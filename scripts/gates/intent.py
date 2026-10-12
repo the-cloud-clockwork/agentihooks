@@ -37,6 +37,9 @@ DRAFT = "draft pull request, judged once ready for review"
 START, END = "<!-- agentihooks intent -->", "<!-- /agentihooks intent -->"
 MERGE_QUEUE = ["merge", "queue"]
 PULL = re.compile(r"github\.com/([^/]+)/([^/]+)/pull/(\d+)")
+SHORT = re.compile(r"(?<![\w./-])([\w.-]+)/([\w.-]+)#(\d+)\b")
+NAMED_LIMIT = 3
+DIFF_CHARS, BODY_CHARS = 6000, 1500
 SECTION = re.compile(f"{re.escape(START)}.*?{re.escape(END)}", re.S)
 TESTS_FIRST = f"{PURPOSE}-tests-first"
 BASE_QUESTIONS = ("usable", "delivers", "reachable", "weakens")
@@ -188,6 +191,38 @@ def pr_view(url, run=subprocess.run):
         return None
 
 
+def named_pulls(task, body):
+    own = PULL.search(task["pr_url"])
+    here = (own[1].lower(), own[2].lower()) if own else None
+    texts = [task.get("description") or "", body, *((c.get("text") or "") for c in task.get("comments") or [])]
+    urls = []
+    for text in texts:
+        for owner, repo, number in (m.groups() for p in (PULL, SHORT) for m in p.finditer(text)):
+            url = f"https://github.com/{owner}/{repo}/pull/{number}"
+            if (owner.lower(), repo.lower()) != here and url not in urls:
+                urls.append(url)
+    return urls[:NAMED_LIMIT]
+
+
+def named_view(url, run=subprocess.run):
+    try:
+        done = _gh(["gh", "pr", "view", url, "--json", "title,body,files,state"], run)
+        raw = json.loads(done.stdout) if done.returncode == 0 else None
+        if raw is None:
+            return None
+        diff = _pr_diff(url, run)
+        return {
+            "url": url,
+            "title": raw["title"],
+            "body": (raw["body"] or "")[:BODY_CHARS],
+            "files": [f["path"] for f in raw["files"]],
+            "merged": raw.get("state") == "MERGED",
+            "diff": diff[:DIFF_CHARS] if diff is not None else None,
+        }
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError):
+        return None
+
+
 def _proof_notes(task, proof_chars):
     try:
         return (Path(task["workspace"]) / "proof.md").read_text()[-proof_chars:]
@@ -221,7 +256,18 @@ def state_of(doc, task, pr, proof_chars=PROOF_CHARS):
         "reviewer_findings": pr.get("reviewer_findings", {}),
         **({"task_part": "tests-first", "pull_request_diff": pr.get("diff")} if _tests_first(pr["body"]) else {}),
         **_plan_chunk(doc, task),
+        **_named_state(pr),
     }
+
+
+def _named_state(pr):
+    pulls = pr.get("pull_requests") or []
+    return {"pull_requests": pulls, "judged_pull_requests": [p["url"] for p in pulls]} if pulls else {}
+
+
+def _judged_on(state):
+    urls = state.get("judged_pull_requests") or []
+    return f"; judged on pull requests {', '.join(urls[:-1])} and {urls[-1]}" if len(urls) > 1 else ""
 
 
 def _rows(state):
@@ -334,7 +380,7 @@ def _verdict(state, answers, thresholds):
 def _verdicts(definition, state, params, answers):
     thresholds = definition.thresholds if definition.name == PURPOSE else definitions.load(PURPOSE).thresholds
     verdict, reason = _verdict(state, answers, thresholds)
-    return {"verdict": verdict, "reason": reason}
+    return {"verdict": verdict, "reason": reason + _judged_on(state)}
 
 
 RULE = code_rules.CodeRule(_questions, _verdicts, {"verdict": (PASS, FAIL, UNCHECKED)}, {"verdict": FAIL})
@@ -437,6 +483,7 @@ class Check:
     ask: Callable
     home: object = None
     head: Callable | None = None
+    named: Callable | None = None
 
     def run(self, doc):
         if self.mode == "off":
@@ -485,10 +532,17 @@ class Check:
         previous = previous if previous and _same_phase(previous, task) else None
         if previous and previous["head"] == pr.get("head") and previous.get("inputs") == inputs:
             return _Judgment(pr, previous, None, None)
-        state = intent_history.prepare(state_of(doc, task, pr))
+        state = intent_history.prepare(state_of(doc, task, self._with_named(task, pr)))
         if state.get("task_part") == "tests-first":
             state["pull_request_diff"] = intent_history.masked(pr.get("diff"))
         return _Judgment(pr, previous, state, self.ask(state), inputs)
+
+    def _with_named(self, task, pr):
+        others = named_pulls(task, pr["body"]) if self.named else []
+        if not others:
+            return pr
+        pulls = [view for view in map(self.named, [task["pr_url"], *others]) if view]
+        return {**pr, "pull_requests": pulls} if any(p["url"] != task["pr_url"] for p in pulls) else pr
 
     def _check(self, task, judgment, verdicts):
         previous, pr = judgment.previous, judgment.pr

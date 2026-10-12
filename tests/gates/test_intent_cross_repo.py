@@ -107,4 +107,4 @@ def test_named_pulls_reads_task_text_comments_and_the_body_and_skips_this_reposi
         ),
         "Binding: o/antoncore#580 and https://github.com/o/bridge/pull/7, closes #2.",
     )
-    assert named == [THERE, "https://github.com/O/Kernel/pull/12", "https://github.com/o/bridge/pull/7"]
+    assert named == [THERE, "https://github.com/o/bridge/pull/7", "https://github.com/O/Kernel/pull/12"]
