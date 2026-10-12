@@ -80,7 +80,7 @@ def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window, quiet=DEFAULT_
     marks = SeenMarks(inbox.redis)
     statuses, prompted = {}, set()
     actions = [f"redelivered message {item.id}" for item in inbox.redeliver(now_ms, redelivery_ms())]
-    actions += addresses.settle_unresolved(inbox, names, inbox.pending(), now_ms, window)
+    actions += addresses.settle_unresolved(inbox, names, _ladder(inbox, slug), now_ms, window)
     doc = None
     for item in _ladder(inbox, slug):
         item = replace(item, address=inbox.names.resolve(item.address), sender=inbox.names.resolve(item.sender))
@@ -137,7 +137,7 @@ def wake_now(inbox, slug, agents, herdr, now_ms, window, quiet=DEFAULT_QUIET_S *
 
 
 def _ladder(inbox, slug):
-    """No wake or escalation step runs while the swarm has an open outage."""
+    """No wake, escalation or withdrawal step runs while the swarm has an open outage."""
     return [] if outage.open_records(slug) else inbox.pending()
 
 

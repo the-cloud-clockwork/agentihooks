@@ -13,11 +13,14 @@ from scripts.swarm.store import RedisStore, SwarmError
 from scripts.swarm_v2.records import _write
 
 if TYPE_CHECKING:
+    from scripts.swarm.health.findings import Finding
+    from scripts.swarm.store import AgentRecord
     from scripts.swarm.tick import Runtime
 
 HOME = None
 PANE = "provider-error"
 PANE_TTL_S = 24 * 3600
+PAST_SPANS = 50
 HELD = {"idle with claim": "idle during outage", "stale claim": "stale during outage"}
 
 
@@ -47,10 +50,19 @@ def observe(slug: str, kind: str, evidence: list[str], now_ms: int) -> None:
     with _edit(slug) as records:
         record = records.get(kind)
         if evidence:
-            started = record["started_at"] if record and record["ended_at"] is None else now_ms
-            records[kind] = {"kind": kind, "started_at": started, "evidence": evidence, "ended_at": None}
+            ongoing = record is not None and record["ended_at"] is None
+            fresh = {"kind": kind, "started_at": record["started_at"] if ongoing else now_ms, "evidence": evidence}
+            records[kind] = {**fresh, "ended_at": None, **_carried(record, ongoing)}
         elif record and record["ended_at"] is None:
             record["ended_at"] = now_ms
+
+
+def _carried(record: dict | None, ongoing: bool) -> dict:
+    """Closed spans of the record's kind, which paused time still counts after a new outage of that kind opens."""
+    if record is None:
+        return {}
+    past = record.get("past", []) if ongoing else [*record.get("past", []), [record["started_at"], record["ended_at"]]]
+    return {"past": past[-PAST_SPANS:]} if past else {}
 
 
 def open_records(slug: str) -> list[dict]:
@@ -64,11 +76,11 @@ def lines(slug: str) -> list[str]:
     ]
 
 
-def mark_pane(store, slug: str, name: str, error: str) -> None:
+def mark_pane(store: RedisStore, slug: str, name: str, error: str) -> None:
     store.redis.set(store.key(slug, PANE, name), error, ex=PANE_TTL_S)
 
 
-def held(store, slug: str, name: str) -> str:
+def held(store: RedisStore, slug: str, name: str) -> str:
     """The evidence holding an agent: the swarm's open outages, else a provider error on its own pane."""
     evidence = [line for record in open_records(slug) for line in record["evidence"]]
     return "; ".join(evidence) or store.redis.get(store.key(slug, PANE, name)) or ""
@@ -76,8 +88,9 @@ def held(store, slug: str, name: str) -> str:
 
 def paused_ms(slug: str, since_ms: int, now_ms: int) -> int:
     spans = sorted(
-        (max(record["started_at"], since_ms), now_ms if record["ended_at"] is None else min(record["ended_at"], now_ms))
+        (max(started_at, since_ms), now_ms if ended_at is None else min(ended_at, now_ms))
         for record in read(slug).values()
+        for started_at, ended_at in [*record.get("past", []), [record["started_at"], record["ended_at"]]]
     )
     total, reach = 0, since_ms
     for start, end in spans:
@@ -86,7 +99,7 @@ def paused_ms(slug: str, since_ms: int, now_ms: int) -> int:
     return total
 
 
-def hold_findings(store, slug: str, found: list, agents: list) -> list:
+def hold_findings(store: RedisStore, slug: str, found: list[Finding], agents: list[AgentRecord]) -> list[Finding]:
     claimants = {agent.task: agent.name for agent in agents}
     return [_hold(store, slug, finding, claimants) for finding in found]
 
@@ -154,6 +167,8 @@ def _provider_record(record, observed, now_ms):
         if fresh:
             episode = _with_error(episode, agent, pane, now_ms)
     if episode:
+        if episode is not record:
+            episode.update(_carried(record, False))
         episode["observed_errors"] = seen
         if affected := episode.get("affected_agents"):
             episode["evidence"] = [actor["evidence"] for actor in affected.values()]
