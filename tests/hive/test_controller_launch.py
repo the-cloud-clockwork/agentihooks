@@ -788,6 +788,7 @@ def test_controller_spawn_uses_the_remote_backend_for_worker_profiles(setup, lan
     setup.herdr._profile_decision.return_value = ProfileDecision(profile, "task", profile)
     write_hive(setup, ui="yes", roles=["eng", "ci", "frontend"])
     request = request_for(setup, lane=lane)
+    request.task["profile_decision"] = setup.herdr._profile_decision.return_value.record()
     local = LocalHerdrRuntime(setup.herdr)
     original = RoutedRuntime(setup.herdr, RuntimeRouter([local]))
     fenced = FencedRuntime(setup.store, "fixture", setup.held, original, "compose")
@@ -874,3 +875,30 @@ def test_controller_reports_a_placement_wait_for_a_worker_without_a_ui_hive(setu
     setup.herdr._profile_decision.return_value = ProfileDecision("qa", "task", "qa")
     fenced = FencedRuntime(setup.store, "fixture", setup.held, RoutedRuntime(setup.herdr, RuntimeRouter([])), "compose")
     assert fenced.placement_refusal("eng", {"id": "task"}) == NO_UI_HIVE
+
+
+def test_controller_ci_lane_cannot_replace_a_pinned_codex_harness_with_claude(setup):
+    from scripts.swarm.controller import FencedRuntime
+    from scripts.swarm.profile_choice import ProfileDecision
+    from scripts.swarm_v2.runtime.base import RuntimeRouter
+    from scripts.swarm_v2.runtime.routed import RoutedRuntime
+
+    config = replace(setup.config, lanes={"ci": {"agent": "codex"}})
+    setup.store.create(config)
+    setup.herdr._profile_decision.return_value = ProfileDecision("cicd", "lane", "ci")
+    fenced = FencedRuntime(setup.store, "fixture", setup.held, RoutedRuntime(setup.herdr, RuntimeRouter([])), "compose")
+    assert fenced.placement_refusal("ci", {"id": "task"}) == "Codex hive placement is not enabled"
+
+
+def test_spawn_honors_the_ci_lane_harness_before_admission(setup):
+    from scripts.swarm.profile_choice import ProfileDecision
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    request = request_for(setup, lane="ci")
+    request = replace(request, config=replace(setup.config, lanes={"ci": {"agent": "codex"}}))
+    setup.herdr._profile_decision.return_value = ProfileDecision("cicd", "lane", "ci")
+    setup.launcher.sleep = Mock(side_effect=AssertionError("a rejected harness must not launch"))
+    assert setup.launcher.spawn(request) == Outcome(
+        "spawn", Status.UNAVAILABLE, "hive", detail="Codex hive placement is not enabled"
+    )
+    assert setup.store.execution_registry.records("fixture") == []
