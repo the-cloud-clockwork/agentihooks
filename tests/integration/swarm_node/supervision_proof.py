@@ -8,7 +8,6 @@ import select
 import shlex
 import struct
 import subprocess
-import sys
 import termios
 import time
 import uuid
@@ -16,11 +15,7 @@ from pathlib import Path
 
 
 def docker(*args, timeout=30):
-    try:
-        return subprocess.check_output(["docker", *args], text=True, timeout=timeout, stderr=subprocess.STDOUT).strip()
-    except subprocess.CalledProcessError as exc:
-        print(exc.output, file=sys.stderr, flush=True)
-        raise
+    return subprocess.check_output(["docker", *args], text=True, timeout=timeout, stderr=subprocess.STDOUT).strip()
 
 
 def state(container):
@@ -90,7 +85,7 @@ def terminal_disconnect(container, root):
         os.close(master)
 
 
-def run_case(image, mode, output, kill=False, supervised=False):
+def run_case(image, mode, output, kill=False, supervised=False, viewer=True):
     container = docker(
         "run",
         "--detach",
@@ -140,7 +135,7 @@ def run_case(image, mode, output, kill=False, supervised=False):
                 "-c",
                 f"import json; from pathlib import Path; r=Path({root!r}); print(json.dumps({{p.name:json.loads(p.read_text())['tick'] for p in r.glob('heartbeat-*.json')}}))",
             )
-            terminal = terminal_disconnect(container, root)
+            terminal = terminal_disconnect(container, root) if viewer else None
             time.sleep(0.2)
             after = docker(
                 "exec",
@@ -159,7 +154,10 @@ def run_case(image, mode, output, kill=False, supervised=False):
         assert not stopped["Running"] and stopped["Pid"] == 0
         target = output / uuid.uuid4().hex
         target.mkdir()
-        docker("cp", f"{container}:/home/worker/attempts", str(target))
+        try:
+            docker("cp", f"{container}:/home/worker/attempts", str(target))
+        except subprocess.CalledProcessError as exc:
+            raise AssertionError(exc.output) from exc
         results = list(target.glob("attempts/*/run/supervision/*/result.json"))
         launch = json.loads(next(target.glob("attempts/*/launch.json")).read_text())
         bound = launch["quiesce_seconds"] + launch["checkpoint_seconds"] + 3 * launch["kill_seconds"] + 1
@@ -180,7 +178,7 @@ def run_case(image, mode, output, kill=False, supervised=False):
             "elapsed_shutdown_seconds": round(elapsed, 3),
             "shutdown_bound_seconds": bound,
             "container_process_tree_gone": True,
-            "viewer_detached": not kill,
+            "viewer_detached": viewer and not kill,
             "terminal_disconnect": terminal if not kill else None,
             "result": result,
         }
