@@ -246,6 +246,22 @@ def test_cli_refresh_rewrites_hive_env_through_the_join_service(admin, hive, tmp
     assert _password(env["AGENTIHOOKS_HIVE_REDIS_URL"]) not in out
 
 
+def test_cli_refresh_reads_its_hive_from_hive_env_alone(admin, hive, tmp_path, monkeypatch, capsys):
+    grant = _joined(admin, hive, tmp_path, monkeypatch)
+    for name in ("AGENTIHOOKS_HIVE_ID", "AGENTIHOOKS_HIVE_URL", "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL"):
+        monkeypatch.delenv(name)
+    monkeypatch.delenv("AGENTIHOOKS_HIVE_REDIS_URL")
+    admin.acl_deluser(f"hive-{grant['id']}")
+
+    assert cli.main(["refresh"]) == 0
+
+    env = _env_file(tmp_path)
+    assert capsys.readouterr().out.startswith(f"refreshed the Redis credential of hive member {grant['id']};")
+    assert env["AGENTIHOOKS_HIVE_URL"] == hive
+    assert env["AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL"] == grant["ledger_credential"]
+    assert _accepts(admin, env["AGENTIHOOKS_HIVE_REDIS_URL"])
+
+
 @pytest.mark.parametrize("unset", ["AGENTIHOOKS_HIVE_URL", "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL"])
 def test_cli_refresh_without_a_joined_hive_is_refused(tmp_path, monkeypatch, capsys, unset):
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
