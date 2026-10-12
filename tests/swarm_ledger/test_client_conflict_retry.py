@@ -130,8 +130,8 @@ def test_the_exhausted_message_names_the_resource_the_server_reports(pauses):
     assert json.loads(error.value.read())["error"]["details"] == {"path": "chat"}
 
 
-def pin(id, revision):
-    return {"op": "set", "id": id, "path": f"phases/p1/{id}", "value": True, "expected_revision": revision}
+def pin(name, revision):
+    return {"op": "set", "id": name, "path": f"phases/p1/{name}", "value": True, "expected_revision": revision}
 
 
 def test_a_batch_pinning_two_revisions_on_one_resource_is_refused_before_sending(pauses):
