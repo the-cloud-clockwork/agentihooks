@@ -151,6 +151,9 @@ def test_the_pre_tool_hook_logs_a_failed_lookup_and_adds_nothing(worker, monkeyp
         "gh run watch 123",
         "gh run watch 123 --interval 60",
         "gh -R owner/repo run watch 123",
+        "gh --repo owner/repo run watch 123",
+        "gh --hostname github.com run watch 123",
+        "gh -Rowner/repo run watch 123",
         "gh pr checks 456 --watch",
         "gh pr checks --watch=true 456",
         "cd repo && gh run watch 123 | tail -n 1",
@@ -165,7 +168,11 @@ def test_the_pre_tool_hook_refuses_independent_github_watches(worker, monkeypatc
     with pytest.raises(hook_manager.BlockAction, match="shared GitHub hourly quota") as blocked:
         _pre(capsys, _bash(command))
     assert "agentihooks swarm rig wait --on checks <pr url>" in str(blocked.value)
-    assert "wait --on mutation <run url>" in str(blocked.value)
+    assert str(blocked.value) == (
+        "Independent GitHub watches spend the shared GitHub hourly quota. "
+        "Use agentihooks swarm rig wait --on checks <pr url>, "
+        "or wait --on mutation <run url> for Mutation preflight. The swarm tick resolves these waits centrally."
+    )
 
 
 def test_declaring_a_wait_does_not_allow_an_independent_github_watch(worker, capsys):
@@ -184,6 +191,7 @@ def test_declaring_a_wait_does_not_allow_an_independent_github_watch(worker, cap
         "gh api repos/owner/repo/actions/runs/123",
         "printf '%s' 'gh run watch 123'",
         "echo 'gh pr checks --watch'",
+        "echo run watch",
         "gh api repos/owner/repo -f 'body=gh run watch 123'",
         "gh pr checks 456; echo --watch",
     ],
@@ -213,3 +221,8 @@ def test_the_master_can_watch(worker, monkeypatch, capsys):
 def test_a_monitor_cannot_start_an_independent_github_watch(worker):
     with pytest.raises(hook_manager.BlockAction, match="shared GitHub hourly quota"):
         nudge.check_github_watch({"tool_name": "Monitor", "tool_input": {"command": "gh run watch 123"}})
+
+
+def test_a_monitor_command_alias_cannot_start_an_independent_github_watch(worker):
+    with pytest.raises(hook_manager.BlockAction, match="shared GitHub hourly quota"):
+        nudge.check_github_watch({"tool_name": "Monitor", "tool_input": {"cmd": "gh run watch 123"}})
