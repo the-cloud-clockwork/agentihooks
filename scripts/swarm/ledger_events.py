@@ -157,6 +157,15 @@ def view(url, run=subprocess.run):
         return None
 
 
+def head(url, run=subprocess.run):
+    owner, repo, _, number = url.rstrip("/").split("/")[-4:]
+    try:
+        done = run(["gh", "api", f"repos/{owner}/{repo}/pulls/{number}"], capture_output=True, text=True, timeout=20)
+        return json.loads(done.stdout)["head"]["sha"] if done.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+        return ""
+
+
 def _view_resource(raw, gated=None):
     try:
         raw = dict(raw)

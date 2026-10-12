@@ -1345,10 +1345,10 @@ def cmd_wait(store, args):
         if problem := waits.target_problem(held["kind"], held["target"], agent.task, rows, get):
             raise SwarmError(problem)
         if held["kind"] == "checks":
-            pull = ledger_events.view(held["target"])
-            if pull is None or not pull.head:
+            head = ledger_events.head(held["target"])
+            if not head:
                 raise SwarmError("cannot read the pull request head; retry the checks wait")
-            held["head"] = pull.head
+            held["head"] = head
         if held["kind"] == "mutation":
             held["head"] = waits.mutation_wait.bind(held["target"])
     at = now_ms()
