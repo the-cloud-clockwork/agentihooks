@@ -244,3 +244,7 @@ def test_full_stops_are_trimmed_and_capital_letters_kept():
     lines = ledger_fold.description({"overview": "Ship the UX. Then more."}, task("t1"), group).splitlines()
     assert lines[0] == "Parent intent: Ship the UX."
     assert lines[3:] == ["One: Tidy the UX.", "Two: Fix the X.", "Done when the panel shows UX."]
+
+
+def test_a_name_opening_the_description_stands_apart_from_the_title():
+    assert ledger_fold.names({"title": "Fix", "description": "merge_wait handles it"}) == {"merge_wait"}
