@@ -139,3 +139,32 @@ def test_task_split_cli_sends_the_ordered_halves(monkeypatch, capsys):
     ledger.cmd_task(args)
     assert sent == [(args, "task_split", {"item": "tasks/t1", "halves": ["1-2", "3-4"]})]
     assert capsys.readouterr().out == '{"task": "t1", "split": ["1-2", "3-4"]}\n'
+
+
+@pytest.mark.parametrize(
+    "halves, reason",
+    [
+        (["12-14", "15-20"], ""),
+        (["12-12", "13-19", "20-20"], ""),
+        (["12-14", "16-20"], "halves: cover plan lines 12-20"),
+        (["10-14", "15-20"], "halves: cover plan lines 12-20"),
+        (["12-14", "15-19"], "halves: cover plan lines 12-20"),
+        (["12-14", "15-22"], "halves: cover plan lines 12-20"),
+    ],
+)
+def test_a_split_covers_the_task_plan_lines_exactly(halves, reason):
+    assert ledger_splits.refusal({"kind": "code", "plan_lines": "12-20"}, halves) == reason
+
+
+def test_a_task_without_plan_lines_takes_any_ordered_split():
+    assert ledger_splits.refusal({"kind": "code"}, ["1-2", "9-9"]) == ""
+
+
+def test_the_ledger_refuses_a_split_that_misses_plan_lines(monkeypatch):
+    real = ledger_splits.refusal
+    monkeypatch.setattr(ledger_splits, "refusal", lambda task, halves: real({**task, "plan_lines": "1-4"}, halves))
+    state, rejected = split("t1", ["1-2", "4-4"])
+    assert rejected == ["split-1"] and "split" not in row(state, "t1")
+    assert "tasks/t1: halves: cover plan lines 1-4" in state["_meta"]["warnings"][-1]
+    state, rejected = split("t1", ["1-2", "3-4"], n=2)
+    assert rejected == [] and row(state, "t1")["split"] == ["1-2", "3-4"]

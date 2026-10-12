@@ -40,7 +40,7 @@ def _unmerged(url, github):
 
 
 def _split_refusal(task, url, github):
-    bound = pulls(task, url)
+    bound = _pulls(task, url)
     if len(bound) < len(task["split"]):
         return (
             f"half {len(bound) + 1} of this split task has no pull request yet: record it with swarm pr <url>, "
@@ -63,7 +63,7 @@ def require_target(store: object, slug: str, task_id: str, url: str, tasks: list
     from scripts.swarm.store import SwarmError
 
     own = next((task for task in tasks if task["id"] == task_id), {})
-    if url not in pulls(own):
+    if url not in _pulls(own):
         raise SwarmError("final integration must target this task's recorded pull request")
     for task in tasks:
         if task.get("pr_url") == url:
@@ -77,7 +77,7 @@ def recheck_pass(store, slug, doc, ledger, now_ms, github):
         task = tasks.get(task_id, {})
         if task.get("state") != "done" or ledger_kinds.kind(task) not in GATED or not task.get("pr_url"):
             continue
-        for url in pulls(task):
+        for url in _pulls(task):
             state = _unmerged_state(store, slug, url, github)
             if state:
                 ledger.update_task(slug, task_id, {"state": "open", "claimed_by": ""})
@@ -87,7 +87,7 @@ def recheck_pass(store, slug, doc, ledger, now_ms, github):
     return actions
 
 
-def pulls(task, url=None):
+def _pulls(task, url=None):
     url = url or task.get("pr_url")
     if not task.get("split"):
         return [url]

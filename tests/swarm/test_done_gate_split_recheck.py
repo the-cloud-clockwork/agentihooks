@@ -43,14 +43,14 @@ def test_a_repeated_bound_pull_request_does_not_stand_for_another_half():
     read = lambda url: reads.append(url) or pull("MERGED")  # noqa: E731
     row = {"id": "t1", "kind": "code", "split": ["1-2", "3-4"], "split_pulls": [FIRST, FIRST]}
     assert done_gate.refusal(row, FIRST, read).startswith("half 2 of this split task has no pull request yet")
-    assert done_gate.pulls(row) == [FIRST]
+    assert done_gate._pulls(row) == [FIRST]
 
 
 def test_pulls_of_an_unsplit_task_is_its_pull_request():
-    assert done_gate.pulls({"pr_url": FIRST}) == [FIRST]
-    assert done_gate.pulls({"pr_url": FIRST}, SECOND) == [SECOND]
+    assert done_gate._pulls({"pr_url": FIRST}) == [FIRST]
+    assert done_gate._pulls({"pr_url": FIRST}, SECOND) == [SECOND]
     row = {"pr_url": SECOND, "split": ["1-2", "3-4"], "split_pulls": [FIRST, SECOND, "x"]}
-    assert done_gate.pulls(row) == [FIRST, SECOND]
+    assert done_gate._pulls(row) == [FIRST, SECOND]
 
 
 def test_any_bound_half_may_be_merged():
