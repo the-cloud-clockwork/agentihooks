@@ -23,7 +23,9 @@ NAME_RES = (
     re.compile(r"\b[\w-]+\.(?:py|sh|js|ts|md|json|ya?ml|toml|css|html)\b"),
     re.compile(r"\bagentihooks [a-z][\w-]*(?: [a-z][\w-]*)?"),
 )
-PATH_RE = re.compile(r"\S+/\S+|\b[\w-]+\.(?:py|sh|js|ts|md|json|ya?ml|toml|css|html)\b")
+FILE_RE = re.compile(r"\.(?:py|sh|js|ts|md|json|ya?ml|toml|css|html)$")
+# Punctuation around a word that is not part of the path it names.
+WRAPPING = ".,;:!?()[]{}'\"`"
 DASHES = ("—", "–", " - ", "--")
 FALLBACK_STATUS = "Folded into a grouped task; its agent delivers this change in the same pull request."
 STATUS = "Folded into the task titled {title}; its agent delivers this change in the same pull request."
@@ -158,11 +160,19 @@ def plain_problems(text: str, known: dict) -> list[str]:
     found = []
     if ids := sorted(i for i in known if re.search(rf"(?<![\w-]){re.escape(i)}(?![\w-])", text)):
         found.append(f"names task id {ids[0]}; describe the change in plain words")
-    if match := PATH_RE.search(text):
-        found.append(f"names the path {match.group(0)}; name the command, hook or behaviour instead")
+    if path := _path(text):
+        found.append(f"names the path {path}; name the command, hook or behaviour instead")
     if dash := next((d for d in DASHES if d in text), None):
         found.append(f"uses the dash {dash.strip()!r}; use a comma or a full stop")
     return found
+
+
+def _path(text: str) -> str:
+    for word in text.split():
+        bare = word.strip(WRAPPING)
+        if ("/" in bare and bare.strip("/")) or FILE_RE.search(bare):
+            return bare
+    return ""
 
 
 def description(doc: dict, lead: dict, group: dict) -> str:

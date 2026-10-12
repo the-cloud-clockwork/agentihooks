@@ -1,3 +1,5 @@
+import pytest
+
 from scripts.swarm_ledger import ledger_fold
 
 
@@ -248,3 +250,23 @@ def test_full_stops_are_trimmed_and_capital_letters_kept():
 
 def test_a_name_opening_the_description_stands_apart_from_the_title():
     assert ledger_fold.names({"title": "Fix", "description": "merge_wait handles it"}) == {"merge_wait"}
+
+
+@pytest.mark.parametrize(
+    ("text", "path"),
+    [
+        ("see (a/b).", "a/b"),
+        ("read notes.md.", "notes.md"),
+        ("/etc/passwd here", "/etc/passwd"),
+        ("use / here", ""),
+        ("move X/Y now", "X/Y"),
+        ("see X/ now", "X/"),
+        ("the yaml route", ""),
+    ],
+)
+def test_a_path_is_found_word_by_word_without_its_wrapping(text, path):
+    assert ledger_fold._path(text) == path
+
+
+def test_a_long_text_without_a_path_is_checked_in_linear_time():
+    assert ledger_fold._path("a" * 200_000) == ""
