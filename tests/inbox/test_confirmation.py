@@ -166,6 +166,20 @@ def test_the_next_hook_event_confirms_an_item_shown_by_the_last_one(store, capsy
     assert "review my branch" not in _pre(capsys)
 
 
+def test_a_relaunched_session_with_the_same_name_receives_the_unconfirmed_item(store, monkeypatch):
+    item = store.send("alice", "bob", "review my branch")
+    assert "review my branch" in delivery.pending_context("first-session")
+    monkeypatch.setattr(delivery, "now_ms", lambda: store.get(item.id).updated_at + 1)
+    delivery.confirm_shown("second-session")
+    assert store.get(item.id).state == "pending"
+    assert "review my branch" in delivery.pending_context("second-session")
+    delivery.confirm_shown("first-session")
+    assert store.get(item.id).state == "pending"
+    assert "review my branch" in delivery.pending_context("second-session")
+    delivery.confirm_shown("second-session")
+    assert store.get(item.id).state == "confirmed"
+
+
 @pytest.mark.parametrize("event", ["stop", "prompt"])
 def test_stop_and_prompt_confirm_items_the_channel_pushed(store, event, monkeypatch):
     item = store.send("alice", "bob", "thanks")
