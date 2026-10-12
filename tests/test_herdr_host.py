@@ -495,6 +495,7 @@ def test_a_rename_is_confirmed_by_polling_until_the_name_shows(monkeypatch):
     assert herdr_host.RENAME_POLL_S == 0.5 and herdr_host.RENAME_CONFIRM_S == 15.0
 
 
+@pytest.mark.parametrize("error", [herdr_host.HerdrError("no pane"), subprocess.TimeoutExpired("herdr", 5)])
 def test_name_session_reports_a_pane_it_could_not_type_into(monkeypatch, error):
     pane = CodexPane(["idle"])
 
