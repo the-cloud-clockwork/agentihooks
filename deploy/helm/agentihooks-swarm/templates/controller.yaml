@@ -151,7 +151,7 @@ spec:
               else:
                   raise SystemExit("Redis or the ledger never came up")
           env:
-            {{- include "swarm.env" . | nindent 12 }}
+            {{- include "swarm.env" (dict "root" . "role" "controller") | nindent 12 }}
           {{- include "swarm.envFrom" . | nindent 10 }}
           resources:
             {{- toYaml .Values.probe.resources | nindent 12 }}
@@ -162,7 +162,7 @@ spec:
           {{- include "swarm.containerSecurity" . | nindent 10 }}
           command: [agentihooks, swarm-jump, prepare, --state, /run/jump/state]
           env:
-            {{- include "swarm.env" . | nindent 12 }}
+            {{- include "swarm.env" (dict "root" . "role" "controller") | nindent 12 }}
             - name: AGENTIHOOKS_TERMINAL_CA_KEY
               value: /run/secrets/terminal-ca/{{ $ca.key }}
             - name: AGENTIHOOKS_TERMINAL_JUMP
@@ -238,7 +238,7 @@ spec:
               {{- end }}
             {{- toYaml .Values.controller.livenessProbe | nindent 12 }}
           env:
-            {{- include "swarm.env" . | nindent 12 }}
+            {{- include "swarm.env" (dict "root" . "role" "controller") | nindent 12 }}
             - name: AGENTIHOOKS_HOME
               value: /run/agentihooks
             {{- if $api.enabled }}

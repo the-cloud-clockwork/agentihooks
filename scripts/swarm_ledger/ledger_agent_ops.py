@@ -24,6 +24,7 @@ def check(op, task_ids=()):
     if not isinstance(by, str) or not AUTHOR_RE.match(by) or by == "operator":
         raise ValueError("agent ops need `by`, an agent name other than operator")
     kind = op["op"]
+    check_hive(op)
     if kind == "join" and op.get("role", "member") not in ROLES:
         raise ValueError(f"role must be one of {ROLES}")
     if kind == "ack" and not isinstance(op.get("rev"), int):
@@ -60,6 +61,14 @@ def check(op, task_ids=()):
             raise ValueError(f"status must be text up to {MAX_TEXT} characters")
         op["status"] = _screened(op["status"])
         ledger_comments.check(op["status"], "comment", task_ids=task_ids)
+
+
+def check_hive(op):
+    if op["op"] != "add_item" or "hive" not in op:
+        return
+    hive = op["hive"]
+    if not isinstance(hive, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", hive):
+        raise ValueError("hive needs an identifier of up to 128 letters, digits, dots, underscores or hyphens")
 
 
 def _screened(text):
@@ -174,6 +183,8 @@ def _add_item(doc, op, ctx):
         return True
     item = {"id": op["id"], "text": op["text"], "comments": []}
     item.update({"done": False} if op["list"] == "followups" else {"answers": []})
+    if "hive" in op:
+        item["hive"] = op["hive"]
     if op.get("needs_operator"):
         item["needs_operator"] = True
     items.append(item)

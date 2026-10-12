@@ -46,14 +46,20 @@ def registered_name():
     return session_name(agent_pid())
 
 
-def check_for_operator(address, text):
-    """A message to the operator is shown in the ledger page chat, so it must pass the chat word rules now."""
+def check_for_operator(address, text, kind="chat"):
+    """A message to the operator is shown on the ledger page, so it must pass its chat or comment word rules now."""
     if address != OPERATOR:
         return
     try:
-        ledger_comments.check(text, "chat")
+        ledger_comments.check(text, kind)
     except ValueError as exc:
         raise InboxError(str(exc)) from exc
+
+
+def check_answer(store, item_id, sender, text):
+    """An answer to an operator item on a ledger entry lands as a comment there, under the comment word rules."""
+    if sender == OPERATOR:
+        check_for_operator(sender, text, "comment" if store.entry_of(item_id) else "chat")
 
 
 def informational(words: list[str]) -> tuple[bool, list[str]]:
@@ -128,7 +134,7 @@ def _apply_reply(store, me, record):
         close = {"kind": "done", "detail": args["text"]}
         return _apply_close(store, me, {**record, "item": args["id"], "args": close})
     check_address(store, me, sender)
-    check_for_operator(sender, args["text"])
+    check_answer(store, args["id"], sender, args["text"])
     answer = store.reply(args["id"], me, args["text"], fyi=args["fyi"], answer_id=record["item"])
     return {"id": answer.id, "to": answer.address, "closed": args["id"]}
 

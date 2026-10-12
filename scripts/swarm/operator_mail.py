@@ -15,6 +15,7 @@ OPERATOR = "operator"
 SYNC_ORDER = "sync requested"
 EVERYONE = "swarm"
 SENT_TTL_S = 30 * 24 * 3600
+ENTRY_LISTS = ("tasks", "phases", "questions", "followups", "notes")
 MASTER_RULE = "Answer the operator in your next turn: reply to this message saying what you will do."
 ANSWER_RULE = (
     "Answer the operator in your next turn: reply to this message saying what you will do. If the work is not "
@@ -74,6 +75,14 @@ def primed(text, event, address, master):
     return f"{text}\n{rule}"
 
 
+def entry(event):
+    """The ledger entry an operator write sits on, where an answer to it lands; '' for chat and writes on no entry."""
+    if event["kind"].startswith("note "):
+        return f"notes/{event['id']}"
+    head, _, rest = event["target"].partition("/")
+    return f"{head}/{rest.partition('/')[0]}" if head in ENTRY_LISTS and rest else ""
+
+
 def relay(inbox, store, slug, doc, events, line):
     """Send each new operator write once; a write already relayed is skipped. No swarm on the ledger sends nothing."""
     try:
@@ -94,7 +103,10 @@ def relay(inbox, store, slug, doc, events, line):
         for address in addresses(slug, event, doc, agents, owners):
             primer = primed(text, event, address, master)
             fyi = informed(event, address, master)
-            mail = outbox.Post(OPERATOR, address, primer, ref=ref, fyi=fyi, item=outbox.stable_id(ref, address))
+            item_id = outbox.stable_id(ref, address)
+            if on := entry(event):
+                inbox.about(item_id, on)
+            mail = outbox.Post(OPERATOR, address, primer, ref=ref, fyi=fyi, item=item_id)
             item = outbox.post(inbox, mail)
             sent += [item] if item else []
         inbox.redis.set(mark, 1, ex=SENT_TTL_S)

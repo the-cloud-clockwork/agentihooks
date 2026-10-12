@@ -62,6 +62,17 @@ redis:
   existingSecret:
     name: ""
     key: ""
+  # Set all three or none; once set, existingSecret (the administrator credential) reaches no container.
+  roles:
+    ledger:
+      name: ""
+      key: ""
+    controller:
+      name: ""
+      key: ""
+    worker:
+      name: ""
+      key: ""
   image:
     repository: redis
     tag: 7-alpine

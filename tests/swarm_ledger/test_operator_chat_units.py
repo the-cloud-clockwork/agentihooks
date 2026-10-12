@@ -2,10 +2,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm_ledger import ledger_comments, ledger_core, ledger_notifications
+from scripts.swarm_ledger import ledger_authority, ledger_comments, ledger_core, ledger_notifications
 from scripts.swarm_ledger.api import schemas
 
-TO_ONLY_CHAT = "to and reply_to address only an agent chat message"
+TO_ONLY_CHAT = "to addresses only an agent chat message or comment, reply_to only an agent chat message"
 OPERATOR_ONLY = "an agent chat message goes to the operator or answers his line by its id"
 
 
@@ -13,11 +13,69 @@ def op(thread="chat", **fields):
     return {"op": "add", "thread": thread, "id": "m-1", "text": "Phase one is done.", "by": "eng", **fields}
 
 
-@pytest.mark.parametrize("field", [{"to": "operator"}, {"reply_to": "m-0"}])
-def test_an_address_rides_only_on_an_agent_chat_message(field):
+@pytest.mark.parametrize(
+    "sent",
+    [
+        op("phases/p1/comments", reply_to="m-0"),
+        {key: value for key, value in op("phases/p1/comments", to="operator").items() if key != "by"},
+        {key: value for key, value in op("notes", to="operator").items() if key != "by"},
+        {**op("phases/p1/comments", to="operator"), "op": "edit"},
+    ],
+)
+def test_an_address_rides_only_on_an_agent_chat_message_or_an_answer_comment(sent):
     with pytest.raises(ValueError) as refused:
-        ledger_core.check_op(op("phases/p1/comments", **field))
+        ledger_core.check_op(sent)
     assert str(refused.value) == TO_ONLY_CHAT
+
+
+def test_an_agent_comment_to_the_operator_passes_the_check():
+    assert ledger_core.check_op(op("phases/p1/comments", to="operator")) is None
+
+
+ANSWER = {"id": "m-1", "by": "eng", "at": 7, "text": "Phase one is done.", "to": "operator"}
+
+
+def test_an_agent_answer_to_the_operator_is_a_new_comment_beside_its_status():
+    status = {"id": "c-0", "by": "eng", "at": 1, "text": "Working on the phase."}
+    thread, c = [dict(status)], ctx()
+    c.meta["members"] = {"eng": {"last_seen": 1}}
+    c.record = lambda *args, **fields: c.records.append((args, fields))
+    answered = op("phases/p1/comments", to="operator")
+    assert ledger_comments.agent_thread_op(thread, answered, c, "phases/p1", "comment") is True
+    assert thread == [status, ANSWER] and c.meta["members"]["eng"]["last_seen"] == 7
+    assert c.records == [(("eng", "comment added", "phases/p1"), {"id": "m-1", "text": "Phase one is done."})]
+    assert ledger_comments.agent_thread_op(thread, answered, c, "phases/p1", "comment") is True
+    assert len(thread) == 2 and len(c.records) == 1
+
+
+def test_only_the_swarm_relay_answers_the_operator_on_an_entry():
+    answered = op("phases/p1/comments", to="operator")
+    assert ledger_authority.refusal("eng", answered) == (
+        "eng cannot answer the operator on an entry; the swarm relay posts that answer"
+    )
+    assert ledger_authority.refusal("", answered) == ""
+    assert ledger_authority.refusal("eng", op("chat", to="operator")) == ""
+    assert ledger_authority.refusal("eng", op("phases/p1/comments")) == ""
+
+
+def test_an_agent_status_after_its_answer_leaves_the_answer_intact():
+    thread, c = [dict(ANSWER)], ctx()
+    status = {**op("phases/p1/comments"), "id": "c-2", "text": "Still on the phase."}
+    assert ledger_comments.agent_thread_op(thread, status, c, "phases/p1", "comment") is True
+    assert thread == [ANSWER, {"id": "c-2", "by": "eng", "at": 7, "text": "Still on the phase."}]
+
+
+def test_an_answer_does_not_count_against_the_one_status_rule():
+    item = {"comments": [{"id": "c-0", "by": "eng", "text": "Working on the phase."}, dict(ANSWER)]}
+    assert ledger_comments.audit_item("phases/p1", item) == []
+    item["comments"].append({"id": "c-3", "by": "eng", "text": "Another status."})
+    assert ledger_comments.audit_item("phases/p1", item) == [("phases/p1", "-", "eng", ["2 comments, keep one status"])]
+
+
+def test_an_agent_status_comment_still_amends_its_last_one():
+    thread, c = [{"id": "c-0", "by": "eng", "at": 1, "text": "Working on the phase."}], ctx()
+    assert ledger_comments.agent_thread_op(thread, op("phases/p1/comments"), c, "phases/p1", "comment") is True
+    assert [(e["id"], e["text"]) for e in thread] == [("c-0", "Phase one is done.")]
 
 
 @pytest.mark.parametrize("field", [{"to": "operator"}, {"reply_to": "m-0"}, {}])
