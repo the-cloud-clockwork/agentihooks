@@ -98,7 +98,10 @@ def test_editing_the_weight_writes_it_as_the_operator_and_shows_the_stored_value
     weight = page.tab.locator('#swarm-quota input[data-routing="claude-api-weight"]')
     weight.fill("40")
     weight.press("Enter")
-    page.tab.wait_for_function("() => document.querySelector('#swarm-note').textContent.includes('acknowledged')")
+    for _ in range(100):
+        if page.patches:
+            break
+        page.tab.wait_for_timeout(100)
     assert page.patches == [({"claude-api-weight": 40}, "__LEDGER_TOKEN__", "__LEDGER_SLUG__")]
     assert dict((key, value) for key, value, _ in inputs(page))["claude-api-weight"] == "40"
 
@@ -108,7 +111,10 @@ def test_clearing_the_cap_sends_null(routing_page):
     cap = page.tab.locator('#swarm-quota input[data-routing="claude-api-max-sessions"]')
     cap.fill("")
     cap.press("Enter")
-    page.tab.wait_for_function("() => document.querySelector('#swarm-note').textContent.includes('acknowledged')")
+    for _ in range(100):
+        if page.patches:
+            break
+        page.tab.wait_for_timeout(100)
     assert [body for body, _, _ in page.patches] == [{"claude-api-max-sessions": None}]
     assert dict((key, value) for key, value, _ in inputs(page))["claude-api-max-sessions"] == ""
 

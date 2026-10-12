@@ -198,7 +198,8 @@ def test_the_bin_lists_days_left_and_a_restore_button(browser, updated_at):
         in page
     )
     assert 'class="watermark"' not in page
-    assert '<span class="r">Deleted</span><span class="r">Left</span><span></span></div>' in page
+    head = re.sub(r'<span class="col-grip"[^>]*></span>', "", page)
+    assert '<span class="r">Deleted</span><span class="r">Left</span><span></span></div>' in head
     assert 'id="home-fab" href="/"' in page
     with patch.object(
         server, "bin_summaries", return_value=[{**summary(SLUG), "deleted_at": updated_at, "days_left": 30}]
