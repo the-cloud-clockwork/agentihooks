@@ -46,7 +46,7 @@ def server(monkeypatch):
 
 def run(capsys, *argv):
     args = ledger.build_parser().parse_args(["--slug", SLUG, "--as", argv[0], *argv[1:]])
-    args.func(args)
+    getattr(ledger, f"cmd_{args.command}")(args)
     return [json.loads(line) for line in capsys.readouterr().out.splitlines()]
 
 
