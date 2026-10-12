@@ -283,10 +283,10 @@ def test_a_wrong_shaped_body_is_a_bad_request(redis):
 def test_an_unreachable_store_answers_retry_later(redis, monkeypatch):
     from redis.exceptions import ConnectionError as RedisConnectionError
 
-    def down(*args):
+    def down(*args, **kwargs):
         raise RedisConnectionError("store down")
 
-    monkeypatch.setattr(redis, "hget", down)
+    monkeypatch.setattr(redis, "transaction", down)
     sent, body = handler(redis, payload(alert()))
     assert (sent.code, body) == (503, {"error": "swarm store unreachable"})
 

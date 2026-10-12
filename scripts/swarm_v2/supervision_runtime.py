@@ -185,6 +185,16 @@ class Supervisor:
             "child_exits": self.exits,
             "supervisor_child_exit_total": len(self.reaped),
         }
+        record = self.launch.record()
+        record["checkpoint_acknowledgement"] = {
+            **self.scope,
+            "status": result["checkpoint_status"],
+            "checkpoint_id": identifier,
+            "quiescence": result["quiescence"],
+            "acknowledged_at_ms": int(time.time() * 1000),
+        }
+        write(self.root / "launch.json", record)
+        result["launch_record"] = record
         write(self.root / "result.json", result)
         return result
 
@@ -197,6 +207,7 @@ class Supervisor:
                 raise LaunchRefused("execution already supervised") from exc
             self.root.mkdir()
             write(self.root / "context.json", self.scope)
+            write(self.root / "launch.json", self.launch.record())
             trees.subreaper()
             previous = {sig: signal.signal(sig, self.signal) for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGCHLD)}
             try:

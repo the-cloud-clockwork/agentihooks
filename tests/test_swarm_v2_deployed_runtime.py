@@ -963,6 +963,11 @@ def test_a_kubernetes_launch_puts_its_grant_in_the_pod_launch_material_and_recor
         "exporter": ["python", "-m", "scripts.swarm_v2.session_export"],
         "control_url": API_URL,
         "profile": "engineer",
+        "startup_seconds": 10,
+        "quiesce_seconds": 10,
+        "checkpoint_seconds": 10,
+        "kill_seconds": 2,
+        "checkpoint_acknowledgement": {"status": "pending"},
     }
 
 

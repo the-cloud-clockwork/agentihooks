@@ -311,10 +311,12 @@ def autoscaled(config: SwarmConfig, inputs: ScaleInputs, host: dict | None = Non
 
 
 def ready_work(slug: str, store, doc: dict) -> tuple[dict, dict]:
-    from scripts.swarm.tick import _claimable, _launch_order
+    from scripts.swarm import dispatcher
+    from scripts.swarm.tick import ready_in_order
 
     rows = {task["id"]: task for task in doc["tasks"]}
-    return rows, {lane: _launch_order(slug, store, _claimable(slug, store, rows, doc, lane)) for lane in LANES}
+    dispatched = dispatcher.claim_key(store.config(slug), doc)
+    return rows, {lane: ready_in_order(slug, store, rows, doc, lane, dispatched) for lane in LANES}
 
 
 def live_inputs(slug: str, store, ledger, environ: dict, now_ms: int) -> ScaleInputs:
@@ -411,6 +413,10 @@ def calculate(
 def read(store, slug: str) -> dict:
     value = store.redis.get(store.key(slug, "quota-capacity"))
     return json.loads(value) if value else {}
+
+
+def caps(decision: dict, config: SwarmConfig) -> dict[str, int]:
+    return decision.get("effective", {"eng": config.max_eng, "ci": config.max_ci, "plan": config.max_plan})
 
 
 def status_line(decision: dict) -> str:

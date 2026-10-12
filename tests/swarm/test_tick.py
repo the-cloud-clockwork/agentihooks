@@ -30,7 +30,7 @@ class FakeLedger:
             "overview": "Project intent",
             "tasks": tasks,
             "phases": getattr(self, "phases", []),
-            "_meta": {"rev": len(log), "events": log, "stamps": stamps},
+            "_meta": {"rev": len(log), "events": log, "stamps": getattr(self, "stamps", stamps)},
             "followups": [],
         }
 
@@ -333,6 +333,7 @@ def test_a_task_whose_launch_failed_takes_only_a_slot_left_over(store):
 
 
 def test_rank_precedes_launch_failures_when_selecting_a_lane_task(store):
+    store.update("sw", autonomy="assist")
     store.update("sw", max_eng=1)
     ledger = FakeLedger(
         [
@@ -516,6 +517,7 @@ def test_a_task_closed_done_during_a_tick_stays_done_and_is_not_claimed_again(st
 
 
 def test_an_open_task_closed_done_during_a_tick_spawns_no_agent(store):
+    store.update("sw", autonomy="assist")
     ledger, runtime = DoneMidTick([{"id": "t1", "lane": "eng"}, {"id": "t2", "lane": "eng"}]), FakeRuntime()
     for row in ledger.rows.values():
         row["difficulty"] = "M"
@@ -560,6 +562,7 @@ def test_a_lost_agents_open_items_follow_the_live_reopen_result(store, closed_mi
 
 @pytest.mark.parametrize("closed_mid_tick", [True, False])
 def test_a_stalled_agents_open_items_follow_the_live_reopen_result(store, closed_mid_tick):
+    store.update("sw", autonomy="assist")
     from scripts.inbox.store import InboxStore
     from scripts.swarm.tick import IDLE_KILL_TICKS
 
@@ -586,6 +589,7 @@ def test_a_stalled_agents_open_items_follow_the_live_reopen_result(store, closed
 
 
 def test_a_task_closed_done_during_a_tick_is_not_blocked_by_the_claim_cap(store):
+    store.update("sw", autonomy="assist")
     ledger, runtime = DoneMidTick([{"id": "t1", "lane": "eng", "difficulty": "M"}]), FakeRuntime()
     for _ in range(3):
         store.count_claim("sw", "t1")
@@ -762,6 +766,7 @@ def test_the_nudge_says_to_answer_with_the_swarm_commands_never_in_the_terminal(
 
 
 def test_each_idle_tick_is_recorded_in_the_gate_log_with_its_time_and_task(store):
+    store.update("sw", autonomy="assist")
     from scripts.gates import log
 
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
@@ -1505,6 +1510,7 @@ def test_a_reopened_task_with_a_branch_is_claimed_before_fresh_work_even_when_it
 
 
 def test_a_fresh_task_of_a_higher_rank_still_goes_ahead_of_a_resumed_one(store):
+    store.update("sw", autonomy="assist")
     store.update("sw", max_eng=1)
     ledger = FakeLedger([{"id": "resumed", "branch": "engineer-a1b2c3-0004"}, {"id": "urgent", "rank": "urgent"}])
     runtime = FakeRuntime()
@@ -1611,6 +1617,7 @@ def test_a_task_without_territory_is_claimed_alongside_anything(store):
 
 
 def test_an_urgent_ready_task_is_claimed_ahead_of_an_older_normal_one(store):
+    store.update("sw", autonomy="assist")
     store.update("sw", max_eng=1)
     ledger = FakeLedger([{"id": "t1"}, {"id": "t2", "rank": "urgent"}])
     runtime = FakeRuntime()
@@ -1638,6 +1645,7 @@ def test_an_urgent_task_sharing_a_territory_an_active_claim_holds_is_still_claim
 
 
 def test_an_urgent_task_wins_a_shared_territory_over_an_earlier_normal_one(store):
+    store.update("sw", autonomy="assist")
     ledger = FakeLedger([{"id": "t1", "territory": ["hooks"]}, {"id": "t2", "rank": "urgent", "territory": ["hooks"]}])
     runtime = FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
@@ -1651,12 +1659,14 @@ def test_an_urgent_overlapping_task_is_claimed_ahead_of_lower_ranked_clear_work(
     tick("sw", store, ledger, runtime, now_ms=1_000)
     ledger.rows["t2"] = {**ledger.rows["t1"], "id": "t2", "state": "open", "claimed_by": "", "rank": "urgent"}
     ledger.rows["t3"] = {**ledger.rows["t2"], "id": "t3", "rank": "low", "territory": ["docs"]}
+    ledger.stamps = {f"tasks/{t}/rank": {"by": "operator"} for t in ("t2", "t3")}
     store.update("sw", max_eng=2)
     tick("sw", store, ledger, runtime, now_ms=2_000)
     assert spawned_ids(runtime) == ["t1", "t2"]
 
 
 def test_equal_ranks_keep_ledger_order_and_ranks_order_the_rest(store):
+    store.update("sw", autonomy="assist")
     store.update("sw", max_eng=6)
     ledger = FakeLedger(
         [
@@ -1674,11 +1684,12 @@ def test_equal_ranks_keep_ledger_order_and_ranks_order_the_rest(store):
 
 
 def test_claims_follow_rank_then_the_small_fast_clear_task_then_critical_path_depth(store):
+    store.update("sw", autonomy="assist")
     store.update("sw", max_eng=6)
     ledger = FakeLedger(
         [
             {"id": "shallow", "phase": "p1"},
-            {"id": "deep", "rank": "normal", "phase": "p2"},
+            {"id": "deep", "title": "deep", "rank": "normal", "phase": "p2"},
             {"id": "w1", "depends_on": ["deep"], "rank": "low", "phase": "p2"},
             {"id": "w2", "depends_on": ["w1"], "rank": "low", "phase": "p2"},
             {"id": "small", "difficulty": "S", "phase": "p3"},
@@ -1691,6 +1702,7 @@ def test_claims_follow_rank_then_the_small_fast_clear_task_then_critical_path_de
 
 
 def test_a_rank_change_applies_on_the_next_tick(store):
+    store.update("sw", autonomy="assist")
     store.update("sw", max_eng=1)
     ledger = FakeLedger([{"id": "t1"}, {"id": "t2"}, {"id": "t3"}])
     runtime = FakeRuntime()

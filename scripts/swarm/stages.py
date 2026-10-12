@@ -42,6 +42,7 @@ class Timeline:
     end: float
     base: tuple
     overlays: tuple
+    task: str = ""
 
 
 def _ready(task: dict, events: list, before: float) -> float | None:
@@ -166,7 +167,7 @@ def _claimed(task: dict, rows: dict, now_ms: int, live: bool) -> Timeline:
         *_gaps([life for life, _ in lives], claimed, pushed),
         *_ci(runs, rows["ci_stages"], pushed, green),
     )
-    return Timeline(start, end, base, overlays)
+    return Timeline(start, end, base, overlays, task_id)
 
 
 def _waiting(task: dict, rows: dict, done: set, now_ms: int) -> Timeline | None:
@@ -175,7 +176,7 @@ def _waiting(task: dict, rows: dict, done: set, now_ms: int) -> Timeline | None:
     ready = _ready(task, rows["ledger_events"], now_ms)
     if ready is None:
         return None
-    return Timeline(ready, now_ms, (Span("claim_wait", ready, now_ms),), ())
+    return Timeline(ready, now_ms, (Span("claim_wait", ready, now_ms),), (), task["id"])
 
 
 def timelines(rows: dict, tasks: list, now_ms: int) -> list[Timeline]:
@@ -229,6 +230,35 @@ def attribute(timeline: Timeline, held: list[Span], window: bottleneck.Window) -
     return seconds
 
 
+def _overrun_episodes(rows, timeline, branch, held, window):
+    episodes = set()
+    for run in rows["ci_runs"]:
+        if not branch or run["branch"] != branch:
+            continue
+        for span in _ci([run], rows["ci_stages"], timeline.start, timeline.end):
+            if span.stage != "ci_overrun":
+                continue
+            clipped = bottleneck.Window(max(window.start, span.start), min(window.end, span.end))
+            if attribute(timeline, held, clipped).get((span.stage, span.label), 0) > 0:
+                episodes.add(str(run["run_id"]))
+    return episodes
+
+
+def observations(rows: dict, tasks: list, now_ms: int, window_ms: int) -> dict:
+    window = bottleneck.Window(now_ms - window_ms, now_ms)
+    held = holds(rows["host_samples"], now_ms)
+    branches = {task["id"]: task.get("branch") for task in tasks}
+    found = {}
+    for timeline in timelines(rows, tasks, now_ms):
+        for stage, _ in attribute(timeline, held, window):
+            if stage != "ci_overrun":
+                found.setdefault(stage, set()).add(f"{stage}:{timeline.task}:{int(timeline.start)}")
+        overruns = _overrun_episodes(rows, timeline, branches.get(timeline.task), held, window)
+        if overruns:
+            found.setdefault("ci_overrun", set()).update(overruns)
+    return {stage: sorted(episodes) for stage, episodes in found.items()}
+
+
 def report(rows: dict, tasks: list, now_ms: int, window_ms: int = bottleneck.WINDOW_MS) -> dict:
     window = bottleneck.Window(now_ms - window_ms, now_ms)
     held = holds(rows["host_samples"], now_ms)
@@ -251,13 +281,20 @@ def _named(row: dict) -> str:
     return f"{name} {SPOKEN.get(row['stage'], 'on')} {row['label']}" if row["label"] else name
 
 
+def _reading(row):
+    text = f"{_named(row)} {row['seconds'] / 3600:.1f} task hours"
+    if "trend" in row:
+        text += f" ({row['trend']})"
+    return text
+
+
 def line(found: dict, now_ms: int) -> str:
     if not found:
         return "top stages not measured yet: the metrics sink is off or no tick has run"
     hours = f"{found['window_hours']:g}"
     if not found["total"]:
         return f"top stages none: no task time in the last {hours} hours"
-    top = ", ".join(f"{_named(row)} {row['seconds'] / 3600:.1f} task hours" for row in found["stages"][:TOP])
+    top = ", ".join(_reading(row) for row in found["stages"][:TOP])
     age = (now_ms - found["at"]) // 60_000
     return (
         f"top stages in the last {hours} hours: {top}; {found['total'] / 3600:.1f} task hours in all,"
