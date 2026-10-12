@@ -362,7 +362,7 @@ def test_external_secret_remote_property_references_are_not_credential_values(mo
 def test_a_git_app_secret_name_is_a_reference_while_a_private_key_literal_is_refused(mode):
     from hooks.secrets import scan
 
-    field = "git_app_" + "secret"
+    field = "git_app_" + "secret_name"
     reference = '"' + field + '": "swarm-git-app"'
     assert scan(reference, mode=mode) == []
     literal = "GITHUB_APP_" + "PRIVATE_KEY" + "=literalcredentialvalue"
