@@ -32,7 +32,9 @@ def _receiver(session_id, environ):
     env = dict(os.environ if environ is None else environ)
     env["CLAUDE_CODE_SESSION_ID"] = env.get("CLAUDE_CODE_SESSION_ID") or session_id
     try:
-        return identity(env), connect(env)
+        store = connect(env)
+        store.session_id = session_id
+        return identity(env), store
     except InboxError:
         return None
 

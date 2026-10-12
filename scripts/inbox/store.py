@@ -62,6 +62,7 @@ class Item:
     sequence: int = 0
     fyi: bool = False
     task: str = ""
+    delivery_session: str = ""
 
 
 def now_ms():
@@ -100,11 +101,12 @@ def close_reason(kind, detail=""):
 
 
 class InboxStore:
-    def __init__(self, redis, *, persist=None):
+    def __init__(self, redis, *, persist=None, session_id=""):
         if redis is None:
             raise InboxError("no Redis client; the inbox refuses to run without it")
         self.redis = redis
         self.persist = persist
+        self.session_id = session_id
         self.seats = SeatRegistry(redis)
         self.names = NameRegistry(redis)
 
@@ -427,6 +429,9 @@ class InboxStore:
             if self.names.resolve(self._delivered_to(item_id)) != receiver:
                 continue
             try:
+                if self.get(item_id).delivery_session != self.session_id:
+                    self.requeue(item_id, receiver, "receiving session changed", before=before - 1)
+                    continue
                 item = self.confirm(item_id, receiver)
             except InboxError:
                 continue
@@ -593,6 +598,8 @@ class InboxStore:
                 raise InboxError(f"message {item_id} belongs to {item.address}, not {by}")
             if only_from is not None and item.state not in only_from:
                 return None
+            if state == "confirmed" and item.state == "delivered" and item.delivery_session != self.session_id:
+                return None
             if item.state in CLOSED:
                 raise InboxError(f"message {item_id} is closed: {item.reason}")
             if state == "done" and not item.fyi and reason == "done":
@@ -602,6 +609,8 @@ class InboxStore:
             if state == "delivered" and (self._owned(pipe, by) or self._reserved(pipe, item_id)):
                 return None
             moved = replace(item, state=state, updated_at=now_ms(), reason=reason)
+            if state == "delivered":
+                moved = replace(moved, delivery_session=self.session_id)
             last = self.last_pending(pipe, item)
             pipe.multi()
             self.stage_move(pipe, item, moved, by, last)
@@ -678,10 +687,11 @@ def connect(environ=None):
     import redis
 
     from scripts.inbox import outbox
+    from scripts.inbox.seen import receiving_session
     from scripts.swarm.store import redis_client
 
     try:
-        store = InboxStore(redis_client(environ))
+        store = InboxStore(redis_client(environ), session_id=receiving_session(environ))
     except redis.RedisError as exc:
         raise Unreachable(f"Redis is unreachable ({exc}); the inbox refuses to run without it") from exc
     outbox.flush(store)

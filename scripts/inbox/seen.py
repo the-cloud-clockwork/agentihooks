@@ -99,3 +99,15 @@ def _shown_elsewhere(marks, store, item, me):
 
 def _delivered_before(store, item_id, me):
     return sum(e.get("state") == "delivered" and e.get("by") == me for e in store.history(item_id)) > 1
+
+
+def receiving_session(environ=None):
+    from hooks.context.account_sessions import agent_pid
+    from hooks.context.broadcast import get_active_sessions
+
+    env = os.environ if environ is None else environ
+    session_id = env.get("CLAUDE_CODE_SESSION_ID", "") or env.get("CODEX_THREAD_ID", "")
+    if session_id:
+        return session_id
+    pid = agent_pid()
+    return next((sid for sid, row in get_active_sessions().items() if row.get("pid") == pid), "")

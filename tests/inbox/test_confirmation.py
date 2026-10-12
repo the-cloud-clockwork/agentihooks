@@ -18,7 +18,7 @@ REDELIVERED = "redelivered: never confirmed inside the redelivery window"
 def store(monkeypatch):
     import fakeredis
 
-    store = InboxStore(fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True))
+    store = InboxStore(fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True), session_id="s1")
     monkeypatch.setattr(delivery, "connect", lambda environ=None: store)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "bob")
     monkeypatch.delenv("AGENTIHOOKS_TARGET", raising=False)
@@ -178,6 +178,33 @@ def test_a_relaunched_session_with_the_same_name_receives_the_unconfirmed_item(s
     assert "review my branch" in delivery.pending_context("second-session")
     delivery.confirm_shown("second-session")
     assert store.get(item.id).state == "confirmed"
+
+
+def test_delivery_session_survives_reconnecting_to_the_store(store):
+    item = store.deliver(store.send("alice", "bob", "review").id, "bob")
+    replacement = InboxStore(store.redis, session_id="s2")
+    assert replacement.get(item.id).delivery_session == "s1"
+    assert replacement.confirm_shown("bob", item.updated_at + 1) == []
+    assert replacement.get(item.id).state == "pending"
+
+
+@pytest.mark.parametrize("env", [{"CLAUDE_CODE_SESSION_ID": "s1"}, {"CODEX_THREAD_ID": "s1"}])
+def test_receiving_session_uses_the_harness_session_id(env):
+    assert seen.receiving_session(env) == "s1"
+
+
+def test_receiving_session_finds_the_registered_harness_process(monkeypatch):
+    monkeypatch.setattr("hooks.context.account_sessions.agent_pid", lambda: 42)
+    monkeypatch.setattr(
+        "hooks.context.broadcast.get_active_sessions",
+        lambda: {"unrelated": {"pid": 12}, "s1": {"pid": 42}},
+    )
+    assert seen.receiving_session({}) == "s1"
+
+
+def test_receiving_session_is_empty_without_a_registered_harness(monkeypatch):
+    monkeypatch.setattr("hooks.context.broadcast.get_active_sessions", lambda: {})
+    assert seen.receiving_session({}) == ""
 
 
 @pytest.mark.parametrize("event", ["stop", "prompt"])
