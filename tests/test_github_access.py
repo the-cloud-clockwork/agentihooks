@@ -166,7 +166,7 @@ def test_apply_opens_every_unapproved_app_when_the_browser_consumes_stdin(tmp_pa
 import json, os, sys
 from pathlib import Path
 assert sys.argv[1] == "api"
-endpoint = sys.argv[2]
+endpoint = next(arg for arg in sys.argv[2:] if arg.startswith(("repos/", "orgs/")) or arg == "user")
 fixture = Path(os.environ["GH_ACCESS_FIXTURE"])
 data = json.loads(fixture.read_text())
 if endpoint == "user":
