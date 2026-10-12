@@ -688,8 +688,8 @@ class IntentGate:
     name = NAME
     default_mode = DEFAULT_MODE
 
-    def __init__(self, clock=time.time):
-        self.clock = clock
+    def __init__(self, clock=time.time, run=subprocess.run):
+        self.clock, self.run = clock, run
 
     def matches(self, call):
         return call.tool == "Bash" and ("merge" in call.command or "done" in call.command)
@@ -720,9 +720,12 @@ class IntentGate:
         if verdict != PENDING:
             return Decision()
         if record["reason"] == DRAFT:
-            return Decision.deny(
-                f"intent for task {who.task} is judged once its pull request is ready for review. {_next_step(who)}"
-            )
+            pull = PULL.search(call.command)
+            if not (pull and _pr_field(pull.group(0), "draft", self.run) == "false"):
+                return Decision.deny(
+                    f"intent for task {who.task} is judged once its pull request is ready for review. {_next_step(who)}"
+                )
+            record = state.write(who.task, PENDING, RUNNING, int(self.clock() * 1000), phase=record.get("phase"))
         waited = int(self.clock() * 1000) - record["at"]
         if waited < GRACE_MS:
             return Decision.deny(
