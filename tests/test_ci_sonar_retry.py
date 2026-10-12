@@ -220,9 +220,11 @@ def test_an_unreachable_upstream_is_answered_with_502_and_logged(monkeypatch, ca
 
 def test_a_refused_upstream_answer_is_logged_with_who_refused(monkeypatch, capsys):
     class Forbidden(BaseHTTPRequestHandler):
+        def version_string(self):
+            return "cloudflare"
+
         def do_GET(self):
             self.send_response(403)
-            self.send_header("Server", "cloudflare")
             self.send_header("CF-RAY", "8c1fixture-AMS")
             self.send_header("cf-mitigated", "challenge")
             self.send_header("Content-Length", "0")
