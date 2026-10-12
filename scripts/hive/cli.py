@@ -1,17 +1,21 @@
 """agentihooks hive invite|join|revoke|controller|serve|set|show|list."""
 
 import argparse
+import contextlib
+import fcntl
 import json
 import os
 import sys
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Mapping, MutableMapping
+from collections.abc import Iterator, Mapping, MutableMapping
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from scripts.hive import auth, registry, server
+
+LOCK_FILE = "hive.lock"
 
 if TYPE_CHECKING:
     from redis import Redis
@@ -51,6 +55,15 @@ def saved_redis_url(environ: Mapping[str, str]) -> str | None:
         return None
     saved = dict(line.partition("=")[::2] for line in lines)
     return saved.get("AGENTIHOOKS_HIVE_REDIS_URL") or None
+
+
+@contextlib.contextmanager
+def refresh_lock(environ: Mapping[str, str]) -> Iterator[None]:
+    path = registry.home(environ) / LOCK_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        yield
 
 
 def _post(url: str, path: str, body: dict, action: str) -> dict:
@@ -152,7 +165,8 @@ def main(argv: list[str]) -> int:
             path = auth.write_env(registry.home(), args.url, grant)
             print(f"joined the hive as {grant['id']}; credentials are in {path}")
         elif args.command == "refresh":
-            member_id = refresh_env(os.environ)
+            with refresh_lock(os.environ):
+                member_id = refresh_env(os.environ)
             print(
                 f"refreshed the Redis credential of hive member {member_id}; it is in {registry.home() / auth.ENV_FILE}"
             )

@@ -533,22 +533,23 @@ def redis_client(environ=None):
 def _hive_recovered(redis, environ, refused):
     from scripts.hive import auth, cli
 
-    saved = cli.saved_redis_url(environ)
-    if saved not in (None, refused):
-        # Another process on this host may have refreshed already; a second refresh would retire its password.
+    # One refresh per host: a second would retire the password the first just saved.
+    with cli.refresh_lock(environ):
+        saved = cli.saved_redis_url(environ)
+        if saved not in (None, refused):
+            try:
+                client = _pinged(redis, saved)
+            except redis.AuthenticationError:
+                pass
+            else:
+                environ["AGENTIHOOKS_HIVE_REDIS_URL"] = saved
+                return client
         try:
-            client = _pinged(redis, saved)
-        except redis.AuthenticationError:
-            pass
-        else:
-            environ["AGENTIHOOKS_HIVE_REDIS_URL"] = saved
-            return client
-    try:
-        cli.refresh_env(environ)
-    except auth.HiveError as exc:
-        raise redis.AuthenticationError(
-            f"the hive Redis credential was refused and the hive refused a refresh ({exc})"
-        ) from exc
+            cli.refresh_env(environ)
+        except auth.HiveError as exc:
+            raise redis.AuthenticationError(
+                f"the hive Redis credential was refused and the hive refused a refresh ({exc})"
+            ) from exc
     return _pinged(redis, environ["AGENTIHOOKS_HIVE_REDIS_URL"])
 
 
