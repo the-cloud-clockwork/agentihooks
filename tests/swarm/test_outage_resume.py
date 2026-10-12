@@ -118,17 +118,20 @@ def test_a_codex_owner_stopped_at_model_capacity_is_held_probed_then_resumed(sto
     runtime.errors[owner.name] = pane.provider_error("codex", capacity)
     outage.providers(store, "sw", runtime, MINUTE)
     assert outage.open_records("sw")
-    tick("sw", store, ledger, runtime, 2 * MINUTE)
+    for step in range(3):
+        tick("sw", store, ledger, runtime, (2 + step) * MINUTE)
+    assert outage.held(store, "sw", owner.name)
     assert store.claimant("sw", owner.task) == owner.name
     assert owner.name not in runtime.nudged
-    outage.providers(store, "sw", runtime, 3 * MINUTE)
+    outage.providers(store, "sw", runtime, 5 * MINUTE)
     assert [(target.harness, target.account) for target in probes] == [("codex", "alpha")]
     assert not outage.open_records("sw")
     for step in range(3):
-        tick("sw", store, ledger, runtime, (4 + step) * MINUTE)
+        tick("sw", store, ledger, runtime, (6 + step) * MINUTE)
     assert runtime.statuses[owner.name] == "working"
     assert store.claimant("sw", owner.task) == owner.name
-    assert any("Service is back" in text for _, text in runtime.nudge_calls), runtime.nudge_calls
+    owner_prompts = [text for name, (_, text) in zip(runtime.nudged, runtime.nudge_calls) if name == owner.name]
+    assert owner_prompts and "Service is back" in owner_prompts[0], owner_prompts
 
 
 def test_a_successor_claim_during_restart_prevents_resuming_the_old_owner(store, tmp_path, monkeypatch):

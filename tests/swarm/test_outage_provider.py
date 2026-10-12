@@ -28,6 +28,7 @@ CAPACITY = "\x1b[31m■ Selected model is at capacity. Please try a different mo
         ("codex", CAPACITY, "Selected model is at capacity"),
         ("claude", CAPACITY, ""),
         ("copilot", CAPACITY, ""),
+        ("codex", "steering.md:3: the Codex error Selected model is at capacity", ""),
         ("unknown", "API Error: 529", ""),
     ],
 )
