@@ -1,10 +1,11 @@
 import json
+from dataclasses import asdict
 from types import SimpleNamespace
 
 import pytest
 
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
-from scripts.swarm_v2 import proof_swarm
+from scripts.swarm_v2 import proof_swarm, retention
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 SLUG = "proof-323133-t351-1"
@@ -156,6 +157,93 @@ def test_a_proof_swarm_with_agents_waits_after_its_ledger_is_removed(store):
     assert store.slugs() == [SLUG]
 
 
+def attempt(store, slug=SLUG, name="engineer@1fd5f4-0001", execution_id="exe-a"):
+    record = AgentRecord(
+        name, "eng", "t1", started_at=1_000, execution_id=execution_id, generation=2, runtime_backend="kubernetes"
+    )
+    store.redis.hset(store.key(slug, "executions"), execution_id, json.dumps(asdict(record)))
+    store.redis.hset(store.key(slug, "agents"), name, json.dumps(asdict(record)))
+    store.redis.hset(store.key(slug, "heartbeats"), execution_id, json.dumps({"archive_watermark": 7}))
+    store.redis.set(store.key(slug, "claim", "t1"), name)
+    return record
+
+
+def test_the_served_proof_swarm_cancels_its_remaining_attempts_under_the_lease_and_waits(store):
+    swarm(store, SLUG)
+    attempt(store)
+    leased = []
+
+    lines = proof_swarm.reconcile(CLEARED, store, SLUG, Ledger(), lambda: leased.append(1))
+
+    assert lines == [f"controller: proof swarm {SLUG} has its ledger removed and waits for its agents to end"]
+    assert leased == [1]
+    assert retention.final(store, SLUG, "exe-a") == retention.Final("exe-a", 2, "cancelled", 7, f"proof/{SLUG}/removed")
+    assert store.slugs() == [SLUG]
+    assert [agent.name for agent in store.agents(SLUG)] == ["engineer@1fd5f4-0001"]
+
+
+def test_a_cancelled_attempt_is_not_finalized_again_on_the_next_pass(store):
+    swarm(store, SLUG)
+    attempt(store)
+    proof_swarm.reconcile(CLEARED, store, SLUG, Ledger(), lambda: None)
+    store.redis.hset(store.key(SLUG, "heartbeats"), "exe-a", json.dumps({"archive_watermark": 9}))
+
+    assert proof_swarm.reconcile(CLEARED, store, SLUG, Ledger(), lambda: None) == [
+        f"controller: proof swarm {SLUG} has its ledger removed and waits for its agents to end"
+    ]
+    assert retention.final(store, SLUG, "exe-a").transcript_end == 7
+
+
+def test_the_served_proof_swarm_drops_retained_attempts_and_removes_itself(store):
+    swarm(store, SLUG)
+    record = attempt(store)
+    proof_swarm.reconcile(CLEARED, store, SLUG, Ledger(), lambda: None)
+    retention.retain(store, SLUG, retention.final(store, SLUG, record.execution_id), {"pods": [], "services": []})
+
+    assert proof_swarm.reconcile(CLEARED, store, SLUG, Ledger(), lambda: None) == [
+        f"controller: removed proof swarm {SLUG}"
+    ]
+    assert store.slugs() == []
+    assert store.redis.get(store.key(SLUG, "claim", "t1")) is None
+
+
+def test_an_agent_without_an_attempt_is_dropped_when_its_served_proof_swarm_goes(store):
+    swarm(store, SLUG)
+    store.put_agent(SLUG, AgentRecord("engineer@323133-0001", "eng", "t1", started_at=1_000))
+
+    assert proof_swarm.reconcile(CLEARED, store, SLUG, Ledger(), lambda: None) == [
+        f"controller: removed proof swarm {SLUG}"
+    ]
+    assert store.slugs() == []
+
+
+def test_only_the_served_proof_swarm_ends_its_agents(store):
+    swarm(store, SLUG)
+    swarm(store, OTHER)
+    attempt(store, OTHER)
+    leased = []
+
+    assert proof_swarm.reconcile(ENV, store, SLUG, Ledger(), lambda: leased.append(1)) == [
+        f"controller: proof swarm {OTHER} has its ledger removed and waits for its agents to end"
+    ]
+    assert leased == []
+    assert retention.final(store, OTHER, "exe-a") is None
+    assert sorted(store.slugs()) == [SLUG, OTHER]
+
+
+def test_a_failed_lease_check_leaves_the_attempt_unfinalized(store):
+    swarm(store, SLUG)
+    attempt(store)
+
+    def stale():
+        raise SwarmError("the controller lease is stale")
+
+    with pytest.raises(SwarmError, match="the controller lease is stale"):
+        proof_swarm.reconcile(CLEARED, store, SLUG, Ledger(), stale)
+    assert retention.final(store, SLUG, "exe-a") is None
+    assert store.slugs() == [SLUG]
+
+
 def test_nothing_happens_without_a_setting_or_a_proof_swarm(store):
     swarm(store, "rig-grade-swarm")
     ledger = Ledger()
@@ -205,7 +293,7 @@ def test_a_pass_runs_only_against_a_hosted_ledger_and_prints_each_line(store, mo
 
     proof_swarm.run(environ, store)
 
-    assert seen == ([(environ, store, SLUG, proof_ledger)] if called else [])
+    assert seen == ([(environ, store, SLUG, proof_ledger, None)] if called else [])
     assert capsys.readouterr().out == ("controller: a\ncontroller: b\n" if called else "")
 
 
@@ -227,12 +315,30 @@ def test_the_controller_runs_a_pass_at_start_and_after_each_tick(store, monkeypa
     monkeypatch.setattr(operator_env, "fill", lambda environ: None)
     monkeypatch.setattr(commands, "hive_id", lambda: "hive-fixture")
     monkeypatch.setattr(controller, "connect", lambda: store)
-    monkeypatch.setattr(proof_swarm, "run", lambda environ, given: order.append(("proof", given)))
+    monkeypatch.setattr(proof_swarm, "run", lambda environ, given, *lease: order.append(("proof", given, *lease)))
     monkeypatch.setattr(control_service, "host", lambda *args: order.append(("host", args[1])))
     monkeypatch.setattr(controller, "tick_once", lambda given, service: order.append(("tick", given)) or {})
 
     assert controller.main(["run", "--once"]) == 0
-    assert order == [("proof", store), ("host", store), ("tick", store), ("proof", store)]
+    assert order == [("proof", store), ("host", store), ("tick", store), ("proof", store, None)]
+
+
+def test_every_pass_after_the_service_starts_holds_its_controller_lease_check(store, monkeypatch):
+    from scripts import operator_env
+    from scripts.swarm import commands, controller
+    from scripts.swarm_v2 import control_service
+
+    service = SimpleNamespace(controller=SimpleNamespace(require=lambda: None), tick=lambda: None, stop=lambda: None)
+    passes = []
+    monkeypatch.setattr(operator_env, "fill", lambda environ: None)
+    monkeypatch.setattr(commands, "hive_id", lambda: "hive-fixture")
+    monkeypatch.setattr(controller, "connect", lambda: store)
+    monkeypatch.setattr(proof_swarm, "run", lambda environ, given, *lease: passes.append(lease))
+    monkeypatch.setattr(control_service, "host", lambda *args: service)
+    monkeypatch.setattr(controller, "tick_once", lambda given, running: {})
+
+    assert controller.main(["run", "--once"]) == 0
+    assert passes == [(), (service.controller.require,)]
 
 
 def test_a_failed_pass_is_reported_and_the_controller_keeps_running(store, capsys):
