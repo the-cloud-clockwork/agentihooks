@@ -200,8 +200,19 @@ def agent_status(pane_id: str, environ: dict[str, str]) -> str:
 def typed(pane_id: str, environ: dict[str, str]) -> str:
     from scripts.swarm.pane import typed_input
 
-    text = _cli(["pane", "read", pane_id, "--source", "visible", "--format", "ansi"], environ).get("text")
-    return typed_input(text) if isinstance(text, str) else ""
+    return typed_input(_read(pane_id, environ))
+
+
+def _read(pane_id: str, environ: dict[str, str]) -> str:
+    """The pane's visible screen with its styles; herdr prints it raw, not as a JSON reply."""
+    exe = binary()
+    if exe is None:
+        raise HerdrError("herdr is not installed")
+    args = [exe, "pane", "read", pane_id, "--source", "visible", "--format", "ansi"]
+    done = subprocess.run(args, capture_output=True, text=True, env=environ, timeout=30)
+    if done.returncode != 0:
+        raise HerdrError(f"herdr pane read: {done.stderr.strip()}")
+    return done.stdout
 
 
 def wait_ready(pane_id: str, environ: dict[str, str], timeout: float) -> bool:
