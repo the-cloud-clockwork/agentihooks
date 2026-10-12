@@ -418,6 +418,19 @@ def test_stored_durations_allow_new_tests_concentrated_in_one_shard(tmp_path, mo
             test_stored_durations_cover_the_collected_suite()
 
 
+@pytest.mark.parametrize("missing", [10, 11])
+def test_stored_durations_read_the_split_jobs_collected_suite(tmp_path, monkeypatch, missing):
+    nodeids = [f"tests/test_probe.py::test_{i}" for i in range(100)]
+    (tmp_path / ".test_durations").write_text(json.dumps(dict.fromkeys(nodeids[: 100 - missing], 0.1)))
+    (tmp_path / "collected.json").write_text(json.dumps(nodeids))
+    monkeypatch.setattr(sys.modules[__name__], "_ROOT", tmp_path)
+    if missing <= 10:
+        test_stored_durations_cover_the_collected_suite()
+    else:
+        with pytest.raises(AssertionError, match=f"{missing} of 100 tests"):
+            test_stored_durations_cover_the_collected_suite()
+
+
 def test_dev_push_refreshes_stored_durations_unless_the_run_was_cancelled():
     job = _workflow()["jobs"]["refresh-durations"]
     assert job["needs"] == ["unit", "lint", "shard-check"]
