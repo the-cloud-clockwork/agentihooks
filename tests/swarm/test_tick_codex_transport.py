@@ -103,7 +103,7 @@ def test_failed_transport_admission_retires_the_launched_pane(tmp_path, monkeypa
         fake.live.add(name)
         output = "status=started\nroute_status=routed\npane_id=w1:p2\nagent=codex\n"
         return SimpleNamespace(
-            returncode=0, stdout=validated(argv, output).replace('"pid": 123', '"pid": 0'), stderr=""
+            returncode=0, stdout=validated(argv, output).replace('"pid": 123', '"pid": 999999999'), stderr=""
         )
 
     def terminate(name):
