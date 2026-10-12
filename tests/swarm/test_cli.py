@@ -750,6 +750,23 @@ def test_tick_reports_spawn_intent_and_store_stages(env, capsys):
     assert all(row["slug"] == "sw" for row in rows)
 
 
+def test_the_tick_hands_the_intent_check_the_named_pull_request_view(env, monkeypatch):
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    built = []
+
+    class Recorded:
+        def __init__(self, *args, **kwargs):
+            built.append(kwargs)
+
+        def run(self, doc):
+            return []
+
+    monkeypatch.setattr(intent, "Check", Recorded)
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert [kwargs["named"] for kwargs in built] == [intent.named_view]
+
+
 def test_tick_records_failed_stage_and_releases_its_lock(env, monkeypatch, capsys):
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")

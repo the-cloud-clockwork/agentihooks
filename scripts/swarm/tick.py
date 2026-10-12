@@ -54,6 +54,7 @@ from scripts.swarm import (
     retire_watch,
     seat_spawn,
     session_model,
+    stack,
     tick_master,
     time_left,
     timing,
@@ -310,10 +311,12 @@ def _master_down(slug, config, store, ledger, runtime, now_ms):
     return [f"master down, told the operator about {len(told)} waiting lines"]
 
 
-def _drop(slug, store, ledger, rows, agent):
+def _drop(slug, store, ledger, rows, agent, refund=False):
     store.release(slug, agent.task, agent.name)
     store.drop_agent(slug, agent.name)
     held = rows.get(agent.task, {}).get("state") in ACTIVE and rows[agent.task].get("claimed_by") == agent.name
+    if refund and held and store.claims(slug, agent.task) > 0:
+        store.refund_claim(slug, agent.task)
     reopen = held and _reopen(slug, ledger, rows, agent.task)
     exits.settle(InboxStore(store.redis), agent.name, agent.seat if reopen else "", "stopped")
     return f", task {agent.task} reopened" if reopen else ""
@@ -359,7 +362,9 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
             actions.append(f"could not retire {agent.name} after mismatched {fields}, retrying next tick")
             continue
         store.redis.hset(store.key(slug, "launch-assignments"), agent.task, json.dumps(saved))
-        actions.append(f"retired {agent.name} after mismatched {fields}" + _drop(slug, store, ledger, rows, agent))
+        actions.append(
+            f"retired {agent.name} after mismatched {fields}" + _drop(slug, store, ledger, rows, agent, refund=True)
+        )
     return actions
 
 
@@ -581,7 +586,7 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
         refused = runtime.nudge(idle, NUDGE.format(slug=slug))
         return [f"nudge to {agent.name} refused: {refused}" if refused else f"nudged {agent.name}"]
     if idle.idle_ticks >= IDLE_KILL_TICKS and runtime.retire(idle, homes=reaper.scratch_homes(slug, idle.task)):
-        return [f"stalled {agent.name}" + _drop(slug, store, ledger, rows, idle)]
+        return [f"stalled {agent.name}" + _drop(slug, store, ledger, rows, idle, refund=True)]
     return []
 
 
@@ -688,13 +693,20 @@ def _stackable(dep):
     return dep.get("state") == "done" or (dep.get("state") in ACTIVE and bool(dep.get("branch")))
 
 
-def _stack_base(task, rows):
-    deps = task.get("depends_on") or []
-    return [{"task": dep, "branch": rows[dep]["branch"]} for dep in deps if rows[dep].get("state") != "done"]
+def _stack_base(task, rows, repo):
+    deps = [dep for dep in task.get("depends_on") or [] if rows[dep].get("state") != "done"]
+    return [_stacked_dep(dep, rows[dep], repo) for dep in deps]
+
+
+def _stacked_dep(dep, row, repo):
+    base = {"task": dep, "branch": row["branch"]}
+    elsewhere = row.get("branch_repo") and stack.repo_key(row["branch_repo"]) != stack.origin_key(repo)
+    return {**base, "repo": row["branch_repo"]} if elsewhere else base
 
 
 def _refund_parked(slug, store, rows, task_id):
-    if _parked(rows.get(task_id, {}), rows):
+    quota = (store.handoff_envelope(slug, task_id) or {}).get("reason") == "quota"
+    if _parked(rows.get(task_id, {}), rows) or quota:
         store.refund_claim(slug, task_id)
 
 
@@ -808,7 +820,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
         elif (lives := store.earlier_lives(slug, task["id"])) or task.get("branch"):
             task["reclaim"] = reclaim(config.repo, lives, task.get("branch") or "")
             store.put_reclaim(slug, name, task["reclaim"])
-        task["stack_base"] = _stack_base(task, rows)
+        task["stack_base"] = _stack_base(task, rows, config.repo)
         task["overlaps"] = _sharing(task, rows)
         task["group"] = [
             {key: rows[m][key] for key in ("id", "title", "description")}

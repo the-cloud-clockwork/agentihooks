@@ -81,12 +81,47 @@ def show(tab, html, url=PAGE_URL, ledger=None, swarm=None):
 def loaded(tab):
     """Wait until the page applied the stream's first ledger state."""
     tab.wait_for_function(
-        """async () => {
-          const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
-          await (await import(new URL("sync.js", main))).loaded;
-          return true;
+        """() => {
+          if (!window.__ledgerTestLoaded) {
+            window.__ledgerTestLoaded = {ready: false};
+            const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
+            import(new URL("sync.js", main)).then(sync => sync.loaded)
+              .then(() => { window.__ledgerTestLoaded.ready = true; });
+          }
+          return window.__ledgerTestLoaded.ready;
         }"""
     )
+
+
+def reload_after_folds(tab, selector):
+    state = tab.locator(selector).evaluate_all(
+        """boxes => boxes.map(box => ({
+          id: box.id,
+          key: box.dataset.key || (box.matches(".plan-fold,.phase-fold")
+            ? box.closest("[id^=item-]").id.slice(5).replace("-", "/") + "/row" : null),
+          open: box.open
+        }))"""
+    )
+    assert state
+    keys = tab.evaluate(
+        """async () => {
+          const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
+          const {FOLD_KEY, COMMENTS_KEY} = await import(new URL("config.js", main));
+          return {FOLD_KEY, COMMENTS_KEY};
+        }"""
+    )
+    tab.wait_for_function(
+        """({boxes, keys}) => {
+          const folds = JSON.parse(localStorage.getItem(keys.FOLD_KEY) || "{}");
+          const comments = JSON.parse(localStorage.getItem(keys.COMMENTS_KEY) || "{}");
+          return boxes.every(box => box.key
+            ? (comments[box.open ? "opened" : "closed"] || []).includes(box.key)
+            : folds[box.id] === box.open);
+        }""",
+        arg={"boxes": state, "keys": keys},
+    )
+    tab.reload()
+    loaded(tab)
 
 
 def page_source():

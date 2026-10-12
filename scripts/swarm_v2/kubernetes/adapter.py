@@ -40,7 +40,13 @@ class KubernetesRuntime:
         if status is not Status.OK:
             detail = f"spawn operation {operation.operation_id} is {operation.phase.value}"
             return Outcome(SPAWN, status, BACKEND, detail=detail)
-        placed = Placed("", payload["harness"], placement=BACKEND, profile=payload["task_payload"]["profile"])
+        placed = Placed(
+            "",
+            payload["harness"],
+            account=request.task.get("account", ""),
+            placement=BACKEND,
+            profile=payload["task_payload"]["profile"],
+        )
         return Outcome(SPAWN, Status.OK, BACKEND, placed)
 
     def observe(self, agent: AgentRecord) -> Outcome:

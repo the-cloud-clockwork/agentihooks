@@ -265,6 +265,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
                     intent.pr_view,
                     intent.judge,
                     head=lambda url: getattr(view(url), "head", None),
+                    named=intent.named_view,
                 ).run,
                 doc,
             )
@@ -480,6 +481,8 @@ def stop_now(store, slug, runtime, ledger):
         store.drop_agent(slug, agent.name)
         row = rows.get(agent.task, {})
         if agent.state != "finished" and row.get("state") in ("claimed", "pr") and row.get("claimed_by") == agent.name:
+            if store.claims(slug, agent.task) > 0:
+                store.refund_claim(slug, agent.task)
             try:
                 ledger.update_task(slug, agent.task, {"state": "open", "claimed_by": ""})
             except LedgerRefused as exc:
