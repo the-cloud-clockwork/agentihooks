@@ -58,9 +58,11 @@ def woke(name):
     return [f"sent idle master {name} the backstop through its inbox to work waiting Priorities"]
 
 
+@pytest.mark.parametrize("state", ["idle", "done"])
 @pytest.mark.parametrize("source", ["inbox", "seat", "read", "priority", "followup", "blocked"])
-def test_idle_master_with_work_wakes_at_twenty_minutes_and_retries(setup, source):
-    store, master, _, doc, sent = setup
+def test_ready_master_with_work_wakes_at_twenty_minutes_and_retries(setup, source, state):
+    store, master, runtime, doc, sent = setup
+    runtime.statuses[master.name] = state
     if source in {"inbox", "seat", "read"}:
         inbox = InboxStore(store.redis)
         item = inbox.send("worker", "master@sw" if source == "seat" else master.name, "Work waits")
@@ -125,7 +127,7 @@ def test_quiet_window_prevents_wake_until_its_boundary(setup, monkeypatch):
     assert run(setup, START + WINDOW + 59_999)
 
 
-@pytest.mark.parametrize("state", ["working", "waiting", "unknown", "done"])
+@pytest.mark.parametrize("state", ["working", "waiting", "unknown"])
 def test_non_idle_pane_resets_continuous_idle_time(setup, state):
     _, master, runtime, doc, sent = setup
     doc["followups"] = [{"done": False}]

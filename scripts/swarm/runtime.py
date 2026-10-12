@@ -522,6 +522,9 @@ class HerdrRuntime:
         )
         timing.call(priming_trace.write, self.home, config.slug, name, task)
         argv = self._argv(config, name, agent, text, f"{name}.md", profile, decision.overlays)
+        from scripts.swarm_v2.runtime import codex
+
+        argv += codex.arguments(config, agent, task)
         argv += _pinned(decision.overlays, decision.bundle_revision)
         if saved.get("model"):
             picked = model_pick.ModelPick(
@@ -577,6 +580,7 @@ class HerdrRuntime:
             controller_epoch=task.get("controller_epoch"),
         )
         self._reserve_account(account, lane, agent)
+        placed = codex.complete(config, name, placed, self._terminate)
         return replace(
             placed,
             model_source=picked.source,

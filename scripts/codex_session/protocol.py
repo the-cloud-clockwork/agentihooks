@@ -12,12 +12,31 @@ class ProtocolError(RuntimeError):
     pass
 
 
+class Refused(ProtocolError):
+    """The server answered with an error: a definitive refusal, so the input was not accepted."""
+
+
+def ignore(message: dict) -> None:
+    return None
+
+
+def decode(raw: str, reader: str) -> dict:
+    try:
+        message = json.loads(raw)
+    except ValueError as exc:
+        raise ProtocolError(f"{reader} got a frame that is not JSON") from exc
+    if not isinstance(message, dict):
+        raise ProtocolError(f"{reader} got a frame that is not a JSON object")
+    return message
+
+
 class Connection:
     def __init__(self, ws: Any, timeout_s: float, clock: Callable[[], float] = time.monotonic) -> None:
         self.ws = ws
         self.timeout_s = timeout_s
         self.clock = clock
         self.next_id = 1
+        self.listener: Callable[[dict], None] = ignore
 
     def request(self, method: str, params: dict | None = None) -> dict:
         from websockets.exceptions import WebSocketException
@@ -33,16 +52,31 @@ class Connection:
         self.ws.send(json.dumps({"jsonrpc": "2.0", "id": rid, "method": method, "params": params}))
         deadline = self.clock() + self.timeout_s
         while (left := deadline - self.clock()) > 0:
-            try:
-                message = json.loads(self.ws.recv(timeout=left))
-            except ValueError as exc:
-                raise ProtocolError(f"{method} got a frame that is not JSON") from exc
-            if message.get("id") != rid or "method" in message:
+            message = decode(self.ws.recv(timeout=left), method)
+            if "method" in message:
+                self.listener(message)
+                continue
+            if message.get("id") != rid:
                 continue
             if "error" in message:
-                raise ProtocolError(f"{method} refused: {message['error'].get('message', 'no message')}")
+                raise Refused(f"{method} refused: {message['error'].get('message', 'no message')}")
             return message.get("result") or {}
         raise TimeoutError(f"no reply to {method}")
+
+    def poll(self, timeout_s: float) -> bool:
+        """Hand the next notification or server request to the listener; False when none arrived in time."""
+        from websockets.exceptions import WebSocketException
+
+        try:
+            raw = self.ws.recv(timeout=timeout_s)
+        except TimeoutError:
+            return False
+        except WebSocketException as exc:
+            raise ProtocolError(f"the event stream lost the connection: {type(exc).__name__}") from exc
+        message = decode(raw, "the event stream")
+        if "method" in message:
+            self.listener(message)
+        return True
 
     def notify(self, method: str) -> None:
         self.ws.send(json.dumps({"jsonrpc": "2.0", "method": method}))
@@ -101,3 +135,12 @@ def resume_thread(connection: Connection, thread_id: str) -> dict:
 def start_turn(connection: Connection, thread_id: str, text: str) -> str:
     result = connection.request("turn/start", {"threadId": thread_id, "input": [{"type": "text", "text": text}]})
     return (result.get("turn") or {}).get("id", "")
+
+
+def steer_turn(connection: Connection, thread_id: str, turn_id: str, text: str) -> str:
+    params = {"threadId": thread_id, "expectedTurnId": turn_id, "input": [{"type": "text", "text": text}]}
+    return connection.request("turn/steer", params).get("turnId") or turn_id
+
+
+def read_thread(connection: Connection, thread_id: str) -> dict:
+    return connection.request("thread/read", {"threadId": thread_id, "includeTurns": True}).get("thread") or {}

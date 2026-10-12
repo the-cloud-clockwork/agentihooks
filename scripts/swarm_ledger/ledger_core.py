@@ -37,7 +37,7 @@ import ledger_title
 import ledger_verdict
 import orjson
 
-from scripts.swarm_ledger import ledger_freezes, ledger_groups, ledger_phases, ledger_plans, ledger_rank
+from scripts.swarm_ledger import ledger_freezes, ledger_groups, ledger_phases, ledger_plans, ledger_rank, ledger_splits
 
 LEDGER_DIR = Path(os.environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,120}$")
@@ -104,6 +104,7 @@ EXTENSION_OPS = {
         ledger_tasks,
         ledger_rank,
         ledger_groups,
+        ledger_splits,
         ledger_title,
         ledger_names,
         ledger_close,

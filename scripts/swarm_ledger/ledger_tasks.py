@@ -43,6 +43,7 @@ UPDATABLE = (
     "phase",
     "slice",
     "follow_up",
+    "split_pulls",
     "recovery",
 )
 BOOL_FIELDS = ("artifact", "follow_up")
@@ -50,7 +51,7 @@ DIFFICULTIES = ("S", "M", "L")
 DIFFICULTY_SOURCES = ("operator", "rule", "classifier", "default")
 DIFFICULTY_FIELDS = ("difficulty", "difficulty_source", "difficulty_confidence")
 NUMBER_FIELDS = ("difficulty_confidence",)
-LIST_FIELDS = ("depends_on", "territory", "parked_on", "parked_repos", "overlays")
+LIST_FIELDS = ("depends_on", "territory", "parked_on", "parked_repos", "overlays", "split_pulls")
 OVERLAY_CAP = 3
 BRANCH_RE = re.compile(r"^(?!-)\S*$")
 COMMIT_RE = re.compile(r"^([0-9a-f]{7,64})?$")

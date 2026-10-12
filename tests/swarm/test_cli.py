@@ -1007,6 +1007,7 @@ def test_runtime_spawns_through_init_agent_with_a_private_prompt(tmp_path, monke
         model_source="lane-default",
         profile_decision={**decision, "validation": placed.profile_decision["validation"]},
         choice="rotation",
+        transport="legacy",
         launched_at=7_000,
         launch_timings=placed.launch_timings,
     )

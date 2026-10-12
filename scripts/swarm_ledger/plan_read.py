@@ -47,7 +47,7 @@ def numbered(text: str, lines: str) -> list[tuple[int, str]]:
     return [(number, row.strip()) for number, row in enumerate(text.splitlines(), start) if row.strip()]
 
 
-def section(source: str, anchor: str) -> str:
+def section(source: str, anchor: str, printed: set[int] | None = None) -> str:
     entries = [entry for entry in _ledger("plan_ranges").sections(source) if entry[1] or entry[2].strip()]
     tag = f'<a id="{anchor}"></a>'
     heading = next(
@@ -61,15 +61,20 @@ def section(source: str, anchor: str) -> str:
     rows = source.splitlines()[first - 1 : stop]
     while rows and (not rows[-1].strip() or ANCHOR.fullmatch(rows[-1].strip())):
         rows.pop()
-    return "".join(f"{row}\n" for row in rows)
+    if printed is None:
+        return "".join(f"{row}\n" for row in rows)
+    remaining = "".join(f"{row}\n" for n, row in enumerate(rows, first) if n not in printed)
+    printed.update(range(first, first + len(rows)))
+    return remaining
 
 
-def linked(source: str, lines: str) -> str:
+def linked(source: str, lines: str, margin: int = 0) -> str:
     start, end = _ledger("plan_ranges").bounds(lines)
     rows = source.splitlines()[start - 1 : end]
     tags = {row.strip() for row in rows}
     anchors = dict.fromkeys(a for row in rows for a in LINK.findall(row) if f'<a id="{a}"></a>' not in tags)
-    return "".join(f"\n{case}" for anchor in anchors if (case := section(source, anchor)))
+    printed = set(range(start - margin, end + margin + 1))
+    return "".join(f"\n{case}" for anchor in anchors if (case := section(source, anchor, printed)))
 
 
 def pointer(task: dict) -> str:
@@ -122,7 +127,7 @@ def read(doc: dict, slug: str, task_id: str | None, phase_id: str | None) -> str
         return _ledger("plan_packages").read(task["plan_lines"])
     source = _stored(doc, phase, task)
     lines = task.get("plan_lines") or phase["plan_ref"]["lines"]
-    return chunk(source, lines) + (linked(source, lines) if task else "")
+    return chunk(source, lines) + (linked(source, lines, margin=MARGIN) if task else "")
 
 
 def main(argv=None, environ=None) -> int:
