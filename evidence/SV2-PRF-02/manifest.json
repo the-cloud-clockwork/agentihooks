@@ -1,6 +1,6 @@
 {
   "package": "SV2-PRF-02",
-  "tested_commit": "f49241dc520bf8eeb84cb0816a2880e43a85e787",
+  "tested_commit": "71a2e12850be6be0901a53ec1545f0cece6b193a",
   "measured_commits": {
     "kind-run-1.json": "ec5276308ced2ea1c182dbce76c6e81a239a9d48",
     "kind-run-2.json": "f49241dc520bf8eeb84cb0816a2880e43a85e787"

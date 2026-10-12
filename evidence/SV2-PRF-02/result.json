@@ -1,14 +1,14 @@
 {
   "package": "SV2-PRF-02",
-  "package_complete": false,
+  "package_complete": true,
   "dependencies": [
     "SV2-PRF-01"
   ],
   "stacked_on": "SV2-PRF-01, merged into dev",
   "integration_gate": "G10",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2613",
-  "tested_commit": "f49241dc520bf8eeb84cb0816a2880e43a85e787",
-  "status": "measured on Anton by read only reads and on a CI runner by a kind fixture with an interrupted registry",
+  "tested_commit": "71a2e12850be6be0901a53ec1545f0cece6b193a",
+  "status": "measured on Anton by read only reads, including the native handshake of one controller launched worker, and on a CI runner by a kind fixture with an interrupted registry",
   "evidence_class": "Measured: two read only Anton reads (kubectl get nodes, events and Pods; aws describe scaling activities and instances) at 2026-10-11T14:57:15Z and 15:59:13Z, each covering the hour of events Kubernetes keeps; a third read at 2026-10-12T10:17:25Z added the agent log of every swarm worker Pod, holding one Pod the swarm controller launched on Anton at 10:03:14Z; two Startup stages runs (38150380291 at ec5276308, 38153743721 at f49241dc5) on GitHub hosted runners pulled the published worker image through a local registry with the committed driver, each behind a 90 second outage on both kind workers; an earlier run, 38150051995, used an older driver and is not committed. Attribution, report, claim and the account release are functions over committed reads; the account release runs the KUB-05 recovery over fakeredis and is mocked. No antoncore object, autoscaler setting or deployed Pod was changed.",
   "interfaces": [
     "scripts.swarm_v2.startup_stages.reduce(raw) keeps only the event reasons, node Ready transitions, Pod creation and readiness, and successful ASG launch activities joined to EC2 launch times that attribution reads; with worker logs it adds each Pod's prepared and delivered instants read by log_marks",
@@ -36,11 +36,11 @@
     "externally_verified": "Read only: one worker Pod launched on Anton by the swarm controller for the checkpoint restore proof swarm, its agent log showing the prepared report and the prompt delivery; no worker was launched for this package."
   },
   "validation": {
-    "red": "Proofs run 38149987978 on tests only commit b7f1e1191: tests/test_swarm_v2_startup_stages.py failed collection with ImportError for startup_bench",
-    "tests": "pending on the head after the review fixes; earlier: Proofs run 38151908976 (40 passed) and 38153748934 at f49241dc5 (136 passed across the stage tests, the case record tests and the KUB-05 failure tests)",
-    "mutation": "pending: Mutation preflight on the head after the review fixes",
+    "red": "Proofs run 38149987978 on tests only commit b7f1e1191: tests/test_swarm_v2_startup_stages.py failed collection with ImportError for startup_bench; handshake round: Proofs run 38235593941 on tests only commit 50819c940 failed the new log mark and handshake tests and the widened stage dict and markdown tests",
+    "tests": "Tests run 38237658586 at 71a2e1285 success: unit shards on every Python version, mutation-stats and Gate Required pass",
+    "mutation": "Tests run 38237658586 mutation shards and Mutation preflight runs 38237657404 and 38237652333 at 71a2e1285 success; startup_stages and startup_bench mutated in every shard, each survivor killed or cleared by a file under mutation-clearances",
     "lint": "ruff check, ruff format and size limits passed through python -m scripts.ci_prepush",
-    "review": "Standards and Spec readers on the diff since the SV2-PRF-01 head: warm pool cold labels, failure timing, a silent fixture exit, outage time charged to the Pod phase, the image total including Pod start, the schedule stage outside node provision, hidden transient failures, a tautological repeat check and kind provenance were fixed in code; the remaining points are recorded as limitations"
+    "review": "Standards and Spec readers on the diff since the SV2-PRF-01 head: warm pool cold labels, failure timing, a silent fixture exit, outage time charged to the Pod phase, the image total including Pod start, the schedule stage outside node provision, hidden transient failures, a tautological repeat check and kind provenance were fixed in code; the remaining points are recorded as limitations; handshake round: Standards (5 findings) and Spec (7 findings) readers, resolution in https://github.com/the-cloud-clockwork/agentihooks/pull/2641#issuecomment-6122393601, the per container image split filed as a ledger follow up"
   },
   "measurements": {
     "startup_stage_p50_p95": {
