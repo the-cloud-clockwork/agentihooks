@@ -10,6 +10,7 @@ from pathlib import Path
 
 NAMESPACE = "startup-bench"
 REGISTRY = "kind-registry"
+WORKERS = "agentihooks-swarm-workers"
 READY_FILE = "/tmp/startup-ready"
 BOOT = f"python /opt/swarm-node/worker_image.py report > /tmp/report.json && touch {READY_FILE} && sleep 900"
 
@@ -136,6 +137,12 @@ def read_anton(output: Path) -> None:
     ids = [i["InstanceId"] for group in groups["AutoScalingGroups"] for i in group["Instances"]]
     found = run("aws", "ec2", "describe-instances", "--instance-ids", *ids, "--output", "json") if ids else ""
     (output / "instances.json").write_text(found or json.dumps({"Reservations": []}))
+    logs = output / "logs"
+    logs.mkdir(exist_ok=True)
+    for name in kubectl("-n", WORKERS, "get", "pods", "-o", "name").split():
+        pod = name.removeprefix("pod/")
+        text = kubectl("-n", WORKERS, "logs", pod, "-c", "agent", "--timestamps", check=False)
+        (logs / f"{WORKERS}_{pod}.log").write_text(text)
 
 
 def kind(args: argparse.Namespace) -> None:

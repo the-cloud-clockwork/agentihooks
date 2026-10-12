@@ -20,15 +20,21 @@ STAGE_NAMES = {
     "pull_retry": "Failed pulls before the pull that succeeded",
     "pod_start": "Scheduled to last container start, less pulls and retries",
     "bootstrap": "Last container start to Pod Ready",
+    "handshake": "Worker prepared to native agent ready and prompt delivered",
 }
 
 
 def read(capture: Path) -> dict:
-    """The capture folder holds read_at and one JSON listing per name in LISTINGS."""
+    """The capture folder holds read_at, one JSON listing per name in LISTINGS and, optionally, logs/<namespace>_<pod>.log
+    worker logs with timestamps."""
     raw = {name: json.loads((capture / f"{name}.json").read_text(encoding="utf-8")) for name in LISTINGS}
     raw["read_at"] = (capture / "read_at").read_text(encoding="utf-8").strip()
+    logs = sorted((capture / "logs").glob("*.log"))
+    raw["logs"] = {path.stem.replace("_", "/", 1): path.read_text(encoding="utf-8") for path in logs}
     reduced = startup_stages.reduce(raw)
     reduced["inputs"] = {name: hashlib.sha256((capture / f"{name}.json").read_bytes()).hexdigest() for name in LISTINGS}
+    if logs:
+        reduced["inputs"]["logs"] = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in logs}
     return reduced
 
 

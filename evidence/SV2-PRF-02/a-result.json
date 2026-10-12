@@ -1,9 +1,10 @@
 {
   "case": "T-SV2-PRF-02-A",
-  "evidence_class": "measured: Anton reads are read only kubectl and aws listings of nodes, events, Pods, autoscaling activities and EC2 instances reduced by startup_bench reduce; the kind reads come from the Startup stages workflow named in their source, where a GitHub hosted runner pulled the published worker image from a local registry that the fixture stopped and restarted; attribution, report and claim are functions over those committed reads; the account release in case C runs the KUB-05 recovery over fakeredis and is mocked",
+  "evidence_class": "measured: Anton reads are read only kubectl and aws listings of nodes, events, Pods, autoscaling activities and EC2 instances, read 3 also the agent log of each swarm worker Pod, reduced by startup_bench reduce; the kind reads come from the Startup stages workflow named in their source, where a GitHub hosted runner pulled the published worker image from a local registry that the fixture stopped and restarted; attribution, report and claim are functions over those committed reads; the account release in case C runs the KUB-05 recovery over fakeredis and is mocked",
   "input_sha256": {
     "anton-read-1.json": "850d67d30fb7ec52e89277b2e467c6a9785fba87e56dcff3e2dcd94dc4f9695a",
     "anton-read-2.json": "4ae6cdceb5cfe22509ba51da0efa04b6a57c8770189b0f2c35e2e6825741e7c4",
+    "anton-read-3.json": "d55c97ca370de23b73af9e80ecc9db06a3f3742855d8df56a646d4137728a2a8",
     "kind-run-1.json": "9cdad8aecf741089cc741a5424792136f103c038982b54886cc0db5898fecc17",
     "kind-run-2.json": "a2b14c83b40160e2de8be5c949f78c28e7ec73cc82a2e175ffa2959a091b1b16"
   },
@@ -457,6 +458,161 @@
         }
       }
     },
+    "anton-read-3.json": {
+      "read_at": "2026-10-12T10:17:25Z",
+      "source": "read only kubectl and aws read of anton-prod at 2026-10-12T10:17:25Z with the agent log of every swarm worker Pod, one launched by the controller at 10:03:14Z",
+      "startup_stage_p50_p95": {
+        "warm-node/cached-image": {
+          "failures": {},
+          "from_zero": 0,
+          "image_init_ms": {
+            "n": 32,
+            "p50": 0,
+            "p95": 0
+          },
+          "node_provision_ms": null,
+          "node_sources": {
+            "existing": 32
+          },
+          "pending": 0,
+          "samples": 32,
+          "stages": {
+            "image": {
+              "n": 32,
+              "p50": 0,
+              "p95": 0
+            },
+            "pod_start": {
+              "n": 32,
+              "p50": 722,
+              "p95": 1681
+            },
+            "pull_retry": {
+              "n": 32,
+              "p50": 0,
+              "p95": 0
+            },
+            "schedule": {
+              "n": 5,
+              "p50": 434,
+              "p95": 533
+            }
+          },
+          "started": 32,
+          "transient": {}
+        },
+        "warm-node/partial-image": {
+          "failures": {},
+          "from_zero": 0,
+          "image_init_ms": {
+            "n": 142,
+            "p50": 618,
+            "p95": 2877
+          },
+          "node_provision_ms": null,
+          "node_sources": {
+            "existing": 142
+          },
+          "pending": 0,
+          "samples": 142,
+          "stages": {
+            "bootstrap": {
+              "n": 6,
+              "p50": 1000,
+              "p95": 1000
+            },
+            "image": {
+              "n": 142,
+              "p50": 618,
+              "p95": 2877
+            },
+            "pod_start": {
+              "n": 142,
+              "p50": 15718,
+              "p95": 39607
+            },
+            "pull_retry": {
+              "n": 142,
+              "p50": 0,
+              "p95": 0
+            },
+            "schedule": {
+              "n": 7,
+              "p50": 464,
+              "p95": 939
+            }
+          },
+          "started": 142,
+          "transient": {}
+        },
+        "warm-node/uncached-image": {
+          "failures": {},
+          "from_zero": 0,
+          "image_init_ms": {
+            "n": 445,
+            "p50": 1005,
+            "p95": 5382
+          },
+          "node_provision_ms": null,
+          "node_sources": {
+            "existing": 445
+          },
+          "pending": 0,
+          "samples": 445,
+          "stages": {
+            "bootstrap": {
+              "n": 3,
+              "p50": 6000,
+              "p95": 17000
+            },
+            "handshake": {
+              "n": 1,
+              "p50": 1085,
+              "p95": 1085
+            },
+            "image": {
+              "n": 445,
+              "p50": 1005,
+              "p95": 5382
+            },
+            "pod_start": {
+              "n": 445,
+              "p50": 421,
+              "p95": 2900
+            },
+            "pull_retry": {
+              "n": 445,
+              "p50": 0,
+              "p95": 0
+            },
+            "schedule": {
+              "n": 81,
+              "p50": 388,
+              "p95": 873
+            }
+          },
+          "started": 445,
+          "transient": {}
+        },
+        "warm-node/unknown-image": {
+          "failures": {
+            "registry_unauthorized": 1,
+            "unschedulable": 41
+          },
+          "from_zero": 0,
+          "image_init_ms": null,
+          "node_provision_ms": null,
+          "node_sources": {
+            "existing": 42
+          },
+          "pending": 0,
+          "samples": 42,
+          "stages": {},
+          "started": 0,
+          "transient": {}
+        }
+      }
+    },
     "continuing_in_both_reads": [
       "anton-prod/plane-0"
     ],
@@ -468,6 +624,11 @@
       "anton-read-2.json": {
         "cold_claimed": 1,
         "cold_rows_split": true
+      },
+      "anton-read-3.json": {
+        "handshake_ms": {
+          "agentihooks-swarm-workers/swarm-exe-4a990712d05642e3964f0b0374c7cd43": 1085
+        }
       },
       "kind-run-1.json": {
         "all_started": true,

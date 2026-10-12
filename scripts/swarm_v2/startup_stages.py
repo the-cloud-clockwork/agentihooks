@@ -1,5 +1,6 @@
 """Attribute worker startup delay to node provision and image initialization stages from a read of the cluster."""
 
+import json
 import re
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
@@ -8,7 +9,7 @@ from datetime import datetime
 from scripts.swarm_v2.kubernetes.failures import PULL_GRACE_MS
 from scripts.swarm_v2.resource_profiles import ClaimRefused, distribution
 
-STAGES = ("trigger", "instance", "join", "schedule", "image", "pull_retry", "pod_start", "bootstrap")
+STAGES = ("trigger", "instance", "join", "schedule", "image", "pull_retry", "pod_start", "bootstrap", "handshake")
 NODE_STAGES = ("trigger", "instance", "join", "schedule")
 IMAGE_STAGES = ("image", "pull_retry")
 COLD_LABEL = "cold_scale_from_zero"
@@ -86,6 +87,25 @@ def _event(item: Mapping) -> dict | None:
     return kept
 
 
+def log_marks(text: str) -> dict:
+    """The worker's prepared report and the first prompt delivery after it, from `kubectl logs --timestamps`."""
+    marks = {}
+    for line in text.splitlines():
+        stamp, _, body = line.partition(" ")
+        try:
+            record = json.loads(body)
+        except ValueError:
+            continue
+        if not isinstance(record, dict):
+            continue
+        if "prepared" not in marks and record.get("worker_start") == "prepared":
+            marks["prepared"] = instant(stamp)
+        elif "prepared" in marks and record.get("supervisor") == "prompt_delivered":
+            marks["delivered"] = instant(stamp)
+            break
+    return marks
+
+
 def reduce(raw: Mapping) -> dict:
     """Keep only the fields stage attribution reads from kubectl and aws listings, sorted for a stable record."""
     events = sorted(filter(None, map(_event, raw["events"]["items"])), key=lambda e: (e["pod"], e["at"], e["reason"]))
@@ -96,13 +116,15 @@ def reduce(raw: Mapping) -> dict:
         }
         for node in raw["nodes"]["items"]
     }
-    pods = {
-        f"{pod['metadata']['namespace']}/{pod['metadata']['name']}": {
+    logs = raw.get("logs", {})
+    pods = {}
+    for pod in raw["pods"]["items"]:
+        name = f"{pod['metadata']['namespace']}/{pod['metadata']['name']}"
+        pods[name] = {
             "created": instant(pod["metadata"]["creationTimestamp"]),
             "ready": _ready_at(pod.get("status", {}).get("conditions", [])),
+            **log_marks(logs.get(name, "")),
         }
-        for pod in raw["pods"]["items"]
-    }
     return {
         "read_at": raw["read_at"],
         "events": events,
@@ -223,6 +245,7 @@ def _image_stages(events, scheduled, pod, failed_pull: bool) -> tuple[dict, list
         "pull_retry": retry,
         "pod_start": None if start is None else max(start - (image or 0) - (retry or 0), 0),
         "bootstrap": _gap(pod.get("ready"), started) if started and (pod.get("ready") or 0) >= started else None,
+        "handshake": _gap(pod.get("delivered"), pod.get("prepared")),
     }
     return stages, pulls
 

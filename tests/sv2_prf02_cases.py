@@ -14,6 +14,7 @@ from tests import sv2_kub05_cases as kub05
 FIXTURES = Path(__file__).parent / "fixtures" / "swarm_v2" / "startup"
 ANTON = ("anton-read-1.json", "anton-read-2.json")
 KIND = ("kind-run-1.json", "kind-run-2.json")
+NATIVE = "anton-read-3.json"
 SOURCES = {
     "anton-read-1.json": "read only kubectl and aws read of anton-prod at 2026-10-11T14:57:15Z",
     "anton-read-2.json": "read only kubectl and aws read of anton-prod, the next hour of events",
@@ -21,12 +22,14 @@ SOURCES = {
     " 90 second registry outage",
     "kind-run-2.json": "Startup stages run 38153743721 at f49241dc520bf8eeb84cb0816a2880e43a85e787, both nodes behind a"
     " 90 second registry outage",
+    NATIVE: "read only kubectl and aws read of anton-prod at 2026-10-12T10:17:25Z with the agent log of every swarm"
+    " worker Pod, one launched by the controller at 10:03:14Z",
 }
-INPUTS = (*ANTON, *KIND)
+INPUTS = (*ANTON, *KIND, NATIVE)
 FROM_ZERO_GROUP = "anton-k3s-swarm"
 EVIDENCE_CLASS = (
     "measured: Anton reads are read only kubectl and aws listings of nodes, events, Pods, autoscaling activities and "
-    "EC2 instances reduced by startup_bench reduce; the kind reads come from the Startup stages workflow named in "
+    "EC2 instances, read 3 also the agent log of each swarm worker Pod, reduced by startup_bench reduce; the kind reads come from the Startup stages workflow named in "
     "their source, where a GitHub hosted runner pulled the published worker image from a local registry that the "
     "fixture stopped and restarted; attribution, report and claim are functions over those committed reads; the "
     "account release in case C runs the KUB-05 recovery over fakeredis and is mocked"
@@ -73,8 +76,9 @@ NOTES = (
     "Kubernetes keeps events for about an hour, so each Anton read covers the hour before it; Pods whose events"
     " expired are absent rather than counted as fast.",
     "EC2 launch times have one second precision and the join stage ends at the node's Ready transition.",
-    "Bootstrap is the worker image's own report followed by a readiness file in the kind fixture; the native harness"
-    " handshake needs a controller grant and provider credentials and is not measured here.",
+    "Bootstrap is the worker image's own report followed by a readiness file in the kind fixture. The native handshake"
+    " runs from the worker's prepared report to the supervisor's prompt delivery once the native agent reported"
+    " ready, read from the worker log of a controller launched Pod; it falls inside bootstrap and is not added to it.",
     "The kind fixture pulls from a registry on the same runner, so its pull times show image size and unpack cost,"
     " not registry distance; the Anton reads show the production registry path.",
     "With few cold samples the p95 equals the maximum.",
@@ -126,9 +130,15 @@ def _kind_holds(name: str) -> dict:
     }
 
 
+def _native_holds(name: str) -> dict:
+    measured = [e for e in samples(name) if e["outcome"] == stages.STARTED and e["stages"]["handshake"] is not None]
+    return {"handshake_ms": {e["pod"]: e["stages"]["handshake"] for e in measured}}
+
+
 def _positive() -> tuple[dict, bool]:
     observed = {name: summary(name) for name in INPUTS}
     held = {name: _anton_holds(name) for name in ANTON} | {name: _kind_holds(name) for name in KIND}
+    held[NATIVE] = _native_holds(NATIVE)
     starts = [{(e["pod"], e["at"]) for e in samples(name) if e["outcome"] == stages.STARTED} for name in ANTON]
     first = {(s["pod"], s["at"]) for s in samples(ANTON[0])}
     shared = sorted(e["pod"] for e in samples(ANTON[1]) if (e["pod"], e["at"]) in first)
@@ -141,7 +151,7 @@ def _positive() -> tuple[dict, bool]:
         and {"warm-node/cached-image", "warm-node/uncached-image"} <= set(held[name]["scenarios"])
         for name in KIND
     )
-    return observed, anton and kind and independent
+    return observed, anton and kind and independent and bool(held[NATIVE]["handshake_ms"])
 
 
 def _rejection() -> tuple[dict, bool]:

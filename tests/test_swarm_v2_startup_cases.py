@@ -29,4 +29,5 @@ def test_every_recorded_read_names_its_source_and_hashes_its_listings():
     for name in cases.INPUTS:
         read = cases.load(name)
         assert cases.SOURCES[name]
-        assert sorted(read["inputs"]) == ["activities", "events", "instances", "nodes", "pods"]
+        logged = ["logs"] if name == cases.NATIVE else []
+        assert sorted(read["inputs"]) == sorted(["activities", "events", "instances", "nodes", "pods", *logged])
