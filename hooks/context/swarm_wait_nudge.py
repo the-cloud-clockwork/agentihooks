@@ -61,7 +61,8 @@ def check_github_watch(payload: dict) -> None:
     if not slug or not name or lane_of(name) not in WORKERS or payload.get("tool_name") not in WAIT_TOOLS:
         return
     tool_input = payload.get("tool_input") or {}
-    if any(_github_watch(tokens) for tokens in commands(tool_input.get("command") or tool_input.get("cmd") or "")):
+    command = tool_input.get("command") or tool_input.get("cmd")
+    if command and any(_github_watch(tokens) for tokens in commands(command)):
         raise BlockAction(
             "Independent GitHub watches spend the shared GitHub hourly quota. "
             f"Use agentihooks swarm {slug} wait --on checks <pr url>, "

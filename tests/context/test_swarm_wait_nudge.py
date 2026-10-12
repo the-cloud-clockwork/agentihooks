@@ -226,3 +226,8 @@ def test_a_monitor_cannot_start_an_independent_github_watch(worker):
 def test_a_monitor_command_alias_cannot_start_an_independent_github_watch(worker):
     with pytest.raises(hook_manager.BlockAction, match="shared GitHub hourly quota"):
         nudge.check_github_watch({"tool_name": "Monitor", "tool_input": {"cmd": "gh run watch 123"}})
+
+
+@pytest.mark.parametrize("tool_input", [{}, {"command": ""}, {"command": None, "cmd": ""}])
+def test_empty_monitor_commands_are_allowed(worker, tool_input):
+    assert nudge.check_github_watch({"tool_name": "Monitor", "tool_input": tool_input}) is None
