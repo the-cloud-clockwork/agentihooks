@@ -30,23 +30,17 @@ def test_expired_login_never_starts_a_pane(tmp_path):
     with pytest.raises(SpawnError, match="native Claude login is expired or missing"):
         runtime.spawn(config(tmp_path), "master", "agent", {"id": "master", "route_kind": "interactive"})
     assert len(calls) == 1
-    assert calls[0][1:] == ["auth", "status", "--json"]
+    assert calls[0][1:] == ["auth", "status", "--text"]
     assert not (tmp_path / "proof" / "interactive-claude-status.json").exists()
 
 
 @pytest.mark.parametrize("launch_ok", [True, False])
 def test_status_proof_is_captured_only_after_success(tmp_path, launch_ok):
     def run(argv, **kwargs):
-        if argv[1:] == ["auth", "status", "--json"]:
+        if argv[1:] == ["auth", "status", "--text"]:
             return SimpleNamespace(
                 returncode=0,
-                stdout=json.dumps(
-                    {
-                        "loggedIn": True,
-                        "authMethod": "claude.ai",
-                        "email": "private",
-                    }
-                ),
+                stdout="Login method: Claude account\nEmail: private",
             )
         return SimpleNamespace(
             returncode=0 if launch_ok else 1,
@@ -66,7 +60,6 @@ def test_status_proof_is_captured_only_after_success(tmp_path, launch_ok):
     assert proof.exists() == launch_ok
     if launch_ok:
         assert json.loads(proof.read_text()) == {
-            "command": "claude auth status --json",
-            "loggedIn": True,
-            "authMethod": "claude.ai",
+            "command": "claude auth status --text",
+            "status": "Login method: Claude account",
         }
