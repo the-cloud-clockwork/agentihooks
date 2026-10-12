@@ -80,7 +80,7 @@ def show(tab, html, url=PAGE_URL, ledger=None, swarm=None):
 
 def loaded(tab):
     """Wait until the page applied the stream's first ledger state."""
-    tab.wait_for_function(
+    tab.evaluate(
         """async () => {
           const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
           await (await import(new URL("sync.js", main))).loaded;
@@ -99,17 +99,22 @@ def reload_after_folds(tab, selector):
         }))"""
     )
     assert state
-    tab.wait_for_function(
-        """async (boxes) => {
+    keys = tab.evaluate(
+        """async () => {
           const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
           const {FOLD_KEY, COMMENTS_KEY} = await import(new URL("config.js", main));
-          const folds = JSON.parse(localStorage.getItem(FOLD_KEY) || "{}");
-          const comments = JSON.parse(localStorage.getItem(COMMENTS_KEY) || "{}");
+          return {FOLD_KEY, COMMENTS_KEY};
+        }"""
+    )
+    tab.wait_for_function(
+        """({boxes, keys}) => {
+          const folds = JSON.parse(localStorage.getItem(keys.FOLD_KEY) || "{}");
+          const comments = JSON.parse(localStorage.getItem(keys.COMMENTS_KEY) || "{}");
           return boxes.every(box => box.key
             ? (comments[box.open ? "opened" : "closed"] || []).includes(box.key)
             : folds[box.id] === box.open);
         }""",
-        arg=state,
+        arg={"boxes": state, "keys": keys},
     )
     tab.reload()
     loaded(tab)

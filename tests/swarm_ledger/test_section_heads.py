@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import ledger_state, reload_after_folds, serve_modules, shell_html
+from tests.swarm_ledger.ledger_page import ledger_state, loaded, reload_after_folds, serve_modules, shell_html
 
 TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 URL = "http://ledger.test/swarm-buildout"
@@ -75,14 +75,7 @@ def open_page(browser, doc, init_script=None):
 
 
 def rendered(page):
-    """The status line reads saved once the stream opens, so wait for the page's own first-state promise instead."""
-    page.wait_for_function(
-        """async () => {
-          const main = document.querySelector("script[type=module]").src;
-          await (await import(new URL("sync.js", main))).loaded;
-          return true;
-        }"""
-    )
+    loaded(page)
 
 
 @pytest.fixture
