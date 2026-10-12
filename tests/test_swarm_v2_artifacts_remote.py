@@ -1,6 +1,8 @@
 import io
 from unittest.mock import Mock
 
+import pytest
+
 from scripts.swarm_v2.artifacts import remote
 
 
@@ -41,12 +43,13 @@ def test_controller_storage_is_disabled_without_a_bucket(monkeypatch):
     client.assert_not_called()
 
 
-def test_controller_uses_private_bucket_and_verifies_a_round_trip(monkeypatch):
+@pytest.mark.parametrize("prefix", ["checkpoints", "checkpoints/"])
+def test_controller_uses_private_bucket_and_verifies_a_round_trip(monkeypatch, prefix):
     objects = Objects()
     client = Mock(return_value=objects)
     monkeypatch.setattr("boto3.client", client)
     backend = remote.controller_backend(
-        {"AGENTIHOOKS_CHECKPOINT_BUCKET": "checkpoint-fixture", "AGENTIHOOKS_CHECKPOINT_PREFIX": "checkpoints/"}
+        {"AGENTIHOOKS_CHECKPOINT_BUCKET": "checkpoint-fixture", "AGENTIHOOKS_CHECKPOINT_PREFIX": prefix}
     )
     assert backend.kind == "object-store"
     client.assert_called_once_with("s3")
