@@ -230,11 +230,14 @@ def test_size_of_a_vanished_entry_is_zero(tmp_path):
 
 def test_measure_reports_the_whole_tree_of_a_live_workload(tmp_path, capfd):
     command = [sys.executable, str(WORKLOADS / "memory.py"), "--children", "2", "--mib", "48", "--hold", "1.5"]
+    gc.collect()
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         result = sampling.measure(command, tmp_path, {"PATH": os.environ["PATH"]}, 0.05, 60)
         gc.collect()
-    assert [w for w in caught if issubclass(w.category, ResourceWarning)] == []
+    assert [w for w in caught if issubclass(w.category, ResourceWarning)] == [], [
+        f"{w.category.__name__}: {w.message} at {w.filename}:{w.lineno}" for w in caught
+    ]
     assert result["exit_code"] == 0 and not result["timed_out"]
     assert 3 <= result["peak_processes"] < 10
     assert 96 <= result["peak_rss_mib"] < 2048
@@ -251,6 +254,43 @@ def test_measure_reports_the_whole_tree_of_a_live_workload(tmp_path, capfd):
     assert 0 < result["peak_children_cores"] <= result["peak_cores"]
     assert result["samples"] >= 5
     assert 1.0 <= result["wall_seconds"] < 30
+
+
+def leaked_file(path):
+    cycle = [path.open("w")]
+    cycle.append(cycle)
+
+
+@pytest.mark.flaky(reruns=0)
+@pytest.mark.parametrize("inherited", [True, False], ids=["inherited", "new-leak"])
+def test_live_workload_resource_audit_owns_only_sampling_leaks(tmp_path, capfd, monkeypatch, inherited):
+    enabled = gc.isenabled()
+    gc.disable()
+    leak = tmp_path / ("inherited-resource" if inherited else "sampling-resource")
+    try:
+        if inherited:
+            leaked_file(leak)
+            test_measure_reports_the_whole_tree_of_a_live_workload(tmp_path, capfd)
+        else:
+            measure = sampling.measure
+
+            def leaking_measure(*args, **kwargs):
+                result = measure(*args, **kwargs)
+                leaked_file(leak)
+                return result
+
+            monkeypatch.setattr(sampling, "measure", leaking_measure)
+            with pytest.raises(AssertionError) as failure:
+                test_measure_reports_the_whole_tree_of_a_live_workload(tmp_path, capfd)
+            message = str(failure.value)
+            assert "ResourceWarning" in message
+            assert "unclosed file" in message
+            assert str(leak) in message
+            assert __file__ in message
+    finally:
+        gc.collect()
+        if enabled:
+            gc.enable()
 
 
 def test_measure_counts_peak_storage_written_then_removed(tmp_path):

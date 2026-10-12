@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/startup_bench.py:scripts.swarm_v2.startup_bench.x_main__mutmut_51:1568469f53c6ade3d5be2ea866420e7baa24073511b1403213083503b8b26c82": {
+    "reader": "Standards reader for SV2-PRF-02",
+    "reason": "The refused dict is built from samples that attribute() already returns in sorted pod order, and json.dumps with sort_keys only reorders keys, so sorting is a no-op on the claim-refusal print."
+  }
+}

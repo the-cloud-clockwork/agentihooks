@@ -1,0 +1,847 @@
+{
+  "case": "T-SV2-PRF-02-A",
+  "evidence_class": "measured: Anton reads are read only kubectl and aws listings of nodes, events, Pods, autoscaling activities and EC2 instances, read 3 also the agent log of each swarm worker Pod, reduced by startup_bench reduce; the kind reads come from the Startup stages workflow named in their source, where a GitHub hosted runner pulled the published worker image from a local registry that the fixture stopped and restarted; attribution, report and claim are functions over those committed reads; the account release in case C runs the KUB-05 recovery over fakeredis and is mocked",
+  "input_sha256": {
+    "anton-read-1.json": "850d67d30fb7ec52e89277b2e467c6a9785fba87e56dcff3e2dcd94dc4f9695a",
+    "anton-read-2.json": "4ae6cdceb5cfe22509ba51da0efa04b6a57c8770189b0f2c35e2e6825741e7c4",
+    "anton-read-3.json": "d55c97ca370de23b73af9e80ecc9db06a3f3742855d8df56a646d4137728a2a8",
+    "kind-run-1.json": "9cdad8aecf741089cc741a5424792136f103c038982b54886cc0db5898fecc17",
+    "kind-run-2.json": "a2b14c83b40160e2de8be5c949f78c28e7ec73cc82a2e175ffa2959a091b1b16"
+  },
+  "observed": {
+    "anton-read-1.json": {
+      "read_at": "2026-10-11T14:57:15Z",
+      "source": "read only kubectl and aws read of anton-prod at 2026-10-11T14:57:15Z",
+      "startup_stage_p50_p95": {
+        "cold-node/uncached-image": {
+          "failures": {},
+          "from_zero": 1,
+          "image_init_ms": {
+            "n": 16,
+            "p50": 24523,
+            "p95": 31360
+          },
+          "node_provision_ms": {
+            "n": 16,
+            "p50": 55387,
+            "p95": 163058
+          },
+          "node_sources": {
+            "new_instance": 15,
+            "warm_pool": 1
+          },
+          "pending": 0,
+          "samples": 16,
+          "stages": {
+            "image": {
+              "n": 16,
+              "p50": 24523,
+              "p95": 31360
+            },
+            "instance": {
+              "n": 16,
+              "p50": 10000,
+              "p95": 12000
+            },
+            "join": {
+              "n": 16,
+              "p50": 36000,
+              "p95": 46000
+            },
+            "pod_start": {
+              "n": 16,
+              "p50": 62413,
+              "p95": 70485
+            },
+            "pull_retry": {
+              "n": 16,
+              "p50": 0,
+              "p95": 0
+            },
+            "schedule": {
+              "n": 16,
+              "p50": 1099,
+              "p95": 95855
+            },
+            "trigger": {
+              "n": 16,
+              "p50": 8303,
+              "p95": 26638
+            }
+          },
+          "started": 16,
+          "transient": {
+            "sandbox": 15
+          }
+        },
+        "warm-node/cached-image": {
+          "failures": {},
+          "from_zero": 0,
+          "image_init_ms": {
+            "n": 33,
+            "p50": 0,
+            "p95": 0
+          },
+          "node_provision_ms": null,
+          "node_sources": {
+            "existing": 33
+          },
+          "pending": 0,
+          "samples": 33,
+          "stages": {
+            "bootstrap": {
+              "n": 1,
+              "p50": 1000,
+              "p95": 1000
+            },
+            "image": {
+              "n": 33,
+              "p50": 0,
+              "p95": 0
+            },
+            "pod_start": {
+              "n": 33,
+              "p50": 679,
+              "p95": 1766
+            },
+            "pull_retry": {
+              "n": 33,
+              "p50": 0,
+              "p95": 0
+            },
+            "schedule": {
+              "n": 7,
+              "p50": 401,
+              "p95": 620
+            }
+          },
+          "started": 33,
+          "transient": {
+            "sandbox": 1
+          }
+        },
+        "warm-node/partial-image": {
+          "failures": {},
+          "from_zero": 0,
+          "image_init_ms": {
+            "n": 301,
+            "p50": 582,
+            "p95": 2660
+          },
+          "node_provision_ms": null,
+          "node_sources": {
+            "existing": 301
+          },
+          "pending": 0,
+          "samples": 301,
+          "stages": {
+            "bootstrap": {
+              "n": 9,
+              "p50": 0,
+              "p95": 1000
+            },
+            "image": {
+              "n": 301,
+              "p50": 582,
+              "p95": 2660
+            },
+            "pod_start": {
+              "n": 301,
+              "p50": 15002,
+              "p95": 45325
+            },
+            "pull_retry": {
+              "n": 301,
+              "p50": 0,
+              "p95": 0
+            },
+            "schedule": {
+              "n": 11,
+              "p50": 604,
+              "p95": 1107
+            }
+          },
+          "started": 301,
+          "transient": {
+            "sandbox": 7
+          }
+        },
+        "warm-node/uncached-image": {
+          "failures": {},
+          "from_zero": 0,
+          "image_init_ms": {
+            "n": 495,
+            "p50": 1003,
+            "p95": 6568
+          },
+          "node_provision_ms": null,
+          "node_sources": {
+            "existing": 495
+          },
+          "pending": 0,
+          "samples": 495,
+          "stages": {
+            "bootstrap": {
+              "n": 28,
+              "p50": 1000,
+              "p95": 93000
+            },
+            "image": {
+              "n": 495,
+              "p50": 1003,
+              "p95": 6568
+            },
+            "pod_start": {
+              "n": 495,
+              "p50": 382,
+              "p95": 13677
+            },
+            "pull_retry": {
+              "n": 495,
+              "p50": 0,
+              "p95": 0
+            },
+            "schedule": {
+              "n": 109,
+              "p50": 386,
+              "p95": 1013
+            }
+          },
+          "started": 495,
+          "transient": {
+            "sandbox": 26
+          }
+        },
+        "warm-node/unknown-image": {
+          "failures": {
+            "image_pull": 1
+          },
+          "from_zero": 0,
+          "image_init_ms": null,
+          "node_provision_ms": null,
+          "node_sources": {
+            "existing": 1
+          },
+          "pending": 0,
+          "samples": 1,
+          "stages": {},
+          "started": 0,
+          "transient": {}
+        }
+      }
+    },
+    "anton-read-2.json": {
+      "read_at": "2026-10-11T15:59:13Z",
+      "source": "read only kubectl and aws read of anton-prod, the next hour of events",
+      "startup_stage_p50_p95": {
+        "cold-node/uncached-image": {
+          "failures": {},
+          "from_zero": 1,
+          "image_init_ms": {
+            "n": 2,
+            "p50": 554,
+            "p95": 30034
+          },
+          "node_provision_ms": {
+            "n": 2,
+            "p50": 29922,
+            "p95": 150617
+          },
+          "node_sources": {
+            "new_instance": 1,
+            "warm_pool": 1
+          },
+          "pending": 0,
+          "samples": 2,
+          "stages": {
+            "bootstrap": {
+              "n": 1,
+              "p50": 0,
+              "p95": 0
+            },
+            "image": {
+              "n": 2,
+              "p50": 554,
+              "p95": 30034
+            },
+            "instance": {
+              "n": 2,
+              "p50": 2000,
+              "p95": 8000
+            },
+            "join": {
+              "n": 2,
+              "p50": 22000,
+              "p95": 56000
+            },
+            "pod_start": {
+              "n": 2,
+              "p50": 5514,
+              "p95": 65487
+            },
+            "pull_retry": {
+              "n": 2,
+              "p50": 0,
+              "p95": 0
+            },
+            "schedule": {
+              "n": 2,
+              "p50": 479,
+              "p95": 74932
+            },
+            "trigger": {
+              "n": 2,
+              "p50": 5443,
+              "p95": 11685
+            }
+          },
+          "started": 2,
+          "transient": {
+            "sandbox": 1
+          }
+        },
+        "warm-node/cached-image": {
+          "failures": {},
+          "from_zero": 0,
+          "image_init_ms": {
+            "n": 32,
+            "p50": 0,
+            "p95": 0
+          },
+          "node_provision_ms": null,
+          "node_sources": {
+            "existing": 32
+          },
+          "pending": 0,
+          "samples": 32,
+          "stages": {
+            "bootstrap": {
+              "n": 2,
+              "p50": 0,
+              "p95": 1000
+            },
+            "image": {
+              "n": 32,
+              "p50": 0,
+              "p95": 0
+            },
+            "pod_start": {
+              "n": 32,
+              "p50": 704,
+              "p95": 14431
+            },
+            "pull_retry": {
+              "n": 32,
+              "p50": 0,
+              "p95": 0
+            },
+            "schedule": {
+              "n": 5,
+              "p50": 323,
+              "p95": 569
+            }
+          },
+          "started": 32,
+          "transient": {
+            "sandbox": 2
+          }
+        },
+        "warm-node/partial-image": {
+          "failures": {},
+          "from_zero": 0,
+          "image_init_ms": {
+            "n": 96,
+            "p50": 600,
+            "p95": 3705
+          },
+          "node_provision_ms": null,
+          "node_sources": {
+            "existing": 96
+          },
+          "pending": 0,
+          "samples": 96,
+          "stages": {
+            "bootstrap": {
+              "n": 11,
+              "p50": 1000,
+              "p95": 1000
+            },
+            "image": {
+              "n": 96,
+              "p50": 600,
+              "p95": 3705
+            },
+            "pod_start": {
+              "n": 96,
+              "p50": 16014,
+              "p95": 40860
+            },
+            "pull_retry": {
+              "n": 96,
+              "p50": 0,
+              "p95": 0
+            },
+            "schedule": {
+              "n": 11,
+              "p50": 1363,
+              "p95": 94061
+            }
+          },
+          "started": 96,
+          "transient": {
+            "sandbox": 3
+          }
+        },
+        "warm-node/uncached-image": {
+          "failures": {},
+          "from_zero": 0,
+          "image_init_ms": {
+            "n": 465,
+            "p50": 997,
+            "p95": 18714
+          },
+          "node_provision_ms": null,
+          "node_sources": {
+            "existing": 465
+          },
+          "pending": 0,
+          "samples": 465,
+          "stages": {
+            "bootstrap": {
+              "n": 37,
+              "p50": 1000,
+              "p95": 114000
+            },
+            "image": {
+              "n": 465,
+              "p50": 997,
+              "p95": 18714
+            },
+            "pod_start": {
+              "n": 465,
+              "p50": 301,
+              "p95": 14421
+            },
+            "pull_retry": {
+              "n": 465,
+              "p50": 0,
+              "p95": 0
+            },
+            "schedule": {
+              "n": 130,
+              "p50": 339,
+              "p95": 21787
+            }
+          },
+          "started": 465,
+          "transient": {
+            "sandbox": 28
+          }
+        },
+        "warm-node/unknown-image": {
+          "failures": {
+            "image_pull": 1,
+            "sandbox": 1,
+            "unschedulable": 1
+          },
+          "from_zero": 0,
+          "image_init_ms": null,
+          "node_provision_ms": null,
+          "node_sources": {
+            "existing": 3
+          },
+          "pending": 0,
+          "samples": 3,
+          "stages": {},
+          "started": 0,
+          "transient": {}
+        }
+      }
+    },
+    "anton-read-3.json": {
+      "read_at": "2026-10-12T10:17:25Z",
+      "source": "read only kubectl and aws read of anton-prod at 2026-10-12T10:17:25Z with the agent log of every swarm worker Pod, one launched by the controller at 10:03:14Z",
+      "startup_stage_p50_p95": {
+        "warm-node/cached-image": {
+          "failures": {},
+          "from_zero": 0,
+          "image_init_ms": {
+            "n": 32,
+            "p50": 0,
+            "p95": 0
+          },
+          "node_provision_ms": null,
+          "node_sources": {
+            "existing": 32
+          },
+          "pending": 0,
+          "samples": 32,
+          "stages": {
+            "image": {
+              "n": 32,
+              "p50": 0,
+              "p95": 0
+            },
+            "pod_start": {
+              "n": 32,
+              "p50": 722,
+              "p95": 1681
+            },
+            "pull_retry": {
+              "n": 32,
+              "p50": 0,
+              "p95": 0
+            },
+            "schedule": {
+              "n": 5,
+              "p50": 434,
+              "p95": 533
+            }
+          },
+          "started": 32,
+          "transient": {}
+        },
+        "warm-node/partial-image": {
+          "failures": {},
+          "from_zero": 0,
+          "image_init_ms": {
+            "n": 142,
+            "p50": 618,
+            "p95": 2877
+          },
+          "node_provision_ms": null,
+          "node_sources": {
+            "existing": 142
+          },
+          "pending": 0,
+          "samples": 142,
+          "stages": {
+            "bootstrap": {
+              "n": 6,
+              "p50": 1000,
+              "p95": 1000
+            },
+            "image": {
+              "n": 142,
+              "p50": 618,
+              "p95": 2877
+            },
+            "pod_start": {
+              "n": 142,
+              "p50": 15718,
+              "p95": 39607
+            },
+            "pull_retry": {
+              "n": 142,
+              "p50": 0,
+              "p95": 0
+            },
+            "schedule": {
+              "n": 7,
+              "p50": 464,
+              "p95": 939
+            }
+          },
+          "started": 142,
+          "transient": {}
+        },
+        "warm-node/uncached-image": {
+          "failures": {},
+          "from_zero": 0,
+          "image_init_ms": {
+            "n": 445,
+            "p50": 1005,
+            "p95": 5382
+          },
+          "node_provision_ms": null,
+          "node_sources": {
+            "existing": 445
+          },
+          "pending": 0,
+          "samples": 445,
+          "stages": {
+            "bootstrap": {
+              "n": 3,
+              "p50": 6000,
+              "p95": 17000
+            },
+            "handshake": {
+              "n": 1,
+              "p50": 1085,
+              "p95": 1085
+            },
+            "image": {
+              "n": 445,
+              "p50": 1005,
+              "p95": 5382
+            },
+            "pod_start": {
+              "n": 445,
+              "p50": 421,
+              "p95": 2900
+            },
+            "pull_retry": {
+              "n": 445,
+              "p50": 0,
+              "p95": 0
+            },
+            "schedule": {
+              "n": 81,
+              "p50": 388,
+              "p95": 873
+            }
+          },
+          "started": 445,
+          "transient": {}
+        },
+        "warm-node/unknown-image": {
+          "failures": {
+            "registry_unauthorized": 1,
+            "unschedulable": 41
+          },
+          "from_zero": 0,
+          "image_init_ms": null,
+          "node_provision_ms": null,
+          "node_sources": {
+            "existing": 42
+          },
+          "pending": 0,
+          "samples": 42,
+          "stages": {},
+          "started": 0,
+          "transient": {}
+        }
+      }
+    },
+    "continuing_in_both_reads": [
+      "anton-prod/plane-0"
+    ],
+    "each_fixture": {
+      "anton-read-1.json": {
+        "cold_claimed": 1,
+        "cold_rows_split": true
+      },
+      "anton-read-2.json": {
+        "cold_claimed": 1,
+        "cold_rows_split": true
+      },
+      "anton-read-3.json": {
+        "accepted": "single observation, n 1, not a latency claim",
+        "handshake_ms": {
+          "agentihooks-swarm-workers/swarm-exe-4a990712d05642e3964f0b0374c7cd43": 1085
+        },
+        "handshake_undelivered": []
+      },
+      "kind-run-1.json": {
+        "all_started": true,
+        "scenarios": [
+          "warm-node/cached-image",
+          "warm-node/uncached-image"
+        ],
+        "uncached_pull_measured": true
+      },
+      "kind-run-2.json": {
+        "all_started": true,
+        "scenarios": [
+          "warm-node/cached-image",
+          "warm-node/uncached-image"
+        ],
+        "uncached_pull_measured": true
+      }
+    },
+    "independent_reads": true,
+    "kind-run-1.json": {
+      "read_at": "2026-10-11T15:19:06Z",
+      "source": "Startup stages run 38150380291 at ec5276308ced2ea1c182dbce76c6e81a239a9d48, both nodes behind a 90 second registry outage",
+      "startup_stage_p50_p95": {
+        "warm-node/cached-image": {
+          "failures": {},
+          "from_zero": 0,
+          "image_init_ms": {
+            "n": 11,
+            "p50": 0,
+            "p95": 0
+          },
+          "node_provision_ms": null,
+          "node_sources": {
+            "existing": 11
+          },
+          "pending": 0,
+          "samples": 11,
+          "stages": {
+            "bootstrap": {
+              "n": 11,
+              "p50": 0,
+              "p95": 1000
+            },
+            "image": {
+              "n": 11,
+              "p50": 0,
+              "p95": 0
+            },
+            "pod_start": {
+              "n": 11,
+              "p50": 2000,
+              "p95": 4000
+            },
+            "pull_retry": {
+              "n": 11,
+              "p50": 0,
+              "p95": 0
+            },
+            "schedule": {
+              "n": 11,
+              "p50": 0,
+              "p95": 11000
+            }
+          },
+          "started": 11,
+          "transient": {}
+        },
+        "warm-node/uncached-image": {
+          "failures": {},
+          "from_zero": 0,
+          "image_init_ms": {
+            "n": 4,
+            "p50": 11070,
+            "p95": 180000
+          },
+          "node_provision_ms": null,
+          "node_sources": {
+            "existing": 4
+          },
+          "pending": 0,
+          "samples": 4,
+          "stages": {
+            "bootstrap": {
+              "n": 4,
+              "p50": 1000,
+              "p95": 2000
+            },
+            "image": {
+              "n": 4,
+              "p50": 10144,
+              "p95": 11070
+            },
+            "pod_start": {
+              "n": 4,
+              "p50": 0,
+              "p95": 930
+            },
+            "pull_retry": {
+              "n": 4,
+              "p50": 0,
+              "p95": 169839
+            },
+            "schedule": {
+              "n": 4,
+              "p50": 0,
+              "p95": 3000
+            }
+          },
+          "started": 4,
+          "transient": {
+            "registry_unavailable": 2
+          }
+        }
+      }
+    },
+    "kind-run-2.json": {
+      "read_at": "2026-10-11T16:07:33Z",
+      "source": "Startup stages run 38153743721 at f49241dc520bf8eeb84cb0816a2880e43a85e787, both nodes behind a 90 second registry outage",
+      "startup_stage_p50_p95": {
+        "warm-node/cached-image": {
+          "failures": {},
+          "from_zero": 0,
+          "image_init_ms": {
+            "n": 11,
+            "p50": 0,
+            "p95": 0
+          },
+          "node_provision_ms": null,
+          "node_sources": {
+            "existing": 11
+          },
+          "pending": 0,
+          "samples": 11,
+          "stages": {
+            "bootstrap": {
+              "n": 11,
+              "p50": 0,
+              "p95": 1000
+            },
+            "image": {
+              "n": 11,
+              "p50": 0,
+              "p95": 0
+            },
+            "pod_start": {
+              "n": 11,
+              "p50": 2000,
+              "p95": 3000
+            },
+            "pull_retry": {
+              "n": 11,
+              "p50": 0,
+              "p95": 0
+            },
+            "schedule": {
+              "n": 11,
+              "p50": 0,
+              "p95": 10000
+            }
+          },
+          "started": 11,
+          "transient": {}
+        },
+        "warm-node/uncached-image": {
+          "failures": {},
+          "from_zero": 0,
+          "image_init_ms": {
+            "n": 4,
+            "p50": 11420,
+            "p95": 186000
+          },
+          "node_provision_ms": null,
+          "node_sources": {
+            "existing": 4
+          },
+          "pending": 0,
+          "samples": 4,
+          "stages": {
+            "bootstrap": {
+              "n": 4,
+              "p50": 0,
+              "p95": 1000
+            },
+            "image": {
+              "n": 4,
+              "p50": 11420,
+              "p95": 12557
+            },
+            "pod_start": {
+              "n": 4,
+              "p50": 698,
+              "p95": 2000
+            },
+            "pull_retry": {
+              "n": 4,
+              "p50": 0,
+              "p95": 173443
+            },
+            "schedule": {
+              "n": 4,
+              "p50": 0,
+              "p95": 1000
+            }
+          },
+          "started": 4,
+          "transient": {
+            "registry_unavailable": 2
+          }
+        }
+      }
+    }
+  },
+  "state": "passed"
+}

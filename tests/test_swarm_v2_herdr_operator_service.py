@@ -353,3 +353,123 @@ def test_without_a_jump_record_the_client_keeps_its_own_jump(tmp_path):
     running.run_pass()
 
     assert running.upkeep.terminal.home == client
+
+
+def test_a_pass_renews_the_saved_certificates_before_they_expire(tmp_path):
+    from scripts.swarm_v2.herdr.attach import ClientHome
+    from scripts.swarm_v2.herdr.endpoints import CERTIFICATE_SECONDS
+    from scripts.swarm_v2.herdr.operator_service import RENEW_SECONDS, Service
+    from scripts.swarm_v2.herdr.upkeep import Upkeep
+
+    assert RENEW_SECONDS == CERTIFICATE_SECONDS // 2
+    made, herdr, now = store(), Herdr(), [1000.0]
+    started = worker(made, "hive-a")
+    publish(made, "hive-a", *started)
+    terminal = cases.client_terminal(tmp_path / "client", herdr, FX["namespace"])
+    running = Service(Upkeep(terminal), lambda: made, lambda: now[0])
+    certificate = ClientHome(tmp_path / "client").certificate(
+        Endpoint(Scope("operator/operator", "hive-a", *started), FX["namespace"])
+    )
+    assert running.run_pass() is not None
+    first = certificate.read_text()
+
+    now[0] += RENEW_SECONDS - 1
+    assert running.run_pass() is None
+    assert certificate.read_text() == first
+
+    now[0] += 1
+    assert running.run_pass() is not None
+    assert certificate.read_text() != first
+    assert running.run_pass() is None
+
+
+def test_renewal_follows_the_wall_clock_the_certificates_expire_on(tmp_path):
+    import time
+
+    from scripts.swarm_v2.herdr.operator_service import Service
+    from scripts.swarm_v2.herdr.upkeep import Upkeep
+
+    terminal = cases.client_terminal(tmp_path / "client", Herdr(), FX["namespace"])
+
+    assert Service(Upkeep(terminal), store).clock is time.time
+
+
+def test_a_renewal_pass_renews_the_jump_certificate_too(tmp_path):
+    from scripts.swarm_v2.herdr import operator_setup
+    from scripts.swarm_v2.herdr.attach import ClientHome, Jump
+    from scripts.swarm_v2.herdr.operator_service import RENEW_SECONDS
+    from scripts.swarm_v2.kubernetes import jump
+
+    made, now = store(), [1000.0]
+    publish(made, "hive-a", *worker(made, "hive-a"))
+    jump.record(made, Jump("swarm.example", 2223, JUMP_KEY))
+    running = operator_setup.service(
+        {}, ClientHome(tmp_path / "client"), placed(tmp_path), herdr_run(Herdr()), lambda: made
+    )
+    running.clock = lambda: now[0]
+    assert running.run_pass() is not None
+    certificate = running.upkeep.terminal.home.jump_certificate
+    first = certificate.read_text()
+
+    now[0] += RENEW_SECONDS
+    assert running.run_pass() is not None
+
+    assert certificate.read_text() != first
+
+
+def test_no_certificate_is_renewed_for_a_worker_that_ended(tmp_path):
+    from scripts.swarm_v2.herdr.attach import ClientHome
+    from scripts.swarm_v2.herdr.operator_service import RENEW_SECONDS, Service
+    from scripts.swarm_v2.herdr.upkeep import Upkeep
+
+    made, herdr, now = store(), Herdr(), [1000.0]
+    started = worker(made, "hive-a")
+    publish(made, "hive-a", *started)
+    terminal = cases.client_terminal(tmp_path / "client", herdr, FX["namespace"])
+    running = Service(Upkeep(terminal), lambda: made, lambda: now[0])
+    certificate = ClientHome(tmp_path / "client").certificate(
+        Endpoint(Scope("operator/operator", "hive-a", *started), FX["namespace"])
+    )
+    running.run_pass()
+    end(made, "hive-a", started[0])
+    running.run_pass()
+    left = certificate.read_text() if certificate.exists() else None
+
+    now[0] += RENEW_SECONDS
+    running.run_pass()
+
+    assert (certificate.read_text() if certificate.exists() else None) == left
+    assert name("hive-a", *started) not in [machine["label"] for machine in herdr.machines]
+
+
+def test_the_service_dials_the_placed_hive_redis_url(tmp_path, monkeypatch):
+    from scripts.swarm_v2.herdr import operator_setup, publications
+    from scripts.swarm_v2.herdr.attach import ClientHome
+
+    made, herdr, dialled = store(), Herdr(), []
+    root = placed(tmp_path)
+    url_file = root / "swarm-terminal" / "hive-redis.url"
+    url_file.write_text("rediss://placed.example:6379/0\n")
+    env = root / "swarm-terminal" / "terminal.env"
+    env.write_text(env.read_text() + f"AGENTIHOOKS_HIVE_REDIS_URL_FILE={url_file}\n")
+    monkeypatch.setattr(publications, "connect", lambda environ: dialled.append(dict(environ)) or made)
+
+    operator_setup.service({"A": "b"}, ClientHome(tmp_path / "client"), root, herdr_run(herdr)).run_pass()
+
+    assert dialled == [{"A": "b", "AGENTIHOOKS_HIVE_REDIS_URL": "rediss://placed.example:6379/0"}]
+
+
+def test_an_explicit_hive_redis_url_wins_over_the_placed_one(tmp_path, monkeypatch):
+    from scripts.swarm_v2.herdr import operator_setup, publications
+    from scripts.swarm_v2.herdr.attach import ClientHome
+
+    made, dialled = store(), []
+    root = placed(tmp_path)
+    env = root / "swarm-terminal" / "terminal.env"
+    env.write_text(env.read_text() + f"AGENTIHOOKS_HIVE_REDIS_URL_FILE={root / 'missing.url'}\n")
+    monkeypatch.setattr(publications, "connect", lambda environ: dialled.append(dict(environ)) or made)
+    environ = {"AGENTIHOOKS_HIVE_REDIS_URL": "rediss://own.example:6379/0"}
+
+    operator_setup.service(environ, ClientHome(tmp_path / "client"), root, herdr_run(Herdr())).run_pass()
+
+    assert dialled == [environ]

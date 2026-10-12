@@ -1,0 +1,39 @@
+{
+  "case": "T-SV2-PRF-02-B",
+  "evidence_class": "measured: Anton reads are read only kubectl and aws listings of nodes, events, Pods, autoscaling activities and EC2 instances, read 3 also the agent log of each swarm worker Pod, reduced by startup_bench reduce; the kind reads come from the Startup stages workflow named in their source, where a GitHub hosted runner pulled the published worker image from a local registry that the fixture stopped and restarted; attribution, report and claim are functions over those committed reads; the account release in case C runs the KUB-05 recovery over fakeredis and is mocked",
+  "input_sha256": {
+    "anton-read-1.json": "850d67d30fb7ec52e89277b2e467c6a9785fba87e56dcff3e2dcd94dc4f9695a",
+    "anton-read-2.json": "4ae6cdceb5cfe22509ba51da0efa04b6a57c8770189b0f2c35e2e6825741e7c4",
+    "anton-read-3.json": "d55c97ca370de23b73af9e80ecc9db06a3f3742855d8df56a646d4137728a2a8",
+    "kind-run-1.json": "9cdad8aecf741089cc741a5424792136f103c038982b54886cc0db5898fecc17",
+    "kind-run-2.json": "a2b14c83b40160e2de8be5c949f78c28e7ec73cc82a2e175ffa2959a091b1b16"
+  },
+  "observed": {
+    "cached_image": {
+      "count": 11,
+      "reasons": [
+        "the Pod landed on a node that existed before it waited"
+      ],
+      "refused": "a warm sample cannot be advertised as cold scale from zero"
+    },
+    "cli_exit_code": 2,
+    "cli_refusal": "a warm sample cannot be advertised as cold scale from zero",
+    "cold_not_from_zero": {
+      "count": 15,
+      "reasons": [
+        "the instance came from a warm pool",
+        "the scale up did not start from an empty pool"
+      ],
+      "refused": "a warm sample cannot be advertised as cold scale from zero"
+    },
+    "read_unchanged": true,
+    "warm_node": {
+      "count": 50,
+      "reasons": [
+        "the Pod landed on a node that existed before it waited"
+      ],
+      "refused": "a warm sample cannot be advertised as cold scale from zero"
+    }
+  },
+  "state": "passed"
+}

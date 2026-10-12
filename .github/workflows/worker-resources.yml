@@ -6,7 +6,7 @@ on:
   push:
     branches-ignore: [main, dev, 'diffcheck/**']
     paths:
-      - tests/performance/swarm_v2/**
+      - tests/performance/swarm_v2/workloads/**
       - scripts/swarm_v2/resource_*.py
       - .github/workflows/worker-resources.yml
 

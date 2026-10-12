@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/startup_stages.py:scripts.swarm_v2.startup_stages.x_reduce__mutmut_34:77db269fbb52a99bc2d331642675fe92748099a8b38a8b29d7d522afc5492a51": {
+    "reader": "Standards reader for SV2-PRF-02",
+    "reason": "rsplit with no maxsplit and then [-1] yields the substring after the final slash, the same as rsplit with maxsplit 1 and [-1], for every string including the empty providerID."
+  }
+}

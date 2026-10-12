@@ -615,7 +615,7 @@
         ],
         "plan": []
       },
-      "reason": "accounts are closed, unknown; Claude has 22 free seats and Codex has 12 free seats"
+      "reason": "eng, ci and plan have no more ready tasks; accounts are closed, unknown; Claude has 22 free seats and Codex has 12 free seats"
     },
     "lane_agent": {
       "accounts": [

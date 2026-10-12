@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/startup_bench.py:scripts.swarm_v2.startup_bench.x__write__mutmut_10:6a2b8aa1c07ccf9522222733dc239081553c9b025c1167a80f3b6cfc6730bc43": {
+    "reader": "Standards reader for SV2-PRF-02",
+    "reason": "Same as _write mutmut_8: the JSON payload is ASCII-only because ensure_ascii is on, so dropping encoding produces identical bytes under the UTF-8 CI and worker locale."
+  }
+}
