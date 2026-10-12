@@ -352,6 +352,7 @@ def cmd_tick(store, args):
     if why := timer.installed_refusal():
         raise SwarmError(f"the tick refused to run: {why}")
     operator_env.fill(os.environ)
+    operator_env.classifier(os.environ)
     if os.environ.get("AGENTIHOOKS_CONTROLLER_TICK_SECONDS"):
         raise SwarmError(
             "the tick refused to run: AGENTIHOOKS_CONTROLLER_TICK_SECONDS is for controller installs, "

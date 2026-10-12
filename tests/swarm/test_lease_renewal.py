@@ -292,6 +292,7 @@ def test_the_controller_sleeps_one_configured_tick_between_passes(store, monkeyp
 
     monkeypatch.setenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", "4")
     monkeypatch.setattr(scripts.operator_env, "fill", lambda environ: [])
+    monkeypatch.setattr(scripts.operator_env, "classifier", lambda environ: [])
     monkeypatch.setattr(controller, "connect", lambda: store)
     monkeypatch.setattr(controller, "run_once", lambda saved: {})
     monkeypatch.setattr(controller.time, "sleep", sleep)

@@ -507,6 +507,7 @@ def test_the_controller_loop_hosts_registration_and_heartbeats(tmp_path, monkeyp
     monkeypatch.setattr(_cs(), "host", lambda *args: hosted.append(real_host(*args)) or hosted[0])
     monkeypatch.setattr(loop, "connect", lambda: store)
     monkeypatch.setattr("scripts.operator_env.fill", lambda env: None)
+    monkeypatch.setattr("scripts.operator_env.classifier", lambda env: [])
 
     def tick(given):
         service = hosted[0]
@@ -629,6 +630,7 @@ def test_the_controller_loop_runs_as_before_without_an_api_port(tmp_path, monkey
     monkeypatch.delenv(_cs().PORT_ENV, raising=False)
     monkeypatch.setattr(loop, "connect", lambda: store)
     monkeypatch.setattr("scripts.operator_env.fill", lambda env: None)
+    monkeypatch.setattr("scripts.operator_env.classifier", lambda env: [])
     ticked = []
     monkeypatch.setattr(loop, "run_once", lambda given: ticked.append(given) or {})
 
@@ -709,6 +711,7 @@ def test_the_controller_loop_reports_a_hosting_refusal(monkeypatch, capsys):
     monkeypatch.setattr(_cs(), "host", refuse)
     monkeypatch.setattr(loop, "connect", _store)
     monkeypatch.setattr("scripts.operator_env.fill", lambda env: None)
+    monkeypatch.setattr("scripts.operator_env.classifier", lambda env: [])
 
     assert loop.main(["run", "--once"]) == 1
 

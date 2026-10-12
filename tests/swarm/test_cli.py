@@ -2373,6 +2373,7 @@ def _tick_all(monkeypatch, run_tick, slugs, tick_seconds=0.05):
     filled, swept = [], []
     monkeypatch.setattr(timer, "installed_refusal", lambda: "")
     monkeypatch.setattr(operator_env, "fill", lambda environ: filled.append(environ))
+    monkeypatch.setattr(operator_env, "classifier", lambda environ: [])
     monkeypatch.setattr(cli, "now_ms", lambda: 77)
     monkeypatch.setattr(herdr_gc, "run", lambda environ, now, apply: swept.append((environ, now, apply)) or ["swept"])
     counts = {}
@@ -2402,6 +2403,7 @@ def test_the_host_tick_refuses_a_controller_tick_setting(monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", "10")
     monkeypatch.setattr(timer, "installed_refusal", lambda: "")
     monkeypatch.setattr(operator_env, "fill", lambda environ: [])
+    monkeypatch.setattr(operator_env, "classifier", lambda environ: [])
     monkeypatch.setattr(cli, "run_tick", lambda store, slug: ticked.append(slug))
     with pytest.raises(SwarmError) as error:
         cli.cmd_tick(types.SimpleNamespace(slugs=lambda: ["sw"]), None)

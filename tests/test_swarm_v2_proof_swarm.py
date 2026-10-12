@@ -327,6 +327,7 @@ def test_the_controller_runs_a_pass_at_start_and_after_each_tick(store, monkeypa
 
     order = []
     monkeypatch.setattr(operator_env, "fill", lambda environ: None)
+    monkeypatch.setattr(operator_env, "classifier", lambda environ: [])
     monkeypatch.setattr(commands, "hive_id", lambda: "hive-fixture")
     monkeypatch.setattr(controller, "connect", lambda: store)
     monkeypatch.setattr(proof_swarm, "run", lambda environ, given, *lease: order.append(("proof", given, *lease)))
@@ -345,6 +346,7 @@ def test_every_pass_after_the_service_starts_holds_its_controller_lease_check(st
     service = SimpleNamespace(controller=SimpleNamespace(require=lambda: None), tick=lambda: None, stop=lambda: None)
     passes = []
     monkeypatch.setattr(operator_env, "fill", lambda environ: None)
+    monkeypatch.setattr(operator_env, "classifier", lambda environ: [])
     monkeypatch.setattr(commands, "hive_id", lambda: "hive-fixture")
     monkeypatch.setattr(controller, "connect", lambda: store)
     monkeypatch.setattr(proof_swarm, "run", lambda environ, given, *lease: passes.append(lease))
