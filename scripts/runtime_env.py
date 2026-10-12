@@ -11,7 +11,7 @@ def seed(seeder: Callable[[], list[str]], destination: Path, settings: dict) -> 
     added = seeder()
     environment = settings.get("env", settings.get("_agentihooks", {}).get("env", {}))
     endpoint = environment.get(KEY, "")
-    original = destination.read_text()
+    original = destination.read_text() if destination.exists() else ""
     body = original
     if START in body:
         before, rest = body.split(START, 1)
