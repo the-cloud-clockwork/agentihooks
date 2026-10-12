@@ -263,3 +263,15 @@ def test_object_content_address_is_accepted(storage):
     key = "swarm/task/objects/" + hashlib.sha256(data).hexdigest()
     assert request(handler, "write", key=key, data=base64.b64encode(data).decode()) == (200, {})
     assert backend.read(key, 0, len(data)) == data
+
+
+def test_move_target_requires_a_complete_object_key(storage):
+    handler, backend, _ = storage
+    data = b"target"
+    staging = "swarm/task/staging/execution/target"
+    backend.write(staging, data)
+    assert request(handler, "move", key=staging, target="swarm/task/objects") == (
+        403,
+        refusal("forbidden_scope", "artifact key names no object"),
+    )
+    assert backend.read(staging, 0, len(data)) == data

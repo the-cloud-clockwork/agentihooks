@@ -74,6 +74,7 @@ def test_default_and_custom_controller_prefixes(monkeypatch):
         ({}, "checkpoints/swarm/task/value"),
         ({"AGENTIHOOKS_CHECKPOINT_PREFIX": "private"}, "private/swarm/task/value"),
         ({"AGENTIHOOKS_CHECKPOINT_PREFIX": "private/"}, "private/swarm/task/value"),
+        ({"AGENTIHOOKS_CHECKPOINT_PREFIX": "prefixX"}, "prefixX/swarm/task/value"),
     ]:
         backend = remote.controller_backend({"AGENTIHOOKS_CHECKPOINT_BUCKET": "bucket", **settings})
         backend.write("swarm/task/value", b"value")
