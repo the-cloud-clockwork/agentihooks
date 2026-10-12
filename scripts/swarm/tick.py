@@ -124,6 +124,8 @@ class Placed:
     overlays: list = field(default_factory=list)
     launch_timings: dict = field(default_factory=dict)
     route_kind: str = "subscription"
+    transport: str = ""
+    execution: AgentRecord | None = None
 
 
 class Ledger(Protocol):
@@ -842,6 +844,9 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             store.seats.occupy(seat, name, now_ms)
             task["transfer"] = transfers.attach(store, slug, record)
             placed = runtime.spawn(config, lane, name, primed(store, slug, seat, task))
+            from scripts.swarm_v2.runtime import codex
+
+            launched = codex.admit_legacy(store, slug, placed_record(record, placed))
         except Exception as exc:
             _release_admission(slug, runtime, task)
             _record_spawn_failure(slug, store, record, exc, now_ms)
@@ -851,7 +856,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             continue
         store.count_claim(slug, task["id"])
         store.record_launch(slug, replace(record, pane_id=placed.pane_id), "started")
-        store.put_agent(slug, placed_record(record, placed))
+        store.put_agent(slug, launched)
         launch_check.begin(store, slug, record, now_ms)
         store.count_spawn(slug, placed.harness)
         _spend_host(store, name, now_ms)
@@ -962,7 +967,15 @@ def primed(store, slug, seat, task):
 
     memory = {"recaps": store.memory.recaps(seat), "learned": store.memory.learned(seat)}
     envelope = store.handoff_envelope(slug, task["id"])
-    task = {**task, "seat": seat, "culture": store.culture.get(slug), "handoff_envelope": envelope, **memory}
+    previous = store.execution_occupants(slug).get(seat)
+    task = {
+        **task,
+        "seat": seat,
+        "previous_execution_id": previous.execution_id if previous else "",
+        "culture": store.culture.get(slug),
+        "handoff_envelope": envelope,
+        **memory,
+    }
     saved = store.redis.hget(store.key(slug, "launch-assignments"), task["id"])
     if saved:
         task["launch_assignment"] = json.loads(saved)
@@ -976,6 +989,7 @@ def _free_seat(slug, lane, taken, preferred):
 
 
 def placed_record(record, placed):
+    record = placed.execution or record
     return replace(
         record,
         pane_id=placed.pane_id,
@@ -993,6 +1007,7 @@ def placed_record(record, placed):
         overlays=placed.overlays,
         launch_timings=placed.launch_timings,
         route_kind=placed.route_kind,
+        transport=placed.transport or record.transport,
         state="working",
     )
 
@@ -1077,7 +1092,9 @@ def _master(slug, config, store, runtime, now_ms):
             master_start.save(store, slug, {**failed, "name": "", "retry": True})
         return [f"master spawn failed: {exc}"]
     affinity.placed(store, slug, placed.harness)
-    record = placed_record(record, placed)
+    from scripts.swarm_v2.runtime import codex
+
+    record = codex.admit_legacy(store, slug, placed_record(record, placed))
     reported = runtime.reported(record)
     store.put_agent(slug, replace(record, state="working" if reported else "starting"))
     launch_check.begin(store, slug, record, now_ms)

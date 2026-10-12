@@ -1,3 +1,5 @@
+import json
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -5,6 +7,7 @@ import pytest
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
+from scripts.swarm_v2.runtime import codex
 from scripts.swarm_v2.runtime.routed import routed
 from tests.swarm.profile_fixture import validated
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
@@ -13,10 +16,11 @@ pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 @pytest.mark.parametrize("transport,harness", [("legacy", "codex"), ("app_server", "codex"), ("app_server", "claude")])
-def test_tick_selects_and_records_codex_transport(tmp_path, transport, harness):
+def test_tick_selects_and_records_codex_transport(tmp_path, monkeypatch, transport, harness):
     import fakeredis
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    monkeypatch.setattr(codex, "connect", lambda: store)
     config = SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, codex_inbox_transport=transport)
     store.create(config)
     ledger = FakeLedger([{"id": "t1", "title": "Transport", "lane": "eng"}])
@@ -49,7 +53,9 @@ def test_tick_selects_and_records_codex_transport(tmp_path, transport, harness):
         else:
             assert "--codex-transport" not in argv
         output = f"status=started\nroute_status=routed\npane_id=w1:p2\nagent={harness}\n"
-        return SimpleNamespace(returncode=0, stdout=validated(argv, output), stderr="")
+        return SimpleNamespace(
+            returncode=0, stdout=validated(argv, output).replace('"pid": 123', f'"pid": {os.getpid()}'), stderr=""
+        )
 
     herdr = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: (harness, "open"))
     fake.spawn = lambda config, lane, name, task: (
@@ -65,6 +71,8 @@ def test_tick_selects_and_records_codex_transport(tmp_path, transport, harness):
         assert execution.transport == transport
         assert execution.pane_id == "w1:p2"
         assert execution.state == "working"
+        projection = json.loads(store.redis.hget(store.key("sw", "agents"), worker.name))
+        assert "transport" not in projection
         assert execution.name == worker.name
         assert execution.seat == worker.seat
         if admitted:
