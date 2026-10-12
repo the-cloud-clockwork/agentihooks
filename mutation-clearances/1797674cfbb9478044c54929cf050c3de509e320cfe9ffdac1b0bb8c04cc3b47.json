@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/bottleneck_status.py:scripts.swarm.bottleneck_status.x_trend__mutmut_28:ca080957617088c31a0efccca4a1fdd2c9b39fbb81ed22502f002e4809cba157": {
+    "reader": "/root/standards",
+    "reason": "The equality branch already returns steady. Remaining numeric comparisons make greater than and greater than or equal produce the same output."
+  }
+}
