@@ -520,7 +520,25 @@ def redis_client(environ=None):
 
     import hooks.config  # noqa: F401  loads ~/.agentihooks/*.env, where REDIS_URL lives
 
-    url = redis_url(os.environ if environ is None else environ)
+    environ = os.environ if environ is None else environ
+    url = redis_url(environ)
+    try:
+        return _pinged(redis, url)
+    except redis.AuthenticationError:
+        if url != environ.get("AGENTIHOOKS_HIVE_REDIS_URL"):
+            raise
+    from scripts.hive import auth, cli
+
+    try:
+        cli.refresh_env(environ)
+    except auth.HiveError as exc:
+        raise redis.AuthenticationError(
+            f"the hive Redis credential was refused and the hive refused a refresh ({exc})"
+        ) from exc
+    return _pinged(redis, environ["AGENTIHOOKS_HIVE_REDIS_URL"])
+
+
+def _pinged(redis, url):
     client = redis.Redis.from_url(url, decode_responses=True, socket_connect_timeout=3, socket_timeout=10)
     client.ping()
     return client
