@@ -1,6 +1,6 @@
 import json
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 from scripts.swarm import bottleneck, metrics_outbox, stages
@@ -47,11 +47,17 @@ def _totals(found: dict) -> dict:
     return totals
 
 
-def report(rows: dict, tasks: list, now_ms: int, window_ms: int = bottleneck.WINDOW_MS) -> dict:
-    current = stages.report(rows, tasks, now_ms, window_ms)
-    previous = _totals(stages.report(rows, tasks, now_ms - window_ms, window_ms))
+def report(
+    rows: dict,
+    tasks: list,
+    now_ms: int,
+    window_ms: int = bottleneck.WINDOW_MS,
+    ready: Callable[[dict], bool] | None = None,
+) -> dict:
+    current = stages.report(rows, tasks, now_ms, window_ms, ready)
+    previous = _totals(stages.report(rows, tasks, now_ms - window_ms, window_ms, ready))
     totals = _totals(current)
-    episodes = stages.observations(rows, tasks, now_ms, window_ms)
+    episodes = stages.observations(rows, tasks, now_ms, window_ms, ready)
     ranked = []
     for stage in totals.keys() | previous.keys():
         row = (
@@ -99,12 +105,13 @@ def record(
     now_ms: int,
     tasks: list,
     environ: Mapping[str, str] = os.environ,
+    ready: Callable[[dict], bool] | None = None,
 ) -> dict:
     config = settings(environ)
     count = store.redis.incr(store.key(slug, "stage-detector-ticks"))
     if (count - 1) % config.ticks:
         return stages.read(store, slug)
-    found = report(stages.read_rows(box, slug, now_ms), tasks, now_ms, config.window_ms)
+    found = report(stages.read_rows(box, slug, now_ms), tasks, now_ms, config.window_ms, ready)
     update_findings(store, slug, found, now_ms)
     box.append(stages.TABLE, stages.stage_rows(slug, found))
     store.redis.set(store.key(slug, stages.KEY), json.dumps(found))
