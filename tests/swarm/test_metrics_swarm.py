@@ -229,6 +229,27 @@ def test_unknown_claim_duration_is_not_invented():
     assert row["claim_to_merge_seconds"] == -1.0
 
 
+def test_claim_to_merge_counts_a_task_once_from_first_claim_to_final_merge():
+    claims = [event("task claimed", NOW), event("task claimed", NOW + 10_000)]
+    first, final = TASK["pr_url"], "https://github.com/org/repo/pull/2"
+    merged = {
+        first: SimpleNamespace(state="MERGED", merged_at=NOW + 5_000),
+        final: SimpleNamespace(state="MERGED", merged_at=NOW + 20_000),
+    }
+    samples = []
+    for state in ("pr", "claimed", "open", "blocked"):
+        task = {**TASK, "state": state}
+        rows = metrics_swarm.delivery_rows(SLUG, {"tasks": [task], "_meta": {"events": claims}}, [AGENT], merged)
+        samples += [row for row in rows if row["kind"] == "merge"]
+    assert samples == []
+    done = {**TASK, "state": "done", "pr_url": final}
+    rows = metrics_swarm.delivery_rows(SLUG, {"tasks": [done], "_meta": {"events": claims}}, [AGENT], merged)
+    samples = [row for row in rows if row["kind"] == "merge"]
+    assert [(row["pull_request"], row["claim_to_merge_seconds"], row["ts_ms"]) for row in samples] == [
+        (final, 20.0, NOW + 20_000)
+    ]
+
+
 def test_record_pass_appends_through_outbox_and_deduplicates(tmp_path, monkeypatch):
     import fakeredis
 
