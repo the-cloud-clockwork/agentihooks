@@ -725,6 +725,7 @@ def test_checkpoint_window_closes_at_deadline(supervisor, monkeypatch):
     assert supervisor.drain("termination")["checkpoint_status"] == "incomplete"
     checkpoint.assert_not_called()
 
+
 def test_remote_validation_cannot_extend_the_checkpoint_deadline(supervisor, monkeypatch):
     import threading
 
