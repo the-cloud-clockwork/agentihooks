@@ -191,19 +191,17 @@ def _is_codex_session(pid: int, proc: Path) -> bool:
 def execution_key(endpoint: str) -> str:
     if not endpoint.startswith(UNIX):
         return ""
-    path = Path(endpoint.removeprefix(UNIX))
+    path = Path(endpoint)
     return path.parent.name if path.name == MANAGED_SOCKET and path.parent.parent.name == MANAGED_RUNTIME else ""
-
-
-def _listen(argv: list[str]) -> str:
-    return argv[argv.index(LISTEN) + 1] if LISTEN in argv[:-1] else ""
 
 
 def _managed_execution(pid: int, proc: Path) -> str:
     if not _is_codex(pid, proc):
         return ""
     argv = _cmdline(pid, proc)
-    return execution_key(_listen(argv)) if _codex_positionals(argv)[:1] == ["app-server"] else ""
+    if _codex_positionals(argv)[:1] != ["app-server"] or LISTEN not in argv[:-1]:
+        return ""
+    return execution_key(argv[argv.index(LISTEN) + 1])
 
 
 def _codex_processes(proc: Path) -> tuple[dict[int, str], dict[tuple[str, str], int]]:
