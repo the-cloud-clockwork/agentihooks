@@ -216,4 +216,24 @@ def test_the_dispatcher_queue_puts_an_urgent_fix_task_first_and_ignores_its_lowe
     ]
     stamps = {f"tasks/{task_id}/rank": {"by": "dispatcher"} for task_id in ("h1", "r1")}
     doc = {"overview": "o", "tasks": tasks, "phases": [{"id": "p1", "depends_on": []}], "_meta": {"stamps": stamps}}
-    assert dispatcher.queue(doc, None) == ["r1", "a1", "h1"]
+    assert dispatcher.queue(doc) == ["r1", "a1", "h1"]
+
+
+def detected(store, stage, seconds=7200.0, at=NOW):
+    reading = {"stage": stage, "seconds": seconds, "previous_seconds": 0.0, "trend": "rising", "episodes": ["d1"]}
+    standing.update_detector(store.redis, SLUG, reading, at)
+
+
+def test_a_stage_the_detector_only_ranks_runs_no_remedy(store, home, shipped):
+    detected(store, "claim_wait")
+    detected(store, "merge_queue")
+    assert run(store) == []
+    assert caps(store) == (2, 2) and master_items(store) == [] and recorded(store) == {}
+
+
+def test_a_ci_overrun_proposal_names_its_own_unit(store, home, shipped):
+    reading = standing.Reading(22.5, 15.0, "minutes from push to Gate Required", "run1")
+    standing.fire(store.redis, SLUG, "ci_overrun", reading, NOW)
+    (text,) = run(store)
+    assert "ci overrun at 22.5 minutes from push to Gate Required, over its 15 threshold" in text
+    assert len(master_items(store)) == 1
