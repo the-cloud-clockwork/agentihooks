@@ -292,16 +292,16 @@ def test_a_repeat_is_refused_whatever_tasks_landed_since_the_list_was_read(live,
 
 
 class Inner:
-    def __init__(self):
-        self.applied = []
+    def __init__(self, accepted=True):
+        self.applied, self.accepted = [], accepted
 
     def apply(self, doc, op, ctx, apply_op):
         self.applied.append((op["id"], apply_op))
-        return True
+        return self.accepted
 
 
-def gate_for(screen):
-    return ledger_task_duplicates.Gate(screen, Inner())
+def gate_for(screen, accepted=True):
+    return ledger_task_duplicates.Gate(screen, Inner(accepted))
 
 
 def test_the_screen_remembers_the_tasks_it_compared_and_the_adds_it_screened(monkeypatch):
@@ -317,13 +317,11 @@ def test_the_screen_remembers_the_tasks_it_compared_and_the_adds_it_screened(mon
 def test_an_add_names_the_tasks_that_landed_while_its_check_ran():
     gate = gate_for(ledger_task_duplicates.Screen(seen=frozenset({"t1", "t9"})))
     add = task("t9", REPEAT, "p1")
+    add_id = add["id"]
     doc = {"tasks": [{"id": "t1"}, {"id": "t4"}, {"id": "t5"}]}
     assert gate.apply(doc, add, None, "apply") is True
-    assert gate.screen.warnings == {
-        add[
-            "id"
-        ]: "the duplicate check did not compare task t9 with t4, t5, added while it ran, so check them for repeats"
-    }
+    landed = "the duplicate check did not compare task t9 with t4, t5, added while it ran, so check them for repeats"
+    assert gate.screen.warnings == {add_id: landed}
     assert gate.inner.applied == [(add["id"], "apply")]
 
 
@@ -344,10 +342,18 @@ def test_an_add_is_not_flagged_when_nothing_landed_it_was_not_screened_or_alread
     assert gate.inner.applied == [(add["id"], "apply")]
 
 
+def test_an_add_the_locked_apply_refuses_is_not_flagged():
+    gate = gate_for(ledger_task_duplicates.Screen(seen=frozenset({"t9"})), accepted=False)
+    add = task("t9", REPEAT, "p1", depends_on=["t404"])
+    assert gate.apply({"tasks": [{"id": "t4"}]}, add, None, "apply") is False
+    assert gate.screen.warnings == {}
+    assert gate.inner.applied == [(add["id"], "apply")]
+
+
 def test_a_refused_add_is_not_flagged_and_gets_the_refusal():
     add = task("t9", REPEAT, "p1")
-    gate = gate_for(ledger_task_duplicates.Screen(refused={add["id"]: "repeat"}, seen=frozenset({"t9"})))
-    gate.apply({"tasks": [{"id": "t4"}]}, add, None, "apply")
+    gate = gate_for(ledger_task_duplicates.Screen(refused={add["id"]: "repeat"}, seen=frozenset({"t9"})), False)
+    assert gate.apply({"tasks": [{"id": "t4"}]}, add, None, "apply") is False
     assert gate.screen.warnings == {}
     (applied_id, refuse), ctx = gate.inner.applied[0], SimpleNamespace(refused=[])
     assert applied_id == add["id"] and refuse({}, add, ctx) is False and ctx.refused == ["repeat"]

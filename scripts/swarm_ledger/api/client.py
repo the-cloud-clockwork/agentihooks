@@ -99,15 +99,14 @@ class ResourceClient:
                     raise ValueError(f"one batch pins {path} to two revisions: {guards[path]} and {revision}")
         operation_id = operations[0].setdefault("operation_id", uuid.uuid4().hex)
         for operation in operations:
+            if operation["op"] not in schemas.UNGUARDED:
+                path = schemas.target(operation)
+                if path not in guards:
+                    guards[path] = self.request(slug, path)["revision"]
+                operation.setdefault("expected_revision", guards[path])
             ops.append(
                 {key: value for key, value in operation.items() if key not in ("expected_revision", "operation_id")}
             )
-            if operation["op"] in schemas.UNGUARDED:
-                continue
-            path = schemas.target(operation)
-            if path not in guards:
-                guards[path] = self.request(slug, path)["revision"]
-            operation.setdefault("expected_revision", guards[path])
         return self.request(slug, "operations", {"operation_id": operation_id, "ops": ops, "guards": guards})
 
 

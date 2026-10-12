@@ -40,9 +40,10 @@ class Gate:
 
     def apply(self, doc: dict, op: dict, ctx: object, apply_op: object) -> bool:
         reason = self.screen.refused.get(op["id"])
-        if not reason and op["id"] not in self.screen.warnings and checked(op):
+        accepted = self.inner.apply(doc, op, ctx, _refuse(reason) if reason else apply_op)
+        if accepted and op["id"] not in self.screen.warnings and checked(op):
             self.flag_concurrent(doc, op)
-        return self.inner.apply(doc, op, ctx, _refuse(reason) if reason else apply_op)
+        return accepted
 
     def flag_concurrent(self, doc: dict, op: dict) -> None:
         landed = [t["id"] for t in doc.get("tasks", []) if t["id"] not in self.screen.seen]
