@@ -147,6 +147,10 @@ def _merged(task, known):
 def chain_claimed(slug, config, ledger, doc, task, lane, now_ms):
     if config.autonomy not in APPLIES or task["id"] not in guarded(doc):
         return []
+    return _chain_report(slug, ledger, doc, task, lane, now_ms)
+
+
+def _chain_report(slug, ledger, doc, task, lane, now_ms):
     known, stamps = {t["id"]: t for t in doc["tasks"]}, doc.get("_meta", {}).get("stamps", {})
     times = [
         (stamps[f"tasks/{dep}/state"]["at"], dep) for dep in _merged(task, known) if f"tasks/{dep}/state" in stamps
