@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/startup_bench.py:scripts.swarm_v2.startup_bench.x_read__mutmut_36:7ba3190fadcc83fa839f1818a1a8b2c9ab5a602ba9311f581c946fc73a60e829": {
+    "reader": "author, applying the Standards reader for SV2-PRF-02 ruling on the listing read without encoding",
+    "reason": "The worker log read with encoding=None uses the locale, which is UTF-8 in CI and the worker image, the same ruling as the listing read; the logs are JSON lines that decode identically."
+  }
+}

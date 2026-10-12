@@ -810,3 +810,15 @@ def test_cli_reduce_reads_worker_logs_and_hashes_each(tmp_path):
     assert len(reduced["inputs"]["logs"]["default_a.log"]) == 64
     assert reduced["pods"]["default/a"]["delivered"] - reduced["pods"]["default/a"]["prepared"] == 1085
     assert "Worker prepared to native agent ready and prompt delivered" in bench.markdown(stages.report([]), "empty")
+
+
+def test_a_worker_log_name_splits_its_namespace_at_the_first_underscore_only(tmp_path):
+    write_capture(tmp_path / "capture")
+    pods = json.loads((tmp_path / "capture" / "pods.json").read_text())
+    created = "2026-10-11T14:36:08Z"
+    pods["items"].append({"metadata": {"namespace": "w", "name": "x_y_z", "creationTimestamp": created}})
+    (tmp_path / "capture" / "pods.json").write_text(json.dumps(pods))
+    (tmp_path / "capture" / "logs").mkdir()
+    (tmp_path / "capture" / "logs" / "w_x_y_z.log").write_text(WORKER_LOG)
+    reduced = bench.read(tmp_path / "capture")
+    assert reduced["pods"]["w/x_y_z"]["delivered"] - reduced["pods"]["w/x_y_z"]["prepared"] == 1085
