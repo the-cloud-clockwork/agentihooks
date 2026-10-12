@@ -4,7 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import ledger_state, loaded, page_source, serve_modules, shell_html
+from tests.swarm_ledger.ledger_page import (
+    ledger_state,
+    loaded,
+    page_source,
+    reload_after_folds,
+    serve_modules,
+    shell_html,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE = ROOT / "scripts" / "swarm_ledger" / "template.html"
@@ -99,12 +106,7 @@ def test_a_folded_phase_row_stays_folded_after_a_reload(context):
     page.goto(URL)
     loaded(page)
     page.click("#item-phases-p3 details.phase-fold > summary")
-    page.wait_for_function(
-        """() => Object.keys(localStorage).some((k) => k.endsWith(":comments")
-          && JSON.parse(localStorage.getItem(k)).closed.includes("phases/p3/row"))"""
-    )
-    page.reload()
-    loaded(page)
+    reload_after_folds(page, "#item-phases-p3 details.phase-fold")
     assert [open_ for _, open_, _ in rows(page)] == [True, True, False]
 
 

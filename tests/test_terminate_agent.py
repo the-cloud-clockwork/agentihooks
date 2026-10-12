@@ -56,6 +56,41 @@ def test_validate_leaves_out_group_members_that_ended(monkeypatch, state):
     assert validate(item, [item]) == [item.process]
 
 
+@pytest.mark.parametrize("state", ["Z", "X"])
+def test_validate_refuses_a_dead_target_with_a_live_sibling(monkeypatch, state):
+    item = session()
+    ended = Process(200, 1, 190, 190, 100, state, "claude", item.process.argv)
+    sibling = process(201, ppid=200, pgid=190, sid=190, comm="node", argv=("node",))
+    table = {100: process(100, comm="python"), 200: ended, 201: sibling}
+    monkeypatch.setattr("scripts.terminate_agent.processes", lambda proc=Path("/proc"): table)
+    monkeypatch.setattr("scripts.terminate_agent.os.getpid", lambda: 100)
+    with pytest.raises(ValueError) as error:
+        validate(item, [item], force_shared=True)
+    assert str(error.value) == "target process has ended"
+
+
+@pytest.mark.parametrize("state", ["Z", "X"])
+@pytest.mark.parametrize("registered", [False, True])
+def test_sessions_omit_a_dead_agent_with_a_live_sibling(tmp_path, state, registered):
+    from scripts.terminate_agent import sessions
+
+    ended = Process(200, 1, 190, 190, 100, state, "claude", ("claude",))
+    sibling = process(201, ppid=200, pgid=190, sid=190, argv=("claude", "--name", "sibling"))
+    registry = {"dead": {"pid": 200, "status": "alive"}} if registered else {}
+    with patch("scripts.terminate_agent.processes", return_value={200: ended, 201: sibling}):
+        found = sessions(tmp_path / "proc", registry=registry)
+    assert [item.process.pid for item in found] == [201]
+
+
+def test_sessions_omit_a_registered_non_agent_process(tmp_path):
+    from scripts.terminate_agent import sessions
+
+    item = process(200, comm="python", argv=("python",))
+    registry = {"non-agent": {"pid": 200, "status": "alive"}}
+    with patch("scripts.terminate_agent.processes", return_value={200: item}):
+        assert sessions(tmp_path / "proc", registry=registry) == []
+
+
 @pytest.mark.parametrize("state,alive", [("S", True), ("Z", False), ("X", False)])
 def test_alive_counts_a_zombie_or_a_process_being_reaped_as_ended(monkeypatch, state, alive):
     from scripts.terminate_agent import _alive

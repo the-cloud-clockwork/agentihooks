@@ -290,6 +290,16 @@ class LandingBays(unittest.TestCase):
         }
         self.assertEqual(mains, {"ledger": "", "home": ' class="home"', "bin": ' class="bin"'})
 
+    def test_priority_item_and_stat_rows_are_separate_raised_tiles(self):
+        css = css_of(page_source())
+        for row in (".prio", ".item", ".stat"):
+            rule = declared(css, row)
+            self.assertEqual(rule.get("background"), "var(--surface-2)", row)
+            self.assertNotIn("border-top", rule, row)
+            self.assertRegex(rule.get("padding", ""), r"^\d+px \d+px$", row)
+            self.assertTrue(rule.get("border-radius"), row)
+            self.assertRegex(declared(css, f"{row} + {row}").get("margin-top", ""), r"^\d+px$", row)
+
 
 if __name__ == "__main__":
     unittest.main()
