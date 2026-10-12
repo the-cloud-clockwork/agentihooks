@@ -121,7 +121,7 @@ def credential_fill(tmp_path, host="github.com"):
 
 
 def test_git_takes_the_token_by_reference_through_the_credential_helper(tmp_path, monkeypatch):
-    monkeypatch.setenv(workspaces.TOKEN, PROBE)
+    monkeypatch.setenv(workspaces.GIT_LOGIN_ENV, PROBE)
     environ = workspaces._environ()
 
     assert {key: environ[key] for key in ("GIT_TERMINAL_PROMPT", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0")} == {
@@ -151,7 +151,7 @@ def test_the_helper_keeps_git_config_entries_already_in_the_environment(monkeypa
 
 
 def test_the_token_is_offered_to_github_only(tmp_path, monkeypatch):
-    monkeypatch.setenv(workspaces.TOKEN, PROBE)
+    monkeypatch.setenv(workspaces.GIT_LOGIN_ENV, PROBE)
 
     code, fields = credential_fill(tmp_path, "example.invalid")
 
@@ -160,7 +160,7 @@ def test_the_token_is_offered_to_github_only(tmp_path, monkeypatch):
 
 
 def test_without_a_token_git_answers_no_credential_and_never_prompts(tmp_path, monkeypatch):
-    monkeypatch.delenv(workspaces.TOKEN, raising=False)
+    monkeypatch.delenv(workspaces.GIT_LOGIN_ENV, raising=False)
 
     code, fields = credential_fill(tmp_path)
 

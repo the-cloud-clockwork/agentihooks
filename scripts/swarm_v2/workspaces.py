@@ -24,8 +24,10 @@ COMMIT = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 LOCK = ".prepare.lock"
 GIT_TIMEOUT = 600
 TRACKING = "+refs/heads/*:refs/remotes/origin/*"
-TOKEN = "AGENTIHOOKS_GIT_TOKEN"
-HELPER = f'!f() {{ test -z "${TOKEN}" || printf "username=x-access-token\\npassword=%s\\n" "${TOKEN}"; }}; f'
+GIT_LOGIN_ENV = "AGENTIHOOKS_GIT_TOKEN"
+HELPER = (
+    f'!f() {{ test -z "${GIT_LOGIN_ENV}" || printf "username=x-access-token\\npassword=%s\\n" "${GIT_LOGIN_ENV}"; }}; f'
+)
 GIT_SCOPE = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_NAMESPACE")
 
 
