@@ -655,6 +655,14 @@ def test_page_quota_drops_accounts_the_probe_stopped_reading(monkeypatch):
     assert [r["account"] for r in agents_quota.page_quota(now=newest)["rows"]] == ["nestor_coltatgmail_com"]
 
 
+def test_an_account_read_exactly_at_the_cutoff_stays_and_an_empty_cache_shows_nothing():
+    window = QuotaWindow(used=8.0)
+    edge = (1000.0 - agents_quota.RETIRED_AFTER_S, ProbeResult("edge", "ok", "OK", 78.0, window, window))
+    newest = (1000.0, ProbeResult("new", "ok", "OK", 78.0, window, window))
+    assert agents_quota.current_observations([edge, newest]) == [edge, newest]
+    assert agents_quota.current_observations([]) == []
+
+
 def test_every_cached_account_stays_while_none_is_newer_than_the_others():
     window = QuotaWindow(used=8.0)
     cached = [

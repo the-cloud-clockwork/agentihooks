@@ -64,3 +64,24 @@ def test_column_widths_round_trip_beside_panel_sizes_and_reset_with_them():
 def test_bad_column_widths_are_refused(columns):
     with pytest.raises(ValueError):
         layout.write({"columns": columns})
+
+
+def test_the_column_limits_are_inclusive_and_each_refusal_names_its_cause():
+    widest = [layout.COLUMN_WIDTH[1]] * layout.MAX_COLUMNS
+    tables = {f"t{n}": [layout.COLUMN_WIDTH[0]] for n in range(layout.MAX_TABLES - 1)}
+    saved = layout.write({"columns": {**tables, "wide": widest}})
+    assert saved["columns"]["wide"] == widest and len(saved["columns"]) == layout.MAX_TABLES
+    cases = [
+        ({f"t{n}": [40] for n in range(layout.MAX_TABLES + 1)}, "at most"),
+        ({"Bad": [40]}, "unknown column table Bad"),
+        ({"t": [40] * (layout.MAX_COLUMNS + 1)}, "t needs 1 to"),
+        ({"t": [layout.COLUMN_WIDTH[1] + 1]}, "t column widths must be numbers"),
+    ]
+    for columns, message in cases:
+        with pytest.raises(ValueError, match=message):
+            layout.write({"columns": columns})
+
+
+def test_rows_after_the_columns_entry_are_still_saved():
+    saved = layout.write({"columns": {"t": [40]}, "health-box": {"height": 200}})
+    assert saved == {"columns": {"t": [40]}, "health-box": {"height": 200}}

@@ -274,3 +274,94 @@ def test_phone_width_stacks_the_panels_hides_the_handles_and_ignores_saved_sizes
     assert page.box("capacity-box")["height"] < 400
     assert page.tab.eval_on_selector("#agents-box", "el => el.scrollHeight <= el.clientHeight + 1")
     assert page.stored() == layout.read()
+
+
+def saved_columns(key, timeout=5.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        found = layout.read().get("columns", {}).get(key)
+        if found:
+            return found
+        time.sleep(0.05)
+    raise AssertionError(f"no saved widths for {key}: {layout.read()}")
+
+
+def column_width(page, table, index=0):
+    return round(page.tab.locator(f"#{table} thead th").nth(index).bounding_box()["width"])
+
+
+def test_a_column_grip_drags_its_width_and_the_width_survives_a_reload(visit):
+    page = visit(width=1920)
+    grip = page.tab.locator("#health-table thead th").first.locator(".col-grip")
+    grip.scroll_into_view_if_needed()
+    before = column_width(page, "health-table")
+    box = grip.bounding_box()
+    x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+    page.tab.mouse.move(x, y)
+    page.tab.mouse.down()
+    page.tab.mouse.move(x + 40, y)
+    page.tab.mouse.move(x + 80, y)
+    page.tab.mouse.up()
+    widths = saved_columns("health-table-7")
+    assert abs(widths[0] - (before + 80)) <= 2
+    page.reload()
+    assert abs(column_width(page, "health-table") - widths[0]) <= 1
+    assert "sized-cols" in page.tab.get_attribute("#health-table", "class")
+
+
+def test_arrow_keys_move_a_focused_column_grip_and_reset_clears_the_widths(visit):
+    page = visit(width=1920)
+    grip = page.tab.locator("#handoff-table thead th").first.locator(".col-grip")
+    grip.scroll_into_view_if_needed()
+    before = column_width(page, "handoff-table")
+    grip.focus()
+    page.tab.keyboard.press("ArrowRight")
+    page.tab.keyboard.press("Shift+ArrowRight")
+    page.tab.keyboard.press("Enter")
+    page.tab.wait_for_function(
+        f"() => Math.round(document.querySelector('#handoff-table thead th').getBoundingClientRect().width) >= {before + 79}"
+    )
+    assert abs(saved_columns("handoff-table-6")[0] - (before + 80)) <= 2
+    page.tab.locator("#layout-reset").click()
+    page.tab.wait_for_function("() => !document.querySelector('#handoff-table').classList.contains('sized-cols')")
+    deadline = time.monotonic() + 5
+    while "columns" in layout.read() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert "columns" not in layout.read()
+
+
+def test_home_columns_drag_and_step_and_keep_their_widths(browser, base):
+    layout.path().unlink(missing_ok=True)
+    context = browser.new_context(viewport={"width": 1920, "height": 1000})
+    tab = context.new_page()
+    try:
+        tab.goto(f"{base}/")
+        grip = tab.locator(".row.head > *:nth-child(3) .col-grip")
+        grip.wait_for()
+        tracks = lambda: [
+            float(t)
+            for t in tab.evaluate("() => getComputedStyle(document.querySelector('.row.head')).gridTemplateColumns")
+            .replace("px", "")
+            .split()
+        ]  # noqa: E731
+        before = tracks()
+        box = grip.bounding_box()
+        x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+        tab.mouse.move(x, y)
+        tab.mouse.down()
+        tab.mouse.move(x - 100, y)
+        tab.mouse.up()
+        grip.focus()
+        tab.keyboard.press("ArrowLeft")
+        widths = saved_columns("home")
+        assert abs(widths[2] - (before[2] - 116)) <= 2
+        assert widths[:2] == [round(w) for w in before[:2]]
+        tab.locator(".sort[data-sort=kind]").click()
+        assert tab.locator(".sort[data-sort=kind] i").text_content() in ("▲", "▼")
+        tab.reload()
+        tab.locator(".row.head").wait_for()
+        tab.wait_for_function("() => document.querySelector('.panel').classList.contains('sized-cols')")
+        assert abs(tracks()[2] - widths[2]) <= 1
+    finally:
+        context.close()
+        layout.path().unlink(missing_ok=True)

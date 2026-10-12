@@ -380,7 +380,9 @@ def balance_table(
 
 
 def current_observations(cached: list) -> list:
-    newest = max((at for at, _ in cached), default=0.0)
+    if not cached:
+        return []
+    newest = max(at for at, _ in cached)
     return [(at, result) for at, result in cached if newest - at <= RETIRED_AFTER_S]
 
 
