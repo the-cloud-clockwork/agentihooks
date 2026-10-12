@@ -116,8 +116,7 @@ printf 'the chart check flagged a planted ledger reference to the terminal CA Se
 roles=(-f "$chart/ci/kind-redis-roles.yaml")
 helm template "$release" "$chart" "${roles[@]}" | python3 tests/chart_redis.py "$chart/ci/kind-redis-roles.yaml"
 helm template "$release" "$chart" "${roles[@]}" "${api[@]}" | python3 tests/chart_redis.py "$chart/ci/kind-redis-roles.yaml"
-planted="$(helm template "$release" "$chart" "${roles[@]}" --set redis.roles.worker.name=swarm-redis-admin \
-  2>&1 | python3 tests/chart_redis.py "$chart/ci/kind-redis-roles.yaml" 2>&1 >/dev/null || true)"
+planted="$(helm template "$release" "$chart" "${roles[@]}" --set redis.roles.worker.name=swarm-redis-admin 2>&1 >/dev/null || true)"
 if [[ $planted != *"redis.roles.worker must not name the administrator Redis Secret"* ]]; then
   printf 'the chart did not refuse a worker role naming the administrator Redis Secret: %s\n' "$planted" >&2
   exit 1
