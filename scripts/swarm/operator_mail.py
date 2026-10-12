@@ -77,10 +77,10 @@ def primed(text, event, address, master):
 
 def entry(event):
     """The ledger entry an operator write sits on, where an answer to it lands; '' for chat and writes on no entry."""
-    if event.get("kind", "").startswith("note "):
+    if event["kind"].startswith("note "):
         return f"notes/{event['id']}"
-    parts = event.get("target", "").split("/")
-    return "/".join(parts[:2]) if len(parts) > 1 and parts[0] in ENTRY_LISTS else ""
+    head, _, rest = event["target"].partition("/")
+    return event["target"] if head in ENTRY_LISTS and rest else ""
 
 
 def relay(inbox, store, slug, doc, events, line):

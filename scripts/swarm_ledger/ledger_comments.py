@@ -144,7 +144,7 @@ def agent_thread_op(thread, op, ctx, target, noun):
     if op["op"] == "add" and "outcome" in op:
         post_outcome(thread, op, ctx, target)
         return True
-    if op["op"] == "add" and noun == "comment":
+    if op["op"] == "add" and noun == "comment" and "to" not in op:
         post_status(thread, by, op["id"], text, ctx, target, op.get("attachments"))
         return True
     if op["op"] == "add":

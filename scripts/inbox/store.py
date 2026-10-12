@@ -26,7 +26,6 @@ REDELIVERER = "inbox"
 CLOSED = ("done", "blocked", "handed_off", "cancelled")
 CLOSE_KINDS = {"done": "done", "handoff": "handed_off", "blocked": "blocked", "cancel": "cancelled"}
 NEEDS_DETAIL = {"handoff": "the address the work went to", "blocked": "what it is blocked on"}
-ENTRY_TTL_S = 30 * 24 * 3600
 
 
 class InboxError(RuntimeError):
@@ -289,6 +288,7 @@ class InboxStore:
             ids = self.redis.zrange(self.key("address", address), 0, -1)
             keys += [self.key(kind, address) for kind in ("address", "pending", "open", "open-size", "sequence")]
             keys += [self.key(kind, item_id) for item_id in ids for kind in ("item", "history")]
+            keys += [key for key in (self.key("entry", item_id) for item_id in ids) if self.redis.exists(key)]
         members = {
             self.key(shared): [a for a in addresses if self.redis.sismember(self.key(shared), a)]
             for shared in ("waiting", "indexed", "open-indexed")
@@ -381,8 +381,7 @@ class InboxStore:
             return moved
 
     def reply(self, item_id, replier, text, fyi=False, answer_id=""):
-        """A given answer_id makes the reply replayable: an answer already sent is kept and only the close runs.
-        The answer carries the ledger entry its item is about, so it lands on that entry."""
+        """A given answer_id makes the reply replayable: an answer already sent is kept and only the close runs."""
         item = self.get(item_id)
         if not self.acts_for(replier, item.address):
             raise InboxError(f"message {item_id} belongs to {item.address}, not {replier}")
@@ -402,7 +401,7 @@ class InboxStore:
 
     def about(self, item_id, entry):
         """Name the ledger entry an item is about, before the item is written."""
-        self.redis.set(self.key("entry", item_id), entry, ex=ENTRY_TTL_S)
+        self.redis.set(self.key("entry", item_id), entry)
 
     def entry_of(self, item_id):
         return self.redis.get(self.key("entry", item_id)) or ""

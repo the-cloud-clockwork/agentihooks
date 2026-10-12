@@ -1,7 +1,7 @@
 """Swarm chat over the inbox: addressed swarm chat becomes inbox items.
 
 The inbox hooks deliver an item at the receiver's next tool call and the tick's wake pass prompts idle panes.
-Replies addressed to the operator are posted on the ledger page chat.
+Replies addressed to the operator are posted as a comment on the ledger entry his item sat on, else on the page chat.
 """
 
 import contextlib
@@ -94,7 +94,6 @@ def apply_say(inbox, sender, entry):
 
 
 def relay_to_page(inbox, slug, agents, ledger):
-    """Show each answer to the operator: as a comment on the ledger entry its question sat on, else in page chat."""
     names = {a.name for a in agents}
     shown = 0
     for item in inbox.inbox(OPERATOR):
@@ -110,7 +109,7 @@ def relay_to_page(inbox, slug, agents, ledger):
 
 def show(ledger, slug, item, sender, entry):
     if entry:
-        return ledger.relay_comment(slug, entry, item.text, sender)
+        return ledger.relay_comment(slug, entry, item.text, sender, item.id)
     return ledger.relay(slug, item.text, sender)
 
 

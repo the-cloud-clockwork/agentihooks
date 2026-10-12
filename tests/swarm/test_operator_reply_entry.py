@@ -2,8 +2,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.inbox import cli
-from scripts.inbox.store import ENTRY_TTL_S, InboxStore
+from scripts.inbox import channel, cli
+from scripts.inbox.store import InboxStore
 from scripts.swarm import delivery, ledger_client, operator_mail
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_ledger.watch_ledger import line
@@ -14,17 +14,19 @@ SLUG = "sw"
 ENG = AgentRecord("sw-eng-1", "eng", "t1", pane_id="p1", seat=f"eng-1@{SLUG}")
 BOSS = AgentRecord("sw-master-1", MASTER, MASTER, pane_id="pm", seat=f"master@{SLUG}")
 DOC = {"tasks": [{"id": "t1", "state": "claimed", "claimed_by": ENG.name}]}
+SIXTY_WORDS = " ".join(["merged"] * 60)
 
 
 class PageLedger:
     def __init__(self):
-        self.said, self.commented = [], []
+        self.said, self.commented, self.ids = [], [], []
 
     def relay(self, slug, text, by):
         self.said.append((slug, text, by))
 
-    def relay_comment(self, slug, entry, text, by):
+    def relay_comment(self, slug, entry, text, by, op_id):
         self.commented.append((slug, entry, text, by))
+        self.ids.append(op_id)
 
 
 @pytest.fixture
@@ -47,14 +49,24 @@ def operator_write(rev, kind, target, text):
     return {"rev": rev, "at": rev, "by": "operator", "kind": kind, "target": target, "id": f"x-{rev}", "text": text}
 
 
-def answer(swarm, monkeypatch, event, agent, words):
+def relayed(swarm, event):
     store, inbox = swarm
     [item] = operator_mail.relay(inbox, store, SLUG, DOC, [event], line)
-    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", agent.name)
-    assert cli.main(["reply", item.id, *words]) == 0
+    return item
+
+
+def shown(swarm):
+    store, inbox = swarm
     ledger = PageLedger()
     delivery.relay_to_page(inbox, SLUG, store.agents(SLUG), ledger)
-    return item, ledger
+    return ledger
+
+
+def answer(swarm, monkeypatch, event, agent, words):
+    item = relayed(swarm, event)
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", agent.name)
+    assert cli.main(["reply", item.id, *words]) == 0
+    return item, shown(swarm)
 
 
 def test_a_reply_to_an_operator_task_comment_lands_as_a_comment_on_that_task(swarm, monkeypatch):
@@ -64,6 +76,7 @@ def test_a_reply_to_an_operator_task_comment_lands_as_a_comment_on_that_task(swa
     assert ledger.said == []
     _, inbox = swarm
     assert inbox.get(item.id).state == "done" and inbox.pending_items("operator") == []
+    assert ledger.ids == [inbox.get(item.id).reason.rpartition(" ")[2]]
 
 
 def test_a_reply_to_an_operator_note_lands_as_a_comment_on_that_note(swarm, monkeypatch):
@@ -73,7 +86,36 @@ def test_a_reply_to_an_operator_note_lands_as_a_comment_on_that_note(swarm, monk
     assert ledger.said == []
     _, inbox = swarm
     assert inbox.get(item.id).state == "done"
-    assert 0 < inbox.redis.ttl(inbox.key("entry", item.id)) <= ENTRY_TTL_S
+    assert inbox.entry_of("no-such-item") == ""
+
+
+def test_a_channel_reply_to_an_operator_note_lands_as_a_comment_on_that_note(swarm):
+    item = relayed(swarm, operator_write(9, "note added", "", "pause the page work"))
+    _, inbox = swarm
+    assert channel.answer(inbox, BOSS.name, item.id, "paused until you say").startswith("sent to operator")
+    ledger = shown(swarm)
+    assert ledger.commented == [(SLUG, "notes/x-9", "paused until you say", BOSS.name)] and ledger.said == []
+
+
+def test_a_reply_on_an_entry_is_held_to_the_comment_word_limit_and_the_item_stays_open(swarm, monkeypatch):
+    item = relayed(swarm, operator_write(10, "comment added", "tasks/t1", "is the fix merged"))
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", ENG.name)
+    assert cli.main(["reply", item.id, SIXTY_WORDS]) == 1
+    _, inbox = swarm
+    assert inbox.get(item.id).state != "done" and shown(swarm).commented == []
+
+
+def test_a_reply_to_a_chat_line_keeps_the_chat_word_limit(swarm, monkeypatch):
+    _, ledger = answer(swarm, monkeypatch, operator_write(11, "message added", "chat", "status"), BOSS, [SIXTY_WORDS])
+    assert ledger.said == [(SLUG, SIXTY_WORDS, BOSS.name)]
+
+
+def test_an_item_entry_is_listed_with_its_keys_and_others_are_not(swarm):
+    _, inbox = swarm
+    plain = inbox.send("operator", "eng", "hello")
+    item = relayed(swarm, operator_write(12, "comment added", "tasks/t1", "is the fix merged"))
+    keys, _ = inbox.keys_for(lambda address: True)
+    assert inbox.key("entry", item.id) in keys and inbox.key("entry", plain.id) not in keys
 
 
 @pytest.mark.parametrize(
@@ -82,7 +124,7 @@ def test_a_reply_to_an_operator_note_lands_as_a_comment_on_that_note(swarm, monk
         ("comment added", "notes/n2", "notes/n2"),
         ("comment added", "phases/p1", "phases/p1"),
         ("answer added", "questions/q1", "questions/q1"),
-        ("comment added", "followups/f1/comments/c-1", "followups/f1"),
+        ("comment added", "followups/f1", "followups/f1"),
         ("checked", "phases/p2", "phases/p2"),
     ],
 )
@@ -106,14 +148,14 @@ def test_a_reply_to_a_chat_line_or_a_write_without_an_entry_still_answers_in_cha
         ({"kind": "note edited", "target": "", "id": "n-7"}, "notes/n-7"),
         ({"kind": "comment added", "target": "tasks"}, ""),
         ({"kind": "comment added", "target": "artifacts/a1"}, ""),
-        ({"kind": "checked", "target": "tasks/t9/done"}, "tasks/t9"),
+        ({"kind": "checked", "target": "tasks/t9"}, "tasks/t9"),
     ],
 )
 def test_the_entry_of_an_operator_write_is_its_list_and_id(event, entry):
     assert operator_mail.entry(event) == entry
 
 
-def test_relay_comment_posts_the_senders_comment_on_the_entry_with_the_service_credential(monkeypatch):
+def test_relay_comment_posts_an_answer_to_the_operator_on_the_entry_with_the_service_credential(monkeypatch):
     calls = []
 
     def call(slug, ops, service):
@@ -121,12 +163,15 @@ def test_relay_comment_posts_the_senders_comment_on_the_entry_with_the_service_c
         return {"rejected": []}
 
     monkeypatch.setattr(ledger_client, "_ledger", lambda: SimpleNamespace(call=call))
-    ledger_client.LedgerClient().relay_comment("demo", "notes/n-1", "holding page changes", "master@a1b2c3-0002")
+    client = ledger_client.LedgerClient()
+    client.relay_comment("demo", "notes/n-1", "holding page changes", "master@a1b2c3-0002", "a1b2c3d4e5f6")
     [(slug, [op], service)] = calls
     assert (slug, service) == ("demo", True)
-    assert {k: v for k, v in op.items() if k != "id"} == {
+    assert op == {
         "op": "add",
+        "id": "a1b2c3d4e5f6",
         "by": "master@a1b2c3-0002",
         "thread": "notes/n-1/comments",
         "text": "holding page changes",
+        "to": "operator",
     }
