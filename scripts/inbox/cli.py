@@ -58,7 +58,8 @@ def check_for_operator(address, text, kind="chat"):
 
 def check_answer(store, item_id, sender, text):
     """An answer to an operator item on a ledger entry lands as a comment there, under the comment word rules."""
-    check_for_operator(sender, text, "comment" if store.entry_of(item_id) else "chat")
+    if sender == OPERATOR:
+        check_for_operator(sender, text, "comment" if store.entry_of(item_id) else "chat")
 
 
 def informational(words: list[str]) -> tuple[bool, list[str]]:
