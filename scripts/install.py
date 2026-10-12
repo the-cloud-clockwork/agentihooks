@@ -2924,7 +2924,17 @@ def _native_settings(
             say(f"Applied settings-profile overlay: {settings_profile_name} ({src})")
 
     # --- 1c. Apply linked connectors (from last profile in chain) ---
-    conn_env, conn_deny, conn_disabled = _load_connectors(profile_dirs[-1][0])
+    _apply_connectors(rendered, profile_dirs[-1][0], say)
+
+    from scripts.profile_telemetry import apply_collector_env, apply_langfuse_env
+
+    apply_langfuse_env(rendered, profile_dirs, settings_profile_dir)
+    apply_collector_env(rendered)
+    return rendered
+
+
+def _apply_connectors(rendered: dict, profile_name: str, say) -> None:
+    conn_env, conn_deny, conn_disabled = _load_connectors(profile_name)
     if conn_env:
         rendered.setdefault("env", {}).update(conn_env)
         say(f"  [OK] Connector env: {list(conn_env.keys())}")
@@ -2936,12 +2946,6 @@ def _native_settings(
         merged_disabled = list(dict.fromkeys(existing_disabled + conn_disabled))
         rendered["disabledMcpjsonServers"] = merged_disabled
         say(f"  [OK] Connector disabled MCP servers: {merged_disabled}")
-
-    from scripts.profile_telemetry import apply_collector_env, apply_langfuse_env
-
-    apply_langfuse_env(rendered, profile_dirs, settings_profile_dir)
-    apply_collector_env(rendered)
-    return rendered
 
 
 def install_global(args: argparse.Namespace) -> None:

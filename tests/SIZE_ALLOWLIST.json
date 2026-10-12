@@ -164,7 +164,7 @@
   "PLR0912": 27
  },
  "scripts/install.py": {
-  "file-lines": 6990
+  "file-lines": 6994
  },
  "scripts/install.py::_clean_state_dir": {
   "C901": 14,
@@ -209,9 +209,6 @@
   "PLR0912": 14
  },
  "scripts/install.py::_load_connectors": {
-  "C901": 13
- },
- "scripts/install.py::_native_settings": {
   "C901": 13
  },
  "scripts/install.py::_prune_stale_mcp_servers": {
