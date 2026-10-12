@@ -2937,14 +2937,15 @@ def test_pinned_copilot_rebuild_keeps_the_recorded_overlay_servers(world, overla
 def test_pinned_render_keeps_external_and_package_parents(world, overlays, tmp_path, source):
     from scripts.profiles import bundle_copy, render
 
-    library = tmp_path / ("library" if source == "linked" else "package-roles/library")
-    _write(library / "profile.yml", "name: library\n")
+    parent = "library" if source == "linked" else "engineer"
+    library = tmp_path / ("library" if source == "linked" else "package-roles/engineer")
+    _write(library / "profile.yml", f"name: {parent}\n")
     _write(library / "CLAUDE.md", "LIBRARY PERSONA\n")
     if source == "linked":
         state = world["install"]._load_state()
         state["linked_profiles"] = [{"name": "library", "path": str(library)}]
         world["install"]._save_state(state)
-    _write(overlays / "rb-eng" / "profile.yml", "name: rb-eng\nextends: [library, package:engineer]\n")
+    _write(overlays / "rb-eng" / "profile.yml", f"name: rb-eng\nextends: [{parent}, package:engineer]\n")
     _commit(world["bundle"], "library parent")
     recorded = _git(world["bundle"], "rev-parse", "HEAD").strip()
 
