@@ -344,6 +344,7 @@ def _serving():
         yield server
     finally:
         server.shutdown()
+        server.server_close()
 
 
 @pytest.fixture
