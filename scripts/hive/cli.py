@@ -36,7 +36,10 @@ def _join(url: str, code: str) -> dict:
 
 
 def refresh_env(environ: MutableMapping[str, str]) -> str:
-    url, credential = environ.get("AGENTIHOOKS_HIVE_URL"), environ.get("AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL")
+    saved = _saved_env(environ)
+    url, credential = (
+        environ.get(name) or saved.get(name) for name in ("AGENTIHOOKS_HIVE_URL", "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL")
+    )
     if not (url and credential):
         raise auth.HiveError(
             "this host has not joined a hive: "
@@ -49,12 +52,15 @@ def refresh_env(environ: MutableMapping[str, str]) -> str:
 
 
 def saved_redis_url(environ: Mapping[str, str]) -> str | None:
+    return _saved_env(environ).get("AGENTIHOOKS_HIVE_REDIS_URL") or None
+
+
+def _saved_env(environ: Mapping[str, str]) -> dict[str, str]:
     try:
         lines = (registry.home(environ) / auth.ENV_FILE).read_text().splitlines()
     except OSError:
-        return None
-    saved = dict(line.partition("=")[::2] for line in lines)
-    return saved.get("AGENTIHOOKS_HIVE_REDIS_URL") or None
+        return {}
+    return dict(line.partition("=")[::2] for line in lines)
 
 
 @contextlib.contextmanager
