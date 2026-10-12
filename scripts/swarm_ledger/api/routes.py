@@ -173,8 +173,8 @@ def handle(handler: object, server: ModuleType) -> None:
     except (OSError, ValueError):
         logging.getLogger(__name__).exception("Ledger API storage failure")
         status, result = 500, APIError(500, "storage_error", "Resource could not be read or written").envelope()
-    body = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
-    return handler.send(status, body, "application/json")
+    encoded = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
+    return handler.send(status, encoded, "application/json")
 
 
 def pagination(url: str) -> dict:
