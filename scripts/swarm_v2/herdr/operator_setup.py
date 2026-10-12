@@ -167,9 +167,11 @@ def place(home: Path, bao: openbao_kv.OpenBao, antoncore: Path, address: str = "
     }
     if address:
         place_redis(placement, bao, address)
-        env += f"{URL_FILE_ENV}={placement.redis_url}\n"
         report["hive_redis"] = address
+    if placement.redis_url.exists():
+        env += f"{URL_FILE_ENV}={placement.redis_url}\n"
     _stage(placement.env, env.encode()).replace(placement.env)
+    placement.alarm.unlink(missing_ok=True)
     return report
 
 
@@ -177,25 +179,41 @@ def transport(environ: Mapping[str, str], placed: Mapping[str, str]) -> Mapping[
     name = publications.URL_ENVS[0]
     if environ.get(name) or URL_FILE_ENV not in placed:
         return environ
-    return {**environ, name: Path(placed[URL_FILE_ENV]).read_text().strip()}
+    try:
+        url = Path(placed[URL_FILE_ENV]).read_text().strip()
+    except OSError:
+        raise publications.TransportRefused(f"the placed hive Redis URL {placed[URL_FILE_ENV]} is unreadable") from None
+    return {**environ, name: url}
+
+
+def _raised(placement: Placement, message: str) -> set[str]:
+    try:
+        entry = json.loads(placement.alarm.read_text())
+    except (OSError, ValueError):
+        return set()
+    return set(entry["raised"]) if entry.get("message") == message else set()
 
 
 def alarm(root: Path, environ: Mapping[str, str], message: str) -> None:
     placement = Placement(root / FOLDER)
-    if placement.alarm.exists() and placement.alarm.read_text() == message:
-        return
     try:
         placed = settings(root)
     except OSError:
         placed = {}
     try:
-        store = publications.connect(transport(environ, placed))
+        slugs = publications.connect(transport(environ, placed)).slugs()
     except (OSError, SwarmError):
         return
+    raised = _raised(placement, message)
     ledger = LedgerClient()
-    for slug in store.slugs():
-        ledger.followup(slug, message, needs_operator=True)
-    _stage(placement.alarm, message.encode()).replace(placement.alarm)
+    for slug in sorted(set(slugs) - raised):
+        try:
+            if ledger.followup(slug, message, needs_operator=True):
+                raised.add(slug)
+        except SwarmError:
+            continue
+    entry = {"message": message, "raised": sorted(raised)}
+    _stage(placement.alarm, json.dumps(entry).encode()).replace(placement.alarm)
 
 
 def service(
@@ -270,6 +288,32 @@ def sync_unit(binary: str) -> str:
     )
 
 
+def _wanted(binary: str, unit_dir: Path, address: str) -> tuple[tuple[Path, str], ...]:
+    return (
+        (unit_dir / UNIT, unit(binary, address)),
+        (unit_dir / TIMER, timer()),
+        (unit_dir / SYNC, sync_unit(binary)),
+    )
+
+
+def installed(
+    binary: str | None = None, unit_dir: Path | None = None, run: Callable = subprocess.run, address: str = ""
+) -> bool:
+    binary = binary or shutil.which("agentihooks")
+    unit_dir = unit_dir or Path.home() / ".config" / "systemd" / "user"
+    if not binary or any(
+        not path.exists() or path.read_text() != text for path, text in _wanted(binary, unit_dir, address)
+    ):
+        return False
+    return all(
+        run(
+            ["systemctl", "--user", "is-enabled", "--quiet", name], capture_output=True, text=True, timeout=30
+        ).returncode
+        == 0
+        for name in (TIMER, SYNC)
+    )
+
+
 def install(
     binary: str | None = None, unit_dir: Path | None = None, run: Callable = subprocess.run, address: str = ""
 ) -> None:
@@ -278,12 +322,11 @@ def install(
         raise SetupRefused("the agentihooks executable is not on PATH")
     unit_dir = unit_dir or Path.home() / ".config" / "systemd" / "user"
     unit_dir.mkdir(parents=True, exist_ok=True)
-    wanted = (
-        (unit_dir / UNIT, unit(binary, address)),
-        (unit_dir / TIMER, timer()),
-        (unit_dir / SYNC, sync_unit(binary)),
-    )
-    stale = [(path, text) for path, text in wanted if not path.exists() or path.read_text() != text]
+    stale = [
+        (path, text)
+        for path, text in _wanted(binary, unit_dir, address)
+        if not path.exists() or path.read_text() != text
+    ]
     for path, text in stale:
         _stage(path, text.encode()).replace(path)
     try:
@@ -307,6 +350,7 @@ def _parser() -> argparse.ArgumentParser:
     setup.add_argument("--antoncore", help=f"antoncore checkout; defaults to {ANTONCORE_ENV}")
     installed = sub.add_parser("install", help="Write and enable the user timer that runs setup and the sync service")
     installed.add_argument("--redis-address", default="", help=f"hive Redis host:port setup composes, as {ADDRESS_ENV}")
+    installed.add_argument("--check", action="store_true", help="exit 0 only when the units are current and enabled")
     sub.add_parser("sync", help="Keep every hive's published workers in the operator's herdr")
     return parser
 
@@ -323,6 +367,8 @@ def main(
         print(f"operator terminal {args.command} refused: {refused}", file=sys.stderr)
         return 1
     try:
+        if args.command == "install" and args.check:
+            return 0 if installed(address=args.redis_address) else 1
         if args.command == "install":
             install(address=args.redis_address)
             return 0

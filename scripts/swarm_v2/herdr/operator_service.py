@@ -26,7 +26,7 @@ def attempts(store: RedisStore) -> list[Attempt]:
 
 class Service:
     def __init__(
-        self, upkeep: Upkeep, connect: Callable[[], RedisStore], clock: Callable[[], float] = time.monotonic
+        self, upkeep: Upkeep, connect: Callable[[], RedisStore], clock: Callable[[], float] = time.time
     ) -> None:
         self.upkeep, self.connect, self.clock = upkeep, connect, clock
         self.synced: float | None = None
