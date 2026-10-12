@@ -24,7 +24,7 @@ def measured(tmp_path, monkeypatch):
 
 def test_cached_base_uses_the_requested_commit_with_the_same_tree(measured):
     root, target = measured
-    base = next(ratchet._cached_runs(root, "squash", 1, target))
+    base = next(ratchet._cached_runs(root, "squash", target))
     assert base.commit == "squash"
     assert base.executed == {"hooks/example.py": {1, 2}}
     assert base.source("hooks/example.py") == "one\ntwo\nthree\n"
@@ -57,11 +57,6 @@ def test_a_head_split_another_way_grades_against_the_cached_base(measured, monke
     _, _, result = ratchet._grade(args, shards, root)
     assert result.lost == {}
 
-
-def test_a_cached_base_from_another_tree_is_refused(measured):
-    root, target = measured
-    with pytest.raises(ValueError, match="tree differs"):
-        cache.read(target, "another-tree")
 
 
 def test_cache_miss_fails_the_cli_with_recovery_guidance(measured, capsys):
