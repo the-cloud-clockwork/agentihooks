@@ -7,10 +7,10 @@ behind that queue. At delegate and full the tick claims from this queue, resumed
 clear territory before overlapping, and the dispatcher writes no rank: it comments on a task only when the task
 enters the head of its lane's queue, as many tasks as the lane has seats among those that unblock work or carry an
 operator rank, or leaves it while still open; a lane with no seats keeps its head until seats return. When a task on
-the critical chain merges, its claimable successor heads the queue ahead of every band and takes the next free seat in
-its lane, and the dispatcher reports the seconds from that merge to the claim on the task. Below delegate it proposes
-each raise to the master. Every action is a gate log row, a dispatch metrics row naming its rule and a comment on the
-task.
+the critical chain of the work no freeze or focus holds merges, its claimable successor heads the queue ahead of every
+band and takes the next free seat in its lane, and the dispatcher reports the seconds from that merge to the claim on
+the task. Below delegate it proposes each raise to the master. Every action is a gate log row, a dispatch metrics row
+naming its rule and a comment on the task.
 """
 
 import json
@@ -120,22 +120,26 @@ def ordered(doc: dict, named: str, scores: dict) -> list[str]:
     ]
 
 
-def queue(doc: dict) -> list[str]:
-    fixed, guard, known = _fixed(doc), guarded(doc), {t["id"]: t for t in doc["tasks"]}
+def queue(doc: dict, fix: str) -> list[str]:
+    fixed, guard, known = _fixed(doc), guarded(doc, fix), {t["id"]: t for t in doc["tasks"]}
     return sorted(ordered(doc, None, leverage(doc)), key=lambda task_id: _band(known[task_id], fixed, guard))
 
 
 def claim_key(config, doc):
     if config.autonomy not in APPLIES:
         return None
-    fixed, guard = _fixed(doc), guarded(doc)
-    lined = queue(doc)
+    fix = freeze.fix_phase(config)
+    fixed, guard = _fixed(doc), guarded(doc, fix)
+    lined = queue(doc, fix)
     position = {task_id: index for index, task_id in enumerate(lined)}
     return lambda task: (_band(task, fixed, guard), position.get(task["id"], len(lined)))
 
 
-def guarded(doc: dict) -> set[str]:
-    depth, known = chains(doc), {t["id"]: t for t in doc["tasks"]}
+def guarded(doc: dict, fix: str) -> set[str]:
+    graph, known = hierarchy.project(doc)[0], {t["id"]: t for t in doc["tasks"]}
+    depth = {
+        task_id: length for task_id, length in chains(doc).items() if not freeze.held(known[task_id], doc, graph, fix)
+    }
     longest = depth and max(depth.values())
     return {task_id for task_id, length in depth.items() if length + 1 >= longest and _merged(known[task_id], known)}
 
@@ -145,7 +149,7 @@ def _merged(task, known):
 
 
 def chain_claimed(slug, config, ledger, doc, task, lane, now_ms):
-    if config.autonomy not in APPLIES or task["id"] not in guarded(doc):
+    if config.autonomy not in APPLIES or task["id"] not in guarded(doc, freeze.fix_phase(config)):
         return []
     return _chain_report(slug, ledger, doc, task, lane, now_ms)
 
@@ -180,7 +184,7 @@ def rank_pass(slug, config, store, ledger, doc, now_ms):
     scores, fixed = leverage(doc), _fixed(doc)
     if config.autonomy in APPLIES:
         before = _saved_heads(store, slug)
-        leading = [t for t in queue(doc) if t in claimable and (scores[t] or t in fixed)]
+        leading = [t for t in queue(doc, fix) if t in claimable and (scores[t] or t in fixed)]
         heads = _heads(store, slug, config, leading, known, before)
         landed = {
             lane: [t for t in before.get(lane, []) if t in head or known.get(t, {}).get("state") == "open"]

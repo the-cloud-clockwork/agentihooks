@@ -389,7 +389,7 @@ Among open tasks whose territories overlap, the higher rank claims first. The ra
 pass, so a change applies on the next tick.
 
 At `delegate` and `full` autonomy the dispatcher guards the critical chain: when a task on the longest open
-dependency chain merges, its claimable successor takes the next free seat in its lane ahead of every rank, resumed
+dependency chain among the work no freeze or focus holds merges, its claimable successor takes the next free seat in its lane ahead of every rank, resumed
 work and territory order, in the tick that reads the merge. The dispatcher then comments on that task with the
 seconds from the merge to the claim and logs a `chain-guard` row.
 

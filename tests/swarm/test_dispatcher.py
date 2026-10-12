@@ -537,7 +537,7 @@ def spawned(store, config, ledger, found):
 @pytest.mark.parametrize("autonomy", ["delegate", "full"])
 def test_a_tick_with_four_free_seats_claims_the_top_four_of_the_dispatcher_queue(store, autonomy):
     config, ledger, found = queue_ledger(store, autonomy)
-    assert dispatcher.queue(found)[:6] == ["l4", "h1", "h2", "h3", "s", "h4"]
+    assert dispatcher.queue(found, "")[:6] == ["l4", "h1", "h2", "h3", "s", "h4"]
     assert spawned(store, config, ledger, found) == [("eng", t) for t in ("l4", "h1", "s", "l1")]
 
 
@@ -570,7 +570,7 @@ def test_the_claim_key_bands_only_operator_ranks_ahead_of_the_queue_position(sto
     key = dispatcher.claim_key(config, found)
     rows = {t["id"]: t for t in found["tasks"]}
     assert [key(rows[t]) for t in ("l4", "h1", "l3")] == [(1, 0), (2, 1), (2, 15)]
-    assert key({"id": "missing"}) == (2, len(dispatcher.queue(found)))
+    assert key({"id": "missing"}) == (2, len(dispatcher.queue(found, "")))
     assert dispatcher.claim_key(store.update(SLUG, autonomy="assist"), found) is None
 
 
@@ -606,9 +606,9 @@ CHAIN_COMMENT = (
 
 def test_a_critical_chain_successor_takes_the_next_seat_ahead_of_operator_urgent_and_resumed_work(store):
     config, ledger, found = chain_merge(store)
-    assert dispatcher.guarded(found) == {"b"}
+    assert dispatcher.guarded(found, "") == {"b"}
     key = dispatcher.claim_key(config, found)
-    assert dispatcher.queue(found) == ["b", "x", "c", "r", "y"]
+    assert dispatcher.queue(found, "") == ["b", "x", "c", "r", "y"]
     assert [key(ledger.rows[t]) for t in ("b", "x", "r")] == [(-1, 0), (0, 1), (2, 3)]
     assert spawned(store, config, ledger, found) == [("eng", "b")]
     config, ledger, found = chain_merge(store, "assist")
@@ -621,9 +621,27 @@ def chain_of(*ids):
 
 def test_only_a_merged_predecessors_successor_on_the_critical_chain_is_guarded():
     tasks = [task("a", phase="", state="done"), task("b", phase="", depends_on=["a"]), *chain_of("p", "q", "s")]
-    assert dispatcher.guarded(doc(tasks, phases=[])) == set()
+    assert dispatcher.guarded(doc(tasks, phases=[]), "") == set()
     tasks.append(task("c", phase="", depends_on=["b"]))
-    assert dispatcher.guarded(doc(tasks, phases=[])) == {"b"}
+    assert dispatcher.guarded(doc(tasks, phases=[]), "") == {"b"}
+
+
+def test_the_critical_chain_counts_only_work_no_focus_holds_unless_the_fix_phase_exempts_it():
+    from scripts.doctor import loop
+
+    fix = loop.FIX_PHASE
+    tasks = [
+        task("a", state="done"),
+        task("b", depends_on=["a"]),
+        task("p", phase=fix),
+        task("q", phase=fix, depends_on=["p"]),
+        task("s", phase=fix, depends_on=["q"]),
+    ]
+    phases = [{"id": "p1", "depends_on": []}, {"id": fix, "depends_on": []}]
+    focus = [{"verb": "focus", "target": "phases/p1"}]
+    assert dispatcher.guarded(doc(tasks, phases=phases), "") == set()
+    assert dispatcher.guarded(doc(tasks, phases=phases, freezes=focus), "") == {"b"}
+    assert dispatcher.guarded(doc(tasks, phases=phases, freezes=focus), fix) == set()
 
 
 def test_a_chain_claim_reports_the_seconds_from_the_merge_on_the_task_and_logs_it(store, home, shipped):
