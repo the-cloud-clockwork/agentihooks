@@ -83,6 +83,7 @@ from scripts.swarm import (
     failed_panes,
     idle,
     launch_check,
+    ledger_client,
     ledger_events,
     ledger_probe,
     ledger_watchdog,
@@ -90,6 +91,7 @@ from scripts.swarm import (
     merge_queue,
     metrics,
     naming,
+    outage,
     overlays,
     phase_planning,
     phase_state,
@@ -170,11 +172,13 @@ def now_ms():
 
 
 @timing.instrument_tick
+@outage.guard_tick
 def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=False):
     from scripts.swarm import command_runner, commands, controller, incidents, lease
 
     ledger = ledger or LedgerClient()
     outbox.flush(InboxStore(store.redis))
+    runtime = runtime or routed(herdr=HerdrRuntime())
     held = lease.acquire(store, slug, commands.hive_id())
     if held is None:
         return ["the swarm belongs to another hive"]
@@ -183,6 +187,11 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
         return ["another tick is running"]
     keeping = timing.BEFORE_STEP.set(lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS))
     try:
+        outage.providers(store, slug, runtime, now_ms())
+        if isinstance(ledger, ledger_client.LedgerClient) and not outage.ledger_health(
+            slug, now_ms(), lambda: isinstance(ledger.metadata(slug), dict)
+        ):
+            return ["Ledger health probe failed"]
         ledger = controller.FencedLedger(store, slug, held, ledger)
         runtime = controller.FencedRuntime(
             store,
@@ -326,6 +335,7 @@ def _tick_while_others_run(store, slug, firsts, until):
         _tick_one(store, slug)
 
 
+@outage.guard_command
 def cmd_tick(store, args):
     from scripts import operator_env
 
@@ -826,6 +836,7 @@ def cmd_status(store, args):
         store.config(args.slug)
         print(json.dumps(status_report(store, args.slug, LedgerClient().state(args.slug))))
         return
+    outage.show(args.slug, False)
     config = store.config(args.slug)
     agents = store.agents(args.slug)
     ledger = LedgerClient()
@@ -1389,7 +1400,12 @@ def cmd_confirm_handoff(store, args):
 
 def cmd_restore_decision(store, args):
     from scripts.swarm import resume
+    from scripts.swarm_v2 import restore_decisions
 
+    target = next((a for a in store.agents(args.slug) if a.name == store.names.resolve(args.agent)), None)
+    if target is not None and target.runtime_backend == "kubernetes":
+        print(json.dumps(restore_decisions.decide(store, args.slug, target, args.choice, Who.from_env())))
+        return
     name = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME", "")
     if name not in {"", "operator"} and _me(store, args).lane != MASTER:
         raise SwarmError("Only the master or operator can choose resume or fresh")
@@ -1659,6 +1675,12 @@ def build_parser():
     return parser
 
 
+def _tick_store():
+    if why := timer.installed_refusal():
+        raise SwarmError(f"the tick refused to run: {why}")
+    return outage.connect_tick(connect, now_ms)
+
+
 def main(argv):
     if argv and argv[0] in ("list", "tick", "templates", "rename", "waker", "alerts"):
         handler, args = globals()[f"cmd_{argv[0]}"], argparse.Namespace()
@@ -1683,7 +1705,9 @@ def main(argv):
     from redis.exceptions import RedisError
 
     try:
-        store = connect()
+        store = _tick_store() if handler is cmd_tick else connect()
+        if store is None:
+            return 0
         if "slug" in args:
             args.slug = store.names.swarm_slug(args.slug)
         action = getattr(args, "command", "")
@@ -1695,6 +1719,8 @@ def main(argv):
         if action in control_notifications.CONTROLS:
             control_notifications.notify(store, args, LedgerClient(), before, action)
     except (SwarmError, InboxError, RedisError) as exc:
+        if handler is cmd_status and outage.show(args.slug, args.json):
+            return 0
         return failed(args, who, exc)
     return 0
 
