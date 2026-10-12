@@ -268,7 +268,7 @@ def _codex_launch(monkeypatch, tmp_path, pane, *extra, route="status=routed\nacc
     monkeypatch.setattr(herdr_host, "run", run)
     pane.attach(monkeypatch)
     pane.check = lambda environ: environ.get("HOME") == str(tmp_path)
-    monkeypatch.setattr(herdr_host.time, "sleep", lambda seconds: None)
+    Clock(monkeypatch)
 
     def codex_named(environ, name, since):
         opened.append((environ.get("HOME"), name, since))
@@ -615,12 +615,11 @@ def test_reading_a_pane_without_herdr_is_an_error(monkeypatch):
 
 def test_ready_needs_two_ready_reads_in_a_row_because_codex_reads_idle_before_its_startup(monkeypatch):
     pane = CodexPane(["unknown", "idle", "working", "working", "done", "done"])
-    slept = []
     pane.attach(monkeypatch)
-    monkeypatch.setattr(herdr_host.time, "sleep", slept.append)
+    clock = Clock(monkeypatch)
     assert herdr_host.wait_ready("w1:p2", ENV, 60) is True
     assert pane.calls == [["agent", "get", "w1:p2"]] * 6
-    assert slept == [herdr_host.READY_SETTLE_S] * 5 and herdr_host.READY_SETTLE_S == 1.5
+    assert clock.slept == [herdr_host.READY_SETTLE_S] * 5 and herdr_host.READY_SETTLE_S == 1.5
 
 
 def test_ready_gives_up_at_its_deadline(monkeypatch):
