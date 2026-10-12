@@ -212,6 +212,20 @@ def test_host_keys_are_kept_per_swarm():
     )
 
 
+def test_forgetting_a_host_key_drops_only_that_execution_in_that_swarm():
+    shared = store()
+    keys = HostKeys(shared)
+    keys.record(Scope("grant/x", "fixture-swarm", EXE_A, 2), "ssh-ed25519 AAAA-a")
+    keys.record(Scope("grant/y", "fixture-swarm", "exe-" + "b" * 32, 1), "ssh-ed25519 AAAA-b")
+    keys.record(Scope("grant/z", "other", EXE_A, 1), "ssh-ed25519 AAAA-o")
+
+    keys.forget("fixture-swarm", EXE_A)
+    keys.forget("fixture-swarm", EXE_A)
+
+    assert list(shared.redis.hgetall(shared.key("fixture-swarm", "terminal-host-keys"))) == ["exe-" + "b" * 32]
+    assert keys.launched("other", EXE_A) == Launched(EXE_A, 1, "ssh-ed25519 AAAA-o")
+
+
 EXE_B = "exe-" + "b" * 32
 EXE_C = "exe-" + "c" * 32
 
@@ -351,8 +365,8 @@ def launch() -> dict:
 
 
 def test_exposure_on_gives_the_rendered_pod_the_terminal_mount_and_port():
-    plain = PodTemplate(policy()).render(launch())
-    rendered = TerminalTemplate(PodTemplate(policy())).render(launch())
+    plain = PodTemplate(policy(), "agentihooks-swarm-fixture").render(launch())
+    rendered = TerminalTemplate(PodTemplate(policy(), "agentihooks-swarm-fixture")).render(launch())
 
     execution = launch()["execution_id"]
     container = rendered.pod["spec"]["containers"][0]
@@ -367,14 +381,14 @@ def test_exposure_on_gives_the_rendered_pod_the_terminal_mount_and_port():
 
 
 def test_exposure_off_renders_the_pod_unchanged():
-    plain = PodTemplate(policy()).render(launch())
+    plain = PodTemplate(policy(), "agentihooks-swarm-fixture").render(launch())
 
     assert "ports" not in plain.pod["spec"]["containers"][0]
     assert all(volume["name"] != "terminal" for volume in plain.pod["spec"]["volumes"])
 
 
 def test_the_terminal_template_refuses_what_the_pod_template_refuses():
-    template = PodTemplate(policy())
+    template = PodTemplate(policy(), "agentihooks-swarm-fixture")
 
     with pytest.raises(PodSpecRefused):
         TerminalTemplate(template).render({**launch(), "extra": 1})

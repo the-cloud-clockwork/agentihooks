@@ -193,7 +193,11 @@ def test_ledger_rows_are_collected_before_a_failing_swarm_collector(spool, sent,
 
     monkeypatch.setattr(metrics.metrics_ledger, "record", lambda box, slug, now_ms, ledger: order.append("ledger"))
     monkeypatch.setattr(metrics.metrics_swarm, "pull_rows", broken)
-    swarm = metrics.metrics_swarm.TickInput(None, {"tasks": []}, [], lambda url: None, None)
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    swarm = metrics.metrics_swarm.TickInput(store, {"tasks": []}, [], lambda url: None, None)
     assert metrics.record_pass("sw", NOW, 0, ON, swarm) == ["metrics outbox failed: bad swarm row"]
     assert order == ["ledger", "swarm"]
 
@@ -210,3 +214,33 @@ def test_a_ledger_without_tasks_still_names_the_bottleneck(spool, sent, monkeypa
     swarm = metrics.metrics_swarm.TickInput(store, {}, [], lambda url: None, None)
     assert metrics.record_pass("sw", NOW, 0, ON, swarm) == []
     assert bottleneck.read(store, "sw")["bottleneck"] == ""
+
+
+def test_a_swarm_pass_measures_the_stages_of_the_ledger_tasks_and_reports_a_fleet_failure(spool, sent, monkeypatch):
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 0, 0, template="doctor"))
+    seen = []
+
+    def broken(*args):
+        raise SwarmError("registry down")
+
+    monkeypatch.setattr(metrics.metrics_swarm, "pull_rows", lambda box, now_ms, swarm: {})
+    monkeypatch.setattr(metrics.metrics_swarm, "record_pass", lambda *args: None)
+    monkeypatch.setattr(
+        metrics.stage_detector,
+        "record",
+        lambda box, store, slug, now_ms, tasks, environ, ready: seen.append((tasks, [ready(t) for t in tasks])),
+    )
+    monkeypatch.setattr(metrics.metrics_fleet, "record", broken)
+    tasks = [{"id": f"t{n}", "state": "open", "phase": phase} for n, phase in ((1, "p2"), (2, "p2"), (3, "p1"))]
+    doc = {"tasks": tasks, "freezes": [{"verb": "freeze", "target": "tasks/t2"}]}
+    monkeypatch.setattr(
+        metrics.freeze,
+        "watched",
+        lambda slug, store, ledger, doc: {**doc, metrics.freeze.WATCHED: ["the focus on t9 in the watched swarm"]},
+    )
+    swarm = metrics.metrics_swarm.TickInput(store, doc, [], lambda url: None, None)
+    assert metrics.record_pass("sw", NOW, 0, ON, swarm) == ["fleet metrics failed: registry down"]
+    assert seen == [(tasks, [True, False, False])]

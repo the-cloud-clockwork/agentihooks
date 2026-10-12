@@ -11,6 +11,7 @@ from scripts import account_names
 START = "# ===AGENTIHOOKS-AICODING-TOKENS==="
 END = "# ===AGENTIHOOKS-AICODING-TOKENS-END==="
 REFRESH_FLAG = "AGENTIHOOKS_AICODE_TOKEN_REFRESH"
+TOKEN_EXPORTS = ("AH_CC_TOKEN_", "AH_CX_TOKEN_")
 RESERVED = ("api", "default", "help", "status")
 SLUG_RULE = (
     "slug is lowercased, '@' becomes 'at' and every other character outside a-z and 0-9 becomes '_'; "
@@ -73,6 +74,22 @@ def _blocks(lines: list[str]) -> list[tuple[int, int]]:
 
 def has_block(text: str) -> bool:
     return bool(_blocks(text.splitlines()))
+
+
+def token_exports(text: str) -> dict[str, str]:
+    lines = text.splitlines()
+    found = {}
+    for start, end in _blocks(lines):
+        for line in lines[start + 1 : end]:
+            try:
+                words = shlex.split(line)
+            except ValueError:
+                continue
+            if len(words) == 2 and words[0] == "export":
+                name, _, value = words[1].partition("=")
+                if value and name.startswith(TOKEN_EXPORTS):
+                    found.setdefault(name, value)
+    return found
 
 
 def _exported(line: str) -> str | None:

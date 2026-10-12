@@ -2,6 +2,7 @@
 attempt's task waits on recovery on the ledger."""
 
 from collections.abc import Callable
+from functools import partial
 from typing import TYPE_CHECKING, Protocol
 
 from scripts.swarm import lease
@@ -14,8 +15,11 @@ if TYPE_CHECKING:
 
 LAUNCHED = "attempt-replacement-launches"
 MARKED = "recovery-pending-tasks"
+RECOVERY = "recovery"
+RECORDED = "attempt-recovery-records"
 CLEARED = ""
 SUPERSEDED = "superseded"
+DEFERRED = "deferred"
 STARTED = (Status.OK, Status.AMBIGUOUS)
 
 
@@ -40,6 +44,7 @@ class Replacements:
             if decision is not None and decision.replacement:
                 launched[execution_id] = self._launch(decision)
         self._mark()
+        self._record()
         return launched
 
     def _key(self, name: str) -> str:
@@ -55,6 +60,7 @@ class Replacements:
         self.controller.require()
         if occupant.execution_id != successor.execution_id:
             self._launched(decision)
+            self.store.redis.hset(self._key(RECORDED), decision.execution_id, SUPERSEDED)
             return SUPERSEDED
         task = {
             "id": successor.task,
@@ -63,11 +69,40 @@ class Replacements:
             "controller_epoch": self.controller.held.epoch,
             "checkpoint": decision.checkpoint,
         }
+        if not decision.checkpoint:
+            try:
+                task = {**self._row(successor.task), **task}
+            except SwarmError as error:
+                print(f"controller: the ledger refused the read of task {successor.task}: {error}", flush=True)
+                return DEFERRED
         request = SpawnRequest(self.store.config(self.slug), successor.lane, successor.name, task)
         outcome = self.relaunch(request, successor).outcome
         if outcome.status in STARTED:
             self._launched(decision)
         return outcome.status.value
+
+    def _row(self, task: str) -> dict:
+        return next((row for row in self.ledger.state(self.slug)["tasks"] if row["id"] == task), {})
+
+    def _record(self) -> None:
+        for execution_id, successor in sorted(self.store.redis.hgetall(self._key(LAUNCHED)).items()):
+            agent = self.store.execution(self.slug, successor)
+            if self.store.execution_occupants(self.slug)[agent.seat].execution_id != successor:
+                self.store.redis.hset(self._key(RECORDED), execution_id, SUPERSEDED)
+                continue
+            outcome = self.recovery.outcome(successor)
+            recorded = self.store.redis.hget(self._key(RECORDED), execution_id)
+            if recorded == SUPERSEDED or recorded == "verified" or (recorded == "accepted" and outcome is None):
+                continue
+            directive = self.recovery.restore(successor)
+            if directive is not None:
+                value = outcome or {**directive, "status": "accepted"}
+                task = self.store.execution(self.slug, successor).task
+                self._ledgered(task, partial(self._recovered, execution_id, value))
+
+    def _recovered(self, execution_id: str, restore: dict, task: str) -> None:
+        self.ledger.update_task(self.slug, task, {RECOVERY: restore})
+        self.store.redis.hset(self._key(RECORDED), execution_id, restore["status"])
 
     def _launched(self, decision: Decision) -> None:
         self.controller.require()
@@ -75,6 +110,12 @@ class Replacements:
 
     def _mark(self) -> None:
         waiting = {self.store.execution(self.slug, execution_id).task for execution_id in self._unlaunched()}
+        for execution_id, successor in self.store.redis.hgetall(self._key(LAUNCHED)).items():
+            if (
+                self.store.redis.hget(self._key(RECORDED), execution_id) != SUPERSEDED
+                and self.recovery.outcome(successor) is None
+            ):
+                waiting.add(self.store.execution(self.slug, successor).task)
         marked = set(self.store.redis.hkeys(self._key(MARKED)))
         for task in sorted(waiting - marked):
             self._ledgered(task, self._hold)

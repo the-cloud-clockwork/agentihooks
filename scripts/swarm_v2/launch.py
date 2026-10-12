@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Protocol
 
 from hooks.context.profile_chain import PACKAGE_ROLES
-from scripts.swarm import live_binding, profile_choice
+from scripts.swarm import live_binding, profile_choice, prompt
 from scripts.swarm.store import AgentRecord, SwarmError
 from scripts.swarm_v2 import broadcast_bridge, worker_home
 from scripts.swarm_v2.accounts import ACCOUNT_FULL, AccountCapacity, Slot
@@ -35,7 +35,7 @@ Ending = Callable[[AgentRecord, str], AgentRecord]
 
 
 class WorkerHomes(Protocol):
-    def hand(self, agent: AgentRecord, grant: str) -> Hand: ...
+    def hand(self, agent: AgentRecord, grant: str, opening: str) -> Hand: ...
 
 
 @dataclass(frozen=True)
@@ -44,7 +44,7 @@ class WorkerHomeCommand:
 
     root: Path
 
-    def hand(self, agent: AgentRecord, grant: str) -> Hand:
+    def hand(self, agent: AgentRecord, grant: str, opening: str = "") -> Hand:
         attempt = self.root / agent.execution_id
         command = [sys.executable, "-m", "scripts.swarm_v2.worker_home", "grant", str(attempt)]
         try:
@@ -84,6 +84,14 @@ def seat_profile(request: SpawnRequest) -> str:
     return decision.profile
 
 
+def opening(request: SpawnRequest) -> str:
+    config = request.config
+    role = config.lanes.get(request.lane, {}).get("role", "")
+    return prompt.build(
+        config.slug, config.repo, request.lane, request.name, request.task, role=role, autonomy=config.autonomy
+    )
+
+
 def worker_profiles() -> set[str]:
     roles = {path.name for path in PACKAGE_ROLES.iterdir() if path.is_dir() and not path.name.startswith("_")}
     return {WORKER_DEFAULT, *roles}
@@ -121,16 +129,22 @@ class DistributedLaunch:
         self.slug = capacity.slug
         self.accounts: AccountChooser | None = None
         self.planned: PlannedAccount | None = None
+        self.opening: Callable[[SpawnRequest], str] = opening
 
-    def spawn(self, request: SpawnRequest, agent: AgentRecord, terms: LaunchTerms, previous: str) -> Launch:
+    def spawn(
+        self, request: SpawnRequest, agent: AgentRecord, terms: LaunchTerms, previous: str, opening: str
+    ) -> Launch:
         admitted = self.controller.admit(replace(agent, account=terms.account), previous)
-        return self._place(request, admitted, terms, self.end_refused)
+        return self._place(request, admitted, terms, self.end_refused, opening)
 
     def relaunch(self, request: SpawnRequest, admitted: AgentRecord, terms: LaunchTerms) -> Launch:
         """A refused relaunch leaves its replacement unended, so the next recovery pass places it again."""
-        return self._place(request, admitted, replace(terms, account=admitted.account), kept)
+        opening = "" if request.task.get("checkpoint") else self.opening(request)
+        return self._place(request, admitted, replace(terms, account=admitted.account), kept, opening)
 
-    def _place(self, request: SpawnRequest, admitted: AgentRecord, terms: LaunchTerms, refused: Ending) -> Launch:
+    def _place(
+        self, request: SpawnRequest, admitted: AgentRecord, terms: LaunchTerms, refused: Ending, opening: str
+    ) -> Launch:
         grant = self.grants.issue(
             self.slug,
             admitted.execution_id,
@@ -151,13 +165,14 @@ class DistributedLaunch:
             "execution_id": admitted.execution_id,
             "generation": admitted.generation,
             "account": terms.account,
+            "profile": admitted.profile,
             "endpoints": {broadcast_bridge.API_URL: terms.api_url},
         }
         outcome = self.router.spawn(replace(request, task={**request.task, **identity}))
         if outcome.status in NOT_LAUNCHED:
             self.exited(admitted)
             return Launch(admitted, grant, slot, outcome)
-        hand = self.homes.hand(admitted, grant)
+        hand = self.homes.hand(admitted, grant, opening)
         store = self.controller.store
         store.redis.hset(store.key(self.slug, HANDS), admitted.execution_id, json.dumps(asdict(hand)))
         if hand.handed or outcome.status is Status.AMBIGUOUS:
@@ -198,7 +213,7 @@ class DistributedLaunch:
         occupant = store.execution_occupants(self.slug).get(agent.seat)
         refused = occupant and store.redis.hexists(store.key(self.slug, ENDINGS), occupant.execution_id)
         previous = occupant.execution_id if refused else ""
-        return self.spawn(request, agent, replace(terms, api_url=api_url), previous).outcome
+        return self.spawn(request, agent, replace(terms, api_url=api_url), previous, self.opening(request)).outcome
 
     def end_refused(self, agent: AgentRecord, reason: str) -> AgentRecord:
         store, ended = self.controller.store, replace(agent, state=ENDED)

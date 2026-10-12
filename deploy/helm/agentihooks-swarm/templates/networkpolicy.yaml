@@ -70,4 +70,23 @@ spec:
       ports:
         - port: api
 {{- end }}
+{{- if .Values.controller.jump.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-controller-jump
+  labels:
+    {{- include "swarm.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "swarm.selector" (dict "root" . "component" "controller") | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        {{- toYaml .Values.controller.jump.ingressFrom | nindent 8 }}
+      ports:
+        - port: jump
+{{- end }}
 {{- end }}

@@ -1,0 +1,44 @@
+{
+  "assertions": {
+    "fenced_generation": 1,
+    "ledger_recovery": {
+      "archive_watermark": 4096,
+      "checkpoint_id": "ckpt-1",
+      "command": [
+        "claude",
+        "--resume",
+        "5f0c1a2e-0000-4000-8000-00000000c1a0"
+      ],
+      "recovery": "native",
+      "session_id": "5f0c1a2e-0000-4000-8000-00000000c1a0",
+      "status": "verified",
+      "watermark": 41
+    },
+    "replacement_count": 1,
+    "restore_outcomes_by_type": {
+      "fresh": 0,
+      "native": 1,
+      "reconstructed": 0
+    },
+    "restored": {
+      "checkpoint_id": "ckpt-1",
+      "command": [
+        "claude",
+        "--resume",
+        "5f0c1a2e-0000-4000-8000-00000000c1a0"
+      ],
+      "recovery": "native",
+      "session_id": "5f0c1a2e-0000-4000-8000-00000000c1a0",
+      "watermark": 41
+    }
+  },
+  "case": "A",
+  "evidence_class": "mocked controller with real durable artifacts and native materialization",
+  "independent_fixtures": 2,
+  "input_sha256": {
+    "context-only.json": "0bef305b2565a336c5021606d2bf4b1a6f4b35f9cade44aee8c6720da27e5fda"
+  },
+  "mocked": true,
+  "package": "SV2-CKP-05",
+  "status": "passed"
+}

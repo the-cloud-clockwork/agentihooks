@@ -12,10 +12,12 @@ from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_link
 from scripts.swarm_ledger.repository.sqlite import DATABASE, SQLiteLedgerRepository
 from scripts.swarm_v2 import deployed, ledger_writer, operator_auth, telemetry
-from scripts.swarm_v2.api import health
+from scripts.swarm_v2.api import artifacts, health
 from scripts.swarm_v2.api.executions import ExecutionsAPI
+from scripts.swarm_v2.api.recovery import RecoveryAPI
 from scripts.swarm_v2.api.server import Routes, serve
 from scripts.swarm_v2.api.tasks import TasksAPI
+from scripts.swarm_v2.artifacts import remote
 from scripts.swarm_v2.auth_context import LaunchAuthority, LaunchKey
 from scripts.swarm_v2.authority import TaskAuthority
 from scripts.swarm_v2.controller import Controller
@@ -23,7 +25,7 @@ from scripts.swarm_v2.herdr.attach import ClientHome
 from scripts.swarm_v2.herdr.capabilities import runner
 from scripts.swarm_v2.herdr.upkeep import Upkeep, switched_on
 from scripts.swarm_v2.hosted_ledger import HostedLedger
-from scripts.swarm_v2.kubernetes import operator_terminal
+from scripts.swarm_v2.kubernetes import jump, operator_terminal
 from scripts.swarm_v2.kubernetes.client import ApiRefused
 from scripts.swarm_v2.kubernetes.runtime import PodStatus
 from scripts.swarm_v2.kubernetes.spec import pod_name
@@ -111,6 +113,8 @@ class ControlService:
         self.grants = LaunchAuthority(store, key, ISSUER, AUDIENCE)
         self.tasks = TaskAuthority(store, self.controller, lambda token: self.grants.bound(slug, token))
         self.executions = ExecutionsAPI(self.grants, self.tasks)
+        backend = remote.controller_backend(os.environ)
+        self.artifacts = None if backend is None else artifacts.ArtifactsAPI(backend, self.tasks)
         self.health = health.Health(store, slug, health.brain_probe(os.environ), self.controller)
         self.health_api = health.HealthAPI(self.health, self.grants, operator, health.deep_enabled())
         self.server: ThreadingHTTPServer | None = None
@@ -119,6 +123,13 @@ class ControlService:
         self.pods: Callable[[str], tuple[PodStatus, ...]] | None = None
         self.api_url = ""
         self.recover: Callable[[], dict[str, str]] | None = None
+        self.recovery_api = RecoveryAPI(
+            store,
+            slug,
+            lambda: getattr(self.recover, "recovery", None),
+            operator,
+            lambda token: self.grants.bound(slug, token),
+        )
         self.views: Callable[[], dict] | None = None
         self.viewing: threading.Thread | None = None
         self.tasks_api: TasksAPI | None = None
@@ -165,17 +176,25 @@ class ControlService:
         return [finding for finding in found if finding is not None]
 
     def _open(self) -> None:
+        store, slug = self.controller.store, self.controller.slug
         if self.listen is not None and self.server is None:
             if self.hosted_ledger is not None and self.tasks_api is None:
                 self.tasks_api = TasksAPI(self.grants, self.tasks, self.hosted_ledger)
             if self.ledger_folder is not None and self.tasks_api is None:
                 self.mount_ledger(self.ledger_folder)
             self.serve(*self.listen)
-            if self.api_url:
-                self.controller.store.update(self.controller.slug, api_url=self.api_url)
+            if self.api_url and slug not in store.slugs():
+                print(
+                    f"controller: serves the control API for {slug}, which does not exist yet; waits for it", flush=True
+                )
+        if self.server is not None and self.api_url and slug in store.slugs():
+            if store.config(slug).api_url != self.api_url:
+                store.update(slug, api_url=self.api_url)
 
     def serve(self, host: str, port: int) -> ThreadingHTTPServer:
-        self.server = serve(Routes(self.executions, self.tasks_api, health=self.health_api), host, port)
+        routes = Routes(self.executions, self.tasks_api, health=self.health_api, recovery=self.recovery_api)
+        routes.artifacts = self.artifacts
+        self.server = serve(routes, host, port)
         self.thread = threading.Thread(target=self.server.serve_forever, name=THREAD, daemon=True)
         self.thread.start()
         return self.server
@@ -209,7 +228,7 @@ def anton_client(environ: Mapping[str, str], slug: str, workers: deployed.Worker
         )
         return None
     home = ClientHome(Path.home())
-    return Upkeep(operator_terminal.terminal(slug, environ, home, runner(home.environment(dict(environ)))))
+    return Upkeep(operator_terminal.terminal(environ, home, runner(home.environment(dict(environ)))))
 
 
 def host(environ: Mapping[str, str], store: RedisStore, owner: str) -> ControlService | None:
@@ -239,10 +258,11 @@ def host(environ: Mapping[str, str], store: RedisStore, owner: str) -> ControlSe
     service.controller.terminals = anton_client(environ, slug, workers)
     service.listen = (HOST, int(port))
     if workers is not None:
+        service.controller.jump = jump.routes(environ, workers.policy["namespace"])
         service.api_url = workers.terms.api_url
         service.runtime = deployed.tick_runtime(service, workers, environ)
         service.pods = transports[0].status
-        service.recover = deployed.recovery_pass(service, workers, transports[0].api, LedgerClient())
+        service.recover = deployed.recovery_pass(service, workers, transports[0].api, LedgerClient(), environ)
         if service.controller.terminals is not None:
             service.views = deployed.terminal_views(service.controller, environ)
     if hosted:

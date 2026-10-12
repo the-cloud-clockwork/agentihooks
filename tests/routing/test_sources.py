@@ -95,18 +95,18 @@ def test_the_codex_source_marks_the_default_login_interactive_and_tokens_subscri
         seen.append(argv[-2:])
         return type("Done", (), {"returncode": 0})()
 
-    readings = {"default": _quota(10), "alpha": _quota(97), "beta": _quota(20, 99, NOW - 3600)}
+    readings = {"default": _quota(10), "alpha": _quota(97), "beta": _quota(20, 99, NOW - 6 * 3600 - 1)}
     monkeypatch.setattr(codex_router, "quotas", lambda pool, environ: {a.name: readings[a.name] for a in pool})
     source = codex_router.CodexAccountSource(status, {"default": 2}, refresh=False)
     assert source.slots(CODEX_ENV, NOW) == [Slot("codex", "alpha", 0, 0, NOW + 600, kind="subscription")]
     assert source.slots({"HOME": "/h"}, NOW) == [Slot("codex", "default", 6, 2, NOW + 600, kind="interactive")]
-    assert seen == []
+    assert seen == [["login", "status"]]
 
 
 def test_the_codex_source_refreshes_through_fresh_quotas_with_its_runner(monkeypatch):
     calls = []
     runner = object()
-    monkeypatch.setattr(codex_router, "routing_pool", lambda environ, *run: calls.append(("pool", run)) or [])
+    monkeypatch.setattr(codex_router, "accounts", lambda environ, *run: calls.append(("pool", run)) or [])
     monkeypatch.setattr(
         codex_router, "fresh_quotas", lambda pool, environ, now, *run: calls.append(("fresh", now, run)) or {}
     )

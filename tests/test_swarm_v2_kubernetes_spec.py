@@ -38,7 +38,7 @@ def write(tmp_path, doc, name="policy.json") -> Path:
 
 
 def render(launch: dict | None = None, policy: dict | None = None):
-    template = PodTemplate(policy or load_policy(POLICY))
+    template = PodTemplate(policy or load_policy(POLICY), "agentihooks-swarm-fixture")
     return template, template.render(launch or launch_doc())
 
 
@@ -114,6 +114,19 @@ def test_a_policy_without_a_brain_sets_only_the_account_token():
     assert rendered.pod["spec"]["containers"][0]["env"] == [TOKEN_ENV]
 
 
+def test_worker_git_app_credentials_are_only_secret_key_references():
+    policy = load_policy(POLICY)
+    policy["git_app_secret_name"] = "swarm-git-app"
+    _, rendered = render(policy=policy)
+    environ = rendered.pod["spec"]["containers"][0]["env"]
+    app = [entry for entry in environ if entry["name"].startswith("GITHUB_APP_")]
+    assert app == [
+        {"name": key, "valueFrom": {"secretKeyRef": {"name": "swarm-git-app", "key": key}}}
+        for key in ("GITHUB_APP_ID", "GITHUB_APP_INSTALLATION_ID", "GITHUB_APP_PRIVATE_KEY")
+    ]
+    assert rendered.pod["spec"]["volumes"] == render()[1].pod["spec"]["volumes"]
+
+
 def test_requests_come_from_the_admitted_launch_and_limits_from_the_profile():
     _, rendered = render()
     assert rendered.pod["spec"]["containers"][0]["resources"] == {
@@ -166,7 +179,7 @@ def test_the_worker_is_hardened_and_never_mounts_a_service_account_token():
     assert body["containers"][0]["securityContext"] == {
         "allowPrivilegeEscalation": False,
         "privileged": False,
-        "readOnlyRootFilesystem": True,
+        "readOnlyRootFilesystem": False,
         "capabilities": {"drop": ["ALL"]},
     }
 
@@ -190,8 +203,29 @@ def test_the_policy_runtime_class_reaches_the_pod():
     assert rendered.pod["spec"]["runtimeClassName"] == "kata-qemu"
 
 
+@pytest.mark.parametrize("runtime", ["kata-fc", "runc"])
+def test_worker_scratch_uses_the_root_disk_only_for_firecracker(runtime):
+    policy = policy_doc()
+    policy["runtime_class_name"] = runtime
+    template, rendered = render(policy=policy)
+    body = rendered.pod["spec"]
+    agent = body["containers"][0]
+    expected = [] if runtime == "kata-fc" else ["home", "tmp"]
+    assert [v["name"] for v in body["volumes"] if "emptyDir" in v] == expected
+    assert [m["name"] for m in agent["volumeMounts"] if m["mountPath"] in ("/home/worker", "/tmp")] == expected
+    assert agent["securityContext"]["readOnlyRootFilesystem"] is (runtime != "kata-fc")
+    assert agent["securityContext"]["allowPrivilegeEscalation"] is False
+    assert agent["securityContext"]["privileged"] is False
+    assert agent["securityContext"]["capabilities"] == {"drop": ["ALL"]}
+    assert body["securityContext"]["runAsUser"] == 10001
+    assert body["automountServiceAccountToken"] is False
+    assert template.shared_runtime_mount_rejections_total() == {}
+
+
 def test_volumes_are_private_scratch_and_the_launch_record_with_no_credential_mount():
-    _, rendered = render()
+    policy = policy_doc()
+    policy["runtime_class_name"] = "runc"
+    _, rendered = render(policy=policy)
     body = rendered.pod["spec"]
     assert body["volumes"] == [
         {"name": "home", "emptyDir": {"sizeLimit": "9216Mi"}},
@@ -382,7 +416,7 @@ REFUSALS = [
 
 @pytest.mark.parametrize(("change", "message", "reason"), [r[1:] for r in REFUSALS], ids=[r[0] for r in REFUSALS])
 def test_hostile_launches_are_refused_without_output_and_counted(change, message, reason):
-    template = PodTemplate(load_policy(POLICY))
+    template = PodTemplate(load_policy(POLICY), "agentihooks-swarm-fixture")
     doc = launch_doc()
     change(doc)
     before = copy.deepcopy(template.policy)
@@ -396,7 +430,7 @@ def test_hostile_launches_are_refused_without_output_and_counted(change, message
 
 
 def test_a_record_that_is_not_an_object_is_refused():
-    template = PodTemplate(load_policy(POLICY))
+    template = PodTemplate(load_policy(POLICY), "agentihooks-swarm-fixture")
     with pytest.raises(PodSpecRefused) as refused:
         template.render(["not", "a", "record"])
     assert str(refused.value) == "launch must be a JSON object"
@@ -404,7 +438,7 @@ def test_a_record_that_is_not_an_object_is_refused():
 
 
 def test_failures_accumulate_per_reason_and_success_counts_nothing():
-    template = PodTemplate(load_policy(POLICY))
+    template = PodTemplate(load_policy(POLICY), "agentihooks-swarm-fixture")
     template.render(launch_doc())
     assert template.pod_spec_validation_failures_total() == {}
     for profile in ("research", "memory"):
@@ -458,7 +492,7 @@ def test_render_does_not_mutate_the_launch_or_policy():
     snapshot = copy.deepcopy(policy)
     launch = launch_doc()
     before = copy.deepcopy(launch)
-    rendered = PodTemplate(policy).render(launch)
+    rendered = PodTemplate(policy, "agentihooks-swarm-fixture").render(launch)
     rendered.pod["spec"]["nodeSelector"]["x"] = "y"
     rendered.pod["spec"]["tolerations"][0]["key"] = "changed"
     rendered.pod["spec"]["affinity"]["nodeAffinity"]["requiredDuringSchedulingIgnoredDuringExecution"][
@@ -469,7 +503,7 @@ def test_render_does_not_mutate_the_launch_or_policy():
 
 
 def test_a_payload_that_refers_to_itself_is_refused():
-    template = PodTemplate(load_policy(POLICY))
+    template = PodTemplate(load_policy(POLICY), "agentihooks-swarm-fixture")
     doc = launch_doc()
     loop = {}
     loop["self"] = loop
@@ -559,10 +593,65 @@ def test_a_codex_launch_names_codex_in_its_probes_and_binds_its_own_provider_acc
     assert rendered.pod["metadata"]["labels"]["swarm.agentihooks.io/provider-account"] == "codex-fixtureatexample-com"
     assert token_env(rendered.pod) == [
         {
-            "name": "AH_CC_TOKEN_codex_fixtureatexample_com",
-            "valueFrom": {"secretKeyRef": {"name": "swarm-claude-creds", "key": "codex-fixtureatexample-com"}},
+            "name": "AH_CX_TOKEN_codex_fixtureatexample_com",
+            "valueFrom": {
+                "secretKeyRef": {"name": "swarm-codex-creds", "key": "AH_CX_TOKEN_codex_fixtureatexample_com"}
+            },
         }
     ]
+
+
+@pytest.mark.parametrize(
+    ("harness", "account", "expected"),
+    [
+        (
+            "codex",
+            "alpha-personal",
+            {
+                "name": "AH_CX_TOKEN_alpha_personal",
+                "valueFrom": {"secretKeyRef": {"name": "swarm-codex-creds", "key": "AH_CX_TOKEN_alpha_personal"}},
+            },
+        ),
+        (
+            "claude",
+            "claude-account",
+            {
+                "name": "AH_CC_TOKEN_claude_account",
+                "valueFrom": {"secretKeyRef": {"name": "swarm-claude-creds", "key": "claude-account"}},
+            },
+        ),
+    ],
+)
+def test_each_harness_uses_only_its_own_approval_reader_and_credential(harness, account, expected):
+    policy = load_policy(POLICY)
+    policy["provider_accounts"] = []
+    called = []
+    template = PodTemplate(
+        policy,
+        "agentihooks-swarm-fixture",
+        lambda: called.append("claude") or {"claude-account"},
+        codex_accounts=lambda: called.append("codex") or {"alpha-personal"},
+    )
+    doc = launch_doc()
+    doc.update(harness=harness, provider_account=account)
+    rendered = template.render(doc)
+    assert called == [harness]
+    assert token_env(rendered.pod) == [expected]
+
+
+def test_claude_approval_never_authorizes_a_codex_worker():
+    policy = load_policy(POLICY)
+    policy["provider_accounts"] = []
+    template = PodTemplate(
+        policy,
+        "agentihooks-swarm-fixture",
+        lambda: {"alpha-personal"},
+        codex_accounts=lambda: frozenset(),
+    )
+    doc = launch_doc()
+    doc.update(harness="codex", provider_account="alpha-personal")
+    with pytest.raises(PodSpecRefused, match="not an approved provider account"):
+        template.render(doc)
 
 
 KEY = "claude-fixtureatexample-com"
@@ -571,7 +660,7 @@ KEY = "claude-fixtureatexample-com"
 def keyed(*keys: str) -> PodTemplate:
     policy = load_policy(POLICY)
     policy["provider_accounts"] = []
-    return PodTemplate(policy, lambda: frozenset(keys))
+    return PodTemplate(policy, "agentihooks-swarm-fixture", lambda: frozenset(keys))
 
 
 def test_a_launch_whose_account_key_the_shared_secret_holds_is_admitted():
@@ -602,7 +691,7 @@ def test_against_the_shared_secret_keys_an_account_email_is_never_approved():
 def test_the_shared_secret_keys_are_read_again_at_each_render():
     keys = {KEY}
     policy = load_policy(POLICY)
-    template = PodTemplate(policy, lambda: frozenset(keys))
+    template = PodTemplate(policy, "agentihooks-swarm-fixture", lambda: frozenset(keys))
     doc = launch_doc()
     doc["provider_account"] = KEY
     template.render(doc)
@@ -827,14 +916,19 @@ def test_a_difference_outside_the_probes_is_reported():
 
 
 def test_the_command_line_renders_the_pod_as_sorted_json(capsys):
-    assert spec.main(["render", "--policy", str(POLICY), "--launch", str(LAUNCH)]) == 0
+    assert spec.main(["render", "--policy", str(POLICY), "--launch", str(LAUNCH), "--swarm", "fixture"]) == 0
     assert capsys.readouterr().out == json.dumps(render()[1].pod, sort_keys=True) + "\n"
 
 
 def test_the_command_line_refuses_a_hostile_launch_without_output(tmp_path, capsys):
     doc = launch_doc()
     doc["provider_account"] = "cluster-admin@token.io"
-    assert spec.main(["render", "--policy", str(POLICY), "--launch", str(write(tmp_path, doc, "l.json"))]) == 1
+    assert (
+        spec.main(
+            ["render", "--policy", str(POLICY), "--launch", str(write(tmp_path, doc, "l.json")), "--swarm", "fixture"]
+        )
+        == 1
+    )
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err == "launch provider_account is not an approved provider account\n"
@@ -844,9 +938,9 @@ def test_the_command_line_refuses_unreadable_inputs(tmp_path, capsys):
     missing = tmp_path / "missing.json"
     broken = tmp_path / "broken.json"
     broken.write_text("{not json")
-    assert spec.main(["render", "--policy", str(missing), "--launch", str(LAUNCH)]) == 1
+    assert spec.main(["render", "--policy", str(missing), "--launch", str(LAUNCH), "--swarm", "fixture"]) == 1
     assert capsys.readouterr().err == f"{missing} is not a readable JSON file\n"
-    assert spec.main(["render", "--policy", str(POLICY), "--launch", str(broken)]) == 1
+    assert spec.main(["render", "--policy", str(POLICY), "--launch", str(broken), "--swarm", "fixture"]) == 1
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err == f"{broken} is not a readable JSON file\n"
@@ -863,20 +957,26 @@ def test_an_unreadable_policy_is_refused_as_input(tmp_path):
 
 
 def test_the_command_line_digest_action_prints_the_spec_digest(capsys):
-    assert spec.main(["digest", "--policy", str(POLICY), "--launch", str(LAUNCH)]) == 0
+    assert spec.main(["digest", "--policy", str(POLICY), "--launch", str(LAUNCH), "--swarm", "fixture"]) == 0
     assert capsys.readouterr().out == render()[1].digest + "\n"
 
 
 def test_the_command_line_refuses_an_unknown_action(capsys):
-    assert spec.main(["apply", "--policy", str(POLICY), "--launch", str(LAUNCH)]) == 64
+    assert spec.main(["apply", "--policy", str(POLICY), "--launch", str(LAUNCH), "--swarm", "fixture"]) == 64
     assert " ".join(capsys.readouterr().err.split()).startswith(
-        "usage: python -m scripts.swarm_v2.kubernetes.spec [-h] --policy POLICY --launch LAUNCH {render,digest}"
+        "usage: python -m scripts.swarm_v2.kubernetes.spec [-h] --policy POLICY --launch LAUNCH --swarm SWARM {render,digest}"
     )
 
 
-@pytest.mark.parametrize("missing", ["--policy", "--launch"])
-def test_the_command_line_requires_both_inputs(missing):
-    argv = ["render", "--policy", str(POLICY), "--launch", str(LAUNCH)]
+def test_the_command_line_labels_the_pod_with_the_named_swarms_owner(capsys):
+    assert spec.main(["render", "--policy", str(POLICY), "--launch", str(LAUNCH), "--swarm", "other"]) == 0
+    labels = json.loads(capsys.readouterr().out)["metadata"]["labels"]
+    assert labels["swarm.agentihooks.io/controller-owner"] == "agentihooks-swarm-other"
+
+
+@pytest.mark.parametrize("missing", ["--policy", "--launch", "--swarm"])
+def test_the_command_line_requires_every_input(missing):
+    argv = ["render", "--policy", str(POLICY), "--launch", str(LAUNCH), "--swarm", "fixture"]
     index = argv.index(missing)
     del argv[index : index + 2]
     assert spec.main(argv) == 64
@@ -937,7 +1037,10 @@ def test_a_policy_bundle_is_copied_by_an_init_container_into_a_private_folder(tm
     assert init["imagePullPolicy"] == "Always"
     assert init["command"] == ["cp", "-R", "/bundle", "/linked", "/revision.json", spec.BUNDLE_DIR + "/"]
     assert init["volumeMounts"] == [{"name": "bundle", "mountPath": spec.BUNDLE_DIR}]
-    assert init["securityContext"] == pod["spec"]["containers"][0]["securityContext"]
+    assert init["securityContext"] == {
+        **pod["spec"]["containers"][0]["securityContext"],
+        "readOnlyRootFilesystem": True,
+    }
     assert "env" not in init and "envFrom" not in init
     assert {"name": "bundle", "emptyDir": {"sizeLimit": f"{spec.BUNDLE_MIB}Mi"}} in pod["spec"]["volumes"]
 

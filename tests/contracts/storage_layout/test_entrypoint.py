@@ -29,7 +29,9 @@ def spawn(spec_digest: str = "") -> Operation:
 
 def sender(tmp_path, *mounts) -> KubernetesTransport:
     document = policy(*mounts)
-    return KubernetesTransport(ApiServer(document["namespace"]), "fixture", PodTemplate(load(tmp_path, document)))
+    return KubernetesTransport(
+        ApiServer(document["namespace"]), "fixture", PodTemplate(load(tmp_path, document), "agentihooks-swarm-fixture")
+    )
 
 
 def test_the_pod_create_path_refuses_an_operator_home_mount_without_calling_the_api(tmp_path):

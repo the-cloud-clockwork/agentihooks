@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/worker/git_auth.py:scripts.swarm_v2.worker.git_auth.xǁGitHubAppAuthǁ__init____mutmut_13:6f19ef694d724abcfe030c497d74726277e7009d3f91d25d612ae25d2c46eba1": {
+    "reader": "standards-reader",
+    "reason": "None and empty string are falsy, so get_token never indexes either cache initialization. Successful paths replace both with the identical token and expiry tuple; failures return no credential. No public output differs. Approved by the independent Standards reader in round two."
+  }
+}

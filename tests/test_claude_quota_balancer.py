@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from scripts import claude_quota_balancer as balancer
+from scripts import claude_usage
 from scripts.routing import place
 from scripts.routing.slots import API, API_UNBOUNDED, INTERACTIVE, SUBSCRIPTION
 
@@ -119,6 +120,10 @@ def test_probe_passes_only_selected_oauth_token(monkeypatch):
         observed["env"] = kwargs["env"]
         return subprocess.CompletedProcess(command, 0, _stream(0.20, 0.30), "")
 
+    def unreachable(*args, **kwargs):
+        raise claude_usage.Unreachable
+
+    monkeypatch.setattr(claude_usage, "probe", unreachable)
     monkeypatch.setattr(balancer.subprocess, "run", run)
     credential = balancer.Credential("AH_CC_TOKEN_ALPHA", "selected-secret")
     result = balancer.probe_credential(
@@ -634,7 +639,7 @@ def test_todays_accounts_get_band_caps_and_the_next_session_rotates(monkeypatch,
         "tccgma": 6,
     }
     monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: (TODAY, "live"))
-    env = {f"AH_CC_TOKEN_{result.account}": "secret" for result in TODAY}
+    env = {f"AH_CC_TOKEN_{result.account}": f"tok-{result.account}" for result in TODAY}
     live = {"ncgma": 4, "nchotma": 2, "tccgma": 3}
     order = []
     for _ in range(4):

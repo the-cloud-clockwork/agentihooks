@@ -46,6 +46,9 @@
         "task_generation": {
           "$ref": "urn:swarm-v2:common#/$defs/generation"
         },
+        "execution_generation": {
+          "$ref": "urn:swarm-v2:common#/$defs/generation"
+        },
         "project_id": {
           "$ref": "urn:swarm-v2:common#/$defs/project_id"
         }

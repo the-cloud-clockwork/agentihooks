@@ -7,23 +7,13 @@ from pathlib import Path
 from scripts.ci_mutation.scope import discover_changes, graded_green, own_bases, select_tests
 from scripts.ci_mutation.selection import changed_mutations, file_seconds, part_files, stats_shards
 
-# Fitted on Tests runs 37890680008 and 37877992114: a mutant costs a pytest start plus a few covering tests.
-MUTANT_SECONDS = 3.0
-TEST_WEIGHT = 5.0
-UNTIMED_TEST_SECONDS = 1.0
+# Upper quartile of measured worker seconds per mutant; stored test timings did not predict the cost.
+MUTANT_SECONDS = 5.6
 WORKERS = 4
 
 
-def mean_test_seconds(durations: dict[str, float], tests: list[str]) -> float:
-    selected = set(tests)
-    timings = [seconds for nodeid, seconds in durations.items() if nodeid.partition("::")[0] in selected]
-    return sum(timings) / len(timings) if timings else UNTIMED_TEST_SECONDS
-
-
 def estimate(root: Path, changes: dict[str, set[int]]) -> tuple[float, int, list[str]]:
-    stored = root / ".test_durations"
-    durations = json.loads(stored.read_text()) if stored.is_file() else {}
-    seconds, mutants, tests = 0.0, 0, set()
+    mutants, tests = 0, set()
     for path, lines in changes.items():
         chosen = select_tests(root, Path(path))
         if not chosen:
@@ -31,10 +21,8 @@ def estimate(root: Path, changes: dict[str, set[int]]) -> tuple[float, int, list
         tests.update(chosen)
         _, mutations = changed_mutations(path, (root / path).read_text(), lines)
         # mutmut emits only mutants inside a function or method.
-        count = sum(1 for mutation in mutations if mutation.contained_by_top_level_function)
-        mutants += count
-        seconds += count * (MUTANT_SECONDS + TEST_WEIGHT * mean_test_seconds(durations, chosen))
-    return seconds, mutants, sorted(tests)
+        mutants += sum(1 for mutation in mutations if mutation.contained_by_top_level_function)
+    return mutants * MUTANT_SECONDS, mutants, sorted(tests)
 
 
 def shard_count(seconds: float, mutants: int, target: float, limit: int) -> int:
@@ -70,7 +58,8 @@ def main() -> int:
     root = Path.cwd()
     bases = own_bases(root, args.base, args.head, graded_green)
     print(f"Mutation bases: {' '.join(bases)}")
-    seconds, mutants, tests = estimate(root, discover_changes(root, bases, args.head))
+    changes = discover_changes(root, bases, args.head)
+    seconds, mutants, tests = estimate(root, changes)
     count = shard_count(seconds, mutants, args.target, args.limit)
     parts, stats = stats_part_count(root, tests, args.stats_target, args.limit)
     print(
@@ -82,6 +71,7 @@ def main() -> int:
             stream.write(f"shards={json.dumps(list(range(count)))}\n")
             stream.write(f"stats_parts={json.dumps(list(range(parts)))}\n")
             stream.write(f"bases={','.join(bases)}\n")
+            stream.write(f"changed={len(changes)}\n")
     return 0
 
 

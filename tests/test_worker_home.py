@@ -137,6 +137,31 @@ def test_bootstrap_renders_both_targets_into_separate_homes(fixture):
     assert "AH_CC_TOKEN_POOL_A" not in claude_text + codex_text
 
 
+@pytest.mark.parametrize("attempt_id", ["attempt-1", "attempt-2"])
+def test_bootstrap_completes_native_claude_onboarding(fixture, attempt_id):
+    from scripts.claude_config import claude_json
+
+    templates, volume = fixture
+    record = worker_home.bootstrap(request(templates, volume, attempt=attempt_id))
+    home = volume / attempt_id / record["homes"]["claude"]
+    state = claude_json({"HOME": str(home), "CLAUDE_CONFIG_DIR": str(home / ".claude")})
+    assert json.loads(state.read_text())["hasCompletedOnboarding"] is True
+    assert state.parent.stat().st_mode & 0o777 == 0o700
+    assert not (volume / attempt_id / record["homes"]["codex"] / ".claude").exists()
+
+
+def test_accepted_worker_replay_preserves_native_onboarding_state(fixture):
+    templates, volume = fixture
+    req = request(templates, volume)
+    worker_home.bootstrap(req)
+    state = volume / req.attempt / "homes" / "claude" / ".claude" / ".claude.json"
+    doc = json.loads(state.read_text())
+    doc.update(theme="light", numStartups=3)
+    state.write_text(json.dumps(doc))
+    assert worker_home.bootstrap(req)["reused"] is True
+    assert json.loads(state.read_text()) == doc
+
+
 def test_bootstrap_allocates_the_layout_seals_seeds_and_records_relative_paths(fixture):
     templates, volume = fixture
     record = worker_home.bootstrap(request(templates, volume))

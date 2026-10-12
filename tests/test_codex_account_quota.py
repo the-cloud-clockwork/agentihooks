@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import time
+from dataclasses import replace
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
@@ -104,7 +105,7 @@ def test_windows_are_read_only_from_the_default_codex_limit_family():
 def test_a_fresh_blocked_reading_takes_no_session_and_a_stale_one_is_unknown():
     blocked = CodexQuota(observed_at=NOW, plan_type="?", reached=DEPLETED)
     assert codex_router.account_cap(blocked, NOW) == 0
-    assert codex_router.account_cap(blocked, NOW + 901) is None
+    assert codex_router.account_cap(blocked, NOW + 6 * 3600 + 1) is None
     full = CodexQuota(NOW, "pro", seven_day=QuotaWindow(used=10.0, resets_at=NOW + 6000), reached=DEPLETED)
     assert codex_router.account_cap(full, NOW) == 0
 
@@ -186,7 +187,7 @@ def test_an_option_value_ahead_of_a_server_is_not_taken_for_the_subcommand(flag,
 
 def test_rows_say_stale_unknown_and_blocked_and_never_carry_a_stale_cap():
     accounts = [CodexAccount("default"), CodexAccount("alpha", "AH_CX_TOKEN_alpha"), CodexAccount("beta", "x")]
-    stale = CodexQuota(NOW - 901, "pro", QuotaWindow(10.0, NOW + 60), QuotaWindow(20.0, NOW + 6000))
+    stale = CodexQuota(NOW - 6 * 3600 - 1, "pro", QuotaWindow(10.0, NOW + 60), QuotaWindow(20.0, NOW + 6000))
     blocked = CodexQuota(NOW - 120.5, "?", reached=DEPLETED)
     rows = agents_quota.codex_rows(accounts, {"default": stale, "alpha": blocked}, {"alpha": 1}, NOW)
     assert [(row.account, row.state, row.cap, row.sessions) for row in rows] == [
@@ -194,10 +195,29 @@ def test_rows_say_stale_unknown_and_blocked_and_never_carry_a_stale_cap():
         ("alpha", "BLOCKED", 0, 1),
         ("beta", "UNKNOWN", None, 0),
     ]
-    assert [(row.five_hour_left, row.seven_day_left) for row in rows] == [(90.0, 80.0), (None, None), (None, None)]
-    assert rows[0].source == "session-log 15m ago"
+    assert [(row.five_hour_left, row.seven_day_left) for row in rows] == [(None, 80.0), (None, None), (None, None)]
+    assert rows[0].source == "session-log 6h00m ago"
     assert rows[1].source == f"session-log 2m ago, {DEPLETED}"
     assert rows[2].source == "no session log"
+
+
+def test_an_old_reading_keeps_its_week_state_and_cap_without_its_old_five_hour_window(monkeypatch):
+    monkeypatch.delenv("AGENTIHOOKS_CODEX_READING_MAX_AGE_H", raising=False)
+    hot = CodexQuota(NOW - 3600, "pro", QuotaWindow(95.0, NOW + 60), QuotaWindow(20.0, NOW + 6000))
+    reset = CodexQuota(NOW - 3600, "pro", seven_day=QuotaWindow(99.0, NOW - 1))
+    fresh = replace(hot, observed_at=NOW - 60)
+    accounts = [CodexAccount("default"), CodexAccount("alpha", "AH_CX_TOKEN_alpha"), CodexAccount("beta", "x")]
+    rows = agents_quota.codex_rows(accounts, {"default": hot, "alpha": reset, "beta": fresh}, {}, NOW)
+    assert [(row.account, row.state, row.cap) for row in rows] == [
+        ("default", "NORMAL", 6),
+        ("alpha", "NORMAL", 6),
+        ("beta", fresh.state_at(NOW), 6),
+    ]
+    assert fresh.state_at(NOW) != "NORMAL"
+    assert [row.five_hour_left for row in rows] == [None, None, 5.0]
+    short = {"AGENTIHOOKS_CODEX_READING_MAX_AGE_H": "0.5"}
+    [old] = agents_quota.codex_rows(accounts[:1], {"default": hot}, {}, NOW, short)
+    assert (old.state, old.cap) == ("STALE", None)
 
 
 def test_a_window_whose_reset_has_passed_reads_full_and_unused():
@@ -225,23 +245,8 @@ def test_two_accounts_render_both_windows_their_resets_and_the_reading_age():
     accounts = [CodexAccount("alpha", "AH_CX_TOKEN_alpha"), CodexAccount("beta", "AH_CX_TOKEN_beta")]
     rows = agents_quota.codex_rows(accounts, {"alpha": alpha, "beta": beta}, {"alpha": 1, "beta": 2}, NOW)
     table = agents_quota.render(agents_quota.mark_next(rows, "beta"), now=NOW).splitlines()
-    assert table[1].split() == [
-        "codex",
-        "alpha",
-        "subscription",
-        "DRAIN",
-        "1/0",
-        "-",
-        "0",
-        "80%",
-        "1h00m",
-        "3%",
-        "1d00h",
-        "session-log",
-        "1m",
-        "ago",
-    ]
     assert table[2].split() == [
+        "1",
         "codex",
         "beta",
         agents_quota.NEXT_MARK,
@@ -250,13 +255,26 @@ def test_two_accounts_render_both_windows_their_resets_and_the_reading_age():
         "2/6",
         "-",
         "6",
+        "60%",
         "30%",
         "30m",
         "60%",
         "4d15h",
-        "session-log",
-        "0m",
-        "ago",
+    ]
+    assert table[3].split() == [
+        "2",
+        "codex",
+        "alpha",
+        "subscription",
+        "DRAIN",
+        "1/0",
+        "-",
+        "0",
+        "3%",
+        "80%",
+        "1h00m",
+        "3%",
+        "1d00h",
     ]
 
 
@@ -269,8 +287,8 @@ def test_the_account_open_placement_picks_next_is_marked():
     assert [row.selected for row in marked] == [False, True]
     assert agents_quota.mark_next(rows, "") == rows
     table = agents_quota.render(marked, now=NOW).splitlines()
-    assert table[1].startswith("codex  alpha" + " " * 8 + "subscription")
-    assert table[2].startswith("codex  beta (next)  subscription")
+    assert table[2].startswith("1  codex    alpha" + " " * 8 + "subscription")
+    assert table[3].startswith("2  codex    beta (next)  subscription")
 
 
 def test_next_account_is_open_placement_over_unrefused_accounts():
@@ -297,6 +315,7 @@ def test_next_account_hands_select_the_usable_pool_and_the_environment(monkeypat
 
 
 def test_the_codex_rows_mark_the_account_placement_picks_from_live_readings(monkeypatch):
+    monkeypatch.setenv("AH_CX_TOKEN_alpha", "alpha-token")
     pool = [CodexAccount("default"), CodexAccount("alpha", "AH_CX_TOKEN_alpha")]
     quotas = {"alpha": CodexQuota(NOW, "pro", seven_day=QuotaWindow(10.0, NOW + 6000))}
     seen = []
@@ -343,7 +362,7 @@ def test_two_concurrent_accounts_read_count_and_place_apart(tmp_path, monkeypatc
     assert launched["env"]["AH_CX_TOKEN_beta"] == env["AH_CX_TOKEN_beta"]
     assert "AH_CX_TOKEN_alpha" not in launched["env"]
     assert launched["env"][codex_router.ACCOUNT_ID_ENV] == "acct-b"
-    assert launched["argv"][-2:] == ["exec", "ok"]
+    assert launched["argv"][2:] == ["exec", *codex_router.bearer_overrides(), "ok"]
     assert probes == []
 
 
@@ -388,6 +407,7 @@ def test_probes_and_classifier_calls_hold_no_slot_while_a_routed_launch_inside_o
         return subprocess.CompletedProcess(argv, 1, "", "")
 
     env = {"HOME": str(tmp_path), "AH_CX_TOKEN_alpha": _jwt("acct-a")}
+    monkeypatch.setattr(codex_router.codex_usage, "read", lambda *a, **k: None)
     assert codex_router.probe(CodexAccount("alpha", "AH_CX_TOKEN_alpha"), env, run) is None
     monkeypatch.setattr(fallbacks.subprocess, "run", run)
     with pytest.raises(BackendFailure):

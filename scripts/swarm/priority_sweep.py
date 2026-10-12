@@ -18,6 +18,7 @@ from scripts.swarm import ledger_events, naming
 PURPOSE = "priority-resolve"
 DISPATCHER = "dispatcher"
 CURSOR = "priority-cursor"
+JUDGED = "comments, answers and chat lines that might resolve a priority"
 PATH = re.compile(r"([a-z]+)/([^/]+)")
 CLEARED = "Priority cleared by the swarm: {reason}."
 OPERATOR = "operator"
@@ -52,7 +53,7 @@ def priority_pass(store, slug, doc, ledger, judge=None, github=None):
         actions.append(_cleared(row, reason))
         gone.add(row["id"])
     judged = set()
-    for row, write in _writes(doc, rows, ledger_events.new_events(store, slug, doc, CURSOR)):
+    for row, write in _writes(doc, rows, ledger_events.new_events(store, slug, doc, CURSOR, JUDGED)):
         if row["id"] in gone or (row["id"], write.text) in judged:
             continue
         judged.add((row["id"], write.text))

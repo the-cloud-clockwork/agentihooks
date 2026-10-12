@@ -335,6 +335,29 @@ def test_a_newer_attempt_of_the_same_task_verifies_an_earlier_checkpoint(native,
     assert reader.verify("ckpt-native-0001") == verdict(model.COMPLETE, model.NATIVE, model.NATIVE, (), True)
 
 
+def test_distinct_task_and_execution_generations_validate_against_their_own_sources(tmp_path, native):
+    target = store(tmp_path, generation=7)
+    doc = native["manifest"]
+    doc["authority"]["task_generation"] = 7
+    doc["authority"]["execution_generation"] = 2
+    doc["reconstruction"]["execution_generation"] = 2
+    upload(target, native)
+    validator = model.Validator(target, execution_generation=2)
+    assert validator.commit(doc).authoritative
+    assert validator.verify(doc["checkpoint_id"]).authoritative
+    mismatched = model.Validator(target, execution_generation=3)
+    assert mismatched.verify(doc["checkpoint_id"]).reason == "scope_mismatch"
+
+
+def test_an_old_record_keeps_its_generation_compatibility(tmp_path, native):
+    target = store(tmp_path)
+    upload(target, native)
+    validator = model.Validator(target)
+    assert "execution_generation" not in native["manifest"]["authority"]
+    assert validator.commit(native["manifest"]).authoritative
+    assert model.Validator(target, execution_generation=9).verify(native["manifest"]["checkpoint_id"]).authoritative
+
+
 def test_another_task_cannot_see_the_checkpoint(native, tmp_path):
     writer = store(tmp_path)
     upload(writer, native)

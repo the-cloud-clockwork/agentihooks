@@ -62,7 +62,7 @@ def fixture(monkeypatch):
     second = RedisStore(fakeredis.FakeRedis(server=server, decode_responses=True))
     first.create(SwarmConfig("fixture", "agentihooks", 1, 0))
     clock = [1000]
-    monkeypatch.setattr(lease, "now_ms", lambda store: clock[0])
+    monkeypatch.setattr("time.time", lambda: clock[0] / 1000)
     transport = Transport()
     grant = {"allowed": True}
     controllers = tuple(
@@ -170,6 +170,21 @@ def test_revoked_grant_blocks_cached_authority(fixture):
     with pytest.raises(SwarmError):
         first.admit(agent(store))
     assert store.execution_registry.records("fixture") == []
+    assert transport.creations == 0
+
+
+def test_a_renewal_refused_its_grant_closes_admission_until_a_granted_renewal(fixture):
+    store, (first, _), transport, _, grant = fixture
+    assert first.acquire()
+    grant["allowed"] = False
+    with pytest.raises(SwarmError, match="^a scoped controller grant is required$"):
+        first.renew()
+    assert first.ready is False
+    grant["allowed"] = True
+    with pytest.raises(SwarmError, match="^controller admission is disabled until reconciliation completes$"):
+        first.admit(agent(store))
+    assert first.renew() is True
+    assert first.admit(agent(store)).generation == 1
     assert transport.creations == 0
 
 
@@ -732,6 +747,36 @@ def test_a_renew_tick_whose_account_reconcile_fails_leaves_admission_closed(acco
     assert controller.ready is False
 
 
+def test_a_grant_revoked_while_the_lease_renews_releases_nothing_and_closes_admission(accounts, monkeypatch):
+    controller = accounts.authority.controller
+    renew = lease.renew
+    accounts.clock[0] += TTL
+    before = accounts.rows()
+
+    def revoked(store, slug, held):
+        monkeypatch.setattr(controller, "authorize", lambda: False)
+        return renew(store, slug, held)
+
+    monkeypatch.setattr(lease, "renew", revoked)
+    with pytest.raises(SwarmError, match="^a scoped controller grant is required$"):
+        controller.renew()
+    assert controller.ready is False
+    assert accounts.rows() == before
+
+
+def test_an_interrupted_renewal_leaves_admission_closed(fixture, monkeypatch):
+    store, (first, _), _, _, _ = fixture
+    assert first.acquire()
+
+    def interrupted(*args):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(lease, "renew", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        first.renew()
+    assert first.ready is False
+
+
 def test_a_refused_renew_tick_releases_nothing(accounts):
     controller = accounts.authority.controller
     accounts.clock[0] += lease.ttl_ms()
@@ -947,6 +992,98 @@ def test_every_renewal_passes_the_attachable_attempts_for_change(fixture):
     assert controller.renew()
 
     assert keeper.calls == [("start", []), ("change", [wanted])]
+
+
+class Routes:
+    def __init__(self) -> None:
+        self.published = []
+
+    def publish(self, attempts):
+        self.published.append(list(attempts))
+
+
+def test_the_controller_lists_its_live_worker_terminals_for_the_jump(fixture):
+    store, _controllers, _transport, _clock, grant = fixture
+    routes = Routes()
+    controller = keeping(store, grant, None)
+    controller.jump = routes
+    assert controller.acquire()
+    wanted = attachable(store, controller.admit(agent(store)))
+
+    assert controller.renew()
+
+    assert routes.published == [[], [wanted]]
+
+
+def jumping(store, grant):
+    controller, routes = keeping(store, grant, None), Routes()
+    controller.jump = routes
+    return controller, routes
+
+
+def test_a_worker_that_ended_leaves_the_jump_on_the_next_renewal(fixture):
+    store, _controllers, _transport, _clock, grant = fixture
+    controller, routes = jumping(store, grant)
+    assert controller.acquire()
+    ended = controller.admit(agent(store))
+    attachable(store, ended)
+    assert controller.renew()
+    HostKeys(store).forget("fixture", ended.execution_id)
+
+    assert controller.renew()
+
+    assert [len(published) for published in routes.published] == [0, 1, 0]
+
+
+def test_a_controller_that_lost_its_lease_withdraws_every_jump_route(fixture):
+    store, (first, _second), _transport, clock, grant = fixture
+    controller, routes = jumping(store, grant)
+    assert controller.acquire()
+    attachable(store, controller.admit(agent(store)))
+    assert controller.renew()
+    clock[0] += lease.ttl_ms()
+    assert first.acquire()
+
+    assert not controller.renew()
+
+    assert [len(published) for published in routes.published] == [0, 1, 0]
+
+
+def test_a_controller_refused_the_lease_lists_no_jump_route(fixture):
+    store, (first, _second), _transport, _clock, grant = fixture
+    assert first.acquire()
+    controller, routes = jumping(store, grant)
+
+    assert not controller.acquire()
+
+    assert routes.published == [[]]
+
+
+def test_a_controller_whose_epoch_moved_withdraws_every_jump_route(fixture):
+    store, _controllers, _transport, _clock, grant = fixture
+    controller, routes = jumping(store, grant)
+    assert controller.acquire()
+    attachable(store, controller.admit(agent(store)))
+    assert controller.renew()
+    controller.reconciled_epoch = -1
+
+    assert not controller.renew()
+
+    assert [len(published) for published in routes.published] == [0, 1, 0]
+
+
+def test_a_controller_whose_grant_was_revoked_withdraws_every_jump_route(fixture):
+    store, _controllers, _transport, _clock, grant = fixture
+    controller, routes = jumping(store, grant)
+    assert controller.acquire()
+    attachable(store, controller.admit(agent(store)))
+    assert controller.renew()
+    grant["allowed"] = False
+
+    with pytest.raises(SwarmError):
+        controller.renew()
+
+    assert [len(published) for published in routes.published] == [0, 1, 0]
 
 
 def test_a_controller_that_lost_its_lease_reconciles_nothing(fixture):

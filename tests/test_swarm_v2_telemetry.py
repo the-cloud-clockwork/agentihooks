@@ -60,6 +60,7 @@ def store(monkeypatch):
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig(SLUG, "agentihooks", 1, 0))
+    monkeypatch.setattr("time.time", lambda: NOW / 1000)
     monkeypatch.setattr(lease, "now_ms", lambda given: 0 if given is None else NOW)
     return store
 

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/checkpoints/cards.py:scripts.swarm_v2.checkpoints.cards.x_rows__mutmut_59:d5673fb06e3359857f13c62d22a421f676f25b53248aab9c026966be6c20fde5": {
+    "reader": "standards_reader",
+    "reason": "ExecutionRegistry.start strictly increases each seat generation and Recovery records one row per execution; equal-generation rows for one seat cannot occur, so > and >= agree for valid producer state."
+  }
+}

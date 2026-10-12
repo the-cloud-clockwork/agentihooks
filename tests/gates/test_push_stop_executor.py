@@ -193,7 +193,7 @@ def test_dirty_work_is_refused_and_a_clean_pushed_worktree_with_its_pull_request
     assert clean.returncode == 0, clean.stderr
 
 
-def test_a_pre_push_gate_that_overruns_is_stopped_by_the_gate_inside_the_stop_condition(rig):
+def overrun(rig, seconds):
     rig.cli("task", "set", rig.task, f"pr_url={URL}")
     gate = rig.tree / "scripts" / "ci_prepush"
     gate.mkdir(parents=True)
@@ -202,12 +202,25 @@ def test_a_pre_push_gate_that_overruns_is_stopped_by_the_gate_inside_the_stop_co
     (gate / "__main__.py").write_text("import time\ntime.sleep(60)\n")
     git(rig.tree, "add", "scripts")
     git(rig.tree, "commit", "-m", "gate")
-    rig.env["CONDITIONS_TIMEOUT_SEC"] = "6"
+    rig.env["CONDITIONS_TIMEOUT_SEC"] = str(seconds)
     started = time.monotonic()
     done = rig.stop()
-    took = time.monotonic() - started
+    return done, time.monotonic() - started
+
+
+@pytest.mark.wall_clock
+def test_a_pre_push_gate_that_overruns_is_stopped_by_the_gate_inside_the_stop_condition(rig):
+    done, took = overrun(rig, 6)
     assert done.returncode == 2, (done.stderr, rig.rows())
     assert "The pre push gate did not finish in " in done.stderr
     assert f" s in {rig.tree}, so the stop hook did not push it." in done.stderr
     assert rig.remote_head() == ""
     assert took < 6
+
+
+def test_a_pre_push_gate_that_overruns_is_stopped_inside_the_stop_condition(rig):
+    done, _ = overrun(rig, 20)
+    assert done.returncode == 2, (done.stderr, rig.rows())
+    assert "The pre push gate did not finish in " in done.stderr
+    assert f" s in {rig.tree}, so the stop hook did not push it." in done.stderr
+    assert rig.remote_head() == ""

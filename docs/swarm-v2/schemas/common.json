@@ -37,6 +37,7 @@
     "authority_names": {
       "enum": [
         "execution_id",
+        "execution_generation",
         "task_id",
         "task_generation",
         "controller_epoch",

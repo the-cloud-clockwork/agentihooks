@@ -2,7 +2,7 @@
 
 import json
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Protocol
 
 from scripts.swarm.store import AgentRecord
@@ -11,9 +11,12 @@ from scripts.swarm_v2.broadcast_bridge import GRANT_NAME
 from scripts.swarm_v2.hand import HANDED, Hand
 from scripts.swarm_v2.kubernetes.client import AlreadyExists, ApiRefused, PodApi, PreconditionFailed
 from scripts.swarm_v2.kubernetes.runtime import GENERATION_LABEL
-from scripts.swarm_v2.kubernetes.spec import LAUNCH_RECORD, launch_name, pod_name
+from scripts.swarm_v2.kubernetes.spec import DOMAIN, LAUNCH_RECORD, launch_name, pod_name
 from scripts.swarm_v2.kubernetes.watch import EXECUTION_LABEL, OWNER_LABEL, owner_for
-from scripts.swarm_v2.supervision import AUTHORITY, SCHEMA_VERSION
+from scripts.swarm_v2.supervision import AUTHORITY, SCHEMA_VERSION, Budgets
+
+PROJECT_ANNOTATION = f"{DOMAIN}/project"
+GITHUB = "github.com/"
 
 
 @dataclass(frozen=True)
@@ -21,8 +24,17 @@ class Supervision:
     harness: str
     exporter: tuple[str, ...] | None
     control_url: str
+    budgets: Budgets = Budgets()
+    checkpoint_remote: bool = False
 
-    def record(self, registration: Registration, profile: str) -> str:
+    def record(
+        self,
+        registration: Registration,
+        profile: str,
+        restore: dict | None = None,
+        checkout: dict | None = None,
+        opening: str = "",
+    ) -> str:
         record = {
             "schema_version": SCHEMA_VERSION,
             "execution_id": registration.execution_id,
@@ -32,9 +44,20 @@ class Supervision:
             "agent": [self.harness],
             "control_url": self.control_url,
             "profile": profile,
+            "registration": asdict(registration),
+            **self.budgets.record(),
+            "checkpoint_acknowledgement": {"status": "pending"},
         }
+        if self.checkpoint_remote:
+            record["checkpoint_remote"] = True
         if self.exporter:
             record["exporter"] = list(self.exporter)
+        if restore is not None:
+            record["restore"] = restore
+        if checkout:
+            record["checkout"] = checkout
+        if opening:
+            record["prompt"] = opening
         return json.dumps(record, sort_keys=True)
 
 
@@ -73,18 +96,19 @@ class PodGrants:
         verify: Callable[[str], Registration],
         supervision: Supervision,
         terminal: Terminals | None = None,
+        restores: Callable[[str], dict | None] = lambda execution_id: None,
     ) -> None:
         self.api, self.owner = api, owner_for(slug)
         self.verify, self.supervision, self.terminal = verify, supervision, terminal
+        self.restores = restores
 
-    def hand(self, agent: AgentRecord, grant: str) -> Hand:
+    def hand(self, agent: AgentRecord, grant: str, opening: str = "") -> Hand:
         from redis.exceptions import RedisError
 
         try:
             registration = self.verify(grant)
         except (GrantRefused, RedisError):
             return Hand(False, "grant_unverified")
-        record = self.supervision.record(registration, agent.profile)
         labels = {
             OWNER_LABEL: self.owner,
             EXECUTION_LABEL: agent.execution_id,
@@ -98,6 +122,18 @@ class PodGrants:
             return Hand(False, "pod_missing")
         if not _owned(pod, labels):
             return Hand(False, "pod_foreign")
+        project = pod["metadata"].get("annotations", {}).get(PROJECT_ANNOTATION)
+        if project is not None and project not in registration.project_ids:
+            return Hand(False, "project_unpermitted", self._remove(pod))
+        restore = self.restores(agent.execution_id)
+        hosted = project is not None and project.startswith(GITHUB)
+        checkout = {"project": project, "agent": agent.name} if hosted else None
+        record = self.supervision.record(registration, agent.profile, restore, checkout, opening)
+        containers = pod.get("spec", {}).get("containers", [])
+        if containers and "@" in containers[0].get("image", ""):
+            material = json.loads(record)
+            material["image_digest"] = containers[0]["image"].split("@", 1)[1]
+            record = json.dumps(material, sort_keys=True)
         try:
             self.api.create_config_map(_material(pod, labels, grant, record))
         except AlreadyExists:

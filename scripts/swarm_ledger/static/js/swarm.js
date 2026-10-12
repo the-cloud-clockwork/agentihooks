@@ -375,8 +375,8 @@ function renderHandoffs(rows) {
   $("handoff-count").textContent = `${rows.length} ${rows.length === 1 ? "seat" : "seats"}`;
   $("swarm-handoffs").replaceChildren(...(rows.length ? firstPage("seats", rows, (r) => `seat-${r.seat}`).map((r) => withId(cells(idCell(seatText(r.seat)), clock(r.at), r.reason,
     r.continuity ? label(r.continuity) : "—", r.binding ? h("span", {}, label(r.binding), r.bound_at && ` ${clock(r.bound_at)}`) : "—",
-    r.awaiting ? h("span", { class: "sw-ctl" }, ...["resume", "fresh"].map((choice) => h("button", { class: "sw-btn", type: "button",
-      "data-agent": r.awaiting, "data-restore-choice": choice, disabled: !!pending, text: choice }))) : r.successor ? idCell(r.successor) : "—"), `seat-${r.seat}`))
+    r.awaiting ? h("span", { class: "sw-ctl" }, ...(r.resume_available === false ? ["fresh"] : ["resume", "fresh"]).map((choice) => h("button", { class: "sw-btn", type: "button",
+      "data-agent": r.awaiting, "data-restore-choice": choice, disabled: !!pending, text: choice === "resume" ? r.resume_label || choice : choice }))) : r.successor ? idCell(r.successor) : "—"), `seat-${r.seat}`))
     : [emptyRow(6, "No seats yet. Seats appear when agents start.")]), moreRow("seats", rows.length, "more seats", 6, () => renderHandoffs(rows)) || "");
 }
 

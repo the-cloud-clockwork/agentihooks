@@ -24,6 +24,10 @@ COMMIT = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 LOCK = ".prepare.lock"
 GIT_TIMEOUT = 600
 TRACKING = "+refs/heads/*:refs/remotes/origin/*"
+GIT_LOGIN_ENV = "AGENTIHOOKS_GIT_TOKEN"
+HELPER = (
+    f'!f() {{ test -z "${GIT_LOGIN_ENV}" || printf "username=x-access-token\\npassword=%s\\n" "${GIT_LOGIN_ENV}"; }}; f'
+)
 GIT_SCOPE = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_NAMESPACE")
 
 
@@ -86,7 +90,13 @@ def recorded(execution: Execution, task: str) -> dict | None:
 
 def _environ() -> dict[str, str]:
     environ = {key: value for key, value in os.environ.items() if key not in GIT_SCOPE}
-    return {**environ, "GIT_TERMINAL_PROMPT": "0"}
+    index = environ.get("GIT_CONFIG_COUNT", "0")
+    helper = {
+        "GIT_CONFIG_COUNT": str(int(index) + 1),
+        f"GIT_CONFIG_KEY_{index}": "credential.https://github.com.helper",
+        f"GIT_CONFIG_VALUE_{index}": HELPER,
+    }
+    return {**environ, "GIT_TERMINAL_PROMPT": "0", **helper}
 
 
 def _git(*args: str, repo: Path | None = None) -> subprocess.CompletedProcess:

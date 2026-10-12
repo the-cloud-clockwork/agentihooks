@@ -26,6 +26,7 @@ from scripts.inbox.seats import seat_address
 from scripts.inbox.store import CLOSED, InboxStore
 from scripts.swarm import (
     affinity,
+    bottleneck_remedy,
     ci_speed,
     claim_order,
     control_notifications,
@@ -33,6 +34,7 @@ from scripts.swarm import (
     difficulty,
     dispatch_seat,
     dispatcher,
+    failed_panes,
     freeze,
     grouping,
     lane_split,
@@ -44,9 +46,11 @@ from scripts.swarm import (
     master_retire,
     master_start,
     master_wake,
+    outage,
     phase_state,
     profile_first,
     reaper,
+    resume,
     retire_watch,
     seat_spawn,
     session_model,
@@ -67,6 +71,7 @@ from scripts.swarm_v2 import masters as master_seats
 
 LEASE_MS = 10 * 60 * 1000
 STARTUP_GRACE_MS = 6 * 60 * 1000
+EXITED_BEFORE_LIFE = "its agent process exited before its launch check passed"
 SUSPECT = "suspect"
 MASTER_WAITING = f"{PREFIX}:master-waiting"
 MASTER_WAIT_MS = 10 * 60 * 1000
@@ -96,9 +101,10 @@ NUDGE = (
 
 
 class SpawnError(RuntimeError):
-    def __init__(self, message: str, status: str = "refused"):
+    def __init__(self, message: str, status: str = "refused", pane_id: str = ""):
         super().__init__(message)
         self.status = status
+        self.pane_id = pane_id
 
 
 @dataclass(frozen=True)
@@ -145,6 +151,9 @@ class Runtime(Protocol):
     def conversations(self) -> dict[str, str] | None: ...
     def resume(self, config, agent: AgentRecord, text: str) -> Placed: ...
     def close_space(self, config: SwarmConfig) -> bool: ...
+    def pane_tail(self, pane_id: str, lines: int) -> str: ...
+    def launched_pane(self, pane_id: str, name: str) -> bool: ...
+    def close_pane(self, pane_id: str) -> None: ...
 
 
 def tick(slug, store, ledger, runtime, now_ms):
@@ -164,9 +173,12 @@ def tick(slug, store, ledger, runtime, now_ms):
     )
     actions += skip_refused(master_start.observe, slug, config, store, ledger, runtime, now_ms)
     actions += skip_refused(_launch_checks, slug, store, ledger, runtime, rows, doc, now_ms)
+    timing.call(resume.track_outages, slug, store, runtime, rows, now_ms)
     actions += skip_refused(_verify, slug, store, ledger, runtime, rows, now_ms)
     actions += skip_refused(_reap, slug, store, ledger, runtime, rows, now_ms)
+    actions += skip_refused(resume.recover_outages, slug, store, ledger, runtime, rows, now_ms)
     actions += skip_refused(_strays, slug, config, store, runtime)
+    actions += skip_refused(failed_panes.sweep, slug, store, runtime, now_ms)
     if config.state not in {"stopped", "stopping"}:
         actions += skip_refused(master_wake.run, slug, store, runtime, doc, now_ms)
     actions += skip_refused(lifetime.retire_idle_master, slug, store, ledger, runtime, rows, now_ms)
@@ -194,7 +206,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     with PLACING:
         actions += skip_refused(quota_notice.refresh, slug, config, store, ledger, runtime, now_ms)
         actions += skip_refused(ci_speed.refresh, slug, config, store, now_ms)
-        actions += skip_refused(ci_defects.refresh, slug, config, store, ledger, now_ms)
+        actions += skip_refused(ci_defects.refresh, slug, config, store, now_ms)
         actions += skip_refused(ci_flakes.refresh, slug, config, store, ledger, now_ms)
         actions += skip_refused(time_left.refresh, slug, store, ledger, runtime, config, doc)
         if not sleeping:
@@ -213,6 +225,7 @@ def tick(slug, store, ledger, runtime, now_ms):
             actions += skip_refused(master_scale.run, slug, config, store, runtime, doc, now_ms)
             actions += skip_refused(dispatcher.rank_pass, slug, config, store, ledger, doc, now_ms)
             actions += skip_refused(lane_split.step, slug, config, store, doc, now_ms)
+            actions += skip_refused(bottleneck_remedy.step, slug, store, ledger, doc, now_ms)
             if config.state == "running":
                 actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
         actions += skip_refused(dispatch_seat.run, slug, config, store, runtime, doc, now_ms, sleeping)
@@ -415,7 +428,7 @@ def _failed_launch(slug, store, ledger, runtime, rows, miss, now_ms):
         store, slug, agent, f"its launch check failed on {fields}", agent.name in runtime.live_names(), now_ms
     ):
         return held
-    elif not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
+    elif not _retire_launch(slug, store, runtime, agent, now_ms):
         return f"could not retire {agent.name} after its launch check failed on {fields}, retrying next tick"
     else:
         outcome = "relaunch"
@@ -433,6 +446,17 @@ def _failed_launch(slug, store, ledger, runtime, rows, miss, now_ms):
     if agent.lane == MASTER and pending.get("name") == agent.name:
         master_start.save(store, slug, {**pending, "name": "", "retry": True, "at": now_ms})
     return f"retired {agent.name} after its launch check failed on {fields}" + _drop(slug, store, ledger, rows, agent)
+
+
+def _retire_launch(slug, store, runtime, agent, now_ms):
+    local = agent.runtime_backend == "local"
+    exited = local and agent.lane != MASTER and agent.name not in runtime.live_names()
+    kept = replace(agent, pane_id="") if exited else agent
+    if not runtime.retire(kept, homes=reaper.scratch_homes(slug, agent.task)):
+        return False
+    if exited:
+        failed_panes.hold(store, slug, agent, now_ms, EXITED_BEFORE_LIFE)
+    return True
 
 
 def _reap(slug, store, ledger, runtime, rows, now_ms):
@@ -465,6 +489,8 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
         elif agent.name in live:
             store.refresh(slug, agent.task, agent.name, LEASE_MS)
             actions += _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
+        elif resume.recovery_pending(store, slug, agent):
+            store.refresh(slug, agent.task, agent.name, LEASE_MS)
         elif now_ms - agent.started_at > STARTUP_GRACE_MS:
             runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task))
             actions.append(f"lost {agent.name}" + _drop(slug, store, ledger, rows, agent))
@@ -513,13 +539,19 @@ def agent_status(agent):
 def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     observed = runtime.observe(agent)
     store.redis.set(store.key(slug, "pane-state", agent.name), observed.state, ex=idle_state.BEAT_TTL_S)
+    outage.mark_pane(store, slug, agent.name, observed.provider_error)
+    if observed.provider_error and not observed.prompt_title and not observed.typed:
+        observed = replace(observed, state=idle_state.IDLE)
     if observed.state == idle_state.WAITING:
         title = observed.prompt_title or "Waiting on input"
         ticks = agent.input_ticks + 1 if agent.input_prompt == title else 1
         store.put_agent(slug, replace(agent, input_prompt=title, input_ticks=ticks, idle_ticks=0))
         return []
     agent = replace(agent, input_prompt="", input_ticks=0)
-    if agent.lane == MASTER:
+    held = outage.held(store, slug, agent.name)
+    exhausted = resume.recovery_exhausted(store, slug, agent)
+    pending = resume.recovery_pending(store, slug, agent)
+    if agent.lane == MASTER or (held and not exhausted):
         store.put_agent(slug, agent)
         return []
     state = idle_state.verdict(
@@ -540,6 +572,8 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     gate_log.append(
         slug, gate_log.Row.of(IDLE_TICKS, "count", who, reason=f"idle tick {idle.idle_ticks}", now_ms=now_ms)
     )
+    if pending:
+        return []
     if idle.idle_ticks == IDLE_NUDGE_TICKS:
         refused = runtime.nudge(idle, NUDGE.format(slug=slug))
         return [f"nudge to {agent.name} refused: {refused}" if refused else f"nudged {agent.name}"]
@@ -571,6 +605,8 @@ def _conversations(slug, store, runtime):
     for agent in store.agents(slug):
         if agent.state in {"finished", "awaiting-decision"} or not agent.pane_id:
             continue
+        if agent.pane_id not in found and resume.recovery_pending(store, slug, agent):
+            continue
         current = found.get(agent.pane_id, "")
         if current != agent.conversation_id:
             store.put_agent(slug, replace(agent, conversation_id=current))
@@ -590,12 +626,16 @@ def _reopen(slug, ledger, rows, task_id):
     return live["state"] == "open"
 
 
-def _claimable(slug, store, rows, doc, lane):
+def ready_in_order(slug, store, rows, doc, lane, dispatched=None):
+    return _launch_order(slug, store, _claimable(slug, store, rows, doc, lane, dispatched), dispatched)
+
+
+def _claimable(slug, store, rows, doc, lane, dispatched=None):
     awaiting = {a.task for a in store.agents(slug) if a.state == "awaiting-decision"}
     held = [t.get("territory") or [] for t in rows.values() if t.get("state") in ACTIVE]
     graph, fix = hierarchy.project(doc)[0], freeze.fix_phase(store.config(slug))
     clear, overlapping = [], []
-    for t in sorted(rows.values(), key=claim_order.key(rows)):
+    for t in sorted(rows.values(), key=dispatched or claim_order.key(rows)):
         if (
             t.get("lane") == lane
             and t["id"] not in awaiting
@@ -622,11 +662,11 @@ def ready(task, rows, doc, graph, fix):
     )
 
 
-def _launch_order(slug, store, tasks):
+def _launch_order(slug, store, tasks, dispatched=None):
     return sorted(
         tasks,
         key=lambda task: (
-            ledger_rank.order(task),
+            dispatched(task)[0] if dispatched else ledger_rank.order(task),
             bool(store.launch_failure(slug, task["id"])),
             not claim_order.resumed(task),
         ),
@@ -727,7 +767,7 @@ def _spawn_stop(slug, config, store, runtime, now_ms):
     return ""
 
 
-def _record_spawn_failure(slug, store, record, error):
+def _record_spawn_failure(slug, store, record, error, now_ms):
     if record_failure := timing.ON_FAILURE.get():
         record_failure(f"{__name__}._spawn", error)
     waiting = isinstance(error, SpawnError) and error.status == "unavailable"
@@ -736,7 +776,10 @@ def _record_spawn_failure(slug, store, record, error):
     else:
         transfers.failed(store, slug, record)
         store.note_launch_failure(slug, record.task, str(error))
+    record = replace(record, pane_id=getattr(error, "pane_id", ""))
     store.record_launch(slug, record, "waiting" if waiting else "failed", str(error))
+    if not waiting:
+        failed_panes.hold(store, slug, record, now_ms)
 
 
 def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
@@ -800,13 +843,13 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             placed = runtime.spawn(config, lane, name, primed(store, slug, seat, task))
         except Exception as exc:
             _release_admission(slug, runtime, task)
-            _record_spawn_failure(slug, store, record, exc)
+            _record_spawn_failure(slug, store, record, exc, now_ms)
             actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
             if isinstance(exc, ProfileUnresolved):
                 actions.append(_unresolved(slug, ledger, rows, task["id"], str(exc)))
             continue
         store.count_claim(slug, task["id"])
-        store.record_launch(slug, record, "started")
+        store.record_launch(slug, replace(record, pane_id=placed.pane_id), "started")
         store.put_agent(slug, placed_record(record, placed))
         launch_check.begin(store, slug, record, now_ms)
         store.count_spawn(slug, placed.harness)
@@ -815,6 +858,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
         store.redis.hdel(store.key(slug, "launch-assignments"), task["id"])
         profile_first.spawned(slug, store, task["id"])
         actions.append(f"spawned {name} for {task['id']}")
+        actions += dispatcher.chain_claimed(slug, config, ledger, doc, task, lane, now_ms)
     return actions
 
 
@@ -822,11 +866,12 @@ def _spawn_order(slug, config, store, agents, rows, doc, runtime):
     from scripts.swarm import capacity
 
     decision = capacity.read(store, slug)
-    caps = decision.get("effective", {"eng": config.max_eng, "ci": config.max_ci, "plan": config.max_plan})
+    caps = capacity.caps(decision, config)
+    dispatched = dispatcher.claim_key(config, doc)
     queue = []
     for lane, cap in caps.items():
         busy = sum(1 for a in agents if a.lane == lane and not _ended(a, rows))
-        ready = _launch_order(slug, store, _claimable(slug, store, rows, doc, lane))
+        ready = ready_in_order(slug, store, rows, doc, lane, dispatched)
         if "tasks" in decision:
             ready = [task for task in ready if task["id"] in decision["tasks"]]
         ready = profile_first.placeable(slug, config, store, runtime, lane, ready, max(cap - busy, 0))

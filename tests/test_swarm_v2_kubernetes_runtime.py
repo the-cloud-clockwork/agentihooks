@@ -22,7 +22,7 @@ ZERO = {"created": 0, "adopted": 0, "observed": 0, "quarantined": 0, "disabled":
 
 
 def journaled(launch=None) -> str:
-    rendered = PodTemplate(cases.policy()).render(launch or cases.launch())
+    rendered = PodTemplate(cases.policy(), OWNER).render(launch or cases.launch())
     return adoption.identity(rendered.digest, rendered.pod["spec"])
 
 
@@ -35,7 +35,7 @@ def operation(
 
 def transport(api=None, slug="fixture", creation_enabled=True) -> KubernetesTransport:
     api = api or cases.ApiServer(cases.policy()["namespace"])
-    return KubernetesTransport(api, slug, PodTemplate(cases.policy()), creation_enabled)
+    return KubernetesTransport(api, slug, PodTemplate(cases.policy(), OWNER), creation_enabled)
 
 
 def applied(execution_id=EXECUTION, generation=3, uid="uid-1", name=NAME) -> Observation:
@@ -58,7 +58,7 @@ def test_apply_creates_the_labelled_pod_and_returns_its_uid():
     assert labels[watch.OWNER_LABEL] == OWNER
     assert labels[watch.EXECUTION_LABEL] == EXECUTION
     assert notes[runtime.OPERATION_DIGEST] == DIGEST
-    assert notes[runtime.SPEC_DIGEST] == PodTemplate(cases.policy()).render(cases.launch()).digest
+    assert notes[runtime.SPEC_DIGEST] == PodTemplate(cases.policy(), OWNER).render(cases.launch()).digest
     assert notes["swarm.agentihooks.io/seat"] == "eng-3@rig-grade-swarm"
     assert sender.kubernetes_create_reconciliation_total() == {**ZERO, "created": 1}
     assert sender.quarantined == {}
@@ -107,7 +107,7 @@ def test_a_labelled_pod_without_annotations_is_quarantined_for_its_operation():
 
 
 def test_creation_is_enabled_by_default():
-    sender = KubernetesTransport(cases.ApiServer("swarm-pod-proof"), "fixture", PodTemplate(cases.policy()))
+    sender = KubernetesTransport(cases.ApiServer("swarm-pod-proof"), "fixture", PodTemplate(cases.policy(), OWNER))
     assert sender.creation_enabled is True
 
 
@@ -131,11 +131,38 @@ def test_a_launch_for_another_execution_or_generation_is_refused(change):
     assert sender.api.create_calls == 0
 
 
-def test_a_swarm_whose_owner_differs_from_the_policy_owner_creates_nothing():
+def test_a_template_rendering_another_swarms_owner_creates_nothing():
     sender = transport(slug="other")
     assert sender.owner == "agentihooks-swarm-other"
     assert sender.apply_operation(operation(), cases.launch()) == Observation(Phase.REFUSED)
     assert sender.api.create_calls == 0
+
+
+def test_one_policy_renders_pods_for_two_swarms_with_distinct_owners():
+    policy = cases.policy()
+    assert "owner" not in policy
+    first = PodTemplate(policy, watch.owner_for("swarm-a")).render(cases.launch()).pod
+    second = PodTemplate(policy, watch.owner_for("swarm-b")).render(cases.launch()).pod
+    assert first["metadata"]["labels"][watch.OWNER_LABEL] == "agentihooks-swarm-swarm-a"
+    assert second["metadata"]["labels"][watch.OWNER_LABEL] == "agentihooks-swarm-swarm-b"
+    del first["metadata"]["labels"][watch.OWNER_LABEL], second["metadata"]["labels"][watch.OWNER_LABEL]
+    assert first == second
+
+
+def test_a_pod_from_one_swarm_is_refused_by_the_other_swarms_controller():
+    api = cases.ApiServer(cases.policy()["namespace"])
+    swarms = {
+        slug: KubernetesTransport(api, slug, PodTemplate(cases.policy(), watch.owner_for(slug))) for slug in ("a", "b")
+    }
+    spec = {slug: swarms[slug].spec_digest(cases.launch()) for slug in swarms}
+    assert spec["a"] != spec["b"]
+    assert swarms["a"].apply_operation(operation(spec_digest=spec["a"]), cases.launch()).phase == Phase.APPLIED
+    before = json.dumps(api.objects, sort_keys=True)
+    assert swarms["b"].observe_operation(operation(spec_digest=spec["b"])) == Observation(Phase.ABSENT)
+    assert swarms["b"].apply_operation(operation(spec_digest=spec["b"]), cases.launch()) == Observation(Phase.REFUSED)
+    assert json.dumps(api.objects, sort_keys=True) == before
+    assert swarms["b"].quarantined == {"uid-1": {"name": NAME, "uid": "uid-1", "reason": "owner"}}
+    assert api.objects[NAME]["metadata"]["labels"][watch.OWNER_LABEL] == "agentihooks-swarm-a"
 
 
 def test_a_policy_namespace_outside_the_client_namespace_creates_nothing():
@@ -226,9 +253,11 @@ def test_already_exists_with_an_unreadable_pod_is_unknown():
 
 
 def existing(sender, **changes) -> dict:
-    body = PodTemplate(cases.policy()).render(cases.launch()).pod
+    body = PodTemplate(cases.policy(), OWNER).render(cases.launch()).pod
     body["metadata"]["annotations"][runtime.OPERATION_DIGEST] = DIGEST
-    body["metadata"]["annotations"][runtime.SPEC_DIGEST] = PodTemplate(cases.policy()).render(cases.launch()).digest
+    body["metadata"]["annotations"][runtime.SPEC_DIGEST] = (
+        PodTemplate(cases.policy(), OWNER).render(cases.launch()).digest
+    )
     for key, value in changes.items():
         place = "annotations" if key in (runtime.OPERATION_DIGEST, runtime.SPEC_DIGEST) else "labels"
         if value is None:
@@ -318,7 +347,7 @@ def test_a_fenced_transport_passes_the_spec_digest_through_or_answers_empty():
 def test_spec_digest_is_the_identity_of_the_rendered_pod_and_its_fields():
     sender = transport()
     assert sender.spec_digest(cases.launch()) == journaled()
-    assert journaled() != PodTemplate(cases.policy()).render(cases.launch()).digest
+    assert journaled() != PodTemplate(cases.policy(), OWNER).render(cases.launch()).digest
 
 
 def test_a_refused_launch_counts_one_refusal_across_prepare_and_apply():
@@ -348,7 +377,8 @@ def test_a_prepared_render_of_another_payload_is_not_reused():
     assert sender.apply_operation(operation(), cases.launch()) == applied()
     pod = sender.api.objects[NAME]
     assert (
-        pod["metadata"]["annotations"][runtime.SPEC_DIGEST] == PodTemplate(cases.policy()).render(cases.launch()).digest
+        pod["metadata"]["annotations"][runtime.SPEC_DIGEST]
+        == PodTemplate(cases.policy(), OWNER).render(cases.launch()).digest
     )
 
 
@@ -462,7 +492,7 @@ def test_a_controller_spawn_journals_the_rendered_spec_digest():
         created = controller.execute(request)
         journaled = world.store.operation_journal.get(cases.SLUG, created.operation_id)
     assert created.phase is Phase.APPLIED
-    rendered = PodTemplate(cases.policy()).render(request.payload)
+    rendered = PodTemplate(cases.policy(), OWNER).render(request.payload)
     assert journaled.spec_digest == adoption.identity(rendered.digest, rendered.pod["spec"])
     pod = world.api.objects[f"swarm-{attempt.execution_id}"]
     assert pod["metadata"]["annotations"][runtime.SPEC_DIGEST] == rendered.digest
@@ -478,10 +508,12 @@ def test_observation_quarantines_a_labelled_pod_of_another_generation():
 def test_two_matching_pods_for_one_execution_are_both_quarantined():
     sender = transport()
     existing(sender)
-    twin = PodTemplate(cases.policy()).render(cases.launch()).pod
+    twin = PodTemplate(cases.policy(), OWNER).render(cases.launch()).pod
     twin["metadata"]["name"] = "swarm-twin"
     twin["metadata"]["annotations"][runtime.OPERATION_DIGEST] = DIGEST
-    twin["metadata"]["annotations"][runtime.SPEC_DIGEST] = PodTemplate(cases.policy()).render(cases.launch()).digest
+    twin["metadata"]["annotations"][runtime.SPEC_DIGEST] = (
+        PodTemplate(cases.policy(), OWNER).render(cases.launch()).digest
+    )
     sender.api.put(twin)
     assert sender.observe_operation(operation()) == Observation(Phase.REFUSED)
     assert {uid: q["reason"] for uid, q in sender.quarantined.items()} == {"uid-1": "ambiguous", "uid-2": "ambiguous"}
@@ -491,7 +523,7 @@ def test_two_matching_pods_for_one_execution_are_both_quarantined():
 def test_two_pods_one_mismatched_keeps_each_reason():
     sender = transport()
     existing(sender)
-    twin = PodTemplate(cases.policy()).render(cases.launch()).pod
+    twin = PodTemplate(cases.policy(), OWNER).render(cases.launch()).pod
     twin["metadata"]["name"] = "swarm-twin"
     sender.api.put(twin)
     assert sender.observe_operation(operation()) == Observation(Phase.REFUSED)
@@ -534,7 +566,7 @@ def test_status_reads_the_labelled_pod_of_one_execution():
 def test_status_of_an_ambiguous_execution_lists_every_pod():
     sender = transport()
     existing(sender)
-    twin = PodTemplate(cases.policy()).render(cases.launch()).pod
+    twin = PodTemplate(cases.policy(), OWNER).render(cases.launch()).pod
     twin["metadata"]["name"] = "swarm-twin"
     sender.api.put(twin)
     assert [status.uid for status in sender.status(EXECUTION)] == ["uid-1", "uid-2"]

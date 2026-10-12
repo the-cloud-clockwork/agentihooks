@@ -104,6 +104,15 @@ def test_spawns_held_by_quota_count_as_quota():
     assert found["bottleneck"] == "quota"
 
 
+def test_a_held_span_names_the_held_harness_and_none_for_an_older_sample():
+    gap = bottleneck.SAMPLE_GAP_MS
+    labelled = {**sample(9 * H, 1, "quota"), "held_harness": "codex"}
+    assert bottleneck.held_spans([labelled, sample(9 * H + gap, 2, "quota")], NOW) == [
+        ("quota", 9 * H, 9 * H + gap, 1, "codex"),
+        ("quota", 9 * H + gap, 9 * H + 2 * gap, 2, ""),
+    ]
+
+
 def test_a_sample_spooled_before_the_held_by_column_counts_as_quota():
     older = {"ledger": SLUG, "ts_ms": 9 * H, "held_spawns": 2, "reason": "accounts have quota"}
     assert bottleneck.report(rows(host=[older]), [], NOW)["seconds"] == seconds(quota=600.0)

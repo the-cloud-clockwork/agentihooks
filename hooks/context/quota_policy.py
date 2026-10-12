@@ -206,22 +206,12 @@ def _other_accounts(sessions: dict[str, int], fleet: Iterable[tuple[float, "Prob
 
 
 def _codex_accounts() -> list[Candidate]:
-    from hooks.context.account_sessions import (
-        API_ACCOUNT,
-        CODEX_DEFAULT,
-        CODEX_TOKEN_PREFIX,
-        codex_sessions_by_account,
-    )
+    from hooks.context.account_sessions import codex_sessions_by_account
     from scripts import codex_router
 
     environ = dict(os.environ)
     sessions = codex_sessions_by_account()
-    pool = codex_router.routing_pool(environ)
-    known = {account.name for account in pool}
-    pool += [
-        codex_router.CodexAccount(name, f"{CODEX_TOKEN_PREFIX}{name}")
-        for name in sorted(set(sessions) - known - {CODEX_DEFAULT, API_ACCOUNT})
-    ]
+    pool = codex_router.CodexAccountSource().pool(environ)
     now = time.time()
     candidates = []
     for name, quota in codex_router.quotas(pool, environ).items():
@@ -409,10 +399,13 @@ def render(d: Decision, session_id: str, cwd: str) -> str:
 
 
 def handed_off_block(session_id: str) -> str | None:
+    from hooks.context.account_sessions import agent_pid
     from hooks.context.broadcast import session_status
+    from hooks.lifecycle import handoff_close
 
     info = session_status(session_id)
-    if info.get("status") != "handed_off":
+    resumed = bool(session_id) and handoff_close.handoff_record(agent_pid(), session_id).exists()
+    if info.get("status") != "handed_off" and not resumed:
         return None
     return (
         f"BLOCKED: this session handed its task off to account {info.get('handed_off_to') or '?'} at "
@@ -435,6 +428,9 @@ def pretool(session_id: str, tool_name: str, cwd: str) -> tuple[str | None, str 
 
 
 def prompt_context(session_id: str, cwd: str) -> str | None:
+    blocked = handed_off_block(session_id)
+    if blocked:
+        return blocked
     d = evaluate(session_id)
     if d is None:
         return early_warning(session_id)

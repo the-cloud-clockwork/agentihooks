@@ -2,8 +2,10 @@
 
 import shlex
 import subprocess
-from collections.abc import Mapping, MutableMapping
+from collections.abc import Iterable, Mapping, MutableMapping
 from pathlib import Path
+
+from scripts import aicode_tokens
 
 SHELL_NAMES = frozenset({"PWD", "OLDPWD", "SHLVL", "_"})
 SOURCE = 'set -a; for f in "$@"; do . "$f" 2>/dev/null; done; set +a'
@@ -37,7 +39,29 @@ def fill(environ: MutableMapping[str, str]) -> list[str]:
     loaded = values(environ)
     added = [key for key in loaded if key not in environ]
     environ.update({key: loaded[key] for key in added})
-    return added
+    block = block_tokens()
+    renewed = [key for key, value in block.items() if environ.get(key) != value and key not in added]
+    environ.update(block)
+    return added + renewed
+
+
+def block_tokens() -> dict[str, str]:
+    try:
+        text = aicode_tokens.rc_file().read_bytes().decode()
+    except (OSError, UnicodeDecodeError):
+        return {}
+    return aicode_tokens.token_exports(text)
+
+
+def distinct(environ: Mapping[str, str], names: Iterable[str]) -> list[str]:
+    block = block_tokens()
+    chosen: dict[str, str] = {}
+    for name in sorted(names):
+        value = environ[name]
+        held = chosen.get(value)
+        if held is None or (block.get(name) == value and block.get(held) != value):
+            chosen[value] = name
+    return sorted(chosen.values())
 
 
 def source_line(environ: Mapping[str, str]) -> str:

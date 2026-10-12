@@ -47,6 +47,7 @@ class Controller:
         self.store, self.slug, self.authorize = store, slug, authorize
         self.telemetry = Telemetry(store, slug)
         self.terminals: Upkeep | None = None
+        self.jump = None
         self.host_keys = HostKeys(store)
         self.pods, self.reconciler = pods, Reconciler(owner_for(slug), orphan_cleanup)
         self.accounts = AccountReconciler(store, slug)
@@ -63,6 +64,7 @@ class Controller:
         self._authorize()
         self.held = lease.acquire(self.store, self.slug, self.owner)
         if self.held is None:
+            self._route([])
             return False
         with lease.fencing(self.held.epoch):
             self.operations.recover(self.slug)
@@ -76,12 +78,20 @@ class Controller:
                 f"controller: kept saved herdr machines for {self.slug} on start: registered "
                 f"{len(report.registered)}, refused {dict(sorted(report.refused.items()))}"
             )
+        self._route(self._attempts())
         self.reconciled_epoch = self.held.epoch
         self.ready = True
         return True
 
     def renew(self) -> bool:
-        self.ready = False
+        try:
+            return self._renew()
+        except BaseException:
+            self.ready = False
+            self._route([])
+            raise
+
+    def _renew(self) -> bool:
         self._authorize()
         if self.held is None:
             return False
@@ -89,14 +99,24 @@ class Controller:
             self.held = lease.renew(self.store, self.slug, self.held)
         except SwarmError:
             self.held = None
+            self.ready = False
+            self._route([])
             return False
-        if self.reconciled_epoch == self.held.epoch:
-            self._authority()
-            self.accounts.reconcile()
-            if self.terminals is not None:
-                self.terminals.change(self._attempts())
-            self.ready = True
-        return self.ready
+        if self.reconciled_epoch != self.held.epoch:
+            self.ready = False
+            self._route([])
+            return False
+        self._authority()
+        self.accounts.reconcile()
+        if self.terminals is not None:
+            self.terminals.change(self._attempts())
+        self._route(self._attempts())
+        self.ready = True
+        return True
+
+    def _route(self, attempts: list[Attempt]) -> None:
+        if self.jump is not None:
+            self.jump.publish(attempts)
 
     def _authorize(self) -> None:
         if self.authorize() is not True:

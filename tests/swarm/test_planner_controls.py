@@ -117,8 +117,21 @@ def test_empty_page_set_names_all_cap_fields():
         ledger_server.control_argv({"action": "set"})
     assert (
         str(caught.value) == "set needs max_eng, max_ci, max_plan, compact_limit, effort_min, effort_max, autonomy, "
-        "scaling, load_high, load_low, memory_per_agent_mb, master_agent, overlays or gates"
+        "scaling, load_high, load_low, memory_per_agent_mb, claude_model, codex_model, master_agent, overlays or gates"
     )
+
+
+def test_page_set_maps_catalog_models_and_refuses_unknown(monkeypatch):
+    models = {"claude": [{"model": "sonnet"}], "codex": [{"model": "gpt-6-sol"}]}
+    monkeypatch.setattr(ledger_server, "swarm_models", lambda: models)
+    assert ledger_server.control_argv({"action": "set", "claude_model": "sonnet", "codex_model": "gpt-6-sol"}) == [
+        "set",
+        "claude-model=sonnet",
+        "codex-model=gpt-6-sol",
+    ]
+    for field in ("claude_model", "codex_model"):
+        with pytest.raises(ValueError, match="catalog"):
+            ledger_server.control_argv({"action": "set", field: "unknown"})
 
 
 @pytest.mark.parametrize("limit", [100, 650, 1000])

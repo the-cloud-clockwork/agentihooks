@@ -78,7 +78,7 @@ CALLERS = [
     ("task-grouping", "confidence", _task_grouping, None),
     ("task-difficulty", "confidence", _task_difficulty, difficulty.sized(difficulty.FALLBACK, "default", 0.0)),
     ("profile-pick", "confidence", _profile_pick, "refused"),
-    ("model-pick", "confidence", _model_pick, model_pick.ModelPick("auto", "auto")),
+    ("model-pick", "confidence", _model_pick, model_pick.ModelPick("opus", "medium", "band")),
     ("priority-resolve", "probability", _priority_resolve, None),
 ]
 

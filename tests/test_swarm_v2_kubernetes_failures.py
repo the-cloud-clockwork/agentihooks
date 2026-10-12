@@ -1,5 +1,5 @@
 import json
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -8,9 +8,10 @@ import pytest
 
 from scripts.swarm import lease
 from scripts.swarm.store import SwarmError
-from scripts.swarm_v2 import deployed
+from scripts.swarm_v2 import deployed, retention
 from scripts.swarm_v2.kubernetes import client, failures, replacement
 from scripts.swarm_v2.kubernetes.failures import AccountSlot, Decision
+from scripts.swarm_v2.runtime import observe
 from scripts.swarm_v2.runtime.base import Outcome, Status
 from tests import sv2_kub05_cases as cases
 
@@ -311,6 +312,18 @@ def test_no_checkpoint_or_a_paused_recovery_leaves_the_seat_awaiting_a_decision(
     assert len(world.attempts("eng-2")) == 1
 
 
+def test_pending_lists_only_the_attempts_still_awaiting_a_decision(world):
+    world.checkpoints.by_execution[world.old.execution_id] = []
+    recovery = world.recovery(world.live)
+    assert recovery.pending() == []
+    other = world.launch(world.live, world.fx["second"], "eng-2")
+    recovery.handle(world.old.execution_id, "node_lost")
+    world.recovery(world.live, automatic=False).handle(other.execution_id, "oom_killed")
+    assert recovery.pending() == sorted([world.old.execution_id, other.execution_id])
+    recovery.decide(world.old.execution_id, "fresh")
+    assert recovery.pending() == [other.execution_id]
+
+
 def test_an_image_pull_never_replaces_automatically(world):
     decision = world.recovery(world.live).handle(world.old.execution_id, "image_pull")
     assert decision.mode == "recovery_pending"
@@ -454,6 +467,11 @@ class _Cluster:
     def ready_nodes(self):
         return sorted(self.world.ready) if self.nodes else None
 
+    def __getattr__(self, name):
+        if name in ("namespace", "list_pods", "list_services", "read", "delete"):
+            return getattr(self.world.api, name)
+        raise AttributeError(name)
+
 
 def test_the_deployed_pass_fences_an_attempt_whose_node_was_deleted(world):
     grants, cluster = _Grants(), _Cluster(world)
@@ -540,6 +558,43 @@ def test_a_finished_deleted_pod_on_a_node_the_listing_no_longer_shows_is_node_lo
     last = _gone(world)
     assert recovery.reconcile([], ["worker-a"], [last]) == {world.old.execution_id: "fenced"}
     assert recovery.fence(world.old.execution_id)["reason"] == "node_lost"
+
+
+def test_a_completed_attempt_is_never_fenced_when_its_pod_and_node_are_gone(world):
+    recovery = world.recovery(world.live)
+    world.show(world.old, "clean_exit")
+    retention.finalize(world.store, cases.SLUG, world.live.require, world.old.execution_id, "completed", 0, "ref")
+    last = _gone(world)
+    assert recovery.reconcile([], ["worker-a"], [last]) == {world.old.execution_id: "completed"}
+    assert recovery.fence(world.old.execution_id) is None
+
+
+class _Cleaning(_Cluster):
+    def __getattr__(self, name):
+        return getattr(self.world.api, name)
+
+
+def test_the_deployed_pass_deletes_a_completed_attempt_pod_and_scale_down_never_fences_it(world):
+    grants, cluster = _Grants(), _Cleaning(world)
+    service = SimpleNamespace(controller=world.live, grants=grants)
+    recover = deployed.recovery_pass(service, SimpleNamespace(image_tag="dev"), cluster)
+    node = world.fx["first"]["node"]
+    world.show(world.old, "clean_exit", node)
+    assert recover() == {world.old.execution_id: "working"}
+    assert f"swarm-{world.old.execution_id}" not in world.api.objects
+    assert grants.revoked == [(cases.SLUG, world.old.execution_id)]
+    world.ready.discard(node)
+    assert recover() == {world.old.execution_id: "completed"}
+    assert world.recovery(world.live).fence(world.old.execution_id) is None
+
+
+def test_the_deployed_pass_keeps_a_running_attempt_pod(world):
+    recover = deployed.recovery_pass(
+        SimpleNamespace(controller=world.live, grants=_Grants()), SimpleNamespace(image_tag="dev"), _Cleaning(world)
+    )
+    assert recover() == {world.old.execution_id: "working"}
+    assert f"swarm-{world.old.execution_id}" in world.api.objects
+    assert world.api.deletes == []
 
 
 def test_a_live_pod_outranks_a_deleted_state_of_the_same_attempt(world):
@@ -639,6 +694,30 @@ def test_a_pod_deleted_after_the_listing_is_reported_by_the_overlapping_watch():
     assert [call for call in api.calls if call[0] == "watch"] == [("watch", "owner=x", "5"), ("watch", "owner=x", "9")]
 
 
+def test_the_chooser_runs_after_reconcile_and_before_replacements_and_its_lines_reach_the_log(monkeypatch):
+    printed, order = [], []
+    monkeypatch.setattr(deployed, "print", lambda *line, **flags: printed.append((line, flags)), raising=False)
+    recording = _Recording()
+    recording.reconcile = lambda *args: order.append("reconcile") or {}
+    recover = deployed.RecoveryPass(recording, _Scripted([([], "5")], []), "owner=x")
+    recover.choose = lambda: order.append("choose") or ["controller: chose fresh"]
+    recover.replacements = lambda: order.append("replace") or {}
+    recover()
+    assert order == ["reconcile", "choose", "replace"]
+    assert printed == [(("controller: chose fresh",), {"flush": True})]
+
+
+def test_the_deployed_pass_chooses_only_when_given_the_controller_environment(world, monkeypatch):
+    service = SimpleNamespace(controller=world.live, grants=_Grants())
+    cluster = _Cluster(world)
+    assert deployed.recovery_pass(service, SimpleNamespace(image_tag="dev"), cluster).choose is None
+    seen = []
+    monkeypatch.setattr(deployed.proof_swarm, "choose_fresh", lambda environ, recovery: seen.append(environ) or [])
+    recover = deployed.recovery_pass(service, SimpleNamespace(image_tag="dev"), cluster, environ={"A": "1"})
+    assert recover.choose() == []
+    assert seen == [{"A": "1"}]
+
+
 def test_the_deployed_pass_fences_a_live_pod_on_a_lost_node_while_nodes_are_refused(world):
     cluster = _Cluster(world, nodes=False)
     service = SimpleNamespace(controller=world.live, grants=_Grants())
@@ -724,6 +803,87 @@ def test_a_failed_node_listing_judges_no_pod_lost(world):
     world.api.objects.pop(f"swarm-{world.old.execution_id}")
     assert recovery.reconcile([], None) == {world.old.execution_id: "unobserved"}
     assert recovery.reconcile([], []) == {world.old.execution_id: "fenced"}
+
+
+def _observed(world, attempt, *ages_s, mode=observe.Mode.STANDARD, **seen):
+    observer, now = observe.Observer(world.store, "kubernetes", observe.Thresholds(mode=mode)), world.clock[0] / 1000
+    kind = {"source": observe.Source.KUBERNETES, "reading": observe.Reading.NOT_FOUND, **seen}
+    for age in ages_s:
+        signal = observe.Signal(
+            kind["source"], kind["reading"], now + age, attempt.execution_id, attempt.generation, kind.get("value", "")
+        )
+        record = observer.observe(cases.SLUG, attempt, [signal], now + age)
+    return record
+
+
+def _stored_for_generation(world, attempt, generation):
+    record, now = None, world.clock[0] / 1000
+    for age in (0, 600):
+        signal = observe.Signal(
+            observe.Source.KUBERNETES, observe.Reading.NOT_FOUND, now + age, attempt.execution_id, generation
+        )
+        record = observe.classify(attempt.execution_id, generation, [signal], record, observe.Thresholds(), now + age)
+    world.store.redis.hset(
+        world.store.key(cases.SLUG, "observations"), attempt.execution_id, json.dumps(asdict(record))
+    )
+    return record
+
+
+def _vanish(world):
+    world.api.objects.pop(f"swarm-{world.old.execution_id}")
+    world.store.redis.hdel(world.store.key(cases.SLUG, "attempt-nodes"), world.old.execution_id)
+    return world.recovery(world.live)
+
+
+def test_a_pod_vanished_unwatched_is_fenced_as_node_lost_once_its_observation_settles_lost(world):
+    recovery = _vanish(world)
+    assert _observed(world, world.old, 0, 600).state is observe.State.LOST
+    assert world.reconcile(recovery) == {world.old.execution_id: "fenced"}
+    assert recovery.fence(world.old.execution_id)["reason"] == "node_lost"
+
+
+def test_a_pod_vanished_unwatched_stays_unobserved_while_its_observation_is_suspect(world):
+    recovery = _vanish(world)
+    assert _observed(world, world.old, 0, 599).state is observe.State.SUSPECT
+    assert world.reconcile(recovery) == {world.old.execution_id: "unobserved"}
+    assert recovery.fence(world.old.execution_id) is None
+
+
+@pytest.mark.parametrize("step", [-1, 1])
+def test_a_lost_observation_of_another_generation_never_fences(world, step):
+    recovery = _vanish(world)
+    assert _stored_for_generation(world, world.old, world.old.generation + step).state is observe.State.LOST
+    assert world.reconcile(recovery) == {world.old.execution_id: "unobserved"}
+    assert recovery.fence(world.old.execution_id) is None
+
+
+@pytest.mark.parametrize(
+    "seen",
+    [
+        {"reading": observe.Reading.OK, "value": "Failed"},
+        {"reading": observe.Reading.OK, "value": "Succeeded"},
+        {"source": observe.Source.SUPERVISOR, "reading": observe.Reading.OK, "value": "exited"},
+    ],
+    ids=["failed", "succeeded", "supervisor-exited"],
+)
+def test_a_lost_observation_proven_by_an_ended_worker_never_fences_a_vanished_pod(world, seen):
+    recovery = _vanish(world)
+    assert _observed(world, world.old, 0, 600, **seen).state is observe.State.LOST
+    assert world.reconcile(recovery) == {world.old.execution_id: "unobserved"}
+    assert recovery.fence(world.old.execution_id) is None
+
+
+def test_an_operator_lost_ruling_fences_a_vanished_pod_and_a_working_ruling_does_not(world):
+    recovery, conservative = _vanish(world), observe.Mode.CONSERVATIVE
+    held = _observed(world, world.old, 0, 600, mode=conservative)
+    assert (held.state, held.needs_operator) == (observe.State.SUSPECT, True)
+    now = world.clock[0] / 1000 + 601
+    observe.rule(world.store, cases.SLUG, world.old.execution_id, "working", "pod moved", "operator", now)
+    assert world.reconcile(recovery) == {world.old.execution_id: "unobserved"}
+    _observed(world, world.old, 602, mode=conservative)
+    observe.rule(world.store, cases.SLUG, world.old.execution_id, "lost", "pod gone", "operator", now + 2)
+    assert world.reconcile(recovery) == {world.old.execution_id: "fenced"}
+    assert recovery.fence(world.old.execution_id)["reason"] == "node_lost"
 
 
 def test_two_live_pods_for_one_attempt_are_left_alone(world):
@@ -838,11 +998,15 @@ class _Stdout:
 
 class _Relaunch:
     def __init__(self, *statuses):
-        self.statuses, self.calls = list(statuses), []
+        self.statuses, self.calls, self.recovery = list(statuses), [], None
 
     def __call__(self, request, agent):
         self.calls.append((request, agent))
         status = self.statuses.pop(0) if self.statuses else Status.OK
+        if status == Status.OK and self.recovery is not None:
+            directive = self.recovery.restore(agent.execution_id)
+            if directive is not None:
+                self.recovery.confirm(agent.execution_id, {**directive, "command": []})
         return SimpleNamespace(outcome=Outcome("spawn", status, "kubernetes"))
 
 
@@ -851,11 +1015,31 @@ def _hash(world, name):
 
 
 def _marks(ledger):
-    return [call[2] for call in ledger.calls]
+    return [call[2] for call in ledger.calls if "awaiting" in call[2]]
+
+
+def _recorded(ledger):
+    return [call[2]["recovery"] for call in ledger.calls if "recovery" in call[2]]
+
+
+def _directive(world, recovery="native", checkpoint="ckpt-one-2"):
+    session = world.fx["first"]["native_session"] if recovery == "native" else ""
+    return {
+        "checkpoint_id": checkpoint,
+        "recovery": recovery,
+        "session_id": session,
+        "watermark": world.fx["first"]["archive_watermark"],
+    }
+
+
+def _outcome(world, recovery="native", checkpoint="ckpt-one-2"):
+    directive = _directive(world, recovery, checkpoint)
+    return {**directive, "command": [], "status": "verified", "archive_watermark": directive["watermark"]}
 
 
 def test_a_pending_recovery_marks_its_task_until_the_resumed_replacement_launches_from_its_checkpoint(world):
     recovery, ledger, relaunch = world.recovery(world.live, automatic=False), _Ledger(), _Relaunch()
+    relaunch.recovery = recovery
     replacements = replacement.Replacements(recovery, relaunch, ledger)
     world.show(world.old, "oom_killed")
     assert world.reconcile(recovery) == {world.old.execution_id: "fenced"}
@@ -880,16 +1064,21 @@ def test_a_pending_recovery_marks_its_task_until_the_resumed_replacement_launche
         "controller_epoch": epoch,
         "checkpoint": "ckpt-one-2",
     }
-    assert ledger.calls[1:] == [(cases.SLUG, "task", {"awaiting": ""}, epoch)]
+    assert ledger.calls[1:] == [
+        (cases.SLUG, "task", {"awaiting": ""}, epoch),
+        (cases.SLUG, "task", {"recovery": _outcome(world)}, epoch),
+    ]
+    assert _hash(world, "attempt-recovery-records") == {world.old.execution_id: "verified"}
     assert _hash(world, "recovery-pending-tasks") == {}
     assert _hash(world, "attempt-replacement-launches") == {world.old.execution_id: decision.replacement}
 
     assert replacements() == {}
-    assert (len(relaunch.calls), len(ledger.calls)) == (1, 2)
+    assert (len(relaunch.calls), len(ledger.calls)) == (1, 3)
 
 
 def test_a_refused_replacement_launch_keeps_its_task_waiting_and_launches_on_a_later_pass(world):
     recovery, ledger, relaunch = world.recovery(world.live), _Ledger(), _Relaunch(Status.UNAVAILABLE)
+    relaunch.recovery = recovery
     replacements = replacement.Replacements(recovery, relaunch, ledger)
     world.show(world.old, "oom_killed")
     world.reconcile(recovery)
@@ -908,6 +1097,7 @@ def test_a_fresh_replacement_launches_without_a_checkpoint_and_a_refused_mark_wa
     world, monkeypatch
 ):
     recovery, ledger, relaunch = world.recovery(world.live, automatic=False), _Ledger(refusals=1), _Relaunch()
+    relaunch.recovery = recovery
     replacements = replacement.Replacements(recovery, relaunch, ledger)
     world.show(world.old, "oom_killed")
     world.reconcile(recovery)
@@ -921,12 +1111,35 @@ def test_a_fresh_replacement_launches_without_a_checkpoint_and_a_refused_mark_wa
     replacements()
     assert _marks(ledger) == [{"awaiting": "recovery_pending"}]
 
-    recovery.decide(world.old.execution_id, "fresh")
+    decision = recovery.decide(world.old.execution_id, "fresh")
     ledger.refusals = 1
+    assert replacements() == {world.old.execution_id: "deferred"}
+    assert relaunch.calls == []
+    assert stdout.text.endswith("controller: the ledger refused the read of task task: ledger fixture refused\n")
+    assert stdout.flushes == 2
+    release = ledger.update_task
+
+    def refused_once(*args):
+        ledger.update_task = release
+        raise SwarmError("ledger fixture refused")
+
+    ledger.update_task = refused_once
+    reads = len(ledger.reads)
     assert replacements() == {world.old.execution_id: "ok"}
+    assert ledger.reads[reads:] == [cases.SLUG]
     [(request, _)] = relaunch.calls
-    assert request.task["checkpoint"] == ""
+    successor = world.store.execution(cases.SLUG, decision.replacement)
+    assert request.task == {
+        "id": "task",
+        "state": "claimed",
+        "awaiting": "recovery_pending",
+        "seat": successor.seat,
+        "profile": successor.profile,
+        "controller_epoch": world.live.held.epoch,
+        "checkpoint": "",
+    }
     assert _hash(world, "recovery-pending-tasks") == {"task": ""}
+    assert _recorded(ledger) == [_outcome(world, "fresh", "")]
     assert replacements() == {}
     assert _marks(ledger) == [{"awaiting": "recovery_pending"}, {"awaiting": ""}]
     assert _hash(world, "recovery-pending-tasks") == {}
@@ -934,6 +1147,7 @@ def test_a_fresh_replacement_launches_without_a_checkpoint_and_a_refused_mark_wa
 
 def test_a_stale_controller_records_no_launch_and_writes_no_mark(world):
     recovery, ledger, relaunch = world.recovery(world.live), _Ledger(), _Relaunch()
+    relaunch.recovery = recovery
     replacements = replacement.Replacements(recovery, relaunch, ledger)
     world.show(world.old, "oom_killed")
     world.reconcile(recovery)
@@ -950,7 +1164,9 @@ def test_a_stale_controller_records_no_launch_and_writes_no_mark(world):
 
 def test_a_stale_controller_writes_no_pending_mark(world):
     recovery, ledger = world.recovery(world.live, automatic=False), _Ledger()
-    replacements = replacement.Replacements(recovery, _Relaunch(), ledger)
+    relaunch = _Relaunch()
+    relaunch.recovery = recovery
+    replacements = replacement.Replacements(recovery, relaunch, ledger)
     world.show(world.old, "oom_killed")
     world.reconcile(recovery)
 
@@ -982,6 +1198,7 @@ def test_a_controller_that_loses_its_lease_during_the_launch_records_no_launch(w
 
 def test_an_ambiguous_replacement_launch_counts_as_launched_and_is_never_placed_twice(world):
     recovery, ledger, relaunch = world.recovery(world.live), _Ledger(), _Relaunch(Status.AMBIGUOUS)
+    relaunch.recovery = recovery
     replacements = replacement.Replacements(recovery, relaunch, ledger)
     world.show(world.old, "oom_killed")
     world.reconcile(recovery)
@@ -991,11 +1208,18 @@ def test_an_ambiguous_replacement_launch_counts_as_launched_and_is_never_placed_
     assert replacements() == {}
     assert len(relaunch.calls) == 1
     assert _hash(world, "attempt-replacement-launches") == {world.old.execution_id: successor}
-    assert ledger.calls == []
+    assert _marks(ledger) == [{"awaiting": "recovery_pending"}]
+    assert _recorded(ledger) == [{**_directive(world), "status": "accepted"}]
+    assert recovery.restore_outcomes_by_type() == {"native": 0, "reconstructed": 0, "fresh": 0}
+    recovery.confirm(successor, {**_directive(world), "command": []})
+    assert replacements() == {}
+    assert len(relaunch.calls) == 1
+    assert _marks(ledger)[-1] == {"awaiting": ""}
 
 
 def test_a_replacement_the_seat_has_moved_past_is_never_launched_and_its_task_stops_waiting(world):
     recovery, ledger, relaunch = world.recovery(world.live, automatic=False), _Ledger(), _Relaunch()
+    relaunch.recovery = recovery
     replacements = replacement.Replacements(recovery, relaunch, ledger)
     world.show(world.old, "oom_killed")
     world.reconcile(recovery)
@@ -1008,10 +1232,13 @@ def test_a_replacement_the_seat_has_moved_past_is_never_launched_and_its_task_st
     assert relaunch.calls == []
     assert _hash(world, "attempt-replacement-launches") == {world.old.execution_id: decision.replacement}
     assert _marks(ledger) == [{"awaiting": "recovery_pending"}, {"awaiting": ""}]
+    assert _recorded(ledger) == []
+    assert _hash(world, "attempt-recovery-records") == {world.old.execution_id: "superseded"}
 
 
 def test_a_fence_whose_decision_is_not_written_yet_waits_without_a_launch(world):
     recovery, ledger, relaunch = world.recovery(world.live), _Ledger(), _Relaunch()
+    relaunch.recovery = recovery
     replacements = replacement.Replacements(recovery, relaunch, ledger)
     fence = {"execution_id": world.old.execution_id, "reason": "oom_killed", "released": []}
     world.store.redis.hset(world.store.key(cases.SLUG, "attempt-fences"), world.old.execution_id, json.dumps(fence))
@@ -1032,7 +1259,9 @@ def test_a_fence_whose_decision_is_not_written_yet_waits_without_a_launch(world)
 )
 def test_a_cleared_recovery_mark_restores_the_awaiting_value_the_task_held_before(world, rows, restored):
     recovery, ledger = world.recovery(world.live, automatic=False), _Ledger(rows=rows)
-    replacements = replacement.Replacements(recovery, _Relaunch(), ledger)
+    relaunch = _Relaunch()
+    relaunch.recovery = recovery
+    replacements = replacement.Replacements(recovery, relaunch, ledger)
     world.show(world.old, "oom_killed")
     world.reconcile(recovery)
 
@@ -1050,6 +1279,7 @@ def test_the_deployed_pass_launches_a_decided_replacement_after_it_reconciles(wo
     service = SimpleNamespace(controller=world.live, grants=_Grants(), runtime=SimpleNamespace(relaunch=relaunch))
     recover = deployed.recovery_pass(service, SimpleNamespace(image_tag="dev"), _Cluster(world), ledger)
     passing = recover.replacements
+    relaunch.recovery = recover.recovery
     assert (passing.recovery, passing.relaunch, passing.ledger) == (recover.recovery, relaunch, ledger)
     assert recover() == {world.old.execution_id: "working"}
     assert ledger.calls == []
@@ -1062,6 +1292,205 @@ def test_the_deployed_pass_launches_a_decided_replacement_after_it_reconciles(wo
     assert recover() == {decision.replacement: "unobserved"}
     assert [agent.execution_id for _, agent in relaunch.calls] == [decision.replacement]
     assert _marks(ledger) == [{"awaiting": "recovery_pending"}, {"awaiting": ""}]
+    kept = retention.retained(world.store, cases.SLUG, world.old.execution_id)
+    assert kept["final"]["outcome_ref"] == f"attempt-fences/{world.old.execution_id}"
+    assert retention.retained(world.store, cases.SLUG, decision.replacement) is None
+
+
+def _context(world, checkpoint_id="ckpt-context", sequence=9):
+    entry = {"checkpoint_id": checkpoint_id, "sequence": sequence, "status": "complete", "continuation": "context"}
+    return {**entry, "compatibility": world.fx["compatibility"]}
+
+
+def test_an_automatic_replacement_comes_only_from_a_native_checkpoint(world):
+    native = {**world.fx["first"]["checkpoints"][1], "continuation": "native"}
+    world.checkpoints.by_execution[world.old.execution_id] = [_context(world), native]
+    recovery = world.recovery(world.live)
+    decision = recovery.handle(world.old.execution_id, "node_lost")
+    assert (decision.mode, decision.checkpoint) == ("resume", "ckpt-one-2")
+    assert recovery.restore(decision.replacement) == _directive(world)
+    assert recovery.restore_outcomes_by_type() == {"native": 0, "reconstructed": 0, "fresh": 0}
+
+
+def test_a_context_only_checkpoint_waits_for_an_explicit_choice_and_restores_as_reconstructed(world):
+    world.checkpoints.by_execution[world.old.execution_id] = [_context(world)]
+    recovery = world.recovery(world.live)
+    pending = recovery.handle(world.old.execution_id, "evicted")
+    assert (pending.mode, pending.replacement) == ("recovery_pending", "")
+    assert world.occupant().state == "awaiting-decision"
+    assert recovery.restore_outcomes_by_type() == {"native": 0, "reconstructed": 0, "fresh": 0}
+    decision = recovery.decide(world.old.execution_id, "resume")
+    assert (decision.mode, decision.checkpoint) == ("resume", "ckpt-context")
+    assert recovery.restore(decision.replacement) == _directive(world, "reconstructed", "ckpt-context")
+    assert recovery.restore_outcomes_by_type() == {"native": 0, "reconstructed": 0, "fresh": 0}
+
+
+def test_an_attempt_without_a_native_session_never_resumes_natively(world):
+    run = {**world.fx["second"], "native_session": ""}
+    other = world.launch(world.live, run, "eng-2")
+    recovery = world.recovery(world.live)
+    assert recovery.handle(other.execution_id, "oom_killed").mode == "recovery_pending"
+    decision = recovery.decide(other.execution_id, "resume")
+    restore = recovery.restore(decision.replacement)
+    assert (restore["recovery"], restore["session_id"], restore["checkpoint_id"]) == ("reconstructed", "", "ckpt-two-1")
+
+
+def test_a_fresh_choice_records_a_fresh_restore_at_the_archived_watermark(world):
+    world.checkpoints.by_execution[world.old.execution_id] = []
+    recovery = world.recovery(world.live)
+    recovery.handle(world.old.execution_id, "node_lost")
+    decision = recovery.decide(world.old.execution_id, "fresh")
+    assert recovery.restore(decision.replacement) == _directive(world, "fresh", "")
+    assert recovery.restore_outcomes_by_type() == {"native": 0, "reconstructed": 0, "fresh": 0}
+
+
+@pytest.mark.parametrize("command", [None, 123, "claude", {"word": "claude"}, [None], [123], [False]])
+def test_malformed_restore_commands_are_refused_without_recording_an_outcome(world, command):
+    recovery = world.recovery(world.live)
+    decision = recovery.handle(world.old.execution_id, "node_lost")
+    restored = {**recovery.restore(decision.replacement), "command": command}
+    with pytest.raises(SwarmError) as caught:
+        recovery.confirm(decision.replacement, restored)
+    assert str(caught.value) == "restore command must be a sequence of strings"
+    assert recovery.outcome(decision.replacement) is None
+
+
+@pytest.mark.parametrize("command", [[], ["claude", "--resume", "fixture"], ("claude", "--resume", "fixture")])
+def test_restore_command_sequences_are_recorded_as_json_lists(world, command):
+    recovery = world.recovery(world.live)
+    decision = recovery.handle(world.old.execution_id, "node_lost")
+    restored = {**recovery.restore(decision.replacement), "command": command}
+    outcome = recovery.confirm(decision.replacement, restored)
+    assert outcome["command"] == list(command)
+    assert recovery.confirm(decision.replacement, restored) == outcome
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("recovery", "fresh"),
+        ("checkpoint_id", "another"),
+        ("session_id", "another"),
+        ("watermark", -1),
+        ("watermark", True),
+        ("watermark", 0.0),
+        ("watermark", None),
+    ],
+)
+def test_restore_receipt_fields_must_match_the_accepted_native_directive(world, field, value):
+    recovery = world.recovery(world.live)
+    decision = recovery.handle(world.old.execution_id, "node_lost")
+    restored = {**recovery.restore(decision.replacement), "command": [], field: value}
+    with pytest.raises(SwarmError) as caught:
+        recovery.confirm(decision.replacement, restored)
+    assert str(caught.value) == "restore outcome does not match the accepted directive"
+    assert recovery.outcome(decision.replacement) is None
+
+
+@pytest.mark.parametrize("restored", [None, [], {}, {"unknown": "value"}])
+def test_restore_receipt_shape_is_refused_before_recording(world, restored):
+    recovery = world.recovery(world.live)
+    decision = recovery.handle(world.old.execution_id, "node_lost")
+    with pytest.raises(SwarmError) as caught:
+        recovery.confirm(decision.replacement, restored)
+    assert str(caught.value) == "no restore directive for this attempt"
+    assert recovery.outcome(decision.replacement) is None
+
+
+def test_a_restore_receipt_requires_a_directive_and_accepts_zero_cursor(world):
+    recovery = world.recovery(world.live)
+    decision = recovery.handle(world.old.execution_id, "node_lost")
+    restored = {**recovery.restore(decision.replacement), "command": [], "watermark": 0}
+    verified = recovery.confirm(decision.replacement, restored)
+    assert verified["watermark"] == 0
+    with pytest.raises(SwarmError) as caught:
+        recovery.confirm(decision.replacement, {**restored, "watermark": 1})
+    assert str(caught.value) == "restore outcome is already recorded"
+    assert recovery.outcome(decision.replacement) == verified
+    world.store.redis.hdel(world.store.key(recovery.slug, "attempt-restores"), decision.replacement)
+    with pytest.raises(SwarmError) as caught:
+        recovery.confirm(decision.replacement, restored)
+    assert str(caught.value) == "no restore directive for this attempt"
+
+
+@pytest.mark.parametrize("first", ["verified", "superseded"])
+def test_replacement_receipts_continue_after_an_already_settled_attempt(world, first):
+    recovery, ledger, relaunch = world.recovery(world.live), _Ledger(), _Relaunch()
+    relaunch.recovery = recovery
+    other = world.launch(world.live, world.fx["second"], "eng-2")
+    decisions = [recovery.handle(agent.execution_id, "node_lost") for agent in [world.old, other]]
+    replacements = replacement.Replacements(recovery, relaunch, ledger)
+    replacements()
+    before, remaining = sorted(decisions, key=lambda decision: decision.execution_id)
+    world.store.redis.hdel(world.store.key(recovery.slug, "attempt-recovery-records"), remaining.execution_id)
+    if first == "superseded":
+        successor = world.store.execution(recovery.slug, before.replacement)
+        world.live.admit(replace(successor, **failures.NEW_ATTEMPT), successor.execution_id)
+    ledger.calls.clear()
+    replacements()
+    assert _recorded(ledger) == [recovery.outcome(remaining.replacement)]
+    assert len(relaunch.calls) == 2
+
+
+def test_a_repeated_restore_request_reuses_the_accepted_decision_without_a_second_replacement(world):
+    recovery = world.recovery(world.live, automatic=False)
+    recovery.handle(world.old.execution_id, "oom_killed")
+    first = recovery.request(world.old.execution_id, "resume")
+    restored = recovery.restore(first.replacement)
+    attempts = world.attempts()
+    again = world.recovery(world.live).request(world.old.execution_id, "resume")
+    assert again == first
+    assert world.attempts() == attempts == [[world.old.execution_id, 1], [first.replacement, 2]]
+    assert recovery.restore(first.replacement) == restored
+    with pytest.raises(SwarmError, match="^no recovery decision is pending for this attempt$"):
+        recovery.request(world.old.execution_id, "fresh")
+    with pytest.raises(SwarmError, match="^a recovery decision is fresh or resume$"):
+        recovery.request(world.old.execution_id, "recovery_pending")
+    assert world.attempts() == attempts
+
+
+def test_a_repeated_request_still_requires_the_controller(world):
+    recovery = world.recovery(world.live, automatic=False)
+    recovery.handle(world.old.execution_id, "oom_killed")
+    recovery.request(world.old.execution_id, "fresh")
+
+    def stale():
+        raise SwarmError("the controller lease is stale")
+
+    world.live.require = stale
+    with pytest.raises(SwarmError, match="stale"):
+        recovery.request(world.old.execution_id, "fresh")
+
+
+def test_a_pending_request_is_applied_once_on_the_next_pass_and_a_bad_one_is_dropped(world, monkeypatch):
+    recovery = world.recovery(world.live, automatic=False)
+    recovery.handle(world.old.execution_id, "oom_killed")
+    other = world.launch(world.live, world.fx["second"], "eng-2")
+    requests = world.store.key(cases.SLUG, "recovery-requests")
+    world.store.redis.hset(requests, mapping={world.old.execution_id: "fresh", other.execution_id: "resume"})
+    stdout = _Stdout()
+    monkeypatch.setattr("sys.stdout", stdout)
+    world.reconcile(recovery)
+    decision = recovery.decision(world.old.execution_id)
+    assert (decision.mode, decision.checkpoint) == ("fresh", "")
+    assert recovery.decision(other.execution_id) is None
+    assert stdout.text == (
+        f"controller: the recovery request for {other.execution_id} was refused: "
+        "no recovery decision is pending for this attempt\n"
+    )
+    assert stdout.flushes == 1
+    assert world.store.redis.hgetall(requests) == {}
+    world.store.redis.hset(requests, world.old.execution_id, "fresh")
+    attempts = world.attempts()
+    world.reconcile(recovery)
+    assert world.attempts() == attempts
+    assert recovery.decision(world.old.execution_id) == decision
+
+
+def test_an_attempt_no_recovery_admitted_has_no_restore(world):
+    assert failures.restore_directive(world.store, cases.SLUG, "unknown") is None
+    assert world.recovery(world.live).restore(world.old.execution_id) is None
+    assert (failures.RESTORES, failures.REQUESTS) == ("attempt-restores", "recovery-requests")
 
 
 @pytest.mark.parametrize("case", ["a", "b", "c"])

@@ -16,6 +16,9 @@ FLAG = {"AGENTIHOOKS_AICODE_TOKEN_REFRESH": "true"}
 BAO_ENV = {"OPENBAO_URL": BAO_URL, "OPENBAO_TOKEN": BAO_TOKEN}
 OPENBAO_STORE = {"AGENTIHOOKS_AICODE_TOKEN_STORE": "openbao"}
 FRESH = access_token(10)
+NAMED_PATH = "ops/codex-accounts"
+NAMED_URL = f"/v1/secret/data/{NAMED_PATH}"
+NAMED = {"AGENTIHOOKS_CODEX_CREDS_PATH": NAMED_PATH}
 
 
 class Grant:
@@ -240,6 +243,21 @@ def test_the_openbao_store_reads_and_writes_only_openbao_and_an_existing_block()
     rc.write_text(f"{aicode_tokens.START}\n{aicode_tokens.END}\n")
     assert _run(["--force", "beta"], {**FLAG, **BAO_ENV, **OPENBAO_STORE}, Grant(), bao) == 0
     assert f"export AH_CX_TOKEN_beta={FRESH}\n" in rc.read_text()
+
+
+def test_the_openbao_store_reads_and_writes_the_path_the_setting_names(capsys):
+    bao = FakeBao({"AH_CX_TOKEN_alpha": access_token(1), "AH_CX_REFRESH_alpha": "rt-alpha"}, path=NAMED_URL)
+    assert _run([], {**FLAG, **BAO_ENV, **OPENBAO_STORE, **NAMED}, Grant(), bao) == 0
+    assert bao.data == {"AH_CX_TOKEN_alpha": FRESH, "AH_CX_REFRESH_alpha": "rt-alpha-next"}
+    assert f"OpenBao secret/{NAMED_PATH}: wrote" in capsys.readouterr().out
+
+
+def test_the_local_store_writes_back_to_the_path_the_setting_names(capsys):
+    _account("alpha", 1)
+    bao = FakeBao(path=NAMED_URL)
+    assert _run([], {**FLAG, **BAO_ENV, **NAMED}, Grant(), bao) == 0
+    assert bao.data == {"AH_CX_TOKEN_alpha": FRESH, "AH_CX_REFRESH_alpha": "rt-alpha-next"}
+    assert f"OpenBao secret/{NAMED_PATH}: wrote" in capsys.readouterr().out
 
 
 def test_a_failed_openbao_write_after_a_refresh_keeps_the_new_pair_in_a_recovery_file(capsys):

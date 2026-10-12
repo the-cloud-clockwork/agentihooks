@@ -100,7 +100,7 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
 | Trigger | Action |
 |---|---|
 | Start a swarm from an accepted plan | `$init-swarm`; the swarm starts its master, `master@<code>-<n>`, which the operator talks to on the page chat or in its pane |
-| Steer a swarm | `agentihooks swarm <slug> start\|pause\|stop`, `set max-eng-agents=N max-ci-agents=N compact-limit=N autonomy=manual|assist|delegate|full effort-min=E effort-max=E`; the ledger page swarm panel writes the same ops. Codex is one more account in the session rotation, judged on its week alone with the top band. Every lane agent starts inside the effort range (default medium to high) |
+| Steer a swarm | `agentihooks swarm <slug> start\|pause\|stop`, `set max-eng-agents=N max-ci-agents=N compact-limit=N autonomy=manual|assist|delegate|full effort-min=E effort-max=E`; the ledger page swarm panel writes the same ops. Codex is one more account in the session rotation, judged on its week alone with the top band. Every lane agent starts inside the effort range (default medium to xhigh) |
 | Working a ledger | `agentihooks ledger --slug <slug> --as <name> join`, act on every OPERATOR line, then `ack`. In a swarm each operator write arrives as an inbox message at the next tool call and the tick wakes an idle pane, so no Monitor is needed; a ledger without a swarm wakes an idle session only through a `Monitor` on `agentihooks ledger watch <slug> --as <name>` |
 | Work lands, or a blocker appears | `ledger comment phases/<id> "<text>"`, `ledger followup add "<text>"`, `ledger say "<text>"`; plain words for the operator |
 | A question while the operator is away (the question tool is refused unless he typed `operator on`, or typed a prompt in the pane within thirty minutes with no swarm or inbox prompt since) | `ledger question add "<text>"`; the tick sends it to the master, who answers it or raises it to the operator |
@@ -195,8 +195,14 @@ a seat: `master@<slug>`, `eng-1@<slug>`, `ci-1@<slug>`, one per swarm lane slot.
 The tick seats every agent it spawns, a handoff successor in its predecessor's seat;
 whoever occupies a seat now gets its items, the ones a predecessor left pending
 included. Every state change is kept in the item's history.
-A pending item is delivered once, into this session's context at its next tool call
-(PostToolUse where the harness's PreToolUse carries no context), and marked delivered.
+A pending item is claimed and marked delivered when shown through the inbox channel
+or a hook (PostToolUse where PreToolUse carries no context). A later hook confirms
+items delivered before that hook began; `msg read` records receipt, and `msg reply`
+or `msg close` settles the work. Confirmation leaves the item open for you to handle.
+An item never confirmed returns to pending after `AGENTIHOOKS_INBOX_REDELIVER_S`
+(default 300 seconds), with the same id, for whichever transport claims next.
+Failed channel writes return unsent items immediately. Before repeating work on
+redelivery, read the item's current state.
 A swarm Claude session also receives each item the moment it lands through its inbox
 channel, answered with the channel's reply tool. The tick types a wake only into the
 idle worker pane of a harness without that channel, Codex today: one prompt to run
@@ -208,15 +214,47 @@ the operator's and is never typed into. Still unread one window later, the swarm
 gets an item; one more window, the operator gets a follow-up on the ledger page. A
 session with no typed wake is escalated one window after the send. An item for the
 master, or in a swarm without one, goes straight to the operator. Each wake and
-escalation is kept in the item's history.
+escalation is kept in the item's history. The wake window is separate from the
+receiver confirmation window.
+
+Redis unavailable: sends, replies and closes queue in the local checksummed,
+fsynced outbox under the AgentiHooks home. Queued means accepted locally;
+delivery follows replay. New operations wait behind queued ones. Each inbox
+connection and tick replays in order, retaining the failed record and the rest
+on a Redis failure. Stable item ids prevent duplicate sends after a lost response.
+`AGENTIHOOKS_INBOX_OUTBOX_MAX_BYTES` defaults to 1048576; the warning threshold,
+`AGENTIHOOKS_INBOX_OUTBOX_WARN_BYTES`, to 786432. A full outbox refuses the new
+operation and drops nothing queued: restore Redis, then retry the refused send.
+Corrupt or refused replay records stay in `inbox-outbox.skipped.jsonl`; inspect
+their reported reasons. Local disk survival and available space bound durability.
+Ledger writes not accepted by Redis or the outbox retain their oldest unrelayed
+revision for replay on the next write or the ledger watch; replay reaches only
+the ledger's retained 2000 events. A ledger notice reports the lost revision
+range when history was trimmed before relay; the watcher and tick report gaps.
+
+An open Redis, ledger or provider outage, or your pane's provider error, holds
+idle counts, nudges, retirement and task reclaim. Wake and escalation deadlines
+exclude outage time; idle and stale claim findings carry the outage evidence and
+send no finding notice. Provider recovery needs a successful minimal request
+for every affected account, on a backoff from one to ten minutes; an account
+stops probing on its first success, and pane text alone does not release the
+hold. On recovery the tick sends a marked resume prompt: read your task folder
+and inbox, then continue your task. Busy panes, typed input and permission
+prompts wait. Error panes get at most three resume attempts on separate ticks
+before normal idle rules; dead agents reopen their own
+conversation in the same seat, with a handoff fallback. Recovery requires your
+claim, generation and seat occupant still to match, with a live claim lease,
+so a successor's work cannot be resumed
+by the old agent. Full contract and limits: `docs/pillars/swarm.md`,
+Delivered then confirmed, Local outbox and limits, Outage holds and recovery.
 
 The inbox carries swarm chat and talk across harnesses (Claude, Codex, Copilot) alike.
 `agentihooks swarm <slug> say --to <name|eng|ci>` leaves one item per recipient; a
 ledger page chat line becomes an item from `operator` for its addressee (the master
 when unaddressed) and stays on the page. Every other operator write on the page (comment,
 reply, answer, note, check) becomes an item too: for the agent that claimed its task, else
-for the master, whom a stopped swarm starts for it. Each write reaches you once, through the
-inbox or the ledger hook; an operator sync order reaches every live agent. A reply to `operator` is posted on the
+for the master, whom a stopped swarm starts for it. Stable ids keep relay retries
+to one item; unconfirmed delivery can be shown again. An operator sync order reaches every live agent. A reply to `operator` is posted on the
 ledger page chat and closed done.
 
 | Trigger | Action |

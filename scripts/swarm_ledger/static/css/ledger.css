@@ -500,6 +500,7 @@ input, textarea { caret-color: var(--accent-2); }
 .sw-num[aria-invalid="true"] { color: var(--destructive); }
 .sw-unit { font-size: var(--fs-meta); color: var(--muted); }
 .sw-select { text-align: left; cursor: pointer; }
+.sw-model .sw-select { max-width: 22ch; }
 .sw-select option { background: var(--panel); color: var(--text); }
 .sw-affinity-state:empty { display: none; }
 .sw-affinity-state.bad { color: var(--destructive); }
@@ -618,6 +619,9 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 #stats-column section { padding: 16px; margin: 0; }
 #stats { margin: 0; }
 #stats .stat { grid-template-columns: minmax(0, 1fr) auto; }
+#stats .top-bottleneck { grid-template-columns: 1fr; gap: 6px; padding-bottom: 12px; }
+#stats .top-bottleneck dd { text-align: left; min-width: 0; overflow-wrap: anywhere; }
+#stats .bottleneck-stage { font-weight: 600; }
 @media (max-width: 1023px) {
   .workspace { margin-left: 0; overflow-x: auto; }
   .workspace > .outline { flex-basis: 180px; }

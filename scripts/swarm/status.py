@@ -15,19 +15,22 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm import (
     affinity,
     bottleneck,
+    bottleneck_status,
     drain_watch,
+    failed_panes,
     idle,
     launch_check,
     ledger_probe,
     lifecycle,
     live_binding,
+    outage,
     overlays,
     quota_view,
     retire_watch,
     snapshot,
     tick_master,
 )
-from scripts.swarm.health import activity, checks, prompt_backlog, spawn_stall, verdicts
+from scripts.swarm.health import activity, checks, prompt_backlog, spawn_stall, standing, verdicts
 from scripts.swarm.health import findings as health
 from scripts.swarm.naming import swarm_name
 from scripts.swarm.store import ASSIST, SwarmError
@@ -40,6 +43,9 @@ from scripts.swarm_v2.runtime import observe
 DEFAULT_COMPACT_LIMIT = 600
 UNCLASSIFIED = "unclassified"
 PAUSED_WHILE_SLOW = ("idle with claim", "stale claim")
+
+
+from scripts.swarm_v2.checkpoints import cards as recovery_cards
 
 
 def now_ms():
@@ -99,7 +105,9 @@ def findings(store, slug, config, tasks, events):
         + launch_check.findings(store, slug)
         + spawn_stall.findings(store, slug)
         + prompt_backlog.findings(store, slug)
+        + standing.findings(store.redis, slug, now_ms())
     )
+    found = outage.hold_findings(store, slug, found, agents)
     if ledger_probe.holding(store, slug):
         found = [f for f in found if f.kind not in PAUSED_WHILE_SLOW]
     return verdict_store(store, slug).visible(found, now_ms(), limits.cooldown_minutes * 60_000)
@@ -161,7 +169,7 @@ def doctor_report(store, slug):
     }
 
 
-def handoff_rows(transfers_list, agents):
+def handoff_rows(transfers_list, agents, recoveries=None):
     latest = {row["seat"]: row for row in transfers_list}
     occupant = {a["seat"]: a for a in agents if a.get("seat")}
     seats = sorted(set(latest) | set(occupant), key=lambda seat: (not seat.startswith("master@"), seat))
@@ -180,6 +188,7 @@ def handoff_rows(transfers_list, agents):
                 "bound_at": row.get("binding", {}).get("at", 0),
                 "successor": row.get("successor") or agent.get("name", ""),
                 "awaiting": awaiting,
+                **((recoveries or {}).get(seat, {})),
             }
         )
     return rows
@@ -248,6 +257,7 @@ def status_report(store, slug, state):
             }
             for a in store.agents(slug)
         ],
+        "outages": outage.open_records(slug),
         "last_tick": int(store.redis.get(store.key(slug, "last-tick")) or 0),
         "history": [json.loads(row) for row in store.redis.lrange(store.key(slug, "history"), 0, -1)],
         "tasks": task_counts(tasks),
@@ -255,10 +265,11 @@ def status_report(store, slug, state):
         "spawns": store.spawns(slug),
         "findings": findings(store, slug, config, tasks, events),
         "launch_checks": launch_check.reports(store, slug),
+        "failed_launch_panes": failed_panes.report(store, slug),
         "auto_snapshot": auto_snapshot(config),
         "restored": store.restored(slug),
         "transfers": handed,
-        "handoffs": handoff_rows(handed, agents),
+        "handoffs": handoff_rows(handed, agents, recovery_cards.rows(store, slug)),
         "peer": store.peer(slug),
         "plan_shape": shape_report(tasks, config.max_eng),
         "compact_limit": compact_limit(config),
@@ -271,6 +282,7 @@ def status_report(store, slug, state):
         "execution_transition_latency_seconds": telemetry.Telemetry(store, slug).execution_transition_latency_seconds(),
         "transitions": telemetry.timelines(store, slug, [a.seat for a in store.agents(slug)]),
         "bottleneck": bottleneck.read(store, slug),
+        "top_bottleneck": bottleneck_status.report(store, slug, now_ms()),
         "gates": [{**row, "kind": modes.label(row["kind"])} for row in gate_log.decisions(slug)],
         "gate_modes": {name: modes.label(mode) for name, mode in catalog.current(config.gates).items()},
         "master_affinity": affinity.report(store, slug, config, store.agents(slug)),

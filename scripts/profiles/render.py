@@ -457,6 +457,7 @@ def render_codex(name: str, force: bool = False, overlays: Sequence[str] = ()) -
     current = {
         "render": stamp,
         "operator": hashlib.sha256(text.encode()).hexdigest(),
+        "login": (operator / "auth.json").is_file(),
         "skills": {skill: str(path) for skill, path in {**below, **above}.items()},
     }
     root = profile_dir(name, overlays)
@@ -487,7 +488,8 @@ def render_codex(name: str, force: bool = False, overlays: Sequence[str] = ()) -
     _relink(out / "skills", {**below, **{p.name: p for p in sorted((claude / "skills").iterdir())}, **above})
     _link_commands(out / "skills", claude / "commands")
     for item in CODEX_STATE:
-        _link(out / item, operator / item)
+        if item != "auth.json" or current["login"]:
+            _link(out / item, operator / item)
     _link(manifest, sources.path(root.name, "claude", root.parent))
     doc = _codex_config(installed, operator, out, _settings("codex", bundle, dirs))
     doc["project_doc_max_bytes"] = max(65536, int(len((claude / "CLAUDE.md").read_bytes()) * 1.25))

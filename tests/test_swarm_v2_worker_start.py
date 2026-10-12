@@ -13,8 +13,9 @@ from pathlib import Path
 
 import pytest
 
-from scripts.swarm_v2 import filesystem, worker_home
+from scripts.swarm_v2 import filesystem, worker_home, workspaces
 from scripts.swarm_v2.broadcast_bridge import API_URL, GRANT_NAME
+from scripts.swarm_v2.checkpoints import restore
 from scripts.swarm_v2.supervision import Launch, LaunchRefused
 from scripts.swarm_v2.worker import start
 
@@ -406,6 +407,196 @@ def test_an_answer_that_is_not_an_object_refuses(tmp_path):
     )
 
 
+FRESH_RESTORE = {"checkpoint_id": "", "recovery": "fresh", "session_id": "", "watermark": 4096}
+NATIVE_RESTORE = {"checkpoint_id": "ckpt-1", "recovery": "native", "session_id": "s-1", "watermark": 4096}
+
+
+def test_a_launch_naming_no_restore_writes_no_restore_record(tmp_path):
+    prepare(tmp_path, material(tmp_path), Controller((200, ANSWER)))
+    assert not (tmp_path / "attempts" / EXECUTION / start.RESTORED).exists()
+    assert start.RESTORED == "restore.json"
+
+
+def test_a_fresh_restore_is_recorded_before_the_registration_record(tmp_path):
+    prepare(tmp_path, material(tmp_path, {**RECORD, "restore": FRESH_RESTORE}), Controller((200, ANSWER)))
+    attempt = tmp_path / "attempts" / EXECUTION
+    recorded = attempt / start.RESTORED
+    expected = {"recovery": "fresh", "checkpoint_id": "", "watermark": 4096, "session_id": "", "command": []}
+    assert json.loads(recorded.read_text()) == expected
+    assert stat.S_IMODE(recorded.stat().st_mode) == 0o600
+    assert json.loads((attempt / "registration.json").read_text()) == AUTHORITY
+
+
+def test_the_launch_restore_runs_after_bootstrap_with_the_launch_record(tmp_path, monkeypatch):
+    seen = []
+
+    def restoring(spec, attempt):
+        seen.append((spec["restore"], (tmp_path / "attempts" / EXECUTION / "run").is_dir()))
+        return restore.Restored("native", "ckpt-1", 41, "s-1", ("claude", "--resume", "s-1"))
+
+    launch = material(tmp_path, {**RECORD, "restore": NATIVE_RESTORE})
+    attempt = tmp_path / "attempts" / EXECUTION
+    monkeypatch.setattr(start.checkpoint_runtime, "prepare", restoring)
+    start.prepare(attempt, launch, Controller((200, ANSWER)).send, None, Boot(), shipped(tmp_path))
+    assert seen == [(NATIVE_RESTORE, True)]
+    recorded = json.loads((attempt / start.RESTORED).read_text())
+    assert recorded == {
+        "recovery": "native",
+        "checkpoint_id": "ckpt-1",
+        "watermark": 41,
+        "session_id": "s-1",
+        "command": ["claude", "--resume", "s-1"],
+    }
+
+
+def test_remote_restore_is_reported_before_receipt_and_registration(tmp_path, monkeypatch):
+    attempt = tmp_path / "attempts" / EXECUTION
+    spec = {**RECORD, "restore": NATIVE_RESTORE, "checkpoint_remote": True}
+    launch = material(tmp_path, spec)
+    calls = []
+    restored = restore.Restored("native", "ckpt-1", 41, "s-1", ("claude", "--resume", "s-1"))
+    monkeypatch.delenv(start.checkpoint_runtime.REMOTE, raising=False)
+
+    def restoring(actual, root):
+        assert actual == spec
+        assert root == attempt
+        assert os.environ[start.checkpoint_runtime.REMOTE] == "true"
+        assert json.loads((attempt / "launch.json").read_text()) == spec
+        assert stat.S_IMODE((attempt / "launch.json").stat().st_mode) == 0o600
+        return restored
+
+    def reporting(actual, grant, outcome):
+        calls.append((actual, grant, outcome))
+        assert not (attempt / start.RESTORED).exists()
+        assert not (attempt / "registration.json").exists()
+
+    monkeypatch.setattr(start.checkpoint_runtime, "prepare", restoring)
+    monkeypatch.setattr(start, "report", reporting)
+    start.prepare(attempt, launch, Controller((200, ANSWER)).send, None, Boot(), shipped(tmp_path))
+    assert calls == [(spec, GRANT, restored)]
+    assert json.loads((attempt / start.RESTORED).read_text())["recovery"] == "native"
+
+
+@pytest.mark.parametrize("status", [200, 201, 403])
+@pytest.mark.parametrize("suffix, base", [("/", CONTROL), ("/proxyX/", CONTROL + "/proxyX")])
+def test_restore_receipt_transport_is_authenticated_bounded_and_requires_success(monkeypatch, status, suffix, base):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    restored = restore.Restored("native", "ckp-one", 41, "session", ("claude", "--resume", "session"))
+    spec = {"execution_id": EXECUTION, "control_url": CONTROL + suffix}
+    calls = []
+    monkeypatch.setattr(
+        start.urllib.request,
+        "urlopen",
+        lambda request, **kwargs: calls.append((request, kwargs)) or nullcontext(SimpleNamespace(status=status)),
+    )
+    if status == 200:
+        assert start.report(spec, GRANT, restored) is None
+    else:
+        with pytest.raises(start.LaunchRefused) as caught:
+            start.report(spec, GRANT, restored)
+        assert str(caught.value) == "restore outcome was not accepted"
+    [(request, kwargs)] = calls
+    assert request.full_url == base + f"/v1/executions/{EXECUTION}/restore-outcome"
+    assert request.get_method() == "POST"
+    assert request.get_header("Authorization") == "Bearer " + GRANT
+    assert request.get_header("Content-type") == "application/json"
+    assert json.loads(request.data) == {
+        "recovery": "native",
+        "checkpoint_id": "ckp-one",
+        "watermark": 41,
+        "session_id": "session",
+        "command": ["claude", "--resume", "session"],
+    }
+    assert kwargs == {"timeout": start.TIMEOUT_SECONDS}
+
+
+@pytest.mark.parametrize("error", [OSError("transport refused"), start.HTTPException("broken response")])
+def test_failed_restore_receipt_transport_refuses_start(monkeypatch, error):
+    def broken(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(start.urllib.request, "urlopen", broken)
+    with pytest.raises(start.LaunchRefused) as caught:
+        start.report({"execution_id": EXECUTION, "control_url": CONTROL}, GRANT, restore.Restored("fresh", "", 0))
+    assert str(caught.value) == "restore outcome was not accepted"
+
+
+@pytest.mark.parametrize("status", [200, 403])
+@pytest.mark.parametrize(
+    "recovery, checkpoint_id", [("native", "ckp-one"), ("reconstructed", "ckp-two"), ("fresh", None)]
+)
+def test_only_confirmed_restore_outcomes_have_a_public_summary(monkeypatch, capsys, status, recovery, checkpoint_id):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    restored = restore.Restored(
+        recovery, checkpoint_id, 41, "private-session", ("claude", "--resume", "private-session")
+    )
+    monkeypatch.setattr(
+        start.urllib.request, "urlopen", lambda *args, **kwargs: nullcontext(SimpleNamespace(status=status))
+    )
+    spec = {"execution_id": EXECUTION, "control_url": CONTROL}
+    if status != 200:
+        with pytest.raises(start.LaunchRefused):
+            start.report(spec, GRANT, restored)
+        assert capsys.readouterr().out == ""
+        return
+    start.report(spec, GRANT, restored)
+    assert json.loads(capsys.readouterr().out) == {
+        "event": "restore_verified",
+        "execution_id": EXECUTION,
+        "recovery": recovery,
+        "checkpoint_id": checkpoint_id,
+        "watermark": 41,
+    }
+
+
+def test_confirmed_restore_summary_is_delivered_before_report_returns(monkeypatch):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    from tests.public_output import BufferedOutput
+
+    output = BufferedOutput()
+    monkeypatch.setattr("sys.stdout", output)
+    monkeypatch.setattr(
+        start.urllib.request, "urlopen", lambda *args, **kwargs: nullcontext(SimpleNamespace(status=200))
+    )
+    restored = restore.Restored("native", "ckp-one", 41, "private-session", ("claude", "--resume", "private-session"))
+    start.report({"execution_id": EXECUTION, "control_url": CONTROL}, GRANT, restored)
+    assert json.loads(output.visible) == {
+        "event": "restore_verified",
+        "execution_id": EXECUTION,
+        "recovery": "native",
+        "checkpoint_id": "ckp-one",
+        "watermark": 41,
+    }
+
+
+def test_a_checkpoint_restore_without_a_store_refuses_the_start_and_registers_nothing(tmp_path):
+    launch = material(tmp_path, {**RECORD, "restore": NATIVE_RESTORE})
+    with pytest.raises(restore.RestoreRefused) as refused:
+        prepare(tmp_path, launch, Controller((200, ANSWER)))
+    assert str(refused.value) == restore.STORE_MISSING
+    attempt = tmp_path / "attempts" / EXECUTION
+    assert not (attempt / "registration.json").exists()
+    assert not (attempt / start.RESTORED).exists()
+    assert (attempt / "run" / GRANT_NAME).exists()
+
+
+def test_a_refused_restore_is_a_refused_start(tmp_path, monkeypatch, capsys):
+    def refused(attempt, launch):
+        raise restore.RestoreRefused("version_changed")
+
+    monkeypatch.setattr(start.os, "umask", lambda mask: 0o022)
+    monkeypatch.setattr(start, "prepare", refused)
+    monkeypatch.setattr(start.supervision_runtime, "main", lambda argv: pytest.fail("supervisor ran"))
+    assert start.main(["a", "b"]) == 64
+    assert capsys.readouterr().err == "ERROR worker start refused: version_changed\n"
+
+
 def test_the_start_runs_the_supervisor_on_the_prepared_attempt_under_a_private_umask(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(start.os, "umask", lambda mask: calls.append(("umask", mask)) or 0o022)
@@ -675,3 +866,144 @@ def test_the_image_supervisor_entry_runs_the_start_step_as_a_script():
 
     assert (done.returncode, done.stdout) == (64, "")
     assert done.stderr == "ERROR worker start requires attempt directory and launch record\n"
+
+
+PROJECT = "github.com/the-cloud-clockwork/agentihooks"
+AGENT = "engineer@323133-1222"
+CHECKOUT = {"project": PROJECT, "agent": AGENT}
+BRANCH = "engineer-323133-1222"
+BASE_COMMIT = "a" * 40
+
+
+class Workspaces:
+    def __init__(self, failure: Exception | None = None) -> None:
+        self.failure, self.calls = failure, []
+
+    def __call__(self, attempt: Path, request: workspaces.Request) -> workspaces.Workspace:
+        self.calls.append((attempt, request, (attempt / "registration.json").exists()))
+        if self.failure is not None:
+            raise self.failure
+        mirror = attempt / "checkouts" / "agentihooks.git"
+        tree = attempt / "worktrees" / BRANCH
+        return workspaces.Workspace(tree, BRANCH, mirror, PROJECT, "dev", BASE_COMMIT, request.task, 3, 1.5)
+
+
+def checked_out(tmp_path, monkeypatch, prepared, record=None):
+    controller = Controller((200, ANSWER))
+    launch = material(tmp_path, record or {**RECORD, "checkout": CHECKOUT})
+    attempt = tmp_path / "attempts" / EXECUTION
+    monkeypatch.setattr(start, "checkout", prepared)
+    return start.prepare(attempt, launch, controller.send, controller.sleep, Boot(), shipped(tmp_path))
+
+
+def test_the_start_prepares_the_permitted_project_checkout_on_its_branch_before_the_registration_record(
+    tmp_path, monkeypatch
+):
+    prepared = Workspaces()
+
+    record = checked_out(tmp_path, monkeypatch, prepared)
+
+    origin = "https://github.com/the-cloud-clockwork/agentihooks.git"
+    attempt = tmp_path / "attempts" / EXECUTION
+    assert prepared.calls == [(attempt, workspaces.Request(origin, "t1", 3, AGENT), False)]
+    assert record == {"checkout": {"project": PROJECT, "branch": BRANCH, "base": "dev", "base_commit": BASE_COMMIT}}
+    assert json.loads((attempt / "registration.json").read_text()) == AUTHORITY
+
+
+def test_worker_configures_scoped_app_askpass_before_checkout(tmp_path, monkeypatch):
+    monkeypatch.setenv("GITHUB_APP_ID", "123")
+    prepared = Workspaces()
+    seen = []
+
+    def configure(project):
+        assert prepared.calls == []
+        seen.append(project)
+
+    monkeypatch.setattr(start.git_auth, "configure", configure)
+    checked_out(tmp_path, monkeypatch, prepared)
+    assert seen == [PROJECT]
+
+
+def test_a_launch_record_without_a_checkout_prepares_none(tmp_path, monkeypatch):
+    prepared = Workspaces()
+
+    assert checked_out(tmp_path, monkeypatch, prepared, RECORD) == {}
+
+    assert prepared.calls == []
+
+
+def test_a_checkout_that_cannot_be_prepared_refuses_the_start_without_a_registration_record(tmp_path, monkeypatch):
+    prepared = Workspaces(workspaces.WorkspaceError("fetch of the project failed"))
+
+    with pytest.raises(workspaces.WorkspaceError) as refused:
+        checked_out(tmp_path, monkeypatch, prepared)
+
+    assert str(refused.value) == "fetch of the project failed"
+
+    assert not (tmp_path / "attempts" / EXECUTION / "registration.json").exists()
+
+
+@pytest.mark.parametrize(
+    "checkout",
+    [
+        {"project": "user:token@github.com/the-cloud-clockwork/agentihooks", "agent": AGENT},
+        {"project": "x-access-token@github.com/the-cloud-clockwork/agentihooks", "agent": AGENT},
+        {"project": "local:fixture", "agent": AGENT},
+        {"project": "github.com/the-cloud-clockwork/agentihooks/extra", "agent": AGENT},
+        {"project": "github.com/the-cloud-clockwork/..", "agent": AGENT},
+        {"project": "github.com/.hidden/agentihooks", "agent": AGENT},
+        {"project": "gitlab.com/the-cloud-clockwork/agentihooks", "agent": AGENT},
+        {"project": 7, "agent": AGENT},
+        {"agent": AGENT},
+        PROJECT,
+    ],
+)
+def test_a_checkout_outside_a_plain_project_is_refused_before_anything_is_written(tmp_path, checkout):
+    launch = material(tmp_path, {**RECORD, "checkout": checkout})
+
+    assert refusal(tmp_path, launch) == "launch record names no permitted project"
+
+
+@pytest.mark.parametrize("checkout", [{"project": PROJECT}, {"project": PROJECT, "agent": 7}])
+def test_a_checkout_that_names_no_agent_is_refused_before_anything_is_written(tmp_path, checkout):
+    launch = material(tmp_path, {**RECORD, "checkout": checkout})
+
+    assert refusal(tmp_path, launch) == "launch record names no agent for its checkout"
+
+
+def test_the_start_prints_the_prepared_checkout(monkeypatch, capsys):
+    checkout = {"project": PROJECT, "branch": BRANCH, "base": "dev", "base_commit": BASE_COMMIT}
+    monkeypatch.setattr(start, "prepare", lambda attempt, launch: {"checkout": checkout})
+    monkeypatch.setattr(start.supervision_runtime, "main", lambda argv: 70)
+
+    assert start.main(["/home/worker/attempts/a", "/var/run/swarm/launch/launch.json"]) == 70
+
+    printed = {"worker_start": "prepared", "attempt": "a", "uid": os.getuid(), "checkout": checkout}
+    assert capsys.readouterr().out == json.dumps(printed) + "\n"
+
+
+def git(*args: str, cwd: Path | None = None) -> str:
+    identity = ["-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid"]
+    done = subprocess.run(["git", *identity, *args], cwd=cwd, capture_output=True, text=True, check=True)
+    return done.stdout.strip()
+
+
+def test_the_checkout_clones_its_origin_into_the_attempt_and_names_the_branch_from_the_agent(tmp_path):
+    origin, seed = tmp_path / "origin.git", tmp_path / "seed"
+    git("init", "--bare", "--initial-branch", "dev", str(origin))
+    git("init", "--initial-branch", "dev", str(seed))
+    (seed / "README").write_text("fixture\n")
+    git("add", "README", cwd=seed)
+    git("commit", "-m", "seed", cwd=seed)
+    git("push", str(origin), "dev", cwd=seed)
+    layout = filesystem.load()
+    attempt = filesystem.allocate(tmp_path, EXECUTION, layout).root
+    (attempt / "execution.json").write_text(json.dumps({"attempt": EXECUTION, "layout": filesystem.mapping(layout)}))
+
+    found = start.checkout(attempt, workspaces.Request(f"file://{origin}", "t1", 3, AGENT))
+
+    assert (found.branch, found.base, found.base_commit) == (BRANCH, "dev", git("rev-parse", "HEAD", cwd=seed))
+    assert found.path == attempt / "worktrees" / BRANCH
+    assert (found.path / "README").read_text() == "fixture\n"
+    assert git("rev-parse", "--abbrev-ref", "HEAD", cwd=found.path) == BRANCH
+    assert git("--git-dir", str(found.mirror), "config", "remote.origin.url") == f"file://{origin}"

@@ -4047,7 +4047,7 @@ Baseline references: [SRC-AH-SNAPSHOT] [SRC-K8S-LIFECYCLE]
 ##### Implementation sequence
 
 1. Discover the supported native conversation artifacts for the pinned target version.
-2. Quiesce writes or use a supported backup method for mutable databases.
+2. Read a mutable database in one read-only transaction that never waits on a writer's lock; a held lock reports `database_busy`, and the database itself is not carried because the CLI rebuilds it from its conversation files.
 3. Exclude account authentication state from the portable bundle.
 4. Run a fresh-container native-resume proof with the intended account and project.
 

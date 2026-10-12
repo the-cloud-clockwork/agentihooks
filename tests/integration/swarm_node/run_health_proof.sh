@@ -14,7 +14,7 @@ cleanup() {
     docker image rm "$task_missing" "$task_fixture" "$task_worker" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
-docker build --platform linux/amd64 --file "$task_repo/docker/swarm-node/Dockerfile" \
+docker build --platform linux/amd64 ${WORKER_BASE_CONTEXT:+--build-context "$WORKER_BASE_CONTEXT"} --file "$task_repo/docker/swarm-node/Dockerfile" \
     --build-arg SOURCE_REVISION="$task_revision" --tag "$task_worker" "$task_repo" > "$task_output/worker-build.log" 2>&1
 docker build --file "$task_repo/tests/integration/swarm_node/Dockerfile" \
     --build-arg WORKER_IMAGE="$task_worker" --tag "$task_fixture" "$task_repo" > "$task_output/fixture-build.log" 2>&1

@@ -19,6 +19,7 @@ from scripts.profiles import binding, plugins
 from scripts.swarm import (
     affinity,
     capacity,
+    default_models,
     effort_range,
     host_budget,
     live_binding,
@@ -31,7 +32,7 @@ from scripts.swarm import (
     reaper,
     timing,
 )
-from scripts.swarm.pane import PaneObservation, selection_prompt, typed_input
+from scripts.swarm.pane import PaneObservation, provider_error, provider_error_id, selection_prompt, typed_input
 from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig, connect
 from scripts.swarm.tick import Placed, SpawnError
 
@@ -77,7 +78,14 @@ def _model_args(agent, chosen, environ, bounds, preserve=False):
     model, effort = model_effort(agent, [], environ)
     saved = _set(chosen.get("effort")) or effort
     effort = effort_range.clamp(agent, saved, bounds)
-    if preserve and effort_range.rank(effort) != effort_range.rank(saved):
+    if (
+        not preserve
+        and chosen.get("source") == model_pick.BAND
+        and chosen.get("model") == model_pick.SONNET
+        and effort != model_pick.SONNET_EFFORT
+    ):
+        raise SpawnError("unsupported automatic Sonnet: the swarm range must allow xhigh", "unsupported")
+    if preserve and effort_range.rank(effort) != effort_range.rank(effort_range.named(agent, saved)):
         raise SpawnError("unsupported transfer: saved effort is outside the current swarm range", "unsupported")
     return model_flags(agent, _set(chosen.get("model")) or model, effort)
 
@@ -86,10 +94,11 @@ def preserves_effort(recorded: bool, lane: str) -> bool:
     return recorded and lane != MASTER
 
 
-def _lane_default(lane, agent, chosen):
+def _lane_default(lane, agent, chosen, config=None):
+    model = default_models.model(config, agent)
     if lane == MASTER:
-        return model_pick.frontier(agent)
-    return model_pick.ModelPick(chosen.get("model"), chosen.get("effort"))
+        return model_pick.frontier(agent, model)
+    return model_pick.ModelPick(_set(chosen.get("model")) or model, chosen.get("effort"))
 
 
 def herdr_call(args):
@@ -109,6 +118,19 @@ def herdr_target(name):
 
 def pane_target(agent):
     return agent.pane_id or herdr_target(agent.name)
+
+
+def _launch_records(name):
+    from scripts import herdr_panes
+
+    return [r for r in herdr_panes.load(dict(os.environ)) if r.kind == "init-agent" and r.owner_session == name]
+
+
+def _opened_pane(name, since_ms):
+    found = sorted(
+        (r for r in _launch_records(name) if r.launched_at >= since_ms), key=lambda record: record.launched_at
+    )
+    return found[-1].pane_id if found else ""
 
 
 def _owns(found, agent):
@@ -503,9 +525,18 @@ class HerdrRuntime:
                 confidence=saved.get("model_confidence"),
             )
         elif lane in PICKED_LANES:
-            picked = timing.call(model_pick.pick, agent, {} if quota_transfer else chosen, task, environ)
+            picked = timing.call(
+                model_pick.pick,
+                agent,
+                {} if quota_transfer else chosen,
+                task,
+                environ,
+                effort_range.of(config),
+                default_models.model(config, agent),
+            )
         else:
-            picked = _lane_default(lane, agent, {} if quota_transfer else chosen)
+            picked = _lane_default(lane, agent, {} if quota_transfer else chosen, config)
+        picked = replace(picked, model=_set(picked.model) or default_models.model(config, agent))
         picked = replace(picked, effort=saved["effort"]) if saved else picked
         mode = [] if lane != "plan" else PLAN_MODE if agent == "claude" else codex_plan_mode(environ)
         route = ["--route", saved["account"]] if saved.get("account") else []
@@ -561,7 +592,7 @@ class HerdrRuntime:
             agent.overlays,
         )
         argv += _pinned(agent.overlays, agent.profile_decision.get("bundle_revision"))
-        defaults = _lane_default(agent.lane, agent.harness, config.lanes.get(agent.lane, {}))
+        defaults = _lane_default(agent.lane, agent.harness, config.lanes.get(agent.lane, {}), config)
         picked = model_pick.ModelPick(
             agent.model or defaults.model,
             agent.effort or defaults.effort,
@@ -595,7 +626,12 @@ class HerdrRuntime:
     def operator(self, config, name, profile, text):
         """Open a claude session for the operator in the swarm's space, bound to the swarm with no task or lane slot."""
         argv = self._argv(config, name, "claude", text, f"{name}.md", profile)
-        model = _model_args("claude", model_pick.frontier("claude").__dict__, dict(os.environ), effort_range.of(config))
+        model = _model_args(
+            "claude",
+            model_pick.frontier("claude", default_models.model(config, "claude")).__dict__,
+            dict(os.environ),
+            effort_range.of(config),
+        )
         return self._launch(config, naming.OPERATOR, "", name, [*argv, "--", *model])
 
     def _holds(self, pane_id, conversation_id):
@@ -662,7 +698,7 @@ class HerdrRuntime:
             )
         except subprocess.TimeoutExpired as exc:
             self._terminate(name)
-            raise SpawnError(f"init-agent timed out for {name}", "ambiguous") from exc
+            raise SpawnError(f"init-agent timed out for {name}", "ambiguous", _opened_pane(name, launched_at)) from exc
         timings = {
             "launched_at": launched_at,
             "returned_at": int(time.time() * 1000),
@@ -676,12 +712,13 @@ class HerdrRuntime:
         if proc.returncode or fields.get("status") != "started" or fields.get("route_status") not in STARTED_ROUTES:
             self._terminate(name)
             tail = (proc.stderr or proc.stdout).strip().splitlines()
-            raise SpawnError(tail[-1] if tail else f"init-agent exit {proc.returncode}")
+            message = tail[-1] if tail else f"init-agent exit {proc.returncode}"
+            raise SpawnError(message, pane_id=fields.get("pane_id") or _opened_pane(name, launched_at))
         try:
             validated = binding.fields(fields, argv[argv.index("--profile") + 1], agent)
         except ValueError as exc:
             self._terminate(name)
-            raise SpawnError(str(exc)) from exc
+            raise SpawnError(str(exc), pane_id=fields.get("pane_id", "")) from exc
         return Placed(
             fields.get("pane_id", ""),
             fields.get("agent", agent),
@@ -775,6 +812,21 @@ class HerdrRuntime:
         pids = [s.process.pid for s in sessions() if s.name == name]
         return not self.reap(pids).refusal
 
+    def pane_tail(self, pane_id, lines):
+        args = ["pane", "read", pane_id, "--source", "recent", "--lines", str(lines), "--format", "text"]
+        return self.herdr(args)["text"]
+
+    def launched_pane(self, pane_id, name):
+        listed = {p["pane_id"]: p.get("terminal_id") for p in self.herdr(["pane", "list"]).get("panes", [])}
+        return any(r.pane_id == pane_id and r.terminal_id == listed.get(pane_id) for r in _launch_records(name))
+
+    def close_pane(self, pane_id):
+        try:
+            self.herdr(["pane", "close", pane_id])
+        except Exception as exc:
+            if "not found" not in str(exc):
+                raise
+
     def close_space(self, config: SwarmConfig) -> bool:
         try:
             spaces = self.herdr(["workspace", "list"])["workspaces"]
@@ -811,11 +863,19 @@ class HerdrRuntime:
             capture = self.herdr(["pane", "read", found["pane_id"], "--source", "visible", "--format", "ansi"])
         except Exception:
             return PaneObservation("unknown" if agent.lane == MASTER else state)
-        text = capture.get("text", "")
+        text = capture.get("text")
+        if not isinstance(text, str):
+            return PaneObservation(state)
+        error = provider_error(agent.harness, text)
+        error_id = provider_error_id(agent.harness, text)
         title = selection_prompt(text)
         if title or state == "blocked":
-            return PaneObservation("waiting", title)
-        return PaneObservation(state, typed=typed_input(text))
+            return PaneObservation(
+                "waiting", title, provider_error=error, provider_checked=True, provider_error_id=error_id
+            )
+        return PaneObservation(
+            state, typed=typed_input(text), provider_error=error, provider_checked=True, provider_error_id=error_id
+        )
 
     def _get(self, target):
         try:

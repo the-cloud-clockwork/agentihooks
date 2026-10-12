@@ -44,7 +44,10 @@ def _deployment() -> dict:
             "seed_read_only": mounts["shared-profiles"]["readOnly"] is True,
             "artifact_scoped_to_execution": mounts["shared-artifacts"].get("subPath") == launch()["execution_id"],
             "node_cache_read_only": mounts["shared-node-cache"]["readOnly"] is True,
-            "runtime_homes_private": [v["name"] for v in safe["spec"]["volumes"][:2]] == ["home", "tmp"],
+            "runtime_homes_private": not any(
+                mount["mountPath"] in ("/home/worker", "/tmp")
+                for mount in safe["spec"]["containers"][0]["volumeMounts"]
+            ),
             "shared_writable_codex_home_refused": reason == "shared_runtime",
         }
         run["passed"] = all(run.values())
@@ -67,13 +70,15 @@ def _operator_home() -> dict:
         document = policy(SEED, ARTIFACTS, CACHE, OPERATOR_HOME)
         loaded = load(Path(root), document)
         before = copy.deepcopy(loaded)
-        template = PodTemplate(loaded)
+        template = PodTemplate(loaded, "agentihooks-swarm-fixture")
         try:
             template.render(launch())
             message, reason = "", None
         except PodSpecRefused as refused:
             message, reason = str(refused), refused.reason
-        corrected = PodTemplate(load(Path(root), policy(SEED, ARTIFACTS, CACHE))).render(launch())
+        corrected = PodTemplate(load(Path(root), policy(SEED, ARTIFACTS, CACHE)), "agentihooks-swarm-fixture").render(
+            launch()
+        )
         return {
             "operator_home_refused": reason == "storage",
             "policy_unchanged": loaded == before,

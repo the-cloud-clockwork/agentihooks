@@ -94,7 +94,7 @@ controller:
     cap: 1
     projects: []
     brain: ""
-    # The Pod policy, docs/swarm-v2/schemas/pod-policy.json; its owner is agentihooks-swarm-<api.swarm>.
+    # The Pod policy, docs/swarm-v2/schemas/pod-policy.json, shared by every swarm; the controller labels its Pods agentihooks-swarm-<api.swarm>.
     podPolicy: {}
     # Or the name of a ConfigMap in the release namespace holding pod-policy.json, such as one GitOps manages.
     podPolicyConfigMap: ""
@@ -112,7 +112,8 @@ controller:
     timeoutSeconds: 8
     failureThreshold: 3
   terminationGracePeriodSeconds: 30
-  env: {}
+  env:
+    LANGFUSE_MCP_URL: ""
   # Secret env only the controller container reads, unlike secretEnv; optional: true lets it start before the Secret exists.
   secretEnv: []
   # The terminal user CA private key: only that key of the Secret, a read only file on the controller container.
@@ -120,6 +121,26 @@ controller:
   terminalCa:
     secretName: ""
     key: ""
+  # SSH jump from the operator's machine to worker terminals: an sshd sidecar in the controller Pod, whose
+  # Pods the worker terminal policy already admits. address is the host:port the operator machine dials,
+  # recorded in Redis with the jump host key; publish that port with a LoadBalancer outside this chart.
+  jump:
+    enabled: false
+    address: ""
+    image:
+      repository: ghcr.io/the-cloud-clockwork/agentihooks-worker
+      tag: dev
+      pullPolicy: Always
+    # Peers admitted to the jump port, such as the operator LAN.
+    ingressFrom: []
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+        ephemeral-storage: 16Mi
+      limits:
+        memory: 128Mi
+        ephemeral-storage: 64Mi
   resources:
     requests:
       cpu: 50m

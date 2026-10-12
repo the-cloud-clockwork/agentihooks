@@ -4,7 +4,7 @@ import { inScope, itemState, phaseLifecycle, taskRank, taskRanks } from "./state
 import { doc, meta, queue, renderSync, toggle } from "./sync.js";
 import { renderArtifacts } from "./artifacts.js";
 import { closedComments, commentsView, openComments, rememberComment, taskLink, threadView } from "./threads.js";
-import { renderAlerts, renderNotifications, renderPriorities } from "./notices.js";
+import { bottleneckStat, renderAlerts, renderNotifications, renderPriorities } from "./notices.js";
 import { renderOutline } from "./outline.js";
 import { collapsible, markToggles } from "./folds.js";
 import { renderChat, renderChatBadge } from "./chat.js";
@@ -356,7 +356,7 @@ export function renderStats() {
   const pct = total ? Math.round(100 * done / total) : 0;
   const next = phases.find((p) => !p.done), counts = (swarm && swarm.tasks) || {}, figure = (value) => (swarm ? String(value || 0) : "—");
   const row = (label, value, extra) => h("div", { class: "stat", title: label === "Time left" ? timeLeftInputs(calc) : undefined, style: gap && label === "Time left" ? "grid-template-columns:75px minmax(0,1fr)" : "" }, h("dt", { text: label }), h("dd", {}, value, extra));
-  $("stats").replaceChildren(
+  $("stats").replaceChildren(bottleneckStat(swarm && swarm.top_bottleneck),
     row("Started", started ? when(started) : "—"),
     row("Elapsed", elapsed === null ? "—" : span(elapsed)),
     row("Time left", leftText),

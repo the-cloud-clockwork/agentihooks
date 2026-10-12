@@ -46,7 +46,11 @@ def _claude(environ: dict, now: float) -> list[Account]:
     counts = account_sessions.sessions_by_account()
     rows = []
     for at, result in observed.values():
-        cap = tokens.cap(result, now) if session_bands.fresh(at, now) else None
+        cap = (
+            tokens.cap(result, now)
+            if environ.get(f"{balancer.TOKEN_PREFIX}{result.account}") and session_bands.fresh(at, now)
+            else None
+        )
         five, week = _left(result.five_hour, now), _left(result.seven_day, now)
         reset = session_bands.upcoming(result.seven_day.resets_at, now)
         five_reset = session_bands.upcoming(result.five_hour.resets_at, now)
@@ -84,7 +88,7 @@ def _api(source, harness: str, environ: dict, now: float) -> list[Account]:
 
 def _codex(environ: dict, now: float, refresh: bool) -> list[Account]:
     source = codex_router.CodexAccountSource(refresh=refresh)
-    pool = [account for account in source.pool(environ) if account.signed_in]
+    pool = source.pool(environ)
     counts = account_sessions.codex_sessions_by_account()
     found = source.readings(pool, environ, now)
     known = {account.name for account in pool}
@@ -97,7 +101,7 @@ def _codex(environ: dict, now: float, refresh: bool) -> list[Account]:
     rows = []
     for account in pool + live:
         quota = found.get(account.name)
-        cap = codex_router.account_cap(quota, now) if account.name in known else None
+        cap = codex_router.account_cap(quota, now, environ) if account.name in known else None
         five = _left(quota.five_hour, now) if quota else None
         week = _left(quota.seven_day, now) if quota else None
         reset = session_bands.upcoming(quota.seven_day.resets_at, now) if quota else None
@@ -307,10 +311,12 @@ def autoscaled(config: SwarmConfig, inputs: ScaleInputs, host: dict | None = Non
 
 
 def ready_work(slug: str, store, doc: dict) -> tuple[dict, dict]:
-    from scripts.swarm.tick import _claimable, _launch_order
+    from scripts.swarm import dispatcher
+    from scripts.swarm.tick import ready_in_order
 
     rows = {task["id"]: task for task in doc["tasks"]}
-    return rows, {lane: _launch_order(slug, store, _claimable(slug, store, rows, doc, lane)) for lane in LANES}
+    dispatched = dispatcher.claim_key(store.config(slug), doc)
+    return rows, {lane: ready_in_order(slug, store, rows, doc, lane, dispatched) for lane in LANES}
 
 
 def live_inputs(slug: str, store, ledger, environ: dict, now_ms: int) -> ScaleInputs:
@@ -407,6 +413,10 @@ def calculate(
 def read(store, slug: str) -> dict:
     value = store.redis.get(store.key(slug, "quota-capacity"))
     return json.loads(value) if value else {}
+
+
+def caps(decision: dict, config: SwarmConfig) -> dict[str, int]:
+    return decision.get("effective", {"eng": config.max_eng, "ci": config.max_ci, "plan": config.max_plan})
 
 
 def status_line(decision: dict) -> str:

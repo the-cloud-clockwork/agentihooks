@@ -1,6 +1,13 @@
 {{- $api := .Values.controller.api }}
 {{- $workers := .Values.controller.workers }}
 {{- $ca := .Values.controller.terminalCa | default dict }}
+{{- $jump := .Values.controller.jump | default dict }}
+{{- if and $jump.enabled (not (and $ca.secretName $ca.key $jump.address)) }}
+{{- fail "controller.jump needs controller.terminalCa and an address: the jump trusts the user CA and records the address the operator dials" }}
+{{- end }}
+{{- if and $jump.enabled (not $jump.ingressFrom) }}
+{{- fail "controller.jump needs ingressFrom: an empty peer list would admit every source to the jump port" }}
+{{- end }}
 {{- with $api.proof }}
 {{- if not $api.enabled }}
 {{- fail "controller.api.proof needs controller.api.enabled: the setting reaches the controller only with its API" }}
@@ -148,7 +155,49 @@ spec:
           {{- include "swarm.envFrom" . | nindent 10 }}
           resources:
             {{- toYaml .Values.probe.resources | nindent 12 }}
+        {{- if $jump.enabled }}
+        - name: jump-prepare
+          image: {{ include "swarm.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- include "swarm.containerSecurity" . | nindent 10 }}
+          command: [agentihooks, swarm-jump, prepare, --state, /run/jump/state]
+          env:
+            {{- include "swarm.env" . | nindent 12 }}
+            - name: AGENTIHOOKS_TERMINAL_CA_KEY
+              value: /run/secrets/terminal-ca/{{ $ca.key }}
+            - name: AGENTIHOOKS_TERMINAL_JUMP
+              value: {{ $jump.address | quote }}
+          {{- include "swarm.envFrom" . | nindent 10 }}
+          resources:
+            {{- toYaml .Values.probe.resources | nindent 12 }}
+          volumeMounts:
+            - name: jump
+              mountPath: /run/jump
+            - name: terminal-ca
+              mountPath: /run/secrets/terminal-ca
+              readOnly: true
+        {{- end }}
       containers:
+        {{- if $jump.enabled }}
+        - name: jump
+          image: "{{ $jump.image.repository }}:{{ $jump.image.tag }}"
+          imagePullPolicy: {{ $jump.image.pullPolicy }}
+          {{- include "swarm.containerSecurity" . | nindent 10 }}
+          command: [/usr/sbin/sshd, -D, -e, -f, /run/jump/state/sshd_config]
+          ports:
+            - name: jump
+              containerPort: 2222
+          readinessProbe:
+            tcpSocket:
+              port: jump
+            periodSeconds: 10
+          resources:
+            {{- toYaml $jump.resources | nindent 12 }}
+          volumeMounts:
+            - name: jump
+              mountPath: /run/jump
+              readOnly: true
+        {{- end }}
         - name: controller
           image: {{ include "swarm.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
@@ -226,6 +275,10 @@ spec:
             - name: AGENTIHOOKS_TERMINAL_CA_KEY
               value: /run/secrets/terminal-ca/{{ $ca.key }}
             {{- end }}
+            {{- if $jump.enabled }}
+            - name: AGENTIHOOKS_TERMINAL_JUMP_STATE
+              value: /run/jump/state
+            {{- end }}
             {{- include "swarm.controllerSecretEnv" . | nindent 12 }}
             {{- include "swarm.extraEnv" .Values.controller.env | nindent 12 }}
           {{- include "swarm.envFrom" . | nindent 10 }}
@@ -249,10 +302,19 @@ spec:
               mountPath: /run/secrets/terminal-ca
               readOnly: true
             {{- end }}
+            {{- if $jump.enabled }}
+            - name: jump
+              mountPath: /run/jump
+            {{- end }}
       volumes:
         - name: home
           emptyDir:
             medium: Memory
+        {{- if $jump.enabled }}
+        - name: jump
+          emptyDir:
+            medium: Memory
+        {{- end }}
         {{- if $api.enabled }}
         - name: launch-signing
           secret:

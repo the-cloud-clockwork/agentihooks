@@ -9,6 +9,7 @@ RANKS = ("urgent", "high", "normal", "low")
 ALIASES = {"next": "urgent"}
 DEFAULT = "normal"
 OPERATOR = "operator"
+QUOTE_WORDS = 3
 OPS = ("task_rank",)
 ITEM_RE = re.compile(r"^tasks/[^/]+$")
 
@@ -49,9 +50,8 @@ def apply(doc, op, ctx):
         ctx.refused.append(refusal)
         return False
     rank, path = canonical(op["rank"]), f"{op['item']}/rank"
-    owner = author(ctx, path) if op.get("if_owned") and "rank" in task else by
-    if owner != by:
-        ctx.refused.append(f"task {task_id} has rank {task['rank']} set by {owner or 'someone else'}")
+    if by != OPERATOR and (refusal := pinned(task_id, author(ctx, path) if "rank" in task else None)):
+        ctx.refused.append(refusal)
         return False
     if task.get("rank") != rank or author(ctx, path) != by:
         task["rank"] = rank
@@ -63,3 +63,15 @@ def apply(doc, op, ctx):
 
 def author(ctx, path):
     return ctx.stamps.get(path, {}).get("by")
+
+
+def pinned(task_id, owner) -> str:
+    if owner != OPERATOR:
+        return ""
+    return f"task {task_id} has a rank the operator set: relay his words with task set {task_id} rank=<rank> --quote"
+
+
+def quoted(rank, words) -> bool:
+    said = set(re.findall(r"[a-z]+", words.lower()))
+    names = {rank} | {alias for alias, target in ALIASES.items() if target == rank}
+    return len(words.split()) >= QUOTE_WORDS and bool(names & said)

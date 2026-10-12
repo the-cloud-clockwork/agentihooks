@@ -3,31 +3,40 @@ before the supervisor starts. Nothing is written until the launch record, grant 
 
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
+from dataclasses import asdict
 from http.client import HTTPException
 from pathlib import Path
 from subprocess import SubprocessError
 from urllib.parse import urlsplit
 
-from scripts.swarm_v2 import supervision_runtime, worker_home
+from scripts.swarm_v2 import filesystem, supervision_runtime, worker_home, workspaces
 from scripts.swarm_v2.broadcast_bridge import API_URL, AUTHORIZATION, GRANT_NAME, JSON_HEADERS
+from scripts.swarm_v2.checkpoints import runtime as checkpoint_runtime
+from scripts.swarm_v2.checkpoints.restore import Restored
 from scripts.swarm_v2.supervision import SCHEMA_VERSION, LaunchRefused, checked_authority
 
 TEMPLATES = Path("/opt/agentihooks/templates")
 BUNDLE = Path("/var/run/swarm/bundle")
 REGISTER = "/v2/executions/register"
 RECORD = "registration.json"
+RESTORED = "restore.json"
 BUSY = 503
 REGISTER_ATTEMPTS = 10
 RETRY_SECONDS = 2
 TIMEOUT_SECONDS = 10
 CONFIRMED = ("execution_id", "task_id", "grant_id")
+PROJECT = re.compile(r"github\.com/[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*")
 
 Send = Callable[[str, str, dict], tuple[int, object]]
+
+
+from scripts.swarm_v2.worker import git_auth
 
 
 def post(url: str, grant: str, body: dict) -> tuple[int, object]:
@@ -46,6 +55,32 @@ def post(url: str, grant: str, body: dict) -> tuple[int, object]:
         return status, {}
 
 
+def report(spec: dict, grant: str, restored: Restored) -> None:
+    path = f"/v1/executions/{spec['execution_id']}/restore-outcome"
+    headers = {**JSON_HEADERS, AUTHORIZATION: f"Bearer {grant}"}
+    request = urllib.request.Request(
+        spec["control_url"].rstrip("/") + path, json.dumps(asdict(restored)).encode(), headers
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as answer:
+            if answer.status != 200:
+                raise LaunchRefused("restore outcome was not accepted")
+    except (OSError, HTTPException):
+        raise LaunchRefused("restore outcome was not accepted") from None
+    print(
+        json.dumps(
+            {
+                "event": "restore_verified",
+                "execution_id": spec["execution_id"],
+                "recovery": restored.recovery,
+                "checkpoint_id": restored.checkpoint_id,
+                "watermark": restored.watermark,
+            }
+        ),
+        flush=True,
+    )
+
+
 def _launch(path: Path, templates: Path, bundle: Path | None) -> dict:
     try:
         spec = json.loads(path.read_text())
@@ -58,7 +93,35 @@ def _launch(path: Path, templates: Path, bundle: Path | None) -> dict:
         raise LaunchRefused("unsupported harness")
     _control_url(spec.get("control_url"))
     _profile(spec.get("profile"), templates, bundle)
+    if "checkout" in spec:
+        _project(spec["checkout"])
     return spec
+
+
+def _project(checkout: object) -> None:
+    project = checkout.get("project") if isinstance(checkout, dict) else None
+    if not isinstance(project, str) or not PROJECT.fullmatch(project):
+        raise LaunchRefused("launch record names no permitted project")
+    if not isinstance(checkout.get("agent"), str):
+        raise LaunchRefused("launch record names no agent for its checkout")
+
+
+def checkout(attempt: Path, request: workspaces.Request) -> workspaces.Workspace:
+    record = json.loads((attempt / "execution.json").read_text())
+    return workspaces.prepare(filesystem.recorded(attempt, record), request)
+
+
+def _checked_out(attempt: Path, spec: dict) -> dict:
+    wanted, authority = spec.get("checkout"), spec["authority"]
+    if wanted is None:
+        return {}
+    origin = f"https://{wanted['project']}.git"
+    request = workspaces.Request(origin, authority["task_id"], authority["generation"], wanted["agent"])
+    if os.environ.get("GITHUB_APP_ID"):
+        git_auth.configure(wanted["project"])
+    found = checkout(attempt, request)
+    tree = {"project": wanted["project"], "branch": found.branch, "base": found.base, "base_commit": found.base_commit}
+    return {"checkout": tree}
 
 
 def _profile(profile: object, templates: Path, bundle: Path | None) -> None:
@@ -154,9 +217,18 @@ def prepare(
             bundle,
         )
     )
+    prepared = _checked_out(attempt, spec)
+    if spec.get("checkpoint_remote") is True:
+        os.environ[checkpoint_runtime.REMOTE] = "true"
+    _private(attempt / "launch.json", spec)
     worker_home.store_grant(attempt, grant)
+    restored = checkpoint_runtime.prepare(spec, attempt)
+    if restored is not None:
+        if spec.get("checkpoint_remote") is True:
+            report(spec, grant, restored)
+        _private(attempt / RESTORED, asdict(restored))
     _private(attempt / RECORD, authority)
-    return record
+    return {**record, **prepared}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -170,8 +242,8 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, KeyError, TypeError, SubprocessError) as refused:
         print(f"ERROR worker start refused: {refused}", file=sys.stderr)
         return 64
-    chains = {"chains": record["chains"]} if record.get("chains") else {}
-    print(json.dumps({"worker_start": "prepared", "attempt": Path(args[0]).name, "uid": os.getuid(), **chains}))
+    shown = {key: record[key] for key in ("chains", "checkout") if record.get(key)}
+    print(json.dumps({"worker_start": "prepared", "attempt": Path(args[0]).name, "uid": os.getuid(), **shown}))
     return supervision_runtime.main(args)
 
 

@@ -21,9 +21,12 @@ class CodexQuota:
     five_hour: QuotaWindow = field(default_factory=QuotaWindow)
     seven_day: QuotaWindow = field(default_factory=QuotaWindow)
     reached: str = ""
+    expired: bool = False
 
     @property
     def state(self) -> str:
+        if self.expired:
+            return "EXPIRED"
         if self.reached:
             return "BLOCKED"
         windows = [w for w in (self.five_hour, self.seven_day) if w.used is not None]
@@ -38,12 +41,17 @@ class CodexQuota:
         return max(used) if used else None
 
     def state_at(self, now: float) -> str:
-        return replace(self, five_hour=_current(self.five_hour, now), seven_day=_current(self.seven_day, now)).state
+        reached = "" if passed(self.seven_day, now) else self.reached
+        current = replace(self, five_hour=_current(self.five_hour, now), seven_day=_current(self.seven_day, now))
+        return replace(current, reached=reached).state
+
+
+def passed(window: QuotaWindow, now: float) -> bool:
+    return window.resets_at is not None and window.resets_at <= now
 
 
 def _current(window: QuotaWindow, now: float) -> QuotaWindow:
-    passed = window.resets_at is not None and window.resets_at <= now
-    return QuotaWindow(used=0.0) if passed else window
+    return QuotaWindow(used=0.0) if passed(window, now) else window
 
 
 def codex_home(environ: dict[str, str]) -> Path:

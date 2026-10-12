@@ -17,7 +17,6 @@ from scripts.swarm_v2.herdr.capabilities import Verdict
 from scripts.swarm_v2.herdr.endpoints import HostIdentity, TerminalAuthority
 from scripts.swarm_v2.kubernetes import operator_terminal
 from scripts.swarm_v2.kubernetes.terminal import HostKeys
-from scripts.swarm_v2.kubernetes.watch import owner_for
 from scripts.swarm_v2.operator_auth import OPERATOR
 from scripts.swarm_v2.runtime.commands import Principal, Role
 from tests.test_swarm_v2_kubernetes_terminal import (
@@ -69,7 +68,7 @@ def ca_key(tmp_path: Path, key=None) -> Path:
 def environ(tmp_path: Path, **changes) -> dict[str, str]:
     policy = json.loads((FIXTURES / "pod-policy.json").read_text())
     path = tmp_path / "policy.json"
-    path.write_text(json.dumps({**policy, "owner": owner_for(SWARM), "namespace": NAMESPACE, "provider_accounts": []}))
+    path.write_text(json.dumps({**policy, "namespace": NAMESPACE, "provider_accounts": []}))
     return {deployed.POLICY_ENV: str(path), operator_terminal.CA_KEY_ENV: str(ca_key(tmp_path)), **changes}
 
 
@@ -92,7 +91,7 @@ def test_the_operator_attaches_through_the_controller_with_the_recorded_host_key
     identity = HostIdentity.generate()
     launched(store, identity)
     home, run = client(tmp_path, identity.public)
-    built = operator_terminal.terminal(SWARM, environ(tmp_path), home, run, lookup)
+    built = operator_terminal.terminal(environ(tmp_path), home, run, lookup)
 
     verdict = operator_terminal.attach(store, SWARM, OPERATOR, EXE_A, lambda: built)
 
@@ -114,7 +113,7 @@ def test_the_terminal_is_built_from_the_pod_policy_namespace_and_the_operator_us
     (tmp_path / "chosen").mkdir()
     settings = environ(tmp_path, **{operator_terminal.CA_KEY_ENV: str(ca_key(tmp_path / "chosen", key))})
 
-    built = operator_terminal.terminal(SWARM, settings, home, run, lookup)
+    built = operator_terminal.terminal(settings, home, run, lookup)
 
     assert (built.home, built.namespace, built.run, built.lookup) == (home, NAMESPACE, run, lookup)
     assert built.authority.user_ca == TerminalAuthority(key).user_ca
@@ -156,7 +155,7 @@ def test_an_engineer_session_has_no_terminal_principal(store):
 
 def test_an_unknown_execution_is_refused_before_any_connection(store, tmp_path):
     home, run = client(tmp_path, HostIdentity.generate().public)
-    built = operator_terminal.terminal(SWARM, environ(tmp_path), home, run, lookup)
+    built = operator_terminal.terminal(environ(tmp_path), home, run, lookup)
 
     assert refusal(lambda: operator_terminal.attach(store, SWARM, OPERATOR, EXE_A, lambda: built)) == (
         "host_key_unrecorded",
@@ -173,18 +172,13 @@ def test_the_terminal_needs_the_user_ca_key_and_the_pod_policy(tmp_path):
     garbage.write_text("not a key\n")
     (tmp_path / "ecdsa").mkdir()
     foreign = ca_key(tmp_path / "ecdsa", ec.generate_private_key(ec.SECP256R1()))
-    owner = tmp_path / "owner.json"
-    owner.write_text(json.dumps({**json.loads(Path(settings[deployed.POLICY_ENV]).read_text()), "owner": "someone"}))
 
     def build(**changes):
-        return lambda: operator_terminal.terminal(SWARM, {**settings, **changes}, home, run, lookup)
+        return lambda: operator_terminal.terminal({**settings, **changes}, home, run, lookup)
 
     ca = operator_terminal.CA_KEY_ENV
-    assert swarm_error(lambda: operator_terminal.terminal(SWARM, {}, home, run, lookup)) == (
+    assert swarm_error(lambda: operator_terminal.terminal({}, home, run, lookup)) == (
         f"opening a worker terminal needs {deployed.POLICY_ENV}"
-    )
-    assert swarm_error(build(**{deployed.POLICY_ENV: str(owner)})) == (
-        f"the Pod policy owner must be {owner_for(SWARM)}"
     )
     assert swarm_error(build(**{ca: ""})) == f"opening a worker terminal needs {ca}"
     assert swarm_error(build(**{ca: str(tmp_path / "missing")})) == (
@@ -299,7 +293,7 @@ def test_an_encrypted_user_ca_key_is_refused(monkeypatch, tmp_path):
 
     monkeypatch.setattr(operator_terminal.serialization, "load_ssh_private_key", encrypted)
 
-    assert swarm_error(lambda: operator_terminal.terminal(SWARM, environ(tmp_path), home, run, lookup)) == (
+    assert swarm_error(lambda: operator_terminal.terminal(environ(tmp_path), home, run, lookup)) == (
         "the terminal user CA key is encrypted, and the command reads only an unencrypted key"
     )
 

@@ -14,9 +14,9 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import best_match
 
-from scripts.account_names import secret_key, token_env
+from scripts.account_names import codex_token_env, secret_key, token_env
 from scripts.swarm_v2.kubernetes.storage import MountChecker, StorageRefused, normal
-from scripts.swarm_v2.kubernetes.watch import EXECUTION_LABEL, OWNER_LABEL
+from scripts.swarm_v2.kubernetes.watch import EXECUTION_LABEL, OWNER_LABEL, owner_for
 
 SCHEMA = Path(__file__).resolve().parents[3] / "docs" / "swarm-v2" / "schemas" / "pod-policy.json"
 DOMAIN = "swarm.agentihooks.io"
@@ -209,7 +209,7 @@ def launch_volume(execution_id: str) -> dict:
     return {"name": "launch", "configMap": {"name": launch_name(execution_id), "defaultMode": 0o444}}
 
 
-def _metadata(policy: dict, launch: AdmittedLaunch, payload: str) -> dict:
+def _metadata(policy: dict, owner: str, launch: AdmittedLaunch, payload: str) -> dict:
     version = policy["template_version"]
     return {
         "name": pod_name(launch.execution_id),
@@ -217,7 +217,7 @@ def _metadata(policy: dict, launch: AdmittedLaunch, payload: str) -> dict:
         "labels": {
             "app.kubernetes.io/managed-by": "agentihooks",
             "app.kubernetes.io/component": "swarm-execution",
-            OWNER_LABEL: policy["owner"],
+            OWNER_LABEL: owner,
             EXECUTION_LABEL: launch.execution_id,
             f"{DOMAIN}/generation": str(launch.generation),
             f"{DOMAIN}/swarm": launch.swarm_id,
@@ -267,8 +267,13 @@ def _resources(launch: AdmittedLaunch, limits: dict) -> dict:
 
 
 def _token(launch: AdmittedLaunch) -> dict:
-    ref = {"name": ACCOUNTS_OBJECT, "key": secret_key(launch.provider_account)}
-    return {"name": token_env(launch.provider_account), "valueFrom": {"secretKeyRef": ref}}
+    if launch.harness == "codex":
+        name = codex_token_env(launch.provider_account)
+        ref = {"name": "swarm-codex-creds", "key": name}
+    else:
+        name = token_env(launch.provider_account)
+        ref = {"name": ACCOUNTS_OBJECT, "key": secret_key(launch.provider_account)}
+    return {"name": name, "valueFrom": {"secretKeyRef": ref}}
 
 
 def _read_only(mount: dict) -> bool:
@@ -308,7 +313,15 @@ def _container(policy: dict, launch: AdmittedLaunch, profile: dict) -> dict:
             f"{LAUNCH_DIR}/{LAUNCH_RECORD}",
         ],
         "env": [_token(launch)]
-        + ([{"name": "BRAIN_URL", "value": policy["brain_url"]}] if "brain_url" in policy else []),
+        + ([{"name": "BRAIN_URL", "value": policy["brain_url"]}] if "brain_url" in policy else [])
+        + (
+            [
+                {"name": key, "valueFrom": {"secretKeyRef": {"name": policy["git_app_secret_name"], "key": key}}}
+                for key in ("GITHUB_APP_ID", "GITHUB_APP_INSTALLATION_ID", "GITHUB_APP_PRIVATE_KEY")
+            ]
+            if "git_app_secret_name" in policy
+            else []
+        ),
         "resources": _resources(launch, profile["limits"]),
         "securityContext": copy.deepcopy(HARDENED),
         "volumeMounts": [
@@ -362,6 +375,11 @@ def _spec(policy: dict, launch: AdmittedLaunch, profile: dict) -> dict:
         ],
         "runtimeClassName": policy["runtime_class_name"],
     }
+    if policy["runtime_class_name"] == "kata-fc":
+        agent = body["containers"][0]
+        agent["securityContext"]["readOnlyRootFilesystem"] = False
+        agent["volumeMounts"] = [mount for mount in agent["volumeMounts"] if mount["name"] not in ("home", "tmp")]
+        body["volumes"] = [volume for volume in body["volumes"] if volume["name"] not in ("home", "tmp")]
     if "bundle" in policy:
         _deliver(body, policy["bundle"])
     return body
@@ -384,8 +402,15 @@ def _deliver(body: dict, bundle: dict) -> None:
 
 
 class PodTemplate:
-    def __init__(self, policy: dict, accounts: Callable[[], Collection[str]] | None = None) -> None:
-        self.policy, self.accounts = policy, accounts
+    def __init__(
+        self,
+        policy: dict,
+        owner: str,
+        accounts: Callable[[], Collection[str]] | None = None,
+        codex_accounts: Callable[[], Collection[str]] | None = None,
+    ) -> None:
+        self.policy, self.owner, self.accounts = policy, owner, accounts
+        self.codex_accounts = codex_accounts
         self.failures = Counter()
         self.storage = MountChecker()
 
@@ -393,7 +418,8 @@ class PodTemplate:
         try:
             launch = AdmittedLaunch.from_record(record)
             _identity(launch)
-            profile = _profile(self.policy, launch, None if self.accounts is None else self.accounts())
+            accounts = self.codex_accounts if launch.harness == "codex" else self.accounts
+            profile = _profile(self.policy, launch, None if accounts is None else accounts())
             payload = _payload(launch)
         except PodSpecRefused as refused:
             self.failures[refused.reason] += 1
@@ -401,7 +427,7 @@ class PodTemplate:
         pod = {
             "apiVersion": "v1",
             "kind": "Pod",
-            "metadata": _metadata(self.policy, launch, payload),
+            "metadata": _metadata(self.policy, self.owner, launch, payload),
             "spec": _spec(self.policy, launch, profile),
         }
         try:
@@ -423,12 +449,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("action", choices=("render", "digest"))
     parser.add_argument("--policy", required=True)
     parser.add_argument("--launch", required=True)
+    parser.add_argument("--swarm", required=True)
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
         return 0 if exc.code == 0 else 64
     try:
-        rendered = PodTemplate(load_policy(args.policy)).render(_read(args.launch))
+        rendered = PodTemplate(load_policy(args.policy), owner_for(args.swarm)).render(_read(args.launch))
     except PodSpecRefused as refused:
         print(refused, file=sys.stderr)
         return 1

@@ -206,6 +206,14 @@ def test_a_login_prints_where_the_token_went_and_what_it_belongs_to(capsys):
     )
 
 
+def test_a_login_stores_in_the_path_the_setting_names(capsys):
+    bao = FakeBao(path="/v1/secret/data/ops/codex-accounts")
+    environ = {**ENV, **BAO_ENV, "AGENTIHOOKS_CODEX_CREDS_PATH": "ops/codex-accounts"}
+    assert _login(["team", "--openbao"], environ=environ, bao=bao) == 0
+    assert bao.data == {"AH_CX_TOKEN_team": ACCESS, "AH_CX_REFRESH_team": REFRESH}
+    assert "OpenBao secret/ops/codex-accounts: wrote" in capsys.readouterr().out
+
+
 def test_a_token_without_claims_is_described_as_unknown(capsys):
     assert _login(["team", "--no-openbao"], run=_codex(tokens={"access_token": "opaque"})[0]) == 0
     assert "  workspace unknown, plan unknown\n  expires unknown\n" in capsys.readouterr().out

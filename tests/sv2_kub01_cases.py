@@ -93,9 +93,9 @@ def _summary(pod: dict) -> dict:
 
 
 def _positive() -> tuple[dict, bool]:
-    template = PodTemplate(policy())
+    template = PodTemplate(policy(), "agentihooks-swarm-fixture")
     first = template.render(launch())
-    other = PodTemplate(policy()).render(second())
+    other = PodTemplate(policy(), "agentihooks-swarm-fixture").render(second())
     golden = json.loads((FIXTURES / "pod-rendered.json").read_text())
     observed = {
         "fixture": _summary(first.pod),
@@ -115,7 +115,7 @@ def _positive() -> tuple[dict, bool]:
 
 
 def _rejection() -> tuple[dict, bool]:
-    template = PodTemplate(policy())
+    template = PodTemplate(policy(), "agentihooks-swarm-fixture")
     protected = copy.deepcopy(template.policy)
     refusals = {}
     for name, change in HOSTILE.items():
@@ -141,12 +141,12 @@ def _rejection() -> tuple[dict, bool]:
 
 
 def _recovery() -> tuple[dict, bool]:
-    first = PodTemplate(policy()).render(launch())
-    restarted = PodTemplate(policy()).render(launch())
-    broken = PodTemplate(wrong_probes()).render(launch())
+    first = PodTemplate(policy(), "agentihooks-swarm-fixture").render(launch())
+    restarted = PodTemplate(policy(), "agentihooks-swarm-fixture").render(launch())
+    broken = PodTemplate(wrong_probes(), "agentihooks-swarm-fixture").render(launch())
     previous = policy()
     previous["template_version"] = "kub01-v1"
-    restored = PodTemplate(previous).render(launch())
+    restored = PodTemplate(previous, "agentihooks-swarm-fixture").render(launch())
     image = first.pod["spec"]["containers"][0]["image"]
     golden = json.loads((FIXTURES / "pod-rendered-wrong-probes.json").read_text())
     observed = {

@@ -605,7 +605,7 @@ def test_a_master_quota_transfer_to_codex_starts_its_saved_effort_inside_the_ran
         "_launch",
         lambda cfg, lane, task, name, argv, **kw: seen.append(argv) or runtime.Placed("pane", "codex", "best"),
     )
-    config = SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, code="a1b2c3")
+    config = SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, code="a1b2c3", effort_max="high")
     task = {
         "id": "master",
         "title": "Continue task",
@@ -621,7 +621,7 @@ def test_a_lane_quota_transfer_to_codex_outside_the_range_is_refused(tmp_path, m
     rt._quota_accounts = [account("old", state="DRAIN"), account("best", "codex", five=10, week=20)]
     monkeypatch.setattr(runtime.plugins, "claude_only", lambda _: False)
     monkeypatch.setattr(rt, "_launch", lambda *args, **kw: pytest.fail("launched outside the range"))
-    config = SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, code="a1b2c3")
+    config = SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, code="a1b2c3", effort_max="high")
     task = {
         "id": "e",
         "title": "Continue task",

@@ -108,6 +108,66 @@ def test_origin_identity_keeps_a_port_and_reads_local_paths():
     assert workspaces.identity("host.example:/Xr/repo") == workspaces.identity("ssh://host.example/Xr/repo")
 
 
+PROBE = "probe-value"
+
+
+def credential_fill(tmp_path, host="github.com"):
+    environ = {**workspaces._environ(), "HOME": str(tmp_path), "GIT_CONFIG_NOSYSTEM": "1"}
+    request = f"protocol=https\nhost={host}\n\n"
+    done = subprocess.run(
+        ["git", "credential", "fill"], input=request, capture_output=True, text=True, env=environ, cwd=tmp_path
+    )
+    return done.returncode, dict(line.split("=", 1) for line in done.stdout.splitlines() if "=" in line)
+
+
+def test_git_takes_the_token_by_reference_through_the_credential_helper(tmp_path, monkeypatch):
+    monkeypatch.setenv(workspaces.GIT_LOGIN_ENV, PROBE)
+    environ = workspaces._environ()
+
+    assert {key: environ[key] for key in ("GIT_TERMINAL_PROMPT", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0")} == {
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "credential.https://github.com.helper",
+    }
+    assert environ["GIT_CONFIG_VALUE_0"] == workspaces.HELPER
+    assert PROBE not in workspaces.HELPER
+    code, fields = credential_fill(tmp_path)
+    assert (code, fields["username"], PROBE in fields.values()) == (0, "x-access-token", True)
+
+
+def test_the_helper_keeps_git_config_entries_already_in_the_environment(monkeypatch):
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "safe.directory")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "*")
+    environ = workspaces._environ()
+
+    assert {key: value for key, value in environ.items() if key.startswith("GIT_CONFIG_")} == {
+        "GIT_CONFIG_COUNT": "2",
+        "GIT_CONFIG_KEY_0": "safe.directory",
+        "GIT_CONFIG_VALUE_0": "*",
+        "GIT_CONFIG_KEY_1": "credential.https://github.com.helper",
+        "GIT_CONFIG_VALUE_1": workspaces.HELPER,
+    }
+
+
+def test_the_token_is_offered_to_github_only(tmp_path, monkeypatch):
+    monkeypatch.setenv(workspaces.GIT_LOGIN_ENV, PROBE)
+
+    code, fields = credential_fill(tmp_path, "example.invalid")
+
+    assert code != 0
+    assert PROBE not in fields.values()
+
+
+def test_without_a_token_git_answers_no_credential_and_never_prompts(tmp_path, monkeypatch):
+    monkeypatch.delenv(workspaces.GIT_LOGIN_ENV, raising=False)
+
+    code, fields = credential_fill(tmp_path)
+
+    assert code != 0
+    assert "username" not in fields
+
+
 @pytest.mark.parametrize(
     "url",
     [

@@ -235,6 +235,62 @@ def test_controller_admission_disabled_refuses_renewal_as_unavailable(world, wor
     assert stored(world, agent) is None
 
 
+def overlap(world, monkeypatch, send, before=lambda: None):
+    from scripts.swarm import lease
+
+    renew, answers = lease.renew, []
+
+    def overlapped(store, slug, held):
+        before()
+        answers.append(send())
+        return renew(store, slug, held)
+
+    monkeypatch.setattr(lease, "renew", overlapped)
+    return answers
+
+
+def test_a_registration_during_a_routine_lease_renewal_is_admitted(world, worker, monkeypatch):
+    late, late_token = world.start("eng-2@fixture", "other")
+    answers = overlap(world, monkeypatch, lambda: world.register(late, late_token))
+    world.clock[0] += 20
+    assert world.controller.renew() is True
+    status, ack = answers[0]
+    assert (status, ack["execution_id"], ack["controller_epoch"]) == (200, late.execution_id, 1)
+    assert world.tasks.current("other").execution_id == late.execution_id
+    assert world.controller.ready is True
+
+
+def test_a_heartbeat_during_a_routine_lease_renewal_is_admitted(world, worker, monkeypatch):
+    agent, token = worker
+    answers = overlap(world, monkeypatch, lambda: world.put(agent.execution_id, token, world.beat(agent, 1)))
+    world.clock[0] += 20
+    assert world.controller.renew() is True
+    status, ack = answers[0]
+    assert (status, ack["lease_deadline_ms"]) == (200, 1120)
+    assert stored(world, agent)["renewal_sequence"] == 1
+    assert world.controller.ready is True
+
+
+def test_a_heartbeat_during_a_renewal_that_lost_the_lease_is_refused(world, worker, monkeypatch):
+    from scripts.swarm import lease
+
+    agent, token = worker
+
+    def taken():
+        world.clock[0] += lease.ttl_ms()
+        assert lease.acquire(world.store, "fixture", "rival").epoch == 2
+
+    answers = overlap(world, monkeypatch, lambda: world.put(agent.execution_id, token, world.beat(agent, 1)), taken)
+    claim = world.tasks.current("task")
+    assert world.controller.renew() is False
+    status, refusal = answers[0]
+    assert (status, refusal["error_class"], refusal["retry"]) == (503, "dependency_unavailable", "same_request")
+    assert world.controller.ready is False
+    assert world.controller.held is None
+    assert world.tasks.current("task") == claim
+    assert stored(world, agent) is None
+
+
 @pytest.mark.parametrize(
     "change",
     [

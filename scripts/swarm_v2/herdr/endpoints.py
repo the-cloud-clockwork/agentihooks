@@ -29,6 +29,8 @@ COMPONENT_LABEL = f"{DOMAIN}/component"
 COMPONENT = "swarm-terminal"
 CERTIFICATE_SECONDS = 300
 CLOCK_SKEW_SECONDS = 30
+JUMP_PRINCIPAL = "swarm-jump"
+JUMP_EXTENSION = b"permit-port-forwarding"
 NAMESPACE = re.compile(r"[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?")
 PUBLIC_SERVICE_FIELDS = ("externalIPs", "externalName", "loadBalancerIP", "loadBalancerSourceRanges")
 
@@ -161,18 +163,26 @@ class TerminalAuthority:
         return _public(self.key.public_key())
 
     def issue(self, scope: Scope, client_public: str) -> str:
+        return self._sign(client_public, scope.actor, scope.execution_id, ())
+
+    def issue_jump(self, actor: str, client_public: str) -> str:
+        return self._sign(client_public, actor, JUMP_PRINCIPAL, (JUMP_EXTENSION,))
+
+    def _sign(self, client_public: str, key_id: str, principal: str, extensions: tuple[bytes, ...]) -> str:
         try:
             key = serialization.load_ssh_public_key(client_public.encode())
         except (ValueError, UnsupportedAlgorithm):
             raise EndpointRefused("client_key", "terminal client key is not an OpenSSH public key") from None
         now = int(self.clock())
+        builder = serialization.SSHCertificateBuilder()
+        for extension in extensions:
+            builder = builder.add_extension(extension, b"")
         certificate = (
-            serialization.SSHCertificateBuilder()
-            .public_key(key)
+            builder.public_key(key)
             .serial(secrets.randbits(64))
             .type(serialization.SSHCertificateType.USER)
-            .key_id(scope.actor.encode())
-            .valid_principals([scope.execution_id.encode()])
+            .key_id(key_id.encode())
+            .valid_principals([principal.encode()])
             .valid_after(now - CLOCK_SKEW_SECONDS)
             .valid_before(now + self.seconds)
             .sign(self.key)

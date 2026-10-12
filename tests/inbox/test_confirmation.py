@@ -258,9 +258,8 @@ def test_a_failed_channel_write_puts_every_unsent_item_back_to_pending(store):
     async def drive():
         ready = anyio.Event()
         ready.set()
-        pubsub = store.redis.pubsub()
         with pytest.raises(anyio.BrokenResourceError):
-            await channel._push(store, "bob", Broken(), ready, pubsub)
+            await channel._push(store, "bob", Broken(), ready)
 
     channel.SETTLE_S, saved = 0, channel.SETTLE_S
     try:
@@ -287,7 +286,7 @@ def test_a_cancelled_channel_write_puts_the_item_back_to_pending(store):
         ready = anyio.Event()
         ready.set()
         with pytest.raises(Cancelled):
-            await channel._push(store, "bob", Stopping(), ready, store.redis.pubsub())
+            await channel._push(store, "bob", Stopping(), ready)
 
     channel.SETTLE_S, saved = 0, channel.SETTLE_S
     try:

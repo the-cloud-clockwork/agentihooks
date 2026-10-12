@@ -1,0 +1,222 @@
+{
+  "case": "T-SV2-CKP-03-C",
+  "evidence_class": "mocked: fixture Claude and Codex homes laid out as the qualified CLIs write them, a local durable directory backend behind a granted artifact store and fixture launch registrations; no CLI, account, worker Pod or object store was used",
+  "input_sha256": {
+    "context-only.json": "0bef305b2565a336c5021606d2bf4b1a6f4b35f9cade44aee8c6720da27e5fda"
+  },
+  "observed": {
+    "fixture": {
+      "active_database": {
+        "after_writer_stopped": {
+          "outcome": "captured",
+          "quiescence": "stopped_process",
+          "session_id": "01a12b75-0000-7000-8000-00000000c0de"
+        },
+        "exclusive_writer_open": {
+          "cause": "database_busy",
+          "decision": [
+            "continue_from_context",
+            "start_fresh"
+          ],
+          "outcome": "native_resume_unavailable"
+        },
+        "wal_writer_open": {
+          "outcome": "captured",
+          "quiescence": "consistent_export",
+          "session_id": "01a12b75-0000-7000-8000-00000000c0de"
+        }
+      },
+      "after_restart": {
+        "authoritative": true,
+        "completeness": "complete",
+        "continuation": "native",
+        "reason": "native"
+      },
+      "checkpoint_while_disabled": {
+        "authoritative": true,
+        "completeness": "complete",
+        "continuation": "native",
+        "reason": "native"
+      },
+      "context_material_while_disabled": true,
+      "fresh_home_untouched_while_unavailable": true,
+      "installed_cli_upgraded": {
+        "cause": "version_changed",
+        "decision": [
+          "continue_from_context",
+          "start_fresh"
+        ],
+        "outcome": "native_resume_unavailable"
+      },
+      "interrupted_manifest": {
+        "authoritative": false,
+        "completeness": "incomplete",
+        "continuation": "none",
+        "reason": "manifest_absent"
+      },
+      "interruption": "worker stopped",
+      "native_material_durable_while_manifest_absent": true,
+      "native_resume_disabled": {
+        "cause": "unqualified_version",
+        "decision": [
+          "continue_from_context",
+          "start_fresh"
+        ],
+        "outcome": "native_resume_unavailable"
+      },
+      "native_resume_success_by_target": {
+        "claude/native_resume_unavailable": 2,
+        "claude/resumed": 1
+      },
+      "previous_checkpoint": {
+        "authoritative": true,
+        "completeness": "complete",
+        "continuation": "native",
+        "reason": "native"
+      },
+      "previous_checkpoint_while_interrupted": {
+        "authoritative": true,
+        "completeness": "complete",
+        "continuation": "native",
+        "reason": "native"
+      },
+      "qualified_restore": {
+        "command": [
+          "claude",
+          "--resume",
+          "5f0c1a2e-0000-4000-8000-00000000c1a0"
+        ],
+        "outcome": "resumed",
+        "session_id": "5f0c1a2e-0000-4000-8000-00000000c1a0"
+      },
+      "replay": {
+        "authoritative": true,
+        "completeness": "complete",
+        "continuation": "native",
+        "reason": "native"
+      },
+      "replay_added_keys": [],
+      "second_restore_into_same_home": {
+        "cause": "conversation_present",
+        "decision": [
+          "continue_from_context",
+          "start_fresh"
+        ],
+        "outcome": "native_resume_unavailable"
+      },
+      "stale_attempt": {
+        "authoritative": false,
+        "completeness": "incomplete",
+        "continuation": "none",
+        "reason": "scope_mismatch"
+      }
+    },
+    "second_fixture": {
+      "active_database": {
+        "after_writer_stopped": {
+          "outcome": "captured",
+          "quiescence": "stopped_process",
+          "session_id": "01a12b75-0000-7000-8000-00000000c0de"
+        },
+        "exclusive_writer_open": {
+          "cause": "database_busy",
+          "decision": [
+            "continue_from_context",
+            "start_fresh"
+          ],
+          "outcome": "native_resume_unavailable"
+        },
+        "wal_writer_open": {
+          "outcome": "captured",
+          "quiescence": "consistent_export",
+          "session_id": "01a12b75-0000-7000-8000-00000000c0de"
+        }
+      },
+      "after_restart": {
+        "authoritative": true,
+        "completeness": "complete",
+        "continuation": "native",
+        "reason": "native"
+      },
+      "checkpoint_while_disabled": {
+        "authoritative": true,
+        "completeness": "complete",
+        "continuation": "native",
+        "reason": "native"
+      },
+      "context_material_while_disabled": true,
+      "fresh_home_untouched_while_unavailable": true,
+      "installed_cli_upgraded": {
+        "cause": "version_changed",
+        "decision": [
+          "continue_from_context",
+          "start_fresh"
+        ],
+        "outcome": "native_resume_unavailable"
+      },
+      "interrupted_manifest": {
+        "authoritative": false,
+        "completeness": "incomplete",
+        "continuation": "none",
+        "reason": "manifest_absent"
+      },
+      "interruption": "worker stopped",
+      "native_material_durable_while_manifest_absent": true,
+      "native_resume_disabled": {
+        "cause": "unqualified_version",
+        "decision": [
+          "continue_from_context",
+          "start_fresh"
+        ],
+        "outcome": "native_resume_unavailable"
+      },
+      "native_resume_success_by_target": {
+        "claude/native_resume_unavailable": 2,
+        "claude/resumed": 1
+      },
+      "previous_checkpoint": {
+        "authoritative": true,
+        "completeness": "complete",
+        "continuation": "native",
+        "reason": "native"
+      },
+      "previous_checkpoint_while_interrupted": {
+        "authoritative": true,
+        "completeness": "complete",
+        "continuation": "native",
+        "reason": "native"
+      },
+      "qualified_restore": {
+        "command": [
+          "claude",
+          "--resume",
+          "5f0c1a2e-0000-4000-8000-00000000c1a0"
+        ],
+        "outcome": "resumed",
+        "session_id": "5f0c1a2e-0000-4000-8000-00000000c1a0"
+      },
+      "replay": {
+        "authoritative": true,
+        "completeness": "complete",
+        "continuation": "native",
+        "reason": "native"
+      },
+      "replay_added_keys": [],
+      "second_restore_into_same_home": {
+        "cause": "conversation_present",
+        "decision": [
+          "continue_from_context",
+          "start_fresh"
+        ],
+        "outcome": "native_resume_unavailable"
+      },
+      "stale_attempt": {
+        "authoritative": false,
+        "completeness": "incomplete",
+        "continuation": "none",
+        "reason": "scope_mismatch"
+      }
+    }
+  },
+  "state": "passed"
+}

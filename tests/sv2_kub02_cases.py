@@ -113,10 +113,12 @@ class World:
         return RedisStore(fakeredis.FakeRedis(server=self.redis, decode_responses=True))
 
     def clocked(self):
-        return mock.patch.object(lease, "now_ms", lambda store: self.clock[0])
+        return mock.patch("time.time", lambda: self.clock[0] / 1000)
 
     def controller(self, creation_enabled: bool = True) -> tuple[Controller, KubernetesTransport]:
-        transport = KubernetesTransport(self.api, SLUG, PodTemplate(policy()), creation_enabled)
+        transport = KubernetesTransport(
+            self.api, SLUG, PodTemplate(policy(), "agentihooks-swarm-fixture"), creation_enabled
+        )
         view = watch.PodView(Source(self.api))
         return Controller(self.client(), SLUG, [transport], lambda: self.grant["allowed"], pods=view), transport
 
