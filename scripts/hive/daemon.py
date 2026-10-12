@@ -42,6 +42,9 @@ def beat(redis: "Redis", local_id: str) -> None:
             pipe.set(f"{key}:{field}", json.dumps(report[field]), ex=TTL_SECONDS)
         pipe.execute()
     LaunchSlots(redis).refresh([execution for ids in executions.values() for execution in ids])
+    from scripts.hive.orders import Consumer
+
+    Consumer.local(redis, local_id).poll()
 
 
 def run(redis: "Redis") -> None:
