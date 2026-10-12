@@ -36,7 +36,7 @@ def browser():
 
 
 @pytest.fixture
-def tab(browser):
+def tab(browser, request):
     context = browser.new_context(viewport={"width": 1600, "height": 900})
     html = shell_html()
     context.route(
@@ -44,6 +44,18 @@ def tab(browser):
         lambda route: route.fulfill(body=html, content_type="text/html") if route.request.url == URL else route.abort(),
     )
     serve_modules(context, ledger_state(DOC))
+    context.add_init_script(
+        """
+        const listen = EventTarget.prototype.addEventListener;
+        EventTarget.prototype.addEventListener = function(type, callback, options) {
+            if (type === "toggle") {
+                const original = callback;
+                callback = event => setTimeout(() => original.call(this, event), DELAY);
+            }
+            return listen.call(this, type, callback, options);
+        };
+        """.replace("DELAY", str(getattr(request, "param", 0)))
+    )
     page = context.new_page()
     page.goto(URL)
     settle(page)
@@ -177,6 +189,7 @@ def test_comment_control_label_flips_with_state_and_survives_a_reload(tab):
     assert comments(tab, "sec-phases") == {"labels": ["Show all comments"], "open": [False, False, False]}
 
 
+@pytest.mark.parametrize("tab", [0, 250], indirect=True)
 def test_one_dropdown_by_hand_is_remembered_and_flips_the_control_only_when_all_agree(tab):
     summaries = "#sec-phases details[data-key] > summary"
     tab.locator(summaries).nth(0).evaluate("(el) => el.click()")
