@@ -53,7 +53,10 @@ def three_owners(store):
     return ledger, runtime, agents
 
 
-def test_error_idle_and_dead_owners_resume_their_tasks_within_three_recovery_ticks(store, tmp_path, monkeypatch):
+@pytest.mark.parametrize("error_state", ["idle", "waiting"])
+def test_error_idle_and_dead_owners_resume_their_tasks_within_three_recovery_ticks(
+    store, tmp_path, monkeypatch, error_state
+):
     from scripts.swarm import snapshot
 
     ledger, runtime, agents = three_owners(store)
@@ -62,6 +65,7 @@ def test_error_idle_and_dead_owners_resume_their_tasks_within_three_recovery_tic
     launches = list(runtime.spawned)
     outage.observe("sw", "provider", ["provider unavailable"], MINUTE)
     runtime.errors[agents[0].name] = "provider unavailable"
+    runtime.statuses[agents[0].name] = error_state
     runtime.live.remove(agents[2].name)
     tick("sw", store, ledger, runtime, 8 * MINUTE)
     assert {agent.task: store.claimant("sw", agent.task) for agent in agents} == claims
