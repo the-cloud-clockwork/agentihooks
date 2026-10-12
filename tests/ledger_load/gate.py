@@ -381,7 +381,10 @@ def budgets(source: str) -> dict:
 
 def base_budgets(revision: str) -> dict:
     gate = Path(__file__)
-    show = subprocess.run(["git", "show", f"{revision}:./{gate.name}"], cwd=gate.parent, capture_output=True, text=True)
+    # Repository relative, so a mutation sandbox copy inside the checkout still reads the tracked gate.
+    show = subprocess.run(
+        ["git", "show", f"{revision}:tests/ledger_load/{gate.name}"], cwd=gate.parent, capture_output=True, text=True
+    )
     if show.returncode:
         sys.exit(f"git could not show the ledger load gate at base {revision}: {show.stderr.strip()}")
     return budgets(show.stdout)
