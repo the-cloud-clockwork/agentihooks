@@ -684,8 +684,7 @@ def _name_in_herdr(
 
 
 def _send_opening(pane: str, opening: str, environ: dict[str, str], ready: bool) -> str:
-    """Codex can read busy again right after the rename, and a prompt typed into a running turn or onto text in the
-    input line would not go out alone, so it waits for ready again and is held otherwise."""
+    """Codex can read busy again right after its rename."""
     ready = ready and herdr_host.wait_ready(pane, environ, CODEX_READY_S)
     why = herdr_host.busy(pane, environ) if ready else "not-ready"
     if why:
@@ -694,7 +693,7 @@ def _send_opening(pane: str, opening: str, environ: dict[str, str], ready: bool)
 
 
 def _names_pane(route: dict, launcher: Path, agent: str) -> bool:
-    """A held prompt still goes out while the route report is pending, because Codex may start after the wait."""
+    """Codex may start after the route wait ends with no report."""
     return route.get("status") in STARTED_ROUTES or (not route.get("status") and bool(_held_prompt(launcher, agent)))
 
 

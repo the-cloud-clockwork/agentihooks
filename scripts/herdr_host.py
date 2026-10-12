@@ -255,7 +255,6 @@ def name_session(
 
 
 def busy(pane_id: str, environ: dict[str, str]) -> str:
-    """Why nothing may be typed into the pane now: a status other than ready, or text already in its input line."""
     status = agent_status(pane_id, environ)
     if status not in READY:
         return status
