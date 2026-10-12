@@ -369,9 +369,11 @@ function renderHandoffs(rows) {
 
 function freezeRow(r) {
   const end = r.verb === "focus" ? "end focus" : "unfreeze", target = targetText(doc, r.target);
-  return cells(snowflake(r.verb === "focus" ? "Focus" : "Frozen"), r.verb, target, r.by, r.at ? clock(r.at) : "—",
+  const row = cells(snowflake(r.verb === "focus" ? "Focus" : "Frozen"), r.verb, target, r.by, r.at ? clock(r.at) : "—",
     h("button", { class: "sw-btn", type: "button", "aria-label": `${end} ${target}`, text: end,
       on: { click: () => queue({ op: "freeze_clear", id: newId("freeze"), target: r.target }) } }));
+  row.cells[2].title = target;
+  return row;
 }
 
 function renderFreezes() {

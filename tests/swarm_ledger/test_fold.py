@@ -71,9 +71,14 @@ def sections():
     return list(walk(body(), "section"))
 
 
+SWARM_PANELS = {"quota-fold", "overlays-fold", "agents-fold", "health-fold", "handoff-fold", "freeze-fold"}
+
+
 def in_ledger_section(node):
     while node.parent is not None:
         if node.tag == "section" and node.parent.attrs.get("class") == "col":
+            return True
+        if node.tag == "details" and node.attrs.get("id") in SWARM_PANELS:
             return True
         node = node.parent
     return False
@@ -95,7 +100,15 @@ class OnlyLedgerSectionsFold(unittest.TestCase):
             found[summary.text.strip() or summary.kids[0].text.strip()] = "open" in box.attrs
         self.assertEqual(found, SECTIONS)
 
-    def test_nothing_outside_the_ledger_tab_sections_folds(self):
+    def test_every_swarm_panel_below_capacity_folds_open_by_default(self):
+        folds = {node.attrs.get("id"): node for node in walk(body(), "details") if node.attrs.get("id") in SWARM_PANELS}
+        self.assertEqual(set(folds), SWARM_PANELS)
+        for name, box in folds.items():
+            self.assertIn("fold", box.attrs.get("class", "").split(), name)
+            self.assertIn("open", box.attrs, name)
+            self.assertEqual(box.kids[0].tag, "summary", name)
+
+    def test_nothing_outside_the_ledger_sections_and_swarm_panels_folds(self):
         stray = [
             node.attrs.get("id") or node.parent.attrs.get("id") or node.tag
             for tag in ("details", "summary")

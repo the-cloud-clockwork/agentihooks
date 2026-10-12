@@ -156,13 +156,14 @@ def test_a_refused_write_names_the_reason_and_restores_the_stored_value(routing_
     assert dict((key, value) for key, value, _ in inputs(page))["claude-api-weight"] == "25"
 
 
-def test_the_quota_box_header_does_not_fold_it(routing_page):
+def test_the_quota_box_folds_on_its_header_and_its_refresh_does_not(routing_page):
     page = routing_page()
-    assert page.tab.eval_on_selector("#quota-fold", "el => el.querySelector('summary')") is None
     assert page.tab.locator("#quota-table").is_visible()
-    page.tab.locator("#quota-fold .sw-blockhead h3").click()
-    assert page.tab.locator("#quota-table").is_visible()
-    assert page.tab.evaluate("() => Object.values(localStorage).some((v) => v.includes('quota-fold'))") is False
+    page.tab.locator("#quota-refresh").click()
+    assert page.tab.eval_on_selector("#quota-fold", "d => d.open") is True
+    page.tab.locator("#quota-fold > summary h3").click()
+    assert page.tab.eval_on_selector("#quota-fold", "d => d.open") is False
+    page.tab.wait_for_function("() => Object.values(localStorage).some((v) => v.includes('\"quota-fold\":false'))")
 
 
 def test_the_wider_quota_table_still_fits_its_box_at_1920(routing_page):

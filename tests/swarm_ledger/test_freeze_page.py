@@ -230,14 +230,13 @@ def test_end_focus_in_the_swarm_panel_sends_the_clear(page):
     tab.wait_for_function("() => document.querySelectorAll('#swarm-freezes tr').length === 2")
 
 
-def test_the_freezes_block_header_does_not_fold_it(page):
+def test_the_freezes_block_folds_on_its_header_and_remembers_it(page):
     tab, _ = page
     open_swarm(tab)
-    assert tab.eval_on_selector("#freeze-fold", "el => el.querySelector('summary')") is None
     assert tab.locator("#freeze-table").is_visible()
-    tab.locator("#freeze-fold .sw-blockhead h3").click()
-    assert tab.locator("#freeze-table").is_visible()
-    assert tab.evaluate("() => Object.values(localStorage).some((v) => v.includes('freeze-fold'))") is False
+    tab.locator("#freeze-fold > summary h3").click()
+    assert tab.eval_on_selector("#freeze-fold", "d => d.open") is False
+    tab.wait_for_function("() => Object.values(localStorage).some((v) => v.includes('\"freeze-fold\":false'))")
 
 
 def test_the_swarm_panel_says_when_nothing_is_frozen(page):

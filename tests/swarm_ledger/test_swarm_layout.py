@@ -184,8 +184,8 @@ def test_rows_run_header_alert_capacity_quota_overlays_agents_health_handoffs():
     positions = [box.index(f'id="{row}"') for row in ROWS]
     assert positions == sorted(positions)
     assert 'id="command-log"' not in box
-    assert '<div class="sw-fold" id="overlays-fold">' in box
-    assert '<div class="sw-fold" id="quota-fold">' in box
+    assert '<details class="fold sw-fold" id="overlays-fold" open>' in box
+    assert '<details class="fold sw-fold" id="quota-fold" open>' in box
     for gone in (
         "crew",
         "needs-you",
@@ -667,13 +667,12 @@ def test_toggling_an_overlay_back_leaves_nothing_to_apply(open_page):
     assert page.tab.locator("#overlays-apply").is_disabled()
 
 
-def test_the_overlays_box_header_does_not_fold_it(open_page):
+def test_the_overlays_box_folds_on_its_header_and_remembers_it(open_page):
     page = open_page(status(overlays_available=OFFERED))
-    assert page.tab.locator("#overlays-fold").evaluate("el => el.querySelector('summary')") is None
     assert page.tab.locator("#swarm-overlays").is_visible()
-    page.tab.locator("#overlays-fold .sw-blockhead h3").click()
-    assert page.tab.locator("#swarm-overlays").is_visible()
-    assert page.tab.evaluate("() => Object.values(localStorage).some((v) => v.includes('overlays-fold'))") is False
+    page.tab.locator("#overlays-fold > summary h3").click()
+    assert page.tab.eval_on_selector("#overlays-fold", "d => d.open") is False
+    page.tab.wait_for_function("() => Object.values(localStorage).some((v) => v.includes('\"overlays-fold\":false'))")
 
 
 @pytest.mark.parametrize("width", [1440, 390])
