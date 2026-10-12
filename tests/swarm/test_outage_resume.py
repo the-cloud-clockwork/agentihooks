@@ -241,9 +241,19 @@ def pending_owners(store, tmp_path, monkeypatch, worktree=True):
     from scripts.swarm import snapshot
 
     ledger, runtime, _ = three_owners(store)
-    monkeypatch.setattr(
-        snapshot, "worktrees", lambda repo, names: {name: str(tmp_path) for name in names} if worktree else {}
-    )
+
+    def worktrees(repo, names):
+        assert repo == store.config("sw").repo
+        return {name: str(tmp_path) for name in names} if worktree else {}
+
+    monkeypatch.setattr(snapshot, "worktrees", worktrees)
+    state = ledger.state
+
+    def own_state(slug):
+        assert slug == "sw"
+        return state(slug)
+
+    monkeypatch.setattr(ledger, "state", own_state)
     outage.observe("sw", "provider", ["provider unavailable"], MINUTE)
     resume.track_outages("sw", store, runtime, rows_of(ledger), 8 * MINUTE)
     outage.observe("sw", "provider", [], 9 * MINUTE)
@@ -256,7 +266,10 @@ def take_over(store, ledger, agent):
     ledger.rows[agent.task]["claimed_by"] = "successor"
 
 
-@pytest.mark.parametrize("change", ["missing row", "done", "seat", "released authority", "lapsed authority"])
+@pytest.mark.parametrize(
+    "change",
+    ["missing row", "done", "ledger claimant", "store claimant", "seat", "released authority", "lapsed authority"],
+)
 def test_an_owner_that_loses_its_task_drops_its_pending_recovery(store, tmp_path, monkeypatch, change):
     ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
     agent = agents[0]
@@ -266,6 +279,11 @@ def test_an_owner_that_loses_its_task_drops_its_pending_recovery(store, tmp_path
         rows = {}
     elif change == "done":
         rows[agent.task]["done"] = True
+    elif change == "ledger claimant":
+        rows[agent.task]["claimed_by"] = "successor"
+    elif change == "store claimant":
+        assert store.release("sw", agent.task, agent.name)
+        assert store.claim("sw", agent.task, "successor", 600_000)
     elif change == "seat":
         store.seats.occupy(agent.seat, "successor", 9 * MINUTE)
     else:
@@ -357,6 +375,8 @@ def test_one_recovery_pass_completes_working_nudged_and_reopened_owners(store, t
     reopened = next(agent for agent in owners(store) if agent.name == dead.name)
     assert (reopened.pane_id, reopened.started_at, reopened.idle_ticks) == ("recovered:pane", 9 * MINUTE, 0)
     assert (reopened.model, reopened.account, reopened.profile_decision) == ("sonnet", dead.account, decision)
+    assert dead.effort and reopened.effort == dead.effort
+    assert runtime.resumed[-1][2].startswith("Service is back after the outage.")
 
 
 def test_a_refused_retry_waits_for_the_next_tick(store, tmp_path, monkeypatch):
@@ -377,6 +397,7 @@ def test_a_dead_owner_without_a_worktree_restarts_from_its_last_transfer_handoff
     runtime.live.remove(dead.name)
     handoff = "## Next\nContinue from the saved proof.\n"
     transfers.record(store, "sw", dead, "quota", handoff, 2 * MINUTE)
+    store.put_agent("sw", replace(dead, idle_ticks=2))
     launches = len(runtime.spawned)
     actions = resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
     assert f"outage resume for {dead.name}" in actions
@@ -385,15 +406,17 @@ def test_a_dead_owner_without_a_worktree_restarts_from_its_last_transfer_handoff
     assert runtime.tasks[-1]["handoff"] == handoff
     assert transfers.get(store, "sw", runtime.tasks[-1]["transfer"])["reason"] == "outage"
     assert runtime.spawn_configs[-1] == "sw"
+    assert runtime.tasks[-1]["seat"] == dead.seat
     restarted = next(agent for agent in owners(store) if agent.name == dead.name)
-    assert (restarted.pane_id, restarted.conversation_id, restarted.started_at) == (
+    assert (restarted.pane_id, restarted.conversation_id, restarted.started_at, restarted.idle_ticks) == (
         f"w1:p{launches + 1}",
         "",
         9 * MINUTE,
+        0,
     )
 
 
-@pytest.mark.parametrize("moment", ["before resume", "before respawn"])
+@pytest.mark.parametrize("moment", ["before resume", "during resume", "before respawn"])
 def test_ownership_lost_during_recovery_is_reported(store, tmp_path, monkeypatch, moment):
     from scripts.handoff import transfers
     from scripts.swarm import snapshot
@@ -408,6 +431,14 @@ def test_ownership_lost_during_recovery_is_reported(store, tmp_path, monkeypatch
             return {dead.name: str(tmp_path)}
 
         monkeypatch.setattr(snapshot, "worktrees", worktrees)
+    elif moment == "during resume":
+        monkeypatch.setattr(snapshot, "worktrees", lambda repo, names: {dead.name: str(tmp_path)})
+
+        def unsupported(config, agent, text):
+            take_over(store, ledger, dead)
+            raise SpawnError("conversation resume blocked", "unsupported")
+
+        monkeypatch.setattr(runtime, "resume", unsupported)
     else:
         attach = transfers.attach
 
@@ -423,17 +454,20 @@ def test_ownership_lost_during_recovery_is_reported(store, tmp_path, monkeypatch
     assert runtime.spawned == launches
 
 
-def test_an_ambiguous_resume_failure_reports_its_error(store, tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "message, reported", [("conversation resume blocked", "conversation resume blocked"), ("", "SpawnError")]
+)
+def test_an_ambiguous_resume_failure_reports_its_error(store, tmp_path, monkeypatch, message, reported):
     ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
     dead = agents[2]
     runtime.live.remove(dead.name)
 
     def ambiguous(config, agent, text):
-        raise SpawnError("conversation resume blocked", "ambiguous")
+        raise SpawnError(message, "ambiguous")
 
     monkeypatch.setattr(runtime, "resume", ambiguous)
     actions = resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
-    assert f"outage resume for {dead.name} refused: conversation resume blocked" in actions
+    assert f"outage resume for {dead.name} refused: {reported}" in actions
 
 
 def test_an_owner_whose_task_is_in_review_is_recovered(store):
@@ -474,11 +508,12 @@ def test_a_reopened_conversation_records_the_placement_it_reports(store, tmp_pat
     dead = agents[2]
     runtime.live.remove(dead.name)
     store.put_agent("sw", replace(dead, model_source="ledger", profile_decision={"profile": "engineer"}))
-    runtime.placement = {"account": "acct-2", "profile_decision": {"profile": "reviewer"}}
+    runtime.placement = {"account": "acct-2", "effort": "max", "profile_decision": {"profile": "reviewer"}}
     resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
     reopened = next(agent for agent in owners(store) if agent.name == dead.name)
-    assert (reopened.account, reopened.model_source, reopened.profile_decision) == (
+    assert (reopened.account, reopened.effort, reopened.model_source, reopened.profile_decision) == (
         "acct-2",
+        "max",
         "ledger",
         {"profile": "reviewer"},
     )
@@ -492,3 +527,75 @@ def test_a_pending_owner_missing_its_pane_does_not_stop_other_conversation_updat
     tick("sw", store, ledger, runtime, 8 * MINUTE)
     found = {agent.name: agent.conversation_id for agent in owners(store)}
     assert found == {first.name: "conversation-0", second.name: "conversation-new", third.name: "conversation-2"}
+
+
+def test_a_non_owner_does_not_stop_tracking_later_owners(store):
+    ledger, runtime, _ = three_owners(store)
+    first, second, _ = owners(store)
+    ledger.rows[first.task]["done"] = True
+    outage.observe("sw", "provider", ["provider unavailable"], MINUTE)
+    resume.track_outages("sw", store, runtime, rows_of(ledger), 8 * MINUTE)
+    assert [recovery_state(store, agent.name) for agent in (first, second)] == [None, "pending"]
+
+
+def test_an_owner_that_worked_after_the_outage_is_not_recovered(store):
+    ledger, runtime, _ = three_owners(store)
+    first, second, _ = owners(store)
+    outage.observe("sw", "provider", ["provider unavailable"], MINUTE)
+    outage.observe("sw", "provider", [], 9 * MINUTE)
+    idle.beat(store.redis, "sw", first.name, idle.IDLE, 10 * MINUTE)
+    resume.track_outages("sw", store, runtime, rows_of(ledger), 10 * MINUTE)
+    assert [recovery_state(store, agent.name) for agent in (first, second)] == [None, "pending"]
+
+
+def test_an_owner_holding_a_declared_wait_is_not_stalled(store):
+    ledger, runtime, _ = three_owners(store)
+    first, second, _ = owners(store)
+    outage.observe("sw", "provider", ["provider unavailable"], MINUTE)
+    outage.observe("sw", "provider", [], 9 * MINUTE)
+    idle.declare_wait(store.redis, "sw", first.name, 60 * MINUTE, "checks", 8 * MINUTE)
+    resume.track_outages("sw", store, runtime, rows_of(ledger), 10 * MINUTE)
+    assert [recovery_state(store, agent.name) for agent in (first, second)] == ["done", "pending"]
+
+
+def test_the_tick_tracks_recovery_on_its_own_clock(store):
+    ledger, runtime, _ = three_owners(store)
+    first, second, _ = owners(store)
+    outage.observe("sw", "provider", ["provider unavailable"], MINUTE)
+    idle.beat(store.redis, "sw", first.name, idle.WORKING, 7 * MINUTE)
+    tick("sw", store, ledger, runtime, 8 * MINUTE)
+    assert [recovery_state(store, agent.name) for agent in (first, second)] == [None, "pending"]
+
+
+def test_a_pending_recovery_stops_once_its_attempts_are_spent(store, tmp_path, monkeypatch):
+    _, _, agents = pending_owners(store, tmp_path, monkeypatch)
+    key = store.key("sw", resume.RECOVERY)
+    record = json.loads(store.redis.hget(key, agents[0].name))
+    record["attempts"] = resume.RECOVERY_ATTEMPTS
+    store.redis.hset(key, agents[0].name, json.dumps(record))
+    assert not resume.recovery_pending(store, "sw", agents[0])
+
+
+def test_an_owner_holding_its_task_authority_is_recovered(store, tmp_path, monkeypatch):
+    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
+    agent = agents[0]
+    authority = {
+        "state": "active",
+        "holder": agent.name,
+        "execution_id": agent.execution_id,
+        "execution_generation": agent.generation,
+        "generation": 0,
+        "lease_deadline_ms": 20 * MINUTE,
+    }
+    store.redis.set(store.key("sw", "task-authority", agent.task), json.dumps(authority))
+    resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
+    assert agent.name in runtime.nudged
+    assert recovery_state(store, agent.name) == "done"
+
+
+def test_a_refused_prompt_keeps_the_recovery_pending(store, tmp_path, monkeypatch):
+    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
+    runtime.nudge_refusals[agents[0].name] = "pane busy"
+    resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
+    assert agents[0].name in runtime.nudged
+    assert resume.recovery_pending(store, "sw", agents[0])
