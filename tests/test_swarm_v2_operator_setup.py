@@ -757,7 +757,7 @@ def test_a_refused_setup_raises_one_priority_on_each_synced_swarm(tmp_path, monk
     assert run_main(["setup"], environ, Who(), tmp_path / "home")[0] == 1
 
     assert ledger.followups == [("hive-a", message, True), ("hive-b", message, True)]
-    assert dialled == [environ]
+    assert dialled == [environ, environ]
 
 
 @pytest.mark.xdist_group("fakeredis")
