@@ -265,6 +265,13 @@ def test_a_task_add_beside_a_guarded_write_guards_only_that_write(pauses):
     assert [op["op"] for op in client.calls[1][1]["ops"]] == ["task_add", "add"]
 
 
+def test_the_ledger_server_queues_a_burst_of_connections():
+    from scripts.swarm_ledger import ledger_server
+
+    assert ledger_server.LedgerHTTPServer.request_queue_size == 128
+    assert issubclass(ledger_server.LedgerHTTPServer, ledger_server.ThreadingHTTPServer)
+
+
 def test_a_conflict_on_a_task_add_batch_is_not_retried(pauses):
     client = Scripted(conflict("tasks"))
     with pytest.raises(urllib.error.HTTPError):

@@ -4,7 +4,6 @@ import os
 import sys
 import threading
 import uuid
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
@@ -45,7 +44,7 @@ def pinned(name=WORKER):
 @pytest.fixture(scope="module")
 def live():
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+    httpd = server.LedgerHTTPServer(("127.0.0.1", 0), server.Handler)
     port = httpd.server_address[1]
     host = f"127.0.0.1:{port}"
     content = {"title": "Authority", "phases": [{"title": "Proof", "description": "word " * 101}]}

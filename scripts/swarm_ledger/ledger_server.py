@@ -69,6 +69,10 @@ BIN_SWEEP_EVERY = 15
 LOADED_STAMP = code_stamp()
 
 
+class LedgerHTTPServer(ThreadingHTTPServer):
+    request_queue_size = 128
+
+
 @functools.cache
 def served_page():
     """The assets this process serves and their version, read once so a version URL never serves other bytes."""
@@ -1092,7 +1096,7 @@ def serve():
         sys.exit(str(conflict))
     legacy.adopt(stored)
     threading.Thread(target=watch_ledgers, daemon=True).start()
-    server = ThreadingHTTPServer((HOST, PORT), Handler)
+    server = LedgerHTTPServer((HOST, PORT), Handler)
     stopped = server_lifetime.watch(server, core.LEDGER_DIR, PORT)
     server_code.record(PIDFILE.parent, os.getpid(), LOADED_STAMP)
     PIDFILE.write_text(str(os.getpid()))

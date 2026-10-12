@@ -71,7 +71,7 @@ class ResourceClient:
         unpinned = [
             operation
             for operation in operations
-            if not operation.get("expected_revision") and operation["op"] not in schemas.UNGUARDED
+            if not operation.get("expected_revision") and operation["op"] != "task_add"
         ]
         pinned = {schemas.target(operation) for operation in operations if operation.get("expected_revision")}
         fetched = {schemas.target(operation) for operation in unpinned} - pinned
@@ -99,7 +99,7 @@ class ResourceClient:
                     raise ValueError(f"one batch pins {path} to two revisions: {guards[path]} and {revision}")
         operation_id = operations[0].setdefault("operation_id", uuid.uuid4().hex)
         for operation in operations:
-            if operation["op"] not in schemas.UNGUARDED:
+            if operation["op"] != "task_add":
                 path = schemas.target(operation)
                 if path not in guards:
                     guards[path] = self.request(slug, path)["revision"]
