@@ -128,13 +128,13 @@ function planActions(key, plan) {
 
 function planRow({ key, id, title, phases, plan }) {
   const idOf = (p) => `item-phases-${p.id}`;
-  const fold = h("details", { class: "plan-fold" }, h("summary", {}, h("span", { class: "plan-title", text: title }),
+  const fold = h("details", { class: "plan-fold" }, h("summary", {}, plan ? holdMark(key) : null, h("span", { class: "plan-title", text: title }),
     h("span", { class: "plan-count", text: `${phases.length} ${phases.length === 1 ? "phase" : "phases"}` }), planActions(key, plan)));
   fold.open = !closedComments.has(`${key}/row`) || phases.some((p) => idOf(p) === wanted.id);
   fold.addEventListener("toggle", () => rememberComment(`${key}/row`, fold.open));
   lazy(fold, () => h("ol", { class: "plan-phases" }, ...firstPage(key, phases, idOf).map((p, i) => phaseRow(p, i + 1)),
     moreButton(key, phases.length, "more phases", render), phases.length ? null : h("li", { class: "empty", text: "None." })));
-  return h("li", { class: "plan" + (plan && plan.out_of_scope ? " out" : "") + (plan ? holdClass(key) : ""), id }, plan ? holdMark(key) : null, fold);
+  return h("li", { class: "plan" + (plan && plan.out_of_scope ? " out" : "") + (plan ? holdClass(key) : ""), id }, fold);
 }
 
 function phaseList() {
