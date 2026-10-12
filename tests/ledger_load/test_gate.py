@@ -142,7 +142,7 @@ def test_the_base_budgets_come_from_the_committed_gate_at_that_revision():
 def test_the_gate_runs_on_the_stricter_of_base_and_head_budgets(monkeypatch, tmp_path):
     for name, value in head_budgets().items():
         monkeypatch.setattr(ledger_load, name, value)
-    strict = {"WRITE_P95_S": 0.5, "CPU_CORES": 0.25, "LEDGER_BYTES": 10**8}
+    strict = {**head_budgets(), "WRITE_P95_S": 0.5, "CPU_CORES": 0.25, "LEDGER_BYTES": 10**8}
     revisions = []
     monkeypatch.setattr(ledger_load, "base_budgets", lambda revision: revisions.append(revision) or strict)
     monkeypatch.setattr(ledger_load, "run", lambda folder: [] if head_budgets() == strict else ["head budgets graded"])
