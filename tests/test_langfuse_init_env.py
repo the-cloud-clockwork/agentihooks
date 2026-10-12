@@ -62,7 +62,7 @@ def test_real_init_seeder_refreshes_owned_endpoint_and_preserves_operator_overri
     runtime_env.seed(install._seed_user_env_file, destination, settings)
     assert dotenv_values(destination)["LANGFUSE_MCP_URL"] == "http://changed.example/mcp/"
     with destination.open("a") as stream:
-        stream.write("LANGFUSE_MCP_URL=http://operator.example/mcp/\\n")
+        stream.write("LANGFUSE_MCP_URL=http://operator.example/mcp/\n")
     runtime_env.seed(install._seed_user_env_file, destination, settings)
     assert dotenv_values(destination)["LANGFUSE_MCP_URL"] == "http://operator.example/mcp/"
     assert runtime_env.START not in destination.read_text()

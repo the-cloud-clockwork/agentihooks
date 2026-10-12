@@ -9,8 +9,8 @@ END = "# END agentihooks sampler environment"
 
 def seed(seeder: Callable[[], list[str]], destination: Path, settings: dict) -> list[str]:
     added = seeder()
-    environment = settings.get("env", settings.get("_agentihooks", {}).get("env", {}))
-    endpoint = environment.get(KEY, "")
+    environment = settings.get("env", {})
+    endpoint = environment.get(KEY, settings.get("_agentihooks", {}).get("env", {}).get(KEY, ""))
     original = destination.read_text() if destination.exists() else ""
     body = original
     if START in body:
