@@ -692,7 +692,7 @@ class HerdrRuntime:
             self._terminate(name)
             tail = (proc.stderr or proc.stdout).strip().splitlines()
             message = tail[-1] if tail else f"init-agent exit {proc.returncode}"
-            raise SpawnError(message, pane_id=fields.get("pane_id", ""))
+            raise SpawnError(message, pane_id=fields.get("pane_id") or _opened_pane(name, launched_at))
         try:
             validated = binding.fields(fields, argv[argv.index("--profile") + 1], agent)
         except ValueError as exc:
