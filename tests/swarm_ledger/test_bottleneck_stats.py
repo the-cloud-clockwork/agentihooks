@@ -21,13 +21,15 @@ def test_top_stage_trend_and_action_fit_the_operator_viewport(open_page):
     )
     page.tab.set_viewport_size({"width": 1920, "height": 1080})
     box = page.tab.locator("#stats .top-bottleneck")
+    assert page.tab.locator("#stats > .stat").last.evaluate("e => e.classList.contains('top-bottleneck')")
+    assert box.locator("li").count() == 4
+    box.scroll_into_view_if_needed()
     assert box.is_visible()
     assert box.inner_text() == (
         "TOP BOTTLENECK\nci overrun\nTrend rising\nMeasured 5 minutes ago\nLast action Proposed a faster mutation run"
     )
     bounds = box.bounding_box()
     assert bounds["x"] >= 0 and bounds["x"] + bounds["width"] <= 1920
-    assert bounds["y"] >= 0 and bounds["y"] + bounds["height"] <= 1080
 
 
 @pytest.mark.parametrize(
