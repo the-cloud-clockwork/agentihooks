@@ -41,3 +41,33 @@ def test_three_failed_lives_still_block_the_fourth_claim(store, ending):  # noqa
     assert [task for _, _, task in runtime.spawned] == ["t1"] * 3
     assert ledger.rows["t1"]["state"] == "blocked"
     assert store.claimant("sw", "t1") is None
+
+
+@pytest.mark.parametrize("ending", ["mismatch", "idle", "stop"])
+def test_three_swarm_retirements_allow_a_fourth_claim(store, ending):  # noqa: F811
+    from scripts.swarm.cli import stop_now
+    from scripts.swarm.tick import IDLE_KILL_TICKS
+
+    ledger, runtime = CommentingLedger([{"id": "t1"}]), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    for at in (2_000, 3_000, 4_000):
+        agent = workers(store)[0]
+        tick("sw", store, ledger, runtime, now_ms=at)
+        if ending == "stop":
+            stop_now(store, "sw", runtime, ledger)
+            store.update("sw", state="running")
+        elif ending == "mismatch":
+            store.put_agent("sw", replace(agent, account="old-account"))
+            original = runtime.bindings
+            runtime.bindings = lambda agents: {
+                name: {**facts, "account": "new-account"} for name, facts in original(agents).items()
+            }
+        else:
+            runtime.statuses[agent.name] = "idle"
+            store.put_agent("sw", replace(agent, idle_ticks=IDLE_KILL_TICKS - 1))
+        tick("sw", store, ledger, runtime, now_ms=at + 1)
+        if ending == "mismatch":
+            runtime.bindings = original
+    assert [task for _, _, task in runtime.spawned] == ["t1"] * 4
+    assert ledger.rows["t1"]["state"] == "claimed"
+    assert store.claims("sw", "t1") == 1
