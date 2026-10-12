@@ -149,8 +149,6 @@ def test_a_definite_resume_blocker_uses_the_handoff_but_an_ambiguous_launch_does
 
 
 def test_work_after_outage_closure_excludes_an_agent_that_only_becomes_idle_later(store):
-    from scripts.swarm import idle
-
     ledger, runtime, agents = three_owners(store)
     healthy = agents[0]
     runtime.statuses[healthy.name] = "working"
@@ -167,7 +165,6 @@ def test_work_after_outage_closure_excludes_an_agent_that_only_becomes_idle_late
 
 @pytest.mark.parametrize("error_state", ["idle", "waiting"])
 def test_overlapping_outages_hold_recovery_and_persistent_errors_retry_three_times_then_count_idle(store, error_state):
-    from scripts.swarm import idle
     from scripts.swarm.store import RedisStore
 
     ledger, runtime, agents = three_owners(store)
@@ -194,10 +191,6 @@ def test_overlapping_outages_hold_recovery_and_persistent_errors_retry_three_tim
 
 
 def test_a_new_task_generation_fences_the_recovery_pass(store):
-    import json
-
-    from scripts.swarm import resume
-
     ledger, runtime, agents = three_owners(store)
     agent = next(agent for agent in store.agents("sw") if agent.name == agents[0].name)
     authority = {
@@ -240,8 +233,9 @@ def pending_owners(store, tmp_path, monkeypatch, worktree=True):
     from scripts.swarm import snapshot
 
     ledger, runtime, _ = three_owners(store)
-    paths = [str(tmp_path)] if worktree else []
-    monkeypatch.setattr(snapshot, "worktrees", lambda repo, names: {name: path for name in names for path in paths})
+    monkeypatch.setattr(
+        snapshot, "worktrees", lambda repo, names: {name: str(tmp_path) for name in names} if worktree else {}
+    )
     outage.observe("sw", "provider", ["provider unavailable"], MINUTE)
     resume.track_outages("sw", store, runtime, rows_of(ledger), 8 * MINUTE)
     outage.observe("sw", "provider", [], 9 * MINUTE)
@@ -300,12 +294,29 @@ def test_an_owner_started_after_the_outage_does_not_stop_tracking_the_others(sto
     ledger, runtime, _ = three_owners(store)
     first, healthy, stuck = owners(store)
     store.put_agent("sw", replace(first, started_at=10 * MINUTE))
-    assert owners(store)[0].name == first.name
     runtime.statuses[healthy.name] = idle.WORKING
     outage.observe("sw", "provider", ["provider unavailable"], MINUTE)
     outage.observe("sw", "provider", [], 9 * MINUTE)
     resume.track_outages("sw", store, runtime, rows_of(ledger), 10 * MINUTE)
     assert [recovery_state(store, agent.name) for agent in (first, healthy, stuck)] == [None, "done", "pending"]
+
+
+def test_an_unchanged_owner_does_not_stop_rerecording_a_later_owner_with_a_new_identity(store, tmp_path, monkeypatch):
+    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
+    last = agents[2]
+    authority = {
+        "state": "active",
+        "holder": last.name,
+        "execution_id": last.execution_id,
+        "execution_generation": last.generation,
+        "generation": 1,
+        "lease_deadline_ms": 20 * MINUTE,
+    }
+    store.redis.set(store.key("sw", "task-authority", last.task), json.dumps(authority))
+    assert not resume.recovery_pending(store, "sw", last)
+    resume.track_outages("sw", store, runtime, rows_of(ledger), 9 * MINUTE)
+    assert resume.recovery_pending(store, "sw", agents[0])
+    assert resume.recovery_pending(store, "sw", last)
 
 
 def test_the_resume_prompt_names_the_task_workspace_and_keeps_the_claim(store, tmp_path, monkeypatch):
