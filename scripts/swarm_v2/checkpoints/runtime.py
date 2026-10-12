@@ -98,6 +98,15 @@ def restoring(store: ArtifactStore, directive: restore.Directive, paths: restore
     return restorer.restore(directive, paths.worktree, paths.home, paths.cwd, paths.version_text)
 
 
+def source_paths(spec: dict, execution: filesystem.Execution) -> tuple[Path, Path]:
+    if "checkout" in spec:
+        from scripts.swarm_v2.supervision import _checkout
+
+        path = _checkout(execution, spec["authority"]["task_id"])
+        return path, path
+    return execution.path("worktree"), execution.root
+
+
 def prepare(spec: dict, attempt: Path, environ: Mapping[str, str] = os.environ) -> restore.Restored | None:
     if "restore" not in spec:
         return None
@@ -116,7 +125,8 @@ def prepare(spec: dict, attempt: Path, environ: Mapping[str, str] = os.environ) 
     execution = filesystem.recorded(attempt.resolve(), record)
     harness = spec["harness"]
     home = execution.path("home") / harness / (".claude" if harness == "claude" else ".codex")
-    paths = restore.Paths(execution.path("worktree"), home, attempt, version(harness, environ))
+    worktree, cwd = source_paths(spec, execution)
+    paths = restore.Paths(worktree, home, cwd, version(harness, environ))
     directive = restore.Directive.parse(spec["restore"])
     restored = restoring(store, directive, paths)
     if restored.recovery == restore.RECONSTRUCTED:
