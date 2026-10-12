@@ -27,11 +27,8 @@ def _pytest_command() -> str:
 
 
 def _slowest_committed_test() -> float:
-    root = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"], cwd=_ROOT, check=True, capture_output=True, text=True
-    ).stdout.strip()
     return max(
-        max(json.loads(subprocess.check_output(["git", "show", f"HEAD:{name}"], cwd=root, text=True)).values())
+        max(json.loads(subprocess.check_output(["git", "show", f"HEAD:{name}"], cwd=_ROOT, text=True)).values())
         for name in (".test_durations", ".test_durations-3.12")
     )
 
@@ -206,7 +203,8 @@ def test_the_hung_test_bound_reads_the_committed_durations_not_the_downloaded_co
     subprocess.run(
         ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "d"], check=True
     )
-    (tmp_path / ".test_durations-3.12").write_text(json.dumps({"tests/test_a.py::test_a": 90.0}))
+    for name in (".test_durations", ".test_durations-3.12"):
+        (tmp_path / name).write_text(json.dumps({"tests/test_a.py::test_a": 90.0}))
     monkeypatch.setattr(sys.modules[__name__], "_ROOT", tmp_path)
     assert _slowest_committed_test() == 1.0
 
