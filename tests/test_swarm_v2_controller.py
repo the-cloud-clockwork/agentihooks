@@ -173,6 +173,21 @@ def test_revoked_grant_blocks_cached_authority(fixture):
     assert transport.creations == 0
 
 
+def test_a_renewal_refused_its_grant_closes_admission_until_a_granted_renewal(fixture):
+    store, (first, _), transport, _, grant = fixture
+    assert first.acquire()
+    grant["allowed"] = False
+    with pytest.raises(SwarmError, match="^a scoped controller grant is required$"):
+        first.renew()
+    assert first.ready is False
+    grant["allowed"] = True
+    with pytest.raises(SwarmError, match="^controller admission is disabled until reconciliation completes$"):
+        first.admit(agent(store))
+    assert first.renew() is True
+    assert first.admit(agent(store)).generation == 1
+    assert transport.creations == 0
+
+
 @pytest.mark.parametrize("run", range(2))
 def test_independent_controllers_race_for_one_admission(fixture, run):
     from concurrent.futures import ThreadPoolExecutor
@@ -730,6 +745,36 @@ def test_a_renew_tick_whose_account_reconcile_fails_leaves_admission_closed(acco
     with pytest.raises(SwarmError, match="^dependency_unavailable$"):
         controller.renew()
     assert controller.ready is False
+
+
+def test_a_grant_revoked_while_the_lease_renews_releases_nothing_and_closes_admission(accounts, monkeypatch):
+    controller = accounts.authority.controller
+    renew = lease.renew
+    accounts.clock[0] += TTL
+    before = accounts.rows()
+
+    def revoked(store, slug, held):
+        monkeypatch.setattr(controller, "authorize", lambda: False)
+        return renew(store, slug, held)
+
+    monkeypatch.setattr(lease, "renew", revoked)
+    with pytest.raises(SwarmError, match="^a scoped controller grant is required$"):
+        controller.renew()
+    assert controller.ready is False
+    assert accounts.rows() == before
+
+
+def test_an_interrupted_renewal_leaves_admission_closed(fixture, monkeypatch):
+    store, (first, _), _, _, _ = fixture
+    assert first.acquire()
+
+    def interrupted(*args):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(lease, "renew", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        first.renew()
+    assert first.ready is False
 
 
 def test_a_refused_renew_tick_releases_nothing(accounts):

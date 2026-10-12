@@ -55,7 +55,7 @@ def test_quota_rows_exclude_signed_out_default_and_keep_signed_in_default(monkey
 
     def rows():
         if surface == "table":
-            return agents_quota.codex_table()
+            return [row.account for row in agents_quota._codex(1000.0)]
         agents_quota._page_cache.clear()
         return [row["account"] for row in agents_quota.page_quota(now=1000.0)["rows"]]
 

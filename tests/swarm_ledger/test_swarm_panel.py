@@ -565,7 +565,7 @@ class SwarmPanel(unittest.TestCase):
             "[" + ",".join(f"capStep({json.dumps(values)}, '{key}', {str(up).lower()})" for key, up in steps) + "]",
         )
         self.assertEqual(
-            out, [{"effort_min": "low"}, {"effort_min": "high"}, {"effort_max": "max"}, {"effort_max": "medium"}]
+            out, [{"effort_min": "low"}, {"effort_min": "high"}, {"effort_max": "xhigh"}, {"effort_max": "medium"}]
         )
         meet = {"effort_min": "high", "effort_max": "high"}
         out = self.run_js(["capStep"], f"[capStep({json.dumps(meet)}, 'effort_min', true)]")
@@ -590,7 +590,7 @@ class SwarmPanel(unittest.TestCase):
             out,
             [
                 {"body": {"action": "set", "effort_min": "low", "effort_max": "max"}, "bad": []},
-                {"body": {"action": "set"}, "bad": ["effort floor must be one of low, medium, high, max"]},
+                {"body": {"action": "set"}, "bad": ["effort floor must be one of low, medium, high, xhigh, max"]},
                 {
                     "body": {"action": "set", "effort_min": "max"},
                     "bad": ["effort floor must not be above the effort ceiling"],
@@ -606,11 +606,14 @@ class SwarmPanel(unittest.TestCase):
             [run.call_args_list[0].args[2], SLUG, *run.call_args_list[0].args[3]],
             ["swarm", SLUG, "set", "effort-min=low", "effort-max=max"],
         )
-        for level in ("xhigh", "", 3, None):
+        for level in ("huge", "", 3, None):
             code, text, run = self.control({"action": "set", "effort_max": level})
             self.assertEqual(code, 400, level)
-            self.assertIn("effort_max must be one of low, medium, high, max", text)
+            self.assertIn("effort_max must be one of low, medium, high, xhigh, max", text)
             run.assert_not_called()
+        code, _, run = self.control({"action": "set", "effort_max": "xhigh"})
+        self.assertEqual(code, 200)
+        self.assertEqual(run.call_args_list[0].args[3], ["set", "effort-max=xhigh"])
 
     def test_a_one_lane_set_runs_only_that_lane(self):
         code, _, run = self.control({"action": "set", "max_ci": 2})

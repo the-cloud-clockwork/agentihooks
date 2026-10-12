@@ -77,7 +77,7 @@ def _model_args(agent, chosen, environ, bounds, preserve=False):
     model, effort = model_effort(agent, [], environ)
     saved = _set(chosen.get("effort")) or effort
     effort = effort_range.clamp(agent, saved, bounds)
-    if preserve and effort_range.rank(effort) != effort_range.rank(saved):
+    if preserve and effort_range.rank(effort) != effort_range.rank(effort_range.named(agent, saved)):
         raise SpawnError("unsupported transfer: saved effort is outside the current swarm range", "unsupported")
     return model_flags(agent, _set(chosen.get("model")) or model, effort)
 
@@ -109,6 +109,19 @@ def herdr_target(name):
 
 def pane_target(agent):
     return agent.pane_id or herdr_target(agent.name)
+
+
+def _launch_records(name):
+    from scripts import herdr_panes
+
+    return [r for r in herdr_panes.load(dict(os.environ)) if r.kind == "init-agent" and r.owner_session == name]
+
+
+def _opened_pane(name, since_ms):
+    found = sorted(
+        (r for r in _launch_records(name) if r.launched_at >= since_ms), key=lambda record: record.launched_at
+    )
+    return found[-1].pane_id if found else ""
 
 
 def _owns(found, agent):
@@ -503,7 +516,9 @@ class HerdrRuntime:
                 confidence=saved.get("model_confidence"),
             )
         elif lane in PICKED_LANES:
-            picked = timing.call(model_pick.pick, agent, {} if quota_transfer else chosen, task, environ)
+            picked = timing.call(
+                model_pick.pick, agent, {} if quota_transfer else chosen, task, environ, effort_range.of(config)
+            )
         else:
             picked = _lane_default(lane, agent, {} if quota_transfer else chosen)
         picked = replace(picked, effort=saved["effort"]) if saved else picked
@@ -662,7 +677,7 @@ class HerdrRuntime:
             )
         except subprocess.TimeoutExpired as exc:
             self._terminate(name)
-            raise SpawnError(f"init-agent timed out for {name}", "ambiguous") from exc
+            raise SpawnError(f"init-agent timed out for {name}", "ambiguous", _opened_pane(name, launched_at)) from exc
         timings = {
             "launched_at": launched_at,
             "returned_at": int(time.time() * 1000),
@@ -676,12 +691,13 @@ class HerdrRuntime:
         if proc.returncode or fields.get("status") != "started" or fields.get("route_status") not in STARTED_ROUTES:
             self._terminate(name)
             tail = (proc.stderr or proc.stdout).strip().splitlines()
-            raise SpawnError(tail[-1] if tail else f"init-agent exit {proc.returncode}")
+            message = tail[-1] if tail else f"init-agent exit {proc.returncode}"
+            raise SpawnError(message, pane_id=fields.get("pane_id", ""))
         try:
             validated = binding.fields(fields, argv[argv.index("--profile") + 1], agent)
         except ValueError as exc:
             self._terminate(name)
-            raise SpawnError(str(exc)) from exc
+            raise SpawnError(str(exc), pane_id=fields.get("pane_id", "")) from exc
         return Placed(
             fields.get("pane_id", ""),
             fields.get("agent", agent),
@@ -774,6 +790,21 @@ class HerdrRuntime:
 
         pids = [s.process.pid for s in sessions() if s.name == name]
         return not self.reap(pids).refusal
+
+    def pane_tail(self, pane_id, lines):
+        args = ["pane", "read", pane_id, "--source", "recent", "--lines", str(lines), "--format", "text"]
+        return self.herdr(args)["text"]
+
+    def launched_pane(self, pane_id, name):
+        listed = {p["pane_id"]: p.get("terminal_id") for p in self.herdr(["pane", "list"]).get("panes", [])}
+        return any(r.pane_id == pane_id and r.terminal_id == listed.get(pane_id) for r in _launch_records(name))
+
+    def close_pane(self, pane_id):
+        try:
+            self.herdr(["pane", "close", pane_id])
+        except Exception as exc:
+            if "not found" not in str(exc):
+                raise
 
     def close_space(self, config: SwarmConfig) -> bool:
         try:

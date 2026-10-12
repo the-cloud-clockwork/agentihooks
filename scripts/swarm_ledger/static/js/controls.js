@@ -7,7 +7,7 @@ import { lifecycleBody, sendLifecycle, unresolved } from "./lifecycle.js";
 const GATE_MODES = ["enforce", "observe", "off"];
 const GATE_LABELS = { enforce: "deny", observe: "log only", off: "skip" };
 const STEPS = { eng: ["max_eng", 1, 0, 50], ci: ["max_ci", 1, 0, 50], plan: ["max_plan", 1, 0, 50], compact: ["compact_limit", 50, 100, 1000, "compact limit"] };
-const EFFORTS = ["low", "medium", "high", "max"];
+const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 const EFFORT_CAPS = { effort_min: "effort floor", effort_max: "effort ceiling" };
 const MASTER_AGENTS = ["claude", "codex"];
 

@@ -245,23 +245,8 @@ def test_two_accounts_render_both_windows_their_resets_and_the_reading_age():
     accounts = [CodexAccount("alpha", "AH_CX_TOKEN_alpha"), CodexAccount("beta", "AH_CX_TOKEN_beta")]
     rows = agents_quota.codex_rows(accounts, {"alpha": alpha, "beta": beta}, {"alpha": 1, "beta": 2}, NOW)
     table = agents_quota.render(agents_quota.mark_next(rows, "beta"), now=NOW).splitlines()
-    assert table[1].split() == [
-        "codex",
-        "alpha",
-        "subscription",
-        "DRAIN",
-        "1/0",
-        "-",
-        "0",
-        "80%",
-        "1h00m",
-        "3%",
-        "1d00h",
-        "session-log",
-        "1m",
-        "ago",
-    ]
     assert table[2].split() == [
+        "1",
         "codex",
         "beta",
         agents_quota.NEXT_MARK,
@@ -270,13 +255,26 @@ def test_two_accounts_render_both_windows_their_resets_and_the_reading_age():
         "2/6",
         "-",
         "6",
+        "60%",
         "30%",
         "30m",
         "60%",
         "4d15h",
-        "session-log",
-        "0m",
-        "ago",
+    ]
+    assert table[3].split() == [
+        "2",
+        "codex",
+        "alpha",
+        "subscription",
+        "DRAIN",
+        "1/0",
+        "-",
+        "0",
+        "3%",
+        "80%",
+        "1h00m",
+        "3%",
+        "1d00h",
     ]
 
 
@@ -289,8 +287,8 @@ def test_the_account_open_placement_picks_next_is_marked():
     assert [row.selected for row in marked] == [False, True]
     assert agents_quota.mark_next(rows, "") == rows
     table = agents_quota.render(marked, now=NOW).splitlines()
-    assert table[1].startswith("codex  alpha" + " " * 8 + "subscription")
-    assert table[2].startswith("codex  beta (next)  subscription")
+    assert table[2].startswith("1  codex    alpha" + " " * 8 + "subscription")
+    assert table[3].startswith("2  codex    beta (next)  subscription")
 
 
 def test_next_account_is_open_placement_over_unrefused_accounts():

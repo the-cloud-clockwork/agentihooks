@@ -12,7 +12,6 @@ RULES = {
     "intent-check": "scripts.gates.intent:RULE",
     "intent-check-tests-first": "scripts.gates.intent:RULE",
     "ledger-duplicate": "scripts.swarm_ledger.ledger_duplicates:RULE",
-    "model-pick": "scripts.swarm.model_pick:RULE",
     "phase-slice": "scripts.swarm.slice_screen:RULE",
     "priority-resolve": "scripts.swarm.priority_sweep:RULE",
     "task-difficulty": "scripts.swarm.difficulty:RULE",
