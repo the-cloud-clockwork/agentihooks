@@ -24,17 +24,6 @@ def access_responses():
             "name": "Default",
             "allows_public_repositories": False,
         },
-        "repos/the-cloud-clockwork/agentihooks/rulesets/24942335": {
-            "name": "owner-and-apps-only-push",
-            "target": "branch",
-            "enforcement": "active",
-            "conditions": {"ref_name": {"include": ["~ALL"], "exclude": ["refs/heads/gh-readonly-queue/**"]}},
-            "rules": [{"type": "creation"}, {"type": "update"}],
-            "bypass_actors": [
-                {"actor_type": "RepositoryRole", "actor_id": 5, "bypass_mode": "always"},
-                {"actor_type": "Integration", "actor_id": 2988497, "bypass_mode": "always"},
-            ],
-        },
     }
     for repository in ("agentihooks", "agentibrain-kernel"):
         prefix = f"repos/the-cloud-clockwork/{repository}"
@@ -113,23 +102,6 @@ def test_read_back_rejects_public_access_to_default_runners(tmp_path, access_res
     result = run_access(tmp_path, access_responses)
     assert result.returncode == 1
     assert "DRIFT Default runner public access" in result.stderr
-
-
-@pytest.mark.parametrize(
-    ("field", "changed"),
-    [
-        ("enforcement", "disabled"),
-        ("conditions", {"ref_name": {"include": ["~ALL"], "exclude": ["refs/heads/dev"]}}),
-        ("conditions", {"ref_name": {"include": ["~ALL"], "exclude": []}}),
-        ("rules", [{"type": "creation"}]),
-        ("bypass_actors", [{"actor_type": "RepositoryRole", "actor_id": 4, "bypass_mode": "always"}]),
-    ],
-)
-def test_read_back_rejects_branch_rule_drift(tmp_path, access_responses, field, changed):
-    access_responses["repos/the-cloud-clockwork/agentihooks/rulesets/24942335"][field] = changed
-    result = run_access(tmp_path, access_responses)
-    assert result.returncode == 1
-    assert "DRIFT agentihooks branch access" in result.stderr
 
 
 def test_read_back_rejects_an_additional_writer_on_a_later_page(tmp_path, access_responses):

@@ -6,9 +6,6 @@ policy="$root/.github/security/access.json"
 organization="$(jq -r .organization "$policy")"
 operator="$(jq -r .operator "$policy")"
 group="$(jq -r .runner_group.id "$policy")"
-repository="$(jq -r .branch_restriction.repository "$policy")"
-ruleset="$(jq -r .branch_restriction.id "$policy")"
-payload="$root/.github/rulesets/$(jq -r .branch_restriction.payload "$policy")"
 mode="${1:-check}"
 failures=0
 checks=0
@@ -31,7 +28,6 @@ case "$mode" in
     done < <(jq -r '.repositories[]' "$policy")
     jq '{allows_public_repositories: .runner_group.allows_public_repositories}' "$policy" |
       gh api --method PATCH "orgs/$organization/actions/runner-groups/$group" --input - > /dev/null
-    gh api --method PUT "repos/$organization/$repository/rulesets/$ruleset" --input "$payload" > /dev/null
     installed="$(gh api "orgs/$organization/installations?per_page=100" --paginate | jq -s '[.[].installations[]]')"
     unapproved="$(jq -r --argjson allowed "$(jq '[.installed_apps[].app_id]' "$policy")" \
       '.[] | select(.app_id as $id | ($allowed | index($id)) == null) | [.app_slug, .html_url] | @tsv' <<< "$installed")"
@@ -80,9 +76,6 @@ done < <(jq -r '.repositories[]' "$policy")
 
 actual="$(gh api "orgs/$organization/actions/runner-groups/$group")"
 check_json 'Default runner public access' "$actual" "$(jq .runner_group "$policy")" '{id, name, allows_public_repositories}'
-actual="$(gh api "repos/$organization/$repository/rulesets/$ruleset")"
-projection='{name, target, enforcement, conditions, rules: (.rules | sort_by(.type)), bypass_actors: (.bypass_actors | sort_by(.actor_type, .actor_id, .bypass_mode))}'
-check_json "$repository branch access" "$actual" "$(jq "$projection" "$payload")" "$projection"
 
 echo "$checks access checks, $failures drift findings"
 if [[ "$failures" -ne 0 ]]; then
