@@ -28,11 +28,12 @@ PULLS = {
 }
 
 
-def runner(calls):
+def runner(calls, pulls=PULLS):
     def run(args, **kwargs):
         calls.append(args)
-        url = args[3]
-        pull = PULLS[url]
+        pull = pulls.get(args[3])
+        if pull is None:
+            return SimpleNamespace(returncode=1, stdout="")
         if args[1:3] == ["pr", "view"]:
             fields = ("title", "body", "files", "state")
             return SimpleNamespace(returncode=0, stdout=json.dumps({key: pull[key] for key in fields}))
@@ -53,8 +54,9 @@ def task(**fields):
     }
 
 
-def judged(tmp_path, task, usable=0.9, body=PULLS[HERE]["body"], calls=None):
-    seen, calls = [], [] if calls is None else calls
+def judged(tmp_path, task, usable=0.9, body=PULLS[HERE]["body"], calls=None, pulls=PULLS, seen=None):
+    seen = [] if seen is None else seen
+    calls = [] if calls is None else calls
     view = {"title": PULLS[HERE]["title"], "body": body, "files": [".github/workflows/sonar.yml"]}
     intent.Check(
         SLUG,
@@ -65,7 +67,7 @@ def judged(tmp_path, task, usable=0.9, body=PULLS[HERE]["body"], calls=None):
         lambda url: view,
         lambda state: intent.judge(state, classifier(usable, seen=seen)),
         home=tmp_path,
-        named=lambda url: intent.named_view(url, run=runner(calls)),
+        named=lambda url: intent.named_view(url, run=runner(calls, pulls)),
     ).run({**DOC, "tasks": [task]})
     return seen, verdicts(tmp_path).read(WHO.task)
 
@@ -81,13 +83,14 @@ def test_a_merged_pull_request_in_a_second_repository_is_judged_with_the_open_on
     assert pulls[HERE]["merged"] is False
     assert pulls[THERE]["files"] == ["stacks/sonarqube/gates.json"]
     assert record["verdict"] == "pass"
-    assert HERE in record["reason"] and THERE in record["reason"]
+    assert record["reason"].endswith(f"; judged on {HERE} and {THERE}")
+    assert "named_pending" not in record
 
 
 def test_a_failed_verdict_also_names_every_pull_request_judged(tmp_path):
     _, record = judged(tmp_path, task(), usable=0.1)
     assert record["verdict"] == "fail"
-    assert HERE in record["reason"] and THERE in record["reason"]
+    assert f"; judged on {HERE} and {THERE}" in record["reason"]
 
 
 def test_a_task_naming_no_other_repository_is_judged_on_its_own_pull_request_alone(tmp_path):
@@ -99,12 +102,55 @@ def test_a_task_naming_no_other_repository_is_judged_on_its_own_pull_request_alo
     assert record["reason"] == "the phase can use it as delivered at probability 0.90"
 
 
+def test_an_unreadable_named_pull_request_is_named_and_judged_again_once_it_reads_merged(tmp_path):
+    seen = []
+    _, record = judged(tmp_path, task(), pulls={HERE: PULLS[HERE]}, seen=seen)
+    assert record["reason"].endswith(f"; judged on {HERE}; could not read {THERE}")
+    assert record["named_pending"] == [THERE]
+    judged(tmp_path, task(), pulls={HERE: PULLS[HERE]}, seen=seen)
+    assert len(seen) == 1
+    _, record = judged(tmp_path, task(), seen=seen)
+    assert len(seen) == 2
+    assert record["reason"].endswith(f"; judged on {HERE} and {THERE}")
+
+
+def test_an_open_named_pull_request_is_judged_again_when_it_merges(tmp_path):
+    seen, opened = [], {**PULLS, THERE: {**PULLS[THERE], "state": "OPEN"}}
+    _, record = judged(tmp_path, task(), pulls=opened, seen=seen)
+    assert record["named_pending"] == [THERE]
+    judged(tmp_path, task(), pulls=opened, seen=seen)
+    assert len(seen) == 1
+    judged(tmp_path, task(), seen=seen)
+    assert len(seen) == 2
+    assert {p["url"]: p["merged"] for p in seen[1][0]["pull_requests"]}[THERE] is True
+
+
+def test_named_pull_requests_past_the_limit_are_named_unread():
+    others = [f"https://github.com/o/r{n}/pull/1" for n in range(intent.NAMED_LIMIT + 1)]
+    pulls = {url: {**PULLS[THERE]} for url in [HERE, *others]}
+    check = intent.Check(
+        SLUG, "enforce", NOW, None, None, None, None, named=lambda url: intent.named_view(url, run=runner([], pulls))
+    )
+    pr = check._with_named(task(description=" ".join(others)), {"body": ""})
+    assert [p["url"] for p in pr["pull_requests"]] == [HERE, *others[: intent.NAMED_LIMIT]]
+    assert pr["unread_pull_requests"] == others[intent.NAMED_LIMIT :]
+
+
+def test_named_view_marks_a_cut_diff_and_body():
+    pulls = {THERE: {**PULLS[THERE], "body": "b" * (intent.BODY_CHARS + 1), "diff": "d" * (intent.DIFF_CHARS + 1)}}
+    view = intent.named_view(THERE, run=runner([], pulls))
+    assert view["diff_truncated"] and view["body_truncated"]
+    assert len(view["diff"]) == intent.DIFF_CHARS and len(view["body"]) == intent.BODY_CHARS
+    view = intent.named_view(THERE, run=runner([]))
+    assert not view["diff_truncated"] and not view["body_truncated"]
+
+
 def test_named_pulls_reads_task_text_comments_and_the_body_and_skips_this_repository():
     named = intent.named_pulls(
         task(
             description="Gate merged in https://github.com/o/antoncore/pull/580, see o/agentihooks#4.",
-            comments=[{"text": "Kernel side is O/Kernel#12."}],
+            comments=[{"text": "Kernel side is O/Kernel#12, also https://github.com/o/kernel/pull/12."}],
         ),
-        "Binding: o/antoncore#580 and https://github.com/o/bridge/pull/7, closes #2.",
+        "Binding: o/antoncore#580 and https://github.com/o/bridge/pull/7, closes #2, see docs/a/b#3.",
     )
     assert named == [THERE, "https://github.com/o/bridge/pull/7", "https://github.com/O/Kernel/pull/12"]
