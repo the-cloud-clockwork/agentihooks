@@ -195,14 +195,19 @@ def timelines(rows: dict, tasks: list, now_ms: int) -> list[Timeline]:
 
 def holds(samples: list, now_ms: int) -> list[Span]:
     held = [
-        Span(f"{share}_hold", start, end)
-        for share, start, end, count in bottleneck.held_spans(samples, now_ms)
+        Span(f"{share}_hold", start, end, harness)
+        for share, start, end, count, harness in bottleneck.held_spans(samples, now_ms)
         if count > 0
     ]
     merged = []
     for span in held:
-        if merged and merged[-1].stage == span.stage and merged[-1].end == span.start:
-            merged[-1] = Span(span.stage, merged[-1].start, span.end)
+        if (
+            merged
+            and merged[-1].stage == span.stage
+            and merged[-1].label == span.label
+            and merged[-1].end == span.start
+        ):
+            merged[-1] = Span(span.stage, merged[-1].start, span.end, span.label)
         else:
             merged.append(span)
     return merged
@@ -214,7 +219,7 @@ def _stage_at(timeline: Timeline, held: list[Span], at: float) -> tuple[str, str
     if span.stage == "claim_wait":
         hold = next((hold for hold in held if hold.covers(at)), None)
         if hold is not None:
-            return hold.stage, ""
+            return hold.stage, hold.label
     return span.stage, span.label
 
 

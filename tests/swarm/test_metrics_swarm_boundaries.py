@@ -408,7 +408,7 @@ def test_ready_tasks_in_an_unconfigured_lane_are_not_held_spawns(monkeypatch):
     ready = {lane: [] for lane in metrics_swarm.capacity.LANES}
     ready["eng"] = [{"id": "t"}]
     monkeypatch.setattr(metrics_swarm.capacity, "ready_work", lambda *args: ({}, ready))
-    assert metrics_swarm._held_spawns(None, SLUG, doc(), {}, []) == 0
+    assert sum(metrics_swarm._held_lanes(None, SLUG, doc(), {}, [], False).values()) == 0
 
 
 def test_local_window_includes_its_boundary_and_excludes_older_rows(box, tmp_path, monkeypatch):
