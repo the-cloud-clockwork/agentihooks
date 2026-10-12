@@ -45,7 +45,7 @@ def fill(environ: MutableMapping[str, str]) -> list[str]:
     block = block_tokens()
     renewed = [key for key, value in block.items() if environ.get(key) != value and key not in added]
     environ.update(block)
-    return added + renewed
+    return added + renewed + classifier(environ)
 
 
 def block_tokens() -> dict[str, str]:
