@@ -403,7 +403,12 @@ class InboxStore:
             answer = self.send(replier, item.sender, text, fyi=fyi, item_id=reply_id)
         except (DuplicateItem, WatchError):
             answer = self.get(reply_id)
-            if (answer.sender, answer.address, answer.text, answer.fyi) != (replier, item.sender, text, fyi):
+            if (answer.sender, answer.address, answer.text, answer.fyi) != (
+                replier,
+                self.names.resolve(item.sender),
+                text,
+                fyi,
+            ):
                 raise InboxError("a reply retry must keep its sender, recipient, text and informational flag") from None
         self._close_reply(item_id, replier, answer.id, answer_id)
         return answer
