@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm_ledger import ledger_comments, ledger_core, ledger_notifications
+from scripts.swarm_ledger import ledger_authority, ledger_comments, ledger_core, ledger_notifications
 from scripts.swarm_ledger.api import schemas
 
 TO_ONLY_CHAT = "to addresses only an agent chat message or comment, reply_to only an agent chat message"
@@ -46,6 +46,16 @@ def test_an_agent_answer_to_the_operator_is_a_new_comment_beside_its_status():
     assert c.records == [(("eng", "comment added", "phases/p1"), {"id": "m-1", "text": "Phase one is done."})]
     assert ledger_comments.agent_thread_op(thread, answered, c, "phases/p1", "comment") is True
     assert len(thread) == 2 and len(c.records) == 1
+
+
+def test_only_the_swarm_relay_answers_the_operator_on_an_entry():
+    answered = op("phases/p1/comments", to="operator")
+    assert ledger_authority.refusal("eng", answered) == (
+        "eng cannot answer the operator on an entry; the swarm relay posts that answer"
+    )
+    assert ledger_authority.refusal("", answered) == ""
+    assert ledger_authority.refusal("eng", op("chat", to="operator")) == ""
+    assert ledger_authority.refusal("eng", op("phases/p1/comments")) == ""
 
 
 def test_an_agent_status_after_its_answer_leaves_the_answer_intact():
