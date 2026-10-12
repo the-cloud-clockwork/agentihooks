@@ -10,6 +10,9 @@ def revision(value: object) -> str:
     ).hexdigest()
 
 
+ABSENT = revision(None)
+
+
 def reply_size(reply: object) -> int:
     return len(json.dumps(reply, ensure_ascii=False).encode())
 
@@ -42,7 +45,13 @@ def metadata(doc: dict) -> dict:
 
 
 def resource_revision(doc: dict, path: str) -> str:
-    raw = value(doc, path)
+    try:
+        raw = value(doc, path)
+    except APIError:
+        name, _, item = path.partition("/")
+        if name in COLLECTIONS and item and "/" not in item:
+            return ABSENT
+        raise
     if path == "metadata":
         raw = {**raw, "_meta": {key: item for key, item in raw["_meta"].items() if key not in ("rev", "updated_at")}}
     return revision(raw)

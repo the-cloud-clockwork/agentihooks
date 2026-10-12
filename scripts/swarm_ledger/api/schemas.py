@@ -201,6 +201,8 @@ def target(op: dict) -> str:
         return op["path"].rsplit("/", 1)[0] if "/" in op["path"] else "metadata"
     if kind == "add_item":
         return op["list"]
+    if kind == "task_add":
+        return f"tasks/{op['task']}"
     if kind.startswith("task_"):
         return op.get("item", "tasks")
     if kind.startswith("phase_"):

@@ -68,6 +68,9 @@ class ResourceClient:
         return state
 
     def mutate(self, slug: str, operations: list) -> dict:
+        for operation in operations:
+            if operation["op"] == "task_add":
+                operation.setdefault("expected_revision", resources.ABSENT)
         unpinned = [operation for operation in operations if not operation.get("expected_revision")]
         pinned = {schemas.target(operation) for operation in operations if operation.get("expected_revision")}
         fetched = {schemas.target(operation) for operation in unpinned} - pinned

@@ -35,7 +35,12 @@ class GuardedOperations:
                 raise APIError(428, "revision_required", "Every changed resource needs an expected revision")
             actual = resources.resource_revision({**doc, "_meta": ctx.meta}, path)
             if expected != actual:
-                raise APIError(409, "revision_conflict", "Resource changed since the expected revision", {"path": path})
+                message = (
+                    "Resource already exists"
+                    if expected == resources.ABSENT
+                    else "Resource changed since the expected revision"
+                )
+                raise APIError(409, "revision_conflict", message, {"path": path})
         self.checked = True
 
     def check_controller(self, op: dict) -> None:
