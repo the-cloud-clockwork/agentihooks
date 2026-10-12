@@ -142,6 +142,7 @@ def test_init_preserves_comments_describing_its_markers_after_the_owned_block(tm
         stream.write(notes)
     settings["env"]["LANGFUSE_MCP_URL"] = "http://changed.example/mcp/"
     runtime_env.seed(lambda: [], destination, settings)
+    runtime_env.seed(lambda: [], destination, settings)
     assert notes in destination.read_text()
     assert dotenv_values(destination) == {
         "BEFORE": "kept",
