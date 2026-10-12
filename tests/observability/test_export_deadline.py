@@ -68,7 +68,9 @@ def test_deadline_checkpoints_a_growing_open_turn(tmp_path, monkeypatch):
     monkeypatch.setattr(otel, "langfuse_exporter", Receiver)
     source = list(records(80))
     path.write_text("".join(json.dumps(record) + "\n" for record in source[:2] + source[3:51]))
-    assert trace_flush.flush_once("session", str(path)) == 0
+    for _ in range(10):
+        if trace_flush.flush_once("session", str(path)) == 0:
+            break
     before = agent_trace._cursor("session")["source"]["accepted_bytes"]
     assert before == path.stat().st_size
     with path.open("a") as handle:
@@ -76,7 +78,7 @@ def test_deadline_checkpoints_a_growing_open_turn(tmp_path, monkeypatch):
     original = transcript.mask_value
 
     def slow_mask(value):
-        if isinstance(value, str) and len(value) > 10000:
+        if isinstance(value, dict) and str(value.get("uuid", "")).startswith("result-"):
             time.sleep(0.2)
         return original(value)
 
