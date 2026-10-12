@@ -78,3 +78,16 @@ def test_a_mouse_drag_moves_a_stat_row_down_and_back_up(open_page):
     assert keys(page) == [before[0], *before[2:5], "elapsed", *before[5:]]
     drag(page, "elapsed", "started", 0.25)
     assert keys(page) == ["elapsed", "started", *before[2:]]
+
+
+def test_the_grip_keeps_the_same_margin_on_the_left_as_the_values_on_the_right(open_page):
+    page = open_page(width=1920)
+    margins = page.tab.evaluate(
+        """() => {
+            const panel = document.querySelector('#stats-column section').getBoundingClientRect();
+            const grip = document.querySelector('#stats .stat-grip').getBoundingClientRect();
+            const value = document.querySelector('#stats .stat dd').getBoundingClientRect();
+            return [Math.round(grip.left - panel.left), Math.round(panel.right - value.right)];
+        }"""
+    )
+    assert margins[0] == margins[1] == 16
