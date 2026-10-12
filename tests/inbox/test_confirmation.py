@@ -184,8 +184,25 @@ def test_delivery_session_survives_reconnecting_to_the_store(store):
     item = store.deliver(store.send("alice", "bob", "review").id, "bob")
     replacement = InboxStore(store.redis, session_id="s2")
     assert replacement.get(item.id).delivery_session == "s1"
+    assert replacement.history(item.id)[-1]["session_id"] == "s1"
     assert replacement.confirm_shown("bob", item.updated_at + 1) == []
     assert replacement.get(item.id).state == "pending"
+
+
+def test_unknown_session_never_automatically_confirms_an_unknown_delivery(store):
+    unknown = InboxStore(store.redis)
+    item = unknown.deliver(unknown.send("alice", "bob", "review").id, "bob")
+    replacement = InboxStore(store.redis)
+    assert replacement.confirm_shown("bob", item.updated_at + 1) == []
+    assert replacement.get(item.id).state == "delivered"
+
+
+def test_known_session_redelivers_a_legacy_delivery_without_session_identity(store):
+    legacy = InboxStore(store.redis)
+    item = legacy.deliver(legacy.send("alice", "bob", "review").id, "bob")
+    store.redis.hdel(store.key("item", item.id), "delivery_session")
+    assert store.confirm_shown("bob", item.updated_at + 1) == []
+    assert store.get(item.id).state == "pending"
 
 
 @pytest.mark.parametrize("env", [{"CLAUDE_CODE_SESSION_ID": "s1"}, {"CODEX_THREAD_ID": "s1"}])

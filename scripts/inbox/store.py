@@ -425,6 +425,8 @@ class InboxStore:
         """Confirm every item delivered to receiver before this hook event began: the session lived past it."""
         receiver = self.names.resolve(receiver)
         confirmed = []
+        if not self.session_id:
+            return confirmed
         for item_id in self.redis.zrangebyscore(self.key("delivered"), "-inf", before - 1):
             if self.names.resolve(self._delivered_to(item_id)) != receiver:
                 continue
@@ -649,7 +651,7 @@ class InboxStore:
         pipe.zrem(self.key("pending", item.address), item.id)
         if last:
             pipe.srem(self.key("waiting"), item.address)
-        pipe.rpush(self.key("history", item.id), _entry(moved.state, by, moved.reason, moved.updated_at))
+        pipe.rpush(self.key("history", item.id), _entry(moved.state, by, moved.reason, moved.updated_at, moved.delivery_session))
 
 
 def _index_current(indexed, size, total: int) -> bool:
@@ -679,8 +681,11 @@ def _item(raw, item_id):
     )
 
 
-def _entry(state, by, reason, at):
-    return json.dumps({"state": state, "by": by, "reason": reason, "at": at})
+def _entry(state, by, reason, at, session_id=""):
+    entry = {"state": state, "by": by, "reason": reason, "at": at}
+    if state == "delivered":
+        entry["session_id"] = session_id
+    return json.dumps(entry)
 
 
 def connect(environ=None):
