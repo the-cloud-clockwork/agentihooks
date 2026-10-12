@@ -165,3 +165,28 @@ def test_raw_removal_preserves_committed_manifest_references(storage):
     assert request(api, "remove", key=record)[0] == 403
     assert request(api, "remove", key=object_key)[0] == 403
     assert store.get_range(reference) == b"retained"
+
+
+@pytest.mark.parametrize("category", ["objects", "artifacts"])
+def test_final_artifact_deletion_is_refused_before_a_provider_takeover(storage, monkeypatch, category):
+    api, backend, authority = storage
+    data = b"retained"
+    digest = hashlib.sha256(data).hexdigest()
+    key = f"swarm/task/objects/{digest}" if category == "objects" else "swarm/task/artifacts/checkpoint.json"
+    stored = (
+        data
+        if category == "objects"
+        else json.dumps({"execution_id": "execution", "generation": 7, "sha256": digest, "size": len(data)}).encode()
+    )
+    backend.write(key, stored)
+    remove = backend.remove
+
+    def takeover(subject):
+        authority.current.return_value.generation = 8
+        remove(subject)
+
+    provider = Mock(side_effect=takeover)
+    monkeypatch.setattr(backend, "remove", provider)
+    assert request(api, "remove", key=key)[0] == 403
+    provider.assert_not_called()
+    assert backend.read(key, 0, len(stored)) == stored
