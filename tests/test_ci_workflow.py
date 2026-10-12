@@ -182,8 +182,12 @@ def test_unit_matrix_runs_one_shard_per_split():
 
 def test_a_hung_unit_shard_fails_near_twice_the_slowest_shard():
     slowest_shard_minutes = 186 / 60
-    timeout = _workflow()["jobs"]["unit"]["timeout-minutes"]
+    unit = _workflow()["jobs"]["unit"]
+    steps = {step.get("name"): step for step in unit["steps"]}
+    timeout = steps["Run tests"]["timeout-minutes"]
     assert 2 * slowest_shard_minutes <= timeout <= 3 * slowest_shard_minutes
+    browser = steps["Install the browser that page tests drive"]["timeout-minutes"]
+    assert unit["timeout-minutes"] >= browser + timeout + 2
 
 
 def test_a_hung_unit_test_dumps_every_thread_stack_within_a_minute():
@@ -280,13 +284,13 @@ def test_mutation_browser_setup_is_selected_bounded_and_reports_failure():
     assert steps[select]["run"].startswith("python -m scripts.ci_mutation." + "browser ")
     assert steps[install]["if"] == "steps.selection.outputs.browser == 'true'"
     assert steps[install]["id"] == "browser"
-    assert steps[install]["timeout-minutes"] == 2
+    assert steps[install]["timeout-minutes"] == 6
     job = _mutation_workflow()["jobs"]["mutation"]
     assert job["env"]["PLAYWRIGHT_BROWSERS_PATH"] == "${{ github.workspace }}/.playwright"
     failure = next(step for step in steps if step.get("name") == "Report browser setup failure")
     assert failure["if"] == "failure() && steps.browser.outcome == 'failure'"
     assert "::error::" in failure["run"]
-    assert "two minute" in failure["run"]
+    assert "six minute" in failure["run"]
     assert "exit 1" in failure["run"]
 
 
@@ -310,7 +314,7 @@ def test_lint_and_equivalence_browser_installs_have_the_same_timeout():
         "ledger-equivalence"
     ]["steps"]
     for steps in (lint, equivalence):
-        assert _browser_install(steps)["timeout-minutes"] == 2
+        assert _browser_install(steps)["timeout-minutes"] == 6
 
 
 def test_lint_and_equivalence_browser_setup_uses_the_working_mirror():
@@ -765,7 +769,7 @@ def test_mutation_job_runs_independently_and_keeps_its_evidence():
         ["mutation-plan", "mutation-stats"],
         ["mutation-plan", "mutation-stats", "admission"],
     )
-    assert job["timeout-minutes"] == 20
+    assert job["timeout-minutes"] == 26
     steps = job["steps"]
     checkout = next(step for step in steps if step.get("uses", "").startswith("actions/checkout"))
     assert checkout["with"]["fetch-depth"] == 0

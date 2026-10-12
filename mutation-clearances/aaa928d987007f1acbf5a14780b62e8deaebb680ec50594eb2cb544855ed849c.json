@@ -1,0 +1,6 @@
+{
+  "scripts/doctor/registry.py:scripts.doctor.registry.x__read_all__mutmut_31:782e6d07be558468540560269aa483c09b64249b9ac5b995a2112ca71fc705c9": {
+    "reader": "Standards",
+    "reason": "ThreadPoolExecutor.shutdown only tests if wait, and None is falsy, so the mutant takes the same path as False and changes no output of registry.read."
+  }
+}

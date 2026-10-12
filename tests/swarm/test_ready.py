@@ -8,7 +8,7 @@ from scripts.gates import Call, Who
 from scripts.gates.base import Decision
 from scripts.gates.claim_stop import ClaimStop
 from scripts.gates.verdicts import Verdicts
-from scripts.swarm import capacity, cli, ready, stack, tick, waits
+from scripts.swarm import capacity, cli, merge_queue, ready, stack, tick, waits
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.store import RedisStore, SwarmError
 from tests.swarm.test_cli import HANDOFF, env
@@ -357,6 +357,43 @@ def test_the_merge_pass_queues_on_green_checks_and_watches_the_queue(merging):
     assert ready.record(merging.store, "sw", "t1")["on"] == {"kind": "merge", "target": URL, "queued": True}
 
 
+def test_the_merge_pass_squash_merges_without_a_queue_or_tests_workflow(merging):
+    merging.pulls[URL] = GREEN
+    pull = {
+        "id": "PR_one",
+        "state": "OPEN",
+        "headRefOid": HEAD,
+        "baseRefName": "dev",
+        "mergeQueueEntry": None,
+        "isDraft": False,
+        "reviewDecision": None,
+        "statusCheckRollup": {"state": "SUCCESS"},
+        "repository": {"mergeQueue": None},
+    }
+    merged_heads = []
+
+    def github(command, **kwargs):
+        if command[:3] != ["gh", "api", "graphql"]:
+            return subprocess.CompletedProcess(command, 1, "", "gh: Not Found (HTTP 404)")
+        if command[4] == f"query={merge_queue.MERGE}":
+            merged_heads.append(command[-1])
+            pull["state"] = "MERGED"
+            merging.pulls[URL] = MERGED
+            data = {"mergePullRequest": {"pullRequest": {"state": "MERGED"}}}
+        else:
+            data = {"resource": pull}
+        return subprocess.CompletedProcess(command, 0, json.dumps({"data": data}))
+
+    def queue(action, url):
+        return merge_queue.operate(action, url, github)
+
+    merging.run(queuer=queue)
+    assert merged_heads == [f"head={HEAD}"]
+    assert merging.run() == [f"task t1 done, {URL} merged", f"removed the worktree {TOP}"]
+    assert merging.rows["t1"]["state"] == "done" and merging.rows["t1"]["awaiting"] == ""
+    assert ready.record(merging.store, "sw", "t1") is None
+
+
 def test_a_queue_that_updates_the_branch_watches_the_new_head_checks(merging):
     merging.pulls[URL] = GREEN
     merging.queue.extra = {"queued": False, "waiting": "checks", "previous_head": HEAD}
@@ -393,9 +430,37 @@ def test_a_pull_request_the_queue_keeps_refusing_reopens_the_task(merging):
 @pytest.mark.parametrize(
     "error",
     [
+        "gh: Not Found (HTTP 404)",
+        "cannot establish the base of the green checks",
+        "squash merge requires a ready pull request with green checks and no pending review",
+    ],
+)
+def test_an_unknown_merge_error_reopens_the_task_with_its_reason(merging, error):
+    merging.pulls[URL] = GREEN
+
+    def failed(action, url):
+        raise SwarmError(error)
+
+    assert merging.run(queuer=failed) == [
+        f"task t1 reopened, {URL} could not be queued: {error}",
+        f"removed the worktree {TOP}",
+    ]
+    assert merging.rows["t1"]["state"] == "open"
+    assert merging.rows["t1"]["claimed_by"] == "" and merging.rows["t1"]["awaiting"] == ""
+    assert error in merging.ledger.comments[0][1]
+    assert merging.store.handoff("sw", "t1") == "the handoff"
+    assert merging.store.claimant("sw", "t1") is None
+    assert ready.record(merging.store, "sw", "t1") is None
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
         "GitHub API: timed out",
+        "GitHub API: Command gh timed out after 20 seconds",
         "error connecting to api.github.com",
         "HTTP 502",
+        "gh: Service Unavailable (HTTP 503)",
         "the current pull request head must pass Tests before queueing",
     ],
 )

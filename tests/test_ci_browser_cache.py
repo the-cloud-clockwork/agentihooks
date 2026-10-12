@@ -1,5 +1,7 @@
 import os
+import re
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -9,16 +11,20 @@ ROOT = Path(__file__).resolve().parents[1]
 ACTION = ROOT / ".github/actions/browser-cache"
 
 
-def _setup(tmp_path, monkeypatch, *, cached, ready, recovery=True):
+def _setup(tmp_path, monkeypatch, *, cached, ready, recovery=True, stall_once=False, attempt_seconds=None):
     executable = tmp_path / "python"
     calls = tmp_path / "calls"
     marker = tmp_path / "ready"
+    stall = tmp_path / "stall"
     if ready:
         marker.touch()
+    if stall_once:
+        stall.touch()
     executable.write_text(
         "#!/usr/bin/env bash\nset -euo pipefail\n"
         'if [[ "$*" == *"install --with-deps chromium"* ]]; then\n'
         '  echo install >> "$CALLS"\n'
+        '  if [[ -f "$STALL" ]]; then rm "$STALL"; sleep 30; fi\n'
         '  [[ "$RECOVERY" == true ]] || exit 1\n'
         '  touch "$READY"\n'
         "else\n"
@@ -33,6 +39,7 @@ def _setup(tmp_path, monkeypatch, *, cached, ready, recovery=True):
     monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
     monkeypatch.setenv("CALLS", str(calls))
     monkeypatch.setenv("READY", str(marker))
+    monkeypatch.setenv("STALL", str(stall))
     monkeypatch.setenv("RECOVERY", str(recovery).lower())
     monkeypatch.setenv("CACHE_HIT", str(cached).lower())
     monkeypatch.setenv("GITHUB_ACTION_PATH", str(ACTION))
@@ -46,7 +53,12 @@ def _setup(tmp_path, monkeypatch, *, cached, ready, recovery=True):
         assert condition in (None, "steps.launch.outputs.ready != 'true'")
         if condition and output.read_text().strip() == "ready=true":
             continue
-        result = subprocess.run(["bash", "-euo", "pipefail", "-c", step["run"]], capture_output=True, text=True)
+        env = {**os.environ, **{k: str(v) for k, v in step.get("env", {}).items() if "${{" not in str(v)}}
+        if attempt_seconds is not None:
+            env["ATTEMPT_SECONDS"] = str(attempt_seconds)
+        result = subprocess.run(
+            ["bash", "-euo", "pipefail", "-c", step["run"]], capture_output=True, text=True, env=env
+        )
         if result.returncode:
             break
     return result, calls.read_text().splitlines() if calls.exists() else []
@@ -65,10 +77,70 @@ def test_missing_browser_or_os_dependencies_are_recovered(tmp_path, monkeypatch,
     assert calls == (["launch"] if cached else []) + ["mirror", "install", "launch"]
 
 
-def test_failed_browser_recovery_is_red(tmp_path, monkeypatch):
+def test_failed_browser_recovery_is_red_after_exactly_two_attempts(tmp_path, monkeypatch):
     result, calls = _setup(tmp_path, monkeypatch, cached=True, ready=False, recovery=False)
     assert result.returncode != 0
-    assert calls == ["launch", "mirror", "install"]
+    assert calls == ["launch", "mirror", "install", "install"]
+    assert result.stdout.count("::warning title=Retried browser install::") == 1
+
+
+def test_a_stalled_download_is_killed_at_its_attempt_timeout_and_retried_green(tmp_path, monkeypatch):
+    started = time.monotonic()
+    result, calls = _setup(tmp_path, monkeypatch, cached=False, ready=False, stall_once=True, attempt_seconds=5)
+    assert result.returncode == 0, result.stderr
+    assert calls == ["mirror", "install", "install", "launch"]
+    assert time.monotonic() - started < 20
+
+
+def _timeouts(run):
+    return sum(
+        int(kill or 0) + int(seconds) for kill, seconds in re.findall(r"timeout (?:--kill-after=(\d+)s )?(\d+)s", run)
+    )
+
+
+def _attempt_budget():
+    steps = yaml.safe_load((ACTION / "action.yml").read_text())["runs"]["steps"]
+    install = next(step for step in steps if "install --with-deps chromium" in step.get("run", ""))
+    attempt = int(install["env"]["ATTEMPT_SECONDS"])
+    kill = int(
+        re.search(
+            r"timeout --kill-after=(\d+)s \"\$\{ATTEMPT_SECONDS\}s\" python -m playwright install", install["run"]
+        ).group(1)
+    )
+    others = sum(_timeouts(step.get("run", "")) for step in steps if step is not install)
+    version_and_restore_seconds = 15
+    return attempt, version_and_restore_seconds + others + 2 * (attempt + kill)
+
+
+def test_each_attempt_has_room_for_the_measured_anton_install():
+    attempt, _ = _attempt_budget()
+    anton_image_install_seconds_2026_10_12 = 73
+    assert attempt >= 1.5 * anton_image_install_seconds_2026_10_12
+
+
+def _browser_cache_callers():
+    for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
+        workflow = yaml.safe_load(path.read_text())
+        for name, job in workflow["jobs"].items():
+            for index, step in enumerate(job.get("steps", [])):
+                if step.get("uses", "").endswith("/.github/actions/browser-cache"):
+                    yield path.name, name, job["steps"], index
+
+
+def test_every_browser_cache_caller_gives_its_step_both_attempts_and_names_that_bound():
+    _, budget = _attempt_budget()
+    callers = list(_browser_cache_callers())
+    assert len(callers) >= 9
+    words = {6: "six", 7: "seven", 8: "eight"}
+    reported = 0
+    for workflow, job, steps, index in callers:
+        minutes = steps[index]["timeout-minutes"]
+        assert minutes * 60 >= budget, (workflow, job)
+        for step in steps[index + 1 :]:
+            if step.get("name") == "Report browser setup failure":
+                assert f"{words[minutes]} minute timeout" in step["run"], (workflow, job)
+                reported += 1
+    assert reported == 4
 
 
 def test_cache_uses_installed_playwright_version_and_absolute_browser_folder():

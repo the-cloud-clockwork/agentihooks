@@ -19,6 +19,7 @@ RECORDS = "ready"
 GATED = ("code", "ci")
 QUEUE_TRIES = 5
 REFUSALS = ("GraphQL", "swarm merge queue operations require")
+HOLDS = ("timed out", "error connecting to api.github.com", "HTTP 5", "the current pull request head must pass Tests")
 REOPENED = (
     "Reopened by the swarm: its pull request {url} {what}. The next engineer continues it from the handoff its "
     "engineer left."
@@ -175,6 +176,8 @@ def _queue(run, row, found):
             found["refusals"] = found.get("refusals", 0) + 1
             if found["refusals"] >= QUEUE_TRIES:
                 return _reopen(run, row, found, f"could not be queued: {exc}")
+        elif not any(hold in str(exc) for hold in HOLDS):
+            return _reopen(run, row, found, f"could not be queued: {exc}")
         save(run.store, run.slug, task_id, found)
         return [f"could not queue {url} for task {task_id}: {exc}"]
     if result.get("waiting") == "checks":
