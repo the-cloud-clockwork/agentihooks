@@ -338,12 +338,11 @@ def test_home_columns_drag_and_step_and_keep_their_widths(browser, base):
         tab.goto(f"{base}/")
         grip = tab.locator(".row.head > *:nth-child(3) .col-grip")
         grip.wait_for()
-        tracks = lambda: [
-            float(t)
-            for t in tab.evaluate("() => getComputedStyle(document.querySelector('.row.head')).gridTemplateColumns")
-            .replace("px", "")
-            .split()
-        ]  # noqa: E731
+
+        def tracks():
+            found = tab.evaluate("() => getComputedStyle(document.querySelector('.row.head')).gridTemplateColumns")
+            return [float(t) for t in found.replace("px", "").split()]
+
         before = tracks()
         box = grip.bounding_box()
         x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
