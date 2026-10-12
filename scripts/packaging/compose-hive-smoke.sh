@@ -97,6 +97,12 @@ import os, hooks.config, redis
 client = redis.Redis.from_url(os.environ["AGENTIHOOKS_HIVE_REDIS_URL"], decode_responses=True)
 print(f"member Redis user from hive.env: {client.acl_whoami()}")
 '
+hive_keys='
+from collections import Counter
+from scripts.swarm.store import redis_client
+print("hive records:", dict(Counter(key.split(":")[1] for key in redis_client().scan_iter("agentihooks-hive:*"))))
+'
+docker compose exec -T hive python -c "$hive_keys"
 docker compose restart redis >/dev/null
 for _ in $(seq 30); do
   docker exec "$run-member" python -c "$member_auth" >/dev/null 2>&1 && break
@@ -104,6 +110,7 @@ for _ in $(seq 30); do
 done
 printf 'after a Redis restart, '
 docker exec "$run-member" python -c "$member_auth"
+docker compose exec -T hive python -c "$hive_keys"
 docker exec "$run-member" agentihooks hive refresh >/dev/null
 printf 'after a refresh through the join service, '
 docker exec "$run-member" python -c "$member_auth"
