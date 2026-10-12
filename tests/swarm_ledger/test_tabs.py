@@ -2,7 +2,15 @@ from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import fulfill_events, is_events, ledger_state, loaded, serve_modules, shell_html
+from tests.swarm_ledger.ledger_page import (
+    fulfill_events,
+    is_events,
+    ledger_state,
+    loaded,
+    reload_after_folds,
+    serve_modules,
+    shell_html,
+)
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
 browser = chromium_browser
@@ -132,8 +140,7 @@ def test_global_comment_choice_survives_reload_and_the_next_click_collapses(tab)
     loaded(tab)
     tab.locator("#comments-all").click()
     assert tab.locator("#comments-all").text_content() == "Hide all comments"
-    tab.reload()
-    loaded(tab)
+    reload_after_folds(tab, "#sec-phases details[data-key]")
     assert tab.locator("#comments-all").text_content() == "Hide all comments"
     tab.locator("#comments-all").click()
     assert tab.locator("#comments-all").text_content() == "Show all comments"

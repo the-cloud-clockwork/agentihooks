@@ -3,7 +3,7 @@ import subprocess
 from collections.abc import Callable, Mapping
 
 from scripts.claude_config import claude_home
-from scripts.routing import envs, master_account
+from scripts.routing import envs, master_account, native_login
 
 
 def account(harness: str, environ: Mapping[str, str], run: Callable = subprocess.run) -> master_account.MasterAccount:
@@ -20,6 +20,10 @@ def account(harness: str, environ: Mapping[str, str], run: Callable = subprocess
             (claude_home(environ) / ".credentials.json").stat()
         except OSError as exc:
             raise RoutingError("interactive login missing") from exc
+        try:
+            native_login.check(environ, declared.slug, run)
+        except native_login.LoginError as exc:
+            raise RoutingError(str(exc)) from exc
     else:
         try:
             status = run(

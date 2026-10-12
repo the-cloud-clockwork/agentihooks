@@ -85,7 +85,7 @@ def sessions(
             continue
         process = table.get(pid)
         target = _target(process) if process else ""
-        if not process or not target:
+        if not process or not target or process.state in {"Z", "X"}:
             continue
         registered_pids.add(pid)
         session_id, cwd = _main_thread(target, session_id, info, records)
@@ -101,7 +101,7 @@ def sessions(
         )
     for process in table.values():
         target = _target(process)
-        if not target or process.pid in registered_pids:
+        if not target or process.pid in registered_pids or process.state in {"Z", "X"}:
             continue
         name = _name(process, proc, table)
         if target == "claude" and any(value in {"-p", "--print"} for value in process.argv[1:]):
@@ -166,6 +166,8 @@ def validate(
         session.process.argv,
     ):
         raise ValueError("target process disappeared or its PID was reused")
+    if current.state in {"Z", "X"}:
+        raise ValueError("target process has ended")
     if current.pgid <= 1:
         raise ValueError(f"unsafe process group {current.pgid}")
     caller_ancestors = _ancestors(os.getpid(), table)
