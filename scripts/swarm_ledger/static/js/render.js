@@ -387,6 +387,22 @@ export function editTitle(on) {
   box.select();
 }
 
+export function editOverview(on) {
+  $("overview").hidden = on;
+  $("overview-form").hidden = !on;
+  $("overview-edit").hidden = on;
+  if (!on) return $("overview-edit").focus();
+  const box = $("overview-input");
+  box.value = doc.overview;
+  box.focus();
+}
+
+export function saveOverview() {
+  const text = $("overview-input").value.trim();
+  editOverview(false);
+  if (text !== doc.overview) queue({ op: "overview_set", id: newId("overview"), text });
+}
+
 export function saveTitle() {
   const text = $("title-input").value.trim();
   if (!text) {
