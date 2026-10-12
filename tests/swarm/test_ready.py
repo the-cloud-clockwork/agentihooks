@@ -469,10 +469,15 @@ def test_the_merge_pass_carries_every_released_task_in_one_tick(merging):
             "t0": {"id": "t0", "state": "open", "claimed_by": ""},
             "t3": {"id": "t3", "state": "pr", "claimed_by": "", "pr_url": other, "awaiting": "merge"},
             "t1": {"id": "t1", "state": "pr", "claimed_by": AGENT, "pr_url": URL, "awaiting": "merge"},
+            "t4": {"id": "t4", "state": "pr", "claimed_by": "", "pr_url": other, "awaiting": "merge"},
         }
     )
     merging.pulls[URL] = GREEN
-    assert merging.run() == ["task t3 left the merge pass", f"queued {URL} for task t1"]
+    assert merging.run() == [
+        "task t3 left the merge pass",
+        f"queued {URL} for task t1",
+        "task t4 left the merge pass",
+    ]
 
 
 def test_a_merge_seen_through_the_queue_closes_the_task(merging):
