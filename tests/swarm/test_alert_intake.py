@@ -286,7 +286,7 @@ def test_an_unreachable_store_answers_retry_later(redis, monkeypatch):
     def down(*args):
         raise RedisConnectionError("store down")
 
-    monkeypatch.setattr(redis, "hget", down)
+    monkeypatch.setattr(redis, "transaction", down)
     sent, body = handler(redis, payload(alert()))
     assert (sent.code, body) == (503, {"error": "swarm store unreachable"})
 
