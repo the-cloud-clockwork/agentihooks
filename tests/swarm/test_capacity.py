@@ -556,7 +556,7 @@ def test_a_cached_claude_record_without_its_token_or_a_live_session_is_pruned(mo
     assert [(row.name, row.state, row.sessions) for row in rows] == [("busy", "UNKNOWN", 1), ("mail", "OPEN", 0)]
 
 
-def test_unknown_accounts_never_clamp_a_lane_and_the_reason_names_lanes_without_ready_work():
+def test_the_reason_leads_with_lanes_held_by_missing_ready_work_ahead_of_unknown_accounts():
     config = SwarmConfig("sw", "/repo", max_eng=12, max_ci=1, max_plan=2)
     stale = capacity.Account("claude", "busy", "UNKNOWN", 1, None, None)
     agents = [AgentRecord(f"e{i}", "eng", f"t{i}", harness="claude") for i in range(6)]
