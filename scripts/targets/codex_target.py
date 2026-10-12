@@ -107,25 +107,29 @@ def _stale_catalog_files() -> tuple[Path, Path]:
     return AGENTIHOOKS_HOME / "codex_model_catalog.json", AGENTIHOOKS_HOME / "codex_context_highwater.json"
 
 
-def wrapper_text(profile_env: dict[str, str]) -> str:
-    _i = _install_module()
+def wrapper_text(profile_env: dict[str, str], python_bin: str) -> str:
     return (
         "#!/usr/bin/env bash\n"
         "# managed-by: agentihooks — regenerate with: agentihooks init --target codex\n"
         "set -euo pipefail\n"
-        f"cd {shlex.quote(str(_i.AGENTIHOOKS_ROOT))}\n"
+        f"cd {shlex.quote(str(_install_module().AGENTIHOOKS_ROOT))}\n"
         + "".join(f'export {key}="${{{key}:={shlex.quote(value)}}}"\n' for key, value in profile_env.items())
-        + f"AGENTIHOOKS_TARGET=codex exec {shlex.quote(str(_i._detect_venv() or sys.executable))} -m hooks\n"
+        + f"AGENTIHOOKS_TARGET=codex exec {shlex.quote(python_bin)} -m hooks\n"
     )
+
+
+def _wrapper_python(text: str) -> str | None:
+    words = shlex.split(text.rstrip("\n").rsplit("\n", 1)[-1])
+    return words[2] if words[:2] == ["AGENTIHOOKS_TARGET=codex", "exec"] and len(words) == 5 else None
 
 
 def refresh_wrapper() -> bool:
     from scripts.native_settings import native_settings
-    from scripts.profiles.render import _operator_codex_home
+    from scripts.profiles.render import operator_codex_home
 
     _i = _install_module()
     record = _i._global_record(_i._load_state(), "codex")
-    wrapper = _operator_codex_home() / "agentihooks-hook.sh"
+    wrapper = operator_codex_home() / "agentihooks-hook.sh"
     if not record.get("profile") or not wrapper.is_file():
         return False
     if _i.AGENTIHOOKS_ROOT.resolve() != _i.install_root().resolve():
@@ -136,13 +140,20 @@ def refresh_wrapper() -> bool:
     if not chain or (name and overlay is None):
         return False
     native = native_settings("codex", chain, (name, overlay) if overlay else None, say=lambda *_: None)
-    text = wrapper_text(native.get("_agentihooks", {}).get("env", {}))
-    if wrapper.read_text() == text:
+    current = wrapper.read_text()
+    python_bin = _wrapper_python(current)
+    if python_bin is None:
+        return False
+    text = wrapper_text(native.get("_agentihooks", {}).get("env", {}), python_bin)
+    if current == text:
         return False
     staged = wrapper.with_name(f".{wrapper.name}.tmp-{os.getpid()}")
-    staged.write_text(text)
-    staged.chmod(0o755)
-    os.replace(staged, wrapper)
+    try:
+        staged.write_text(text)
+        staged.chmod(0o755)
+        os.replace(staged, wrapper)
+    finally:
+        staged.unlink(missing_ok=True)
     return True
 
 
@@ -371,7 +382,7 @@ class CodexAdapter:
     def _write_hooks_json(self, home: Path, profile_env: dict[str, str] | None = None) -> None:
         _i = _install_module()
         wrapper = home / "agentihooks-hook.sh"
-        wrapper.write_text(wrapper_text(profile_env or {}))
+        wrapper.write_text(wrapper_text(profile_env or {}, str(_i._detect_venv() or sys.executable)))
         wrapper.chmod(0o755)
 
         hooks_path = home / "hooks.json"

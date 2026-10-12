@@ -131,6 +131,23 @@ def test_a_session_in_a_rendered_home_refreshes_the_global_wrapper(installed, mo
     assert [p.name for p in installed["home"].iterdir() if ".tmp-" in p.name] == []
 
 
+def test_a_launch_from_another_python_keeps_the_wrapper_interpreter(installed, monkeypatch, tmp_path):
+    install = installed["install"]
+    monkeypatch.setattr(install, "_detect_venv", lambda: tmp_path / "other" / "bin" / "python")
+    _env_layer(installed["bundle"] / "profiles" / "wr-base", "http://new:4000")
+    assert codex_target.refresh_wrapper() is True
+    last = (installed["home"] / "agentihooks-hook.sh").read_text().splitlines()[-1]
+    assert last == f"AGENTIHOOKS_TARGET=codex exec {tmp_path / 'venv' / 'bin' / 'python'} -m hooks"
+
+
+def test_an_unrecognised_wrapper_is_left_alone(installed):
+    wrapper = installed["home"] / "agentihooks-hook.sh"
+    wrapper.write_text("#!/usr/bin/env bash\nexec my-own-hooks\n")
+    _env_layer(installed["bundle"] / "profiles" / "wr-base", "http://new:4000")
+    assert codex_target.refresh_wrapper() is False
+    assert wrapper.read_text() == "#!/usr/bin/env bash\nexec my-own-hooks\n"
+
+
 def test_a_run_from_another_checkout_leaves_the_wrapper(installed, monkeypatch, tmp_path):
     install = installed["install"]
     monkeypatch.setattr(install, "install_root", lambda: tmp_path / "elsewhere")
