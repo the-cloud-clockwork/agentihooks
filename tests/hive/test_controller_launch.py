@@ -902,3 +902,26 @@ def test_spawn_honors_the_ci_lane_harness_before_admission(setup):
         "spawn", Status.UNAVAILABLE, "hive", detail="Codex hive placement is not enabled"
     )
     assert setup.store.execution_registry.records("fixture") == []
+
+
+def test_reported_worker_sessions_fill_hive_room_without_execution_records(setup):
+    from scripts.hive import registry
+    from scripts.hive.placement import Wait
+
+    setup.store.redis.set(f"{registry.key('remote')}:sessions", json.dumps({"claude:account": 3}))
+    assert setup.launcher.select(setup.config, "eng", {"id": "task"}) == Wait("no hive for eng has room")
+
+
+def test_terminal_order_is_cleared_even_when_replacement_has_no_account_room(setup):
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    request = request_for(setup)
+    order = order_for(setup, request, setup.launcher.select(setup.config, "eng", request.task))
+    previous = setup.store.execution_registry.get("fixture", order.execution_id)
+    setup.store.execution_registry.update("fixture", replace(previous, state="finished"))
+    setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(order.__dict__))
+    setup.herdr._quota_accounts = []
+    assert setup.launcher.spawn(request_for(setup)) == Outcome(
+        "spawn", Status.UNAVAILABLE, "hive", detail="no advertised Claude account has room"
+    )
+    assert setup.launcher.orders_for("task") is None
