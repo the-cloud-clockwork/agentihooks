@@ -190,6 +190,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
     if token is None:
         return ["another tick is running"]
     keeping = timing.BEFORE_STEP.set(lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS))
+    doc = {}
     try:
         outage.providers(store, slug, runtime, now_ms())
         if isinstance(ledger, ledger_client.LedgerClient) and not outage.ledger_health(
@@ -298,11 +299,14 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             )
             taken = timing.call(snapshot.auto, store, slug, now_ms(), os.environ)
             store.redis.set(store.key(slug, "last-tick"), now_ms())
-            timing.call(command_runner.publish, store, slug, timing.call(ledger.state, slug))
+            doc = timing.call(ledger.state, slug)
             return probed + controls + actions + ([f"took automatic snapshot {taken.name}"] if taken else [])
     finally:
-        timing.BEFORE_STEP.reset(keeping)
-        controller.release_tick_lock(store, slug, token)
+        try:
+            timing.call(command_runner.publish, store, slug, doc)
+        finally:
+            timing.BEFORE_STEP.reset(keeping)
+            controller.release_tick_lock(store, slug, token)
 
 
 def cmd_list(store, args):
