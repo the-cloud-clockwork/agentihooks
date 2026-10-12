@@ -619,7 +619,12 @@ def test_notice_task_names_the_task_only_a_swarm_wait_ended_notice_asks_back():
 def test_checks_declaration_records_the_remote_head(started, monkeypatch, capsys):
     store, _ = started
     calls = []
-    monkeypatch.setattr(cli.ledger_events, "head", lambda url: calls.append(url) or "first")
+
+    def head(url):
+        calls.append(url)
+        return "first"
+
+    monkeypatch.setattr(cli.ledger_events, "head", head)
     monkeypatch.setattr(cli.ledger_events, "view", lambda url: pytest.fail("the checks view was read"))
     assert run("sw", "--as", ME, "wait", "--on", "checks", URL) == 0
     assert held(store)["on"] == {"kind": "checks", "target": URL, "head": "first"}

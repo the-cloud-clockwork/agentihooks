@@ -15,10 +15,10 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from scripts.inbox.store import CLOSED, InboxError
-from scripts.swarm import operator_mail, outage
+from scripts.swarm import merge_queue, operator_mail, outage
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.naming import lane_of
-from scripts.swarm.store import MASTER, PREFIX
+from scripts.swarm.store import MASTER, PREFIX, SwarmError
 from scripts.swarm_v2 import masters
 
 MINUTE_MS = 60_000
@@ -158,11 +158,10 @@ def view(url, run=subprocess.run):
 
 
 def head(url, run=subprocess.run):
-    owner, repo, _, number = url.rstrip("/").split("/")[-4:]
     try:
-        done = run(["gh", "api", f"repos/{owner}/{repo}/pulls/{number}"], capture_output=True, text=True, timeout=20)
-        return json.loads(done.stdout)["head"]["sha"] if done.returncode == 0 else ""
-    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+        owner, repo, _, number = url.rstrip("/").split("/")[-4:]
+        return merge_queue.rest(f"repos/{owner}/{repo}/pulls/{number}", run)["head"]["sha"]
+    except (SwarmError, ValueError, KeyError, TypeError):
         return ""
 
 
