@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import signal
 import subprocess
 import time
@@ -172,19 +173,40 @@ def _succeeded(harness: str, output: str) -> bool:
         return False
 
 
+def _codex_launch(target: Target, args: list[str], env: dict[str, str]) -> tuple[list[str], dict[str, str]]:
+    from scripts import codex_router
+
+    try:
+        if target.account == codex_router.API_ACCOUNT:
+            account = codex_router.api_account(env)
+        else:
+            account = next((item for item in codex_router.routing_pool(env) if item.name == target.account), None)
+            if account is None:
+                return [], env
+        account = codex_router.credential(account, env)
+    except codex_router.RoutingError:
+        return [], env
+    native = codex_router.command(account, shutil.which("codex") or "codex", args[4:])
+    return native, codex_router.child_environment(account, env)
+
+
 def check(target: Target, directory: Path, run: Callable = _run) -> Result:
     from hooks.context.account_sessions import INTERNAL_RUN
 
     args = _arguments(target) if target.account else []
     if not args:
         return _result(False, "Provider account route unavailable")
-    directory.mkdir(parents=True, exist_ok=True)
     env = {
         name: value
         for name, value in os.environ.items()
         if not name.startswith(("AGENTIHOOKS_SWARM", "AGENTIHOOKS_AGENT_", "AGENTIHOOKS_PROFILE_"))
         and name not in ("CLAUDECODE", "AGENTIHOOKS_SESSION_ID")
     }
+    if target.harness == "codex":
+        args, env = _codex_launch(target, args, env)
+        if not args:
+            return _result(False, "Provider account route unavailable")
+    directory.mkdir(parents=True, exist_ok=True)
     env.update({"AGENTIHOOKS_CLASSIFIER_CHILD": "1", INTERNAL_RUN: "1"})
     try:
         result = run(args, input=PROMPT, cwd=directory, env=env, timeout=TIMEOUT_S)
