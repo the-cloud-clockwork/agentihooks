@@ -207,6 +207,19 @@ def _role_home(root: Path, role: str, render: str) -> Path:
     return home
 
 
+@pytest.mark.parametrize(
+    ("tail", "expected"),
+    [
+        ((".homes", "frontend", "abc-1", "claude"), "frontend"),
+        ((".homes", "frontend"), "frontend"),
+        ((".homes",), None),
+        ((".claude",), None),
+    ],
+)
+def test_home_profile_names_the_key_under_the_homes_layout(tmp_path, tail, expected):
+    assert rules_refresh.home_profile(tmp_path.joinpath(*tail)) == expected
+
+
 class TestProfileHomeScope:
     def test_marker_records_the_profile_home_it_was_rendered_from(self, tmp_home, mock_sessions, monkeypatch):
         mock_sessions.return_value = {"s1": {"status": "alive"}}
