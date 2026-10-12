@@ -4,7 +4,7 @@ import { inScope, itemState, phaseLifecycle, taskRank, taskRanks } from "./state
 import { doc, meta, queue, renderSync, toggle } from "./sync.js";
 import { renderArtifacts } from "./artifacts.js";
 import { closedComments, commentsView, openComments, rememberComment, taskLink, threadView } from "./threads.js";
-import { bottleneckStat, renderAlerts, renderNotifications, renderPriorities } from "./notices.js";
+import { bottleneckStat, renderAlerts, renderNotifications, renderPriorities, statGrip, statKey } from "./notices.js";
 import { renderOutline } from "./outline.js";
 import { collapsible, markToggles } from "./folds.js";
 import { renderChat, renderChatBadge } from "./chat.js";
@@ -354,7 +354,7 @@ export function renderStats() {
   const last = (meta.events || []).reduce((m, e) => Math.max(m, e.at || 0), 0);
   const pct = total ? Math.round(100 * done / total) : 0;
   const next = phases.find((p) => !p.done), counts = (swarm && swarm.tasks) || {}, figure = (value) => (swarm ? String(value || 0) : "—");
-  const row = (label, value, extra) => h("div", { class: "stat", title: label === "Time left" ? timeLeftInputs(calc) : undefined, style: gap && label === "Time left" ? "grid-template-columns:75px minmax(0,1fr)" : "" }, h("dt", { text: label }), h("dd", {}, value, extra));
+  const row = (label, value, extra) => h("div", { class: "stat", title: label === "Time left" ? timeLeftInputs(calc) : undefined, style: gap && label === "Time left" ? "grid-template-columns:75px minmax(0,1fr)" : "", "data-stat": statKey(label) }, h("dt", {}, statGrip(label), label), h("dd", {}, value, extra));
   $("stats").replaceChildren(row("Started", started ? when(started) : "—"),
     row("Elapsed", elapsed === null ? "—" : span(elapsed)),
     row("Time left", leftText),
@@ -374,4 +374,5 @@ export function renderStats() {
     row("Agents · 2 h", String(activeAgents())),
     row("Last activity", last ? `${span(Date.now() - last)} ago` : "—"),
     bottleneckStat(swarm && swarm.top_bottleneck));
+  document.dispatchEvent(new Event("stats"));
 }

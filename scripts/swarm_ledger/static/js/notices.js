@@ -128,13 +128,23 @@ export function showNotifications(open) {
   renderNotifications();
   if (open) anchorPanel($("notif"), $("bell"));
 }
+export function statKey(label) {
+  return label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+export function statGrip(label) {
+  return h("button", { type: "button", class: "stat-grip", "aria-label": `Move ${label}`,
+    "data-tip": "Drag to reorder Stats, or use the up and down arrow keys. Every browser keeps the order." });
+}
+
 function measuredAge(top) {
   const minutes = /^(\d+) minutes? ago$/.exec(top.measured || "");
   return minutes ? `${minutes[1]}m ago` : "never";
 }
 
 export function bottleneckStat(top) {
-  return h("div", { class: "stat top-bottleneck" }, h("dt", { text: top ? `Top bottleneck · ${measuredAge(top)}` : "Top bottleneck" }),
+  return h("div", { class: "stat top-bottleneck", "data-stat": statKey("Top bottleneck") },
+    h("dt", {}, statGrip("Top bottleneck"), top ? `Top bottleneck · ${measuredAge(top)}` : "Top bottleneck"),
     h("dd", {}, h("ul", { class: "bottleneck-list" }, h("li", { class: "bottleneck-stage", text: top ? top.label || "none" : "unavailable" }),
       h("li", { text: `Trend ${top && top.trend || "unknown"}` }),
       h("li", { text: `Last action ${top && top.last_action || "none recorded"}` }))));
