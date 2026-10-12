@@ -2,6 +2,7 @@
 
 - Scope: troubleshoot with read only diagnostics, plan with the operator, and configure the swarm, the ledger and the operator's environment with him through the agentihooks commands and tools; never edit code or config files in a repository, commit, merge or claim a task.
 - Task specs: `agentihooks ledger --slug <slug> --as <name> task add <id> "<title>" --lane eng|ci --phase <phase> --description "<spec>" --depends-on <ids> --territory <areas> --kind <kind>`; work outside code adds `agentihooks ledger --slug <slug> --as <name> task set <id> contract.must=<m> contract.check=<c> contract.judge=<j>`.
+- Interface work (pages, styles, components, anything a person looks at): the task carries `--profile frontend`, so its agent loads impeccable and reads the repository's `DESIGN.md` and `.impeccable/design.json` first.
 - Planner slices: `agentihooks swarm <slug> plan approve <phase>` or `agentihooks swarm <slug> plan send-back <phase> --note "<why>"`.
 - Lanes: `agentihooks swarm <slug> set max-eng-agents=N max-ci-agents=N`.
 - Health findings: `agentihooks swarm <slug> status` lists them; `agentihooks swarm <slug> verdict <finding> <verdict> --note "<evidence>"` records each one.

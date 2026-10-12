@@ -44,6 +44,8 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       prompt or AskUserQuestion answer any master or planner of this swarm recorded
   answer ITEM TEXT                    the master answers questions/<id> as itself at delegate or full autonomy,
                                       which clears it from Priorities; members cannot answer
+  fold candidates | check PLAN | apply PLAN
+                                      fold open tasks that change the same code into one grouped task (fold-tasks skill)
   time-left DURATION                 record remaining time, e.g. "3h 20m"
   claim ITEM                          take ownership of an item's operator events
   task add ID TITLE --lane eng|ci [--phase P] [--description D] [--depends-on IDS] [--territory AREAS] [--gain N] [--profile NAME]
@@ -698,6 +700,12 @@ def _duration(value):
     return minutes
 
 
+def cmd_fold(args):
+    from scripts.swarm_ledger import ledger_fold
+
+    ledger_fold.run(args)
+
+
 def cmd_time_left(args):
     send(args, "set", path="time_left_minutes", value=args.minutes)
     print(json.dumps({"time_left_minutes": args.minutes}))
@@ -907,6 +915,9 @@ def build_parser():
     answer = sub.add_parser("answer")
     answer.add_argument("item")
     answer.add_argument("text")
+    fold = sub.add_parser("fold")
+    fold.add_argument("action", choices=["candidates", "check", "apply"])
+    fold.add_argument("plan", nargs="?")
     sub.add_parser("time-left").add_argument("minutes", type=_duration)
     sub.add_parser("claim").add_argument("item")
     task = sub.add_parser("task")
