@@ -224,11 +224,11 @@ def ledger_remote_auth_failures_total() -> int:
 def call(slug, ops=None, service=False):
     if ledger_link.remote():
         return remote_call(slug, ops, service)
-    held = talk(ops)
+    talking = talk(ops)
     if outbox.waiting("ledger"):
         outbox.flush(None)
     if ops and outbox.waiting("ledger"):
-        if not held:
+        if not talking:
             sys.exit(
                 f"ledger talk queued while the server was down still waits in {outbox.path()}; retry once it lands"
             )
@@ -249,7 +249,7 @@ def call(slug, ops=None, service=False):
     except urllib.error.HTTPError as exc:
         sys.exit(f"server refused: {exc.code} {exc.read().decode(errors='replace')}")
     except OSError as exc:
-        if held:
+        if talking:
             return queue(slug, ops, service)
         sys.exit(f"ledger server not answering on {base()}: {exc}")
 
