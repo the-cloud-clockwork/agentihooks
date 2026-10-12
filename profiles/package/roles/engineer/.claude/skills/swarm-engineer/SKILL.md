@@ -91,7 +91,7 @@ The swarm ends a checked wait when the thing resolves and tells you through the 
 ## Close with the proof
 
 A code or ci task at delegate or full autonomy closes at
-`agentihooks swarm <slug> ready <handoff doc>` once both reviews closed and the
+`agentihooks swarm <slug> ready <doc>` once both reviews closed and the
 pull request is out of draft and holds the worktree head: leave the crew first,
 then ready writes the short Handoff v2 and ends your session. The tick watches
 the checks, queues the pull request on green, waits for the merge, closes the
