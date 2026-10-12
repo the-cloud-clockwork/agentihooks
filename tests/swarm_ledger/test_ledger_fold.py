@@ -130,3 +130,100 @@ def test_writes_compose_the_lead_description_territory_and_member_status():
 def test_a_lead_title_that_is_not_plain_falls_back_to_plain_status():
     doc = ledger(task("t1", title="Fix scripts/swarm/merge.py"), task("t2"))
     assert ledger_fold.writes(doc, plan()["groups"][0])["statuses"]["t2"] == ledger_fold.FALLBACK_STATUS
+
+
+def test_the_pool_reads_time_left_inputs_and_leaves_out_what_the_freeze_holds(monkeypatch):
+    seen = {}
+
+    def frozen(doc, pending, inputs):
+        seen["inputs"] = inputs
+        return {"t2"}
+
+    monkeypatch.setattr(ledger_fold.ledger_stats, "frozen", frozen)
+    doc = ledger(task("t1"), task("t2"), task("t3", claimed_by="engineer@abcdef-0002"))
+    doc["_meta"] = {"time_left": {"inputs": {"slots": 3}}}
+    kept, skipped = ledger_fold.pool(doc)
+    assert seen["inputs"] == {"slots": 3}
+    assert [t["id"] for t in kept] == ["t1"]
+    assert skipped["frozen"] == 1 and skipped["in flight"] == 1
+
+
+def test_planner_chains_count_every_linked_slice_by_either_field():
+    doc = ledger(
+        task("t1", slice="a"),
+        task("t2", slice="b", depends_on=["t1"]),
+        task("t3", plan_slice="c"),
+        task("t4", plan_slice="d", depends_on=["t3"]),
+    )
+    assert ledger_fold.pool(doc)[1]["planner chain"] == 4
+
+
+def test_names_come_from_the_title_and_the_description_alone():
+    assert ledger_fold.names({"title": "Fix merge_wait"}) == {"merge_wait"}
+    assert ledger_fold.names({"description": "Touches claim_order."}) == {"claim_order"}
+    assert ledger_fold.names({"title": None, "description": None}) == set()
+
+
+def test_signals_join_every_shared_item_and_need_a_real_overlap():
+    a = task("t1", territory=["docs", "scripts"], description="`merge_wait` and `claim_order`")
+    b = task("t2", territory=["docs", "scripts"], description="`claim_order` then `merge_wait`")
+    assert ledger_fold.signals(a, b) == ["territory docs, scripts", "names claim_order, merge_wait"]
+    assert ledger_fold.signals(task("t1", description="`merge_wait`"), task("t2", description="`claim_order`")) == []
+    assert ledger_fold.signals({"id": "t1"}, {"id": "t2"}) == []
+
+
+def test_title_words_link_at_exactly_three_fifths_and_ignore_short_words():
+    sharing = task("t1", title="alpha bravo charlie delta echo")
+    assert ledger_fold.signals(sharing, task("t2", title="alpha bravo charlie golf hotel")) == [
+        "titles share alpha, bravo, charlie"
+    ]
+    assert ledger_fold.signals(task("t1", title="alpha bravo"), task("t2", title="alpha golf")) == []
+    assert ledger_fold.signals(task("t1", title="alpha cat"), task("t2", title="t2")) == []
+    assert ledger_fold.words("cat dog alpha") == {"alpha"}
+
+
+def test_candidates_fill_a_group_to_five_and_start_the_next_one():
+    doc = ledger(*(task(f"t{n}", difficulty="S", territory=["scripts"]) for n in range(1, 8)))
+    found = ledger_fold.candidates(doc)
+    assert [[t["id"] for t in g["tasks"]] for g in found["groups"]] == [["t1", "t2", "t3", "t4", "t5"], ["t6", "t7"]]
+    assert len(found["groups"][0]["signals"]) == 10
+    assert set(found) == {"pool", "skipped", "groups"} and found["groups"][0]["tasks"][0]["kind"] == "code"
+
+
+def test_the_plan_check_refuses_malformed_groups_with_their_reason():
+    doc = ledger(task("t1"), task("t2"), task("t3", depends_on=["t9"]), task("t9", state="open"))
+    cases = [
+        ("not a group", "each group is an object with a lead, members, seams and done"),
+        ({"lead": 1, "members": ["t2"]}, "needs a lead id and at least one member id"),
+        ({"lead": "t1", "members": []}, "needs a lead id and at least one member id"),
+        ({"lead": "t1", "members": [2]}, "members must be task ids"),
+    ]
+    for group, reason in cases:
+        assert ledger_fold.problems(doc, {"groups": [group]}) == [f"group 1: {reason}"]
+    found = ledger_fold.problems(
+        doc, {"groups": [{"lead": "t1", "members": ["t3"], "seams": ["One", ""], "done": "see a/b"}]}
+    )
+    assert found == [
+        "group 1: task t3 waits on task t9",
+        "group 1: seams must list 2 plain sentences, one per folded task",
+        "group 1: done names the path a/b; name the command, hook or behaviour instead",
+    ]
+    assert ledger_fold.problems(doc, {"groups": [{**plan()["groups"][0], "done": 3}]}) == ["group 1: done must be text"]
+
+
+def test_the_description_trims_full_stops_and_states_what_the_ledger_lacks():
+    group = {"lead": "t1", "members": ["t2"], "seams": ["Cut the wait.", ".Drop the poll"], "done": "it merges."}
+    lines = ledger_fold.description({"tasks": []}, task("t1", phase="none"), group).splitlines()
+    assert lines[:2] == ["Parent intent: not stated on the ledger.", "Mission: not stated on the ledger."]
+    assert lines[3:] == ["One: Cut the wait.", "Two: .Drop the poll.", "Done when it merges."]
+    assert ledger_fold.description({"overview": "", "phases": []}, task("t1"), group).startswith(
+        "Parent intent: not stated on the ledger."
+    )
+
+
+def test_the_member_status_names_the_lead_title_without_its_full_stop():
+    known = {"t1": task("t1")}
+    assert ledger_fold.status({"title": "Tidy the UX."}, known) == (
+        "Folded into the task titled Tidy the UX; its agent delivers this change in the same pull request."
+    )
+    assert ledger_fold.status({}, known) == ledger_fold.FALLBACK_STATUS

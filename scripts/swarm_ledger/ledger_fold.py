@@ -28,6 +28,7 @@ DASHES = ("—", "–", " - ", "--")
 FALLBACK_STATUS = "Folded into a grouped task; its agent delivers this change in the same pull request."
 STATUS = "Folded into the task titled {title}; its agent delivers this change in the same pull request."
 DONE = "one merged pull request delivers every numbered change above"
+UNSTATED = "not stated on the ledger"
 CARD_KEYS = ("id", "title", "description", "territory", "difficulty", "lane", "profile", "phase", "depends_on")
 
 
@@ -69,7 +70,7 @@ def _chained(pending: dict) -> set:
 
 
 def names(task: dict) -> set:
-    text = f"{task.get('title', '')}\n{task.get('description', '')}"
+    text = f"{task.get('title') or ''}\n{task.get('description') or ''}"
     return {m.strip().lower() for pattern in NAME_RES for m in pattern.findall(text)}
 
 
@@ -83,7 +84,7 @@ def signals(a: dict, b: dict) -> list[str]:
         found.append(f"territory {', '.join(shared)}")
     if shared := sorted(names(a) & names(b)):
         found.append(f"names {', '.join(shared)}")
-    mine, theirs = words(a.get("title", "")), words(b.get("title", ""))
+    mine, theirs = words(a.get("title") or ""), words(b.get("title") or "")
     if mine and theirs and len(mine & theirs) / min(len(mine), len(theirs)) >= TITLE_OVERLAP:
         found.append(f"titles share {', '.join(sorted(mine & theirs))}")
     return found
@@ -163,11 +164,11 @@ def plain_problems(text: str, known: dict) -> list[str]:
 
 
 def description(doc: dict, lead: dict, group: dict) -> str:
-    phase = next((p for p in doc.get("phases", []) if p.get("id") == lead.get("phase")), {})
-    mission = ": ".join(filter(None, (phase.get("title"), _sentence(phase.get("description", "")))))
+    phase = next((p for p in doc.get("phases") or [] if p.get("id") == lead.get("phase")), {})
+    mission = ": ".join(filter(None, (phase.get("title"), _sentence(phase.get("description")))))
     lines = [
-        f"Parent intent: {_sentence(doc.get('overview', '')) or 'not stated on the ledger'}.",
-        f"Mission: {mission or 'not stated on the ledger'}.",
+        f"Parent intent: {_sentence(doc.get('overview')) or UNSTATED}.",
+        f"Mission: {mission or UNSTATED}.",
         f"This task delivers {len(group['seams'])} folded changes in one pull request.",
         *(f"{NUMBERS[i]}: {seam.rstrip('.')}." for i, seam in enumerate(group["seams"])),
         f"Done when {(group.get('done') or DONE).rstrip('.')}.",
@@ -175,8 +176,8 @@ def description(doc: dict, lead: dict, group: dict) -> str:
     return "\n".join(lines)
 
 
-def _sentence(text: str) -> str:
-    return re.split(r"(?<=[.!?])\s", text.strip(), maxsplit=1)[0].rstrip(".").strip() if text else ""
+def _sentence(text: str | None) -> str:
+    return re.split(r"(?<=[.!?])\s", text.strip())[0].rstrip(".").strip() if text else ""
 
 
 def territory(known: dict, ids: list[str]) -> list[str]:
@@ -184,8 +185,9 @@ def territory(known: dict, ids: list[str]) -> list[str]:
 
 
 def status(lead: dict, known: dict) -> str:
-    text = STATUS.format(title=lead.get("title", "").rstrip("."))
-    return FALLBACK_STATUS if plain_problems(text, known) else text
+    title = (lead.get("title") or "").rstrip(".")
+    text = STATUS.format(title=title)
+    return FALLBACK_STATUS if not title or plain_problems(text, known) else text
 
 
 def writes(doc: dict, group: dict) -> dict:
