@@ -13,7 +13,7 @@ def test_production_remote_capture_completes_within_its_pod_grace(tmp_path, monk
     from scripts.swarm_v2.supervision import Launch
     from tests.test_swarm_v2_checkpoints_capture import portable
     from tests.test_swarm_v2_checkpoints_runtime import artifact_endpoint
-    from tests.test_swarm_v2_deployed_runtime import Pods, SLUG, _store, _workers
+    from tests.test_swarm_v2_deployed_runtime import SLUG, Pods, _store, _workers
 
     attempt, _, environ, newest = portable.__wrapped__(tmp_path, monkeypatch)
     original = json.loads((attempt / "launch.json").read_text())
