@@ -4,6 +4,7 @@ import re
 import subprocess
 import time
 import zipfile
+import zlib
 from datetime import datetime
 
 from scripts.swarm.store import SwarmError
@@ -13,7 +14,6 @@ WORKFLOW = ".github/workflows/mutation-preflight.yml"
 PROOFS = ".github/workflows/proofs.yml"
 EVENTS = {WORKFLOW: "push", PROOFS: "workflow_dispatch"}
 UNREADABLE = (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError)
-
 
 BACKOFF = (2, 4)
 
@@ -116,7 +116,7 @@ def _fetch(target, started_at):
     for pause in (*BACKOFF, None):
         try:
             return _report(target, started_at)
-        except (Unreachable, zipfile.BadZipFile) as error:
+        except (Unreachable, zipfile.BadZipFile, zlib.error, EOFError) as error:
             if pause is None:
                 raise FetchFailed(error) from error
         except Missing:

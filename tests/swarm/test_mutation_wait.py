@@ -17,7 +17,7 @@ URL = "https://github.com/org/repo/actions/runs/123"
 @pytest.fixture(autouse=True)
 def pauses(monkeypatch):
     slept = []
-    monkeypatch.setattr(mutation_wait.time, "sleep", slept.append)
+    monkeypatch.setattr(mutation_wait, "time", SimpleNamespace(sleep=slept.append))
     return slept
 
 
@@ -262,6 +262,27 @@ def test_a_truncated_report_download_is_unknown_not_red(preflight, monkeypatch):
     outcome = waits.resolution(held, {}, None, None, None, False)
     assert outcome.startswith(f"mutation preflight {URL}, now unknown; the run concluded success")
     assert "now red" not in outcome
+
+
+def test_a_corrupt_compressed_report_body_is_unknown_not_red(preflight, monkeypatch):
+    original = subprocess.run
+    data = io.BytesIO()
+    with zipfile.ZipFile(data, "w", zipfile.ZIP_DEFLATED) as zipped:
+        zipped.writestr("report.json", json.dumps(preflight.report))
+    archive = bytearray(data.getvalue())
+    body = 30 + len("report.json")
+    archive[body : body + 4] = b"\xff\xff\xff\xff"
+
+    def api(args, **kwargs):
+        if args[-1].endswith("/zip"):
+            return subprocess.CompletedProcess(args, 0, bytes(archive))
+        return original(args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", api)
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert waits.resolution(held, {}, None, None, None, False).startswith(
+        f"mutation preflight {URL}, now unknown; the run concluded success"
+    )
 
 
 def test_a_fetch_error_on_a_failed_run_is_red_by_its_conclusion(preflight, monkeypatch):
