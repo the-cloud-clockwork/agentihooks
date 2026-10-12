@@ -332,6 +332,7 @@ def test_the_resume_prompt_names_the_task_workspace_and_keeps_the_claim(store, t
     ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
     stuck = agents[1]
     ledger.rows[stuck.task]["workspace"] = "/work/folder"
+    ledger.rows[agents[0].task]["workspace"] = ""
     resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
     texts = dict(zip(runtime.nudged, (text for _, text in runtime.nudge_calls)))
     assert texts[stuck.name] == (
