@@ -5,6 +5,7 @@ import shlex
 import shutil
 import subprocess
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -181,10 +182,69 @@ def answer(pane_id: str, text: str, environ: dict[str, str], timeout_ms: int) ->
     return True
 
 
-def name_session(pane_id: str, name: str, environ: dict[str, str]) -> bool:
-    """Codex has no launch option for a session name, so its own rename command is typed into the pane."""
+READY = ("idle", "done")
+READY_SETTLE_S = 1.5
+RENAME_CONFIRM_S = 15.0
+RENAME_POLL_S = 0.5
+CLEAR_INPUT = "ctrl+u"
+
+
+def agent_status(pane_id: str, environ: dict[str, str]) -> str:
     try:
+        found = _cli(["agent", "get", pane_id], environ).get("agent", {})
+    except (HerdrError, subprocess.TimeoutExpired):
+        return "unknown"
+    return found.get("agent_status") or "unknown"
+
+
+def typed(pane_id: str, environ: dict[str, str]) -> str:
+    from scripts.swarm.pane import typed_input
+
+    text = _cli(["pane", "read", pane_id, "--source", "visible", "--format", "ansi"], environ).get("text")
+    return typed_input(text) if isinstance(text, str) else ""
+
+
+def wait_ready(pane_id: str, environ: dict[str, str], timeout: float) -> bool:
+    """True once the agent reads ready twice in a row: Codex reads idle for a moment before its startup turns busy."""
+    deadline = time.monotonic() + timeout
+    seen = False
+    while True:
+        ready = agent_status(pane_id, environ) in READY
+        if ready and seen:
+            return True
+        seen = ready
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(READY_SETTLE_S)
+
+
+def name_session(
+    pane_id: str, name: str, environ: dict[str, str], confirmed: Callable[[], bool], timeout: float = RENAME_CONFIRM_S
+) -> str:
+    """Codex has no launch option for a session name, so its own rename command is typed at its ready prompt.
+    Returns "named", or why not; a rename that did not take is cleared from the input line."""
+    try:
+        status = agent_status(pane_id, environ)
+        if status not in READY:
+            return f"refused-{status}"
+        if typed(pane_id, environ):
+            return "refused-typed"
         _cli(["pane", "run", pane_id, f"/rename {name}"], environ)
+        deadline = time.monotonic() + timeout
+        while not confirmed():
+            if time.monotonic() >= deadline:
+                if typed(pane_id, environ):
+                    _cli(["pane", "send-keys", pane_id, CLEAR_INPUT], environ)
+                return "unconfirmed"
+            time.sleep(RENAME_POLL_S)
+    except (HerdrError, subprocess.TimeoutExpired):
+        return "error"
+    return "named"
+
+
+def prompt(pane_id: str, text: str, environ: dict[str, str]) -> bool:
+    try:
+        _cli(["agent", "prompt", pane_id, text], environ)
     except (HerdrError, subprocess.TimeoutExpired):
         return False
     return True

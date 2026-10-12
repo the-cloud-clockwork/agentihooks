@@ -31,6 +31,7 @@ class PaneRecord:
     seen: str = ""
     active_at: int = 0
     herdr_server: str = ""
+    session_name: str = ""
 
 
 def root(environ: dict[str, str]) -> Path:
