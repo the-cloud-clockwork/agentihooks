@@ -276,8 +276,10 @@ def test_reservation_contention_ends_the_unlaunched_execution(setup):
     from scripts.swarm_v2.runtime.base import Status
 
     request = request_for(setup)
-    setup.launcher.slots.reserve = Mock(return_value=False)
-    result = setup.launcher.spawn(request)
+    from unittest.mock import patch
+
+    with patch.object(type(setup.launcher.slots), "reserve", return_value=False):
+        result = setup.launcher.spawn(request)
     assert result.status is Status.UNAVAILABLE
     assert result.detail == "account reservation is full"
     assert setup.store.execution_registry.records("fixture")[0].state == "ended"
