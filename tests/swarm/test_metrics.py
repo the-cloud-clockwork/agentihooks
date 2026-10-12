@@ -216,7 +216,7 @@ def test_a_swarm_pass_measures_the_stages_of_the_ledger_tasks_and_reports_a_flee
     import fakeredis
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    store.create(SwarmConfig("sw", "/repo", 0, 0, template="doctor"))
     seen = []
 
     def broken(*args):
@@ -230,8 +230,11 @@ def test_a_swarm_pass_measures_the_stages_of_the_ledger_tasks_and_reports_a_flee
         lambda box, store, slug, now_ms, tasks, environ, ready: seen.append((tasks, [ready(t) for t in tasks])),
     )
     monkeypatch.setattr(metrics.metrics_fleet, "record", broken)
-    tasks = [{"id": "t1", "state": "open"}, {"id": "t2", "state": "open"}]
-    doc = {"tasks": tasks, "freezes": [{"verb": "freeze", "target": "tasks/t2"}]}
+    tasks = [{"id": "t1", "state": "open", "phase": "p2"}, {"id": "t2", "state": "open", "phase": "p2"}]
+    doc = {
+        "tasks": tasks,
+        "freezes": [{"verb": "freeze", "target": "tasks/t2"}, {"verb": "focus", "target": "tasks/t9"}],
+    }
     swarm = metrics.metrics_swarm.TickInput(store, doc, [], lambda url: None, None)
     assert metrics.record_pass("sw", NOW, 0, ON, swarm) == ["fleet metrics failed: registry down"]
     assert seen == [(tasks, [True, False])]

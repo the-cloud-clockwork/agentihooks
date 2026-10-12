@@ -188,9 +188,18 @@ def waiting_of(tasks, **doc):
         rows(ledger_events=[ledger("added", at(8), f"tasks/{task['id']}") for task in tasks]),
         tasks,
         NOW,
-        ready=stages.claimable({"tasks": tasks, **doc}),
+        ready=stages.claimable({"tasks": tasks, **doc}, ""),
     )
     return seconds_of(found)
+
+
+def test_the_tick_readiness_exempts_the_doctor_fix_phase_from_a_focus_and_needs_no_task_list():
+    from scripts.doctor import loop
+
+    task = {"id": "t3", "state": "open", "phase": loop.FIX_PHASE}
+    doc = {"tasks": [task], "freezes": [{"verb": "focus", "target": "tasks/t9"}]}
+    assert [stages.claimable(doc, loop.FIX_PHASE)(task), stages.claimable(doc, "")(task)] == [True, False]
+    assert stages.claimable({}, "")({"id": "t3", "state": "open"}) is True
 
 
 def test_a_frozen_task_opens_no_claim_wait():

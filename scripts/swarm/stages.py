@@ -20,6 +20,7 @@ DONE = "task done"
 JOINED = "joined"
 OVERLAYS = ("merge_queue", "intent_fix", "launch_failure", "launch", "claim_wait", "ci_overrun", "ci_queue")
 INTENT = ("intent_failed", "intent_passed")
+NO_FIX_PHASE = ""
 SPOKEN = {"ci_overrun": "in", "review": "in"}
 TABLE = metrics_outbox.Table(
     "bottleneck_stages",
@@ -181,7 +182,7 @@ def _waiting(task: dict, rows: dict, ready: Callable[[dict], bool], now_ms: int)
     return Timeline(start, now_ms, (Span("claim_wait", start, now_ms),), (), task["id"])
 
 
-def claimable(doc: dict, fix_phase: str = "") -> Callable[[dict], bool]:
+def claimable(doc: dict, fix_phase: str) -> Callable[[dict], bool]:
     from scripts.swarm import tick
 
     rows = {task["id"]: task for task in doc.get("tasks", [])}
@@ -192,7 +193,7 @@ def claimable(doc: dict, fix_phase: str = "") -> Callable[[dict], bool]:
 def timelines(rows: dict, tasks: list, now_ms: int, ready: Callable[[dict], bool] | None = None) -> list[Timeline]:
     claimed = {event["task"] for event in rows["agent_events"] if event["kind"] == "claim"}
     by_id = {task["id"]: task for task in tasks}
-    ready = ready or claimable({"tasks": tasks})
+    ready = ready or claimable({"tasks": tasks}, NO_FIX_PHASE)
     found = [
         _claimed(
             by_id.get(task_id, {"id": task_id}), rows, now_ms, by_id.get(task_id, {}).get("state") in bottleneck.OPEN
