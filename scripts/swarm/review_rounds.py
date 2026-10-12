@@ -1,4 +1,4 @@
-"""Review rounds per swarm task: the third closes review and a fourth is refused (Development Manifesto §4.4)."""
+"""Review rounds per swarm task: the third closes review and a fourth is refused."""
 
 from scripts.gates.budget import Budget
 from scripts.swarm.store import SwarmError
