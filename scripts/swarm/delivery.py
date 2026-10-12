@@ -122,7 +122,7 @@ def relay_to_page(inbox, slug, agents, ledger):
 def show(ledger, slug, item, sender, entry):
     if entry:
         return ledger.relay_comment(slug, entry, item.text, sender, item.id)
-    return ledger.relay(slug, item.text, sender)
+    return ledger.relay(slug, item.text, sender, item.id)
 
 
 def post(inbox, item, write):
