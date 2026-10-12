@@ -115,7 +115,7 @@ def test_the_stats_card_has_no_stats_check_row():
         "const nodes = {}; const $ = id => nodes[id] ||= {replaceChildren: (...rows) => {nodes[id].textContent = rows.join(' · ');}};\n"
         "const h = (tag, attrs, ...children) => attrs.text || children.filter(Boolean).join(' ');\n"
         "const when = () => 'now'; const span = () => '1m'; const inScope = list => list; const activeAgents = () => 0;\n"
-        "const swarm = null; const inboxPending = () => 0;\n"
+        "const swarm = null; const inboxPending = () => 0; const document = {dispatchEvent: () => true};\n"
         + EVENTS
         + "let meta = {created_at: 1, events: [sent, answer]};\n"
         "let doc = {phases: [], followups: [], questions: [], tasks: [], time_left_minutes: null, chat: [{id: 'm3', by: 'boss', at: 150, text: 'ok'}]};\n"
@@ -123,6 +123,8 @@ def test_the_stats_card_has_no_stats_check_row():
         + function_source("statsCheck")
         + function_source("statsCheckText")
         + function_source("timeLeftInputs")
+        + function_source("statKey")
+        + function_source("statGrip")
         + function_source("bottleneckStat")
         + function_source("renderStats")
         + "\nconst assert = require('node:assert/strict');\n"
@@ -155,19 +157,21 @@ def test_the_stats_card_counts_unfrozen_and_frozen_work_apart():
         "const nodes = {}; const $ = id => nodes[id] ||= {replaceChildren: (...rows) => {nodes[id].rows = rows;}};\n"
         "const h = (tag, attrs, ...children) => [attrs.text, ...children].filter(Boolean).join(' ');\n"
         "const when = () => 'now'; const inScope = list => list; const activeAgents = () => 0;\n"
-        "const swarm = null; const inboxPending = () => 0;\n"
+        "const swarm = null; const inboxPending = () => 0; const document = {dispatchEvent: () => true};\n"
         "let meta = {created_at: 1, events: [],"
         " time_left: {at: 5, calculation: {remaining: 2, frozen: 3, frozen_work: 90}}};\n"
         "let doc = {phases: [], followups: [], questions: [], tasks: [], time_left_minutes: 30};\n"
         + function_source("span")
         + function_source("timeLeftInputs")
+        + function_source("statKey")
+        + function_source("statGrip")
         + function_source("bottleneckStat")
         + function_source("renderStats")
         + "\nconst assert = require('node:assert/strict');\n"
         "renderStats();\n"
-        "assert.deepEqual(nodes.stats.rows.slice(2, 5), ['Time left 30m', 'Unfrozen 2', 'Frozen 3 · 1h 30m of work']);\n"
+        "assert.deepEqual([nodes.stats.rows[2], ...nodes.stats.rows.slice(6, 8)], ['Time left 30m', 'Frozen 3 · 1h 30m', 'Unfrozen 2']);\n"
         "meta = {created_at: 1, events: []};\n"
         "renderStats();\n"
-        "assert.deepEqual(nodes.stats.rows.slice(3, 5), ['Unfrozen —', 'Frozen —']);\n"
+        "assert.deepEqual(nodes.stats.rows.slice(6, 8), ['Frozen —', 'Unfrozen —']);\n"
     )
     subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True)

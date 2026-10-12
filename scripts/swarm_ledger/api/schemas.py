@@ -76,6 +76,7 @@ FIELDS = {
     "task_rank": "by item rank if_owned",
     "task_group": "by item members",
     "task_ungroup": "by item",
+    "task_split": "by item halves",
     "title_set": "text",
     "overview_set": "text",
     "agent_rename": "by old new",
@@ -132,7 +133,7 @@ TYPES = {
     "attachments": {"type": "array", "maxItems": 100, "items": {"type": "object"}},
 }
 KIND_TYPES = {"artifact_add": {"plan": {"type": "boolean"}}, "task_rank": {"if_owned": {"type": "boolean"}}}
-for _field in ("depends_on", "territory", "if_state", "members", "watched"):
+for _field in ("depends_on", "territory", "if_state", "members", "watched", "halves"):
     TYPES[_field] = {"type": "array", "maxItems": 100, "items": {"type": "string", "maxLength": 2000}}
 
 

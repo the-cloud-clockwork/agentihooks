@@ -189,13 +189,13 @@ def delivery_rows(slug: str, doc: dict, agents: list, pulls: dict) -> list[dict]
         )
     for task in doc.get("tasks", []):
         pull = pulls.get(task.get("pr_url"))
-        if pull is None or pull.state != "MERGED" or pull.merged_at is None:
+        if pull is None or pull.state != "MERGED" or pull.merged_at is None or task.get("state") != "done":
             continue
         at = pull.merged_at
         claimed = claims.get(task["id"])
         duration = (at - claimed) / 1000 if claimed is not None else -1.0
         agent = _owner(agents, task["id"], at)
-        rows.append(_delivery(_event(slug, task, agent, at, "merge", task["pr_url"]), task, duration))
+        rows.append(_delivery(_event(slug, task, agent, at, "merge", task["id"]), task, duration))
     return rows
 
 
@@ -208,6 +208,14 @@ def queue_rows(slug: str, doc: dict, agents: list, pulls: dict, now_ms: int) -> 
         agent = _owner(agents, task["id"], now_ms)
         rows.append(_delivery(_event(slug, task, agent, now_ms, "merge_queued", [task["pr_url"], pull.head]), task))
     return rows
+
+
+def _supersede_merges(box: metrics_outbox.Outbox, rows: list) -> None:
+    with box.db:
+        box.db.executemany(
+            "DELETE FROM spool WHERE tbl = ? AND event_id = ? AND row != ?",
+            [(DELIVERY.name, row["event_id"], json.dumps(row)) for row in rows if row["kind"] == "merge"],
+        )
 
 
 def launch_rows(slug: str, doc: dict, launches: list, agents: list) -> list[dict]:
@@ -409,6 +417,9 @@ def record_pass(
         (CLASSIFIERS, classifier_rows(classifiers.rows, socket.gethostname())),
     )
     for table, rows in batches:
-        box.append(table, [row for row in rows if row["ts_ms"] >= now_ms - metrics_outbox.DAY_MS])
+        recent = [row for row in rows if row["ts_ms"] >= now_ms - metrics_outbox.DAY_MS]
+        if table is DELIVERY:
+            _supersede_merges(box, recent)
+        box.append(table, recent)
     _checkpoint(box, reviews)
     _checkpoint(box, classifiers)

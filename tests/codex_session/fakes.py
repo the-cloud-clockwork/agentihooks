@@ -87,7 +87,9 @@ class Connection:
 
 class Server:
     def __init__(self, codex_home):
+        Path(codex_home).mkdir(parents=True, exist_ok=True)
         self.codex_home = codex_home
+        self.runtime_home = codex_home
         self.info = {"codexHome": codex_home}
         self.source = f"{codex_home}/hooks.json"
         self.hooks = hooks(self.source)
@@ -107,6 +109,16 @@ class Server:
         self.connections = []
 
     def popen(self, command, **kwargs):
+        home = kwargs["env"]["CODEX_HOME"]
+        if self.info.get("codexHome") == self.runtime_home:
+            self.info = {"codexHome": home}
+        self.hooks = [
+            {**hook, "sourcePath": str(Path(home) / "hooks.json")}
+            if hook.get("sourcePath") == str(Path(self.runtime_home) / "hooks.json")
+            else hook
+            for hook in self.hooks
+        ]
+        self.runtime_home = home
         self.commands.append(command)
         self.spawns.append(kwargs)
         Path(command[command.index("--listen") + 1].removeprefix("unix://")).touch()

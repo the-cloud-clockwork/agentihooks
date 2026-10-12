@@ -1,4 +1,5 @@
 import json
+import os
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -33,7 +34,13 @@ class QuotaRuntime(FakeRuntime):
 
     def _run(self, argv, **kwargs):
         self.argv.append(argv)
-        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+        return SimpleNamespace(
+            returncode=0,
+            stdout=validated(argv, "status=started\nroute_status=routed\n").replace(
+                '"pid": 123', f'"pid": {os.getpid()}'
+            ),
+            stderr="",
+        )
 
     def has_capacity(self, config):
         return self.herdr.has_capacity(config)
