@@ -774,6 +774,17 @@ def test_the_handshake_stage_is_the_worker_log_gap_and_absent_without_both_marks
     assert result["scenarios"]["warm-node/cached-image"]["stages"]["handshake"]["p50"] == 1085
 
 
+def test_a_prepared_worker_without_a_prompt_delivery_is_counted_undelivered():
+    pods = {
+        "w/a": {"created": T0, "ready": T0 + 9000, "prepared": T0 + 4000},
+        "w/b": {"created": T0, "ready": T0 + 9000, "prepared": T0 + 4000, "delivered": T0 + 5000},
+        "w/c": {"created": T0, "ready": T0 + 9000},
+    }
+    entries = stages.attribute(read(warm_events("w/a") + warm_events("w/b") + warm_events("w/c"), pods))
+    assert [e["handshake_undelivered"] for e in entries] == [True, False, False]
+    assert stages.report(entries)["scenarios"]["warm-node/cached-image"]["handshake_undelivered"] == 1
+
+
 def test_reduce_joins_each_worker_log_to_its_pod():
     raw = raw_capture()
     raw["logs"] = {"default/a": WORKER_LOG, "default/gone": WORKER_LOG}

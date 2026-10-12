@@ -286,6 +286,7 @@ def sample(name: str, events: Sequence[Mapping], read: Mapping, ups: Mapping) ->
         "outcome": STARTED if started else kind or PENDING,
         "transient": kind if started else "",
         "sandbox_retries": sum(1 for e in events if e["reason"] == "FailedCreatePodSandBox"),
+        "handshake_undelivered": "prepared" in pod and "delivered" not in pod,
         "failure_ms": _gap(failed, begun),
         "stages": {stage: stages.get(stage) for stage in STAGES},
     }
@@ -324,6 +325,7 @@ def summarize(group: Sequence[Mapping]) -> dict:
         "pending": sum(1 for e in group if e["outcome"] == PENDING),
         "failures": dict(sorted(Counter(e["outcome"] for e in failed).items())),
         "transient": dict(sorted(Counter(e["transient"] for e in started if e["transient"]).items())),
+        "handshake_undelivered": sum(1 for e in group if e["handshake_undelivered"]),
         "failure_ms": _spread(e["failure_ms"] for e in group),
         "from_zero": sum(1 for e in group if e["from_zero"]),
         "node_sources": dict(sorted(Counter(e["node_source"] for e in group).items())),

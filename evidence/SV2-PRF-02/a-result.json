@@ -626,9 +626,11 @@
         "cold_rows_split": true
       },
       "anton-read-3.json": {
+        "accepted": "single observation, n 1, not a latency claim",
         "handshake_ms": {
           "agentihooks-swarm-workers/swarm-exe-4a990712d05642e3964f0b0374c7cd43": 1085
-        }
+        },
+        "handshake_undelivered": []
       },
       "kind-run-1.json": {
         "all_started": true,

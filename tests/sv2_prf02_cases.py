@@ -132,8 +132,13 @@ def _kind_holds(name: str) -> dict:
 
 
 def _native_holds(name: str) -> dict:
-    measured = [e for e in samples(name) if e["outcome"] == stages.STARTED and e["stages"]["handshake"] is not None]
-    return {"handshake_ms": {e["pod"]: e["stages"]["handshake"] for e in measured}}
+    entries = samples(name)
+    measured = [e for e in entries if e["outcome"] == stages.STARTED and e["stages"]["handshake"] is not None]
+    return {
+        "handshake_ms": {e["pod"]: e["stages"]["handshake"] for e in measured},
+        "handshake_undelivered": sorted(e["pod"] for e in entries if e["handshake_undelivered"]),
+        "accepted": "single observation, n 1, not a latency claim" if len(measured) == 1 else "",
+    }
 
 
 def _positive() -> tuple[dict, bool]:
