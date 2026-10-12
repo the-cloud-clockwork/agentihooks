@@ -38,7 +38,6 @@ class ControllerBackend:
             self.url,
             json.dumps({"operation": operation, **fields}).encode(),
             {"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-            method="POST",
         )
         try:
             with urllib.request.urlopen(request, timeout=30) as response:

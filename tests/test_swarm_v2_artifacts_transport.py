@@ -71,3 +71,19 @@ def test_worker_backend_cannot_write_another_task(endpoint):
     with pytest.raises(ArtifactError, match="forbidden_scope"):
         store.backend.write("swarm/foreign/staging/execution/data", b"forbidden")
     assert backend.keys("") == []
+
+
+def test_worker_control_url_can_end_with_a_slash(endpoint):
+    spec, attempt, _, _ = endpoint
+    spec["control_url"] += "/"
+    assert remote.worker_store(spec, attempt, {}).scope.generation == 7
+
+
+def test_worker_uses_the_configured_grant_file(endpoint):
+    from scripts.swarm_v2.broadcast_bridge import GRANT_FILE
+
+    spec, attempt, _, authority = endpoint
+    credential = attempt / "separate-grant"
+    credential.write_text("configured-grant")
+    assert remote.worker_store(spec, attempt, {GRANT_FILE: str(credential)}).scope.generation == 7
+    authority.authorize.assert_called_with("configured-grant")

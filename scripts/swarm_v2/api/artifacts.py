@@ -40,7 +40,7 @@ def _refuse(message: str) -> None:
     raise GrantRefused("forbidden_scope", message)
 
 
-def _key(key: object, scope: Registration, listing: bool = False) -> str:
+def _key(key: object, scope: Registration, listing: bool) -> str:
     prefix = f"{scope.swarm_id}/{scope.task_id}/"
     if not isinstance(key, str) or not key.startswith(prefix):
         _refuse("artifact key is outside the registered task")
@@ -104,7 +104,7 @@ class ArtifactsAPI:
         try:
             operation = self._operation(body)
             with self.lock:
-                scope = self._scope(token, operation in MUTATIONS)
+                scope = self._scope(token, False)
                 fence = partial(self._guard, token, scope)
                 answer = self._dispatch(operation, body, scope, fence)
                 if operation in MUTATIONS:
@@ -158,7 +158,7 @@ class ArtifactsAPI:
             self._write(key, base64.b64decode(body["data"], validate=True), scope, fence)
         elif operation == "move":
             _staging(key, scope)
-            target = _key(body["target"], scope)
+            target = _key(body["target"], scope, False)
             data = self._read(key, 0, self.backend.size(key))
             self._write(target, data, scope, fence)
             fence()
