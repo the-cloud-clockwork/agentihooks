@@ -22,12 +22,13 @@ from pathlib import Path
 
 from hooks.common import inject_context, log
 from scripts.claude_config import claude_home
-from scripts.profiles.homes import HOMES
 
 MAX_AGE_SECONDS = 24 * 3600  # 24h — markers older than this are GCed
 
 
 def home_profile(home: Path) -> str | None:
+    from scripts.profiles.homes import HOMES
+
     parts = home.resolve().parts
     if HOMES in parts[:-1]:
         return parts[parts.index(HOMES) + 1]
