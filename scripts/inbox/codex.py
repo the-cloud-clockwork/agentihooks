@@ -161,10 +161,11 @@ class Pump:
             self._submit(self.queue.pop(0))
 
     def _hinted(self) -> bool:
-        hints = 0
+        if self.subscription.get_message(timeout=0) is None:
+            return False
         while self.subscription.get_message(timeout=0) is not None:
-            hints += 1
-        return hints > 0
+            pass
+        return True
 
     def _reconcile(self) -> None:
         binding = self.binding

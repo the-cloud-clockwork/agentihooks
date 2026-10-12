@@ -160,6 +160,7 @@ def test_an_idle_thread_wakes_with_turn_start_and_no_wait_tool(rig):
     assert rig.store.get(item.id).state == "delivered"
     assert (delivery.state, delivery.committed) == ("accepted", True)
     assert (rig.record().state, rig.record().active_turn_id) == (CONNECTED, "turn-1")
+    assert rig.record().last_transport_activity == int(rig.clock.now * 1000)
 
 
 def test_busy_delivery_steers_the_observed_turn_on_the_same_thread(rig):
