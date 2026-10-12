@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from scripts import codex_router, deps_preflight
+from scripts.native_settings import native_settings
 from scripts.targets import codex_target
 from scripts.targets._common import _install_module
 
@@ -29,7 +30,7 @@ def installed(tmp_path, monkeypatch):
     install._save_state({"bundle": {"path": str(bundle)}, "targets": {"global": {"codex": {"profile": "wr-role"}}}})
     home = codex_target.codex_home()
     home.mkdir(parents=True)
-    native = install._native_settings("codex", install._resolve_profile_chain("wr-role"), None, say=lambda *_: None)
+    native = native_settings("codex", install._resolve_profile_chain("wr-role"), None, say=lambda *_: None)
     codex_target.CodexAdapter().write_settings(native)
     return {"bundle": bundle, "home": home, "install": install}
 
@@ -60,7 +61,7 @@ def test_the_refreshed_wrapper_matches_what_init_writes(installed):
     codex_target.refresh_wrapper()
     refreshed = (installed["home"] / "agentihooks-hook.sh").read_text()
     install = installed["install"]
-    native = install._native_settings("codex", install._resolve_profile_chain("wr-role"), None, say=lambda *_: None)
+    native = native_settings("codex", install._resolve_profile_chain("wr-role"), None, say=lambda *_: None)
     codex_target.CodexAdapter().write_settings(native)
     assert (installed["home"] / "agentihooks-hook.sh").read_text() == refreshed
     assert "http://role:4000" in refreshed

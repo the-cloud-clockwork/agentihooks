@@ -120,6 +120,8 @@ def wrapper_text(profile_env: dict[str, str]) -> str:
 
 
 def refresh_wrapper() -> bool:
+    from scripts.native_settings import native_settings
+
     _i = _install_module()
     record = _i._global_record(_i._load_state(), "codex")
     wrapper = codex_home() / "agentihooks-hook.sh"
@@ -130,7 +132,7 @@ def refresh_wrapper() -> bool:
     name = record.get("settings_profile")
     overlay = _i._resolve_profile_dir(name) if name else None
     chain = _i._resolve_profile_chain(record["profile"])
-    native = _i._native_settings("codex", chain, (name, overlay) if overlay else None, say=lambda *_: None)
+    native = native_settings("codex", chain, (name, overlay) if overlay else None, say=lambda *_: None)
     text = wrapper_text(native.get("_agentihooks", {}).get("env", {}))
     if wrapper.read_text() == text:
         return False
