@@ -13,6 +13,9 @@ OPEN = {
     "headRefOid": "abc",
     "baseRefName": "dev",
     "mergeQueueEntry": None,
+    "isDraft": False,
+    "reviewDecision": None,
+    "statusCheckRollup": {"state": "SUCCESS"},
     "repository": {"mergeQueue": {"id": "MQ_dev"}},
 }
 ENTRY = {"id": "MQ_one", "position": 2, "state": "AWAITING_CHECKS"}
@@ -153,6 +156,24 @@ def test_queue_squash_merges_the_observed_head_when_the_repository_has_no_queue(
     assert "expectedHeadOid: $head" in calls[1][4]
     assert "mergeMethod: SQUASH" in calls[1][4]
     assert calls[1][5:] == ["-f", "id=PR_one", "-f", "head=abc"]
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"isDraft": True},
+        {"reviewDecision": "CHANGES_REQUESTED"},
+        {"reviewDecision": "REVIEW_REQUIRED"},
+        {"statusCheckRollup": None},
+        {"statusCheckRollup": {"state": "PENDING"}},
+        {"statusCheckRollup": {"state": "FAILURE"}},
+    ],
+)
+def test_queue_without_a_queue_refuses_an_unready_pull_request(change):
+    run, calls = runner({"data": {"resource": {**OPEN, "repository": {"mergeQueue": None}, **change}}})
+    with pytest.raises(SwarmError, match="squash merge requires"):
+        merge_queue.operate("queue", URL, run)
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize(

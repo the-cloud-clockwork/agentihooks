@@ -25,7 +25,7 @@ GRADING = (
     "sonar-project.properties",
     ".coveragerc",
 )
-FIELDS = 'id state headRefOid baseRefName mergeQueueEntry { id position state } repository { mergeQueue(branch: "dev") { id } }'
+FIELDS = 'id state headRefOid baseRefName isDraft reviewDecision statusCheckRollup { state } mergeQueueEntry { id position state } repository { mergeQueue(branch: "dev") { id } }'
 STATE = "query($url: URI!) { resource(url: $url) { ... on PullRequest { " + FIELDS + " } } }"
 QUEUE = """mutation($id: ID!, $head: GitObjectID!) {
     enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head}) { mergeQueueEntry { id } }
@@ -132,6 +132,12 @@ def operate(action: str, url: str, run=subprocess.run) -> dict:
     waiting = False
     if action == "queue" and raw["mergeQueueEntry"] is None:
         if raw["repository"]["mergeQueue"] is None:
+            if (
+                raw["isDraft"]
+                or raw["reviewDecision"] not in (None, "APPROVED")
+                or (raw["statusCheckRollup"] or {}).get("state") != "SUCCESS"
+            ):
+                raise SwarmError("squash merge requires a ready pull request with green checks and no pending review")
             graphql(MERGE, {"id": raw["id"], "head": raw["headRefOid"]}, run)
         else:
             waiting = refresh(url, raw, run)
