@@ -119,8 +119,26 @@ def test_paused_time_keeps_each_closed_outage_of_one_kind(store):
     outage.observe("sw", "redis", [], 700)
     assert outage.paused_ms("sw", 0, 1_000) == 300
     outage.observe("sw", "redis", ["down a third time"], 900)
+    outage.observe("sw", "redis", ["still down"], 950)
     assert outage.paused_ms("sw", 0, 1_000) == 400
     assert outage.read("sw")["redis"]["started_at"] == 900
+
+
+def test_paused_time_keeps_the_newest_closed_outages_of_one_kind(store):
+    for n in range(outage.PAST_SPANS + 10):
+        outage.observe("sw", "redis", ["down"], n * 10)
+        outage.observe("sw", "redis", [], n * 10 + 5)
+    outage.observe("sw", "redis", ["down"], 10_000)
+    past = outage.read("sw")["redis"]["past"]
+    assert len(past) == outage.PAST_SPANS and past[-1] == [
+        (outage.PAST_SPANS + 9) * 10,
+        (outage.PAST_SPANS + 9) * 10 + 5,
+    ]
+
+
+def test_a_pane_error_mark_expires_within_a_day(store):
+    outage.mark_pane(store, "sw", NAME, "API Error: 529")
+    assert 0 < store.redis.ttl(store.key("sw", outage.PANE, NAME)) <= outage.PANE_TTL_S
 
 
 def test_a_new_provider_episode_keeps_the_closed_one_in_paused_time(store, monkeypatch):

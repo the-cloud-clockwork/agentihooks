@@ -51,18 +51,17 @@ def observe(slug: str, kind: str, evidence: list[str], now_ms: int) -> None:
         record = records.get(kind)
         if evidence:
             ongoing = record is not None and record["ended_at"] is None
+            past = record.get("past", []) if ongoing else _history(record) if record else []
             fresh = {"kind": kind, "started_at": record["started_at"] if ongoing else now_ms, "evidence": evidence}
-            records[kind] = {**fresh, "ended_at": None, **_carried(record, ongoing)}
+            records[kind] = {**fresh, "ended_at": None, **({"past": past} if past else {})}
         elif record and record["ended_at"] is None:
             record["ended_at"] = now_ms
 
 
-def _carried(record: dict | None, ongoing: bool) -> dict:
-    """Closed spans of the record's kind, which paused time still counts after a new outage of that kind opens."""
-    if record is None:
-        return {}
-    past = record.get("past", []) if ongoing else [*record.get("past", []), [record["started_at"], record["ended_at"]]]
-    return {"past": past[-PAST_SPANS:]} if past else {}
+def _history(record: dict) -> list:
+    """Closed spans of a closed record's kind, its own included, which paused time still counts after a new outage
+    of that kind opens."""
+    return [*record.get("past", []), [record["started_at"], record["ended_at"]]][-PAST_SPANS:]
 
 
 def open_records(slug: str) -> list[dict]:
@@ -80,10 +79,11 @@ def mark_pane(store: RedisStore, slug: str, name: str, error: str) -> None:
     store.redis.set(store.key(slug, PANE, name), error, ex=PANE_TTL_S)
 
 
-def held(store: RedisStore, slug: str, name: str) -> str:
+def held(store: RedisStore, slug: str, name: str | None) -> str:
     """The evidence holding an agent: the swarm's open outages, else a provider error on its own pane."""
     evidence = [line for record in open_records(slug) for line in record["evidence"]]
-    return "; ".join(evidence) or store.redis.get(store.key(slug, PANE, name)) or ""
+    pane = store.redis.get(store.key(slug, PANE, name)) if name else None
+    return "; ".join(evidence) or pane or ""
 
 
 def paused_ms(slug: str, since_ms: int, now_ms: int) -> int:
@@ -107,7 +107,7 @@ def hold_findings(store: RedisStore, slug: str, found: list[Finding], agents: li
 def _hold(store, slug, finding, claimants):
     if finding.kind not in HELD:
         return finding
-    name = finding.subject if finding.kind == "idle with claim" else claimants.get(finding.subject, "")
+    name = finding.subject if finding.kind == "idle with claim" else claimants.get(finding.subject)
     evidence = held(store, slug, name)
     if not evidence:
         return finding
@@ -167,8 +167,8 @@ def _provider_record(record, observed, now_ms):
         if fresh:
             episode = _with_error(episode, agent, pane, now_ms)
     if episode:
-        if episode is not record:
-            episode.update(_carried(record, False))
+        if record and episode is not record:
+            episode["past"] = _history(record)
         episode["observed_errors"] = seen
         if affected := episode.get("affected_agents"):
             episode["evidence"] = [actor["evidence"] for actor in affected.values()]
