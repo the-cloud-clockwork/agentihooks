@@ -4,7 +4,6 @@ import os
 from dataclasses import replace
 from unittest.mock import Mock, patch
 
-import fakeredis
 import pytest
 
 from scripts.swarm import cli, default_models, model_catalog, model_pick, runtime
@@ -19,6 +18,8 @@ CATALOG = {
 
 @pytest.fixture
 def store(monkeypatch):
+    import fakeredis
+
     monkeypatch.setattr(model_catalog, "catalog", lambda *args: CATALOG)
     saved = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     saved.create(SwarmConfig("sw", "/repo", 2, 1, state="paused"))
