@@ -152,7 +152,7 @@ def test_sections_toggle_sits_under_the_overview_and_flips_every_section(tab):
     tab.click("#sections-all")
     settle(tab)
     assert sections(tab) == {"labels": ["Expand all"], "open": [False] * len(SECTIONS)}
-    assert tab.evaluate("() => document.getElementById('overview-box').open")
+    assert tab.evaluate("() => document.getElementById('overview-box').querySelector('summary') === null")
 
 
 def test_sections_toggle_leaves_comments_and_outline_alone(tab):

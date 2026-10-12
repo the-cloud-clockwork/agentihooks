@@ -431,7 +431,7 @@ class SwarmPanel(unittest.TestCase):
             "swarm-agents",
             "swarm-overlays",
             "swarm-quota",
-            "swarm-doctor",
+            "doctor-row",
             "health",
             "swarm-handoffs",
             "capacity-box",
@@ -472,16 +472,16 @@ class SwarmPanel(unittest.TestCase):
             },
         )
 
-    def test_each_op_reports_pending_then_done_or_error(self):
+    def test_an_error_names_the_action_and_the_swarm_suffix_only_for_lifecycle_actions(self):
         out = self.run_js(
             ["opNote"],
-            '[opNote("pending", "autonomy"), opNote("done", "apply"), opNote("error", "start", "no swarm x")]',
+            '[opNote("error", "autonomy", "x"), opNote("error", "apply", "y"), opNote("error", "start", "no swarm x")]',
         )
         self.assertEqual(
             out,
             [
-                {"cls": "pending", "text": "Set autonomy: sending"},
-                {"cls": "ok", "text": "Apply capacity: acknowledged"},
+                {"cls": "bad", "text": "Could not set autonomy: x. Try again or ask the master."},
+                {"cls": "bad", "text": "Could not apply capacity: y. Try again or ask the master."},
                 {"cls": "bad", "text": "Could not start the swarm: no swarm x. Try again or ask the master."},
             ],
         )
