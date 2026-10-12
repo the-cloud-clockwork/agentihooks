@@ -42,3 +42,10 @@ def test_rounds_live_in_the_swarm_home_by_default(tmp_path, monkeypatch):
     monkeypatch.setattr(gate_log, "swarm_home", lambda: tmp_path)
     review_rounds.start("sw", "t1")
     assert (tmp_path / "sw" / "gates" / "reviews" / "counts" / "t1" / "rounds").read_text() == "1"
+
+
+def test_rounds_live_in_the_home_given(tmp_path, monkeypatch):
+    monkeypatch.setattr(gate_log, "swarm_home", lambda: tmp_path / "default")
+    review_rounds.start("sw", "t1", tmp_path / "given")
+    assert (tmp_path / "given" / "sw" / "gates" / "reviews" / "counts" / "t1" / "rounds").read_text() == "1"
+    assert not (tmp_path / "default").exists()
