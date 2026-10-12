@@ -23,12 +23,15 @@ class TwoHives(cases.World):
         from scripts.swarm.store import MASTER, AgentRecord
 
         hive = "local" if address == cases.LEAD else "anton"
-        self.store.put_agent(
+        name = self.store.next_name(cases.SLUG, MASTER)
+        self.store.start_execution(
             cases.SLUG, AgentRecord(name, MASTER, MASTER, pane_id=f"p-{name}", seat=address, hive=hive)
         )
         self.store.seats.occupy(address, name, 1)
         if address == cases.LEAD:
-            self.lead = name
+            self.lead = self.lead_name = name
+        else:
+            self.second_name = name
 
 
 def add(world, kind, hive="anton"):
@@ -75,13 +78,13 @@ def test_event_relay_sends_hive_items_once_to_the_owner(world, kind):
     add(world, kind)
     doc = world.doc()
     ledger_events.event_pass(inbox, world.store, cases.SLUG, doc, None, 0)
-    received = inbox.inbox(cases.SECOND_NAME)
+    received = inbox.inbox(world.second_name)
     assert len(received) == 1
     assert received[0].address == cases.SECOND
     assert received[0].ref == f"{cases.SLUG}:event:{kind}/targeted"
-    assert inbox.deliver(received[0].id, cases.LEAD_NAME) is None
-    assert inbox.deliver(received[0].id, cases.SECOND_NAME).state == "delivered"
-    assert inbox.deliver(received[0].id, cases.SECOND_NAME) is None
+    assert inbox.deliver(received[0].id, world.lead_name) is None
+    assert inbox.deliver(received[0].id, world.second_name).state == "delivered"
+    assert inbox.deliver(received[0].id, world.second_name) is None
     assert ledger_events.event_pass(inbox, world.store, cases.SLUG, doc, None, 0) == []
 
 
@@ -89,12 +92,12 @@ def test_question_is_decided_only_by_its_hive_owner_and_posted_once(world):
     from scripts.swarm_v2.masters_channel import MastersChannel
 
     add(world, "questions")
-    op = {"op": "answer", "id": "answer", "by": cases.LEAD_NAME, "item": "questions/targeted", "text": "Proceed"}
+    op = {"op": "answer", "id": "answer", "by": world.lead_name, "item": "questions/targeted", "text": "Proceed"}
     assert not world.write(op)["accepted"]
-    op = {**op, "by": cases.SECOND_NAME}
+    op = {**op, "by": world.second_name}
     assert world.write(op)["accepted"]
     assert world.write(op)["accepted"]
-    posts = MastersChannel(world.redis).read(cases.SLUG, cases.LEAD_NAME)
+    posts = MastersChannel(world.redis).read(cases.SLUG, world.lead_name)
     assert len(posts) == 1
     assert posts[0].seat == cases.SECOND
     assert len(next(q for q in world.doc()["questions"] if q["id"] == "targeted")["answers"]) == 1
@@ -104,7 +107,7 @@ def test_absent_hive_master_falls_back_to_lead(world):
     from scripts.swarm_v2 import masters
 
     add(world, "questions")
-    world.down(cases.SECOND_NAME)
+    world.down(world.second_name)
     table = masters.MasterSeats(world.redis)
     assert (
         masters.route(
@@ -112,7 +115,7 @@ def test_absent_hive_master_falls_back_to_lead(world):
         )
         == cases.LEAD
     )
-    op = {"op": "answer", "id": "answer", "by": cases.LEAD_NAME, "item": "questions/targeted", "text": "Proceed"}
+    op = {"op": "answer", "id": "answer", "by": world.lead_name, "item": "questions/targeted", "text": "Proceed"}
     assert world.write(op)["accepted"]
 
 
