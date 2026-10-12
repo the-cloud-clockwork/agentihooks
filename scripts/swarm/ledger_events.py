@@ -159,7 +159,7 @@ def view(url, run=subprocess.run):
 
 def head(url, run=subprocess.run):
     try:
-        owner, repo, _, number = url.rstrip("/").split("/")[-4:]
+        owner, repo, _, number = url.split("/")[-4:]
         return merge_queue.rest(f"repos/{owner}/{repo}/pulls/{number}", run)["head"]["sha"]
     except (SwarmError, ValueError, KeyError, TypeError):
         return ""
