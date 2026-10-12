@@ -1083,6 +1083,23 @@ def test_a_missing_gate_on_the_confirming_read_keeps_the_wait(tick):
     assert tick.told() == []
 
 
+def test_a_pending_first_read_keeps_waiting_before_a_successful_confirmation(tick):
+    tick.hold("checks", URL)
+    pending = gated_probe(
+        UNIT_PASSED + [{"name": "Gate — Required", "status": "IN_PROGRESS"}], [], workflows(GATE_WORKFLOW)
+    )
+    tick.pulls[URL] = pending
+    assert tick.end() == []
+    held = idle.wait(tick.store.redis, "sw", ME)
+    passed = gated_probe(
+        UNIT_PASSED + [{"name": "Gate — Required", "conclusion": "SUCCESS"}], [], workflows(GATE_WORKFLOW)
+    )
+    replies = iter([pending, passed])
+    assert waits.end_pass(tick.store, "sw", {}, tick.inbox, lambda url: next(replies), 5_000, None) == []
+    assert idle.wait(tick.store.redis, "sw", ME) == held
+    assert tick.told() == []
+
+
 def test_a_concluded_failure_ends_the_wait_with_a_missing_gate(tick):
     tick.hold("checks", URL)
     tick.pulls[URL] = gated_probe([{"name": "Unit tests", "conclusion": "FAILURE"}], [], workflows(GATE_WORKFLOW))
