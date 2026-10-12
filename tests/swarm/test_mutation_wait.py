@@ -232,9 +232,11 @@ def test_a_failed_run_or_report_cannot_pass_without_named_survivors(preflight, c
 
 def test_a_corrupt_report_download_on_a_green_run_is_unknown_not_red(preflight, monkeypatch, pauses):
     original = subprocess.run
+    downloads = []
 
     def api(args, **kwargs):
         if args[-1].endswith("/zip"):
+            downloads.append(args[-1])
             return subprocess.CompletedProcess(args, 0, b"unreadable")
         return original(args, **kwargs)
 
@@ -245,7 +247,7 @@ def test_a_corrupt_report_download_on_a_green_run_is_unknown_not_red(preflight, 
         "could not be fetched: File is not a zip file; wait on the run again"
     )
     assert pauses == list(mutation_wait.BACKOFF)
-    assert sum(request.endswith("/zip") for request in preflight.requests) == len(mutation_wait.BACKOFF) + 1
+    assert len(downloads) == len(mutation_wait.BACKOFF) + 1
 
 
 def test_a_truncated_report_download_is_unknown_not_red(preflight, monkeypatch):
