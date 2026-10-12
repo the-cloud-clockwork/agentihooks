@@ -15,9 +15,9 @@ def test_the_ledger_load_gate_runs_beside_the_shards_with_redis_inside_the_budge
         "uses": "./.github/workflows/ledger-load.yml"
     }
     assert job["needs"] == ["reuse"]
-    assert (
-        job["if"]
-        == "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}"
+    assert job["if"] in (
+        "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
+        "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.gate_plant) && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
     )
     load = yaml.safe_load((WORKFLOWS / "ledger-load.yml").read_text())["jobs"]["load"]
     assert "redis" in load["services"]

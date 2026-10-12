@@ -1,5 +1,6 @@
+import hashlib
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -7,6 +8,40 @@ class PaneObservation:
     state: str
     prompt_title: str = ""
     typed: str = ""
+    provider_error: str = ""
+    provider_checked: bool = field(default=False, compare=False)
+    provider_error_id: str = ""
+
+
+PROVIDER_ERRORS = {
+    "claude": (
+        r"API Error: (?:500|502|503|504|529)\b",
+        r"Unable to connect to API",
+        r"Connection error\.",
+    ),
+    "codex": (
+        r"stream disconnected before completion",
+        r"unexpected status (?:500|502|503|504)\b",
+        r"error sending request for url",
+    ),
+    "copilot": (
+        r"Request failed with status code (?:500|502|503|504)\b",
+        r"Failed to connect to (?:the )?model provider",
+    ),
+}
+
+
+def provider_error(harness: str, text: str) -> str:
+    plain = ESCAPE.sub("", text)
+    for pattern in PROVIDER_ERRORS.get(harness, ()):
+        if match := re.search(pattern, plain, re.I):
+            return match.group()
+    return ""
+
+
+def provider_error_id(harness: str, text: str) -> str:
+    lines = [line.strip() for line in ESCAPE.sub("", text).splitlines() if provider_error(harness, line)]
+    return hashlib.sha256("\n".join(lines).encode()).hexdigest() if lines else ""
 
 
 def selection_prompt(text: str) -> str:
