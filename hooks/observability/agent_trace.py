@@ -627,8 +627,8 @@ def _stage_source(state: dict, transcript_path: str) -> None:
                 break
             size, empty, waiting = size + weight, False, True
             merged[key] = masked
+            staged_bytes += end - position
         revisions[key] = revision
-        staged_bytes += end - position
         position, count = end, count + 1
     state["records"] = merged
     state["unsupported_records"] = unsupported
