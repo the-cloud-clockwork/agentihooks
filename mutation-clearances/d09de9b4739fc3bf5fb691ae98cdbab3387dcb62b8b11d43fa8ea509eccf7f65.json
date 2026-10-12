@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/bundle_copy.py:scripts.profiles.bundle_copy.x_attach__mutmut_8:7dd1a6627d2870d686f95565b29b5ec279474a709d0379d1ba88f7f529622233": {
+    "reader": "Standards reader",
+    "reason": "All reachable recorded, attach and reuse context assignments preserve active[0].name == active[1].name. Substituting either leaf name yields the identical destination path and unchanged outputs."
+  }
+}

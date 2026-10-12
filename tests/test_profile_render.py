@@ -2828,3 +2828,84 @@ def test_pinned_render_replaces_a_dirty_retained_bundle_copy(world, overlays):
     assert (repaired / "skills" / "bundle-skill" / "SKILL.md").read_text() == "---\nname: bundle-skill\n---\n"
     assert _git(world["bundle"], "status", "--porcelain") == ""
     assert bundle_copy.current() is None
+
+
+def test_pinned_render_preserves_bundle_symlinks(world, overlays):
+    from scripts.profiles import bundle_copy, render
+
+    skill = world["bundle"] / ".claude" / "skills" / "bundle-skill"
+    (skill / "linked.md").symlink_to("SKILL.md")
+    _commit(world["bundle"], "linked skill")
+    recorded = _git(world["bundle"], "rev-parse", "HEAD").strip()
+
+    out = render.render("claude", "rb-eng", overlays=["ov-a"], bundle_revision=recorded)
+
+    linked = out / "skills" / "bundle-skill" / "linked.md"
+    assert linked.is_symlink()
+    assert linked.readlink() == Path("SKILL.md")
+    assert linked.read_text() == "---\nname: bundle-skill\n---\n"
+    assert bundle_copy.current() is None
+
+
+def test_pinned_render_repairs_a_home_missing_its_bundle_copy(world, overlays):
+    from scripts.profiles import bundle_copy, render
+
+    recorded = _git(world["bundle"], "rev-parse", "HEAD").strip()
+    first = render.render("claude", "rb-eng", overlays=["ov-a"], bundle_revision=recorded)
+    shutil.rmtree(first.parent / "bundle")
+
+    repaired = render.render("claude", "rb-eng", overlays=["ov-a"], bundle_revision=recorded)
+
+    assert repaired is not None
+    assert (repaired / "skills" / "bundle-skill" / "SKILL.md").is_file()
+    assert bundle_copy.current() is None
+
+
+@pytest.mark.parametrize("failure", ["returncode", "timeout"])
+@pytest.mark.parametrize("operation", ["rev-parse", "status"])
+def test_pinned_cache_git_errors_report_the_recorded_bundle(world, overlays, monkeypatch, failure, operation):
+    from scripts.profiles import bundle_copy, render
+
+    recorded = _git(world["bundle"], "rev-parse", "HEAD").strip()
+    first = render.render("claude", "rb-eng", overlays=["ov-a"], bundle_revision=recorded)
+    copied = first.parent / "bundle" / world["bundle"].name
+    run = subprocess.run
+
+    def fail_copy(argv, **kwargs):
+        if argv[:3] == ["git", "-C", str(copied)] and argv[3] == operation:
+            if failure == "timeout":
+                raise subprocess.TimeoutExpired(argv, 10)
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="copy failure\n")
+        return run(argv, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", fail_copy)
+
+    with pytest.raises(ValueError) as refused:
+        render.render("claude", "rb-eng", overlays=["ov-a"], bundle_revision=recorded)
+
+    prefix = f"the launch recorded bundle commit {recorded}, but"
+    detail = (
+        f"git did not answer within 10 seconds for the bundle at {world['bundle']}"
+        if failure == "timeout"
+        else f"git cannot read the bundle at {world['bundle']}: copy failure"
+    )
+    assert str(refused.value) == f"{prefix} {detail}"
+    assert bundle_copy.current() is None
+
+
+def test_pinned_copilot_rebuild_keeps_the_recorded_overlay_servers(world, overlays, monkeypatch):
+    from scripts.profiles import bundle_copy, render
+
+    server = {"mcpServers": {"overlay-server": {"command": "overlay-command"}}}
+    _write(overlays / "ov-a" / ".copilot" / ".mcp.json", json.dumps(server))
+    _commit(world["bundle"], "overlay server")
+    recorded = _git(world["bundle"], "rev-parse", "HEAD").strip()
+    first = render.render("copilot", "rb-eng", overlays=["ov-a"], bundle_revision=recorded)
+    (first / "mcp-config.json").write_text("{}")
+
+    rebuilt = render.render("copilot", "rb-eng", overlays=["ov-a"], bundle_revision=recorded)
+
+    assert rebuilt.parent != first.parent
+    servers = json.loads((rebuilt / "mcp-config.json").read_text())["mcpServers"]
+    assert servers["overlay-server"]["command"] == "overlay-command"
+    assert bundle_copy.current() is None

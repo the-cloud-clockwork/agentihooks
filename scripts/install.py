@@ -773,13 +773,14 @@ def _print_bundle_discover_hint(*, profile_hint: str = "default") -> None:
 
 
 def _get_bundle_path() -> Path | None:
-    from scripts.profiles.bundle_copy import current
-
-    if (recorded := current()) is not None:
-        return recorded
-    bundle = _load_state().get("bundle")
-    if bundle and (p := Path(bundle["path"])).is_dir():
-        return p
+    """Return the linked bundle path from state.json, or AGENTIHOOKS_BUNDLE_PATH env var."""
+    state = _load_state()
+    bundle = state.get("bundle")
+    if bundle:
+        p = Path(bundle["path"])
+        if p.is_dir():
+            return p
+    # Fallback: auto-discover from env var (headless/container mode)
     env_path = os.environ.get("AGENTIHOOKS_BUNDLE_PATH", "")
     if env_path:
         p = Path(env_path).expanduser().resolve()

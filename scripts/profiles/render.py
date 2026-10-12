@@ -65,24 +65,42 @@ def _global_env() -> dict[str, str]:
     return {k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}
 
 
-def declared(name: str) -> list[str]:
+def _resolve(name: str) -> Path | None:
     _i = _install_module()
-    found = [o for _, path in _i._resolve_profile_chain(name) for o in profile_chain.overlays(path)]
-    return [o for o in dict.fromkeys(found) if _i._resolve_profile_dir(o) is not None]
+    copy = bundle_copy.current()
+    if copy is None or name.startswith(profile_chain.PACKAGE_PREFIX):
+        return _i._resolve_profile_dir(name)
+    local = _i.PROFILES_DIR / name
+    if local.is_dir():
+        return local
+    candidate = copy / "profiles" / name
+    if candidate.is_dir():
+        return candidate
+    return _i._resolve_linked_profile_dir(name) or _i._package_role_dir(name)
+
+
+def _resolve_chain(names: list[str]) -> list[tuple[str, Path]]:
+    if bundle_copy.current() is None:
+        return _install_module()._resolve_profile_chain(",".join(names))
+    return [(name, _resolve(name)) for name in profile_chain.expand_profiles(names, _resolve)]
+
+
+def declared(name: str) -> list[str]:
+    found = [o for _, path in _resolve_chain([name]) for o in profile_chain.overlays(path)]
+    return [o for o in dict.fromkeys(found) if _resolve(o) is not None]
 
 
 def _chain(name: str, overlays: Sequence[str] = ()) -> list[tuple[str, Path]]:
-    _i = _install_module()
-    if _i._resolve_profile_dir(name) is None:
+    if _resolve(name) is None:
         raise ValueError(f"Profile '{name}' not found")
     always = [name, *declared(name)]
-    worn = profile_chain.worn(_i._resolve_profile_chain(",".join(always)), list(overlays), _i._resolve_profile_dir)
-    return _i._resolve_profile_chain(",".join([*always, *worn]))
+    worn = profile_chain.worn(_resolve_chain(always), list(overlays), _resolve)
+    return _resolve_chain([*always, *worn])
 
 
 def _bundle() -> Path | None:
     _i = _install_module()
-    bundle = _i._get_bundle_path()
+    bundle = bundle_copy.current() or _i._get_bundle_path()
     linked = (_i._load_state().get("bundle") or {}).get("path")
     if bundle is None and linked:
         raise ValueError(
