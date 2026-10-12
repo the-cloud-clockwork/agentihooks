@@ -13,6 +13,8 @@ context="$output/context-$fixture"
 mkdir "$context"
 git -C "$repo" archive HEAD | tar -x -C "$context"
 cleanup() {
+    if [[ -n "${scan_pid:-}" ]]; then wait "$scan_pid" || true; fi
+    if [[ -n "${profile_pid:-}" ]]; then wait "$profile_pid" || true; fi
     docker image rm "$image" "$rebuild" "$rejected" >/dev/null 2>&1 || true
     python3 - "$context" <<'PY'
 import shutil, sys
@@ -23,7 +25,8 @@ trap cleanup EXIT
 
 docker build --platform linux/amd64 ${WORKER_BASE_CONTEXT:+--build-context "$WORKER_BASE_CONTEXT"} --build-arg SOURCE_REVISION="$revision" \
     -f "$context/docker/swarm-node/Dockerfile" -t "$image" "$context" > "$output/build.log" 2>&1
-bash "$context/docker/swarm-node/scan.sh" "$image" "$output/credential-scan"
+bash "$context/docker/swarm-node/scan.sh" "$image" "$output/credential-scan" &
+scan_pid=$!
 for attempt in first second; do
     docker run --rm --network none --read-only \
         --tmpfs /home/worker:uid=10001,gid=10001 --tmpfs /tmp \
@@ -40,17 +43,20 @@ docker run --rm --network none --read-only --tmpfs /home/worker:uid=10001,gid=10
 probe="$context/tests/swarm_node"
 fixtures="$context/docker/swarm-node/fixtures/profiles"
 chmod -R a+rX "$probe" "$fixtures"
-for case in positive positive-second rejection recovery rollback noexec; do
-    volume=/home/worker:uid=10001,gid=10001,exec
-    if [[ "$case" == noexec ]]; then
-        volume=/home/worker:uid=10001,gid=10001
-    fi
-    docker run --rm --network none --read-only --tmpfs "$volume" --tmpfs /tmp \
-        -v "$fixtures:/fixtures:ro" -v "$probe:/opt/probe:ro" \
-        "$image" bash /opt/probe/profile-probe.sh "${case%-second}" \
-        > "$output/profile-$case.json" 2> "$output/profile-$case.log"
-done
-python3 "$probe/profile_evidence.py" "$output" "$fixture" "$revision" "$fixtures"
+(
+    for case in positive positive-second rejection recovery rollback noexec; do
+        volume=/home/worker:uid=10001,gid=10001,exec
+        if [[ "$case" == noexec ]]; then
+            volume=/home/worker:uid=10001,gid=10001
+        fi
+        docker run --rm --network none --read-only --tmpfs "$volume" --tmpfs /tmp \
+            -v "$fixtures:/fixtures:ro" -v "$probe:/opt/probe:ro" \
+            "$image" bash /opt/probe/profile-probe.sh "${case%-second}" \
+            > "$output/profile-$case.json" 2> "$output/profile-$case.log"
+    done
+    python3 "$probe/profile_evidence.py" "$output" "$fixture" "$revision" "$fixtures"
+) &
+profile_pid=$!
 
 for rejection in missing-checksum unsupported-architecture mismatched-binary; do
     python3 - "$context/docker/swarm-node/versions.lock" "$rejection" <<'PY'
@@ -87,6 +93,8 @@ docker run --rm --network none --read-only --tmpfs /home/worker:uid=10001,gid=10
     --tmpfs /tmp "$rebuild" > "$output/rebuild.json"
 docker run --rm --network none --read-only --tmpfs /home/worker:uid=10001,gid=10001 \
     --tmpfs /tmp "$image" > "$output/rollback.json"
+wait "$scan_pid"
+wait "$profile_pid"
 python3 - "$output" "$fixture" "$revision" <<'PY'
 import json, sys
 from pathlib import Path
