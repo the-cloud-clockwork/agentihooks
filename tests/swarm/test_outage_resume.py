@@ -197,9 +197,7 @@ def test_a_new_task_generation_fences_the_recovery_pass(store):
     from scripts.swarm import resume
 
     ledger, runtime, agents = three_owners(store)
-    original = next(agent for agent in store.agents("sw") if agent.name == agents[0].name)
-    agent = replace(original, execution_id="execution", generation=1)
-    store.put_agent("sw", agent)
+    agent = next(agent for agent in store.agents("sw") if agent.name == agents[0].name)
     authority = {
         "state": "active",
         "holder": agent.name,
