@@ -107,4 +107,18 @@ for _ in $(seq 30); do
 done
 printf 'after a Redis restart, the refreshed '
 docker exec "$run-member" python -c "$member_auth"
+docker exec "$run-member" agentihooks hive refresh >/dev/null
+printf 'after a Redis restart, a refresh still finds the member record\n'
+docker compose exec -T -e SLUG="$slug" swarm python -c '
+import os
+from scripts.inbox.seats import SeatRegistry
+from scripts.swarm.store import connect
+slug = os.environ["SLUG"]
+seat = SeatRegistry(connect().redis).occupant(f"eng-1@{slug}")
+assert seat and seat.occupant == "member-agent", f"the seat lost its occupant after the Redis restart: {seat}"
+print(f"after a Redis restart, the seat is still held by {seat.occupant}")
+'
+anonymous="$(docker compose exec -T redis redis-cli --tls --cacert /run/swarm-tls/ca.pem ping 2>&1 || true)"
+printf 'unauthenticated Redis client: %s\n' "$anonymous"
+[[ $anonymous == *NOAUTH* ]]
 printf 'Compose hive smoke passed\n'

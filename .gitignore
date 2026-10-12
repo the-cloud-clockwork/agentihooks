@@ -57,3 +57,4 @@ profiles/*/.claude/settings.json
 .impeccable/live/*
 !.impeccable/live/config.json
 docs/swarm-v2/.*.lock
+collected.json

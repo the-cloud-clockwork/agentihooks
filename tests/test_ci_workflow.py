@@ -26,6 +26,13 @@ def _pytest_command() -> str:
     raise AssertionError("no pytest step in test.yml")
 
 
+def _slowest_committed_test() -> float:
+    return max(
+        max(json.loads(subprocess.check_output(["git", "show", f"HEAD:{name}"], cwd=_ROOT, text=True)).values())
+        for name in (".test_durations", ".test_durations-3.12")
+    )
+
+
 @pytest.mark.parametrize("plugin", ["pytest-xdist", "pytest-split"])
 def test_dev_extra_declares_test_plugin(plugin):
     dev = tomllib.loads((_ROOT / "pyproject.toml").read_text())["project"]["optional-dependencies"]["dev"]
@@ -181,13 +188,25 @@ def test_a_hung_unit_shard_fails_near_twice_the_slowest_shard():
 
 def test_a_hung_unit_test_dumps_every_thread_stack_within_a_minute():
     command = _pytest_command()
-    slowest_test = max(
-        max(json.loads((_ROOT / name).read_text()).values()) for name in (".test_durations", ".test_durations-3.12")
-    )
+    slowest_test = _slowest_committed_test()
     timeout = int(re.search(r"-o faulthandler_timeout=(\d+)", command).group(1))
     assert slowest_test < timeout <= 60
     assert "no:faulthandler" not in command
     assert "faulthandler_exit_on_timeout" not in command
+
+
+def test_the_hung_test_bound_reads_the_committed_durations_not_the_downloaded_copy(tmp_path, monkeypatch):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    for name in (".test_durations", ".test_durations-3.12"):
+        (tmp_path / name).write_text(json.dumps({"tests/test_a.py::test_a": 1.0}))
+    subprocess.run(["git", "-C", str(tmp_path), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "d"], check=True
+    )
+    for name in (".test_durations", ".test_durations-3.12"):
+        (tmp_path / name).write_text(json.dumps({"tests/test_a.py::test_a": 90.0}))
+    monkeypatch.setattr(sys.modules[__name__], "_ROOT", tmp_path)
+    assert _slowest_committed_test() == 1.0
 
 
 def test_tests_run_on_pull_requests_into_dev_and_main():
@@ -365,7 +384,11 @@ def test_unit_pins_an_exact_uv_version():
     assert re.fullmatch(r"\d+\.\d+\.\d+", uv["with"]["version"])
 
 
-def test_stored_durations_cover_the_collected_suite():
+def _collected_suite() -> tuple[list[str], str]:
+    split = _ROOT / "collected.json"
+    if split.exists():
+        text = split.read_text()
+        return json.loads(text), text
     result = subprocess.run(
         [sys.executable, "-m", "pytest", "tests/", "--collect-only", "-q", "-n", "0", "-o", "addopts="],
         cwd=_ROOT,
@@ -375,14 +398,27 @@ def test_stored_durations_cover_the_collected_suite():
         env={**os.environ, "PYTEST_ADDOPTS": "", "PYTEST_DISABLE_PLUGIN_AUTOLOAD": ""},
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    collected = [line for line in result.stdout.splitlines() if line.startswith("tests/") and "::" in line]
-    assert collected, result.stdout
+    return [line for line in result.stdout.splitlines() if line.startswith("tests/") and "::" in line], result.stdout
+
+
+def test_stored_durations_cover_the_collected_suite():
+    collected, output = _collected_suite()
+    assert collected, output
     stored = json.loads((_ROOT / ".test_durations").read_text())
     missing = [nodeid for nodeid in collected if re.sub(r"@[^\[\]]*$", "", nodeid) not in stored]
     assert len(missing) * 10 <= len(collected), (
         f"{len(missing)} of {len(collected)} tests have no stored duration; "
         "refresh them with: python -m tests.refresh_durations"
     )
+
+
+def test_unit_shards_read_the_suite_the_split_job_collected():
+    jobs = _workflow()["jobs"]
+    upload = next(step for step in jobs["split"]["steps"] if step.get("name") == "Upload collected tests")
+    _, download = _unit_step_index(lambda s: s.get("name") == "Download the suite the split job collected")
+    assert download["uses"] == "./.github/actions/retry-download"
+    assert download["with"] == {"name": upload["with"]["name"]}
+    assert download["if"] == upload["if"]
 
 
 @pytest.mark.parametrize("missing", [0, 5, 10, 11, 100])
@@ -394,6 +430,19 @@ def test_stored_durations_allow_new_tests_concentrated_in_one_shard(tmp_path, mo
     monkeypatch.setattr(sys.modules[__name__], "_ROOT", tmp_path)
     monkeypatch.setenv("PYTEST_ADDOPTS", "--shard 1/4")
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    if missing <= 10:
+        test_stored_durations_cover_the_collected_suite()
+    else:
+        with pytest.raises(AssertionError, match=f"{missing} of 100 tests"):
+            test_stored_durations_cover_the_collected_suite()
+
+
+@pytest.mark.parametrize("missing", [10, 11])
+def test_stored_durations_read_the_split_jobs_collected_suite(tmp_path, monkeypatch, missing):
+    nodeids = [f"tests/test_probe.py::test_{i}" for i in range(100)]
+    (tmp_path / ".test_durations").write_text(json.dumps(dict.fromkeys(nodeids[: 100 - missing], 0.1)))
+    (tmp_path / "collected.json").write_text(json.dumps(nodeids))
+    monkeypatch.setattr(sys.modules[__name__], "_ROOT", tmp_path)
     if missing <= 10:
         test_stored_durations_cover_the_collected_suite()
     else:

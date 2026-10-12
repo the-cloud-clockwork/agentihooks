@@ -1,6 +1,7 @@
 import ast
 import importlib
 import os
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -119,6 +120,8 @@ def warm_imports(modules: list[str], workers: int) -> list[int]:
         pid = os.fork()
         if pid == 0:
             try:
+                # The fork inherits the controller's coverage tracer; its data is never saved, so tracing only costs CPU the collecting workers need.
+                sys.settrace(None)
                 for module in modules[start::workers]:
                     try:
                         importlib.import_module(module)

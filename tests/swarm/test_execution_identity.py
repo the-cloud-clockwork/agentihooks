@@ -184,6 +184,34 @@ def test_a_local_target_names_its_process_by_namespace_pid_and_start_time(store,
     assert store.start_execution("fixture", replace(agent, runtime_target=target)).runtime_target == target
 
 
+@pytest.mark.parametrize("host", [None, 12])
+def test_local_host_requires_a_string(store, agent, host):
+    with pytest.raises(SwarmError, match="must be a string"):
+        store.start_execution("fixture", replace(agent, runtime_target={"host_id": host}))
+
+
+def test_local_host_binds_to_one_process_once(store, agent):
+    initial = store.start_execution("fixture", replace(agent, runtime_target={"host_id": "host"}))
+    target = {"host_id": "host", "process_namespace": "ns", "pid": 12, "pid_start": 34}
+    store.put_agent("fixture", replace(initial, runtime_target=target))
+    bound = store.execution("fixture", initial.execution_id)
+    assert bound.runtime_target == target
+    with pytest.raises(SwarmError, match="immutable"):
+        store.put_agent("fixture", replace(bound, runtime_target={**target, "pid": 13}))
+
+
+def test_kubernetes_target_cannot_use_a_local_host(store, agent):
+    with pytest.raises(SwarmError, match="unsupported runtime target"):
+        store.start_execution(
+            "fixture",
+            replace(
+                agent,
+                runtime_backend="kubernetes",
+                runtime_target={"pod_namespace": "ns", "pod_name": "pod", "host_id": "host"},
+            ),
+        )
+
+
 @pytest.mark.parametrize(
     "changes",
     [

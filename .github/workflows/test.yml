@@ -513,6 +513,12 @@ jobs:
         with:
           name: split-${{ matrix.python-version }}
 
+      - name: Download the suite the split job collected
+        if: github.event.pull_request.base.ref != 'main'
+        uses: ./.github/actions/retry-download
+        with:
+          name: collected-${{ matrix.python-version }}
+
       # Page tests drive Chromium; the coverage shards run them so the page JavaScript they reach is measured.
       - name: Install the browser that page tests drive
         if: matrix.python-version == '3.12'
@@ -738,16 +744,10 @@ jobs:
         run: |
           python .github/coverage/proxy.py > sonar-proxy.log 2>&1 &
           echo "pid=$!" >> "$GITHUB_OUTPUT"
-          for attempt in {1..5}; do
-            if curl --fail --silent --show-error --max-time 10 http://127.0.0.1:9000/api/system/status; then
-              version=$(curl --fail --silent --show-error --max-time 10 http://127.0.0.1:9000/api/server/version)
-              test -n "$version"
-              echo "version=$version" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            sleep 1
-          done
-          exit 1
+          bash "$GITHUB_WORKSPACE/.github/coverage/sonar-retry.sh" "Sonar status" -- curl --fail --silent --show-error --max-time 10 http://127.0.0.1:9000/api/system/status
+          version=$(bash "$GITHUB_WORKSPACE/.github/coverage/sonar-retry.sh" "Sonar version" -- curl --fail --silent --show-error --max-time 10 http://127.0.0.1:9000/api/server/version)
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Hold the Delivery L2 binding
         if: steps.current.outputs.superseded != 'true'
@@ -756,7 +756,7 @@ jobs:
         run: |
           set -o pipefail
           : "${SONAR_READ_TOKEN:?SONAR_READ_TOKEN is not set}"
-          bound=$(curl --fail --silent --show-error --max-time 10 \
+          bound=$(bash "$GITHUB_WORKSPACE/.github/coverage/sonar-retry.sh" "Delivery L2 binding" -- curl --fail --silent --show-error --max-time 10 \
             -H "Authorization: Bearer $SONAR_READ_TOKEN" \
             "http://127.0.0.1:9000/api/qualitygates/get_by_project?project=agentihooks" | jq -er .qualityGate.name)
           if [[ "$bound" != 'Delivery L2' ]]; then
@@ -842,7 +842,7 @@ jobs:
             cp -a "$RUNNER_TEMP/sonar-scanner-$SONAR_SCANNER_VERSION-linux-x64/." "$scanner/"
           fi
           read -ra extra <<< "$ARGS"
-          "$scanner/bin/sonar-scanner" -Dsonar.projectBaseDir=. "${extra[@]}"
+          bash "$GITHUB_WORKSPACE/.github/coverage/sonar-retry.sh" --unless .scannerwork/report-task.txt "SonarQube Scan" -- "$scanner/bin/sonar-scanner" -Dsonar.projectBaseDir=. "${extra[@]}"
 
       - name: Upload coverage and analysis evidence
         if: always() && steps.current.outputs.superseded != 'true'
@@ -866,7 +866,7 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           set -o pipefail
-          api() { curl --fail --silent --show-error --max-time 10 --retry 2 --retry-all-errors -H "Authorization: Bearer $SONAR_TOKEN" "http://127.0.0.1:9000/api/$1"; }
+          api() { bash "$GITHUB_WORKSPACE/.github/coverage/sonar-retry.sh" "Sonar $1" -- curl --fail --silent --show-error --max-time 10 -H "Authorization: Bearer $SONAR_TOKEN" "http://127.0.0.1:9000/api/$1"; }
           task=$(sed -n 's/^ceTaskId=//p' .scannerwork/report-task.txt)
           [[ -n "$task" ]] || { echo "::error::No Sonar task id in report-task.txt."; exit 1; }
           while true; do
@@ -895,7 +895,7 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           set -o pipefail
-          api() { curl --fail --silent --show-error --max-time 10 -H "Authorization: Bearer $SONAR_TOKEN" "http://127.0.0.1:9000/api/$1"; }
+          api() { bash "$GITHUB_WORKSPACE/.github/coverage/sonar-retry.sh" "Sonar $1" -- curl --fail --silent --show-error --max-time 10 -H "Authorization: Bearer $SONAR_TOKEN" "http://127.0.0.1:9000/api/$1"; }
           expected=$(printf '%s\n' "new_bugs GT 0" "new_coverage LT 80" "new_duplicated_lines_density GT 3" \
             "new_security_hotspots_reviewed LT 100" "new_vulnerabilities GT 0" | sort)
           defined=$(api "qualitygates/show?name=Delivery%20L2" | jq -er '.conditions[] | "\(.metric) \(.op) \(.error)"' | sort)
@@ -917,6 +917,10 @@ jobs:
             echo "::error::The analysis was not graded on the Delivery L2 conditions. Foreign: ${foreign:-none}. Missing: ${missing:-none}."
             exit 1
           fi
+
+      - name: Show the Sonar proxy log
+        if: failure() && steps.proxy.outputs.pid != ''
+        run: cat sonar-proxy.log
 
       - name: Stop the proxy
         if: always() && steps.proxy.outputs.pid != ''

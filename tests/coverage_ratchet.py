@@ -51,7 +51,7 @@ def _grade(args: argparse.Namespace, head_files: list[Path], scratch: Path) -> t
     head = executed(head_files)
     wanted = git("rev-parse", args.base, cwd=args.head).strip()
     if getattr(args, "base_baseline", None):
-        runs = _cached_runs(args.head, wanted, args.shards, args.base_baseline)
+        runs = _cached_runs(args.head, wanted, args.base_baseline)
     else:
         runs = dev_runs(args.head, wanted, args.shards, scratch)
     base = next(runs, None)
@@ -67,11 +67,11 @@ def _chain(first: Measurement, rest):
     yield from rest
 
 
-def _cached_runs(repo: Path, commit: str, shards: int, path: Path):
+def _cached_runs(repo: Path, commit: str, path: Path):
     from tests.coverage_baseline import read
     from tests.coverage_history import _show
 
-    value = read(path, git("rev-parse", f"{commit}^{{tree}}", cwd=repo).strip(), shards)
+    value = read(path, git("rev-parse", f"{commit}^{{tree}}", cwd=repo).strip())
     for index, snapshot in enumerate([value, *value["history"]]):
         revision = snapshot["commit"] if index else commit
         lines = {path: set(lines) for path, lines in snapshot["executed"].items()}

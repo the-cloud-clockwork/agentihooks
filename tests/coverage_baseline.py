@@ -10,7 +10,7 @@ def _git(repo: Path, revision: str) -> str:
     return subprocess.check_output(["git", "rev-parse", revision], cwd=repo, text=True).strip()
 
 
-def read(path: Path, tree: str | None = None, shards: int | None = None) -> dict:
+def read(path: Path, tree: str | None = None) -> dict:
     if not path.is_file():
         raise ValueError(
             "baseline cache missing: a failed dev run saves no baseline; merge a measured dev revision instead of rerunning"
@@ -18,8 +18,6 @@ def read(path: Path, tree: str | None = None, shards: int | None = None) -> dict
     value = json.loads(path.read_text())
     if tree and value["tree"] != tree:
         raise ValueError("baseline cache tree differs from the base tree")
-    if shards is not None and value["shards"] != shards:
-        raise ValueError("baseline cache shards differ from the measured suite")
     return value
 
 
@@ -66,6 +64,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         shards = [args.head_shards / f"coverage-3.12-{n}" / ".coverage" for n in range(1, args.shards + 1)]
+        downloaded = sorted(folder.name for folder in args.head_shards.glob("coverage-3.12-*"))
+        if downloaded != sorted(shard.parent.name for shard in shards):
+            raise ValueError(f"downloaded shard coverage {downloaded} is not the {args.shards} shards the run split")
         record(args.head, shards, args.out, args.previous)
     except (subprocess.CalledProcessError, KeyError, ValueError, OSError) as exc:
         print(f"::error::Cannot record the coverage baseline: {exc}")
