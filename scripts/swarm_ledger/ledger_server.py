@@ -123,7 +123,7 @@ TRASH = ICON.format(
 )
 HOME_ICON = ICON.format('<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>')
 HEADS = {
-    "home": ("", "Ledger", "Kind:kind", "Overview", ">Open:open", ">Done:done", "Swarm:swarm", ">Activity:at", ""),
+    "home": ("Ledger", "Kind:kind", "Overview", ">Open:open", ">Done:done", "Swarm:swarm", ">Activity:at", ""),
     "bin": ("Ledger", "Kind", "Overview", ">Deleted", ">Left", ""),
 }
 PAGE_POLICY = page_policy.policy(os.environ, core.LEDGER_DIR, PORT)
@@ -135,9 +135,6 @@ PAGE_HEADERS = {"Content-Security-Policy": PAGE_POLICY, "X-Content-Type-Options"
 
 def home_summaries():
     return [{**s, "swarm": swarm_state(s["slug"])} for s in ledger_summaries()]
-
-
-FOLD_ALL = '<button class="act toggle-all" id="fold-all" type="button">Expand all</button>'
 
 
 def head_cell(label):
@@ -156,7 +153,7 @@ def index_page(view="home"):
         heading, total, watermark = "BIN", '<span class="total" id="total"></span>', ""
         fab = f'<a class="fab" id="home-fab" href="/" aria-label="HOME">{HOME_ICON}</a>'
     else:
-        heading, total, watermark = "HOME", FOLD_ALL, '<div class="watermark" aria-hidden="true"></div>'
+        heading, total, watermark = "HOME", "", '<div class="watermark" aria-hidden="true"></div>'
         fab = f'<a class="fab" id="bin-fab" href="/?view=bin" aria-label="Bin">{TRASH}</a>'
     values = {
         "HEADING": heading,

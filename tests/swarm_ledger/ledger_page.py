@@ -23,6 +23,7 @@ ORDER = (
     "artifacts",
     "threads",
     "render",
+    "edits",
     "notices",
 )
 ORDER += ("outline", "folds", "layout", "chat", "lifecycle", "swarm", "controls", "events", "main")
