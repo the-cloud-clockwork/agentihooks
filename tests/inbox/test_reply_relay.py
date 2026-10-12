@@ -1,18 +1,21 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from scripts.inbox.store import InboxStore
 from scripts.swarm import delivery, ledger_client
-from scripts.swarm_ledger import ledger_core
-from scripts.swarm_ledger.repository.legacy import fresh
-from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 def test_reply_and_page_relay_retries_keep_one_answer_and_one_page_post(tmp_path, monkeypatch):
     import fakeredis
+
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"))
+    from scripts.swarm_ledger import ledger_core
+    from scripts.swarm_ledger.repository.legacy import fresh
+    from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
 
     repository = SQLiteLedgerRepository(tmp_path / "page.db", domain=ledger_core)
     doc, meta, _ = fresh(
