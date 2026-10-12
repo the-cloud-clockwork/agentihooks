@@ -383,6 +383,8 @@ class InboxStore:
             return moved
 
     def reply(self, item_id, replier, text, fyi=False, answer_id=""):
+        from redis.exceptions import WatchError
+
         item = self.get(item_id)
         replier = self.names.resolve(replier)
         if not self.acts_for(replier, item.address):
@@ -399,7 +401,7 @@ class InboxStore:
             self.about(reply_id, entry)
         try:
             answer = self.send(replier, item.sender, text, fyi=fyi, item_id=reply_id)
-        except DuplicateItem:
+        except (DuplicateItem, WatchError):
             answer = self.get(reply_id)
             if (answer.sender, answer.address, answer.text, answer.fyi) != (replier, item.sender, text, fyi):
                 raise InboxError("a reply retry must keep its sender, recipient, text and informational flag") from None
