@@ -230,6 +230,33 @@ def test_reply_retry_after_a_lost_close_keeps_one_outgoing_item(store, monkeypat
     assert store.get(original.id).reason == f"done: replied with message {answer.id}"
 
 
+def test_racing_reply_retries_return_one_outgoing_answer(server, monkeypatch):
+    first, second = fresh(server), fresh(server)
+    original = first.send("alice", "bob", "question")
+    pipeline = first.redis.pipeline
+    raced = []
+
+    def racing_pipeline(*args, **kwargs):
+        pipe = pipeline(*args, **kwargs)
+        exists = pipe.exists
+
+        def racing_exists(key):
+            found = exists(key)
+            reply_id = first.redis.hget(first.key("item", original.id), "reply:bob")
+            if key == first.key("item", reply_id) and not raced:
+                raced.append(second.reply(original.id, "bob", "answer"))
+            return found
+
+        pipe.exists = racing_exists
+        return pipe
+
+    monkeypatch.setattr(first.redis, "pipeline", racing_pipeline)
+    answer = first.reply(original.id, "bob", "answer")
+    assert answer.id == raced[0].id
+    assert [item.id for item in first.inbox("alice")] == [answer.id]
+    assert [event["state"] for event in first.history(original.id)] == ["pending", "done"]
+
+
 def test_only_the_addressee_can_reply(store):
     item = store.send("alice", "bob", "hi")
     with pytest.raises(InboxError):
