@@ -3,6 +3,7 @@ set -euo pipefail
 
 hash="$(printf '%s' "$SWARM_REDIS_PASSWORD" | sha256sum | cut -d' ' -f1)"
 # Hive members are added at runtime and saved by ACL SAVE; the template users are rebuilt on every start.
+# The default user stays off yet holds every command, because Redis replays each MULTI/EXEC in the AOF as that user.
 hive_users="$(grep '^user hive-' /data/users.acl 2>/dev/null || true)"
 sed "s/@SWARM_REDIS_PASSWORD_SHA256@/$hash/" /compose/users.acl.template > /data/users.acl
 [[ -z "$hive_users" ]] || printf '%s\n' "$hive_users" >> /data/users.acl
