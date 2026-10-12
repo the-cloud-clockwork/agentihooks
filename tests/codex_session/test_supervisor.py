@@ -20,6 +20,11 @@ SLUG = "fixture"
 SEAT = f"eng-1@{SLUG}"
 
 
+import sys
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
+
+
 @pytest.fixture
 def store():
     import fakeredis
@@ -398,6 +403,67 @@ def test_two_executions_get_two_private_endpoints(store, server, clock, root, tm
     second = supervisor.launch(store, other_seat(launch_spec(store, server, tmp_path)), deps(server, clock, root))
     assert first.record.endpoint_ref != second.record.endpoint_ref
     assert len(store.redis.hgetall(store.key(SLUG, ENDPOINTS))) == 2
+
+
+def test_concurrent_executions_write_private_seeded_homes(store, server, root, tmp_path):
+    profile = Path(server.codex_home)
+    profile.mkdir()
+    (profile / "config.toml").write_text('model = "fixture"\n')
+    (profile / "hooks.json").write_text("{}")
+    shared = tmp_path / "shared-skills"
+    shared.mkdir()
+    (shared / "SKILL.md").write_text("fixture skill")
+    (profile / "skills").symlink_to(shared, target_is_directory=True)
+    (profile / "history.jsonl").symlink_to(tmp_path / "missing-history")
+    original = {p.name: p.read_bytes() for p in profile.iterdir() if p.is_file()}
+    barrier = Barrier(2)
+    servers = [Server(server.codex_home), Server(server.codex_home)]
+    specs = [launch_spec(store, item, tmp_path) for item in servers]
+    specs[1] = other_seat(specs[1])
+
+    def start(index):
+        item = servers[index]
+
+        def popen(command, **kwargs):
+            home = Path(kwargs["env"]["CODEX_HOME"])
+            barrier.wait(timeout=10)
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    "import os; from pathlib import Path; h = Path(os.environ['CODEX_HOME']); "
+                    "assert (h / 'skills' / 'SKILL.md').read_text() == 'fixture skill'; "
+                    "(h / 'config.toml').write_text(os.environ['EXECUTION_WRITER']); "
+                    "(h / 'hooks.json').write_text(os.environ['EXECUTION_WRITER']); "
+                    "(h / 'history.jsonl').write_text(os.environ['EXECUTION_WRITER']); "
+                    "(h / 'skills' / 'SKILL.md').write_text(os.environ['EXECUTION_WRITER'])",
+                ],
+                env={**kwargs["env"], "EXECUTION_WRITER": str(index)},
+                check=True,
+            )
+            item.info = {"codexHome": str(home)}
+            item.hooks = hooks(str(home / "hooks.json"))
+            return item.popen(command, **kwargs)
+
+        return supervisor.launch(store, specs[index], deps(item, Clock(), root, popen=popen))
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        started = list(pool.map(start, range(2)))
+    homes = [Path(item.spawns[0]["env"]["CODEX_HOME"]) for item in servers]
+    assert homes[0] != homes[1]
+    assert profile not in homes
+    assert len({item.record.execution_id for item in started}) == 2
+    for index, home in enumerate(homes):
+        assert stat.S_IMODE(home.stat().st_mode) == 0o700
+        assert all((home / name).read_text() == str(index) for name in ("config.toml", "hooks.json", "history.jsonl"))
+        assert (home / "skills" / "SKILL.md").read_text() == str(index)
+        assert not (home / "skills").is_symlink()
+        assert specs[index].environ["CODEX_HOME"] == str(profile)
+    assert {p.name: p.read_bytes() for p in profile.iterdir() if p.is_file()} == original
+    assert (shared / "SKILL.md").read_text() == "fixture skill"
+    assert (profile / "skills").is_symlink()
+    assert (profile / "history.jsonl").is_symlink()
+    assert not (tmp_path / "missing-history").exists()
 
 
 def test_the_runtime_root_comes_from_the_launch_environment_when_deps_name_none(store, server, clock, tmp_path):
