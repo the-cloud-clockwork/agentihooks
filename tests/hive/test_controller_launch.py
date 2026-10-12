@@ -884,7 +884,7 @@ def test_controller_ci_lane_cannot_replace_a_pinned_codex_harness_with_claude(se
     from scripts.swarm_v2.runtime.routed import RoutedRuntime
 
     config = replace(setup.config, lanes={"ci": {"agent": "codex"}})
-    setup.store.create(config)
+    setup.store.redis.hset(setup.store.key("fixture", "config"), "lanes", json.dumps(config.lanes))
     setup.herdr._profile_decision.return_value = ProfileDecision("cicd", "lane", "ci")
     fenced = FencedRuntime(setup.store, "fixture", setup.held, RoutedRuntime(setup.herdr, RuntimeRouter([])), "compose")
     assert fenced.placement_refusal("ci", {"id": "task"}) == "Codex hive placement is not enabled"
