@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from scripts.inbox.store import CLOSED, InboxError
-from scripts.swarm import operator_mail
+from scripts.swarm import operator_mail, outage
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.naming import lane_of
 from scripts.swarm.store import MASTER, PREFIX
@@ -396,7 +396,7 @@ def _settled(found):
 def findings_pass(inbox, store, slug, shown, doc=None):
     mail, sent = Mail(inbox, store, slug, doc), []
     for found in shown:
-        if found["kind"] == "spawn stall":
+        if found["kind"] == "spawn stall" or found["kind"] in outage.HELD.values():
             continue
         judged = (found.get("verdict") or {}).get("at", 0)
         text = (

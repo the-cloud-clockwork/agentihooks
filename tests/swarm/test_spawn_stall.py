@@ -127,7 +127,7 @@ def test_generic_wake_cannot_escalate_the_dedicated_alarm(stalled):
     tick_failure(stalled)
     inbox = InboxStore(store.redis)
     (item,) = inbox.pending_mail("master@sw")
-    assert wake.decide(item, None, inbox.history(item.id), clock[0] + 300_000, 300_000) is None
+    assert wake.decide(item, None, inbox.history(item.id), clock[0] + 300_000, 300_000, "sw") is None
 
 
 def test_normal_findings_pass_sends_no_duplicate_alarm(stalled):
