@@ -95,6 +95,17 @@ def test_no_wrapper_yet_writes_nothing(installed):
     assert not wrapper.exists()
 
 
+def test_a_chain_with_no_resolvable_profile_writes_nothing(installed):
+    install = installed["install"]
+    install._save_state(
+        {"bundle": {"path": str(installed["bundle"])}, "targets": {"global": {"codex": {"profile": "wr-gone"}}}}
+    )
+    wrapper = installed["home"] / "agentihooks-hook.sh"
+    old = wrapper.read_text()
+    assert codex_target.refresh_wrapper() is False
+    assert wrapper.read_text() == old
+
+
 def test_a_run_from_another_checkout_leaves_the_wrapper(installed, monkeypatch, tmp_path):
     install = installed["install"]
     monkeypatch.setattr(install, "install_root", lambda: tmp_path / "elsewhere")

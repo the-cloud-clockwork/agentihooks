@@ -132,6 +132,8 @@ def refresh_wrapper() -> bool:
     name = record.get("settings_profile")
     overlay = _i._resolve_profile_dir(name) if name else None
     chain = _i._resolve_profile_chain(record["profile"])
+    if not chain:
+        return False
     native = native_settings("codex", chain, (name, overlay) if overlay else None, say=lambda *_: None)
     text = wrapper_text(native.get("_agentihooks", {}).get("env", {}))
     if wrapper.read_text() == text:

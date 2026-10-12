@@ -1,4 +1,5 @@
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from scripts.targets._common import _install_module
@@ -8,7 +9,7 @@ def native_settings(
     install_target: str,
     profile_dirs: list[tuple[str, Path]],
     settings_profile: tuple[str, Path] | None,
-    say=None,
+    say: Callable[[str], None] | None = None,
 ) -> dict:
     _i = _install_module()
     say = say or _i._cprint
