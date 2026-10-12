@@ -153,7 +153,8 @@ SCALING_KEYS = {
 }
 ADDRESS_KEYS = {"api-url": "api_url"}
 NO_API_ADDRESS = "api-url takes an http or https address with a host and no credentials"
-CONFIG_KEYS = {**SCALING_KEYS, **ADDRESS_KEYS, **default_models.KEYS}
+TRANSPORT_KEYS = {"codex-inbox-transport": "codex_inbox_transport"}
+CONFIG_KEYS = {**SCALING_KEYS, **ADDRESS_KEYS, **default_models.KEYS, **TRANSPORT_KEYS}
 GATE_KEYS = {f"{name}-gate": name for name in catalog.defaults()}
 GATE_MODES = modes.MODES
 RETIRES_MASTER = frozenset({"stop now", "close ledger"})
@@ -265,6 +266,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
                     intent.pr_view,
                     intent.judge,
                     head=lambda url: getattr(view(url), "head", None),
+                    named=intent.named_view,
                 ).run,
                 doc,
             )
@@ -480,6 +482,8 @@ def stop_now(store, slug, runtime, ledger):
         store.drop_agent(slug, agent.name)
         row = rows.get(agent.task, {})
         if agent.state != "finished" and row.get("state") in ("claimed", "pr") and row.get("claimed_by") == agent.name:
+            if store.claims(slug, agent.task) > 0:
+                store.refund_claim(slug, agent.task)
             try:
                 ledger.update_task(slug, agent.task, {"state": "open", "claimed_by": ""})
             except LedgerRefused as exc:
@@ -682,7 +686,7 @@ def api_address(value):
 
 
 def config_value(key, value):
-    if key in default_models.KEYS:
+    if key in default_models.KEYS or key in TRANSPORT_KEYS:
         return value
     return api_address(value) if key in ADDRESS_KEYS else scaling_value(key, value)
 
@@ -744,7 +748,7 @@ def cmd_set(store, args):
             raise SwarmError(
                 f"set takes {', '.join(SETTABLE)}=<whole number>, masters=N, master-per=N|hive|off, "
                 f"{masters.HIVE_KEY}<hive id>=<master seat>, autonomy={'|'.join(AUTONOMY)}, "
-                f"effort-min=E, effort-max=E, claude-model=M, codex-model=M, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB, api-url=URL "
+                f"effort-min=E, effort-max=E, claude-model=M, codex-model=M, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB, api-url=URL, codex-inbox-transport=legacy|app_server "
                 f"or {', '.join(LANE_KEYS)}=<value>"
             )
         changes[SETTABLE[key]] = int(value)
@@ -777,6 +781,7 @@ def cmd_set(store, args):
                 "load_low": config.load_low,
                 "memory_per_agent_mb": config.memory_per_agent_mb,
                 "api_url": config.api_url,
+                "codex_inbox_transport": config.codex_inbox_transport,
                 "master_affinity": {"desired": affinity.desired(config) or "auto", "order": master},
                 "masters": masters.MasterSeats(store.redis).count(args.slug),
                 "master_per": master_scale.rule(store.redis, args.slug) or master_scale.OFF,

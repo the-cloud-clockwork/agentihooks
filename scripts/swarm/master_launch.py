@@ -176,7 +176,7 @@ def _new(store, slug, runtime, at):
             store.redis.delete(store.key(slug, "master-start"))
         raise SwarmError(f"the new master could not start: {exc}") from exc
     affinity.placed(store, slug, placed.harness)
-    record = placed_record(record, placed)
+    record = placed_record(store.execution_occupants(slug).get(record.seat, record), placed)
     reported = runtime.reported(record)
     store.put_agent(slug, replace(record, state="working" if reported else "starting"))
     launch_check.begin(store, slug, record, at)

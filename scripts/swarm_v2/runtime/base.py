@@ -1,7 +1,7 @@
 """The runtime protocol task orchestration calls: six operations, typed outcomes, capability flags checked first."""
 
 from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Protocol
@@ -57,8 +57,11 @@ class Placement:
     backend: str
     lanes: frozenset[str] = frozenset(("eng", "ci"))
     local_profiles: frozenset[str] = LOCAL_PROFILES
+    master_seats: Callable[[], frozenset[str]] = frozenset
 
     def backend_for(self, lane: str, task: dict) -> str:
+        if lane == "master":
+            return self.backend if task.get("id") in self.master_seats() else LOCAL
         profile = (task.get("profile_decision") or {}).get("profile") or task.get("profile")
         placed = profile not in self.local_profiles and lane in self.lanes
         return self.backend if placed else LOCAL

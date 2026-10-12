@@ -1,9 +1,9 @@
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from scripts.inbox.store import InboxStore
 from scripts.swarm import capacity, quota_notice
-from scripts.swarm.store import RedisStore
+from scripts.swarm.store import MASTER, RedisStore
 
 
 @dataclass(frozen=True)
@@ -33,7 +33,7 @@ def windows(account: capacity.Account, thresholds: Thresholds) -> list[str]:
             ("week", account.week_left, thresholds.week),
             ("five hour", account.five_left, thresholds.five),
         )
-        if left is not None and 100 - left >= limit
+        if left is not None and (100 - left >= limit or (window == "week" and account.reserved != ""))
     ]
 
 
@@ -76,6 +76,7 @@ def warn(slug: str, store: RedisStore, environ: dict) -> list[str]:
         account = accounts.get((agent.harness, agent.account))
         if agent.state == "finished" or account is None:
             continue
+        account = replace(account, reserved="") if agent.lane == MASTER else account
         life, due = str(agent.started_at), []
         for window in windows(account, thresholds):
             field, period = f"{agent.name}:{window}", f"{life}:{_reset(account, window)}"
