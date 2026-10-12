@@ -154,7 +154,10 @@ class TaskAuthority:
             if any(json.loads(raw)["claim"]["execution_id"] == scope.execution_id for raw in history):
                 self._stale()
             agent = self.store.execution(self.slug, scope.execution_id)
-            if previous is None and pipe.get(self.store.key(self.slug, "claim", scope.task_id)) not in (None, agent.name):
+            if previous is None and pipe.get(self.store.key(self.slug, "claim", scope.task_id)) not in (
+                None,
+                agent.name,
+            ):
                 raise SwarmError("claim_held")
             if previous and previous.state == "completed":
                 raise SwarmError("claim_held")
