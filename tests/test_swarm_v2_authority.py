@@ -35,6 +35,33 @@ def test_admission_persists_an_exclusive_task_owner(fixture):
     assert len(authority.journal("task")) == 1
 
 
+@pytest.mark.parametrize("owned", [True, False])
+def test_first_admission_preserves_or_consumes_the_controller_preclaim(fixture, owned):
+    store, authority, controller, clock, start = fixture
+    agent, token = start()
+    holder = agent.name if owned else "another-holder"
+    key = store.key("fixture", "claim", "task")
+    store.redis.set(key, holder)
+    if not owned:
+        with pytest.raises(SwarmError) as caught:
+            authority.admit(token, 100)
+        assert str(caught.value) == "claim_held"
+        assert store.redis.get(key) == holder
+        assert authority.current("task") is None
+        assert authority.journal("task") == []
+        return
+    claim = authority.admit(token, 100)
+    assert claim.holder == agent.name
+    assert claim.execution_id == agent.execution_id
+    assert claim.execution_generation == agent.generation
+    assert claim.generation == 1
+    assert claim.lease_deadline_ms == 1100
+    assert store.redis.get(key) == agent.name
+    assert authority.current("task") == claim
+    assert authority.admit(token, 100) == claim
+    assert len(authority.journal("task")) == 1
+
+
 @pytest.mark.parametrize("operation", ["renew", "release", "complete"])
 def test_partitioned_worker_cannot_mutate_its_successor(fixture, operation):
     store, authority, controller, clock, start = fixture
