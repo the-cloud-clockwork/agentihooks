@@ -29,6 +29,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Routed Codex exec calls keep authentication overrides in the subcommand's
+  configuration scope when its own configuration flags are present.
 - Codex provider recovery probes carry the routed account credential and native
   launch arguments, allowing a successful probe to close its outage.
 - Plan scope classification excludes test areas and the shared mutation clearance

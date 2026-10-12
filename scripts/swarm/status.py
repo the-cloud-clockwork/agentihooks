@@ -45,6 +45,9 @@ UNCLASSIFIED = "unclassified"
 PAUSED_WHILE_SLOW = ("idle with claim", "stale claim")
 
 
+from scripts.swarm_v2.checkpoints import cards as recovery_cards
+
+
 def now_ms():
     return int(time.time() * 1000)
 
@@ -166,7 +169,7 @@ def doctor_report(store, slug):
     }
 
 
-def handoff_rows(transfers_list, agents):
+def handoff_rows(transfers_list, agents, recoveries=None):
     latest = {row["seat"]: row for row in transfers_list}
     occupant = {a["seat"]: a for a in agents if a.get("seat")}
     seats = sorted(set(latest) | set(occupant), key=lambda seat: (not seat.startswith("master@"), seat))
@@ -185,6 +188,7 @@ def handoff_rows(transfers_list, agents):
                 "bound_at": row.get("binding", {}).get("at", 0),
                 "successor": row.get("successor") or agent.get("name", ""),
                 "awaiting": awaiting,
+                **((recoveries or {}).get(seat, {})),
             }
         )
     return rows
@@ -265,7 +269,7 @@ def status_report(store, slug, state):
         "auto_snapshot": auto_snapshot(config),
         "restored": store.restored(slug),
         "transfers": handed,
-        "handoffs": handoff_rows(handed, agents),
+        "handoffs": handoff_rows(handed, agents, recovery_cards.rows(store, slug)),
         "peer": store.peer(slug),
         "plan_shape": shape_report(tasks, config.max_eng),
         "compact_limit": compact_limit(config),

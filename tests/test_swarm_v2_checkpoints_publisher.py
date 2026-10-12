@@ -241,6 +241,30 @@ def test_a_restart_recaptures_an_interrupted_identity_with_other_bytes(root):
     assert pub.latest() == "ckpt-g2-s2"
 
 
+def test_object_store_retry_keeps_uploaded_immutable_material_records(root, monkeypatch):
+    pub = make(root)
+    pub.store.backend.kind = "object-store"
+    doc, materials = checkpoint(1)
+    role, material = next(iter(materials.items()))
+    reference = pub.store.put(f"{doc['checkpoint_id']}.{role}", material)
+    original_remove = pub.store.backend.remove
+    removed = []
+
+    def staging_only(key):
+        assert "/staging/" in key, "immutable final object must not be deleted"
+        removed.append(key)
+        original_remove(key)
+
+    monkeypatch.setattr(pub.store.backend, "remove", staging_only)
+    assert pub.publish(doc, materials).promoted
+    assert pub.store.recorded(f"{doc['checkpoint_id']}.{role}") == reference
+    assert pub.validator.verify(doc["checkpoint_id"]).authoritative
+    assert removed
+    before = files(root)
+    assert pub.reclaim(doc["checkpoint_id"]) == []
+    assert files(root) == before
+
+
 def test_a_committed_unpromoted_identity_with_other_bytes_is_refused(root):
     pub = make(root)
     doc, materials = checkpoint(1, payload=b"first")

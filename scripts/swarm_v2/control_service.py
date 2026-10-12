@@ -123,7 +123,13 @@ class ControlService:
         self.pods: Callable[[str], tuple[PodStatus, ...]] | None = None
         self.api_url = ""
         self.recover: Callable[[], dict[str, str]] | None = None
-        self.recovery_api = RecoveryAPI(store, slug, lambda: getattr(self.recover, "recovery", None), operator)
+        self.recovery_api = RecoveryAPI(
+            store,
+            slug,
+            lambda: getattr(self.recover, "recovery", None),
+            operator,
+            lambda token: self.grants.bound(slug, token),
+        )
         self.views: Callable[[], dict] | None = None
         self.viewing: threading.Thread | None = None
         self.tasks_api: TasksAPI | None = None

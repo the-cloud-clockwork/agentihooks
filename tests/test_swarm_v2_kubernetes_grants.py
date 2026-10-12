@@ -1,4 +1,5 @@
 import json
+from dataclasses import asdict
 
 import pytest
 
@@ -109,6 +110,9 @@ def registration() -> Registration:
     )
 
 
+RECORD["registration"] = asdict(registration())
+
+
 def verify(token: str) -> Registration:
     if token != GRANT:
         raise GrantRefused("unauthenticated", "launch grant was not issued by this controller")
@@ -143,6 +147,20 @@ def test_the_grant_lands_in_the_launch_config_map_its_pod_owns():
     assert api.reads == [POD]
     assert api.created == [material()]
     assert api.deleted == []
+
+
+@pytest.mark.parametrize("spec", [{}, {"containers": []}, {"containers": [{}]}])
+def test_missing_pod_image_keeps_launch_material_unchanged(spec):
+    api = Api({**pod(), "spec": spec})
+    assert grants(api).hand(agent(), GRANT) == Hand(True, "handed", False)
+    assert api.created == [material()]
+
+
+def test_launch_material_records_the_running_container_digest_in_canonical_json():
+    digest = "sha256:" + "c" * 64
+    api = Api({**pod(), "spec": {"containers": [{"image": "fixture/worker@" + digest}]}})
+    assert grants(api).hand(agent(), GRANT) == Hand(True, "handed", False)
+    assert api.created == [material(record={**RECORD, "image_digest": digest})]
 
 
 def test_the_config_map_is_the_one_the_pod_template_mounts_at_the_launch_folder():
@@ -241,8 +259,41 @@ def test_a_set_exporter_is_copied_into_the_launch_record():
     assert api.created == [material({**RECORD, "exporter": ["python", "-m", "exporter"]})]
 
 
+def test_the_launch_record_names_the_restore_the_recovery_decided_for_the_attempt():
+    api, asked = Api(pod()), []
+    directive = {"checkpoint_id": "ckpt-1", "recovery": "native", "session_id": "s-1", "watermark": 4096}
+
+    def restores(execution_id):
+        asked.append(execution_id)
+        return directive
+
+    granting = PodGrants(api, SLUG, verify, Supervision("claude", None, CONTROL), restores=restores)
+    assert granting.hand(agent(), GRANT) == Hand(True, "handed", False)
+    assert asked == [EXECUTION]
+    resumed = {key: value for key, value in RECORD.items() if key != "checkout"}
+    assert api.created == [material({**resumed, "restore": directive})]
+
+
+def test_a_fresh_recovery_keeps_the_checkout_beside_its_restore():
+    directive = {"checkpoint_id": "", "recovery": "fresh", "session_id": "", "watermark": 0}
+    api = Api(pod())
+    granting = PodGrants(
+        api, SLUG, verify, Supervision("claude", None, CONTROL), restores=lambda execution_id: directive
+    )
+    assert granting.hand(agent(), GRANT) == Hand(True, "handed", False)
+    assert api.created == [material({**RECORD, "restore": directive})]
+
+
+def test_an_attempt_no_recovery_admitted_carries_no_restore():
+    assert grants(Api(pod())).restores(EXECUTION) is None
+    record = json.loads(Supervision("claude", None, CONTROL).record(registration(), "engineer"))
+    assert "restore" not in record
+    assert json.loads(Supervision("claude", None, CONTROL).record(registration(), "engineer", {}))["restore"] == {}
+
+
 @pytest.mark.parametrize("budgets", [Budgets(), Budgets(3, 7, 11, 4)])
 def test_the_supervisor_loads_the_handed_record_against_the_registered_authority(tmp_path, budgets):
+
     api = Api(pod())
     PodGrants(api, SLUG, verify, Supervision("claude", None, CONTROL, budgets)).hand(agent(), GRANT)
     attempt = tmp_path / EXECUTION

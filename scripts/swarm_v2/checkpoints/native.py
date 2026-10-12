@@ -145,7 +145,7 @@ def _complete(data: bytes) -> bytes:
 
 def _records(data: bytes) -> list[dict]:
     try:
-        records = [json.loads(text) for text in data.decode().splitlines()]
+        records = [json.loads(text) for text in data.decode().split("\n") if text]
     except ValueError as error:
         raise NativeError(FORMAT) from error
     if not records or not all(isinstance(r, dict) and isinstance(r.get("type"), str) for r in records):

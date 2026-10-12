@@ -78,7 +78,10 @@ def _native_problem(doc: dict) -> str | None:
 def _typed_problem(doc: dict) -> str | None:
     if any(name not in doc for name in TYPED):
         return "missing_material"
-    if doc["reconstruction"]["execution_generation"] != doc["authority"]["task_generation"]:
+    authority = doc["authority"]
+    if doc["reconstruction"]["execution_generation"] != authority.get(
+        "execution_generation", authority["task_generation"]
+    ):
         return "scope_mismatch"
     cursor = doc["transcript_durable_cursor"]
     if not (_counted(cursor.get("sequence")) and _counted(cursor.get("byte_offset"))):
@@ -94,8 +97,11 @@ def _typed_problem(doc: dict) -> str | None:
 class Validator:
     """Every read goes through the store granted to this attempt; a verdict never names record values or paths."""
 
-    def __init__(self, store: ArtifactStore, loaded: dict | None = None) -> None:
+    def __init__(
+        self, store: ArtifactStore, loaded: dict | None = None, execution_generation: int | None = None
+    ) -> None:
         self.store = store
+        self.execution_generation = execution_generation
         self.contracts = contracts.load() if loaded is None else loaded
         self.decisions: Counter[str] = Counter()
 
@@ -127,6 +133,14 @@ class Validator:
             return _refused("not_committed")
         if problem := _typed_problem(doc):
             return _refused(problem)
+        if (
+            doc["authority"]["execution_id"] == self.store.scope.execution_id
+            and "execution_generation" in doc["authority"]
+            and self.execution_generation is not None
+            and doc["authority"].get("execution_generation", doc["authority"]["task_generation"])
+            != self.execution_generation
+        ):
+            return _refused("scope_mismatch")
         if doc["continuation"] == NATIVE:
             return Verdict(COMPLETE, NATIVE, NATIVE)
         return Verdict(COMPLETE, CONTEXT, CONTEXT, CONTEXT_LIMITS)

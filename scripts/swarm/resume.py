@@ -11,6 +11,8 @@ from scripts.swarm_ledger import ledger_workspace
 
 AWAITING = "awaiting-decision"
 RESUMED, FRESH = "resumed", "fresh"
+KUBERNETES = "kubernetes"
+RECOVERY_REQUESTS = "recovery-requests"
 REOPENED = "own conversation reopened"
 RESTORED = (
     "The swarm {slug} was restored from a snapshot and reopened this conversation of yours as {name}, on task {task}. "
@@ -128,6 +130,8 @@ def decide(store, slug: str, name: str, choice: str, runtime, now_ms: int, ledge
     agent = next((a for a in store.agents(slug) if a.name == name), None)
     if agent is None or agent.state != AWAITING:
         raise SwarmError("This agent is not awaiting a restore decision")
+    if agent.execution_id and agent.runtime_backend == KUBERNETES:
+        return requested(store, slug, agent, choice, now_ms)
     previous = next(r for r in store.restored(slug) if r["name"] == name)
     if choice == "fresh":
         transfers.fresh(store, slug, previous["transfer"], now_ms)
@@ -160,3 +164,13 @@ def decide(store, slug: str, name: str, choice: str, runtime, now_ms: int, ledge
         raise SwarmError("Choose resume or fresh")
     store.put_restored(slug, [asdict(outcome) if r["name"] == name else r for r in store.restored(slug)])
     return outcome
+
+
+def requested(store, slug: str, agent, choice: str, now_ms: int) -> Outcome:
+    """A Pod attempt's choice is only requested here; the controller applies it under its lease on its next pass,
+    and a repeated request for the same attempt replaces the pending one instead of queueing a second."""
+    if choice not in ("resume", "fresh"):
+        raise SwarmError("Choose resume or fresh")
+    store.redis.hset(store.key(slug, RECOVERY_REQUESTS), agent.execution_id, choice)
+    reason = f"Recovery requested: {choice}"
+    return Outcome(agent.name, agent.lane, agent.task, AWAITING, reason, agent.conversation_id, now_ms)

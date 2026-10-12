@@ -13,6 +13,9 @@ SESSIONS = {"claude": ("CLAUDE_CONFIG_DIR", "projects"), "codex": ("CODEX_HOME",
 SESSION_ID_LENGTH = 36
 
 
+from scripts.swarm_v2.checkpoints import capture as portable_capture
+
+
 def _sessions(root: Path) -> list[Path]:
     found = []
     for folder, _, names in os.walk(root):
@@ -41,6 +44,10 @@ def export(attempt: Path, scope: dict, environ: Mapping[str, str]) -> dict:
     transcripts = [path for path in found if "subagents" not in path.relative_to(root).parts]
     if not transcripts:
         return {"status": "incomplete", "reason": "no_native_session"}
+    if portable_capture.enabled(environ):
+        return portable_capture.publish(
+            attempt, scope, environ, newest=max(transcripts, key=lambda path: path.stat().st_mtime_ns)
+        )
     checkpoint = Path("checkpoints") / scope["incarnation"]
     files = []
     for source in found:

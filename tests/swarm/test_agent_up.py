@@ -261,9 +261,17 @@ def test_the_operator_launch_opens_claude_in_the_swarm_space_with_the_inbox_chan
 def test_the_operator_launch_starts_on_the_frontier_model_inside_the_swarm_effort_range(tmp_path, monkeypatch):
     from scripts.swarm import model_pick
 
-    monkeypatch.setattr(model_pick, "frontier", lambda harness: model_pick.ModelPick(f"{harness}-top", "max"))
+    monkeypatch.setattr(
+        model_pick, "frontier", lambda harness, default_model: model_pick.ModelPick(f"{harness}-top", "max")
+    )
     _, seen = _operator_launch(tmp_path, monkeypatch, effort_min="low", effort_max="medium")
     assert seen["argv"][seen["argv"].index("--") + 1 :] == ["--model", "claude-top", "--effort", "medium"]
+
+
+def test_the_operator_launch_uses_the_configured_frontier_model(tmp_path, monkeypatch):
+    _, seen = _operator_launch(tmp_path, monkeypatch, claude_model="sonnet")
+    passed = seen["argv"][seen["argv"].index("--") + 1 :]
+    assert passed[:4] == ["--model", "sonnet", "--effort", "high"]
 
 
 @pytest.mark.parametrize(("lane", "slug"), [("operator", ""), ("plan", "sw"), ("", "sw")])

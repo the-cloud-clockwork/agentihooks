@@ -76,6 +76,7 @@ from scripts.swarm import (
     bottleneck_status,
     clearance,
     control_notifications,
+    default_models,
     delivery,
     dev_red,
     dispatch_seat,
@@ -151,7 +152,7 @@ SCALING_KEYS = {
 }
 ADDRESS_KEYS = {"api-url": "api_url"}
 NO_API_ADDRESS = "api-url takes an http or https address with a host and no credentials"
-CONFIG_KEYS = {**SCALING_KEYS, **ADDRESS_KEYS}
+CONFIG_KEYS = {**SCALING_KEYS, **ADDRESS_KEYS, **default_models.KEYS}
 GATE_KEYS = {f"{name}-gate": name for name in catalog.defaults()}
 GATE_MODES = modes.MODES
 RETIRES_MASTER = frozenset({"stop now", "close ledger"})
@@ -679,6 +680,8 @@ def api_address(value):
 
 
 def config_value(key, value):
+    if key in default_models.KEYS:
+        return value
     return api_address(value) if key in ADDRESS_KEYS else scaling_value(key, value)
 
 
@@ -739,7 +742,7 @@ def cmd_set(store, args):
             raise SwarmError(
                 f"set takes {', '.join(SETTABLE)}=<whole number>, masters=N, master-per=N|hive|off, "
                 f"{masters.HIVE_KEY}<hive id>=<master seat>, autonomy={'|'.join(AUTONOMY)}, "
-                f"effort-min=E, effort-max=E, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB, api-url=URL "
+                f"effort-min=E, effort-max=E, claude-model=M, codex-model=M, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB, api-url=URL "
                 f"or {', '.join(LANE_KEYS)}=<value>"
             )
         changes[SETTABLE[key]] = int(value)
@@ -763,6 +766,8 @@ def cmd_set(store, args):
                 "snapshot_minutes": config.snapshot_minutes,
                 "effort_min": config.effort_min,
                 "effort_max": config.effort_max,
+                "claude_model": config.claude_model,
+                "codex_model": config.codex_model,
                 "lanes": config.lanes,
                 "overlays": config.overlays,
                 "scaling": config.scaling,

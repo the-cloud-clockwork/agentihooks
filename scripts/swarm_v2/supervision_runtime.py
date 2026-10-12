@@ -15,6 +15,7 @@ from hooks.proc import _process
 from scripts.account_names import oauth_env
 from scripts.swarm_v2 import filesystem
 from scripts.swarm_v2 import supervision_processes as trees
+from scripts.swarm_v2.checkpoints import runtime as checkpoint_runtime
 from scripts.swarm_v2.supervision import Launch, LaunchRefused
 from scripts.swarm_v2.supervision_agent import native_command
 from scripts.swarm_v2.supervision_protocol import checkpoint, matches, read, write
@@ -124,7 +125,9 @@ class Supervisor:
             if not self.ready(role, deadline):
                 return "termination" if self.stop else f"{role}_startup_failure"
         directory = self.launch.checkout or self.launch.attempt
-        agent = native_command(self.launch.agent, directory, self.environment)
+        agent = native_command(
+            checkpoint_runtime.command(self.launch.attempt, self.launch.agent), directory, self.environment
+        )
         command = [sys.executable, "-m", "scripts.swarm_v2.supervision_agent", *self.opening(), *agent]
         self.phase = "workspace_create"
         tab = self.herdr(["workspace", "create", "--cwd", str(directory), "--no-focus"])
@@ -185,7 +188,17 @@ class Supervisor:
         deadline = time.monotonic() + self.launch.budgets.checkpoint
         while clean and self.launch.exporter and time.monotonic() < deadline:
             identifier = checkpoint(self.launch.attempt, read(self.root / "exporter.checkpoint.json"), self.scope)
-            if identifier or "exporter" in self.exits:
+            if identifier:
+                portable = (
+                    self.environment.get(checkpoint_runtime.ROOT)
+                    or self.environment.get(checkpoint_runtime.REMOTE) == "true"
+                )
+                if portable and not checkpoint_runtime.validate_export(
+                    self.launch.attempt, identifier, self.environment
+                ):
+                    identifier = None
+                break
+            if "exporter" in self.exits:
                 break
             self.wait()
         trees.cleanup(os.getpid(), self.launch.budgets.kill, self.observe)

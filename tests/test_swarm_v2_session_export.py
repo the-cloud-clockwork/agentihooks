@@ -94,6 +94,29 @@ def test_claude_sessions_are_copied_into_a_manifest_the_supervisor_accepts(tmp_p
     assert protocol.checkpoint(attempt, {**scope, **fields}, scope) == "ckp-inc-1"
 
 
+def test_portable_export_selects_newest_main_conversation_and_returns_durable_ack(tmp_path, monkeypatch):
+    from scripts.swarm_v2.checkpoints import runtime
+
+    attempt, home, environ = _home(tmp_path, "claude")
+    environ[runtime.ROOT] = str(tmp_path / "durable")
+    projects = home / ".claude/projects/fixture"
+    newest = projects / f"{CLAUDE_ID}.jsonl"
+    _session(newest, b'{"type": "user"}\n', 2_000)
+    _session(projects / f"{OLDER_ID}.jsonl", b'{"type": "old"}\n', 1_000)
+    _session(projects / CLAUDE_ID / "subagents/agent.jsonl", b'{"type": "sub"}\n', 3_000)
+    scope = _scope()
+    calls = []
+    acknowledgement = {"status": "complete", "manifest": "manifest", "sha256": "digest"}
+    monkeypatch.setattr(
+        session_export.portable_capture,
+        "publish",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or acknowledgement,
+    )
+    assert session_export.export(attempt, scope, environ) == acknowledgement
+    assert calls == [((attempt, scope, environ), {"newest": newest})]
+    assert not (attempt / "checkpoints").exists()
+
+
 def test_codex_rollouts_name_their_session_id(tmp_path):
     attempt, home, environ = _home(tmp_path, "codex")
     rollout = home / ".codex" / "sessions" / "2026" / "10" / "11" / f"rollout-2026-10-11T20-30-00-{CODEX_ID}.jsonl"
