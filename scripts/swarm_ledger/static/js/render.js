@@ -359,7 +359,7 @@ export function renderStats() {
     row("Elapsed", elapsed === null ? "—" : span(elapsed)),
     row("Time left", leftText),
     row("Unfrozen", calc && calc.frozen !== undefined ? String(calc.remaining) : "—"),
-    row("Frozen", calc && calc.frozen !== undefined ? `${calc.frozen} · ${span(calc.frozen_work * 60000)} of work` : "—"),
+    row("Frozen", calc && calc.frozen !== undefined ? `${calc.frozen} · ${span(calc.frozen_work * 60000)}` : "—"),
     row("Phases", `${done} / ${total} · ${pct}%`, h("div", { class: "bar" }, h("i", { style: `width:${pct}%` }))),
     row("Tasks", `${tasks.filter((t) => t.done || t.state === "done").length} / ${tasks.length}`),
     row("Open", figure(counts.open)),

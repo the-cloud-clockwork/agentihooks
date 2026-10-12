@@ -184,7 +184,7 @@ The ledger page is a three-column desktop layout at 1920 width: a fixed outline 
 - **Panels.** Below Capacity, full width, in this order: Quota, Overlays, Agents, Health, Handoff outcomes, Freezes. Each folds on its header and keeps a drag height grip; a folded panel shrinks to its header. Reset layout restores sizes; the order is fixed. The Quota panel has no capacity line under its table and lists only accounts read within 15 minutes of the newest reading.
 
 ### Stats
-Rows from Started to Last activity, then Top bottleneck last, as a bullet list (stage, trend, measured, last action). Each row is a key and value on a fixed label track (112px), labels muted and values right aligned on one column, hairlines between rows; a long value wraps inside its track and never covers its label.
+Rows from Started to Last activity, then Top bottleneck last: its title carries the measured age (`Top bottleneck · 3m ago`) over a bullet list of stage, trend and last action. Each row is a key and value on a fixed label track (104px), labels muted and values right aligned on one column, hairlines between rows. A value stays on one line; one that does not fit ends in an ellipsis and never covers its label.
 
 ## Elevation & Depth
 

@@ -338,6 +338,13 @@ class LandingBays(unittest.TestCase):
         columns = declared(css_of(page_source()), "#stats .stat")["grid-template-columns"]
         self.assertRegex(columns, r"^\d+px minmax\(0, 1fr\)$")
 
+    def test_stat_values_stay_on_one_line(self):
+        value = declared(css_of(page_source()), ".stat dd")
+        self.assertEqual(
+            (value.get("white-space"), value.get("overflow"), value.get("text-overflow")),
+            ("nowrap", "hidden", "ellipsis"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
