@@ -78,9 +78,9 @@ def _quota_handoff(store, ledger, runtime):  # noqa: F811
     return done, first, envelope
 
 
-def _capacity(eng, claude, codex):
+def _capacity(eng, claude, codex, idle=""):
     return (
-        f"quota capacity eng {eng} ci 0 plan 0 because accounts have quota; "
+        f"quota capacity eng {eng} ci 0 plan 0 because {idle}accounts have quota; "
         f"Claude has {claude} free seats and Codex has {codex} free seats"
     )
 
@@ -113,7 +113,7 @@ def test_a_quota_handoff_keeps_the_seat_and_launch_settings_on_another_account(s
     assert actions == [
         f"retired {done.name}",
         f"retired {first.name}",
-        _capacity(1, 5, 6) + WARNED,
+        _capacity(1, 5, 6, "eng has no more ready tasks; ") + WARNED,
         f"spawned {successor.name} for {first.task}",
     ]
     assert successor.seat == first.seat
