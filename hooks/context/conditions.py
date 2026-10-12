@@ -639,6 +639,8 @@ _SIGNAL = re.compile(
     rf"{_NAMED}conditions?|(?:set|add|create|update|remove){_NAMED}(?:filters?|classifiers?))\b",
     re.IGNORECASE,
 )
+_CODE_NOUN = re.compile(r"\b(?:endpoints?|quer(?:y|ies)|tables?|lists?|columns?)\b", re.IGNORECASE)
+_BESIDE_WORDS = 4
 _CONDITION_TOOL = re.compile(r"(?:agentihooks|hooks[-_]utils).*condition_(?:set|clear)$", re.IGNORECASE)
 _EDIT_TOOLS = frozenset({"Write", "Edit", "MultiEdit", "NotebookEdit"})
 _NEAR_CONDITIONS = re.compile(
@@ -733,6 +735,9 @@ def contains_condition_signal(prompt: str) -> bool:
 
     for match in _SIGNAL.finditer(prompt or ""):
         prefix = prompt[max(0, match.start() - 20) : match.start()].lower().strip()
+        after = " ".join(prompt[match.end() :].split()[:_BESIDE_WORDS])
+        if _CODE_NOUN.search(match.group(0)) or _CODE_NOUN.search(after):
+            continue
         if not any(prefix.endswith(neg.strip()) for neg in _NEGATION_PREFIXES):
             return True
     return False
