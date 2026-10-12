@@ -1859,7 +1859,14 @@ def test_export_encodes_once_per_ledger_generation(live, monkeypatch):
         assert status == 200
         return body
 
+    def stored():
+        state = server.repository.inner.get_document(SLUG)
+        hidden = ("seeds", "api_operations")
+        state["_meta"] = {key: item for key, item in state["_meta"].items() if key not in hidden}
+        return {"data": state}
+
     first = export()
+    assert json.loads(first) == stored()
     monkeypatch.setattr(json, "loads", decode)
     monkeypatch.setattr(json, "dumps", encode)
     assert [export() for _ in range(3)] == [first] * 3
@@ -1872,10 +1879,7 @@ def test_export_encodes_once_per_ledger_generation(live, monkeypatch):
     assert counts == {"decode": 0, "encode": 1}
     monkeypatch.undo()
     assert after == [after[0]] * 3 and after[0] != first
-    stored = server.repository.inner.get_document(SLUG)
-    hidden = ("seeds", "api_operations")
-    stored["_meta"] = {key: item for key, item in stored["_meta"].items() if key not in hidden}
-    assert json.loads(after[0]) == {"data": stored}
+    assert json.loads(after[0]) == stored()
     assert "Written after the first export, café" in after[0].decode()
 
 
