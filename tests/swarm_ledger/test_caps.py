@@ -128,7 +128,8 @@ class StopOrReportStack(unittest.TestCase):
         code = (
             "import ctypes, signal, sys, time\n"
             "PR_SET_DUMPABLE = 4\n"
-            "ctypes.CDLL(None).prctl(PR_SET_DUMPABLE, 0)\n"
+            "if ctypes.CDLL(None, use_errno=True).prctl(PR_SET_DUMPABLE, 0):\n"
+            "    raise OSError(ctypes.get_errno(), 'prctl PR_SET_DUMPABLE failed')\n"
             "signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})\n"
             "def hang():\n"
             "    open(sys.argv[1], 'w').close()\n"
