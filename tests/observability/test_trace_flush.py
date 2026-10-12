@@ -1,4 +1,6 @@
+import contextlib
 import fcntl
+import gc
 import http.client
 import http.server
 import json
@@ -7,6 +9,7 @@ import subprocess
 import sys
 import threading
 import time
+import warnings
 
 import pytest
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
@@ -332,13 +335,39 @@ class Receiver(http.server.BaseHTTPRequestHandler):
         pass
 
 
-@pytest.fixture
-def receiver():
+@contextlib.contextmanager
+def _serving():
     Receiver.spans, Receiver.posts, Receiver.delay = [], 0, 0.0
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Receiver)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    yield server
-    server.shutdown()
+    try:
+        yield server
+    finally:
+        server.shutdown()
+
+
+@pytest.fixture
+def receiver():
+    with _serving() as server:
+        yield server
+
+
+def test_a_request_outliving_the_receiver_leaves_no_unclosed_socket():
+    before = set(threading.enumerate())
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        with _serving() as server:
+            Receiver.delay = 1.0
+            connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=15)
+            connection.request("POST", "/", ExportTraceServiceRequest().SerializeToString())
+            assert _wait(lambda: Receiver.posts == 1, 5), "the request never reached the receiver"
+        del server
+        for thread in set(threading.enumerate()) - before:
+            thread.join(15)
+        connection.getresponse().read()
+        connection.close()
+        gc.collect()
+    assert [str(w.message) for w in caught if issubclass(w.category, ResourceWarning)] == []
 
 
 def _records(stamp="2026-10-07T10:00:00Z"):
