@@ -632,6 +632,62 @@ def test_a_renewed_credential_keeps_heartbeats_and_task_writes_past_the_launch_g
     assert (audit["renewals"], audit["expires_at"]) == (2, "1970-01-01T00:11:40Z")
 
 
+def admitted_worker(world):
+    from scripts.swarm_v2.api.executions import DEFAULT_LEASE_MS, ExecutionsAPI
+
+    api = ExecutionsAPI(world.grants, world.tasks, DEFAULT_LEASE_MS)
+    agent, token = world.start()
+    status, admission = api.route(
+        "POST", "/v2/executions/register", f"Bearer {token}", {"execution_id": agent.execution_id, "generation": 1}
+    )
+    assert status == 200
+    return api, agent, token, admission
+
+
+def routed(api):
+    def send(method, url, grant, body):
+        return api.route(method, url.removeprefix("http://controller.invalid"), f"Bearer {grant}", body)
+
+    return send
+
+
+def test_a_pod_worker_keeps_its_lease_past_five_minutes_and_a_controller_failover(world, tmp_path):
+    from scripts.swarm_v2.worker import lease_renewal
+
+    api, agent, token, admission = admitted_worker(world)
+
+    def seconds():
+        return world.clock[0] / 1000
+
+    lease = lease_renewal.Lease(tmp_path, "http://controller.invalid/", admission, token)
+    renewer = lease_renewal.Renewer(lease, routed(api), seconds, seconds)
+
+    for second in range(1, 361):
+        advance(world, 1000 + second * 1000)
+        if second == 180:
+            assert world.controller.release() and world.controller.acquire()
+        renewer.tick()
+        assert renewer.lost is None, second
+
+    claim = world.tasks.current(agent.task)
+    assert (claim.state, claim.generation, claim.execution_id) == ("active", 1, agent.execution_id)
+    assert claim.lease_deadline_ms > world.clock[0]
+    assert (world.controller.held.epoch, renewer.authority["controller_epoch"]) == (2, 2)
+    assert renewer.grant != token
+    written = world.tasks.complete(renewer.grant, 1, {"outcome": "merged"})
+    assert written.state == "completed"
+
+
+def test_an_unrenewed_pod_worker_loses_its_scoped_writes_after_the_admission_lease(world):
+    from scripts.swarm.store import SwarmError
+
+    _, agent, token, _ = admitted_worker(world)
+    advance(world, 1000 + 61_000)
+
+    with pytest.raises(SwarmError, match="^stale_generation$"):
+        world.tasks.complete(token, 1, {"outcome": "merged"})
+
+
 def test_revoking_the_registration_stops_heartbeats_task_writes_and_renewal(world, long_lived):
     from scripts.swarm_v2.auth_context import GrantRefused
 
