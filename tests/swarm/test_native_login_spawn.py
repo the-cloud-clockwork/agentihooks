@@ -27,8 +27,9 @@ def test_expired_login_never_starts_a_pane(tmp_path):
         return SimpleNamespace(returncode=1, stdout=json.dumps({"loggedIn": False, "authMethod": "none"}))
 
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "requested"))
-    with pytest.raises(SpawnError, match="native Claude login is expired or missing"):
+    with pytest.raises(SpawnError, match="native Claude login is expired or missing") as raised:
         runtime.spawn(config(tmp_path), "master", "agent", {"id": "master", "route_kind": "interactive"})
+    assert raised.value.status == "unavailable"
     assert len(calls) == 1
     assert calls[0][1:] == ["auth", "status", "--text"]
     assert not (tmp_path / "proof" / "interactive-claude-status.json").exists()
@@ -38,6 +39,7 @@ def test_expired_login_never_starts_a_pane(tmp_path):
 def test_status_proof_is_captured_only_after_success(tmp_path, launch_ok):
     def run(argv, **kwargs):
         if argv[1:] == ["auth", "status", "--text"]:
+            assert kwargs["env"]["AH_ROUTE_INTERACTIVE_native"] == "1"
             return SimpleNamespace(
                 returncode=0,
                 stdout="Login method: Claude account\nEmail: private",
@@ -63,3 +65,19 @@ def test_status_proof_is_captured_only_after_success(tmp_path, launch_ok):
             "command": "claude auth status --text",
             "status": "Login method: Claude account",
         }
+
+
+@pytest.mark.parametrize("harness,route", [("claude", "subscription"), ("codex", "interactive")])
+def test_other_launches_do_not_record_native_claude_proof(tmp_path, harness, route):
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: (harness, "requested"))
+    chosen = config(tmp_path)
+    chosen.lanes = {"master": {"agent": harness}}
+    runtime.spawn(chosen, "master", "agent", {"id": "master", "route_kind": route})
+    assert len(calls) == 1
+    assert not (tmp_path / "proof" / "interactive-claude-status.json").exists()
