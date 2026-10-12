@@ -34,7 +34,8 @@ LANE_USERS = {
     "swarm-node-image.yml",
     *DIRECT,
 }
-MUTATION_LANE_USERS = {"mutation-preflight.yml:mutation"}
+MUTATION_LANE_USERS = {"mutation-preflight.yml:stats", "mutation-preflight.yml:mutation-shard"}
+LEGS = {"mutation-preflight.yml:stats": "stats", "mutation-preflight.yml:mutation-shard": "shard"}
 EXCLUDED = {
     "coverage-stability.yml": "a manual dispatch runs one short job that only reads dev run data",
     "pages.yml": "a rare manual docs build and deploy; the github-pages environment decides which branches deploy",
@@ -53,12 +54,13 @@ class _Context(dict):
         return _Context(value) if isinstance(value, dict) else value
 
 
-def _evaluate(value, inputs=None, **github):
+def _evaluate(value, inputs=None, matrix=None, **github):
     if not isinstance(value, str) or not value.startswith("${{"):
         return value
     names = {
         "github": _Context(github),
         "inputs": _Context(inputs or {}),
+        "matrix": _Context(matrix or {"part": 0, "shard": 0}),
         "endsWith": lambda text, end: str(text).endswith(end),
         "format": lambda template, *args: template.format(*args),
     }
@@ -97,8 +99,10 @@ def _block(where):
     return next(block for name, block in _blocks() if name == where)
 
 
-def _resolve(block, inputs=None, **github):
-    return {key: _evaluate(block.get(key), inputs, **github) for key in ("group", "queue", "cancel-in-progress")}
+def _resolve(block, inputs=None, matrix=None, **github):
+    return {
+        key: _evaluate(block.get(key), inputs, matrix, **github) for key in ("group", "queue", "cancel-in-progress")
+    }
 
 
 def _triggered(events):
@@ -193,10 +197,12 @@ def test_a_focused_tests_proof_never_waits_on_a_lane_and_every_other_proof_keeps
 
 def test_a_branch_mutation_job_never_holds_a_lane_that_proofs_or_dispatches_wait_on():
     push = {"event_name": "push", "ref": "refs/heads/task-branch", "workflow": "Mutation preflight"}
-    mutation = {
-        _resolve(_block("mutation-preflight.yml:mutation"), run_id=run_id, **push)["group"]
-        for run_id in range(1000, 1010)
-    }
+    mutation = set()
+    for where, leg in LEGS.items():
+        for run_id, index in product(range(1000, 1010), range(3)):
+            group = _resolve(_block(where), matrix={leg if leg == "shard" else "part": index}, run_id=run_id, **push)
+            assert group["group"].endswith(f"-{leg}-{index}"), (where, group)
+            mutation.add(group["group"].removesuffix(f"-{leg}-{index}"))
     assert mutation == {"mutation-lane-a", "mutation-lane-b", "mutation-lane-c"}
     shared = {
         _resolve(block, **github)["group"]
@@ -223,9 +229,11 @@ def test_a_called_workflow_never_waits_on_its_callers_lane(caller):
             "queue": "single",
             "cancel-in-progress": None,
         }
-    mutation = _resolve(_block("mutation-preflight.yml:mutation"), **github)
-    assert mutation["group"] == "mutation-preflight-job-1000"
-    assert mutation["group"] != _resolve(_block("mutation-preflight.yml"), **github)["group"]
+    for where, leg in LEGS.items():
+        mutation = _resolve(_block(where), **github)
+        assert mutation["group"] == f"mutation-preflight-job-1000-{leg}-0"
+        assert mutation["queue"] == "single"
+        assert mutation["group"] != _resolve(_block("mutation-preflight.yml"), **github)["group"]
 
 
 def test_direct_dispatches_and_branch_pushes_queue_on_a_lane():
@@ -235,7 +243,8 @@ def test_direct_dispatches_and_branch_pushes_queue_on_a_lane():
     assert _is_lane(_resolve(_block("test-leaks.yml"), workflow="Test leaks", **dispatch)["group"])
     assert _is_lane(_resolve(_block("swarm-node-image.yml"), workflow="Swarm worker image", **dispatch)["group"])
     push = {"event_name": "push", "ref": "refs/heads/task-branch", "workflow": "Mutation preflight", "run_id": 1000}
-    assert _resolve(_block("mutation-preflight.yml:mutation"), **push)["group"] == "mutation-lane-a"
+    assert _resolve(_block("mutation-preflight.yml:stats"), **push)["group"] == "mutation-lane-a-stats-0"
+    assert _resolve(_block("mutation-preflight.yml:mutation-shard"), **push)["group"] == "mutation-lane-a-shard-0"
     schedule = {"event_name": "schedule", "ref": "refs/heads/dev", "workflow": "Test leaks", "run_id": 1000}
     assert _resolve(_block("test-leaks.yml"), **schedule) == {
         "group": "test-leaks-refs/heads/dev",

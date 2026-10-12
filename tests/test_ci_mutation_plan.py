@@ -5,10 +5,16 @@ import pytest
 from scripts.ci_mutation import plan
 
 
-def test_mean_test_seconds_reads_stored_timings_of_selected_files_only():
-    durations = {"tests/test_a.py::t1": 1.0, "tests/test_a.py::Case::t2": 3.0, "tests/test_b.py::t": 40.0}
-    assert plan.mean_test_seconds(durations, ["tests/test_a.py"]) == 2.0
-    assert plan.mean_test_seconds(durations, ["tests/test_new.py"]) == plan.UNTIMED_TEST_SECONDS
+def test_each_mutant_costs_the_measured_worker_seconds_whatever_its_tests_take(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mutmut.configuration._config", None)
+    _project(tmp_path, {"tests/test_sample.py::t": 0.01})
+    fast = plan.estimate(tmp_path, {"scripts/sample.py": {2}})
+    (tmp_path / ".test_durations").write_text(json.dumps({"tests/test_sample.py::t": 90.0}))
+    assert plan.estimate(tmp_path, {"scripts/sample.py": {2}}) == fast
+    assert fast[0] == pytest.approx(fast[1] * plan.MUTANT_SECONDS)
+    assert plan.MUTANT_SECONDS == 5.6
+    assert plan.shard_count(412 * plan.MUTANT_SECONDS, 412, 240, 10) == 3
 
 
 @pytest.mark.parametrize(
@@ -71,7 +77,7 @@ def _project(tmp_path, durations):
     (tmp_path / ".test_durations").write_text(json.dumps(durations))
 
 
-def test_estimate_weighs_each_changed_line_mutant_by_its_selected_test_timings(tmp_path, monkeypatch):
+def test_estimate_counts_each_changed_line_mutant_and_its_selected_tests(tmp_path, monkeypatch):
     from scripts.ci_mutation.selection import changed_mutations
 
     monkeypatch.chdir(tmp_path)
@@ -79,7 +85,7 @@ def test_estimate_weighs_each_changed_line_mutant_by_its_selected_test_timings(t
     timings = {"tests/test_sample.py::t1": 0.2, "tests/test_sample.py::Case::t2": 0.6, "tests/test_x.py::t": 9}
     _project(tmp_path, timings | {"tests/test_other.py::t": 2.0})
     source = (tmp_path / "scripts/sample.py").read_text()
-    per_mutant = plan.MUTANT_SECONDS + plan.TEST_WEIGHT * 0.4
+    per_mutant = plan.MUTANT_SECONDS
     for lines in ({2}, {2, 6}):
         _, mutations = changed_mutations("scripts/sample.py", source, lines)
         seconds, mutants, tests = plan.estimate(tmp_path, {"scripts/sample.py": lines})
@@ -150,7 +156,7 @@ def test_main_writes_one_matrix_entry_per_shard(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr("sys.argv", [*__import__("sys").argv, "--stats-target", "100"])
     assert plan.main() == 0
     assert calls == [(tmp_path, ["earlier", "merged"], "HEAD")]
-    assert output.read_text() == "shards=[0, 1, 2, 3]\nstats_parts=[0, 1, 2]\nbases=earlier,merged\n"
+    assert output.read_text() == "shards=[0, 1, 2, 3]\nstats_parts=[0, 1, 2]\nbases=earlier,merged\nchanged=1\n"
     assert capsys.readouterr().out == (
         "Mutation bases: earlier merged\n"
         "Changed line mutants: 50\nEstimated mutation seconds: 1601, slowest stats bucket: 121\n"
@@ -186,4 +192,4 @@ def test_main_defaults_to_origin_dev_a_four_minute_target_a_half_minute_stats_bu
     monkeypatch.setattr("scripts.ci_mutation.plan.estimate", lambda root, changes: estimated)
     assert plan.main() == 0
     assert calls == [(tmp_path, ["origin/dev@HEAD"], "HEAD")]
-    assert output.read_text() == f"shards={shards}\nstats_parts={parts}\nbases=origin/dev@HEAD\n"
+    assert output.read_text() == f"shards={shards}\nstats_parts={parts}\nbases=origin/dev@HEAD\nchanged=0\n"

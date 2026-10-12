@@ -10,6 +10,7 @@ from time import process_time
 
 from mutmut.utils.format_utils import get_mutant_name
 
+from scripts.ci_mutation.killers import KillMemory
 from scripts.ci_mutation.mutant_shards import shard_names
 from scripts.ci_mutation.report import mutation_lines
 from scripts.ci_mutation.stats import write_part
@@ -268,13 +269,17 @@ def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats
             except runner.BadTestExecutionCommandsException:
                 # The stats shards proved these node ids collect, so a usage error here is the forced failure at import.
                 return 1
-        return run_tests(self, mutant_name=mutant_name, tests=tests)
+        return run_tests(self, mutant_name=mutant_name, tests=memory.prepare(mutant_name, tests))
+
+    memory = KillMemory(Path.cwd() / "killers")
 
     runner.collect_or_load_stats = collect_selected_stats
     # Every shard generates the same mutants, so names and clearance keys match an unsharded run; each runs its share.
     runner.collect_source_file_mutation_data = shard_collector(runner.collect_source_file_mutation_data, shard)
     # The forced fail control passes no tests and would otherwise rerun every selected module.
     runner.PytestRunner.run_tests = run_related_tests
+    # A function's mutants usually die on one test, so later ones run the recorded killer first.
+    runner.PytestRunner.execute_pytest = memory.wrap(runner.PytestRunner.execute_pytest)
     # mutmut 3.6.0 writes one copy of a whole function per selected mutant.
     runner.write_all_mutants_to_file = write_selected
     for name in [name for name in sys.modules if name == "scripts" or name.startswith("scripts.")]:

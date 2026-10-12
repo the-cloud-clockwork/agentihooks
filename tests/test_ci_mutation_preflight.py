@@ -31,13 +31,13 @@ def test_preflight_skips_a_branch_with_an_open_pull_request():
     check = jobs["pull-request"]
     if "workflow_call" in workflow[True]:
         assert check["if"] == "${{ github.event_name == 'push' && !github.event.deleted }}"
-        assert jobs["mutation"]["if"] == (
+        assert jobs["plan"]["if"] == (
             "${{ !cancelled() && (github.event_name != 'push' || (needs.pull-request.outputs.open == 'false'"
             " && needs.pull-request.outputs.reused != 'true')) }}"
         )
     else:
         assert check["if"] == "${{ !github.event.deleted }}"
-        assert jobs["mutation"]["if"] == "${{ needs.pull-request.outputs.open == 'false' }}"
+        assert jobs["plan"]["if"] == "${{ needs.pull-request.outputs.open == 'false' }}"
     assert check["outputs"] == {
         "open": "${{ steps.open.outputs.open }}",
         "reused": "${{ steps.reuse.outputs.reused }}",
@@ -48,7 +48,12 @@ def test_preflight_skips_a_branch_with_an_open_pull_request():
     assert "head=$GITHUB_REPOSITORY_OWNER:$GITHUB_REF_NAME" in step["run"]
     assert "state=open" in step["run"]
     assert """--jq '[.[] | select(.base.ref == "dev")] | length'""" in step["run"]
-    assert jobs["mutation"]["needs"] == "pull-request"
+    assert jobs["plan"]["needs"] == "pull-request"
+    for name in ("stats", "mutation-shard", "mutation"):
+        assert jobs[name]["if"].startswith("${{ !cancelled() && needs.plan.result == 'success'"), name
+    for name in ("stats", "mutation-shard"):
+        assert "needs.plan.outputs.changed != '0'" in jobs[name]["if"], name
+    assert "changed" not in jobs["mutation"]["if"]
 
 
 def test_preflight_reuses_a_green_report_before_the_mutation_job_takes_a_lane():
@@ -77,31 +82,113 @@ def test_preflight_reuses_a_green_report_before_the_mutation_job_takes_a_lane():
     }
 
 
-def test_preflight_mutates_against_dev_with_the_pull_request_budget():
+def _steps(job):
+    steps = job["steps"]
+    return steps, [step.get("name") for step in steps]
+
+
+def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan():
+    jobs = _workflow()["jobs"]
+    plan = jobs["plan"]
+    assert plan["env"]["BASE"] == "${{ inputs.base || 'origin/dev' }}"
+    assert plan["outputs"] == {
+        "shards": "${{ steps.plan.outputs.shards }}",
+        "stats_parts": "${{ steps.plan.outputs.stats_parts }}",
+        "bases": "${{ steps.plan.outputs.bases }}",
+        "changed": "${{ steps.plan.outputs.changed }}",
+    }
+    steps, names = _steps(plan)
+    assert steps[0]["with"] == {"fetch-depth": 0}
+    sized = steps[names.index("Size mutation shards from stored timings")]
+    assert sized["id"] == "plan"
+    assert sized["env"] == {"GH_TOKEN": "${{ github.token }}"}
+    assert sized["run"] == "python -m scripts.ci_mutation." + 'plan --base "$BASE"'
+    assert jobs["stats"]["needs"] == ["pull-request", "plan"]
+    assert jobs["stats"]["strategy"] == {
+        "fail-fast": False,
+        "matrix": {"part": "${{ fromJSON(needs.plan.outputs.stats_parts) }}"},
+    }
+    assert jobs["mutation-shard"]["needs"] == ["plan", "stats"]
+    assert jobs["mutation-shard"]["strategy"] == {
+        "fail-fast": False,
+        "matrix": {"shard": "${{ fromJSON(needs.plan.outputs.shards) }}"},
+    }
+    assert (
+        jobs["mutation-shard"]["if"]
+        == "${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.changed != '0'"
+        " && needs.stats.result == 'success' }}"
+    )
+
+
+def test_preflight_collects_one_stats_part_per_leg_with_the_pull_request_budget():
+    job = _workflow()["jobs"]["stats"]
+    assert job["timeout-minutes"] == 20
+    steps, names = _steps(job)
+    select = steps[names.index("Select mutation tests before browser setup")]
+    collect = steps[names.index("Collect one stats part for every mutation shard")]
+    for step in (select, collect):
+        assert step["env"]["BASES"] == "${{ needs.plan.outputs.bases }}"
+    assert select["run"] == "python -m scripts.ci_mutation." + 'browser --bases "$BASES"'
+    assert collect["env"]["PART"] == "${{ matrix.part }}"
+    assert collect["env"]["PARTS"] == "${{ strategy.job-total }}"
+    assert collect["run"] == (
+        'mkdir -p .mutation-stats && touch ".mutation-stats/collected-$PART" && python -m scripts.ci_mutation'
+        ' --bases "$BASES" --budget 1080 --stats .mutation-stats --stats-part "$PART" --stats-parts "$PARTS"'
+    )
+    assert names.index("Install the browser that page tests drive") < names.index(collect["name"])
+    upload = steps[names.index("Upload mutation stats part")]
+    assert upload["with"]["name"] == "mutation-stats-${{ matrix.part }}"
+    assert upload["with"]["path"] == ".mutation-stats/"
+
+
+def test_preflight_mutates_each_shard_against_the_shared_stats_with_the_pull_request_budget():
+    job = _workflow()["jobs"]["mutation-shard"]
+    assert job["timeout-minutes"] == 20
+    steps, names = _steps(job)
+    assert steps[0]["with"] == {"fetch-depth": 0}
+    stats = steps[names.index("Download the shared mutation stats")]
+    assert stats["with"] == {"pattern": "mutation-stats-*", "path": ".mutation-stats", "merge-multiple": True}
+    mutate = steps[names.index("Mutate changed Python files")]
+    assert mutate["env"]["BASES"] == "${{ needs.plan.outputs.bases }}"
+    assert mutate["env"]["SHARD"] == "${{ matrix.shard }}"
+    assert mutate["env"]["SHARDS"] == "${{ strategy.job-total }}"
+    assert mutate["run"] == (
+        'python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --shard "$SHARD" --shards "$SHARDS"'
+        " --stats .mutation-stats"
+    )
+    assert names.index(stats["name"]) < names.index(mutate["name"])
+    assert names.index("Install the browser that page tests drive") < names.index(mutate["name"])
+    assert steps[-1]["if"] == "always()"
+    assert steps[-1]["with"]["name"] == "mutation-preflight-shard-${{ matrix.shard }}"
+    assert steps[-1]["with"]["path"] == ".mutation-gate/"
+
+
+def test_preflight_merges_every_shard_into_the_one_report_its_readers_take():
     workflow = _workflow()
     job = workflow["jobs"]["mutation"]
-    assert job["timeout-minutes"] == 20
-    steps = job["steps"]
-    assert steps[0]["with"] == {"fetch-depth": 0}
-    names = [step.get("name") for step in steps]
-    select = steps[names.index("Select mutation tests before browser setup")]
-    mutate = steps[names.index("Mutate changed Python files")]
-    plan = steps[names.index("Resolve the branch's own mutation bases")]
+    assert job["needs"] == ["plan", "mutation-shard"]
+    assert job["if"] == "${{ !cancelled() && needs.plan.result == 'success' }}"
     assert job["env"]["BASE"] == "${{ inputs.base || 'origin/dev' }}"
-    assert plan["id"] == "plan"
-    assert plan["env"] == {"GH_TOKEN": "${{ github.token }}"}
-    assert plan["run"] == "python -m scripts.ci_mutation." + 'plan --base "$BASE"'
-    assert names.index("Resolve the branch's own mutation bases") < names.index(select["name"])
-    for step in (select, mutate):
-        assert step["env"]["BASES"] == "${{ steps.plan.outputs.bases }}"
-    assert select["run"] == "python -m scripts.ci_mutation." + 'browser --bases "$BASES"'
-    assert mutate["run"] == 'python -m scripts.ci_mutation --bases "$BASES" --budget 1080'
-    assert names.index("Install the browser that page tests drive") < names.index("Mutate changed Python files")
+    steps, names = _steps(job)
+    assert steps[0]["with"] == {"fetch-depth": 0}
+    download = steps[names.index("Download every mutation shard report")]
+    assert download["with"] == {"pattern": "mutation-preflight-shard-*", "path": ".mutation-shards"}
+    assert download["if"] == "needs.plan.outputs.changed != '0'"
     scope = steps[names.index("Record the revisions the report grades")]
     assert '"$(git merge-base "$BASE" HEAD)" "$(git rev-parse HEAD)" > .mutation-gate/scope.json' in scope["run"]
-    assert names.index("Record the revisions the report grades") < names.index("Mutate changed Python files")
-    assert steps[-1]["if"] == "always()"
-    assert steps[-1]["with"]["name"] == "mutation-preflight-report"
+    merge = steps[names.index("Merge the shard reports")]
+    assert merge["env"] == {"SHARDS": "${{ needs.plan.outputs.changed != '0' && needs.plan.outputs.shards || '[]' }}"}
+    assert merge["run"] == (
+        "python -m scripts.ci_mutation."
+        'merge .mutation-shards --shards "$(jq length <<< "$SHARDS")" --output .mutation-gate'
+    )
+    assert names.index(scope["name"]) < names.index(merge["name"])
+    upload = steps[names.index("Upload complete mutation evidence")]
+    assert upload["if"] == "always()"
+    assert upload["with"]["name"] == "mutation-preflight-report"
+    shards = steps[names.index("Fail when a shard did not finish")]
+    assert shards["if"] == "needs.plan.outputs.changed != '0' && needs.mutation-shard.result != 'success'"
+    assert names.index(upload["name"]) < names.index(shards["name"])
 
 
 def test_only_the_push_preflight_reports_the_check_that_proves_a_commit_graded():
@@ -110,5 +197,6 @@ def test_only_the_push_preflight_reports_the_check_that_proves_a_commit_graded()
     assert tests["mutation"]["strategy"]["matrix"] == {"shard": "${{ fromJSON(needs.mutation-plan.outputs.shards) }}"}
     assert "name" not in _workflow()["jobs"]["mutation"]
     assert "strategy" not in _workflow()["jobs"]["mutation"]
+    assert "strategy" in _workflow()["jobs"]["mutation-shard"]
     proofs = yaml.safe_load((_ROOT / ".github/workflows/proofs.yml").read_text())["jobs"]
     assert proofs["mutation"]["uses"] == "./.github/workflows/mutation-preflight.yml"
