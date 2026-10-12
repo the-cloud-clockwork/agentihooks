@@ -62,7 +62,7 @@ def fixture(monkeypatch):
     second = RedisStore(fakeredis.FakeRedis(server=server, decode_responses=True))
     first.create(SwarmConfig("fixture", "agentihooks", 1, 0))
     clock = [1000]
-    monkeypatch.setattr(lease, "now_ms", lambda store: clock[0])
+    monkeypatch.setattr("time.time", lambda: clock[0] / 1000)
     transport = Transport()
     grant = {"allowed": True}
     controllers = tuple(

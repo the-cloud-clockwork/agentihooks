@@ -75,6 +75,7 @@ def held_spans(samples: list, now_ms: int) -> list[tuple]:
             sample["ts_ms"],
             min(sample["ts_ms"] + SAMPLE_GAP_MS, after),
             sample["held_spawns"],
+            sample.get("held_harness", ""),
         )
         for sample, after in zip(ordered, nexts)
     ]
@@ -85,7 +86,7 @@ def report(rows: dict, tasks: list, now_ms: int, window_ms: int = WINDOW_MS) -> 
     seconds = dict.fromkeys(SHARES, 0.0)
     for share, start, end in task_spans(rows, tasks, now_ms):
         seconds[share] += window.seconds(start, end)
-    for share, start, end, held in held_spans(rows["host_samples"], now_ms):
+    for share, start, end, held, _ in held_spans(rows["host_samples"], now_ms):
         seconds[share] += held * window.seconds(start, end)
     total = sum(seconds.values())
     return {

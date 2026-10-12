@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/outage.py:scripts.swarm.outage.x_connect_tick__mutmut_9:d44b9e7d6206bece9e19de2098dbf41b272ebe3c191dcaaf18acf6662ea7289e": {
+    "reader": "Standards reader for swarm outage detector",
+    "reason": "observe only truth-tests recovery evidence; empty list and None both close the record without persisting that argument."
+  }
+}

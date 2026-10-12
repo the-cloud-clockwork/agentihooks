@@ -90,12 +90,12 @@
       "privileged": false,
       "secret_keys": [
         {
-          "key": "codex-fixtureatexample-com",
-          "name": "swarm-claude-creds"
+          "key": "AH_CX_TOKEN_codex_fixtureatexample_com",
+          "name": "swarm-codex-creds"
         }
       ]
     },
-    "second_fixture_digest": "sha256:b7a6b6e658dde71a4468ce319542655786d3691b3a4180ba6efe075425c8c044",
+    "second_fixture_digest": "sha256:2ff22a3e8faf6541739c44779e1b85a4b3af3755448a1d97440526a85496592b",
     "pod_spec_validation_failures_total": {}
   }
 }

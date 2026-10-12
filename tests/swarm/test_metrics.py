@@ -224,7 +224,9 @@ def test_a_swarm_pass_measures_the_stages_of_the_ledger_tasks_and_reports_a_flee
 
     monkeypatch.setattr(metrics.metrics_swarm, "pull_rows", lambda box, now_ms, swarm: {})
     monkeypatch.setattr(metrics.metrics_swarm, "record_pass", lambda *args: None)
-    monkeypatch.setattr(metrics.stages, "record", lambda box, store, slug, now_ms, tasks: seen.append(tasks))
+    monkeypatch.setattr(
+        metrics.stage_detector, "record", lambda box, store, slug, now_ms, tasks, environ: seen.append(tasks)
+    )
     monkeypatch.setattr(metrics.metrics_fleet, "record", broken)
     tasks = [{"id": "t1", "state": "open"}]
     swarm = metrics.metrics_swarm.TickInput(store, {"tasks": tasks}, [], lambda url: None, None)

@@ -173,7 +173,7 @@ class Workers:
 
     def transport(self, environ: Mapping[str, str], slug: str) -> KubernetesTransport:
         api = pod_api(environ, self.policy["namespace"])
-        template = PodTemplate(self.policy, owner_for(slug), SecretKeys(api))
+        template = PodTemplate(self.policy, owner_for(slug), SecretKeys(api), codex_accounts=SecretKeys(api, "codex"))
         mounted = template if self.terminal is None else TerminalTemplate(template)
         return KubernetesTransport(api, slug, mounted)
 

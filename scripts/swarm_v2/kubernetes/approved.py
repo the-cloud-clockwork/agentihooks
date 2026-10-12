@@ -1,10 +1,8 @@
-"""The approved launch accounts are the key names of Secret swarm-claude-accounts, which external secrets syncs from
-the source of swarm-claude-creds with every value replaced, so the controller never holds a provider credential."""
-
 import os
 from collections.abc import Callable, Collection, Mapping
 
 from scripts import session_bands
+from scripts.account_names import CODEX_TOKEN_PREFIX, codex_token_env
 from scripts.swarm import quota_handoff
 from scripts.swarm.capacity import Account, offered
 from scripts.swarm_v2.kubernetes.client import ApiRefused, PodApi
@@ -16,19 +14,28 @@ OPEN, CLOSED = "OPEN", "CLOSED"
 
 
 class SecretKeys:
-    def __init__(self, api: PodApi) -> None:
-        self.api = api
+    def __init__(self, api: PodApi, harness: str = "claude") -> None:
+        self.api, self.harness = api, harness
+        self.index = {"claude": INDEX, "codex": "swarm-codex-accounts"}[harness]
 
     def __call__(self) -> frozenset[str]:
         try:
-            secret = self.api.read("secrets", INDEX)
+            secret = self.api.read("secrets", self.index)
         except (ApiRefused, ConnectionError, TimeoutError) as error:
             print(
-                f"controller: Secret {INDEX} is unreadable ({type(error).__name__}); no account is approved",
+                f"controller: Secret {self.index} is unreadable ({type(error).__name__}); no account is approved",
                 flush=True,
             )
             return frozenset()
         data = (secret or {}).get("data") or {}
+        if self.harness == "codex":
+            return frozenset(
+                account
+                for key in data
+                if key.startswith(CODEX_TOKEN_PREFIX)
+                and KEY.fullmatch(account := key[len(CODEX_TOKEN_PREFIX) :].replace("_", "-"))
+                and codex_token_env(account) == key
+            )
         return frozenset(key for key in data if KEY.fullmatch(key))
 
 

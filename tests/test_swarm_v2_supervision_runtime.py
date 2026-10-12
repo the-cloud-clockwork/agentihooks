@@ -304,6 +304,7 @@ def test_quiesce_excludes_exporter_and_bounds_descendants(supervisor, monkeypatc
 @pytest.mark.parametrize("clean,identifier", [(True, "checkpoint"), (True, None), (False, None)])
 def test_drain_reports_acknowledged_material_only(supervisor, monkeypatch, clean, identifier, already_reaped):
     monkeypatch.setattr(supervisor, "quiesce", lambda: clean)
+    monkeypatch.setattr(runtime.time, "time", lambda: 123.456)
     supervisor.stop = signal.SIGTERM
     supervisor.exits.update(agent=0)
     supervisor.reaped.add(321)
@@ -328,6 +329,25 @@ def test_drain_reports_acknowledged_material_only(supervisor, monkeypatch, clean
     assert result["child_exits"] == {"agent": 0}
     assert result["supervisor_child_exit_total"] == 2
     assert protocol.read(supervisor.root / "result.json") == result
+    launch_record = protocol.read(supervisor.root / "launch.json")
+    assert result["launch_record"] == launch_record
+    assert {key: value for key, value in launch_record.items() if key != "checkpoint_acknowledgement"} == {
+        "schema_version": 1,
+        "authority": supervisor.launch.authority,
+        "harness": "codex",
+        "startup_seconds": 2,
+        "quiesce_seconds": 1,
+        "checkpoint_seconds": 1,
+        "kill_seconds": 1,
+    }
+    launch_ack = launch_record["checkpoint_acknowledgement"]
+    assert launch_ack == {
+        **supervisor.scope,
+        "status": result["checkpoint_status"],
+        "checkpoint_id": identifier,
+        "quiescence": result["quiescence"],
+        "acknowledged_at_ms": 123456,
+    }
     assert protocol.read(supervisor.root / "drain.json") == {
         **supervisor.scope,
         "reason": "termination",
@@ -368,6 +388,17 @@ def test_run_restores_handlers_and_returns_observed_outcome(supervisor, monkeypa
     )
     assert protocol.read(supervisor.root / "context.json") == supervisor.scope
     assert (supervisor.root.parent / "owner.lock").exists()
+    record = protocol.read(supervisor.root / "launch.json")
+    assert record == {
+        "schema_version": 1,
+        "authority": supervisor.launch.authority,
+        "harness": "codex",
+        "startup_seconds": 2,
+        "quiesce_seconds": 1,
+        "checkpoint_seconds": 1,
+        "kill_seconds": 1,
+        "checkpoint_acknowledgement": {"status": "pending"},
+    }
     assert [call.args for call in handlers.call_args_list[:3]] == [
         (sig, supervisor.signal) for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGCHLD)
     ]

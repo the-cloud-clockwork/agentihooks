@@ -34,6 +34,10 @@ class SwarmError(RuntimeError):
     pass
 
 
+class Unreachable(SwarmError):
+    pass
+
+
 @dataclass(frozen=True)
 class SwarmConfig:
     slug: str
@@ -518,4 +522,4 @@ def connect(environ=None):
     try:
         return RedisStore(redis_client(environ))
     except redis.RedisError as exc:
-        raise SwarmError(f"Redis is unreachable ({exc}); the swarm refuses to run without it") from exc
+        raise Unreachable(f"Redis is unreachable ({exc}); the swarm refuses to run without it") from exc

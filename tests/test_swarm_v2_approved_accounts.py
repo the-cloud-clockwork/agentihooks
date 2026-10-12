@@ -36,6 +36,38 @@ def test_the_approved_accounts_are_the_key_names_of_the_shared_secret():
     assert api.asked == [("secrets", "swarm-claude-accounts")]
 
 
+def test_codex_approval_reads_only_access_key_names_from_its_redacted_index():
+    api = Secrets(
+        {
+            "data": dict.fromkeys(
+                [
+                    "AH_CX_TOKEN_alpha_personal",
+                    "AH_CX_TOKEN_beta_business",
+                    "AH_CX_REFRESH_alpha_personal",
+                    "unrelated",
+                    "AH_CX_TOKEN_",
+                    "AH_CX_TOKEN_Upper",
+                    "AH_CX_TOKEN_bad.dot",
+                    "AH_CX_TOKEN_wrong-dash",
+                ],
+                "YXBwcm92ZWQ=",
+            )
+        }
+    )
+    assert approved.SecretKeys(api, "codex")() == frozenset({"alpha-personal", "beta-business"})
+    assert api.asked == [("secrets", "swarm-codex-accounts")]
+
+
+@pytest.mark.parametrize("answer", [None, {}, {"data": {}}, {"data": {"AH_CX_REFRESH_alpha": "YXBwcm92ZWQ="}}])
+def test_a_codex_index_without_access_keys_approves_no_account(answer):
+    assert approved.SecretKeys(Secrets(answer), "codex")() == frozenset()
+
+
+def test_an_unreadable_codex_index_approves_no_account_and_names_its_index(capsys):
+    assert approved.SecretKeys(Secrets(TimeoutError()), "codex")() == frozenset()
+    assert "Secret swarm-codex-accounts is unreadable" in capsys.readouterr().out
+
+
 def test_a_secret_key_that_no_pod_could_carry_is_never_approved():
     data = dict.fromkeys(["okkey", "Upper", "under_score", "dot.ted", "-lead", "a" * 64, "a" * 63], "YXBwcm92ZWQ=")
     assert approved.SecretKeys(Secrets({"data": data}))() == frozenset({"okkey", "a" * 63})

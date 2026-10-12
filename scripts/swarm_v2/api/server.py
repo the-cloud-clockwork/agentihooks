@@ -2,10 +2,14 @@ import json
 import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from scripts.swarm_v2.api.artifacts import MAX_REQUEST, ArtifactsAPI
+from scripts.swarm_v2.api.artifacts import PATH as ARTIFACT_PATH
 from scripts.swarm_v2.api.broadcasts import BroadcastsAPI
 from scripts.swarm_v2.api.commands import CommandsAPI
 from scripts.swarm_v2.api.executions import ExecutionsAPI
 from scripts.swarm_v2.api.health import HealthAPI
+from scripts.swarm_v2.api.recovery import PATH as RECOVERY_PATH
+from scripts.swarm_v2.api.recovery import RecoveryAPI
 from scripts.swarm_v2.api.tasks import TasksAPI
 from scripts.swarm_v2.auth_context import GrantRefused
 
@@ -29,9 +33,11 @@ class Routes:
         commands: CommandsAPI | None = None,
         broadcasts: BroadcastsAPI | None = None,
         health: HealthAPI | None = None,
+        recovery: RecoveryAPI | None = None,
     ) -> None:
         self.executions, self.tasks, self.commands, self.broadcasts = executions, tasks, commands, broadcasts
-        self.health = health
+        self.health, self.recovery = health, recovery
+        self.artifacts: ArtifactsAPI | None = None
 
     def route(self, method: str, path: str, authorization: str, body: object) -> tuple[int, dict]:
         api = self.tasks if self.tasks is not None and TASK_PATHS.fullmatch(path) else self.executions
@@ -41,6 +47,10 @@ class Routes:
             api = self.commands
         if self.health is not None and HEALTH_PATHS.fullmatch(path):
             api = self.health
+        if self.recovery is not None and RECOVERY_PATH.fullmatch(path):
+            api = self.recovery
+        if self.artifacts is not None and path == ARTIFACT_PATH:
+            api = self.artifacts
         return api.route(method, path, authorization, body)
 
 
@@ -61,7 +71,8 @@ class ExecutionsHandler(BaseHTTPRequestHandler):
 
     def dispatch(self, method: str) -> None:
         length = int(self.headers.get(LENGTH) or 0)
-        if length > MAX_BODY_BYTES:
+        limit = MAX_REQUEST if self.path == ARTIFACT_PATH else MAX_BODY_BYTES
+        if length > limit:
             self.reply(413, GrantRefused(*TOO_LARGE).detail())
             return
         try:
