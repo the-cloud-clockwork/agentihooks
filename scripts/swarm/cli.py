@@ -1140,9 +1140,11 @@ def cmd_pr(store, args):
 
 
 def _split_binding(row, url):
-    pulls = row.get("split_pulls") or []
-    if url in pulls or len(pulls) >= len(row.get("split") or []):
+    pulls, halves = row.get("split_pulls") or [], row.get("split") or []
+    if not halves or url in pulls:
         return {}
+    if len(pulls) >= len(halves):
+        raise SwarmError(f"every half of this split task has a pull request: {', '.join(pulls)}")
     return {"split_pulls": [*pulls, url]}
 
 

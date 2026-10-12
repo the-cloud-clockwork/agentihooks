@@ -20,11 +20,12 @@ def test_swarm_pr_binds_each_pull_request_of_a_split_task_to_the_next_half(start
     assert ledger.rows["t1"]["split_pulls"] == [FIRST, SECOND]
 
 
-def test_swarm_pr_past_the_last_half_binds_nothing(started):  # noqa: F811
+def test_swarm_pr_past_the_last_half_is_refused(started, capsys):  # noqa: F811
     _, ledger, _ = started
-    ledger.rows["t1"].update(split=["1-2", "3-4"], split_pulls=[FIRST, SECOND])
-    assert run("sw", "pr", "https://github.com/o/r/pull/11") == 0
-    assert ledger.rows["t1"]["split_pulls"] == [FIRST, SECOND]
+    ledger.rows["t1"].update(split=["1-2", "3-4"], split_pulls=[FIRST, SECOND], pr_url=SECOND)
+    assert run("sw", "pr", "https://github.com/o/r/pull/11") != 0
+    assert f"every half of this split task has a pull request: {FIRST}, {SECOND}" in capsys.readouterr().err
+    assert (ledger.rows["t1"]["split_pulls"], ledger.rows["t1"]["pr_url"]) == ([FIRST, SECOND], SECOND)
 
 
 def test_swarm_pr_on_an_unsplit_task_records_no_halves(started):  # noqa: F811

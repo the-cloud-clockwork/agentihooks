@@ -122,7 +122,7 @@ def stamp(slug, task_id, url, doc, mode, now_ms, home=None):
         return {"verdict": "off", "body": body}
     verdicts = Verdicts(slug, NAME, home)
     planned = verdicts.read(task_id)
-    if task is not None and planned and planned.get("planned") and planned["verdict"] == PASS:
+    if task is not None and not task.get("split") and planned and planned.get("planned") and planned["verdict"] == PASS:
         if _same_phase(planned, task):
             return {"verdict": PASS, "body": body}
     verdicts.write(task_id, PENDING, RUNNING, now_ms)
