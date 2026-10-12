@@ -31,9 +31,6 @@ def _workflow():
 @pytest.mark.parametrize("gate_plant,allowed", [("", False), ("false", False), ("true", True)])
 def test_full_tests_dispatch_requires_explicit_gate_plant_intent(gate_plant, allowed):
     workflow = _workflow()
-    if "gate_plant" not in workflow[True]["workflow_dispatch"]["inputs"]:
-        assert workflow["jobs"]["reuse"]["steps"][0]["uses"] == "actions/checkout@v4"
-        return
     assert workflow[True]["workflow_dispatch"]["inputs"]["gate_plant"] == {
         "description": "Run the full suite only for a gate plant proof; focused tests and mutation use Proofs",
         "type": "boolean",
