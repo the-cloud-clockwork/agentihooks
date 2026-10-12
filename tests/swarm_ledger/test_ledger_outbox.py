@@ -200,6 +200,52 @@ def test_a_busy_or_conflicting_server_answer_keeps_the_record_for_a_later_replay
     assert not outbox.path().exists()
 
 
+def aged(seconds):
+    entry = queued()[0]
+    entry["args"]["queued_at"] -= seconds
+    body = {key: value for key, value in entry.items() if key != "sum"}
+    outbox.path().write_text(json.dumps({**body, "sum": outbox.checksum(body)}) + "\n")
+    return entry
+
+
+@pytest.mark.parametrize(("seconds", "kept"), [(59, True), (61, False)])
+def test_a_record_the_server_keeps_answering_busy_is_set_aside_once_it_is_older_than_the_limit(
+    server, monkeypatch, capsys, seconds, kept
+):
+    import urllib.error
+
+    server.stop()
+    run(capsys, ENG, "say", "Busy for too long")
+    entry = aged(seconds)
+    monkeypatch.setenv(outbox.BUSY_AGE_ENV, "60")
+
+    def busy(*args):
+        raise urllib.error.HTTPError("http://ledger", 503, "busy", {}, None)
+
+    monkeypatch.setattr(ledger, "replay", busy)
+    report = outbox.flush(None)
+    assert outbox.path().exists() is kept
+    if kept:
+        assert (report.left, report.rejected) == (1, [])
+        return
+    reason = f"the ledger server answered 503 for over 60 seconds ({outbox.BUSY_AGE_ENV})"
+    assert report.rejected == [(entry["item"], reason)]
+    assert json.loads(outbox.skipped_path().read_text().splitlines()[-1])["reason"] == reason
+
+
+def test_a_stopped_server_never_expires_held_talk(server, capsys):
+    server.stop()
+    run(capsys, ENG, "say", "Held through a long outage")
+    aged(10 * outbox.DEFAULT_BUSY_AGE)
+    report = outbox.flush(None)
+    assert (report.left, report.rejected) == (1, [])
+
+
+def test_the_busy_age_limit_reads_its_setting_and_defaults_to_an_hour():
+    assert outbox.busy_age({}) == 3600
+    assert outbox.busy_age({outbox.BUSY_AGE_ENV: "90"}) == 90
+
+
 def test_a_ledger_outage_does_not_hold_a_queued_inbox_record(server, capsys, monkeypatch):
     from scripts.inbox import cli
 

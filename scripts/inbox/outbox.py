@@ -11,6 +11,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,6 +26,8 @@ MAX_ENV = "AGENTIHOOKS_INBOX_OUTBOX_MAX_BYTES"
 WARN_ENV = "AGENTIHOOKS_INBOX_OUTBOX_WARN_BYTES"
 DEFAULT_MAX_BYTES = 1_048_576
 DEFAULT_WARN_BYTES = 786_432
+BUSY_AGE_ENV = "AGENTIHOOKS_LEDGER_OUTBOX_BUSY_MAX_AGE_S"
+DEFAULT_BUSY_AGE = 3600
 QUEUED = (
     "agentihooks msg: Redis is unreachable or busy; the message is queued locally and replays when Redis returns, "
     "where its address is checked; a refused replay is reported and kept in the skipped outbox"
@@ -36,6 +39,10 @@ class OutboxFull(InboxError):
 
 
 class LedgerDown(Exception):
+    pass
+
+
+class LedgerBusy(LedgerDown):
     pass
 
 
@@ -65,6 +72,15 @@ def skipped_path() -> Path:
 def bounds(environ=None) -> tuple[int, int]:
     env = os.environ if environ is None else environ
     return int(env.get(MAX_ENV) or DEFAULT_MAX_BYTES), int(env.get(WARN_ENV) or DEFAULT_WARN_BYTES)
+
+
+def busy_age(environ=None) -> int:
+    env = os.environ if environ is None else environ
+    return int(env.get(BUSY_AGE_ENV) or DEFAULT_BUSY_AGE)
+
+
+def stale(entry: dict) -> bool:
+    return time.time() - entry["args"]["queued_at"] > busy_age()
 
 
 def checksum(body: dict) -> str:
@@ -180,6 +196,14 @@ def _replay(store, report: Report) -> None:
             report.applied.append(entry["item"])
         except DuplicateItem:
             report.already.append(entry["item"])
+        except LedgerBusy as exc:
+            if not stale(entry):
+                down.add(lane(entry))
+                kept.append(line)
+                continue
+            reason = f"{exc} for over {busy_age()} seconds ({BUSY_AGE_ENV})"
+            _set_aside(line, reason)
+            report.rejected.append((entry["item"], reason))
         except (RedisError, Contended, LedgerDown):
             down.add(lane(entry))
             kept.append(line)
@@ -284,7 +308,7 @@ def apply_post(store, by: str, entry: dict):
 
 
 def ledger_record(slug: str, ops: list, agent: str, service: bool) -> dict:
-    args = {"slug": slug, "ops": ops, "agent": agent, "service": service}
+    args = {"slug": slug, "ops": ops, "agent": agent, "service": service, "queued_at": time.time()}
     return record("ledger", agent or ops[0].get("by", ""), args, item=ops[0]["id"])
 
 
@@ -298,7 +322,7 @@ def apply_ledger(store, by: str, entry: dict) -> dict:
         state = ledger.replay(args["slug"], args["ops"], args["agent"], args["service"])
     except urllib.error.HTTPError as exc:
         if exc.code >= 500 or exc.code == 429:
-            raise LedgerDown(f"the ledger server answered {exc.code}") from None
+            raise LedgerBusy(f"the ledger server answered {exc.code}") from None
         raise InboxError(f"the ledger server refused it: {exc.code}") from None
     except OSError as exc:
         raise LedgerDown(str(exc)) from None
