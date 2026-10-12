@@ -99,8 +99,8 @@ def _claude_settings_env(environ: Mapping[str, str], prefix: str) -> dict[str, s
 
 def classifier(environ: MutableMapping[str, str]) -> list[str]:
     found = _claude_settings_env(environ, CLASSIFIER_PREFIX)
-    if not set(CLASSIFIER_NEEDS) <= {*environ, *found}:
+    if not all(environ.get(name) or found.get(name) for name in CLASSIFIER_NEEDS):
         found = {**_shell_exports(environ, CLASSIFIER_PREFIX), **found}
-    added = sorted(key for key in found if key not in environ)
+    added = sorted(key for key, value in found.items() if value and not environ.get(key))
     environ.update({key: found[key] for key in added})
     return added

@@ -104,7 +104,8 @@ from the shell (loaded from OpenBao), never from a bundle file.
 
 The swarm tick and the controller run outside an agent session, so at start they add
 each `AGENTIHOOKS_CLASSIFIER_*` name they lack from the installed Claude settings env,
-then from the operator's login shell, as the hooks of an agent session see them.
+then, while the address or the key is still missing, from the operator's login shell,
+as the hooks of an agent session see them.
 
 ## Decision log and stats
 

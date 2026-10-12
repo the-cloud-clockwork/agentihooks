@@ -29,9 +29,13 @@ def _environ(home):
 
 @pytest.fixture(autouse=True)
 def _unset(monkeypatch):
-    for name in (URL, KEY, "AGENTIHOOKS_CLASSIFIER_MODELS"):
-        monkeypatch.setenv(name, "")
+    held = {name: value for name, value in os.environ.items() if name.startswith(operator_env.CLASSIFIER_PREFIX)}
+    for name in held:
         monkeypatch.delenv(name)
+    yield
+    for name in [name for name in os.environ if name.startswith(operator_env.CLASSIFIER_PREFIX)]:
+        del os.environ[name]
+    os.environ.update(held)
 
 
 def test_the_address_comes_from_the_claude_settings_and_the_key_from_the_login_shell(tmp_path):
@@ -48,6 +52,15 @@ def test_a_name_the_caller_holds_is_kept(tmp_path):
     environ = {**_environ(tmp_path), URL: "http://caller:4000"}
     assert operator_env.classifier(environ) == [KEY]
     assert environ[URL] == "http://caller:4000"
+
+
+def test_an_empty_name_counts_as_missing(tmp_path):
+    _settings(tmp_path, {URL: "http://settings:4000", KEY: ""})
+    _shell(tmp_path, "export AGENTIHOOKS_CLASSIFIER_LITELLM_KEY=sk-shell")
+    environ = {**_environ(tmp_path), URL: "", KEY: ""}
+    assert operator_env.classifier(environ) == [URL]
+    assert environ[URL] == "http://settings:4000"
+    assert environ[KEY] == ""
 
 
 def test_the_settings_value_wins_over_the_shell(tmp_path):
