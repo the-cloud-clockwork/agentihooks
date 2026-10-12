@@ -5,6 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
+pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("mcp-sdk")]
+
 
 @pytest.mark.parametrize("default_url", [False, True])
 @pytest.mark.parametrize("outcome", ["success", "error", "timeout"])

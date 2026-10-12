@@ -2,6 +2,10 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
+pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+
 
 def test_recorded_turn_sample_yields_one_standing_finding_per_breaching_account():
     import fakeredis
@@ -212,8 +216,6 @@ def test_unbound_agents_and_missing_accounts_produce_no_findings():
 
 
 def test_foreign_swarm_summary_is_refused_before_findings_change():
-    import pytest
-
     from scripts.swarm import langfuse
     from scripts.swarm.health import standing
 
