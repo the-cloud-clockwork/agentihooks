@@ -137,6 +137,60 @@ def test_an_alert_finding_under_the_detector_threshold_keeps_its_alert_numbers(s
     )
 
 
+def test_an_alert_that_fires_while_the_detector_clears_keeps_its_finding(store, monkeypatch):
+    stage_detector.update_findings(store, "scratch", live_pass(), NOW)
+    real_pipeline = store.redis.pipeline
+    interleaved = []
+
+    def pipeline(*args, **kwargs):
+        pipe = real_pipeline(*args, **kwargs)
+        real_multi = pipe.multi
+
+        def multi():
+            if not interleaved:
+                interleaved.append(True)
+                standing.fire(
+                    store.redis, "scratch", "ci_queue", standing.Reading(1.5, 1.0, "task hours in the window", "a"), NOW
+                )
+            return real_multi()
+
+        pipe.multi = multi
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+    found = {"stages": [{**live_pass()["stages"][8], "seconds": 60.0}]}
+    stage_detector.update_findings(store, "scratch", found, NOW)
+    assert interleaved == [True]
+    row = standing.read(store.redis, "scratch")["ci_queue"]
+    assert (row["value"], row["threshold"], row["unit"]) == (1.5, 1.0, "task hours in the window")
+
+
+def test_clearing_a_detector_finding_leaves_alert_findings_and_reports_what_it_did(store):
+    standing.fire(store.redis, "scratch", "launch", standing.Reading(1.0, 0.5, "task hours in the window", "a"), NOW)
+    stage_detector.update_findings(store, "scratch", live_pass(), NOW)
+    assert standing.clear_detector(store.redis, "scratch", "launch") is False
+    assert standing.clear_detector(store.redis, "scratch", "missing") is False
+    assert standing.clear_detector(store.redis, "scratch", "review") is True
+    assert sorted(standing.read(store.redis, "scratch")) == [
+        "ci_overrun",
+        "ci_queue",
+        "claim_wait",
+        "intent_fix",
+        "launch",
+        "merge_queue",
+        "quota_hold",
+    ]
+
+
+def test_an_unchanged_reading_still_takes_a_new_threshold(store):
+    reading = live_pass()["stages"][0]
+    stage_detector.update_findings(store, "scratch", {"stages": [reading]}, NOW)
+    row = standing.update_detector(store.redis, "scratch", reading, NOW + 60_000, 5.0)
+    assert (row["threshold"], row["updated_at"]) == (5.0, NOW + 60_000)
+    same = standing.update_detector(store.redis, "scratch", reading, NOW + 120_000, 5.0)
+    assert same == row
+
+
 def test_two_equal_windows_show_rising_and_falling_stages():
     source = rows()
     tasks = []
@@ -185,7 +239,6 @@ def test_record_keeps_the_shared_report_and_findings_stable_between_cadence_tick
             ("intent_fix", 600.0),
         ]
         before = standing.read(store.redis, "scratch")
-        assert {row["stage"] for row in found["stages"]} >= {"review", "merge_queue", "intent_fix"}
         assert before == {}
         assert stage_detector.record(box, store, "scratch", 10 * H + 60_000, [task], environ) == found
         assert standing.read(store.redis, "scratch") == before

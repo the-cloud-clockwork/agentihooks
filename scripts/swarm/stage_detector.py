@@ -89,7 +89,7 @@ def update_findings(store: RedisStore, slug: str, found: dict, now_ms: int) -> N
         if threshold is not None:
             standing.update_detector(store.redis, slug, row, now_ms, threshold)
         elif existing:
-            standing.clear(store.redis, slug, row["stage"])
+            standing.clear_detector(store.redis, slug, row["stage"])
 
 
 def record(

@@ -69,7 +69,7 @@ def _fire(old, stage, reading, now_ms):
 
 
 def _detector(old, reading, now_ms, threshold):
-    if old.get("detector") == reading:
+    if old.get("detector") == reading and (old.get("unit") != DETECTOR_UNIT or old.get("threshold") == threshold):
         return old
     known = {*old.get("episodes", []), *old.get("detector", {}).get("episodes", [])}
     added = [episode for episode in reading["episodes"] if episode not in known]
@@ -100,6 +100,18 @@ def update_detector(redis: Redis, slug: str, reading: dict, now_ms: int, thresho
 
 def clear(redis: Redis, slug: str, stage: str) -> bool:
     return bool(redis.hdel(key(slug), stage))
+
+
+def clear_detector(redis: Redis, slug: str, stage: str) -> bool:
+    def apply(pipe):
+        raw = pipe.hget(key(slug), stage)
+        if not raw or json.loads(raw).get("unit") != DETECTOR_UNIT:
+            return False
+        pipe.multi()
+        pipe.hdel(key(slug), stage)
+        return True
+
+    return redis.transaction(apply, key(slug), value_from_callable=True)
 
 
 def _finding(row: dict) -> Finding:
