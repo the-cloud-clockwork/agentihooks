@@ -39,7 +39,7 @@ def test_app_mints_only_the_permitted_repository_and_refreshes_five_minutes_earl
     monkeypatch.setattr(git_auth.time, "time", clock)
     post = Mock(side_effect=[response(), response("refreshed-value")])
     monkeypatch.setattr(git_auth.requests, "post", post)
-    auth = git_auth.GitHubAppAuth("github.com/example/private")
+    auth = git_auth.GitHubAppAuth("github.com/Example/Private")
     assert auth.get_token() == "installation-value"
     assert auth.get_token() == "installation-value"
     assert post.call_count == 1
@@ -78,7 +78,7 @@ def test_worker_sets_askpass_by_reference_and_disables_stored_helpers(app, monke
     monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
     monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.autocrlf")
     monkeypatch.setenv("GIT_CONFIG_VALUE_0", "false")
-    git_auth.configure("github.com/example/private")
+    git_auth.configure("github.com/Example/Private")
     import os
 
     assert os.environ["AGENTIHOOKS_GIT_PROJECT"] == "github.com/example/private"
@@ -93,7 +93,7 @@ def test_worker_sets_askpass_by_reference_and_disables_stored_helpers(app, monke
 
 def test_askpass_returns_credentials_only_for_its_https_repository(app, monkeypatch):
     monkeypatch.setattr(git_auth.requests, "post", Mock(return_value=response()))
-    git_auth.configure("github.com/example/private")
+    git_auth.configure("github.com/Example/Private")
     output = io.StringIO()
     assert git_auth.askpass("Username for 'https://github.com/example/private.git': ", output) == 0
     assert output.getvalue() == "x-access-token\n"

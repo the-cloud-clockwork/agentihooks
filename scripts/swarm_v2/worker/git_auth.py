@@ -22,7 +22,7 @@ class GitAuthRefused(ValueError):
 
 class GitHubAppAuth:
     def __init__(self, project: str) -> None:
-        self.project = identity(f"https://{project}")
+        self.project = identity(f"https://{project}").lower()
         self.app_id = os.environ["GITHUB_APP_ID"]
         self.installation = os.environ["GITHUB_APP_INSTALLATION_ID"]
         self.key = os.environ["GITHUB_APP_PRIVATE_KEY"]
@@ -53,7 +53,7 @@ class GitHubAppAuth:
 
 
 def configure(project: str) -> None:
-    os.environ[PROJECT] = identity(f"https://{project}")
+    os.environ[PROJECT] = identity(f"https://{project}").lower()
     os.environ["GIT_ASKPASS"] = str(Path(__file__).with_name("git_askpass.sh"))
     os.environ["GIT_TERMINAL_PROMPT"] = "0"
     index = int(os.environ.get("GIT_CONFIG_COUNT", "0"))
