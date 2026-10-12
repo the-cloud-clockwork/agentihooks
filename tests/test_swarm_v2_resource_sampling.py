@@ -253,6 +253,43 @@ def test_measure_reports_the_whole_tree_of_a_live_workload(tmp_path, capfd):
     assert 1.0 <= result["wall_seconds"] < 30
 
 
+def leaked_file(path):
+    cycle = [path.open("w")]
+    cycle.append(cycle)
+
+
+@pytest.mark.flaky(reruns=0)
+@pytest.mark.parametrize("inherited", [True, False], ids=["inherited", "new-leak"])
+def test_live_workload_resource_audit_owns_only_sampling_leaks(tmp_path, capfd, monkeypatch, inherited):
+    enabled = gc.isenabled()
+    gc.disable()
+    leak = tmp_path / ("inherited-resource" if inherited else "sampling-resource")
+    try:
+        if inherited:
+            leaked_file(leak)
+            test_measure_reports_the_whole_tree_of_a_live_workload(tmp_path, capfd)
+        else:
+            measure = sampling.measure
+
+            def leaking_measure(*args, **kwargs):
+                result = measure(*args, **kwargs)
+                leaked_file(leak)
+                return result
+
+            monkeypatch.setattr(sampling, "measure", leaking_measure)
+            with pytest.raises(AssertionError) as failure:
+                test_measure_reports_the_whole_tree_of_a_live_workload(tmp_path, capfd)
+            message = str(failure.value)
+            assert "ResourceWarning" in message
+            assert "unclosed file" in message
+            assert str(leak) in message
+            assert __file__ in message
+    finally:
+        gc.collect()
+        if enabled:
+            gc.enable()
+
+
 def test_measure_counts_peak_storage_written_then_removed(tmp_path):
     script = (
         "import os, time, pathlib; p = pathlib.Path('blob'); p.write_bytes(bytes(3 << 20)); "
