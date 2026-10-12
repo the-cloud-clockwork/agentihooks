@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import replace
 
 from hooks.proc import processes
@@ -27,16 +28,20 @@ def arguments(config: SwarmConfig, harness: str, task: dict) -> list[str]:
     return result
 
 
-def complete(config: SwarmConfig, name: str, placed: Placed) -> Placed:
+def complete(config: SwarmConfig, name: str, placed: Placed, terminate: Callable[[str], object]) -> Placed:
     if placed.harness != "codex":
         return placed
     transport = getattr(config, "codex_inbox_transport", LEGACY_TRANSPORT)
     if transport == LEGACY_TRANSPORT:
         return replace(placed, transport=transport)
-    execution = next((row for row in connect().execution_occupants(config.slug).values() if row.name == name), None)
-    if execution is None or execution.transport != transport:
-        raise SwarmError("the Codex app server launch has no matching admitted execution")
-    return replace(placed, transport=transport, execution=execution)
+    try:
+        execution = next((row for row in connect().execution_occupants(config.slug).values() if row.name == name), None)
+        if execution is None or execution.transport != transport:
+            raise SwarmError("the Codex app server launch has no matching admitted execution")
+        return replace(placed, transport=transport, execution=execution)
+    except Exception as exc:
+        terminate(name)
+        raise SpawnError(str(exc), pane_id=placed.pane_id) from exc
 
 
 def admit_legacy(store: RedisStore, slug: str, agent: AgentRecord, runtime) -> AgentRecord:
