@@ -82,6 +82,15 @@ def test_sessions_omit_a_dead_agent_with_a_live_sibling(tmp_path, state, registe
     assert [item.process.pid for item in found] == [201]
 
 
+def test_sessions_omit_a_registered_non_agent_process(tmp_path):
+    from scripts.terminate_agent import sessions
+
+    item = process(200, comm="python", argv=("python",))
+    registry = {"non-agent": {"pid": 200, "status": "alive"}}
+    with patch("scripts.terminate_agent.processes", return_value={200: item}):
+        assert sessions(tmp_path / "proc", registry=registry) == []
+
+
 @pytest.mark.parametrize("state,alive", [("S", True), ("Z", False), ("X", False)])
 def test_alive_counts_a_zombie_or_a_process_being_reaped_as_ended(monkeypatch, state, alive):
     from scripts.terminate_agent import _alive
