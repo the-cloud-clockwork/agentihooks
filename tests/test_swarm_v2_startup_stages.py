@@ -95,6 +95,7 @@ def test_a_scale_from_zero_attributes_every_stage_separately():
         "pull_retry": 0,
         "pod_start": 5000,
         "bootstrap": 2000,
+        "handshake": None,
     }
     assert (entry["node_kind"], entry["node_source"], entry["from_zero"]) == ("cold", "new_instance", True)
     assert (entry["image_cache"], entry["outcome"], entry["transient"]) == ("uncached", "started", "")
@@ -517,7 +518,7 @@ def test_markdown_renders_seconds_with_counts_and_marks_missing_cells():
     row = next(line for line in page.splitlines() if line.startswith("| cold-node/uncached-image"))
     assert "| none | none | 70.0 / 70.0 (n 1) | 20.0 / 20.0 (n 1) |" in row
     warm = next(line for line in page.splitlines() if line.startswith("| warm-node/cached-image"))
-    assert warm.count("n/a") == 6
+    assert warm.count("n/a") == 7
 
 
 def test_a_pod_listed_after_its_scheduling_event_is_a_later_incarnation():
@@ -719,3 +720,68 @@ def test_written_records_are_sorted_indented_json_in_new_folders(tmp_path):
     path = tmp_path / "a" / "b" / "record.json"
     bench._write(path, {"b": 1, "a": [1]})
     assert path.read_text() == '{\n  "a": [\n    1\n  ],\n  "b": 1\n}\n'
+
+
+WORKER_LOG = "\n".join(
+    (
+        '2026-10-12T10:04:10.603104698Z {"event": "restore_verified", "recovery": "fresh"}',
+        '2026-10-12T10:04:10.603630080Z {"worker_start": "prepared", "attempt": "exe-1", "uid": 10001}',
+        "2026-10-12T10:04:11.100000000Z not a record",
+        "2026-10-12T10:04:11.200000000Z 12",
+        '2026-10-12T10:04:11.688520777Z {"supervisor": "prompt_delivered", "incarnation": "i1", "bytes": 1}',
+        '2026-10-12T10:04:30.000000000Z {"supervisor": "prompt_delivered", "incarnation": "i2", "bytes": 1}',
+    )
+)
+
+
+def test_worker_log_marks_run_from_the_prepared_report_to_the_first_prompt_delivery_after_it():
+    assert stages.log_marks(WORKER_LOG) == {
+        "prepared": stages.instant("2026-10-12T10:04:10.603630Z"),
+        "delivered": stages.instant("2026-10-12T10:04:11.688520Z"),
+    }
+
+
+def test_a_prompt_delivery_before_the_prepared_report_or_without_one_is_not_a_handshake():
+    early = '2026-10-12T10:04:09Z {"supervisor": "prompt_delivered"}\n2026-10-12T10:04:10Z {"worker_start": "prepared"}'
+    assert stages.log_marks(early) == {"prepared": stages.instant("2026-10-12T10:04:10Z")}
+    assert stages.log_marks('2026-10-12T10:04:11Z {"supervisor": "prompt_delivered"}') == {}
+    assert stages.log_marks("") == {}
+
+
+def test_the_handshake_stage_is_the_worker_log_gap_and_absent_without_both_marks():
+    events = warm_events("w/exe")
+    pods = {"w/exe": {"created": T0, "ready": T0 + 9000, "prepared": T0 + 4000, "delivered": T0 + 5085}}
+    [entry] = stages.attribute(read(events, pods))
+    assert entry["stages"]["handshake"] == 1085 and entry["stages"]["bootstrap"] == 6500
+    del pods["w/exe"]["delivered"]
+    [entry] = stages.attribute(read(events, pods))
+    assert entry["stages"]["handshake"] is None
+    result = stages.report(stages.attribute(read(events, {"w/exe": {**pods["w/exe"], "delivered": T0 + 5085}})))
+    assert result["scenarios"]["warm-node/cached-image"]["stages"]["handshake"]["p50"] == 1085
+
+
+def test_reduce_joins_each_worker_log_to_its_pod():
+    raw = raw_capture()
+    raw["logs"] = {"default/a": WORKER_LOG, "default/gone": WORKER_LOG}
+    reduced = stages.reduce(raw)
+    assert reduced["pods"] == {
+        "default/a": {
+            "created": stages.instant("2026-10-11T14:36:08Z"),
+            "ready": None,
+            "prepared": stages.instant("2026-10-12T10:04:10.603630Z"),
+            "delivered": stages.instant("2026-10-12T10:04:11.688520Z"),
+        }
+    }
+
+
+def test_cli_reduce_reads_worker_logs_and_hashes_each(tmp_path):
+    write_capture(tmp_path / "capture")
+    (tmp_path / "capture" / "logs").mkdir()
+    (tmp_path / "capture" / "logs" / "default_a.log").write_text(WORKER_LOG)
+    assert bench.main(["reduce", "--capture", str(tmp_path / "capture"), "--output", str(tmp_path / "read.json")]) == 0
+    reduced = json.loads((tmp_path / "read.json").read_text())
+    assert sorted(reduced["inputs"]) == sorted((*bench.LISTINGS, "logs"))
+    assert list(reduced["inputs"]["logs"]) == ["default_a.log"]
+    assert len(reduced["inputs"]["logs"]["default_a.log"]) == 64
+    assert reduced["pods"]["default/a"]["delivered"] - reduced["pods"]["default/a"]["prepared"] == 1085
+    assert "Worker prepared to native agent ready and prompt delivered" in bench.markdown(stages.report([]), "empty")
