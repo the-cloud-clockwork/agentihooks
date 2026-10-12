@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -149,6 +150,93 @@ def test_a_second_start_adds_no_second_link(env):
     assert len(state(WATCHED)["sources"]) == len(state(DOCTOR)["sources"]) == 1
     assert len(pointers(WATCHED)) == 1
     assert len([i for i in InboxStore(store.redis).inbox(f"master@{WATCHED}") if not i.fyi]) == 1
+
+
+MASTER = "master@323133-0106"
+
+
+class PinnedLedger(FileLedger):
+    """The file ledger behind the server's write as check: a pinned session's credential binds its own name."""
+
+    def _call(self, slug, ops=None):
+        from scripts.swarm.ledger_client import SERVICE_AUTHORS
+        from scripts.swarm_ledger import ledger_authority
+
+        pinned = os.environ.get("AGENTIHOOKS_SWARM") and os.environ.get("AGENTIHOOKS_AGENT_NAME", "")
+        if pinned and not all(op.get("by") in SERVICE_AUTHORS for op in ops or ()):
+            for op in ops or ():
+                if refused := ledger_authority.refusal(pinned, op):
+                    raise SwarmError(f"ledger {slug} refused: {refused}")
+        return super()._call(slug, ops)
+
+
+def pin(monkeypatch, name=MASTER, lane="master"):
+    monkeypatch.setattr(swarm_cli, "LedgerClient", PinnedLedger)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", WATCHED)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_LANE", lane)
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", name)
+
+
+@pytest.fixture
+def pinned_master(monkeypatch):
+    pin(monkeypatch)
+
+
+def test_the_watched_master_starts_its_doctor_and_authors_the_links_as_itself(env, pinned_master, capsys):
+    store, _, _ = env
+    assert doctor.main([WATCHED, "start"]) == 0, capsys.readouterr().err
+    assert state(DOCTOR)["sources"] == [ledger_link.page_url(WATCHED)]
+    assert state(WATCHED)["sources"] == [ledger_link.page_url(DOCTOR)]
+    assert state(DOCTOR)["_meta"]["stamps"]["sources"]["by"] == MASTER
+    assert state(WATCHED)["_meta"]["stamps"]["sources"]["by"] == MASTER
+    assert (store.peer(WATCHED), store.peer(DOCTOR)) == (DOCTOR, WATCHED)
+    assert store.config(DOCTOR).state in ("running", "drained") and store.agents(DOCTOR)
+
+
+def test_the_watched_master_reopens_its_closed_doctor_as_itself(env, monkeypatch, capsys):
+    store, _, _ = env
+    assert doctor.main([WATCHED, "start"]) == 0
+    assert doctor.main([WATCHED, "stop"]) == 0
+    assert state(DOCTOR)["closed_at"]
+    pin(monkeypatch)
+    assert doctor.main([WATCHED, "start"]) == 0, capsys.readouterr().err
+    assert not state(DOCTOR)["closed_at"]
+    assert state(DOCTOR)["_meta"]["stamps"]["closed_at"]["by"] == MASTER
+
+
+def test_the_watched_master_stops_its_doctor_as_itself(env, pinned_master, capsys):
+    store, _, _ = env
+    assert doctor.main([WATCHED, "start"]) == 0, capsys.readouterr().err
+    assert doctor.main([WATCHED, "stop"]) == 0, capsys.readouterr().err
+    assert state(DOCTOR)["closed_at"]
+    assert state(DOCTOR)["_meta"]["stamps"]["closed_at"]["by"] == MASTER
+    assert state(DOCTOR)["_meta"]["stamps"]["overview"]["by"] == MASTER
+    assert store.config(DOCTOR).state == "stopped"
+
+
+def test_the_operator_shell_still_starts_the_doctor_as_doctor(env, monkeypatch, capsys):
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
+    assert doctor.main([WATCHED, "start"]) == 0, capsys.readouterr().err
+    assert state(DOCTOR)["_meta"]["stamps"]["sources"]["by"] == doctor.BY
+    assert state(WATCHED)["_meta"]["stamps"]["sources"]["by"] == doctor.BY
+    assert doctor.main([WATCHED, "stop"]) == 0
+    assert state(DOCTOR)["_meta"]["stamps"]["closed_at"]["by"] == doctor.BY
+    assert doctor.main([WATCHED, "start"]) == 0, capsys.readouterr().err
+    assert not state(DOCTOR)["closed_at"]
+    assert state(DOCTOR)["_meta"]["stamps"]["closed_at"]["by"] == doctor.BY
+
+
+@pytest.mark.parametrize("name", [MASTER, "engineer@323133-1244"])
+def test_a_pinned_agent_still_cannot_write_the_doctor_ledger_as_doctor(env, monkeypatch, name):
+    from scripts.swarm_ledger import ledger_authority
+
+    op = {"op": "source_add", "id": "s1", "by": doctor.BY, "source": ledger_link.page_url(WATCHED)}
+    assert ledger_authority.refusal(name, op) == f"{name} cannot write as {doctor.BY}"
+    pin(monkeypatch, name, "eng")
+    with pytest.raises(SwarmError) as refused:
+        swarm_cli.LedgerClient().add_source(WATCHED, ledger_link.page_url(DOCTOR), doctor.BY)
+    assert str(refused.value) == f"ledger {WATCHED} refused: {name} cannot write as {doctor.BY}"
+    assert state(WATCHED)["sources"] == []
 
 
 LONG = "a" * 40 + "-2026-10"
