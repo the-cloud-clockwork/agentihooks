@@ -120,7 +120,7 @@ def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window, quiet=DEFAULT_
 def wake_now(inbox, slug, agents, herdr, now_ms, window, quiet=DEFAULT_QUIET_S * 1000):
     """The wake step alone, for Codex panes the moment an item lands; Claude sessions take items through the inbox
     channel, and escalation stays with the tick's wake pass."""
-    actions = []
+    actions, names = [], {a.name for a in agents}
     for agent in agents:
         if agent.harness != "codex" or not typed_wake(agent) or outage.open_records(slug):
             continue
@@ -128,13 +128,18 @@ def wake_now(inbox, slug, agents, herdr, now_ms, window, quiet=DEFAULT_QUIET_S *
         if not mail:
             continue
         state = _pane_state(inbox.redis, slug, herdr, agent, now_ms, quiet)
-        due = [item for item in mail if decide(item, state, inbox.history(item.id), now_ms, window, slug) == WOKEN]
+        due = [item for item in mail if _wake_due(inbox, item, state, names, (now_ms, window, slug))]
         if not due or not _wake(herdr, agent, set()):
             continue
         for item in due:
             inbox.note(item.id, WOKEN, BY, f"prompted {agent.name} to read its inbox", now_ms)
             actions.append(f"woke {agent.name} for message {item.id}")
     return actions
+
+
+def _wake_due(inbox, item, state, names, clock):
+    since = _seat_clock(inbox, *_receiver(inbox, item.address), names)
+    return decide(item, state, inbox.history(item.id), *clock, since) == WOKEN
 
 
 def _ladder(inbox, slug):

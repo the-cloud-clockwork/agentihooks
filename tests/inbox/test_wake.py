@@ -433,6 +433,20 @@ def test_seat_mail_to_a_live_occupant_escalates_after_one_window(inbox):
     assert events(inbox, item.id) == ["escalated_master"]
 
 
+def test_a_codex_successor_is_woken_one_window_after_it_binds(inbox):
+    inbox.seats.occupy("eng-1@sw", "sw-eng-gone", at=1)
+    item = inbox.send("sw-eng-4", "eng-1@sw", "rebase please")
+    inbox.note(item.id, wake.WOKEN, wake.BY, "prompted sw-eng-gone to read its inbox", sent_at(item) + 1)
+    bound = sent_at(item) + 10 * W
+    codex = AgentRecord("sw-eng-2", "eng", "t1", pane_id="p2", harness="codex", seat="eng-1@sw")
+    inbox.seats.occupy("eng-1@sw", codex.name, at=bound)
+    herdr = FakeHerdr({"p2": "idle"})
+    wake.wake_now(inbox, "sw", [codex], herdr, bound + W - 1, W)
+    assert herdr.prompts == []
+    wake.wake_now(inbox, "sw", [codex], herdr, bound + W, W)
+    assert herdr.prompts == [("p2", wake.WAKE_TEXT)]
+
+
 def test_a_handover_before_the_prompt_leaves_the_old_pane_alone(inbox):
     inbox.seats.occupy("eng-1@sw", "sw-eng-1", at=1)
     item = inbox.send(MASTER_NAME, "eng-1@sw", "rebase please")
