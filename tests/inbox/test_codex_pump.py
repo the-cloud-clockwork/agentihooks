@@ -154,7 +154,8 @@ def test_an_idle_thread_wakes_with_turn_start_and_no_wait_tool(rig):
     [delivery] = deliveries(rig, item.id)
     assert [m for m in rig.server.methods() if m.startswith("turn/")] == ["turn/start"]
     assert rig.server.turns[0]["inputs"] == [
-        f"[swarm delivery] item {item.id} delivery {delivery.id} from alice\n\nhello"
+        f'[swarm delivery]\n{{"item_id": "{item.id}", "delivery_id": "{delivery.id}", "sender": "alice", '
+        f'"recipient": "{ME}", "task": "", "kind": "message"}}\n\nhello'
     ]
     assert [m["params"]["threadId"] for m in rig.server.sent if m["method"] == "turn/start"] == [THREAD]
     assert rig.store.get(item.id).state == "delivered"
@@ -175,7 +176,8 @@ def test_busy_delivery_steers_the_observed_turn_on_the_same_thread(rig):
     assert len(rig.server.turns) == 1
     [delivery] = deliveries(rig, item.id)
     assert rig.server.turns[0]["inputs"][-1] == (
-        f"[swarm delivery] item {item.id} delivery {delivery.id} from alice\n\nsteer me"
+        f'[swarm delivery]\n{{"item_id": "{item.id}", "delivery_id": "{delivery.id}", "sender": "alice", '
+        f'"recipient": "{ME}", "task": "", "kind": "message"}}\n\nsteer me'
     )
     assert rig.store.get(item.id).state == "delivered"
 
@@ -201,7 +203,8 @@ def test_a_turn_end_race_refreshes_after_the_refusal_and_starts_a_turn(rig):
     assert rig.server.methods()[-3:] == ["turn/steer", "thread/read", "turn/start"]
     [delivery] = deliveries(rig, item.id)
     assert rig.server.turns[1]["inputs"] == [
-        f"[swarm delivery] item {item.id} delivery {delivery.id} from alice\n\nracing"
+        f'[swarm delivery]\n{{"item_id": "{item.id}", "delivery_id": "{delivery.id}", "sender": "alice", '
+        f'"recipient": "{ME}", "task": "", "kind": "message"}}\n\nracing'
     ]
     assert rig.store.get(item.id).state == "delivered"
     assert rig.pump.state.active_turn == "turn-2"

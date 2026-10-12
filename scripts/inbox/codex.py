@@ -10,6 +10,7 @@ from scripts.codex_session.binding import CONNECTED, DEGRADED, BindingStore
 from scripts.inbox.dispatch import Dispatcher, digest
 from scripts.inbox.receipts import MISMATCH, RELEASED, Delivery, DispatchError
 from scripts.inbox.store import NOTIFY, InboxStore, Item, now_ms
+from scripts.swarm.delivery import envelope as delivery_envelope
 
 STOPPED = "stopped"
 UNOBSERVED = "an active turn that began before this pump connected"
@@ -25,7 +26,7 @@ DEGRADED_LOG = "codex pump for {} degraded: {}: {}"
 
 
 def envelope(item: Item, delivery: Delivery) -> str:
-    return f"[swarm delivery] item {item.id} delivery {delivery.id} from {item.sender}\n\n{item.text}"
+    return delivery_envelope(item, delivery.id, delivery.recipient)
 
 
 def stderr(line: str) -> None:

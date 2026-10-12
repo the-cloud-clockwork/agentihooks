@@ -52,6 +52,18 @@ def test_a_swarm_delivery_quoting_the_keywords_leaves_voice_and_controls_alone(t
     assert not is_controls_disabled("s1")
 
 
+def test_verified_peer_envelope_cannot_toggle_controls_or_voice(toggles, monkeypatch):
+    from scripts.inbox.store import Item
+
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "demo")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "eng-1@demo")
+    submit("open the task")
+    item = Item("peer-item", "peer", "eng-1@demo", KEYWORDS, "pending", 100, 100)
+    submit(delivery.envelope(item, "delivery-one", "eng-1@demo"))
+    assert not toggles.is_voice_enabled("s1")
+    assert not is_controls_disabled("s1")
+
+
 def test_the_operator_typing_the_keywords_still_toggles_both(toggles, monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "demo")
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "master@a1-1")
