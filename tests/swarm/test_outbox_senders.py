@@ -248,3 +248,9 @@ def test_an_alert_delivered_again_after_its_mark_expired_is_one_item_with_its_st
     ledger_alerts.deliver(inbox, SLUG, [alert(3)], 3, BOSS.seat)
     [item] = items(inbox, BOSS.seat)
     assert item.id == outbox.stable_id("alert", SLUG, "al-3-0") and len(item.id) == 12
+
+
+def test_a_stable_id_is_the_short_hash_of_its_parts_one_per_line():
+    import hashlib
+
+    assert outbox.stable_id("ledger:sw:5", "eng-1@sw") == hashlib.sha256(b"ledger:sw:5\neng-1@sw").hexdigest()[:12]

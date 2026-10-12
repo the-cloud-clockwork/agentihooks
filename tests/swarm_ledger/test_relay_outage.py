@@ -206,6 +206,33 @@ def test_a_relay_forgets_only_the_revisions_it_covered():
     assert ledger_server.unrelayed() == {ledger_server.RELAY: {SLUG: [9]}}
 
 
+def first_read(monkeypatch, seen):
+    """unrelayed() answers seen once, as another thread's write lands, then reads the file again."""
+    real, calls = ledger_server.unrelayed, []
+
+    def read():
+        calls.append(1)
+        return seen if len(calls) == 1 else real()
+
+    monkeypatch.setattr(ledger_server, "unrelayed", read)
+    return real
+
+
+@pytest.mark.parametrize("left", [{}, {ledger_server.RELAY: {"other-2026-01-01": [7]}}])
+def test_a_relay_whose_revisions_another_thread_forgot_leaves_the_record_as_it_found_it(monkeypatch, left):
+    for slug, revs in left.get(ledger_server.RELAY, {}).items():
+        ledger_server.unrelayed_on(ledger_server.RELAY, slug, revs[0])
+    real = first_read(monkeypatch, {ledger_server.RELAY: {SLUG: [5]}})
+    ledger_server.relayed(ledger_server.RELAY, SLUG, 0, 9)
+    assert real() == left
+
+
+def test_a_replay_whose_gone_ledger_another_thread_forgot_carries_on(monkeypatch):
+    real = first_read(monkeypatch, {ledger_server.RELAY: {"gone-2026-01-01": [4]}})
+    ledger_server.replay_unrelayed()
+    assert real() == {}
+
+
 def test_the_unrelayed_record_creates_its_folder(monkeypatch, tmp_path):
     monkeypatch.setattr("hooks.config.AGENTIHOOKS_HOME", str(tmp_path / "home" / "state"))
     ledger_server.unrelayed_on(ledger_server.RELAY, SLUG, 3)

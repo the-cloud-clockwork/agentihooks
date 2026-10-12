@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/operator_mail.py:scripts.swarm.operator_mail.x_relay__mutmut_65:8137138614d0e190bb886552debfeda9ef9592cc68ae0f00f57942fbac35caa6": {
+    "reader": "standards_reader",
+    "reason": "The ledger sent mark is read only with exists() and nothing reads its value; its TTL is unchanged."
+  }
+}
