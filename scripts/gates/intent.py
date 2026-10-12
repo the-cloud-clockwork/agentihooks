@@ -194,9 +194,9 @@ def pr_view(url, run=subprocess.run):
 def named_pulls(task, body):
     own = PULL.search(task["pr_url"])
     here = (own[1].lower(), own[2].lower()) if own else None
-    texts = [task.get("description") or "", body, *((c.get("text") or "") for c in task.get("comments") or [])]
+    texts = [task.get("description"), body, *(c.get("text") for c in task.get("comments") or [])]
     urls, seen = [], set()
-    for text in texts:
+    for text in filter(None, texts):
         short = (m.groups() for m in SHORT.finditer(text) if here and m[1].lower() == here[0])
         for owner, repo, number in [*(m.groups() for m in PULL.finditer(text)), *short]:
             url = f"https://github.com/{owner}/{repo}/pull/{number}"

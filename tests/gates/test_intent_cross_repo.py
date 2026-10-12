@@ -34,10 +34,12 @@ def runner(calls, pulls=PULLS):
         pull = pulls.get(args[3])
         if pull is None:
             return SimpleNamespace(returncode=1, stdout="")
-        if args[1:3] == ["pr", "view"]:
+        if args == ["gh", "pr", "view", args[3], "--json", "title,body,files,state"]:
             fields = ("title", "body", "files", "state")
             return SimpleNamespace(returncode=0, stdout=json.dumps({key: pull[key] for key in fields}))
-        return SimpleNamespace(returncode=0, stdout=pull["diff"])
+        if args == ["gh", "pr", "diff", args[3]]:
+            return SimpleNamespace(returncode=0, stdout=pull["diff"])
+        return SimpleNamespace(returncode=1, stdout="")
 
     return run
 
@@ -82,6 +84,8 @@ def test_a_merged_pull_request_in_a_second_repository_is_judged_with_the_open_on
     assert pulls[THERE]["merged"] is True
     assert pulls[HERE]["merged"] is False
     assert pulls[THERE]["files"] == ["stacks/sonarqube/gates.json"]
+    assert pulls[THERE]["title"] == PULLS[THERE]["title"]
+    assert pulls[THERE]["body"] == PULLS[THERE]["body"]
     assert record["verdict"] == "pass"
     assert record["reason"].endswith(f"; judged on {HERE} and {THERE}")
     assert "named_pending" not in record
@@ -91,6 +95,13 @@ def test_a_failed_verdict_also_names_every_pull_request_judged(tmp_path):
     _, record = judged(tmp_path, task(), usable=0.1)
     assert record["verdict"] == "fail"
     assert f"; judged on {HERE} and {THERE}" in record["reason"]
+
+
+def test_three_judged_pull_requests_are_listed_with_commas_and_a_final_and(tmp_path):
+    bridge = "https://github.com/o/bridge/pull/7"
+    pulls = {**PULLS, bridge: PULLS[THERE]}
+    _, record = judged(tmp_path, task(description=f"Also {bridge}."), pulls=pulls)
+    assert record["reason"].endswith(f"; judged on {HERE}, {bridge} and {THERE}")
 
 
 def test_a_task_naming_no_other_repository_is_judged_on_its_own_pull_request_alone(tmp_path):
@@ -168,10 +179,20 @@ def test_coach_mode_rejudges_the_same_head_when_a_named_pull_request_merges(tmp_
 
 
 def test_a_large_named_diff_keeps_its_url_and_merged_state_in_the_classifier_state():
-    pull = {"url": THERE, "merged": True, "files": ["a"], "diff": '"' * intent.DIFF_CHARS}
+    pull = {
+        "url": THERE,
+        "merged": True,
+        "files": ["x y " * 2047 + "x" * (8189 - 8188)],
+        "diff": '"' * intent.DIFF_CHARS,
+    }
     [bound] = intent_history.prepare({"pull_requests": [pull]})["pull_requests"]
     assert bound["url"] == THERE and bound["merged"] is True
     assert bound["diff"]["truncated"] is True
+    assert bound["files"]["truncated"] is True
+    [kept] = intent_history.prepare({"pull_requests": [{**pull, "files": ["x y " * 2047 + "x" * (8188 - 8188)]}]})[
+        "pull_requests"
+    ]
+    assert kept["files"] == ["x y " * 2047 + "x" * (8188 - 8188)]
 
 
 def test_named_view_marks_a_cut_diff_and_body():
@@ -179,8 +200,11 @@ def test_named_view_marks_a_cut_diff_and_body():
     view = intent.named_view(THERE, run=runner([], pulls))
     assert view["diff_truncated"] and view["body_truncated"]
     assert len(view["diff"]) == intent.DIFF_CHARS and len(view["body"]) == intent.BODY_CHARS
-    view = intent.named_view(THERE, run=runner([]))
+    pulls = {THERE: {**PULLS[THERE], "body": "b" * intent.BODY_CHARS, "diff": "d" * intent.DIFF_CHARS}}
+    view = intent.named_view(THERE, run=runner([], pulls))
     assert not view["diff_truncated"] and not view["body_truncated"]
+    view = intent.named_view(THERE, run=runner([], {THERE: {**PULLS[THERE], "body": None}}))
+    assert view["body"] == "" and view["body_truncated"] is False
 
 
 def test_named_pulls_reads_task_text_comments_and_the_body_and_skips_this_repository():
