@@ -6,8 +6,8 @@ import urllib.request
 from collections.abc import Mapping
 from pathlib import Path
 
-from scripts.swarm_v2.artifacts.base import ArtifactError, ArtifactStore, Backend
-from scripts.swarm_v2.artifacts.object_store import ObjectStoreBackend
+from scripts.swarm_v2.artifacts.base import ArtifactError, ArtifactStore
+from scripts.swarm_v2.artifacts.object_store import ConditionalBackend, ObjectStoreBackend
 from scripts.swarm_v2.auth_context import Registration
 from scripts.swarm_v2.broadcast_bridge import GRANT_FILE, grant_path
 
@@ -15,7 +15,7 @@ BUCKET = "AGENTIHOOKS_CHECKPOINT_BUCKET"
 PREFIX = "AGENTIHOOKS_CHECKPOINT_PREFIX"
 
 
-def controller_backend(environ: Mapping[str, str] = os.environ) -> Backend | None:
+def controller_backend(environ: Mapping[str, str] = os.environ) -> ConditionalBackend | None:
     bucket = environ.get(BUCKET)
     if not bucket:
         return None
