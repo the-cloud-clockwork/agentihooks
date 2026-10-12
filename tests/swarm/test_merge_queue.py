@@ -120,6 +120,34 @@ def test_queue_enqueues_the_observed_head_and_reports_the_queue_entry():
     assert not any("compare/" in str(call[0]) for call in calls)
 
 
+def test_queue_squash_merges_the_observed_head_when_the_repository_has_no_queue():
+    calls = []
+    responses = iter(
+        [
+            {"data": {"resource": {**OPEN, "repository": {"mergeQueue": None}}}},
+            {"data": {"mergePullRequest": {"pullRequest": {"state": "MERGED"}}}},
+            {"data": {"resource": {**OPEN, "state": "MERGED", "repository": {"mergeQueue": None}}}},
+        ]
+    )
+
+    def run(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0, json.dumps(next(responses)))
+
+    assert merge_queue.operate("queue", URL, run) == {
+        "url": URL,
+        "state": "MERGED",
+        "head": "abc",
+        "queued": False,
+        "entry": None,
+    }
+    assert len(calls) == 3
+    assert "mergePullRequest(input:" in calls[1][4]
+    assert "expectedHeadOid: $head" in calls[1][4]
+    assert "mergeMethod: SQUASH" in calls[1][4]
+    assert calls[1][5:] == ["-f", "id=PR_one", "-f", "head=abc"]
+
+
 @pytest.mark.parametrize(
     "changed",
     [
