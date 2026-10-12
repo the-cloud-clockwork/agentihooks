@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from scripts.routing.slots import SlotSource
 
 PAGE_TTL_S = 60
+RETIRED_AFTER_S = session_bands.FRESH_SECONDS
 STALE = "STALE"
 EXPIRED_SOURCE = "token expired: run {login}"
 NEXT_MARK = "(next)"
@@ -378,13 +379,20 @@ def balance_table(
     return _render_live(claude + ([] if fable else _codex(now)), sessions, now, fable, current)
 
 
+def current_observations(cached: list) -> list:
+    if not cached:
+        return []
+    newest = max(at for at, _ in cached)
+    return [(at, result) for at, result in cached if newest - at <= RETIRED_AFTER_S]
+
+
 def _page_quota(now: float) -> dict:
     from hooks.context import account_sessions
     from scripts import claude_quota_balancer, codex_router
     from scripts.routing.claude_api import ClaudeApiSource
     from scripts.routing.codex_api import CodexApiSource
 
-    cached = claude_quota_balancer.cached_observations()
+    cached = current_observations(claude_quota_balancer.cached_observations())
     observed = {result.account: at for at, result in cached}
     pool = codex_router.CodexAccountSource().pool(os.environ)
     live = account_sessions.sessions_by_account()

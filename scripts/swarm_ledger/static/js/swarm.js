@@ -271,12 +271,6 @@ export async function saveRouting(input) {
   renderQuota(swarm, Date.now(), true);
 }
 
-function capacityLine(cap, now) {
-  if (!cap || !cap.effective) return null;
-  return { lanes: cap.lanes.map((lane) => `${lane} ${cap.effective[lane]} of ${cap.configured[lane]}`).join(" · "),
-    changed: `changed ${span(now - cap.at)} ago`, reason: `because ${cap.reason}` };
-}
-
 function sessionCell(q) {
   return h("span", { class: "sw-sessions-value", text: String(q.sessions) });
 }
@@ -286,17 +280,16 @@ function quotaCount(sw, count, now) {
   return at ? `${accounts} · probed ${age(now - at * 1000)} ago` : accounts;
 }
 
-function doctorFigures(doctor, now) {
-  const on = !!(doctor && doctor.slug);
-  return [["state", on ? doctor.state : "not running"], ["last check", on && doctor.last_check ? `${span(now - doctor.last_check)} ago` : "—"], ["findings", on ? String(doctor.findings) : "—"]];
+function renderDoctor(sw, now) {
+  const doctor = sw.doctor || {}, on = doctorOn(sw);
+  $("doctor-dot").replaceChildren(label(on ? "on" : "off", on ? "on" : "off"));
+  $("doctor-state").replaceChildren(on ? h("a", { href: "/" + doctor.slug, text: doctor.state }) : "not running");
+  $("doctor-check").textContent = `last check ${on && doctor.last_check ? `${span(now - doctor.last_check)} ago` : "—"}`;
+  $("doctor-findings").textContent = `findings ${on ? doctor.findings : "—"}`;
 }
 
 function seatText(seat) {
   return seat.startsWith("master@") ? seat : seat.split("@")[0].replace(/-(\d+)$/, " $1");
-}
-
-function kv(id, pairs) {
-  $(id).replaceChildren(...pairs.map(([key, value]) => h("div", { class: "kv" }, h("dt", { text: key }), h("dd", {}, value && value.nodeType ? value : String(value)))));
 }
 
 export function renderSwarm(sw) {
@@ -327,13 +320,7 @@ export function renderSwarm(sw) {
   renderAgents(sw, now);
   renderOverlays(sw);
   renderQuota(sw, now);
-  const capacity = capacityLine(sw.quota_capacity, now);
-  $("quota-capacity").replaceChildren(...(capacity ? [h("span", { class: "sw-caplanes", text: capacity.lanes }), h("span", { text: capacity.changed }), h("span", { text: capacity.reason })] : []));
-  const doctor = sw.doctor || {};
-  $("doctor-state").replaceChildren(label(doctorOn(sw) ? "on" : "off", doctorOn(sw) ? "on" : "off"));
-  const figures = doctorFigures(doctor, now);
-  if (doctorOn(sw)) figures[0][1] = h("a", { href: "/" + doctor.slug, text: doctor.state });
-  kv("swarm-doctor", figures);
+  renderDoctor(sw, now);
   if (wanted.id || !$("health").contains(document.activeElement)) renderHealth(sw.findings, now);
   renderHandoffs(sw.handoffs || []);
   renderStats();
@@ -343,6 +330,7 @@ function terminalHead(remote) {
   const head = $("agents-table").querySelector("thead tr"), found = head.querySelector("[data-terminal]");
   if (remote && !found) head.children[6].after(h("th", { "data-execution": "", text: "execution" }), h("th", { "data-terminal": "", text: "terminal" }));
   if (!remote && found) head.querySelectorAll("[data-execution], [data-terminal]").forEach((th) => th.remove());
+  if (remote !== !!found) document.dispatchEvent(new Event("columns"));
 }
 
 function renderAgents(sw, now = Date.now()) {
@@ -382,9 +370,11 @@ function renderHandoffs(rows) {
 
 function freezeRow(r) {
   const end = r.verb === "focus" ? "end focus" : "unfreeze", target = targetText(doc, r.target);
-  return cells(snowflake(r.verb === "focus" ? "Focus" : "Frozen"), r.verb, target, r.by, r.at ? clock(r.at) : "—",
+  const row = cells(snowflake(r.verb === "focus" ? "Focus" : "Frozen"), r.verb, target, r.by, r.at ? clock(r.at) : "—",
     h("button", { class: "sw-btn", type: "button", "aria-label": `${end} ${target}`, text: end,
       on: { click: () => queue({ op: "freeze_clear", id: newId("freeze"), target: r.target }) } }));
+  row.cells[2].title = target;
+  return row;
 }
 
 function renderFreezes() {

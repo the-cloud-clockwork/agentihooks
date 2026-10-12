@@ -23,3 +23,5 @@ printf 'FROM %s\nUSER 0:0\nRUN rm /usr/local/bin/codex\nUSER 10001:10001\n' "$ta
 "$task_python" "$task_repo/tests/integration/swarm_node/health_proof.py" \
     --image "$task_fixture" --missing-binary-image "$task_missing" \
     --tested-commit "$task_revision" --output "$task_output/results" 2>&1 | tee "$task_output/proof.log"
+"$task_python" "$task_repo/tests/integration/swarm_node/entrypoint_proof.py" \
+    --image "$task_fixture" --output "$task_output/entrypoint" 2>&1 | tee "$task_output/entrypoint.log"

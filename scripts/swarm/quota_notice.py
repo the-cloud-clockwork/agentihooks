@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 
 HURRY = "Your account has fifteen percent or less quota left. Finish the current step and push."
 HANDOFF_OPENING = "Your account is at the quota handoff threshold."
+WARNING_OPENING = "QUOTA HANDOFF WARNING:"
 HANDOFF = HANDOFF_OPENING + (
     " Commit, push, write the Handoff v2 document, "
     "then run agentihooks swarm {slug} handoff <doc> --reason quota and stop. "
@@ -29,7 +30,7 @@ def level(account: dict) -> str:
 
 
 def is_notice(item: Item) -> bool:
-    return item.sender == "swarm" and (item.text == HURRY or item.text.startswith(HANDOFF_OPENING))
+    return item.sender == "swarm" and (item.text == HURRY or item.text.startswith((HANDOFF_OPENING, WARNING_OPENING)))
 
 
 def apply(slug: str, store: RedisStore, decision: dict) -> list[str]:
