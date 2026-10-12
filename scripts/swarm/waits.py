@@ -80,7 +80,7 @@ def target_problem(kind, target, mine, rows, get):
         return "" if mutation_wait.RUN_URL.fullmatch(target) else "wait on mutation needs an Actions run url"
     if kind == "intent":
         own = rows.get(mine, {}).get("pr_url")
-        return "" if target == own else f"wait on intent needs the pull request of your task {mine}, not {target}"
+        return "" if target and target == own else f"wait on intent needs the pull request of your task {mine}, not {target}"
     if kind == "task":
         if target == mine:
             return f"task {target} is your own task"
