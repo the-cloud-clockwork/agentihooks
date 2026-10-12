@@ -46,6 +46,35 @@ def test_eleventh_replay_counts_three_overruns_in_one_standing_finding(store):
     assert len(report["top"]) <= 3
 
 
+def test_the_detector_measures_claim_wait_against_claimable_tasks_only():
+    from scripts.swarm import stages
+    from tests.swarm.test_stages import ledger
+
+    tasks = [{"id": "t1", "state": "open"}, {"id": "t2", "state": "open"}]
+    source = rows(ledger_events=[ledger("added", NOW - 5 * H, f"tasks/{task['id']}") for task in tasks])
+    ready = stages.claimable({"tasks": tasks, "freezes": [{"verb": "freeze", "target": "tasks/t2"}]}, "")
+    found = stage_detector.report(source, tasks, NOW, 4 * H, ready)
+    assert [(row["stage"], row["seconds"], row["previous_seconds"], row["episodes"]) for row in found["stages"]] == [
+        ("claim_wait", 14400.0, 3600.0, [f"claim_wait:t1:{NOW - 5 * H}"])
+    ]
+
+
+def test_record_measures_with_the_readiness_it_is_given(tmp_path, store, monkeypatch):
+    from scripts.swarm.metrics_outbox import Outbox, Settings
+
+    seen = []
+    measured = {"at": NOW, "window_hours": 1.0, "stages": [], "total": 0.0}
+    monkeypatch.setattr(
+        stage_detector, "report", lambda rows, tasks, now_ms, window_ms, ready: seen.append(ready) or measured
+    )
+    box = Outbox(tmp_path / "events.db", Settings("http://sink", "writer", ""))
+    try:
+        assert stage_detector.record(box, store, "scratch", NOW, [], {}, ready=len) == measured
+    finally:
+        box.close()
+    assert seen == [len]
+
+
 FIRST_LIVE_PASS = {
     "claim_wait": 579440.0,
     "quota_hold": 303960.0,
