@@ -406,13 +406,13 @@ def test_agents_table_lists_the_master_first_with_overlays_and_stats_carry_the_t
     pairs = page.tab.eval_on_selector_all(
         "#stats .stat:not(.top-bottleneck)", "rows => rows.map(r => [r.children[0].innerText, r.children[1].innerText])"
     )
-    figures = [[label.lower(), value] for label, value in pairs[6:14]]
+    figures = [[label.lower(), value] for label, value in [pairs[4], *pairs[8:15]]]
     assert figures == [
         ["tasks", "0 / 1"],
         ["open", "9"],
         ["claimed", "3"],
-        ["in pr", "1"],
         ["blocked", "1"],
+        ["in pr", "1"],
         ["done today", "4"],
         ["next phase", "p3"],
         ["inbox pending", "1"],
