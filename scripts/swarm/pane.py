@@ -23,6 +23,7 @@ PROVIDER_ERRORS = {
         r"stream disconnected before completion",
         r"unexpected status (?:500|502|503|504)\b",
         r"error sending request for url",
+        r"Selected model is at capacity",
     ),
     "copilot": (
         r"Request failed with status code (?:500|502|503|504)\b",
