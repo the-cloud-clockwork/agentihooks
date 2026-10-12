@@ -5,6 +5,7 @@ Replies addressed to the operator are posted on the ledger page chat.
 """
 
 import contextlib
+import functools
 import json
 
 from scripts.inbox import links, outbox
@@ -93,17 +94,24 @@ def apply_say(inbox, sender, entry):
 
 
 def relay_to_page(inbox, slug, agents, ledger):
+    """Show each answer to the operator: as a comment on the ledger entry its question sat on, else in page chat."""
     names = {a.name for a in agents}
     shown = 0
     for item in inbox.inbox(OPERATOR):
         sender = inbox.names.resolve(item.sender)
         if item.state != "pending" or sender not in names:
             continue
-        if not post(inbox, item, lambda: ledger.relay(slug, item.text, sender)):
+        if not post(inbox, item, functools.partial(show, ledger, slug, item, sender, inbox.entry_of(item.id))):
             continue
         inbox.close(item.id, OPERATOR, "done", "shown on the ledger page")
         shown += 1
     return shown
+
+
+def show(ledger, slug, item, sender, entry):
+    if entry:
+        return ledger.relay_comment(slug, entry, item.text, sender)
+    return ledger.relay(slug, item.text, sender)
 
 
 def post(inbox, item, write):

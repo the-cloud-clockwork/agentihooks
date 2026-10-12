@@ -26,6 +26,7 @@ REDELIVERER = "inbox"
 CLOSED = ("done", "blocked", "handed_off", "cancelled")
 CLOSE_KINDS = {"done": "done", "handoff": "handed_off", "blocked": "blocked", "cancel": "cancelled"}
 NEEDS_DETAIL = {"handoff": "the address the work went to", "blocked": "what it is blocked on"}
+ENTRY_TTL_S = 30 * 24 * 3600
 
 
 class InboxError(RuntimeError):
@@ -380,7 +381,8 @@ class InboxStore:
             return moved
 
     def reply(self, item_id, replier, text, fyi=False, answer_id=""):
-        """A given answer_id makes the reply replayable: an answer already sent is kept and only the close runs."""
+        """A given answer_id makes the reply replayable: an answer already sent is kept and only the close runs.
+        The answer carries the ledger entry its item is about, so it lands on that entry."""
         item = self.get(item_id)
         if not self.acts_for(replier, item.address):
             raise InboxError(f"message {item_id} belongs to {item.address}, not {replier}")
@@ -388,12 +390,22 @@ class InboxStore:
             raise DuplicateItem(f"message {item_id} was already answered with message {answer_id}")
         if item.state in CLOSED:
             raise InboxError(f"message {item_id} is closed: {item.reason}")
+        answer_id = answer_id or new_item_id()
+        if entry := self.entry_of(item_id):
+            self.about(answer_id, entry)
         try:
             answer = self.send(replier, item.sender, text, fyi=fyi, item_id=answer_id)
         except DuplicateItem:
             answer = self.get(answer_id)
         self.close(item_id, replier, "done", replied(answer.id))
         return answer
+
+    def about(self, item_id, entry):
+        """Name the ledger entry an item is about, before the item is written."""
+        self.redis.set(self.key("entry", item_id), entry, ex=ENTRY_TTL_S)
+
+    def entry_of(self, item_id):
+        return self.redis.get(self.key("entry", item_id)) or ""
 
     def deliver(self, item_id, receiver):
         try:

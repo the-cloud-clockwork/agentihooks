@@ -1,8 +1,10 @@
+from types import SimpleNamespace
+
 import pytest
 
 from scripts.inbox import cli
-from scripts.inbox.store import InboxStore
-from scripts.swarm import delivery, operator_mail
+from scripts.inbox.store import ENTRY_TTL_S, InboxStore
+from scripts.swarm import delivery, ledger_client, operator_mail
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_ledger.watch_ledger import line
 
@@ -71,6 +73,7 @@ def test_a_reply_to_an_operator_note_lands_as_a_comment_on_that_note(swarm, monk
     assert ledger.said == []
     _, inbox = swarm
     assert inbox.get(item.id).state == "done"
+    assert 0 < inbox.redis.ttl(inbox.key("entry", item.id)) <= ENTRY_TTL_S
 
 
 @pytest.mark.parametrize(
@@ -95,3 +98,35 @@ def test_a_reply_to_any_operator_entry_write_lands_on_that_entry(swarm, monkeypa
 def test_a_reply_to_a_chat_line_or_a_write_without_an_entry_still_answers_in_chat(swarm, monkeypatch, kind, target):
     _, ledger = answer(swarm, monkeypatch, operator_write(8, kind, target, "status please"), BOSS, ["all", "green"])
     assert ledger.said == [(SLUG, "all green", BOSS.name)] and ledger.commented == []
+
+
+@pytest.mark.parametrize(
+    ("event", "entry"),
+    [
+        ({"kind": "note edited", "target": "", "id": "n-7"}, "notes/n-7"),
+        ({"kind": "comment added", "target": "tasks"}, ""),
+        ({"kind": "comment added", "target": "artifacts/a1"}, ""),
+        ({"kind": "checked", "target": "tasks/t9/done"}, "tasks/t9"),
+    ],
+)
+def test_the_entry_of_an_operator_write_is_its_list_and_id(event, entry):
+    assert operator_mail.entry(event) == entry
+
+
+def test_relay_comment_posts_the_senders_comment_on_the_entry_with_the_service_credential(monkeypatch):
+    calls = []
+
+    def call(slug, ops, service):
+        calls.append((slug, ops, service))
+        return {"rejected": []}
+
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: SimpleNamespace(call=call))
+    ledger_client.LedgerClient().relay_comment("demo", "notes/n-1", "holding page changes", "master@a1b2c3-0002")
+    [(slug, [op], service)] = calls
+    assert (slug, service) == ("demo", True)
+    assert {k: v for k, v in op.items() if k != "id"} == {
+        "op": "add",
+        "by": "master@a1b2c3-0002",
+        "thread": "notes/n-1/comments",
+        "text": "holding page changes",
+    }

@@ -134,6 +134,9 @@ class LedgerClient:
     def relay(self, slug, text, by):
         LedgerClient(service=True)._call(slug, [_op("add", by, thread="chat", text=text, to="operator")])
 
+    def relay_comment(self, slug, entry, text, by):
+        LedgerClient(service=True)._call(slug, [_op("add", by, thread=f"{entry}/comments", text=text)])
+
     def notify(self, slug, text):
         self._call(slug, [_op("notice", "swarm", text=text)])
 
