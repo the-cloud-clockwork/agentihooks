@@ -175,6 +175,17 @@ def now_ms():
     return int(time.time() * 1000)
 
 
+def _publish_tick_status(store, slug, doc):
+    from scripts.swarm import command_runner
+
+    failure = sys.exception()
+    try:
+        timing.call(command_runner.publish, store, slug, doc)
+    except Exception:
+        if failure is None:
+            raise
+
+
 @timing.instrument_tick
 @outage.guard_tick
 def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=False):
@@ -302,12 +313,8 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             doc = timing.call(ledger.state, slug)
             return probed + controls + actions + ([f"took automatic snapshot {taken.name}"] if taken else [])
     finally:
-        failure = sys.exception()
         try:
-            timing.call(command_runner.publish, store, slug, doc)
-        except Exception:
-            if failure is None:
-                raise
+            _publish_tick_status(store, slug, doc)
         finally:
             timing.BEFORE_STEP.reset(keeping)
             controller.release_tick_lock(store, slug, token)
