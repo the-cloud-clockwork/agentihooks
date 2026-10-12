@@ -64,6 +64,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         shards = [args.head_shards / f"coverage-3.12-{n}" / ".coverage" for n in range(1, args.shards + 1)]
+        downloaded = sorted(folder.name for folder in args.head_shards.glob("coverage-3.12-*"))
+        if downloaded != sorted(shard.parent.name for shard in shards):
+            raise ValueError(f"downloaded shard coverage {downloaded} is not the {args.shards} shards the run split")
         record(args.head, shards, args.out, args.previous)
     except (subprocess.CalledProcessError, KeyError, ValueError, OSError) as exc:
         print(f"::error::Cannot record the coverage baseline: {exc}")

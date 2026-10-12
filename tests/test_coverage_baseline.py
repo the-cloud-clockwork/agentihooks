@@ -65,6 +65,21 @@ def test_an_incomplete_suite_cannot_publish_a_baseline(measured):
     assert not target.exists()
 
 
+@pytest.mark.parametrize("folders,code", [(2, 0), (3, 1)], ids=["exact", "extra-shard"])
+def test_the_recorder_reads_exactly_the_shards_the_run_split(measured, folders, code):
+    root, _, _ = measured
+    for index in range(1, folders + 1):
+        folder = root / "downloaded" / f"coverage-3.12-{index}"
+        folder.mkdir(parents=True)
+        data = CoverageData(basename=str(folder / ".coverage"))
+        data.add_lines({"hooks/example.py": {index}})
+        data.write()
+    target = root / "baseline.json"
+    argv = ["--head", str(root), "--shards", "2", "--head-shards", str(root / "downloaded"), "--out", str(target)]
+    assert cache.main(argv) == code
+    assert target.exists() == (code == 0)
+
+
 def test_history_is_bounded_to_thirty_measurements(measured):
     root, state, shards = measured
     target = root / "baseline.json"
