@@ -910,6 +910,20 @@ def test_the_start_prepares_the_permitted_project_checkout_on_its_branch_before_
     assert json.loads((attempt / "registration.json").read_text()) == AUTHORITY
 
 
+def test_worker_configures_scoped_app_askpass_before_checkout(tmp_path, monkeypatch):
+    monkeypatch.setenv("GITHUB_APP_ID", "123")
+    prepared = Workspaces()
+    seen = []
+
+    def configure(project):
+        assert prepared.calls == []
+        seen.append(project)
+
+    monkeypatch.setattr(start.git_auth, "configure", configure)
+    checked_out(tmp_path, monkeypatch, prepared)
+    assert seen == [PROJECT]
+
+
 def test_a_launch_record_without_a_checkout_prepares_none(tmp_path, monkeypatch):
     prepared = Workspaces()
 

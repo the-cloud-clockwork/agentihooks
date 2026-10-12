@@ -48,7 +48,9 @@ def test_app_mints_only_the_permitted_repository_and_refreshes_five_minutes_earl
     assert kwargs["json"] == {"repositories": ["private"], "permissions": {"contents": "write"}}
     assert kwargs["timeout"] == 10
     signed = kwargs["headers"]["Authorization"].removeprefix("Bearer ")
-    claims = jwt.decode(signed, app.public_key(), algorithms=["RS256"], options={"verify_exp": False})
+    claims = jwt.decode(
+        signed, app.public_key(), algorithms=["RS256"], options={"verify_exp": False, "verify_iat": False}
+    )
     assert claims == {"iat": now - 60, "exp": now + 600, "iss": "123"}
     clock.return_value = now + 3300
     assert auth.get_token() == "refreshed-value"
