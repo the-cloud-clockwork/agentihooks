@@ -1087,6 +1087,12 @@ def test_target_problem_takes_intent_only_on_the_own_tasks_pull_request():
     assert waits.target_problem("intent", OTHER, "t1", {}, None) == refused
 
 
+def test_only_an_intent_wait_carries_its_task_and_none_is_empty_by_default():
+    assert waits.on("intent", URL) == {"kind": "intent", "target": URL, "task": ""}
+    assert waits.on("intent", URL, task="t1") == {"kind": "intent", "target": URL, "task": "t1"}
+    assert waits.on("checks", URL, task="t1") == {"kind": "checks", "target": URL}
+
+
 def hold_intent(tick):
     idle.declare_wait(tick.store.redis, "sw", ME, 10_000_000, "", 1, on={"kind": "intent", "target": URL, "task": "t1"})
 
