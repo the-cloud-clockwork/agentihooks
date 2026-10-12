@@ -632,15 +632,16 @@ def test_a_chain_claim_reports_the_seconds_from_the_merge_on_the_task_and_logs_i
     assert actions == ["chain guard claimed task b 30 seconds after task a merged on the critical chain"]
     assert ledger.comments == [("b", CHAIN_COMMENT, "dispatcher")]
     (row,) = gate_log.recent(SLUG, None, home)
-    assert (row["gate"], row["kind"], row["task"], row["tool"], row["reason"]) == (
+    assert (row["at"], row["gate"], row["kind"], row["task"], row["tool"], row["reason"]) == (
+        NOW,
         "dispatcher",
         "apply",
         "b",
         "chain-guard",
         actions[0],
     )
-    assert [(r["task"], r["rule"], r["action"]) for _, rows, _ in shipped for r in rows] == [
-        ("b", "chain-guard", actions[0])
+    assert [(r["ts_ms"], r["task"], r["rule"], r["action"]) for _, rows, _ in shipped for r in rows] == [
+        (NOW, "b", "chain-guard", actions[0])
     ]
 
 
@@ -666,6 +667,10 @@ def test_an_unguarded_claim_below_delegate_or_without_a_merge_time_reports_nothi
     off_chain = doc(off, phases=[], _meta={"stamps": stamps})
     assert dispatcher.chain_claimed(SLUG, config, ledger, off_chain, off[1], "eng", NOW) == []
     del found["_meta"]["stamps"]["tasks/a/state"], found["_meta"]["stamps"]["tasks/a2/state"]
+    assert dispatcher.chain_claimed(SLUG, config, ledger, found, ledger.rows["b"], "eng", NOW) == []
+    del found["_meta"]["stamps"]
+    assert dispatcher.chain_claimed(SLUG, config, ledger, found, ledger.rows["b"], "eng", NOW) == []
+    del found["_meta"]
     assert dispatcher.chain_claimed(SLUG, config, ledger, found, ledger.rows["b"], "eng", NOW) == []
     assert (ledger.comments, shipped, gate_log.recent(SLUG, None, home)) == ([], [], [])
 

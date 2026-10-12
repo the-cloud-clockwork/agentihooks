@@ -136,7 +136,7 @@ def claim_key(config, doc):
 
 def guarded(doc: dict) -> set[str]:
     depth, known = chains(doc), {t["id"]: t for t in doc["tasks"]}
-    longest = max(depth.values(), default=0)
+    longest = depth and max(depth.values())
     return {task_id for task_id, length in depth.items() if length + 1 >= longest and _merged(known[task_id], known)}
 
 
