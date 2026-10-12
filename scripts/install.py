@@ -2945,37 +2945,6 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         print(f"ERROR: {_base_settings} not found.", file=sys.stderr)
         sys.exit(1)
 
-    raw_settings = _load_native_layer(_base_settings)
-    rendered: dict = substitute_paths(raw_settings)
-    rendered = substitute_paths(rendered, "__PYTHON__", _canonical_python)
-
-    # --- 1a. Bundle-global native overrides ---
-    # Settings gain the bundle rung that MCP already had; without it a bundle
-    # can only express fleet-wide settings by repeating them in every profile.
-    _bundle_root = _get_bundle_path()
-    if _bundle_root:
-        _bundle_overrides = _native_layer_path(_bundle_root, install_target, _NATIVE_SETTINGS_NAME)
-        if _bundle_overrides:
-            _data = _load_native_layer(_bundle_overrides)
-            if install_target == "claude":
-                _data = _resolve_profile_hook_paths(_data, _bundle_root)
-            rendered = _deep_merge(rendered, _data)
-            print(f"Applied bundle overrides: {_bundle_overrides}")
-
-    # --- 1b. Apply per-profile overrides (chained: each profile merges on top) ---
-    for pname, pdir in profile_dirs:
-        overrides_path = _native_layer_path(pdir, install_target, _NATIVE_SETTINGS_NAME)
-        if overrides_path:
-            overrides = _load_native_layer(overrides_path)
-            # Resolve relative paths in hook commands against the profile's root
-            # (claude only — codex/copilot hooks are adapter-written, never
-            # declared in their native settings files).
-            if install_target == "claude":
-                overrides = _resolve_profile_hook_paths(overrides, pdir)
-            rendered = _deep_merge(rendered, overrides)
-            print(f"Applied profile overrides: {overrides_path}")
-
-    # --- 1b2. Apply settings-profile overlay (settings.json + MCP only, not rules/CLAUDE.md) ---
     settings_profile_name: str = getattr(args, "settings_profile", "") or ""
     settings_profile_dir: Path | None = None
     if settings_profile_name:
@@ -2985,35 +2954,11 @@ def _install_global_inner(args: argparse.Namespace) -> None:
             print(f"ERROR: Settings profile '{settings_profile_name}' not found.", file=sys.stderr)
             print(f"Available profiles: {', '.join(available)}", file=sys.stderr)
             sys.exit(1)
+    settings_profile = (settings_profile_name, settings_profile_dir) if settings_profile_dir else None
+    from scripts.native_settings import native_settings
 
-        sp_overrides = _native_layer_path(settings_profile_dir, install_target, _NATIVE_SETTINGS_NAME)
-        if sp_overrides:
-            sp_data = _load_native_layer(sp_overrides)
-            if install_target == "claude":
-                sp_data = _resolve_profile_hook_paths(sp_data, settings_profile_dir)
-            rendered = _deep_merge(rendered, sp_data)
-            src = _profile_source_label(settings_profile_name)
-            print(f"Applied settings-profile overlay: {settings_profile_name} ({src})")
-
-    # --- 1c. Apply linked connectors (from last profile in chain) ---
+    rendered = native_settings(install_target, profile_dirs, settings_profile)
     last_profile = profile_chain[-1]
-    conn_env, conn_deny, conn_disabled = _load_connectors(last_profile)
-    if conn_env:
-        rendered.setdefault("env", {}).update(conn_env)
-        _cprint(f"  [OK] Connector env: {list(conn_env.keys())}")
-    if conn_deny:
-        rendered.setdefault("permissions", {}).setdefault("deny", []).extend(conn_deny)
-        _cprint(f"  [OK] Connector deny rules: {len(conn_deny)}")
-    if conn_disabled:
-        existing_disabled = rendered.get("disabledMcpjsonServers", [])
-        merged_disabled = list(dict.fromkeys(existing_disabled + conn_disabled))
-        rendered["disabledMcpjsonServers"] = merged_disabled
-        _cprint(f"  [OK] Connector disabled MCP servers: {merged_disabled}")
-
-    from scripts.profile_telemetry import apply_collector_env, apply_langfuse_env
-
-    apply_langfuse_env(rendered, profile_dirs, settings_profile_dir)
-    apply_collector_env(rendered)
 
     # --- 2 + 3. Personal-key merge, backup, and settings write (target-specific) ---
     existing_settings_path = adapter.write_settings(rendered)

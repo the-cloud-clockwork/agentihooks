@@ -98,7 +98,8 @@ def test_runtime_forwards_and_records_profile(tmp_path, lane, profile, harness):
     saved = store.RedisStore(fakeredis.FakeRedis(decode_responses=True))
     saved.create(config)
     saved.put_agent("sw", record)
-    assert saved.agents("sw") == [record]
+    assert record.transport == ("legacy" if harness == "codex" else "")
+    assert saved.agents("sw") == [replace(record, transport="")]
     assert (saved.agents("sw")[0].profile, saved.agents("sw")[0].model) == (profile, "chosen")
     raw = json.loads(saved.redis.hget(saved.key("sw", "agents"), "a"))
     raw.pop("profile")

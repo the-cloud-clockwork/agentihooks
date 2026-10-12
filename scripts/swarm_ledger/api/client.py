@@ -87,8 +87,12 @@ class ResourceClient:
             time.sleep(random.uniform(BACKOFF * 2**attempt / 2, BACKOFF * 2**attempt))
 
     def send(self, slug: str, operations: list) -> dict:
-        pins = [operation for operation in reversed(operations) if operation.get("expected_revision")]
-        guards, ops = {schemas.target(operation): operation["expected_revision"] for operation in pins}, []
+        guards, ops = {}, []
+        for operation in operations:
+            if revision := operation.get("expected_revision"):
+                path = schemas.target(operation)
+                if guards.setdefault(path, revision) != revision:
+                    raise ValueError(f"one batch pins {path} to two revisions: {guards[path]} and {revision}")
         operation_id = operations[0].setdefault("operation_id", uuid.uuid4().hex)
         for operation in operations:
             path = schemas.target(operation)

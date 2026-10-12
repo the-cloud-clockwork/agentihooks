@@ -700,6 +700,20 @@ def test_as_equals_is_not_mistaken_for_set(env, monkeypatch):
     assert run("sw", "--as=engineer@a1b2c3-0001", "issue", "https://github.com/o/r/issues/1") == 0
 
 
+def test_review_closes_on_the_third_round_and_refuses_a_fourth(env, monkeypatch, capsys, tmp_path):
+    monkeypatch.setattr(gate_log, "swarm_home", lambda: tmp_path)
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    capsys.readouterr()
+    for n in (1, 2):
+        assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 0
+        assert json.loads(capsys.readouterr().out) == {"task": "t1", "round": n}
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 0
+    assert json.loads(capsys.readouterr().out) == {"task": "t1", "round": 3, "notice": cli.review_rounds.CLOSED}
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 1
+    assert capsys.readouterr().err == f"swarm: task t1 gets no fourth review round. {cli.review_rounds.CLOSED}\n"
+
+
 def test_redis_down_is_a_clear_failure(monkeypatch, capsys):
     def down():
         raise SwarmError("Redis is unreachable; the swarm refuses to run without it")
@@ -993,6 +1007,7 @@ def test_runtime_spawns_through_init_agent_with_a_private_prompt(tmp_path, monke
         model_source="lane-default",
         profile_decision={**decision, "validation": placed.profile_decision["validation"]},
         choice="rotation",
+        transport="legacy",
         launched_at=7_000,
         launch_timings=placed.launch_timings,
     )
@@ -1566,7 +1581,14 @@ def test_the_master_takes_no_task_commands(env, capsys):
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     store.put_agent("sw", AgentRecord("master@a1b2c3-0001", "master", "master"))
-    for argv in (("issue", "https://x/issues/1"), ("pr", "https://x/pull/1"), ("branch",), ("done",), ("block", "why")):
+    for argv in (
+        ("issue", "https://x/issues/1"),
+        ("pr", "https://x/pull/1"),
+        ("branch",),
+        ("review",),
+        ("done",),
+        ("block", "why"),
+    ):
         assert run("sw", "--as", "master@a1b2c3-0001", *argv) == 1
         assert "master works no task" in capsys.readouterr().err
     assert ledger.comments == [] and [a.state for a in store.agents("sw")] == ["working"]
