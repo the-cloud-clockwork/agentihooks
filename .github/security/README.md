@@ -34,12 +34,17 @@ teams, deploy keys and installed apps. API failures and missing settings fail th
 Successful reads print each checked setting and end with
 `GitHub access controls verified`. Drift prints `DRIFT` and exits nonzero.
 
-The hosted audit uses the existing organization secret `ORG_GITHUB_TOKEN`.
-Its token must read repository administration, organization members/settings,
-installed applications and organization self-hosted runner groups. A classic
-operator token needs `repo` and `admin:org`; a fine-grained equivalent requires
-the corresponding read permissions. The job never applies settings and never
-runs on pull request code. It runs on dev pushes and manual dispatch immediately;
+The hosted audit mints an installation token from TCC Main CI using the existing
+`TCC_CI_CLIENT_ID` and `TCC_CI_APP_PRIVATE_KEY` secrets, as the reuse jobs do.
+The app's client ID identifies the same app as `TCC_CI_APP_ID`; the token action
+prefers client ID over its deprecated app ID input. The app must be installed on
+agentihooks and agentibrain-kernel with repository Administration read, Actions
+read and Contents read, plus organization Administration read, Members read and
+Self-hosted runners read. The token requests only those read permissions and
+only the two repositories. Organization Administration allows the audit to list
+installed applications and inspect organization defaults. Personal tokens are
+not used; `ORG_GITHUB_TOKEN` remains private. The job never applies settings and
+never runs on pull request code. It runs on dev pushes and manual dispatch immediately;
 GitHub activates its weekly schedule only when the workflow reaches the default
 branch through the next release. Dispatch it through the existing focused proof
 workflow, which owns the hosted lane:

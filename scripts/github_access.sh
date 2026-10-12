@@ -34,7 +34,7 @@ case "$mode" in
     if [[ -n "$unapproved" ]]; then
       while IFS=$'\t' read -r app url; do
         printf 'Uninstall %s: %s\n' "$app" "$url"
-        xdg-open "$url"
+        xdg-open "$url" < /dev/null
       done <<< "$unapproved"
       read -r -p 'Uninstall those apps in the browser, then press Enter to verify: ' confirmation
     fi

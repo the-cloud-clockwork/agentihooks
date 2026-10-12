@@ -24,9 +24,24 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Mint the TCC Main CI audit token
+        id: app-token
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: agentihooks,agentibrain-kernel
+          permission-actions: read
+          permission-contents: read
+          permission-administration: read
+          permission-organization-administration: read
+          permission-members: read
+          permission-organization-self-hosted-runners: read
+
       - name: Read effective access controls
         env:
-          GH_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          [[ -n "$GH_TOKEN" ]] || { echo '::error::The organization audit token is unavailable'; exit 1; }
+          [[ -n "$GH_TOKEN" ]] || { echo '::error::The app audit token is unavailable'; exit 1; }
           bash scripts/github_access.sh check
