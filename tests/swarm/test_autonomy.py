@@ -80,11 +80,8 @@ def test_delegate_is_todays_prompt_for_every_lane():
     for lane in ("eng", "ci", MASTER):
         assert build("delegate", lane) == build(lane=lane)
     text = build("delegate")
-    assert (
-        "Queue on green checks with agentihooks swarm sw merge queue <pr url>, then "
-        "agentihooks swarm sw wait --on merge <pr url>."
-    ) in text
-    assert "After merged, run wt.sh done." in text
+    assert "release your seat: agentihooks swarm sw ready <handoff doc>." in text
+    assert "merge queue" not in text and "done --pr" not in text
 
 
 def test_manual_opens_a_draft_and_stops_for_the_operator():

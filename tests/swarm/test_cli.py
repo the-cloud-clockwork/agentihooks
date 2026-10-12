@@ -1017,7 +1017,7 @@ def test_runtime_spawns_through_init_agent_with_a_private_prompt(tmp_path, monke
     assert seen[0][seen[0].index("--name") + 1 : seen[0].index("--name") + 4] == ["ci@a1b2c3-0001", "--agent", "codex"]
     assert oct(prompt_path.stat().st_mode)[-3:] == "600"
     text = prompt_path.read_text()
-    assert "speed up the tests" in text and "CI speed" in text and "agentihooks swarm sw done --pr" in text
+    assert "speed up the tests" in text and "CI speed" in text and "agentihooks swarm sw ready <handoff doc>" in text
 
 
 def test_runtime_spawn_failure_names_the_reason(tmp_path):
@@ -1501,23 +1501,23 @@ def test_agent_prompt_joins_the_ledger_reads_its_inbox_and_leaves_before_done():
     assert f"{led} comment phases/p1" in text
     assert f"{led} followup add" in text
     assert text.index(f"{led} join") < text.index("Work it end to end")
-    assert text.index(f"{led} leave") < text.index("agentihooks swarm sw done --pr")
+    assert text.index(f"{led} leave") < text.index("agentihooks swarm sw ready <handoff doc>")
 
 
-def test_agent_prompt_waits_on_checks_through_the_swarm():
+def test_agent_prompt_ends_at_swarm_ready():
     from scripts.swarm import prompt
 
     text = prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x", "phase": "p1"})
     merge = next(line for line in text.splitlines() if line.startswith("6. "))
     assert merge == (
-        "6. Wait on the checks with agentihooks swarm sw wait --on checks <pr url>: the tick ends the wait and tells "
-        "you when they resolve, so no Monitor is needed. Queue on green checks with agentihooks swarm sw merge "
-        "queue <pr url>, then agentihooks swarm sw wait --on merge <pr url>. Report queue state with "
-        "agentihooks swarm sw merge state <pr url>. Before fixing a queued pull request, dequeue first with "
-        "agentihooks swarm sw merge dequeue <pr url>, then push, then queue again with agentihooks swarm sw "
-        "merge queue <pr url> once checks pass. Keep the worktree until the tick confirms merged; "
-        "a red merge wait means fix the pull request and queue it again. After merged, run wt.sh done."
+        "6. Once both reviews closed and the pull request is out of draft, write a short Handoff v2 document with "
+        "the handoff skill: what the pull request delivers, how review closed and what a successor fixes if its "
+        "checks go red. Leave the crew with agentihooks ledger --slug sw --as engineer@a1b2c3-0001 leave, then "
+        "release your seat: agentihooks swarm sw ready <handoff doc>. The swarm watches the checks, queues the "
+        "pull request on green, waits for the merge, closes the task and removes your worktree; red checks reopen "
+        "the task for the next engineer with your handoff. The swarm then closes this session; stop working."
     )
+    assert not any(line.startswith("7. ") for line in text.splitlines())
 
 
 def test_master_prompt_needs_no_ledger_watch():
@@ -1560,12 +1560,12 @@ def test_agent_prompt_runs_gates_and_review_before_the_merge_and_ends_with_leave
     text = prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x", "phase": "p1"})
     steps = [line for line in text.splitlines() if line[:1].isdigit() and line[1:3] == ". "]
     review = next(i for i, s in enumerate(steps) if "Gates green" in s and "review per the dev-cycle skill" in s)
-    merge = next(i for i, s in enumerate(steps) if "Queue on green checks" in s)
+    merge = next(i for i, s in enumerate(steps) if "ready <handoff doc>" in s)
     assert review < merge
     assert "Standards and Spec" in steps[review] and "three rounds" in steps[review]
     last = steps[-1]
     assert last.index("agentihooks ledger --slug sw --as engineer@a1b2c3-0001 leave") < last.index(
-        "agentihooks swarm sw done --pr"
+        "agentihooks swarm sw ready <handoff doc>"
     )
 
 

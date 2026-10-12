@@ -600,12 +600,11 @@ def test_transport_failures_are_reported(error):
     assert str(exc.value) == f"GitHub API: {error}"
 
 
-@pytest.mark.parametrize("autonomy", ["full", "assist"])
-def test_engineer_guidance_names_queue_state_and_dequeue_commands(autonomy):
+def test_engineer_guidance_names_queue_state_and_dequeue_commands():
     from scripts.swarm import prompt
 
     text = prompt.build(
-        "sw", "/repo", "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x", "phase": "p1"}, autonomy=autonomy
+        "sw", "/repo", "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x", "phase": "p1"}, autonomy="assist"
     )
     assert "agentihooks swarm sw merge queue <pr url>" in text
     assert "agentihooks swarm sw merge state <pr url>" in text

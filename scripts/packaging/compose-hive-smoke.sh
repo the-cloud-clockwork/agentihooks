@@ -91,4 +91,20 @@ if [[ $state != "true 0 healthy" ]]; then
   exit 1
 fi
 printf 'controller: running, no restarts, healthy on its lease\n'
+
+member_auth='
+import os, hooks.config, redis
+client = redis.Redis.from_url(os.environ["AGENTIHOOKS_HIVE_REDIS_URL"], decode_responses=True)
+print(f"member Redis user from hive.env: {client.acl_whoami()}")
+'
+docker exec "$run-member" agentihooks hive refresh >/dev/null
+printf 'after a refresh through the join service, '
+docker exec "$run-member" python -c "$member_auth"
+docker compose restart redis >/dev/null
+for _ in $(seq 30); do
+  docker exec "$run-member" python -c "$member_auth" >/dev/null 2>&1 && break
+  sleep 1
+done
+printf 'after a Redis restart, the refreshed '
+docker exec "$run-member" python -c "$member_auth"
 printf 'Compose hive smoke passed\n'

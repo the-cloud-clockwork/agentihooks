@@ -33,6 +33,7 @@ from scripts.swarm_v2.quota import QuotaObservations
 from scripts.swarm_v2.registry import FleetRegistry
 from scripts.swarm_v2.runtime.base import SpawnRequest
 from scripts.swarm_v2.runtime.routed import RoutedRuntime, routed
+from scripts.swarm_v2.supervision import Budgets
 
 if TYPE_CHECKING:
     from scripts.swarm_v2.auth_context import LaunchAuthority
@@ -187,6 +188,7 @@ class Workers:
             HARNESS,
             self.exporter,
             self.terms.api_url,
+            budgets=Budgets(checkpoint=40),
             checkpoint_remote=bool(environ.get("AGENTIHOOKS_CHECKPOINT_BUCKET")),
         )
         api = pod_api(environ, self.policy["namespace"])

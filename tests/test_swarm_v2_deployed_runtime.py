@@ -1008,7 +1008,7 @@ def test_a_kubernetes_launch_puts_its_grant_in_the_pod_launch_material_and_recor
         "profile": "engineer",
         "startup_seconds": 10,
         "quiesce_seconds": 10,
-        "checkpoint_seconds": 10,
+        "checkpoint_seconds": 40,
         "kill_seconds": 2,
         "checkpoint_acknowledgement": {"status": "pending"},
         "checkout": {"project": PROJECT, "agent": request.name},

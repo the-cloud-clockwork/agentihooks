@@ -14,13 +14,13 @@ def build(**task):
 
 def test_a_task_without_a_kind_gets_the_code_prompt():
     assert build() == build(kind="code")
-    assert "agentihooks swarm sw done --pr <pr url>" in build()
+    assert "agentihooks swarm sw ready <handoff doc>" in build()
 
 
 def test_each_kind_gets_its_own_prompt():
     texts = {kind: build(kind=kind) for kind in KINDS}
     assert len(set(texts.values())) == len(KINDS)
-    assert "done --pr <pr url>" in texts["ci"]
+    assert "ready <handoff doc>" in texts["ci"]
     for kind in ("ops", "tune"):
         assert '--command "<command>" --output "<its output>"' in texts[kind]
         assert "done --pr" not in texts[kind]
@@ -30,10 +30,9 @@ def test_each_kind_gets_its_own_prompt():
     )
     assert "task add" not in texts["troubleshoot"]
     assert "--finding <link>" in texts["research"]
-    for text in texts.values():
-        assert text.index("agentihooks ledger --slug sw --as engineer@a1b2c3-0001 leave") < text.index(
-            "agentihooks swarm sw done"
-        )
+    for kind, text in texts.items():
+        close = "agentihooks swarm sw ready" if kind in ("code", "ci") else "agentihooks swarm sw done"
+        assert text.index("agentihooks ledger --slug sw --as engineer@a1b2c3-0001 leave") < text.index(close)
 
 
 def test_the_prompt_carries_the_proof_contract():

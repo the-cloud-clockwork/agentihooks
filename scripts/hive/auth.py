@@ -20,6 +20,8 @@ PREFIX = f"{ROOT}-hive"
 # ACL cannot confine a user to one database, so a hive's Redis serves that hive alone.
 ACL_PATTERNS = (f"{ROOT}:*",)
 ACL_CATEGORIES = ("+@all", "-@admin", "-@dangerous")
+# A Redis started without --aclfile keeps users in memory only; there is nothing to save.
+NO_ACL_FILE = "not configured to use an ACL file"
 ENV_FILE = "hive.env"
 # Below the home, where the hooks' *.env autoload never puts it into other processes.
 CONTROLLER_ENV_FILE = "controller/credential.env"
@@ -52,16 +54,10 @@ def exchange(redis: "Redis", code: str, redis_url: str) -> dict:
     with redis.pipeline() as pipe:
         pipe.hset(records[0], mapping={"name": name, "ledger": _digest(ledger)})
         pipe.set(records[1], member_id)
-        pipe.acl_setuser(
-            f"hive-{member_id}",
-            enabled=True,
-            hashed_passwords=[f"+{_digest(password)}"],
-            categories=ACL_CATEGORIES,
-            keys=ACL_PATTERNS,
-            channels=ACL_PATTERNS,
-        )
+        _set_user(pipe, member_id, password)
         try:
             pipe.execute()
+            _persist(redis)
         except RedisError as exc:
             _forget(redis, member_id, records)
             raise HiveError(f"Redis refused the new member ({exc})") from exc
@@ -71,6 +67,50 @@ def exchange(redis: "Redis", code: str, redis_url: str) -> dict:
         "ledger_credential": ledger,
         "redis_url": _with_user(redis_url, f"hive-{member_id}", password),
     }
+
+
+def refresh(redis: "Redis", credential: str, redis_url: str) -> dict:
+    from redis.exceptions import RedisError
+
+    password = secrets.token_urlsafe()
+    ledger_key = f"{PREFIX}:ledger:{_digest(credential)}"
+
+    def recreate(pipe):
+        member_id = pipe.get(ledger_key)
+        if member_id is None:
+            raise HiveError("the ledger credential belongs to no hive member")
+        pipe.multi()
+        _set_user(pipe, member_id, password)
+        return member_id
+
+    try:
+        member_id = redis.transaction(recreate, ledger_key, value_from_callable=True)
+        _persist(redis)
+    except RedisError as exc:
+        raise HiveError(f"Redis refused the refreshed member ({exc})") from exc
+    return {"id": member_id, "redis_url": _with_user(redis_url, f"hive-{member_id}", password)}
+
+
+def _set_user(client, member_id: str, password: str) -> None:
+    client.acl_setuser(
+        f"hive-{member_id}",
+        enabled=True,
+        reset=True,
+        hashed_passwords=[f"+{_digest(password)}"],
+        categories=ACL_CATEGORIES,
+        keys=ACL_PATTERNS,
+        channels=ACL_PATTERNS,
+    )
+
+
+def _persist(redis: "Redis") -> None:
+    from redis.exceptions import ResponseError
+
+    try:
+        redis.acl_save()
+    except ResponseError as exc:
+        if NO_ACL_FILE not in str(exc):
+            raise
 
 
 def _forget(redis: "Redis", member_id: str, records: tuple[str, ...]) -> None:
@@ -125,13 +165,24 @@ def controller(redis: "Redis", credential: str) -> bool:
 
 
 def revoke(redis: "Redis", member_id: str) -> None:
-    member = redis.hgetall(f"{PREFIX}:member:{member_id}")
+    from redis.exceptions import RedisError
+
+    member_key = f"{PREFIX}:member:{member_id}"
+    member = redis.hgetall(member_key)
     if not member:
         raise HiveError(f"no hive member {member_id}")
     with redis.pipeline() as pipe:
-        pipe.delete(f"{PREFIX}:member:{member_id}", f"{PREFIX}:ledger:{member['ledger']}")
+        pipe.delete(f"{PREFIX}:ledger:{member['ledger']}")
         pipe.acl_deluser(f"hive-{member_id}")
         pipe.execute()
+    try:
+        _persist(redis)
+        redis.delete(member_key)
+    except RedisError as exc:
+        raise HiveError(
+            f"revoking {member_id} is incomplete and a Redis restart before it completes revives its Redis user; "
+            f"run revoke again ({exc})"
+        ) from exc
 
 
 def write_env(home: Path | str, url: str, grant: dict) -> Path:

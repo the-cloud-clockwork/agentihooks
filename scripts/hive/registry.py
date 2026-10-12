@@ -3,6 +3,7 @@
 import json
 import os
 import re
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -162,8 +163,9 @@ def live(record: dict, now_ms: int) -> bool:
     return record["heartbeat_at"] > 0 and now_ms - record["heartbeat_at"] <= LIVE_MS
 
 
-def home() -> Path:
-    return Path(os.environ.get("AGENTIHOOKS_HOME") or Path.home() / ".agentihooks")
+def home(environ: Mapping[str, str] = os.environ) -> Path:
+    chosen = environ.get("AGENTIHOOKS_HOME") or os.environ.get("AGENTIHOOKS_HOME")
+    return Path(chosen or Path.home() / ".agentihooks")
 
 
 def seeded_id() -> str:

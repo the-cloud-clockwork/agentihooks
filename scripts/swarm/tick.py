@@ -64,6 +64,7 @@ from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.naming import parse
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.profile_choice import ProfileUnresolved
+from scripts.swarm.ready import awaiting as awaiting_merge
 from scripts.swarm.store import MASTER, PREFIX, AgentRecord, SwarmConfig, SwarmError
 from scripts.swarm_ledger import ledger_rank, ledger_workspace
 from scripts.swarm_ledger.repository import hierarchy
@@ -481,7 +482,10 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
                 store.release(slug, agent.task, agent.name)
                 store.drop_agent(slug, agent.name)
                 _refund_parked(slug, store, rows, agent.task)
-                goes_on = bool(store.handoff(slug, agent.task)) and rows.get(agent.task, {}).get("state") in ACTIVE
+                row = rows.get(agent.task, {})
+                goes_on = (
+                    bool(store.handoff(slug, agent.task)) and row.get("state") in ACTIVE and not awaiting_merge(row)
+                )
                 if goes_on:
                     _reopen(slug, ledger, rows, agent.task)
                 exits.settle(InboxStore(store.redis), agent.name, agent.seat if goes_on else "", "exited")
@@ -600,7 +604,12 @@ def _orphans(slug, store, ledger, rows):
     known = {a.name for a in store.agents(slug)}
     actions = []
     for task_id, row in rows.items():
-        if row.get("state") in ACTIVE and row.get("claimed_by") not in known and store.claimant(slug, task_id) is None:
+        if (
+            row.get("state") in ACTIVE
+            and row.get("claimed_by") not in known
+            and store.claimant(slug, task_id) is None
+            and not awaiting_merge(row)
+        ):
             if _reopen(slug, ledger, rows, task_id):
                 actions.append(f"task {task_id} had no agent, reopened")
     return actions

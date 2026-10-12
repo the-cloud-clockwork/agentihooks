@@ -96,10 +96,10 @@ class ClaimStop:
         task = next((t for t in ledger.tasks(who.swarm) if t.get("id") == who.task), None)
         if task is None or task.get("state") not in ACTIVE or task.get("claimed_by") != who.name:
             return Decision()
-        from scripts.swarm import idle
+        from scripts.swarm import idle, ready
 
         store, now = self.connect(), self.now()
-        if parked_by(store, who, task):
+        if parked_by(store, who, task) or ready.awaiting(task):
             return Decision()
         url = task.get("pr_url")
         held = idle.wait(store.redis, who.swarm, who.name)

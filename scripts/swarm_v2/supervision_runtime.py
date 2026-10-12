@@ -6,6 +6,7 @@ import shlex
 import signal
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -185,6 +186,18 @@ class Supervisor:
             return False
         return True
 
+    def validated(self, identifier: str, deadline: float) -> bool:
+        verified = threading.Event()
+
+        def validate():
+            if checkpoint_runtime.validate_export(self.launch.attempt, identifier, self.environment):
+                verified.set()
+
+        worker = threading.Thread(target=validate, daemon=True)
+        worker.start()
+        worker.join(max(0, deadline - time.monotonic()))
+        return verified.is_set() and time.monotonic() < deadline
+
     def drain(self, reason: str) -> dict:
         write(self.root / "drain.json", {**self.scope, "reason": reason, "status": "draining"})
         clean = self.quiesce()
@@ -198,9 +211,7 @@ class Supervisor:
                     self.environment.get(checkpoint_runtime.ROOT)
                     or self.environment.get(checkpoint_runtime.REMOTE) == "true"
                 )
-                if portable and not checkpoint_runtime.validate_export(
-                    self.launch.attempt, identifier, self.environment
-                ):
+                if portable and not self.validated(identifier, deadline):
                     identifier = None
                 break
             if "exporter" in self.exits:
