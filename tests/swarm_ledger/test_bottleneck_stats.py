@@ -13,9 +13,7 @@ def test_top_stage_trend_and_action_fit_the_operator_viewport(open_page):
                 "label": "ci overrun",
                 "trend": "rising",
                 "last_action": "Proposed a faster mutation run",
-                "value": 3,
-                "threshold": 1,
-                "unit": "minutes",
+                "seconds": 10800.0,
             }
         ),
         width=1920,
