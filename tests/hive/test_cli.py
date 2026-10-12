@@ -202,13 +202,12 @@ def test_curl_reads_a_full_https_join_with_no_stream_error(admin, cert, tls_hive
             f"https://localhost:{tls_hive}{server.JOIN_PATH}",
         ],
         capture_output=True,
-        text=True,
         timeout=30,
     )
 
-    head, _, body = result.stdout.partition("\r\n\r\n")
-    assert (result.returncode, result.stderr) == (0, "")
-    assert f"Content-Length: {len(body)}" in head.split("\r\n")
+    head, _, body = result.stdout.partition(b"\r\n\r\n")
+    assert (result.returncode, result.stderr) == (0, b"")
+    assert b"Content-Length: %d" % len(body) in head.split(b"\r\n")
     assert json.loads(body)["name"] == "laptop"
     assert capsys.readouterr().err == ""
 
