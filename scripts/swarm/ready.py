@@ -6,6 +6,8 @@ the next engineer, who continues from the stored handoff.
 """
 
 import json
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from scripts.swarm import merge_queue, stack, waits
@@ -91,83 +93,94 @@ def release(store, slug, task_id, found, ledger, by):
     ledger.update_task(slug, task_id, {"state": "pr", "awaiting": AWAITING}, by=by)
 
 
-def merge_pass(store, slug, rows, ledger, github, reread, now_ms, queue=merge_queue.operate):
+@dataclass(frozen=True)
+class Pass:
+    store: object
+    slug: str
+    ledger: object
+    github: Callable
+    reread: Callable
+    now_ms: int
+    queue: Callable = merge_queue.operate
+
+
+def merge_pass(run, rows):
     actions = []
     for task_id, row in rows.items():
         if row.get("awaiting") != AWAITING:
             continue
-        found = record(store, slug, task_id)
+        found = record(run.store, run.slug, task_id)
         if not awaiting(row) or found is None or found["agent"] != row.get("claimed_by"):
-            actions += _leave(store, slug, task_id, row, ledger)
+            actions += _leave(run, task_id, row)
             continue
-        actions += _advance(store, slug, rows, row, found, ledger, github, reread, now_ms, queue)
+        actions += _advance(run, rows, row, found)
     return actions
 
 
-def _leave(store, slug, task_id, row, ledger):
-    ledger.update_task(slug, task_id, {"awaiting": ""})
-    forget(store, slug, task_id)
+def _leave(run, task_id, row):
+    run.ledger.update_task(run.slug, task_id, {"awaiting": ""})
+    forget(run.store, run.slug, task_id)
     who = row.get("claimed_by")
     return [f"task {task_id} left the merge pass" + (f": {who} works it" if who else "")]
 
 
-def _advance(store, slug, rows, row, found, ledger, github, reread, now_ms, queue):
+def _advance(run, rows, row, found):
     url, held = found["url"], found["on"]
-    pull = github(url)
+    pull = run.github(url)
     if pull is None:
         return []
     if pull.state == "MERGED":
-        return _finish(store, slug, rows, row, found, ledger)
+        return _finish(run, rows, row, found)
     if held["kind"] == "checks":
-        if not waits.checks_resolution(held, github):
-            save(store, slug, row["id"], found)
+        if not waits.checks_resolution(held, run.github):
+            save(run.store, run.slug, row["id"], found)
             return []
         if pull.state != "OPEN":
-            return _reopen(store, slug, row, found, ledger, "was closed without merging")
+            return _reopen(run, row, found, "was closed without merging")
         if pull.red:
-            return _reopen(store, slug, row, found, ledger, "has red checks")
-        return _queue(store, slug, row["id"], found, now_ms, queue)
-    outcome = waits.merge_resolution(held, github, reread, now_ms - found["queued_at"] < waits.FRESH_MS)
+            return _reopen(run, row, found, "has red checks")
+        return _queue(run, row["id"], found)
+    outcome = waits.merge_resolution(held, run.github, run.reread, run.now_ms - found["queued_at"] < waits.FRESH_MS)
     if not outcome:
-        save(store, slug, row["id"], found)
+        save(run.store, run.slug, row["id"], found)
         return []
     if outcome == f"pull request {url}, now merged":
-        return _finish(store, slug, rows, row, found, ledger)
-    return _reopen(store, slug, row, found, ledger, "left the merge queue without merging")
+        return _finish(run, rows, row, found)
+    return _reopen(run, row, found, "left the merge queue without merging")
 
 
-def _queue(store, slug, task_id, found, now_ms, queue):
+def _queue(run, task_id, found):
     url = found["url"]
     try:
-        result = queue("queue", url)
+        result = run.queue("queue", url)
     except SwarmError as exc:
         return [f"could not queue {url} for task {task_id}: {exc}"]
     if result.get("waiting") == "checks":
         found["on"] = {"kind": "checks", "target": url, "previous_head": result["previous_head"]}
-        save(store, slug, task_id, found)
+        save(run.store, run.slug, task_id, found)
         return [f"{url} for task {task_id} updated from dev; waiting on its checks again"]
-    found["on"], found["queued_at"] = {"kind": "merge", "target": url}, now_ms
-    save(store, slug, task_id, found)
+    found["on"], found["queued_at"] = {"kind": "merge", "target": url}, run.now_ms
+    save(run.store, run.slug, task_id, found)
     return [f"queued {url} for task {task_id}"]
 
 
-def _finish(store, slug, rows, row, found, ledger):
+def _finish(run, rows, row, found):
     task_id, url = row["id"], found["url"]
     fields = {"state": "done", "pr_url": url, "awaiting": ""}
-    ledger.update_task(slug, task_id, fields)
+    run.ledger.update_task(run.slug, task_id, fields)
     for member in row.get("group_members") or []:
         if member in rows and rows[member].get("state") != "done":
-            ledger.update_task(slug, member, fields)
-    store.clear_handoff(slug, task_id)
-    forget(store, slug, task_id)
+            run.ledger.update_task(run.slug, member, fields)
+    run.store.clear_handoff(run.slug, task_id)
+    forget(run.store, run.slug, task_id)
     return [f"task {task_id} done, {url} merged", *_remove(found)]
 
 
-def _reopen(store, slug, row, found, ledger, what):
+def _reopen(run, row, found, what):
     task_id, url = row["id"], found["url"]
-    ledger.update_task(slug, task_id, {"state": "open", "claimed_by": "", "awaiting": ""}, if_state=("pr",))
-    ledger.comment(slug, task_id, REOPENED.format(url=url, what=what), by="swarm")
-    forget(store, slug, task_id)
+    run.ledger.update_task(run.slug, task_id, {"state": "open", "claimed_by": "", "awaiting": ""}, if_state=("pr",))
+    run.ledger.comment(run.slug, task_id, REOPENED.format(url=url, what=what), by="swarm")
+    forget(run.store, run.slug, task_id)
     return [f"task {task_id} reopened, {url} {what}", *_remove(found, "--pushed")]
 
 

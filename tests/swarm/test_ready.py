@@ -208,7 +208,7 @@ def merging(monkeypatch):
         return {"url": url, "queued": True, **getattr(queue, "extra", {})}
 
     def run(now=NOW):
-        return ready.merge_pass(store, "sw", rows, ledger, pulls.get, pulls.get, now, queue)
+        return ready.merge_pass(ready.Pass(store, "sw", ledger, pulls.get, pulls.get, now, queue), rows)
 
     rig = type("Rig", (), {})()
     rig.store, rig.rows, rig.ledger, rig.pulls, rig.queued, rig.shell, rig.run, rig.queue = (
@@ -254,9 +254,8 @@ def test_a_queue_refusal_is_retried_on_the_next_tick(merging):
     def refused(action, url):
         raise SwarmError("GitHub API failed")
 
-    assert ready.merge_pass(
-        merging.store, "sw", merging.rows, merging.ledger, merging.pulls.get, merging.pulls.get, NOW, refused
-    ) == [f"could not queue {URL} for task t1: GitHub API failed"]
+    run = ready.Pass(merging.store, "sw", merging.ledger, merging.pulls.get, merging.pulls.get, NOW, refused)
+    assert ready.merge_pass(run, merging.rows) == [f"could not queue {URL} for task t1: GitHub API failed"]
     assert ready.record(merging.store, "sw", "t1")["on"]["kind"] == "checks"
     assert merging.run() == [f"queued {URL} for task t1"]
 
@@ -345,7 +344,7 @@ def test_the_tick_runs_the_merge_pass_after_the_wait_pass(env, monkeypatch):
     cli.main(["sw", "create", "--repo", "/repo"])
     order = []
     monkeypatch.setattr(waits, "end_pass", lambda *args: order.append("waits") or [])
-    monkeypatch.setattr(ready, "merge_pass", lambda *args: order.append(("merge", args[1])) or ["merged"])
+    monkeypatch.setattr(ready, "merge_pass", lambda run, rows: order.append(("merge", run.slug)) or ["merged"])
     from tests.swarm.test_delivery import FakeHerdr
 
     actions = cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
