@@ -86,7 +86,7 @@ def test_publishes_fenced_order_after_host_admission(setup):
     record = AgentRecord(name, "eng", "task", seat=f"eng-1@{slug}", state="starting")
     store.put_agent(slug, record)
     store.seats.occupy(record.seat, name, 0)
-    task = {"id": "task", "seat": record.seat}
+    task = {"id": "task", "seat": record.seat, "controller_epoch": setup.held.epoch}
     orders = Orders(store.redis)
     runtime = Mock()
     runtime.spawn.return_value = Outcome(
