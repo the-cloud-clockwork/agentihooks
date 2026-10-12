@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -186,6 +187,8 @@ EFFORT_DEFAULT = "medium"
 AGENT_HELP = "Agent to open; default the harness of the account with a free session and the fewest live sessions"
 LAUNCH_GRACE_S = 3
 STARTED_ROUTES = ("routed", "bare", "direct")
+PROMPT_AFTER_START = "AGENTIHOOKS_PROMPT_AFTER_START"
+CODEX_READY_S = 120.0
 
 
 def _flag_value(args: list[str], names: tuple[str, ...]) -> str:
@@ -338,10 +341,11 @@ def _write_launcher(
     langfuse = environ.get("AGENTIHOOKS_LANGFUSE_ENABLED")
     langfuse_export = f"export AGENTIHOOKS_LANGFUSE_ENABLED={shlex.quote(langfuse)}\n" if langfuse is not None else ""
     command, before = _agent_command(spec, _route_report(launcher), name, claude_args, environ, directory)
+    command_text = shlex.join(command)
     if prompt_file is not None:
-        command_text = f'{shlex.join(command)} "$(cat {shlex.quote(str(prompt_file))})"'
-    else:
-        command_text = shlex.join(command)
+        prompt_arg = f'"$(cat {shlex.quote(str(prompt_file))})"'
+        held = f'set --; [ -n "${{{PROMPT_AFTER_START}:-}}" ] || set -- {prompt_arg}; unset {PROMPT_AFTER_START}; '
+        command_text = f'{held}{command_text} "$@"' if spec.agent == "codex" else f"{command_text} {prompt_arg}"
     cleanup = [
         str(launcher),
         str(_route_report(launcher)),
@@ -633,7 +637,7 @@ def _select_host(requested: str, environ: dict[str, str]) -> tuple[str, bool]:
 
 def _start_herdr(launcher: Path, directory: Path, name: str, args, agent: str, environ: dict[str, str]) -> list[str]:
     started = herdr_host.ensure_server(environ)
-    env = {"HERDR_AGENT": agent}
+    env = {"HERDR_AGENT": agent, **({PROMPT_AFTER_START: "1"} if _held_prompt(launcher, agent) else {})}
     placed = herdr_host.open_pane(directory, name, env, args.placement, args.workspace, environ)
     herdr_panes.record(placed, "init-agent", name, environ, int(time.time() * 1000))
     herdr_host.run(placed.pane_id, launcher, environ)
@@ -643,6 +647,12 @@ def _start_herdr(launcher: Path, directory: Path, name: str, args, agent: str, e
         f"pane_id={placed.pane_id}",
         *(["herdr_server=started", "attach=herdr"] if started else []),
     ]
+
+
+def _held_prompt(launcher: Path, agent: str) -> str:
+    """The opening prompt a Codex pane gets after its rename: typed at launch, the rename would wait behind its turn."""
+    prompt_file = launcher.with_suffix(".prompt")
+    return prompt_file.read_bytes().decode() if agent == "codex" and prompt_file.exists() else ""
 
 
 CHANNEL_WARNING_MS = 60_000
@@ -660,12 +670,56 @@ def _answer_channel_warning(pane: str, environ: dict[str, str]) -> str:
     return "answered" if herdr_host.answer(pane, channel.WARNING, environ, CHANNEL_WARNING_MS) else "unseen"
 
 
-def _name_in_herdr(pane: str, name: str, agent: str, environ: dict[str, str]) -> list[str]:
-    if not herdr_host.rename_agent(pane, name, environ):
-        return ["agent_name=unset"]
-    named = [f"agent_name={herdr_host.agent_name(name)}"]
-    if agent == "codex":
-        named.append(f"session_name={name if herdr_host.name_session(pane, name, environ) else 'unset'}")
+def _name_in_herdr(pane: str, name: str, agent: str, environ: dict[str, str], opening: str, since: float) -> list[str]:
+    detected = herdr_host.rename_agent(pane, name, environ)
+    ready = agent == "codex" and (detected or bool(opening)) and herdr_host.wait_ready(pane, environ, CODEX_READY_S)
+    named = [f"agent_name={herdr_host.agent_name(name)}"] if detected else ["agent_name=unset"]
+    if detected and agent == "codex":
+        named += _name_codex_session(pane, name, environ, since, ready)
+    if opening:
+        named.append(f"opening_prompt={_send_opening(pane, opening, environ, ready)}")
+    return named
+
+
+def _send_opening(pane: str, opening: str, environ: dict[str, str], ready: bool) -> str:
+    """Codex can read busy again right after its rename."""
+    ready = ready and herdr_host.wait_ready(pane, environ, CODEX_READY_S)
+    why = herdr_host.busy(pane, environ) if ready else "not-ready"
+    if why:
+        return f"held:{why}"
+    return "sent" if herdr_host.prompt(pane, opening, environ) else "failed"
+
+
+def _names_pane(route: dict, launcher: Path, agent: str) -> bool:
+    """Codex may start after the route wait ends with no report."""
+    return route.get("status") in STARTED_ROUTES or (not route.get("status") and bool(_held_prompt(launcher, agent)))
+
+
+def _name_codex_session(pane: str, name: str, environ: dict[str, str], since: float, ready: bool) -> list[str]:
+    outcome = herdr_host.name_session(pane, name, environ, _codex_named(environ, name, since)) if ready else "not-ready"
+    herdr_panes.mark(pane, environ, session_name=name if outcome == "named" else f"unset:{outcome}")
+    return [f"session_name={name}"] if outcome == "named" else ["session_name=unset", f"session_name_error={outcome}"]
+
+
+def _codex_named(environ: dict[str, str], name: str, since: float) -> Callable[[], bool]:
+    """Whether Codex's session index holds the name, set at or after the launch."""
+    index = codex_home(environ) / "session_index.jsonl"
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(since))
+
+    def named() -> bool:
+        try:
+            lines = index.read_bytes().decode().splitlines()
+        except OSError:
+            return False
+        for line in lines:
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(row, dict) and row.get("thread_name") == name and str(row.get("updated_at", "")) >= stamp:
+                return True
+        return False
+
     return named
 
 
@@ -814,8 +868,8 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         report.append(f"route_error={route['error']}")
     pane = next((line.split("=", 1)[1] for line in report if line.startswith("pane_id=")), "")
     herdr_panes.mark(pane, active_env, route_status=route.get("status", "pending"))
-    if pane and route.get("status") in STARTED_ROUTES:
-        report += _name_in_herdr(pane, name, agent, active_env)
+    if pane and _names_pane(route, launcher, agent):
+        report += _name_in_herdr(pane, name, agent, active_env, _held_prompt(launcher, agent), launcher_at / 1000)
         if channel:
             report.append(f"channel_warning={_answer_channel_warning(pane, active_env)}")
     if args.handoff and route.get("status") != "routed":

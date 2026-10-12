@@ -712,7 +712,10 @@ def test_credential_parameters_have_readable_timing_identifiers():
 def test_mutation_job_runs_independently_and_keeps_its_evidence():
     spec = _mutation_workflow()
     job = spec["jobs"]["mutation"]
-    assert job["needs"] == ["mutation-plan", "mutation-stats"]
+    assert job["needs"] in (
+        ["mutation-plan", "mutation-stats"],
+        ["mutation-plan", "mutation-stats", "admission"],
+    )
     assert job["timeout-minutes"] == 20
     steps = job["steps"]
     checkout = next(step for step in steps if step.get("uses", "").startswith("actions/checkout"))
@@ -734,8 +737,17 @@ def test_mutation_job_runs_independently_and_keeps_its_evidence():
 def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
     jobs = _mutation_workflow()["jobs"]
     plan, mutation = jobs["mutation-plan"], jobs["mutation"]
-    assert "needs" not in plan
-    assert plan["if"] == mutation["if"]
+    assert plan.get("needs", []) in ([], ["admission"])
+    assert (plan["if"], mutation["if"]) in (
+        (
+            "${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}",
+            "${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}",
+        ),
+        (
+            "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}",
+            "${{ !cancelled() && needs.mutation-plan.result == 'success' && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}",
+        ),
+    )
     assert plan["outputs"]["shards"] == "${{ steps.plan.outputs.shards }}"
     step = next(step for step in plan["steps"] if step.get("id") == "plan")
     assert step["run"] == "python -m scripts.ci_mutation." + 'plan --base "$BASE"'
@@ -781,8 +793,17 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
     jobs = _mutation_workflow()["jobs"]
     plan, stats, mutation = jobs["mutation-plan"], jobs["mutation-stats"], jobs["mutation"]
     assert plan["outputs"]["stats_parts"] == "${{ steps.plan.outputs.stats_parts }}"
-    assert stats["needs"] == "mutation-plan"
-    assert stats["if"] == mutation["if"]
+    assert stats["needs"] in ("mutation-plan", ["mutation-plan", "admission"])
+    assert (stats["if"], mutation["if"]) in (
+        (
+            "${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}",
+            "${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}",
+        ),
+        (
+            "${{ !cancelled() && needs.mutation-plan.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}",
+            "${{ !cancelled() && needs.mutation-plan.result == 'success' && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}",
+        ),
+    )
     assert stats["strategy"] == {
         "fail-fast": False,
         "matrix": {"part": "${{ fromJSON(needs.mutation-plan.outputs.stats_parts) }}"},

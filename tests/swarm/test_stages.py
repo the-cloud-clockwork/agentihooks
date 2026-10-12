@@ -387,6 +387,30 @@ def test_holds_separated_by_a_sample_gap_do_not_cover_the_gap():
     assert seconds_of(found) == {("quota_hold", ""): 600.0, ("claim_wait", ""): 3000.0}
 
 
+def test_quota_holds_carry_the_held_harness_and_split_where_it_changes():
+    found = stages.report(
+        rows(
+            ledger_events=[ledger("task done", at(7), "tasks/t0")],
+            host_samples=[
+                {**sample(at(7), 1, "quota"), "held_harness": "codex"},
+                {**sample(at(7, 5), 1, "quota"), "held_harness": "codex"},
+                {**sample(at(7, 10), 1, "quota"), "held_harness": "claude"},
+                sample(at(7, 15), 1, "host"),
+                sample(at(7, 20), 0, ""),
+            ],
+            agent_events=[agent("claim", "t1", at(8))],
+        ),
+        [{**TASK, "state": "claimed"}],
+        at(8),
+    )
+    assert seconds_of(found) == {
+        ("quota_hold", "codex"): 600.0,
+        ("quota_hold", "claude"): 300.0,
+        ("host_hold", ""): 300.0,
+        ("claim_wait", ""): 2400.0,
+    }
+
+
 def test_a_reopen_at_the_claim_instant_is_the_ready_time():
     found = stages.report(
         rows(

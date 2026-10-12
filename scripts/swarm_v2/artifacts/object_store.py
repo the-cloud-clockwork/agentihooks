@@ -1,8 +1,8 @@
 """An S3 shaped object store backend; the client, bucket and endpoint come from the caller's configuration."""
 
-from typing import Any
+from typing import Any, Protocol
 
-from scripts.swarm_v2.artifacts.base import ArtifactError
+from scripts.swarm_v2.artifacts.base import ArtifactError, Backend
 
 MISSING = frozenset({"404", "NoSuchKey", "NotFound"})
 PAGES = 10_000
@@ -10,6 +10,10 @@ PAGES = 10_000
 
 def _missing(error: Exception) -> bool:
     return getattr(error, "response", {}).get("Error", {}).get("Code") in MISSING
+
+
+class ConditionalBackend(Backend, Protocol):
+    def write_once(self, key: str, data: bytes) -> bool: ...
 
 
 class ObjectStoreBackend:
@@ -25,6 +29,17 @@ class ObjectStoreBackend:
 
     def write(self, key: str, data: bytes) -> None:
         self.client.put_object(**self._request(key), Body=data)
+
+    def write_once(self, key: str, data: bytes) -> bool:
+        from botocore.exceptions import ClientError
+
+        try:
+            self.client.put_object(**self._request(key), Body=data, IfNoneMatch="*")
+        except ClientError as error:
+            if error.response["Error"]["Code"] in {"PreconditionFailed", "412", "ConditionalRequestConflict", "409"}:
+                return False
+            raise
+        return True
 
     def size(self, key: str) -> int | None:
         try:

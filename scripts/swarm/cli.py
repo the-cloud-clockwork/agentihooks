@@ -271,6 +271,10 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             actions += skip_refused(waits.end_pass, store, slug, rows, inbox, view, now_ms(), ledger_events.view)
             actions += skip_refused(quiet.quiet_pass, store, slug, rows, now_ms())
             actions += skip_refused(dispatcher.priorities, store, slug, doc, ledger, view, now_ms())
+            if scheduled:
+                from scripts.swarm import langfuse
+
+                actions += skip_refused(langfuse.refresh, store, slug, now_ms())
             found = timing.call(
                 findings, store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", [])
             )

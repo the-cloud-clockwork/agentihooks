@@ -4,9 +4,9 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import bottleneck_status, cli, stages, status
+from scripts.swarm import bottleneck_status, cli, commands, stages, status
 from scripts.swarm.health import standing
-from scripts.swarm.store import RedisStore
+from scripts.swarm.store import RedisStore, SwarmConfig
 from tests.swarm.test_cli import env as env
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
@@ -77,6 +77,24 @@ def test_action_is_per_stage_and_survives_reading_updates(store):
     report = bottleneck_status.report(store, "sw", NOW)
     assert report["last_action"] == "Proposed a faster mutation run"
     assert report["action_at"] == NOW
+
+
+def test_page_view_reads_the_stored_ranking_over_the_published_snapshot(store, monkeypatch):
+    store.create(SwarmConfig("sw", ".", 0, 0, state="paused"))
+    stale = {"stage": "quota_hold", "label": "quota hold", "trend": "steady", "last_action": "none recorded"}
+    commands.publish(store, "sw", {"agents": [], "tasks": {}, "top_bottleneck": stale}, {})
+    detect(store, ("claim_wait", 665404.0, "rising"), ("quota_hold", 216504.0, "rising"))
+    monkeypatch.setattr(commands, "time", SimpleNamespace(time_ns=lambda: (NOW + 299_999) * 1_000_000))
+    assert commands.view(store, "sw")["top_bottleneck"] == {
+        "stage": "claim_wait",
+        "label": "claim wait",
+        "trend": "rising",
+        "seconds": 665404.0,
+        "measured_at": NOW,
+        "measured": "4 minutes ago",
+        "last_action": "none recorded",
+        "action_at": 0,
+    }
 
 
 def test_each_top_transition_sends_one_master_item_and_repeats_send_none(store):
