@@ -226,6 +226,17 @@ class TestGate:
         assert gate.decide(bash(f"agentihooks swarm {SLUG} merge queue {URL}"), WHO, verdicts(tmp_path)).allowed
         assert verdicts(tmp_path).read(TASK) == {"verdict": "pass", "reason": "fine", "at": NOW - 1, "phase": "p8"}
 
+    def test_a_verdict_landing_during_the_draft_read_is_decided_in_the_same_mode(self, tmp_path):
+        verdicts(tmp_path).write(TASK, "pending", intent.DRAFT, NOW - 60_000, phase="p8")
+
+        def failed(args, **kwargs):
+            verdicts(tmp_path).write(TASK, "fail", "missing behavior", NOW - 1, coach_rounds=2)
+            return subprocess.CompletedProcess(args, 0, stdout="false\n", stderr="")
+
+        gate = intent.IntentGate(clock=lambda: NOW / 1000, run=failed)
+        command = bash(f"agentihooks swarm {SLUG} merge queue {URL}")
+        assert gate.decide(command, WHO, verdicts(tmp_path), "coach").allowed
+
 
 class TestBody:
     def test_the_section_names_project_phase_and_task(self):
