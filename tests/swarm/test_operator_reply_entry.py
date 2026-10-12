@@ -109,7 +109,7 @@ def test_an_empty_reply_is_refused_before_its_answer_is_tied_to_the_entry(swarm)
     item = relayed(swarm, operator_write(13, "comment added", "tasks/t1", "is the fix merged"))
     _, inbox = swarm
     before = set(inbox.redis.scan_iter(match=inbox.key("entry", "*")))
-    with pytest.raises(InboxError, match="a reply needs text"):
+    with pytest.raises(InboxError, match="^a reply needs text$"):
         inbox.reply(item.id, ENG.name, "  ")
     assert set(inbox.redis.scan_iter(match=inbox.key("entry", "*"))) == before
     assert inbox.get(item.id).state == "pending"

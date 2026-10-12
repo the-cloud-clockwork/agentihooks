@@ -39,11 +39,13 @@ def test_an_agent_answer_to_the_operator_is_a_new_comment_beside_its_status():
     status = {"id": "c-0", "by": "eng", "at": 1, "text": "Working on the phase."}
     thread, c = [dict(status)], ctx()
     c.meta["members"] = {"eng": {"last_seen": 1}}
+    c.record = lambda *args, **fields: c.records.append((args, fields))
     answered = op("phases/p1/comments", to="operator")
     assert ledger_comments.agent_thread_op(thread, answered, c, "phases/p1", "comment") is True
     assert thread == [status, ANSWER] and c.meta["members"]["eng"]["last_seen"] == 7
+    assert c.records == [(("eng", "comment added", "phases/p1"), {"id": "m-1", "text": "Phase one is done."})]
     assert ledger_comments.agent_thread_op(thread, answered, c, "phases/p1", "comment") is True
-    assert len(thread) == 2
+    assert len(thread) == 2 and len(c.records) == 1
 
 
 def test_an_agent_status_after_its_answer_leaves_the_answer_intact():
