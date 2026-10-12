@@ -41,6 +41,14 @@ def test_escalation_to_the_master_and_operator_waits_out_the_outage(inbox):
     assert events(inbox, item.id) == ["escalated_master"] and ledger.followups == []
 
 
+def test_an_outage_withdraws_no_message_whose_recipient_stops_resolving(inbox, monkeypatch):
+    monkeypatch.setattr("scripts.inbox.addresses.get_active_sessions", lambda **kwargs: {})
+    item = inbox.send(MASTER_NAME, "gone-name", "review my diff")
+    outage.observe("sw", "provider", ["sw-eng-1 (claude): API Error: 529"], sent_at(item))
+    assert run(inbox, FakeHerdr({}), FakeLedger(), sent_at(item) + 5 * W) == []
+    assert inbox.get(item.id).state == "pending"
+
+
 def test_the_immediate_codex_wake_waits_for_the_outage_to_end(inbox):
     codex = AgentRecord("sw-eng-1", "eng", "t1", pane_id="p1", harness="codex")
     item = inbox.send(MASTER_NAME, "sw-eng-1", "review my diff")

@@ -1,9 +1,10 @@
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import ledger_events, master_retire, outage, status
+from scripts.swarm import ledger_events, master_retire, outage, pane, provider_probe, status
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import AgentRecord
 from scripts.swarm.tick import IDLE_NUDGE_TICKS, tick
@@ -109,6 +110,30 @@ def test_paused_time_counts_each_outage_moment_once_inside_the_window(store):
     assert outage.paused_ms("sw", 500, 550) == 50
     assert outage.paused_ms("sw", 700, 1_000) == 0
     assert outage.paused_ms("other", 0, 1_000) == 0
+
+
+def test_paused_time_keeps_each_closed_outage_of_one_kind(store):
+    outage.observe("sw", "redis", ["down"], 100)
+    outage.observe("sw", "redis", [], 200)
+    outage.observe("sw", "redis", ["down again"], 500)
+    outage.observe("sw", "redis", [], 700)
+    assert outage.paused_ms("sw", 0, 1_000) == 300
+    outage.observe("sw", "redis", ["down a third time"], 900)
+    assert outage.paused_ms("sw", 0, 1_000) == 400
+    assert outage.read("sw")["redis"]["started_at"] == 900
+
+
+def test_a_new_provider_episode_keeps_the_closed_one_in_paused_time(store, monkeypatch):
+    monkeypatch.setattr(provider_probe, "check", lambda target, directory: provider_probe.Result(False, "down", 0))
+    with outage._edit("sw") as records:
+        records["provider"] = {"kind": "provider", "started_at": 100, "evidence": ["one"], "ended_at": 300}
+    agent = SimpleNamespace(name="one", state="active", harness="claude", account="alpha", model="chosen")
+    error = pane.PaneObservation(
+        "idle", provider_error="API Error: 529", provider_checked=True, provider_error_id="two"
+    )
+    outage.providers(SimpleNamespace(agents=lambda slug: [agent]), "sw", SimpleNamespace(observe=lambda a: error), 600)
+    assert outage.read("sw")["provider"]["started_at"] == 600
+    assert outage.paused_ms("sw", 0, 1_000) == 600
 
 
 def test_idle_findings_for_an_agent_held_by_an_outage_carry_it(store):
