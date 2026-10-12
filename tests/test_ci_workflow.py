@@ -365,7 +365,10 @@ def test_unit_pins_an_exact_uv_version():
     assert re.fullmatch(r"\d+\.\d+\.\d+", uv["with"]["version"])
 
 
-def test_stored_durations_cover_the_collected_suite():
+def _collected_suite() -> tuple[list[str], str]:
+    split = _ROOT / "collected.json"
+    if split.exists():
+        return json.loads(split.read_text()), split.name
     result = subprocess.run(
         [sys.executable, "-m", "pytest", "tests/", "--collect-only", "-q", "-n", "0", "-o", "addopts="],
         cwd=_ROOT,
@@ -375,8 +378,12 @@ def test_stored_durations_cover_the_collected_suite():
         env={**os.environ, "PYTEST_ADDOPTS": "", "PYTEST_DISABLE_PLUGIN_AUTOLOAD": ""},
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    collected = [line for line in result.stdout.splitlines() if line.startswith("tests/") and "::" in line]
-    assert collected, result.stdout
+    return [line for line in result.stdout.splitlines() if line.startswith("tests/") and "::" in line], result.stdout
+
+
+def test_stored_durations_cover_the_collected_suite():
+    collected, output = _collected_suite()
+    assert collected, output
     stored = json.loads((_ROOT / ".test_durations").read_text())
     missing = [nodeid for nodeid in collected if re.sub(r"@[^\[\]]*$", "", nodeid) not in stored]
     assert len(missing) * 10 <= len(collected), (
