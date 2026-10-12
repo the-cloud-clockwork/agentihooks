@@ -18,7 +18,7 @@ AWAITING = "merge"
 RECORDS = "ready"
 GATED = ("code", "ci")
 QUEUE_TRIES = 5
-OUTAGE = "GitHub API"
+REFUSALS = ("GraphQL", "swarm merge queue operations require")
 REOPENED = (
     "Reopened by the swarm: its pull request {url} {what}. The next engineer continues it from the handoff its "
     "engineer left."
@@ -171,7 +171,7 @@ def _queue(run, row, found):
     try:
         result = run.queue("queue", url)
     except SwarmError as exc:
-        if not str(exc).startswith(OUTAGE):
+        if str(exc).startswith(REFUSALS):
             found["refusals"] = found.get("refusals", 0) + 1
         if found.get("refusals", 0) >= QUEUE_TRIES:
             return _reopen(run, row, found, f"could not be queued: {exc}")

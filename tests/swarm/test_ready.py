@@ -328,12 +328,12 @@ def test_a_queue_that_updates_the_branch_watches_the_new_head_checks(merging):
 
 
 def refused(action, url):
-    raise SwarmError("GitHub API failed")
+    raise SwarmError("GraphQL: Pull request is not mergeable")
 
 
 def test_a_queue_refusal_is_retried_on_the_next_tick(merging):
     merging.pulls[URL] = GREEN
-    assert merging.run(queuer=refused) == [f"could not queue {URL} for task t1: GitHub API failed"]
+    assert merging.run(queuer=refused) == [f"could not queue {URL} for task t1: GraphQL: Pull request is not mergeable"]
     assert ready.record(merging.store, "sw", "t1")["on"]["kind"] == "checks"
     assert ready.record(merging.store, "sw", "t1")["refusals"] == 1
     assert merging.run() == [f"queued {URL} for task t1"]
@@ -342,24 +342,45 @@ def test_a_queue_refusal_is_retried_on_the_next_tick(merging):
 def test_a_pull_request_the_queue_keeps_refusing_reopens_the_task(merging):
     merging.pulls[URL] = GREEN
     for _ in range(4):
-        assert merging.run(queuer=refused) == [f"could not queue {URL} for task t1: GitHub API failed"]
+        assert merging.run(queuer=refused) == [
+            f"could not queue {URL} for task t1: GraphQL: Pull request is not mergeable"
+        ]
     assert merging.run(queuer=refused) == [
-        f"task t1 reopened, {URL} could not be queued: GitHub API failed",
+        f"task t1 reopened, {URL} could not be queued: GraphQL: Pull request is not mergeable",
         f"removed the worktree {TOP}",
     ]
     assert merging.rows["t1"]["state"] == "open"
 
 
-def test_a_github_outage_while_queueing_never_counts_toward_the_reopen(merging):
+@pytest.mark.parametrize(
+    "error",
+    [
+        "GitHub API: timed out",
+        "error connecting to api.github.com",
+        "HTTP 502",
+        "the current pull request head must pass Tests before queueing",
+    ],
+)
+def test_an_outage_or_a_hold_while_queueing_never_counts_toward_the_reopen(merging, error):
     merging.pulls[URL] = GREEN
 
     def down(action, url):
-        raise SwarmError("GitHub API: timed out")
+        raise SwarmError(error)
 
     for _ in range(6):
-        assert merging.run(queuer=down) == [f"could not queue {URL} for task t1: GitHub API: timed out"]
+        assert merging.run(queuer=down) == [f"could not queue {URL} for task t1: {error}"]
     assert "refusals" not in ready.record(merging.store, "sw", "t1")
     assert merging.rows["t1"]["state"] == "pr"
+
+
+def test_a_pull_request_into_another_base_counts_as_a_refusal(merging):
+    merging.pulls[URL] = GREEN
+
+    def elsewhere(action, url):
+        raise SwarmError("swarm merge queue operations require a pull request into dev")
+
+    merging.run(queuer=elsewhere)
+    assert ready.record(merging.store, "sw", "t1")["refusals"] == 1
 
 
 def test_a_pull_request_that_merges_between_the_checks_reads_waits_for_the_next_tick(merging):
