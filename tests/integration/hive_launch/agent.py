@@ -28,7 +28,7 @@ class ScratchHerdr:
         self.children = []
 
     def spawn(self, config: SwarmConfig, lane: str, name: str, task: dict) -> Placed:
-        child = subprocess.Popen([sys.executable, "-m", "scripts.packaging.hive_launch_smoke", "agent"])
+        child = subprocess.Popen([sys.executable, __file__, "agent"])
         self.children.append(child)
         return Placed(
             "scratch-pane",

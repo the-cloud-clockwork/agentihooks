@@ -10,7 +10,9 @@ services:
     image: local/agentihooks-hive-proof
     build:
       context: ../../..
-    command: [python, -m, scripts.packaging.hive_launch_smoke, worker]
+    command: [python, /proof/agent.py, worker]
+    volumes:
+      - ./agent.py:/proof/agent.py:ro
     environment:
       AGENTIHOOKS_SWARM_REDIS_URL: redis://redis:6379/0
       AGENTIHOOKS_DEPLOYMENT: local
@@ -18,13 +20,15 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: [CMD, python, -m, scripts.packaging.hive_launch_smoke, ready]
+      test: [CMD, python, /proof/agent.py, ready]
       interval: 1s
       timeout: 2s
       retries: 30
   controller:
     image: local/agentihooks-hive-proof
-    command: [python, -m, scripts.packaging.hive_launch_smoke, controller]
+    command: [python, /proof/agent.py, controller]
+    volumes:
+      - ./agent.py:/proof/agent.py:ro
     environment:
       AGENTIHOOKS_SWARM_REDIS_URL: redis://redis:6379/0
       AGENTIHOOKS_DEPLOYMENT: compose
