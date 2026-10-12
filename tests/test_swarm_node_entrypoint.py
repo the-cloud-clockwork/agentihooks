@@ -1,3 +1,4 @@
+import os
 import subprocess
 from pathlib import Path
 
@@ -10,6 +11,7 @@ import pytest
         (["python", "/opt/swarm-node/supervisor.py", "attempt", "launch"], "supervisor"),
         (["python", "/opt/swarm-node/worker_image.py", "report"], "tini"),
         (["python"], "tini"),
+        (["cat", "/opt/swarm-node/supervisor.py"], "tini"),
     ],
 )
 def test_entrypoint_executes_supervisor_directly_and_keeps_tini_for_other_commands(tmp_path, arguments, route):
@@ -28,6 +30,10 @@ def test_entrypoint_executes_supervisor_directly_and_keeps_tini_for_other_comman
         .replace("/usr/bin/tini", str(tini))
     )
     result = subprocess.run(
-        ["bash", str(entrypoint), str(interpreter), *arguments[1:]], capture_output=True, text=True, check=True
+        ["bash", str(entrypoint), *arguments],
+        env={**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}"},
+        capture_output=True,
+        text=True,
+        check=True,
     )
     assert result.stdout.strip() == route
