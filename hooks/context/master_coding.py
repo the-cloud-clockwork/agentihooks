@@ -25,48 +25,46 @@ PROTECTION_REFUSAL = (
 )
 
 
-def is_master(environ=None) -> bool:
-    env = os.environ if environ is None else environ
-    return bool(env.get("AGENTIHOOKS_SWARM")) and env.get("AGENTIHOOKS_SWARM_TASK") == "master"
+def is_master() -> bool:
+    return bool(os.environ.get("AGENTIHOOKS_SWARM")) and os.environ.get("AGENTIHOOKS_SWARM_TASK") == "master"
 
 
-def path(session_id: str, environ=None) -> Path:
-    env = os.environ if environ is None else environ
-    home = Path(env.get("AGENTIHOOKS_HOME") or Path.home() / ".agentihooks")
+def path(session_id: str) -> Path:
+    home = Path(os.environ.get("AGENTIHOOKS_HOME") or Path.home() / ".agentihooks")
     return home / "master_coding" / (re.sub(r"[^A-Za-z0-9_.@-]", "_", session_id) + ".json")
 
 
-def observe(session_id: str, prompt: str, typed: bool, environ=None, now=None) -> str:
+def observe(session_id: str | None, prompt: str | None, typed: bool, now: float | None = None) -> str:
     """Open or close the window on the operator's typed phrase in the master pane; returns open, closed or ''."""
-    if not (session_id and typed and is_master(environ)):
+    if not (session_id and typed and is_master()):
         return ""
-    target = path(session_id, environ)
-    if CLOSE.search(prompt or ""):
-        target.unlink(missing_ok=True)
+    if CLOSE.search(str(prompt)):
+        path(session_id).unlink(missing_ok=True)
         return "closed"
-    if not OPEN.search(prompt or ""):
+    if not OPEN.search(str(prompt)):
         return ""
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps({"at": time.time() if now is None else now}))
+    path(session_id).parent.mkdir(parents=True, exist_ok=True)
+    path(session_id).write_text(json.dumps({"at": time.time() if now is None else now}))
     return "open"
 
 
-def is_open(session_id: str, environ=None, now=None) -> bool:
-    if not (session_id and is_master(environ)):
+def is_open(session_id: str, now: float | None = None) -> bool:
+    if not (session_id and is_master()):
         return False
     try:
-        opened = json.loads(path(session_id, environ).read_text())["at"]
+        opened = json.loads(path(session_id).read_text())["at"]
     except (OSError, ValueError, KeyError, TypeError):
         return False
     return (time.time() if now is None else now) - opened < WINDOW_SEC
 
 
-def asks_operator(tool_name: str, session_id: str, environ=None, now=None) -> bool:
+def asks_operator(tool_name: str, session_id: str | None) -> bool:
     """Whether a permission prompt for this tool may reach the operator present in the master pane."""
     from hooks.context.operator_mode import _heard
 
-    return tool_name in PERMISSION_TOOLS and is_master(environ) and _heard(session_id, environ, now)
+    return tool_name in PERMISSION_TOOLS and is_master() and _heard(session_id, None, None)
 
 
-def protection_refusal(command: str, environ=None) -> str:
-    return PROTECTION_REFUSAL if is_master(environ) and PROTECTION.search(command or "") else ""
+def protection_refusal(payload: dict) -> str:
+    command = str((payload.get("tool_input") or {}).get("command"))
+    return PROTECTION_REFUSAL if is_master() and PROTECTION.search(command) else ""

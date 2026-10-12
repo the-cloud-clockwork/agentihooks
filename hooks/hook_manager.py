@@ -1118,7 +1118,7 @@ def _master_coding(payload: dict, typed: bool) -> None:
         from hooks.common import inject_context
         from hooks.context import master_coding
 
-        state = master_coding.observe(payload.get("session_id", ""), payload.get("prompt", ""), typed)
+        state = master_coding.observe(payload.get("session_id"), payload.get("prompt"), typed)
         if state:
             inject_context(master_coding.NOTICES[state], also_log=False, skip_compression=True)
     except Exception as e:
@@ -1254,7 +1254,7 @@ def _check_shell_guards(payload: dict) -> None:
 
         check_branch_guard(payload)
         check_commit_on_main(payload)
-        if refusal := protection_refusal(payload.get("tool_input", {}).get("command", "")):
+        if refusal := protection_refusal(payload):
             raise BlockAction(refusal)
     except BlockAction:
         raise
@@ -2549,7 +2549,7 @@ def on_permission_request(payload: dict) -> None:
 
     if planner_plan.accepts(tool_name):
         print(json.dumps(planner_plan.grant(payload.get("tool_input") or {})))
-    elif master_coding.asks_operator(tool_name, payload.get("session_id", "")):
+    elif master_coding.asks_operator(tool_name, payload.get("session_id")):
         return
     elif os.environ.get("AGENTIHOOKS_SWARM"):
         emit_permission_decision(
