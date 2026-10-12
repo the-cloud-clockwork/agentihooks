@@ -142,7 +142,7 @@ def test_park_refuses_a_worktree_with_uncommitted_changes(parked, capsys):
 )
 def test_park_refuses_a_worktree_outside_the_worktree_script_root(parked, capsys, top):
     parked[3].top = top
-    _refused(parked, capsys, f"park removes only a worktree wt.sh new made under {ROOT}; {top} is not one")
+    _refused(parked, capsys, f"park and ready remove only a worktree wt.sh new made under {ROOT}; {top} is not one")
     assert parked[3].calls[-3:] == LOCATE
 
 

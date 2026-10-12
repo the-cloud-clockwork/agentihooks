@@ -17,6 +17,7 @@ from scripts.swarm_ledger import ledger_kinds
 AWAITING = "merge"
 RECORDS = "ready"
 GATED = ("code", "ci")
+QUEUE_TRIES = 5
 REOPENED = (
     "Reopened by the swarm: its pull request {url} {what}. The next engineer continues it from the handoff its "
     "engineer left."
@@ -80,6 +81,8 @@ def check(row, agent, autonomy, github, now_ms):
         raise SwarmError(f"pull request {url} is merged; close the task with swarm done")
     if pull.state != "OPEN":
         raise SwarmError(f"pull request {url} is {pull.state.lower()}; swarm ready carries an open pull request")
+    if stack.shell(["gh", "pr", "view", url, "--json", "isDraft", "--jq", ".isDraft"]).stdout.strip() == "true":
+        raise SwarmError(f"pull request {url} is a draft; mark it ready for review with gh pr ready first")
     top = stack.worktree()
     if _git("status", "--porcelain"):
         raise SwarmError("the worktree holds uncommitted changes; commit and push them first")
@@ -91,6 +94,11 @@ def check(row, agent, autonomy, github, now_ms):
 def release(store, slug, task_id, found, ledger, by):
     save(store, slug, task_id, found)
     ledger.update_task(slug, task_id, {"state": "pr", "awaiting": AWAITING}, by=by)
+
+
+def withdraw(store, slug, task_id, ledger, by):
+    forget(store, slug, task_id)
+    ledger.update_task(slug, task_id, {"awaiting": ""}, by=by)
 
 
 @dataclass(frozen=True)
@@ -131,15 +139,10 @@ def _advance(run, rows, row, found):
         return []
     if pull.state == "MERGED":
         return _finish(run, rows, row, found)
+    if pull.state != "OPEN":
+        return _reopen(run, row, found, "was closed without merging")
     if held["kind"] == "checks":
-        if not waits.checks_resolution(held, run.github):
-            save(run.store, run.slug, row["id"], found)
-            return []
-        if pull.state != "OPEN":
-            return _reopen(run, row, found, "was closed without merging")
-        if pull.red:
-            return _reopen(run, row, found, "has red checks")
-        return _queue(run, row["id"], found)
+        return _checks(run, row, found)
     outcome = waits.merge_resolution(held, run.github, run.reread, run.now_ms - found["queued_at"] < waits.FRESH_MS)
     if not outcome:
         save(run.store, run.slug, row["id"], found)
@@ -149,11 +152,25 @@ def _advance(run, rows, row, found):
     return _reopen(run, row, found, "left the merge queue without merging")
 
 
-def _queue(run, task_id, found):
-    url = found["url"]
+def _checks(run, row, found):
+    outcome = waits.checks_resolution(found["on"], run.github)
+    if not outcome:
+        save(run.store, run.slug, row["id"], found)
+        return []
+    if outcome.startswith(f"checks on {found['url']}, now red"):
+        return _reopen(run, row, found, "has red checks")
+    return _queue(run, row, found)
+
+
+def _queue(run, row, found):
+    task_id, url = row["id"], found["url"]
     try:
         result = run.queue("queue", url)
     except SwarmError as exc:
+        found["refusals"] = found.get("refusals", 0) + 1
+        if found["refusals"] >= QUEUE_TRIES:
+            return _reopen(run, row, found, f"could not be queued: {exc}")
+        save(run.store, run.slug, task_id, found)
         return [f"could not queue {url} for task {task_id}: {exc}"]
     if result.get("waiting") == "checks":
         found["on"] = {"kind": "checks", "target": url, "previous_head": result["previous_head"]}
@@ -180,14 +197,13 @@ def _reopen(run, row, found, what):
     task_id, url = row["id"], found["url"]
     run.ledger.update_task(run.slug, task_id, {"state": "open", "claimed_by": "", "awaiting": ""}, if_state=("pr",))
     run.ledger.comment(run.slug, task_id, REOPENED.format(url=url, what=what), by="swarm")
+    run.store.release(run.slug, task_id, found["agent"])
     forget(run.store, run.slug, task_id)
     return [f"task {task_id} reopened, {url} {what}", *_remove(found, "--pushed")]
 
 
 def _remove(found, *flags):
-    top = found.get("worktree")
-    if not top:
-        return []
+    top = found["worktree"]
     done = stack.shell(["bash", str(stack.WT_SCRIPT), "done", Path(top).name, "--repo", top, *flags])
     if done.returncode != 0:
         return [f"could not remove the worktree {top}: {done.stderr.strip()}"]

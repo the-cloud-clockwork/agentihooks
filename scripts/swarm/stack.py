@@ -42,7 +42,7 @@ def worktree() -> str:
     common = _out(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], "cannot locate the repo")
     root = _out(["bash", str(WT_SCRIPT), "root"], "cannot locate the worktree root")
     if Path(top).resolve().parent != Path(root).resolve() / Path(common).parent.name:
-        raise SwarmError(f"park removes only a worktree wt.sh new made under {root}; {top} is not one")
+        raise SwarmError(f"park and ready remove only a worktree wt.sh new made under {root}; {top} is not one")
     return top
 
 

@@ -1,8 +1,13 @@
 import json
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 
+from scripts.gates import Call, Who
+from scripts.gates.base import Decision
+from scripts.gates.claim_stop import ClaimStop
+from scripts.gates.verdicts import Verdicts
 from scripts.swarm import capacity, cli, ready, stack, tick, waits
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.store import RedisStore, SwarmError
@@ -22,11 +27,12 @@ RUNNING = PullRequest("OPEN", None, 1, False, False, head=HEAD)
 QUEUED = PullRequest("OPEN", None, 1, False, True, head=HEAD, queued=True)
 MERGED = PullRequest("MERGED", 2, 1, False, True, head=HEAD)
 CLOSED = PullRequest("CLOSED", None, 1, False, True, head=HEAD)
+REMOVE = ["bash", str(stack.WT_SCRIPT), "done", "engineer-a1b2c3-0001", "--repo", TOP]
 
 
 class Shell:
     def __init__(self):
-        self.calls, self.status, self.head, self.fail = [], "", HEAD, ()
+        self.calls, self.status, self.head, self.draft, self.fail = [], "", HEAD, "false", ()
 
     def __call__(self, argv):
         self.calls.append(argv)
@@ -36,6 +42,7 @@ class Shell:
             ("bash", str(stack.WT_SCRIPT), "root"): ROOT,
             ("git", "status", "--porcelain"): self.status,
             ("git", "rev-parse", "HEAD"): self.head,
+            ("gh", "pr", "view"): self.draft,
         }.get(tuple(argv[:3]), "")
         code = 1 if tuple(argv[:3]) in self.fail else 0
         return subprocess.CompletedProcess(argv, code, stdout=out + "\n", stderr=" boom\n" if code else "")
@@ -60,12 +67,18 @@ def release(doc):
     return cli.main(["sw", "--as", AGENT, "ready", str(doc)])
 
 
-def test_ready_records_the_pull_request_and_head_and_ends_the_agent(released, capsys):
-    store, ledger, _, doc = released
+def working(store):
+    return [a.state for a in store.agents("sw") if a.name == AGENT] == ["working"]
+
+
+@pytest.mark.parametrize("kind", ["code", "ci"])
+def test_ready_records_the_pull_request_and_head_and_ends_the_agent(released, capsys, kind):
+    store, ledger, shell, doc = released
+    ledger.rows["t1"]["kind"] = kind
     capsys.readouterr()
     assert release(doc) == 0
-    assert ledger.rows["t1"]["state"] == "pr" and ledger.rows["t1"]["awaiting"] == ready.AWAITING
-    assert ready.record(store, "sw", "t1") == {
+    assert ledger.rows["t1"]["state"] == "pr" and ledger.rows["t1"]["awaiting"] == "merge"
+    assert json.loads(store.redis.hget(store.key("sw", "ready"), "t1")) == {
         "url": URL,
         "head": HEAD,
         "worktree": TOP,
@@ -73,6 +86,7 @@ def test_ready_records_the_pull_request_and_head_and_ends_the_agent(released, ca
         "at": NOW,
         "on": {"kind": "checks", "target": URL, "head": HEAD},
     }
+    assert ["gh", "pr", "view", URL, "--json", "isDraft", "--jq", ".isDraft"] in shell.calls
     assert store.handoff("sw", "t1") == doc.read_text()
     assert store.handoff_envelope("sw", "t1")["reason"] == "exit"
     assert [a.state for a in store.agents("sw") if a.name == AGENT] == ["finished"]
@@ -80,9 +94,41 @@ def test_ready_records_the_pull_request_and_head_and_ends_the_agent(released, ca
         "task": "t1",
         "pr_url": URL,
         "head": HEAD,
-        "awaiting": ready.AWAITING,
+        "awaiting": "merge",
         "next": "stop now; the swarm carries the pull request to merge and closes this session",
     }
+
+
+def test_a_second_ready_is_refused_once_the_seat_is_released(released, capsys):
+    store, _, _, doc = released
+    assert release(doc) == 0
+    first = ready.record(store, "sw", "t1")
+    capsys.readouterr()
+    assert release(doc) == 1
+    assert capsys.readouterr().err == (
+        f"swarm: {AGENT} already handed off its seat; the swarm carries its pull request\n"
+    )
+    assert ready.record(store, "sw", "t1") == first
+
+
+def test_a_failed_handoff_withdraws_the_release(released, capsys, monkeypatch):
+    store, ledger, _, doc = released
+
+    def refused(*args):
+        raise SwarmError("handoff store down")
+
+    monkeypatch.setattr(cli, "_hand_off", refused)
+    assert release(doc) == 1
+    assert capsys.readouterr().err.endswith("handoff store down\n")
+    assert ledger.rows["t1"]["awaiting"] == "" and ready.record(store, "sw", "t1") is None
+
+
+def test_ready_refuses_a_task_under_the_controller_outcome_path(released, capsys):
+    store, ledger, _, doc = released
+    store.redis.set(store.key("sw", "task-authority", "t1"), 1)
+    assert release(doc) == 1
+    assert capsys.readouterr().err == "swarm: distributed final mutations require the controller outcome path\n"
+    assert ready.record(store, "sw", "t1") is None and working(store)
 
 
 def test_a_ready_task_no_longer_holds_a_busy_seat_and_is_never_reopened(released):
@@ -106,6 +152,21 @@ def test_the_reaper_retires_a_ready_agent_without_reopening_its_task(released):
     assert store.handoff("sw", "t1") == doc.read_text()
 
 
+def test_the_stop_gate_lets_a_ready_engineer_stop(released, tmp_path):
+    store, ledger, _, doc = released
+    ledger.pulls[URL] = GREEN
+    gate = ClaimStop(connect=lambda: store, ledger=lambda: ledger, github=lambda url: GREEN, now=lambda: NOW)
+    who = Who(name=AGENT, swarm="sw", lane="eng", task="t1")
+
+    def stop():
+        return gate.decide(Call(""), who, Verdicts("sw", gate.name, tmp_path))
+
+    assert not stop().allowed
+    assert release(doc) == 0
+    assert stop() == Decision()
+    assert ledger.rows["t1"]["state"] == "pr"
+
+
 @pytest.mark.parametrize(
     "change, says",
     [
@@ -122,13 +183,17 @@ def test_ready_refuses_a_task_without_a_pull_request_to_carry(released, capsys, 
     assert release(doc) == 1
     assert capsys.readouterr().err == f"swarm: {says}\n"
     assert ready.record(store, "sw", "t1") is None and store.handoff("sw", "t1") == ""
-    assert [a.state for a in store.agents("sw") if a.name == AGENT] == ["working"]
+    assert working(store)
 
 
 @pytest.mark.parametrize(
     "pull, says",
     [
         (None, f"cannot read pull request {URL} from GitHub; run swarm ready again when it answers"),
+        (
+            PullRequest("OPEN", None, 1, False, True, head=""),
+            f"cannot read pull request {URL} from GitHub; run swarm ready again when it answers",
+        ),
         (MERGED, f"pull request {URL} is merged; close the task with swarm done"),
         (CLOSED, f"pull request {URL} is closed; swarm ready carries an open pull request"),
     ],
@@ -141,6 +206,16 @@ def test_ready_refuses_a_pull_request_it_cannot_carry(released, capsys, pull, sa
     assert ledger.rows["t1"].get("awaiting", "") == ""
 
 
+def test_ready_refuses_a_draft_pull_request(released, capsys):
+    store, _, shell, doc = released
+    shell.draft = "true"
+    assert release(doc) == 1
+    assert capsys.readouterr().err == (
+        f"swarm: pull request {URL} is a draft; mark it ready for review with gh pr ready first\n"
+    )
+    assert ready.record(store, "sw", "t1") is None and working(store)
+
+
 def test_ready_refuses_a_worktree_whose_head_the_pull_request_lacks(released, capsys):
     store, ledger, shell, doc = released
     shell.head = "b" * 40
@@ -151,6 +226,9 @@ def test_ready_refuses_a_worktree_whose_head_the_pull_request_lacks(released, ca
     shell.head, shell.status = HEAD, " M scripts/x.py"
     assert release(doc) == 1
     assert capsys.readouterr().err == "swarm: the worktree holds uncommitted changes; commit and push them first\n"
+    shell.status, shell.fail = "", (("git", "status", "--porcelain"),)
+    assert release(doc) == 1
+    assert capsys.readouterr().err == "swarm: git status failed: boom\n"
     assert ready.record(store, "sw", "t1") is None
 
 
@@ -170,7 +248,7 @@ def test_ready_refuses_a_malformed_handoff(released, capsys):
     doc.write_text("# Handoff v2\n")
     assert release(doc) == 1
     assert ready.record(store, "sw", "t1") is None
-    assert [a.state for a in store.agents("sw") if a.name == AGENT] == ["working"]
+    assert working(store)
 
 
 class Ledger:
@@ -199,6 +277,7 @@ def merging(monkeypatch):
     }
     ledger = Ledger(rows)
     store.put_handoff("sw", "t1", "the handoff")
+    store.claim("sw", "t1", AGENT, 60_000)
     ready.save(store, "sw", "t1", ready.held_record(URL, HEAD, TOP, AGENT, NOW))
     pulls, queued, shell = {URL: RUNNING}, [], Shell()
     monkeypatch.setattr(stack, "shell", shell)
@@ -207,21 +286,17 @@ def merging(monkeypatch):
         queued.append((action, url))
         return {"url": url, "queued": True, **getattr(queue, "extra", {})}
 
-    def run(now=NOW):
-        return ready.merge_pass(ready.Pass(store, "sw", ledger, pulls.get, pulls.get, now, queue), rows)
+    def run(now=NOW, queuer=queue):
+        return ready.merge_pass(ready.Pass(store, "sw", ledger, pulls.get, pulls.get, now, queuer), rows)
 
-    rig = type("Rig", (), {})()
-    rig.store, rig.rows, rig.ledger, rig.pulls, rig.queued, rig.shell, rig.run, rig.queue = (
-        store,
-        rows,
-        ledger,
-        pulls,
-        queued,
-        shell,
-        run,
-        queue,
+    return SimpleNamespace(
+        store=store, rows=rows, ledger=ledger, pulls=pulls, queued=queued, shell=shell, run=run, queue=queue
     )
-    return rig
+
+
+def queued_at_now(merging):
+    merging.pulls[URL] = GREEN
+    assert merging.run() == [f"queued {URL} for task t1"]
 
 
 def test_the_merge_pass_waits_while_checks_run(merging):
@@ -230,8 +305,7 @@ def test_the_merge_pass_waits_while_checks_run(merging):
 
 
 def test_the_merge_pass_queues_on_green_checks_and_watches_the_queue(merging):
-    merging.pulls[URL] = GREEN
-    assert merging.run() == [f"queued {URL} for task t1"]
+    queued_at_now(merging)
     assert merging.queued == [("queue", URL)]
     assert ready.record(merging.store, "sw", "t1")["on"] == {"kind": "merge", "target": URL}
     assert ready.record(merging.store, "sw", "t1")["queued_at"] == NOW
@@ -248,34 +322,44 @@ def test_a_queue_that_updates_the_branch_watches_the_new_head_checks(merging):
     assert merging.run() == [] and len(merging.queued) == 1
 
 
+def refused(action, url):
+    raise SwarmError("GitHub API failed")
+
+
 def test_a_queue_refusal_is_retried_on_the_next_tick(merging):
     merging.pulls[URL] = GREEN
-
-    def refused(action, url):
-        raise SwarmError("GitHub API failed")
-
-    run = ready.Pass(merging.store, "sw", merging.ledger, merging.pulls.get, merging.pulls.get, NOW, refused)
-    assert ready.merge_pass(run, merging.rows) == [f"could not queue {URL} for task t1: GitHub API failed"]
+    assert merging.run(queuer=refused) == [f"could not queue {URL} for task t1: GitHub API failed"]
     assert ready.record(merging.store, "sw", "t1")["on"]["kind"] == "checks"
+    assert ready.record(merging.store, "sw", "t1")["refusals"] == 1
     assert merging.run() == [f"queued {URL} for task t1"]
 
 
+def test_a_pull_request_the_queue_keeps_refusing_reopens_the_task(merging):
+    merging.pulls[URL] = GREEN
+    for _ in range(4):
+        assert merging.run(queuer=refused) == [f"could not queue {URL} for task t1: GitHub API failed"]
+    assert merging.run(queuer=refused) == [
+        f"task t1 reopened, {URL} could not be queued: GitHub API failed",
+        f"removed the worktree {TOP}",
+    ]
+    assert merging.rows["t1"]["state"] == "open"
+
+
 def test_a_merged_pull_request_closes_the_task_with_the_done_proof_and_removes_the_worktree(merging):
-    merging.rows["t1"]["group_members"] = ["t2"]
+    merging.rows["t1"]["group_members"] = ["t2", "t9"]
     merging.pulls[URL] = MERGED
     assert merging.run() == [f"task t1 done, {URL} merged", f"removed the worktree {TOP}"]
     assert merging.rows["t1"]["state"] == "done" and merging.rows["t1"]["pr_url"] == URL
     assert merging.rows["t1"]["awaiting"] == ""
     assert merging.rows["t2"]["state"] == "done" and merging.rows["t2"]["pr_url"] == URL
-    assert merging.shell.calls == [["bash", str(stack.WT_SCRIPT), "done", "engineer-a1b2c3-0001", "--repo", TOP]]
+    assert merging.shell.calls == [REMOVE]
     assert ready.record(merging.store, "sw", "t1") is None
     assert merging.store.handoff("sw", "t1") == ""
     assert merging.run() == []
 
 
 def test_a_merge_seen_through_the_queue_closes_the_task(merging):
-    merging.pulls[URL] = GREEN
-    merging.run()
+    queued_at_now(merging)
     merging.pulls[URL] = QUEUED
     merging.run(NOW + 60_000)
     merging.pulls[URL] = MERGED
@@ -299,23 +383,46 @@ def test_red_checks_or_a_closed_pull_request_reopen_the_task_for_the_next_engine
     assert merging.rows["t1"]["state"] == "open" and merging.rows["t1"]["claimed_by"] == ""
     assert merging.rows["t1"]["awaiting"] == ""
     assert merging.ledger.comments == [
-        ("t1", ready.REOPENED.format(url=URL, what=what), "swarm"),
+        (
+            "t1",
+            f"Reopened by the swarm: its pull request {URL} {what}. The next engineer continues it from the "
+            "handoff its engineer left.",
+            "swarm",
+        ),
     ]
-    assert merging.shell.calls == [
-        ["bash", str(stack.WT_SCRIPT), "done", "engineer-a1b2c3-0001", "--repo", TOP, "--pushed"]
-    ]
+    assert merging.shell.calls == [[*REMOVE, "--pushed"]]
     assert merging.store.handoff("sw", "t1") == "the handoff"
+    assert merging.store.claimant("sw", "t1") is None
     assert ready.record(merging.store, "sw", "t1") is None
 
 
-def test_a_pull_request_that_leaves_the_queue_unmerged_reopens_the_task(merging):
-    merging.pulls[URL] = GREEN
+def test_a_pull_request_closed_while_queued_reopens_as_closed(merging):
+    queued_at_now(merging)
+    merging.pulls[URL] = CLOSED
+    assert merging.run(NOW + 60_000)[0] == f"task t1 reopened, {URL} was closed without merging"
+
+
+def test_a_reopen_leaves_a_task_the_ledger_already_moved_on(merging):
+    merging.ledger.rows = {"t1": {**merging.rows["t1"], "state": "done"}}
+    merging.pulls[URL] = RED
     merging.run()
+    assert merging.ledger.rows["t1"]["state"] == "done" and merging.ledger.rows["t1"]["claimed_by"] == AGENT
+
+
+def test_a_pull_request_that_leaves_the_queue_unmerged_reopens_the_task(merging):
+    queued_at_now(merging)
     merging.pulls[URL] = QUEUED
     merging.run(NOW + 60_000)
     merging.pulls[URL] = GREEN
     assert merging.run(NOW + 120_000)[0] == f"task t1 reopened, {URL} left the merge queue without merging"
     assert merging.rows["t1"]["state"] == "open"
+
+
+def test_a_fresh_queue_entry_not_yet_listed_holds_until_its_grace_runs_out(merging):
+    queued_at_now(merging)
+    assert merging.run(NOW + waits.FRESH_MS - 1) == []
+    assert merging.rows["t1"]["state"] == "pr"
+    assert merging.run(NOW + waits.FRESH_MS)[0] == f"task t1 reopened, {URL} left the merge queue without merging"
 
 
 def test_a_task_a_new_engineer_took_over_leaves_the_merge_pass(merging):
@@ -324,6 +431,15 @@ def test_a_task_a_new_engineer_took_over_leaves_the_merge_pass(merging):
     assert merging.run() == ["task t1 left the merge pass: engineer@a1b2c3-0002 works it"]
     assert merging.rows["t1"]["awaiting"] == "" and merging.queued == []
     assert ready.record(merging.store, "sw", "t1") is None
+
+
+@pytest.mark.parametrize("claimant, line", [(AGENT, f": {AGENT} works it"), ("", "")])
+def test_a_task_without_its_record_leaves_the_merge_pass(merging, claimant, line):
+    merging.rows["t1"]["claimed_by"] = claimant
+    ready.forget(merging.store, "sw", "t1")
+    merging.pulls[URL] = GREEN
+    assert merging.run() == [f"task t1 left the merge pass{line}"]
+    assert merging.rows["t1"]["awaiting"] == "" and merging.queued == []
 
 
 def test_a_github_outage_holds_the_pass(merging):

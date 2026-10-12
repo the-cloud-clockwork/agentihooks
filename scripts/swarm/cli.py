@@ -1414,6 +1414,8 @@ def cmd_park(store, args):
 
 def cmd_ready(store, args):
     agent = _worker(store, args)
+    if agent.state == "finished":
+        raise SwarmError(f"{agent.name} already handed off its seat; the swarm carries its pull request")
     done_gate.require_local(store, args.slug, agent.task)
     text = _read(args.doc, "handoff document")
     ledger = LedgerClient()
@@ -1423,7 +1425,11 @@ def cmd_ready(store, args):
     if problems:
         raise SwarmError(handoff_check.refusal(problems))
     ready.release(store, args.slug, agent.task, found, ledger, agent.name)
-    _hand_off(store, args.slug, agent, text, "exit", ledger)
+    try:
+        _hand_off(store, args.slug, agent, text, "exit", ledger)
+    except Exception:
+        ready.withdraw(store, args.slug, agent.task, ledger, agent.name)
+        raise
     print(
         json.dumps(
             {

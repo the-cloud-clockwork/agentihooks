@@ -1503,7 +1503,7 @@ def test_agent_prompt_joins_the_ledger_reads_its_inbox_and_leaves_before_done():
     assert text.index(f"{led} leave") < text.index("agentihooks swarm sw ready <handoff doc>")
 
 
-def test_agent_prompt_waits_on_checks_through_the_swarm():
+def test_agent_prompt_ends_at_swarm_ready():
     from scripts.swarm import prompt
 
     text = prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x", "phase": "p1"})
