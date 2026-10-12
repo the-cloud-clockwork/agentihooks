@@ -52,6 +52,9 @@ def test_app_mints_only_the_permitted_repository_and_refreshes_five_minutes_earl
         signed, app.public_key(), algorithms=["RS256"], options={"verify_exp": False, "verify_iat": False}
     )
     assert claims == {"iat": now - 60, "exp": now + 600, "iss": "123"}
+    clock.return_value = now + 3299
+    assert auth.get_token() == "installation-value"
+    assert post.call_count == 1
     clock.return_value = now + 3300
     assert auth.get_token() == "refreshed-value"
     assert post.call_count == 2
@@ -104,7 +107,25 @@ def test_askpass_returns_credentials_only_for_its_https_repository(app, monkeypa
         "Password for 'https://github.com/other/private.git': ",
         "Password for 'https://example.invalid/example/private.git': ",
         "Password for 'http://github.com/example/private.git': ",
+        "Password for 'https://github.com:443/example/private.git': ",
+        "Unexpected prompt",
     ):
         output = io.StringIO()
         assert git_auth.askpass(prompt, output) == 1
         assert output.getvalue() == ""
+
+
+def test_askpass_command_supplies_its_output_without_logging(app, monkeypatch, capsys):
+    monkeypatch.setattr(git_auth.requests, "post", Mock(return_value=response()))
+    git_auth.configure("github.com/example/private")
+    monkeypatch.setattr(git_auth.sys, "argv", ["askpass", "Username for 'https://github.com/example/private.git': "])
+    assert git_auth.main() == 0
+    assert capsys.readouterr() == ("x-access-token\n", "")
+
+
+@pytest.mark.parametrize("error", [KeyError, ValueError, git_auth.requests.RequestException, jwt.PyJWTError])
+def test_askpass_command_redacts_failures(app, monkeypatch, capsys, error):
+    monkeypatch.setattr(git_auth, "askpass", Mock(side_effect=error("private response body")))
+    monkeypatch.setattr(git_auth.sys, "argv", ["askpass", "Password"])
+    assert git_auth.main() == 1
+    assert capsys.readouterr() == ("", "GitHub App cannot supply scoped contents write credentials\n")

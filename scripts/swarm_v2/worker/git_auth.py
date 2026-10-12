@@ -26,17 +26,16 @@ class GitHubAppAuth:
         self.app_id = os.environ["GITHUB_APP_ID"]
         self.installation = os.environ["GITHUB_APP_INSTALLATION_ID"]
         self.key = os.environ["GITHUB_APP_PRIVATE_KEY"]
-        self.cached = ""
-        self.expires = 0.0
+        self.cached: tuple[str, float] | None = None
 
     def get_token(self) -> str:
         now = int(time.time())
-        if self.cached and now < self.expires - 300:
-            return self.cached
+        if self.cached and now < self.cached[1] - 300:
+            return self.cached[0]
         signed = jwt.encode({"iat": now - 60, "exp": now + 600, "iss": self.app_id}, self.key, algorithm="RS256")
         response = requests.post(
             f"https://api.github.com/app/installations/{self.installation}/access_tokens",
-            headers={"Authorization": f"Bearer {signed}", "Accept": "application/vnd.github+json"},
+            headers={"Authorization": f"Bearer {signed}"},
             json={"repositories": [self.project.rsplit("/", 1)[1]], "permissions": {"contents": "write"}},
             timeout=10,
         )
@@ -47,9 +46,8 @@ class GitHubAppAuth:
         repositories = {repo["full_name"].lower() for repo in data["repositories"]}
         if data["permissions"].get("contents") != "write" or repositories != {expected}:
             raise GitAuthRefused(REFUSED)
-        self.cached = data["token"]
-        self.expires = datetime.fromisoformat(data["expires_at"].replace("Z", "+00:00")).timestamp()
-        return self.cached
+        self.cached = (data["token"], datetime.fromisoformat(data["expires_at"]).timestamp())
+        return self.cached[0]
 
 
 def configure(project: str) -> None:
