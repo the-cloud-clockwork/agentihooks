@@ -59,9 +59,9 @@ def test_an_empty_name_counts_as_missing(tmp_path):
     _settings(tmp_path, {URL: "http://settings:4000", KEY: ""})
     _shell(tmp_path, "export AGENTIHOOKS_CLASSIFIER_LITELLM_KEY=sk-shell")
     environ = {**_environ(tmp_path), URL: "", KEY: ""}
-    assert operator_env.classifier(environ) == [URL]
+    assert operator_env.classifier(environ) == [KEY, URL]
     assert environ[URL] == "http://settings:4000"
-    assert environ[KEY] == ""
+    assert environ[KEY] == "sk-shell"
 
 
 def test_the_settings_value_wins_over_the_shell(tmp_path):

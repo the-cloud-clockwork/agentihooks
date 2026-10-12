@@ -94,7 +94,7 @@ def _claude_settings_env(environ: Mapping[str, str], prefix: str) -> dict[str, s
         return {}
     if not isinstance(env, dict):
         return {}
-    return {key: value for key, value in env.items() if key.startswith(prefix) and isinstance(value, str)}
+    return {key: value for key, value in env.items() if key.startswith(prefix) and isinstance(value, str) and value}
 
 
 def classifier(environ: MutableMapping[str, str]) -> list[str]:
