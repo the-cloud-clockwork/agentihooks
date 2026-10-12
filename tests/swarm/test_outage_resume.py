@@ -189,3 +189,35 @@ def test_overlapping_outages_hold_recovery_and_persistent_errors_retry_three_tim
     assert runtime.nudged.count(stuck.name) == 3
     assert next(agent for agent in store.agents("sw") if agent.name == stuck.name).idle_ticks == 1
     assert store.claimant("sw", stuck.task) == stuck.name
+
+
+def test_a_new_task_generation_fences_the_recovery_pass(store):
+    import json
+
+    from scripts.swarm import resume
+
+    ledger, runtime, agents = three_owners(store)
+    original = next(agent for agent in store.agents("sw") if agent.name == agents[0].name)
+    agent = replace(original, execution_id="execution", generation=1)
+    store.put_agent("sw", agent)
+    authority = {
+        "state": "active",
+        "holder": agent.name,
+        "execution_id": agent.execution_id,
+        "execution_generation": agent.generation,
+        "generation": 1,
+        "lease_deadline_ms": 20 * MINUTE,
+    }
+    key = store.key("sw", "task-authority", agent.task)
+    store.redis.set(key, json.dumps(authority))
+    outage.observe("sw", "provider", ["provider unavailable"], MINUTE)
+    rows = {task["id"]: task for task in ledger.state("sw")["tasks"]}
+    resume.track_outages("sw", store, runtime, rows, 8 * MINUTE)
+    assert resume.recovery_pending(store, "sw", agent)
+    authority["generation"] += 1
+    store.redis.set(key, json.dumps(authority))
+    outage.observe("sw", "provider", [], 9 * MINUTE)
+    resume.recover_outages("sw", store, ledger, runtime, rows, 9 * MINUTE)
+    assert not resume.recovery_pending(store, "sw", agent)
+    assert agent.name not in runtime.nudged
+    assert store.claimant("sw", agent.task) == agent.name
