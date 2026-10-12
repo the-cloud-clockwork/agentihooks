@@ -1,5 +1,6 @@
 import json
 from contextlib import contextmanager
+from dataclasses import replace
 
 import pytest
 
@@ -19,7 +20,12 @@ def test_production_remote_capture_completes_within_its_pod_grace(tmp_path, monk
 
     attempt, _, environ, newest = portable.__wrapped__(tmp_path, monkeypatch)
     original = json.loads((attempt / "launch.json").read_text())
-    registration = Registration(**original["registration"])
+    registration = replace(
+        Registration(**original["registration"]), execution_id="exe-" + "1" * 32, grant_id="lgr-" + "2" * 32
+    )
+    execution = json.loads((attempt / "execution.json").read_text())
+    execution["attempt"] = registration.execution_id
+    (attempt / "execution.json").write_text(json.dumps(execution))
     pods = Pods("swarm-pod-proof")
     monkeypatch.setattr(deployed, "pod_api", lambda *_: pods)
     settings = _workers(tmp_path, AGENTIHOOKS_CHECKPOINT_BUCKET="fixture-checkpoints")
