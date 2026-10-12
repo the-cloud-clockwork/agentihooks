@@ -52,7 +52,7 @@ def herdr_argv(container, root):
         "--env",
         "HOME=" + attempt + "/homes/codex",
         "--env",
-        "XDG_RUNTIME_DIR=" + attempt + "/tmp",
+        "XDG_RUNTIME_DIR=" + attempt + "/run",
         container,
         "herdr",
     ]

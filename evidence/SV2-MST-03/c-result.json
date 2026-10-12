@@ -1,0 +1,39 @@
+{
+  "case": "T-SV2-MST-03-C",
+  "independent_runs": 2,
+  "observed": {
+    "case": "T-SV2-MST-03-C",
+    "evidence_class": "fakeredis swarm store, inbox and masters channel; fake herdr runtime; fixture ledger document; no live swarm",
+    "input_sha256": "d215ed0eeff3f52750bd28c22232aeeec3011a04d37eabb8855a44d431e222ea",
+    "observed": {
+      "actions": [
+        "retired master seat master-4@fixture after 60 seconds",
+        "retired master seat master-3@fixture after 60 seconds",
+        "retired master seat master-2@fixture after 60 seconds",
+        "master seats 4 to 1 for 5 working agents"
+      ],
+      "count": 1,
+      "handoffs_at_lead": [
+        "master-2@fixture",
+        "master-3@fixture",
+        "master-4@fixture"
+      ],
+      "last_announcement": "Master seats are now 1 for 5 working agents. Phase owners: master@fixture owns p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15, p16.",
+      "measurements": {
+        "master_retire_seconds": [
+          60,
+          60,
+          60
+        ],
+        "master_seat_count": 1
+      },
+      "open_at_retired_seats": 0,
+      "owners_after_restart_match": true,
+      "phases_per_seat": {
+        "master@fixture": 16
+      },
+      "question_at": "master@fixture"
+    },
+    "state": "passed"
+  }
+}

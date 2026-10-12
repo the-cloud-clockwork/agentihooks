@@ -47,6 +47,12 @@ def verified(by, quote):
     return found.group(0) if found else ""
 
 
+def relayed(op, meta) -> str:
+    """The operator's words an op quotes, when its author is the ledger's orchestrator and the hooks recorded them."""
+    master = meta["members"].get(op["by"], {}).get("role") == "orchestrator"
+    return verified(op["by"], op["quote"]) if master else ""
+
+
 def apply(doc, op, ctx):
     name, item_id = op["item"].split("/")
     item = next((i for i in doc[name] if i["id"] == item_id), None)
@@ -55,8 +61,7 @@ def apply(doc, op, ctx):
     thread = "answers" if name == "questions" else "comments"
     if any(e["id"] == op["id"] for e in item[thread]):
         return True
-    master = ctx.meta["members"].get(op["by"], {}).get("role") == "orchestrator"
-    words = verified(op["by"], op["quote"]) if master else ""
+    words = relayed(op, ctx.meta)
     if not words:
         return False
     marks = {"relayed_by": op["by"], "relayed_from": RELAYED_FROM, "quote": words}

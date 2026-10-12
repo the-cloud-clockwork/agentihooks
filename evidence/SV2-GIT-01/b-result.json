@@ -1,0 +1,40 @@
+{
+  "case": "T-SV2-GIT-01-B",
+  "evidence_class": "mocked: fakeredis store shared by both controller processes with its own clock, the chart's controller affinity evaluated against labelled node fixtures; recovery seconds count controller ticks times the tick interval; no Kubernetes scheduler, autoscaler or EC2 call was made",
+  "input_sha256": {
+    "tests/fixtures/swarm_v2/control-nodes.json": "b8d05e926dd1722cc6cfa084886dd583d2735676f9bf63c82e415300e4a00dca"
+  },
+  "observed": {
+    "forged_credential_refusal": "a scoped controller grant is required",
+    "new_valid_request_took_lease": true,
+    "placement": {
+      "anton-ec2-on-demand-ci": {
+        "affinity_admits": false,
+        "free_cpu_millicores": 16000,
+        "schedulable": false,
+        "taints_admit": false
+      },
+      "anton-ec2-spot-ci": {
+        "affinity_admits": false,
+        "free_cpu_millicores": 16000,
+        "schedulable": false,
+        "taints_admit": false
+      },
+      "anton-ec2-spot-research": {
+        "affinity_admits": false,
+        "free_cpu_millicores": 8000,
+        "schedulable": false,
+        "taints_admit": false
+      },
+      "anton-ec2-spot-untainted": {
+        "affinity_admits": false,
+        "free_cpu_millicores": 32000,
+        "schedulable": false,
+        "taints_admit": true
+      }
+    },
+    "protected_state_unchanged": true,
+    "refusal_discloses_no_key": true
+  },
+  "state": "passed"
+}

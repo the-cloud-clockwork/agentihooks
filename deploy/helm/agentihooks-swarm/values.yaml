@@ -13,6 +13,15 @@ envFromSecrets: []
 externalSecrets: []
 
 ledger:
+  replicas: 1
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: anton.io/capacity-type
+                operator: DoesNotExist
+  tolerations: []
   port: 8765
   publicUrl: ""
   persistence:
@@ -51,13 +60,87 @@ redis:
       ephemeral-storage: 256Mi
 
 controller:
+  # Durable capacity only: EC2 nodes carry anton.io/capacity-type and the autoscaler may remove them.
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: anton.io/capacity-type
+                operator: DoesNotExist
+  tolerations: []
+  # Required with workers: the Kubernetes runtime creates worker Pods with this account's token.
+  serviceAccountName: ""
+  # Worker registration and heartbeat API, served by the controller process for one swarm.
+  api:
+    enabled: false
+    port: 8780
+    swarm: ""
+    signingKey:
+      keyId: ""
+      secretName: ""
+      secretKey: signing-key
+    # Peers beside the controller's own Pods, such as worker Pods; networkPolicy.ingressFrom never reaches the API.
+    ingressFrom: []
+    # {agent, task} of the swarm task proving a launch: the controller creates that proof swarm, and removes it once cleared.
+    proof: {}
+  # Kubernetes runtime settings, rendered once apiUrl is set and read while the API is on. The worker
+  # image stays on a floating tag; the controller resolves its digest at each launch. No launch account
+  # lives here: approved accounts come from the shared account secret.
+  workers:
+    apiUrl: ""
+    imageTag: dev
+    profile: ""
+    cap: 1
+    projects: []
+    brain: ""
+    # The Pod policy, docs/swarm-v2/schemas/pod-policy.json, shared by every swarm; the controller labels its Pods agentihooks-swarm-<api.swarm>.
+    podPolicy: {}
+    # Or the name of a ConfigMap in the release namespace holding pod-policy.json, such as one GitOps manages.
+    podPolicyConfigMap: ""
   livenessProbe:
     initialDelaySeconds: 60
     periodSeconds: 10
-    timeoutSeconds: 5
+    timeoutSeconds: 8
+    failureThreshold: 3
+  startupProbe:
+    periodSeconds: 5
+    timeoutSeconds: 8
+    failureThreshold: 60
+  readinessProbe:
+    periodSeconds: 10
+    timeoutSeconds: 8
     failureThreshold: 3
   terminationGracePeriodSeconds: 30
-  env: {}
+  env:
+    LANGFUSE_MCP_URL: ""
+  # Secret env only the controller container reads, unlike secretEnv; optional: true lets it start before the Secret exists.
+  secretEnv: []
+  # The terminal user CA private key: only that key of the Secret, a read only file on the controller container.
+  # Required with workers.apiUrl; never list it in secretEnv, which every swarm container reads.
+  terminalCa:
+    secretName: ""
+    key: ""
+  # SSH jump from the operator's machine to worker terminals: an sshd sidecar in the controller Pod, whose
+  # Pods the worker terminal policy already admits. address is the host:port the operator machine dials,
+  # recorded in Redis with the jump host key; publish that port with a LoadBalancer outside this chart.
+  jump:
+    enabled: false
+    address: ""
+    image:
+      repository: ghcr.io/the-cloud-clockwork/agentihooks-worker
+      tag: dev
+      pullPolicy: Always
+    # Peers admitted to the jump port, such as the operator LAN.
+    ingressFrom: []
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+        ephemeral-storage: 16Mi
+      limits:
+        memory: 128Mi
+        ephemeral-storage: 64Mi
   resources:
     requests:
       cpu: 50m

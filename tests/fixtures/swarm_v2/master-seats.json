@@ -1,0 +1,11 @@
+{
+  "slug": "fixture",
+  "master_count": 2,
+  "phases": ["p1", "p2", "p3", "p4"],
+  "tasks": [
+    {"id": "t1", "phase": "p1", "state": "open"},
+    {"id": "t2", "phase": "p2", "state": "open"},
+    {"id": "t3", "phase": "p3", "state": "open"},
+    {"id": "t4", "phase": "p4", "state": "open"}
+  ]
+}

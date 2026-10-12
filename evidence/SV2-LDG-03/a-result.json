@@ -1,0 +1,35 @@
+{
+  "case": "T-SV2-LDG-03-A",
+  "independent_runs": 2,
+  "observed": {
+    "case": "T-SV2-LDG-03-A",
+    "evidence_class": "mocked Redis and server clock; SQLite fixture ledger; signed fixture grants",
+    "input_sha256": "d398bb2096487a5e0fe517c41511bc1e409b3e90578ca17c1bb24f17c8b92683",
+    "observed": {
+      "comments": [
+        "Building the first slice"
+      ],
+      "ledger_revision_conflicts_total": 1,
+      "progress_after_edit": 200,
+      "read": 200,
+      "retried": [
+        200,
+        true
+      ],
+      "revision_changed_by_edit": true,
+      "stale_update": [
+        409,
+        "revision_conflict",
+        "new_request",
+        true
+      ],
+      "task": {
+        "claimed_by": true,
+        "description": "Build the second specification",
+        "pr_url": "https://github.com/the-cloud-clockwork/agentihooks/pull/1",
+        "state": "pr"
+      }
+    },
+    "state": "passed"
+  }
+}

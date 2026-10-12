@@ -19,6 +19,7 @@ from scripts.profiles import binding, plugins
 from scripts.swarm import (
     affinity,
     capacity,
+    default_models,
     effort_range,
     host_budget,
     live_binding,
@@ -31,7 +32,7 @@ from scripts.swarm import (
     reaper,
     timing,
 )
-from scripts.swarm.pane import PaneObservation, selection_prompt, typed_input
+from scripts.swarm.pane import PaneObservation, provider_error, provider_error_id, selection_prompt, typed_input
 from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig, connect
 from scripts.swarm.tick import Placed, SpawnError
 
@@ -42,6 +43,7 @@ STARTED_ROUTES = ("routed", "bare", "direct")
 AUTO = "auto"
 PICKED_LANES = ("eng", "ci")
 PLAN_MODE = ["--permission-mode", "plan"]
+REMOTE_PANE = "a remote agent's pane lives on its worker herdr server, never on the local one"
 
 
 def codex_plan_mode(environ):
@@ -76,7 +78,14 @@ def _model_args(agent, chosen, environ, bounds, preserve=False):
     model, effort = model_effort(agent, [], environ)
     saved = _set(chosen.get("effort")) or effort
     effort = effort_range.clamp(agent, saved, bounds)
-    if preserve and effort_range.rank(effort) != effort_range.rank(saved):
+    if (
+        not preserve
+        and chosen.get("source") == model_pick.BAND
+        and chosen.get("model") == model_pick.SONNET
+        and effort != model_pick.SONNET_EFFORT
+    ):
+        raise SpawnError("unsupported automatic Sonnet: the swarm range must allow xhigh", "unsupported")
+    if preserve and effort_range.rank(effort) != effort_range.rank(effort_range.named(agent, saved)):
         raise SpawnError("unsupported transfer: saved effort is outside the current swarm range", "unsupported")
     return model_flags(agent, _set(chosen.get("model")) or model, effort)
 
@@ -85,10 +94,11 @@ def preserves_effort(recorded: bool, lane: str) -> bool:
     return recorded and lane != MASTER
 
 
-def _lane_default(lane, agent, chosen):
+def _lane_default(lane, agent, chosen, config=None):
+    model = default_models.model(config, agent)
     if lane == MASTER:
-        return model_pick.frontier(agent)
-    return model_pick.ModelPick(chosen.get("model"), chosen.get("effort"))
+        return model_pick.frontier(agent, model)
+    return model_pick.ModelPick(_set(chosen.get("model")) or model, chosen.get("effort"))
 
 
 def herdr_call(args):
@@ -108,6 +118,19 @@ def herdr_target(name):
 
 def pane_target(agent):
     return agent.pane_id or herdr_target(agent.name)
+
+
+def _launch_records(name):
+    from scripts import herdr_panes
+
+    return [r for r in herdr_panes.load(dict(os.environ)) if r.kind == "init-agent" and r.owner_session == name]
+
+
+def _opened_pane(name, since_ms):
+    found = sorted(
+        (r for r in _launch_records(name) if r.launched_at >= since_ms), key=lambda record: record.launched_at
+    )
+    return found[-1].pane_id if found else ""
 
 
 def _owns(found, agent):
@@ -139,17 +162,6 @@ def _registered_conversations(found):
     return ids
 
 
-def _transfer(task):
-    saved = (task.get("handoff_envelope") or {}).get("launch")
-    if not task.get("handoff") and not saved:
-        return {}
-    if not saved or not all(saved.get(key) for key in ("profile", "harness", "model", "effort")):
-        raise SpawnError("unsupported handoff: original profile and run options are missing", "unsupported")
-    if saved["harness"] not in ("claude", "codex"):
-        raise SpawnError(f"unsupported handoff harness: {saved['harness']}", "unsupported")
-    return saved
-
-
 def _recorded_revision(saved):
     return saved.get("bundle_revision") or saved.get("profile_decision", {}).get("bundle_revision")
 
@@ -168,6 +180,8 @@ def _predecessor(task):
 
 
 class HerdrRuntime:
+    quota_accounts: Callable[..., list] | None = None
+
     def __init__(self, home=SWARM_HOME, run=subprocess.run, choose=None, herdr=herdr_call):
         self.home, self.run, self.herdr = home, run, herdr
         self.choose = choose or agent_choice.choose
@@ -180,6 +194,8 @@ class HerdrRuntime:
 
     def has_capacity(self, config):
         environ = dict(os.environ)
+        if self.quota_accounts is not None:
+            self._quota_accounts = self.quota_accounts(environ, time.time(), refresh=False)
         if hasattr(self, "_quota_accounts"):
             from scripts.swarm.capacity import free_seats
 
@@ -223,7 +239,8 @@ class HerdrRuntime:
         from scripts.swarm import capacity
 
         placing = demand is None or any(demand.values())
-        self._quota_accounts = capacity.accounts(dict(os.environ), now, refresh=placing and refresh)
+        read = self.quota_accounts or capacity.accounts
+        self._quota_accounts = read(dict(os.environ), now, refresh=placing and refresh)
         self._quota_held = {}
         accounts = self._quota_successor_accounts(requirements) if requirements else None
         if requirements:
@@ -413,24 +430,17 @@ class HerdrRuntime:
         return self.choose(saved["harness"], environ)
 
     def _profile_decision(self, config, lane, chosen, task, saved, relaunch, environ):
-        decision = (
-            profile_choice.ProfileDecision(
-                saved["profile"],
-                "handoff",
-                "original seat profile",
-                overlays=tuple(saved.get("overlays", ())),
-            )
-            if saved and (relaunch or not task.get("profile"))
-            else timing.call(
+        decision = profile_choice.kept(task, saved, relaunch)
+        if decision is None:
+            decision = timing.call(
                 profile_choice.choose, config.slug, lane, chosen, task, environ, getattr(config, "overlays", {})
             )
-        )
         if not decision.bundle_revision:
             kept = _recorded_revision(saved) if saved.get("profile") == decision.profile else ""
             decision = replace(decision, bundle_revision=kept or overlays.revision())
         return decision
 
-    def _planned_account(self, task_id, agent):
+    def planned_account(self, task_id, agent):
         planned = getattr(self, "_quota_tasks", {}).get(task_id)
         return getattr(self, "_quota_task_accounts", {}).get(task_id) if planned == agent else None
 
@@ -462,7 +472,7 @@ class HerdrRuntime:
     def spawn(self, config, lane, name, task):
         chosen, environ = config.lanes.get(lane, {}), dict(os.environ)
         relaunch = live_binding.complete(task.get("launch_assignment"))
-        saved = relaunch or _transfer(task)
+        saved = relaunch or profile_choice.transfer(task)
         decision = self._profile_decision(config, lane, chosen, task, saved, relaunch, environ)
         profile = decision.profile
         requested = "claude" if plugins.claude_only(profile) else _set(chosen.get("agent"))
@@ -515,15 +525,24 @@ class HerdrRuntime:
                 confidence=saved.get("model_confidence"),
             )
         elif lane in PICKED_LANES:
-            picked = timing.call(model_pick.pick, agent, {} if quota_transfer else chosen, task, environ)
+            picked = timing.call(
+                model_pick.pick,
+                agent,
+                {} if quota_transfer else chosen,
+                task,
+                environ,
+                effort_range.of(config),
+                default_models.model(config, agent),
+            )
         else:
-            picked = _lane_default(lane, agent, {} if quota_transfer else chosen)
+            picked = _lane_default(lane, agent, {} if quota_transfer else chosen, config)
+        picked = replace(picked, model=_set(picked.model) or default_models.model(config, agent))
         picked = replace(picked, effort=saved["effort"]) if saved else picked
         mode = [] if lane != "plan" else PLAN_MODE if agent == "claude" else codex_plan_mode(environ)
         route = ["--route", saved["account"]] if saved.get("account") else []
         account = None
         if hasattr(self, "_quota_accounts"):
-            account = self._quota_account(agent, saved.get("account") or self._planned_account(task["id"], agent), None)
+            account = self._quota_account(agent, saved.get("account") or self.planned_account(task["id"], agent), None)
             route = ["--route", account.name]
         placed = timing.call(
             self._launch,
@@ -573,7 +592,7 @@ class HerdrRuntime:
             agent.overlays,
         )
         argv += _pinned(agent.overlays, agent.profile_decision.get("bundle_revision"))
-        defaults = _lane_default(agent.lane, agent.harness, config.lanes.get(agent.lane, {}))
+        defaults = _lane_default(agent.lane, agent.harness, config.lanes.get(agent.lane, {}), config)
         picked = model_pick.ModelPick(
             agent.model or defaults.model,
             agent.effort or defaults.effort,
@@ -588,7 +607,7 @@ class HerdrRuntime:
             preserve=preserves_effort(bool(agent.effort), agent.lane),
         )
         argv += ["--resume", agent.conversation_id, "--", *route, *model]
-        placed = self._launch(config, agent.lane, agent.task, agent.name, argv)
+        placed = timing.call(self._launch, config, agent.lane, agent.task, agent.name, argv)
         if not self._holds(placed.pane_id, agent.conversation_id):
             self.retire(
                 replace(agent, pane_id=placed.pane_id, profile_decision=placed.profile_decision),
@@ -607,7 +626,12 @@ class HerdrRuntime:
     def operator(self, config, name, profile, text):
         """Open a claude session for the operator in the swarm's space, bound to the swarm with no task or lane slot."""
         argv = self._argv(config, name, "claude", text, f"{name}.md", profile)
-        model = _model_args("claude", model_pick.frontier("claude").__dict__, dict(os.environ), effort_range.of(config))
+        model = _model_args(
+            "claude",
+            model_pick.frontier("claude", default_models.model(config, "claude")).__dict__,
+            dict(os.environ),
+            effort_range.of(config),
+        )
         return self._launch(config, naming.OPERATOR, "", name, [*argv, "--", *model])
 
     def _holds(self, pane_id, conversation_id):
@@ -632,7 +656,16 @@ class HerdrRuntime:
             "--dir",
             config.repo,
         ]
-        argv += ["--name", name, "--agent", agent, "--start-timeout", "30", "--route-timeout", "90"]
+        argv += [
+            "--name",
+            name,
+            "--agent",
+            agent,
+            "--start-timeout",
+            "30",
+            "--route-timeout",
+            "30" if agent == "codex" else "90",
+        ]
         argv += ["--inbox-channel"] if agent == "claude" else []
         argv += [arg for overlay in worn for arg in ("--overlay", overlay)]
         return [*argv, "--profile", profile, "--prompt-file", str(path)]
@@ -665,7 +698,7 @@ class HerdrRuntime:
             )
         except subprocess.TimeoutExpired as exc:
             self._terminate(name)
-            raise SpawnError(f"init-agent timed out for {name}", "ambiguous") from exc
+            raise SpawnError(f"init-agent timed out for {name}", "ambiguous", _opened_pane(name, launched_at)) from exc
         timings = {
             "launched_at": launched_at,
             "returned_at": int(time.time() * 1000),
@@ -679,12 +712,13 @@ class HerdrRuntime:
         if proc.returncode or fields.get("status") != "started" or fields.get("route_status") not in STARTED_ROUTES:
             self._terminate(name)
             tail = (proc.stderr or proc.stdout).strip().splitlines()
-            raise SpawnError(tail[-1] if tail else f"init-agent exit {proc.returncode}")
+            message = tail[-1] if tail else f"init-agent exit {proc.returncode}"
+            raise SpawnError(message, pane_id=fields.get("pane_id") or _opened_pane(name, launched_at))
         try:
             validated = binding.fields(fields, argv[argv.index("--profile") + 1], agent)
         except ValueError as exc:
             self._terminate(name)
-            raise SpawnError(str(exc)) from exc
+            raise SpawnError(str(exc), pane_id=fields.get("pane_id", "")) from exc
         return Placed(
             fields.get("pane_id", ""),
             fields.get("agent", agent),
@@ -752,6 +786,9 @@ class HerdrRuntime:
         return self.retire_process(agent, pid, homes)
 
     def retire_process(self, agent, pid, homes=(), start=0):
+        if agent.runtime_backend != "local":
+            self.refusals[agent.name] = {"process": 0, "refusal": REMOTE_PANE}
+            return False
         outcome = self.end(agent.name, pid, list(homes), start)
         if outcome.refusal:
             self.refusals[agent.name] = {"process": outcome.process, "refusal": outcome.refusal}
@@ -774,6 +811,21 @@ class HerdrRuntime:
 
         pids = [s.process.pid for s in sessions() if s.name == name]
         return not self.reap(pids).refusal
+
+    def pane_tail(self, pane_id, lines):
+        args = ["pane", "read", pane_id, "--source", "recent", "--lines", str(lines), "--format", "text"]
+        return self.herdr(args)["text"]
+
+    def launched_pane(self, pane_id, name):
+        listed = {p["pane_id"]: p.get("terminal_id") for p in self.herdr(["pane", "list"]).get("panes", [])}
+        return any(r.pane_id == pane_id and r.terminal_id == listed.get(pane_id) for r in _launch_records(name))
+
+    def close_pane(self, pane_id):
+        try:
+            self.herdr(["pane", "close", pane_id])
+        except Exception as exc:
+            if "not found" not in str(exc):
+                raise
 
     def close_space(self, config: SwarmConfig) -> bool:
         try:
@@ -799,6 +851,8 @@ class HerdrRuntime:
         return self.observe(agent).state
 
     def observe(self, agent: AgentRecord) -> PaneObservation:
+        if agent.runtime_backend != "local":
+            return PaneObservation("unknown")
         found = self._get(pane_target(agent))
         if found is None or not _owns(found, agent):
             return PaneObservation("unknown")
@@ -809,11 +863,19 @@ class HerdrRuntime:
             capture = self.herdr(["pane", "read", found["pane_id"], "--source", "visible", "--format", "ansi"])
         except Exception:
             return PaneObservation("unknown" if agent.lane == MASTER else state)
-        text = capture.get("text", "")
+        text = capture.get("text")
+        if not isinstance(text, str):
+            return PaneObservation(state)
+        error = provider_error(agent.harness, text)
+        error_id = provider_error_id(agent.harness, text)
         title = selection_prompt(text)
         if title or state == "blocked":
-            return PaneObservation("waiting", title)
-        return PaneObservation(state, typed=typed_input(text))
+            return PaneObservation(
+                "waiting", title, provider_error=error, provider_checked=True, provider_error_id=error_id
+            )
+        return PaneObservation(
+            state, typed=typed_input(text), provider_error=error, provider_checked=True, provider_error_id=error_id
+        )
 
     def _get(self, target):
         try:
@@ -824,7 +886,7 @@ class HerdrRuntime:
 
     def name_pane(self, agent):
         """Name the agent's own pane: unnamed and holding its conversation, or carrying the 32 character cut of its name."""
-        found = self._get(agent.pane_id) if agent.pane_id else None
+        found = self._get(agent.pane_id) if agent.pane_id and agent.runtime_backend == "local" else None
         if found is None:
             return False
         name = found.get("name")
@@ -858,7 +920,9 @@ class HerdrRuntime:
     def nudge(self, agent, text):
         from scripts.swarm.delivery import marked
 
+        if agent.runtime_backend != "local":
+            return
         try:
             self.herdr(["agent", "prompt", pane_target(agent), marked(text)])
-        except Exception:
-            pass
+        except Exception as exc:
+            return str(exc) or type(exc).__name__

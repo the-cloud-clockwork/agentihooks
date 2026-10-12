@@ -1,0 +1,96 @@
+{
+  "schema_version": "1.0",
+  "package": "SV2-OBS-05",
+  "contract": "docs/swarm-v2/metrics-contract.md",
+  "limits": {
+    "archive_lag_ms": 300000,
+    "checkpoint_stale_ms": 1800000,
+    "knowledge_stale_ms": 3600000
+  },
+  "panels": [
+    {
+      "id": "attempts",
+      "title": "Execution attempts",
+      "series": {
+        "active": "active attempts (admitted and running)",
+        "pending": "pending attempts (admitted, waiting for a node)"
+      }
+    },
+    {
+      "id": "capacity",
+      "title": "Pool capacity",
+      "series": {
+        "configured_maximum": "configured maximum (declared ceiling, not live nodes)",
+        "observed_nodes": "observed nodes (joined and ready now)",
+        "active_tasks": "active tasks (attempts running in this pool)",
+        "pending_requests": "pending requests (attempts waiting for this pool)"
+      }
+    },
+    {
+      "id": "quota_wait",
+      "title": "Quota wait",
+      "series": {
+        "waiting_accounts": "accounts in quota wait",
+        "longest_wait_ms": "longest current wait"
+      }
+    },
+    {
+      "id": "archive_lag",
+      "title": "Archive lag",
+      "series": {
+        "lagging": "executions whose archive watermark has not advanced within the limit",
+        "worst_lag_ms": "worst archive lag"
+      }
+    },
+    {
+      "id": "checkpoint_age",
+      "title": "Checkpoint age",
+      "series": {
+        "stale": "executions whose newest checkpoint is older than the limit",
+        "oldest_age_ms": "oldest newest-checkpoint age"
+      }
+    },
+    {
+      "id": "connectivity",
+      "title": "Terminal connectivity and worker authority",
+      "series": {
+        "terminal": "operator terminal connection (transport only, not liveness)",
+        "authority": "worker execution authority (lease renewal)"
+      }
+    },
+    {
+      "id": "knowledge",
+      "title": "Knowledge freshness",
+      "series": {
+        "feed_age_ms": "age of the newest brain feed",
+        "cross_scope_denials": "cross scope brain queries denied"
+      }
+    }
+  ],
+  "alerts": [
+    {
+      "id": "protected_idle_pod",
+      "severity": "warning",
+      "for_ms": 600000,
+      "limit": 5,
+      "owner": "master",
+      "action": "drain the attempt and release its scale down protection; the alert never releases it"
+    },
+    {
+      "id": "impossible_pending",
+      "severity": "warning",
+      "for_ms": 120000,
+      "limit": 5,
+      "owner": "master",
+      "action": "find what keeps the request from a node: free room in its permitted pools, resize it, or ask the operator for capacity; the alert never cancels it"
+    },
+    {
+      "id": "cross_scope_denial",
+      "severity": "info",
+      "for_ms": 0,
+      "limit": 5,
+      "owner": "operator",
+      "action": "check the requester's brain binding; the denial already held and nothing was disclosed"
+    }
+  ]
+}

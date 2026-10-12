@@ -5,72 +5,6 @@ exec python3 "$0" "$@"
 exit
 """
 
-# NOTE: The triple-quoted polyglot string above becomes __doc__ in Python,
-# so the real usage text is stored in _USAGE_TEXT and used as the argparse epilog.
-_USAGE_TEXT = """
-Quick start:
-    agentihooks init --bundle /path/to/bundle --profile colt
-    agentihooks init --profile colt          # re-run (bundle already linked)
-
-Commands:
-    agentihooks init [--bundle PATH] [--profile NAME]
-        First-time setup or re-install. Links a bundle, selects a profile,
-        and installs everything into ~/.claude: hooks, settings, skills,
-        agents, commands, rules, CLAUDE.md, and MCP servers.
-
-    agentihooks uninstall [--yes]
-        Remove all agentihooks artifacts: symlinks, settings, CLAUDE.md,
-        MCP servers, and the CLI. Preserves ~/.agentihooks/state.json.
-
-    agentihooks prune [-v]
-        Remove stale MCP entries from disabledMcpServers and known-mcp-servers.json.
-
-    agentihooks ignore [path] [--force]
-        Create a .claudeignore in the current directory.
-
-    agentihooks claude [--route SLUG] [extra flags]
-        Route to the OAuth account with a free place under its five hour session band
-        and the fewest live sessions, and launch Claude.
-        --route SLUG selects AH_CC_TOKEN_<SLUG> directly, ignoring the band.
-        Alias: agenti (added to ~/.bashrc by init)
-
-    agentihooks init-agent [launcher options] [--handoff] -- [claude flags]
-        Open a routed Claude session in a new terminal on WSL, macOS, or Linux.
-        --handoff moves this session's work to another account (quota handoff).
-
-    agentihooks herdr [status|install|configure|enable|disable]
-        Install and configure herdr, the terminal host init-agent opens agents in.
-
-    agentihooks quota [--json] [--refresh]
-        Quota left for every agent harness: each Claude account and Codex.
-
-    agentihooks balance --dry-run [--fable] [--refresh]
-        Show ranked OAuth account capacity without launching Claude.
-
-    agentihooks conditions list [--step pre|post|stop] [--tool NAME] [--command CMD]
-        Show bundle and profile conditions, invalid files, and what fires for a call.
-
-    agentihooks --list-profiles     # show available profiles
-    agentihooks --query             # print active profile name
-
-Profile layout (mirrors Claude Code project structure):
-    profiles/<name>/
-    ├── CLAUDE.md                    # system prompt (→ ~/.claude/CLAUDE.md)
-    └── .claude/
-        ├── settings.overrides.json  # merged into ~/.claude/settings.json
-        ├── .mcp.json                # profile MCP servers
-        ├── skills/                  # → ~/.claude/skills/
-        ├── agents/                  # → ~/.claude/agents/
-        ├── commands/                # → ~/.claude/commands/
-        ├── rules/                   # → ~/.claude/rules/
-        └── conditions/              # run in place on matching tool calls
-
-3-layer merge: agentihooks built-in → bundle global → profile-specific.
-The built-in layer (skills/agents/commands/rules) lives under profiles/package/
-— the packaged emulation of a .claude/ tree, shipped in the wheel.
-All commands are idempotent. Data directory: ~/.agentihooks/
-"""
-
 import argparse
 import contextlib
 import fcntl
@@ -84,17 +18,18 @@ import textwrap
 from collections.abc import Callable, Sequence
 from copy import deepcopy
 from datetime import datetime, timezone
-from importlib import metadata
+from importlib import import_module, metadata
 from pathlib import Path
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
 import yaml
 
-from scripts import balance_cli
+from scripts import balance_cli, runtime_env
 from scripts.claude_config import claude_home
 from scripts.claude_config import claude_json as claude_json_path
 from scripts.cli_delegates import delegated_cli
+from scripts.cli_help import USAGE as _USAGE_TEXT
 from scripts.cli_parser import ArgumentParser
 from scripts.targets import DEFAULT_TARGET, SUPPORTED_TARGETS, get_adapter, resolve_target
 from scripts.targets._common import LEGACY_MCP_SERVER_NAMES, MCP_SERVER_NAME
@@ -2357,11 +2292,11 @@ def _update_bashrc_block() -> None:
         f"}}\n"
         f"agentienv\n"
         f'case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac\n'
+        f'command -v agentihooks >/dev/null && eval "$(agentihooks accounts env)"\n'
         f'alias agenti="agentihooks claude"\n'
         f"{_BLOCK_END}\n"
     )
 
-    # Always remove first, then append at the end
     _remove_bashrc_block()
     bashrc_text = _BASHRC.read_text(encoding="utf-8") if _BASHRC.exists() else ""
     sep = "\n" if bashrc_text and not bashrc_text.endswith("\n") else ""
@@ -3190,7 +3125,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
 
     # --- 11. Seed ~/.agentihooks/.env from .env.example (first run only) ---
     print()
-    _seed_user_env_file()
+    runtime_env.seed(_seed_user_env_file, _ENV_FILE_DST, rendered)
 
     # --- 12. Register install in state.json ---
     # Persist the OPERATOR-INTENT chain (profile_input), not the shrunk
@@ -5506,20 +5441,17 @@ def cmd_ignore(target_dir: Path, *, force: bool = False) -> None:
     print("       Edit it to add project-specific exclusions.")
 
 
-def _load_claude_runtime_env() -> None:
+def _load_claude_runtime_env(*, shell_wins: bool = False) -> None:
     env_file = _ENV_FILE_DST
     if env_file.is_file():
         from dotenv import dotenv_values
 
-        for k, v in dotenv_values(env_file).items():
-            if v is not None:
-                os.environ[k] = v
-        # Also load companion .env files
-        for f in sorted(env_file.parent.glob("*.env")):
-            if f != env_file:
-                for k, v in dotenv_values(f).items():
-                    if v is not None:
-                        os.environ[k] = v
+        shell = set(os.environ) if shell_wins else set()
+        companions = [f for f in sorted(env_file.parent.glob("*.env")) if f != env_file]
+        for f in [env_file, *companions]:
+            for k, v in dotenv_values(f).items():
+                if v is not None and k not in shell:
+                    os.environ[k] = v
 
 
 def _extract_claude_route(extra_args: list[str]) -> tuple[str, list[str]]:
@@ -5670,10 +5602,9 @@ def cmd_balance(
     current: bool = False,
 ) -> int:
     import time
-    from dataclasses import replace
 
     from hooks.context.account_sessions import sessions_by_account
-    from scripts.agents_quota import codex_table, tokenless_table
+    from scripts.agents_quota import balance_table, current_table, tokenless_table
     from scripts.claude_quota_balancer import (
         RoutingError,
         ancestor_oauth_token,
@@ -5684,10 +5615,8 @@ def cmd_balance(
         discover_credentials,
         identify_session_account,
         is_routable,
-        render_table,
     )
-    from scripts.routing import master_account, place
-    from scripts.routing.claude_api import ClaudeApiSource
+    from scripts.routing import master_account
 
     session_env = dict(os.environ)
     _load_claude_runtime_env()
@@ -5706,21 +5635,11 @@ def cmd_balance(
                 timeout=timeout,
                 claude_bin=shutil.which("claude") or "claude",
             )
-        observations = cached_observations(include_fable=include_fable)
-        rows = {result.account: result for _, result in observations}
-        observed = {result.account: seen for seen, result in observations}
-        rows.update({result.account: result for result in probed})
+        cached = cached_observations(include_fable=include_fable)
         print(f"current={session.account or 'none'} method={session.method}")
-        if rows:
-            print(
-                render_table(
-                    list(rows.values()),
-                    include_fable=include_fable,
-                    observed=observed,
-                    sessions=live,
-                    marks=master_account.row_marks(session.account),
-                )
-            )
+        table = current_table(cached, probed, {c.account for c in known}, live, include_fable, session.account)
+        if table:
+            print(table)
         return 0 if session.account else 1
     if not credentials:
         print(tokenless_table(master_account.row_marks().master, live))
@@ -5740,18 +5659,14 @@ def cmd_balance(
         )
         print(json.dumps(metadata, indent=2, sort_keys=True))
         return 0 if all(account["return_code"] == 0 for account in metadata["accounts"]) else 1
-    results, source = collect_results(
+    results, _ = collect_results(
         credentials,
         include_fable=include_fable,
         refresh=refresh,
         timeout=timeout,
         claude_bin=shutil.which("claude") or "claude",
     )
-    api, weight = place.api_side(ClaudeApiSource(live), "claude", os.environ, time.time())
-    api = [replace(slot, weight=weight) for slot in api]
-    print(render_table(results, include_fable=include_fable, sessions=live, api=api, marks=master_account.row_marks()))
-    print(f"\nsource={source}")
-    print(f"\n{codex_table()}")
+    print(balance_table(results, live, time.time(), include_fable))
     return 0 if any(is_routable(result) for result in results) else 1
 
 
@@ -6407,12 +6322,11 @@ def main() -> None:
     # Fast path: "agentihooks claude ..." bypasses argparse entirely
     # so that any claude flags (-r, --resume, -p, etc.) pass through untouched
     if _argv and _argv[0] == "claude":
-        cmd_claude(_argv[1:])
-        return
+        return import_module("scripts.claude_login").dispatch(_argv[1:], cmd_claude)
     if _argv and _argv[0] == "codex":
         from scripts.codex_router import main as codex_main
 
-        _load_claude_runtime_env()
+        _load_claude_runtime_env(shell_wins=True)
         raise SystemExit(codex_main(_argv[1:]))
     if _argv and _argv[0] == "init-agent":
         from scripts.init_agent import main as terminal_main
@@ -6600,7 +6514,7 @@ def main() -> None:
         help="Edit only this target's chain (default: every installed target). Ignored by unlink.",
     )
     sub.add_parser("claude", help="Route to the healthiest OAuth account and launch Claude")
-    sub.add_parser("codex", help="Route to the default login or an AH_CX_TOKEN account and launch Codex")
+    sub.add_parser("codex", help="Route to an AH_CX_TOKEN account (default login if none is set) and launch Codex")
     sub.add_parser("select-profile", help="Select a profile, model and effort for one routed run")
     sub.add_parser("init-agent", help="Open a routed Claude session in a new terminal")
     sub.add_parser("terminate-agent", help="List or terminate a Claude Code or Codex session")
@@ -6609,7 +6523,7 @@ def main() -> None:
         "herdr",
         help="Install and configure herdr, the terminal host for agents: status|install|configure|enable|disable",
     )
-    sub.add_parser("quota", help="Quota left for every agent harness (Claude accounts and Codex)")
+    sub.add_parser("quota", help="One table for every Claude and Codex account")
     sub.add_parser("skill", help="Run skill evaluations with quota routed Claude authentication: eval -- <command>")
     sub.add_parser("serena", help="Run the Serena router: start|stop|restart|status|release <path>")
     sub.add_parser("ledger", help="Swarm ledger: agent CLI, or new|serve|watch|chat|decline <args>")

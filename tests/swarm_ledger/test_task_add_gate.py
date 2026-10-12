@@ -59,6 +59,27 @@ def assert_added(by, phase="p1"):
     assert "t9" in [t["id"] for t in state["tasks"]]
 
 
+def add_ranked(by):
+    op = {"op": "task_add", "id": "add-t9", "by": by, "task": "t9", "title": "x", "lane": "eng", "phase": "p1"}
+    return core.sync(SLUG, ops=[{**op, "rank": "high"}])
+
+
+def test_a_planner_holding_its_plan_task_cannot_add_a_ranked_task():
+    make_ledger([plan_task()])
+    state, rejected = add_ranked(PLANNER)
+    assert rejected == ["add-t9"]
+    assert state["_meta"]["warnings"] == [f"{PLANNER} cannot set a task rank: {FOLLOWUP}"]
+    assert "t9" not in [t["id"] for t in state["tasks"]]
+
+
+@pytest.mark.parametrize("by", ["master@abcdef-0001", "dispatcher@abcdef-0005"])
+def test_the_master_and_the_dispatcher_add_a_ranked_task(by):
+    make_ledger()
+    state, rejected = add_ranked(by)
+    assert rejected == []
+    assert next(t for t in state["tasks"] if t["id"] == "t9")["rank"] == "high"
+
+
 def test_an_engineer_cannot_add_a_task():
     make_ledger()
     assert_refused(

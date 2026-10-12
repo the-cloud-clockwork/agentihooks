@@ -1,0 +1,20 @@
+{
+  "package": "SV2-LDG-02",
+  "tested_commit": "6850d5aacc0225b255b6e24d3e33b994675991c2",
+  "fixture": "tests/fixtures/swarm_v2/worker-heartbeat.json",
+  "evidence_class": "mocked Redis with actual Lua interpreter and server clock; signed fixture grants",
+  "runs": {
+    "a": {
+      "input_sha256": "23a672c8a2243a860add3a69d90458928c2a0c9e6e776874a210994a8f2bd048",
+      "independent_runs": 2
+    },
+    "b": {
+      "input_sha256": "23a672c8a2243a860add3a69d90458928c2a0c9e6e776874a210994a8f2bd048",
+      "independent_runs": 2
+    },
+    "c": {
+      "input_sha256": "23a672c8a2243a860add3a69d90458928c2a0c9e6e776874a210994a8f2bd048",
+      "independent_runs": 2
+    }
+  }
+}

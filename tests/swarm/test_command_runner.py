@@ -200,7 +200,7 @@ def test_controller_fences_ledger_and_spawn_writes(store):
     ledger = FakeLedger([])
     held = lease.acquire(store, "sw", "home")
     guarded_ledger = controller.FencedLedger(store, "sw", held, ledger)
-    guarded_runtime = controller.FencedRuntime(store, "sw", held, runtime, True)
+    guarded_runtime = controller.FencedRuntime(store, "sw", held, runtime, "local")
     assert guarded_ledger.state("sw") == ledger.state("sw")
     guarded_runtime.spawn(store.config("sw"), "eng", "one", {"id": "t"})
     assert runtime.tasks[0]["controller_epoch"] == 1
@@ -342,11 +342,11 @@ def test_fenced_adapters_preserve_arguments_and_refuse_disabled_spawn(store):
         has_capacity=lambda saved: False,
         spawn=lambda *args: calls.append(args) or "placed",
     )
-    enabled = controller.FencedRuntime(store, "sw", held, receiver, True)
+    enabled = controller.FencedRuntime(store, "sw", held, receiver, "local")
     assert enabled.has_capacity(config) is False
     assert enabled.spawn(config, "eng", "one", {"id": "t"}) == "placed"
     assert calls[-1] == (config, "eng", "one", {"id": "t", "controller_epoch": 1})
-    disabled = controller.FencedRuntime(store, "sw", held, receiver, False)
+    disabled = controller.FencedRuntime(store, "sw", held, receiver, "compose")
     with pytest.raises(SwarmError) as error:
         disabled.spawn(config, "eng", "one", {"id": "t"})
     assert str(error.value) == "controller spawning is disabled in this deployment mode"

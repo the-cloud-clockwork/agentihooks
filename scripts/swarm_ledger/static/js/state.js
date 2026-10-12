@@ -1,5 +1,6 @@
 import { LS_KEY } from "./config.js";
 import { checks, doc, ops } from "./sync.js";
+import { clearFreeze, setFreeze } from "./freezes.js";
 
 export const app = {
 
@@ -28,6 +29,7 @@ export function withDefaults(d) {
     artifacts: (Array.isArray(d.artifacts) ? d.artifacts : []).filter((a) => a && typeof a.id === "string" && a.file && typeof a.file.id === "string"),
     artifact_trash: (Array.isArray(d.artifact_trash) ? d.artifact_trash : []).filter((a) => a && typeof a.id === "string" && a.file && typeof a.file.id === "string"),
     plans: entries(d.plans), slices: entries(d.slices),
+    freezes: entries(d.freezes).filter((r) => ["freeze", "focus"].includes(r.verb) && typeof r.target === "string"),
     phases: list("phases", ["title", "description", "done", "out_of_scope", "depends_on", "planning", "release"], ["comments"]),
     questions: list("questions", ["text", "out_of_scope"], ["answers", "comments"]),
     followups: list("followups", ["text", "done", "out_of_scope"], ["comments"]),
@@ -67,6 +69,8 @@ export function applyOp(d, op) {
     if (task) task.rank = op.rank === "next" ? "urgent" : op.rank;
     return;
   }
+  if (op.op === "freeze_set") return setFreeze(d, op, Date.now());
+  if (op.op === "freeze_clear") return clearFreeze(d, op);
   if (op.op === "title_set") {
     d.title = op.text.trim();
     return;

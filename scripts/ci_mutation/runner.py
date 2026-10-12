@@ -46,6 +46,7 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
         "docs",
         ".github",
         "evidence",
+        "observability",
         "docker/swarm-node",
         ".agentihooks/conditions",
     ):
@@ -75,6 +76,7 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
             "docs/",
             ".github/",
             "evidence/",
+            "observability/",
             "docker/swarm-node/",
             ".agentihooks/conditions/",
             *root_files,

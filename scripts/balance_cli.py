@@ -125,7 +125,9 @@ def cmd_balance_master_account(tokens: list[str], clear: bool = False, now: floa
 
 
 def add_parser(sub: argparse._SubParsersAction) -> None:
-    balance_p = sub.add_parser("balance", help="Probe and rank Claude OAuth accounts without launching workload")
+    balance_p = sub.add_parser(
+        "balance", help="One table for every Claude and Codex account, without launching anything"
+    )
     balance_p.add_argument("--dry-run", action="store_true", help="Report routing state without launching Claude")
     balance_p.add_argument("--fable", action="store_true", help="Include the separate Fable weekly quota")
     balance_p.add_argument(

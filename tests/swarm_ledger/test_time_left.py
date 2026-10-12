@@ -173,6 +173,8 @@ class TestCalculate:
             "tiers": TIERS,
             "stale": True,
             "gap": "",
+            "frozen": 0,
+            "frozen_work": 0,
         }
 
     def test_the_chain_bound_wins_when_slots_are_many_and_rounds_up(self):
@@ -199,6 +201,86 @@ class TestCalculate:
         d = self.ledger()
         d["time_left_minutes"] = 60
         assert ledger_stats.calculate(d, self.events(), NOW, {"slots": 1, "ci_minutes": 5})["stale"] is False
+
+
+class TestFrozenSplit:
+    def ledger(self, *freezes):
+        d = doc(
+            task("a", "open", "S"),
+            task("b", "open", "M", depends_on=["a"]),
+            task("c", "open", "L", depends_on=["b"]),
+            task("d", "claimed", "S"),
+            task("e", "open", "S"),
+        )
+        d["freezes"] = [{"verb": verb, "target": target} for verb, target in freezes]
+        return d
+
+    def test_a_frozen_task_and_its_dependents_leave_time_left_and_are_counted_apart(self):
+        result = ledger_stats.calculate(self.ledger(("freeze", "tasks/a")), [], NOW, {"slots": 1, "ci_minutes": 5})
+        assert (result["minutes"], result["remaining"], result["work"], result["chain"]) == (30, 2, 30, 15)
+        assert (result["frozen"], result["frozen_work"]) == (3, 90)
+
+    def test_a_held_chain_no_longer_sets_time_left(self):
+        inputs = {"slots": 10, "ci_minutes": 5}
+        free = ledger_stats.calculate(self.ledger(), [], NOW, inputs)
+        assert (free["minutes"], free["frozen"], free["frozen_work"]) == (90, 0, 0)
+        held = ledger_stats.calculate(self.ledger(("freeze", "tasks/b")), [], NOW, inputs)
+        assert (held["minutes"], held["chain"], held["remaining"]) == (15, 15, 3)
+        assert (held["frozen"], held["frozen_work"]) == (2, 75)
+
+    def test_a_focus_holds_open_work_outside_it_but_not_urgent_or_in_flight_tasks(self):
+        d = self.ledger(("focus", "tasks/e"))
+        d["tasks"][0]["rank"] = "urgent"
+        result = ledger_stats.calculate(d, [], NOW, {"slots": 1, "ci_minutes": 5})
+        assert (result["remaining"], result["work"], result["frozen"], result["frozen_work"]) == (3, 45, 2, 75)
+
+    def test_a_phase_freeze_holds_every_open_task_under_it(self):
+        result = ledger_stats.calculate(self.ledger(("freeze", "phases/p1")), [], NOW, {"slots": 1, "ci_minutes": 5})
+        assert (result["minutes"], result["remaining"], result["frozen"], result["frozen_work"]) == (15, 1, 4, 105)
+
+    def test_the_tick_fix_phase_stays_claimable_under_a_focus(self):
+        inputs = {"slots": 1, "ci_minutes": 5, "fix_phase": "p1"}
+        result = ledger_stats.calculate(self.ledger(("focus", "tasks/e")), [], NOW, inputs)
+        assert (result["remaining"], result["frozen"]) == (5, 0)
+
+    def test_a_watched_swarm_focus_holds_open_work_outside_the_fix_phase(self):
+        inputs = {
+            "slots": 1,
+            "ci_minutes": 5,
+            "fix_phase": "p9",
+            "watched": ["the focus on task x in the watched swarm"],
+        }
+        result = ledger_stats.calculate(self.ledger(), [], NOW, inputs)
+        assert (result["remaining"], result["frozen"], result["frozen_work"]) == (1, 4, 105)
+
+    def test_a_member_merged_into_a_group_is_not_counted_twice(self):
+        d = doc(task("g", "open", "S", group_members=["m"]), task("m", "open", "S", merged_into="g"))
+        result = ledger_stats.calculate(d, [], NOW, {"slots": 1, "ci_minutes": 5})
+        assert (result["remaining"], result["work"], result["frozen"]) == (1, 15, 0)
+
+    def test_frozen_work_rounds_to_one_decimal(self):
+        result = ledger_stats.calculate(self.ledger(("freeze", "tasks/e")), [], NOW, {"slots": 1, "ci_minutes": 5.37})
+        assert result["frozen_work"] == 15.4
+
+    def test_only_frozen_work_left_reads_zero_with_the_frozen_remainder_named(self):
+        d = doc(task("a", "open", "S"), time_left=30)
+        d["freezes"] = [{"verb": "freeze", "target": "tasks/a"}]
+        result = ledger_stats.calculate(d, [], NOW)
+        assert (result["minutes"], result["remaining"], result["gap"]) == (0, 0, "")
+        assert (result["frozen"], result["frozen_work"]) == (1, 10)
+        assert ledger_stats.time_left_line(d, [], NOW, result) == (
+            "the page shows 0h 30m, computed 0h 0m with no task remaining, "
+            "with 1 frozen task holding 10m of work left out, stale"
+        )
+
+    def test_the_line_names_the_frozen_remainder_beside_the_live_estimate(self):
+        d = self.ledger(("freeze", "tasks/a"))
+        result = ledger_stats.calculate(d, [], NOW, {"slots": 1, "ci_minutes": 5})
+        assert ledger_stats.time_left_line(d, [], NOW, result) == (
+            "the page shows not set, computed 0h 30m as the larger of a 15m chain and 30m of work over 1 slots, "
+            "for 2 remaining tasks at S 10m, M 25m, L 40m and 5m of CI, "
+            "with 3 frozen tasks holding 90m of work left out, stale"
+        )
 
 
 class TestOutageHour:
@@ -278,7 +360,12 @@ class TestTimeLeftOp:
         from scripts.swarm_ledger.api import schemas
 
         assert ledger_core.EXTENSION_OPS["time_left"].OPS == ("time_left",)
-        assert schemas.FIELDS["time_left"] == "by slots ci_minutes"
+        assert schemas.FIELDS["time_left"] == "by slots ci_minutes fix_phase watched"
+        assert schemas.TYPES["watched"] == {
+            "type": "array",
+            "maxItems": 100,
+            "items": {"type": "string", "maxLength": 2000},
+        }
         assert schemas.TYPES["slots"] == {"type": ["integer", "null"], "minimum": 0}
         assert schemas.TYPES["ci_minutes"] == {"type": ["number", "null"], "minimum": 0}
 
@@ -291,8 +378,8 @@ class TestTimeLeftOp:
     @pytest.mark.parametrize(
         ("change", "message"),
         [
-            ({"by": "eng"}, "time_left takes id, by swarm, slots and ci_minutes"),
-            ({"extra": 1}, "time_left takes id, by swarm, slots and ci_minutes"),
+            ({"by": "eng"}, "time_left takes id, by swarm, slots and ci_minutes, and optionally fix_phase and watched"),
+            ({"extra": 1}, "time_left takes id, by swarm, slots and ci_minutes, and optionally fix_phase and watched"),
             ({"slots": -1}, "slots must be a nonnegative integer or null"),
             ({"slots": True}, "slots must be a nonnegative integer or null"),
             ({"slots": 1.0}, "slots must be a nonnegative integer or null"),
@@ -311,7 +398,36 @@ class TestTimeLeftOp:
         del op["ci_minutes"]
         with pytest.raises(ValueError) as refused:
             ledger_time_left.check(op)
-        assert str(refused.value) == "time_left takes id, by swarm, slots and ci_minutes"
+        assert (
+            str(refused.value)
+            == "time_left takes id, by swarm, slots and ci_minutes, and optionally fix_phase and watched"
+        )
+
+    def test_check_takes_the_tick_focus_and_refuses_a_malformed_one(self):
+        assert ledger_time_left.check({**self.op(), "fix_phase": "p1", "watched": ["the focus on x"]}) is None
+        for change, message in (
+            ({"fix_phase": 3}, "fix_phase must be text"),
+            ({"watched": "x"}, "watched must be a list of text"),
+            ({"watched": [1]}, "watched must be a list of text"),
+        ):
+            with pytest.raises(ValueError) as refused:
+                ledger_time_left.check({**self.op(), **change})
+            assert str(refused.value) == message
+
+    def test_apply_keeps_the_tick_focus_in_the_inputs(self):
+        d = doc(task("a", "open", "S"), task("b", "open", "S", phase="p2"))
+        ctx = self.ctx()
+        ledger_time_left.apply(d, {**self.op(), "fix_phase": "p2", "watched": ["the focus on x"]}, ctx)
+        assert ctx.meta["time_left"]["inputs"] == {
+            "slots": 1,
+            "ci_minutes": 5,
+            "fix_phase": "p2",
+            "watched": ["the focus on x"],
+        }
+        assert (ctx.meta["time_left"]["calculation"]["remaining"], ctx.meta["time_left"]["calculation"]["frozen"]) == (
+            1,
+            1,
+        )
 
     def test_apply_writes_the_minutes_and_keeps_every_input_beside_them(self):
         d = doc(task("a", "open", "S"), time_left=400)
@@ -329,14 +445,22 @@ class TestTimeLeftOp:
             ),
         }
 
-    def test_an_unchanged_calculation_is_not_a_write(self):
+    def test_an_unchanged_calculation_still_stamps_its_refresh_time(self):
         d = doc(task("a", "open", "S"), time_left=15)
         result = ledger_stats.calculate(d, [], NOW, {"slots": 1, "ci_minutes": 5})
         ctx = self.ctx(meta={"time_left": {"at": 1, "inputs": {"slots": 1, "ci_minutes": 5}, "calculation": result}})
         assert ledger_time_left.apply(d, self.op(), ctx) is True
-        assert ctx.dirty is False
+        assert ctx.dirty is True
         assert ctx.stamps == {}
-        assert ctx.meta["time_left"]["at"] == 1
+        assert ctx.meta["time_left"]["at"] == NOW
+
+    def test_every_tick_write_stamps_its_own_refresh_time(self):
+        d = doc(task("a", "open", "S"), time_left=15)
+        meta = {"rev": 0, "stamps": {}, "events": [], "members": {}}
+        for tick in range(3):
+            at = NOW + tick * MINUTE
+            ledger_time_left.apply(d, self.op(), ledger_core.Context(meta, at))
+            assert meta["time_left"]["at"] == at
 
     def test_an_unknown_estimate_keeps_the_prior_value(self):
         d = doc(task("a", "open", "S"), time_left=400)
@@ -388,6 +512,14 @@ class TestPageInputs:
             " · S 10m from 0 samples · no CI median yet');\n"
             "assert.equal(timeLeftInputs(undefined), undefined);\n"
             "assert.equal(timeLeftInputs({gap: 'x'}), undefined);\n"
+        )
+
+    def test_the_hover_names_the_frozen_remainder_left_out(self):
+        self.run(
+            "const calc = {chain: 15, work: 30, slots: 1, remaining: 2, ci_minutes: 5, frozen: 3, frozen_work: 90,"
+            " tiers: {S: {minutes: 10, samples: 0}}};\n"
+            "assert.equal(timeLeftInputs(calc), 'Larger of a 15m chain and 30m of work over 1 slots · 2 tasks left"
+            " · S 10m from 0 samples · CI 5m a task · 3 frozen tasks with 90m of work left out');\n"
         )
 
 

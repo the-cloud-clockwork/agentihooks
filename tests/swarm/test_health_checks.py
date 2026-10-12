@@ -132,3 +132,27 @@ def test_status_raises_worker_ceremony_only_past_the_talk_budget(monkeypatch):
     assert [(f["kind"], f["subject"], f["evidence"]) for f in found] == [
         ("ceremony", "sw-eng-1", ["11 talk writes since its last outcome"])
     ]
+
+
+@pytest.mark.parametrize(("decided", "expected"), [(True, []), (False, [["53 ledger transitions", "0 outcomes"]])])
+def test_status_credits_the_dispatcher_seat_with_the_priorities_it_settled(monkeypatch, decided, expected):
+    import fakeredis
+
+    from scripts.swarm import status
+    from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+
+    seat = "dispatcher@323133-0001"
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    config = SwarmConfig("triage-proof", "/repo", max_eng=1, max_ci=0)
+    store.create(config)
+    store.put_agent("triage-proof", AgentRecord(seat, "dispatch", "dispatcher"))
+    monkeypatch.setattr(status.activity, "counts", lambda slug: {})
+    at = status.now_ms()
+    events = []
+    for n in range(24):
+        kind, target = ("comment added", f"followups/f{n}") if decided else ("comment edited", "phases/p1")
+        events.append({"kind": kind, "target": target, "by": seat, "at": at})
+        events.append({"kind": "checked", "target": f"followups/f{n}", "by": seat, "at": at})
+    events += [{"kind": "priority cleared", "target": f"followups/c{n}", "by": seat, "at": at} for n in range(5)]
+    found = status.findings(store, "triage-proof", config, [], events)
+    assert [f["evidence"] for f in found if f["kind"] == "ceremony"] == expected

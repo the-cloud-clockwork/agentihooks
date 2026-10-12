@@ -13,6 +13,10 @@ import pytest
 from scripts.ci_mutation.runner import run_gate
 
 
+def _no_pytest(self, params, **kwargs):
+    return 0
+
+
 @pytest.mark.parametrize("lines", [{1}, {2}, {2, 5}])
 def test_gate_runs_only_changed_line_mutants_including_untested_code(tmp_path, monkeypatch, lines):
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
@@ -197,6 +201,8 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
     test_calls = []
 
     class PytestRunner:
+        execute_pytest = _no_pytest
+
         def run_tests(self, *, mutant_name, tests):
             assert isinstance(self, PytestRunner)
             test_calls.append((mutant_name, tests))
@@ -358,6 +364,8 @@ def test_selection_collects_one_stats_part_or_reuses_the_shared_stats(tmp_path, 
         return [files]
 
     class PytestRunner:
+        execute_pytest = _no_pytest
+
         def run_tests(self, *, mutant_name, tests):
             return 0
 
@@ -473,7 +481,7 @@ def test_selection_never_imports_the_mutants_tree_another_worker_is_writing(tmp_
 
 
 def test_stats_shards_balance_by_duration_and_keep_xdist_groups_together(tmp_path):
-    from scripts.ci_mutation.selection import stats_shards
+    from scripts.ci_mutation.selection import IMPORT_GROUPS, stats_shards
 
     (tmp_path / "tests").mkdir()
     files = [f"tests/test_{name}.py" for name in "abcdef"]
@@ -502,6 +510,15 @@ def test_stats_shards_balance_by_duration_and_keep_xdist_groups_together(tmp_pat
         (bridge / f"tests/test_{name}.py").write_text(text)
     bridged = [f"tests/test_{name}.py" for name in marks]
     assert stats_shards(bridge, bridged, 4) == [bridged[1:], bridged[:1]]
+    (group,) = IMPORT_GROUPS
+    imports = tmp_path / "imports"
+    (imports / "tests").mkdir(parents=True)
+    for name in "pqr":
+        (imports / f"tests/test_{name}.py").write_text(
+            f'import pytest\n\npytestmark = pytest.mark.xdist_group("{group}")\n'
+        )
+    imported = [f"tests/test_{name}.py" for name in "pqr"]
+    assert stats_shards(imports, imported, 3) == [[path] for path in imported]
     (tmp_path / ".test_durations").unlink()
     assert stats_shards(tmp_path, files, 3) == [
         ["tests/test_b.py", "tests/test_d.py"],
@@ -603,6 +620,12 @@ WALL_CLOCK_SPLITS = {
         (
             "test_a_quick_swarm_keeps_its_minute_while_a_slow_one_runs",
             "test_a_quick_swarm_keeps_ticking_while_a_slow_one_runs",
+        )
+    ],
+    "tests/gates/test_push_stop_executor.py": [
+        (
+            "test_a_pre_push_gate_that_overruns_is_stopped_by_the_gate_inside_the_stop_condition",
+            "test_a_pre_push_gate_that_overruns_is_stopped_inside_the_stop_condition",
         )
     ],
 }
@@ -791,7 +814,7 @@ def test_local_selection_caps_mutation_and_stats_workers(tmp_path, monkeypatch, 
         collect_source_file_mutation_data=None,
         SourceFileMutationData=lambda **kwargs: data,
         Config=SimpleNamespace(get=lambda: config),
-        PytestRunner=type("PytestRunner", (), {"run_tests": lambda *args, **kwargs: 0}),
+        PytestRunner=type("PytestRunner", (), {"run_tests": lambda *args, **kwargs: 0, "execute_pytest": _no_pytest}),
         mutmut=engine,
     )
 

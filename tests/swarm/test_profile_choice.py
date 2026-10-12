@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from hooks.classifier import Answer, ClassifierUnavailable, DecisionResult
-from scripts.swarm import profile_choice, runtime, store, tick
+from scripts.swarm import dispatcher, profile_choice, runtime, store, tick
 from tests.swarm.test_tick import FakeRuntime, tasks
 from tests.swarm_ledger import legacy_page
 
@@ -75,6 +75,18 @@ def test_explicit_task_profile_wins_without_classifier(monkeypatch):
     monkeypatch.setattr(profile_choice, "decide", lambda *a, **k: pytest.fail("explicit profile asked classifier"))
     decision = profile_choice.choose("sw", "eng", {"profile": "engineer"}, {**TASK, "profile": "qa"}, {})
     assert decision == profile_choice.ProfileDecision("qa", "task", "explicit task profile")
+
+
+def test_the_decision_the_tick_recorded_is_reused_without_the_classifier(monkeypatch):
+    monkeypatch.setattr(profile_choice, "decide", lambda *a, **k: pytest.fail("recorded decision asked classifier"))
+    saved = profile_choice.ProfileDecision(
+        "frontend", "classifier", "frontend", "m1", 0.8, True, ("task:t9", "phase:p1"), ("o1",), "rev1"
+    )
+    task = {**TASK, "profile_decision": saved.record()}
+    assert profile_choice.pick("sw", "eng", {}, task) == saved
+    assert profile_choice.pick("sw", "eng", {}, {**task, "profile": "qa"}) == profile_choice.ProfileDecision(
+        "qa", "task", "explicit task profile"
+    )
 
 
 @pytest.mark.parametrize(
@@ -387,7 +399,8 @@ def test_tick_blocks_task_with_the_unresolved_reason(swarm):
     rt = FakeRuntime(crash=profile_choice.ProfileUnresolved("profile unresolved: set it"))
     actions = tick.tick("sw", swarm, ledger, rt, now_ms=1_000)
     assert ledger.rows["t1"]["state"] == "blocked" and swarm.claimant("sw", "t1") is None
-    assert ledger.comments == [("sw", "t1", "profile unresolved: set it", "swarm")]
+    comments = [row for row in ledger.comments if row[-1] != dispatcher.AUTHOR]
+    assert comments == [("sw", "t1", "profile unresolved: set it", "swarm")]
     assert "blocked t1: profile unresolved: set it" in actions
 
 

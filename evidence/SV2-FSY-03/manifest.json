@@ -1,0 +1,18 @@
+{
+  "package": "SV2-FSY-03",
+  "tested_commit": "9a54962a47352faac17050996763fefa5a46267f",
+  "evidence_class": "local isolated fixture in CI; not live rollout proof",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38068548038",
+  "fixture": "tests/test_swarm_v2_cache.py build(): two attempts allocated from the SV2-FSY-01 layout, a temporary cache store with the shipped policy, a fake clock and fake disk usage; trusted toolchain entry, poisoned executable entry, full disk and mismatched dependency lock",
+  "cleanup": "pytest tmp_path and tempfile folders per test; no live resource mutations",
+  "inputs": {
+    "scripts/swarm_v2/cache.py": "2e1f3a625a81eeaac0e9df1023b31ca719fd360af7d3a355a19f2836c5ab04f9",
+    "scripts/swarm_v2/filesystem.py": "dd63ab06531f9cfd929fcd048dd1fce03cdea25db515141b082e79694d6fdcfa",
+    "docker/swarm-node/cache-policy.json": "f0a156ea7a2d85cc9df347ab50341a665a9a3ff87e14082e7c2c43cacfc68903",
+    "docker/swarm-node/layout.json": "41fc01753018c5b59967476af90ba7ece797cac9d39a734635759aae2aeaf379",
+    "docker/swarm-node/Dockerfile": "e0f540c1be5808cf931191da97ebf67ba2c59ac24e0d83cfb728d2c383256891",
+    "tests/test_swarm_v2_cache.py": "96f51499bba5f51ae49618f1c001315768069b4909ff4ee415342addb2cc2cc4",
+    "tests/sv2_fsy03_cases.py": "c7d121237da9df2221c32951157c248a9818f38e23b94a15ec63b1e081deaa6b",
+    "evidence/SV2-FSY-03/generate_case_results.py": "25cec877377c1468dc2d2e522b2ca1607d70300c1f25933ad4938c98d219ca0b"
+  }
+}

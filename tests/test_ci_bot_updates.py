@@ -42,13 +42,10 @@ def test_dev_push_publishes_merged_durations_with_read_permissions():
 
 def test_a_newer_dev_push_never_cancels_a_running_dev_push_run():
     concurrency = _workflow("test.yml")["concurrency"]
-    assert (concurrency["group"], concurrency["cancel-in-progress"]) in {
-        ("tests-${{ github.ref }}", "${{ github.event_name != 'push' }}"),
-        (
-            "tests-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}",
-            "${{ github.event_name == 'pull_request' }}",
-        ),
-    }
+    assert concurrency["cancel-in-progress"] == "${{ github.event_name == 'pull_request' }}"
+    assert concurrency["group"].endswith(
+        "|| format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}"
+    )
 
 
 ADOPT = (
@@ -66,7 +63,7 @@ def test_unit_shards_adopt_dev_durations_through_the_script_before_the_tests_run
     download = next(s for s in steps if s.get("name") == "Download the durations this run splits on")
     assert download["with"] == {"name": "split-${{ matrix.python-version }}"}
     assert steps.index(download) < next(i for i, s in enumerate(steps) if s.get("name") == "Run tests")
-    assert jobs["unit"]["needs"] == ["split"]
+    assert jobs["unit"]["needs"] in (["split", "reuse"], ["split", "reuse", "admission"])
 
 
 def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
@@ -87,7 +84,7 @@ def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
     assert restore["with"]["key"] == "${{ needs.durations.outputs.key }}"
     assert restore["if"] == "needs.durations.outputs.key != ''"
     assert restore["with"]["fail-on-cache-miss"] is True
-    assert jobs["split"]["needs"] == ["durations"]
+    assert jobs["split"]["needs"] in (["durations", "reuse"], ["durations", "reuse", "admission"])
     lookup = jobs["durations"]["steps"][0]
     assert jobs["durations"]["outputs"] == {
         "key": "${{ steps.stored.outputs.cache-matched-key }}",
@@ -103,6 +100,7 @@ def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
         "path": "~/dev-durations",
         "key": "durations-merged-${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha"
         " || github.event.before || github.sha }}",
+        "restore-keys": "durations-merged-",
         "lookup-only": True,
     }
     assert {"durations", "split"} <= set(jobs["gate-required"]["needs"])

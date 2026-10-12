@@ -27,6 +27,7 @@ def test_the_server_and_the_swarm_share_one_list_of_code_folders():
     assert [d.name for d in server_code.CODE_DIRS[1:]] == [
         "inbox",
         "swarm",
+        "swarm_v2",
         "handoff",
         "doctor",
         "gates",

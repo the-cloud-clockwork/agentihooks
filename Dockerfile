@@ -1,16 +1,21 @@
 # syntax=mirror.gcr.io/docker/dockerfile:1
-FROM mirror.gcr.io/library/python:3.12-slim AS build
+FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS build
 WORKDIR /build
-COPY pyproject.toml README.md ./
-RUN python -c 'import tomllib; print("\n".join(tomllib.load(open("pyproject.toml", "rb"))["project"]["optional-dependencies"]["ledger"]))' > ledger-requirements.txt
-RUN python -m venv /opt/venv && /opt/venv/bin/pip install --no-cache-dir -r ledger-requirements.txt
+COPY pyproject.toml README.md docker/swarm/requirements.lock ./
+RUN python -m venv /opt/venv && /opt/venv/bin/pip install --no-cache-dir --require-hashes -r requirements.lock
 COPY hooks/ hooks/
 COPY scripts/ scripts/
 COPY profiles/ profiles/
 ARG VERSION=0.0.0
 RUN SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS="$VERSION" /opt/venv/bin/pip install --no-cache-dir --no-deps .
 
-FROM mirror.gcr.io/library/python:3.12-slim
+FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS herdr
+ARG TARGETARCH=amd64
+COPY docker/swarm-node/versions.lock docker/swarm-node/requirements.lock /opt/swarm-node/
+COPY scripts/swarm_v2/worker_image.py /opt/swarm-node/worker_image.py
+RUN python /opt/swarm-node/worker_image.py install --tool herdr --architecture "$TARGETARCH"
+
+FROM mirror.gcr.io/library/python:3.12-slim-bookworm
 ENV PATH=/opt/venv/bin:$PATH \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -18,9 +23,17 @@ ENV PATH=/opt/venv/bin:$PATH \
     LEDGER_PORT=8765 \
     LEDGER_DIR=/data \
     SWARM_RELOAD=0
+RUN --mount=type=bind,from=herdr,source=/opt/swarm-node,target=/opt/swarm-node \
+    python -c 'import json; from pathlib import Path; s=json.loads(Path("/opt/swarm-node/versions.lock").read_text())["debian_snapshot"]; Path("/etc/apt/sources.list").write_text(f"deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/{s} bookworm main\ndeb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/{s} bookworm-security main\n")' \
+    && rm /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends $(python /opt/swarm-node/worker_image.py shell-packages --package openssh-client) \
+    && rm -r /var/lib/apt/lists/*
 RUN groupadd --gid 10001 swarm && useradd --uid 10001 --gid swarm --create-home swarm && mkdir /data && chown swarm:swarm /data
 COPY --from=build /opt/venv /opt/venv
+COPY --from=herdr /usr/local/bin/herdr /usr/local/bin/herdr
 COPY media/agentihooks-logo.png /opt/venv/lib/python3.12/site-packages/media/agentihooks-logo.png
+COPY docs/swarm-v2/schemas/ /opt/venv/lib/python3.12/site-packages/docs/swarm-v2/schemas/
 USER 10001:10001
 VOLUME /data
 EXPOSE 8765

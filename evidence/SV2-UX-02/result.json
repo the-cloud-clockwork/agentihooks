@@ -1,0 +1,52 @@
+{
+  "package": "SV2-UX-02",
+  "package_complete": false,
+  "dependencies": {
+    "SV2-UX-01": "merged into dev (#2595)"
+  },
+  "integration_gate": "G10",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2597",
+  "tested_commit": "1ea599c53",
+  "status": "fixture-qualified: attach, pause, drain, cancel and force stop each state their scope and consequence; a drain of one worker leaves the others working, holds that agent until the worker reports, and reports its checkpoint; an old force stop after replacement is refused as stale without touching the successor; an unsupported attach is disabled and refused; a lost acknowledgement is reconciled by operation id before another click is accepted; no Anton rollout of this commit has been observed",
+  "evidence_class": "mocked: a fake Redis swarm store holds two Kubernetes workers and one local agent; page clicks enter through the ledger server's lifecycle control with the incarnation, generation and task revision a page rendered; the hive command runner consumes the queue with its terminal commands stubbed; a worker's acknowledgement and checkpoint outcome are written through the worker command queue; no ledger HTTP server, browser, worker Pod or cluster runs",
+  "interfaces": [
+    "scripts.swarm.lifecycle.CONTROLS names each control's label, scope (terminal view, one agent, one swarm), destructive flag and consequence; the page renders them from the swarm view",
+    "scripts.swarm.lifecycle.view(store, slug) offers per agent the incarnation, execution generation and published task revision to send back, the unresolved operation id, the reason each control is disabled (finished, unsupported for the backend, no execution identity, earlier control unresolved, rollback switch) and whether terminate is offered (only when the rollback switch is off)",
+    "PUT /api/swarm/<slug> with action lifecycle reads the live ledger task state stamps and calls scripts.swarm.lifecycle.request, which refuses a malformed body (400), a destructive control without the operator (403), a stale incarnation, generation or task revision (409), a new operation while an earlier one is unresolved (409), an operation id reused with another control (409) and an unsupported or switched off control (422); a repeated operation id returns the recorded operation and queues nothing; every 409 increments ledger_control_conflicts_total",
+    "scripts.swarm.lifecycle.execute runs when the hive command runner consumes the row: it refuses an expired operation, a destructive control while its own environment has the switch off, and a replaced or finished agent, then drains or cancels through the worker command queue keyed by the operation id (state issued), attaches through swarm terminal, or force stops a local agent through terminate-agent after a dry run (state applied); an unexpected error is logged and fails the operation",
+    "An agent stays pending while its operation is queued (at most ten minutes) or while its issued worker command is issued or accepted (at most thirty minutes); a completed, failed or expired worker command releases it",
+    "The published swarm status carries task_revisions, each task's state stamp revision; the swarm view never reads the ledger",
+    "The ledger page keeps a sent control in session storage until a response arrives or the view lists its operation id, resends the same body after a lost acknowledgement, and disables that agent's controls meanwhile and while the swarm view is not current; destructive controls confirm with their consequence; the swarm pause button states it pauses the whole swarm"
+  ],
+  "authority": "Only the operator reaches PUT /api/swarm; destructive controls are refused without operator authority inside the request as well. The offer grants nothing: every click is checked against the swarm store and the live ledger task revision, and again by the controller before any effect. The rollback switch is owned by the ledger server for offers and admission; the controller re-reads its own environment and can only refuse, never allow, a control.",
+  "authoritative_objects": "The executions registry, the worker command queue and the lifecycle operation records are authoritative. Offers are computed per read; rollback deletes none of the records.",
+  "rollback": "Set AGENTIHOOKS_LIFECYCLE_DESTRUCTIVE=off on the ledger server (and the controller): cancel and force stop are disabled in the offers, refused at admission and at run time, and the page shows the existing server validated terminate button again. Rehearsed by test_the_rollback_switch_turns_off_cancel_and_force_stop_only, test_a_destructive_control_turned_off_after_queueing_does_not_run and test_the_rollback_switch_brings_terminate_back_beside_the_offers.",
+  "states": {
+    "observed": "Cases A, B and C run against a fake Redis store in CI run 38147012460 (evidence/SV2-UX-02/a-result.json, b-result.json, c-result.json); the full pull request suite and mutation preflight ran green on fec447c1a (Tests run 38149340597, Mutation preflight run 38149337392); the page was checked by eye at 1920 by 1080 on a scratch ledger server before and after the page module split, screenshots agents-1920.png, agents-local-1920.png, split-agents-1920.png and split-agents-hover-1920.png on the ledger task vux2 proof",
+    "accepted": "Standards and Spec readers closed after three rounds, rulings: https://github.com/the-cloud-clockwork/agentihooks/issues/2597#issuecomment-6110027392; the Standards reader ruled the five equivalent mutation survivors cleared in mutation-clearances",
+    "committed": "Case records, manifest, result and compatibility record committed on the pull request branch at the tested commit; the change reaches dev only when pull request 2603 merges through the merge queue",
+    "externally_verified": "Not on Anton: no rollout of this commit has been observed, so no lifecycle control has acted on a worker Pod; the evidence is mocked and labelled so"
+  },
+  "measurements": {
+    "ledger_control_conflicts_total": {
+      "a": 0,
+      "b": 1,
+      "c": 2,
+      "note": "b counts the stale force stop; c counts the click refused while the drain was unacknowledged and again while its worker had not reported"
+    }
+  },
+  "limitations": [
+    "Kubernetes workers have no force stop and no page kill control: the adapter lacks terminate and terminate-agent acts only on local processes; cancel checkpoints and stops",
+    "Local agents have no attach, drain or cancel; their pane already lives in the operator's herdr session",
+    "Offers come from the published snapshot while admission reads the live ledger, so a click after a task change is refused as stale until the next publish",
+    "Operation records are kept without expiry, like the command rows, and the view reads each shown worker outcome per poll",
+    "The rollback switch must be set on both the ledger server and the controller; set on only the controller it refuses controls the page still offers"
+  ],
+  "cases": {
+    "a": "evidence/SV2-UX-02/a-result.json",
+    "b": "evidence/SV2-UX-02/b-result.json",
+    "c": "evidence/SV2-UX-02/c-result.json"
+  },
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2603",
+  "compatibility": "evidence/SV2-UX-02/compatibility.json"
+}

@@ -270,3 +270,87 @@ def test_run_in_terminal_waits_its_grace_in_a_native_terminal(monkeypatch, tmp_p
 def test_a_plain_shell_tab_has_no_command_to_delay(herdr, tmp_path):
     assert run_in_terminal.main(["--dir", str(tmp_path)], {"HOME": str(tmp_path)}) == 0
     assert not any(call[:2] == ("pane", "run") for call in herdr if isinstance(call, tuple))
+
+
+def _block(*lines, before="", after=""):
+    from scripts import aicode_tokens
+
+    rc = aicode_tokens.rc_file()
+    body = "".join(f"{line}\n" for line in lines)
+    rc.write_text(f"{before}{aicode_tokens.START}\n{body}{aicode_tokens.END}\n{after}")
+    return rc
+
+
+def test_fill_loads_only_the_token_exports_inside_the_managed_block(tmp_path, capsys):
+    _block(
+        "export AH_CX_TOKEN_open='c1",
+        "export AH_CX_TOKEN_alpha=cx1",
+        "export AH_CC_TOKEN_beta='cc 2'",
+        "export AH_CX_TOKEN_pad=ab==",
+        "export AGENTIHOOKS_AICODE_TOKEN_REFRESH=true",
+        "export OPENAI_API_KEY=k1",
+        "AH_CX_TOKEN_bare=b1",
+        "export AH_CX_TOKEN_split=a b",
+        before="export AH_CX_TOKEN_outside=o1\n",
+        after="export AH_CC_TOKEN_after=a1\n",
+    )
+    environ = {"HOME": str(tmp_path)}
+    assert operator_env.fill(environ) == ["AH_CX_TOKEN_alpha", "AH_CC_TOKEN_beta", "AH_CX_TOKEN_pad"]
+    assert environ == {
+        "HOME": str(tmp_path),
+        "AH_CX_TOKEN_alpha": "cx1",
+        "AH_CC_TOKEN_beta": "cc 2",
+        "AH_CX_TOKEN_pad": "ab==",
+    }
+    assert capsys.readouterr() == ("", "")
+
+
+def test_the_block_value_wins_for_a_shared_name_and_a_name_only_in_the_environment_stays(tmp_path):
+    _block("export AH_CX_TOKEN_alpha=cx2", "export AH_CX_TOKEN_beta=cx3")
+    environ = {"HOME": str(tmp_path), "AH_CX_TOKEN_alpha": "cx1", "AH_CX_TOKEN_beta": "cx3", "AH_CX_TOKEN_keep": "k1"}
+    assert operator_env.fill(environ) == ["AH_CX_TOKEN_alpha"]
+    assert environ == {**environ, "AH_CX_TOKEN_alpha": "cx2", "AH_CX_TOKEN_beta": "cx3", "AH_CX_TOKEN_keep": "k1"}
+
+
+def test_the_first_block_wins_and_empty_values_are_dropped():
+    from scripts import aicode_tokens
+
+    start, end = aicode_tokens.START, aicode_tokens.END
+    text = (
+        f"{start}\nexport AH_CC_TOKEN_a=one\nexport AH_CC_TOKEN_empty=\nexport AH_CC_TOKEN_bare\n{end}\n"
+        f"{start}\nexport AH_CC_TOKEN_a=two\nexport AH_CX_TOKEN_b=three\n{end}\n"
+    )
+    assert aicode_tokens.token_exports(text) == {"AH_CC_TOKEN_a": "one", "AH_CX_TOKEN_b": "three"}
+
+
+def test_a_token_held_under_two_names_counts_once_and_the_block_name_wins(tmp_path):
+    from scripts import claude_quota_balancer as balancer
+
+    _block(
+        "export AH_CC_TOKEN_nestor_coltatgmail_com=cc1", "export AH_CC_TOKEN_other=cc2", "export AH_CC_TOKEN_twin=cc2"
+    )
+    environ = {"HOME": str(tmp_path), "AH_CC_TOKEN_ncgma": "cc1"}
+    operator_env.fill(environ)
+    accounts = [credential.account for credential in balancer.discover_credentials(environ)]
+    assert accounts == ["nestor_coltatgmail_com", "other"]
+
+
+def test_without_a_block_a_shared_token_counts_once_under_its_first_name():
+    from scripts import claude_quota_balancer as balancer
+
+    environ = {"AH_CC_TOKEN_b": "cc1", "AH_CC_TOKEN_a": "cc1", "AH_CC_TOKEN_c": "cc2"}
+    assert [credential.account for credential in balancer.discover_credentials(environ)] == ["a", "c"]
+
+
+@pytest.mark.parametrize("make", ["missing", "no-block", "directory"])
+def test_no_rc_file_or_no_block_leaves_the_environment_alone(make, tmp_path):
+    from scripts import aicode_tokens
+
+    rc = aicode_tokens.rc_file()
+    if make == "no-block":
+        rc.write_text("export AH_CX_TOKEN_alpha=cx1\n")
+    elif make == "directory":
+        rc.mkdir()
+    environ = {"HOME": str(tmp_path)}
+    assert operator_env.fill(environ) == []
+    assert environ == {"HOME": str(tmp_path)}

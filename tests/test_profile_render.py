@@ -157,6 +157,23 @@ def test_swarm_roles_render_only_the_task_browser(world, role, target):
     assert not settings["enabledPlugins"].get("playwright@claude-plugins-official", False)
 
 
+def test_codex_engineer_home_lists_the_serena_opt_in_tools(world):
+    from scripts.profiles import render
+
+    root = world["bundle"] / "profiles" / "engineer"
+    router = "http://127.0.0.1:8643/mcp"
+    _write(root / "profile.yml", "name: engineer\nextends: [package:engineer]\n")
+    _write(root / ".claude" / ".mcp.json", json.dumps({"mcpServers": {"serena": {"type": "http", "url": router}}}))
+    _write(
+        root / ".codex" / "mcp.overrides.toml",
+        f'[mcpServers.serena]\ntype = "http"\nurl = "{router}?tools=read_file,search_for_pattern"\n',
+    )
+    claude = json.loads((render.render("claude", "engineer") / ".claude.json").read_text())["mcpServers"]
+    codex = tomllib.loads((render.render("codex", "engineer") / "config.toml").read_text())["mcp_servers"]
+    assert codex["serena"]["url"] == f"{router}?tools=read_file,search_for_pattern"
+    assert claude["serena"]["url"] == router
+
+
 @pytest.mark.parametrize("target", ["claude", "codex"])
 def test_a_role_overlay_keeps_the_logged_in_extension_browser(world, target):
     from scripts.profiles import render
@@ -1569,6 +1586,7 @@ def test_codex_render_links_state_back_to_the_operator_home(world):
 
     home = world["home"]
     _operator_codex(home)
+    _write(home / ".codex" / "auth.json", "{}")
 
     out = render.render_codex("rb-role")
 
@@ -1579,6 +1597,53 @@ def test_codex_render_links_state_back_to_the_operator_home(world):
     assert doc["hooks"]["state"] == {f"{out / 'hooks.json'}:pre_tool_use:0:0": {"trusted_hash": "sha256:aa"}}
     assert doc["projects"] == {"/w": {"trust_level": "trusted"}}
     assert (doc["model"], doc["service_tier"], doc["notify"]) == ("gpt-op", "fast", ["py", "-m", "shim"])
+
+
+@pytest.mark.parametrize("token_kind", ["chatgpt", "agent"])
+def test_codex_token_account_role_home_has_no_dangling_login(world, monkeypatch, token_kind):
+    from scripts import codex_router
+    from scripts.profiles import render
+    from tests.codex_fakes import jwt
+
+    claims = (
+        {"https://api.openai.com/auth": {"chatgpt_account_id": "workspace"}}
+        if token_kind == "chatgpt"
+        else {"https://api.openai.com/agent_identity": {}}
+    )
+    token = jwt(claims)
+    monkeypatch.setenv("AH_CX_TOKEN_alpha", token)
+    out = render.render_codex("rb-role")
+    login = out / "auth.json"
+
+    assert not login.is_symlink()
+    assert not login.exists()
+    active = {"CODEX_HOME": str(out), "AH_CX_TOKEN_alpha": token}
+    account = codex_router.credential(codex_router.CodexAccount("alpha", "AH_CX_TOKEN_alpha"), active)
+    child = codex_router.child_environment(account, active)
+    assert child["CODEX_HOME"] == str(out)
+    assert child["CODEX_ACCESS_TOKEN"] == token
+    assert codex_router.command(account, "codex", [])[1] == "--no-daemon"
+
+
+def test_codex_render_refreshes_when_the_operator_login_appears_or_disappears(world):
+    from scripts.profiles import render
+
+    absent = render.render_codex("rb-role")
+    assert render.render_codex("rb-role") is None
+    login = _write(world["home"] / ".codex" / "auth.json", "{}")
+
+    present = render.render_codex("rb-role")
+    assert present not in (None, absent)
+    assert (present / "auth.json").is_file()
+    assert (present / "auth.json").resolve() == login
+    assert render.render_codex("rb-role") is None
+
+    login.unlink()
+    removed = render.render_codex("rb-role")
+    assert removed not in (None, present)
+    assert not (removed / "auth.json").is_symlink()
+    assert not (removed / "auth.json").exists()
+    assert render.render_codex("rb-role") is None
 
 
 def test_codex_render_follows_operator_changes(world):
@@ -1597,6 +1662,7 @@ def test_codex_render_from_inside_a_profile_codex_home(world, monkeypatch):
     from scripts.profiles import render
 
     home = world["home"]
+    _write(home / ".codex" / "auth.json", "{}")
     monkeypatch.setenv("CODEX_HOME", str(render.rendered_root() / "rb-other" / "codex"))
 
     out = render.render_codex("rb-role")

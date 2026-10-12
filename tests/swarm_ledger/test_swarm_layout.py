@@ -185,7 +185,9 @@ def test_rows_run_header_alert_capacity_work_accounts_health_handoffs():
     assert 'class="fold sw-command-log" id="command-log"' in box
     assert '<details class="fold sw-fold" id="overlays-fold" open>' in box
     assert '<details class="fold sw-fold" id="quota-fold" open>' in box
-    box = re.sub(r'<details[^>]*id="(command-log|overlays-fold|quota-fold)".*?</details>', "", box, flags=re.S)
+    box = re.sub(
+        r'<details[^>]*id="(command-log|overlays-fold|quota-fold|freeze-fold)".*?</details>', "", box, flags=re.S
+    )
     for gone in ("crew", "needs-you", "swarm-figs", "swarm-work", "restore-box", "<section", "<details"):
         assert gone not in box, gone
 
@@ -276,6 +278,8 @@ def test_the_effort_range_shows_in_the_caps_row_and_apply_sends_it(open_page):
     assert (floor.input_value(), ceiling.input_value()) == ("medium", "high")
     assert floor.bounding_box()["y"] == page.tab.locator("#cap-eng").bounding_box()["y"]
     page.tab.get_by_role("button", name="Raise effort ceiling").click()
+    assert ceiling.input_value() == "xhigh"
+    page.tab.get_by_role("button", name="Raise effort ceiling").click()
     assert page.tab.get_by_role("button", name="Raise effort ceiling").is_disabled()
     floor.fill("low")
     page.tab.get_by_role("button", name="Apply capacity").click()
@@ -349,8 +353,8 @@ def test_capacity_caps_and_apply_share_one_row_and_gates_start_below(open_page):
           };
         }"""
     )
-    assert len(boxes["row"]) == 8
-    caps, (affinity, apply) = boxes["row"][:6], boxes["row"][6:]
+    assert len(boxes["row"]) == 10
+    caps, (affinity, apply) = boxes["row"][:6], boxes["row"][8:]
     middle = (caps[0][0] + caps[0][1]) / 2
     assert all(top <= middle <= bottom for top, bottom in caps)
     last = (affinity[0] + affinity[1]) / 2
@@ -389,9 +393,9 @@ def test_agents_table_lists_the_master_first_with_overlays_and_stats_carry_the_t
     for gone in ("swarm-tasks-box", "swarm-tasks", "tasks-open"):
         assert page.tab.locator(f"#{gone}").count() == 0, gone
     pairs = page.tab.eval_on_selector_all(
-        "#stats .stat", "rows => rows.map(r => [r.children[0].innerText, r.children[1].innerText])"
+        "#stats .stat:not(.top-bottleneck)", "rows => rows.map(r => [r.children[0].innerText, r.children[1].innerText])"
     )
-    figures = [[label.lower(), value] for label, value in pairs[4:12]]
+    figures = [[label.lower(), value] for label, value in pairs[6:14]]
     assert figures == [
         ["tasks", "0 / 1"],
         ["open", "9"],
@@ -402,6 +406,153 @@ def test_agents_table_lists_the_master_first_with_overlays_and_stats_carry_the_t
         ["next phase", "p3"],
         ["inbox pending", "1"],
     ]
+
+
+def test_agents_table_shows_live_terminals_and_never_shows_an_aged_or_failed_view_as_live(open_page):
+    payload = status()
+    fresh = {"state": "live", "checked_at": NOW_MS - 30_000, "live_at": NOW_MS - 30_000, "fresh_ms": 30_000}
+    payload["terminals"] = {
+        "master-1": {**fresh, "checked_at": NOW_MS - 31_000, "live_at": NOW_MS - 31_000, "reason": ""},
+        "eng-58": fresh | {"reason": ""},
+    }
+    page = open_page(payload, clock=True)
+    heads = page.tab.eval_on_selector_all("#agents-table thead th", "ths => ths.map(t => t.innerText.trim())")
+    assert heads[6:10] == ["state", "execution", "terminal", "age"]
+    assert [row[8] for row in page.table("swarm-agents")] == ["CACHED live 1m ago · stale", "LIVE"]
+    payload["terminals"] = {
+        "master-1": {
+            "state": "unverified",
+            "checked_at": NOW_MS,
+            "live_at": 0,
+            "fresh_ms": 30_000,
+            "reason": "unreachable",
+        },
+        "eng-58": {**fresh, "state": "cached", "live_at": NOW_MS - 120_000, "reason": "conversation_mismatch"},
+    }
+    page = open_page(payload, clock=True)
+    assert [row[8] for row in page.table("swarm-agents")] == [
+        "UNVERIFIED unreachable",
+        "CACHED live 2m ago · conversation mismatch",
+    ]
+
+
+def test_agents_table_shows_each_agents_execution_identity_beside_its_terminal(open_page):
+    remote = {"lane": "eng", "harness": "claude", "status": "working", "inbox": [], "started_at": NOW_MS - 60_000}
+    payload = status()
+    payload["agents"] += [{**remote, "name": "eng-60", "task": "pb10"}, {**remote, "name": "ci-61", "lane": "ci"}]
+    card = {"pool": "standard", "wait": "", "terminal_behind": False}
+    payload["executions"] = {
+        "master-1": {
+            **card,
+            "backend": "local",
+            "generation": 1,
+            "pool": "",
+            "observed": "working",
+            "seen_at": NOW_MS - 60_000,
+        },
+        "eng-58": {
+            **card,
+            "backend": "local",
+            "generation": 3,
+            "pool": "",
+            "observed": "waiting",
+            "wait": "input",
+            "seen_at": 0,
+        },
+        "eng-60": {
+            **card,
+            "backend": "kubernetes",
+            "generation": 2,
+            "observed": "working",
+            "seen_at": NOW_MS - 120_000,
+            "terminal_behind": True,
+        },
+        "ci-61": {
+            **card,
+            "backend": "kubernetes",
+            "generation": 1,
+            "pool": "memory",
+            "observed": "pending",
+            "wait": "scheduling",
+            "seen_at": NOW_MS - 180_000,
+        },
+    }
+    payload["terminals"] = {
+        "eng-60": {
+            "state": "live",
+            "checked_at": NOW_MS - 300_000,
+            "live_at": NOW_MS - 300_000,
+            "fresh_ms": 30_000,
+            "reason": "",
+        }
+    }
+    page = open_page(payload, clock=True)
+    heads = page.tab.eval_on_selector_all("#agents-table thead th", "ths => ths.map(t => t.innerText.trim())")
+    assert heads[:10] == [
+        "agent",
+        "lane",
+        "profile",
+        "overlays",
+        "model",
+        "task",
+        "state",
+        "execution",
+        "terminal",
+        "age",
+    ]
+    rows = page.table("swarm-agents")
+    assert [row[:2] + row[6:9] for row in rows] == [
+        ["master-1", "—", "LIVE", "WORKING seen 1m ago\nlocal · gen 1", "—"],
+        ["eng-58", "eng", "IDLE", "INPUT WAIT not seen\nlocal · gen 3", "—"],
+        [
+            "eng-60",
+            "eng",
+            "WORKING",
+            "WORKING seen 2m ago\nkubernetes · gen 2 · standard",
+            "CACHED live 5m ago · stale · behind heartbeat",
+        ],
+        ["ci-61", "ci", "WORKING", "SCHEDULING WAIT seen 3m ago\nkubernetes · gen 1 · memory", "—"],
+    ]
+
+
+def test_a_remote_agent_without_a_terminal_view_still_shows_the_execution_column(open_page):
+    payload = status()
+    payload["executions"] = {
+        "eng-58": {
+            "backend": "kubernetes",
+            "generation": 2,
+            "pool": "standard",
+            "observed": "starting",
+            "wait": "",
+            "seen_at": NOW_MS - 60_000,
+            "terminal_behind": False,
+        }
+    }
+    page = open_page(payload, clock=True)
+    assert page.tab.eval_on_selector_all("#agents-table th", "ths => ths.length") == 11
+    assert [row[7:9] for row in page.table("swarm-agents")] == [
+        ["—", "—"],
+        ["STARTING seen 1m ago\nkubernetes · gen 2 · standard", "—"],
+    ]
+
+
+def test_a_local_only_swarm_keeps_the_familiar_agents_table(open_page):
+    payload = status()
+    payload["executions"] = {
+        a["name"]: {
+            "backend": "local",
+            "generation": 1,
+            "pool": "",
+            "observed": "working",
+            "wait": "",
+            "seen_at": 0,
+            "terminal_behind": False,
+        }
+        for a in payload["agents"]
+    }
+    page = open_page(payload)
+    assert page.tab.eval_on_selector_all("#agents-table th", "ths => ths.length") == 9
+    assert "execution" not in page.text("#agents-table thead")
 
 
 def test_an_agents_table_without_agents_spans_all_nine_columns(open_page):
@@ -630,7 +781,7 @@ def test_the_sessions_cell_reads_the_plain_session_count(open_page):
 def test_every_capacity_stepper_puts_minus_before_and_plus_after_its_value(open_page):
     page = open_page()
     order = page.tab.eval_on_selector_all(
-        "#capacity-box .sw-cap:not(.sw-affinity)",
+        "#capacity-box .sw-cap:not(.sw-affinity):not(.sw-model)",
         """caps => caps.map(c => [c.querySelector('.sw-cap-name').innerText,
           [...c.children].slice(1).map(e => e.matches('.sw-field') ? e.querySelector('input').value + (e.querySelector('.sw-unit')?.innerText || '') : e.innerText)])""",
     )

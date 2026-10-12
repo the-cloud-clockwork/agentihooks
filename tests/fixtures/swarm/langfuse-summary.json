@@ -1,0 +1,92 @@
+{
+  "source": "agent-swarm live summary and turn-only legacy metrics, 2026-10-11",
+  "summary": {
+    "swarm": "rig-grade-swarm",
+    "window": {
+      "fromTimestamp": "2026-10-11T18:00:00Z",
+      "toTimestamp": "2026-10-11T19:00:00Z"
+    },
+    "agents": [
+      {
+        "agent": "engineer@323133-1125",
+        "traces": 1,
+        "trace_latency_ms": {
+          "p50": 5237673,
+          "p95": 5237673,
+          "max": 5237673
+        },
+        "observations": 331,
+        "observation_latency_ms": {
+          "p50": 2373,
+          "p95": 17053
+        },
+        "errors": 0,
+        "error_rate": 0,
+        "turns": 8,
+        "turn_latency_ms": {
+          "p50": 44266,
+          "p95": 719854.9499999996
+        }
+      },
+      {
+        "agent": "engineer@323133-1135",
+        "traces": 1,
+        "trace_latency_ms": {
+          "p50": 3932308,
+          "p95": 3932308,
+          "max": 3932308
+        },
+        "observations": 226,
+        "observation_latency_ms": {
+          "p50": 2884,
+          "p95": 17336.25
+        },
+        "errors": 0,
+        "error_rate": 0,
+        "turns": 8,
+        "turn_latency_ms": {
+          "p50": 27164.5,
+          "p95": 445475.1999999997
+        }
+      },
+      {
+        "agent": "engineer@323133-1138",
+        "traces": 1,
+        "trace_latency_ms": {
+          "p50": 3558046,
+          "p95": 3558046,
+          "max": 3558046
+        },
+        "observations": 247,
+        "observation_latency_ms": {
+          "p50": 2672,
+          "p95": 15965.1
+        },
+        "errors": 0,
+        "error_rate": 0,
+        "turns": 4,
+        "turn_latency_ms": {
+          "p50": 469654.5,
+          "p95": 1326823.9499999997
+        }
+      }
+    ]
+  },
+  "bindings": [
+    {
+      "name": "engineer@323133-1125",
+      "account": "nestorcoltathotmail_com",
+      "task": "ncx5"
+    },
+    {
+      "name": "engineer@323133-1135",
+      "account": "nchotma",
+      "task": "t414"
+    },
+    {
+      "name": "engineer@323133-1138",
+      "account": "nestor_coltatthecloudclockwork_com",
+      "task": "t439"
+    }
+  ]
+}

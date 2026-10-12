@@ -1,0 +1,442 @@
+{
+  "case": "T-SV2-HDR-03-B",
+  "state": "passed",
+  "evidence_class": "mocked: a recording stand in for the Anton herdr client answers herdr machine list, add, rename and remove with the 0.9.1 reply shapes captured in the SV2-HDR-01 live proof, and its status and schema replies are the SV2-HDR-01 captures; no herdr process, SSH connection or cluster runs in these cases",
+  "input_sha256": {
+    "herdr-registrations.json": "eb069f75d17862be563e36f558ee14db60cd24d7982bb042f2232db5bb81a57c",
+    "herdr-capabilities.json": "c15bb685e5bb4e2f53aa9a51a8ee80701aebe75a222093d120787b4839c45940"
+  },
+  "observed": {
+    "checks": {
+      "conflicts_refused_by_reason": true,
+      "manual_machine_never_mutated": true,
+      "refused_endpoints_hold_no_ownership": true,
+      "incompatible_registration_removed": true,
+      "unreadable_state_mutates_nothing": true,
+      "retired_record_spares_a_same_label_manual_machine": true,
+      "direct_collision_writes_nothing": true,
+      "no_disclosure_of_the_manual_machine": true,
+      "a_corrected_input_needs_a_new_request": true
+    },
+    "label_collision": {
+      "refusal": {},
+      "report": {
+        "registered": {
+          "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": "63f4cd8f16013cdd0e78c95b4aeff3eb"
+        },
+        "refused": {
+          "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "label_collision"
+        },
+        "retired": [],
+        "unverified": [],
+        "drift": {
+          "missing": 2,
+          "collision": 1
+        },
+        "herdr_registration_drift": 3
+      },
+      "manual_before": [
+        {
+          "id": "0d4e1b5c9a7f42e8b3c6d2a1f0e9b8c7",
+          "label": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
+          "target": "ssh://operator@devbox.lan",
+          "session": "default",
+          "enabled": true,
+          "selected": false
+        }
+      ],
+      "manual_after": [
+        {
+          "id": "0d4e1b5c9a7f42e8b3c6d2a1f0e9b8c7",
+          "label": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
+          "target": "ssh://operator@devbox.lan",
+          "session": "default",
+          "enabled": true,
+          "selected": false
+        }
+      ],
+      "commands_naming_manual": [],
+      "mutating": [
+        [
+          "herdr",
+          "machine",
+          "add",
+          "--label",
+          "swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal",
+          "--remote-session",
+          "default",
+          "ssh://swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal.swarm-workers.svc.cluster.local"
+        ]
+      ],
+      "store_unchanged": false,
+      "records": {
+        "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": {
+          "execution_id": "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "generation": 1,
+          "label": "swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal",
+          "target": "ssh://swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal.swarm-workers.svc.cluster.local",
+          "session": "default",
+          "profile_id": "63f4cd8f16013cdd0e78c95b4aeff3eb",
+          "before": []
+        }
+      }
+    },
+    "target_collision": {
+      "refusal": {},
+      "report": {
+        "registered": {
+          "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": "63f4cd8f16013cdd0e78c95b4aeff3eb"
+        },
+        "refused": {
+          "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "target_collision"
+        },
+        "retired": [],
+        "unverified": [],
+        "drift": {
+          "missing": 2,
+          "collision": 1
+        },
+        "herdr_registration_drift": 3
+      },
+      "manual_before": [
+        {
+          "id": "0d4e1b5c9a7f42e8b3c6d2a1f0e9b8c7",
+          "label": "devbox",
+          "target": "ssh://swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal.swarm-workers.svc.cluster.local",
+          "session": "default",
+          "enabled": true,
+          "selected": false
+        }
+      ],
+      "manual_after": [
+        {
+          "id": "0d4e1b5c9a7f42e8b3c6d2a1f0e9b8c7",
+          "label": "devbox",
+          "target": "ssh://swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal.swarm-workers.svc.cluster.local",
+          "session": "default",
+          "enabled": true,
+          "selected": false
+        }
+      ],
+      "commands_naming_manual": [],
+      "mutating": [
+        [
+          "herdr",
+          "machine",
+          "add",
+          "--label",
+          "swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal",
+          "--remote-session",
+          "default",
+          "ssh://swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal.swarm-workers.svc.cluster.local"
+        ]
+      ],
+      "store_unchanged": false,
+      "records": {
+        "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": {
+          "execution_id": "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "generation": 1,
+          "label": "swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal",
+          "target": "ssh://swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal.swarm-workers.svc.cluster.local",
+          "session": "default",
+          "profile_id": "63f4cd8f16013cdd0e78c95b4aeff3eb",
+          "before": []
+        }
+      }
+    },
+    "incompatible_server": {
+      "refusal": {},
+      "report": {
+        "registered": {
+          "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "eda75d4e8494f54c8a6fe05759524de3"
+        },
+        "refused": {
+          "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": "incompatible"
+        },
+        "retired": [],
+        "unverified": [],
+        "drift": {
+          "missing": 2
+        },
+        "herdr_registration_drift": 2
+      },
+      "manual_before": [
+        {
+          "id": "0d4e1b5c9a7f42e8b3c6d2a1f0e9b8c7",
+          "label": "devbox",
+          "target": "ssh://operator@devbox.lan",
+          "session": "default",
+          "enabled": true,
+          "selected": false
+        }
+      ],
+      "manual_after": [
+        {
+          "id": "0d4e1b5c9a7f42e8b3c6d2a1f0e9b8c7",
+          "label": "devbox",
+          "target": "ssh://operator@devbox.lan",
+          "session": "default",
+          "enabled": true,
+          "selected": false
+        }
+      ],
+      "commands_naming_manual": [],
+      "mutating": [
+        [
+          "herdr",
+          "machine",
+          "add",
+          "--label",
+          "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
+          "--remote-session",
+          "default",
+          "ssh://swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal.swarm-workers.svc.cluster.local"
+        ],
+        [
+          "herdr",
+          "machine",
+          "add",
+          "--label",
+          "swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal",
+          "--remote-session",
+          "default",
+          "ssh://swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal.swarm-workers.svc.cluster.local"
+        ],
+        [
+          "herdr",
+          "machine",
+          "remove",
+          "eefed520946b717557bfbc5ef89d91ee"
+        ]
+      ],
+      "store_unchanged": false,
+      "records": {
+        "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {
+          "execution_id": "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "generation": 2,
+          "label": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
+          "target": "ssh://swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal.swarm-workers.svc.cluster.local",
+          "session": "default",
+          "profile_id": "eda75d4e8494f54c8a6fe05759524de3",
+          "before": []
+        }
+      }
+    },
+    "server_not_ready": {
+      "refusal": {},
+      "report": {
+        "registered": {
+          "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "eda75d4e8494f54c8a6fe05759524de3"
+        },
+        "refused": {
+          "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": "machine_refused"
+        },
+        "retired": [],
+        "unverified": [],
+        "drift": {
+          "missing": 2
+        },
+        "herdr_registration_drift": 2
+      },
+      "manual_before": [
+        {
+          "id": "0d4e1b5c9a7f42e8b3c6d2a1f0e9b8c7",
+          "label": "devbox",
+          "target": "ssh://operator@devbox.lan",
+          "session": "default",
+          "enabled": true,
+          "selected": false
+        }
+      ],
+      "manual_after": [
+        {
+          "id": "0d4e1b5c9a7f42e8b3c6d2a1f0e9b8c7",
+          "label": "devbox",
+          "target": "ssh://operator@devbox.lan",
+          "session": "default",
+          "enabled": true,
+          "selected": false
+        }
+      ],
+      "commands_naming_manual": [],
+      "mutating": [
+        [
+          "herdr",
+          "machine",
+          "add",
+          "--label",
+          "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
+          "--remote-session",
+          "default",
+          "ssh://swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal.swarm-workers.svc.cluster.local"
+        ],
+        [
+          "herdr",
+          "machine",
+          "add",
+          "--label",
+          "swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal",
+          "--remote-session",
+          "default",
+          "ssh://swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal.swarm-workers.svc.cluster.local"
+        ]
+      ],
+      "store_unchanged": false,
+      "records": {
+        "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {
+          "execution_id": "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "generation": 2,
+          "label": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
+          "target": "ssh://swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal.swarm-workers.svc.cluster.local",
+          "session": "default",
+          "profile_id": "eda75d4e8494f54c8a6fe05759524de3",
+          "before": []
+        }
+      }
+    },
+    "unreadable_catalog": {
+      "refusal": {
+        "reason": "catalog_unreadable",
+        "message": "herdr machine list is not JSON"
+      },
+      "report": null,
+      "manual_before": [
+        {
+          "id": "0d4e1b5c9a7f42e8b3c6d2a1f0e9b8c7",
+          "label": "devbox",
+          "target": "ssh://operator@devbox.lan",
+          "session": "default",
+          "enabled": true,
+          "selected": false
+        }
+      ],
+      "manual_after": [
+        {
+          "id": "0d4e1b5c9a7f42e8b3c6d2a1f0e9b8c7",
+          "label": "devbox",
+          "target": "ssh://operator@devbox.lan",
+          "session": "default",
+          "enabled": true,
+          "selected": false
+        }
+      ],
+      "commands_naming_manual": [],
+      "mutating": [],
+      "store_unchanged": true,
+      "records": {}
+    },
+    "unreadable_ownership": {
+      "refusal": {
+        "reason": "ownership_unreadable",
+        "message": "the registration ownership record is unreadable"
+      },
+      "report": null,
+      "manual_before": [
+        {
+          "id": "0d4e1b5c9a7f42e8b3c6d2a1f0e9b8c7",
+          "label": "devbox",
+          "target": "ssh://operator@devbox.lan",
+          "session": "default",
+          "enabled": true,
+          "selected": false
+        }
+      ],
+      "manual_after": [
+        {
+          "id": "0d4e1b5c9a7f42e8b3c6d2a1f0e9b8c7",
+          "label": "devbox",
+          "target": "ssh://operator@devbox.lan",
+          "session": "default",
+          "enabled": true,
+          "selected": false
+        }
+      ],
+      "commands_naming_manual": [],
+      "mutating": [],
+      "store_unchanged": true,
+      "records": "ownership_unreadable"
+    },
+    "retired_record_beside_manual_label": {
+      "refusal": {},
+      "report": {
+        "registered": {},
+        "refused": {},
+        "retired": [
+          "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ],
+        "unverified": [],
+        "drift": {},
+        "herdr_registration_drift": 0
+      },
+      "manual_before": [
+        {
+          "id": "0d4e1b5c9a7f42e8b3c6d2a1f0e9b8c7",
+          "label": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
+          "target": "ssh://operator@devbox.lan",
+          "session": "default",
+          "enabled": true,
+          "selected": false
+        }
+      ],
+      "manual_after": [
+        {
+          "id": "0d4e1b5c9a7f42e8b3c6d2a1f0e9b8c7",
+          "label": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
+          "target": "ssh://operator@devbox.lan",
+          "session": "default",
+          "enabled": true,
+          "selected": false
+        }
+      ],
+      "commands_naming_manual": [],
+      "mutating": [],
+      "store_unchanged": false,
+      "records": {}
+    },
+    "direct": {
+      "reason": "label_collision",
+      "message": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal is the label of a machine this controller does not own; audit it and remove it with herdr machine remove before this endpoint registers",
+      "discloses_manual_target": false,
+      "mutating": [],
+      "store_written": false
+    },
+    "recovery_isolation": {
+      "refused": {
+        "registered": {
+          "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": "63f4cd8f16013cdd0e78c95b4aeff3eb"
+        },
+        "refused": {
+          "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "label_collision"
+        },
+        "retired": [],
+        "unverified": [],
+        "drift": {
+          "missing": 2,
+          "collision": 1
+        },
+        "herdr_registration_drift": 3
+      },
+      "after_the_operator_renamed_the_manual_machine": {
+        "registered": {
+          "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "13cd2e293be8f9118055391e876c8b5f",
+          "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": "63f4cd8f16013cdd0e78c95b4aeff3eb"
+        },
+        "refused": {},
+        "retired": [],
+        "unverified": [],
+        "drift": {
+          "missing": 1
+        },
+        "herdr_registration_drift": 1
+      },
+      "manual_after": {
+        "id": "0d4e1b5c9a7f42e8b3c6d2a1f0e9b8c7",
+        "label": "devbox",
+        "target": "ssh://operator@devbox.lan",
+        "session": "default",
+        "enabled": true,
+        "selected": false
+      }
+    }
+  }
+}

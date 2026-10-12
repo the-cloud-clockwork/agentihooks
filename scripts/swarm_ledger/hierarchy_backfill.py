@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 from scripts.swarm_ledger import ledger_plans
 from scripts.swarm_ledger.repository import hierarchy, repository
 from scripts.swarm_ledger.repository import sqlite as store
+from scripts.swarm_ledger.repository.events import keep_events
 
 STANDALONE_DESCRIPTION = (
     "Tasks that belonged to no phase, moved here by the hierarchy backfill so every task sits under one plan."
@@ -191,7 +192,7 @@ def commit(repo: store.SQLiteLedgerRepository, slug: str, by: str) -> dict:
             ctx = repo.domain.Context(meta, repo.domain.now_ms())
             ctx.record(by, "backfilled", "hierarchy")
             meta.update(rev=ctx.rev, updated_at=ctx.at)
-            meta["events"] = (meta["events"] + ctx.events)[-repo.domain.EVENTS_KEPT :]
+            keep_events(meta, ctx.events, repo.domain, ctx.at)
             written = repo._write(connection, slug, entry, after, ctx.events)
         else:
             written = entry

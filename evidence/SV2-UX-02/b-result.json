@@ -1,0 +1,30 @@
+{
+  "case": "T-SV2-UX-02-B",
+  "checks": {
+    "fresh_offer_names_the_new_generation": true,
+    "no_terminal_command_ran": true,
+    "old_force_stop_refused_as_stale": true,
+    "protected_state_unchanged": true,
+    "successor_still_working": true,
+    "unsupported_attach_disabled_in_the_offer": true,
+    "unsupported_attach_refused_without_a_command": true
+  },
+  "evidence_class": "mocked: a fake Redis swarm store holds two Kubernetes workers and one local agent; page clicks enter through the ledger server's lifecycle control with the incarnation, generation and task revision a page rendered; the hive command runner consumes the queue with its terminal commands stubbed; a worker's acknowledgement and checkpoint outcome are written through the worker command queue; no ledger HTTP server, browser, worker Pod or cluster runs",
+  "input_sha256": {
+    "ledger-lifecycle-controls.json": "7debe263338f18145353feee5368d88748f513d5110fb23c17885940574ed7f1"
+  },
+  "ledger_control_conflicts_total": 1,
+  "observed": {
+    "stale_answer": [
+      409,
+      "the page is stale: this agent was replaced, finished or moved task; wait for the next swarm view"
+    ],
+    "successor_generation": 2,
+    "unsupported_answer": [
+      422,
+      "a local agent has no attach"
+    ]
+  },
+  "package": "SV2-UX-02",
+  "state": "passed"
+}

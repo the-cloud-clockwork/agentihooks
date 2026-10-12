@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/kubernetes/grants.py:scripts.swarm_v2.kubernetes.grants.x\u01c1PodGrants\u01c1hand__mutmut_42:6b2d4cc8a42e6347ac2ff62337272d8074f6d6628904d8c0457c79a51c26711c": {
+    "reader": "standards_reader",
+    "reason": "Canonical controller-produced image references have exactly one separator; split and reverse split return the same digest."
+  }
+}

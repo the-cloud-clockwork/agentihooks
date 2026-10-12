@@ -22,7 +22,7 @@ MUTATION = {
                 "properties": {
                     "path": {
                         "type": "string",
-                        "pattern": "^(phases|questions|followups|tasks)/[^/]+/(done|out_of_scope)$",
+                        "pattern": "^((phases|questions|followups|tasks)/[^/]+/(done|out_of_scope)|plans/[^/]+/out_of_scope)$",
                     },
                     "base": {"type": "boolean"},
                     "value": {"type": "boolean"},
@@ -52,7 +52,7 @@ PAGINATION = {
 }
 
 FIELDS = {
-    "add": "thread text by long attachments to reply_to",
+    "add": "thread text by long attachments to reply_to outcome",
     "edit": "thread text by",
     "delete": "thread by",
     "clear": "thread",
@@ -72,8 +72,8 @@ FIELDS = {
     "notification_clear": "target",
     "notice": "by text",
     "task_add": "by task title lane phase description depends_on territory kind contract proof workspace artifact profile plan_url plan_slice rank gain difficulty difficulty_source difficulty_confidence not_duplicate slice follow_up",
-    "task_update": "by item fields if_state if_plan_lines_missing",
-    "task_rank": "by item rank if_unranked",
+    "task_update": "by item fields if_state if_plan_lines_missing quote",
+    "task_rank": "by item rank if_owned",
     "task_group": "by item members",
     "task_ungroup": "by item",
     "title_set": "text",
@@ -98,7 +98,9 @@ FIELDS = {
     "artifact_purge": "by",
     "alert_claim": "by target",
     "alert_close": "by target outcome",
-    "time_left": "by slots ci_minutes",
+    "time_left": "by slots ci_minutes fix_phase watched",
+    "freeze_set": "by verb target reason quote",
+    "freeze_clear": "by target reason quote",
     "events_ack": "by rev",
 }
 TYPES = {
@@ -128,8 +130,8 @@ TYPES = {
     "phases": {"type": "array", "maxItems": 100, "items": {"type": "object"}},
     "attachments": {"type": "array", "maxItems": 100, "items": {"type": "object"}},
 }
-KIND_TYPES = {"artifact_add": {"plan": {"type": "boolean"}}, "task_rank": {"if_unranked": {"type": "boolean"}}}
-for _field in ("depends_on", "territory", "if_state", "members"):
+KIND_TYPES = {"artifact_add": {"plan": {"type": "boolean"}}, "task_rank": {"if_owned": {"type": "boolean"}}}
+for _field in ("depends_on", "territory", "if_state", "members", "watched"):
     TYPES[_field] = {"type": "array", "maxItems": 100, "items": {"type": "string", "maxLength": 2000}}
 
 
@@ -216,4 +218,6 @@ def target(op: dict) -> str:
         "source_add": "sources",
         "plan_add": "plans",
         "slice_add": "slices",
+        "freeze_set": "freezes",
+        "freeze_clear": "freezes",
     }.get(kind, "metadata")

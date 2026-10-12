@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '=== CONTEXT INJECTION ===\nProfile hook: dispatcher profile loaded successfully.'"
+          }
+        ]
+      }
+    ]
+  }
+}

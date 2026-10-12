@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/checkpoints/runtime.py:scripts.swarm_v2.checkpoints.runtime.x\u01c1Checkpoints\u01c1list__mutmut_40:2d3e80da52d17da18df4e257297017a6368ebdfe182b743eab4a338c498e4a5d": {
+    "reader": "standards_reader",
+    "reason": "Empty generations implies empty documents; the returned list is empty whether max defaults to zero or one. Nonempty generations ignores the default."
+  }
+}

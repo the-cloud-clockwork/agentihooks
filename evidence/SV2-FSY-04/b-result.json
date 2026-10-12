@@ -1,0 +1,905 @@
+{
+  "package": "SV2-FSY-04",
+  "case": "T-SV2-FSY-04-B",
+  "title": "rejection: a transport acknowledgement with mismatched content hash is not accepted as durability proof",
+  "tested_commit": "11d056e7ad80ae0bc50c683bfae65f9dc79c517c",
+  "evidence_class": "mocked: a local durable directory under pytest temporary roots and an in memory S3 shaped object store fake with injected truncated uploads, run in CI; no real object store, no Pod and no live rollout proof",
+  "mocked": true,
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38071102980",
+  "dimensions": {
+    "fixture": "sv2-fsy-04",
+    "backend": [
+      "local",
+      "object-store"
+    ]
+  },
+  "passed": true,
+  "measurement": {
+    "name": "artifact_upload_verification_failures",
+    "dimensions": {
+      "fixture": "sv2-fsy-04",
+      "backend": [
+        "local",
+        "object-store"
+      ]
+    },
+    "observed_per_backend": {
+      "local": 1,
+      "object-store": 1
+    },
+    "condition": "after one injected truncated upload through each backend; also asserted by test_same_length_corruption_is_refused for a same length hash mismatch and by case_b check counted",
+    "asserted_by": [
+      {
+        "test": "tests/test_swarm_v2_artifacts.py::test_truncated_upload_is_refused_counted_and_leaves_no_state[object-store]",
+        "shard": "unit (3.12, 5)",
+        "output": "PASSED at 2026-10-10T17:23:54.8805424Z"
+      },
+      {
+        "test": "tests/test_swarm_v2_artifacts.py::test_truncated_upload_is_refused_counted_and_leaves_no_state[local]",
+        "shard": "unit (3.12, 5)",
+        "output": "PASSED at 2026-10-10T17:23:55.0178940Z"
+      },
+      {
+        "test": "tests/test_swarm_v2_artifacts.py::test_truncated_upload_is_refused_counted_and_leaves_no_state[local]",
+        "shard": "unit (3.11, 1)",
+        "output": "PASSED at 2026-10-10T17:23:00.4849281Z"
+      },
+      {
+        "test": "tests/test_swarm_v2_artifacts.py::test_truncated_upload_is_refused_counted_and_leaves_no_state[object-store]",
+        "shard": "unit (3.11, 1)",
+        "output": "PASSED at 2026-10-10T17:23:00.4998614Z"
+      }
+    ],
+    "passed": true
+  },
+  "test_counts": {
+    "results": 140,
+    "distinct_tests": 70,
+    "per_python": {
+      "3.11": 70,
+      "3.12": 70
+    }
+  },
+  "tests": [
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_every_refused_upload_is_counted[local]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:54.3291758Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_malformed_reference_is_refused[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:54.3717474Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_malformed_reference_is_refused[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:54.3977551Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_every_refused_upload_is_counted[object-store]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:54.4045550Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_malformed_reference_is_refused[gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg-1]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:54.4305808Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_malformed_reference_is_refused[AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA-1]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:54.4724840Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_malformed_reference_is_refused[ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:54.4905927Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_malformed_reference_is_refused[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa--1]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:54.4935980Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_scope_refuses_names_that_are_not_identifiers[-swarm_id]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:54.5251768Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_scope_refuses_names_that_are_not_identifiers[../x-swarm_id]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:54.5335388Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_scope_refuses_names_that_are_not_identifiers[../x-execution_id]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:54.5535372Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_scope_refuses_names_that_are_not_identifiers[../x-task_id]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:54.5565625Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_scope_refuses_names_that_are_not_identifiers[.hidden-task_id]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:54.5895520Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_scope_refuses_names_that_are_not_identifiers[-task_id]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:54.6015302Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_scope_refuses_names_that_are_not_identifiers[.hidden-swarm_id]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:54.6175476Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_scope_refuses_names_that_are_not_identifiers[-execution_id]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:54.6205606Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_scope_refuses_names_that_are_not_identifiers[a/b-execution_id]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:54.6545519Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_scope_refuses_names_that_are_not_identifiers[.hidden-execution_id]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:54.6685431Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_scope_refuses_names_that_are_not_identifiers[a/b-task_id]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:54.6825597Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_scope_refuses_names_that_are_not_identifiers[a/b-swarm_id]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:54.6864807Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_scope_refuses_names_that_are_not_identifiers[7-swarm_id]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:54.7377479Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_scope_refuses_names_that_are_not_identifiers[7-task_id]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:54.7405270Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_scope_refuses_names_that_are_not_identifiers[7-execution_id]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:54.7555470Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_truncated_upload_is_refused_counted_and_leaves_no_state[object-store]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:54.8805424Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_same_length_corruption_is_refused[local]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:54.9763524Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_same_length_corruption_is_refused[object-store]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.0005453Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_truncated_upload_is_refused_counted_and_leaves_no_state[local]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.0178940Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_retry_after_a_refused_upload_is_a_new_valid_request[local]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.0214122Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_retry_after_a_refused_upload_is_a_new_valid_request[object-store]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.0883643Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_stale_generation_cannot_delete_a_newer_record[object-store]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.1194972Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_stale_generation_cannot_delete_a_newer_record[local]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.3175379Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_same_artifact_id_with_other_content_is_refused_without_writing[object-store]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.3205817Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_same_artifact_id_with_other_content_is_refused_without_writing[local]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.5523434Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_another_task_scope_sees_nothing[local]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.6338340Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_another_task_scope_sees_nothing[object-store]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.6806068Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_range_outside_the_artifact_is_refused[local--1-1]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.6843846Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_range_outside_the_artifact_is_refused[local-31-1]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.7617037Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_range_outside_the_artifact_is_refused[local-0-32]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.7699202Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_range_outside_the_artifact_is_refused[local-5-31]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.8079800Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_range_outside_the_artifact_is_refused[local-0--1]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.8088561Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_range_outside_the_artifact_is_refused[object-store-0--1]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.8143296Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_range_outside_the_artifact_is_refused[object-store-5-31]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.8425386Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_range_outside_the_artifact_is_refused[object-store-31-1]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.8795463Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_range_outside_the_artifact_is_refused[object-store--1-1]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.8820103Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_range_outside_the_artifact_is_refused[object-store-0-32]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.8905537Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_artifact_ids_must_be_identifiers[local-]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.9115333Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_artifact_ids_must_be_identifiers[local-../a]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.9475266Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_artifact_ids_must_be_identifiers[object-store-../a]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.9783899Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_artifact_ids_must_be_identifiers[local-a/b]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.9925964Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_artifact_ids_must_be_identifiers[local-3]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:56.0035258Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_artifact_ids_must_be_identifiers[object-store-3]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:56.0435268Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_artifact_ids_must_be_identifiers[object-store-]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:56.0547331Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_artifact_ids_must_be_identifiers[object-store-a/b]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:56.0675263Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_artifact_ids_must_be_identifiers[local-.a]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:56.0855277Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_artifact_ids_must_be_identifiers[object-store-.a]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:56.1446425Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_manifest_with_other_content_at_the_same_generation_is_refused[object-store]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:56.2139418Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_stale_generation_cannot_publish_over_a_newer_manifest[object-store]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:56.3455576Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_manifest_refuses_an_absent_or_unverified_artifact[object-store]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:56.3456711Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_manifest_with_other_content_at_the_same_generation_is_refused[local]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:56.3565578Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_manifest_name_must_be_an_identifier[local]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:56.4025571Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_manifest_name_must_be_an_identifier[object-store]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:56.4085085Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_truncated_manifest_upload_publishes_no_manifest[object-store]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:56.4653358Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_stale_generation_cannot_publish_over_a_newer_manifest[local]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:56.5116906Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_referenced_artifact_is_not_deleted[object-store]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:56.5263204Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_referenced_artifact_is_not_deleted[local]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:56.6248471Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_truncated_manifest_upload_publishes_no_manifest[local]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:56.6655475Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_manifest_refuses_an_absent_or_unverified_artifact[local]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:56.6885434Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_local_backend_contains_every_key",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:56.9456903Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_truncated_copy_is_refused_and_removed",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:56.9935502Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_package_acceptance_cases_pass",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:57.5392300Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_every_refused_upload_is_counted[object-store]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.1817957Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_malformed_reference_is_refused[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.2184898Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_every_refused_upload_is_counted[local]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.2282021Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_malformed_reference_is_refused[AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA-1]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.2450434Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_malformed_reference_is_refused[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.2496527Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_malformed_reference_is_refused[ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.2509916Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_malformed_reference_is_refused[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa--1]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.2667048Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_malformed_reference_is_refused[gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg-1]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.2728727Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_scope_refuses_names_that_are_not_identifiers[../x-swarm_id]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.2898477Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_scope_refuses_names_that_are_not_identifiers[../x-task_id]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.3028375Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_scope_refuses_names_that_are_not_identifiers[../x-execution_id]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.3096455Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_scope_refuses_names_that_are_not_identifiers[-task_id]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.3159208Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_scope_refuses_names_that_are_not_identifiers[-swarm_id]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.3258293Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_scope_refuses_names_that_are_not_identifiers[-execution_id]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.3325914Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_scope_refuses_names_that_are_not_identifiers[.hidden-task_id]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.3474006Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_scope_refuses_names_that_are_not_identifiers[.hidden-swarm_id]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.3518364Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_scope_refuses_names_that_are_not_identifiers[.hidden-execution_id]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.3558385Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_scope_refuses_names_that_are_not_identifiers[a/b-swarm_id]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.3688457Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_scope_refuses_names_that_are_not_identifiers[a/b-execution_id]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.3739173Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_scope_refuses_names_that_are_not_identifiers[a/b-task_id]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.3818297Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_scope_refuses_names_that_are_not_identifiers[7-swarm_id]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.3948609Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_scope_refuses_names_that_are_not_identifiers[7-execution_id]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.4058409Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_scope_refuses_names_that_are_not_identifiers[7-task_id]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.4088342Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_truncated_upload_is_refused_counted_and_leaves_no_state[local]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.4849281Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_truncated_upload_is_refused_counted_and_leaves_no_state[object-store]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.4998614Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_retry_after_a_refused_upload_is_a_new_valid_request[object-store]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.5050406Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_retry_after_a_refused_upload_is_a_new_valid_request[local]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.5462963Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_same_length_corruption_is_refused[local]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.5489730Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_same_length_corruption_is_refused[object-store]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.5788261Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_stale_generation_cannot_delete_a_newer_record[object-store]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.6468723Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_stale_generation_cannot_delete_a_newer_record[local]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.6675789Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_same_artifact_id_with_other_content_is_refused_without_writing[object-store]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.7232494Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_same_artifact_id_with_other_content_is_refused_without_writing[local]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.7362527Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_another_task_scope_sees_nothing[object-store]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.8266914Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_range_outside_the_artifact_is_refused[local--1-1]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.8358323Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_range_outside_the_artifact_is_refused[local-0--1]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.8588519Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_another_task_scope_sees_nothing[local]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.8674891Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_range_outside_the_artifact_is_refused[local-0-32]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.8778343Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_range_outside_the_artifact_is_refused[object-store-0-32]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.9028588Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_range_outside_the_artifact_is_refused[local-5-31]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.9030285Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_range_outside_the_artifact_is_refused[local-31-1]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.9070740Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_range_outside_the_artifact_is_refused[object-store--1-1]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.9288371Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_range_outside_the_artifact_is_refused[object-store-0--1]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.9289772Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_range_outside_the_artifact_is_refused[object-store-31-1]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.9541843Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_range_outside_the_artifact_is_refused[object-store-5-31]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.9569682Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_artifact_ids_must_be_identifiers[local-]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.9736301Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_artifact_ids_must_be_identifiers[local-../a]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.9766696Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_artifact_ids_must_be_identifiers[local-.a]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.9973431Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_artifact_ids_must_be_identifiers[local-a/b]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:01.0026288Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_artifact_ids_must_be_identifiers[local-3]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:01.0120609Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_artifact_ids_must_be_identifiers[object-store-]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:01.0269925Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_artifact_ids_must_be_identifiers[object-store-../a]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:01.0298398Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_artifact_ids_must_be_identifiers[object-store-3]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:01.0373066Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_artifact_ids_must_be_identifiers[object-store-a/b]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:01.0477994Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_artifact_ids_must_be_identifiers[object-store-.a]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:01.0568386Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_stale_generation_cannot_publish_over_a_newer_manifest[object-store]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:01.1291829Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_manifest_with_other_content_at_the_same_generation_is_refused[object-store]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:01.1404940Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_manifest_refuses_an_absent_or_unverified_artifact[object-store]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:01.1662222Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_manifest_with_other_content_at_the_same_generation_is_refused[local]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:01.1663997Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_manifest_name_must_be_an_identifier[object-store]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:01.1958957Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_manifest_refuses_an_absent_or_unverified_artifact[local]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:01.2263421Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_stale_generation_cannot_publish_over_a_newer_manifest[local]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:01.2659334Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_truncated_manifest_upload_publishes_no_manifest[local]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:01.2792177Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_manifest_name_must_be_an_identifier[local]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:01.2813449Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_referenced_artifact_is_not_deleted[object-store]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:01.3109897Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_truncated_manifest_upload_publishes_no_manifest[object-store]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:01.3135309Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_local_backend_contains_every_key",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:01.3368277Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_referenced_artifact_is_not_deleted[local]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:01.3440952Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_truncated_copy_is_refused_and_removed",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:01.4768272Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_package_acceptance_cases_pass",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:01.7241717Z"
+    }
+  ]
+}

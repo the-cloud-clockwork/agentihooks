@@ -1,0 +1,61 @@
+{
+  "package": "SV2-CKP-05",
+  "status": "fixture_verified",
+  "mocked": true,
+  "tested_commit": "47c3369d31b30f5e2b051588ac5e4bc28c8f9708",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2773",
+  "cases": [
+    "A",
+    "B",
+    "C"
+  ],
+  "tests": [
+    "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38191156838",
+    "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38192449508",
+    "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38210282982",
+    "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38207793497"
+  ],
+  "interfaces": [
+    "Recovery.request",
+    "Recovery.confirm",
+    "Restorer.restore",
+    "Validator.verify",
+    "capture.publish",
+    "Checkpoints.list",
+    "Checkpoints.fetch",
+    "RecoveryAPI restore outcome and checkpoint endpoints",
+    "worker prepare and supervisor native command"
+  ],
+  "supported_harness_versions": {
+    "claude": [
+      "2.1"
+    ],
+    "codex": [
+      "0.162"
+    ]
+  },
+  "metrics": "restore_outcomes_by_type counts authenticated verified worker outcomes",
+  "rollback_rehearsal": "C retained checkpoint and awaiting decision state while automation was paused",
+  "browser": {
+    "viewport": [
+      1920,
+      1080
+    ],
+    "mocked": true,
+    "proof": "workspace:vckp5/recovery-cards-1920x1080.png"
+  },
+  "deployment": {
+    "status": "checkpoint_restore_proof_pending",
+    "configuration_pr": "https://github.com/the-cloud-clockwork/antoncore/pull/720",
+    "admission_pr": "https://github.com/the-cloud-clockwork/agentihooks/pull/2770",
+    "admission_evidence": {
+      "worker_start": "prepared",
+      "authority_claim_exists": true,
+      "image_builds": [
+        38209292872,
+        38209292266
+      ],
+      "merge_commit": "803514b722dd8c6d7da3a9429c3cca9e86ffc8c1"
+    }
+  }
+}

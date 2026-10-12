@@ -79,6 +79,7 @@ COLLECTIONS = (
     "artifact_trash",
     "sources",
     "alerts",
+    "freezes",
 )
 THREADS = {
     "tasks": ("comments",),

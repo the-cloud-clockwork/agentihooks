@@ -12,7 +12,7 @@ MAX_TASKS = 5
 CEILING = "M"
 MINUTES = {"S": 10, "M": 25, "L": 40}
 GROUPED_KINDS = ("code", "ci")
-WORKER_LANES = ("eng", "ci")
+REFUSED_LANES = ("eng", "ci", "plan")
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 ID_RE = re.compile(r"^[A-Za-z0-9][\w.-]{0,63}$")
 ITEM_RE = re.compile(r"^tasks/[^/]+$")
@@ -78,7 +78,7 @@ def _upstream(task, known):
 def apply(doc, op, ctx):
     from scripts.swarm.naming import lane_of
 
-    if lane_of(op["by"]) in WORKER_LANES:
+    if lane_of(op["by"]) in REFUSED_LANES:
         verb = "release" if op["op"] == "task_ungroup" else "set"
         ctx.refused.append(f"{op['by']} works in the {lane_of(op['by'])} lane and cannot {verb} a task group")
         return False

@@ -208,3 +208,23 @@ def test_status_raises_a_base_miss_as_a_finding(store, monkeypatch):
     report = status.status_report(store, "sw", {"tasks": []})
     assert report["launch_checks"] == [saved]
     assert [f["id"] for f in report["findings"]] == ["launch-check/engineer@a1b2c3-0001/base"]
+
+
+def test_status_reports_each_closed_failed_launch_pane_with_its_lines(store, monkeypatch):
+    store.create(SwarmConfig("sw", "/repo", 1, 1))
+    agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", started_at=10, pane_id="w1:p9")
+    store.record_launch("sw", agent, "failed", "account not found")
+    store.note_launch_pane("sw", agent.name, ["account not found", "$"])
+    monkeypatch.setattr(status, "page_quota", lambda: {})
+    report = status.status_report(store, "sw", {"tasks": []})
+    assert report["failed_launch_panes"] == [
+        {
+            "agent": agent.name,
+            "task": "t1",
+            "at": 10,
+            "state": "failed",
+            "error": "account not found",
+            "pane_id": "w1:p9",
+            "pane_lines": ["account not found", "$"],
+        }
+    ]

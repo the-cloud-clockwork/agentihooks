@@ -161,6 +161,12 @@ def test_an_unknown_sample_has_no_room_limit_and_says_host_unknown():
     )
 
 
+def test_spawn_room_passes_a_room_its_reading_already_sized_through_unchanged():
+    sized = host_budget.Room(3, "worker pool: sized elsewhere", "memory")
+
+    assert host_budget.spawn_room(SwarmConfig("sw", "/repo", 1, 0), sized, 9) is sized
+
+
 def test_a_host_without_process_files_reads_as_unknown(tmp_path):
     assert host_budget.read_host(tmp_path) is None
 

@@ -12,6 +12,7 @@ import yaml
 BUILT_IN_PROFILES = Path(__file__).resolve().parents[2] / "profiles"
 PACKAGE_ROLES = BUILT_IN_PROFILES / "package" / "roles"
 PACKAGE_PREFIX = "package:"
+BUNDLE_PROFILES = "profiles"
 RENDER_STAMP = ".agentihooks-render.json"
 OVERLAY_CAP = 3
 
@@ -160,7 +161,7 @@ def profile_candidates(
             return [PACKAGE_ROLES / name.removeprefix(PACKAGE_PREFIX)]
         paths = [BUILT_IN_PROFILES / name]
         if bundle is not None:
-            paths.append(bundle / "profiles" / name)
+            paths.append(bundle / BUNDLE_PROFILES / name)
         if name in linked:
             paths.append(linked[name])
         paths.append(PACKAGE_ROLES / name)

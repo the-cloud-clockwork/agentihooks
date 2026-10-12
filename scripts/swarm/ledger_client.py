@@ -103,8 +103,11 @@ class LedgerClient:
     def capacity_comment(self, slug: str, task_id: str, text: str, at: int) -> None:
         self.comment(slug, task_id, text, by="swarm")
 
-    def time_left(self, slug: str, slots: int, ci_minutes: float | None) -> None:
-        self._call(slug, [_op("time_left", "swarm", slots=slots, ci_minutes=ci_minutes)])
+    def time_left(
+        self, slug: str, slots: int, ci_minutes: float | None, fix_phase: str = "", watched: list[str] | None = None
+    ) -> None:
+        focus = {key: value for key, value in (("fix_phase", fix_phase), ("watched", watched)) if value}
+        self._call(slug, [_op("time_left", "swarm", slots=slots, ci_minutes=ci_minutes, **focus)])
 
     def ack_events(self, slug: str, revision: int) -> None:
         self._call(slug, [_op("events_ack", "swarm", rev=revision)])
@@ -141,14 +144,24 @@ class LedgerClient:
     def priority(self, slug, item, text):
         return self._write(slug, _op("priority", "swarm", item=item, text=text), "priority")
 
+    def freeze(self, slug, verb, target, by=None, reason="", quote=""):
+        fields = {"target": target, **({"reason": reason} if reason else {}), **({"quote": quote} if quote else {})}
+        if verb == "unfreeze":
+            op = _op("freeze_clear", by, **fields)
+        else:
+            op = _op("freeze_set", by, verb=verb, **fields)
+        if by is None:
+            op.pop("by")
+        self._call(slug, [op])
+
     def group_tasks(self, slug, lead, members):
         self._call(slug, [_op("task_group", "swarm", item=f"tasks/{lead}", members=list(members))])
 
     def ungroup_tasks(self, slug, lead):
         self._call(slug, [_op("task_ungroup", "swarm", item=f"tasks/{lead}")])
 
-    def rank_task(self, slug, task_id, rank, by, if_unranked=False):
-        guard = {"if_unranked": True} if if_unranked else {}
+    def rank_task(self, slug, task_id, rank, by, if_owned=False):
+        guard = {"if_owned": True} if if_owned else {}
         self._call(slug, [_op("task_rank", by, item=f"tasks/{task_id}", rank=rank, **guard)])
 
     def clear_priority(self, slug, priority_id, reason):

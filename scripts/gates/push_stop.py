@@ -6,6 +6,7 @@ import re
 import signal
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,8 +25,9 @@ SETTLED = "a later stop passed with the work committed, on origin and recorded"
 PUSHED = "pushed"
 GITHUB_RE = re.compile(r"github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?/?$")
 GIT_TIMEOUT_S = 60
-# Two seconds under the Stop condition's kill: a gate still running at the kill lets the stop through unpushed.
-GATE_TIMEOUT_S = CONDITIONS_TIMEOUT_SEC - 2
+# Measured: a GitHub push takes up to 2.3 s, the ledger write after it up to 0.52 s and the hook's startup up to 0.23 s.
+RESERVE_S = 3.5
+FLOOR_S = 1.0
 PREPUSH = Path("scripts") / "ci_prepush" / "__init__.py"
 GATE_FAILED = (
     "The pre push gate failed in {path}, so the stop hook did not push it. "
@@ -35,6 +37,11 @@ GATE_SLOW = (
     "The pre push gate did not finish in {seconds:g} s in {path}, so the stop hook did not push it. "
     "Run python -m scripts.ci_prepush there and commit."
 )
+GATE_LATE = (
+    "The stop hook had too little time left to run the pre push gate in {path}, so it did not push it. "
+    "Run python -m scripts.ci_prepush there and commit."
+)
+PUSH_LATE = "The stop hook had too little time left to push {path}, so it did not push it. Push it yourself."
 
 
 @dataclass(frozen=True)
@@ -75,7 +82,7 @@ def trees(root, name):
     return [tree for tree in found if tree is not None]
 
 
-def gate_refusal(tree):
+def gate_refusal(tree, budget):
     """Why the pre push gate keeps HEAD off origin, or None: a repo without one passes, a stamped HEAD is not rerun."""
     if not (tree.path / PREPUSH).is_file():
         return None
@@ -83,6 +90,9 @@ def gate_refusal(tree):
 
     if passed(tree.path):
         return None
+    seconds = budget()
+    if seconds < FLOOR_S:
+        return GATE_LATE.format(path=tree.path)
     gate = subprocess.Popen(
         [sys.executable, "-m", "scripts.ci_prepush"],
         cwd=tree.path,
@@ -91,11 +101,11 @@ def gate_refusal(tree):
         start_new_session=True,
     )
     try:
-        code = gate.wait(GATE_TIMEOUT_S)
+        code = gate.wait(seconds)
     except subprocess.TimeoutExpired:
         os.killpg(gate.pid, signal.SIGKILL)
         gate.wait()
-        return GATE_SLOW.format(path=tree.path, seconds=GATE_TIMEOUT_S)
+        return GATE_SLOW.format(path=tree.path, seconds=round(seconds, 1))
     return None if code == 0 else GATE_FAILED.format(path=tree.path)
 
 
@@ -148,8 +158,10 @@ class PushStop:
     name = "push-stop"
     default_mode = "enforce"
 
-    def __init__(self, connect=None, ledger=None, root=None, now=None):
-        self._connect, self._ledger, self._root, self._now = connect, ledger, root, now
+    def __init__(self, connect=None, ledger=None, root=None, now=None, clock=None):
+        self._connect, self._ledger, self._root, self._now, self._clock = connect, ledger, root, now, clock
+        # The hook process builds its gates right after its imports; the reserve covers the startup before this.
+        self.started = self.clock()
 
     def matches(self, call):
         return not call.tool
@@ -164,7 +176,7 @@ class PushStop:
             return Decision()
         store, owed, failed = self.connect(), False, []
         for tree in trees(self.root(), who.name):
-            if tree.unpushed and (refused := gate_refusal(tree)):
+            if tree.unpushed and (refused := self.held(tree)):
                 failed.append(refused)
             elif tree.unpushed and push(tree):
                 self.record(store, ledger, who, tree)
@@ -175,6 +187,10 @@ class PushStop:
             return Decision()
         self.notify(store, who)
         return Decision.deny(" ".join([TEMPLATE, *failed]))
+
+    def held(self, tree):
+        """Why HEAD stays off origin: its pre push gate refused, or less than the reserve is left for the push."""
+        return gate_refusal(tree, self.left) or (PUSH_LATE.format(path=tree.path) if self.left() < 0 else None)
 
     def on_origin(self, tree):
         return count(tree.path, "HEAD", "--not", "--remotes=origin") == 0
@@ -235,6 +251,11 @@ class PushStop:
     def now(self):
         if self._now:
             return self._now()
-        import time
-
         return int(time.time() * 1000)
+
+    def clock(self):
+        return self._clock() if self._clock else time.monotonic()
+
+    def left(self):
+        """Seconds a pre push gate may run: the Stop condition's time left after the reserve."""
+        return self.started + CONDITIONS_TIMEOUT_SEC - self.clock() - RESERVE_S

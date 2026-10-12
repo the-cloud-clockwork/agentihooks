@@ -120,6 +120,15 @@ def global_resource(handler: object, server: ModuleType, parts: list) -> dict:
             return resources.page(rows, resources.revision(rows), pagination(handler.path))
     if parts == ["bin", "actions"] and handler.command == "POST":
         return admin.bin_action(handler, server, body(handler, server))
+    if parts[0] == "proof-ledgers" and handler.command == "POST":
+        from . import proofs
+
+        proofs.require_controller(handler, server)
+        if len(parts) == 1:
+            return proofs.create(server, body(handler, server))
+        if len(parts) == 3 and parts[2] == "remove":
+            schemas.validate({"type": "object", "maxProperties": 0}, body(handler, server))
+            return proofs.remove(handler, server, parts[1])
     raise APIError(404, "resource_missing", "No such resource")
 
 

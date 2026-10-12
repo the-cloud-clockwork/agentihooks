@@ -8,7 +8,7 @@ from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, session_bands
 from scripts.routing import claude_api, codex_api, place
 from scripts.routing.slots import API, SUBSCRIPTION
-from scripts.swarm import autoscale, host_budget
+from scripts.swarm import autoscale, freeze, host_budget
 from scripts.swarm.store import AUTO_SCALING, RedisStore, SwarmConfig
 
 LANES = ("eng", "ci", "plan")
@@ -27,6 +27,7 @@ class Account:
     week_resets_at: int | None = None
     kind: str = SUBSCRIPTION
     weight: int | None = None
+    five_resets_at: int | None = None
 
 
 def _left(window: balancer.QuotaWindow, now: float) -> float | None:
@@ -45,11 +46,26 @@ def _claude(environ: dict, now: float) -> list[Account]:
     counts = account_sessions.sessions_by_account()
     rows = []
     for at, result in observed.values():
-        cap = tokens.cap(result, now) if session_bands.fresh(at, now) else None
+        cap = (
+            tokens.cap(result, now)
+            if environ.get(f"{balancer.TOKEN_PREFIX}{result.account}") and session_bands.fresh(at, now)
+            else None
+        )
         five, week = _left(result.five_hour, now), _left(result.seven_day, now)
         reset = session_bands.upcoming(result.seven_day.resets_at, now)
+        five_reset = session_bands.upcoming(result.five_hour.resets_at, now)
         rows.append(
-            Account("claude", result.account, _state(cap), counts.get(result.account, 0), five, week, cap, reset)
+            Account(
+                "claude",
+                result.account,
+                _state(cap),
+                counts.get(result.account, 0),
+                five,
+                week,
+                cap,
+                reset,
+                five_resets_at=five_reset,
+            )
         )
     rows += [
         Account("claude", name, "UNKNOWN", count, None, None)
@@ -72,7 +88,7 @@ def _api(source, harness: str, environ: dict, now: float) -> list[Account]:
 
 def _codex(environ: dict, now: float, refresh: bool) -> list[Account]:
     source = codex_router.CodexAccountSource(refresh=refresh)
-    pool = [account for account in source.pool(environ) if account.signed_in]
+    pool = source.pool(environ)
     counts = account_sessions.codex_sessions_by_account()
     found = source.readings(pool, environ, now)
     known = {account.name for account in pool}
@@ -85,11 +101,24 @@ def _codex(environ: dict, now: float, refresh: bool) -> list[Account]:
     rows = []
     for account in pool + live:
         quota = found.get(account.name)
-        cap = codex_router.account_cap(quota, now) if account.name in known else None
+        cap = codex_router.account_cap(quota, now, environ) if account.name in known else None
         five = _left(quota.five_hour, now) if quota else None
         week = _left(quota.seven_day, now) if quota else None
         reset = session_bands.upcoming(quota.seven_day.resets_at, now) if quota else None
-        rows.append(Account("codex", account.name, _state(cap), counts.get(account.name, 0), five, week, cap, reset))
+        five_reset = session_bands.upcoming(quota.five_hour.resets_at, now) if quota else None
+        rows.append(
+            Account(
+                "codex",
+                account.name,
+                _state(cap),
+                counts.get(account.name, 0),
+                five,
+                week,
+                cap,
+                reset,
+                five_resets_at=five_reset,
+            )
+        )
     return rows + _api(codex_api.CodexApiSource(counts), "codex", environ, now)
 
 
@@ -234,7 +263,7 @@ class ScaleInputs:
     observations: list[Account]
     agents: list
     demand: dict | None
-    host: Callable[[], host_budget.HostSample | None]
+    host: Callable[[], host_budget.HostSample | host_budget.Room | None]
     previous: dict
     warned: dict = field(default_factory=dict)
     spent: Callable[[int], int] = no_spawns
@@ -282,17 +311,19 @@ def autoscaled(config: SwarmConfig, inputs: ScaleInputs, host: dict | None = Non
 
 
 def ready_work(slug: str, store, doc: dict) -> tuple[dict, dict]:
-    from scripts.swarm.tick import _claimable, _launch_order
+    from scripts.swarm import dispatcher
+    from scripts.swarm.tick import ready_in_order
 
     rows = {task["id"]: task for task in doc["tasks"]}
-    return rows, {lane: _launch_order(slug, store, _claimable(slug, store, rows, doc, lane)) for lane in LANES}
+    dispatched = dispatcher.claim_key(store.config(slug), doc)
+    return rows, {lane: ready_in_order(slug, store, rows, doc, lane, dispatched) for lane in LANES}
 
 
 def live_inputs(slug: str, store, ledger, environ: dict, now_ms: int) -> ScaleInputs:
     from scripts.swarm import quota_handoff
     from scripts.swarm.tick import _ended
 
-    rows, ready = ready_work(slug, store, ledger.state(slug))
+    rows, ready = ready_work(slug, store, freeze.watched(slug, store, ledger, ledger.state(slug)))
     observations = accounts(environ, now_ms / 1000, refresh=False)
     thresholds = quota_handoff.Thresholds.from_env(environ)
     warned = {
@@ -384,6 +415,10 @@ def read(store, slug: str) -> dict:
     return json.loads(value) if value else {}
 
 
+def caps(decision: dict, config: SwarmConfig) -> dict[str, int]:
+    return decision.get("effective", {"eng": config.max_eng, "ci": config.max_ci, "plan": config.max_plan})
+
+
 def status_line(decision: dict) -> str:
     if not decision:
         return "quota capacity has not been observed"
@@ -407,7 +442,7 @@ def apply(slug: str, config, store, ledger, runtime, now_ms: int) -> list[str]:
     from scripts.swarm.ledger_client import LedgerRefused
     from scripts.swarm.tick import _ended
 
-    rows, ready = ready_work(slug, store, ledger.state(slug))
+    rows, ready = ready_work(slug, store, freeze.watched(slug, store, ledger, ledger.state(slug)))
     demand = {lane: len(tasks) for lane, tasks in ready.items()}
     requirements = None
     if hasattr(runtime, "quota_requirements"):

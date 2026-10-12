@@ -1,0 +1,72 @@
+{
+  "materials": {
+    "normalized_transcript": "{\"seq\":40,\"role\":\"user\",\"text\":\"fixture prompt\"}\n{\"seq\":41,\"role\":\"assistant\",\"text\":\"fixture reply\"}\n",
+    "native_session": "{\"type\":\"summary\",\"session\":\"native-session-fixture-0001\"}\n",
+    "source_bundle": "fixture git bundle bytes for engineer-fixture-0001\n"
+  },
+  "manifest": {
+    "schema_version": "2.2",
+    "operation_id": "ckpt-native-0001",
+    "authority": {
+      "execution_id": "e1",
+      "task_id": "t1",
+      "task_generation": 2,
+      "project_id": "local:fixture"
+    },
+    "checkpoint_id": "ckpt-native-0001",
+    "checkpoint_sequence": 1,
+    "status": "complete",
+    "created_at": "2026-10-11T09:00:00Z",
+    "committed_at": "2026-10-11T09:00:30Z",
+    "continuation": "native",
+    "native_resume_capability": "qualified",
+    "base_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "head_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "branch_name": "engineer-fixture-0001",
+    "branch_state": "bundled",
+    "transcript_durable_cursor": {
+      "sequence": 41,
+      "byte_offset": 102
+    },
+    "inventory": {
+      "native_session": {
+        "sha256": "c24e850d5f0aa56034936d8e9f39ad6df13e925f379ac2009a746b74b755c996",
+        "size": 59
+      },
+      "normalized_transcript": {
+        "sha256": "2911e953a7946c60e39975ab8ed3acacd5b8eff7bc26b209b8c9f34df3cace47",
+        "size": 102
+      },
+      "source_bundle": {
+        "sha256": "79c433180edc625885dcfc5685d327bd6db17afd49b08d911474aaf897302946",
+        "size": 51
+      }
+    },
+    "artifact_hashes": {
+      "native_session": "sha256:c24e850d5f0aa56034936d8e9f39ad6df13e925f379ac2009a746b74b755c996",
+      "normalized_transcript": "sha256:2911e953a7946c60e39975ab8ed3acacd5b8eff7bc26b209b8c9f34df3cace47",
+      "source_bundle": "sha256:79c433180edc625885dcfc5685d327bd6db17afd49b08d911474aaf897302946"
+    },
+    "exclusions": [
+      "environment variables",
+      "account authentication stores"
+    ],
+    "quiescence_method": "stopped_process",
+    "reconstruction": {
+      "harness": "claude",
+      "image_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "task_revision": 7,
+      "execution_generation": 2
+    },
+    "dependencies_manifest": {
+      "lockfiles": [
+        "uv.lock"
+      ]
+    },
+    "restore_constraints": [
+      "same harness major version"
+    ],
+    "native_harness_version": "claude-fixture-2",
+    "native_session_id": "native-session-fixture-0001"
+  }
+}
