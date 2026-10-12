@@ -123,7 +123,7 @@ def test_a_launch_admits_one_server_binds_its_thread_and_opens_once(store, serve
     assert server.commands == [["codex", "app-server", "--listen", f"unix://{path}"]]
     assert server.spawns == [
         {
-            "env": {"CODEX_HOME": server.codex_home, "AGENTIHOOKS_SWARM": SLUG},
+            "env": {"CODEX_HOME": str(path.parent / "codex"), "AGENTIHOOKS_SWARM": SLUG},
             "cwd": str(tmp_path),
             "stdin": subprocess.DEVNULL,
             "start_new_session": True,
@@ -407,7 +407,6 @@ def test_two_executions_get_two_private_endpoints(store, server, clock, root, tm
 
 def test_concurrent_executions_write_private_seeded_homes(store, server, root, tmp_path):
     profile = Path(server.codex_home)
-    profile.mkdir()
     (profile / "config.toml").write_text('model = "fixture"\n')
     (profile / "hooks.json").write_text("{}")
     shared = tmp_path / "shared-skills"
@@ -464,6 +463,42 @@ def test_concurrent_executions_write_private_seeded_homes(store, server, root, t
     assert (profile / "skills").is_symlink()
     assert (profile / "history.jsonl").is_symlink()
     assert not (tmp_path / "missing-history").exists()
+
+
+def test_execution_home_keeps_profile_binding_and_manifests(server, tmp_path):
+    import json
+
+    from scripts.profiles import binding
+
+    profile = Path(server.codex_home)
+    (profile / "AGENTS.md").write_text("fixture persona")
+    manifest = profile.parent / "codex.sources.json"
+    manifest.write_text("[]")
+    mounts = profile.parent / "codex.mounts.json"
+    mounts.write_text('{"fixture": "mount"}')
+    binding.write(profile, "engineer", "codex")
+    original = (profile / binding.FILE).read_bytes()
+    directory = tmp_path / "execution"
+    directory.mkdir()
+    spec = supervisor.Launch("fixture", AgentRecord("fixture", "eng", "task"), str(tmp_path), str(profile), {})
+    private = supervisor.execution_home(spec, directory)
+    home = Path(private.codex_home)
+    assert binding.inspect(home, "engineer", "codex")["home"] == str(home)
+    assert (directory / "codex.sources.json").read_bytes() == manifest.read_bytes()
+    assert (directory / "codex.mounts.json").read_bytes() == mounts.read_bytes()
+    assert (profile / binding.FILE).read_bytes() == original
+    assert json.loads(original)["home"] == str(profile)
+
+
+def test_a_home_seed_failure_spawns_nothing_and_frees_the_endpoint(store, server, clock, root, tmp_path):
+    spec = launch_spec(store, server, tmp_path, codex_home=str(tmp_path / "missing"))
+    with pytest.raises(FileNotFoundError):
+        supervisor.launch(store, spec, deps(server, clock, root))
+    assert not server.spawns
+    record = only_record(store)
+    assert record.state == FAILED
+    assert record.last_error_class == "FileNotFoundError"
+    assert not store.redis.hgetall(store.key(SLUG, ENDPOINTS))
 
 
 def test_the_runtime_root_comes_from_the_launch_environment_when_deps_name_none(store, server, clock, tmp_path):
