@@ -5,7 +5,7 @@ from functools import partial
 from typing import TYPE_CHECKING
 
 from scripts.swarm.store import RedisStore, SwarmError
-from scripts.swarm_v2 import image_tag
+from scripts.swarm_v2 import image_tag, proof_swarm
 from scripts.swarm_v2.accounts import AccountCapacity, fleet_held
 from scripts.swarm_v2.auth_context import Registration
 from scripts.swarm_v2.herdr.capabilities import Qualifier, machine_probe
@@ -261,6 +261,7 @@ class RecoveryPass:
         self.recovery, self.api, self.selector = recovery, api, selector
         self.version, self.listed = "", {}
         self.replacements: Replacements | None = None
+        self.choose: Callable[[], list[str]] | None = None
         self.completion: Completion | None = None
 
     def __call__(self) -> dict[str, str]:
@@ -273,6 +274,9 @@ class RecoveryPass:
                 gone.setdefault(uid, pod)
         self.listed = {_uid(pod): pod for pod in pods}
         seen = self.recovery.reconcile(pods, self.api.ready_nodes(), list(gone.values()))
+        if self.choose is not None:
+            for line in self.choose():
+                print(line, flush=True)
         if self.replacements is not None:
             self.replacements()
         if self.completion is not None:
@@ -295,7 +299,11 @@ def _uid(pod: dict) -> str:
 
 
 def recovery_pass(
-    service: "ControlService", workers: Workers, api: PodApi, ledger: TaskLedger | None = None
+    service: "ControlService",
+    workers: Workers,
+    api: PodApi,
+    ledger: TaskLedger | None = None,
+    environ: Mapping[str, str] | None = None,
 ) -> RecoveryPass:
     controller, grants = service.controller, service.grants
     slug = controller.slug
@@ -312,4 +320,6 @@ def recovery_pass(
     recovering.completion = Completion(controller.store, slug, cleanup)
     if ledger is not None:
         recovering.replacements = Replacements(recovery, service.runtime.relaunch, ledger)
+    if environ is not None:
+        recovering.choose = partial(proof_swarm.choose_fresh, environ, recovery)
     return recovering

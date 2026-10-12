@@ -355,7 +355,7 @@ def test_a_lane_pin_wins_over_an_opposite_saved_harness(tmp_path, monkeypatch, p
         seen["argv"] = argv
         return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
 
-    def pick(harness, lane, task, environ):
+    def pick(harness, lane, task, environ, bounds):
         seen["classifier_harness"] = harness
         return model_pick.ModelPick("", "high", "classifier", 0.9)
 
@@ -469,17 +469,17 @@ def test_only_a_codex_planner_starts_read_only(tmp_path, lane, agent):
 
 def test_an_auto_lane_falls_back_to_the_automatic_choice(tmp_path):
     seen = _spawn_seen(tmp_path, {"eng": {"agent": "auto", "model": "auto", "effort": "auto"}})
-    assert seen["requested"] == "" and _passed(seen["argv"]) == ["--model", "opus", "--effort", "high"]
+    assert seen["requested"] == "" and _passed(seen["argv"]) == ["--model", "opus", "--effort", "medium"]
 
 
 def test_a_lane_without_an_entry_falls_back_to_the_automatic_choice(tmp_path):
     seen = _spawn_seen(tmp_path, {"eng": {"agent": "codex"}}, lane="ci")
-    assert seen["requested"] == "" and _passed(seen["argv"]) == ["--model", "opus", "--effort", "high"]
+    assert seen["requested"] == "" and _passed(seen["argv"]) == ["--model", "opus", "--effort", "medium"]
 
 
 def test_a_lane_model_goes_to_the_automatically_chosen_agent(tmp_path):
     seen = _spawn_seen(tmp_path, {"eng": {"agent": "auto", "model": "sonnet", "effort": "auto"}})
-    assert seen["requested"] == "" and _passed(seen["argv"]) == ["--model", "sonnet", "--effort", "high"]
+    assert seen["requested"] == "" and _passed(seen["argv"]) == ["--model", "sonnet", "--effort", "xhigh"]
 
 
 def test_the_lane_role_replaces_the_default_role_in_the_prompt(tmp_path):
@@ -731,8 +731,8 @@ def test_a_codex_launch_must_start_its_harness_inside_the_start_timeout(tmp_path
     [
         ("master", "claude", ["--model", "opus", "--effort", "high"], "frontier"),
         ("master", "codex", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="high"'], "frontier"),
-        ("eng", "claude", ["--model", "opus", "--effort", "high"], "lane-default"),
-        ("eng", "codex", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="high"'], "lane-default"),
+        ("eng", "claude", ["--model", "opus", "--effort", "medium"], "lane-default"),
+        ("eng", "codex", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="medium"'], "lane-default"),
     ],
 )
 def test_resume_uses_defaults_when_no_resolved_model_was_recorded(tmp_path, monkeypatch, lane, harness, launch, source):
@@ -870,7 +870,7 @@ SEAT_TASKS = {
 
 @pytest.mark.parametrize("lane", sorted(SEAT_TASKS))
 @pytest.mark.parametrize("handoff", [None, "# Handoff\n<!-- handoff complete -->"])
-def test_every_seat_launch_carries_opus_and_high_effort_for_claude(tmp_path, monkeypatch, lane, handoff):
+def test_every_seat_launch_carries_opus_and_its_lane_effort_for_claude(tmp_path, monkeypatch, lane, handoff):
     from scripts.swarm.templates import DEFAULT_PROFILES
 
     transfer = (
@@ -889,7 +889,8 @@ def test_every_seat_launch_carries_opus_and_high_effort_for_claude(tmp_path, mon
         else {}
     )
     task = {**SEAT_TASKS[lane], **transfer}
-    assert _launched(tmp_path, monkeypatch, lane, task) == ["--model", "opus", "--effort", "high"]
+    effort = "high" if handoff or lane == "master" else "medium"
+    assert _launched(tmp_path, monkeypatch, lane, task) == ["--model", "opus", "--effort", effort]
 
 
 @pytest.mark.parametrize("lane", ["master", "plan"])
@@ -921,24 +922,20 @@ def test_a_master_launches_on_the_frontier_model_at_high_effort_whatever_the_lan
 def _lowest_pick(*args, **kwargs):
     from hooks.classifier import Answer, DecisionResult
 
-    return DecisionResult({"effort": Answer("score", score=0, confidence=0.95)}, "luna")
+    return DecisionResult({"option": Answer("choice", choice="lower", confidence=0.95)}, "luna")
 
 
-@pytest.mark.parametrize("lane", sorted(SEAT_TASKS))
-@pytest.mark.parametrize(
-    "harness,launch",
-    [
-        ("claude", ["--model", "opus", "--effort", "high"]),
-        ("codex", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="high"']),
-    ],
-)
-def test_a_live_classifier_never_launches_a_seat_below_the_default_model_and_high_effort(
-    tmp_path, monkeypatch, lane, harness, launch
+@pytest.mark.parametrize("lane,effort", [("eng", "medium"), ("ci", "medium"), ("plan", "medium"), ("master", "high")])
+@pytest.mark.parametrize("harness,model", [("claude", "opus"), ("codex", "gpt-6.1-sol")])
+def test_a_live_classifier_never_launches_a_seat_below_the_default_model_and_its_lane_floor(
+    tmp_path, monkeypatch, lane, effort, harness, model
 ):
+    from scripts.init_agent import model_flags
     from scripts.swarm import model_pick
 
     monkeypatch.setattr(model_pick, "decide", _lowest_pick)
-    assert _launched(tmp_path, monkeypatch, lane, SEAT_TASKS[lane], harness=harness) == launch
+    launched = _launched(tmp_path, monkeypatch, lane, SEAT_TASKS[lane], harness=harness)
+    assert launched == model_flags(harness, model, effort)
 
 
 def test_a_swarm_config_model_launches_as_named_with_the_classifier_live(tmp_path, monkeypatch):
@@ -950,7 +947,7 @@ def test_a_swarm_config_model_launches_as_named_with_the_classifier_live(tmp_pat
         "--model",
         "sonnet",
         "--effort",
-        "high",
+        "xhigh",
     ]
 
 

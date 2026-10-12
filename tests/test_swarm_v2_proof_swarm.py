@@ -262,3 +262,48 @@ def test_every_pass_line_is_flushed_for_the_pod_log(store, monkeypatch):
 
     assert [kwargs["flush"] for _, kwargs in printed] == [True, True]
     assert printed[0][0] == ("controller: a",)
+
+
+class Recovery:
+    def __init__(self, slug=SLUG, waiting=("exe-a", "exe-b")):
+        self.slug, self.waiting, self.decided = slug, list(waiting), []
+
+    def pending(self):
+        return list(self.waiting)
+
+    def decide(self, execution_id, choice):
+        self.decided.append((execution_id, choice))
+
+
+SERVED = {**ENV, "AGENTIHOOKS_CONTROL_SWARM": SLUG}
+
+
+def test_the_served_proof_swarm_chooses_fresh_for_every_pending_recovery_with_its_reason():
+    recovery = Recovery()
+
+    lines = proof_swarm.choose_fresh(SERVED, recovery)
+
+    assert recovery.decided == [("exe-a", "fresh"), ("exe-b", "fresh")]
+    assert lines == [
+        f"controller: chose fresh for {execution} in proof swarm {SLUG}: the controller owns this proof swarm, "
+        "which keeps no checkpoints and runs one trivial task"
+        for execution in ("exe-a", "exe-b")
+    ]
+
+
+@pytest.mark.parametrize(
+    ("environ", "slug"),
+    [
+        (SERVED, OTHER),
+        ({**CLEARED, "AGENTIHOOKS_CONTROL_SWARM": SLUG}, SLUG),
+        ({**SERVED, "AGENTIHOOKS_CONTROL_PROOF": "{"}, SLUG),
+        ({**ENV, "AGENTIHOOKS_CONTROL_SWARM": "rig-grade-swarm"}, "rig-grade-swarm"),
+        (ENV, SLUG),
+    ],
+    ids=["another-swarm", "proof-cleared", "proof-malformed", "not-a-proof-name", "nothing-served"],
+)
+def test_no_swarm_but_the_served_proof_has_a_pending_recovery_decided(environ, slug):
+    recovery = Recovery(slug)
+
+    assert proof_swarm.choose_fresh(environ, recovery) == []
+    assert recovery.decided == []

@@ -312,6 +312,18 @@ def test_no_checkpoint_or_a_paused_recovery_leaves_the_seat_awaiting_a_decision(
     assert len(world.attempts("eng-2")) == 1
 
 
+def test_pending_lists_only_the_attempts_still_awaiting_a_decision(world):
+    world.checkpoints.by_execution[world.old.execution_id] = []
+    recovery = world.recovery(world.live)
+    assert recovery.pending() == []
+    other = world.launch(world.live, world.fx["second"], "eng-2")
+    recovery.handle(world.old.execution_id, "node_lost")
+    world.recovery(world.live, automatic=False).handle(other.execution_id, "oom_killed")
+    assert recovery.pending() == sorted([world.old.execution_id, other.execution_id])
+    recovery.decide(world.old.execution_id, "fresh")
+    assert recovery.pending() == [other.execution_id]
+
+
 def test_an_image_pull_never_replaces_automatically(world):
     decision = world.recovery(world.live).handle(world.old.execution_id, "image_pull")
     assert decision.mode == "recovery_pending"
@@ -675,6 +687,30 @@ def test_a_pod_deleted_after_the_listing_is_reported_by_the_overlapping_watch():
         recover()
     assert [deleted for _, _, deleted in recording.calls] == [[], [a_last], [a_last]]
     assert [call for call in api.calls if call[0] == "watch"] == [("watch", "owner=x", "5"), ("watch", "owner=x", "9")]
+
+
+def test_the_chooser_runs_after_reconcile_and_before_replacements_and_its_lines_reach_the_log(monkeypatch):
+    printed, order = [], []
+    monkeypatch.setattr(deployed, "print", lambda *line, **flags: printed.append((line, flags)), raising=False)
+    recording = _Recording()
+    recording.reconcile = lambda *args: order.append("reconcile") or {}
+    recover = deployed.RecoveryPass(recording, _Scripted([([], "5")], []), "owner=x")
+    recover.choose = lambda: order.append("choose") or ["controller: chose fresh"]
+    recover.replacements = lambda: order.append("replace") or {}
+    recover()
+    assert order == ["reconcile", "choose", "replace"]
+    assert printed == [(("controller: chose fresh",), {"flush": True})]
+
+
+def test_the_deployed_pass_chooses_only_when_given_the_controller_environment(world, monkeypatch):
+    service = SimpleNamespace(controller=world.live, grants=_Grants())
+    cluster = _Cluster(world)
+    assert deployed.recovery_pass(service, SimpleNamespace(image_tag="dev"), cluster).choose is None
+    seen = []
+    monkeypatch.setattr(deployed.proof_swarm, "choose_fresh", lambda environ, recovery: seen.append(environ) or [])
+    recover = deployed.recovery_pass(service, SimpleNamespace(image_tag="dev"), cluster, environ={"A": "1"})
+    assert recover.choose() == []
+    assert seen == [{"A": "1"}]
 
 
 def test_the_deployed_pass_fences_a_live_pod_on_a_lost_node_while_nodes_are_refused(world):

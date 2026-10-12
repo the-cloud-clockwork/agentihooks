@@ -605,6 +605,23 @@ def test_the_start_logs_that_it_built_the_kubernetes_runtime(tmp_path, monkeypat
         service.stop()
 
 
+def test_the_started_recovery_pass_hands_the_proof_chooser_the_controller_environment(tmp_path, monkeypatch):
+    store, chosen = _store(), []
+    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: Pods(namespace))
+    monkeypatch.setattr(
+        deployed.proof_swarm, "choose_fresh", lambda environ, recovery: chosen.append((environ, recovery))
+    )
+    environ = _environ(tmp_path, store)
+
+    service = _cs().host(environ, store, "hive-fixture")
+    try:
+        service.recover.choose()
+        ((handed, recovery),) = chosen
+        assert (handed, recovery.slug) == (environ, SLUG)
+    finally:
+        service.stop()
+
+
 def test_the_runtime_line_is_flushed_so_the_container_log_shows_it_at_once(tmp_path, monkeypatch):
     store, printed = _store(), []
     monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: Pods(namespace))

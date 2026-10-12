@@ -124,7 +124,7 @@ def test_the_balance_help_names_every_flag_and_subcommand(monkeypatch, capsys):
     def shows(text, page):
         return re.search(rf"(?m)(?:^|\s){re.escape(text)}$", page) is not None
 
-    assert shows("Probe and rank Claude OAuth accounts without launching workload", top)
+    assert shows("One table for every Claude and Codex account, without launching anything", top)
     for text in (
         "Report routing state without launching Claude",
         "Include the separate Fable weekly quota",

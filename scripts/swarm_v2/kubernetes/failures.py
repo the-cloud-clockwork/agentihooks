@@ -208,6 +208,10 @@ class Recovery:
         raw = self.store.redis.hget(self._key(RECOVERIES), execution_id)
         return Decision(**json.loads(raw)) if raw else None
 
+    def pending(self) -> list[str]:
+        decided = self.store.redis.hkeys(self._key(RECOVERIES))
+        return sorted(execution_id for execution_id in decided if self.decision(execution_id).mode == PENDING)
+
     def late_observations(self, execution_id: str) -> int:
         return int(self.store.redis.hget(self._key(LATE), execution_id) or 0)
 

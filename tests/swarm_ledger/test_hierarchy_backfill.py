@@ -655,6 +655,23 @@ def test_apply_records_one_backfill_event_at_the_write_time(tmp_path, monkeypatc
     ]
 
 
+def test_apply_keeps_every_event_inside_the_window_past_the_kept_count(tmp_path, monkeypatch):
+    repo = repository(tmp_path)
+    now, ids = 1_800_000_000_000, [f"m{n}" for n in range(repo.domain.EVENTS_KEPT + 100)]
+    state = repo.export_document(SLUG)
+    state["_meta"]["events"] = [
+        {"rev": state["_meta"]["rev"], "at": now - 60_000, "by": "operator", "kind": "message added", "id": i}
+        for i in ids
+    ]
+    repo.import_document(SLUG, state, token=repo.token(SLUG), replace=True)
+    monkeypatch.setattr(repo.domain, "now_ms", lambda: now)
+    hierarchy_backfill.backfill(repo, SLUG, "planner", apply=True)
+    meta = store.SQLiteLedgerRepository(repo.path).export_document(SLUG)["_meta"]
+    assert [event.get("id") for event in meta["events"][:-1]] == ids
+    assert meta["events"][-1]["kind"] == "backfilled"
+    assert "events_trimmed" not in meta
+
+
 def test_apply_repairs_drifted_hierarchy_rows_with_one_reported_event(tmp_path):
     repo = repository(tmp_path)
     hierarchy_backfill.backfill(repo, SLUG, "planner", apply=True)

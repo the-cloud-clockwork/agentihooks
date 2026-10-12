@@ -242,7 +242,7 @@ def host(environ: Mapping[str, str], store: RedisStore, owner: str) -> ControlSe
         service.api_url = workers.terms.api_url
         service.runtime = deployed.tick_runtime(service, workers, environ)
         service.pods = transports[0].status
-        service.recover = deployed.recovery_pass(service, workers, transports[0].api, LedgerClient())
+        service.recover = deployed.recovery_pass(service, workers, transports[0].api, LedgerClient(), environ)
         if service.controller.terminals is not None:
             service.views = deployed.terminal_views(service.controller, environ)
     if hosted:

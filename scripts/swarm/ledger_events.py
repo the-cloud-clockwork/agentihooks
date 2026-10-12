@@ -31,6 +31,8 @@ MERGED_MASTER_MS = 20 * MINUTE_MS
 RED_QUIET_MS = 20 * MINUTE_MS
 SENT_TTL_S = 30 * 24 * 3600
 SENDER = "swarm"
+EVENTS_CURSOR = "events-cursor"
+RELAYED = "agent follow ups, questions and task changes"
 OPERATOR = "operator"
 ASK_WORDS = 12
 RED = {"FAILURE", "ERROR", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED"}
@@ -318,12 +320,26 @@ def event_pass(inbox, store, slug, doc, ledger, now_ms, github=view):
     tasks = {t["id"]: t for t in doc.get("tasks", [])}
     raised = _raised_for_operator(doc, events)
     return (
-        _events(mail, new_events(store, slug, doc, "events-cursor"), tasks, raised)
+        _events(mail, new_events(store, slug, doc, EVENTS_CURSOR, RELAYED), tasks, raised)
+        + _history_gaps(mail)
         + _followups(mail, doc, events, ledger, now_ms)
         + _pull_requests(mail, tasks.values(), now_ms, github)
         + _settle_red_notices(mail, github)
         + _priorities(mail, doc, raised)
     )
+
+
+def _history_gaps(mail):
+    key, sent = mail.store.key(mail.slug, "history-gaps"), []
+    for gap, value in mail.store.redis.hgetall(key).items():
+        cursor, trimmed, subject = json.loads(value)
+        text = (
+            f"Ledger {mail.slug} trimmed its history after revision {cursor} through revision {trimmed} before the "
+            f"tick read it, so {subject} in that range reached no one. Read the ledger for them."
+        )
+        sent += mail.send(f"history-gap:{gap}", mail.master, text)
+        mail.store.redis.hdel(key, gap)
+    return sent
 
 
 def _raised_for_operator(doc, events):
@@ -397,12 +413,17 @@ def _finding_owner(mail, found):
     return mail.owner(f"tasks/{task}") if task else mail.master
 
 
-def new_events(store, slug, doc, cursor_name):
+def new_events(store, slug, doc, cursor_name, subject):
+    """Events past the named cursor, which moves to the ledger revision; history trimmed past it is kept as a gap."""
     key, rev = store.key(slug, cursor_name), doc["_meta"]["rev"]
     cursor = store.redis.get(key)
     store.redis.set(key, rev)
     if cursor is None:
         return []
+    trimmed = doc["_meta"].get("events_trimmed")
+    if trimmed is not None and trimmed > int(cursor):
+        gap = json.dumps([cursor, trimmed, subject])
+        store.redis.hset(store.key(slug, "history-gaps"), f"{cursor_name}:{cursor}:{trimmed}", gap)
     return [e for e in doc["_meta"].get("events", []) if int(cursor) < e.get("rev", 0) <= rev]
 
 

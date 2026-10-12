@@ -680,13 +680,13 @@ def _command_line(tmp_path, environ, agent, agent_args=()):
     return next(line for line in launcher.read_text().splitlines() if " --name m" in line or "codex " in line)
 
 
-def test_claude_defaults_to_opus_at_high_effort(tmp_path):
-    assert "--model opus --effort high" in _command_line(tmp_path, {}, "claude")
+def test_claude_defaults_to_opus_at_medium_effort(tmp_path):
+    assert "--model opus --effort medium" in _command_line(tmp_path, {}, "claude")
 
 
-def test_codex_defaults_to_sol_at_high_effort(tmp_path):
+def test_codex_defaults_to_sol_at_medium_effort(tmp_path):
     line = _command_line(tmp_path, {}, "codex")
-    assert "-m gpt-6.1-sol" in line and 'model_reasoning_effort="high"' in line
+    assert "-m gpt-6.1-sol" in line and 'model_reasoning_effort="medium"' in line
 
 
 def _resume_line(tmp_path, agent):
@@ -743,7 +743,7 @@ def test_explicit_model_and_effort_flags_win_over_defaults(tmp_path):
 
 
 def test_model_effort_names_what_the_launch_uses(tmp_path):
-    assert init_agent.model_effort("claude", [], {}) == ("opus", "high")
+    assert init_agent.model_effort("claude", [], {}) == ("opus", "medium")
     assert init_agent.model_effort("codex", [], {"AGENTIHOOKS_CODEX_EFFORT": "xhigh"}) == ("gpt-6.1-sol", "xhigh")
     assert init_agent.model_effort("claude", ["--model", "sonnet", "--effort=low"], {}) == ("sonnet", "low")
     assert init_agent.model_effort("codex", ["-m", "o3", "-c", 'model_reasoning_effort="low"'], {}) == ("o3", "low")
@@ -760,7 +760,7 @@ def test_report_names_the_model_and_effort(monkeypatch, tmp_path, capsys):
         {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "rt"), "SHELL": "/bin/bash"},
     )
     out = capsys.readouterr().out.splitlines()
-    assert rc == 0 and "model=fable" in out and "effort=high" in out
+    assert rc == 0 and "model=fable" in out and "effort=medium" in out
 
 
 def _trust_launch(monkeypatch, tmp_path, project, env_extra=None):

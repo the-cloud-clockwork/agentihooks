@@ -40,6 +40,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Pull the locked worker base with bounded rate limit retries
+        run: bash docker/swarm-node/pull-base.sh
       - name: Build the candidate
         run: >-
           docker build --platform linux/amd64 --build-arg SOURCE_REVISION="$GITHUB_SHA"
