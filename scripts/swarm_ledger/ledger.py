@@ -108,6 +108,7 @@ import ledger_workspace  # noqa: E402
 import watch_ledger  # noqa: E402
 
 from scripts.gates.base import Who
+from scripts.inbox import outbox
 from scripts.swarm_ledger import ledger_phases, ledger_plans, ledger_task_duplicates
 from scripts.swarm_ledger.repository import repository
 
@@ -115,6 +116,7 @@ BASE = "" if ledger_link.remote() else ledger_link.base()
 REMOTE_READ_ATTEMPTS = 3
 REMOTE_READ_PAUSE = 0.5
 REQUEST_TIMEOUT = 10
+TALK_OPS = ("answer", "add_item", "relay")
 CREDENTIAL_REFUSED = '"Missing or wrong ledger credential"'
 AUTH_FAILURES = collections.Counter()
 SHOW_JSON = functools.partial(json.dumps, indent=1, ensure_ascii=False)
@@ -142,10 +144,20 @@ def credentials(slug, service=False):
             )
         token = os.environ.get("AGENTIHOOKS_LEDGER_AGENT_TOKEN") or launch_token(slug, who.name)
         return {"X-Ledger-Token": token, "X-Ledger-Agent": who.name}
+    return local_credentials(slug, who.name if who.pinned else "", service)
+
+
+def local_credentials(slug, agent, service):
     token = repository.token(slug) or ""
-    if service or not who.pinned:
+    if service or not agent:
         return {"X-Ledger-Token": token}
-    return {"X-Ledger-Token": authority.agent_token(token, slug, who.name), "X-Ledger-Agent": who.name}
+    return {"X-Ledger-Token": authority.agent_token(token, slug, agent), "X-Ledger-Agent": agent}
+
+
+def replay(slug, ops, agent, service):
+    from scripts.swarm_ledger.api.client import ResourceClient
+
+    return ResourceClient(base(), local_credentials(slug, agent, service), REQUEST_TIMEOUT).mutate(slug, ops)
 
 
 def launch_token(slug, name):
@@ -212,6 +224,11 @@ def ledger_remote_auth_failures_total() -> int:
 def call(slug, ops=None, service=False):
     if ledger_link.remote():
         return remote_call(slug, ops, service)
+    held = talk(ops)
+    if outbox.waiting("ledger"):
+        outbox.flush(None)
+    if held and outbox.waiting("ledger"):
+        return queue(slug, ops, service)
     try:
         return request(slug, ops, service)
     except urllib.error.HTTPError as exc:
@@ -228,7 +245,28 @@ def call(slug, ops=None, service=False):
     except urllib.error.HTTPError as exc:
         sys.exit(f"server refused: {exc.code} {exc.read().decode(errors='replace')}")
     except OSError as exc:
+        if held:
+            return queue(slug, ops, service)
         sys.exit(f"ledger server not answering on {base()}: {exc}")
+
+
+def talk(ops):
+    """Agent chat, comments, items, answers and relays: the writes held in the outbox while the server is down."""
+    return bool(ops) and all(
+        o["op"] in TALK_OPS or (o["op"] == "add" and "by" in o and not o.get("attachments")) for o in ops
+    )
+
+
+def queue(slug, ops, service):
+    who = Who.from_env()
+    try:
+        outbox.append(outbox.ledger_record(slug, ops, who.name if who.pinned else "", service))
+    except outbox.OutboxFull as exc:
+        sys.exit(str(exc))
+    print(
+        f"ledger server not answering on {base()}: queued locally, it replays when the server returns", file=sys.stderr
+    )
+    return {"rejected": [], "queued": ops[0]["id"]}
 
 
 def remote_call(slug, ops, service):
@@ -283,7 +321,8 @@ def unexplained(sent):
 
 
 def posted(state, ops):
-    print(json.dumps({"posted": not state.get("rejected")}))
+    held = {"posted": False, "queued": True} if state.get("queued") else {"posted": not state.get("rejected")}
+    print(json.dumps(held))
     refused(state, ops)
 
 
