@@ -1,7 +1,7 @@
 import json
 from types import SimpleNamespace
 
-from scripts.gates import intent
+from scripts.gates import intent, intent_history
 from tests.gates.test_intent import NOW, SLUG, WHO, Ledger, Mail, classifier, verdicts
 
 HERE = "https://github.com/o/agentihooks/pull/9"
@@ -136,6 +136,44 @@ def test_named_pull_requests_past_the_limit_are_named_unread():
     assert pr["unread_pull_requests"] == others[intent.NAMED_LIMIT :]
 
 
+def test_a_merged_pull_request_past_the_limit_never_rejudges(tmp_path):
+    others = [f"https://github.com/o/r{n}/pull/1" for n in range(intent.NAMED_LIMIT + 1)]
+    pulls = {**{url: {**PULLS[THERE]} for url in others}, HERE: PULLS[HERE]}
+    seen = []
+    for _ in range(2):
+        _, record = judged(tmp_path, task(description=" ".join(others)), pulls=pulls, seen=seen)
+    assert len(seen) == 1
+    assert "named_pending" not in record
+    assert record["reason"].endswith(f"; could not read {others[-1]}")
+
+
+def test_coach_mode_rejudges_the_same_head_when_a_named_pull_request_merges(tmp_path):
+    seen, opened = [], {**PULLS, THERE: {**PULLS[THERE], "state": "OPEN"}}
+    view = {"head": "h1", "title": "t", "body": PULLS[HERE]["body"], "files": ["a"], "draft": False}
+    for pulls in (opened, opened, PULLS):
+        intent.Check(
+            SLUG,
+            "coach",
+            NOW,
+            Ledger(),
+            Mail(),
+            lambda url: view,
+            lambda state: intent.judge(state, classifier(0.9, seen=seen)),
+            home=tmp_path,
+            head=lambda url: "h1",
+            named=lambda url, pulls=pulls: intent.named_view(url, run=runner([], pulls)),
+        ).run({**DOC, "tasks": [task()]})
+    assert len(seen) == 2
+    assert {p["url"]: p["merged"] for p in seen[1][0]["pull_requests"]}[THERE] is True
+
+
+def test_a_large_named_diff_keeps_its_url_and_merged_state_in_the_classifier_state():
+    pull = {"url": THERE, "merged": True, "files": ["a"], "diff": '"' * intent.DIFF_CHARS}
+    [bound] = intent_history.prepare({"pull_requests": [pull]})["pull_requests"]
+    assert bound["url"] == THERE and bound["merged"] is True
+    assert bound["diff"]["truncated"] is True
+
+
 def test_named_view_marks_a_cut_diff_and_body():
     pulls = {THERE: {**PULLS[THERE], "body": "b" * (intent.BODY_CHARS + 1), "diff": "d" * (intent.DIFF_CHARS + 1)}}
     view = intent.named_view(THERE, run=runner([], pulls))
@@ -151,6 +189,6 @@ def test_named_pulls_reads_task_text_comments_and_the_body_and_skips_this_reposi
             description="Gate merged in https://github.com/o/antoncore/pull/580, see o/agentihooks#4.",
             comments=[{"text": "Kernel side is O/Kernel#12, also https://github.com/o/kernel/pull/12."}],
         ),
-        "Binding: o/antoncore#580 and https://github.com/o/bridge/pull/7, closes #2, see docs/a/b#3.",
+        "Binding: o/antoncore#580 and https://github.com/o/bridge/pull/7, closes #2, see docs/a/b#3 and scripts/gates#2.",
     )
     assert named == [THERE, "https://github.com/o/bridge/pull/7", "https://github.com/O/Kernel/pull/12"]

@@ -49,5 +49,5 @@ def prepare(state: dict) -> dict:
 
 def _bound(key: str, value: object) -> object:
     if key == "pull_requests" and isinstance(value, list):
-        return [bounded(item, 12288) for item in value]
+        return [{**item, **{part: bounded(item.get(part), 8192) for part in ("diff", "files")}} for item in value]
     return bounded(value, 32768 if key in ("reviewer_findings", "plan_chunk") else 8192)

@@ -197,7 +197,8 @@ def named_pulls(task, body):
     texts = [task.get("description") or "", body, *((c.get("text") or "") for c in task.get("comments") or [])]
     urls, seen = [], set()
     for text in texts:
-        for owner, repo, number in (m.groups() for p in (PULL, SHORT) for m in p.finditer(text)):
+        short = (m.groups() for m in SHORT.finditer(text) if here and m[1].lower() == here[0])
+        for owner, repo, number in [*(m.groups() for m in PULL.finditer(text)), *short]:
             url = f"https://github.com/{owner}/{repo}/pull/{number}"
             if (owner.lower(), repo.lower()) != here and url.lower() not in seen:
                 seen.add(url.lower())
@@ -284,10 +285,8 @@ def _judged_on(state):
     return text + (f"; could not read {_listed(unread)}" if unread else "")
 
 
-def _pending(task, pr):
-    opened = [p["url"] for p in pr.get("pull_requests", []) if p["url"] != task["pr_url"] and not p["merged"]]
-    pending = opened + pr.get("unread_pull_requests", [])
-    return {"named_pending": pending} if pending else {}
+def _pending(pr):
+    return {"named_pending": pr["named_pending"]} if pr.get("named_pending") else {}
 
 
 def _rows(state):
@@ -554,7 +553,12 @@ class Check:
             return _Judgment(pr, None, None, None)
         previous = self._coaching().read(task["id"]) if self.mode == "coach" else None
         previous = previous if previous and _same_phase(previous, task) else None
-        if previous and previous["head"] == pr.get("head") and previous.get("inputs") == inputs:
+        if (
+            previous
+            and previous["head"] == pr.get("head")
+            and previous.get("inputs") == inputs
+            and not self._named_moved(previous)
+        ):
             return _Judgment(pr, previous, None, None)
         pr = self._with_named(task, pr)
         state = intent_history.prepare(state_of(doc, task, pr))
@@ -567,8 +571,15 @@ class Check:
         if not others:
             return pr
         views = {url: self.named(url) for url in [task["pr_url"], *others[:NAMED_LIMIT]]}
-        unread = [url for url, view in views.items() if not view] + others[NAMED_LIMIT:]
-        return {**pr, "pull_requests": [view for view in views.values() if view], "unread_pull_requests": unread}
+        pulls = [view for view in views.values() if view]
+        failed = [url for url, view in views.items() if not view]
+        opened = [p["url"] for p in pulls if p["url"] != task["pr_url"] and not p["merged"]]
+        return {
+            **pr,
+            "pull_requests": pulls,
+            "unread_pull_requests": failed + others[NAMED_LIMIT:],
+            "named_pending": failed + opened,
+        }
 
     def _named_moved(self, record):
         pending = record.get("named_pending") or []
@@ -588,7 +599,7 @@ class Check:
         rounds = min(previous["coach_rounds"] + fixed, 2) if previous else 0
         _remember(self.slug, task, self.now_ms, state, judgment.answer, self.home)
         coached = {"coach_rounds": rounds, "head": head, "url": task["pr_url"]} if self.mode == "coach" else {}
-        fields = {"phase": task.get("phase"), **coached, "inputs": judgment.inputs, **_pending(task, pr)}
+        fields = {"phase": task.get("phase"), **coached, "inputs": judgment.inputs, **_pending(pr)}
         verdicts.write(task["id"], verdict, reason, self.now_ms, **fields)
         if self.mode == "coach":
             self._coaching().write(task["id"], verdict, reason, self.now_ms, **fields)
