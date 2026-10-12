@@ -11,7 +11,7 @@ from scripts.swarm.store import (
     SwarmError,
     connect,
 )
-from scripts.swarm.tick import Placed, SpawnError
+from scripts.swarm.tick import Placed, Runtime, SpawnError
 from scripts.swarm_v2.runtime import process
 
 
@@ -44,7 +44,7 @@ def complete(config: SwarmConfig, name: str, placed: Placed, terminate: Callable
         raise SpawnError(str(exc), pane_id=placed.pane_id) from exc
 
 
-def admit_legacy(store: RedisStore, slug: str, agent: AgentRecord, runtime) -> AgentRecord:
+def admit_legacy(store: RedisStore, slug: str, agent: AgentRecord, runtime: Runtime) -> AgentRecord:
     if agent.harness != "codex" or agent.transport != LEGACY_TRANSPORT or agent.execution_id:
         return agent
     try:
