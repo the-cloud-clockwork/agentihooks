@@ -176,14 +176,20 @@ class ControlService:
         return [finding for finding in found if finding is not None]
 
     def _open(self) -> None:
+        store, slug = self.controller.store, self.controller.slug
         if self.listen is not None and self.server is None:
             if self.hosted_ledger is not None and self.tasks_api is None:
                 self.tasks_api = TasksAPI(self.grants, self.tasks, self.hosted_ledger)
             if self.ledger_folder is not None and self.tasks_api is None:
                 self.mount_ledger(self.ledger_folder)
             self.serve(*self.listen)
-            if self.api_url:
-                self.controller.store.update(self.controller.slug, api_url=self.api_url)
+            if self.api_url and slug not in store.slugs():
+                print(
+                    f"controller: serves the control API for {slug}, which does not exist yet; waits for it", flush=True
+                )
+        if self.server is not None and self.api_url and slug in store.slugs():
+            if store.config(slug).api_url != self.api_url:
+                store.update(slug, api_url=self.api_url)
 
     def serve(self, host: str, port: int) -> ThreadingHTTPServer:
         routes = Routes(self.executions, self.tasks_api, health=self.health_api, recovery=self.recovery_api)

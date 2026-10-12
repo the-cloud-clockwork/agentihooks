@@ -116,6 +116,57 @@ def test_the_service_holds_the_controller_and_renews_it_each_tick(tmp_path):
     assert service.controller.held.epoch == epoch
 
 
+def test_the_service_serves_and_waits_while_its_swarm_does_not_exist(tmp_path, capsys):
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    service = _cs().ControlService(store, SLUG, _cs().launch_key(_environ(tmp_path)), lambda: True)
+    service.listen, service.api_url = ("127.0.0.1", 0), "http://controller:8780"
+    try:
+        assert service.start() is True
+        assert service.tick() is True
+        assert service.server is not None
+        assert capsys.readouterr().out == (
+            f"controller: serves the control API for {SLUG}, which does not exist yet; waits for it\n"
+        )
+        assert store.slugs() == []
+        store.create(SwarmConfig(SLUG, "agentihooks", 2, 0))
+        assert service.tick() is True
+        assert store.config(SLUG).api_url == "http://controller:8780"
+    finally:
+        service.stop()
+
+
+def test_the_wait_line_is_flushed_for_the_pod_log(tmp_path, monkeypatch):
+    import fakeredis
+
+    printed = []
+    monkeypatch.setattr(_cs(), "print", lambda *args, **kwargs: printed.append((args, kwargs)), raising=False)
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    service = _cs().ControlService(store, SLUG, _cs().launch_key(_environ(tmp_path)), lambda: True)
+    service.listen, service.api_url = ("127.0.0.1", 0), "http://controller:8780"
+    try:
+        assert service.start() is True
+    finally:
+        service.stop()
+
+    assert printed == [
+        ((f"controller: serves the control API for {SLUG}, which does not exist yet; waits for it",), {"flush": True})
+    ]
+
+
+def test_the_service_records_its_api_url_on_an_existing_swarm_at_start(tmp_path, capsys):
+    store = _store()
+    service = _cs().ControlService(store, SLUG, _cs().launch_key(_environ(tmp_path)), lambda: True)
+    service.listen, service.api_url = ("127.0.0.1", 0), "http://controller:8780"
+    try:
+        assert service.start() is True
+        assert store.config(SLUG).api_url == "http://controller:8780"
+        assert capsys.readouterr().out == ""
+    finally:
+        service.stop()
+
+
 @pytest.mark.parametrize(("setting", "exporting"), (("stdout", True), ("", False)))
 def test_the_service_hands_its_controller_the_configured_transition_exporter(tmp_path, monkeypatch, setting, exporting):
     from scripts.swarm_v2 import telemetry
