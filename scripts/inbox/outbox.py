@@ -297,7 +297,7 @@ def apply_ledger(store, by: str, entry: dict) -> dict:
     try:
         state = ledger.replay(args["slug"], args["ops"], args["agent"], args["service"])
     except urllib.error.HTTPError as exc:
-        if exc.code >= 500 or exc.code in (409, 429):
+        if exc.code >= 500 or exc.code == 429:
             raise LedgerDown(f"the ledger server answered {exc.code}") from None
         raise InboxError(f"the ledger server refused it: {exc.code}") from None
     except OSError as exc:

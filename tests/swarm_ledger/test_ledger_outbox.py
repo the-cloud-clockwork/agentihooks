@@ -180,7 +180,7 @@ def test_a_busy_or_conflicting_server_answer_keeps_the_record_for_a_later_replay
     server.stop()
     run(capsys, ENG, "say", "Kept through a busy server")
     held = outbox.path().read_text()
-    for code in (503, 429, 409):
+    for code in (503, 500, 429):
 
         def busy(*args, code=code):
             raise urllib.error.HTTPError("http://ledger", code, "busy", {}, None)
@@ -190,6 +190,28 @@ def test_a_busy_or_conflicting_server_answer_keeps_the_record_for_a_later_replay
         assert (report.applied, report.rejected, report.left) == ([], [], 1)
         assert outbox.path().read_text() == held
     assert not outbox.skipped_path().exists()
+
+    def conflict(*args):
+        raise urllib.error.HTTPError("http://ledger", 409, "operation conflict", {}, None)
+
+    monkeypatch.setattr(ledger, "replay", conflict)
+    report = outbox.flush(None)
+    assert report.rejected == [(json.loads(held)["item"], "the ledger server refused it: 409")]
+    assert not outbox.path().exists()
+
+
+def test_a_ledger_outage_does_not_hold_a_queued_inbox_record(server, capsys, monkeypatch):
+    from scripts.inbox import cli
+
+    server.stop()
+    run(capsys, ENG, "say", "Waits for the ledger")
+    sent = outbox.record("send", ENG, {"address": "bob", "text": "for bob", "fyi": False})
+    outbox.append(sent)
+    applied = []
+    monkeypatch.setitem(cli.APPLY, "send", lambda store, by, entry: applied.append(entry["item"]))
+    report = outbox.flush(object())
+    assert applied == [sent["item"]] and report.applied == [sent["item"]]
+    assert [record["op"] for record in queued()] == ["ledger"]
 
 
 def test_a_redis_record_and_a_ledger_record_replay_independently(server, capsys):
