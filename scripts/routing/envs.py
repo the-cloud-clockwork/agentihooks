@@ -1,7 +1,7 @@
 from collections.abc import Mapping
 from urllib.parse import urlsplit
 
-from hooks.context.account_sessions import API_MARKER, CODEX_TOKEN_PREFIX, TOKEN_PREFIX
+from hooks.context.account_sessions import API_MARKER, CODEX_TOKEN_PREFIX, INTERACTIVE_PREFIX, TOKEN_PREFIX
 
 ANTHROPIC_HOST = "api.anthropic.com"
 CODEX_TOKEN_ENV = "CODEX_ACCESS_TOKEN"
@@ -34,14 +34,18 @@ def _api_name(name: str, value: str) -> bool:
 
 
 def subscription_child(environ: Mapping[str, str]) -> dict[str, str]:
-    return {name: value for name, value in environ.items() if not _api_name(name, value)}
+    return {
+        name: value
+        for name, value in environ.items()
+        if not _api_name(name, value) and not name.startswith(INTERACTIVE_PREFIX)
+    }
 
 
 def api_child(environ: Mapping[str, str]) -> dict[str, str]:
     child = {
         name: value
         for name, value in environ.items()
-        if name != "CLAUDE_CODE_OAUTH_TOKEN" and not name.startswith(TOKEN_PREFIX)
+        if name != "CLAUDE_CODE_OAUTH_TOKEN" and not name.startswith((TOKEN_PREFIX, INTERACTIVE_PREFIX))
     }
     child[API_MARKER] = "1"
     return child
@@ -52,7 +56,7 @@ def _codex_without_tokens(environ: Mapping[str, str]) -> dict[str, str]:
         name: value
         for name, value in environ.items()
         if name not in (CODEX_TOKEN_ENV, CHATGPT_ACCOUNT_ID_ENV)
-        and not name.startswith((CODEX_TOKEN_PREFIX, TOKEN_PREFIX))
+        and not name.startswith((CODEX_TOKEN_PREFIX, TOKEN_PREFIX, INTERACTIVE_PREFIX))
     }
 
 
@@ -63,4 +67,29 @@ def codex_subscription_child(environ: Mapping[str, str]) -> dict[str, str]:
 def codex_api_child(environ: Mapping[str, str]) -> dict[str, str]:
     child = _codex_without_tokens(environ)
     child[API_MARKER] = "1"
+    return child
+
+
+def claude_interactive_child(environ: Mapping[str, str], slug: str) -> dict[str, str]:
+    dropped = {
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_BASE_URL",
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+        "DISABLE_GROWTHBOOK",
+        API_MARKER,
+    }
+    child = {
+        name: value
+        for name, value in environ.items()
+        if name not in dropped and not name.startswith((TOKEN_PREFIX, "CLAUDE_CODE_USE_", INTERACTIVE_PREFIX))
+    }
+    child[f"{INTERACTIVE_PREFIX}{slug}"] = "1"
+    return child
+
+
+def codex_interactive_child(environ: Mapping[str, str], slug: str) -> dict[str, str]:
+    child = codex_subscription_child(environ)
+    child[f"{INTERACTIVE_PREFIX}{slug}"] = "1"
     return child

@@ -575,6 +575,7 @@ def cmd_followup(args):
             list="followups",
             text=args.value,
             **({"needs_operator": True} if args.needs_operator else {}),
+            **hive_fields(args),
         )
     elif args.action in ("flag", "unflag"):
         send(args, "set", path=f"followups/{args.value}/needs_operator", value=args.action == "flag")
@@ -584,7 +585,13 @@ def cmd_followup(args):
 
 
 def cmd_question(args):
-    print(json.dumps({"question": args.action, **held(send(args, "add_item", list="questions", text=args.text))}))
+    result = send(args, "add_item", list="questions", text=args.text, **hive_fields(args))
+    print(json.dumps({"question": args.action, **held(result)}))
+
+
+def hive_fields(args):
+    hive = vars(args).get("hive")
+    return {"hive": hive} if hive is not None else {}
 
 
 def cmd_priority(args):
@@ -865,9 +872,11 @@ def build_parser():
     followup.add_argument("value")
     followup.add_argument("--status")
     followup.add_argument("--needs-operator", action="store_true")
+    followup.add_argument("--hive", help="hive whose master owns the new follow up")
     question = sub.add_parser("question")
     question.add_argument("action", choices=["add"])
     question.add_argument("text")
+    question.add_argument("--hive", help="hive whose master owns the new question")
     scope = sub.add_parser("scope")
     scope.add_argument("item")
     scope.add_argument("state", choices=["in", "out"])

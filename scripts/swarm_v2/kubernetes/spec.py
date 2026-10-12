@@ -321,6 +321,16 @@ def _container(policy: dict, launch: AdmittedLaunch, profile: dict) -> dict:
             ]
             if "git_app_secret_name" in policy
             else []
+        )
+        + (
+            [
+                {
+                    "name": "AGENTIHOOKS_SWARM_REDIS_URL",
+                    "valueFrom": {"secretKeyRef": {"name": policy["redis_secret_name"], "key": "url"}},
+                }
+            ]
+            if "redis_secret_name" in policy
+            else []
         ),
         "resources": _resources(launch, profile["limits"]),
         "securityContext": copy.deepcopy(HARDENED),

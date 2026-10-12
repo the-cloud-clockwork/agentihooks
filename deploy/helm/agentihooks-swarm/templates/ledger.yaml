@@ -61,7 +61,7 @@ spec:
             - name: http
               containerPort: {{ $port }}
           env:
-            {{- include "swarm.env" . | nindent 12 }}
+            {{- include "swarm.env" (dict "root" . "role" "ledger") | nindent 12 }}
             - name: LEDGER_HOST
               value: 0.0.0.0
             - name: LEDGER_PORT
