@@ -144,7 +144,7 @@ def test_an_alert_that_could_neither_send_nor_queue_is_not_marked_sent(swarm, lo
 
 def test_alerts_since_an_older_revision_are_all_delivered(swarm):
     _, inbox = swarm
-    ledger_alerts.deliver(inbox, SLUG, [alert(2), alert(3), alert(4)], 4, BOSS.seat, since=3)
+    assert len(ledger_alerts.deliver(inbox, SLUG, [alert(2), alert(3), alert(4)], 4, BOSS.seat, since=3)) == 2
     assert sorted(i.text.split("alert ")[1].split(" ")[0] for i in items(inbox, BOSS.seat)) == ["al-3-0", "al-4-0"]
 
 
@@ -167,13 +167,49 @@ def test_swarm_say_while_redis_is_fully_down_reaches_its_recipient_once_after_re
     assert not outbox.waiting()
 
 
-def test_a_say_to_the_operator_while_redis_is_down_is_refused_not_queued(swarm, monkeypatch, capsys):
+@pytest.mark.parametrize("to", [["--to", "operator"], []])
+def test_a_say_to_the_operator_while_redis_is_down_is_refused_not_queued(swarm, monkeypatch, capsys, to):
     from scripts.swarm import cli
 
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", BOSS.name)
     monkeypatch.setattr(cli, "connect", unreachable)
-    assert cli.main([SLUG, "say", "for the page", "--to", "operator"]) == 1
+    assert cli.main([SLUG, "say", "for the page", *to]) == 1
     assert "swarm: Redis is unreachable" in capsys.readouterr().err and not outbox.waiting()
+
+
+def test_a_say_naming_nobody_while_redis_is_up_is_refused_not_queued(swarm, monkeypatch, capsys):
+    from scripts.swarm import cli
+
+    store, _ = swarm
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", BOSS.name)
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    assert cli.main([SLUG, "say", "anyone", "--to", "ghost"]) == 1
+    assert "swarm: nobody in swarm" in capsys.readouterr().err and not outbox.waiting()
+
+
+def test_a_redis_error_outside_a_say_to_agents_is_raised(swarm, monkeypatch):
+    import redis
+
+    from scripts.swarm import cli
+
+    store, _ = swarm
+
+    def lost(slug):
+        raise redis.ConnectionError("connection lost")
+
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", BOSS.name)
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    monkeypatch.setattr(store, "agents", lost)
+    with pytest.raises(redis.ConnectionError):
+        cli.main([SLUG, "say", "for the page", "--to", "operator"])
+    assert not outbox.waiting()
+
+
+def test_a_queued_say_to_everyone_reaches_each_recipient_once(swarm):
+    _, inbox = swarm
+    delivery.queue(SLUG, "the docs build is green", "sw-ci-9", "all")
+    outbox.flush(inbox)
+    assert [len(items(inbox, agent.name)) for agent in (ENG, BOSS)] == [1, 1]
 
 
 def test_a_queued_swarm_say_naming_nobody_is_set_aside_and_the_next_records_still_land(swarm):
@@ -211,4 +247,4 @@ def test_an_alert_delivered_again_after_its_mark_expired_is_one_item_with_its_st
     inbox.redis.delete(inbox.key("alert-sent", SLUG, "al-3-0"))
     ledger_alerts.deliver(inbox, SLUG, [alert(3)], 3, BOSS.seat)
     [item] = items(inbox, BOSS.seat)
-    assert item.id == outbox.stable_id("alert", SLUG, "al-3-0")
+    assert item.id == outbox.stable_id("alert", SLUG, "al-3-0") and len(item.id) == 12

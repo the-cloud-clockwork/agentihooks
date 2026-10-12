@@ -179,10 +179,37 @@ def test_a_held_revision_with_nothing_left_to_send_clears_on_replay(outage, kind
     assert ledger_server.unrelayed() == {}
 
 
-def test_a_held_revision_of_a_ledger_that_is_gone_is_dropped(outage):
+def test_a_held_revision_of_a_ledger_that_is_gone_is_dropped_and_the_next_ledger_still_replays(outage):
+    make_ledger()
+    state, _ = core.sync(SLUG)
     ledger_server.unrelayed_on(ledger_server.RELAY, "gone-2026-01-01", 3)
+    ledger_server.unrelayed_on(ledger_server.RELAY, SLUG, state["_meta"]["rev"])
     ledger_server.replay_unrelayed()
     assert ledger_server.unrelayed() == {}
+
+
+def test_an_alert_held_during_the_outage_goes_out_with_the_next_write_after_recovery(outage):
+    make_ledger()
+    outage.down()
+    taken = {"op": "phase_append", "id": "plan", "by": "master", "phases": [{"phase": "p1", "title": "Taken"}]}
+    write(taken, refused=["plan"])
+    outage.down(False)
+    write({"op": "add", "thread": "chat", "id": "m-3", "text": "back again"})
+    assert len([text for text in outage.texts(BOSS.seat) if "alert" in text]) == 1
+    assert ledger_server.unrelayed() == {}
+
+
+def test_a_relay_forgets_only_the_revisions_it_covered():
+    for rev in (3, 9):
+        ledger_server.unrelayed_on(ledger_server.RELAY, SLUG, rev)
+    ledger_server.relayed(ledger_server.RELAY, SLUG, 1, 5)
+    assert ledger_server.unrelayed() == {ledger_server.RELAY: {SLUG: [9]}}
+
+
+def test_the_unrelayed_record_creates_its_folder(monkeypatch, tmp_path):
+    monkeypatch.setattr("hooks.config.AGENTIHOOKS_HOME", str(tmp_path / "home" / "state"))
+    ledger_server.unrelayed_on(ledger_server.RELAY, SLUG, 3)
+    assert ledger_server.unrelayed() == {ledger_server.RELAY: {SLUG: [3]}}
 
 
 def test_a_trimmed_range_notice_names_the_range_and_resumes_the_relay_after_it(outage):
@@ -190,8 +217,22 @@ def test_a_trimmed_range_notice_names_the_range_and_resumes_the_relay_after_it(o
     ledger_server.unrelayed_on(ledger_server.RELAY, SLUG, 3)
     assert ledger_server.record_trimmed(SLUG, 3, 7) == 8
     state, _ = core.sync(SLUG)
-    [notice] = [row["text"] for row in state["notifications"] if "left the ledger history" in row["text"]]
-    assert "from revision 3 through 7" in notice and ledger_server.unrelayed() == {}
+    [notice] = [row for row in state["notifications"] if "left the ledger history" in row["text"]]
+    assert "from revision 3 through 7" in notice["text"] and notice["by"] == "ledger"
+    assert ledger_server.unrelayed() == {}
+
+
+class Unwritable:
+    def apply_ops(self, slug, **kwargs):
+        raise OSError("disk full")
+
+
+def test_a_trimmed_range_whose_notice_cannot_be_written_stays_held(outage, monkeypatch, capsys):
+    ledger_server.unrelayed_on(ledger_server.RELAY, SLUG, 3)
+    monkeypatch.setattr(ledger_server, "repository", Unwritable())
+    assert ledger_server.record_trimmed(SLUG, 3, 7) == 3
+    assert "trimmed notice for" in capsys.readouterr().err
+    assert ledger_server.unrelayed() == {ledger_server.RELAY: {SLUG: [3]}}
 
 
 class Stop(Exception):

@@ -1525,7 +1525,7 @@ def cmd_say(store, args):
 
 def queued_say(args, who) -> bool:
     """A swarm say to agents that met a Redis outage is queued in the outbox, its recipients looked up on replay."""
-    if getattr(args, "command", "") != "say" or args.to in ("", delivery.OPERATOR):
+    if vars(args).get("command") != "say" or args.to in ("", delivery.OPERATOR):
         return False
     print(json.dumps(delivery.queue(args.slug, args.text, args.name or who.name, args.to, fyi=args.fyi)))
     return True
@@ -1683,29 +1683,29 @@ def main(argv):
     from redis.exceptions import RedisError
 
     try:
-        dispatch(args, who, handler)
-    except Unreachable as exc:
-        if not queued_say(args, who):
-            print(f"swarm: {exc}", file=sys.stderr)
-            return 1
-    except RedisError:
-        if not queued_say(args, who):
-            raise
-    except (SwarmError, InboxError) as exc:
-        print(f"swarm: {exc}", file=sys.stderr)
-        return 1
+        store = connect()
+        if "slug" in args:
+            args.slug = store.names.swarm_slug(args.slug)
+        action = getattr(args, "command", "")
+        before = control_notifications.master(store, args.slug) if action in control_notifications.CONTROLS else None
+        if action in clearance.COMMANDS:
+            run_control(store, args, who, handler)
+        else:
+            handler(store, args)
+        if action in control_notifications.CONTROLS:
+            control_notifications.notify(store, args, LedgerClient(), before, action)
+    except (SwarmError, InboxError, RedisError) as exc:
+        return failed(args, who, exc)
     return 0
 
 
-def dispatch(args, who, handler):
-    store = connect()
-    if "slug" in args:
-        args.slug = store.names.swarm_slug(args.slug)
-    action = getattr(args, "command", "")
-    before = control_notifications.master(store, args.slug) if action in control_notifications.CONTROLS else None
-    if action in clearance.COMMANDS:
-        run_control(store, args, who, handler)
-    else:
-        handler(store, args)
-    if action in control_notifications.CONTROLS:
-        control_notifications.notify(store, args, LedgerClient(), before, action)
+def failed(args, who, exc) -> int:
+    """A say to agents that met a Redis outage is queued; any other failure is reported, a bare Redis error raised."""
+    from redis.exceptions import RedisError
+
+    if isinstance(exc, (Unreachable, RedisError)) and queued_say(args, who):
+        return 0
+    if isinstance(exc, RedisError):
+        raise exc
+    print(f"swarm: {exc}", file=sys.stderr)
+    return 1
