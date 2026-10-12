@@ -75,7 +75,7 @@ def held_spans(samples: list, now_ms: int) -> list[tuple]:
             sample["ts_ms"],
             min(sample["ts_ms"] + SAMPLE_GAP_MS, after),
             sample["held_spawns"],
-            "" if sample.get("held_by") == "host" else sample.get("held_harness", ""),
+            sample.get("held_harness", ""),
         )
         for sample, after in zip(ordered, nexts)
     ]

@@ -395,7 +395,7 @@ def test_quota_holds_carry_the_held_harness_and_split_where_it_changes():
                 {**sample(at(7), 1, "quota"), "held_harness": "codex"},
                 {**sample(at(7, 5), 1, "quota"), "held_harness": "codex"},
                 {**sample(at(7, 10), 1, "quota"), "held_harness": "claude"},
-                {**sample(at(7, 15), 1, "host"), "held_harness": "codex"},
+                sample(at(7, 15), 1, "host"),
                 sample(at(7, 20), 0, ""),
             ],
             agent_events=[agent("claim", "t1", at(8))],

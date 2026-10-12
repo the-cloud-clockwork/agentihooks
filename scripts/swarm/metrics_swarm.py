@@ -370,6 +370,10 @@ def _held_lanes(store: RedisStore, slug: str, doc: dict, quota: dict, agents: li
     }
 
 
+def _held_spawns(store: RedisStore, slug: str, doc: dict, quota: dict, agents: list, host_held: bool = False) -> int:
+    return sum(_held_lanes(store, slug, doc, quota, agents, host_held).values())
+
+
 def held_harness(lanes: dict, held: dict) -> str:
     agents = {lanes.get(lane, {}).get("agent", "") for lane, count in held.items() if count}
     return next(iter(agents)) if len(agents) == 1 and agents <= set(agent_choice.AGENTS) else ""
