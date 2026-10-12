@@ -227,7 +227,11 @@ def call(slug, ops=None, service=False):
     held = talk(ops)
     if outbox.waiting("ledger"):
         outbox.flush(None)
-    if held and outbox.waiting("ledger"):
+    if ops and outbox.waiting("ledger"):
+        if not held:
+            sys.exit(
+                f"ledger talk queued while the server was down still waits in {outbox.path()}; retry once it lands"
+            )
         return queue(slug, ops, service)
     try:
         return request(slug, ops, service)
@@ -251,7 +255,6 @@ def call(slug, ops=None, service=False):
 
 
 def talk(ops):
-    """Agent chat, comments, items, answers and relays: the writes held in the outbox while the server is down."""
     return bool(ops) and all(
         o["op"] in TALK_OPS or (o["op"] == "add" and "by" in o and not o.get("attachments")) for o in ops
     )
@@ -321,9 +324,13 @@ def unexplained(sent):
 
 
 def posted(state, ops):
-    held = {"posted": False, "queued": True} if state.get("queued") else {"posted": not state.get("rejected")}
-    print(json.dumps(held))
+    queued = held(state)
+    print(json.dumps({"posted": not queued and not state.get("rejected"), **queued}))
     refused(state, ops)
+
+
+def held(state):
+    return {"queued": True} if state.get("queued") else {}
 
 
 def send(args, kind, /, **fields):
@@ -577,8 +584,7 @@ def cmd_followup(args):
 
 
 def cmd_question(args):
-    send(args, "add_item", list="questions", text=args.text)
-    print(json.dumps({"question": args.action}))
+    print(json.dumps({"question": args.action, **held(send(args, "add_item", list="questions", text=args.text))}))
 
 
 def cmd_priority(args):
@@ -614,8 +620,8 @@ def cmd_relay(args):
         sys.exit(
             "relay refused: the quote is not in an operator prompt or answer any master or planner of this swarm recorded"
         )
-    send(args, "relay", item=args.item, text=args.text, quote=args.quote)
-    print(json.dumps({"relayed": True, "item": args.item}))
+    queued = held(send(args, "relay", item=args.item, text=args.text, quote=args.quote))
+    print(json.dumps({"relayed": not queued, "item": args.item, **queued}))
 
 
 def swarm_autonomy(slug):
@@ -633,8 +639,8 @@ def cmd_answer(args):
     reason = ledger_answer.refusal(swarm_autonomy(args.slug))
     if reason:
         sys.exit(reason)
-    send(args, "answer", item=args.item, text=args.text)
-    print(json.dumps({"answered": True, "item": args.item}))
+    queued = held(send(args, "answer", item=args.item, text=args.text))
+    print(json.dumps({"answered": not queued, "item": args.item, **queued}))
 
 
 def cmd_scope(args):

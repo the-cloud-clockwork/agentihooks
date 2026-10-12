@@ -1,4 +1,6 @@
+import itertools
 import json
+import sys
 import threading
 from http.server import ThreadingHTTPServer
 
@@ -11,6 +13,7 @@ from scripts.swarm_ledger import ledger, ledger_server, new_ledger
 SLUG = "outbox-2026-01-01"
 ENG = "eng-1@demo"
 BOSS = "master@demo"
+COUNT = itertools.count(1)
 
 
 class Server:
@@ -33,7 +36,8 @@ class Server:
 
 
 @pytest.fixture
-def server(monkeypatch):
+def server(monkeypatch, request):
+    monkeypatch.setattr(sys.modules[__name__], "SLUG", f"outbox-{len(request.node.name)}-{next(COUNT)}-2026-01-01")
     monkeypatch.setenv("LEDGER_AUTOSTART", "0")
     monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
     new_ledger.create(SLUG, {"title": "Outbox", "overview": "o", "phases": [{"title": "one"}], "questions": []})
@@ -76,7 +80,9 @@ def test_talk_sent_while_the_server_is_stopped_queues_and_lands_once_in_order_wh
         {"posted": False, "queued": True}
     ]
     assert run(capsys, ENG, "say", "Tests run in continuous integration now") == [{"posted": False, "queued": True}]
-    assert run(capsys, ENG, "question", "add", "Which port should the service use") == [{"question": "add"}]
+    assert run(capsys, ENG, "question", "add", "Which port should the service use") == [
+        {"question": "add", "queued": True}
+    ]
     records = queued()
     assert [record["op"] for record in records] == ["ledger"] * 3
     assert [record["args"]["ops"][0]["op"] for record in records] == ["add", "add", "add_item"]
@@ -108,13 +114,16 @@ def test_a_replayed_record_lands_once_even_when_it_is_replayed_again(server, cap
     assert not outbox.path().exists()
 
 
-def test_an_answer_sent_while_the_server_is_stopped_lands_as_the_master_when_it_returns(server, capsys):
+def test_an_answer_sent_while_the_server_is_stopped_lands_as_the_master_when_it_returns(server, capsys, monkeypatch):
+    monkeypatch.setattr(ledger, "swarm_autonomy", lambda slug: "delegate")
     run(capsys, ENG, "question", "add", "Which broker should we use")
     question = f"questions/{stored()['questions'][0]['id']}"
     server.stop()
-    answer = {"op": "answer", "id": "answer-1", "by": BOSS, "item": question, "text": "Use the existing broker"}
-    assert ledger.call(SLUG, [answer])["queued"] == "answer-1"
+    assert run(capsys, BOSS, "answer", question, "Use the existing broker") == [
+        {"answered": False, "item": question, "queued": True}
+    ]
     assert queued()[0]["args"]["agent"] == ""
+    assert queued()[0]["args"]["ops"][0]["op"] == "answer"
     server.start()
     ledger.call(SLUG)
     answers = stored()["questions"][0]["answers"]
@@ -154,3 +163,55 @@ def test_reads_and_untalkative_writes_still_fail_while_the_server_is_stopped(ser
     with pytest.raises(SystemExit, match="ledger server not answering"):
         ledger.call(SLUG, [{"op": "leave", "id": "leave-1", "by": ENG}])
     assert queued() == []
+
+
+def test_an_untalkative_write_is_refused_while_queued_talk_still_waits_so_it_never_overtakes_it(server, capsys):
+    server.stop()
+    run(capsys, ENG, "say", "Queued first")
+    held = outbox.path().read_text()
+    with pytest.raises(SystemExit, match="still waits in"):
+        ledger.call(SLUG, [{"op": "join", "id": "join-eng", "by": ENG, "role": "member"}])
+    assert outbox.path().read_text() == held
+
+
+def test_a_busy_or_conflicting_server_answer_keeps_the_record_for_a_later_replay(server, monkeypatch, capsys):
+    import urllib.error
+
+    server.stop()
+    run(capsys, ENG, "say", "Kept through a busy server")
+    held = outbox.path().read_text()
+    for code in (503, 429, 409):
+
+        def busy(*args, code=code):
+            raise urllib.error.HTTPError("http://ledger", code, "busy", {}, None)
+
+        monkeypatch.setattr(ledger, "replay", busy)
+        report = outbox.flush(None)
+        assert (report.applied, report.rejected, report.left) == ([], [], 1)
+        assert outbox.path().read_text() == held
+    assert not outbox.skipped_path().exists()
+
+
+def test_a_redis_record_and_a_ledger_record_replay_independently(server, capsys):
+    server.stop()
+    inbox = outbox.record("send", ENG, {"address": "bob", "text": "for bob", "fyi": False})
+    outbox.append(inbox)
+    run(capsys, ENG, "say", "Ledger talk behind an inbox send")
+    server.start()
+    report = outbox.flush(None)
+    assert chat(stored()) == ["Ledger talk behind an inbox send"]
+    assert [record["item"] for record in queued()] == [inbox["item"]]
+    assert report.left == 1
+
+
+def test_an_inbox_send_goes_live_past_waiting_ledger_talk_and_the_inbox_flush_replays_it(server, capsys):
+    server.stop()
+    run(capsys, ENG, "say", "Replayed by the inbox")
+    live = []
+    found = outbox.submit(object(), outbox.record("send", ENG, {"text": "x"}), lambda store, entry: live.append(entry))
+    assert found is None and len(live) == 1
+    assert len(queued()) == 1
+    server.start()
+    assert len(outbox.flush(object()).applied) == 1
+    assert chat(stored()) == ["Replayed by the inbox"]
+    assert not outbox.path().exists()

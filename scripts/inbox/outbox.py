@@ -284,7 +284,6 @@ def apply_post(store, by: str, entry: dict):
 
 
 def ledger_record(slug: str, ops: list, agent: str, service: bool) -> dict:
-    """A ledger write held while the ledger server is down, named by its first op so the server keeps it once."""
     args = {"slug": slug, "ops": ops, "agent": agent, "service": service}
     return record("ledger", agent or ops[0].get("by", ""), args, item=ops[0]["id"])
 
@@ -298,6 +297,8 @@ def apply_ledger(store, by: str, entry: dict) -> dict:
     try:
         state = ledger.replay(args["slug"], args["ops"], args["agent"], args["service"])
     except urllib.error.HTTPError as exc:
+        if exc.code >= 500 or exc.code in (409, 429):
+            raise LedgerDown(f"the ledger server answered {exc.code}") from None
         raise InboxError(f"the ledger server refused it: {exc.code}") from None
     except OSError as exc:
         raise LedgerDown(str(exc)) from None
