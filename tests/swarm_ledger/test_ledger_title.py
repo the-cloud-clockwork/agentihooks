@@ -38,8 +38,22 @@ def test_check_takes_a_title_or_overview_within_its_limit(op):
     ],
 )
 def test_check_refuses_an_empty_long_wrong_typed_or_agent_sent_edit(op):
-    with pytest.raises(ValueError):
+    message = (
+        "is the operator's" if "by" in op else ("needs an overview" if op["op"] == "overview_set" else "needs a title")
+    )
+    with pytest.raises(ValueError, match=f"^{op['op']} {message}"):
         ledger_title.check(op)
+
+
+def test_the_refusals_name_the_operation_and_its_limit():
+    with pytest.raises(ValueError, match=r"^overview_set is the operator's and takes only id and text$"):
+        ledger_title.check({"op": "overview_set", "id": "o", "text": "z", "by": "eng-1"})
+    with pytest.raises(ValueError, match=rf"^title_set needs a title of 1 to {ledger_title.MAX_TITLE} characters$"):
+        ledger_title.check({"op": "title_set", "id": "t", "text": ""})
+    with pytest.raises(
+        ValueError, match=rf"^overview_set needs an overview of at most {ledger_title.MAX_OVERVIEW} characters$"
+    ):
+        ledger_title.check({"op": "overview_set", "id": "o", "text": None})
 
 
 @pytest.mark.parametrize(("op", "field"), [("title_set", "title"), ("overview_set", "overview")])
