@@ -52,6 +52,9 @@ def place_seat(slug: str, config, store, runtime, seat: Seat, now_ms: int, prepa
     try:
         store.seats.occupy(record.seat, name, now_ms)
         placed = runtime.spawn(config, lane, name, prepare(record))
+        from scripts.swarm_v2.runtime import codex
+
+        record = codex.admit_legacy(store, slug, tick.placed_record(record, placed), runtime)
     except Exception as exc:
         raise SeatFailed(record, exc) from exc
     tick._spend_host(store, name, now_ms)

@@ -579,7 +579,11 @@ class HerdrRuntime:
             controller_epoch=task.get("controller_epoch"),
         )
         self._reserve_account(account, lane, agent)
-        placed = codex.complete(config, name, placed)
+        try:
+            placed = codex.complete(config, name, placed)
+        except Exception as exc:
+            self._terminate(name)
+            raise SpawnError(str(exc), pane_id=placed.pane_id) from exc
         return replace(
             placed,
             model_source=picked.source,

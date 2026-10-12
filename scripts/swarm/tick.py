@@ -846,7 +846,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             placed = runtime.spawn(config, lane, name, primed(store, slug, seat, task))
             from scripts.swarm_v2.runtime import codex
 
-            launched = codex.admit_legacy(store, slug, placed_record(record, placed))
+            launched = codex.admit_legacy(store, slug, placed_record(record, placed), runtime)
         except Exception as exc:
             _release_admission(slug, runtime, task)
             _record_spawn_failure(slug, store, record, exc, now_ms)
@@ -1092,9 +1092,7 @@ def _master(slug, config, store, runtime, now_ms):
             master_start.save(store, slug, {**failed, "name": "", "retry": True})
         return [f"master spawn failed: {exc}"]
     affinity.placed(store, slug, placed.harness)
-    from scripts.swarm_v2.runtime import codex
-
-    record = codex.admit_legacy(store, slug, placed_record(record, placed))
+    record = placed_record(record, placed)
     reported = runtime.reported(record)
     store.put_agent(slug, replace(record, state="working" if reported else "starting"))
     launch_check.begin(store, slug, record, now_ms)

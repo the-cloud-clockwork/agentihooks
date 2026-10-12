@@ -1,6 +1,6 @@
 from dataclasses import replace
 
-from hooks.context import account_sessions
+from hooks.proc import processes
 from scripts.swarm.store import (
     APP_SERVER_TRANSPORT,
     LEGACY_TRANSPORT,
@@ -10,7 +10,7 @@ from scripts.swarm.store import (
     SwarmError,
     connect,
 )
-from scripts.swarm.tick import Placed
+from scripts.swarm.tick import Placed, SpawnError
 from scripts.swarm_v2.runtime import process
 
 
@@ -39,10 +39,16 @@ def complete(config: SwarmConfig, name: str, placed: Placed) -> Placed:
     return replace(placed, transport=transport, execution=execution)
 
 
-def admit_legacy(store: RedisStore, slug: str, agent: AgentRecord) -> AgentRecord:
+def admit_legacy(store: RedisStore, slug: str, agent: AgentRecord, runtime) -> AgentRecord:
     if agent.harness != "codex" or agent.transport != LEGACY_TRANSPORT or agent.execution_id:
         return agent
-    pid = agent.profile_decision.get("validation", {}).get("pid")
-    target = process.launch_target(pid, process.local_namespace(), account_sessions.processes())
-    previous = store.execution_occupants(slug).get(agent.seat)
-    return store.start_execution(slug, replace(agent, runtime_target=target), previous.execution_id if previous else "")
+    try:
+        pid = agent.profile_decision.get("validation", {}).get("pid")
+        target = process.launch_target(pid, process.local_namespace(), processes())
+        previous = store.execution_occupants(slug).get(agent.seat)
+        return store.start_execution(
+            slug, replace(agent, runtime_target=target), previous.execution_id if previous else ""
+        )
+    except Exception as exc:
+        runtime.retire(agent)
+        raise SpawnError(str(exc), pane_id=agent.pane_id) from exc

@@ -16,7 +16,8 @@ pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 @pytest.mark.parametrize("transport,harness", [("legacy", "codex"), ("app_server", "codex"), ("app_server", "claude")])
-def test_tick_selects_and_records_codex_transport(tmp_path, monkeypatch, transport, harness):
+@pytest.mark.parametrize("lane", ["eng", "master"])
+def test_tick_selects_and_records_codex_transport(tmp_path, monkeypatch, transport, harness, lane):
     import fakeredis
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
@@ -40,8 +41,8 @@ def test_tick_selects_and_records_codex_transport(tmp_path, monkeypatch, transpo
                         "sw",
                         AgentRecord(
                             name,
-                            "eng",
-                            "t1",
+                            lane,
+                            kwargs["env"]["AGENTIHOOKS_SWARM_TASK"],
                             harness="codex",
                             seat=seat,
                             started_at=1100,
@@ -57,13 +58,17 @@ def test_tick_selects_and_records_codex_transport(tmp_path, monkeypatch, transpo
             returncode=0, stdout=validated(argv, output).replace('"pid": 123', f'"pid": {os.getpid()}'), stderr=""
         )
 
+    selected_lane = lane
     herdr = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: (harness, "open"))
     fake.spawn = lambda config, lane, name, task: (
-        FakeRuntime.spawn(fake, config, lane, name, task) if lane == "master" else herdr.spawn(config, lane, name, task)
+        FakeRuntime.spawn(fake, config, lane, name, task)
+        if lane != selected_lane
+        else herdr.spawn(config, lane, name, task)
     )
     actions = tick("sw", store, ledger, routed({}, herdr=fake), now_ms=1000)
-    assert any(action.startswith("spawned engineer") for action in actions), actions
-    worker = next(agent for agent in store.agents("sw") if agent.lane == "eng")
+    prefix = "spawned master" if lane == "master" else "spawned engineer"
+    assert any(action.startswith(prefix) for action in actions), actions
+    worker = next(agent for agent in store.agents("sw") if agent.lane == lane)
     assert len(calls) == 1
     assert worker.transport == (transport if harness == "codex" else "")
     if harness == "codex":
@@ -80,3 +85,45 @@ def test_tick_selects_and_records_codex_transport(tmp_path, monkeypatch, transpo
             assert worker.generation == admitted[0].generation
             assert worker.started_at == admitted[0].started_at
             assert worker.runtime_target == admitted[0].runtime_target
+
+
+@pytest.mark.parametrize("lane", ["eng", "master"])
+@pytest.mark.parametrize("transport", ["legacy", "app_server"])
+def test_failed_transport_admission_retires_the_launched_pane(tmp_path, monkeypatch, lane, transport):
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, codex_inbox_transport=transport))
+    monkeypatch.setattr(codex, "connect", lambda: store)
+    fake = FakeRuntime()
+    ended = []
+
+    def run(argv, **kwargs):
+        name = argv[argv.index("--name") + 1]
+        fake.live.add(name)
+        output = "status=started\nroute_status=routed\npane_id=w1:p2\nagent=codex\n"
+        return SimpleNamespace(
+            returncode=0, stdout=validated(argv, output).replace('"pid": 123', '"pid": 0'), stderr=""
+        )
+
+    def terminate(name):
+        ended.append(name)
+        fake.live.discard(name)
+
+    herdr = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("codex", "open"))
+    monkeypatch.setattr(herdr, "_terminate", terminate)
+    selected_lane = lane
+    fake.spawn = lambda config, lane, name, task: (
+        herdr.spawn(config, lane, name, task)
+        if lane == selected_lane
+        else FakeRuntime.spawn(fake, config, lane, name, task)
+    )
+    ledger = FakeLedger([{"id": "t1", "title": "Transport", "lane": "eng"}])
+    actions = tick("sw", store, ledger, routed({}, herdr=fake), now_ms=1000)
+    assert any("spawn failed" in action for action in actions), actions
+    assert not any(agent.lane == lane for agent in store.agents("sw"))
+    assert not store.executions("sw")
+    assert ended if transport == "app_server" else "w1:p2" in fake.closed
+    if lane == "eng":
+        assert ledger.rows["t1"]["state"] == "open"
+        assert store.launches("sw")[-1]["pane_id"] == "w1:p2"
