@@ -30,10 +30,9 @@ def test_each_kind_gets_its_own_prompt():
     )
     assert "task add" not in texts["troubleshoot"]
     assert "--finding <link>" in texts["research"]
-    for text in texts.values():
-        assert text.index("agentihooks ledger --slug sw --as engineer@a1b2c3-0001 leave") < text.index(
-            "agentihooks swarm sw done"
-        )
+    for kind, text in texts.items():
+        close = "agentihooks swarm sw ready" if kind in ("code", "ci") else "agentihooks swarm sw done"
+        assert text.index("agentihooks ledger --slug sw --as engineer@a1b2c3-0001 leave") < text.index(close)
 
 
 def test_the_prompt_carries_the_proof_contract():
