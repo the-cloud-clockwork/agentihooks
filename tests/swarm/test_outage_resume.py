@@ -164,9 +164,7 @@ def test_work_after_outage_closure_excludes_an_agent_that_only_becomes_idle_late
 
 
 @pytest.mark.parametrize("error_state", ["idle", "waiting"])
-def test_overlapping_outages_hold_recovery_and_persistent_errors_retry_three_times_then_count_idle(
-    store, error_state
-):
+def test_overlapping_outages_hold_recovery_and_persistent_errors_retry_three_times_then_count_idle(store, error_state):
     from scripts.swarm import idle
     from scripts.swarm.store import RedisStore
 
