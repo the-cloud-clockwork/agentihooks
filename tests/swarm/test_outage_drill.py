@@ -133,7 +133,10 @@ def fake_ledger():
     from tests.swarm.test_tick import FakeLedger
 
     class Ledger(FakeLedger, LedgerClient):
-        metadata = time_left = None
+        time_left = None
+
+        def metadata(self, slug):
+            return self.state(slug)["_meta"]
 
         def _call(self, slug, ops=None):
             raise AssertionError("unexpected ledger transport")
