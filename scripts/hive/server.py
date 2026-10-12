@@ -40,8 +40,8 @@ class _TLSHandler(BaseHTTPRequestHandler):
         if isinstance(self.request, ssl.SSLSocket):
             try:
                 self.request.unwrap()
-            except OSError as exc:
-                raise Dropped from exc
+            except OSError:
+                pass
 
 
 def _handler(redis: "Redis", redis_url: str, context: ssl.SSLContext | None) -> type[BaseHTTPRequestHandler]:
