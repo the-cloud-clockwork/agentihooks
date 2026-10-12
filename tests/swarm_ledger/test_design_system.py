@@ -57,7 +57,7 @@ class Palette(unittest.TestCase):
         def value(role):
             return tokens[tokens[role][len("var(") : -1]]
 
-        expected = {"--canvas": "#010104", "--accent": "#3b82f6", "--signal": "#ef4444", "--destructive": "#ef4444"}
+        expected = {"--canvas": "#050812", "--accent": "#3b82f6", "--signal": "#ef4444", "--destructive": "#ef4444"}
         for role, colour in expected.items():
             self.assertEqual(value(role), colour, role)
         self.assertEqual(value("--warn"), "#facc15")
@@ -182,7 +182,7 @@ class BluePalette(unittest.TestCase):
 
     def test_the_ramp_holds_the_approved_blue_values(self):
         expected = {
-            "--ink-950": "#010104",
+            "--ink-950": "#050812",
             "--steel-060": "#0e131b",
             "--steel-100": "#151c29",
             "--steel-160": "#1b2636",
@@ -196,7 +196,7 @@ class BluePalette(unittest.TestCase):
 
     def test_roles_take_the_blue_ramp_instead_of_white_lifts(self):
         expected = {
-            "--canvas": "#010104",
+            "--canvas": "#050812",
             "--veil": "#0e131b",
             "--hover": "#151c29",
             "--rule": "#151c29",

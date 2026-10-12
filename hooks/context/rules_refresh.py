@@ -3,8 +3,9 @@
 When an operator runs `agentihooks refresh-rules`, a marker file is written
 containing the current rule content and a snapshot of session IDs that were
 alive at the time. On each session's next UserPromptSubmit, the hook checks
-the marker; if that session is in the pending list, it receives the rule
-payload as additionalContext and is removed from the list.
+the marker; if that session is in the pending list and runs from the profile
+home the marker was rendered from, it receives the rule payload as
+additionalContext. Either way it is removed from the list.
 
 Properties:
 - Running sessions get the one-shot on their next prompt
@@ -20,8 +21,22 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from hooks.common import inject_context, log
+from scripts.claude_config import claude_home
 
 MAX_AGE_SECONDS = 24 * 3600  # 24h — markers older than this are GCed
+
+
+def home_profile(home: Path) -> str | None:
+    from scripts.profiles.homes import HOMES
+
+    parts = home.resolve().parts
+    if HOMES in parts[:-1]:
+        return parts[parts.index(HOMES) + 1]
+    return None
+
+
+def profile_home(home: Path) -> str:
+    return home_profile(home) or str(home.resolve())
 
 
 def _refresh_dir() -> Path:
@@ -101,6 +116,7 @@ def write_refresh_marker(profile: str, payload: str) -> dict:
     marker = {
         "ts": _iso_now(),
         "profile": profile,
+        "home": profile_home(claude_home()),
         "content_hash": content_hash,
         "payload": payload,
         "pending": pending,
@@ -129,6 +145,7 @@ def maybe_inject(session_id: str) -> None:
     - If no marker exists → no-op
     - If marker is expired → delete it, no-op
     - If session_id not in pending → no-op
+    - If the session's profile home differs from the marker's → consume without delivery
     - Otherwise: inject, remove session from pending, save (or delete if last one)
     """
     if not session_id:
@@ -152,9 +169,10 @@ def maybe_inject(session_id: str) -> None:
         if session_id not in pending:
             continue
 
-        # Deliver the one-shot
         payload = marker.get("payload", "")
-        if payload:
+        if marker.get("home") != profile_home(claude_home()):
+            log("rules_refresh: other profile home skipped", {"profile": profile, "session_id": session_id})
+        elif payload:
             inject_context(payload)
             log(
                 "rules_refresh: delivered",

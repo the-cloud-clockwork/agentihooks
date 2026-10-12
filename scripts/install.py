@@ -5864,14 +5864,10 @@ def _detect_active_profile() -> str:
 def _cmd_refresh_rules(args: argparse.Namespace) -> None:
     """Handle the refresh-rules CLI command — push rules to running sessions."""
     sys.path.insert(0, str(AGENTIHOOKS_ROOT))
-    from hooks.context.rules_refresh import (
-        _delete_marker,
-        _load_marker,
-        write_refresh_marker,
-    )
+    from hooks.context.rules_refresh import _delete_marker, _load_marker, home_profile, write_refresh_marker
     from scripts.targets.claude_target import refresh_rules
 
-    profile = args.profile or _detect_active_profile()
+    profile = args.profile or home_profile(claude_home()) or _detect_active_profile()
     rules_dir = claude_home() / "rules"
     claude_md = claude_home() / "CLAUDE.md"
     claude_local_md = claude_home() / "CLAUDE.local.md"

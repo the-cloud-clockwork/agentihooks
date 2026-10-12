@@ -128,13 +128,13 @@ function planActions(key, plan) {
 
 function planRow({ key, id, title, phases, plan }) {
   const idOf = (p) => `item-phases-${p.id}`;
-  const fold = h("details", { class: "plan-fold" }, h("summary", {}, h("span", { class: "plan-title", text: title }),
+  const fold = h("details", { class: "plan-fold" }, h("summary", {}, plan ? holdMark(key) : null, h("span", { class: "plan-title", text: title }),
     h("span", { class: "plan-count", text: `${phases.length} ${phases.length === 1 ? "phase" : "phases"}` }), planActions(key, plan)));
   fold.open = !closedComments.has(`${key}/row`) || phases.some((p) => idOf(p) === wanted.id);
   fold.addEventListener("toggle", () => rememberComment(`${key}/row`, fold.open));
   lazy(fold, () => h("ol", { class: "plan-phases" }, ...firstPage(key, phases, idOf).map((p, i) => phaseRow(p, i + 1)),
     moreButton(key, phases.length, "more phases", render), phases.length ? null : h("li", { class: "empty", text: "None." })));
-  return h("li", { class: "plan" + (plan && plan.out_of_scope ? " out" : "") + (plan ? holdClass(key) : ""), id }, plan ? holdMark(key) : null, fold);
+  return h("li", { class: "plan" + (plan && plan.out_of_scope ? " out" : "") + (plan ? holdClass(key) : ""), id }, fold);
 }
 
 function phaseList() {
@@ -258,7 +258,6 @@ export function render(focusKey) {
   document.title = doc.title;
   $("title").textContent = doc.title;
   $("overview").textContent = doc.overview;
-  $("overview-box").querySelector("summary").textContent = "Overview";
   $("closed-label").textContent = closedText(doc.closed_at);
   $("closed-banner").hidden = !doc.closed_at;
   $("sources-count").textContent = headCount([[doc.sources.length]]);
@@ -356,8 +355,7 @@ export function renderStats() {
   const pct = total ? Math.round(100 * done / total) : 0;
   const next = phases.find((p) => !p.done), counts = (swarm && swarm.tasks) || {}, figure = (value) => (swarm ? String(value || 0) : "—");
   const row = (label, value, extra) => h("div", { class: "stat", title: label === "Time left" ? timeLeftInputs(calc) : undefined, style: gap && label === "Time left" ? "grid-template-columns:75px minmax(0,1fr)" : "" }, h("dt", { text: label }), h("dd", {}, value, extra));
-  $("stats").replaceChildren(bottleneckStat(swarm && swarm.top_bottleneck),
-    row("Started", started ? when(started) : "—"),
+  $("stats").replaceChildren(row("Started", started ? when(started) : "—"),
     row("Elapsed", elapsed === null ? "—" : span(elapsed)),
     row("Time left", leftText),
     row("Unfrozen", calc && calc.frozen !== undefined ? String(calc.remaining) : "—"),
@@ -374,26 +372,6 @@ export function renderStats() {
     row("Follow-ups", `${upsDone} / ${ups.length}`),
     ...(out ? [row("Out of scope", String(out))] : []),
     row("Agents · 2 h", String(activeAgents())),
-    row("Last activity", last ? `${span(Date.now() - last)} ago` : "—"));
-}
-
-export function editTitle(on) {
-  $("title-row").hidden = on;
-  $("title-form").hidden = !on;
-  $("title-error").textContent = "";
-  if (!on) return $("title-edit").focus();
-  const box = $("title-input");
-  box.value = doc.title;
-  box.focus();
-  box.select();
-}
-
-export function saveTitle() {
-  const text = $("title-input").value.trim();
-  if (!text) {
-    $("title-error").textContent = "The title cannot be empty";
-    return $("title-input").focus();
-  }
-  editTitle(false);
-  if (text !== doc.title) queue({ op: "title_set", id: newId("title"), text });
+    row("Last activity", last ? `${span(Date.now() - last)} ago` : "—"),
+    bottleneckStat(swarm && swarm.top_bottleneck));
 }

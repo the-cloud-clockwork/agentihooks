@@ -16,11 +16,6 @@ SECTIONS = {
     "Open questions": True,
     "Operator notes": True,
     "Follow-ups or blockers": True,
-    "Chat": True,
-    "Notifications": True,
-    "Alerts": True,
-    "Artifacts": True,
-    "Stats": True,
 }
 
 
@@ -66,18 +61,36 @@ def walk(node, tag):
         yield from walk(kid, tag)
 
 
-def sections():
+def body():
     tree = Tree()
     tree.feed(page().split("<body>", 1)[1].split("<script", 1)[0])
-    return list(walk(tree.root, "section"))
+    return tree.root
 
 
-class EverySectionFolds(unittest.TestCase):
-    def test_every_section_the_page_renders_has_a_fold_header(self):
+def sections():
+    return list(walk(body(), "section"))
+
+
+SWARM_PANELS = {"quota-fold", "overlays-fold", "agents-fold", "health-fold", "handoff-fold", "freeze-fold"}
+
+
+def in_ledger_section(node):
+    while node.parent is not None:
+        if node.tag == "section" and node.parent.attrs.get("class") == "col":
+            return True
+        if node.tag == "details" and node.attrs.get("id") in SWARM_PANELS:
+            return True
+        node = node.parent
+    return False
+
+
+class OnlyLedgerSectionsFold(unittest.TestCase):
+    def test_every_ledger_tab_section_has_a_fold_header(self):
         found = {}
         for section in sections():
-            label = section.attrs.get("id") or section.attrs.get("aria-label") or "a section"
-            self.assertTrue(section.kids, label)
+            if section.parent.attrs.get("class") != "col":
+                continue
+            label = section.attrs.get("id") or "a section"
             box = section.kids[0]
             self.assertEqual(box.tag, "details", f"{label} has a fixed header")
             self.assertIn("fold", box.attrs.get("class", "").split(), label)
@@ -86,6 +99,23 @@ class EverySectionFolds(unittest.TestCase):
             summary = box.kids[0]
             found[summary.text.strip() or summary.kids[0].text.strip()] = "open" in box.attrs
         self.assertEqual(found, SECTIONS)
+
+    def test_every_swarm_panel_below_capacity_folds_open_by_default(self):
+        folds = {node.attrs.get("id"): node for node in walk(body(), "details") if node.attrs.get("id") in SWARM_PANELS}
+        self.assertEqual(set(folds), SWARM_PANELS)
+        for name, box in folds.items():
+            self.assertIn("fold", box.attrs.get("class", "").split(), name)
+            self.assertIn("open", box.attrs, name)
+            self.assertEqual(box.kids[0].tag, "summary", name)
+
+    def test_nothing_outside_the_ledger_sections_and_swarm_panels_folds(self):
+        stray = [
+            node.attrs.get("id") or node.parent.attrs.get("id") or node.tag
+            for tag in ("details", "summary")
+            for node in walk(body(), tag)
+            if not in_ledger_section(node)
+        ]
+        self.assertEqual(stray, [])
 
     def test_a_closed_dropdown_inside_an_open_section_shows_the_closed_arrow(self):
         self.assertIn("details[open] > summary::before { transform: rotate(90deg); }", page())
