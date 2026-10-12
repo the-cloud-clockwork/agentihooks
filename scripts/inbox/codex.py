@@ -29,7 +29,7 @@ def envelope(item: Item, delivery: Delivery) -> str:
 
 
 def stderr(line: str) -> None:
-    print(f"[agentihooks codex-pump] {line}", file=sys.stderr, flush=True)
+    print(f"[agentihooks codex-pump] {line}", file=sys.stderr)
 
 
 @dataclass
@@ -113,7 +113,6 @@ class Pump:
         self.state = ThreadState()
         self.queue = []
         self.subscription = None
-        self.next_reconcile = 0.0
         self.hold_until = 0.0
         self.backoff = timing.backoff_s
         self.surfaced = ""
@@ -162,10 +161,10 @@ class Pump:
             self._submit(self.queue.pop(0))
 
     def _hinted(self) -> bool:
-        hinted = False
+        hints = 0
         while self.subscription.get_message(timeout=0) is not None:
-            hinted = True
-        return hinted
+            hints += 1
+        return hints > 0
 
     def _reconcile(self) -> None:
         binding = self.binding

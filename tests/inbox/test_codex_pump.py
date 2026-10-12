@@ -137,6 +137,11 @@ def rig():
     return Rig()
 
 
+@pytest.fixture(autouse=True)
+def watchdog(recovery_deadline):
+    yield
+
+
 def deliveries(rig, item_id):
     receipts = Receipts(rig.store)
     keys = rig.store.redis.keys(rig.store.key("delivery", "*"))
@@ -151,6 +156,7 @@ def test_an_idle_thread_wakes_with_turn_start_and_no_wait_tool(rig):
     assert rig.server.turns[0]["inputs"] == [
         f"[swarm delivery] item {item.id} delivery {delivery.id} from alice\n\nhello"
     ]
+    assert [m["params"]["threadId"] for m in rig.server.sent if m["method"] == "turn/start"] == [THREAD]
     assert rig.store.get(item.id).state == "delivered"
     assert (delivery.state, delivery.committed) == ("accepted", True)
     assert (rig.record().state, rig.record().active_turn_id) == (CONNECTED, "turn-1")
@@ -339,14 +345,52 @@ def test_a_turn_running_before_the_pump_connected_is_not_steered_and_holds_deliv
 
 
 def test_the_backoff_doubles_to_its_cap_and_resets_on_acceptance(rig):
+    rig.pump.start()
     rig.pump.backoff = 40.0
     rig.pump._hold()
     assert rig.pump.backoff == rig.pump.timing.backoff_max_s
-    rig.store.send("alice", ME, "ok")
+    item = rig.store.send("alice", ME, "ok")
     rig.clock.now = rig.pump.hold_until
+    rig.server.frames.append({"method": "thread/status/changed", "params": {"threadId": THREAD}})
+    rig.pump.step()
+    assert rig.clock.now == rig.pump.hold_until
+    assert rig.store.get(item.id).state == "delivered"
+    assert rig.pump.backoff == 1.0
+
+
+def test_a_fresh_pump_delivers_from_clock_zero(rig):
+    rig.clock.now = 0.0
+    item = rig.store.send("alice", ME, "early")
     rig.pump.start()
     rig.pump.step()
-    assert rig.pump.backoff == 1.0
+    assert rig.store.get(item.id).state == "delivered"
+
+
+def test_an_unchanged_empty_request_set_writes_no_pending_mark(rig):
+    marks = []
+    original = rig.bindings.put
+    rig.bindings.put = lambda slug, record: marks.append(record.pending_request) or original(slug, record)
+    rig.pump.start()
+    rig.pump.step()
+    rig.pump.step()
+    assert marks == ["", ""]
+    assert rig.logged == []
+
+
+def test_a_refused_ownership_at_start_degrades_without_a_subscription(rig):
+    Dispatcher(rig.store).own(ME, "host:99")
+    assert rig.run(1) == DEGRADED
+    assert rig.pump.subscription is None
+    assert rig.logged == [
+        f"codex pump for {ME} degraded: DispatchError: {ME} is delivered by host:99; take over to replace it"
+    ]
+    assert (rig.record().state, rig.record().last_error_class) == (DEGRADED, "DispatchError")
+
+
+def test_run_closes_its_subscription(rig):
+    rig.run(1)
+    closed = rig.pump.subscription
+    assert closed.subscribed is False
 
 
 def test_a_pending_approval_keeps_the_item_reserved_and_surfaces_the_request(rig):
@@ -363,10 +407,13 @@ def test_a_pending_approval_keeps_the_item_reserved_and_surfaces_the_request(rig
     assert rig.record().pending_request == APPROVAL
     assert rig.logged == [f"thread {THREAD} waits on {APPROVAL}; inbox delivery is held"]
     assert 90 not in [m.get("id") for m in rig.server.sent if "result" in m]
+    later = rig.store.send("bob", ME, "also waiting")
+    rig.pump.step()
+    assert [d.state for d in deliveries(rig, later.id)] == ["reserved"]
     rig.server.frames.append({"method": codex.RESOLVED, "params": {"threadId": THREAD, "requestId": 90}})
     rig.pump.step()
-    assert rig.server.methods()[-1] == "turn/steer"
-    assert rig.store.get(item.id).state == "delivered"
+    assert rig.server.methods()[-2:] == ["turn/steer", "turn/steer"]
+    assert [rig.store.get(i.id).state for i in (item, later)] == ["delivered", "delivered"]
     assert rig.record().pending_request == ""
 
 
@@ -480,6 +527,7 @@ def test_start_owns_the_recipient_and_releases_unsent_reservations(rig):
     rig.store.send("alice", ME, "left over")
     Dispatcher(rig.store).own(ME, OWNER)
     [stale] = Dispatcher(rig.store).reserve(ME, OWNER)
+    codex.Transport(rig.bindings, SLUG, EXECUTION).mark(state=DEGRADED, last_error_class="ProtocolError")
     rig.pump.start()
     assert Dispatcher(rig.store).owner(ME) == OWNER
     assert Receipts(rig.store).get(stale.id).state == "rejected"
@@ -503,7 +551,10 @@ def test_a_withdrawn_item_is_released_instead_of_submitted(rig):
     rig.store.redis.hset(rig.store.key("item", item.id), "state", "done")
     rig.pump._submit(rig.pump.queue.pop(0))
     [delivery] = deliveries(rig, item.id)
-    assert delivery.state == "rejected"
+    assert (delivery.state, delivery.reason) == (
+        "rejected",
+        f"message {item.id} is done for {ME}, not {ME}'s to submit",
+    )
     assert "turn/start" not in rig.server.methods()
 
 
