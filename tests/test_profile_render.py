@@ -2897,7 +2897,7 @@ def test_pinned_copilot_rebuild_keeps_the_recorded_overlay_servers(world, overla
     from scripts.profiles import bundle_copy, render
 
     server = {"mcpServers": {"overlay-server": {"command": "overlay-command"}}}
-    _write(overlays / "ov-a" / ".copilot" / ".mcp.json", json.dumps(server))
+    _write(overlays / "ov-a" / ".copilot" / "mcp-config.overrides.json", json.dumps(server))
     _commit(world["bundle"], "overlay server")
     recorded = _git(world["bundle"], "rev-parse", "HEAD").strip()
     first = render.render("copilot", "rb-eng", overlays=["ov-a"], bundle_revision=recorded)
