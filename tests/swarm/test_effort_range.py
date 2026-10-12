@@ -326,7 +326,8 @@ def test_set_names_every_key_it_takes_and_every_level(env, capsys):  # noqa: F81
     err = capsys.readouterr().err
     assert "set takes max-eng-agents, max-ci-agents, " in err
     assert (
-        "autonomy=manual|assist|delegate|full, effort-min=E, effort-max=E, scaling=auto|manual, "
+        "autonomy=manual|assist|delegate|full, effort-min=E, effort-max=E, claude-model=M, codex-model=M, "
+        "scaling=auto|manual, "
         "load-high=N, load-low=N, memory-per-agent=MB, api-url=URL or eng-role, "
     ) in err
     assert run("sw", "set", "effort-min=huge") == 1

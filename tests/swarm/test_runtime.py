@@ -305,7 +305,7 @@ def test_spawn_without_a_known_predecessor_names_none(tmp_path, monkeypatch, ext
     assert "AGENTIHOOKS_PREDECESSOR_SESSION" not in env
 
 
-def _spawn_seen(tmp_path, lanes, lane="eng"):
+def _spawn_seen(tmp_path, lanes, lane="eng", config=None):
     seen = {}
 
     def run(argv, **kwargs):
@@ -317,7 +317,7 @@ def _spawn_seen(tmp_path, lanes, lane="eng"):
         return requested or "claude", "requested" if requested else "priority"
 
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=choose)
-    config = SimpleNamespace(
+    config = config or SimpleNamespace(
         slug="sw",
         repo=str(tmp_path),
         code="a1b2c3",
@@ -355,7 +355,7 @@ def test_a_lane_pin_wins_over_an_opposite_saved_harness(tmp_path, monkeypatch, p
         seen["argv"] = argv
         return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
 
-    def pick(harness, lane, task, environ, bounds):
+    def pick(harness, lane, task, environ, bounds, default_model):
         seen["classifier_harness"] = harness
         return model_pick.ModelPick("", "high", "classifier", 0.9)
 
@@ -949,6 +949,66 @@ def test_a_swarm_config_model_launches_as_named_with_the_classifier_live(tmp_pat
         "--effort",
         "xhigh",
     ]
+
+
+@pytest.mark.parametrize("harness,model", [("claude", "sonnet"), ("codex", "gpt-6-sol")])
+@pytest.mark.parametrize("lane", ["eng", "ci", "plan", "master"])
+def test_configured_models_reach_each_launch_lane(tmp_path, monkeypatch, harness, model, lane):
+    for agent in ("CLAUDE", "CODEX"):
+        for field in ("MODEL", "EFFORT"):
+            monkeypatch.delenv(f"AGENTIHOOKS_{agent}_{field}", raising=False)
+    lanes = {lane: {"agent": harness, "model": "auto", "effort": "auto"}}
+    config = SwarmConfig(
+        "sw",
+        str(tmp_path),
+        2,
+        1,
+        code="a1b2c3",
+        lanes=lanes,
+        claude_model="sonnet",
+        codex_model="gpt-6-sol",
+    )
+    passed = _passed(_spawn_seen(tmp_path, lanes, lane, config)["argv"])
+    model_flag = "-m" if harness == "codex" else "--model"
+    assert passed[passed.index(model_flag) + 1] == model
+    effort = "high" if lane == "master" else "xhigh" if harness == "claude" and lane in ("eng", "ci") else "medium"
+    if harness == "codex":
+        assert f'model_reasoning_effort="{effort}"' in passed
+    else:
+        assert passed[passed.index("--effort") + 1] == effort
+
+
+def test_the_classifier_receives_the_launch_environment(tmp_path, monkeypatch):
+    from scripts.swarm import model_pick
+
+    original = model_pick.pick
+    monkeypatch.setenv("MODEL_CONTEXT_PROOF", "present")
+
+    def pick(harness, lane, task, environ, bounds, default_model):
+        context_present = bool(environ) and environ.get("MODEL_CONTEXT_PROOF") == "present"
+        assert context_present
+        return original(harness, lane, task, environ, bounds, default_model)
+
+    monkeypatch.setattr(model_pick, "pick", pick)
+    _spawn_seen(tmp_path, {"eng": {"agent": "codex", "model": "auto", "effort": "auto"}})
+
+
+def test_an_empty_lane_model_uses_the_configured_default(tmp_path, monkeypatch):
+    monkeypatch.delenv("AGENTIHOOKS_CLAUDE_MODEL", raising=False)
+    lanes = {"eng": {"agent": "claude", "effort": "medium"}}
+    config = SwarmConfig("sw", str(tmp_path), 2, 1, code="a1b2c3", lanes=lanes, claude_model="sonnet")
+    passed = _passed(_spawn_seen(tmp_path, lanes, config=config)["argv"])
+    assert passed[passed.index("--model") + 1] == "sonnet"
+
+
+def test_an_unrecorded_resume_uses_the_configured_model(tmp_path):
+    from dataclasses import replace
+
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee")
+    config.claude_model = "sonnet"
+    runtime.resume(config, replace(agent, model=""), "resume")
+    passed = _passed(seen["runs"][0])
+    assert passed[passed.index("--model") + 1] == "sonnet"
 
 
 @pytest.mark.parametrize("lane", sorted(SEAT_TASKS))
