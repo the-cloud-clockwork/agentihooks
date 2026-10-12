@@ -532,8 +532,14 @@ def main(
     lock = lock_path.open("a+", encoding="utf-8")
     fcntl.flock(lock, fcntl.LOCK_EX)
     try:
-        account, placement, live, cap = _route(active, route, run, exclude)
-        account = credential(account, active)
+        if route == "interactive":
+            from scripts.routing import interactive
+
+            declared = interactive.account("codex", active, run)
+            account, placement, live, cap = CodexAccount(declared.slug), "forced", 0, "?"
+        else:
+            account, placement, live, cap = _route(active, route, run, exclude)
+            account = credential(account, active)
     except RoutingError as exc:
         print(f"agentihooks codex: {exc}", file=sys.stderr)
         _report(report, status="failed", error=str(exc))
@@ -541,5 +547,10 @@ def main(
     _report(report, status="routed", account=account.name, placement=placement)
     print(f"[agentihooks codex] account={account.name} sessions={live}/{cap} placement={placement}", flush=True)
     codex_bin = shutil.which("codex") or "codex"
-    execvpe(codex_bin, command(account, codex_bin, args), child_environment(account, active))
+    child = (
+        envs.codex_interactive_child(active, account.name)
+        if route == "interactive"
+        else child_environment(account, active)
+    )
+    execvpe(codex_bin, command(account, codex_bin, args), child)
     return 0
