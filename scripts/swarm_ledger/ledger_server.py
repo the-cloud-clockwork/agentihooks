@@ -270,6 +270,17 @@ MAX_NOTE = 500
 FINDING_RE = re.compile(r"^[a-z][a-z-]*/[\w.-]{1,64}$")
 
 
+def model_pairs(body):
+    from scripts.swarm import default_models
+
+    changes = {key: body[key] for key in default_models.FIELDS.values() if key in body}
+    if not changes:
+        return []
+    if refused := default_models.refusal(changes, swarm_models()):
+        raise ValueError(refused)
+    return [f"{key}={changes[field]}" for key, field in default_models.KEYS.items() if field in changes]
+
+
 def control_argv(body):
     action = body.get("action") if isinstance(body, dict) else None
     if action in CONTROLS:
@@ -311,6 +322,7 @@ def control_argv(body):
             raise ValueError(f"autonomy must be one of {', '.join(AUTONOMY)}")
         pairs.append(f"autonomy={body['autonomy']}")
     pairs += scaling_pairs(body)
+    pairs += model_pairs(body)
     if "gates" in body:
         pairs += gate_pairs(body["gates"])
     if "master_agent" in body:
@@ -322,7 +334,7 @@ def control_argv(body):
     if not pairs:
         raise ValueError(
             "set needs max_eng, max_ci, max_plan, compact_limit, effort_min, effort_max, autonomy, "
-            "scaling, load_high, load_low, memory_per_agent_mb, master_agent, overlays or gates"
+            "scaling, load_high, load_low, memory_per_agent_mb, claude_model, codex_model, master_agent, overlays or gates"
         )
     return ["set", *pairs]
 

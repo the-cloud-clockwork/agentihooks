@@ -156,6 +156,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm alerts` | The Grafana alert intake, run by the `agentihooks-alert-intake` user service the swarm timer installs. It takes Grafana webhook posts on `/alerts` at `AGENTIHOOKS_ALERT_INTAKE_HOST` (`0.0.0.0`) and `AGENTIHOOKS_ALERT_INTAKE_PORT` (8796; 0 turns it off), only from private addresses or the networks in `AGENTIHOOKS_ALERT_INTAKE_FROM`. An alert labelled `swarm=bottleneck` with a `ledger`, a known `stage` and `threshold_hours` keeps one standing `bottleneck-stage/<stage>` health finding on that ledger: firing updates its hours and counts each new firing once, resolved clears it. Only those labels and the `hours` value are read, never the alert text. The ci budget pass alone owns the `ci_overrun` finding, which the intake refuses: it updates that finding for each Tests run over fifteen minutes instead of adding a follow up per run. A standing finding not updated for six hours stops showing. The rules live in antoncore's Grafana provisioning. Build, ci run and launch are productive work: the intake refuses their alerts and the stage detector never raises a finding for them, though status still ranks them. The detector opens a finding only when a stage's task hours in its window pass that stage's threshold in `stage_detector.THRESHOLD_HOURS` (claim wait and review 4, quota and host hold 2, merge queue, intent fix and ci queue 1, ci overrun and launch failure 0.25), and clears a finding it opened once the stage falls back under it; an alert's finding is left to its alert. Each tick, every standing stage finding over a nonzero threshold runs its remedy once per four hour window. At `delegate` or `full`, `claim_wait` moves one seat from the ci lane to the eng lane under the lane split's caps, `launch_failure` moves the first eng or ci lane pinned to the one harness the detector saw fail to the other harness and `quota_hold` does the same for the one harness its finding names as held, which each host sample records as `held_harness` when every quota held lane is pinned to that harness; a stage whose remedy is refused or has none raises its open task titled `Bottleneck fix for the <stage> stage` to `urgent`, which the dispatcher queue orders first, and an urgent one needs nothing more. Otherwise, and for every stage below `delegate`, the master gets one proposed task carrying the hours: to add that task, or to raise the open one. Each action goes to the gate log as rule `bottleneck-remedy` with the hours it targeted and is kept as the stage's last action. |
 | `agentihooks swarm <id> classify EXECUTION RULING --reason TEXT` | The master or the operator rules `lost` or `working` on an execution attempt the observer flagged for the operator under `AGENTIHOOKS_OBSERVATION_MODE=conservative`. The reason, author and time are kept on its observation. `lost` holds the attempt lost and writes the audit record; `working` holds it working until a newer loss reading (pod gone or ended, supervisor exited) flags it again, or it recovers on its own. Only a registered master record or the operator acts: any other name, an empty reason or an attempt that is not flagged is refused. `verdict` follows the same authority rule. |
 | `agentihooks swarm <id> terminal EXECUTION` | The operator opens the worker terminal of a Kubernetes execution in herdr. The command takes only the swarm and the execution: the host, the generation and the host key come from the record the controller wrote when it launched the Pod. It signs a short lived certificate with the user CA key named by `AGENTIHOOKS_TERMINAL_CA_KEY`, reads the worker namespace from the Pod policy in `AGENTIHOOKS_POD_POLICY_FILE`, writes the SSH material under the operator's own home and saves the machine in herdr. A master or any agent session is refused, and so is an execution with no recorded host key. |
+| `agentihooks swarm-terminal setup [--antoncore DIR]`, `agentihooks swarm-terminal install` | Places the files the terminal command needs on the operator machine, with nobody copying them by hand. `setup` reads the user CA key from OpenBao `secret/agentihooks-swarm/terminal-attach` field `user_ca` with `OPENBAO_URL` and `OPENBAO_TOKEN`, and the Pod policy from the `swarm-pod-policy` ConfigMap in the antoncore checkout (`--antoncore`, else `AGENTIHOOKS_ANTONCORE_DIR`, else `~/dev/tcc-ecosystem/antoncore`). Each is checked before it replaces the previous file: an Ed25519 OpenSSH key, a valid policy. It writes `user_ca`, `pod-policy.json` and `terminal.env`, which names both as `AGENTIHOOKS_TERMINAL_CA_KEY` and `AGENTIHOOKS_POD_POLICY_FILE`, mode 0600 under `~/.agentihooks/swarm-terminal`, below the `*.env` autoload, and prints only their paths, the CA fingerprint and the worker namespace. `install` writes and enables the `agentihooks-swarm-terminal` user timer, which runs `setup` a minute after boot and every fifteen minutes. Both refuse inside an agent session. `operator_setup.settings` reads `terminal.env` back for the service that uses the files. The workstation reads controller host key records through `scripts.swarm_v2.herdr.publications`, which opens `AGENTIHOOKS_HIVE_REDIS_URL`, else `AGENTIHOOKS_SWARM_REDIS_URL`, only as `rediss` with the certificate and its hostname verified, refuses a URL carrying `ssl_` options and a host resolving outside the private network, and keeps each worker's host key exactly as the controller recorded it at launch. |
 | `agentihooks swarm <id> lift AGENT GATE` | The operator or the master lets one agent past one gate for an hour, the page's lift button in the Agents table runs it. It arms the lift for that agent and writes the same `lift` row to the gate log as typing `lift the <gate> gate` in the agent's pane; the hook gates and the talk gate honour it. Each agent in `status --json` lists `gates`: every gate that denied it in the last hour and whether a lift holds. Other agents are refused. |
 | `agentihooks swarm <id> freeze TARGET`, `agentihooks swarm <id> focus TARGET`, `agentihooks swarm <id> unfreeze TARGET` `[--reason TEXT] [--quote WORDS]` | Writes a freeze or focus record to the ledger's `freezes` collection, or clears one. A target is a node address (`plans/<id>`, `phases/<id>`, `slices/<id>`, `tasks/<id>`) or a selector `lane:<lane>` or `kind:<kind>`. A freeze holds the node and everything under it; a focus holds everything outside it. `unfreeze` on a node clears every record on that node and under it. The operator writes them; the master writes them only with `--quote` carrying the operator's recorded words; the dispatcher writes them only at `full` autonomy. Every other agent is refused. `status` lists each active record. A Doctor swarm also follows the ledger it watches: while that ledger has a focus, Doctor tasks outside the fix phase are held and fixes pass; a freeze there does not touch the Doctor, and its detectors keep running. |
 | `agentihooks swarm <id> learned` | List every seat's learned notes, one line each: seat, number, maturity, text. |
@@ -288,7 +289,8 @@ checked, who judges it) that the agent's prompt carries.
 A systemd user timer (`agentihooks-swarm.timer`) runs `agentihooks swarm tick` every minute. `start` installs
 and enables it. Every swarm ticks in its own thread; while one swarm's tick runs long, a quicker swarm ticks
 again each minute until every swarm's first tick of the pass ends; no extra tick starts after seven minutes.
-Each tick, per swarm:
+An outage holds the affected idle and delivery decisions until recovery (see
+[Outage holds and recovery](#outage-holds-and-recovery)). Each tick, per swarm:
 
 1. Retire agents that finished, and pass on the messages they left (see [Safe retire](#safe-retire)).
 2. Free the tasks of agents whose pane is gone, or that stayed idle for 10 ticks. An idle agent is nudged at 3.
@@ -423,11 +425,12 @@ The default is `redis://127.0.0.1:6379/0`; set `AGENTIHOOKS_SWARM_REDIS_URL` to 
   `agentihooks swarm <id> say --to operator "<text>"`.
 - Agents: `agentihooks swarm <id> say "<text>"`, optionally `--to <agent name>`, `master`, `eng` or `ci`.
 
-Every message goes through the agent inbox. An addressed line leaves one pending inbox item per recipient,
-sent by the real author; an unaddressed agent line only shows on the page. The receiver gets the item at its
-next tool call, an idle pane is prompted by the next tick, and unread items climb to the master, then to the
-operator. A reply to the operator is posted on the page chat and its item closed. The page keeps the whole
-conversation.
+Every addressed message goes through the agent inbox, with one item per recipient, sent by the real author;
+an unaddressed agent line only shows on the page. Items pass from pending to delivered, then confirmed by
+the receiver; delivery alone leaves them eligible for redelivery. The receiver gets the item through its
+inbox channel or next tool call, an idle pane is prompted by the next tick, and unread items climb to the
+master, then to the operator. A reply to the operator is posted on the page chat and its item closed. The
+page keeps the whole conversation.
 
 Every operator write on the page reaches the inbox the moment the ledger server applies it: a comment or reply,
 an answer, a note, a check or uncheck, a chat line. A write on a task goes to the agent that claimed it, a chat
@@ -437,5 +440,70 @@ images; the page shows it once, marked as sent to the whole swarm. Only the mast
 every other agent's copy is information only and asks for no reply. With no live master the item waits at the
 master seat for the next one, and the tick tells the page chat that the master is down.
 A stopped swarm whose master seat holds a pending item is paused, so the tick starts its master and no engineer.
-The ledger hook, the ledger watch and the inbox share one seen mark per agent and write, so each write reaches each
-agent once, through whichever path shows it first.
+The ledger hook, the ledger watch and the inbox share one seen mark per agent and write. Stable item ids keep
+relay retries from creating a second item; an unconfirmed delivery may still be shown again.
+
+### Delivered then confirmed
+
+The inbox keeps an item and its history until it is closed. A hook or channel claims a pending item and marks
+it delivered. A later hook confirms items delivered to that receiver before the hook began: the session has
+continued past delivery. `agentihooks msg read <id>` records receipt as read; `msg reply` or `msg close`
+settles the work. Confirmation proves receipt, and leaves the agent responsible for answering or closing it.
+
+If delivery remains unconfirmed for `AGENTIHOOKS_INBOX_REDELIVER_S` (default 300 seconds), the inbox returns
+the same item to pending. Whichever transport claims next can deliver it: the channel, hook or wake path.
+A failed channel write returns its unsent items to pending immediately. The redelivery window is separate
+from `AGENTIHOOKS_INBOX_RETRY_WINDOW_S` (default 300 seconds), which controls idle wakes and escalation.
+Agents should read the item's current state before repeating work after redelivery.
+
+### Local outbox and limits
+
+When Redis is unavailable, inbox operations queue in `inbox-outbox.jsonl` under the AgentiHooks home. Records
+are checksummed and fsynced before the sender reports them queued. A queued result means accepted locally;
+the receiver sees it after replay. While records wait, new operations queue behind them to preserve order.
+Each inbox connection and swarm tick attempts replay. Replay stops on a Redis failure and retains that
+record and everything after it; stable item ids make a retry safe when Redis accepted a send before its
+response was lost.
+
+| Setting | Default | Behaviour |
+|---|---|---|
+| `AGENTIHOOKS_INBOX_OUTBOX_MAX_BYTES` | 1048576 bytes (1 MiB) | Refuse an operation that would exceed the limit, with an error; retain everything already queued. |
+| `AGENTIHOOKS_INBOX_OUTBOX_WARN_BYTES` | 786432 bytes (768 KiB) | Warn when the queued bytes reach this threshold. |
+
+Corrupt records and operations refused during replay are preserved in `inbox-outbox.skipped.jsonl`, with
+the reason reported; later valid records can continue. Inspect and resolve those refusals rather than
+treating them as delivered. The outbox depends on the local disk surviving and having space, and its limit
+is a refusal boundary. Restoring Redis lets replay free space; a send refused before queuing must be retried.
+
+Operator ledger writes and alerts retain their oldest unrelayed revision in `ledger-unrelayed.json` when
+neither Redis nor the outbox accepts them. The next write to that ledger retries the intervening events;
+the ledger watch also retries every five passes, about ten seconds at its default interval. Stable ids
+prevent duplicate inbox items. Ledger replay is limited to its retained history of 2000 events: writes
+older than that history cannot be reconstructed by replay. The ledger records a notice naming the lost
+revision range for the operator; the watcher and tick also report trimmed history gaps.
+
+### Outage holds and recovery
+
+The tick records Redis, ledger and provider outages locally under the swarm home, so the evidence remains
+available when Redis is down. `agentihooks swarm <id> status` shows open outages and their evidence. A failed
+Redis check ends the pass cleanly; a failed ledger probe holds decisions that need the ledger. Provider
+error signatures in an agent pane open a provider outage. Recovery requires an affirmative service check:
+for a provider, one minimal request per affected provider account on a backoff from one to ten minutes.
+Each account stops probing after its first success; the provider record closes once every affected account
+has succeeded. Pane text alone cannot prove recovery.
+
+While a swarm outage is open, or an agent's own pane shows a provider error, its idle count stays where it
+was. The tick sends no idle nudge, retires no affected worker or idle master, and reclaims no affected task.
+The wake ladder pauses wakes and escalations during the outage, then subtracts outage time from its
+deadlines so it continues from where it stopped. Idle and stale claim findings for held agents carry the
+outage evidence and send no finding notice to the master. Once the hold lifts, idle counting resumes from
+the held count.
+
+When service returns, the tick sends one marked resume prompt to each stalled agent that still owns its
+task. The prompt tells it to read its task folder and inbox and continue the same work. Busy panes, typed
+input and permission prompts are left alone. A pane still showing the provider error gets at most three
+resume attempts on separate ticks before normal idle rules apply. An agent whose process
+died reopens its own conversation in the same seat; if that cannot resume, the handoff supplies its
+successor's context. Recovery preserves the existing task claim. A changed claim owner or execution
+generation, expired claim lease or changed seat occupant fences out the old agent, so recovery cannot
+resume work already taken by a successor.

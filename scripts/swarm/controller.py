@@ -188,7 +188,7 @@ def main(argv: list[str]) -> int:
                     print(f"{slug}: {action}", flush=True)
             if service is not None:
                 service.tick()
-            proof_swarm.run(os.environ, store)
+            proof_swarm.run(os.environ, store, service.controller.require if service is not None else None)
             if args.once:
                 return 0
             time.sleep(lease.tick_ms() / 1000)

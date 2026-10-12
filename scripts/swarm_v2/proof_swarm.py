@@ -5,12 +5,14 @@ from types import ModuleType
 from typing import TYPE_CHECKING
 
 from scripts.swarm import naming
-from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
+from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
+from scripts.swarm_v2 import retention
 
 if TYPE_CHECKING:
     from scripts.swarm_v2.kubernetes.failures import Recovery
 
 PROOF_ENV = "AGENTIHOOKS_CONTROL_PROOF"
+CANCELLED = "cancelled"
 FRESH = "fresh"
 FRESH_REASON = "the controller owns this proof swarm, which keeps no checkpoints and runs one trivial task"
 PROJECTS_ENV = "AGENTIHOOKS_LAUNCH_PROJECTS"
@@ -32,13 +34,13 @@ CONTENT = {
 }
 
 
-def run(environ: Mapping[str, str], store: RedisStore) -> None:
+def run(environ: Mapping[str, str], store: RedisStore, require: Callable[[], None] | None = None) -> None:
     from scripts.swarm_ledger import ledger_link, proof_ledger
 
     if not ledger_link.remote(environ):
         return
     try:
-        lines = reconcile(environ, store, environ.get(SWARM_ENV, ""), proof_ledger)
+        lines = reconcile(environ, store, environ.get(SWARM_ENV, ""), proof_ledger, require)
     except SwarmError as exc:
         print(
             f"controller: the proof swarm pass failed and runs again after the next tick: {exc}",
@@ -50,10 +52,16 @@ def run(environ: Mapping[str, str], store: RedisStore) -> None:
         print(line, flush=True)
 
 
-def reconcile(environ: Mapping[str, str], store: RedisStore, slug: str, ledger: ModuleType) -> list[str]:
+def reconcile(
+    environ: Mapping[str, str],
+    store: RedisStore,
+    slug: str,
+    ledger: ModuleType,
+    require: Callable[[], None] | None = None,
+) -> list[str]:
     asked = _asked(environ)
     stale = [other for other in store.slugs() if naming.PROOF_RE.fullmatch(other) and (asked is None or other != slug)]
-    lines = [_remove(environ, store, other, ledger) for other in stale]
+    lines = [_remove(environ, store, other, ledger, require if other == slug else None) for other in stale]
     if asked is not None and slug not in store.slugs():
         lines.append(_create(environ, store, slug, ledger, asked))
     return lines
@@ -106,13 +114,33 @@ def _create(environ: Mapping[str, str], store: RedisStore, slug: str, ledger: Mo
     return f"controller: created proof swarm {slug} with one engineer task"
 
 
-def _remove(environ: Mapping[str, str], store: RedisStore, slug: str, ledger: ModuleType) -> str:
+def _remove(
+    environ: Mapping[str, str], store: RedisStore, slug: str, ledger: ModuleType, require: Callable[[], None] | None
+) -> str:
     if _call(ledger.state, slug, environ) == "live":
         _call(ledger.remove, slug, environ)
-    if store.agents(slug):
+    agents = store.agents(slug)
+    if agents and require is not None:
+        agents = _end(store, slug, agents, require)
+    if agents:
         return f"controller: proof swarm {slug} has its ledger removed and waits for its agents to end"
     store.remove(slug)
     return f"controller: removed proof swarm {slug}"
+
+
+def _end(store: RedisStore, slug: str, agents: list[AgentRecord], require: Callable[[], None]) -> list[AgentRecord]:
+    left = []
+    for agent in agents:
+        execution_id = agent.execution_id
+        if execution_id and not retention.retained(store, slug, execution_id):
+            if retention.final(store, slug, execution_id) is None:
+                end = retention.archive_watermark(store, slug, execution_id)
+                retention.finalize(store, slug, require, execution_id, CANCELLED, end, f"proof/{slug}/removed")
+            left.append(agent)
+            continue
+        store.release(slug, agent.task, agent.name)
+        store.drop_agent(slug, agent.name)
+    return left
 
 
 def _repo(environ: Mapping[str, str]) -> str:

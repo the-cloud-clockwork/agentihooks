@@ -1,4 +1,6 @@
-"""Local outbox for inbox sends, replies and closes made while Redis is unreachable, replayed in order once it returns.
+"""Local outbox for inbox sends made while Redis is unreachable and ledger talk made while the ledger server is down.
+
+Each destination replays in order once it returns, independent of the other.
 
 A record names the item it writes, so a replay never writes twice; a full outbox refuses and never drops a record.
 """
@@ -9,6 +11,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -18,11 +21,13 @@ from scripts.inbox.store import Contended, DuplicateItem, InboxError, new_item_i
 NAME = "inbox-outbox.jsonl"
 SKIPPED = "inbox-outbox.skipped.jsonl"
 LOCK = "inbox-outbox.lock"
-OPS = ("send", "reply", "close", "post", "say")
+OPS = ("send", "reply", "close", "post", "say", "ledger")
 MAX_ENV = "AGENTIHOOKS_INBOX_OUTBOX_MAX_BYTES"
 WARN_ENV = "AGENTIHOOKS_INBOX_OUTBOX_WARN_BYTES"
 DEFAULT_MAX_BYTES = 1_048_576
 DEFAULT_WARN_BYTES = 786_432
+BUSY_AGE_ENV = "AGENTIHOOKS_LEDGER_OUTBOX_BUSY_MAX_AGE_S"
+DEFAULT_BUSY_AGE = 3600
 QUEUED = (
     "agentihooks msg: Redis is unreachable or busy; the message is queued locally and replays when Redis returns, "
     "where its address is checked; a refused replay is reported and kept in the skipped outbox"
@@ -30,6 +35,14 @@ QUEUED = (
 
 
 class OutboxFull(InboxError):
+    pass
+
+
+class LedgerDown(Exception):
+    pass
+
+
+class LedgerBusy(LedgerDown):
     pass
 
 
@@ -61,6 +74,15 @@ def bounds(environ=None) -> tuple[int, int]:
     return int(env.get(MAX_ENV) or DEFAULT_MAX_BYTES), int(env.get(WARN_ENV) or DEFAULT_WARN_BYTES)
 
 
+def busy_age(environ=None) -> int:
+    env = os.environ if environ is None else environ
+    return int(env.get(BUSY_AGE_ENV) or DEFAULT_BUSY_AGE)
+
+
+def stale(entry: dict) -> bool:
+    return time.time() - entry["args"]["queued_at"] > busy_age()
+
+
 def checksum(body: dict) -> str:
     return hashlib.sha256(json.dumps(body).encode()).hexdigest()
 
@@ -81,8 +103,15 @@ def parse(line: str) -> dict | None:
     return found if found.get("sum") == checksum(body) else None
 
 
-def waiting() -> bool:
-    return path().exists()
+def lane(entry: dict) -> str:
+    return "ledger" if entry["op"] == "ledger" else "redis"
+
+
+def waiting(destination: str = "") -> bool:
+    if not path().exists():
+        return False
+    lines = path().read_text().splitlines() if destination else []
+    return not destination or any((entry := parse(line)) and lane(entry) == destination for line in lines)
 
 
 @contextmanager
@@ -125,7 +154,7 @@ def append(entry: dict) -> None:
 def submit(store, entry: dict, apply) -> dict:
     from redis.exceptions import RedisError
 
-    if store is not None and not waiting():
+    if store is not None and not waiting("redis"):
         try:
             return apply(store, entry)
         except (RedisError, Contended):
@@ -136,7 +165,7 @@ def submit(store, entry: dict, apply) -> dict:
 
 
 def flush(store) -> Report:
-    """Replay every queued record in order; stop at the first Redis error and keep it and the rest for later."""
+    """Replay every queued record in order; a destination that fails keeps that record and its later ones for later."""
     report = Report()
     if not waiting():
         return report
@@ -152,29 +181,43 @@ def _replay(store, report: Report) -> None:
 
     from scripts.inbox.cli import apply
 
-    lines = path().read_text().splitlines(keepends=True)
-    for index, line in enumerate(lines):
+    kept, down = [], {"redis"} if store is None else set()
+    for line in path().read_text().splitlines(keepends=True):
         entry = parse(line)
         if entry is None:
             _set_aside(line, "corrupt")
             report.corrupt += 1
+            continue
+        if lane(entry) in down:
+            kept.append(line)
             continue
         try:
             apply(store, entry)
             report.applied.append(entry["item"])
         except DuplicateItem:
             report.already.append(entry["item"])
-        except (RedisError, Contended):
-            _keep(lines[index:], report)
-            return
+        except LedgerBusy as exc:
+            if not stale(entry):
+                down.add(lane(entry))
+                kept.append(line)
+                continue
+            reason = f"{exc} for over {busy_age()} seconds ({BUSY_AGE_ENV})"
+            _set_aside(line, reason)
+            report.rejected.append((entry["item"], reason))
+        except (RedisError, Contended, LedgerDown):
+            down.add(lane(entry))
+            kept.append(line)
         except (InboxError, KeyError, TypeError, ValueError) as exc:
             _set_aside(line, str(exc))
             report.rejected.append((entry["item"], str(exc)))
         except Exception as exc:
             print(f"agentihooks msg: outbox replay stopped ({type(exc).__name__}: {exc})", file=sys.stderr)
-            _keep(lines[index:], report)
-            return
-    _clear()
+            down.add(lane(entry))
+            kept.append(line)
+    if kept:
+        _keep(kept, report)
+    else:
+        _clear()
 
 
 def _keep(lines: list[str], report: Report) -> None:
@@ -217,7 +260,10 @@ def _sync(handle) -> None:
 
 def _tell(report: Report) -> None:
     if report.left:
-        print(f"agentihooks msg: {report.left} queued messages wait in {path()} for Redis", file=sys.stderr)
+        print(
+            f"agentihooks msg: {report.left} queued messages wait in {path()} for Redis or the ledger server",
+            file=sys.stderr,
+        )
     for _ in range(report.corrupt):
         print(f"agentihooks msg: a corrupt outbox record was skipped and kept in {skipped_path()}", file=sys.stderr)
     for item, reason in report.rejected:
@@ -259,3 +305,29 @@ def apply_post(store, by: str, entry: dict):
     return store.send(
         by, args["address"], args["text"], ref=args["ref"], fyi=args["fyi"], task=args["task"], item_id=entry["item"]
     )
+
+
+def ledger_record(slug: str, ops: list, agent: str, service: bool) -> dict:
+    args = {"slug": slug, "ops": ops, "agent": agent, "service": service, "queued_at": time.time()}
+    return record("ledger", agent, args, item=ops[0]["id"])
+
+
+def apply_ledger(store, by: str, entry: dict) -> dict:
+    import urllib.error
+
+    from scripts.swarm_ledger import ledger
+
+    args = entry["args"]
+    try:
+        state = ledger.replay(args["slug"], args["ops"], args["agent"], args["service"])
+    except urllib.error.HTTPError as exc:
+        from scripts.swarm_ledger.api.client import failure
+
+        if exc.code >= 500 or exc.code == 429 or failure(exc)[1].get("code") == "revision_conflict":
+            raise LedgerBusy(f"the ledger server answered {exc.code}") from None
+        raise InboxError(f"the ledger server refused it: {exc.code}") from None
+    except OSError as exc:
+        raise LedgerDown(str(exc)) from None
+    if state.get("rejected"):
+        raise InboxError(f"the ledger server rejected {', '.join(state['rejected'])}")
+    return state
