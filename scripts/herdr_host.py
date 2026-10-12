@@ -1,3 +1,4 @@
+import contextlib
 import hashlib
 import json
 import re
@@ -234,12 +235,14 @@ def name_session(
 ) -> str:
     """Codex has no launch option for a session name, so its own rename command is typed at its ready prompt.
     Returns "named", or why not; a rename that did not take is cleared from the input line."""
+    ran = False
     try:
         status = agent_status(pane_id, environ)
         if status not in READY:
             return f"refused-{status}"
         if typed(pane_id, environ):
             return "refused-typed"
+        ran = True
         _cli(["pane", "run", pane_id, f"/rename {name}"], environ)
         deadline = time.monotonic() + timeout
         while not confirmed():
@@ -249,8 +252,15 @@ def name_session(
                 return "unconfirmed"
             time.sleep(RENAME_POLL_S)
     except (HerdrError, subprocess.TimeoutExpired):
+        if ran:
+            _clear(pane_id, environ)
         return "error"
     return "named"
+
+
+def _clear(pane_id: str, environ: dict[str, str]) -> None:
+    with contextlib.suppress(HerdrError, subprocess.TimeoutExpired):
+        _cli(["pane", "send-keys", pane_id, CLEAR_INPUT], environ)
 
 
 def prompt(pane_id: str, text: str, environ: dict[str, str]) -> bool:

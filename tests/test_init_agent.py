@@ -1012,18 +1012,47 @@ def test_the_opening_prompt_follows_the_names(monkeypatch, sent, said):
     assert calls == ["agent", ("prompt", "w1:p2", "Start.", {"K": "v"})]
 
 
-def test_an_undetected_agent_still_gets_its_opening_prompt(monkeypatch):
+def test_an_undetected_agent_still_gets_its_opening_prompt_after_the_ready_wait(monkeypatch):
+    calls = []
     monkeypatch.setattr(init_agent.herdr_host, "rename_agent", lambda *args: False)
-    monkeypatch.setattr(init_agent.herdr_host, "prompt", lambda *args: True)
+    monkeypatch.setattr(init_agent.herdr_host, "wait_ready", lambda *args: calls.append(("ready", *args)) or False)
+    monkeypatch.setattr(init_agent.herdr_host, "prompt", lambda *args: calls.append(("prompt", *args)) or True)
     assert init_agent._name_in_herdr("w1:p2", "eng-a", "codex", {}, opening="Start.") == [
         "agent_name=unset",
         "opening_prompt=sent",
     ]
+    assert calls == [("ready", "w1:p2", {}, init_agent.CODEX_READY_S), ("prompt", "w1:p2", "Start.", {})]
+
+
+def test_an_undetected_codex_agent_without_a_prompt_waits_for_nothing(monkeypatch):
+    monkeypatch.setattr(init_agent.herdr_host, "rename_agent", lambda *args: False)
+    monkeypatch.setattr(init_agent.herdr_host, "wait_ready", lambda *args: pytest.fail("waited"))
+    assert init_agent._name_in_herdr("w1:p2", "eng-a", "codex", {}) == ["agent_name=unset"]
+
+
+@pytest.mark.parametrize(("held", "argv"), [("1", "<a b>\n"), ("", "<a b><Start the task.>\n")])
+def test_the_codex_launcher_line_runs_its_command_without_the_prompt_only_when_held(tmp_path, held, argv):
+    spec = init_agent.AgentSpec(agent="codex")
+    launcher, _ = init_agent._write_launcher(
+        tmp_path, "eng", "Start the task.", [], {"XDG_RUNTIME_DIR": str(tmp_path)}, spec
+    )
+    line = next(x for x in launcher.read_text().splitlines() if x.startswith("if [ -n"))
+    command = line.split("; then unset AGENTIHOOKS_PROMPT_AFTER_START; ", 1)[1].split("; else ", 1)[0]
+    script = line.replace(command, "printf '<%s>' 'a b'")
+    done = subprocess.run(
+        ["bash", "-c", f'{script}; echo; echo "left=${{AGENTIHOOKS_PROMPT_AFTER_START:-}}"'],
+        capture_output=True,
+        text=True,
+        env={"PATH": os.environ["PATH"], **({"AGENTIHOOKS_PROMPT_AFTER_START": held} if held else {})},
+    )
+    assert done.stdout == f"{argv}left=\n"
 
 
 def _index(home, *rows):
     home.mkdir(parents=True, exist_ok=True)
-    (home / "session_index.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows) + "not json\n")
+    (home / "session_index.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in rows) + "not json\n5\nnull\n[]\n"
+    )
 
 
 def test_a_codex_name_is_confirmed_from_its_session_index_after_the_launch(tmp_path):

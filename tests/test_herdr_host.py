@@ -469,18 +469,47 @@ def test_a_rename_is_confirmed_by_polling_until_the_name_shows(monkeypatch):
     assert herdr_host.RENAME_POLL_S == 0.5 and herdr_host.RENAME_CONFIRM_S == 15.0
 
 
-@pytest.mark.parametrize("error", [herdr_host.HerdrError("no pane"), subprocess.TimeoutExpired("herdr", 5)])
 def test_name_session_reports_a_pane_it_could_not_type_into(monkeypatch, error):
     pane = CodexPane(["idle"])
 
     def cli(args, environ):
         if args[:2] == ["pane", "run"]:
+            pane.input = args[3]
             raise error
         return pane(args, environ)
 
     pane.attach(monkeypatch)
     monkeypatch.setattr(herdr_host, "_cli", cli)
     assert herdr_host.name_session("w1:p2", "engineer@abc-0001", {}, lambda: True) == "error"
+    assert pane.calls[-1] == ["pane", "send-keys", "w1:p2", "ctrl+u"] and pane.input == ""
+
+
+def test_a_failed_read_before_the_rename_types_and_clears_nothing(monkeypatch):
+    pane = CodexPane(["idle"])
+    pane.attach(monkeypatch)
+
+    def read(pane_id, environ):
+        raise herdr_host.HerdrError("herdr pane read: gone")
+
+    monkeypatch.setattr(herdr_host, "_read", read)
+    assert herdr_host.name_session("w1:p2", "engineer@abc-0001", {}, lambda: True) == "error"
+    assert pane.calls == [["agent", "get", "w1:p2"]]
+
+
+@pytest.mark.parametrize("error", [herdr_host.HerdrError("gone"), subprocess.TimeoutExpired("herdr", 5)])
+def test_a_clear_herdr_refuses_still_reports_the_error(monkeypatch, error):
+    pane = CodexPane(["idle"])
+
+    def cli(args, environ):
+        pane(args, environ)
+        if args[:2] in (["pane", "run"], ["pane", "send-keys"]):
+            raise error
+        return {}
+
+    pane.attach(monkeypatch)
+    monkeypatch.setattr(herdr_host, "_cli", cli)
+    assert herdr_host.name_session("w1:p2", "engineer@abc-0001", {}, lambda: True) == "error"
+    assert pane.calls[-1] == ["pane", "send-keys", "w1:p2", "ctrl+u"]
 
 
 @pytest.mark.parametrize("error", [herdr_host.HerdrError("no agent"), subprocess.TimeoutExpired("herdr", 5)])

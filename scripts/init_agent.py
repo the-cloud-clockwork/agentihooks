@@ -673,21 +673,18 @@ def _answer_channel_warning(pane: str, environ: dict[str, str]) -> str:
 def _name_in_herdr(
     pane: str, name: str, agent: str, environ: dict[str, str], opening: str = "", since: float = 0.0
 ) -> list[str]:
-    if not herdr_host.rename_agent(pane, name, environ):
-        named = ["agent_name=unset"]
-    else:
-        named = [f"agent_name={herdr_host.agent_name(name)}"]
-        if agent == "codex":
-            named += _name_codex_session(pane, name, environ, since)
+    detected = herdr_host.rename_agent(pane, name, environ)
+    ready = agent == "codex" and (detected or bool(opening)) and herdr_host.wait_ready(pane, environ, CODEX_READY_S)
+    named = [f"agent_name={herdr_host.agent_name(name)}"] if detected else ["agent_name=unset"]
+    if detected and agent == "codex":
+        named += _name_codex_session(pane, name, environ, since, ready)
     if opening:
         named.append(f"opening_prompt={'sent' if herdr_host.prompt(pane, opening, environ) else 'failed'}")
     return named
 
 
-def _name_codex_session(pane: str, name: str, environ: dict[str, str], since: float) -> list[str]:
-    outcome = "not-ready"
-    if herdr_host.wait_ready(pane, environ, CODEX_READY_S):
-        outcome = herdr_host.name_session(pane, name, environ, _codex_named(environ, name, since))
+def _name_codex_session(pane: str, name: str, environ: dict[str, str], since: float, ready: bool) -> list[str]:
+    outcome = herdr_host.name_session(pane, name, environ, _codex_named(environ, name, since)) if ready else "not-ready"
     herdr_panes.mark(pane, environ, session_name=name if outcome == "named" else f"unset:{outcome}")
     return [f"session_name={name}"] if outcome == "named" else ["session_name=unset", f"session_name_error={outcome}"]
 
@@ -707,7 +704,7 @@ def _codex_named(environ: dict[str, str], name: str, since: float) -> Callable[[
                 row = json.loads(line)
             except ValueError:
                 continue
-            if row.get("thread_name") == name and str(row.get("updated_at", "")) >= stamp:
+            if isinstance(row, dict) and row.get("thread_name") == name and str(row.get("updated_at", "")) >= stamp:
                 return True
         return False
 
