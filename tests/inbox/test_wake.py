@@ -486,12 +486,11 @@ def test_a_seat_note_after_binding_leaves_the_window_at_the_bind(inbox):
     assert events(inbox, item.id) == ["escalated_master"]
 
 
-def test_mail_on_a_never_seated_lane_of_a_stopped_swarm_escalates_from_its_first_step(inbox, monkeypatch):
+def test_mail_on_a_never_seated_lane_of_a_stopped_swarm_waits_out_its_first_window(inbox):
     swarm_config(inbox, "stopped")
-    monkeypatch.setattr("scripts.inbox.store.now_ms", lambda: 0)
     item = inbox.send("sw-eng-4", "eng-1@sw", "rebase please")
-    run(inbox, FakeHerdr({}), FakeLedger(), W, SEATED[1:])
-    assert events(inbox, item.id) == ["escalated_master"]
+    assert run(inbox, FakeHerdr({}), FakeLedger(), sent_at(item) + 1, SEATED[1:]) == []
+    assert events(inbox, item.id) == []
 
 
 @pytest.mark.parametrize(("seat", "held"), [("eng-1@sw", True), ("eng-2@sw", False)])
