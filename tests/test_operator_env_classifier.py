@@ -4,11 +4,12 @@ import urllib.error
 
 import pytest
 
-from hooks.classifier import core
+from hooks.classifier import YesNo, core, decide
 from hooks.classifier.errors import BackendFailure
 from scripts import operator_env
 from scripts.gates import intent
 from scripts.swarm import cli as swarm_cli
+from tests.classifier.fakes import FakeUrlopen, ok
 
 URL = "AGENTIHOOKS_CLASSIFIER_URL"
 KEY = "AGENTIHOOKS_CLASSIFIER_LITELLM_KEY"
@@ -114,26 +115,52 @@ def test_the_tick_holds_the_classifier_address_and_key_before_any_slug(tmp_path,
     assert seen == [("http://litellm:4000", "sk-shell")]
 
 
-def test_an_intent_judge_tries_the_decisions_endpoint_before_any_fallback(tmp_path, monkeypatch):
+def _tick_environment(tmp_path, monkeypatch):
     _settings(tmp_path, {URL: "http://litellm:4000"})
     _shell(tmp_path, "export AGENTIHOOKS_CLASSIFIER_LITELLM_KEY=sk-shell")
     monkeypatch.setenv("HOME", str(tmp_path))
+
+    class Store:
+        def slugs(self):
+            return []
+
+    swarm_cli.cmd_tick(Store(), None)
     monkeypatch.setenv("AGENTIHOOKS_CLASSIFIER_MODELS", "liquid-d1")
+
+
+class _Fallback:
+    name = "haiku"
+
+    def __init__(self, order):
+        self.order = order
+
+    def decide(self, request):
+        self.order.append("fallback")
+        raise BackendFailure("haiku: down")
+
+
+def test_an_intent_judge_tries_the_decisions_endpoint_before_any_fallback(tmp_path, monkeypatch):
+    _tick_environment(tmp_path, monkeypatch)
     order = []
 
     def endpoint(request, timeout=None):
         order.append(request.full_url)
         raise urllib.error.URLError("refused")
 
-    class Fallback:
-        name = "haiku"
-
-        def decide(self, request):
-            order.append("fallback")
-            raise BackendFailure("haiku: down")
-
     monkeypatch.setattr("hooks.classifier.api.urlopen", endpoint)
-    monkeypatch.setattr(core, "cli_backends", lambda harness: [Fallback()])
-    operator_env.classifier(os.environ)
+    monkeypatch.setattr(core, "cli_backends", lambda harness: [_Fallback(order)])
     assert intent.judge({}) == (intent.UNCHECKED, "the classifier did not answer")
     assert order == ["http://litellm:4000/v1/decisions", "fallback"]
+
+
+def test_an_endpoint_answer_in_the_tick_environment_skips_the_fallback(tmp_path, monkeypatch):
+    _tick_environment(tmp_path, monkeypatch)
+    order = []
+    fake = FakeUrlopen({"liquid-d1": ok()})
+    monkeypatch.setattr("hooks.classifier.api.urlopen", fake)
+    monkeypatch.setattr(core, "cli_backends", lambda harness: [_Fallback(order)])
+    result = decide("typo", {"trivial": YesNo("One line?", true="t", false="f")}, purpose="intent-check")
+    assert result.source == "liquid-d1"
+    assert [call["url"] for call in fake.calls] == ["http://litellm:4000/v1/decisions"]
+    assert fake.calls[0]["headers"]["Authorization"] == "Bearer sk-shell"
+    assert order == []
