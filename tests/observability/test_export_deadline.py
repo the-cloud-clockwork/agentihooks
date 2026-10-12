@@ -67,7 +67,7 @@ def test_deadline_checkpoints_a_growing_open_turn(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_trace, "_collector_outcomes", lambda *args: None)
     monkeypatch.setattr(otel, "langfuse_exporter", Receiver)
     source = list(records(80))
-    path.write_text("".join(json.dumps(record) + "\n" for record in source[:51]))
+    path.write_text("".join(json.dumps(record) + "\n" for record in source[:2] + source[3:51]))
     assert trace_flush.flush_once("session", str(path)) == 0
     before = agent_trace._cursor("session")["source"]["accepted_bytes"]
     assert before == path.stat().st_size
@@ -188,6 +188,32 @@ def test_source_page_checkpoint_at_the_byte_boundary(tmp_path, exporter, first_b
     expected = first_bytes if accepted == "first" else path.stat().st_size
     assert agent_trace._cursor("session")["source"]["accepted_bytes"] == expected
     assert trace_flush.flush_once("session", str(path)) == 0
+    assert agent_trace._cursor("session")["source"]["accepted_bytes"] == path.stat().st_size
+
+
+def test_source_page_counts_only_new_record_bytes(tmp_path, exporter):
+    prompt = list(records(1))[0]
+    assistant = {
+        "type": "assistant",
+        "uuid": "answer",
+        "timestamp": "2026-10-12T10:00:00Z",
+        "message": {"id": "generation", "content": ""},
+    }
+    lines = []
+    for record in (prompt, assistant):
+        record["message"]["content"] = ""
+        size = len((json.dumps(record) + "\n").encode())
+        record["message"]["content"] = "p" * (131071 - size)
+        lines.append(json.dumps(record) + "\n")
+    lines.append(
+        json.dumps(
+            {"type": "user", "uuid": "next", "timestamp": "2026-10-12T10:01:00Z", "message": {"content": "next"}}
+        )
+        + "\n"
+    )
+    path = tmp_path / "source.jsonl"
+    path.write_text("".join(lines))
+    agent_trace.export_session("session", str(path))
     assert agent_trace._cursor("session")["source"]["accepted_bytes"] == path.stat().st_size
 
 
