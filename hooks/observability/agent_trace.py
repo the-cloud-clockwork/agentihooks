@@ -597,6 +597,9 @@ def _stage_source(state: dict, transcript_path: str) -> None:
     legacy = "legacy_turns" in state and not merged
     point = _resume_point(state, transcript_path)
     position, count, unsupported = point["offset"], point["records"], point["unsupported"]
+    revisions = state.setdefault("source_revisions", {})
+    staged_bytes = 0
+    state.pop("deferred_source", None)
     size = _pending_bytes(state, merged, state["pending"])
     waiting = bool(_waiting(state, merged))
     empty = not state["pending"]
@@ -606,6 +609,13 @@ def _stage_source(state: dict, transcript_path: str) -> None:
             unsupported, position = unsupported + 1, end
             continue
         key = record_id(record)
+        revision = _record_revisions({key: record})[key]
+        if key in merged and revisions.get(key) == revision:
+            position, count = end, count + 1
+            continue
+        if staged_bytes >= 256 * 1024:
+            state["deferred_source"] = True
+            break
         masked = mask_value(record)
         source_id = str(count) if legacy and record.get("type") == "response_item" else key
         masked["_source_id"] = merged.get(key, {}).get("_source_id", source_id)
@@ -617,6 +627,8 @@ def _stage_source(state: dict, transcript_path: str) -> None:
                 break
             size, empty, waiting = size + weight, False, True
             merged[key] = masked
+        revisions[key] = revision
+        staged_bytes += end - position
         position, count = end, count + 1
     state["records"] = merged
     state["unsupported_records"] = unsupported
@@ -953,8 +965,8 @@ def _page_accepted(session_id: str, state: dict) -> None:
     for span_id in full["spans"] - rest["spans"]:
         del state["accepted"][f"{span_id:016x}"]
     state["records"] = {keys[index]: values[index] for index in kept}
-    for name in ("accepted_records", "pending_records"):
-        state[name] = {key: value for key, value in state[name].items() if key in state["records"]}
+    for name in ("accepted_records", "pending_records", "source_revisions"):
+        state[name] = {key: value for key, value in state.get(name, {}).items() if key in state["records"]}
     state["paged"] = target
 
 

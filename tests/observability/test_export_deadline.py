@@ -4,7 +4,7 @@ import time
 
 from opentelemetry.sdk.trace.export import SpanExportResult
 
-from hooks.observability import agent_trace, otel, transcript
+from hooks.observability import agent_trace, otel, trace_flush, transcript
 
 
 class Receiver:
@@ -63,7 +63,7 @@ def test_deadline_checkpoints_a_growing_open_turn(tmp_path, monkeypatch):
     monkeypatch.setattr(otel, "langfuse_exporter", Receiver)
     source = list(records(80))
     path.write_text("".join(json.dumps(record) + "\n" for record in source[:51]))
-    agent_trace.export_session("session", str(path))
+    assert trace_flush.flush_once("session", str(path)) == 0
     before = agent_trace._cursor("session")["source"]["accepted_bytes"]
     with path.open("a") as handle:
         handle.write("".join(json.dumps(record) + "\n" for record in source[51:]))

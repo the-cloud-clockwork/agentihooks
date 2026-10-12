@@ -223,7 +223,7 @@ def flush_once(session_id: str, transcript_path: str) -> int:
         state = _cursor(session_id)
         if state.get("pending"):
             return 1
-        if not state.get("overflow"):
+        if not (state.get("overflow") or state.get("deferred_source")):
             return 0
         if state["source"]["accepted_bytes"] == position:
             return 1
