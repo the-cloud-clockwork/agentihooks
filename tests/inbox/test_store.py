@@ -227,7 +227,7 @@ def test_reply_retry_after_a_lost_close_keeps_one_outgoing_item(store, monkeypat
     monkeypatch.setattr(store, "close", close)
     answer = store.reply(original.id, "bob", "answer")
     assert [item.id for item in store.inbox("alice")] == [answer.id]
-    assert store.get(original.id).reason == f"replied with message {answer.id}"
+    assert store.get(original.id).reason == f"done: replied with message {answer.id}"
 
 
 def test_only_the_addressee_can_reply(store):
