@@ -169,7 +169,14 @@ class HiveLaunch:
                 self.store.redis.hdel(self.store.key(self.slug, ORDERS), order.task)
             status = Status.AMBIGUOUS if ack.failure == "ambiguous" else Status.REFUSED
             return Outcome("spawn", status, HIVE, detail=f"hive launch failed: {ack.failure}")
-        if agent.generation != order.generation or agent.runtime_target != ack.target or agent.state != "working":
+        current = self.store.execution_occupants(self.slug).get(agent.seat)
+        if (
+            current is None
+            or current.execution_id != order.execution_id
+            or agent.generation != order.generation
+            or agent.runtime_target != ack.target
+            or agent.state != "working"
+        ):
             raise SwarmError("hive launch acknowledgement does not match the live execution")
         if not self.slots.acknowledge(agent.execution_id):
             return Outcome("spawn", Status.AMBIGUOUS, HIVE, detail="hive launch reservation expired")
