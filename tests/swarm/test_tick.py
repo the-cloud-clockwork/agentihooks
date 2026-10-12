@@ -1,8 +1,10 @@
+import subprocess
 from dataclasses import replace
 
 import pytest
 
-from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
+from scripts.swarm import stack
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import MASTER_DOWN, STARTUP_GRACE_MS, Placed, SpawnError, tick
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -1466,6 +1468,54 @@ def test_a_task_starts_stacked_on_claimed_and_in_pr_dependencies_that_carry_a_br
         {"task": "t0", "branch": "engineer-a1b2c3-0002"},
     ]
     assert runtime.tasks[0]["stack_base"] == []
+
+
+def test_a_stacked_claim_carries_the_repository_only_of_a_dependency_branch_in_another_repository(store, monkeypatch):
+    asked = []
+    monkeypatch.setattr(
+        stack,
+        "shell",
+        lambda argv: asked.append(argv) or subprocess.CompletedProcess(argv, 0, "git@github.com:O/home.git\n", ""),
+    )
+    store.update("sw", max_eng=3)
+    ledger = FakeLedger([{"id": "t1"}, {"id": "t0"}, {"id": "t2", "depends_on": ["t1", "t0"]}])
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    ledger.rows["t1"].update(branch="engineer-a1b2c3-0001", branch_repo="https://github.com/o/other")
+    ledger.rows["t0"].update(branch="engineer-a1b2c3-0002", branch_repo="https://github.com/o/home")
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert spawned_ids(runtime) == ["t1", "t0", "t2"]
+    assert runtime.tasks[-1]["stack_base"] == [
+        {"task": "t1", "branch": "engineer-a1b2c3-0001", "repo": "https://github.com/o/other"},
+        {"task": "t0", "branch": "engineer-a1b2c3-0002"},
+    ]
+    assert ["git", "-C", "/repo", "remote", "get-url", "origin"] in asked
+
+
+def test_a_stacked_claim_names_the_recorded_repository_when_its_own_origin_cannot_be_read(store, monkeypatch):
+    monkeypatch.setattr(stack, "shell", lambda argv: subprocess.CompletedProcess(argv, 128, "", "no origin\n"))
+    ledger = FakeLedger([{"id": "t1"}, {"id": "t2", "depends_on": ["t1"]}])
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    ledger.rows["t1"].update(branch="engineer-a1b2c3-0001", branch_repo="https://github.com/o/other")
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert runtime.tasks[-1]["stack_base"] == [
+        {"task": "t1", "branch": "engineer-a1b2c3-0001", "repo": "https://github.com/o/other"}
+    ]
+
+
+def test_a_stacked_claim_names_the_recorded_repository_when_git_cannot_run(store, monkeypatch):
+    def refuse(argv):
+        raise SwarmError("git -C could not run: no git")
+
+    monkeypatch.setattr(stack, "shell", refuse)
+    ledger = FakeLedger([{"id": "t1"}, {"id": "t2", "depends_on": ["t1"]}])
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    ledger.rows["t1"].update(branch="engineer-a1b2c3-0001", branch_repo="XXXX")
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert spawned_ids(runtime) == ["t1", "t2"]
+    assert runtime.tasks[-1]["stack_base"] == [{"task": "t1", "branch": "engineer-a1b2c3-0001", "repo": "XXXX"}]
 
 
 @pytest.mark.parametrize(

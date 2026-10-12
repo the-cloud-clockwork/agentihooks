@@ -554,8 +554,9 @@ def _screened(op):
 
 
 def _check_chat_address(op, chat_add):
-    if ("to" in op or "reply_to" in op) and not chat_add:
-        raise ValueError("to and reply_to address only an agent chat message")
+    answer = op["op"] == "add" and "by" in op and op["thread"].endswith("/comments")
+    if ("to" in op and not (chat_add or answer)) or ("reply_to" in op and not chat_add):
+        raise ValueError("to addresses only an agent chat message or comment, reply_to only an agent chat message")
     if op.get("to", "operator") != "operator" or not isinstance(op.get("reply_to", ""), str):
         raise ValueError("an agent chat message goes to the operator or answers his line by its id")
 

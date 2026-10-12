@@ -77,6 +77,13 @@ def repo_key(url: str) -> str:
     return rest.rstrip("/").lower().removesuffix(".git")
 
 
+def origin_key(repo: str) -> str:
+    try:
+        return repo_key(shell(["git", "-C", repo, "remote", "get-url", "origin"]).stdout.strip())
+    except SwarmError:
+        return ""
+
+
 def public_url(url: str) -> str:
     scheme, sep, rest = url.partition("://")
     if not sep:

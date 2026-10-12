@@ -288,6 +288,7 @@ class InboxStore:
             ids = self.redis.zrange(self.key("address", address), 0, -1)
             keys += [self.key(kind, address) for kind in ("address", "pending", "open", "open-size", "sequence")]
             keys += [self.key(kind, item_id) for item_id in ids for kind in ("item", "history")]
+            keys += [key for key in (self.key("entry", item_id) for item_id in ids) if self.redis.exists(key)]
         members = {
             self.key(shared): [a for a in addresses if self.redis.sismember(self.key(shared), a)]
             for shared in ("waiting", "indexed", "open-indexed")
@@ -388,12 +389,24 @@ class InboxStore:
             raise DuplicateItem(f"message {item_id} was already answered with message {answer_id}")
         if item.state in CLOSED:
             raise InboxError(f"message {item_id} is closed: {item.reason}")
+        if not text.strip():
+            raise InboxError("a reply needs text")
+        answer_id = answer_id or new_item_id()
+        if entry := self.entry_of(item_id):
+            self.about(answer_id, entry)
         try:
             answer = self.send(replier, item.sender, text, fyi=fyi, item_id=answer_id)
         except DuplicateItem:
             answer = self.get(answer_id)
         self.close(item_id, replier, "done", replied(answer.id))
         return answer
+
+    def about(self, item_id, entry):
+        """Name the ledger entry an item is about, before the item is written."""
+        self.redis.set(self.key("entry", item_id), entry)
+
+    def entry_of(self, item_id):
+        return self.redis.get(self.key("entry", item_id)) or ""
 
     def deliver(self, item_id, receiver):
         try:
