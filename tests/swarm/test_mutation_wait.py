@@ -6,12 +6,19 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm import cli, idle, waits
+from scripts.swarm import cli, idle, mutation_wait, waits
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_waits import ME, tick  # noqa: F401
 
 pytestmark = pytest.mark.unit
 URL = "https://github.com/org/repo/actions/runs/123"
+
+
+@pytest.fixture(autouse=True)
+def pauses(monkeypatch):
+    slept = []
+    monkeypatch.setattr(mutation_wait.time, "sleep", slept.append)
+    return slept
 
 
 def test_cli_wait_binds_the_branch_preflight_run(env, monkeypatch):  # noqa: F811
@@ -158,10 +165,11 @@ def test_an_active_preflight_keeps_the_wait(tick, preflight, status):  # noqa: F
     assert len(preflight.requests) == 1
 
 
-def test_a_successful_run_without_a_mutation_report_ends_red(preflight):
+def test_a_successful_run_without_a_mutation_report_ends_red_after_the_retries(preflight, pauses):
     preflight.missing = True
     held = {**waits.on("mutation", URL), "head": "first"}
     assert "now red; complete mutation report unavailable" in waits.resolution(held, {}, None, None, None, False)
+    assert pauses == list(mutation_wait.BACKOFF)
 
 
 @pytest.mark.parametrize("conclusion", ["cancelled", "timed_out", "skipped"])
@@ -222,7 +230,7 @@ def test_a_failed_run_or_report_cannot_pass_without_named_survivors(preflight, c
     )
 
 
-def test_report_read_failure_ends_red(preflight, monkeypatch):
+def test_a_corrupt_report_download_on_a_green_run_is_unknown_not_red(preflight, monkeypatch, pauses):
     original = subprocess.run
 
     def api(args, **kwargs):
@@ -232,7 +240,63 @@ def test_report_read_failure_ends_red(preflight, monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", api)
     held = {**waits.on("mutation", URL), "head": "first"}
-    assert "complete mutation report unavailable" in waits.resolution(held, {}, None, None, None, False)
+    assert waits.resolution(held, {}, None, None, None, False) == (
+        f"mutation preflight {URL}, now unknown; the run concluded success but its mutation report "
+        "could not be fetched: File is not a zip file; wait on the run again"
+    )
+    assert pauses == list(mutation_wait.BACKOFF)
+    assert sum(request.endswith("/zip") for request in preflight.requests) == len(mutation_wait.BACKOFF) + 1
+
+
+def test_a_truncated_report_download_is_unknown_not_red(preflight, monkeypatch):
+    original = subprocess.run
+
+    def api(args, **kwargs):
+        done = original(args, **kwargs)
+        if args[-1].endswith("/zip"):
+            return subprocess.CompletedProcess(args, 0, done.stdout[: len(done.stdout) // 2])
+        return done
+
+    monkeypatch.setattr(subprocess, "run", api)
+    held = {**waits.on("mutation", URL), "head": "first"}
+    outcome = waits.resolution(held, {}, None, None, None, False)
+    assert outcome.startswith(f"mutation preflight {URL}, now unknown; the run concluded success")
+    assert "now red" not in outcome
+
+
+def test_a_fetch_error_on_a_failed_run_is_red_by_its_conclusion(preflight, monkeypatch):
+    preflight.run["conclusion"] = "failure"
+    original = subprocess.run
+
+    def api(args, **kwargs):
+        if args[-1].endswith("/zip"):
+            return subprocess.CompletedProcess(args, 1, b"", b"HTTP 502")
+        return original(args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", api)
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert waits.resolution(held, {}, None, None, None, False) == (
+        f"mutation preflight {URL}, now red; run failure; its mutation report could not be fetched: "
+        "gh api repos/org/repo/actions/artifacts/7/zip: HTTP 502"
+    )
+
+
+def test_a_report_listed_late_is_read_on_a_retry(preflight, monkeypatch, pauses):
+    original = subprocess.run
+    listings = []
+
+    def api(args, **kwargs):
+        if "artifacts?" in args[-1]:
+            listings.append(args[-1])
+            preflight.missing = len(listings) == 1
+        return original(args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", api)
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert waits.resolution(held, {}, None, None, None, False) == (
+        f"mutation preflight {URL}, now green; no failing mutants"
+    )
+    assert pauses == list(mutation_wait.BACKOFF[:1])
 
 
 def test_a_nested_complete_report_can_pass(preflight):
@@ -427,7 +491,25 @@ def test_an_unreachable_merge_base_keeps_the_wait(unreadable):
 
 
 @pytest.mark.parametrize("endpoint", ["artifacts?", "/zip"])
-def test_a_failed_report_download_keeps_the_wait_for_the_next_tick(tick, preflight, monkeypatch, endpoint):  # noqa: F811
+def test_a_failed_report_download_is_retried_before_the_tick_ends_the_wait(tick, preflight, monkeypatch, endpoint):  # noqa: F811
+    original = subprocess.run
+    failed = []
+
+    def api(args, **kwargs):
+        if endpoint in args[-1] and not failed:
+            failed.append(args[-1])
+            return subprocess.CompletedProcess(args, 1, b"")
+        return original(args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", api)
+    held = {**waits.on("mutation", URL), "head": "first"}
+    idle.declare_wait(tick.store.redis, "sw", ME, 10_000_000, "", 1, on=held)
+    assert tick.end() == [f"ended the wait of {ME}: mutation preflight {URL}, now green; no failing mutants"]
+    assert len(failed) == 1
+
+
+@pytest.mark.parametrize("endpoint", ["artifacts?", "/zip"])
+def test_a_report_download_that_keeps_failing_ends_the_wait_unknown(tick, preflight, monkeypatch, endpoint):  # noqa: F811
     original = subprocess.run
 
     def api(args, **kwargs):
@@ -438,14 +520,13 @@ def test_a_failed_report_download_keeps_the_wait_for_the_next_tick(tick, preflig
     monkeypatch.setattr(subprocess, "run", api)
     held = {**waits.on("mutation", URL), "head": "first"}
     idle.declare_wait(tick.store.redis, "sw", ME, 10_000_000, "", 1, on=held)
-    assert tick.end() == []
-    assert idle.wait(tick.store.redis, "sw", ME)["on"] == held
-    monkeypatch.setattr(subprocess, "run", original)
-    assert tick.end() == [f"ended the wait of {ME}: mutation preflight {URL}, now green; no failing mutants"]
+    (ended,) = tick.end()
+    assert ended.startswith(f"ended the wait of {ME}: mutation preflight {URL}, now unknown; the run concluded success")
+    assert "exited 1; wait on the run again" in ended
 
 
 @pytest.mark.parametrize("error", [subprocess.TimeoutExpired(["gh"], 20), OSError("reset")])
-def test_a_timed_out_report_download_keeps_the_wait(preflight, monkeypatch, error):
+def test_a_timed_out_report_download_is_unknown_not_red(preflight, monkeypatch, error):
     original = subprocess.run
 
     def api(args, **kwargs):
@@ -455,4 +536,7 @@ def test_a_timed_out_report_download_keeps_the_wait(preflight, monkeypatch, erro
 
     monkeypatch.setattr(subprocess, "run", api)
     held = {**waits.on("mutation", URL), "head": "first"}
-    assert waits.resolution(held, {}, None, None, None, False) == ""
+    assert waits.resolution(held, {}, None, None, None, False) == (
+        f"mutation preflight {URL}, now unknown; the run concluded success but its mutation report could not be "
+        f"fetched: gh api repos/org/repo/actions/artifacts/7/zip: {error}; wait on the run again"
+    )
