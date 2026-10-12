@@ -16,6 +16,7 @@ pytestmark = pytest.mark.xdist_group("fakeredis")
 @pytest.fixture(autouse=True)
 def isolated_accounts(monkeypatch):
     monkeypatch.setattr(capacity.account_sessions, "codex_sessions_by_account", lambda: {})
+    monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: ([], "cached"))
 
 
 def _store():
