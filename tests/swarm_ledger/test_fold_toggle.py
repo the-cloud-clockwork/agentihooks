@@ -50,7 +50,9 @@ def tab(browser, request):
         EventTarget.prototype.addEventListener = function(type, callback, options) {
             if (type === "toggle") {
                 const original = callback;
-                callback = event => setTimeout(() => original.call(this, event), DELAY);
+                callback = event => window.delayFolds
+                    ? setTimeout(() => original.call(this, event), DELAY)
+                    : original.call(this, event);
             }
             return listen.call(this, type, callback, options);
         };
@@ -59,6 +61,7 @@ def tab(browser, request):
     page = context.new_page()
     page.goto(URL)
     settle(page)
+    page.evaluate("window.delayFolds = true")
     yield page
     context.close()
 

@@ -48,6 +48,13 @@ def image_page(browser, request):
 def test_comment_images_are_small_thumbnails_that_keep_ratio_and_never_grow(image_page, width):
     tab = image_page
     tab.set_viewport_size({"width": width, "height": 900})
+    tab.wait_for_function(
+        """() => {
+          const images = [...document.querySelectorAll("#item-phases-p1 .attach-row img")];
+          return images.length === 2 && images.every(image =>
+            image.complete && image.naturalWidth > 0 && image.naturalHeight > 0);
+        }"""
+    )
     large = tab.locator("#item-phases-p1 .attach-row img").nth(0).bounding_box()
     small = tab.locator("#item-phases-p1 .attach-row img").nth(1).bounding_box()
     assert large["width"] == 160

@@ -127,6 +127,10 @@ def settle(tab):
 
 @pytest.mark.parametrize("tab", [0, 250], indirect=True)
 def test_every_header_shows_its_counts_folded_and_open(tab):
+    tab.wait_for_function(
+        "(keys) => keys.every(key => document.getElementById(key + '-count')?.textContent.trim())",
+        arg=list(EXPECTED),
+    )
     assert counts(tab) == EXPECTED
     for box in SECTIONS:
         tab.evaluate("(id) => { document.getElementById(id).open = !document.getElementById(id).open; }", box)
