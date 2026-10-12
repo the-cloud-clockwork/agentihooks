@@ -103,7 +103,7 @@ def _report(target, started_at):
         and datetime.fromisoformat(artifact["created_at"]) >= since
     ]
     if not matching:
-        raise Missing("no mutation report from this attempt")
+        raise Missing
     artifact = max(matching, key=lambda row: row["id"])
     archive = _api(f"repos/{repo}/actions/artifacts/{artifact['id']}/zip", binary=True)
     with zipfile.ZipFile(io.BytesIO(archive)) as zipped:

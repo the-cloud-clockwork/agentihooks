@@ -304,6 +304,39 @@ def test_a_fetch_error_on_a_failed_run_is_red_by_its_conclusion(preflight, monke
     )
 
 
+def test_undecodable_gh_stderr_is_reported_with_replacement_characters(preflight, monkeypatch):
+    preflight.run["conclusion"] = "failure"
+    original = subprocess.run
+
+    def api(args, **kwargs):
+        if args[-1].endswith("/zip"):
+            return subprocess.CompletedProcess(args, 1, b"", b"HTTP \xff502")
+        return original(args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", api)
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert waits.resolution(held, {}, None, None, None, False).endswith(
+        "gh api repos/org/repo/actions/artifacts/7/zip: HTTP �502"
+    )
+
+
+def test_an_unparseable_artifact_listing_is_unknown_with_its_parse_error(preflight, monkeypatch):
+    original = subprocess.run
+
+    def api(args, **kwargs):
+        if "artifacts?" in args[-1]:
+            return subprocess.CompletedProcess(args, 0, b"<html>")
+        return original(args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", api)
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert waits.resolution(held, {}, None, None, None, False) == (
+        f"mutation preflight {URL}, now unknown; the run concluded success but its mutation report could not be "
+        "fetched: gh api repos/org/repo/actions/runs/123/artifacts?per_page=100: Expecting value: line 1 column 1 "
+        "(char 0); wait on the run again"
+    )
+
+
 def test_a_report_listed_late_is_read_on_a_retry(preflight, monkeypatch, pauses):
     original = subprocess.run
     listings = []
