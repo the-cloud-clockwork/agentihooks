@@ -330,6 +330,7 @@ function terminalHead(remote) {
   const head = $("agents-table").querySelector("thead tr"), found = head.querySelector("[data-terminal]");
   if (remote && !found) head.children[6].after(h("th", { "data-execution": "", text: "execution" }), h("th", { "data-terminal": "", text: "terminal" }));
   if (!remote && found) head.querySelectorAll("[data-execution], [data-terminal]").forEach((th) => th.remove());
+  if (remote !== !!found) document.dispatchEvent(new Event("columns"));
 }
 
 function renderAgents(sw, now = Date.now()) {

@@ -183,6 +183,11 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
   comments. Nothing else folds: the chat, artifacts, alerts and notifications
   windows, Stats, Overview, the Swarm control bar and Capacity, HOME and BIN. An outline item with a pending
   notification carries a plus mark. A fold anywhere else fails its test.
+- Every column in the ledger front end resizes by dragging its header edge
+  (arrow keys on the grip too): every table on the ledger page and the HOME and
+  BIN columns. Only columns resize this way. Widths are saved in the shared
+  page layout beside the panel sizes and clear with Reset layout. A table or
+  column the grips cannot reach fails its test.
 - Ledger front end colours live only in `scripts/swarm_ledger/palette.css`, and
   keep the ledger's own red and blue. Layout follows design system 2026-001 and
   the `ui-doctrine` skill.

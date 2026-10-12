@@ -534,6 +534,14 @@ input, textarea { caret-color: var(--accent-2); }
 .sw-grip:focus-visible { outline: 2px dashed var(--ring); outline-offset: -2px; }
 body.resizing-y { cursor: row-resize; user-select: none; }
 body.resizing-x { cursor: col-resize; user-select: none; }
+.sw-table th { position: relative; }
+.col-grip { position: absolute; top: 0; right: 0; bottom: 0; width: 8px; cursor: col-resize; touch-action: none; }
+.col-grip::after { content: ""; position: absolute; top: 2px; bottom: 6px; right: 3px; width: 1px; background: var(--grip); opacity: 0; transition: opacity .15s; }
+.col-grip:hover::after, .col-grip.dragging::after, .col-grip:focus-visible::after { opacity: 1; }
+.col-grip:focus-visible { outline: none; }
+.sw-table.sized-cols { table-layout: fixed; min-width: 100%; }
+.sw-table.sized-cols td:not(:has(> .sw-acts)) { overflow: hidden; text-overflow: ellipsis; }
+.sw-table.sized-cols .sw-id { display: block; max-width: 100%; }
 .sw-layout { padding-left: var(--space-row); border-left: 1px solid var(--rule); }
 .sw-btn.sw-reset { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
 .sw-btn.sw-reset:hover:not(:disabled) { color: var(--accent-2); }

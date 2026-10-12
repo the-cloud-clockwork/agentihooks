@@ -65,3 +65,9 @@ li.row:hover,li.row:focus-within{background:var(--hover)}
 .home .row{grid-template-columns:minmax(0,1fr) auto auto}
 .head,.kind,.ov,.num,.when,.deleted{display:none}
 }
+.row.head>*{position:relative}
+.col-grip{position:absolute;top:-4px;right:-14px;bottom:-4px;width:8px;cursor:col-resize;touch-action:none}
+.col-grip::after{content:"";position:absolute;top:2px;bottom:2px;left:3px;width:1px;background:var(--grip);opacity:0;transition:opacity .15s}
+.col-grip:hover::after,.col-grip.dragging::after,.col-grip:focus-visible::after{opacity:1}
+.col-grip:focus-visible{outline:none}
+@media (min-width:761px){.panel.sized-cols .row{grid-template-columns:var(--cols)}}

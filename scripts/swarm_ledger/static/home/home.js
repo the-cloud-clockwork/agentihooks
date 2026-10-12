@@ -131,12 +131,66 @@ function sorting() {
   order();
   document.addEventListener("click", (e) => {
     const b = e.target.closest(".sort");
-    if (!b) return;
+    if (!b || e.target.closest(".col-grip")) return;
     const k = b.dataset.sort;
     sort = sort.key === k ? { key: k, dir: -sort.dir } : { key: k, dir: FIRST[k] };
     write(SORT_KEY, sort);
     order();
   });
+}
+
+const COLUMN_MIN = 40, COLUMN_STEP = 16;
+let layout = {}, layoutSave = 0;
+
+function heads() {
+  return [...document.querySelectorAll(".row.head > *")];
+}
+
+function applyColumns() {
+  const widths = (layout.columns || {})[view], cells = heads(), panel = document.querySelector(".panel");
+  const sized = Array.isArray(widths) && widths.length === cells.length;
+  panel.classList.toggle("sized-cols", sized);
+  if (sized) panel.style.setProperty("--cols", widths.map((w) => `${w}px`).join(" "));
+  else panel.style.removeProperty("--cols");
+}
+
+function setColumns(widths) {
+  layout = { ...layout, columns: { ...(layout.columns || {}), [view]: widths.map((w) => Math.round(w)) } };
+  applyColumns();
+  clearTimeout(layoutSave);
+  layoutSave = setTimeout(() => {
+    fetch("/api/layout", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(layout) }).catch(() => {});
+  }, 300);
+}
+
+function columns() {
+  const cells = heads();
+  cells.forEach((cell, i) => {
+    if (i === cells.length - 1) return;
+    const grip = h("span", { class: "col-grip", tabindex: "0", role: "separator", "aria-orientation": "vertical", "aria-label": `Resize the ${cell.textContent.replace(/[↕▲▼]/g, "").trim() || "first"} column` });
+    cell.append(grip);
+  });
+  const measured = () => getComputedStyle(document.querySelector(".row.head")).gridTemplateColumns.split(" ").map(parseFloat);
+  document.addEventListener("pointerdown", (ev) => {
+    const grip = ev.target.closest(".col-grip");
+    if (!grip || ev.button !== 0) return;
+    ev.preventDefault();
+    const index = heads().indexOf(grip.parentElement), start = measured(), x0 = ev.clientX;
+    grip.setPointerCapture(ev.pointerId);
+    grip.classList.add("dragging");
+    const move = (e) => setColumns(start.map((w, i) => (i === index ? Math.max(COLUMN_MIN, w + e.clientX - x0) : w)));
+    grip.addEventListener("pointermove", move);
+    grip.addEventListener("lostpointercapture", () => { grip.removeEventListener("pointermove", move); grip.classList.remove("dragging"); }, { once: true });
+  });
+  document.addEventListener("keydown", (ev) => {
+    const grip = ev.target.closest && ev.target.closest(".col-grip");
+    const step = grip && { ArrowLeft: -COLUMN_STEP, ArrowRight: COLUMN_STEP }[ev.key];
+    if (!step) return;
+    ev.preventDefault();
+    const index = heads().indexOf(grip.parentElement);
+    setColumns(measured().map((w, i) => (i === index ? Math.max(COLUMN_MIN, w + step * (ev.shiftKey ? 4 : 1)) : w)));
+  });
+  fetch("/api/layout", { cache: "no-store" }).then((r) => (r.ok ? r.json() : {})).then((saved) => { layout = saved || {}; applyColumns(); }).catch(() => {});
 }
 
 async function start() {
@@ -157,6 +211,7 @@ async function start() {
     list.replaceChildren(h("li", { class: "empty", text: `The ledger list could not be read: ${error.message}` }));
   }
   sorting();
+  columns();
 }
 
 start();
