@@ -36,6 +36,9 @@ PROJECT = re.compile(r"github\.com/[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z
 Send = Callable[[str, str, dict], tuple[int, object]]
 
 
+from scripts.swarm_v2.worker import git_auth
+
+
 def post(url: str, grant: str, body: dict) -> tuple[int, object]:
     headers = {**JSON_HEADERS, AUTHORIZATION: f"Bearer {grant}"}
     request = urllib.request.Request(url.rstrip("/") + REGISTER, json.dumps(body).encode(), headers)
@@ -114,6 +117,8 @@ def _checked_out(attempt: Path, spec: dict) -> dict:
         return {}
     origin = f"https://{wanted['project']}.git"
     request = workspaces.Request(origin, authority["task_id"], authority["generation"], wanted["agent"])
+    if os.environ.get("GITHUB_APP_ID"):
+        git_auth.configure(wanted["project"])
     found = checkout(attempt, request)
     tree = {"project": wanted["project"], "branch": found.branch, "base": found.base, "base_commit": found.base_commit}
     return {"checkout": tree}
