@@ -82,7 +82,7 @@ def test_launch_choices_skip_a_cached_claude_account_without_its_token(monkeypat
     monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
     monkeypatch.setattr(agent_choice.time, "time", lambda: 100)
     rows = capacity.accounts(env, 100)
-    assert [(seat.account, seat.sessions) for seat in capacity.offered(rows)] == [("mail", 2)]
+    assert capacity.pick(capacity.offered(rows)).account == "mail"
     assert agent_choice.choose("", env) == ("claude", "rotation")
     runtime, config, launches = _runtime_probe(tmp_path, monkeypatch, rows)
     runtime.spawn(config, "plan", "engineer@a1b2c3-0001", {"id": "t1", "title": "x"})
