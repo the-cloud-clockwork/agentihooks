@@ -101,6 +101,36 @@ def test_error_idle_and_dead_owners_resume_their_tasks_within_three_recovery_tic
         assert "continue your own task" in text
 
 
+def test_a_codex_owner_stopped_at_model_capacity_is_held_probed_then_resumed(store, tmp_path, monkeypatch):
+    from scripts.swarm import pane, provider_probe, snapshot
+
+    ledger, runtime, agents = three_owners(store)
+    monkeypatch.setattr(snapshot, "worktrees", lambda repo, names: {name: str(tmp_path) for name in names})
+    probes = []
+    monkeypatch.setattr(
+        provider_probe, "check", lambda target, *args: probes.append(target) or provider_probe.Result(True, "ok")
+    )
+    owner = replace(agents[0], conversation_id="conversation-0", profile="engineer", harness="codex", account="alpha")
+    store.put_agent("sw", owner)
+    for agent in agents[1:]:
+        runtime.statuses[agent.name] = "working"
+    capacity = "■ Selected model is at capacity. Please try a different model."
+    runtime.errors[owner.name] = pane.provider_error("codex", capacity)
+    outage.providers(store, "sw", runtime, MINUTE)
+    assert outage.open_records("sw")
+    tick("sw", store, ledger, runtime, 2 * MINUTE)
+    assert store.claimant("sw", owner.task) == owner.name
+    assert owner.name not in runtime.nudged
+    outage.providers(store, "sw", runtime, 3 * MINUTE)
+    assert [(target.harness, target.account) for target in probes] == [("codex", "alpha")]
+    assert not outage.open_records("sw")
+    for step in range(3):
+        tick("sw", store, ledger, runtime, (4 + step) * MINUTE)
+    assert runtime.statuses[owner.name] == "working"
+    assert store.claimant("sw", owner.task) == owner.name
+    assert any("Service is back" in text for _, text in runtime.nudge_calls), runtime.nudge_calls
+
+
 def test_a_successor_claim_during_restart_prevents_resuming_the_old_owner(store, tmp_path, monkeypatch):
     from scripts.swarm import snapshot
 
