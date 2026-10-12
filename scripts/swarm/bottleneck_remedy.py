@@ -41,6 +41,7 @@ class Stage:
     hours: float
     threshold: float
     fired: int
+    unit: str
 
     @property
     def label(self) -> str:
@@ -48,7 +49,7 @@ class Stage:
 
     @property
     def targeted(self) -> str:
-        return f"{self.label} at {self.hours:g} task hours in the window, over its {self.threshold:g} threshold"
+        return f"{self.label} at {self.hours:g} {self.unit}, over its {self.threshold:g} threshold"
 
 
 def remedy_pass(
@@ -66,7 +67,7 @@ def remedy_pass(
     for row in standing.read(store.redis, slug).values():
         if not _due(row, last, now_ms):
             continue
-        stage = Stage(row["stage"], row["value"], row["threshold"], row["fired"])
+        stage = Stage(row["stage"], row["value"], row["threshold"], row["fired"], row["unit"])
         action = _remedy(slug, config, store, ledger, doc, lanes, stage)
         if action is None:
             continue
@@ -77,7 +78,7 @@ def remedy_pass(
 
 
 def _due(row: dict, last: dict, now_ms: int) -> bool:
-    if now_ms - row["updated_at"] >= standing.STALE_MS:
+    if now_ms - row["updated_at"] >= standing.STALE_MS or not row["value"] > row["threshold"] > 0:
         return False
     return row["stage"] not in last or now_ms - int(last[row["stage"]]) >= bottleneck.WINDOW_MS
 
