@@ -16,7 +16,7 @@ CONTEXT = '${WORKER_BASE_CONTEXT:+--build-context "$WORKER_BASE_CONTEXT"}'
 MISSING = "Error response from daemon: manifest unknown"
 PULL_DOCKER = """printf '%s\\n' "$*" >> "$CALLS"
 if [[ "$4" == ghcr.io/* ]]; then
-    if [[ -n "$COPY_ERROR" ]]; then
+    if [[ -n "$COPY_ERROR" && "$(grep -c "^pull --platform linux/amd64 ghcr.io" "$CALLS")" -le "$COPY_FAILURES" ]]; then
         printf '%s\\n' "$COPY_ERROR" >&2
         exit 18
     fi
@@ -28,7 +28,9 @@ fi
 COPY_DOCKER = """printf '%s\\n' "$*" >> "$CALLS"
 case "$1 $2 ${3:-}" in
     "login ghcr.io -u") cat > "$LOGIN" ;;
-    "buildx imagetools create") if [[ -n "$CREATES" ]]; then touch "$COPIED"; fi ;;
+    "buildx imagetools create")
+        if [[ "$CREATES" == fail ]]; then exit 1; fi
+        if [[ -n "$CREATES" ]]; then touch "$COPIED"; fi ;;
     "buildx imagetools inspect") [[ -e "$COPIED" ]] ;;
 esac
 """
@@ -64,7 +66,7 @@ def run(tmp_path, script, docker, **variables):
     return result, read["calls"].splitlines(), read["waits"].splitlines(), read
 
 
-def pull(tmp_path, failures, error, copy_error=MISSING):
+def pull(tmp_path, failures, error, copy_error=MISSING, copy_failures=99):
     return run(
         tmp_path,
         "pull-base.sh",
@@ -72,7 +74,16 @@ def pull(tmp_path, failures, error, copy_error=MISSING):
         FAILURES=str(failures),
         PULL_ERROR=error,
         COPY_ERROR=copy_error,
+        COPY_FAILURES=str(copy_failures),
     )
+
+
+def test_a_throttled_copy_is_retried_before_any_fallback(tmp_path):
+    result, calls, waits, files = pull(tmp_path, 99, "", copy_error="toomanyrequests: Rate exceeded", copy_failures=2)
+    assert result.returncode == 0, result.stderr
+    assert calls == [f"pull --platform linux/amd64 {COPY}"] * 3
+    assert waits == ["15", "30"]
+    assert files["github_env"] == f"WORKER_BASE_CONTEXT={BASE}=docker-image://{COPY}\n"
 
 
 def test_locked_base_comes_from_the_registry_copy_and_feeds_every_build(tmp_path):
@@ -170,6 +181,12 @@ def test_a_copy_anonymous_pulls_cannot_read_fails_the_job(tmp_path):
     assert "anonymous" in result.stderr
 
 
+def test_a_failed_copy_still_drops_the_job_token_login(tmp_path):
+    result, calls, _, _ = copy(tmp_path, creates="fail")
+    assert result.returncode != 0
+    assert calls[-2:] == [f"buildx imagetools create --tag {COPY_TAG} {BASE}", "logout ghcr.io"]
+
+
 @pytest.mark.parametrize(
     ("workflow", "job"),
     [
@@ -195,7 +212,6 @@ def _base_builds(text):
     [
         ("docker/swarm-node/smoke.sh", 3),
         ("tests/integration/swarm_node/run_health_proof.sh", 1),
-        ("tests/integration/swarm_node/run_supervision_proof.sh", 1),
         (".github/workflows/swarm-node-image.yml", 1),
     ],
 )

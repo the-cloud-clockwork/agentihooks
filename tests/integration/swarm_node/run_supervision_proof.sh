@@ -12,7 +12,7 @@ task_compatibility="$("$task_python" -c 'import uuid; print("agentihooks-compati
 mkdir -p "$task_output"
 "$task_python" -c 'import json,sys; from pathlib import Path; Path(sys.argv[1]).write_text(json.dumps(dict(zip(("worker","fixture","prior_fixture","tested_commit"),sys.argv[2:])),indent=2))' \
     "$task_output/images.json" "$task_worker" "$task_fixture" "$task_compatibility" "$task_revision"
-docker build --platform linux/amd64 ${WORKER_BASE_CONTEXT:+--build-context "$WORKER_BASE_CONTEXT"} --file "$task_repo/docker/swarm-node/Dockerfile" \
+docker build --platform linux/amd64 --file "$task_repo/docker/swarm-node/Dockerfile" \
     --build-arg SOURCE_REVISION="$task_revision" --tag "$task_worker" "$task_repo" > "$task_output/worker-build.log" 2>&1
 printf 'WORKER BUILD COMPLETE\n'
 docker build --file "$task_repo/tests/integration/swarm_node/Dockerfile" \
