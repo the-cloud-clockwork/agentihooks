@@ -198,3 +198,75 @@ class TestPayloadCollection:
         claude_md.write_text("# Only global")
         payload = rules_refresh.collect_profile_rules(tmp_path / "nope", claude_md, tmp_path / "no-local.md")
         assert "# Only global" in payload
+
+
+def _role_home(root: Path, role: str, render: str) -> Path:
+    home = root / ".agentihooks" / "profiles" / ".homes" / role / render / "claude"
+    home.mkdir(parents=True)
+    return home
+
+
+class TestProfileHomeScope:
+    def test_marker_records_the_profile_home_it_was_rendered_from(self, tmp_home, mock_sessions, monkeypatch):
+        mock_sessions.return_value = {"s1": {"status": "alive"}}
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(_role_home(tmp_home, "frontend", "abc-1")))
+        rules_refresh.write_refresh_marker("frontend", "FRONTEND PERSONA")
+        assert rules_refresh._load_marker("frontend")["home"] == "frontend"
+
+    def test_a_role_home_refresh_reaches_only_sessions_of_that_role(self, tmp_home, mock_sessions, monkeypatch):
+        homes = {"s-frontend-old": _role_home(tmp_home, "frontend", "old-1")}
+        for n in range(13):
+            role = ("engineer", "master", "anton")[n % 3]
+            homes[f"s-{role}-{n}"] = _role_home(tmp_home, role, f"r{n}-1")
+        caller = _role_home(tmp_home, "frontend", "new-2")
+        mock_sessions.return_value = {sid: {"status": "alive"} for sid in [*homes, "s-caller"]}
+        homes["s-caller"] = caller
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(caller))
+        rules_refresh.write_refresh_marker("frontend", "FRONTEND PERSONA")
+
+        received = []
+        for sid, home in homes.items():
+            monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home))
+            monkeypatch.setattr(rules_refresh, "inject_context", lambda payload, sid=sid: received.append(sid))
+            rules_refresh.maybe_inject(sid)
+
+        assert sorted(received) == ["s-caller", "s-frontend-old"]
+        assert rules_refresh._load_marker("frontend") is None
+
+    def test_a_marker_without_a_profile_home_reaches_no_session(self, tmp_home, monkeypatch):
+        rules_refresh._save_marker(
+            "anton",
+            {
+                "ts": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "profile": "anton",
+                "content_hash": "abc",
+                "payload": "FRONTEND PERSONA",
+                "pending": ["s-master"],
+            },
+        )
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(_role_home(tmp_home, "master", "m-1")))
+        received = []
+        monkeypatch.setattr(rules_refresh, "inject_context", received.append)
+        rules_refresh.maybe_inject("s-master")
+        assert received == []
+        assert rules_refresh._load_marker("anton") is None
+
+    def test_refresh_from_a_role_home_keys_the_marker_by_that_role(self, tmp_home, monkeypatch):
+        from argparse import Namespace
+
+        from scripts import install
+
+        home = _role_home(tmp_home, "frontend", "abc-1")
+        (home / "CLAUDE.md").write_text("You are frontend")
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home))
+        monkeypatch.setattr(install, "_detect_active_profile", lambda: "anton")
+        monkeypatch.setattr("scripts.targets.claude_target.refresh_rules", lambda *args: "You are frontend")
+        seen = []
+
+        def capture(profile, payload):
+            seen.append(profile)
+            return {"marker_path": "marker", "pending_count": 0, "content_hash": "proof"}
+
+        monkeypatch.setattr("hooks.context.rules_refresh.write_refresh_marker", capture)
+        install._cmd_refresh_rules(Namespace(profile=None, clear=False, dry_run=False))
+        assert seen == ["frontend"]
