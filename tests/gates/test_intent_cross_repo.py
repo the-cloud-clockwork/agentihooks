@@ -141,7 +141,7 @@ def test_a_merged_pull_request_past_the_limit_never_rejudges(tmp_path):
     pulls = {**{url: {**PULLS[THERE]} for url in others}, HERE: PULLS[HERE]}
     seen = []
     for _ in range(2):
-        _, record = judged(tmp_path, task(description=" ".join(others)), pulls=pulls, seen=seen)
+        _, record = judged(tmp_path, task(description=" ".join(others)), body="", pulls=pulls, seen=seen)
     assert len(seen) == 1
     assert "named_pending" not in record
     assert record["reason"].endswith(f"; could not read {others[-1]}")
