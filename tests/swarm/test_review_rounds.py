@@ -1,5 +1,6 @@
 import pytest
 
+from scripts.gates import log as gate_log
 from scripts.swarm import review_rounds
 from scripts.swarm.store import SwarmError
 
@@ -38,8 +39,6 @@ def test_rounds_count_per_task_and_per_swarm(tmp_path):
 
 
 def test_rounds_live_in_the_swarm_home_by_default(tmp_path, monkeypatch):
-    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(gate_log, "swarm_home", lambda: tmp_path)
     review_rounds.start("sw", "t1")
-    assert (
-        tmp_path / ".agentihooks" / "swarm" / "sw" / "gates" / "reviews" / "counts" / "t1" / "rounds"
-    ).read_text() == "1"
+    assert (tmp_path / "sw" / "gates" / "reviews" / "counts" / "t1" / "rounds").read_text() == "1"

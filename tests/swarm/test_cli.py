@@ -701,7 +701,7 @@ def test_as_equals_is_not_mistaken_for_set(env, monkeypatch):
 
 
 def test_review_closes_on_the_third_round_and_refuses_a_fourth(env, monkeypatch, capsys, tmp_path):
-    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(gate_log, "swarm_home", lambda: tmp_path)
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     capsys.readouterr()
