@@ -7,7 +7,7 @@ from scripts.swarm import metrics_outbox, metrics_swarm
 from scripts.swarm.host_budget import HostSample
 from scripts.swarm.metrics_outbox import Outbox, Settings
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
-from tests.swarm.test_metrics_swarm import AGENT, NOW, SLUG, TASK, assert_node, doc, event
+from tests.swarm.test_metrics_swarm import AGENT, DONE, NOW, SLUG, TASK, assert_node, delivered, doc, event
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
@@ -20,7 +20,7 @@ def box(tmp_path):
 
 
 def test_persisted_identifiers_remain_compatible_for_recorded_inputs():
-    state = doc([event("task claimed", NOW), event("task pr", NOW + 1_000)])
+    state = delivered([event("task claimed", NOW), event("task pr", NOW + 1_000)])
     agent = {**AGENT, "ended_at": NOW + 5_000, "reason": "finished"}
     agents = {row["kind"]: row["event_id"] for row in metrics_swarm.agent_rows(SLUG, state, [agent])}
     assert agents == {
@@ -31,7 +31,7 @@ def test_persisted_identifiers_remain_compatible_for_recorded_inputs():
     pulls = {TASK["pr_url"]: SimpleNamespace(state="MERGED", merged_at=NOW + 4_000)}
     assert {row["kind"]: row["event_id"] for row in metrics_swarm.delivery_rows(SLUG, state, [agent], pulls)} == {
         "pull_request_opened": "868d759174d90f18b90b12c6491d231e14fb2813444e5350a06f9e2376687bf7",
-        "merge": "c405b9e5687a19a1ec4d5ca9431bde100ce7c32916813e2c8ee6424aeadb7793",
+        "merge": "faef1187da88c86d2b0ac5203e80c7755125fd754f7a581cf7c57d7ab3eacfbc",
     }
     host = metrics_swarm.host_row(SLUG, NOW, HostSample(1.0, 1, 1, 1), {})
     assert host["event_id"] == "3277834f4d5e7cf2b8fb56e7c674ad57cece7f319bbdff0436b21ae8c3758844"
@@ -111,9 +111,9 @@ def test_temporal_ownership_excludes_other_tasks_and_ended_lives():
 
 
 def test_nonmerged_pulls_do_not_hide_later_merges_and_duration_starts_at_first_claim():
-    other = {**TASK, "id": "other", "pr_url": "other", "state": "pr"}
+    other = {**DONE, "id": "other", "pr_url": "other"}
     state = {
-        "tasks": [other, TASK],
+        "tasks": [other, DONE],
         "_meta": {"events": [event("task claimed", NOW), event("task claimed", NOW + 1_000)]},
     }
     pulls = {
@@ -359,7 +359,7 @@ def test_late_events_without_named_metadata_do_not_reuse_an_ended_owner():
     unrelated = {**AGENT, "name": "XXXX", "task": "other", "started_at": NOW + 2}
     rows = metrics_swarm.delivery_rows(
         SLUG,
-        doc(),
+        delivered(),
         [AGENT, unrelated],
         {TASK["pr_url"]: SimpleNamespace(state="MERGED", merged_at=NOW + 4)},
     )
