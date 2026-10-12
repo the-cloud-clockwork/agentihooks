@@ -17,7 +17,7 @@ def read(store: RedisStore, slug: str) -> dict:
     return json.loads(store.redis.get(store.key(slug, KEY)) or "{}")
 
 
-def report(store: RedisStore, slug: str) -> dict:
+def report(store: RedisStore, slug: str, now_ms: int) -> dict:
     found = stages.read(store, slug)
     row = found["stages"][0] if found.get("total") else {}
     stage = row.get("stage", "")
@@ -27,18 +27,23 @@ def report(store: RedisStore, slug: str) -> dict:
         "label": stage.replace("_", " ") or "none",
         "trend": row.get("trend", "none" if found else "unknown"),
         "seconds": row.get("seconds", 0.0),
+        "measured_at": found.get("at", 0),
+        "measured": f"{(now_ms - found['at']) // 60_000} minutes ago" if found else "never",
         "last_action": action.get("text", "none recorded"),
         "action_at": action.get("at", 0),
     }
 
 
 def line(found: dict) -> str:
-    return f"Top bottleneck {found['label']}; trend {found['trend']}; last action {found['last_action']}"
+    return (
+        f"Top bottleneck {found['label']}; trend {found['trend']}; measured {found['measured']};"
+        f" last action {found['last_action']}"
+    )
 
 
-def refresh(slug: str, store: RedisStore) -> list[str]:
+def refresh(slug: str, store: RedisStore, now_ms: int) -> list[str]:
     previous = read(store, slug)
-    found = report(store, slug)
+    found = report(store, slug, now_ms)
     changed = found["stage"] != previous.get("stage", "")
     transition = previous.get("transition", 0) + int(changed)
     snapshot = json.dumps({**found, "transition": transition})
