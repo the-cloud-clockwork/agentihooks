@@ -578,6 +578,24 @@ def test_the_reason_leads_with_lanes_held_by_missing_ready_work_ahead_of_unknown
     assert held["reason"].startswith("plan has no more ready tasks; accounts are unknown; ")
 
 
+def test_stale_short_name_records_never_hold_a_ready_ci_task_off_its_cap(monkeypatch):
+    windows = balancer.QuotaWindow(used=10)
+    names = ("ncgma", "nctcc", "tccgma", "nchotma", "ncsmgma", "mail_com")
+    cached = [(100, balancer.ProbeResult(name, "allowed", "NORMAL", 90, windows, windows)) for name in names]
+    monkeypatch.setattr(balancer, "cached_observations", lambda **kw: cached)
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
+    rows = capacity.accounts({"AH_CC_TOKEN_mail_com": "fake"}, 100)
+    config = SwarmConfig("sw", "/repo", max_eng=12, max_ci=1, max_plan=0)
+    agents = [AgentRecord(f"e{i}", "eng", f"t{i}", harness="claude") for i in range(6)]
+    decision = capacity.calculate(config, rows, agents, {"eng": 0, "ci": 1, "plan": 0})
+    assert decision["effective"] == {"eng": 6, "ci": 1, "plan": 0}
+    assert decision["placements"]["ci"] == [{"index": 0, "harness": "claude", "account": "mail_com"}]
+    assert decision["reason"] == (
+        "eng has no more ready tasks; accounts have quota; Claude has 6 free seats and Codex has 0 free seats"
+    )
+
+
 def test_closed_and_reduced_free_seats_follow_the_accounts_own_cap():
     closed = capacity.Account("claude", "a", "CLOSED", 0, 90, 90, cap=0)
     open_ = capacity.Account("codex", "cx", "OPEN", 1, 30, 30, cap=5)
