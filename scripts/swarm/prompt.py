@@ -578,7 +578,7 @@ def task_steps(task, me, led, name, phase, autonomy):
     if task.get("parked_on"):
         parked_on = ", ".join(task["parked_on"])
         return [
-            f"Your task was parked on {parked_on} without a branch and a stacked base: start it fresh from dev.",
+            f"Your task was parked on {parked_on}, but the park lacks a branch or a stacked base: start it fresh from dev.",
             *steps,
         ]
     if task.get("stack_base"):
