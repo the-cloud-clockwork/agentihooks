@@ -8,6 +8,7 @@ import stat
 import subprocess
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -17,7 +18,7 @@ from scripts.swarm_v2 import filesystem, worker_home, workspaces
 from scripts.swarm_v2.broadcast_bridge import API_URL, GRANT_NAME
 from scripts.swarm_v2.checkpoints import restore
 from scripts.swarm_v2.supervision import Launch, LaunchRefused
-from scripts.swarm_v2.worker import start
+from scripts.swarm_v2.worker import lease_renewal, start
 
 pytestmark = pytest.mark.unit
 
@@ -46,9 +47,31 @@ ANSWER = {
     "execution_id": EXECUTION,
     "task_id": "t1",
     "task_generation": 1,
+    "controller_epoch": 2,
+    "owner_identity": "engineer@fixture",
+    "lease_deadline_ms": int(time.time() * 1000) + 600_000,
     "grant_id": AUTHORITY["grant_id"],
     "registered_at": "2026-10-11T00:00:00Z",
 }
+RENEWED = {**ANSWER, "lease_deadline_ms": ANSWER["lease_deadline_ms"] + 1_000}
+
+
+class Renewals:
+    def __init__(self, *answers: tuple[int, object]) -> None:
+        self.answers, self.calls = list(answers), []
+
+    def __call__(self, method: str, url: str, grant: str, body: dict) -> tuple[int, object]:
+        self.calls.append((method, url, grant, body))
+        if self.answers:
+            return self.answers.pop(0)
+        return (200, {"credential": "sv2.grant-renewed"}) if method == "POST" else (200, RENEWED)
+
+
+@pytest.fixture(autouse=True)
+def renewals(monkeypatch) -> Renewals:
+    found = Renewals()
+    monkeypatch.setattr(lease_renewal, "send", found)
+    return found
 
 
 def material(tmp_path: Path, record: object = RECORD, grant: str | None = GRANT) -> Path:
@@ -142,6 +165,71 @@ def test_a_prepared_attempt_holds_the_registration_record_only_the_worker_can_re
             os.getgid(),
         )
     ]
+
+
+def test_the_lease_is_renewed_from_registration_and_handed_to_the_supervisor(tmp_path, renewals):
+    prepare(tmp_path, material(tmp_path), Controller((200, ANSWER)))
+
+    attempt = tmp_path / "attempts" / EXECUTION
+    method, url, grant, body = renewals.calls[0]
+    assert (method, url, grant) == ("PUT", f"{CONTROL}/v2/executions/{EXECUTION}/heartbeat", GRANT)
+    assert body["authority"]["task_generation"] == 1
+    record = attempt / lease_renewal.ADMISSION
+    assert json.loads(record.read_text()) == {
+        "execution_id": EXECUTION,
+        "task_id": "t1",
+        "task_generation": 1,
+        "controller_epoch": 2,
+        "owner_identity": "engineer@fixture",
+        "lease_deadline_ms": RENEWED["lease_deadline_ms"],
+    }
+    assert stat.S_IMODE(record.stat().st_mode) == 0o600
+
+
+class LosingBoot(Boot):
+    def __init__(self, renewals: Renewals) -> None:
+        super().__init__()
+        self.renewals = renewals
+
+    def __call__(self, request: worker_home.Request) -> dict:
+        deadline = time.monotonic() + 5
+        while not self.renewals.calls:
+            assert time.monotonic() < deadline
+            time.sleep(0.001)
+        time.sleep(0.05)
+        return super().__call__(request)
+
+
+def test_a_lease_lost_while_preparing_refuses_the_start_before_the_restore(tmp_path, renewals, monkeypatch):
+    renewals.answers.append((409, {}))
+
+    def restoring(*args):
+        raise AssertionError("restored after the lease was lost")
+
+    monkeypatch.setattr(start.checkpoint_runtime, "prepare", restoring)
+
+    with pytest.raises(LaunchRefused) as refused:
+        prepare(tmp_path, material(tmp_path), Controller((200, ANSWER)), LosingBoot(renewals))
+
+    assert str(refused.value) == "admission lease lost: heartbeat_refused_409"
+    assert not (tmp_path / "attempts" / EXECUTION / "registration.json").exists()
+
+
+def test_a_grant_renewed_while_preparing_is_the_one_handed_to_the_supervisor(tmp_path, renewals, monkeypatch):
+    monkeypatch.setattr(lease_renewal, "CREDENTIAL_SECONDS", 0.0)
+
+    prepare(tmp_path, material(tmp_path), Controller((200, ANSWER)))
+
+    assert renewals.calls[0][:3] == ("POST", f"{CONTROL}/v2/executions/{EXECUTION}/credential", GRANT)
+    assert (tmp_path / "attempts" / EXECUTION / "run" / GRANT_NAME).read_text() == "sv2.grant-renewed"
+
+
+def test_post_registers_with_a_post_request(monkeypatch):
+    sent = []
+    monkeypatch.setattr(start, "transport", lambda *args: sent.append(args) or (200, {}))
+
+    assert start.post(CONTROL + "/", GRANT, {"a": 1}) == (200, {})
+    assert sent == [("POST", CONTROL + start.REGISTER, GRANT, {"a": 1}, start.TIMEOUT_SECONDS)]
 
 
 def test_an_engineer_launch_record_renders_the_engineer_profile_in_the_pod_home(tmp_path):
@@ -834,7 +922,9 @@ def test_the_started_supervisor_loads_a_prepared_attempt_only_the_worker_can_rea
         assert stat.S_IMODE(path.stat().st_mode) == 0o600, path
     assert stat.S_IMODE(attempt.parent.stat().st_mode) == 0o700
     printed = {"worker_start": "prepared", "attempt": EXECUTION, "uid": os.getuid()}
-    assert capsys.readouterr().out == json.dumps(printed) + "\n"
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[-1] == json.dumps(printed)
+    assert [json.loads(line)["lease"] for line in lines[:-1]] == ["renewed"] * (len(lines) - 1)
 
 
 def test_the_start_prints_the_rendered_chain_when_bootstrap_names_one(monkeypatch, capsys):

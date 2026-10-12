@@ -378,9 +378,18 @@ def update_refusal(doc: dict, op: dict, meta: dict | None = None) -> str:
     if phase is not None and phase not in {p["id"] for p in doc["phases"]}:
         return f"phase {phase} is not on this ledger: name one of its phase ids"
     task = next((t for t in doc["tasks"] if t["id"] == op["item"].split("/")[1]), {})
+    if refusal := park_refusal(op, task):
+        return refusal
     if phase is not None and phase != task.get("phase"):
         return unsliced_refusal(doc, {**task, "plan_slice": "", **op["fields"]}, op["by"])
     return ""
+
+
+def park_refusal(op: dict, task: dict) -> str:
+    after = {**task, **op["fields"]}
+    if "parked_on" not in op["fields"] or not after["parked_on"] or (after.get("branch") and after.get("stacked_base")):
+        return ""
+    return f"{op['item']} cannot be parked without a branch and a stacked base: park it with agentihooks swarm park"
 
 
 def pinned_refusal(op: dict, meta: dict | None) -> str:

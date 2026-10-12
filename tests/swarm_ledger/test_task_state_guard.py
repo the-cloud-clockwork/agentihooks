@@ -79,6 +79,31 @@ def test_empty_values_clear_the_branch_and_park_state():
     assert (doc["tasks"][1]["branch"], doc["tasks"][1]["stacked_base"], doc["tasks"][1]["parked_on"]) == ("", "", [])
 
 
+PARK_REFUSAL = "tasks/t1 cannot be parked without a branch and a stacked base: park it with agentihooks swarm park"
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"parked_on": ["t0"]},
+        {"parked_on": ["t0"], "branch": "engineer-323133-0001"},
+        {"parked_on": ["t0"], "stacked_base": "0a86fd7a" * 5},
+    ],
+)
+def test_a_park_with_no_branch_or_stacked_base_is_refused(fields):
+    doc = stacked_ledger()
+    applied, ctx = update(doc, fields, [])
+    assert applied is False and "parked_on" not in doc["tasks"][1]
+    assert ctx.refused == [PARK_REFUSAL]
+
+
+def test_clearing_a_park_with_no_branch_is_allowed():
+    doc = stacked_ledger()
+    doc["tasks"][1]["parked_on"] = ["t0"]
+    applied, ctx = update(doc, {"parked_on": []}, [])
+    assert applied is True and doc["tasks"][1]["parked_on"] == [] and ctx.refused == []
+
+
 BRANCH_REFUSAL = "branch must be a git branch name, or empty to clear it"
 BASE_REFUSAL = "stacked_base must be a lowercase commit hash of 7 to 64 characters, or empty to clear it"
 PARKED_REFUSAL = "parked_on must list task ids"
