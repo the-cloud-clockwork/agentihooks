@@ -107,9 +107,9 @@ def _create_ledger(doctor, slug, title):
 
 
 def _link(ledger, slug, doctor):
-    ledger.add_source(doctor, _path(slug), BY)
+    ledger.add_source(doctor, _path(slug), _name())
     if _path(doctor) not in ledger.state(slug).get("sources", []):
-        ledger.add_source(slug, _path(doctor), BY)
+        ledger.add_source(slug, _path(doctor), _name())
         ledger.notify(slug, POINTER)
 
 
@@ -159,7 +159,7 @@ def cmd_start(store, args):
     _pair(store, slug, doctor)
     loop.reset(store, doctor)
     if ledger.closed(doctor):
-        swarm.cmd_reopen(store, Namespace(slug=doctor, name="operator"))
+        swarm.cmd_reopen(store, Namespace(slug=doctor, name=None))
     else:
         swarm.cmd_start(store, Namespace(slug=doctor))
 
