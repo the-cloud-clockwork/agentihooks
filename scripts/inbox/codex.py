@@ -116,7 +116,10 @@ class Pump:
         self.surfaced = ""
 
     def run(self, stop: Callable[[], bool]) -> str:
-        """Pump until stop() or a failure; any failure marks the transport degraded and is returned as its health."""
+        """Pump until stop() or a failure; a failure is logged, marks the transport degraded and returns DEGRADED.
+
+        A failure to write that mark propagates.
+        """
         try:
             self.start()
             while not stop():
