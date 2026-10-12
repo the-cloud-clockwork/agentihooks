@@ -2,6 +2,7 @@ import io
 import json
 import socket
 import ssl
+import struct
 import subprocess
 import sys
 import threading
@@ -407,3 +408,34 @@ def test_serve_refuses_a_lone_tls_flag_before_starting(served, flags):
 
     assert calls == []
     assert printed == [(("hive serve refused: --tls-cert and --tls-key go together",), {"file": sys.stderr})]
+
+
+def test_a_handler_error_is_still_logged_when_the_client_resets_before_the_tls_close(admin, cert, monkeypatch, capsys):
+    raised = threading.Event()
+
+    def broken(*_):
+        raised.set()
+        raise RuntimeError("exchange broke")
+
+    monkeypatch.setattr(auth, "exchange", broken)
+    httpd = server.make_server(admin, PUBLIC, "localhost", 0, cert)
+    trusting = ssl.create_default_context(cafile=cert[0])
+
+    def client():
+        raw = socket.create_connection(("localhost", httpd.server_address[1]), timeout=5)
+        conn = trusting.wrap_socket(raw, server_hostname="localhost")
+        conn.sendall(b'POST /hive/join HTTP/1.0\r\nContent-Length: 12\r\n\r\n{"code": ""}')
+        raised.wait(5)
+        conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+        conn.close()
+
+    resetting = threading.Thread(target=client)
+    resetting.start()
+    try:
+        request, address = httpd.get_request()
+        httpd.process_request_thread(request, address)
+    finally:
+        resetting.join()
+        httpd.server_close()
+
+    assert "RuntimeError: exchange broke" in capsys.readouterr().err
