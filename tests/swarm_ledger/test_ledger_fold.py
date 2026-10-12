@@ -227,3 +227,20 @@ def test_the_member_status_names_the_lead_title_without_its_full_stop():
         "Folded into the task titled Tidy the UX; its agent delivers this change in the same pull request."
     )
     assert ledger_fold.status({}, known) == ledger_fold.FALLBACK_STATUS
+
+
+def test_candidates_leave_out_a_task_still_waiting_on_an_open_dependency():
+    doc = ledger(task("t1", territory=["scripts"]), task("t2", territory=["scripts"], depends_on=["t9"]), task("t9"))
+    assert ledger_fold.candidates(doc)["groups"] == []
+
+
+def test_a_missing_title_never_matches_a_real_title_word():
+    assert ledger_fold.signals({"id": "t1"}, task("t2", title="xxxx")) == []
+    assert ledger_fold.signals(task("t1", title="xxxx"), {"id": "t2"}) == []
+
+
+def test_full_stops_are_trimmed_and_capital_letters_kept():
+    group = {"lead": "t1", "members": ["t2"], "seams": ["Tidy the UX.", "Fix the X"], "done": "the panel shows UX."}
+    lines = ledger_fold.description({"overview": "Ship the UX. Then more."}, task("t1"), group).splitlines()
+    assert lines[0] == "Parent intent: Ship the UX."
+    assert lines[3:] == ["One: Tidy the UX.", "Two: Fix the X.", "Done when the panel shows UX."]

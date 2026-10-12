@@ -70,7 +70,7 @@ def _chained(pending: dict) -> set:
 
 
 def names(task: dict) -> set:
-    text = f"{task.get('title') or ''}\n{task.get('description') or ''}"
+    text = "\n".join(filter(None, (task.get("title"), task.get("description"))))
     return {m.strip().lower() for pattern in NAME_RES for m in pattern.findall(text)}
 
 
@@ -147,7 +147,9 @@ def _group_problems(group: dict, known: dict, seen: set) -> list[str]:
         found.append(f"seams must list {len(ids)} plain sentences, one per folded task")
     else:
         found += [f"seam {NUMBERS[i]} {p}" for i, s in enumerate(seams) for p in plain_problems(s, known)]
-    done = group.get("done", "")
+    done = group.get("done")
+    if done is None:
+        return found
     found += [f"done {p}" for p in plain_problems(done, known)] if isinstance(done, str) else ["done must be text"]
     return found
 

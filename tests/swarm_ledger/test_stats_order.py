@@ -31,6 +31,19 @@ def test_a_bad_stats_order_is_refused(stats):
         layout.write({"stats": stats})
 
 
+def test_the_stats_order_holds_up_to_its_limit_beside_other_rows():
+    order = [f"s{n}" for n in range(layout.MAX_STATS)]
+    saved = layout.write({"stats": order, "health-box": {"height": 200}})
+    assert saved == {"stats": order, "health-box": {"height": 200}}
+
+
+def test_each_stats_refusal_names_its_cause():
+    with pytest.raises(ValueError, match=f"^stats must list at most {layout.MAX_STATS} rows$"):
+        layout.write({"stats": "tasks"})
+    with pytest.raises(ValueError, match="^stats must list distinct row keys$"):
+        layout.write({"stats": ["tasks", "tasks"]})
+
+
 def keys(page):
     return page.tab.eval_on_selector_all("#stats > .stat", "rows => rows.map(r => r.dataset.stat)")
 
