@@ -6,6 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from hooks.context import quota_policy as qp
+from scripts.routing.reservation import Reservation
 
 
 def _c(account, five, week, sessions=0, cap=2):
@@ -571,3 +572,125 @@ def test_api_slot_uses_its_harness_settings_namespace(tmp_path, monkeypatch, har
     assert candidate.sessions == (2 if harness == "codex" else 1)
     assert candidate.cap == (4 if harness == "codex" else 3)
     assert (candidate.five_used, candidate.week_used) == (None, None)
+
+
+MASTER_HELD = Reservation("claude", "main", 1)
+
+
+def _decide_reserved(week_used, ceiling, others=()):
+    return qp.decide_reserved(
+        ceiling,
+        account="main",
+        five_used=10.0,
+        week_used=week_used,
+        five_reset=None,
+        week_reset=None,
+        others=list(others),
+        push=False,
+    )
+
+
+def test_worker_on_the_master_account_hands_off_at_the_ceiling():
+    other = qp.Candidate("spare", 10.0, 10.0, 0, 0.0, 6)
+    assert _decide_reserved(69.9, 70.0, [other]) is None
+    decision = _decide_reserved(70.0, 70.0, [other])
+    assert (decision.action, decision.trigger, decision.target.account) == ("handoff", "week", "spare")
+    assert decision.week_used == 70.0
+    assert _decide_reserved(70.0, None, [other]) is None
+    assert _decide_reserved(98.5, None, [other]).week_used == 98.5
+
+
+def test_reserved_candidates_take_no_handoff():
+    held = qp.reserved([qp.Candidate("main", 10.0, 70.0, 0, 0.0, 6)], MASTER_HELD)
+    assert held[0].reserved
+    assert not qp.reserved([qp.Candidate("main", 10.0, 69.9, 0, 0.0, 6)], MASTER_HELD)[0].reserved
+    assert qp.reserved(held, None) == held
+    decision = qp.decide(
+        account="tired",
+        five_used=10.0,
+        week_used=99.0,
+        five_reset=None,
+        week_reset=None,
+        others=held,
+        push=False,
+    )
+    assert decision.action == "stop"
+
+
+def test_a_master_session_ignores_the_ceiling():
+    assert qp._own_ceiling(MASTER_HELD, "main", master=True) is None
+    assert qp._own_ceiling(MASTER_HELD, "main", master=False) == 70.0
+    assert qp._own_ceiling(MASTER_HELD, "other", master=False) is None
+    assert qp._own_ceiling(None, "main", master=False) is None
+
+
+def test_a_ceiling_handoff_names_the_ceiling_as_its_limit():
+    spare = qp.Candidate("spare", 10.0, 10.0, 0, 0.0, 6)
+    assert qp._trigger_text(_decide_reserved(70.0, 70.0, [spare])) == "7-day quota 70.0% used (limit 70%)"
+    assert _decide_reserved(98.5, None, [spare]).week_limit == qp.QUOTA_HANDOFF_WEEK_PCT
+
+
+def test_a_spent_five_hour_window_at_the_ceiling_stops_on_the_week():
+    decision = qp.decide_reserved(
+        70.0,
+        account="main",
+        five_used=99.5,
+        week_used=75.0,
+        five_reset=1.0,
+        week_reset=None,
+        others=[],
+        push=False,
+    )
+    assert (decision.action, decision.trigger, decision.week_used) == ("stop", "week", 75.0)
+
+
+def _evaluate(monkeypatch, five_used, week_used, held=None, agent=""):
+    from hooks.context import account_sessions
+    from scripts.routing import reservation
+    from scripts.swarm_v2 import quota
+
+    for name in ("AH_ROUTE_API", "AGENTIHOOKS_TARGET", "AGENTIHOOKS_AGENT_NAME"):
+        monkeypatch.delenv(name, raising=False)
+    if agent:
+        monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", agent)
+    monkeypatch.setattr(qp, "_session_windows", lambda session_id: (five_used, week_used, None, None))
+    monkeypatch.setattr(account_sessions, "agent_pid", lambda: 1)
+    monkeypatch.setattr(account_sessions, "session_account", lambda pid: "main")
+    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(quota, "fleet_observations", lambda environ: {})
+    main = qp.Candidate("main", 10.0, 75.0, 0, 0.0, 6)
+    monkeypatch.setattr(qp, "_other_accounts", lambda sessions, observed: [main])
+    monkeypatch.setattr(qp, "_api_accounts", lambda sessions: [])
+    monkeypatch.setattr(qp, "push_active", lambda session_id: False)
+    reads, decided = [], []
+    monkeypatch.setattr(reservation, "current", lambda harness, environ: reads.append(harness) or held)
+    monkeypatch.setattr(qp, "decide_reserved", lambda ceiling, **inputs: decided.append((ceiling, inputs)))
+    assert qp.evaluate("s") is None
+    return reads, decided
+
+
+def test_evaluate_reads_no_reservation_below_the_lowest_ceiling(monkeypatch):
+    assert _evaluate(monkeypatch, 10.0, 49.9) == ([], [])
+
+
+def test_evaluate_reads_the_reservation_from_the_lowest_ceiling(monkeypatch):
+    assert _evaluate(monkeypatch, 10.0, 50.0) == (["claude"], [])
+
+
+def test_evaluate_decides_at_the_five_hour_limit(monkeypatch):
+    reads, decided = _evaluate(monkeypatch, qp.QUOTA_HANDOFF_5H_PCT, 10.0)
+    assert reads == ["claude"]
+    assert [ceiling for ceiling, _ in decided] == [None]
+
+
+def test_evaluate_hands_a_worker_off_at_the_ceiling(monkeypatch):
+    reads, decided = _evaluate(monkeypatch, 10.0, 70.0, MASTER_HELD)
+    assert reads == ["claude"]
+    [(ceiling, inputs)] = decided
+    assert (ceiling, inputs["account"], inputs["week_used"]) == (70.0, "main", 70.0)
+    assert [c.reserved for c in inputs["others"]] == [True]
+    assert _evaluate(monkeypatch, 10.0, 69.9, MASTER_HELD)[1] == []
+
+
+def test_evaluate_leaves_a_master_on_its_account_at_the_ceiling(monkeypatch):
+    assert _evaluate(monkeypatch, 10.0, 70.0, MASTER_HELD, agent="master@1")[1] == []

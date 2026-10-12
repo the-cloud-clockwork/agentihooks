@@ -41,7 +41,7 @@ def checks_resolution(held, github):
     if held.get("head") != pull.head:
         held["head"] = pull.head
         return ""
-    if not pull.resolved:
+    if not pull.resolved or (pull.unpassed_gate and not pull.failed):
         return ""
     current = github(target)
     if current is None or not current.head:
@@ -49,7 +49,7 @@ def checks_resolution(held, github):
     if current.head != pull.head:
         held["head"] = current.head
         return ""
-    if not current.resolved:
+    if not current.resolved or (current.unpassed_gate and not current.failed):
         return ""
     outcome = f"checks on {target}, now {'red' if current.red else 'green'}"
     return f"{outcome}; {current.unpassed_gate} never passed" if current.unpassed_gate else outcome
