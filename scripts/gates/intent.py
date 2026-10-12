@@ -803,6 +803,9 @@ class IntentGate:
             return Decision.deny(text)
         if verdict != PENDING:
             return Decision()
+        return self._pending(call, who, state, mode, record)
+
+    def _pending(self, call, who, state, mode, record):
         if record["reason"] == DRAFT:
             if _pr_field(call.command, "draft", self.run) != "false":
                 return Decision.deny(
