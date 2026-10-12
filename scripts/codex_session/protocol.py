@@ -20,6 +20,16 @@ def ignore(message: dict) -> None:
     return None
 
 
+def decode(raw: str, reader: str) -> dict:
+    try:
+        message = json.loads(raw)
+    except ValueError as exc:
+        raise ProtocolError(f"{reader} got a frame that is not JSON") from exc
+    if not isinstance(message, dict):
+        raise ProtocolError(f"{reader} got a frame that is not a JSON object")
+    return message
+
+
 class Connection:
     def __init__(self, ws: Any, timeout_s: float, clock: Callable[[], float] = time.monotonic) -> None:
         self.ws = ws
@@ -42,10 +52,7 @@ class Connection:
         self.ws.send(json.dumps({"jsonrpc": "2.0", "id": rid, "method": method, "params": params}))
         deadline = self.clock() + self.timeout_s
         while (left := deadline - self.clock()) > 0:
-            try:
-                message = json.loads(self.ws.recv(timeout=left))
-            except ValueError as exc:
-                raise ProtocolError(f"{method} got a frame that is not JSON") from exc
+            message = decode(self.ws.recv(timeout=left), method)
             if "method" in message:
                 self.listener(message)
                 continue
@@ -66,10 +73,7 @@ class Connection:
             return False
         except WebSocketException as exc:
             raise ProtocolError(f"the event stream lost the connection: {type(exc).__name__}") from exc
-        try:
-            message = json.loads(raw)
-        except ValueError as exc:
-            raise ProtocolError("the event stream got a frame that is not JSON") from exc
+        message = decode(raw, "the event stream")
         if "method" in message:
             self.listener(message)
         return True

@@ -1,8 +1,4 @@
-"""Codex push pump: deliver one recipient's inbox into its bound app-server thread, one submission at a time.
-
-A notify is a hint and the stored item is authoritative: subscribe, scan, then reconcile on an interval. The reader,
-subscriber and reconciler run in one loop, so any failure in them degrades the transport record as a unit.
-"""
+"""Codex push pump: deliver one recipient's inbox into its bound app-server thread, one submission at a time."""
 
 import sys
 import time
@@ -10,11 +6,13 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 
 from scripts.codex_session import protocol
-from scripts.codex_session.binding import CONNECTED, DEGRADED
+from scripts.codex_session.binding import CONNECTED, DEGRADED, BindingStore
 from scripts.inbox.dispatch import Dispatcher, digest
-from scripts.inbox.receipts import DispatchError
-from scripts.inbox.store import NOTIFY, now_ms
+from scripts.inbox.receipts import MISMATCH, RELEASED, Delivery, DispatchError
+from scripts.inbox.store import NOTIFY, InboxStore, Item, now_ms
 
+STOPPED = "stopped"
+UNOBSERVED = "an active turn that began before this pump connected"
 RECONCILE_S = 30.0
 POLL_S = 0.2
 BACKOFF_S = 1.0
@@ -26,7 +24,7 @@ HELD = "thread {} waits on {}; inbox delivery is held"
 DEGRADED_LOG = "codex pump for {} degraded: {}: {}"
 
 
-def envelope(item, delivery) -> str:
+def envelope(item: Item, delivery: Delivery) -> str:
     return f"[swarm delivery] item {item.id} delivery {delivery.id} from {item.sender}\n\n{item.text}"
 
 
@@ -40,29 +38,38 @@ class ThreadState:
 
     active_turn: str = ""
     requests: dict = field(default_factory=dict)
+    ended: str = ""
 
     def observe(self, message: dict) -> None:
         method, params = message.get("method", ""), message.get("params") or {}
+        turn = (params.get("turn") or {}).get("id", "")
         if "id" in message:
             self.requests[message["id"]] = method
         elif method == TURN_STARTED:
-            self.active_turn = (params.get("turn") or {}).get("id", "")
-        elif method == TURN_COMPLETED:
-            if (params.get("turn") or {}).get("id") == self.active_turn:
-                self.active_turn = ""
+            self.active_turn = turn
             self.requests.clear()
+        elif method == TURN_COMPLETED:
+            self.ended = turn
+            if turn == self.active_turn:
+                self.active_turn = ""
+                self.requests.clear()
         elif method == RESOLVED:
             self.requests.pop(params.get("requestId"), None)
+
+    def follow(self, turn_id: str) -> None:
+        self.active_turn = "" if turn_id == self.ended else turn_id
 
     def refresh(self, thread: dict) -> None:
         turns = thread.get("turns") or [{}]
         last = turns[-1]
         self.active_turn = last.get("id", "") if last.get("status") == IN_PROGRESS else ""
+        if not self.active_turn:
+            self.requests.clear()
 
 
 @dataclass(frozen=True)
 class Transport:
-    bindings: object
+    bindings: BindingStore
     slug: str
     execution_id: str
 
@@ -91,7 +98,9 @@ class Binding:
 
 
 class Pump:
-    def __init__(self, store, binding: Binding, timing: Timing = Timing(), log: Callable[[str], None] = stderr):
+    def __init__(
+        self, store: InboxStore, binding: Binding, timing: Timing = Timing(), log: Callable[[str], None] = stderr
+    ) -> None:
         self.store = store
         self.dispatcher = Dispatcher(store)
         self.receipts = self.dispatcher.receipts
@@ -105,7 +114,6 @@ class Pump:
         self.hold_until = 0.0
         self.backoff = timing.backoff_s
         self.surfaced = ""
-        binding.connection.listener = self.state.observe
 
     def run(self, stop: Callable[[], bool]) -> str:
         """Pump until stop() or a failure; any failure marks the transport degraded and is returned as its health."""
@@ -113,10 +121,10 @@ class Pump:
             self.start()
             while not stop():
                 self.step()
-            return CONNECTED
+            return STOPPED
         except Exception as failure:
-            self.binding.transport.mark(state=DEGRADED, last_error_class=type(failure).__name__)
             self.log(DEGRADED_LOG.format(self.binding.recipient, type(failure).__name__, failure))
+            self.binding.transport.mark(state=DEGRADED, last_error_class=type(failure).__name__)
             return DEGRADED
         finally:
             if self.subscription is not None:
@@ -124,10 +132,14 @@ class Pump:
 
     def start(self) -> None:
         binding = self.binding
+        binding.connection.listener = self.state.observe
         self.dispatcher.own(binding.recipient, binding.owner)
         self.receipts.recover(binding.recipient, binding.owner)
         self.subscription = self.store.redis.pubsub()
         self.subscription.subscribe(NOTIFY)
+        self._refresh()
+        if self.state.active_turn:
+            self.state.requests[UNOBSERVED] = UNOBSERVED
         self.next_reconcile = self.timing.clock()
         binding.transport.mark(state=CONNECTED, last_error_class="")
 
@@ -169,9 +181,12 @@ class Pump:
         if pending:
             self.log(HELD.format(self.binding.thread_id, pending))
 
-    def _submit(self, delivery) -> None:
+    def _submit(self, delivery: Delivery) -> None:
         owner = self.binding.owner
         item = self.store.get(delivery.item)
+        if digest(item) != delivery.digest:
+            self.receipts.reject(delivery.id, owner, MISMATCH)
+            return
         try:
             self.receipts.submitting(delivery.id, owner)
         except DispatchError as gone:
@@ -181,30 +196,37 @@ class Pump:
             self._arbitrate(envelope(item, delivery))
         except protocol.Refused as refused:
             self.receipts.reject(delivery.id, owner, str(refused))
+            for queued in self.queue:
+                self.receipts.reject(queued.id, owner, RELEASED)
+            self.queue.clear()
             self._hold()
             return
         except (protocol.ProtocolError, TimeoutError):
             self.receipts.recover(self.binding.recipient, owner)
             self.queue.clear()
             raise
-        self.receipts.accept(delivery.id, owner, digest(item))
+        self.receipts.accept(delivery.id, owner, delivery.digest)
         self.backoff = self.timing.backoff_s
         self.binding.transport.mark(active_turn_id=self.state.active_turn, last_transport_activity=self.timing.now_ms())
 
     def _arbitrate(self, text: str) -> None:
         try:
             self._send(text)
-        except protocol.Refused:
-            self._refresh()
+        except protocol.Refused as refused:
+            try:
+                self._refresh()
+            except (protocol.ProtocolError, TimeoutError) as lost:
+                raise protocol.Refused(str(refused)) from lost
             self._send(text)
 
     def _send(self, text: str) -> None:
         connection, thread = self.binding.connection, self.binding.thread_id
         if self.state.active_turn:
-            self.state.active_turn = protocol.steer_turn(connection, thread, self.state.active_turn, text)
+            self.state.follow(protocol.steer_turn(connection, thread, self.state.active_turn, text))
         else:
-            self.state.active_turn = protocol.start_turn(connection, thread, text)
+            self.state.follow(protocol.start_turn(connection, thread, text))
 
     def _hold(self) -> None:
         self.hold_until = self.timing.clock() + self.backoff
+        self.next_reconcile = min(self.next_reconcile, self.hold_until)
         self.backoff = min(self.backoff * 2, self.timing.backoff_max_s)

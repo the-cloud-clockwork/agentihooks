@@ -6,7 +6,7 @@ from scripts.codex_session import protocol
 from scripts.codex_session.binding import CONNECTED, DEGRADED, BindingStore, TransportRecord
 from scripts.inbox import codex
 from scripts.inbox.dispatch import Dispatcher
-from scripts.inbox.receipts import Receipts
+from scripts.inbox.receipts import MISMATCH, RELEASED, DispatchError, Receipts
 from scripts.inbox.store import InboxStore
 from scripts.swarm.store import RedisStore, SwarmConfig
 
@@ -38,6 +38,7 @@ class AppServer:
         self.turns = []
         self.silent = set()
         self.broken = None
+        self.early = []
 
     @property
     def active(self):
@@ -50,9 +51,11 @@ class AppServer:
             return
         result = getattr(self, message["method"].replace("/", "_"))(message["params"])
         if isinstance(result, str):
-            self.frames.insert(0, {"id": message["id"], "error": {"code": -32600, "message": result}})
+            reply = {"id": message["id"], "error": {"code": -32600, "message": result}}
         else:
-            self.frames.insert(0, {"id": message["id"], "result": result})
+            reply = {"id": message["id"], "result": result}
+        self.frames[0:0] = [*self.early, reply]
+        self.early = []
 
     def recv(self, timeout):
         if self.broken is not None:
@@ -142,7 +145,7 @@ def deliveries(rig, item_id):
 
 def test_an_idle_thread_wakes_with_turn_start_and_no_wait_tool(rig):
     item = rig.store.send("alice", ME, "hello")
-    assert rig.run(1) == CONNECTED
+    assert rig.run(1) == codex.STOPPED
     [delivery] = deliveries(rig, item.id)
     assert [m for m in rig.server.methods() if m.startswith("turn/")] == ["turn/start"]
     assert rig.server.turns[0]["inputs"] == [
@@ -154,16 +157,19 @@ def test_an_idle_thread_wakes_with_turn_start_and_no_wait_tool(rig):
 
 
 def test_busy_delivery_steers_the_observed_turn_on_the_same_thread(rig):
-    rig.server.begin_elsewhere()
-    rig.run(1)
-    item = rig.store.send("alice", ME, "steer me")
     rig.pump.start()
+    rig.pump.step()
+    rig.server.begin_elsewhere()
+    item = rig.store.send("alice", ME, "steer me")
     rig.pump.step()
     steer = [m for m in rig.server.sent if m.get("method") == "turn/steer"]
     assert [m["params"]["threadId"] for m in steer] == [THREAD]
     assert [m["params"]["expectedTurnId"] for m in steer] == ["turn-1"]
     assert len(rig.server.turns) == 1
-    assert rig.server.turns[0]["inputs"][-1].endswith("\n\nsteer me")
+    [delivery] = deliveries(rig, item.id)
+    assert rig.server.turns[0]["inputs"][-1] == (
+        f"[swarm delivery] item {item.id} delivery {delivery.id} from alice\n\nsteer me"
+    )
     assert rig.store.get(item.id).state == "delivered"
 
 
@@ -186,7 +192,10 @@ def test_a_turn_end_race_refreshes_after_the_refusal_and_starts_a_turn(rig):
     item = rig.store.send("alice", ME, "racing")
     rig.pump.step()
     assert rig.server.methods()[-3:] == ["turn/steer", "thread/read", "turn/start"]
-    assert rig.server.turns[1]["inputs"][0].endswith("\n\nracing")
+    [delivery] = deliveries(rig, item.id)
+    assert rig.server.turns[1]["inputs"] == [
+        f"[swarm delivery] item {item.id} delivery {delivery.id} from alice\n\nracing"
+    ]
     assert rig.store.get(item.id).state == "delivered"
     assert rig.pump.state.active_turn == "turn-2"
 
@@ -216,6 +225,90 @@ def test_a_second_refusal_rejects_the_delivery_and_holds_the_pump(rig):
     assert (rig.pump.hold_until, rig.pump.backoff) == (rig.clock.now + 1.0, 2.0)
     rig.pump.step()
     assert rig.server.methods().count("turn/steer") == 2
+
+
+def test_a_refusal_releases_the_queued_successors_and_order_is_kept(rig, recovery_deadline):
+    rig.pump.start()
+    rig.pump.step()
+    items = [rig.store.send("alice", ME, text) for text in ("one", "two", "three")]
+    refuse = iter(["thread is closing", "thread is closing"])
+    accept = rig.server.turn_start
+    rig.server.turn_start = lambda params: next(refuse, None) or accept(params)
+    rig.pump.step()
+    assert [rig.store.get(item.id).state for item in items] == ["pending", "pending", "pending"]
+    assert [d.state for item in items for d in deliveries(rig, item.id)] == ["rejected", "rejected", "rejected"]
+    assert [d.reason for item in items[1:] for d in deliveries(rig, item.id)] == [RELEASED, RELEASED]
+    assert rig.pump.queue == []
+    assert rig.pump.next_reconcile == rig.pump.hold_until
+    rig.clock.now = rig.pump.hold_until
+    rig.pump.step()
+    texts = [m["params"]["input"][0]["text"].rsplit("\n", 1)[1] for m in rig.server.sent if "input" in m["params"]]
+    assert texts[-3:] == ["one", "two", "three"]
+    assert [rig.store.get(item.id).state for item in items] == ["delivered", "delivered", "delivered"]
+
+
+def test_a_failed_refresh_after_a_refusal_still_rejects_the_delivery(rig):
+    rig.server.begin_elsewhere()
+    rig.pump.start()
+    rig.pump.step()
+    rig.server.finish(announce=False)
+    rig.server.silent.add("thread/read")
+    item = rig.store.send("alice", ME, "refused then lost")
+    rig.pump.step()
+    [delivery] = deliveries(rig, item.id)
+    assert (delivery.state, delivery.reason) == ("rejected", "turn/steer refused: expected turn mismatch")
+    assert rig.store.get(item.id).state == "pending"
+
+
+def test_a_steer_reply_for_a_turn_that_already_completed_leaves_the_thread_idle(rig):
+    rig.pump.start()
+    rig.pump.step()
+    rig.server.begin_elsewhere()
+    rig.pump.step()
+    accept = rig.server.turn_steer
+
+    def steer_then_complete(params):
+        result = accept(params)
+        rig.server.finish(announce=False)
+        rig.server.early.append({"method": codex.TURN_COMPLETED, "params": {"turn": {"id": "turn-1"}}})
+        return result
+
+    rig.server.turn_steer = steer_then_complete
+    rig.server.frames.clear()
+    rig.store.send("alice", ME, "last words")
+    rig.pump.step()
+    assert rig.server.frames == []
+    assert rig.pump.state.active_turn == ""
+    rig.store.send("alice", ME, "after the end")
+    rig.pump.step()
+    assert rig.server.methods()[-1] == "turn/start"
+
+
+def test_a_payload_that_changed_since_reservation_is_released_unsent(rig):
+    item = rig.store.send("alice", ME, "original")
+    rig.pump.start()
+    rig.pump.queue += rig.pump.dispatcher.reserve(ME, OWNER)
+    rig.store.redis.hset(rig.store.key("item", item.id), "text", "changed")
+    rig.pump._submit(rig.pump.queue.pop(0))
+    [delivery] = deliveries(rig, item.id)
+    assert (delivery.state, delivery.reason) == ("rejected", MISMATCH)
+    assert not [m for m in rig.server.methods() if m.startswith("turn/")]
+
+
+def test_a_turn_running_before_the_pump_connected_holds_delivery_until_it_ends(rig):
+    rig.server.begin_elsewhere()
+    rig.server.frames.clear()
+    rig.pump.start()
+    item = rig.store.send("alice", ME, "careful")
+    rig.pump.step()
+    assert not [m for m in rig.server.methods() if m.startswith("turn/")]
+    assert rig.record().pending_request == codex.UNOBSERVED
+    assert rig.logged == [f"thread {THREAD} waits on {codex.UNOBSERVED}; inbox delivery is held"]
+    rig.server.finish()
+    rig.pump.step()
+    assert rig.server.methods()[-1] == "turn/start"
+    assert rig.store.get(item.id).state == "delivered"
+    assert rig.record().pending_request == ""
 
 
 def test_the_backoff_doubles_to_its_cap_and_resets_on_acceptance(rig):
@@ -250,10 +343,16 @@ def test_a_pending_approval_keeps_the_item_reserved_and_surfaces_the_request(rig
     assert rig.record().pending_request == ""
 
 
-def test_a_completed_turn_drops_its_open_requests(rig):
+def test_the_active_turn_completing_drops_its_open_requests():
+    state = codex.ThreadState("turn-1", {7: APPROVAL})
+    state.observe({"method": codex.TURN_COMPLETED, "params": {"turn": {"id": "turn-1"}}})
+    assert (state.active_turn, state.requests) == ("", {})
+
+
+def test_a_late_completion_of_an_earlier_turn_keeps_the_active_turn_and_its_requests():
     state = codex.ThreadState("turn-1", {7: APPROVAL})
     state.observe({"method": codex.TURN_COMPLETED, "params": {"turn": {"id": "turn-0"}}})
-    assert (state.active_turn, state.requests) == ("turn-1", {})
+    assert (state.active_turn, state.requests) == ("turn-1", {7: APPROVAL})
 
 
 def test_a_lost_notify_is_recovered_by_the_scan_and_not_before(rig, recovery_deadline):
@@ -299,7 +398,7 @@ def test_a_lost_acknowledgement_stays_unknown_and_is_never_replayed(rig, recover
     assert (rig.record().state, rig.record().last_error_class) == (DEGRADED, "TimeoutError")
     rig.server.silent.clear()
     rig.pump = rig.new_pump()
-    assert rig.run(2) == CONNECTED
+    assert rig.run(2) == codex.STOPPED
     assert rig.server.methods().count("turn/start") == 1
     assert rig.store.get(item.id).state == "pending"
     assert [d.state for d in deliveries(rig, item.id)] == ["unknown"]
@@ -326,7 +425,7 @@ def test_a_broken_event_stream_degrades_the_transport(rig):
     assert rig.run(3) == DEGRADED
     assert (rig.record().state, rig.record().last_error_class) == (DEGRADED, "ProtocolError")
     assert rig.logged == [
-        f"codex pump for {ME} degraded: ProtocolError: the event stream lost the connection: ConnectionClosedError"
+        f"codex pump for {ME} degraded: ProtocolError: thread/read lost the connection: ConnectionClosedError"
     ]
 
 
@@ -335,7 +434,9 @@ def test_a_stray_text_frame_is_refused_and_diagnostics_stay_off_the_socket(rig):
     assert rig.run(3) == DEGRADED
     assert rig.logged == [f"codex pump for {ME} degraded: ProtocolError: the event stream got a frame that is not JSON"]
     assert all(message["jsonrpc"] == "2.0" for message in rig.server.sent)
-    assert not [m for m in rig.server.sent if "degraded" in json.dumps(m)]
+    assert rig.server.sent == [
+        {"jsonrpc": "2.0", "id": 1, "method": "thread/read", "params": {"threadId": THREAD, "includeTurns": True}}
+    ]
 
 
 def test_losing_ownership_degrades_at_the_next_reconcile(rig):
@@ -343,7 +444,7 @@ def test_losing_ownership_degrades_at_the_next_reconcile(rig):
     rig.pump.step()
     Dispatcher(rig.store).own(ME, "host:99", takeover=True)
     rig.clock.now = rig.pump.next_reconcile
-    with pytest.raises(codex.DispatchError) as lost:
+    with pytest.raises(DispatchError) as lost:
         rig.pump.step()
     assert str(lost.value) == f"{OWNER} no longer delivers for {ME}"
 

@@ -149,6 +149,26 @@ def test_poll_refuses_a_frame_that_is_not_json():
     assert str(garbled.value) == "the event stream got a frame that is not JSON"
 
 
+def test_poll_refuses_json_that_is_not_an_object():
+    class Scalar(Socket):
+        def recv(self, timeout):
+            return "null"
+
+    with pytest.raises(protocol.ProtocolError) as scalar:
+        protocol.Connection(Scalar(), 5).poll(0.1)
+    assert str(scalar.value) == "the event stream got a frame that is not a JSON object"
+
+
+def test_a_request_refuses_json_that_is_not_an_object():
+    class Listed(Socket):
+        def recv(self, timeout):
+            return "[1]"
+
+    with pytest.raises(protocol.ProtocolError) as listed:
+        protocol.Connection(Listed(), 5).request("thread/read")
+    assert str(listed.value) == "thread/read got a frame that is not a JSON object"
+
+
 def test_steer_turn_sends_the_expected_turn_and_returns_the_steered_one():
     ws = Socket([{"id": 1, "result": {"turnId": "t2"}}])
     assert protocol.steer_turn(protocol.Connection(ws, 5), "th", "t1", "hi") == "t2"
