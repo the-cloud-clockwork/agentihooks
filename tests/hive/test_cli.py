@@ -264,6 +264,7 @@ def test_an_unexpected_handler_error_is_still_logged(admin, monkeypatch, capsys,
     monkeypatch.setattr(auth, "exchange", broken)
     httpd = server.make_server(admin, PUBLIC, "127.0.0.1", 0)
     client = socket.create_connection(("127.0.0.1", httpd.server_address[1]), timeout=5)
+    address = client.getsockname()
     try:
         _process_one(
             httpd, lambda: client.sendall(b'POST /hive/join HTTP/1.0\r\nContent-Length: 12\r\n\r\n{"code": ""}')
@@ -274,6 +275,7 @@ def test_an_unexpected_handler_error_is_still_logged(admin, monkeypatch, capsys,
 
     err = capsys.readouterr().err
     assert f"{error.__name__}: exchange broke" in err
+    assert f"Exception occurred during processing of request from {address}\n" in err
 
 
 def test_join_posts_the_code_to_the_join_path_with_the_request_timeout(tmp_path, monkeypatch, capsys):
