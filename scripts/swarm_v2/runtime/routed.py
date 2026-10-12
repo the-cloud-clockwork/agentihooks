@@ -37,7 +37,8 @@ class RoutedRuntime:
         placed = self.launch is not None and self.router.spawn_backend(request) != LOCAL
         outcome = self.launch(request) if placed else self.router.spawn(request)
         if not outcome.ok:
-            raise SpawnError(outcome.detail, outcome.status)
+            pane_id = outcome.value.get("pane_id", "") if isinstance(outcome.value, dict) else ""
+            raise SpawnError(outcome.detail, outcome.status, pane_id)
         return outcome.value
 
     def observe(self, agent: AgentRecord) -> PaneObservation:
