@@ -5,6 +5,8 @@ from scripts.swarm_ledger import ledger_splits, ledger_tasks, new_ledger
 from scripts.swarm_ledger.api import schemas
 from tests.swarm_ledger import legacy_page
 
+pytestmark = pytest.mark.unit
+
 SLUG = "tasksplit-2026-01-01"
 MASTER = "master@abcdef-0001"
 ENGINEER = "engineer@abcdef-0002"

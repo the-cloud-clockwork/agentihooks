@@ -3,6 +3,8 @@ import pytest
 from scripts.gates import intent
 from tests.gates.test_intent import PR, chunk_classifier, planned  # noqa: F401
 
+pytestmark = pytest.mark.unit
+
 FIRST = "https://github.com/o/r/pull/9"
 SECOND = "https://github.com/o/r/pull/10"
 
@@ -58,7 +60,7 @@ def test_the_half_is_part_of_the_fingerprint(planned, pulls):  # noqa: F811
 
 def test_split_half_names_the_index_and_lines():
     task = {"pr_url": SECOND, "split": ["1-2", "3-4", "5-5"], "split_pulls": [FIRST]}
-    assert intent.split_half(task) == (1, "3-4")
-    assert intent.split_half({**task, "pr_url": FIRST}) == (0, "1-2")
-    assert intent.split_half({"pr_url": FIRST}) is None
-    assert intent.split_half({**task, "split_pulls": [FIRST, "a", "b"], "pr_url": "c"}) is None
+    assert intent._split_half(task) == (1, "3-4")
+    assert intent._split_half({**task, "pr_url": FIRST}) == (0, "1-2")
+    assert intent._split_half({"pr_url": FIRST}) is None
+    assert intent._split_half({**task, "split_pulls": [FIRST, "a", "b"], "pr_url": "c"}) is None
