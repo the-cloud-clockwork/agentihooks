@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.x__lane_default__mutmut_6:7b4600289efbb54e4dc66f963715985de68e968c4c274fa2063e6b00f11c8b0a": {
+    "reader": "standards_reader",
+    "reason": "_lane_default resolves a nonempty model for every valid persisted SwarmConfig and for config=None before calling frontier. frontier evaluates default_model first and never evaluates MODEL_DEFAULTS[harness] when that model is nonempty. Replacing the already-unused harness argument with None therefore changes no returned model, effort, source or exception for valid inputs. Empty configured models are rejected by create/update, and config loading replaces absent or empty legacy fields with nonempty harness defaults."
+  }
+}

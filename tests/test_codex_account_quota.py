@@ -362,7 +362,7 @@ def test_two_concurrent_accounts_read_count_and_place_apart(tmp_path, monkeypatc
     assert launched["env"]["AH_CX_TOKEN_beta"] == env["AH_CX_TOKEN_beta"]
     assert "AH_CX_TOKEN_alpha" not in launched["env"]
     assert launched["env"][codex_router.ACCOUNT_ID_ENV] == "acct-b"
-    assert launched["argv"][-2:] == ["exec", "ok"]
+    assert launched["argv"][2:] == ["exec", *codex_router.bearer_overrides(), "ok"]
     assert probes == []
 
 

@@ -660,12 +660,57 @@ def test_a_bearer_child_carries_its_token_and_account_id_and_runs_the_bearer_pro
     assert router.command(account, "/usr/bin/codex", ["exec", "hi"]) == [
         "/usr/bin/codex",
         "--no-daemon",
-        *router.bearer_overrides(),
         "exec",
+        *router.bearer_overrides(),
         "hi",
     ]
     second = router.child_environment(router.credential(_token("beta"), OAUTH_ENV), OAUTH_ENV)
     assert (second["CODEX_ACCESS_TOKEN"], second["AGENTIHOOKS_CHATGPT_ACCOUNT_ID"]) == (OAUTH_TWO, "acct-2")
+
+
+@pytest.mark.parametrize("kind", ["bearer", "api"])
+@pytest.mark.parametrize(
+    ("args", "at"),
+    [
+        (["exec", "-c", 'model_reasoning_effort="low"', "probe"], 0),
+        (["e", "-c", 'model_reasoning_effort="low"', "probe"], 0),
+        (["--model", "chosen-model", "exec", "-c", 'model_reasoning_effort="low"'], 2),
+        (["--model", "e", "exec", "--", "-"], 2),
+        (["--no-alt-screen", "e", "--", "probe"], 1),
+        (["--no-alt-screen", "--search", "exec", "probe"], 2),
+        (["exec", "--", "-"], 0),
+        (["--model=chosen-model", "exec", "probe"], 1),
+        (["--model", "exec", "probe"], None),
+        (["--", "exec"], None),
+        (["--model", "chosen-model", "-c", 'model_reasoning_effort="low"', "probe"], None),
+        ([], None),
+        (["--model"], None),
+        (["--image", "first.png", "second.png", "--model", "chosen-model", "exec", "probe"], 5),
+        (["-ifirst.png", "second.png", "-m", "chosen-model", "e", "--", "-"], 4),
+        (["--image=first.png", "--model", "chosen-model", "exec", "probe"], 3),
+        (["--image=first.png", "second.png", "--model", "chosen-model", "exec", "probe"], 4),
+        (["-i", "first.png", "exec"], None),
+        (["--image"], None),
+    ],
+)
+def test_routed_auth_overrides_share_the_exec_config_scope_and_preserve_interactive_order(kind, args, at):
+    if kind == "bearer":
+        account = router.credential(_token("alpha"), OAUTH_ENV)
+        overrides = router.bearer_overrides()
+    else:
+        account = router.CodexAccount("api", key_env="CODEX_API_KEY", base_url="https://api.invalid")
+        overrides = codex_api.overrides("CODEX_API_KEY", "https://api.invalid")
+    expected = ["/usr/bin/codex", "--no-daemon"]
+    expected += [*overrides, *args] if at is None else [*args[: at + 1], *overrides, *args[at + 1 :]]
+    assert router.command(account, "/usr/bin/codex", args) == expected
+
+
+@pytest.mark.parametrize("flag", ["--local-provider", "--remote", "--remote-auth-token-env", "--add-dir"])
+def test_exec_auth_scope_skips_the_other_native_root_option_values(flag):
+    account = router.credential(_token("alpha"), OAUTH_ENV)
+    args = [flag, "exec", "e", "-c", 'model_reasoning_effort="low"', "probe"]
+    expected = ["/usr/bin/codex", "--no-daemon", flag, "exec", "e", *router.bearer_overrides(), *args[3:]]
+    assert router.command(account, "/usr/bin/codex", args) == expected
 
 
 def test_default_api_and_access_token_children_never_inherit_an_account_id():
@@ -705,7 +750,7 @@ def test_the_probe_of_a_chatgpt_account_runs_the_bearer_provider_and_skips_an_un
     monkeypatch.setattr(router.codex_usage, "read", lambda *a, **k: None)
     assert router.probe(_token("alpha"), OAUTH_ENV, run) == "t-9"
     argv, env = seen[0]
-    assert argv == ["/usr/bin/codex", "--no-daemon", *router.bearer_overrides(), *router.PROBE_ARGS]
+    assert argv == ["/usr/bin/codex", "--no-daemon", "exec", *router.bearer_overrides(), *router.PROBE_ARGS[1:]]
     assert env["AGENTIHOOKS_CHATGPT_ACCOUNT_ID"] == "acct-1"
     assert router.probe(_token("keyed"), OAUTH_ENV, run) is None
     assert router.probe(_token("ghost"), OAUTH_ENV, run) is None
@@ -715,7 +760,7 @@ def test_the_probe_of_a_chatgpt_account_runs_the_bearer_provider_and_skips_an_un
 def test_a_forced_chatgpt_launch_runs_the_bearer_provider_and_never_prints_the_token(monkeypatch, tmp_path, capsys):
     rc, seen, report = _launch(monkeypatch, tmp_path, OAUTH_ENV, ["--route", "beta", "exec", "hi"])
     assert rc == 0
-    assert seen["cmd"] == ["/usr/bin/codex", "--no-daemon", *router.bearer_overrides(), "exec", "hi"]
+    assert seen["cmd"] == ["/usr/bin/codex", "--no-daemon", "exec", *router.bearer_overrides(), "hi"]
     assert (seen["env"]["CODEX_ACCESS_TOKEN"], seen["env"]["AGENTIHOOKS_CHATGPT_ACCOUNT_ID"]) == (OAUTH_TWO, "acct-2")
     assert report.read_text() == "status=routed\naccount=beta\nplacement=forced\n"
     out = capsys.readouterr()

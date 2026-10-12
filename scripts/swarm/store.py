@@ -1,13 +1,14 @@
 """Swarm runtime state in Redis: config, exclusive task claims with a lease, the agent registry and its seats."""
 
 import json
+import os
 import time
 from dataclasses import asdict, dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from scripts.inbox.seats import SeatMemory, SeatRegistry, SwarmCulture, of_swarm
 from scripts.inbox.store import InboxStore
-from scripts.swarm import effort_range
+from scripts.swarm import default_models, effort_range
 from scripts.swarm.execution import ExecutionRegistry
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.naming import NameRegistry
@@ -62,6 +63,8 @@ class SwarmConfig:
     memory_per_agent_mb: int = DEFAULT_MEMORY_PER_AGENT_MB
     lane_shift: int = 0
     api_url: str = ""
+    claude_model: str = default_models.DEFAULTS["claude"]
+    codex_model: str = default_models.DEFAULTS["codex"]
 
 
 def scaling_refusal(config):
@@ -135,6 +138,17 @@ class RedisStore:
         return sorted(self.redis.smembers(f"{PREFIX}:index"))
 
     def create(self, config):
+        from scripts.swarm import model_catalog
+
+        changes = {
+            field: default_models.model(config, harness)
+            for harness, field in default_models.FIELDS.items()
+            if default_models.model(config, harness) != default_models.DEFAULTS[harness]
+        }
+        if changes and (
+            refused := default_models.refusal(changes, model_catalog.catalog(os.environ, self.redis, time.time()))
+        ):
+            raise SwarmError(refused)
         refused = effort_range.refusal((config.effort_min, config.effort_max), config.lanes) or scaling_refusal(config)
         if refused:
             raise SwarmError(refused)
@@ -172,13 +186,20 @@ class RedisStore:
             int(raw.get("memory_per_agent_mb") or DEFAULT_MEMORY_PER_AGENT_MB),
             int(raw.get("lane_shift") or 0),
             raw.get("api_url", ""),
+            raw.get("claude_model") or default_models.DEFAULTS["claude"],
+            raw.get("codex_model") or default_models.DEFAULTS["codex"],
         )
 
     def update(self, slug, **changes):
+        from scripts.swarm import model_catalog
+
         if changes.get("state", STATES[0]) not in STATES:
             raise SwarmError(f"state must be one of {STATES}")
         if changes.get("autonomy", DELEGATE) not in AUTONOMY:
             raise SwarmError(f"autonomy must be one of {AUTONOMY}")
+        if set(default_models.FIELDS.values()) & changes.keys():
+            if refused := default_models.refusal(changes, model_catalog.catalog(os.environ, self.redis, time.time())):
+                raise SwarmError(refused)
         previous = self.config(slug)
         config = replace(previous, **changes)
         if {"lanes", "effort_min", "effort_max"} & set(changes):
