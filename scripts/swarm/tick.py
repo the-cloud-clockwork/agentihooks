@@ -691,7 +691,8 @@ def _stack_base(task, rows):
 
 
 def _refund_parked(slug, store, rows, task_id):
-    if _parked(rows.get(task_id, {}), rows):
+    quota = (store.handoff_envelope(slug, task_id) or {}).get("reason") == "quota"
+    if _parked(rows.get(task_id, {}), rows) or quota:
         store.refund_claim(slug, task_id)
 
 

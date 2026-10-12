@@ -35,8 +35,9 @@ def test_three_failed_lives_still_block_the_fourth_claim(store, ending):  # noqa
             ledger.rows["t1"].update(state="open", claimed_by="")
             tick("sw", store, ledger, runtime, now_ms=at + 1)
         else:
+            tick("sw", store, ledger, runtime, now_ms=agent.started_at + 1)
             runtime.live.discard(agent.name)
-            tick("sw", store, ledger, runtime, now_ms=at + STARTUP_GRACE_MS)
+            tick("sw", store, ledger, runtime, now_ms=agent.started_at + STARTUP_GRACE_MS + 1)
     assert [task for _, _, task in runtime.spawned] == ["t1"] * 3
     assert ledger.rows["t1"]["state"] == "blocked"
     assert store.claimant("sw", "t1") is None
