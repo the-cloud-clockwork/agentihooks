@@ -24,7 +24,7 @@ def body(handler: object, server: ModuleType) -> dict:
         raise APIError(400, "schema_invalid", "Request body must be a bounded JSON object") from None
 
 
-def dispatch(handler: object, server: ModuleType) -> dict | None:
+def dispatch(handler: object, server: ModuleType) -> dict | str | None:
     if handler.headers.get("Host") not in server.ALLOWED_HOSTS:
         raise APIError(403, "forbidden", "Host not allowed")
     origin = handler.headers.get("Origin")
@@ -132,7 +132,7 @@ def global_resource(handler: object, server: ModuleType, parts: list) -> dict:
     raise APIError(404, "resource_missing", "No such resource")
 
 
-def ledger_operation(handler: object, server: ModuleType, slug: str, path: str, principal: str) -> dict | None:
+def ledger_operation(handler: object, server: ModuleType, slug: str, path: str, principal: str) -> dict | str | None:
     from . import admin, mutations
 
     if handler.command not in ("POST", "PUT"):
@@ -149,7 +149,7 @@ def ledger_operation(handler: object, server: ModuleType, slug: str, path: str, 
             if status is None:
                 raise APIError(404, "swarm_missing", "No swarm for this ledger")
             return {"data": status}
-        return handler.send(200, server.repository.encoded_view(slug, export_body), "application/json")
+        return server.repository.encoded_view(slug, export_body)
     if path == "operations":
         return mutations.apply(server, slug, principal, payload)
     raise APIError(404, "resource_missing", "No such operation resource")
@@ -173,7 +173,8 @@ def handle(handler: object, server: ModuleType) -> None:
     except (OSError, ValueError):
         logging.getLogger(__name__).exception("Ledger API storage failure")
         status, result = 500, APIError(500, "storage_error", "Resource could not be read or written").envelope()
-    return handler.send(status, json.dumps(result, ensure_ascii=False), "application/json")
+    body = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
+    return handler.send(status, body, "application/json")
 
 
 def pagination(url: str) -> dict:

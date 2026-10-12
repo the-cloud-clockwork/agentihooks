@@ -1869,6 +1869,9 @@ def test_export_encodes_once_per_ledger_generation(live, monkeypatch):
     assert json.loads(first) == stored()
     monkeypatch.setattr(json, "loads", decode)
     monkeypatch.setattr(json, "dumps", encode)
+    server.repository.inner.get_document(SLUG)
+    assert counts == {"decode": 1, "encode": 0}
+    counts.update(decode=0)
     assert [export() for _ in range(3)] == [first] * 3
     assert counts == {"decode": 0, "encode": 0}
     ops = [{"op": "add", "id": "export-generation", "thread": "chat", "text": "Written after the first export, café"}]
@@ -1879,7 +1882,7 @@ def test_export_encodes_once_per_ledger_generation(live, monkeypatch):
     assert counts == {"decode": 0, "encode": 1}
     monkeypatch.undo()
     assert after == [after[0]] * 3 and after[0] != first
-    assert json.loads(after[0]) == stored()
+    assert after[0] == json.dumps(stored(), ensure_ascii=False).encode()
     assert "Written after the first export, café" in after[0].decode()
 
 
