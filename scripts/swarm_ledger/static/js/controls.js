@@ -11,7 +11,6 @@ const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 const EFFORT_CAPS = { effort_min: "effort floor", effort_max: "effort ceiling" };
 const MASTER_AGENTS = ["claude", "codex"];
 
-let noteTimer = 0;
 let noteError = false;
 let models = {};
 
@@ -124,21 +123,15 @@ function opNote(phase, action, error) {
     compact_down: "Lower compact limit", compact_up: "Raise compact limit",
     effort_min_down: "Lower effort floor", effort_min_up: "Raise effort floor", effort_max_down: "Lower effort ceiling", effort_max_up: "Raise effort ceiling", apply: "Apply capacity", overlays: "Apply overlays", verdict: "Verdict", lift: "Lift the gate", quota_refresh: "Refresh quota", routing: "Set routing",
     attach: "Attach", drain: "Drain", cancel: "Cancel", force_stop: "Force stop" }[action] || action;
-  if (phase === "pending") return { cls: "pending", text: `${name}: sending` };
-  if (phase === "queued") return { cls: "pending", text: `${name}: pending, waiting for the hive tick` };
-  if (phase === "accepted") return { cls: "pending", text: `${name}: accepted by the hive tick` };
-  if (phase === "done" || phase === "acknowledged") return { cls: "ok", text: `${name}: acknowledged` };
   return { cls: "bad", text: `Could not ${name.toLowerCase()}${["start", "pause", "stop"].includes(action) ? " the swarm" : ""}: ${error}. Try again or ask the master.` };
 }
 
 export function showNote(phase, action, error) {
-  const note = opNote(phase, action, error);
   noteError = phase === "error";
-  clearTimeout(noteTimer);
-  $("swarm-note").className = `sw-note ${note.cls}`;
-  $("swarm-note").textContent = note.text;
-  $("swarm-note").title = note.text;
-  if (phase === "done") noteTimer = setTimeout(() => { $("swarm-note").textContent = ""; }, 4000);
+  const text = noteError ? opNote(phase, action, error).text : "";
+  $("swarm-note").className = "sw-note bad";
+  $("swarm-note").textContent = text;
+  $("swarm-note").title = text;
 }
 
 export function renderControls() {
@@ -163,7 +156,6 @@ export function renderControls() {
     input.setAttribute("aria-invalid", String(input.dataset.cap in capDraft && !!capChanges({}, { [input.dataset.cap]: capDraft[input.dataset.cap] }, models).bad.length));
     input.disabled = !swarm || pending === "apply";
   }
-  renderCommands((swarm && swarm.commands) || []);
   const command = swarm && (swarm.commands || []).at(-1);
   if (!pending && !noteError && command) {
     const phase = { pending: "queued", accepted: "accepted", acknowledged: "acknowledged", failed: "error" }[command.state];
@@ -180,16 +172,6 @@ function commandAction(command) {
   if (command.command === "doctor") return `doctor_${command.argv[0]}`;
   const action = command.argv[0] === "--as" ? command.argv[2] : command.argv[0];
   return action === "stop" && command.argv.includes("--now") ? "stop_now" : action;
-}
-
-function renderCommands(commands) {
-  $("command-log").hidden = !commands.length;
-  const counts = ["pending", "accepted", "failed"].map((state) => [state, commands.filter((command) => command.state === state).length]);
-  $("command-count").textContent = counts.filter(([, count]) => count).map(([state, count]) => `${count} ${state}`).join(" · ");
-  $("command-rows").replaceChildren(...[...commands].reverse().map((command) => h("p", { class: "sw-command" },
-    h("span", { text: opNote("pending", commandAction(command)).text.split(":")[0] }),
-    h("span", { text: command.state }),
-    command.error && h("span", { text: command.error }))));
 }
 
 export function renderGates(sw) {

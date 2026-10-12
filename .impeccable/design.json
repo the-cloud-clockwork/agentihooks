@@ -1,44 +1,207 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-06T21:30:00Z",
+  "generatedAt": "2026-10-12T12:30:00Z",
   "title": "Design System: agentihooks ledger",
   "extensions": {
     "colorMeta": {
-      "canvas-ink": { "role": "neutral", "displayName": "Canvas Ink", "canonical": "#010104", "tonalRamp": ["#010104", "#0b0b10", "#16161c", "#24242b", "#3a3a43", "#5b5b66", "#8e8e9a", "#d9d9e0"] },
-      "panel-navy": { "role": "neutral", "displayName": "Panel Navy", "canonical": "#0d1424", "tonalRamp": ["#060a12", "#0d1424", "#18223a", "#263452", "#3a4b70", "#56698f", "#8496b6", "#c4cfe2"] },
-      "accent-blue": { "role": "primary", "displayName": "Accent Blue", "canonical": "#3b82f6", "tonalRamp": ["#0b1a3d", "#13306e", "#1d4ed8", "#2f6cf0", "#3b82f6", "#60a5fa", "#93c5fd", "#dbeafe"] },
-      "link-blue": { "role": "primary", "displayName": "Link Blue", "canonical": "#60a5fa" },
-      "accent-blue-soft": { "role": "primary", "displayName": "Soft Blue", "canonical": "#93c5fd" },
-      "selection-blue": { "role": "primary", "displayName": "Selection Blue", "canonical": "#1d4ed8" },
-      "signal-red": { "role": "secondary", "displayName": "Signal Red", "canonical": "#ef4444", "tonalRamp": ["#3b0b0b", "#6b1414", "#991b1b", "#c62d2d", "#ef4444", "#f87171", "#fca5a5", "#fee2e2"] },
-      "warn-yellow": { "role": "tertiary", "displayName": "Warn Yellow", "canonical": "#facc15", "tonalRamp": ["#3a2e04", "#6b5408", "#a1800b", "#d4a90f", "#facc15", "#fde047", "#fde68a", "#fef9c3"] },
-      "warn-yellow-soft": { "role": "tertiary", "displayName": "Soft Yellow", "canonical": "#fde68a" },
-      "positive-green": { "role": "tertiary", "displayName": "Positive Green", "canonical": "#4ade80", "tonalRamp": ["#082b16", "#0f4f28", "#15803d", "#22a55a", "#4ade80", "#86efac", "#bbf7d0", "#dcfce7"] },
-      "text-white": { "role": "neutral", "displayName": "Text White", "canonical": "#f8fafc" },
-      "text-secondary": { "role": "neutral", "displayName": "Secondary Text", "canonical": "#cbd5e1" },
-      "muted-slate": { "role": "neutral", "displayName": "Muted Slate", "canonical": "#9aa8bd" },
-      "surface-1": { "role": "neutral", "displayName": "Surface 1 (4.5% lift)", "canonical": "rgba(255, 255, 255, .045)" },
-      "surface-2": { "role": "neutral", "displayName": "Surface 2 (6% lift)", "canonical": "rgba(255, 255, 255, .06)" },
-      "hover-lift": { "role": "neutral", "displayName": "Hover Lift (8%)", "canonical": "rgba(255, 255, 255, .08)" },
-      "edge": { "role": "neutral", "displayName": "Edge (14%)", "canonical": "rgba(255, 255, 255, .14)" }
+      "canvas-ink": {
+        "role": "neutral",
+        "displayName": "Canvas Ink",
+        "canonical": "#050812",
+        "tonalRamp": [
+          "#010104",
+          "#0b0b10",
+          "#16161c",
+          "#24242b",
+          "#3a3a43",
+          "#5b5b66",
+          "#8e8e9a",
+          "#d9d9e0"
+        ]
+      },
+      "panel-navy": {
+        "role": "neutral",
+        "displayName": "Panel Navy",
+        "canonical": "#0d1424",
+        "tonalRamp": [
+          "#060a12",
+          "#0d1424",
+          "#18223a",
+          "#263452",
+          "#3a4b70",
+          "#56698f",
+          "#8496b6",
+          "#c4cfe2"
+        ]
+      },
+      "accent-blue": {
+        "role": "primary",
+        "displayName": "Accent Blue",
+        "canonical": "#3b82f6",
+        "tonalRamp": [
+          "#0b1a3d",
+          "#13306e",
+          "#1d4ed8",
+          "#2f6cf0",
+          "#3b82f6",
+          "#60a5fa",
+          "#93c5fd",
+          "#dbeafe"
+        ]
+      },
+      "link-blue": {
+        "role": "primary",
+        "displayName": "Link Blue",
+        "canonical": "#60a5fa"
+      },
+      "accent-blue-soft": {
+        "role": "primary",
+        "displayName": "Soft Blue",
+        "canonical": "#93c5fd"
+      },
+      "selection-blue": {
+        "role": "primary",
+        "displayName": "Selection Blue",
+        "canonical": "#1d4ed8"
+      },
+      "signal-red": {
+        "role": "secondary",
+        "displayName": "Signal Red",
+        "canonical": "#ef4444",
+        "tonalRamp": [
+          "#3b0b0b",
+          "#6b1414",
+          "#991b1b",
+          "#c62d2d",
+          "#ef4444",
+          "#f87171",
+          "#fca5a5",
+          "#fee2e2"
+        ]
+      },
+      "warn-yellow": {
+        "role": "tertiary",
+        "displayName": "Warn Yellow",
+        "canonical": "#facc15",
+        "tonalRamp": [
+          "#3a2e04",
+          "#6b5408",
+          "#a1800b",
+          "#d4a90f",
+          "#facc15",
+          "#fde047",
+          "#fde68a",
+          "#fef9c3"
+        ]
+      },
+      "warn-yellow-soft": {
+        "role": "tertiary",
+        "displayName": "Soft Yellow",
+        "canonical": "#fde68a"
+      },
+      "positive-green": {
+        "role": "tertiary",
+        "displayName": "Positive Green",
+        "canonical": "#4ade80",
+        "tonalRamp": [
+          "#082b16",
+          "#0f4f28",
+          "#15803d",
+          "#22a55a",
+          "#4ade80",
+          "#86efac",
+          "#bbf7d0",
+          "#dcfce7"
+        ]
+      },
+      "text-white": {
+        "role": "neutral",
+        "displayName": "Text White",
+        "canonical": "#f8fafc"
+      },
+      "text-secondary": {
+        "role": "neutral",
+        "displayName": "Secondary Text",
+        "canonical": "#cbd5e1"
+      },
+      "muted-slate": {
+        "role": "neutral",
+        "displayName": "Muted Slate",
+        "canonical": "#9aa8bd"
+      },
+      "surface-1": {
+        "role": "neutral",
+        "displayName": "Surface 1 (4.5% lift)",
+        "canonical": "rgba(255, 255, 255, .045)"
+      },
+      "surface-2": {
+        "role": "neutral",
+        "displayName": "Surface 2 (6% lift)",
+        "canonical": "rgba(255, 255, 255, .06)"
+      },
+      "hover-lift": {
+        "role": "neutral",
+        "displayName": "Hover Lift (8%)",
+        "canonical": "rgba(255, 255, 255, .08)"
+      },
+      "edge": {
+        "role": "neutral",
+        "displayName": "Edge (14%)",
+        "canonical": "rgba(255, 255, 255, .14)"
+      }
     },
     "typographyMeta": {
-      "title": { "displayName": "Title", "purpose": "The ledger title in the page header." },
-      "headline": { "displayName": "Headline", "purpose": "Section and panel heads, the HOME header; uppercase, tracked." },
-      "item": { "displayName": "Item", "purpose": "Phase and task titles, stat values, HOME ledger titles." },
-      "body": { "displayName": "Body", "purpose": "Overview, comments, chat, descriptions." },
-      "label": { "displayName": "Label", "purpose": "Column heads, meta lines, action links, states; uppercase, tracked." }
+      "title": {
+        "displayName": "Title",
+        "purpose": "The ledger title in the page header."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Section and panel heads, the HOME header; uppercase, tracked."
+      },
+      "item": {
+        "displayName": "Item",
+        "purpose": "Phase and task titles, stat values, HOME ledger titles."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Overview, comments, chat, descriptions."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Column heads, meta lines, action links, states; uppercase, tracked."
+      }
     },
     "shadows": [],
     "motion": [
-      { "name": "state-change", "value": "150ms ease", "purpose": "Colour, background and opacity changes on hover and focus (transition .15s)." },
-      { "name": "flash", "value": "1.8s ease-out", "purpose": "One-time hover-lift flash on an item reached from a link." }
+      {
+        "name": "state-change",
+        "value": "150ms ease",
+        "purpose": "Colour, background and opacity changes on hover and focus (transition .15s)."
+      },
+      {
+        "name": "flash",
+        "value": "1.8s ease-out",
+        "purpose": "One-time hover-lift flash on an item reached from a link."
+      }
     ],
     "breakpoints": [
-      { "name": "narrow", "value": "600px" },
-      { "name": "tablet", "value": "1023px" },
-      { "name": "laptop", "value": "1279px" },
-      { "name": "desktop", "value": "1599px" }
+      {
+        "name": "narrow",
+        "value": "600px"
+      },
+      {
+        "name": "tablet",
+        "value": "1023px"
+      },
+      {
+        "name": "laptop",
+        "value": "1279px"
+      },
+      {
+        "name": "desktop",
+        "value": "1599px"
+      }
     ]
   },
   "components": [
@@ -96,24 +259,54 @@
       "refersTo": "outline",
       "description": "Fixed left list of section links; red bullet for open items, accent when current.",
       "html": "<nav class=\"ds-outline\"><a href=\"#\" class=\"on\">Claude and Codex messaging</a><a href=\"#\">Seats and continuity</a></nav>",
-      "css": ".ds-outline { display: flex; flex-direction: column; width: 248px; font: 13px/1.6 ui-monospace, 'JetBrains Mono', monospace; } .ds-outline a { position: relative; display: block; padding: 3px 10px 3px 24px; border-radius: 4px; color: var(--muted); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .ds-outline a::before { content: '•'; position: absolute; left: 11px; color: var(--signal); } .ds-outline a:hover { background: var(--hover); color: var(--text); } .ds-outline a.on { color: var(--accent); } .ds-outline a:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }"
+      "css": ".ds-outline { display: flex; flex-direction: column; width: 248px; font: 13px/1.6 ui-monospace, 'JetBrains Mono', monospace; } .ds-outline a { position: relative; display: block; padding: 3px 10px 3px 24px; border-radius: 4px; color: var(--muted); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .ds-outline a::before { content: '\u2022'; position: absolute; left: 11px; color: var(--signal); } .ds-outline a:hover { background: var(--hover); color: var(--text); } .ds-outline a.on { color: var(--accent); } .ds-outline a:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }"
     }
   ],
   "narrative": {
     "northStar": "The Operator's Console",
-    "overview": "A dark, dense control surface for one operator watching many agents. The page is a record first: hairline-divided rows of monospaced text on a near-black canvas, with colour reserved for state. Structure follows the operator's design system 2026-001: bare labels instead of chips, frameless controls that show a surface only on hover, depth from two translucent lifts over a single canvas, and every colour in one palette file.\n\nTwo operator decisions override 2026-001 here. First, no glow: no text-shadow, drop-shadow or halo box-shadow on text, icons or controls. Role colour, weight and size carry emphasis. Second, the canvas is near black (#010104) with no blue radial wash behind it.\n\nDensity is high and calm. A ledger page holds dozens of panels and hundreds of rows and must stay readable after hours open.",
+    "overview": "A dark, dense control surface for one operator watching many agents. The page is a record first: hairline-divided rows of monospaced text on a deep blue-black canvas, with colour reserved for state. Structure follows the operator's design system 2026-001: bare labels instead of chips, frameless controls that show a surface only on hover, depth from two translucent lifts over a single canvas, and every colour in one palette file.\n\nTwo operator decisions override 2026-001 here. First, no glow: no text-shadow, drop-shadow or halo box-shadow on text, icons or controls. Role colour, weight and size carry emphasis. Second, the canvas is a deep blue black (#050812) with no blue radial wash behind it.\n\nDensity is high and calm. A ledger page holds dozens of panels and hundreds of rows and must stay readable after hours open.",
     "keyCharacteristics": [
       "Monospace everywhere, five sizes (22 / 14 / 13 / 12 / 11 px), uppercase tracked labels for section and column heads.",
-      "Near-black canvas, two white lifts (4.5% and 6%) for panels and wells, hairlines (6%) between rows.",
+      "Deep blue-black canvas (#050812), two light-blue lifts (5% and 7.5%) for panels and wells, steel hairlines between rows.",
       "Colour is state: blue for action and links, green done or running, yellow paused or warning, red signal, destructive and open items.",
       "Frameless controls; the hover lift is the only frame.",
-      "Flat: no shadows and no glow."
+      "Flat: no shadows and no glow.",
+      "Every table column resizes from its header edge; widths live in the shared page layout.",
+      "Only Ledger sections, Swarm panels below Capacity, outline categories and comments fold."
     ],
     "rules": [
-      { "name": "The One File Rule", "body": "A colour value appears only in palette.css. Changing a hue is one edit there; a change that needs a component file opened means the palette layer is broken.", "section": "colors" },
-      { "name": "The State Colour Rule", "body": "Hue means state. A colour used for decoration takes that meaning away from the state it stands for.", "section": "colors" },
-      { "name": "The Flat Type Rule", "body": "Text never glows. Emphasis comes from weight, size, case and role colour.", "section": "typography" },
-      { "name": "The Two Lifts Rule", "body": "Every panel samples to one of two surface values. A third value is a component painting its own surface.", "section": "elevation" }
+      {
+        "name": "The One File Rule",
+        "body": "A colour value appears only in palette.css. Changing a hue is one edit there; a change that needs a component file opened means the palette layer is broken.",
+        "section": "colors"
+      },
+      {
+        "name": "The State Colour Rule",
+        "body": "Hue means state. A colour used for decoration takes that meaning away from the state it stands for.",
+        "section": "colors"
+      },
+      {
+        "name": "The Flat Type Rule",
+        "body": "Text never glows. Emphasis comes from weight, size, case and role colour.",
+        "section": "typography"
+      },
+      {
+        "name": "The Two Lifts Rule",
+        "body": "Every panel samples to one of two surface values. A third value is a component painting its own surface.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Column Rule",
+        "body": "Every column in the front end resizes by dragging its header edge, with arrow keys on its grip; widths are saved in the shared page layout and clear with Reset layout. Only columns resize this way. A table the grips cannot reach fails its test."
+      },
+      {
+        "name": "The Fold Rule",
+        "body": "Only the Ledger tab's sections below Overview, the Swarm tab panels below Capacity, the outline categories and comment dropdowns fold. Nothing else does."
+      },
+      {
+        "name": "The Scroll Gutter Rule",
+        "body": "Scrolling content keeps max(.5%, 12px) between itself and its scrollbar."
+      }
     ],
     "dos": [
       "Do take every colour from a role token in palette.css.",

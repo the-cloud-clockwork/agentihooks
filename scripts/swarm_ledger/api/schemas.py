@@ -77,6 +77,7 @@ FIELDS = {
     "task_group": "by item members",
     "task_ungroup": "by item",
     "title_set": "text",
+    "overview_set": "text",
     "agent_rename": "by old new",
     "summary_set": "by note",
     "close": "by",

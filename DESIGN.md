@@ -2,7 +2,7 @@
 name: agentihooks ledger
 description: The operator's console for agentihooks swarms; ledger pages, HOME and BIN.
 colors:
-  canvas-ink: "#010104"
+  canvas-ink: "#050812"
   panel-navy: "#0d1424"
   accent-blue: "#3b82f6"
   link-blue: "#60a5fa"
@@ -15,10 +15,12 @@ colors:
   text-white: "#f8fafc"
   text-secondary: "#cbd5e1"
   muted-slate: "#9aa8bd"
-  surface-1: "rgba(255, 255, 255, .045)"
-  surface-2: "rgba(255, 255, 255, .06)"
-  hover-lift: "rgba(255, 255, 255, .08)"
-  edge: "rgba(255, 255, 255, .14)"
+  surface-1: "rgba(147, 197, 253, .05)"
+  surface-2: "rgba(147, 197, 253, .075)"
+  hover-lift: "#151c29"
+  rule: "#151c29"
+  edge: "#222f44"
+  grip: "#60a5fa"
 typography:
   title:
     fontFamily: "ui-monospace, 'JetBrains Mono', SFMono-Regular, Menlo, Consolas, monospace"
@@ -51,6 +53,7 @@ rounded:
   soft: "8px"
   fab: "12px"
 spacing:
+  scroll-gutter: "max(.5%, 12px)"
   xs: "4px"
   sm: "8px"
   md: "12px"
@@ -91,6 +94,15 @@ components:
     backgroundColor: "{colors.surface-1}"
     rounded: "{rounded.default}"
     padding: "16px 18px"
+  table-row:
+    textColor: "{colors.text-white}"
+    typography: "{typography.body}"
+    height: "34px"
+  column-grip:
+    backgroundColor: "{colors.grip}"
+    width: "8px"
+  overlay-row:
+    height: "36px"
 ---
 
 # Design System: agentihooks ledger
@@ -101,13 +113,13 @@ components:
 
 A dark, dense control surface for one operator watching many agents. The page is a record first: hairline-divided rows of monospaced text on a near-black canvas, with colour reserved for state. Structure follows the operator's design system 2026-001: bare labels instead of chips, frameless controls that show a surface only on hover, depth from two translucent lifts over a single canvas, and every colour in one palette file.
 
-Two operator decisions override 2026-001 here. First, **no glow**: no `text-shadow`, `drop-shadow` or halo `box-shadow` on text, icons or controls. Role colour, weight and size carry emphasis. Second, the canvas is near black (#010104) with no blue radial wash behind it.
+Two operator decisions override 2026-001 here. First, **no glow**: no `text-shadow`, `drop-shadow` or halo `box-shadow` on text, icons or controls. Role colour, weight and size carry emphasis. Second, the canvas is a deep blue black (#050812, operator decision 2026-10-12, replacing #010104) with no blue radial wash behind it.
 
 Density is high and calm. A ledger page holds dozens of panels and hundreds of rows and must stay readable after hours open.
 
 **Key Characteristics:**
 - Monospace everywhere, five sizes (22 / 14 / 13 / 12 / 11 px), uppercase tracked labels for section and column heads.
-- Near-black canvas, two white lifts (4.5% and 6%) for panels and wells, hairlines (6%) between rows.
+- Deep blue-black canvas (#050812), two light-blue lifts (5% and 7.5%) for panels and wells, steel hairlines between rows.
 - Colour is state: blue for action and links, green done or running, yellow paused or warning, red signal, destructive and open items.
 - Frameless controls; the hover lift is the only frame.
 - Flat: no shadows and no glow.
@@ -129,12 +141,14 @@ One blue accent family over a near-black canvas, with red as a structural signal
 - **Warn Yellow** (`--warn`, `--warn-2`): paused swarms, out-of-scope items, unsaved state.
 
 ### Neutral
-- **Canvas Ink** (`--canvas` → `--ink-950`, #010104): the page ground, the only opaque surface.
+- **Canvas Ink** (`--canvas` → `--ink-950`, #050812): the page ground, the only opaque surface.
 - **Panel Navy** (`--panel`, `--overlay`): floating panels (chat, notifications) under a backdrop blur.
 - **Text White** (`--text`): primary text, values.
 - **Secondary Text** (`--text-2`): body copy in lists, proof values.
 - **Muted Slate** (`--muted`, `--dim`): labels, column heads, timestamps, idle states.
-- **Surface 1 / Surface 2 / Hover / Rule / Edge**: white lifts at 4.5%, 6%, 8%, 6% and 14%.
+- **Surface 1 / Surface 2** (`--bay-050`, `--bay-075`): light-blue lifts at 5% and 7.5% on ledger pages; HOME keeps surface 1 transparent.
+- **Hover / Rule / Edge** (`--steel-100`, `--steel-100`, `--steel-200`): solid steel steps for the hover lift, row hairlines and edges.
+- **Grip** (`--grip` → `--blue-400`): the hairline shown on a resize grip under hover, drag or focus.
 
 ### Named Rules
 **The One File Rule.** A colour value appears only in `palette.css`. Changing a hue is one edit there; a change that needs a component file opened means the palette layer is broken.
@@ -160,6 +174,17 @@ One blue accent family over a near-black canvas, with red as a structural signal
 ## Layout
 
 The ledger page is a three-column desktop layout at 1920 width: a fixed outline on the left (280px), the main column of folding sections (max 1802px overall), and a sidebar of Stats and the swarm panel that scrolls on its own. Floating action buttons (sync, top, bell, home, chat) sit in the corners at 16px from the edge. Breakpoints at 1599, 1279, 1023 and 600px drop the sidebar and outline into the flow. HOME is a full-width hairline table on a fixed column grid: ledger, kind, overview, open, done, swarm, activity, actions. Spacing steps are 4, 8, 12, 16 and 32px; panels pad 16–18px, rows 6–12px.
+
+**Scroll gutter (operator decision 2026-10-12).** Content never touches a scrollbar. The main column keeps `max(.5%, 12px)` and the Stats column `max(.5%, 8px)` of padding between its content and its scrollbar, on the Ledger and Swarm tabs alike.
+
+### Swarm tab
+- **Control bar.** Left: swarm name, state and tick. Right: the controls row (start, pause, stop, stop now, close ledger, autonomy modes, reset layout), and under it, right aligned, the Doctor row in this order: DOCTOR, last check, findings, start doctor or stop doctor (red), the on or off dot, the Doctor state (a link to its ledger when running). The Doctor row is always visible; with no Doctor it reads `last check —`, `findings —`, `not running`. There is no Doctor side panel.
+- **Status line.** The line under the control bar shows failures only ("Could not … Try again or ask the master."). Progress notes such as "sending", "pending, waiting for the hive tick" or "acknowledged" never show, and there is no Commands log.
+- **Capacity.** Two strips: the caps (eng, ci, plan, compact limit, effort min, effort max), then Claude model, Codex model, master affinity and apply together on their own strip. Gates follow.
+- **Panels.** Below Capacity, full width, in this order: Quota, Overlays, Agents, Health, Handoff outcomes, Freezes. Each folds on its header and keeps a drag height grip; a folded panel shrinks to its header. Reset layout restores sizes; the order is fixed. The Quota panel has no capacity line under its table and lists only accounts read within 15 minutes of the newest reading.
+
+### Stats
+Rows from Started to Last activity, then Top bottleneck last, as a bullet list (stage, trend, measured, last action).
 
 ## Elevation & Depth
 
@@ -198,6 +223,30 @@ Small, quiet radii: 4px for inline controls, checkboxes and code, 6px for panels
 - **Border:** none; hairlines divide items inside.
 - **Head:** a fold summary in 12px uppercase tracked bold with a red 2px tick underline when open.
 
+### Folding (operator rule 2026-10-12)
+- Only four things fold, each remembering its choice per viewer: the Ledger tab's sections below Overview, the Swarm tab panels below Capacity, the outline categories (with Expand all / Collapse all) and comment dropdowns (with Show all / Hide all comments).
+- Nothing else folds: Overview, Stats, the chat, artifacts, alerts and notifications windows, the Swarm control bar and Capacity, HOME and BIN. A fold anywhere else fails its test.
+- A button inside a fold header (quota refresh, overlays apply) acts without folding its panel.
+
+### Overview
+- A muted 11px uppercase OVERVIEW label with a pen beside it. The pen opens an inset textarea with Save and Cancel; Ctrl+Enter saves, Esc cancels. Saving sends `overview_set`, an operator-only operation recorded as "overview changed".
+
+### Tables
+- **Columns resize (operator rule 2026-10-12, cannot be broken).** Every column in the front end resizes by dragging its header's right edge: every table on the ledger page and the HOME and BIN columns. An 8px grip shows a 1px `--grip` hairline on hover, drag or keyboard focus; arrow keys move it 16px (Shift ×4). Only columns resize this way. Widths are saved in the shared page layout (`/api/layout`, `columns` per table) beside the panel sizes, apply to every ledger page, and clear with Reset layout. A table the grips cannot reach fails its test.
+- **Distribution.** Columns share the width in proportion (fixed layout on desktop) instead of one column taking everything and the rest crowding the right edge. Values sit left aligned under their heads.
+- **Overflow.** A cell that does not fit ends in an ellipsis and shows its full text on hover; ids (`.sw-id`) ellipsize inside a narrowed column. Tables never scroll sideways at 1920.
+- **Row actions** (end focus, unfreeze) use the row's own type: 13px, weight 400, on the row's baseline, never the 11px uppercase button style.
+
+### Overlays
+- One row per role, all 36px high, role names in a 12ch column and overlay names or "no overlay in the bundle wears this role" in one text column.
+- Apply sits in the panel header after the count and appears only when an overlay change is pending.
+
+### Freeze marks
+- A snowflake marks a frozen or held item. On a plan row it sits inside the header between the fold arrow and the title; it never floats outside its panel.
+
+### Outline marks
+- An outline entry with a pending notification carries a `+` placed against its own link, section headers included.
+
 ### Labels and states
 - **Style:** bare uppercase text in its role colour, optionally led by a 6px status dot. No chip, no capsule, no glow.
 
@@ -213,7 +262,9 @@ Small, quiet radii: 4px for inline controls, checkboxes and code, 6px for panels
 - **Do** take every colour from a role token in `palette.css`.
 - **Do** carry status with role colour and an optional status dot.
 - **Do** keep controls frameless at rest and show the hover lift on hover and focus.
-- **Do** keep every section foldable, remembering its state per viewer.
+- **Do** fold only Ledger sections, Swarm panels below Capacity, outline categories and comments, remembering each choice per viewer.
+- **Do** give every table column a resize grip whose width is saved in the shared layout.
+- **Do** keep a gutter between scrolling content and its scrollbar.
 - **Do** keep a visible `focus-visible` ring on every control.
 
 ### Don't:
@@ -222,3 +273,6 @@ Small, quiet radii: 4px for inline controls, checkboxes and code, 6px for panels
 - **Don't** wrap labels in chips, badges or pills.
 - **Don't** add a third surface level; reach for a hairline instead.
 - **Don't** write a colour literal outside `palette.css`.
+- **Don't** show progress or acknowledgement chatter under the Swarm control bar; failures only.
+- **Don't** let one table column take the width while the rest crowd the right edge.
+- **Don't** add a fold to Overview, Stats, side windows, the control bar, Capacity, HOME or BIN.

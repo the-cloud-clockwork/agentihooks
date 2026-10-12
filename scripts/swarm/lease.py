@@ -1,5 +1,6 @@
 import json
 import os
+import socket
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -55,6 +56,9 @@ def current(store: RedisStore, slug: str) -> Lease | None:
 def acquire(store: RedisStore, slug: str, owner: str) -> Lease | None:
     from redis.exceptions import WatchError
 
+    from scripts.swarm.commands import hive_id
+
+    hostname = socket.gethostname() if owner == hive_id() else owner
     key, epochs = store.key(slug, "control-owner"), store.key(slug, "control-epoch")
     while True:
         with store.redis.pipeline() as pipe:
@@ -63,12 +67,12 @@ def acquire(store: RedisStore, slug: str, owner: str) -> Lease | None:
                 raw, at = pipe.get(key), now_ms(store)
                 held = Lease(**json.loads(raw)) if raw and raw.startswith("{") else None
                 if held and held.expires_at > at:
-                    if held.owner != owner:
+                    if held.owner not in (owner, hostname):
                         return None
                     epoch, keeper = held.epoch, owner
                 else:
                     epoch = int(pipe.get(epochs) or 0) + 1
-                    keeper = raw if raw and held is None else owner
+                    keeper = raw if raw and held is None and raw != hostname else owner
                 ttl = ttl_ms()
                 renewed = Lease(keeper, epoch, at + ttl)
                 pipe.multi()

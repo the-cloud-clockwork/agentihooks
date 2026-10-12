@@ -56,7 +56,10 @@ def test_apply_sends_changed_models_and_xhigh_in_one_body(open_page):
     page.tab.locator('[data-swarm="effort_max_up"]').click()
     expect(page.tab.locator("#cap-effort_max")).to_have_value("xhigh")
     page.tab.locator('[data-swarm="apply"]').click()
-    expect(page.tab.locator("#swarm-note")).to_contain_text("pending")
+    for _ in range(100):
+        if page.puts:
+            break
+        page.tab.wait_for_timeout(100)
     assert page.puts == [
         {"action": "set", "effort_max": "xhigh", "claude_model": "future-claude", "codex_model": "future-sol"}
     ]

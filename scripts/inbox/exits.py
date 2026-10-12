@@ -204,7 +204,7 @@ def _settle_peer_mail(inbox: "InboxStore", slug: str, store: "RedisStore", activ
 
 def _settle_unfillable(inbox: "InboxStore", config, seats: set) -> None:
     for seat in sorted(seats):
-        why = _no_successor(seat, config)
+        why = no_successor(seat, config)
         if not why:
             continue
         for item in inbox.open_items(seat):
@@ -229,7 +229,7 @@ def _withdraw_escalations(inbox: "InboxStore", item_id: str, seat: str) -> None:
             inbox.withdraw(raised, BY, f"cancelled: message {item_id} is closed, {seat} can get no successor")
 
 
-def _no_successor(seat: str, config) -> str:
+def no_successor(seat: str, config) -> str:
     found = LANE_SEAT.fullmatch(seat)
     if not found:
         return ""

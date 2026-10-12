@@ -66,6 +66,78 @@ function applyLayout(next) {
     }
   }
   $("layout-reset").disabled = !Object.keys(layout).length;
+  applyColumns();
+}
+
+const COLUMN_MIN = 40;
+const COLUMN_STEP = 16;
+
+function columnKey(table) {
+  return `${table.id}-${table.tHead.rows[0].cells.length}`;
+}
+
+function columnHeads(table) {
+  return [...table.tHead.rows[0].cells];
+}
+
+export function applyColumns() {
+  const saved = layout.columns || {};
+  for (const table of document.querySelectorAll("table.sw-table[id]")) {
+    const heads = columnHeads(table), widths = saved[columnKey(table)];
+    heads.forEach((th, i) => {
+      if (i < heads.length - 1 && !th.querySelector(":scope > .col-grip")) th.append(columnGrip(th));
+    });
+    const sized = Array.isArray(widths) && widths.length === heads.length;
+    table.classList.toggle("sized-cols", sized);
+    heads.forEach((th, i) => { th.style.width = sized ? `${widths[i]}px` : ""; });
+    table.style.width = sized ? `${widths.reduce((a, b) => a + b, 0)}px` : "";
+  }
+}
+
+function columnGrip(th) {
+  const grip = document.createElement("span");
+  grip.className = "col-grip";
+  grip.tabIndex = 0;
+  grip.setAttribute("role", "separator");
+  grip.setAttribute("aria-orientation", "vertical");
+  grip.setAttribute("aria-label", `Resize the ${th.textContent.trim() || "column"} column`);
+  return grip;
+}
+
+function setColumns(table, widths) {
+  setLayout({ ...layout, columns: { ...(layout.columns || {}), [columnKey(table)]: widths.map((w) => Math.round(w)) } });
+}
+
+function measured(table) {
+  return columnHeads(table).map((th) => th.getBoundingClientRect().width);
+}
+
+function wireColumns() {
+  document.addEventListener("pointerdown", (ev) => {
+    const grip = ev.target.closest(".col-grip");
+    if (!grip || ev.button !== 0) return;
+    ev.preventDefault();
+    const th = grip.parentElement, table = th.closest("table"), index = th.cellIndex, start = measured(table), x0 = ev.clientX;
+    grip.setPointerCapture(ev.pointerId);
+    grip.classList.add("dragging");
+    document.body.classList.add("resizing-x");
+    const move = (e) => setColumns(table, start.map((w, i) => (i === index ? Math.max(COLUMN_MIN, w + e.clientX - x0) : w)));
+    grip.addEventListener("pointermove", move);
+    grip.addEventListener("lostpointercapture", () => {
+      grip.removeEventListener("pointermove", move);
+      grip.classList.remove("dragging");
+      document.body.classList.remove("resizing-x");
+    }, { once: true });
+  });
+  document.addEventListener("keydown", (ev) => {
+    const grip = ev.target.closest && ev.target.closest(".col-grip");
+    const step = grip && { ArrowLeft: -COLUMN_STEP, ArrowRight: COLUMN_STEP }[ev.key];
+    if (!step) return;
+    ev.preventDefault();
+    const table = grip.closest("table"), index = grip.parentElement.cellIndex;
+    setColumns(table, measured(table).map((w, i) => (i === index ? Math.max(COLUMN_MIN, w + step * (ev.shiftKey ? 4 : 1)) : w)));
+  });
+  document.addEventListener("columns", applyColumns);
 }
 
 function mirrorLayout() {
@@ -128,6 +200,7 @@ function wireGrip(grip) {
 export function startLayout() {
   applyLayout(stored(LAYOUT_KEY, {}));
   for (const grip of document.querySelectorAll("#swarm-box [data-grip]")) wireGrip(grip);
+  wireColumns();
   $("layout-reset").addEventListener("click", () => setLayout({}, 0));
   readLayout()
     .then((resp) => (resp.ok ? resp.json() : null))

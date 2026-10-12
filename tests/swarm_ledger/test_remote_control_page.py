@@ -13,7 +13,9 @@ pytestmark = pytest.mark.xdist_group("fakeredis")
 __all__ = ["browser", "remote_server"]
 
 
-def test_page_keeps_pending_and_acknowledged_control_states(remote_server, monkeypatch, tmp_path, browser):
+def test_page_shows_no_note_text_for_pending_or_acknowledged_control_states(
+    remote_server, monkeypatch, tmp_path, browser
+):
     saved, request, url = remote_server
     ledger = FakeLedger([])
     command_runner.publish(saved, "sw", ledger.state("sw"))
@@ -26,12 +28,11 @@ def test_page_keeps_pending_and_acknowledged_control_states(remote_server, monke
         page.on("pageerror", lambda error: errors.append(str(error)))
         page.goto(url + "/sw#swarm")
         page.locator('[data-swarm="pause"]').click()
-        expect(page.locator("#swarm-note")).to_have_text("Pause: pending, waiting for the hive tick")
-        page.locator("#command-log summary").click()
+        expect(page.locator("#swarm-note")).to_have_text("")
         page.screenshot(path=str(tmp_path / "pending.png"))
         assert request("GET")["commands"][0]["state"] == "pending"
         cli.run_tick(saved, "sw", ledger, FakeRuntime(), FakeHerdr({}))
         page.reload()
-        expect(page.locator("#swarm-note")).to_have_text("Pause: acknowledged")
+        expect(page.locator("#swarm-note")).to_have_text("")
         page.screenshot(path=str(tmp_path / "acknowledged.png"))
         assert errors == []
