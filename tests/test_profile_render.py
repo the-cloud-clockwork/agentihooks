@@ -2516,6 +2516,13 @@ def overlays(world, tmp_path, monkeypatch):
     return profiles
 
 
+@pytest.fixture
+def recorded_assets(world, overlays, tmp_path, monkeypatch):
+    features = tmp_path / "package-features"
+    features.mkdir()
+    monkeypatch.setattr(world["install"], "PACKAGE_FEATURES_DIR", features)
+
+
 def test_overlays_follow_the_role_chain_and_the_always_on_overlays(world, overlays, named_brain):
     from scripts.profiles import render
 
@@ -2680,6 +2687,7 @@ def test_cli_renders_the_overlays_named(world, overlays, capsys):
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
+@pytest.mark.usefixtures("recorded_assets")
 def test_an_overlay_render_uses_the_recorded_commit_after_the_bundle_advances(world, overlays, target):
     from scripts.profiles import bundle_copy, render
 
@@ -2707,6 +2715,7 @@ def test_an_overlay_render_uses_the_recorded_commit_after_the_bundle_advances(wo
     assert not list(render.rendered_root().glob("bundle-*"))
 
 
+@pytest.mark.usefixtures("recorded_assets")
 def test_an_overlay_render_ignores_uncommitted_bundle_changes(world, overlays):
     from scripts.profiles import render
 
@@ -2724,6 +2733,7 @@ def test_an_overlay_render_ignores_uncommitted_bundle_changes(world, overlays):
     assert world["install"]._get_bundle_path() == world["bundle"]
 
 
+@pytest.mark.usefixtures("recorded_assets")
 def test_an_overlay_render_refuses_a_recorded_commit_without_a_linked_bundle(world, overlays, monkeypatch):
     from scripts.profiles import render
 
@@ -2735,6 +2745,7 @@ def test_an_overlay_render_refuses_a_recorded_commit_without_a_linked_bundle(wor
     assert str(refused.value) == "the launch recorded bundle commit abc123, but no bundle is linked"
 
 
+@pytest.mark.usefixtures("recorded_assets")
 def test_an_overlay_render_refuses_a_bundle_git_cannot_read(world, overlays, monkeypatch, tmp_path):
     from scripts.profiles import render
 
@@ -2750,6 +2761,7 @@ def test_an_overlay_render_refuses_a_bundle_git_cannot_read(world, overlays, mon
     )
 
 
+@pytest.mark.usefixtures("recorded_assets")
 def test_an_overlay_render_refuses_a_bundle_git_does_not_answer(world, overlays, monkeypatch):
     from scripts.profiles import render
 
@@ -2768,6 +2780,7 @@ def test_an_overlay_render_refuses_a_bundle_git_does_not_answer(world, overlays,
     )
 
 
+@pytest.mark.usefixtures("recorded_assets")
 def test_an_unavailable_recorded_commit_does_not_publish_a_home(world, overlays):
     from scripts.profiles import bundle_copy, render
 
@@ -2780,6 +2793,7 @@ def test_an_unavailable_recorded_commit_does_not_publish_a_home(world, overlays)
     assert world["install"]._get_bundle_path() == world["bundle"]
 
 
+@pytest.mark.usefixtures("recorded_assets")
 def test_an_overlay_render_from_the_recorded_commit_renders_and_stamps_it(world, overlays):
     from scripts.profiles import render
 
@@ -2792,6 +2806,7 @@ def test_an_overlay_render_from_the_recorded_commit_renders_and_stamps_it(world,
     assert render.render("claude", "rb-eng", overlays=["ov-a"], bundle_revision=recorded) is None
 
 
+@pytest.mark.usefixtures("recorded_assets")
 def test_pinned_codex_rebuild_keeps_bundle_links_in_its_new_home(world, overlays):
     from scripts.profiles import bundle_copy, render
 
@@ -2813,6 +2828,7 @@ def test_pinned_codex_rebuild_keeps_bundle_links_in_its_new_home(world, overlays
     assert render.render("codex", "rb-eng", overlays=["ov-a"], bundle_revision=recorded) is None
 
 
+@pytest.mark.usefixtures("recorded_assets")
 def test_pinned_render_replaces_a_dirty_retained_bundle_copy(world, overlays):
     from scripts.profiles import bundle_copy, render
 
@@ -2830,6 +2846,7 @@ def test_pinned_render_replaces_a_dirty_retained_bundle_copy(world, overlays):
     assert bundle_copy.current() is None
 
 
+@pytest.mark.usefixtures("recorded_assets")
 def test_pinned_render_preserves_bundle_symlinks(world, overlays):
     from scripts.profiles import bundle_copy, render
 
@@ -2847,6 +2864,7 @@ def test_pinned_render_preserves_bundle_symlinks(world, overlays):
     assert bundle_copy.current() is None
 
 
+@pytest.mark.usefixtures("recorded_assets")
 def test_pinned_render_repairs_a_home_missing_its_bundle_copy(world, overlays):
     from scripts.profiles import bundle_copy, render
 
@@ -2863,6 +2881,7 @@ def test_pinned_render_repairs_a_home_missing_its_bundle_copy(world, overlays):
 
 @pytest.mark.parametrize("failure", ["returncode", "timeout"])
 @pytest.mark.parametrize("operation", ["rev-parse", "status"])
+@pytest.mark.usefixtures("recorded_assets")
 def test_pinned_cache_git_errors_report_the_recorded_bundle(world, overlays, monkeypatch, failure, operation):
     from scripts.profiles import bundle_copy, render
 
@@ -2893,6 +2912,7 @@ def test_pinned_cache_git_errors_report_the_recorded_bundle(world, overlays, mon
     assert bundle_copy.current() is None
 
 
+@pytest.mark.usefixtures("recorded_assets")
 def test_pinned_copilot_rebuild_keeps_the_recorded_overlay_servers(world, overlays, monkeypatch):
     from scripts.profiles import bundle_copy, render
 
