@@ -100,6 +100,46 @@ plant_network 'the controller API policy does not admit {"namespaceSelector": {"
 plant_network 'the ledger policy does not admit {"ipBlock": {"cidr": "10.10.30.0/24"}}' \
   --set-json 'networkPolicy.ingressFrom=[]'
 printf 'the chart check flagged planted controller API and ledger peers that differ from their values\n'
+hive_join=(-f "$chart/ci/kind-hive-join.yaml")
+hive_values=("$chart/values.yaml" "$chart/ci/kind-hive-join.yaml")
+helm template "$release" "$chart" | python3 tests/chart_hive_join.py "$release" "$chart/values.yaml"
+helm template "$release" "$chart" "${hive_join[@]}" | python3 tests/chart_hive_join.py "$release" "${hive_values[@]}"
+helm template "$release" "$chart" "${hive_join[@]}" | python3 tests/chart_hive_join.py --self-test "$release" "${hive_values[@]}"
+plant_hive_join() {
+  local expected=$1 planted
+  shift
+  planted="$(helm template "$release" "$chart" "${hive_join[@]}" "$@" \
+    | python3 tests/chart_hive_join.py "$release" "${hive_values[@]}" 2>&1 >/dev/null || true)"
+  if [[ $planted != *"$expected"* ]]; then
+    printf 'the chart check did not flag planted hive join fault %s with "%s": %s\n' "$*" "$expected" "$planted" >&2
+    exit 1
+  fi
+}
+plant_hive_join 'the hive join policy admits {"ipBlock": {"cidr": "0.0.0.0/0"}} beyond its peers' \
+  --set-json 'hive.join.ingressFrom=[{"ipBlock":{"cidr":"10.10.30.0/24"}},{"ipBlock":{"cidr":"0.0.0.0/0"}}]'
+plant_hive_join 'the hive join command is' --set hive.join.memberRedisUrl=rediss://elsewhere.test:6379/0
+plant_hive_join 'the hive join Service ports are' --set hive.join.port=8771
+plant_hive_join 'the hive join volumes are' --set hive.join.tlsSecretName=other-tls
+plant_hive_join 'the hive join env is' --set hive.join.redisSecret.name=swarm-redis
+plant_hive_join 'the hive join tolerations are' --set-json 'hive.join.tolerations=[{"operator":"Exists"}]'
+planted="$(helm template "$release" "$chart" | python3 tests/chart_hive_join.py "$release" "${hive_values[@]}" 2>&1 >/dev/null || true)"
+if [[ $planted != *"the chart renders no hive join Deployment"* ]]; then
+  printf 'the chart check did not flag a missing hive join service: %s\n' "$planted" >&2
+  exit 1
+fi
+for setting in 'hive.join.tlsSecretName=' 'hive.join.memberRedisUrl=' 'hive.join.memberRedisUrl=rediss://hive@swarm.example.test:6379/0'; do
+  refusal="$(helm template "$release" "$chart" "${hive_join[@]}" --set "$setting" 2>&1 >/dev/null || true)"
+  if [[ $refusal != *"hive.join"* ]]; then
+    printf 'the chart rendered the hive join service with %s: %s\n' "$setting" "$refusal" >&2
+    exit 1
+  fi
+done
+refusal="$(helm template "$release" "$chart" "${hive_join[@]}" --set-json 'hive.join.ingressFrom=[]' 2>&1 >/dev/null || true)"
+if [[ $refusal != *"hive.join.ingressFrom"* ]]; then
+  printf 'the chart rendered the hive join service with no ingress peers: %s\n' "$refusal" >&2
+  exit 1
+fi
+printf 'the chart check flagged planted hive join faults and the chart refused incomplete hive join settings\n'
 workers=(-f "$chart/ci/kind-workers.yaml")
 helm template "$release" "$chart" "${workers[@]}" "${api[@]}" | python3 tests/chart_workers.py "$chart/ci/kind-workers.yaml"
 secrets+=("${workers[@]}" "${api[@]}")
