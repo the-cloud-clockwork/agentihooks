@@ -36,9 +36,10 @@ def _route(host: str, port: int, lookup: Lookup | None) -> None:
 
 
 def private_url(environ: Mapping[str, str], lookup: Lookup | None = None) -> str:
-    url = next((environ[name] for name in URL_ENVS if environ.get(name)), "")
-    if not url:
+    urls = [environ[name] for name in URL_ENVS if environ.get(name)]
+    if not urls:
         raise TransportRefused(f"the publication transport needs {' or '.join(URL_ENVS)}")
+    url = urls[0]
     parts = urlsplit(url)
     if parts.scheme != SCHEME:
         raise TransportRefused(f"the publication transport uses {SCHEME} only, not {parts.scheme}")

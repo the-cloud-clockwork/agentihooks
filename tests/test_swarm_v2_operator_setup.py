@@ -1,3 +1,4 @@
+import argparse
 import base64
 import hashlib
 import io
@@ -344,6 +345,72 @@ def test_install_writes_and_enables_the_timer(tmp_path):
 
 def test_install_reports_a_failed_enable(tmp_path):
     assert operator_setup.install("/opt/bin/agentihooks", tmp_path, Systemctl(code=1)) is False
+
+
+def test_install_defaults_to_the_agentihooks_executable_and_user_units(tmp_path, monkeypatch):
+    looked_up = []
+    monkeypatch.setattr(operator_setup.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(operator_setup.shutil, "which", lambda name: looked_up.append(name) or "/opt/bin/agentihooks")
+
+    assert operator_setup.install(run=Systemctl()) is True
+
+    units = tmp_path / ".config" / "systemd" / "user"
+    assert looked_up == ["agentihooks"]
+    assert sorted(path.name for path in units.iterdir()) == [
+        "agentihooks-swarm-terminal.service",
+        "agentihooks-swarm-terminal.timer",
+    ]
+    assert (units / "agentihooks-swarm-terminal.service").read_text() == operator_setup.unit("/opt/bin/agentihooks")
+
+
+def test_parser_names_the_command_and_its_subcommands():
+    parser = operator_setup._parser()
+    sub = next(action for action in parser._actions if isinstance(action, argparse._SubParsersAction))
+    setup = sub.choices["setup"]
+    antoncore = next(action for action in setup._actions if action.dest == "antoncore")
+
+    assert (parser.prog, parser.description) == ("agentihooks swarm-terminal", "Operator terminal attach setup")
+    assert (sub.dest, sub.required) == ("command", True)
+    assert [(choice.dest, choice.help) for choice in sub._choices_actions] == [
+        ("setup", "Place the terminal user CA key and the Pod policy from their sources"),
+        ("install", "Write and enable the user timer that runs setup"),
+    ]
+    assert (antoncore.option_strings, antoncore.help) == (
+        ["--antoncore"],
+        "antoncore checkout; defaults to AGENTIHOOKS_ANTONCORE_DIR",
+    )
+    with pytest.raises(SystemExit), redirect_stderr(io.StringIO()):
+        parser.parse_args([])
+
+
+@pytest.mark.parametrize("from_env", [True, False])
+def test_setup_command_defaults_its_home(tmp_path, monkeypatch, from_env):
+    monkeypatch.setattr(
+        openbao_kv.urllib.request, "urlopen", Bao({"user_ca": ssh_private(Ed25519PrivateKey.generate())})
+    )
+    monkeypatch.setattr(operator_setup.Path, "home", lambda: tmp_path / "user")
+    environ = {
+        "OPENBAO_URL": BAO_URL,
+        "OPENBAO_TOKEN": "fixture-token",
+        "AGENTIHOOKS_ANTONCORE_DIR": str(antoncore(tmp_path)),
+    }
+    if from_env:
+        environ["AGENTIHOOKS_HOME"] = str(tmp_path / "custom")
+    root = tmp_path / "custom" if from_env else tmp_path / "user" / ".agentihooks"
+
+    code, out, _ = run_main(["setup"], environ, Who(), None)
+
+    assert code == 0
+    assert json.loads(out)["ca_key"] == str(root / "swarm-terminal" / "user_ca")
+
+
+def test_settings_keep_an_equals_sign_in_a_path(tmp_path):
+    home = tmp_path / "a=b" / "home"
+    operator_setup.place(
+        home, Bao({"user_ca": ssh_private(Ed25519PrivateKey.generate())}).client(), antoncore(tmp_path)
+    )
+
+    assert operator_setup.settings(home)["AGENTIHOOKS_TERMINAL_CA_KEY"] == str(home / "swarm-terminal" / "user_ca")
 
 
 @pytest.mark.parametrize(

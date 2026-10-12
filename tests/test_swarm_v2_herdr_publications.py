@@ -150,6 +150,17 @@ def test_connect_refuses_before_opening_an_insecure_url():
     assert factory.calls == []
 
 
+def test_connect_and_host_keys_resolve_through_the_given_lookup():
+    factory = Factory()
+    public = lookup_of("8.8.8.8")
+
+    for open_ in (publications.connect, publications.host_keys):
+        with pytest.raises(TransportRefused) as refused:
+            open_(hive(URL), public, factory)
+        assert str(refused.value) == f"{HOST} resolves outside the private network"
+    assert factory.calls == []
+
+
 def test_connect_names_a_refused_connection_without_its_credential():
     import redis
 

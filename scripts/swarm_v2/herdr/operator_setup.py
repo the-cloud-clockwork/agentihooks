@@ -63,7 +63,7 @@ def _stage(path: Path, data: bytes) -> Path:
 
 def _fingerprint(public: str) -> str:
     digest = hashlib.sha256(base64.b64decode(public.split()[1])).digest()
-    return "SHA256:" + base64.b64encode(digest).decode().rstrip("=")
+    return "SHA256:" + base64.b64encode(digest).decode().removesuffix("=")
 
 
 def place_ca_key(placement: Placement, bao: openbao_kv.OpenBao) -> str:
@@ -163,14 +163,12 @@ def install(binary: str | None = None, unit_dir: Path | None = None, run: Callab
         raise SetupRefused("the agentihooks executable is not on PATH")
     unit_dir = unit_dir or Path.home() / ".config" / "systemd" / "user"
     unit_dir.mkdir(parents=True, exist_ok=True)
-    changed = False
-    for name, text in ((UNIT, unit(binary)), (TIMER, timer())):
-        path = unit_dir / name
-        if not path.exists() or path.read_text() != text:
-            _stage(path, text.encode()).replace(path)
-            changed = True
+    wanted = ((unit_dir / UNIT, unit(binary)), (unit_dir / TIMER, timer()))
+    stale = [(path, text) for path, text in wanted if not path.exists() or path.read_text() != text]
+    for path, text in stale:
+        _stage(path, text.encode()).replace(path)
     try:
-        if changed:
+        if stale:
             run(["systemctl", "--user", "daemon-reload"], capture_output=True, text=True, timeout=30, check=True)
         result = run(["systemctl", "--user", "enable", "--now", TIMER], capture_output=True, text=True, timeout=30)
     except (OSError, subprocess.SubprocessError) as error:
