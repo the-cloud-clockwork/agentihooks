@@ -200,3 +200,113 @@ def test_followup_escalation_reaches_the_hive_owner(world):
     assert all(item.address == cases.SECOND for item in received)
     assert "still open fifteen minutes" in received[1].text
     assert ledger_events.event_pass(inbox, world.store, cases.SLUG, doc, None, now) == []
+
+
+@pytest.mark.parametrize("repeat", range(2))
+def test_two_hives_steer_separate_phases_and_coordinate_privately(world, repeat):
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import operator_mail
+    from scripts.swarm_v2 import masters
+    from scripts.swarm_v2.masters_channel import MastersChannel
+
+    agents = world.store.agents(cases.SLUG)
+    assert {(a.seat, a.hive) for a in agents} == {(cases.LEAD, "local"), (cases.SECOND, "anton")}
+    assert world.set_task(world.lead_name, "t1")["accepted"]
+    assert not world.set_task(world.lead_name, "t2")["accepted"]
+    assert world.set_task(world.second_name, "t2")["accepted"]
+    channel = MastersChannel(world.redis)
+    channel.post(cases.SLUG, world.lead_name, "Local phase ready", repeat)
+    channel.post(cases.SLUG, world.second_name, "Anton phase ready", repeat)
+    for name in (world.lead_name, world.second_name):
+        texts = [post.text for post in channel.unread(cases.SLUG, name)]
+        assert texts[-2:] == ["Local phase ready", "Anton phase ready"]
+        assert channel.unread(cases.SLUG, name) == []
+    with pytest.raises(masters.MasterError):
+        channel.read(cases.SLUG, cases.ENGINEER)
+    inbox = InboxStore(world.redis)
+    event = {
+        "rev": 900,
+        "at": 1000,
+        "by": "operator",
+        "kind": "chat added",
+        "target": "chat",
+        "id": "chat",
+        "text": "Status",
+    }
+    sent = operator_mail.relay(inbox, world.store, cases.SLUG, world.doc(), [event], lambda e: e["text"])
+    assert [item.address for item in sent] == [cases.LEAD]
+    assert operator_mail.relay(inbox, world.store, cases.SLUG, world.doc(), [event], lambda e: e["text"]) == []
+    assert inbox.mailbox(world.second_name) == []
+
+
+@pytest.mark.parametrize("repeat", range(2))
+def test_hive_item_delivery_race_has_one_handler(world, repeat):
+    import threading
+
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import ledger_events
+
+    inbox = InboxStore(world.redis)
+    ledger_events.event_pass(inbox, world.store, cases.SLUG, world.doc(), None, 0)
+    add(world, "questions")
+    doc = world.doc()
+    ledger_events.event_pass(inbox, world.store, cases.SLUG, doc, None, 0)
+    item = inbox.mailbox(world.second_name)[0]
+    ready, results = threading.Barrier(2), []
+
+    def deliver():
+        ready.wait()
+        results.append(InboxStore(world.redis).deliver(item.id, world.second_name))
+
+    threads = [threading.Thread(target=deliver) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert len([result for result in results if result is not None]) == 1
+    assert inbox.deliver(item.id, world.lead_name) is None
+    answer = {
+        "op": "answer",
+        "id": f"answer-{repeat}",
+        "by": world.second_name,
+        "item": "questions/targeted",
+        "text": "Proceed",
+    }
+    assert world.write(answer)["accepted"]
+    assert world.write(answer)["accepted"]
+    question = next(q for q in world.doc()["questions"] if q["id"] == "targeted")
+    assert len(question["answers"]) == 1
+    assert ledger_events.event_pass(inbox, world.store, cases.SLUG, world.doc(), None, 0) == []
+
+
+@pytest.mark.parametrize("repeat", range(2))
+def test_hive_master_successor_keeps_items_decisions_and_channel_cursor(world, repeat):
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import ledger_events
+    from scripts.swarm.store import MASTER, AgentRecord
+    from scripts.swarm_v2.masters_channel import MastersChannel
+
+    inbox = InboxStore(world.redis)
+    ledger_events.event_pass(inbox, world.store, cases.SLUG, world.doc(), None, 0)
+    add(world, "questions")
+    ledger_events.event_pass(inbox, world.store, cases.SLUG, world.doc(), None, 0)
+    channel = MastersChannel(world.redis)
+    channel.post(cases.SLUG, world.lead_name, "Capacity ready", repeat)
+    assert len(channel.unread(cases.SLUG, world.second_name)) == 1
+    old = next(a for a in world.store.agents(cases.SLUG) if a.name == world.second_name)
+    world.down(world.second_name)
+    successor = world.store.next_name(cases.SLUG, MASTER)
+    world.store.start_execution(
+        cases.SLUG, AgentRecord(successor, MASTER, MASTER, seat=cases.SECOND, hive="anton"), old.execution_id
+    )
+    world.store.seats.occupy(cases.SECOND, successor, 2)
+    cases.core.sync(cases.SLUG, ops=[{"op": "join", "id": "join-successor", "by": successor, "role": "orchestrator"}])
+    assert channel.unread(cases.SLUG, successor) == []
+    item = InboxStore(world.redis).mailbox(successor)[0]
+    assert inbox.deliver(item.id, world.second_name) is None
+    assert inbox.deliver(item.id, successor).state == "delivered"
+    answer = {"op": "answer", "id": "answer", "by": successor, "item": "questions/targeted", "text": "Proceed"}
+    assert world.write(answer)["accepted"]
+    assert not world.write({**answer, "id": "former", "by": world.second_name})["accepted"]
+    assert len(next(q for q in world.doc()["questions"] if q["id"] == "targeted")["answers"]) == 1
+    assert len(channel.unread(cases.SLUG, successor)) == 1
