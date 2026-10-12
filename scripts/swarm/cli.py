@@ -302,8 +302,12 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             doc = timing.call(ledger.state, slug)
             return probed + controls + actions + ([f"took automatic snapshot {taken.name}"] if taken else [])
     finally:
+        failure = sys.exception()
         try:
             timing.call(command_runner.publish, store, slug, doc)
+        except Exception:
+            if failure is None:
+                raise
         finally:
             timing.BEFORE_STEP.reset(keeping)
             controller.release_tick_lock(store, slug, token)
