@@ -649,7 +649,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 #stats { margin: 0; }
 #stats .stat { grid-template-columns: 104px minmax(0, 1fr); }
 #stats .stat dt { position: relative; }
-.stat-grip { position: absolute; left: -15px; top: 50%; transform: translateY(-50%); padding: 0 2px; border: 0; border-radius: 4px; background: none; color: var(--dim); font: inherit; font-size: var(--fs-item); line-height: 1; letter-spacing: 0; cursor: grab; touch-action: none; }
+.stat-grip { position: absolute; left: -17px; top: 50%; transform: translateY(-50%); padding: 4px 3px; border: 0; border-radius: 4px; background: none; color: var(--dim); font: inherit; font-size: var(--fs-item); line-height: 1; letter-spacing: 0; cursor: grab; touch-action: none; }
 .stat-grip::before { content: "≡"; }
 .stat-grip:hover, .stat-grip:focus-visible { color: var(--text); outline: none; }
 .stat-grip:focus-visible { box-shadow: inset 0 -1px 0 var(--accent); }

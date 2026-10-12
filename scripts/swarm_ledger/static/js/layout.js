@@ -92,24 +92,31 @@ function wireStats() {
     if (!grip || ev.button !== 0) return;
     ev.preventDefault();
     const row = grip.closest(".stat");
-    grip.setPointerCapture(ev.pointerId);
     row.classList.add("dragging");
     document.body.classList.add("reordering");
     const move = (e) => {
-      const over = document.elementFromPoint(e.clientX, e.clientY);
-      const target = over && over.closest("#stats > .stat");
-      if (!row.isConnected || !target || target === row) return;
-      const box = target.getBoundingClientRect();
-      target.before(row);
-      if (e.clientY > box.top + box.height / 2) target.after(row);
+      if (e.pointerId !== ev.pointerId || !row.isConnected) return;
+      const target = [...box.children].find((other) => {
+        const at = other.getBoundingClientRect();
+        return other !== row && e.clientY >= at.top && e.clientY < at.bottom;
+      });
+      if (!target) return;
+      const at = target.getBoundingClientRect();
+      if (e.clientY < at.top + at.height / 2) target.before(row);
+      else target.after(row);
     };
-    grip.addEventListener("pointermove", move);
-    grip.addEventListener("lostpointercapture", () => {
-      grip.removeEventListener("pointermove", move);
+    const end = (e) => {
+      if (e.pointerId !== ev.pointerId) return;
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", end);
+      document.removeEventListener("pointercancel", end);
       row.classList.remove("dragging");
       document.body.classList.remove("reordering");
       saveStats();
-    }, { once: true });
+    };
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", end);
+    document.addEventListener("pointercancel", end);
   });
   box.addEventListener("keydown", (ev) => {
     const grip = ev.target.closest(".stat-grip"), row = grip && grip.closest(".stat");

@@ -57,3 +57,24 @@ def test_a_stat_row_moves_by_its_grip_and_the_order_is_saved_to_the_shared_layou
     assert saved and saved[-1]["stats"] == moved
     page.tab.evaluate("document.dispatchEvent(new Event('stats'))")
     assert keys(page) == moved
+
+
+def drag(page, key, to_key, fraction):
+    grip = page.tab.locator(f'#stats [data-stat="{key}"] .stat-grip').bounding_box()
+    target = page.tab.locator(f'#stats [data-stat="{to_key}"]').bounding_box()
+    x, y = grip["x"] + grip["width"] / 2, grip["y"] + grip["height"] / 2
+    page.tab.mouse.move(x, y)
+    page.tab.mouse.down()
+    for step in range(1, 13):
+        page.tab.mouse.move(x + step, y + (target["y"] + target["height"] * fraction - y) * step / 12)
+    page.tab.mouse.up()
+
+
+def test_a_mouse_drag_moves_a_stat_row_down_and_back_up(open_page):
+    page = open_page(width=1920)
+    page.context.route("**/api/layout", lambda route: route.fulfill(json={}))
+    before = keys(page)
+    drag(page, "elapsed", before[4], 0.75)
+    assert keys(page) == [before[0], *before[2:5], "elapsed", *before[5:]]
+    drag(page, "elapsed", "started", 0.25)
+    assert keys(page) == ["elapsed", "started", *before[2:]]
