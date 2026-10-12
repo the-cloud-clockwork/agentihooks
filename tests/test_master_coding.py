@@ -49,7 +49,7 @@ def test_other_seats_never_open_a_window(master, monkeypatch):
 def test_the_window_record_lives_under_the_agentihooks_home_by_a_safe_session_name(master, monkeypatch):
     assert master_coding.path("Ab/c d") == master / "ah" / "master_coding" / "Ab_c_d.json"
     monkeypatch.delenv("AGENTIHOOKS_HOME")
-    monkeypatch.setenv("HOME", str(master))
+    monkeypatch.setattr(Path, "home", lambda: master)
     assert master_coding.path("s") == master / ".agentihooks" / "master_coding" / "s.json"
 
 
