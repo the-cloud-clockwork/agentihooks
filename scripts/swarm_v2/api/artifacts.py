@@ -187,16 +187,6 @@ class ArtifactsAPI:
         if size is None or self._read(key, 0, size) != data:
             raise GrantRefused("operation_conflict", "committed artifact content is immutable")
 
-    def _references(self, scope: Registration) -> set[str]:
-        found = set()
-        for category in ("manifests", "pointers"):
-            prefix = f"{scope.swarm_id}/{scope.task_id}/{category}/"
-            for key in self.backend.keys(prefix):
-                document = json.loads(self._read(key, 0, self.backend.size(key)))
-                refs = document["artifacts"].values() if category == "manifests" else (document["manifest"],)
-                found.update(reference["sha256"] for reference in refs)
-        return found
-
     def _remove(self, key: str, scope: Registration, fence: Callable[[], None]) -> None:
         _staging(key, scope)
         fence()
