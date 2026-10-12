@@ -388,6 +388,51 @@ def test_escalation_goes_to_the_master_seat(inbox):
     assert item.id in raised.text
 
 
+@pytest.mark.parametrize("gone", ["absent", "exited"])
+def test_seat_mail_waits_for_the_successor_and_its_window_starts_at_binding(inbox, gone):
+    inbox.seats.occupy("eng-1@sw", "sw-eng-gone", at=1)
+    waiting = SEATED[1:]
+    if gone == "exited":
+        inbox.seats.record_exit("sw-eng-gone", "eng-1@sw", "handed off its seat")
+        waiting = [AgentRecord("sw-eng-gone", "eng", "t1", pane_id="pg", seat="eng-1@sw"), *waiting]
+    item = inbox.send("sw-eng-4", "eng-1@sw", "rebase please")
+    herdr, ledger = FakeHerdr({}), FakeLedger()
+    for n in range(1, 30):
+        run(inbox, herdr, ledger, sent_at(item) + n * W, waiting)
+    assert events(inbox, item.id) == [] and inbox.inbox("master@sw") == [] and ledger.followups == []
+    bound = sent_at(item) + 30 * W
+    inbox.seats.occupy("eng-1@sw", "sw-eng-1", at=bound)
+    run(inbox, herdr, ledger, bound + W - 1, SEATED)
+    assert events(inbox, item.id) == []
+    run(inbox, herdr, ledger, bound + W, SEATED)
+    assert events(inbox, item.id) == ["escalated_master"]
+
+
+def test_master_seat_mail_waits_for_the_next_master(inbox):
+    inbox.seats.occupy("master@sw", "sw-master-0", at=1)
+    item = inbox.send("sw-eng-4", "master@sw", "check the plan")
+    herdr, ledger = FakeHerdr({}), FakeLedger()
+    for n in range(1, 10):
+        run(inbox, herdr, ledger, sent_at(item) + n * W, SEATED[:2])
+    assert events(inbox, item.id) == [] and ledger.followups == []
+    bound = sent_at(item) + 10 * W
+    inbox.seats.occupy("master@sw", MASTER_NAME, at=bound)
+    run(inbox, herdr, ledger, bound + W - 1, SEATED)
+    assert ledger.followups == []
+    run(inbox, herdr, ledger, bound + W, SEATED)
+    assert events(inbox, item.id) == ["escalated_operator"] and len(ledger.followups) == 1
+
+
+def test_seat_mail_to_a_live_occupant_escalates_after_one_window(inbox):
+    inbox.seats.occupy("eng-1@sw", "sw-eng-1", at=1)
+    item = inbox.send("sw-eng-4", "eng-1@sw", "rebase please")
+    herdr, ledger = FakeHerdr({"p1": "working"}), FakeLedger()
+    run(inbox, herdr, ledger, sent_at(item) + W - 1, SEATED)
+    assert events(inbox, item.id) == []
+    run(inbox, herdr, ledger, sent_at(item) + W, SEATED)
+    assert events(inbox, item.id) == ["escalated_master"]
+
+
 def test_a_handover_before_the_prompt_leaves_the_old_pane_alone(inbox):
     inbox.seats.occupy("eng-1@sw", "sw-eng-1", at=1)
     item = inbox.send(MASTER_NAME, "eng-1@sw", "rebase please")
