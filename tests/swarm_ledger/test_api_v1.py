@@ -1669,7 +1669,7 @@ def test_item_ids_and_absent_threads(live):
         "ops": [
             {"op": "task_add", "id": "empty-comments", "by": "swarm", "task": "t1", "title": "Empty", "lane": "eng"}
         ],
-        "guards": {"tasks/t1": api.resources.ABSENT},
+        "guards": {},
     }
     assert request(live, "POST", "operations", payload)[0] == 200
     status, result = request(live, "GET", "tasks/t1/comments")

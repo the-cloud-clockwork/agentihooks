@@ -6,6 +6,7 @@ import select
 import subprocess
 import sys
 import uuid
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -279,15 +280,84 @@ def test_a_timeout_error_inside_the_check_is_named_not_counted_as_slow(live, mon
     )
 
 
-def test_a_refused_repeat_still_needs_a_current_revision(live, monkeypatch):
+def test_a_repeat_is_refused_whatever_tasks_landed_since_the_list_was_read(live, monkeypatch):
     stale = guards(live)
     core.sync(SLUG, ops=[task("t8", "Rename the ledger page title", live["phases"][1])])
     judge = judged(monkeypatch, Judge(yes={"t1"}))
     body = {"operation_id": uuid.uuid4().hex, "ops": [task("t9", REPEAT, live["phases"][0])], "guards": stale}
     headers = {"X-Ledger-Token": live["admin"], "Content-Type": "application/json"}
     status, data, _ = send(live, "POST", f"/api/v1/ledgers/{SLUG}/operations", json.dumps(body).encode(), **headers)
-    assert status == 409 and json.loads(data)["error"]["code"] == "revision_conflict"
+    assert status == 200 and OPEN_REFUSAL in json.loads(data)["_meta"]["warnings"]
     assert judge.asked == ["ledger-duplicate"] and stored("t9") is None
+
+
+class Inner:
+    def __init__(self):
+        self.applied = []
+
+    def apply(self, doc, op, ctx, apply_op):
+        self.applied.append((op["id"], apply_op))
+        return True
+
+
+def gate_for(screen):
+    return ledger_task_duplicates.Gate(screen, Inner())
+
+
+def test_the_screen_remembers_the_tasks_it_compared_and_the_adds_it_screened(monkeypatch):
+    monkeypatch.setattr(ledger_task_duplicates, "find", lambda doc, adds: [None] * len(adds))
+    doc = {"tasks": [{"id": "t1"}, {"id": "t2"}]}
+    ops = [task("t9", REPEAT, "p1"), {"op": "task_update", "id": "u", "by": "swarm", "item": "tasks/t1"}]
+    assert ledger_task_duplicates.screen(doc, ops) == ledger_task_duplicates.Screen(
+        {}, {}, frozenset({"t1", "t2", "t9"})
+    )
+    assert ledger_task_duplicates.screen(doc, ops[1:]) == ledger_task_duplicates.Screen()
+
+
+def test_an_add_names_the_tasks_that_landed_while_its_check_ran():
+    gate = gate_for(ledger_task_duplicates.Screen(seen=frozenset({"t1", "t9"})))
+    add = task("t9", REPEAT, "p1")
+    doc = {"tasks": [{"id": "t1"}, {"id": "t4"}, {"id": "t5"}]}
+    assert gate.apply(doc, add, None, "apply") is True
+    assert gate.screen.warnings == {
+        add[
+            "id"
+        ]: "the duplicate check did not compare task t9 with t4, t5, added while it ran, so check them for repeats"
+    }
+    assert gate.inner.applied == [(add["id"], "apply")]
+
+
+@pytest.mark.parametrize(
+    "screen,fields",
+    [
+        (ledger_task_duplicates.Screen(seen=frozenset({"t1", "t9"})), {}),
+        (ledger_task_duplicates.Screen(seen=frozenset({"t9"})), {"not_duplicate": "a different change"}),
+        (ledger_task_duplicates.Screen(warnings={"w": "unchecked"}, seen=frozenset({"t9"})), {"id": "w"}),
+    ],
+)
+def test_an_add_is_not_flagged_when_nothing_landed_it_was_not_screened_or_already_warned(screen, fields):
+    gate = gate_for(screen)
+    before = dict(screen.warnings)
+    add = {**task("t9", REPEAT, "p1"), **fields}
+    gate.apply({"tasks": [{"id": "t1"}]}, add, None, "apply")
+    assert screen.warnings == before
+    assert gate.inner.applied == [(add["id"], "apply")]
+
+
+def test_a_refused_add_is_not_flagged_and_gets_the_refusal():
+    add = task("t9", REPEAT, "p1")
+    gate = gate_for(ledger_task_duplicates.Screen(refused={add["id"]: "repeat"}, seen=frozenset({"t9"})))
+    gate.apply({"tasks": [{"id": "t4"}]}, add, None, "apply")
+    assert gate.screen.warnings == {}
+    (applied_id, refuse), ctx = gate.inner.applied[0], SimpleNamespace(refused=[])
+    assert applied_id == add["id"] and refuse({}, add, ctx) is False and ctx.refused == ["repeat"]
+
+
+def test_the_cli_prints_the_warning_when_tasks_landed_during_the_check(monkeypatch, capsys):
+    warning = ledger_task_duplicates.CONCURRENT.format(new="t9", ids="t4")
+    monkeypatch.setattr(ledger, "call", lambda slug, ops: {"applied": ["x"], "_meta": {"warnings": [warning]}})
+    ledger.send(SimpleNamespace(slug=SLUG, name=MASTER), "task_add", task="t9", title=REPEAT, lane="eng")
+    assert capsys.readouterr().err.strip() == warning
 
 
 def test_a_plan_id_from_any_writer_but_the_tick_is_checked(live, monkeypatch):

@@ -234,47 +234,39 @@ def test_sixteen_concurrent_adds_of_different_ids_all_land_without_a_conflict(li
     assert {f"b{n}" for n in range(writers)} <= {row["id"] for row in client.collection(SLUG, "tasks")}
 
 
-def test_an_add_of_a_used_id_is_refused_as_a_conflict_on_that_task(live, pauses):  # noqa: F811
+def test_an_add_of_a_used_id_is_refused_naming_the_task_it_repeats(live):  # noqa: F811
     from tests.swarm_ledger.test_ledger_authority import ledger
 
-    conflicts = []
-    client = Crowded(ledger.BASE, ledger.credentials(SLUG, service=True), None, conflicts)
+    client = api_client.ResourceClient(ledger.BASE, ledger.credentials(SLUG, service=True))
     assert client.mutate(SLUG, [task_add(0, "dup")])["applied"] == ["burst-0"]
-    with pytest.raises(urllib.error.HTTPError) as error:
-        client.mutate(SLUG, [task_add(1, "dup")])
-    body = json.loads(error.value.read())["error"]
-    assert (error.value.code, body["code"], body["details"]) == (409, "revision_conflict", {"path": "tasks/dup"})
-    assert body["message"] == "Resource already exists"
-    assert conflicts == [409]
-    assert pauses == []
+    reply = client.mutate(SLUG, [task_add(1, "dup"), {"op": "add", "id": "m-9", "thread": "chat", "text": "Hi"}])
+    assert (reply["applied"], reply["rejected"]) == (["m-9"], ["burst-1"])
+    taken = f'task dup already exists as "{TITLES[0]}" (open): pick another id, or pass - as the id to mint one'
+    assert taken in reply["_meta"]["warnings"]
     assert client.request(SLUG, "tasks/dup")["data"]["title"] == TITLES[0]
 
 
-def test_a_task_add_pins_its_own_task_to_the_absent_revision_without_reading(pauses):
+def test_a_task_add_sends_no_guard_and_reads_nothing(pauses):
     client = Scripted({"applied": ["burst-3"]})
-    client.mutate(SLUG, [task_add(3, "t3")])
-    assert [(path, payload["guards"]) for path, payload in client.calls] == [
-        ("operations", {"tasks/t3": api_client.resources.ABSENT})
+    operation = task_add(3, "t3")
+    client.mutate(SLUG, [operation])
+    assert [(path, payload["guards"]) for path, payload in client.calls] == [("operations", {})]
+    assert client.calls[0][1]["ops"] == [{key: value for key, value in operation.items() if key != "operation_id"}]
+    assert "expected_revision" not in operation
+
+
+def test_a_task_add_beside_a_guarded_write_guards_only_that_write(pauses):
+    client = Scripted({"revision": "r0"}, {"applied": ["burst-3", "m-1"]})
+    client.mutate(SLUG, [task_add(3, "t3"), *chat_add()])
+    assert [(path, payload and payload["guards"]) for path, payload in client.calls] == [
+        ("chat", None),
+        ("operations", {"chat": "r0"}),
     ]
+    assert [op["op"] for op in client.calls[1][1]["ops"]] == ["task_add", "add"]
 
 
-def test_a_missing_task_has_the_absent_revision_and_other_missing_paths_stay_missing():
-    from scripts.swarm_ledger.api import resources, schemas
-    from scripts.swarm_ledger.api.errors import APIError
-
-    doc = {"_meta": {"members": {}}, "tasks": [{"id": "t1", "title": "Here"}]}
-    assert resources.ABSENT == resources.revision(None)
-    assert resources.resource_revision(doc, "tasks/t2") == resources.ABSENT
-    assert resources.resource_revision(doc, "tasks/t1") == resources.revision({"id": "t1", "title": "Here"})
-    for path in ("tasks/t2/comments", "phases/p9", "members/nobody", "unknown/t2"):
-        with pytest.raises(APIError):
-            resources.resource_revision(doc, path)
-    assert schemas.target({"op": "task_add", "task": "t2"}) == "tasks/t2"
-    assert schemas.target({"op": "task_update", "item": "tasks/t1"}) == "tasks/t1"
-
-
-def test_a_task_add_conflict_is_not_retried(pauses):
-    client = Scripted(conflict("tasks/t3"))
+def test_a_conflict_on_a_task_add_batch_is_not_retried(pauses):
+    client = Scripted(conflict("tasks"))
     with pytest.raises(urllib.error.HTTPError):
         client.mutate(SLUG, [task_add(3, "t3")])
     assert len(client.calls) == 1

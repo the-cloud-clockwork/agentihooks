@@ -26,7 +26,9 @@ class GuardedOperations:
                 raise APIError(409, "operation_conflict", "Operation identifier was already used for different content")
             self.results = dict(known["results"])
         pending = [op for op in self.payload["ops"] if op["id"] not in self.results]
-        targets = {schemas.target(op) for op in pending if op["op"] != "ack" and not self.changes_for(op)}
+        targets = {
+            schemas.target(op) for op in pending if op["op"] not in schemas.UNGUARDED and not self.changes_for(op)
+        }
         for op in pending:
             targets.update(change["path"].rsplit("/", 1)[0] for change in self.changes_for(op))
         for path in targets:
@@ -35,12 +37,7 @@ class GuardedOperations:
                 raise APIError(428, "revision_required", "Every changed resource needs an expected revision")
             actual = resources.resource_revision({**doc, "_meta": ctx.meta}, path)
             if expected != actual:
-                message = (
-                    "Resource already exists"
-                    if expected == resources.ABSENT
-                    else "Resource changed since the expected revision"
-                )
-                raise APIError(409, "revision_conflict", message, {"path": path})
+                raise APIError(409, "revision_conflict", "Resource changed since the expected revision", {"path": path})
         self.checked = True
 
     def check_controller(self, op: dict) -> None:
