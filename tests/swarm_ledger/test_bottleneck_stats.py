@@ -30,12 +30,16 @@ def test_top_stage_trend_and_action_fit_the_operator_viewport(open_page):
     assert bounds["y"] >= 0 and bounds["y"] + bounds["height"] <= 1080
 
 
-@pytest.mark.parametrize("top,label", [(None, "unavailable"), ({"stage": ""}, "none")])
-def test_stats_distinguish_missing_status_from_no_active_finding(open_page, top, label):
+@pytest.mark.parametrize(
+    "top,shown",
+    [
+        (None, "TOP BOTTLENECK\nunavailable\nTrend unknown\nLast action none recorded"),
+        ({"stage": ""}, "TOP BOTTLENECK\nnone\nTrend unknown\nMeasured never\nLast action none recorded"),
+    ],
+)
+def test_stats_distinguish_missing_status_from_no_active_finding(open_page, top, shown):
     page = open_page(status(top_bottleneck=top), width=1920)
-    text = page.tab.locator("#stats .top-bottleneck").inner_text()
-    assert label in text
-    assert "Measured never" in text
+    assert page.tab.locator("#stats .top-bottleneck").inner_text() == shown
 
 
 def test_action_is_text_and_long_actions_wrap_within_stats(open_page):

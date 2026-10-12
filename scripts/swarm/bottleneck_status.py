@@ -28,7 +28,7 @@ def report(store: RedisStore, slug: str, now_ms: int) -> dict:
         "trend": row.get("trend", "none" if found else "unknown"),
         "seconds": row.get("seconds", 0.0),
         "measured_at": found.get("at", 0),
-        "measured": f"{max(0, now_ms - found['at']) // 60_000} minutes ago" if found else "never",
+        "measured": f"{max(0, (now_ms - found['at']) // 60_000)} minutes ago" if found else "never",
         "last_action": action.get("text", "none recorded"),
         "action_at": action.get("at", 0),
     }

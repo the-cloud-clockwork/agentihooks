@@ -59,9 +59,13 @@ def test_trend_is_unknown_only_before_the_detector_runs(store):
     assert (found["stage"], found["label"], found["trend"]) == ("", "none", "none")
 
 
-def test_a_ranking_stamped_ahead_of_the_reader_clock_reads_as_just_measured(store):
+@pytest.mark.parametrize(
+    "elapsed,measured",
+    [(-120_000, "0 minutes ago"), (0, "0 minutes ago"), (59_999, "0 minutes ago"), (60_000, "1 minutes ago")],
+)
+def test_age_counts_whole_minutes_and_a_ranking_ahead_of_the_clock_reads_as_just_measured(store, elapsed, measured):
     detect(store, ("build", 3600.0, "rising"))
-    assert bottleneck_status.report(store, "sw", NOW - 120_000)["measured"] == "0 minutes ago"
+    assert bottleneck_status.report(store, "sw", NOW + elapsed)["measured"] == measured
 
 
 def test_action_is_per_stage_and_survives_reading_updates(store):
