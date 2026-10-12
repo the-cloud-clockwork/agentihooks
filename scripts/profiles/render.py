@@ -453,6 +453,9 @@ def render_codex(name: str, force: bool = False, overlays: Sequence[str] = ()) -
     if out.exists():
         root = render_claude(name, force=True, overlays=overlays).parent
         out = root / "codex"
+        bundle, dirs = _bundle(), _chain(name, overlays)
+        below, above = _codex_skills(bundle, dirs, stamp)
+        current["skills"] = {skill: str(path) for skill, path in {**below, **above}.items()}
     manifest = sources.path(root.name, "codex", root.parent)
     claude = root / "claude"
     out.mkdir()
@@ -507,6 +510,8 @@ def render_copilot(name: str, force: bool = False, overlays: Sequence[str] = ())
     if out.exists():
         root = render_claude(name, force=True, overlays=overlays).parent
         out = root / "copilot"
+        bundle, dirs = _bundle(), _chain(name, overlays)
+        config = {"mcpServers": CopilotAdapter().mcp_entries(_mcp_servers("copilot", bundle, dirs))}
     out.mkdir()
     _link(out / "copilot-instructions.md", root / "claude" / "CLAUDE.md")
     operator = copilot_home()

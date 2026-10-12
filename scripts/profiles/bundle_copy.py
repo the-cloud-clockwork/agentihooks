@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 
-_ACTIVE: ContextVar[tuple[Path, Path] | None] = ContextVar("recorded_bundle", default=None)
+_ACTIVE: ContextVar[tuple[Path, Path, str] | None] = ContextVar("recorded_bundle", default=None)
 
 
 def current() -> Path | None:
@@ -26,19 +26,24 @@ def identity(path: Path) -> Path:
 def attach(root: Path) -> None:
     active = _ACTIVE.get()
     if active is not None:
-        destination = root / "bundle"
+        destination = root / "bundle" / active[0].name
         shutil.copytree(active[1], destination, symlinks=True)
-        _ACTIVE.set((active[0], destination))
+        _ACTIVE.set((active[0], destination, active[2]))
 
 
 def reuse(root: Path) -> bool:
     active = _ACTIVE.get()
     if active is None:
         return True
-    destination = root / "bundle"
+    destination = root / "bundle" / active[0].name
     if not destination.is_dir():
         return False
-    _ACTIVE.set((active[0], destination))
+    git = ["git", "-C", str(destination)]
+    head = _git(active[0], active[2], [*git, "rev-parse", "HEAD"])
+    status = _git(active[0], active[2], [*git, "status", "--porcelain", "--untracked-files=all"])
+    if head != active[2] or status:
+        return False
+    _ACTIVE.set((active[0], destination, active[2]))
     return True
 
 
@@ -64,7 +69,8 @@ def recorded(bundle: Path | None, revision: str, root: Path) -> Iterator[None]:
     )
     root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="bundle-", dir=root) as temporary:
-        copy = Path(temporary)
+        copy = Path(temporary) / bundle.name
+        copy.mkdir()
         git = ["git", "-C", str(copy)]
         for args in (
             ["init", "--quiet"],
@@ -74,7 +80,7 @@ def recorded(bundle: Path | None, revision: str, root: Path) -> Iterator[None]:
             ["checkout-index", "--all"],
         ):
             _git(bundle, revision, [*git, *args])
-        token = _ACTIVE.set((bundle, copy))
+        token = _ACTIVE.set((bundle, copy, commit))
         try:
             yield
         finally:

@@ -2701,8 +2701,8 @@ def test_an_overlay_render_uses_the_recorded_commit_after_the_bundle_advances(wo
     assert render.binding.inspect(out, "rb-eng", target)["profile"] == "rb-eng"
     assert bundle_copy.current() is None
     assert not list(render.rendered_root().glob("bundle-*"))
-    assert _git(out.parent / "bundle", "rev-parse", "HEAD").strip() == recorded
-    assert _git(out.parent / "bundle", "status", "--porcelain") == ""
+    assert _git(out.parent / "bundle" / world["bundle"].name, "rev-parse", "HEAD").strip() == recorded
+    assert _git(out.parent / "bundle" / world["bundle"].name, "status", "--porcelain") == ""
     assert render.render(target, "rb-eng", overlays=["ov-a"], bundle_revision=recorded) is None
     assert not list(render.rendered_root().glob("bundle-*"))
 
