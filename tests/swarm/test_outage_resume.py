@@ -19,11 +19,14 @@ class RecoveringRuntime(FakeRuntime):
     def __init__(self):
         super().__init__()
         self.errors, self.resumed, self.resume_configs = {}, [], []
-        self.inputs, self.placement, self.spawn_configs = {}, {}, []
+        self.inputs, self.titles, self.placement, self.spawn_configs = {}, {}, {}, []
 
     def observe(self, agent):
         return PaneObservation(
-            self.status(agent), typed=self.inputs.get(agent.name, ""), provider_error=self.errors.get(agent.name, "")
+            self.status(agent),
+            prompt_title=self.titles.get(agent.name, ""),
+            typed=self.inputs.get(agent.name, ""),
+            provider_error=self.errors.get(agent.name, ""),
         )
 
     def spawn(self, config, lane, name, task):
@@ -268,7 +271,16 @@ def take_over(store, ledger, agent):
 
 @pytest.mark.parametrize(
     "change",
-    ["missing row", "done", "ledger claimant", "store claimant", "seat", "released authority", "lapsed authority"],
+    [
+        "missing row",
+        "done",
+        "not working",
+        "ledger claimant",
+        "store claimant",
+        "seat",
+        "released authority",
+        "lapsed authority",
+    ],
 )
 def test_an_owner_that_loses_its_task_drops_its_pending_recovery(store, tmp_path, monkeypatch, change):
     ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
@@ -279,6 +291,8 @@ def test_an_owner_that_loses_its_task_drops_its_pending_recovery(store, tmp_path
         rows = {}
     elif change == "done":
         rows[agent.task]["done"] = True
+    elif change == "not working":
+        store.put_agent("sw", replace(agent, state="awaiting-decision"))
     elif change == "ledger claimant":
         rows[agent.task]["claimed_by"] = "successor"
     elif change == "store claimant":
@@ -368,6 +382,7 @@ def test_one_recovery_pass_completes_working_nudged_and_reopened_owners(store, t
     runtime.live.remove(dead.name)
     decision = {"profile": "engineer", "source": "test"}
     store.put_agent("sw", replace(dead, idle_ticks=2, profile_decision=decision))
+    runtime.placement = {"model_source": "probe"}
     actions = resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
     assert sorted(actions) == sorted([f"outage resume for {nudged.name}", f"outage resume for {dead.name}"])
     assert [recovery_state(store, agent.name) for agent in agents] == ["done", "done", "done"]
@@ -376,6 +391,7 @@ def test_one_recovery_pass_completes_working_nudged_and_reopened_owners(store, t
     assert (reopened.pane_id, reopened.started_at, reopened.idle_ticks) == ("recovered:pane", 9 * MINUTE, 0)
     assert (reopened.model, reopened.account, reopened.profile_decision) == ("sonnet", dead.account, decision)
     assert dead.effort and reopened.effort == dead.effort
+    assert reopened.model_source == "probe"
     assert runtime.resumed[-1][2].startswith("Service is back after the outage.")
 
 
@@ -495,11 +511,16 @@ def test_a_new_recovery_is_due_on_its_first_pass_at_any_clock(store, tmp_path, m
     assert agents[0].name in runtime.nudged
 
 
-def test_an_owner_with_typed_input_is_not_prompted(store, tmp_path, monkeypatch):
+@pytest.mark.parametrize("pending_input", ["typed", "title"])
+def test_an_owner_with_pending_input_is_not_prompted(store, tmp_path, monkeypatch, pending_input):
     ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
-    runtime.inputs[agents[0].name] = "half typed reply"
+    if pending_input == "typed":
+        runtime.inputs[agents[0].name] = "half typed reply"
+    else:
+        runtime.titles[agents[0].name] = "Approve this edit?"
     resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
     assert agents[0].name not in runtime.nudged
+    assert agents[1].name in runtime.nudged
     assert resume.recovery_pending(store, "sw", agents[0])
 
 
@@ -599,3 +620,36 @@ def test_a_refused_prompt_keeps_the_recovery_pending(store, tmp_path, monkeypatc
     resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
     assert agents[0].name in runtime.nudged
     assert resume.recovery_pending(store, "sw", agents[0])
+
+
+def test_a_non_owner_does_not_stop_later_recoveries(store, tmp_path, monkeypatch):
+    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
+    ledger.rows[agents[0].task]["done"] = True
+    resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
+    assert agents[0].name not in runtime.nudged
+    assert agents[1].name in runtime.nudged
+
+
+def test_an_owner_already_prompted_this_pass_does_not_stop_later_recoveries(store, tmp_path, monkeypatch):
+    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
+    runtime.nudge_refusals[agents[0].name] = "pane busy"
+    rows = rows_of(ledger)
+    first_only = {task: {**row, "done": task != agents[0].task} for task, row in rows.items()}
+    resume.recover_outages("sw", store, ledger, runtime, first_only, 9 * MINUTE)
+    resume.recover_outages("sw", store, ledger, runtime, rows, 9 * MINUTE)
+    assert runtime.nudged.count(agents[0].name) == 1
+    assert agents[1].name in runtime.nudged
+
+
+def test_a_dead_owner_pending_recovery_keeps_its_claim_lease(store):
+    from scripts.swarm.tick import LEASE_MS
+
+    ledger, runtime, _ = three_owners(store)
+    dead = owners(store)[2]
+    runtime.live.remove(dead.name)
+    claim = store.key("sw", "claim", dead.task)
+    store.redis.pexpire(claim, 1_000)
+    outage.observe("sw", "provider", ["provider unavailable"], MINUTE)
+    tick("sw", store, ledger, runtime, 8 * MINUTE)
+    assert store.claimant("sw", dead.task) == dead.name
+    assert store.redis.pttl(claim) > LEASE_MS // 2
