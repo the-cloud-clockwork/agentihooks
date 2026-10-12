@@ -63,7 +63,7 @@ def test_the_load_covers_every_sweep_of_the_watch_loop_more_than_once():
 def test_the_gate_refuses_to_run_outside_ci(monkeypatch, tmp_path):
     ran = []
     monkeypatch.setattr(ledger_load, "run", lambda folder: ran.append(folder) or [])
-    monkeypatch.setattr(ledger_load, "base_budgets", lambda revision: ledger_load.graded({}))
+    monkeypatch.setattr(ledger_load, "base_budgets", lambda revision: head_budgets())
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     with pytest.raises(SystemExit, match="CI only"):
         ledger_load.main(["--folder", str(tmp_path), "--base", "HEAD"])
