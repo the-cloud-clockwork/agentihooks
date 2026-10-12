@@ -208,6 +208,10 @@ class Recovery:
         raw = self.store.redis.hget(self._key(RECOVERIES), execution_id)
         return Decision(**json.loads(raw)) if raw else None
 
+    def pending(self) -> list[str]:
+        decided = self.store.redis.hkeys(self._key(RECOVERIES))
+        return sorted(execution_id for execution_id in decided if self.decision(execution_id).mode == PENDING)
+
     def late_observations(self, execution_id: str) -> int:
         return int(self.store.redis.hget(self._key(LATE), execution_id) or 0)
 
@@ -230,6 +234,9 @@ class Recovery:
             return self._late(agent.execution_id, len(pods))
         if len(pods) > 1:
             return "ambiguous"
+        final = retention.final(self.store, self.slug, agent.execution_id)
+        if final:
+            return final.state
         reason = self._reason(agent.execution_id, pods[0], ready) if pods else self._vanished(agent, ready, last)
         if reason == IMAGE_PULL and pods and self._pulling(agent.execution_id):
             return "pulling"

@@ -1,6 +1,6 @@
-"""Pull request Tests runs over fifteen minutes from push to Gate Required, each added once as a ledger follow up.
+"""Pull request Tests runs over fifteen minutes from push to Gate Required, each counted once on the standing ci overrun finding.
 
-The minute tick calls it; CI runners cannot reach the ledger, so the defect is filed from the machine that can.
+The minute tick calls it; CI runners cannot reach the swarm, so the overrun is recorded from the machine that can.
 """
 
 from __future__ import annotations
@@ -14,11 +14,14 @@ from typing import TYPE_CHECKING
 
 from scripts import ci_budget
 from scripts.swarm import ci_speed, metrics_ci, metrics_outbox
+from scripts.swarm.health import standing
 from scripts.swarm.store import PREFIX
 
 if TYPE_CHECKING:
-    from scripts.swarm.ledger_client import LedgerClient
     from scripts.swarm.store import RedisStore, SwarmConfig
+
+STAGE = "ci_overrun"
+UNIT = "minutes from push to Gate Required"
 
 REFRESH_MS = 5 * 60_000
 WINDOW_S = 6 * 3600
@@ -127,7 +130,6 @@ def refresh(
     slug: str,
     config: SwarmConfig,
     store: RedisStore,
-    ledger: LedgerClient,
     now_ms: int,
     run: Callable = subprocess.run,
     environ: Mapping[str, str] = os.environ,
@@ -157,8 +159,14 @@ def refresh(
             if spent <= ci_budget.RUN_BUDGET_S or redis.exists(seen):
                 continue
             text = defect(item, jobs_of(item["id"]))
-            if text and ledger.followup(slug, text) is not False:
-                actions.append("filed a ledger follow up for a pull request Tests run over fifteen minutes")
+            if text:
+                reading = standing.Reading(
+                    round(spent / 60, 1), ci_budget.RUN_BUDGET_S / 60, UNIT, str(item["id"]), text
+                )
+                standing.fire(redis, slug, STAGE, reading, now_ms)
+                actions.append(
+                    "updated the standing ci overrun finding for a pull request Tests run over fifteen minutes"
+                )
         except READ_ERRORS as exc:
             _skipped("one Tests run", exc)
             continue

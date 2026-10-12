@@ -2,11 +2,17 @@ import json
 import sys
 from collections.abc import Callable, Mapping
 from types import ModuleType
+from typing import TYPE_CHECKING
 
 from scripts.swarm import naming
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 
+if TYPE_CHECKING:
+    from scripts.swarm_v2.kubernetes.failures import Recovery
+
 PROOF_ENV = "AGENTIHOOKS_CONTROL_PROOF"
+FRESH = "fresh"
+FRESH_REASON = "the controller owns this proof swarm, which keeps no checkpoints and runs one trivial task"
 PROJECTS_ENV = "AGENTIHOOKS_LAUNCH_PROJECTS"
 SWARM_ENV = "AGENTIHOOKS_CONTROL_SWARM"
 MALFORMED = f"{PROOF_ENV} must be a JSON object naming an agent and a task"
@@ -50,6 +56,21 @@ def reconcile(environ: Mapping[str, str], store: RedisStore, slug: str, ledger: 
     lines = [_remove(environ, store, other, ledger) for other in stale]
     if asked is not None and slug not in store.slugs():
         lines.append(_create(environ, store, slug, ledger, asked))
+    return lines
+
+
+def choose_fresh(environ: Mapping[str, str], recovery: "Recovery") -> list[str]:
+    slug = recovery.slug
+    try:
+        asked = _asked(environ)
+    except SwarmError:
+        return []
+    if asked is None or environ.get(SWARM_ENV) != slug or not naming.PROOF_RE.fullmatch(slug):
+        return []
+    lines = []
+    for execution_id in recovery.pending():
+        recovery.decide(execution_id, FRESH)
+        lines.append(f"controller: chose fresh for {execution_id} in proof swarm {slug}: {FRESH_REASON}")
     return lines
 
 

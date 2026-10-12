@@ -38,6 +38,7 @@ def repo(path, monkeypatch):
     repo = SQLiteLedgerRepository(path)
     monkeypatch.setattr(repo.domain, "EVENTS_KEPT", 3)
     monkeypatch.setattr(repo.domain, "EVENTS_CEILING", 6)
+    monkeypatch.setattr(repo.domain, "EVENTS_WINDOW_MS", 0)
     monkeypatch.setattr(repo.domain, "now_ms", lambda: NOW - 1000)
     repo.create("ledger", CONTENT)
     return repo
@@ -163,6 +164,24 @@ def test_retained_drops_only_a_prefix_bounded_by_the_ceiling():
     assert events.retained(rows[:2], 0, 2, 5) == 0
     assert events.retained(rows, 5, 2, 9) == 4
     assert events.retained([{}, {"rev": 3}], 0, 0, 9) == 1
+
+
+def test_retained_keeps_every_event_inside_the_horizon():
+    rows = [{"rev": n, "at": n * 10} for n in range(1, 7)]
+    assert events.retained(rows, None, 2, 9, horizon=29) == 2
+    assert events.retained(rows, None, 2, 9, horizon=30) == 3
+    assert events.retained(rows, None, 2, 9, horizon=60) == 4
+    assert events.retained(rows, None, 2, 3, horizon=-1) == 3
+    assert events.retained(rows, 1, 2, 9, horizon=60) == 1
+    assert events.retained([{"rev": 1}, *rows], None, 2, 9, horizon=9) == 1
+    assert events.retained([{"rev": 1}, *rows], None, 2, 9, horizon=0) == 1
+
+
+def test_keep_events_trims_by_the_window_behind_the_write_time_and_marks_the_highest_trimmed():
+    core = SimpleNamespace(EVENTS_KEPT=1, EVENTS_CEILING=9, EVENTS_WINDOW_MS=100)
+    meta = {"events": [{"rev": 1, "at": 0}, {"rev": 2, "at": 950}]}
+    events.keep_events(meta, [{"rev": 3, "at": 1000}], core, 1000)
+    assert meta == {"events": [{"rev": 2, "at": 950}, {"rev": 3, "at": 1000}], "events_trimmed": 1}
 
 
 def test_a_trim_at_an_event_without_a_revision_marks_revision_zero(repo):

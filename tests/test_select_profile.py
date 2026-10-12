@@ -153,7 +153,7 @@ def test_absent_manifest_uses_launch_defaults(profile):
     root, _ = profile
     (root / "engineer" / "profile.yml").unlink()
     _, result = select_profile.prepare("engineer", "claude", "", "", [], {})
-    assert result == ["--model", "opus", "--effort", "high"]
+    assert result == ["--model", "opus", "--effort", "medium"]
 
 
 def test_chain_defaults_use_last_profile_and_ignore_empty_manifest(profile, monkeypatch):

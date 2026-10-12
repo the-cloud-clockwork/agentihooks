@@ -244,6 +244,6 @@ def test_an_expired_account_has_no_seats_and_shows_expired_with_the_login_never_
     accounts = [codex_router.CodexAccount("alpha", "AH_CX_TOKEN_alpha"), codex_router.CodexAccount("default")]
     rows = agents_quota.codex_rows(accounts, {"alpha": expired, "default": expired}, {}, later)
     assert [(row.state, row.cap, row.source) for row in rows] == [
-        ("EXPIRED", 0, "token expired: run agentihooks codex login alpha"),
-        ("EXPIRED", 0, "token expired: run codex login"),
+        ("EXPIRED", None, "token expired: run agentihooks codex login alpha"),
+        ("EXPIRED", None, "token expired: run codex login"),
     ]

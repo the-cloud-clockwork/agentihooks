@@ -1,12 +1,16 @@
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from scripts.swarm.store import SwarmError
+from scripts.swarm.store import AgentRecord, SwarmError
 from scripts.swarm_v2 import retention
-from scripts.swarm_v2.kubernetes import cleanup
+from scripts.swarm_v2.kubernetes import cleanup, failures
 from scripts.swarm_v2.kubernetes.cleanup import Cleanup
+from scripts.swarm_v2.kubernetes.client import ApiRefused
+from scripts.swarm_v2.kubernetes.completion import Completion
+from scripts.swarm_v2.kubernetes.watch import BACKEND
 from tests import sv2_kub04_cases as cases
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
@@ -220,6 +224,97 @@ def test_a_journal_left_after_retain_is_cleared_on_the_next_run(ready):
     world.store.redis.hset(key, old.execution_id, "{}")
     assert world.cleanup(controller).run(old.execution_id) == first
     assert world.store.redis.hlen(key) == 0
+
+
+def _finished_and_running(world, controller):
+    fx = cases.fixture("first")
+    finished, running = world.admit(controller, "eng-1"), world.admit(controller, "eng-2")
+    for attempt in (finished, running):
+        world.spawn(controller, attempt, fx)
+    world.api.objects[f"swarm-{finished.execution_id}"]["status"]["phase"] = "Succeeded"
+    world.api.objects[f"swarm-{running.execution_id}"]["status"]["phase"] = "Running"
+    return finished, running
+
+
+def _listed(world) -> list[dict]:
+    return json.loads(json.dumps(list(world.api.objects.values())))
+
+
+def test_a_completed_attempt_pod_is_deleted_and_a_running_one_kept():
+    world = cases.World()
+    with world.clocked():
+        controller, _ = world.controller()
+        assert controller.acquire()
+        finished, running = _finished_and_running(world, controller)
+        world.acknowledge(finished.execution_id, 7)
+        complete = Completion(world.client(), cases.SLUG, world.cleanup(controller))
+        assert complete(_listed(world)) == {finished.execution_id: "done"}
+        assert sorted(world.api.objects) == [f"swarm-{running.execution_id}"]
+        assert sorted(world.api.services) == [f"swarm-attach-{running.execution_id}"]
+        final = retention.final(world.store, cases.SLUG, finished.execution_id)
+        pod = f"pods/swarm-{finished.execution_id}/uid-1"
+        assert (final.state, final.transcript_end, final.outcome_ref) == ("completed", 7, pod)
+        assert retention.final(world.store, cases.SLUG, running.execution_id) is None
+        assert world.attached == world.secret_refs == {running.execution_id}
+        assert complete(_listed(world)) == {}
+
+
+@pytest.mark.parametrize("change", ["generation", "fenced", "duplicate"])
+def test_a_succeeded_pod_of_another_generation_a_fenced_attempt_or_a_second_pod_is_left_alone(change):
+    world = cases.World()
+    with world.clocked():
+        controller, _ = world.controller()
+        assert controller.acquire()
+        finished, _ = _finished_and_running(world, controller)
+        pod = world.api.objects[f"swarm-{finished.execution_id}"]
+        if change == "generation":
+            pod["metadata"]["labels"][cases.GENERATION_LABEL] = "2"
+        elif change == "fenced":
+            world.store.redis.hset(world.store.key(cases.SLUG, failures.FENCES), finished.execution_id, "{}")
+        else:
+            world.api.put({**json.loads(json.dumps(pod)), "metadata": {**pod["metadata"], "name": "swarm-twin"}})
+        complete = Completion(world.client(), cases.SLUG, world.cleanup(controller))
+        assert complete(_listed(world)) == {}
+        assert f"swarm-{finished.execution_id}" in world.api.objects
+        assert world.api.deletes == []
+        assert retention.final(world.store, cases.SLUG, finished.execution_id) is None
+
+
+def test_a_superseded_attempt_whose_pod_succeeded_is_deleted_too():
+    world = cases.World()
+    with world.clocked():
+        controller, _ = world.controller()
+        assert controller.acquire()
+        finished, _ = _finished_and_running(world, controller)
+        target = {"pod_namespace": world.api.namespace, "pod_name": "swarm-pending"}
+        name = world.store.next_name(cases.SLUG, "eng")
+        successor = AgentRecord(name, "eng", "task", seat=finished.seat, runtime_backend=BACKEND)
+        controller.admit(replace(successor, runtime_target=target), finished.execution_id)
+        complete = Completion(world.client(), cases.SLUG, world.cleanup(controller))
+        assert complete(_listed(world)) == {finished.execution_id: "done"}
+        assert f"swarm-{finished.execution_id}" not in world.api.objects
+
+
+def test_a_refused_delete_keeps_the_pod_and_retries_on_the_next_pass(monkeypatch, capsys):
+    world = cases.World()
+    with world.clocked():
+        controller, _ = world.controller()
+        assert controller.acquire()
+        finished, _ = _finished_and_running(world, controller)
+        complete = Completion(world.client(), cases.SLUG, world.cleanup(controller))
+        delete = world.api.delete
+
+        def refuse(kind, name, uid):
+            raise ApiRefused(500, "internal error")
+
+        monkeypatch.setattr(world.api, "delete", refuse)
+        assert complete(_listed(world)) == {finished.execution_id: "refused"}
+        line = f"controller: cleanup of {finished.execution_id} failed with ApiRefused; retrying\n"
+        assert capsys.readouterr().out == line
+        assert f"swarm-{finished.execution_id}" in world.api.objects
+        monkeypatch.setattr(world.api, "delete", delete)
+        assert complete(_listed(world)) == {finished.execution_id: "done"}
+        assert f"swarm-{finished.execution_id}" not in world.api.objects
 
 
 @pytest.mark.parametrize("case", ["a", "b", "c"])

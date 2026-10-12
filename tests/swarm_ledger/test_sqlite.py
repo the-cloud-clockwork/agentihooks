@@ -147,6 +147,7 @@ def test_one_operation_writes_only_the_rows_it_changed_and_no_file(tmp_path):
 def test_every_write_leaves_rows_and_events_equal_to_the_returned_state(tmp_path, monkeypatch):
     repo = store(tmp_path)
     monkeypatch.setattr(repo.domain, "EVENTS_KEPT", 3)
+    monkeypatch.setattr(repo.domain, "EVENTS_WINDOW_MS", 0)
     repo.create("ledger", CONTENT)
     operations = [
         [chat(1)],
