@@ -485,7 +485,7 @@ def _followups(mail, doc, events, ledger, now_ms):
                 f"A follow-up on ledger {mail.slug} is still open fifteen minutes after {event['by']} added it: "
                 f"{followup['text']}\nDecide it now, or it goes to the operator's Priorities."
             )
-            sent += mail.send(f"{target}:raised", mail.master, text, ref=f"{mail.slug}:event:{target}")
+            sent += mail.send(f"{target}:raised", mail.owner(target), text, ref=f"{mail.slug}:event:{target}")
         if age >= FOLLOWUP_OPERATOR_MS:
             ask = "Open half an hour without a decision: " + " ".join(followup["text"].split()[:ASK_WORDS])
             if mail.once(f"{target}:operator", lambda: ledger.priority(mail.slug, target, ask)):
