@@ -11,6 +11,7 @@ from scripts.swarm import (
     metrics_outbox,
     metrics_swarm,
     stage_detector,
+    stages,
 )
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import SwarmError
@@ -28,7 +29,8 @@ def _collect(slug, now_ms, swarm, box, errors, environ):
     watched = freeze.watched(slug, swarm.store, swarm.ledger, swarm.doc)
     metrics_swarm.record_pass(box, slug, now_ms, swarm.store, watched, swarm.findings, pulls)
     bottleneck.record(box, swarm.store, slug, now_ms, swarm.doc.get("tasks", []))
-    stage_detector.record(box, swarm.store, slug, now_ms, swarm.doc.get("tasks", []), environ)
+    ready = stages.claimable(watched, freeze.fix_phase(swarm.store.config(slug)))
+    stage_detector.record(box, swarm.store, slug, now_ms, swarm.doc.get("tasks", []), environ, ready=ready)
     from redis.exceptions import RedisError
 
     try:
