@@ -18,6 +18,7 @@ AWAITING = "merge"
 RECORDS = "ready"
 GATED = ("code", "ci")
 QUEUE_TRIES = 5
+OUTAGE = "GitHub API"
 REOPENED = (
     "Reopened by the swarm: its pull request {url} {what}. The next engineer continues it from the handoff its "
     "engineer left."
@@ -81,7 +82,10 @@ def check(row, agent, autonomy, github, now_ms):
         raise SwarmError(f"pull request {url} is merged; close the task with swarm done")
     if pull.state != "OPEN":
         raise SwarmError(f"pull request {url} is {pull.state.lower()}; swarm ready carries an open pull request")
-    if stack.shell(["gh", "pr", "view", url, "--json", "isDraft", "--jq", ".isDraft"]).stdout.strip() == "true":
+    draft = stack.shell(["gh", "pr", "view", url, "--json", "isDraft", "--jq", ".isDraft"])
+    if draft.returncode != 0:
+        raise SwarmError(f"cannot read whether pull request {url} is a draft; run swarm ready again when it answers")
+    if draft.stdout.strip() == "true":
         raise SwarmError(f"pull request {url} is a draft; mark it ready for review with gh pr ready first")
     top = stack.worktree()
     if _git("status", "--porcelain"):
@@ -154,7 +158,7 @@ def _advance(run, rows, row, found):
 
 def _checks(run, row, found):
     outcome = waits.checks_resolution(found["on"], run.github)
-    if not outcome:
+    if not outcome.startswith(f"checks on {found['url']}"):
         save(run.store, run.slug, row["id"], found)
         return []
     if outcome.startswith(f"checks on {found['url']}, now red"):
@@ -167,8 +171,9 @@ def _queue(run, row, found):
     try:
         result = run.queue("queue", url)
     except SwarmError as exc:
-        found["refusals"] = found.get("refusals", 0) + 1
-        if found["refusals"] >= QUEUE_TRIES:
+        if not str(exc).startswith(OUTAGE):
+            found["refusals"] = found.get("refusals", 0) + 1
+        if found.get("refusals", 0) >= QUEUE_TRIES:
             return _reopen(run, row, found, f"could not be queued: {exc}")
         save(run.store, run.slug, task_id, found)
         return [f"could not queue {url} for task {task_id}: {exc}"]

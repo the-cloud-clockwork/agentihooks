@@ -214,6 +214,11 @@ def test_ready_refuses_a_draft_pull_request(released, capsys):
         f"swarm: pull request {URL} is a draft; mark it ready for review with gh pr ready first\n"
     )
     assert ready.record(store, "sw", "t1") is None and working(store)
+    shell.fail = (("gh", "pr", "view"),)
+    assert release(doc) == 1
+    assert capsys.readouterr().err == (
+        f"swarm: cannot read whether pull request {URL} is a draft; run swarm ready again when it answers\n"
+    )
 
 
 def test_ready_refuses_a_worktree_whose_head_the_pull_request_lacks(released, capsys):
@@ -343,6 +348,29 @@ def test_a_pull_request_the_queue_keeps_refusing_reopens_the_task(merging):
         f"removed the worktree {TOP}",
     ]
     assert merging.rows["t1"]["state"] == "open"
+
+
+def test_a_github_outage_while_queueing_never_counts_toward_the_reopen(merging):
+    merging.pulls[URL] = GREEN
+
+    def down(action, url):
+        raise SwarmError("GitHub API: timed out")
+
+    for _ in range(6):
+        assert merging.run(queuer=down) == [f"could not queue {URL} for task t1: GitHub API: timed out"]
+    assert "refusals" not in ready.record(merging.store, "sw", "t1")
+    assert merging.rows["t1"]["state"] == "pr"
+
+
+def test_a_pull_request_that_merges_between_the_checks_reads_waits_for_the_next_tick(merging):
+    reads = iter([GREEN, MERGED])
+    run = ready.Pass(
+        merging.store, "sw", merging.ledger, lambda url: next(reads), merging.pulls.get, NOW, merging.queue
+    )
+    assert ready.merge_pass(run, merging.rows) == []
+    assert merging.queued == [] and merging.rows["t1"]["state"] == "pr"
+    merging.pulls[URL] = MERGED
+    assert merging.run()[0] == f"task t1 done, {URL} merged"
 
 
 def test_a_merged_pull_request_closes_the_task_with_the_done_proof_and_removes_the_worktree(merging):
