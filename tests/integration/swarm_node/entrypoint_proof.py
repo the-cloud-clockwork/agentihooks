@@ -12,6 +12,10 @@ def main():
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     outcomes = [run_case(args.image, mode, args.output, supervised=True) for mode in ("complete", "forced")]
+    for outcome in outcomes:
+        result = outcome["result"]
+        assert result["reason"] == "termination" and result["signal"] == 15
+        assert result["supervisor_child_exit_total"] >= 4
     outcomes.append(run_case(args.image, "complete", args.output))
     (args.output / "entrypoint-result.json").write_text(json.dumps(outcomes, indent=2) + "\n")
     print("supervisor process one drained on TERM and removed cooperative and stubborn children; generic Tini passed")
