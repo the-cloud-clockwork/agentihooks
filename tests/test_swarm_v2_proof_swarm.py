@@ -157,15 +157,29 @@ def test_a_proof_swarm_with_agents_waits_after_its_ledger_is_removed(store):
     assert store.slugs() == [SLUG]
 
 
-def attempt(store, slug=SLUG, name="engineer@1fd5f4-0001", execution_id="exe-a"):
+def attempt(store, slug=SLUG, name="engineer@1fd5f4-0001", execution_id="exe-a", task="t1"):
     record = AgentRecord(
-        name, "eng", "t1", started_at=1_000, execution_id=execution_id, generation=2, runtime_backend="kubernetes"
+        name, "eng", task, started_at=1_000, execution_id=execution_id, generation=2, runtime_backend="kubernetes"
     )
     store.redis.hset(store.key(slug, "executions"), execution_id, json.dumps(asdict(record)))
     store.redis.hset(store.key(slug, "agents"), name, json.dumps(asdict(record)))
     store.redis.hset(store.key(slug, "heartbeats"), execution_id, json.dumps({"archive_watermark": 7}))
-    store.redis.set(store.key(slug, "claim", "t1"), name)
+    store.redis.set(store.key(slug, "claim", task), name)
     return record
+
+
+def test_a_pass_drops_each_retained_attempt_and_keeps_every_attempt_still_cleaning(store):
+    swarm(store, SLUG)
+    cleaning = attempt(store)
+    done = attempt(store, name="engineer@1fd5f4-0002", execution_id="exe-b", task="t2")
+    retention.finalize(store, SLUG, lambda: None, "exe-b", "cancelled", 7, "proof/removed")
+    retention.retain(store, SLUG, retention.final(store, SLUG, "exe-b"), {"pods": [], "services": []})
+
+    assert proof_swarm._end(store, SLUG, store.agents(SLUG), lambda: None) == [cleaning]
+    assert [agent.name for agent in store.agents(SLUG)] == [cleaning.name]
+    assert store.redis.get(store.key(SLUG, "claim", "t2")) is None
+    assert store.redis.get(store.key(SLUG, "claim", "t1")) == cleaning.name
+    assert done.name not in [agent.name for agent in store.agents(SLUG)]
 
 
 def test_the_served_proof_swarm_cancels_its_remaining_attempts_under_the_lease_and_waits(store):
@@ -291,9 +305,9 @@ def test_a_pass_runs_only_against_a_hosted_ledger_and_prints_each_line(store, mo
     monkeypatch.setattr(proof_swarm, "reconcile", lambda *args: seen.append(args) or ["controller: a", "controller: b"])
     environ = {**ENV, "AGENTIHOOKS_DEPLOYMENT": deployment, "AGENTIHOOKS_CONTROL_SWARM": SLUG}
 
-    proof_swarm.run(environ, store)
+    proof_swarm.run(environ, store, len)
 
-    assert seen == ([(environ, store, SLUG, proof_ledger, None)] if called else [])
+    assert seen == ([(environ, store, SLUG, proof_ledger, len)] if called else [])
     assert capsys.readouterr().out == ("controller: a\ncontroller: b\n" if called else "")
 
 
