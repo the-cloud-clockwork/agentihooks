@@ -69,7 +69,7 @@ def sessions(
     from hooks.context.broadcast import foreign_session
     from scripts.swarm_v2.runtime.process import local_namespace
 
-    table = {pid: item for pid, item in processes(proc).items() if item.state not in {"Z", "X"}}
+    table = processes(proc)
     records = _registry() if registry is None else registry
     here = local_namespace() if namespace is None else namespace
     result = []
@@ -85,7 +85,7 @@ def sessions(
             continue
         process = table.get(pid)
         target = _target(process) if process else ""
-        if not process or not target:
+        if not process or not target or process.state in {"Z", "X"}:
             continue
         registered_pids.add(pid)
         session_id, cwd = _main_thread(target, session_id, info, records)
@@ -101,7 +101,7 @@ def sessions(
         )
     for process in table.values():
         target = _target(process)
-        if not target or process.pid in registered_pids:
+        if not target or process.pid in registered_pids or process.state in {"Z", "X"}:
             continue
         name = _name(process, proc, table)
         if target == "claude" and any(value in {"-p", "--print"} for value in process.argv[1:]):
