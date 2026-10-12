@@ -7,7 +7,14 @@ from scripts.swarm import cli, merge_queue, waits
 from scripts.swarm.store import SwarmError
 
 URL = "https://github.com/o/r/pull/7"
-OPEN = {"id": "PR_one", "state": "OPEN", "headRefOid": "abc", "baseRefName": "dev", "mergeQueueEntry": None}
+OPEN = {
+    "id": "PR_one",
+    "state": "OPEN",
+    "headRefOid": "abc",
+    "baseRefName": "dev",
+    "mergeQueueEntry": None,
+    "repository": {"mergeQueue": {"id": "MQ_dev"}},
+}
 ENTRY = {"id": "MQ_one", "position": 2, "state": "AWAITING_CHECKS"}
 AUTHORED = {"sha": "abc", "commit": {"message": "Change the code"}, "committer": {"login": "nestorcolt"}}
 REFRESHED = {"sha": "abc", "commit": {"message": "Merge branch 'dev' into ci-1"}, "committer": {"login": "web-flow"}}
