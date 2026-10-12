@@ -135,7 +135,7 @@ def _error(stderr):
 
 
 def _plain(title):
-    return " ".join(title.lower().split())
+    return title.casefold().split()
 
 
 def _refuse(reason):

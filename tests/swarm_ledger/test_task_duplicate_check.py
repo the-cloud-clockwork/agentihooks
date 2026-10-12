@@ -312,6 +312,7 @@ def test_the_screen_remembers_the_tasks_it_compared_and_the_adds_it_screened(mon
         {}, {}, frozenset({"t1", "t2", "t9"})
     )
     assert ledger_task_duplicates.screen(doc, ops[1:]) == ledger_task_duplicates.Screen()
+    assert ledger_task_duplicates.screen({}, ops).seen == frozenset({"t9"})
 
 
 def test_an_add_names_the_tasks_that_landed_while_its_check_ran():
