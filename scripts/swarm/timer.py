@@ -8,6 +8,7 @@ from pathlib import Path
 
 UNIT = "agentihooks-swarm"
 WAKER = "agentihooks-inbox-waker"
+ALERTS = "agentihooks-alert-intake"
 UNIT_DIR = Path.home() / ".config" / "systemd" / "user"
 
 
@@ -34,7 +35,21 @@ def units(binary):
         "Restart=always\nRestartSec=5\n\n"
         "[Install]\nWantedBy=default.target\n"
     )
-    return {f"{UNIT}.service": service, f"{UNIT}.timer": timer, f"{WAKER}.service": waker}
+    alerts = (
+        "[Unit]\nDescription=agentihooks swarm alert intake for Grafana\n\n"
+        "[Service]\nType=simple\nEnvironment=PYTHONUNBUFFERED=1\n"
+        "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
+        "EnvironmentFile=-%h/.agentihooks/.env\n"
+        f'ExecStart="{binary}" swarm alerts\n'
+        "Restart=on-failure\nRestartSec=5\n\n"
+        "[Install]\nWantedBy=default.target\n"
+    )
+    return {
+        f"{UNIT}.service": service,
+        f"{UNIT}.timer": timer,
+        f"{WAKER}.service": waker,
+        f"{ALERTS}.service": alerts,
+    }
 
 
 def _foreign_run(unit_dir):
@@ -66,6 +81,7 @@ def ensure(binary, unit_dir=None, run=subprocess.run):
     if changed:
         run(["systemctl", "--user", "daemon-reload"], capture_output=True, text=True, timeout=30, check=False)
     run(["systemctl", "--user", "enable", "--now", f"{WAKER}.service"], capture_output=True, text=True, timeout=30)
+    run(["systemctl", "--user", "enable", "--now", f"{ALERTS}.service"], capture_output=True, text=True, timeout=30)
     proc = run(["systemctl", "--user", "enable", "--now", f"{UNIT}.timer"], capture_output=True, text=True, timeout=30)
     return proc.returncode == 0
 

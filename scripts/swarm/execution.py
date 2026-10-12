@@ -21,6 +21,26 @@ if TYPE_CHECKING:
     from scripts.swarm.store import AgentRecord, RedisStore
 
 
+ADMIT = """
+local raw = redis.call('GET', KEYS[4])
+if not raw then return 'controller_stale' end
+local leader = cjson.decode(raw)
+local expected = cjson.decode(ARGV[3])
+local clock = redis.call('TIME')
+local now = tonumber(clock[1]) * 1000 + math.floor(tonumber(clock[2]) / 1000)
+if leader.owner ~= expected.owner or leader.epoch ~= expected.epoch or leader.expires_at <= now then
+    return 'controller_stale'
+end
+local agent = cjson.decode(ARGV[1])
+redis.call('HSET', KEYS[1], agent.execution_id, ARGV[1])
+redis.call('HSET', KEYS[2], agent.name, ARGV[2])
+redis.call('HSET', KEYS[3], agent.name, ARGV[4])
+redis.call('HSET', KEYS[5], agent.execution_id, ARGV[6])
+if ARGV[5] ~= '' then redis.call('HDEL', KEYS[2], ARGV[5]) end
+return 'committed'
+"""
+
+
 class ExecutionRegistry:
     def __init__(self, store: RedisStore) -> None:
         self.store = store
@@ -127,10 +147,11 @@ class ExecutionRegistry:
                 try:
                     from scripts.swarm import lease
 
-                    pipe.watch(key, self.store.key(slug, "control-owner"))
+                    pipe.watch(key)
                     epoch = lease.EPOCH.get()
-                    if epoch is not None:
-                        lease.require_epoch(self.store, slug, epoch)
+                    held = lease.current(self.store, slug) if epoch is not None else None
+                    if epoch is not None and (held is None or held.epoch != epoch):
+                        raise SwarmError("the controller lease is stale")
                     previous = self.occupants(slug, pipe).get(agent.seat)
                     if (previous.execution_id if previous else "") != previous_execution_id:
                         self.conflict(slug, "replacement does not match the current execution")
@@ -143,22 +164,46 @@ class ExecutionRegistry:
                     )
                     if pipe.hexists(key, current.execution_id):
                         self.conflict(slug, "execution identity already exists")
-                    pipe.multi()
-                    self.write(pipe, slug, current)
-                    if epoch is not None:
-                        intent = {
-                            "execution_id": current.execution_id,
-                            "generation": current.generation,
-                            "controller_epoch": epoch,
-                        }
-                        pipe.hset(self.store.key(slug, "controller-intents"), current.execution_id, json.dumps(intent))
-                    if previous and previous.name != current.name:
-                        pipe.hdel(self.store.key(slug, "agents"), previous.name)
-                    pipe.execute()
+                    self._admit(pipe, slug, current, previous, held)
                     return current
                 except WatchError:
                     continue
         raise SwarmError("execution history kept changing; admission was not committed")
+
+    def _admit(self, pipe, slug, current, previous, held) -> None:
+        from scripts.swarm.store import SwarmError
+
+        removed = previous.name if previous and previous.name != current.name else ""
+        pipe.multi()
+        if held is None:
+            self.write(pipe, slug, current)
+            if removed:
+                pipe.hdel(self.store.key(slug, "agents"), removed)
+            pipe.execute()
+            return
+        row = asdict(current)
+        intent = {
+            "execution_id": current.execution_id,
+            "generation": current.generation,
+            "controller_epoch": held.epoch,
+        }
+        keys = [
+            self.store.key(slug, part)
+            for part in ("executions", "agents", "state-since", "control-owner", "controller-intents")
+        ]
+        pipe.eval(
+            ADMIT,
+            len(keys),
+            *keys,
+            json.dumps(row),
+            json.dumps({field: value for field, value in row.items() if field not in PROJECTION_OMITTED}),
+            json.dumps(asdict(held)),
+            int(time.time() * 1000),
+            removed,
+            json.dumps(intent),
+        )
+        if pipe.execute()[0] != "committed":
+            raise SwarmError("the controller lease is stale")
 
     def check_uid(self, slug: str, agent: AgentRecord, reader: Redis | Pipeline) -> None:
         uid = agent.runtime_target.get("pod_uid")
@@ -186,6 +231,9 @@ class ExecutionRegistry:
                         current.runtime_target, agent.runtime_target, lambda message: self.conflict(slug, message)
                     )
                     self.check_uid(slug, agent, pipe)
+                    if agent == current:
+                        pipe.unwatch()
+                        return
                     pipe.multi()
                     self.write(pipe, slug, agent, current)
                     pipe.execute()

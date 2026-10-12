@@ -7,6 +7,7 @@ import pytest
 
 from scripts.ci_budget import defects
 from scripts.swarm import metrics_outbox
+from scripts.swarm.health import standing
 from scripts.swarm.store import PREFIX
 from scripts.swarm_ledger import ledger_comments
 
@@ -66,9 +67,11 @@ def swarm():
     import fakeredis
 
     store = SimpleNamespace(redis=fakeredis.FakeRedis(decode_responses=True))
-    ledger = SimpleNamespace(added=[])
-    ledger.followup = lambda slug, text: ledger.added.append((slug, text))
-    return store, SimpleNamespace(repo="/repo"), ledger
+    return store, SimpleNamespace(repo="/repo")
+
+
+def _found(store):
+    return standing.read(store.redis, "sw").get("ci_overrun")
 
 
 def _gh(calls, runs=RUNS):
@@ -93,13 +96,23 @@ def test_keys_sit_under_the_swarm_prefix():
     assert defects.key("sw", "seen", "1") == f"{PREFIX}:sw:ci-budget:seen:1"
 
 
-def test_a_run_over_fifteen_minutes_to_gate_required_is_filed_once_in_plain_words(swarm):
-    store, config, ledger = swarm
+def test_a_run_over_fifteen_minutes_updates_one_standing_ci_overrun_finding_in_plain_words(swarm):
+    store, config = swarm
     calls = []
-    actions = defects.refresh("sw", config, store, ledger, NOW_MS, run=_gh(calls))
-    assert ledger.added == [("sw", TEXT)]
+    actions = defects.refresh("sw", config, store, NOW_MS, run=_gh(calls))
+    assert _found(store) == {
+        "stage": "ci_overrun",
+        "value": 16.1,
+        "threshold": 15.0,
+        "unit": "minutes from push to Gate Required",
+        "detail": TEXT,
+        "fired": 1,
+        "episodes": ["1"],
+        "first_at": NOW_MS,
+        "updated_at": NOW_MS,
+    }
     assert ledger_comments.problems(TEXT, "item") == []
-    assert actions == ["filed a ledger follow up for a pull request Tests run over fifteen minutes"]
+    assert actions == ["updated the standing ci overrun finding for a pull request Tests run over fifteen minutes"]
     assert 0 < store.redis.ttl(defects.key("sw", "seen", "1")) <= defects.SEEN_TTL_S
     assert store.redis.exists(defects.key("sw", "seen", "3"))
     assert _job_reads(calls) == [
@@ -108,15 +121,30 @@ def test_a_run_over_fifteen_minutes_to_gate_required_is_filed_once_in_plain_word
     ]
 
     later = NOW_MS + defects.REFRESH_MS
-    assert defects.refresh("sw", config, store, ledger, later, run=_gh(calls)) == []
-    assert len(ledger.added) == 1
+    assert defects.refresh("sw", config, store, later, run=_gh(calls)) == []
+    assert (_found(store)["fired"], _found(store)["updated_at"]) == (1, NOW_MS)
     assert len(_job_reads(calls)) == 2
 
 
+def test_each_new_slow_run_updates_the_same_finding_and_counts_once(swarm):
+    store, config = swarm
+    defects.refresh("sw", config, store, NOW_MS, run=_gh([]))
+    JOBS[6] = _jobs(6, "17:30")
+    try:
+        later = NOW_MS + defects.REFRESH_MS
+        defects.refresh("sw", config, store, later, run=_gh([], [*RUNS, _run(6, "00:00", "17:30")]))
+    finally:
+        del JOBS[6]
+    found = _found(store)
+    assert (found["fired"], found["episodes"], found["value"], found["updated_at"]) == (2, ["1", "6"], 17.5, later)
+    assert found["detail"].endswith(URL.format(6))
+    assert len(standing.findings(store.redis, "sw", later)) == 1
+
+
 def test_github_is_read_from_the_repository_over_the_window(swarm):
-    store, config, ledger = swarm
+    store, config = swarm
     calls = []
-    defects.refresh("sw", config, store, ledger, NOW_MS, run=_gh(calls))
+    defects.refresh("sw", config, store, NOW_MS, run=_gh(calls))
     since = datetime.fromtimestamp(NOW_MS / 1000 - defects.WINDOW_S, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     runs = [(command, kwargs) for command, kwargs in calls if "/jobs" not in command[2]]
     assert runs and all(f"created=>={since}&" in command[2] and kwargs["cwd"] == "/repo" for command, kwargs in runs)
@@ -133,19 +161,19 @@ def test_github_is_read_from_the_repository_over_the_window(swarm):
 
 
 def test_the_pass_reads_github_at_most_once_per_refresh_interval(swarm):
-    store, config, ledger = swarm
+    store, config = swarm
     calls = []
-    defects.refresh("sw", config, store, ledger, defects.REFRESH_MS, run=_gh(calls))
+    defects.refresh("sw", config, store, defects.REFRESH_MS, run=_gh(calls))
     read = len(calls)
     assert read
-    defects.refresh("sw", config, store, ledger, 2 * defects.REFRESH_MS - 1, run=_gh(calls))
+    defects.refresh("sw", config, store, 2 * defects.REFRESH_MS - 1, run=_gh(calls))
     assert len(calls) == read
 
 
 def test_a_run_of_exactly_fifteen_minutes_is_inside_budget(swarm):
-    store, config, ledger = swarm
+    store, config = swarm
     calls = []
-    defects.refresh("sw", config, store, ledger, NOW_MS, run=_gh(calls, [_run(7, "00:00", "15:00")]))
+    defects.refresh("sw", config, store, NOW_MS, run=_gh(calls, [_run(7, "00:00", "15:00")]))
     assert _job_reads(calls) == []
     assert defects.defect(_run(1, "00:00", "20:00"), _jobs(1, "15:00")) is None
 
@@ -168,55 +196,28 @@ def test_a_skipped_gate_still_ends_the_measured_run():
 
 
 def test_a_failed_read_files_nothing_and_retries_next_interval(swarm, capsys):
-    store, config, ledger = swarm
+    store, config = swarm
 
     def broken(command, **kwargs):
         raise subprocess.CalledProcessError(1, command, "", "HTTP 502")
 
-    assert defects.refresh("sw", config, store, ledger, NOW_MS, run=broken) == []
-    assert ledger.added == []
+    assert defects.refresh("sw", config, store, NOW_MS, run=broken) == []
+    assert _found(store) is None
     assert "ci budget skipped reading Tests runs: HTTP 502" in capsys.readouterr().err
-    defects.refresh("sw", config, store, ledger, NOW_MS + defects.REFRESH_MS, run=_gh([]))
-    assert len(ledger.added) == 1
-
-
-def test_a_followup_the_ledger_refuses_is_not_sent_again(swarm):
-    store, config, ledger = swarm
-    refused = []
-
-    def refuse(slug, text):
-        refused.append(text)
-        return False
-
-    ledger.followup = refuse
-    assert defects.refresh("sw", config, store, ledger, NOW_MS, run=_gh([])) == []
-    defects.refresh("sw", config, store, ledger, NOW_MS + defects.REFRESH_MS, run=_gh([]))
-    assert len(refused) == 1
-
-
-def test_a_followup_that_fails_to_reach_the_ledger_is_retried_next_interval(swarm):
-    store, config, ledger = swarm
-
-    def unreachable(slug, text):
-        raise ConnectionRefusedError("ledger down")
-
-    ledger.followup = unreachable
-    defects.refresh("sw", config, store, ledger, NOW_MS, run=_gh([]))
-    ledger.followup = lambda slug, text: ledger.added.append((slug, text))
-    defects.refresh("sw", config, store, ledger, NOW_MS + defects.REFRESH_MS, run=_gh([]))
-    assert len(ledger.added) == 1
+    defects.refresh("sw", config, store, NOW_MS + defects.REFRESH_MS, run=_gh([]))
+    assert _found(store)["fired"] == 1
 
 
 def test_a_malformed_run_record_does_not_stop_the_pass(swarm, capsys):
-    store, config, ledger = swarm
+    store, config = swarm
     broken = {"id": 9, "event": "pull_request", "status": "completed", "conclusion": "success", "head_branch": "e"}
-    defects.refresh("sw", config, store, ledger, NOW_MS, run=_gh([], [broken, *RUNS]))
-    assert len(ledger.added) == 1
+    defects.refresh("sw", config, store, NOW_MS, run=_gh([], [broken, *RUNS]))
+    assert _found(store)["fired"] == 1
     assert "ci budget skipped one Tests run: 'updated_at'" in capsys.readouterr().err
 
 
 def test_one_run_whose_jobs_cannot_be_read_does_not_hide_the_others(swarm, capsys):
-    store, config, ledger = swarm
+    store, config = swarm
     calls = []
     healthy = _gh(calls)
 
@@ -225,12 +226,12 @@ def test_one_run_whose_jobs_cannot_be_read_does_not_hide_the_others(swarm, capsy
             raise subprocess.CalledProcessError(1, command, "", "HTTP 502")
         return healthy(command, **kwargs)
 
-    defects.refresh("sw", config, store, ledger, NOW_MS, run=run)
-    assert ledger.added == []
+    defects.refresh("sw", config, store, NOW_MS, run=run)
+    assert _found(store) is None
     assert "/runs/3/jobs" in _job_reads(calls)[-1]
     assert "ci budget skipped one Tests run: HTTP 502" in capsys.readouterr().err
-    defects.refresh("sw", config, store, ledger, NOW_MS + defects.REFRESH_MS, run=healthy)
-    assert len(ledger.added) == 1
+    defects.refresh("sw", config, store, NOW_MS + defects.REFRESH_MS, run=healthy)
+    assert _found(store)["fired"] == 1
 
 
 def test_a_run_without_a_finished_gate_is_no_defect():
@@ -300,9 +301,9 @@ def _inserted(sent, table):
 
 
 def test_with_the_sink_set_each_finished_pull_request_and_dev_push_run_is_metered_once(swarm, sink):
-    store, config, ledger = swarm
+    store, config = swarm
     calls = []
-    assert defects.refresh("sw", config, store, ledger, NOW_MS, run=_metered_gh(calls), environ=SINK) == []
+    assert defects.refresh("sw", config, store, NOW_MS, run=_metered_gh(calls), environ=SINK) == []
     assert [(r["run_id"], r["event"], r["run_s"]) for r in _inserted(sink, "ci_runs")] == [
         (22, "push", 420.0),
         (21, "pull_request", 600.0),
@@ -316,30 +317,30 @@ def test_with_the_sink_set_each_finished_pull_request_and_dev_push_run_is_metere
     assert 0 < store.redis.ttl(defects.key("sw", "metered", "21", "1")) <= defects.SEEN_TTL_S
 
     reads = len(calls)
-    defects.refresh("sw", config, store, ledger, NOW_MS + defects.REFRESH_MS, run=_metered_gh(calls), environ=SINK)
+    defects.refresh("sw", config, store, NOW_MS + defects.REFRESH_MS, run=_metered_gh(calls), environ=SINK)
     assert [c for c in calls[reads:] if "/jobs" in c] == []
 
 
 def test_a_run_over_budget_reads_its_jobs_once_for_the_defect_and_the_rows(swarm, sink):
-    store, config, ledger = swarm
+    store, config = swarm
     calls = []
-    actions = defects.refresh("sw", config, store, ledger, NOW_MS, run=_gh(calls), environ=SINK)
+    actions = defects.refresh("sw", config, store, NOW_MS, run=_gh(calls), environ=SINK)
     assert _job_reads(calls).count("repos/{owner}/{repo}/actions/runs/1/jobs?per_page=100") == 1
-    assert actions == ["filed a ledger follow up for a pull request Tests run over fifteen minutes"]
+    assert actions == ["updated the standing ci overrun finding for a pull request Tests run over fifteen minutes"]
     pushes = [kwargs["cwd"] for command, kwargs in calls if "event=push" in command[2]]
     assert pushes and set(pushes) == {"/repo"}
 
 
 def test_without_the_sink_no_push_runs_or_logs_are_read(swarm):
-    store, config, ledger = swarm
+    store, config = swarm
     calls = []
-    defects.refresh("sw", config, store, ledger, NOW_MS, run=_metered_gh(calls), environ={})
+    defects.refresh("sw", config, store, NOW_MS, run=_metered_gh(calls), environ={})
     assert [c for c in calls if "event=push" in c or c.endswith("/logs") or "/runs/22/" in c] == []
     assert not store.redis.keys(defects.key("sw", "metered", "*"))
 
 
 def test_a_run_whose_log_cannot_be_read_is_metered_on_a_later_pass(swarm, sink, capsys):
-    store, config, ledger = swarm
+    store, config = swarm
     healthy = _metered_gh([])
 
     def broken(command, **kwargs):
@@ -347,25 +348,25 @@ def test_a_run_whose_log_cannot_be_read_is_metered_on_a_later_pass(swarm, sink, 
             raise subprocess.CalledProcessError(1, command, stderr="HTTP 502")
         return healthy(command, **kwargs)
 
-    defects.refresh("sw", config, store, ledger, NOW_MS, run=broken, environ=SINK)
+    defects.refresh("sw", config, store, NOW_MS, run=broken, environ=SINK)
     assert "ci budget skipped metering one Tests run: HTTP 502" in capsys.readouterr().err
     assert [r["run_id"] for r in _inserted(sink, "ci_runs")] == [22]
-    defects.refresh("sw", config, store, ledger, NOW_MS + defects.REFRESH_MS, run=healthy, environ=SINK)
+    defects.refresh("sw", config, store, NOW_MS + defects.REFRESH_MS, run=healthy, environ=SINK)
     assert [r["run_id"] for r in _inserted(sink, "ci_runs")] == [22, 21]
 
 
 def test_rows_the_outbox_cannot_take_leave_their_runs_unmetered(swarm, monkeypatch, tmp_path):
-    store, config, ledger = swarm
+    store, config = swarm
     blocker = tmp_path / "file"
     blocker.write_text("")
     monkeypatch.setattr(metrics_outbox, "spool_path", lambda: blocker / "outbox.sqlite")
-    actions = defects.refresh("sw", config, store, ledger, NOW_MS, run=_metered_gh([]), environ=SINK)
+    actions = defects.refresh("sw", config, store, NOW_MS, run=_metered_gh([]), environ=SINK)
     assert len(actions) == 1 and actions[0].startswith("metrics outbox failed:")
     assert not store.redis.keys(defects.key("sw", "metered", "*"))
 
 
 def test_a_failed_job_log_is_read_from_the_repository(swarm, sink):
-    store, config, ledger = swarm
+    store, config = swarm
     seen = []
     healthy = _metered_gh([])
 
@@ -374,7 +375,7 @@ def test_a_failed_job_log_is_read_from_the_repository(swarm, sink):
             seen.append((command, kwargs))
         return healthy(command, **kwargs)
 
-    defects.refresh("sw", config, store, ledger, NOW_MS, run=run, environ=SINK)
+    defects.refresh("sw", config, store, NOW_MS, run=run, environ=SINK)
     assert seen == [
         (
             ["gh", "api", "repos/{owner}/{repo}/actions/jobs/211/logs"],
@@ -384,7 +385,7 @@ def test_a_failed_job_log_is_read_from_the_repository(swarm, sink):
 
 
 def test_dev_push_runs_that_cannot_be_read_leave_pull_request_runs_metered(swarm, sink, capsys):
-    store, config, ledger = swarm
+    store, config = swarm
     healthy = _metered_gh([])
 
     def run(command, **kwargs):
@@ -392,23 +393,23 @@ def test_dev_push_runs_that_cannot_be_read_leave_pull_request_runs_metered(swarm
             raise subprocess.CalledProcessError(1, command, stderr="HTTP 503")
         return healthy(command, **kwargs)
 
-    defects.refresh("sw", config, store, ledger, NOW_MS, run=run, environ=SINK)
+    defects.refresh("sw", config, store, NOW_MS, run=run, environ=SINK)
     assert "ci budget skipped reading dev push Tests runs: HTTP 503" in capsys.readouterr().err
     assert [r["run_id"] for r in _inserted(sink, "ci_runs")] == [21]
 
 
 def test_a_run_whose_rows_break_their_table_is_skipped_and_the_rest_ship(swarm, sink, capsys, monkeypatch):
-    store, config, ledger = swarm
+    store, config = swarm
     monkeypatch.setitem(METERED_RUNS[0], "head_branch", None)
-    assert defects.refresh("sw", config, store, ledger, NOW_MS, run=_metered_gh([]), environ=SINK) == []
+    assert defects.refresh("sw", config, store, NOW_MS, run=_metered_gh([]), environ=SINK) == []
     assert "ci budget skipped metering one Tests run: ci_runs.branch must be String" in capsys.readouterr().err
     assert [r["run_id"] for r in _inserted(sink, "ci_runs")] == [22]
 
 
 def test_each_pass_meters_at_most_a_batch_of_runs(swarm, sink, monkeypatch):
-    store, config, ledger = swarm
+    store, config = swarm
     monkeypatch.setattr(defects, "METER_BATCH", 1)
-    defects.refresh("sw", config, store, ledger, NOW_MS, run=_metered_gh([]), environ=SINK)
+    defects.refresh("sw", config, store, NOW_MS, run=_metered_gh([]), environ=SINK)
     assert [r["run_id"] for r in _inserted(sink, "ci_runs")] == [21]
-    defects.refresh("sw", config, store, ledger, NOW_MS + defects.REFRESH_MS, run=_metered_gh([]), environ=SINK)
+    defects.refresh("sw", config, store, NOW_MS + defects.REFRESH_MS, run=_metered_gh([]), environ=SINK)
     assert [r["run_id"] for r in _inserted(sink, "ci_runs")] == [21, 22]

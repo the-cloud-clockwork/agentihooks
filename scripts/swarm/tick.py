@@ -201,7 +201,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     with PLACING:
         actions += skip_refused(quota_notice.refresh, slug, config, store, ledger, runtime, now_ms)
         actions += skip_refused(ci_speed.refresh, slug, config, store, now_ms)
-        actions += skip_refused(ci_defects.refresh, slug, config, store, ledger, now_ms)
+        actions += skip_refused(ci_defects.refresh, slug, config, store, now_ms)
         actions += skip_refused(ci_flakes.refresh, slug, config, store, ledger, now_ms)
         actions += skip_refused(time_left.refresh, slug, store, ledger, runtime, config, doc)
         if not sleeping:

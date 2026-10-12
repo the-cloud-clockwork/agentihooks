@@ -126,7 +126,7 @@ def test_the_envelope_carries_every_fact_the_runtime_holds(store):
     }
 
 
-@pytest.mark.parametrize(("harness", "saved", "recorded"), [("claude", "max", "high"), ("codex", "xhigh", "high")])
+@pytest.mark.parametrize(("harness", "saved", "recorded"), [("claude", "max", "xhigh"), ("codex", "xhigh", "xhigh")])
 def test_a_master_envelope_records_its_launch_effort_inside_the_swarm_range(store, harness, saved, recorded):
     master = AgentRecord("master@a1b2c3-0001", "master", "master", harness=harness, effort=saved)
     envelope = build(store, "sw", master, "recycle", [], 0, run=lambda argv, **_: _done(code=1))

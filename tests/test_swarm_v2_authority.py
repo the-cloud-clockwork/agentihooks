@@ -728,7 +728,6 @@ def test_task_expiry_refuses_before_a_delayed_controller_expiry(fixture, monkeyp
     [
         ("renew", "claim"),
         ("renew", "executions"),
-        ("renew", "control-owner"),
         ("renew", "launch-grants"),
         ("renew", "launch-registrations"),
         ("renew", "launch-grants-disabled"),
