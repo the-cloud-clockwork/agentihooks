@@ -219,9 +219,12 @@ def flush_once(session_id: str, transcript_path: str) -> int:
 
     deadline = time.monotonic() + budget().attempt_timeout * 0.8
     position = None
-    while time.monotonic() < deadline:
+    duration = 0.0
+    while time.monotonic() + duration < deadline:
+        started = time.monotonic()
         export_session(session_id, transcript_path)
         state = _cursor(session_id)
+        duration = max(duration, time.monotonic() - started)
         if state.get("pending"):
             return 1
         if not (state.get("overflow") or state.get("deferred_source")):
