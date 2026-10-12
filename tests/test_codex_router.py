@@ -684,6 +684,11 @@ def test_a_bearer_child_carries_its_token_and_account_id_and_runs_the_bearer_pro
         (["--model", "chosen-model", "-c", 'model_reasoning_effort="low"', "probe"], None),
         ([], None),
         (["--model"], None),
+        (["--image", "first.png", "second.png", "--model", "chosen-model", "exec", "probe"], 5),
+        (["-ifirst.png", "second.png", "-m", "chosen-model", "e", "--", "-"], 4),
+        (["--image=first.png", "--model", "chosen-model", "exec", "probe"], 3),
+        (["-i", "first.png", "exec"], None),
+        (["--image"], None),
     ],
 )
 def test_routed_auth_overrides_share_the_exec_config_scope_and_preserve_interactive_order(kind, args, at):
