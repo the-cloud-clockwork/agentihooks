@@ -54,6 +54,40 @@ def test_routed_session_reads_quota_for_every_occupied_account(monkeypatch, tmp_
     assert sorted((r.name, r.sessions, r.week_left) for r in seen) == [("a", 1, 90), ("b", 2, 90), ("c", 1, 90)]
 
 
+@pytest.mark.parametrize("missing_token", [None, "", "   "])
+def test_launch_choices_skip_a_cached_claude_account_without_its_token(monkeypatch, tmp_path, missing_token):
+    from scripts import agent_choice
+
+    env = {"AGENTIHOOKS_HOME": str(tmp_path), "AH_CC_TOKEN_mail": "fake"}
+    if missing_token is not None:
+        env["AH_CC_TOKEN_old"] = missing_token
+    windows = balancer.QuotaWindow(used=10)
+    results = [balancer.ProbeResult(name, "allowed", "NORMAL", 90, windows, windows) for name in ("mail", "old")]
+    balancer._write_cache(
+        tmp_path / "claude-router-cache.json",
+        {
+            "version": 1,
+            "modes": {
+                "normal": {
+                    "accounts": {
+                        f"AH_CC_TOKEN_{r.account}": {"observed_at": 100, "result": balancer._result_data(r)}
+                        for r in results
+                    }
+                }
+            },
+        },
+    )
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {"mail": 2, "old": 1})
+    monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
+    monkeypatch.setattr(agent_choice.time, "time", lambda: 100)
+    rows = capacity.accounts(env, 100)
+    assert [(seat.account, seat.sessions) for seat in capacity.offered(rows)] == [("mail", 2)]
+    assert agent_choice.choose("", env) == ("claude", "rotation")
+    runtime, config, launches = _runtime_probe(tmp_path, monkeypatch, rows)
+    runtime.spawn(config, "plan", "engineer@a1b2c3-0001", {"id": "t1", "title": "x"})
+    assert launches == [("t1", "claude", "mail")]
+
+
 @pytest.mark.parametrize(
     ("five_used", "expected_cap"),
     [(10, 6), (50, 4), (80, 3), (93, 2), (97, 0)],
