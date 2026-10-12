@@ -683,7 +683,7 @@ def test_the_head_read_asks_the_rest_pulls_endpoint(code, out, found):
 
     def run(command, **options):
         calls.append((command, options))
-        return SimpleNamespace(returncode=code, stdout=out)
+        return SimpleNamespace(returncode=code, stdout=out, stderr="refused")
 
     assert head(URL + "/", run) == found
     assert calls == [(["gh", "api", "repos/o/r/pulls/7"], {"capture_output": True, "text": True, "timeout": 20})]
