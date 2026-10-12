@@ -199,7 +199,7 @@ jobs:
 
   helm-kind:
     needs: kind-due
-    if: ${{ needs.kind-due.outputs.due == 'true' }}
+    if: ${{ !cancelled() && needs.kind-due.result == 'success' && needs.kind-due.outputs.due == 'true' }}
     uses: ./.github/workflows/helm-kind.yml
 
   # Every shard restores this one key, or nothing when the lookup found none, so all shards of a run split alike.
