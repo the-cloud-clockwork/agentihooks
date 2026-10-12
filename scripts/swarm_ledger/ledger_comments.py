@@ -82,7 +82,7 @@ def can_change(entry, by, members):
 def post_status(thread, by, entry_id, text, ctx, target, attachments=None):
     """An agent's comment amends its own latest one on the item, unless the operator spoke after it."""
     live = [e for e in thread if not e.get("deleted")]
-    mine = next((e for e in reversed(live) if e.get("by") == by), None)
+    mine = next((e for e in reversed(live) if e.get("by") == by and "to" not in e), None)
     replied = mine is not None and any(e.get("by") == "operator" for e in live[live.index(mine) + 1 :])
     if mine is None or replied or "outcome" in mine:
         if any(e["id"] == entry_id for e in thread):
@@ -104,6 +104,14 @@ def post_status(thread, by, entry_id, text, ctx, target, attachments=None):
 def post_outcome(thread, op, ctx, target):
     if not any(e["id"] == op["id"] for e in thread):
         thread.append({"id": op["id"], "by": op["by"], "at": ctx.at, "text": op["text"], "outcome": op["outcome"]})
+        ctx.record(op["by"], "comment added", target, id=op["id"], text=op["text"])
+    seen(ctx, op["by"])
+
+
+def post_answer(thread, op, ctx, target):
+    """An agent's answer to the operator stays beside its status comment: it never amends one or is amended."""
+    if not any(e["id"] == op["id"] for e in thread):
+        thread.append({"id": op["id"], "by": op["by"], "at": ctx.at, "text": op["text"], "to": op["to"]})
         ctx.record(op["by"], "comment added", target, id=op["id"], text=op["text"])
     seen(ctx, op["by"])
 
@@ -144,6 +152,9 @@ def agent_thread_op(thread, op, ctx, target, noun):
     if op["op"] == "add" and "outcome" in op:
         post_outcome(thread, op, ctx, target)
         return True
+    if op["op"] == "add" and noun == "comment" and "to" in op:
+        post_answer(thread, op, ctx, target)
+        return True
     if op["op"] == "add" and noun == "comment":
         post_status(thread, by, op["id"], text, ctx, target, op.get("attachments"))
         return True
@@ -181,7 +192,7 @@ def audit_item(where, item, task_ids=()):
     for entry in item.get("comments", []):
         if entry.get("deleted") or entry.get("by") == "operator":
             continue
-        counts[entry["by"]] = counts.get(entry["by"], 0) + 1
+        counts[entry["by"]] = counts.get(entry["by"], 0) + ("to" not in entry)
         if problems(entry["text"], "comment", task_ids=task_ids):
             rows.append((where, entry["id"], entry["by"], problems(entry["text"], "comment", task_ids=task_ids)))
     rows += [(where, "-", by, [f"{n} comments, keep one status"]) for by, n in counts.items() if n > 1]

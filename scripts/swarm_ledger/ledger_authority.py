@@ -64,6 +64,8 @@ def refusal(name, op):
         return f"{name} cannot join as {op['role']}"
     if op["op"] == "claim":
         return claim_refusal(resolve_name(name))
+    if "to" in op and str(op.get("thread")).endswith("/comments"):
+        return f"{name} cannot answer the operator on an entry; the swarm relay posts that answer"
     return ""
 
 

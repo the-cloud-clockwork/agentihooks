@@ -283,7 +283,6 @@ class Mail:
         return masters.MasterSeats(self.store.redis).owners(self.slug, self.doc) if self.doc else {}
 
     def owner(self, target):
-        """A phase's or a task's item goes to the live master owning its phase, anything else to the lead."""
         return masters.route(target, self.doc, lambda: self.owners, self.masters, self.master)
 
     def once(self, key, act):
@@ -485,7 +484,7 @@ def _followups(mail, doc, events, ledger, now_ms):
                 f"A follow-up on ledger {mail.slug} is still open fifteen minutes after {event['by']} added it: "
                 f"{followup['text']}\nDecide it now, or it goes to the operator's Priorities."
             )
-            sent += mail.send(f"{target}:raised", mail.master, text, ref=f"{mail.slug}:event:{target}")
+            sent += mail.send(f"{target}:raised", mail.owner(target), text, ref=f"{mail.slug}:event:{target}")
         if age >= FOLLOWUP_OPERATOR_MS:
             ask = "Open half an hour without a decision: " + " ".join(followup["text"].split()[:ASK_WORDS])
             if mail.once(f"{target}:operator", lambda: ledger.priority(mail.slug, target, ask)):
