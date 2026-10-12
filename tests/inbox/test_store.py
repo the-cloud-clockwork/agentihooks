@@ -200,6 +200,36 @@ def test_reply_goes_to_the_sender_and_closes_the_original_done(store):
     assert closed.state == "done" and answer.id in closed.reason
 
 
+def test_reply_retry_returns_the_same_outgoing_item(store):
+    original = store.send("alice", "bob", "question")
+    answer = store.reply(original.id, "bob", "answer")
+    replay = store.reply(original.id, "bob", "answer")
+    assert replay.id == answer.id
+    assert [item.id for item in store.inbox("alice")] == [answer.id]
+    assert len(store.history(original.id)) == 2
+
+
+def test_reply_retry_refuses_different_text(store):
+    original = store.send("alice", "bob", "question")
+    answer = store.reply(original.id, "bob", "answer", answer_id="reply-one")
+    with pytest.raises(InboxError) as refused:
+        store.reply(original.id, "bob", "changed", answer_id="reply-one")
+    assert str(refused.value) == "a reply retry must keep its sender, recipient, text and informational flag"
+    assert store.get(answer.id).text == "answer"
+
+
+def test_reply_retry_after_a_lost_close_keeps_one_outgoing_item(store, monkeypatch):
+    original = store.send("alice", "bob", "question")
+    close = store.close
+    monkeypatch.setattr(store, "close", lambda *args: (_ for _ in ()).throw(ConnectionError("lost close")))
+    with pytest.raises(ConnectionError):
+        store.reply(original.id, "bob", "answer")
+    monkeypatch.setattr(store, "close", close)
+    answer = store.reply(original.id, "bob", "answer")
+    assert [item.id for item in store.inbox("alice")] == [answer.id]
+    assert store.get(original.id).reason == f"replied with message {answer.id}"
+
+
 def test_only_the_addressee_can_reply(store):
     item = store.send("alice", "bob", "hi")
     with pytest.raises(InboxError):
