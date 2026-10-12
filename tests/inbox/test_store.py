@@ -209,6 +209,17 @@ def test_reply_retry_returns_the_same_outgoing_item(store):
     assert len(store.history(original.id)) == 2
 
 
+def test_reply_retry_keeps_the_resolved_sender_alias(store):
+    store.names.mint_code("sw", "sw", "/repo")
+    renamed = store.names.next("sw", "eng")
+    original = store.send("alice", "bob", "question")
+    store.names.alias("alice", renamed)
+    answer = store.reply(original.id, "bob", "answer")
+    assert answer.address == renamed
+    assert store.reply(original.id, "bob", "answer").id == answer.id
+    assert [item.id for item in store.inbox(renamed)] == [answer.id]
+
+
 def test_reply_retry_refuses_different_text(store):
     original = store.send("alice", "bob", "question")
     answer = store.reply(original.id, "bob", "answer", answer_id="reply-one")
