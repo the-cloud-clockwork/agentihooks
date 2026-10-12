@@ -648,7 +648,7 @@ def test_a_dead_owner_pending_recovery_keeps_its_claim_lease(store):
     dead = owners(store)[2]
     runtime.live.remove(dead.name)
     claim = store.key("sw", "claim", dead.task)
-    store.redis.pexpire(claim, 1_000)
+    store.redis.pexpire(claim, 60_000)
     outage.observe("sw", "provider", ["provider unavailable"], MINUTE)
     tick("sw", store, ledger, runtime, 8 * MINUTE)
     assert store.claimant("sw", dead.task) == dead.name
