@@ -53,13 +53,19 @@ def assign_files(
 
 
 def assign_nodes(
-    durations: dict[str, float], shards: int, grouped: set[str] | dict[str, str], workers: int
+    durations: dict[str, float],
+    shards: int,
+    grouped: set[str] | dict[str, str],
+    workers: int,
+    sizes: dict[str, int] | None = None,
 ) -> list[list[str]]:
     serial = {node: seconds if node.split("::", 1)[0] in grouped else 0.0 for node, seconds in durations.items()}
     serial_groups = (
         {node: grouped.get(node.split("::", 1)[0], "") for node in durations} if isinstance(grouped, dict) else None
     )
-    return _assign_work(durations, serial, dict.fromkeys(durations, 0.0), shards, workers, serial_groups)
+    files = {node: node.split("::", 1)[0] for node in durations}
+    collection = {node: (sizes or {}).get(path, 0) * SECONDS_PER_SOURCE_BYTE for node, path in files.items()}
+    return _assign_work(durations, serial, collection, shards, workers, serial_groups, files)
 
 
 def _assign_work(
@@ -69,13 +75,16 @@ def _assign_work(
     shards: int,
     workers: int,
     serial_groups: dict[str, str] | None = None,
+    collection_groups: dict[str, str] | None = None,
 ) -> list[list[str]]:
     loads = [0.0] * shards
     serial_loads: list[dict[str, float]] = [{} for _ in range(shards)]
     collection_loads = [0.0] * shards
+    collected: list[set[str]] = [set() for _ in range(shards)]
     groups: list[list[str]] = [[] for _ in range(shards)]
     for path in sorted(seconds, key=lambda f: (-max(seconds[f] / workers, serial[f]) - collection[f], f)):
         group = serial_groups[path] if serial_groups is not None else ""
+        file = collection_groups[path] if collection_groups is not None else path
         lightest = min(
             range(shards),
             key=lambda i: (
@@ -85,13 +94,15 @@ def _assign_work(
                     serial_loads[i].get(group, 0.0) + serial[path],
                 )
                 + collection_loads[i]
-                + collection[path],
+                + (collection[path] if file not in collected[i] else 0.0),
                 loads[i],
             ),
         )
         loads[lightest] += seconds[path]
         serial_loads[lightest][group] = serial_loads[lightest].get(group, 0.0) + serial[path]
-        collection_loads[lightest] += collection[path]
+        if file not in collected[lightest]:
+            collection_loads[lightest] += collection[path]
+            collected[lightest].add(file)
         groups[lightest].append(path)
     return groups
 

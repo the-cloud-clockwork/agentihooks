@@ -338,6 +338,14 @@ def test_the_code_steps_push_and_record_the_branch_at_the_first_commit(kind):
     )
 
 
+@pytest.mark.parametrize("kind", ["code", "ci"])
+def test_the_code_steps_start_each_review_round_with_the_review_command(kind):
+    assert _step(_steps({"kind": kind}), 4).endswith(
+        "review closes after three rounds. Start every review round with agentihooks swarm sw review; "
+        "the third round closes review and a fourth is refused."
+    )
+
+
 def test_a_stacked_claim_starts_from_the_dependency_branch_builds_pushes_and_parks():
     lines = _steps({"kind": "code", "stack_base": [{"task": "t1", "branch": "engineer-a1b2c3-0001"}]})
     text = "\n".join(lines)

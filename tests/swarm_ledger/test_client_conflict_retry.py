@@ -130,6 +130,24 @@ def test_the_exhausted_message_names_the_resource_the_server_reports(pauses):
     assert json.loads(error.value.read())["error"]["details"] == {"path": "chat"}
 
 
+def pin(name, revision):
+    return {"op": "set", "id": name, "path": f"phases/p1/{name}", "value": True, "expected_revision": revision}
+
+
+def test_a_batch_pinning_two_revisions_on_one_resource_is_refused_before_sending(pauses):
+    client = Scripted()
+    with pytest.raises(ValueError, match="phases/p1") as error:
+        client.mutate(SLUG, [pin("a", "p0"), pin("b", "p1")])
+    assert "p0" in str(error.value) and "p1" in str(error.value)
+    assert client.calls == []
+
+
+def test_a_batch_pinning_the_same_revision_twice_still_sends(pauses):
+    client = Scripted({"applied": ["a", "b"]})
+    client.mutate(SLUG, [pin("a", "p0"), pin("b", "p0")])
+    assert [(path, payload["guards"]) for path, payload in client.calls] == [("operations", {"phases/p1": "p0"})]
+
+
 def test_an_unnamed_conflict_names_every_fetched_resource_and_keeps_the_reply(pauses):
     def unnamed():
         return urllib.error.HTTPError("http://ledger.test/ops", 409, "Conflict", {"X-Seen": "1"}, io.BytesIO(CONFLICT))
