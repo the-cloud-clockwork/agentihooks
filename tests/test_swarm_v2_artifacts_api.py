@@ -109,3 +109,59 @@ def test_expired_task_lease_refuses_mutation(storage):
     authority.current.return_value.lease_deadline_ms = 100
     assert request(api, "write", key="swarm/task/staging/execution/blob", data=encoded(b"blob"))[0] == 409
     assert backend.keys("") == []
+
+
+@pytest.mark.parametrize("change,status", [("revoked", 401), ("generation", 409), ("expired", 409)])
+def test_authority_change_during_storage_read_refuses_commit(storage, monkeypatch, change, status):
+    api, backend, authority = storage
+    size = backend.size
+
+    def changed(key):
+        found = size(key)
+        if change == "revoked":
+            authority.authorize.side_effect = GrantRefused("unauthenticated", "revoked")
+        elif change == "generation":
+            authority.current.return_value.generation = 8
+        else:
+            authority.current.return_value.lease_deadline_ms = 100
+        return found
+
+    monkeypatch.setattr(backend, "size", changed)
+    key = "swarm/task/staging/execution/checkpoint"
+    assert request(api, "write", key=key, data=encoded(b"checkpoint"))[0] == status
+    assert backend.keys("") == []
+
+
+def test_immutable_publication_keeps_a_concurrent_committed_record(storage, monkeypatch):
+    api, backend, _ = storage
+    key = "swarm/task/artifacts/checkpoint.json"
+    first = json.dumps({"execution_id": "execution", "generation": 7, "sha256": "a" * 64, "size": 1}).encode()
+    second = json.dumps({"execution_id": "execution", "generation": 7, "sha256": "b" * 64, "size": 1}).encode()
+    size = backend.size
+
+    def concurrent(subject):
+        found = size(subject)
+        if subject == key and found is None:
+            backend.write(key, first)
+        return found
+
+    monkeypatch.setattr(backend, "size", concurrent)
+    assert request(api, "write", key=key, data=encoded(second))[0] == 409
+    assert backend.read(key, 0, len(first)) == first
+
+
+def test_raw_removal_preserves_committed_manifest_references(storage):
+    from dataclasses import replace
+
+    from scripts.swarm_v2.artifacts.base import ArtifactStore
+
+    api, backend, authority = storage
+    registration = replace(authority.authorize.return_value, generation=7)
+    store = ArtifactStore(backend, lambda token: registration, "grant")
+    reference = store.put("checkpoint", b"retained")
+    store.commit_manifest("checkpoint", ["checkpoint"])
+    record = "swarm/task/artifacts/checkpoint.json"
+    object_key = f"swarm/task/objects/{reference.sha256}"
+    assert request(api, "remove", key=record)[0] == 403
+    assert request(api, "remove", key=object_key)[0] == 403
+    assert store.get_range(reference) == b"retained"

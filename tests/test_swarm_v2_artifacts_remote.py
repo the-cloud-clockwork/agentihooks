@@ -10,7 +10,11 @@ class Objects:
     def __init__(self):
         self.objects = {}
 
-    def put_object(self, Bucket, Key, Body):
+    def put_object(self, Bucket, Key, Body, IfNoneMatch=None):
+        if IfNoneMatch == "*" and (Bucket, Key) in self.objects:
+            from botocore.exceptions import ClientError
+
+            raise ClientError({"Error": {"Code": "PreconditionFailed"}}, "PutObject")
         self.objects[Bucket, Key] = Body
 
     def head_object(self, Bucket, Key):
