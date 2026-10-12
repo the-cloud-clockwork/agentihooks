@@ -2,7 +2,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import capacity
+from scripts.swarm import capacity, quota_notice
 from scripts.swarm.store import RedisStore
 
 
@@ -56,7 +56,7 @@ def _window_text(account: capacity.Account, window: str) -> str:
 
 def directive(slug: str, account: capacity.Account, crossed: list[str]) -> str:
     return (
-        f"QUOTA HANDOFF WARNING: {account.harness} account {account.name} "
+        f"{quota_notice.WARNING_OPENING} {account.harness} account {account.name} "
         f"{'. It '.join(_window_text(account, window) for window in crossed)}. "
         "Finish your current step and write your Handoff v2 with the handoff skill while quota remains. "
         f"Submit it with agentihooks swarm {slug} handoff DOC --reason quota, then stop. "

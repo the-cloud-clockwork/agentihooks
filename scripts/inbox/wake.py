@@ -43,15 +43,15 @@ def typed_wake(agent):
     return bool(agent.pane_id) and agent.lane != MASTER and agent.harness not in WATCHED
 
 
-def decide(item, pane, history, now_ms, window, slug):
+def decide(item, pane, history, now_ms, window, slug, since=0):
     """pane is the receiver's herdr status, None when it sits outside herdr; the window clock skips the swarm's
-    outage time since the item's last step."""
-    if item.state != "pending":
+    outage time since the item's last step, and starts no earlier than since. since None holds the item."""
+    if item.state != "pending" or since is None:
         return None
     steps = [e.get("event") for e in history]
     if TO_OPERATOR in steps:
         return None
-    last = max(e["at"] for e in history)
+    last = max(since, *(e["at"] for e in history))
     due = now_ms - last - outage.paused_ms(slug, last, now_ms) >= window
     if TO_MASTER in steps:
         return TO_OPERATOR if due else None
@@ -99,7 +99,8 @@ def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window, quiet=DEFAULT_
         agent = panes.get(receiver)
         if agent and agent.name not in statuses:
             statuses[agent.name] = _pane_state(inbox.redis, slug, herdr, agent, now_ms, quiet)
-        step = decide(item, statuses.get(receiver), inbox.history(item.id), now_ms, window, slug)
+        since = _seat_clock(inbox, receiver, held, names)
+        step = decide(item, statuses.get(receiver), inbox.history(item.id), now_ms, window, slug, since)
         if step == WOKEN and _still_held(inbox, held) and _wake(herdr, agent, prompted):
             if inbox.note(item.id, WOKEN, BY, f"prompted {receiver} to read its inbox", now_ms, held):
                 actions.append(f"woke {receiver} for message {item.id}")
@@ -161,6 +162,18 @@ def _receiver(inbox, address):
 
 def _still_held(inbox, held):
     return held is None or inbox.seats.occupant(held[0]).generation == held[1]
+
+
+def _seat_clock(inbox, receiver, held, names):
+    """When a seat item's window may start: None while the seat waits for a live successor, else when its occupant
+    bound. Seats that can get no successor have their mail withdrawn by the exit sweep."""
+    if held is None:
+        return 0
+    address, generation = held
+    if receiver not in names or inbox.seats.left(receiver, address):
+        return None
+    bound = (e["at"] for e in inbox.seats.history(address) if e["generation"] == generation and "event" not in e)
+    return max(bound, default=0)
 
 
 def _status(herdr, agent):
