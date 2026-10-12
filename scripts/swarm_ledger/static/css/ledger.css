@@ -568,14 +568,13 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 .sw-table .sw-empty td { white-space: normal; font-size: var(--fs-meta); color: var(--dim); }
 #freeze-table { table-layout: fixed; }
 #freeze-table th:nth-child(1) { width: 28px; }
-#freeze-table th:nth-child(2) { width: 9ch; }
-#freeze-table th:nth-child(4) { width: 24ch; }
-#freeze-table th:nth-child(5) { width: 8ch; }
-#freeze-table th:nth-child(6) { width: 12ch; }
+#freeze-table th:nth-child(2) { width: 9%; }
+#freeze-table th:nth-child(4) { width: 20%; }
+#freeze-table th:nth-child(5) { width: 9%; }
+#freeze-table th:nth-child(6) { width: 10%; }
 #freeze-table td { overflow: hidden; text-overflow: ellipsis; }
-#freeze-table td:last-child { text-align: right; }
 #freeze-table .sw-btn { min-height: 0; padding: 0; font-size: inherit; font-weight: 400; line-height: inherit; vertical-align: baseline; }
-#freeze-table td:last-child, #freeze-table th:last-child { padding-right: 4px; }
+#freeze-table td:nth-child(3) { padding-right: var(--space-group); }
 #health-table td:nth-child(3) { min-width: 20ch; white-space: normal; color: var(--text-2); }
 #health-table .hl-pick, #health-table .hl-note { border-bottom-color: transparent; font-size: var(--fs-body); }
 #health-table .hl-pick:hover, #health-table .hl-note:hover, #health-table .hl-pick:focus, #health-table .hl-note:focus { border-bottom-color: var(--accent); }
