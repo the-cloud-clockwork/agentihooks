@@ -2681,7 +2681,7 @@ def test_cli_renders_the_overlays_named(world, overlays, capsys):
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
 def test_an_overlay_render_uses_the_recorded_commit_after_the_bundle_advances(world, overlays, target):
-    from scripts.profiles import render
+    from scripts.profiles import bundle_copy, render
 
     recorded = _git(world["bundle"], "rev-parse", "HEAD").strip()
     _write(overlays / "ov-a" / ".claude" / "rules" / "ov-a.md", "ADVANCED RULE\n")
@@ -2699,23 +2699,29 @@ def test_an_overlay_render_uses_the_recorded_commit_after_the_bundle_advances(wo
     assert _git(world["bundle"], "status", "--porcelain") == ""
     assert (out / "skills" / "bundle-skill" / "SKILL.md").read_text() == "---\nname: bundle-skill\n---\n"
     assert render.binding.inspect(out, "rb-eng", target)["profile"] == "rb-eng"
+    assert bundle_copy.current() is None
+    assert not list(render.rendered_root().glob("bundle-*"))
+    assert _git(out.parent / "bundle", "rev-parse", "HEAD").strip() == recorded
+    assert _git(out.parent / "bundle", "status", "--porcelain") == ""
     assert render.render(target, "rb-eng", overlays=["ov-a"], bundle_revision=recorded) is None
+    assert not list(render.rendered_root().glob("bundle-*"))
 
 
-def test_an_overlay_render_refuses_a_bundle_with_uncommitted_changes(world, overlays):
+def test_an_overlay_render_ignores_uncommitted_bundle_changes(world, overlays):
     from scripts.profiles import render
 
     recorded = _git(world["bundle"], "rev-parse", "HEAD").strip()
-    _write(overlays / "ov-a" / ".claude" / "rules" / "ov-a.md", "EDITED RULE\n")
+    rule = overlays / "ov-a" / ".claude" / "rules" / "ov-a.md"
+    _write(rule, "EDITED RULE\n")
+    status = _git(world["bundle"], "status", "--porcelain")
 
-    with pytest.raises(ValueError) as refused:
-        render.render("codex", "rb-eng", overlays=["ov-a"], bundle_revision=recorded)
+    out = render.render("codex", "rb-eng", overlays=["ov-a"], bundle_revision=recorded)
 
-    assert str(refused.value) == (
-        f"the launch recorded bundle commit {recorded}, but the bundle at {world['bundle']} has uncommitted changes; "
-        f"check out {recorded} in the bundle before this launch renders"
-    )
-    assert render.profile_dir("rb-eng", ["ov-a"]) is None
+    assert "OV-A RULE MARKER" in (out / "AGENTS.md").read_text()
+    assert "EDITED RULE" not in (out / "AGENTS.md").read_text()
+    assert rule.read_text() == "EDITED RULE\n"
+    assert _git(world["bundle"], "status", "--porcelain") == status
+    assert world["install"]._get_bundle_path() == world["bundle"]
 
 
 def test_an_overlay_render_refuses_a_recorded_commit_without_a_linked_bundle(world, overlays, monkeypatch):
@@ -2762,21 +2768,16 @@ def test_an_overlay_render_refuses_a_bundle_git_does_not_answer(world, overlays,
     )
 
 
-def test_the_bundle_pin_reads_head_and_status_as_text_within_ten_seconds(world, overlays, monkeypatch):
-    from scripts.profiles import render
+def test_an_unavailable_recorded_commit_does_not_publish_a_home(world, overlays):
+    from scripts.profiles import bundle_copy, render
 
-    calls = []
+    with pytest.raises(ValueError) as refused:
+        render.render("claude", "rb-eng", overlays=["ov-a"], bundle_revision="not-a-commit")
 
-    def run(argv, **kwargs):
-        calls.append((argv[3:], kwargs))
-        return subprocess.CompletedProcess(argv, 0, stdout="abc123\n" if argv[3] == "rev-parse" else "", stderr="")
-
-    monkeypatch.setattr(render.subprocess, "run", run)
-
-    render._pin(world["bundle"], "abc123")
-
-    options = {"capture_output": True, "text": True, "timeout": 10}
-    assert calls == [(["rev-parse", "HEAD"], options), (["status", "--porcelain"], options)]
+    assert str(refused.value).startswith("the launch recorded bundle commit not-a-commit, but git cannot read")
+    assert render.profile_dir("rb-eng", ["ov-a"]) is None
+    assert bundle_copy.current() is None
+    assert world["install"]._get_bundle_path() == world["bundle"]
 
 
 def test_an_overlay_render_from_the_recorded_commit_renders_and_stamps_it(world, overlays):

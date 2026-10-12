@@ -774,6 +774,11 @@ def _print_bundle_discover_hint(*, profile_hint: str = "default") -> None:
 
 def _get_bundle_path() -> Path | None:
     """Return the linked bundle path from state.json, or AGENTIHOOKS_BUNDLE_PATH env var."""
+    from scripts.profiles.bundle_copy import current
+
+    recorded = current()
+    if recorded is not None:
+        return recorded
     state = _load_state()
     bundle = state.get("bundle")
     if bundle:

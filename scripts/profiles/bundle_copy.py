@@ -1,0 +1,81 @@
+from __future__ import annotations
+
+import shutil
+import subprocess
+import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from pathlib import Path
+
+_ACTIVE: ContextVar[tuple[Path, Path] | None] = ContextVar("recorded_bundle", default=None)
+
+
+def current() -> Path | None:
+    active = _ACTIVE.get()
+    return active[1] if active is not None else None
+
+
+def identity(path: Path) -> Path:
+    active = _ACTIVE.get()
+    if active is not None and path.is_relative_to(active[1]):
+        return active[0] / path.relative_to(active[1])
+    return path
+
+
+def attach(root: Path) -> None:
+    active = _ACTIVE.get()
+    if active is not None:
+        destination = root / "bundle"
+        shutil.copytree(active[1], destination, symlinks=True)
+        _ACTIVE.set((active[0], destination))
+
+
+def reuse(root: Path) -> bool:
+    active = _ACTIVE.get()
+    if active is None:
+        return True
+    destination = root / "bundle"
+    if not destination.is_dir():
+        return False
+    _ACTIVE.set((active[0], destination))
+    return True
+
+
+def _git(bundle: Path, revision: str, argv: list[str]) -> str:
+    recorded = f"the launch recorded bundle commit {revision}, but"
+    try:
+        done = subprocess.run(argv, capture_output=True, text=True, timeout=10)
+    except subprocess.TimeoutExpired as exc:
+        raise ValueError(f"{recorded} git did not answer within 10 seconds for the bundle at {bundle}") from exc
+    if done.returncode:
+        raise ValueError(f"{recorded} git cannot read the bundle at {bundle}: {done.stderr.strip()}")
+    return done.stdout.strip()
+
+
+@contextmanager
+def recorded(bundle: Path | None, revision: str, root: Path) -> Iterator[None]:
+    if bundle is None:
+        raise ValueError(f"the launch recorded bundle commit {revision}, but no bundle is linked")
+    commit = _git(
+        bundle,
+        revision,
+        ["git", "-C", str(bundle), "rev-parse", "--verify", "--end-of-options", f"{revision}^{{commit}}"],
+    )
+    root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="bundle-", dir=root) as temporary:
+        copy = Path(temporary)
+        git = ["git", "-C", str(copy)]
+        for args in (
+            ["init", "--quiet"],
+            ["fetch", "--quiet", "--depth=1", "--no-tags", str(bundle), commit],
+            ["update-ref", "HEAD", "FETCH_HEAD"],
+            ["read-tree", "HEAD"],
+            ["checkout-index", "--all"],
+        ):
+            _git(bundle, revision, [*git, *args])
+        token = _ACTIVE.set((bundle, copy))
+        try:
+            yield
+        finally:
+            _ACTIVE.reset(token)
