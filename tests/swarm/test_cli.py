@@ -875,6 +875,47 @@ def test_main_runs_the_inbox_waker_and_renames_without_a_slug(monkeypatch):
     assert ran == [("waker", "store", {}), ("rename", "store", {})]
 
 
+def test_timer_ensure_also_runs_the_alert_intake_service(tmp_path):
+    calls = []
+    timer.ensure(
+        "/bin/agentihooks",
+        tmp_path,
+        run=lambda argv, **kw: calls.append((argv, kw)) or subprocess.CompletedProcess(argv, 0),
+    )
+    assert (tmp_path / "agentihooks-alert-intake.service").read_text() == (
+        "[Unit]\nDescription=agentihooks swarm alert intake for Grafana\n\n"
+        "[Service]\nType=simple\nEnvironment=PYTHONUNBUFFERED=1\n"
+        "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
+        "EnvironmentFile=-%h/.agentihooks/.env\n"
+        'ExecStart="/bin/agentihooks" swarm alerts\n'
+        "Restart=on-failure\nRestartSec=5\n\n"
+        "[Install]\nWantedBy=default.target\n"
+    )
+    enable = ["systemctl", "--user", "enable", "--now", "agentihooks-alert-intake.service"]
+    assert (enable, {"capture_output": True, "text": True, "timeout": 30}) in calls
+    assert calls[-1][0] == ["systemctl", "--user", "enable", "--now", "agentihooks-swarm.timer"]
+
+
+def test_main_runs_the_alert_intake_without_a_slug(monkeypatch):
+    ran = []
+    monkeypatch.setattr(cli, "connect", lambda: "store")
+    monkeypatch.setattr(cli, "cmd_alerts", lambda store, args: ran.append((store, vars(args))))
+    assert cli.main(["alerts"]) == 0
+    assert ran == [("store", {})]
+
+
+def test_the_alerts_command_serves_the_intake_with_the_swarm_store_and_clock(monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts.swarm import alert_intake
+
+    ran = []
+    monkeypatch.setenv("AGENTIHOOKS_ALERT_INTAKE_PORT", "9002")
+    monkeypatch.setattr(alert_intake, "serve", lambda redis, settings, clock: ran.append((redis, settings, clock)))
+    cli.cmd_alerts(SimpleNamespace(redis="redis"), None)
+    assert ran == [("redis", alert_intake.Settings("0.0.0.0", 9002, None), cli.now_ms)]
+
+
 def test_the_waker_command_runs_the_waker_with_the_swarm_clock(monkeypatch):
     from scripts.inbox import waker
 

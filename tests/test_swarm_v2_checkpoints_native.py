@@ -705,9 +705,9 @@ def test_members_counts_against_the_member_limit(monkeypatch, members, limit, re
     data = tar({f"m{index}": b"abc" for index in range(members)})
     if refused:
         with pytest.raises(native.NativeError, match=f"^{native.TOO_LARGE}$"):
-            native._members(data)
+            native.members(data)
     else:
-        assert native._members(data) == {f"m{index}": b"abc" for index in range(members)}
+        assert native.members(data) == {f"m{index}": b"abc" for index in range(members)}
 
 
 @pytest.mark.parametrize(("limit", "refused"), [(6, False), (5, True)])
@@ -716,9 +716,9 @@ def test_members_sums_every_member_against_the_byte_limit(monkeypatch, limit, re
     data = tar({"a": b"abc", "b": b"def"})
     if refused:
         with pytest.raises(native.NativeError, match=f"^{native.TOO_LARGE}$"):
-            native._members(data)
+            native.members(data)
     else:
-        assert native._members(data) == {"a": b"abc", "b": b"def"}
+        assert native.members(data) == {"a": b"abc", "b": b"def"}
 
 
 def test_members_refuses_a_compressed_archive():
@@ -728,7 +728,7 @@ def test_members_refuses_a_compressed_archive():
         info.size = 3
         archive.addfile(info, io.BytesIO(b"x\n\n"))
     with pytest.raises(native.NativeError, match=f"^{native.FORMAT}$"):
-        native._members(buffer.getvalue())
+        native.members(buffer.getvalue())
 
 
 def test_write_new_never_replaces_or_follows(tmp_path):
@@ -806,6 +806,61 @@ def test_an_index_path_under_the_resolved_home_is_found_through_a_linked_home(tm
     alias.symlink_to(real)
     result = qualifier(tmp_path).capture("codex", alias, CODEX, tmp_path, cases.VERSIONS["codex"], True)
     assert result.session_id == CODEX
+
+
+TOKEN = "ghp_" + "Z9" * 18
+
+
+def planted(root: Path) -> tuple[native.Qualifier, object]:
+    cwd = root / "repo"
+    common = {"sessionId": CLAUDE, "version": "2.1.296", "cwd": cases.LOGICAL_CWD}
+    printed = {"type": "user", **common, "toolUseResult": {"stdout": f"token {TOKEN}"}}
+    home = cases.claude_home(root, cwd, [*cases.claude_records(CLAUDE), printed])
+    writer = qualifier(root)
+    return writer, writer.capture("claude", home, CLAUDE, cwd, cases.VERSIONS["claude"], True)
+
+
+def test_a_capture_keeps_no_secret_a_tool_printed_and_counts_it(tmp_path):
+    writer, result = planted(tmp_path)
+    assert TOKEN.encode() not in result.material()
+    assert result.fields()["secret_redactions"] == 1
+    assert cases.commit(writer, result, "ckpt-1", "claude").authoritative
+    stored = [path.read_bytes() for path in (tmp_path / "durable").rglob("*") if path.is_file()]
+    assert stored
+    assert all(TOKEN.encode() not in data for data in stored)
+    store = writer.validator.store
+    assert json.loads(store.get_range(store.recorded("ckpt-1")))["secret_redactions"] == 1
+
+
+def test_a_redacted_conversation_restores_with_its_marker(tmp_path):
+    writer, result = planted(tmp_path)
+    assert cases.commit(writer, result, "ckpt-1", "claude").authoritative
+    home, cwd = tmp_path / "fresh", tmp_path / "fresh-repo"
+    restored = reader(tmp_path).restore("ckpt-1", home, cwd, cases.VERSIONS["claude"])
+    assert restored == native.Resumed("claude", CLAUDE, native.HARNESSES["claude"].command(CLAUDE))
+    placed = (home / "projects" / native.encoded(cwd) / f"{CLAUDE}.jsonl").read_text()
+    assert "token [REDACTED:github_token]" in placed
+    assert TOKEN not in placed
+
+
+@pytest.mark.parametrize(("slack", "available"), [(0, True), (-1, False)])
+def test_the_archive_bound_applies_to_the_redacted_files(tmp_path, monkeypatch, slack, available):
+    _, first = planted(tmp_path / "first")
+    kept = sum(len(data) for _, data in first.files)
+    monkeypatch.setattr(native, "ARCHIVE_BYTES", kept + slack)
+    _, result = planted(tmp_path / "second")
+    assert isinstance(result, native.NativeCapture) is available
+    if not available:
+        assert result.cause == native.TOO_LARGE
+
+
+def test_a_key_split_across_records_makes_the_capture_unavailable(tmp_path):
+    cwd = tmp_path / "repo"
+    common = {"sessionId": CLAUDE, "version": "2.1.296", "cwd": cases.LOGICAL_CWD}
+    opened = {"type": "user", **common, "toolUseResult": {"stdout": "-----BEGIN RSA PRIVATE" + " KEY-----\nAAAA"}}
+    home = cases.claude_home(tmp_path, cwd, [*cases.claude_records(CLAUDE), opened])
+    result = qualifier(tmp_path).capture("claude", home, CLAUDE, cwd, cases.VERSIONS["claude"], True)
+    assert result == native.Unavailable("claude", "secret_unredactable")
 
 
 @pytest.mark.parametrize("case", ["a", "b", "c"])

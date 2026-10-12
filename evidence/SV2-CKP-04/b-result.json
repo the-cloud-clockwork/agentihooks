@@ -1,0 +1,128 @@
+{
+  "case": "T-SV2-CKP-04-B",
+  "evidence_class": "mocked: a local durable directory backend behind a granted artifact store, fixture launch registrations, a backend wrapper that loses acknowledgements and a fake clock; no object store, worker Pod or harness was used",
+  "input_sha256": {
+    "context-only.json": "0bef305b2565a336c5021606d2bf4b1a6f4b35f9cade44aee8c6720da27e5fda"
+  },
+  "observed": {
+    "fixture": {
+      "corrected_request": {
+        "promoted": true,
+        "reason": "promoted",
+        "verdict": {
+          "authoritative": true,
+          "completeness": "complete",
+          "reason": "context"
+        }
+      },
+      "latest_for_restoring_attempt": "ckpt-g3-s1",
+      "latest_for_stale_attempt": "",
+      "newer_metrics": {
+        "checkpoint_publish_failures": {
+          "identity_conflict": 1,
+          "scope_mismatch": 1,
+          "stale_sequence": 1
+        }
+      },
+      "outside_grant": {
+        "promoted": false,
+        "reason": "scope_mismatch",
+        "verdict": null
+      },
+      "raced_during_upload": {
+        "promoted": false,
+        "reason": "superseded_generation",
+        "verdict": {
+          "authoritative": true,
+          "completeness": "complete",
+          "reason": "context"
+        }
+      },
+      "raced_pointers": [
+        "s1/t1/pointers/0000000003/0000000001.json"
+      ],
+      "refusals_left_store_unchanged": true,
+      "same_identity_other_content": {
+        "promoted": false,
+        "reason": "identity_conflict",
+        "verdict": null
+      },
+      "stale_metrics": {
+        "checkpoint_publish_failures": {
+          "superseded_generation": 1
+        }
+      },
+      "stale_sequence": {
+        "promoted": false,
+        "reason": "stale_sequence",
+        "verdict": null
+      },
+      "superseded": {
+        "promoted": false,
+        "reason": "superseded_generation",
+        "verdict": null
+      },
+      "superseded_left_store_unchanged": true
+    },
+    "second_fixture": {
+      "corrected_request": {
+        "promoted": true,
+        "reason": "promoted",
+        "verdict": {
+          "authoritative": true,
+          "completeness": "complete",
+          "reason": "context"
+        }
+      },
+      "latest_for_restoring_attempt": "ckpt-g3-s1",
+      "latest_for_stale_attempt": "",
+      "newer_metrics": {
+        "checkpoint_publish_failures": {
+          "identity_conflict": 1,
+          "scope_mismatch": 1,
+          "stale_sequence": 1
+        }
+      },
+      "outside_grant": {
+        "promoted": false,
+        "reason": "scope_mismatch",
+        "verdict": null
+      },
+      "raced_during_upload": {
+        "promoted": false,
+        "reason": "superseded_generation",
+        "verdict": {
+          "authoritative": true,
+          "completeness": "complete",
+          "reason": "context"
+        }
+      },
+      "raced_pointers": [
+        "s1/t1/pointers/0000000003/0000000001.json"
+      ],
+      "refusals_left_store_unchanged": true,
+      "same_identity_other_content": {
+        "promoted": false,
+        "reason": "identity_conflict",
+        "verdict": null
+      },
+      "stale_metrics": {
+        "checkpoint_publish_failures": {
+          "superseded_generation": 1
+        }
+      },
+      "stale_sequence": {
+        "promoted": false,
+        "reason": "stale_sequence",
+        "verdict": null
+      },
+      "superseded": {
+        "promoted": false,
+        "reason": "superseded_generation",
+        "verdict": null
+      },
+      "superseded_left_store_unchanged": true
+    }
+  },
+  "state": "passed"
+}
