@@ -69,12 +69,11 @@ def refresh(slug: str, store: RedisStore, at: int) -> list[str]:
         pipe.set(store.key(slug, KEY), snapshot)
 
     if changed:
-        InboxStore(store.redis).send(
+        InboxStore(store.redis, persist=persist).send(
             "swarm",
             seat_address(slug, "master"),
             line(found),
             ref=f"top-bottleneck:{slug}:{transition}",
-            persist=persist,
         )
     else:
         persist(store.redis)

@@ -100,10 +100,11 @@ def close_reason(kind, detail=""):
 
 
 class InboxStore:
-    def __init__(self, redis):
+    def __init__(self, redis, *, persist=None):
         if redis is None:
             raise InboxError("no Redis client; the inbox refuses to run without it")
         self.redis = redis
+        self.persist = persist
         self.seats = SeatRegistry(redis)
         self.names = NameRegistry(redis)
 
@@ -128,7 +129,7 @@ class InboxStore:
             "",
         )
 
-    def send(self, sender, address, text, ref="", fyi=False, task="", item_id="", *, persist=None):
+    def send(self, sender, address, text, ref="", fyi=False, task="", item_id=""):
         """ref names the ledger write an operator item carries, for the seen marks; fyi marks an item that needs no
         work, so a bare close names no outcome; a given item_id refuses a second write of that item."""
         if not (sender and address and text.strip()):
@@ -162,8 +163,8 @@ class InboxStore:
             pipe.incr(self.key("open-size", address))
             pipe.sadd(self.key("waiting"), address)
             pipe.rpush(self.key("history", item.id), _entry("pending", sender, "", at))
-            if persist is not None:
-                persist(pipe)
+            if self.persist is not None:
+                self.persist(pipe)
             pipe.publish(NOTIFY, address)
             pipe.execute()
         return item
