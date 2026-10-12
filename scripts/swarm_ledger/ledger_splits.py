@@ -1,4 +1,4 @@
-from scripts.swarm_ledger import ledger_kinds, plan_ranges
+from scripts.swarm_ledger import ledger_kinds
 from scripts.swarm_ledger.ledger_groups import AUTHOR_RE, ITEM_RE, REFUSED_LANES
 
 OPS = ("task_split",)
@@ -8,6 +8,8 @@ FIELDS = {"op", "id", "by", "item", "halves"}
 
 
 def check(op):
+    from scripts.swarm_ledger import plan_ranges
+
     by = op.get("by")
     if not isinstance(by, str) or not AUTHOR_RE.match(by) or by == "operator":
         raise ValueError("task_split by: an agent name")
@@ -25,6 +27,8 @@ def check(op):
 
 
 def refusal(task: dict, halves: list) -> str:
+    from scripts.swarm_ledger import plan_ranges
+
     if ledger_kinds.kind(task) not in SPLIT_KINDS:
         return "not a code or ci task"
     if task.get("split_pulls"):
