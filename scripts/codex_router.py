@@ -564,6 +564,9 @@ def main(
     _report(report, status="routed", account=account.name, placement=placement)
     print(f"[agentihooks codex] account={account.name} sessions={live}/{cap} placement={placement}", flush=True)
     codex_bin = shutil.which("codex") or "codex"
+    from scripts.deps_preflight import refresh_codex_wrapper
+
+    refresh_codex_wrapper("codex")
     child = (
         envs.codex_interactive_child(active, account.name)
         if route == "interactive"

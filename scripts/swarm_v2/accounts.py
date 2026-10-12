@@ -220,7 +220,12 @@ class AccountCapacity:
                 raise SwarmError("stale_generation")
             return [], [holder], held
 
-        return self._write(account, decide)
+        held = self._write(account, decide)
+        if held is not None:
+            from scripts.routing.reservation import LaunchSlots
+
+            LaunchSlots(self.store.redis).release(execution_id)
+        return held
 
     def slots(self, account: str) -> list[Slot]:
         now = self.clock()

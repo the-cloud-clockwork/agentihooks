@@ -503,7 +503,8 @@ def code_steps(me, led, name, phase):
         "4. Gates green (ruff check, ruff format --check and the tests), commit in the worktree; at your first commit "
         f"push the branch (git push -u origin HEAD) and record it: {me} branch. Then review per the "
         "dev-cycle skill: at most two critic sub agents, Standards and Spec, that never edit and send every finding "
-        "back to you; fix each finding, the same reader re-reviews, and review closes after three rounds.",
+        "back to you; fix each finding, the same reader re-reviews, and review closes after three rounds. "
+        f"Start every review round with {me} review; the third round closes review and a fourth is refused.",
         f"5. Push, open the pull request into dev (with Closes #<n> when there is an issue), record it: {me} pr <pr url>",
         f"6. Wait on the checks with {me} wait --on checks <pr url>: the tick ends the wait and tells you when they "
         f"resolve, so no Monitor is needed. Queue on green checks with {me} merge queue <pr url>, then "

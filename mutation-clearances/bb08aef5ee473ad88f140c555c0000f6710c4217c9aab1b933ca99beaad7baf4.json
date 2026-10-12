@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/launch.py:scripts.swarm_v2.launch.x\u01c1DistributedLaunch\u01c1_reserve__mutmut_9:b4ebc8769d20342de8b0f07fafd678036c1fd1340138826896f5bf2df58d43f0": {
+    "reader": "standards",
+    "reason": "Equivalent on reachable scoped launches: ExecutionRegistry.start rejects caller supplied identity and generates exe- plus UUID hex. Scoped holder execution IDs therefore cannot equal XXXX. In the no predecessor branch both empty string and XXXX cannot match any reserved scoped execution ID in Lua ARGV[7], so admission count and outcome are identical. This ruling does not cover arbitrary direct LaunchSlots inputs."
+  }
+}
