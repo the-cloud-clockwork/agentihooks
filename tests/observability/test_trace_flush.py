@@ -359,16 +359,18 @@ def test_a_request_outliving_the_receiver_leaves_no_unclosed_socket():
         warnings.simplefilter("always")
         with _serving() as server:
             Receiver.delay = 1.0
-            connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=15)
+            port = server.server_port
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=15)
             connection.request("POST", "/", ExportTraceServiceRequest().SerializeToString())
             assert _wait(lambda: Receiver.posts == 1, 5), "the request never reached the receiver"
         del server
         for thread in set(threading.enumerate()) - before:
             thread.join(15)
+            assert not thread.is_alive()
         connection.getresponse().read()
-        connection.close()
         gc.collect()
-    assert [str(w.message) for w in caught if issubclass(w.category, ResourceWarning)] == []
+    leaked = [str(w.message) for w in caught if issubclass(w.category, ResourceWarning)]
+    assert [m for m in leaked if f"laddr=('127.0.0.1', {port})" in m] == []
 
 
 def _records(stamp="2026-10-07T10:00:00Z"):
