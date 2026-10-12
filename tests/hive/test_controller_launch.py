@@ -136,3 +136,106 @@ def test_nonlocal_controller_routes_worker_lanes_through_hives(setup, deployment
     assert fenced.placement_refusal("eng", {"id": "task"}) == ""
     assert fenced.placement_refusal("master", {}) == "the workstation hive spawns master work"
     setup.herdr.spawn.assert_not_called()
+
+
+def request_for(setup, name=None):
+    from scripts.swarm.store import AgentRecord
+    from scripts.swarm_v2.runtime.base import SpawnRequest
+
+    name = name or setup.store.next_name(setup.config.slug, "eng")
+    record = AgentRecord(name, "eng", "task", seat="eng-1@fixture", state="starting")
+    setup.store.put_agent("fixture", record)
+    setup.store.seats.occupy(record.seat, name, 0)
+    return SpawnRequest(
+        setup.config, "eng", name, {"id": "task", "seat": record.seat, "controller_epoch": setup.held.epoch}
+    )
+
+
+def order_for(setup, request, selected):
+    from scripts.hive.orders import LaunchOrder
+
+    admitted = setup.launcher.admit(request, selected)
+    return LaunchOrder(
+        "fixture",
+        admitted.execution_id,
+        admitted.generation,
+        "engineer",
+        "eng",
+        "task",
+        "account",
+        "claude",
+        "subscription",
+        "prompt",
+        setup.held.epoch,
+        0,
+    )
+
+
+def test_disabled_hive_never_falls_back_to_local_spawn(setup):
+    from scripts.swarm.controller import FencedRuntime
+    from scripts.swarm_v2.runtime.base import RuntimeRouter
+    from scripts.swarm_v2.runtime.routed import RoutedRuntime
+
+    routed = RoutedRuntime(setup.herdr, RuntimeRouter([], disabled=["hive"]))
+    fenced = FencedRuntime(setup.store, "fixture", setup.held, routed, "compose")
+    assert fenced.placement_refusal("eng", {"id": "task"}) == "the hive runtime is disabled on this controller"
+    setup.herdr.spawn.assert_not_called()
+
+
+def test_expired_order_honors_a_definitive_receipt(setup):
+    from scripts.hive.orders import Ack
+    from scripts.swarm_v2.runtime.base import Status
+
+    request = request_for(setup)
+    selected = setup.launcher.select(setup.config, "eng", request.task)
+    order = order_for(setup, request, selected)
+    setup.launcher.slots.reserve("claude:account", order.execution_id, 6, 300000)
+    setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(order.__dict__))
+    setup.launcher.orders.finish("remote", "0-0", order, Ack("failed", {}, "expired"))
+    result = setup.launcher.wait(order)
+    assert result.status is Status.REFUSED
+    assert result.detail == "hive launch failed: expired"
+    assert setup.launcher.orders_for("task") is None
+    assert setup.store.execution_registry.get("fixture", order.execution_id).state == "ended"
+
+
+def test_expired_unknown_order_remains_ambiguous(setup):
+    from scripts.swarm_v2.runtime.base import Status
+
+    request = request_for(setup)
+    selected = setup.launcher.select(setup.config, "eng", request.task)
+    order = order_for(setup, request, selected)
+    result = setup.launcher.wait(order)
+    assert result.status is Status.AMBIGUOUS
+    assert result.detail == "hive launch acknowledgement expired"
+    assert setup.store.execution_registry.get("fixture", order.execution_id).state == "launching"
+
+
+def test_replay_refuses_another_claimant(setup):
+    from scripts.hive.orders import Ack
+    from scripts.swarm_v2.runtime.base import Status
+
+    request = request_for(setup)
+    order = order_for(setup, request, setup.launcher.select(setup.config, "eng", request.task))
+    agent = setup.store.execution_registry.get("fixture", order.execution_id)
+    setup.store.execution_registry.update("fixture", replace(agent, state="working"))
+    setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(order.__dict__))
+    setup.launcher.orders.finish("remote", "0-0", order, Ack("live", agent.runtime_target))
+    other = replace(request, name=setup.store.next_name("fixture", "eng"))
+    result = setup.launcher.spawn(other)
+    assert result.status is Status.REFUSED
+    assert result.detail == "another claimant owns the hive launch order"
+    assert len(setup.store.execution_registry.records("fixture")) == 1
+
+
+def test_publication_uses_one_redis_transaction(setup):
+    from unittest.mock import patch
+
+    request = request_for(setup)
+    setup.launcher.wait = Mock(return_value="pending")
+    with patch.object(setup.store.redis, "pipeline", wraps=setup.store.redis.pipeline) as pipeline:
+        assert setup.launcher.spawn(request) == "pending"
+    queued = setup.store.redis.xrange(setup.launcher.orders.stream("remote"))
+    assert len(queued) == 1
+    assert json.loads(queued[0][1]["order"])["prompt_ref"] == setup.launcher.orders_for("task").prompt_ref
+    assert any(call.kwargs.get("transaction", True) for call in pipeline.call_args_list)
