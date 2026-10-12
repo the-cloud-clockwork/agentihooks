@@ -57,7 +57,10 @@ class ThreadState:
             self.requests.pop(params.get("requestId"), None)
 
     def follow(self, turn_id: str) -> None:
-        self.active_turn = "" if turn_id == self.ended else turn_id
+        if turn_id != self.ended:
+            self.active_turn = turn_id
+        elif self.active_turn == turn_id:
+            self.active_turn = ""
 
     def refresh(self, thread: dict) -> None:
         turns = thread.get("turns") or [{}]
@@ -188,7 +191,8 @@ class Pump:
         owner = self.binding.owner
         item = self.store.get(delivery.item)
         if digest(item) != delivery.digest:
-            self.receipts.reject(delivery.id, owner, MISMATCH)
+            self._requeue(delivery, MISMATCH)
+            self.next_reconcile = self.timing.clock()
             return
         try:
             self.receipts.submitting(delivery.id, owner)
@@ -198,10 +202,7 @@ class Pump:
         try:
             self._arbitrate(envelope(item, delivery))
         except protocol.Refused as refused:
-            self.receipts.reject(delivery.id, owner, str(refused))
-            for queued in self.queue:
-                self.receipts.reject(queued.id, owner, RELEASED)
-            self.queue.clear()
+            self._requeue(delivery, str(refused))
             self._hold()
             return
         except (protocol.ProtocolError, TimeoutError):
@@ -211,6 +212,14 @@ class Pump:
         self.receipts.accept(delivery.id, owner, delivery.digest)
         self.backoff = self.timing.backoff_s
         self.binding.transport.mark(active_turn_id=self.state.active_turn, last_transport_activity=self.timing.now_ms())
+
+    def _requeue(self, delivery: Delivery, reason: str) -> None:
+        """Reject delivery and release every queued successor, so the next scan rebuilds the queue in inbox order."""
+        owner = self.binding.owner
+        self.receipts.reject(delivery.id, owner, reason)
+        for queued in self.queue:
+            self.receipts.reject(queued.id, owner, RELEASED)
+        self.queue.clear()
 
     def _arbitrate(self, text: str) -> None:
         try:

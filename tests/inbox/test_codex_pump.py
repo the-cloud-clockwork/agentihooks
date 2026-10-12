@@ -295,7 +295,34 @@ def test_a_payload_that_changed_since_reservation_is_released_unsent(rig):
     assert not [m for m in rig.server.methods() if m.startswith("turn/")]
 
 
-def test_a_turn_running_before_the_pump_connected_holds_delivery_until_it_ends(rig):
+def test_a_changed_payload_in_the_middle_keeps_inbox_order(rig, recovery_deadline):
+    items = [rig.store.send("alice", ME, text) for text in ("one", "two", "three")]
+    rig.pump.start()
+    rig.pump.queue += rig.pump.dispatcher.reserve(ME, OWNER)
+    rig.store.redis.hset(rig.store.key("item", items[1].id), "text", "two changed")
+    rig.pump._submit(rig.pump.queue.pop(0))
+    rig.pump._submit(rig.pump.queue.pop(0))
+    assert rig.pump.queue == []
+    assert [d.reason for item in items[1:] for d in deliveries(rig, item.id)] == [MISMATCH, RELEASED]
+    assert rig.pump.next_reconcile == rig.clock.now
+    rig.pump.step()
+    texts = [m["params"]["input"][0]["text"].rsplit("\n", 1)[1] for m in rig.server.sent if "input" in m["params"]]
+    assert texts == ["one", "two changed", "three"]
+    assert [rig.store.get(item.id).state for item in items] == ["delivered", "delivered", "delivered"]
+
+
+def test_a_reply_naming_the_completed_turn_keeps_a_newer_active_turn():
+    state = codex.ThreadState("turn-2", ended="turn-1")
+    state.follow("turn-1")
+    assert state.active_turn == "turn-2"
+    state.follow("turn-3")
+    assert state.active_turn == "turn-3"
+    idle = codex.ThreadState("", ended="turn-1")
+    idle.follow("turn-1")
+    assert idle.active_turn == ""
+
+
+def test_a_turn_running_before_the_pump_connected_is_not_steered_and_holds_delivery_until_it_ends(rig):
     rig.server.begin_elsewhere()
     rig.server.frames.clear()
     rig.pump.start()
