@@ -14,7 +14,7 @@
 {{- end }}
 {{- $fullname := include "swarm.fullname" . }}
 {{- $reload := list $join.tlsSecretName }}
-{{- with .Values.redis.existingSecret.name }}
+{{- with ($join.redisSecret.name | default .Values.redis.existingSecret.name) }}
 {{- $reload = append $reload . }}
 {{- end }}
 apiVersion: apps/v1
@@ -63,7 +63,15 @@ spec:
           env:
             - name: AGENTIHOOKS_DEPLOYMENT
               value: {{ .Values.deployment | quote }}
+            {{- if $join.redisSecret.name }}
+            - name: AGENTIHOOKS_SWARM_REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $join.redisSecret.name }}
+                  key: {{ required "hive.join.redisSecret.key names the key holding the administrator Redis URL" $join.redisSecret.key }}
+            {{- else }}
             {{- include "swarm.redisEnv" . | nindent 12 }}
+            {{- end }}
           ports:
             - name: join
               containerPort: {{ $join.port }}

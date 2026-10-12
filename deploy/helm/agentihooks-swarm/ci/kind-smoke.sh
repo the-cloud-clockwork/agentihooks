@@ -119,6 +119,7 @@ plant_hive_join 'the hive join policy admits {"ipBlock": {"cidr": "0.0.0.0/0"}} 
 plant_hive_join 'the hive join command is' --set hive.join.memberRedisUrl=rediss://elsewhere.test:6379/0
 plant_hive_join 'the hive join Service ports are' --set hive.join.port=8771
 plant_hive_join 'the hive join volumes are' --set hive.join.tlsSecretName=other-tls
+plant_hive_join 'the hive join env is' --set hive.join.redisSecret.name=swarm-redis
 planted="$(helm template "$release" "$chart" | python3 tests/chart_hive_join.py "$release" "${hive_values[@]}" 2>&1 >/dev/null || true)"
 if [[ $planted != *"the chart renders [] for the hive join service"* ]]; then
   printf 'the chart check did not flag a missing hive join service: %s\n' "$planted" >&2

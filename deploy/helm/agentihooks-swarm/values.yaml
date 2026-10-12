@@ -12,6 +12,9 @@ hive:
     port: 8770
     memberRedisUrl: ""
     tlsSecretName: ""
+    redisSecret:
+      name: ""
+      key: ""
     affinity: {}
     tolerations: []
     ingressFrom: []

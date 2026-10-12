@@ -12,8 +12,11 @@ RELOAD = "secret.reloader.stakater.com/reload"
 def redis_env(values: dict, release: str) -> dict:
     redis = values["redis"]
     name = "AGENTIHOOKS_SWARM_REDIS_URL"
-    if redis["existingSecret"]["name"]:
-        return {"name": name, "valueFrom": {"secretKeyRef": dict(redis["existingSecret"])}}
+    secret = values["hive"]["join"]["redisSecret"]
+    if not secret["name"]:
+        secret = redis["existingSecret"]
+    if secret["name"]:
+        return {"name": name, "valueFrom": {"secretKeyRef": dict(secret)}}
     return {"name": name, "value": redis["url"] or f"redis://{release}-redis:6379/0"}
 
 
@@ -76,7 +79,11 @@ def main(release: str, values_paths: list[str], rendered: str) -> list[str]:
     if deployment["spec"]["selector"]["matchLabels"] != selector:
         problems.append("the hive join Deployment selects other pods")
     reload = set(deployment["metadata"].get("annotations", {}).get(RELOAD, "").split(","))
-    secrets = {join["tlsSecretName"], values["redis"]["existingSecret"]["name"]} - {""}
+    secrets = {
+        join["tlsSecretName"],
+        redis_env(values, release).get("valueFrom", {}).get("secretKeyRef", {}).get("name", ""),
+    }
+    secrets -= {""}
     if reload != secrets:
         problems.append(f"the hive join Deployment reloads on {sorted(reload)}, not {sorted(secrets)}")
     service = found["Service"]["spec"]
