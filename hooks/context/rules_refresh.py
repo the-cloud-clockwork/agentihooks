@@ -170,7 +170,9 @@ def maybe_inject(session_id: str) -> None:
             continue
 
         payload = marker.get("payload", "")
-        if payload and marker.get("home") == profile_home(claude_home()):
+        if marker.get("home") != profile_home(claude_home()):
+            log("rules_refresh: other profile home skipped", {"profile": profile, "session_id": session_id})
+        elif payload:
             inject_context(payload)
             log(
                 "rules_refresh: delivered",

@@ -281,6 +281,19 @@ class TestProfileHomeScope:
         assert received == []
         assert rules_refresh._load_marker("anton") is None
 
+    def test_a_skipped_session_is_logged_with_its_profile_and_id(self, tmp_home, mock_sessions, monkeypatch):
+        mock_sessions.return_value = {"s-master": {"status": "alive"}}
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(_role_home(tmp_home, "frontend", "f-1")))
+        rules_refresh.write_refresh_marker("frontend", "FRONTEND PERSONA")
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(_role_home(tmp_home, "master", "m-1")))
+        logged = []
+        monkeypatch.setattr(rules_refresh, "log", lambda *args: logged.append(args))
+        rules_refresh.maybe_inject("s-master")
+        assert (
+            "rules_refresh: other profile home skipped",
+            {"profile": "frontend", "session_id": "s-master"},
+        ) in logged
+
     def test_refresh_from_a_role_home_keys_the_marker_by_that_role(self, tmp_home, monkeypatch):
         from argparse import Namespace
 
