@@ -49,7 +49,7 @@ def test_a_stat_row_moves_by_its_grip_and_the_order_is_saved_to_the_shared_layou
     assert before[:2] == ["started", "elapsed"] and before[-1] == "top-bottleneck"
     assert page.tab.locator("#stats .stat dt").first.inner_text() == "STARTED"
     page.tab.locator('#stats [data-stat="elapsed"] .stat-grip').focus()
-    page.keyboard.press("ArrowUp")
+    page.tab.keyboard.press("ArrowUp")
     moved = ["elapsed", "started", *before[2:]]
     assert keys(page) == moved
     page.tab.wait_for_function("() => document.activeElement.matches('[data-stat=elapsed] .stat-grip')")

@@ -4,7 +4,7 @@ from scripts.swarm_ledger import ledger_fold
 def task(task_id, **fields):
     return {
         "id": task_id,
-        "title": f"Change number {task_id[1:]}",
+        "title": task_id,
         "lane": "eng",
         "state": "open",
         "claimed_by": "",
