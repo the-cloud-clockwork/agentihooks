@@ -164,7 +164,8 @@ def live(record: dict, now_ms: int) -> bool:
 
 
 def home(environ: Mapping[str, str] = os.environ) -> Path:
-    return Path(environ.get("AGENTIHOOKS_HOME") or Path.home() / ".agentihooks")
+    chosen = environ.get("AGENTIHOOKS_HOME") or os.environ.get("AGENTIHOOKS_HOME")
+    return Path(chosen or Path.home() / ".agentihooks")
 
 
 def seeded_id() -> str:

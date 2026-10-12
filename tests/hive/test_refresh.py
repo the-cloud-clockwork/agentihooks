@@ -4,10 +4,11 @@ import threading
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
 import pytest
 
-from scripts.hive import auth, cli, server
+from scripts.hive import auth, cli, registry, server
 from scripts.swarm import store
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -167,8 +168,8 @@ def test_a_revoke_whose_acl_save_fails_is_reported_and_completes_on_retry(saved,
             auth.revoke(redis, grant["id"])
 
     assert str(refused.value) == (
-        f"Redis could not save its ACL file, so revoking {grant['id']} is incomplete; run revoke again "
-        "(ERR There was an error trying to save the ACLs)"
+        f"revoking {grant['id']} is incomplete and a Redis restart before it completes revives its Redis user; "
+        "run revoke again (ERR There was an error trying to save the ACLs)"
     )
     assert redis.acl_users() == ["default"]
     assert auth.ledger_member(redis, grant["ledger_credential"]) is None
@@ -364,6 +365,15 @@ def test_no_saved_hive_redis_url_reads_as_none(tmp_path, content):
         (tmp_path / "hive.env").write_text(content)
 
     assert cli.saved_redis_url({"AGENTIHOOKS_HOME": str(tmp_path)}) is None
+
+
+def test_the_hive_home_comes_from_the_mapping_then_the_process(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "process"))
+
+    assert registry.home({"AGENTIHOOKS_HOME": str(tmp_path / "given")}) == tmp_path / "given"
+    assert registry.home({}) == tmp_path / "process"
+    monkeypatch.delenv("AGENTIHOOKS_HOME")
+    assert registry.home({}) == Path.home() / ".agentihooks"
 
 
 def test_a_refused_swarm_credential_is_not_refreshed(admin, redis_lib, monkeypatch):

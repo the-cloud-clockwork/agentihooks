@@ -177,11 +177,12 @@ def revoke(redis: "Redis", member_id: str) -> None:
         pipe.execute()
     try:
         _persist(redis)
+        redis.delete(member_key)
     except RedisError as exc:
         raise HiveError(
-            f"Redis could not save its ACL file, so revoking {member_id} is incomplete; run revoke again ({exc})"
+            f"revoking {member_id} is incomplete and a Redis restart before it completes revives its Redis user; "
+            f"run revoke again ({exc})"
         ) from exc
-    redis.delete(member_key)
 
 
 def write_env(home: Path | str, url: str, grant: dict) -> Path:
