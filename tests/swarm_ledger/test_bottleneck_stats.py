@@ -13,9 +13,8 @@ def test_top_stage_trend_and_action_fit_the_operator_viewport(open_page):
                 "label": "ci overrun",
                 "trend": "rising",
                 "last_action": "Proposed a faster mutation run",
-                "value": 3,
-                "threshold": 1,
-                "unit": "minutes",
+                "seconds": 10800.0,
+                "measured": "5 minutes ago",
             }
         ),
         width=1920,
@@ -23,16 +22,24 @@ def test_top_stage_trend_and_action_fit_the_operator_viewport(open_page):
     page.tab.set_viewport_size({"width": 1920, "height": 1080})
     box = page.tab.locator("#stats .top-bottleneck")
     assert box.is_visible()
-    assert box.inner_text() == "TOP BOTTLENECK\nci overrun\nTrend rising\nLast action Proposed a faster mutation run"
+    assert box.inner_text() == (
+        "TOP BOTTLENECK\nci overrun\nTrend rising\nMeasured 5 minutes ago\nLast action Proposed a faster mutation run"
+    )
     bounds = box.bounding_box()
     assert bounds["x"] >= 0 and bounds["x"] + bounds["width"] <= 1920
     assert bounds["y"] >= 0 and bounds["y"] + bounds["height"] <= 1080
 
 
-@pytest.mark.parametrize("top,label", [(None, "unavailable"), ({"stage": ""}, "none")])
-def test_stats_distinguish_missing_status_from_no_active_finding(open_page, top, label):
+@pytest.mark.parametrize(
+    "top,shown",
+    [
+        (None, "TOP BOTTLENECK\nunavailable\nTrend unknown\nLast action none recorded"),
+        ({"stage": ""}, "TOP BOTTLENECK\nnone\nTrend unknown\nMeasured never\nLast action none recorded"),
+    ],
+)
+def test_stats_distinguish_missing_status_from_no_active_finding(open_page, top, shown):
     page = open_page(status(top_bottleneck=top), width=1920)
-    assert label in page.tab.locator("#stats .top-bottleneck").inner_text()
+    assert page.tab.locator("#stats .top-bottleneck").inner_text() == shown
 
 
 def test_action_is_text_and_long_actions_wrap_within_stats(open_page):

@@ -1,6 +1,0 @@
-{
-  "scripts/swarm/bottleneck_status.py:scripts.swarm.bottleneck_status.x_observations__mutmut_15:f40185ed038a3b30b9212f291904a250f691a95819793736e2670777ab4ca20a": {
-    "reader": "/root/standards",
-    "reason": "A missing prior observation becomes None rather than an empty dictionary; trend returns unknown for both falsy inputs."
-  }
-}
