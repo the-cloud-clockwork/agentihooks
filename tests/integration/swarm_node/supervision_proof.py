@@ -85,7 +85,7 @@ def terminal_disconnect(container, root):
         os.close(master)
 
 
-def run_case(image, mode, output, kill=False):
+def run_case(image, mode, output, kill=False, supervised=False):
     container = docker(
         "run",
         "--detach",
@@ -99,12 +99,21 @@ def run_case(image, mode, output, kill=False):
         "128",
         image,
         "python",
-        "/opt/fixture/container_case.py",
+        "/opt/swarm-node/supervisor.py" if supervised else "/opt/fixture/container_case.py",
         mode,
     )
     try:
         observed = ready(container)
         root = observed["root"]
+        if supervised:
+            pid = docker(
+                "exec",
+                container,
+                "python",
+                "-c",
+                f"import json; from pathlib import Path; print(json.loads(Path({root!r}, 'context.json').read_text())['supervisor_pid'])",
+            )
+            assert pid == "1", f"supervisor is process {pid}, not process one"
         if kill:
             start = time.monotonic()
             try:
