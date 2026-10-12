@@ -21,6 +21,7 @@ paths=(
   profiles/
   media/
   docs/swarm-v2/schemas/
+  tests/chart_hive_join.py
   tests/chart_network.py
   tests/chart_secrets.py
   tests/chart_workers.py
