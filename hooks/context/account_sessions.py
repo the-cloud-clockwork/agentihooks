@@ -189,8 +189,14 @@ def live_codex_sessions(proc: Path = _PROC) -> int:
     return sum(1 for pid in entries if _is_codex_session(pid, proc))
 
 
-def codex_sessions_by_account(proc: Path = _PROC) -> dict[str, int]:
+def codex_sessions_by_account(proc: Path = _PROC, *, local: bool = False) -> dict[str, int]:
     """Interactive Codex sessions and exec runs per Codex account: a token slug, or the default login."""
+    from scripts.routing import aggregate
+
+    if not local and aggregate.enabled():
+        import time
+
+        return aggregate.counts("codex", time.time())
     try:
         entries = [int(entry.name) for entry in proc.iterdir() if entry.name.isdigit()]
     except OSError:
@@ -201,6 +207,18 @@ def codex_sessions_by_account(proc: Path = _PROC) -> dict[str, int]:
             account = codex_account_from_names(_env_names(pid, proc))
             counts[account] = counts.get(account, 0) + 1
     return counts
+
+
+def local_processes(proc: Path = _PROC) -> dict[str, dict[int, str]]:
+    found = {"claude": live_sessions(proc, handed_off_pids()), "codex": {}}
+    try:
+        entries = [int(entry.name) for entry in proc.iterdir() if entry.name.isdigit()]
+    except OSError:
+        return found
+    for pid in entries:
+        if _is_codex_session(pid, proc):
+            found["codex"][pid] = codex_account_from_names(_env_names(pid, proc))
+    return found
 
 
 def handed_off_pids() -> set[int]:
@@ -237,8 +255,14 @@ def fleet_held(environ: Mapping[str, str] | None = None) -> dict[str, int]:
         return {}
 
 
-def sessions_by_account(proc: Path = _PROC) -> dict[str, int]:
+def sessions_by_account(proc: Path = _PROC, *, local: bool = False) -> dict[str, int]:
     """Live sessions per account; sessions that already handed off their work do not hold a slot."""
+    from scripts.routing import aggregate
+
+    if not local and aggregate.enabled():
+        import time
+
+        return aggregate.counts("claude", time.time())
     try:
         skip = handed_off_pids()
     except Exception:
@@ -246,6 +270,7 @@ def sessions_by_account(proc: Path = _PROC) -> dict[str, int]:
     counts: dict[str, int] = {}
     for account in live_sessions(proc, skip).values():
         counts[account] = counts.get(account, 0) + 1
-    for account, held in fleet_held().items():
-        counts[account] = counts.get(account, 0) + held
+    if not local:
+        for account, held in fleet_held().items():
+            counts[account] = counts.get(account, 0) + held
     return counts

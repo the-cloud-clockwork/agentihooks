@@ -122,11 +122,15 @@ def stamp(slug, task_id, url, doc, mode, now_ms, home=None):
         return {"verdict": "off", "body": body}
     verdicts = Verdicts(slug, NAME, home)
     planned = verdicts.read(task_id)
-    if task is not None and planned and planned.get("planned") and planned["verdict"] == PASS:
+    if task is not None and not task.get("split") and planned and planned.get("planned") and planned["verdict"] == PASS:
         if _same_phase(planned, task):
             return {"verdict": PASS, "body": body}
-    verdicts.write(task_id, PENDING, RUNNING, now_ms)
+    verdicts.write(task_id, PENDING, RUNNING, now_ms, **_split_fields(task, url))
     return {"verdict": PENDING, "body": body}
+
+
+def _split_fields(task, url):
+    return {"url": url, "split": True} if task and task.get("split") else {}
 
 
 def _pr_field(url, field, run):
@@ -234,7 +238,28 @@ def _proof_notes(task, proof_chars):
         return ""
 
 
+def _split_half(task):
+    halves, pulls = task.get("split") or [], task.get("split_pulls") or []
+    index = pulls.index(task.get("pr_url")) if task.get("pr_url") in pulls else len(pulls)
+    return (index, halves[index]) if index < len(halves) else None
+
+
+def _split_note(task):
+    half = _split_half(task)
+    if half is None:
+        return ""
+    index, lines = half
+    ranges = task["split"]
+    others = "; ".join(f"half {n} carries plan lines {other}" for n, other in enumerate(ranges, 1) if n != index + 1)
+    return (
+        f"\n\nThis pull request is half {index + 1} of {len(ranges)} of a split task: it carries only plan lines "
+        f"{lines}; {others} in its own pull request."
+    )
+
+
 def _plan_chunk(doc, task):
+    half = _split_half(task)
+    task = {**task, "plan_lines": half[1]} if half else task
     if not task.get("plan_lines") or task.get("follow_up"):
         return {}
     try:
@@ -251,7 +276,7 @@ def state_of(doc, task, pr, proof_chars=PROOF_CHARS):
         "phase": phase.get("title", ""),
         "phase_intent": phase.get("description", ""),
         "task": task["title"],
-        "task_text": task["description"],
+        "task_text": task["description"] + _split_note(task),
         "pull_request_title": pr["title"],
         "pull_request_body": pr["body"],
         "changed_files": pr["files"],
@@ -524,7 +549,14 @@ class Check:
             tasks.append((task, record, moved))
         for task, record, _ in tasks:
             if _drafted(record):
-                verdicts.write(task["id"], PENDING, RUNNING, self.now_ms, phase=task.get("phase"))
+                verdicts.write(
+                    task["id"],
+                    PENDING,
+                    RUNNING,
+                    self.now_ms,
+                    phase=task.get("phase"),
+                    **_split_fields(task, task["pr_url"]),
+                )
         with ThreadPoolExecutor(max_workers=2) as workers:
             pending = [
                 (task, record, moved, workers.submit(copy_context().run, self._judge, doc, task))
@@ -532,10 +564,24 @@ class Check:
             ]
             for task, record, moved, future in pending:
                 if not record or not _same_phase(record, task) or moved:
-                    verdicts.write(task["id"], PENDING, RUNNING, self.now_ms, phase=task.get("phase"))
+                    verdicts.write(
+                        task["id"],
+                        PENDING,
+                        RUNNING,
+                        self.now_ms,
+                        phase=task.get("phase"),
+                        **_split_fields(task, task["pr_url"]),
+                    )
                 judgment = future.result()
                 if judgment is None and _drafted(record):
-                    verdicts.write(task["id"], PENDING, DRAFT, record["at"], phase=record.get("phase"))
+                    verdicts.write(
+                        task["id"],
+                        PENDING,
+                        DRAFT,
+                        record["at"],
+                        phase=record.get("phase"),
+                        **_split_fields(task, task["pr_url"]),
+                    )
                 if judgment is not None:
                     actions += self._check(task, judgment, verdicts)
                     timing.keep()
@@ -588,7 +634,9 @@ class Check:
     def _check(self, task, judgment, verdicts):
         previous, pr = judgment.previous, judgment.pr
         if judgment.state is None and previous is None:
-            verdicts.write(task["id"], PENDING, DRAFT, self.now_ms, phase=task.get("phase"))
+            verdicts.write(
+                task["id"], PENDING, DRAFT, self.now_ms, phase=task.get("phase"), **_split_fields(task, task["pr_url"])
+            )
             return []
         if judgment.state is None:
             self._keep(task, previous, verdicts)
@@ -599,7 +647,13 @@ class Check:
         rounds = min(previous["coach_rounds"] + fixed, 2) if previous else 0
         _remember(self.slug, task, self.now_ms, state, judgment.answer, self.home)
         coached = {"coach_rounds": rounds, "head": head, "url": task["pr_url"]} if self.mode == "coach" else {}
-        fields = {"phase": task.get("phase"), **coached, "inputs": judgment.inputs, **_pending(pr)}
+        fields = {
+            "phase": task.get("phase"),
+            **coached,
+            "inputs": judgment.inputs,
+            **_pending(pr),
+            **_split_fields(task, task["pr_url"]),
+        }
         verdicts.write(task["id"], verdict, reason, self.now_ms, **fields)
         if self.mode == "coach":
             self._coaching().write(task["id"], verdict, reason, self.now_ms, **fields)
@@ -639,8 +693,8 @@ class Check:
             previous["at"],
             coach_rounds=previous["coach_rounds"],
             head=previous["head"],
-            url=task["pr_url"],
             phase=task.get("phase"),
+            **{"url": task["pr_url"], **_split_fields(task, task["pr_url"])},
         )
 
     def _failed(self, task, who, reason, rounds=0, merged=False):
@@ -677,6 +731,31 @@ def _gated(words):
     return program == "agentihooks" and rest[:1] == ["swarm"] and (rest[2:3] == ["done"] or rest[2:4] == MERGE_QUEUE)
 
 
+def _merge_target(words):
+    index = program_index(words)
+    if index is None:
+        return None
+    program, rest = PurePosixPath(words[index]).name, words[index + 1 :]
+    if program == "gh" and rest[:2] == ["pr", "merge"]:
+        operands = rest[2:]
+    elif program == "agentihooks" and rest[:1] == ["swarm"] and rest[2:4] == MERGE_QUEUE:
+        operands = rest[4:]
+    else:
+        return None
+    return next((word for word in operands if PULL.search(word) or word.isdigit()), None)
+
+
+def _other_half(command, record):
+    judged = record and record.get("split") and PULL.search(record["url"])
+    if not judged:
+        return False
+    for target in filter(None, map(_merge_target, simple_commands(command))):
+        named = PULL.search(target)
+        if (named.groups() if named else target) != (judged.groups() if named else judged[3]):
+            return True
+    return False
+
+
 def _next_step(who):
     return (
         "Mark the pull request ready with gh pr ready <pull request url> if it is a draft, then wait for the verdict: "
@@ -698,6 +777,11 @@ class IntentGate:
         if not (who.pinned and who.task) or not any(map(_gated, simple_commands(call.command))):
             return Decision()
         record = state.read(who.task)
+        if _other_half(call.command, record):
+            return Decision.deny(
+                f"intent for task {who.task} was judged on {record['url']}, not this pull request. Record this half "
+                f"first: agentihooks swarm {who.swarm} pr <pull request url> --half <n>, then wait for its verdict."
+            )
         verdict = record and record["verdict"]
         if mode == "coach" and record and record.get("head"):
             head = pr_head(record["url"])
