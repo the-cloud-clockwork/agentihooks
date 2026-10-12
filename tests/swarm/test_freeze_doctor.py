@@ -227,3 +227,8 @@ def test_the_host_sample_names_the_harness_its_quota_held_lane_is_pinned_to(
 )
 def test_the_held_harness_is_the_one_harness_every_held_lane_is_pinned_to(lanes, held, harness):
     assert metrics_swarm.held_harness(lanes, held) == harness
+
+
+def test_a_host_row_without_a_held_harness_names_none():
+    row = metrics_swarm.host_row("sw", 1_000, HostSample(1.0, 1, 512, 0), {})
+    assert row["held_harness"] == ""

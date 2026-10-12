@@ -151,12 +151,12 @@ def _shift(slug, config, store, lanes, stage):
 def _move(slug, config, store, stage):
     if len(stage.harnesses) != 1:
         return UNKNOWN
-    stuck = stage.harnesses
-    target = next(agent for agent in agent_choice.AGENTS if agent not in stuck)
+    (stuck,) = stage.harnesses
+    target = next(agent for agent in agent_choice.AGENTS if agent != stuck)
     lanes = {key: dict(value) for key, value in config.lanes.items()}
-    lane = next((key for key in PINNABLE if lanes.get(key, {}).get("agent") in stuck), None)
+    lane = next((key for key in PINNABLE if lanes.get(key, {}).get("agent") == stuck), None)
     if lane is None:
-        return UNPINNED.format(harness=" or ".join(stuck))
+        return UNPINNED.format(harness=stuck)
     source = lanes[lane]["agent"]
     lanes[lane].update(agent=target, model=templates.AUTO)
     store.update(slug, lanes=templates.lane_map(templates.parse({"name": "remedy", "lanes": lanes})))

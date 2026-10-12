@@ -150,13 +150,13 @@ def test_claim_wait_moves_one_seat_from_ci_to_engineers_and_records_the_hours(st
 
 
 def test_auto_scaling_moves_the_stored_shift_against_the_last_ceilings(store, home, shipped):
-    store.update(SLUG, scaling="auto", lane_shift=2)
-    autoscale = {"ceilings": {"plan": 1, "ci": 2, "eng": 3}, "shift": 1}
+    store.update(SLUG, scaling="auto")
+    autoscale = {"ceilings": {"plan": 1, "ci": 2, "eng": 3}, "shift": 3}
     store.redis.set(store.key(SLUG, "quota-capacity"), json.dumps({"autoscale": autoscale}))
     fire(store, "claim_wait", value=7.5)
     text = bottleneck_remedy.SHIFTED.format(giver="ci", taker="eng", targeted=CLAIM, eng=4, ci=1)
     assert run(store) == [text]
-    assert store.config(SLUG).lane_shift == 0
+    assert store.config(SLUG).lane_shift == 2
     assert caps(store) == (2, 2)
 
 
@@ -374,6 +374,14 @@ def test_a_stage_not_due_leaves_the_next_stage_its_remedy(store, home, shipped):
     fire(store, "merge_queue", value=4.0, threshold=1.5)
     assert len(run(store)) == 1
     assert list(recorded(store)) == ["merge_queue"]
+
+
+def test_a_stage_needing_no_action_leaves_the_next_stage_its_remedy(store, home, shipped):
+    fire(store, "claim_wait", value=7.5)
+    fire(store, "merge_queue", value=4.0, threshold=1.5)
+    full = lane_split.Lanes(ready={"eng": 3, "ci": 1}, live={"eng": 1, "ci": 2}, room=4)
+    assert len(run(store, doc={"tasks": [claim_fix(rank="urgent")]}, lanes=full)) == 1
+    assert list(stamped(store)) == ["merge_queue"]
 
 
 def test_actions_taken_before_a_failing_stage_are_still_logged(store, home, shipped, monkeypatch):
