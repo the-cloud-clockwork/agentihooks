@@ -161,10 +161,9 @@ class Supervisor:
             self.wait()
             if self.stop:
                 return "termination"
-            if self.lease is not None:
-                self.lease.tick()
-                if self.lease.lost is not None:
-                    return "lease_lost"
+            self.lease.tick()
+            if self.lease.lost is not None:
+                return "lease_lost"
             for role in ("herdr", "exporter", "agent"):
                 if role in self.exits:
                     return "agent_completed" if role == "agent" and self.exits[role] == 0 else f"{role}_failure"
@@ -192,8 +191,7 @@ class Supervisor:
         write(self.root / "quiesced.json", {**self.scope, "status": "quiesced" if clean else "forced"})
         identifier = None
         deadline = time.monotonic() + self.launch.budgets.checkpoint
-        held = self.lease is None or self.lease.lost is None
-        while clean and held and self.launch.exporter and time.monotonic() < deadline:
+        while clean and self.lease.lost is None and self.launch.exporter and time.monotonic() < deadline:
             identifier = checkpoint(self.launch.attempt, read(self.root / "exporter.checkpoint.json"), self.scope)
             if identifier:
                 portable = (

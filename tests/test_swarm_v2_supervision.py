@@ -501,7 +501,7 @@ class LapsingLease:
 def test_a_launch_without_an_admission_runs_without_a_lease(tmp_path):
     attempt, path, _ = launch_files(tmp_path)
 
-    assert Supervisor(Launch.load(attempt, path)).lease is None
+    assert isinstance(Supervisor(Launch.load(attempt, path)).lease, lease_renewal.Unleased)
 
 
 def test_an_admitted_launch_renews_its_lease_from_the_attempt(tmp_path):
@@ -541,7 +541,7 @@ def test_a_worker_without_a_lease_runs_until_its_agent_completes(tmp_path, monke
     supervisor.exits["agent"] = 0
     monkeypatch.setattr(supervisor, "wait", lambda: None)
 
-    assert supervisor.lease is None
+    assert isinstance(supervisor.lease, lease_renewal.Unleased)
     assert supervisor.running() == "agent_completed"
 
 

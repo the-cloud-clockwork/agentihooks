@@ -163,6 +163,13 @@ class Renewer:
         print(json.dumps({"lease": event, **fields, **identity}), flush=True)
 
 
+class Unleased:
+    lost: str | None = None
+
+    def tick(self) -> None:
+        pass
+
+
 @contextmanager
 def kept(renewer: Renewer, pause: float = PAUSE_SECONDS) -> Iterator[Renewer]:
     stop = threading.Event()
@@ -188,9 +195,9 @@ def kept(renewer: Renewer, pause: float = PAUSE_SECONDS) -> Iterator[Renewer]:
 
 def load(
     attempt: Path, send: Send = send, clock: Callable[[], float] = time.monotonic, wall: Callable[[], float] = time.time
-) -> Renewer | None:
+) -> Renewer | Unleased:
     if not (attempt / ADMISSION).exists():
-        return None
+        return Unleased()
     admission = json.loads((attempt / ADMISSION).read_text())
     control_url = json.loads((attempt / "launch.json").read_text())["control_url"]
     grant = broadcast_bridge.grant_path(attempt).read_text().strip()

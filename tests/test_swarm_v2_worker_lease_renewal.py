@@ -423,7 +423,12 @@ def test_an_attempt_without_an_admission_has_no_lease_to_renew(tmp_path):
     clock = Clock()
     attempt = attempt_folder(tmp_path, admission=None)
 
-    assert lease_renewal.load(attempt, Controller(clock), clock.monotonic, clock.time) is None
+    controller = Controller(clock)
+    unleased = lease_renewal.load(attempt, controller, clock.monotonic, clock.time)
+
+    unleased.tick()
+    assert isinstance(unleased, lease_renewal.Unleased)
+    assert (unleased.lost, controller.calls) == (None, [])
 
 
 def test_a_renewed_grant_waits_in_memory_until_the_run_folder_exists(tmp_path):
