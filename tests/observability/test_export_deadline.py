@@ -89,3 +89,22 @@ def test_deadline_checkpoints_a_growing_open_turn(tmp_path, monkeypatch):
     )
     assert progress["source"]["accepted_bytes"] > before
     assert child.exitcode == 0
+
+
+def test_retry_returns_with_checkpoint_before_its_deadline(monkeypatch):
+    elapsed = [0.0]
+    state = {"source": {"accepted_bytes": 0}, "overflow": {"bytes": 1}}
+
+    def advance(*args):
+        elapsed[0] += 1
+        state["source"]["accepted_bytes"] += 1
+        if elapsed[0] == 10:
+            state.pop("overflow")
+
+    monkeypatch.setattr(trace_flush.time, "monotonic", lambda: elapsed[0])
+    monkeypatch.setattr(agent_trace, "export_session", advance)
+    monkeypatch.setattr(agent_trace, "_cursor", lambda session: state)
+    monkeypatch.setenv("AGENTIHOOKS_TRACE_FLUSH_ATTEMPT_TIMEOUT_SEC", "5")
+    assert trace_flush.flush_once("session", "/transcript") == 1
+    assert 0 < state["source"]["accepted_bytes"] < 5
+    assert elapsed[0] < 5
