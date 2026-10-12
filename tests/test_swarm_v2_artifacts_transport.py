@@ -87,3 +87,39 @@ def test_worker_uses_the_configured_grant_file(endpoint):
     credential.write_text("configured-grant")
     assert remote.worker_store(spec, attempt, {GRANT_FILE: str(credential)}).scope.generation == 7
     authority.authorize.assert_called_with("configured-grant")
+
+
+def test_scope_handshake_authorizes_the_original_constructor_grant(endpoint):
+    from pathlib import Path
+    from unittest.mock import patch
+
+    spec, attempt, _, authority = endpoint
+    credential = grant_path(attempt)
+    read_bytes = Path.read_bytes
+
+    def renewed(path):
+        data = read_bytes(path)
+        if path == credential:
+            credential.write_text("renewed-grant")
+        return data
+
+    with patch.object(Path, "read_bytes", renewed):
+        assert remote.worker_store(spec, attempt, {}).scope.generation == 7
+    authority.authorize.assert_called_once_with("grant")
+
+
+def test_unconfigured_artifact_route_uses_the_execution_api():
+    default = SimpleNamespace(route=lambda *args: (404, {"owner": "executions"}))
+    routes = server.Routes(default, None)
+    assert routes.route("POST", "/v2/artifacts/backend", "Bearer grant", {"operation": "scope"}) == (
+        404,
+        {"owner": "executions"},
+    )
+
+
+def test_configured_artifact_route_preserves_other_api_paths(storage):
+    handler, _, _ = storage
+    default = SimpleNamespace(route=lambda *args: (404, {"owner": "executions"}))
+    routes = server.Routes(default, None)
+    routes.artifacts = handler
+    assert routes.route("GET", "/other", "Bearer grant", None) == (404, {"owner": "executions"})
