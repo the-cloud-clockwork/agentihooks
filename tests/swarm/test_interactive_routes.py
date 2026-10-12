@@ -12,6 +12,13 @@ from tests.swarm.test_runtime import _passed, _resuming, validated
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
+@pytest.fixture(autouse=True)
+def native_status(monkeypatch):
+    from scripts.routing import native_login
+
+    monkeypatch.setattr(native_login, "check", lambda *_: {"loggedIn": True, "authMethod": "claude.ai"})
+
+
 @pytest.mark.parametrize("kind", ["subscription", "interactive", "api"])
 def test_route_kind_persists_and_legacy_records_default_to_subscription(kind):
     import fakeredis

@@ -16,6 +16,7 @@ from scripts import agent_choice
 from scripts.handoff import envelope
 from scripts.init_agent import PREDECESSOR
 from scripts.profiles import binding, plugins
+from scripts.routing import native_login
 from scripts.swarm import (
     affinity,
     capacity,
@@ -691,6 +692,13 @@ class HerdrRuntime:
 
             lease.require_epoch(connect(), config.slug, controller_epoch)
         agent = argv[argv.index("--agent") + 1]
+        proof = None
+        passed = argv[argv.index("--") + 1 :] if "--" in argv else []
+        if agent == "claude" and passed[:2] == ["--route", "interactive"]:
+            try:
+                proof = native_login.check(os.environ, "native", self.run)
+            except native_login.LoginError as exc:
+                raise SpawnError(str(exc), "unavailable") from exc
         launched_at = int(time.time() * 1000)
         load_at_launch = list(os.getloadavg())
         try:
@@ -734,6 +742,8 @@ class HerdrRuntime:
         except ValueError as exc:
             self._terminate(name)
             raise SpawnError(str(exc), pane_id=fields.get("pane_id", "")) from exc
+        if proof is not None:
+            native_login.record(self.home, config.slug, proof)
         return Placed(
             fields.get("pane_id", ""),
             fields.get("agent", agent),

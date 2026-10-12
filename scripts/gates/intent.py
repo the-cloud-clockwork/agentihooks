@@ -37,6 +37,9 @@ DRAFT = "draft pull request, judged once ready for review"
 START, END = "<!-- agentihooks intent -->", "<!-- /agentihooks intent -->"
 MERGE_QUEUE = ["merge", "queue"]
 PULL = re.compile(r"github\.com/([^/]+)/([^/]+)/pull/(\d+)")
+SHORT = re.compile(r"(?<![\w./-])([A-Za-z0-9-]+)/([\w.-]+)#(\d+)\b")
+NAMED_LIMIT = 3
+DIFF_CHARS, BODY_CHARS = 6000, 1000
 SECTION = re.compile(f"{re.escape(START)}.*?{re.escape(END)}", re.S)
 TESTS_FIRST = f"{PURPOSE}-tests-first"
 BASE_QUESTIONS = ("usable", "delivers", "reachable", "weakens")
@@ -188,6 +191,42 @@ def pr_view(url, run=subprocess.run):
         return None
 
 
+def named_pulls(task, body):
+    own = PULL.search(task["pr_url"])
+    here = (own[1].lower(), own[2].lower()) if own else None
+    texts = [task.get("description"), body, *(c.get("text") for c in task.get("comments") or [])]
+    urls, seen = [], set()
+    for text in filter(None, texts):
+        short = (m.groups() for m in SHORT.finditer(text) if here and m[1].lower() == here[0])
+        for owner, repo, number in [*(m.groups() for m in PULL.finditer(text)), *short]:
+            url = f"https://github.com/{owner}/{repo}/pull/{number}"
+            if (owner.lower(), repo.lower()) != here and url.lower() not in seen:
+                seen.add(url.lower())
+                urls.append(url)
+    return urls
+
+
+def named_view(url, run=subprocess.run):
+    try:
+        done = _gh(["gh", "pr", "view", url, "--json", "title,body,files,state"], run)
+        raw = json.loads(done.stdout) if done.returncode == 0 else None
+        if raw is None:
+            return None
+        body, diff = raw["body"] or "", _pr_diff(url, run)
+        return {
+            "url": url,
+            "title": raw["title"],
+            "body": body[:BODY_CHARS],
+            "body_truncated": len(body) > BODY_CHARS,
+            "files": [f["path"] for f in raw["files"]],
+            "merged": raw.get("state") == "MERGED",
+            "diff": None if diff is None else diff[:DIFF_CHARS],
+            "diff_truncated": diff is not None and len(diff) > DIFF_CHARS,
+        }
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError):
+        return None
+
+
 def _proof_notes(task, proof_chars):
     try:
         return (Path(task["workspace"]) / "proof.md").read_text()[-proof_chars:]
@@ -221,7 +260,33 @@ def state_of(doc, task, pr, proof_chars=PROOF_CHARS):
         "reviewer_findings": pr.get("reviewer_findings", {}),
         **({"task_part": "tests-first", "pull_request_diff": pr.get("diff")} if _tests_first(pr["body"]) else {}),
         **_plan_chunk(doc, task),
+        **_named_state(pr),
     }
+
+
+def _named_state(pr):
+    if "pull_requests" not in pr:
+        return {}
+    pulls = pr["pull_requests"]
+    return {
+        "pull_requests": pulls,
+        "judged_pull_requests": [p["url"] for p in pulls],
+        "unread_pull_requests": pr["unread_pull_requests"],
+    }
+
+
+def _listed(urls):
+    return f"{', '.join(urls[:-1])} and {urls[-1]}" if len(urls) > 1 else urls[0]
+
+
+def _judged_on(state):
+    judged, unread = state.get("judged_pull_requests") or [], state.get("unread_pull_requests") or []
+    text = f"; judged on {_listed(judged)}" if judged else ""
+    return text + (f"; could not read {_listed(unread)}" if unread else "")
+
+
+def _pending(pr):
+    return {"named_pending": pr["named_pending"]} if pr.get("named_pending") else {}
 
 
 def _rows(state):
@@ -334,7 +399,7 @@ def _verdict(state, answers, thresholds):
 def _verdicts(definition, state, params, answers):
     thresholds = definition.thresholds if definition.name == PURPOSE else definitions.load(PURPOSE).thresholds
     verdict, reason = _verdict(state, answers, thresholds)
-    return {"verdict": verdict, "reason": reason}
+    return {"verdict": verdict, "reason": reason + _judged_on(state)}
 
 
 RULE = code_rules.CodeRule(_questions, _verdicts, {"verdict": (PASS, FAIL, UNCHECKED)}, {"verdict": FAIL})
@@ -437,6 +502,7 @@ class Check:
     ask: Callable
     home: object = None
     head: Callable | None = None
+    named: Callable | None = None
 
     def run(self, doc):
         if self.mode == "off":
@@ -448,7 +514,11 @@ class Check:
                 continue
             record = verdicts.read(task["id"])
             judged = record and record["verdict"] != PENDING and not record.get("planned")
-            moved = self.mode != "coach" and judged and record.get("inputs") != _fingerprint(doc, task)
+            moved = (
+                self.mode != "coach"
+                and judged
+                and (record.get("inputs") != _fingerprint(doc, task) or self._named_moved(record))
+            )
             if self.mode != "coach" and judged and _same_phase(record, task) and not moved:
                 continue
             tasks.append((task, record, moved))
@@ -483,12 +553,37 @@ class Check:
             return _Judgment(pr, None, None, None)
         previous = self._coaching().read(task["id"]) if self.mode == "coach" else None
         previous = previous if previous and _same_phase(previous, task) else None
-        if previous and previous["head"] == pr.get("head") and previous.get("inputs") == inputs:
+        if (
+            previous
+            and previous["head"] == pr.get("head")
+            and previous.get("inputs") == inputs
+            and not self._named_moved(previous)
+        ):
             return _Judgment(pr, previous, None, None)
+        pr = self._with_named(task, pr)
         state = intent_history.prepare(state_of(doc, task, pr))
         if state.get("task_part") == "tests-first":
             state["pull_request_diff"] = intent_history.masked(pr.get("diff"))
         return _Judgment(pr, previous, state, self.ask(state), inputs)
+
+    def _with_named(self, task, pr):
+        others = named_pulls(task, pr["body"]) if self.named else []
+        if not others:
+            return pr
+        views = {url: self.named(url) for url in [task["pr_url"], *others[:NAMED_LIMIT]]}
+        pulls = [view for view in views.values() if view]
+        failed = [url for url, view in views.items() if not view]
+        opened = [p["url"] for p in pulls if p["url"] != task["pr_url"] and not p["merged"]]
+        return {
+            **pr,
+            "pull_requests": pulls,
+            "unread_pull_requests": failed + others[NAMED_LIMIT:],
+            "named_pending": failed + opened,
+        }
+
+    def _named_moved(self, record):
+        pending = record.get("named_pending") or []
+        return bool(self.named) and any((view := self.named(url)) and view["merged"] for url in pending)
 
     def _check(self, task, judgment, verdicts):
         previous, pr = judgment.previous, judgment.pr
@@ -504,7 +599,7 @@ class Check:
         rounds = min(previous["coach_rounds"] + fixed, 2) if previous else 0
         _remember(self.slug, task, self.now_ms, state, judgment.answer, self.home)
         coached = {"coach_rounds": rounds, "head": head, "url": task["pr_url"]} if self.mode == "coach" else {}
-        fields = {"phase": task.get("phase"), **coached, "inputs": judgment.inputs}
+        fields = {"phase": task.get("phase"), **coached, "inputs": judgment.inputs, **_pending(pr)}
         verdicts.write(task["id"], verdict, reason, self.now_ms, **fields)
         if self.mode == "coach":
             self._coaching().write(task["id"], verdict, reason, self.now_ms, **fields)
@@ -531,6 +626,7 @@ class Check:
             or not _same_phase(previous, task)
             or previous.get("inputs") != inputs
             or previous["head"] != self.head(task["pr_url"])
+            or self._named_moved(previous)
         ):
             return None
         return previous

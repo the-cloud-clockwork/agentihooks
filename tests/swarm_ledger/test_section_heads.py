@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import ledger_state, serve_modules, shell_html
+from tests.swarm_ledger.ledger_page import ledger_state, loaded, reload_after_folds, serve_modules, shell_html
 
 TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 URL = "http://ledger.test/swarm-buildout"
@@ -75,19 +75,23 @@ def open_page(browser, doc, init_script=None):
 
 
 def rendered(page):
-    """The status line reads saved once the stream opens, so wait for the page's own first-state promise instead."""
-    page.wait_for_function(
-        """async () => {
-          const main = document.querySelector("script[type=module]").src;
-          await (await import(new URL("sync.js", main))).loaded;
-          return true;
-        }"""
-    )
+    loaded(page)
 
 
 @pytest.fixture
-def tab(browser):
+def tab(browser, request):
     context, page = open_page(browser, DOC)
+    if getattr(request, "param", 0):
+        page.evaluate(
+            """(delay) => {
+              for (const el of document.querySelectorAll("[id$='-count']")) {
+                const text = el.textContent;
+                el.textContent = "";
+                setTimeout(() => { el.textContent = text; }, delay);
+              }
+            }""",
+            request.param,
+        )
     yield page
     context.close()
 
@@ -114,7 +118,12 @@ def settle(tab):
     tab.wait_for_timeout(50)
 
 
+@pytest.mark.parametrize("tab", [0, 250], indirect=True)
 def test_every_header_shows_its_counts_folded_and_open(tab):
+    tab.wait_for_function(
+        "(keys) => keys.every(key => document.getElementById(key + '-count')?.textContent.trim())",
+        arg=list(EXPECTED),
+    )
     assert counts(tab) == EXPECTED
     for box in SECTIONS:
         tab.evaluate("(id) => { document.getElementById(id).open = !document.getElementById(id).open; }", box)
@@ -168,16 +177,17 @@ def test_sections_toggle_leaves_comments_and_outline_alone(tab):
 
 
 def test_sections_state_survives_a_reload(tab):
+    changed = tab.locator(".col > section[data-outline]:not(#sec-overview) > details.fold:not([open])").evaluate_all(
+        "boxes => boxes.map(box => '#' + box.id).join(',')"
+    )
     tab.click("#sections-all")
     settle(tab)
-    tab.reload()
-    rendered(tab)
+    reload_after_folds(tab, changed)
     assert sections(tab) == {"labels": ["Collapse all"], "open": [True] * len(SECTIONS)}
     tab.evaluate("() => { document.getElementById('notes-box').open = false; }")
     settle(tab)
     assert sections(tab)["labels"] == ["Collapse all"]
-    tab.reload()
-    rendered(tab)
+    reload_after_folds(tab, "#notes-box")
     folded = sections(tab)
     assert folded["open"][SECTIONS.index("notes-box")] is False
     assert folded["open"].count(True) == len(SECTIONS) - 1
