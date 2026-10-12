@@ -111,7 +111,7 @@ def test_temporal_ownership_excludes_other_tasks_and_ended_lives():
 
 
 def test_nonmerged_pulls_do_not_hide_later_merges_and_duration_starts_at_first_claim():
-    other = {**TASK, "id": "other", "pr_url": "other", "state": "pr"}
+    other = {**DONE, "id": "other", "pr_url": "other"}
     state = {
         "tasks": [other, DONE],
         "_meta": {"events": [event("task claimed", NOW), event("task claimed", NOW + 1_000)]},
