@@ -363,6 +363,23 @@ def test_a_module_that_fails_to_import_leaves_the_rest_of_its_stride_warmed(tmp_
     assert list((package / "__pycache__").glob("test_ok.*-pytest-*.pyc"))
 
 
+def test_warm_imports_run_without_the_controllers_tracer(tmp_path, monkeypatch):
+    seen = tmp_path / "seen"
+    _warm_package(
+        tmp_path, monkeypatch, {"test_trace": f"import sys\nopen({str(seen)!r}, 'w').write(repr(sys.gettrace()))\n"}
+    )
+    prior = sys.gettrace()
+    if prior is None:
+        sys.settrace(lambda *args: None)
+    try:
+        statuses = [os.waitpid(pid, 0)[1] for pid in warm_imports(["warmpkg.test_trace"], 1)]
+    finally:
+        if prior is None:
+            sys.settrace(None)
+    assert statuses == [0]
+    assert seen.read_text() == "None"
+
+
 def _configured(monkeypatch, numprocesses, **extra):
     calls = []
     monkeypatch.setattr(NodeManager, "setup_nodes", NodeManager.setup_nodes)
