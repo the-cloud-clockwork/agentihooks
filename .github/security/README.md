@@ -45,8 +45,16 @@ installed applications and organization self-hosted runner groups. A classic
 operator token needs `repo` and `admin:org`; a fine-grained equivalent requires
 the corresponding read permissions. The job never applies settings and never
 runs on pull request code. It runs on dev pushes and manual dispatch immediately;
-GitHub activates its weekly schedule only when the workflow reaches the default branch
-through the next release.
+GitHub activates its weekly schedule only when the workflow reaches the default
+branch through the next release. Dispatch it through the existing focused proof
+workflow, which owns the hosted lane:
+
+```bash
+gh workflow run proofs.yml \
+  --ref dev \
+  -f proof=github-access \
+  -f base=origin/dev
+```
 
 The merge queue exception must be proved by a subsequent successful merge group
 run after operator application. If the access restriction blocks the queue,
