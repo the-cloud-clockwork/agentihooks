@@ -230,11 +230,14 @@ def test_size_of_a_vanished_entry_is_zero(tmp_path):
 
 def test_measure_reports_the_whole_tree_of_a_live_workload(tmp_path, capfd):
     command = [sys.executable, str(WORKLOADS / "memory.py"), "--children", "2", "--mib", "48", "--hold", "1.5"]
+    gc.collect()
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         result = sampling.measure(command, tmp_path, {"PATH": os.environ["PATH"]}, 0.05, 60)
         gc.collect()
-    assert [w for w in caught if issubclass(w.category, ResourceWarning)] == []
+    assert [w for w in caught if issubclass(w.category, ResourceWarning)] == [], [
+        f"{w.category.__name__}: {w.message} at {w.filename}:{w.lineno}" for w in caught
+    ]
     assert result["exit_code"] == 0 and not result["timed_out"]
     assert 3 <= result["peak_processes"] < 10
     assert 96 <= result["peak_rss_mib"] < 2048
