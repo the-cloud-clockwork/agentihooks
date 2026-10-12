@@ -26,7 +26,7 @@ elif [[ "$(grep -c "^pull --platform linux/amd64 public" "$CALLS")" -le "$FAILUR
 fi
 """
 COPY_DOCKER = """printf '%s\\n' "$*" >> "$CALLS"
-case "$1 $2 $3" in
+case "$1 $2 ${3:-}" in
     "login ghcr.io -u") cat > "$LOGIN" ;;
     "buildx imagetools create") if [[ -n "$CREATES" ]]; then touch "$COPIED"; fi ;;
     "buildx imagetools inspect") [[ -e "$COPIED" ]] ;;
