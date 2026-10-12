@@ -418,10 +418,14 @@ def child_environment(account: CodexAccount, environ: Mapping[str, str]) -> dict
 
 def command(account: CodexAccount, codex_bin: str, args: list[str]) -> list[str]:
     if account.is_api:
-        return [codex_bin, NO_DAEMON, *codex_api.overrides(account.key_env, account.base_url), *args]
-    if account.bearer:
-        return [codex_bin, NO_DAEMON, *bearer_overrides(), *args]
-    return [codex_bin, *([NO_DAEMON] if account.is_token else []), *args]
+        overrides = codex_api.overrides(account.key_env, account.base_url)
+    elif account.bearer:
+        overrides = bearer_overrides()
+    else:
+        return [codex_bin, *([NO_DAEMON] if account.is_token else []), *args]
+    if args[:1] == ["exec"]:
+        return [codex_bin, NO_DAEMON, *args, *overrides]
+    return [codex_bin, NO_DAEMON, *overrides, *args]
 
 
 def api_account(environ: Mapping[str, str]) -> CodexAccount:

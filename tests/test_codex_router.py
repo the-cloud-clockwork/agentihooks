@@ -660,9 +660,9 @@ def test_a_bearer_child_carries_its_token_and_account_id_and_runs_the_bearer_pro
     assert router.command(account, "/usr/bin/codex", ["exec", "hi"]) == [
         "/usr/bin/codex",
         "--no-daemon",
-        *router.bearer_overrides(),
         "exec",
         "hi",
+        *router.bearer_overrides(),
     ]
     second = router.child_environment(router.credential(_token("beta"), OAUTH_ENV), OAUTH_ENV)
     assert (second["CODEX_ACCESS_TOKEN"], second["AGENTIHOOKS_CHATGPT_ACCOUNT_ID"]) == (OAUTH_TWO, "acct-2")
@@ -721,7 +721,7 @@ def test_the_probe_of_a_chatgpt_account_runs_the_bearer_provider_and_skips_an_un
     monkeypatch.setattr(router.codex_usage, "read", lambda *a, **k: None)
     assert router.probe(_token("alpha"), OAUTH_ENV, run) == "t-9"
     argv, env = seen[0]
-    assert argv == ["/usr/bin/codex", "--no-daemon", *router.bearer_overrides(), *router.PROBE_ARGS]
+    assert argv == ["/usr/bin/codex", "--no-daemon", *router.PROBE_ARGS, *router.bearer_overrides()]
     assert env["AGENTIHOOKS_CHATGPT_ACCOUNT_ID"] == "acct-1"
     assert router.probe(_token("keyed"), OAUTH_ENV, run) is None
     assert router.probe(_token("ghost"), OAUTH_ENV, run) is None
@@ -731,7 +731,7 @@ def test_the_probe_of_a_chatgpt_account_runs_the_bearer_provider_and_skips_an_un
 def test_a_forced_chatgpt_launch_runs_the_bearer_provider_and_never_prints_the_token(monkeypatch, tmp_path, capsys):
     rc, seen, report = _launch(monkeypatch, tmp_path, OAUTH_ENV, ["--route", "beta", "exec", "hi"])
     assert rc == 0
-    assert seen["cmd"] == ["/usr/bin/codex", "--no-daemon", *router.bearer_overrides(), "exec", "hi"]
+    assert seen["cmd"] == ["/usr/bin/codex", "--no-daemon", "exec", "hi", *router.bearer_overrides()]
     assert (seen["env"]["CODEX_ACCESS_TOKEN"], seen["env"]["AGENTIHOOKS_CHATGPT_ACCOUNT_ID"]) == (OAUTH_TWO, "acct-2")
     assert report.read_text() == "status=routed\naccount=beta\nplacement=forced\n"
     out = capsys.readouterr()
