@@ -84,14 +84,14 @@ def test_page_view_reads_the_stored_ranking_over_the_published_snapshot(store, m
     stale = {"stage": "quota_hold", "label": "quota hold", "trend": "steady", "last_action": "none recorded"}
     commands.publish(store, "sw", {"agents": [], "tasks": {}, "top_bottleneck": stale}, {})
     detect(store, ("claim_wait", 665404.0, "rising"), ("quota_hold", 216504.0, "rising"))
-    monkeypatch.setattr(commands.time, "time_ns", lambda: (NOW + 300_000) * 1_000_000)
+    monkeypatch.setattr(commands, "time", SimpleNamespace(time_ns=lambda: (NOW + 299_999) * 1_000_000))
     assert commands.view(store, "sw")["top_bottleneck"] == {
         "stage": "claim_wait",
         "label": "claim wait",
         "trend": "rising",
         "seconds": 665404.0,
         "measured_at": NOW,
-        "measured": "5 minutes ago",
+        "measured": "4 minutes ago",
         "last_action": "none recorded",
         "action_at": 0,
     }
