@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 KIND = "bottleneck stage"
 STALE_MS = 6 * 3_600_000
 EPISODES = 20
+DETECTOR_UNIT = "task hours"
 
 
 @dataclass(frozen=True)
@@ -67,15 +68,14 @@ def _fire(old, stage, reading, now_ms):
     }
 
 
-def _detector(old, reading, now_ms):
+def _detector(old, reading, now_ms, threshold):
     if old.get("detector") == reading:
         return old
     known = {*old.get("episodes", []), *old.get("detector", {}).get("episodes", [])}
     added = [episode for episode in reading["episodes"] if episode not in known]
     row = {
         "stage": reading["stage"],
-        "threshold": 0.0,
-        "unit": "task hours",
+        "unit": DETECTOR_UNIT,
         "detail": "",
         "first_at": now_ms,
         **old,
@@ -84,8 +84,9 @@ def _detector(old, reading, now_ms):
         "detector": reading,
         "updated_at": now_ms,
     }
-    if row["unit"] == "task hours":
+    if row["unit"] == DETECTOR_UNIT:
         row["value"] = reading["seconds"] / 3600
+        row["threshold"] = threshold
     return row
 
 
@@ -93,8 +94,8 @@ def fire(redis: Redis, slug: str, stage: str, reading: Reading, now_ms: int) -> 
     return _update(redis, slug, stage, lambda old: _fire(old, stage, reading, now_ms))
 
 
-def update_detector(redis: Redis, slug: str, reading: dict, now_ms: int) -> dict:
-    return _update(redis, slug, reading["stage"], lambda old: _detector(old, reading, now_ms))
+def update_detector(redis: Redis, slug: str, reading: dict, now_ms: int, threshold: float) -> dict:
+    return _update(redis, slug, reading["stage"], lambda old: _detector(old, reading, now_ms, threshold))
 
 
 def clear(redis: Redis, slug: str, stage: str) -> bool:
