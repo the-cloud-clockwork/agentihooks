@@ -75,7 +75,6 @@ def test_deadline_checkpoints_a_growing_open_turn(tmp_path, monkeypatch):
         return original(value)
 
     monkeypatch.setattr(transcript, "mask_value", slow_mask)
-    monkeypatch.setenv("AGENTIHOOKS_TRACE_ATTEMPT_TIMEOUT_SEC", "5")
     child = multiprocessing.get_context("fork").Process(target=timed_export, args=(path, phases))
     child.start()
     child.join(5)
