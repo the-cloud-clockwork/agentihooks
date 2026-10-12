@@ -478,7 +478,8 @@ Operator ledger writes and alerts retain their oldest unrelayed revision in `led
 neither Redis nor the outbox accepts them. The next write to that ledger retries the intervening events;
 the ledger watch also retries every five passes, about ten seconds at its default interval. Stable ids
 prevent duplicate inbox items. Ledger replay is limited to its retained history of 2000 events: writes
-older than that history cannot be reconstructed by replay.
+older than that history cannot be reconstructed by replay. The ledger records a notice naming the lost
+revision range for the operator; the watcher and tick also report trimmed history gaps.
 
 ### Outage holds and recovery
 
@@ -487,7 +488,8 @@ available when Redis is down. `agentihooks swarm <id> status` shows open outages
 Redis check ends the pass cleanly; a failed ledger probe holds decisions that need the ledger. Provider
 error signatures in an agent pane open a provider outage. Recovery requires an affirmative service check:
 for a provider, one minimal request per affected provider account on a backoff from one to ten minutes.
-The first successful probe closes that provider record; pane text alone cannot prove recovery.
+Each account stops probing after its first success; the provider record closes once every affected account
+has succeeded. Pane text alone cannot prove recovery.
 
 While a swarm outage is open, or an agent's own pane shows a provider error, its idle count stays where it
 was. The tick sends no idle nudge, retires no affected worker or idle master, and reclaims no affected task.
@@ -497,8 +499,10 @@ outage evidence and send no finding notice to the master. Once the hold lifts, i
 the held count.
 
 When service returns, the tick sends one marked resume prompt to each stalled agent that still owns its
-task. The prompt tells it to read its task folder and inbox and continue the same work. A pane still showing
-the provider error is retried for up to three ticks before normal idle rules apply. An agent whose process
+task. The prompt tells it to read its task folder and inbox and continue the same work. Busy panes, typed
+input and permission prompts are left alone. A pane still showing the provider error gets at most three
+resume attempts on separate ticks before normal idle rules apply. An agent whose process
 died reopens its own conversation in the same seat; if that cannot resume, the handoff supplies its
 successor's context. Recovery preserves the existing task claim. A changed claim owner or execution
-generation fences out the old agent, so recovery cannot resume work already taken by a successor.
+generation, expired claim lease or changed seat occupant fences out the old agent, so recovery cannot
+resume work already taken by a successor.

@@ -229,18 +229,22 @@ Corrupt or refused replay records stay in `inbox-outbox.skipped.jsonl`; inspect
 their reported reasons. Local disk survival and available space bound durability.
 Ledger writes not accepted by Redis or the outbox retain their oldest unrelayed
 revision for replay on the next write or the ledger watch; replay reaches only
-the ledger's retained 2000 events.
+the ledger's retained 2000 events. A ledger notice reports the lost revision
+range when history was trimmed before relay; the watcher and tick report gaps.
 
 An open Redis, ledger or provider outage, or your pane's provider error, holds
 idle counts, nudges, retirement and task reclaim. Wake and escalation deadlines
 exclude outage time; idle and stale claim findings carry the outage evidence and
 send no finding notice. Provider recovery needs a successful minimal request
-per affected account, on a backoff from one to ten minutes; pane text alone
-does not release the hold. On recovery the tick sends a marked resume prompt:
-read your task folder and inbox, then continue your task. Error panes retry for
-up to three ticks before normal idle rules; dead agents reopen their own
+for every affected account, on a backoff from one to ten minutes; an account
+stops probing on its first success, and pane text alone does not release the
+hold. On recovery the tick sends a marked resume prompt: read your task folder
+and inbox, then continue your task. Busy panes, typed input and permission
+prompts wait. Error panes get at most three resume attempts on separate ticks
+before normal idle rules; dead agents reopen their own
 conversation in the same seat, with a handoff fallback. Recovery requires your
-claim and generation still to match, so a successor's work cannot be resumed
+claim, generation and seat occupant still to match, with a live claim lease,
+so a successor's work cannot be resumed
 by the old agent. Full contract and limits: `docs/pillars/swarm.md`,
 Delivered then confirmed, Local outbox and limits, Outage holds and recovery.
 
