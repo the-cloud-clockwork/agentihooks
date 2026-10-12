@@ -65,6 +65,7 @@ class SwarmConfig:
     api_url: str = ""
     claude_model: str = default_models.DEFAULTS["claude"]
     codex_model: str = default_models.DEFAULTS["codex"]
+    scratch: bool = False
 
 
 def scaling_refusal(config):
@@ -188,6 +189,7 @@ class RedisStore:
             raw.get("api_url", ""),
             raw.get("claude_model") or default_models.DEFAULTS["claude"],
             raw.get("codex_model") or default_models.DEFAULTS["codex"],
+            raw.get("scratch") == "True",
         )
 
     def update(self, slug, **changes):

@@ -481,13 +481,21 @@ def test_run_restores_handlers_and_returns_observed_outcome(supervisor, monkeypa
     monkeypatch.setattr(runtime.signal, "signal", handlers)
     monkeypatch.setattr(supervisor, "start", lambda: None)
     monkeypatch.setattr(supervisor, "running", lambda: reason)
-    monkeypatch.setattr(supervisor, "drain", lambda observed: {"reason": observed, "checkpoint_status": status})
+    outcome = {"reason": reason, "checkpoint_status": status, "launch_record": {"prompt": "private task instructions"}}
+
+    def drain(observed):
+        assert observed == reason
+        protocol.write(supervisor.root / "result.json", outcome)
+        return outcome
+
+    monkeypatch.setattr(supervisor, "drain", drain)
     printed = Mock(wraps=print)
     monkeypatch.setattr(runtime, "print", printed, raising=False)
     assert supervisor.run() == code
     printed.assert_called_once_with(
         json.dumps({"reason": reason, "checkpoint_status": status}, sort_keys=True), flush=True
     )
+    assert protocol.read(supervisor.root / "result.json") == outcome
     assert protocol.read(supervisor.root / "context.json") == supervisor.scope
     assert (supervisor.root.parent / "owner.lock").exists()
     record = protocol.read(supervisor.root / "launch.json")

@@ -1,5 +1,6 @@
 """Worker Pods run with restartPolicy Never: once a Pod has Succeeded its archive watermark cannot advance."""
 
+import json
 from collections import Counter
 from collections.abc import Iterable
 
@@ -7,11 +8,11 @@ from scripts.swarm.store import RedisStore
 from scripts.swarm_v2 import retention
 from scripts.swarm_v2.kubernetes.cleanup import Cleanup
 from scripts.swarm_v2.kubernetes.client import ApiRefused
-from scripts.swarm_v2.kubernetes.failures import FENCES
+from scripts.swarm_v2.kubernetes.failures import FENCES, FRESH, RECOVERIES, RESUME
 from scripts.swarm_v2.kubernetes.runtime import GENERATION_LABEL
 from scripts.swarm_v2.kubernetes.watch import BACKEND, EXECUTION_LABEL
 
-SUCCEEDED, COMPLETED, REFUSED = "Succeeded", "completed", "refused"
+SUCCEEDED, COMPLETED, CANCELLED, REFUSED = "Succeeded", "completed", "cancelled", "refused"
 
 
 class Completion:
@@ -29,6 +30,7 @@ class Completion:
         for pod in pods:
             if self._completed(pod, known, listed):
                 self._finalize(pod["metadata"])
+        self._retire()
         finals = set(self.store.redis.hkeys(self.store.key(self.slug, "attempt-finals")))
         finals -= set(self.store.redis.hkeys(self.store.key(self.slug, "attempt-retained")))
         return {execution_id: self._clean(execution_id) for execution_id in sorted(finals)}
@@ -50,6 +52,15 @@ class Completion:
         end = retention.archive_watermark(self.store, self.slug, execution_id)
         outcome = f"pods/{metadata['name']}/{metadata['uid']}"
         retention.finalize(self.store, self.slug, self.cleanup.require, execution_id, COMPLETED, end, outcome)
+
+    def _retire(self) -> None:
+        decided = self.store.redis.hgetall(self.store.key(self.slug, RECOVERIES))
+        for execution_id, raw in sorted(decided.items()):
+            if json.loads(raw)["mode"] not in (FRESH, RESUME) or retention.final(self.store, self.slug, execution_id):
+                continue
+            fence = json.loads(self.store.redis.hget(self.store.key(self.slug, FENCES), execution_id))
+            end, outcome = fence["archive_watermark"], f"{FENCES}/{execution_id}"
+            retention.finalize(self.store, self.slug, self.cleanup.require, execution_id, CANCELLED, end, outcome)
 
     def _clean(self, execution_id: str) -> str:
         try:

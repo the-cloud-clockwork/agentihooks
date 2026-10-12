@@ -193,7 +193,11 @@ def test_ledger_rows_are_collected_before_a_failing_swarm_collector(spool, sent,
 
     monkeypatch.setattr(metrics.metrics_ledger, "record", lambda box, slug, now_ms, ledger: order.append("ledger"))
     monkeypatch.setattr(metrics.metrics_swarm, "pull_rows", broken)
-    swarm = metrics.metrics_swarm.TickInput(None, {"tasks": []}, [], lambda url: None, None)
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    swarm = metrics.metrics_swarm.TickInput(store, {"tasks": []}, [], lambda url: None, None)
     assert metrics.record_pass("sw", NOW, 0, ON, swarm) == ["metrics outbox failed: bad swarm row"]
     assert order == ["ledger", "swarm"]
 

@@ -249,7 +249,8 @@ class Supervisor:
                     self.failure_class = type(exc).__name__
                     reason = "supervisor_failure"
                 result = self.drain(reason)
-                print(json.dumps(result, sort_keys=True), flush=True)
+                summary = {key: value for key, value in result.items() if key != "launch_record"}
+                print(json.dumps(summary, sort_keys=True), flush=True)
                 if reason not in ("agent_completed", "termination"):
                     return 70
                 return 0 if result["checkpoint_status"] == "complete" else 75

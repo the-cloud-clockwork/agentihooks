@@ -207,6 +207,40 @@ def test_worker_prepare_materializes_source_and_conversation(published_attempt, 
         assert runtime.command(attempt, ("claude", "--print")) == ("claude", "--print", continuation.read_text())
 
 
+def test_worker_prepare_restores_source_and_native_state_for_its_prepared_checkout(published_attempt, tmp_path):
+    from scripts.swarm_v2 import filesystem
+    from tests import sv2_ckp02_cases as sources
+
+    original, environ = published_attempt
+    attempt = tmp_path / "e2"
+    attempt.mkdir()
+    record = {"attempt": "e2", "layout": filesystem.mapping(filesystem.load()), "homes": {"claude": "homes/claude"}}
+    (attempt / "execution.json").write_text(json.dumps(record))
+    checkout = attempt / "worktrees" / "task"
+    checkout.parent.mkdir()
+    sources.git(tmp_path, "clone", "-q", "-b", "dev", str(tmp_path / "remote.git"), str(checkout))
+    workspace = attempt / "spool" / "workspaces" / "t1.json"
+    workspace.parent.mkdir(parents=True)
+    workspace.write_text(json.dumps({"path": str(checkout)}))
+    spec = json.loads((original / "launch.json").read_text())
+    spec["registration"].update(execution_id="e2", generation=3)
+    spec["authority"].update(execution_id="e2", generation=3, task_id="t1")
+    spec["checkout"] = {"project": "github.com/the-cloud-clockwork/agentihooks", "agent": "engineer-1"}
+    spec["restore"] = {
+        "checkpoint_id": "ckp-fixture",
+        "recovery": "native",
+        "session_id": cases.SESSIONS["claude"],
+        "watermark": 41,
+    }
+    result = runtime.prepare(spec, attempt, environ)
+    assert result.recovery == "native"
+    assert (checkout / "app.py").read_text() == "print('committed locally')\n"
+    assert (checkout / "notes.md").read_text() == "staged notes\nunstaged line\n"
+    restored = attempt / "homes/claude/.claude/projects" / native.encoded(checkout) / f"{result.session_id}.jsonl"
+    assert restored.is_file()
+    assert not (attempt / "worktrees" / ".git").exists()
+
+
 def test_worker_prepare_requires_granted_project_before_materialization(published_attempt):
     attempt, environ = published_attempt
     spec = json.loads((attempt / "launch.json").read_text())

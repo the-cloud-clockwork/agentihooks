@@ -77,6 +77,8 @@ def record_pass(
     environ: Mapping[str, str] = os.environ,
     swarm: metrics_swarm.TickInput | None = None,
 ) -> list[str]:
+    if swarm is not None and swarm.store.config(slug).scratch:
+        return []
     errors = []
     extra = partial(_pass, slug, now_ms, swarm, errors, environ=environ)
     return [*record(TICKS, [tick_row(slug, now_ms, actions)], now_ms, environ, extra), *errors]

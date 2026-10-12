@@ -401,6 +401,10 @@ def _seed(execution: filesystem.Execution, request: Request) -> None:
         home = execution.path("home") / target / ".agentihooks"
         home.mkdir(parents=True, mode=0o700)
         _write(home / "state.json", _json({**state, "linked_profiles": linked}))
+        if target == "claude":
+            config = execution.path("home") / target / ".claude"
+            config.mkdir(mode=0o700)
+            _write(config / ".claude.json", _json({"hasCompletedOnboarding": True}))
 
 
 def _accepted(attempt: Path, digest: str) -> dict | None:

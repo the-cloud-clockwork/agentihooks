@@ -126,9 +126,7 @@ class PodGrants:
         if project is not None and project not in registration.project_ids:
             return Hand(False, "project_unpermitted", self._remove(pod))
         restore = self.restores(agent.execution_id)
-        # A resume restores its session against the attempt folder; a checkout would move the agent off it.
-        resumed = restore is not None and restore.get("recovery") != "fresh"
-        hosted = project is not None and project.startswith(GITHUB) and not resumed
+        hosted = project is not None and project.startswith(GITHUB)
         checkout = {"project": project, "agent": agent.name} if hosted else None
         record = self.supervision.record(registration, agent.profile, restore, checkout, opening)
         containers = pod.get("spec", {}).get("containers", [])

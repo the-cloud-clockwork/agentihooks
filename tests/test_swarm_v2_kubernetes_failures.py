@@ -467,6 +467,11 @@ class _Cluster:
     def ready_nodes(self):
         return sorted(self.world.ready) if self.nodes else None
 
+    def __getattr__(self, name):
+        if name in ("namespace", "list_pods", "list_services", "read", "delete"):
+            return getattr(self.world.api, name)
+        raise AttributeError(name)
+
 
 def test_the_deployed_pass_fences_an_attempt_whose_node_was_deleted(world):
     grants, cluster = _Grants(), _Cluster(world)
@@ -1287,6 +1292,9 @@ def test_the_deployed_pass_launches_a_decided_replacement_after_it_reconciles(wo
     assert recover() == {decision.replacement: "unobserved"}
     assert [agent.execution_id for _, agent in relaunch.calls] == [decision.replacement]
     assert _marks(ledger) == [{"awaiting": "recovery_pending"}, {"awaiting": ""}]
+    kept = retention.retained(world.store, cases.SLUG, world.old.execution_id)
+    assert kept["final"]["outcome_ref"] == f"attempt-fences/{world.old.execution_id}"
+    assert retention.retained(world.store, cases.SLUG, decision.replacement) is None
 
 
 def _context(world, checkpoint_id="ckpt-context", sequence=9):

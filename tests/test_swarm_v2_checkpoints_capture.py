@@ -179,6 +179,32 @@ def test_worker_capture_publishes_and_validates_native_and_source_material(porta
     assert set(manifest["inventory"]) >= {"native_session", "normalized_transcript", "source_bundle"}
 
 
+def test_worker_capture_uses_the_prepared_checkout_and_native_directory(portable):
+    attempt, scope, environ, newest = portable
+    root = attempt / "worktrees"
+    saved = attempt / "source"
+    root.rename(saved)
+    root.mkdir()
+    checkout = root / "task"
+    saved.rename(checkout)
+    workspace = attempt / "spool" / "workspaces" / "t1.json"
+    workspace.parent.mkdir(parents=True)
+    workspace.write_text(json.dumps({"path": str(checkout)}))
+    spec = json.loads((attempt / "launch.json").read_text())
+    spec["authority"]["task_id"] = "t1"
+    spec["checkout"] = {"project": "github.com/the-cloud-clockwork/agentihooks", "agent": "engineer-1"}
+    (attempt / "launch.json").write_text(json.dumps(spec))
+    native_folder = newest.parent.parent / native.encoded(checkout)
+    newest.parent.rename(native_folder)
+    newest = native_folder / newest.name
+    result = capture.publish(attempt, scope, environ, newest)
+    assert result["status"] == "complete"
+    identifier = checkpoint(attempt, {**scope, **result}, scope)
+    store = runtime.worker_store(spec, attempt, environ)
+    assert model.Validator(store).verify(identifier).continuation == "native"
+    assert not (root / ".git").exists()
+
+
 def test_corruption_after_export_is_refused_by_the_supervisor_validator(portable):
     attempt, scope, environ, newest = portable
     assert capture.publish(attempt, scope, environ, newest)["status"] == "complete"

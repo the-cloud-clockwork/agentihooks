@@ -64,7 +64,7 @@ def publish(attempt: Path, scope: dict, environ: Mapping[str, str], newest: Path
     qualifier = native.Qualifier(model.Validator(store, execution_generation=spec["registration"]["generation"]))
     record = json.loads((attempt / "execution.json").read_text())
     execution = filesystem.recorded(attempt.resolve(), record)
-    worktree = execution.path("worktree")
+    worktree, cwd = runtime.source_paths(spec, execution)
     if not (worktree / ".git").exists():
         return {"status": "incomplete", "reason": "source_checkout_absent"}
     source = git_capture.capture(worktree, "origin/dev")
@@ -78,7 +78,7 @@ def publish(attempt: Path, scope: dict, environ: Mapping[str, str], newest: Path
     harness = spec["harness"]
     variable = "CLAUDE_CONFIG_DIR" if harness == "claude" else "CODEX_HOME"
     taken = qualifier.capture(
-        harness, Path(environ[variable]), newest.stem[-36:], attempt, runtime.version(harness, environ), stopped=True
+        harness, Path(environ[variable]), newest.stem[-36:], cwd, runtime.version(harness, environ), stopped=True
     )
     doc = native.merged(doc, taken)
     materials = {**source.materials, model.TRANSCRIPT: text}

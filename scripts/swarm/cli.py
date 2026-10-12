@@ -420,6 +420,7 @@ def cmd_create(store, args):
         lanes=templates.lane_map(template),
         links=template.links,
         autonomy=template.autonomy or DELEGATE,
+        scratch=not ledger_creator.shared(os.environ),
     )
     store.create(config)
     from scripts.swarm import commands
