@@ -1,5 +1,5 @@
 import { $, h } from "./dom.js";
-import { writeSwarm } from "./api.js";
+import { readModels, writeSwarm } from "./api.js";
 import { setChatTo, showChat } from "./chat.js";
 import { capDraft, doctorOn, overlayChanges, pending, renderSwarm, saveRouting, swarm, swarmControl, toggleOverlay } from "./swarm.js";
 import { lifecycleBody, sendLifecycle, unresolved } from "./lifecycle.js";
@@ -13,6 +13,31 @@ const MASTER_AGENTS = ["claude", "codex"];
 
 let noteTimer = 0;
 let noteError = false;
+let models = {};
+
+async function loadModels() {
+  try {
+    const response = await readModels();
+    models = response.ok ? await response.json() : {};
+  } catch {
+    models = {};
+  }
+  renderControls();
+}
+
+function renderModels(values) {
+  for (const harness of ["claude", "codex"]) {
+    const key = `${harness}_model`, current = values[key] || "";
+    const options = [...(models[harness] || [])];
+    if (current && !options.length) options.unshift({ model: current, label: current });
+    const select = $(`cap-${key}`), stamp = JSON.stringify(options);
+    if (select.dataset.options !== stamp) {
+      select.replaceChildren(...options.map((entry) => h("option", { value: entry.model, text: entry.label || entry.model })));
+      select.dataset.options = stamp;
+    }
+    select.value = current;
+  }
+}
 
 export function clearNoteError() {
   noteError = false;
@@ -47,7 +72,7 @@ function capStep(values, lane, up) {
   return { [key]: Math.min(high, Math.max(low, (Number(values[key]) || 0) + (up ? step : -step))) };
 }
 
-function capChanges(values, draft) {
+function capChanges(values, draft, catalog = {}) {
   const body = { action: "set" }, bad = [];
   for (const [lane, [key, , low, high, name]] of Object.entries(STEPS)) {
     if (!(key in draft)) continue;
@@ -62,6 +87,12 @@ function capChanges(values, draft) {
     const value = String(draft[key]).trim();
     if (!EFFORTS.includes(value)) bad.push(`${name} must be one of ${EFFORTS.join(", ")}`);
     else if (value !== values[key]) body[key] = value;
+  }
+  for (const harness of ["claude", "codex"]) {
+    const key = `${harness}_model`;
+    if (!(key in draft) || draft[key] === values[key]) continue;
+    if (!(catalog[harness] || []).some((entry) => entry.model === draft[key])) bad.push(`${harness} model must be listed in the catalog`);
+    else body[key] = draft[key];
   }
   if ("master_agent" in draft) {
     if (!MASTER_AGENTS.includes(draft.master_agent)) bad.push("master affinity must be Claude or Codex");
@@ -112,7 +143,7 @@ export function showNote(phase, action, error) {
 
 export function renderControls() {
   const config = swarm ? swarm.config : {};
-  const changes = swarm ? capChanges(capValues(swarm), capDraft) : { body: {}, bad: [] };
+  const changes = swarm ? capChanges(capValues(swarm), capDraft, models) : { body: {}, bad: [] };
   const off = swarm ? { ...swarmControls(config.state), ...capBounds(capCurrent()), apply: Object.keys(changes.body).length < 2 && !changes.bad.length } : swarmControls("");
   for (const btn of [...$("swarm-box").querySelectorAll("button[data-swarm]"), ...$("closed-banner").querySelectorAll("button[data-swarm]")]) {
     const action = btn.dataset.swarm;
@@ -126,9 +157,10 @@ export function renderControls() {
     btn.disabled = !swarm || !!pending;
   }
   for (const btn of $("swarm-gates").querySelectorAll("button[data-gate]")) btn.disabled = !swarm || !!pending;
+  if (swarm) renderModels(capCurrent());
   for (const input of $("capacity-box").querySelectorAll("[data-cap]")) {
     if (swarm && !(input.dataset.cap in capDraft)) input.value = capValues(swarm)[input.dataset.cap] ?? "";
-    input.setAttribute("aria-invalid", String(input.dataset.cap in capDraft && !!capChanges({}, { [input.dataset.cap]: capDraft[input.dataset.cap] }).bad.length));
+    input.setAttribute("aria-invalid", String(input.dataset.cap in capDraft && !!capChanges({}, { [input.dataset.cap]: capDraft[input.dataset.cap] }, models).bad.length));
     input.disabled = !swarm || pending === "apply";
   }
   renderCommands((swarm && swarm.commands) || []);
@@ -189,12 +221,13 @@ export async function refreshQuota() {
 }
 
 function applyCaps() {
-  const { body, bad } = capChanges(capValues(swarm), capDraft);
+  const { body, bad } = capChanges(capValues(swarm), capDraft, models);
   if (bad.length) return showNote("error", "apply", bad.join("; "));
   if (Object.keys(body).length > 1) swarmControl(body, "apply");
 }
 
 export function wireSwarm() {
+  loadModels();
   $("quota-refresh").addEventListener("click", refreshQuota);
 
   $("closed-banner").addEventListener("click", (event) => {

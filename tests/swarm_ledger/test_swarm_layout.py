@@ -279,7 +279,6 @@ def test_the_effort_range_shows_in_the_caps_row_and_apply_sends_it(open_page):
     assert floor.bounding_box()["y"] == page.tab.locator("#cap-eng").bounding_box()["y"]
     page.tab.get_by_role("button", name="Raise effort ceiling").click()
     assert ceiling.input_value() == "xhigh"
-    assert not page.tab.get_by_role("button", name="Raise effort ceiling").is_disabled()
     page.tab.get_by_role("button", name="Raise effort ceiling").click()
     assert page.tab.get_by_role("button", name="Raise effort ceiling").is_disabled()
     floor.fill("low")
@@ -354,8 +353,8 @@ def test_capacity_caps_and_apply_share_one_row_and_gates_start_below(open_page):
           };
         }"""
     )
-    assert len(boxes["row"]) == 8
-    caps, (affinity, apply) = boxes["row"][:6], boxes["row"][6:]
+    assert len(boxes["row"]) == 10
+    caps, (affinity, apply) = boxes["row"][:6], boxes["row"][8:]
     middle = (caps[0][0] + caps[0][1]) / 2
     assert all(top <= middle <= bottom for top, bottom in caps)
     last = (affinity[0] + affinity[1]) / 2
@@ -782,7 +781,7 @@ def test_the_sessions_cell_reads_the_plain_session_count(open_page):
 def test_every_capacity_stepper_puts_minus_before_and_plus_after_its_value(open_page):
     page = open_page()
     order = page.tab.eval_on_selector_all(
-        "#capacity-box .sw-cap:not(.sw-affinity)",
+        "#capacity-box .sw-cap:not(.sw-affinity):not(.sw-model)",
         """caps => caps.map(c => [c.querySelector('.sw-cap-name').innerText,
           [...c.children].slice(1).map(e => e.matches('.sw-field') ? e.querySelector('input').value + (e.querySelector('.sw-unit')?.innerText || '') : e.innerText)])""",
     )

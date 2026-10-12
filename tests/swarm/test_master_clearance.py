@@ -178,7 +178,14 @@ def test_a_master_stop_that_outlives_its_retirement_records_the_settled_state(sw
     ]
 
 
-SAMPLES = {"compact_limit": 200, "effort_min": "low", "effort_max": "max", "master_agent": "codex"}
+SAMPLES = {
+    "compact_limit": 200,
+    "effort_min": "low",
+    "effort_max": "max",
+    "master_agent": "codex",
+    "claude_model": "opus",
+    "codex_model": "gpt-6.1-sol",
+}
 NOT_SWARM = {"apply", "doctor_start", "doctor_stop"}
 
 
@@ -209,8 +216,17 @@ def test_the_walk_finds_every_panel_control_family():
 
 @pytest.mark.parametrize("body", list(panel_bodies()), ids=str)
 def test_every_panel_control_is_a_cleared_command_the_command_line_takes(swarm, monkeypatch, body):
+    from unittest.mock import patch
+
+    from scripts.swarm import model_catalog
+
     store, _ = swarm
-    argv = ledger_server.control_argv(body)
-    assert argv[0] in clearance.COMMANDS
-    acting(monkeypatch, MASTER, "demo")
-    assert cli.main(["demo", *argv]) == 0
+    models = {"claude": [{"model": "opus"}], "codex": [{"model": "gpt-6.1-sol"}]}
+    with (
+        patch.object(model_catalog, "catalog", return_value=models),
+        patch.object(ledger_server, "swarm_models", return_value=models),
+    ):
+        argv = ledger_server.control_argv(body)
+        assert argv[0] in clearance.COMMANDS
+        acting(monkeypatch, MASTER, "demo")
+        assert cli.main(["demo", *argv]) == 0

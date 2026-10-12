@@ -500,6 +500,7 @@ input, textarea { caret-color: var(--accent-2); }
 .sw-num[aria-invalid="true"] { color: var(--destructive); }
 .sw-unit { font-size: var(--fs-meta); color: var(--muted); }
 .sw-select { text-align: left; cursor: pointer; }
+.sw-model .sw-select { max-width: 22ch; }
 .sw-select option { background: var(--panel); color: var(--text); }
 .sw-affinity-state:empty { display: none; }
 .sw-affinity-state.bad { color: var(--destructive); }

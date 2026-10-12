@@ -114,6 +114,19 @@ def test_a_policy_without_a_brain_sets_only_the_account_token():
     assert rendered.pod["spec"]["containers"][0]["env"] == [TOKEN_ENV]
 
 
+def test_worker_git_app_credentials_are_only_secret_key_references():
+    policy = load_policy(POLICY)
+    policy["git_app_secret_name"] = "swarm-git-app"
+    _, rendered = render(policy=policy)
+    environ = rendered.pod["spec"]["containers"][0]["env"]
+    app = [entry for entry in environ if entry["name"].startswith("GITHUB_APP_")]
+    assert app == [
+        {"name": key, "valueFrom": {"secretKeyRef": {"name": "swarm-git-app", "key": key}}}
+        for key in ("GITHUB_APP_ID", "GITHUB_APP_INSTALLATION_ID", "GITHUB_APP_PRIVATE_KEY")
+    ]
+    assert rendered.pod["spec"]["volumes"] == render()[1].pod["spec"]["volumes"]
+
+
 def test_requests_come_from_the_admitted_launch_and_limits_from_the_profile():
     _, rendered = render()
     assert rendered.pod["spec"]["containers"][0]["resources"] == {
