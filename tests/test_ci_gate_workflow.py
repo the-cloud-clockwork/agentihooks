@@ -382,7 +382,9 @@ def test_required_gate_is_red_unless_mutation_passed_or_was_not_due(job, mutatio
     step = gate["steps"][0]
     assert job in gate["needs"]
     assert jobs[job]["if"].startswith("${{")
-    assert step["env"]["MUTATION"] == jobs[job]["if"]
+    assert step["env"]["MUTATION"] == (
+        "${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}"
+    )
     needs = {name: {"result": "success"} for name in ("unit", "lint", "sonar")}
     needs[job] = {"result": mutation}
     env = dict(os.environ, NEEDS=json.dumps(needs), MUTATION=expected)
