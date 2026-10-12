@@ -33,7 +33,27 @@ app.kubernetes.io/component: {{ .component }}
 {{- end -}}
 
 {{- define "swarm.redisEnv" -}}
-{{- if .Values.redis.existingSecret.name }}
+{{- $roles := .Values.redis.roles | default dict -}}
+{{- $named := list -}}
+{{- range $role := list "ledger" "controller" "worker" }}
+{{- if (get $roles $role | default dict).name }}
+{{- $named = append $named $role -}}
+{{- end }}
+{{- end }}
+{{- if and $named (ne (len $named) 3) }}
+{{- fail "redis.roles sets every role or none: ledger, controller and worker each name their own Secret" }}
+{{- end }}
+{{- if and $named (ne (toString .role) "hive-join") }}
+{{- $ref := get $roles (required "swarm.redisEnv needs a role when redis.roles is set" .role) }}
+{{- if eq $ref.name .Values.redis.existingSecret.name }}
+{{- fail (printf "redis.roles.%s must not name the administrator Redis Secret %s" .role $ref.name) }}
+{{- end }}
+- name: AGENTIHOOKS_SWARM_REDIS_URL
+  valueFrom:
+    secretKeyRef:
+      name: {{ $ref.name }}
+      key: {{ required (printf "redis.roles.%s.key names the key holding the Redis URL" .role) $ref.key }}
+{{- else if .Values.redis.existingSecret.name }}
 - name: AGENTIHOOKS_SWARM_REDIS_URL
   valueFrom:
     secretKeyRef:
@@ -54,19 +74,22 @@ app.kubernetes.io/component: {{ .component }}
 {{- end -}}
 
 {{- define "swarm.env" -}}
+{{- $role := .role -}}
+{{- with .root -}}
 - name: AGENTIHOOKS_DEPLOYMENT
   value: {{ .Values.deployment | quote }}
 - name: LEDGER_URL
   value: {{ include "swarm.ledgerUrl" . | quote }}
 - name: SWARM_HIVE_ID
   value: {{ .Values.hive.id | default (include "swarm.fullname" .) | quote }}
-{{ include "swarm.redisEnv" . }}
+{{ include "swarm.redisEnv" (dict "Values" .Values "Chart" .Chart "Release" .Release "role" $role) }}
 {{- range .Values.secretEnv }}
 - name: {{ .name }}
   valueFrom:
     secretKeyRef:
       name: {{ .secretName }}
       key: {{ .key }}
+{{- end }}
 {{- end }}
 {{- end -}}
 

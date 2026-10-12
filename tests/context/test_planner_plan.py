@@ -87,6 +87,7 @@ def test_pre_tool_use_leaves_the_planner_plan_exit_to_the_permission_request(
 
 
 @pytest.mark.parametrize(("lane", "tool"), [("eng", "ExitPlanMode"), ("plan", "Bash")])
-def test_anything_else_still_gets_the_pane_prompt(forced_claude, monkeypatch, capsys, tmp_path, lane, tool):
+def test_non_swarm_sessions_still_get_the_pane_prompt(forced_claude, monkeypatch, capsys, tmp_path, lane, tool):
     _planner(monkeypatch, lane)
+    monkeypatch.delenv("AGENTIHOOKS_SWARM")
     assert _hook("PermissionRequest", tmp_path, capsys, tool) == {}

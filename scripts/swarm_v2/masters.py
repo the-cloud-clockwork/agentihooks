@@ -99,6 +99,9 @@ def owner_of(target: str, doc: dict, owners: dict[str, str]) -> str:
     item = rest.partition("/")[0]
     if kind == HIVES:
         return owners.get(f"{HIVES}/{item}", "")
+    if kind in ("questions", "followups"):
+        hive = next((row.get("hive") for row in doc.get(kind, []) if row.get("id") == item), None)
+        return owners.get(f"{HIVES}/{hive}", "") if hive else ""
     if kind == "tasks":
         item = {t.get("id"): t.get("phase") for t in doc.get("tasks", [])}.get(item)
     elif kind != "phases":
@@ -107,8 +110,7 @@ def owner_of(target: str, doc: dict, owners: dict[str, str]) -> str:
 
 
 def route(target: str, doc: dict, owners: Callable[[], dict[str, str]], live: list[str], lead: str) -> str:
-    """owners is read only for a phase, task or hive target, so other items write no owner state."""
-    if target.partition("/")[0] not in ("phases", "tasks", HIVES):
+    if target.partition("/")[0] not in ("phases", "tasks", "questions", "followups", HIVES):
         return lead
     owner = owner_of(target, doc, owners())
     return owner if owner in live else lead
