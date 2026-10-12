@@ -3,14 +3,21 @@
 import json
 import os
 from dataclasses import asdict, dataclass, replace
+from typing import TYPE_CHECKING
 
 from scripts import agent_choice
 from scripts.handoff import transfers
-from scripts.swarm.store import MASTER, SwarmError
+from scripts.swarm import idle, outage, snapshot
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_workspace
+
+if TYPE_CHECKING:
+    from scripts.swarm.tick import Ledger, Runtime
 
 AWAITING = "awaiting-decision"
 RESUMED, FRESH = "resumed", "fresh"
+KUBERNETES = "kubernetes"
+RECOVERY_REQUESTS = "recovery-requests"
 REOPENED = "own conversation reopened"
 RESTORED = (
     "The swarm {slug} was restored from a snapshot and reopened this conversation of yours as {name}, on task {task}. "
@@ -128,6 +135,8 @@ def decide(store, slug: str, name: str, choice: str, runtime, now_ms: int, ledge
     agent = next((a for a in store.agents(slug) if a.name == name), None)
     if agent is None or agent.state != AWAITING:
         raise SwarmError("This agent is not awaiting a restore decision")
+    if agent.execution_id and agent.runtime_backend == KUBERNETES:
+        return requested(store, slug, agent, choice, now_ms)
     previous = next(r for r in store.restored(slug) if r["name"] == name)
     if choice == "fresh":
         transfers.fresh(store, slug, previous["transfer"], now_ms)
@@ -160,3 +169,232 @@ def decide(store, slug: str, name: str, choice: str, runtime, now_ms: int, ledge
         raise SwarmError("Choose resume or fresh")
     store.put_restored(slug, [asdict(outcome) if r["name"] == name else r for r in store.restored(slug)])
     return outcome
+
+
+def requested(store, slug: str, agent, choice: str, now_ms: int) -> Outcome:
+    """A Pod attempt's choice is only requested here; the controller applies it under its lease on its next pass,
+    and a repeated request for the same attempt replaces the pending one instead of queueing a second."""
+    if choice not in ("resume", "fresh"):
+        raise SwarmError("Choose resume or fresh")
+    store.redis.hset(store.key(slug, RECOVERY_REQUESTS), agent.execution_id, choice)
+    reason = f"Recovery requested: {choice}"
+    return Outcome(agent.name, agent.lane, agent.task, AWAITING, reason, agent.conversation_id, now_ms)
+
+
+RECOVERY = "outage-resumes"
+RECOVERY_ATTEMPTS = 3
+
+
+def _recovery_record(store, slug, agent):
+    raw = store.redis.hget(store.key(slug, RECOVERY), agent.name)
+    return json.loads(raw) if raw else {}
+
+
+def _recovery_owner(store, slug, agent, rows, now_ms):
+    task = rows.get(agent.task, {})
+    if agent.lane == MASTER or agent.state != "working":
+        return False
+    if task.get("done") or task.get("state") not in {"claimed", "pr"} or task.get("claimed_by") != agent.name:
+        return False
+    if store.claimant(slug, agent.task) != agent.name:
+        return False
+    if agent.seat and store.seats.occupant(agent.seat).occupant != agent.name:
+        return False
+    raw = store.redis.get(store.key(slug, "task-authority", agent.task))
+    if not raw:
+        return not agent.execution_id
+    claim = json.loads(raw)
+    return (
+        claim["state"] == "active"
+        and claim["holder"] == agent.name
+        and claim["execution_id"] == agent.execution_id
+        and claim["execution_generation"] == agent.generation
+        and claim["lease_deadline_ms"] > now_ms
+    )
+
+
+def _recovery_identity(store, slug, agent):
+    raw = store.redis.get(store.key(slug, "task-authority", agent.task))
+    generation = json.loads(raw)["generation"] if raw else 0
+    return [agent.task, agent.seat, agent.execution_id, agent.generation, generation]
+
+
+def track_outages(slug: str, store: RedisStore, runtime: "Runtime", rows: dict, now_ms: int) -> None:
+    records = outage.read(slug)
+    key = store.key(slug, RECOVERY)
+    live = runtime.live_names()
+    for agent in store.agents(slug):
+        previous = _recovery_record(store, slug, agent)
+        if not _recovery_owner(store, slug, agent, rows, now_ms):
+            if previous:
+                store.redis.hdel(key, agent.name)
+            continue
+        heartbeat = idle.heartbeat(store.redis, slug, agent.name)
+        last_work = max(agent.started_at, (heartbeat or {}).get("at", 0))
+        if previous.get("state") == "pending":
+            last_work = agent.started_at
+        episodes = sorted(
+            [record["kind"], record["started_at"]]
+            for record in records.values()
+            if record["ended_at"] is None or record["ended_at"] >= last_work
+        )
+        if not episodes:
+            if previous.get("state") == "pending":
+                previous["state"] = "done"
+                store.redis.hset(key, agent.name, json.dumps(previous))
+            continue
+        identity = _recovery_identity(store, slug, agent)
+        if previous.get("episodes") == episodes and previous.get("identity") == identity:
+            continue
+        observed = runtime.observe(agent)
+        state = idle.verdict(
+            observed.state,
+            heartbeat,
+            idle.wait(store.redis, slug, agent.name),
+            now_ms,
+        )
+        stalled = agent.name not in live or bool(observed.provider_error) or state == idle.IDLE
+        if not stalled and any(record["ended_at"] is None for record in records.values()):
+            continue
+        store.redis.hset(
+            key,
+            agent.name,
+            json.dumps(
+                {
+                    "identity": identity,
+                    "episodes": episodes,
+                    "attempts": 0,
+                    "state": "pending" if stalled else "done",
+                    "last_at": 0,
+                }
+            ),
+        )
+
+
+def recovery_pending(store: RedisStore, slug: str, agent: AgentRecord) -> bool:
+    record = _recovery_record(store, slug, agent)
+    return (
+        record.get("state") == "pending"
+        and record["attempts"] < RECOVERY_ATTEMPTS
+        and record["identity"] == _recovery_identity(store, slug, agent)
+    )
+
+
+def recovery_exhausted(store: RedisStore, slug: str, agent: AgentRecord) -> bool:
+    record = _recovery_record(store, slug, agent)
+    return record.get("state") == "exhausted" and record["identity"] == _recovery_identity(store, slug, agent)
+
+
+def _recovery_current(store, slug, agent, context):
+    rows = {task["id"]: task for task in context.ledger.state(slug)["tasks"]}
+    record = _recovery_record(store, slug, agent)
+    return (
+        record.get("state") == "pending"
+        and record["identity"] == _recovery_identity(store, slug, agent)
+        and _recovery_owner(store, slug, agent, rows, context.at)
+    )
+
+
+def _recovery_text(slug, agent, task):
+    folder = task.get("workspace") or str(ledger_workspace.folder(slug, agent.task))
+    return (
+        f"Service is back after the outage. As {agent.name}, re-read your task folder {folder} "
+        f"(steering.md, progress.md, proof.md), then run agentihooks msg inbox and continue your own task {agent.task}. "
+        "Keep your existing claim; do not claim new work."
+    )
+
+
+def recover_outages(
+    slug: str, store: RedisStore, ledger: "Ledger", runtime: "Runtime", rows: dict, now_ms: int
+) -> list[str]:
+    if outage.open_records(slug):
+        return []
+    actions, live = [], runtime.live_names()
+    context = RestoreContext(runtime, now_ms, ledger)
+    key = store.key(slug, RECOVERY)
+    for agent in store.agents(slug):
+        if not recovery_pending(store, slug, agent) or not _recovery_owner(store, slug, agent, rows, now_ms):
+            continue
+        record = _recovery_record(store, slug, agent)
+        observed = runtime.observe(agent)
+        if record["last_at"] == now_ms or not _recovery_current(store, slug, agent, context):
+            continue
+        if agent.name in live and not observed.provider_error and observed.state == idle.WORKING:
+            record["state"] = "done"
+        elif agent.name in live and (
+            observed.typed
+            or observed.prompt_title
+            or (observed.state not in {idle.IDLE, idle.WORKING} and not observed.provider_error)
+        ):
+            continue
+        else:
+            record["attempts"] += 1
+            record["last_at"] = now_ms
+            store.redis.hset(key, agent.name, json.dumps(record))
+            text = _recovery_text(slug, agent, rows[agent.task])
+            if agent.name in live:
+                why = runtime.nudge(agent, text)
+                if not why and not observed.provider_error:
+                    record["state"] = "done"
+            else:
+                why = _recover_process(store, slug, agent, rows[agent.task], context, text)
+                if not why:
+                    record["state"] = "done"
+            if record["state"] == "pending" and record["attempts"] >= RECOVERY_ATTEMPTS:
+                record["state"] = "exhausted"
+            actions.append(f"outage resume for {agent.name}" + (f" refused: {why}" if why else ""))
+        store.redis.hset(key, agent.name, json.dumps(record))
+    return actions
+
+
+def _recover_process(store, slug, agent, task, context, text):
+    from scripts.swarm.tick import SpawnError
+
+    worktree = snapshot.worktrees(store.config(slug).repo, [agent.name]).get(agent.name, "")
+    why = blocker(agent, worktree)
+    if not _recovery_current(store, slug, agent, context):
+        return "task ownership changed"
+    try:
+        if not why:
+            try:
+                placed = context.runtime.resume(store.config(slug), agent, text)
+            except SpawnError as error:
+                if error.status != "unsupported":
+                    raise
+            else:
+                store.put_agent(
+                    slug,
+                    replace(
+                        agent,
+                        pane_id=placed.pane_id,
+                        started_at=context.at,
+                        idle_ticks=0,
+                        account=placed.account or agent.account,
+                        model=placed.model or agent.model,
+                        effort=placed.effort or agent.effort,
+                        model_source=placed.model_source or agent.model_source,
+                        profile_decision=placed.profile_decision or agent.profile_decision,
+                    ),
+                )
+                return ""
+        return _restart_from_handoff(store, slug, agent, task, context)
+    except Exception as error:
+        return str(error) or type(error).__name__
+
+
+def _restart_from_handoff(store, slug, agent, task, context):
+    from scripts.swarm.tick import placed_record, primed
+
+    if not _recovery_current(store, slug, agent, context):
+        return "task ownership changed"
+    handoff = store.handoff(slug, agent.task) or transfers.last_handoff(store, slug, agent.task)
+    transfer = transfers.record(store, slug, agent, "outage", handoff, context.at)
+    transfers.attach(store, slug, agent)
+    task = primed(store, slug, agent.seat, {**task, "handoff": handoff, "transfer": transfer["id"]})
+    if not _recovery_current(store, slug, agent, context):
+        return "task ownership changed"
+    placed = context.runtime.spawn(store.config(slug), agent.lane, agent.name, task)
+    store.put_agent(
+        slug, replace(placed_record(agent, placed), conversation_id="", started_at=context.at, idle_ticks=0)
+    )
+    return ""

@@ -165,6 +165,17 @@ def test_a_branch_repository_that_is_not_a_string_is_refused():
     assert {"branch_repo", "parked_repos"} <= set(ledger_tasks.UPDATABLE)
 
 
+def test_the_ledger_keeps_how_a_replacement_continued_and_from_which_watermark():
+    doc = ledger("claimed")
+    recovery = {"checkpoint_id": "ckpt-1", "recovery": "native", "session_id": "s-1", "watermark": 4096}
+    applied, ctx = update(doc, {"recovery": recovery}, [])
+    assert applied is True
+    assert doc["tasks"][0]["recovery"] == recovery
+    assert sorted(ctx.stamps) == ["tasks/t1/recovery"]
+    assert ledger_tasks.OBJECT_FIELDS == ("contract", "proof", "recovery")
+    assert ledger_tasks.UPDATABLE[-1] == "recovery"
+
+
 @pytest.mark.parametrize(
     ("task", "refusal"),
     [

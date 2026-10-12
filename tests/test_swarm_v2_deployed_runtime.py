@@ -1,6 +1,6 @@
 import json
 import socket
-from dataclasses import replace
+from dataclasses import asdict, replace
 from functools import partial
 from pathlib import Path
 
@@ -644,6 +644,47 @@ def test_the_started_recovery_pass_hands_the_proof_chooser_the_controller_enviro
         service.stop()
 
 
+def test_deployed_checkpoint_reader_maps_historical_claim_and_execution_generations(tmp_path, monkeypatch):
+    from scripts.swarm_v2.auth_context import Registration
+
+    store = _store()
+    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: Pods(namespace))
+    environ = _environ(tmp_path, store, **{"AGENTIHOOKS_CHECKPOINT_ROOT": str(tmp_path / "durable")})
+    service = _cs().host(environ, store, "hive-fixture")
+    registration = Registration(
+        "g", SLUG, "e1", 2, SEAT, "t1", ACCOUNT, "brain", ["local:fixture"], "issuer", "worker", "key", ""
+    )
+    calls = []
+
+    def registered(slug, execution):
+        calls.append(("registration", slug, execution))
+        return registration if slug == SLUG and execution == "e1" else None
+
+    def journal(task):
+        calls.append(("journal", task))
+        return [{"claim": {"execution_id": "e1", "execution_generation": 2, "generation": 9}}] if task == "t1" else []
+
+    try:
+        monkeypatch.setattr(service.grants, "registration", registered)
+        monkeypatch.setattr(service.tasks, "journal", journal)
+        reader = service.recover.recovery.checkpoints
+        assert reader.root == tmp_path / "durable"
+        assert reader.compatibility == "dev"
+        validator = reader.validator("e1")
+        assert validator.store.scope.generation == 9
+        assert validator.store.scope.execution_id == "e1"
+        assert validator.execution_generation == 2
+        assert reader.validator("unknown") is None
+        assert calls == [
+            ("registration", SLUG, "e1"),
+            ("journal", "t1"),
+            ("registration", SLUG, "e1"),
+            ("registration", SLUG, "unknown"),
+        ]
+    finally:
+        service.stop()
+
+
 def test_the_runtime_line_is_flushed_so_the_container_log_shows_it_at_once(tmp_path, monkeypatch):
     store, printed = _store(), []
     monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: Pods(namespace))
@@ -958,6 +999,8 @@ def test_a_kubernetes_launch_puts_its_grant_in_the_pod_launch_material_and_recor
             "swarm_id": SLUG,
             "grant_id": claims.grant_id,
         },
+        "registration": asdict(claims),
+        "image_digest": pod["spec"]["containers"][0]["image"].split("@", 1)[1],
         "harness": "claude",
         "agent": ["claude"],
         "exporter": ["python", "-m", "scripts.swarm_v2.session_export"],
@@ -969,6 +1012,25 @@ def test_a_kubernetes_launch_puts_its_grant_in_the_pod_launch_material_and_recor
         "kill_seconds": 2,
         "checkpoint_acknowledgement": {"status": "pending"},
     }
+
+
+@pytest.mark.parametrize(
+    ("storage", "remote"),
+    [
+        ({}, False),
+        ({"AGENTIHOOKS_CHECKPOINT_ROOT": "/fixture/checkpoints"}, False),
+        ({"AGENTIHOOKS_CHECKPOINT_BUCKET": "fixture-checkpoints"}, True),
+        ({"AGENTIHOOKS_CHECKPOINT_BUCKET": ""}, False),
+    ],
+)
+def test_worker_remote_transport_requires_the_controller_bucket(tmp_path, monkeypatch, storage, remote):
+    store = _store()
+    pods = Pods("swarm-pod-proof")
+    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: pods)
+    environ = _workers(tmp_path, **storage)
+    workers = deployed.Workers.from_environ(environ, SLUG)
+    grants = workers.grants(environ, SLUG, lambda execution: None, store)
+    assert grants.supervision.checkpoint_remote is remote
 
 
 def test_the_exporter_worker_setting_reaches_the_launch_record(tmp_path, monkeypatch):

@@ -416,12 +416,40 @@ def child_environment(account: CodexAccount, environ: Mapping[str, str]) -> dict
     return child
 
 
+def _exec_at(args: list[str]) -> int | None:
+    value_flags = codex_sessions.VALUE_FLAGS | {"--local-provider", "--remote", "--remote-auth-token-env", "--add-dir"}
+    mode = "options"
+    for at, arg in enumerate(args):
+        if mode == "value":
+            mode = "options"
+            continue
+        if mode == "images":
+            if not arg.startswith("-"):
+                continue
+            mode = "options"
+        if mode == "options":
+            if arg == "--":
+                return None
+            if arg == "--image" or arg.startswith(("-i", "--image=")):
+                mode = "images"
+            elif arg in value_flags:
+                mode = "value"
+            elif not arg.startswith("-"):
+                return at if arg in ("exec", "e") else None
+    return None
+
+
 def command(account: CodexAccount, codex_bin: str, args: list[str]) -> list[str]:
     if account.is_api:
-        return [codex_bin, NO_DAEMON, *codex_api.overrides(account.key_env, account.base_url), *args]
-    if account.bearer:
-        return [codex_bin, NO_DAEMON, *bearer_overrides(), *args]
-    return [codex_bin, *([NO_DAEMON] if account.is_token else []), *args]
+        overrides = codex_api.overrides(account.key_env, account.base_url)
+    elif account.bearer:
+        overrides = bearer_overrides()
+    else:
+        return [codex_bin, *([NO_DAEMON] if account.is_token else []), *args]
+    at = _exec_at(args)
+    if at is not None:
+        return [codex_bin, NO_DAEMON, *args[: at + 1], *overrides, *args[at + 1 :]]
+    return [codex_bin, NO_DAEMON, *overrides, *args]
 
 
 def api_account(environ: Mapping[str, str]) -> CodexAccount:

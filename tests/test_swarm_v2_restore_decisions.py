@@ -115,6 +115,136 @@ def test_master_resume_with_compatible_checkpoint_replaces_the_attempt(pending):
     assert result["replacement"] == pending.world.occupant().execution_id
 
 
+def test_a_master_lists_verified_checkpoints_for_a_recovery(pending):
+    entries = pending.world.fx["first"]["checkpoints"]
+    pending.world.checkpoints.by_execution[pending.old.execution_id] = entries
+    code, answer = pending.service.recovery_api.route(
+        "POST",
+        f"/v1/executions/{pending.old.execution_id}/checkpoints",
+        "Bearer " + pending.token,
+        {"agent": "coordinator"},
+    )
+    assert code == 200
+    assert answer["checkpoints"] == entries
+
+
+def test_the_controller_requires_a_bound_worker_before_confirming_recovery(pending):
+    decision = pending.recovery.request(pending.old.execution_id, "fresh")
+    path = f"/v1/executions/{decision.replacement}/restore-outcome"
+    api = pending.service.recovery_api
+    api.worker = lambda token: SimpleNamespace(execution_id=decision.replacement) if token == "worker fixture" else None
+    body = {"recovery": "fresh", "checkpoint_id": "", "watermark": 4096, "session_id": "", "command": []}
+    before = pending.world.protected()
+    status, refused = api.route("POST", path, "Bearer unbound fixture", body)
+    assert (status, refused["error_class"], refused["message"]) == (
+        403,
+        "forbidden_scope",
+        "restore outcome is not bound to this execution",
+    )
+    assert pending.world.protected() == before
+    assert pending.recovery.outcome(decision.replacement) is None
+    status, confirmed = api.route("POST", path, "Bearer worker fixture", body)
+    assert status == 200
+    assert confirmed == {**body, "status": "verified", "archive_watermark": 4096}
+    assert pending.recovery.restore_outcomes_by_type() == {"native": 0, "reconstructed": 0, "fresh": 1}
+    assert api.route("POST", path, "Bearer worker fixture", body) == (200, confirmed)
+    refused = {**body, "recovery": "native", "session_id": "fresh-session"}
+    assert api.route("POST", path, "Bearer worker fixture", refused)[0] == 409
+    assert pending.recovery.outcome(decision.replacement) == confirmed
+
+
+@pytest.mark.parametrize("endpoint", ["checkpoints", "restore-outcome"])
+def test_unavailable_controller_refuses_checkpoint_and_outcome_endpoints(pending, endpoint):
+    api = pending.service.recovery_api
+    api.worker = lambda token: SimpleNamespace(execution_id=pending.old.execution_id)
+    pending.service.recover = None
+    status, result = api.route(
+        "POST",
+        f"/v1/executions/{pending.old.execution_id}/{endpoint}",
+        "Bearer " + pending.token,
+        {"agent": "coordinator"},
+    )
+    assert (status, result["error_class"], result["message"]) == (
+        503,
+        "dependency_unavailable",
+        "controller recovery is unavailable",
+    )
+
+
+def test_checkpoint_fetch_requires_a_verified_listing_and_preserves_identity(pending):
+    api = pending.service.recovery_api
+    old = pending.old.execution_id
+    calls = []
+    checkpoints = SimpleNamespace(
+        list=lambda execution: calls.append(("list", execution)) or [{"checkpoint_id": "ckp-verified"}],
+        fetch=lambda execution, checkpoint: (
+            calls.append(("fetch", execution, checkpoint))
+            or {"checkpoint_id": checkpoint, "authority": {"execution_id": execution}}
+        ),
+    )
+    pending.recovery.checkpoints = checkpoints
+    path = f"/v1/executions/{old}/checkpoints"
+    assert api.route(
+        "POST", path, "Bearer " + pending.token, {"agent": "coordinator", "checkpoint_id": "ckp-verified"}
+    ) == (200, {"checkpoint_id": "ckp-verified", "authority": {"execution_id": old}})
+    status, refused = api.route(
+        "POST", path, "Bearer " + pending.token, {"agent": "coordinator", "checkpoint_id": "unverified"}
+    )
+    assert (status, refused["error_class"], refused["message"]) == (
+        409,
+        "recovery_refused",
+        "checkpoint is not verified for this execution",
+    )
+    assert calls == [("list", old), ("fetch", old, "ckp-verified"), ("list", old)]
+
+
+def test_outcome_from_another_execution_is_refused_before_any_record(pending):
+    api = pending.service.recovery_api
+    api.worker = lambda token: SimpleNamespace(execution_id="another")
+    before = pending.world.protected()
+    status, refused = api.route(
+        "POST", f"/v1/executions/{pending.old.execution_id}/restore-outcome", "Bearer worker fixture", {}
+    )
+    assert (status, refused["error_class"], refused["message"]) == (
+        403,
+        "forbidden_scope",
+        "restore outcome is not bound to this execution",
+    )
+    assert pending.world.protected() == before
+
+
+def test_controller_recovery_authenticator_preserves_swarm_and_grant(pending, monkeypatch):
+    calls = []
+    registration = SimpleNamespace(execution_id=pending.old.execution_id)
+    monkeypatch.setattr(
+        pending.service.grants, "bound", lambda slug, token: calls.append((slug, token)) or registration
+    )
+    assert pending.service.recovery_api.worker("worker fixture") is registration
+    assert calls == [(pending.recovery.slug, "worker fixture")]
+
+
+def test_a_delayed_restore_receipt_cannot_overwrite_a_newer_attempt(pending):
+    from dataclasses import replace
+
+    decision = pending.recovery.request(pending.old.execution_id, "fresh")
+    successor = pending.world.store.execution(pending.recovery.slug, decision.replacement)
+    newer = pending.recovery.controller.admit(replace(successor, execution_id="", generation=0), successor.execution_id)
+    body = {"recovery": "fresh", "checkpoint_id": "", "watermark": 4096, "session_id": "", "command": []}
+    api = pending.service.recovery_api
+    api.worker = lambda token: SimpleNamespace(execution_id=successor.execution_id)
+    path = f"/v1/executions/{successor.execution_id}/restore-outcome"
+    before = pending.world.protected()
+    status, refused = api.route("POST", path, "Bearer delayed fixture", body)
+    assert (status, refused["error_class"], refused["message"]) == (
+        409,
+        "recovery_refused",
+        "restore outcome is for a superseded execution",
+    )
+    assert pending.world.protected() == before
+    assert pending.world.occupant().execution_id == newer.execution_id
+    assert pending.recovery.outcome(successor.execution_id) is None
+
+
 @pytest.mark.parametrize("choice", ["fresh", "resume"])
 def test_restore_command_delivers_master_decision_to_anton(pending, monkeypatch, capsys, choice):
     from scripts.gates import Who

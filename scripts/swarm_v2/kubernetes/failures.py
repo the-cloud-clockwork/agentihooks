@@ -9,6 +9,8 @@ from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from scripts.swarm_v2 import retention
 from scripts.swarm_v2.accounts import AccountCapacity
+from scripts.swarm_v2.checkpoints import model
+from scripts.swarm_v2.checkpoints import restore as restoring
 from scripts.swarm_v2.controller import Controller
 from scripts.swarm_v2.kubernetes.cleanup import Release
 from scripts.swarm_v2.kubernetes.watch import BACKEND, EXECUTION_LABEL
@@ -34,6 +36,8 @@ LATE = "attempt-late-observations"
 NODES = "attempt-nodes"
 PULLS = "image-pull-since"
 PAUSED = "recovery-paused"
+RESTORES = "attempt-restores"
+REQUESTS = "recovery-requests"
 NO_TAIL = "the image never started, so no transcript was written"
 TAIL = (
     "transcript written by native session {session} after archive offset {watermark} was not archived before the "
@@ -105,6 +109,12 @@ def tail(reason: str, session: str, watermark: int) -> str:
     return TAIL.format(session=session or "unknown", watermark=watermark, reason=reason.replace("_", " "))
 
 
+def restore_directive(store: RedisStore, slug: str, replacement: str) -> dict | None:
+    """The restore a replacement attempt's launch record names, or None for an attempt no recovery admitted."""
+    raw = store.redis.hget(store.key(slug, RESTORES), replacement)
+    return json.loads(raw) if raw else None
+
+
 class AccountSlot:
     """Releases the provider slot held by exactly the fenced execution and generation."""
 
@@ -141,6 +151,7 @@ class Recovery:
         `deleted` holds the last state of each Pod deleted since the previous pass."""
         self.controller.require()
         self._resume()
+        self._requested()
         ready = None if ready_nodes is None else frozenset(ready_nodes)
         groups, seen = {}, {}
         for pod in pods:
@@ -181,13 +192,84 @@ class Recovery:
         known = self.decision(execution_id)
         if known is None or known.mode != PENDING:
             raise SwarmError("no recovery decision is pending for this attempt")
-        checkpoint = self._checkpoint(execution_id) if choice == RESUME else ""
-        if choice == RESUME and not checkpoint:
+        entry = self._checkpoint(execution_id) if choice == RESUME else {}
+        if choice == RESUME and not entry:
             raise SwarmError("no complete compatible checkpoint to resume from")
         agent = self.store.execution(self.slug, execution_id)
+        native = entry.get("continuation") != model.CONTEXT and bool(agent.conversation_id)
+        recovery = restoring.FRESH if choice == FRESH else restoring.NATIVE if native else restoring.RECONSTRUCTED
         successor = self._replace(agent)
+        checkpoint = entry.get("checkpoint_id", "")
         decision = replace(known, mode=choice, checkpoint=checkpoint, replacement=successor.execution_id)
+        self._direct(decision, recovery)
         return self._record(agent, decision, successor.generation)
+
+    def request(self, execution_id: str, choice: str) -> Decision:
+        """A repeated request for the choice already accepted returns that decision and admits nothing."""
+        known = self.decision(execution_id)
+        if choice in (FRESH, RESUME) and known is not None and known.mode == choice:
+            self.controller.require()
+            return known
+        return self.decide(execution_id, choice)
+
+    def restore(self, replacement: str) -> dict | None:
+        return restore_directive(self.store, self.slug, replacement)
+
+    def outcome(self, replacement: str) -> dict | None:
+        raw = self.store.redis.hget(self._key("attempt-restore-outcomes"), replacement)
+        return json.loads(raw) if raw else None
+
+    def confirm(self, replacement: str, restored: dict) -> dict:
+        self.controller.require()
+        agent = self.store.execution(self.slug, replacement)
+        occupant = self.store.execution_occupants(self.slug)[agent.seat]
+        if occupant.execution_id != replacement or occupant.generation != agent.generation:
+            raise SwarmError("restore outcome is for a superseded execution")
+        directive = self.restore(replacement)
+        if (
+            directive is None
+            or not isinstance(restored, dict)
+            or set(restored) != set(restoring.Restored.__dataclass_fields__)
+        ):
+            raise SwarmError("no restore directive for this attempt")
+        expected = (directive["recovery"], directive["checkpoint_id"], directive["session_id"])
+        actual = (restored.get("recovery"), restored.get("checkpoint_id"), restored.get("session_id"))
+        if actual != expected or type(restored.get("watermark")) is not int or restored["watermark"] < 0:
+            raise SwarmError("restore outcome does not match the accepted directive")
+        command = restored["command"]
+        if not isinstance(command, (list, tuple)) or any(not isinstance(word, str) for word in command):
+            raise SwarmError("restore command must be a sequence of strings")
+        outcome = {
+            **restored,
+            "command": list(command),
+            "status": "verified",
+            "archive_watermark": directive["watermark"],
+        }
+        known = self.outcome(replacement)
+        if known is not None and known != outcome:
+            raise SwarmError("restore outcome is already recorded")
+        self.store.redis.hsetnx(self._key("attempt-restore-outcomes"), replacement, json.dumps(outcome))
+        return self.outcome(replacement)
+
+    def restore_outcomes_by_type(self) -> dict[str, int]:
+        kinds = [json.loads(raw)["recovery"] for raw in self.store.redis.hvals(self._key("attempt-restore-outcomes"))]
+        return {kind: kinds.count(kind) for kind in restoring.TYPES}
+
+    def _direct(self, decision: Decision, recovery: str) -> None:
+        fence = self.fence(decision.execution_id)
+        session = fence["native_session"] if recovery == restoring.NATIVE else ""
+        directive = restoring.Directive(decision.checkpoint, recovery, session, fence["archive_watermark"])
+        self.controller.require()
+        self.store.redis.hsetnx(self._key(RESTORES), decision.replacement, json.dumps(directive.record()))
+
+    def _requested(self) -> None:
+        for execution_id, choice in sorted(self.store.redis.hgetall(self._key(REQUESTS)).items()):
+            try:
+                self.request(execution_id, choice)
+            except SwarmError as error:
+                print(f"controller: the recovery request for {execution_id} was refused: {error}", flush=True)
+            self.controller.require()
+            self.store.redis.hdel(self._key(REQUESTS), execution_id)
 
     def pause(self, paused: bool) -> None:
         """The operator's pause outlives a controller restart; the constructor flag stays the deployment default."""
@@ -319,8 +401,8 @@ class Recovery:
         return fence
 
     def _decide(self, agent: AgentRecord, reason: str) -> Decision:
-        checkpoint = self._checkpoint(agent.execution_id)
-        if not self.automatic or self.paused() or reason == IMAGE_PULL or not checkpoint:
+        entry = self._checkpoint(agent.execution_id, native_only=True)
+        if not self.automatic or self.paused() or reason == IMAGE_PULL or not entry or not agent.conversation_id:
             occupant = self.store.execution_occupants(self.slug)[agent.seat]
             if occupant.execution_id == agent.execution_id:
                 self.controller.require()
@@ -328,16 +410,20 @@ class Recovery:
             decision = Decision(agent.execution_id, agent.generation, reason, PENDING)
             return self._record(agent, decision, occupant.generation)
         successor = self._replace(agent)
+        checkpoint = entry["checkpoint_id"]
         decision = Decision(agent.execution_id, agent.generation, reason, RESUME, checkpoint, successor.execution_id)
+        self._direct(decision, restoring.NATIVE)
         return self._record(agent, decision, successor.generation)
 
-    def _checkpoint(self, execution_id: str) -> str:
+    def _checkpoint(self, execution_id: str, native_only: bool = False) -> dict:
         usable = [
             entry
             for entry in self.checkpoints.list(execution_id)
             if entry.get("status") == "complete" and entry.get("compatibility") == self.compatibility
         ]
-        return max(usable, key=lambda entry: entry["sequence"])["checkpoint_id"] if usable else ""
+        if native_only:
+            usable = [entry for entry in usable if entry.get("continuation") != model.CONTEXT]
+        return max(usable, key=lambda entry: entry["sequence"]) if usable else {}
 
     def _replace(self, agent: AgentRecord) -> AgentRecord:
         occupant = self.store.execution_occupants(self.slug)[agent.seat]
@@ -352,6 +438,7 @@ class Recovery:
         return self.controller.admit(record, agent.execution_id)
 
     def _record(self, agent: AgentRecord, decision: Decision, observed_generation: int) -> Decision:
+        self._write("attempt-checkpoint-options", decision.execution_id, self._checkpoint(decision.execution_id))
         self._write(RECOVERIES, decision.execution_id, asdict(decision))
         self.controller.telemetry.record(
             "recovery",

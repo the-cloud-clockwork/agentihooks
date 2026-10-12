@@ -43,6 +43,7 @@ UPDATABLE = (
     "phase",
     "slice",
     "follow_up",
+    "recovery",
 )
 BOOL_FIELDS = ("artifact", "follow_up")
 DIFFICULTIES = ("S", "M", "L")
@@ -53,7 +54,7 @@ LIST_FIELDS = ("depends_on", "territory", "parked_on", "parked_repos", "overlays
 OVERLAY_CAP = 3
 BRANCH_RE = re.compile(r"^(?!-)\S*$")
 COMMIT_RE = re.compile(r"^([0-9a-f]{7,64})?$")
-OBJECT_FIELDS = ("contract", "proof")
+OBJECT_FIELDS = ("contract", "proof", "recovery")
 URL_FIELDS = ("issue_url", "pr_url", "plan_url")
 URL_RE = re.compile(r"^https?://[^\s]+$")
 OPS = ("task_add", "task_update")

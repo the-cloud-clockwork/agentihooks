@@ -19,7 +19,7 @@ from scripts.swarm_v2.supervision import Budgets, Launch, LaunchRefused
 
 
 @pytest.fixture
-def supervisor(tmp_path):
+def supervisor(tmp_path, monkeypatch):
     (tmp_path / "homes" / "codex").mkdir(parents=True)
     execution = filesystem.Execution(tmp_path, filesystem.load())
     launch = Launch(
@@ -32,6 +32,7 @@ def supervisor(tmp_path):
         Budgets(2, 1, 1, 1),
     )
     owner = runtime.Supervisor(launch)
+    monkeypatch.setattr(runtime.checkpoint_runtime, "validate_export", lambda *args: True)
     owner.root.mkdir(parents=True)
     protocol.write(owner.root / "context.json", owner.scope)
     return owner
