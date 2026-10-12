@@ -26,6 +26,13 @@ def _pytest_command() -> str:
     raise AssertionError("no pytest step in test.yml")
 
 
+def _slowest_committed_test() -> float:
+    return max(
+        max(json.loads(subprocess.check_output(["git", "show", f"HEAD:{name}"], cwd=_ROOT, text=True)).values())
+        for name in (".test_durations", ".test_durations-3.12")
+    )
+
+
 @pytest.mark.parametrize("plugin", ["pytest-xdist", "pytest-split"])
 def test_dev_extra_declares_test_plugin(plugin):
     dev = tomllib.loads((_ROOT / "pyproject.toml").read_text())["project"]["optional-dependencies"]["dev"]
@@ -181,13 +188,25 @@ def test_a_hung_unit_shard_fails_near_twice_the_slowest_shard():
 
 def test_a_hung_unit_test_dumps_every_thread_stack_within_a_minute():
     command = _pytest_command()
-    slowest_test = max(
-        max(json.loads((_ROOT / name).read_text()).values()) for name in (".test_durations", ".test_durations-3.12")
-    )
+    slowest_test = _slowest_committed_test()
     timeout = int(re.search(r"-o faulthandler_timeout=(\d+)", command).group(1))
     assert slowest_test < timeout <= 60
     assert "no:faulthandler" not in command
     assert "faulthandler_exit_on_timeout" not in command
+
+
+def test_the_hung_test_bound_reads_the_committed_durations_not_the_downloaded_copy(tmp_path, monkeypatch):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    for name in (".test_durations", ".test_durations-3.12"):
+        (tmp_path / name).write_text(json.dumps({"tests/test_a.py::test_a": 1.0}))
+    subprocess.run(["git", "-C", str(tmp_path), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "d"], check=True
+    )
+    for name in (".test_durations", ".test_durations-3.12"):
+        (tmp_path / name).write_text(json.dumps({"tests/test_a.py::test_a": 90.0}))
+    monkeypatch.setattr(sys.modules[__name__], "_ROOT", tmp_path)
+    assert _slowest_committed_test() == 1.0
 
 
 def test_tests_run_on_pull_requests_into_dev_and_main():
