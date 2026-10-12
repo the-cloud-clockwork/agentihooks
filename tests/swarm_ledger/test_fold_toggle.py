@@ -196,7 +196,7 @@ def test_one_dropdown_by_hand_is_remembered_and_flips_the_control_only_when_all_
     tab.locator(summaries).nth(0).evaluate("(el) => el.click()")
     settle(tab)
     assert comments(tab, "sec-phases") == {"labels": ["Show all comments"], "open": [True, False, False]}
-    tab.reload()
+    reload_after_folds(tab, "#sec-phases details[data-key='phases/p0']")
     settle(tab)
     assert comments(tab, "sec-phases") == {"labels": ["Show all comments"], "open": [True, False, False]}
     tab.locator(summaries).nth(1).evaluate("(el) => el.click()")
