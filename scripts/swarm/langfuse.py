@@ -101,4 +101,4 @@ def refresh(
         store.redis.set(key, json.dumps(record))
         return []
     store.redis.set(key, json.dumps({"tried_at": now_ms, "at": now_ms, "accounts": count}))
-    return []
+    return [f"Langfuse summary read: {count} breaching accounts"]

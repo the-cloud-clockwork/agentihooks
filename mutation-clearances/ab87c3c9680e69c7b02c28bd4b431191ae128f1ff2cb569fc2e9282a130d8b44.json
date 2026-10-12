@@ -1,6 +1,0 @@
-{
-  "scripts/runtime_env.py:scripts.runtime_env.x_seed__mutmut_17:f001609ab004297617b6942e1b6bbe7a872b2f8296805515be1b3035fc3cd747": {
-    "reader": "/root/standards_reader",
-    "reason": "Only the missing-key fallback differs, empty string versus None. Endpoint is subsequently used only in truthiness before quote/write; both suppress insertion with identical block removal, file output, chmod and return."
-  }
-}

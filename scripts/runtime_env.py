@@ -1,3 +1,4 @@
+import re
 from collections.abc import Callable
 from pathlib import Path
 from shlex import quote
@@ -13,10 +14,9 @@ def seed(seeder: Callable[[], list[str]], destination: Path, settings: dict) -> 
     endpoint = environment.get(KEY, settings.get("_agentihooks", {}).get("env", {}).get(KEY, ""))
     original = destination.read_text() if destination.exists() else ""
     body = original
-    if START in body:
-        before, rest = body.split(START, 1)
-        _, after = rest.split(END, 1)
-        body = before.rstrip() + "\n" + after.lstrip("\n")
+    block = re.search(rf"(?ms)^{re.escape(START)}\n.*?^{re.escape(END)}(?:\n|$)", body)
+    if block:
+        body = body[: block.start()].rstrip() + "\n" + body[block.end() :].lstrip("\n")
     active = {
         line.strip().removeprefix("export ").partition("=")[0].strip()
         for line in body.splitlines()
