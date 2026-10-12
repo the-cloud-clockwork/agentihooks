@@ -427,10 +427,11 @@ def test_a_parked_task_finishes_from_its_branch_after_a_restack():
     assert "HEAD:eng-parked" not in text
 
 
-def test_a_parked_task_with_no_branch_starts_fresh_from_dev_with_the_park_noted():
-    lines = _steps({"kind": "code", "parked_on": ["gb4"]})
+@pytest.mark.parametrize("stack", [{}, {"branch": "eng-parked"}, {"stacked_base": "abc"}])
+def test_a_parked_task_with_no_branch_or_base_starts_fresh_from_dev_with_the_park_noted(stack):
+    lines = _steps({"kind": "code", "parked_on": ["gb4"], **stack})
     text = "\n".join(lines)
-    assert "Your task is parked on gb4 but records no branch: start it fresh from dev." in lines
+    assert "Your task is parked on gb4 without a branch and a stacked base: start it fresh from dev." in lines
     assert f"2. Create your worktree: {CUT} (never edit the primary checkout)" in _step(lines, 2)
     assert "restack" not in text and "--from origin/" not in text
 
