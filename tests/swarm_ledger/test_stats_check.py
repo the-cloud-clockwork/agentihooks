@@ -123,6 +123,7 @@ def test_the_stats_card_has_no_stats_check_row():
         + function_source("statsCheck")
         + function_source("statsCheckText")
         + function_source("timeLeftInputs")
+        + function_source("bottleneckStat")
         + function_source("renderStats")
         + "\nconst assert = require('node:assert/strict');\n"
         "renderStats();\n"
@@ -160,6 +161,7 @@ def test_the_stats_card_counts_unfrozen_and_frozen_work_apart():
         "let doc = {phases: [], followups: [], questions: [], tasks: [], time_left_minutes: 30};\n"
         + function_source("span")
         + function_source("timeLeftInputs")
+        + function_source("bottleneckStat")
         + function_source("renderStats")
         + "\nconst assert = require('node:assert/strict');\n"
         "renderStats();\n"
