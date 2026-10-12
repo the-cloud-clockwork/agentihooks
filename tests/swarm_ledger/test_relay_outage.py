@@ -194,6 +194,50 @@ def test_a_trimmed_range_notice_names_the_range_and_resumes_the_relay_after_it(o
     assert "from revision 3 through 7" in notice and ledger_server.unrelayed() == {}
 
 
+class Stop(Exception):
+    pass
+
+
+def watch_passes(monkeypatch, held, replay, count=6):
+    """Run the watch loop for count passes with everything but the unrelayed replay stubbed out."""
+    passes = []
+
+    def sleep(_):
+        passes.append(1)
+        if len(passes) == count:
+            raise Stop
+
+    for name in ("bin_closed_without_swarm", "expire_alerts", "sample_streams"):
+        monkeypatch.setattr(ledger_server, name, lambda: None)
+    monkeypatch.setattr(ledger_server.ledger_bin, "tidy", lambda: None)
+    monkeypatch.setattr(ledger_server, "reloading", lambda *args: False)
+    monkeypatch.setattr(ledger_server, "unrelayed_path", lambda: held)
+    monkeypatch.setattr(ledger_server, "replay_unrelayed", lambda: replay(len(passes)))
+    monkeypatch.setattr(ledger_server.time, "sleep", sleep)
+    with pytest.raises(Stop):
+        ledger_server.watch_ledgers()
+
+
+def test_the_watch_loop_replays_held_revisions_every_fifth_pass_and_survives_a_failed_replay(
+    monkeypatch, tmp_path, capsys
+):
+    held, replayed = tmp_path / "held.json", []
+    held.write_text("{}")
+
+    def replay(at):
+        replayed.append(at)
+        raise OSError("disk full")
+
+    watch_passes(monkeypatch, held, replay)
+    assert replayed == [0, 5] and "unrelayed replay: disk full" in capsys.readouterr().err
+
+
+def test_the_watch_loop_never_replays_when_nothing_is_held(monkeypatch, tmp_path):
+    replayed = []
+    watch_passes(monkeypatch, tmp_path / "absent.json", replayed.append)
+    assert replayed == []
+
+
 def test_each_operator_write_trimmed_before_its_relay_leaves_one_notice_for_the_operator(outage, monkeypatch):
     phase, question = make_ledger()
     monkeypatch.setattr(core, "EVENTS_KEPT", 1)
