@@ -62,13 +62,13 @@ def test_the_master_records_an_ordered_split_on_a_code_task():
 def test_a_lane_agent_cannot_split_a_task():
     state, rejected = split("t1", ["1-2", "3-4"], by=ENGINEER)
     assert rejected == ["split-1"] and "split" not in row(state, "t1")
-    assert f"{ENGINEER} works in the eng lane and cannot split a task" in state["_meta"]["warnings"][-1]
+    assert f"{ENGINEER}: eng lane, no split" in state["_meta"]["warnings"][-1]
 
 
 def test_only_a_code_or_ci_task_is_split():
     state, rejected = split("r1", ["1-2", "3-4"])
     assert rejected == ["split-1"] and "split" not in row(state, "r1")
-    assert "tasks/r1 cannot be split: it is not a code or ci task" in state["_meta"]["warnings"][-1]
+    assert "tasks/r1: not a code or ci task" in state["_meta"]["warnings"][-1]
 
 
 def test_a_split_with_bound_pull_requests_is_not_rewritten():
@@ -76,7 +76,7 @@ def test_a_split_with_bound_pull_requests_is_not_rewritten():
     update("t1", {"split_pulls": ["https://github.com/o/r/pull/9"]}, by=ENGINEER)
     state, rejected = split("t1", ["1-3", "4-4"], n=2)
     assert rejected == ["split-2"] and row(state, "t1")["split"] == ["1-2", "3-4"]
-    assert "tasks/t1 cannot be split: a half already has a pull request" in state["_meta"]["warnings"][-1]
+    assert "tasks/t1: a half has a pull request" in state["_meta"]["warnings"][-1]
 
 
 def test_an_unknown_task_is_skipped():
@@ -87,12 +87,12 @@ def test_an_unknown_task_is_skipped():
 @pytest.mark.parametrize(
     "halves, reason",
     [
-        (["1-2"], "a split lists 2 to 4 halves"),
-        (["1-2", "3-4", "5-6", "7-8", "9-9"], "a split lists 2 to 4 halves"),
-        ("1-2", "a split lists 2 to 4 halves"),
-        (["1-2", "x"], "each half is a plan line range like 12-20"),
-        (["4-5", "1-2"], "halves are ordered and do not overlap"),
-        (["1-3", "3-4"], "halves are ordered and do not overlap"),
+        (["1-2"], "halves: 2 to 4"),
+        (["1-2", "3-4", "5-6", "7-8", "9-9"], "halves: 2 to 4"),
+        ("1-2", "halves: 2 to 4"),
+        (["1-2", "x"], "halves: plan line ranges"),
+        (["4-5", "1-2"], "halves: ordered, not overlapping"),
+        (["1-3", "3-4"], "halves: ordered, not overlapping"),
     ],
 )
 def test_a_malformed_split_is_refused(halves, reason):
@@ -104,9 +104,9 @@ def test_a_malformed_split_is_refused(halves, reason):
 @pytest.mark.parametrize(
     "op, reason",
     [
-        ({"by": "operator"}, "task_split needs `by`, an agent name other than operator"),
-        ({"item": "phases/p1"}, "task_split takes only an id, by, an item tasks/<id> and halves"),
-        ({"extra": 1}, "task_split takes only an id, by, an item tasks/<id> and halves"),
+        ({"by": "operator"}, "task_split by: an agent name"),
+        ({"item": "phases/p1"}, "task_split fields: id, by, item tasks/<id>, halves"),
+        ({"extra": 1}, "task_split fields: id, by, item tasks/<id>, halves"),
     ],
 )
 def test_the_op_shape_is_checked(op, reason):

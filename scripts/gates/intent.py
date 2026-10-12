@@ -234,7 +234,27 @@ def _proof_notes(task, proof_chars):
         return ""
 
 
+def split_half(task):
+    halves, pulls = task.get("split") or [], task.get("split_pulls") or []
+    index = pulls.index(task.get("pr_url")) if task.get("pr_url") in pulls else len(pulls)
+    return (index, halves[index]) if index < len(halves) else None
+
+
+def _split_note(task):
+    half = split_half(task)
+    if half is None:
+        return ""
+    index, halves = half[0], task["split"]
+    others = "; ".join(f"half {n} carries plan lines {lines}" for n, lines in enumerate(halves, 1) if n != index + 1)
+    return (
+        f"\n\nThis pull request is half {index + 1} of {len(halves)} of a split task: it carries only plan lines "
+        f"{half[1]}; {others} in its own pull request."
+    )
+
+
 def _plan_chunk(doc, task):
+    half = split_half(task)
+    task = {**task, "plan_lines": half[1]} if half else task
     if not task.get("plan_lines") or task.get("follow_up"):
         return {}
     try:
@@ -251,7 +271,7 @@ def state_of(doc, task, pr, proof_chars=PROOF_CHARS):
         "phase": phase.get("title", ""),
         "phase_intent": phase.get("description", ""),
         "task": task["title"],
-        "task_text": task["description"],
+        "task_text": task["description"] + _split_note(task),
         "pull_request_title": pr["title"],
         "pull_request_body": pr["body"],
         "changed_files": pr["files"],

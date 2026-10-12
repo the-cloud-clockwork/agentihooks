@@ -23,13 +23,34 @@ def refusal(task, url, github):
     kind = ledger_kinds.kind(task)
     if kind not in GATED:
         return ""
+    if task.get("split"):
+        return _split_refusal(task, url, github)
     if not url:
         return f"a {kind} task is done only with its merged pull request: give --pr <url>"
+    return _unmerged(url, github)
+
+
+def _unmerged(url, github):
     found = github(url)
     if found is None:
         return f"could not read pull request {url} from GitHub; run swarm done again when it answers"
     if found.state != MERGED:
         return f"pull request {url} is {found.state.lower()}, not merged; merge it, then run swarm done again"
+    return ""
+
+
+def _split_refusal(task, url, github):
+    pulls = list(task.get("split_pulls") or [])
+    if url and url not in pulls:
+        pulls.append(url)
+    if len(pulls) < len(task["split"]):
+        return (
+            f"half {len(pulls) + 1} of this split task has no pull request yet: record it with swarm pr <url>, "
+            "merge it, then run swarm done again"
+        )
+    for number, pull in enumerate(pulls[: len(task["split"])], 1):
+        if refused := _unmerged(pull, github):
+            return f"half {number} of this split task: {refused}"
     return ""
 
 
