@@ -8,7 +8,7 @@ from scripts.swarm.store import RedisStore
 from scripts.swarm_v2 import retention
 from scripts.swarm_v2.kubernetes.cleanup import Cleanup
 from scripts.swarm_v2.kubernetes.client import ApiRefused
-from scripts.swarm_v2.kubernetes.failures import FENCES, PENDING, RECOVERIES
+from scripts.swarm_v2.kubernetes.failures import FENCES, FRESH, RECOVERIES, RESUME
 from scripts.swarm_v2.kubernetes.runtime import GENERATION_LABEL
 from scripts.swarm_v2.kubernetes.watch import BACKEND, EXECUTION_LABEL
 
@@ -56,7 +56,7 @@ class Completion:
     def _retire(self) -> None:
         decided = self.store.redis.hgetall(self.store.key(self.slug, RECOVERIES))
         for execution_id, raw in sorted(decided.items()):
-            if json.loads(raw)["mode"] == PENDING or retention.final(self.store, self.slug, execution_id):
+            if json.loads(raw)["mode"] not in (FRESH, RESUME) or retention.final(self.store, self.slug, execution_id):
                 continue
             fence = json.loads(self.store.redis.hget(self.store.key(self.slug, FENCES), execution_id))
             end, outcome = fence["archive_watermark"], f"{FENCES}/{execution_id}"
