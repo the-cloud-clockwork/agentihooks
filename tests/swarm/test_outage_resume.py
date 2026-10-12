@@ -163,13 +163,17 @@ def test_work_after_outage_closure_excludes_an_agent_that_only_becomes_idle_late
     assert next(agent for agent in store.agents("sw") if agent.name == healthy.name).idle_ticks == 1
 
 
-def test_overlapping_outages_hold_recovery_and_persistent_errors_retry_three_times_then_count_idle(store):
+@pytest.mark.parametrize("error_state", ["idle", "waiting"])
+def test_overlapping_outages_hold_recovery_and_persistent_errors_retry_three_times_then_count_idle(
+    store, error_state
+):
     from scripts.swarm import idle
     from scripts.swarm.store import RedisStore
 
     ledger, runtime, agents = three_owners(store)
     stuck = agents[0]
     runtime.errors[stuck.name] = "provider unavailable"
+    runtime.statuses[stuck.name] = error_state
     runtime.nudge_refusals[stuck.name] = "provider unavailable"
     outage.observe("sw", "provider", ["provider unavailable"], MINUTE)
     outage.observe("sw", "redis", ["Redis unavailable"], 8 * MINUTE)

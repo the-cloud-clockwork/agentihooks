@@ -307,7 +307,11 @@ def recover_outages(
             continue
         if agent.name in live and not observed.provider_error and observed.state == idle.WORKING:
             record["state"] = "done"
-        elif agent.name in live and (observed.typed or observed.state not in {idle.IDLE, idle.WORKING}):
+        elif agent.name in live and (
+            observed.typed
+            or observed.prompt_title
+            or (observed.state not in {idle.IDLE, idle.WORKING} and not observed.provider_error)
+        ):
             continue
         else:
             record["attempts"] += 1
