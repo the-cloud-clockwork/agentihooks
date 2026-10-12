@@ -184,7 +184,7 @@ The ledger page is a three-column desktop layout at 1920 width: a fixed outline 
 - **Panels.** Below Capacity, full width, in this order: Quota, Overlays, Agents, Health, Handoff outcomes, Freezes. Each folds on its header and keeps a drag height grip; a folded panel shrinks to its header. Reset layout restores sizes; the order is fixed. The Quota panel has no capacity line under its table and lists only accounts read within 15 minutes of the newest reading.
 
 ### Stats
-Rows from Started to Last activity, then Top bottleneck last, as a bullet list (stage, trend, measured, last action).
+Default order (operator choice 2026-10-12): Started, Elapsed, Time left, Phases, Tasks, Follow-ups, Frozen, Unfrozen, Open, Claimed, Blocked, In PR, Done today, Next phase, Out of scope, Inbox pending, Agents · 2 h, Last activity, then Top bottleneck last: its title carries the measured age (`Top bottleneck · 3m ago`) over a bullet list of stage, trend and last action. Each row is a key and value on a fixed label track (104px), labels muted and values right aligned on one column, hairlines between rows. A value stays on one line; one that does not fit ends in an ellipsis and never covers its label. Every row, Top bottleneck included, carries a dim `≡` grip 16px in from the panel's left edge, the same margin the values keep on the right, 8px before its label: drag it, or focus it and press the up or down arrow, to reorder. The order is saved in the shared page layout (`/api/layout`, `stats`), so every browser shows it, and Reset layout clears it.
 
 ## Elevation & Depth
 
@@ -192,6 +192,8 @@ Flat. Depth is two translucent lifts over one canvas: `--surface-1` for panels a
 
 ### Named Rules
 **The Two Lifts Rule.** Every panel samples to one of two surface values. A third value is a component painting its own surface.
+
+**The Hairline Row Rule (operator rule 2026-10-12, cannot be broken).** A record row (a priority, an item, a stat, a table or list row) is transparent over its panel and divided from its neighbour by a 1px --rule hairline only. It never takes a background, a border-radius, a border, a box-shadow or a sibling gap that turns it into a tile, card or bubble; emphasis comes from role colour and type. Only hover and focus may wash a row that is a link. tests/swarm_ledger/test_design_system.py fails on any painted row and proves itself against planted tiles.
 
 ## Shapes
 
@@ -272,6 +274,7 @@ Small, quiet radii: 4px for inline controls, checkboxes and code, 6px for panels
 - **Don't** paint a blue or other tinted wash behind the canvas.
 - **Don't** wrap labels in chips, badges or pills.
 - **Don't** add a third surface level; reach for a hairline instead.
+- **Don't** paint a record row as a tile, card or bubble: no row background, radius, border, shadow or gap between rows. Hairlines only.
 - **Don't** write a colour literal outside `palette.css`.
 - **Don't** show progress or acknowledgement chatter under the Swarm control bar; failures only.
 - **Don't** let one table column take the width while the rest crowd the right edge.
