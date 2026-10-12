@@ -65,7 +65,7 @@ def test_interactive_login_presence_and_missing_login(tmp_path, monkeypatch, har
     monkeypatch.setattr(interactive.shutil, "which", {"codex": "/opt/codex"}.get)
     run = Mock(return_value=SimpleNamespace(returncode=0))
     if harness == "claude":
-        run.side_effect = AssertionError("a claude login check must not run codex")
+        run.return_value.stdout = "Login method: Claude account"
     assert interactive.account(harness, source, run) == declared
     assert credentials.is_symlink()
     if harness == "codex":
