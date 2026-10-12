@@ -104,6 +104,13 @@ def test_a_created_pane_carries_its_terminal_id(tmp_path, monkeypatch):
     assert placed == Placement("w9", "w9:t2", "w9:p4", "term_9")
 
 
+def _terminal_popen(command, **kwargs):
+    """subprocess.Popen is patched for the whole process, so only the terminal launch starts its launcher."""
+    if command[0] != "/usr/bin/terminal":
+        raise OSError(f"unexpected process {command[0]}")
+    Path(command[-1]).with_suffix(".started").touch()
+
+
 def _launch(monkeypatch, tmp_path, *extra, **env_extra):
     monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "rotation"))
     monkeypatch.setattr(herdr_host, "open_pane", lambda *a: Placement("w1", "w1:t3", "w1:p7", "term_7"))
@@ -116,9 +123,7 @@ def _launch(monkeypatch, tmp_path, *extra, **env_extra):
         "_launch_command",
         lambda launcher, directory, title, environ: ("linux", ["/usr/bin/terminal", str(launcher)]),
     )
-    monkeypatch.setattr(
-        init_agent.subprocess, "Popen", lambda command, **k: Path(command[-1]).with_suffix(".started").touch()
-    )
+    monkeypatch.setattr(init_agent.subprocess, "Popen", _terminal_popen)
     env = {
         "HOME": str(tmp_path),
         "XDG_RUNTIME_DIR": str(tmp_path / "rt"),

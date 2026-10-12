@@ -129,6 +129,8 @@ def _main(monkeypatch, tmp_path, *extra, agent="claude"):
     popened = []
 
     def popen(command, **kwargs):
+        if command[0] != "/usr/bin/terminal":
+            raise OSError(f"unexpected process {command[0]}")
         popened.append(command)
         Path(command[-1]).with_suffix(".started").touch()
 
