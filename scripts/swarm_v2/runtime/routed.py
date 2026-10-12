@@ -84,3 +84,18 @@ def routed(
     placement = Placement(kubernetes.backend) if kubernetes is not None else None
     router = RuntimeRouter.from_environ(runtimes, os.environ if environ is None else environ, placement)
     return RoutedRuntime(herdr, router, launch)
+
+
+def hive_controller(runtime: RoutedRuntime, store, slug: str, held) -> RoutedRuntime:
+    from scripts.hive.launch import HIVE, HiveLaunch
+
+    hive = HiveLaunch(store, slug, held, runtime.herdr_runtime)
+    router = RuntimeRouter(
+        [*runtime.router.runtimes.values(), hive],
+        default=HIVE,
+        disabled=runtime.router.disabled,
+        placement=Placement(HIVE, local_profiles=frozenset()),
+    )
+    placed = RoutedRuntime(runtime.herdr_runtime, router)
+    placed.hive_launch = hive
+    return placed

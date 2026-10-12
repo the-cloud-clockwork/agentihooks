@@ -40,6 +40,10 @@ class FencedLedger:
 class FencedRuntime:
     def __init__(self, store: RedisStore, slug: str, held: lease.Lease, runtime, deployment: str):
         self.store, self.slug, self.held = store, slug, held
+        from scripts.swarm_v2.runtime.routed import RoutedRuntime, hive_controller
+
+        if deployment != LOCAL and isinstance(runtime, RoutedRuntime):
+            runtime = hive_controller(runtime, store, slug, held)
         self.runtime, self.deployment = runtime, deployment
 
     def __getattr__(self, name):
@@ -57,6 +61,9 @@ class FencedRuntime:
     def _mode_refusal(self) -> str:
         if self.deployment == LOCAL:
             return ""
+        router = getattr(self.runtime, "router", None)
+        if getattr(getattr(router, "placement", None), "backend", None) == "hive":
+            return ""
         if self.deployment != DISTRIBUTED:
             return NO_SPAWNING
         router = getattr(self.runtime, "router", None)
@@ -68,6 +75,13 @@ class FencedRuntime:
         if self.deployment == LOCAL:
             return ""
         router = self.runtime.router
+        if router.placement.backend == "hive":
+            if lane not in ("eng", "ci"):
+                return WORKSTATION.format(lane=lane)
+            from scripts.hive.placement import Wait
+
+            selected = self.runtime.hive_launch.select(self.store.config(self.slug), lane, task)
+            return selected.reason if isinstance(selected, Wait) else ""
         wanted = router.placed_backend(lane, task)
         if wanted == WORKSTATION_BACKEND:
             return WORKSTATION.format(lane=lane)
@@ -77,7 +91,7 @@ class FencedRuntime:
         lease.renew(self.store, self.slug, self.held)
         if self._mode_refusal():
             return False
-        return self.deployment == DISTRIBUTED or self.runtime.has_capacity(config)
+        return self.deployment != LOCAL or self.runtime.has_capacity(config)
 
     def spawn(self, config, lane, name, task):
         lease.renew(self.store, self.slug, self.held)

@@ -35,11 +35,31 @@ class HiveLaunch:
         self.orders, self.slots = Orders(store.redis), LaunchSlots(store.redis)
         self.sleep = time.sleep
 
+    def hives(self) -> list[dict]:
+        agents = [agent for slug in self.store.slugs() for agent in self.store.agents(slug)]
+        hives = registry.hives(self.store.redis)
+        for hive in hives:
+            counts = json.loads(self.store.redis.get(f"{registry.key(hive['id'])}:sessions") or "{}")
+            seen = {execution for executions in counts.get("_executions", {}).values() for execution in executions}
+            reported = sum(
+                count for key, count in counts.items() if key != "_executions" and not key.startswith("interactive:")
+            )
+            masters = sum(count for key, count in counts.items() if key.startswith("interactive:"))
+            pending = sum(
+                agent.hive == hive["id"]
+                and agent.lane != "master"
+                and agent.state in ("launching", "working", "suspect")
+                and agent.execution_id not in seen
+                for agent in agents
+            )
+            hive["agents"] = max(0, reported - masters) + pending
+        return hives
+
     def select(self, config: SwarmConfig, lane: str, task: dict) -> Selection | placement.Wait:
         chosen = config.lanes.get(lane, {})
         saved = task.get("launch_assignment") or profile_choice.transfer(task)
         decision = self.herdr._profile_decision(config, lane, chosen, task, saved, saved, dict(os.environ))
-        hives, now = registry.hives(self.store.redis), lease.now_ms(self.store)
+        hives, now = self.hives(), lease.now_ms(self.store)
         role = ROLE_PROFILES.get(decision.profile, decision.profile)
         if role in registry.UI_ROLES and not any(hive["ui"] == "yes" and registry.live(hive, now) for hive in hives):
             return placement.Wait(placement.NO_UI_HIVE)
