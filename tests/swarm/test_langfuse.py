@@ -70,6 +70,38 @@ def recorded_case():
     )
 
 
+@pytest.fixture(autouse=True)
+def configured_endpoint(monkeypatch):
+    monkeypatch.setenv("LANGFUSE_MCP_URL", "http://fixture/mcp/")
+
+
+def test_unconfigured_sampling_reports_once_and_resumes_without_losing_findings(monkeypatch):
+    from scripts.swarm import langfuse
+    from scripts.swarm.health import standing
+
+    redis, summary, bindings, limits = recorded_case()
+    langfuse.apply(redis, "rig-grade-swarm", summary, bindings, 1, limits)
+    before = standing.read(redis, "rig-grade-swarm")
+    calls = []
+
+    def read(slug, window, timeout):
+        calls.append(slug)
+        return {"swarm": slug, "window": window, "agents": []}
+
+    store = SimpleNamespace(redis=redis, execution_registry=SimpleNamespace(records=lambda slug: bindings))
+    monkeypatch.delenv("LANGFUSE_MCP_URL")
+    assert langfuse.refresh(store, "rig-grade-swarm", 3600000, read=read) == [
+        "Langfuse sampling is off: configure LANGFUSE_MCP_URL"
+    ]
+    assert langfuse.refresh(store, "rig-grade-swarm", 3600001, read=read) == []
+    assert calls == []
+    assert standing.read(redis, "rig-grade-swarm") == before
+    monkeypatch.setenv("LANGFUSE_MCP_URL", "http://fixture/mcp/")
+    assert langfuse.refresh(store, "rig-grade-swarm", 3600002, read=read) == []
+    assert calls == ["rig-grade-swarm"]
+    assert standing.read(redis, "rig-grade-swarm") == {}
+
+
 def test_clean_recorded_sample_clears_only_langfuse_findings():
     from scripts.swarm import langfuse
     from scripts.swarm.health import standing
