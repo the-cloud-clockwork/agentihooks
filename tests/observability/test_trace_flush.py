@@ -316,12 +316,13 @@ class Receiver(http.server.BaseHTTPRequestHandler):
     spans: list = []
     posts = 0
     delay = 0.0
+    release = threading.Event()
 
     def do_POST(self):
         spans = type(self).spans
         body = self.rfile.read(int(self.headers["Content-Length"]))
         type(self).posts += 1
-        time.sleep(type(self).delay)
+        type(self).release.wait(type(self).delay)
         request = ExportTraceServiceRequest.FromString(body)
         for resource in request.resource_spans:
             for scope in resource.scope_spans:
@@ -338,11 +339,13 @@ class Receiver(http.server.BaseHTTPRequestHandler):
 @contextlib.contextmanager
 def _serving():
     Receiver.spans, Receiver.posts, Receiver.delay = [], 0, 0.0
+    Receiver.release = threading.Event()
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Receiver)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
         yield server
     finally:
+        Receiver.release.set()
         server.shutdown()
         server.server_close()
 
@@ -353,12 +356,13 @@ def receiver():
         yield server
 
 
-def test_a_request_outliving_the_receiver_leaves_no_unclosed_socket():
+def test_a_slow_request_in_flight_at_teardown_leaves_no_unclosed_socket():
     before = set(threading.enumerate())
+    started = time.monotonic()
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         with _serving() as server:
-            Receiver.delay = 1.0
+            Receiver.delay = 30.0
             port = server.server_port
             connection = http.client.HTTPConnection("127.0.0.1", port, timeout=15)
             connection.request("POST", "/", ExportTraceServiceRequest().SerializeToString())
@@ -369,6 +373,7 @@ def test_a_request_outliving_the_receiver_leaves_no_unclosed_socket():
             assert not thread.is_alive()
         connection.getresponse().read()
         gc.collect()
+    assert time.monotonic() - started < 15
     leaked = [str(w.message) for w in caught if issubclass(w.category, ResourceWarning)]
     assert [m for m in leaked if f"laddr=('127.0.0.1', {port})" in m] == []
 
