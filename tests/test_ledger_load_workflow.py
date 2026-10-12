@@ -5,7 +5,10 @@ import yaml
 
 WORKFLOWS = Path(__file__).resolve().parents[1] / ".github/workflows"
 pytestmark = pytest.mark.unit
-BASE = "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}"
+BASE = (
+    "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha"
+    " || github.event.before || inputs.base }}"
+)
 
 
 def test_the_ledger_load_gate_runs_beside_the_shards_with_redis_inside_the_budget():

@@ -11,8 +11,9 @@ on:
     inputs:
       base:
         description: Revision whose budgets grade the run
+        type: string
         required: true
-        default: dev
+        default: origin/dev
 
 permissions:
   contents: read

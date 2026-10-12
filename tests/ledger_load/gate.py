@@ -42,7 +42,16 @@ CPU_WINDOW_S = 10
 MIN_WRITES = 0.9
 SERVER_WAIT_S = 60.0
 ALERT_QUIET_MS = 3_600_000
-BUDGETS = {"WRITE_P95_S": min, "CPU_CORES": min, "LEDGER_BYTES": max}
+BUDGETS = {
+    "WRITE_P95_S": min,
+    "CPU_CORES": min,
+    "CPU_WINDOW_S": min,
+    "LEDGER_BYTES": max,
+    "CLIENTS": max,
+    "LIVE_PEAK_WRITES_PER_MINUTE": max,
+    "HEADROOM": max,
+    "MIN_WRITES": max,
+}
 WORDS = "the swarm keeps every task with its comments proof and the work that landed for the operator".split()
 
 
@@ -370,12 +379,13 @@ def budgets(source: str) -> dict:
 
 def base_budgets(revision: str) -> dict:
     gate = Path(__file__)
-    show = ["git", "show", f"{revision}:./{gate.name}"]
-    return budgets(subprocess.run(show, cwd=gate.parent, capture_output=True, text=True, check=True).stdout)
+    show = subprocess.run(["git", "show", f"{revision}:./{gate.name}"], cwd=gate.parent, capture_output=True, text=True)
+    if show.returncode:
+        sys.exit(f"the base {revision} has no ledger load gate to grade from: {show.stderr.strip()}")
+    return budgets(show.stdout)
 
 
 def graded(base: dict) -> dict:
-    """Each budget at the stricter of base and head: a pull request may tighten its grade, never loosen it."""
     return {name: pick(globals()[name], base[name]) for name, pick in BUDGETS.items()}
 
 

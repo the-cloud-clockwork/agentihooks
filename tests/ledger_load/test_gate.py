@@ -1,4 +1,5 @@
 import inspect
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -89,14 +90,43 @@ def test_a_head_that_tightens_its_budgets_keeps_its_own(monkeypatch):
     base = head_budgets()
     tight = {"WRITE_P95_S": base["WRITE_P95_S"] / 2, "CPU_CORES": base["CPU_CORES"] / 2}
     tight["LEDGER_BYTES"] = base["LEDGER_BYTES"] * 2
+    tight["MIN_WRITES"] = 1.0
     for name, value in tight.items():
         monkeypatch.setattr(ledger_load, name, value)
-    assert ledger_load.graded(base) == tight
+    assert ledger_load.graded(base) == {**base, **tight}
+
+
+def test_every_load_shape_constant_a_head_could_loosen_is_graded_from_the_base(monkeypatch):
+    base = head_budgets()
+    loose = {"CPU_WINDOW_S": 600, "CLIENTS": 1, "LIVE_PEAK_WRITES_PER_MINUTE": 1, "HEADROOM": 0.1, "MIN_WRITES": 0}
+    for name, value in loose.items():
+        monkeypatch.setattr(ledger_load, name, value)
+    assert ledger_load.graded(base) == base
+
+
+def test_the_base_budgets_are_read_from_the_commit_not_the_working_file(monkeypatch, tmp_path):
+    gate = tmp_path / "tests" / "ledger_load" / "gate.py"
+    gate.parent.mkdir(parents=True)
+    committed = Path(ledger_load.__file__).read_text().replace("CPU_CORES = 1.0", "CPU_CORES = 0.25")
+    gate.write_text(committed)
+    git = ["git", "-C", str(tmp_path), "-c", "user.email=gate@example.com", "-c", "user.name=gate"]
+    subprocess.run([*git, "init", "-q"], check=True)
+    subprocess.run([*git, "add", "."], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "base"], check=True)
+    gate.write_text(committed.replace("CPU_CORES = 0.25", "CPU_CORES = 9.0"))
+    monkeypatch.setattr(ledger_load, "__file__", str(gate))
+    assert ledger_load.base_budgets("HEAD")["CPU_CORES"] == 0.25
 
 
 def test_budgets_are_read_from_the_source_given_not_the_running_module():
-    source = "WRITE_P95_S = 0.5\nCPU_CORES = 0.25\nLEDGER_BYTES = 7_000_000\nCLIENTS = 99\n"
-    assert ledger_load.budgets(source) == {"WRITE_P95_S": 0.5, "CPU_CORES": 0.25, "LEDGER_BYTES": 7_000_000}
+    planted = {name: n + 0.5 for n, name in enumerate(ledger_load.BUDGETS)}
+    source = "".join(f"{name} = {value}\n" for name, value in planted.items()) + "TIMEOUT_S = 99.0\n"
+    assert ledger_load.budgets(source) == planted
+
+
+def test_a_base_without_the_gate_is_red():
+    with pytest.raises(SystemExit, match="no ledger load gate"):
+        ledger_load.base_budgets("0" * 40)
 
 
 def test_a_base_without_a_budget_is_red():
