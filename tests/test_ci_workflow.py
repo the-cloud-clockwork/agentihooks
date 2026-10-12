@@ -182,8 +182,12 @@ def test_unit_matrix_runs_one_shard_per_split():
 
 def test_a_hung_unit_shard_fails_near_twice_the_slowest_shard():
     slowest_shard_minutes = 186 / 60
-    timeout = _workflow()["jobs"]["unit"]["timeout-minutes"]
+    unit = _workflow()["jobs"]["unit"]
+    steps = {step.get("name"): step for step in unit["steps"]}
+    timeout = steps["Run tests"]["timeout-minutes"]
     assert 2 * slowest_shard_minutes <= timeout <= 3 * slowest_shard_minutes
+    browser = steps["Install the browser that page tests drive"]["timeout-minutes"]
+    assert unit["timeout-minutes"] >= browser + timeout + 2
 
 
 def test_a_hung_unit_test_dumps_every_thread_stack_within_a_minute():
@@ -735,7 +739,7 @@ def test_mutation_job_runs_independently_and_keeps_its_evidence():
         ["mutation-plan", "mutation-stats"],
         ["mutation-plan", "mutation-stats", "admission"],
     )
-    assert job["timeout-minutes"] == 20
+    assert job["timeout-minutes"] == 26
     steps = job["steps"]
     checkout = next(step for step in steps if step.get("uses", "").startswith("actions/checkout"))
     assert checkout["with"]["fetch-depth"] == 0

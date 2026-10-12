@@ -44,7 +44,7 @@ runs:
       run: |
         for attempt in 1 2; do
           timeout --kill-after=10s "${ATTEMPT_SECONDS}s" python -m playwright install --with-deps chromium && exit 0
-          [[ "$attempt" == 2 ]] || echo "::warning title=Retried browser install::Chromium install attempt $attempt failed or passed ${ATTEMPT_SECONDS}s; retrying once."
+          [[ "$attempt" == 2 ]] || echo "::warning title=Retried browser install::Chromium install attempt $attempt failed or exceeded ${ATTEMPT_SECONDS}s; retrying once."
         done
         exit 1
     - name: Verify the installed browser

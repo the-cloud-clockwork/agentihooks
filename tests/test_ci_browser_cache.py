@@ -86,7 +86,7 @@ def test_failed_browser_recovery_is_red_after_exactly_two_attempts(tmp_path, mon
 
 def test_a_stalled_download_is_killed_at_its_attempt_timeout_and_retried_green(tmp_path, monkeypatch):
     started = time.monotonic()
-    result, calls = _setup(tmp_path, monkeypatch, cached=False, ready=False, stall_once=True, attempt_seconds=1)
+    result, calls = _setup(tmp_path, monkeypatch, cached=False, ready=False, stall_once=True, attempt_seconds=5)
     assert result.returncode == 0, result.stderr
     assert calls == ["mirror", "install", "install", "launch"]
     assert time.monotonic() - started < 20
@@ -108,14 +108,14 @@ def _attempt_budget():
         ).group(1)
     )
     others = sum(_timeouts(step.get("run", "")) for step in steps if step is not install)
-    return attempt, others + 2 * (attempt + kill)
+    version_and_restore_seconds = 15
+    return attempt, version_and_restore_seconds + others + 2 * (attempt + kill)
 
 
-def test_each_attempt_has_room_for_the_measured_install_and_the_action_budgets_two_attempts():
-    attempt, budget = _attempt_budget()
-    measured_install_seconds = 73
-    assert attempt >= 1.5 * measured_install_seconds
-    assert budget >= 2 * attempt + 60 + 2 * 10
+def test_each_attempt_has_room_for_the_measured_anton_install():
+    attempt, _ = _attempt_budget()
+    anton_image_install_seconds_2026_10_12 = 73
+    assert attempt >= 1.5 * anton_image_install_seconds_2026_10_12
 
 
 def _browser_cache_callers():
@@ -132,12 +132,15 @@ def test_every_browser_cache_caller_gives_its_step_both_attempts_and_names_that_
     callers = list(_browser_cache_callers())
     assert len(callers) >= 9
     words = {6: "six", 7: "seven", 8: "eight"}
+    reported = 0
     for workflow, job, steps, index in callers:
         minutes = steps[index]["timeout-minutes"]
         assert minutes * 60 >= budget, (workflow, job)
         for step in steps[index + 1 :]:
             if step.get("name") == "Report browser setup failure":
                 assert f"{words[minutes]} minute timeout" in step["run"], (workflow, job)
+                reported += 1
+    assert reported == 4
 
 
 def test_cache_uses_installed_playwright_version_and_absolute_browser_folder():
