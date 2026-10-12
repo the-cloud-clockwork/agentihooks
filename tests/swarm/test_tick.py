@@ -1492,14 +1492,13 @@ def test_a_stacked_claim_carries_the_repository_only_of_a_dependency_branch_in_a
     assert ["git", "-C", "/repo", "remote", "get-url", "origin"] in asked
 
 
-def test_a_stacked_claim_names_no_repository_when_its_own_origin_cannot_be_read(store, monkeypatch):
+def test_a_stacked_claim_names_the_recorded_repository_when_its_own_origin_cannot_be_read(store, monkeypatch):
     monkeypatch.setattr(stack, "shell", lambda argv: subprocess.CompletedProcess(argv, 128, "", "no origin\n"))
     ledger = FakeLedger([{"id": "t1"}, {"id": "t2", "depends_on": ["t1"]}])
     runtime = FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
     ledger.rows["t1"].update(branch="engineer-a1b2c3-0001", branch_repo="https://github.com/o/other")
     tick("sw", store, ledger, runtime, now_ms=2_000)
-    assert runtime.tasks[-1]["stack_base"] == [{"task": "t1", "branch": "engineer-a1b2c3-0001"}]
     assert runtime.tasks[-1]["stack_base"] == [
         {"task": "t1", "branch": "engineer-a1b2c3-0001", "repo": "https://github.com/o/other"}
     ]

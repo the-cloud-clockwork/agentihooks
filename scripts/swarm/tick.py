@@ -694,7 +694,7 @@ def _stack_base(task, rows, repo):
 
 def _stacked_dep(dep, row, home):
     base = {"task": dep, "branch": row["branch"]}
-    elsewhere = home and row.get("branch_repo") and stack.repo_key(row["branch_repo"]) != home
+    elsewhere = row.get("branch_repo") and (not home or stack.repo_key(row["branch_repo"]) != home)
     return {**base, "repo": row["branch_repo"]} if elsewhere else base
 
 
