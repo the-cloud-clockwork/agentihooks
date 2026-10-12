@@ -638,13 +638,13 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 #icon-strip { flex: 0 0 56px; overflow-x: hidden; display: flex; flex-direction: column; gap: 16px; overflow-y: auto; padding-top: 8px; }
 #icon-strip .sync { position: relative; inset: auto; flex: none; }
 .workspace > .outline { display: block; position: static; z-index: auto; align-self: stretch; flex: 0 0 224px; min-height: 0; overflow-y: auto; }
-#main-content { flex: 1; min-width: 0; overflow-y: auto; overscroll-behavior: contain; }
+#main-content { flex: 1; min-width: 0; overflow-y: auto; overscroll-behavior: contain; padding-right: max(.5%, 12px); }
 #main-content > .overview { margin: 0 0 16px; }
 #main-content > .tabs { padding: 0; }
 #main-content > .tab-body { padding: 16px 0; overflow: visible; }
 .ledger-layout { display: block; max-width: none; margin: 0; }
 .jump-menu { display: none; }
-#stats-column { flex: 0 0 280px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+#stats-column { flex: 0 0 280px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-right: max(.5%, 8px); }
 #stats-column section { padding: 16px; margin: 0; }
 #stats { margin: 0; }
 #stats .stat { grid-template-columns: minmax(0, 1fr) auto; }
