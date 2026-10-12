@@ -310,3 +310,64 @@ def test_hive_master_successor_keeps_items_decisions_and_channel_cursor(world, r
     assert not world.write({**answer, "id": "former", "by": world.second_name})["accepted"]
     assert len(next(q for q in world.doc()["questions"] if q["id"] == "targeted")["answers"]) == 1
     assert len(channel.unread(cases.SLUG, successor)) == 1
+
+
+@pytest.mark.parametrize(
+    "command,text",
+    [("question", "hive whose master owns the new question"), ("followup", "hive whose master owns the new follow up")],
+)
+def test_hive_option_help_names_its_owner(command, text, capsys):
+    import re
+
+    from scripts.swarm_ledger import ledger
+
+    with pytest.raises(SystemExit) as error:
+        ledger.build_parser().parse_args([command, "--help"])
+    assert error.value.code == 0
+    line = re.search(r"--hive HIVE\s+([^\n]+)", capsys.readouterr().out)
+    assert line.group(1) == text
+
+
+@pytest.mark.parametrize("kind", ["questions", "followups"])
+def test_unowned_hive_has_no_owner_and_routes_to_lead(world, kind):
+    from scripts.swarm_v2 import masters
+
+    add(world, kind, "unknown")
+    doc = world.doc()
+    table = masters.MasterSeats(world.redis)
+
+    def owners():
+        return table.owners(cases.SLUG, doc)
+
+    assert masters.owner_of(f"{kind}/targeted", doc, owners()) == ""
+    assert masters.route(f"{kind}/targeted", doc, owners, [cases.LEAD, cases.SECOND], cases.LEAD) == cases.LEAD
+
+
+def test_escalation_reports_every_hive_followup(world):
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import ledger_events
+
+    inbox = InboxStore(world.redis)
+    ledger_events.event_pass(inbox, world.store, cases.SLUG, world.doc(), None, 0)
+    add(world, "followups")
+    world.write(
+        {
+            "op": "add_item",
+            "id": "local-item",
+            "by": cases.ENGINEER,
+            "list": "followups",
+            "text": "Local capacity ready",
+            "hive": "local",
+        }
+    )
+    doc = world.doc()
+    ledger_events.event_pass(inbox, world.store, cases.SLUG, doc, None, 0)
+    added = [event for event in doc["_meta"]["events"] if event["kind"] == "added"]
+    sent = ledger_events.event_pass(
+        inbox, world.store, cases.SLUG, doc, None, max(event["at"] for event in added) + ledger_events.FOLLOWUP_RAISE_MS
+    )
+    assert set(sent) == {
+        f"told {cases.LEAD}: followups/f1:raised",
+        f"told {cases.SECOND}: followups/targeted:raised",
+        f"told {cases.LEAD}: followups/local-item:raised",
+    }
