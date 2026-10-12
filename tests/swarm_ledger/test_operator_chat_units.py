@@ -32,14 +32,32 @@ def test_an_agent_comment_to_the_operator_passes_the_check():
     assert ledger_core.check_op(op("phases/p1/comments", to="operator")) is None
 
 
+ANSWER = {"id": "m-1", "by": "eng", "at": 7, "text": "Phase one is done.", "to": "operator"}
+
+
 def test_an_agent_answer_to_the_operator_is_a_new_comment_beside_its_status():
     status = {"id": "c-0", "by": "eng", "at": 1, "text": "Working on the phase."}
     thread, c = [dict(status)], ctx()
+    c.meta["members"] = {"eng": {"last_seen": 1}}
     answered = op("phases/p1/comments", to="operator")
     assert ledger_comments.agent_thread_op(thread, answered, c, "phases/p1", "comment") is True
-    assert thread == [status, {"id": "m-1", "by": "eng", "at": 7, "text": "Phase one is done."}]
+    assert thread == [status, ANSWER] and c.meta["members"]["eng"]["last_seen"] == 7
     assert ledger_comments.agent_thread_op(thread, answered, c, "phases/p1", "comment") is True
     assert len(thread) == 2
+
+
+def test_an_agent_status_after_its_answer_leaves_the_answer_intact():
+    thread, c = [dict(ANSWER)], ctx()
+    status = {**op("phases/p1/comments"), "id": "c-2", "text": "Still on the phase."}
+    assert ledger_comments.agent_thread_op(thread, status, c, "phases/p1", "comment") is True
+    assert thread == [ANSWER, {"id": "c-2", "by": "eng", "at": 7, "text": "Still on the phase."}]
+
+
+def test_an_answer_does_not_count_against_the_one_status_rule():
+    item = {"comments": [{"id": "c-0", "by": "eng", "text": "Working on the phase."}, dict(ANSWER)]}
+    assert ledger_comments.audit_item("phases/p1", item) == []
+    item["comments"].append({"id": "c-3", "by": "eng", "text": "Another status."})
+    assert ledger_comments.audit_item("phases/p1", item) == [("phases/p1", "-", "eng", ["2 comments, keep one status"])]
 
 
 def test_an_agent_status_comment_still_amends_its_last_one():

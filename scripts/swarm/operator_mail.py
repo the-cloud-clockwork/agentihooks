@@ -80,7 +80,7 @@ def entry(event):
     if event["kind"].startswith("note "):
         return f"notes/{event['id']}"
     head, _, rest = event["target"].partition("/")
-    return event["target"] if head in ENTRY_LISTS and rest else ""
+    return f"{head}/{rest.partition('/')[0]}" if head in ENTRY_LISTS and rest else ""
 
 
 def relay(inbox, store, slug, doc, events, line):

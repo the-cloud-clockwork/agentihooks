@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.inbox import channel, cli
-from scripts.inbox.store import InboxStore
+from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import delivery, ledger_client, operator_mail
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_ledger.watch_ledger import line
@@ -105,6 +105,16 @@ def test_a_reply_on_an_entry_is_held_to_the_comment_word_limit_and_the_item_stay
     assert inbox.get(item.id).state != "done" and shown(swarm).commented == []
 
 
+def test_an_empty_reply_is_refused_before_its_answer_is_tied_to_the_entry(swarm):
+    item = relayed(swarm, operator_write(13, "comment added", "tasks/t1", "is the fix merged"))
+    _, inbox = swarm
+    before = set(inbox.redis.scan_iter(match=inbox.key("entry", "*")))
+    with pytest.raises(InboxError, match="a reply needs text"):
+        inbox.reply(item.id, ENG.name, "  ")
+    assert set(inbox.redis.scan_iter(match=inbox.key("entry", "*"))) == before
+    assert inbox.get(item.id).state == "pending"
+
+
 def test_a_reply_to_a_chat_line_keeps_the_chat_word_limit(swarm, monkeypatch):
     _, ledger = answer(swarm, monkeypatch, operator_write(11, "message added", "chat", "status"), BOSS, [SIXTY_WORDS])
     assert ledger.said == [(SLUG, SIXTY_WORDS, BOSS.name)]
@@ -149,6 +159,7 @@ def test_a_reply_to_a_chat_line_or_a_write_without_an_entry_still_answers_in_cha
         ({"kind": "comment added", "target": "tasks"}, ""),
         ({"kind": "comment added", "target": "artifacts/a1"}, ""),
         ({"kind": "checked", "target": "tasks/t9"}, "tasks/t9"),
+        ({"kind": "checked", "target": "tasks/t9/done"}, "tasks/t9"),
     ],
 )
 def test_the_entry_of_an_operator_write_is_its_list_and_id(event, entry):

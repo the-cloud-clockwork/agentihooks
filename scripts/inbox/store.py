@@ -389,6 +389,8 @@ class InboxStore:
             raise DuplicateItem(f"message {item_id} was already answered with message {answer_id}")
         if item.state in CLOSED:
             raise InboxError(f"message {item_id} is closed: {item.reason}")
+        if not text.strip():
+            raise InboxError("a reply needs text")
         answer_id = answer_id or new_item_id()
         if entry := self.entry_of(item_id):
             self.about(answer_id, entry)
