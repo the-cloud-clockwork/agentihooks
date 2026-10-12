@@ -134,6 +134,20 @@ def test_independent_worker_groups_balance_without_serializing_each_other():
     assert sorted(node for part in parts for node in part) == nodes
 
 
+def test_worker_shards_charge_collection_once_per_file():
+    from tests.shards import assign_nodes
+
+    nodes = [f"tests/test_{name}.py::test_{case}" for name in "abc" for case in range(4)]
+    durations = dict.fromkeys(nodes, 0.01)
+    sizes = {f"tests/test_{name}.py": size for name, size in zip("abc", (1_000_000, 1000, 1000))}
+    parts = assign_nodes(durations, 2, {}, 4, sizes=sizes)
+    assert sorted({node.split("::")[0] for node in part} for part in parts) == [
+        {"tests/test_a.py"},
+        {"tests/test_b.py", "tests/test_c.py"},
+    ]
+    assert sorted(node for part in parts for node in part) == nodes
+
+
 def test_worker_shards_select_each_measured_and_unknown_case_once(tmp_path):
     (tmp_path / "tests").mkdir()
     (tmp_path / "tests/test_hot.py").write_text('import pytest\npytestmark = pytest.mark.xdist_group("redis")\n')
