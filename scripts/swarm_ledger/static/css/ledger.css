@@ -465,7 +465,7 @@ input, textarea { caret-color: var(--accent-2); }
 .sw-ctl { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 0; }
 .sw-actions { display: flex; flex-direction: column; gap: var(--space-tight); margin-left: auto; }
 .sw-actrow { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--space-tight) var(--space-row); }
-.sw-doctor { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-tight) var(--space-row); padding-left: 8px; font-size: var(--fs-meta); color: var(--muted); }
+.sw-doctor { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--space-tight) var(--space-row); font-size: var(--fs-meta); color: var(--muted); }
 .sw-doctor-name { font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--text); }
 .sw-doctor a { color: var(--accent); text-decoration: none; }
 .sw-head .sw-btn { min-height: 32px; padding: 4px 8px; }
