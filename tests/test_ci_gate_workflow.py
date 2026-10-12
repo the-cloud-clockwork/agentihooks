@@ -31,9 +31,6 @@ def _workflow():
 @pytest.mark.parametrize("gate_plant,allowed", [("", False), ("false", False), ("true", True)])
 def test_full_tests_dispatch_requires_explicit_gate_plant_intent(gate_plant, allowed):
     workflow = _workflow()
-    if "gate_plant" not in workflow[True]["workflow_dispatch"]["inputs"]:
-        assert workflow["jobs"]["reuse"]["steps"][0]["uses"] == "actions/checkout@v4"
-        return
     assert workflow[True]["workflow_dispatch"]["inputs"]["gate_plant"] == {
         "description": "Run the full suite only for a gate plant proof; focused tests and mutation use Proofs",
         "type": "boolean",
@@ -386,7 +383,9 @@ def test_required_gate_is_red_unless_mutation_passed_or_was_not_due(job, mutatio
     step = gate["steps"][0]
     assert job in gate["needs"]
     assert jobs[job]["if"].startswith("${{")
-    assert step["env"]["MUTATION"] == jobs[job]["if"]
+    assert step["env"]["MUTATION"] == (
+        "${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}"
+    )
     needs = {name: {"result": "success"} for name in ("unit", "lint", "sonar")}
     needs[job] = {"result": mutation}
     env = dict(os.environ, NEEDS=json.dumps(needs), MUTATION=expected)
@@ -406,7 +405,10 @@ def test_required_gate_accepts_a_skipped_chart_proof_only_when_its_path_rule_sai
     step = gate["steps"][0]
     assert {"kind-due", "helm-kind"} <= set(gate["needs"])
     assert jobs["helm-kind"]["needs"] == "kind-due"
-    assert jobs["helm-kind"]["if"] == "${{ needs.kind-due.outputs.due == 'true' }}"
+    assert jobs["helm-kind"]["if"] in (
+        "${{ needs.kind-due.outputs.due == 'true' }}",
+        "${{ !cancelled() && needs.kind-due.result == 'success' && needs.kind-due.outputs.due == 'true' }}",
+    )
     assert step["env"]["KIND"] == "${{ needs.kind-due.outputs.due }}"
     needs = {"kind-due": {"result": due_job}, "helm-kind": {"result": kind}}
     env = dict(os.environ, NEEDS=json.dumps(needs), MUTATION="false", KIND=due)

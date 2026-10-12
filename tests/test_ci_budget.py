@@ -90,6 +90,20 @@ def test_a_stage_at_its_budget_and_a_run_at_fifteen_minutes_are_inside_budget():
     assert ci_budget.run_state(901) == "over"
 
 
+@pytest.mark.parametrize(
+    ("name", "completed", "expected"),
+    [
+        ("admission", "00:30", "ok"),
+        ("admission", "00:31", "over"),
+        ("mutation-plan", "01:00", "ok"),
+        ("mutation-plan", "01:01", "over"),
+    ],
+)
+def test_dispatch_admission_and_mutation_planning_have_bounded_wall_times(name, completed, expected):
+    result = ci_budget.report({"run_started_at": START}, [_job(name, "00:00", completed)], 0)
+    assert ci_budget.verdict(result["stages"][0]) == expected
+
+
 def test_render_prints_every_stage_and_the_run_against_the_budget():
     result = ci_budget.report({"run_started_at": START}, JOBS, ci_budget.seconds("2026-10-09T07:16:00Z"))
     assert [line.split() for line in ci_budget.render(result)] == [

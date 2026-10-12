@@ -7,6 +7,15 @@ import pytest
 from scripts.swarm import provider_probe
 
 
+@pytest.fixture(autouse=True)
+def _codex_account(monkeypatch):
+    import shutil
+    import uuid
+
+    monkeypatch.setenv("AH_CX_TOKEN_alpha", uuid.uuid4().hex)
+    monkeypatch.setattr(shutil, "which", lambda name: "codex")
+
+
 @pytest.mark.parametrize("harness", ["claude", "codex", "copilot"])
 @pytest.mark.parametrize("model", ["", "chosen-model"])
 def test_native_request_disables_tools_and_session_persistence(tmp_path, harness, model):
@@ -42,10 +51,8 @@ def test_native_request_disables_tools_and_session_persistence(tmp_path, harness
         ]
     elif harness == "codex":
         expected = [
-            "agentihooks",
             "codex",
-            "--route",
-            "alpha",
+            "--no-daemon",
             "exec",
             *selected,
             "--sandbox",

@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 from hooks.classifier import decision_log
+from scripts import agent_choice
 from scripts.gates import log as gate_log
 from scripts.swarm import capacity, host_budget, metrics_outbox
 from scripts.swarm.store import RedisStore
@@ -28,6 +29,7 @@ HOST = metrics_outbox.Table(
         ("live_agents", "Int64"),
         ("held_spawns", "Int64"),
         ("held_by", "String"),
+        ("held_harness", "String"),
         ("reason", "String"),
     ),
 )
@@ -267,6 +269,7 @@ def host_row(slug: str, now_ms: int, sample: host_budget.HostSample, quota: dict
         "live_agents": sample.agents,
         "held_spawns": quota.get("held_spawns", 0),
         "held_by": quota.get("held_by", ""),
+        "held_harness": quota.get("held_harness", ""),
         "reason": quota.get("reason", ""),
     }
 
@@ -354,17 +357,22 @@ def read_classifier_calls(box: metrics_outbox.Outbox) -> LogBatch:
     return _log_batch(decision_log.log_path(), box)
 
 
-def _held_spawns(store: RedisStore, slug: str, doc: dict, quota: dict, agents: list, host_held: bool = False) -> int:
+def _held_lanes(store: RedisStore, slug: str, doc: dict, quota: dict, agents: list, host_held: bool) -> dict:
     _, ready = capacity.ready_work(slug, store, doc)
     busy = {lane: sum(agent["lane"] == lane for agent in agents) for lane in capacity.LANES}
-    return sum(
-        max(
+    return {
+        lane: max(
             0,
             min(len(ready[lane]), max(0, quota.get("configured", {}).get(lane, 0) - busy[lane]))
             - (0 if host_held else len(quota.get("placements", {}).get(lane, []))),
         )
         for lane in capacity.LANES
-    )
+    }
+
+
+def held_harness(lanes: dict, held: dict) -> str:
+    agents = {lanes.get(lane, {}).get("agent") for lane, count in held.items() if count}
+    return agents.pop() if len(agents) == 1 and agents.issubset(agent_choice.AGENTS) else ""
 
 
 def record_pass(
@@ -377,8 +385,10 @@ def record_pass(
     quota = capacity.read(store, slug)
     hold = store.redis.get(store.key(slug, SPAWN_HOLD)) or ""
     live = [asdict(agent) for agent in store.agents(slug)]
-    quota["held_spawns"] = _held_spawns(store, slug, doc, quota, live, bool(hold))
+    held = _held_lanes(store, slug, doc, quota, live, bool(hold))
+    quota["held_spawns"] = sum(held.values())
     quota["held_by"] = ("host" if hold else "quota") if quota["held_spawns"] else ""
+    quota["held_harness"] = "" if hold else held_harness(store.config(slug).lanes, held)
     quota["reason"] = hold or quota.get("reason", "")
     reviews, classifiers = read_review_events(slug, box), read_classifier_calls(box)
     review_doc = {**doc, "_meta": {"events": [*doc.get("_meta", {}).get("events", []), *reviews.rows]}}

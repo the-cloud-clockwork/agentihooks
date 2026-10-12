@@ -51,6 +51,31 @@ call. `agentihooks msg inbox` lists them, `agentihooks msg read <id>` shows one.
    A follow up you find is proposed, never queued as your own task:
    `agentihooks ledger --slug <slug> --as <name> followup add "<text>"`.
 
+## CI proofs
+
+Where the repository has a Proofs workflow, send focused tests and mutation
+there. Tests still runs every required check on pull requests, merge groups
+and dev pushes.
+
+```bash
+gh workflow run proofs.yml --ref <branch> -f proof=tests -f tests='<test paths>'
+gh workflow run proofs.yml --ref <branch> -f proof=mutation -f base=origin/dev
+```
+
+Give focused tests explicit paths under `tests/`; add `-f browser=true` for
+tests that drive Chromium. Use the dependency branch as `base` for a stacked
+mutation proof.
+
+Full Tests dispatch is for gate plant proofs. Declare that intent explicitly:
+
+```bash
+gh workflow run test.yml --ref <proof branch> -f gate_plant=true
+```
+
+The admission job refuses an ordinary full dispatch and names Proofs; expensive
+jobs require successful admission on dispatch. Record the proof run and head, and its expected red or
+green result, before continuing.
+
 ## Waits
 
 Name every wait so the swarm does not count you idle:

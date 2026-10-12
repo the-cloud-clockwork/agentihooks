@@ -180,3 +180,55 @@ def test_the_held_spawns_gauge_counts_no_doctor_task_the_watched_focus_holds(sto
     assert row["held_spawns"] == 1
     assert row["held_by"] == "quota"
     assert "watched" in ledger.read
+
+
+@pytest.mark.parametrize(("hold", "harness"), [("", "codex"), ("host is full", "")])
+def test_the_host_sample_names_the_harness_its_quota_held_lane_is_pinned_to(
+    store, monkeypatch, tmp_path, hold, harness
+):
+    ledger = doctor(store, [record("plans/a", "focus")])
+    store.update("sw", lanes={"eng": {"agent": "codex"}, "ci": {"agent": "claude"}})
+    store.redis.set(store.key("sw", "quota-capacity"), json.dumps({"configured": {"eng": 2}}))
+    if hold:
+        store.redis.set(store.key("sw", metrics_swarm.SPAWN_HOLD), hold)
+    monkeypatch.setattr(metrics_swarm.host_budget, "read_host", lambda: HostSample(1.0, 1, 512, 0))
+    monkeypatch.setattr(metrics_swarm.gate_log, "recent", lambda *args, **kwargs: [])
+    monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda box: metrics_swarm.LogBatch("", 0, []))
+    monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug, box: metrics_swarm.LogBatch("", 0, []))
+    monkeypatch.setattr(metrics.metrics_ledger, "record", lambda *args: None)
+    spool = tmp_path / "outbox.db"
+    monkeypatch.setattr(metrics_outbox, "spool_path", lambda: spool)
+    monkeypatch.setattr(
+        metrics_outbox.urllib.request,
+        "urlopen",
+        lambda *args, **kwargs: (_ for _ in ()).throw(URLError("sink down")),
+    )
+    configured = {"AGENTIHOOKS_METRICS_URL": "http://sink", "AGENTIHOOKS_METRICS_USER": "test"}
+    snapshot = metrics_swarm.TickInput(store, ledger.state("sw"), [], lambda url: None, ledger)
+    metrics.record_pass("sw", 1_000, 0, configured, snapshot)
+    box = Outbox(spool, Settings("http://sink", "", ""))
+    try:
+        [row] = box.recent("host_samples", 1_000)
+    finally:
+        box.close()
+    assert row["held_spawns"] == 1
+    assert row["held_harness"] == harness
+
+
+@pytest.mark.parametrize(
+    ("lanes", "held", "harness"),
+    [
+        ({"eng": {"agent": "codex"}, "ci": {"agent": "claude"}}, {"eng": 2, "ci": 0, "plan": 0}, "codex"),
+        ({"eng": {"agent": "codex"}, "ci": {"agent": "claude"}}, {"eng": 1, "ci": 1, "plan": 0}, ""),
+        ({"eng": {"agent": "auto"}}, {"eng": 1, "ci": 0, "plan": 0}, ""),
+        ({"eng": {"agent": "codex"}, "ci": {"agent": "codex"}}, {"eng": 1, "ci": 1, "plan": 0}, "codex"),
+        ({"eng": {"agent": "codex"}}, {"eng": 0, "ci": 0, "plan": 0}, ""),
+    ],
+)
+def test_the_held_harness_is_the_one_harness_every_held_lane_is_pinned_to(lanes, held, harness):
+    assert metrics_swarm.held_harness(lanes, held) == harness
+
+
+def test_a_host_row_without_a_held_harness_names_none():
+    row = metrics_swarm.host_row("sw", 1_000, HostSample(1.0, 1, 512, 0), {})
+    assert row["held_harness"] == ""

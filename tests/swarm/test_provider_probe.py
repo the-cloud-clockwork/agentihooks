@@ -7,6 +7,15 @@ from scripts.swarm import provider_probe
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture(autouse=True)
+def _codex_account(monkeypatch):
+    import shutil
+    import uuid
+
+    monkeypatch.setenv("AH_CX_TOKEN_alpha", uuid.uuid4().hex)
+    monkeypatch.setattr(shutil, "which", lambda name: "codex")
+
+
 @pytest.mark.parametrize(
     ("harness", "output"),
     [
@@ -33,7 +42,7 @@ def test_probe_checks_a_model_response_on_the_existing_account_route(tmp_path, h
     assert kwargs["input"] == "Reply with exactly OK."
     assert kwargs["cwd"] == tmp_path
     assert kwargs["timeout"] == 30
-    if harness != "copilot":
+    if harness == "claude":
         at = args.index("--route")
         assert args[at + 1] == "alpha"
         assert args[at - 1] == harness

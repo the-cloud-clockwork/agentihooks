@@ -10,6 +10,7 @@ RUN_BUDGET_S = 15 * 60
 GATE = "Gate — Required"
 SELF = "stage-budget"
 BUDGETS = {
+    "admission": 30,
     "reuse": 30,
     "durations": 60,
     "split": 120,
@@ -20,7 +21,7 @@ BUDGETS = {
     "sonar": 240,
     "coverage-ratchet": 90,
     "queue-baseline": 180,
-    "mutation-plan": 90,
+    "mutation-plan": 60,
     "mutation-stats": 210,
     "mutation": 480,
     "worker-image": 300,

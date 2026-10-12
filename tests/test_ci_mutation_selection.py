@@ -13,6 +13,10 @@ import pytest
 from scripts.ci_mutation.runner import run_gate
 
 
+def _no_pytest(self, params, **kwargs):
+    return 0
+
+
 @pytest.mark.parametrize("lines", [{1}, {2}, {2, 5}])
 def test_gate_runs_only_changed_line_mutants_including_untested_code(tmp_path, monkeypatch, lines):
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
@@ -197,6 +201,8 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
     test_calls = []
 
     class PytestRunner:
+        execute_pytest = _no_pytest
+
         def run_tests(self, *, mutant_name, tests):
             assert isinstance(self, PytestRunner)
             test_calls.append((mutant_name, tests))
@@ -358,6 +364,8 @@ def test_selection_collects_one_stats_part_or_reuses_the_shared_stats(tmp_path, 
         return [files]
 
     class PytestRunner:
+        execute_pytest = _no_pytest
+
         def run_tests(self, *, mutant_name, tests):
             return 0
 
@@ -806,7 +814,7 @@ def test_local_selection_caps_mutation_and_stats_workers(tmp_path, monkeypatch, 
         collect_source_file_mutation_data=None,
         SourceFileMutationData=lambda **kwargs: data,
         Config=SimpleNamespace(get=lambda: config),
-        PytestRunner=type("PytestRunner", (), {"run_tests": lambda *args, **kwargs: 0}),
+        PytestRunner=type("PytestRunner", (), {"run_tests": lambda *args, **kwargs: 0, "execute_pytest": _no_pytest}),
         mutmut=engine,
     )
 
