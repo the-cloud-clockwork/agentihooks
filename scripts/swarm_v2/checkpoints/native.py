@@ -13,7 +13,7 @@ from pathlib import Path, PurePosixPath
 from typing import Protocol
 
 from scripts.swarm_v2.artifacts.base import ArtifactRef, Scope
-from scripts.swarm_v2.checkpoints import model
+from scripts.swarm_v2.checkpoints import model, redaction
 from scripts.swarm_v2.filesystem import ARCHIVE_BYTES, ARCHIVE_MEMBERS, LayoutError, contain
 
 METRIC = "native_resume_success_by_target"
@@ -71,6 +71,20 @@ class Resumed:
     outcome: str = RESUMED
 
 
+def oversized(files: tuple[tuple[str, bytes], ...]) -> bool:
+    return len(files) > ARCHIVE_MEMBERS or sum(len(data) for _, data in files) > ARCHIVE_BYTES
+
+
+def archive(files: tuple[tuple[str, bytes], ...]) -> bytes:
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as written:  # NOSONAR: writes only
+        for name, data in files:
+            info = tarfile.TarInfo(name)
+            info.size, info.mode = len(data), MEMBER_MODE
+            written.addfile(info, io.BytesIO(data))
+    return buffer.getvalue()
+
+
 @dataclass(frozen=True)
 class NativeCapture:
     harness: str
@@ -78,18 +92,14 @@ class NativeCapture:
     session_id: str
     files: tuple[tuple[str, bytes], ...]
     quiescence: str
+    redactions: int = 0
 
     def material(self) -> bytes:
-        buffer = io.BytesIO()
-        with tarfile.open(fileobj=buffer, mode="w", format=tarfile.PAX_FORMAT) as archive:  # NOSONAR: writes only
-            for name, data in self.files:
-                info = tarfile.TarInfo(name)
-                info.size, info.mode = len(data), MEMBER_MODE
-                archive.addfile(info, io.BytesIO(data))
-        return buffer.getvalue()
+        return archive(self.files)
 
     def fields(self) -> dict:
         ref = asdict(ArtifactRef.of(self.material()))
+        counted = {redaction.FIELD: self.redactions} if self.redactions else {}
         return {
             "continuation": model.NATIVE,
             "native_resume_capability": "qualified",
@@ -99,6 +109,7 @@ class NativeCapture:
             "inventory": {model.NATIVE_SESSION: ref},
             "artifact_hashes": {model.NATIVE_SESSION: "sha256:" + ref["sha256"]},
             "native_resume": {"outcome": CAPTURED, "harness": self.harness},
+            **counted,
         }
 
     @property
@@ -253,7 +264,7 @@ class Codex:
 HARNESSES: dict[str, Harness] = {harness.name: harness for harness in (Claude(), Codex())}
 
 
-def _members(data: bytes) -> dict[str, bytes]:
+def members(data: bytes) -> dict[str, bytes]:
     found: dict[str, bytes] = {}
     expanded = 0
     try:
@@ -350,10 +361,16 @@ def capture(
         return Unavailable(harness, "identity_mismatch")
     if line(recorded) != line(version_text):
         return Unavailable(harness, "version_changed")
-    if len(files) > ARCHIVE_MEMBERS or sum(map(len, files.values())) > ARCHIVE_BYTES:
+    try:
+        scrubbed = {name: redaction.scrub(data) for name, data in sorted(files.items())}
+    except redaction.Unredactable as error:
+        return Unavailable(harness, str(error))
+    kept = tuple((name, data) for name, (data, _) in scrubbed.items())
+    if oversized(kept):
         return Unavailable(harness, TOO_LARGE)
     quiescence = "stopped_process" if stopped else "consistent_export"
-    return NativeCapture(harness, recorded, session_id, tuple(sorted(files.items())), quiescence)
+    count = sum(found for _, found in scrubbed.values())
+    return NativeCapture(harness, recorded, session_id, kept, quiescence, count)
 
 
 class Qualifier:
@@ -408,12 +425,12 @@ class Qualifier:
 
     def _place(self, native: Harness, doc: dict, home: Path, cwd: Path) -> Resumed:
         store = self.validator.store
-        members = _members(store.get_range(ArtifactRef(**doc["inventory"][model.NATIVE_SESSION])))
+        found = members(store.get_range(ArtifactRef(**doc["inventory"][model.NATIVE_SESSION])))
         session_id = doc["native_session_id"]
-        if native.identity(members)[0] != session_id:
+        if native.identity(found)[0] != session_id:
             raise NativeError("identity_mismatch")
         try:
-            placed = [(native.placed(session_id, cwd, name), data) for name, data in members.items()]
+            placed = [(native.placed(session_id, cwd, name), data) for name, data in found.items()]
         except ValueError as error:
             raise NativeError(ESCAPE) from error
         targets = [(_unlinked(home, home / relative), data) for relative, data in placed]

@@ -18,42 +18,38 @@ TASK = {"id": "t1", "title": "x"}
 from tests.swarm.profile_fixture import validated
 
 
-def _answer(score):
-    return lambda *a, **kw: DecisionResult({"effort": Answer("score", score=score, confidence=0.95)}, "luna")
+def _answer(choice):
+    return lambda *a, **kw: DecisionResult({"option": Answer("choice", choice=choice, confidence=0.95)}, "luna")
 
 
 @pytest.mark.parametrize(
-    "harness,score,floor,launch",
+    "harness,choice,launch",
     [
-        ("claude", 3, "low", ["--model", "opus", "--effort", "high"]),
-        ("claude", 0, "low", ["--model", "opus", "--effort", "medium"]),
-        ("codex", 3, "low", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="high"']),
-        ("codex", 0, "low", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="medium"']),
+        ("claude", "higher", ["--model", "opus", "--effort", "xhigh"]),
+        ("claude", "lower", ["--model", "opus", "--effort", "high"]),
+        ("codex", "higher", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="xhigh"']),
+        ("codex", "lower", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="high"']),
     ],
 )
-def test_a_classifier_answer_is_clamped_into_the_default_range(tmp_path, monkeypatch, harness, score, floor, launch):
-    monkeypatch.setattr(model_pick, "decide", _answer(score))
-    launch_env = {f"AGENTIHOOKS_{harness.upper()}_EFFORT": floor}
-    assert _launched(tmp_path, monkeypatch, "eng", TASK, harness=harness, env=launch_env) == launch
+def test_a_classifier_answer_launches_inside_the_default_range(tmp_path, monkeypatch, harness, choice, launch):
+    monkeypatch.setattr(model_pick, "decide", _answer(choice))
+    task = {**TASK, "difficulty": "L"}
+    assert _launched(tmp_path, monkeypatch, "eng", task, harness=harness) == launch
 
 
-@pytest.mark.parametrize(
-    "score,effort",
-    [(3, "max"), (0, "low")],
-)
-def test_a_range_widened_to_low_and_max_lets_the_classifier_answer_through(tmp_path, monkeypatch, score, effort):
-    monkeypatch.setattr(model_pick, "decide", _answer(score))
-    monkeypatch.setattr(effort_range, "DEFAULT", ("low", "max"))
-    launch_env = {"AGENTIHOOKS_CLAUDE_EFFORT": "low"}
-    assert _launched(tmp_path, monkeypatch, "eng", TASK, env=launch_env) == ["--model", "opus", "--effort", effort]
+def test_a_range_narrowed_to_high_clamps_an_xhigh_pick_to_its_edge(tmp_path, monkeypatch):
+    monkeypatch.setattr(model_pick, "decide", _answer("higher"))
+    monkeypatch.setattr(effort_range, "DEFAULT", ("medium", "high"))
+    task = {**TASK, "difficulty": "L"}
+    assert _launched(tmp_path, monkeypatch, "eng", task) == ["--model", "opus", "--effort", "high"]
 
 
-@pytest.mark.parametrize("lane", ["eng", "ci", "plan", "master"])
-def test_a_lane_or_environment_effort_outside_the_range_launches_at_its_edge(tmp_path, monkeypatch, lane):
+@pytest.mark.parametrize("lane,edge", [("eng", "xhigh"), ("ci", "xhigh"), ("plan", "xhigh"), ("master", "high")])
+def test_a_lane_or_environment_effort_outside_the_range_launches_at_its_edge(tmp_path, monkeypatch, lane, edge):
     lanes = {lane: {"agent": "claude", "model": "auto", "effort": "max"}}
     task = {"id": "master", "peer": ""} if lane == "master" else TASK
     launch_env = {"AGENTIHOOKS_CLAUDE_EFFORT": "max"}
-    assert _launched(tmp_path, monkeypatch, lane, task, lanes, env=launch_env)[-2:] == ["--effort", "high"]
+    assert _launched(tmp_path, monkeypatch, lane, task, lanes, env=launch_env)[-2:] == ["--effort", edge]
 
 
 def test_spawn_hands_init_agent_the_swarm_effort_range(tmp_path):
@@ -121,10 +117,17 @@ def test_spawn_and_resume_take_the_swarm_range_not_the_default(tmp_path):
 @pytest.mark.parametrize(
     "agent,args,environ,expected",
     [
-        ("claude", ["--effort", "max"], {"AGENTIHOOKS_SWARM_LANE": "eng"}, "high"),
+        ("claude", ["--effort", "max"], {"AGENTIHOOKS_SWARM_LANE": "eng"}, "xhigh"),
         ("claude", ["--effort=low"], {"AGENTIHOOKS_SWARM_LANE": "eng"}, "medium"),
-        ("claude", [], {"AGENTIHOOKS_SWARM_LANE": "eng", "AGENTIHOOKS_CLAUDE_EFFORT": "max"}, "high"),
-        ("codex", ["-c", 'model_reasoning_effort="xhigh"'], {"AGENTIHOOKS_SWARM_LANE": "ci"}, "high"),
+        ("claude", [], {"AGENTIHOOKS_SWARM_LANE": "eng", "AGENTIHOOKS_CLAUDE_EFFORT": "max"}, "xhigh"),
+        ("claude", [], {"AGENTIHOOKS_SWARM_LANE": "eng"}, "medium"),
+        ("codex", ["-c", 'model_reasoning_effort="xhigh"'], {"AGENTIHOOKS_SWARM_LANE": "ci"}, "xhigh"),
+        (
+            "codex",
+            ["-c", 'model_reasoning_effort="xhigh"'],
+            {"AGENTIHOOKS_SWARM_LANE": "ci", "AGENTIHOOKS_SWARM_EFFORT_RANGE": "low:max"},
+            "xhigh",
+        ),
         (
             "claude",
             ["--effort", "max"],
@@ -153,18 +156,18 @@ def test_set_refuses_a_lane_effort_outside_the_range_and_names_it(env, capsys): 
     run("sw", "create", "--repo", "/repo")
     capsys.readouterr()
     assert run("sw", "set", "eng-effort=max") == 1
-    assert "medium to high" in capsys.readouterr().err
-    assert run("sw", "set", "ci-effort=xhigh") == 1
+    assert "medium to xhigh" in capsys.readouterr().err
+    assert run("sw", "set", "ci-effort=max") == 1
     assert run("sw", "set", "eng-effort=low") == 1
     assert run("sw", "set", "eng-effort=high") == 0
     assert store.config("sw").lanes["eng"]["effort"] == "high"
 
 
-def test_the_range_defaults_to_medium_and_high_and_widens_to_let_both_through(env, capsys):  # noqa: F811
+def test_the_range_defaults_to_medium_and_xhigh_and_widens_to_let_both_through(env, capsys):  # noqa: F811
     store, _, _ = env
     run("sw", "create", "--repo", "/repo")
     config = store.config("sw")
-    assert (config.effort_min, config.effort_max) == ("medium", "high")
+    assert (config.effort_min, config.effort_max) == ("medium", "xhigh")
     assert run("sw", "set", "effort-min=low", "effort-max=max") == 0
     assert run("sw", "set", "eng-effort=max", "ci-effort=low") == 0
     config = store.config("sw")
@@ -181,15 +184,45 @@ def test_set_refuses_an_unordered_or_unknown_range(env, pairs):  # noqa: F811
     run("sw", "create", "--repo", "/repo")
     assert run("sw", "set", *pairs) == 1
     config = store.config("sw")
-    assert (config.effort_min, config.effort_max) == ("medium", "high")
+    assert (config.effort_min, config.effort_max) == ("medium", "xhigh")
 
 
 @pytest.mark.parametrize(
     "harness,effort,named",
-    [("codex", "max", "xhigh"), ("claude", "xhigh", "max"), ("codex", "medium", "medium"), ("codex", "turbo", "turbo")],
+    [
+        ("codex", "max", "xhigh"),
+        ("claude", "xhigh", "xhigh"),
+        ("claude", "max", "max"),
+        ("codex", "xhigh", "xhigh"),
+        ("codex", "medium", "medium"),
+        ("codex", "turbo", "turbo"),
+    ],
 )
 def test_an_effort_is_named_for_a_harness_by_its_rank(harness, effort, named):
     assert effort_range.named(harness, effort) == named
+
+
+@pytest.mark.parametrize("effort,clamped", [("max", "xhigh"), ("xhigh", "xhigh"), ("low", "low")])
+def test_a_codex_effort_clamps_inside_its_own_levels(effort, clamped):
+    assert effort_range.clamp("codex", effort, ("low", "max")) == clamped
+
+
+@pytest.mark.parametrize(
+    "effort,clamped",
+    [("low", "medium"), ("medium", "medium"), ("high", "high"), ("xhigh", "xhigh"), ("max", "xhigh")],
+)
+def test_every_claude_level_clamps_into_the_default_range(effort, clamped):
+    assert effort_range.clamp("claude", effort, effort_range.DEFAULT) == clamped
+
+
+def test_a_preserved_effort_is_compared_by_its_name_on_the_launching_harness():
+    from scripts.swarm import runtime
+
+    chosen = {"model": "m", "effort": "max"}
+    launched = runtime._model_args("codex", chosen, {}, ("medium", "xhigh"), preserve=True)
+    assert launched == ["-m", "m", "-c", 'model_reasoning_effort="xhigh"']
+    with pytest.raises(runtime.SpawnError, match="saved effort is outside the current swarm range"):
+        runtime._model_args("claude", chosen, {}, ("medium", "xhigh"), preserve=True)
 
 
 def test_a_codex_name_sets_the_range_on_the_shared_scale(env):  # noqa: F811
@@ -197,7 +230,7 @@ def test_a_codex_name_sets_the_range_on_the_shared_scale(env):  # noqa: F811
     assert cli.EFFORT_KEYS == {"effort-min": "effort_min", "effort-max": "effort_max"}
     run("sw", "create", "--repo", "/repo")
     assert run("sw", "set", "effort-max=xhigh") == 0
-    assert store.config("sw").effort_max == "max"
+    assert store.config("sw").effort_max == "xhigh"
 
 
 def test_bare_pairs_route_to_set_by_their_key_alone(env):  # noqa: F811
@@ -234,28 +267,28 @@ def test_a_swarm_stored_before_the_range_reads_the_default_and_keeps_its_lanes_e
         },
     )
     config = saved.config("old")
-    assert (config.effort_min, config.effort_max) == ("medium", "high")
+    assert (config.effort_min, config.effort_max) == ("medium", "xhigh")
     assert saved.update("old", max_eng=3).max_eng == 3
-    with pytest.raises(SwarmError, match="lane eng effort max is outside the swarm effort range medium to high"):
+    with pytest.raises(SwarmError, match="lane eng effort max is outside the swarm effort range medium to xhigh"):
         saved.update("old", lanes={"eng": {"effort": "max"}})
 
 
 def test_store_update_checks_and_normalises_the_range(saved):
     saved.create(SwarmConfig("sw", "/r", 1, 0))
-    config = saved.update("sw", effort_min="low", effort_max="xhigh")
+    config = saved.update("sw", effort_min="low", effort_max="max")
     assert (config.effort_min, config.effort_max) == ("low", "max")
     assert saved.config("sw").effort_max == "max"
-    assert saved.update("sw", effort_min="xhigh").effort_min == "max"
+    assert saved.update("sw", effort_min="xhigh").effort_min == "xhigh"
     config = saved.update("sw", effort_min="low")
     with pytest.raises(SwarmError, match="effort-min high is above effort-max medium"):
         saved.update("sw", effort_min="high", effort_max="medium")
-    with pytest.raises(SwarmError, match="one of low, medium, high, max"):
+    with pytest.raises(SwarmError, match="one of low, medium, high, xhigh, max"):
         saved.update("sw", effort_max="huge")
     assert (saved.config("sw").effort_min, saved.config("sw").effort_max) == ("low", "max")
 
 
 def test_store_create_refuses_an_out_of_range_lane_and_stores_nothing(saved):
-    with pytest.raises(SwarmError, match="lane ci effort low is outside the swarm effort range medium to high"):
+    with pytest.raises(SwarmError, match="lane ci effort low is outside the swarm effort range medium to xhigh"):
         saved.create(SwarmConfig("sw", "/r", 1, 0, lanes={"ci": {"effort": "low"}}))
     assert saved.slugs() == [] and not saved.redis.exists(f"{KEY_ROOT}:swarm:sw:config")
 
@@ -269,7 +302,7 @@ def test_create_refuses_a_template_lane_effort_outside_the_range(env, tmp_path, 
     lanes = {"eng": {"effort": "max"}}
     (tmp_path / "swarm-templates" / "hot.json").write_text(json.dumps({"name": "hot", "lanes": lanes}))
     assert run("sw", "create", "--repo", "/repo", "--template", "hot") == 1
-    assert "outside the swarm effort range medium to high" in capsys.readouterr().err
+    assert "outside the swarm effort range medium to xhigh" in capsys.readouterr().err
     assert store.slugs() == []
 
 
@@ -281,7 +314,7 @@ def test_set_reports_the_range_takes_bare_pairs_and_a_one_level_range(env, capsy
     capsys.readouterr()
     assert run("sw", "effort-min=high", "max-eng-agents=3") == 0
     out = json.loads(capsys.readouterr().out.splitlines()[-1])
-    assert (out["effort_min"], out["effort_max"], out["max_eng"]) == ("high", "high", 3)
+    assert (out["effort_min"], out["effort_max"], out["max_eng"]) == ("high", "xhigh", 3)
     assert run("sw", "effort-max=max") == 0
     assert store.config("sw").effort_max == "max"
 
@@ -297,7 +330,7 @@ def test_set_names_every_key_it_takes_and_every_level(env, capsys):  # noqa: F81
         "load-high=N, load-low=N, memory-per-agent=MB, api-url=URL or eng-role, "
     ) in err
     assert run("sw", "set", "effort-min=huge") == 1
-    assert "one of low, medium, high, max, Codex xhigh standing for max" in capsys.readouterr().err
+    assert "one of low, medium, high, xhigh, max, Codex running max as xhigh" in capsys.readouterr().err
 
 
 def test_a_lane_without_an_effort_passes_the_range():
@@ -310,13 +343,13 @@ def test_a_lane_without_an_effort_passes_the_range():
         (
             "claude",
             ["--effort", "max", "--model", "opus", "--resume", "c0"],
-            ["--model", "opus", "--resume", "c0", "--effort", "high"],
+            ["--model", "opus", "--resume", "c0", "--effort", "xhigh"],
         ),
         ("claude", ["--name", "x", "--effort=low"], ["--name", "x", "--effort", "medium"]),
         (
             "codex",
             ["-c", 'model_reasoning_effort="xhigh"', "-c", "other=1", "-m", "g"],
-            ["-c", "other=1", "-m", "g", "-c", 'model_reasoning_effort="high"'],
+            ["-c", "other=1", "-m", "g", "-c", 'model_reasoning_effort="xhigh"'],
         ),
         (
             "codex",

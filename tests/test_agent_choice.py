@@ -82,7 +82,7 @@ def test_a_codex_launcher_runs_through_the_codex_router(monkeypatch, tmp_path):
     text = launcher.read_text()
     report = launcher.with_suffix(".route")
     assert (
-        f"/usr/bin/agentihooks codex --agentihooks-report {report} -c 'model_reasoning_effort=\"high\"' --model o3 "
+        f"/usr/bin/agentihooks codex --agentihooks-report {report} -c 'model_reasoning_effort=\"medium\"' --model o3 "
         f'"$(cat {prompt_file})"'
     ) in text
     assert "status=direct" not in text and "agentihooks claude" not in text

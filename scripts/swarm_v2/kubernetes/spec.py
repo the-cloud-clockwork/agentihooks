@@ -14,7 +14,7 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import best_match
 
-from scripts.account_names import secret_key, token_env
+from scripts.account_names import codex_token_env, secret_key, token_env
 from scripts.swarm_v2.kubernetes.storage import MountChecker, StorageRefused, normal
 from scripts.swarm_v2.kubernetes.watch import EXECUTION_LABEL, OWNER_LABEL, owner_for
 
@@ -267,8 +267,13 @@ def _resources(launch: AdmittedLaunch, limits: dict) -> dict:
 
 
 def _token(launch: AdmittedLaunch) -> dict:
-    ref = {"name": ACCOUNTS_OBJECT, "key": secret_key(launch.provider_account)}
-    return {"name": token_env(launch.provider_account), "valueFrom": {"secretKeyRef": ref}}
+    if launch.harness == "codex":
+        name = codex_token_env(launch.provider_account)
+        ref = {"name": "swarm-codex-creds", "key": name}
+    else:
+        name = token_env(launch.provider_account)
+        ref = {"name": ACCOUNTS_OBJECT, "key": secret_key(launch.provider_account)}
+    return {"name": name, "valueFrom": {"secretKeyRef": ref}}
 
 
 def _read_only(mount: dict) -> bool:
@@ -389,8 +394,15 @@ def _deliver(body: dict, bundle: dict) -> None:
 
 
 class PodTemplate:
-    def __init__(self, policy: dict, owner: str, accounts: Callable[[], Collection[str]] | None = None) -> None:
+    def __init__(
+        self,
+        policy: dict,
+        owner: str,
+        accounts: Callable[[], Collection[str]] | None = None,
+        codex_accounts: Callable[[], Collection[str]] | None = None,
+    ) -> None:
         self.policy, self.owner, self.accounts = policy, owner, accounts
+        self.codex_accounts = codex_accounts
         self.failures = Counter()
         self.storage = MountChecker()
 
@@ -398,7 +410,8 @@ class PodTemplate:
         try:
             launch = AdmittedLaunch.from_record(record)
             _identity(launch)
-            profile = _profile(self.policy, launch, None if self.accounts is None else self.accounts())
+            accounts = self.codex_accounts if launch.harness == "codex" else self.accounts
+            profile = _profile(self.policy, launch, None if accounts is None else accounts())
             payload = _payload(launch)
         except PodSpecRefused as refused:
             self.failures[refused.reason] += 1

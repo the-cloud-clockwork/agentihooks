@@ -238,7 +238,6 @@ class TaskAuthority:
                 self.store.key(self.slug, part)
                 for part in (
                     "executions",
-                    "control-owner",
                     "launch-grants",
                     "launch-registrations",
                     "launch-grants-disabled",

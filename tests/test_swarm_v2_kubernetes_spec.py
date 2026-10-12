@@ -580,10 +580,65 @@ def test_a_codex_launch_names_codex_in_its_probes_and_binds_its_own_provider_acc
     assert rendered.pod["metadata"]["labels"]["swarm.agentihooks.io/provider-account"] == "codex-fixtureatexample-com"
     assert token_env(rendered.pod) == [
         {
-            "name": "AH_CC_TOKEN_codex_fixtureatexample_com",
-            "valueFrom": {"secretKeyRef": {"name": "swarm-claude-creds", "key": "codex-fixtureatexample-com"}},
+            "name": "AH_CX_TOKEN_codex_fixtureatexample_com",
+            "valueFrom": {
+                "secretKeyRef": {"name": "swarm-codex-creds", "key": "AH_CX_TOKEN_codex_fixtureatexample_com"}
+            },
         }
     ]
+
+
+@pytest.mark.parametrize(
+    ("harness", "account", "expected"),
+    [
+        (
+            "codex",
+            "alpha-personal",
+            {
+                "name": "AH_CX_TOKEN_alpha_personal",
+                "valueFrom": {"secretKeyRef": {"name": "swarm-codex-creds", "key": "AH_CX_TOKEN_alpha_personal"}},
+            },
+        ),
+        (
+            "claude",
+            "claude-account",
+            {
+                "name": "AH_CC_TOKEN_claude_account",
+                "valueFrom": {"secretKeyRef": {"name": "swarm-claude-creds", "key": "claude-account"}},
+            },
+        ),
+    ],
+)
+def test_each_harness_uses_only_its_own_approval_reader_and_credential(harness, account, expected):
+    policy = load_policy(POLICY)
+    policy["provider_accounts"] = []
+    called = []
+    template = PodTemplate(
+        policy,
+        "agentihooks-swarm-fixture",
+        lambda: called.append("claude") or {"claude-account"},
+        codex_accounts=lambda: called.append("codex") or {"alpha-personal"},
+    )
+    doc = launch_doc()
+    doc.update(harness=harness, provider_account=account)
+    rendered = template.render(doc)
+    assert called == [harness]
+    assert token_env(rendered.pod) == [expected]
+
+
+def test_claude_approval_never_authorizes_a_codex_worker():
+    policy = load_policy(POLICY)
+    policy["provider_accounts"] = []
+    template = PodTemplate(
+        policy,
+        "agentihooks-swarm-fixture",
+        lambda: {"alpha-personal"},
+        codex_accounts=lambda: frozenset(),
+    )
+    doc = launch_doc()
+    doc.update(harness="codex", provider_account="alpha-personal")
+    with pytest.raises(PodSpecRefused, match="not an approved provider account"):
+        template.render(doc)
 
 
 KEY = "claude-fixtureatexample-com"

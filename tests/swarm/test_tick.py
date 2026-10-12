@@ -1137,14 +1137,13 @@ def test_account_reads_and_spawns_hold_the_placement_lock_and_the_rest_does_not(
     assert not tick_module.PLACING.locked()
 
 
-def test_the_tick_hands_the_ci_budget_pass_its_ledger(store, monkeypatch):
+def test_the_tick_hands_the_ci_budget_pass_its_store_and_clock(store, monkeypatch):
     from scripts.ci_budget import defects
 
     seen = []
-    monkeypatch.setattr(defects, "refresh", lambda *args: seen.append(args) or [])
-    ledger = tasks(("t1", "eng"))
-    tick("sw", store, ledger, FakeRuntime(), 1)
-    assert [(args[0], args[3], args[4]) for args in seen] == [("sw", ledger, 1)]
+    monkeypatch.setattr(defects, "refresh", lambda *args: seen.append(args) or ["updated"])
+    assert "updated" in tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), 1)
+    assert [(args[0], args[2], args[3]) for args in seen] == [("sw", store, 1)]
 
 
 def test_the_tick_hands_the_flake_budget_pass_its_ledger(store, monkeypatch):
