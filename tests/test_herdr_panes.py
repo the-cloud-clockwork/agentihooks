@@ -228,7 +228,8 @@ def test_a_routed_launch_records_its_route_and_launch_time(monkeypatch, tmp_path
 
     before = time.time() * 1000
     monkeypatch.setattr(herdr_host, "rename_agent", lambda pane, name, environ: True)
-    monkeypatch.setattr(herdr_host, "name_session", lambda pane, name, environ: True)
+    monkeypatch.setattr(herdr_host, "wait_ready", lambda pane, environ, timeout: True)
+    monkeypatch.setattr(herdr_host, "name_session", lambda pane, name, environ, confirmed: "named")
     monkeypatch.setattr(herdr_host, "run", started)
     monkeypatch.setattr(herdr_host, "open_pane", lambda *a: Placement("w1", "w1:t3", "w1:p7", "term_7"))
     monkeypatch.setattr(herdr_host, "binary", lambda: "/bin/herdr")
