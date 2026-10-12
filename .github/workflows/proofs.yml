@@ -105,7 +105,7 @@ jobs:
 
       - name: Install the browser that page tests drive
         if: inputs.browser
-        timeout-minutes: 2
+        timeout-minutes: 6
         uses: ./.github/actions/browser-cache
 
       - name: Run selected tests

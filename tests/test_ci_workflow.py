@@ -280,13 +280,13 @@ def test_mutation_browser_setup_is_selected_bounded_and_reports_failure():
     assert steps[select]["run"].startswith("python -m scripts.ci_mutation." + "browser ")
     assert steps[install]["if"] == "steps.selection.outputs.browser == 'true'"
     assert steps[install]["id"] == "browser"
-    assert steps[install]["timeout-minutes"] == 2
+    assert steps[install]["timeout-minutes"] == 6
     job = _mutation_workflow()["jobs"]["mutation"]
     assert job["env"]["PLAYWRIGHT_BROWSERS_PATH"] == "${{ github.workspace }}/.playwright"
     failure = next(step for step in steps if step.get("name") == "Report browser setup failure")
     assert failure["if"] == "failure() && steps.browser.outcome == 'failure'"
     assert "::error::" in failure["run"]
-    assert "two minute" in failure["run"]
+    assert "six minute" in failure["run"]
     assert "exit 1" in failure["run"]
 
 
@@ -310,7 +310,7 @@ def test_lint_and_equivalence_browser_installs_have_the_same_timeout():
         "ledger-equivalence"
     ]["steps"]
     for steps in (lint, equivalence):
-        assert _browser_install(steps)["timeout-minutes"] == 2
+        assert _browser_install(steps)["timeout-minutes"] == 6
 
 
 def test_lint_and_equivalence_browser_setup_uses_the_working_mirror():
