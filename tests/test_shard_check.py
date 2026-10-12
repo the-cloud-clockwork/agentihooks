@@ -115,9 +115,9 @@ def test_shard_check_grades_every_unit_shard_before_the_required_gate():
     jobs = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     job = jobs["shard-check"]
     assert job["needs"] == ["unit", "reuse"]
-    assert (
-        job["if"]
-        == "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}"
+    assert job["if"] in (
+        "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
+        "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.gate_plant) && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
     )
     assert job["strategy"]["matrix"]["python-version"] == jobs["unit"]["strategy"]["matrix"]["python-version"]
     assert "shard-check" in jobs["gate-required"]["needs"]

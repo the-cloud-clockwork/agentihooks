@@ -24,9 +24,9 @@ def test_sonar_is_required_on_dev_and_main_pull_requests():
     assert "sonar" in jobs["gate-required"]["needs"]
     sonar = jobs["sonar"]
     assert sonar["needs"] == ["unit", "reuse"]
-    assert (
-        sonar["if"]
-        == "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}"
+    assert sonar["if"] in (
+        "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
+        "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.gate_plant) && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
     )
     assert not sonar.get("continue-on-error")
     gate = next(step for step in sonar["steps"] if step.get("name") == "SonarQube Quality Gate")

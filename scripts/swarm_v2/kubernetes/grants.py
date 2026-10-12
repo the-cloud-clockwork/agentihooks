@@ -13,7 +13,7 @@ from scripts.swarm_v2.kubernetes.client import AlreadyExists, ApiRefused, PodApi
 from scripts.swarm_v2.kubernetes.runtime import GENERATION_LABEL
 from scripts.swarm_v2.kubernetes.spec import LAUNCH_RECORD, launch_name, pod_name
 from scripts.swarm_v2.kubernetes.watch import EXECUTION_LABEL, OWNER_LABEL, owner_for
-from scripts.swarm_v2.supervision import AUTHORITY, SCHEMA_VERSION
+from scripts.swarm_v2.supervision import AUTHORITY, SCHEMA_VERSION, Budgets
 
 
 @dataclass(frozen=True)
@@ -21,6 +21,7 @@ class Supervision:
     harness: str
     exporter: tuple[str, ...] | None
     control_url: str
+    budgets: Budgets = Budgets()
 
     def record(self, registration: Registration, profile: str) -> str:
         record = {
@@ -32,6 +33,8 @@ class Supervision:
             "agent": [self.harness],
             "control_url": self.control_url,
             "profile": profile,
+            **self.budgets.record(),
+            "checkpoint_acknowledgement": {"status": "pending"},
         }
         if self.exporter:
             record["exporter"] = list(self.exporter)

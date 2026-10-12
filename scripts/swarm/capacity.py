@@ -46,7 +46,11 @@ def _claude(environ: dict, now: float) -> list[Account]:
     counts = account_sessions.sessions_by_account()
     rows = []
     for at, result in observed.values():
-        cap = tokens.cap(result, now) if session_bands.fresh(at, now) else None
+        cap = (
+            tokens.cap(result, now)
+            if environ.get(f"{balancer.TOKEN_PREFIX}{result.account}") and session_bands.fresh(at, now)
+            else None
+        )
         five, week = _left(result.five_hour, now), _left(result.seven_day, now)
         reset = session_bands.upcoming(result.seven_day.resets_at, now)
         five_reset = session_bands.upcoming(result.five_hour.resets_at, now)
