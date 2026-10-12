@@ -90,6 +90,11 @@ class Watch:
         self.state = state
         meta, args = state["_meta"], self.args
         members, tasks = meta.get("members", {}), state.get("tasks", [])
+        if meta.get("events_trimmed", self.since) > self.since:
+            say(
+                f"WARNING ledger history trimmed events after revision {self.since}"
+                f" through revision {meta['events_trimmed']} before this watcher read them"
+            )
         fresh = [
             e
             for e in meta.get("events", [])

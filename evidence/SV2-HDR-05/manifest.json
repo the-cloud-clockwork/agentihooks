@@ -1,0 +1,39 @@
+{
+  "cases": [
+    "T-SV2-HDR-05-A",
+    "T-SV2-HDR-05-B",
+    "T-SV2-HDR-05-C"
+  ],
+  "evidence_class": "mocked: a recording stand in for the Anton herdr client serves two worker herdr servers whose agents keep working on every fixture tick, answers agent get, pane read and agent prompt with the 0.9.1 reply shapes of SV2-HDR-04, times out every command to a machine whose SSH path is cut while that worker's control heartbeat continues, and advances a fake clock by a fixed time per remote command; the operator TUI is a Viewer that is closed by detach; no herdr process, SSH connection or cluster runs in these cases",
+  "inputs": {
+    "scripts/swarm_v2/herdr/viewer.py": "ee2690de8bb24ed2e0ec746e82e40cf3ba5978c6c9061f826bf0ae2fd7cc5edc",
+    "scripts/swarm_v2/herdr/visibility.py": "154220650493ac3b4cc0557f2e1a67de7c64990340692551832f998fe127de7c",
+    "scripts/swarm_v2/herdr/target.py": "b20ea518ba71bf14fcc291f66b723d309786c6c9e486d8ccb4290d285ccd6aed",
+    "scripts/swarm_v2/kubernetes/terminal_views.py": "a802f032bae3a2b1c9a62748700cff85436a53d2bdd71919fd15e1b6a43c502c",
+    "scripts/swarm_v2/kubernetes/prompts.py": "96103e4c9313c1d72c455c9278f85a73aac6ee18294568c53e65bef639c7f544",
+    "scripts/swarm_v2/deployed.py": "3a305907191ed23ac00f05fadce7b6fe764d9aac4787a2b3dade720ce83532d8",
+    "scripts/swarm_v2/control_service.py": "13aab3f4aac4e614bfdbc8a1f6f576f035c2469082cb9c1e924419d87f8172d6",
+    "scripts/swarm/commands.py": "12fd3cf9bc7de94ba293f48addf23b2e6dc6796560d706158ca96d5effc0b5b0",
+    "scripts/swarm_ledger/static/js/swarm.js": "b0b37cb002e90e81434da5d5211b30aaf2055537b2b7fb642cca2123fb975c11",
+    "tests/sv2_hdr05_cases.py": "0aec4911baa3d2e45f3e19ec04bce35f872c8590390b42ae93b12dfa9cdbf728",
+    "tests/e2e/swarm_v2/test_terminal_reconnect.py": "8c3511c58e28bcc86979f4f0fbdf6b39be620d9ba56c275494a982cfa8c47432",
+    "tests/test_swarm_v2_herdr_viewer.py": "0deed373c375fe08100d95700d188b9b759f71303a2811c73ea91fa27fa434a1",
+    "tests/test_swarm_v2_herdr_visibility.py": "be44bcb2571055d6ad27c54525380df230932cc4fcdb75f462dc37252627240f",
+    "tests/test_swarm_v2_kubernetes_terminal_views.py": "dcdb1614729bd3f6985ccb30c173fa1ad83f01551334615344ab6373e7ef6381",
+    "tests/fixtures/swarm_v2/herdr-terminal-reconnect.json": "32abd57e558c817dac8ed2be158b56f845d0a6b6f2c59b604f390d65c2b136dc",
+    "tests/fixtures/swarm_v2/herdr-pane-routing.json": "36a84ba856cd6c2cdc3f57e7ca84227a9908e2de7046ea57056ca2329a8c730d",
+    "tests/fixtures/swarm_v2/herdr-registrations.json": "eb069f75d17862be563e36f558ee14db60cd24d7982bb042f2232db5bb81a57c",
+    "tests/fixtures/swarm_v2/herdr-capabilities.json": "c15bb685e5bb4e2f53aa9a51a8ee80701aebe75a222093d120787b4839c45940"
+  },
+  "red_runs": [
+    "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38120107847",
+    "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38122750674"
+  ],
+  "records_runs": {
+    "a, b": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38121170312",
+    "c": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38122159373",
+    "note": "each record was printed by the committed evidence assertion failing on stale records in that run; neither run is cited as green"
+  },
+  "mutation_preflight": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38126382405",
+  "tested_commit": "bddcf94fd"
+}

@@ -1,0 +1,126 @@
+{
+  "case": "T-SV2-HDR-01-A",
+  "evidence_class": "mocked: status and schema replies captured from the pinned herdr 0.9.1 binary over saved machine forwarding, replayed through a recording command runner; no herdr process or SSH connection runs in these cases",
+  "input_sha256": {
+    "herdr-capabilities.json": "c15bb685e5bb4e2f53aa9a51a8ee80701aebe75a222093d120787b4839c45940"
+  },
+  "observed": {
+    "first": {
+      "commands": {
+        "pane_close": [
+          "herdr",
+          "--machine",
+          "worker-fixture",
+          "pane",
+          "close"
+        ],
+        "pane_launch": [
+          "herdr",
+          "--machine",
+          "worker-fixture",
+          "pane",
+          "split"
+        ],
+        "pane_read": [
+          "herdr",
+          "--machine",
+          "worker-fixture",
+          "pane",
+          "read"
+        ],
+        "pane_run": [
+          "herdr",
+          "--machine",
+          "worker-fixture",
+          "pane",
+          "run"
+        ],
+        "pane_send_keys": [
+          "herdr",
+          "--machine",
+          "worker-fixture",
+          "pane",
+          "send-keys"
+        ],
+        "pane_send_text": [
+          "herdr",
+          "--machine",
+          "worker-fixture",
+          "pane",
+          "send-text"
+        ],
+        "pane_wait_output": [
+          "herdr",
+          "--machine",
+          "worker-fixture",
+          "pane",
+          "wait-output"
+        ],
+        "workspace_close": [
+          "herdr",
+          "--machine",
+          "worker-fixture",
+          "workspace",
+          "close"
+        ],
+        "workspace_create": [
+          "herdr",
+          "--machine",
+          "worker-fixture",
+          "workspace",
+          "create"
+        ]
+      },
+      "herdr_capability_mismatch_total": 0,
+      "matrix": {
+        "agent_attach": "unsupported: interactive attachment is not forwarded",
+        "agent_get": "supported",
+        "agent_list": "supported",
+        "agent_prompt": "supported",
+        "agent_rename": "supported",
+        "local_fallback": "unsupported: a machine command never falls back to the local server",
+        "pane_close": "supported",
+        "pane_launch": "supported",
+        "pane_list": "supported",
+        "pane_process_info": "supported",
+        "pane_read": "supported",
+        "pane_run": "supported",
+        "pane_send_keys": "supported",
+        "pane_send_text": "supported",
+        "pane_wait_output": "supported",
+        "server_replace": "unsupported: machine forwarding never installs, starts or restarts a server",
+        "session": "unsupported: session management is not forwarded",
+        "tab_create": "supported",
+        "update": "unsupported: local installation is not forwarded",
+        "workspace_close": "supported",
+        "workspace_create": "supported",
+        "workspace_list": "supported"
+      },
+      "mismatches_by_target_and_reason": [],
+      "probe_commands": [
+        [
+          "herdr",
+          "--machine",
+          "worker-fixture",
+          "status",
+          "server",
+          "--json"
+        ],
+        [
+          "herdr",
+          "status",
+          "client",
+          "--json"
+        ],
+        [
+          "herdr",
+          "api",
+          "schema",
+          "--json"
+        ]
+      ]
+    },
+    "second_identical": true
+  },
+  "state": "passed"
+}

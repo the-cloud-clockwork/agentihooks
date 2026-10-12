@@ -398,6 +398,29 @@ def test_command_delivers_through_the_herdr_nudge(tmp_path, monkeypatch):
     assert calls == [["agent", "prompt", "w1:p1", "[swarm delivery] wake"]]
 
 
+@pytest.mark.parametrize(
+    ("answer", "outcome"),
+    [
+        (None, Outcome("command", Status.OK, LOCAL, "accepted")),
+        ("", Outcome("command", Status.OK, LOCAL, "accepted")),
+        ("agent_not_found", Outcome("command", Status.REFUSED, LOCAL, detail="agent_not_found")),
+    ],
+)
+def test_a_local_command_answers_by_the_herdr_delivery(answer, outcome):
+    seen = []
+    herdr = SimpleNamespace(nudge=lambda agent, text: seen.append((agent.name, text)) or answer)
+    agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", pane_id="w1:p1")
+    assert LocalHerdrRuntime(herdr).command(agent, "wake") == outcome
+    assert seen == [(agent.name, "wake")]
+
+
+def test_a_local_tick_nudge_herdr_fails_to_deliver_returns_the_failure():
+    herdr = FakeHerdr()
+    herdr.nudge = lambda agent, text: "agent_not_found"
+    agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", pane_id="w1:p1")
+    assert tick_runtime(herdr).nudge(agent, "wake") == "agent_not_found"
+
+
 def test_local_drain_is_unsupported():
     outcome = LocalHerdrRuntime(SimpleNamespace()).drain(AgentRecord("a", "eng", "t"))
     assert outcome == Outcome("drain", Status.UNSUPPORTED, LOCAL, detail="local herdr has no drain")
@@ -554,6 +577,48 @@ def test_a_tick_observation_of_another_backend_is_unknown_and_touches_nothing():
     remote = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", runtime_backend=REMOTE)
     assert runtime.observe(remote) == PaneObservation("unknown")
     assert runtime.retire(remote) is False
+    assert herdr.calls == []
+
+
+class CommandedRuntime(FakeRuntime):
+    def __init__(self, status=Status.OK, detail=""):
+        super().__init__(REMOTE, {Capability.COMMAND})
+        self.status, self.detail = status, detail
+
+    def command(self, agent, text):
+        self.calls.append(("command", agent.name, text))
+        return Outcome("command", self.status, self.backend, detail=self.detail)
+
+
+def remote_tick_runtime(remote, disabled=()):
+    herdr = FakeHerdr()
+    return herdr, RoutedRuntime(herdr, RuntimeRouter([LocalHerdrRuntime(herdr), remote], LOCAL, disabled))
+
+
+REMOTE_AGENT = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", execution_id="exe-1", runtime_backend=REMOTE)
+
+
+def test_an_accepted_remote_tick_nudge_reports_no_refusal():
+    remote = CommandedRuntime()
+    herdr, runtime = remote_tick_runtime(remote)
+    assert runtime.nudge(REMOTE_AGENT, "wake") is None
+    assert remote.calls == [("command", REMOTE_AGENT.name, "wake")] and herdr.calls == []
+
+
+@pytest.mark.parametrize(
+    ("remote", "disabled", "reason"),
+    [
+        (remote_fake(), (), "kubernetes lacks command"),
+        (CommandedRuntime(), (REMOTE,), "runtime kubernetes is disabled"),
+        (CommandedRuntime(Status.REFUSED, "the pane is gone"), (), "the pane is gone"),
+        (CommandedRuntime(Status.REFUSED), (), "refused"),
+        (CommandedRuntime(Status.AMBIGUOUS), (), "ambiguous"),
+    ],
+)
+def test_a_refused_remote_tick_nudge_returns_its_reason(remote, disabled, reason):
+    herdr, runtime = remote_tick_runtime(remote, disabled)
+    refused = runtime.nudge(REMOTE_AGENT, "wake")
+    assert (type(refused), refused) == (str, reason)
     assert herdr.calls == []
 
 

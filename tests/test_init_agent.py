@@ -1,3 +1,4 @@
+import calendar
 import json
 import os
 import subprocess
@@ -181,6 +182,56 @@ def test_launch_reports_when_the_launcher_and_the_harness_started(monkeypatch, t
 
 def test_a_route_report_removed_before_it_is_read_reads_as_no_route(tmp_path):
     assert init_agent._take_route_report(tmp_path / "gone.route") == ({}, None)
+
+
+def test_a_profiled_launch_with_no_route_report_fails_at_the_route_timeout(tmp_path):
+    from scripts.profiles import binding
+
+    report = tmp_path / "report.json"
+    binding.request(report, "engineer", "codex")
+    env = {binding.REPORT: str(report)}
+    with pytest.raises(ValueError) as error:
+        init_agent._route_reported(env, 90.0, {})
+    assert str(error.value) == "the harness did not report its route within 90s"
+    with pytest.raises(ValueError) as empty:
+        init_agent._route_reported(env, 0.5, {"status": ""})
+    assert str(empty.value) == "the harness did not report its route within 0.5s"
+    with pytest.raises(ValueError) as failed:
+        init_agent._route_reported(env, 90.0, {"status": "failed", "error": "no Codex account has room"})
+    assert str(failed.value) == "the harness route is failed: no Codex account has room"
+    with pytest.raises(ValueError) as silent:
+        init_agent._route_reported(env, 90.0, {"status": "failed"})
+    assert str(silent.value) == "the harness route is failed: no error given"
+    for started in ("routed", "bare", "direct"):
+        assert init_agent._route_reported(env, 90.0, {"status": started}) is None
+    assert init_agent._route_reported({}, 90.0, {}) is None
+    assert init_agent._route_reported({binding.REPORT: ""}, 90.0, {}) is None
+    binding.refuse(report, "selection refused")
+    assert init_agent._route_reported(env, 90.0, {}) is None
+
+
+def test_a_codex_launch_that_never_reports_its_route_fails_without_the_binding_wait(monkeypatch, tmp_path, capsys):
+    from scripts.swarm.runtime import parse_fields
+
+    binding, _ = _profile(monkeypatch, tmp_path, "codex")
+    waited = []
+    monkeypatch.setattr(binding, "wait", lambda *args: waited.append(args))
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda *a: ("codex", "explicit"))
+
+    def launch(launcher, directory, name, args, agent, environ):
+        init_agent._started_marker(launcher).touch()
+        assert Path(environ[binding.REPORT]).is_file()
+        return []
+
+    monkeypatch.setattr(init_agent, "_start_herdr", launch)
+    argv = ["--host", "herdr", "--agent", "codex", "--profile", "engineer", "--dir", str(tmp_path)]
+    rc = init_agent.main([*argv, "--route-timeout", "0.1"], {"XDG_RUNTIME_DIR": str(tmp_path / "runtime")})
+    output = capsys.readouterr()
+    fields = parse_fields(output.out)
+    assert rc == 3
+    assert waited == []
+    assert (fields["status"], fields["route_status"], fields["profile_validation"]) == ("started", "pending", "failed")
+    assert output.err == "agentihooks init-agent: the harness did not report its route within 0.1s\n"
 
 
 def test_terminal_that_never_starts_the_launcher_fails_and_discards_it(monkeypatch, tmp_path, capsys):
@@ -369,6 +420,18 @@ def test_handoff_marks_this_session_once_the_new_one_is_routed(monkeypatch, tmp_
     assert "account=beta" in out
     assert "handoff=done" in out
     assert "handed_off_sessions=sid-1" in out
+
+
+@pytest.mark.parametrize(("extra", "recorded"), [(("--resume", "sid-9"), ["handed-off-4242-sid-9"]), ((), [])])
+def test_a_resumed_handoff_records_the_process_it_leaves(monkeypatch, tmp_path, extra, recorded):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr("hooks.lifecycle.handoff_close._home", lambda: home)
+    monkeypatch.setattr("hooks.context.account_sessions.agent_pid", lambda start=None: 4242)
+    monkeypatch.setattr("hooks.context.broadcast.mark_handed_off", lambda pid, account: [])
+
+    assert _handoff(monkeypatch, tmp_path, _routed("routed", "beta"), extra) == 0
+    assert sorted(path.name for path in home.iterdir()) == recorded
 
 
 def test_failed_route_fails_the_handoff_and_marks_nothing(monkeypatch, tmp_path, capsys):
@@ -618,13 +681,13 @@ def _command_line(tmp_path, environ, agent, agent_args=()):
     return next(line for line in launcher.read_text().splitlines() if " --name m" in line or "codex " in line)
 
 
-def test_claude_defaults_to_opus_at_high_effort(tmp_path):
-    assert "--model opus --effort high" in _command_line(tmp_path, {}, "claude")
+def test_claude_defaults_to_opus_at_medium_effort(tmp_path):
+    assert "--model opus --effort medium" in _command_line(tmp_path, {}, "claude")
 
 
-def test_codex_defaults_to_sol_at_high_effort(tmp_path):
+def test_codex_defaults_to_sol_at_medium_effort(tmp_path):
     line = _command_line(tmp_path, {}, "codex")
-    assert "-m gpt-6.1-sol" in line and 'model_reasoning_effort="high"' in line
+    assert "-m gpt-6.1-sol" in line and 'model_reasoning_effort="medium"' in line
 
 
 def _resume_line(tmp_path, agent):
@@ -638,11 +701,11 @@ def test_a_claude_resume_reopens_that_conversation(tmp_path):
     assert "--name m --resume c0ffee" in _resume_line(tmp_path, "claude")
 
 
-def test_a_codex_resume_runs_the_resume_subcommand_before_any_flag(tmp_path):
+def test_a_codex_resume_puts_every_flag_before_the_resume_subcommand(tmp_path):
     words = _resume_line(tmp_path, "codex").split()
-    at = words.index("resume")
-    assert words[at + 1] == "c0ffee"
-    assert words[at - 1] != "--agentihooks-report" and words.index("-m") > at
+    assert words[-2:] == ["resume", "c0ffee"]
+    assert words.count("resume") == 1
+    assert "-m" in words and "-c" in words
 
 
 def test_init_agent_passes_resume_through_to_the_launch(monkeypatch, tmp_path, capsys):
@@ -681,7 +744,7 @@ def test_explicit_model_and_effort_flags_win_over_defaults(tmp_path):
 
 
 def test_model_effort_names_what_the_launch_uses(tmp_path):
-    assert init_agent.model_effort("claude", [], {}) == ("opus", "high")
+    assert init_agent.model_effort("claude", [], {}) == ("opus", "medium")
     assert init_agent.model_effort("codex", [], {"AGENTIHOOKS_CODEX_EFFORT": "xhigh"}) == ("gpt-6.1-sol", "xhigh")
     assert init_agent.model_effort("claude", ["--model", "sonnet", "--effort=low"], {}) == ("sonnet", "low")
     assert init_agent.model_effort("codex", ["-m", "o3", "-c", 'model_reasoning_effort="low"'], {}) == ("o3", "low")
@@ -698,7 +761,7 @@ def test_report_names_the_model_and_effort(monkeypatch, tmp_path, capsys):
         {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "rt"), "SHELL": "/bin/bash"},
     )
     out = capsys.readouterr().out.splitlines()
-    assert rc == 0 and "model=fable" in out and "effort=high" in out
+    assert rc == 0 and "model=fable" in out and "effort=medium" in out
 
 
 def _trust_launch(monkeypatch, tmp_path, project, env_extra=None):
@@ -891,6 +954,197 @@ def test_the_channel_warning_is_answered_in_the_agents_pane(monkeypatch, seen, s
     assert calls == [("w1:p2", channel.WARNING, {"K": "v"}, init_agent.CHANNEL_WARNING_MS)]
 
 
+@pytest.mark.parametrize(
+    ("agent", "detected", "outcome", "named"),
+    [
+        ("codex", True, "named", ["agent_name=engineer-abc-0001", "session_name=engineer@abc-0001"]),
+        (
+            "codex",
+            True,
+            "unconfirmed",
+            ["agent_name=engineer-abc-0001", "session_name=unset", "session_name_error=unconfirmed"],
+        ),
+        ("codex", False, "named", ["agent_name=unset"]),
+        ("claude", True, "named", ["agent_name=engineer-abc-0001"]),
+    ],
+)
+def test_herdr_names_the_agent_and_a_codex_session_by_its_raw_name(monkeypatch, agent, detected, outcome, named):
+    calls, marked = [], []
+    monkeypatch.setattr(init_agent.herdr_host, "rename_agent", lambda *args: calls.append(("agent", *args)) or detected)
+    monkeypatch.setattr(init_agent.herdr_host, "wait_ready", lambda *args: calls.append(("ready", *args)) or True)
+    monkeypatch.setattr(init_agent, "_codex_named", lambda environ, name, since: ("index", environ, name, since))
+    monkeypatch.setattr(
+        init_agent.herdr_host, "name_session", lambda *args: calls.append(("session", *args)) or outcome
+    )
+    monkeypatch.setattr(
+        init_agent.herdr_panes, "mark", lambda pane, environ, **changes: marked.append((pane, environ, changes))
+    )
+    assert init_agent._name_in_herdr("w1:p2", "engineer@abc-0001", agent, {"K": "v"}, "", 12.5) == named
+    expected = [("agent", "w1:p2", "engineer@abc-0001", {"K": "v"})]
+    if agent == "codex" and detected:
+        expected.append(("ready", "w1:p2", {"K": "v"}, init_agent.CODEX_READY_S))
+        expected.append(
+            ("session", "w1:p2", "engineer@abc-0001", {"K": "v"}, ("index", {"K": "v"}, "engineer@abc-0001", 12.5))
+        )
+    assert calls == expected
+    session = {"named": "engineer@abc-0001", "unconfirmed": "unset:unconfirmed"}[outcome]
+    assert marked == ([("w1:p2", {"K": "v"}, {"session_name": session})] if agent == "codex" and detected else [])
+    assert init_agent.CODEX_READY_S == 120.0
+
+
+def test_a_codex_session_that_never_reads_ready_is_recorded_unnamed(monkeypatch):
+    marked = []
+    monkeypatch.setattr(init_agent.herdr_host, "rename_agent", lambda *args: True)
+    monkeypatch.setattr(init_agent.herdr_host, "wait_ready", lambda *args: False)
+    monkeypatch.setattr(init_agent.herdr_host, "name_session", lambda *args: pytest.fail("renamed while not ready"))
+    monkeypatch.setattr(init_agent.herdr_panes, "mark", lambda pane, environ, **changes: marked.append(changes))
+    assert init_agent._name_in_herdr("w1:p2", "eng-a", "codex", {}, "", 0.0) == [
+        "agent_name=eng-a",
+        "session_name=unset",
+        "session_name_error=not-ready",
+    ]
+    assert marked == [{"session_name": "unset:not-ready"}]
+
+
+def _ready_codex(monkeypatch, calls, ready=True, busy=""):
+    monkeypatch.setattr(init_agent.herdr_host, "rename_agent", lambda *args: calls.append("agent") or True)
+    monkeypatch.setattr(init_agent.herdr_host, "wait_ready", lambda *args: calls.append("ready") or ready)
+    monkeypatch.setattr(init_agent.herdr_host, "name_session", lambda *args: calls.append("session") or "named")
+    monkeypatch.setattr(init_agent.herdr_host, "busy", lambda *args: calls.append(("busy", *args)) or busy)
+    monkeypatch.setattr(init_agent, "_codex_named", lambda environ, name, since: None)
+    monkeypatch.setattr(init_agent.herdr_panes, "mark", lambda pane, environ, **changes: None)
+
+
+@pytest.mark.parametrize(("sent", "said"), [(True, "sent"), (False, "failed")])
+def test_the_opening_prompt_follows_the_names(monkeypatch, sent, said):
+    calls = []
+    _ready_codex(monkeypatch, calls)
+    monkeypatch.setattr(init_agent.herdr_host, "prompt", lambda *args: calls.append(("prompt", *args)) or sent)
+    named = init_agent._name_in_herdr("w1:p2", "eng-a", "codex", {"K": "v"}, "Start.", 0.0)
+    assert named == ["agent_name=eng-a", "session_name=eng-a", f"opening_prompt={said}"]
+    assert calls == [
+        "agent",
+        "ready",
+        "session",
+        "ready",
+        ("busy", "w1:p2", {"K": "v"}),
+        ("prompt", "w1:p2", "Start.", {"K": "v"}),
+    ]
+
+
+@pytest.mark.parametrize(("ready", "busy", "said"), [(False, "", "held:not-ready"), (True, "typed", "held:typed")])
+def test_an_opening_prompt_is_held_from_a_busy_pane(monkeypatch, ready, busy, said):
+    calls = []
+    _ready_codex(monkeypatch, calls, ready, busy)
+    monkeypatch.setattr(init_agent.herdr_host, "prompt", lambda *args: pytest.fail("prompted a busy pane"))
+    named = init_agent._name_in_herdr("w1:p2", "eng-a", "codex", {}, "Start.", 0.0)
+    assert named[-1] == f"opening_prompt={said}"
+    assert [call for call in calls if call[0] == "busy"] == ([("busy", "w1:p2", {})] if ready else [])
+
+
+@pytest.mark.parametrize(
+    ("status", "agent", "held", "names"),
+    [
+        ("routed", "claude", False, True),
+        ("bare", "codex", False, True),
+        ("direct", "codex", False, True),
+        (None, "codex", True, True),
+        (None, "codex", False, False),
+        (None, "claude", True, False),
+        ("failed", "codex", True, False),
+    ],
+)
+def test_a_pane_is_named_once_routed_or_while_a_held_prompt_waits_on_the_route(tmp_path, status, agent, held, names):
+    launcher = tmp_path / "eng.sh"
+    if held:
+        launcher.with_suffix(".prompt").write_text("Start.", encoding="utf-8")
+    route = {"status": status} if status else {}
+    assert init_agent._names_pane(route, launcher, agent) is names
+
+
+def test_an_undetected_agent_still_gets_its_opening_prompt_after_the_ready_wait(monkeypatch):
+    calls = []
+    monkeypatch.setattr(init_agent.herdr_host, "rename_agent", lambda *args: False)
+    monkeypatch.setattr(init_agent.herdr_host, "wait_ready", lambda *args: calls.append(("ready", *args)) or True)
+    monkeypatch.setattr(init_agent.herdr_host, "busy", lambda *args: "")
+    monkeypatch.setattr(init_agent.herdr_host, "prompt", lambda *args: calls.append(("prompt", *args)) or True)
+    assert init_agent._name_in_herdr("w1:p2", "eng-a", "codex", {}, "Start.", 0.0) == [
+        "agent_name=unset",
+        "opening_prompt=sent",
+    ]
+    assert calls == [
+        ("ready", "w1:p2", {}, init_agent.CODEX_READY_S),
+        ("ready", "w1:p2", {}, init_agent.CODEX_READY_S),
+        ("prompt", "w1:p2", "Start.", {}),
+    ]
+
+
+def test_an_undetected_codex_agent_without_a_prompt_waits_for_nothing(monkeypatch):
+    monkeypatch.setattr(init_agent.herdr_host, "rename_agent", lambda *args: False)
+    monkeypatch.setattr(init_agent.herdr_host, "wait_ready", lambda *args: pytest.fail("waited"))
+    assert init_agent._name_in_herdr("w1:p2", "eng-a", "codex", {}, "", 0.0) == ["agent_name=unset"]
+
+
+@pytest.mark.parametrize(("held", "argv"), [("1", "<a b>\n"), ("", "<a b><Start the task.>\n")])
+def test_the_codex_launcher_line_runs_its_command_without_the_prompt_only_when_held(tmp_path, held, argv):
+    spec = init_agent.AgentSpec(agent="codex")
+    launcher, _ = init_agent._write_launcher(
+        tmp_path, "eng", "Start the task.", [], {"XDG_RUNTIME_DIR": str(tmp_path)}, spec
+    )
+    line = next(x for x in launcher.read_text().splitlines() if x.startswith("set --; [ -n"))
+    command = line.split("; unset AGENTIHOOKS_PROMPT_AFTER_START; ", 1)[1].removesuffix(' "$@"')
+    script = line.replace(command, "printf '<%s>' 'a b'")
+    done = subprocess.run(
+        ["bash", "-c", f'{script}; echo; echo "left=${{AGENTIHOOKS_PROMPT_AFTER_START:-}}"'],
+        capture_output=True,
+        text=True,
+        env={"PATH": os.environ["PATH"], **({"AGENTIHOOKS_PROMPT_AFTER_START": held} if held else {})},
+    )
+    assert done.stdout == f"{argv}left=\n"
+
+
+def _index(home, *rows):
+    home.mkdir(parents=True, exist_ok=True)
+    junk = "not json\n5\nnull\n[]\n" + json.dumps({"thread_name": "eng-a"}) + "\n"
+    (home / "session_index.jsonl").write_text(junk + "".join(json.dumps(row) + "\n" for row in rows))
+
+
+def test_a_codex_name_is_confirmed_from_its_session_index_after_the_launch(tmp_path):
+    since = calendar.timegm((2026, 10, 12, 2, 43, 50, 0, 0, 0))
+    home = tmp_path / "codex"
+    environ = {"CODEX_HOME": str(home)}
+    named = init_agent._codex_named(environ, "eng-a", since)
+    assert named() is False
+    _index(home, {"id": "a", "thread_name": "eng-a", "updated_at": "2026-10-12T02:43:49.9Z"})
+    assert named() is False
+    _index(home, {"id": "a", "thread_name": "eng-a", "updated_at": "2026-10-12T02:43:50"})
+    assert named() is True
+    _index(
+        home,
+        {"id": "b", "thread_name": "eng-b", "updated_at": "2026-10-12T02:43:58.92Z"},
+        {"id": "c", "thread_name": "eng-a", "updated_at": "2026-10-12T02:43:50.000000001Z"},
+    )
+    assert named() is True
+
+
+def test_a_codex_launcher_holds_its_prompt_behind_the_herdr_variable(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("codex", "requested"))
+    monkeypatch.setattr(init_agent.shutil, "which", lambda name: "/usr/bin/agentihooks")
+    runtime = tmp_path / "rt"
+    argv = ["--dir", str(tmp_path), "--name", "eng-a", "--prompt", "Start.", "--host", "herdr", "--dry-run"]
+    assert init_agent.main(argv, {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(runtime)}) == 0
+    launcher = next((runtime / "agentihooks-claude-terminal").glob("*.sh")).read_text().splitlines()
+    prompt_file = next((runtime / "agentihooks-claude-terminal").glob("*.prompt"))
+    line = next(x for x in launcher if x.startswith("set --; [ -n"))
+    command = line.split("; unset AGENTIHOOKS_PROMPT_AFTER_START; ", 1)[1].removesuffix(' "$@"')
+    assert command.startswith("/usr/bin/agentihooks codex ") and command.count("agentihooks codex") == 1
+    assert line == (
+        f'set --; [ -n "${{AGENTIHOOKS_PROMPT_AFTER_START:-}}" ] || set -- "$(cat {prompt_file})"; '
+        f'unset AGENTIHOOKS_PROMPT_AFTER_START; {command} "$@"'
+    )
+    assert init_agent.PROMPT_AFTER_START == "AGENTIHOOKS_PROMPT_AFTER_START"
+
+
 def test_a_channel_dry_run_writes_the_negotiation_pin_into_its_launcher(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "requested"))
     monkeypatch.setattr(init_agent, "_launch_command", lambda launcher, directory, title, environ: ("linux", ["t"]))
@@ -995,13 +1249,200 @@ def test_api_handoff_launches_the_requested_harness(monkeypatch, tmp_path, capsy
 
 
 @pytest.mark.parametrize("extra", [[], ["--", "--route", "token"], ["--", "--route-timeout", "api"]])
-def test_codex_subscription_handoff_remains_unsupported(monkeypatch, tmp_path, capsys, extra):
+@pytest.mark.parametrize("source,target", [("codex", "claude"), ("claude", "codex")])
+def test_a_subscription_handoff_never_crosses_harnesses(monkeypatch, tmp_path, capsys, extra, source, target):
     monkeypatch.setattr(init_agent.operator_env, "fill", lambda env: None)
     assert (
         init_agent.main(
-            ["--dir", str(tmp_path), "--handoff", "--prompt", "saved task", "--dry-run", *extra],
+            ["--dir", str(tmp_path), "--agent", target, "--handoff", "--prompt", "saved task", "--dry-run", *extra],
+            {"HOME": str(tmp_path), "AGENTIHOOKS_TARGET": source},
+        )
+        == 2
+    )
+    assert (
+        f"unsupported quota transfer: {source.capitalize()} cannot transfer to a {target.capitalize()} account"
+        in capsys.readouterr().err
+    )
+
+
+@pytest.mark.parametrize(
+    "requested,source,agent",
+    [("", "copilot", "claude"), ("copilot", "claude", "claude"), ("", "codex", "codex"), ("codex", "codex", "codex")],
+)
+def test_only_codex_sources_hand_off_to_codex(requested, source, agent):
+    assert init_agent._handoff_agent(requested, {"AGENTIHOOKS_TARGET": source}, []) == agent
+
+
+@pytest.mark.parametrize(
+    "requested,environ,harness,agent",
+    [
+        ("codex", {}, "codex", "codex"),
+        ("", {}, "codex", "codex"),
+        ("", {}, "claude", "claude"),
+        ("", {"AGENTIHOOKS_TARGET": "codex"}, "claude", "codex"),
+    ],
+)
+def test_a_handoff_without_a_target_takes_the_live_harness(monkeypatch, requested, environ, harness, agent):
+    from scripts.profiles import binding
+
+    monkeypatch.setattr(binding, "process", lambda: (123, harness, {}, "alpha"))
+    assert init_agent._handoff_agent(requested, environ, []) == agent
+
+
+@pytest.mark.parametrize("error", [ValueError("no supported live harness ancestor"), OSError("process vanished")])
+def test_a_handoff_outside_any_harness_comes_from_claude(monkeypatch, error):
+    from scripts.profiles import binding
+
+    def missing():
+        raise error
+
+    monkeypatch.setattr(binding, "process", missing)
+    assert init_agent._live_harness() == "claude"
+    assert init_agent._handoff_agent("", {}, []) == "claude"
+    with pytest.raises(ValueError, match="unsupported quota transfer: Claude cannot transfer to a Codex account"):
+        init_agent._handoff_agent("codex", {}, [])
+
+
+def test_a_handoff_excludes_the_account_it_leaves(monkeypatch):
+    from scripts.profiles import binding
+
+    monkeypatch.setattr(binding, "process", lambda: (123, "codex", {}, "alpha"))
+    assert init_agent._handoff_exclude("codex", {"AH_CX_TOKEN_beta": "b"}) == "alpha"
+    assert init_agent._handoff_exclude("claude", {"AH_CC_TOKEN_beta": "b"}) == "beta"
+    assert init_agent._handoff_exclude("claude", {}) == ""
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_a_codex_handoff_resumes_the_conversation_on_another_codex_account(monkeypatch, tmp_path, capsys, explicit):
+    binding, profile_env = _profile(monkeypatch, tmp_path, "codex")
+    original = {**profile_env, "AGENTIHOOKS_RUN_MODEL": "gpt-6.1-sol", "AGENTIHOOKS_RUN_EFFORT": "medium"}
+    monkeypatch.setattr(binding, "process", lambda: (123, "codex", original, "alpha"))
+    monkeypatch.setattr(init_agent, "_launch_command", lambda *args: ("linux", ["terminal"]))
+    monkeypatch.setattr(init_agent.operator_env, "fill", lambda env: None)
+    argv = ["--dir", str(tmp_path), "--name", "cx-handoff", *(["--agent", "codex"] if explicit else [])]
+    argv += ["--prompt", "saved task", "--handoff", "--resume", "thread-1", "--dry-run"]
+    environ = {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "runtime"), "AGENTIHOOKS_TARGET": "codex"}
+    assert init_agent.main(argv, {**environ, "AH_CX_TOKEN_alpha": "tok", "AH_CX_TOKEN_beta": "tok", **profile_env}) == 0
+    report = capsys.readouterr().out
+    assert "agent=codex\n" in report and "agent_reason=handoff\n" in report
+    launcher = next(line.split("=", 1)[1] for line in report.splitlines() if line.startswith("launcher="))
+    command = Path(launcher).read_text()
+    assert "select-profile engineer --agent codex -- --agentihooks-exclude alpha --agentihooks-report" in command
+    assert " resume thread-1 " in command
+    assert "-m gpt-6.1-sol" in command
+
+
+@pytest.mark.parametrize("source_flags", [False, True, "session", "single", "partial", "defaults", "override"])
+def test_a_plain_codex_quota_handoff_preserves_native_choices(monkeypatch, tmp_path, capsys, source_flags):
+    from scripts.profiles import binding
+
+    home = tmp_path / "codex"
+    home.mkdir()
+    config = 'model = "gpt-6-astra"\nmodel_reasoning_effort = "low"\n'
+    (home / "config.toml").write_text("" if source_flags == "defaults" else config)
+    source = {"CODEX_HOME": str(home)}
+    if source_flags is True:
+        source.update(AGENTIHOOKS_RUN_MODEL="gpt-6.1-sol", AGENTIHOOKS_RUN_EFFORT="high")
+    rollout = tmp_path / "rollout.jsonl"
+    latest = '{"type":"turn_context","payload":{"model":"gpt-6-sol","effort":"medium"}}\n'
+    transcripts = {
+        "single": latest,
+        "partial": '{"type":"turn_context","payload":{}}\n',
+        "session": (
+            '{"type":"turn_context","payload":{"model":"gpt-6-astra","effort":"low"}}\n'
+            + latest
+            + '{"type":"event_msg","payload":{"model":"unrelated","effort":"low"}}\n'
+            + "not-json\n"
+        ),
+    }
+    rollout.write_text(transcripts.get(source_flags, ""))
+    monkeypatch.setattr(
+        "hooks.targets.normalizer.codex_rollout_path",
+        lambda session: str(rollout) if source_flags in transcripts and session == "thread-1" else "",
+    )
+    monkeypatch.setattr(binding, "process", lambda: (123, "codex", source, "alpha"))
+    monkeypatch.setattr(init_agent.operator_env, "fill", lambda env: None)
+    monkeypatch.setattr(init_agent, "_launch_command", lambda launcher, *args: ("linux", ["terminal", str(launcher)]))
+    launched = []
+
+    def popen(command, **kwargs):
+        launcher = Path(command[-1])
+        launched.append((launcher.read_text(), kwargs["env"]))
+        _routed("routed", "beta")(command, **kwargs)
+
+    monkeypatch.setattr(init_agent.subprocess, "Popen", popen)
+    monkeypatch.setattr(init_agent, "_mark_handoff", lambda account, resume: ["thread-1"])
+    env = {
+        "HOME": str(tmp_path),
+        "XDG_RUNTIME_DIR": str(tmp_path / "runtime"),
+        "AGENTIHOOKS_TARGET": "codex",
+        "CODEX_HOME": str(home),
+        "AH_CX_TOKEN_alpha": "tok",
+    }
+    flags = ["--", "-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="xhigh"', "--no-alt-screen"]
+    assert (
+        init_agent.main(
+            [
+                "--dir",
+                str(tmp_path),
+                "--name",
+                "plain-handoff",
+                "--prompt",
+                "saved task",
+                "--handoff",
+                "--resume",
+                "thread-1",
+                "--start-timeout",
+                "0",
+                "--route-timeout",
+                "0",
+                *(flags if source_flags == "override" else []),
+            ],
+            env,
+        )
+        == 0
+    )
+    command, successor = launched[0]
+    assert "--agentihooks-exclude alpha" in command
+    assert "resume thread-1" in command
+    assert "select-profile" not in command
+    assert "AGENTIHOOKS_PROFILE_REPORT" not in successor
+    assert not successor.get("AGENTIHOOKS_PROFILE")
+    expected_model, expected_effort = {
+        False: ("gpt-6-astra", "low"),
+        True: ("gpt-6.1-sol", "high"),
+        "session": ("gpt-6-sol", "medium"),
+        "single": ("gpt-6-sol", "medium"),
+        "partial": ("gpt-6-astra", "low"),
+        "defaults": ("", ""),
+        "override": ("gpt-6.1-sol", "xhigh"),
+    }[source_flags]
+    if expected_model:
+        assert f"-m {expected_model}" in command
+        assert f'model_reasoning_effort="{expected_effort}"' in command
+        assert command.count("model_reasoning_effort=") == 1
+    else:
+        assert " -m " not in command
+        assert "model_reasoning_effort=" not in command
+    if source_flags == "override":
+        assert "--no-alt-screen" in command
+    report = capsys.readouterr().out
+    assert "handoff=done" in report
+    assert "account=beta" in report
+    assert "profile_validation" not in report
+
+
+def test_a_plain_codex_handoff_refuses_a_different_live_harness(monkeypatch, tmp_path, capsys):
+    from scripts.profiles import binding
+
+    monkeypatch.setattr(binding, "process", lambda: (123, "claude", {}, "alpha"))
+    monkeypatch.setattr(init_agent.operator_env, "fill", lambda env: None)
+    monkeypatch.setattr(init_agent.subprocess, "Popen", lambda *args, **kwargs: pytest.fail("must not launch"))
+    assert (
+        init_agent.main(
+            ["--dir", str(tmp_path), "--agent", "codex", "--prompt", "saved task", "--handoff"],
             {"HOME": str(tmp_path), "AGENTIHOOKS_TARGET": "codex"},
         )
         == 2
     )
-    assert "unsupported quota transfer" in capsys.readouterr().err
+    assert "unsupported quota transfer from claude to codex" in capsys.readouterr().err

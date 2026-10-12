@@ -337,6 +337,36 @@ def test_claude_sessions_list_from_their_own_records(tmp_path, monkeypatch):
     ]
 
 
+def test_a_record_from_another_process_namespace_never_claims_a_local_pid(tmp_path, monkeypatch):
+    from scripts.terminate_agent import sessions
+
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    item = process(400, argv=("claude", "--name", "engineer"))
+    registry = {
+        "remote": {"status": "alive", "pid": 400, "cwd": "/pod", "process_namespace": "boot-worker/pid:[1]"},
+        "local": {"status": "alive", "pid": 400, "cwd": "/repo", "process_namespace": "boot-anton/pid:[1]"},
+    }
+    with patch("scripts.terminate_agent.processes", return_value={400: item}):
+        here = sessions(tmp_path / "proc", registry=registry, namespace="boot-anton/pid:[1]")
+        alone = sessions(tmp_path / "proc", registry={"remote": registry["remote"]}, namespace="boot-anton/pid:[1]")
+    assert [(s.session_id, s.cwd, s.status) for s in here] == [("local", "/repo", "alive")]
+    assert [(s.session_id, s.process.pid, s.status) for s in alone] == [("", 400, "unregistered")]
+    with pytest.raises(ValueError, match="no live claude session exactly matches 'remote'"):
+        resolve(alone, "remote", "claude")
+
+
+def test_sessions_read_the_local_namespace_when_none_is_given(tmp_path, monkeypatch):
+    from scripts.terminate_agent import sessions
+
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    monkeypatch.setattr("scripts.swarm_v2.runtime.process.local_namespace", lambda: "boot-anton/pid:[1]")
+    item = process(400, argv=("claude", "--name", "engineer"))
+    registry = {"remote": {"status": "alive", "pid": 400, "cwd": "/pod", "process_namespace": "boot-worker/pid:[1]"}}
+    with patch("scripts.terminate_agent.processes", return_value={400: item}):
+        found = sessions(tmp_path / "proc", registry=registry)
+    assert [(s.session_id, s.status) for s in found] == [("", "unregistered")]
+
+
 def test_sessions_name_a_registered_session_from_its_record(monkeypatch):
     from scripts.terminate_agent import sessions
 

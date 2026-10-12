@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/hosted_ledger.py:scripts.swarm_v2.hosted_ledger.xǁHostedLedgerǁclient__mutmut_6:aac214e893a197eef45afa414d466e6ae95f47e30f12fb4decd3ec1dd36aa210": {
+    "reader": "standards_reader",
+    "reason": "urllib Request capitalizes header names and the ledger server reads headers case insensitively, so the header spelling cannot change the outcome"
+  }
+}

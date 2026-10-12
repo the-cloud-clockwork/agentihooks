@@ -1,0 +1,25 @@
+{
+  "case_runs": [
+    "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38142150601"
+  ],
+  "cases": [
+    "T-SV2-UX-01-A",
+    "T-SV2-UX-01-B",
+    "T-SV2-UX-01-C"
+  ],
+  "evidence_class": "mocked: a fake Redis swarm store holds one published status for a mixed local and Kubernetes swarm and terminal views published after the heartbeat but checked before it; the swarm view the ledger server returns is read at a fixed clock; no ledger server, browser, worker Pod or cluster runs in these cases",
+  "inputs": {
+    "scripts/swarm/commands.py": "89537e7a0dfb94479de2df8fc05e7bedb3f5e8ba1dd100c709756e382b8f1ef6",
+    "scripts/swarm/execution_card.py": "c1c02a44e23cb897c6e35795f6d38fe6e4032f92cd5afde5e1cf2a934b88dcae",
+    "scripts/swarm_ledger/static/css/ledger.css": "1b020f9eafb4c5bc0b0ba2a1d88362b2460c3e40b47fef60df2b1826c0b10dc1",
+    "scripts/swarm_ledger/static/js/swarm.js": "24d990257976f5f4dc89e9d85c11e134d5bb9284197cae71f82a0832cd3cd5dd",
+    "tests/e2e/swarm_v2/test_ledger_execution_cards.py": "81531d978775b6e393c198dc769cf5d42912d4e790494975732aa41986243890",
+    "tests/fixtures/swarm_v2/ledger-execution-cards.json": "8cd72c41a0adc2f627b7b6fae24279d7f5acb0c5e4f52b1a6375d84b4c939a27",
+    "tests/sv2_ux01_cases.py": "5acb5702505dbbc9a3d9604c8f71d5c17bc5dc40df8d9527123bba53306d0e60",
+    "tests/test_swarm_execution_card.py": "8995f7bc5bfbd45557d8b4bea1a79e2b0c5b2df4ffee6fac0bded0c6c9cb17b5"
+  },
+  "red_runs": [
+    "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38139050185"
+  ],
+  "tested_commit": "faab46eca"
+}

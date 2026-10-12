@@ -5,6 +5,7 @@ from hooks.context.account_sessions import API_MARKER, CODEX_TOKEN_PREFIX, TOKEN
 
 ANTHROPIC_HOST = "api.anthropic.com"
 CODEX_TOKEN_ENV = "CODEX_ACCESS_TOKEN"
+CHATGPT_ACCOUNT_ID_ENV = "AGENTIHOOKS_CHATGPT_ACCOUNT_ID"
 _CODEX_API_NAMES = frozenset({"CODEX_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL", API_MARKER})
 _API_NAMES = frozenset(
     {
@@ -50,7 +51,8 @@ def _codex_without_tokens(environ: Mapping[str, str]) -> dict[str, str]:
     return {
         name: value
         for name, value in environ.items()
-        if name != CODEX_TOKEN_ENV and not name.startswith((CODEX_TOKEN_PREFIX, TOKEN_PREFIX))
+        if name not in (CODEX_TOKEN_ENV, CHATGPT_ACCOUNT_ID_ENV)
+        and not name.startswith((CODEX_TOKEN_PREFIX, TOKEN_PREFIX))
     }
 
 

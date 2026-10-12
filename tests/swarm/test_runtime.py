@@ -139,6 +139,23 @@ def test_status_and_nudge_address_the_agents_own_pane_id(tmp_path):
     assert prompts == [["agent", "prompt", "w:p9", "[swarm delivery] wake"]]
 
 
+def test_a_delivered_nudge_reports_no_failure(tmp_path):
+    runtime = HerdrRuntime(home=tmp_path, herdr=lambda args: {})
+    assert runtime.nudge(AgentRecord("engineer@a1b2c3-0001", "eng", "t", pane_id="w:p9"), "wake") is None
+
+
+@pytest.mark.parametrize(
+    ("error", "reason"),
+    [(RuntimeError("agent_not_found"), "agent_not_found"), (TimeoutError(), "TimeoutError")],
+)
+def test_a_nudge_herdr_fails_to_deliver_returns_the_failure(tmp_path, error, reason):
+    def herdr(args):
+        raise error
+
+    runtime = HerdrRuntime(home=tmp_path, herdr=herdr)
+    assert runtime.nudge(AgentRecord("engineer@a1b2c3-0001", "eng", "t", pane_id="w:p9"), "wake") == reason
+
+
 class NamedPanes:
     def __init__(self, panes):
         self.panes, self.renamed = panes, []
@@ -171,7 +188,9 @@ def test_status_names_a_running_pane_spawned_without_its_herdr_name(tmp_path):
     runtime = HerdrRuntime(home=tmp_path, herdr=herdr)
 
     def agent(seat, pane, conversation=""):
-        return SimpleNamespace(name=f"{slug}-{seat}", pane_id=pane, conversation_id=conversation)
+        return SimpleNamespace(
+            name=f"{slug}-{seat}", pane_id=pane, conversation_id=conversation, runtime_backend="local"
+        )
 
     assert runtime.status(agent("eng-3", "w:p4", "c3")) == "working"
     assert runtime.status(agent("master-1", "w:p1")) == "idle"
@@ -187,7 +206,8 @@ def test_status_names_a_running_pane_spawned_without_its_herdr_name(tmp_path):
 def test_a_pane_already_carrying_its_herdr_name_is_not_renamed(tmp_path):
     herdr = NamedPanes({"w:p1": {"name": "master-a1b2c3-0001", "agent_status": "idle"}})
     runtime = HerdrRuntime(home=tmp_path, herdr=herdr)
-    assert runtime.name_pane(SimpleNamespace(name="master@a1b2c3-0001", pane_id="w:p1", conversation_id="")) is False
+    agent = SimpleNamespace(name="master@a1b2c3-0001", pane_id="w:p1", conversation_id="", runtime_backend="local")
+    assert runtime.name_pane(agent) is False
     assert herdr.renamed == []
 
 
@@ -285,7 +305,7 @@ def test_spawn_without_a_known_predecessor_names_none(tmp_path, monkeypatch, ext
     assert "AGENTIHOOKS_PREDECESSOR_SESSION" not in env
 
 
-def _spawn_seen(tmp_path, lanes, lane="eng"):
+def _spawn_seen(tmp_path, lanes, lane="eng", config=None):
     seen = {}
 
     def run(argv, **kwargs):
@@ -297,7 +317,7 @@ def _spawn_seen(tmp_path, lanes, lane="eng"):
         return requested or "claude", "requested" if requested else "priority"
 
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=choose)
-    config = SimpleNamespace(
+    config = config or SimpleNamespace(
         slug="sw",
         repo=str(tmp_path),
         code="a1b2c3",
@@ -335,7 +355,7 @@ def test_a_lane_pin_wins_over_an_opposite_saved_harness(tmp_path, monkeypatch, p
         seen["argv"] = argv
         return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
 
-    def pick(harness, lane, task, environ):
+    def pick(harness, lane, task, environ, bounds, default_model):
         seen["classifier_harness"] = harness
         return model_pick.ModelPick("", "high", "classifier", 0.9)
 
@@ -449,17 +469,17 @@ def test_only_a_codex_planner_starts_read_only(tmp_path, lane, agent):
 
 def test_an_auto_lane_falls_back_to_the_automatic_choice(tmp_path):
     seen = _spawn_seen(tmp_path, {"eng": {"agent": "auto", "model": "auto", "effort": "auto"}})
-    assert seen["requested"] == "" and _passed(seen["argv"]) == ["--model", "opus", "--effort", "high"]
+    assert seen["requested"] == "" and _passed(seen["argv"]) == ["--model", "opus", "--effort", "medium"]
 
 
 def test_a_lane_without_an_entry_falls_back_to_the_automatic_choice(tmp_path):
     seen = _spawn_seen(tmp_path, {"eng": {"agent": "codex"}}, lane="ci")
-    assert seen["requested"] == "" and _passed(seen["argv"]) == ["--model", "opus", "--effort", "high"]
+    assert seen["requested"] == "" and _passed(seen["argv"]) == ["--model", "opus", "--effort", "medium"]
 
 
 def test_a_lane_model_goes_to_the_automatically_chosen_agent(tmp_path):
     seen = _spawn_seen(tmp_path, {"eng": {"agent": "auto", "model": "sonnet", "effort": "auto"}})
-    assert seen["requested"] == "" and _passed(seen["argv"]) == ["--model", "sonnet", "--effort", "high"]
+    assert seen["requested"] == "" and _passed(seen["argv"]) == ["--model", "sonnet", "--effort", "xhigh"]
 
 
 def test_the_lane_role_replaces_the_default_role_in_the_prompt(tmp_path):
@@ -677,13 +697,42 @@ def test_a_resume_herdr_never_shows_in_its_conversation_is_closed_and_fails(tmp_
     assert ["pane", "close", "w2:p9"] in seen["herdr"]
 
 
+def test_a_resume_whose_launch_fails_terminates_that_agent(tmp_path):
+    from scripts.swarm.tick import SpawnError
+
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee")
+    launched = runtime.run
+    refused = "agentihooks init-agent: the harness did not report its route within 90s"
+
+    def failing(argv, **kwargs):
+        if "init-agent" in argv:
+            seen["runs"].append(argv)
+            return SimpleNamespace(returncode=3, stdout="", stderr=refused + "\n")
+        return launched(argv, **kwargs)
+
+    runtime.run = failing
+    with pytest.raises(SpawnError) as error:
+        runtime.resume(config, agent, "you were restored")
+    assert str(error.value) == refused
+    assert [argv[1:] for argv in seen["runs"] if "terminate-agent" in argv] == [
+        ["terminate-agent", "engineer@a1b2c3-0001", "--force-shared"]
+    ]
+
+
+def test_a_codex_launch_must_start_its_harness_inside_the_start_timeout(tmp_path):
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee", harness="codex")
+    runtime.resume(config, agent, "you were restored")
+    argv = seen["runs"][0]
+    assert (argv[argv.index("--start-timeout") + 1], argv[argv.index("--route-timeout") + 1]) == ("30", "30")
+
+
 @pytest.mark.parametrize(
     "lane,harness,launch,source",
     [
         ("master", "claude", ["--model", "opus", "--effort", "high"], "frontier"),
         ("master", "codex", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="high"'], "frontier"),
-        ("eng", "claude", ["--model", "opus", "--effort", "high"], "lane-default"),
-        ("eng", "codex", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="high"'], "lane-default"),
+        ("eng", "claude", ["--model", "opus", "--effort", "medium"], "lane-default"),
+        ("eng", "codex", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="medium"'], "lane-default"),
     ],
 )
 def test_resume_uses_defaults_when_no_resolved_model_was_recorded(tmp_path, monkeypatch, lane, harness, launch, source):
@@ -821,7 +870,7 @@ SEAT_TASKS = {
 
 @pytest.mark.parametrize("lane", sorted(SEAT_TASKS))
 @pytest.mark.parametrize("handoff", [None, "# Handoff\n<!-- handoff complete -->"])
-def test_every_seat_launch_carries_opus_and_high_effort_for_claude(tmp_path, monkeypatch, lane, handoff):
+def test_every_seat_launch_carries_opus_and_its_lane_effort_for_claude(tmp_path, monkeypatch, lane, handoff):
     from scripts.swarm.templates import DEFAULT_PROFILES
 
     transfer = (
@@ -840,7 +889,8 @@ def test_every_seat_launch_carries_opus_and_high_effort_for_claude(tmp_path, mon
         else {}
     )
     task = {**SEAT_TASKS[lane], **transfer}
-    assert _launched(tmp_path, monkeypatch, lane, task) == ["--model", "opus", "--effort", "high"]
+    effort = "high" if handoff or lane == "master" else "medium"
+    assert _launched(tmp_path, monkeypatch, lane, task) == ["--model", "opus", "--effort", effort]
 
 
 @pytest.mark.parametrize("lane", ["master", "plan"])
@@ -872,24 +922,20 @@ def test_a_master_launches_on_the_frontier_model_at_high_effort_whatever_the_lan
 def _lowest_pick(*args, **kwargs):
     from hooks.classifier import Answer, DecisionResult
 
-    return DecisionResult({"effort": Answer("score", score=0, confidence=0.95)}, "luna")
+    return DecisionResult({"option": Answer("choice", choice="lower", confidence=0.95)}, "luna")
 
 
-@pytest.mark.parametrize("lane", sorted(SEAT_TASKS))
-@pytest.mark.parametrize(
-    "harness,launch",
-    [
-        ("claude", ["--model", "opus", "--effort", "high"]),
-        ("codex", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="high"']),
-    ],
-)
-def test_a_live_classifier_never_launches_a_seat_below_the_default_model_and_high_effort(
-    tmp_path, monkeypatch, lane, harness, launch
+@pytest.mark.parametrize("lane,effort", [("eng", "medium"), ("ci", "medium"), ("plan", "medium"), ("master", "high")])
+@pytest.mark.parametrize("harness,model", [("claude", "opus"), ("codex", "gpt-6.1-sol")])
+def test_a_live_classifier_never_launches_a_seat_below_the_default_model_and_its_lane_floor(
+    tmp_path, monkeypatch, lane, effort, harness, model
 ):
+    from scripts.init_agent import model_flags
     from scripts.swarm import model_pick
 
     monkeypatch.setattr(model_pick, "decide", _lowest_pick)
-    assert _launched(tmp_path, monkeypatch, lane, SEAT_TASKS[lane], harness=harness) == launch
+    launched = _launched(tmp_path, monkeypatch, lane, SEAT_TASKS[lane], harness=harness)
+    assert launched == model_flags(harness, model, effort)
 
 
 def test_a_swarm_config_model_launches_as_named_with_the_classifier_live(tmp_path, monkeypatch):
@@ -901,8 +947,68 @@ def test_a_swarm_config_model_launches_as_named_with_the_classifier_live(tmp_pat
         "--model",
         "sonnet",
         "--effort",
-        "high",
+        "xhigh",
     ]
+
+
+@pytest.mark.parametrize("harness,model", [("claude", "sonnet"), ("codex", "gpt-6-sol")])
+@pytest.mark.parametrize("lane", ["eng", "ci", "plan", "master"])
+def test_configured_models_reach_each_launch_lane(tmp_path, monkeypatch, harness, model, lane):
+    for agent in ("CLAUDE", "CODEX"):
+        for field in ("MODEL", "EFFORT"):
+            monkeypatch.delenv(f"AGENTIHOOKS_{agent}_{field}", raising=False)
+    lanes = {lane: {"agent": harness, "model": "auto", "effort": "auto"}}
+    config = SwarmConfig(
+        "sw",
+        str(tmp_path),
+        2,
+        1,
+        code="a1b2c3",
+        lanes=lanes,
+        claude_model="sonnet",
+        codex_model="gpt-6-sol",
+    )
+    passed = _passed(_spawn_seen(tmp_path, lanes, lane, config)["argv"])
+    model_flag = "-m" if harness == "codex" else "--model"
+    assert passed[passed.index(model_flag) + 1] == model
+    effort = "high" if lane == "master" else "xhigh" if harness == "claude" and lane in ("eng", "ci") else "medium"
+    if harness == "codex":
+        assert f'model_reasoning_effort="{effort}"' in passed
+    else:
+        assert passed[passed.index("--effort") + 1] == effort
+
+
+def test_the_classifier_receives_the_launch_environment(tmp_path, monkeypatch):
+    from scripts.swarm import model_pick
+
+    original = model_pick.pick
+    monkeypatch.setenv("MODEL_CONTEXT_PROOF", "present")
+
+    def pick(harness, lane, task, environ, bounds, default_model):
+        context_present = bool(environ) and environ.get("MODEL_CONTEXT_PROOF") == "present"
+        assert context_present
+        return original(harness, lane, task, environ, bounds, default_model)
+
+    monkeypatch.setattr(model_pick, "pick", pick)
+    _spawn_seen(tmp_path, {"eng": {"agent": "codex", "model": "auto", "effort": "auto"}})
+
+
+def test_an_empty_lane_model_uses_the_configured_default(tmp_path, monkeypatch):
+    monkeypatch.delenv("AGENTIHOOKS_CLAUDE_MODEL", raising=False)
+    lanes = {"eng": {"agent": "claude", "effort": "medium"}}
+    config = SwarmConfig("sw", str(tmp_path), 2, 1, code="a1b2c3", lanes=lanes, claude_model="sonnet")
+    passed = _passed(_spawn_seen(tmp_path, lanes, config=config)["argv"])
+    assert passed[passed.index("--model") + 1] == "sonnet"
+
+
+def test_an_unrecorded_resume_uses_the_configured_model(tmp_path):
+    from dataclasses import replace
+
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee")
+    config.claude_model = "sonnet"
+    runtime.resume(config, replace(agent, model=""), "resume")
+    passed = _passed(seen["runs"][0])
+    assert passed[passed.index("--model") + 1] == "sonnet"
 
 
 @pytest.mark.parametrize("lane", sorted(SEAT_TASKS))

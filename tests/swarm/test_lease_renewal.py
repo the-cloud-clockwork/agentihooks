@@ -1,3 +1,4 @@
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -97,7 +98,7 @@ def test_a_tick_slower_than_the_lease_keeps_writing(store, clock):
             spawn=lambda *args: "placed",
             retire=lambda agent, homes=None: (agent, homes),
         ),
-        True,
+        "local",
     )
     for step in range(5):
         clock[0] += 120000
@@ -118,7 +119,7 @@ def test_a_tick_whose_lease_was_stolen_stops(store, clock):
     writes, spawned = [], []
     ledger = controller.FencedLedger(store, "sw", held, SimpleNamespace(update_task=lambda *args: writes.append(args)))
     runtime = controller.FencedRuntime(
-        store, "sw", held, SimpleNamespace(spawn=lambda *args: spawned.append(args), retire=spawned.append), True
+        store, "sw", held, SimpleNamespace(spawn=lambda *args: spawned.append(args), retire=spawned.append), "local"
     )
     ledger.update_task("sw", "t", {"step": 0})
     clock[0] += lease.ttl_ms()
@@ -296,3 +297,172 @@ def test_the_controller_sleeps_one_configured_tick_between_passes(store, monkeyp
     monkeypatch.setattr(controller.time, "sleep", sleep)
     assert controller.main(["run"]) == 1
     assert slept == [4.0]
+
+
+def renewed(store, clock, wait_s=2.0):
+    deadline = time.monotonic() + wait_s
+    while time.monotonic() < deadline:
+        held = lease.current(store, "sw")
+        if held and held.expires_at == clock[0] + lease.ttl_ms():
+            return True
+        time.sleep(0.005)
+    return False
+
+
+class Stop:
+    def __init__(self, clock, step, stops_after):
+        self.clock, self.step, self.stops_after, self.waits = clock, step, stops_after, []
+
+    def wait(self, seconds):
+        self.waits.append(seconds)
+        self.clock[0] += self.step
+        return self.is_set()
+
+    def is_set(self):
+        return len(self.waits) > self.stops_after
+
+
+def test_beat_renews_the_lease_once_a_tick_until_stopped(store, clock, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", "2.5")
+    held = lease.acquire(store, "sw", "home")
+    stop = Stop(clock, 5000, 3)
+    assert lease.beat(store, "sw", held, stop) is None
+    assert stop.waits == [2.5, 2.5, 2.5, 2.5]
+    assert clock[0] == 21000
+    assert lease.current(store, "sw") == lease.Lease("home", 1, 23500)
+
+
+def test_beat_stops_once_the_lease_is_lost(store, clock, monkeypatch):
+    monkeypatch.delenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", raising=False)
+    held = lease.acquire(store, "sw", "home")
+    stop = Stop(clock, lease.ttl_ms(), 5)
+    assert lease.beat(store, "sw", held, stop) is None
+    assert stop.waits == [60.0]
+    assert lease.current(store, "sw") is None
+
+
+def test_kept_beats_only_while_its_block_runs(store, clock, monkeypatch):
+    held, calls = lease.acquire(store, "sw", "home"), []
+
+    def beat(*args):
+        calls.append(args[:3])
+        calls.append(args[3].wait(5))
+
+    monkeypatch.setattr(lease, "beat", beat)
+    with lease.kept(store, "sw", held):
+        deadline = time.monotonic() + 5
+        while not calls and time.monotonic() < deadline:
+            time.sleep(0.005)
+        assert calls == [(store, "sw", held)]
+    assert calls == [(store, "sw", held), True]
+
+
+def test_beat_keeps_beating_through_a_redis_error(store, clock, monkeypatch):
+    from redis.exceptions import ConnectionError as RedisDown
+
+    held, renewals = lease.acquire(store, "sw", "home"), []
+
+    def renew(*args):
+        renewals.append(args)
+        if len(renewals) == 1:
+            raise RedisDown("redis restarting")
+
+    monkeypatch.setattr(lease, "renew", renew)
+    assert lease.beat(store, "sw", held, Stop(clock, 0, 2)) is None
+    assert renewals == [(store, "sw", held)] * 2
+
+
+def test_a_fenced_launch_slower_than_the_lease_keeps_it(store, clock, monkeypatch):
+    store.create(SwarmConfig("sw", ".", 1, 0))
+    monkeypatch.delenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", raising=False)
+    monkeypatch.setattr(lease, "beat_s", lambda: 0.01)
+    held, beats = lease.acquire(store, "sw", "home"), []
+
+    def slow(*args):
+        for _ in range(5):
+            clock[0] += 120000
+            beats.append(renewed(store, clock))
+            if not beats[-1]:
+                break
+        return "placed"
+
+    runtime = controller.FencedRuntime(store, "sw", held, SimpleNamespace(spawn=slow, relaunch=slow), "local")
+    assert runtime.spawn(store.config("sw"), "eng", "one", {"id": "t"}) == "placed"
+    assert runtime.relaunch("one") == "placed"
+    assert beats == [True] * 10
+    assert lease.current(store, "sw") == lease.Lease("home", 1, clock[0] + lease.ttl_ms())
+
+
+def test_a_launch_slower_than_the_lease_keeps_the_intent_pass_in_the_same_tick(env, clock, monkeypatch):  # noqa: F811
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo", "--max-eng-agents", "1", "--max-ci-agents", "0")
+    store.update("sw", state="running")
+    monkeypatch.delenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", raising=False)
+    monkeypatch.setattr(lease, "beat_s", lambda: 0.01)
+    spawn, events = rt.spawn, []
+
+    def slow(config, lane, name, task):
+        for _ in range(5):
+            clock[0] += 120000
+            events.append(renewed(store, clock))
+            if not events[-1]:
+                break
+        return spawn(config, lane, name, task)
+
+    class Check:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self, doc):
+            events.append("intent")
+            return ["judged"]
+
+    monkeypatch.setattr(rt, "spawn", slow)
+    monkeypatch.setattr(cli.intent, "Check", Check)
+    started = clock[0]
+    actions = cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert clock[0] - started > lease.ttl_ms()
+    assert events[-1] == "intent"
+    assert events[:-1] and all(beat is True for beat in events[:-1])
+    assert "judged" in actions
+    assert lease.current(store, "sw").epoch == 1
+    assert store.redis.get(store.key("sw", "last-tick"))
+
+
+def test_a_slow_launch_that_never_starts_is_recorded_against_the_launch_not_the_tick(env, clock, monkeypatch):  # noqa: F811
+    from scripts.swarm.tick import SpawnError
+
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo", "--max-eng-agents", "1", "--max-ci-agents", "0")
+    store.update("sw", state="running")
+    monkeypatch.delenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", raising=False)
+    monkeypatch.setattr(lease, "beat_s", lambda: 0.01)
+    spawn, events = rt.spawn, []
+    refused = "agentihooks init-agent: the harness did not report its route within 90s"
+
+    def slow(config, lane, name, task):
+        if task.get("id") != "t1":
+            return spawn(config, lane, name, task)
+        for _ in range(5):
+            clock[0] += 120000
+            events.append(renewed(store, clock))
+            if not events[-1]:
+                break
+        raise SpawnError(refused)
+
+    class Check:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self, doc):
+            events.append("intent")
+            return []
+
+    monkeypatch.setattr(rt, "spawn", slow)
+    monkeypatch.setattr(cli.intent, "Check", Check)
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert events == [True] * 5 + ["intent"]
+    assert [(row["state"], row["error"]) for row in store.launches("sw") if row["task"] == "t1"] == [
+        ("failed", refused)
+    ]
+    assert lease.current(store, "sw").epoch == 1

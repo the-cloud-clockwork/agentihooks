@@ -322,6 +322,9 @@ def on_session_start(payload: dict) -> None:
         deps_kick()
     except Exception as e:
         log("deps kick failed", {"error": str(e)})
+    from hooks.lifecycle.codex_refresh_kick import kick as codex_refresh_kick
+
+    codex_refresh_kick()
     otel.emit_event(
         "agentihooks.session.started",
         {
@@ -684,12 +687,29 @@ def on_session_end(payload: dict) -> None:
 
     if BROADCAST_ENABLED:
         try:
+            from hooks.context.account_sessions import agent_pid
             from hooks.context.broadcast import heartbeat_sessions, mark_session_closed
 
-            mark_session_closed(session_id)
+            mark_session_closed(session_id, agent_pid())
             heartbeat_sessions()
         except Exception as e:
             log("broadcast session_end failed", {"error": str(e)})
+
+
+def _prompt_broadcasts(session_id: str) -> None:
+    try:
+        from hooks.context.broadcast import _get_session_channels
+        from scripts.swarm_v2 import broadcast_bridge
+
+        broadcast_bridge.claim(session_id, _get_session_channels(session_id), os.environ)
+    except Exception as e:
+        log("fleet broadcast claim failed", {"error": str(e)})
+    try:
+        from hooks.context.broadcast import check_and_inject_broadcasts
+
+        check_and_inject_broadcasts(session_id)
+    except Exception as e:
+        log("broadcast user_prompt failed", {"error": str(e)})
 
 
 def on_user_prompt_submit(payload: dict) -> None:
@@ -968,12 +988,7 @@ def on_user_prompt_submit(payload: dict) -> None:
     from hooks.config import BROADCAST_ENABLED
 
     if BROADCAST_ENABLED:
-        try:
-            from hooks.context.broadcast import check_and_inject_broadcasts
-
-            check_and_inject_broadcasts(session_id)
-        except Exception as e:
-            log("broadcast user_prompt failed", {"error": str(e)})
+        _prompt_broadcasts(session_id)
 
     _inject_refocus(session_id, "prompt")
     _inject_ledger_decision(payload)
@@ -1016,6 +1031,18 @@ def _confirm_inbox(session_id: str) -> None:
         confirm_shown(session_id)
     except Exception as e:
         log("inbox confirmation failed", {"error": str(e)})
+
+
+def _inject_after_tool(payload: dict) -> None:
+    from hooks.common import inject_context
+    from hooks.context.quota_policy import posttool_context
+
+    session_id, cwd = payload.get("session_id", ""), payload.get("cwd", "")
+    _inject_inbox(session_id, cwd)
+    _inject_refocus(session_id, "tool")
+    quota = posttool_context(session_id, payload.get("tool_name"), cwd)
+    if quota:
+        inject_context(quota, also_log=False, skip_compression=True)
 
 
 def _swarm_heartbeat(state: str, prompt: str | None = None, payload: dict | None = None) -> None:
@@ -1179,8 +1206,10 @@ def _plan_read_guard(payload: dict, tool_name: str) -> None:
 
 def _check_shell_guards(payload: dict) -> None:
     from hooks.context.local_test_guard import check_local_tests
+    from hooks.context.swarm_wait_nudge import check_github_watch
 
     check_local_tests(payload)
+    check_github_watch(payload)
     if payload.get("tool_name") != "Bash":
         return
     try:
@@ -1833,8 +1862,7 @@ def on_post_tool_use(payload: dict) -> None:
                 )
                 if enforcement_context:
                     inject_context(enforcement_context, also_log=False, skip_compression=True)
-            _inject_inbox(_trace_session_id, payload.get("cwd", ""))
-            _inject_refocus(_trace_session_id, "tool")
+            _inject_after_tool(payload)
     except Exception as e:
         log("enforcement posttool fallback failed", {"error": str(e)})
 

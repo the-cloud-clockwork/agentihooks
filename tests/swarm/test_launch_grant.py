@@ -12,6 +12,7 @@ import pytest
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2.auth_context import (
     MAX_TTL_SECONDS,
+    WRITE_ATTEMPTS,
     GrantRefused,
     LaunchAuthority,
     LaunchKey,
@@ -825,3 +826,122 @@ def test_disabling_lists_every_outstanding_grant_in_order(store, authority, exec
     assert authority.disable("fixture") == grants
     rows = store.redis.hgetall(store.key("fixture", "launch-grants"))
     assert {json.loads(row)["state"] for row in rows.values()} == {"revoked"}
+
+
+def registered(authority, execution):
+    token = issue(authority, execution)
+    authority.register("fixture", token, body(execution))
+    return token
+
+
+def audit_of(store, token):
+    return json.loads(store.redis.hget(store.key("fixture", "launch-grants"), claims_of(token)["grant_id"]))
+
+
+def refusal(action, *args):
+    with pytest.raises(GrantRefused) as error:
+        action("fixture", *args)
+    return error.value.error_class, str(error.value)
+
+
+def test_a_registered_credential_renews_bound_to_its_registration(store, authority, clock, execution):
+    token = registered(authority, execution)
+    clock.now += 200
+    renewed, expires_at = authority.renew("fixture", token)
+    assert expires_at == "2026-10-08T09:08:20Z"
+    assert claims_of(renewed) == {**claims_of(token), "issued_at": "2026-10-08T09:03:20Z", "expires_at": expires_at}
+    clock.now += 200
+    assert authority.bound("fixture", renewed) == authority.registration("fixture", execution.execution_id)
+    assert refusal(authority.bound, token) == ("unauthenticated", "launch grant has expired")
+    audit = audit_of(store, token)
+    assert (audit["state"], audit["expires_at"], audit["renewals"]) == ("registered", expires_at, 1)
+    again, _ = authority.renew("fixture", renewed)
+    assert audit_of(store, again)["renewals"] == 2
+    assert renewed.split(".")[1] not in json.dumps(store.redis.hgetall(store.key("fixture", "launch-grants")))
+
+
+def test_only_a_live_registered_credential_renews(store, authority, clock, execution):
+    token = issue(authority, execution)
+    assert refusal(authority.renew, token) == ("unauthenticated", "launch grant is not registered")
+    authority.register("fixture", token, body(execution))
+    admit(store, FIXTURE["seat"], execution.execution_id)
+    assert refusal(authority.renew, token) == ("stale_generation", "launch grant is for a superseded execution")
+    store, clock, authority = world()
+    execution = admit(store, FIXTURE["seat"])
+    token = registered(authority, execution)
+    clock.now += FIXTURE["ttl"]
+    assert refusal(authority.renew, token) == ("unauthenticated", "launch grant has expired")
+    assert "renewals" not in audit_of(store, token)
+
+
+def test_revoking_a_registration_refuses_every_credential_bound_to_it(store, authority, execution):
+    token = registered(authority, execution)
+    renewed, _ = authority.renew("fixture", token)
+    assert authority.revoke("fixture", execution.execution_id) is True
+    for credential in (token, renewed):
+        assert refusal(authority.bound, credential) == ("unauthenticated", "launch grant was revoked")
+        assert refusal(authority.renew, credential) == ("unauthenticated", "launch grant was revoked")
+    assert refusal(authority.register, renewed, body(execution)) == ("unauthenticated", "launch grant was revoked")
+    assert audit_of(store, token)["state"] == "revoked"
+    assert authority.registration("fixture", execution.execution_id).grant_id == claims_of(token)["grant_id"]
+    revoked = audit_of(store, token)
+    assert authority.revoke("fixture", execution.execution_id) is False
+    assert audit_of(store, token) == revoked
+    assert authority.revoke("fixture", "missing") is False
+
+
+def test_a_renewal_raced_by_revocation_is_refused(store, authority, execution, monkeypatch):
+    token = registered(authority, execution)
+    raced = []
+
+    def revoke_first(pipe):
+        if not raced:
+            raced.append(True)
+            authority.revoke("fixture", execution.execution_id)
+        return pipe.execute()
+
+    hook_pipelines(store, monkeypatch, revoke_first)
+    assert refusal(authority.renew, token) == ("unauthenticated", "launch grant was revoked")
+    assert audit_of(store, token)["state"] == "revoked"
+    assert "renewals" not in audit_of(store, token)
+
+
+def test_a_grant_rewrite_that_keeps_racing_is_unavailable(store, authority, execution, monkeypatch):
+    from redis.exceptions import WatchError
+
+    token = registered(authority, execution)
+    before = audit_of(store, token)
+
+    def always_raced(pipe):
+        raise WatchError("raced")
+
+    _, calls = hook_pipelines(store, monkeypatch, always_raced)
+    assert refusal(authority.renew, token) == (
+        "dependency_unavailable",
+        "launch grants kept changing; the credential was not renewed",
+    )
+    assert len(calls) == WRITE_ATTEMPTS
+    assert refusal(authority.revoke, execution.execution_id) == (
+        "dependency_unavailable",
+        "launch grants kept changing; the registration was not revoked",
+    )
+    assert len(calls) == 2 * WRITE_ATTEMPTS
+    assert audit_of(store, token) == before
+
+
+def test_a_grant_rewrite_retries_after_a_race_until_it_commits(store, authority, execution, monkeypatch):
+    from redis.exceptions import WatchError
+
+    token = registered(authority, execution)
+    raced = []
+
+    def raced_until_last(pipe):
+        if len(raced) < WRITE_ATTEMPTS - 1:
+            raced.append(True)
+            raise WatchError("raced")
+        return pipe.execute()
+
+    _, calls = hook_pipelines(store, monkeypatch, raced_until_last)
+    renewed, _ = authority.renew("fixture", token)
+    assert len(calls) == WRITE_ATTEMPTS
+    assert audit_of(store, renewed)["renewals"] == 1

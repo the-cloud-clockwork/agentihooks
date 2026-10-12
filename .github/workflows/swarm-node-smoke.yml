@@ -7,12 +7,20 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow == 'Swarm worker image smoke' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('swarm-node-smoke-{0}', github.run_id) }}
+  queue: ${{ github.workflow == 'Swarm worker image smoke' && 'max' || 'single' }}
+
 jobs:
   worker-image:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Pull the locked worker base with bounded rate limit retries
+        run: bash docker/swarm-node/pull-base.sh
       - name: Prove clean worker builds and offline startup
         run: bash docker/swarm-node/smoke.sh "$HOME/scratchpad/worker-image-evidence"
       - uses: actions/upload-artifact@v4
@@ -20,3 +28,18 @@ jobs:
         with:
           name: swarm-worker-image-evidence
           path: ~/scratchpad/worker-image-evidence
+
+  worker-health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pull the locked worker base with bounded rate limit retries
+        run: bash docker/swarm-node/pull-base.sh
+      - name: Prove worker probes against isolated containers
+        run: bash tests/integration/swarm_node/run_health_proof.sh "$HOME/scratchpad/worker-health-evidence"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: swarm-worker-health-evidence
+          path: ~/scratchpad/worker-health-evidence

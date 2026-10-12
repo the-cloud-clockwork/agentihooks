@@ -1,0 +1,32 @@
+{
+  "package": "SV2-ACC-01",
+  "case": "T-SV2-ACC-01-B",
+  "tested_commit": "5c700c834a120384a7862b404f48ab8b779baeaf",
+  "evidence_class": "mocked",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37937300304",
+  "fixture": "tests/fixtures/swarm_v2/fleet-registry.json plus a minted master name and the legacy alias fixture-master-1",
+  "tests": [
+    {
+      "test": "tests/test_swarm_v2_registry.py::test_a_remote_session_naming_itself_master_without_a_grant_is_refused",
+      "job": 113843861247,
+      "output": "PASSED at 2026-10-09T13:36:50.6450866Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_registry.py::test_an_alias_cannot_carry_the_master_name_past_the_grant",
+      "job": 113843861257,
+      "output": "PASSED at 2026-10-09T13:36:10.3993324Z"
+    }
+  ],
+  "rejections": {
+    "master_name_without_grant": "forbidden_scope",
+    "master_name_with_an_engineer_grant": "forbidden_scope",
+    "self_declared_master_seat": "forbidden_scope",
+    "alias_resolving_to_a_master_name": "forbidden_scope"
+  },
+  "state_assertion": "sessions and seats hashes are byte-equal before and after every refused request; the master seat stays unheld",
+  "disclosure_assertion": "the launch token never appears in a refusal message",
+  "recovery_isolation": "a valid request needs a master-seat launch grant (test_a_master_grant_registers_the_master_seat)",
+  "cleanup": "fakeredis per test; no live resource mutations",
+  "fleet_registry_stale_records": {"value": 0, "dimension": "fixture fleet-registry.json, no record written"},
+  "passed": true
+}

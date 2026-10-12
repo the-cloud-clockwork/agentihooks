@@ -37,7 +37,9 @@ def test_a_page_save_answers_applied_rejected_and_bounded_warnings(quiet, monkey
     monkeypatch.setattr(server, "repository", SimpleNamespace(apply_ops=apply_ops))
     h = handler("/api/demo")
     h.reply_state("demo", ops=[{"id": "a"}, {"id": "b"}], refusals={"c": "refused c"})
-    assert calls == [("demo", None, [{"id": "a"}, {"id": "b"}], "budget demo")]
+    gate = calls[0][3]
+    assert calls == [("demo", None, [{"id": "a"}, {"id": "b"}], gate)]
+    assert (type(gate).__name__, gate.slug, gate.inner) == ("Fence", "demo", "budget demo")
     assert h.sent == [
         (
             200,

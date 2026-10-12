@@ -1,0 +1,94 @@
+{
+  "package": "SV2-OBS-04",
+  "package_complete": false,
+  "dependency": "SV2-OBS-03",
+  "integration_gate": "G10",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2588",
+  "tested_commit": "f4f73bf55d5a4fd604fe1f889e7c985f4c8a46c0",
+  "status": "fixture-qualified",
+  "evidence_class": "Mocked: fakeredis execution registry, task claims and heartbeats behind a server that can be disconnected, a fake wall and Redis clock, signed fixture launch grants, a fixture operator page credential and an in process brain health server that answers 401 or 200; no Kubernetes API server, worker Pod, transcript exporter process or deployed brain was used.",
+  "interfaces": [
+    "scripts.swarm_v2.api.health.Health(store, slug, brain=None, controller=None, limits=Limits(), clock=time.time).live() answers probe shallow, status live, pid, started and checked times and an empty qualifies list without reading Redis, the brain or any other dependency",
+    "Health.diagnose(execution_id='') reads the transition export and archive stages from Redis; a read that fails marks Redis unavailable with a sanitized reason and reports the last readings as unknown with their last observed state and observation time, never ok",
+    "Dependencies redis and brain carry state (ok, unavailable, auth_failed, error, unconfigured), reason, checked_at_ms and last_ok_at_ms; the brain is probed at most once per Limits.brain_interval_ms through worker_health.brain_state and a 401 or 403 reads auth_failed",
+    "The archive stage holds one entry per execution occupant with a heartbeat: process live when the heartbeat is inside Limits.fresh_ms else silent and unknown; a live working execution whose archive watermark has not advanced for more than Limits.stall_ms reads stalled with its last durable watermark and advance time",
+    "The transition export stage carries the SV2-OBS-01 observability state, the durable exported sequence as watermark and the backlog",
+    "Remediation hints are classified (controller_standby, dependency_unavailable, credential_rejected, dependency_error, pipeline_degraded, pipeline_stalled), carry fixed text and automatic false, and nothing acts on them",
+    "Health.qualify(report, purpose, execution_id='') admits backup or native_resume only for a deep report this process issued unaltered (digest over sorted keys, the last ISSUED_LIMIT reports), inside Limits.report_ms, with Redis ok and the needed stage ok; refusals are unsupported_purpose, shallow_report, unrecognized_report, stale_report, dependency_unavailable and pipeline_not_ok and change no state",
+    "HealthAPI routes GET /v2/health/live open, GET /v2/health/diagnose and POST /v2/health/qualify behind a bearer credential: the operator page credential reads swarm scope, a worker launch grant reads its own execution only and cannot qualify, an unreachable credential store answers 503, and deep_enabled false answers 503 while liveness stays",
+    "ExecutionsAPI heartbeat commit records archive_advanced_at_ms, kept from the previous record while the watermark is unchanged",
+    "scripts.swarm_v2.api.server.Routes routes /v2/health/* to the health API, and task paths fall back to the executions API when no tasks API is wired; ControlService serves Routes with its Health and HealthAPI"
+  ],
+  "supported_versions": {
+    "python": "3.11 and later",
+    "redis": "reads existing keys only: heartbeats, the execution registry and the SV2-OBS-01 observability keys; heartbeat records gain archive_advanced_at_ms",
+    "compatibility": "Heartbeat acknowledgements, leases and every existing executions, tasks, commands and broadcasts route answer as before; a heartbeat record written before this change counts its advance from its acceptance time. Local execution is unaffected."
+  },
+  "authority": "Diagnostics hold no authority and write nothing. Scope comes from the operator page credential compared in constant time or from a registered worker launch grant, never from a display label.",
+  "authoritative_objects": "The execution registry, task claims, heartbeats, operation journal and the controller lease stay authoritative; health reads them and keeps only an in process cache of its last readings and issued report digests.",
+  "states": {
+    "observed": "Cases A, B and C ran in proofs run 38142649773 at 9114a635 and their records are committed; case A runs its story twice in independent worlds with identical records.",
+    "accepted": "Case A: the stuck execution reads process live, state stalled, watermark 4096, advanced at the fixture start while the healthy one reads ok; Redis ok, brain auth_failed with brain_http_401; remediation credential_rejected then pipeline_stalled, never automatic; liveness answers while Redis is disconnected and without probing the brain; a worker grant sees only its own execution; no brain token, operator credential or worker token appears in any answer. Case B: shallow, stalled, forged, stale and unknown purpose reports are refused with their reasons, anonymous and wrong credentials get 401, a worker qualify gets 403, an operator shallow qualify gets 409 shallow_report, only the controller lease key changes while the clock advances, and a fresh deep report qualifies the healthy execution. Case C: with Redis down the report is degraded, Redis unavailable with its last ok kept, stages unknown with their last observed states and the stuck watermark kept, workers get 503 and liveness 200; restoring Redis clears only the Redis diagnostic while the brain stays auth_failed; restoring the brain clears it and leaves pipeline_stalled; only the controller lease key changes; a replayed heartbeat writes nothing and a stale one is refused; deep checks switched off answer 503 while liveness answers 200.",
+    "committed": "Code and fixture inputs are at tested_commit; manifest.json hashes the fixture.",
+    "externally_verified": "None: no deployed controller, brain or exporter process was exercised; G10 live evidence is outstanding."
+  },
+  "validation": {
+    "red": "proofs run 38141730406 on tests only commit 72feec59: ImportError cannot import name health",
+    "tests": "proofs run 38142649773 at 9114a635 produced the case records; proofs run 38142921808 at dd547661: 254 passed with the committed records",
+    "lint": "ruff check and ruff format passed through python -m scripts.ci_prepush",
+    "review": "Spec reader one round, no findings; Standards reader two rounds, the issued cache lock and the guarded operator lookup fixed at 544b15c9, the switched off answer before auth ruled",
+    "mutation": "mutation preflight 38146905623 at f4f73bf5: 709 mutants killed, none survived, after 65 survivors from preflight 38142900491 and 1 from preflight 38145221835 were killed by tests or removed in code"
+  },
+  "measurements": {
+    "pipeline_stage_health": {
+      "a": {
+        "archive": {
+          "ok": 1,
+          "stalled": 1
+        },
+        "transition_export": {
+          "disabled": 1
+        }
+      }
+    }
+  },
+  "cases": {
+    "a": "evidence/SV2-OBS-04/a-result.json",
+    "b": "evidence/SV2-OBS-04/b-result.json",
+    "c": "evidence/SV2-OBS-04/c-result.json",
+    "manifest": "evidence/SV2-OBS-04/manifest.json"
+  },
+  "rollback_rehearsal": {
+    "action": "Set AGENTIHOOKS_HEALTH_DEEP=off: diagnose and qualify answer 503 deep diagnostics are switched off while /v2/health/live stays 200.",
+    "test": "tests/test_swarm_v2_control_service.py::test_the_hosted_api_honours_the_deep_diagnostics_switch",
+    "proof": "Case C rollback: live 200, diagnose 503."
+  },
+  "remaining_limitations": [
+    "A stall is judged from the archive watermark and the working state; an execution that works without writing transcript reads stalled after the stall window.",
+    "The issued report cache and last readings live in one controller process; another controller cannot qualify a report this one issued.",
+    "The operator scope reads the ledger page credential from the local ledger repository; a controller without it refuses operator diagnostics.",
+    "The brain probe is the existing worker health request against BRAIN_URL; it reflects that endpoint's auth only.",
+    "hooks/memory has no HTTP surface, so no memory health endpoint is published.",
+    "No antoncore probe wiring and no G10 live canary yet."
+  ],
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2604",
+  "follow_ups": [],
+  "obligations": {
+    "compatibility": "Compared with the accepted SV2-LDG-02 heartbeat and SV2-OBS-01 observability protocols: acknowledgements, renewal ordering and replay are unchanged and the executions API suite passes in proofs run 38142921808; the stored heartbeat gains one field.",
+    "failure_evidence": "No contract failed in the final runs. The smallest reproducer is the committed fixture tests/fixtures/swarm_v2/health-diagnostics.json, hashed in manifest.json, with a fake wall and Redis clock.",
+    "data_safety": "Authoritative objects identified before rollback: execution registry, task claims, heartbeats, operation journal and the controller lease. Health never writes or deletes them; rollback switches deep checks off and deletes nothing.",
+    "completion_evidence": "Recorded here: interfaces, supported_versions, validation, measurements, remaining_limitations and rollback_rehearsal."
+  },
+  "completion_evidence": {
+    "implemented_interfaces": "interfaces above: Health.live, Health.diagnose, Health.qualify, HealthAPI routes /v2/health/live, /v2/health/diagnose and /v2/health/qualify, the heartbeat archive_advanced_at_ms field, Routes health routing and the ControlService wiring",
+    "supported_versions": "supported_versions above: Python 3.11 and 3.12 in CI, Redis keys read only plus one heartbeat field, local execution unchanged",
+    "test_outputs": [
+      "proofs run 38141730406 at 72feec59 (red): ImportError: cannot import name 'health' from 'scripts.swarm_v2.api'",
+      "proofs run 38142649773 at 9114a635: cases T-SV2-OBS-04-A, B and C state passed; records committed",
+      "proofs run 38142921808 at dd547661: 254 passed in 17.00s across health, suite speed, control service, executions, tasks and broadcasts API tests",
+      "mutation preflight 38146905623 at f4f73bf5: executions 21 killed, health 643 killed, server 9 killed, control service 36 killed, none survived"
+    ],
+    "remaining_limitations": "remaining_limitations above",
+    "rollback_rehearsal": "rollback_rehearsal above: AGENTIHOOKS_HEALTH_DEEP=off answers 503 on diagnose and qualify while liveness answers 200, rehearsed in case C and in the hosted control service test"
+  }
+}

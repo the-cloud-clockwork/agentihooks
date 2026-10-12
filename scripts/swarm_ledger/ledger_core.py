@@ -91,6 +91,7 @@ DEFAULT_CHAT_INSTRUCTIONS = (
 )
 EVENTS_KEPT = 2000
 EVENTS_CEILING = 10000
+EVENTS_WINDOW_MS = 24 * 60 * 60 * 1000
 MAX_TEXT = 20000
 LOG_MAX_BYTES = 5 << 20
 LOCK = threading.Lock()
@@ -602,6 +603,7 @@ def check_op(op, task_ids=()):
         if op["op"] != "add" or not talks:
             raise ValueError("attachments ride only on an add to chat or a comment thread")
         ledger_media.check(op["attachments"])
+    ledger_comments.check_outcome(op)
     if "by" in op:
         talks = op["op"] != "clear" and (op["thread"] == "chat" or op["thread"].endswith("/comments"))
         if not talks or not AUTHOR_RE.match(str(op["by"])) or op["by"] == "operator":

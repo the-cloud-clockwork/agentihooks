@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import ledger_events
+from scripts.swarm import ledger_events, priority_sweep
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -149,8 +149,34 @@ def test_the_event_cursor_is_stored_under_its_own_name(store):
         InboxStore(store.redis), store, "sw", recorded(rev=7), FakeLedger(), 0, github=lambda u: None
     )
     assert store.redis.get(store.key("sw", "events-cursor")) == "7"
-    assert ledger_events.new_events(store, "sw", recorded(rev=7), "other-cursor") == []
+    assert ledger_events.new_events(store, "sw", recorded(rev=7), "other-cursor", "other writes") == []
     assert store.redis.get(store.key("sw", "other-cursor")) == "7"
+
+
+def test_history_trimmed_past_any_tick_cursor_is_told_to_the_master(store):
+    def sweep(doc):
+        priority_sweep.priority_pass(store, "sw", doc, FakeLedger(), github=lambda url: None)
+
+    run(store, recorded())
+    sweep(recorded())
+    caught_up = recorded()
+    caught_up["_meta"]["events_trimmed"] = 10
+    run(store, caught_up)
+    sweep(caught_up)
+    behind = recorded(rev=40)
+    behind["_meta"]["events_trimmed"] = 30
+    sweep(behind)
+    actions = run(store, behind)
+    assert run(store, behind) == []
+    gap = "Ledger sw trimmed its history after revision 10 through revision 30 before the tick read it, so {} in that "
+    expected = [
+        gap.format(subject) + "range reached no one. Read the ledger for them."
+        for subject in (ledger_events.RELAYED, priority_sweep.JUDGED)
+    ]
+    assert sorted(text for text in texts(store, MASTER_SEAT) if "trimmed" in text) == sorted(expected)
+    assert sorted(actions) == [
+        f"told {MASTER_SEAT}: history-gap:{cursor}:10:30" for cursor in ("events-cursor", "priority-cursor")
+    ]
 
 
 def test_items_go_to_the_master_seat_when_no_master_is_live(store):

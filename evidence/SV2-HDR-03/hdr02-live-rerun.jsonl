@@ -1,0 +1,22 @@
+{"detail": "live on a workstation, not Anton: the image sshd template and start script and the session entry run unprivileged on 127.0.0.1 with the pinned herdr behind them; the cluster DNS name is answered by an injected resolver mapping it to 127.0.0.1, except the missing route step, which uses the system resolver, and the public route step, whose injected resolver answers 1.1.1.1", "held": true, "step": "environment"}
+{"detail": "", "held": true, "step": "a_sshd_started"}
+{"detail": {"allowagentforwarding": "no", "allowstreamlocalforwarding": "no", "allowtcpforwarding": "no", "authorizedkeysfile": "none", "authorizedprincipalsfile": "<workers>/a/state/principals", "kbdinteractiveauthentication": "no", "listenaddress": "127.0.0.1:22553", "passwordauthentication": "no", "permitrootlogin": "no", "permittunnel": "no", "permituserenvironment": "no", "port": "22553", "strictmodes": "yes", "trustedusercakeys": "<workers>/a/state/user_ca.pub", "x11forwarding": "no"}, "held": true, "step": "a_sshd_private_and_certificate_only"}
+{"detail": "supervised herdr server for execution A", "held": true, "step": "a_herdr_server_started"}
+{"detail": {"incarnation": "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/1", "refusals": [], "target": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal"}, "held": true, "step": "a_attach_qualified"}
+{"detail": {"exit": 0, "pane": "w2:p1", "workspace": "w2"}, "held": true, "step": "a_workspace_created"}
+{"detail": {"exit": 0, "pane": "w2:p1"}, "held": true, "step": "a_pane_run"}
+{"detail": {"exit": 0, "marker_read_by_a_later_client": true}, "held": true, "step": "a_work_survives_client_exit"}
+{"detail": {"incarnation": "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/1", "target": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal"}, "held": true, "step": "a_second_independent_client"}
+{"detail": {"unauthorized": 1}, "held": true, "step": "b_unauthorized_client"}
+{"detail": {"unauthorized": 1}, "held": true, "step": "b_certificate_for_another_execution"}
+{"detail": {"client_files": false, "reason": "no_route"}, "held": true, "step": "b_missing_cluster_dns_route"}
+{"detail": {"reason": "public_route"}, "held": true, "step": "b_public_route"}
+{"detail": "ERROR: a raw machine target is operator only; an agent qualifies through its terminal scope", "held": true, "step": "b_raw_target_refused_for_an_agent"}
+{"detail": {"reason": "host_key_changed"}, "held": true, "step": "c_changed_host_key_refused"}
+{"detail": {"incarnation": "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/2", "target": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal"}, "held": true, "step": "c_new_generation_verified"}
+{"detail": {"pin_unchanged": true, "reason": "stale_generation"}, "held": true, "step": "c_stale_generation_cannot_overwrite_the_newer_pin"}
+{"detail": "supervised herdr server for execution C", "held": true, "step": "c_replacement_herdr_started"}
+{"detail": {"incarnation": "exe-cccccccccccccccccccccccccccccccc/1", "target": "swarm-exe-cccccccccccccccccccccccccccccccc-terminal"}, "held": true, "step": "c_replacement_verified"}
+{"detail": ["swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal", "swarm-exe-cccccccccccccccccccccccccccccccc-terminal"], "held": true, "step": "c_replay_adds_no_duplicate"}
+{"detail": {"reason": "stale_generation"}, "held": true, "step": "c_old_identity_not_accepted"}
+{"detail": {"cluster_dns": {"all": {"no_route": 1}, "auth": {}}, "operator": {"all": {"host_key_changed": 1, "stale_generation": 2}, "auth": {"host_key_changed": 1}}, "other_execution": {"all": {"unauthorized": 1}, "auth": {"unauthorized": 1}}, "public_route": {"all": {"public_route": 1}, "auth": {}}, "unauthorized": {"all": {"unauthorized": 1}, "auth": {"unauthorized": 1}}}, "held": true, "step": "terminal_endpoint_auth_failures"}

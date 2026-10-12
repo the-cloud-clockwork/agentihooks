@@ -7,7 +7,7 @@ on:
         type: string
         required: true
   push:
-    branches-ignore: [dev, main, "gh-readonly-queue/**", "wip/**"]
+    branches-ignore: [dev, main, "gh-readonly-queue/**", "wip/**", "diffcheck/**"]
 
 concurrency:
   group: mutation-preflight-${{ github.event_name == 'push' && github.ref || github.run_id }}
@@ -16,14 +16,16 @@ concurrency:
 permissions:
   contents: read
   pull-requests: read
+  actions: read
 
 jobs:
   pull-request:
     if: ${{ github.event_name == 'push' && !github.event.deleted }}
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 5
     outputs:
       open: ${{ steps.open.outputs.open }}
+      reused: ${{ steps.reuse.outputs.reused }}
     steps:
       - name: Skip when the branch already has an open pull request into dev
         id: open
@@ -33,13 +35,84 @@ jobs:
           count=$(gh api -X GET "repos/$GITHUB_REPOSITORY/pulls" -f state=open -f "head=$GITHUB_REPOSITORY_OWNER:$GITHUB_REF_NAME" --jq '[.[] | select(.base.ref == "dev")] | length')
           if [[ $count == 0 ]]; then echo open=false; else echo open=true; fi >> "$GITHUB_OUTPUT"
 
-  mutation:
+      - uses: actions/checkout@v4
+        if: steps.open.outputs.open == 'false'
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Record the revisions the report grades
+        if: steps.open.outputs.open == 'false'
+        run: |
+          mkdir -p .mutation-gate
+          printf '{"base": "%s", "head": "%s"}\n' "$(git merge-base origin/dev HEAD)" "$(git rev-parse HEAD)" > .mutation-gate/scope.json
+
+      - name: Reuse a green report when this head only adds tests to it
+        id: reuse
+        if: steps.open.outputs.open == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -m scripts.ci_mutation.reuse "$GITHUB_REF_NAME" "$GITHUB_RUN_ID"
+
+      - name: Upload the reused mutation evidence
+        if: steps.reuse.outputs.reused == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-preflight-report
+          path: .mutation-gate/
+          include-hidden-files: true
+          retention-days: 7
+
+  plan:
     needs: pull-request
-    if: ${{ !cancelled() && (github.event_name != 'push' || needs.pull-request.outputs.open == 'false') }}
+    if: ${{ !cancelled() && (github.event_name != 'push' || (needs.pull-request.outputs.open == 'false' && needs.pull-request.outputs.reused != 'true')) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 5
     env:
       BASE: ${{ inputs.base || 'origin/dev' }}
+    outputs:
+      shards: ${{ steps.plan.outputs.shards }}
+      stats_parts: ${{ steps.plan.outputs.stats_parts }}
+      bases: ${{ steps.plan.outputs.bases }}
+      changed: ${{ steps.plan.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.23"
+          checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
+          enable-cache: false
+
+      - name: Install dependencies
+        run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+
+      - name: Size mutation shards from stored timings
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -m scripts.ci_mutation.plan --base "$BASE"
+
+  # Each leg queues on its run's lane under its kind and index, so a lane holds one stats and one shard leg per index.
+  stats:
+    needs: [pull-request, plan]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.changed != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: ${{ format('{0}-stats-{1}', github.workflow == 'Mutation preflight' && format('mutation-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('mutation-preflight-job-{0}', github.run_id), matrix.part) }}
+      queue: ${{ github.workflow == 'Mutation preflight' && 'max' || 'single' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        part: ${{ fromJSON(needs.plan.outputs.stats_parts) }}
+    env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
     steps:
       - uses: actions/checkout@v4
@@ -61,7 +134,9 @@ jobs:
 
       - name: Select mutation tests before browser setup
         id: selection
-        run: python -m scripts.ci_mutation.browser --base "$BASE"
+        env:
+          BASES: ${{ needs.plan.outputs.bases }}
+        run: python -m scripts.ci_mutation.browser --bases "$BASES"
 
       - name: Install the browser that page tests drive
         id: browser
@@ -75,10 +150,142 @@ jobs:
           echo "::error::Chromium setup failed or exceeded its two minute timeout; mutation tests cannot run."
           exit 1
 
+      - name: Collect one stats part for every mutation shard
+        env:
+          BASES: ${{ needs.plan.outputs.bases }}
+          PYTHONUNBUFFERED: "1"
+          PART: ${{ matrix.part }}
+          PARTS: ${{ strategy.job-total }}
+        run: mkdir -p .mutation-stats && touch ".mutation-stats/collected-$PART" && python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --stats .mutation-stats --stats-part "$PART" --stats-parts "$PARTS"
+
+      - name: Upload mutation stats part
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-stats-${{ matrix.part }}
+          path: .mutation-stats/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+
+      - name: Upload stats evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-evidence-stats-${{ matrix.part }}
+          path: .mutation-gate/
+          include-hidden-files: true
+          retention-days: 7
+          overwrite: true
+
+  mutation-shard:
+    needs: [plan, stats]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.changed != '0' && needs.stats.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: ${{ format('{0}-shard-{1}', github.workflow == 'Mutation preflight' && format('mutation-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('mutation-preflight-job-{0}', github.run_id), matrix.shard) }}
+      queue: ${{ github.workflow == 'Mutation preflight' && 'max' || 'single' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.23"
+          checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
+          enable-cache: false
+
+      - name: Install dependencies
+        run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+
+      - name: Select mutation tests before browser setup
+        id: selection
+        env:
+          BASES: ${{ needs.plan.outputs.bases }}
+        run: python -m scripts.ci_mutation.browser --bases "$BASES"
+
+      - name: Install the browser that page tests drive
+        id: browser
+        if: steps.selection.outputs.browser == 'true'
+        timeout-minutes: 2
+        uses: ./.github/actions/browser-cache
+
+      - name: Report browser setup failure
+        if: failure() && steps.browser.outcome == 'failure'
+        run: |
+          echo "::error::Chromium setup failed or exceeded its two minute timeout; mutation tests cannot run."
+          exit 1
+
+      - name: Download the shared mutation stats
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mutation-stats-*
+          path: .mutation-stats
+          merge-multiple: true
+
       - name: Mutate changed Python files
         env:
+          BASES: ${{ needs.plan.outputs.bases }}
           PYTHONUNBUFFERED: "1"
-        run: python -m scripts.ci_mutation --base "$BASE" --budget 1080
+          SHARD: ${{ matrix.shard }}
+          SHARDS: ${{ strategy.job-total }}
+        run: python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --shard "$SHARD" --shards "$SHARDS" --stats .mutation-stats
+
+      - name: Upload shard mutation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-preflight-shard-${{ matrix.shard }}
+          path: .mutation-gate/
+          include-hidden-files: true
+          retention-days: 7
+          overwrite: true
+
+  # Readers take one report and the check named mutation, so every shard ends here.
+  mutation:
+    needs: [plan, mutation-shard]
+    if: ${{ !cancelled() && needs.plan.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BASE: ${{ inputs.base || 'origin/dev' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download every mutation shard report
+        if: needs.plan.outputs.changed != '0'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mutation-preflight-shard-*
+          path: .mutation-shards
+
+      - name: Record the revisions the report grades
+        run: |
+          mkdir -p .mutation-gate
+          printf '{"base": "%s", "head": "%s"}\n' "$(git merge-base "$BASE" HEAD)" "$(git rev-parse HEAD)" > .mutation-gate/scope.json
+
+      - name: Merge the shard reports
+        env:
+          SHARDS: ${{ needs.plan.outputs.changed != '0' && needs.plan.outputs.shards || '[]' }}
+        run: python -m scripts.ci_mutation.merge .mutation-shards --shards "$(jq length <<< "$SHARDS")" --output .mutation-gate
 
       - name: Upload complete mutation evidence
         if: always()
@@ -88,3 +295,12 @@ jobs:
           path: .mutation-gate/
           include-hidden-files: true
           retention-days: 7
+          overwrite: true
+
+      - name: Fail when a shard did not finish
+        if: needs.plan.outputs.changed != '0' && needs.mutation-shard.result != 'success'
+        env:
+          RESULT: ${{ needs.mutation-shard.result }}
+        run: |
+          echo "::error::A mutation shard ended $RESULT; the merged report is incomplete."
+          exit 1

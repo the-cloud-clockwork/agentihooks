@@ -1,0 +1,30 @@
+{
+  "schema_version": "2.0",
+  "package": "SV2-ACC-01",
+  "fixture": "Two machines with PID collisions and one legitimate renamed agent alias",
+  "stale_after_ms": 90000,
+  "pid": 4242,
+  "machines": {
+    "anton": {
+      "backend": "local",
+      "host": "inst-0000000000000000000000000000a001",
+      "namespace": "boot-anton/pid:[4026531836]",
+      "pid_start": 111,
+      "session": "sess-anton",
+      "conversation": "conv-anton",
+      "harness": "claude"
+    },
+    "worker": {
+      "backend": "kubernetes",
+      "host": "pod-0000000000000000000000000000b002",
+      "namespace": "boot-worker/pid:[4026531836]",
+      "pid_start": 222,
+      "session": "sess-worker",
+      "conversation": "conv-worker",
+      "harness": "codex"
+    }
+  },
+  "alias": "fixture-eng-1",
+  "master_seat": "master@fixture",
+  "grant": "Signed fixture launch grant, validated on every request; never a deployed credential"
+}

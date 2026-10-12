@@ -492,7 +492,7 @@ def _epoch_mutation_server(rejected):
         repository=SimpleNamespace(get_document=lambda *args, **kwargs: doc, apply_ops=apply_ops),
         authority=SimpleNamespace(refusal=lambda *args: "", fence=fence),
         core=SimpleNamespace(check_body=lambda *args: None),
-        talk=SimpleNamespace(Budget=lambda slug: SimpleNamespace(apply=lambda *args: True)),
+        write_gate=lambda slug: SimpleNamespace(apply=lambda *args: True, publish=lambda rejected: None),
         ledger_media=SimpleNamespace(resolve=lambda *args: None),
         ledger_artifacts=SimpleNamespace(resolve=lambda *args: None),
         relay_to_inbox=lambda *args: None,

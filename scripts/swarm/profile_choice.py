@@ -1,6 +1,5 @@
 """The typed profile decision made before every swarm launch: explicit task profile, fixed lane, else the classifier."""
 
-import os
 from dataclasses import asdict, dataclass, replace
 
 from hooks.classifier import ClassifierUnavailable, decide, definitions, runner
@@ -47,17 +46,7 @@ def preferred(profile: str) -> tuple[str, ...]:
 def choose(
     slug: str, lane: str, lane_config: dict, task: dict, environ: dict, role_overlays: dict | None = None
 ) -> ProfileDecision:
-    pinned = lane_config.get("profile") or DEFAULT_PROFILES[lane]
-    if task.get("profile"):
-        decision = ProfileDecision(task["profile"], "task", "explicit task profile")
-    elif lane != CLASSIFIED_LANE or pinned != DEFAULT_PROFILES[lane]:
-        decision = ProfileDecision(pinned, "lane", f"{lane} lane")
-    elif needs_ci_push(task):
-        decision = ProfileDecision(
-            DEFAULT_PROFILES[CLASSIFIED_LANE], "proof contract", "proof needs a pushed CI run", anchors=anchors(task)
-        )
-    else:
-        decision = classify(slug, task, environ)
+    decision = pick(slug, lane, lane_config, task, environ)
     if not installed(decision.profile):
         raise ProfileUnresolved(
             f"task {task.get('id')} needs profile {decision.profile}, which is not installed: install it with "
@@ -67,6 +56,42 @@ def choose(
         return replace(decision, overlays=overlays.chosen(decision.profile, task, role_overlays or {}))
     except ValueError as exc:
         raise ProfileUnresolved(f"task {task.get('id')} overlays are refused: {exc}") from exc
+
+
+def pick(slug: str, lane: str, lane_config: dict, task: dict, environ: dict | None = None) -> ProfileDecision:
+    pinned = lane_config.get("profile") or DEFAULT_PROFILES[lane]
+    if task.get("profile"):
+        return ProfileDecision(task["profile"], "task", "explicit task profile")
+    if saved := task.get("profile_decision"):
+        return ProfileDecision(**{**saved, "anchors": tuple(saved["anchors"]), "overlays": tuple(saved["overlays"])})
+    if lane != CLASSIFIED_LANE or pinned != DEFAULT_PROFILES[lane]:
+        return ProfileDecision(pinned, "lane", f"{lane} lane")
+    if needs_ci_push(task):
+        return ProfileDecision(
+            DEFAULT_PROFILES[CLASSIFIED_LANE], "proof contract", "proof needs a pushed CI run", anchors=anchors(task)
+        )
+    return classify(slug, task, environ)
+
+
+def kept(task: dict, saved: dict, relaunch: dict) -> ProfileDecision | None:
+    if not saved.get("profile") or (task.get("profile") and not relaunch):
+        return None
+    return ProfileDecision(
+        saved["profile"], "handoff", "original seat profile", overlays=tuple(saved.get("overlays", ()))
+    )
+
+
+def transfer(task: dict) -> dict:
+    from scripts.swarm.tick import SpawnError
+
+    saved = (task.get("handoff_envelope") or {}).get("launch")
+    if not task.get("handoff") and not saved:
+        return {}
+    if not saved or not all(saved.get(key) for key in ("profile", "harness", "model", "effort")):
+        raise SpawnError("unsupported handoff: original profile and run options are missing", "unsupported")
+    if saved["harness"] not in ("claude", "codex"):
+        raise SpawnError(f"unsupported handoff harness: {saved['harness']}", "unsupported")
+    return saved
 
 
 def needs_ci_push(task: dict) -> bool:
@@ -126,10 +151,9 @@ def anchors(task: dict) -> tuple:
 
 
 def _ledger(slug: str) -> dict:
-    from scripts.swarm_ledger.repository.folder import ledger_folder
-    from scripts.swarm_ledger.repository.sqlite import read_ledger
+    from scripts.swarm import ledger_read
 
-    return read_ledger(ledger_folder(os.environ), slug, "overview", "phases") or {}
+    return ledger_read.parts(slug, "overview", "phases")
 
 
 def _remedy(slug: str, task: dict) -> str:

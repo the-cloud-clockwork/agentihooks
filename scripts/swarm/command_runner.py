@@ -2,7 +2,7 @@ import os
 import shutil
 import subprocess
 
-from scripts.swarm import commands
+from scripts.swarm import commands, lifecycle
 from scripts.swarm.status import status_report
 from scripts.swarm.store import RedisStore
 from scripts.swarm_ledger import ledger_workspace
@@ -37,6 +37,8 @@ def execute(store: RedisStore, slug: str, row: dict) -> str:
             return "agent is not in this swarm"
         target = ["terminate-agent", argv[1], "--type", "any"]
         return run([*target, "--dry-run"], env) or run(target, env)
+    if command == lifecycle.COMMAND:
+        return lifecycle.execute(store, slug, row, lambda argv: run(argv, env))
     if command not in {"swarm", "doctor"}:
         return "unknown control command"
     return run([command, slug, *argv], env)

@@ -1,0 +1,6 @@
+{
+  "scripts/codex_refresh.py:scripts.codex_refresh.x_grant__mutmut_20:8ff66eb1ef1ae3b127f75833fbeb0bae2de3d2a21aa0b4af7b85bcda91dcf382": {
+    "reader": "standards_reader",
+    "reason": "Changes only the spelling case of an HTTP header name. urllib.request.Request stores every header key with key.capitalize(), so 'accept' and the original spelling send the identical header on the wire. Cleared by the Standards reader on PR 2578 round 3 as equivalent."
+  }
+}

@@ -39,6 +39,26 @@ def _path(word: str) -> str:
     return os.path.expanduser(os.path.expandvars(word))
 
 
+def _swarm_cwd(cwd: Path) -> Path:
+    from scripts.gates.base import Who
+    from scripts.swarm.snapshot import worktrees
+    from scripts.swarm_ledger.repository.sqlite import read_ledger
+
+    who = Who.from_env()
+    if not (who.pinned and who.task):
+        return cwd
+    folder = Path(os.environ.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser()
+    doc = read_ledger(folder, who.swarm, f"tasks/{who.task}") or {}
+    task = next((row for row in doc.get("tasks", []) if row.get("id") == who.task), {})
+    if task.get("claimed_by") != who.name or task.get("state") not in ("claimed", "pr"):
+        return cwd
+    branch = task.get("branch")
+    if not branch:
+        return cwd
+    target = worktrees(str(cwd), [branch])[branch]
+    return Path(target) if target else cwd
+
+
 def _unpassed(payload: dict) -> Path | None:
     from hooks.context.shell_commands import commands
     from scripts.ci_prepush import passed
@@ -48,15 +68,18 @@ def _unpassed(payload: dict) -> Path | None:
     if not command:
         return None
     cwd = Path(payload.get("cwd") or os.getcwd(), _path(tool_input.get("workdir") or ""))
+    selected = bool(tool_input.get("workdir"))
     for tokens in commands(command):
         if Path(tokens[0]).name == "cd":
             target = cwd / _path(next((word for word in tokens[1:] if not word.startswith("-")), "~"))
             cwd = target if os.path.isdir(target) else cwd
+            selected = True
             continue
         push = _push(tokens)
         if push is None or _exempt(push[1]):
             continue
-        root = _toplevel(cwd.joinpath(*map(_path, push[0])))
+        base = cwd if selected or push[0] else _swarm_cwd(cwd)
+        root = _toplevel(base.joinpath(*map(_path, push[0])))
         if root and (root / "scripts" / "ci_prepush" / "__init__.py").is_file() and not passed(root):
             return root
     return None

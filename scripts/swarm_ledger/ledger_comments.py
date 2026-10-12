@@ -7,6 +7,7 @@ Agent text is for the operator: plain words saying what was done or why it was s
 import re
 
 LIMITS = {"comment": 50, "chat": 100, "item": 40, "priority": 20}
+OUTCOMES = ("done", "blocked")
 UNADDRESSED = (
     "chat is the operator's conversation: send it to the operator or answer his line, "
     "and talk to agents through the inbox"
@@ -73,7 +74,7 @@ def check(text, kind, long=False, task_ids=()):
 
 
 def can_change(entry, by, members):
-    if entry.get("by") == "operator" or entry.get("deleted"):
+    if entry.get("by") == "operator" or entry.get("deleted") or "outcome" in entry:
         return False
     return entry.get("by") == by or members.get(by, {}).get("role") == "orchestrator"
 
@@ -83,7 +84,7 @@ def post_status(thread, by, entry_id, text, ctx, target, attachments=None):
     live = [e for e in thread if not e.get("deleted")]
     mine = next((e for e in reversed(live) if e.get("by") == by), None)
     replied = mine is not None and any(e.get("by") == "operator" for e in live[live.index(mine) + 1 :])
-    if mine is None or replied:
+    if mine is None or replied or "outcome" in mine:
         if any(e["id"] == entry_id for e in thread):
             return
         thread.append({"id": entry_id, "by": by, "at": ctx.at, "text": text})
@@ -97,9 +98,30 @@ def post_status(thread, by, entry_id, text, ctx, target, attachments=None):
         mine.update(text=text, edited_at=ctx.at)
         if attachments is not None:
             mine["attachments"] = attachments
+    seen(ctx, by)
+
+
+def post_outcome(thread, op, ctx, target):
+    if not any(e["id"] == op["id"] for e in thread):
+        thread.append({"id": op["id"], "by": op["by"], "at": ctx.at, "text": op["text"], "outcome": op["outcome"]})
+        ctx.record(op["by"], "comment added", target, id=op["id"], text=op["text"])
+    seen(ctx, op["by"])
+
+
+def seen(ctx, by):
     member = ctx.meta.get("members", {}).get(by)
     if member is not None:
         member["last_seen"] = ctx.at
+
+
+def check_outcome(op):
+    if "outcome" not in op:
+        return
+    agent_comment = op["op"] == "add" and "by" in op and op["thread"].endswith("/comments")
+    if op["outcome"] not in OUTCOMES or not agent_comment or "attachments" in op:
+        raise ValueError(
+            "outcome rides only on an agent add to a comment thread, as done or blocked, without attachments"
+        )
 
 
 def refused(text, kind, where, ctx):
@@ -119,6 +141,9 @@ def agent_thread_op(thread, op, ctx, target, noun):
     by, text = op["by"], op.get("text", "")
     if op.get("attachments") and by not in ctx.meta.get("members", {}):
         return False
+    if op["op"] == "add" and "outcome" in op:
+        post_outcome(thread, op, ctx, target)
+        return True
     if op["op"] == "add" and noun == "comment":
         post_status(thread, by, op["id"], text, ctx, target, op.get("attachments"))
         return True

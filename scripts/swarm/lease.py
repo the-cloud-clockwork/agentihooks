@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -27,6 +28,10 @@ def tick_ms() -> int:
 
 def ttl_ms() -> int:
     return 3 * tick_ms()
+
+
+def beat_s() -> float:
+    return tick_ms() / 1000
 
 
 @dataclass(frozen=True)
@@ -100,6 +105,32 @@ def renew(store: RedisStore, slug: str, held: Lease) -> Lease:
                 return renewed
             except WatchError:
                 continue
+
+
+def beat(store: RedisStore, slug: str, held: Lease, stop: threading.Event) -> None:
+    from redis.exceptions import RedisError
+
+    while not stop.is_set():
+        if stop.wait(beat_s()):
+            return
+        try:
+            renew(store, slug, held)
+        except SwarmError:
+            return
+        except RedisError:
+            continue
+
+
+@contextmanager
+def kept(store: RedisStore, slug: str, held: Lease) -> Iterator[None]:
+    stop = threading.Event()
+    beating = threading.Thread(target=beat, args=(store, slug, held, stop))
+    beating.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        beating.join()
 
 
 def require_epoch(store: RedisStore, slug: str, epoch: int) -> None:

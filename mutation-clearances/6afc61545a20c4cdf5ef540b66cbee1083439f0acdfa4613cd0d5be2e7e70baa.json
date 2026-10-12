@@ -1,0 +1,6 @@
+{
+  "scripts/openbao_kv.py:scripts.openbao_kv.x__call__mutmut_8:8b4c475c9dbd3945e95bd151fd4c4973071b04b1d33dbd63e799a17085fdf585": {
+    "reader": "standards_reader",
+    "reason": "Changes only the spelling case of an HTTP header name. urllib.request.Request stores every header key with key.capitalize(), so 'x-vault-token' and the original spelling send the identical header on the wire. Cleared by the Standards reader on PR 2578 round 3 as equivalent."
+  }
+}

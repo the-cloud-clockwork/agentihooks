@@ -52,7 +52,7 @@ def herdr_argv(container, root):
         "--env",
         "HOME=" + attempt + "/homes/codex",
         "--env",
-        "XDG_RUNTIME_DIR=" + attempt + "/tmp",
+        "XDG_RUNTIME_DIR=" + attempt + "/run",
         container,
         "herdr",
     ]
@@ -85,7 +85,7 @@ def terminal_disconnect(container, root):
         os.close(master)
 
 
-def run_case(image, mode, output, kill=False):
+def run_case(image, mode, output, kill=False, supervised=False, viewer=True):
     container = docker(
         "run",
         "--detach",
@@ -99,12 +99,21 @@ def run_case(image, mode, output, kill=False):
         "128",
         image,
         "python",
-        "/opt/fixture/container_case.py",
+        "/opt/swarm-node/supervisor.py" if supervised else "/opt/fixture/container_case.py",
         mode,
     )
     try:
         observed = ready(container)
         root = observed["root"]
+        if supervised:
+            pid = docker(
+                "exec",
+                container,
+                "python",
+                "-c",
+                f"import json; from pathlib import Path; print(json.loads(Path({root!r}, 'context.json').read_text())['supervisor_pid'])",
+            )
+            assert pid == "1", f"supervisor is process {pid}, not process one"
         if kill:
             start = time.monotonic()
             try:
@@ -126,7 +135,7 @@ def run_case(image, mode, output, kill=False):
                 "-c",
                 f"import json; from pathlib import Path; r=Path({root!r}); print(json.dumps({{p.name:json.loads(p.read_text())['tick'] for p in r.glob('heartbeat-*.json')}}))",
             )
-            terminal = terminal_disconnect(container, root)
+            terminal = terminal_disconnect(container, root) if viewer else None
             time.sleep(0.2)
             after = docker(
                 "exec",
@@ -145,7 +154,11 @@ def run_case(image, mode, output, kill=False):
         assert not stopped["Running"] and stopped["Pid"] == 0
         target = output / uuid.uuid4().hex
         target.mkdir()
-        docker("cp", f"{container}:/home/worker/attempts", str(target))
+        attempt = Path(root).parents[2]
+        captured = target / "attempts" / attempt.name
+        (captured / "run").mkdir(parents=True)
+        docker("cp", f"{container}:{attempt}/launch.json", str(captured / "launch.json"))
+        docker("cp", f"{container}:{attempt}/run/supervision", str(captured / "run"))
         results = list(target.glob("attempts/*/run/supervision/*/result.json"))
         launch = json.loads(next(target.glob("attempts/*/launch.json")).read_text())
         bound = launch["quiesce_seconds"] + launch["checkpoint_seconds"] + 3 * launch["kill_seconds"] + 1
@@ -166,7 +179,7 @@ def run_case(image, mode, output, kill=False):
             "elapsed_shutdown_seconds": round(elapsed, 3),
             "shutdown_bound_seconds": bound,
             "container_process_tree_gone": True,
-            "viewer_detached": not kill,
+            "viewer_detached": viewer and not kill,
             "terminal_disconnect": terminal if not kill else None,
             "result": result,
         }

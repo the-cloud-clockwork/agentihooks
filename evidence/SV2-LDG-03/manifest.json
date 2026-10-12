@@ -1,0 +1,14 @@
+{
+  "cases": [
+    "T-SV2-LDG-03-A",
+    "T-SV2-LDG-03-B",
+    "T-SV2-LDG-03-C"
+  ],
+  "evidence_class": "mocked Redis and server clock; SQLite fixture ledger; signed fixture grants",
+  "inputs": {
+    "tests/fixtures/swarm_v2/task-revision.json": "d398bb2096487a5e0fe517c41511bc1e409b3e90578ca17c1bb24f17c8b92683"
+  },
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2380",
+  "package": "SV2-LDG-03",
+  "tested_commit": "f520b8a6e01e018a520fb7c04312efd6f22ca41a"
+}

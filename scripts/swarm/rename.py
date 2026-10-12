@@ -27,6 +27,8 @@ def rename_swarm(store, slug, ledger, runtime, at):
             if pane.get("name") != herdr_target(new):
                 runtime.herdr(["agent", "rename", agent.pane_id, herdr_target(new)])
                 actions.append(f"renamed {agent.name} to {new}")
+            if agent.harness == "codex":
+                _name_session(store, slug, runtime, agent.pane_id, new)
             store.names.alias(agent.name, new)
             _move_agent(store, slug, agent, new, at)
             for old in store.names.aliases(new):
@@ -43,6 +45,13 @@ def rename_swarm(store, slug, ledger, runtime, at):
     finally:
         if store.redis.get(lock) == token:
             store.redis.delete(lock)
+
+
+def _name_session(store, slug, runtime, pane_id, new):
+    key = store.key(slug, "session-name", pane_id)
+    if store.redis.get(key) != new:
+        runtime.herdr(["pane", "run", pane_id, f"/rename {new}"])
+        store.redis.set(key, new)
 
 
 def _check_pane(names, agent, pane, reserved=""):

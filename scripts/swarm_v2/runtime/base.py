@@ -11,6 +11,7 @@ from scripts.swarm.store import AgentRecord
 LOCAL = "local"
 BACKEND_VARIABLE = "AGENTIHOOKS_RUNTIME_BACKEND"
 DISABLED_VARIABLE = "AGENTIHOOKS_RUNTIME_DISABLED"
+LOCAL_PROFILES = frozenset(("frontend",))
 
 
 class Capability(StrEnum):
@@ -49,6 +50,18 @@ class SpawnRequest:
     lane: str
     name: str
     task: dict
+
+
+@dataclass(frozen=True)
+class Placement:
+    backend: str
+    lanes: frozenset[str] = frozenset(("eng", "ci"))
+    local_profiles: frozenset[str] = LOCAL_PROFILES
+
+    def backend_for(self, lane: str, task: dict) -> str:
+        profile = (task.get("profile_decision") or {}).get("profile") or task.get("profile")
+        placed = profile not in self.local_profiles and lane in self.lanes
+        return self.backend if placed else LOCAL
 
 
 @dataclass(frozen=True)
@@ -96,21 +109,36 @@ def legacy(agent: AgentRecord) -> bool:
 
 
 class RuntimeRouter:
-    def __init__(self, runtimes: Iterable[Runtime], default: str = LOCAL, disabled: Iterable[str] = ()):
+    def __init__(
+        self,
+        runtimes: Iterable[Runtime],
+        default: str = LOCAL,
+        disabled: Iterable[str] = (),
+        placement: Placement | None = None,
+    ):
         self.runtimes = {runtime.backend: runtime for runtime in runtimes}
-        self.default, self.disabled = default, frozenset(disabled)
+        self.default, self.disabled, self.placement = default, frozenset(disabled), placement
         self.failures, self.rejected = Counter(), Counter()
 
     @classmethod
-    def from_environ(cls, runtimes: Iterable[Runtime], environ: Mapping[str, str]) -> "RuntimeRouter":
+    def from_environ(
+        cls, runtimes: Iterable[Runtime], environ: Mapping[str, str], placement: Placement | None = None
+    ) -> "RuntimeRouter":
         disabled = [name.strip() for name in environ.get(DISABLED_VARIABLE, "").split(",") if name.strip()]
-        return cls(runtimes, environ.get(BACKEND_VARIABLE) or LOCAL, disabled)
+        return cls(runtimes, environ.get(BACKEND_VARIABLE) or LOCAL, disabled, placement)
 
-    def spawn_backend(self) -> str:
-        return LOCAL if self.default in self.disabled else self.default
+    def placed_backend(self, lane: str, task: dict) -> str:
+        return self.default if self.placement is None else self.placement.backend_for(lane, task)
+
+    def enabled_backend(self, wanted: str) -> str:
+        return LOCAL if wanted in self.disabled else wanted
+
+    def spawn_backend(self, request: SpawnRequest | None = None) -> str:
+        wanted = self.default if request is None else self.placed_backend(request.lane, request.task)
+        return self.enabled_backend(wanted)
 
     def spawn(self, request: SpawnRequest, needs: Iterable[Capability] = ()) -> Outcome:
-        backend = self.spawn_backend()
+        backend = self.spawn_backend(request)
         if backend not in self.runtimes or backend in self.disabled:
             return Outcome("spawn", Status.UNAVAILABLE, backend, detail=f"no enabled runtime for {backend}")
         return self._call(backend, "spawn", (Capability.SPAWN, *needs), request)

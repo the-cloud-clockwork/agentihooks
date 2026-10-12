@@ -24,14 +24,20 @@ def due(payload: dict, environ: dict, status: str) -> bool:
     return environ.get(CLOSE_ENV, "1") != "0" and status == "handed_off"
 
 
-def close_command(session_id: str) -> list[str]:
+def handoff_record(pid: int, session_id: str) -> Path:
+    return _home() / f"handed-off-{pid}-{session_id}"
+
+
+def close_command(pid: int) -> list[str]:
     exe = shutil.which("agentihooks") or "agentihooks"
-    return [exe, "terminate-agent", session_id, "--type", "claude"]
+    return [exe, "terminate-agent", str(pid), "--type", "any"]
 
 
-def close(command: list[str], marker: Path) -> None:
+def close(command: list[str], marker: Path, record: Path) -> None:
     marker.touch()
-    subprocess.run(command, stdin=subprocess.DEVNULL, capture_output=True, timeout=120, check=False)
+    done = subprocess.run(command, stdin=subprocess.DEVNULL, capture_output=True, timeout=120, check=False)
+    if done.returncode == 0:
+        record.unlink(missing_ok=True)
 
 
 def on_stop(payload: dict) -> bool:
@@ -40,19 +46,21 @@ def on_stop(payload: dict) -> bool:
     from hooks.context.broadcast import _load_sessions
 
     session_id = payload.get("session_id", "")
-    status = _load_sessions().get(session_id, {}).get("status", "")
+    pid = agent_pid()
+    recorded = session_id and handoff_record(pid, session_id).exists()
+    status = "handed_off" if recorded else _load_sessions().get(session_id, {}).get("status")
     if not session_id or not due(payload, dict(os.environ), status):
         return False
-    claim = _home() / f"handoff-close-{session_id}.claim"
+    claim = _home() / f"handoff-close-{pid}-{session_id}.claim"
     try:
         os.close(os.open(claim, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
     except FileExistsError:
         return False
-    pid = agent_pid()
     fork_and_call(
         close,
-        close_command(session_id),
+        close_command(pid),
         _closing_marker(pid, dict(os.environ)),
+        handoff_record(pid, session_id),
         timeout_sec=180,
         task_name="handoff-close",
     )

@@ -4,18 +4,21 @@ The sweep clears an agent's priority whose item is done, out of scope, merged or
 chat line on an item that carries a priority asks the classifier whether that write resolves what the priority
 asks. A yes clears it, closes a follow-up, records an operator comment on a question as its answer and notes the
 reason on the item; a no or a silent classifier leaves it. A priority that waits on an operator decision, a question,
-a merge approval, a follow-up flagged for him or an escalated plan, counts only the operator's writes, a verified
-master relay among them; an agent's write on it is never judged.
+a merge approval, a follow-up flagged for him or an escalated plan, and one a dispatcher seat handed to him by raising
+it under its own name, counts only the operator's writes, a verified master relay among them; an agent's write on it is
+never judged.
 """
 
 import re
 from dataclasses import dataclass
 
 from hooks.classifier import ClassifierError, code_rules, decide, runner
-from scripts.swarm import ledger_events
+from scripts.swarm import ledger_events, naming
 
 PURPOSE = "priority-resolve"
+DISPATCHER = "dispatcher"
 CURSOR = "priority-cursor"
+JUDGED = "comments, answers and chat lines that might resolve a priority"
 PATH = re.compile(r"([a-z]+)/([^/]+)")
 CLEARED = "Priority cleared by the swarm: {reason}."
 OPERATOR = "operator"
@@ -50,7 +53,7 @@ def priority_pass(store, slug, doc, ledger, judge=None, github=None):
         actions.append(_cleared(row, reason))
         gone.add(row["id"])
     judged = set()
-    for row, write in _writes(doc, rows, ledger_events.new_events(store, slug, doc, CURSOR)):
+    for row, write in _writes(doc, rows, ledger_events.new_events(store, slug, doc, CURSOR, JUDGED)):
         if row["id"] in gone or (row["id"], write.text) in judged:
             continue
         judged.add((row["id"], write.text))
@@ -89,7 +92,7 @@ def _stale(item, github):
 
 def _item(doc, path):
     name, item_id = _split(path)
-    return next((i for i in doc[name] if i["id"] == item_id), {})
+    return next((i for i in doc.get(name, []) if i["id"] == item_id), {})
 
 
 def _split(path):
@@ -110,7 +113,16 @@ def _writes(doc, rows, events):
 
 
 def _counts(doc, row, write):
-    return write.by == OPERATOR or not _operator_decides(row["item"], _item(doc, row["item"]))
+    return write.by == OPERATOR or not operator_only(doc, row)
+
+
+def operator_only(doc, row):
+    return handed(row) or _operator_decides(row["item"], _item(doc, row["item"]))
+
+
+def handed(row):
+    found = naming.parse(row.get("by"))
+    return found is not None and found.kind == DISPATCHER
 
 
 def _operator_decides(path, item):

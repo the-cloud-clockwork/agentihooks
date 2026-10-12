@@ -7,7 +7,7 @@ CODE_DIR = Path(__file__).resolve().parent
 ROOT = CODE_DIR.parents[1]
 CODE_DIRS = (
     CODE_DIR,
-    *(ROOT / "scripts" / name for name in ("inbox", "swarm", "handoff", "doctor", "gates", "hive")),
+    *(ROOT / "scripts" / name for name in ("inbox", "swarm", "swarm_v2", "handoff", "doctor", "gates", "hive")),
     ROOT / "hooks",
 )
 SUFFIXES = (".py", ".html", ".js", ".css")

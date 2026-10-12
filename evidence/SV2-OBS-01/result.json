@@ -1,0 +1,101 @@
+{
+  "package": "SV2-OBS-01",
+  "package_complete": false,
+  "dependency": "SV2-KUB-05",
+  "integration_gate": "G10",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2572",
+  "tested_commit": "4a1da5638ef34f4d12ff2ea073a81121382c7a8b",
+  "status": "fixture-qualified",
+  "evidence_class": "Mocked: fakeredis execution registry, transition audit, latency counters and observability record, a fake lease clock, a fixed step telemetry clock, an in process exporter that can be switched off, an in process API server whose Pods carry fixture statuses and the SV2-KUB-05 recovery world. No Kubernetes API server, node, worker Pod or telemetry backend was used.",
+  "interfaces": [
+    "scripts.swarm_v2.telemetry.Telemetry(store, slug, exporter=None, clock=time.monotonic).record(transition, result, duration_s, audit=True, **fields) keeps one sanitized event in the bounded swarm audit list (AUDIT_LIMIT), counts it in the execution_transition_latency_seconds histogram under fixed transition, result and bucket labels only, then offers every unexported event to the optional exporter; it never raises into the caller",
+    "Telemetry.timed(transition, **fields) records accepted, refused (SwarmError) or failed (any other exception) with the sanitized error and re-raises unchanged; setting audit False in the yielded fields counts without an audit event",
+    "Event fields are an allowlist: transition, result, duration_ms, at_ms, seq, task, seat, execution_id, previous_execution_id, operation_id, action, expected_generation, observed_generation, controller_epoch, reason, mode, replacement, error",
+    "sanitize_text cuts input to INPUT_LIMIT, withholds any text naming environ( or holding three or more NAME=value pairs, redacts URL userinfo, bearer tokens, provider token shapes, AWS key ids and values named token, secret, password, prefixed key, credential or authorization, and truncates to TEXT_LIMIT; sanitize_error keeps the exception type",
+    "observability(store, slug) reports ok, degraded or disabled with events, unexported, export_failures, export_dropped, the sanitized last error and the failure and export times; an exporter outage replays each missed event once by sequence and counts events lost before export as export_dropped",
+    "history(events, seat) and timelines(store, slug, seats) join one seat's admissions, recoveries and the commands of the execution ids they named",
+    "Controller.admit, execute and observe record admission, command, heartbeat and outcome with expected and observed generation and the controller epoch; a heartbeat is counted every time and audited only when its observed state changes",
+    "Recovery records fence when it writes a fence and recovery when it decides, naming the replacement; the replacement's admission names its predecessor",
+    "scripts.swarm.status.status_report carries observability, execution_transition_latency_seconds and transitions per agent seat",
+    "scripts.swarm_v2.control_service.ControlService gives its controller the stdout exporter only when AGENTIHOOKS_TRANSITION_EXPORT is stdout"
+  ],
+  "supported_versions": {
+    "python": "3.11 and later",
+    "redis": "new keys under the swarm: transitions, transition-seq, transition-exported, transition-latency and observability",
+    "compatibility": "Authority behaviour is unchanged: every controller and recovery call commits or refuses exactly as before and re-raises the same exception; Recovery._replace now returns the successor record instead of its execution id, used only inside Recovery and one KUB-05 test call site. Local execution is unaffected."
+  },
+  "authority": "Telemetry holds no authority and writes only its own keys. Actor and scope in every event come from the execution registry, the operation journal and the controller lease, never from a display label.",
+  "authoritative_objects": "The execution registry, operation journal, fence and recovery records stay authoritative and are never touched by telemetry. The transition audit, counters and observability record are operational records; the audit is bounded and trims its oldest events.",
+  "states": {
+    "observed": "Cases A, B and C each ran twice with identical records in proofs run 38135830892 at tested_commit.",
+    "accepted": "Case A: two independent runs read refused admission while the lease is absent, admission, command, heartbeat, fence for node_lost, replacement admission naming its predecessor, resume decision and the replacement command, all exported. Case B: an exception carrying a fake environment is withheld whole, a bearer token after Authorization is redacted, no fake token or environment value reaches the audit, exporter or counters, and a refused admission changes no protected state. Case C: with the exporter down, admission and command commit, observability reads degraded with 3 unexported, the replayed command keeps one operation, restoring the exporter delivers events 1 to 4 once, a stale controller is refused and the occupant stays, and without an exporter the state reads disabled while audit and counters continue.",
+    "committed": "Code and fixture inputs are at tested_commit; manifest.json hashes them.",
+    "externally_verified": "None: no deployed controller or telemetry backend was exercised; G10 live evidence is outstanding."
+  },
+  "validation": {
+    "red": "proofs run 38135150563 on tests only commit 42d908129: 3 failed, 1 collection error, KUB-05 suite unchanged",
+    "tests": "proofs run 38135830892 at tested_commit produced the case records; proofs run 38137696953 at 217bcd1ab: 279 passed with the committed records",
+    "lint": "ruff check and ruff format passed through python -m scripts.ci_prepush",
+    "review": "Standards and Spec readers, three rounds and two rounds; every finding fixed or ruled, rulings in the task proof",
+    "mutation": "mutation preflight 38137689711 at 217bcd1ab: 703 mutants killed, none survived, after 28 survivors from preflight 38136209144 were killed by tests or removed in code"
+  },
+  "measurements": {
+    "execution_transition_latency_seconds": {
+      "a": {
+        "admission": {
+          "accepted": 2,
+          "refused": 1
+        },
+        "command": {
+          "accepted": 2
+        },
+        "fence": {
+          "accepted": 1
+        },
+        "heartbeat": {
+          "accepted": 2
+        },
+        "recovery": {
+          "accepted": 1
+        }
+      },
+      "b": {
+        "admission": {
+          "accepted": 4,
+          "refused": 1
+        },
+        "command": {
+          "accepted": 1,
+          "failed": 2
+        }
+      }
+    }
+  },
+  "cases": {
+    "a": "evidence/SV2-OBS-01/a-result.json",
+    "b": "evidence/SV2-OBS-01/b-result.json",
+    "c": "evidence/SV2-OBS-01/c-result.json",
+    "manifest": "evidence/SV2-OBS-01/manifest.json"
+  },
+  "rollback_rehearsal": {
+    "action": "Unset AGENTIHOOKS_TRANSITION_EXPORT: the controller keeps the local sanitized audit and core counters and observability reads disabled.",
+    "test": "tests/test_swarm_v2_telemetry.py::test_only_the_stdout_setting_turns_the_exporter_on",
+    "proof": "Case C rollback runs a launch with no exporter: state disabled, unexported 0, audit admission and command, counters admission 1 and command 1."
+  },
+  "remaining_limitations": [
+    "Export runs in the caller's thread; the only exporter is a local stdout line, and a network exporter must bring its own timeout.",
+    "Observability reads disabled until the first event is recorded, even when an exporter is configured.",
+    "The audit keeps the latest AUDIT_LIMIT events; older ones are trimmed, and an exporter lagging past that counts them as export_dropped.",
+    "Two plain NAME=value pairs in an error message are kept; three or more, or any environ dump, are withheld whole.",
+    "The status report reads the whole audit list once per call to build the per seat timelines.",
+    "Code task and pull request evidence is in the pull request; no G10 live canary has run."
+  ],
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2584",
+  "follow_ups": [],
+  "obligations": {
+    "compatibility": "Compared with the accepted SV2-KUB-05 and controller protocol: admit, execute, observe and every recovery call commit or refuse exactly as before and re-raise the same exception; the controller, control service, KUB-05 failures and account reconciliation suites pass unchanged in proofs run 38137696953, with one KUB-05 call site reading execution_id from the record Recovery._replace now returns. The local runtime path is not touched.",
+    "failure_evidence": "No rejection or recovery contract failed in the final runs, so no failing seed exists to keep. The smallest reproducer for each contract is the committed fixture tests/fixtures/swarm_v2/transition-telemetry.json with the SV2-KUB-05 inputs, hashed in manifest.json; a fixed step telemetry clock and the fake lease clock make each case deterministic, and every proof runs each case twice and compares the records. Earlier failures and their fixes are in the validation record: the red run, and 28 mutation survivors from preflight 38136209144.",
+    "data_safety": "Authoritative objects identified before rollback: the execution registry, operation journal, fence records and recovery decisions. Telemetry never writes or deletes them. Its own keys transitions, transition-seq, transition-exported, transition-latency and observability are operational and bounded. Rollback removes only the optional exporter and deletes nothing.",
+    "completion_evidence": "Recorded here: interfaces, supported_versions, validation (red, case, green and mutation runs), measurements, remaining_limitations and rollback_rehearsal."
+  }
+}

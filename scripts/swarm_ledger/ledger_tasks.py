@@ -43,6 +43,7 @@ UPDATABLE = (
     "phase",
     "slice",
     "follow_up",
+    "recovery",
 )
 BOOL_FIELDS = ("artifact", "follow_up")
 DIFFICULTIES = ("S", "M", "L")
@@ -53,7 +54,7 @@ LIST_FIELDS = ("depends_on", "territory", "parked_on", "parked_repos", "overlays
 OVERLAY_CAP = 3
 BRANCH_RE = re.compile(r"^(?!-)\S*$")
 COMMIT_RE = re.compile(r"^([0-9a-f]{7,64})?$")
-OBJECT_FIELDS = ("contract", "proof")
+OBJECT_FIELDS = ("contract", "proof", "recovery")
 URL_FIELDS = ("issue_url", "pr_url", "plan_url")
 URL_RE = re.compile(r"^https?://[^\s]+$")
 OPS = ("task_add", "task_update")
@@ -62,6 +63,11 @@ WORKER_LANES = ("eng", "ci")
 SWARM = "swarm"
 RANK_AUTHORS = ("operator", SWARM, "dispatcher")
 RANK_LANES = ("master", "dispatch")
+QUOTED = "task_update takes quote, the operator's words, only with a rank"
+UNRELAYED = (
+    "a rank relay needs the ledger's orchestrator and at least three words the hooks recorded from the operator "
+    "that name the rank: set the rank without a quote or quote his exact words"
+)
 PROPOSE = 'propose the work with agentihooks ledger followup add "<plain words>" and the master decides'
 PUBLISH = (
     "publish the plan with agentihooks ledger publish-plan <file> --phase <phase id>, then link each task with "
@@ -117,6 +123,7 @@ def check(op):
     if "state" in fields and fields["state"] not in STATES:
         raise ValueError(f"state must be one of {STATES}")
     check_guards(op)
+    check_quote(op)
     check_lists(fields)
     check_stack(fields)
     check_bools(fields)
@@ -132,6 +139,14 @@ def check_guards(op: dict) -> None:
     guard = op.get("if_state", [])
     if not isinstance(guard, list) or not all(state in STATES for state in guard):
         raise ValueError(f"if_state must be a list of states from {STATES}")
+
+
+def check_quote(op: dict) -> None:
+    if "quote" not in op:
+        return
+    quote = op["quote"]
+    if not isinstance(quote, str) or not quote.strip() or set(op["fields"]) != {"rank"}:
+        raise ValueError(QUOTED)
 
 
 def check_stack(fields):
@@ -289,6 +304,8 @@ def _add(doc, op, ctx):
         return False
     tasks.append(task)
     ctx.record(op["by"], "added", f"tasks/{task['id']}", text=task["title"])
+    if "rank" in task:
+        ctx.stamp(f"tasks/{task['id']}/rank", op["by"])
     return True
 
 
@@ -355,6 +372,8 @@ def update_refusal(doc: dict, op: dict, meta: dict | None = None) -> str:
     for field in ("rank", "difficulty", "phase"):
         if field in op["fields"] and (refusal := rank_refusal(op["by"], field)):
             return refusal
+    if refusal := pinned_refusal(op, meta):
+        return refusal
     phase = op["fields"].get("phase")
     if phase is not None and phase not in {p["id"] for p in doc["phases"]}:
         return f"phase {phase} is not on this ledger: name one of its phase ids"
@@ -362,6 +381,13 @@ def update_refusal(doc: dict, op: dict, meta: dict | None = None) -> str:
     if phase is not None and phase != task.get("phase"):
         return unsliced_refusal(doc, {**task, "plan_slice": "", **op["fields"]}, op["by"])
     return ""
+
+
+def pinned_refusal(op: dict, meta: dict | None) -> str:
+    if "rank" not in op["fields"]:
+        return ""
+    stamps = (meta or {}).get("stamps", {})
+    return ledger_rank.pinned(op["item"].split("/")[1], stamps.get(f"{op['item']}/rank", {}).get("by"))
 
 
 def _known(tasks, ids):
@@ -439,7 +465,7 @@ def _update(doc, op, ctx):
         if refusal := slice_refusal(op["item"], after, doc):
             ctx.refused.append(refusal)
             return False
-    changed = {k: v for k, v in fields.items() if task.get(k) != v}
+    changed = _changed(task, fields, op, ctx)
     if "kind" in changed and after.get("workspace"):
         from scripts.swarm_ledger import ledger_workspace
 
@@ -454,6 +480,28 @@ def _update(doc, op, ctx):
         ctx.stamp(f"{op['item']}/{key}", op["by"])
     ctx.dirty = ctx.dirty or bool(changed)
     return True
+
+
+def _relay_rank(doc, op, ctx):
+    from scripts.swarm_ledger.ledger_relay import RELAYED_FROM, relayed
+
+    task = next((t for t in doc["tasks"] if t["id"] == op["item"].split("/")[1]), None)
+    rank, words = ledger_rank.canonical(op["fields"]["rank"]), relayed(op, ctx.meta)
+    if task is None or not ledger_rank.quoted(rank, words):
+        ctx.refused.append(UNRELAYED)
+        return False
+    task["rank"] = rank
+    ctx.stamp(f"{op['item']}/rank", ledger_rank.OPERATOR)
+    marks = {"relayed_by": op["by"], "relayed_from": RELAYED_FROM, "quote": words}
+    ctx.record(ledger_rank.OPERATOR, "rank set", op["item"], text=rank, **marks)
+    return True
+
+
+def _changed(task, fields, op, ctx):
+    changed = {k: v for k, v in fields.items() if task.get(k) != v}
+    if "rank" in fields and ledger_rank.author(ctx, f"{op['item']}/rank") != op["by"]:
+        changed["rank"] = fields["rank"]
+    return changed
 
 
 def complete_outcome(doc: dict, op: dict, ctx: object, outcome: dict, actor: str) -> bool:
@@ -557,6 +605,8 @@ def _set_slice(doc: dict, op: dict, ctx) -> bool:
 def apply(doc, op, ctx):
     if op["op"] == "task_add":
         return _add(doc, op, ctx)
+    if "quote" in op:
+        return _relay_rank(doc, op, ctx)
     if op.get("if_plan_lines_missing") and any(
         t["id"] == op["item"].split("/")[1] and t.get("plan_lines") for t in doc.get("tasks", [])
     ):

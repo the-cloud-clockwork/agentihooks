@@ -187,17 +187,21 @@ def _settings(target: str, bundle: Path | None, dirs: list[tuple[str, Path]]) ->
     return doc
 
 
-def _claude_settings(bundle: Path | None, dirs: list[tuple[str, Path]], kept: Sequence[str] = ()) -> dict:
+def claude_environment(doc: dict, dirs: list[tuple[str, Path]]) -> dict:
     from scripts.profile_telemetry import apply_collector_env, apply_langfuse_env
 
-    _i = _install_module()
-    doc = _settings("claude", bundle, dirs)
     env = doc["env"]
     subscribed = _channels(env.get(CHANNELS, ""), dirs)
     if subscribed:
         env[CHANNELS] = subscribed
     apply_langfuse_env(doc, dirs, None)
     apply_collector_env(doc)
+    return doc
+
+
+def _claude_settings(bundle: Path | None, dirs: list[tuple[str, Path]], kept: Sequence[str] = ()) -> dict:
+    _i = _install_module()
+    doc = claude_environment(_settings("claude", bundle, dirs), dirs)
     default_home = claude_home(_global_env())
     global_settings = default_home / "settings.json"
     personal = _i.load_json(global_settings) if global_settings.exists() else {}
@@ -453,6 +457,7 @@ def render_codex(name: str, force: bool = False, overlays: Sequence[str] = ()) -
     current = {
         "render": stamp,
         "operator": hashlib.sha256(text.encode()).hexdigest(),
+        "login": (operator / "auth.json").is_file(),
         "skills": {skill: str(path) for skill, path in {**below, **above}.items()},
     }
     root = profile_dir(name, overlays)
@@ -483,7 +488,8 @@ def render_codex(name: str, force: bool = False, overlays: Sequence[str] = ()) -
     _relink(out / "skills", {**below, **{p.name: p for p in sorted((claude / "skills").iterdir())}, **above})
     _link_commands(out / "skills", claude / "commands")
     for item in CODEX_STATE:
-        _link(out / item, operator / item)
+        if item != "auth.json" or current["login"]:
+            _link(out / item, operator / item)
     _link(manifest, sources.path(root.name, "claude", root.parent))
     doc = _codex_config(installed, operator, out, _settings("codex", bundle, dirs))
     doc["project_doc_max_bytes"] = max(65536, int(len((claude / "CLAUDE.md").read_bytes()) * 1.25))

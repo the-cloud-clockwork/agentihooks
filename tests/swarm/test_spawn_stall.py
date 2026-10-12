@@ -127,7 +127,7 @@ def test_generic_wake_cannot_escalate_the_dedicated_alarm(stalled):
     tick_failure(stalled)
     inbox = InboxStore(store.redis)
     (item,) = inbox.pending_mail("master@sw")
-    assert wake.decide(item, None, inbox.history(item.id), clock[0] + 300_000, 300_000) is None
+    assert wake.decide(item, None, inbox.history(item.id), clock[0] + 300_000, 300_000, "sw") is None
 
 
 def test_normal_findings_pass_sends_no_duplicate_alarm(stalled):
@@ -141,6 +141,7 @@ def test_normal_findings_pass_sends_no_duplicate_alarm(stalled):
     other = {
         "id": "idle/worker",
         "kind": "idle",
+        "subject": "worker",
         "summary": "A worker is idle",
         "verdict": None,
     }
@@ -226,7 +227,7 @@ def test_caught_spawn_failures_keep_the_error_without_resetting_the_clock(stalle
     store, ledger, _, clock, _ = stalled
     record = AgentRecord("failed", "eng", "t1", started_at=clock[0])
     with timing.tick("sw"), spawn_stall.watch(store, "sw", ledger, lambda: clock[0], stalled[2]):
-        tick._record_spawn_failure("sw", store, record, RuntimeError("forced launch failure"))
+        tick._record_spawn_failure("sw", store, record, RuntimeError("forced launch failure"), clock[0])
     clock[0] += 600_000
     with timing.tick("sw"), spawn_stall.watch(store, "sw", ledger, lambda: clock[0], stalled[2]):
         pass

@@ -114,6 +114,47 @@ def test_install_native_binaries_and_reject_wrong_version(locked, tmp_path, monk
     assert str(error.value) == "binary version mismatch: herdr"
 
 
+def test_install_reuses_only_verified_cached_downloads(locked, tmp_path, monkeypatch):
+    _, lock, payloads = locked
+    download = Mock(side_effect=lambda url, timeout: io.BytesIO(payloads[url]))
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", download)
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    first = tmp_path / "first"
+    first.mkdir()
+    worker_image.install_tools(lock, first, cache)
+    assert download.call_count == 3
+    assert {p.name: p.read_bytes() for p in cache.iterdir()} == {
+        tool["sha256"]: payloads[tool["url"]] for tool in lock["tools"].values()
+    }
+    herdr = lock["tools"]["herdr"]
+    (cache / herdr["sha256"]).write_bytes(b"tampered")
+    download.reset_mock()
+    second = tmp_path / "second"
+    second.mkdir()
+    worker_image.install_tools(lock, second, cache)
+    assert download.call_args_list == [call(herdr["url"], timeout=120)]
+    assert (cache / herdr["sha256"]).read_bytes() == payloads[herdr["url"]]
+    assert {p.name: p.read_bytes() for p in second.iterdir()} == {p.name: p.read_bytes() for p in first.iterdir()}
+
+
+def test_install_never_caches_a_mismatched_download(locked, tmp_path, monkeypatch):
+    _, lock, payloads = locked
+    codex = lock["tools"]["codex"]
+    payloads[codex["url"]] = b"wrong binary"
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", lambda url, timeout: io.BytesIO(payloads[url]))
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    (cache / codex["sha256"]).write_bytes(b"also wrong")
+    destination = tmp_path / "bin"
+    destination.mkdir()
+    with pytest.raises(ValueError) as error:
+        worker_image.install_tools(lock, destination, cache)
+    assert str(error.value) == "artifact checksum mismatch: codex"
+    assert (cache / codex["sha256"]).read_bytes() == b"also wrong"
+    assert list(destination.iterdir()) == []
+
+
 def test_codex_archive_installs_only_named_binary(locked, tmp_path, monkeypatch):
     _, lock, payloads = locked
     url = lock["tools"]["codex"]["url"]
@@ -166,9 +207,22 @@ def test_committed_image_inputs_pin_base_and_keep_profiles_outside_home():
     assert "FROM ${BASE_IMAGE}" in dockerfile
     assert '--base-image "$BASE_IMAGE"' in dockerfile
     assert "COPY profiles/ /opt/agentihooks/templates/" in dockerfile
+    assert "COPY profiles/package/roles/ /opt/agentihooks/templates/" in dockerfile
     assert "USER 10001:10001" in dockerfile
     assert "DISABLE_AUTOUPDATER=1" in dockerfile
     assert "--require-hashes" in dockerfile
+    assert "--require-hashes -d /downloads/pip -r /opt/swarm-node/requirements.lock" in dockerfile
+    assert (
+        'worker_image.py download --architecture "$TARGETARCH" --cache /downloads/tools\n\nFROM ${BASE_IMAGE} AS worker\n'
+        in dockerfile
+    )
+    assert 'worker_image.py install --architecture "$TARGETARCH" --cache /downloads/tools\nCOPY pyproject' in dockerfile
+    smoke = (inputs / "smoke.sh").read_text()
+    assert "docker build --no-cache-filter worker --platform" in smoke
+    assert "--mount=type=bind,from=downloads,source=/downloads,target=/downloads" in dockerfile
+    assert "--no-index --find-links /downloads/pip --require-hashes" in dockerfile
+    assert dockerfile.endswith('CMD ["python", "/opt/swarm-node/worker_image.py", "report"]\n')
+    assert dockerfile.count("FROM ") == 2
 
 
 @pytest.mark.parametrize(
@@ -301,24 +355,42 @@ def test_build_rejects_selected_base_that_differs_from_lock(locked, monkeypatch)
     assert str(error.value) == "base image differs from lock"
 
 
-@pytest.mark.parametrize("action", ["validate", "install", "manifest", "report", "shell-packages"])
+@pytest.mark.parametrize("action", ["validate", "download", "install", "manifest", "report", "shell-packages"])
 def test_build_command_routes_locked_actions(locked, monkeypatch, capsys, action):
     path, lock, _ = locked
     lock["shell_packages"].update(bash="5.2", curl="7.88")
     path.write_text(json.dumps(lock))
     monkeypatch.setattr(
         "sys.argv",
-        ["worker_image", action, "--lock", str(path), "--architecture", "amd64", "--source-revision", "tested"],
+        [
+            "worker_image",
+            action,
+            "--lock",
+            str(path),
+            "--architecture",
+            "amd64",
+            "--source-revision",
+            "tested",
+            "--cache",
+            "/var/cache/tools",
+        ],
     )
+    fetch = Mock()
     install = Mock()
     manifest = Mock()
     report = Mock(return_value={"zeta": 2, "alpha": 1})
+    monkeypatch.setattr(worker_image, "fetch", fetch)
     monkeypatch.setattr(worker_image, "install_tools", install)
     monkeypatch.setattr(worker_image, "write_manifest", manifest)
     monkeypatch.setattr(worker_image, "report", report)
     worker_image.main()
-    if action == "install":
-        install.assert_called_once_with(lock, Path("/usr/local/bin"))
+    if action == "download":
+        assert fetch.call_args_list == [
+            call(name, artifact, Path("/var/cache/tools")) for name, artifact in lock["tools"].items()
+        ]
+        install.assert_not_called()
+    elif action == "install":
+        install.assert_called_once_with(lock, Path("/usr/local/bin"), Path("/var/cache/tools"))
     elif action == "manifest":
         manifest.assert_called_once_with(path, "amd64", "tested", Path("/opt/agentihooks/templates"))
     elif action == "report":
@@ -327,6 +399,7 @@ def test_build_command_routes_locked_actions(locked, monkeypatch, capsys, action
     elif action == "shell-packages":
         assert capsys.readouterr().out == "git=1:2.39.5-0+deb12u3 bash=5.2 curl=7.88\n"
     else:
+        fetch.assert_not_called()
         install.assert_not_called()
         manifest.assert_not_called()
         report.assert_not_called()
@@ -397,3 +470,61 @@ def test_command_rejects_unknown_actions(monkeypatch, capsys):
         worker_image.main()
     assert error.value.code == 2
     assert "invalid choice: 'unexpected'" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("action", ["download", "install"])
+def test_a_named_tool_limits_download_and_install_to_that_tool(locked, monkeypatch, action):
+    path, lock, _ = locked
+    argv = ["worker_image", action, "--lock", str(path), "--tool", "herdr", "--cache", "/var/cache/tools"]
+    monkeypatch.setattr("sys.argv", argv)
+    fetch = Mock()
+    install = Mock()
+    monkeypatch.setattr(worker_image, "fetch", fetch)
+    monkeypatch.setattr(worker_image, "install_tools", install)
+    worker_image.main()
+    herdr = lock["tools"]["herdr"]
+    if action == "download":
+        assert fetch.call_args_list == [call("herdr", herdr, Path("/var/cache/tools"))]
+    else:
+        install.assert_called_once_with(
+            {**lock, "tools": {"herdr": herdr}}, Path("/usr/local/bin"), Path("/var/cache/tools")
+        )
+
+
+def test_a_named_tool_installs_and_checks_only_that_binary(locked, tmp_path, monkeypatch):
+    path, lock, payloads = locked
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", lambda url, timeout: io.BytesIO(payloads[url]))
+    installed = Mock(wraps=worker_image.install_tools)
+    monkeypatch.setattr(worker_image, "install_tools", lambda lock, _, cache: installed(lock, tmp_path, cache))
+    monkeypatch.setattr("sys.argv", ["worker_image", "install", "--lock", str(path), "--tool", "herdr"])
+    worker_image.main()
+    assert [entry.name for entry in tmp_path.iterdir() if entry.name in lock["tools"]] == ["herdr"]
+
+
+def test_command_rejects_an_unlocked_tool(locked, monkeypatch, capsys):
+    path, _, _ = locked
+    monkeypatch.setattr("sys.argv", ["worker_image", "install", "--lock", str(path), "--tool", "curl"])
+    with pytest.raises(SystemExit) as error:
+        worker_image.main()
+    assert error.value.code == 2
+    assert "invalid choice: 'curl'" in capsys.readouterr().err
+
+
+def test_a_named_package_limits_shell_packages_to_that_package(locked, monkeypatch, capsys):
+    path, lock, _ = locked
+    lock["shell_packages"].update(bash="5.2", **{"openssh-client": "1:9.2p1-2+deb12u7"})
+    path.write_text(json.dumps(lock))
+    argv = ["worker_image", "shell-packages", "--lock", str(path), "--package", "openssh-client", "--package", "git"]
+    monkeypatch.setattr("sys.argv", argv)
+    worker_image.main()
+    assert capsys.readouterr().out == "openssh-client=1:9.2p1-2+deb12u7 git=1:2.39.5-0+deb12u3\n"
+
+
+def test_an_unlocked_package_is_refused(locked, monkeypatch, capsys):
+    path, _, _ = locked
+    argv = ["worker_image", "shell-packages", "--lock", str(path), "--package", "zsh", "--package", "curl"]
+    monkeypatch.setattr("sys.argv", argv)
+    with pytest.raises(SystemExit) as error:
+        worker_image.main()
+    assert error.value.code == 2
+    assert "--package names packages the lock does not pin: curl, zsh" in capsys.readouterr().err

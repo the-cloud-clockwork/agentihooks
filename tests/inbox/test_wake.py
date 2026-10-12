@@ -133,7 +133,7 @@ def test_the_original_overdue_item_replayed_at_nine_minutes(pane, step):
 
     item = SimpleNamespace(state="pending", sender="sw-eng-2", fyi=False, ref="")
     history = [{"state": "pending", "by": "sw-eng-2", "reason": "", "at": ORIGINAL_SENT}]
-    assert wake.decide(item, pane, history, ORIGINAL_SENT + ORIGINAL_AGE, W) == step
+    assert wake.decide(item, pane, history, ORIGINAL_SENT + ORIGINAL_AGE, W, "sw") == step
 
 
 def test_retries_stop_at_three_then_the_master_gets_an_item(inbox):
@@ -386,6 +386,120 @@ def test_escalation_goes_to_the_master_seat(inbox):
     run(inbox, FakeHerdr({}), FakeLedger(), sent_at(item) + W, [outside, SEATED[2]])
     [raised] = inbox.inbox("master@sw")
     assert item.id in raised.text
+
+
+@pytest.mark.parametrize("gone", ["absent", "exited"])
+def test_seat_mail_waits_for_the_successor_and_its_window_starts_at_binding(inbox, gone):
+    inbox.seats.occupy("eng-1@sw", "sw-eng-gone", at=1)
+    waiting = SEATED[1:]
+    if gone == "exited":
+        inbox.seats.record_exit("sw-eng-gone", "eng-1@sw", "handed off its seat")
+        waiting = [AgentRecord("sw-eng-gone", "eng", "t1", pane_id="pg", seat="eng-1@sw"), *waiting]
+    item = inbox.send("sw-eng-4", "eng-1@sw", "rebase please")
+    herdr, ledger = FakeHerdr({}), FakeLedger()
+    for n in range(1, 30):
+        run(inbox, herdr, ledger, sent_at(item) + n * W, waiting)
+    assert events(inbox, item.id) == [] and inbox.inbox("master@sw") == [] and ledger.followups == []
+    bound = sent_at(item) + 30 * W
+    inbox.seats.occupy("eng-1@sw", "sw-eng-1", at=bound)
+    run(inbox, herdr, ledger, bound + W - 1, SEATED)
+    assert events(inbox, item.id) == []
+    run(inbox, herdr, ledger, bound + W, SEATED)
+    assert events(inbox, item.id) == ["escalated_master"]
+
+
+def test_master_seat_mail_waits_for_the_next_master(inbox):
+    inbox.seats.occupy("master@sw", "sw-master-0", at=1)
+    item = inbox.send("sw-eng-4", "master@sw", "check the plan")
+    herdr, ledger = FakeHerdr({}), FakeLedger()
+    for n in range(1, 10):
+        run(inbox, herdr, ledger, sent_at(item) + n * W, SEATED[:2])
+    assert events(inbox, item.id) == [] and ledger.followups == []
+    bound = sent_at(item) + 10 * W
+    inbox.seats.occupy("master@sw", MASTER_NAME, at=bound)
+    run(inbox, herdr, ledger, bound + W - 1, SEATED)
+    assert ledger.followups == []
+    run(inbox, herdr, ledger, bound + W, SEATED)
+    assert events(inbox, item.id) == ["escalated_operator"] and len(ledger.followups) == 1
+
+
+def test_master_seat_mail_on_a_stopped_swarm_escalates_as_before(inbox):
+    from scripts.swarm.store import RedisStore, SwarmConfig
+
+    store = RedisStore(inbox.redis)
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=1))
+    store.update("sw", state="stopped")
+    inbox.seats.occupy("master@sw", "sw-master-0", at=1)
+    item = inbox.send("sw-eng-4", "master@sw", "check the plan")
+    ledger = FakeLedger()
+    run(inbox, FakeHerdr({}), ledger, sent_at(item) + W, SEATED[:2])
+    assert events(inbox, item.id) == ["escalated_operator"] and len(ledger.followups) == 1
+
+
+def test_seat_mail_to_a_live_occupant_escalates_after_one_window(inbox):
+    inbox.seats.occupy("eng-1@sw", "sw-eng-1", at=1)
+    item = inbox.send("sw-eng-4", "eng-1@sw", "rebase please")
+    herdr, ledger = FakeHerdr({"p1": "working"}), FakeLedger()
+    run(inbox, herdr, ledger, sent_at(item) + W - 1, SEATED)
+    assert events(inbox, item.id) == []
+    run(inbox, herdr, ledger, sent_at(item) + W, SEATED)
+    assert events(inbox, item.id) == ["escalated_master"]
+
+
+def test_a_codex_successor_is_woken_one_window_after_it_binds(inbox):
+    inbox.seats.occupy("eng-1@sw", "sw-eng-gone", at=1)
+    item = inbox.send("sw-eng-4", "eng-1@sw", "rebase please")
+    inbox.note(item.id, wake.WOKEN, wake.BY, "prompted sw-eng-gone to read its inbox", sent_at(item) + 1)
+    bound = sent_at(item) + 10 * W
+    codex = AgentRecord("sw-eng-2", "eng", "t1", pane_id="p2", harness="codex", seat="eng-1@sw")
+    inbox.seats.occupy("eng-1@sw", codex.name, at=bound)
+    herdr = FakeHerdr({"p2": "idle"})
+    wake.wake_now(inbox, "sw", [codex], herdr, bound + W - 1, W)
+    assert herdr.prompts == []
+    wake.wake_now(inbox, "sw", [codex], herdr, bound + W, W)
+    assert herdr.prompts == [("p2", wake.WAKE_TEXT)]
+
+
+def swarm_config(inbox, state="running"):
+    from scripts.swarm.store import RedisStore, SwarmConfig
+
+    store = RedisStore(inbox.redis)
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=1))
+    store.update("sw", state=state)
+
+
+def test_the_window_counts_from_the_items_first_step_at_clock_zero(inbox, monkeypatch):
+    monkeypatch.setattr("scripts.inbox.store.now_ms", lambda: 0)
+    item = inbox.send("sw-eng-2", "sw-eng-1", "review my diff")
+    assert wake.decide(item, None, inbox.history(item.id), W, W, "sw") == wake.TO_MASTER
+    run(inbox, FakeHerdr({"p1": "working"}), FakeLedger(), W)
+    assert events(inbox, item.id) == ["escalated_master"]
+
+
+def test_a_seat_note_after_binding_leaves_the_window_at_the_bind(inbox):
+    inbox.seats.occupy("eng-1@sw", "sw-eng-1", at=1)
+    item = inbox.send("sw-eng-4", "eng-1@sw", "rebase please")
+    bound = sent_at(item) + W
+    inbox.seats.occupy("eng-1@sw", "sw-eng-1", at=bound)
+    inbox.seats.note("eng-1@sw", "promoted", "a later seat note", bound + W)
+    run(inbox, FakeHerdr({"p1": "working"}), FakeLedger(), bound + W, SEATED)
+    assert events(inbox, item.id) == ["escalated_master"]
+
+
+def test_mail_on_a_never_seated_lane_of_a_stopped_swarm_waits_out_its_first_window(inbox):
+    swarm_config(inbox, "stopped")
+    item = inbox.send("sw-eng-4", "eng-1@sw", "rebase please")
+    assert run(inbox, FakeHerdr({}), FakeLedger(), sent_at(item) + 1, SEATED[1:]) == []
+    assert events(inbox, item.id) == []
+
+
+@pytest.mark.parametrize(("seat", "held"), [("eng-1@sw", True), ("eng-2@sw", False)])
+def test_a_running_swarm_holds_only_seats_inside_the_lane_cap(inbox, seat, held):
+    swarm_config(inbox)
+    inbox.seats.occupy(seat, "sw-eng-gone", at=1)
+    item = inbox.send("sw-eng-4", seat, "rebase please")
+    run(inbox, FakeHerdr({}), FakeLedger(), sent_at(item) + W, [SEATED[2]])
+    assert events(inbox, item.id) == ([] if held else ["escalated_master"])
 
 
 def test_a_handover_before_the_prompt_leaves_the_old_pane_alone(inbox):

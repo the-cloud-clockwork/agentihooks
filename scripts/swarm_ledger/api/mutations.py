@@ -83,13 +83,13 @@ def apply(server: ModuleType, slug: str, principal: str, payload: dict) -> dict:
     server.ledger_media.resolve(slug, operations)
     server.ledger_artifacts.resolve(slug, operations)
     screen = ledger_task_duplicates.screen(doc, operations)
+    fence = server.write_gate(slug)
     gate = ledger_task_duplicates.Gate(
         screen,
-        GuardedOperations(
-            payload, server.talk.Budget(slug), server.core, lambda epoch: server.authority.fence(slug, epoch)
-        ),
+        GuardedOperations(payload, fence, server.core, lambda epoch: server.authority.fence(slug, epoch)),
     )
     state, rejected = server.repository.apply_ops(slug, ops=operations, gate=gate)
+    fence.publish(rejected)
     server.relay_to_inbox(slug, state)
     server.doctor_phrase(slug, state)
     server.deliver_alerts(slug, state)

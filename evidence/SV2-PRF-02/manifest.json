@@ -1,0 +1,20 @@
+{
+  "package": "SV2-PRF-02",
+  "tested_commit": "71a2e12850be6be0901a53ec1545f0cece6b193a",
+  "measured_commits": {
+    "kind-run-1.json": "ec5276308ced2ea1c182dbce76c6e81a239a9d48",
+    "kind-run-2.json": "f49241dc520bf8eeb84cb0816a2880e43a85e787"
+  },
+  "inputs": {
+    "tests/fixtures/swarm_v2/startup/anton-read-1.json": "850d67d30fb7ec52e89277b2e467c6a9785fba87e56dcff3e2dcd94dc4f9695a",
+    "tests/fixtures/swarm_v2/startup/anton-read-2.json": "4ae6cdceb5cfe22509ba51da0efa04b6a57c8770189b0f2c35e2e6825741e7c4",
+    "tests/fixtures/swarm_v2/startup/kind-run-1.json": "9cdad8aecf741089cc741a5424792136f103c038982b54886cc0db5898fecc17",
+    "tests/fixtures/swarm_v2/startup/kind-run-2.json": "a2b14c83b40160e2de8be5c949f78c28e7ec73cc82a2e175ffa2959a091b1b16",
+    "tests/performance/swarm_v2/startup.py": "3e624ae98541e7fc03a84a6211eeb08ad2a1121c775da922b0283583725c6842",
+    "scripts/swarm_v2/startup_stages.py": "5f211ddd84c0bcb12a37d5db3229154f629b51ce3af5354b9b5b605d68ba8f41",
+    "scripts/swarm_v2/startup_bench.py": "86b416972cb491c8b66a06fddf0cd4e59ea6d20ad15ca0f591c73efca9e5523a",
+    ".github/workflows/startup-stages.yml": "84bdb16a16a14f7ea6f113397522de8d1a9bd245c779e57a3f6f1a6e31beee7e",
+    "tests/fixtures/swarm_v2/startup/anton-read-3.json": "d55c97ca370de23b73af9e80ecc9db06a3f3742855d8df56a646d4137728a2a8",
+    "tests/fixtures/swarm_v2/startup/logs/agentihooks-swarm-workers_swarm-exe-4a990712d05642e3964f0b0374c7cd43.log": "7d2676e1713d435e2995e9d709572c785c6378312f52ba9cf2cc6d762496a1b2"
+  }
+}

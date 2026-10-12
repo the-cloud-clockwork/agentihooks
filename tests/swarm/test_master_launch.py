@@ -339,7 +339,7 @@ def test_an_empty_saved_assignment_launches_from_the_swarm_config(up, monkeypatc
     launch = {"profile": "master", "harness": "claude", "model": "opus", "effort": "high"}
     assert {k: task["launch_assignment"][k] for k in launch} == launch
     assert {k: task["handoff_envelope"]["launch"][k] for k in launch} == launch
-    assert runtime._transfer(task)["harness"] == "claude"
+    assert runtime.profile_choice.transfer(task)["harness"] == "claude"
 
 
 def test_an_incomplete_saved_assignment_keeps_what_it_has_and_fills_the_rest(up, monkeypatch):

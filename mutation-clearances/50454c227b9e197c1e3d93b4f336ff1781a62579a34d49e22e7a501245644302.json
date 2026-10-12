@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/outage.py:scripts.swarm.outage.x_providers__mutmut_23:a67af6498c50d31f4586a2e8b235ebdd6874856c47bd531e06375638fda862f0": {
+    "reader": "Standards reader for swarm outage detector",
+    "reason": "Missing probes become a false value in both versions; the default is neither read nor persisted."
+  }
+}

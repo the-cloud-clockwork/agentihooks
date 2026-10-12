@@ -1,0 +1,75 @@
+{
+  "case": "T-SV2-KUB-03-B",
+  "independent_runs": 2,
+  "observed": {
+    "case": "T-SV2-KUB-03-B",
+    "checks": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ],
+    "evidence_class": "mocked Redis and server clock; fixture network; in process helper exec; no Kubernetes calls",
+    "input_sha256": "a72d5c962385abf18d1df7a6fe17443cde4a010a28faeb385c56443a442b8554",
+    "observed": {
+      "corrected_request": [
+        "queued",
+        true
+      ],
+      "expired_fallback": "expired",
+      "fallback_results": [
+        "queued",
+        "queued",
+        "queued",
+        "queued",
+        "queued",
+        "queued"
+      ],
+      "foreign_owner_pod": "refused",
+      "handlers_ran": 8,
+      "helper_refused": {
+        "another_execution": [
+          2,
+          "the envelope names another execution"
+        ],
+        "another_generation": [
+          2,
+          "the envelope names another execution"
+        ],
+        "expired": [
+          2,
+          "the command expired"
+        ],
+        "tampered_payload": [
+          2,
+          "the payload digest does not match"
+        ]
+      },
+      "metacharacters_stayed_content": [
+        true,
+        true
+      ],
+      "queued_after_refusals": [],
+      "refusals_left_state_unchanged": true,
+      "rollback": [
+        "disabled",
+        true
+      ],
+      "stale_generation_pod": "refused",
+      "unauthenticated": [
+        "refused",
+        "authenticated operator or current master required"
+      ],
+      "worker_transport_ambiguous_total": {
+        "deliver": 0,
+        "status": 0
+      }
+    },
+    "state": "passed"
+  }
+}

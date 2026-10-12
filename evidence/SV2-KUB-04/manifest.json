@@ -1,0 +1,21 @@
+{
+  "tested_commit": "d246b7ba84890a0a292c96d3a32732268e092820",
+  "evidence_class": "mocked Redis, fake lease clock, in process API server enforcing uid preconditions with a droppable delete response, in process attach and secret registries; no Kubernetes API server",
+  "cases": [
+    "T-SV2-KUB-04-A",
+    "T-SV2-KUB-04-B",
+    "T-SV2-KUB-04-C"
+  ],
+  "inputs": {
+    "tests/fixtures/swarm_v2/cleanup-attempts.json": "39a4e5c1dc686133750138a012ddc2d2764666e2562588959752e670ab12d4ce",
+    "tests/fixtures/swarm_v2/pod-policy.json": "fe59695070f986ee8928dcfa9abff5d0a07372f6af03611733a4cdad34772acb",
+    "tests/fixtures/swarm_v2/pod-launch.json": "a3dd9f7083b76f91ac724de6fc3d05d0227424feda9caac8d1c8f50eeede87ae",
+    "tests/sv2_kub04_cases.py": "60e9e7a6c0a3570e55ce7f4ad12a134c8db17f1d765544de3dd92d7db6ffd9f0",
+    "tests/test_swarm_v2_kubernetes_cleanup.py": "ceb4736a6f60afa1a036a7871e26e4a80e514ccb80f46323860cd3c118d6c521",
+    "tests/test_swarm_v2_retention.py": "59d78e580ff85e9de3d382ad8b790ef4c249e352f2fcde8c78accefbf75853f3",
+    "tests/test_swarm_v2_kubernetes_client.py": "6cf1fa2d68b53f6dd79bc4218c3d17a80f51ef3d5bdb385f3072fd23ae9bce48",
+    "scripts/swarm_v2/kubernetes/cleanup.py": "8c817a95c823de52d52e5335d1d30a1a8d3418a29a30eddf874d7747e1d6f3c3",
+    "scripts/swarm_v2/retention.py": "ffe42ea081b243ae2dfe275a107cbac7ad8f7c3f9a623d17297b6731a77be1db",
+    "scripts/swarm_v2/kubernetes/client.py": "054bfc85e529c4ab389ed7333fa53f4fd30bedf578bf20d5c89ea45b787bdd1f"
+  }
+}

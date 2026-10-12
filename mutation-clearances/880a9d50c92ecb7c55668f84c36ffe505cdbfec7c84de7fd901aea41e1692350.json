@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/startup_bench.py:scripts.swarm_v2.startup_bench.x_read__mutmut_38:d31115a475ad6dfda3cc6c2de8551d342f31a529249d2960eb6989dbbf7b81f4": {
+    "reader": "author, applying the Standards reader for SV2-PRF-02 ruling on the UTF-8 spelling variant",
+    "reason": "Spelling variant of utf-8 (same codec) on the worker log read; decoded output is identical."
+  }
+}

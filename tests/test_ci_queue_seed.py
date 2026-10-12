@@ -88,7 +88,7 @@ def test_queue_runs_publish_their_own_baseline_before_sonar_and_the_gate():
     record = _step(steps, "Record this run's coverage baseline")
     upload = _step(steps, "Publish this run's coverage baseline")
     find = _step(steps, "Find the run that measured the base tree")
-    assert jobs["queue-baseline"]["needs"] == ["unit"]
+    assert jobs["queue-baseline"]["needs"] == ["unit", "reuse"]
     assert download["with"] == {"pattern": "coverage-3.12-*", "path": ".coverage-shards"}
     assert record["run"] == (
         "python -m tests.coverage_baseline --shards 8 --head-shards .coverage-shards"
@@ -109,7 +109,7 @@ def test_the_queue_baseline_holds_the_exact_base_tree_on_the_app_token():
     download = _step(steps, "Download the base tree's coverage baseline")
     hold = _step(steps, "Hold the base tree")
     upload = _step(steps, "Publish the base tree's coverage baseline")
-    assert job["needs"] == ["unit"]
+    assert job["needs"] == ["unit", "reuse"]
     assert job["if"] == "${{ !cancelled() && github.event_name == 'merge_group' }}"
     assert job["permissions"] == {"contents": "read"}
     assert mint["id"] == "app-token"
@@ -154,7 +154,7 @@ def test_every_unit_shard_downloads_the_one_republished_dev_durations():
     download = _step(steps, "Download the queued run's dev durations")
     adopt = _step(steps, "Adopt latest dev durations")
     assert download["if"] == "needs.durations.outputs.queued == 'true'"
-    assert download["uses"] == "actions/download-artifact@v4"
+    assert download["uses"] == "./.github/actions/retry-download"
     assert download["with"] == {"name": "dev-durations", "path": "~/dev-durations"}
     assert steps.index(download) < steps.index(adopt)
 
@@ -219,7 +219,10 @@ def base_run(tmp_path):
         'printf "%s\\n" "$@" >> "$ARGS"\n'
         'case "$2" in\n'
         '  */commits/*) printf "tree-of-base" ;;\n'
-        '  */runs\\?head_sha=*) [[ -z "$FAIL_RUNS" ]] || exit 1; for r in $FAKE_RUNS; do echo "$r $FAKE_STATUS"; done ;;\n'
+        '  */runs\\?head_sha=*) [[ -z "$FAIL_RUNS" ]] || exit 1; for r in $FAKE_RUNS; do e=pull_request; s=$FAKE_STATUS;'
+        ' [[ " $FAKE_DISPATCH " == *" $r "* ]] && { e=workflow_dispatch; s=in_progress; };'
+        ' jq -n --argjson id "$r" --arg s "$s" --arg e "$e" \'{id: $id, status: $s, event: $e}\'; done'
+        " | jq -s '{workflow_runs: .}' | jq -r \"$4\" ;;\n"
         '  */artifacts*) n=$(cat "$POLLS"); echo $((n + 1)) > "$POLLS"; '
         '[[ "$2" == *"/$FAKE_KEPT_BY/"* && $n -ge $FAKE_AFTER ]] && printf 1 || printf 0 ;;\n'
         "esac\n"
@@ -228,7 +231,7 @@ def base_run(tmp_path):
     (tools / "sleep").write_text("#!/usr/bin/env bash\ntrue\n")
     (tools / "sleep").chmod(0o755)
 
-    def run(runs="111 222", kept_by="222", after=0, wait="600", fail_runs="", status="in_progress"):
+    def run(runs="111 222", kept_by="222", after=0, wait="600", fail_runs="", status="in_progress", dispatch=""):
         output = tmp_path / "output"
         output.write_text("")
         polls = tmp_path / "polls"
@@ -243,6 +246,7 @@ def base_run(tmp_path):
             FAKE_AFTER=str(after),
             FAIL_RUNS=fail_runs,
             FAKE_STATUS=status,
+            FAKE_DISPATCH=dispatch,
             WAIT_SECONDS=wait,
             BASE_SHA="b" * 40,
             GITHUB_OUTPUT=str(output),
@@ -265,6 +269,13 @@ def test_the_base_run_is_any_tests_run_on_the_base_commit_that_kept_a_baseline(b
     assert "repos/the-cloud-clockwork/agentihooks/actions/runs/222/artifacts?name=coverage-baseline" in args
     assert "[.artifacts[] | select(.expired | not)] | length" in args
     assert "tree-of-base" in result.stdout
+
+
+def test_the_base_run_ignores_dispatched_runs_that_wait_on_a_hosted_lane(base_run):
+    result, output, _ = base_run(dispatch="111", kept_by="333", status="completed", wait="5")
+    assert result.returncode != 0
+    assert "finished without a coverage baseline" in result.stdout
+    assert output == ""
 
 
 def test_the_base_run_waits_for_an_earlier_queue_entry_to_publish(base_run):
@@ -310,7 +321,7 @@ def test_a_failed_queue_run_publishes_its_baseline_then_stops_red():
     mint = _step(steps, "Mint the tcc main ci App token")
     assert "!cancelled()" in job["if"]
     assert "if" not in upload
-    assert stop["if"] == "needs.unit.result != 'success'"
+    assert stop["if"] == "needs.unit.result != 'success' && needs.reuse.outputs.reused != 'true'"
     assert steps.index(upload) < steps.index(stop) < steps.index(mint)
     result = subprocess.run(["bash", "-e", "-c", stop["run"]], capture_output=True, text=True)
     assert result.returncode != 0

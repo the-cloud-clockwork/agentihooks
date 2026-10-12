@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/startup_stages.py:scripts.swarm_v2.startup_stages.x__launches__mutmut_30:a76c164596b24a3c1fbbdbcada4fec224fc7758688c9c733b29d8c5335445ee2": {
+    "reader": "Standards reader for SV2-PRF-02",
+    "reason": "LAUNCH requires the literal prefix Launching a new EC2 instance, which XXXX cannot match, so search returns None for both the XXXX default and the empty default and the activity is skipped identically."
+  }
+}

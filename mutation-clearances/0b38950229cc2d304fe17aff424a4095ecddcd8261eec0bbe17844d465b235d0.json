@@ -1,0 +1,6 @@
+{
+  "scripts/codex_login.py:scripts.codex_login.x__bao_target__mutmut_11:42fbc358a38dd264d516dbdf880e53f16bce0fcd6617852be4af92e9ad43d547": {
+    "reader": "standards_reader",
+    "reason": "The default-no answer becomes None. The prompt still renders '[y/N]' because only a truthy default shows '[Y/n]', and an empty answer returns None, which the caller only reads under `not`, so it is falsy like False. Cleared by the Standards reader on PR 2578 round 2 as equivalent."
+  }
+}

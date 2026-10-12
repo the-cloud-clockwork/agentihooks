@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/proof_ledger.py:scripts.swarm_ledger.proof_ledger.x_call__mutmut_20:32dd651e2ee5beea091bd849e85c6b5711b981140434b5b55eefd04e804982af": {
+    "reader": "standards_reader",
+    "reason": "urllib.request.Request stores each header name as key.capitalize(), so every casing of Content-Type and X-Controller-Credential puts the same header on the wire; the server's routes.body compares get_content_type(), which lowercases the media type, so the casing of application/json changes no output."
+  }
+}

@@ -1,7 +1,6 @@
 """The opening prompt of a swarm agent: one task, one life; or the master, who stays for the life of the swarm."""
 
 import json
-import os
 
 from scripts.doctor import priming
 from scripts.handoff.check import section
@@ -10,6 +9,7 @@ from scripts.swarm import naming, plan_review
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.store import ASSIST, DELEGATE, DISPATCH, FULL, MANUAL, MASTER
 from scripts.swarm_ledger import ledger_close, ledger_kinds, plan_read
+from scripts.swarm_v2 import masters
 
 CLOSES = "The swarm then closes this session; stop working."
 OVERLAP_LINE = (
@@ -69,6 +69,7 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         "You troubleshoot with read only diagnostics, plan with the operator and configure the swarm, the ledger "
         "and the operator's environment with him through the agentihooks commands and tools. You never edit code or config "
         "files in a repository, commit, merge or claim a task: engineers do that.",
+        *masters.seat_lines(slug, task),
     ]
     lines += [
         *priming_lines(task),
@@ -171,10 +172,9 @@ def peer_lines(peer):
 
 
 def summary_lines(slug):
-    from scripts.swarm_ledger.repository.folder import ledger_folder
-    from scripts.swarm_ledger.repository.sqlite import read_ledger
+    from scripts.swarm import ledger_read
 
-    overview = str((read_ledger(ledger_folder(os.environ), slug, "overview") or {}).get("overview"))
+    overview = str(ledger_read.parts(slug, "overview").get("overview"))
     _, marker, summary = overview.partition(ledger_close.MARK)
     if not marker:
         return []
@@ -249,8 +249,9 @@ def build_dispatcher(slug: str, repo: str, name: str, task: dict, autonomy: str 
         "Settle each trigger within the swarm's autonomy with the agentihooks commands, the classifiers and read only sub "
         f'agents: comment on its item with {led} comment <item> "<text>", close a decided follow up, rank a task, and '
         f"clear the priority once it is resolved with {led} priority clear <priority id>.",
-        "A decision only the operator can make goes to the master; never ask the operator yourself. You never edit "
-        "code or config files, commit, merge or claim a task.",
+        "For a decision only the operator can make, tell the master and hand its priority to the operator with "
+        f'{led} priority add <item> "<the ask in plain words>": it stays in his Priorities and no longer counts as your '
+        "trigger. Never ask the operator yourself. You never edit code or config files, commit, merge or claim a task.",
         f'After each trigger, tell the master what you did: agentihooks msg send {MASTER}@{slug} "<plain words>".',
         'New triggers arrive as inbox messages: answer one with agentihooks msg reply <id> "<text>", or close it with '
         'agentihooks msg close <id> done "<where the work went>".',

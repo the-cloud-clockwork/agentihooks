@@ -49,10 +49,12 @@ dependencies = [
     # The ledger repository writes a multi-megabyte indented document on every sync;
     # the stdlib encoder takes the pure Python path whenever indent is set.
     "orjson>=3.10",
+    # Operator architecture approvals are Ed25519 signed (scripts/swarm_v2/architecture.py).
+    "cryptography>=42",
 ]
 
 [project.optional-dependencies]
-ledger = ["redis>=5.0.0", "jsonschema>=4.23", "orjson>=3.10", "pyyaml>=6.0", "tomlkit>=0.12"]
+ledger = ["redis>=5.0.0", "jsonschema>=4.23", "orjson>=3.10", "pyyaml>=6.0", "tomlkit>=0.12", "requests>=2.31.0", "cryptography>=42", "boto3>=1.34.0"]
 postgres = ["psycopg2-binary>=2.9.9"]
 otel = [
     "opentelemetry-api>=1.20.0",
@@ -82,6 +84,7 @@ dev = [
     "mutmut==3.6.0",
     "pytest-random-order>=1.2",
     "pytest-reportlog>=1.0",
+    "pytest-rerunfailures>=16.7",
     "detect-test-pollution==1.2.0",
     "uv>=0.5",
     "websockets>=15.0",
@@ -105,6 +108,7 @@ include = ["hooks*", "scripts*", "profiles*"]
 # systemd unit template for the network-transport agentihooks MCP daemon. Lives
 # under scripts/ so AGENTIHOOKS_ROOT-relative resolution works from a wheel too.
 "scripts" = ["packaging/**/*.template"]
+"scripts.swarm_v2.worker" = ["*.sh"]
 "scripts.swarm_ledger" = ["*.html", "*.css", "*.js", "static/**/*.js", "static/**/*.css"]
 # Ship every native config and Markdown artifact under profiles/ — personas,
 # rules, settings, and profile manifests. Recursive ** globs cover .claude/

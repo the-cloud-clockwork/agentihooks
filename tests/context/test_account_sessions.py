@@ -2,7 +2,11 @@
 
 from unittest.mock import patch
 
+import pytest
+
 from hooks.context import account_sessions as acc
+
+pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 def _proc(root, pid, comm, ppid, argv, env):
@@ -46,6 +50,12 @@ def test_account_comes_from_the_single_token_name():
     assert acc.account_from_names(["AH_CC_TOKEN_alpha", "AH_CC_TOKEN_beta"]) == acc.UNROUTED
     assert acc.account_from_names(["HOME"]) == acc.UNROUTED
     assert acc.environment_account({"AH_CC_TOKEN_alpha": ""}) == acc.UNROUTED
+
+
+def test_an_email_named_token_counts_under_its_email_slug():
+    from scripts.account_names import token_env
+
+    assert acc.account_from_names(["HOME", token_env("NESTOR.COLT@GMAIL.COM")]) == "nestor_coltatgmail_com"
 
 
 def test_the_route_marker_attributes_an_api_session():
@@ -98,20 +108,73 @@ def test_handed_off_sessions_free_their_slot(tmp_path):
     assert counts == {"alpha": 1, "beta": 2, acc.UNROUTED: 1}
 
 
+def test_fleet_slots_add_to_the_local_counts(tmp_path):
+    root = _tree(tmp_path)
+
+    with (
+        patch.object(acc, "handed_off_pids", return_value=set()),
+        patch.object(acc, "fleet_held", return_value={"alpha": 2, "gamma": 1}),
+    ):
+        counts = acc.sessions_by_account(root)
+
+    assert counts == {"alpha": 4, "beta": 2, "gamma": 1, acc.UNROUTED: 1}
+
+
+def test_fleet_slots_stay_out_while_distributed_launches_are_off():
+    with patch("hooks._redis.get_redis", side_effect=AssertionError("Redis read while local")):
+        assert acc.fleet_held({}) == {}
+        assert acc.fleet_held({"AGENTIHOOKS_RUNTIME_BACKEND": "local"}) == {}
+        assert (
+            acc.fleet_held({"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes", "AGENTIHOOKS_RUNTIME_DISABLED": "kubernetes"})
+            == {}
+        )
+
+
+def test_fleet_slots_need_redis():
+    with patch("hooks._redis.get_redis", return_value=None):
+        assert acc.fleet_held({"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"}) == {}
+
+
+def test_fleet_slots_fail_open_when_redis_breaks_mid_read():
+    import fakeredis
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    with (
+        patch("hooks._redis.get_redis", return_value=redis),
+        patch.object(redis, "scan_iter", side_effect=RedisConnectionError("down")),
+    ):
+        assert acc.fleet_held({"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"}) == {}
+
+
+def test_fleet_slots_are_read_from_the_account_store():
+    import fakeredis
+
+    from scripts.swarm.keyspace import ROOT
+    from scripts.swarm_v2.accounts import RESERVED, Slot, encode
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    slot = Slot("alpha", "fleet/eng-1@fleet", "exe-1", 1, RESERVED, 10**15)
+    redis.hset(f"{ROOT}:accounts:alpha", slot.holder, encode(slot))
+
+    with patch("hooks._redis.get_redis", return_value=redis):
+        assert acc.fleet_held({"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"}) == {"alpha": 1}
+
+
 def test_session_account_reads_the_agent_process(tmp_path):
     root = _tree(tmp_path)
 
     assert acc.session_account(102, root) == "beta"
 
 
-def test_live_codex_sessions_count_interactive_codex_only(tmp_path):
+def test_live_codex_sessions_count_interactive_codex_and_exec_runs(tmp_path):
     root = tmp_path / "proc"
     _proc(root, 200, "codex", 1, ["/home/u/.local/bin/codex"], {})
     _proc(root, 201, "codex", 1, ["/home/u/.codex/packages/app-server-daemon/releases/1/bin/codex"], {})
     _proc(root, 202, "codex-code-mode", 200, ["codex-code-mode"], {})
     _proc(root, 203, "codex", 1, ["codex", "exec", "summarize"], {})
     _proc(root, 204, "codex", 1, ["codex", "--yolo"], {})
-    assert acc.live_codex_sessions(root) == 2
+    assert acc.live_codex_sessions(root) == 3
 
 
 def test_codex_sessions_count_per_codex_account(tmp_path):
@@ -122,7 +185,25 @@ def test_codex_sessions_count_per_codex_account(tmp_path):
     _proc(root, 303, "codex", 1, ["codex"], {"AH_CX_TOKEN_alpha": "cx-a", "AH_CX_TOKEN_beta": "cx-b"})
     _proc(root, 304, "codex", 1, ["codex", "exec", "x"], {"AH_CX_TOKEN_beta": "cx-b"})
     _proc(root, 305, "claude", 1, ["claude"], {"AH_CC_TOKEN_alpha": "cc"})
-    assert acc.codex_sessions_by_account(root) == {"alpha": 2, "default": 2}
+    assert acc.codex_sessions_by_account(root) == {"alpha": 2, "default": 2, "beta": 1}
     assert acc.session_account(300, root) == "alpha"
     assert acc.session_account(302, root) == "default"
     assert acc.session_account(305, root) == "alpha"
+
+
+def test_a_codex_child_of_a_codex_process_is_part_of_its_session_and_a_shell_run_is_not(tmp_path):
+    root = tmp_path / "proc"
+    _proc(root, 700, "codex", 1, ["codex", "--no-daemon"], {"AH_CX_TOKEN_alpha": "a"})
+    _proc(root, 701, "bash", 700, ["bash", "-lc", "codex exec ok"], {"AH_CX_TOKEN_alpha": "a"})
+    _proc(root, 702, "codex", 701, ["codex", "exec", "ok"], {"AH_CX_TOKEN_alpha": "a"})
+    _proc(root, 703, "codex", 700, ["codex", "exec", "ok"], {"AH_CX_TOKEN_alpha": "a"})
+    _proc(root, 710, "python3", 1, ["python3", "-m", "hooks"], {})
+    _proc(root, 711, "codex", 710, ["codex", "--no-daemon", "exec", "ok"], {"AH_CX_TOKEN_beta": "b"})
+    assert acc.codex_sessions_by_account(root) == {"alpha": 2, "beta": 1}
+    assert acc.live_codex_sessions(root) == 3
+
+
+def test_an_exec_run_whose_prompt_names_a_server_still_counts(tmp_path):
+    root = tmp_path / "proc"
+    _proc(root, 720, "codex", 1, ["codex", "exec", "mcp-server"], {"AH_CX_TOKEN_alpha": "a"})
+    assert acc.codex_sessions_by_account(root) == {"alpha": 1}

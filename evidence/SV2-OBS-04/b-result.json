@@ -1,0 +1,51 @@
+{
+  "case": "T-SV2-OBS-04-B",
+  "evidence_class": "mocked: fakeredis execution registry, task claims and heartbeats behind a server that can be disconnected, a fake wall and Redis clock, signed fixture launch grants, a fixture operator page credential and an in process brain health server that answers 401 or 200; no Kubernetes API server, worker Pod, transcript exporter process or deployed brain was used",
+  "input_sha256": {
+    "health-diagnostics.json": "c9ee91f0cb3f4abf4bcd56ca2f7d534943bd0513fd03d529acbfa76fe2684139"
+  },
+  "observed": {
+    "fresh_resume": {
+      "checked_at_ms": 1280001,
+      "execution_id": "<healthy>",
+      "purpose": "native_resume",
+      "qualified": true
+    },
+    "http": {
+      "anonymous_diagnose": [
+        401,
+        "unauthenticated",
+        ""
+      ],
+      "operator_shallow_qualify": [
+        409,
+        "not_qualified",
+        "shallow_report"
+      ],
+      "worker_qualify": [
+        403,
+        "forbidden_scope",
+        ""
+      ],
+      "wrong_operator": [
+        401,
+        "unauthenticated",
+        ""
+      ]
+    },
+    "leaked": [],
+    "protected_changed": [
+      "control-owner"
+    ],
+    "refusals": {
+      "forged_resume": "unrecognized_report",
+      "shallow_backup": "shallow_report",
+      "shallow_resume": "shallow_report",
+      "stale_resume": "stale_report",
+      "stalled_backup": "pipeline_not_ok",
+      "stalled_resume": "pipeline_not_ok",
+      "unknown_purpose": "unsupported_purpose"
+    }
+  },
+  "state": "passed"
+}

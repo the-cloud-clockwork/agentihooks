@@ -38,6 +38,7 @@ class Memory:
         return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})  # NOSONAR
 
 
+from hooks._redis import redis_key
 from hooks.config import AGENTIHOOKS_HOME
 
 _KEY_PREFIX: str = os.getenv("REDIS_KEY_PREFIX", "agenticore")
@@ -47,6 +48,10 @@ _AGENT: str = os.getenv("AGENTICORE_AGENT", "unknown")
 def _rkey(suffix: str) -> str:
     """Build namespaced Redis key for memory subsystem."""
     return f"{_KEY_PREFIX}:memory:{suffix}"
+
+
+def _session_index(session_id: str) -> str:
+    return redis_key("memory:idx:session", session_id)
 
 
 class MemoryStore:
@@ -179,7 +184,7 @@ class MemoryStore:
         pipe.zadd(_rkey("idx:all"), {mem.id: mem.created_at})
         for tag in mem.tags:
             pipe.zadd(_rkey(f"idx:tag:{tag}"), {mem.id: mem.created_at})
-        pipe.sadd(_rkey(f"idx:session:{mem.session_id}"), mem.id)
+        pipe.sadd(_session_index(mem.session_id), mem.id)
         pipe.execute()
 
     def _redis_get(self, r, memory_id: str) -> Optional[Memory]:
@@ -222,7 +227,7 @@ class MemoryStore:
             min_score = str(time() - since_hours * 3600)
 
         if session_id:
-            all_ids = r.smembers(_rkey(f"idx:session:{session_id}"))
+            all_ids = r.smembers(_session_index(session_id))
         elif tags:
             all_ids = set()
             for tag in tags:
@@ -257,7 +262,7 @@ class MemoryStore:
         pipe.zrem(_rkey("idx:all"), memory_id)
         for tag in mem.tags:
             pipe.zrem(_rkey(f"idx:tag:{tag}"), memory_id)
-        pipe.srem(_rkey(f"idx:session:{mem.session_id}"), memory_id)
+        pipe.srem(_session_index(mem.session_id), memory_id)
         pipe.execute()
         return True
 
@@ -273,7 +278,7 @@ class MemoryStore:
                 mem = Memory.from_dict(data)
                 for tag in mem.tags:
                     pipe.zrem(_rkey(f"idx:tag:{tag}"), mid)
-                pipe.srem(_rkey(f"idx:session:{mem.session_id}"), mid)
+                pipe.srem(_session_index(mem.session_id), mid)
             pipe.delete(_rkey(mid))
         pipe.delete(_rkey("idx:all"))
         pipe.execute()

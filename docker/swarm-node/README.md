@@ -15,12 +15,41 @@ checksums, and the hashed Python requirements closure. The agentihooks source
 wheel uses version zero with its tested source revision recorded in the manifest.
 Changing requirements also requires updating their checksum in `versions.lock`.
 Template inputs come from the repository's packaged profiles, never a host home
-or credential store. Runtime homes are writable; templates and the environment
-are owned by root and read only to the worker user.
+or credential store. Every package role profile and the shared `_guards` folder
+also sit at the template root, so a role name resolves as a template and a
+seeded role's conditions find the guard beside it; bootstrap refuses templates
+without that folder. The controller admits a seat profile only when it is
+`default` or a role its own package ships, which matches the image built from
+the same commit; an older image ignores the record's `profile` and renders
+`default`. Runtime homes are writable; templates and the environment are owned
+by root and read only to the worker user.
+
+The image never carries a private bundle. A Pod policy `bundle` section names a
+private bundle image, its tag and the image pull Secret only the kubelet reads.
+The Pod template then adds an init container that copies the image's `/bundle`
+(the bundle tree), `/linked` (linked profiles such as `brain`) and
+`/revision.json` into a Pod private emptyDir, which the agent mounts read only at
+`/var/run/swarm/bundle`. With that section the controller admits any valid
+profile name, and the start step accepts a profile shipped in either the
+templates or the bundle, refusing one in neither with exit sixty four.
+Bootstrap seeds the bundle and its linked profiles into the attempt and renders
+through the same chain, bundle global layer, persona, settings and MCP rules as
+a local launch; the execution record names the rendered `chains`, the bundle
+`revision` and its `digest`, and the `worker_start` line prints the chains.
 
 The default command verifies and reports installed inventory without a network.
 Every command runs under Tini as PID one, which reaps children. Production
 execution supplies `python /opt/swarm-node/supervisor.py ATTEMPT LAUNCH_JSON`.
+That entry first prepares the attempt under a private umask: it reads the
+launch record and the launch grant beside it, registers with the control API
+the record names, bootstraps the attempt for the record's harness from the
+template the record's `profile` names and writes the record's authority as
+`registration.json` once the answer has confirmed its execution, task and
+grant. A missing or malformed record or grant, a record naming no profile or
+one the image does not ship, a refused registration or an answer naming
+another execution, task or grant exits sixty four before the attempt is touched; a bootstrap refusal, an
+unreadable file or a failed probe exits sixty four too. The supervisor never starts after a refusal. A prepared start prints one
+`worker_start` line naming the attempt and the worker uid.
 The supervisor owns a headless herdr server, an exporter and one main agent in
 a herdr pane. Viewers can attach and detach without owning those processes.
 
@@ -37,11 +66,54 @@ requested, because its hook wrapper must execute. Other relative paths are
 admitted. Rerunning an accepted request is a no-op, an interrupted one is
 rendered again from scratch, and a different request for an accepted attempt is
 refused. The execution record names the digest of each selected profile.
+
+`layout.json` (copied to `/opt/swarm-node/layout.json`) is the SV2-FSY-01 path
+contract, read by `scripts.swarm_v2.filesystem`. Every attempt root holds the
+same private folders: `homes` for writable CLI state, `run` for supervision and
+Unix sockets, `checkouts`, `worktrees`, `spool`, `tmp` for scratch, and
+`profiles` for profile seeds, which bootstrap seals read only. Each folder is
+created mode 0700 under the attempt, so two Pods use the same internal names
+without sharing a mutable file or socket. `filesystem.environment` gives a
+process its `HOME`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_RUNTIME_DIR` and
+`TMPDIR` inside those folders. A path, profile link or archive member
+that resolves outside its attempt root after symlink resolution is refused
+before any write and counted in `execution_path_validation_failures`. The
+execution record carries the layout as relative folder names only;
+`filesystem.restore` recreates an attempt under a new base from that record and
+refuses absolute paths or an unknown layout version, which stops new launches
+while the readers for earlier versions stay in place.
 Rollback selects the prior profile digest for new attempts; existing attempt
 homes are kept for recovery. The supervisor pins both native config homes to
 the selected private home, marks the admitted attempt trusted for Claude, and
 passes the admitted attempt as Codex project trust. This image introduces no orchestration service or
 embedded database. The existing ledger service Dockerfile remains separate.
+
+`cache-policy.json` (copied to `/opt/swarm-node/cache-policy.json`) is the
+SV2-FSY-03 cache contract, read by `scripts.swarm_v2.cache`. A cache key covers
+the cache kind, toolchain, dependency lock digest, platform and trust scope, so
+a different lock or another project's scope never reuses an entry. The store
+is built with the attempt's granted scope, its verified project identity: an
+attempt reads entries of that scope or of a policy `shared` scope and publishes
+only into its own, so an untrusted project cannot write a `trusted` toolchain. `attach`
+gives each attempt a writable layer under its own `tmp/cache` and, on a hit, the
+path of a sealed read-only seed in the node store. `publish` copies a writable
+layer into the store as a new seed: it refuses links, special files, the
+excluded credential and session database names, and executables in kinds that
+may not hold them; it never replaces an existing entry and refuses one whose
+recorded files differ, and it evicts least
+recently used entries only when that fits the byte budget and the free-space
+reserve, otherwise nothing changes. An entry whose recorded key or file
+manifest no longer matches is discarded on its next attach and counted in
+`cache_corruption_total`; `cache_hit_rate` is the share of attaches that found a
+seed. Setting `enabled` to false turns reuse off in the module: attaches return
+no seed, publishes write nothing, and no workspace, home or archive is touched.
+No worker launch path calls the module yet, and the granted scope is passed in
+by the caller, so the toolchain rejection holds at this interface only. Seeds
+are sealed by file mode only. Each attach and each publish over an existing
+entry re-hashes its files and checks their execute bits, but a seed edited
+after an attach runs unverified for that holder until the next attach discards
+it. A store owned by another user or mounted read only into attempts is left
+to deployment.
 
 The SV2-IMG-03 launch JSON has schema version one, `authority`, `harness`,
 `agent` and `exporter` argument vectors. Authority must exactly match a
@@ -58,9 +130,22 @@ Each launch has an exclusive attempt lock and a new random incarnation under
 its run directory. `SWARM_SUPERVISION_DIR` points to that directory; its
 `context.json` binds authority and incarnation. An exporter calls
 `scripts.swarm_v2.supervision_protocol.acknowledge("exporter", status="ready")`
-when usable. Only then does the main agent start. SIGTERM or SIGINT publishes
-`drain.json`, stops the agent and herdr process trees including escaped
-grandchildren, and publishes `quiesced.json`. The exporter remains alive to
+when usable. Only then does the main agent start. A launch record with no
+`exporter` starts herdr and the agent alone and reports its checkpoint
+incomplete. The image's own exporter is `python -m
+scripts.swarm_v2.session_export`, which the controller's
+`AGENTIHOOKS_WORKER_EXPORTER` setting names when unset or empty. Once its
+incarnation is quiesced it copies the agent's native session files, Claude
+`projects/**/*.jsonl` or Codex `sessions/**/*.jsonl` from the private home,
+regular files only and never through a link, under
+`checkpoints/<incarnation>/session`, syncs them, writes a manifest bound to the
+supervision scope with each file's sha256 and size and the newest main
+transcript's session id, and acknowledges it complete. No main transcript or a
+linked session folder is acknowledged incomplete with its reason; a forced
+quiescence exports nothing and the supervisor reports it incomplete. The
+exporter exits without a checkpoint if its supervisor goes away. SIGTERM or
+SIGINT publishes `drain.json`, stops the agent and herdr process trees
+including escaped grandchildren, and publishes `quiesced.json`. The exporter remains alive to
 flush. No task reconciliation, authority renewal or second swarm timer runs
 in the supervisor.
 
@@ -94,14 +179,109 @@ Historical supervisor image rollback must be requalified when such an image
 exists. Production rollout remains with antoncore GitOps.
 
 After committing inputs, `bash docker/swarm-node/smoke.sh OUTPUT_DIRECTORY`
-builds an archived clean context, starts two independent containers with network
-disabled, rejects three invalid locks, rebuilds without cache and starts the
-retained image again. It also bootstraps the fixture profiles in
-`fixtures/profiles` inside fresh containers, runs `claude mcp list`, `codex mcp
-list`, `claude -p` and `codex exec` offline so their SessionStart hooks register
-the session, proves refusals, crash recovery and a profile rollback, and writes
-the SV2-IMG-02 evidence. The output contains the build manifest, software
+builds an archived clean context, scans the built image for credentials with
+`docker/swarm-node/scan.sh`, starts two independent containers with network
+disabled, rejects three invalid locks, rebuilds the worker stage without cache and starts
+the retained image again. The rebuild reuses the pip wheels and tool binaries of the
+`downloads` stage, each checked against its locked sha256 before use. It
+also bootstraps the fixture profiles in `fixtures/profiles` inside fresh
+containers, runs `claude mcp list`, `codex mcp list`, `claude -p` and `codex
+exec` offline so their SessionStart hooks register the session, proves
+refusals, crash recovery and a profile rollback, and writes the SV2-IMG-02
+evidence. The output contains the build manifest, software
 inventory, profile hashes and package evidence. Production deployment and new
 attempt image selection remain with antoncore GitOps. Rollback retains the
 previously qualified image for new attempts; active attempts and durable task
 state are unchanged.
+
+`python /opt/swarm-node/health.py MODE --attempt ATTEMPT --harness claude|codex`
+answers the execution adapter's probes with one JSON report. `liveness` reads
+only the attempt's newest supervisor incarnation: its process is alive in this
+process namespace and it has published no result. herdr and every external
+dependency stay out of liveness, so an outage never restarts a running agent.
+`startup` adds the self tests: herdr and the harness binary on `PATH`, the
+private home readable and writable, the attempt `run` and `tmp` folders
+writable, every program in every SessionStart hook command callable (a `cd`
+must name an existing folder), and herdr answering
+`workspace list` over its local socket for that incarnation. `readiness` also
+requires the agent to be running. A brain named by `BRAIN_URL` that does not
+answer `/health` reports `degraded` under `dependencies` with exit zero; local
+failures report `not_ready` with exit one. `diagnose` prints the full report
+for a failed bootstrap with exit zero and lists environment variable names,
+never values. Every report names `worker_startup_failure_reason`, the first
+failing local check. Probes leave nothing behind in the attempt.
+`--herdr-timeout` and `--brain-timeout` (seconds, default 2) are the probe
+thresholds; a wrong value is reverted in the probe arguments alone, with no new
+image and no agent restart. The SV2-KUB-01 Pod template
+(`scripts.swarm_v2.kubernetes.spec`) wires the probes; their thresholds come from
+its Pod policy document, which antoncore GitOps supplies, and roll back
+independently of the image. `tests/integration/swarm_node/run_health_proof.sh`
+proves the probes against isolated containers with real headless herdr.
+
+Image promotion runs in `.github/workflows/swarm-node-image.yml` on GitHub hosted
+runners only, so a broken swarm can still build and publish its repair image: no
+swarm runner, ledger or Redis is involved. A dev push (or a dispatch with
+`publish`) builds the candidate from the checked out commit, then
+`docker/swarm-node/qualify.sh` runs `python -m scripts.swarm_v2.image_probe`
+inside it with the network disabled and no credentials. The probe starts a
+private headless herdr server and reads its status and socket API schema, then
+launches `claude -p` and `codex exec` from fixture profiles and counts the
+sessions their SessionStart hooks registered. `scripts.swarm_v2.image_attestation`
+qualifies each target against the image manifest's pinned version and the
+accepted herdr contract of the local herdr 0.9.1 runtime path (protocol 22,
+every socket method the runtime calls, and the server capabilities saved machine
+forwarding needs: endpoint protocol generation one, `surface_interest`,
+`health_check` and `detached_server_daemon`). herdr 0.9.1 reports
+`detached_server_daemon` true only when the server leads its own session, and
+`herdr machine add` refuses any other server as not ready for saved machines; the
+supervisor and the probe both start `herdr server` in a new session.
+`scripts.swarm_v2.herdr.capabilities` (SV2-HDR-01) holds that contract and the
+remote operation matrix; `python -m scripts.swarm_v2.herdr.capabilities TARGET
+INCARNATION` qualifies a saved machine before any remote terminal is promised
+(exit 0 compatible, 1 when the client and server pair is incompatible, 2
+unreachable or missing arguments), and
+`tests/integration/herdr_remote/run_remote_proof.sh`
+proves it against the pinned binary behind a private sshd. That raw target
+command is operator only; agents qualify a worker through its terminal scope.
+`docker/swarm-node/ssh` is the worker terminal endpoint (SV2-HDR-02): when the Pod
+mounts its terminal Secret at `/var/run/swarm/terminal`, the entrypoint starts an
+unprivileged sshd on port 2222 that loads that execution's host key, trusts only
+the mounted user CA and admits only certificates naming the execution, with every
+forwarding off; its forced command, `scripts.swarm_v2.herdr.session`, enters the
+supervised herdr environment of the attempt. The start script waits in the
+background up to `SWARM_TERMINAL_WAIT_SECONDS` (180) for the Secret; without it the
+endpoint stays off for that attempt and the agent still runs. The image keeps no host key of its own.
+`scripts.swarm_v2.herdr.endpoints` renders the Secret, a ClusterIP Service and a
+NetworkPolicy per execution, and `scripts.swarm_v2.herdr.attach` connects the
+client; `tests/integration/herdr_terminal/terminal_proof.py` proves the pair
+against the pinned herdr on localhost. Qualification reports
+`worker_image_qualified_targets`. Any refused target, or a manifest naming another
+commit, leaves the image unpromotable and nothing is pushed. The same job builds
+an incompatible herdr fixture and requires its refusal, and qualifies the
+candidate twice in independent containers. Before the registry login it builds a
+fixture carrying a build-time generated GitHub app token, requires
+`docker/swarm-node/scan.sh` to refuse it, then scans the candidate. The scan runs
+Trivy's secret scanner over every image layer and the image config, fails on any
+finding and fails when the scanner cannot finish. The one exception is a
+`jwt-token` match in an installed Python package's `dist-info/METADATA`, where
+package descriptions quote example tokens; it is recorded in
+`package-examples.txt`, and any other rule in that file still fails.
+
+Only a qualified image is pushed, under the immutable tag `sha-<commit>`, after
+the registry login, which holds the workflow token; build arguments carry only
+the source revision. `docker/swarm-node/publish.sh` confirms the registry config
+digest equals the tested image before recording the digest. An existing commit
+tag is never pushed again: a rerun records it as a replay only when it holds the
+tested image, and a registry that cannot say whether the tag exists stops the
+run with nothing pushed. On dev the floating `dev` tag then moves to the published
+digest; the deployed controller resolves that tag to its digest at each launch. The
+`swarm-worker-image-attestation` artifact holds the probe output and the
+attestation with the registry digest, which is the immutable digest reference
+`agentihooks-worker@sha256:...`, the version manifest, the protocol compatibility
+manifest, the test report and provenance naming the commit and run. Publication
+runs only from a dev push or a `publish` dispatch on dev or a proof branch; a
+dispatch elsewhere qualifies without pushing. A push to a `diffcheck/` proof
+branch starts no build. Proof branch publication goes only to the
+`agentihooks-worker-proof` repository. Rollback points deployment at the last
+accepted digest without rebuilding or retagging it; deployment selection belongs
+to antoncore GitOps.

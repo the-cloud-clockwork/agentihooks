@@ -3,6 +3,7 @@
 import re
 import time
 
+from scripts.swarm.naming import lane_of, resolve_name
 from scripts.swarm_ledger.ledger_kinds import KINDS
 from scripts.swarm_ledger.ledger_tasks import LANES
 from scripts.swarm_ledger.repository.hierarchy import project
@@ -12,7 +13,7 @@ VERBS = ("freeze", "focus")
 NODE_RE = re.compile(r"^(plans|phases|slices|tasks)/[^/\s]+$")
 SELECTORS = frozenset({*(f"lane:{lane}" for lane in LANES), *(f"kind:{kind}" for kind in KINDS)})
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
-DISPATCHER = "dispatcher"
+DISPATCH = "dispatch"
 FULL = "full"
 FIELDS = {"freeze_set": ("verb", "target", "reason", "quote"), "freeze_clear": ("target", "reason", "quote")}
 EVENTS = {"freeze": "frozen", "focus": "focused"}
@@ -56,7 +57,7 @@ def author(op, ctx) -> tuple[str, str] | None:
     by = op.get("by")
     if by is None:
         return "operator", op.get("quote")
-    if by == DISPATCHER:
+    if lane_of(resolve_name(by)) == DISPATCH:
         return (by, "") if autonomy(ctx.slug) == FULL else None
     master = ctx.meta["members"].get(by, {}).get("role") == "orchestrator"
     words = ledger_relay.verified(by, op["quote"]) if master and op.get("quote") else ""
@@ -67,7 +68,7 @@ def under(doc: dict, target: str) -> set:
     below = {}
     for node, (_, link, _) in project(doc)[0].items():
         below.setdefault(link, []).append(node)
-    for task in doc["tasks"]:
+    for task in doc.get("tasks", []):
         below.setdefault(f"tasks/{task['id']}", []).extend(f"tasks/{m}" for m in task.get("group_members", []))
     found = [target]
     for parent in found:
@@ -79,7 +80,7 @@ def _set(doc, op, ctx, by, words):
     target = op["target"]
     if not selector(target) and target not in project(doc)[0]:
         return False
-    rows = doc["freezes"]
+    rows = doc.setdefault("freezes", [])
     if any(row["verb"] == op["verb"] and row["target"] == target for row in rows):
         return True
     row = {"id": op["id"], "verb": op["verb"], "target": target, "by": by, "at": ctx.at, "reason": op.get("reason", "")}
@@ -92,7 +93,7 @@ def _set(doc, op, ctx, by, words):
 def _clear(doc, op, ctx, by):
     target = op["target"]
     held = under(doc, target)
-    rows = doc["freezes"]
+    rows = doc.get("freezes", [])
     gone = [row for row in rows if row["target"] in held]
     if gone:
         doc["freezes"] = [row for row in rows if row["target"] not in held]

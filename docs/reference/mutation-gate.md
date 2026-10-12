@@ -8,6 +8,30 @@ Run locally with the workspace Python:
 ~/dev/tcc-ecosystem/.venv/bin/python -m scripts.ci_mutation --base origin/dev
 ```
 
+## Graded lines
+
+A branch is graded only on its own lines, so a dev refresh or a stacked branch does not pay for work that was already graded:
+
+- **Real bases.** The plan job resolves them once:
+  - the merge base with the given base;
+  - the merge base with `origin/dev`;
+  - every pushed commit inside the head whose own push Mutation preflight had a successful `mutation` job.
+- **Which lines count.** A line is graded only when it differs from every real base. Because the given base always counts, the scope never grows past `base...head`.
+- **Proof of grading.** The plan reads the preflight proof through the Actions API on the App token. Dispatched runs and pull request gates never count, since they choose their own base or may skip mutation.
+- **Weakened tests.** The narrowing never hides weakened tests. If the head changed `tests/` against a newer base beyond adding tests, every line that base excluded is graded again. Adding tests means new `test_` functions, or new `Test` classes holding only test methods, with only `pytest.mark` decorators, or imports in a new test file, and no reused or repeated name. An import added to an existing test file counts as a change, since it can shadow a fixture or builtin those tests use. Anything else counts as a change: an edit, a deletion, a rename, a skip marker, a fixture, a helper, a conftest or a data file.
+- **One list for every job.** The plan writes the resolved list as `bases`. The stats parts, shards, push preflight and the proofs mutation take it with `--bases`, so every job grades the same mutants.
+
+- **Reuse on the push preflight.** Before the mutation job takes a mutation lane, which the proofs workflow and other dispatches never wait on, the cheap decision job reads the newest graded push preflight for the same head on any branch, then the branch's newest. When that run concluded success with a complete green report and this head equals it or only adds tests since, as defined above, its report is uploaded as this run's `mutation-preflight-report` with a `reuse.json` naming the source run, and the mutation job is skipped. A newer red or failed run, a missing report, any change outside `tests/` or any lookup error runs the mutation job as before, so no head goes green without a complete green report. A reused head never counts as a graded base. Measured on PR 2624: the full preflight 38151448161 took 116 s; the tests only head after it reused that report in run 38151636224, whose decision job took 18 s.
+
+Measured on dispatched proofs:
+
+| Case | Old scope | New scope | Shard time |
+|---|---|---|---|
+| Branch refreshed with dev, base pinned to an older dev commit | 17 files | 203 own mutants | 39 s |
+| Branch stacked on a graded branch | earlier branch's 303 mutants plus own | 13 own mutants | 23 s |
+
+On the pull request that delivered this, the whole mutation chain finished 184 s into the Tests run: the plan, including the App token mint, took 21 s, and the stats and two shards finished by 184 s. Gate Required finished at 431 s, well inside the fifteen minute budget. Sonar and the coverage ratchet set that time, not mutation.
+
 `--head`, `--output` and `--budget` override the comparison head, evidence directory and total seconds. The default budget is eighteen minutes, leaving two minutes for setup and evidence upload in the twenty minute job. Over budget files and failed runs are named and fail the gate. All outcomes, including survivors on untouched lines, are recorded in `report.json`; CI uploads the complete evidence directory on success or failure.
 
 Mutmut 3 mutates functions and methods. Files without mutable functions are reported explicitly with a zero count. A surviving or uncovered mutant fails when its original source lines intersect added or changed hunk lines. Incomplete, timed out and unexpected mutant outcomes fail regardless of their line. Generated trampolines and function relative diffs are mapped back to the original source, including decorators and methods.

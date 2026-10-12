@@ -1,8 +1,9 @@
 """Agent writes on a swarm ledger as inbox items, sent by the minute tick so the master hears of them asleep or awake.
 
-New ledger events past the swarm's cursor go to the master. Time rules raise a follow-up nobody decided, watch each
-task's pull request on GitHub and pass every new health finding on for a verdict. Each item is sent once, so a replay
-of the same ledger sends nothing; the wake ladder then carries every item to a reader.
+New ledger events past the swarm's cursor go to the master owning their phase, else the lead. Time rules raise a
+follow-up nobody decided, watch each task's pull request on GitHub and pass every new health finding on for a verdict.
+Each item is sent once, so a replay of the same ledger sends nothing; the wake ladder then carries every item to a
+reader.
 """
 
 import functools
@@ -13,13 +14,16 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
-from scripts.inbox.seats import seat_address
 from scripts.inbox.store import CLOSED, InboxError
+from scripts.swarm import operator_mail, outage
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.naming import lane_of
 from scripts.swarm.store import MASTER, PREFIX
+from scripts.swarm_v2 import masters
 
 MINUTE_MS = 60_000
+TASK_FINDINGS = frozenset({"proof loop", "failed launch", "stale claim"})
+HELD_FINDINGS = frozenset({"idle with claim", "waiting on input", "stalled", "working on drain"})
 FOLLOWUP_RAISE_MS = 15 * MINUTE_MS
 FOLLOWUP_OPERATOR_MS = 30 * MINUTE_MS
 MERGED_ENGINEER_MS = 10 * MINUTE_MS
@@ -27,6 +31,8 @@ MERGED_MASTER_MS = 20 * MINUTE_MS
 RED_QUIET_MS = 20 * MINUTE_MS
 SENT_TTL_S = 30 * 24 * 3600
 SENDER = "swarm"
+EVENTS_CURSOR = "events-cursor"
+RELAYED = "agent follow ups, questions and task changes"
 OPERATOR = "operator"
 ASK_WORDS = 12
 RED = {"FAILURE", "ERROR", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED"}
@@ -262,13 +268,23 @@ def tick_view(inbox: object, store: object, slug: str, doc: dict) -> Callable[[s
 
 
 class Mail:
-    def __init__(self, inbox, store, slug):
-        self.inbox, self.store, self.slug = inbox, store, slug
-        live = [a for a in store.agents(slug) if a.state != "finished"]
+    def __init__(self, inbox, store, slug, doc=None):
+        self.inbox, self.store, self.slug, self.doc = inbox, store, slug, doc or {}
+        agents = store.agents(slug)
+        live = [a for a in agents if a.state != "finished"]
         self.seats = {a.name: a.seat or a.name for a in live}
-        boss = next((a for a in live if a.lane == MASTER), None)
-        self.has_master = boss is not None
-        self.master = self.seats[boss.name] if boss else seat_address(slug, MASTER)
+        self.held = {a.name: a.task for a in agents if a.lane != MASTER}
+        self.has_master = any(a.lane == MASTER for a in live)
+        self.master = operator_mail.master_address(slug, live)
+        self.masters = masters.live_seats(live)
+
+    @functools.cached_property
+    def owners(self):
+        return masters.MasterSeats(self.store.redis).owners(self.slug, self.doc) if self.doc else {}
+
+    def owner(self, target):
+        """A phase's or a task's item goes to the live master owning its phase, anything else to the lead."""
+        return masters.route(target, self.doc, lambda: self.owners, self.masters, self.master)
 
     def once(self, key, act):
         marker = self.store.key(self.slug, "events-sent", key)
@@ -295,21 +311,35 @@ class Mail:
         self.store.redis.hset(self.red_index(), item.id, url)
 
     def engineer(self, task):
-        return self.seats.get(task.get("claimed_by", ""), self.master)
+        return self.seats.get(task.get("claimed_by")) or self.owner(f"tasks/{task['id']}")
 
 
 def event_pass(inbox, store, slug, doc, ledger, now_ms, github=view):
-    mail, github = Mail(inbox, store, slug), functools.cache(github)
+    mail, github = Mail(inbox, store, slug, doc), functools.cache(github)
     events = doc.get("_meta", {}).get("events", [])
     tasks = {t["id"]: t for t in doc.get("tasks", [])}
     raised = _raised_for_operator(doc, events)
     return (
-        _events(mail, new_events(store, slug, doc, "events-cursor"), tasks, raised)
+        _events(mail, new_events(store, slug, doc, EVENTS_CURSOR, RELAYED), tasks, raised)
+        + _history_gaps(mail)
         + _followups(mail, doc, events, ledger, now_ms)
         + _pull_requests(mail, tasks.values(), now_ms, github)
         + _settle_red_notices(mail, github)
         + _priorities(mail, doc, raised)
     )
+
+
+def _history_gaps(mail):
+    key, sent = mail.store.key(mail.slug, "history-gaps"), []
+    for gap, value in mail.store.redis.hgetall(key).items():
+        cursor, trimmed, subject = json.loads(value)
+        text = (
+            f"Ledger {mail.slug} trimmed its history after revision {cursor} through revision {trimmed} before the "
+            f"tick read it, so {subject} in that range reached no one. Read the ledger for them."
+        )
+        sent += mail.send(f"history-gap:{gap}", mail.master, text)
+        mail.store.redis.hdel(key, gap)
+    return sent
 
 
 def _raised_for_operator(doc, events):
@@ -363,26 +393,37 @@ def _settled(found):
     return "turned green" if found.resolved and not found.red else ""
 
 
-def findings_pass(inbox, store, slug, shown):
-    mail, sent = Mail(inbox, store, slug), []
+def findings_pass(inbox, store, slug, shown, doc=None):
+    mail, sent = Mail(inbox, store, slug, doc), []
     for found in shown:
-        if found["kind"] == "spawn stall":
+        if found["kind"] == "spawn stall" or found["kind"] in outage.HELD.values():
             continue
         judged = (found.get("verdict") or {}).get("at", 0)
         text = (
             f"New health finding on swarm {slug}: {found['summary']} ({found['kind']}). Give it a verdict: "
             f'agentihooks swarm {slug} verdict {found["id"]} {"|".join(VERDICTS)} --note "<why>"'
         )
-        sent += mail.send(f"finding:{found['id']}:{judged}", mail.master, text)
+        sent += mail.send(f"finding:{found['id']}:{judged}", _finding_owner(mail, found), text)
     return sent
 
 
-def new_events(store, slug, doc, cursor_name):
+def _finding_owner(mail, found):
+    kind, subject = found["kind"], found["subject"]
+    task = subject if kind in TASK_FINDINGS else kind in HELD_FINDINGS and mail.held.get(subject)
+    return mail.owner(f"tasks/{task}") if task else mail.master
+
+
+def new_events(store, slug, doc, cursor_name, subject):
+    """Events past the named cursor, which moves to the ledger revision; history trimmed past it is kept as a gap."""
     key, rev = store.key(slug, cursor_name), doc["_meta"]["rev"]
     cursor = store.redis.get(key)
     store.redis.set(key, rev)
     if cursor is None:
         return []
+    trimmed = doc["_meta"].get("events_trimmed")
+    if trimmed is not None and trimmed > int(cursor):
+        gap = json.dumps([cursor, trimmed, subject])
+        store.redis.hset(store.key(slug, "history-gaps"), f"{cursor_name}:{cursor}:{trimmed}", gap)
     return [e for e in doc["_meta"].get("events", []) if int(cursor) < e.get("rev", 0) <= rev]
 
 
@@ -400,7 +441,7 @@ def _events(mail, events, tasks, raised):
         if text:
             sent += mail.send(
                 f"event:{event['rev']}:{event['kind']}:{event['target']}",
-                mail.master,
+                mail.owner(event["target"]),
                 text,
                 ref=f"{mail.slug}:event:{event['target']}",
                 fyi=event["kind"] == "task done",
@@ -471,8 +512,9 @@ def _priorities(mail, doc, raised):
                 f"New priority on ledger {mail.slug} for {item}: {row['text']}\n"
                 "Triage it: resolve it if the call is yours, else leave it for the operator."
             )
-            mail.inbox.send(SENDER, mail.master, text, ref=f"{mail.slug}:priority:{item}")
-            sent.append(f"told {mail.master}: priority {item}")
+            owner = mail.owner(item)
+            mail.inbox.send(SENDER, owner, text, ref=f"{mail.slug}:priority:{item}")
+            sent.append(f"told {owner}: priority {item}")
         mail.store.redis.sadd(key, item)
     mail.store.redis.set(marker, 1)
     return sent
@@ -498,7 +540,7 @@ def _pull_requests(mail, tasks, now_ms, github):
                 sent += mail.send(f"{url}:merged:engineer", mail.engineer(task), text)
             if age >= MERGED_MASTER_MS:
                 text = f"{title} on ledger {mail.slug} is still in pull request twenty minutes after {url} merged."
-                sent += mail.send(f"{url}:merged:master", mail.master, text)
+                sent += mail.send(f"{url}:merged:master", mail.owner(f"tasks/{task['id']}"), text)
         elif found.state == "CLOSED":
             text = f"Your pull request {url} for {title} was closed without merging. Reopen it, open a new one, or block the task."
             sent += mail.send(f"{url}:closed", mail.engineer(task), text)

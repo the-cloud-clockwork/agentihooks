@@ -1,0 +1,56 @@
+{
+  "case": "T-SV2-LDG-02-C",
+  "independent_runs": 2,
+  "observed": {
+    "case": "T-SV2-LDG-02-C",
+    "evidence_class": "mocked Redis and server clock; signed fixture grants; no external runtime",
+    "input_sha256": "23a672c8a2243a860add3a69d90458928c2a0c9e6e776874a210994a8f2bd048",
+    "observed": {
+      "heartbeat_rejections": {
+        "revision_conflict": 1
+      },
+      "heartbeat_rejections_total": 1,
+      "out_of_order": [
+        409,
+        "revision_conflict"
+      ],
+      "replayed": [
+        200,
+        {
+          "archive_watermark": 0,
+          "command_watermark": 0,
+          "controller_epoch": 1,
+          "lease_deadline": "1970-01-01T00:00:01.100Z",
+          "lease_deadline_ms": 1100,
+          "renewal_sequence": 5,
+          "schema_version": "2.1",
+          "task_generation": 1,
+          "task_id": "task"
+        }
+      ],
+      "rollback": {
+        "draining_heartbeat": [
+          200,
+          {
+            "archive_watermark": 0,
+            "command_watermark": 0,
+            "controller_epoch": 1,
+            "lease_deadline": "1970-01-01T00:00:01.150Z",
+            "lease_deadline_ms": 1150,
+            "renewal_sequence": 6,
+            "schema_version": "2.1",
+            "task_generation": 1,
+            "task_id": "task"
+          }
+        ],
+        "issue_while_disabled": "forbidden_scope",
+        "new_registration": [
+          401,
+          "unauthenticated"
+        ],
+        "revoked_unregistered_grants": 1
+      }
+    },
+    "state": "passed"
+  }
+}

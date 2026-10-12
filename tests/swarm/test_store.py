@@ -115,7 +115,7 @@ def test_launch_rows_merge_recorded_launches_with_verified_history(store):
     assert sorted(store.launches("smoke"), key=lambda row: row["agent"]) == [
         {"agent": "first", "task": "t1", "at": 1, "state": "started", "error": ""},
         {"agent": "last", "task": "t2", "at": 3, "state": "started", "error": ""},
-        {"agent": "waiting", "task": "t3", "at": 4, "state": "pending", "error": ""},
+        {"agent": "waiting", "task": "t3", "at": 4, "state": "pending", "error": "", "pane_id": ""},
     ]
 
 
@@ -250,6 +250,13 @@ def test_scaling_settings_round_trip_and_an_old_config_reads_the_defaults(store)
         DEFAULT_MEMORY_PER_AGENT_MB,
     )
     assert DEFAULT_LOAD_LOW < DEFAULT_LOAD_HIGH
+
+
+def test_the_api_address_round_trips_and_an_old_config_reads_it_empty(store):
+    store.create(config(api_url="https://swarm.example.test:8443"))
+    assert store.config("smoke").api_url == "https://swarm.example.test:8443"
+    store.redis.hdel(store.key("smoke", "config"), "api_url")
+    assert store.config("smoke").api_url == ""
 
 
 @pytest.mark.parametrize(

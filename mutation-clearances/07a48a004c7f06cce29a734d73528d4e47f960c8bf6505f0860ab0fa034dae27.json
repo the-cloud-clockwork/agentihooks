@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/checkpoints/native.py:scripts.swarm_v2.checkpoints.native.x\u01c1Codex\u01c1_indexed__mutmut_20:ca7aaf17bb5468cb0da2c96a271fbe7cb4339762b2ba2aa475d03d3ac5b69e04": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: uppercasing the column, table and parameter names leaves the query unchanged because SQLite treats ASCII identifiers case-insensitively, and the cursor column label is never read, so the returned rollout path is identical."
+  }
+}

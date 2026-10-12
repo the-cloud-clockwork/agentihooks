@@ -33,7 +33,7 @@ All domain mutations use POST or PUT `/operations`. The envelope has a transport
 | Tasks | task_add, task_update, task_rank, task_group, task_ungroup | Tasks collection or named task |
 | Phases | phase_add, phase_update, phase_review, phase_append | Phases collection or named phase |
 | Decisions | priority, priority_clear, notification_clear, relay, answer, verdict | Priority or notification collection, or named item |
-| Ledger lifecycle | title_set, summary_set, close, reopen, size_set, source_add | Metadata or sources |
+| Ledger lifecycle | title_set, overview_set, summary_set, close, reopen, size_set, source_add | Metadata or sources |
 | Artifacts | artifact_add, artifact_delete, artifact_restore, artifact_purge | Artifacts |
 
 Operation schema names are checked against every domain dispatch name. Existing semantic validators are reused after the central strict field and type schemas. Receipts retain the latest one thousand transport identifiers and operation outcomes in repository metadata, including across server restarts. A replay within that retained window ignores its old expected revision and does not apply again. Outside the window the revision guard still applies.

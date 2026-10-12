@@ -1,0 +1,12 @@
+{
+  "schema_version": "2.0",
+  "package": "SV2-ACC-02",
+  "fixture": "One account with one remaining slot and two simultaneous launch requests",
+  "account": "fixture",
+  "cap": 2,
+  "held_seat": "eng-1@fixture",
+  "requests": ["eng-2@fixture", "eng-3@fixture"],
+  "ttl_ms": 30000,
+  "machine": {"backend": "kubernetes", "host": "pod-0000000000000000000000000000c003", "namespace": "boot-worker/pid:[4026531836]"},
+  "grant": "Signed fixture launch grant, validated on every request; never a deployed credential"
+}

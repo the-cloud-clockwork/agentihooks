@@ -1,0 +1,185 @@
+{
+  "package": "SV2-FSY-01",
+  "case": "T-SV2-FSY-01-A",
+  "title": "successful behavior: two attempts use the same internal path names without sharing a mutable CLI file or Unix socket",
+  "tested_commit": "9698d0aacfa190b7d538aa9b8cdd1a66d29df0df",
+  "evidence_class": "local isolated fixture in CI; not live rollout proof",
+  "mocked": false,
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38059486223",
+  "tests": [
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_the_shipped_layout_names_every_root_relative_to_the_attempt",
+      "job": 114234977195,
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T14:28:54.9371785Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_the_shipped_layout_names_every_root_relative_to_the_attempt",
+      "job": 114234977207,
+      "shard": "unit (3.12, 8)",
+      "output": "PASSED at 2026-10-10T14:29:14.2402717Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_load_reads_the_repository_layout_then_the_image_copy",
+      "job": 114234977140,
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T14:29:25.4190658Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_load_reads_the_repository_layout_then_the_image_copy",
+      "job": 114234977204,
+      "shard": "unit (3.12, 3)",
+      "output": "PASSED at 2026-10-10T14:30:31.6780138Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_load_reads_an_explicit_layout_file_only",
+      "job": 114234977154,
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T14:29:40.8906881Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_load_reads_an_explicit_layout_file_only",
+      "job": 114234977205,
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T14:29:15.9170775Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_every_root_may_be_immutable",
+      "job": 114234977195,
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T14:28:54.9505897Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_every_root_may_be_immutable",
+      "job": 114234977207,
+      "shard": "unit (3.12, 8)",
+      "output": "PASSED at 2026-10-10T14:29:14.3143285Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_two_attempts_share_internal_names_but_no_mutable_file_or_socket",
+      "job": 114234977133,
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T14:29:24.1280197Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_two_attempts_share_internal_names_but_no_mutable_file_or_socket",
+      "job": 114234977255,
+      "shard": "unit (3.12, 1)",
+      "output": "PASSED at 2026-10-10T14:30:18.7133610Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_second_independent_fixture_allocates_the_same_layout",
+      "job": 114234977133,
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T14:29:24.1606119Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_second_independent_fixture_allocates_the_same_layout",
+      "job": 114234977226,
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T14:30:51.6047689Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_allocate_keeps_existing_contents",
+      "job": 114234977165,
+      "shard": "unit (3.12, 2)",
+      "output": "PASSED at 2026-10-10T14:30:33.4400222Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_allocate_keeps_existing_contents",
+      "job": 114234977205,
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T14:29:15.9570743Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_seed_copies_a_profile_read_only_while_homes_stay_writable",
+      "job": 114234977140,
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T14:29:25.3796257Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_seed_copies_a_profile_read_only_while_homes_stay_writable",
+      "job": 114234977280,
+      "shard": "unit (3.12, 7)",
+      "output": "PASSED at 2026-10-10T14:29:31.6305582Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_seed_root_the_layout_leaves_mutable_is_not_sealed",
+      "job": 114234977140,
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T14:29:25.4051633Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_seed_root_the_layout_leaves_mutable_is_not_sealed",
+      "job": 114234977204,
+      "shard": "unit (3.12, 3)",
+      "output": "PASSED at 2026-10-10T14:30:31.8645420Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_contained_archive_extracts_into_its_destination",
+      "job": 114234977195,
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T14:28:54.9509399Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_contained_archive_extracts_into_its_destination",
+      "job": 114234977207,
+      "shard": "unit (3.12, 8)",
+      "output": "PASSED at 2026-10-10T14:29:14.3292822Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_the_archive_caps_bound_members_and_expanded_bytes",
+      "job": 114234977154,
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T14:29:40.9704705Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_the_archive_caps_bound_members_and_expanded_bytes",
+      "job": 114234977205,
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T14:29:15.9264002Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_an_archive_at_its_member_and_size_cap_extracts",
+      "job": 114234977140,
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T14:29:25.4081860Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_an_archive_at_its_member_and_size_cap_extracts",
+      "job": 114234977204,
+      "shard": "unit (3.12, 3)",
+      "output": "PASSED at 2026-10-10T14:30:31.7830169Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_environment_points_every_process_at_its_private_roots",
+      "job": 114234977154,
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T14:29:41.1135318Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_environment_points_every_process_at_its_private_roots",
+      "job": 114234977205,
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T14:29:16.0031049Z"
+    },
+    {
+      "test": "tests/test_worker_home.py::test_bootstrap_allocates_the_layout_seals_seeds_and_records_relative_paths",
+      "job": 114234977140,
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T14:29:27.6454374Z"
+    },
+    {
+      "test": "tests/test_worker_home.py::test_bootstrap_allocates_the_layout_seals_seeds_and_records_relative_paths",
+      "job": 114234977280,
+      "shard": "unit (3.12, 7)",
+      "output": "PASSED at 2026-10-10T14:29:32.7768599Z"
+    }
+  ],
+  "execution_path_validation_failures": {
+    "dimension": "per test, read from filesystem.FAILURES before and after the refused call",
+    "asserted": "no refusal in the success tests"
+  },
+  "cleanup": "pytest tmp_path per test; no live resource mutations",
+  "passed": true
+}

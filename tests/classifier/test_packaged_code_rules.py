@@ -2,10 +2,8 @@ import pytest
 
 from hooks.classifier import code_rules, definitions, runner
 from hooks.classifier.result import Answer
-from scripts.swarm import difficulty, grouping, model_pick, priority_sweep, slice_screen, trace_plan
+from scripts.swarm import difficulty, grouping, priority_sweep, slice_screen, trace_plan
 from scripts.swarm_ledger import ledger_duplicates
-
-LEVELS = ["low", "medium", "high", "max"]
 
 
 def choice(value, confidence):
@@ -42,27 +40,6 @@ def test_difficulty_takes_a_confident_option_else_the_fallback(answer, expected)
 
 def test_difficulty_without_a_confidence_falls_back():
     assert verdicts(difficulty, "task-difficulty", {"difficulty": choice("L", None)}) == {"difficulty": "M"}
-
-
-@pytest.mark.parametrize(
-    ("answer", "params", "expected"),
-    [
-        (score(0.6, 0.6), {"levels": LEVELS, "floor": "low"}, "max"),
-        (score(0.4, 0.9), {"levels": LEVELS, "floor": "low"}, "low"),
-        (score(2.2, 0.9), {"levels": LEVELS, "floor": "medium"}, "max"),
-        (score(0, 0.9), {"levels": LEVELS, "floor": "high"}, "high"),
-        (score(3, 0.59), {"levels": LEVELS, "floor": "low"}, "lane default"),
-    ],
-)
-def test_model_pick_raises_to_the_floor_or_keeps_the_lane_default(answer, params, expected):
-    assert verdicts(model_pick, "model-pick", {"effort": answer}, params) == {"effort": expected}
-
-
-def test_model_pick_rejects_with_the_lane_default():
-    assert model_pick.RULE.rejections == {"effort": "lane default"}
-    assert model_pick.RULE.values == {
-        "effort": ("lane default", "high", "low", "max", "medium", "xhigh"),
-    }
 
 
 PAIRS = {"pairs": [{"new": 0, "slot": 0}, {"new": 0, "slot": 1}]}

@@ -1,8 +1,9 @@
 version: 1
 notes: Cases seeded from the classifier decision log. Each case state was rebuilt from its ledger and matched to a state digest
-  the decision log recorded before seeding. Expected verdicts were written by a separate reader agent that saw only each case
-  state and its question, never the thresholds or the rule. Model pick expectations are the reader's level raised to the lane
-  floor, as the call site raises them. Samples are one live answer per backend to the two level question.
+  the decision log recorded before seeding, then given the task's size and rank from its ledger. Params are the Claude band
+  for that size and rank with each option's plain description. Expected verdicts were written by a separate reader agent that
+  saw only each task and its question, never the thresholds or the samples. Samples are one live answer per API backend to
+  the band choice question.
 cases:
 - name: rig-grade-swarm-t58
   state:
@@ -14,86 +15,52 @@ cases:
       merged.'
     kind: code
     territory_size: 0
+    difficulty: M
+    rank: normal
   params:
-    levels:
-    - low
-    - medium
-    - high
-    - max
-    floor: high
+    difficulty: M
+    rank: normal
+    lower: 'Opus at medium effort: the task names what to change and how to check it'
+    higher: 'Opus at high effort: several seams, or a cause to find inside one component'
   expected:
-    effort: high
+    option: lower
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 379
+    latency_ms: 501
     answers:
-      effort:
-        type: score
-        score: 0.0017007222390815137
-        confidence: 0.9965985555218371
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.9681872184423985
         probabilities:
-          '0': 0.9982992777609185
-          '1': 0.0017007222390815137
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 0.9840936092211993
+          higher: 0.01590639077880068
   - source: jev-1.13
-    latency_ms: 317
+    latency_ms: 291
     answers:
-      effort:
-        type: score
-        score: 0.0
-        confidence: 1.0
-        probabilities:
-          '0': 1.0
-          '1': 0.0
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
-  - source: pplx-decider-v1-27b
-    latency_ms: 264
-    answers:
-      effort:
-        type: score
-        score: 0.010160063206853748
-        confidence: 0.9796798735862925
-        probabilities:
-          '0': 0.9898399367931463
-          '1': 0.010160063206853748
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
-  - source: haiku
-    latency_ms: 8087
-    answers:
-      effort:
-        type: score
-        score: 0.05
-        confidence: 0.95
-        probabilities:
-          '0': 0.95
-          '1': 0.05
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
-  - source: luna
-    latency_ms: 4393
-    answers:
-      effort:
-        type: score
-        score: 0.02
+      option:
+        type: choice
+        choice: lower
         confidence: 0.98
         probabilities:
-          '0': 0.98
-          '1': 0.02
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 0.99
+          higher: 0.01
+  - source: pplx-decider-v1-27b
+    latency_ms: 325
+    answers:
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.8596659422695181
+        probabilities:
+          lower: 0.929832971134759
+          higher: 0.07016702886524098
   notes:
     state_digest: 9ab27e2cb7206f5a
-    reader_level: high
-    floor: high
+    found_in_ledger: true
+    reader_option: lower
+    reader_reason: the task names the answer command, the autonomy rule and the three tests to write
 - name: rig-grade-swarm-cxc0
   state:
     title: Commit the Codex Channels plan into resources plans
@@ -102,86 +69,52 @@ cases:
       body without the note, pasted, and the pull request merges.'
     kind: code
     territory_size: 1
+    difficulty: S
+    rank: urgent
   params:
-    levels:
-    - low
-    - medium
-    - high
-    - max
-    floor: high
+    difficulty: S
+    rank: urgent
+    lower: 'Opus at medium effort: the task names what to change and how to check it'
+    higher: 'Opus at high effort: several seams, or a cause to find inside one component'
   expected:
-    effort: high
+    option: lower
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 229
+    latency_ms: 267
     answers:
-      effort:
-        type: score
-        score: 0.005911068505999277
-        confidence: 0.9881778629880016
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.9751366950006521
         probabilities:
-          '0': 0.9940889314940008
-          '1': 0.005911068505999277
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 0.9875683475003261
+          higher: 0.012431652499674001
   - source: jev-1.13
-    latency_ms: 321
+    latency_ms: 292
     answers:
-      effort:
-        type: score
-        score: 0.01
+      option:
+        type: choice
+        choice: lower
         confidence: 0.98
         probabilities:
-          '0': 0.99
-          '1': 0.01
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 0.99
+          higher: 0.01
   - source: pplx-decider-v1-27b
-    latency_ms: 252
+    latency_ms: 326
     answers:
-      effort:
-        type: score
-        score: 0.0027874332901078503
-        confidence: 0.9944251334197843
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.9975322537759124
         probabilities:
-          '0': 0.9972125667098921
-          '1': 0.0027874332901078503
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
-  - source: haiku
-    latency_ms: 5347
-    answers:
-      effort:
-        type: score
-        score: 0.07
-        confidence: 0.93
-        probabilities:
-          '0': 0.93
-          '1': 0.07
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
-  - source: luna
-    latency_ms: 4716
-    answers:
-      effort:
-        type: score
-        score: 0.02
-        confidence: 0.98
-        probabilities:
-          '0': 0.98
-          '1': 0.02
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 0.9987661268879562
+          higher: 0.001233873112043887
   notes:
     state_digest: 3665c32f581a8043
-    reader_level: low
-    floor: high
+    found_in_ledger: true
+    reader_option: lower
+    reader_reason: copies a fixed plan section into the repo and checks it with a sha256sum match
 - name: rig-grade-swarm-doctor-fx-9b243b65-tune
   state:
     title: Move the number behind the task cost finding
@@ -193,86 +126,53 @@ cases:
       zero. The task t20 profile check failures after renders may share this cause: check them in the same proof.'
     kind: code
     territory_size: 0
+    difficulty: M
+    rank: urgent
   params:
-    levels:
-    - low
-    - medium
-    - high
-    - max
-    floor: high
+    difficulty: M
+    rank: urgent
+    lower: 'Opus at high effort: several seams, or a cause to find inside one component'
+    higher: 'Opus at extra high effort: an unknown cause across several components, or a redesign of a core concept'
   expected:
-    effort: high
+    option: higher
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 229
+    latency_ms: 433
     answers:
-      effort:
-        type: score
-        score: 0.012431651676429884
-        confidence: 0.9751366966471404
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.7193275154014789
         probabilities:
-          '0': 0.9875683483235702
-          '1': 0.012431651676429884
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 0.8596637577007394
+          higher: 0.14033624229926062
   - source: jev-1.13
-    latency_ms: 757
+    latency_ms: 287
     answers:
-      effort:
-        type: score
-        score: 0.09
-        confidence: 0.82
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.48
         probabilities:
-          '0': 0.91
-          '1': 0.09
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 0.74
+          higher: 0.26
   - source: pplx-decider-v1-27b
-    latency_ms: 588
+    latency_ms: 929
     answers:
-      effort:
-        type: score
-        score: 0.02686476872403489
-        confidence: 0.9462704625519303
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.7921570080134515
         probabilities:
-          '0': 0.9731352312759652
-          '1': 0.02686476872403489
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
-  - source: haiku
-    latency_ms: 6062
-    answers:
-      effort:
-        type: score
-        score: 0.2
-        confidence: 0.8
-        probabilities:
-          '0': 0.8
-          '1': 0.2
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
-  - source: luna
-    latency_ms: 14386
-    answers:
-      effort:
-        type: score
-        score: 0.06
-        confidence: 0.94
-        probabilities:
-          '0': 0.94
-          '1': 0.06
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 0.8960785040067257
+          higher: 0.10392149599327426
   notes:
     state_digest: 79d0c2def5bd1ce7
-    reader_level: high
-    floor: high
+    found_in_ledger: true
+    reader_option: higher
+    reader_reason: the change is within one component, but finding whether the t20 failures share the cause can reach other
+      components
 - name: rig-grade-swarm-vidn2
   state:
     title: Separate logical agents from execution attempts
@@ -285,86 +185,52 @@ cases:
       is the bottleneck.'
     kind: code
     territory_size: 1
+    difficulty: M
+    rank: high
   params:
-    levels:
-    - low
-    - medium
-    - high
-    - xhigh
-    floor: high
+    difficulty: M
+    rank: high
+    lower: 'Opus at high effort: several seams, or a cause to find inside one component'
+    higher: 'Opus at extra high effort: an unknown cause across several components, or a redesign of a core concept'
   expected:
-    effort: xhigh
+    option: higher
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 234
+    latency_ms: 550
     answers:
-      effort:
-        type: score
-        score: 0.021615333077779054
-        confidence: 0.9567693338444418
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.8198140145191788
         probabilities:
-          '0': 0.9783846669222209
-          '1': 0.021615333077779054
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 0.9099070072595894
+          higher: 0.09009299274041056
   - source: jev-1.13
-    latency_ms: 296
+    latency_ms: 264
     answers:
-      effort:
-        type: score
-        score: 0.44
-        confidence: 0.12
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.22
         probabilities:
-          '0': 0.56
-          '1': 0.44
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 0.61
+          higher: 0.39
   - source: pplx-decider-v1-27b
-    latency_ms: 260
+    latency_ms: 315
     answers:
-      effort:
-        type: score
-        score: 0.13950635094429395
-        confidence: 0.720987298111412
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.6448487043295266
         probabilities:
-          '0': 0.8604936490557061
-          '1': 0.13950635094429395
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
-  - source: haiku
-    latency_ms: 5846
-    answers:
-      effort:
-        type: score
-        score: 0.1
-        confidence: 0.9
-        probabilities:
-          '0': 0.9
-          '1': 0.1
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
-  - source: luna
-    latency_ms: 18651
-    answers:
-      effort:
-        type: score
-        score: 0.05
-        confidence: 0.95
-        probabilities:
-          '0': 0.95
-          '1': 0.05
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 0.8224243521647633
+          higher: 0.17757564783523677
   notes:
     state_digest: a53cb64d4dd464ba
-    reader_level: xhigh
-    floor: high
+    found_in_ledger: true
+    reader_option: higher
+    reader_reason: redesigns a core concept, splitting seat identity from the identity of each execution attempt
 - name: rig-grade-swarm-doctor-t14
   state:
     title: Measure non master replies to whole swarm chat lines after the fix is live
@@ -373,86 +239,52 @@ cases:
       on two lines. Target zero, with the master answering each line once.'
     kind: tune
     territory_size: 0
+    difficulty: M
+    rank: normal
   params:
-    levels:
-    - low
-    - medium
-    - high
-    - xhigh
-    floor: high
+    difficulty: M
+    rank: normal
+    lower: 'Opus at medium effort: the task names what to change and how to check it'
+    higher: 'Opus at high effort: several seams, or a cause to find inside one component'
   expected:
-    effort: high
+    option: lower
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 227
+    latency_ms: 244
     answers:
-      effort:
-        type: score
-        score: 0.01322282311331546
-        confidence: 0.9735543537733693
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.9158245333550736
         probabilities:
-          '0': 0.9867771768866846
-          '1': 0.01322282311331546
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 0.9579122666775368
+          higher: 0.04208773332246319
   - source: jev-1.13
-    latency_ms: 282
+    latency_ms: 388
     answers:
-      effort:
-        type: score
-        score: 0.02
-        confidence: 0.96
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.92
         probabilities:
-          '0': 0.98
-          '1': 0.02
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 0.96
+          higher: 0.04
   - source: pplx-decider-v1-27b
-    latency_ms: 266
+    latency_ms: 319
     answers:
-      effort:
-        type: score
-        score: 0.003512080895693861
-        confidence: 0.9929758382086122
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.9212166786347391
         probabilities:
-          '0': 0.996487919104306
-          '1': 0.003512080895693861
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
-  - source: haiku
-    latency_ms: 15025
-    answers:
-      effort:
-        type: score
-        score: 0.1
-        confidence: 0.9
-        probabilities:
-          '0': 0.9
-          '1': 0.1
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
-  - source: luna
-    latency_ms: 4331
-    answers:
-      effort:
-        type: score
-        score: 0.05
-        confidence: 0.95
-        probabilities:
-          '0': 0.95
-          '1': 0.05
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 0.9606083393173696
+          higher: 0.0393916606826305
   notes:
     state_digest: ac2ce7b5cfe261e5
-    reader_level: low
-    floor: high
+    found_in_ledger: true
+    reader_option: lower
+    reader_reason: repeats a named count and compares it with a known before value
 - name: rig-grade-swarm-tc1
   state:
     title: Grouped local test runs across swarm and root tests keep swarm fixtures
@@ -463,86 +295,52 @@ cases:
       on dev is recorded first, and CI stays green. Do not run the full suite locally.'
     kind: ci
     territory_size: 0
+    difficulty: M
+    rank: normal
   params:
-    levels:
-    - low
-    - medium
-    - high
-    - xhigh
-    floor: high
+    difficulty: M
+    rank: normal
+    lower: 'Opus at medium effort: the task names what to change and how to check it'
+    higher: 'Opus at high effort: several seams, or a cause to find inside one component'
   expected:
-    effort: high
+    option: higher
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 220
+    latency_ms: 233
     answers:
-      effort:
-        type: score
-        score: 0.1329642333263228
-        confidence: 0.7340715333473546
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.9377123438763293
         probabilities:
-          '0': 0.8670357666736773
-          '1': 0.1329642333263228
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 0.9688561719381646
+          higher: 0.031143828061835372
   - source: jev-1.13
-    latency_ms: 277
+    latency_ms: 319
     answers:
-      effort:
-        type: score
-        score: 0.73
-        confidence: 0.46
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.58
         probabilities:
-          '0': 0.27
-          '1': 0.73
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 0.79
+          higher: 0.21
   - source: pplx-decider-v1-27b
-    latency_ms: 254
+    latency_ms: 384
     answers:
-      effort:
-        type: score
-        score: 0.21175520438836018
-        confidence: 0.5764895912232797
+      option:
+        type: choice
+        choice: higher
+        confidence: 0.4293400781079959
         probabilities:
-          '0': 0.7882447956116397
-          '1': 0.21175520438836018
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
-  - source: haiku
-    latency_ms: 7929
-    answers:
-      effort:
-        type: score
-        score: 0.4
-        confidence: 0.6
-        probabilities:
-          '0': 0.6
-          '1': 0.4
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
-  - source: luna
-    latency_ms: 14083
-    answers:
-      effort:
-        type: score
-        score: 0.02
-        confidence: 0.98
-        probabilities:
-          '0': 0.98
-          '1': 0.02
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 0.285329960946002
+          higher: 0.714670039053998
   notes:
     state_digest: 9d90cdbe140a28ad
-    reader_level: high
-    floor: high
+    found_in_ledger: true
+    reader_option: higher
+    reader_reason: the fixture loss in test collection and scoping has an unknown cause to find
 - name: rig-grade-swarm-doctor-t25
   state:
     title: Measure rewritten life stamps over a full hour of watched swarm startups
@@ -554,86 +352,52 @@ cases:
       after are on the proof.'
     kind: tune
     territory_size: 0
+    difficulty: M
+    rank: normal
   params:
-    levels:
-    - low
-    - medium
-    - high
-    - max
-    floor: high
+    difficulty: M
+    rank: normal
+    lower: 'Opus at medium effort: the task names what to change and how to check it'
+    higher: 'Opus at high effort: several seams, or a cause to find inside one component'
   expected:
-    effort: high
+    option: lower
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 222
+    latency_ms: 232
     answers:
-      effort:
-        type: score
-        score: 0.010328151605433544
-        confidence: 0.9793436967891327
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.8482836462252734
         probabilities:
-          '0': 0.9896718483945663
-          '1': 0.010328151605433544
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 0.9241418231126367
+          higher: 0.07585817688736327
   - source: jev-1.13
-    latency_ms: 281
+    latency_ms: 358
     answers:
-      effort:
-        type: score
-        score: 0.01
-        confidence: 0.98
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.92
         probabilities:
-          '0': 0.99
-          '1': 0.01
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 0.96
+          higher: 0.04
   - source: pplx-decider-v1-27b
-    latency_ms: 270
+    latency_ms: 319
     answers:
-      effort:
-        type: score
-        score: 0.0033403561012858053
-        confidence: 0.9933192877974284
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.9327829037503721
         probabilities:
-          '0': 0.9966596438987143
-          '1': 0.0033403561012858053
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
-  - source: haiku
-    latency_ms: 5906
-    answers:
-      effort:
-        type: score
-        score: 0.1
-        confidence: 0.9
-        probabilities:
-          '0': 0.9
-          '1': 0.1
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
-  - source: luna
-    latency_ms: 5916
-    answers:
-      effort:
-        type: score
-        score: 0.02
-        confidence: 0.98
-        probabilities:
-          '0': 0.98
-          '1': 0.02
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 0.966391451875186
+          higher: 0.033608548124814015
   notes:
     state_digest: fb871e174812dba4
-    reader_level: medium
-    floor: high
+    found_in_ledger: true
+    reader_option: lower
+    reader_reason: runs an existing count script the same way as before and pastes the output
 - name: rig-grade-swarm-doctor-t38
   state:
     title: The red checks detector waits for a head to sit red with no push
@@ -647,86 +411,52 @@ cases:
       zero, while a head left red past the window is still found.'
     kind: code
     territory_size: 0
+    difficulty: M
+    rank: normal
   params:
-    levels:
-    - low
-    - medium
-    - high
-    - max
-    floor: high
+    difficulty: M
+    rank: normal
+    lower: 'Opus at medium effort: the task names what to change and how to check it'
+    higher: 'Opus at high effort: several seams, or a cause to find inside one component'
   expected:
-    effort: high
+    option: lower
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 220
+    latency_ms: 242
     answers:
-      effort:
-        type: score
-        score: 0.0006263340042096389
-        confidence: 0.9987473319915805
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.7982427599461548
         probabilities:
-          '0': 0.9993736659957903
-          '1': 0.0006263340042096389
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 0.8991213799730774
+          higher: 0.10087862002692255
   - source: jev-1.13
-    latency_ms: 289
+    latency_ms: 315
     answers:
-      effort:
-        type: score
-        score: 0.01
-        confidence: 0.98
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.7
         probabilities:
-          '0': 0.99
-          '1': 0.01
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 0.85
+          higher: 0.15
   - source: pplx-decider-v1-27b
-    latency_ms: 256
+    latency_ms: 307
     answers:
-      effort:
-        type: score
-        score: 0.007973551857422661
-        confidence: 0.9840528962851547
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.47451587496535375
         probabilities:
-          '0': 0.9920264481425773
-          '1': 0.007973551857422661
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
-  - source: haiku
-    latency_ms: 5241
-    answers:
-      effort:
-        type: score
-        score: 0.12
-        confidence: 0.88
-        probabilities:
-          '0': 0.88
-          '1': 0.12
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
-  - source: luna
-    latency_ms: 4323
-    answers:
-      effort:
-        type: score
-        score: 0.03
-        confidence: 0.97
-        probabilities:
-          '0': 0.97
-          '1': 0.03
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 0.7372579374826769
+          higher: 0.2627420625173231
   notes:
     state_digest: 0f4bd84eaecc604c
-    reader_level: high
-    floor: high
+    found_in_ledger: true
+    reader_option: lower
+    reader_reason: three clearly stated behaviours in one detector, with a named setting and measure
 - name: rig-grade-swarm-ed1
   state:
     title: Enforce determinism skill reaches every profile
@@ -736,86 +466,52 @@ cases:
       in the bundle and a fresh ci session lists the skill.'
     kind: code
     territory_size: 0
+    difficulty: M
+    rank: normal
   params:
-    levels:
-    - low
-    - medium
-    - high
-    - max
-    floor: high
+    difficulty: M
+    rank: normal
+    lower: 'Opus at medium effort: the task names what to change and how to check it'
+    higher: 'Opus at high effort: several seams, or a cause to find inside one component'
   expected:
-    effort: high
+    option: lower
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 280
+    latency_ms: 286
     answers:
-      effort:
-        type: score
-        score: 0.0013250222151015146
-        confidence: 0.9973499555697969
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.9932467737321544
         probabilities:
-          '0': 0.9986749777848984
-          '1': 0.0013250222151015146
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 0.9966233868660772
+          higher: 0.003376613133922829
   - source: jev-1.13
-    latency_ms: 283
+    latency_ms: 264
     answers:
-      effort:
-        type: score
-        score: 0.0
-        confidence: 1.0
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.92
         probabilities:
-          '0': 1.0
-          '1': 0.0
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 0.96
+          higher: 0.04
   - source: pplx-decider-v1-27b
-    latency_ms: 270
+    latency_ms: 305
     answers:
-      effort:
-        type: score
-        score: 0.0031501954961636438
-        confidence: 0.9936996090076727
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.8496852496552081
         probabilities:
-          '0': 0.9968498045038364
-          '1': 0.0031501954961636438
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
-  - source: haiku
-    latency_ms: 6845
-    answers:
-      effort:
-        type: score
-        score: 0.1
-        confidence: 0.9
-        probabilities:
-          '0': 0.9
-          '1': 0.1
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
-  - source: luna
-    latency_ms: 50628
-    answers:
-      effort:
-        type: score
-        score: 0.02
-        confidence: 0.98
-        probabilities:
-          '0': 0.98
-          '1': 0.02
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 0.924842624827604
+          higher: 0.07515737517239592
   notes:
     state_digest: d32bba8bda0565d3
-    reader_level: medium
-    floor: high
+    found_in_ledger: true
+    reader_option: lower
+    reader_reason: moves a skill folder and pins it in the existing role tests
 - name: rig-grade-swarm-doctor-fx-8be892c4-cause
   state:
     title: Find the cause of the inbox no outcome finding
@@ -828,86 +524,52 @@ cases:
       the code that sends each notice), and the fix or a filed task.'
     kind: troubleshoot
     territory_size: 0
+    difficulty: M
+    rank: normal
   params:
-    levels:
-    - low
-    - medium
-    - high
-    - xhigh
-    floor: high
+    difficulty: M
+    rank: normal
+    lower: 'Opus at medium effort: the task names what to change and how to check it'
+    higher: 'Opus at high effort: several seams, or a cause to find inside one component'
   expected:
-    effort: xhigh
+    option: higher
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 219
+    latency_ms: 235
     answers:
-      effort:
-        type: score
-        score: 0.8740772318846387
-        confidence: 0.7481544637692774
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.5758623713664381
         probabilities:
-          '0': 0.1259227681153614
-          '1': 0.8740772318846387
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 0.7879311856832191
+          higher: 0.21206881431678096
   - source: jev-1.13
-    latency_ms: 283
+    latency_ms: 274
     answers:
-      effort:
-        type: score
-        score: 0.99
-        confidence: 0.98
+      option:
+        type: choice
+        choice: higher
+        confidence: 0.72
         probabilities:
-          '0': 0.01
-          '1': 0.99
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 0.14
+          higher: 0.86
   - source: pplx-decider-v1-27b
-    latency_ms: 254
+    latency_ms: 305
     answers:
-      effort:
-        type: score
-        score: 0.8906398686407034
-        confidence: 0.7812797372814069
+      option:
+        type: choice
+        choice: higher
+        confidence: 0.9026106367444922
         probabilities:
-          '0': 0.10936013135929655
-          '1': 0.8906398686407034
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
-  - source: haiku
-    latency_ms: 7583
-    answers:
-      effort:
-        type: score
-        score: 0.65
-        confidence: 0.65
-        probabilities:
-          '0': 0.35
-          '1': 0.65
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
-  - source: luna
-    latency_ms: 14107
-    answers:
-      effort:
-        type: score
-        score: 0.95
-        confidence: 0.95
-        probabilities:
-          '0': 0.05
-          '1': 0.95
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 0.0486946816277538
+          higher: 0.9513053183722461
   notes:
     state_digest: a6c1d6d8f56a8616
-    reader_level: xhigh
-    floor: high
+    found_in_ledger: true
+    reader_option: higher
+    reader_reason: a root cause has to be found and shown with evidence across the tick, the close path and the detector
 - name: rig-grade-swarm-t64
   state:
     title: Quota transfer refusal text names the right direction
@@ -916,86 +578,52 @@ cases:
       and the pull request is merged. Evidence is on the profile QA task proof.'
     kind: code
     territory_size: 0
+    difficulty: M
+    rank: normal
   params:
-    levels:
-    - low
-    - medium
-    - high
-    - xhigh
-    floor: high
+    difficulty: M
+    rank: normal
+    lower: 'Opus at medium effort: the task names what to change and how to check it'
+    higher: 'Opus at high effort: several seams, or a cause to find inside one component'
   expected:
-    effort: high
+    option: lower
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 233
+    latency_ms: 234
     answers:
-      effort:
-        type: score
-        score: 0.004070137534687356
-        confidence: 0.9918597249306256
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.9640275734959454
         probabilities:
-          '0': 0.9959298624653128
-          '1': 0.004070137534687356
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 0.9820137867479727
+          higher: 0.017986213252027258
   - source: jev-1.13
-    latency_ms: 327
+    latency_ms: 269
     answers:
-      effort:
-        type: score
-        score: 0.0
+      option:
+        type: choice
+        choice: lower
         confidence: 1.0
         probabilities:
-          '0': 1.0
-          '1': 0.0
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 1.0
+          higher: 0.0
   - source: pplx-decider-v1-27b
-    latency_ms: 315
+    latency_ms: 332
     answers:
-      effort:
-        type: score
-        score: 0.004786394445332337
-        confidence: 0.9904272111093353
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.952314960256132
         probabilities:
-          '0': 0.9952136055546676
-          '1': 0.004786394445332337
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
-  - source: haiku
-    latency_ms: 5583
-    answers:
-      effort:
-        type: score
-        score: 0.05
-        confidence: 0.95
-        probabilities:
-          '0': 0.95
-          '1': 0.05
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
-  - source: luna
-    latency_ms: 4565
-    answers:
-      effort:
-        type: score
-        score: 0.02
-        confidence: 0.98
-        probabilities:
-          '0': 0.98
-          '1': 0.02
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'xhigh: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 0.976157480128066
+          higher: 0.023842519871934028
   notes:
     state_digest: 35ef80246812c2db
-    reader_level: low
-    floor: high
+    found_in_ledger: true
+    reader_option: lower
+    reader_reason: fixes one message string and pins it with a test
 - name: rig-grade-swarm-tc104
   state:
     title: Unit test jobs carry a time limit
@@ -1004,83 +632,49 @@ cases:
       request merges and the workflow shows the limit on every unit shard.
     kind: code
     territory_size: 0
+    difficulty: M
+    rank: normal
   params:
-    levels:
-    - low
-    - medium
-    - high
-    - max
-    floor: high
+    difficulty: M
+    rank: normal
+    lower: 'Opus at medium effort: the task names what to change and how to check it'
+    higher: 'Opus at high effort: several seams, or a cause to find inside one component'
   expected:
-    effort: high
+    option: lower
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 224
+    latency_ms: 234
     answers:
-      effort:
-        type: score
-        score: 0.004609571615310557
-        confidence: 0.990780856769379
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.9857571422978062
         probabilities:
-          '0': 0.9953904283846895
-          '1': 0.004609571615310557
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 0.9928785711489031
+          higher: 0.007121428851096951
   - source: jev-1.13
-    latency_ms: 284
+    latency_ms: 285
     answers:
-      effort:
-        type: score
-        score: 0.0
+      option:
+        type: choice
+        choice: lower
         confidence: 1.0
         probabilities:
-          '0': 1.0
-          '1': 0.0
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 1.0
+          higher: 0.0
   - source: pplx-decider-v1-27b
-    latency_ms: 253
+    latency_ms: 321
     answers:
-      effort:
-        type: score
-        score: 0.00833767969556772
-        confidence: 0.9833246406088646
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.9186838248004303
         probabilities:
-          '0': 0.9916623203044324
-          '1': 0.00833767969556772
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
-  - source: haiku
-    latency_ms: 6176
-    answers:
-      effort:
-        type: score
-        score: 0.05
-        confidence: 0.95
-        probabilities:
-          '0': 0.95
-          '1': 0.05
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
-  - source: luna
-    latency_ms: 14371
-    answers:
-      effort:
-        type: score
-        score: 0.02
-        confidence: 0.98
-        probabilities:
-          '0': 0.98
-          '1': 0.02
-        legend:
-          '0': 'high: the task names what to change and how to check it'
-          '1': 'max: an unknown cause to find across several components, or a redesign of a core concept'
+          lower: 0.9593419124002152
+          higher: 0.040658087599784815
   notes:
     state_digest: bcc7c04ca294ff60
-    reader_level: low
-    floor: high
+    found_in_ledger: true
+    reader_option: lower
+    reader_reason: sets a job time limit with a clear rule and a clear check

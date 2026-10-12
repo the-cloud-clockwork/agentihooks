@@ -1,0 +1,214 @@
+{
+  "case": "T-SV2-CKP-03-B",
+  "evidence_class": "mocked: fixture Claude and Codex homes laid out as the qualified CLIs write them, a local durable directory backend behind a granted artifact store and fixture launch registrations; no CLI, account, worker Pod or object store was used",
+  "input_sha256": {
+    "context-only.json": "0bef305b2565a336c5021606d2bf4b1a6f4b35f9cade44aee8c6720da27e5fda"
+  },
+  "observed": {
+    "fixture": {
+      "capture_attempts": {
+        "absent_conversation": {
+          "cause": "conversation_absent",
+          "decision": [
+            "continue_from_context",
+            "start_fresh"
+          ],
+          "outcome": "native_resume_unavailable"
+        },
+        "changed_claude_format": {
+          "cause": "native_format_changed",
+          "decision": [
+            "continue_from_context",
+            "start_fresh"
+          ],
+          "outcome": "native_resume_unavailable"
+        },
+        "changed_codex_format": {
+          "cause": "native_format_changed",
+          "decision": [
+            "continue_from_context",
+            "start_fresh"
+          ],
+          "outcome": "native_resume_unavailable"
+        },
+        "unqualified_harness": {
+          "cause": "unqualified_harness",
+          "decision": [
+            "continue_from_context",
+            "start_fresh"
+          ],
+          "outcome": "native_resume_unavailable"
+        },
+        "unqualified_installed_version": {
+          "cause": "unqualified_version",
+          "decision": [
+            "continue_from_context",
+            "start_fresh"
+          ],
+          "outcome": "native_resume_unavailable"
+        }
+      },
+      "context_checkpoint": {
+        "authoritative": true,
+        "completeness": "complete",
+        "continuation": "context",
+        "reason": "context"
+      },
+      "diagnostics_name_auth_value": false,
+      "forged_database_commit": {
+        "authoritative": true,
+        "completeness": "complete",
+        "continuation": "native",
+        "reason": "native"
+      },
+      "forged_summary_commit": {
+        "authoritative": true,
+        "completeness": "complete",
+        "continuation": "native",
+        "reason": "native"
+      },
+      "fresh_home_unchanged": true,
+      "native_resume_success_by_target": {
+        "capture": {
+          "claude/native_resume_unavailable": 2,
+          "codex/native_resume_unavailable": 2,
+          "copilot/native_resume_unavailable": 1
+        },
+        "restore": {
+          "claude/native_resume_unavailable": 1,
+          "codex/native_resume_unavailable": 2
+        }
+      },
+      "restores": {
+        "context_checkpoint": {
+          "cause": "context_only",
+          "decision": [
+            "continue_from_context",
+            "start_fresh"
+          ],
+          "outcome": "native_resume_unavailable"
+        },
+        "database_copy_labelled_native": {
+          "cause": "native_format_changed",
+          "decision": [
+            "continue_from_context",
+            "start_fresh"
+          ],
+          "outcome": "native_resume_unavailable"
+        },
+        "normalized_summary_labelled_native": {
+          "cause": "native_format_changed",
+          "decision": [
+            "continue_from_context",
+            "start_fresh"
+          ],
+          "outcome": "native_resume_unavailable"
+        }
+      },
+      "store_unchanged_by_restores": true
+    },
+    "second_fixture": {
+      "capture_attempts": {
+        "absent_conversation": {
+          "cause": "conversation_absent",
+          "decision": [
+            "continue_from_context",
+            "start_fresh"
+          ],
+          "outcome": "native_resume_unavailable"
+        },
+        "changed_claude_format": {
+          "cause": "native_format_changed",
+          "decision": [
+            "continue_from_context",
+            "start_fresh"
+          ],
+          "outcome": "native_resume_unavailable"
+        },
+        "changed_codex_format": {
+          "cause": "native_format_changed",
+          "decision": [
+            "continue_from_context",
+            "start_fresh"
+          ],
+          "outcome": "native_resume_unavailable"
+        },
+        "unqualified_harness": {
+          "cause": "unqualified_harness",
+          "decision": [
+            "continue_from_context",
+            "start_fresh"
+          ],
+          "outcome": "native_resume_unavailable"
+        },
+        "unqualified_installed_version": {
+          "cause": "unqualified_version",
+          "decision": [
+            "continue_from_context",
+            "start_fresh"
+          ],
+          "outcome": "native_resume_unavailable"
+        }
+      },
+      "context_checkpoint": {
+        "authoritative": true,
+        "completeness": "complete",
+        "continuation": "context",
+        "reason": "context"
+      },
+      "diagnostics_name_auth_value": false,
+      "forged_database_commit": {
+        "authoritative": true,
+        "completeness": "complete",
+        "continuation": "native",
+        "reason": "native"
+      },
+      "forged_summary_commit": {
+        "authoritative": true,
+        "completeness": "complete",
+        "continuation": "native",
+        "reason": "native"
+      },
+      "fresh_home_unchanged": true,
+      "native_resume_success_by_target": {
+        "capture": {
+          "claude/native_resume_unavailable": 2,
+          "codex/native_resume_unavailable": 2,
+          "copilot/native_resume_unavailable": 1
+        },
+        "restore": {
+          "claude/native_resume_unavailable": 1,
+          "codex/native_resume_unavailable": 2
+        }
+      },
+      "restores": {
+        "context_checkpoint": {
+          "cause": "context_only",
+          "decision": [
+            "continue_from_context",
+            "start_fresh"
+          ],
+          "outcome": "native_resume_unavailable"
+        },
+        "database_copy_labelled_native": {
+          "cause": "native_format_changed",
+          "decision": [
+            "continue_from_context",
+            "start_fresh"
+          ],
+          "outcome": "native_resume_unavailable"
+        },
+        "normalized_summary_labelled_native": {
+          "cause": "native_format_changed",
+          "decision": [
+            "continue_from_context",
+            "start_fresh"
+          ],
+          "outcome": "native_resume_unavailable"
+        }
+      },
+      "store_unchanged_by_restores": true
+    }
+  },
+  "state": "passed"
+}
