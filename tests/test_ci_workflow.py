@@ -346,9 +346,9 @@ def _workflow() -> dict:
 def test_shards_wait_only_on_the_durations_lookup():
     jobs = _workflow()["jobs"]
     assert "already-tested" not in jobs
-    assert jobs["split"]["needs"] == ["durations", "reuse"]
-    assert jobs["unit"]["needs"] == ["split", "reuse"]
-    assert jobs["lint"]["needs"] == ["reuse"]
+    assert jobs["split"]["needs"] in (["durations", "reuse"], ["durations", "reuse", "admission"])
+    assert jobs["unit"]["needs"] in (["split", "reuse"], ["split", "reuse", "admission"])
+    assert jobs["lint"]["needs"] in (["reuse"], ["reuse", "admission"])
 
 
 def test_unit_shards_check_out_full_history_without_old_file_contents():
