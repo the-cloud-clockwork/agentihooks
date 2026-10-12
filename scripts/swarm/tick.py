@@ -848,7 +848,7 @@ def _spawn_order(slug, config, store, agents, rows, doc, runtime):
 
     decision = capacity.read(store, slug)
     caps = capacity.caps(decision, config)
-    dispatched = dispatcher.claim_key(slug, config, store, doc)
+    dispatched = dispatcher.claim_key(config, doc)
     queue = []
     for lane, cap in caps.items():
         busy = sum(1 for a in agents if a.lane == lane and not _ended(a, rows))

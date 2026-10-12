@@ -116,7 +116,7 @@ def queue(doc: dict) -> list[str]:
     return sorted(ordered(doc, None, leverage(doc)), key=lambda task_id: _band(known[task_id], fixed))
 
 
-def claim_key(slug, config, store, doc):
+def claim_key(config, doc):
     if config.autonomy not in APPLIES:
         return None
     fixed = _fixed(doc)

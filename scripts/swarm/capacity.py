@@ -311,7 +311,7 @@ def ready_work(slug: str, store, doc: dict) -> tuple[dict, dict]:
     from scripts.swarm.tick import ready_in_order
 
     rows = {task["id"]: task for task in doc["tasks"]}
-    dispatched = dispatcher.claim_key(slug, store.config(slug), store, doc)
+    dispatched = dispatcher.claim_key(store.config(slug), doc)
     return rows, {lane: ready_in_order(slug, store, rows, doc, lane, dispatched) for lane in LANES}
 
 

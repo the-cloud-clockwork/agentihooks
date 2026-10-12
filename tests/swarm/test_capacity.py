@@ -1119,8 +1119,10 @@ def test_ready_work_orders_a_lane_by_the_dispatcher_queue_at_delegate():
     store = _store()
     store.create(SwarmConfig("sw", "/repo", max_eng=2, max_ci=0, max_plan=0))
     store.update("sw", autonomy="delegate")
-    ledger = FakeLedger([{"id": "leaf"}, {"id": "head"}, {"id": "after", "depends_on": ["head"]}])
-    _, ready = capacity.ready_work("sw", store, ledger.state("sw"))
+    ledger = FakeLedger([{"id": "leaf", "rank": "high"}, {"id": "head"}, {"id": "after", "depends_on": ["head"]}])
+    found = ledger.state("sw")
+    found["_meta"]["stamps"] = {}
+    _, ready = capacity.ready_work("sw", store, found)
     assert [t["id"] for t in ready["eng"]] == ["head", "leaf"]
 
 

@@ -567,11 +567,11 @@ def test_below_delegate_the_tick_keeps_claiming_by_rank(store, autonomy):
 
 def test_the_claim_key_bands_only_operator_ranks_ahead_of_the_queue_position(store):
     config, _, found = queue_ledger(store, "delegate")
-    key = dispatcher.claim_key(SLUG, config, store, found)
+    key = dispatcher.claim_key(config, found)
     rows = {t["id"]: t for t in found["tasks"]}
     assert [key(rows[t]) for t in ("l4", "h1", "l3")] == [(1, 0), (2, 1), (2, 15)]
     assert key({"id": "missing"}) == (2, len(dispatcher.queue(found)))
-    assert dispatcher.claim_key(SLUG, store.update(SLUG, autonomy="assist"), store, found) is None
+    assert dispatcher.claim_key(store.update(SLUG, autonomy="assist"), found) is None
 
 
 def test_a_master_urgent_fix_phase_leaf_outside_the_focus_gets_no_rank_write_and_no_head_comment(store, home, shipped):
