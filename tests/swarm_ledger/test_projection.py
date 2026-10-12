@@ -97,12 +97,15 @@ const inScope = list => list;
 const activeAgents = () => 0;
 const swarm = null;
 const inboxPending = () => 0;
+const document = {dispatchEvent: () => true};
 let meta = {created_at: Date.now() - 3600000};
 let doc = {phases: [{done: true}, {done: false}], followups: [], questions: [], tasks: [], time_left_minutes: 200};
 """
         script += (
             function_source("span")
             + function_source("timeLeftInputs")
+            + function_source("statKey")
+            + function_source("statGrip")
             + function_source("bottleneckStat")
             + function_source("renderStats")
         )

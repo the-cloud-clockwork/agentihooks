@@ -71,6 +71,132 @@ def test_a_frame_that_is_not_json_is_a_protocol_error():
         protocol.Connection(Garbled(), 5).request("thread/start")
 
 
+def test_a_request_hands_notifications_and_server_requests_to_the_listener():
+    events = [{"method": "turn/started", "params": {"turn": {"id": "t1"}}}, {"id": 1, "method": "x/requestApproval"}]
+    ws = Socket([*events, {"id": 1, "result": {}}])
+    connection = protocol.Connection(ws, 5)
+    seen = []
+    connection.listener = seen.append
+    connection.request("thread/read")
+    assert seen == events
+
+
+def test_an_error_reply_is_a_definitive_refusal():
+    ws = Socket([{"id": 1, "error": {"message": "expected turn mismatch"}}])
+    with pytest.raises(protocol.Refused) as refused:
+        protocol.Connection(ws, 5).request("turn/steer")
+    assert str(refused.value) == "turn/steer refused: expected turn mismatch"
+
+
+def test_a_lost_connection_is_not_a_refusal():
+    from websockets.exceptions import ConnectionClosedError
+
+    with pytest.raises(protocol.ProtocolError) as lost:
+        protocol.Connection(Socket(recv_error=ConnectionClosedError(None, None)), 5).request("turn/start")
+    assert not isinstance(lost.value, protocol.Refused)
+
+
+def test_the_default_listener_ignores_events():
+    assert protocol.ignore({"method": "turn/started"}) is None
+    assert protocol.Connection(Socket(), 5).listener is protocol.ignore
+
+
+def test_poll_hands_one_event_to_the_listener():
+    event = {"method": "turn/completed", "params": {"turn": {"id": "t1"}}}
+    connection = protocol.Connection(Socket([event, {"method": "later"}]), 5)
+    seen = []
+    connection.listener = seen.append
+    assert connection.poll(0.1) is True
+    assert seen == [event]
+
+
+def test_poll_skips_a_stray_response_and_reports_a_frame():
+    connection = protocol.Connection(Socket([{"id": 9, "result": {}}]), 5)
+    seen = []
+    connection.listener = seen.append
+    assert connection.poll(0.1) is True
+    assert seen == []
+
+
+def test_poll_with_nothing_to_read_returns_false():
+    timeouts = []
+
+    class Quiet(Socket):
+        def recv(self, timeout):
+            timeouts.append(timeout)
+            raise TimeoutError("quiet")
+
+    assert protocol.Connection(Quiet(), 5).poll(0.25) is False
+    assert timeouts == [0.25]
+
+
+def test_poll_on_a_lost_connection_is_a_protocol_error():
+    from websockets.exceptions import ConnectionClosedError
+
+    connection = protocol.Connection(Socket(recv_error=ConnectionClosedError(None, None)), 5)
+    with pytest.raises(protocol.ProtocolError) as lost:
+        connection.poll(0.1)
+    assert str(lost.value) == "the event stream lost the connection: ConnectionClosedError"
+
+
+def test_poll_refuses_a_frame_that_is_not_json():
+    class Garbled(Socket):
+        def recv(self, timeout):
+            return "stderr text"
+
+    with pytest.raises(protocol.ProtocolError) as garbled:
+        protocol.Connection(Garbled(), 5).poll(0.1)
+    assert str(garbled.value) == "the event stream got a frame that is not JSON"
+
+
+def test_poll_refuses_json_that_is_not_an_object():
+    class Scalar(Socket):
+        def recv(self, timeout):
+            return "null"
+
+    with pytest.raises(protocol.ProtocolError) as scalar:
+        protocol.Connection(Scalar(), 5).poll(0.1)
+    assert str(scalar.value) == "the event stream got a frame that is not a JSON object"
+
+
+def test_a_request_refuses_json_that_is_not_an_object():
+    class Listed(Socket):
+        def recv(self, timeout):
+            return "[1]"
+
+    with pytest.raises(protocol.ProtocolError) as listed:
+        protocol.Connection(Listed(), 5).request("thread/read")
+    assert str(listed.value) == "thread/read got a frame that is not a JSON object"
+
+
+def test_steer_turn_sends_the_expected_turn_and_returns_the_steered_one():
+    ws = Socket([{"id": 1, "result": {"turnId": "t2"}}])
+    assert protocol.steer_turn(protocol.Connection(ws, 5), "th", "t1", "hi") == "t2"
+    assert ws.sent == [
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "turn/steer",
+            "params": {"threadId": "th", "expectedTurnId": "t1", "input": [{"type": "text", "text": "hi"}]},
+        }
+    ]
+
+
+def test_steer_turn_keeps_the_expected_turn_when_the_reply_names_none():
+    assert protocol.steer_turn(protocol.Connection(Socket([{"id": 1, "result": {}}]), 5), "th", "t1", "hi") == "t1"
+
+
+def test_read_thread_asks_for_turns_and_returns_the_thread():
+    ws = Socket([{"id": 1, "result": {"thread": {"id": "th", "turns": []}}}])
+    assert protocol.read_thread(protocol.Connection(ws, 5), "th") == {"id": "th", "turns": []}
+    assert ws.sent[0]["method"] == "thread/read"
+    assert ws.sent[0]["params"] == {"threadId": "th", "includeTurns": True}
+
+
+def test_read_thread_without_a_thread_is_empty():
+    assert protocol.read_thread(protocol.Connection(Socket([{"id": 1, "result": {}}]), 5), "th") == {}
+
+
 def test_connect_initializes_then_announces_initialized():
     ws = Socket([{"id": 1, "result": {"codexHome": "/home/codex"}}])
     opened = []

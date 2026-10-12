@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 
 SCHEMA_VERSION = 1
 TRANSPORT = "codex_app_server"
-STARTING, CONNECTED, FAILED, EXITED = "starting", "connected", "failed", "exited"
+STARTING, CONNECTED, FAILED, EXITED, DEGRADED = "starting", "connected", "failed", "exited", "degraded"
 RECORDS, ENDPOINTS, OPENINGS = "codex-transport", "codex-endpoints", "codex-openings"
 IDENTITY = ("execution_id", "execution_generation", "seat", "agent_name", "task_id", "endpoint_ref", "transport")
 
@@ -47,6 +47,7 @@ class TransportRecord:
     last_transport_activity: int = 0
     last_reconcile_at: int = 0
     last_error_class: str = ""
+    pending_request: str = ""
 
 
 def decode(raw: str) -> TransportRecord:
