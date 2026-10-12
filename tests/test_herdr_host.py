@@ -287,9 +287,7 @@ def test_a_codex_launch_renames_at_the_ready_prompt_before_its_opening_prompt(mo
     assert "session_name=eng-a" in out and "opening_prompt=sent" in out
     env, launcher = opened
     assert env == {"HERDR_AGENT": "codex", init_agent.PROMPT_AFTER_START: "1"}
-    assert (
-        f'if [ -n "${{{init_agent.PROMPT_AFTER_START}:-}}" ]; then unset {init_agent.PROMPT_AFTER_START}; ' in launcher
-    )
+    assert f'set --; [ -n "${{{init_agent.PROMPT_AFTER_START}:-}}" ] || set -- ' in launcher
     assert [r.session_name for r in herdr_panes.load({}) if r.pane_id == "w1:p7"] == ["eng-a"]
 
 
@@ -529,10 +527,10 @@ def test_a_clear_herdr_refuses_still_reports_the_error(monkeypatch, error):
     pane = CodexPane(["idle"])
 
     def cli(args, environ):
-        pane(args, environ)
+        reply = pane(args, environ)
         if args[:2] in (["pane", "run"], ["pane", "send-keys"]):
             raise error
-        return {}
+        return reply
 
     pane.attach(monkeypatch)
     monkeypatch.setattr(herdr_host, "_cli", cli)

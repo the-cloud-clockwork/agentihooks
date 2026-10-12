@@ -343,9 +343,9 @@ def _write_launcher(
     command, before = _agent_command(spec, _route_report(launcher), name, claude_args, environ, directory)
     command_text = shlex.join(command)
     if prompt_file is not None:
-        with_prompt = f'{command_text} "$(cat {shlex.quote(str(prompt_file))})"'
-        held = f'if [ -n "${{{PROMPT_AFTER_START}:-}}" ]; then unset {PROMPT_AFTER_START}; {command_text}; else '
-        command_text = f"{held}{with_prompt}; fi" if spec.agent == "codex" else with_prompt
+        prompt_arg = f'"$(cat {shlex.quote(str(prompt_file))})"'
+        held = f'set --; [ -n "${{{PROMPT_AFTER_START}:-}}" ] || set -- {prompt_arg}; unset {PROMPT_AFTER_START}; '
+        command_text = f'{held}{command_text} "$@"' if spec.agent == "codex" else f"{command_text} {prompt_arg}"
     cleanup = [
         str(launcher),
         str(_route_report(launcher)),
@@ -684,7 +684,9 @@ def _name_in_herdr(
 
 
 def _send_opening(pane: str, opening: str, environ: dict[str, str], ready: bool) -> str:
-    """A prompt typed into a running turn or onto text in the input line would not go out alone, so it is held."""
+    """Codex can read busy again right after the rename, and a prompt typed into a running turn or onto text in the
+    input line would not go out alone, so it waits for ready again and is held otherwise."""
+    ready = ready and herdr_host.wait_ready(pane, environ, CODEX_READY_S)
     why = herdr_host.busy(pane, environ) if ready else "not-ready"
     if why:
         return f"held:{why}"

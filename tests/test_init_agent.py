@@ -1022,6 +1022,7 @@ def test_the_opening_prompt_follows_the_names(monkeypatch, sent, said):
         "agent",
         "ready",
         "session",
+        "ready",
         ("busy", "w1:p2", {"K": "v"}),
         ("prompt", "w1:p2", "Start.", {"K": "v"}),
     ]
@@ -1067,7 +1068,11 @@ def test_an_undetected_agent_still_gets_its_opening_prompt_after_the_ready_wait(
         "agent_name=unset",
         "opening_prompt=sent",
     ]
-    assert calls == [("ready", "w1:p2", {}, init_agent.CODEX_READY_S), ("prompt", "w1:p2", "Start.", {})]
+    assert calls == [
+        ("ready", "w1:p2", {}, init_agent.CODEX_READY_S),
+        ("ready", "w1:p2", {}, init_agent.CODEX_READY_S),
+        ("prompt", "w1:p2", "Start.", {}),
+    ]
 
 
 def test_an_undetected_codex_agent_without_a_prompt_waits_for_nothing(monkeypatch):
@@ -1082,8 +1087,8 @@ def test_the_codex_launcher_line_runs_its_command_without_the_prompt_only_when_h
     launcher, _ = init_agent._write_launcher(
         tmp_path, "eng", "Start the task.", [], {"XDG_RUNTIME_DIR": str(tmp_path)}, spec
     )
-    line = next(x for x in launcher.read_text().splitlines() if x.startswith("if [ -n"))
-    command = line.split("; then unset AGENTIHOOKS_PROMPT_AFTER_START; ", 1)[1].split("; else ", 1)[0]
+    line = next(x for x in launcher.read_text().splitlines() if x.startswith("set --; [ -n"))
+    command = line.split("; unset AGENTIHOOKS_PROMPT_AFTER_START; ", 1)[1].removesuffix(' "$@"')
     script = line.replace(command, "printf '<%s>' 'a b'")
     done = subprocess.run(
         ["bash", "-c", f'{script}; echo; echo "left=${{AGENTIHOOKS_PROMPT_AFTER_START:-}}"'],
@@ -1117,7 +1122,7 @@ def test_a_codex_name_is_confirmed_from_its_session_index_after_the_launch(tmp_p
     assert named() is True
 
 
-def test_a_codex_dry_run_with_a_prompt_holds_it_back_only_inside_herdr(monkeypatch, tmp_path, capsys):
+def test_a_codex_launcher_holds_its_prompt_behind_the_herdr_variable(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("codex", "requested"))
     monkeypatch.setattr(init_agent.shutil, "which", lambda name: "/usr/bin/agentihooks")
     runtime = tmp_path / "rt"
@@ -1125,11 +1130,12 @@ def test_a_codex_dry_run_with_a_prompt_holds_it_back_only_inside_herdr(monkeypat
     assert init_agent.main(argv, {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(runtime)}) == 0
     launcher = next((runtime / "agentihooks-claude-terminal").glob("*.sh")).read_text().splitlines()
     prompt_file = next((runtime / "agentihooks-claude-terminal").glob("*.prompt"))
-    line = next(x for x in launcher if x.startswith("if [ -n"))
-    command = line.split("; then unset AGENTIHOOKS_PROMPT_AFTER_START; ", 1)[1].split("; else ", 1)[0]
+    line = next(x for x in launcher if x.startswith("set --; [ -n"))
+    command = line.split("; unset AGENTIHOOKS_PROMPT_AFTER_START; ", 1)[1].removesuffix(' "$@"')
+    assert command.startswith("/usr/bin/agentihooks codex ") and command.count("agentihooks codex") == 1
     assert line == (
-        'if [ -n "${AGENTIHOOKS_PROMPT_AFTER_START:-}" ]; then unset AGENTIHOOKS_PROMPT_AFTER_START; '
-        f'{command}; else {command} "$(cat {prompt_file})"; fi'
+        f'set --; [ -n "${{AGENTIHOOKS_PROMPT_AFTER_START:-}}" ] || set -- "$(cat {prompt_file})"; '
+        f'unset AGENTIHOOKS_PROMPT_AFTER_START; {command} "$@"'
     )
     assert init_agent.PROMPT_AFTER_START == "AGENTIHOOKS_PROMPT_AFTER_START"
 
