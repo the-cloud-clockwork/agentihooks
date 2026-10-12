@@ -393,6 +393,32 @@ def test_a_pull_request_the_queue_keeps_refusing_reopens_the_task(merging):
 @pytest.mark.parametrize(
     "error",
     [
+        "gh: Not Found (HTTP 404)",
+        "cannot establish the base of the green checks",
+        "squash merge requires a ready pull request with green checks and no pending review",
+    ],
+)
+def test_an_unknown_merge_error_reopens_the_task_with_its_reason(merging, error):
+    merging.pulls[URL] = GREEN
+
+    def failed(action, url):
+        raise SwarmError(error)
+
+    assert merging.run(queuer=failed) == [
+        f"task t1 reopened, {URL} could not be queued: {error}",
+        f"removed the worktree {TOP}",
+    ]
+    assert merging.rows["t1"]["state"] == "open"
+    assert merging.rows["t1"]["claimed_by"] == "" and merging.rows["t1"]["awaiting"] == ""
+    assert error in merging.ledger.comments[0][1]
+    assert merging.store.handoff("sw", "t1") == "the handoff"
+    assert merging.store.claimant("sw", "t1") is None
+    assert ready.record(merging.store, "sw", "t1") is None
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
         "GitHub API: timed out",
         "error connecting to api.github.com",
         "HTTP 502",
