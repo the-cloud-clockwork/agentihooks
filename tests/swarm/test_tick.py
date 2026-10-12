@@ -1512,11 +1512,11 @@ def test_a_stacked_claim_names_the_recorded_repository_when_git_cannot_run(store
     ledger = FakeLedger([{"id": "t1"}, {"id": "t2", "depends_on": ["t1"]}])
     runtime = FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
-    ledger.rows["t1"].update(branch="engineer-a1b2c3-0001", branch_repo="https://github.com/o/other")
+    ledger.rows["t1"].update(branch="engineer-a1b2c3-0001", branch_repo="XXXX")
     tick("sw", store, ledger, runtime, now_ms=2_000)
     assert spawned_ids(runtime) == ["t1", "t2"]
     assert runtime.tasks[-1]["stack_base"] == [
-        {"task": "t1", "branch": "engineer-a1b2c3-0001", "repo": "https://github.com/o/other"}
+        {"task": "t1", "branch": "engineer-a1b2c3-0001", "repo": "XXXX"}
     ]
 
 
