@@ -330,7 +330,7 @@ class Done(WtBase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(
             result.stderr.strip().splitlines()[-1],
-            "wt: branch 'parked-two' is not on origin at the worktree head — worktree kept",
+            "wt: branch 'parked-two' is not contained in an origin branch — worktree kept",
         )
         self.assertTrue(dest.is_dir())
         self.assertTrue(self.branch_exists("parked-two"))
@@ -342,7 +342,7 @@ class Done(WtBase):
         _git(dest, "commit", "--quiet", "-m", "unpushed", env=self.gitenv)
         result = self.run_wt("done", "parked-three", "--repo", str(self.primary), "--pushed")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("is not on origin at the worktree head", result.stderr)
+        self.assertIn("is not contained in an origin branch", result.stderr)
         self.assertTrue(dest.is_dir())
 
     def test_done_pushed_refuses_a_dirty_worktree(self):
@@ -380,7 +380,7 @@ class Done(WtBase):
         _git(self.primary, "remote", "set-url", "origin", str(Path(self.tmp) / "gone.git"), env=self.gitenv)
         result = self.run_wt("done", "parked-seven", "--repo", str(self.primary), "--pushed")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("cannot read remote branch 'parked-seven' — worktree kept", result.stderr)
+        self.assertIn("cannot read origin branches — worktree kept", result.stderr)
         self.assertTrue(dest.is_dir())
 
     def test_done_without_force_keeps_a_worktree_whose_pull_request_closed_unmerged(self):
