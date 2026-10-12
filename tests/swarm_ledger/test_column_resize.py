@@ -25,8 +25,13 @@ def test_every_table_on_the_ledger_page_is_one_the_column_grips_reach():
         assert re.search(r'\bid="[a-z][a-z0-9-]*"', table), table
 
 
+DOCUMENT_TABLES = {"markdown.js"}
+
+
 def test_no_script_builds_a_table_the_column_grips_cannot_reach():
     for script in (*ROOT.joinpath("static", "js").glob("*.js"), ROOT / "static" / "home" / "home.js"):
+        if script.name in DOCUMENT_TABLES:
+            continue
         source = script.read_text()
         for found in re.findall(r'h\("table",\s*\{[^}]*\}', source):
             assert "sw-table" in found and "id:" in found, (script.name, found)

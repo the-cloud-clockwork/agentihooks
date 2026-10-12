@@ -169,7 +169,9 @@ def test_the_header_brands_home_without_a_ledger_count_and_names_each_column(bro
     )
     assert 'class="total"' not in page
     assert 'id="fold-all"' not in page
-    head = re.search(r'<div class="row head">(.*?)</div>', page).group(1)
+    head = re.search(
+        r'<div class="row head">(.*?)</div>', re.sub(r'<span class="col-grip"[^>]*></span>', "", page)
+    ).group(1)
     arrow = '<i aria-hidden="true">▼</i></button>'
     still = '<i aria-hidden="true">↕</i></button>'
     assert head == (
