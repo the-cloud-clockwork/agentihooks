@@ -49,7 +49,7 @@ def resource_revision(doc: dict, path: str) -> str:
         raw = value(doc, path)
     except APIError:
         name, _, item = path.partition("/")
-        if name in COLLECTIONS and item and "/" not in item:
+        if name == "tasks" and item and "/" not in item:
             return ABSENT
         raise
     if path == "metadata":

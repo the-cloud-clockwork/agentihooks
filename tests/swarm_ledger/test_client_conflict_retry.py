@@ -266,7 +266,7 @@ def test_a_missing_task_has_the_absent_revision_and_other_missing_paths_stay_mis
     assert resources.ABSENT == resources.revision(None)
     assert resources.resource_revision(doc, "tasks/t2") == resources.ABSENT
     assert resources.resource_revision(doc, "tasks/t1") == resources.revision({"id": "t1", "title": "Here"})
-    for path in ("tasks/t2/comments", "members/nobody", "unknown/t2"):
+    for path in ("tasks/t2/comments", "phases/p9", "members/nobody", "unknown/t2"):
         with pytest.raises(APIError):
             resources.resource_revision(doc, path)
     assert schemas.target({"op": "task_add", "task": "t2"}) == "tasks/t2"
