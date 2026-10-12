@@ -416,6 +416,29 @@ def child_environment(account: CodexAccount, environ: Mapping[str, str]) -> dict
     return child
 
 
+def _exec_at(args: list[str]) -> int | None:
+    value_flags = codex_sessions.VALUE_FLAGS | {
+        "-i",
+        "--image",
+        "--local-provider",
+        "--remote",
+        "--remote-auth-token-env",
+        "--add-dir",
+    }
+    at = 0
+    while at < len(args):
+        arg = args[at]
+        if arg == "--":
+            return None
+        if arg in value_flags:
+            at += 2
+        elif arg.startswith("-"):
+            at += 1
+        else:
+            return at if arg in ("exec", "e") else None
+    return None
+
+
 def command(account: CodexAccount, codex_bin: str, args: list[str]) -> list[str]:
     if account.is_api:
         overrides = codex_api.overrides(account.key_env, account.base_url)
@@ -423,8 +446,9 @@ def command(account: CodexAccount, codex_bin: str, args: list[str]) -> list[str]
         overrides = bearer_overrides()
     else:
         return [codex_bin, *([NO_DAEMON] if account.is_token else []), *args]
-    if args[:1] == ["exec"]:
-        return [codex_bin, NO_DAEMON, *args, *overrides]
+    at = _exec_at(args)
+    if at is not None:
+        return [codex_bin, NO_DAEMON, *args[: at + 1], *overrides, *args[at + 1 :]]
     return [codex_bin, NO_DAEMON, *overrides, *args]
 
 
