@@ -637,6 +637,33 @@ def test_quota_prints_one_table_and_json_rows_name_their_harness(monkeypatch, ca
     assert (found["harness"], found["account"], found["routing_left"]) == ("codex", "alpha", 80.0)
 
 
+def test_page_quota_drops_accounts_the_probe_stopped_reading(monkeypatch):
+    from hooks.context import account_sessions
+    from scripts import claude_quota_balancer, codex_router
+
+    agents_quota._page_cache.clear()
+    window = QuotaWindow(used=8.0)
+    current = ProbeResult("nestor_coltatgmail_com", "ok", "OK", 78.0, window, window)
+    retired = ProbeResult("ncsmgma", "ok", "OK", 78.0, window, window)
+    newest = 100_000.0
+    cached = [(newest - agents_quota.RETIRED_AFTER_S - 1, retired), (newest, current)]
+    monkeypatch.setattr(claude_quota_balancer, "cached_observations", lambda: cached)
+    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {})
+    monkeypatch.setattr(codex_router, "accounts", lambda environ: [])
+    monkeypatch.setattr(codex_router, "quotas", lambda pool, environ: {})
+    assert [r["account"] for r in agents_quota.page_quota(now=newest)["rows"]] == ["nestor_coltatgmail_com"]
+
+
+def test_every_cached_account_stays_while_none_is_newer_than_the_others():
+    window = QuotaWindow(used=8.0)
+    cached = [
+        (1.0, ProbeResult("a", "ok", "OK", 78.0, window, window)),
+        (2.0, ProbeResult("b", "ok", "OK", 78.0, window, window)),
+    ]
+    assert agents_quota.current_observations(cached) == cached
+
+
 def test_page_quota_without_a_cached_reading_has_no_probe_time(monkeypatch):
     from hooks.context import account_sessions
     from scripts import claude_quota_balancer, codex_router
