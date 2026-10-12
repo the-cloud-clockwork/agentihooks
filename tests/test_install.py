@@ -2736,6 +2736,20 @@ class TestInstallGlobalHonoursTarget:
         assert state["targets"]["global"]["codex"]["profile"] == "tiny"
         assert "claude" not in state["targets"]["global"]
 
+    def test_the_settings_profile_env_reaches_the_codex_wrapper(self, tmp_path, monkeypatch):
+        profiles = self._tiny_profile(tmp_path)
+        overlay = profiles / "tinyset" / ".codex"
+        overlay.mkdir(parents=True)
+        (overlay / "config.overrides.toml").write_text('[_agentihooks.env]\nSET_FLAG = "on"\n')
+        monkeypatch.setattr(install, "PROFILES_DIR", profiles, raising=False)
+        monkeypatch.setattr(install, "_get_bundle_path", lambda: None)
+        monkeypatch.setattr(install, "_install_cli_tool", lambda *a, **k: None, raising=False)
+        monkeypatch.setattr(install, "_ensure_mcp_daemon", lambda *a, **k: None, raising=False)
+        monkeypatch.setattr(install, "_resolve_hooks_python", lambda *a, **k: Path(sys.executable), raising=False)
+        install.install_global(argparse.Namespace(profile="tiny", settings_profile="tinyset", install_target="codex"))
+        wrapper = (Path.home() / ".codex" / "agentihooks-hook.sh").read_text()
+        assert 'export SET_FLAG="${SET_FLAG:=on}"\n' in wrapper
+
 
 class TestSkillFolderWithoutSkillFile:
     def _skills(self, tmp_path):
