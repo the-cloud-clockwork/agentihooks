@@ -573,8 +573,11 @@ def task_steps(task, me, led, name, phase, autonomy):
     steps = kind_steps(kind, me, led, name, phase, autonomy, task["id"])
     if kind not in STACKED_KINDS:
         return continued(steps, name, task)
-    if task.get("parked_on"):
+    if task.get("parked_on") and task.get("branch"):
         return finish_steps(steps, me, naming.plain(name), task)
+    if task.get("parked_on"):
+        parked_on = ", ".join(task["parked_on"])
+        return [f"Your task is parked on {parked_on} but records no branch: start it fresh from dev.", *steps]
     if task.get("stack_base"):
         return stacked_steps(me, led, naming.plain(name), task)
     return continued(steps, name, task)
