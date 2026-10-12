@@ -152,8 +152,9 @@ class Publisher:
         return max(own, default=0)
 
     def reclaim(self, checkpoint_id: str) -> list[str]:
-        """Removes the records of a checkpoint no pointer names, never a newer generation's record; an object another
-        record names stays."""
+        """Object-store final artifacts follow bucket lifecycle; local unreferenced records may be reclaimed."""
+        if self.store.backend.kind == "object-store":
+            return []
         if checkpoint_id in {pointer.document["checkpoint_id"] for pointer in self._pointers()}:
             return []
         scope, backend = self.store.scope, self.store.backend

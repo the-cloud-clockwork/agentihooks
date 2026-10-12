@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/checkpoints/model.py:scripts.swarm_v2.checkpoints.model.x\u01c1Validator\u01c1_classify__mutmut_18:a358b128b483d5a3eab7a0dbca732870b0496de5dd84b01b80e39a5f82fcecc0": {
+    "reader": "standards_reader",
+    "reason": "The preceding execution_generation membership guard ensures the key exists whenever get executes; omitting its default cannot change the returned value. Schema validation already requires task_generation."
+  }
+}

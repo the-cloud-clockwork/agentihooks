@@ -190,3 +190,82 @@ def test_final_artifact_deletion_is_refused_before_a_provider_takeover(storage, 
     assert request(api, "remove", key=key)[0] == 403
     provider.assert_not_called()
     assert backend.read(key, 0, len(stored)) == stored
+
+
+@pytest.mark.parametrize("operation", ["write", "read", "move"])
+def test_artifact_outcomes_log_only_authenticated_scope_and_status(storage, capsys, operation):
+    api, backend, authority = storage
+    digest = hashlib.sha256(b"private conversation bytes").hexdigest()
+    key = f"swarm/task/staging/execution/{digest}"
+    backend.write(key, b"private conversation bytes")
+    fields = {
+        "write": {"key": key, "data": encoded(b"private conversation bytes")},
+        "read": {"key": key, "start": 0, "length": 26},
+        "move": {"key": key, "target": f"swarm/task/objects/{digest}"},
+    }
+    status, _ = request(api, operation, **fields[operation])
+    assert status == 200
+    assert json.loads(capsys.readouterr().out) == {
+        "event": "checkpoint_storage",
+        "backend": "object-store",
+        "operation": operation,
+        "execution_id": "execution",
+        "generation": 7,
+        "status": 200,
+        "error_class": None,
+    }
+
+
+@pytest.mark.parametrize("error_class, status", [("unauthenticated", 401), ("stale_generation", 409)])
+def test_artifact_refusals_log_no_grant_or_provider_error_message(storage, capsys, error_class, status):
+    from scripts.swarm_v2.auth_context import GrantRefused
+
+    api, _, authority = storage
+    authority.authorize.side_effect = GrantRefused(error_class, "private provider response")
+    assert request(api, "write", key="not public", data="not public")[0] == status
+    assert json.loads(capsys.readouterr().out) == {
+        "event": "checkpoint_storage",
+        "backend": "object-store",
+        "operation": "write",
+        "execution_id": None,
+        "generation": None,
+        "status": status,
+        "error_class": error_class,
+    }
+
+
+@pytest.mark.parametrize("body", [None, {"operation": "untrusted-operation"}, {"operation": "write"}])
+def test_invalid_artifact_requests_emit_only_the_fixed_operation_label(storage, monkeypatch, body):
+    from tests.public_output import BufferedOutput
+
+    api, _, _ = storage
+    output = BufferedOutput()
+    monkeypatch.setattr("sys.stdout", output)
+    assert api.route("POST", artifacts.PATH, "Bearer grant", body)[0] == 400
+    assert json.loads(output.visible) == {
+        "event": "checkpoint_storage",
+        "backend": "object-store",
+        "operation": "invalid_request",
+        "execution_id": None,
+        "generation": None,
+        "status": 400,
+        "error_class": "invalid_request",
+    }
+
+
+def test_authenticated_artifact_refusal_keeps_its_scope_in_the_immediate_event(storage, monkeypatch):
+    from tests.public_output import BufferedOutput
+
+    api, _, _ = storage
+    output = BufferedOutput()
+    monkeypatch.setattr("sys.stdout", output)
+    assert request(api, "write", key="outside/task", data=encoded(b"private bytes"))[0] == 403
+    assert json.loads(output.visible) == {
+        "event": "checkpoint_storage",
+        "backend": "object-store",
+        "operation": "write",
+        "execution_id": "execution",
+        "generation": 7,
+        "status": 403,
+        "error_class": "forbidden_scope",
+    }

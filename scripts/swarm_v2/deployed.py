@@ -17,7 +17,7 @@ from scripts.swarm_v2.kubernetes.approved import INDEX, AccountRoute, FleetAccou
 from scripts.swarm_v2.kubernetes.cleanup import Cleanup
 from scripts.swarm_v2.kubernetes.client import ApiRefused, KubeHttp, PodApi, PodClient
 from scripts.swarm_v2.kubernetes.completion import Completion
-from scripts.swarm_v2.kubernetes.failures import AccountSlot, Recovery
+from scripts.swarm_v2.kubernetes.failures import AccountSlot, Recovery, restore_directive
 from scripts.swarm_v2.kubernetes.grants import PodGrants, Supervision
 from scripts.swarm_v2.kubernetes.pool import WorkerPool
 from scripts.swarm_v2.kubernetes.prompts import TerminalPrompts
@@ -53,6 +53,9 @@ AGGREGATION_ENV = "AGENTIHOOKS_TERMINAL_AGGREGATION"
 REQUIRED = (POLICY_ENV, IMAGE_TAG_ENV, PROFILE_ENV, CAP_ENV, PROJECTS_ENV, BRAIN_ENV)
 RESERVATION_MS = 300_000
 HARNESS = "claude"
+
+
+from scripts.swarm_v2.checkpoints import runtime as checkpoint_runtime
 
 
 class WorkerSettingsRefused(SwarmError):
@@ -180,10 +183,15 @@ class Workers:
     def grants(
         self, environ: Mapping[str, str], slug: str, verify: Callable[[str], Registration], store: RedisStore
     ) -> PodGrants:
-        supervision = Supervision(HARNESS, self.exporter, self.terms.api_url)
+        supervision = Supervision(
+            HARNESS,
+            self.exporter,
+            self.terms.api_url,
+            checkpoint_remote=bool(environ.get("AGENTIHOOKS_CHECKPOINT_BUCKET")),
+        )
         api = pod_api(environ, self.policy["namespace"])
         terminal = None if self.terminal is None else TerminalObjects(api, self.terminal, HostKeys(store))
-        return PodGrants(api, slug, verify, supervision, terminal)
+        return PodGrants(api, slug, verify, supervision, terminal, partial(restore_directive, store, slug))
 
 
 def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[str, str]) -> RoutedRuntime:
@@ -246,13 +254,6 @@ class AttachRelease:
         self.keys.forget(self.slug, execution_id)
 
 
-class NoCheckpoints:
-    """No checkpoint store is deployed yet, so every failure waits for an explicit fresh or resume decision."""
-
-    def list(self, execution_id: str) -> list[dict]:
-        return []
-
-
 class RecoveryPass:
     """Each pass lists first, then watches from the previous listing's version, so consecutive watches overlap and
     leave no gap; when the watch fails, Pods missing since the last listing stand in for its deletions."""
@@ -313,7 +314,20 @@ def recovery_pass(
 
     capacity = AccountCapacity(controller.store, slug, verify)
     releases = {"grant": GrantRelease(grants, slug), "account": AccountSlot(controller.store, slug, capacity)}
-    recovery = Recovery(controller.store, slug, controller, NoCheckpoints(), releases, workers.image_tag)
+
+    def registered(execution_id: str):
+        registration = grants.registration(slug, execution_id)
+        journal = service.tasks.journal(registration.task_id) if registration is not None else []
+        return checkpoint_runtime.historical(registration, journal)
+
+    def execution_generation(execution_id: str):
+        registration = grants.registration(slug, execution_id)
+        return registration.generation if registration is not None else None
+
+    checkpoints = checkpoint_runtime.Checkpoints(
+        checkpoint_runtime.configured(environ or {}), registered, workers.image_tag, execution_generation
+    )
+    recovery = Recovery(controller.store, slug, controller, checkpoints, releases, workers.image_tag)
     recovering = RecoveryPass(recovery, api, f"{OWNER_LABEL}={owner_for(slug)}")
     attach = AttachRelease(HostKeys(controller.store), slug)
     cleanup = Cleanup(controller.store, slug, api, controller.require, attach, releases["grant"])

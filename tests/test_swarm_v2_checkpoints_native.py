@@ -479,6 +479,20 @@ def test_restore_places_the_conversation_for_the_fresh_cwd_and_reports_its_ident
     assert all((p.stat().st_mode & 0o777) == native.MEMBER_MODE for p in home.rglob("*") if p.is_file())
 
 
+@pytest.mark.parametrize("separator", ["\u2028", "\u2029"])
+def test_native_conversation_records_split_only_on_newline(tmp_path, separator):
+    cwd = tmp_path / "repo"
+    home = cases.home_for("claude", tmp_path, cwd)
+    path = home / "projects" / native.encoded(cwd) / f"{CLAUDE}.jsonl"
+    path.write_text(path.read_text().replace("fixture", f"fixture{separator}paragraph"))
+    writer = qualifier(tmp_path)
+    taken = writer.capture("claude", home, CLAUDE, cwd, cases.VERSIONS["claude"], stopped=True)
+    assert isinstance(taken, native.NativeCapture)
+    assert cases.commit(writer, taken, "ckpt-1", "claude").authoritative
+    resumed = reader(tmp_path).restore("ckpt-1", tmp_path / "fresh", cwd, cases.VERSIONS["claude"])
+    assert resumed == native.Resumed("claude", CLAUDE, ("claude", "--resume", CLAUDE))
+
+
 def test_resume_commands_name_the_session():
     assert native.Claude().command("s1") == ("claude", "--resume", "s1")
     assert native.Codex().command("s1") == ("codex", "resume", "s1")

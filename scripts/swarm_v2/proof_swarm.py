@@ -69,6 +69,8 @@ def choose_fresh(environ: Mapping[str, str], recovery: "Recovery") -> list[str]:
         return []
     lines = []
     for execution_id in recovery.pending():
+        if recovery.checkpoints.list(execution_id):
+            continue
         recovery.decide(execution_id, FRESH)
         lines.append(f"controller: chose fresh for {execution_id} in proof swarm {slug}: {FRESH_REASON}")
     return lines

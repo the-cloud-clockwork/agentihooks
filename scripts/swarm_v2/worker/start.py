@@ -8,6 +8,7 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
+from dataclasses import asdict
 from http.client import HTTPException
 from pathlib import Path
 from subprocess import SubprocessError
@@ -15,12 +16,15 @@ from urllib.parse import urlsplit
 
 from scripts.swarm_v2 import supervision_runtime, worker_home
 from scripts.swarm_v2.broadcast_bridge import API_URL, AUTHORIZATION, GRANT_NAME, JSON_HEADERS
+from scripts.swarm_v2.checkpoints import runtime as checkpoint_runtime
+from scripts.swarm_v2.checkpoints.restore import Restored
 from scripts.swarm_v2.supervision import SCHEMA_VERSION, LaunchRefused, checked_authority
 
 TEMPLATES = Path("/opt/agentihooks/templates")
 BUNDLE = Path("/var/run/swarm/bundle")
 REGISTER = "/v2/executions/register"
 RECORD = "registration.json"
+RESTORED = "restore.json"
 BUSY = 503
 REGISTER_ATTEMPTS = 10
 RETRY_SECONDS = 2
@@ -44,6 +48,32 @@ def post(url: str, grant: str, body: dict) -> tuple[int, object]:
         return status, json.loads(text)
     except ValueError:
         return status, {}
+
+
+def report(spec: dict, grant: str, restored: Restored) -> None:
+    path = f"/v1/executions/{spec['execution_id']}/restore-outcome"
+    headers = {**JSON_HEADERS, AUTHORIZATION: f"Bearer {grant}"}
+    request = urllib.request.Request(
+        spec["control_url"].rstrip("/") + path, json.dumps(asdict(restored)).encode(), headers
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as answer:
+            if answer.status != 200:
+                raise LaunchRefused("restore outcome was not accepted")
+    except (OSError, HTTPException):
+        raise LaunchRefused("restore outcome was not accepted") from None
+    print(
+        json.dumps(
+            {
+                "event": "restore_verified",
+                "execution_id": spec["execution_id"],
+                "recovery": restored.recovery,
+                "checkpoint_id": restored.checkpoint_id,
+                "watermark": restored.watermark,
+            }
+        ),
+        flush=True,
+    )
 
 
 def _launch(path: Path, templates: Path, bundle: Path | None) -> dict:
@@ -154,7 +184,15 @@ def prepare(
             bundle,
         )
     )
+    if spec.get("checkpoint_remote") is True:
+        os.environ[checkpoint_runtime.REMOTE] = "true"
+    _private(attempt / "launch.json", spec)
     worker_home.store_grant(attempt, grant)
+    restored = checkpoint_runtime.prepare(spec, attempt)
+    if restored is not None:
+        if spec.get("checkpoint_remote") is True:
+            report(spec, grant, restored)
+        _private(attempt / RESTORED, asdict(restored))
     _private(attempt / RECORD, authority)
     return record
 

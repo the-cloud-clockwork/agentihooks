@@ -101,6 +101,7 @@ class ArtifactsAPI:
         if not authorization.startswith("Bearer "):
             return 401, {"error_class": "unauthenticated", "message": "a bearer credential is required"}
         token = authorization.removeprefix("Bearer ")
+        operation, scope = "invalid_request", None
         try:
             operation = self._operation(body)
             with self.lock:
@@ -109,11 +110,29 @@ class ArtifactsAPI:
                 answer = self._dispatch(operation, body, scope, fence)
                 if operation in MUTATIONS:
                     fence()
+                self._outcome(operation, scope, 200, None)
                 return 200, answer
         except GrantRefused as error:
+            self._outcome(operation, scope, STATUS[error.error_class], error.error_class)
             return STATUS[error.error_class], error.detail()
         except (ValueError, TypeError, binascii.Error):
             return 400, {"error_class": "invalid_request", "message": "invalid artifact request"}
+
+    def _outcome(self, operation: str, scope: Registration | None, status: int, error_class: str | None) -> None:
+        print(
+            json.dumps(
+                {
+                    "event": "checkpoint_storage",
+                    "backend": self.backend.kind,
+                    "operation": operation,
+                    "execution_id": scope.execution_id if scope else None,
+                    "generation": scope.generation if scope else None,
+                    "status": status,
+                    "error_class": error_class,
+                }
+            ),
+            flush=True,
+        )
 
     def _operation(self, body: object) -> str:
         if not isinstance(body, dict) or body.get("operation") not in FIELDS:
