@@ -304,6 +304,16 @@ def test_linked_omits_printed_lines_without_dropping_distinct_equal_rows(source,
     assert plan_read.linked(source, lines, margin=margin) == expected
 
 
+def test_linked_keeps_unprinted_earlier_cases_when_links_are_reversed():
+    source = '[B](#b) [A](#a)\n<a id="a"></a>\n### A\nfirst\n<a id="b"></a>\n### B\nlast\n'
+    assert plan_read.linked(source, "1-1") == "\n### B\nlast\n\n### A\nfirst\n"
+
+
+def test_linked_defaults_to_excluding_only_the_slice():
+    source = '<a id="a"></a>\n### A\n[A](#a)\nbody\n'
+    assert plan_read.linked(source, "3-3") == "\n### A\nbody\n"
+
+
 def test_linked_follows_only_links_inside_the_slice():
     assert plan_read.linked(LINKED_PLAN, "4-4") == f"\n{CASE_A}"
     assert plan_read.linked(LINKED_PLAN, "3-5") == f"\n{CASE_A}\n{CASE_B}"

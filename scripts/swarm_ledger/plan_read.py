@@ -73,7 +73,7 @@ def linked(source: str, lines: str, margin: int = 0) -> str:
     rows = source.splitlines()[start - 1 : end]
     tags = {row.strip() for row in rows}
     anchors = dict.fromkeys(a for row in rows for a in LINK.findall(row) if f'<a id="{a}"></a>' not in tags)
-    printed = set(range(max(1, start - margin), end + margin + 1))
+    printed = set(range(start - margin, end + margin + 1))
     return "".join(f"\n{case}" for anchor in anchors if (case := section(source, anchor, printed)))
 
 
