@@ -643,6 +643,30 @@ def test_overlays_box_lists_every_base_role_with_the_overlays_that_wear_it(open_
     assert [row[2] for row in overlay_rows(open_page(payload))] == [none] * 5
 
 
+def test_overlay_names_start_at_the_role_text_edge(open_page):
+    page = open_page(status(overlays_available=[{"name": "trader", "wears": ["engineer"]}]), width=1920)
+    edges = page.tab.eval_on_selector_all(
+        "#swarm-overlays .sw-ovl-row",
+        """rows => rows.map(r => { const t = r.children[1].querySelector('button') || r.children[1];
+          const range = document.createRange(); range.selectNodeContents(t);
+          return Math.round(range.getBoundingClientRect().left); })""",
+    )
+    assert len(edges) == 5
+    assert len(set(edges)) == 1
+
+
+def test_queued_commands_are_not_listed_and_a_failed_one_shows_its_error(open_page):
+    payload = status()
+    payload["commands"] = [
+        {"command": "swarm", "argv": ["set", "--max-eng", "4"], "state": "acknowledged"},
+        {"command": "quota", "argv": [], "state": "failed", "error": "quota reader timed out"},
+    ]
+    page = open_page(payload, width=1920)
+    assert page.tab.locator(".sw-command, #command-log, #command-rows").count() == 0
+    assert "max-eng" not in page.text("#swarm-box")
+    assert page.text("#swarm-note") == "Could not refresh quota: quota reader timed out. Try again or ask the master."
+
+
 def test_a_role_takes_at_most_three_overlays_and_apply_sends_only_changed_roles(open_page):
     payload = status(overlays_available=OFFERED)
     payload["config"]["overlays"] = {"planner": ["reviewer"]}
