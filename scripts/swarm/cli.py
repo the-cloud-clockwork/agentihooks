@@ -1141,9 +1141,33 @@ def cmd_pr(store, args):
     branch = {"branch": head, "branch_repo": repo} if head else {}
     fields = {"pr_url": args.url, "state": "pr", "awaiting": awaiting, **branch}
     ledger = LedgerClient()
-    checked = intent.stamp(args.slug, agent.task, args.url, ledger.state(args.slug), intent.mode_of(config), now_ms())
+    doc = ledger.state(args.slug)
+    row = next(t for t in doc["tasks"] if t.get("id") == agent.task)
+    fields.update(_split_binding(row, args.url, args.half))
+    checked = intent.stamp(args.slug, agent.task, args.url, doc, intent.mode_of(config), now_ms())
     ledger.update_task(args.slug, agent.task, fields, by=agent.name)
     print(json.dumps({"task": agent.task, "pr_url": args.url, **branch, "intent": checked}))
+
+
+def _split_binding(row, url, half):
+    pulls, halves = row.get("split_pulls") or [], row.get("split") or []
+    if not halves:
+        if half:
+            raise SwarmError("this task is not split: drop --half")
+        return {}
+    if url in pulls:
+        if half and half != pulls.index(url) + 1:
+            raise SwarmError(f"{url} is half {pulls.index(url) + 1} of this split task")
+        return {}
+    if len(pulls) >= len(halves):
+        raise SwarmError(f"every half of this split task has a pull request: {', '.join(pulls)}")
+    if not 1 <= half <= len(halves):
+        raise SwarmError(
+            f"this task is split in {len(halves)} halves: name this pull request's half with --half {len(pulls) + 1}"
+        )
+    if half != len(pulls) + 1:
+        raise SwarmError(f"half {len(pulls) + 1} of this split task is next: record it before half {half}")
+    return {"split_pulls": [*pulls, url]}
 
 
 def cmd_merge(store, args):
@@ -1197,7 +1221,7 @@ def cmd_done(store, args):
             on=waits.on("merge", url),
         )
         raise SwarmError(f"pull request {url} is in the merge queue; waiting for it to land before swarm done")
-    refused = done_gate.refusal(row, url, lambda target: pull)
+    refused = done_gate.refusal(row, url, _pull_reader(url, pull))
     if refused:
         raise SwarmError(refused)
     fields = {"state": "done", **({"pr_url": args.pr} if args.pr else {}), **({"proof": proof} if proof else {})}
@@ -1206,6 +1230,10 @@ def cmd_done(store, args):
     waits.settle_notices(InboxStore(store.redis), agent, "done")
     _retire(store, args.slug, agent, "finished its task and exited")
     print(json.dumps({"task": agent.task, "state": "done", "next": "stop now; the swarm closes this session"}))
+
+
+def _pull_reader(url, pull):
+    return lambda target: pull if target == url else ledger_events.view(target)
 
 
 def _dispatcher_done(store, slug, agent):
@@ -1631,8 +1659,10 @@ def build_parser():
     lift = sub.add_parser("lift")
     lift.add_argument("agent")
     lift.add_argument("gate")
-    for name in ("issue", "pr"):
-        sub.add_parser(name).add_argument("url")
+    sub.add_parser("issue").add_argument("url")
+    pr = sub.add_parser("pr")
+    pr.add_argument("url")
+    pr.add_argument("--half", type=int, default=0)
     merge = sub.add_parser("merge")
     merge.add_argument("action", choices=("queue", "dequeue", "state"))
     merge.add_argument("url")

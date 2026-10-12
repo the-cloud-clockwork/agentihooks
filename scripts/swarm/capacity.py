@@ -126,11 +126,44 @@ def _codex(environ: dict, now: float, refresh: bool) -> list[Account]:
     return rows + _api(codex_api.CodexApiSource(counts), "codex", environ, now)
 
 
+def _global(environ: dict, now: float) -> list[Account]:
+    from scripts.routing import aggregate
+
+    rows = []
+    for row in aggregate.current(now).values():
+        quota = row["quota"]
+        five = session_bands.left(quota["five_hour"]["used"], quota["five_hour"]["resets_at"], now) if quota else None
+        week = session_bands.left(quota["seven_day"]["used"], quota["seven_day"]["resets_at"], now) if quota else None
+        cap = session_bands.cap(five, week) if quota and session_bands.fresh(quota["observed_at"], now) else None
+        weight = None
+        if row["kind"] == API:
+            policy = place.policy(row["harness"], environ)
+            cap, weight = policy.cap, policy.weight
+        rows.append(
+            Account(
+                row["harness"],
+                row["account"],
+                _state(cap),
+                row["sessions"],
+                five,
+                week,
+                cap,
+                session_bands.upcoming(quota["seven_day"]["resets_at"], now) if quota else None,
+                kind=row["kind"],
+                weight=weight,
+                five_resets_at=session_bands.upcoming(quota["five_hour"]["resets_at"], now) if quota else None,
+            )
+        )
+    return rows
+
+
 def accounts(environ: dict, now: float, refresh: bool = True) -> list[Account]:
     """Every account with its band cap; ``refresh`` probes stale Codex readings, which costs a Codex request."""
-    from scripts.routing import reservation
+    from scripts.routing import aggregate, reservation
 
-    rows = _claude(environ, now) + _codex(environ, now, refresh)
+    rows = (
+        _global(environ, now) if aggregate.enabled(environ) else _claude(environ, now) + _codex(environ, now, refresh)
+    )
     for harness in LABELS:
         rows = reserve(rows, reservation.current(harness, environ))
     return rows

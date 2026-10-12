@@ -24,6 +24,7 @@ def test_recorded_spawns_and_planted_failed_spawn():
 
 
 def test_runtime_records_the_launcher_overflow_placement(tmp_path):
+    import os
     import subprocess
 
     import fakeredis
@@ -45,7 +46,7 @@ def test_runtime_records_the_launcher_overflow_placement(tmp_path):
             validated(
                 argv,
                 "status=started\nroute_status=routed\nagent=codex\naccount=default\nplacement=overflow\npane_id=1\n",
-            ),
+            ).replace('"pid": 123', f'"pid": {os.getpid()}'),
             "",
         )
 
