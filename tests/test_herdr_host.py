@@ -249,7 +249,7 @@ def test_a_codex_launch_names_its_session_after_herdr_detects_it(
     assert named == ([("w1:p7", "eng-a", str(tmp_path))] if reported else [])
 
 
-def _codex_launch(monkeypatch, tmp_path, pane, *extra):
+def _codex_launch(monkeypatch, tmp_path, pane, *extra, route="status=routed\naccount=alpha\n"):
     opened = []
 
     def open_pane(directory, title, env, placement, workspace, environ):
@@ -259,7 +259,8 @@ def _codex_launch(monkeypatch, tmp_path, pane, *extra):
     def run(pane_id, launcher, environ):
         opened.append(launcher.read_text())
         launcher.with_suffix(".started").touch()
-        launcher.with_suffix(".route").write_text("status=routed\naccount=alpha\n")
+        if route:
+            launcher.with_suffix(".route").write_text(route)
 
     monkeypatch.setattr(herdr_host, "open_pane", open_pane)
     monkeypatch.setattr(herdr_host, "run", run)
@@ -292,16 +293,41 @@ def test_a_codex_launch_renames_at_the_ready_prompt_before_its_opening_prompt(mo
     assert [r.session_name for r in herdr_panes.load({}) if r.pane_id == "w1:p7"] == ["eng-a"]
 
 
-def test_a_codex_launch_never_types_its_rename_while_a_turn_runs(monkeypatch, tmp_path, capsys):
+def test_a_codex_launch_never_types_into_a_running_turn(monkeypatch, tmp_path, capsys):
     pane = CodexPane(["working"])
     monkeypatch.setattr(init_agent, "CODEX_READY_S", 0)
     rc, _ = _codex_launch(monkeypatch, tmp_path, pane, "--prompt", "Start the task.")
 
     out = capsys.readouterr().out.splitlines()
     assert rc == 0
-    assert [call for call in pane.calls if call[:2] in TYPED] == [["agent", "prompt", "w1:p7", "Start the task."]]
+    assert [call for call in pane.calls if call[:2] in TYPED] == []
     assert "session_name=unset" in out and "session_name_error=not-ready" in out
+    assert "opening_prompt=held:not-ready" in out
     assert [r.session_name for r in herdr_panes.load({}) if r.pane_id == "w1:p7"] == ["unset:not-ready"]
+
+
+def test_a_codex_launch_holds_its_prompt_from_text_already_in_the_input_line(monkeypatch, tmp_path, capsys):
+    pane = CodexPane(["done"], typed="half typed")
+    rc, _ = _codex_launch(monkeypatch, tmp_path, pane, "--prompt", "Start the task.")
+
+    out = capsys.readouterr().out.splitlines()
+    assert rc == 0
+    assert [call for call in pane.calls if call[:2] in TYPED] == []
+    assert "session_name_error=refused-typed" in out and "opening_prompt=held:typed" in out
+    assert pane.input == "half typed"
+
+
+@pytest.mark.parametrize(("route", "prompted"), [("", True), ("status=failed\nerror=no account\n", False)])
+def test_a_held_prompt_goes_out_while_the_route_is_pending_but_not_after_it_failed(
+    monkeypatch, tmp_path, capsys, route, prompted
+):
+    pane = CodexPane(["done"])
+    rc, _ = _codex_launch(monkeypatch, tmp_path, pane, "--prompt", "Start the task.", route=route)
+
+    capsys.readouterr()
+    assert rc == 0
+    sent = [call for call in pane.calls if call[:2] == ["agent", "prompt"]]
+    assert sent == ([["agent", "prompt", "w1:p7", "Start the task."]] if prompted else [])
 
 
 def test_a_codex_launch_without_a_prompt_only_renames(monkeypatch, tmp_path, capsys):
@@ -418,7 +444,10 @@ READ = ["pane", "read", "w1:p2", "--source", "visible", "--format", "ansi"]
 def test_name_session_renames_at_the_ready_prompt_and_confirms_the_name(monkeypatch, status):
     pane = CodexPane([status])
     pane.attach(monkeypatch)
-    confirmed = lambda: ["pane", "run", "w1:p2", "/rename engineer@abc-0001"] in pane.calls  # noqa: E731
+
+    def confirmed():
+        return ["pane", "run", "w1:p2", "/rename engineer@abc-0001"] in pane.calls
+
     assert herdr_host.name_session("w1:p2", "engineer@abc-0001", {"K": "v"}, confirmed) == "named"
     assert pane.calls == [["agent", "get", "w1:p2"], READ, ["pane", "run", "w1:p2", "/rename engineer@abc-0001"]]
     assert pane.input == ""
@@ -452,7 +481,6 @@ def test_a_rename_that_did_not_take_is_cleared_from_the_input_line(monkeypatch):
         ["agent", "get", "w1:p2"],
         READ,
         ["pane", "run", "w1:p2", "/rename engineer@abc-0001"],
-        READ,
         ["pane", "send-keys", "w1:p2", "ctrl+u"],
     ]
     assert pane.input == "" and slept == []

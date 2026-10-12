@@ -10,6 +10,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from scripts.swarm.pane import typed_input
+
 PLACEMENTS = ("tab", "split", "workspace")
 
 
@@ -199,8 +201,6 @@ def agent_status(pane_id: str, environ: dict[str, str]) -> str:
 
 
 def typed(pane_id: str, environ: dict[str, str]) -> str:
-    from scripts.swarm.pane import typed_input
-
     return typed_input(_read(pane_id, environ))
 
 
@@ -233,22 +233,18 @@ def wait_ready(pane_id: str, environ: dict[str, str], timeout: float) -> bool:
 def name_session(
     pane_id: str, name: str, environ: dict[str, str], confirmed: Callable[[], bool], timeout: float = RENAME_CONFIRM_S
 ) -> str:
-    """Codex has no launch option for a session name, so its own rename command is typed at its ready prompt.
-    Returns "named", or why not; a rename that did not take is cleared from the input line."""
+    """Codex has no launch option for a session name, so its own rename command is typed at its ready prompt."""
     ran = False
     try:
-        status = agent_status(pane_id, environ)
-        if status not in READY:
-            return f"refused-{status}"
-        if typed(pane_id, environ):
-            return "refused-typed"
+        why = busy(pane_id, environ)
+        if why:
+            return f"refused-{why}"
         ran = True
         _cli(["pane", "run", pane_id, f"/rename {name}"], environ)
         deadline = time.monotonic() + timeout
         while not confirmed():
             if time.monotonic() >= deadline:
-                if typed(pane_id, environ):
-                    _cli(["pane", "send-keys", pane_id, CLEAR_INPUT], environ)
+                _clear(pane_id, environ)
                 return "unconfirmed"
             time.sleep(RENAME_POLL_S)
     except (HerdrError, subprocess.TimeoutExpired):
@@ -256,6 +252,14 @@ def name_session(
             _clear(pane_id, environ)
         return "error"
     return "named"
+
+
+def busy(pane_id: str, environ: dict[str, str]) -> str:
+    """Why nothing may be typed into the pane now: a status other than ready, or text already in its input line."""
+    status = agent_status(pane_id, environ)
+    if status not in READY:
+        return status
+    return "typed" if typed(pane_id, environ) else ""
 
 
 def _clear(pane_id: str, environ: dict[str, str]) -> None:

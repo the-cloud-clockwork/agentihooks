@@ -1002,20 +1002,66 @@ def test_a_codex_session_that_never_reads_ready_is_recorded_unnamed(monkeypatch)
     assert marked == [{"session_name": "unset:not-ready"}]
 
 
+def _ready_codex(monkeypatch, calls, ready=True, busy=""):
+    monkeypatch.setattr(init_agent.herdr_host, "rename_agent", lambda *args: calls.append("agent") or True)
+    monkeypatch.setattr(init_agent.herdr_host, "wait_ready", lambda *args: calls.append("ready") or ready)
+    monkeypatch.setattr(init_agent.herdr_host, "name_session", lambda *args: calls.append("session") or "named")
+    monkeypatch.setattr(init_agent.herdr_host, "busy", lambda *args: calls.append(("busy", *args)) or busy)
+    monkeypatch.setattr(init_agent, "_codex_named", lambda environ, name, since: None)
+    monkeypatch.setattr(init_agent.herdr_panes, "mark", lambda pane, environ, **changes: None)
+
+
 @pytest.mark.parametrize(("sent", "said"), [(True, "sent"), (False, "failed")])
 def test_the_opening_prompt_follows_the_names(monkeypatch, sent, said):
     calls = []
-    monkeypatch.setattr(init_agent.herdr_host, "rename_agent", lambda *args: calls.append("agent") or True)
+    _ready_codex(monkeypatch, calls)
     monkeypatch.setattr(init_agent.herdr_host, "prompt", lambda *args: calls.append(("prompt", *args)) or sent)
-    named = init_agent._name_in_herdr("w1:p2", "eng-a", "claude", {"K": "v"}, opening="Start.")
-    assert named == ["agent_name=eng-a", f"opening_prompt={said}"]
-    assert calls == ["agent", ("prompt", "w1:p2", "Start.", {"K": "v"})]
+    named = init_agent._name_in_herdr("w1:p2", "eng-a", "codex", {"K": "v"}, opening="Start.")
+    assert named == ["agent_name=eng-a", "session_name=eng-a", f"opening_prompt={said}"]
+    assert calls == [
+        "agent",
+        "ready",
+        "session",
+        ("busy", "w1:p2", {"K": "v"}),
+        ("prompt", "w1:p2", "Start.", {"K": "v"}),
+    ]
+
+
+@pytest.mark.parametrize(("ready", "busy", "said"), [(False, "", "held:not-ready"), (True, "typed", "held:typed")])
+def test_an_opening_prompt_is_held_from_a_busy_pane(monkeypatch, ready, busy, said):
+    calls = []
+    _ready_codex(monkeypatch, calls, ready, busy)
+    monkeypatch.setattr(init_agent.herdr_host, "prompt", lambda *args: pytest.fail("prompted a busy pane"))
+    named = init_agent._name_in_herdr("w1:p2", "eng-a", "codex", {}, opening="Start.")
+    assert named[-1] == f"opening_prompt={said}"
+    assert [call for call in calls if call[0] == "busy"] == ([("busy", "w1:p2", {})] if ready else [])
+
+
+@pytest.mark.parametrize(
+    ("status", "agent", "held", "names"),
+    [
+        ("routed", "claude", False, True),
+        ("bare", "codex", False, True),
+        ("direct", "codex", False, True),
+        (None, "codex", True, True),
+        (None, "codex", False, False),
+        (None, "claude", True, False),
+        ("failed", "codex", True, False),
+    ],
+)
+def test_a_pane_is_named_once_routed_or_while_a_held_prompt_waits_on_the_route(tmp_path, status, agent, held, names):
+    launcher = tmp_path / "eng.sh"
+    if held:
+        launcher.with_suffix(".prompt").write_text("Start.", encoding="utf-8")
+    route = {"status": status} if status else {}
+    assert init_agent._names_pane(route, launcher, agent) is names
 
 
 def test_an_undetected_agent_still_gets_its_opening_prompt_after_the_ready_wait(monkeypatch):
     calls = []
     monkeypatch.setattr(init_agent.herdr_host, "rename_agent", lambda *args: False)
-    monkeypatch.setattr(init_agent.herdr_host, "wait_ready", lambda *args: calls.append(("ready", *args)) or False)
+    monkeypatch.setattr(init_agent.herdr_host, "wait_ready", lambda *args: calls.append(("ready", *args)) or True)
+    monkeypatch.setattr(init_agent.herdr_host, "busy", lambda *args: "")
     monkeypatch.setattr(init_agent.herdr_host, "prompt", lambda *args: calls.append(("prompt", *args)) or True)
     assert init_agent._name_in_herdr("w1:p2", "eng-a", "codex", {}, opening="Start.") == [
         "agent_name=unset",

@@ -679,8 +679,21 @@ def _name_in_herdr(
     if detected and agent == "codex":
         named += _name_codex_session(pane, name, environ, since, ready)
     if opening:
-        named.append(f"opening_prompt={'sent' if herdr_host.prompt(pane, opening, environ) else 'failed'}")
+        named.append(f"opening_prompt={_send_opening(pane, opening, environ, ready)}")
     return named
+
+
+def _send_opening(pane: str, opening: str, environ: dict[str, str], ready: bool) -> str:
+    """A prompt typed into a running turn or onto text in the input line would not go out alone, so it is held."""
+    why = herdr_host.busy(pane, environ) if ready else "not-ready"
+    if why:
+        return f"held:{why}"
+    return "sent" if herdr_host.prompt(pane, opening, environ) else "failed"
+
+
+def _names_pane(route: dict, launcher: Path, agent: str) -> bool:
+    """A held prompt still goes out while the route report is pending, because Codex may start after the wait."""
+    return route.get("status") in STARTED_ROUTES or (not route.get("status") and bool(_held_prompt(launcher, agent)))
 
 
 def _name_codex_session(pane: str, name: str, environ: dict[str, str], since: float, ready: bool) -> list[str]:
@@ -856,7 +869,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         report.append(f"route_error={route['error']}")
     pane = next((line.split("=", 1)[1] for line in report if line.startswith("pane_id=")), "")
     herdr_panes.mark(pane, active_env, route_status=route.get("status", "pending"))
-    if pane and route.get("status") in STARTED_ROUTES:
+    if pane and _names_pane(route, launcher, agent):
         report += _name_in_herdr(pane, name, agent, active_env, _held_prompt(launcher, agent), launcher_at / 1000)
         if channel:
             report.append(f"channel_warning={_answer_channel_warning(pane, active_env)}")
