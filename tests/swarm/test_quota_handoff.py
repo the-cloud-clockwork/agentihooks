@@ -36,7 +36,9 @@ class QuotaRuntime(FakeRuntime):
         self.argv.append(argv)
         return SimpleNamespace(
             returncode=0,
-            stdout=validated(argv, "status=started\nroute_status=routed\n").replace('"pid": 123', f'"pid": {os.getpid()}'),
+            stdout=validated(argv, "status=started\nroute_status=routed\n").replace(
+                '"pid": 123', f'"pid": {os.getpid()}'
+            ),
             stderr="",
         )
 
