@@ -110,6 +110,11 @@ def reload_after_folds(tab, selector):
           return {FOLD_KEY, COMMENTS_KEY};
         }"""
     )
+    print(
+        "FOLD-DIAGNOSTIC",
+        state,
+        tab.evaluate("keys => [localStorage.getItem(keys.FOLD_KEY), localStorage.getItem(keys.COMMENTS_KEY)]", keys),
+    )
     tab.wait_for_function(
         """({boxes, keys}) => {
           const folds = JSON.parse(localStorage.getItem(keys.FOLD_KEY) || "{}");
