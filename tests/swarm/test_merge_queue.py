@@ -130,11 +130,12 @@ def test_queue_enqueues_the_observed_head_and_reports_the_queue_entry():
     assert not any("compare/" in str(call[0]) for call in calls)
 
 
-def test_queue_squash_merges_the_observed_head_when_the_repository_has_no_queue():
+@pytest.mark.parametrize("review", [None, "APPROVED"])
+def test_queue_squash_merges_the_observed_head_when_the_repository_has_no_queue(review):
     calls = []
     responses = iter(
         [
-            {"data": {"resource": {**OPEN, "repository": {"mergeQueue": None}}}},
+            {"data": {"resource": {**OPEN, "repository": {"mergeQueue": None}, "reviewDecision": review}}},
             {"data": {"mergePullRequest": {"pullRequest": {"state": "MERGED"}}}},
             {"data": {"resource": {**OPEN, "state": "MERGED", "repository": {"mergeQueue": None}}}},
         ]
@@ -171,7 +172,9 @@ def test_queue_squash_merges_the_observed_head_when_the_repository_has_no_queue(
 )
 def test_queue_without_a_queue_refuses_an_unready_pull_request(change):
     run, calls = runner({"data": {"resource": {**OPEN, "repository": {"mergeQueue": None}, **change}}})
-    with pytest.raises(SwarmError, match="squash merge requires"):
+    with pytest.raises(
+        SwarmError, match="^squash merge requires a ready pull request with green checks and no pending review$"
+    ):
         merge_queue.operate("queue", URL, run)
     assert len(calls) == 1
 
