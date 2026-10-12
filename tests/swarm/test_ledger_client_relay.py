@@ -50,6 +50,21 @@ def test_relay_keeps_the_outgoing_inbox_identifier_for_reconciliation(monkeypatc
     ]
 
 
+def test_relay_without_an_inbox_identifier_keeps_distinct_chat_writes(monkeypatch):
+    writes = []
+
+    def call(slug, ops, service):
+        writes.extend(ops)
+        return {"rejected": []}
+
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: SimpleNamespace(call=call))
+    client = ledger_client.LedgerClient()
+    client.relay("demo", "first report", "master")
+    client.relay("demo", "second report", "master")
+    assert [op["text"] for op in writes] == ["first report", "second report"]
+    assert writes[0]["id"] != writes[1]["id"]
+
+
 def test_notify_posts_a_swarm_notice_for_the_panel(monkeypatch):
     calls = []
 

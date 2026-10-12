@@ -251,6 +251,54 @@ def test_reply_replay_reconciles_an_answer_saved_before_reservations(store, text
     assert [item.id for item in store.inbox("alice")] == ["legacy-answer"]
 
 
+@pytest.mark.parametrize("address", ["alice", "carol"])
+def test_reply_reconciles_a_legacy_send_whose_original_close_never_landed(store, address):
+    original = store.send("alice", "bob", "question")
+    store.send("bob", address, "answer", item_id="legacy-pending")
+    if address == "alice":
+        answer = store.reply(original.id, "bob", "answer", answer_id="legacy-pending")
+        assert answer.id == "legacy-pending"
+        assert store.get(original.id).reason == "done: replied with message legacy-pending"
+    else:
+        with pytest.raises(InboxError) as refused:
+            store.reply(original.id, "bob", "answer", answer_id="legacy-pending")
+        assert str(refused.value) == "a reply retry must keep its sender, recipient, text and informational flag"
+        assert store.get(original.id).state == "pending"
+    assert [item.id for item in store.inbox(address)] == ["legacy-pending"]
+
+
+def test_a_non_reply_close_refuses_new_reply_operations_before_sending(store):
+    original = store.send("alice", "bob", "question")
+    store.close(original.id, "bob", "cancel", "request withdrawn")
+    with pytest.raises(InboxError) as refused:
+        store.reply(original.id, "bob", "answer", answer_id="new-reply")
+    assert str(refused.value) == f"message {original.id} is closed: cancelled: request withdrawn"
+    assert store.inbox("alice") == []
+
+
+@pytest.mark.parametrize("kind", ["done", "cancel"])
+def test_a_racing_original_close_is_reconciled_only_when_its_reply_outcome_matches(server, monkeypatch, kind):
+    first, second = fresh(server), fresh(server)
+    original = first.send("alice", "bob", "question")
+    close = first.close
+
+    def racing_close(item_id, by, reason, detail):
+        second.close(item_id, by, kind, detail if kind == "done" else "withdrawn")
+        return close(item_id, by, reason, detail)
+
+    monkeypatch.setattr(first, "close", racing_close)
+    if kind == "done":
+        answer = first.reply(original.id, "bob", "answer")
+        assert first.get(original.id).reason == f"done: replied with message {answer.id}"
+    else:
+        with pytest.raises(InboxError) as refused:
+            first.reply(original.id, "bob", "answer")
+        assert str(refused.value) == f"message {original.id} is closed: cancelled: withdrawn"
+        assert first.get(original.id).state == "cancelled"
+    assert len(first.inbox("alice")) == 1
+    assert len(first.history(original.id)) == 2
+
+
 def test_reply_retry_after_a_lost_close_keeps_one_outgoing_item(store, monkeypatch):
     original = store.send("alice", "bob", "question")
     close = store.close
