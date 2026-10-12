@@ -28,6 +28,34 @@ def _workflow():
     return yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
 
 
+@pytest.mark.parametrize("gate_plant,allowed", [("", False), ("false", False), ("true", True)])
+def test_full_tests_dispatch_requires_explicit_gate_plant_intent(gate_plant, allowed):
+    workflow = _workflow()
+    assert workflow[True]["workflow_dispatch"]["inputs"]["gate_plant"] == {
+        "description": "Run the full suite only for a gate plant proof; focused tests and mutation use Proofs",
+        "type": "boolean",
+        "required": False,
+        "default": False,
+    }
+    step = workflow["jobs"]["reuse"]["steps"][0]
+    assert step["name"] == "Require explicit gate plant intent for a full Tests dispatch"
+    assert step["if"] == "github.event_name == 'workflow_dispatch'"
+    assert step["env"] == {"GATE_PLANT": "${{ inputs.gate_plant }}"}
+    result = subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        env=dict(os.environ, GATE_PLANT=gate_plant),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == (0 if allowed else 1)
+    assert result.stdout == (
+        ""
+        if allowed
+        else "::error::Use the Proofs workflow for focused tests or mutation; full Tests dispatch requires gate_plant=true.\n"
+    )
+    assert result.stderr == ""
+
+
 def test_required_gate_runs_after_parallel_unit_and_lint():
     jobs = _workflow()["jobs"]
     gate = jobs["gate-required"]
