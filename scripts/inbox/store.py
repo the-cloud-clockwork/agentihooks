@@ -100,10 +100,11 @@ def close_reason(kind, detail=""):
 
 
 class InboxStore:
-    def __init__(self, redis):
+    def __init__(self, redis, *, persist=None):
         if redis is None:
             raise InboxError("no Redis client; the inbox refuses to run without it")
         self.redis = redis
+        self.persist = persist
         self.seats = SeatRegistry(redis)
         self.names = NameRegistry(redis)
 
@@ -162,6 +163,8 @@ class InboxStore:
             pipe.incr(self.key("open-size", address))
             pipe.sadd(self.key("waiting"), address)
             pipe.rpush(self.key("history", item.id), _entry("pending", sender, "", at))
+            if self.persist is not None:
+                self.persist(pipe)
             pipe.publish(NOTIFY, address)
             pipe.execute()
         return item

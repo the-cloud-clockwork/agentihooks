@@ -147,7 +147,19 @@ def _closed_by(store: InboxStore, item, me: str) -> bool:
     return closing["state"] == item.state and store.names.resolve(closing["by"]) == store.names.resolve(me)
 
 
-APPLY = {"send": _apply_send, "reply": _apply_reply, "close": _apply_close}
+def _apply_say(store, me, record):
+    from scripts.swarm import delivery
+
+    return delivery.apply_say(store, me, record)
+
+
+APPLY = {
+    "send": _apply_send,
+    "reply": _apply_reply,
+    "close": _apply_close,
+    "post": outbox.apply_post,
+    "say": _apply_say,
+}
 
 
 def build_parser():
