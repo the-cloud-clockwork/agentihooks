@@ -99,7 +99,9 @@ def test_unconfigured_sampling_reports_once_and_resumes_without_losing_findings(
     assert calls == []
     assert standing.read(redis, "rig-grade-swarm") == before
     monkeypatch.setenv("LANGFUSE_MCP_URL", "http://fixture/mcp/")
-    assert langfuse.refresh(store, "rig-grade-swarm", 3600002, read=read) == []
+    assert langfuse.refresh(store, "rig-grade-swarm", 3600002, read=read) == [
+        "Langfuse summary read: 0 breaching accounts"
+    ]
     assert calls == ["rig-grade-swarm"]
     assert standing.read(redis, "rig-grade-swarm") == {}
 
@@ -303,7 +305,9 @@ def test_scheduled_breach_uses_execution_identity_and_persists_success_state(mon
     monkeypatch.setenv("TZ", "EST5")
     time.tzset()
     try:
-        assert langfuse.refresh(store, "rig-grade-swarm", 7200000, read=lambda *args: summary) == []
+        assert langfuse.refresh(store, "rig-grade-swarm", 7200000, read=lambda *args: summary) == [
+            "Langfuse summary read: 2 breaching accounts"
+        ]
     finally:
         monkeypatch.undo()
         time.tzset()
