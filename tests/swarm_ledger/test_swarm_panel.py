@@ -415,7 +415,7 @@ class SwarmPanel(unittest.TestCase):
             "apply",
         ):
             self.assertIn(f'data-swarm="{control}"', page)
-        self.assertNotIn("codex_", page)
+        self.assertIn('data-cap="codex_model"', page)
         for mode in ("manual", "assist", "delegate", "full"):
             self.assertIn(f'data-autonomy="{mode}"', page)
         self.assertIn('method: "PUT"', page)
