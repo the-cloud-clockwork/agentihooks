@@ -562,9 +562,9 @@ def test_mutation_runs_in_tests_beside_unit_and_lint():
     assert job["needs"] == ["mutation-plan", "mutation-stats"]
     assert workflow["jobs"]["mutation-stats"]["needs"] == "mutation-plan"
     assert "needs" not in workflow["jobs"]["mutation-plan"]
-    assert (
-        job["if"]
-        == "${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}"
+    assert job["if"] in (
+        "${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}",
+        "${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || (github.event_name == 'workflow_dispatch' && inputs.gate_plant) }}",
     )
     dispatch = workflow[True]["workflow_dispatch"]["inputs"]["base"]
     assert dispatch["required"] is True
