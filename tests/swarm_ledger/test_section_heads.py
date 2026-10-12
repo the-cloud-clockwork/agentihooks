@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import ledger_state, serve_modules, shell_html
+from tests.swarm_ledger.ledger_page import ledger_state, reload_after_folds, serve_modules, shell_html
 
 TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 URL = "http://ledger.test/swarm-buildout"
@@ -170,14 +170,12 @@ def test_sections_toggle_leaves_comments_and_outline_alone(tab):
 def test_sections_state_survives_a_reload(tab):
     tab.click("#sections-all")
     settle(tab)
-    tab.reload()
-    rendered(tab)
+    reload_after_folds(tab, ".col > section[data-outline]:not(#sec-overview) > details.fold")
     assert sections(tab) == {"labels": ["Collapse all"], "open": [True] * len(SECTIONS)}
     tab.evaluate("() => { document.getElementById('notes-box').open = false; }")
     settle(tab)
     assert sections(tab)["labels"] == ["Collapse all"]
-    tab.reload()
-    rendered(tab)
+    reload_after_folds(tab, "#notes-box")
     folded = sections(tab)
     assert folded["open"][SECTIONS.index("notes-box")] is False
     assert folded["open"].count(True) == len(SECTIONS) - 1

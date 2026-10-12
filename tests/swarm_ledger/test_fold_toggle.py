@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import ledger_state, loaded, serve_modules, shell_html
+from tests.swarm_ledger.ledger_page import ledger_state, loaded, reload_after_folds, serve_modules, shell_html
 
 TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 URL = "http://ledger.test/swarm-buildout"
@@ -106,7 +106,7 @@ def test_notes_show_replies_under_the_note_and_remember_the_comments_toggle(tab)
     tab.click("#sec-notes button[data-comments]")
     settle(tab)
     assert comments(tab, "sec-notes") == {"labels": ["Show all comments"], "open": [False, False]}
-    tab.reload()
+    reload_after_folds(tab, "#sec-notes details[data-key]")
     settle(tab)
     assert comments(tab, "sec-notes") == {"labels": ["Show all comments"], "open": [False, False]}
     tab.click("#sec-notes button[data-comments]")
@@ -166,7 +166,7 @@ def test_comments_stored_by_the_old_open_by_default_rule_start_collapsed(browser
             }
         page.click("#sec-phases button[data-comments]")
         settle(page)
-        page.reload()
+        reload_after_folds(page, "#sec-phases details[data-key]")
         settle(page)
         assert comments(page, "sec-phases") == {"labels": ["Hide all comments"], "open": [True, True, True]}
     finally:
@@ -179,12 +179,12 @@ def test_comment_control_label_flips_with_state_and_survives_a_reload(tab):
     tab.click("#sec-phases button[data-comments]")
     settle(tab)
     assert comments(tab, "sec-phases") == {"labels": ["Hide all comments"], "open": [True, True, True]}
-    tab.reload()
+    reload_after_folds(tab, "#sec-phases details[data-key]")
     settle(tab)
     assert comments(tab, "sec-phases") == {"labels": ["Hide all comments"], "open": [True, True, True]}
     tab.click("#sec-phases button[data-comments]")
     settle(tab)
-    tab.reload()
+    reload_after_folds(tab, "#sec-phases details[data-key]")
     settle(tab)
     assert comments(tab, "sec-phases") == {"labels": ["Show all comments"], "open": [False, False, False]}
 
@@ -195,14 +195,14 @@ def test_one_dropdown_by_hand_is_remembered_and_flips_the_control_only_when_all_
     tab.locator(summaries).nth(0).evaluate("(el) => el.click()")
     settle(tab)
     assert comments(tab, "sec-phases") == {"labels": ["Show all comments"], "open": [True, False, False]}
-    tab.reload()
+    reload_after_folds(tab, "#sec-phases details[data-key='phases/p0']")
     settle(tab)
     assert comments(tab, "sec-phases") == {"labels": ["Show all comments"], "open": [True, False, False]}
     tab.locator(summaries).nth(1).evaluate("(el) => el.click()")
     tab.locator(summaries).nth(2).evaluate("(el) => el.click()")
     settle(tab)
     assert comments(tab, "sec-phases") == {"labels": ["Hide all comments"], "open": [True, True, True]}
-    tab.reload()
+    reload_after_folds(tab, "#sec-phases details[data-key]")
     settle(tab)
     assert comments(tab, "sec-phases")["labels"] == ["Hide all comments"]
 
@@ -216,12 +216,12 @@ def test_outline_control_label_flips_with_state_and_survives_a_reload(tab):
     folded = outline(tab)
     assert folded["labels"] == ["Expand all"]
     assert not any(folded["open"])
-    tab.reload()
+    reload_after_folds(tab, "#outline details.fold")
     settle(tab)
     assert outline(tab) == folded
     tab.click("#outline .ol-tools button")
     settle(tab)
-    tab.reload()
+    reload_after_folds(tab, "#outline details.fold")
     settle(tab)
     assert outline(tab) == first
 

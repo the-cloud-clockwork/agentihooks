@@ -89,6 +89,32 @@ def loaded(tab):
     )
 
 
+def reload_after_folds(tab, selector):
+    state = tab.locator(selector).evaluate_all(
+        """boxes => boxes.map(box => ({
+          id: box.id,
+          key: box.dataset.key || (box.matches(".plan-fold,.phase-fold")
+            ? box.parentElement.id.slice(5).replace("-", "/") + "/row" : null),
+          open: box.open
+        }))"""
+    )
+    assert state
+    tab.wait_for_function(
+        """async (boxes) => {
+          const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
+          const {FOLD_KEY, COMMENTS_KEY} = await import(new URL("config.js", main));
+          const folds = JSON.parse(localStorage.getItem(FOLD_KEY) || "{}");
+          const comments = JSON.parse(localStorage.getItem(COMMENTS_KEY) || "{}");
+          return boxes.every(box => box.key
+            ? (comments[box.open ? "opened" : "closed"] || []).includes(box.key)
+            : folds[box.id] === box.open);
+        }""",
+        arg=state,
+    )
+    tab.reload()
+    loaded(tab)
+
+
 def page_source():
     """The ledger page as one text for text checks: shell markup, stylesheets and every module inlined."""
     from scripts.swarm_ledger import ledger_core
