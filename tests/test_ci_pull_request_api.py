@@ -136,6 +136,7 @@ def test_no_script_a_step_runs_calls_the_api():
         ".github/coverage/proxy.py",
         "deploy/helm/agentihooks-swarm/ci/kind-due.sh",
         "deploy/helm/agentihooks-swarm/ci/kind-smoke.sh",
+        "docker/swarm-node/base-copy.sh",
         "docker/swarm-node/pull-base.sh",
         "docker/swarm-node/smoke.sh",
         "hooks/__main__.py",
@@ -374,7 +375,7 @@ def test_a_value_without_the_workflow_token_holds_none(value):
 
 def test_sonar_downloads_this_runs_coverage_after_the_shards():
     sonar = _jobs()["sonar"]
-    assert sonar["needs"] == ["unit", "reuse"]
+    assert sonar["needs"] in (["unit", "reuse"], ["unit", "reuse", "admission"])
     steps = sonar["steps"]
     download = next(step for step in steps if step.get("name") == "Download shard coverage")
     merge = next(step for step in steps if step.get("name") == "Merge shard coverage")

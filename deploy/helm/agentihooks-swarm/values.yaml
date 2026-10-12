@@ -112,7 +112,8 @@ controller:
     timeoutSeconds: 8
     failureThreshold: 3
   terminationGracePeriodSeconds: 30
-  env: {}
+  env:
+    LANGFUSE_MCP_URL: ""
   # Secret env only the controller container reads, unlike secretEnv; optional: true lets it start before the Secret exists.
   secretEnv: []
   # The terminal user CA private key: only that key of the Secret, a read only file on the controller container.

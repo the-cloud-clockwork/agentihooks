@@ -25,7 +25,7 @@ from urllib.request import url2pathname
 
 import yaml
 
-from scripts import balance_cli
+from scripts import balance_cli, runtime_env
 from scripts.claude_config import claude_home
 from scripts.claude_config import claude_json as claude_json_path
 from scripts.cli_delegates import delegated_cli
@@ -3125,7 +3125,7 @@ def _install_global_inner(args: argparse.Namespace) -> None:
 
     # --- 11. Seed ~/.agentihooks/.env from .env.example (first run only) ---
     print()
-    _seed_user_env_file()
+    runtime_env.seed(_seed_user_env_file, _ENV_FILE_DST, rendered)
 
     # --- 12. Register install in state.json ---
     # Persist the OPERATOR-INTENT chain (profile_input), not the shrunk

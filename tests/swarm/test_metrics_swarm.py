@@ -296,9 +296,9 @@ def test_held_spawns_count_ready_tasks_with_room_but_without_placements(monkeypa
     ready["eng"] = [{"id": "a"}, {"id": "b"}, {"id": "c"}]
     monkeypatch.setattr(metrics_swarm.capacity, "ready_work", lambda *args: ({}, ready))
     quota = {"configured": {"eng": 3}, "placements": {"eng": [{"index": 0}]}}
-    assert metrics_swarm._held_spawns(None, SLUG, doc(), quota, [AGENT]) == 1
-    assert metrics_swarm._held_spawns(None, SLUG, doc(), quota, []) == 2
-    assert metrics_swarm._held_spawns(None, SLUG, doc(), {}, [AGENT]) == 0
+    assert sum(metrics_swarm._held_lanes(None, SLUG, doc(), quota, [AGENT], False).values()) == 1
+    assert sum(metrics_swarm._held_lanes(None, SLUG, doc(), quota, [], False).values()) == 2
+    assert sum(metrics_swarm._held_lanes(None, SLUG, doc(), {}, [AGENT], False).values()) == 0
 
 
 def test_a_host_hold_counts_every_waiting_ready_task(monkeypatch):
@@ -306,8 +306,8 @@ def test_a_host_hold_counts_every_waiting_ready_task(monkeypatch):
     ready["eng"] = [{"id": "a"}, {"id": "b"}, {"id": "c"}]
     monkeypatch.setattr(metrics_swarm.capacity, "ready_work", lambda *args: ({}, ready))
     quota = {"configured": {"eng": 3}, "placements": {"eng": [{"index": 0}]}}
-    assert metrics_swarm._held_spawns(None, SLUG, doc(), quota, [AGENT], host_held=True) == 2
-    assert metrics_swarm._held_spawns(None, SLUG, doc(), quota, [AGENT], host_held=False) == 1
+    assert sum(metrics_swarm._held_lanes(None, SLUG, doc(), quota, [AGENT], host_held=True).values()) == 2
+    assert sum(metrics_swarm._held_lanes(None, SLUG, doc(), quota, [AGENT], host_held=False).values()) == 1
 
 
 @pytest.mark.parametrize(
