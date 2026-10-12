@@ -54,6 +54,7 @@ from scripts.swarm import (
     retire_watch,
     seat_spawn,
     session_model,
+    stack,
     tick_master,
     time_left,
     timing,
@@ -685,14 +686,16 @@ def _stackable(dep):
     return dep.get("state") == "done" or (dep.get("state") in ACTIVE and bool(dep.get("branch")))
 
 
-def _stack_base(task, rows):
+def _stack_base(task, rows, repo):
     deps = [dep for dep in task.get("depends_on") or [] if rows[dep].get("state") != "done"]
-    return [_stacked_dep(dep, rows[dep]) for dep in deps]
+    home = stack.origin_key(repo) if any(rows[dep].get("branch_repo") for dep in deps) else ""
+    return [_stacked_dep(dep, rows[dep], home) for dep in deps]
 
 
-def _stacked_dep(dep, row):
+def _stacked_dep(dep, row, home):
     base = {"task": dep, "branch": row["branch"]}
-    return {**base, "repo": row["branch_repo"]} if row.get("branch_repo") else base
+    elsewhere = home and row.get("branch_repo") and stack.repo_key(row["branch_repo"]) != home
+    return {**base, "repo": row["branch_repo"]} if elsewhere else base
 
 
 def _refund_parked(slug, store, rows, task_id):
@@ -810,7 +813,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
         elif (lives := store.earlier_lives(slug, task["id"])) or task.get("branch"):
             task["reclaim"] = reclaim(config.repo, lives, task.get("branch") or "")
             store.put_reclaim(slug, name, task["reclaim"])
-        task["stack_base"] = _stack_base(task, rows)
+        task["stack_base"] = _stack_base(task, rows, config.repo)
         task["overlaps"] = _sharing(task, rows)
         task["group"] = [
             {key: rows[m][key] for key in ("id", "title", "description")}

@@ -523,16 +523,13 @@ def reuse_issue_step(me, task):
 
 
 def stacked_steps(me, led, name, task):
-    first = task["stack_base"][0]
+    deps = task["stack_base"]
     return [
         "Your task depends on work still open. Build on top of it, push and park; the next engineer finishes it "
         "once its dependency is done:",
-        *(
-            f"Dependency {dep['task']} is still open on branch {dep['branch']}{_in_repo(dep)}."
-            for dep in task["stack_base"]
-        ),
+        *(f"Dependency {dep['task']} is still open on branch {dep['branch']}{_in_repo(dep)}." for dep in deps),
         reuse_issue_step(me, task),
-        _stacked_cut(name, task, first) + "".join(_merge(dep) for dep in task["stack_base"][1:]),
+        _stacked_cut(name, task, [dep for dep in deps if not dep.get("repo")]),
         "3. Build what you can on top of the dependency: red test, least code to green. Leave what needs the "
         "dependency finished and name it in your handoff.",
         "4. Gates green on what you built, commit with the issue in the message (Refs #<n>) so the branch points at "
@@ -547,24 +544,18 @@ def _in_repo(dep):
     return f" in repository {dep['repo']}" if dep.get("repo") else ""
 
 
-def _stacked_cut(name, task, first):
-    ref = _continue_from(task)
-    if ref or not first.get("repo"):
-        ref = ref or f"origin/{first['branch']}"
-        return f"2. Create your worktree from the dependency branch: wt.sh new {name} --from {ref}, then call {SERENA}"
-    return (
-        f"2. Create your worktree from the dependency branch in its repository {first['repo']}: wt.sh new {name} "
-        f"--from origin/{first['branch']}. When your task's repository is not {first['repo']}, cut from dev in "
-        f"your own repository: wt.sh new {name}. Then call {SERENA}"
+def _stacked_cut(name, task, local):
+    ref = _continue_from(task) or (f"origin/{local[0]['branch']}" if local else "")
+    if not ref:
+        return (
+            "2. Every open dependency branch lives in another repository, so cut your worktree from dev in your own "
+            f"repository: wt.sh new {name}, then call {SERENA}"
+        )
+    merges = "".join(
+        f" Merge each other open dependency into it: git merge origin/{dep['branch']}." for dep in local[1:]
     )
-
-
-def _merge(dep):
-    if not dep.get("repo"):
-        return f" Merge each other open dependency into it: git merge origin/{dep['branch']}."
     return (
-        f" Merge {dep['branch']} into it when your task's repository is {dep['repo']}: "
-        f"git merge origin/{dep['branch']}."
+        f"2. Create your worktree from the dependency branch: wt.sh new {name} --from {ref}, then call {SERENA}{merges}"
     )
 
 
