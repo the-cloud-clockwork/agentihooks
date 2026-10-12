@@ -1,5 +1,3 @@
-from dataclasses import replace
-
 import pytest
 
 from tests import sv2_mst04_cases as cases
@@ -13,14 +11,24 @@ def world(tmp_path, monkeypatch):
 
     monkeypatch.setattr(cases.core, "LEDGER_DIR", tmp_path / "ledgers")
     cases.core.LEDGER_DIR.mkdir()
-    world = cases.World()
+    world = TwoHives()
     table = masters.MasterSeats(world.redis)
     table.own_hive(cases.SLUG, "local", cases.LEAD)
     table.own_hive(cases.SLUG, "anton", cases.SECOND)
-    for name, hive in ((cases.LEAD_NAME, "local"), (cases.SECOND_NAME, "anton")):
-        agent = next(a for a in world.store.agents(cases.SLUG) if a.name == name)
-        world.store.put_agent(cases.SLUG, replace(agent, hive=hive))
     return world
+
+
+class TwoHives(cases.World):
+    def seat(self, name, address):
+        from scripts.swarm.store import MASTER, AgentRecord
+
+        hive = "local" if address == cases.LEAD else "anton"
+        self.store.put_agent(
+            cases.SLUG, AgentRecord(name, MASTER, MASTER, pane_id=f"p-{name}", seat=address, hive=hive)
+        )
+        self.store.seats.occupy(address, name, 1)
+        if address == cases.LEAD:
+            self.lead = name
 
 
 def add(world, kind, hive="anton"):
@@ -114,8 +122,10 @@ def test_operator_comment_routes_to_hive_owner_but_chat_stays_with_lead(world):
 
     add(world, "questions")
     doc = world.doc()
+
     def owners():
         return masters.MasterSeats(world.redis).owners(cases.SLUG, doc)
+
     agents = world.store.agents(cases.SLUG)
     assert operator_mail.addresses(cases.SLUG, {"target": "questions/targeted"}, doc, agents, owners) == [cases.SECOND]
     assert operator_mail.addresses(cases.SLUG, {"target": "chat"}, doc, agents, owners) == [cases.LEAD]
