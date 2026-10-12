@@ -90,8 +90,12 @@ class AgentSpec:
     overlays: tuple = ()
     bundle_revision: str = ""
     auth: str = ""
+    transport: str = ""
+    seat: str = ""
+    previous_execution: str = ""
 
 
+APP_SERVER = "app_server"
 SPAWN = "AGENTIHOOKS_SWARM_SPAWN"
 PREDECESSOR = "AGENTIHOOKS_PREDECESSOR_SESSION"
 SWARM_IDENTITY = (
@@ -282,11 +286,50 @@ def _profile_command(command: list[str], spec: AgentSpec) -> list[str]:
     return [command[0], "select-profile", spec.profile, *worn, "--agent", spec.agent, "--", *command[2:]]
 
 
+def _app_server_command(
+    spec: AgentSpec, report: Path, agent_args: list[str], environ: dict[str, str], directory: Path, opening: Path | None
+) -> list[str]:
+    return [
+        sys.executable,
+        "-m",
+        "scripts.codex_session",
+        "serve",
+        "--cwd",
+        str(directory),
+        "--profile",
+        spec.profile,
+        "--seat",
+        spec.seat,
+        *[f"--overlay={overlay}" for overlay in spec.overlays],
+        *([f"--bundle-revision={spec.bundle_revision}"] if spec.bundle_revision else []),
+        *(["--exclude", spec.exclude] if spec.exclude else []),
+        "--report",
+        str(report),
+        *(["--previous-execution", spec.previous_execution] if spec.previous_execution else []),
+        *(["--resume", spec.resume] if spec.resume else []),
+        *(["--prompt-file", str(opening)] if opening else []),
+        "--",
+        *(["--route", spec.auth] if spec.auth else []),
+        *_codex_otel_args(environ),
+        *_codex_trust_args(directory, environ),
+        *_model_args("codex", agent_args, environ),
+        *agent_args,
+    ]
+
+
 def _agent_command(
-    spec: AgentSpec, report: Path, name: str, agent_args: list[str], environ: dict[str, str], directory: Path
+    spec: AgentSpec,
+    report: Path,
+    name: str,
+    agent_args: list[str],
+    environ: dict[str, str],
+    directory: Path,
+    opening: Path | None = None,
 ) -> tuple[list[str], str]:
     """(command, line run before it): Claude routes through `agentihooks claude`, Codex through `agentihooks codex`."""
     agentihooks_bin = shutil.which("agentihooks") or str(Path(sys.argv[0]).resolve())
+    if spec.agent == "codex" and spec.transport == APP_SERVER:
+        return _app_server_command(spec, report, agent_args, environ, directory, opening), ""
     if spec.agent == "codex":
         command = [
             agentihooks_bin,
@@ -333,7 +376,8 @@ def _write_launcher(
     safe_name = "".join(character if character.isalnum() or character in "._-" else "_" for character in name)
     stamp = f"{time.strftime('%y%m%d-%H%M%S')}-{os.getpid()}"
     launcher = root / f"{safe_name}-{stamp}.sh"
-    prompt_file = root / f"{safe_name}-{stamp}.prompt" if prompt else None
+    app_server = spec.transport == APP_SERVER
+    prompt_file = root / f"{safe_name}-{stamp}.{'opening' if app_server else 'prompt'}" if prompt else None
     if prompt_file is not None:
         prompt_file.write_text(prompt, encoding="utf-8")
         prompt_file.chmod(0o600)
@@ -343,9 +387,10 @@ def _write_launcher(
     environ = {**installed_langfuse_env(spec.agent), **environ}
     langfuse = environ.get("AGENTIHOOKS_LANGFUSE_ENABLED")
     langfuse_export = f"export AGENTIHOOKS_LANGFUSE_ENABLED={shlex.quote(langfuse)}\n" if langfuse is not None else ""
-    command, before = _agent_command(spec, _route_report(launcher), name, claude_args, environ, directory)
+    opening = prompt_file if app_server else None
+    command, before = _agent_command(spec, _route_report(launcher), name, claude_args, environ, directory, opening)
     command_text = shlex.join(command)
-    if prompt_file is not None:
+    if prompt_file is not None and not app_server:
         prompt_arg = f'"$(cat {shlex.quote(str(prompt_file))})"'
         held = f'set --; [ -n "${{{PROMPT_AFTER_START}:-}}" ] || set -- {prompt_arg}; unset {PROMPT_AFTER_START}; '
         command_text = f'{held}{command_text} "$@"' if spec.agent == "codex" else f"{command_text} {prompt_arg}"
@@ -560,6 +605,16 @@ def _launch_command(
     raise RuntimeError(f"unsupported host OS: {system}")
 
 
+def _transport(args: argparse.Namespace, agent: str) -> str:
+    if args.codex_transport != APP_SERVER:
+        return args.codex_transport
+    if agent != "codex":
+        raise ValueError("--codex-transport app_server runs only a Codex agent")
+    if not (args.seat and args.profile):
+        raise ValueError("--codex-transport app_server needs --seat and --profile")
+    return APP_SERVER
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Open a routed Claude session in a new terminal")
     parser.add_argument("--dir", default="", help="Target directory; relative paths resolve below the configured base")
@@ -612,6 +667,14 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--bundle-revision", default="", help="Render the profile only from this bundle commit")
     parser.add_argument("--resume", default="", help="Reopen this conversation id (Claude --resume, Codex resume)")
+    parser.add_argument(
+        "--codex-transport",
+        choices=("legacy", APP_SERVER),
+        default="",
+        help="Codex: run the supervised app-server for this swarm execution instead of the interactive terminal",
+    )
+    parser.add_argument("--seat", default="", help="Codex app-server: the swarm seat this execution occupies")
+    parser.add_argument("--previous-execution", default="", help="Codex app-server: the execution this launch replaces")
     parser.add_argument(
         "--inbox-channel",
         action="store_true",
@@ -772,6 +835,9 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
                 overlays=tuple(args.overlay),
                 bundle_revision=args.bundle_revision,
                 auth=args.auth,
+                transport=_transport(args, agent),
+                seat=args.seat,
+                previous_execution=args.previous_execution,
             ),
         )
         host, explicit = _select_host(args.host, active_env)
