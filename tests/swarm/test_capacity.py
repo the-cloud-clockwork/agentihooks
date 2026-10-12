@@ -850,7 +850,10 @@ def test_capacity_evidence_has_the_swarm_task_actor_and_stable_time():
         return capacity.calculate(cfg, [account()], agents, demand)
 
     runtime.quota_capacity = quota
-    expected = "quota capacity eng 1 ci 0 plan 0 because accounts have quota; Claude has 3 free seats and Codex has 0 free seats"
+    expected = (
+        "quota capacity eng 1 ci 0 plan 0 because eng and ci have no more ready tasks; "
+        "accounts have quota; Claude has 3 free seats and Codex has 0 free seats"
+    )
     assert capacity.apply("sw", config, store, ledger, runtime, 1000) == [expected]
     assert comments == [(("sw", "e", expected), {"by": "swarm"})]
     assert capacity.read(store, "sw")["at"] == 1000
@@ -870,7 +873,10 @@ def test_capacity_can_comment_after_every_task_has_closed():
     ledger.comment = lambda *args, **kwargs: comments.append((args, kwargs))
     runtime = FakeRuntime()
     runtime.quota_capacity = lambda cfg, agents, now, demand, requirements: capacity.calculate(cfg, [], agents, demand)
-    text = "quota capacity eng 0 ci 0 plan 0 because accounts have quota; Claude has 0 free seats and Codex has 0 free seats"
+    text = (
+        "quota capacity eng 0 ci 0 plan 0 because eng has no more ready tasks; "
+        "accounts have quota; Claude has 0 free seats and Codex has 0 free seats"
+    )
     assert capacity.apply("sw", config, store, ledger, runtime, 1000) == [text]
     assert comments == [(("sw", "done", text), {"by": "swarm"})]
 
