@@ -1,0 +1,128 @@
+{
+  "package": "SV2-PRF-01",
+  "package_complete": false,
+  "dependencies": [
+    "SV2-OBS-05",
+    "SV2-IDX-05",
+    "SV2-GAT-05"
+  ],
+  "stacked_on": "SV2-OBS-01, merged into dev by pull request 2584 before this package was rebased onto dev",
+  "integration_gate": "G10",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2585",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2634",
+  "tested_commit": "c69fb66a1ef99a8cd56d37d30dcfe310a1ece97d",
+  "measured_commit": "99ab72b5d4f2aee4d7e86327d2388c788f08027a",
+  "status": "measured on a CI runner, coexistence computed against a read of Anton node capacity",
+  "evidence_class": "Measured: the workload suite, an independent repeat and an update suite ran on a GitHub hosted Ubuntu runner (4 CPUs, 15989 MiB) in Worker resources run 38149855138; Anton node capacity and the requests of every scheduled Pod were read read only with kubectl get nodes -o json and kubectl get pods -A -o json at 2026-10-11T12:28:53Z and reduced with resource_bench nodes; only the reduced numbers and the sha256 of both listings are committed, because the Pod listing holds environment values. Derivation, coexistence, promotion and rollback are pure functions over those committed records. No worker Pod ran the workloads and no profile was applied to a deployed Pod policy.",
+  "interfaces": [
+    "scripts.swarm_v2.resource_sampling.measure(command, workdir, env, interval, timeout) runs one workload in its own session and samples its whole process tree from /proc: members are the ppid tree of the root plus every process in the root's session; it reports peak RSS, peak cores, CPU seconds and peak process count each for the whole tree and split between the root (the parent) and its descendants (the children), peak PSS read only for tree members, peak process count, peak cores over whole one second windows that keep the ticks of children that exited inside the window and never fall below the run's average, CPU seconds (the larger of the reaped tree's rusage and the tracked per process ticks), wall time, peak workdir bytes, exit code and timeout; it checks the leader with waitid WNOWAIT so the process group kill lands before the leader is reaped",
+    "scripts.swarm_v2.resource_bench run --suite --root --generation --source --output measures every workload at every child count and repeat in a fresh workdir removed afterwards, with an environment holding only PATH, LANG, PLAYWRIGHT_BROWSERS_PATH, HOME, TMPDIR and CHILDREN; it records the host (CPUs, memory total and available, load before and after) and tool versions, a workload's version counting as a tool",
+    "resource_bench nodes --nodes --pods --output [--read-at] turns kubectl node and Pod listings into allocatable memory, CPU and ephemeral storage per node minus the requests of every scheduled Pod that has not finished (the larger of the summed containers and any init container), and records the read time and the sha256 of both listings instead of the listings",
+    "scripts.swarm_v2.resource_profiles.derive(measured, nodes, Policy) admits a class only when every run exited zero, at least one run had children and more than one process, and every child count has min_repeats runs; it refuses the idle class outright and raises ClaimRefused when no class is admitted. An admitted profile carries limits (memory from the worst RSS plus the declared agent reserve, CPU from the worst cores, ephemeral from the worst workdir plus the declared base, each grown by the margin and rounded up), requests (p95 RSS plus reserve, p50 cores), every metric's distribution (n, min, p50, p95, max) and its uncertainty (samples, child counts, relative RSS spread, margin, declared values)",
+    "resource_profiles.coexistence(profiles, nodes) counts whole workers per node against free memory by memory limit and free CPU by CPU request, and whether one of each profile fits at once; derive reports it, or unmeasured when no node capacity was recorded",
+    "resource_profiles.promote(accepted, candidate, policy, requalified_by) answers refused (the candidate sizes a class outside general, browser, compiler and memory, such as idle), promoted, replayed (same generation and content), conflict (same generation, different content), stale (older generation), requalify (a measured maximum moved past the tolerance, a class is missing, or a tool or workload version changed) or requalified (the same held change installed because a reviewer was named; the name is stripped and recorded in the installed report); accept(path, candidate, policy, requalified_by) installs atomically only on promoted or requalified and keeps the replaced report beside it; rollback(path) swaps the accepted report with the one it replaced through three renames, so neither is deleted and an interruption leaves both on disk",
+    "resource_bench derive, promote --requalified-by and rollback expose derive, accept and rollback on the command line; derive exits 2 with the refusal when no class is admitted",
+    "resource_profiles.markdown(report, notes) renders the results page; docs/swarm-v2/resource-results.md is that page for the committed record and a test keeps them equal",
+    ".github/workflows/worker-resources.yml runs the suite, an independent repeat and the update suite on a hosted runner on dispatch, on call and on a branch push that changes the workloads or the resource modules, derives against the committed Anton node record, refuses to publish a record holding the fake credential it sets, and uploads the worker-resources artifact"
+  ],
+  "supported_versions": {
+    "python": "3.11 and later; measured with Python 3.12.15",
+    "platform": "Linux /proc with smaps_rollup for PSS; RSS stands in where PSS is unreadable",
+    "tools_measured": "pytest 9.1.1, Playwright 1.63.0, cc (Ubuntu 13.3.0), kernel 6.17.0-1022-azure as recorded in the measurement tools; workloads general 1, compiler 2, browser 2, memory 1, idle 1",
+    "compatibility": "New modules only. No deployed Pod policy, Helm value or antoncore object changed; the existing general profile limits stay as they are until an operator promotes measured ones through GitOps."
+  },
+  "authority": "The benchmark holds no authority over admission. The accepted report changes only through accept, which decides from the generation, the measured classes and the comparison with the accepted report, never from a label in the candidate; a held change is installed only when a reviewer is named on the command, and the name is recorded in the installed report. The name is not checked against a grant or operator role; whoever can write the accepted file can name one.",
+  "authoritative_objects": "The accepted report file is the only authoritative object; accept never deletes it, writes it only on promotion or named requalification and keeps the report it replaced for rollback, and rollback swaps the two so neither is lost. Measurement workdirs are fixture local and removed after each run; node and Pod listings are read only and only reduced numbers with input digests are committed.",
+  "states": {
+    "observed": "Worker resources run 38149855138 at measured_commit measured 39 runs: general, compiler, browser and memory at 1, 2 and 4 children, three repeats each, and three idle runs, each with parent and children CPU seconds, peak cores and process counts; an independent repeat measured the same 39 runs again; the update suite measured the memory class again with its workload changed from 256 to 384 MiB and its version from 1 to 2.",
+    "accepted": "Case A: all four classes admitted with 9 runs each and the idle class refused; the coexistence result covers all 8 Anton nodes; a second derivation of the same record matches, the independent repeat derives every class with no material, missing or tool change (every limit equal), and the first accept promotes with the accepted file read back equal. Case B: the three idle runs (peak 13.0 MiB) are refused with no class admitted, a forged candidate that sizes the idle class is refused by promote even with a named reviewer, the accepted report is unchanged, and the fake credential set during the run is absent from every file the run wrote, the refusal, the decision and the committed records. Case C: the memory workload change (256 to 384 MiB, version 1 to 2) moved the memory class peak RSS from 1091.25 to 1603.12 MiB, so promotion is held for requalification; a stale generation is refused, a candidate missing the browser class is held, a replay of the accepted report is a no op, an install interrupted by an injected failure of the atomic rename leaves the accepted file intact, a named requalification installs generation 112 and rollback restores generation 110 byte for byte while keeping generation 112 beside it.",
+    "committed": "Code, workloads, measurement, repeat, update and node records and case records at tested_commit; manifest.json hashes the inputs and names the measured commit. The workloads are unchanged between measured_commit and tested_commit; the sampler differs only in tests and in evaluating its loop condition as one tuple, which samples the same way.",
+    "externally_verified": "None: the profiles are not applied to any deployed Pod policy and no worker Pod ran the workloads; G10 live evidence is outstanding."
+  },
+  "validation": {
+    "red": "Proofs run 38139509083 on tests only commit d3fae5797: the three new test modules failed collection with ImportError",
+    "tests": "Proofs run 38154739013 at tested_commit: 100 passed across the three resource test modules, case records a, b and c matched",
+    "mutation": "Mutation preflight 38154729501 at tested_commit against dev: resource_bench 514 killed, resource_profiles 690 killed, resource_sampling 312 killed, no survivor or timeout",
+    "lint": "ruff check and ruff format passed through python -m scripts.ci_prepush",
+    "earlier_runs": "Worker resources run 38139549078 refused every class because the suite path was relative; run 38139693400 refused the general class because its generated suite failed and showed peak cores above the runner's 4 CPUs, which led to whole second core windows; run 38140098792 measured the first committed record, replaced after the readers' fixes by run 38147758574, which in turn was replaced by run 38149855138 once the sampler split CPU and process count between parent and children"
+  },
+  "measurements": {
+    "worker_process_tree_peak_memory": {
+      "unit": "MiB, RSS summed over the process tree",
+      "browser": 2663.61,
+      "compiler": 236.2,
+      "general": 258.68,
+      "memory": 1091.25,
+      "idle": 13.0
+    },
+    "profiles": {
+      "browser": {
+        "memory_mib": 4864,
+        "cpu_millis": 4250,
+        "ephemeral_mib": 3072
+      },
+      "compiler": {
+        "memory_mib": 1792,
+        "cpu_millis": 4750,
+        "ephemeral_mib": 3072
+      },
+      "general": {
+        "memory_mib": 1792,
+        "cpu_millis": 5000,
+        "ephemeral_mib": 3072
+      },
+      "memory": {
+        "memory_mib": 2816,
+        "cpu_millis": 500,
+        "ephemeral_mib": 3072
+      }
+    },
+    "coexistence": "On the read of 2026-10-11T12:28:53Z, anton-ec2-0396dfd54e94477e5 and k8s-master each fit at least one worker of every profile on its own and worker-001 fits one compiler, general or memory worker; no node fits one of each at once, because the four CPU requests sum to 6750 millis and the most free CPU on any node is 4412. The three busy EC2 workers and both k8s workers fit only memory workers.",
+    "parent_and_children": {
+      "unit": "maximum over each class's nine runs; cores over whole one second windows, floored at the run average",
+      "browser": {
+        "peak_parent_cores": 0.098,
+        "peak_children_cores": 3.199,
+        "parent_cpu_seconds": 0.12,
+        "children_cpu_seconds": 6.35,
+        "peak_children_processes": 32
+      },
+      "compiler": {
+        "peak_parent_cores": 0.039,
+        "peak_children_cores": 3.646,
+        "parent_cpu_seconds": 0.06,
+        "children_cpu_seconds": 24.344,
+        "peak_children_processes": 8
+      },
+      "general": {
+        "peak_parent_cores": 0.029,
+        "peak_children_cores": 3.803,
+        "parent_cpu_seconds": 0.04,
+        "children_cpu_seconds": 26.011,
+        "peak_children_processes": 5
+      },
+      "memory": {
+        "peak_parent_cores": 0.019,
+        "peak_children_cores": 0.324,
+        "parent_cpu_seconds": 0.02,
+        "children_cpu_seconds": 0.422,
+        "peak_children_processes": 4
+      }
+    }
+  },
+  "limitations": [
+    "Measured on a GitHub hosted runner, not inside a worker Pod on Anton: CPU peaks are bounded by that runner's 4 CPUs and its kernel.",
+    "The agent CLI's own resident memory is a declared 1024 MiB reserve in every profile, not a measurement; measuring it needs a live, authenticated agent run.",
+    "The idle class is a sleeping Python process standing in for an idle agent CLI.",
+    "With nine runs per class the p95 column equals the maximum.",
+    "Descendants that leave the workload's session and process tree are neither counted nor killed.",
+    "A child that starts and exits between two samples never enters a peak window; CPU seconds still count it.",
+    "A workload change is detected through its declared version, not a fingerprint of its command.",
+    "The sampler walks the workload folder on every sample; that cost runs outside the measured tree.",
+    "Coexistence counts whole workers in each node's allocatable capacity minus the requests already scheduled there.",
+    "The interrupted install is an injected failure of the atomic rename, not a killed and restarted process.",
+    "A requalifying reviewer is a name on the command line, not checked against a grant or operator role.",
+    "The worker image carries neither a compiler nor a browser, so the compiler and browser profiles assume the project brings its toolchain."
+  ],
+  "rollback": "Restore previous profile limits and lower admission while new measurements are gathered: no deployed profile changed, so rollback of this package is reverting its pull request; an accepted report is restored with resource_bench rollback, which swaps in the report the last promotion replaced and keeps the displaced one. Rehearsed in case C: a memory workload change is held with the accepted file byte identical, an interrupted install leaves it intact, and rollback after a named requalification restores generation 110 byte for byte with generation 112 kept beside it."
+}

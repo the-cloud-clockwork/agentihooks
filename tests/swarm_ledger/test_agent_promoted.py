@@ -8,7 +8,7 @@ def _rows(agents):
     page = page_source()
     functions = [
         "function " + name + "(" + page.split("  function " + name + "(", 1)[1].split("\n  }\n", 1)[0] + "\n}"
-        for name in ("span", "modelText", "agentRows")
+        for name in ("span", "modelText", "terminalView", "executionView", "agentRows")
     ]
     js = "\n".join(functions) + f"\nconsole.log(JSON.stringify(agentRows({{agents: {json.dumps(agents)}}}, 0)));"
     return json.loads(subprocess.check_output(["node", "-e", js], text=True))

@@ -1,0 +1,36 @@
+{
+  "case": "T-SV2-LDG-04-A",
+  "independent_runs": 2,
+  "observed": {
+    "case": "T-SV2-LDG-04-A",
+    "evidence_class": "two real ledger server processes sharing one SQLite ledger folder; no Redis fixture",
+    "observed": {
+      "chat": [
+        "Written by the one active writer"
+      ],
+      "display_label_without_token": {
+        "reason": "missing or wrong ledger token",
+        "status": 403
+      },
+      "first_server_held_the_lease": true,
+      "first_server_write": {
+        "applied": [
+          "a-1"
+        ],
+        "rejected": [],
+        "status": 200
+      },
+      "ledger_unchanged_by_label": true,
+      "ledger_unchanged_by_second": true,
+      "ledger_writer_conflicts_total": 1,
+      "revision_advanced_by_first": true,
+      "second_server": {
+        "exit": 1,
+        "leaked_the_token": false,
+        "named_the_holder": true,
+        "served": false
+      }
+    },
+    "state": "passed"
+  }
+}

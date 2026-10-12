@@ -51,7 +51,7 @@ SHELL_RC = {
     ".zsh_history",
 }
 
-CREDENTIAL_FILES = {".netrc", ".npmrc", ".pypirc", ".git-credentials", ".pgpass"}
+CREDENTIAL_FILES = {".netrc", ".npmrc", ".pypirc", ".git-credentials", ".pgpass", "launch-grant"}
 
 KIND_DOTENV = "dotenv"
 KIND_SHELLRC = "shellrc"
@@ -176,7 +176,7 @@ SENSITIVE_FRAGMENT = re.compile(
     r"|[\w-]+\.env"
     r"|\.bashrc|\.bash_profile|\.bash_login|\.profile"
     r"|\.zshrc|\.zprofile|\.zshenv|\.bash_history|\.zsh_history"
-    r"|\.netrc|\.npmrc|\.pypirc|\.git-credentials|\.pgpass"
+    r"|\.netrc|\.npmrc|\.pypirc|\.git-credentials|\.pgpass|launch-grant"
     r"|\.aws/credentials"
     r")"
 )

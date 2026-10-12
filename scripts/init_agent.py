@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -182,9 +183,12 @@ def _codex_trust_args(directory: Path, environ: dict[str, str]) -> list[str]:
 
 
 MODEL_DEFAULTS = {"claude": "opus", "codex": "gpt-6.1-sol"}
-EFFORT_DEFAULT = "high"
+EFFORT_DEFAULT = "medium"
 AGENT_HELP = "Agent to open; default the harness of the account with a free session and the fewest live sessions"
 LAUNCH_GRACE_S = 3
+STARTED_ROUTES = ("routed", "bare", "direct")
+PROMPT_AFTER_START = "AGENTIHOOKS_PROMPT_AFTER_START"
+CODEX_READY_S = 120.0
 
 
 def _flag_value(args: list[str], names: tuple[str, ...]) -> str:
@@ -198,15 +202,48 @@ def _flag_value(args: list[str], names: tuple[str, ...]) -> str:
 
 
 def _handoff_agent(requested: str, environ: dict[str, str], agent_args: list[str]) -> str:
-    source = environ.get("AGENTIHOOKS_TARGET") or "claude"
+    source = environ.get("AGENTIHOOKS_TARGET") or _live_harness()
     target = requested or source
     if _flag_value(agent_args, ("--route",)) == "api":
         return target
-    if requested == "codex" or source == "codex":
+    if "codex" in (requested, source) and target != source:
         raise ValueError(
-            f"unsupported quota transfer: {source.capitalize()} cannot transfer to a {(requested or 'claude').capitalize()} account"
+            f"unsupported quota transfer: {source.capitalize()} cannot transfer to a {target.capitalize()} account"
         )
-    return "claude"
+    return "codex" if source == "codex" else "claude"
+
+
+def _live_harness() -> str:
+    from scripts.profiles import binding
+
+    try:
+        return binding.process()[1]
+    except (OSError, ValueError):
+        return "claude"
+
+
+def _handoff_exclude(agent: str, environ: dict[str, str]) -> str:
+    """The account a quota handoff leaves; for Codex it comes from the live process because the
+    operator environment can carry every AH_CX_TOKEN_*, which hides the session's own account."""
+    from hooks.context.account_sessions import UNROUTED, environment_account
+    from scripts.profiles import binding
+
+    if agent == "codex":
+        _, _, _, current = binding.process()
+        return current
+    current = environment_account(environ)
+    return "" if current == UNROUTED else current
+
+
+def _mark_handoff(account: str, resumed: str) -> list[str]:
+    from hooks.context.account_sessions import agent_pid
+    from hooks.context.broadcast import mark_handed_off
+    from hooks.lifecycle import handoff_close
+
+    pid = agent_pid()
+    if resumed:
+        handoff_close.handoff_record(pid, resumed).touch()
+    return mark_handed_off(pid, account)
 
 
 def model_effort(agent: str, agent_args: list[str], environ: dict[str, str]) -> tuple[str, str]:
@@ -253,13 +290,14 @@ def _agent_command(
         command = [
             agentihooks_bin,
             "codex",
+            *(["--agentihooks-exclude", spec.exclude] if spec.exclude else []),
             "--agentihooks-report",
             str(report),
-            *(["resume", spec.resume] if spec.resume else []),
             *_codex_otel_args(environ),
             *_codex_trust_args(directory, environ),
-            *_model_args("codex", agent_args, environ),
+            *(_model_args("codex", agent_args, environ) if spec.profile or spec.fallback_bare else []),
             *agent_args,
+            *(["resume", spec.resume] if spec.resume else []),
         ]
         return _profile_command(command, spec), ""
     command = [
@@ -303,10 +341,11 @@ def _write_launcher(
     langfuse = environ.get("AGENTIHOOKS_LANGFUSE_ENABLED")
     langfuse_export = f"export AGENTIHOOKS_LANGFUSE_ENABLED={shlex.quote(langfuse)}\n" if langfuse is not None else ""
     command, before = _agent_command(spec, _route_report(launcher), name, claude_args, environ, directory)
+    command_text = shlex.join(command)
     if prompt_file is not None:
-        command_text = f'{shlex.join(command)} "$(cat {shlex.quote(str(prompt_file))})"'
-    else:
-        command_text = shlex.join(command)
+        prompt_arg = f'"$(cat {shlex.quote(str(prompt_file))})"'
+        held = f'set --; [ -n "${{{PROMPT_AFTER_START}:-}}" ] || set -- {prompt_arg}; unset {PROMPT_AFTER_START}; '
+        command_text = f'{held}{command_text} "$@"' if spec.agent == "codex" else f"{command_text} {prompt_arg}"
     cleanup = [
         str(launcher),
         str(_route_report(launcher)),
@@ -339,6 +378,35 @@ def _write_launcher(
     return launcher, prompt_file
 
 
+def _codex_session_choices(session_id: str) -> tuple[str | None, str | None]:
+    from hooks.observability.transcript import iter_complete_records
+    from hooks.targets.normalizer import codex_rollout_path
+
+    model, effort = "", ""
+    if rollout := codex_rollout_path(session_id):
+        for record, _ in iter_complete_records(rollout, 0):
+            if record and record.get("type") == "turn_context":
+                context = record["payload"]
+                model, effort = context.get("model"), context.get("effort")
+    return model, effort
+
+
+def _plain_codex_handoff(flags: list[str], session_id: str) -> list[str]:
+    from scripts.profiles import binding
+    from scripts.select_profile import _native_options
+    from scripts.swarm.launch_model import configured
+
+    _, harness, source, _ = binding.process()
+    if harness != "codex":
+        raise ValueError(f"unsupported quota transfer from {harness} to codex")
+    native = configured("codex", codex_home(source))
+    model, effort, remaining = _native_options("codex", flags)
+    saved_model, saved_effort = _codex_session_choices(session_id)
+    model = model or saved_model or source.get("AGENTIHOOKS_RUN_MODEL") or native.get("model")
+    effort = effort or saved_effort or source.get("AGENTIHOOKS_RUN_EFFORT") or native.get("effort")
+    return [*model_flags("codex", model, effort), *remaining]
+
+
 def _prepare_profile(args: argparse.Namespace, agent: str, flags: list[str], environ: dict[str, str]) -> list[str]:
     from scripts.profiles import binding
     from scripts.select_profile import BUNDLE_REVISION, OVERLAYS, prepare
@@ -349,6 +417,8 @@ def _prepare_profile(args: argparse.Namespace, agent: str, flags: list[str], env
         args.overlay = [o for o in environ.get(OVERLAYS, "").split(",") if o]
         args.bundle_revision = environ.get(BUNDLE_REVISION, "")
     if continuing and not args.profile:
+        if agent == "codex" and args.handoff:
+            return _plain_codex_handoff(flags, args.resume)
         raise ValueError("unsupported continuation: original required profile is missing; pass --profile")
     if not args.profile:
         return flags
@@ -392,6 +462,17 @@ def _selection_refused(environ: dict[str, str]) -> bool:
     from scripts.profiles import binding
 
     return bool(environ.get(binding.REPORT)) and binding.refused(Path(environ[binding.REPORT]))
+
+
+def _route_reported(environ: dict[str, str], timeout: float, route: dict) -> None:
+    from scripts.profiles import binding
+
+    status = route.get("status")
+    if not environ.get(binding.REPORT) or status in STARTED_ROUTES or _selection_refused(environ):
+        return
+    if not status:
+        raise ValueError(f"the harness did not report its route within {timeout:g}s")
+    raise ValueError(f"the harness route is {status}: {route.get('error', 'no error given')}")
 
 
 def _binding_export(environ: dict[str, str]) -> str:
@@ -556,7 +637,7 @@ def _select_host(requested: str, environ: dict[str, str]) -> tuple[str, bool]:
 
 def _start_herdr(launcher: Path, directory: Path, name: str, args, agent: str, environ: dict[str, str]) -> list[str]:
     started = herdr_host.ensure_server(environ)
-    env = {"HERDR_AGENT": agent}
+    env = {"HERDR_AGENT": agent, **({PROMPT_AFTER_START: "1"} if _held_prompt(launcher, agent) else {})}
     placed = herdr_host.open_pane(directory, name, env, args.placement, args.workspace, environ)
     herdr_panes.record(placed, "init-agent", name, environ, int(time.time() * 1000))
     herdr_host.run(placed.pane_id, launcher, environ)
@@ -566,6 +647,12 @@ def _start_herdr(launcher: Path, directory: Path, name: str, args, agent: str, e
         f"pane_id={placed.pane_id}",
         *(["herdr_server=started", "attach=herdr"] if started else []),
     ]
+
+
+def _held_prompt(launcher: Path, agent: str) -> str:
+    """The opening prompt a Codex pane gets after its rename: typed at launch, the rename would wait behind its turn."""
+    prompt_file = launcher.with_suffix(".prompt")
+    return prompt_file.read_bytes().decode() if agent == "codex" and prompt_file.exists() else ""
 
 
 CHANNEL_WARNING_MS = 60_000
@@ -581,6 +668,59 @@ def _answer_channel_warning(pane: str, environ: dict[str, str]) -> str:
     from scripts.inbox import channel
 
     return "answered" if herdr_host.answer(pane, channel.WARNING, environ, CHANNEL_WARNING_MS) else "unseen"
+
+
+def _name_in_herdr(pane: str, name: str, agent: str, environ: dict[str, str], opening: str, since: float) -> list[str]:
+    detected = herdr_host.rename_agent(pane, name, environ)
+    ready = agent == "codex" and (detected or bool(opening)) and herdr_host.wait_ready(pane, environ, CODEX_READY_S)
+    named = [f"agent_name={herdr_host.agent_name(name)}"] if detected else ["agent_name=unset"]
+    if detected and agent == "codex":
+        named += _name_codex_session(pane, name, environ, since, ready)
+    if opening:
+        named.append(f"opening_prompt={_send_opening(pane, opening, environ, ready)}")
+    return named
+
+
+def _send_opening(pane: str, opening: str, environ: dict[str, str], ready: bool) -> str:
+    """Codex can read busy again right after its rename."""
+    ready = ready and herdr_host.wait_ready(pane, environ, CODEX_READY_S)
+    why = herdr_host.busy(pane, environ) if ready else "not-ready"
+    if why:
+        return f"held:{why}"
+    return "sent" if herdr_host.prompt(pane, opening, environ) else "failed"
+
+
+def _names_pane(route: dict, launcher: Path, agent: str) -> bool:
+    """Codex may start after the route wait ends with no report."""
+    return route.get("status") in STARTED_ROUTES or (not route.get("status") and bool(_held_prompt(launcher, agent)))
+
+
+def _name_codex_session(pane: str, name: str, environ: dict[str, str], since: float, ready: bool) -> list[str]:
+    outcome = herdr_host.name_session(pane, name, environ, _codex_named(environ, name, since)) if ready else "not-ready"
+    herdr_panes.mark(pane, environ, session_name=name if outcome == "named" else f"unset:{outcome}")
+    return [f"session_name={name}"] if outcome == "named" else ["session_name=unset", f"session_name_error={outcome}"]
+
+
+def _codex_named(environ: dict[str, str], name: str, since: float) -> Callable[[], bool]:
+    """Whether Codex's session index holds the name, set at or after the launch."""
+    index = codex_home(environ) / "session_index.jsonl"
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(since))
+
+    def named() -> bool:
+        try:
+            lines = index.read_bytes().decode().splitlines()
+        except OSError:
+            return False
+        for line in lines:
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(row, dict) and row.get("thread_name") == name and str(row.get("updated_at", "")) >= stamp:
+                return True
+        return False
+
+    return named
 
 
 def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -> int:
@@ -602,10 +742,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         )
         agent = agent or "claude"
         if args.handoff:
-            from hooks.context.account_sessions import UNROUTED, environment_account
-
-            current = environment_account(active_env)
-            exclude = "" if current == UNROUTED else current
+            exclude = _handoff_exclude(agent, active_env)
             if not prompt:
                 raise ValueError("--handoff needs the handoff document as --prompt-file")
         claude_args = _prepare_profile(args, agent, claude_args, active_env)
@@ -731,9 +868,8 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         report.append(f"route_error={route['error']}")
     pane = next((line.split("=", 1)[1] for line in report if line.startswith("pane_id=")), "")
     herdr_panes.mark(pane, active_env, route_status=route.get("status", "pending"))
-    if pane and route.get("status") in ("routed", "bare", "direct"):
-        renamed = herdr_host.rename_agent(pane, name, active_env)
-        report.append(f"agent_name={herdr_host.agent_name(name) if renamed else 'unset'}")
+    if pane and _names_pane(route, launcher, agent):
+        report += _name_in_herdr(pane, name, agent, active_env, _held_prompt(launcher, agent), launcher_at / 1000)
         if channel:
             report.append(f"channel_warning={_answer_channel_warning(pane, active_env)}")
     if args.handoff and route.get("status") != "routed":
@@ -743,6 +879,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         )
         return 3
     try:
+        _route_reported(active_env, args.route_timeout, route)
         report += _binding_result(active_env, args.route_timeout, route)
     except (OSError, ValueError) as exc:
         print("\n".join([*report, "profile_validation=failed"]))
@@ -752,10 +889,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         print("\n".join(report))
         return 0
 
-    from hooks.context.account_sessions import agent_pid
-    from hooks.context.broadcast import mark_handed_off
-
-    marked = mark_handed_off(agent_pid(), route["account"])
+    marked = _mark_handoff(route["account"], args.resume)
     print("\n".join([*report, "handoff=done", f"handed_off_sessions={','.join(marked) or 'none'}"]))
     return 0
 

@@ -1,0 +1,111 @@
+{
+  "case": "T-SV2-KUB-03-A",
+  "independent_runs": 2,
+  "observed": {
+    "case": "T-SV2-KUB-03-A",
+    "checks": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ],
+    "evidence_class": "mocked Redis and server clock; fixture network; in process helper exec; no Kubernetes calls",
+    "input_sha256": "a72d5c962385abf18d1df7a6fe17443cde4a010a28faeb385c56443a442b8554",
+    "observed": {
+      "fallback": [
+        "queued",
+        1,
+        true
+      ],
+      "fallback_argv_bounded": true,
+      "fallback_calls": [
+        [
+          "status",
+          5
+        ],
+        [
+          "deliver",
+          5
+        ],
+        [
+          "status",
+          5
+        ],
+        [
+          "deliver",
+          5
+        ]
+      ],
+      "fallback_drain": [
+        "queued",
+        "drain",
+        {},
+        false,
+        "completed",
+        {
+          "checkpoint": "refs/checkpoints/kub03-1",
+          "status": "checkpointed"
+        }
+      ],
+      "handlers_ran": 7,
+      "http_drain": [
+        "ok",
+        false,
+        "completed",
+        {
+          "checkpoint": "refs/checkpoints/kub03-1",
+          "status": "checkpointed"
+        }
+      ],
+      "http_payload_sha256": [
+        "945c221b460423c62dc1b25f9925157015648d2a19539ffa2f60207be96d8f28",
+        "0aaf0e40e6b4715905d140fdf7f4583a17c564cdc52e27d9a31d6ce6f7442507",
+        "94c2dc1c8501d1540bf71cbbf1d091fe546e39fe9a9a1c6287fd4692c8dd8863",
+        "559a67a200a0812c2f52b00e39648cd1ea76b71dd805349b3974f1df4b767d99",
+        "0937704d31aa6ab4e30678cc9b659bee02ec12fdfc494f3f0634f28ce0ac25c0",
+        "c06895757a5a23516981377bcda2cae1448d8c4e40f4cb6883b1d12f59004831"
+      ],
+      "http_payloads_intact": true,
+      "issued_over_http": [
+        [
+          "ok",
+          "applied",
+          "issued"
+        ],
+        [
+          "ok",
+          "applied",
+          "issued"
+        ],
+        [
+          "ok",
+          "applied",
+          "issued"
+        ],
+        [
+          "ok",
+          "applied",
+          "issued"
+        ],
+        [
+          "ok",
+          "applied",
+          "issued"
+        ],
+        [
+          "ok",
+          "applied",
+          "issued"
+        ]
+      ],
+      "worker_transport_ambiguous_total": {
+        "deliver": 0,
+        "status": 0
+      }
+    },
+    "state": "passed"
+  }
+}

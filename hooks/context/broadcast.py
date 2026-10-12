@@ -415,6 +415,9 @@ def _build_broadcast(
     return entry
 
 
+MASTERS_CHANNEL_PREFIX = "masters."
+
+
 def create_broadcast(
     message: str,
     severity: str = "info",
@@ -443,6 +446,11 @@ def create_broadcast(
     Returns:
         The 12-char message ID on success, or ``None`` for empty input.
     """
+    if channel and channel.startswith(MASTERS_CHANNEL_PREFIX):
+        slug = channel.removeprefix(MASTERS_CHANNEL_PREFIX)
+        raise ValueError(
+            f"{channel} is a masters channel: master seats post with agentihooks swarm {slug} masters-channel say"
+        )
     entry = _build_broadcast(message, severity, ttl_seconds, source, persistent, channel)
     if entry is None:
         return None
@@ -520,6 +528,35 @@ def reconcile_channel_broadcasts(channel: str, desired: list[dict]) -> dict:
     }
 
 
+def cache_fleet_broadcasts(entries: list[dict]) -> int:
+    """Cache fleet revisions claimed for one session each, keeping only the newest revision per session; entries
+    without a ``fleet`` tag are local broadcasts and stay untouched. Returns how many new entries the file kept."""
+
+    def name(m: dict) -> tuple[str, str, str]:
+        return m["fleet"]["swarm"], m["fleet"]["broadcast_id"], m["fleet"]["session"]
+
+    with _file_lock(_broadcast_path()):
+        msgs = _read_broadcasts()
+        held = {m["id"] for m in msgs}
+        tagged = sorted((m for m in [*msgs, *entries] if "fleet" in m), key=lambda m: m["fleet"]["revision"])
+        newest = {name(m): m["fleet"]["revision"] for m in tagged}
+        kept = [m for m in msgs if "fleet" not in m or m["fleet"]["revision"] == newest[name(m)]]
+        added = [
+            {**entry, "content_hash": _msg_hash(entry)}
+            for entry in entries
+            if entry["id"] not in held and entry["fleet"]["revision"] == newest[name(entry)]
+        ]
+        if not added and len(kept) == len(msgs):
+            return 0
+        saved = kept + added
+        fleet_ids = [m["id"] for m in saved if "fleet" in m]
+        evicted = set(fleet_ids[: max(len(saved) - BROADCAST_MAX_MESSAGES, 0)])
+        saved = [m for m in saved if m["id"] not in evicted][-BROADCAST_MAX_MESSAGES:]
+        _save_broadcasts(saved)
+        fresh = {m["id"] for m in added}
+        return sum(1 for m in saved if m["id"] in fresh)
+
+
 def find_broadcast_by_content_hash(content_hash: str, channel: str | None = None) -> dict | None:
     """Return the most recent broadcast matching content_hash + channel, else None."""
     if not content_hash:
@@ -566,6 +603,7 @@ def clear_broadcasts(message_id: str | None = None, channel: str | None = None) 
 
 
 def _admitted(session_id: str, msgs: list[dict]) -> list[dict]:
+    msgs = [m for m in msgs if "fleet" not in m or m["fleet"]["session"] == session_id]
     return quarantine.keep(
         session_id,
         "broadcast",
@@ -723,6 +761,7 @@ def acknowledge_broadcast(session_id: str, message_id: str) -> bool:
 
 
 SESSION_MAX_AGE_SECONDS = 86400  # 24h retention for crash recovery
+SESSION_SUSPECT_SECONDS = 300
 
 
 def _now_iso() -> str:
@@ -790,6 +829,7 @@ def register_session(
             "model": model,
             "account": account,
             "project": identity.attributes() if identity else None,
+            "process_namespace": _local_namespace(),
         }
         _save_sessions(sessions)
 
@@ -849,18 +889,44 @@ def session_status(session_id: str) -> dict:
     return dict(_load_sessions().get(session_id) or {})
 
 
-def mark_session_closed(session_id: str) -> None:
+def mark_session_closed(session_id: str, pid: int | None = None) -> None:
     """Flip a session to status=closed on clean SessionEnd. Keeps the entry
     for the 24h crash-recovery retention window (see SESSION_MAX_AGE_SECONDS)
     instead of deleting it outright."""
     with _file_lock(_sessions_path()):
         sessions = _load_sessions()
         entry = sessions.get(session_id)
-        if entry is None:
+        # A resumed conversation keeps its id under a new process; only that process closes it.
+        if entry is None or (pid is not None and entry.get("pid") not in (None, pid)):
             return
         entry["status"] = "closed"
         entry["last_seen"] = _now_iso()
         _save_sessions(sessions)
+
+
+def _local_namespace() -> str:
+    from scripts.swarm_v2.runtime.process import local_namespace
+
+    return local_namespace()
+
+
+def foreign_session(info: dict, namespace: str) -> bool:
+    """A stamped record this process table cannot judge: another namespace, or an unreadable local one."""
+    recorded = info.get("process_namespace") or ""
+    return bool(recorded) and recorded != namespace
+
+
+def _silent(info: dict, now_dt: datetime) -> bool:
+    if info.get("status", "alive") not in ("alive", "handed_off"):
+        return False
+    stamp = info.get("last_seen") or info.get("started_at")
+    if not stamp:
+        return False
+    try:
+        seen = _parse_iso(stamp)
+    except ValueError:
+        return False
+    return (now_dt - seen).total_seconds() > SESSION_SUSPECT_SECONDS
 
 
 def heartbeat_sessions() -> dict:
@@ -869,18 +935,37 @@ def heartbeat_sessions() -> dict:
         return _heartbeat_locked()
 
 
+def _pid_alive(pid: object) -> bool:
+    try:
+        os.kill(int(pid), 0)
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def _probe(info: dict, now_iso: str) -> str:
+    """The status a local liveness probe leaves on the record; empty when the record is not probed."""
+    status = info.get("status", "alive")
+    if status not in ("alive", "handed_off", "suspect"):
+        return ""
+    if info.get("pid") and _pid_alive(info["pid"]):
+        info["last_seen"] = now_iso
+        info["status"] = "alive" if status == "suspect" else status
+    else:
+        info["status"] = "dead"
+    return info["status"]
+
+
 def _heartbeat_locked() -> dict:
     sessions = _load_sessions()
     now_dt = datetime.now(timezone.utc)
     now_iso = now_dt.isoformat().replace("+00:00", "Z")
-    summary = {"alive": 0, "flipped_dead": 0, "pruned": 0, "total": 0}
+    summary = {"alive": 0, "flipped_dead": 0, "pruned": 0, "suspect": 0}
     prune: list[str] = []
     changed = False
+    here = _local_namespace()
 
     for sid, info in list(sessions.items()):
-        status = info.get("status", "alive")
-        pid = info.get("pid", 0)
-
         ts_str = info.get("last_seen") or info.get("started_at")
         if ts_str:
             try:
@@ -891,22 +976,16 @@ def _heartbeat_locked() -> dict:
             except ValueError:
                 pass
 
-        if status in ("alive", "handed_off"):
-            alive = False
-            try:
-                if pid:
-                    os.kill(int(pid), 0)
-                    alive = True
-            except (OSError, ValueError):
-                alive = False
-            if alive:
-                info["last_seen"] = now_iso
-                summary["alive"] += status == "alive"
+        if foreign_session(info, here):
+            if _silent(info, now_dt):
+                info["status"] = "suspect"
+                summary["suspect"] += 1
                 changed = True
-            else:
-                info["status"] = "dead"
-                summary["flipped_dead"] += 1
-                changed = True
+            continue
+        probed = _probe(info, now_iso)
+        summary["alive"] += probed == "alive"
+        summary["flipped_dead"] += probed == "dead"
+        changed = changed or bool(probed)
 
     for sid in prune:
         del sessions[sid]
@@ -936,9 +1015,12 @@ def get_active_sessions(cleanup: bool = False, include_all: bool = False) -> dic
         with _file_lock(_sessions_path()):
             sessions = _load_sessions()
             changed = False
+            here = _local_namespace()
             for sid, info in sessions.items():
                 pid = info.get("pid")
                 if not pid or info.get("status") in ("dead", "closed", "superseded"):
+                    continue
+                if foreign_session(info, here):
                     continue
                 try:
                     os.kill(pid, 0)

@@ -4,11 +4,12 @@ The inbox hooks deliver an item at the receiver's next tool call and the tick's 
 Replies addressed to the operator are posted on the ledger page chat.
 """
 
+import contextlib
 import json
 
-from scripts.inbox import links
-from scripts.inbox.store import InboxStore
-from scripts.swarm.store import SwarmError
+from scripts.inbox import links, outbox
+from scripts.inbox.store import DuplicateItem, InboxError, InboxStore
+from scripts.swarm.store import RedisStore, SwarmError
 
 READY = ("idle", "done")
 OPERATOR = "operator"
@@ -65,7 +66,29 @@ def send(store, slug, text, sender, to, fyi=False):
     for agent in found:
         links.check_send(inbox, sender, agent.name)
     for agent in found:
-        inbox.send(sender, agent.name, text, fyi=fyi, task=agent.task)
+        outbox.post(inbox, outbox.Post(sender, agent.name, text, fyi=fyi, task=agent.task))
+    return [a.name for a in found]
+
+
+def queue(slug, text, sender, to, fyi=False):
+    """A swarm say while Redis is unreachable: its recipients are looked up when the outbox replays."""
+    entry = outbox.record("say", sender, {"slug": slug, "to": to, "text": text, "fyi": fyi})
+    return outbox.submit(None, entry, None)
+
+
+def apply_say(inbox, sender, entry):
+    args, store = entry["args"], RedisStore(inbox.redis)
+    try:
+        slug = store.names.swarm_slug(args["slug"])
+        found = recipients(store, slug, args["to"], sender)
+    except SwarmError as exc:
+        raise InboxError(str(exc)) from exc
+    for agent in found:
+        links.check_send(inbox, sender, agent.name)
+    for agent in found:
+        item = outbox.stable_id(entry["item"], agent.name)
+        with contextlib.suppress(DuplicateItem):
+            inbox.send(sender, agent.name, args["text"], fyi=args["fyi"], task=agent.task, item_id=item)
     return [a.name for a in found]
 
 

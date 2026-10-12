@@ -730,6 +730,22 @@ def test_a_quota_notice_ends_with_the_life_it_was_sent_to(redis, seat):
     assert inbox.pending_mail("sw-eng-2") == []
 
 
+@pytest.mark.parametrize("seat", ["", "eng-1@sw"])
+def test_an_early_quota_warning_ends_with_the_life_it_warned(redis, seat):
+    from scripts.swarm import capacity, quota_handoff
+
+    inbox, store = InboxStore(redis), RedisStore(redis)
+    store.seats.occupy("eng-1@sw", "sw-eng-1", 1)
+    account = capacity.Account("claude", "work", "OPEN", 1, 50, 10, 3)
+    warning = inbox.send("swarm", "sw-eng-1", quota_handoff.directive("sw", account, ["week"]))
+    exits.settle(inbox, "sw-eng-1", seat, "handed off its seat")
+    after = inbox.get(warning.id)
+    assert (after.address, after.state) == ("sw-eng-1", "done")
+    assert "quota notice ended" in after.reason
+    store.seats.occupy("eng-1@sw", "sw-eng-2", 2)
+    assert inbox.pending_mail("sw-eng-2") == []
+
+
 @pytest.mark.parametrize(
     ("outcome", "state", "reason"),
     [

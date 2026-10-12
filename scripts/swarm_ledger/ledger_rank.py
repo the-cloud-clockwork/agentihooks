@@ -9,6 +9,7 @@ RANKS = ("urgent", "high", "normal", "low")
 ALIASES = {"next": "urgent"}
 DEFAULT = "normal"
 OPERATOR = "operator"
+QUOTE_WORDS = 3
 OPS = ("task_rank",)
 ITEM_RE = re.compile(r"^tasks/[^/]+$")
 
@@ -27,9 +28,9 @@ def order(task: dict) -> int:
 
 def check(op):
     by = op.get("by", OPERATOR)
-    shape = set(op) - {"by", "if_unranked"} == {"op", "id", "item", "rank"} and op.get("if_unranked", True) is True
+    shape = set(op) - {"by", "if_owned"} == {"op", "id", "item", "rank"} and op.get("if_owned", True) is True
     if not shape or not ITEM_RE.match(str(op["item"])) or not _named(by):
-        raise ValueError("task_rank takes an id, an item tasks/<id>, a rank and an optional author by and if_unranked")
+        raise ValueError("task_rank takes an id, an item tasks/<id>, a rank and an optional author by and if_owned")
     canonical(op["rank"])
 
 
@@ -48,13 +49,29 @@ def apply(doc, op, ctx):
     if refusal := rank_refusal(by):
         ctx.refused.append(refusal)
         return False
-    rank = canonical(op["rank"])
-    if op.get("if_unranked") and "rank" in task:
-        ctx.refused.append(f"task {task_id} already has rank {task['rank']}")
+    rank, path = canonical(op["rank"]), f"{op['item']}/rank"
+    if by != OPERATOR and (refusal := pinned(task_id, author(ctx, path) if "rank" in task else None)):
+        ctx.refused.append(refusal)
         return False
-    if task.get("rank") != rank:
+    if task.get("rank") != rank or author(ctx, path) != by:
         task["rank"] = rank
-        ctx.stamp(f"{op['item']}/rank", by)
+        ctx.stamp(path, by)
         ctx.record(by, "rank set", op["item"], text=rank)
         ctx.dirty = True
     return True
+
+
+def author(ctx, path):
+    return ctx.stamps.get(path, {}).get("by")
+
+
+def pinned(task_id, owner) -> str:
+    if owner != OPERATOR:
+        return ""
+    return f"task {task_id} has a rank the operator set: relay his words with task set {task_id} rank=<rank> --quote"
+
+
+def quoted(rank, words) -> bool:
+    said = set(re.findall(r"[a-z]+", words.lower()))
+    names = {rank} | {alias for alias, target in ALIASES.items() if target == rank}
+    return len(words.split()) >= QUOTE_WORDS and bool(names & said)

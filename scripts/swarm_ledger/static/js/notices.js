@@ -128,3 +128,11 @@ export function showNotifications(open) {
   renderNotifications();
   if (open) anchorPanel($("notif"), $("bell"));
 }
+export function bottleneckStat(top) {
+  return h("div", { class: "stat top-bottleneck" }, h("dt", { text: "Top bottleneck" }),
+    h("dd", {}, h("ul", { class: "bottleneck-list" }, h("li", { class: "bottleneck-stage", text: top ? top.label || "none" : "unavailable" }),
+      h("li", { text: `Trend ${top && top.trend || "unknown"}` }),
+      top && h("li", { text: `Measured ${top.measured || "never"}` }),
+      h("li", { text: `Last action ${top && top.last_action || "none recorded"}` }))));
+}
+

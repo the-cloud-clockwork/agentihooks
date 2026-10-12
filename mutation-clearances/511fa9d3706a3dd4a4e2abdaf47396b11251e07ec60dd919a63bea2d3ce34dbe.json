@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_relay_to_inbox__mutmut_38:26bc8caf4a5c8e962573b46a43a8e269e0cb047b60b3f27b904a92877a01ed9c": {
+    "reader": "standards_reader",
+    "reason": "Events come only from Context.record, which always sets rev, so the default is never taken and any value below 0 is excluded identically."
+  }
+}

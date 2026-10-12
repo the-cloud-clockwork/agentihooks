@@ -11,6 +11,7 @@ from scripts.handoff import transfers
 from scripts.inbox.seats import seat_address
 from scripts.swarm import launch_check, launch_model, naming
 from scripts.swarm.store import MASTER, AgentRecord, SwarmError
+from scripts.swarm_v2 import masters as master_seats
 
 PROC = Path("/proc")
 
@@ -54,7 +55,7 @@ def take(store, slug, name, runtime, now_ms, replace_live=False):
     carried, name = name, store.names.resolve(name)
     seated = _master_name(name, store.ensure_code(slug).code)
     own = {carried, name}
-    masters = [a for a in store.agents(slug) if a.lane == MASTER]
+    masters = [a for a in store.agents(slug) if master_seats.is_lead(slug, a)]
     others = [a for a in masters if a.name not in own]
     running = [a.name for a in others if a.state != "finished" and a.name in live]
     if running and not replace_live:

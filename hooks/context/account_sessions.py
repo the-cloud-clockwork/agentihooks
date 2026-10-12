@@ -17,6 +17,32 @@ API_MARKER = "AH_ROUTE_API"
 API_ACCOUNT = "api"
 _SHELLS = frozenset({"sh", "bash", "dash", "zsh", "fish", "ksh"})
 _PROC = Path("/proc")
+VALUE_FLAGS = frozenset(
+    {
+        "-c",
+        "--config",
+        "--enable",
+        "--disable",
+        "--remote",
+        "--remote-auth-token-env",
+        "-i",
+        "--image",
+        "-m",
+        "--model",
+        "--local-provider",
+        "-p",
+        "--profile",
+        "-s",
+        "--sandbox",
+        "-C",
+        "--cd",
+        "--add-dir",
+        "-a",
+        "--ask-for-approval",
+    }
+)
+SERVERS = frozenset({"app-server", "mcp-server"})
+INTERNAL_RUN = "AGENTIHOOKS_INTERNAL_RUN"
 
 
 def account_from_names(names: Iterable[str], prefix: str = TOKEN_PREFIX) -> str:
@@ -129,33 +155,42 @@ def _is_codex(pid: int, proc: Path) -> bool:
     return bool(argv) and (_comm(pid, proc) == "codex" or Path(argv[0]).name == "codex")
 
 
-def _is_interactive_codex(pid: int, proc: Path) -> bool:
+def _codex_positionals(argv: list[str]) -> list[str]:
+    rest = argv[1:]
+    while rest and rest[0].startswith("-"):
+        rest = rest[2:] if rest[0] in VALUE_FLAGS else rest[1:]
+    return rest
+
+
+def _is_codex_session(pid: int, proc: Path) -> bool:
     if not _is_codex(pid, proc):
         return False
     argv = _cmdline(pid, proc)
-    if "app-server" in argv[0] or (len(argv) > 1 and argv[1] in ("exec", "app-server", "mcp-server")):
+    if "app-server" in argv[0] or SERVERS.intersection(_codex_positionals(argv)[:1]):
+        return False
+    if INTERNAL_RUN in _env_names(pid, proc):
         return False
     return _comm(_ppid(pid, proc), proc) != "codex"
 
 
 def live_codex_sessions(proc: Path = _PROC) -> int:
-    """Interactive Codex sessions on this host; one CODEX_HOME is one account."""
+    """Interactive Codex sessions and exec runs on this host; one CODEX_HOME is one account."""
     try:
         entries = [int(entry.name) for entry in proc.iterdir() if entry.name.isdigit()]
     except OSError:
         return 0
-    return sum(1 for pid in entries if _is_interactive_codex(pid, proc))
+    return sum(1 for pid in entries if _is_codex_session(pid, proc))
 
 
 def codex_sessions_by_account(proc: Path = _PROC) -> dict[str, int]:
-    """Interactive Codex sessions per Codex account: a token slug, or the default login."""
+    """Interactive Codex sessions and exec runs per Codex account: a token slug, or the default login."""
     try:
         entries = [int(entry.name) for entry in proc.iterdir() if entry.name.isdigit()]
     except OSError:
         return {}
     counts: dict[str, int] = {}
     for pid in entries:
-        if _is_interactive_codex(pid, proc):
+        if _is_codex_session(pid, proc):
             account = codex_account_from_names(_env_names(pid, proc))
             counts[account] = counts.get(account, 0) + 1
     return counts
@@ -171,6 +206,30 @@ def handed_off_pids() -> set[int]:
     }
 
 
+def fleet_held(environ: Mapping[str, str] | None = None) -> dict[str, int]:
+    """Account slots held across the fleet that this host's /proc cannot see; none while distributed launches are off."""
+    from scripts.swarm_v2.runtime.base import LOCAL, RuntimeRouter
+
+    if RuntimeRouter.from_environ((), os.environ if environ is None else environ).spawn_backend() == LOCAL:
+        return {}
+    from hooks._redis import get_redis
+
+    redis = get_redis()
+    if redis is None:
+        return {}
+    from redis.exceptions import RedisError
+
+    from scripts.swarm import lease
+    from scripts.swarm.store import RedisStore
+    from scripts.swarm_v2 import accounts
+
+    store = RedisStore(redis)
+    try:
+        return accounts.fleet_held(store, lease.now_ms(store))
+    except RedisError:
+        return {}
+
+
 def sessions_by_account(proc: Path = _PROC) -> dict[str, int]:
     """Live sessions per account; sessions that already handed off their work do not hold a slot."""
     try:
@@ -180,4 +239,6 @@ def sessions_by_account(proc: Path = _PROC) -> dict[str, int]:
     counts: dict[str, int] = {}
     for account in live_sessions(proc, skip).values():
         counts[account] = counts.get(account, 0) + 1
+    for account, held in fleet_held().items():
+        counts[account] = counts.get(account, 0) + held
     return counts

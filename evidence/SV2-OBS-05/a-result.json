@@ -1,0 +1,223 @@
+{
+  "case": "T-SV2-OBS-05-A",
+  "evidence_class": "mixed: the two live runs of the recorded SV2-CAP-02 scaling canary on the Anton anton-k3s-swarm group, joined with synthetic quota wait, stale checkpoint and denied cross brain query readings, plus two independent synthetic traces, a fakeredis incident store behind a server that can be disconnected and an in process notification sink that can fail; no live controller, deployed brain or alert backend was used",
+  "input_sha256": {
+    "fleet-canary-overlay.json": "2def3d0c2158e8569db200752ee289b623767c97003d4afd0c11b17d6e04df6c",
+    "fleet-dashboard-second.json": "dfc4eeee2456710da17662a2a2587c0ee7b02670b9cce302b5d9ab32f9b1178e",
+    "fleet-dashboard.json": "6cd33879f00facc2cdb1e1cadb945fd61f2532e397ba19e34b7a781a395b0c2b",
+    "scaling-canary-sv2-cap-02.json": "b51bcbf1ea93fb6f29172b6a29a5b43b8e513f30fa3e871fc31b49ad04829693"
+  },
+  "observed": {
+    "first": {
+      "alert_actionability_review": {
+        "actionable": 3,
+        "alerts": 3,
+        "by_rule": {
+          "cross_scope_denial": 1,
+          "impossible_pending": 1,
+          "protected_idle_pod": 1
+        },
+        "state": "enabled",
+        "suppressed": {
+          "cross_scope_denial": 0,
+          "impossible_pending": 0,
+          "protected_idle_pod": 0
+        },
+        "unactionable": []
+      },
+      "archive_lag": [
+        1,
+        700000
+      ],
+      "attempts": [
+        2,
+        1
+      ],
+      "capacity": [
+        [
+          "on-demand",
+          20,
+          1,
+          1,
+          0
+        ],
+        [
+          "general-spot",
+          20,
+          1,
+          1,
+          0
+        ],
+        [
+          "research",
+          10,
+          0,
+          0,
+          0
+        ]
+      ],
+      "capacity_labels_distinct": true,
+      "checkpoint_age": [
+        1,
+        2300000
+      ],
+      "connectivity": {
+        "authority": {
+          "held": 2,
+          "unknown": 1
+        },
+        "terminal": {
+          "connected": 1,
+          "disconnected": 1,
+          "unknown": 1
+        }
+      },
+      "first_fired_seq": {
+        "cross_scope_denial:deny-1": 4,
+        "impossible_pending:exe-huge-1": 3,
+        "protected_idle_pod:exe-idle-1": 5
+      },
+      "knowledge_stale": false,
+      "leaked": [],
+      "notices": [
+        "cross_scope_denial",
+        "impossible_pending",
+        "protected_idle_pod"
+      ],
+      "opened": 3,
+      "quota_wait": [
+        1,
+        330000
+      ]
+    },
+    "recorded": {
+      "swarm-scaling-a-1791735630": {
+        "at_maximum_first_fired_seq": {
+          "cross_scope_denial:deny-anton-1": 1,
+          "impossible_pending:swarm-scaling-a-1791735630": 5
+        },
+        "capacity": [
+          "anton-k3s-swarm",
+          4,
+          1,
+          1,
+          0
+        ],
+        "checkpoint_stale": 1,
+        "first_fired_seq": {
+          "cross_scope_denial:deny-anton-1": 1
+        },
+        "leaked": [],
+        "pending_ms": 155000,
+        "quota_waiting": 1
+      },
+      "swarm-scaling-a-1791737269": {
+        "at_maximum_first_fired_seq": {
+          "cross_scope_denial:deny-anton-1": 1,
+          "impossible_pending:swarm-scaling-a-1791737269": 5
+        },
+        "capacity": [
+          "anton-k3s-swarm",
+          4,
+          1,
+          1,
+          0
+        ],
+        "checkpoint_stale": 1,
+        "first_fired_seq": {
+          "cross_scope_denial:deny-anton-1": 1
+        },
+        "leaked": [],
+        "pending_ms": 179000,
+        "quota_waiting": 1
+      }
+    },
+    "second": {
+      "alert_actionability_review": {
+        "actionable": 6,
+        "alerts": 6,
+        "by_rule": {
+          "cross_scope_denial": 5,
+          "impossible_pending": 1
+        },
+        "state": "enabled",
+        "suppressed": {
+          "cross_scope_denial": 1,
+          "impossible_pending": 0,
+          "protected_idle_pod": 0
+        },
+        "unactionable": []
+      },
+      "archive_lag": [
+        0,
+        0
+      ],
+      "attempts": [
+        1,
+        1
+      ],
+      "capacity": [
+        [
+          "on-demand",
+          20,
+          20,
+          1,
+          0
+        ],
+        [
+          "general-spot",
+          20,
+          0,
+          0,
+          0
+        ],
+        [
+          "research",
+          10,
+          0,
+          0,
+          0
+        ]
+      ],
+      "capacity_labels_distinct": true,
+      "checkpoint_age": [
+        0,
+        300000
+      ],
+      "connectivity": {
+        "authority": {
+          "expired": 1,
+          "unknown": 1
+        },
+        "terminal": {
+          "connected": 1,
+          "unknown": 1
+        }
+      },
+      "first_fired_seq": {
+        "cross_scope_denial:deny-2-1": 2,
+        "cross_scope_denial:deny-2-2": 2,
+        "cross_scope_denial:deny-2-3": 2,
+        "cross_scope_denial:deny-2-4": 2,
+        "cross_scope_denial:deny-2-5": 2,
+        "impossible_pending:exe-full-2": 3
+      },
+      "knowledge_stale": true,
+      "leaked": [],
+      "notices": [
+        "cross_scope_denial",
+        "cross_scope_denial",
+        "cross_scope_denial",
+        "cross_scope_denial",
+        "cross_scope_denial",
+        "impossible_pending"
+      ],
+      "opened": 6,
+      "quota_wait": [
+        1,
+        900000
+      ]
+    }
+  },
+  "state": "passed"
+}

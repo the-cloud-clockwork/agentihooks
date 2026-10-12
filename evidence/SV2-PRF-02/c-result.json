@@ -1,0 +1,55 @@
+{
+  "case": "T-SV2-PRF-02-C",
+  "evidence_class": "measured: Anton reads are read only kubectl and aws listings of nodes, events, Pods, autoscaling activities and EC2 instances, read 3 also the agent log of each swarm worker Pod, reduced by startup_bench reduce; the kind reads come from the Startup stages workflow named in their source, where a GitHub hosted runner pulled the published worker image from a local registry that the fixture stopped and restarted; attribution, report and claim are functions over those committed reads; the account release in case C runs the KUB-05 recovery over fakeredis and is mocked",
+  "input_sha256": {
+    "anton-read-1.json": "850d67d30fb7ec52e89277b2e467c6a9785fba87e56dcff3e2dcd94dc4f9695a",
+    "anton-read-2.json": "4ae6cdceb5cfe22509ba51da0efa04b6a57c8770189b0f2c35e2e6825741e7c4",
+    "anton-read-3.json": "d55c97ca370de23b73af9e80ecc9db06a3f3742855d8df56a646d4137728a2a8",
+    "kind-run-1.json": "9cdad8aecf741089cc741a5424792136f103c038982b54886cc0db5898fecc17",
+    "kind-run-2.json": "a2b14c83b40160e2de8be5c949f78c28e7ec73cc82a2e175ffa2959a091b1b16"
+  },
+  "observed": {
+    "account": {
+      "attempts": 1,
+      "decision": "recovery_pending",
+      "fence_reason": "image_pull",
+      "past_grace": "fenced",
+      "released": [
+        "grant",
+        "account"
+      ],
+      "replay_equal": true,
+      "replay_status": "retired",
+      "slots_after": [],
+      "slots_after_replay": [],
+      "slots_before": 1,
+      "slots_within_grace": 1,
+      "within_grace": "pulling"
+    },
+    "classified": [
+      "registry_unavailable",
+      "registry_unavailable"
+    ],
+    "grace_ms": 120000,
+    "interrupted": [
+      {
+        "failure_ms": 1000,
+        "image_cache": "uncached",
+        "outcome": "started",
+        "pod": "startup-bench/interrupted-startup-worker",
+        "pod_start_ms": 2000,
+        "transient": "registry_unavailable"
+      },
+      {
+        "failure_ms": 1000,
+        "image_cache": "uncached",
+        "outcome": "started",
+        "pod": "startup-bench/interrupted-startup-worker2",
+        "pod_start_ms": 2000,
+        "transient": "registry_unavailable"
+      }
+    ],
+    "unbounded": []
+  },
+  "state": "passed"
+}

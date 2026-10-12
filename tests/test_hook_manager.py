@@ -173,6 +173,8 @@ def test_brain_reader_session_start_dispatch(enabled, brain_dispatch, monkeypatc
         monkeypatch.setattr(config, flag, False)
     monkeypatch.setattr("hooks.lifecycle.guard.session_event", Mock())
     monkeypatch.setattr("hooks.lifecycle.deps_kick.kick", Mock())
+    codex_refresh_kick = Mock()
+    monkeypatch.setattr("hooks.lifecycle.codex_refresh_kick.kick", codex_refresh_kick)
     monkeypatch.setattr("hooks.context.injection_trace.record_session_start", Mock())
     monkeypatch.setattr("hooks.context.enforcement.get_session_start_enforcements", Mock(return_value=""))
     monkeypatch.setattr("hooks.context.voice_output.cleanup_stale_flags", Mock(return_value=0))
@@ -180,6 +182,7 @@ def test_brain_reader_session_start_dispatch(enabled, brain_dispatch, monkeypatc
     monkeypatch.setattr("hooks.context.brain_adapter.inject_on_session_start", inject)
     EVENT_HANDLERS["SessionStart"]({"session_id": "session", "cwd": str(tmp_path)})
 
+    codex_refresh_kick.assert_called_once_with()
     if enabled:
         inject.assert_called_once_with("session", str(tmp_path))
     else:

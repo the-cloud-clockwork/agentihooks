@@ -11,6 +11,8 @@ from scripts.swarm_v2.supervision_protocol import acknowledge, context
 
 def main(argv: list[str] | None = None) -> int:
     command = sys.argv[1:] if argv is None else argv
+    if command[:1] == ["--prompt-file"]:
+        command = [*command[2:], Path(command[1]).read_bytes().decode()]
     root, _ = context()
     if (root / "drain.json").exists():
         acknowledge("agent.exit", exit_code=75)

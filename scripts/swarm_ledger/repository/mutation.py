@@ -5,7 +5,7 @@ import ledger_notifications
 import ledger_plans
 import ledger_priorities
 
-from .events import retained
+from .events import keep_events
 
 
 def apply(slug, state, core, changes=None, ops=None, gate=None, created=False):
@@ -53,11 +53,7 @@ def apply(slug, state, core, changes=None, ops=None, gate=None, created=False):
     ctx.changed = bool(ctx.events or ctx.dirty or found != meta.get("warnings") or created)
     if ctx.changed:
         meta.update(rev=ctx.rev, updated_at=ctx.at, warnings=found)
-        log = meta["events"] + ctx.events
-        start = retained(log, meta.get("events_ack"), core.EVENTS_KEPT, core.EVENTS_CEILING)
-        if start:
-            meta["events_trimmed"] = log[start - 1].get("rev", 0)
-        meta["events"] = log[start:]
+        keep_events(meta, ctx.events, core, ctx.at)
     state["_meta"] = meta
     return rejected, ctx
 

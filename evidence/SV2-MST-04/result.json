@@ -1,0 +1,117 @@
+{
+  "package": "SV2-MST-04",
+  "dependency": [
+    "SV2-MST-03",
+    "SV2-CTL-02",
+    "SV2-LDG-03"
+  ],
+  "dependents": [
+    "SV2-MST-05"
+  ],
+  "integration_gate": "G10",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2594",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2605",
+  "tested_commit": "55a3cf9cd808",
+  "status": "mocked-acceptance-qualified",
+  "package_complete": false,
+  "evidence_class": "fakeredis swarm store, seats and masters channel and a temporary ledger folder written through the ledger write path with the master fence, two masters racing from two threads; no live swarm or ledger server. Live G10 qualification is separate.",
+  "interfaces": [
+    "ledger_server.write_gate(slug): every op write on the page path and the API path runs through master_fence.Fence wrapping the talk budget, inside the locked ledger write",
+    "master_fence.Fence.apply: a master's answer on questions/<id>, set on followups/<id>/<field> or questions/<id>/out_of_scope, or task_update on tasks/<id> is accepted only from the owning master seat; any other master, or a master name with no live seat, is refused with '<item> belongs to <owner>, so <writer> cannot <verb> it'",
+    "Decider record: an accepted master decision that changed a question or follow up writes {seat, rev} under _meta.master_decisions; while its own stamp stands and only masters wrote the item since, another master is refused with '<item> was decided by <seat> at revision <rev>, so <writer> cannot <verb> it'",
+    "Fence.publish(rejected): after the ledger write commits, each kept decision is posted on the masters channel as its seat with MastersChannel.decision, only when the swarm has more than one master seat",
+    "master_fence.measurements(redis, slug): master_write_refusals_total from the swarm masters hash",
+    "AGENTIHOOKS_MASTER_FENCE=off in the ledger server environment turns the fence off: every master write passes as before"
+  ],
+  "supported_versions": {
+    "python": "3.11 and 3.12 unit shards on the pull request",
+    "compatibility": "Operator writes, non master writes, a ledger with no swarm and a swarm whose master-fence gate is off are written exactly as before (INV-R11); a single master swarm keeps every decision and posts nothing"
+  },
+  "states": {
+    "observed": "The owning seat is computed inside the locked write from the live master records, the phase owners and the decider record",
+    "committed": "An accepted decision and its decider record are committed in the same ledger write; a refusal commits only its warning and the counter",
+    "externally_verified": "None; no live multi master swarm on Anton yet"
+  },
+  "authoritative_objects": [
+    "The ledger document stays the single writer of questions, follow ups and tasks; the decider record lives in its meta and is written in the same transaction",
+    "The swarm masters hash holds the phase owners and the refusal counter",
+    "The masters channel list holds each posted decision"
+  ],
+  "rollback_rehearsal": {
+    "action": "Set AGENTIHOOKS_MASTER_FENCE=off in ~/.agentihooks/.env and let the ledger server reload: every master write passes as before; decider records stay in the ledger meta and are ignored",
+    "test": "tests/test_swarm_v2_master_fence.py::test_the_fence_is_rolled_back_by_turning_its_switch_off",
+    "data_safety": "No ledger item, inbox item or channel post is deleted; a refused write changes nothing"
+  },
+  "remaining_limitations": [
+    "Questions and follow ups route to the lead, so a non lead master decides one only as the acting lead or through a decider record; per phase routing of follow ups is SV2-MST-05's hive target work",
+    "The relay, priority and verdict writes of a master are not fenced; this package covers answering a question, deciding a follow up and setting a task",
+    "The refusal counter is kept in the masters hash and returned by master_fence.measurements; it is not shipped to the metrics outbox yet",
+    "A Redis outage lets the write through with a fail-open row in the swarm gate log, like the talk budget"
+  ],
+  "validation": {
+    "red": "Proofs run https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38143194163 on the tests only commit 857ab3c7d failed: ImportError for master_fence and the talk wiring test saw Budget instead of Fence",
+    "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38147471684",
+    "unit": "Proofs run https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38147038081 on 07d4b069b passed every test file that touches either ledger write path; the pull request Tests run grades the full suite",
+    "mutation": "Mutation preflight https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38147471684 green on 55a3cf9cd: every changed line mutant killed in master_fence, masters_channel, ledger_server and api mutations"
+  },
+  "measurements": {
+    "master_write_refusals_total": 2
+  },
+  "cases": {
+    "a": "evidence/SV2-MST-04/a-result.json",
+    "b": "evidence/SV2-MST-04/b-result.json",
+    "c": "evidence/SV2-MST-04/c-result.json",
+    "manifest": "evidence/SV2-MST-04/manifest.json"
+  },
+  "decisions": [
+    "The fence runs inside the locked ledger write, so the owner check and the write never interleave with another master's; a client side check could race",
+    "Routing decides the owner, so the master an item was sent to is the one that may act on it",
+    "A question or follow up keeps its deciding seat until someone other than a master changes it, so a returning lead cannot overturn the acting lead's decision; tasks follow their phase owner because they change all their life",
+    "The record holds only while its own stamp stands, so a write rolled back after the fence leaves no false owner",
+    "Decisions are posted after the commit and only for kept writes, so the channel never reports a decision the ledger dropped"
+  ],
+  "obligations": {
+    "input_preparation": {
+      "met_by": "tests/sv2_mst04_cases.py builds the two master ledger from tests/fixtures/swarm_v2/master-race.json",
+      "tests": [
+        "tests/test_swarm_v2_master_fence.py::test_package_cases_match_their_committed_evidence",
+        "tests/test_swarm_v2_master_fence.py::test_the_manifest_names_the_hash_of_every_case_input"
+      ]
+    },
+    "output_contract": {
+      "met_by": "Two masters racing on one follow up leave one decision by its owner, posted once",
+      "tests": [
+        "tests/test_swarm_v2_master_fence.py::test_two_masters_racing_on_one_follow_up_leave_one_decision_by_its_owner",
+        "tests/test_swarm_v2_master_fence.py::test_a_master_sets_a_task_only_in_the_phase_it_owns"
+      ]
+    },
+    "rejection_contract": {
+      "met_by": "A refused write names the owning master and changes nothing",
+      "tests": [
+        "tests/test_swarm_v2_master_fence.py::test_a_refused_write_changes_nothing_and_posts_nothing",
+        "tests/test_swarm_v2_master_fence.py::test_the_refusals_name_the_owning_master_in_full"
+      ]
+    },
+    "recovery_contract": {
+      "met_by": "A decider record survives a restart and lapses on a write by someone other than a master",
+      "tests": [
+        "tests/test_swarm_v2_master_fence.py::test_a_decider_record_holds_while_its_write_stands_and_only_masters_wrote_since",
+        "tests/test_swarm_v2_master_fence.py::test_a_decider_whose_seat_is_gone_no_longer_fences_the_item"
+      ]
+    },
+    "compatibility": {
+      "met_by": "Single master swarms, ledgers without a swarm and uncovered writes behave as before",
+      "tests": [
+        "tests/test_swarm_v2_master_fence.py::test_a_single_master_swarm_decides_as_before_and_posts_nothing",
+        "tests/test_swarm_v2_master_fence.py::test_a_ledger_with_no_swarm_is_not_fenced",
+        "tests/test_swarm_v2_master_fence.py::test_writes_it_does_not_cover_pass_without_reading_redis"
+      ]
+    },
+    "authority": {
+      "met_by": "The writer's seat comes from its live master record, never from the name it writes as",
+      "tests": [
+        "tests/test_swarm_v2_master_fence.py::test_package_cases_match_their_committed_evidence"
+      ]
+    }
+  }
+}

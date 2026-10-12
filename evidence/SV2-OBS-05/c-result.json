@@ -1,0 +1,46 @@
+{
+  "case": "T-SV2-OBS-05-C",
+  "evidence_class": "mixed: the two live runs of the recorded SV2-CAP-02 scaling canary on the Anton anton-k3s-swarm group, joined with synthetic quota wait, stale checkpoint and denied cross brain query readings, plus two independent synthetic traces, a fakeredis incident store behind a server that can be disconnected and an in process notification sink that can fail; no live controller, deployed brain or alert backend was used",
+  "input_sha256": {
+    "fleet-canary-overlay.json": "2def3d0c2158e8569db200752ee289b623767c97003d4afd0c11b17d6e04df6c",
+    "fleet-dashboard-second.json": "dfc4eeee2456710da17662a2a2587c0ee7b02670b9cce302b5d9ab32f9b1178e",
+    "fleet-dashboard.json": "6cd33879f00facc2cdb1e1cadb945fd61f2532e397ba19e34b7a781a395b0c2b",
+    "scaling-canary-sv2-cap-02.json": "b51bcbf1ea93fb6f29172b6a29a5b43b8e513f30fa3e871fc31b49ad04829693"
+  },
+  "observed": {
+    "after_restore": true,
+    "delivered_after_restore": [
+      1,
+      0
+    ],
+    "failed_delivery": "raised",
+    "incidents": 3,
+    "last_seq": [
+      5
+    ],
+    "notices_per_incident": [
+      1,
+      1,
+      1
+    ],
+    "older_stale": true,
+    "outage": "refused",
+    "replay_stale": true,
+    "rollback": {
+      "dashboard": [
+        "archive_lag",
+        "attempts",
+        "capacity",
+        "checkpoint_age",
+        "connectivity",
+        "knowledge",
+        "quota_wait"
+      ],
+      "deliver": 0,
+      "evaluate": "disabled",
+      "record": true,
+      "store_unchanged": true
+    }
+  },
+  "state": "passed"
+}

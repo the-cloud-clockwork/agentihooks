@@ -111,6 +111,18 @@ def failed(store, slug: str, agent) -> None:
         store.redis.hset(store.key(slug, "transfers"), retry["id"], json.dumps(retry))
 
 
+def detach(store, slug: str, agent) -> None:
+    """A spawn that waits on capacity hands its transfer back to the next spawn, recording no failed binding."""
+    for row in list_transfers(store, slug):
+        if row["successor"] != agent.name or row["binding"]["state"] == "live":
+            continue
+
+        def change(current):
+            current["successor"] = ""
+
+        _change(store, slug, row["id"], change)
+
+
 def observe(store, slug: str, live: set[str]) -> None:
     for row in list_transfers(store, slug):
         if not row["successor"] or row["binding"]["state"] == "live":

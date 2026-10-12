@@ -1,0 +1,578 @@
+{
+  "assertions": {
+    "canary_removed": true,
+    "every_run_classified": true,
+    "from_empty_pool": true,
+    "independent_runs": true,
+    "no_launch_failure": true,
+    "one_node_for_one_worker": false,
+    "selected_swarm_group": true,
+    "started_on_new_swarm_node": true,
+    "within_autoscaler_bounds": true
+  },
+  "case": "a",
+  "evidence_class": "live Anton cluster-autoscaler v1.33.0 and the anton-k3s-swarm ASG",
+  "failed": [
+    "one_node_for_one_worker"
+  ],
+  "fixture": {
+    "inputs": {
+      "k8s/charts/cluster-autoscaler/values.yaml": "12403172c7e42219ec40534ef5fb53df88dd91f1b73acb14105f794a0aa4bc26",
+      "k8s/manifests/swarm/microvm/runtime-class.yaml": "22711103b65e7585075206d8442e01c614348474261f20b0c2ad4ccfe35dba73",
+      "k8s/manifests/swarm/policy/pod-policy.yaml": "c68dce915705d92663147448369de42e747e8927a29bb98a5f0011856419806c",
+      "k8s/values-overlays/swarm/capacity.yaml": "7bd26d947d2f3506d028131eb678a7ed48ac860a7cc2e1a90ce51945f17b46d7",
+      "stacks/terraform/modules/ec2-arc-runners/asg.tf": "8bf166b52b72f123f8fc4fed5737d8d7640604d568d82f8bb5b7e5b0feb91fbc"
+    },
+    "tested_commit": "0214ee41916f64c00188afb11157eb0ac15a9a67"
+  },
+  "known_failures": {
+    "one_node_for_one_worker": "a new swarm node turns Ready before kata-deploy labels it katacontainers.io/kata-runtime=true, so the autoscaler counts no upcoming node for the still-pending worker and raises the group once more; the extra node stays empty and the ordinary scale-down removes it. Accepted as a known limitation by the swarm master on 2026-10-11; the startup taint fix is its own task"
+  },
+  "mocked": false,
+  "package": "SV2-CAP-02",
+  "passed": false,
+  "runs": [
+    {
+      "classification": {
+        "group": {
+          "from": 0,
+          "max": 4,
+          "name": "anton-k3s-swarm",
+          "to": 1
+        },
+        "missing": null,
+        "stages": [
+          {
+            "at": "2026-10-11T16:20:37Z",
+            "seconds": 6,
+            "stage": "simulated"
+          },
+          {
+            "at": "2026-10-11T16:20:42Z",
+            "seconds": 5,
+            "stage": "launch_requested"
+          },
+          {
+            "at": "2026-10-11T16:21:42Z",
+            "seconds": 60,
+            "stage": "node_registered"
+          },
+          {
+            "at": "2026-10-11T16:21:42Z",
+            "seconds": 0,
+            "stage": "node_ready"
+          },
+          {
+            "at": "2026-10-11T16:22:59Z",
+            "seconds": 77,
+            "stage": "runtime_labelled"
+          },
+          {
+            "at": "2026-10-11T16:22:59Z",
+            "seconds": 0,
+            "stage": "scheduled"
+          },
+          {
+            "at": "2026-10-11T16:23:06Z",
+            "seconds": 7,
+            "stage": "started"
+          }
+        ],
+        "swarm_scale_up_stage_seconds": {
+          "launch_requested": 5,
+          "node_ready": 0,
+          "node_registered": 60,
+          "runtime_labelled": 77,
+          "scheduled": 0,
+          "simulated": 6,
+          "started": 7
+        },
+        "verdict": "scaled_and_started"
+      },
+      "cleanup": {
+        "canary_removed": true
+      },
+      "commit": "0214ee41916f64c00188afb11157eb0ac15a9a67",
+      "dirty": false,
+      "launch_failure": {
+        "class": "none",
+        "detail": null,
+        "group": "anton-k3s-swarm",
+        "retries": 0,
+        "within_bounds": true
+      },
+      "mocked": false,
+      "run": "swarm-scaling-a-1791735630",
+      "snapshot": {
+        "activities": [
+          {
+            "end": null,
+            "start": "2026-10-11T16:22:06Z",
+            "status": "WaitingForInstanceWarmup"
+          },
+          {
+            "end": null,
+            "start": "2026-10-11T16:20:42Z",
+            "status": "WaitingForInstanceWarmup"
+          }
+        ],
+        "desired": [
+          0,
+          0,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2
+        ],
+        "events": [
+          {
+            "count": 1,
+            "first": "2026-10-11T16:20:31Z",
+            "last": "2026-10-11T16:20:31Z",
+            "message": "0/10 nodes are available: 1 node(s) had untolerated taint {node-role.kubernetes.io/control-plane: }, 3 node(s) didn't match Pod's node affinity/selector, 3 node(s) had untolerated taint {anton.io/workload: ci}, 3 node(s) were unschedulable. preemption: 0/10 nodes are available: 10 Preemption is not helpful for scheduling.",
+            "reason": "FailedScheduling"
+          },
+          {
+            "count": 1,
+            "first": "2026-10-11T16:20:37Z",
+            "last": "2026-10-11T16:20:37Z",
+            "message": "pod triggered scale-up: [{anton-k3s-swarm 0->1 (max: 4)}]",
+            "reason": "TriggeredScaleUp"
+          },
+          {
+            "count": 1,
+            "first": "2026-10-11T16:20:57Z",
+            "last": "2026-10-11T16:20:57Z",
+            "message": "0/10 nodes are available: 1 node(s) had untolerated taint {node-role.kubernetes.io/control-plane: }, 3 node(s) didn't match Pod's node affinity/selector, 3 node(s) had untolerated taint {anton.io/workload: ci}, 3 node(s) were unschedulable. preemption: 0/10 nodes are available: 10 Preemption is not helpful for scheduling.",
+            "reason": "FailedScheduling"
+          },
+          {
+            "count": 1,
+            "first": "2026-10-11T16:21:42Z",
+            "last": "2026-10-11T16:21:42Z",
+            "message": "0/11 nodes are available: 1 node(s) had untolerated taint {node-role.kubernetes.io/control-plane: }, 1 node(s) had untolerated taint {node.kubernetes.io/not-ready: }, 3 node(s) didn't match Pod's node affinity/selector, 3 node(s) had untolerated taint {anton.io/workload: ci}, 3 node(s) were unschedulable. preemption: 0/11 nodes are available: 11 Preemption is not helpful for scheduling.",
+            "reason": "FailedScheduling"
+          },
+          {
+            "count": 1,
+            "first": "2026-10-11T16:21:42Z",
+            "last": "2026-10-11T16:21:42Z",
+            "message": "0/11 nodes are available: 1 node(s) had untolerated taint {node-role.kubernetes.io/control-plane: }, 3 node(s) had untolerated taint {anton.io/workload: ci}, 3 node(s) were unschedulable, 4 node(s) didn't match Pod's node affinity/selector. preemption: 0/11 nodes are available: 11 Preemption is not helpful for scheduling.",
+            "reason": "FailedScheduling"
+          },
+          {
+            "count": 1,
+            "first": "2026-10-11T16:22:18Z",
+            "last": "2026-10-11T16:22:18Z",
+            "message": "0/11 nodes are available: 1 node(s) had untolerated taint {node-role.kubernetes.io/control-plane: }, 3 node(s) had untolerated taint {anton.io/workload: ci}, 3 node(s) were unschedulable, 4 node(s) didn't match Pod's node affinity/selector. preemption: 0/11 nodes are available: 11 Preemption is not helpful for scheduling.",
+            "reason": "FailedScheduling"
+          },
+          {
+            "count": 1,
+            "first": "2026-10-11T16:22:53Z",
+            "last": "2026-10-11T16:22:53Z",
+            "message": "0/12 nodes are available: 1 node(s) had untolerated taint {node-role.kubernetes.io/control-plane: }, 1 node(s) had untolerated taint {node.kubernetes.io/not-ready: }, 3 node(s) had untolerated taint {anton.io/workload: ci}, 3 node(s) were unschedulable, 4 node(s) didn't match Pod's node affinity/selector. preemption: 0/12 nodes are available: 12 Preemption is not helpful for scheduling.",
+            "reason": "FailedScheduling"
+          },
+          {
+            "count": 1,
+            "first": "2026-10-11T16:22:53Z",
+            "last": "2026-10-11T16:22:53Z",
+            "message": "0/12 nodes are available: 1 node(s) had untolerated taint {node-role.kubernetes.io/control-plane: }, 3 node(s) had untolerated taint {anton.io/workload: ci}, 3 node(s) were unschedulable, 5 node(s) didn't match Pod's node affinity/selector. preemption: 0/12 nodes are available: 12 Preemption is not helpful for scheduling.",
+            "reason": "FailedScheduling"
+          },
+          {
+            "count": 1,
+            "first": "2026-10-11T16:22:58Z",
+            "last": "2026-10-11T16:22:58Z",
+            "message": "pod didn't trigger scale-up: 1 node(s) had untolerated taint {anton.io/workload: ci}, 2 node(s) had untolerated taint {anton.io/spot: true}, 1 node(s) didn't match Pod's node affinity/selector",
+            "reason": "NotTriggerScaleUp"
+          },
+          {
+            "count": 1,
+            "first": "2026-10-11T16:22:58Z",
+            "last": "2026-10-11T16:22:58Z",
+            "message": "0/12 nodes are available: 1 node(s) had untolerated taint {node-role.kubernetes.io/control-plane: }, 3 node(s) had untolerated taint {anton.io/workload: ci}, 3 node(s) were unschedulable, 5 node(s) didn't match Pod's node affinity/selector. preemption: 0/12 nodes are available: 12 Preemption is not helpful for scheduling.",
+            "reason": "FailedScheduling"
+          },
+          {
+            "count": 1,
+            "first": "2026-10-11T16:22:59Z",
+            "last": "2026-10-11T16:22:59Z",
+            "message": "Successfully assigned default/swarm-scaling-a-1791735630 to anton-ec2-swarm-1",
+            "reason": "Scheduled"
+          },
+          {
+            "count": 1,
+            "first": "2026-10-11T16:23:03Z",
+            "last": "2026-10-11T16:23:03Z",
+            "message": "Pulling image \"registry.k8s.io/pause:3.10\"",
+            "reason": "Pulling"
+          },
+          {
+            "count": 1,
+            "first": "2026-10-11T16:23:04Z",
+            "last": "2026-10-11T16:23:04Z",
+            "message": "Successfully pulled image \"registry.k8s.io/pause:3.10\" in 581ms (581ms including waiting). Image size: 320368 bytes.",
+            "reason": "Pulled"
+          },
+          {
+            "count": 1,
+            "first": "2026-10-11T16:23:06Z",
+            "last": "2026-10-11T16:23:06Z",
+            "message": "Created container: canary",
+            "reason": "Created"
+          },
+          {
+            "count": 1,
+            "first": "2026-10-11T16:23:06Z",
+            "last": "2026-10-11T16:23:06Z",
+            "message": "Started container canary",
+            "reason": "Started"
+          }
+        ],
+        "group": "anton-k3s-swarm",
+        "node": {
+          "created": "2026-10-11T16:21:42Z",
+          "labels": {
+            "anton.io/capacity-type": "on-demand",
+            "anton.io/kvm": "true",
+            "anton.io/node-pool": "ec2-canary",
+            "anton.io/workload": "swarm",
+            "katacontainers.io/kata-runtime": "true"
+          },
+          "name": "anton-ec2-swarm-1",
+          "provider_id": "aws:///eu-west-1c/swarm-1",
+          "ready": "2026-10-11T16:21:42Z",
+          "runtime_labelled": "2026-10-11T16:23:06Z"
+        },
+        "pod": {
+          "created": "2026-10-11T16:20:31Z",
+          "node": "anton-ec2-swarm-1",
+          "phase": "Running",
+          "scheduled": "2026-10-11T16:22:59Z",
+          "started": "2026-10-11T16:23:06Z"
+        },
+        "run": "swarm-scaling-a-1791735630",
+        "status": {
+          "anton-k3s-swarm": {
+            "backoff": null,
+            "health": "Healthy",
+            "scale_up": "NoActivity"
+          }
+        },
+        "status_events": []
+      },
+      "submitted": "created"
+    },
+    {
+      "classification": {
+        "group": {
+          "from": 0,
+          "max": 4,
+          "name": "anton-k3s-swarm",
+          "to": 1
+        },
+        "missing": null,
+        "stages": [
+          {
+            "at": "2026-10-11T16:48:07Z",
+            "seconds": 16,
+            "stage": "simulated"
+          },
+          {
+            "at": "2026-10-11T16:48:19Z",
+            "seconds": 12,
+            "stage": "launch_requested"
+          },
+          {
+            "at": "2026-10-11T16:48:58Z",
+            "seconds": 39,
+            "stage": "node_registered"
+          },
+          {
+            "at": "2026-10-11T16:48:58Z",
+            "seconds": 0,
+            "stage": "node_ready"
+          },
+          {
+            "at": "2026-10-11T16:50:43Z",
+            "seconds": 105,
+            "stage": "runtime_labelled"
+          },
+          {
+            "at": "2026-10-11T16:50:43Z",
+            "seconds": 0,
+            "stage": "scheduled"
+          },
+          {
+            "at": "2026-10-11T16:50:50Z",
+            "seconds": 7,
+            "stage": "started"
+          }
+        ],
+        "swarm_scale_up_stage_seconds": {
+          "launch_requested": 12,
+          "node_ready": 0,
+          "node_registered": 39,
+          "runtime_labelled": 105,
+          "scheduled": 0,
+          "simulated": 16,
+          "started": 7
+        },
+        "verdict": "scaled_and_started"
+      },
+      "cleanup": {
+        "canary_removed": true
+      },
+      "commit": "0214ee41916f64c00188afb11157eb0ac15a9a67",
+      "dirty": false,
+      "launch_failure": {
+        "class": "none",
+        "detail": null,
+        "group": "anton-k3s-swarm",
+        "retries": 0,
+        "within_bounds": true
+      },
+      "mocked": false,
+      "run": "swarm-scaling-a-1791737269",
+      "snapshot": {
+        "activities": [
+          {
+            "end": null,
+            "start": "2026-10-11T16:49:11Z",
+            "status": "WaitingForInstanceWarmup"
+          },
+          {
+            "end": null,
+            "start": "2026-10-11T16:48:19Z",
+            "status": "WaitingForInstanceWarmup"
+          }
+        ],
+        "desired": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2
+        ],
+        "events": [
+          {
+            "count": 1,
+            "first": "2026-10-11T16:47:51Z",
+            "last": "2026-10-11T16:47:51Z",
+            "message": "0/8 nodes are available: 1 node(s) had untolerated taint {anton.io/workload: ci}, 1 node(s) had untolerated taint {node-role.kubernetes.io/control-plane: }, 3 node(s) didn't match Pod's node affinity/selector, 3 node(s) were unschedulable. preemption: 0/8 nodes are available: 8 Preemption is not helpful for scheduling.",
+            "reason": "FailedScheduling"
+          },
+          {
+            "count": 1,
+            "first": "2026-10-11T16:48:07Z",
+            "last": "2026-10-11T16:48:07Z",
+            "message": "pod triggered scale-up: [{anton-k3s-swarm 0->1 (max: 4)}]",
+            "reason": "TriggeredScaleUp"
+          },
+          {
+            "count": 1,
+            "first": "2026-10-11T16:48:58Z",
+            "last": "2026-10-11T16:48:58Z",
+            "message": "0/9 nodes are available: 1 node(s) had untolerated taint {anton.io/workload: ci}, 1 node(s) had untolerated taint {node-role.kubernetes.io/control-plane: }, 1 node(s) had untolerated taint {node.cloudprovider.kubernetes.io/uninitialized: true}, 3 node(s) didn't match Pod's node affinity/selector, 3 node(s) were unschedulable. preemption: 0/9 nodes are available: 9 Preemption is not helpful for scheduling.",
+            "reason": "FailedScheduling"
+          },
+          {
+            "count": 1,
+            "first": "2026-10-11T16:48:58Z",
+            "last": "2026-10-11T16:48:58Z",
+            "message": "0/9 nodes are available: 1 node(s) had untolerated taint {anton.io/workload: ci}, 1 node(s) had untolerated taint {node-role.kubernetes.io/control-plane: }, 1 node(s) had untolerated taint {node.kubernetes.io/not-ready: }, 3 node(s) didn't match Pod's node affinity/selector, 3 node(s) were unschedulable. preemption: 0/9 nodes are available: 9 Preemption is not helpful for scheduling.",
+            "reason": "FailedScheduling"
+          },
+          {
+            "count": 1,
+            "first": "2026-10-11T16:48:58Z",
+            "last": "2026-10-11T16:48:58Z",
+            "message": "0/9 nodes are available: 1 node(s) had untolerated taint {anton.io/workload: ci}, 1 node(s) had untolerated taint {node-role.kubernetes.io/control-plane: }, 3 node(s) were unschedulable, 4 node(s) didn't match Pod's node affinity/selector. preemption: 0/9 nodes are available: 9 Preemption is not helpful for scheduling.",
+            "reason": "FailedScheduling"
+          },
+          {
+            "count": 1,
+            "first": "2026-10-11T16:49:27Z",
+            "last": "2026-10-11T16:49:27Z",
+            "message": "0/9 nodes are available: 1 node(s) had untolerated taint {anton.io/workload: ci}, 1 node(s) had untolerated taint {node-role.kubernetes.io/control-plane: }, 3 node(s) were unschedulable, 4 node(s) didn't match Pod's node affinity/selector. preemption: 0/9 nodes are available: 9 Preemption is not helpful for scheduling.",
+            "reason": "FailedScheduling"
+          },
+          {
+            "count": 1,
+            "first": "2026-10-11T16:49:53Z",
+            "last": "2026-10-11T16:49:53Z",
+            "message": "0/10 nodes are available: 1 node(s) had untolerated taint {anton.io/workload: ci}, 1 node(s) had untolerated taint {node-role.kubernetes.io/control-plane: }, 1 node(s) had untolerated taint {node.kubernetes.io/not-ready: }, 3 node(s) were unschedulable, 4 node(s) didn't match Pod's node affinity/selector. preemption: 0/10 nodes are available: 10 Preemption is not helpful for scheduling.",
+            "reason": "FailedScheduling"
+          },
+          {
+            "count": 1,
+            "first": "2026-10-11T16:49:53Z",
+            "last": "2026-10-11T16:49:53Z",
+            "message": "0/10 nodes are available: 1 node(s) had untolerated taint {anton.io/workload: ci}, 1 node(s) had untolerated taint {node-role.kubernetes.io/control-plane: }, 3 node(s) were unschedulable, 5 node(s) didn't match Pod's node affinity/selector. preemption: 0/10 nodes are available: 10 Preemption is not helpful for scheduling.",
+            "reason": "FailedScheduling"
+          },
+          {
+            "count": 1,
+            "first": "2026-10-11T16:50:08Z",
+            "last": "2026-10-11T16:50:08Z",
+            "message": "pod didn't trigger scale-up: 1 node(s) had untolerated taint {anton.io/workload: ci}, 2 node(s) had untolerated taint {anton.io/spot: true}, 1 node(s) didn't match Pod's node affinity/selector",
+            "reason": "NotTriggerScaleUp"
+          },
+          {
+            "count": 1,
+            "first": "2026-10-11T16:50:08Z",
+            "last": "2026-10-11T16:50:08Z",
+            "message": "0/10 nodes are available: 1 node(s) had untolerated taint {anton.io/workload: ci}, 1 node(s) had untolerated taint {node-role.kubernetes.io/control-plane: }, 3 node(s) were unschedulable, 5 node(s) didn't match Pod's node affinity/selector. preemption: 0/10 nodes are available: 10 Preemption is not helpful for scheduling.",
+            "reason": "FailedScheduling"
+          },
+          {
+            "count": 1,
+            "first": "2026-10-11T16:50:43Z",
+            "last": "2026-10-11T16:50:43Z",
+            "message": "Successfully assigned default/swarm-scaling-a-1791737269 to anton-ec2-swarm-2",
+            "reason": "Scheduled"
+          },
+          {
+            "count": 1,
+            "first": "2026-10-11T16:50:47Z",
+            "last": "2026-10-11T16:50:47Z",
+            "message": "Pulling image \"registry.k8s.io/pause:3.10\"",
+            "reason": "Pulling"
+          },
+          {
+            "count": 1,
+            "first": "2026-10-11T16:50:47Z",
+            "last": "2026-10-11T16:50:47Z",
+            "message": "Successfully pulled image \"registry.k8s.io/pause:3.10\" in 502ms (502ms including waiting). Image size: 320368 bytes.",
+            "reason": "Pulled"
+          },
+          {
+            "count": 1,
+            "first": "2026-10-11T16:50:49Z",
+            "last": "2026-10-11T16:50:49Z",
+            "message": "Created container: canary",
+            "reason": "Created"
+          },
+          {
+            "count": 1,
+            "first": "2026-10-11T16:50:50Z",
+            "last": "2026-10-11T16:50:50Z",
+            "message": "Started container canary",
+            "reason": "Started"
+          }
+        ],
+        "group": "anton-k3s-swarm",
+        "node": {
+          "created": "2026-10-11T16:48:58Z",
+          "labels": {
+            "anton.io/capacity-type": "on-demand",
+            "anton.io/kvm": "true",
+            "anton.io/node-pool": "ec2-canary",
+            "anton.io/workload": "swarm",
+            "katacontainers.io/kata-runtime": "true"
+          },
+          "name": "anton-ec2-swarm-2",
+          "provider_id": "aws:///eu-west-1a/swarm-2",
+          "ready": "2026-10-11T16:48:58Z",
+          "runtime_labelled": "2026-10-11T16:50:50Z"
+        },
+        "pod": {
+          "created": "2026-10-11T16:47:51Z",
+          "node": "anton-ec2-swarm-2",
+          "phase": "Running",
+          "scheduled": "2026-10-11T16:50:43Z",
+          "started": "2026-10-11T16:50:50Z"
+        },
+        "run": "swarm-scaling-a-1791737269",
+        "status": {
+          "anton-k3s-swarm": {
+            "backoff": null,
+            "health": "Healthy",
+            "scale_up": "NoActivity"
+          }
+        },
+        "status_events": []
+      },
+      "submitted": "created"
+    }
+  ],
+  "scale_up_overshoot": [
+    {
+      "extra_nodes": 1,
+      "planned_nodes": 1,
+      "run": "swarm-scaling-a-1791735630"
+    },
+    {
+      "extra_nodes": 1,
+      "planned_nodes": 1,
+      "run": "swarm-scaling-a-1791737269"
+    }
+  ],
+  "swarm_scale_up_stage_seconds": [
+    {
+      "launch_requested": 5,
+      "node_ready": 0,
+      "node_registered": 60,
+      "run": "swarm-scaling-a-1791735630",
+      "runtime_labelled": 77,
+      "scheduled": 0,
+      "simulated": 6,
+      "started": 7
+    },
+    {
+      "launch_requested": 12,
+      "node_ready": 0,
+      "node_registered": 39,
+      "run": "swarm-scaling-a-1791737269",
+      "runtime_labelled": 105,
+      "scheduled": 0,
+      "simulated": 16,
+      "started": 7
+    }
+  ]
+}

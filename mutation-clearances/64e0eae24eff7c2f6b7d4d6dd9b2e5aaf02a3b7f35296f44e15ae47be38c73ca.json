@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/startup_bench.py:scripts.swarm_v2.startup_bench.x__write__mutmut_22:adbfb346cf3d0eff99bcea7f49dbe26a5c50869b928b6c0c0a4a48bd0b3030fd": {
+    "reader": "Standards reader for SV2-PRF-02",
+    "reason": "\"UTF-8\" and \"utf-8\" resolve to the same utf_8 codec with the same error handling, so the output is byte-identical."
+  }
+}

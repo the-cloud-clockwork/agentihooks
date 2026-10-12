@@ -29,7 +29,7 @@ SERVER = {**DOC, "_meta": {"rev": 5, "warnings": [WARNING], "events": []}}
 
 
 @pytest.fixture
-def tab(browser, request):
+def tab(browser):
     context = browser.new_context(viewport={"width": 1920, "height": 1080})
     html = shell_html()
     html = html.replace("__LEDGER_SLUG__", "alerts-page").replace(
@@ -57,18 +57,6 @@ def tab(browser, request):
 
     context.route("**/*", answer)
     serve_modules(context, ledger_state(DOC))
-    context.add_init_script(
-        """
-        const listen = EventTarget.prototype.addEventListener;
-        EventTarget.prototype.addEventListener = function(type, callback, options) {
-            if (type === "toggle" && this.id === "alert-fold") {
-                const original = callback;
-                callback = event => setTimeout(() => original.call(this, event), DELAY);
-            }
-            return listen.call(this, type, callback, options);
-        };
-        """.replace("DELAY", str(getattr(request, "param", 0)))
-    )
     page = context.new_page()
     page.goto(URL)
     page.set_default_timeout(2000)
@@ -114,16 +102,9 @@ def test_claim_and_close_from_the_panel_send_their_ops(tab):
     assert kinds == [("alert_claim", "al-3-0", None), ("alert_close", "al-3-0", "Trimmed the phase")]
 
 
-@pytest.mark.parametrize("tab", [0, 250], indirect=True)
-def test_the_panel_fold_is_remembered_after_a_reload(tab):
+def test_the_panel_header_does_not_fold_it(tab):
     tab.locator("#alert-fab").click()
-    tab.locator("#alert-fold > summary").click()
-    assert tab.locator("#alert-fold").evaluate("el => el.open") is False
-    tab.wait_for_function(
-        """JSON.parse(localStorage.getItem('plan-ledger:alerts-page:fold') || '{}')
-            ['alert-fold'] === false"""
-    )
-    tab.reload()
-    loaded(tab)
-    tab.locator("#alert-fab").click()
-    assert tab.locator("#alert-fold").evaluate("el => el.open") is False
+    assert tab.locator("#alert-fold").evaluate("el => el.querySelector('summary')") is None
+    tab.locator("#alert-fold .notif-head").click(position={"x": 5, "y": 5})
+    assert tab.locator("#alerts").is_visible()
+    assert tab.evaluate("() => Object.values(localStorage).some((v) => v.includes('alert-fold'))") is False

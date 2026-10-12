@@ -1,0 +1,96 @@
+name: Startup stages
+
+on:
+  workflow_dispatch:
+  workflow_call:
+  push:
+    branches-ignore: [main, dev, 'diffcheck/**']
+    paths:
+      - tests/performance/swarm_v2/startup.py
+      - scripts/swarm_v2/startup_*.py
+      - scripts/swarm_v2/resource_profiles.py
+      - scripts/swarm_v2/kubernetes/failures.py
+      - .github/workflows/startup-stages.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow == 'Startup stages' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('startup-stages-{0}', github.run_id) }}
+  queue: ${{ github.workflow == 'Startup stages' && 'max' || 'single' }}
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      KIND_VERSION: v0.33.0
+      KIND_NODE_IMAGE: mirror.gcr.io/kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
+      WORKER_IMAGE: ghcr.io/the-cloud-clockwork/agentihooks-worker:dev
+      FIXTURE_IMAGE: kind-registry:5000/agentihooks-worker:startup
+      EVIDENCE: ${{ github.workspace }}/startup-stages
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: '0.12.23'
+          checksum: '9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6'
+          enable-cache: false
+
+      - name: Install dependencies
+        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+
+      - name: Install kind
+        run: |
+          if ! kind version; then
+            curl -fsSLo kind-linux-amd64 "https://kind.sigs.k8s.io/dl/$KIND_VERSION/kind-linux-amd64"
+            curl -fsSLo kind.sha256sum "https://kind.sigs.k8s.io/dl/$KIND_VERSION/kind-linux-amd64.sha256sum"
+            sha256sum -c kind.sha256sum
+            mv kind-linux-amd64 kind
+            sudo install -m 0755 kind /usr/local/bin/kind
+          fi
+          kind version
+
+      - name: Start a local registry holding the published worker image
+        run: |
+          docker run -d -p 127.0.0.1:5001:5000 --name kind-registry registry:2
+          docker pull "$WORKER_IMAGE"
+          docker tag "$WORKER_IMAGE" localhost:5001/agentihooks-worker:startup
+          docker push localhost:5001/agentihooks-worker:startup
+          docker image inspect "$WORKER_IMAGE" --format '{{.Id}} {{.Size}}' | tee "$RUNNER_TEMP/worker-image.txt"
+
+      - name: Create a cluster with two worker nodes that pull from the registry
+        run: |
+          printf '%s\n' 'kind: Cluster' 'apiVersion: kind.x-k8s.io/v1alpha4' 'nodes:' \
+            '  - role: control-plane' '  - role: worker' '  - role: worker' > "$RUNNER_TEMP/kind.yaml"
+          kind create cluster --name startup --image "$KIND_NODE_IMAGE" --config "$RUNNER_TEMP/kind.yaml" --wait 120s
+          docker network connect kind kind-registry
+          for node in $(kind get nodes --name startup); do
+            docker exec "$node" mkdir -p /etc/containerd/certs.d/kind-registry:5000
+            printf '[host."http://kind-registry:5000"]\n' | docker exec -i "$node" \
+              tee /etc/containerd/certs.d/kind-registry:5000/hosts.toml > /dev/null
+          done
+
+      - name: Measure uncached, cached and interrupted pulls
+        run: |
+          python tests/performance/swarm_v2/startup.py kind --image "$FIXTURE_IMAGE" \
+            --nodes startup-worker startup-worker2 --output "$EVIDENCE/capture"
+
+      - name: Reduce and report
+        run: |
+          source="Startup stages run ${GITHUB_RUN_ID} attempt ${GITHUB_RUN_ATTEMPT} at ${GITHUB_SHA}, $(cat "$RUNNER_TEMP/worker-image.txt")"
+          python -m scripts.swarm_v2.startup_bench reduce --capture "$EVIDENCE/capture" --output "$EVIDENCE/read.json"
+          python -m scripts.swarm_v2.startup_bench report --read "$EVIDENCE/read.json" --source "$source" \
+            --output "$EVIDENCE/report.json" --markdown "$EVIDENCE/report.md"
+          cat "$EVIDENCE/report.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: startup-stages
+          path: ${{ env.EVIDENCE }}

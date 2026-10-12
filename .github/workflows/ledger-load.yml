@@ -1,13 +1,15 @@
 name: Ledger server load
 
 on:
-  push:
-    branches: ["diffcheck/**"]
   workflow_call:
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow == 'Ledger server load' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('ledger-load-{0}', github.run_id) }}
+  queue: ${{ github.workflow == 'Ledger server load' && 'max' || 'single' }}
 
 jobs:
   load:
@@ -27,6 +29,8 @@ jobs:
       AGENTIHOOKS_SWARM_REDIS_URL: redis://127.0.0.1:6379/0
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
 
       - name: Set up Python
         id: python

@@ -1,0 +1,179 @@
+{
+  "case": "T-SV2-HDR-05-A",
+  "evidence_class": "mocked: a recording stand in for the Anton herdr client serves two worker herdr servers whose agents keep working on every fixture tick, answers agent get, pane read and agent prompt with the 0.9.1 reply shapes of SV2-HDR-04, times out every command to a machine whose SSH path is cut while that worker's control heartbeat continues, and advances a fake clock by a fixed time per remote command; the operator TUI is a Viewer that is closed by detach; no herdr process, SSH connection or cluster runs in these cases",
+  "input_sha256": {
+    "herdr-capabilities.json": "c15bb685e5bb4e2f53aa9a51a8ee80701aebe75a222093d120787b4839c45940",
+    "herdr-pane-routing.json": "36a84ba856cd6c2cdc3f57e7ca84227a9908e2de7046ea57056ca2329a8c730d",
+    "herdr-registrations.json": "eb069f75d17862be563e36f558ee14db60cd24d7982bb042f2232db5bb81a57c",
+    "herdr-terminal-reconnect.json": "32abd57e558c817dac8ed2be158b56f845d0a6b6f2c59b604f390d65c2b136dc"
+  },
+  "observed": {
+    "checks": {
+      "both_agents_keep_working_while_the_tui_is_closed": true,
+      "both_views_open_live": true,
+      "closing_the_tui_runs_no_herdr_command": true,
+      "explicit_reattach_keeps_pane_incarnation_and_conversation": true,
+      "independent_repeat_identical": true,
+      "ledger_rows_carry_no_screen_text": true,
+      "ledger_shows_live_and_cached": true,
+      "lost_path_leaves_the_other_view_live": true,
+      "lost_path_view_is_cached_never_gone": true,
+      "lost_worker_keeps_working_and_heartbeating": true,
+      "nothing_launched_stopped_or_closed": true,
+      "reopen_shows_the_same_conversations_and_their_progress": true
+    },
+    "first": {
+      "after_cut": {
+        "engineer@a1b2c3-0001": {
+          "agent": "engineer@a1b2c3-0001",
+          "checked_at": 1790000040600,
+          "fresh_ms": 30000,
+          "live_at": 1790000040600,
+          "machine": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
+          "pane_id": "w1:p1",
+          "reason": "",
+          "state": "live"
+        },
+        "engineer@a1b2c3-0002": {
+          "agent": "engineer@a1b2c3-0002",
+          "checked_at": 1790000040700,
+          "fresh_ms": 30000,
+          "live_at": 1790000030500,
+          "machine": "swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal",
+          "pane_id": "w1:p1",
+          "reason": "unreachable",
+          "state": "cached"
+        }
+      },
+      "after_reopen": {
+        "engineer@a1b2c3-0001": {
+          "agent": "engineer@a1b2c3-0001",
+          "checked_at": 1790000030400,
+          "fresh_ms": 30000,
+          "live_at": 1790000030400,
+          "machine": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
+          "pane_id": "w1:p1",
+          "reason": "",
+          "state": "live"
+        },
+        "engineer@a1b2c3-0002": {
+          "agent": "engineer@a1b2c3-0002",
+          "checked_at": 1790000030500,
+          "fresh_ms": 30000,
+          "live_at": 1790000030500,
+          "machine": "swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal",
+          "pane_id": "w1:p1",
+          "reason": "",
+          "state": "live"
+        }
+      },
+      "at_close": {
+        "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {
+          "conversation_id": "11111111-1111-4111-8111-111111111111",
+          "pid": 4101,
+          "work": 0
+        },
+        "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": {
+          "conversation_id": "22222222-2222-4222-8222-222222222222",
+          "pid": 4202,
+          "work": 0
+        }
+      },
+      "detach_commands": 0,
+      "heartbeats": {
+        "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": 1790000040600,
+        "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": 1790000040600
+      },
+      "launches": [],
+      "ledger": {
+        "engineer@a1b2c3-0001": {
+          "agent": "engineer@a1b2c3-0001",
+          "checked_at": 1790000040600,
+          "fresh_ms": 30000,
+          "live_at": 1790000040600,
+          "machine": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
+          "pane_id": "w1:p1",
+          "reason": "",
+          "state": "live"
+        },
+        "engineer@a1b2c3-0002": {
+          "agent": "engineer@a1b2c3-0002",
+          "checked_at": 1790000040700,
+          "fresh_ms": 30000,
+          "live_at": 1790000030500,
+          "machine": "swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal",
+          "pane_id": "w1:p1",
+          "reason": "unreachable",
+          "state": "cached"
+        }
+      },
+      "now_ms": 1790000040850,
+      "opened": {
+        "engineer@a1b2c3-0001": {
+          "agent": "engineer@a1b2c3-0001",
+          "checked_at": 1790000000100,
+          "fresh_ms": 30000,
+          "live_at": 1790000000100,
+          "machine": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
+          "pane_id": "w1:p1",
+          "reason": "",
+          "state": "live"
+        },
+        "engineer@a1b2c3-0002": {
+          "agent": "engineer@a1b2c3-0002",
+          "checked_at": 1790000000250,
+          "fresh_ms": 30000,
+          "live_at": 1790000000250,
+          "machine": "swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal",
+          "pane_id": "w1:p1",
+          "reason": "",
+          "state": "live"
+        }
+      },
+      "processes_after_cut": {
+        "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {
+          "conversation_id": "11111111-1111-4111-8111-111111111111",
+          "pid": 4101,
+          "work": 4
+        },
+        "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": {
+          "conversation_id": "22222222-2222-4222-8222-222222222222",
+          "pid": 4202,
+          "work": 4
+        }
+      },
+      "reattached": {
+        "conversation_id": "11111111-1111-4111-8111-111111111111",
+        "incarnation": "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/2",
+        "pane_id": "w1:p1",
+        "profile_id": "eda75d4e8494f54c8a6fe05759524de3",
+        "session": "default"
+      },
+      "registered": {
+        "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "eda75d4e8494f54c8a6fe05759524de3",
+        "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": "eefed520946b717557bfbc5ef89d91ee"
+      },
+      "screens_after_reopen": {
+        "engineer@a1b2c3-0001": "engineer@a1b2c3-0001 work 3\n",
+        "engineer@a1b2c3-0002": "engineer@a1b2c3-0002 work 3\n"
+      },
+      "terminal_reconnect_latency_seconds": [
+        0.1
+      ],
+      "while_closed": {
+        "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {
+          "conversation_id": "11111111-1111-4111-8111-111111111111",
+          "pid": 4101,
+          "work": 3
+        },
+        "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": {
+          "conversation_id": "22222222-2222-4222-8222-222222222222",
+          "pid": 4202,
+          "work": 3
+        }
+      }
+    },
+    "second_identical": true
+  },
+  "state": "passed"
+}

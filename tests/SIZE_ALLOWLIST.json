@@ -45,7 +45,7 @@
  "hooks/hook_manager.py::on_post_tool_use": {
   "C901": 56,
   "PLR0912": 56,
-  "function-lines": 305
+  "function-lines": 304
  },
  "hooks/hook_manager.py::on_pre_tool_use": {
   "C901": 79,
@@ -65,8 +65,8 @@
   "PLR0912": 22
  },
  "hooks/hook_manager.py::on_user_prompt_submit": {
-  "C901": 45,
-  "PLR0912": 45
+  "C901": 44,
+  "PLR0912": 44
  },
  "hooks/hook_manager.py::parse_transcript_metrics": {
   "C901": 17,
@@ -164,7 +164,7 @@
   "PLR0912": 27
  },
  "scripts/install.py": {
-  "file-lines": 7068
+  "file-lines": 6978
  },
  "scripts/install.py::_clean_state_dir": {
   "C901": 14,
@@ -230,8 +230,8 @@
  "scripts/install.py::main": {
   "C901": 69,
   "PLR0912": 72,
-  "PLR0915": 328,
-  "function-lines": 671
+  "PLR0915": 327,
+  "function-lines": 670
  },
  "scripts/install.py::uninstall_global": {
   "C901": 35,
@@ -277,8 +277,7 @@
   "PLR0912": 15
  },
  "scripts/swarm_ledger/ledger_server.py::Handler.do_GET": {
-  "C901": 16,
-  "PLR0912": 15
+  "C901": 13
  },
  "scripts/swarm_ledger/ledger_server.py::Handler.do_POST": {
   "C901": 14,

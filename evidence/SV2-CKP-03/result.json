@@ -1,0 +1,141 @@
+{
+  "package": "SV2-CKP-03",
+  "dependency": [
+    "SV2-CKP-02"
+  ],
+  "dependents": [
+    "SV2-CKP-04"
+  ],
+  "integration_gate": "G8",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2608",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2642",
+  "tested_commit": "f5d141c2e38c2a82af70d50831b65d8baca4364b",
+  "status": "acceptance-qualified: mocked cases A, B and C passed in CI; live fresh-home resume and fresh-container resume passed for both installed CLIs; the swarm snapshot captures each agent's native conversation in production",
+  "package_complete": false,
+  "evidence_class": {
+    "cases": "mocked: fixture Claude and Codex homes laid out as the qualified CLIs write them, a local durable directory backend behind a granted artifact store and fixture launch registrations; no CLI, account, worker Pod or object store was used. Mocked.",
+    "live": "live: real Claude Code 2.1.296 and codex-cli 0.162.1 conversations on this workstation, each told a codeword in a source home, carried through a granted local checkpoint store and resumed in an empty home under another working folder with the account supplied only through the environment; no worker Pod or object store. Records live-claude.jsonl and live-codex.jsonl. Ran on native.py as of c3975cc8, before capture became a module function in f54a5929; the container records cover the tested commit.",
+    "container": "live, run on 0a43bcff (recorded in each record), whose scripts and proof script equal the tested commit's; the tested commit changes one test assertion only: real conversations told a codeword on this workstation (Claude Code 2.1.296, codex-cli 0.162.1), captured and committed through a granted local checkpoint store on the host, then restored and resumed inside a fresh container of the worker proof image ghcr.io/the-cloud-clockwork/agentihooks-worker-proof:sha-388e7f8565de348c0061c528f7bd4a19cb1dd125 (Claude Code 2.1.295, codex-cli 0.162.0). The restored home existed only inside the container; the conversation reopened in the mounted agentihooks checkout, the project; the account reached it only through the environment. No worker Pod or object store. Records container-claude.jsonl and container-codex.jsonl."
+  },
+  "interfaces": [
+    "snapshot.natives(slug, agents, repo, worktrees, environ, run): the production caller. Every swarm snapshot (the snapshot command and the tick's automatic snapshots) records a natives section beside sources: for each agent with a native harness and a conversation id, native.capture from the home its profile validation recorded (else CLAUDE_CONFIG_DIR or CODEX_HOME, else the user default), looked up under the agent's worktree, then the swarm repo, with the CLI version read once per harness and stopped false. Captured material is kept by sha256 in the swarm's sources folder and pruning counts it; an Unavailable is recorded with its cause and the operator's continue-or-fresh decision. These snapshot copies are recovery material for the operator, not checkpoints: they are not written through a granted ArtifactStore and Validator.commit never sees them. AGENTIHOOKS_SWARM_NATIVE_CAPTURE=0 records none",
+    "native.capture(harness, home, session_id, cwd, version_text, stopped, qualified=QUALIFIED): the store-free capture Qualifier.capture wraps and counts; an OSError reading the conversation yields Unavailable native_unreadable",
+    "native.Qualifier(validator, qualified=QUALIFIED): capture, checkpoint and restore through the attempt's granted store; metrics() exposes native_resume_success_by_target keyed harness/outcome (captured, resumed, native_resume_unavailable)",
+    "Qualifier.capture(harness, home, session_id, cwd, version_text, stopped) returns NativeCapture or Unavailable. Claude: projects/<cwd with every non alphanumeric character a dash>/<id>.jsonl and its companion folder. Codex: the rollout under sessions, located through the threads index read in one read transaction that never waits on a lock (a held exclusive lock yields database_busy), else by file name; a link anywhere on the rollout path under sessions is refused as an escape. Conversation files are read up to their last complete record. Account stores, environment and harness databases are never read into the material",
+    "Unavailable(harness, cause): outcome native_resume_unavailable, decision (continue_from_context, start_fresh) left to the operator and recorded in its manifest fields; causes unqualified_harness, unqualified_version, version_changed, native_format_changed, native_too_large, database_busy, conversation_absent, identity_mismatch, native_member_escapes_home, context_only, conversation_present, placement_failed, native_unreadable, or the Validator refusal reason. A checkpoint that is not authoritative is counted under the harness unknown, since its manifest cannot be trusted to name one",
+    "Qualifier.checkpoint(native, manifest) stores <checkpoint_id>.native_session before Validator.commit stores the manifest and only when the manifest authority equals the store grant; an Unavailable commits a context continuation with native_resume_capability unsupported; native.merged replaces only the native_session material",
+    "Qualifier.restore(checkpoint_id, home, cwd, version_text) returns Resumed(harness, session_id, command) only for an authoritative native checkpoint whose recorded CLI line equals the installed qualified line. It reads every member bounded, checks identity in memory, refuses a link on any unresolved target path, an escape or an existing conversation, then writes each file new (O_EXCL, O_NOFOLLOW, mode 0600) and re-reads the placed files to report the identity. A failed write or read back removes every file and folder it created; placement_failed names an OSError, any other refusal keeps its own cause",
+    "tests/integration/native_resume/run_native_proof.sh <dir> claude|codex: the live fresh-home proof; with NATIVE_PROOF_IMAGE set, restore and resume run inside a fresh container of that image"
+  ],
+  "supported_versions": {
+    "claude": "2.1 line, qualified live on 2.1.296 (fresh home) and 2.1.295 (fresh container, captured from 2.1.296)",
+    "codex": "0.162 line, qualified live on 0.162.1 (fresh home) and 0.162.0 (fresh container, captured from 0.162.1)",
+    "copilot": "not qualified: native_resume_unavailable"
+  },
+  "authority": "Checkpoint capture writes only through the ArtifactStore granted to the attempt and only when the manifest authority equals that grant; restore reads only through the reader's granted store and only a checkpoint Validator.verify calls authoritative. The swarm snapshot's natives copies are not checkpoints and confer no authority.",
+  "states": {
+    "observed": "Conversation bytes the CLI wrote, up to the last complete record, and the thread index row read in one read transaction",
+    "accepted": "Native material stored and read back verified before the manifest",
+    "committed": "Validator.commit stores the manifest only after every inventoried object reads back verified",
+    "externally_verified": "Live: the CLI itself resumed the restored conversation and recalled its codeword, in a fresh home on the workstation and in a fresh worker image container"
+  },
+  "measurements": {
+    "native_resume_success_by_target": {
+      "a": {
+        "claude": {
+          "capture": {
+            "claude/captured": 1
+          },
+          "restore": {
+            "claude/resumed": 1
+          }
+        },
+        "codex": {
+          "capture": {
+            "codex/captured": 1
+          },
+          "restore": {
+            "codex/resumed": 1
+          }
+        }
+      },
+      "b": {
+        "capture": {
+          "claude/native_resume_unavailable": 2,
+          "codex/native_resume_unavailable": 2,
+          "copilot/native_resume_unavailable": 1
+        },
+        "restore": {
+          "claude/native_resume_unavailable": 1,
+          "codex/native_resume_unavailable": 2
+        }
+      },
+      "c": {
+        "claude/native_resume_unavailable": 2,
+        "claude/resumed": 1
+      },
+      "live": {
+        "claude": "resumed, codeword recalled",
+        "codex": "resumed, codeword recalled"
+      },
+      "container": {
+        "claude": {
+          "capture": {
+            "claude/captured": 1
+          },
+          "restore": {
+            "claude/resumed": 1
+          },
+          "recalled": true
+        },
+        "codex": {
+          "capture": {
+            "codex/captured": 1
+          },
+          "restore": {
+            "codex/resumed": 1
+          },
+          "recalled": true
+        },
+        "tested_commit": "0a43bcff252893504e18e82d01f8d03bef55103e"
+      }
+    }
+  },
+  "validation": {
+    "red": "Proofs run 38149669076 on the tests only commit c7108dd4 failed collecting the native tests with ImportError for native",
+    "first_green_attempt": "Proofs run 38149709947 on d03a46c1 hung: sqlite3 online backup retries forever on a locked source; cancelled and replaced by a read transaction on a connection that never waits",
+    "green": "Proofs run 38160034825 on 113d332a (native.py identical to the tested commit) passed the native unit tests, and the case A, B and C records committed here matched; earlier records were lifted from runs 38151824986 and 38153418291",
+    "live": "run_native_proof.sh passed for claude (codeword PLUM-7902) and codex (codeword PLUM-7537) with native.py as of c3975cc8; the codex run closed stdin, the only script change after that commit",
+    "review": "Standards and Spec readers, three rounds; findings fixed: unhashable session ids, corrupt index, linked rollouts on both branches, capture bounds, placement written new and removed on failure, account names kept out of the live records, version_changed cause, case C durability by read back. Disputed and closed: forged native commits are refused at restore (consumer_rule); round four on the snapshot and container delta: unreadable conversations, an agent with no folder, undecodable --version output, the decision field, script harness and token checks, authority and mocked labels",
+    "mutation": "Preflight 38158655576 left 38 survivors, killed by tests in 113d332a; preflight 38160034917 left 5: the three uri mutants are killed by a test pinning the read-only, no-wait connection, and two SQL case-only mutants are cleared by the Standards reader's equivalence ruling; PR run 38172978687 on d2274eec left 19 survivors in the snapshot natives and native capture, killed by tests in the tested commit",
+    "snapshot_red": "Proofs run 38171923315 on the tests only commit 486ea25d failed: the snapshot natives tests found no natives section",
+    "snapshot_green": "Proofs run 38171925588 on 317b2f4d: 66 passed across the snapshot natives, snapshot sources, snapshot and resume tests",
+    "container": "run_native_proof.sh with NATIVE_PROOF_IMAGE on 0a43bcff passed for claude (codeword PLUM-5031) and codex (codeword PLUM-3352), resumed in the mounted project checkout; account name count 0 in both records"
+  },
+  "limitations": [
+    "Qualification is per CLI minor line; a new line needs a live proof run and a QUALIFIED entry",
+    "A capture while the CLI runs is labelled consistent_export: it ends at the last complete record, which may sit mid turn",
+    "Codex databases are not carried; Codex rebuilds its thread index from the rollout, observed live on 0.162.1",
+    "Capture bounds (ARCHIVE_MEMBERS, ARCHIVE_BYTES) are checked after the conversation files are read; an oversized conversation is read once, then refused as native_too_large",
+    "A restore home whose projects or sessions folder is a link, as in agentihooks profile homes, is refused as an escape; restores target fresh homes",
+    "Cleanup after a failed placement suppresses its own errors; a path it cannot remove is left behind",
+    "Capture reads through a projects or sessions folder that is itself a link, as in agentihooks profile homes, because it reads the operator's own home; restore refuses that shape",
+    "The thread index read uses a file: URI with mode=ro; a SQLite build without URI support would take the name literally and the capture would report native_format_changed. Verified on SQLite 3.37.2 on the workstation and on the CI build",
+    "The Claude live proof did not close stdin; Claude waited three seconds for stdin data and warned, then answered correctly",
+    "The fresh-container proof ran the worker image under Docker on the workstation, not as a worker Pod on Anton; the Pod proof belongs to the G8 rollout gate",
+    "The snapshot runs each CLI's --version on the controller host; an agent whose CLI differs from the controller's is judged by the controller's version and its own conversation record, and a mismatch yields version_changed",
+    "Production restore: Qualifier.restore has no production caller in this package; the snapshot is the production capture path and SV2-CKP-04 and SV2-CKP-05 wire checkpoint publish and restore through the worker supervisor",
+    "Transcripts are copied verbatim, so tool output a conversation holds, secrets included, is copied too: into the swarm's sources folder (mode 0600, kept while one of ten automatic snapshots names it) and into native checkpoints. No secret scan runs on the material; the exposure equals the CLI's own conversation files"
+  ],
+  "rollback": "Mocked, unit level; no live rollback was rehearsed. Case C: a Qualifier with an empty qualification table returns native_resume_unavailable and leaves the home untouched while the checkpoint and its transcript material stay authoritative, so context continuation remains available. Snapshot: AGENTIHOOKS_SWARM_NATIVE_CAPTURE=0 records no natives section, runs no CLI and keeps no native material while sources and worktree paths are still saved (test_the_switch_at_zero_captures_no_native_conversation)",
+  "compatibility": "SV2-CKP-01 Validator and SV2-CKP-02 source capture are unchanged; a context continuation checkpoint is identical to the earlier path apart from the native_resume extension field",
+  "rollout_safety": "Disabling native resume is Qualifier(validator, qualified={}); every other checkpoint path is unchanged",
+  "consumer_rule": "SV2-CKP-04 and SV2-CKP-05 decide native resume from the restore outcome, never from the commit verdict: Validator.commit checks inventory and hashes, not native format, so a manifest written by another writer can commit as native and still restore to native_resume_unavailable (case B)",
+  "completion_evidence": {
+    "implemented_interfaces": "interfaces above; production caller snapshot.natives",
+    "supported_versions": "supported_versions above",
+    "test_outputs": "validation above: red 38149669076 and 38171923315, green 38160034825, 38171925588 and the proofs run on the tested commit, mutation preflights, live fresh-home and fresh-container records",
+    "remaining_limitations": "limitations above",
+    "rollback_rehearsal": "Mocked, unit level; no live rollback was rehearsed. Case C: a Qualifier with an empty qualification table returns native_resume_unavailable and leaves the home untouched while the checkpoint and its transcript material stay authoritative, so context continuation remains available. Snapshot: AGENTIHOOKS_SWARM_NATIVE_CAPTURE=0 records no natives section, runs no CLI and keeps no native material while sources and worktree paths are still saved (test_the_switch_at_zero_captures_no_native_conversation)"
+  }
+}

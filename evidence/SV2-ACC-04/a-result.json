@@ -1,0 +1,59 @@
+{
+  "package": "SV2-ACC-04",
+  "tested_commit": "eea0a65108ef3076a97d4686b49875b325948583",
+  "evidence_class": "mocked",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38059850340",
+  "case": "T-SV2-ACC-04-A",
+  "title": "successful behavior: a critical authorized swarm warning reaches local and remote subscribers once per policy",
+  "fixture": "tests/fixtures/swarm_v2/fleet-broadcasts.json: local seat eng-1@fixture and remote seat eng-2@fixture on channels brain and amygdala; operator critical warning (until_ack, ttl 600 s), expired warning (ttl 30 s), personal brain message and an agent info note (once); published at 1000 ms, claimed at 61000 ms",
+  "fixture_clock": "build() from tests/sv2_ctl02_cases.py patches time.time to the fixture clock and issues launch grants; FleetBroadcasts reads the same list; fakeredis server clock only in test_the_default_clock_is_the_redis_server_clock",
+  "independent_runs": 2,
+  "tests": [
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_a_critical_operator_warning_reaches_local_and_remote_subscribers_once_per_policy[first]",
+      "job": 114235852616,
+      "output": "PASSED at 2026-10-10T14:32:38.2731922Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_a_critical_operator_warning_reaches_local_and_remote_subscribers_once_per_policy[second]",
+      "job": 114235852616,
+      "output": "PASSED at 2026-10-10T14:32:38.2672805Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_concurrent_claims_by_one_seat_hand_out_a_once_revision_a_single_time",
+      "job": 114235852591,
+      "output": "PASSED at 2026-10-10T14:34:56.0570083Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_claimed_fleet_revisions_land_in_the_local_cache_in_the_hook_format",
+      "job": 114235852619,
+      "output": "PASSED at 2026-10-10T14:34:49.4121486Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_a_cached_fleet_revision_reaches_only_the_session_it_was_claimed_for",
+      "job": 114235852616,
+      "output": "PASSED at 2026-10-10T14:32:38.3652251Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_broadcasts.py::test_the_local_bridge_claims_into_the_cache_only_while_the_fleet_path_is_on",
+      "job": 114235852616,
+      "output": "PASSED at 2026-10-10T14:32:38.3360020Z"
+    }
+  ],
+  "state_assertions": {
+    "delivery": "The local seat (store client of the controller) and the remote seat (a separate RedisStore client) each claim agent-note and fleet-warning at 61000 ms; the expired warning and the personal brain message are not delivered",
+    "policy": "A second claim returns only the until_ack warning, keeping the first delivery time; the once note is not replayed; after acknowledgement claims return nothing",
+    "acknowledgement": "The first acknowledgement of revision 1 returns true, the duplicate returns false and broadcast-duplicate-acks counts 1 per seat",
+    "store": "broadcast-deliveries for the local seat records revision 1, delivered 61000 ms, acked, the grant's execution id and generation 1; history lists the four published revisions in order",
+    "authority": "The operator warning carries author operator:operator and the swarm fleet; the agent note's author is the seat and execution id from its validated launch grant",
+    "local_cache": "Claimed revisions land in the broadcast file in the hook format, tagged fleet, and hook injection shows them only to the session that claimed them; sync_local writes nothing unless AGENTIHOOKS_FLEET_BROADCASTS=1"
+  },
+  "boundary": "The Redis records under the swarm root are the authoritative broadcasts and delivery state; the local broadcast file is a per-session compatibility cache",
+  "cleanup": "fakeredis and tmp_path per test; no live resource mutations",
+  "broadcast_delivery_lag_seconds": {
+    "first": 60.0,
+    "second": 60.0,
+    "dimension": "seat eng-1@fixture and eng-2@fixture, broadcast fleet-warning revision 1, published 1000 ms, delivered 61000 ms"
+  },
+  "passed": true
+}

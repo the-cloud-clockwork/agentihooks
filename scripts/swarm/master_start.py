@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from scripts.handoff import transfers
 from scripts.swarm import master_alarm, reaper
 from scripts.swarm.store import MASTER, RedisStore, SwarmConfig
+from scripts.swarm_v2 import masters as master_seats
 
 if TYPE_CHECKING:
     from scripts.swarm.tick import Ledger, Runtime
@@ -36,7 +37,7 @@ def observe(slug: str, config: SwarmConfig, store: RedisStore, ledger: Ledger, r
     if config.state == "stopping":
         store.redis.delete(store.key(slug, "master-start"))
         return []
-    records = [a for a in store.agents(slug) if a.lane == MASTER]
+    records = [a for a in store.agents(slug) if master_seats.is_lead(slug, a)]
     masters = [a for a in records if a.state != "finished"]
     agent = next((a for a in masters if a.name == pending["name"]), None)
     if any(a.name != pending["name"] for a in masters) or any(

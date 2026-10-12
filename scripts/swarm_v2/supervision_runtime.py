@@ -1,4 +1,5 @@
 import fcntl
+import hashlib
 import json
 import os
 import shlex
@@ -11,16 +12,21 @@ from pathlib import Path
 from types import FrameType
 
 from hooks.proc import _process
+from scripts.account_names import oauth_env
+from scripts.swarm_v2 import filesystem
 from scripts.swarm_v2 import supervision_processes as trees
+from scripts.swarm_v2.checkpoints import runtime as checkpoint_runtime
 from scripts.swarm_v2.supervision import Launch, LaunchRefused
 from scripts.swarm_v2.supervision_agent import native_command
 from scripts.swarm_v2.supervision_protocol import checkpoint, matches, read, write
+
+PROMPT = "prompt.md"
 
 
 class Supervisor:
     def __init__(self, launch: Launch):
         self.launch = launch
-        self.root = launch.attempt / "run" / "supervision" / uuid.uuid4().hex
+        self.root = launch.execution.path("runtime") / "supervision" / uuid.uuid4().hex
         self.scope = {
             "authority": launch.authority,
             "incarnation": self.root.name,
@@ -34,11 +40,9 @@ class Supervisor:
         self.failure_class = None
         self.phase = "startup"
         self.environment = {k: v for k, v in os.environ.items() if not k.startswith("HERDR_")}
+        self.environment.update(oauth_env(self.environment))
         self.environment.update(
-            HOME=str(launch.home),
-            CODEX_HOME=str(launch.home / ".codex"),
-            CLAUDE_CONFIG_DIR=str(launch.home / ".claude"),
-            XDG_RUNTIME_DIR=str(launch.attempt / "tmp"),
+            filesystem.environment(launch.execution, launch.harness),
             HERDR_CONFIG_PATH=str(self.root / "herdr.toml"),
             SWARM_SUPERVISION_DIR=str(self.root),
         )
@@ -114,21 +118,41 @@ class Supervisor:
     def start(self) -> str | None:
         deadline = time.monotonic() + self.launch.budgets.startup
         self.spawn("herdr", self.launch.herdr)
-        self.spawn("exporter", self.launch.exporter)
-        for role in ("herdr", "exporter"):
+        roles = ("herdr", "exporter") if self.launch.exporter else ("herdr",)
+        if self.launch.exporter:
+            self.spawn("exporter", self.launch.exporter)
+        for role in roles:
             if not self.ready(role, deadline):
                 return "termination" if self.stop else f"{role}_startup_failure"
-        agent = native_command(self.launch.agent, self.launch.attempt, self.environment)
-        command = [sys.executable, "-m", "scripts.swarm_v2.supervision_agent", *agent]
+        directory = self.launch.checkout or self.launch.attempt
+        agent = native_command(
+            checkpoint_runtime.command(self.launch.attempt, self.launch.agent), directory, self.environment
+        )
+        command = [sys.executable, "-m", "scripts.swarm_v2.supervision_agent", *self.opening(), *agent]
         self.phase = "workspace_create"
-        tab = self.herdr(["workspace", "create", "--cwd", str(self.launch.attempt), "--no-focus"])
+        tab = self.herdr(["workspace", "create", "--cwd", str(directory), "--no-focus"])
         pane = tab["result"]["root_pane"]["pane_id"]
         self.phase = "agent_launch"
         self.herdr(["pane", "run", pane, shlex.join(command)])
         if not self.ready("agent", deadline):
             return "termination" if self.stop else "agent_startup_failure"
+        if self.launch.prompt:
+            self.delivered()
         write(self.root / "running.json", {**self.scope, "pane_id": pane, "status": "running"})
         return None
+
+    def opening(self) -> list[str]:
+        if not self.launch.prompt:
+            return []
+        path = self.root / PROMPT
+        with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as handle:
+            handle.write(self.launch.prompt.encode())
+        return ["--prompt-file", str(path)]
+
+    def delivered(self) -> None:
+        text = self.launch.prompt.encode()
+        digest = {"bytes": len(text), "sha256": hashlib.sha256(text).hexdigest()}
+        print(json.dumps({"supervisor": "prompt_delivered", "incarnation": self.root.name, **digest}), flush=True)
 
     def running(self) -> str:
         while True:
@@ -162,9 +186,19 @@ class Supervisor:
         write(self.root / "quiesced.json", {**self.scope, "status": "quiesced" if clean else "forced"})
         identifier = None
         deadline = time.monotonic() + self.launch.budgets.checkpoint
-        while clean and time.monotonic() < deadline:
+        while clean and self.launch.exporter and time.monotonic() < deadline:
             identifier = checkpoint(self.launch.attempt, read(self.root / "exporter.checkpoint.json"), self.scope)
-            if identifier or "exporter" in self.exits:
+            if identifier:
+                portable = (
+                    self.environment.get(checkpoint_runtime.ROOT)
+                    or self.environment.get(checkpoint_runtime.REMOTE) == "true"
+                )
+                if portable and not checkpoint_runtime.validate_export(
+                    self.launch.attempt, identifier, self.environment
+                ):
+                    identifier = None
+                break
+            if "exporter" in self.exits:
                 break
             self.wait()
         trees.cleanup(os.getpid(), self.launch.budgets.kill, self.observe)
@@ -183,6 +217,16 @@ class Supervisor:
             "child_exits": self.exits,
             "supervisor_child_exit_total": len(self.reaped),
         }
+        record = self.launch.record()
+        record["checkpoint_acknowledgement"] = {
+            **self.scope,
+            "status": result["checkpoint_status"],
+            "checkpoint_id": identifier,
+            "quiescence": result["quiescence"],
+            "acknowledged_at_ms": int(time.time() * 1000),
+        }
+        write(self.root / "launch.json", record)
+        result["launch_record"] = record
         write(self.root / "result.json", result)
         return result
 
@@ -195,6 +239,7 @@ class Supervisor:
                 raise LaunchRefused("execution already supervised") from exc
             self.root.mkdir()
             write(self.root / "context.json", self.scope)
+            write(self.root / "launch.json", self.launch.record())
             trees.subreaper()
             previous = {sig: signal.signal(sig, self.signal) for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGCHLD)}
             try:
@@ -204,7 +249,8 @@ class Supervisor:
                     self.failure_class = type(exc).__name__
                     reason = "supervisor_failure"
                 result = self.drain(reason)
-                print(json.dumps(result, sort_keys=True), flush=True)
+                summary = {key: value for key, value in result.items() if key != "launch_record"}
+                print(json.dumps(summary, sort_keys=True), flush=True)
                 if reason not in ("agent_completed", "termination"):
                     return 70
                 return 0 if result["checkpoint_status"] == "complete" else 75

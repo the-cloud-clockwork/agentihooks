@@ -4,9 +4,20 @@ import os
 import sys
 import time
 import uuid
+from typing import TYPE_CHECKING
 
 from scripts.swarm import lease
 from scripts.swarm.store import RedisStore, SwarmError, connect
+from scripts.swarm_v2.runtime.base import LOCAL as WORKSTATION_BACKEND
+
+if TYPE_CHECKING:
+    from scripts.swarm_v2.control_service import ControlService
+
+LOCAL, DISTRIBUTED = "local", "distributed"
+NO_SPAWNING = "controller spawning is disabled in this deployment mode"
+NO_KUBERNETES = "the distributed controller spawns only through its Kubernetes runtime"
+WORKSTATION = "the workstation hive spawns {lane} work"
+DISABLED = "the {backend} runtime is disabled on this controller"
 
 
 class FencedLedger:
@@ -27,9 +38,9 @@ class FencedLedger:
 
 
 class FencedRuntime:
-    def __init__(self, store: RedisStore, slug: str, held: lease.Lease, runtime, spawning: bool):
+    def __init__(self, store: RedisStore, slug: str, held: lease.Lease, runtime, deployment: str):
         self.store, self.slug, self.held = store, slug, held
-        self.runtime, self.spawning = runtime, spawning
+        self.runtime, self.deployment = runtime, deployment
 
     def __getattr__(self, name):
         value = getattr(self.runtime, name)
@@ -38,19 +49,42 @@ class FencedRuntime:
 
         def call(*args, **kwargs):
             lease.renew(self.store, self.slug, self.held)
-            return value(*args, **kwargs)
+            with lease.kept(self.store, self.slug, self.held):
+                return value(*args, **kwargs)
 
         return call
 
+    def _mode_refusal(self) -> str:
+        if self.deployment == LOCAL:
+            return ""
+        if self.deployment != DISTRIBUTED:
+            return NO_SPAWNING
+        router = getattr(self.runtime, "router", None)
+        return "" if getattr(router, "placement", None) is not None else NO_KUBERNETES
+
+    def placement_refusal(self, lane: str, task: dict) -> str:
+        if refused := self._mode_refusal():
+            return refused
+        if self.deployment == LOCAL:
+            return ""
+        router = self.runtime.router
+        wanted = router.placed_backend(lane, task)
+        if wanted == WORKSTATION_BACKEND:
+            return WORKSTATION.format(lane=lane)
+        return DISABLED.format(backend=wanted) if router.enabled_backend(wanted) != wanted else ""
+
     def has_capacity(self, config) -> bool:
         lease.renew(self.store, self.slug, self.held)
-        return self.spawning and self.runtime.has_capacity(config)
+        if self._mode_refusal():
+            return False
+        return self.deployment == DISTRIBUTED or self.runtime.has_capacity(config)
 
     def spawn(self, config, lane, name, task):
         lease.renew(self.store, self.slug, self.held)
-        if not self.spawning:
-            raise SwarmError("controller spawning is disabled in this deployment mode")
-        return self.runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch})
+        if refused := self.placement_refusal(lane, task):
+            raise SwarmError(refused)
+        with lease.kept(self.store, self.slug, self.held):
+            return self.runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch})
 
 
 def take_tick_lock(store: RedisStore, slug: str, held: lease.Lease, ttl_ms: int) -> str | None:
@@ -108,29 +142,59 @@ def keep_tick(store: RedisStore, slug: str, held: lease.Lease, token: str, ttl_m
                 continue
 
 
-def run_once(store: RedisStore, ledger=None, runtime=None, messenger=None) -> dict:
+def run_once(store: RedisStore, ledger=None, runtime=None, messenger=None, runtimes: dict | None = None) -> dict:
     from scripts.swarm.cli import run_tick
 
-    return {slug: run_tick(store, slug, ledger, runtime, messenger, scheduled=True) for slug in store.slugs()}
+    runtimes = runtimes or {}
+    return {
+        slug: run_tick(store, slug, ledger, runtimes.get(slug, runtime), messenger, scheduled=True)
+        for slug in store.slugs()
+    }
+
+
+def tick_once(store: RedisStore, service: "ControlService | None") -> dict:
+    if service is None or service.runtime is None:
+        return run_once(store)
+    return run_once(store, runtimes={service.controller.slug: service.runtime})
 
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="agentihooks controller")
-    parser.add_argument("action", choices=("run",))
+    parser.add_argument("action", choices=("run", "live", "ready"))
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args(argv)
+    if args.action != "run":
+        from scripts.swarm import controller_probes
+
+        try:
+            store = connect()
+        except SwarmError as exc:
+            print(f"controller: {exc}")
+            return 1
+        return getattr(controller_probes, args.action)(os.environ, store)
     from scripts import operator_env
+    from scripts.swarm import commands
+    from scripts.swarm_v2 import control_service, proof_swarm
 
     operator_env.fill(os.environ)
     store = connect()
+    service = None
     try:
+        proof_swarm.run(os.environ, store)
+        service = control_service.host(os.environ, store, commands.hive_id())
         while True:
-            for slug, actions in run_once(store).items():
+            for slug, actions in tick_once(store, service).items():
                 for action in actions:
                     print(f"{slug}: {action}", flush=True)
+            if service is not None:
+                service.tick()
+            proof_swarm.run(os.environ, store, service.controller.require if service is not None else None)
             if args.once:
                 return 0
             time.sleep(lease.tick_ms() / 1000)
     except SwarmError as exc:
         print(f"controller: {exc}", file=sys.stderr)
         return 1
+    finally:
+        if service is not None:
+            service.stop()

@@ -187,9 +187,10 @@ def continuation(args: list[str], target: str, environ: dict[str, str] | None = 
     from scripts.swarm.store import MASTER
 
     environ = environ or {}
-    flags = model_flags(target, model, effort_range.named(target, effort))
+    named = effort_range.named(target, effort)
+    flags = model_flags(target, model, named)
     _, bounded, _ = _native_options(target, effort_range.launch_args(target, flags, environ))
-    if effort_range.rank(bounded) != effort_range.rank(effort) and environ.get("AGENTIHOOKS_SWARM_LANE") != MASTER:
+    if effort_range.rank(bounded) != effort_range.rank(named) and environ.get("AGENTIHOOKS_SWARM_LANE") != MASTER:
         raise ValueError("unsupported quota transfer: saved effort is outside the current swarm range")
     return [*flags, *remaining]
 

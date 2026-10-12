@@ -343,3 +343,93 @@ class TestGenericSecretShape:
         assert code in result
         assert "[REDACTED:generic_secret]" in result
         assert "sk9f8a7s6d5f4g3h2j1k" not in result
+
+
+@pytest.mark.parametrize("mode", ["standard", "strict", "memory"])
+def test_external_secret_remote_property_references_are_not_credential_values(mode):
+    from hooks.secrets import scan
+
+    key = "GITHUB_APP_" + "PRIVATE_KEY"
+    document = (
+        "apiVersion: external-secrets.io/v1beta1\nkind: ExternalSecret\n"
+        "spec:\n  data:\n  - secretKey: " + key + "\n"
+        "    remoteRef:\n      key: k8s/agenticore\n      property: " + key + "\n"
+    )
+    assert scan(document, mode=mode) == []
+
+
+def test_a_git_app_secret_name_is_a_reference_while_a_private_key_literal_is_refused():
+    from hooks.secrets import scan
+
+    field = "git_app_" + "secret_name"
+    reference = '"' + field + '": "swarm-git-app"'
+    assert scan(reference, mode="standard") == []
+    literal = "GITHUB_APP_" + "PRIVATE_KEY" + "=literalcredentialvalue"
+    assert "generic_secret" in scan(literal, mode="standard")
+
+
+PEM_BODY = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC"
+
+
+def _pem(opening: str, closing: str) -> str:
+    return f"-----BEGIN {opening}PRIVATE" + f" KEY-----\n{PEM_BODY}\n-----END {closing}PRIVATE" + " KEY-----"
+
+
+@pytest.mark.parametrize("kind", ["", "RSA ", "EC ", "OPENSSH ", "PGP ", "DSA ", "ENCRYPTED "])
+def test_a_private_key_with_or_without_an_algorithm_is_redacted_whole(kind):
+    from hooks.secrets import redact, scan
+
+    text = f"a\n{_pem(kind, kind)}\nb"
+    assert scan(text, mode="standard") == ["private_key"]
+    assert redact(text, mode="standard") == "a\n[REDACTED:private_key]\nb"
+
+
+def test_a_private_key_whose_end_names_another_algorithm_is_redacted_to_the_end():
+    from hooks.secrets import redact
+
+    assert redact(f"a\n{_pem('RSA ', 'EC ')}\nb", mode="standard") == "a\n[REDACTED:private_key]"
+
+
+NESTED = "pass" + "word"
+
+
+@pytest.mark.parametrize("keyword", [NESTED, "passwd", "Secret", "api_key", "private_key", "ACCESS_TOKEN"])
+@pytest.mark.parametrize("inner", ["value", "password", "passwd", "token", "secret"])
+def test_strict_mode_finds_a_keyword_key_holding_an_object(keyword, inner):
+    from hooks.secrets import redact, scan
+
+    value = "hunter2" + "h"
+    text = json.dumps({keyword: {"name": "x", inner: value}})
+    assert "nested_secret" in scan(text, mode="strict")
+    assert value not in redact(text, mode="strict")
+
+
+def test_strict_mode_hides_every_credential_value_of_the_object():
+    from hooks.secrets import redact
+
+    text = json.dumps({NESTED: {"value": "hunter2" + "hunter2", "token": "abcdefghijk"}})
+    assert redact(text, mode="strict") == '{"[REDACTED:nested_secret]"}}'
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        {NESTED: {"enabled": True}},
+        {NESTED: {"value": "hunter2"}},
+        {NESTED: {"value": "$PASSWORD_FROM_ENV"}},
+        {NESTED: {"path": "secret/data/prod"}},
+        {"secret": {"secretName": "anton-db-credentials"}},
+        {"secret": {"name": "db-credentials", "key": "password"}},
+        {"name": {"value": "hunter2" + "hunter2"}},
+    ],
+)
+def test_strict_mode_leaves_an_object_without_a_credential_literal_under_a_keyword(record):
+    from hooks.secrets import scan
+
+    assert scan(json.dumps(record), mode="strict") == []
+
+
+def test_standard_mode_never_flags_a_keyword_key_holding_an_object():
+    from hooks.secrets import scan
+
+    assert scan(json.dumps({NESTED: {"value": "hunter2" + "hunter2"}}), mode="standard") == []

@@ -1,9 +1,6 @@
 name: Proofs
 
 on:
-  push:
-    branches: ['diffcheck/**']
-    paths: ['.github/workflows/proofs.yml']
   workflow_dispatch:
     inputs:
       proof:
@@ -27,12 +24,14 @@ on:
         default: false
 
 concurrency:
-  group: proofs-${{ github.run_id }}
+  group: ${{ inputs.proof == 'tests' && format('focused-proof-{0}', github.run_id) || format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') }}
+  queue: max
   cancel-in-progress: false
 
 permissions:
   contents: read
   pull-requests: read
+  actions: read
 
 jobs:
   mutation:
@@ -64,11 +63,11 @@ jobs:
     uses: ./.github/workflows/helm-kind.yml
 
   tests:
-    if: github.event_name == 'push' || inputs.proof == 'tests'
+    if: inputs.proof == 'tests'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      TEST_PATHS: ${{ github.event_name == 'push' && 'tests/test_ci_proofs.py tests/test_ci_mutation_preflight.py' || inputs.tests }}
+      TEST_PATHS: ${{ inputs.tests }}
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
     steps:
       - uses: actions/checkout@v4
@@ -77,6 +76,7 @@ jobs:
 
       - name: Require explicit test paths
         run: |
+          [[ "$TEST_PATHS" != *$'\n'* ]] || { echo '::error::Give every test path on one line.'; exit 1; }
           read -r -a paths <<< "$TEST_PATHS"
           [[ ${#paths[@]} -gt 0 ]] || { echo '::error::Choose explicit test paths under tests/.'; exit 1; }
           for path in "${paths[@]}"; do

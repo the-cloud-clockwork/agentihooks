@@ -2,7 +2,7 @@ import hashlib
 import json
 from dataclasses import asdict, dataclass, field, replace
 from enum import StrEnum
-from typing import Any, Iterable, Protocol
+from typing import Any, Iterable, Mapping, Protocol
 from uuid import NAMESPACE_URL, uuid5
 
 WRITE_ATTEMPTS = 5
@@ -20,6 +20,7 @@ _ERRORS = {
     "identity": "operation identity changed",
     "admission": "execution is not admitted",
     "stale": "execution generation is stale",
+    "spec": "operation spec changed since it was journaled",
     "contention": "operation journal kept changing; no outcome committed",
 }
 
@@ -57,6 +58,8 @@ class Operation:
     phase: Phase = Phase.ACCEPTED
     result: dict = field(default_factory=dict)
     controller_epoch: int | None = None
+    attempted: bool = False
+    spec_digest: str = ""
 
 
 @dataclass(frozen=True)
@@ -103,7 +106,7 @@ class OperationJournal:
     def records(self, slug: str) -> list[Operation]:
         return [_decode(raw) for raw in self.store.redis.hvals(self.store.key(slug, "runtime-operations"))]
 
-    def prepare(self, slug: str, request: OperationRequest) -> Operation:
+    def prepare(self, slug: str, request: OperationRequest, specs: Mapping[str, str] | None = None) -> Operation:
         if not request.execution_id or not request.key or request.action not in ACTIONS:
             raise OperationConflict(_ERRORS["invalid"])
         if type(request.generation) is not int or request.generation < 1:
@@ -125,20 +128,23 @@ class OperationJournal:
                 payload_digest,
                 agent.runtime_target,
                 controller_epoch=lease.EPOCH.get(),
+                spec_digest=(specs or {}).get(agent.runtime_backend, ""),
             )
             raw = pipe.hget(self.store.key(slug, "runtime-operations"), operation_id)
             if not raw:
                 return expected
             previous = _decode(raw)
-            if replace(previous, phase=Phase.ACCEPTED, result={}) != replace(
-                expected, controller_epoch=previous.controller_epoch
+            if replace(previous, phase=Phase.ACCEPTED, result={}, attempted=False, spec_digest="") != replace(
+                expected, controller_epoch=previous.controller_epoch, spec_digest=""
             ):
                 raise OperationConflict(_ERRORS["payload"])
+            if agent.runtime_backend in (specs or {}) and previous.spec_digest not in ("", expected.spec_digest):
+                raise OperationConflict(_ERRORS["spec"])
             return previous
 
         return self._write(slug, create)
 
-    def settle(self, slug: str, operation: Operation, observation: Observation) -> Operation:
+    def settle(self, slug: str, operation: Operation, observation: Observation, attempted: bool = False) -> Operation:
         def update(pipe):
             agent = self._current(slug, operation.execution_id, operation.generation, pipe)
             if agent.runtime_backend != operation.backend or agent.runtime_target != operation.target:
@@ -147,12 +153,15 @@ class OperationJournal:
             if not raw:
                 raise OperationConflict(_ERRORS["missing"])
             current = _decode(raw)
-            if replace(current, phase=Phase.ACCEPTED, result={}) != replace(operation, phase=Phase.ACCEPTED, result={}):
+            settled = {"phase": Phase.ACCEPTED, "result": {}, "attempted": False}
+            if replace(current, **settled) != replace(operation, **settled):
                 raise OperationConflict(_ERRORS["identity"])
             if current.phase is Phase.APPLIED:
                 return current
             phase = Phase.ACCEPTED if observation.phase is Phase.ABSENT else observation.phase
-            return replace(current, phase=phase, result=observation.result if phase is Phase.APPLIED else {})
+            result = observation.result if phase is Phase.APPLIED else {}
+            sent = (current.attempted or attempted) and phase in (Phase.UNKNOWN, Phase.APPLIED)
+            return replace(current, phase=phase, result=result, attempted=sent)
 
         return self._write(slug, update)
 
@@ -198,7 +207,7 @@ class Operations:
 
     def execute(self, slug: str, request: OperationRequest) -> Operation:
         request = replace(request, payload=json.loads(json.dumps(request.payload)))
-        operation = self.journal.prepare(slug, request)
+        operation = self.journal.prepare(slug, request, self._specs(request))
         if operation.phase is Phase.APPLIED:
             return operation
         transport = self.transports.get(operation.backend)
@@ -207,12 +216,21 @@ class Operations:
         observed = self._observe(transport, operation)
         if observed.phase is not Phase.ABSENT or not self.dispatch_enabled:
             return self.journal.settle(slug, operation, observed)
-        operation = self.journal.settle(slug, operation, Observation(Phase.UNKNOWN))
+        operation = self.journal.settle(slug, operation, Observation(Phase.UNKNOWN), attempted=True)
         try:
             observed = transport.apply_operation(operation, request.payload)
         except (TimeoutError, ConnectionError):
             observed = Observation(Phase.UNKNOWN)
         return self.journal.settle(slug, operation, self._qualified(operation, observed))
+
+    def _specs(self, request: OperationRequest) -> dict[str, str]:
+        if request.action != SPAWN:
+            return {}
+        return {
+            backend: render(request.payload)
+            for backend, transport in self.transports.items()
+            if (render := getattr(transport, "spec_digest", None))
+        }
 
     def unresolved(self, slug: str) -> list[Operation]:
         return [operation for operation in self.journal.records(slug) if operation.phase is not Phase.APPLIED]

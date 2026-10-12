@@ -182,31 +182,36 @@ sample or when no backend answered, and 2 for a malformed definition or corpus. 
 
 ## Auto swarm lanes
 
-When an eng or ci lane's effort is `auto`, the spawn runtime asks the classifier
-how much reasoning the task needs, following harness routing, using its title,
-description, kind and territory size. The answer only raises effort above the
-launch default (`high` unless `AGENTIHOOKS_CLAUDE_EFFORT` or
-`AGENTIHOOKS_CODEX_EFFORT` names another): Claude launches high or max, Codex high
-or xhigh. The question offers two levels, the launch default and the harness's top
-effort, because every answer at or below the default launches the default; a lower
-default such as `low` therefore launches low or the top, never a level between. A
-default at the top launches without asking, and a launch default outside those levels
-is kept without asking. The
-classifier never picks a model: a lane model of `auto` launches the harness
-default, opus for Claude and gpt-6.1-sol for Codex unless
-`AGENTIHOOKS_CLAUDE_MODEL` or `AGENTIHOOKS_CODEX_MODEL` names another. Explicit
-model and effort values remain unchanged, and master and plan seats never consult
-the classifier. A master always launches on the frontier model at high effort for
-its harness, whatever its lane or the environment names, and records `frontier`.
+When an eng or ci lane's effort is `auto`, the spawn runtime picks the model and
+effort from a band that code builds from the task's size (`S`, `M` or `L`; unsized
+counts as `M`) and rank. The Claude ladder is Sonnet at xhigh, Opus at medium, Opus at
+high and Opus at xhigh. Size `S` offers Sonnet xhigh or Opus medium, `M` Opus medium
+or Opus high, `L` Opus high or Opus xhigh. Rank `urgent` and `high` move the band up
+one step, `low` moves it down one, `normal` leaves it, and the band stays inside the
+ladder. Codex uses the same effort column on gpt-6.1-sol with the Sonnet step removed,
+so a Codex band can hold one option, which launches without asking.
+
+The classifier answers one choice question, `lower` or `higher`, carrying the task's
+title, description, kind, territory size, size and rank, with a plain description of
+each band option. Code maps the answer to model and effort. The band floor is its
+first Opus or Sol option, so Sonnet launches only on a confident answer, and only at
+xhigh: the Sonnet step is offered only when the swarm effort range reaches xhigh and the
+lane model is `auto`. A lane with an explicit model keeps that model, never takes the
+Sonnet step and takes the picked effort; otherwise the Opus or Sol steps use the
+harness default model, which `AGENTIHOOKS_CLAUDE_MODEL` or `AGENTIHOOKS_CODEX_MODEL`
+can name.
+Explicit lane efforts never consult the classifier, planners launch the medium
+default, and a master always launches on the frontier model at high effort for its
+harness, whatever its lane or the environment names, and records `frontier`.
 Each decision it asks for uses purpose `model-pick` in the classifier log.
 
 The `model-pick` definition's `confidence` threshold defaults to 0.6;
 `AGENTIHOOKS_CLASSIFIER_MODEL_PICK_CONFIDENCE` overrides it, and the older
 `AGENTIHOOKS_MODEL_PICK_MIN_CONFIDENCE` still applies when that is unset. The
-effort answer's confidence must meet it; otherwise the lane keeps its launch defaults. An
-unavailable classifier also preserves those defaults.
+answer's confidence must meet it; otherwise the launch takes the band floor. An
+unavailable classifier also launches the band floor, recorded as source `band`.
 Agent records, swarm status and the page carry `model_source` and
 `model_confidence`; low confidence retains the attempted classifier's metadata,
-and an explicit or unavailable pick records `lane-default` without confidence.
+an explicit lane records `lane-default` and an unavailable classifier `band`, both without confidence.
 A running session that reports another model or effort replaces both on the
 record with source `session` and no confidence.

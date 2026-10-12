@@ -164,8 +164,9 @@ class TestGate:
         decision = early.decide(bash("gh pr merge 9"), WHO, verdicts(tmp_path))
         assert not decision.allowed
         assert decision.reason == (
-            f"intent check running for task {TASK}, started 119 s ago; it passes unchecked at 120 s. Wait for it: "
-            f'agentihooks swarm {SLUG} wait 2 --reason "intent check"'
+            f"intent check running for task {TASK}, started 119 s ago; it passes unchecked at 120 s. "
+            "Mark the pull request ready with gh pr ready <pull request url> if it is a draft, then wait for the "
+            f"verdict: agentihooks swarm {SLUG} wait --on intent <pull request url>"
         )
         assert rows(tmp_path) == []
         late = intent.IntentGate(clock=lambda: (NOW + 120_000) / 1000)

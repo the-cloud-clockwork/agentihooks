@@ -1,0 +1,492 @@
+{
+  "package": "SV2-FSY-03",
+  "case": "T-SV2-FSY-03-A",
+  "title": "successful behavior: two compatible tasks reuse a dependency cache while keeping native conversations and credentials separate",
+  "tested_commit": "9a54962a47352faac17050996763fefa5a46267f",
+  "evidence_class": "local isolated fixture in CI: real files in pytest temporary execution roots laid out by SV2-FSY-01 and a temporary cache store; fake clock and fake disk usage; monkeypatched copy and write failures only in named failure tests; not live rollout proof",
+  "mocked": false,
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38068548038",
+  "passed": true,
+  "tests": [
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_publish_refuses_credentials_and_session_databases_and_leaves_the_store_unchanged[session.jsonl-cache",
+      "job": "114261302975",
+      "shard": "unit (3.12, 3)",
+      "output": "PASSED at 2026-10-10T16:44:03.3483461Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_parse_refuses_a_malformed_policy[change0-cache",
+      "job": "114261303015",
+      "shard": "unit (3.12, 8)",
+      "output": "PASSED at 2026-10-10T16:44:34.7527872Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_lock_digest_is_the_sha256_of_the_lock_file",
+      "job": "114261303015",
+      "shard": "unit (3.12, 8)",
+      "output": "PASSED at 2026-10-10T16:44:34.8116354Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_parse_refuses_a_malformed_policy[change7-cache",
+      "job": "114261303015",
+      "shard": "unit (3.12, 8)",
+      "output": "PASSED at 2026-10-10T16:44:34.8416711Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_attach_refuses_a_key_missing_any_field[scope]",
+      "job": "114261303015",
+      "shard": "unit (3.12, 8)",
+      "output": "PASSED at 2026-10-10T16:44:34.9006380Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_the_key_digest_covers_every_field",
+      "job": "114261303015",
+      "shard": "unit (3.12, 8)",
+      "output": "PASSED at 2026-10-10T16:44:34.9036356Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_parse_refuses_a_malformed_policy[change13-cache",
+      "job": "114261303015",
+      "shard": "unit (3.12, 8)",
+      "output": "PASSED at 2026-10-10T16:44:34.9326950Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_cache_hit_rate_is_zero_before_any_attach_and_the_share_of_hits_after",
+      "job": "114261303015",
+      "shard": "unit (3.12, 8)",
+      "output": "PASSED at 2026-10-10T16:44:34.9666267Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_attach_refuses_a_key_missing_any_field[lock]",
+      "job": "114261303021",
+      "shard": "unit (3.12, 2)",
+      "output": "PASSED at 2026-10-10T16:43:00.8436912Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_parse_refuses_a_malformed_policy[change1-cache",
+      "job": "114261303021",
+      "shard": "unit (3.12, 2)",
+      "output": "PASSED at 2026-10-10T16:43:00.8876934Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_publish_refuses_credentials_and_session_databases_and_leaves_the_store_unchanged[history.sqlite-cache",
+      "job": "114261303021",
+      "shard": "unit (3.12, 2)",
+      "output": "PASSED at 2026-10-10T16:43:00.9176589Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_parse_refuses_a_malformed_policy[change8-cache",
+      "job": "114261303022",
+      "shard": "unit (3.12, 4)",
+      "output": "PASSED at 2026-10-10T16:44:46.0253245Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_parse_refuses_a_malformed_policy[change9-cache",
+      "job": "114261303022",
+      "shard": "unit (3.12, 4)",
+      "output": "PASSED at 2026-10-10T16:44:46.0960039Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_parse_refuses_a_malformed_policy[change10-cache",
+      "job": "114261303022",
+      "shard": "unit (3.12, 4)",
+      "output": "PASSED at 2026-10-10T16:44:46.1220089Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_parse_refuses_a_malformed_policy[change14-cache",
+      "job": "114261303022",
+      "shard": "unit (3.12, 4)",
+      "output": "PASSED at 2026-10-10T16:44:46.1579942Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_two_compatible_attempts_reuse_one_sealed_seed_while_homes_stay_private",
+      "job": "114261303022",
+      "shard": "unit (3.12, 4)",
+      "output": "PASSED at 2026-10-10T16:44:46.3179887Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_package_cases_pass_on_the_isolated_fixture",
+      "job": "114261303022",
+      "shard": "unit (3.12, 4)",
+      "output": "PASSED at 2026-10-10T16:44:47.6359824Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_parse_refuses_a_malformed_policy[change2-cache",
+      "job": "114261303027",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T16:44:48.2914355Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_the_shipped_policy_turns_reuse_on_and_keeps_credentials_and_session_databases_out",
+      "job": "114261303027",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T16:44:48.3154098Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_load_reads_the_installed_policy_when_no_path_is_given",
+      "job": "114261303027",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T16:44:48.3693588Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_parse_refuses_a_malformed_policy[change12-cache",
+      "job": "114261303027",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T16:44:48.3764866Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_attach_refuses_a_key_missing_any_field[platform]",
+      "job": "114261303027",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T16:44:48.3803633Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_a_store_defaults_to_the_wall_clock_and_the_real_disk_and_the_image_policy_path",
+      "job": "114261303027",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T16:44:48.4404009Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_a_hit_marks_the_entry_used_at_the_store_clock",
+      "job": "114261303027",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T16:44:48.9063583Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_parse_refuses_a_malformed_policy[change5-cache",
+      "job": "114261303032",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T16:43:36.9391116Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_publish_refuses_credentials_and_session_databases_and_leaves_the_store_unchanged[.credentials.json-cache",
+      "job": "114261303032",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T16:43:36.9659996Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_an_attempt_reads_its_own_and_shared_scopes_and_publishes_only_its_own",
+      "job": "114261303032",
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T16:43:37.0527699Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_parse_refuses_a_malformed_policy[change4-cache",
+      "job": "114261303062",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T16:43:08.6003773Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_a_miss_gives_an_empty_private_writable_layer_and_counts_a_miss",
+      "job": "114261303062",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T16:43:08.6273608Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_publish_refuses_a_kind_outside_the_policy",
+      "job": "114261303062",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T16:43:08.6513603Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_parse_refuses_a_malformed_policy[change6-cache",
+      "job": "114261303062",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T16:43:08.6733625Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_load_reads_an_explicit_path_instead_of_the_installed_policy",
+      "job": "114261303062",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T16:43:08.6929919Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_publish_refuses_credentials_and_session_databases_and_leaves_the_store_unchanged[session.jsonl-cache",
+      "job": "114261303062",
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T16:43:08.7152108Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_attach_refuses_a_key_missing_any_field[lock]",
+      "job": "114261303064",
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T16:43:06.2580820Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_an_attempt_reads_its_own_and_shared_scopes_and_publishes_only_its_own",
+      "job": "114261303064",
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T16:43:06.3113889Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_parse_refuses_a_malformed_policy[change1-cache",
+      "job": "114261303064",
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T16:43:06.3231132Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_publish_refuses_credentials_and_session_databases_and_leaves_the_store_unchanged[history.sqlite-cache",
+      "job": "114261303064",
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T16:43:06.3461490Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_parse_refuses_a_malformed_policy[change5-cache",
+      "job": "114261303064",
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T16:43:06.3491039Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_publish_refuses_credentials_and_session_databases_and_leaves_the_store_unchanged[.credentials.json-cache",
+      "job": "114261303064",
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T16:43:06.3801843Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_parse_refuses_a_malformed_policy[change3-cache",
+      "job": "114261303091",
+      "shard": "unit (3.12, 1)",
+      "output": "PASSED at 2026-10-10T16:43:11.4747777Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_parse_refuses_a_malformed_policy[change11-cache",
+      "job": "114261303091",
+      "shard": "unit (3.12, 1)",
+      "output": "PASSED at 2026-10-10T16:43:11.4950833Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_parse_accepts_the_smallest_limits_and_reuse_off",
+      "job": "114261303091",
+      "shard": "unit (3.12, 1)",
+      "output": "PASSED at 2026-10-10T16:43:11.5100479Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_attach_refuses_a_key_missing_any_field[toolchain]",
+      "job": "114261303091",
+      "shard": "unit (3.12, 1)",
+      "output": "PASSED at 2026-10-10T16:43:11.5230553Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_attach_refuses_an_unknown_kind",
+      "job": "114261303091",
+      "shard": "unit (3.12, 1)",
+      "output": "PASSED at 2026-10-10T16:43:11.5390554Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_publish_records_the_key_the_manifest_and_the_size",
+      "job": "114261303091",
+      "shard": "unit (3.12, 1)",
+      "output": "PASSED at 2026-10-10T16:43:11.6002048Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_reuse_off_runs_an_attempt_as_the_local_path_does_with_only_its_private_scratch_layer_added",
+      "job": "114261303091",
+      "shard": "unit (3.12, 1)",
+      "output": "PASSED at 2026-10-10T16:43:11.6588158Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_publish_waits_for_the_store_lock_even_against_a_shared_holder",
+      "job": "114261303091",
+      "shard": "unit (3.12, 1)",
+      "output": "PASSED at 2026-10-10T16:43:12.1119701Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_load_reads_the_installed_policy_when_no_path_is_given",
+      "job": "114261303099",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T16:43:15.0431353Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_parse_refuses_a_malformed_policy[change11-cache",
+      "job": "114261303099",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T16:43:15.0671010Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_the_shipped_policy_turns_reuse_on_and_keeps_credentials_and_session_databases_out",
+      "job": "114261303099",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T16:43:15.0729647Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_parse_refuses_a_malformed_policy[change12-cache",
+      "job": "114261303099",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T16:43:15.0953810Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_parse_refuses_a_malformed_policy[change3-cache",
+      "job": "114261303099",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T16:43:15.1009667Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_parse_refuses_a_malformed_policy[change2-cache",
+      "job": "114261303099",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T16:43:15.1160082Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_a_store_defaults_to_the_wall_clock_and_the_real_disk_and_the_image_policy_path",
+      "job": "114261303099",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T16:43:15.1229713Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_attach_refuses_an_unknown_kind",
+      "job": "114261303099",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T16:43:15.1241392Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_parse_accepts_the_smallest_limits_and_reuse_off",
+      "job": "114261303099",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T16:43:15.1289236Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_attach_refuses_a_key_missing_any_field[toolchain]",
+      "job": "114261303099",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T16:43:15.1549566Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_attach_refuses_a_key_missing_any_field[platform]",
+      "job": "114261303099",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T16:43:15.1579271Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_publish_records_the_key_the_manifest_and_the_size",
+      "job": "114261303099",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T16:43:15.1779583Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_a_hit_marks_the_entry_used_at_the_store_clock",
+      "job": "114261303099",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T16:43:15.2220274Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_reuse_off_runs_an_attempt_as_the_local_path_does_with_only_its_private_scratch_layer_added",
+      "job": "114261303099",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T16:43:15.2870041Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_publish_waits_for_the_store_lock_even_against_a_shared_holder",
+      "job": "114261303099",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T16:43:15.6919294Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_load_reads_an_explicit_path_instead_of_the_installed_policy",
+      "job": "114261303126",
+      "shard": "unit (3.12, 7)",
+      "output": "PASSED at 2026-10-10T16:44:38.0608156Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_a_miss_gives_an_empty_private_writable_layer_and_counts_a_miss",
+      "job": "114261303126",
+      "shard": "unit (3.12, 7)",
+      "output": "PASSED at 2026-10-10T16:44:38.1558248Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_parse_refuses_a_malformed_policy[change4-cache",
+      "job": "114261303126",
+      "shard": "unit (3.12, 7)",
+      "output": "PASSED at 2026-10-10T16:44:38.1898570Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_parse_refuses_a_malformed_policy[change6-cache",
+      "job": "114261303126",
+      "shard": "unit (3.12, 7)",
+      "output": "PASSED at 2026-10-10T16:44:38.2008545Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_publish_refuses_a_kind_outside_the_policy",
+      "job": "114261303126",
+      "shard": "unit (3.12, 7)",
+      "output": "PASSED at 2026-10-10T16:44:38.2860734Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_parse_refuses_a_malformed_policy[change0-cache",
+      "job": "114261303134",
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T16:43:38.4457082Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_parse_refuses_a_malformed_policy[change8-cache",
+      "job": "114261303134",
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T16:43:38.4527335Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_parse_refuses_a_malformed_policy[change9-cache",
+      "job": "114261303134",
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T16:43:38.4747703Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_parse_refuses_a_malformed_policy[change14-cache",
+      "job": "114261303134",
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T16:43:38.4897518Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_parse_refuses_a_malformed_policy[change7-cache",
+      "job": "114261303134",
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T16:43:38.4987340Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_parse_refuses_a_malformed_policy[change13-cache",
+      "job": "114261303134",
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T16:43:38.5101064Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_lock_digest_is_the_sha256_of_the_lock_file",
+      "job": "114261303134",
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T16:43:38.5156959Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_parse_refuses_a_malformed_policy[change10-cache",
+      "job": "114261303134",
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T16:43:38.5247346Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_the_key_digest_covers_every_field",
+      "job": "114261303134",
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T16:43:38.5296917Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_attach_refuses_a_key_missing_any_field[scope]",
+      "job": "114261303134",
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T16:43:38.5577016Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_cache_hit_rate_is_zero_before_any_attach_and_the_share_of_hits_after",
+      "job": "114261303134",
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T16:43:38.5637101Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_two_compatible_attempts_reuse_one_sealed_seed_while_homes_stay_private",
+      "job": "114261303134",
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T16:43:38.5727184Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_cache.py::test_package_cases_pass_on_the_isolated_fixture",
+      "job": "114261303134",
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T16:43:39.0756931Z"
+    }
+  ]
+}
