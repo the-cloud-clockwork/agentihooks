@@ -641,3 +641,17 @@ def test_judging_a_task_held_as_a_draft_shows_the_running_record_meanwhile(tmp_p
     intent.Check(SLUG, mode, NOW, Ledger(), Mail(), lambda url: {**PR, "head": "ready"}, ask, home=tmp_path).run(DOC)
     assert seen == [{"verdict": "pending", "reason": intent.RUNNING, "at": NOW, "phase": "p8"}]
     assert Verdicts(SLUG, "intent", tmp_path).read(TASK)["verdict"] == "pass"
+
+
+@pytest.mark.parametrize("mode", ["enforce", "coach"])
+def test_a_draft_whose_pull_request_cannot_be_read_keeps_its_draft_record_and_time(tmp_path, mode):
+    Verdicts(SLUG, "intent", tmp_path).write(TASK, "pending", intent.DRAFT, NOW - 60_000, phase="p8")
+    asked = []
+    intent.Check(SLUG, mode, NOW, Ledger(), Mail(), lambda url: None, asked.append, home=tmp_path).run(DOC)
+    assert asked == []
+    assert Verdicts(SLUG, "intent", tmp_path).read(TASK) == {
+        "verdict": "pending",
+        "reason": intent.DRAFT,
+        "at": NOW - 60_000,
+        "phase": "p8",
+    }
