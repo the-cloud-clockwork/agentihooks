@@ -8,6 +8,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Event
 
 ACTIVE = "working"
 TRACES_LIMIT = 5
@@ -177,15 +178,35 @@ def _read_binding(get, slug: str, binding: dict, marks: dict, kept: dict, page: 
     }
 
 
-def _attempts(get, slug: str, binding: dict, marks: dict, page: int) -> tuple[dict, dict, str | None]:
-    error = None
+def _unread() -> dict:
+    return {"read": False, "traces": [], "remote": None}
+
+
+def _attempts(get, slug: str, binding: dict, marks: dict, page: int, ended: Event, slot: dict) -> tuple[dict, dict]:
     for _ in range(ATTEMPTS):
+        if ended.is_set():
+            break
         kept: dict = {}
         try:
-            return _read_binding(get, slug, binding, marks, kept, page), kept, None
+            remote = _read_binding(get, slug, binding, marks, kept, page)
+            slot["error"] = None
+            return remote, kept
         except Exception as exc:  # noqa: BLE001
-            error = f"active read of {binding['agent']} failed: {type(exc).__name__}: {exc}"
-    return {"read": False, "traces": [], "remote": None}, {}, error
+            slot["error"] = f"active read of {binding['agent']} failed: {type(exc).__name__}: {exc}"
+    return _unread(), {}
+
+
+def _read_all(get, slug: str, active: list[dict], marks: dict, page: int, remaining: float) -> list[tuple]:
+    if remaining <= 0:
+        return [(_unread(), {}, None) for _ in active]
+    slots: list[dict] = [{"error": None} for _ in active]
+    ended, pool = Event(), ThreadPoolExecutor(max_workers=WORKERS)
+    futures = [pool.submit(_attempts, get, slug, b, marks, page, ended, slot) for b, slot in zip(active, slots)]
+    wait(futures, timeout=remaining)
+    ended.set()
+    pool.shutdown(wait=False, cancel_futures=True)
+    done = [f.result() if f.done() and not f.cancelled() else (_unread(), {}) for f in futures]
+    return [(remote, kept, slot["error"]) for (remote, kept), slot in zip(done, slots)]
 
 
 def read(
@@ -201,22 +222,11 @@ def read(
     deadline = clock() + seconds
     marks, kept, failures, found = state.get("marks", {}), {}, [], []
     active = bindings(agents)
-    pool = ThreadPoolExecutor(max_workers=WORKERS)
-    futures = []
-    for binding in active:
-        if clock() >= deadline:
-            break
-        futures.append(pool.submit(_attempts, get, slug, binding, marks, page))
-    if futures:
-        wait(futures, timeout=max(0.0, deadline - clock()))
-    pool.shutdown(wait=False, cancel_futures=True)
-    for index, binding in enumerate(active):
-        if index < len(futures) and futures[index].done():
-            remote, marked, error = futures[index].result()
-            kept.update(marked)
-        else:
-            remote = {"read": False, "traces": [], "remote": None}
-            error = f"active read budget of {seconds:g} seconds spent before {binding['agent']}"
+    results = _read_all(get, slug, active, marks, page, deadline - clock())
+    for binding, (remote, marked, error) in zip(active, results):
+        kept.update(marked)
+        if not remote["read"]:
+            error = error or f"active read budget of {seconds:g} seconds spent before {binding['agent']}"
         merged = {**binding, **remote, "local": None}
         try:
             merged["local"] = progress(merged["session_id"], merged["harness"]) if merged["session_id"] else None
