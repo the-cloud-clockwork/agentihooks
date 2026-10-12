@@ -67,6 +67,68 @@ function applyLayout(next) {
   }
   $("layout-reset").disabled = !Object.keys(layout).length;
   applyColumns();
+  orderStats();
+}
+
+function orderStats() {
+  const box = $("stats"), order = Array.isArray(layout.stats) ? layout.stats : [];
+  if (!box) return;
+  const rows = [...box.children], rank = (row) => {
+    const at = order.indexOf(row.dataset.stat);
+    return at < 0 ? order.length + rows.indexOf(row) : at;
+  };
+  const sorted = [...rows].sort((a, b) => rank(a) - rank(b));
+  if (sorted.some((row, i) => row !== rows[i])) box.append(...sorted);
+}
+
+function saveStats() {
+  setLayout({ ...layout, stats: [...$("stats").children].map((row) => row.dataset.stat).filter(Boolean) }, 0);
+}
+
+function wireStats() {
+  const box = $("stats");
+  box.addEventListener("pointerdown", (ev) => {
+    const grip = ev.target.closest(".stat-grip");
+    if (!grip || ev.button !== 0) return;
+    ev.preventDefault();
+    const row = grip.closest(".stat");
+    row.classList.add("dragging");
+    document.body.classList.add("reordering");
+    const move = (e) => {
+      if (e.pointerId !== ev.pointerId || !row.isConnected) return;
+      const target = [...box.children].find((other) => {
+        const at = other.getBoundingClientRect();
+        return other !== row && e.clientY >= at.top && e.clientY < at.bottom;
+      });
+      if (!target) return;
+      const at = target.getBoundingClientRect();
+      if (e.clientY < at.top + at.height / 2) target.before(row);
+      else target.after(row);
+    };
+    const end = (e) => {
+      if (e.pointerId !== ev.pointerId) return;
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", end);
+      document.removeEventListener("pointercancel", end);
+      row.classList.remove("dragging");
+      document.body.classList.remove("reordering");
+      saveStats();
+    };
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", end);
+    document.addEventListener("pointercancel", end);
+  });
+  box.addEventListener("keydown", (ev) => {
+    const grip = ev.target.closest(".stat-grip"), row = grip && grip.closest(".stat");
+    const next = row && { ArrowUp: row.previousElementSibling, ArrowDown: row.nextElementSibling }[ev.key];
+    if (!next) return;
+    ev.preventDefault();
+    if (ev.key === "ArrowUp") next.before(row);
+    else next.after(row);
+    grip.focus();
+    saveStats();
+  });
+  document.addEventListener("stats", orderStats);
 }
 
 const COLUMN_MIN = 40;
@@ -201,6 +263,7 @@ export function startLayout() {
   applyLayout(stored(LAYOUT_KEY, {}));
   for (const grip of document.querySelectorAll("#swarm-box [data-grip]")) wireGrip(grip);
   wireColumns();
+  wireStats();
   $("layout-reset").addEventListener("click", () => setLayout({}, 0));
   readLayout()
     .then((resp) => (resp.ok ? resp.json() : null))

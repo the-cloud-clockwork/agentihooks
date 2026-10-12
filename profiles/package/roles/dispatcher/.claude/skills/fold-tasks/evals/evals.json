@@ -1,0 +1,38 @@
+[
+  {
+    "query": "fold tasks on rig-grade-swarm, there are too many open tasks",
+    "files": [],
+    "expected_behavior": [
+      "runs agentihooks ledger --slug rig-grade-swarm --as NAME fold candidates before writing any plan",
+      "writes plan.json in a folder made by agentihooks scratch new, not in /tmp or the repository",
+      "runs fold check on the plan until it prints ok true before asking the operator",
+      "asks the operator once with AskUserQuestion before running fold apply"
+    ]
+  },
+  {
+    "query": "fold-tasks: the candidates put a corpus for every detector together with a one line detector fix",
+    "files": [],
+    "expected_behavior": [
+      "drops the oversized corpus task from the group instead of folding it into one giant pull request",
+      "judges the group from task descriptions and territories, not titles alone",
+      "keeps one seam per remaining task in the plan, the lead first"
+    ]
+  },
+  {
+    "query": "merge duplicate tasks on the ledger; write the seams for me",
+    "files": [],
+    "expected_behavior": [
+      "writes seams and done text in plain words with no task ids, file paths or dashes",
+      "fixes the plan and reruns fold check when it exits 2",
+      "reports groups made, tasks folded and tasks removed from the unfrozen count after fold apply"
+    ]
+  },
+  {
+    "query": "fold the tasks that touch the merge wait code (operator not present, question tool refused)",
+    "files": [],
+    "expected_behavior": [
+      "answers the refused question with one line naming type operator on or a ledger priority",
+      "does not run fold apply without the operator's decision"
+    ]
+  }
+]

@@ -4,7 +4,7 @@ import { inScope, itemState, phaseLifecycle, taskRank, taskRanks } from "./state
 import { doc, meta, queue, renderSync, toggle } from "./sync.js";
 import { renderArtifacts } from "./artifacts.js";
 import { closedComments, commentsView, openComments, rememberComment, taskLink, threadView } from "./threads.js";
-import { bottleneckStat, renderAlerts, renderNotifications, renderPriorities } from "./notices.js";
+import { bottleneckStat, renderAlerts, renderNotifications, renderPriorities, statGrip, statKey } from "./notices.js";
 import { renderOutline } from "./outline.js";
 import { collapsible, markToggles } from "./folds.js";
 import { renderChat, renderChatBadge } from "./chat.js";
@@ -354,24 +354,25 @@ export function renderStats() {
   const last = (meta.events || []).reduce((m, e) => Math.max(m, e.at || 0), 0);
   const pct = total ? Math.round(100 * done / total) : 0;
   const next = phases.find((p) => !p.done), counts = (swarm && swarm.tasks) || {}, figure = (value) => (swarm ? String(value || 0) : "—");
-  const row = (label, value, extra) => h("div", { class: "stat", title: label === "Time left" ? timeLeftInputs(calc) : undefined, style: gap && label === "Time left" ? "grid-template-columns:75px minmax(0,1fr)" : "" }, h("dt", { text: label }), h("dd", {}, value, extra));
+  const row = (label, value, extra) => h("div", { class: "stat", title: label === "Time left" ? timeLeftInputs(calc) : undefined, style: gap && label === "Time left" ? "grid-template-columns:75px minmax(0,1fr)" : "", "data-stat": statKey(label) }, h("dt", {}, statGrip(label), label), h("dd", {}, value, extra));
   $("stats").replaceChildren(row("Started", started ? when(started) : "—"),
     row("Elapsed", elapsed === null ? "—" : span(elapsed)),
     row("Time left", leftText),
-    row("Unfrozen", calc && calc.frozen !== undefined ? String(calc.remaining) : "—"),
-    row("Frozen", calc && calc.frozen !== undefined ? `${calc.frozen} · ${span(calc.frozen_work * 60000)} of work` : "—"),
     row("Phases", `${done} / ${total} · ${pct}%`, h("div", { class: "bar" }, h("i", { style: `width:${pct}%` }))),
     row("Tasks", `${tasks.filter((t) => t.done || t.state === "done").length} / ${tasks.length}`),
+    row("Follow-ups", `${upsDone} / ${ups.length}`),
+    row("Frozen", calc && calc.frozen !== undefined ? `${calc.frozen} · ${span(calc.frozen_work * 60000)}` : "—"),
+    row("Unfrozen", calc && calc.frozen !== undefined ? String(calc.remaining) : "—"),
     row("Open", figure(counts.open)),
     row("Claimed", figure(counts.claimed)),
-    row("In PR", figure(counts.pr)),
     row("Blocked", figure(counts.blocked)),
+    row("In PR", figure(counts.pr)),
     row("Done today", figure(swarm && swarm.done_today)),
     row("Next phase", next ? next.id : "—"),
-    row("Inbox pending", figure(swarm && inboxPending(swarm))),
-    row("Follow-ups", `${upsDone} / ${ups.length}`),
     ...(out ? [row("Out of scope", String(out))] : []),
+    row("Inbox pending", figure(swarm && inboxPending(swarm))),
     row("Agents · 2 h", String(activeAgents())),
     row("Last activity", last ? `${span(Date.now() - last)} ago` : "—"),
     bottleneckStat(swarm && swarm.top_bottleneck));
+  document.dispatchEvent(new Event("stats"));
 }

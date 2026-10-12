@@ -53,6 +53,13 @@ The phrase "release dance" is itself the operator's PR and release signal, so
 steps 3 and 4 pass the `main` gate. `git fetch` updates `origin/dev`, not your
 local branch. Pull before any merge; the release workflow never changes `dev`.
 
+## Ledger front end
+
+`DESIGN.md` and `.impeccable/design.json` are the ledger front end's design record; their Named Rules and Don'ts are hard
+constraints. Read both before editing anything under `scripts/swarm_ledger/static/` or `palette.css`, and use the
+impeccable skill to shape and critique the change. `tests/swarm_ledger/test_design_system.py` enforces the record;
+a test there that a change has to rewrite means the change is wrong, not the test.
+
 ## The Four Pillars
 
 AgentiHooks is organized around four pillars. When working on this codebase, understand which pillar a change affects:

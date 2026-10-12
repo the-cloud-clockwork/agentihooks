@@ -23,13 +23,32 @@ def refusal(task, url, github):
     kind = ledger_kinds.kind(task)
     if kind not in GATED:
         return ""
+    if task.get("split"):
+        return _split_refusal(task, url, github)
     if not url:
         return f"a {kind} task is done only with its merged pull request: give --pr <url>"
+    return _unmerged(url, github)
+
+
+def _unmerged(url, github):
     found = github(url)
     if found is None:
         return f"could not read pull request {url} from GitHub; run swarm done again when it answers"
     if found.state != MERGED:
         return f"pull request {url} is {found.state.lower()}, not merged; merge it, then run swarm done again"
+    return ""
+
+
+def _split_refusal(task, url, github):
+    bound = _pulls(task, url)
+    if len(bound) < len(task["split"]):
+        return (
+            f"half {len(bound) + 1} of this split task has no pull request yet: record it with swarm pr <url>, "
+            "merge it, then run swarm done again"
+        )
+    for number, pull in enumerate(bound, 1):
+        if refused := _unmerged(pull, github):
+            return f"half {number} of this split task: {refused}"
     return ""
 
 
@@ -44,7 +63,7 @@ def require_target(store: object, slug: str, task_id: str, url: str, tasks: list
     from scripts.swarm.store import SwarmError
 
     own = next((task for task in tasks if task["id"] == task_id), {})
-    if own.get("pr_url") != url:
+    if url not in _pulls(own):
         raise SwarmError("final integration must target this task's recorded pull request")
     for task in tasks:
         if task.get("pr_url") == url:
@@ -56,24 +75,37 @@ def recheck_pass(store, slug, doc, ledger, now_ms, github):
     actions = []
     for task_id in _done_by_workers(doc.get("_meta", {}).get("events", []), now_ms):
         task = tasks.get(task_id, {})
-        url = task.get("pr_url")
-        if task.get("state") != "done" or ledger_kinds.kind(task) not in GATED or not url:
+        if task.get("state") != "done" or ledger_kinds.kind(task) not in GATED or not task.get("pr_url"):
             continue
-        seen = store.key(slug, "done-merged", url)
-        if store.redis.exists(seen):
-            continue
-        found = github(url)
-        if found is None:
-            continue
-        if found.state == MERGED:
-            store.redis.set(seen, 1, ex=SEEN_TTL_S)
-            continue
-        state = found.state.lower()
-        ledger.update_task(slug, task_id, {"state": "open", "claimed_by": ""})
-        text = REOPENED.format(url=url, state=state)
-        ledger.comment(slug, task_id, text, by="swarm")
-        actions.append(f"task {task_id} reopened, its pull request is {state}")
+        for url in _pulls(task):
+            state = _unmerged_state(store, slug, url, github)
+            if state:
+                ledger.update_task(slug, task_id, {"state": "open", "claimed_by": ""})
+                ledger.comment(slug, task_id, REOPENED.format(url=url, state=state), by="swarm")
+                actions.append(f"task {task_id} reopened, its pull request is {state}")
+                break
     return actions
+
+
+def _pulls(task, url=None):
+    url = url or task.get("pr_url")
+    if not task.get("split"):
+        return [url]
+    bound = list(dict.fromkeys([*(task.get("split_pulls") or []), *([url] if url else [])]))
+    return bound[: len(task["split"])]
+
+
+def _unmerged_state(store, slug, url, github):
+    seen = store.key(slug, "done-merged", url)
+    if store.redis.exists(seen):
+        return ""
+    found = github(url)
+    if found is None:
+        return ""
+    if found.state == MERGED:
+        store.redis.set(seen, 1, ex=SEEN_TTL_S)
+        return ""
+    return found.state.lower()
 
 
 def _done_by_workers(events, now_ms):
