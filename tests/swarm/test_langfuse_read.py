@@ -8,9 +8,8 @@ import pytest
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("mcp-sdk")]
 
 
-@pytest.mark.parametrize("default_url", [False, True])
 @pytest.mark.parametrize("outcome", ["success", "error", "timeout"])
-def test_reader_uses_the_named_project_window_and_bounded_transport(monkeypatch, outcome, default_url):
+def test_reader_uses_the_named_project_window_and_bounded_transport(monkeypatch, outcome):
     import mcp
     from mcp.client import streamable_http
 
@@ -22,7 +21,7 @@ def test_reader_uses_the_named_project_window_and_bounded_transport(monkeypatch,
 
     @asynccontextmanager
     async def transport(url, headers, timeout):
-        assert url == ("http://10.10.30.200/mcp/" if default_url else "http://fixture/mcp/")
+        assert url == "http://fixture/mcp/"
         assert headers == {
             "Authorization": "Bearer fixture",
             "Host": "llm.homeofanton.com",
@@ -57,10 +56,7 @@ def test_reader_uses_the_named_project_window_and_bounded_transport(monkeypatch,
             )
 
     monkeypatch.setenv("MCP_KEY_GATEWAY", "fixture")
-    if default_url:
-        monkeypatch.delenv("LANGFUSE_MCP_URL", raising=False)
-    else:
-        monkeypatch.setenv("LANGFUSE_MCP_URL", "http://fixture/mcp/")
+    monkeypatch.setenv("LANGFUSE_MCP_URL", "http://fixture/mcp/")
     monkeypatch.setattr(streamable_http, "streamablehttp_client", transport)
     monkeypatch.setattr(mcp, "ClientSession", Session)
     if outcome == "success":
@@ -82,3 +78,23 @@ def test_reader_uses_the_named_project_window_and_bounded_transport(monkeypatch,
         )
     ]
     assert initialized == closed == [True]
+
+
+def test_reader_requires_the_configured_endpoint_before_connecting(monkeypatch):
+    from mcp.client import streamable_http
+
+    from scripts.swarm.langfuse_read import read_summary
+
+    calls = []
+
+    def transport(*args, **kwargs):
+        calls.append(args)
+        raise AssertionError("An unconfigured read must not connect")
+
+    monkeypatch.setenv("MCP_KEY_GATEWAY", "fixture")
+    monkeypatch.delenv("LANGFUSE_MCP_URL", raising=False)
+    monkeypatch.setattr(streamable_http, "streamablehttp_client", transport)
+    with pytest.raises(KeyError) as error:
+        read_summary("rig-grade-swarm", {}, 0.05)
+    assert error.value.args == ("LANGFUSE_MCP_URL",)
+    assert calls == []
