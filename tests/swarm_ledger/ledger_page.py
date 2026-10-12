@@ -94,7 +94,7 @@ def reload_after_folds(tab, selector):
         """boxes => boxes.map(box => ({
           id: box.id,
           key: box.dataset.key || (box.matches(".plan-fold,.phase-fold")
-            ? box.parentElement.id.slice(5).replace("-", "/") + "/row" : null),
+            ? box.closest("[id^=item-]").id.slice(5).replace("-", "/") + "/row" : null),
           open: box.open
         }))"""
     )

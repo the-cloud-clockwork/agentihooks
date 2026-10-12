@@ -46,15 +46,13 @@ def tab(browser, request):
     serve_modules(context, ledger_state(DOC))
     context.add_init_script(
         """
-        const listen = EventTarget.prototype.addEventListener;
-        EventTarget.prototype.addEventListener = function(type, callback, options) {
-            if (type === "toggle") {
-                const original = callback;
-                callback = event => window.delayFolds
-                    ? setTimeout(() => original.call(this, event), DELAY)
-                    : original.call(this, event);
+        const write = Storage.prototype.setItem;
+        Storage.prototype.setItem = function(key, value) {
+            if (window.delayFolds && (key.endsWith(":fold") || key.endsWith(":comments"))) {
+                setTimeout(() => write.call(this, key, value), DELAY);
+            } else {
+                write.call(this, key, value);
             }
-            return listen.call(this, type, callback, options);
         };
         """.replace("DELAY", str(getattr(request, "param", 0)))
     )
@@ -198,7 +196,7 @@ def test_one_dropdown_by_hand_is_remembered_and_flips_the_control_only_when_all_
     tab.locator(summaries).nth(0).evaluate("(el) => el.click()")
     settle(tab)
     assert comments(tab, "sec-phases") == {"labels": ["Show all comments"], "open": [True, False, False]}
-    reload_after_folds(tab, "#sec-phases details[data-key='phases/p0']")
+    tab.reload()
     settle(tab)
     assert comments(tab, "sec-phases") == {"labels": ["Show all comments"], "open": [True, False, False]}
     tab.locator(summaries).nth(1).evaluate("(el) => el.click()")
