@@ -46,7 +46,19 @@ def test_a_bound_pull_request_names_its_own_half(started, capsys):  # noqa: F811
 
 def test_half_is_refused_on_an_unsplit_task(started, capsys):  # noqa: F811
     assert run("sw", "pr", FIRST, "--half", "1") != 0
-    assert "this task is not split: drop --half" in capsys.readouterr().err
+    assert capsys.readouterr().err.strip().endswith("this task is not split: drop --half")
+
+
+def test_swarm_done_reads_each_half_once(started, monkeypatch):  # noqa: F811
+    from scripts.swarm import cli
+    from scripts.swarm.ledger_events import PullRequest
+
+    _, ledger, _ = started
+    ledger.rows["t1"].update(split=["1-2", "3-4"], split_pulls=[FIRST, SECOND], pr_url=SECOND)
+    seen = []
+    monkeypatch.setattr(cli.ledger_events, "view", lambda url: seen.append(url) or PullRequest("MERGED", 1, 1, False))
+    assert run("sw", "done", "--pr", SECOND) == 0
+    assert (seen, ledger.rows["t1"]["state"]) == ([SECOND, FIRST], "done")
 
 
 def test_swarm_pr_past_the_last_half_is_refused(started, capsys):  # noqa: F811

@@ -1132,14 +1132,14 @@ def cmd_pr(store, args):
     fields = {"pr_url": args.url, "state": "pr", "awaiting": awaiting, **branch}
     ledger = LedgerClient()
     doc = ledger.state(args.slug)
-    row = next((t for t in doc.get("tasks", []) if t.get("id") == agent.task), {})
+    row = next(t for t in doc["tasks"] if t.get("id") == agent.task)
     fields.update(_split_binding(row, args.url, args.half))
     checked = intent.stamp(args.slug, agent.task, args.url, doc, intent.mode_of(config), now_ms())
     ledger.update_task(args.slug, agent.task, fields, by=agent.name)
     print(json.dumps({"task": agent.task, "pr_url": args.url, **branch, "intent": checked}))
 
 
-def _split_binding(row, url, half=0):
+def _split_binding(row, url, half):
     pulls, halves = row.get("split_pulls") or [], row.get("split") or []
     if not halves:
         if half:

@@ -107,6 +107,7 @@ def test_a_malformed_split_is_refused(halves, reason):
     "op, reason",
     [
         ({"by": "operator"}, "task_split by: an agent name"),
+        ({"by": "1 master"}, "task_split by: an agent name"),
         ({"item": "phases/p1"}, "task_split fields: id, by, item tasks/<id>, halves"),
         ({"extra": 1}, "task_split fields: id, by, item tasks/<id>, halves"),
     ],
@@ -158,6 +159,11 @@ def test_a_split_covers_the_task_plan_lines_exactly(halves, reason):
 
 def test_a_task_without_plan_lines_takes_any_ordered_split():
     assert ledger_splits.refusal({"kind": "code"}, ["1-2", "9-9"]) == ""
+
+
+def test_a_split_takes_up_to_four_halves():
+    op = {"op": "task_split", "id": "s", "by": MASTER, "item": "tasks/t1", "halves": ["1-2", "3-4", "5-6", "7-8"]}
+    assert ledger_splits.check(op) is None
 
 
 def test_the_ledger_refuses_a_split_that_misses_plan_lines(monkeypatch):

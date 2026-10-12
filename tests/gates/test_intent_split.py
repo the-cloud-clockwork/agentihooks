@@ -43,6 +43,14 @@ def test_the_next_unbound_pull_request_takes_the_next_half(planned):  # noqa: F8
     assert intent.state_of(doc, doc["tasks"][0], PR)["plan_lines"] == "17-17"
 
 
+def test_the_task_text_names_every_other_half():
+    task = {"description": "Three halves.", "pr_url": SECOND, "split": ["1-2", "3-4", "5-5"], "split_pulls": [FIRST]}
+    assert intent._split_note(task) == (
+        "\n\nThis pull request is half 2 of 3 of a split task: it carries only plan lines 3-4; "
+        "half 1 carries plan lines 1-2; half 3 carries plan lines 5-5 in its own pull request."
+    )
+
+
 def test_a_pull_request_past_the_last_half_is_judged_on_the_whole_task(planned):  # noqa: F811
     third = "https://github.com/o/r/pull/11"
     doc = split(planned, pr_url=third, pulls=[FIRST, SECOND])

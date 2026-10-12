@@ -746,7 +746,7 @@ def _merge_target(words):
 
 
 def _other_half(command, record):
-    judged = record and record.get("split") and PULL.search(record.get("url") or "")
+    judged = record and record.get("split") and PULL.search(record["url"])
     if not judged:
         return False
     for target in filter(None, map(_merge_target, simple_commands(command))):

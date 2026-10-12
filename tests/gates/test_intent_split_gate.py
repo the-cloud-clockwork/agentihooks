@@ -106,3 +106,5 @@ def test_merge_target_reads_the_first_pull_request_operand():
     assert intent._merge_target(["agentihooks", "swarm", SLUG, "merge", "queue", SECOND]) == SECOND
     assert intent._merge_target(["agentihooks", "swarm", SLUG, "done", "--pr", SECOND]) is None
     assert intent._merge_target(["git", "merge", "dev"]) is None
+    assert intent._merge_target(["gh", "pr", "view", "12"]) is None
+    assert intent._merge_target(["agentihooks", "swarm", SLUG, "merge", "state", SECOND]) is None
