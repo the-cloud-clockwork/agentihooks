@@ -9,7 +9,11 @@ from hooks.observability import agent_trace, otel, trace_flush, transcript
 
 
 class Receiver:
+    def __init__(self):
+        self.observations = {}
+
     def export(self, spans):
+        self.observations.update({span.context.span_id: span for span in spans})
         return SpanExportResult.SUCCESS
 
     def shutdown(self):
@@ -66,13 +70,14 @@ def test_deadline_checkpoints_a_growing_open_turn(tmp_path, monkeypatch):
     path.write_text("".join(json.dumps(record) + "\n" for record in source[:51]))
     assert trace_flush.flush_once("session", str(path)) == 0
     before = agent_trace._cursor("session")["source"]["accepted_bytes"]
+    assert before == path.stat().st_size
     with path.open("a") as handle:
         handle.write("".join(json.dumps(record) + "\n" for record in source[51:]))
     original = transcript.mask_value
 
     def slow_mask(value):
         if isinstance(value, str) and len(value) > 10000:
-            time.sleep(0.1)
+            time.sleep(0.2)
         return original(value)
 
     monkeypatch.setattr(transcript, "mask_value", slow_mask)
@@ -91,8 +96,8 @@ def test_deadline_checkpoints_a_growing_open_turn(tmp_path, monkeypatch):
     assert child.exitcode == 0
 
 
-@pytest.mark.parametrize("page_seconds", [1, 3])
-def test_retry_returns_with_checkpoint_before_its_deadline(monkeypatch, page_seconds):
+@pytest.mark.parametrize(("page_seconds", "timeout", "accepted"), [(1, 5, 3), (3, 5, 1), (0.1, 0.5, 3)])
+def test_retry_returns_with_checkpoint_before_its_deadline(monkeypatch, page_seconds, timeout, accepted):
     elapsed = [0.0]
     state = {"source": {"accepted_bytes": 0}, "overflow": {"bytes": 1}}
 
@@ -105,7 +110,94 @@ def test_retry_returns_with_checkpoint_before_its_deadline(monkeypatch, page_sec
     monkeypatch.setattr(trace_flush.time, "monotonic", lambda: elapsed[0])
     monkeypatch.setattr(agent_trace, "export_session", advance)
     monkeypatch.setattr(agent_trace, "_cursor", lambda session: state)
-    monkeypatch.setenv("AGENTIHOOKS_TRACE_FLUSH_ATTEMPT_TIMEOUT_SEC", "5")
+    monkeypatch.setenv("AGENTIHOOKS_TRACE_FLUSH_ATTEMPT_TIMEOUT_SEC", str(timeout))
     assert trace_flush.flush_once("session", "/transcript") == 1
-    assert 0 < state["source"]["accepted_bytes"] < 5
-    assert elapsed[0] < 5
+    assert state["source"]["accepted_bytes"] == accepted
+    assert elapsed[0] < timeout
+
+
+@pytest.fixture
+def exporter(tmp_path, monkeypatch):
+    receiver = Receiver()
+    monkeypatch.setattr(agent_trace, "CURSOR_DIR", tmp_path / "cursor")
+    monkeypatch.setattr(agent_trace, "_root_attributes", lambda session: {})
+    monkeypatch.setattr(agent_trace, "_collector_outcomes", lambda *args: None)
+    monkeypatch.setattr(otel, "langfuse_exporter", lambda: receiver)
+    return receiver
+
+
+def test_revised_record_updates_its_cached_observation(tmp_path, exporter):
+    source = list(records(1))
+    path = tmp_path / "source.jsonl"
+    path.write_text("".join(json.dumps(record) + "\n" for record in source))
+    agent_trace.export_session("session", str(path))
+    source[-1]["message"]["content"][0]["content"] = "updated output"
+    path.write_text("".join(json.dumps(record) + "\n" for record in source))
+    agent_trace.export_session("session", str(path))
+    tool = exporter.observations[agent_trace._span_id("session", "tool-0")]
+    assert tool.attributes["langfuse.observation.output"] == "updated output"
+
+
+def test_paging_bounds_the_durable_source_cache(tmp_path, exporter):
+    source = list(records(1))
+    source.extend(
+        [
+            {
+                "type": "user",
+                "uuid": "prompt-2",
+                "timestamp": "2026-10-12T10:01:00Z",
+                "message": {"content": "next prompt"},
+            },
+            {
+                "type": "assistant",
+                "uuid": "assistant-2",
+                "timestamp": "2026-10-12T10:01:00Z",
+                "message": {"id": "generation-2", "content": "next answer"},
+            },
+        ]
+    )
+    path = tmp_path / "source.jsonl"
+    path.write_text("".join(json.dumps(record) + "\n" for record in source))
+    assert trace_flush.flush_once("session", str(path)) == 0
+    state = agent_trace._cursor("session")
+    assert set(state["source_revisions"]) == {"prompt-2", "assistant-2"}
+    assert state["source"]["accepted_bytes"] == path.stat().st_size
+
+
+@pytest.mark.parametrize(("first_bytes", "accepted"), [(262143, "all"), (262144, "first")])
+def test_source_page_checkpoint_at_the_byte_boundary(tmp_path, exporter, first_bytes, accepted):
+    source = list(records(1))[0]
+    source["message"]["content"] = ""
+    size = len((json.dumps(source) + "\n").encode())
+    source["message"]["content"] = "p" * (first_bytes - size)
+    line = json.dumps(source) + "\n"
+    next_line = (
+        json.dumps(
+            {
+                "type": "user",
+                "uuid": "prompt-2",
+                "timestamp": "2026-10-12T10:01:00Z",
+                "message": {"content": "next prompt"},
+            }
+        )
+        + "\n"
+    )
+    path = tmp_path / "source.jsonl"
+    path.write_text(line + next_line)
+    agent_trace.export_session("session", str(path))
+    expected = first_bytes if accepted == "first" else path.stat().st_size
+    assert agent_trace._cursor("session")["source"]["accepted_bytes"] == expected
+    assert trace_flush.flush_once("session", str(path)) == 0
+    assert agent_trace._cursor("session")["source"]["accepted_bytes"] == path.stat().st_size
+
+
+def test_attempt_passes_its_custom_budget_to_the_child(monkeypatch):
+    received = []
+
+    def run(command, env, timeout):
+        received.append((trace_flush.budget(env).attempt_timeout, timeout))
+        return trace_flush.subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(trace_flush.subprocess, "run", run)
+    assert trace_flush.attempt("session", "/source", 0.5, "interval")
+    assert received == [(0.5, 0.5)]

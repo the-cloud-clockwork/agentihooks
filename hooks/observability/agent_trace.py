@@ -965,8 +965,11 @@ def _page_accepted(session_id: str, state: dict) -> None:
     for span_id in full["spans"] - rest["spans"]:
         del state["accepted"][f"{span_id:016x}"]
     state["records"] = {keys[index]: values[index] for index in kept}
-    for name in ("accepted_records", "pending_records", "source_revisions"):
-        state[name] = {key: value for key, value in state.get(name, {}).items() if key in state["records"]}
+    for name in ("accepted_records", "pending_records"):
+        state[name] = {key: value for key, value in state[name].items() if key in state["records"]}
+    state["source_revisions"] = {
+        key: value for key, value in state["source_revisions"].items() if key in state["records"]
+    }
     state["paged"] = target
 
 
