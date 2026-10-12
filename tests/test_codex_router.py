@@ -688,6 +688,7 @@ def test_a_bearer_child_carries_its_token_and_account_id_and_runs_the_bearer_pro
         (["--image", "first.png", "second.png", "--model", "chosen-model", "exec", "probe"], 5),
         (["-ifirst.png", "second.png", "-m", "chosen-model", "e", "--", "-"], 4),
         (["--image=first.png", "--model", "chosen-model", "exec", "probe"], 3),
+        (["--image=first.png", "second.png", "--model", "chosen-model", "exec", "probe"], 4),
         (["-i", "first.png", "exec"], None),
         (["--image"], None),
     ],
