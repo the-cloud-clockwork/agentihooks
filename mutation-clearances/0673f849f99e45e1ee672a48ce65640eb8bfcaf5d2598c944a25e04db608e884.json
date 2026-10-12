@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/stages.py:scripts.swarm.stages.x_timelines__mutmut_4:9d5825b2048efd6a2b367de790f01b2dc6b425ca3c38734430838d972d909c27": {
+    "reader": "standards_reader",
+    "reason": "Replaces NO_FIX_PHASE with None in the fallback readiness of timelines. That fallback doc holds only the tasks, so it has no freezes and no watched focus, and freeze.exempt tests the fix phase only for truth. None and the empty string both mean no fix phase, so every readiness answer is identical."
+  }
+}

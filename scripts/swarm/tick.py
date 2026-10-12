@@ -844,6 +844,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
         store.redis.hdel(store.key(slug, "launch-assignments"), task["id"])
         profile_first.spawned(slug, store, task["id"])
         actions.append(f"spawned {name} for {task['id']}")
+        actions += dispatcher.chain_claimed(slug, config, ledger, doc, task, lane, now_ms)
     return actions
 
 

@@ -388,6 +388,11 @@ urgent task never skips a dependency that is not done and never takes a task or 
 Among open tasks whose territories overlap, the higher rank claims first. The rank is read from the ledger on every
 pass, so a change applies on the next tick.
 
+At `delegate` and `full` autonomy the dispatcher guards the critical chain: when a task on the longest open
+dependency chain among the work no freeze or focus holds merges, its claimable successor takes the next free seat in its lane ahead of every rank, resumed
+work and territory order, in the tick that reads the merge. The dispatcher then comments on that task with the
+seconds from the merge to the claim and logs a `chain-guard` row.
+
 Set it with `agentihooks ledger task add ... --rank R` or `task set ID rank=R`, or from the select on each task row
 of the ledger page, which lists open tasks in claim order. The master, a planner and the operator may set it; an
 engineer or CI agent is refused and proposes the change as a follow up. The queue rank is separate from the
