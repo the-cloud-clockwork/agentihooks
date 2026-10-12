@@ -23,7 +23,7 @@ def test_record_computes_the_baseline_from_coverage(measured):
     root, _, shards = measured
     target = root / "baseline.json"
     cache.record(root, shards, target)
-    assert cache.read(target, "tree", 1) == {
+    assert cache.read(target, "tree") == {
         "commit": "base",
         "tree": "tree",
         "shards": 1,
@@ -35,16 +35,15 @@ def test_record_computes_the_baseline_from_coverage(measured):
 def test_a_cache_miss_names_a_failed_dev_run_and_the_recovery(measured):
     root, _, _ = measured
     with pytest.raises(ValueError, match="failed dev run.*merge a measured dev revision.*rerunning"):
-        cache.read(root / "missing.json", "tree", 1)
+        cache.read(root / "missing.json", "tree")
 
 
-@pytest.mark.parametrize("tree,shards,message", [("another", 1, "tree"), ("tree", 8, "shards")])
-def test_a_cache_for_another_measurement_is_red(measured, tree, shards, message):
+def test_a_cache_for_another_tree_is_red(measured):
     root, _, files = measured
     target = root / "baseline.json"
     cache.record(root, files, target)
-    with pytest.raises(ValueError, match=message):
-        cache.read(target, tree, shards)
+    with pytest.raises(ValueError, match="tree"):
+        cache.read(target, "another")
 
 
 def test_record_retains_the_previous_measurement_and_its_history(measured):

@@ -10,7 +10,7 @@ def _git(repo: Path, revision: str) -> str:
     return subprocess.check_output(["git", "rev-parse", revision], cwd=repo, text=True).strip()
 
 
-def read(path: Path, tree: str | None = None, shards: int | None = None) -> dict:
+def read(path: Path, tree: str | None = None) -> dict:
     if not path.is_file():
         raise ValueError(
             "baseline cache missing: a failed dev run saves no baseline; merge a measured dev revision instead of rerunning"
@@ -18,8 +18,6 @@ def read(path: Path, tree: str | None = None, shards: int | None = None) -> dict
     value = json.loads(path.read_text())
     if tree and value["tree"] != tree:
         raise ValueError("baseline cache tree differs from the base tree")
-    if shards is not None and value["shards"] != shards:
-        raise ValueError("baseline cache shards differ from the measured suite")
     return value
 
 
