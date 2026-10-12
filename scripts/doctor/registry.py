@@ -5,12 +5,14 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import datetime, timezone
 from pathlib import Path
 
 ACTIVE = "working"
 TRACES_LIMIT = 5
 ATTEMPTS = 2
+WORKERS = 8
 WINDOW_BYTES = 1 << 20
 CORRELATION = "agentihooks.correlation."
 REMOTE_FIELDS = {
@@ -175,6 +177,17 @@ def _read_binding(get, slug: str, binding: dict, marks: dict, kept: dict, page: 
     }
 
 
+def _attempts(get, slug: str, binding: dict, marks: dict, page: int) -> tuple[dict, dict, str | None]:
+    error = None
+    for _ in range(ATTEMPTS):
+        kept: dict = {}
+        try:
+            return _read_binding(get, slug, binding, marks, kept, page), kept, None
+        except Exception as exc:  # noqa: BLE001
+            error = f"active read of {binding['agent']} failed: {type(exc).__name__}: {exc}"
+    return {"read": False, "traces": [], "remote": None}, {}, error
+
+
 def read(
     slug: str,
     agents: list[dict],
@@ -187,17 +200,23 @@ def read(
     """Every active binding with its local progress and, inside the read budget, its Langfuse traces and freshness."""
     deadline = clock() + seconds
     marks, kept, failures, found = state.get("marks", {}), {}, [], []
-    for binding in bindings(agents):
-        remote, error = {"read": False, "traces": [], "remote": None}, None
-        for _ in range(ATTEMPTS):
-            if clock() >= deadline:
-                error = error or f"active read budget of {seconds:g} seconds spent before {binding['agent']}"
-                break
-            try:
-                remote, error = _read_binding(get, slug, binding, marks, kept, page), None
-                break
-            except Exception as exc:  # noqa: BLE001
-                error = f"active read of {binding['agent']} failed: {type(exc).__name__}: {exc}"
+    active = bindings(agents)
+    pool = ThreadPoolExecutor(max_workers=WORKERS)
+    futures = []
+    for binding in active:
+        if clock() >= deadline:
+            break
+        futures.append(pool.submit(_attempts, get, slug, binding, marks, page))
+    if futures:
+        wait(futures, timeout=max(0.0, deadline - clock()))
+    pool.shutdown(wait=False, cancel_futures=True)
+    for index, binding in enumerate(active):
+        if index < len(futures) and futures[index].done():
+            remote, marked, error = futures[index].result()
+            kept.update(marked)
+        else:
+            remote = {"read": False, "traces": [], "remote": None}
+            error = f"active read budget of {seconds:g} seconds spent before {binding['agent']}"
         merged = {**binding, **remote, "local": None}
         try:
             merged["local"] = progress(merged["session_id"], merged["harness"]) if merged["session_id"] else None
