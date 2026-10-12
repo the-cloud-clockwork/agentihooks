@@ -137,3 +137,13 @@ def test_a_failed_refresh_never_stops_a_codex_launch(monkeypatch, tmp_path, caps
     assert codex_router.main([], environ=environ, execvpe=lambda *args: launched.append(1)) == 0
     assert launched == [1]
     assert "[agentihooks codex] hook wrapper refresh skipped: linked bundle is missing\n" in capsys.readouterr().err
+
+
+def test_a_failed_refresh_never_stops_deps_ensure(monkeypatch, capsys):
+    def broken():
+        raise ValueError("Profile 'wr-role' not found")
+
+    monkeypatch.setattr(codex_target, "refresh_wrapper", broken)
+    monkeypatch.setattr("scripts.skill_links.repair", lambda: None)
+    assert deps_preflight.ensure(quiet=True) == 0
+    assert "[agentihooks deps] hook wrapper refresh skipped: Profile 'wr-role' not found\n" in capsys.readouterr().err

@@ -107,6 +107,38 @@ def _stale_catalog_files() -> tuple[Path, Path]:
     return AGENTIHOOKS_HOME / "codex_model_catalog.json", AGENTIHOOKS_HOME / "codex_context_highwater.json"
 
 
+def wrapper_text(profile_env: dict[str, str]) -> str:
+    _i = _install_module()
+    return (
+        "#!/usr/bin/env bash\n"
+        "# managed-by: agentihooks — regenerate with: agentihooks init --target codex\n"
+        "set -euo pipefail\n"
+        f"cd {shlex.quote(str(_i.AGENTIHOOKS_ROOT))}\n"
+        + "".join(f'export {key}="${{{key}:={shlex.quote(value)}}}"\n' for key, value in profile_env.items())
+        + f"AGENTIHOOKS_TARGET=codex exec {shlex.quote(str(_i._detect_venv() or sys.executable))} -m hooks\n"
+    )
+
+
+def refresh_wrapper() -> bool:
+    _i = _install_module()
+    record = _i._global_record(_i._load_state(), "codex")
+    wrapper = codex_home() / "agentihooks-hook.sh"
+    if not record.get("profile") or not wrapper.is_file():
+        return False
+    if _i.AGENTIHOOKS_ROOT.resolve() != _i.install_root().resolve():
+        return False
+    name = record.get("settings_profile")
+    overlay = _i._resolve_profile_dir(name) if name else None
+    chain = _i._resolve_profile_chain(record["profile"])
+    native = _i._native_settings("codex", chain, (name, overlay) if overlay else None, say=lambda *_: None)
+    text = wrapper_text(native.get("_agentihooks", {}).get("env", {}))
+    if wrapper.read_text() == text:
+        return False
+    _atomic_write(wrapper, text)
+    wrapper.chmod(0o755)
+    return True
+
+
 def _is_ours(group: object, wrapper: Path) -> bool:
     hooks = group.get("hooks") if isinstance(group, dict) else None
     return isinstance(hooks, list) and any(
@@ -332,17 +364,7 @@ class CodexAdapter:
     def _write_hooks_json(self, home: Path, profile_env: dict[str, str] | None = None) -> None:
         _i = _install_module()
         wrapper = home / "agentihooks-hook.sh"
-        python_bin = str(_i._detect_venv() or sys.executable)
-        wrapper.write_text(
-            "#!/usr/bin/env bash\n"
-            "# managed-by: agentihooks — regenerate with: agentihooks init --target codex\n"
-            "set -euo pipefail\n"
-            f"cd {shlex.quote(str(_i.AGENTIHOOKS_ROOT))}\n"
-            + "".join(
-                f'export {key}="${{{key}:={shlex.quote(value)}}}"\n' for key, value in (profile_env or {}).items()
-            )
-            + f"AGENTIHOOKS_TARGET=codex exec {shlex.quote(python_bin)} -m hooks\n"
-        )
+        wrapper.write_text(wrapper_text(profile_env or {}))
         wrapper.chmod(0o755)
 
         hooks_path = home / "hooks.json"
