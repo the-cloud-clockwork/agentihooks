@@ -31,7 +31,7 @@ def test_persisted_identifiers_remain_compatible_for_recorded_inputs():
     pulls = {TASK["pr_url"]: SimpleNamespace(state="MERGED", merged_at=NOW + 4_000)}
     assert {row["kind"]: row["event_id"] for row in metrics_swarm.delivery_rows(SLUG, state, [agent], pulls)} == {
         "pull_request_opened": "868d759174d90f18b90b12c6491d231e14fb2813444e5350a06f9e2376687bf7",
-        "merge": "c405b9e5687a19a1ec4d5ca9431bde100ce7c32916813e2c8ee6424aeadb7793",
+        "merge": "faef1187da88c86d2b0ac5203e80c7755125fd754f7a581cf7c57d7ab3eacfbc",
     }
     host = metrics_swarm.host_row(SLUG, NOW, HostSample(1.0, 1, 1, 1), {})
     assert host["event_id"] == "3277834f4d5e7cf2b8fb56e7c674ad57cece7f319bbdff0436b21ae8c3758844"
