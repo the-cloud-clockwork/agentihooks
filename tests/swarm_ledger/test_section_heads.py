@@ -86,8 +86,19 @@ def rendered(page):
 
 
 @pytest.fixture
-def tab(browser):
+def tab(browser, request):
     context, page = open_page(browser, DOC)
+    if getattr(request, "param", 0):
+        page.evaluate(
+            """(delay) => {
+              for (const el of document.querySelectorAll("[id$='-count']")) {
+                const text = el.textContent;
+                el.textContent = "";
+                setTimeout(() => { el.textContent = text; }, delay);
+              }
+            }""",
+            request.param,
+        )
     yield page
     context.close()
 
@@ -114,6 +125,7 @@ def settle(tab):
     tab.wait_for_timeout(50)
 
 
+@pytest.mark.parametrize("tab", [0, 250], indirect=True)
 def test_every_header_shows_its_counts_folded_and_open(tab):
     assert counts(tab) == EXPECTED
     for box in SECTIONS:

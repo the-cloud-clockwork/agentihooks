@@ -13,7 +13,7 @@ browser = chromium_browser
 
 
 @pytest.fixture
-def image_page(browser):
+def image_page(browser, request):
     tab = browser.new_page(viewport={"width": 1440, "height": 900})
     images = [
         {"id": "a" * 64 + ".png", "width": 1280, "height": 720},
@@ -27,16 +27,24 @@ def image_page(browser):
     show(tab, html, ledger=ledger_state(doc))
     tab.locator("#item-phases-p1 details[data-key]").evaluate("el => el.open = true")
     for image in tab.locator(".attach-row img").all():
+        source = (
+            "data:image/png;base64,"
+            + base64.b64encode(png(int(image.get_attribute("width")), int(image.get_attribute("height")))).decode()
+        )
         image.evaluate(
-            "el => el.src = 'data:image/png;base64,' + "
-            + json.dumps(
-                base64.b64encode(png(int(image.get_attribute("width")), int(image.get_attribute("height")))).decode()
-            )
+            """(el, {source, delay}) => {
+              el.removeAttribute("src");
+              el.removeAttribute("width");
+              el.removeAttribute("height");
+              setTimeout(() => { el.src = source; }, delay);
+            }""",
+            {"source": source, "delay": getattr(request, "param", 0)},
         )
     yield tab
     tab.close()
 
 
+@pytest.mark.parametrize("image_page", [0, 250], indirect=True)
 @pytest.mark.parametrize("width", [1440, 390])
 def test_comment_images_are_small_thumbnails_that_keep_ratio_and_never_grow(image_page, width):
     tab = image_page
