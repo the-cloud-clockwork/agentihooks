@@ -1,0 +1,6 @@
+{
+  "scripts/init_agent.py:scripts.init_agent.x__parser__mutmut_39:78b16b3cacb6e07cef23a1b6cc6229b28d46a6acf02ba9866c796543b0918127": {
+    "reader": "Standards reader for cxc2",
+    "reason": "Only the --previous-execution help text has its first letter lowercased, shown only by --help and read by no program or test."
+  }
+}

@@ -328,7 +328,8 @@ def test_set_names_every_key_it_takes_and_every_level(env, capsys):  # noqa: F81
     assert (
         "autonomy=manual|assist|delegate|full, effort-min=E, effort-max=E, claude-model=M, codex-model=M, "
         "scaling=auto|manual, "
-        "load-high=N, load-low=N, memory-per-agent=MB, api-url=URL or eng-role, "
+        "load-high=N, load-low=N, memory-per-agent=MB, api-url=URL, codex-inbox-transport=legacy|app_server "
+        "or eng-role, "
     ) in err
     assert run("sw", "set", "effort-min=huge") == 1
     assert "one of low, medium, high, xhigh, max, Codex running max as xhigh" in capsys.readouterr().err

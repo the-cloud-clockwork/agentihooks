@@ -8,10 +8,10 @@ from uuid import uuid4
 
 from scripts.inbox.seats import is_seat
 
-IMMUTABLE = ("execution_id", "generation", "name", "lane", "task", "seat", "started_at", "runtime_backend")
+IMMUTABLE = ("execution_id", "generation", "name", "lane", "task", "seat", "started_at", "runtime_backend", "transport")
 WRITE_ATTEMPTS = 5
 EXECUTION_FIELDS = ("execution_id", "generation", "runtime_backend", "runtime_target")
-PROJECTION_OMITTED = (*EXECUTION_FIELDS, "hive")
+PROJECTION_OMITTED = (*EXECUTION_FIELDS, "hive", "transport")
 
 
 if TYPE_CHECKING:
@@ -82,6 +82,7 @@ class ExecutionRegistry:
             if name in latest:
                 row.update({field: latest[name][field] for field in EXECUTION_FIELDS})
                 row["hive"] = latest[name].get("hive", "")
+                row["transport"] = latest[name].get("transport", "")
             result.append(AgentRecord(**row))
         return result
 

@@ -26,6 +26,7 @@ from scripts.routing.slots import API, API_UNBOUNDED, INTERACTIVE, SUBSCRIPTION,
 
 if TYPE_CHECKING:
     from scripts.routing.master_account import MasterAccount
+    from scripts.routing.reservation import Reservation
 
 TOKEN_PREFIX = "AH_CC_TOKEN_"
 HARNESS = "claude"
@@ -104,6 +105,7 @@ class RouteDecision:
 class RowMarks:
     current: str = ""
     master: "MasterAccount | None" = None
+    reserved: str = ""
 
 
 class RoutingError(RuntimeError):
@@ -690,6 +692,7 @@ class ClaudeTokenSource:
     options: Mapping[str, Any] = field(default_factory=dict)
     sessions: Mapping[str, int] = field(default_factory=dict)
     exclude: frozenset[str] = frozenset()
+    held: "Reservation | None" = None
 
     def results(self, environ: Mapping[str, str], now: float | None = None) -> tuple[list[ProbeResult], str]:
         credentials = discover_credentials(environ)
@@ -699,6 +702,8 @@ class ClaudeTokenSource:
         return collect_results(credentials, **self.options, environ=environ, **timing)
 
     def cap(self, result: ProbeResult, now: float) -> int | None:
+        if self.held is not None and self.held.closes(result.account, result.seven_day.used):
+            return 0
         return account_cap(result, now, bool(self.options.get("include_fable")))
 
     def offer(self, results: list[ProbeResult], now: float) -> list[Slot]:
@@ -744,7 +749,9 @@ def select_credential(
         "cache_file": cache_file,
         "claude_bin": claude_bin,
     }
-    tokens = ClaudeTokenSource(options, live, frozenset(excluded))
+    from scripts.routing import reservation
+
+    tokens = ClaudeTokenSource(options, live, frozenset(excluded), reservation.for_worker(HARNESS, active_env))
     results, source = tokens.results(active_env)
     seats = tokens.offer(results, timestamp)
     reserve = {
@@ -960,6 +967,8 @@ def render_table(
     errors = [f"{result.account}: {result.error}" for result in rank_results(results, include_fable) if result.error]
     if errors:
         lines.extend(["", *errors])
+    if master and marks.reserved:
+        lines.extend(["", f"{master.slug}: {marks.reserved}"])
     known = {result.account for result in results} | {slot.account for slot in api}
     known |= {interactive.slug} if interactive else set()
     unlisted = {account: count for account, count in (sessions or {}).items() if account not in known}

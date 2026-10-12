@@ -74,5 +74,7 @@ def load(environ: Mapping[str, str]) -> dict[str, MasterAccount]:
 
 def row_marks(current: str = "", environ: Mapping[str, str] = os.environ) -> "RowMarks":
     from scripts.claude_quota_balancer import RowMarks
+    from scripts.routing import reservation
 
-    return RowMarks(current, load(environ).get("claude"))
+    held = reservation.current("claude", environ)
+    return RowMarks(current, load(environ).get("claude"), held.reason if held else "")
