@@ -330,7 +330,7 @@ def test_task_read_appends_the_linked_cases_after_the_slice(tmp_path, monkeypatc
     SQLiteLedgerRepository(tmp_path / DATABASE).import_document("linked", {**doc, "_meta": {"rev": 1}})
     rows = LINKED_PLAN.splitlines()
     margin = "".join(f"{row}\n" for row in rows[:16])
-    assert run(capsys, ["--task", "w1"], {"AGENTIHOOKS_SWARM": "linked"}) == f"{margin}\n{CASE_A}\n{CASE_B}\n{CASE_C}"
+    assert run(capsys, ["--task", "w1"], {"AGENTIHOOKS_SWARM": "linked"}) == f"{margin}\n#### Detail\n- a detail\n\n{CASE_B}\n{CASE_C}"
     assert run(capsys, ["--task", "head"], {"AGENTIHOOKS_SWARM": "linked"}) == "".join(f"{row}\n" for row in rows[:11])
     assert run(capsys, ["--phase", "p1"], {"AGENTIHOOKS_SWARM": "linked"}) == LINKED_PLAN
 
@@ -340,4 +340,4 @@ def test_swarm_v2_package_read_appends_the_linked_cases(monkeypatch):
 
     plan = "## 1. One\n## 2. Two\n## 3. Three\n" + LINKED_PLAN.replace("# Plan\n", "")
     monkeypatch.setattr(plan_packages, "text", lambda: plan)
-    assert plan_packages.read("5-8").endswith(f"\n{CASE_A}\n{CASE_B}\n{CASE_C}")
+    assert plan_packages.read("5-8").endswith(f"\n#### Detail\n- a detail\n\n{CASE_B}\n{CASE_C}")
