@@ -121,3 +121,18 @@ def test_local_mode_keeps_the_original_spawn_call(setup):
     setup.herdr.spawn.assert_called_once_with(
         setup.config, "eng", "name", {**task, "controller_epoch": setup.held.epoch}
     )
+
+
+@pytest.mark.parametrize("deployment", ["compose", "hybrid", "distributed"])
+def test_nonlocal_controller_routes_worker_lanes_through_hives(setup, deployment):
+    from scripts.swarm.controller import FencedRuntime
+    from scripts.swarm_v2.runtime.base import RuntimeRouter
+    from scripts.swarm_v2.runtime.routed import RoutedRuntime
+
+    routed = RoutedRuntime(setup.herdr, RuntimeRouter([]))
+    fenced = FencedRuntime(setup.store, setup.config.slug, setup.held, routed, deployment)
+    assert fenced.router.placement.backend == "hive"
+    assert fenced.has_capacity(setup.config)
+    assert fenced.placement_refusal("eng", {"id": "task"}) == ""
+    assert fenced.placement_refusal("master", {}) == "the workstation hive spawns master work"
+    setup.herdr.spawn.assert_not_called()
