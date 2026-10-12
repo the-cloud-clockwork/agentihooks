@@ -651,7 +651,10 @@ class InboxStore:
         pipe.zrem(self.key("pending", item.address), item.id)
         if last:
             pipe.srem(self.key("waiting"), item.address)
-        pipe.rpush(self.key("history", item.id), _entry(moved.state, by, moved.reason, moved.updated_at, moved.delivery_session))
+        pipe.rpush(
+            self.key("history", item.id),
+            _entry(moved.state, by, moved.reason, moved.updated_at, moved.delivery_session),
+        )
 
 
 def _index_current(indexed, size, total: int) -> bool:
