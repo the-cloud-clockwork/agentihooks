@@ -31,55 +31,64 @@ def test_line_names_the_detectors_first_stage_and_trend_over_alert_ratios(store)
     standing.fire(store.redis, "sw", "quota_hold", reading, NOW)
     standing.fire(store.redis, "sw", "claim_wait", standing.Reading(157, 4, "task hours in the window", "claim"), NOW)
     detect(store, ("claim_wait", 665404.0, "rising"), ("quota_hold", 216504.0, "falling"))
-    found = bottleneck_status.report(store, "sw")
-    assert (found["stage"], found["trend"], found["seconds"]) == ("claim_wait", "rising", 665404.0)
-    assert bottleneck_status.line(found) == "Top bottleneck claim wait; trend rising; last action none recorded"
+    found = bottleneck_status.report(store, "sw", NOW + 300_000)
+    assert (found["stage"], found["trend"], found["seconds"], found["measured_at"]) == (
+        "claim_wait",
+        "rising",
+        665404.0,
+        NOW,
+    )
+    assert bottleneck_status.line(found) == (
+        "Top bottleneck claim wait; trend rising; measured 5 minutes ago; last action none recorded"
+    )
 
 
 def test_trend_is_unknown_only_before_the_detector_runs(store):
-    assert bottleneck_status.report(store, "sw") == {
+    assert bottleneck_status.report(store, "sw", NOW) == {
         "stage": "",
         "label": "none",
         "trend": "unknown",
         "seconds": 0.0,
+        "measured_at": 0,
+        "measured": "never",
         "last_action": "none recorded",
         "action_at": 0,
     }
     detect(store, ("build", 0.0, "falling"))
-    found = bottleneck_status.report(store, "sw")
+    found = bottleneck_status.report(store, "sw", NOW)
     assert (found["stage"], found["label"], found["trend"]) == ("", "none", "none")
 
 
 def test_action_is_per_stage_and_survives_reading_updates(store):
     detect(store, ("ci_overrun", 3600.0, "rising"))
     bottleneck_status.record_action(store, "sw", "build", "Added a seat", NOW)
-    assert bottleneck_status.report(store, "sw")["last_action"] == "none recorded"
+    assert bottleneck_status.report(store, "sw", NOW)["last_action"] == "none recorded"
     bottleneck_status.record_action(store, "sw", "ci_overrun", "Proposed a faster mutation run", NOW)
     detect(store, ("ci_overrun", 7200.0, "rising"))
-    report = bottleneck_status.report(store, "sw")
+    report = bottleneck_status.report(store, "sw", NOW)
     assert report["last_action"] == "Proposed a faster mutation run"
     assert report["action_at"] == NOW
 
 
 def test_each_top_transition_sends_one_master_item_and_repeats_send_none(store):
-    assert bottleneck_status.refresh("sw", store) == []
+    assert bottleneck_status.refresh("sw", store, NOW) == []
     detect(store, ("ci_overrun", 3600.0, "rising"))
-    bottleneck_status.refresh("sw", store)
-    bottleneck_status.refresh("sw", store)
+    bottleneck_status.refresh("sw", store, NOW)
+    bottleneck_status.refresh("sw", store, NOW)
     detect(store, ("build", 7200.0, "rising"), ("ci_overrun", 3600.0, "falling"))
-    bottleneck_status.refresh("sw", store)
-    bottleneck_status.refresh("sw", store)
+    bottleneck_status.refresh("sw", store, NOW)
+    bottleneck_status.refresh("sw", store, NOW)
     detect(store, ("ci_overrun", 3600.0, "unchanged"))
-    bottleneck_status.refresh("sw", store)
+    bottleneck_status.refresh("sw", store, NOW)
     detect(store)
-    bottleneck_status.refresh("sw", store)
-    bottleneck_status.refresh("sw", store)
+    bottleneck_status.refresh("sw", store, NOW)
+    bottleneck_status.refresh("sw", store, NOW)
     items = InboxStore(store.redis).pending_mail("master@sw")
     assert [item.text for item in items] == [
-        "Top bottleneck ci overrun; trend rising; last action none recorded",
-        "Top bottleneck build; trend rising; last action none recorded",
-        "Top bottleneck ci overrun; trend unchanged; last action none recorded",
-        "Top bottleneck none; trend none; last action none recorded",
+        "Top bottleneck ci overrun; trend rising; measured 0 minutes ago; last action none recorded",
+        "Top bottleneck build; trend rising; measured 0 minutes ago; last action none recorded",
+        "Top bottleneck ci overrun; trend unchanged; measured 0 minutes ago; last action none recorded",
+        "Top bottleneck none; trend none; measured 0 minutes ago; last action none recorded",
     ]
     assert len({item.ref for item in items}) == 4
     assert {item.sender for item in items} == {"swarm"}
@@ -101,8 +110,8 @@ def test_interrupted_notification_commit_retries_without_duplicates(store, monke
     with monkeypatch.context() as patch:
         patch.setattr(pipeline_type, "execute", interrupted)
         with pytest.raises(ConnectionError):
-            bottleneck_status.refresh("sw", store)
-    bottleneck_status.refresh("sw", store)
+            bottleneck_status.refresh("sw", store, NOW)
+    bottleneck_status.refresh("sw", store, NOW)
     assert len(InboxStore(store.redis).pending_mail("master@sw")) == 1
     assert bottleneck_status.read(store, "sw")["transition"] == 1
 
@@ -120,7 +129,7 @@ def test_status_json_and_text_share_the_detectors_stage_trend_and_action(env, mo
     cli.cmd_status(store, SimpleNamespace(slug="sw", json=False))
     out = capsys.readouterr().out
     assert "top stages in the last 4 hours: claim wait 2.0 task hours (rising)" in out
-    assert "Top bottleneck claim wait; trend rising; last action Added a seat" in out
+    assert "Top bottleneck claim wait; trend rising; measured 0 minutes ago; last action Added a seat" in out
 
 
 def test_tick_delivers_new_metric_stage_once_before_status_publication(env, monkeypatch):
