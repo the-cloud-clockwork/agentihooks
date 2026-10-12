@@ -291,7 +291,7 @@ def test_linked_appends_each_anchored_section_once_in_link_order():
     ("source", "lines", "margin", "expected"),
     [
         ('[A](#a)\n<a id="a"></a>\n### A\nbody\n', "1-1", 3, ""),
-        ('<a id="a"></a>\n### A\nfirst\nlast\n### Work\n[A](#a)\n', "6-6", 3, "\n### A\nfirst\n"),
+        ('<a id="a"></a>\n### A\nfirst\nlast\n### Work\n[A](#a)\n', "6-6", 2, "\n### A\nfirst\n"),
         (
             '[A](#a) [B](#b)\n<a id="a"></a>\n### A\nsame\n<a id="b"></a>\n#### B\nsame\n',
             "1-1",
