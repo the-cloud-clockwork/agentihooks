@@ -71,3 +71,24 @@ def test_three_swarm_retirements_allow_a_fourth_claim(store, ending):  # noqa: F
     assert [task for _, _, task in runtime.spawned] == ["t1"] * 4
     assert ledger.rows["t1"]["state"] == "claimed"
     assert store.claims("sw", "t1") == 1
+
+
+@pytest.mark.parametrize("ending", ["idle", "stop"])
+def test_retirement_does_not_refund_an_already_reset_claim(store, ending):  # noqa: F811
+    from scripts.swarm.cli import stop_now
+    from scripts.swarm.tick import IDLE_KILL_TICKS
+
+    ledger, runtime = CommentingLedger([{"id": "t1"}]), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    agent = workers(store)[0]
+    store.reset_claims("sw", "t1")
+    store.update("sw", state="paused")
+    if ending == "stop":
+        stop_now(store, "sw", runtime, ledger)
+    else:
+        runtime.statuses[agent.name] = "idle"
+        store.put_agent("sw", replace(agent, idle_ticks=IDLE_KILL_TICKS - 1))
+        tick("sw", store, ledger, runtime, now_ms=3_000)
+    assert store.claims("sw", "t1") == 0
+    assert agent.name in runtime.killed
