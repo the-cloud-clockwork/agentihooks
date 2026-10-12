@@ -46,11 +46,10 @@ def _claude(environ: dict, now: float) -> list[Account]:
     counts = account_sessions.sessions_by_account()
     rows = []
     for at, result in observed.values():
-        cap = (
-            tokens.cap(result, now)
-            if environ.get(f"{balancer.TOKEN_PREFIX}{result.account}") and session_bands.fresh(at, now)
-            else None
-        )
+        token = environ.get(f"{balancer.TOKEN_PREFIX}{result.account}")
+        if not token and not counts.get(result.account):
+            continue
+        cap = tokens.cap(result, now) if token and session_bands.fresh(at, now) else None
         five, week = _left(result.five_hour, now), _left(result.seven_day, now)
         reset = session_bands.upcoming(result.seven_day.resets_at, now)
         five_reset = session_bands.upcoming(result.five_hour.resets_at, now)
@@ -374,6 +373,14 @@ def _api_reason(row: Account) -> str:
     return f"; {LABELS[row.harness]} api is {row.state.lower()}{weight}"
 
 
+def _without_work(lanes: list[str]) -> str:
+    if not lanes:
+        return ""
+    if len(lanes) == 1:
+        return f"{lanes[0]} has no more ready tasks; "
+    return f"{', '.join(lanes[:-1])} and {lanes[-1]} have no more ready tasks; "
+
+
 def calculate(
     config,
     observations: list[Account],
@@ -395,7 +402,9 @@ def calculate(
     placeable = _placeable(open_rows)
     allocation, placements = _allocate(config, effective, limits, offered(observations, warned), requirements, accounts)
     restricted = sorted({row.state.lower() for row in observations if row.state != "OPEN" and row.kind != API})
-    reason = "accounts have quota" if not restricted else "accounts are " + ", ".join(restricted)
+    idle = [lane for lane in LANES if effective[lane] == limits[lane] < configured[lane]]
+    reason = _without_work(idle)
+    reason += "accounts have quota" if not restricted else "accounts are " + ", ".join(restricted)
     reason += f"; Claude has {placeable['claude']} free seats and Codex has {placeable['codex']} free seats"
     reason += "".join(f", {harness} {name} {warning(window)}" for (harness, name), window in warned.items())
     reason += "".join(_api_reason(row) for row in observations if row.kind == API)
