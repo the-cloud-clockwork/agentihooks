@@ -138,12 +138,12 @@ def test_worker_shards_charge_collection_once_per_file():
     from tests.shards import assign_nodes
 
     nodes = [f"tests/test_{name}.py::test_{case}" for name in "abc" for case in range(4)]
-    durations = dict.fromkeys(nodes, 0.01)
+    durations = dict.fromkeys(nodes, 0.0)
     sizes = {f"tests/test_{name}.py": size for name, size in zip("abc", (1_000_000, 1000, 1000))}
     parts = assign_nodes(durations, 2, {}, 4, sizes=sizes)
-    assert sorted({node.split("::")[0] for node in part} for part in parts) == [
-        {"tests/test_a.py"},
-        {"tests/test_b.py", "tests/test_c.py"},
+    assert sorted(sorted({node.split("::")[0] for node in part}) for part in parts) == [
+        ["tests/test_a.py"],
+        ["tests/test_b.py", "tests/test_c.py"],
     ]
     assert sorted(node for part in parts for node in part) == nodes
 
