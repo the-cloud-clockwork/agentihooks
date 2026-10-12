@@ -678,6 +678,24 @@ def test_the_doctor_fix_phase_reaches_the_guard_in_the_claim_key_and_the_chain_r
     assert dispatcher.chain_claimed(SLUG, config, ledger, found, claimed, "eng", NOW) == []
 
 
+def test_the_doctor_fix_phase_reaches_the_dispatcher_queue_its_position_and_its_head(store, home, shipped):
+    from scripts.doctor import loop, priming
+
+    fix = loop.FIX_PHASE
+    found = held_fix_chain(FOCUS)
+    found["tasks"] += [task("v", phase=fix, depends_on=["s"]), task("w", depends_on=["b"])]
+    claimed = found["tasks"][1]
+    assert dispatcher.queue(found, "")[0] == "b"
+    assert dispatcher.queue(found, fix)[0] == "p"
+    config = store.update(SLUG, autonomy="delegate", template=priming.TEMPLATE, max_eng=1)
+    key = dispatcher.claim_key(config, found)
+    assert key(claimed)[0] != dispatcher.GUARD
+    assert key(claimed)[1] == dispatcher.queue(found, fix).index("b") > 0
+    ledger = Ledger()
+    dispatcher.rank_pass(SLUG, config, store, ledger, found, NOW)
+    assert [comment[0] for comment in ledger.comments] == ["p"]
+
+
 def test_a_chain_claim_reports_the_seconds_from_the_merge_on_the_task_and_logs_it(store, home, shipped):
     config, ledger, found = chain_merge(store)
     actions = dispatcher.chain_claimed(SLUG, config, ledger, found, ledger.rows["b"], "eng", NOW)

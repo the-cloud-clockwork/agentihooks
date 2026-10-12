@@ -445,4 +445,4 @@ def test_the_dispatcher_queue_puts_an_urgent_fix_task_first_and_ignores_its_lowe
     ]
     stamps = {f"tasks/{task_id}/rank": {"by": "dispatcher"} for task_id in ("h1", "r1")}
     doc = {"overview": "o", "tasks": tasks, "phases": [{"id": "p1", "depends_on": []}], "_meta": {"stamps": stamps}}
-    assert dispatcher.queue(doc) == ["r1", "a1", "h1"]
+    assert dispatcher.queue(doc, "") == ["r1", "a1", "h1"]
