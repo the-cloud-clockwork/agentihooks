@@ -13,9 +13,11 @@ async def summary(slug: str, window: dict, timeout: float) -> dict:
         "x-mcp-servers": "langfuse_tools",
     }
     async with asyncio.timeout(timeout):
-        async with streamablehttp_client(
-            os.environ["LANGFUSE_MCP_URL"], headers=headers, timeout=timeout
-        ) as (read, write, _):
+        async with streamablehttp_client(os.environ["LANGFUSE_MCP_URL"], headers=headers, timeout=timeout) as (
+            read,
+            write,
+            _,
+        ):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 result = await session.call_tool(
