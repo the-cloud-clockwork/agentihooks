@@ -660,10 +660,10 @@ def test_place_without_an_address_places_no_hive_redis_url(tmp_path):
 
 def test_place_without_an_address_keeps_the_hive_redis_url_already_placed(tmp_path):
     bao = Bao({"user_ca": ssh_private(Ed25519PrivateKey.generate()), "redis_password": REDIS_PASSWORD})
-    home = tmp_path / "home"
-    operator_setup.place(home, bao.client(), antoncore(tmp_path), "swarm.example:6379")
+    home, source = tmp_path / "home", antoncore(tmp_path)
+    operator_setup.place(home, bao.client(), source, "swarm.example:6379")
 
-    report = operator_setup.place(home, bao.client(), antoncore(tmp_path))
+    report = operator_setup.place(home, bao.client(), source)
 
     url_file = home / "swarm-terminal" / "hive-redis.url"
     assert operator_setup.settings(home)["AGENTIHOOKS_HIVE_REDIS_URL_FILE"] == str(url_file)
