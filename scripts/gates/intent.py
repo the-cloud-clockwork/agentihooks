@@ -125,8 +125,12 @@ def stamp(slug, task_id, url, doc, mode, now_ms, home=None):
     if task is not None and not task.get("split") and planned and planned.get("planned") and planned["verdict"] == PASS:
         if _same_phase(planned, task):
             return {"verdict": PASS, "body": body}
-    verdicts.write(task_id, PENDING, RUNNING, now_ms)
+    verdicts.write(task_id, PENDING, RUNNING, now_ms, **_split_fields(task, url))
     return {"verdict": PENDING, "body": body}
+
+
+def _split_fields(task, url):
+    return {"url": url, "split": True} if task and task.get("split") else {}
 
 
 def _pr_field(url, field, run):
@@ -620,7 +624,13 @@ class Check:
         rounds = min(previous["coach_rounds"] + fixed, 2) if previous else 0
         _remember(self.slug, task, self.now_ms, state, judgment.answer, self.home)
         coached = {"coach_rounds": rounds, "head": head, "url": task["pr_url"]} if self.mode == "coach" else {}
-        fields = {"phase": task.get("phase"), **coached, "inputs": judgment.inputs, **_pending(pr)}
+        fields = {
+            "phase": task.get("phase"),
+            **coached,
+            "inputs": judgment.inputs,
+            **_pending(pr),
+            **_split_fields(task, task["pr_url"]),
+        }
         verdicts.write(task["id"], verdict, reason, self.now_ms, **fields)
         if self.mode == "coach":
             self._coaching().write(task["id"], verdict, reason, self.now_ms, **fields)
@@ -660,8 +670,8 @@ class Check:
             previous["at"],
             coach_rounds=previous["coach_rounds"],
             head=previous["head"],
-            url=task["pr_url"],
             phase=task.get("phase"),
+            **{"url": task["pr_url"], **_split_fields(task, task["pr_url"])},
         )
 
     def _failed(self, task, who, reason, rounds=0, merged=False):
@@ -698,6 +708,31 @@ def _gated(words):
     return program == "agentihooks" and rest[:1] == ["swarm"] and (rest[2:3] == ["done"] or rest[2:4] == MERGE_QUEUE)
 
 
+def _merge_target(words):
+    index = program_index(words)
+    if index is None:
+        return None
+    program, rest = PurePosixPath(words[index]).name, words[index + 1 :]
+    if program == "gh" and rest[:2] == ["pr", "merge"]:
+        operands = rest[2:]
+    elif program == "agentihooks" and rest[:1] == ["swarm"] and rest[2:4] == MERGE_QUEUE:
+        operands = rest[4:]
+    else:
+        return None
+    return next((word for word in operands if PULL.search(word) or word.isdigit()), None)
+
+
+def _other_half(command, record):
+    judged = record and record.get("split") and PULL.search(record.get("url") or "")
+    if not judged:
+        return False
+    for target in filter(None, map(_merge_target, simple_commands(command))):
+        named = PULL.search(target)
+        if (named.groups() if named else target) != (judged.groups() if named else judged[3]):
+            return True
+    return False
+
+
 def _next_step(who):
     return (
         "Mark the pull request ready with gh pr ready <pull request url> if it is a draft, then wait for the verdict: "
@@ -719,6 +754,11 @@ class IntentGate:
         if not (who.pinned and who.task) or not any(map(_gated, simple_commands(call.command))):
             return Decision()
         record = state.read(who.task)
+        if _other_half(call.command, record):
+            return Decision.deny(
+                f"intent for task {who.task} was judged on {record['url']}, not this pull request. Record this half "
+                f"first: agentihooks swarm {who.swarm} pr <pull request url> --half <n>, then wait for its verdict."
+            )
         verdict = record and record["verdict"]
         if mode == "coach" and record and record.get("head"):
             head = pr_head(record["url"])

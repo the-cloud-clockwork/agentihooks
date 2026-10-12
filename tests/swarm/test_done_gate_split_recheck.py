@@ -17,9 +17,17 @@ def split_done(**fields):
     return task(pr_url=SECOND, split=["1-2", "3-4"], split_pulls=[FIRST, SECOND], **fields)
 
 
+def reader(seen, states=None):
+    def read(url):
+        seen.append(url)
+        return pull((states or {}).get(url, "MERGED"))
+
+    return read
+
+
 def test_the_tick_reopens_a_split_task_whose_earlier_half_is_unmerged(store):  # noqa: F811
     seen, ledger = [], Ledger()
-    read = lambda url: seen.append(url) or pull("CLOSED" if url == FIRST else "MERGED")  # noqa: E731
+    read = reader(seen, {FIRST: "CLOSED"})
     events = [done("t1", "engineer@a1b2c3-0001")]
     actions = done_gate.recheck_pass(store, "sw", doc([split_done()], events), ledger, NOW, read)
     assert actions == ["task t1 reopened, its pull request is closed"]
@@ -30,7 +38,7 @@ def test_the_tick_reopens_a_split_task_whose_earlier_half_is_unmerged(store):  #
 
 def test_the_tick_leaves_a_split_task_done_when_every_half_merged(store):  # noqa: F811
     seen, ledger = [], Ledger()
-    read = lambda url: seen.append(url) or pull("MERGED")  # noqa: E731
+    read = reader(seen)
     events = [done("t1", "engineer@a1b2c3-0001")]
     assert done_gate.recheck_pass(store, "sw", doc([split_done()], events), ledger, NOW, read) == []
     assert (seen, ledger.updates) == ([FIRST, SECOND], [])
@@ -39,8 +47,7 @@ def test_the_tick_leaves_a_split_task_done_when_every_half_merged(store):  # noq
 
 
 def test_a_repeated_bound_pull_request_does_not_stand_for_another_half():
-    reads = []
-    read = lambda url: reads.append(url) or pull("MERGED")  # noqa: E731
+    read = reader([])
     row = {"id": "t1", "kind": "code", "split": ["1-2", "3-4"], "split_pulls": [FIRST, FIRST]}
     assert done_gate.refusal(row, FIRST, read).startswith("half 2 of this split task has no pull request yet")
     assert done_gate._pulls(row) == [FIRST]

@@ -24,12 +24,20 @@ def check(op):
         raise ValueError("halves: ordered, not overlapping")
 
 
-def refusal(task: dict) -> str:
+def refusal(task: dict, halves: list) -> str:
     if ledger_kinds.kind(task) not in SPLIT_KINDS:
         return "not a code or ci task"
     if task.get("split_pulls"):
         return "a half has a pull request"
+    lines = task.get("plan_lines")
+    if lines and not _covers(plan_ranges.bounds(lines), [plan_ranges.bounds(half) for half in halves]):
+        return f"halves: cover plan lines {lines}"
     return ""
+
+
+def _covers(whole, ranges):
+    edges = [whole[0] - 1, *(edge for start, end in ranges for edge in (start - 1, end)), whole[1]]
+    return all(before == after for before, after in zip(edges[::2], edges[1::2]))
 
 
 def apply(doc, op, ctx):
@@ -41,7 +49,7 @@ def apply(doc, op, ctx):
     task = next((t for t in doc["tasks"] if t["id"] == op["item"].split("/")[1]), None)
     if task is None:
         return False
-    if reason := refusal(task):
+    if reason := refusal(task, op["halves"]):
         ctx.refused.append(f"{op['item']}: {reason}")
         return False
     task["split"] = list(op["halves"])
