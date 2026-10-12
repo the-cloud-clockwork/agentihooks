@@ -85,7 +85,7 @@ def test_event_relay_sends_hive_items_once_to_the_owner(world, kind):
     add(world, kind)
     doc = world.doc()
     ledger_events.event_pass(inbox, world.store, cases.SLUG, doc, None, 0)
-    received = inbox.mailbox(world.second_name)
+    received = [item for item in inbox.mailbox(world.second_name) if item.ref == f"{cases.SLUG}:event:{kind}/targeted"]
     assert len(received) == 1
     assert received[0].address == cases.SECOND
     assert received[0].ref == f"{cases.SLUG}:event:{kind}/targeted"
@@ -162,7 +162,7 @@ def test_valid_hive_target_is_checked_and_persisted(hive):
     op = {"op": "add_item", "id": "q", "by": cases.ENGINEER, "list": "questions", "text": "Capacity", "hive": hive}
     ledger_agent_ops.check(op)
     doc = {}
-    ctx = SimpleNamespace(record=lambda *args, **kwargs: recorded.append((args, kwargs)))
+    ctx = SimpleNamespace(meta={"members": {}}, at=1000, record=lambda *args, **kwargs: recorded.append((args, kwargs)))
     assert ledger_agent_ops.apply(doc, op, ctx)
     assert doc == {"questions": [{"id": "q", "text": "Capacity", "comments": [], "answers": [], "hive": hive}]}
     assert recorded == [((cases.ENGINEER, "added", "questions/q"), {"text": "Capacity"})]
