@@ -19,6 +19,15 @@ def test_production_remote_capture_completes_within_its_pod_grace(tmp_path, monk
     from tests.test_swarm_v2_deployed_runtime import SLUG, Pods, _store, _workers
 
     attempt, _, environ, newest = portable.__wrapped__(tmp_path, monkeypatch)
+    from pathlib import Path
+
+    old_home = Path(environ["CLAUDE_CONFIG_DIR"])
+    home = attempt / "homes" / "claude"
+    home.parent.mkdir(parents=True)
+    newest_relative = newest.relative_to(old_home)
+    old_home.rename(home)
+    environ["CLAUDE_CONFIG_DIR"] = str(home)
+    newest = home / newest_relative
     original = json.loads((attempt / "launch.json").read_text())
     registration = replace(
         Registration(**original["registration"]), execution_id="exe-" + "1" * 32, grant_id="lgr-" + "2" * 32
