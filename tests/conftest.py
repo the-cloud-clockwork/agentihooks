@@ -97,7 +97,7 @@ def _shard_files(config) -> frozenset[str]:
             workers = os.cpu_count() or 1
         if workers > 1:
             measured = {node: seconds for node, seconds in durations.items() if node.split("::", 1)[0] in files}
-            sizes = source_sizes(config.rootpath, files) if sys.version_info[:2] == (3, 11) else None
+            sizes = source_sizes(config.rootpath, files)
             parts = assign_nodes(measured, shards, grouped_files(config.rootpath, files), workers, sizes=sizes)
             config.stash[NODE_SHARDS] = {node: shard for shard, part in enumerate(parts) for node in part}
             owners = {}

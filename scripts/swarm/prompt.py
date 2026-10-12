@@ -506,14 +506,12 @@ def code_steps(me, led, name, phase):
         "back to you; fix each finding, the same reader re-reviews, and review closes after three rounds. "
         f"Start every review round with {me} review; the third round closes review and a fourth is refused.",
         f"5. Push, open the pull request into dev (with Closes #<n> when there is an issue), record it: {me} pr <pr url>",
-        f"6. Wait on the checks with {me} wait --on checks <pr url>: the tick ends the wait and tells you when they "
-        f"resolve, so no Monitor is needed. Queue on green checks with {me} merge queue <pr url>, then "
-        f"{me} wait --on merge <pr url>. Report queue state with {me} merge state <pr url>. "
-        f"Before fixing a queued pull request, dequeue first with {me} merge dequeue <pr url>, then push, "
-        f"then queue again with {me} merge queue <pr url> once checks pass. "
-        "Keep the worktree until the tick confirms merged; a red merge wait means fix the pull request and "
-        "queue it again. After merged, run wt.sh done.",
-        f"7. Leave the crew with {led} leave, then close the task: {me} done --pr <pr url>. {CLOSES}",
+        "6. Once both reviews closed and the pull request is out of draft, write a short Handoff v2 document with "
+        "the handoff skill: what the pull request delivers, how review closed and what a successor fixes if its "
+        f"checks go red. Leave the crew with {led} leave, then release your seat: {me} ready <handoff doc>. The "
+        "swarm watches the checks, queues the pull request on green, waits for the merge, closes the task and "
+        "removes your worktree; red checks reopen the task for the next engineer with your handoff. "
+        f"{CLOSES}",
     ]
 
 
