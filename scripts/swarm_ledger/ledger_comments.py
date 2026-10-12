@@ -166,8 +166,6 @@ def agent_thread_op(thread, op, ctx, target, noun):
             from ledger_core import new_entry
 
             thread.append(new_entry(op, by, ctx.at, text))
-            if "reply_to" in op:
-                thread[-1]["reply_to"] = op["reply_to"]
             if op.get("attachments"):
                 thread[-1]["attachments"] = op["attachments"]
             ctx.record(by, f"{noun} added", target, id=op["id"], text=text)

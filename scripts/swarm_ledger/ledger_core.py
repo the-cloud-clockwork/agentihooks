@@ -468,6 +468,8 @@ def new_entry(op, by, at, text):
     entry = {"id": op["id"], "by": by, "at": at, "text": text}
     if op["thread"] == "notes":
         entry["comments"] = []
+    if "reply_to" in op:
+        entry["reply_to"] = op["reply_to"]
     return entry
 
 
