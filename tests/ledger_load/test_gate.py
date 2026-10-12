@@ -1,4 +1,5 @@
 import inspect
+from pathlib import Path
 
 import pytest
 
@@ -62,13 +63,61 @@ def test_the_load_covers_every_sweep_of_the_watch_loop_more_than_once():
 def test_the_gate_refuses_to_run_outside_ci(monkeypatch, tmp_path):
     ran = []
     monkeypatch.setattr(ledger_load, "run", lambda folder: ran.append(folder) or [])
+    monkeypatch.setattr(ledger_load, "base_budgets", lambda revision: ledger_load.graded({}))
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     with pytest.raises(SystemExit, match="CI only"):
-        ledger_load.main(["--folder", str(tmp_path)])
+        ledger_load.main(["--folder", str(tmp_path), "--base", "HEAD"])
     assert ran == []
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
-    assert ledger_load.main(["--folder", str(tmp_path)]) == 0
+    assert ledger_load.main(["--folder", str(tmp_path), "--base", "HEAD"]) == 0
     assert ran == [tmp_path]
+
+
+def head_budgets() -> dict:
+    return {name: getattr(ledger_load, name) for name in ledger_load.BUDGETS}
+
+
+def test_a_head_that_loosens_its_budgets_is_graded_by_the_base(monkeypatch):
+    base = head_budgets()
+    monkeypatch.setattr(ledger_load, "WRITE_P95_S", base["WRITE_P95_S"] * 10)
+    monkeypatch.setattr(ledger_load, "CPU_CORES", base["CPU_CORES"] * 10)
+    monkeypatch.setattr(ledger_load, "LEDGER_BYTES", base["LEDGER_BYTES"] // 10)
+    assert ledger_load.graded(base) == base
+
+
+def test_a_head_that_tightens_its_budgets_keeps_its_own(monkeypatch):
+    base = head_budgets()
+    tight = {"WRITE_P95_S": base["WRITE_P95_S"] / 2, "CPU_CORES": base["CPU_CORES"] / 2}
+    tight["LEDGER_BYTES"] = base["LEDGER_BYTES"] * 2
+    for name, value in tight.items():
+        monkeypatch.setattr(ledger_load, name, value)
+    assert ledger_load.graded(base) == tight
+
+
+def test_budgets_are_read_from_the_source_given_not_the_running_module():
+    source = "WRITE_P95_S = 0.5\nCPU_CORES = 0.25\nLEDGER_BYTES = 7_000_000\nCLIENTS = 99\n"
+    assert ledger_load.budgets(source) == {"WRITE_P95_S": 0.5, "CPU_CORES": 0.25, "LEDGER_BYTES": 7_000_000}
+
+
+def test_a_base_without_a_budget_is_red():
+    with pytest.raises(SystemExit, match="LEDGER_BYTES"):
+        ledger_load.budgets("WRITE_P95_S = 2.0\nCPU_CORES = 1.0\n")
+
+
+def test_the_base_budgets_come_from_the_committed_gate_at_that_revision():
+    assert ledger_load.base_budgets("HEAD") == ledger_load.budgets(Path(ledger_load.__file__).read_text())
+
+
+def test_the_gate_runs_on_the_stricter_of_base_and_head_budgets(monkeypatch, tmp_path):
+    for name, value in head_budgets().items():
+        monkeypatch.setattr(ledger_load, name, value)
+    strict = {"WRITE_P95_S": 0.5, "CPU_CORES": 0.25, "LEDGER_BYTES": 10**8}
+    revisions = []
+    monkeypatch.setattr(ledger_load, "base_budgets", lambda revision: revisions.append(revision) or strict)
+    monkeypatch.setattr(ledger_load, "run", lambda folder: [] if head_budgets() == strict else ["head budgets graded"])
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    assert ledger_load.main(["--folder", str(tmp_path), "--base", "abc123"]) == 0
+    assert revisions == ["abc123"]
 
 
 def test_some_open_alerts_are_past_their_quiet_hour_so_the_expiry_sweep_has_work():
