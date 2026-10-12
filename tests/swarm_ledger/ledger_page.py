@@ -80,11 +80,15 @@ def show(tab, html, url=PAGE_URL, ledger=None, swarm=None):
 
 def loaded(tab):
     """Wait until the page applied the stream's first ledger state."""
-    tab.evaluate(
-        """async () => {
-          const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
-          await (await import(new URL("sync.js", main))).loaded;
-          return true;
+    tab.wait_for_function(
+        """() => {
+          if (!window.__ledgerTestLoaded) {
+            window.__ledgerTestLoaded = {ready: false};
+            const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
+            import(new URL("sync.js", main)).then(sync => sync.loaded)
+              .then(() => { window.__ledgerTestLoaded.ready = true; });
+          }
+          return window.__ledgerTestLoaded.ready;
         }"""
     )
 
