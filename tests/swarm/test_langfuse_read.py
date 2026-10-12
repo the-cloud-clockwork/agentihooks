@@ -6,8 +6,9 @@ from types import SimpleNamespace
 import pytest
 
 
+@pytest.mark.parametrize("default_url", [False, True])
 @pytest.mark.parametrize("outcome", ["success", "error", "timeout"])
-def test_reader_uses_the_named_project_window_and_bounded_transport(monkeypatch, outcome):
+def test_reader_uses_the_named_project_window_and_bounded_transport(monkeypatch, outcome, default_url):
     import mcp
     from mcp.client import streamable_http
 
@@ -19,7 +20,7 @@ def test_reader_uses_the_named_project_window_and_bounded_transport(monkeypatch,
 
     @asynccontextmanager
     async def transport(url, headers, timeout):
-        assert url == "http://fixture/mcp/"
+        assert url == ("http://10.10.30.200/mcp/" if default_url else "http://fixture/mcp/")
         assert headers == {
             "Authorization": "Bearer fixture",
             "Host": "llm.homeofanton.com",
@@ -47,21 +48,26 @@ def test_reader_uses_the_named_project_window_and_bounded_transport(monkeypatch,
         async def call_tool(self, name, arguments):
             calls.append((name, arguments))
             if outcome == "timeout":
-                await asyncio.Event().wait()
+                await asyncio.sleep(0.5)
             return SimpleNamespace(
                 isError=outcome == "error",
                 content=[SimpleNamespace(type="text", text=json.dumps(payload))],
             )
 
     monkeypatch.setenv("MCP_KEY_GATEWAY", "fixture")
-    monkeypatch.setenv("LANGFUSE_MCP_URL", "http://fixture/mcp/")
+    if default_url:
+        monkeypatch.delenv("LANGFUSE_MCP_URL", raising=False)
+    else:
+        monkeypatch.setenv("LANGFUSE_MCP_URL", "http://fixture/mcp/")
     monkeypatch.setattr(streamable_http, "streamablehttp_client", transport)
     monkeypatch.setattr(mcp, "ClientSession", Session)
     if outcome == "success":
         assert read_summary("rig-grade-swarm", window, 0.05) == payload
     else:
-        with pytest.raises(RuntimeError if outcome == "error" else TimeoutError):
+        with pytest.raises(RuntimeError if outcome == "error" else TimeoutError) as error:
             read_summary("rig-grade-swarm", window, 0.05)
+        if outcome == "error":
+            assert str(error.value) == "Langfuse summary tool failed"
     assert calls == [
         (
             "langfuse_tools-swarm_error_latency_summary",
