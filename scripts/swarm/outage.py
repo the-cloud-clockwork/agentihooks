@@ -51,7 +51,7 @@ def observe(slug: str, kind: str, evidence: list[str], now_ms: int) -> None:
         record = records.get(kind)
         if evidence:
             ongoing = record is not None and record["ended_at"] is None
-            past = record.get("past", []) if ongoing else _history(record) if record else []
+            past = record.get("past") if ongoing else _history(record) if record else None
             fresh = {"kind": kind, "started_at": record["started_at"] if ongoing else now_ms, "evidence": evidence}
             records[kind] = {**fresh, "ended_at": None, **({"past": past} if past else {})}
         elif record and record["ended_at"] is None:
