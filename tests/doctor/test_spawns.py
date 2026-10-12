@@ -81,6 +81,9 @@ def test_runtime_records_the_launcher_overflow_placement(tmp_path):
         def notify(self, *args):
             pass
 
+        def comment(self, *args):
+            pass
+
     actions = tick("sw", store, Ledger(), runtime, 1000)
     agents = store.agents("sw")
     assert len(agents) == 2, actions

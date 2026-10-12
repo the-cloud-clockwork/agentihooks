@@ -125,6 +125,7 @@ from scripts.swarm.store import (
     MASTER,
     SwarmConfig,
     SwarmError,
+    Unreachable,
     connect,
 )
 from scripts.swarm.tick import agent_status, primed, skip_refused, spawn_holds, tick
@@ -1538,6 +1539,14 @@ def cmd_say(store, args):
     print(json.dumps({"sent": sent}))
 
 
+def queued_say(args, who) -> bool:
+    """A swarm say to agents that met a Redis outage is queued in the outbox, its recipients looked up on replay."""
+    if vars(args).get("command") != "say" or args.to in ("", delivery.OPERATOR):
+        return False
+    print(json.dumps(delivery.queue(args.slug, args.text, args.name or who.name, args.to, fyi=args.fyi)))
+    return True
+
+
 def cmd_terminal(store, args):
     from scripts.swarm_v2.kubernetes import operator_terminal
 
@@ -1693,6 +1702,8 @@ def main(argv):
         print(f"swarm: {text}", file=sys.stderr)
         return 1
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
+    from redis.exceptions import RedisError
+
     try:
         store = _tick_store() if handler is cmd_tick else connect()
         if store is None:
@@ -1707,9 +1718,20 @@ def main(argv):
             handler(store, args)
         if action in control_notifications.CONTROLS:
             control_notifications.notify(store, args, LedgerClient(), before, action)
-    except (SwarmError, InboxError) as exc:
+    except (SwarmError, InboxError, RedisError) as exc:
         if handler is cmd_status and outage.show(args.slug, args.json):
             return 0
-        print(f"swarm: {exc}", file=sys.stderr)
-        return 1
+        return failed(args, who, exc)
     return 0
+
+
+def failed(args, who, exc) -> int:
+    """A say to agents that met a Redis outage is queued; any other failure is reported, a bare Redis error raised."""
+    from redis.exceptions import RedisError
+
+    if isinstance(exc, (Unreachable, RedisError)) and queued_say(args, who):
+        return 0
+    if isinstance(exc, RedisError):
+        raise exc
+    print(f"swarm: {exc}", file=sys.stderr)
+    return 1
