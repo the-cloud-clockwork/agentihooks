@@ -198,26 +198,6 @@ class ArtifactsAPI:
         return found
 
     def _remove(self, key: str, scope: Registration, fence: Callable[[], None]) -> None:
-        category = key.split("/")[2]
-        if category == "staging":
-            _staging(key, scope)
-        elif category == "objects":
-            digest = key.rsplit("/", 1)[1]
-            if digest in self._references(scope):
-                _refuse("a committed manifest or pointer references this artifact")
-            prefix = f"{scope.swarm_id}/{scope.task_id}/artifacts/"
-            for record in self.backend.keys(prefix):
-                document = json.loads(self._read(record, 0, self.backend.size(record)))
-                if document["sha256"] == digest:
-                    _refuse("a referenced artifact object cannot be removed")
-        elif category == "artifacts":
-            size = self.backend.size(key)
-            if size is not None:
-                data = self._read(key, 0, size)
-                _writable(key, data, scope)
-                if json.loads(data)["sha256"] in self._references(scope):
-                    _refuse("a committed manifest or pointer references this artifact")
-        else:
-            _refuse("committed artifact indexes cannot be removed")
+        _staging(key, scope)
         fence()
         self.backend.remove(key)
