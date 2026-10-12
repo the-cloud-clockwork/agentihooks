@@ -495,12 +495,17 @@ class HerdrRuntime:
             agent, reason = self._saved_choice(saved, profile, quota_transfer, environ)
         else:
             agent, reason = self._rotation(requested, environ, profile_choice.preferred(profile))
-        if reason == agent_choice.ALL_FULL and not hasattr(self, "_quota_accounts"):
+        route_kind = task.get("route_kind", "subscription")
+        if reason == agent_choice.ALL_FULL and not hasattr(self, "_quota_accounts") and route_kind != "interactive":
             raise SpawnError(reason, "unavailable")
         planned = getattr(self, "_quota_tasks", {}).get(task["id"])
         if planned and not (requested or saved or want):
             agent, reason = planned, "fallthrough: quota reservation"
-        agent, reason = self._quota_choice(agent, reason, bool(requested or saved or want), lane)
+        agent, reason = (
+            (agent, reason)
+            if route_kind == "interactive"
+            else self._quota_choice(agent, reason, bool(requested or saved or want), lane)
+        )
         if saved and agent != saved["harness"]:
             raise SpawnError("unsupported handoff: router substituted the original harness", "unsupported")
         task = {**task, "harness": agent}
@@ -539,9 +544,13 @@ class HerdrRuntime:
         picked = replace(picked, model=_set(picked.model) or default_models.model(config, agent))
         picked = replace(picked, effort=saved["effort"]) if saved else picked
         mode = [] if lane != "plan" else PLAN_MODE if agent == "claude" else codex_plan_mode(environ)
-        route = ["--route", saved["account"]] if saved.get("account") else []
+        route = (
+            ["--route", "interactive"]
+            if route_kind == "interactive"
+            else (["--route", saved["account"]] if saved.get("account") else [])
+        )
         account = None
-        if hasattr(self, "_quota_accounts"):
+        if hasattr(self, "_quota_accounts") and route_kind != "interactive":
             account = self._quota_account(agent, saved.get("account") or self.planned_account(task["id"], agent), None)
             route = ["--route", account.name]
         placed = timing.call(
@@ -574,6 +583,7 @@ class HerdrRuntime:
             profile_decision={**decision.record(), **placed.profile_decision},
             choice=agent_choice.choice_kind(reason),
             overlays=list(decision.overlays),
+            route_kind="api" if placed.account == "api" else route_kind,
         )
 
     def resume(self, config, agent, text):
@@ -598,7 +608,11 @@ class HerdrRuntime:
             agent.effort or defaults.effort,
             source=agent.model_source or ("recorded" if agent.model else defaults.source),
         )
-        route = ["--route", agent.account] if agent.account else []
+        route = (
+            ["--route", "interactive"]
+            if agent.route_kind == "interactive"
+            else (["--route", agent.account] if agent.account else [])
+        )
         model = _model_args(
             agent.harness,
             picked.__dict__,
@@ -621,6 +635,7 @@ class HerdrRuntime:
             model_source=picked.source,
             profile_decision={**agent.profile_decision, **placed.profile_decision},
             overlays=agent.overlays,
+            route_kind=agent.route_kind,
         )
 
     def operator(self, config, name, profile, text):

@@ -2,7 +2,18 @@ name: Ledger server load
 
 on:
   workflow_call:
+    inputs:
+      base:
+        description: Revision whose budgets grade the run
+        type: string
+        required: true
   workflow_dispatch:
+    inputs:
+      base:
+        description: Revision whose budgets grade the run
+        type: string
+        required: true
+        default: origin/dev
 
 permissions:
   contents: read
@@ -52,7 +63,12 @@ jobs:
           uv venv --python "$PYTHON_PATH" "$HOME/venv"
           uv pip install --python "$HOME/venv/bin/python" -e ".[all]"
 
+      - name: Fetch the base whose budgets grade the run
+        env:
+          BASE: ${{ inputs.base }}
+        run: git fetch --no-tags --depth=1 origin "${BASE#origin/}"
+
       - name: Write and read a full size ledger from ten clients within the server budget
         run: |
           mkdir -p "$RUNNER_TEMP/ledger-load"
-          "$HOME/venv/bin/python" -m tests.ledger_load.gate --folder "$RUNNER_TEMP/ledger-load"
+          "$HOME/venv/bin/python" -m tests.ledger_load.gate --folder "$RUNNER_TEMP/ledger-load" --base FETCH_HEAD

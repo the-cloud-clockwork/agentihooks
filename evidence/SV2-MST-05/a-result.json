@@ -1,0 +1,16 @@
+{
+  "case": "T-SV2-MST-05-A",
+  "independent_runs": 2,
+  "test": "test_two_hives_steer_separate_phases_and_coordinate_privately",
+  "observed": {
+    "hives": 2,
+    "masters": 2,
+    "own_phase_writes": true,
+    "cross_phase_write_refused": true,
+    "private_channel_exchanges": true,
+    "second_unread_empty": true,
+    "engineer_channel_read_refused": true,
+    "operator_chat_only_lead": true,
+    "operator_replay_empty": true
+  }
+}
