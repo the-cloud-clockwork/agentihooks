@@ -2790,3 +2790,39 @@ def test_an_overlay_render_from_the_recorded_commit_renders_and_stamps_it(world,
     assert "OV-A RULE MARKER" in (out / "CLAUDE.md").read_text()
     assert json.loads((out / render.STAMP).read_text())["bundle_commit"] == recorded
     assert render.render("claude", "rb-eng", overlays=["ov-a"], bundle_revision=recorded) is None
+
+
+def test_pinned_codex_rebuild_keeps_bundle_links_in_its_new_home(world, overlays):
+    from scripts.profiles import bundle_copy, render
+
+    recorded = _git(world["bundle"], "rev-parse", "HEAD").strip()
+    first = render.render("codex", "rb-eng", overlays=["ov-a"], bundle_revision=recorded)
+    config = world["home"] / ".codex" / "config.toml"
+    config.write_text(config.read_text() + "\nmodel = 'updated'\n")
+
+    rebuilt = render.render("codex", "rb-eng", overlays=["ov-a"], bundle_revision=recorded)
+
+    assert rebuilt.parent != first.parent
+    skill = rebuilt / "skills" / "bundle-skill"
+    assert skill.resolve().is_relative_to(rebuilt.parent)
+    shutil.rmtree(first.parent)
+    assert (skill / "SKILL.md").read_text() == "---\nname: bundle-skill\n---\n"
+    assert bundle_copy.current() is None
+    assert render.render("codex", "rb-eng", overlays=["ov-a"], bundle_revision=recorded) is None
+
+
+def test_pinned_render_replaces_a_dirty_retained_bundle_copy(world, overlays):
+    from scripts.profiles import bundle_copy, render
+
+    recorded = _git(world["bundle"], "rev-parse", "HEAD").strip()
+    first = render.render("claude", "rb-eng", overlays=["ov-a"], bundle_revision=recorded)
+    skill = first / "skills" / "bundle-skill" / "SKILL.md"
+    skill.write_text("DIRTY SKILL\n")
+
+    repaired = render.render("claude", "rb-eng", overlays=["ov-a"], bundle_revision=recorded)
+
+    assert repaired is not None
+    assert repaired.parent != first.parent
+    assert (repaired / "skills" / "bundle-skill" / "SKILL.md").read_text() == "---\nname: bundle-skill\n---\n"
+    assert _git(world["bundle"], "status", "--porcelain") == ""
+    assert bundle_copy.current() is None
