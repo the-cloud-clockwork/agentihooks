@@ -331,6 +331,26 @@ def test_a_timed_out_launch_names_the_newest_pane_it_opened(tmp_path, monkeypatc
     )
 
 
+@pytest.mark.parametrize("stdout", ["", "status=started\nroute_status=pending\n"])
+def test_a_route_timeout_without_a_pane_report_closes_its_recorded_pane_after_two_minutes(
+    store, tmp_path, monkeypatch, stdout
+):
+    monkeypatch.setattr(runtime_module.time, "time", lambda: 5.0)
+    _record(monkeypatch, tmp_path, "engineer@a1b2c3-0001", "w1:p9", "term_route", 5_000)
+    error = _launch_fails(tmp_path, stdout, returncode=3)
+    runtime = PaneRuntime({"w1:p9": SCREEN}, crash=error)
+    ledger = tasks(("t1", "eng"))
+    tick("sw", store, ledger, runtime, now_ms=FAILED_AT)
+    assert _failed_row(store)["pane_id"] == "w1:p9"
+    runtime.crash = None
+    store.update("sw", state="paused")
+    tick("sw", store, ledger, runtime, now_ms=DUE - 1)
+    assert runtime.panes_closed == []
+    tick("sw", store, ledger, runtime, now_ms=DUE)
+    assert runtime.panes_closed == ["w1:p9"]
+    assert failed_panes.held(store, "sw") == {}
+
+
 def test_a_timed_out_launch_never_adopts_a_pane_opened_before_it(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime_module.time, "time", lambda: 5.0)
     _record(monkeypatch, tmp_path, "engineer@a1b2c3-0001", "w1:p7", "term_old", 4_999)
