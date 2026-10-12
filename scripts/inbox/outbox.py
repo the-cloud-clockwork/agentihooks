@@ -309,7 +309,7 @@ def apply_post(store, by: str, entry: dict):
 
 def ledger_record(slug: str, ops: list, agent: str, service: bool) -> dict:
     args = {"slug": slug, "ops": ops, "agent": agent, "service": service, "queued_at": time.time()}
-    return record("ledger", agent or ops[0].get("by", ""), args, item=ops[0]["id"])
+    return record("ledger", agent, args, item=ops[0]["id"])
 
 
 def apply_ledger(store, by: str, entry: dict) -> dict:

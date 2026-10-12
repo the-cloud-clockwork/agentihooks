@@ -269,7 +269,7 @@ def queue(slug, ops, service):
     print(
         f"ledger server not answering on {base()}: queued locally, it replays when the server returns", file=sys.stderr
     )
-    return {"rejected": [], "queued": ops[0]["id"]}
+    return {"queued": ops[0]["id"]}
 
 
 def remote_call(slug, ops, service):

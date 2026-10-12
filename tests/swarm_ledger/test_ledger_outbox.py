@@ -3,6 +3,7 @@ import itertools
 import json
 import sys
 import threading
+import urllib.error
 from http.server import ThreadingHTTPServer
 
 import ledger_core as core
@@ -15,6 +16,7 @@ SLUG = "outbox-2026-01-01"
 ENG = "eng-1@demo"
 BOSS = "master@demo"
 COUNT = itertools.count(1)
+QUEUED = "queued locally, it replays when the server returns"
 
 
 class Server:
@@ -52,7 +54,9 @@ def server(monkeypatch, request):
 def run(capsys, *argv):
     args = ledger.build_parser().parse_args(["--slug", SLUG, "--as", argv[0], *argv[1:]])
     getattr(ledger, f"cmd_{args.command}")(args)
-    return [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    captured = capsys.readouterr()
+    run.err = captured.err
+    return [json.loads(line) for line in captured.out.splitlines()]
 
 
 def queued():
@@ -80,12 +84,16 @@ def test_talk_sent_while_the_server_is_stopped_queues_and_lands_once_in_order_wh
     assert run(capsys, ENG, "comment", phase, "The branch builds on the new base") == [
         {"posted": False, "queued": True}
     ]
+    assert run.err == f"ledger server not answering on {ledger.BASE}: {QUEUED}\n"
     assert run(capsys, ENG, "say", "Tests run in continuous integration now") == [{"posted": False, "queued": True}]
     assert run(capsys, ENG, "question", "add", "Which port should the service use") == [
         {"question": "add", "queued": True}
     ]
     records = queued()
     assert [record["op"] for record in records] == ["ledger"] * 3
+    assert {(record["by"], record["args"]["agent"], record["args"]["service"]) for record in records} == {
+        ("", "", False)
+    }
     assert [record["args"]["ops"][0]["op"] for record in records] == ["add", "add", "add_item"]
     assert [record["item"] for record in records] == [record["args"]["ops"][0]["id"] for record in records]
     assert comments(stored()) == []
@@ -247,6 +255,120 @@ def test_a_stopped_server_never_expires_held_talk(server, capsys):
 def test_the_busy_age_limit_reads_its_setting_and_defaults_to_an_hour():
     assert outbox.busy_age({}) == 3600
     assert outbox.busy_age({outbox.BUSY_AGE_ENV: "90"}) == 90
+
+
+def test_a_record_is_stale_only_past_the_limit(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(outbox, "time", SimpleNamespace(time=lambda: 1000.0))
+    monkeypatch.setenv(outbox.BUSY_AGE_ENV, "60")
+    assert not outbox.stale({"args": {"queued_at": 940.0}})
+    assert outbox.stale({"args": {"queued_at": 939.0}})
+
+
+def test_a_failing_ledger_record_holds_its_later_ledger_records_and_never_the_inbox_lane(server, monkeypatch, capsys):
+    from scripts.inbox import cli
+
+    server.stop()
+    run(capsys, ENG, "say", "First held")
+    run(capsys, ENG, "say", "Second held")
+    sent = outbox.record("send", ENG, {"address": "bob", "text": "for bob", "fyi": False})
+    outbox.append(sent)
+    calls, applied = [], []
+    monkeypatch.setitem(cli.APPLY, "send", lambda store, by, entry: applied.append(entry["item"]))
+    for failure in (urllib.error.HTTPError("http://ledger", 503, "busy", {}, io.BytesIO(b"")), RuntimeError("odd")):
+
+        def failing(*args, failure=failure):
+            calls.append(args)
+            raise failure
+
+        monkeypatch.setattr(ledger, "replay", failing)
+        calls.clear()
+        outbox.flush(object())
+        assert len(calls) == 1
+        assert [record["op"] for record in queued()] == ["ledger", "ledger"]
+    assert applied == [sent["item"]]
+
+
+def test_a_flush_without_a_store_keeps_inbox_records_untried(server, capsys):
+    sent = outbox.record("send", ENG, {"address": "bob", "text": "for bob", "fyi": False})
+    outbox.append(sent)
+    report = outbox.flush(None)
+    assert (report.applied, report.left) == ([], 1)
+    assert "outbox replay stopped" not in capsys.readouterr().err
+
+
+def test_an_expired_record_is_set_aside_as_it_was_written(server, monkeypatch, capsys):
+    server.stop()
+    run(capsys, ENG, "say", "Expired verbatim")
+    aged(10)
+    line = outbox.path().read_text()
+    monkeypatch.setenv(outbox.BUSY_AGE_ENV, "5")
+    monkeypatch.setattr(
+        ledger, "replay", lambda *args: (_ for _ in ()).throw(urllib.error.HTTPError("u", 502, "", {}, io.BytesIO(b"")))
+    )
+    outbox.flush(None)
+    assert json.loads(outbox.skipped_path().read_text().splitlines()[-1])["line"] == line
+
+
+def test_apply_ledger_replays_as_the_recorded_author_and_reports_the_outcome(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ledger, "replay", lambda *args: calls.append(args) or {"rejected": ["c-1", "c-2"]})
+    entry = outbox.ledger_record(SLUG, [{"op": "add", "id": "c-1"}], ENG, True)
+    with pytest.raises(outbox.InboxError) as refused:
+        outbox.apply_ledger(None, ENG, entry)
+    assert str(refused.value) == "the ledger server rejected c-1, c-2"
+    assert calls == [(SLUG, [{"op": "add", "id": "c-1"}], ENG, True)]
+    monkeypatch.setattr(ledger, "replay", lambda *args: (_ for _ in ()).throw(ConnectionRefusedError("refused")))
+    with pytest.raises(outbox.LedgerDown) as down:
+        outbox.apply_ledger(None, ENG, entry)
+    assert str(down.value) == "refused"
+    monkeypatch.setattr(ledger, "replay", lambda *args: {"applied": ["c-1"]})
+    assert outbox.apply_ledger(None, ENG, entry) == {"applied": ["c-1"]}
+
+
+def test_ledger_replay_sends_the_recorded_credential_with_the_request_timeout(monkeypatch):
+    seen = []
+
+    class Client:
+        def __init__(self, base, headers, timeout):
+            seen.append((headers, timeout))
+
+        def mutate(self, slug, ops):
+            return {"slug": slug, "ops": ops}
+
+    monkeypatch.setattr("scripts.swarm_ledger.api.client.ResourceClient", Client)
+    monkeypatch.setattr(ledger.repository, "token", lambda slug: "admin")
+    assert ledger.replay(SLUG, ["op"], ENG, False) == {"slug": SLUG, "ops": ["op"]}
+    assert seen[-1] == (ledger.local_credentials(SLUG, ENG, False), ledger.REQUEST_TIMEOUT)
+    assert seen[-1][0]["X-Ledger-Agent"] == ENG
+    ledger.replay(SLUG, ["op"], ENG, True)
+    assert seen[-1][0] == {"X-Ledger-Token": "admin"}
+
+
+def test_talk_is_agent_chat_comments_items_answers_and_relays_without_attachments():
+    assert ledger.talk([{"op": "add", "by": ENG, "thread": "chat"}])
+    assert not ledger.talk([{"op": "add", "by": ENG, "thread": "chat", "attachments": [{"id": "m"}]}])
+    assert not ledger.talk([{"op": "add", "thread": "chat"}])
+    assert ledger.talk([{"op": name} for name in ledger.TALK_OPS])
+    assert not ledger.talk([{"op": "join"}])
+    assert not ledger.talk([])
+
+
+def test_an_inbox_record_waiting_never_holds_ledger_writes(server, capsys):
+    outbox.append(outbox.record("send", ENG, {"address": "bob", "text": "for bob", "fyi": False}))
+    phase = f"phases/{stored()['phases'][0]['id']}"
+    assert run(capsys, ENG, "comment", phase, "Posted past an inbox record") == [{"posted": True}]
+    assert "wait in" not in run.err
+    assert comments(stored()) == ["Posted past an inbox record"]
+
+
+def test_a_full_outbox_refuses_the_write_with_its_reason(server, monkeypatch, capsys):
+    server.stop()
+    monkeypatch.setenv(outbox.MAX_ENV, "10")
+    with pytest.raises(SystemExit) as full:
+        ledger.call(SLUG, [{"op": "add", "thread": "chat", "id": "m-1", "text": "Too big", "by": ENG}])
+    assert str(full.value).startswith("the local inbox outbox is full (0 of 10 bytes")
 
 
 def test_a_ledger_outage_does_not_hold_a_queued_inbox_record(server, capsys, monkeypatch):
