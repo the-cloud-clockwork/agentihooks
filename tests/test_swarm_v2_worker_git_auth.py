@@ -12,6 +12,7 @@ from scripts.swarm_v2.worker import git_auth
 
 @pytest.fixture
 def app(monkeypatch):
+    monkeypatch.setattr(git_auth.os, "environ", git_auth.os.environ.copy())
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     pem = key.private_bytes(
         serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
