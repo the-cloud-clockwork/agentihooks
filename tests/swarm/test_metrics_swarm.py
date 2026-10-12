@@ -22,6 +22,7 @@ TASK = {
     "plan_slice": "slice",
     "pr_url": "https://github.com/org/repo/pull/1",
 }
+DONE = {**TASK, "state": "done"}
 AGENT = asdict(
     AgentRecord(
         "worker",
@@ -39,6 +40,10 @@ AGENT = asdict(
 
 def doc(events=()):
     return {"tasks": [TASK], "_meta": {"events": list(events)}}
+
+
+def delivered(events=()):
+    return {"tasks": [DONE], "_meta": {"events": list(events)}}
 
 
 def event(kind, at, by="worker"):
@@ -60,7 +65,7 @@ def test_full_task_lifecycle_keeps_identity_and_actual_merge_time():
     agent = {**AGENT, "ended_at": NOW + 5_000, "reason": "finished"}
     agents = metrics_swarm.agent_rows(SLUG, doc(events), [agent])
     pulls = {TASK["pr_url"]: SimpleNamespace(state="MERGED", merged_at=NOW + 4_000)}
-    delivery = metrics_swarm.delivery_rows(SLUG, doc(events), [agent], pulls)
+    delivery = metrics_swarm.delivery_rows(SLUG, delivered(events), [agent], pulls)
     assert [row["kind"] for row in agents] == ["spawn", "retire", "claim"]
     assert [row["kind"] for row in delivery] == ["pull_request_opened", "merge"]
     assert delivery[-1]["claim_to_merge_seconds"] == 4.0
@@ -225,7 +230,7 @@ def test_nullable_classifier_metadata_keeps_legacy_purpose_and_failed_backend():
 
 def test_unknown_claim_duration_is_not_invented():
     pulls = {TASK["pr_url"]: SimpleNamespace(state="MERGED", merged_at=NOW + 4_000)}
-    row = metrics_swarm.delivery_rows(SLUG, doc(), [AGENT], pulls)[0]
+    row = metrics_swarm.delivery_rows(SLUG, delivered(), [AGENT], pulls)[0]
     assert row["claim_to_merge_seconds"] == -1.0
 
 
@@ -442,7 +447,7 @@ def test_classifier_source_positions_survive_append_and_partial_lines(tmp_path, 
 
 
 def test_all_generated_rows_match_the_shared_outbox_schema():
-    state = doc([event("task claimed", NOW), event("task pr", NOW + 1)])
+    state = delivered([event("task claimed", NOW), event("task pr", NOW + 1)])
     pulls = {TASK["pr_url"]: SimpleNamespace(state="MERGED", merged_at=NOW + 2)}
     for table, rows in (
         (metrics_swarm.AGENTS, metrics_swarm.agent_rows(SLUG, state, [AGENT])),

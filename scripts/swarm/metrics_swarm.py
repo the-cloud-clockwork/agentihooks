@@ -189,7 +189,7 @@ def delivery_rows(slug: str, doc: dict, agents: list, pulls: dict) -> list[dict]
         )
     for task in doc.get("tasks", []):
         pull = pulls.get(task.get("pr_url"))
-        if pull is None or pull.state != "MERGED" or pull.merged_at is None:
+        if pull is None or pull.state != "MERGED" or pull.merged_at is None or task.get("state") != "done":
             continue
         at = pull.merged_at
         claimed = claims.get(task["id"])

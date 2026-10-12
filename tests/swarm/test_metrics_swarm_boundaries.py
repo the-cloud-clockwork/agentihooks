@@ -7,7 +7,7 @@ from scripts.swarm import metrics_outbox, metrics_swarm
 from scripts.swarm.host_budget import HostSample
 from scripts.swarm.metrics_outbox import Outbox, Settings
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
-from tests.swarm.test_metrics_swarm import AGENT, NOW, SLUG, TASK, assert_node, doc, event
+from tests.swarm.test_metrics_swarm import AGENT, DONE, NOW, SLUG, TASK, assert_node, delivered, doc, event
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
@@ -20,7 +20,7 @@ def box(tmp_path):
 
 
 def test_persisted_identifiers_remain_compatible_for_recorded_inputs():
-    state = doc([event("task claimed", NOW), event("task pr", NOW + 1_000)])
+    state = delivered([event("task claimed", NOW), event("task pr", NOW + 1_000)])
     agent = {**AGENT, "ended_at": NOW + 5_000, "reason": "finished"}
     agents = {row["kind"]: row["event_id"] for row in metrics_swarm.agent_rows(SLUG, state, [agent])}
     assert agents == {
@@ -113,7 +113,7 @@ def test_temporal_ownership_excludes_other_tasks_and_ended_lives():
 def test_nonmerged_pulls_do_not_hide_later_merges_and_duration_starts_at_first_claim():
     other = {**TASK, "id": "other", "pr_url": "other", "state": "pr"}
     state = {
-        "tasks": [other, TASK],
+        "tasks": [other, DONE],
         "_meta": {"events": [event("task claimed", NOW), event("task claimed", NOW + 1_000)]},
     }
     pulls = {
@@ -359,7 +359,7 @@ def test_late_events_without_named_metadata_do_not_reuse_an_ended_owner():
     unrelated = {**AGENT, "name": "XXXX", "task": "other", "started_at": NOW + 2}
     rows = metrics_swarm.delivery_rows(
         SLUG,
-        doc(),
+        delivered(),
         [AGENT, unrelated],
         {TASK["pr_url"]: SimpleNamespace(state="MERGED", merged_at=NOW + 4)},
     )
