@@ -229,6 +229,24 @@ def test_reply_retry_refuses_different_text(store):
     assert store.get(answer.id).text == "answer"
 
 
+@pytest.mark.parametrize("text", ["answer", "changed"])
+def test_reply_replay_reconciles_an_answer_saved_before_reservations(store, text):
+    from scripts.inbox.store import DuplicateItem
+
+    original = store.send("alice", "bob", "question")
+    store.send("bob", "alice", "answer", item_id="legacy-answer")
+    store.close(original.id, "bob", "done", "replied with message legacy-answer")
+    error = DuplicateItem if text == "answer" else InboxError
+    with pytest.raises(error) as refused:
+        store.reply(original.id, "bob", text, answer_id="legacy-answer")
+    assert str(refused.value) == (
+        f"message {original.id} was already answered with message legacy-answer"
+        if text == "answer"
+        else "a reply retry must keep its sender, recipient, text and informational flag"
+    )
+    assert [item.id for item in store.inbox("alice")] == ["legacy-answer"]
+
+
 def test_reply_retry_after_a_lost_close_keeps_one_outgoing_item(store, monkeypatch):
     original = store.send("alice", "bob", "question")
     close = store.close
