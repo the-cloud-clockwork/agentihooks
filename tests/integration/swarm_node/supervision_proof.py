@@ -8,6 +8,7 @@ import select
 import shlex
 import struct
 import subprocess
+import sys
 import termios
 import time
 import uuid
@@ -15,7 +16,11 @@ from pathlib import Path
 
 
 def docker(*args, timeout=30):
-    return subprocess.check_output(["docker", *args], text=True, timeout=timeout, stderr=subprocess.STDOUT).strip()
+    try:
+        return subprocess.check_output(["docker", *args], text=True, timeout=timeout, stderr=subprocess.STDOUT).strip()
+    except subprocess.CalledProcessError as exc:
+        print(exc.output, file=sys.stderr, flush=True)
+        raise
 
 
 def state(container):
