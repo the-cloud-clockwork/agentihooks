@@ -417,6 +417,20 @@ def test_no_saved_hive_redis_url_reads_as_none(tmp_path, content):
     assert cli.saved_redis_url({"AGENTIHOOKS_HOME": str(tmp_path)}) is None
 
 
+def test_a_saved_hive_redis_url_keeps_every_equals_sign_after_the_name(tmp_path):
+    url = auth._with_user("rediss://hive.example:6380/0?ssl_cert_reqs=none&x=y", "hive-a", "p")
+    auth.write_env(tmp_path, "https://hive.example:8770", {"id": "a", "ledger_credential": "l", "redis_url": url})
+
+    assert cli.saved_redis_url({"AGENTIHOOKS_HOME": str(tmp_path)}) == url
+
+
+def test_the_refresh_command_is_listed_with_its_help():
+    (commands,) = cli._parser()._subparsers._group_actions
+    helps = {action.dest: action.help for action in commands._choices_actions}
+
+    assert helps["refresh"] == "Mint a new Redis credential for this hive through its join service"
+
+
 def test_the_hive_home_comes_from_the_mapping_then_the_process(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "process"))
 
