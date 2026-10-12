@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from scripts.routing.slots import SlotSource
 
 PAGE_TTL_S = 60
-RETIRED_AFTER_S = 6 * 3600
+RETIRED_AFTER_S = session_bands.FRESH_SECONDS
 STALE = "STALE"
 EXPIRED_SOURCE = "token expired: run {login}"
 NEXT_MARK = "(next)"
