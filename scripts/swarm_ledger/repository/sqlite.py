@@ -322,7 +322,8 @@ class SQLiteLedgerRepository:
             return json.loads(self._entry(connection, slug).text)
 
     def encoded_view(self, slug: str, view) -> str:
-        """view(state) of the stored ledger, built once per generation; view must not change the state it reads."""
+        """view(state) of the stored ledger, built once per generation and keyed by view, so view is a module
+        level function that never changes the state it reads."""
         self._adopt(slug)
         with self.connect() as connection, connection:
             connection.execute(BEGIN)
