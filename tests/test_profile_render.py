@@ -2679,21 +2679,27 @@ def test_cli_renders_the_overlays_named(world, overlays, capsys):
     assert re.search(r"--overlay OVERLAY\s+Wear this overlay; repeat for up to three", capsys.readouterr().out)
 
 
-def test_an_overlay_render_refuses_a_bundle_at_another_commit_than_its_launch_recorded(world, overlays):
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_an_overlay_render_uses_the_recorded_commit_after_the_bundle_advances(world, overlays, target):
     from scripts.profiles import render
 
     recorded = _git(world["bundle"], "rev-parse", "HEAD").strip()
+    _write(overlays / "ov-a" / ".claude" / "rules" / "ov-a.md", "ADVANCED RULE\n")
     _commit(world["bundle"], "moved")
     head = _git(world["bundle"], "rev-parse", "HEAD").strip()
 
-    with pytest.raises(ValueError) as refused:
-        render.render("claude", "rb-eng", overlays=["ov-a"], bundle_revision=recorded)
+    out = render.render(target, "rb-eng", overlays=["ov-a"], bundle_revision=recorded)
 
-    assert str(refused.value) == (
-        f"the launch recorded bundle commit {recorded}, but the bundle at {world['bundle']} is at commit {head}; "
-        f"check out {recorded} in the bundle before this launch renders"
-    )
-    assert render.profile_dir("rb-eng", ["ov-a"]) is None
+    persona = out / ("AGENTS.md" if target == "codex" else "CLAUDE.md")
+    assert "OV-A RULE MARKER" in persona.read_text()
+    assert "ADVANCED RULE" not in persona.read_text()
+    stamp = json.loads((out / render.STAMP).read_text())
+    assert stamp.get("render", stamp)["bundle_commit"] == recorded
+    assert _git(world["bundle"], "rev-parse", "HEAD").strip() == head
+    assert _git(world["bundle"], "status", "--porcelain") == ""
+    assert (out / "skills" / "bundle-skill" / "SKILL.md").read_text() == "---\nname: bundle-skill\n---\n"
+    assert render.binding.inspect(out, "rb-eng", target)["profile"] == "rb-eng"
+    assert render.render(target, "rb-eng", overlays=["ov-a"], bundle_revision=recorded) is None
 
 
 def test_an_overlay_render_refuses_a_bundle_with_uncommitted_changes(world, overlays):
