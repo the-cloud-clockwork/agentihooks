@@ -83,6 +83,59 @@ def test_seeded_hive_adopts_its_hostname_lease(store, monkeypatch, legacy):
     assert lease.acquire(store, "sw", "other-hive") is None
 
 
+@pytest.mark.parametrize("legacy", [False, True])
+@pytest.mark.parametrize("holder, requested", [("other-machine", "seeded-hive"), ("this-machine", "other-hive")])
+def test_seeded_hive_never_adopts_another_machine_lease(store, monkeypatch, legacy, holder, requested):
+    import socket
+
+    from scripts.swarm import commands
+
+    monkeypatch.setattr(socket, "gethostname", lambda: "this-machine")
+    monkeypatch.setattr(commands.registry, "seeded_id", lambda: "seeded-hive")
+    monkeypatch.delenv("SWARM_HIVE_ID", raising=False)
+    monkeypatch.setattr(lease, "now_ms", lambda saved: 1000)
+    held = lease.acquire(store, "sw", holder)
+    if legacy:
+        store.redis.set(store.key("sw", "control-owner"), holder)
+    assert lease.acquire(store, "sw", requested) is None
+    assert lease.current(store, "sw") == lease.Lease(holder, 2 if legacy else held.epoch, 181000)
+
+
+def test_hostname_migration_rechecks_a_competing_owner(store, monkeypatch):
+    import socket
+
+    from scripts.swarm import commands
+
+    monkeypatch.setattr(socket, "gethostname", lambda: "this-machine")
+    monkeypatch.setattr(commands.registry, "seeded_id", lambda: "seeded-hive")
+    monkeypatch.delenv("SWARM_HIVE_ID", raising=False)
+    monkeypatch.setattr(lease, "now_ms", lambda saved: 1000)
+    lease.acquire(store, "sw", "this-machine")
+    pipeline = store.redis.pipeline
+    competed = []
+
+    def competing_pipeline():
+        pipe = pipeline()
+        execute = pipe.execute
+
+        def commit():
+            if not competed:
+                competed.append(True)
+                store.redis.set(
+                    store.key("sw", "control-owner"),
+                    json.dumps({"owner": "other-machine", "epoch": 2, "expires_at": 181000}),
+                )
+                store.redis.set(store.key("sw", "control-epoch"), 2)
+            return execute()
+
+        pipe.execute = commit
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", competing_pipeline)
+    assert lease.acquire(store, "sw", commands.hive_id()) is None
+    assert lease.current(store, "sw") == lease.Lease("other-machine", 2, 181000)
+
+
 def test_expired_lease_cannot_write_or_release(store, monkeypatch):
     clock = [1000]
     monkeypatch.setattr(lease, "now_ms", lambda saved: clock[0])
