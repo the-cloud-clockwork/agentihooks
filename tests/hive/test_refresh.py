@@ -154,6 +154,26 @@ def test_a_failed_acl_save_undoes_the_join(saved, redis_lib, monkeypatch):
     assert redis.keys(f"{auth.PREFIX}:ledger:*") == []
 
 
+def test_a_failed_acl_save_after_a_revoke_is_reported(saved, redis_lib, monkeypatch):
+    redis, aclfile = saved
+    grant = auth.exchange(redis, auth.invite(redis, "laptop"), PUBLIC)
+
+    def refuse(self):
+        raise redis_lib.exceptions.ResponseError("ERR There was an error trying to save the ACLs")
+
+    monkeypatch.setattr(redis_lib.Redis, "acl_save", refuse)
+
+    with pytest.raises(auth.HiveError) as refused:
+        auth.revoke(redis, grant["id"])
+
+    assert str(refused.value) == (
+        f"revoked {grant['id']}, but Redis could not save its ACL file, so a restart revives it "
+        "(ERR There was an error trying to save the ACLs)"
+    )
+    assert redis.acl_users() == ["default"]
+    assert _saved_users(aclfile) == ["default", f"hive-{grant['id']}"]
+
+
 def test_the_refresh_endpoint_answers_with_the_refreshed_grant(admin, hive):
     grant = auth.exchange(admin, auth.invite(admin, "laptop"), PUBLIC)
     body = json.dumps({"ledger_credential": grant["ledger_credential"]}).encode()
