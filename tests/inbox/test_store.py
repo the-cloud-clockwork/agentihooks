@@ -263,6 +263,32 @@ def test_reply_retry_after_a_lost_close_keeps_one_outgoing_item(store, monkeypat
     assert store.get(original.id).reason == f"done: replied with message {answer.id}"
 
 
+def test_reply_retry_after_recipient_handoff_keeps_the_same_outgoing_item(store, monkeypatch):
+    original = store.send("alice", "bob", "question")
+    close = store.close
+    monkeypatch.setattr(store, "close", lambda *args: (_ for _ in ()).throw(ConnectionError("lost close")))
+    with pytest.raises(ConnectionError):
+        store.reply(original.id, "bob", "answer")
+    monkeypatch.setattr(store, "close", close)
+    [answer] = store.inbox("alice")
+    store.redirect(answer.id, "swarm", "eng-1@sw", "the task continues in its seat")
+    replay = store.reply(original.id, "bob", "answer")
+    assert replay.id == answer.id
+    assert [item.id for item in store.inbox("eng-1@sw")] == [answer.id]
+    assert store.get(original.id).reason == f"done: replied with message {answer.id}"
+
+
+def test_reply_operation_cannot_reuse_another_originals_outgoing_item(store):
+    first = store.send("alice", "bob", "first question")
+    answer = store.reply(first.id, "bob", "answer")
+    second = store.send("alice", "bob", "second question")
+    with pytest.raises(InboxError) as refused:
+        store.reply(second.id, "bob", "answer", answer_id=answer.id)
+    assert str(refused.value) == "a reply retry must keep its sender, recipient, text and informational flag"
+    assert store.get(second.id).state == "pending"
+    assert [item.id for item in store.inbox("alice")] == [answer.id]
+
+
 def test_racing_reply_retries_return_one_outgoing_answer(server, monkeypatch):
     first, second = fresh(server), fresh(server)
     original = first.send("alice", "bob", "question")
