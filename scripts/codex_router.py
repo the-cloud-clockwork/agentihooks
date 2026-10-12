@@ -418,21 +418,24 @@ def child_environment(account: CodexAccount, environ: Mapping[str, str]) -> dict
 
 def _exec_at(args: list[str]) -> int | None:
     value_flags = codex_sessions.VALUE_FLAGS | {"--local-provider", "--remote", "--remote-auth-token-env", "--add-dir"}
-    at = 0
-    while at < len(args):
-        arg = args[at]
-        if arg == "--":
-            return None
-        if arg == "--image" or arg.startswith(("-i", "--image=")):
-            at += 1
-            while at < len(args) and not args[at].startswith("-"):
-                at += 1
-        elif arg in value_flags:
-            at += 2
-        elif arg.startswith("-"):
-            at += 1
-        else:
-            return at if arg in ("exec", "e") else None
+    mode = "options"
+    for at, arg in enumerate(args):
+        if mode == "value":
+            mode = "options"
+            continue
+        if mode == "images":
+            if not arg.startswith("-"):
+                continue
+            mode = "options"
+        if mode == "options":
+            if arg == "--":
+                return None
+            if arg == "--image" or arg.startswith(("-i", "--image=")):
+                mode = "images"
+            elif arg in value_flags:
+                mode = "value"
+            elif not arg.startswith("-"):
+                return at if arg in ("exec", "e") else None
     return None
 
 

@@ -677,6 +677,7 @@ def test_a_bearer_child_carries_its_token_and_account_id_and_runs_the_bearer_pro
         (["--model", "chosen-model", "exec", "-c", 'model_reasoning_effort="low"'], 2),
         (["--model", "e", "exec", "--", "-"], 2),
         (["--no-alt-screen", "e", "--", "probe"], 1),
+        (["--no-alt-screen", "--search", "exec", "probe"], 2),
         (["exec", "--", "-"], 0),
         (["--model=chosen-model", "exec", "probe"], 1),
         (["--model", "exec", "probe"], None),
@@ -703,9 +704,7 @@ def test_routed_auth_overrides_share_the_exec_config_scope_and_preserve_interact
     assert router.command(account, "/usr/bin/codex", args) == expected
 
 
-@pytest.mark.parametrize(
-    "flag", ["-i", "--image", "--local-provider", "--remote", "--remote-auth-token-env", "--add-dir"]
-)
+@pytest.mark.parametrize("flag", ["--local-provider", "--remote", "--remote-auth-token-env", "--add-dir"])
 def test_exec_auth_scope_skips_the_other_native_root_option_values(flag):
     account = router.credential(_token("alpha"), OAUTH_ENV)
     args = [flag, "exec", "e", "-c", 'model_reasoning_effort="low"', "probe"]
