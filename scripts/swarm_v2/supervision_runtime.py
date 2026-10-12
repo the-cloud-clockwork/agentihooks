@@ -19,6 +19,7 @@ from scripts.swarm_v2.checkpoints import runtime as checkpoint_runtime
 from scripts.swarm_v2.supervision import Launch, LaunchRefused
 from scripts.swarm_v2.supervision_agent import native_command
 from scripts.swarm_v2.supervision_protocol import checkpoint, matches, read, write
+from scripts.swarm_v2.worker import lease_renewal
 
 PROMPT = "prompt.md"
 
@@ -39,6 +40,7 @@ class Supervisor:
         self.stop = None
         self.failure_class = None
         self.phase = "startup"
+        self.lease = lease_renewal.load(launch.attempt)
         self.environment = {k: v for k, v in os.environ.items() if not k.startswith("HERDR_")}
         self.environment.update(oauth_env(self.environment))
         self.environment.update(
@@ -159,6 +161,9 @@ class Supervisor:
             self.wait()
             if self.stop:
                 return "termination"
+            self.lease.tick()
+            if self.lease.lost is not None:
+                return "lease_lost"
             for role in ("herdr", "exporter", "agent"):
                 if role in self.exits:
                     return "agent_completed" if role == "agent" and self.exits[role] == 0 else f"{role}_failure"
@@ -186,7 +191,7 @@ class Supervisor:
         write(self.root / "quiesced.json", {**self.scope, "status": "quiesced" if clean else "forced"})
         identifier = None
         deadline = time.monotonic() + self.launch.budgets.checkpoint
-        while clean and self.launch.exporter and time.monotonic() < deadline:
+        while clean and self.lease.lost is None and self.launch.exporter and time.monotonic() < deadline:
             identifier = checkpoint(self.launch.attempt, read(self.root / "exporter.checkpoint.json"), self.scope)
             if identifier:
                 portable = (

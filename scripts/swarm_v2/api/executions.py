@@ -146,8 +146,8 @@ class ExecutionsAPI:
         held = self.tasks.controller.held
         if held is None:
             raise GrantRefused("dependency_unavailable", "the controller lease is absent")
-        if authority["controller_epoch"] != held.epoch:
-            raise GrantRefused("stale_generation", "heartbeat names another controller epoch")
+        if authority["controller_epoch"] > held.epoch:
+            raise GrantRefused("stale_generation", "heartbeat names a later controller epoch")
 
     def _commit(self, claim: TaskClaim, body: dict, fingerprint: str) -> dict:
         key = self.store.key(self.slug, "heartbeats")

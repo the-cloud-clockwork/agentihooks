@@ -134,6 +134,20 @@ def test_independent_worker_groups_balance_without_serializing_each_other():
     assert sorted(node for part in parts for node in part) == nodes
 
 
+def test_worker_shards_charge_collection_once_per_file():
+    from tests.shards import assign_nodes
+
+    nodes = [f"tests/test_{name}.py::test_{case}" for name in "abc" for case in range(4)]
+    durations = dict.fromkeys(nodes, 0.0)
+    sizes = {f"tests/test_{name}.py": size for name, size in zip("abc", (1_000_000, 1000, 1000))}
+    parts = assign_nodes(durations, 2, {}, 4, sizes=sizes)
+    assert sorted(sorted({node.split("::")[0] for node in part}) for part in parts) == [
+        ["tests/test_a.py"],
+        ["tests/test_b.py", "tests/test_c.py"],
+    ]
+    assert sorted(node for part in parts for node in part) == nodes
+
+
 def test_worker_shards_select_each_measured_and_unknown_case_once(tmp_path):
     (tmp_path / "tests").mkdir()
     (tmp_path / "tests/test_hot.py").write_text('import pytest\npytestmark = pytest.mark.xdist_group("redis")\n')
@@ -369,7 +383,8 @@ def test_the_controller_warms_its_shards_test_modules_once_per_worker(monkeypatc
     calls, config = _configured(monkeypatch, 4)
     files = [path for path in discover_test_files(_ROOT) if path not in FIRST_SHARD_FILES]
     durations = {node: seconds for node, seconds in _stored_durations().items() if node.split("::", 1)[0] in files}
-    part = conftest.assign_nodes(durations, 4, conftest.grouped_files(_ROOT, files), 4)[1]
+    sizes = conftest.source_sizes(_ROOT, files) if conftest.sys.version_info[:2] == (3, 11) else None
+    part = conftest.assign_nodes(durations, 4, conftest.grouped_files(_ROOT, files), 4, sizes=sizes)[1]
     known = {node.split("::", 1)[0] for node in durations}
     shard = sorted({node.split("::", 1)[0] for node in part} | (set(files) - known))
     assert calls == [([path.removesuffix(".py").replace("/", ".") for path in shard], 4)]
