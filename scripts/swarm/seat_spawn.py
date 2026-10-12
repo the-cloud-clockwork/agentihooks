@@ -1,7 +1,7 @@
 """Spawn one named seat of a swarm, the master or the dispatcher, behind the session slot and host checks."""
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from scripts.inbox.seats import seat_address
 from scripts.swarm.naming import TYPES
@@ -54,7 +54,8 @@ def place_seat(slug: str, config, store, runtime, seat: Seat, now_ms: int, prepa
         placed = runtime.spawn(config, lane, name, prepare(record))
         from scripts.swarm_v2.runtime import codex
 
-        record = codex.admit_legacy(store, slug, tick.placed_record(record, placed), runtime)
+        admitted = codex.admit_legacy(store, slug, tick.placed_record(record, placed), runtime)
+        placed = replace(placed, execution=admitted) if admitted.execution_id else placed
     except Exception as exc:
         raise SeatFailed(record, exc) from exc
     tick._spend_host(store, name, now_ms)

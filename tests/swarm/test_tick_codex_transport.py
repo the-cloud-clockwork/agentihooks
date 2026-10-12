@@ -122,7 +122,7 @@ def test_failed_transport_admission_retires_the_launched_pane(tmp_path, monkeypa
     actions = tick("sw", store, ledger, routed({}, herdr=fake), now_ms=1000)
     assert any("spawn failed" in action for action in actions), actions
     assert not any(agent.lane == lane for agent in store.agents("sw"))
-    assert not store.executions("sw")
+    assert not store.execution_occupants("sw")
     assert ended if transport == "app_server" else "w1:p2" in fake.closed
     if lane == "eng":
         assert ledger.rows["t1"]["state"] == "open"

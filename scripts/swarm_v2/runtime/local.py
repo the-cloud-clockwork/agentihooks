@@ -25,7 +25,7 @@ from scripts.swarm_v2.runtime.base import (
 
 def _failed(operation: str, exc: SpawnError) -> Outcome:
     status = Status.AMBIGUOUS if isinstance(exc.__cause__, subprocess.TimeoutExpired) else Status(exc.status)
-    return Outcome(operation, status, LOCAL, detail=str(exc))
+    return Outcome(operation, status, LOCAL, {"pane_id": exc.pane_id}, detail=str(exc))
 
 
 class LocalHerdrRuntime:
