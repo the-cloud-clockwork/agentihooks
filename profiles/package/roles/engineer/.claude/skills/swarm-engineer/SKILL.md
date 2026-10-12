@@ -72,8 +72,8 @@ Full Tests dispatch is for gate plant proofs. Declare that intent explicitly:
 gh workflow run test.yml --ref <proof branch> -f gate_plant=true
 ```
 
-The first job refuses an ordinary full dispatch and names Proofs; expensive
-jobs stay skipped. Record the proof run and head, and its expected red or
+The admission job refuses an ordinary full dispatch and names Proofs; expensive
+jobs require successful admission on dispatch. Record the proof run and head, and its expected red or
 green result, before continuing.
 
 ## Waits
