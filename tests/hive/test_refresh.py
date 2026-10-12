@@ -359,6 +359,56 @@ def test_a_saved_credential_that_is_also_refused_is_refreshed(admin, hive, redis
     assert _accepts(admin, environ["AGENTIHOOKS_HIVE_REDIS_URL"])
 
 
+def test_two_processes_refused_at_once_refresh_once_and_share_the_credential(
+    admin, hive, redis_lib, tmp_path, monkeypatch
+):
+    grant = _joined(admin, hive, tmp_path, monkeypatch)
+    admin.acl_deluser(f"hive-{grant['id']}")
+    both_refused = threading.Barrier(2)
+    refreshes = []
+    real_refresh = auth.refresh
+
+    def counted(*args):
+        refreshes.append(args[1])
+        return real_refresh(*args)
+
+    monkeypatch.setattr(auth, "refresh", counted)
+
+    def ping(self):
+        kwargs = self.connection_pool.connection_kwargs
+        if kwargs["password"] == _password(grant["redis_url"]):
+            both_refused.wait(timeout=5)
+            raise redis_lib.exceptions.AuthenticationError("invalid username-password pair or user is disabled.")
+        digest = hashlib.sha256(kwargs["password"].encode()).hexdigest()
+        if digest not in admin.acl_getuser(kwargs["username"])["passwords"]:
+            raise redis_lib.exceptions.AuthenticationError("invalid username-password pair or user is disabled.")
+        return True
+
+    monkeypatch.setattr(redis_lib.Redis, "ping", ping)
+    environs = [_hive_environ(hive, grant, tmp_path) for _ in range(2)]
+    clients, failures = [], []
+
+    def connect(environ):
+        try:
+            clients.append(store.redis_client(environ))
+        except Exception as exc:  # noqa: BLE001  surfaced through the failures assertion below
+            failures.append(exc)
+
+    threads = [threading.Thread(target=connect, args=(environ,)) for environ in environs]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=20)
+
+    assert failures == []
+    assert len(refreshes) == 1
+    assert environs[0]["AGENTIHOOKS_HIVE_REDIS_URL"] == environs[1]["AGENTIHOOKS_HIVE_REDIS_URL"]
+    assert _accepts(admin, environs[0]["AGENTIHOOKS_HIVE_REDIS_URL"])
+    assert {client.connection_pool.connection_kwargs["password"] for client in clients} == {
+        _password(environs[0]["AGENTIHOOKS_HIVE_REDIS_URL"])
+    }
+
+
 @pytest.mark.parametrize("content", [None, "AGENTIHOOKS_HIVE_ID=a\n", "AGENTIHOOKS_HIVE_REDIS_URL=\n"])
 def test_no_saved_hive_redis_url_reads_as_none(tmp_path, content):
     if content is not None:
