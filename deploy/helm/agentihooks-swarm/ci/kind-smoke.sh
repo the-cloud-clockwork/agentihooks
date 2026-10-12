@@ -156,6 +156,13 @@ printf 'the chart check flagged a planted ledger reference to the terminal CA Se
 roles=(-f "$chart/ci/kind-redis-roles.yaml")
 helm template "$release" "$chart" "${roles[@]}" | python3 tests/chart_redis.py "$chart/ci/kind-redis-roles.yaml"
 helm template "$release" "$chart" "${roles[@]}" "${api[@]}" | python3 tests/chart_redis.py "$chart/ci/kind-redis-roles.yaml"
+joined="$(helm template "$release" "$chart" "${roles[@]}" -f "$chart/ci/kind-hive-join.yaml" \
+  --set redis.existingSecret.name=swarm-redis-admin --set hive.join.redisSecret.name=)"
+python3 tests/chart_redis.py "$chart/ci/kind-redis-roles.yaml" <<<"$joined"
+if [[ $joined != *"name: swarm-redis-admin"* ]]; then
+  printf 'the hive join service lost the administrator Redis Secret under redis.roles\n' >&2
+  exit 1
+fi
 planted="$(helm template "$release" "$chart" "${roles[@]}" --set 'secretEnv[0].name=ADMIN_URL' \
   --set 'secretEnv[0].secretName=swarm-redis-admin' --set 'secretEnv[0].key=url' \
   | python3 tests/chart_redis.py "$chart/ci/kind-redis-roles.yaml" 2>&1 >/dev/null || true)"

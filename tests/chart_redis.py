@@ -31,7 +31,7 @@ def problems(documents: list, redis: dict) -> list[str]:
     for document, pod, container in containers(documents):
         role = role_of(document)
         where = f"{document['kind']} {document['metadata']['name']} container {container['name']}"
-        if references(pod, container, admin):
+        if references(pod, container, admin) and not document["metadata"]["name"].endswith("-hive-join"):
             found.append(f"{where} references the administrator Redis Secret {admin}")
         reference = url_reference(container)
         if role is None or reference is None:
