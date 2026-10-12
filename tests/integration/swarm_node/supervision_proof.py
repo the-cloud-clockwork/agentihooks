@@ -154,10 +154,11 @@ def run_case(image, mode, output, kill=False, supervised=False, viewer=True):
         assert not stopped["Running"] and stopped["Pid"] == 0
         target = output / uuid.uuid4().hex
         target.mkdir()
-        try:
-            docker("cp", f"{container}:/home/worker/attempts", str(target))
-        except subprocess.CalledProcessError as exc:
-            raise AssertionError(exc.output) from exc
+        attempt = Path(root).parents[2]
+        captured = target / "attempts" / attempt.name
+        (captured / "run").mkdir(parents=True)
+        docker("cp", f"{container}:{attempt}/launch.json", str(captured / "launch.json"))
+        docker("cp", f"{container}:{attempt}/run/supervision", str(captured / "run"))
         results = list(target.glob("attempts/*/run/supervision/*/result.json"))
         launch = json.loads(next(target.glob("attempts/*/launch.json")).read_text())
         bound = launch["quiesce_seconds"] + launch["checkpoint_seconds"] + 3 * launch["kill_seconds"] + 1
