@@ -152,7 +152,6 @@ def test_the_pre_tool_hook_logs_a_failed_lookup_and_adds_nothing(worker, monkeyp
         "gh run watch 123 --interval 60",
         "gh -R owner/repo run watch 123",
         "gh pr checks 456 --watch",
-        "gh pr checks 456 -w",
         "gh pr checks --watch=true 456",
         "cd repo && gh run watch 123 | tail -n 1",
         "gh pr checks 456 --watch; echo done",
@@ -180,6 +179,7 @@ def test_declaring_a_wait_does_not_allow_an_independent_github_watch(worker, cap
     [
         "gh run view 123 --json status",
         "gh pr checks 456",
+        "gh pr checks 456 -w",
         "gh pr view 456 --json state",
         "gh api repos/owner/repo/actions/runs/123",
         "printf '%s' 'gh run watch 123'",

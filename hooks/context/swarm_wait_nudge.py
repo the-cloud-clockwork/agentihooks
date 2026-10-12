@@ -48,7 +48,7 @@ def _github_watch(tokens: list[str]) -> bool:
     while args and args[0].startswith("-"):
         args = args[2:] if args[0] in ("-R", "--repo", "--hostname") else args[1:]
     return args[:2] == ["run", "watch"] or (
-        args[:2] == ["pr", "checks"] and any(flag in ("--watch", "--watch=true", "-w") for flag in args[2:])
+        args[:2] == ["pr", "checks"] and any(flag in ("--watch", "--watch=true") for flag in args[2:])
     )
 
 
