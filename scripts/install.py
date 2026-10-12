@@ -778,10 +778,8 @@ def _get_bundle_path() -> Path | None:
     if (recorded := current()) is not None:
         return recorded
     bundle = _load_state().get("bundle")
-    if bundle:
-        p = Path(bundle["path"])
-        if p.is_dir():
-            return p
+    if bundle and (p := Path(bundle["path"])).is_dir():
+        return p
     env_path = os.environ.get("AGENTIHOOKS_BUNDLE_PATH", "")
     if env_path:
         p = Path(env_path).expanduser().resolve()
