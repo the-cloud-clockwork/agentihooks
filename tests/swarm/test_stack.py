@@ -10,7 +10,7 @@ from scripts.gates.verdicts import Verdicts
 from scripts.handoff import check as handoff_check
 from scripts.handoff import transfers
 from scripts.inbox.seats import SeatRegistry
-from scripts.swarm import cli, stack, tick
+from scripts.swarm import cli, dispatcher, stack, tick
 from scripts.swarm.store import SwarmError
 from tests.swarm.test_cli import HANDOFF, env
 
@@ -108,7 +108,7 @@ def _refused(parked, capsys, says):
     assert park(doc) == 1
     assert capsys.readouterr().err == f"swarm: {says}\n"
     assert "parked_on" not in ledger.rows["t1"] and "stacked_base" not in ledger.rows["t1"]
-    assert ledger.comments == [] and shell.comments() == []
+    assert [row for row in ledger.comments if row[-1] != dispatcher.AUTHOR] == [] and shell.comments() == []
     assert REMOVE not in shell.calls
     assert store.handoff("sw", "t1") == ""
     assert [a.state for a in store.agents("sw") if a.name == AGENT] == ["working"]

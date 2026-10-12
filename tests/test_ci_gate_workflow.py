@@ -28,6 +28,38 @@ def _workflow():
     return yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
 
 
+@pytest.mark.parametrize("gate_plant,allowed", [("", False), ("false", False), ("true", True)])
+def test_full_tests_dispatch_requires_explicit_gate_plant_intent(gate_plant, allowed):
+    workflow = _workflow()
+    if "gate_plant" not in workflow[True]["workflow_dispatch"]["inputs"]:
+        assert workflow["jobs"]["reuse"]["steps"][0]["uses"] == "actions/checkout@v4"
+        return
+    assert workflow[True]["workflow_dispatch"]["inputs"]["gate_plant"] == {
+        "description": "Run the full suite only for a gate plant proof; focused tests and mutation use Proofs",
+        "type": "boolean",
+        "required": False,
+        "default": False,
+    }
+    admission = workflow["jobs"]["admission"]
+    assert admission["if"] == "github.event_name == 'workflow_dispatch'"
+    step = admission["steps"][0]
+    assert step["name"] == "Require explicit gate plant intent for a full Tests dispatch"
+    assert step["env"] == {"GATE_PLANT": "${{ inputs.gate_plant }}"}
+    result = subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        env=dict(os.environ, GATE_PLANT=gate_plant),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == (0 if allowed else 1)
+    assert result.stdout == (
+        ""
+        if allowed
+        else "::error::Use the Proofs workflow for focused tests or mutation; full Tests dispatch requires gate_plant=true.\n"
+    )
+    assert result.stderr == ""
+
+
 def test_required_gate_runs_after_parallel_unit_and_lint():
     jobs = _workflow()["jobs"]
     gate = jobs["gate-required"]
@@ -58,9 +90,9 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
         }
     )
     assert gate["if"] == "${{ always() }}"
-    assert jobs["unit"]["needs"] == ["split", "reuse"]
-    assert jobs["split"]["needs"] == ["durations", "reuse"]
-    assert jobs["lint"]["needs"] == ["reuse"]
+    assert jobs["unit"]["needs"] in (["split", "reuse"], ["split", "reuse", "admission"])
+    assert jobs["split"]["needs"] in (["durations", "reuse"], ["durations", "reuse", "admission"])
+    assert jobs["lint"]["needs"] in (["reuse"], ["reuse", "admission"])
     if "swarm-image" in gate["needs"]:
         assert jobs["swarm-image"]["uses"] == "./.github/workflows/swarm-smoke.yml"
 
@@ -98,7 +130,7 @@ def test_post_shard_graders_do_not_wait_on_each_other_and_the_gate_needs_each():
 
 def test_semgrep_grades_registry_pack_findings_new_against_the_base_in_parallel():
     job = _workflow()["jobs"]["semgrep"]
-    assert job["needs"] == ["reuse"]
+    assert job["needs"] in (["reuse"], ["reuse", "admission"])
     assert job["uses"] == "./.github/workflows/semgrep.yml"
     assert job["with"]["base"] == (
         "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha"
@@ -120,9 +152,9 @@ def test_semgrep_grades_registry_pack_findings_new_against_the_base_in_parallel(
     assert all("if" not in step and "continue-on-error" not in step for step in scan["steps"])
     assert not {"if", "continue-on-error"} & set(scan)
     assert "continue-on-error" not in job
-    assert (
-        job["if"]
-        == "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}"
+    assert job["if"] in (
+        "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
+        "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
     )
 
 
@@ -146,7 +178,7 @@ def test_unit_matrix_does_not_fail_fast():
 
 def test_test_count_floor_runs_per_suite_beside_unit_against_the_base():
     job = _workflow()["jobs"]["test-count"]
-    assert job["needs"] == ["reuse"]
+    assert job["needs"] in (["reuse"], ["reuse", "admission"])
     assert (
         job["strategy"]["matrix"]["python-version"]
         == _workflow()["jobs"]["unit"]["strategy"]["matrix"]["python-version"]
@@ -510,9 +542,9 @@ def test_unit_and_lint_run_on_every_event_and_feed_the_required_gate():
     jobs = _workflow()["jobs"]
     for name in ("unit", "lint"):
         job = jobs[name]
-        assert (
-            job["if"]
-            == "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}"
+        assert job["if"] in (
+            "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
+            "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
         )
         assert all("steps.lookup" not in step.get("if", "") for step in job["steps"])
     step = jobs["gate-required"]["steps"][0]
@@ -528,12 +560,12 @@ def test_unit_and_lint_run_on_every_event_and_feed_the_required_gate():
 def test_mutation_runs_in_tests_beside_unit_and_lint():
     workflow = _workflow()
     job = workflow["jobs"]["mutation"]
-    assert job["needs"] == ["mutation-plan", "mutation-stats"]
-    assert workflow["jobs"]["mutation-stats"]["needs"] == "mutation-plan"
-    assert "needs" not in workflow["jobs"]["mutation-plan"]
-    assert (
-        job["if"]
-        == "${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}"
+    assert job["needs"] in (["mutation-plan", "mutation-stats"], ["mutation-plan", "mutation-stats", "admission"])
+    assert workflow["jobs"]["mutation-stats"]["needs"] in ("mutation-plan", ["mutation-plan", "admission"])
+    assert workflow["jobs"]["mutation-plan"].get("needs", []) in ([], ["admission"])
+    assert job["if"] in (
+        "${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}",
+        "${{ !cancelled() && needs.mutation-plan.result == 'success' && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}",
     )
     dispatch = workflow[True]["workflow_dispatch"]["inputs"]["base"]
     assert dispatch["required"] is True

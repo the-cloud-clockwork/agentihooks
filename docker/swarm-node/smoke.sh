@@ -21,7 +21,7 @@ PY
 }
 trap cleanup EXIT
 
-docker build --platform linux/amd64 --build-arg SOURCE_REVISION="$revision" \
+docker build --platform linux/amd64 ${WORKER_BASE_CONTEXT:+--build-context "$WORKER_BASE_CONTEXT"} --build-arg SOURCE_REVISION="$revision" \
     -f "$context/docker/swarm-node/Dockerfile" -t "$image" "$context" > "$output/build.log" 2>&1
 bash "$context/docker/swarm-node/scan.sh" "$image" "$output/credential-scan"
 for attempt in first second; do
@@ -65,7 +65,7 @@ else:
     lock['tools']['herdr']['sha256']='0'*64
 path.write_text(json.dumps(lock))
 PY
-    if docker build --platform linux/amd64 -f "$context/docker/swarm-node/Dockerfile" \
+    if docker build --platform linux/amd64 ${WORKER_BASE_CONTEXT:+--build-context "$WORKER_BASE_CONTEXT"} -f "$context/docker/swarm-node/Dockerfile" \
         -t "$rejected" "$context" > "$output/$rejection.log" 2>&1; then
         echo "rejection fixture unexpectedly built: $rejection" >&2
         exit 1
@@ -76,7 +76,7 @@ PY
     fi
 done
 mv "$context/docker/swarm-node/versions.original" "$context/docker/swarm-node/versions.lock"
-docker build --no-cache-filter worker --platform linux/amd64 --build-arg SOURCE_REVISION="$revision" \
+docker build --no-cache-filter worker --platform linux/amd64 ${WORKER_BASE_CONTEXT:+--build-context "$WORKER_BASE_CONTEXT"} --build-arg SOURCE_REVISION="$revision" \
     -f "$context/docker/swarm-node/Dockerfile" -t "$rebuild" "$context" > "$output/rebuild.log" 2>&1
 bash "$context/docker/swarm-node/scan.sh" "$rebuild" "$output/credential-scan-rebuild"
 docker run --rm --network none --read-only --tmpfs /home/worker:uid=10001,gid=10001 \
