@@ -368,7 +368,8 @@ def test_unit_pins_an_exact_uv_version():
 def _collected_suite() -> tuple[list[str], str]:
     split = _ROOT / "collected.json"
     if split.exists():
-        return json.loads(split.read_text()), split.name
+        text = split.read_text()
+        return json.loads(text), text
     result = subprocess.run(
         [sys.executable, "-m", "pytest", "tests/", "--collect-only", "-q", "-n", "0", "-o", "addopts="],
         cwd=_ROOT,
@@ -390,6 +391,15 @@ def test_stored_durations_cover_the_collected_suite():
         f"{len(missing)} of {len(collected)} tests have no stored duration; "
         "refresh them with: python -m tests.refresh_durations"
     )
+
+
+def test_unit_shards_read_the_suite_the_split_job_collected():
+    jobs = _workflow()["jobs"]
+    upload = next(step for step in jobs["split"]["steps"] if step.get("name") == "Upload collected tests")
+    _, download = _unit_step_index(lambda s: s.get("name") == "Download the suite the split job collected")
+    assert download["uses"] == "./.github/actions/retry-download"
+    assert download["with"] == {"name": upload["with"]["name"]}
+    assert download["if"] == upload["if"]
 
 
 @pytest.mark.parametrize("missing", [0, 5, 10, 11, 100])

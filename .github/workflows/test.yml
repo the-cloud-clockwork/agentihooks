@@ -513,7 +513,6 @@ jobs:
         with:
           name: split-${{ matrix.python-version }}
 
-      # The stored durations coverage test reads this instead of collecting the whole suite again inside a shard.
       - name: Download the suite the split job collected
         if: github.event.pull_request.base.ref != 'main'
         uses: ./.github/actions/retry-download
