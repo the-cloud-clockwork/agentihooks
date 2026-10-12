@@ -190,6 +190,19 @@ def test_a_hung_unit_test_dumps_every_thread_stack_within_a_minute():
     assert "faulthandler_exit_on_timeout" not in command
 
 
+def test_the_hung_test_bound_reads_the_committed_durations_not_the_downloaded_copy(tmp_path, monkeypatch):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    for name in (".test_durations", ".test_durations-3.12"):
+        (tmp_path / name).write_text(json.dumps({"tests/test_a.py::test_a": 1.0}))
+    subprocess.run(["git", "-C", str(tmp_path), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "d"], check=True
+    )
+    (tmp_path / ".test_durations-3.12").write_text(json.dumps({"tests/test_a.py::test_a": 90.0}))
+    monkeypatch.setattr(sys.modules[__name__], "_ROOT", tmp_path)
+    assert _slowest_committed_test() == 1.0
+
+
 def test_tests_run_on_pull_requests_into_dev_and_main():
     triggers = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())[True]
     assert set(triggers["pull_request"]["branches"]) == {"dev", "main"}
