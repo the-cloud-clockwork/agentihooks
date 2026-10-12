@@ -2810,7 +2810,7 @@ def test_an_overlay_render_from_the_recorded_commit_renders_and_stamps_it(world,
 def test_pinned_codex_rebuild_keeps_bundle_links_in_its_new_home(world, overlays):
     from scripts.profiles import bundle_copy, render
 
-    _write(world["bundle"] / ".codex" / "skills" / "pinned-skill" / "SKILL.md", "PINNED SKILL\n")
+    _write(overlays / "ov-a" / ".codex" / "skills" / "pinned-skill" / "SKILL.md", "PINNED SKILL\n")
     _commit(world["bundle"], "native skill")
     recorded = _git(world["bundle"], "rev-parse", "HEAD").strip()
     first = render.render("codex", "rb-eng", overlays=["ov-a"], bundle_revision=recorded)
@@ -2928,4 +2928,42 @@ def test_pinned_copilot_rebuild_keeps_the_recorded_overlay_servers(world, overla
     assert rebuilt.parent != first.parent
     servers = json.loads((rebuilt / "mcp-config.json").read_text())["mcpServers"]
     assert servers["overlay-server"]["command"] == "overlay-command"
+    assert servers["bundle-srv"]["command"] == "bundle-server"
+    assert bundle_copy.current() is None
+
+
+@pytest.mark.usefixtures("recorded_assets")
+@pytest.mark.parametrize("source", ["linked", "package"])
+def test_pinned_render_keeps_external_and_package_parents(world, overlays, tmp_path, source):
+    from scripts.profiles import bundle_copy, render
+
+    library = tmp_path / ("library" if source == "linked" else "package-roles/library")
+    _write(library / "profile.yml", "name: library\n")
+    _write(library / "CLAUDE.md", "LIBRARY PERSONA\n")
+    if source == "linked":
+        state = world["install"]._load_state()
+        state["linked_profiles"] = [{"name": "library", "path": str(library)}]
+        world["install"]._save_state(state)
+    _write(overlays / "rb-eng" / "profile.yml", "name: rb-eng\nextends: [library, package:engineer]\n")
+    _commit(world["bundle"], "library parent")
+    recorded = _git(world["bundle"], "rev-parse", "HEAD").strip()
+
+    out = render.render("claude", "rb-eng", overlays=["ov-a"], bundle_revision=recorded)
+
+    assert "LIBRARY PERSONA" in (out / "CLAUDE.md").read_text()
+    assert bundle_copy.current() is None
+
+
+@pytest.mark.usefixtures("recorded_assets")
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_pinned_render_honors_force(world, overlays, target):
+    from scripts.profiles import bundle_copy, render
+
+    recorded = _git(world["bundle"], "rev-parse", "HEAD").strip()
+    first = render.render(target, "rb-eng", overlays=["ov-a"], bundle_revision=recorded)
+
+    forced = render.render(target, "rb-eng", force=True, overlays=["ov-a"], bundle_revision=recorded)
+
+    assert forced is not None
+    assert forced.parent != first.parent
     assert bundle_copy.current() is None
