@@ -73,6 +73,7 @@ from scripts.swarm import (
     affinity,
     agent_up,
     bottleneck,
+    bottleneck_status,
     clearance,
     control_notifications,
     delivery,
@@ -282,6 +283,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
                 os.environ,
                 metrics.metrics_swarm.TickInput(store, doc, found, view, ledger),
             )
+            actions += skip_refused(bottleneck_status.refresh, slug, store, now_ms())
             window = wake.window_ms(os.environ)
             actions += skip_refused(
                 wake.wake_pass, inbox, slug, agents, herdr, ledger, now_ms(), window, wake.quiet_ms(os.environ)
@@ -864,6 +866,7 @@ def cmd_status(store, args):
         print(line)
     print(bottleneck.line(bottleneck.read(store, args.slug), now_ms()))
     print(stages.line(stages.read(store, args.slug), now_ms()))
+    print(bottleneck_status.line(bottleneck_status.report(store, args.slug, now_ms())))
     print(_snapshot_line(auto_snapshot(config)))
     print(_affinity_line(affinity.report(store, args.slug, config, agents)))
     if promotion := tick_master.status_line(tick_master.read(store, args.slug)):

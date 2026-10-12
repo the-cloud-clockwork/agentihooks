@@ -1206,8 +1206,10 @@ def _plan_read_guard(payload: dict, tool_name: str) -> None:
 
 def _check_shell_guards(payload: dict) -> None:
     from hooks.context.local_test_guard import check_local_tests
+    from hooks.context.swarm_wait_nudge import check_github_watch
 
     check_local_tests(payload)
+    check_github_watch(payload)
     if payload.get("tool_name") != "Bash":
         return
     try:

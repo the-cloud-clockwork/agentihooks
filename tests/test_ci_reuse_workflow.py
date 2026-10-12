@@ -14,7 +14,7 @@ def test_queue_suites_use_a_precise_reuse_condition():
     jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     condition = (
         "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
-        "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.gate_plant) && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
+        "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
     )
     assert jobs["unit"]["if"] in condition
     assert "reuse" in jobs["unit"]["needs"]
