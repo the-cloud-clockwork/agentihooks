@@ -142,10 +142,48 @@ def test_a_launch_from_another_python_keeps_the_wrapper_interpreter(installed, m
 
 def test_an_unrecognised_wrapper_is_left_alone(installed):
     wrapper = installed["home"] / "agentihooks-hook.sh"
-    wrapper.write_text("#!/usr/bin/env bash\nexec my-own-hooks\n")
+    wrapper.write_text("#!/usr/bin/env bash\nexec python -m my hooks\n")
     _env_layer(installed["bundle"] / "profiles" / "wr-base", "http://new:4000")
     assert codex_target.refresh_wrapper() is False
-    assert wrapper.read_text() == "#!/usr/bin/env bash\nexec my-own-hooks\n"
+    assert wrapper.read_text() == "#!/usr/bin/env bash\nexec python -m my hooks\n"
+
+
+@pytest.mark.parametrize(
+    "text, python",
+    [
+        ("", None),
+        ("AGENTIHOOKS_TARGET=codex exec /py -m hooks", "/py"),
+        ("AGENTIHOOKS_TARGET=codex exec /py -m hooks\n", "/py"),
+        ("AGENTIHOOKS_TARGET=codex exec /py -m hooks\n\n", None),
+        ("set -e\nAGENTIHOOKS_TARGET=codex exec /py -m hooks\n", "/py"),
+        ("AGENTIHOOKS_TARGET=codex exec /py -m hooks\nset -e\n", None),
+        ("AGENTIHOOKS_TARGET=codex exec /py -m\n", None),
+        ("one two three four five\n", None),
+    ],
+)
+def test_the_wrapper_interpreter_is_read_only_from_its_exec_line(text, python):
+    assert codex_target._wrapper_python(text) == python
+
+
+def test_the_wrapper_text_is_the_exact_managed_script(installed, tmp_path):
+    install = installed["install"]
+    text = codex_target.wrapper_text({"A": "b c", "D": "e"}, "/opt/py thon")
+    assert text == (
+        "#!/usr/bin/env bash\n"
+        "# managed-by: agentihooks — regenerate with: agentihooks init --target codex\n"
+        "set -euo pipefail\n"
+        f"cd {install.AGENTIHOOKS_ROOT}\n"
+        "export A=\"${A:='b c'}\"\n"
+        'export D="${D:=e}"\n'
+        "AGENTIHOOKS_TARGET=codex exec '/opt/py thon' -m hooks\n"
+    )
+
+
+def test_a_refresh_prints_nothing(installed, capsys):
+    _env_layer(installed["bundle"] / "profiles" / "wr-base", "http://new:4000")
+    capsys.readouterr()
+    assert codex_target.refresh_wrapper() is True
+    assert capsys.readouterr().out == ""
 
 
 def test_a_run_from_another_checkout_leaves_the_wrapper(installed, monkeypatch, tmp_path):

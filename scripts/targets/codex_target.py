@@ -118,8 +118,13 @@ def wrapper_text(profile_env: dict[str, str], python_bin: str) -> str:
     )
 
 
+def _silent(_line: str) -> None:
+    pass
+
+
 def _wrapper_python(text: str) -> str | None:
-    words = shlex.split(text.rstrip("\n").rsplit("\n", 1)[-1])
+    lines = text.splitlines()
+    words = shlex.split(lines[-1]) if lines else []
     return words[2] if words[:2] == ["AGENTIHOOKS_TARGET=codex", "exec"] and len(words) == 5 else None
 
 
@@ -139,12 +144,12 @@ def refresh_wrapper() -> bool:
     chain = _i._resolve_profile_chain(record["profile"])
     if not chain or (name and overlay is None):
         return False
-    native = native_settings("codex", chain, (name, overlay) if overlay else None, say=lambda *_: None)
+    native = native_settings("codex", chain, (name, overlay) if overlay else None, say=_silent)
     current = wrapper.read_text()
     python_bin = _wrapper_python(current)
     if python_bin is None:
         return False
-    text = wrapper_text(native.get("_agentihooks", {}).get("env", {}), python_bin)
+    text = wrapper_text(native["_agentihooks"]["env"], python_bin)
     if current == text:
         return False
     staged = wrapper.with_name(f".{wrapper.name}.tmp-{os.getpid()}")

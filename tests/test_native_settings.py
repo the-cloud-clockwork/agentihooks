@@ -104,3 +104,16 @@ def test_no_connectors_announce_nothing(layers):
     said = []
     ns.native_settings("claude", [("ns-role", layers["role"])], None, say=said.append)
     assert not any("Connector" in line for line in said)
+
+
+def test_connectors_create_the_tables_a_target_lacks(layers, monkeypatch):
+    monkeypatch.setattr(layers["install"], "_load_connectors", lambda name: ({"CONN": "1"}, ["Bash(rm:*)"], []))
+    doc = ns.native_settings("codex", [("ns-role", layers["role"])], None, say=lambda *_: None)
+    assert doc["env"] == {"CONN": "1"}
+    assert doc["permissions"] == {"deny": ["Bash(rm:*)"]}
+
+
+def test_the_settings_profile_decides_langfuse_tracing(layers):
+    _write(layers["extra"] / "profile.yml", "name: ns-extra\notel:\n  langfuse:\n    enabled: true\n")
+    doc = ns.native_settings("codex", [("ns-role", layers["role"])], ("ns-extra", layers["extra"]), say=lambda *_: None)
+    assert doc["_agentihooks"]["env"]["AGENTIHOOKS_LANGFUSE_ENABLED"] == "1"
