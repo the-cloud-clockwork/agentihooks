@@ -195,7 +195,10 @@ def _capacity_outcome(case: dict, root: Path) -> dict:
     home = root / "home"
     home.mkdir(exist_ok=True)
     _seed(home / "claude-router-cache.json", NOW - 5)
-    env = {"AGENTIHOOKS_HOME": str(home), **_claude_env("ALPHA", "BRAVO", "CHARLIE", "DELTA", "GOLF", "HOTEL")}
+    env = {
+        "AGENTIHOOKS_HOME": str(home),
+        **_claude_env("ALPHA", "BRAVO", "CHARLIE", "DELTA", "ECHO", "FOXTROT", "GOLF", "HOTEL"),
+    }
     if case.get("codex_tokens", True):
         env.update({f"AH_CX_TOKEN_{name}": f"cx-{name}" for name in ("alpha", "beta", "gamma", "delta")})
     quotas = _codex_quotas()

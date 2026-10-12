@@ -45,6 +45,7 @@ from scripts.swarm import (
     master_retire,
     master_start,
     master_wake,
+    outage,
     phase_state,
     profile_first,
     reaper,
@@ -531,13 +532,14 @@ def agent_status(agent):
 def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     observed = runtime.observe(agent)
     store.redis.set(store.key(slug, "pane-state", agent.name), observed.state, ex=idle_state.BEAT_TTL_S)
+    outage.mark_pane(store, slug, agent.name, observed.provider_error)
     if observed.state == idle_state.WAITING:
         title = observed.prompt_title or "Waiting on input"
         ticks = agent.input_ticks + 1 if agent.input_prompt == title else 1
         store.put_agent(slug, replace(agent, input_prompt=title, input_ticks=ticks, idle_ticks=0))
         return []
     agent = replace(agent, input_prompt="", input_ticks=0)
-    if agent.lane == MASTER:
+    if agent.lane == MASTER or outage.held(store, slug, agent.name):
         store.put_agent(slug, agent)
         return []
     state = idle_state.verdict(
@@ -608,12 +610,16 @@ def _reopen(slug, ledger, rows, task_id):
     return live["state"] == "open"
 
 
-def _claimable(slug, store, rows, doc, lane):
+def ready_in_order(slug, store, rows, doc, lane, dispatched=None):
+    return _launch_order(slug, store, _claimable(slug, store, rows, doc, lane, dispatched), dispatched)
+
+
+def _claimable(slug, store, rows, doc, lane, dispatched=None):
     awaiting = {a.task for a in store.agents(slug) if a.state == "awaiting-decision"}
     held = [t.get("territory") or [] for t in rows.values() if t.get("state") in ACTIVE]
     graph, fix = hierarchy.project(doc)[0], freeze.fix_phase(store.config(slug))
     clear, overlapping = [], []
-    for t in sorted(rows.values(), key=claim_order.key(rows)):
+    for t in sorted(rows.values(), key=dispatched or claim_order.key(rows)):
         if (
             t.get("lane") == lane
             and t["id"] not in awaiting
@@ -640,11 +646,11 @@ def ready(task, rows, doc, graph, fix):
     )
 
 
-def _launch_order(slug, store, tasks):
+def _launch_order(slug, store, tasks, dispatched=None):
     return sorted(
         tasks,
         key=lambda task: (
-            ledger_rank.order(task),
+            dispatched(task)[0] if dispatched else ledger_rank.order(task),
             bool(store.launch_failure(slug, task["id"])),
             not claim_order.resumed(task),
         ),
@@ -843,11 +849,12 @@ def _spawn_order(slug, config, store, agents, rows, doc, runtime):
     from scripts.swarm import capacity
 
     decision = capacity.read(store, slug)
-    caps = decision.get("effective", {"eng": config.max_eng, "ci": config.max_ci, "plan": config.max_plan})
+    caps = capacity.caps(decision, config)
+    dispatched = dispatcher.claim_key(config, doc)
     queue = []
     for lane, cap in caps.items():
         busy = sum(1 for a in agents if a.lane == lane and not _ended(a, rows))
-        ready = _launch_order(slug, store, _claimable(slug, store, rows, doc, lane))
+        ready = ready_in_order(slug, store, rows, doc, lane, dispatched)
         if "tasks" in decision:
             ready = [task for task in ready if task["id"] in decision["tasks"]]
         ready = profile_first.placeable(slug, config, store, runtime, lane, ready, max(cap - busy, 0))
