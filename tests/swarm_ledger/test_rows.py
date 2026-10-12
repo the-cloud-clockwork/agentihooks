@@ -36,7 +36,7 @@ def test_assembly_releases_rows_without_cyclic_collection(malformed):
     rows = Rows(flatten({"tasks": [{"id": "task", "comments": []}]}))
     reference = weakref.ref(rows)
     if malformed:
-        rows['["tasks",0,"id"]'] = (*rows['["tasks",0,"id"]'][:5], "{")
+        rows["[]"] = (*rows["[]"][:4], "value", "{")
     enabled = gc.isenabled()
     gc.disable()
     try:
