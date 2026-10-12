@@ -3,7 +3,7 @@
   "status": "fixture_verified",
   "mocked": true,
   "tested_commit": "47c3369d31b30f5e2b051588ac5e4bc28c8f9708",
-  "pull_request": "",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2773",
   "cases": [
     "A",
     "B",
