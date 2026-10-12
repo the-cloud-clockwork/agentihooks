@@ -58,7 +58,7 @@ FAMILIES = {
     "lifecycle": (["pause"], "master a1b2c3 0001 changed the swarm state with pause from running to paused."),
     "capacity": (
         ["set", "max-eng-agents=5", "effort-max=max", "master-agent=codex"],
-        "master a1b2c3 0001 changed max eng agents from 2 to 5, effort max from high to max, "
+        "master a1b2c3 0001 changed max eng agents from 2 to 5, effort max from xhigh to max, "
         "master agent from claude to codex.",
     ),
     "autonomy": (["set", "autonomy=full"], "master a1b2c3 0001 changed autonomy from delegate to full."),

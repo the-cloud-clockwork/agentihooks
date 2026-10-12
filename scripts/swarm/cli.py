@@ -16,7 +16,7 @@ agentihooks swarm <id> snapshot | restore [--from FILE]           save the swarm
 agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N compact-limit=N   (or just: swarm <id> max-eng-agents=N)
 agentihooks swarm <id> set snapshot-minutes=N                      automatic snapshot interval while running (default 30, 0 off)
 agentihooks swarm <id> set eng-agent=claude|codex|auto eng-model=M eng-effort=E eng-kind=K eng-role=TEXT   (ci- likewise)
-agentihooks swarm <id> set effort-min=E effort-max=E               every lane launch effort stays in this range (default medium, high)
+agentihooks swarm <id> set effort-min=E effort-max=E               every lane launch effort stays in this range (default medium, xhigh)
 agentihooks swarm <id> set master-agent=claude|codex              master affinity; a change orders the live master to hand off to that harness
 agentihooks swarm <id> save-template NAME                         write this swarm's lanes, caps and compact limit as a template
 agentihooks swarm <id> send-message TEXT                          message to every live agent's inbox

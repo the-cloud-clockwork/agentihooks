@@ -4,9 +4,8 @@ import pytest
 
 from hooks import config
 from hooks.classifier import definitions, runner
-from hooks.classifier.questions import Choice, Score, YesNo
+from hooks.classifier.questions import Choice, YesNo
 from hooks.context import profile_chain
-from scripts.swarm.effort_range import EFFORTS
 
 from .test_definitions import definition_home as definition_home
 from .test_definitions import sample, write_definition
@@ -77,18 +76,14 @@ CASES = [
     ),
     (
         "model-pick",
-        {"levels": ["low", "medium", "high", "xhigh"], "floor": "high"},
+        {"difficulty": "L", "rank": "urgent", "lower": "first option", "higher": "second option"},
         {"confidence": 0.6},
         {
-            "effort": Score(
-                "Which reasoning effort does a coding agent need to finish this task? Most tasks are high: the task "
-                "names what to change and how to check it, even with several seams, a red test first or a before and "
-                "after measurement. xhigh is only for a task that must first find an unknown cause across several "
-                "components, or that redesigns a core concept of the system.",
-                [
-                    "high: the task names what to change and how to check it",
-                    "xhigh: an unknown cause to find across several components, or a redesign of a core concept",
-                ],
+            "option": Choice(
+                "A coding agent will work this task. Its size is L (S small, M medium, L large) and its rank is "
+                "urgent. Which run option lets the agent finish the task well while spending the least? Choose the "
+                "option whose description fits the work the task asks for.",
+                {"lower": "first option", "higher": "second option"},
             )
         },
     ),
@@ -117,7 +112,7 @@ def packaged(tmp_path, monkeypatch):
 @pytest.mark.parametrize(("name", "params", "thresholds", "questions"), CASES)
 def test_tick_definitions_reproduce_the_call_site_prompts(packaged, name, params, thresholds, questions):
     definition = definitions.load(name, environ={})
-    rule = ("choice", "confidence") if name == "profile-pick" else ("code", None)
+    rule = ("choice", "confidence") if name in ("profile-pick", "model-pick") else ("code", None)
     assert (definition.purpose, definition.fallbacks, definition.rule.type, definition.rule.threshold) == (
         name,
         "cli",
@@ -125,14 +120,6 @@ def test_tick_definitions_reproduce_the_call_site_prompts(packaged, name, params
     )
     assert definition.thresholds == thresholds
     assert runner.questions_for(definition, params) == questions
-
-
-@pytest.mark.parametrize("harness", sorted(EFFORTS))
-def test_model_pick_asks_between_the_floor_and_the_top_harness_effort(packaged, harness):
-    levels = list(EFFORTS[harness])
-    for floor in levels[:-1]:
-        questions = runner.questions_for(definitions.load("model-pick", environ={}), {"levels": levels, "floor": floor})
-        assert [text.split(":")[0] for text in questions["effort"].levels] == [floor, levels[-1]]
 
 
 @pytest.mark.parametrize(
