@@ -104,6 +104,7 @@ hive_join=(-f "$chart/ci/kind-hive-join.yaml")
 hive_values=("$chart/values.yaml" "$chart/ci/kind-hive-join.yaml")
 helm template "$release" "$chart" | python3 tests/chart_hive_join.py "$release" "$chart/values.yaml"
 helm template "$release" "$chart" "${hive_join[@]}" | python3 tests/chart_hive_join.py "$release" "${hive_values[@]}"
+helm template "$release" "$chart" "${hive_join[@]}" | python3 tests/chart_hive_join.py --self-test "$release" "${hive_values[@]}"
 plant_hive_join() {
   local expected=$1 planted
   shift
@@ -120,8 +121,9 @@ plant_hive_join 'the hive join command is' --set hive.join.memberRedisUrl=rediss
 plant_hive_join 'the hive join Service ports are' --set hive.join.port=8771
 plant_hive_join 'the hive join volumes are' --set hive.join.tlsSecretName=other-tls
 plant_hive_join 'the hive join env is' --set hive.join.redisSecret.name=swarm-redis
+plant_hive_join 'the hive join tolerations are' --set-json 'hive.join.tolerations=[{"operator":"Exists"}]'
 planted="$(helm template "$release" "$chart" | python3 tests/chart_hive_join.py "$release" "${hive_values[@]}" 2>&1 >/dev/null || true)"
-if [[ $planted != *"the chart renders [] for the hive join service"* ]]; then
+if [[ $planted != *"the chart renders no hive join Deployment"* ]]; then
   printf 'the chart check did not flag a missing hive join service: %s\n' "$planted" >&2
   exit 1
 fi
