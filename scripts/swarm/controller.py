@@ -80,6 +80,8 @@ class FencedRuntime:
             return ""
         router = self.runtime.router
         if router.placement.backend == "hive":
+            if router.enabled_backend("hive") != "hive":
+                return DISABLED.format(backend="hive")
             if lane not in ("eng", "ci"):
                 original = self.runtime.original_runtime.router
                 wanted = original.placed_backend(lane, task)

@@ -4,7 +4,7 @@ import time
 from dataclasses import dataclass, replace
 
 from scripts.hive import placement, registry
-from scripts.hive.orders import LaunchOrder, Orders
+from scripts.hive.orders import Ack, LaunchOrder, Orders
 from scripts.routing.reservation import LaunchSlots
 from scripts.swarm import capacity, lease, profile_choice
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
@@ -90,7 +90,13 @@ class HiveLaunch:
     def spawn(self, request: SpawnRequest) -> Outcome:
         lease.require_epoch(self.store, self.slug, request.task["controller_epoch"])
         if order := self.orders_for(request.task["id"]):
-            return self.wait(order)
+            previous = self.store.execution_registry.get(self.slug, order.execution_id)
+            if previous.state in ("ended", "finished"):
+                self.store.redis.hdel(self.store.key(self.slug, ORDERS), order.task)
+            elif previous.name != request.name or previous.seat != request.task["seat"]:
+                return Outcome("spawn", Status.REFUSED, HIVE, detail="another claimant owns the hive launch order")
+            else:
+                return self.wait(order)
         selected = self.select(request.config, request.lane, request.task)
         if isinstance(selected, placement.Wait):
             return Outcome("spawn", Status.UNAVAILABLE, HIVE, detail=selected.reason)
@@ -102,7 +108,6 @@ class HiveLaunch:
             return Outcome("spawn", Status.UNAVAILABLE, HIVE, detail="account reservation is full")
         prompt_ref = self.store.key(self.slug, f"launch-prompt:{admitted.execution_id}")
         task = {**request.task, "profile_decision": selected.profile.record()}
-        self.store.redis.set(prompt_ref, json.dumps(task), px=TTL_MS)
         order = LaunchOrder(
             self.slug,
             admitted.execution_id,
@@ -117,8 +122,11 @@ class HiveLaunch:
             self.held.epoch,
             lease.now_ms(self.store) + TTL_MS,
         )
-        self.store.redis.hset(self.store.key(self.slug, ORDERS), request.task["id"], json.dumps(order.__dict__))
-        self.orders.send(selected.hive, order)
+        with self.store.redis.pipeline() as pipe:
+            pipe.set(prompt_ref, json.dumps(task), px=TTL_MS)
+            pipe.hset(self.store.key(self.slug, ORDERS), request.task["id"], json.dumps(order.__dict__))
+            Orders(pipe).send(selected.hive, order)
+            pipe.execute()
         return self.wait(order)
 
     def admit(self, request: SpawnRequest, selected: Selection) -> AgentRecord:
@@ -137,19 +145,23 @@ class HiveLaunch:
             route_kind=selected.route_kind,
         )
         previous = self.store.execution_occupants(self.slug).get(agent.seat)
-        ended = previous and self.store.redis.hexists(self.store.key(self.slug, ENDINGS), previous.execution_id)
+        ended = previous and (
+            previous.state in ("ended", "finished")
+            or self.store.redis.hexists(self.store.key(self.slug, ENDINGS), previous.execution_id)
+        )
         with lease.fencing(self.held.epoch):
             return self.store.start_execution(self.slug, agent, previous.execution_id if ended else "")
 
     def wait(self, order: LaunchOrder) -> Outcome:
-        while lease.now_ms(self.store) < order.expires_at:
+        while True:
             lease.require_epoch(self.store, self.slug, order.epoch)
             if ack := self.orders.ack(order):
                 return self.complete(order, ack)
+            if lease.now_ms(self.store) >= order.expires_at:
+                return Outcome("spawn", Status.AMBIGUOUS, HIVE, detail="hive launch acknowledgement expired")
             self.sleep(1)
-        return Outcome("spawn", Status.AMBIGUOUS, HIVE, detail="hive launch acknowledgement expired")
 
-    def complete(self, order: LaunchOrder, ack) -> Outcome:
+    def complete(self, order: LaunchOrder, ack: Ack) -> Outcome:
         agent = self.store.execution_registry.get(self.slug, order.execution_id)
         if ack.status != "live":
             if ack.failure != "ambiguous":

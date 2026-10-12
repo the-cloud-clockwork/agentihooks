@@ -233,9 +233,67 @@ def test_publication_uses_one_redis_transaction(setup):
 
     request = request_for(setup)
     setup.launcher.wait = Mock(return_value="pending")
-    with patch.object(setup.store.redis, "pipeline", wraps=setup.store.redis.pipeline) as pipeline:
+    batches = []
+    original = setup.store.redis.pipeline
+
+    def pipeline(*args, **kwargs):
+        pipe = original(*args, **kwargs)
+        execute = pipe.execute
+
+        def recorded(*args, **kwargs):
+            batches.append([command[0][0] for command in pipe.command_stack])
+            return execute(*args, **kwargs)
+
+        pipe.execute = recorded
+        return pipe
+
+    with patch.object(setup.store.redis, "pipeline", side_effect=pipeline):
         assert setup.launcher.spawn(request) == "pending"
     queued = setup.store.redis.xrange(setup.launcher.orders.stream("remote"))
     assert len(queued) == 1
     assert json.loads(queued[0][1]["order"])["prompt_ref"] == setup.launcher.orders_for("task").prompt_ref
-    assert any(call.kwargs.get("transaction", True) for call in pipeline.call_args_list)
+    assert ["SET", "HSET", "XADD"] in batches
+
+
+def test_terminal_order_allows_a_new_claimant_and_generation(setup):
+    request = request_for(setup)
+    selected = setup.launcher.select(setup.config, "eng", request.task)
+    order = order_for(setup, request, selected)
+    agent = setup.store.execution_registry.get("fixture", order.execution_id)
+    setup.store.execution_registry.update("fixture", replace(agent, state="finished"))
+    setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(order.__dict__))
+    next_request = request_for(setup)
+    setup.launcher.wait = Mock(return_value="pending")
+    assert setup.launcher.spawn(next_request) == "pending"
+    replacement = setup.store.execution_registry.get("fixture", setup.launcher.orders_for("task").execution_id)
+    assert replacement.execution_id != agent.execution_id
+    assert replacement.generation == agent.generation + 1
+    assert replacement.name == next_request.name
+    assert replacement.runtime_target == {"host_id": "remote"}
+
+
+def test_reservation_contention_ends_the_unlaunched_execution(setup):
+    from scripts.swarm_v2.runtime.base import Status
+
+    request = request_for(setup)
+    setup.launcher.slots.reserve = Mock(return_value=False)
+    result = setup.launcher.spawn(request)
+    assert result.status is Status.UNAVAILABLE
+    assert result.detail == "account reservation is full"
+    assert setup.store.execution_registry.records("fixture")[0].state == "ended"
+    assert setup.store.redis.xrange(setup.launcher.orders.stream("remote")) == []
+    assert setup.launcher.orders_for("task") is None
+
+
+def test_failed_order_can_retry_with_a_new_generation(setup):
+    from scripts.hive.orders import Ack
+
+    request = request_for(setup)
+    order = order_for(setup, request, setup.launcher.select(setup.config, "eng", request.task))
+    setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(order.__dict__))
+    setup.launcher.orders.finish("remote", "0-0", order, Ack("failed", {}, "prompt"))
+    assert not setup.launcher.wait(order).ok
+    next_request = request_for(setup)
+    setup.launcher.wait = Mock(return_value="pending")
+    assert setup.launcher.spawn(next_request) == "pending"
+    assert setup.launcher.orders_for("task").generation == order.generation + 1
