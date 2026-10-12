@@ -22,6 +22,7 @@ def layers(tmp_path, monkeypatch):
     _write(role / "profile.yml", "name: ns-role\n")
     hook = {"Stop": [{"hooks": [{"type": "command", "command": "bash hooks/stop.sh"}]}]}
     _write(role / ".claude" / "settings.overrides.json", json.dumps({"env": {"LAYER": "role"}, "hooks": hook}))
+    _write(role / "hooks" / "stop.sh", "true\n")
     extra = bundle / "profiles" / "ns-extra"
     _write(extra / "profile.yml", "name: ns-extra\n")
     _write(extra / ".claude" / "settings.overrides.json", json.dumps({"env": {"LAYER": "extra"}}))
@@ -45,7 +46,7 @@ def test_layers_merge_in_order_and_each_is_announced(layers):
 def test_claude_hook_paths_resolve_against_their_layer(layers):
     doc = ns.native_settings("claude", [("ns-role", layers["role"])], None, say=lambda *_: None)
     commands = [h["command"] for group in doc["hooks"]["Stop"] for h in group["hooks"]]
-    assert any(str(layers["role"] / "hooks" / "stop.sh") in command for command in commands)
+    assert f"bash {(layers['role'] / 'hooks' / 'stop.sh').resolve()}" in commands
     assert "bash hooks/stop.sh" not in commands
 
 

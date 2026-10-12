@@ -121,10 +121,11 @@ def wrapper_text(profile_env: dict[str, str]) -> str:
 
 def refresh_wrapper() -> bool:
     from scripts.native_settings import native_settings
+    from scripts.profiles.render import _operator_codex_home
 
     _i = _install_module()
     record = _i._global_record(_i._load_state(), "codex")
-    wrapper = codex_home() / "agentihooks-hook.sh"
+    wrapper = _operator_codex_home() / "agentihooks-hook.sh"
     if not record.get("profile") or not wrapper.is_file():
         return False
     if _i.AGENTIHOOKS_ROOT.resolve() != _i.install_root().resolve():
@@ -132,14 +133,16 @@ def refresh_wrapper() -> bool:
     name = record.get("settings_profile")
     overlay = _i._resolve_profile_dir(name) if name else None
     chain = _i._resolve_profile_chain(record["profile"])
-    if not chain:
+    if not chain or (name and overlay is None):
         return False
     native = native_settings("codex", chain, (name, overlay) if overlay else None, say=lambda *_: None)
     text = wrapper_text(native.get("_agentihooks", {}).get("env", {}))
     if wrapper.read_text() == text:
         return False
-    _atomic_write(wrapper, text)
-    wrapper.chmod(0o755)
+    staged = wrapper.with_name(f".{wrapper.name}.tmp-{os.getpid()}")
+    staged.write_text(text)
+    staged.chmod(0o755)
+    os.replace(staged, wrapper)
     return True
 
 

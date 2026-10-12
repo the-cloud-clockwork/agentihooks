@@ -29,7 +29,7 @@ def installed(tmp_path, monkeypatch):
     _env_layer(bundle / "profiles" / "wr-base", "http://old:4000")
     install._save_state({"bundle": {"path": str(bundle)}, "targets": {"global": {"codex": {"profile": "wr-role"}}}})
     home = codex_target.codex_home()
-    home.mkdir(parents=True)
+    home.mkdir(parents=True, exist_ok=True)
     native = native_settings("codex", install._resolve_profile_chain("wr-role"), None, say=lambda *_: None)
     codex_target.CodexAdapter().write_settings(native)
     return {"bundle": bundle, "home": home, "install": install}
@@ -104,6 +104,31 @@ def test_a_chain_with_no_resolvable_profile_writes_nothing(installed):
     old = wrapper.read_text()
     assert codex_target.refresh_wrapper() is False
     assert wrapper.read_text() == old
+
+
+def test_a_missing_settings_profile_writes_nothing(installed):
+    install = installed["install"]
+    state = install._load_state()
+    state["targets"]["global"]["codex"]["settings_profile"] = "wr-gone"
+    install._save_state(state)
+    wrapper = installed["home"] / "agentihooks-hook.sh"
+    old = wrapper.read_text()
+    _env_layer(installed["bundle"] / "profiles" / "wr-base", "http://new:4000")
+    assert codex_target.refresh_wrapper() is False
+    assert wrapper.read_text() == old
+
+
+def test_a_session_in_a_rendered_home_refreshes_the_global_wrapper(installed, monkeypatch):
+    from scripts.profiles import render
+
+    rendered = render.rendered_root() / "wr-role" / "codex"
+    rendered.mkdir(parents=True)
+    monkeypatch.setenv("CODEX_HOME", str(rendered))
+    _env_layer(installed["bundle"] / "profiles" / "wr-base", "http://new:4000")
+    assert codex_target.refresh_wrapper() is True
+    assert "http://new:4000" in (installed["home"] / "agentihooks-hook.sh").read_text()
+    assert not (rendered / "agentihooks-hook.sh").exists()
+    assert [p.name for p in installed["home"].iterdir() if ".tmp-" in p.name] == []
 
 
 def test_a_run_from_another_checkout_leaves_the_wrapper(installed, monkeypatch, tmp_path):
