@@ -401,14 +401,14 @@ class InboxStore:
         if entry := self.entry_of(item_id):
             self.about(reply_id, entry)
         try:
-            answer = self.send(replier, item.sender, text, fyi=fyi, item_id=reply_id)
+            answer = self.send(replier, item.sender, text, ref=item_id, fyi=fyi, item_id=reply_id)
         except (DuplicateItem, WatchError):
             answer = self.get(reply_id)
-            if (self.names.resolve(answer.sender), self.names.resolve(answer.address), answer.text, answer.fyi) != (
-                replier,
-                self.names.resolve(item.sender),
-                text,
-                fyi,
+            legacy_recipient = not answer.ref and (
+                legacy or self.names.resolve(answer.address) == self.names.resolve(item.sender)
+            )
+            if (self.names.resolve(answer.sender), answer.text, answer.fyi) != (replier, text, fyi) or not (
+                answer.ref == item_id or legacy_recipient
             ):
                 raise InboxError("a reply retry must keep its sender, recipient, text and informational flag") from None
         self._close_reply(item_id, replier, answer.id, answer_id)
