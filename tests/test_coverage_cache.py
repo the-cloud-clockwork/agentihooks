@@ -44,6 +44,26 @@ def test_cached_grading_does_not_read_github(measured, monkeypatch, covered, los
     assert result.lost == lost
 
 
+def test_a_head_split_another_way_grades_against_the_cached_base(measured, monkeypatch):
+    root, target = measured
+    shards = []
+    for index, covered in enumerate([{1}, {2}], start=1):
+        data = CoverageData(basename=str(root / f"shard-{index}.coverage"))
+        data.add_lines({"hooks/example.py": covered})
+        data.write()
+        shards.append(root / f"shard-{index}.coverage")
+    monkeypatch.setattr(ratchet, "renamed", lambda *args: {})
+    args = argparse.Namespace(head=root, base="base", shards=len(shards), base_baseline=target)
+    _, _, result = ratchet._grade(args, shards, root)
+    assert result.lost == {}
+
+
+def test_a_cached_base_from_another_tree_is_refused(measured):
+    root, target = measured
+    with pytest.raises(ValueError, match="tree differs"):
+        cache.read(target, "another-tree")
+
+
 def test_cache_miss_fails_the_cli_with_recovery_guidance(measured, capsys):
     root, _ = measured
     folder = root / "coverage-3.12-1"
