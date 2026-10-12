@@ -406,7 +406,10 @@ def test_required_gate_accepts_a_skipped_chart_proof_only_when_its_path_rule_sai
     step = gate["steps"][0]
     assert {"kind-due", "helm-kind"} <= set(gate["needs"])
     assert jobs["helm-kind"]["needs"] == "kind-due"
-    assert jobs["helm-kind"]["if"] == "${{ needs.kind-due.outputs.due == 'true' }}"
+    assert jobs["helm-kind"]["if"] in (
+        "${{ needs.kind-due.outputs.due == 'true' }}",
+        "${{ !cancelled() && needs.kind-due.outputs.due == 'true' }}",
+    )
     assert step["env"]["KIND"] == "${{ needs.kind-due.outputs.due }}"
     needs = {"kind-due": {"result": due_job}, "helm-kind": {"result": kind}}
     env = dict(os.environ, NEEDS=json.dumps(needs), MUTATION="false", KIND=due)
