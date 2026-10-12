@@ -50,6 +50,7 @@ from scripts.swarm import (
     phase_state,
     profile_first,
     reaper,
+    resume,
     retire_watch,
     seat_spawn,
     session_model,
@@ -172,8 +173,10 @@ def tick(slug, store, ledger, runtime, now_ms):
     )
     actions += skip_refused(master_start.observe, slug, config, store, ledger, runtime, now_ms)
     actions += skip_refused(_launch_checks, slug, store, ledger, runtime, rows, doc, now_ms)
+    timing.call(resume.track_outages, slug, store, runtime, rows, now_ms)
     actions += skip_refused(_verify, slug, store, ledger, runtime, rows, now_ms)
     actions += skip_refused(_reap, slug, store, ledger, runtime, rows, now_ms)
+    actions += skip_refused(resume.recover_outages, slug, store, ledger, runtime, rows, now_ms)
     actions += skip_refused(_strays, slug, config, store, runtime)
     actions += skip_refused(failed_panes.sweep, slug, store, runtime, now_ms)
     if config.state not in {"stopped", "stopping"}:
@@ -486,6 +489,8 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
         elif agent.name in live:
             store.refresh(slug, agent.task, agent.name, LEASE_MS)
             actions += _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
+        elif resume.recovery_pending(store, slug, agent):
+            store.refresh(slug, agent.task, agent.name, LEASE_MS)
         elif now_ms - agent.started_at > STARTUP_GRACE_MS:
             runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task))
             actions.append(f"lost {agent.name}" + _drop(slug, store, ledger, rows, agent))
@@ -535,13 +540,18 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     observed = runtime.observe(agent)
     store.redis.set(store.key(slug, "pane-state", agent.name), observed.state, ex=idle_state.BEAT_TTL_S)
     outage.mark_pane(store, slug, agent.name, observed.provider_error)
+    if observed.provider_error and not observed.prompt_title and not observed.typed:
+        observed = replace(observed, state=idle_state.IDLE)
     if observed.state == idle_state.WAITING:
         title = observed.prompt_title or "Waiting on input"
         ticks = agent.input_ticks + 1 if agent.input_prompt == title else 1
         store.put_agent(slug, replace(agent, input_prompt=title, input_ticks=ticks, idle_ticks=0))
         return []
     agent = replace(agent, input_prompt="", input_ticks=0)
-    if agent.lane == MASTER or outage.held(store, slug, agent.name):
+    held = outage.held(store, slug, agent.name)
+    exhausted = resume.recovery_exhausted(store, slug, agent)
+    pending = resume.recovery_pending(store, slug, agent)
+    if agent.lane == MASTER or (held and not exhausted):
         store.put_agent(slug, agent)
         return []
     state = idle_state.verdict(
@@ -562,6 +572,8 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     gate_log.append(
         slug, gate_log.Row.of(IDLE_TICKS, "count", who, reason=f"idle tick {idle.idle_ticks}", now_ms=now_ms)
     )
+    if pending:
+        return []
     if idle.idle_ticks == IDLE_NUDGE_TICKS:
         refused = runtime.nudge(idle, NUDGE.format(slug=slug))
         return [f"nudge to {agent.name} refused: {refused}" if refused else f"nudged {agent.name}"]
@@ -592,6 +604,8 @@ def _conversations(slug, store, runtime):
         return
     for agent in store.agents(slug):
         if agent.state in {"finished", "awaiting-decision"} or not agent.pane_id:
+            continue
+        if agent.pane_id not in found and resume.recovery_pending(store, slug, agent):
             continue
         current = found.get(agent.pane_id, "")
         if current != agent.conversation_id:
