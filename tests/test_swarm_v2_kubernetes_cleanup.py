@@ -393,6 +393,22 @@ def test_a_replaced_attempt_ends_at_its_fenced_watermark_though_a_later_heartbea
         assert f"swarm-{failed.execution_id}" not in world.api.objects
 
 
+def test_a_replaced_attempt_keeps_its_pod_while_the_archive_is_behind_its_fenced_watermark():
+    world = cases.World()
+    with world.clocked():
+        controller, _ = world.controller()
+        assert controller.acquire()
+        failed, _ = _failed_and_fenced(world, controller, failures.FRESH)
+        world.acknowledge(failed.execution_id, 4)
+        complete = Completion(world.client(), cases.SLUG, world.cleanup(controller))
+        assert complete(_listed(world)) == {failed.execution_id: "waiting_archive"}
+        assert f"swarm-{failed.execution_id}" in world.api.objects
+        assert world.api.deletes == []
+        world.acknowledge(failed.execution_id, 5)
+        assert complete(_listed(world)) == {failed.execution_id: "done"}
+        assert f"swarm-{failed.execution_id}" not in world.api.objects
+
+
 def test_an_attempt_already_final_under_another_outcome_is_cleaned_without_a_second_final():
     world = cases.World()
     with world.clocked():
