@@ -330,9 +330,9 @@ def test_an_unreadable_record_holds_a_default_slot(tmp_path, monkeypatch):
     redis = _held_store(monkeypatch)
     records = RedisStore(redis).key("sw", RECORDS)
     newer, corrupt, foreign = json.dumps({"schema_version": 2}), "{not json", json.dumps({"schema_version": 1, "x": 1})
-    redis.hset(records, mapping={"exe-d002": newer, "exe-d003": corrupt, "exe-d004": foreign})
-    assert acc.managed_held() == {(newer, "default"), (corrupt, "default"), (foreign, "default")}
-    assert acc.codex_sessions_by_account(root) == {"default": 3}
+    redis.hset(records, mapping={"exe-d002": newer, "exe-d003": corrupt, "exe-d004": foreign, "exe-d005": "[]"})
+    assert acc.managed_held() == {(newer, "default"), (corrupt, "default"), (foreign, "default"), ("[]", "default")}
+    assert acc.codex_sessions_by_account(root) == {"default": 4}
 
 
 def test_a_record_on_an_unmanaged_endpoint_keys_by_its_execution(monkeypatch):
@@ -353,12 +353,17 @@ def test_no_redis_holds_nothing(monkeypatch):
     assert acc.managed_held() == set()
 
 
-def test_a_redis_failure_holds_nothing(monkeypatch):
+def test_a_redis_failure_holds_what_the_store_last_held(monkeypatch):
     from redis.exceptions import RedisError
 
     class Broken:
         def smembers(self, key):
             raise RedisError("down")
 
+    monkeypatch.setattr(acc, "_LAST_HELD", set())
     monkeypatch.setattr("hooks._redis.get_redis", lambda: Broken())
     assert acc.managed_held() == set()
+    _held_store(monkeypatch, ("exe-f000000000000001", "connected", "alpha"))
+    assert acc.managed_held() == {("f000000000000001", "alpha")}
+    monkeypatch.setattr("hooks._redis.get_redis", lambda: Broken())
+    assert acc.managed_held() == {("f000000000000001", "alpha")}

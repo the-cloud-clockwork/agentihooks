@@ -49,6 +49,7 @@ LISTEN = "--listen"
 UNIX = "unix://"
 MANAGED_RUNTIME = "cx"
 MANAGED_SOCKET = "s"
+_LAST_HELD: set[tuple[str, str]] = set()
 
 
 def account_from_names(names: Iterable[str], prefix: str = TOKEN_PREFIX) -> str:
@@ -222,7 +223,7 @@ def _codex_processes(proc: Path) -> tuple[dict[int, str], dict[tuple[str, str], 
 
 
 def live_codex_sessions(proc: Path = _PROC) -> int:
-    """Interactive Codex sessions and exec runs on this host; one CODEX_HOME is one account."""
+    """Interactive Codex sessions, exec runs and managed executions on this host; one CODEX_HOME is one account."""
     sessions, managed = _codex_processes(proc)
     return len(sessions) + len(managed)
 
@@ -232,7 +233,7 @@ def _held(raw: str) -> tuple[str, str] | None:
 
     try:
         record = binding.decode(raw)
-    except (binding.BindingError, ValueError, TypeError):
+    except (binding.BindingError, ValueError, TypeError, AttributeError):
         return raw, CODEX_DEFAULT
     if record.state in (binding.EXITED, binding.FAILED):
         return None
@@ -240,7 +241,7 @@ def _held(raw: str) -> tuple[str, str] | None:
 
 
 def managed_held() -> set[tuple[str, str]]:
-    """Transport records are written before the server starts; an unreadable record holds its slot."""
+    """Transport records are written before the server starts; an unreadable record or store holds what it last held."""
     from hooks._redis import get_redis
 
     redis = get_redis()
@@ -255,8 +256,10 @@ def managed_held() -> set[tuple[str, str]]:
     try:
         raws = [raw for slug in store.slugs() for raw in redis.hvals(store.key(slug, binding.RECORDS))]
     except RedisError:
-        return set()
-    return {held for raw in raws if (held := _held(raw))}
+        return set(_LAST_HELD)
+    _LAST_HELD.clear()
+    _LAST_HELD.update(held for raw in raws if (held := _held(raw)))
+    return set(_LAST_HELD)
 
 
 def codex_sessions_by_account(proc: Path = _PROC, *, local: bool = False) -> dict[str, int]:
