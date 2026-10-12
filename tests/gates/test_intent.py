@@ -213,6 +213,18 @@ class TestGate:
         gate = intent.IntentGate(clock=lambda: NOW / 1000, run=ran)
         assert not gate.decide(bash(f"agentihooks swarm {SLUG} done"), WHO, verdicts(tmp_path)).allowed
         assert ran.calls == []
+        assert intent.IntentGate().run is subprocess.run
+
+    def test_a_verdict_landing_during_the_draft_read_is_kept(self, tmp_path):
+        verdicts(tmp_path).write(TASK, "pending", intent.DRAFT, NOW - 60_000, phase="p8")
+
+        def judged(args, **kwargs):
+            verdicts(tmp_path).write(TASK, "pass", "fine", NOW - 1, phase="p8")
+            return subprocess.CompletedProcess(args, 0, stdout="false\n", stderr="")
+
+        gate = intent.IntentGate(clock=lambda: NOW / 1000, run=judged)
+        assert gate.decide(bash(f"agentihooks swarm {SLUG} merge queue {URL}"), WHO, verdicts(tmp_path)).allowed
+        assert verdicts(tmp_path).read(TASK) == {"verdict": "pass", "reason": "fine", "at": NOW - 1, "phase": "p8"}
 
 
 class TestBody:

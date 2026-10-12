@@ -720,11 +720,12 @@ class IntentGate:
         if verdict != PENDING:
             return Decision()
         if record["reason"] == DRAFT:
-            pull = PULL.search(call.command)
-            if not (pull and _pr_field(pull.group(0), "draft", self.run) == "false"):
+            if _pr_field(call.command, "draft", self.run) != "false":
                 return Decision.deny(
                     f"intent for task {who.task} is judged once its pull request is ready for review. {_next_step(who)}"
                 )
+            if state.read(who.task) != record:
+                return self.decide(call, who, state, mode)
             record = state.write(who.task, PENDING, RUNNING, int(self.clock() * 1000), phase=record.get("phase"))
         waited = int(self.clock() * 1000) - record["at"]
         if waited < GRACE_MS:
