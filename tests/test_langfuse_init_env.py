@@ -6,6 +6,7 @@ pytestmark = pytest.mark.unit
 @pytest.mark.parametrize("native", ["claude", "codex", "copilot"])
 def test_init_exports_the_configured_endpoint_and_refreshes_its_owned_value(tmp_path, native):
     from dotenv import dotenv_values
+
     from scripts.runtime_env import seed
 
     destination = tmp_path / ".env"
@@ -33,6 +34,7 @@ def test_init_exports_the_configured_endpoint_and_refreshes_its_owned_value(tmp_
 @pytest.mark.parametrize("override", ["http://operator.example/mcp/", ""])
 def test_init_preserves_user_endpoint_overrides(tmp_path, override):
     from dotenv import dotenv_values
+
     from scripts.runtime_env import seed
 
     destination = tmp_path / ".env"
