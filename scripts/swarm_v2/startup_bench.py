@@ -25,8 +25,8 @@ STAGE_NAMES = {
 
 
 def read(capture: Path) -> dict:
-    """The capture folder holds read_at, one JSON listing per name in LISTINGS and, optionally, logs/<namespace>_<pod>.log
-    worker logs with timestamps."""
+    """The capture folder holds read_at, one JSON listing per name in LISTINGS and, optionally, worker logs with
+    timestamps as logs/<namespace>_<pod>.log."""
     raw = {name: json.loads((capture / f"{name}.json").read_text(encoding="utf-8")) for name in LISTINGS}
     raw["read_at"] = (capture / "read_at").read_text(encoding="utf-8").strip()
     logs = sorted((capture / "logs").glob("*.log"))

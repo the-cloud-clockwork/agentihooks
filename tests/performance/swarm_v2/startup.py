@@ -124,7 +124,8 @@ def scenario(image: str, nodes: list[str], grace: int, outage: int, output: Path
 
 
 def read_anton(output: Path) -> None:
-    """The read only Anton listings the committed anton reads were reduced from."""
+    """The read only Anton listings the committed anton reads were reduced from, and the agent log of every swarm
+    worker Pod whose log can be read; a Pod without one, such as a Pending Pod, gets no log file."""
     output.mkdir(parents=True, exist_ok=True)
     (output / "read_at").write_text(datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ") + "\n")
     for name in ("nodes", "events", "pods"):
@@ -141,8 +142,16 @@ def read_anton(output: Path) -> None:
     logs.mkdir(exist_ok=True)
     for name in kubectl("-n", WORKERS, "get", "pods", "-o", "name").split():
         pod = name.removeprefix("pod/")
-        text = kubectl("-n", WORKERS, "logs", pod, "-c", "agent", "--timestamps", check=False)
-        (logs / f"{WORKERS}_{pod}.log").write_text(text)
+        done = subprocess.run(
+            ["kubectl", "-n", WORKERS, "logs", pod, "-c", "agent", "--timestamps"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if done.returncode:
+            print(f"no agent log for {pod}: {done.stderr.strip()}")
+            continue
+        (logs / f"{WORKERS}_{pod}.log").write_text(done.stdout)
 
 
 def kind(args: argparse.Namespace) -> None:

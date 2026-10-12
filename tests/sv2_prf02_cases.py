@@ -29,7 +29,8 @@ INPUTS = (*ANTON, *KIND, NATIVE)
 FROM_ZERO_GROUP = "anton-k3s-swarm"
 EVIDENCE_CLASS = (
     "measured: Anton reads are read only kubectl and aws listings of nodes, events, Pods, autoscaling activities and "
-    "EC2 instances, read 3 also the agent log of each swarm worker Pod, reduced by startup_bench reduce; the kind reads come from the Startup stages workflow named in "
+    "EC2 instances, read 3 also the agent log of each swarm worker Pod, reduced by startup_bench reduce; the kind "
+    "reads come from the Startup stages workflow named in "
     "their source, where a GitHub hosted runner pulled the published worker image from a local registry that the "
     "fixture stopped and restarted; attribution, report and claim are functions over those committed reads; the "
     "account release in case C runs the KUB-05 recovery over fakeredis and is mocked"

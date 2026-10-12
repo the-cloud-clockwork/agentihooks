@@ -88,7 +88,8 @@ def _event(item: Mapping) -> dict | None:
 
 
 def log_marks(text: str) -> dict:
-    """The worker's prepared report and the first prompt delivery after it, from `kubectl logs --timestamps`."""
+    """The worker's latest prepared report before the first prompt delivery after it, from `kubectl logs --timestamps`;
+    a later prepared report is a restarted attempt and starts the handshake again."""
     marks = {}
     for line in text.splitlines():
         stamp, _, body = line.partition(" ")
@@ -98,9 +99,9 @@ def log_marks(text: str) -> dict:
             continue
         if not isinstance(record, dict):
             continue
-        if "prepared" not in marks and record.get("worker_start") == "prepared":
-            marks["prepared"] = instant(stamp)
-        elif "prepared" in marks and record.get("supervisor") == "prompt_delivered":
+        if record.get("worker_start") == "prepared":
+            marks = {"prepared": instant(stamp)}
+        elif marks and record.get("supervisor") == "prompt_delivered":
             marks["delivered"] = instant(stamp)
             break
     return marks

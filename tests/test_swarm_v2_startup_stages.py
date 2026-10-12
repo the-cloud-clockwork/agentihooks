@@ -748,6 +748,20 @@ def test_a_prompt_delivery_before_the_prepared_report_or_without_one_is_not_a_ha
     assert stages.log_marks("") == {}
 
 
+def test_a_restarted_attempt_times_its_handshake_from_its_own_prepared_report():
+    restarted = "\n".join(
+        (
+            '2026-10-12T10:04:10Z {"worker_start": "prepared", "attempt": "exe-1"}',
+            '2026-10-12T10:05:00Z {"worker_start": "prepared", "attempt": "exe-1"}',
+            '2026-10-12T10:05:02Z {"supervisor": "prompt_delivered"}',
+        )
+    )
+    assert stages.log_marks(restarted) == {
+        "prepared": stages.instant("2026-10-12T10:05:00Z"),
+        "delivered": stages.instant("2026-10-12T10:05:02Z"),
+    }
+
+
 def test_the_handshake_stage_is_the_worker_log_gap_and_absent_without_both_marks():
     events = warm_events("w/exe")
     pods = {"w/exe": {"created": T0, "ready": T0 + 9000, "prepared": T0 + 4000, "delivered": T0 + 5085}}

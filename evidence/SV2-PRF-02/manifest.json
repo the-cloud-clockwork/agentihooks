@@ -10,9 +10,9 @@
     "tests/fixtures/swarm_v2/startup/anton-read-2.json": "4ae6cdceb5cfe22509ba51da0efa04b6a57c8770189b0f2c35e2e6825741e7c4",
     "tests/fixtures/swarm_v2/startup/kind-run-1.json": "9cdad8aecf741089cc741a5424792136f103c038982b54886cc0db5898fecc17",
     "tests/fixtures/swarm_v2/startup/kind-run-2.json": "a2b14c83b40160e2de8be5c949f78c28e7ec73cc82a2e175ffa2959a091b1b16",
-    "tests/performance/swarm_v2/startup.py": "e68258ad2c355da3f538ef20627a093bc3fda6c0a4b0336f7610ab8d08c37fa9",
-    "scripts/swarm_v2/startup_stages.py": "8a42afce6aced33c9fef4f52d0a16e400c749862e768b5447231e42662124ce8",
-    "scripts/swarm_v2/startup_bench.py": "807af135909c6e32e51107eb6ab2ea60e9f12bd4186b33bbe9eba35752f735a1",
+    "tests/performance/swarm_v2/startup.py": "3e624ae98541e7fc03a84a6211eeb08ad2a1121c775da922b0283583725c6842",
+    "scripts/swarm_v2/startup_stages.py": "be3f7d6108bdb9e2e3a4242401f55dc7b58abb775bad913611b6cabff6445dca",
+    "scripts/swarm_v2/startup_bench.py": "86b416972cb491c8b66a06fddf0cd4e59ea6d20ad15ca0f591c73efca9e5523a",
     ".github/workflows/startup-stages.yml": "84bdb16a16a14f7ea6f113397522de8d1a9bd245c779e57a3f6f1a6e31beee7e",
     "tests/fixtures/swarm_v2/startup/anton-read-3.json": "d55c97ca370de23b73af9e80ecc9db06a3f3742855d8df56a646d4137728a2a8"
   }
