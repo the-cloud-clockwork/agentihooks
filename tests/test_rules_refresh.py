@@ -234,6 +234,22 @@ class TestProfileHomeScope:
         assert sorted(received) == ["s-caller", "s-frontend-old"]
         assert rules_refresh._load_marker("frontend") is None
 
+    def test_an_unrendered_home_refresh_skips_rendered_sessions(self, tmp_home, mock_sessions, monkeypatch):
+        caller = tmp_home / ".claude"
+        caller.mkdir()
+        mock_sessions.return_value = {"s-plain": {"status": "alive"}, "s-engineer": {"status": "alive"}}
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(caller))
+        rules_refresh.write_refresh_marker("anton", "ANTON PERSONA")
+        assert rules_refresh._load_marker("anton")["home"] == str(caller.resolve())
+
+        received = []
+        for sid, home in (("s-engineer", _role_home(tmp_home, "engineer", "e-1")), ("s-plain", caller)):
+            monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home))
+            monkeypatch.setattr(rules_refresh, "inject_context", lambda payload, sid=sid: received.append(sid))
+            rules_refresh.maybe_inject(sid)
+
+        assert received == ["s-plain"]
+
     def test_a_marker_without_a_profile_home_reaches_no_session(self, tmp_home, monkeypatch):
         rules_refresh._save_marker(
             "anton",
