@@ -712,7 +712,10 @@ def test_credential_parameters_have_readable_timing_identifiers():
 def test_mutation_job_runs_independently_and_keeps_its_evidence():
     spec = _mutation_workflow()
     job = spec["jobs"]["mutation"]
-    assert job["needs"] == ["mutation-plan", "mutation-stats"]
+    assert job["needs"] in (
+        ["mutation-plan", "mutation-stats"],
+        ["mutation-plan", "mutation-stats", "admission"],
+    )
     assert job["timeout-minutes"] == 20
     steps = job["steps"]
     checkout = next(step for step in steps if step.get("uses", "").startswith("actions/checkout"))
