@@ -2795,6 +2795,8 @@ def test_an_overlay_render_from_the_recorded_commit_renders_and_stamps_it(world,
 def test_pinned_codex_rebuild_keeps_bundle_links_in_its_new_home(world, overlays):
     from scripts.profiles import bundle_copy, render
 
+    _write(world["bundle"] / ".codex" / "skills" / "pinned-skill" / "SKILL.md", "PINNED SKILL\n")
+    _commit(world["bundle"], "native skill")
     recorded = _git(world["bundle"], "rev-parse", "HEAD").strip()
     first = render.render("codex", "rb-eng", overlays=["ov-a"], bundle_revision=recorded)
     config = world["home"] / ".codex" / "config.toml"
@@ -2803,10 +2805,10 @@ def test_pinned_codex_rebuild_keeps_bundle_links_in_its_new_home(world, overlays
     rebuilt = render.render("codex", "rb-eng", overlays=["ov-a"], bundle_revision=recorded)
 
     assert rebuilt.parent != first.parent
-    skill = rebuilt / "skills" / "bundle-skill"
+    skill = rebuilt / "skills" / "pinned-skill"
     assert skill.resolve().is_relative_to(rebuilt.parent)
     shutil.rmtree(first.parent)
-    assert (skill / "SKILL.md").read_text() == "---\nname: bundle-skill\n---\n"
+    assert (skill / "SKILL.md").read_text() == "PINNED SKILL\n"
     assert bundle_copy.current() is None
     assert render.render("codex", "rb-eng", overlays=["ov-a"], bundle_revision=recorded) is None
 
