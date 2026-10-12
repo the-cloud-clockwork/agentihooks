@@ -51,10 +51,16 @@ class Shell:
 @pytest.fixture
 def released(env, monkeypatch, tmp_path):
     store, ledger, rt = env
+    monkeypatch.setenv("HOME", str(tmp_path))
     cli.main(["sw", "create", "--repo", "/repo"])
     cli.main(["sw", "start"])
     ledger.rows["t1"].update({"state": "pr", "pr_url": URL, "branch": "eng-t1"})
     ledger.pulls[URL] = RUNNING
+    ledger.tasks = lambda slug: list(ledger.rows.values()) if slug == "sw" else []
+    ledger.updates, update = [], ledger.update_task
+    ledger.update_task = lambda slug, task, fields, by="swarm", if_state=(): (
+        ledger.updates.append((task, fields, by)) or update(slug, task, fields, by, if_state)
+    )
     shell = Shell()
     monkeypatch.setattr(stack, "shell", shell)
     monkeypatch.setattr(cli, "now_ms", lambda: NOW)
@@ -78,6 +84,7 @@ def test_ready_records_the_pull_request_and_head_and_ends_the_agent(released, ca
     capsys.readouterr()
     assert release(doc) == 0
     assert ledger.rows["t1"]["state"] == "pr" and ledger.rows["t1"]["awaiting"] == "merge"
+    assert ledger.updates[-1] == ("t1", {"state": "pr", "awaiting": "merge"}, AGENT)
     assert json.loads(store.redis.hget(store.key("sw", "ready"), "t1")) == {
         "url": URL,
         "head": HEAD,
@@ -121,6 +128,35 @@ def test_a_failed_handoff_withdraws_the_release(released, capsys, monkeypatch):
     assert release(doc) == 1
     assert capsys.readouterr().err.endswith("handoff store down\n")
     assert ledger.rows["t1"]["awaiting"] == "" and ready.record(store, "sw", "t1") is None
+    assert ledger.updates[-1] == ("t1", {"awaiting": ""}, AGENT)
+
+
+def test_ready_resolves_read_first_addresses_against_this_swarm(released, tmp_path):
+    store, _, _, doc = released
+    store.memory.add_recap("eng-1@sw", "engineer@a1b2c3-0000", "t1", "an earlier recap", 1)
+    folder = tmp_path / ".agentihooks" / "swarm" / "sw" / "tasks" / "t1"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "progress.md").write_text("- started\n")
+    extra = "- recap:eng-1@sw the earlier recap\n- workspace:t1/progress the step log\n<!-- handoff complete -->"
+    doc.write_text(doc.read_text().replace("<!-- handoff complete -->", extra))
+    assert release(doc) == 0
+
+
+def test_ready_refuses_a_handoff_document_it_cannot_read(released, capsys, tmp_path):
+    store, _, _, _ = released
+    missing = tmp_path / "nowhere.md"
+    assert release(missing) == 1
+    assert capsys.readouterr().err == (
+        f"swarm: cannot read the handoff document {missing}: No such file or directory\n"
+    )
+    assert working(store)
+
+
+def test_ready_refuses_a_task_gone_from_the_ledger(released, capsys):
+    store, ledger, _, doc = released
+    del ledger.rows["t1"]
+    assert release(doc) == 1
+    assert capsys.readouterr().err == "swarm: record the pull request with swarm pr before swarm ready\n"
 
 
 def test_ready_refuses_a_task_under_the_controller_outcome_path(released, capsys):
@@ -252,6 +288,7 @@ def test_ready_refuses_a_malformed_handoff(released, capsys):
     store, _, _, doc = released
     doc.write_text("# Handoff v2\n")
     assert release(doc) == 1
+    assert capsys.readouterr().err.startswith("swarm: handoff refused; fix the document and run the command again:\n- ")
     assert ready.record(store, "sw", "t1") is None
     assert working(store)
 
@@ -268,6 +305,7 @@ class Ledger:
         return dict(row)
 
     def comment(self, slug, task_id, text, by):
+        assert slug == "sw"
         self.comments.append((task_id, text, by))
 
 
@@ -405,6 +443,36 @@ def test_a_merged_pull_request_closes_the_task_with_the_done_proof_and_removes_t
     assert ready.record(merging.store, "sw", "t1") is None
     assert merging.store.handoff("sw", "t1") == ""
     assert merging.run() == []
+
+
+def test_a_merge_only_the_uncached_reread_sees_closes_the_task(merging):
+    merging.rows["t1"]["group_members"] = ["t2"]
+    queued_at_now(merging)
+    run = ready.Pass(merging.store, "sw", merging.ledger, lambda url: GREEN, lambda url: MERGED, NOW + 60_000)
+    assert ready.merge_pass(run, merging.rows) == [f"task t1 done, {URL} merged", f"removed the worktree {TOP}"]
+    assert merging.rows["t2"]["state"] == "done" and merging.store.handoff("sw", "t1") == ""
+
+
+def test_a_group_member_already_done_keeps_its_own_record(merging):
+    merging.rows["t1"]["group_members"] = ["t2"]
+    merging.rows["t2"].update({"state": "done", "pr_url": "https://github.com/o/r/pull/9"})
+    merging.pulls[URL] = MERGED
+    merging.run()
+    assert merging.rows["t2"]["pr_url"] == "https://github.com/o/r/pull/9"
+
+
+def test_the_merge_pass_carries_every_released_task_in_one_tick(merging):
+    other = "https://github.com/o/r/pull/8"
+    merging.rows.clear()
+    merging.rows.update(
+        {
+            "t0": {"id": "t0", "state": "open", "claimed_by": ""},
+            "t3": {"id": "t3", "state": "pr", "claimed_by": "", "pr_url": other, "awaiting": "merge"},
+            "t1": {"id": "t1", "state": "pr", "claimed_by": AGENT, "pr_url": URL, "awaiting": "merge"},
+        }
+    )
+    merging.pulls[URL] = GREEN
+    assert merging.run() == ["task t3 left the merge pass", f"queued {URL} for task t1"]
 
 
 def test_a_merge_seen_through_the_queue_closes_the_task(merging):

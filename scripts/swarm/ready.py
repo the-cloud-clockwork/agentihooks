@@ -173,8 +173,8 @@ def _queue(run, row, found):
     except SwarmError as exc:
         if str(exc).startswith(REFUSALS):
             found["refusals"] = found.get("refusals", 0) + 1
-        if found.get("refusals", 0) >= QUEUE_TRIES:
-            return _reopen(run, row, found, f"could not be queued: {exc}")
+            if found["refusals"] >= QUEUE_TRIES:
+                return _reopen(run, row, found, f"could not be queued: {exc}")
         save(run.store, run.slug, task_id, found)
         return [f"could not queue {url} for task {task_id}: {exc}"]
     if result.get("waiting") == "checks":
