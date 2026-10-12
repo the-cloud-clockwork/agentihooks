@@ -254,13 +254,6 @@ class AttachRelease:
         self.keys.forget(self.slug, execution_id)
 
 
-class NoCheckpoints:
-    """No checkpoint store is deployed yet, so every failure waits for an explicit fresh or resume decision."""
-
-    def list(self, execution_id: str) -> list[dict]:
-        return []
-
-
 class RecoveryPass:
     """Each pass lists first, then watches from the previous listing's version, so consecutive watches overlap and
     leave no gap; when the watch fails, Pods missing since the last listing stand in for its deletions."""
