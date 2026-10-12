@@ -3,6 +3,7 @@ import json
 import shutil
 import subprocess
 import uuid
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -19,8 +20,9 @@ def _oauth():
     return f"header.{payload}.signature"
 
 
+@pytest.mark.parametrize("binary", ["/probe-bin/codex", None])
 @pytest.mark.parametrize("route", ["access", "oauth", "default", "api"])
-def test_codex_probe_launch_authenticates_like_the_routed_pane(tmp_path, monkeypatch, route):
+def test_codex_probe_launch_authenticates_like_the_routed_pane(tmp_path, monkeypatch, route, binary):
     token = _oauth() if route == "oauth" else uuid.uuid4().hex
     env = {"PATH": "probe-bin", "AGENTIHOOKS_AGENT_NAME": "parent"}
     if route in ("access", "oauth"):
@@ -32,7 +34,12 @@ def test_codex_probe_launch_authenticates_like_the_routed_pane(tmp_path, monkeyp
     else:
         account = codex_router.CodexAccount("default")
     account = codex_router.credential(account, env)
-    monkeypatch.setattr(shutil, "which", lambda name: "/probe-bin/codex")
+
+    def which(name):
+        assert name == "codex"
+        return binary
+
+    monkeypatch.setattr(shutil, "which", which)
     calls = []
 
     def run(args, **kwargs):
@@ -63,23 +70,25 @@ def test_codex_probe_launch_authenticates_like_the_routed_pane(tmp_path, monkeyp
             "-c",
             'developer_instructions="Reply with exactly OK."',
         ]
-        assert args == codex_router.command(account, "/probe-bin/codex", native)
+        assert args == codex_router.command(account, binary if binary else "codex", native)
         assert kwargs["input"] == "Reply with exactly OK."
         output = '{"type":"item.completed","item":{"type":"agent_message","text":"OK"}}\n{"type":"turn.completed"}'
         return subprocess.CompletedProcess(args, 0, output, "")
 
-    with patch.dict(provider_probe.os.environ, env, clear=True):
+    with patch.object(provider_probe, "os", SimpleNamespace(environ=env)):
         result = provider_probe.check(provider_probe.Target("codex", account.name, "chosen-model"), tmp_path, run)
     assert result.ok is True
     assert len(calls) == 1
 
 
-@pytest.mark.parametrize("route", ["unknown", "alpha", "api"])
+@pytest.mark.parametrize("route", ["unknown", "alpha", "api", "rejected"])
 def test_codex_probe_without_a_usable_account_never_launches(tmp_path, route):
     def run(*args, **kwargs):
         pytest.fail("An unavailable account must not launch")
 
-    with patch.dict(provider_probe.os.environ, {}, clear=True):
-        result = provider_probe.check(provider_probe.Target("codex", route, "model"), tmp_path, run)
+    env = {"AH_CX_TOKEN_alpha": "sk-" + uuid.uuid4().hex} if route == "rejected" else {}
+    account = "alpha" if route == "rejected" else route
+    with patch.object(provider_probe, "os", SimpleNamespace(environ=env)):
+        result = provider_probe.check(provider_probe.Target("codex", account, "model"), tmp_path, run)
     assert result.ok is False
     assert result.evidence == "Provider account route unavailable"
