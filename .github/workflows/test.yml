@@ -13,6 +13,11 @@ on:
 
   workflow_dispatch:
     inputs:
+      gate_plant:
+        description: Run the full suite only for a gate plant proof; focused tests and mutation use Proofs
+        type: boolean
+        required: false
+        default: false
       base:
         description: Base revision for mutation scope
         required: true
@@ -27,6 +32,17 @@ permissions:
   contents: read
 
 jobs:
+  admission:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Require explicit gate plant intent for a full Tests dispatch
+        env:
+          GATE_PLANT: ${{ inputs.gate_plant }}
+        run: |
+          [[ "$GATE_PLANT" == true ]] || { echo '::error::Use the Proofs workflow for focused tests or mutation; full Tests dispatch requires gate_plant=true.'; exit 1; }
+
   reuse:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -130,33 +146,33 @@ jobs:
           retention-days: 7
 
   worker-image:
-    if: ${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
-    needs: [reuse]
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
+    needs: [reuse, admission]
     uses: ./.github/workflows/swarm-node-smoke.yml
   swarm-image:
-    if: ${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
-    needs: [reuse]
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
+    needs: [reuse, admission]
     uses: ./.github/workflows/swarm-smoke.yml
   semgrep:
-    if: ${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
-    needs: [reuse]
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
+    needs: [reuse, admission]
     uses: ./.github/workflows/semgrep.yml
     with:
       base: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
 
   brain-smoke:
-    if: ${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
-    needs: [reuse]
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
+    needs: [reuse, admission]
     uses: ./.github/workflows/brain-smoke.yml
 
   ledger-load:
-    needs: [reuse]
-    if: ${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
+    needs: [reuse, admission]
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
     uses: ./.github/workflows/ledger-load.yml
 
   kind-due:
-    if: ${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
-    needs: [reuse]
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
+    needs: [reuse, admission]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -183,13 +199,13 @@ jobs:
 
   helm-kind:
     needs: kind-due
-    if: ${{ needs.kind-due.outputs.due == 'true' }}
+    if: ${{ !cancelled() && needs.kind-due.result == 'success' && needs.kind-due.outputs.due == 'true' }}
     uses: ./.github/workflows/helm-kind.yml
 
   # Every shard restores this one key, or nothing when the lookup found none, so all shards of a run split alike.
   durations:
-    if: ${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
-    needs: [reuse]
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
+    needs: [reuse, admission]
     runs-on: ubuntu-latest
     timeout-minutes: ${{ (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch') && 4 || 2 }}
     permissions:
@@ -321,8 +337,8 @@ jobs:
 
   # Every shard of a version splits on the one map this job chooses, so the whole suite is collected once per version, not once per shard.
   split:
-    if: ${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
-    needs: [durations, reuse]
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
+    needs: [durations, reuse, admission]
     runs-on: ubuntu-latest
     timeout-minutes: 7
     permissions:
@@ -430,8 +446,8 @@ jobs:
           overwrite: true
 
   unit:
-    if: ${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
-    needs: [split, reuse]
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
+    needs: [split, reuse, admission]
     runs-on: ubuntu-latest
     timeout-minutes: 7
     permissions:
@@ -558,8 +574,8 @@ jobs:
           overwrite: true
 
   shard-check:
-    if: ${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
-    needs: [unit, reuse]
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
+    needs: [unit, reuse, admission]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -618,8 +634,8 @@ jobs:
         run: python -m tests.shard_budget shard-durations/*/durations.json
 
   test-count:
-    if: ${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
-    needs: [reuse]
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
+    needs: [reuse, admission]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -657,9 +673,9 @@ jobs:
           python -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
 
   sonar:
-    if: ${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
     # Waits for the shards' coverage through needs; the API that could poll for it has an hourly quota every run shares.
-    needs: [unit, reuse]
+    needs: [unit, reuse, admission]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -907,8 +923,8 @@ jobs:
         run: kill "$PROXY_PID"
 
   lint:
-    if: ${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
-    needs: [reuse]
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
+    needs: [reuse, admission]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -1520,7 +1536,8 @@ jobs:
           overwrite: true
 
   mutation-plan:
-    if: ${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}
+    needs: [admission]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -1564,8 +1581,8 @@ jobs:
         run: python -m scripts.ci_mutation.plan --base "$BASE"
 
   mutation-stats:
-    needs: mutation-plan
-    if: ${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}
+    needs: [mutation-plan, admission]
+    if: ${{ !cancelled() && needs.mutation-plan.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -1640,8 +1657,8 @@ jobs:
           overwrite: true
 
   mutation:
-    needs: [mutation-plan, mutation-stats]
-    if: ${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}
+    needs: [mutation-plan, mutation-stats, admission]
+    if: ${{ !cancelled() && needs.mutation-plan.result == 'success' && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:

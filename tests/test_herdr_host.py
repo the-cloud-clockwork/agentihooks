@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts import herdr_host, init_agent
+from scripts import herdr_host, herdr_panes, init_agent
 
 
 class FakeHerdr:
@@ -129,6 +129,8 @@ def _main(monkeypatch, tmp_path, *extra, agent="claude"):
     popened = []
 
     def popen(command, **kwargs):
+        if command[0] != "/usr/bin/terminal":
+            raise OSError(f"unexpected process {command[0]}")
         popened.append(command)
         Path(command[-1]).with_suffix(".started").touch()
 
@@ -216,10 +218,10 @@ def test_the_agent_is_named_in_herdr_once_it_reports_its_route(monkeypatch, tmp_
 @pytest.mark.parametrize(
     ("agent", "detected", "typed", "reported"),
     [
-        ("codex", True, True, "session_name=eng-a"),
-        ("codex", True, False, "session_name=unset"),
-        ("codex", False, True, None),
-        ("claude", True, True, None),
+        ("codex", True, "named", "session_name=eng-a"),
+        ("codex", True, "unconfirmed", "session_name=unset"),
+        ("codex", False, "named", None),
+        ("claude", True, "named", None),
     ],
 )
 def test_a_codex_launch_names_its_session_after_herdr_detects_it(
@@ -234,8 +236,11 @@ def test_a_codex_launch_names_its_session_after_herdr_detects_it(
 
     monkeypatch.setattr(herdr_host, "run", run)
     monkeypatch.setattr(herdr_host, "rename_agent", lambda pane, name, environ: detected)
+    monkeypatch.setattr(herdr_host, "wait_ready", lambda pane, environ, timeout: True)
     monkeypatch.setattr(
-        herdr_host, "name_session", lambda pane, name, environ: named.append((pane, name, environ["HOME"])) or typed
+        herdr_host,
+        "name_session",
+        lambda pane, name, environ, confirmed: named.append((pane, name, environ["HOME"])) or typed,
     )
 
     rc, _ = _main(monkeypatch, tmp_path, agent=agent)
@@ -244,6 +249,104 @@ def test_a_codex_launch_names_its_session_after_herdr_detects_it(
     assert rc == 0
     assert [line for line in lines if line.startswith("session_name=")] == ([reported] if reported else [])
     assert named == ([("w1:p7", "eng-a", str(tmp_path))] if reported else [])
+
+
+def _codex_launch(monkeypatch, tmp_path, pane, *extra, route="status=routed\naccount=alpha\n"):
+    opened = []
+
+    def open_pane(directory, title, env, placement, workspace, environ):
+        opened.append(env)
+        return herdr_host.Placement("w1", "w1:t3", "w1:p7")
+
+    def run(pane_id, launcher, environ):
+        opened.append(launcher.read_text())
+        launcher.with_suffix(".started").touch()
+        if route:
+            launcher.with_suffix(".route").write_text(route)
+
+    monkeypatch.setattr(herdr_host, "open_pane", open_pane)
+    monkeypatch.setattr(herdr_host, "run", run)
+    pane.attach(monkeypatch)
+    pane.check = lambda environ: environ.get("HOME") == str(tmp_path)
+    Clock(monkeypatch)
+
+    def codex_named(environ, name, since):
+        opened.append((environ.get("HOME"), name, since))
+        return lambda: True
+
+    monkeypatch.setattr(init_agent, "_codex_named", codex_named)
+    rc, _ = _main(monkeypatch, tmp_path, *extra, agent="codex")
+    return rc, opened
+
+
+TYPED = (["pane", "run"], ["agent", "prompt"], ["pane", "send-keys"])
+
+
+def test_a_codex_launch_renames_at_the_ready_prompt_before_its_opening_prompt(monkeypatch, tmp_path, capsys):
+    pane = CodexPane(["working", "done"])
+    rc, opened = _codex_launch(monkeypatch, tmp_path, pane, "--prompt", "Start the task.")
+
+    out = capsys.readouterr().out.splitlines()
+    assert rc == 0
+    assert [call for call in pane.calls if call[:2] in TYPED] == [
+        ["pane", "run", "w1:p7", "/rename eng-a"],
+        ["agent", "prompt", "w1:p7", "Start the task."],
+    ]
+    assert "session_name=eng-a" in out and "opening_prompt=sent" in out
+    env, launcher, named = opened
+    launcher_at = next(line.split("=", 1)[1] for line in out if line.startswith("launcher_at="))
+    assert named == (str(tmp_path), "eng-a", int(launcher_at) / 1000)
+    assert env == {"HERDR_AGENT": "codex", init_agent.PROMPT_AFTER_START: "1"}
+    assert f'set --; [ -n "${{{init_agent.PROMPT_AFTER_START}:-}}" ] || set -- ' in launcher
+    assert [r.session_name for r in herdr_panes.load({}) if r.pane_id == "w1:p7"] == ["eng-a"]
+
+
+def test_a_codex_launch_never_types_into_a_running_turn(monkeypatch, tmp_path, capsys):
+    pane = CodexPane(["working"])
+    monkeypatch.setattr(init_agent, "CODEX_READY_S", 0)
+    rc, _ = _codex_launch(monkeypatch, tmp_path, pane, "--prompt", "Start the task.")
+
+    out = capsys.readouterr().out.splitlines()
+    assert rc == 0
+    assert [call for call in pane.calls if call[:2] in TYPED] == []
+    assert "session_name=unset" in out and "session_name_error=not-ready" in out
+    assert "opening_prompt=held:not-ready" in out
+    assert [r.session_name for r in herdr_panes.load({}) if r.pane_id == "w1:p7"] == ["unset:not-ready"]
+
+
+def test_a_codex_launch_holds_its_prompt_from_text_already_in_the_input_line(monkeypatch, tmp_path, capsys):
+    pane = CodexPane(["done"], typed="half typed")
+    rc, _ = _codex_launch(monkeypatch, tmp_path, pane, "--prompt", "Start the task.")
+
+    out = capsys.readouterr().out.splitlines()
+    assert rc == 0
+    assert [call for call in pane.calls if call[:2] in TYPED] == []
+    assert "session_name_error=refused-typed" in out and "opening_prompt=held:typed" in out
+    assert pane.input == "half typed"
+
+
+@pytest.mark.parametrize(("route", "prompted"), [("", True), ("status=failed\nerror=no account\n", False)])
+def test_a_held_prompt_goes_out_while_the_route_is_pending_but_not_after_it_failed(
+    monkeypatch, tmp_path, capsys, route, prompted
+):
+    pane = CodexPane(["done"])
+    rc, _ = _codex_launch(monkeypatch, tmp_path, pane, "--prompt", "Start the task.", route=route)
+
+    capsys.readouterr()
+    assert rc == 0
+    sent = [call for call in pane.calls if call[:2] == ["agent", "prompt"]]
+    assert sent == ([["agent", "prompt", "w1:p7", "Start the task."]] if prompted else [])
+
+
+def test_a_codex_launch_without_a_prompt_only_renames(monkeypatch, tmp_path, capsys):
+    pane = CodexPane(["done"])
+    rc, opened = _codex_launch(monkeypatch, tmp_path, pane)
+
+    out = capsys.readouterr().out.splitlines()
+    assert rc == 0
+    assert [call for call in pane.calls if call[:2] in TYPED] == [["pane", "run", "w1:p7", "/rename eng-a"]]
+    assert not [line for line in out if line.startswith("opening_prompt=")]
+    assert opened[0] == {"HERDR_AGENT": "codex"}
 
 
 def test_a_channel_launch_reports_the_warning_answered_in_its_pane(monkeypatch, tmp_path, capsys):
@@ -309,17 +412,256 @@ def test_answer_presses_nothing_when_the_text_never_shows(monkeypatch):
     assert [c[1] for c in calls] == ["wait-output"]
 
 
-def test_name_session_types_the_codex_rename_command_into_the_pane(monkeypatch):
-    calls = []
-    monkeypatch.setattr(herdr_host, "_cli", lambda args, environ: calls.append((args, environ)) or {})
-    assert herdr_host.name_session("w1:p2", "engineer@abc-0001", {"K": "v"}) is True
-    assert calls == [(["pane", "run", "w1:p2", "/rename engineer@abc-0001"], {"K": "v"})]
+class CodexPane:
+    """A herdr pane running Codex: its status reads in order, its input line, and every call made to it."""
+
+    def __init__(self, statuses, typed="", takes=True):
+        self.statuses = list(statuses)
+        self.input = typed
+        self.takes = takes
+        self.calls = []
+        self.check = lambda environ: environ is ENV
+
+    def __call__(self, args, environ):
+        assert self.check(environ), environ
+        self.calls.append(args)
+        if args[:2] == ["agent", "get"]:
+            status = self.statuses.pop(0) if len(self.statuses) > 1 else self.statuses[0]
+            return {"agent": {"agent": "codex", "agent_status": status}}
+        if args[:2] == ["pane", "read"]:
+            return {"text": f"› {self.input}\n"}
+        if args[:2] == ["pane", "run"]:
+            self.input = "" if self.takes else args[3]
+        if args[:2] == ["pane", "send-keys"] and args[3:] == ["ctrl+u"]:
+            self.input = ""
+        return {}
+
+    def attach(self, monkeypatch):
+        monkeypatch.setattr(herdr_host, "_cli", self)
+        monkeypatch.setattr(
+            herdr_host,
+            "_read",
+            lambda pane_id, environ: self(
+                ["pane", "read", pane_id, "--source", "visible", "--format", "ansi"], environ
+            )["text"],
+        )
+
+
+class Clock:
+    """A monotonic clock that moves only when the code under test sleeps."""
+
+    def __init__(self, monkeypatch, now=100.0):
+        self.now = now
+        self.slept = []
+        monkeypatch.setattr(herdr_host.time, "monotonic", lambda: self.now)
+        monkeypatch.setattr(herdr_host.time, "sleep", self.sleep)
+
+    def sleep(self, seconds):
+        self.slept.append(seconds)
+        self.now += seconds
+
+
+READ = ["pane", "read", "w1:p2", "--source", "visible", "--format", "ansi"]
+ENV = {"K": "v"}
+
+
+@pytest.mark.parametrize("status", ["idle", "done"])
+def test_name_session_renames_at_the_ready_prompt_and_confirms_the_name(monkeypatch, status):
+    pane = CodexPane([status])
+    pane.attach(monkeypatch)
+
+    def confirmed():
+        return ["pane", "run", "w1:p2", "/rename engineer@abc-0001"] in pane.calls
+
+    assert herdr_host.name_session("w1:p2", "engineer@abc-0001", ENV, confirmed) == "named"
+    assert pane.calls == [["agent", "get", "w1:p2"], READ, ["pane", "run", "w1:p2", "/rename engineer@abc-0001"]]
+    assert pane.input == ""
+
+
+@pytest.mark.parametrize("status", ["working", "blocked", "unknown"])
+def test_name_session_refuses_while_a_turn_runs(monkeypatch, status):
+    pane = CodexPane([status])
+    pane.attach(monkeypatch)
+    assert herdr_host.name_session("w1:p2", "engineer@abc-0001", ENV, lambda: True) == f"refused-{status}"
+    assert pane.calls == [["agent", "get", "w1:p2"]]
+
+
+def test_name_session_leaves_text_someone_typed_alone(monkeypatch):
+    pane = CodexPane(["idle"], typed="half typed")
+    pane.attach(monkeypatch)
+    assert herdr_host.name_session("w1:p2", "engineer@abc-0001", ENV, lambda: True) == "refused-typed"
+    assert pane.calls == [["agent", "get", "w1:p2"], READ]
+    assert pane.input == "half typed"
+
+
+def test_a_rename_that_did_not_take_is_cleared_from_the_input_line(monkeypatch):
+    pane = CodexPane(["done"], takes=False)
+    pane.attach(monkeypatch)
+    clock = Clock(monkeypatch)
+    outcome = herdr_host.name_session("w1:p2", "engineer@abc-0001", ENV, lambda: False, timeout=1.0)
+    assert outcome == "unconfirmed"
+    assert pane.calls == [
+        ["agent", "get", "w1:p2"],
+        READ,
+        ["pane", "run", "w1:p2", "/rename engineer@abc-0001"],
+        ["pane", "send-keys", "w1:p2", "ctrl+u"],
+    ]
+    assert pane.input == "" and clock.slept == [0.5, 0.5]
+
+
+def test_a_rename_is_confirmed_by_polling_until_the_name_shows(monkeypatch):
+    pane = CodexPane(["done"])
+    slept = []
+    pane.attach(monkeypatch)
+    monkeypatch.setattr(herdr_host.time, "sleep", slept.append)
+    checks = iter([False, False, True])
+    assert herdr_host.name_session("w1:p2", "engineer@abc-0001", ENV, lambda: next(checks)) == "named"
+    assert slept == [herdr_host.RENAME_POLL_S, herdr_host.RENAME_POLL_S]
+    assert herdr_host.RENAME_POLL_S == 0.5 and herdr_host.RENAME_CONFIRM_S == 15.0
 
 
 @pytest.mark.parametrize("error", [herdr_host.HerdrError("no pane"), subprocess.TimeoutExpired("herdr", 5)])
 def test_name_session_reports_a_pane_it_could_not_type_into(monkeypatch, error):
+    pane = CodexPane(["idle"])
+
+    def cli(args, environ):
+        if args[:2] == ["pane", "run"]:
+            pane.input = args[3]
+            raise error
+        return pane(args, environ)
+
+    pane.attach(monkeypatch)
+    monkeypatch.setattr(herdr_host, "_cli", cli)
+    assert herdr_host.name_session("w1:p2", "engineer@abc-0001", ENV, lambda: True) == "error"
+    assert pane.calls[-1] == ["pane", "send-keys", "w1:p2", "ctrl+u"] and pane.input == ""
+
+
+def test_a_failed_read_before_the_rename_types_and_clears_nothing(monkeypatch):
+    pane = CodexPane(["idle"])
+    pane.attach(monkeypatch)
+
+    def read(pane_id, environ):
+        raise herdr_host.HerdrError("herdr pane read: gone")
+
+    monkeypatch.setattr(herdr_host, "_read", read)
+    assert herdr_host.name_session("w1:p2", "engineer@abc-0001", ENV, lambda: True) == "error"
+    assert pane.calls == [["agent", "get", "w1:p2"]]
+
+
+@pytest.mark.parametrize("error", [herdr_host.HerdrError("gone"), subprocess.TimeoutExpired("herdr", 5)])
+def test_a_clear_herdr_refuses_still_reports_the_error(monkeypatch, error):
+    pane = CodexPane(["idle"])
+
+    def cli(args, environ):
+        reply = pane(args, environ)
+        if args[:2] in (["pane", "run"], ["pane", "send-keys"]):
+            raise error
+        return reply
+
+    pane.attach(monkeypatch)
+    monkeypatch.setattr(herdr_host, "_cli", cli)
+    assert herdr_host.name_session("w1:p2", "engineer@abc-0001", ENV, lambda: True) == "error"
+    assert pane.calls[-1] == ["pane", "send-keys", "w1:p2", "ctrl+u"]
+
+
+@pytest.mark.parametrize("error", [herdr_host.HerdrError("no agent"), subprocess.TimeoutExpired("herdr", 5)])
+def test_an_agent_herdr_cannot_read_has_an_unknown_status(monkeypatch, error):
     def cli(args, environ):
         raise error
 
     monkeypatch.setattr(herdr_host, "_cli", cli)
-    assert herdr_host.name_session("w1:p2", "engineer@abc-0001", {}) is False
+    assert herdr_host.agent_status("w1:p2", {}) == "unknown"
+
+
+def test_an_agent_record_without_a_status_reads_unknown(monkeypatch):
+    monkeypatch.setattr(herdr_host, "_cli", lambda args, environ: {"agent": {"agent": "codex"}})
+    assert herdr_host.agent_status("w1:p2", {}) == "unknown"
+
+
+def test_the_input_line_is_read_from_the_raw_screen_herdr_prints(monkeypatch):
+    ran = []
+
+    def run(args, **kwargs):
+        ran.append((args, kwargs))
+        return subprocess.CompletedProcess(args, 0, "Filler that is not JSON\n› /rename eng-a\n", "")
+
+    monkeypatch.setattr(herdr_host, "binary", lambda: "/bin/herdr")
+    monkeypatch.setattr(herdr_host.subprocess, "run", run)
+    assert herdr_host.typed("w1:p2", {"K": "v"}) == "/rename eng-a"
+    assert ran == [
+        (
+            ["/bin/herdr", "pane", "read", "w1:p2", "--source", "visible", "--format", "ansi"],
+            {"capture_output": True, "text": True, "env": {"K": "v"}, "timeout": 30},
+        )
+    ]
+
+
+def test_a_pane_herdr_cannot_read_is_an_error(monkeypatch):
+    monkeypatch.setattr(herdr_host, "binary", lambda: "/bin/herdr")
+    monkeypatch.setattr(
+        herdr_host.subprocess, "run", lambda args, **kwargs: subprocess.CompletedProcess(args, 1, "", " no pane \n")
+    )
+    with pytest.raises(herdr_host.HerdrError) as raised:
+        herdr_host.typed("w1:p2", {})
+    assert str(raised.value) == "herdr pane read: no pane"
+
+
+def test_reading_a_pane_without_herdr_is_an_error(monkeypatch):
+    monkeypatch.setattr(herdr_host, "binary", lambda: None)
+    with pytest.raises(herdr_host.HerdrError) as raised:
+        herdr_host.typed("w1:p2", {})
+    assert str(raised.value) == "herdr is not installed"
+
+
+def test_ready_needs_two_ready_reads_in_a_row_because_codex_reads_idle_before_its_startup(monkeypatch):
+    pane = CodexPane(["unknown", "idle", "working", "working", "done", "done"])
+    pane.attach(monkeypatch)
+    clock = Clock(monkeypatch)
+    assert herdr_host.wait_ready("w1:p2", ENV, 60) is True
+    assert pane.calls == [["agent", "get", "w1:p2"]] * 6
+    assert clock.slept == [herdr_host.READY_SETTLE_S] * 5 and herdr_host.READY_SETTLE_S == 1.5
+
+
+def test_ready_gives_up_at_its_deadline(monkeypatch):
+    pane = CodexPane(["working"])
+    pane.attach(monkeypatch)
+    clock = Clock(monkeypatch)
+    assert herdr_host.wait_ready("w1:p2", ENV, 3.0) is False
+    assert pane.calls == [["agent", "get", "w1:p2"]] * 3 and clock.slept == [1.5, 1.5]
+
+
+def test_ready_with_no_time_reads_once(monkeypatch):
+    pane = CodexPane(["working"])
+    pane.attach(monkeypatch)
+    clock = Clock(monkeypatch)
+    assert herdr_host.wait_ready("w1:p2", ENV, 0) is False
+    assert pane.calls == [["agent", "get", "w1:p2"]] and clock.slept == []
+
+
+def test_a_first_ready_read_is_not_enough(monkeypatch):
+    pane = CodexPane(["idle", "working", "done", "done"])
+    pane.attach(monkeypatch)
+    clock = Clock(monkeypatch)
+    assert herdr_host.wait_ready("w1:p2", ENV, 60) is True
+    assert pane.calls == [["agent", "get", "w1:p2"]] * 4 and clock.slept == [1.5, 1.5, 1.5]
+
+
+def test_a_reply_without_an_agent_record_reads_unknown(monkeypatch):
+    monkeypatch.setattr(herdr_host, "_cli", lambda args, environ: {})
+    assert herdr_host.agent_status("w1:p2", ENV) == "unknown"
+
+
+def test_prompt_submits_the_text_to_the_agent(monkeypatch):
+    calls = []
+    monkeypatch.setattr(herdr_host, "_cli", lambda args, environ: calls.append((args, environ)) or {})
+    assert herdr_host.prompt("w1:p2", "line one\n\nline two", {"K": "v"}) is True
+    assert calls == [(["agent", "prompt", "w1:p2", "line one\n\nline two"], {"K": "v"})]
+
+
+@pytest.mark.parametrize("error", [herdr_host.HerdrError("blocked"), subprocess.TimeoutExpired("herdr", 5)])
+def test_prompt_reports_a_submission_herdr_refused(monkeypatch, error):
+    def cli(args, environ):
+        raise error
+
+    monkeypatch.setattr(herdr_host, "_cli", cli)
+    assert herdr_host.prompt("w1:p2", "text", {}) is False
