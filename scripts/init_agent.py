@@ -652,7 +652,7 @@ def _start_herdr(launcher: Path, directory: Path, name: str, args, agent: str, e
 def _held_prompt(launcher: Path, agent: str) -> str:
     """The opening prompt a Codex pane gets after its rename: typed at launch, the rename would wait behind its turn."""
     prompt_file = launcher.with_suffix(".prompt")
-    return prompt_file.read_text(encoding="utf-8") if agent == "codex" and prompt_file.exists() else ""
+    return prompt_file.read_bytes().decode() if agent == "codex" and prompt_file.exists() else ""
 
 
 CHANNEL_WARNING_MS = 60_000
@@ -670,9 +670,7 @@ def _answer_channel_warning(pane: str, environ: dict[str, str]) -> str:
     return "answered" if herdr_host.answer(pane, channel.WARNING, environ, CHANNEL_WARNING_MS) else "unseen"
 
 
-def _name_in_herdr(
-    pane: str, name: str, agent: str, environ: dict[str, str], opening: str = "", since: float = 0.0
-) -> list[str]:
+def _name_in_herdr(pane: str, name: str, agent: str, environ: dict[str, str], opening: str, since: float) -> list[str]:
     detected = herdr_host.rename_agent(pane, name, environ)
     ready = agent == "codex" and (detected or bool(opening)) and herdr_host.wait_ready(pane, environ, CODEX_READY_S)
     named = [f"agent_name={herdr_host.agent_name(name)}"] if detected else ["agent_name=unset"]
@@ -710,7 +708,7 @@ def _codex_named(environ: dict[str, str], name: str, since: float) -> Callable[[
 
     def named() -> bool:
         try:
-            lines = index.read_text(encoding="utf-8").splitlines()
+            lines = index.read_bytes().decode().splitlines()
         except OSError:
             return False
         for line in lines:

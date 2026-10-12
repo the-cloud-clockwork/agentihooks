@@ -234,12 +234,13 @@ def name_session(
     pane_id: str, name: str, environ: dict[str, str], confirmed: Callable[[], bool], timeout: float = RENAME_CONFIRM_S
 ) -> str:
     """Codex has no launch option for a session name, so its own rename command is typed at its ready prompt."""
-    ran = False
     try:
         why = busy(pane_id, environ)
-        if why:
-            return f"refused-{why}"
-        ran = True
+    except (HerdrError, subprocess.TimeoutExpired):
+        return "error"
+    if why:
+        return f"refused-{why}"
+    try:
         _cli(["pane", "run", pane_id, f"/rename {name}"], environ)
         deadline = time.monotonic() + timeout
         while not confirmed():
@@ -248,8 +249,7 @@ def name_session(
                 return "unconfirmed"
             time.sleep(RENAME_POLL_S)
     except (HerdrError, subprocess.TimeoutExpired):
-        if ran:
-            _clear(pane_id, environ)
+        _clear(pane_id, environ)
         return "error"
     return "named"
 
