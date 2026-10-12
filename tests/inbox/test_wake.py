@@ -423,6 +423,19 @@ def test_master_seat_mail_waits_for_the_next_master(inbox):
     assert events(inbox, item.id) == ["escalated_operator"] and len(ledger.followups) == 1
 
 
+def test_master_seat_mail_on_a_stopped_swarm_escalates_as_before(inbox):
+    from scripts.swarm.store import RedisStore, SwarmConfig
+
+    store = RedisStore(inbox.redis)
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=1))
+    store.update("sw", state="stopped")
+    inbox.seats.occupy("master@sw", "sw-master-0", at=1)
+    item = inbox.send("sw-eng-4", "master@sw", "check the plan")
+    ledger = FakeLedger()
+    run(inbox, FakeHerdr({}), ledger, sent_at(item) + W, SEATED[:2])
+    assert events(inbox, item.id) == ["escalated_operator"] and len(ledger.followups) == 1
+
+
 def test_seat_mail_to_a_live_occupant_escalates_after_one_window(inbox):
     inbox.seats.occupy("eng-1@sw", "sw-eng-1", at=1)
     item = inbox.send("sw-eng-4", "eng-1@sw", "rebase please")

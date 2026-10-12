@@ -6,13 +6,13 @@ then a follow-up on the ledger page. Every step is appended to the item's histor
 
 from dataclasses import replace
 
-from scripts.inbox import addresses
+from scripts.inbox import addresses, exits
 from scripts.inbox.seats import is_seat
 from scripts.inbox.seen import SEEN_ON_LEDGER, SeenMarks
 from scripts.inbox.store import redelivery_ms
 from scripts.swarm import idle, outage
 from scripts.swarm.delivery import READY, post
-from scripts.swarm.store import MASTER
+from scripts.swarm.store import MASTER, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_comments
 
 MAX_WAKES = 3
@@ -73,7 +73,7 @@ def raised_id(entry: dict) -> str:
 
 
 def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window, quiet=DEFAULT_QUIET_S * 1000):
-    names = {a.name for a in agents}
+    names, config = {a.name for a in agents}, _swarm_config(inbox, slug)
     panes = {a.name: a for a in agents if typed_wake(a)}
     boss = next((a for a in agents if a.lane == MASTER), None)
     master = (boss.seat or boss.name) if boss else ""
@@ -99,7 +99,7 @@ def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window, quiet=DEFAULT_
         agent = panes.get(receiver)
         if agent and agent.name not in statuses:
             statuses[agent.name] = _pane_state(inbox.redis, slug, herdr, agent, now_ms, quiet)
-        since = _seat_clock(inbox, receiver, held, names)
+        since = _seat_clock(inbox, receiver, held, names, config)
         step = decide(item, statuses.get(receiver), inbox.history(item.id), now_ms, window, slug, since)
         if step == WOKEN and _still_held(inbox, held) and _wake(herdr, agent, prompted):
             if inbox.note(item.id, WOKEN, BY, f"prompted {receiver} to read its inbox", now_ms, held):
@@ -120,7 +120,7 @@ def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window, quiet=DEFAULT_
 def wake_now(inbox, slug, agents, herdr, now_ms, window, quiet=DEFAULT_QUIET_S * 1000):
     """The wake step alone, for Codex panes the moment an item lands; Claude sessions take items through the inbox
     channel, and escalation stays with the tick's wake pass."""
-    actions, names = [], {a.name for a in agents}
+    actions, names, config = [], {a.name for a in agents}, _swarm_config(inbox, slug)
     for agent in agents:
         if agent.harness != "codex" or not typed_wake(agent) or outage.open_records(slug):
             continue
@@ -128,7 +128,7 @@ def wake_now(inbox, slug, agents, herdr, now_ms, window, quiet=DEFAULT_QUIET_S *
         if not mail:
             continue
         state = _pane_state(inbox.redis, slug, herdr, agent, now_ms, quiet)
-        due = [item for item in mail if _wake_due(inbox, item, state, names, (now_ms, window, slug))]
+        due = [item for item in mail if _wake_due(inbox, item, state, (names, config), (now_ms, window, slug))]
         if not due or not _wake(herdr, agent, set()):
             continue
         for item in due:
@@ -137,9 +137,10 @@ def wake_now(inbox, slug, agents, herdr, now_ms, window, quiet=DEFAULT_QUIET_S *
     return actions
 
 
-def _wake_due(inbox, item, state, names, clock):
-    since = _seat_clock(inbox, *_receiver(inbox, item.address), names)
-    return decide(item, state, inbox.history(item.id), *clock, since) == WOKEN
+def _wake_due(inbox, item, state, swarm, clock):
+    now_ms, window, slug = clock
+    since = _seat_clock(inbox, *_receiver(inbox, item.address), *swarm)
+    return decide(item, state, inbox.history(item.id), now_ms, window, slug, since) == WOKEN
 
 
 def _ladder(inbox, slug):
@@ -169,16 +170,27 @@ def _still_held(inbox, held):
     return held is None or inbox.seats.occupant(held[0]).generation == held[1]
 
 
-def _seat_clock(inbox, receiver, held, names):
-    """When a seat item's window may start: None while the seat waits for a live successor, else when its occupant
-    bound. Seats that can get no successor have their mail withdrawn by the exit sweep."""
+def _seat_clock(inbox, receiver, held, names, config):
+    """When a seat item's window may start: None while the seat waits for a live successor it can still get, else when
+    its occupant bound."""
     if held is None:
         return 0
     address, generation = held
-    if receiver not in names or inbox.seats.left(receiver, address):
+    if (receiver not in names or inbox.seats.left(receiver, address)) and _refillable(address, config):
         return None
     bound = (e["at"] for e in inbox.seats.history(address) if e["generation"] == generation and "event" not in e)
     return max(bound, default=0)
+
+
+def _refillable(address, config):
+    return config is None or (config.state != "stopped" and not exits.no_successor(address, config))
+
+
+def _swarm_config(inbox, slug):
+    try:
+        return RedisStore(inbox.redis).config(slug)
+    except SwarmError:
+        return None
 
 
 def _status(herdr, agent):
