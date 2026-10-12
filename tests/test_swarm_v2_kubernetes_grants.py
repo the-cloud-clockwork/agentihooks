@@ -259,9 +259,15 @@ def test_a_set_exporter_is_copied_into_the_launch_record():
     assert api.created == [material({**RECORD, "exporter": ["python", "-m", "exporter"]})]
 
 
-def test_the_launch_record_names_the_restore_the_recovery_decided_for_the_attempt():
+@pytest.mark.parametrize("recovery", ["native", "reconstructed"])
+def test_the_launch_record_names_the_restore_the_recovery_decided_for_the_attempt(recovery):
     api, asked = Api(pod()), []
-    directive = {"checkpoint_id": "ckpt-1", "recovery": "native", "session_id": "s-1", "watermark": 4096}
+    directive = {
+        "checkpoint_id": "ckpt-1",
+        "recovery": recovery,
+        "session_id": "s-1" if recovery == "native" else "",
+        "watermark": 4096,
+    }
 
     def restores(execution_id):
         asked.append(execution_id)
@@ -270,8 +276,7 @@ def test_the_launch_record_names_the_restore_the_recovery_decided_for_the_attemp
     granting = PodGrants(api, SLUG, verify, Supervision("claude", None, CONTROL), restores=restores)
     assert granting.hand(agent(), GRANT) == Hand(True, "handed", False)
     assert asked == [EXECUTION]
-    resumed = {key: value for key, value in RECORD.items() if key != "checkout"}
-    assert api.created == [material({**resumed, "restore": directive})]
+    assert api.created == [material({**RECORD, "restore": directive})]
 
 
 def test_a_fresh_recovery_keeps_the_checkout_beside_its_restore():
