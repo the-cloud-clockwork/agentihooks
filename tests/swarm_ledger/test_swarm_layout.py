@@ -31,8 +31,9 @@ ROWS = [
     "swarm-head",
     "swarm-alert",
     "capacity-box",
-    "swarm-row-work",
-    "swarm-row-accounts",
+    "quota-box",
+    "overlays-box",
+    "agents-box",
     "health-box",
     "handoff-box",
 ]
@@ -177,7 +178,7 @@ def open_page(browser):
         page.context.close()
 
 
-def test_rows_run_header_alert_capacity_work_accounts_health_handoffs():
+def test_rows_run_header_alert_capacity_quota_overlays_agents_health_handoffs():
     page = page_source()
     box = page.split('<div id="swarm-box">', 1)[1].split('<aside id="stats-column"', 1)[0]
     positions = [box.index(f'id="{row}"') for row in ROWS]
@@ -185,21 +186,26 @@ def test_rows_run_header_alert_capacity_work_accounts_health_handoffs():
     assert 'id="command-log"' not in box
     assert '<div class="sw-fold" id="overlays-fold">' in box
     assert '<div class="sw-fold" id="quota-fold">' in box
-    for gone in ("crew", "needs-you", "swarm-figs", "swarm-work", "restore-box", "<section", "<details"):
+    for gone in (
+        "crew",
+        "needs-you",
+        "swarm-figs",
+        "swarm-work",
+        "restore-box",
+        "swarm-row-work",
+        "swarm-row-accounts",
+        "doctor-box",
+        "<section",
+        "<details",
+    ):
         assert gone not in box, gone
 
 
-def test_column_pairs_sit_side_by_side_on_desktop_and_stack_on_a_phone(open_page):
-    for width, side_by_side in ((1440, True), (390, False)):
+def test_every_swarm_row_stays_full_width_at_every_viewport(open_page):
+    for width in (1440, 390):
         page = open_page(status(), width)
-        for left, right in (("agents-box", "overlays-box"), ("quota-box", "doctor-box")):
-            a, b = page.box(left), page.box(right)
-            if side_by_side:
-                assert abs(a["y"] - b["y"]) < 1 and a["x"] + a["width"] <= b["x"] + 1, (left, right)
-            else:
-                assert b["y"] >= a["y"] + a["height"] - 1, (left, right)
         full = page.box("swarm-box")["width"]
-        for row in ("capacity-box", "health-box", "handoff-box"):
+        for row in ("capacity-box", "quota-box", "overlays-box", "agents-box", "health-box", "handoff-box"):
             assert abs(page.box(row)["width"] - full) < 1, row
 
 
@@ -730,7 +736,7 @@ def test_quota_rows_come_from_the_stubbed_balance_and_mark_the_master_account(op
     assert page.text("#quota-count").lower() == "3 accounts · probed 2m ago"
 
 
-def test_the_quota_table_with_its_capacity_line_fits_its_box_at_1920(open_page):
+def test_the_quota_table_fits_its_box_at_1920(open_page):
     payload = status()
     payload["quota_capacity"] = {
         "configured": {"eng": 4, "ci": 1, "plan": 1},
@@ -754,13 +760,7 @@ def test_the_quota_table_with_its_capacity_line_fits_its_box_at_1920(open_page):
     scroll = page.tab.eval_on_selector("#quota-box .sw-scroll", "s => [s.scrollWidth, s.clientWidth]")
     assert scroll[0] == scroll[1]
     assert page.table("swarm-quota")[0][3] == "CLOSED"
-    assert page.text("#quota-capacity").split("\n") == [
-        "ENG 2 OF 4 · CI 1 OF 1 · PLAN 0 OF 1",
-        "changed 7m ago",
-        "because accounts are closed; Claude has 1 free seats and Codex has 1 free seats",
-    ]
-    table, line = page.box("quota-table"), page.box("quota-capacity")
-    assert abs(table["x"] - line["x"]) < 1
+    assert page.tab.locator("#quota-capacity").count() == 0
 
 
 def test_the_sessions_cell_reads_the_plain_session_count(open_page):
@@ -822,27 +822,25 @@ def test_an_untouched_page_probes_quota_every_five_minutes(open_page):
     assert page.puts.count({"action": "quota_refresh"}) == 1
 
 
-def test_doctor_block_offers_start_while_off_and_links_its_ledger_while_on(open_page):
+def test_doctor_row_shows_off_or_on_and_toggles_its_own_button(open_page):
     off = open_page()
-    assert off.text("#doctor-state").lower() == "off"
-    assert [r.split("\n") for r in off.tab.locator("#swarm-doctor .kv").all_inner_texts()] == [
-        ["state", "not running"],
-        ["last check", "—"],
-        ["findings", "—"],
-    ]
+    assert off.tab.locator("#doctor-row").is_visible()
+    assert off.text("#doctor-dot").lower() == "off"
+    assert off.text("#doctor-state") == "not running"
+    assert off.text("#doctor-check") == "last check —"
+    assert off.text("#doctor-findings") == "findings —"
     assert off.tab.locator("[data-swarm=doctor_start]").is_visible()
     assert not off.tab.locator("[data-swarm=doctor_stop]").is_visible()
     on = open_page(
         status(doctor={"slug": "rig-doctor", "state": "running", "last_check": NOW_MS - 120_000, "findings": 2})
     )
-    assert on.text("#doctor-state").lower() == "on"
-    assert on.tab.locator("#swarm-doctor a").get_attribute("href") == "/rig-doctor"
-    assert [r.split("\n")[1] for r in on.tab.locator("#swarm-doctor .kv").all_inner_texts()] == [
-        "running",
-        "2m ago",
-        "2",
-    ]
+    assert on.text("#doctor-dot").lower() == "on"
+    assert on.text("#doctor-state") == "running"
+    assert on.tab.locator("#doctor-state a").get_attribute("href") == "/rig-doctor"
+    assert on.text("#doctor-check") == "last check 2m ago"
+    assert on.text("#doctor-findings") == "findings 2"
     assert on.tab.locator("[data-swarm=doctor_stop]").is_visible()
+    assert not on.tab.locator("[data-swarm=doctor_start]").is_visible()
 
 
 def test_health_rows_carry_evidence_threshold_seen_verdict_and_note(open_page):

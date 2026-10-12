@@ -6,8 +6,9 @@ import ledger_core as core
 
 ROWS = {
     "capacity-box": ("height",),
-    "swarm-row-work": ("height", "split"),
-    "swarm-row-accounts": ("height", "split"),
+    "quota-box": ("height",),
+    "overlays-box": ("height",),
+    "agents-box": ("height",),
     "health-box": ("height",),
     "handoff-box": ("height",),
 }
@@ -42,7 +43,8 @@ def check(body):
 
 def read():
     try:
-        return check(core.loads(path().read_bytes()))
+        saved = core.loads(path().read_bytes())
+        return check({row: sizes for row, sizes in saved.items() if row in ROWS})
     except (OSError, ValueError):
         return {}
 

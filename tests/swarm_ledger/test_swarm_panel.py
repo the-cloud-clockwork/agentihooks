@@ -431,7 +431,7 @@ class SwarmPanel(unittest.TestCase):
             "swarm-agents",
             "swarm-overlays",
             "swarm-quota",
-            "swarm-doctor",
+            "doctor-row",
             "health",
             "swarm-handoffs",
             "capacity-box",
