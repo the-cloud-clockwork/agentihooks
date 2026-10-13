@@ -237,8 +237,12 @@ def test_read_back_refuses_empty_or_failed_public_repository_discovery(tmp_path,
 def test_read_back_rejects_open_source_runner_group_access_drift(tmp_path, access_responses, drift):
     endpoint = "orgs/the-cloud-clockwork/actions/runner-groups/3"
     access_responses[endpoint] = {
-        "id": 3, "name": "anton-oss", "visibility": "selected",
-        "allows_public_repositories": True, "restricted_to_workflows": False, "selected_workflows": [],
+        "id": 3,
+        "name": "anton-oss",
+        "visibility": "selected",
+        "allows_public_repositories": True,
+        "restricted_to_workflows": False,
+        "selected_workflows": [],
     }
     access_responses[f"{endpoint}/repositories?per_page=100"] = {
         "repositories": [{"name": "agentihooks"}, {"name": "agentibrain-kernel"}]
