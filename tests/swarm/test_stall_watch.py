@@ -137,7 +137,8 @@ def test_a_red_pull_request_with_no_push_past_its_limit_reopens():
 @pytest.mark.parametrize("newest", ["CANCELLED", "FAILURE"])
 @pytest.mark.parametrize("reverse", [False, True])
 @pytest.mark.parametrize("same_time", [False, True])
-def test_the_newest_run_cancellation_holds_a_red_watchdog(newest, reverse, same_time):
+@pytest.mark.parametrize("missing_older_id", [False, True])
+def test_the_newest_run_cancellation_holds_a_red_watchdog(newest, reverse, same_time, missing_older_id):
     suites = [
         {
             "status": "COMPLETED",
@@ -153,6 +154,9 @@ def test_the_newest_run_cancellation_holds_a_red_watchdog(newest, reverse, same_
             "workflowRun": {"databaseId": 2, "createdAt": "1970-01-01T02:46:40Z"},
         },
     ]
+    if missing_older_id:
+        suites[0]["workflowRun"].pop("databaseId")
+        suites[1]["workflowRun"]["databaseId"] = 1
     pull = ledger_events.pull_request(
         {
             "state": "OPEN",
