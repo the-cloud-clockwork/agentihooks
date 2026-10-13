@@ -53,7 +53,7 @@ function markFrozenToggle() {
   icon.removeAttribute("title");
   icon.removeAttribute("aria-label");
   icon.setAttribute("aria-hidden", "true");
-  button.replaceChildren(icon, h("span", { text: hiding ? "Show frozen" : "Hide frozen" }));
+  button.replaceChildren(icon, h("span", { text: hiding ? "Show all" : "Hide frozen" }));
 }
 
 export function toggleFrozenView() {
