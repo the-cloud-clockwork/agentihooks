@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.test_ci_anton_runners import pool
+
 _ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -33,7 +35,7 @@ def test_ci_creates_no_commits_or_bot_pull_requests():
             assert workflow["permissions"] == {"contents": "read"}
             assert set(workflow["jobs"]) == {"audit"}
             job = workflow["jobs"]["audit"]
-            assert job["runs-on"] == "ubuntu-latest"
+            assert job["runs-on"] == pool("anton-oss-light")
             steps = job["steps"]
             assert steps[0] == {
                 "uses": "actions/checkout@v4",
