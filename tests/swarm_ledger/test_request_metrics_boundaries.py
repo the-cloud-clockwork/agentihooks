@@ -138,7 +138,7 @@ def test_command_rejects_invalid_windows_before_http(capture, monkeypatch, capsy
     calls = []
     monkeypatch.setattr(metrics, "urlopen", lambda *args, **kwargs: calls.append((args, kwargs)))
     with pytest.raises(SystemExit) as caught:
-        metrics.main(["--hours", hours])
+        metrics.main([f"--hours={hours}"])
     assert caught.value.code == 2
     assert "hours must be positive and at most seven days" in capsys.readouterr().err
     assert calls == []
