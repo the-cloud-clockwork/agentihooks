@@ -777,6 +777,53 @@ def test_the_tick_runs_the_merge_pass_after_the_wait_pass(env, monkeypatch):
     assert order == ["waits", ("merge", "sw")] and "merged" in actions
 
 
+def test_a_planted_unmergeable_entry_leaves_the_queue_within_two_full_ticks(env, monkeypatch):
+    from scripts.swarm.ledger_events import pull_request
+    from tests.swarm.test_delivery import FakeHerdr
+
+    store, ledger, rt = env
+    cli.main(["sw", "create", "--repo", "/repo"])
+    ledger.rows["t1"].update({"state": "pr", "pr_url": URL, "claimed_by": AGENT, "awaiting": "merge"})
+    store.claim("sw", "t1", AGENT, 60_000)
+    found = ready.held_record(URL, HEAD, TOP, AGENT, NOW)
+    found["on"], found["queued_at"] = {"kind": "merge", "target": URL}, NOW
+    ready.save(store, "sw", "t1", found)
+    raw = {
+        "id": "pull",
+        "state": "OPEN",
+        "baseRefName": "dev",
+        "headRefOid": HEAD,
+        "mergeable": "CONFLICTING",
+        "mergeQueueEntry": {"id": "plant", "state": "UNMERGEABLE"},
+    }
+    ledger.pulls[URL] = pull_request(raw)
+    dequeued = []
+
+    def graphql(query, values, run):
+        if query == ready.merge_queue.DEQUEUE:
+            assert values == {"id": "pull"}
+            dequeued.append(values["id"])
+            raw["mergeQueueEntry"] = None
+            ledger.pulls[URL] = pull_request(raw)
+            return {}
+        assert query == ready.merge_queue.STATE
+        return {"resource": dict(raw)}
+
+    monkeypatch.setattr(ready.merge_queue, "graphql", graphql)
+    monkeypatch.setattr(stack, "shell", Shell())
+    for tick_number in (1, 2):
+        monkeypatch.setattr(cli, "now_ms", lambda: NOW + tick_number * 60_000)
+        cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+        if ledger.rows["t1"]["state"] == "open":
+            break
+    assert tick_number == 1
+    assert dequeued == ["pull"]
+    assert raw["mergeQueueEntry"] is None
+    assert ledger.rows["t1"]["state"] == "open"
+    assert ledger.rows["t1"]["claimed_by"] == ""
+    assert any("has a merge conflict" in text for _, text, _ in ledger.comments)
+
+
 def test_the_ready_usage_names_its_handoff_document(capsys):
     with pytest.raises(SystemExit):
         cli.build_parser().parse_args(["sw", "ready", "--help"])
