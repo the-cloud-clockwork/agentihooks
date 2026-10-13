@@ -37,12 +37,12 @@ def _pushed(branch):
         raise SwarmError(f"the worktree holds uncommitted changes; commit them and push {branch} first")
 
 
-def _worktree() -> str:
+def worktree() -> str:
     top = _out(["git", "rev-parse", "--show-toplevel"], "cannot locate the worktree")
     common = _out(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], "cannot locate the repo")
     root = _out(["bash", str(WT_SCRIPT), "root"], "cannot locate the worktree root")
     if Path(top).resolve().parent != Path(root).resolve() / Path(common).parent.name:
-        raise SwarmError(f"park removes only a worktree wt.sh new made under {root}; {top} is not one")
+        raise SwarmError(f"park and ready remove only a worktree wt.sh new made under {root}; {top} is not one")
     return top
 
 
@@ -142,7 +142,7 @@ def park(store, slug: str, agent, text: str, ledger) -> dict:
     rows = {t["id"]: t for t in state["tasks"]}
     row = rows.get(agent.task) or {}
     _pushed(row.get("branch"))
-    top = _worktree()
+    top = worktree()
     _issue_ready(row)
     open_ = _open_dependencies(row, rows)
     found = handoff_check.problems(text, Resolver(slug, store.redis, ledger.state))

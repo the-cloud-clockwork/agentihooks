@@ -30,7 +30,7 @@ def _run(step, cwd, bin_dir, **env):
     return subprocess.run(
         ["bash", "-e", "-c", step["run"]],
         cwd=cwd,
-        env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", **env},
+        env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "GITHUB_WORKSPACE": str(_ROOT), **env},
         capture_output=True,
         text=True,
         timeout=30,
@@ -207,7 +207,8 @@ def test_the_coverage_merge_runs_behind_the_setup_and_the_scan_waits_for_it(tmp_
     release.touch()
     waited = _wait_merge(tree, temp, bin_dir, pid)
     assert waited.returncode == 0, waited.stdout + waited.stderr
-    assert "merged --downloaded 8" in waited.stdout
+    unit = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["unit"]
+    assert f"merged --downloaded {unit['strategy']['matrix']['shard'][-1]}" in waited.stdout
 
 
 def test_a_failed_background_merge_fails_the_wait(tmp_path):

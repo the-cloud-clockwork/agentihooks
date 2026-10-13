@@ -192,6 +192,9 @@ def check_operations(payload: dict, core: ModuleType, task_ids: tuple) -> list:
     return operations
 
 
+UNGUARDED = ("ack", "task_add")
+
+
 def target(op: dict) -> str:
     kind = op["op"]
     if kind in ("add", "edit", "delete", "clear"):

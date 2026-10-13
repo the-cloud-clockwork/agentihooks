@@ -28,7 +28,8 @@ def test_redis_starts_from_an_acl_file_with_optional_tls():
     start = (ROOT / "deploy/compose/redis/start.sh").read_text()
     assert "--aclfile" in start
     assert "--tls-port" in start
-    assert "user default off" in (ROOT / "deploy/compose/redis/users.acl.template").read_text()
+    users = (ROOT / "deploy/compose/redis/users.acl.template").read_text().splitlines()
+    assert users[0] == "user default off ~* &* +@all"
 
 
 def test_published_ports_bind_to_the_swarm_bind_address():

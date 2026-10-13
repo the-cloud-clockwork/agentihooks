@@ -96,7 +96,10 @@ def assemble(rows: dict) -> object:
             return [build(key) for key, _ in ordered]
         return {json.loads(child[2]): build(key) for key, child in ordered}
 
-    return build("[]")
+    try:
+        return build("[]")
+    finally:
+        build = None
 
 
 def read_rows(connection, slug: str) -> dict:

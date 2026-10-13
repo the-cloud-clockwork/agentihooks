@@ -7,6 +7,7 @@ from scripts.gates.verdicts import Verdicts
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import cli, idle, waits
 from scripts.swarm.ledger_events import PullRequest
+from scripts.swarm.ledger_events import head as github_head
 from scripts.swarm.ledger_events import view as github_view
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from tests.swarm.test_cli import env, run  # noqa: F401
@@ -27,6 +28,7 @@ def started(env, monkeypatch):  # noqa: F811
     monkeypatch.setattr(cli, "now_ms", lambda: 1_000)
     ledger.tasks = lambda slug: list(ledger.rows.values()) if slug == "sw" else []
     monkeypatch.setattr(cli.ledger_events, "view", lambda url: PullRequest("MERGED", 2, 1, False, head="first"))
+    monkeypatch.setattr(cli.ledger_events, "head", lambda url: "first")
     return store, ledger
 
 
@@ -615,31 +617,87 @@ def test_notice_task_names_the_task_only_a_swarm_wait_ended_notice_asks_back():
 
 
 def test_checks_declaration_records_the_remote_head(started, monkeypatch, capsys):
-    from types import SimpleNamespace
-
     store, _ = started
     calls = []
 
-    def view(url):
+    def head(url):
         calls.append(url)
-        return SimpleNamespace(head="first")
+        return "first"
 
-    monkeypatch.setattr(cli.ledger_events, "view", view)
+    monkeypatch.setattr(cli.ledger_events, "head", head)
+    monkeypatch.setattr(cli.ledger_events, "view", lambda url: pytest.fail("the checks view was read"))
     assert run("sw", "--as", ME, "wait", "--on", "checks", URL) == 0
     assert held(store)["on"] == {"kind": "checks", "target": URL, "head": "first"}
     assert json.loads(capsys.readouterr().out)["on"] == held(store)["on"]
     assert calls == [URL]
 
 
-@pytest.mark.parametrize("pull", [None, {"head": ""}])
-def test_checks_declaration_refuses_an_unknown_head(started, monkeypatch, capsys, pull):
-    from types import SimpleNamespace
-
+def test_checks_declaration_refuses_an_unknown_head(started, monkeypatch, capsys):
     store, _ = started
-    monkeypatch.setattr(cli.ledger_events, "view", lambda url: SimpleNamespace(**pull) if pull else None)
+    monkeypatch.setattr(cli.ledger_events, "head", lambda url: "")
     assert run("sw", "--as", ME, "wait", "--on", "checks", URL) == 1
     assert held(store) is None
     assert capsys.readouterr().err == "swarm: cannot read the pull request head; retry the checks wait\n"
+
+
+GH_2_4 = """#!/usr/bin/env bash
+case "$1 $2" in
+  "api graphql") echo "HTTP 502: Bad Gateway (https://api.github.com/graphql)" >&2; exit 1 ;;
+  "pr view") [[ "$*" == *headRefOid* ]] && { echo 'Unknown JSON field: "headRefOid"' >&2; exit 1; } ;;
+  "api repos/o/r/pulls/7") echo '{"state": "open", "head": {"sha": "first", "ref": "branch"}}' ;;
+  *) echo "unexpected gh $*" >&2; exit 1 ;;
+esac
+"""
+
+
+def test_a_checks_wait_reads_the_head_through_rest_on_gh_2_4(started, monkeypatch, tmp_path, capsys):
+    import os
+
+    store, _ = started
+    gh = tmp_path / "gh"
+    gh.write_text(GH_2_4)
+    gh.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setattr(cli.ledger_events, "view", github_view)
+    monkeypatch.setattr(cli.ledger_events, "head", github_head)
+    assert run("sw", "--as", ME, "wait", "--on", "checks", URL) == 0, capsys.readouterr().err
+    assert held(store)["on"] == {"kind": "checks", "target": URL, "head": "first"}
+
+
+@pytest.mark.parametrize(
+    ("code", "out", "found"),
+    [
+        (0, '{"head": {"sha": "first"}}', "first"),
+        (1, '{"head": {"sha": "first"}}', ""),
+        (0, "not json", ""),
+        (0, '{"head": {}}', ""),
+        (0, '{"head": null}', ""),
+    ],
+)
+def test_the_head_read_asks_the_rest_pulls_endpoint(code, out, found):
+    from types import SimpleNamespace
+
+    from scripts.swarm.ledger_events import head
+
+    calls = []
+
+    def run(command, **options):
+        calls.append((command, options))
+        return SimpleNamespace(returncode=code, stdout=out, stderr="refused")
+
+    assert head(URL, run) == found
+    assert calls == [(["gh", "api", "repos/o/r/pulls/7"], {"capture_output": True, "text": True, "timeout": 20})]
+
+
+def test_the_head_read_is_empty_when_gh_cannot_run():
+    import subprocess
+
+    from scripts.swarm.ledger_events import head
+
+    def run(command, **options):
+        raise subprocess.TimeoutExpired(command, 20)
+
+    assert head(URL, run) == ""
 
 
 def test_pull_request_reads_the_head_commit():

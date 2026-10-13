@@ -9,7 +9,7 @@ import functools
 import json
 
 from scripts.inbox import links, outbox
-from scripts.inbox.store import DuplicateItem, InboxError, InboxStore
+from scripts.inbox.store import DuplicateItem, InboxError, InboxStore, Item
 from scripts.swarm.store import RedisStore, SwarmError
 
 READY = ("idle", "done")
@@ -48,6 +48,18 @@ class HerdrMessenger:
 def marked(text):
     """A prompt the swarm types into a pane, marked so the hooks never count it as the operator's."""
     return f"{MARK} {text}"
+
+
+def envelope(item: Item, delivery_id: str, recipient: str) -> str:
+    metadata = {
+        "item_id": item.id,
+        "delivery_id": delivery_id,
+        "sender": item.sender,
+        "recipient": recipient,
+        "task": item.task,
+        "kind": "fyi" if item.fyi else "message",
+    }
+    return f"{MARK}\n{json.dumps(metadata)}\n\n{item.text}"
 
 
 def recipients(store, slug, to, sender):
@@ -110,7 +122,7 @@ def relay_to_page(inbox, slug, agents, ledger):
 def show(ledger, slug, item, sender, entry):
     if entry:
         return ledger.relay_comment(slug, entry, item.text, sender, item.id)
-    return ledger.relay(slug, item.text, sender)
+    return ledger.relay(slug, item.text, sender, item.id)
 
 
 def post(inbox, item, write):

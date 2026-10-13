@@ -122,7 +122,7 @@ def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan():
 
 def test_preflight_collects_one_stats_part_per_leg_with_the_pull_request_budget():
     job = _workflow()["jobs"]["stats"]
-    assert job["timeout-minutes"] == 20
+    assert job["timeout-minutes"] == 26
     steps, names = _steps(job)
     select = steps[names.index("Select mutation tests before browser setup")]
     collect = steps[names.index("Collect one stats part for every mutation shard")]
@@ -143,7 +143,7 @@ def test_preflight_collects_one_stats_part_per_leg_with_the_pull_request_budget(
 
 def test_preflight_mutates_each_shard_against_the_shared_stats_with_the_pull_request_budget():
     job = _workflow()["jobs"]["mutation-shard"]
-    assert job["timeout-minutes"] == 20
+    assert job["timeout-minutes"] == 26
     steps, names = _steps(job)
     assert steps[0]["with"] == {"fetch-depth": 0}
     stats = steps[names.index("Download the shared mutation stats")]

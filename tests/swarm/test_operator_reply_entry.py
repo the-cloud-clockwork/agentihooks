@@ -21,7 +21,7 @@ class PageLedger:
     def __init__(self):
         self.said, self.commented, self.ids = [], [], []
 
-    def relay(self, slug, text, by):
+    def relay(self, slug, text, by, op_id=""):
         self.said.append((slug, text, by))
 
     def relay_comment(self, slug, entry, text, by, op_id):

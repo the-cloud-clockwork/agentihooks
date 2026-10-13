@@ -1,15 +1,10 @@
 # Operator GitHub access controls
 
 `access.json` records the settings applied by `scripts/github_access.sh`.
-The branch payload covers every agentihooks branch except
-`refs/heads/gh-readonly-queue/**`, which GitHub creates for its merge queue.
+The audit requires the operator to be the only organization member and the
+only collaborator with write or admin access. Agenticore App and the read-only
+TCC Main CI app are the only permitted organization installations.
 Dev and main retain their independent pull request rules without bypass actors.
-
-GitHub repository rulesets cannot name a user as a bypass actor. Repository
-administrators are allowed instead; the audit requires the operator to be the
-only organization member and the only collaborator with write or admin access.
-The only app bypass actor is Agenticore App. The read-only TCC Main CI app has
-no bypass. Those are also the only two permitted organization installations.
 
 Agents prepare and review the change but cannot apply remote enforcement.
 The master opens an operator pane in the reviewed checkout. The operator uses
@@ -21,7 +16,7 @@ bash scripts/github_access.sh apply
 
 The command updates outside-contributor approval and workflow-token permissions
 on agentihooks and agentibrain-kernel, disables public repository access to the
-Default runner group, and updates the existing agentihooks branch restriction.
+Default runner group.
 After applying settings, it opens the installation settings pages of any
 unapproved apps. The operator uninstalls Claude, ChatGPT Codex Connector and AWS
 Connector for GitHub there, then presses Enter in the same pane to read every
@@ -39,16 +34,29 @@ teams, deploy keys and installed apps. API failures and missing settings fail th
 Successful reads print each checked setting and end with
 `GitHub access controls verified`. Drift prints `DRIFT` and exits nonzero.
 
-The hosted audit uses the existing organization secret `ORG_GITHUB_TOKEN`.
-Its token must read repository administration, organization members/settings,
-installed applications and organization self-hosted runner groups. A classic
-operator token needs `repo` and `admin:org`; a fine-grained equivalent requires
-the corresponding read permissions. The job never applies settings and never
-runs on pull request code. It runs on dev pushes and manual dispatch immediately;
-GitHub activates its weekly schedule only when the workflow reaches the default branch
-through the next release.
+The hosted audit mints an installation token from TCC Main CI using the existing
+`TCC_CI_CLIENT_ID` and `TCC_CI_APP_PRIVATE_KEY` secrets, as the reuse jobs do.
+The app's client ID identifies the same app as `TCC_CI_APP_ID`; the token action
+prefers client ID over its deprecated app ID input. The app must be installed on
+agentihooks and agentibrain-kernel with repository Administration read, Actions
+read and Contents read, plus organization Administration read, Members read and
+Self-hosted runners read. The token requests only those read permissions and
+only the two repositories. Organization Administration allows the audit to list
+installed applications and inspect organization defaults. Personal tokens are
+not used; `ORG_GITHUB_TOKEN` remains private. The job never applies settings and
+never runs on pull request code. It runs on dev pushes and manual dispatch immediately;
+GitHub activates its weekly schedule only when the workflow reaches the default
+branch through the next release. Dispatch it through the existing focused proof
+workflow, which owns the hosted lane:
 
-The merge queue exception must be proved by a subsequent successful merge group
-run after operator application. If the access restriction blocks the queue,
-the operator disables only that additional ruleset while its payload is fixed;
-the dev and main protections stay active. Public access to Default stays disabled.
+```bash
+gh workflow run proofs.yml \
+  --ref dev \
+  -f proof=github-access \
+  -f base=origin/dev
+```
+
+The proposed all-branch creation/update ruleset is a separate follow-up.
+The master reported that its merge queue exclusion still blocked queue creation
+and stalled every merge. This apply command leaves that rule unchanged; a
+queue-compatible restriction needs an independent live proof before activation.

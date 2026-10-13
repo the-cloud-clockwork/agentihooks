@@ -68,7 +68,11 @@ class ResourceClient:
         return state
 
     def mutate(self, slug: str, operations: list) -> dict:
-        unpinned = [operation for operation in operations if not operation.get("expected_revision")]
+        unpinned = [
+            operation
+            for operation in operations
+            if not operation.get("expected_revision") and operation["op"] != "task_add"
+        ]
         pinned = {schemas.target(operation) for operation in operations if operation.get("expected_revision")}
         fetched = {schemas.target(operation) for operation in unpinned} - pinned
         for attempt in itertools.count():
@@ -95,10 +99,11 @@ class ResourceClient:
                     raise ValueError(f"one batch pins {path} to two revisions: {guards[path]} and {revision}")
         operation_id = operations[0].setdefault("operation_id", uuid.uuid4().hex)
         for operation in operations:
-            path = schemas.target(operation)
-            if path not in guards:
-                guards[path] = self.request(slug, path)["revision"]
-            operation.setdefault("expected_revision", guards[path])
+            if operation["op"] != "task_add":
+                path = schemas.target(operation)
+                if path not in guards:
+                    guards[path] = self.request(slug, path)["revision"]
+                operation.setdefault("expected_revision", guards[path])
             ops.append(
                 {key: value for key, value in operation.items() if key not in ("expected_revision", "operation_id")}
             )

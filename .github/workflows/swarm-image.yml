@@ -13,12 +13,17 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  tags:
+  publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
-    runs-on: ubuntu-latest
-    outputs:
-      tags: ${{ steps.tags.outputs.tags }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && github.triggering_actor == 'github-merge-queue[bot]') && 'anton-oss' || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - id: tags
         env:
           IMAGE: ghcr.io/the-cloud-clockwork/agentihooks-swarm
@@ -29,25 +34,20 @@ jobs:
             echo "$IMAGE:dev-${GITHUB_SHA:0:7}"
             echo EOF
           } >> "$GITHUB_OUTPUT"
-  runner-trust:
-    uses: the-cloud-clockwork/agentihooks/.github/workflows/runner-trust.yml@dev
-  publish:
-    needs: [tags, runner-trust]
-    if: >-
-      github.event_name != 'pull_request_target' &&
-      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
-      contains(fromJSON(needs.runner-trust.outputs.actors), github.actor) &&
-      contains(fromJSON(needs.runner-trust.outputs.actors), github.triggering_actor) &&
-      (github.actor != fromJSON(needs.runner-trust.outputs.queue_actor) || github.event_name == 'merge_group' ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/dev')) &&
-      (github.triggering_actor != fromJSON(needs.runner-trust.outputs.queue_actor) || github.event_name == 'merge_group' ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/dev')) &&
-      github.event_name == 'push' && github.ref == 'refs/heads/dev'
-    permissions:
-      contents: read
-      packages: write
-    uses: The-Cloud-Clockwork/.github/.github/workflows/ghcr-build-reusable.yml@main
-    with:
-      image_name: ghcr.io/the-cloud-clockwork/agentihooks-swarm
-      tags: ${{ needs.tags.outputs.tags }}
-      cache_scope: swarm
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha,scope=swarm
+          cache-to: type=gha,mode=max,scope=swarm

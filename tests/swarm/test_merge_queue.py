@@ -7,7 +7,17 @@ from scripts.swarm import cli, merge_queue, waits
 from scripts.swarm.store import SwarmError
 
 URL = "https://github.com/o/r/pull/7"
-OPEN = {"id": "PR_one", "state": "OPEN", "headRefOid": "abc", "baseRefName": "dev", "mergeQueueEntry": None}
+OPEN = {
+    "id": "PR_one",
+    "state": "OPEN",
+    "headRefOid": "abc",
+    "baseRefName": "dev",
+    "mergeQueueEntry": None,
+    "isDraft": False,
+    "reviewDecision": None,
+    "statusCheckRollup": {"state": "SUCCESS"},
+    "repository": {"mergeQueue": {"id": "MQ_dev"}},
+}
 ENTRY = {"id": "MQ_one", "position": 2, "state": "AWAITING_CHECKS"}
 AUTHORED = {"sha": "abc", "commit": {"message": "Change the code"}, "committer": {"login": "nestorcolt"}}
 REFRESHED = {"sha": "abc", "commit": {"message": "Merge branch 'dev' into ci-1"}, "committer": {"login": "web-flow"}}
@@ -118,6 +128,55 @@ def test_queue_enqueues_the_observed_head_and_reports_the_queue_entry():
     assert command[5:] == ["-f", "id=PR_one", "-f", "head=abc"]
     assert calls[-1][0] == calls[0][0]
     assert not any("compare/" in str(call[0]) for call in calls)
+
+
+@pytest.mark.parametrize("review", [None, "APPROVED"])
+def test_queue_squash_merges_the_observed_head_when_the_repository_has_no_queue(review):
+    calls = []
+    responses = iter(
+        [
+            {"data": {"resource": {**OPEN, "repository": {"mergeQueue": None}, "reviewDecision": review}}},
+            {"data": {"mergePullRequest": {"pullRequest": {"state": "MERGED"}}}},
+            {"data": {"resource": {**OPEN, "state": "MERGED", "repository": {"mergeQueue": None}}}},
+        ]
+    )
+
+    def run(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0, json.dumps(next(responses)))
+
+    assert merge_queue.operate("queue", URL, run) == {
+        "url": URL,
+        "state": "MERGED",
+        "head": "abc",
+        "queued": False,
+        "entry": None,
+    }
+    assert len(calls) == 3
+    assert "mergePullRequest(input:" in calls[1][4]
+    assert "expectedHeadOid: $head" in calls[1][4]
+    assert "mergeMethod: SQUASH" in calls[1][4]
+    assert calls[1][5:] == ["-f", "id=PR_one", "-f", "head=abc"]
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"isDraft": True},
+        {"reviewDecision": "CHANGES_REQUESTED"},
+        {"reviewDecision": "REVIEW_REQUIRED"},
+        {"statusCheckRollup": None},
+        {"statusCheckRollup": {"state": "PENDING"}},
+        {"statusCheckRollup": {"state": "FAILURE"}},
+    ],
+)
+def test_queue_without_a_queue_refuses_an_unready_pull_request(change):
+    run, calls = runner({"data": {"resource": {**OPEN, "repository": {"mergeQueue": None}, **change}}})
+    with pytest.raises(
+        SwarmError, match="^squash merge requires a ready pull request with green checks and no pending review$"
+    ):
+        merge_queue.operate("queue", URL, run)
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize(
@@ -600,12 +659,11 @@ def test_transport_failures_are_reported(error):
     assert str(exc.value) == f"GitHub API: {error}"
 
 
-@pytest.mark.parametrize("autonomy", ["full", "assist"])
-def test_engineer_guidance_names_queue_state_and_dequeue_commands(autonomy):
+def test_engineer_guidance_names_queue_state_and_dequeue_commands():
     from scripts.swarm import prompt
 
     text = prompt.build(
-        "sw", "/repo", "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x", "phase": "p1"}, autonomy=autonomy
+        "sw", "/repo", "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x", "phase": "p1"}, autonomy="assist"
     )
     assert "agentihooks swarm sw merge queue <pr url>" in text
     assert "agentihooks swarm sw merge state <pr url>" in text

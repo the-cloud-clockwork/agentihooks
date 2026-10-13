@@ -5,9 +5,10 @@ import os
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
+from scripts.swarm import lease
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.runtime import HerdrRuntime
-from scripts.swarm.store import MASTER, AgentRecord
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore
 from scripts.swarm.tick import Placed, SpawnError
 from scripts.swarm_v2.runtime.base import (
     LOCAL,
@@ -84,3 +85,19 @@ def routed(
     placement = Placement(kubernetes.backend) if kubernetes is not None else None
     router = RuntimeRouter.from_environ(runtimes, os.environ if environ is None else environ, placement)
     return RoutedRuntime(herdr, router, launch)
+
+
+def hive_controller(runtime: RoutedRuntime, store: RedisStore, slug: str, held: lease.Lease) -> RoutedRuntime:
+    from scripts.hive.launch import HIVE, HiveLaunch
+
+    hive = HiveLaunch(store, slug, held, runtime.herdr_runtime)
+    router = RuntimeRouter(
+        [*runtime.router.runtimes.values(), hive],
+        default=HIVE,
+        disabled=runtime.router.disabled,
+        placement=Placement(HIVE, local_profiles=frozenset()),
+    )
+    placed = RoutedRuntime(runtime.herdr_runtime, router)
+    placed.hive_launch = hive
+    placed.original_runtime = runtime
+    return placed

@@ -91,7 +91,7 @@ def test_queue_runs_publish_their_own_baseline_before_sonar_and_the_gate():
     assert jobs["queue-baseline"]["needs"] == ["unit", "reuse"]
     assert download["with"] == {"pattern": "coverage-3.12-*", "path": ".coverage-shards"}
     assert record["run"] == (
-        "python -m tests.coverage_baseline --shards 8 --head-shards .coverage-shards"
+        "python -m tests.coverage_baseline --shards 12 --head-shards .coverage-shards"
         ' --out "$RUNNER_TEMP/own-baseline/baseline.json"'
     )
     assert upload["with"]["name"] == "coverage-baseline"

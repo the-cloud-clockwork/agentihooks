@@ -23,7 +23,7 @@ def test_record_computes_the_baseline_from_coverage(measured):
     root, _, shards = measured
     target = root / "baseline.json"
     cache.record(root, shards, target)
-    assert cache.read(target, "tree", 1) == {
+    assert cache.read(target, "tree") == {
         "commit": "base",
         "tree": "tree",
         "shards": 1,
@@ -35,16 +35,15 @@ def test_record_computes_the_baseline_from_coverage(measured):
 def test_a_cache_miss_names_a_failed_dev_run_and_the_recovery(measured):
     root, _, _ = measured
     with pytest.raises(ValueError, match="failed dev run.*merge a measured dev revision.*rerunning"):
-        cache.read(root / "missing.json", "tree", 1)
+        cache.read(root / "missing.json", "tree")
 
 
-@pytest.mark.parametrize("tree,shards,message", [("another", 1, "tree"), ("tree", 8, "shards")])
-def test_a_cache_for_another_measurement_is_red(measured, tree, shards, message):
+def test_a_cache_for_another_tree_is_red(measured):
     root, _, files = measured
     target = root / "baseline.json"
     cache.record(root, files, target)
-    with pytest.raises(ValueError, match=message):
-        cache.read(target, tree, shards)
+    with pytest.raises(ValueError, match="tree"):
+        cache.read(target, "another")
 
 
 def test_record_retains_the_previous_measurement_and_its_history(measured):
@@ -64,6 +63,21 @@ def test_an_incomplete_suite_cannot_publish_a_baseline(measured):
     with pytest.raises(ValueError, match="shard coverage missing"):
         cache.record(root, [*shards, root / "missing.coverage"], target)
     assert not target.exists()
+
+
+@pytest.mark.parametrize("folders,code", [(2, 0), (3, 1)], ids=["exact", "extra-shard"])
+def test_the_recorder_reads_exactly_the_shards_the_run_split(measured, folders, code):
+    root, _, _ = measured
+    for index in range(1, folders + 1):
+        folder = root / "downloaded" / f"coverage-3.12-{index}"
+        folder.mkdir(parents=True)
+        data = CoverageData(basename=str(folder / ".coverage"))
+        data.add_lines({"hooks/example.py": {index}})
+        data.write()
+    target = root / "baseline.json"
+    argv = ["--head", str(root), "--shards", "2", "--head-shards", str(root / "downloaded"), "--out", str(target)]
+    assert cache.main(argv) == code
+    assert target.exists() == (code == 0)
 
 
 def test_history_is_bounded_to_thirty_measurements(measured):

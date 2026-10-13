@@ -431,7 +431,7 @@ def test_a_parked_task_finishes_from_its_branch_after_a_restack():
     assert f"{CUT} --from origin/eng-parked " in worktree
     assert "agentihooks swarm sw restack" in worktree and "git rebase --continue" in worktree
     assert "agentihooks swarm sw pr <pr url>" in _step(lines, 5)
-    assert "done --pr <pr url>" in _step(lines, 7)
+    assert "ready <handoff doc>" in _step(lines, 6)
     assert "HEAD:eng-parked" not in text
 
 

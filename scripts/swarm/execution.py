@@ -259,7 +259,7 @@ def _validate_target(backend, target, refuse):
     allowed = (
         {"pod_namespace", "pod_name", "pod_uid"}
         if backend == "kubernetes"
-        else {"server_id", "process_namespace", "pid", "pid_start"}
+        else {"host_id", "server_id", "process_namespace", "pid", "pid_start"}
     )
     if set(target) - allowed:
         refuse("unsupported runtime target identity field")
@@ -279,6 +279,9 @@ def _validate_target(backend, target, refuse):
 
 
 def _check_binding(previous, current, refuse):
+    if set(previous) == {"host_id"} and set(current) == {"host_id", "process_namespace", "pid", "pid_start"}:
+        if previous["host_id"] == current["host_id"]:
+            return
     for field in sorted(set(previous) | set(current)):
         if field == "pod_uid" and not previous.get(field):
             continue

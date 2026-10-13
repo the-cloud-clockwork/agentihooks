@@ -726,6 +726,49 @@ def test_checkpoint_window_closes_at_deadline(supervisor, monkeypatch):
     checkpoint.assert_not_called()
 
 
+def test_remote_validation_cannot_extend_the_checkpoint_deadline(supervisor, monkeypatch):
+    import threading
+
+    release = threading.Event()
+    finished = threading.Event()
+
+    def validate(*_):
+        assert threading.current_thread().daemon is True
+        release.wait(0.5)
+        finished.set()
+        return True
+
+    supervisor.launch = replace(supervisor.launch, budgets=Budgets(checkpoint=0.05))
+    supervisor.environment[runtime.checkpoint_runtime.REMOTE] = "true"
+    monkeypatch.setattr(supervisor, "quiesce", lambda: True)
+    monkeypatch.setattr(runtime, "checkpoint", lambda *_: "checkpoint")
+    monkeypatch.setattr(runtime.checkpoint_runtime, "validate_export", validate)
+    cleanup = Mock()
+    monkeypatch.setattr(runtime.trees, "cleanup", cleanup)
+    started = runtime.time.monotonic()
+    try:
+        result = supervisor.drain("termination")
+        assert runtime.time.monotonic() - started < 0.3
+        assert result["checkpoint_status"] == "incomplete"
+        assert result["checkpoint_id"] is None
+        cleanup.assert_called_once()
+    finally:
+        release.set()
+        assert finished.wait(1)
+
+
+def test_remote_validation_finishing_at_the_checkpoint_deadline_is_incomplete(supervisor, monkeypatch):
+    supervisor.environment[runtime.checkpoint_runtime.REMOTE] = "true"
+    monkeypatch.setattr(supervisor, "quiesce", lambda: True)
+    monkeypatch.setattr(runtime, "checkpoint", lambda *_: "checkpoint")
+    monkeypatch.setattr(runtime.checkpoint_runtime, "validate_export", lambda *_: True)
+    monkeypatch.setattr(runtime.trees, "cleanup", lambda *_: None)
+    monkeypatch.setattr(runtime.time, "monotonic", Mock(side_effect=[0, 0, 0, 1]))
+    result = supervisor.drain("termination")
+    assert result["checkpoint_status"] == "incomplete"
+    assert result["checkpoint_id"] is None
+
+
 def test_exporter_exit_ends_checkpoint_wait_and_stale_agent_is_not_counted(supervisor, monkeypatch):
     monkeypatch.setattr(supervisor, "quiesce", lambda: True)
     monkeypatch.setattr(runtime.trees, "cleanup", lambda *_: None)

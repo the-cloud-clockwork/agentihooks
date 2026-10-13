@@ -42,7 +42,7 @@ jobs:
         run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
 
       - name: Install the browser the browser workload drives
-        timeout-minutes: 2
+        timeout-minutes: 6
         uses: ./.github/actions/browser-cache
 
       - name: Measure the worker resource suite

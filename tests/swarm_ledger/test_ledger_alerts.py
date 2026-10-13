@@ -580,7 +580,7 @@ def test_a_repeated_refusal_persists_its_new_deadline(monkeypatch):
 
 @pytest.mark.parametrize("refused", [False, True])
 def test_write_with_fifty_alerts_resolves_a_bounded_number_of_names(inbox, monkeypatch, refused):
-    from scripts.swarm_ledger.api import mutations, resources
+    from scripts.swarm_ledger.api import mutations
 
     make_ledger()
     state, _ = sync([{"op": "join", "id": "joined", "by": "writer"}])
@@ -611,11 +611,9 @@ def test_write_with_fifty_alerts_resolves_a_bounded_number_of_names(inbox, monke
     monkeypatch.setattr("scripts.swarm.naming.resolve_name", counted_name)
     monkeypatch.setattr(inbox.names, "resolve", counted_name)
     op = {"op": "ack", "id": "one", "by": "writer", "rev": state["_meta"]["rev"]}
-    guards = {}
     if refused:
         op = {"op": "task_add", "id": "one", "by": "writer", "task": "t1", "title": "Proof", "lane": "eng"}
-        guards = {"tasks": resources.resource_revision(state, "tasks")}
-    reply = mutations.apply(ledger_server, SLUG, "", {"operation_id": "timed", "ops": [op], "guards": guards})
+    reply = mutations.apply(ledger_server, SLUG, "", {"operation_id": "timed", "ops": [op], "guards": {}})
     assert reply["rejected"] == (["one"] if refused else [])
     assert len(resolved) <= (4 if refused else 2), resolved
 

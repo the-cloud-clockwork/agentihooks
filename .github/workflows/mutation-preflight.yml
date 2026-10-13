@@ -104,7 +104,7 @@ jobs:
     needs: [pull-request, plan]
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.changed != '0' }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && github.triggering_actor == 'github-merge-queue[bot]') && 'anton-oss-batch' || 'ubuntu-latest' }}
-    timeout-minutes: 20
+    timeout-minutes: 26
     concurrency:
       group: ${{ format('{0}-stats-{1}', github.workflow == 'Mutation preflight' && format('mutation-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('mutation-preflight-job-{0}', github.run_id), matrix.part) }}
       queue: ${{ github.workflow == 'Mutation preflight' && 'max' || 'single' }}
@@ -141,13 +141,13 @@ jobs:
       - name: Install the browser that page tests drive
         id: browser
         if: steps.selection.outputs.browser == 'true'
-        timeout-minutes: 2
+        timeout-minutes: 6
         uses: ./.github/actions/browser-cache
 
       - name: Report browser setup failure
         if: failure() && steps.browser.outcome == 'failure'
         run: |
-          echo "::error::Chromium setup failed or exceeded its two minute timeout; mutation tests cannot run."
+          echo "::error::Chromium setup failed or exceeded its six minute timeout; mutation tests cannot run."
           exit 1
 
       - name: Collect one stats part for every mutation shard
@@ -182,7 +182,7 @@ jobs:
     needs: [plan, stats]
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.changed != '0' && needs.stats.result == 'success' }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && github.triggering_actor == 'github-merge-queue[bot]') && 'anton-oss-batch' || 'ubuntu-latest' }}
-    timeout-minutes: 20
+    timeout-minutes: 26
     concurrency:
       group: ${{ format('{0}-shard-{1}', github.workflow == 'Mutation preflight' && format('mutation-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('mutation-preflight-job-{0}', github.run_id), matrix.shard) }}
       queue: ${{ github.workflow == 'Mutation preflight' && 'max' || 'single' }}
@@ -219,13 +219,13 @@ jobs:
       - name: Install the browser that page tests drive
         id: browser
         if: steps.selection.outputs.browser == 'true'
-        timeout-minutes: 2
+        timeout-minutes: 6
         uses: ./.github/actions/browser-cache
 
       - name: Report browser setup failure
         if: failure() && steps.browser.outcome == 'failure'
         run: |
-          echo "::error::Chromium setup failed or exceeded its two minute timeout; mutation tests cannot run."
+          echo "::error::Chromium setup failed or exceeded its six minute timeout; mutation tests cannot run."
           exit 1
 
       - name: Download the shared mutation stats

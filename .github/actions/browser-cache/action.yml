@@ -32,15 +32,21 @@ runs:
           echo "ready=false" >> "$GITHUB_OUTPUT"
         fi
     - name: Use the Ubuntu archive for browser dependencies
-      if: steps.launch.outputs.ready != 'true'
+      if: steps.launch.outputs.ready != 'true' && runner.environment == 'github-hosted'
       shell: bash
       run: timeout 60s sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
     - name: Install Chromium and missing OS dependencies
       if: steps.launch.outputs.ready != 'true'
       shell: bash
       env:
+        ATTEMPT_SECONDS: "120"
         PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
-      run: timeout 120s python -m playwright install --with-deps chromium
+      run: |
+        for attempt in 1 2; do
+          timeout --kill-after=10s "${ATTEMPT_SECONDS}s" python -m playwright install --with-deps chromium && exit 0
+          [[ "$attempt" == 2 ]] || echo "::warning title=Retried browser install::Chromium install attempt $attempt failed or exceeded ${ATTEMPT_SECONDS}s; retrying once."
+        done
+        exit 1
     - name: Verify the installed browser
       if: steps.launch.outputs.ready != 'true'
       shell: bash

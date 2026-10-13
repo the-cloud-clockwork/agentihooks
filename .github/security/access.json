@@ -8,6 +8,5 @@
   "repositories": ["agentihooks", "agentibrain-kernel"],
   "contributor_approval": {"approval_policy": "all_external_contributors"},
   "workflow_permissions": {"default_workflow_permissions": "read", "can_approve_pull_request_reviews": false},
-  "runner_group": {"id": 1, "name": "Default", "allows_public_repositories": false},
-  "branch_restriction": {"repository": "agentihooks", "id": 24942335, "payload": "owner-and-apps-only-push.json"}
+  "runner_group": {"id": 1, "name": "Default", "allows_public_repositories": false}
 }

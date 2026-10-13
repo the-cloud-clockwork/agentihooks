@@ -25,7 +25,7 @@ GRADING = (
     "sonar-project.properties",
     ".coveragerc",
 )
-FIELDS = "id state headRefOid baseRefName mergeQueueEntry { id position state }"
+FIELDS = 'id state headRefOid baseRefName mergeQueueEntry { id position state } isDraft reviewDecision statusCheckRollup { state } repository { mergeQueue(branch: "dev") { id } }'
 STATE = "query($url: URI!) { resource(url: $url) { ... on PullRequest { " + FIELDS + " } } }"
 QUEUE = """mutation($id: ID!, $head: GitObjectID!) {
     enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head}) { mergeQueueEntry { id } }
@@ -33,6 +33,13 @@ QUEUE = """mutation($id: ID!, $head: GitObjectID!) {
 
 DEQUEUE = """mutation($id: ID!) {
     dequeuePullRequest(input: {id: $id}) { mergeQueueEntry { id } }
+}"""
+
+
+MERGE = """mutation($id: ID!, $head: GitObjectID!) {
+  mergePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head, mergeMethod: SQUASH}) {
+    pullRequest { state }
+  }
 }"""
 
 
@@ -124,9 +131,18 @@ def operate(action: str, url: str, run=subprocess.run) -> dict:
     raw_head = raw["headRefOid"]
     waiting = False
     if action == "queue" and raw["mergeQueueEntry"] is None:
-        waiting = refresh(url, raw, run)
-        if not waiting:
-            graphql(QUEUE, {"id": raw["id"], "head": raw["headRefOid"]}, run)
+        if raw["repository"]["mergeQueue"] is None:
+            if (
+                raw["isDraft"]
+                or raw["reviewDecision"] not in (None, "APPROVED")
+                or (raw["statusCheckRollup"] or {}).get("state") != "SUCCESS"
+            ):
+                raise SwarmError("squash merge requires a ready pull request with green checks and no pending review")
+            graphql(MERGE, {"id": raw["id"], "head": raw["headRefOid"]}, run)
+        else:
+            waiting = refresh(url, raw, run)
+            if not waiting:
+                graphql(QUEUE, {"id": raw["id"], "head": raw["headRefOid"]}, run)
         raw = graphql(STATE, {"url": url}, run)["resource"]
     if action == "dequeue":
         graphql(DEQUEUE, {"id": raw["id"]}, run)

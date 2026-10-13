@@ -1,4 +1,4 @@
-"""The page layout: panel sizes and column widths shared by every ledger page, HOME and BIN."""
+"""The page layout: panel sizes, column widths and the Stats row order shared by every ledger page, HOME and BIN."""
 
 import json
 import re
@@ -19,6 +19,8 @@ TABLE = re.compile(r"^[a-z][a-z0-9-]{0,48}$")
 COLUMN_WIDTH = (0, 2000)
 MAX_TABLES = 32
 MAX_COLUMNS = 24
+STATS = "stats"
+MAX_STATS = 32
 
 
 def path():
@@ -48,6 +50,14 @@ def columns(tables):
     return found
 
 
+def stats(keys):
+    if not isinstance(keys, list) or len(keys) > MAX_STATS:
+        raise ValueError(f"stats must list at most {MAX_STATS} rows")
+    if not all(isinstance(key, str) and TABLE.match(key) for key in keys) or len(set(keys)) != len(keys):
+        raise ValueError("stats must list distinct row keys")
+    return keys
+
+
 def check(body):
     if not isinstance(body, dict):
         raise ValueError("layout must be an object of rows")
@@ -55,6 +65,9 @@ def check(body):
     for row, sizes in body.items():
         if row == COLUMNS:
             layout[COLUMNS] = columns(sizes)
+            continue
+        if row == STATS:
+            layout[STATS] = stats(sizes)
             continue
         if row not in ROWS:
             raise ValueError(f"unknown row {row}")
@@ -69,7 +82,7 @@ def check(body):
 def read():
     try:
         saved = core.loads(path().read_bytes())
-        return check({row: sizes for row, sizes in saved.items() if row in ROWS or row == COLUMNS})
+        return check({row: sizes for row, sizes in saved.items() if row in ROWS or row in (COLUMNS, STATS)})
     except (OSError, ValueError):
         return {}
 

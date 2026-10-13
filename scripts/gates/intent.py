@@ -36,6 +36,7 @@ MERGED_COMMENT = "Intent remains unmet on a merged pull request. The master must
 DRAFT = "draft pull request, judged once ready for review"
 START, END = "<!-- agentihooks intent -->", "<!-- /agentihooks intent -->"
 MERGE_QUEUE = ["merge", "queue"]
+RELEASES = (["done"], ["ready"])
 PULL = re.compile(r"github\.com/([^/]+)/([^/]+)/pull/(\d+)")
 SHORT = re.compile(r"(?<![\w./-])([A-Za-z0-9-]+)/([\w.-]+)#(\d+)\b")
 NAMED_LIMIT = 3
@@ -728,7 +729,7 @@ def _gated(words):
     program, rest = PurePosixPath(words[index]).name, words[index + 1 :]
     if program == "gh":
         return rest[:2] == ["pr", "merge"]
-    return program == "agentihooks" and rest[:1] == ["swarm"] and (rest[2:3] == ["done"] or rest[2:4] == MERGE_QUEUE)
+    return program == "agentihooks" and rest[:1] == ["swarm"] and (rest[2:3] in RELEASES or rest[2:4] == MERGE_QUEUE)
 
 
 def _merge_target(words):
@@ -767,11 +768,11 @@ class IntentGate:
     name = NAME
     default_mode = DEFAULT_MODE
 
-    def __init__(self, clock=time.time):
-        self.clock = clock
+    def __init__(self, clock=time.time, run=subprocess.run):
+        self.clock, self.run = clock, run
 
     def matches(self, call):
-        return call.tool == "Bash" and ("merge" in call.command or "done" in call.command)
+        return call.tool == "Bash" and any(word in call.command for word in ("merge", "done", "ready"))
 
     def decide(self, call, who, state, mode="enforce"):
         if not (who.pinned and who.task) or not any(map(_gated, simple_commands(call.command))):
@@ -803,10 +804,17 @@ class IntentGate:
             return Decision.deny(text)
         if verdict != PENDING:
             return Decision()
+        return self._pending(call, who, state, mode, record)
+
+    def _pending(self, call, who, state, mode, record):
         if record["reason"] == DRAFT:
-            return Decision.deny(
-                f"intent for task {who.task} is judged once its pull request is ready for review. {_next_step(who)}"
-            )
+            if _pr_field(call.command, "draft", self.run) != "false":
+                return Decision.deny(
+                    f"intent for task {who.task} is judged once its pull request is ready for review. {_next_step(who)}"
+                )
+            if state.read(who.task) != record:
+                return self.decide(call, who, state, mode)
+            record = state.write(who.task, PENDING, RUNNING, int(self.clock() * 1000), phase=record.get("phase"))
         waited = int(self.clock() * 1000) - record["at"]
         if waited < GRACE_MS:
             return Decision.deny(

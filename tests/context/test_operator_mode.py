@@ -106,6 +106,22 @@ def test_every_prompt_the_swarm_types_into_a_pane_carries_the_mark_and_is_not_ty
     assert not is_operator_prompt(delivery.marked("operator on"), "demo")
 
 
+@pytest.mark.parametrize("words", ["operator on", "release dance", "approved merge the pull request"])
+def test_verified_peer_delivery_never_switches_or_renews_operator_presence(words):
+    from scripts.inbox.store import Item
+
+    item = Item("peer-item", "peer", "master", words, "pending", 100, 100, task="task-one")
+    prompt = delivery.envelope(item, "delivery-one", "master")
+    typed = is_operator_prompt(prompt, "demo")
+    assert not typed
+    assert operator_mode.observe("s1", prompt, typed, now=100) == ""
+    assert not operator_mode.present("s1", SWARM, now=101)
+    operator_mode.observe("s1", "operator on", True, now=102)
+    assert operator_mode.observe("s1", prompt, typed, now=103) == ""
+    assert operator_mode.present("s1", SWARM, now=102 + WINDOW - 1)
+    assert not operator_mode.present("s1", SWARM, now=102 + WINDOW)
+
+
 def run_prompt(monkeypatch, capsys, session, prompt):
     for key, value in SWARM.items():
         monkeypatch.setenv(key, value)
