@@ -16,6 +16,7 @@ import argparse
 import errno
 import functools
 import html
+import http.server
 import itertools
 import json
 import os
@@ -26,7 +27,8 @@ import subprocess
 import sys
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from collections.abc import Callable
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -47,6 +49,7 @@ from scripts.swarm_ledger import (  # noqa: E402
     page_policy,
     request_metrics,
     server_code,
+    server_compose,
     server_lifetime,
 )
 from scripts.swarm_ledger.events import Hub  # noqa: E402
@@ -61,6 +64,9 @@ BASE = f"http://{HOST}:{PORT}"
 PIDFILE = core.LEDGER_DIR / ".server.pid"
 LOGFILE = core.LEDGER_DIR / ".server.log"
 SERVER_WAIT = 5.0
+COMPOSE_WAIT = 180.0
+THREADS_EXHAUSTED = 75
+PROBE_FILE = ".healthz"
 FILE_ORIGIN = "null"
 MAX_BODY = 1 << 20
 ALLOWED_HOSTS = ledger_link.allowed_hosts()
@@ -697,6 +703,14 @@ def sample_streams():
             sys.stderr.write(f"stream sample {slug}: {exc}\n")
 
 
+class ThreadingHTTPServer(http.server.ThreadingHTTPServer):
+    def process_request(self, request: socket.socket, client_address: tuple[str, int]) -> None:
+        try:
+            super().process_request(request, client_address)
+        except RuntimeError:
+            os._exit(THREADS_EXHAUSTED)
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         if self.path.startswith("/api/v1/"):
@@ -983,6 +997,19 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(exc.status, str(exc), "text/plain")
         return self.send(200, json.dumps(stored), "application/json")
 
+    def post_route(self, route: str) -> Callable[[], None] | None:
+        if route == "/healthz":
+            return self.probe_write
+        for prefix, post in (("/api/media/", self.post_media), ("/api/artifacts/", self.post_artifact)):
+            if route.startswith(prefix):
+                return functools.partial(post, route.removeprefix(prefix))
+        return None
+
+    def probe_write(self) -> None:
+        with core.LOCK:
+            core.atomic_write(core.LEDGER_DIR / PROBE_FILE, str(core.now_ms()))
+        return self.send(200, json.dumps({"dir": str(core.LEDGER_DIR)}), "application/json")
+
     @request_metrics.measured
     def do_POST(self):
         if self.path.startswith("/api/v1/"):
@@ -992,10 +1019,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.refused():
             return None
         route = self.path.split("?", 1)[0]
-        if route.startswith("/api/media/"):
-            return self.post_media(route.removeprefix("/api/media/"))
-        if route.startswith("/api/artifacts/"):
-            return self.post_artifact(route.removeprefix("/api/artifacts/"))
+        if post := self.post_route(route):
+            return post()
         if route != "/api/bin":
             return self.send(404, "not found", "text/plain")
         if self.headers.get("Origin") not in ALLOWED_ORIGINS:
@@ -1152,30 +1177,45 @@ def server_process_alive() -> bool:
     return not cmdline or b"ledger_server.py" in cmdline
 
 
+def wait_for(folder: Path) -> float:
+    return COMPOSE_WAIT if server_compose.used(folder) else SERVER_WAIT
+
+
+def start_server(compose: bool) -> bool:
+    if compose:
+        if error := server_compose.start(core.LEDGER_DIR):
+            sys.exit(f"could not start the ledger service: {error}")
+        return True
+    if port_held() or server_process_alive():
+        return False
+    core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
+    core.rotate_if_full(LOGFILE)
+    with open(LOGFILE, "a") as log:
+        subprocess.Popen(
+            [sys.executable, os.path.abspath(__file__), "--serve"],
+            stdout=log,
+            stderr=log,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+            env={
+                **server_lifetime.environment(core.LEDGER_DIR, PORT),
+                "SWARM_RELOAD": os.environ.get("SWARM_RELOAD", "1"),
+            },
+        )
+    return True
+
+
 def ensure():
-    deadline = time.monotonic() + SERVER_WAIT
+    deadline = time.monotonic() + wait_for(core.LEDGER_DIR)
+    compose = server_compose.used(core.LEDGER_DIR)
     started = False
     running = ledger_link.serving(url=BASE)
     while running is None:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            sys.exit(f"ledger server did not answer on {BASE}; see {LOGFILE}")
-        if not started and not port_held() and not server_process_alive():
-            core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-            core.rotate_if_full(LOGFILE)
-            with open(LOGFILE, "a") as log:
-                subprocess.Popen(
-                    [sys.executable, os.path.abspath(__file__), "--serve"],
-                    stdout=log,
-                    stderr=log,
-                    stdin=subprocess.DEVNULL,
-                    start_new_session=True,
-                    env={
-                        **server_lifetime.environment(core.LEDGER_DIR, PORT),
-                        "SWARM_RELOAD": os.environ.get("SWARM_RELOAD", "1"),
-                    },
-                )
-            started = True
+            sys.exit(f"ledger server did not answer on {BASE}; see {LOGFILE} or docker compose logs ledger")
+        if not started:
+            started = start_server(compose)
         time.sleep(min(0.1, remaining))
         running = ledger_link.serving(timeout=min(1, remaining), url=BASE)
     if running != str(core.LEDGER_DIR):
@@ -1186,6 +1226,8 @@ def ensure():
 
 
 def stop():
+    if server_compose.used(core.LEDGER_DIR) and (error := server_compose.stop(core.LEDGER_DIR)):
+        sys.exit(f"could not stop the ledger service: {error}")
     if not PIDFILE.exists():
         return print(f"no server pidfile in {core.LEDGER_DIR}")
     pid = int(PIDFILE.read_text())
