@@ -212,8 +212,10 @@ class Claim:
                 or (kind == CHECKED and target in before)
                 or (target == node and kind in PHASE_OPENS)
                 or (kind == FOCUSED and covers(target))
-                or any(map(covers, mark.cleared))
-                or (bool(mark.released) and (not mark.focus or any(map(covers, mark.focus))))
+                or (
+                    (any(map(covers, mark.cleared)) or bool(mark.released))
+                    and (not mark.focus or any(map(covers, mark.focus)))
+                )
             )
 
         return opens
@@ -320,7 +322,7 @@ def attribute(timeline: Timeline, held: list[Span], window: bottleneck.Window) -
 
 
 def _split(pieces: list, lives: list, cap: int | None) -> list[tuple]:
-    """Seat wait is claim wait while every seat of the lane is busy, for at most as many tasks as it has seats."""
+    """Charge each lane's claim wait pieces as seat wait, at most one per seat while every seat is busy, else queue wait."""
     points = sorted({edge for piece in pieces for edge in piece[1:3]} | {edge for life in lives for edge in life})
     found = []
     for low, high in zip(points, points[1:]):

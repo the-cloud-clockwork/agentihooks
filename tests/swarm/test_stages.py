@@ -757,6 +757,21 @@ def test_clearing_one_focus_while_another_still_excludes_the_task_does_not_open_
     assert seconds_of(found)[("seat_wait", "")] == 8100.0
 
 
+def test_an_unfreeze_under_a_focus_that_still_excludes_the_task_does_not_open_it():
+    task = {**OPEN_TASK, "state": "claimed"}
+    events = [
+        ledger("added", at(7), "tasks/t3"),
+        ledger("focused", at(8), "phases/p2"),
+        ledger("frozen", at(8, 30), "tasks/t3"),
+        opened("unfrozen", at(9), "tasks/t3", cleared=["tasks/t3"]),
+        ledger("joined", at(9, 15), by="e1"),
+    ]
+    claim = [agent("claim", "t3", at(9, 15)), agent("spawn", "t3", at(9, 15), "e1", "claude")]
+    ready = stages.claimable({"tasks": [task], "phases": [*PHASES, {"id": "p2"}]}, "")
+    found = stages.report(rows(ledger_events=events, agent_events=claim), [task], NOW, ready=ready)
+    assert seconds_of(found)[("seat_wait", "")] == 8100.0
+
+
 def lane_rows(added, *extra):
     return rows(
         agent_events=[agent("claim", "t1", at(5)), agent("spawn", "t1", at(5), "e1", "claude"), *extra],
