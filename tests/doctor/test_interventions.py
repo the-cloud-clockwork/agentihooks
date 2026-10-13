@@ -211,10 +211,35 @@ def test_missing_process_start_is_reported_without_restarting(store, tmp_path, m
     (tmp_path / "proc" / "1" / "stat").unlink()
     ctx = context(store, code=code, pidfile=pidfile)
 
-    with pytest.raises(SwarmError, match="cannot read the ledger server process start"):
+    with pytest.raises(SwarmError, match="^cannot read the ledger server process start$"):
         interventions.apply(ctx, "restart-ledger-server", args())
 
     assert ctx.run.calls == [] and ctx.ledger.noted == []
+
+
+@pytest.mark.parametrize("newer", [False, True])
+def test_legacy_restart_preserves_nanosecond_process_start_boundary(store, tmp_path, monkeypatch, newer):
+    monkeypatch.setattr(interventions.os, "sysconf", lambda _: 100)
+    code, pidfile = server_tree(tmp_path)
+    process_tree(tmp_path, monkeypatch)
+    (tmp_path / server_code.RECORD).unlink()
+    (tmp_path / "proc" / "stat").write_text("btime 1791800000\n")
+    tail = ["0"] * 20
+    tail[19] = "10001"
+    (tmp_path / "proc" / "1" / "stat").write_text("1 (ledger server) " + " ".join(tail))
+    stamp = 1_791_800_100_010_000_001 if newer else 1_791_800_100_010_000_000
+    os.utime(code / "ledger_server.py", ns=(stamp, stamp))
+    ctx = context(store, code=code, pidfile=pidfile)
+
+    if newer:
+        line = interventions.apply(ctx, "restart-ledger-server", args())
+        assert [call[-1] for call in ctx.run.calls] == ["--stop", "--ensure"]
+        assert line == restarted("scripts/swarm_ledger/ledger_server.py changed since it started")
+        assert logged_on_both(ctx)
+    else:
+        with pytest.raises(SwarmError, match=REFUSED):
+            interventions.apply(ctx, "restart-ledger-server", args())
+        assert ctx.run.calls == [] and ctx.ledger.noted == []
 
 
 @pytest.mark.parametrize(
