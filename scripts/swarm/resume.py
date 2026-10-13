@@ -202,7 +202,7 @@ def _recovery_owner(store, slug, agent, rows, now_ms):
         return False
     raw = store.redis.get(store.key(slug, "task-authority", agent.task))
     if not raw:
-        return not agent.execution_id
+        return not agent.execution_id or agent.runtime_backend == "local"
     claim = json.loads(raw)
     return (
         claim["state"] == "active"
@@ -387,10 +387,9 @@ def _restart_from_handoff(store, slug, agent, task, context):
 
     if not _recovery_current(store, slug, agent, context):
         return "task ownership changed"
-    handoff = store.handoff(slug, agent.task) or transfers.last_handoff(store, slug, agent.task)
-    transfer = transfers.record(store, slug, agent, "outage", handoff, context.at)
+    transfer = recovery_handoff(store, slug, agent, context.at)
     transfers.attach(store, slug, agent)
-    task = primed(store, slug, agent.seat, {**task, "handoff": handoff, "transfer": transfer["id"]})
+    task = primed(store, slug, agent.seat, {**task, "handoff": transfer["handoff"], "transfer": transfer["id"]})
     if not _recovery_current(store, slug, agent, context):
         return "task ownership changed"
     placed = context.runtime.spawn(store.config(slug), agent.lane, agent.name, task)
@@ -398,3 +397,13 @@ def _restart_from_handoff(store, slug, agent, task, context):
         slug, replace(placed_record(agent, placed), conversation_id="", started_at=context.at, idle_ticks=0)
     )
     return ""
+
+
+def recovery_handoff(store, slug, agent, now_ms):
+    handoff = store.handoff(slug, agent.task) or transfers.last_handoff(store, slug, agent.task)
+    return transfers.record(store, slug, agent, "outage", handoff, now_ms)
+
+
+def free_seat(store, slug, agent, now_ms):
+    store.redis.hdel(store.key(slug, RECOVERY), agent.name)
+    return recovery_handoff(store, slug, agent, now_ms)
