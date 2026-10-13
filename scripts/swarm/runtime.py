@@ -783,14 +783,17 @@ class HerdrRuntime:
     def remote(self, agent: AgentRecord) -> str:
         from scripts.hive import reports
 
-        return reports.host(agent) if self.hive is not None else ""
+        return reports.host(agent)
 
     def _hosted(self, agent: AgentRecord) -> dict:
-        return self.hive.execution(agent) or {}
+        return (self.hive.execution(agent) or {}) if self.hive is not None else {}
 
     def _order(self, host: str, order, name: str) -> bool:
         from scripts.hive.orders import Orders
 
+        if self.hive is None:
+            self.refusals[name] = {"process": 0, "refusal": f"no hive reports reach this runtime for hive {host}"}
+            return False
         orders = Orders(self.hive.redis)
         ack = orders.command(host, order)
         if ack is not None and ack.status == "done":
@@ -879,14 +882,18 @@ class HerdrRuntime:
         return self.refusals.get(agent.name, {"process": 0, "refusal": "unknown"})
 
     def reap_name(self, name):
-        from scripts.hive.orders import CommandOrder
+        from scripts.hive.orders import CommandOrder, Orders
         from scripts.terminate_agent import sessions
 
         pids = [s.process.pid for s in sessions() if s.name == name]
         host = "" if pids or self.hive is None else self.hive.holder(name)
-        if host:
-            return self._order(host, CommandOrder(f"reap:{name}", "reap", name=name), name)
-        return not self.reap(pids).refusal
+        if not host:
+            return not self.reap(pids).refusal
+        order = CommandOrder(f"reap:{name}", "reap", name=name)
+        reaped = self._order(host, order, name)
+        if reaped:
+            Orders(self.hive.redis).forget(host, order.id)
+        return reaped
 
     def pane_tail(self, pane_id, lines):
         args = ["pane", "read", pane_id, "--source", "recent", "--lines", str(lines), "--format", "text"]
@@ -987,11 +994,11 @@ class HerdrRuntime:
         None when herdr cannot answer."""
         from scripts.terminate_agent import sessions
 
-        remote = self.hive.conversations() if self.hive is not None else {}
         try:
             listed = self.herdr(["agent", "list"]).get("agents", [])
         except Exception:
-            return remote or None
+            return None
+        remote = self.hive.conversations() if self.hive is not None else {}
         registered = _registered_conversations(sessions())
         local = {
             row["pane_id"]: _conversation_id(row.get("agent_session")) or registered.get(row.get("name"), "")
@@ -1005,7 +1012,7 @@ class HerdrRuntime:
         from scripts.swarm.delivery import marked
 
         if host := self.remote(agent):
-            if self.hive.read(host) is None:
+            if self.hive is None or self.hive.read(host) is None:
                 return f"hive {host} is not reporting"
             Orders(self.hive.redis).command(host, _command("nudge", agent, text, uuid.uuid4().hex))
             return None

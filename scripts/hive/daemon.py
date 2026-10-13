@@ -17,6 +17,8 @@ from scripts.swarm.commands import hive_id
 if TYPE_CHECKING:
     from redis import Redis
 
+    from scripts.swarm.runtime import HerdrRuntime
+
 BEAT_SECONDS = 15
 TTL_SECONDS = BEAT_SECONDS * 3
 UNIT = "agentihooks-hive.service"
@@ -32,8 +34,6 @@ def beat(redis: "Redis", local_id: str) -> None:
     report = observe(processes=processes)
     if executions:
         report["sessions"]["_executions"] = executions
-    consumer = Consumer.local(redis, local_id)
-    hosted = execution_report(redis, local_id, consumer.runtime.herdr)
     key = registry.key(local_id)
     with redis.pipeline() as pipe:
         for field, value in registry._default(local_id).items():
@@ -44,11 +44,13 @@ def beat(redis: "Redis", local_id: str) -> None:
         pipe.sadd(registry.INDEX, local_id)
         for field in ("sessions", "quota"):
             pipe.set(f"{key}:{field}", json.dumps(report[field]), ex=TTL_SECONDS)
-        pipe.set(reports.key(local_id), json.dumps(hosted), ex=TTL_SECONDS)
         pipe.execute()
     LaunchSlots(redis).refresh([execution for ids in executions.values() for execution in ids])
+    consumer = Consumer.local(redis, local_id)
     consumer.poll()
     consumer.poll_commands()
+    hosted = execution_report(redis, local_id, consumer.runtime.herdr)
+    redis.set(reports.key(local_id), json.dumps(hosted), ex=TTL_SECONDS)
 
 
 def run(redis: "Redis") -> None:
@@ -256,7 +258,7 @@ def _executions(redis: "Redis", local_id: str, processes: dict[str, dict[int, st
     return found
 
 
-def execution_report(redis: "Redis", local_id: str, herdr) -> dict:
+def execution_report(redis: "Redis", local_id: str, herdr: "HerdrRuntime") -> dict:
     from dataclasses import asdict
 
     from scripts.swarm.store import RedisStore

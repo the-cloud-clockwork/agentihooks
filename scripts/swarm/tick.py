@@ -379,7 +379,8 @@ def _follow(slug, store, runtime, agent, pid):
 
 
 def _rebind(slug, store, runtime, agent, pid):
-    panes = [p for p, c in (runtime.conversations() or {}).items() if c and c == agent.conversation_id]
+    found = (runtime.conversations() or {}).items()
+    panes = [p for p, c in found if c and c == agent.conversation_id and "/" not in p]
     if len(panes) != 1:
         return None
     validation = {**agent.profile_decision.get("validation", {}), "pid": pid}

@@ -87,7 +87,7 @@ class LocalHerdrRuntime:
         refused = foreign(self, "terminate", agent)
         if refused:
             return refused
-        if legacy(agent) or (reports.host(agent) and self.herdr.remote(agent)):
+        if legacy(agent) or reports.host(agent):
             retired = self.herdr.retire(agent, homes=homes)
         else:
             pid = process.resolve(agent, self.namespace(), self.table())

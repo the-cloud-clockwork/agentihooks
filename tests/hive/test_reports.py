@@ -95,7 +95,9 @@ def test_a_remote_claude_worker_is_seen_live_from_its_hive_report(remote):
     assert observed.provider_error_id == "529"
     assert runtime.status(agent) == "working"
     assert runtime.bindings([agent]) == {agent.name: BINDING}
-    assert runtime.conversations() == {f"{HIVE}/{PANE}": CONVERSATION}
+    assert runtime.conversations() is None
+    runtime.herdr = lambda args: {"agents": [{"pane_id": PANE, "agent_session": {"kind": "id", "value": "local"}}]}
+    assert runtime.conversations() == {PANE: "local", f"{HIVE}/{PANE}": CONVERSATION}
 
 
 def test_a_remote_worker_is_not_reaped_while_its_hive_reports_it(remote):
@@ -188,7 +190,7 @@ def test_a_failed_retire_is_ordered_again(remote):
     assert len(remote.redis.xrange(Orders(remote.redis).commands(HIVE))) == 1
 
 
-def test_a_nudge_reaches_the_remote_pane(remote):
+def test_a_nudge_reaches_the_remote_pane(remote, monkeypatch):
     from scripts.hive.orders import Consumer
     from scripts.swarm.delivery import marked
     from scripts.swarm.runtime import HerdrRuntime
@@ -197,6 +199,7 @@ def test_a_nudge_reaches_the_remote_pane(remote):
     _publish(remote)
     assert remote.runtime.nudge(remote.agent, "check your task") is None
     typed = []
+    monkeypatch.setenv("SWARM_HIVE_ID", HIVE)
     hive = LocalHerdrRuntime(HerdrRuntime(herdr=lambda args: typed.append(args) or {}))
     assert Consumer(remote.redis, HIVE, hive).poll_commands() == 1
     assert typed == [["agent", "prompt", PANE, marked("check your task")]]
@@ -227,6 +230,9 @@ def test_pane_naming_and_stray_reaping_are_hive_orders(remote):
     hive.herdr.reap_name.assert_called_once_with(agent.name)
     assert runtime.name_pane(agent) is True
     assert runtime.reap_name(agent.name) is True
+    assert not remote.redis.exists(Orders(remote.redis).command_receipt(HIVE, f"reap:{agent.name}"))
+    assert runtime.reap_name(agent.name) is False
+    assert len(remote.redis.xrange(Orders(remote.redis).commands(HIVE))) == 1
 
 
 def test_a_hive_refuses_a_command_for_an_execution_it_does_not_run(remote):
@@ -262,3 +268,86 @@ def test_local_targets_keep_the_local_path(remote, monkeypatch):
     _publish(remote)
     assert remote.agent.name not in remote.runtime.live_names()
     assert remote.runtime.observe(remote.agent).state == "unknown"
+
+
+def _hive_side(monkeypatch, namespace, table):
+    from scripts.swarm.runtime import HerdrRuntime
+    from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
+
+    monkeypatch.setenv("SWARM_HIVE_ID", HIVE)
+    ended = []
+    herdr = HerdrRuntime(herdr=lambda args: {})
+    herdr.end = lambda name, pid, homes, start: (
+        ended.append((name, pid, start)) or SimpleNamespace(refusal="", process=pid)
+    )
+    return LocalHerdrRuntime(herdr, namespace=lambda: namespace, table=lambda: table), ended
+
+
+def test_the_hive_retires_the_recorded_process_identity(remote, monkeypatch):
+    from scripts.hive.orders import Consumer
+
+    _publish(remote)
+    runtime, agent = remote.runtime, remote.agent
+    assert runtime.retire(agent) is False
+    hive, ended = _hive_side(monkeypatch, "theirs", {12: SimpleNamespace(pid=12, start_time=34)})
+    Consumer(remote.redis, HIVE, hive).poll_commands()
+    assert ended == [(agent.name, 12, 34)]
+    monkeypatch.setenv("SWARM_HIVE_ID", "controller")
+    assert runtime.retire(agent) is True
+
+
+def test_the_hive_refuses_a_retire_outside_the_recorded_namespace(remote, monkeypatch):
+    from scripts.hive.orders import Consumer
+
+    _publish(remote)
+    runtime, agent = remote.runtime, remote.agent
+    runtime.retire(agent)
+    hive, ended = _hive_side(monkeypatch, "another", {12: SimpleNamespace(pid=12, start_time=34)})
+    Consumer(remote.redis, HIVE, hive).poll_commands()
+    assert ended == []
+    monkeypatch.setenv("SWARM_HIVE_ID", "controller")
+    assert runtime.retire(agent) is False
+    assert "another PID namespace" in runtime.refusal(agent)["refusal"]
+
+
+def test_a_runtime_without_hive_reports_never_acts_on_a_remote_worker_locally(remote):
+    calls = []
+    runtime, agent = remote.runtime, remote.agent
+    runtime.hive = None
+    runtime.herdr = lambda args: calls.append(args) or {}
+    _publish(remote)
+    assert runtime.retire(agent) is False
+    assert "no hive reports" in runtime.refusal(agent)["refusal"]
+    assert runtime.nudge(agent, "hello") == f"hive {HIVE} is not reporting"
+    assert runtime.name_pane(agent) is False
+    assert runtime.observe(agent).state == "unknown"
+    assert runtime.reported(agent) is False
+    assert runtime.bindings([agent]) == {}
+    assert calls == []
+
+
+def test_a_failing_command_is_acknowledged_and_never_blocks_the_stream(remote):
+    from scripts.hive.orders import Consumer, Orders
+
+    _publish(remote)
+    remote.runtime.retire(remote.agent)
+    remote.runtime.nudge(remote.agent, "after")
+    hive = Mock()
+    hive.terminate.side_effect = RuntimeError("boom")
+    assert Consumer(remote.redis, HIVE, hive).poll_commands() == 2
+    assert remote.redis.xrange(Orders(remote.redis).commands(HIVE)) == []
+    hive.command.assert_called_once()
+    assert remote.runtime.retire(remote.agent) is False
+    assert "error: RuntimeError" in remote.runtime.refusal(remote.agent)["refusal"]
+
+
+def test_a_local_rebind_never_takes_a_remote_pane(remote):
+    from scripts.swarm import tick
+    from scripts.swarm.store import AgentRecord
+
+    local = AgentRecord("engineer@local-0001", "eng", "task", conversation_id=CONVERSATION)
+    runtime = Mock()
+    runtime.conversations.return_value = {f"{HIVE}/{PANE}": CONVERSATION}
+    assert tick._rebind("fixture", remote.store, runtime, local, 99) is None
+    runtime.conversations.return_value = {"w9:p9": CONVERSATION}
+    assert tick._rebind("fixture", remote.store, runtime, local, 99).pane_id == "w9:p9"

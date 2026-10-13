@@ -83,15 +83,24 @@ class Orders:
         return f"{registry.key(hive)}:command:{order_id}"
 
     def command(self, hive: str, order: CommandOrder) -> Ack | None:
+        from redis.exceptions import WatchError
+
         receipt = self.command_receipt(hive, order.id)
         raw = self.redis.hget(receipt, "ack")
         if raw:
             return Ack(**json.loads(raw))
-        if self.redis.hsetnx(receipt, "sent", "1"):
-            with self.redis.pipeline() as pipe:
+        with self.redis.pipeline() as pipe:
+            try:
+                pipe.watch(receipt)
+                if pipe.hexists(receipt, "sent"):
+                    return None
+                pipe.multi()
+                pipe.hset(receipt, "sent", "1")
                 pipe.expire(receipt, RECEIPT_SECONDS)
                 pipe.xadd(self.commands(hive), {"order": json.dumps(asdict(order))})
                 pipe.execute()
+            except WatchError:
+                return None
         return None
 
     def forget(self, hive: str, order_id: str) -> None:
@@ -145,7 +154,11 @@ class Consumer:
             receipt = self.orders.command_receipt(self.hive, order.id)
             with self.store.redis.pipeline() as pipe:
                 if not self.store.redis.hexists(receipt, "ack"):
-                    pipe.hset(receipt, "ack", json.dumps(asdict(self.command(order))))
+                    try:
+                        ack = self.command(order)
+                    except Exception as exc:
+                        ack = Ack("failed", {}, f"error: {type(exc).__name__}")
+                    pipe.hset(receipt, "ack", json.dumps(asdict(ack)))
                     pipe.expire(receipt, RECEIPT_SECONDS)
                 pipe.xdel(stream, item)
                 pipe.execute()
