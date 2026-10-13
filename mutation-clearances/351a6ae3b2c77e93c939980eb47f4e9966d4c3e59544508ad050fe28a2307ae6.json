@@ -1,0 +1,6 @@
+{
+  "scripts/ci_runner_trust.py:scripts.ci_runner_trust.x_validate_actors__mutmut_10:c97c319cbf161adf776ae23efb977c5e9faa2277a2657d49277e6d17de74ab76": {
+    "reader": "standards_reader",
+    "reason": "Diagnostic only: the malformed policy key or actor-list type still raises ValueError before recursive validation or admission. Added XX message decoration retains the explanation and changes no accepted policy, output, or exit status."
+  }
+}

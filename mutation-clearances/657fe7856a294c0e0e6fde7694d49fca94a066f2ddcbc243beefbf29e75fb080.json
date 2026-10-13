@@ -1,0 +1,6 @@
+{
+  "scripts/ci_runner_trust.py:scripts.ci_runner_trust.x_main__mutmut_36:1fe2a9ef2e94ee4ff2c1057c7005df551dfe77c20ea7d60fb9d6576d809528aa": {
+    "reader": "standards_reader",
+    "reason": "Equivalent for the enforced policy domain: validate_actors returns only a flat list of strings, including the queue identity. JSON object key/value colon separators are never used when serializing that list, so replacing only the colon separator produces the same actors output."
+  }
+}
