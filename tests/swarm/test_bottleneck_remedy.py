@@ -385,7 +385,8 @@ def test_a_stage_needing_no_action_leaves_the_next_stage_its_remedy(store, home,
 
 
 def test_actions_taken_before_a_failing_stage_are_still_logged(store, home, shipped, monkeypatch):
-    fire(store, "seat_wait", value=7.5)
+    pin(store, "ci", "claude")
+    detect(store, "launch_failure", 0.5, 0.25, labels=("claude",))
     fire(store, "merge_queue", value=4.0, threshold=1.5)
 
     def broken(*args, **kwargs):
@@ -394,7 +395,7 @@ def test_actions_taken_before_a_failing_stage_are_still_logged(store, home, ship
     monkeypatch.setattr(InboxStore, "send", broken)
     with pytest.raises(RuntimeError):
         run(store)
-    text = bottleneck_remedy.SHIFTED.format(giver="ci", taker="eng", targeted=CLAIM, eng=3, ci=1)
+    text = bottleneck_remedy.MOVED.format(lane="ci", source="claude", target="codex", targeted=FAILED)
     assert logged(home) == [(NOW, "dispatcher", "apply", "", RULE, text)]
 
 
@@ -413,8 +414,8 @@ def test_the_step_reads_the_lanes_of_its_ledger_state_and_clock(store, home, shi
     found = bottleneck_remedy.step(SLUG, store, ledger, doc, NOW)
     assert seen == [(SLUG, store, doc, NOW)]
     assert found[:2] == [
-        bottleneck_remedy.SHIFTED.format(giver="ci", taker="eng", targeted=CLAIM, eng=3, ci=1),
         bottleneck_remedy.RAISED.format(task="r1", targeted=REVIEW),
+        bottleneck_remedy.SHIFTED.format(giver="ci", taker="eng", targeted=CLAIM, eng=3, ci=1),
     ]
     assert ledger.ranks == [(SLUG, "r1", "urgent", "dispatcher", True)]
     assert stamped(store) == {"seat_wait": str(NOW), "review": str(NOW)}

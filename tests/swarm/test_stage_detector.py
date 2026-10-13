@@ -113,11 +113,11 @@ def test_first_live_pass_finds_only_stages_over_a_nonzero_threshold(store):
     assert sorted(found) == [
         "ci_overrun",
         "ci_queue",
-        "seat_wait",
         "intent_fix",
         "merge_queue",
         "quota_hold",
         "review",
+        "seat_wait",
     ]
     assert {name: row["threshold"] for name, row in found.items()} == {
         name: stage_detector.THRESHOLD_HOURS[name] for name in found
@@ -203,11 +203,11 @@ def test_clearing_a_detector_finding_leaves_alert_findings_and_reports_what_it_d
     assert sorted(standing.read(store.redis, "scratch")) == [
         "ci_overrun",
         "ci_queue",
-        "seat_wait",
         "intent_fix",
         "launch",
         "merge_queue",
         "quota_hold",
+        "seat_wait",
     ]
 
 
