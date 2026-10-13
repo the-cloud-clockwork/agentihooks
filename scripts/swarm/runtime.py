@@ -429,7 +429,10 @@ class HerdrRuntime:
             raise SpawnError(
                 "unsupported handoff: required profile cannot mount on the original harness", "unsupported"
             )
-        return self.choose(saved["harness"], environ)
+        agent, reason = self.choose(saved["harness"], environ)
+        if agent != saved["harness"]:
+            raise SpawnError("unsupported handoff: router substituted the original harness", "unsupported")
+        return agent, reason
 
     def _profile_decision(self, config, lane, chosen, task, saved, relaunch, environ):
         decision = profile_choice.kept(task, saved, relaunch)

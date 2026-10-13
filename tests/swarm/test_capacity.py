@@ -555,7 +555,11 @@ def test_profile_and_saved_handoff_harnesses_are_reserved_before_automatic_work(
         task = {"id": "e", "handoff_envelope": {"launch": {"profile": "engineer", "harness": "claude"}}}
     config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=1, max_plan=0)
     requirements = runtime.quota_requirements(config, {"eng": [task], "ci": [{"id": "c"}], "plan": []})
-    assert requirements == {"eng": [("claude",)], "ci": [("claude", "codex")], "plan": []}
+    assert requirements == {
+        "eng": [("claude", "codex") if saved else ("claude",)],
+        "ci": [("claude", "codex")],
+        "plan": [],
+    }
     observed = [account(sessions=2), account("cx", sessions=2, harness="codex")]
     decision = capacity.calculate(config, observed, [], {"eng": 1, "ci": 1, "plan": 0}, requirements)
     runtime._quota_accounts = observed
