@@ -424,12 +424,19 @@ def test_a_head_switching_to_either_canonical_aggregation_is_green(queue_coverag
     assert _grade({"test.yml": head}, base={"test.yml": base}) == []
 
 
-def test_a_head_altering_the_queue_canonical_aggregation_is_red():
+@pytest.mark.parametrize("change", ["outcome", "byte", "extra"])
+def test_a_head_altering_the_queue_canonical_aggregation_is_red(change):
     from scripts import ci_reuse
 
     base, head = _aggregators()
-    [step] = ci_reuse.gate_steps(queue_coverage=True)
-    head["jobs"]["gate-required"]["steps"] = [{**step, "run": step["run"].replace("ratchet", "baseline")}]
+    steps = ci_reuse.gate_steps(queue_coverage=True)
+    [step] = steps
+    altered = {
+        "outcome": [{**step, "run": step["run"].replace("ratchet", "baseline")}],
+        "byte": [{**step, "run": step["run"][:-1]}],
+        "extra": [*steps, {"run": "true"}],
+    }
+    head["jobs"]["gate-required"]["steps"] = altered[change]
     assert _grade({"test.yml": head}, base={"test.yml": base}) == [
         "The head's Gate — Required changes its steps; the protected branch grades with its own."
     ]
