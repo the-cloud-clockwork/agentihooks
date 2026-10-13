@@ -13,6 +13,7 @@ const MASTER_AGENTS = ["claude", "codex"];
 
 let noteError = false;
 let models = {};
+let applied = null;
 
 async function loadModels() {
   try {
@@ -200,6 +201,19 @@ export async function refreshQuota() {
   }
   btn.classList.remove("sending");
   btn.setAttribute("aria-busy", "false");
+}
+
+export function appliedCaps(body, sw) {
+  for (const key of Object.keys(capDraft)) if (!(key in body)) delete capDraft[key];
+  applied = { keys: Object.keys(body).filter((key) => key !== "action"), id: ((sw && sw.commands) || []).at(-1)?.id };
+  settleCaps(sw);
+}
+
+export function settleCaps(sw) {
+  if (!applied || !sw) return;
+  const row = (sw.commands || []).find((c) => c.id === applied.id), values = capValues(sw);
+  for (const key of applied.keys) if ((row && row.state === "failed") || String(values[key]) === String(capDraft[key]).trim()) delete capDraft[key];
+  if (!applied.keys.some((key) => key in capDraft)) applied = null;
 }
 
 function applyCaps() {

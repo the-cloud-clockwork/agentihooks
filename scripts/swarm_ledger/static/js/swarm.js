@@ -3,7 +3,7 @@ import { $, age, clock, h, newId, span } from "./dom.js";
 import { readRouting, writeRouting, writeSwarm } from "./api.js";
 import { renderStats } from "./render.js";
 import { renderChatTo } from "./chat.js";
-import { clearNoteError, renderControls, renderGates, showNote } from "./controls.js";
+import { appliedCaps, clearNoteError, renderControls, renderGates, settleCaps, showNote } from "./controls.js";
 import { firstPage, moreButton, wanted } from "./pages.js";
 import { doc, queue } from "./sync.js";
 import { snowflake, targetText } from "./freezes.js";
@@ -18,7 +18,7 @@ export let swarm = null;
 let swarmReadError = false;
 export let pending = "";
 
-export let capDraft = {};
+export const capDraft = {};
 export let overlayDraft = {};
 
 export function receiveSwarm(sw) {
@@ -27,6 +27,7 @@ export function receiveSwarm(sw) {
   swarmReadError = false;
   clearNoteError();
   const resend = reconcile(sw);
+  settleCaps(sw);
   renderSwarm(sw);
   renderChatTo(sw);
   if (resend && !pending) swarmControl(resend, resend.control);
@@ -53,7 +54,7 @@ export async function swarmControl(body, op = body.action) {
     settle(body);
     if (resp.ok) {
       swarm = await resp.json();
-      if (op === "apply") capDraft = {};
+      if (op === "apply") appliedCaps(body, swarm);
       if (op === "overlays") overlayDraft = {};
       showNote("queued", op);
     } else {
