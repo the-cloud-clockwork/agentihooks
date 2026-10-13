@@ -618,14 +618,13 @@ def _orphans(slug, store, ledger, rows):
 
 
 def _conversations(slug, store, runtime):
-    found = runtime.conversations()
-    if found is None:
-        return
+    local = runtime.conversations()
+    found = {**(local or {}), **reports.Reports(store.redis).conversations()}
     for agent in store.agents(slug):
         if agent.state in {"finished", "awaiting-decision"} or not agent.pane_id:
             continue
         pane = reports.pane_key(agent)
-        if pane not in found and (reports.host(agent) or resume.recovery_pending(store, slug, agent)):
+        if pane not in found and (local is None or reports.host(agent) or resume.recovery_pending(store, slug, agent)):
             continue
         current = found.get(pane, "")
         if current != agent.conversation_id:

@@ -97,7 +97,30 @@ def test_a_remote_claude_worker_is_seen_live_from_its_hive_report(remote):
     assert runtime.bindings([agent]) == {agent.name: BINDING}
     assert runtime.conversations() is None
     runtime.herdr = lambda args: {"agents": [{"pane_id": PANE, "agent_session": {"kind": "id", "value": "local"}}]}
-    assert runtime.conversations() == {PANE: "local", f"{HIVE}/{PANE}": CONVERSATION}
+    assert runtime.conversations() == {PANE: "local"}
+
+
+def test_the_tick_records_a_remote_conversation_when_the_local_listing_fails(remote):
+    from scripts.swarm import tick
+    from scripts.swarm.store import AgentRecord
+
+    local = remote.store.start_execution(
+        "fixture",
+        AgentRecord(
+            remote.store.next_name("fixture", "eng"),
+            "eng",
+            "other",
+            pane_id="w1:p9",
+            seat="eng-2@fixture",
+            conversation_id="kept",
+        ),
+    )
+    remote.store.put_agent("fixture", local)
+    _publish(remote)
+    assert remote.runtime.conversations() is None
+    tick._conversations("fixture", remote.store, remote.runtime)
+    found = {a.name: a.conversation_id for a in remote.store.agents("fixture")}
+    assert found == {remote.agent.name: CONVERSATION, local.name: "kept"}
 
 
 def test_a_remote_worker_is_not_reaped_while_its_hive_reports_it(remote):
