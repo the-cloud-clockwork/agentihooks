@@ -175,17 +175,38 @@ class TestWindow:
         assert len(log.since(SLUG, HOUR_MS, tmp_path)) == 301
 
     def test_a_window_row_that_opens_a_chunk_is_read_and_keeps_the_read_going(self, tmp_path):
-        def line(kind, at):
-            return json.dumps(log.Row.of("watch", kind, WHO, now_ms=at).__dict__).ljust(255) + "\n"
+        stale = [self.aligned("count", 0)] * self.PER_CHUNK
+        self.write(tmp_path, stale * 2 + [self.aligned("lift", HOUR_MS)] + stale[1:], 3 * log.TAIL_BYTES)
+        assert [r["kind"] for r in log.since(SLUG, HOUR_MS, tmp_path)] == ["lift"]
 
-        per_chunk = log.TAIL_BYTES // 256
-        stale = [line("count", 0)] * per_chunk
-        text = "".join(stale * 2 + [line("lift", HOUR_MS)] + stale[1:])
-        assert len(text) == 3 * log.TAIL_BYTES
-        path = log.gate_log_path(SLUG, tmp_path)
+    def test_a_chunk_whose_newest_row_opens_the_window_keeps_the_read_going(self, tmp_path):
+        older = [self.aligned("lift", HOUR_MS)] * self.PER_CHUNK
+        edge = [self.aligned("count", HOUR_MS)] * self.PER_CHUNK
+        self.write(tmp_path, older + edge, 2 * log.TAIL_BYTES)
+        assert [r["kind"] for r in log.since(SLUG, HOUR_MS, tmp_path)].count("lift") == self.PER_CHUNK
+
+    def test_a_chunk_without_any_timed_row_keeps_the_read_going(self, tmp_path):
+        junk = ["{}".ljust(255) + "\n"] * self.PER_CHUNK
+        self.write(tmp_path, [self.aligned("lift", HOUR_MS)] * self.PER_CHUNK + junk, 2 * log.TAIL_BYTES)
+        assert [r["kind"] for r in log.since(SLUG, HOUR_MS, tmp_path)].count("lift") == self.PER_CHUNK
+
+    def test_a_single_byte_left_before_the_last_chunk_is_still_read(self, tmp_path):
+        first = self.aligned("lift", HOUR_MS)
+        later = [self.aligned("count", HOUR_MS)] * (self.PER_CHUNK - 1) + ["\n"]
+        self.write(tmp_path, [first] + later, log.TAIL_BYTES + 1)
+        assert [r["kind"] for r in log.since(SLUG, HOUR_MS, tmp_path)][0] == "lift"
+
+    PER_CHUNK = log.TAIL_BYTES // 256
+
+    def aligned(self, kind, at):
+        return json.dumps(log.Row.of("watch", kind, WHO, now_ms=at).__dict__).ljust(255) + "\n"
+
+    def write(self, home, lines, size):
+        text = "".join(lines)
+        assert len(text) == size
+        path = log.gate_log_path(SLUG, home)
         path.parent.mkdir(parents=True)
         path.write_text(text)
-        assert [r["kind"] for r in log.since(SLUG, HOUR_MS, tmp_path)] == ["lift"]
 
     def test_since_returns_every_row_from_the_given_time_on(self, tmp_path):
         self.fill(tmp_path, HOUR_MS)
