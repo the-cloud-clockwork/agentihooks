@@ -605,6 +605,36 @@ def test_a_pull_request_that_leaves_the_queue_unmerged_reopens_the_task(merging)
     assert merging.rows["t1"]["state"] == "open"
 
 
+@pytest.mark.parametrize("queued", [True, False])
+def test_an_unmergeable_entry_reopens_with_its_cause_within_one_tick(merging, queued):
+    from scripts.swarm.ledger_events import pull_request
+
+    queued_at_now(merging)
+    merging.pulls[URL] = pull_request(
+        {
+            "state": "OPEN",
+            "mergeable": "CONFLICTING",
+            "mergeQueueEntry": {"id": "entry", "state": "UNMERGEABLE"} if queued else None,
+        }
+    )
+
+    def dequeue(action, url):
+        assert (action, url) == ("dequeue", URL)
+        merging.queued.append((action, url))
+        return {"queued": False}
+
+    actions = merging.run(NOW + 60_000, queuer=dequeue)
+    assert actions[0] == f"task t1 reopened, {URL} has a merge conflict"
+    assert merging.queued == [("queue", URL)] + ([("dequeue", URL)] if queued else [])
+    assert merging.rows["t1"]["state"] == "open"
+    assert merging.rows["t1"]["claimed_by"] == ""
+    assert merging.rows["t1"]["awaiting"] == ""
+    assert merging.store.claimant("sw", "t1") is None
+    assert ready.record(merging.store, "sw", "t1") is None
+    assert "has a merge conflict" in merging.ledger.comments[0][1]
+    assert merging.run(NOW + 120_000, queuer=dequeue) == []
+
+
 def test_a_fresh_queue_entry_not_yet_listed_holds_until_its_grace_runs_out(merging):
     queued_at_now(merging)
     assert merging.run(NOW + waits.FRESH_MS - 1) == []
