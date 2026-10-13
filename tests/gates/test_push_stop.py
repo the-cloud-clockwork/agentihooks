@@ -828,3 +828,13 @@ def test_a_second_push_is_cut_off_by_the_budget_the_first_push_left(monkeypatch,
     assert git(rig.seed, "ls-remote", str(rig.origin), f"refs/heads/{BRANCH}-2")
     assert len(rig.ledger.comments) == 1
     assert PUSH_LATE.format(path=rig.tree) not in decision.reason
+
+
+@pytest.mark.parametrize(("seconds", "expected"), [(75, 60), (2, 2)])
+def test_push_keeps_the_normal_cap_and_uses_a_shorter_remaining_budget(monkeypatch, seconds, expected):
+    waits = []
+    process = SimpleNamespace(wait=lambda timeout: waits.append(timeout) or 0)
+    monkeypatch.setattr(push_stop.subprocess, "Popen", lambda *args, **kwargs: process)
+    tree = push_stop.Tree(Path("/worktree"), BRANCH, False, 1, 1)
+    assert push_stop.push(tree, seconds)
+    assert waits == [expected]
