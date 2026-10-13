@@ -170,7 +170,7 @@ def test_upgrade_uses_the_registered_swarm_for_modern_agent_names(tmp_path, monk
     from scripts.swarm.naming import NameRegistry
 
     monkeypatch.setattr(hooks.config, "AGENTIHOOKS_HOME", tmp_path)
-    redis = object()
+    redis = _FakeRedis()
     monkeypatch.setattr(
         NameRegistry, "slug_of", lambda self, name: {(redis, "master@abcdef-0001"): "demo"}[(self.redis, name)]
     )
@@ -203,7 +203,7 @@ def test_upgrade_retries_modern_names_after_the_registry_recovers(tmp_path, monk
     assert operator_words.heard_prompt(
         "New words", {"AGENTIHOOKS_AGENT_NAME": "master@abcdef-0001", "AGENTIHOOKS_SWARM": "demo"}, now=101
     )
-    redis = object()
+    redis = _FakeRedis()
     monkeypatch.setattr(
         NameRegistry, "slug_of", lambda self, name: {(redis, "master@abcdef-0001"): "demo"}[(self.redis, name)]
     )
@@ -377,14 +377,19 @@ def test_a_recorder_failure_is_logged_and_never_raised(monkeypatch):
     assert seen == [("operator words record failed", {"error": "disk full"})]
 
 
-def _legacy_words(tmp_path, monkeypatch, slug_of):
+class _FakeRedis:
+    def __init__(self, get=lambda key: None):
+        self.get = get
+
+
+def _legacy_words(tmp_path, monkeypatch, slug_of, redis=None):
     import json
 
     from hooks import _redis
     from scripts.swarm import naming
 
     monkeypatch.setattr(hooks.config, "AGENTIHOOKS_HOME", tmp_path)
-    monkeypatch.setattr(_redis, "get_redis", lambda: object())
+    monkeypatch.setattr(_redis, "get_redis", lambda: redis or _FakeRedis())
     monkeypatch.setattr(naming.NameRegistry, "slug_of", lambda self, name: slug_of(name))
     monkeypatch.setattr(naming, "addresses", lambda name: [name])
     folder = tmp_path / "operator_words"
@@ -417,15 +422,16 @@ def test_a_mid_turn_message_and_an_answer_are_recorded_while_the_registry_times_
     assert operator_words.heard(answer, env, now=102)
     assert ledger_relay.verified("master@abcdef-0002", "freeze the swarm again") == "Freeze the swarm again"
     assert ledger_relay.verified("master@abcdef-0002", "refreeze until push lands") == "Refreeze until push lands"
-    assert operator_words.matching("demo-master-1", "Known words", within=None) == "Known words"
     asked.clear()
-    assert operator_words.matching("master@abcdef-0001", "Old words", within=None) == ""
+    assert operator_words.matching("demo-master-1", "Known words", within=None) == ""
     assert len(asked) == 1
+    assert operator_words.matching("master@abcdef-0001", "Old words", within=None) == ""
     from scripts.swarm import naming
 
     monkeypatch.setattr(naming.NameRegistry, "slug_of", lambda self, name: "demo")
     assert operator_words.matching("master@abcdef-0001", "Old words", within=None) == "Old words"
     assert operator_words.matching("master@abcdef-0003", "Older words", within=None) == "Older words"
+    assert operator_words.matching("demo-master-1", "Known words", within=None) == "Known words"
     operator_words.forget("demo")
     assert operator_words.recorded("*") == []
 
@@ -477,3 +483,22 @@ def test_the_upgrade_asks_the_registry_before_locking_the_store(tmp_path, monkey
 
     _legacy_words(tmp_path, monkeypatch, slug_of)
     assert operator_words.matching("master@abcdef-0001", "Old words", now=101) == "Old words"
+
+
+def test_a_failed_alias_lookup_leaves_the_legacy_name_pending(tmp_path, monkeypatch):
+    import redis
+
+    def timeout(key):
+        raise redis.exceptions.TimeoutError("Timeout reading from socket")
+
+    _legacy_words(tmp_path, monkeypatch, lambda name: "demo", _FakeRedis(timeout))
+    assert operator_words.matching("master@abcdef-0001", "Old words", within=None) == ""
+    with operator_words._store(migrate=False) as connection:
+        assert connection.execute("SELECT name FROM legacy").fetchall() == []
+
+
+def test_a_newer_recorded_quote_wins_over_older_migrated_words(tmp_path, monkeypatch):
+    _legacy_words(tmp_path, monkeypatch, lambda name: "demo")
+    assert operator_words.record("master@abcdef-0001", "OLD  words", now=200, swarm="demo")
+    assert operator_words.matching("master@abcdef-0001", "old words", within=None) == "OLD  words"
+    assert operator_words.matching("master@abcdef-0001", "old", within=None) == "OLD  words"

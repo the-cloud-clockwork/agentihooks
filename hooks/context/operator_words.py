@@ -84,13 +84,18 @@ def _legacy_swarms(names, redis):
 
     from scripts.swarm.naming import NameRegistry
 
-    swarms = {}
+    swarms = dict.fromkeys(names)
+    registry = NameRegistry(redis)
     for name in names:
-        try:
-            swarms[name] = NameRegistry(redis).slug_of(name) if redis is not None else _offline_swarm(name)
-        except RedisError:
-            redis = None
+        if redis is None:
             swarms[name] = _offline_swarm(name)
+            continue
+        try:
+            # slug_of swallows a failed alias lookup; this read raises it so the name stays pending.
+            redis.get(registry.key("alias", name))
+            swarms[name] = registry.slug_of(name)
+        except RedisError:
+            break
     return swarms
 
 
@@ -122,7 +127,7 @@ def _line_match(connection: sqlite3.Connection, name: str, needle: str, since: f
     return connection.execute(
         "SELECT entries.words FROM lines JOIN entries ON entries.id = lines.entry "
         "WHERE lines.name = ? AND lines.hash = ? AND (? IS NULL OR entries.at > ?) "
-        "ORDER BY entries.id DESC LIMIT 1",
+        "ORDER BY entries.at DESC, entries.id DESC LIMIT 1",
         (name, _hash(needle), since, since),
     ).fetchone()
 
@@ -175,7 +180,7 @@ def matching(name: str, quote: str, now: float | None = None, within: float | No
         if row is None:
             row = connection.execute(
                 "SELECT words FROM entries WHERE name = ? AND instr(norm, ?) > 0 "
-                "AND (? IS NULL OR at > ?) ORDER BY id DESC LIMIT 1",
+                "AND (? IS NULL OR at > ?) ORDER BY at DESC, id DESC LIMIT 1",
                 (name, needle, since, since),
             ).fetchone()
     return row[0] if row else ""
