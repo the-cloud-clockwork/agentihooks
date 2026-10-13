@@ -21,6 +21,9 @@ STARTED_AT = time.time()
 EVICTED_THROUGH = float("-inf")
 
 
+import sqlite3
+from _thread import LockType
+from collections.abc import Callable, Iterator
 from urllib.parse import parse_qs, urlsplit
 
 
@@ -32,6 +35,9 @@ class Timing:
 RESOURCES = frozenset(
     (
         "metadata",
+        "threads",
+        "counts",
+        "sources",
         "tasks",
         "phases",
         "plans",
@@ -126,7 +132,7 @@ def record(method: str, route: str, wall: float, cpu: float, lock_wait: float) -
             EVICTED_THROUGH = max(EVICTED_THROUGH, SAMPLES.popleft()[0])
 
 
-def measured(method):
+def measured(method: Callable) -> Callable:
     @wraps(method)
     def request(handler):
         timing = Timing()
@@ -143,7 +149,7 @@ def measured(method):
 
 
 @contextmanager
-def waiting():
+def waiting() -> Iterator[None]:
     timing = CURRENT.get()
     wall = time.perf_counter()
     try:
@@ -154,7 +160,7 @@ def waiting():
 
 
 @contextmanager
-def locked(lock):
+def locked(lock: LockType) -> Iterator[None]:
     with waiting():
         lock.acquire()
     try:
@@ -163,7 +169,7 @@ def locked(lock):
         lock.release()
 
 
-def begin(connection, statement: str) -> None:
+def begin(connection: sqlite3.Connection, statement: str) -> None:
     with waiting():
         connection.execute(statement)
 
@@ -210,7 +216,7 @@ def report(hours: float) -> dict:
     }
 
 
-def endpoint(method):
+def endpoint(method: Callable) -> Callable:
     @wraps(method)
     def request(handler):
         if handler.path.split("?", 1)[0] != "/api/v1/metrics":
