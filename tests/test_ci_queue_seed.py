@@ -32,7 +32,7 @@ def test_publisher_uploads_the_passed_dev_baseline_for_queue_runs():
 
 def test_queue_runs_mint_a_read_only_app_token_and_skip_the_dev_cache_lookup():
     job = _jobs()["durations"]
-    lookup = job["steps"][0]
+    lookup = job["steps"][1]
     mint = _step(job["steps"], "Mint the tcc main ci App token")
     assert not _runs_on(lookup, "merge_group")
     assert _runs_on(mint, "merge_group")
@@ -44,7 +44,7 @@ def test_queue_runs_mint_a_read_only_app_token_and_skip_the_dev_cache_lookup():
         "permission-actions": "read",
         "permission-contents": "read",
     }
-    assert job["permissions"] == {"contents": "read"}
+    assert job["permissions"] == {"contents": "read", "actions": "write"}
 
 
 def test_queue_runs_restore_the_latest_dev_durations_on_the_app_token():
@@ -352,6 +352,9 @@ def _runs_on(step, event):
             name, op, value = atom.strip().strip("()").split()
             if name.startswith("hashfiles("):
                 held = held and ((_ROOT / name[len("hashfiles('") : -len("')")]).exists() == (op == "!="))
+                continue
+            if name in ("github.actor", "github.triggering_actor"):
+                held = held and ((value.strip("'") == "github-merge-queue[bot]") == (op == "=="))
                 continue
             assert name == "github.event_name", atom
             held = held and ((value.strip("'") == event) == (op == "=="))

@@ -246,8 +246,8 @@ jobs:
             echo "::warning::Cannot read the live queue branches; only older runs of this pull request are cancelled"
           fi
           while read -r id branch; do
-            [[ -n "$id" && "$id" != "$RUN" ]] || continue
-            if [[ "$id" -lt "$RUN" && "$branch" == "$prefix"* && "${branch#"$prefix"}" =~ ^[0-9a-f]+$ ]]; then
+            [[ -n "$id" && "$id" -lt "$RUN" ]] || continue
+            if [[ "$branch" == "$prefix"* && "${branch#"$prefix"}" =~ ^[0-9a-f]+$ ]]; then
               reason="superseded by run $RUN"
             elif [[ -n "$live" ]] && ! grep -qxF "refs/heads/$branch" <<< "$live"; then
               reason="its queue branch is gone"

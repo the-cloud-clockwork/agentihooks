@@ -51,6 +51,7 @@ while (($#)); do
   esac
   shift
 done
+echo "$url" >> "$URLS"
 if [[ "$url" =~ $refs ]]; then
   [[ -z "${FAIL_REFS:-}" ]] || exit 1
   jq -r "$filter" "$FIXTURES/refs"
@@ -90,6 +91,7 @@ def _run(tmp_path, ref="refs/heads/" + OWN, live=LIVE, **env):
             PATH=f"{bin_dir}:{os.environ['PATH']}",
             FIXTURES=str(fixtures),
             CANCELLED=str(cancelled),
+            URLS=str(tmp_path / "urls"),
             QUEUE_REF=ref,
             RUN=str(RUN),
             GITHUB_REPOSITORY="owner/repo",
@@ -125,12 +127,20 @@ def test_the_sweep_runs_first_only_for_the_merge_queue_bot_with_cancel_rights():
     assert _workflow()["jobs"]["durations"]["permissions"] == {"contents": "read", "actions": "write"}
 
 
-def test_older_runs_of_the_same_pull_request_and_runs_of_gone_branches_are_cancelled(tmp_path):
+def test_older_runs_of_the_same_pull_request_and_older_runs_of_gone_branches_are_cancelled(tmp_path):
     result, cancelled = _run(tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert cancelled == [410, 430, 480, 520, 455, 460, 470]
+    assert cancelled == [410, 430, 480, 455, 460, 470]
     assert f"Cancelled queue run 410 ({QUEUE}aaa111): superseded by run {RUN}" in result.stdout
-    assert "Cancelled queue run 520 (gh-readonly-queue/dev/pr-88-abc888): its queue branch is gone" in result.stdout
+    assert "Cancelled queue run 480 (gh-readonly-queue/dev/pr-77-abc777): its queue branch is gone" in result.stdout
+
+
+def test_the_live_branches_are_read_after_every_run_listing(tmp_path):
+    result, _ = _run(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    urls = (tmp_path / "urls").read_text().split()
+    assert [url.split("status=")[1].split("&")[0] for url in urls[:-1]] == list(RUNS)
+    assert urls[-1] == "repos/owner/repo/git/matching-refs/heads/gh-readonly-queue/"
 
 
 @pytest.mark.parametrize(("env", "live"), [({"FAIL_REFS": "1"}, LIVE), ({}, LIVE[1:])])
