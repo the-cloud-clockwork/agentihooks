@@ -134,6 +134,30 @@ def test_a_red_pull_request_with_no_push_past_its_limit_reopens():
     assert "red with no push for 15 minutes" in swarm.inbox()[0].text
 
 
+@pytest.mark.parametrize("newest", ["CANCELLED", "FAILURE"])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_the_newest_run_cancellation_holds_a_red_watchdog(newest, reverse):
+    suites = [
+        {"status": "COMPLETED", "conclusion": "FAILURE", "workflowRun": {"createdAt": "1970-01-01T02:45:00Z"}},
+        {"status": "COMPLETED", "conclusion": newest, "workflowRun": {"createdAt": "1970-01-01T02:46:40Z"}},
+    ]
+    pull = ledger_events.pull_request(
+        {
+            "state": "OPEN",
+            "gated": True,
+            "checkSuites": list(reversed(suites)) if reverse else suites,
+            "statusCheckRollup": [
+                {"name": ledger_events.GATE, "conclusion": "FAILURE", "completedAt": "1970-01-01T02:46:40Z"}
+            ],
+        }
+    )
+    swarm = Swarm(pull)
+    swarm.tick(START + 15 * MINUTE)
+    swarm.tick(START + 30 * MINUTE)
+    assert _reopened(swarm) == (newest == "FAILURE")
+    assert swarm.retired == ([OWNER] if newest == "FAILURE" else [])
+
+
 @pytest.mark.parametrize("pull", [RED, GREEN, CONFLICTING])
 def test_a_new_owner_gets_the_full_limit_after_hours_without_a_push(pull):
     swarm = Swarm(pull, live=False)
