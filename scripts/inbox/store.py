@@ -244,7 +244,7 @@ class InboxStore:
         ]
 
     def _due_open(self, address, before):
-        with self.redis.pipeline(transaction=False) as pipe:
+        with self.redis.pipeline() as pipe:
             pipe.sismember(self.key("open-indexed"), address)
             pipe.get(self.key("open-size", address))
             pipe.zcard(self.key("address", address))
