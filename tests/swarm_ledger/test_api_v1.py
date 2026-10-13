@@ -432,6 +432,8 @@ def test_a_schema_mismatch_names_the_first_unknown_key_and_the_top_field(live):
     cases = [
         ({"op": "sync", "id": "two-unknown", "zz": 1, "aa": 1}, "sync", "aa"),
         ({"op": "task_add", "id": "nested", "depends_on": [1]}, "task_add", "depends_on"),
+        ({"op": "plan_add", "id": "flag", "artifact": True}, "plan_add", "artifact"),
+        ({"op": "plan_add", "id": "long", "artifact": "x" * 100001}, "plan_add", "artifact"),
     ]
     for operation, kind, field in cases:
         message = f"Operation {kind} does not match its schema at field {field}"
@@ -850,6 +852,43 @@ def test_domain_operation_families_use_their_named_guards(live):
         status, reply = request(live, "POST", "operations", {"ops": [operation], "guards": {target: expected}})
         assert status == 200, operation["op"]
         assert "rejected" in reply
+
+
+def test_publish_plan_writes_land_through_the_plans_and_slices_resources(live, tmp_path, monkeypatch, capsys):
+    from scripts.swarm_ledger import ledger_artifacts
+    from scripts.swarm_ledger.api import resources
+    from tests.swarm_ledger.test_ledger_authority import ledger
+
+    plan = tmp_path / "plan.md"
+    plan.write_text("# Plan\n<!-- slice: one -->\n## One\n", encoding="utf-8")
+    file = ledger_artifacts.store(SLUG, "plan.md", plan.read_bytes())
+    monkeypatch.setattr(ledger, "upload_artifact", lambda *a: file)
+    monkeypatch.setattr(
+        ledger.ledger_publish,
+        "publish",
+        lambda path, title, repo, artifact, issue_title: (artifact(path, title), "artifact"),
+    )
+    for name in ("AGENTIHOOKS_AGENT_NAME", "AGENTIHOOKS_SWARM", "AGENTIHOOKS_SWARM_TASK"):
+        monkeypatch.delenv(name, raising=False)
+    args = ledger.build_parser().parse_args(
+        ["--slug", SLUG, "--as", "api-reader", "publish-plan", str(plan), "--phase", "p1"]
+    )
+    ledger.cmd_publish_plan(args)
+    url = f"{ledger.base()}/artifacts/{SLUG}/{file['id']}"
+    assert json.loads(capsys.readouterr().out) == {"plan_url": url, "published_to": "artifact", "phases": ["p1"]}
+    plan_id = "plan-71468be2ad68"
+    status, reply = request(live, "GET", f"plans/{plan_id}")
+    assert (status, reply["data"]["artifact"]) == (200, url)
+    assert reply["revision"] == resources.revision(reply["data"])
+    phase = request(live, "GET", "phases/p1")[1]["data"]
+    assert (phase["plan"], phase["plan_ref"], phase["comments_count"]) == (
+        f"plans/{plan_id}",
+        {"artifact": url, "lines": "1-3"},
+        1,
+    )
+    status, reply = request(live, "GET", f"slices/{plan_id}.one")
+    assert (status, reply["data"]["anchor"], reply["data"]["lines"]) == (200, "one", "2-3")
+    assert reply["revision"] == resources.revision(reply["data"])
 
 
 def test_resource_reads_preserve_pinned_identity(live):

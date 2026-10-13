@@ -81,7 +81,7 @@ def test_ordinary_and_later_pull_requests_keep_the_whole_task_contract(body):
     assert "pull_request_diff" not in value
     seen = []
     assert intent.judge(value, decide=classifier(seen, usable=0.1))[0] == "fail"
-    assert set(seen[0][1]) == {"usable", "delivers", "reachable", "weakens"}
+    assert set(seen[0][1]) == {"usable", "aligned", "delivers", "reachable", "weakens"}
 
 
 @pytest.mark.parametrize("probability", [0.5, 0.99])
