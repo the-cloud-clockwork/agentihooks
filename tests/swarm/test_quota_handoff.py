@@ -827,7 +827,7 @@ def test_an_exit_handoff_prefers_codex_but_uses_a_free_claude_seat(
         assert argv[argv.index("--model") + 1] == "opus"
         assert argv[argv.index("--effort") + 1] == "high"
     else:
-        assert argv[argv.index("--model") + 1] == "gpt"
+        assert argv[argv.index("-m") + 1] == "gpt"
 
 
 def test_a_claude_only_profile_hands_off_to_claude(tmp_path, monkeypatch):
