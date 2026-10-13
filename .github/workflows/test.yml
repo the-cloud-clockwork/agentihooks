@@ -408,6 +408,8 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12"]
+    env:
+      UNIT_SOURCE: ${{ needs.durations.outputs.source }}
     outputs:
       source: ${{ needs.durations.outputs.source }}
     steps:
@@ -418,7 +420,7 @@ jobs:
 
       - &python
         name: Set up Python ${{ matrix.python-version }}
-        if: needs.durations.outputs.source == ''
+        if: env.UNIT_SOURCE == ''
         id: python
         uses: actions/setup-python@v5
         with:
@@ -429,13 +431,13 @@ jobs:
       # scan modules loaded from the repo root.
       - &day
         name: Stamp the day
-        if: needs.durations.outputs.source == ''
+        if: env.UNIT_SOURCE == ''
         id: day
         run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
 
       - &venv
         name: Restore the test environment
-        if: needs.durations.outputs.source == ''
+        if: env.UNIT_SOURCE == ''
         id: venv
         uses: actions/cache@v4
         with:
@@ -444,7 +446,7 @@ jobs:
 
       - &uv
         name: Set up uv
-        if: needs.durations.outputs.source == '' && steps.venv.outputs.cache-hit != 'true'
+        if: env.UNIT_SOURCE == '' && steps.venv.outputs.cache-hit != 'true'
         uses: astral-sh/setup-uv@v10.2.0
         with:
           version: "0.12.23"
@@ -458,7 +460,7 @@ jobs:
       # resolved to "command not found" while the packages were installed fine.
       - &install
         name: Install dependencies
-        if: needs.durations.outputs.source == '' && steps.venv.outputs.cache-hit != 'true'
+        if: env.UNIT_SOURCE == '' && steps.venv.outputs.cache-hit != 'true'
         env:
           PYTHON_PATH: ${{ steps.python.outputs.python-path }}
         run: |
@@ -467,7 +469,7 @@ jobs:
 
       - &use-venv
         name: Use the test environment
-        if: needs.durations.outputs.source == ''
+        if: env.UNIT_SOURCE == ''
         run: echo "$HOME/venv/bin" >> "$GITHUB_PATH"
 
       - name: Download the queued run's dev durations
@@ -548,6 +550,7 @@ jobs:
       contents: read
     env:
       CODEX_RELEASE: rust-v0.160.0
+      UNIT_SOURCE: ${{ needs.split.outputs.source }}
     strategy:
       fail-fast: false
       matrix:
@@ -567,23 +570,17 @@ jobs:
           fetch-depth: 0
           filter: blob:none
 
-      - <<: *python
-        if: needs.split.outputs.source == ''
+      - *python
 
-      - <<: *day
-        if: needs.split.outputs.source == ''
+      - *day
 
-      - <<: *venv
-        if: needs.split.outputs.source == ''
+      - *venv
 
-      - <<: *uv
-        if: needs.split.outputs.source == '' && steps.venv.outputs.cache-hit != 'true'
+      - *uv
 
-      - <<: *install
-        if: needs.split.outputs.source == '' && steps.venv.outputs.cache-hit != 'true'
+      - *install
 
-      - <<: *use-venv
-        if: needs.split.outputs.source == ''
+      - *use-venv
 
       # tests.shards pins the live Codex test's file to shard 1; only the 3.12 shard 1 installs the CLI it runs.
       - name: Restore the Codex CLI

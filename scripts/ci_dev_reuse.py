@@ -56,9 +56,13 @@ def _complete(evidence: Path, run: dict) -> bool:
 def select_source(evidence: Path, head: str, repository: str) -> int | None:
     try:
         runs = json.loads((evidence / "runs.json").read_text())["workflow_runs"]
-    except ci_reuse.UNUSABLE:
+    except ci_reuse.UNUSABLE + (TypeError,):
+        return None
+    if not isinstance(runs, list):
         return None
     for run in runs:
+        if not isinstance(run, dict):
+            continue
         try:
             if not _usable(run, repository, "merge_group") or run["head_sha"] != head:
                 continue
@@ -82,7 +86,7 @@ def select_source(evidence: Path, head: str, repository: str) -> int | None:
             if _complete(evidence, run):
                 print(f"Reusing unit artifacts from passed queue evidence on {head}: run {run['id']}")
                 return run["id"]
-        except ci_reuse.UNUSABLE as exc:
+        except ci_reuse.UNUSABLE + (TypeError, AttributeError) as exc:
             print(f"No dev unit reuse from run {run.get('id')}: {type(exc).__name__}")
     return None
 

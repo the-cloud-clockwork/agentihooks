@@ -99,6 +99,38 @@ def test_missing_metadata_falls_back(tmp_path):
     assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) is None
 
 
+@pytest.mark.parametrize("payload", [{"workflow_runs": None}, {"workflow_runs": [None]}, None, []])
+def test_malformed_run_metadata_falls_back(tmp_path, payload):
+    (tmp_path / "runs.json").write_text(json.dumps(payload))
+    assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) is None
+
+
+def test_null_provenance_inputs_fall_back(tmp_path):
+    _, record, folder = evidence(tmp_path)
+    record["inputs"] = None
+    with zipfile.ZipFile(folder / "proof.zip", "w") as archive:
+        archive.writestr("provenance.json", json.dumps(record))
+    digest = hashlib.sha256(json.dumps(record, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    (folder / "reuse.log").write_text(f"2026-10-13T00:00:00Z required-tree-sha256={digest}\n")
+    assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) is None
+
+
+def test_cli_publishes_empty_source_on_mismatch(tmp_path, monkeypatch):
+    evidence(tmp_path)
+    output = tmp_path / "outputs"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    assert ci_dev_reuse.main(["--head", "d" * 40, "--repository", REPOSITORY, "--evidence", str(tmp_path)]) == 0
+    assert output.read_text() == "source=\n"
+
+
+def test_cli_publishes_passed_source(tmp_path, monkeypatch):
+    evidence(tmp_path)
+    output = tmp_path / "outputs"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    assert ci_dev_reuse.main(["--head", HEAD, "--repository", REPOSITORY, "--evidence", str(tmp_path)]) == 0
+    assert output.read_text() == "source=123\n"
+
+
 def test_queue_reused_pull_request_resolves_its_authenticated_artifacts(tmp_path):
     queue, record, folder = evidence(tmp_path, reused=True)
     source = dict(queue, id=456, event="pull_request", head_sha="d" * 40)
