@@ -525,7 +525,7 @@ def cmd_publish_plan(args):
         except ledger_publish.PublishError as exc:
             print(exc, file=sys.stderr)
     refused(state, ops)
-    tasks = ledger_plans.resliced(doc["tasks"], state["tasks"])
+    tasks = ledger_plans.resliced(doc["tasks"], call(args.slug)["tasks"])
     reslice = {"tasks": tasks} if any(tasks.values()) else {}
     print(json.dumps({"plan_url": url, "published_to": where, "phases": phases, **reslice}))
 
