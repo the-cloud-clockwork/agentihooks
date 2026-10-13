@@ -110,7 +110,12 @@ def socket_path(root: Path, execution_id: str) -> Path:
         raise LaunchFailure("endpoint", LONG_SOCKET)
     for private in (root, directory):
         private.mkdir(parents=True, exist_ok=True)
-        private.chmod(PRIVATE_MODE)
+        try:
+            private.chmod(PRIVATE_MODE)
+        except BaseException:
+            if private == directory:
+                shutil.rmtree(directory)
+            raise
     return path
 
 
@@ -311,20 +316,22 @@ def launch(store: RedisStore, spec: Launch, deps: Deps) -> Started:
         bindings.put(spec.slug, record)
         record, agent = _connect_bound(store, bindings, spec, agent, record, process, deps)
     except BaseException as failure:
-        if process is not None:
-            stop(process)
         try:
-            if record is not None:
-                error_class = getattr(failure, "error_class", type(failure).__name__)
-                bindings.put(spec.slug, replace(record, state=FAILED, last_error_class=error_class))
-                bindings.release(spec.slug, record)
+            if process is not None:
+                stop(process)
         finally:
             try:
-                store.put_agent(spec.slug, replace(agent, state="finished"))
-                store.drop_agent(spec.slug, agent.name, deps.now_ms())
+                if record is not None:
+                    error_class = getattr(failure, "error_class", type(failure).__name__)
+                    bindings.put(spec.slug, replace(record, state=FAILED, last_error_class=error_class))
+                    bindings.release(spec.slug, record)
             finally:
-                if path is not None:
-                    shutil.rmtree(path.parent)
+                try:
+                    store.put_agent(spec.slug, replace(agent, state="finished"))
+                    store.drop_agent(spec.slug, agent.name, deps.now_ms())
+                finally:
+                    if path is not None:
+                        shutil.rmtree(path.parent)
         raise
     return Started(record, agent, process)
 
