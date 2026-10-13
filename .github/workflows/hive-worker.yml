@@ -2,7 +2,7 @@ name: Worker hive pod
 
 on:
   push:
-    branches: [dev]
+    branches: [dev, "ci-*"]
     paths: [deploy/worker/**, deploy/helm/agentihooks-swarm/**, scripts/hive/**, docker/swarm-node/**, .github/workflows/hive-worker.yml]
   workflow_dispatch:
     inputs:
