@@ -6,10 +6,18 @@ from pathlib import Path
 
 from scripts.swarm_ledger import ledger_link
 
-ROOT = Path(__file__).resolve().parents[2]
+
+def primary(root: Path) -> Path:
+    marker = root / ".git"
+    if not marker.is_file():
+        return root
+    return Path(marker.read_text().removeprefix("gitdir:").strip()).parents[2]
+
+
+ROOT = primary(Path(__file__).resolve().parents[2])
 COMPOSE_FILE = ROOT / "deploy" / "compose" / "ledger.yaml"
 SERVICE = "ledger"
-TIMEOUT_S = 120
+TIMEOUT_S = 60
 ERROR_KEPT = 200
 
 Run = Callable[..., subprocess.CompletedProcess]
@@ -48,7 +56,7 @@ def _compose(action: list[str], folder: Path, environ: dict, run: Run) -> str:
 
 
 def start(folder: Path, environ: dict = os.environ, run: Run = subprocess.run) -> str:
-    return _compose(["up", "-d", "--no-recreate"], folder, environ, run)
+    return _compose(["up", "-d"], folder, environ, run)
 
 
 def stop(folder: Path, environ: dict = os.environ, run: Run = subprocess.run) -> str:

@@ -27,6 +27,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
@@ -62,7 +63,7 @@ BASE = f"http://{HOST}:{PORT}"
 PIDFILE = core.LEDGER_DIR / ".server.pid"
 LOGFILE = core.LEDGER_DIR / ".server.log"
 SERVER_WAIT = 5.0
-COMPOSE_WAIT = 60.0
+COMPOSE_WAIT = 120.0
 THREADS_EXHAUSTED = 75
 PROBE_FILE = ".healthz"
 FILE_ORIGIN = "null"
@@ -987,7 +988,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(exc.status, str(exc), "text/plain")
         return self.send(200, json.dumps(stored), "application/json")
 
-    def post_route(self, route):
+    def post_route(self, route: str) -> Callable[[], None] | None:
         if route == "/healthz":
             return self.probe_write
         for prefix, post in (("/api/media/", self.post_media), ("/api/artifacts/", self.post_artifact)):
@@ -1164,11 +1165,11 @@ def server_process_alive() -> bool:
     return not cmdline or b"ledger_server.py" in cmdline
 
 
-def wait_for(folder):
+def wait_for(folder: Path) -> float:
     return COMPOSE_WAIT if server_compose.used(folder) else SERVER_WAIT
 
 
-def start_server(compose):
+def start_server(compose: bool) -> bool:
     if compose:
         if error := server_compose.start(core.LEDGER_DIR):
             sys.exit(f"could not start the ledger service: {error}")

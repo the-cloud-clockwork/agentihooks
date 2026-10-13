@@ -180,7 +180,7 @@ def test_a_restart_stops_the_server_by_its_own_pid_and_starts_it_from_its_own_sc
     assert ledger_watchdog.restart(host, PID, host.argv[:2]) == ""
     assert host.calls == [
         ("kill", PID, signal.SIGTERM),
-        ("run", [sys.executable, host.argv[1], "--ensure"], str(host.folder), 90, False, True),
+        ("run", [sys.executable, host.argv[1], "--ensure"], str(host.folder), 150, False, True),
     ]
 
 
@@ -192,7 +192,7 @@ def test_a_server_that_ignores_the_stop_is_killed_after_ten_seconds(tmp_path):
         ("kill", PID, signal.SIGTERM),
         *[("sleep", 0.1)] * 100,
         ("kill", PID, signal.SIGKILL),
-        ("run", [sys.executable, host.argv[1], "--ensure"], str(host.folder), 90, False, True),
+        ("run", [sys.executable, host.argv[1], "--ensure"], str(host.folder), 150, False, True),
     ]
 
 
