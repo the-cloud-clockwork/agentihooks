@@ -4,6 +4,8 @@ import threading
 from collections import deque
 from http.server import ThreadingHTTPServer
 
+import pytest
+
 from scripts.swarm_ledger import api, new_ledger
 from scripts.swarm_ledger import ledger_server as server
 from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
@@ -155,3 +157,32 @@ def test_bounded_snapshot_names_capacity_and_restart_gaps(monkeypatch):
     monkeypatch.setattr(metrics, "STARTED_AT", clock.time())
     restarted = metrics.report(1.0)
     assert restarted["coverage"]["complete"] is False
+
+
+@pytest.mark.parametrize(
+    ("path", "route"),
+    [
+        ("/api/v1/ledgers/one/export", "/api/v1/ledgers/:slug/export"),
+        ("/api/v1/ledgers/one/tasks/item/comments", "/api/v1/ledgers/:slug/tasks/:item/comments"),
+        ("/api/v1/ledgers/private/custom-private?cursor=private", "/api/v1/ledgers/:slug/:resource"),
+        ("/api/swarm/private/models", "/api/swarm/:slug/models"),
+        ("/api/private", "/api/:slug"),
+        ("/private.html", "/:slug"),
+        ("/static/version/ledger.js", "/static/:asset"),
+        ("/healthz", "/healthz"),
+    ],
+)
+def test_route_cpu_labels_have_bounded_cardinality(path, route, monkeypatch):
+    metrics = importlib.import_module("scripts.swarm_ledger.request_metrics")
+    monkeypatch.setattr(metrics, "SAMPLES", deque(maxlen=metrics.MAX_SAMPLES))
+    monkeypatch.setattr(metrics, "time", Clock())
+    monkeypatch.setattr(api, "handle", lambda *args: None)
+    handler = server.Handler.__new__(server.Handler)
+    handler.path, handler.command = path, "GET"
+    handler.refused = lambda *args: False
+    handler.exists = lambda *args: False
+    handler.get_swarm = lambda *args: None
+    handler.send_static = lambda *args: None
+    handler.send = lambda *args: None
+    handler.do_GET()
+    assert metrics.report(1.0)["routes"] == [{"method": "GET", "route": route, "count": 1, "cpu_seconds": 0.0}]
