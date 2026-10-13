@@ -29,12 +29,89 @@ class Timing:
     lock_wait: float = 0.0
 
 
+RESOURCES = frozenset(
+    (
+        "metadata",
+        "tasks",
+        "phases",
+        "plans",
+        "slices",
+        "notes",
+        "chat",
+        "questions",
+        "followups",
+        "priorities",
+        "notifications",
+        "artifacts",
+        "artifact_trash",
+        "alerts",
+        "members",
+        "events",
+        "operations",
+        "export",
+        "swarm",
+        "workspace",
+        "media",
+        "agent-token",
+        "hierarchy",
+        "freezes",
+    )
+)
+FIXED_ROUTES = frozenset(
+    (
+        "/",
+        "/healthz",
+        "/logo.png",
+        "/favicon.ico",
+        "/api/layout",
+        "/api/bin",
+        "/api/v1/metrics",
+        "/api/v1/ledgers",
+        "/api/v1/bin",
+        "/api/v1/bin/actions",
+        "/api/v1/layout",
+        "/api/v1/routing/settings",
+        "/api/v1/proof-ledgers",
+    )
+)
+PREFIX_ROUTES = (
+    ("/static/", "/static/:asset"),
+    ("/media/", "/media/:slug/:item"),
+    ("/artifacts/", "/artifacts/:slug/:item"),
+    ("/api/media/", "/api/media/:slug"),
+    ("/api/artifacts/", "/api/artifacts/:slug"),
+    ("/api/v1/proof-ledgers/", "/api/v1/proof-ledgers/:slug/remove"),
+    ("/api/v1/bin/", "/api/v1/bin/:slug"),
+    ("/api/", "/api/:slug"),
+)
+
+
+def ledger_route(parts: list[str]) -> str:
+    resource = parts[0] if parts else "metadata"
+    prefix = "/api/v1/ledgers/:slug"
+    if resource not in RESOURCES:
+        return prefix + "/:resource"
+    route = f"{prefix}/{resource}"
+    if len(parts) > 1:
+        route += "/:item"
+    if len(parts) > 2:
+        route += "/" + (parts[2] if parts[2] in {"comments", "answers", "workspace"} else ":resource")
+    return route
+
+
 def route_name(path: str) -> str:
-    parts = path.split("?", 1)[0].strip("/").split("/")
+    path = path.split("?", 1)[0]
+    parts = path.strip("/").split("/")
     if parts[:3] == ["api", "v1", "ledgers"] and len(parts) > 3:
-        resource = parts[4] if len(parts) > 4 else "metadata"
-        return f"/api/v1/ledgers/:slug/{resource}"
-    return "/" + "/".join(parts)
+        return ledger_route(parts[4:])
+    if parts[:2] == ["api", "swarm"]:
+        return "/api/swarm/:slug" + ("/models" if parts[3:] == ["models"] else "")
+    if path in FIXED_ROUTES:
+        return path
+    for prefix, route in PREFIX_ROUTES:
+        if path.startswith(prefix):
+            return route
+    return "/:slug"
 
 
 def record(method: str, route: str, wall: float, cpu: float, lock_wait: float) -> None:
