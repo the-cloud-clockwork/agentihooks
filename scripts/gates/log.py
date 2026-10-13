@@ -1,6 +1,7 @@
 """The swarm's gate log: one JSON row per deny, would-be deny, lift and fail-open, read by doctor rates and swarm status."""
 
 import json
+import math
 import re
 import time
 from dataclasses import asdict, dataclass
@@ -58,15 +59,37 @@ def recent(slug, limit=20, home=None):
             lines = source.read().splitlines()
     except OSError:
         return []
-    rows = []
-    for line in lines[1:] if start else lines:
+    rows = list(_parse(lines[1:] if start else lines))
+    return rows if limit is None else rows[-limit:]
+
+
+def since(slug, since_ms, home=None):
+    try:
+        with gate_log_path(slug, home).open("rb") as source:
+            start, data = source.seek(0, 2), b""
+            while start and _oldest(data) >= since_ms:
+                step = min(TAIL_BYTES, start)
+                start -= step
+                source.seek(start)
+                data = source.read(step) + data
+    except OSError:
+        return []
+    lines = data.splitlines()
+    return [row for row in _parse(lines[1:] if start else lines) if row.get("at", 0) >= since_ms]
+
+
+def _oldest(data):
+    return next((row.get("at", 0) for row in _parse(data.splitlines()[1:])), math.inf)
+
+
+def _parse(lines):
+    for line in lines:
         try:
             row = json.loads(line)
         except ValueError:
             continue
         if isinstance(row, dict):
-            rows.append(row)
-    return rows if limit is None else rows[-limit:]
+            yield row
 
 
 def decisions(slug, limit=20, home=None):

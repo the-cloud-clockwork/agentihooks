@@ -179,6 +179,12 @@ class TestWindow:
             out.write("not json\n[1]\n")
         assert [r["kind"] for r in log.since(SLUG, 0, tmp_path)] == ["deny", "lift"]
 
+    def test_since_drops_a_row_without_a_time_once_the_window_starts_after_zero(self, tmp_path):
+        self.fill(tmp_path, HOUR_MS, later=0)
+        with log.gate_log_path(SLUG, tmp_path).open("a") as out:
+            out.write('{"kind": "deny"}\n')
+        assert [r["kind"] for r in log.since(SLUG, 1, tmp_path)] == ["deny", "lift"]
+
     def test_since_without_a_log_is_empty(self, tmp_path):
         assert log.since(SLUG, 0, tmp_path) == []
 
