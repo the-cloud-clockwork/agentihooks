@@ -157,6 +157,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/packaging/swarm-smoke.sh",
         "scripts/size_limits.py",
         "scripts/swarm_ledger/artifact_sanity.py",
+        "scripts/swarm_ledger/ledger_server.py",
         "tests/chart_hive_join.py",
         "tests/chart_network.py",
         "tests/chart_redis.py",
@@ -171,10 +172,12 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/js_lcov.py",
         "tests/kind_request.py",
         "tests/ledger_load/gate.py",
+        "tests/ledger_load/streams.py",
         "tests/refresh_durations.py",
         "tests/shard_budget.py",
         "tests/shard_check.py",
         "scripts/ci_reuse.py",
+        "scripts/ci_runner_classes.py",
     ]
     if (ROOT / "scripts/ci_runner_trust.py").exists():
         expected.extend(("scripts/ci_runner_trust.py", "scripts/gate_protected.py"))

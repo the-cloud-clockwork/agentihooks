@@ -63,6 +63,12 @@ def request(live, method, resource, body=None, **headers):
     return status, json.loads(data)
 
 
+def stored(monkeypatch, document):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(server.repository, "current", lambda slug: SimpleNamespace(state=document))
+
+
 def test_invalid_schema_leaves_resource_unchanged(live):
     status, before = request(live, "GET", "metadata")
     assert status == 200
@@ -589,7 +595,7 @@ def test_page_budget_counts_the_envelope(live, monkeypatch):
 
     row = {"id": "large", "description": "x" * (MAX_REPLY // 2 - 150)}
     document = {"tasks": [row, row], "_meta": {"rev": 1}}
-    monkeypatch.setattr(server.repository, "get_document", lambda slug, **kwargs: document)
+    stored(monkeypatch, document)
     status, reply = request(live, "GET", "tasks?limit=100")
     assert status == 200
     assert len(json.dumps(reply, ensure_ascii=False).encode()) <= MAX_REPLY
@@ -616,7 +622,7 @@ def test_control_actions_validate_before_domain_execution(live):
 
 def test_item_revision_uses_canonical_utf8_content(live, monkeypatch):
     document = {"tasks": [{"title": "Café", "id": "t1"}], "_meta": {"rev": 1}}
-    monkeypatch.setattr(server.repository, "read", lambda slug, *keys: document)
+    stored(monkeypatch, document)
     assert request(live, "GET", "tasks/t1") == (
         200,
         {
@@ -639,7 +645,7 @@ def test_metadata_resource_reports_its_named_fields(live, monkeypatch):
         "summary": "Summary",
         "_meta": {"rev": 7, "updated_at": 200, "created_at": 10, "size": "swarm", "seed_error": None},
     }
-    monkeypatch.setattr(server.repository, "get_document", lambda slug, **kwargs: document)
+    stored(monkeypatch, document)
     status, reply = request(live, "GET", "metadata")
     assert status == 200
     assert reply["data"] == document
@@ -1163,7 +1169,7 @@ def test_storage_errors_have_a_stable_bounded_envelope(live, monkeypatch, caplog
     def unreadable(slug, **kwargs):
         raise error
 
-    monkeypatch.setattr(server.repository, "get_document", unreadable)
+    monkeypatch.setattr(server.repository, "current", unreadable)
     assert request(live, "GET", "metadata") == (
         500,
         {
@@ -1262,7 +1268,7 @@ def test_composite_status_preserves_member_events_and_crew(live, capsys):
 def test_default_collection_limit_and_cursor_edges(live, monkeypatch):
     rows = [{"id": f"t{index}", "title": f"Task {index}"} for index in range(51)]
     document = {"tasks": rows, "_meta": {"rev": 1}}
-    monkeypatch.setattr(server.repository, "get_document", lambda slug, **kwargs: document)
+    stored(monkeypatch, document)
     status, first = request(live, "GET", "tasks")
     assert status == 200
     assert len(first["data"]) == 50
@@ -2491,8 +2497,7 @@ def test_repository_optional_collections_have_empty_http_resources(live, monkeyp
     from scripts.swarm_ledger.api.resources import revision
 
     document = {"_meta": {}, "questions": [{"id": "q1"}]}
-    monkeypatch.setattr(server.repository, "get_document", lambda slug: document)
-    monkeypatch.setattr(server.repository, "read", lambda slug, *keys: document)
+    stored(monkeypatch, document)
     assert request(live, "GET", path) == (
         200,
         {"data": [], "revision": revision([]), "next_cursor": None},

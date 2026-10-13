@@ -61,14 +61,14 @@ def test_only_a_prompt_that_opens_with_the_words_switches():
         assert operator_mode.switch(text) == ""
 
 
-def test_silence_reverts_the_session_and_each_typed_message_slides_the_window():
+def test_operator_on_survives_silence_and_later_typed_messages():
     operator_mode.observe("s1", "operator on", True, now=100)
     assert operator_mode.present("s1", SWARM, now=100 + WINDOW - 1)
     assert operator_mode.observe("s1", "rebase the branch", True, now=100 + WINDOW - 1) == ""
     assert operator_mode.present("s1", SWARM, now=100 + 2 * WINDOW - 2)
-    assert not operator_mode.present("s1", SWARM, now=100 + 2 * WINDOW - 1)
+    assert operator_mode.present("s1", SWARM, now=100 + 2 * WINDOW - 1)
     operator_mode.observe("s1", "rebase it now", True, now=100 + 2 * WINDOW)
-    assert not operator_mode.present("s1", SWARM, now=100 + 2 * WINDOW + 1)
+    assert operator_mode.present("s1", SWARM, now=100 + 2 * WINDOW + 1)
 
 
 def test_operator_off_ends_it_at_once():
@@ -77,6 +77,22 @@ def test_operator_off_ends_it_at_once():
     assert not operator_mode.present("s1", SWARM, now=111)
     operator_mode.observe("s1", "keep going", True, now=112)
     assert not operator_mode.present("s1", SWARM, now=113)
+
+
+def test_operator_on_keeps_questions_open_through_inbox_and_silence_until_off():
+    operator_mode.observe("s1", "operator on", True, now=100)
+    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=101) == ""
+    for prompt in (CHANNEL, delivery.marked("continue")):
+        assert not is_operator_prompt(prompt, "demo")
+        operator_mode.observe("s1", prompt, False, now=200)
+        assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=201) == ""
+    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=86500) == ""
+    operator_mode.observe("s1", CHANNEL, False, now=86501)
+    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=86502) == ""
+    assert operator_mode.observe("s1", "operator off", True, now=86503) == "off"
+    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=86504) == MASTER_ASK.format(
+        slug="demo", name="master@a1-1"
+    )
 
 
 def test_an_unreadable_mode_file_holds_the_session_off(tmp_path, monkeypatch):
@@ -119,7 +135,7 @@ def test_verified_peer_delivery_never_switches_or_renews_operator_presence(words
     operator_mode.observe("s1", "operator on", True, now=102)
     assert operator_mode.observe("s1", prompt, typed, now=103) == ""
     assert operator_mode.present("s1", SWARM, now=102 + WINDOW - 1)
-    assert not operator_mode.present("s1", SWARM, now=102 + WINDOW)
+    assert operator_mode.present("s1", SWARM, now=102 + WINDOW)
 
 
 def run_prompt(monkeypatch, capsys, session, prompt):
@@ -150,7 +166,7 @@ def test_a_switch_tells_the_session_its_mode_and_any_other_prompt_tells_nothing(
     assert operator_mode.notice({"prompt": "operator on"}, True, now=103) == ""
     assert operator_mode.notice({"session_id": "s1"}, True, now=104) == ""
     operator_mode.notice({"session_id": "s2", "prompt": "operator on"}, True, now=100)
-    assert not operator_mode.present("s2", SWARM, now=100 + WINDOW)
+    assert operator_mode.present("s2", SWARM, now=100 + WINDOW)
 
 
 def test_the_hook_injects_the_notice_uncompressed_and_unlogged(monkeypatch):
@@ -378,15 +394,15 @@ def test_operator_off_in_an_unbound_session_tells_only_its_mode(ledgers):
     )
 
 
-def test_a_typed_turn_never_outlives_the_presence_deadline(monkeypatch):
+def test_a_typed_turn_does_not_expire_explicit_operator_presence(monkeypatch):
     for key, value in SWARM.items():
         monkeypatch.setenv(key, value)
     operator_mode.notice({"session_id": "s1", "prompt": "operator on"}, True, now=1000)
     assert operator_mode.notice({"session_id": "s1", "prompt": "rebase it"}, True, now=1100) == ""
     assert operator_mode.present("s1", SWARM, now=1100 + WINDOW - 1)
     assert [operator_mode.reminder("s1", SWARM, now=1100 + WINDOW - 1) for _ in range(2)] == ["", ""]
-    assert not operator_mode.present("s1", SWARM, now=1100 + WINDOW)
-    assert [operator_mode.reminder("s1", SWARM, now=1100 + WINDOW) for _ in range(2)] == ["", REMINDER]
+    assert operator_mode.present("s1", SWARM, now=1100 + WINDOW)
+    assert [operator_mode.reminder("s1", SWARM, now=1100 + WINDOW) for _ in range(2)] == ["", ""]
 
 
 def test_a_typed_turn_while_away_lifts_the_limit_only_inside_the_window(monkeypatch):
@@ -419,23 +435,22 @@ def test_a_channel_prompt_neither_lifts_the_limit_nor_renews_the_window(monkeypa
     assert operator_mode._load("s1")["at"] == at
     assert operator_mode.present("s1", SWARM)
     assert operator_mode.present("s1", SWARM, now=at + WINDOW - 1)
-    assert not operator_mode.present("s1", SWARM, now=at + WINDOW)
+    assert operator_mode.present("s1", SWARM, now=at + WINDOW)
 
 
-def test_prompt_and_tool_reminders_respect_the_supplied_presence_clock(monkeypatch):
+def test_explicit_presence_keeps_reminders_off_past_the_supplied_clock(monkeypatch):
     for key, value in SWARM.items():
         monkeypatch.setenv(key, value)
     monkeypatch.setattr(operator_mode.time, "time", lambda: 5000)
     assert operator_mode.notice({"session_id": "s1", "prompt": "operator on"}, True, now=100) == (
-        "Operator on: the operator is present in this pane until thirty minutes after his last typed message."
+        "Operator on: the operator is present in this pane until he types operator off."
     )
     assert operator_mode.notice({"session_id": "s1", "prompt": delivery.marked("continue")}, False, now=101) == ""
     assert [operator_mode.reminder("s1", SWARM, now=102) for _ in range(2)] == ["", ""]
     assert (
-        operator_mode.notice({"session_id": "s1", "prompt": delivery.marked("continue")}, False, now=100 + WINDOW)
-        == REMINDER
+        operator_mode.notice({"session_id": "s1", "prompt": delivery.marked("continue")}, False, now=100 + WINDOW) == ""
     )
-    assert [operator_mode.reminder("s1", SWARM, now=100 + WINDOW) for _ in range(2)] == ["", REMINDER]
+    assert [operator_mode.reminder("s1", SWARM, now=100 + WINDOW) for _ in range(2)] == ["", ""]
 
 
 def test_the_reminder_counts_tool_calls_upward_from_the_first(monkeypatch):

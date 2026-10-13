@@ -22,6 +22,9 @@ class FakeLedger:
     def tasks(self, slug):
         return list(self.rows.values())
 
+    def task(self, slug, task_id):
+        return self.rows.get(task_id)
+
     def events(self, slug):
         return []
 

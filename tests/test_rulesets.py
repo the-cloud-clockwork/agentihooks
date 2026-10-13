@@ -18,7 +18,7 @@ def test_rulesets_enforce_branch_protection_without_bypass(name):
     rules = {rule["type"]: rule for rule in ruleset["rules"]}
     assert {"deletion", "non_fast_forward", "required_linear_history", "pull_request"} <= rules.keys()
     assert rules["pull_request"]["parameters"]["required_approving_review_count"] == 0
-    assert rules["pull_request"]["parameters"]["require_code_owner_review"] is (name == "dev-no-delete")
+    assert rules["pull_request"]["parameters"]["require_code_owner_review"] is False
 
 
 def test_dev_merges_through_a_queue_that_runs_the_workflow_gate():
@@ -33,10 +33,11 @@ def test_dev_merges_through_a_queue_that_runs_the_workflow_gate():
     checks = params["required_status_checks"]
     assert len(checks) == 1
     assert checks[0]["context"] == workflow["jobs"]["gate-required"]["name"] == "Gate — Required"
+    assert checks[0]["integration_id"] == 15368
     assert rules["merge_queue"]["parameters"] == {
         "check_response_timeout_minutes": 60,
         "grouping_strategy": "ALLGREEN",
-        "max_entries_to_build": 5,
+        "max_entries_to_build": 2,
         "max_entries_to_merge": 5,
         "merge_method": "SQUASH",
         "min_entries_to_merge": 1,

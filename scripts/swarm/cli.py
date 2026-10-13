@@ -1363,7 +1363,9 @@ def cmd_wait(store, args):
             f"a bare wait lasts at most {waits.BARE_MAX_MINUTES} minutes; wait on checks, a reply or a task with --on"
         )
     if held is not None:
-        rows = {t["id"]: t for t in LedgerClient().tasks(args.slug)}
+        rows = waits.named_tasks(
+            held["kind"], held["target"], agent.task, lambda task_id: LedgerClient().task(args.slug, task_id)
+        )
         get = InboxStore(store.redis).get
         if problem := waits.target_problem(held["kind"], held["target"], agent.task, rows, get):
             raise SwarmError(problem)

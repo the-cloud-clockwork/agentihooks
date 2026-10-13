@@ -1194,6 +1194,23 @@ def test_a_wait_on_intent_names_its_own_tasks_pull_request(started, capsys):
     assert f"wait on intent needs the pull request of your task t1, not {OTHER}" in capsys.readouterr().err
 
 
+def test_a_checked_wait_reads_only_the_task_it_names(started):
+    _, ledger = started
+    read = []
+
+    def whole(slug):
+        raise AssertionError("a checked wait read the whole task collection")
+
+    ledger.tasks = whole
+    ledger.task = lambda slug, task_id: read.append((slug, task_id)) or ledger.rows.get(task_id)
+    ledger.rows["t1"]["pr_url"] = URL
+    assert run("sw", "--as", ME, "wait", "--on", "task", "t2") == 0
+    assert run("sw", "--as", ME, "wait", "--on", "intent", URL) == 0
+    assert run("sw", "--as", ME, "wait", "--on", "checks", URL) == 0
+    assert run("sw", "--as", ME, "wait", "--on", "task", "t9") == 1
+    assert read == [("sw", "t2"), ("sw", "t1"), ("sw", "t9")]
+
+
 def test_target_problem_takes_intent_only_on_the_own_tasks_pull_request():
     rows = {"t1": {"id": "t1", "pr_url": URL}, "t2": {"id": "t2", "pr_url": OTHER}}
     assert waits.target_problem("intent", URL, "t1", rows, None) == ""

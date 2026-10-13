@@ -293,10 +293,10 @@ def launch(store: RedisStore, spec: Launch, deps: Deps) -> Started:
     check_environment(spec.environ, spec.allowed_tokens)
     agent = admit(store, spec, deps)
     bindings = BindingStore(store)
-    path = socket_path(deps.runtime_root or runtime_root(spec.environ), agent.execution_id)
-    record = bindings.reserve(spec.slug, _record(spec, agent, path))
-    process = None
+    record, process = None, None
     try:
+        path = socket_path(deps.runtime_root or runtime_root(spec.environ), agent.execution_id)
+        record = bindings.reserve(spec.slug, _record(spec, agent, path))
         spec = execution_home(spec, path.parent)
         process = spawn(spec, deps, path)
         record = replace(record, server_pid=process.pid, server_start_identity=deps.start_identity(process.pid) or 0)
@@ -305,9 +305,14 @@ def launch(store: RedisStore, spec: Launch, deps: Deps) -> Started:
     except BaseException as failure:
         if process is not None:
             stop(process)
-        error_class = getattr(failure, "error_class", type(failure).__name__)
-        bindings.put(spec.slug, replace(record, state=FAILED, last_error_class=error_class))
-        bindings.release(spec.slug, record)
+        try:
+            if record is not None:
+                error_class = getattr(failure, "error_class", type(failure).__name__)
+                bindings.put(spec.slug, replace(record, state=FAILED, last_error_class=error_class))
+                bindings.release(spec.slug, record)
+        finally:
+            store.put_agent(spec.slug, replace(agent, state="finished"))
+            store.drop_agent(spec.slug, agent.name, deps.now_ms())
         raise
     return Started(record, agent, process)
 

@@ -99,6 +99,13 @@ def target_problem(kind, target, mine, rows, get):
     return ""
 
 
+def named_tasks(kind, target, mine, read):
+    """By id, the one task a wait of this kind checks, read with read(task id); no read for any other kind."""
+    wanted = {"intent": mine, "task": target}.get(kind)
+    found = read(wanted) if wanted else None
+    return {wanted: found} if found else {}
+
+
 def merge_resolution(held, github, reread, fresh):
     target = held["target"]
     pull = github(target)

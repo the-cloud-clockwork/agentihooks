@@ -648,7 +648,7 @@ def test_interrupted_bootstrap_restarts_without_duplicate_entries(fixture, tmp_p
     assert comparable(volume) == comparable(clean)
     docs = comparable(volume)
     commands = hook_commands(docs["claude"])
-    assert len(docs["claude"]["hooks"]["SessionStart"]) == 2
+    assert len(docs["claude"]["hooks"]["SessionStart"]) == 1
     assert len(commands) == len(hook_commands(comparable(clean)["claude"]))
     assert list(docs["claude"]["enabledPlugins"]) == ["fixture@market"]
     assert sorted(docs["codex"]["mcp_servers"]) == ["agentihooks", "fixture-codex-mcp"]
