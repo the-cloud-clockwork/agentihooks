@@ -259,9 +259,7 @@ def test_a_crashed_test_reaches_another_worker_only_after_its_crash_is_recorded(
     events = []
     crashed, alive = _Worker(events), _Worker(events)
     sched = RefillingLoadGroupScheduling.__new__(RefillingLoadGroupScheduling)
-    sched.config = SimpleNamespace(
-        option=SimpleNamespace(maxworkerrestart="2", numprocesses=2), getoption={"reruns": 2}.get
-    )
+    sched.config = SimpleNamespace(option=SimpleNamespace(maxworkerrestart="2"), getoption={"reruns": 2}.get)
     sched.log = lambda *args: None
     sched.workqueue = OrderedDict()
     sched.registered_collections = {crashed: [crashing, sibling], alive: [crashing, sibling]}
