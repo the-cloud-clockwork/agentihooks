@@ -129,6 +129,76 @@ def test_a_test_failing_every_attempt_fails_after_three_attempts(tmp_path, worke
     assert by_test["test_probes.py::test_always_fails"]["errors"] == ["AssertionError: every attempt fails"] * 3
 
 
+_CRASHES = """
+import os
+from pathlib import Path
+
+
+def _crash_first(name, times):
+    marker = Path(name)
+    runs = int(marker.read_text()) + 1 if marker.exists() else 1
+    marker.write_text(str(runs))
+    if runs <= times:
+        os._exit(1)
+
+
+def test_crashes_once():
+    _crash_first("crashed-once", 1)
+
+
+def test_crashes_twice():
+    _crash_first("crashed-twice", 2)
+"""
+
+
+def _run_crash(tmp_path, name):
+    (tmp_path / "test_crashes.py").write_text(_CRASHES)
+    ledger = tmp_path / "flakes.jsonl"
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", f"test_crashes.py::{name}", "-p", "xdist", "-p", "rerunfailures"]
+        + ["-p", "tests.flake_ledger", "-p", "no:cacheprovider", "-n", "2", "--dist", "loadgroup"]
+        + ["--reruns", "2", "-q"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ,
+            "PYTHONPATH": str(_ROOT),
+            "PYTEST_ADDOPTS": "",
+            "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+            "CI_FLAKES": str(ledger),
+            "GITHUB_RUN_ID": "4242",
+            "GITHUB_RUN_ATTEMPT": "1",
+        },
+    )
+    lines = ledger.read_text().splitlines() if ledger.exists() else []
+    return result, [json.loads(line) for line in lines]
+
+
+def test_a_worker_crash_that_passes_on_retry_is_green_and_reports_the_crash(tmp_path):
+    result, records = _run_crash(tmp_path, "test_crashes_once")
+    assert result.returncode == 0, result.stdout + result.stderr
+    [record] = records
+    assert record["test"] == "test_crashes.py::test_crashes_once"
+    assert record["outcome"] == "flaky"
+    assert record["crashes"] == 1
+    assert record["attempts"] == 2
+    [error] = record["errors"]
+    assert error.endswith("crashed while running 'test_crashes.py::test_crashes_once'")
+
+
+def test_a_worker_crash_that_repeats_on_retry_stays_red(tmp_path):
+    result, records = _run_crash(tmp_path, "test_crashes_twice")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "crashed while running 'test_crashes.py::test_crashes_twice'" in result.stdout
+    [record] = records
+    assert record["test"] == "test_crashes.py::test_crashes_twice"
+    assert record["outcome"] == "failed"
+    assert record["crashes"] == 2
+    assert record["attempts"] == 2
+
+
 def test_a_run_without_retries_writes_no_ledger(tmp_path):
     result, records = _run(tmp_path, "test_passes")
     assert result.returncode == 0, result.stdout + result.stderr
@@ -179,4 +249,28 @@ def test_every_absorbed_flake_raises_a_warning_on_the_run(tmp_path):
         "Tests retried in place: 2",
         "flaky after 2 attempts: tests/test_a.py::test_once",
         "failed after 3 attempts: tests/test_b.py::test_always",
+    ]
+
+
+def test_every_worker_crash_raises_a_warning_naming_the_test(tmp_path):
+    steps = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["unit"]["steps"]
+    record = next(step for step in steps if step.get("name") == "Record flaky tests")
+    lines = [
+        {"test": "tests/test_a.py::test_crash", "run": "7", "attempts": 2, "outcome": "flaky", "crashes": 1},
+        {"test": "tests/test_b.py::test_crash", "run": "7", "attempts": 2, "outcome": "failed", "crashes": 2},
+    ]
+    (tmp_path / "flakes.jsonl").write_text("".join(json.dumps(line) + "\n" for line in lines))
+    result = subprocess.run(
+        ["bash", "-e", "-c", record["run"]],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "GITHUB_STEP_SUMMARY": str(tmp_path / "summary.md")},
+    )
+    assert result.returncode == 0, result.stderr
+    crashes = [line for line in result.stdout.splitlines() if line.startswith("::warning title=Worker crash")]
+    assert crashes == [
+        "::warning title=Worker crash::tests/test_a.py::test_crash crashed its worker 1 time(s) in run 7",
+        "::warning title=Worker crash::tests/test_b.py::test_crash crashed its worker 2 time(s) in run 7",
     ]
