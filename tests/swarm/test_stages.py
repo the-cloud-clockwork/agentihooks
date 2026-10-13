@@ -716,6 +716,14 @@ PHASES = [{"id": "p1"}]
             {},
             3600.0,
         ),
+        (
+            [
+                ledger("focused", at(8), "tasks/t9"),
+                opened("unfrozen", at(9), "phases/p9", cleared=["phases/p9", "tasks/t9"]),
+            ],
+            {},
+            3600.0,
+        ),
         ([ledger("back in scope", at(9), "tasks/t3")], {}, 3600.0),
         ([ledger("task open", at(8, 30), "tasks/t3")], {}, 5400.0),
         ([ledger("review changed", at(9), "phases/p1")], {}, 3600.0),
@@ -772,19 +780,19 @@ def test_an_unfreeze_under_a_focus_that_still_excludes_the_task_does_not_open_it
     assert seconds_of(found)[("seat_wait", "")] == 8100.0
 
 
-def lane_rows(added, *extra):
+def lane_rows(added, *extra, claimed=at(5)):
     return rows(
-        agent_events=[agent("claim", "t1", at(5)), agent("spawn", "t1", at(5), "e1", "claude"), *extra],
+        agent_events=[agent("claim", "t1", claimed), agent("spawn", "t1", claimed, "e1", "claude"), *extra],
         ledger_events=[
-            ledger("joined", at(5), by="e1"),
+            ledger("joined", claimed, by="e1"),
             *(ledger("added", ts, f"tasks/{t}") for t, ts in added.items()),
         ],
     )
 
 
-def lane_tasks(t2="eng", t3="eng"):
+def lane_tasks(t2="eng", t3="eng", t1="eng"):
     return [
-        {"id": "t1", "state": "claimed", "branch": "b1", "lane": "eng"},
+        {"id": "t1", "state": "claimed", "branch": "b1", "lane": t1},
         {"id": "t2", "state": "open", "lane": t2},
         {"id": "t3", "state": "open", "lane": t3},
     ]
@@ -845,6 +853,24 @@ def test_a_lane_missing_from_the_seat_caps_has_no_seats():
         ("build", ""): 14400.0,
         ("queue_wait", ""): 14400.0,
     }
+
+
+def test_a_busy_seat_counts_only_in_the_lane_of_its_task():
+    found = split(lane_rows(TWO_READY), lane_tasks(t1="ci"), {"eng": 1, "ci": 1})
+    assert found == {("build", ""): 14400.0, ("queue_wait", ""): 14400.0}
+    missing = split(lane_rows(TWO_READY), lane_tasks(t1="ci", t2="ci", t3="ci"), {"eng": 1})
+    assert missing == {("build", ""): 14400.0, ("queue_wait", ""): 14400.0}
+
+
+def test_a_task_without_a_lane_waits_in_the_engineer_lane():
+    tasks = [{"id": "t1", "state": "claimed", "branch": "b1"}, {"id": "t2", "state": "open"}]
+    found = split(lane_rows({"t2": at(8)}), tasks, {"eng": 1})
+    assert found == {("build", ""): 14400.0, ("seat_wait", ""): 7200.0}
+
+
+def test_seat_wait_starts_when_the_last_free_seat_is_taken():
+    found = split(lane_rows(TWO_READY, claimed=at(9)), lane_tasks(), {"eng": 1})
+    assert found == {("build", ""): 3600.0, ("seat_wait", ""): 3600.0, ("queue_wait", ""): 10800.0}
 
 
 def test_swarm_status_lists_the_top_stages(monkeypatch, capsys, store):

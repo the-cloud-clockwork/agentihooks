@@ -314,21 +314,18 @@ def _segments(timeline: Timeline, held: list[Span], window: bottleneck.Window):
         yield (start, end, *_stage_at(timeline, held, (start + end) / 2))
 
 
-def attribute(timeline: Timeline, held: list[Span], window: bottleneck.Window) -> dict:
-    seconds = {}
-    for start, end, stage, label in _segments(timeline, held, window):
-        seconds[stage, label] = seconds.get((stage, label), 0.0) + (end - start) / 1000
-    return seconds
+def _charges(timeline: Timeline, held: list[Span], window: bottleneck.Window, span: Span) -> bool:
+    return any((stage, label) == (span.stage, span.label) for _, _, stage, label in _segments(timeline, held, window))
 
 
 def _split(pieces: list, lives: list, cap: int | None) -> list[tuple]:
     """Charge each lane's claim wait pieces as seat wait, at most one per seat while every seat is busy, else queue wait."""
-    points = sorted({edge for piece in pieces for edge in piece[1:3]} | {edge for life in lives for edge in life})
+    edges = {edge for _, start, end, _, _ in pieces for edge in (start, end)}
+    points = sorted(edges | {edge for life in lives for edge in life})
     found = []
     for low, high in zip(points, points[1:]):
-        at = (low + high) / 2
-        waiting = sorted(piece for piece in pieces if piece[1] <= at < piece[2])
-        busy = sum(start <= at < stop for start, stop in lives)
+        waiting = sorted(piece for piece in pieces if piece[1] <= low and high <= piece[2])
+        busy = sum(start <= low and high <= stop for start, stop in lives)
         if cap is None:
             seats = len(waiting)
         else:
@@ -341,8 +338,8 @@ def _split(pieces: list, lives: list, cap: int | None) -> list[tuple]:
 def _charged(rows: dict, tasks: list, now_ms: int, window_ms: int, ready: Claim | None) -> list[tuple]:
     window = bottleneck.Window(now_ms - window_ms, now_ms)
     held = holds(rows["host_samples"], now_ms)
-    ready = ready or claimable({"tasks": tasks}, NO_FIX_PHASE)
     found = timelines(rows, tasks, now_ms, ready)
+    seats = ready.seats if ready else None
     lives, pieces, seconds = {}, {}, [{} for _ in found]
     for index, timeline in enumerate(found):
         lives.setdefault(timeline.lane, []).extend(timeline.seats)
@@ -352,7 +349,7 @@ def _charged(rows: dict, tasks: list, now_ms: int, window_ms: int, ready: Claim 
             else:
                 seconds[index][stage, label] = seconds[index].get((stage, label), 0.0) + (end - start) / 1000
     for lane, waiting in pieces.items():
-        cap = None if ready.seats is None else ready.seats.get(lane, 0)
+        cap = None if seats is None else seats.get(lane, 0)
         for index, stage, label, value in _split(waiting, lives[lane], cap):
             seconds[index][stage, label] = seconds[index].get((stage, label), 0.0) + value
     return list(zip(found, seconds))
@@ -367,7 +364,7 @@ def _overrun_episodes(rows, timeline, branch, held, window):
             if span.stage != "ci_overrun":
                 continue
             clipped = bottleneck.Window(max(window.start, span.start), min(window.end, span.end))
-            if attribute(timeline, held, clipped).get((span.stage, span.label), 0) > 0:
+            if _charges(timeline, held, clipped, span):
                 episodes.add(str(run["run_id"]))
     return episodes
 

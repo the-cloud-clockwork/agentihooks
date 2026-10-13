@@ -81,6 +81,14 @@ def test_queue_wait_never_names_the_top_bottleneck(store):
     assert bottleneck_status.report(store, "sw", NOW)["stage"] == ""
 
 
+def test_the_waits_add_every_row_of_a_stage_in_exact_hours(store):
+    detect(store, ("queue_wait", 3600.0, "rising"), ("queue_wait", 1800.0, "rising"), ("seat_wait", 180.0, "rising"))
+    assert bottleneck_status.report(store, "sw", NOW)["waits"] == [
+        "Seat wait 0.1 task hours: ready while every seat of its lane was busy",
+        "Queue wait 1.5 task hours: ready while a seat was free or behind more tasks than its lane has seats",
+    ]
+
+
 @pytest.mark.parametrize(
     "elapsed,measured",
     [(-120_000, "0 minutes ago"), (0, "0 minutes ago"), (59_999, "0 minutes ago"), (60_000, "1 minutes ago")],
