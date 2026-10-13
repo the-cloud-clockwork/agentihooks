@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+from collections import OrderedDict
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -9,7 +10,7 @@ import pytest
 import yaml
 from xdist.scheduler import LoadScopeScheduling
 
-from tests.flake_ledger import FlakeLedger
+from tests.flake_ledger import FlakeLedger, RefillingLoadGroupScheduling
 
 pytestmark = pytest.mark.unit
 
@@ -228,6 +229,37 @@ def test_a_crash_past_the_worker_restart_limit_stays_failed(tmp_path):
         ledger.pytest_handlecrashitem(crashitem=f"test_probes.py::test_{n}", report=report, sched=sched)
         outcomes.append(report.outcome)
     assert outcomes == ["rerun", "rerun", "failed"]
+
+
+class _Worker:
+    def __init__(self):
+        self.shutting_down = False
+        self.sent = []
+
+    def send_runtest_some(self, indices):
+        self.sent.extend(indices)
+
+    def shutdown(self):
+        self.shutting_down = True
+
+
+def test_a_crashed_test_reaches_another_worker_only_after_its_crash_is_recorded(tmp_path):
+    crashing, sibling = "test_probes.py::test_crashes_always", "test_probes.py::test_sibling"
+    crashed, alive = _Worker(), _Worker()
+    sched = RefillingLoadGroupScheduling.__new__(RefillingLoadGroupScheduling)
+    sched.config = SimpleNamespace(
+        option=SimpleNamespace(maxworkerrestart="2", numprocesses=2), getoption=lambda name, default=None: 2
+    )
+    sched.log = lambda *args: None
+    sched.workqueue = OrderedDict()
+    sched.registered_collections = {crashed: [crashing, sibling], alive: [crashing, sibling]}
+    sched.assigned_work = {crashed: {crashing: {crashing: False}}, alive: {sibling: {sibling: True}}}
+    assert sched.remove_node(crashed) == crashing
+    assert alive.sent == []
+    report = SimpleNamespace(failed=True, outcome="failed")
+    FlakeLedger(tmp_path / "flakes.jsonl").pytest_handlecrashitem(crashitem=crashing, report=report, sched=sched)
+    assert alive.sent == [0]
+    assert report.outcome == "rerun"
 
 
 def test_a_worker_crash_without_reruns_stays_red_and_is_not_run_again(tmp_path):
