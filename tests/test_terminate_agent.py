@@ -307,6 +307,7 @@ def test_a_child_agent_process_does_not_inherit_its_parents_name(tmp_path):
     (proc / "301" / "environ").write_bytes((proc / "300" / "environ").read_bytes())
     with patch("scripts.terminate_agent.processes", return_value={300: parent, 301: child}):
         found = sessions(proc, registry={})
+    assert {s.process.pid: s.name for s in found} == {300: "smoke-codex", 301: ""}
     assert resolve(found, "smoke-codex", "codex").process.pid == 300
 
 
