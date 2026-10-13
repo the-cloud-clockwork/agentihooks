@@ -797,6 +797,7 @@ def test_light_main_answers_the_trampoline_and_hands_every_other_name_to_the_rea
     assert light_main.record_trampoline_hit("scripts.a.x_f") is None
     with pytest.raises(AttributeError, match="^__path__$"):
         light_main.__path__
+    monkeypatch.setattr(sys.modules["mutmut"], "__main__", real)
     monkeypatch.setitem(sys.modules, "mutmut.__main__", light_main)
     assert light_main.walk_all_files.__module__ == "mutmut.__main__"
     loaded = sys.modules["mutmut.__main__"]

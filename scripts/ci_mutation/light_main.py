@@ -12,6 +12,7 @@ def mangled_name_from_mutant_name(mutant_name: str) -> str:
 
 
 def record_trampoline_hit(name: str) -> None:
+    # The mutation run reads stats only from its own processes, which hold the real module.
     pass
 
 

@@ -205,7 +205,7 @@ def load_or_collect_stats(runner, test_runner, paths: list[str], mode: str, stat
 
 
 def mutated_bootstrap(filename: str) -> str:
-    light_main = repr(str(Path(__file__).resolve().with_name("light_main.py")))
+    light_main_path = repr(str(Path(__file__).resolve().with_name("light_main.py")))
     return (
         "import os as _mutmut_os\n"
         "import sys as _mutmut_sys\n"
@@ -213,7 +213,7 @@ def mutated_bootstrap(filename: str) -> str:
         # A process the mutation run did not start would import mutmut's whole engine for three trampoline names.
         "if 'mutmut.__main__' not in _mutmut_sys.modules:\n"
         "    import importlib.util as _mutmut_util\n"
-        f"    _mutmut_spec = _mutmut_util.spec_from_file_location('mutmut.__main__', {light_main})\n"
+        f"    _mutmut_spec = _mutmut_util.spec_from_file_location('mutmut.__main__', {light_main_path})\n"
         "    _mutmut_sys.modules['mutmut.__main__'] = _mutmut_util.module_from_spec(_mutmut_spec)\n"
         "    _mutmut_spec.loader.exec_module(_mutmut_sys.modules['mutmut.__main__'])\n"
         "    import mutmut as _mutmut_package\n"
