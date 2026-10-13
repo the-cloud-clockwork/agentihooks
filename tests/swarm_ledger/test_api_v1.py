@@ -854,7 +854,8 @@ def test_domain_operation_families_use_their_named_guards(live):
 
 
 def test_publish_plan_writes_land_through_the_plans_and_slices_resources(live, tmp_path, monkeypatch, capsys):
-    from scripts.swarm_ledger import ledger_artifacts, ledger_plans
+    from scripts.swarm_ledger import ledger_artifacts
+    from scripts.swarm_ledger.api import resources
     from tests.swarm_ledger.test_ledger_authority import ledger
 
     plan = tmp_path / "plan.md"
@@ -874,13 +875,19 @@ def test_publish_plan_writes_land_through_the_plans_and_slices_resources(live, t
     ledger.cmd_publish_plan(args)
     url = f"{ledger.base()}/artifacts/{SLUG}/{file['id']}"
     assert json.loads(capsys.readouterr().out) == {"plan_url": url, "published_to": "artifact", "phases": ["p1"]}
-    plan_id = ledger_plans.plan_id(file["id"])
+    plan_id = f"plan-{file['id'][:12]}"
     status, reply = request(live, "GET", f"plans/{plan_id}")
     assert (status, reply["data"]["artifact"]) == (200, url)
-    assert "revision" in reply
-    status, reply = request(live, "GET", f"slices/{ledger_plans.slice_id(plan_id, 'one')}")
+    assert reply["revision"] == resources.revision(reply["data"])
+    phase = request(live, "GET", "phases/p1")[1]["data"]
+    assert (phase["plan"], phase["plan_ref"], phase["comments_count"]) == (
+        f"plans/{plan_id}",
+        {"artifact": url, "lines": "1-3"},
+        1,
+    )
+    status, reply = request(live, "GET", f"slices/{plan_id}.one")
     assert (status, reply["data"]["anchor"], reply["data"]["lines"]) == (200, "one", "2-3")
-    assert "revision" in reply
+    assert reply["revision"] == resources.revision(reply["data"])
 
 
 def test_resource_reads_preserve_pinned_identity(live):
