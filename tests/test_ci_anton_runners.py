@@ -56,7 +56,7 @@ def test_heavy_jobs_run_on_the_isolated_anton_pool_only_for_trusted_actors(workf
 
 
 def test_test_count_timeout_holds_three_times_its_slowest_recent_run():
-    slowest_seconds = 311
+    slowest_seconds = 311  # Tests run 38364025608: the 3.12 leg hit the old five minute timeout
     assert jobs("test.yml")["test-count"]["timeout-minutes"] * 60 >= 3 * slowest_seconds
 
 
