@@ -158,6 +158,14 @@ def test_the_newest_run_cancellation_holds_a_red_watchdog(newest, reverse):
     assert swarm.retired == ([OWNER] if newest == "FAILURE" else [])
 
 
+def test_a_draft_red_pull_request_keeps_its_owner():
+    swarm = Swarm(replace(RED, draft=True))
+    assert swarm.tick(START + 15 * MINUTE) == []
+    assert swarm.tick(START + 30 * MINUTE) == []
+    assert not _reopened(swarm)
+    assert swarm.retired == []
+
+
 @pytest.mark.parametrize("pull", [RED, GREEN, CONFLICTING])
 def test_a_new_owner_gets_the_full_limit_after_hours_without_a_push(pull):
     swarm = Swarm(pull, live=False)
