@@ -127,9 +127,7 @@ def test_source_from_other_repository_falls_back(tmp_path):
 def test_workflow_preserves_downstream_artifacts():
     import yaml
 
-    jobs = yaml.safe_load((Path(__file__).parents[1] / ".github/workflows/test.yml").read_text())[
-        "jobs"
-    ]
+    jobs = yaml.safe_load((Path(__file__).parents[1] / ".github/workflows/test.yml").read_text())["jobs"]
     unit = jobs["unit"]
     steps = {step.get("name"): step for step in unit["steps"]}
     assert steps["Run tests"]["if"] == "needs.split.outputs.source == ''"
