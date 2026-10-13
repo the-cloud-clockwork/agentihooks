@@ -12,6 +12,15 @@ concurrency:
   queue: ${{ github.workflow == 'Swarm container smoke' && 'max' || 'single' }}
 
 jobs:
+  hive-launch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Launch a scratch agent through a remote hive container
+        run: bash scripts/packaging/hive-launch-smoke.sh
   smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 10

@@ -210,6 +210,16 @@ def test_coverage_ratchet_grades_the_merged_shards_from_the_base_copy():
     assert report["with"]["path"] == "coverage-ratchet/report.txt"
 
 
+@pytest.mark.parametrize(
+    "job,step",
+    [("coverage-baseline", "Compute the coverage baseline"), ("queue-baseline", "Record this run's coverage baseline")],
+)
+def test_every_coverage_baseline_records_all_the_shards_the_unit_job_splits(job, step):
+    jobs = _workflow()["jobs"]
+    record = next(entry for entry in jobs[job]["steps"] if entry.get("name") == step)
+    assert f"--shards {jobs['unit']['strategy']['matrix']['shard'][-1]} " in record["run"]
+
+
 def test_coverage_ratchet_grades_a_merge_group_against_the_branch_it_queues_onto():
     job = _workflow()["jobs"]["coverage-ratchet"]
     base = next(step for step in job["steps"] if step.get("name") == "Resolve the measured base tree")

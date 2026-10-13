@@ -32,7 +32,7 @@ runs:
           echo "ready=false" >> "$GITHUB_OUTPUT"
         fi
     - name: Use the Ubuntu archive for browser dependencies
-      if: steps.launch.outputs.ready != 'true'
+      if: steps.launch.outputs.ready != 'true' && runner.environment == 'github-hosted'
       shell: bash
       run: timeout 60s sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
     - name: Install Chromium and missing OS dependencies
