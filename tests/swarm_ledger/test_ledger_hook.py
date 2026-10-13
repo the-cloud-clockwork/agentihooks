@@ -87,6 +87,7 @@ def test_dispatch_reads_the_current_home_folder_after_an_earlier_event(folder, m
     (current / ".sessions").mkdir(parents=True)
     ledger_hook.write_session(current / ".sessions" / "s1.json", ledger_hook.new_session("closed", NAME, "member"))
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(ledger_hook.Path, "home", classmethod(lambda cls: home))
     if configured is None:
         monkeypatch.delenv("LEDGER_DIR")
     else:
