@@ -127,7 +127,8 @@ def record(method: str, route: str, wall: float, cpu: float, lock_wait: float) -
             EVICTED_THROUGH = max(EVICTED_THROUGH, SAMPLES[0][0])
         SAMPLES.append((ended, method, route, wall, cpu, lock_wait))
         while SAMPLES and SAMPLES[0][0] < ended - RETENTION_SECONDS:
-            EVICTED_THROUGH = max(EVICTED_THROUGH, SAMPLES.popleft()[0])
+            expired = SAMPLES.popleft()
+            EVICTED_THROUGH = max(EVICTED_THROUGH, expired[0])
 
 
 def measured(method: Callable) -> Callable:

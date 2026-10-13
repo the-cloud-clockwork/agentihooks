@@ -140,7 +140,7 @@ def test_command_rejects_invalid_windows_before_http(capture, monkeypatch, capsy
     with pytest.raises(SystemExit) as caught:
         metrics.main([f"--hours={hours}"])
     assert caught.value.code == 2
-    assert "hours must be positive and at most seven days" in capsys.readouterr().err
+    assert capsys.readouterr().err.splitlines()[-1].endswith(": error: hours must be positive and at most seven days")
     assert calls == []
 
 
@@ -149,6 +149,7 @@ def test_command_rejects_invalid_windows_before_http(capture, monkeypatch, capsy
     [
         ([], 24.0, "http://example:9999"),
         (["--hours", "168", "--url", "http://example:9999/"], 168.0, "http://example:9999"),
+        (["--url", "http://example:9999/proxyX/"], 24.0, "http://example:9999/proxyX"),
     ],
 )
 def test_command_defaults_trims_url_and_emits_sorted_json(capture, monkeypatch, capsys, args, hours, base):
@@ -246,7 +247,7 @@ def test_command_help_describes_the_timing_report(capsys):
     with pytest.raises(SystemExit) as caught:
         metrics.main(["--help"])
     assert caught.value.code == 0
-    assert "Ledger write timing and request route CPU" in capsys.readouterr().out
+    assert "Ledger write timing and request route CPU" in capsys.readouterr().out.splitlines()
 
 
 @pytest.mark.parametrize("method", ["GET", "POST", "PUT", "PATCH", "OPTIONS"])
