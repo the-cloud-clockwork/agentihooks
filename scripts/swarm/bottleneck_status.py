@@ -7,6 +7,11 @@ from scripts.swarm.store import RedisStore
 
 KEY = "top-bottleneck"
 ACTIONS = "bottleneck-actions"
+WAITS = {
+    stages.SEAT_WAIT: "Seat wait {hours:.1f} task hours: ready while every seat of its lane was busy",
+    stages.QUEUE_WAIT: "Queue wait {hours:.1f} task hours: ready while a seat was free or behind more tasks than its lane"
+    " has seats",
+}
 
 
 def record_action(store: RedisStore, slug: str, stage: str, text: str, at: int) -> None:
@@ -19,7 +24,8 @@ def read(store: RedisStore, slug: str) -> dict:
 
 def report(store: RedisStore, slug: str, now_ms: int) -> dict:
     found = stages.read(store, slug)
-    row = found["stages"][0] if found.get("total") else {}
+    ranked = [row for row in found.get("stages", []) if row["stage"] != stages.QUEUE_WAIT]
+    row = ranked[0] if found.get("total") and ranked else {}
     stage = row.get("stage", "")
     action = json.loads(store.redis.hget(store.key(slug, ACTIONS), stage) or "{}")
     return {
@@ -31,7 +37,15 @@ def report(store: RedisStore, slug: str, now_ms: int) -> dict:
         "measured": f"{max(0, (now_ms - found['at']) // 60_000)} minutes ago" if found else "never",
         "last_action": action.get("text", "none recorded"),
         "action_at": action.get("at", 0),
+        "waits": _waits(found["stages"]) if found else [],
     }
+
+
+def _waits(rows: list) -> list[str]:
+    return [
+        text.format(hours=sum(row["seconds"] for row in rows if row["stage"] == stage) / 3600)
+        for stage, text in WAITS.items()
+    ]
 
 
 def line(found: dict) -> str:

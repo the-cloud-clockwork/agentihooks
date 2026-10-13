@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_words.py:hooks.context.operator_words.x_matching__mutmut_5:a8fbb761db02ac2ac6e829991638f540d7b897e4f76bfb41dd83b37b06c1a33f": {
+    "reader": "standards_reader",
+    "reason": "SQLite keywords and the unquoted identifiers `at` and `id` are case-insensitive, so the lowercased clause parses to the same query."
+  }
+}
