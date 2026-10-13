@@ -42,10 +42,10 @@ def _path(word: str) -> str:
 def _own_worktree(cwd: Path, name: str) -> Path | None:
     from scripts.gates.push_stop import default_root, trees
 
-    root = _toplevel(cwd)
-    if root is None:
+    checkout = _toplevel(cwd)
+    if checkout is None:
         return None
-    found = [tree.path for tree in trees(default_root(), name) if tree.path.parent.name == root.name]
+    found = [tree.path for tree in trees(default_root(), name) if tree.path.parent.name == checkout.name]
     return found[0] if len(found) == 1 else None
 
 

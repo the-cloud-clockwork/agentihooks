@@ -308,6 +308,21 @@ def test_two_agent_worktrees_of_the_repository_keep_the_payload_directory(repo, 
     assert str(blocked.value) == _message(repo)
 
 
+def test_a_swarm_push_outside_a_repository_passes_without_a_guard_error(swarm_worktree, tmp_path, monkeypatch):
+    from tests.swarm_ledger import legacy_page
+
+    logged = []
+    monkeypatch.setattr(prepush_guard, "log", lambda *args: logged.append(args))
+    task = {"id": "push", "state": "claimed", "claimed_by": "engineer@test"}
+    legacy_page.store(tmp_path / "ledgers", "rig", {"tasks": [task]})
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    check_prepush(_bash("git push -u origin HEAD", outside))
+
+    assert logged == []
+
+
 @pytest.mark.parametrize("directory", [None, "", "~/development-ledger"])
 def test_default_swarm_ledger_location_resolves_the_task_worktree(repo, swarm_worktree, monkeypatch, directory):
     from tests.swarm_ledger import legacy_page
