@@ -22,6 +22,21 @@ def require_controller(handler: object, server: ModuleType) -> None:
         raise APIError(403, "forbidden", "Proof ledgers need the controller credential")
 
 
+def route(handler: object, server: ModuleType, parts: list, read_body: object) -> dict:
+    if len(parts) == 3 and parts[2] == "credential":
+        schemas.validate({"type": "object", "maxProperties": 0}, read_body(handler, server))
+        return credential(handler, server, parts[1])
+    if len(parts) == 3 and parts[2] == "controls":
+        return control(handler, server, parts[1], read_body(handler, server))
+    require_controller(handler, server)
+    if len(parts) == 1:
+        return create(server, read_body(handler, server))
+    if len(parts) == 3 and parts[2] == "remove":
+        schemas.validate({"type": "object", "maxProperties": 0}, read_body(handler, server))
+        return remove(handler, server, parts[1])
+    raise APIError(404, "resource_missing", "No such proof resource")
+
+
 def create(server: ModuleType, payload: dict) -> dict:
     import new_ledger
 
