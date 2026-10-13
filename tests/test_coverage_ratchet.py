@@ -290,6 +290,20 @@ def test_changed_or_deleted_importing_tests_keep_incidental_lines_red(test_sourc
     assert getattr(result, "unconfirmed", {}) == {}
 
 
+@pytest.mark.parametrize("test_source", ["import hooks.a", "from hooks.a import f", "from hooks import a"])
+def test_an_import_added_in_a_changed_head_test_keeps_the_line_red(test_source):
+    test_path = "tests/test_a.py"
+    base_sources = {"hooks/a.py": SOURCE, test_path: "assert True\n"}
+    head_sources = {"hooks/a.py": SOURCE, test_path: test_source + "\nassert True\n"}
+    runs = [_measure("b1", {"hooks/a.py": {1, 2, 3}}, base_sources)]
+    runs += [_measure(f"older{n}", {"hooks/a.py": {1, 2}}, base_sources) for n in range(2)]
+    options = {"changed_tests": {test_path}} if hasattr(ratchet.Result("b1", {}), "unconfirmed") else {}
+    result = ratchet.grade({"hooks/a.py": {1, 2}}, head_sources.get, iter(runs), **options)
+    assert result.lost == {"hooks/a.py": [3]}
+    assert result.unstable == {}
+    assert getattr(result, "unconfirmed", {}) == {}
+
+
 def test_changing_an_unrelated_test_does_not_confirm_the_line():
     test_path = "tests/test_b.py"
     sources = {"hooks/a.py": SOURCE, test_path: "from hooks.b import f\nassert True\n"}
