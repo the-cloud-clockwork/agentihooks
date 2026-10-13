@@ -25,6 +25,10 @@ HELD = ("claimed", "pr")
 NTFY = "AGENTIHOOKS_STALL_NTFY_URL"
 NTFY_USER, NTFY_PASS = "NTFY_USER", "NTFY_PASS"
 ANTON_ALERTS = "https://ntfy.homeofanton.com/anton-alerts"
+TITLE, AUTHORIZATION, TIMEOUT_S = "Title", "Authorization", 10
+QUEUED, SEEN, ALERTS, ALERTED_KEY = "stall-queued", "stall-seen", "stall-alerts", "stall-alerted"
+LANES = ("eng", "ci")
+FINISHED, STOPPED, DONE, UNCLAIMED = "finished", "stopped", "done", "unclaimed"
 ENV = {
     "green": "AGENTIHOOKS_STALL_GREEN_MINUTES",
     "red": "AGENTIHOOKS_STALL_RED_MINUTES",
@@ -62,21 +66,21 @@ def limits(environ=None):
     env = os.environ if environ is None else environ
     values = {}
     for field in fields(Limits):
-        raw = env.get(ENV[field.name], "")
-        if raw.isdigit() and int(raw) > 0:
+        raw = env.get(ENV[field.name])
+        if raw and raw.isdigit() and int(raw) > 0:
             values[field.name] = int(raw)
     return Limits(**values)
 
 
 def ntfy(url, title, text, environ, opener=urllib.request.urlopen):
     """An empty answer when posted, else why not."""
-    headers = {"Title": title}
-    user, password = environ.get(NTFY_USER, ""), environ.get(NTFY_PASS, "")
+    headers = {TITLE: title}
+    user, password = environ.get(NTFY_USER), environ.get(NTFY_PASS)
     if user and password:
-        headers["Authorization"] = "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode()
-    request = urllib.request.Request(url, data=text.encode(), headers=headers, method="POST")
+        headers[AUTHORIZATION] = "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode()
+    request = urllib.request.Request(url, data=text.encode(), headers=headers)
     try:
-        with opener(request, timeout=10):
+        with opener(request, timeout=TIMEOUT_S):
             return ""
     except (OSError, ValueError) as exc:
         return f"ntfy failed: {exc}"
@@ -103,18 +107,18 @@ def _key(watch, name):
 def stall_pass(watch, doc):
     limit = limits(watch.environ)
     mail = Mail(InboxStore(watch.store.redis), watch.store, watch.slug, doc)
-    rows = {t["id"]: t for t in doc.get("tasks", [])}
-    marks, seen, actions = watch.store.redis.hgetall(_key(watch, "stall-seen")), {}, []
+    rows = {t["id"]: t for t in doc.get("tasks") or []}
+    marks, seen, actions = watch.store.redis.hgetall(_key(watch, SEEN)), {}, []
     held = [task for task in rows.values() if task.get("state") in HELD and task.get("pr_url")]
-    gone = watch.store.redis.smembers(_key(watch, "stall-queued")) - {task["id"] for task in held}
+    gone = watch.store.redis.smembers(_key(watch, QUEUED)) - {task["id"] for task in held}
     if gone:
-        watch.store.redis.srem(_key(watch, "stall-queued"), *gone)
+        watch.store.redis.srem(_key(watch, QUEUED), *gone)
     for task in held:
         actions += _pull_request(watch, mail, task, limit, marks, seen)
     actions += _unclaimed(watch, mail, rows, limit, marks, seen)
-    watch.store.redis.delete(_key(watch, "stall-seen"))
+    watch.store.redis.delete(_key(watch, SEEN))
     if seen:
-        watch.store.redis.hset(_key(watch, "stall-seen"), mapping=seen)
+        watch.store.redis.hset(_key(watch, SEEN), mapping=seen)
     return actions + _escalate(watch, rows)
 
 
@@ -128,7 +132,7 @@ def _since(watch, marks, seen, mark):
 
 
 def _stall(watch, task, pull, marks, seen):
-    tid, queued = task["id"], _key(watch, "stall-queued")
+    tid, queued = task["id"], _key(watch, QUEUED)
     if pull.queued:
         watch.store.redis.sadd(queued, tid)
     if pull.mergeable == "CONFLICTING" or (not pull.queued and watch.store.redis.sismember(queued, tid)):
@@ -148,11 +152,13 @@ def _pull_request(watch, mail, task, limit, marks, seen):
     if pull is None:
         return []
     if pull.state != "OPEN":
-        watch.store.redis.srem(_key(watch, "stall-queued"), task["id"])
+        watch.store.redis.srem(_key(watch, QUEUED), task["id"])
         return []
     case, since = _stall(watch, task, pull, marks, seen)
-    minutes = _minutes(watch, since) if case else 0
-    if not case or minutes < getattr(limit, case):
+    if case is None:
+        return []
+    minutes = _minutes(watch, since)
+    if minutes < getattr(limit, case):
         return []
     return _reopen(watch, mail, task, case, minutes, limit)
 
@@ -165,7 +171,7 @@ def _reopen(watch, mail, task, case, minutes, limit):
         return []
     if outage.held(watch.store, watch.slug, owner or None):
         return []
-    agent = next((a for a in watch.store.agents(watch.slug) if a.name == owner and a.state != "finished"), None)
+    agent = next((a for a in watch.store.agents(watch.slug) if a.name == owner and a.state != FINISHED), None)
     if agent is not None and agent.name in watch.live and not watch.retire(agent):
         return [f"could not retire {owner} for stalled task {tid}, retrying next tick"]
     reopened = watch.ledger.update_task(
@@ -177,9 +183,9 @@ def _reopen(watch, mail, task, case, minutes, limit):
         watch.store.release(watch.slug, tid, owner)
     if agent is not None:
         watch.store.drop_agent(watch.slug, owner)
-        exits.settle(InboxStore(watch.store.redis), owner, agent.seat, "stopped")
+        exits.settle(InboxStore(watch.store.redis), owner, agent.seat, STOPPED)
     ready.forget(watch.store, watch.slug, tid)
-    watch.store.redis.srem(_key(watch, "stall-queued"), tid)
+    watch.store.redis.srem(_key(watch, QUEUED), tid)
     text = COMMENT.format(action=REOPENED, pr=task["pr_url"], case=CASES[case], minutes=minutes)
     watch.ledger.comment(watch.slug, tid, text, by=SENDER)
     return _alert(watch, mail, task, case, minutes, REOPENED, limit)
@@ -187,8 +193,10 @@ def _reopen(watch, mail, task, case, minutes, limit):
 
 def _alert(watch, mail, task, case, minutes, action, limit):
     tid, wait, inbox = task["id"], 2 * getattr(limit, case), mail.inbox
-    raw = watch.store.redis.hget(_key(watch, "stall-alerts"), tid)
-    earlier = json.loads(raw)["item"] if raw and _open(inbox, json.loads(raw)["item"]) else ""
+    raw = watch.store.redis.hget(_key(watch, ALERTS), tid)
+    earlier = json.loads(raw)["item"] if raw else ""
+    if earlier and not _open(inbox, earlier):
+        earlier = ""
     if earlier and action == ALERTED:
         return []
     row = {
@@ -206,30 +214,30 @@ def _alert(watch, mail, task, case, minutes, action, limit):
         slug=watch.slug, title=task.get("title") or "no title", wait=wait, **{**row, "case": CASES[case]}
     )
     row["item"] = inbox.send(SENDER, address, text, ref=f"{watch.slug}:stall:{tid}").id
-    watch.store.redis.hset(_key(watch, "stall-alerts"), tid, json.dumps(row))
+    watch.store.redis.hset(_key(watch, ALERTS), tid, json.dumps(row))
     if earlier:
-        inbox.close(earlier, SENDER, "done", f"superseded by a new stall alert on task {tid}")
+        inbox.close(earlier, SENDER, DONE, f"superseded by a new stall alert on task {tid}")
     return [f"stall: task {tid} {CASES[case]} for {minutes} minutes, {action}; told {address}"]
 
 
 def _lane_full(watch, lane, decision):
     configured = (decision.get("configured") or {}).get(lane, 0)
-    working = [a for a in watch.store.agents(watch.slug) if a.lane == lane and a.state != "finished"]
+    working = [a for a in watch.store.agents(watch.slug) if a.lane == lane and a.state != FINISHED]
     return configured > 0 and len(working) >= configured
 
 
 def _unclaimed(watch, mail, rows, limit, marks, seen):
-    decision, key = capacity.read(watch.store, watch.slug), _key(watch, "stall-alerted")
+    decision, key = capacity.read(watch.store, watch.slug), _key(watch, ALERTED_KEY)
     alerted, current, actions = watch.store.redis.hgetall(key), {}, []
     if sum((decision.get("placeable") or {}).values()) > 0:
-        for lane in ("eng", "ci"):
+        for lane in LANES:
             if not _lane_full(watch, lane, decision):
                 continue
             for task in watch.claimable(lane):
-                since = current[task["id"]] = str(_since(watch, marks, seen, f"{task['id']}:unclaimed"))
+                since = current[task["id"]] = str(_since(watch, marks, seen, f"{task['id']}:{UNCLAIMED}"))
                 minutes = _minutes(watch, int(since))
                 if minutes >= limit.unclaimed and alerted.get(task["id"]) != since:
-                    actions += _alert(watch, mail, rows.get(task["id"], task), "unclaimed", minutes, ALERTED, limit)
+                    actions += _alert(watch, mail, rows.get(task["id"], task), UNCLAIMED, minutes, ALERTED, limit)
                     alerted[task["id"]] = since
     watch.store.redis.delete(key)
     kept = {tid: since for tid, since in alerted.items() if current.get(tid) == since}
@@ -246,14 +254,15 @@ def _open(inbox, item_id):
 
 
 def _escalate(watch, rows):
-    inbox, key, actions = InboxStore(watch.store.redis), _key(watch, "stall-alerts"), []
+    inbox, key, actions = InboxStore(watch.store.redis), _key(watch, ALERTS), []
     for tid, raw in watch.store.redis.hgetall(key).items():
         row = json.loads(raw)
         task = rows.get(tid, {})
-        moot = row["case"] == "unclaimed" and (task.get("state") != "open" or task.get("claimed_by"))
-        if moot and _open(inbox, row["item"]):
-            inbox.close(row["item"], SENDER, "done", f"task {tid} was claimed")
-        if moot or not _open(inbox, row["item"]):
+        moot = row["case"] == UNCLAIMED and (task.get("state") != "open" or task.get("claimed_by"))
+        is_open = _open(inbox, row["item"])
+        if moot and is_open:
+            inbox.close(row["item"], SENDER, DONE, f"task {tid} was claimed")
+        if moot or not is_open:
             watch.store.redis.hdel(key, tid)
             continue
         if row.get("escalated") or _minutes(watch, row["at"]) < 2 * row["limit"]:

@@ -1,12 +1,17 @@
 import copy
 import json
+from dataclasses import replace
 
 import pytest
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import ledger_events, ready, stall_watch
+from scripts.swarm import ledger_events, outage, ready, stall_watch
+from scripts.swarm.health.findings import Finding
 from scripts.swarm.ledger_events import PullRequest
-from scripts.swarm.store import AgentRecord, RedisStore
+from scripts.swarm.stall_watch import ALERTED, REOPENED
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore
+from scripts.swarm_v2 import masters
+from scripts.swarm_v2.masters import MasterSeats
 from tests.swarm.test_tick import FakeLedger
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -22,17 +27,29 @@ RUNNING = PullRequest("OPEN", None, START, False, False, head="h")
 QUEUED = PullRequest("OPEN", None, START, False, True, head="h", queued=True)
 CONFLICTING = PullRequest("OPEN", None, START, False, False, head="h", mergeable="CONFLICTING")
 DRAFT = PullRequest("OPEN", None, START, False, True, head="h", draft=True)
+LEAD = masters.lead_of(SLUG, [])
+UNCLAIMED_ALERT = {"case": "unclaimed", "minutes": 15, "wait": 30, "pr": "none", "owner": "nobody", "action": ALERTED}
 
 
 class Ledger(FakeLedger):
     def __init__(self, tasks):
         super().__init__(tasks)
-        self.priorities = []
+        self.priorities, self.updates = [], []
+
+    def task(self, slug, task_id):
+        assert slug == SLUG
+        return super().task(slug, task_id)
+
+    def update_task(self, slug, task_id, fields, by="swarm", if_state=()):
+        self.updates.append((task_id, fields, if_state))
+        return super().update_task(slug, task_id, fields, by, if_state)
 
     def comment(self, slug, task, text, by):
+        assert slug == SLUG
         self.comments.append((task, text, by))
 
     def priority(self, slug, item, text):
+        assert slug == SLUG
         self.priorities.append((item, text))
 
 
@@ -45,7 +62,8 @@ class Swarm:
             [{"id": "t1", "state": "pr", "pr_url": URL, "claimed_by": OWNER, "branch": "b1", **(task or {})}]
         )
         self.pulls = {URL: pull}
-        self.retired, self.posted, self.ready = [], [], {"eng": [], "ci": []}
+        self.retired, self.posted, self.envs, self.refusal = [], [], [], ""
+        self.ready = {"eng": [], "ci": []}
         self.live = {OWNER} if live else set()
         self.environ = {stall_watch.NTFY: "https://ntfy.example/alerts", **(environ or {})}
         self.store.put_agent(SLUG, AgentRecord(OWNER, "eng", "t1", seat="eng-1@sw"))
@@ -62,7 +80,9 @@ class Swarm:
             lambda lane: self.ready[lane],
             at,
             self.environ,
-            lambda url, title, text, env: self.posted.append((url, title, text)) or "",
+            lambda url, title, text, env: (
+                self.posted.append((url, title, text)) or self.envs.append(env) or self.refusal
+            ),
         )
         return stall_watch.stall_pass(watch, doc or self.ledger.state(SLUG))
 
@@ -79,6 +99,9 @@ def test_limits_default_to_the_operator_order_and_read_settings():
     assert stall_watch.limits({}) == stall_watch.Limits(green=10, red=15, owner=10, unmergeable=5, unclaimed=15)
     assert stall_watch.limits({"AGENTIHOOKS_STALL_GREEN_MINUTES": "3", "AGENTIHOOKS_STALL_RED_MINUTES": "x"}) == (
         stall_watch.Limits(green=3)
+    )
+    assert stall_watch.limits({"AGENTIHOOKS_STALL_GREEN_MINUTES": "0", "AGENTIHOOKS_STALL_RED_MINUTES": "1"}) == (
+        stall_watch.Limits(red=1)
     )
 
 
@@ -218,9 +241,16 @@ def test_an_answered_alert_never_escalates_and_its_finding_clears():
     swarm = Swarm(GREEN)
     swarm.tick(START)
     swarm.tick(START + 10 * MINUTE)
-    [found] = stall_watch.findings(swarm.store, SLUG)
-    assert found.kind == "stall" and found.subject == "t1" and found.measure == 10
-    assert any(URL in line for line in found.evidence) and any(OWNER in line for line in found.evidence)
+    assert stall_watch.findings(swarm.store, SLUG) == [
+        Finding(
+            "stall",
+            "t1",
+            "green and not queued for 10 minutes",
+            (f"pull request {URL}", f"owner {OWNER}", f"action: {REOPENED}"),
+            "10 minutes green and not queued",
+            10,
+        )
+    ]
     InboxStore(swarm.store.redis).close(swarm.inbox()[0].id, "master@sw", "done", "handled")
     swarm.tick(START + 30 * MINUTE)
     assert swarm.ledger.priorities == [] and stall_watch.findings(swarm.store, SLUG) == []
@@ -247,14 +277,17 @@ def test_ntfy_signs_in_with_the_access_audit_credentials_and_reports_a_refusal()
             return False
 
     def opener(request, timeout):
-        sent.append(request)
+        sent.append((request, timeout))
         return Opened()
 
     env = {"NTFY_USER": "alerts", "NTFY_PASS": "pw"}
     assert stall_watch.ntfy("https://ntfy.example/t", "Stall", "body", env, opener) == ""
-    assert sent[0].get_header("Authorization") == "Basic YWxlcnRzOnB3" and sent[0].data == b"body"
-    assert stall_watch.ntfy("https://ntfy.example/t", "Stall", "body", {}, opener) == ""
-    assert sent[1].get_header("Authorization") is None
+    request, timeout = sent[0]
+    assert request.headers == {"Title": "Stall", "Authorization": "Basic YWxlcnRzOnB3"}
+    assert request.get_method() == "POST" and request.data == b"body" and timeout == 10
+    for partial in ({}, {"NTFY_USER": "alerts"}, {"NTFY_PASS": "pw"}):
+        assert stall_watch.ntfy("https://ntfy.example/t", "Stall", "body", partial, opener) == ""
+        assert sent[-1][0].headers == {"Title": "Stall"}
 
     def refused(request, timeout):
         raise OSError("HTTP Error 401: Unauthorized")
@@ -276,6 +309,8 @@ def test_the_pull_request_view_reads_mergeable_and_draft():
     raw = {"state": "OPEN", "mergeable": "CONFLICTING", "isDraft": True, "commits": [], "statusCheckRollup": []}
     pull = ledger_events.pull_request(raw)
     assert pull.mergeable == "CONFLICTING" and pull.draft is True
+    unknown = ledger_events.pull_request({key: value for key, value in raw.items() if key != "mergeable"})
+    assert unknown.mergeable == "" and unknown.draft is True
 
 
 def test_a_task_the_merge_pass_already_reopened_is_left_alone():
@@ -338,3 +373,316 @@ def test_the_tick_runs_the_stall_pass_after_the_merge_pass():
 
     source = inspect.getsource(cli.run_tick)
     assert source.index("ready.merge_pass") < source.index("stall_watch.stall_pass")
+
+
+def _alert(**fields):
+    row = {"slug": SLUG, "task": "t1", "title": "no title", "pr": URL, "owner": OWNER, "action": REOPENED, **fields}
+    return stall_watch.ALERT.format(**{**row, "case": stall_watch.CASES[row["case"]]})
+
+
+def _queued(swarm):
+    return swarm.store.redis.smembers(swarm.store.key(SLUG, "stall-queued"))
+
+
+def _alert_rows(swarm):
+    return swarm.store.redis.hgetall(swarm.store.key(SLUG, "stall-alerts"))
+
+
+def test_a_reopen_writes_the_exact_ledger_update_comment_alert_and_seat_exit():
+    swarm = Swarm(GREEN, task={"title": "Fix it"})
+    swarm.tick(START)
+    actions = swarm.tick(START + 10 * MINUTE)
+    assert actions == [f"stall: task t1 green and not queued for 10 minutes, {REOPENED}; told {LEAD}"]
+    assert swarm.ledger.updates == [("t1", {"state": "open", "claimed_by": "", "awaiting": ""}, stall_watch.HELD)]
+    comment = stall_watch.COMMENT.format(action=REOPENED, pr=URL, case="green and not queued", minutes=10)
+    assert swarm.ledger.comments == [("t1", comment, "swarm")]
+    [item] = swarm.inbox()
+    assert item.text == _alert(case="green", minutes=10, wait=20, title="Fix it")
+    assert (item.sender, item.ref) == ("swarm", "sw:stall:t1")
+    exit_record = InboxStore(swarm.store.redis).seats.exit_of(OWNER)
+    assert (exit_record["seat"], exit_record["reason"]) == ("eng-1@sw", "stopped")
+
+
+def test_the_watch_settings_set_the_limits():
+    swarm = Swarm(GREEN, environ={"AGENTIHOOKS_STALL_GREEN_MINUTES": "3"})
+    swarm.tick(START)
+    swarm.tick(START + 3 * MINUTE)
+    assert _reopened(swarm)
+
+
+def test_an_alert_goes_to_the_master_owning_the_task_phase():
+    swarm = Swarm(GREEN, task={"phase": "p2"})
+    swarm.ledger.phases = [{"id": "p1"}, {"id": "p2"}]
+    MasterSeats(swarm.store.redis).set_count(SLUG, 2)
+    seats = masters.seats(SLUG, 2)
+    for index, seat in enumerate(seats):
+        swarm.store.put_agent(SLUG, AgentRecord(f"master@abc-000{index + 5}", MASTER, "", seat=seat))
+    swarm.tick(START)
+    [action] = swarm.tick(START + 10 * MINUTE)
+    assert action.endswith(f"; told {seats[1]}")
+
+
+def test_a_closed_pull_request_clears_its_queue_mark():
+    swarm = Swarm(QUEUED)
+    swarm.tick(START)
+    assert _queued(swarm) == {"t1"}
+    swarm.pulls[URL] = replace(QUEUED, state="MERGED", queued=False)
+    assert swarm.tick(START + MINUTE) == []
+    assert _queued(swarm) == set()
+
+
+def test_a_task_that_leaves_review_drops_its_queue_mark():
+    swarm = Swarm(QUEUED)
+    swarm.tick(START)
+    swarm.ledger.rows["t1"]["state"] = "done"
+    swarm.tick(START + MINUTE)
+    assert _queued(swarm) == set()
+
+
+def test_a_reopen_after_a_queue_drop_clears_its_queue_mark():
+    swarm = Swarm(QUEUED)
+    swarm.tick(START)
+    swarm.pulls[URL] = RUNNING
+    swarm.tick(START + MINUTE)
+    swarm.tick(START + 6 * MINUTE)
+    assert _reopened(swarm) and _queued(swarm) == set()
+
+
+def test_two_stalled_pull_requests_act_in_the_same_tick():
+    other, url = "engineer@abc-0002", "https://github.com/o/r/pull/8"
+    swarm = Swarm(GREEN)
+    swarm.ledger.rows["t2"] = {**swarm.ledger.rows["t1"], "id": "t2", "pr_url": url, "claimed_by": other}
+    swarm.pulls[url] = GREEN
+    swarm.live.add(other)
+    swarm.store.put_agent(SLUG, AgentRecord(other, "eng", "t2", seat="eng-2@sw"))
+    swarm.tick(START)
+    assert len(swarm.tick(START + 10 * MINUTE)) == 2
+    assert sorted(swarm.retired) == [OWNER, other]
+
+
+def test_a_stall_mark_is_forgotten_once_the_pull_request_stops_stalling():
+    swarm = Swarm(GREEN)
+    swarm.tick(START)
+    swarm.pulls[URL] = RUNNING
+    swarm.tick(START + 5 * MINUTE)
+    assert swarm.store.redis.hgetall(swarm.store.key(SLUG, "stall-seen")) == {}
+    swarm.pulls[URL] = GREEN
+    swarm.tick(START + 6 * MINUTE)
+    assert swarm.tick(START + 15 * MINUTE) == [] and not _reopened(swarm)
+    swarm.tick(START + 16 * MINUTE)
+    assert _reopened(swarm)
+
+
+def test_outage_time_is_measured_over_the_stall_itself(monkeypatch):
+    calls = []
+
+    def paused(slug, since, now):
+        calls.append((slug, since, now))
+        return (now - since) // 2
+
+    monkeypatch.setattr(stall_watch.outage, "paused_ms", paused)
+    swarm = Swarm(GREEN)
+    swarm.tick(START)
+    swarm.tick(START + 19 * MINUTE)
+    assert not _reopened(swarm)
+    swarm.tick(START + 20 * MINUTE)
+    assert _reopened(swarm) and (SLUG, START, START + 20 * MINUTE) in calls
+
+
+def test_a_red_pull_request_with_no_owner_reopens_and_names_nobody():
+    swarm = Swarm(RED, task={"claimed_by": ""})
+    swarm.tick(START + 15 * MINUTE)
+    assert _reopened(swarm) and swarm.retired == []
+    assert swarm.inbox()[0].text == _alert(case="red", minutes=15, wait=30, owner="nobody")
+
+
+def test_a_provider_error_on_the_owner_pane_holds_its_reopen():
+    swarm = Swarm(GREEN)
+    swarm.store.redis.set(swarm.store.key(SLUG, outage.PANE, OWNER), "provider error")
+    swarm.tick(START)
+    assert swarm.tick(START + 10 * MINUTE) == [] and not _reopened(swarm) and swarm.retired == []
+
+
+def test_a_task_finished_since_the_snapshot_is_left_alone():
+    swarm = Swarm(GREEN)
+    swarm.tick(START)
+    before = copy.deepcopy(swarm.ledger.state(SLUG))
+    swarm.ledger.rows["t1"]["state"] = "done"
+    assert swarm.tick(START + 10 * MINUTE, before) == []
+    assert swarm.retired == [] and swarm.ledger.updates == []
+
+
+def test_a_finished_owner_record_is_not_retired_and_no_other_agent_is():
+    other = "engineer@abc-0000"
+    swarm = Swarm(GREEN)
+    swarm.store.put_agent(SLUG, AgentRecord(OWNER, "eng", "t1", seat="eng-1@sw", state="finished"))
+    swarm.store.put_agent(SLUG, AgentRecord(other, "eng", "t9", seat="eng-2@sw"))
+    swarm.live.add(other)
+    swarm.tick(START)
+    swarm.tick(START + 10 * MINUTE)
+    assert _reopened(swarm) and swarm.retired == []
+    assert other in [a.name for a in swarm.store.agents(SLUG) if a.state != "finished"]
+
+
+def test_a_task_claimed_during_the_reopen_gets_no_comment_or_alert():
+    swarm = Swarm(GREEN)
+    swarm.ledger.update_task = lambda slug, tid, fields, by="swarm", if_state=(): {
+        "state": "open",
+        "claimed_by": "engineer@next",
+    }
+    swarm.tick(START)
+    assert swarm.tick(START + 10 * MINUTE) == []
+    assert swarm.ledger.comments == [] and swarm.inbox() == []
+
+
+def test_a_second_reopen_supersedes_the_open_alert():
+    swarm = Swarm(GREEN)
+    swarm.tick(START)
+    swarm.tick(START + 10 * MINUTE)
+    [first] = swarm.inbox()
+    swarm.ledger.rows["t1"].update(state="pr", claimed_by=OWNER)
+    [action] = swarm.tick(START + 11 * MINUTE)
+    assert "for 11 minutes" in action
+    closed = InboxStore(swarm.store.redis).get(first.id)
+    assert (closed.state, closed.reason) == ("done", "done: superseded by a new stall alert on task t1")
+    assert len(swarm.inbox()) == 2
+
+
+def test_an_answered_alert_does_not_block_the_next_reopen():
+    swarm = Swarm(GREEN)
+    swarm.tick(START)
+    swarm.tick(START + 10 * MINUTE)
+    InboxStore(swarm.store.redis).close(swarm.inbox()[0].id, "master@sw", "done", "handled")
+    swarm.ledger.rows["t1"].update(state="pr", claimed_by=OWNER)
+    assert len(swarm.tick(START + 11 * MINUTE)) == 1 and len(swarm.inbox()) == 2
+
+
+def test_an_open_unclaimed_alert_is_not_repeated_when_the_task_waits_again():
+    swarm = Swarm(RUNNING)
+    _full_lane(swarm)
+    swarm.tick(START)
+    swarm.tick(START + 15 * MINUTE)
+    swarm.ready["eng"] = []
+    swarm.tick(START + 16 * MINUTE)
+    swarm.ready["eng"] = [swarm.ledger.rows["t1"]]
+    swarm.tick(START + 17 * MINUTE)
+    assert swarm.tick(START + 32 * MINUTE) == [] and len(swarm.inbox()) == 1
+
+
+def test_an_unclaimed_alert_names_the_ledger_row_and_no_pull_request():
+    swarm = Swarm(RUNNING)
+    _full_lane(swarm)
+    swarm.ledger.rows["t1"]["title"] = "Ready work"
+    swarm.ready["eng"] = [{"id": "t1"}]
+    swarm.tick(START)
+    actions = swarm.tick(START + 15 * MINUTE)
+    assert actions == [
+        f"stall: task t1 ready and unclaimed while its lane is full for 15 minutes, {ALERTED}; told {LEAD}"
+    ]
+    [item] = swarm.inbox()
+    assert item.text == _alert(**UNCLAIMED_ALERT, title="Ready work")
+
+
+def test_an_unclaimed_task_missing_from_the_snapshot_is_named_from_its_lane():
+    swarm = Swarm(RUNNING)
+    _full_lane(swarm)
+    swarm.ready["eng"] = [{"id": "t3", "title": "Ghost"}]
+    swarm.tick(START)
+    swarm.tick(START + 15 * MINUTE)
+    [item] = swarm.inbox()
+    assert item.text == _alert(**UNCLAIMED_ALERT, title="Ghost", task="t3")
+
+
+def test_two_unclaimed_tasks_alert_in_the_same_tick():
+    swarm = Swarm(RUNNING)
+    _full_lane(swarm)
+    swarm.ledger.rows["t3"] = {"id": "t3", "state": "open", "claimed_by": "", "lane": "eng"}
+    swarm.ready["eng"].append(swarm.ledger.rows["t3"])
+    swarm.tick(START)
+    assert len(swarm.tick(START + 15 * MINUTE)) == 2
+
+
+@pytest.mark.parametrize(
+    ("lane", "configured", "agents", "alerts"),
+    [
+        ("eng", {"eng": 1}, [], 1),
+        ("ci", {"eng": 1}, [("ci@abc-0001", "ci", "working")], 0),
+        ("eng", {"eng": 2, "ci": 1}, [], 0),
+        ("eng", {"eng": 0, "ci": 0}, [], 0),
+        ("eng", {"eng": 1}, [(OWNER, "eng", "finished"), ("ci@abc-0001", "ci", "working")], 0),
+        ("ci", {"eng": 2, "ci": 1}, [("ci@abc-0001", "ci", "working")], 1),
+    ],
+)
+def test_a_lane_is_full_only_when_its_own_working_agents_fill_its_configured_seats(lane, configured, agents, alerts):
+    swarm = Swarm(RUNNING)
+    for name, agent_lane, state in agents:
+        swarm.store.put_agent(SLUG, AgentRecord(name, agent_lane, "t9", state=state))
+    swarm.ledger.rows["t1"].update(state="open", claimed_by="", pr_url="", lane=lane)
+    swarm.ready[lane] = [swarm.ledger.rows["t1"]]
+    decision = {"configured": configured, "placeable": {"claude": 1}}
+    swarm.store.redis.set(swarm.store.key(SLUG, "quota-capacity"), json.dumps(decision))
+    swarm.tick(START)
+    swarm.tick(START + 15 * MINUTE)
+    assert len(swarm.inbox()) == alerts
+
+
+@pytest.mark.parametrize(("state", "claimed_by"), [("claimed", OWNER), ("claimed", ""), ("open", OWNER)])
+def test_an_unclaimed_alert_closes_once_the_task_is_taken(state, claimed_by):
+    swarm = Swarm(RUNNING)
+    _full_lane(swarm)
+    swarm.tick(START)
+    swarm.tick(START + 15 * MINUTE)
+    [item] = swarm.inbox()
+    swarm.ledger.rows["t1"].update(state=state, claimed_by=claimed_by)
+    swarm.ready["eng"] = []
+    swarm.tick(START + 16 * MINUTE)
+    closed = InboxStore(swarm.store.redis).get(item.id)
+    assert (closed.state, closed.reason) == ("done", "done: task t1 was claimed")
+    assert _alert_rows(swarm) == {}
+
+
+def test_a_reopen_alert_still_escalates_after_the_next_claim():
+    swarm = Swarm(GREEN)
+    swarm.tick(START)
+    swarm.tick(START + 10 * MINUTE)
+    swarm.ledger.rows["t1"].update(state="claimed", claimed_by="engineer@abc-0009")
+    swarm.live.add("engineer@abc-0009")
+    swarm.pulls[URL] = RUNNING
+    assert swarm.tick(START + 30 * MINUTE) == ["stall on task t1 unanswered, raised to the operator"]
+
+
+def test_an_escalation_names_the_stall_in_priorities_and_ntfy():
+    swarm = Swarm(GREEN)
+    swarm.refusal = "ntfy failed: HTTP Error 401: Unauthorized"
+    swarm.tick(START)
+    swarm.tick(START + 10 * MINUTE)
+    actions = swarm.tick(START + 30 * MINUTE)
+    text = (
+        f"Stall unanswered: task t1 green and not queued for 10 minutes, pull request {URL}, owner {OWNER}, {REOPENED}."
+    )
+    assert swarm.ledger.priorities == [("tasks/t1", text)]
+    assert swarm.posted == [("https://ntfy.example/alerts", "Swarm sw stall", text)]
+    assert swarm.envs == [swarm.environ]
+    assert actions == [f"stall on task t1 unanswered, raised to the operator; {swarm.refusal}"]
+
+
+def _row(tid, item, **extra):
+    row = {"task": tid, "case": "green", "pr": URL, "owner": OWNER, "minutes": 10, "action": REOPENED}
+    return json.dumps({**row, "limit": 10, "at": START, "item": item, **extra})
+
+
+def test_an_alert_whose_item_is_gone_is_dropped():
+    swarm = Swarm(RUNNING)
+    swarm.store.redis.hset(swarm.store.key(SLUG, "stall-alerts"), "t1", _row("t1", "missing"))
+    assert swarm.tick(START + 30 * MINUTE) == []
+    assert _alert_rows(swarm) == {} and swarm.ledger.priorities == []
+
+
+def test_each_alert_row_is_judged_on_its_own():
+    swarm = Swarm(RUNNING)
+    inbox, key = InboxStore(swarm.store.redis), swarm.store.key(SLUG, "stall-alerts")
+    swarm.store.redis.hset(key, "t0", _row("t0", "missing"))
+    swarm.store.redis.hset(key, "t5", _row("t5", inbox.send("swarm", "master@sw", "old").id, escalated=START))
+    swarm.store.redis.hset(key, "t9", _row("t9", inbox.send("swarm", "master@sw", "due").id))
+    assert swarm.tick(START + 20 * MINUTE) == ["stall on task t9 unanswered, raised to the operator"]
+    assert [item for item, _ in swarm.ledger.priorities] == ["tasks/t9"]
