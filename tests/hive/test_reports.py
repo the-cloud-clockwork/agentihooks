@@ -107,7 +107,12 @@ def test_the_tick_records_a_remote_conversation_when_the_local_listing_fails(rem
     local = remote.store.start_execution(
         "fixture",
         AgentRecord(
-            "engineer@a1b2c3-0009", "eng", "other", pane_id="w1:p9", seat="eng-2@fixture", conversation_id="kept"
+            remote.store.next_name("fixture", "eng"),
+            "eng",
+            "other",
+            pane_id="w1:p9",
+            seat="eng-2@fixture",
+            conversation_id="kept",
         ),
     )
     remote.store.put_agent("fixture", local)
