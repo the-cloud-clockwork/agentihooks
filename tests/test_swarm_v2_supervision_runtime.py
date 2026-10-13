@@ -735,11 +735,10 @@ def test_remote_validation_cannot_extend_the_checkpoint_deadline(supervisor, mon
 
     class Recorded(threading.Thread):
         def join(self, timeout=None):
-            joins.append(timeout)
+            joins.append((self.daemon, timeout))
             super().join(timeout)
 
     def validate(*_):
-        assert threading.current_thread().daemon is True
         release.wait(30)
         finished.set()
         return True
@@ -755,7 +754,9 @@ def test_remote_validation_cannot_extend_the_checkpoint_deadline(supervisor, mon
     try:
         result = supervisor.drain("termination")
         assert len(joins) == 1
-        assert 0 <= joins[0] <= 0.05
+        daemon, timeout = joins[0]
+        assert daemon is True
+        assert 0 <= timeout <= 0.05
         assert not finished.is_set()
         assert result["checkpoint_status"] == "incomplete"
         assert result["checkpoint_id"] is None
