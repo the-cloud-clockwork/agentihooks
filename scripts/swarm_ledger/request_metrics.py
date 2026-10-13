@@ -17,6 +17,8 @@ SLOW_SECONDS = 5.0
 CURRENT = ContextVar("ledger_request_timing", default=None)
 SAMPLES = deque(maxlen=MAX_SAMPLES)
 GUARD = threading.Lock()
+STARTED_AT = time.time()
+EVICTED_THROUGH = float("-inf")
 
 
 from urllib.parse import parse_qs, urlsplit
@@ -36,11 +38,15 @@ def route_name(path: str) -> str:
 
 
 def record(method: str, route: str, wall: float, cpu: float, lock_wait: float) -> None:
-    ended = time.time()
+    global EVICTED_THROUGH
+
     with GUARD:
+        ended = time.time()
+        if len(SAMPLES) == SAMPLES.maxlen:
+            EVICTED_THROUGH = max(EVICTED_THROUGH, SAMPLES[0][0])
         SAMPLES.append((ended, method, route, wall, cpu, lock_wait))
         while SAMPLES and SAMPLES[0][0] < ended - RETENTION_SECONDS:
-            SAMPLES.popleft()
+            EVICTED_THROUGH = max(EVICTED_THROUGH, SAMPLES.popleft()[0])
 
 
 def measured(method):
@@ -85,11 +91,22 @@ def begin(connection, statement: str) -> None:
         connection.execute(statement)
 
 
+def snapshot(start: float, end: float) -> tuple[list, dict]:
+    with GUARD:
+        rows = [row for row in SAMPLES if start <= row[0] <= end]
+        coverage = {
+            "complete": STARTED_AT <= start and EVICTED_THROUGH < start,
+            "started_at": STARTED_AT,
+            "evicted_through": EVICTED_THROUGH if math.isfinite(EVICTED_THROUGH) else None,
+            "capacity": SAMPLES.maxlen,
+        }
+        return rows, coverage
+
+
 def report(hours: float) -> dict:
     end = time.time()
     start = end - hours * 3600
-    with GUARD:
-        rows = [row for row in SAMPLES if start <= row[0] <= end]
+    rows, coverage = snapshot(start, end)
     writes = [row for row in rows if row[1] in {"POST", "PUT", "PATCH", "DELETE"}]
     walls = sorted(row[3] for row in writes)
     days, routes = {}, {}
@@ -103,6 +120,7 @@ def report(hours: float) -> dict:
     return {
         "window_start": start,
         "window_end": end,
+        "coverage": coverage,
         "writes": {
             "count": len(writes),
             "p95_wall_seconds": walls[math.ceil(len(walls) * 0.95) - 1] if walls else None,
