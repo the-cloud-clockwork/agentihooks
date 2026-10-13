@@ -827,7 +827,7 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
     step = next(step for step in plan["steps"] if step.get("id") == "plan")
     assert step["run"] == "python -m scripts.ci_mutation." + 'plan --base "$BASE"'
     assert step["env"] == {
-        "BASE": "${{ github.event.pull_request.base.sha || inputs.base }}",
+        "BASE": "${{ inputs.base || 'origin/dev' }}",
         "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
     }
     names = [item.get("id") for item in plan["steps"]]

@@ -216,7 +216,7 @@ def test_lint_and_test_count_grade_a_pull_request_that_merged_dev_from_the_curre
     selector.write_text((_ROOT / ".github/actions/browser-cache/select-artifacts.sh").read_text())
     jobs = _workflow()["jobs"]
     steps = {
-        "test-count": next(s for s in jobs["test-count"]["steps"] if s.get("name") == "Check out the base revision"),
+        "test-count": _step("test-count", "Check out the base revision"),
         "lint": _step("lint", "Check out the base revision"),
         "docs": next(s for s in jobs["lint"]["steps"] if s.get("id") == "docs"),
         "artifacts": next(s for s in jobs["lint"]["steps"] if s.get("id") == "artifacts"),
