@@ -123,10 +123,13 @@ def read(doc: dict, slug: str, task_id: str | None, phase_id: str | None) -> str
     phase = _phase(doc, phase_id)
     if phase is None:
         raise ValueError(f"no phase {phase_id} in ledger {slug}")
-    if _packaged(phase, task):
-        return _ledger("plan_packages").read(task["plan_lines"])
-    source = _stored(doc, phase, task)
+    packaged = _packaged(phase, task)
+    source = _ledger("plan_packages").text() if packaged else _stored(doc, phase, task)
     lines = task.get("plan_lines") or phase["plan_ref"]["lines"]
+    if task.get("plan_slice"):
+        lines = _ledger("plan_ranges").slice_lines(source, task["plan_slice"], f"1-{len(source.splitlines())}")
+    if packaged:
+        return _ledger("plan_packages").read(lines)
     return chunk(source, lines) + (linked(source, lines, margin=MARGIN) if task else "")
 
 

@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -203,7 +204,7 @@ def test_coverage_ratchet_grades_the_merged_shards_from_the_base_copy():
     download = next(step for step in job["steps"] if step.get("name") == "Download shard coverage")
     assert download["with"]["pattern"] == "coverage-3.12-*"
     grade = next(step for step in job["steps"] if step.get("name") == "Hold every line the base ran")
-    assert '[[ -f "$grader/tests/coverage_ratchet.py" ]] || grader="$GITHUB_WORKSPACE"' in grade["run"]
+    assert grade["run"].index('cd "$RUNNER_TEMP/base"') < grade["run"].index("python -m tests.coverage_ratchet")
     assert f"--shards {jobs['unit']['strategy']['matrix']['shard'][-1]}" in grade["run"]
     report = job["steps"][-1]
     assert report["if"].startswith("always()")
@@ -360,6 +361,31 @@ def test_test_count_refuses_a_base_without_its_grader(tmp_path):
     result = subprocess.run(["bash", "-e", "-c", floor["run"]], env=env, capture_output=True, text=True)
     assert result.returncode == 1
     assert "nothing trusted can grade" in result.stdout
+
+
+def test_coverage_ratchet_refuses_a_base_without_its_grader(tmp_path):
+    graders = [
+        step["run"]
+        for job in _workflow()["jobs"].values()
+        for step in job.get("steps", [])
+        if re.search(r"-m tests\.(coverage_ratchet|count_floor)\b", step.get("run", ""))
+    ]
+    assert len(graders) >= 2
+    git = ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run([*git, "init", "-q"], check=True)
+    subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "base"], check=True)
+    base = subprocess.run([*git, "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "coverage_ratchet.py").write_text("from pathlib import Path\nPath('head-graded').touch()\n")
+    (tmp_path / "runner").mkdir()
+    env = dict(os.environ, BASE=base, RUNNER_TEMP=str(tmp_path / "runner"), GITHUB_WORKSPACE=str(tmp_path))
+    step = _step("coverage-ratchet", "Hold every line the base ran")
+    result = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=tmp_path, env=env, capture_output=True, text=True)
+    assert result.returncode == 1
+    assert "The base carries no tests/coverage_ratchet.py, so nothing trusted can grade." in result.stdout
+    assert not (tmp_path / "head-graded").exists()
+    prefixes = [re.split(r"-m tests\.\w+", run)[0] for run in graders]
+    assert all("GITHUB_WORKSPACE" not in prefix and 'cd "$RUNNER_TEMP/base"' in prefix for prefix in prefixes)
 
 
 @pytest.mark.parametrize("unit", ["success", "failure", "skipped", "cancelled", "pending"])
