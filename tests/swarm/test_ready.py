@@ -686,6 +686,22 @@ def test_one_tick_reports_every_unreleased_entry_it_dequeues(merging):
     assert len(merging.ledger.comments) == 2
 
 
+def test_an_unowned_task_without_a_claimant_field_can_leave_the_queue(merging):
+    from scripts.swarm.ledger_events import pull_request
+
+    other_url = URL + "0"
+    merging.rows["t2"].update({"state": "pr", "pr_url": other_url})
+    merging.rows["t2"].pop("claimed_by")
+    merging.pulls[other_url] = pull_request(
+        {"state": "OPEN", "mergeQueueEntry": {"id": "entry", "state": "UNMERGEABLE"}}
+    )
+    merging.queue.extra = {"queued": False}
+    assert merging.run() == [f"task t2 reopened, {other_url} is marked unmergeable by GitHub"]
+    assert merging.rows["t2"]["state"] == "open"
+    assert merging.rows["t2"]["claimed_by"] == ""
+    assert merging.queued == [("dequeue", other_url)]
+
+
 @pytest.mark.parametrize("failure", ["GitHub did not answer", "still queued"])
 def test_a_dequeue_that_does_not_finish_keeps_the_task_for_the_next_tick(merging, failure):
     from scripts.swarm.ledger_events import pull_request

@@ -124,7 +124,7 @@ def merge_pass(run, rows):
             if row.get("state") == "pr" and row.get("pr_url"):
                 pull = run.github(row["pr_url"])
                 if pull is not None and pull.state == "OPEN" and pull.merge_problem:
-                    found = {"url": row["pr_url"], "agent": row.get("claimed_by", "")}
+                    found = {"url": row["pr_url"], "agent": row.get("claimed_by")}
                     actions += _unmergeable(run, row, found, pull)
             continue
         found = record(run.store, run.slug, task_id)
