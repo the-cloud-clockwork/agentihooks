@@ -20,6 +20,7 @@ def pool(label):
 
 
 MOVED = {
+    ("access-audit.yml", "audit"): "anton-oss-light",
     ("swarm-image.yml", "publish"): "anton-oss",
     ("mutation-preflight.yml", "mutation"): "anton-oss-light",
     ("mutation-preflight.yml", "mutation-shard"): "anton-oss-batch",

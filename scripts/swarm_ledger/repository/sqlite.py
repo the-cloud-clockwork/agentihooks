@@ -5,6 +5,8 @@ import threading
 from contextlib import contextmanager, suppress
 from pathlib import Path
 
+from scripts.swarm_ledger import request_metrics
+
 from . import hierarchy
 from .events import append_events, read_events, trim_events, write_events
 from .rows import TABLES, assemble, diff, encode, flatten, read_rows, write_rows
@@ -358,9 +360,9 @@ class SQLiteLedgerRepository:
         from . import mutation
 
         self._adopt(slug)
-        with self.domain.LOCK, self.connect() as connection:
+        with request_metrics.locked(self.domain.LOCK), self.connect() as connection:
             with connection:
-                connection.execute(BEGIN_IMMEDIATE)
+                request_metrics.begin(connection, BEGIN_IMMEDIATE)
                 entry = self._entry(connection, slug)
                 state = json.loads(entry.text)
                 rejected, ctx = mutation.apply(slug, state, self.domain, changes, ops, gate)
@@ -416,8 +418,8 @@ class SQLiteLedgerRepository:
         """Store a ledger built from content: its first sync derives priorities, notifications and rev 1."""
         from . import mutation
 
-        with self.domain.LOCK, self.connect() as connection, connection:
-            connection.execute(BEGIN_IMMEDIATE)
+        with request_metrics.locked(self.domain.LOCK), self.connect() as connection, connection:
+            request_metrics.begin(connection, BEGIN_IMMEDIATE)
             if not replace and connection.execute(STORED, (slug,)).fetchone():
                 return False
             state = {**doc, "_meta": meta}
@@ -431,8 +433,8 @@ class SQLiteLedgerRepository:
         seeds = stored["_meta"].get("seeds")
         if seeds is not None:
             stored["_meta"]["seeds"] = {}
-        with self.domain.LOCK, self.connect() as connection, connection:
-            connection.execute(BEGIN_IMMEDIATE)
+        with request_metrics.locked(self.domain.LOCK), self.connect() as connection, connection:
+            request_metrics.begin(connection, BEGIN_IMMEDIATE)
             if not replace and connection.execute(STORED, (slug,)).fetchone():
                 raise ValueError(f"ledger {slug} exists; import refuses to replace it")
             self._insert(connection, slug, stored, token or secrets.token_urlsafe(24), seeds)
@@ -455,8 +457,8 @@ class SQLiteLedgerRepository:
 
     def rebuild(self, slug: str) -> dict:
         self._adopt(slug)
-        with self.domain.LOCK, self.connect() as connection, connection:
-            connection.execute(BEGIN_IMMEDIATE)
+        with request_metrics.locked(self.domain.LOCK), self.connect() as connection, connection:
+            request_metrics.begin(connection, BEGIN_IMMEDIATE)
             return hierarchy.rebuild(connection, slug, self._entry(connection, slug).state)
 
     def nodes(self, slug: str, read: str, node: str | None = None) -> list:

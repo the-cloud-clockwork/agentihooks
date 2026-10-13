@@ -238,7 +238,7 @@ def status_report(store, slug, state):
     events = state.get("_meta", {}).get("events", [])
     agents = [a.__dict__ for a in store.agents(slug)]
     handed = transfers.list_transfers(store, slug)
-    active = lift.active(gate_log.recent(slug, limit=None), now_ms())
+    active = lift.current(slug, now_ms())
     promotion = tick_master.read(store, slug)
     return {
         "config": {
