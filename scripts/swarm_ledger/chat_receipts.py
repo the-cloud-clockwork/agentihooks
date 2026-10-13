@@ -15,8 +15,9 @@ def post(repository: LedgerRepository, inbox: InboxStore, slug: str, events: lis
         if event.get("target") != CHAT or event.get("kind") != MESSAGE_ADDED:
             continue
         for address in addresses:
-            if item := inbox.get(stable_id(write_ref(slug, event), address)):
-                ops.append({**RECEIVED, "id": RECEIPT_PREFIX + item.id, "reply_to": event["id"]})
+            item_id = stable_id(write_ref(slug, event), address)
+            if inbox.redis.exists(inbox.key("item", item_id)):
+                ops.append({**RECEIVED, "id": RECEIPT_PREFIX + item_id, "reply_to": event["id"]})
                 break
     if ops:
         repository.apply_ops(slug, ops=ops)

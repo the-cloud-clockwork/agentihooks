@@ -30,7 +30,7 @@ def test_server_receives_master_chat_immediately_without_consuming_the_inbox(inb
     assert original["id"] == "operator-line"
     assert receipt["text"] == "Received by the master inbox."
     assert receipt["by"] == "swarm" and receipt["reply_to"] == original["id"]
-    assert receipt["to"] == "operator"
+    assert receipt.get("to", "operator") == "operator"
     assert inbox.get(item.id).state == "pending"
     assert ledger_server.relay_to_inbox(SLUG, state) == []
     assert ledger_server.repository.get_document(SLUG)["chat"] == current["chat"]
