@@ -151,7 +151,9 @@ class StatsSync(unittest.TestCase):
         state["time_left_minutes"] = 400
         state["_meta"]["time_left"] = {"inputs": {"slots": 1, "ci_minutes": 35}}
         now = core.now_ms()
-        state["_meta"]["events"].append({"kind": "task done", "target": "tasks/closed", "at": now})
+        state["_meta"]["events"].append(
+            {"kind": "task done", "target": "tasks/closed", "at": now, "rev": state["_meta"]["rev"]}
+        )
         storage.import_document(SLUG, state, replace=True)
         reply, rejected = storage.apply_ops(SLUG, ops=[{"op": "stats_sync", "id": "persist"}])
         self.assertEqual(rejected, [])

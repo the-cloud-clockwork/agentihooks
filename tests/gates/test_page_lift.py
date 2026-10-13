@@ -17,6 +17,7 @@ pytestmark = pytest.mark.xdist_group("fakeredis")
 SLUG, ME, TASK = "sw", "engineer@1-1", "t1"
 WHO = Who(name=ME, swarm=SLUG, task=TASK)
 HOUR_MS = lift.LIFT_SECONDS * 1000
+LONG = "x" * 400
 
 
 def saved():
@@ -137,6 +138,99 @@ class TestStatus:
     def test_an_agent_with_no_denies_has_no_gates(self):
         report = status.status_report(saved(), SLUG, {"tasks": []})
         assert [a["gates"] for a in report["agents"]] == [[]]
+
+    def test_a_lift_behind_three_hundred_later_rows_still_shows_lifted(self):
+        log.append(SLUG, log.Row.of("watch", "deny", WHO))
+        log.append(SLUG, log.Row.of("watch", "lift", WHO))
+        for _ in range(300):
+            log.append(SLUG, log.Row.of("subagents", "count", WHO, "Agent", LONG))
+        report = status.status_report(saved(), SLUG, {"tasks": []})
+        assert [a["gates"] for a in report["agents"]] == [[{"gate": "watch", "lifted": True}]]
+
+
+class TestWindow:
+    def fill(self, home, lift_at, later=300):
+        log.append(SLUG, log.Row.of("watch", "deny", WHO, now_ms=lift_at - 1), home)
+        log.append(SLUG, log.Row.of("watch", "lift", WHO, now_ms=lift_at), home)
+        for step in range(later):
+            log.append(SLUG, log.Row.of("subagents", "count", WHO, "Agent", LONG, now_ms=lift_at + 1 + step), home)
+
+    def test_the_log_after_the_lift_is_far_larger_than_one_tail_read(self, tmp_path):
+        self.fill(tmp_path, HOUR_MS)
+        assert log.gate_log_path(SLUG, tmp_path).stat().st_size > 2 * log.TAIL_BYTES
+
+    def test_a_lift_holds_behind_three_hundred_later_rows_until_its_window_ends(self, tmp_path):
+        self.fill(tmp_path, HOUR_MS)
+        assert lift.current(SLUG, 2 * HOUR_MS - 1, tmp_path) == {ME: [{"gate": "watch", "lifted": True}]}
+        assert lift.current(SLUG, 2 * HOUR_MS + 1000, tmp_path) == {}
+
+    def test_stale_timeless_and_text_timed_rows_inside_the_window_do_not_end_the_read(self, tmp_path):
+        self.fill(tmp_path, HOUR_MS, later=0)
+        stray = ['{"at": 0, "kind": "count"}', '{"kind": "count"}', '{"at": "soon", "kind": "count"}', '{"at": true}']
+        with log.gate_log_path(SLUG, tmp_path).open("a") as out:
+            for step in range(300):
+                row = log.Row.of("subagents", "count", WHO, "Agent", LONG, now_ms=HOUR_MS + 1 + step)
+                out.write(json.dumps(row.__dict__) + "\n" + stray[step % len(stray)] + "\n")
+        assert lift.current(SLUG, 2 * HOUR_MS - 1, tmp_path) == {ME: [{"gate": "watch", "lifted": True}]}
+        assert len(log.since(SLUG, HOUR_MS, tmp_path)) == 301
+
+    def test_a_window_row_that_opens_a_chunk_is_read_and_keeps_the_read_going(self, tmp_path):
+        stale = [self.aligned("count", 0)] * self.PER_CHUNK
+        self.write(tmp_path, stale * 2 + [self.aligned("lift", HOUR_MS)] + stale[1:], 3 * log.TAIL_BYTES)
+        assert [r["kind"] for r in log.since(SLUG, HOUR_MS, tmp_path)] == ["lift"]
+
+    def test_a_chunk_whose_newest_row_opens_the_window_keeps_the_read_going(self, tmp_path):
+        older = [self.aligned("lift", HOUR_MS)] * self.PER_CHUNK
+        edge = [self.aligned("count", HOUR_MS)] * self.PER_CHUNK
+        self.write(tmp_path, older + edge, 2 * log.TAIL_BYTES)
+        assert [r["kind"] for r in log.since(SLUG, HOUR_MS, tmp_path)].count("lift") == self.PER_CHUNK
+
+    def test_a_chunk_without_any_timed_row_keeps_the_read_going(self, tmp_path):
+        junk = ["{}".ljust(255) + "\n"] * self.PER_CHUNK
+        self.write(tmp_path, [self.aligned("lift", HOUR_MS)] * self.PER_CHUNK + junk, 2 * log.TAIL_BYTES)
+        assert [r["kind"] for r in log.since(SLUG, HOUR_MS, tmp_path)].count("lift") == self.PER_CHUNK
+
+    def test_a_single_byte_left_before_the_last_chunk_is_still_read(self, tmp_path):
+        first = self.aligned("lift", HOUR_MS)
+        later = [self.aligned("count", HOUR_MS)] * (self.PER_CHUNK - 1) + ["\n"]
+        self.write(tmp_path, [first] + later, log.TAIL_BYTES + 1)
+        assert [r["kind"] for r in log.since(SLUG, HOUR_MS, tmp_path)][0] == "lift"
+
+    PER_CHUNK = log.TAIL_BYTES // 256
+
+    def aligned(self, kind, at):
+        return json.dumps(log.Row.of("watch", kind, WHO, now_ms=at).__dict__).ljust(255) + "\n"
+
+    def write(self, home, lines, size):
+        text = "".join(lines)
+        assert len(text) == size
+        path = log.gate_log_path(SLUG, home)
+        path.parent.mkdir(parents=True)
+        path.write_text(text)
+
+    def test_since_returns_every_row_from_the_given_time_on(self, tmp_path):
+        self.fill(tmp_path, HOUR_MS)
+        found = log.since(SLUG, HOUR_MS, tmp_path)
+        assert [r["at"] for r in found] == list(range(HOUR_MS, HOUR_MS + 301))
+
+    def test_since_keeps_the_first_row_of_a_short_log(self, tmp_path):
+        self.fill(tmp_path, HOUR_MS, later=0)
+        assert [r["kind"] for r in log.since(SLUG, 0, tmp_path)] == ["deny", "lift"]
+
+    def test_since_skips_unreadable_lines_and_non_objects(self, tmp_path):
+        self.fill(tmp_path, HOUR_MS, later=0)
+        with log.gate_log_path(SLUG, tmp_path).open("a") as out:
+            out.write("not json\n[1]\n")
+        assert [r["kind"] for r in log.since(SLUG, 0, tmp_path)] == ["deny", "lift"]
+
+    def test_since_drops_a_row_without_a_time_once_the_window_starts_after_zero(self, tmp_path):
+        self.fill(tmp_path, HOUR_MS, later=0)
+        with log.gate_log_path(SLUG, tmp_path).open("a") as out:
+            out.write('{"kind": "deny"}\n')
+        assert [r["kind"] for r in log.since(SLUG, 1, tmp_path)] == ["deny", "lift"]
+
+    def test_since_without_a_log_is_empty(self, tmp_path):
+        assert log.since(SLUG, 0, tmp_path) == []
 
 
 class TestCommand:
