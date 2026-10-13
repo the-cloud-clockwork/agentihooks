@@ -19,7 +19,9 @@ export function prepareFrozenView(d) {
     const key = `${list}/${item.id}`;
     if (!item.deleted && !snowflakeState(d, key) && (!STRUCTURE.includes(list) || !parents.has(key))) visible.add(key);
   }
-  for (const key of [...visible]) for (const parent of ancestors(d, key)) visible.add(parent);
+  for (const key of [...visible]) for (const parent of ancestors(d, key)) {
+    if (!snowflakeState(d, parent)) visible.add(parent);
+  }
   markFrozenToggle();
 }
 
