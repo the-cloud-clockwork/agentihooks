@@ -55,9 +55,9 @@ class Timeline:
     seats: tuple = ()
 
 
-def _ready(task: dict, events: list, before: float, ready: "Claim") -> float | None:
-    opens = ready.opens(task, events)
-    return max((event["ts_ms"] for event in events if event["ts_ms"] <= before and opens(event)), default=None)
+def _ready(task: dict, marks: list, before: float, ready: "Claim") -> float | None:
+    opens = ready.opens(task)
+    return max((mark.at for mark in marks if mark.at <= before and opens(mark)), default=None)
 
 
 def _lives(task_id: str, rows: dict, end: float) -> list[tuple[tuple, Span]]:
@@ -136,7 +136,7 @@ def _rounds(task_id: str, rows: dict, green: float, end: float) -> list[Span]:
     ]
 
 
-def _claimed(task: dict, rows: dict, now_ms: int, live: bool, ready: "Claim") -> Timeline:
+def _claimed(task: dict, rows: dict, now_ms: int, live: bool, ready: "Claim", marks: list) -> Timeline:
     task_id = task["id"]
     mine = [event for event in rows["agent_events"] if event["task"] == task_id]
     claimed = min(event["ts_ms"] for event in mine if event["kind"] == "claim")
@@ -153,7 +153,7 @@ def _claimed(task: dict, rows: dict, now_ms: int, live: bool, ready: "Claim") ->
     ]
     pushed = min([at for at in [*map(bottleneck._created, runs), *opened] if at >= claimed] + [end])
     green = bottleneck._green(runs, pushed, end)
-    claimable_at = _ready(task, rows["ledger_events"], claimed, ready)
+    claimable_at = _ready(task, marks, claimed, ready)
     start = claimed if claimable_at is None else claimable_at
     lives = _lives(task_id, rows, end)
     base = (
@@ -172,10 +172,10 @@ def _claimed(task: dict, rows: dict, now_ms: int, live: bool, ready: "Claim") ->
     return Timeline(start, end, base, overlays, task_id, task.get("lane", LANE), seats)
 
 
-def _waiting(task: dict, rows: dict, ready: "Claim", now_ms: int) -> Timeline | None:
+def _waiting(task: dict, marks: list, ready: "Claim", now_ms: int) -> Timeline | None:
     if not ready(task):
         return None
-    start = _ready(task, rows["ledger_events"], now_ms, ready)
+    start = _ready(task, marks, now_ms, ready)
     if start is None:
         return None
     return Timeline(start, now_ms, (Span(CLAIM_WAIT, start, now_ms),), (), task["id"], task.get("lane", LANE))
@@ -194,32 +194,55 @@ class Claim:
 
         return tick.ready(task, self.rows, self.doc, self.graph, self.fix_phase)
 
-    def cap(self, lane: str) -> int | None:
-        return None if self.seats is None else self.seats.get(lane)
-
-    def opens(self, task: dict, events: list) -> Callable[[dict], bool]:
+    def opens(self, task: dict) -> Callable[["Mark"], bool]:
         chain = freeze.ancestry(task, self.graph)
         phase = next((row for row in self.doc.get("phases", []) if row["id"] == task.get("phase")), {})
         node = f"phases/{phase['id']}" if phase else None
         before = {f"phases/{name}" for name in phase.get("depends_on") or []}
         needed = {f"tasks/{name}" for name in task.get("depends_on") or []}
-        focused = {event["target"] for event in events if event["kind"] == FOCUSED}
 
-        def admits(target: str) -> bool:
-            return freeze.covers(target, task, chain) or target in focused
+        def covers(target: str) -> bool:
+            return freeze.covers(target, task, chain)
 
-        def opens(event: dict) -> bool:
-            kind, target = event["kind"], event["target"]
+        def opens(mark: Mark) -> bool:
+            kind, target = mark.event["kind"], mark.event["target"]
             return (
                 (target == chain[0] and kind in READY)
                 or (kind == DONE and target in needed)
                 or (kind == CHECKED and target in before)
                 or (target == node and kind in PHASE_OPENS)
-                or (kind == FOCUSED and freeze.covers(target, task, chain))
-                or (kind == UNFROZEN and any(map(admits, _cleared(event))))
+                or (kind == FOCUSED and covers(target))
+                or any(map(covers, mark.cleared))
+                or (bool(mark.released) and (not mark.focus or any(map(covers, mark.focus))))
             )
 
         return opens
+
+
+@dataclass(frozen=True)
+class Mark:
+    """A ledger event with the focus targets an unfreeze released and the focus still live after it."""
+
+    event: dict
+    cleared: tuple = ()
+    released: frozenset = frozenset()
+    focus: frozenset = frozenset()
+
+    @property
+    def at(self) -> float:
+        return self.event["ts_ms"]
+
+
+def history(events: list) -> list[Mark]:
+    live, marks = set(), []
+    for event in sorted(events, key=lambda event: event["ts_ms"]):
+        cleared = tuple(_cleared(event)) if event["kind"] == UNFROZEN else ()
+        released = frozenset(live.intersection(cleared))
+        if event["kind"] == FOCUSED:
+            live.add(event["target"])
+        live.difference_update(cleared)
+        marks.append(Mark(event, cleared, released, frozenset(live)))
+    return marks
 
 
 def _cleared(event: dict) -> list:
@@ -234,6 +257,7 @@ def timelines(rows: dict, tasks: list, now_ms: int, ready: Claim | None = None) 
     claimed = {event["task"] for event in rows["agent_events"] if event["kind"] == "claim"}
     by_id = {task["id"]: task for task in tasks}
     ready = ready or claimable({"tasks": tasks}, NO_FIX_PHASE)
+    marks = history(rows["ledger_events"])
     found = [
         _claimed(
             by_id.get(task_id, {"id": task_id}),
@@ -241,10 +265,11 @@ def timelines(rows: dict, tasks: list, now_ms: int, ready: Claim | None = None) 
             now_ms,
             by_id.get(task_id, {}).get("state") in bottleneck.OPEN,
             ready,
+            marks,
         )
         for task_id in sorted(claimed)
     ]
-    waiting = [_waiting(task, rows, ready, now_ms) for task in tasks if task["id"] not in claimed]
+    waiting = [_waiting(task, marks, ready, now_ms) for task in tasks if task["id"] not in claimed]
     return found + [timeline for timeline in waiting if timeline is not None]
 
 
@@ -278,55 +303,54 @@ def _stage_at(timeline: Timeline, held: list[Span], at: float) -> tuple[str, str
     return span.stage, span.label
 
 
-def attribute(timeline: Timeline, held: list[Span], window: bottleneck.Window, lanes: "Lanes | None" = None) -> dict:
+def _segments(timeline: Timeline, held: list[Span], window: bottleneck.Window):
     low = max(timeline.start, window.start)
     high = max(low, min(timeline.end, window.end))
     spans = [*timeline.base, *timeline.overlays, *held]
-    shared = lanes.edges[timeline.lane] if lanes else ()
-    edges = (*(edge for span in spans for edge in (span.start, span.end)), *shared)
-    points = sorted({low, high, *(min(max(edge, low), high) for edge in edges)})
-    seconds = {}
+    points = sorted({low, high, *(min(max(edge, low), high) for span in spans for edge in (span.start, span.end))})
     for start, end in zip(points, points[1:]):
-        at = (start + end) / 2
-        stage, label = _stage_at(timeline, held, at)
-        if stage == CLAIM_WAIT:
-            stage = lanes.wait(timeline, at) if lanes else SEAT_WAIT
+        yield (start, end, *_stage_at(timeline, held, (start + end) / 2))
+
+
+def attribute(timeline: Timeline, held: list[Span], window: bottleneck.Window) -> dict:
+    seconds = {}
+    for start, end, stage, label in _segments(timeline, held, window):
         seconds[stage, label] = seconds.get((stage, label), 0.0) + (end - start) / 1000
     return seconds
 
 
-@dataclass(frozen=True)
-class Lanes:
+def _split(pieces: list, lives: list, cap: int | None) -> list[tuple]:
     """Seat wait is claim wait while every seat of the lane is busy, for at most as many tasks as it has seats."""
-
-    claim: Claim
-    held: list
-    rows: dict
-    edges: dict
-
-    def wait(self, timeline: Timeline, at: float) -> str:
-        cap = self.claim.cap(timeline.lane)
-        if cap is None:
-            return SEAT_WAIT
-        lane = self.rows[timeline.lane]
-        if sum(start <= at < stop for other in lane for start, stop in other.seats) < cap:
-            return QUEUE_WAIT
-        ahead = 0
-        for other in lane:
-            if other is timeline:
-                break
-            ahead += other.start <= at < other.end and _stage_at(other, self.held, at)[0] == CLAIM_WAIT
-        return SEAT_WAIT if ahead < cap else QUEUE_WAIT
+    points = sorted({edge for piece in pieces for edge in piece[1:3]} | {edge for life in lives for edge in life})
+    found = []
+    for low, high in zip(points, points[1:]):
+        at = (low + high) / 2
+        waiting = sorted(piece for piece in pieces if piece[1] <= at < piece[2])
+        busy = sum(start <= at < stop for start, stop in lives)
+        seats = len(waiting) if cap is None else cap if busy >= cap else 0
+        for rank, (_, _, _, owner, label) in enumerate(waiting):
+            found.append((owner, SEAT_WAIT if rank < seats else QUEUE_WAIT, label, (high - low) / 1000))
+    return found
 
 
-def lanes(found: list[Timeline], held: list[Span], ready: Claim) -> Lanes:
-    rows, edges = {}, {}
-    for timeline in sorted(found, key=lambda timeline: (timeline.start, timeline.task)):
-        rows.setdefault(timeline.lane, []).append(timeline)
-        spans = [*timeline.base, *timeline.overlays]
-        edges.setdefault(timeline.lane, set()).update(edge for span in spans for edge in (span.start, span.end))
-        edges[timeline.lane].update(edge for seat in timeline.seats for edge in seat)
-    return Lanes(ready, held, rows, edges)
+def _charged(rows: dict, tasks: list, now_ms: int, window_ms: int, ready: Claim | None) -> list[tuple]:
+    window = bottleneck.Window(now_ms - window_ms, now_ms)
+    held = holds(rows["host_samples"], now_ms)
+    ready = ready or claimable({"tasks": tasks}, NO_FIX_PHASE)
+    found = timelines(rows, tasks, now_ms, ready)
+    lives, pieces, seconds = {}, {}, [{} for _ in found]
+    for index, timeline in enumerate(found):
+        lives.setdefault(timeline.lane, []).extend(timeline.seats)
+        for start, end, stage, label in _segments(timeline, held, window):
+            if stage == CLAIM_WAIT:
+                pieces.setdefault(timeline.lane, []).append(((timeline.start, timeline.task), start, end, index, label))
+            else:
+                seconds[index][stage, label] = seconds[index].get((stage, label), 0.0) + (end - start) / 1000
+    for lane, waiting in pieces.items():
+        cap = None if ready.seats is None else ready.seats.get(lane, 0)
+        for index, stage, label, value in _split(waiting, lives[lane], cap):
+            seconds[index][stage, label] = seconds[index].get((stage, label), 0.0) + value
+    return list(zip(found, seconds))
 
 
 def _overrun_episodes(rows, timeline, branch, held, window):
@@ -347,12 +371,9 @@ def observations(rows: dict, tasks: list, now_ms: int, window_ms: int, ready: Cl
     window = bottleneck.Window(now_ms - window_ms, now_ms)
     held = holds(rows["host_samples"], now_ms)
     branches = {task["id"]: task.get("branch") for task in tasks}
-    ready = ready or claimable({"tasks": tasks}, NO_FIX_PHASE)
-    found_timelines = timelines(rows, tasks, now_ms, ready)
-    shared = lanes(found_timelines, held, ready)
     found = {}
-    for timeline in found_timelines:
-        for stage, _ in attribute(timeline, held, window, shared):
+    for timeline, seconds in _charged(rows, tasks, now_ms, window_ms, ready):
+        for stage, _ in seconds:
             if stage != "ci_overrun":
                 found.setdefault(stage, set()).add(f"{stage}:{timeline.task}:{int(timeline.start)}")
         overruns = _overrun_episodes(rows, timeline, branches.get(timeline.task), held, window)
@@ -368,14 +389,9 @@ def report(
     window_ms: int = bottleneck.WINDOW_MS,
     ready: Claim | None = None,
 ) -> dict:
-    window = bottleneck.Window(now_ms - window_ms, now_ms)
-    held = holds(rows["host_samples"], now_ms)
-    ready = ready or claimable({"tasks": tasks}, NO_FIX_PHASE)
-    found_timelines = timelines(rows, tasks, now_ms, ready)
-    shared = lanes(found_timelines, held, ready)
     seconds = {}
-    for timeline in found_timelines:
-        for key, value in attribute(timeline, held, window, shared).items():
+    for _, charged in _charged(rows, tasks, now_ms, window_ms, ready):
+        for key, value in charged.items():
             seconds[key] = seconds.get(key, 0.0) + value
     found = [{"stage": stage, "label": label, "seconds": value} for (stage, label), value in seconds.items()]
     found.sort(key=lambda row: (-row["seconds"], row["stage"], row["label"]))

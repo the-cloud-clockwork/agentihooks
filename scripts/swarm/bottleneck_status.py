@@ -9,8 +9,8 @@ KEY = "top-bottleneck"
 ACTIONS = "bottleneck-actions"
 WAITS = {
     stages.SEAT_WAIT: "Seat wait {hours:.1f} task hours: ready while every seat of its lane was busy",
-    stages.QUEUE_WAIT: "Queue wait {hours:.1f} task hours: ready behind more tasks than its lane has seats, or with a seat"
-    " free",
+    stages.QUEUE_WAIT: "Queue wait {hours:.1f} task hours: ready while a seat was free or behind more tasks than its lane"
+    " has seats",
 }
 
 
@@ -24,7 +24,8 @@ def read(store: RedisStore, slug: str) -> dict:
 
 def report(store: RedisStore, slug: str, now_ms: int) -> dict:
     found = stages.read(store, slug)
-    row = found["stages"][0] if found.get("total") else {}
+    ranked = [row for row in found.get("stages", []) if row["stage"] != stages.QUEUE_WAIT]
+    row = ranked[0] if found.get("total") and ranked else {}
     stage = row.get("stage", "")
     action = json.loads(store.redis.hget(store.key(slug, ACTIONS), stage) or "{}")
     return {

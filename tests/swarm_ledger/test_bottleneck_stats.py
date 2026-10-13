@@ -35,7 +35,7 @@ def test_top_stage_trend_and_action_fit_the_operator_viewport(open_page):
 def test_stats_show_seat_wait_and_queue_wait_with_their_meaning(open_page):
     waits = [
         "Seat wait 1.5 task hours: ready while every seat of its lane was busy",
-        "Queue wait 10.0 task hours: ready behind more tasks than its lane has seats, or with a seat free",
+        "Queue wait 10.0 task hours: ready while a seat was free or behind more tasks than its lane has seats",
     ]
     top = {"stage": "seat_wait", "label": "seat wait", "trend": "rising", "measured": "5 minutes ago", "waits": waits}
     page = open_page(status(top_bottleneck=top), width=1920)

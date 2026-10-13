@@ -64,13 +64,21 @@ def test_the_report_names_seat_wait_and_queue_wait_with_their_meaning(store):
     detect(store, ("queue_wait", 36000.0, "rising"), ("seat_wait", 5400.0, "falling"))
     assert bottleneck_status.report(store, "sw", NOW)["waits"] == [
         "Seat wait 1.5 task hours: ready while every seat of its lane was busy",
-        "Queue wait 10.0 task hours: ready behind more tasks than its lane has seats, or with a seat free",
+        "Queue wait 10.0 task hours: ready while a seat was free or behind more tasks than its lane has seats",
     ]
     detect(store, ("build", 3600.0, "rising"))
     assert bottleneck_status.report(store, "sw", NOW)["waits"] == [
         "Seat wait 0.0 task hours: ready while every seat of its lane was busy",
-        "Queue wait 0.0 task hours: ready behind more tasks than its lane has seats, or with a seat free",
+        "Queue wait 0.0 task hours: ready while a seat was free or behind more tasks than its lane has seats",
     ]
+
+
+def test_queue_wait_never_names_the_top_bottleneck(store):
+    detect(store, ("queue_wait", 36000.0, "rising"), ("seat_wait", 5400.0, "falling"))
+    found = bottleneck_status.report(store, "sw", NOW)
+    assert (found["stage"], found["seconds"], found["trend"]) == ("seat_wait", 5400.0, "falling")
+    detect(store, ("queue_wait", 36000.0, "rising"))
+    assert bottleneck_status.report(store, "sw", NOW)["stage"] == ""
 
 
 @pytest.mark.parametrize(
@@ -110,7 +118,7 @@ def test_page_view_reads_the_stored_ranking_over_the_published_snapshot(store, m
         "action_at": 0,
         "waits": [
             "Seat wait 184.8 task hours: ready while every seat of its lane was busy",
-            "Queue wait 0.0 task hours: ready behind more tasks than its lane has seats, or with a seat free",
+            "Queue wait 0.0 task hours: ready while a seat was free or behind more tasks than its lane has seats",
         ],
     }
 

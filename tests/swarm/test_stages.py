@@ -742,6 +742,21 @@ def test_a_task_waits_from_the_approval_of_its_planned_phase():
     assert waited(task, *events, phases=phases, tasks=[plan, task]) == {("seat_wait", ""): 3600.0}
 
 
+def test_clearing_one_focus_while_another_still_excludes_the_task_does_not_open_it():
+    task = {**OPEN_TASK, "state": "claimed"}
+    events = [
+        ledger("added", at(7), "tasks/t3"),
+        ledger("focused", at(8), "tasks/t9"),
+        ledger("focused", at(8, 30), "phases/p2"),
+        opened("unfrozen", at(9), "tasks/t9", cleared=["tasks/t9"]),
+        ledger("joined", at(9, 15), by="e1"),
+    ]
+    claim = [agent("claim", "t3", at(9, 15)), agent("spawn", "t3", at(9, 15), "e1", "claude")]
+    ready = stages.claimable({"tasks": [task], "phases": [*PHASES, {"id": "p2"}]}, "")
+    found = stages.report(rows(ledger_events=events, agent_events=claim), [task], NOW, ready=ready)
+    assert seconds_of(found)[("seat_wait", "")] == 8100.0
+
+
 def lane_rows(added, *extra):
     return rows(
         agent_events=[agent("claim", "t1", at(5)), agent("spawn", "t1", at(5), "e1", "claude"), *extra],
@@ -806,6 +821,15 @@ def test_each_lane_counts_its_own_seats():
     ready = stages.claimable({"tasks": tasks}, "", {"eng": 1, "ci": 1})
     episodes = stages.observations(lane_rows(TWO_READY), tasks, NOW, 4 * H, ready)
     assert (episodes["seat_wait"], episodes["queue_wait"]) == ([f"seat_wait:t3:{at(8)}"], [f"queue_wait:t2:{at(8)}"])
+
+
+def test_a_lane_missing_from_the_seat_caps_has_no_seats():
+    found = split(lane_rows(TWO_READY), lane_tasks(t2="ci"), {"eng": 1})
+    assert found == {("build", ""): 14400.0, ("seat_wait", ""): 7200.0, ("queue_wait", ""): 7200.0}
+    assert split(lane_rows(TWO_READY), lane_tasks(t2="ci", t3="ci"), {"eng": 1}) == {
+        ("build", ""): 14400.0,
+        ("queue_wait", ""): 14400.0,
+    }
 
 
 def test_swarm_status_lists_the_top_stages(monkeypatch, capsys, store):
