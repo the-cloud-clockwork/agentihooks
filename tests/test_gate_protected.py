@@ -368,6 +368,98 @@ def test_a_head_moving_the_gate_away_from_the_protected_reuse_job_is_named_not_c
     assert "The head removes the protected reuse job." in problems
 
 
+_POLICY = {
+    "actors": ["nestorcolt", "agenticore-app[bot]", "tcc-main-ci[bot]"],
+    "queue_actor": "github-merge-queue[bot]",
+}
+_MEMBERS = '["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'
+
+
+def _anton(pool="anton-oss-light"):
+    return (
+        "${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || "
+        "github.event.pull_request.head.repo.full_name == github.repository) && "
+        f"contains(fromJSON('{_MEMBERS}'), github.actor) && contains(fromJSON('{_MEMBERS}'), github.triggering_actor) || "
+        "(github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && "
+        f"github.actor == 'github-merge-queue[bot]' && github.triggering_actor == 'github-merge-queue[bot]') && '{pool}' || 'ubuntu-latest' }}}}"
+    )
+
+
+def _anton_reuse(pool="anton-oss-light"):
+    from scripts import ci_reuse
+
+    job = ci_reuse.reuse_job()
+    job["runs-on"] = _anton(pool)
+    [install] = [step for step in job["steps"] if step.get("name") == "Install metadata dependencies"]
+    install["env"] = {"PYTHONNOUSERSITE": "1"}
+    return job
+
+
+def _protected_pair():
+    from scripts import ci_reuse
+
+    base = _workflow()
+    base["jobs"]["gate-required"] = base["jobs"].pop("gate")
+    base["jobs"]["gate-required"]["runs-on"] = "ubuntu-latest"
+    base["jobs"]["reuse"] = ci_reuse.reuse_job()
+    base["jobs"]["gate-required"]["needs"].append("reuse")
+    return base, copy.deepcopy(base)
+
+
+def test_the_reuse_job_and_the_gate_may_move_behind_the_runner_trust_selector():
+    base, head = _protected_pair()
+    head["jobs"]["reuse"] = _anton_reuse()
+    head["jobs"]["gate-required"]["runs-on"] = _anton()
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY, _POLICY) == []
+    assert gate_protected.grade({"test.yml": head}, {}, {"test.yml": base}, {}, _TODAY, _POLICY) == []
+
+
+@pytest.mark.parametrize(
+    "runner", [_anton("anton-oss"), "anton-oss-light", "ubuntu-22.04", _anton().replace("&&", "||", 1)]
+)
+def test_the_gate_takes_no_other_runner(runner):
+    base, head = _protected_pair()
+    head["jobs"]["gate-required"]["runs-on"] = runner
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY, _POLICY)
+    assert problems == ["The head's Gate — Required changes its runs-on; the protected branch grades with its own."]
+
+
+def _without_install_env(job):
+    [install] = [step for step in job["steps"] if step.get("name") == "Install metadata dependencies"]
+    del install["env"]
+    return job
+
+
+def _changed_step(job):
+    job["steps"][-1]["name"] = "renamed"
+    return job
+
+
+def _other_pool(job):
+    job["runs-on"] = _anton("anton-oss-batch")
+    return job
+
+
+@pytest.mark.parametrize("weaken", [_without_install_env, _changed_step, _other_pool])
+def test_the_reuse_job_moves_only_in_its_canonical_anton_form(weaken):
+    base, head = _protected_pair()
+    head["jobs"]["reuse"] = weaken(_anton_reuse())
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY, _POLICY)
+    assert problems == ["The head changes the protected reuse job; the protected branch grades with its own."]
+
+
+def test_without_a_dict_policy_only_the_hosted_runner_is_accepted():
+    base, head = _protected_pair()
+    head["jobs"]["reuse"] = _anton_reuse()
+    head["jobs"]["gate-required"]["runs-on"] = _anton()
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY, list(_POLICY["actors"]))
+    assert problems == [
+        "The head's Gate — Required changes its runs-on; the protected branch grades with its own.",
+        "The head changes the protected reuse job; the protected branch grades with its own.",
+    ]
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY) == problems
+
+
 def _trusted_base(repo, actors=None):
     candidate = _workflow()
     candidate["jobs"]["gate"]["runs-on"] = "ubuntu-latest"
@@ -383,6 +475,21 @@ def test_protected_cli_accepts_a_hosted_head_from_an_actor_owned_base(repo):
     candidate, base = _trusted_base(repo)
     head = _commit(repo, {"test.yml": candidate}, {}, "hosted head")
     assert gate_protected.main(["--root", str(repo), "--base", base, "--head", head]) == 0
+
+
+def test_protected_cli_accepts_the_gate_behind_the_selector_of_the_base_policy(repo):
+    candidate, base = _trusted_base(repo, _POLICY)
+    candidate["jobs"]["gate"]["runs-on"] = _anton()
+    head = _commit(repo, {"test.yml": candidate}, {}, "gate on anton")
+    assert gate_protected.main(["--root", str(repo), "--base", base, "--head", head]) == 0
+
+
+def test_protected_cli_refuses_a_policy_without_its_queue_actor_before_building_a_selector(repo):
+    candidate, base = _trusted_base(repo, {"actors": _POLICY["actors"]})
+    candidate["jobs"]["gate"]["runs-on"] = _anton()
+    head = _commit(repo, {"test.yml": candidate}, {}, "gate on anton")
+    with pytest.raises(ValueError, match="trusted actors"):
+        gate_protected.main(["--root", str(repo), "--base", base, "--head", head])
 
 
 def test_protected_cli_rejects_a_private_runner_with_no_actor_check(repo, capsys):
