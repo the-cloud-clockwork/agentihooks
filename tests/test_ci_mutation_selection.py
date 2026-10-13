@@ -765,13 +765,15 @@ def test_a_subprocess_importing_a_mutated_module_skips_the_mutation_engine_and_s
     child = (
         "import sys\n"
         "from scripts.sample import value\n"
-        "print(value(1), 'libcst' in sys.modules, callable(__import__('mutmut.__main__').__main__.walk_all_files))\n"
+        "print(value(1), 'libcst' in sys.modules)\n"
+        "print(callable(__import__('mutmut.__main__').__main__.walk_all_files))\n"
     )
     (tmp_path / "tests/test_sample.py").write_text(
         "import os, subprocess, sys\n\n"
         "from scripts.sample import value\n\n"
         "def test_value():\n"
-        "    assert value(1) == 2\n"
+        "    assert sys.modules['mutmut.__main__'].__file__.endswith('mutmut/__main__.py')\n"
+        "    value(1)\n"
         "    env = {**os.environ, 'PYTHONPATH': os.getcwd()}\n"
         f"    out = subprocess.run([sys.executable, '-c', {child!r}], env=env, capture_output=True, text=True, check=True)\n"
         "    assert out.stdout.split() == ['2', 'False', 'True']\n"
@@ -781,6 +783,27 @@ def test_a_subprocess_importing_a_mutated_module_skips_the_mutation_engine_and_s
     assert report["not_mutated"] == [], [log.read_text()[-4000:] for log in logs if log.is_file()]
     assert report["failed"] is False
     assert report["files"][0]["counts"] == {"killed": 2}
+
+
+def test_light_main_answers_the_trampoline_and_hands_every_other_name_to_the_real_module(monkeypatch):
+    import mutmut.__main__ as real
+
+    from scripts.ci_mutation import light_main
+
+    assert issubclass(light_main.MutmutProgrammaticFailException, Exception)
+    assert light_main.mangled_name_from_mutant_name("scripts.a.x_f__mutmut_3") == "scripts.a.x_f"
+    with pytest.raises(AssertionError, match="^scripts.a.x_f$"):
+        light_main.mangled_name_from_mutant_name("scripts.a.x_f")
+    assert light_main.record_trampoline_hit("scripts.a.x_f") is None
+    with pytest.raises(AttributeError, match="^__path__$"):
+        light_main.__path__
+    monkeypatch.setitem(sys.modules, "mutmut.__main__", light_main)
+    assert light_main.walk_all_files.__module__ == "mutmut.__main__"
+    loaded = sys.modules["mutmut.__main__"]
+    assert loaded is not light_main
+    assert loaded.__file__ == real.__file__
+    assert light_main.walk_all_files is loaded.walk_all_files
+    assert sys.modules["mutmut.__main__"] is loaded
 
 
 def test_shared_run_grades_each_file_only_by_the_tests_selected_for_it(tmp_path, monkeypatch):

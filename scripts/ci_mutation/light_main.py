@@ -1,8 +1,3 @@
-"""The names a mutated module's trampoline imports from mutmut.__main__, for a process the mutation run did not start.
-
-Stats such a process records are never read by the run, so a hit is dropped. Any other name loads the real module.
-"""
-
 import importlib
 import sys
 
@@ -17,10 +12,10 @@ def mangled_name_from_mutant_name(mutant_name: str) -> str:
 
 
 def record_trampoline_hit(name: str) -> None:
-    return None
+    pass
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> object:
     if name.startswith("__"):
         raise AttributeError(name)
     if getattr(sys.modules.get("mutmut.__main__"), "__getattr__", None) is __getattr__:
