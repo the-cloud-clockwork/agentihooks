@@ -60,8 +60,7 @@ def main(
     end: Callable[[Path], None] = end_server,
 ) -> int:
     folder = ledger_link.folder(environ)
-    host, port = ledger_link.address(environ)
-    error = check(f"http://{host}:{port}")
+    error = check(ledger_link.base(environ))
     if error == REFUSED:
         print(f"probe write failed: {error}", file=sys.stderr)
         return 1

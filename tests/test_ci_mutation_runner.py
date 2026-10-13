@@ -156,6 +156,7 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
         "evidence",
         "observability",
         "docker/swarm-node",
+        "deploy/compose",
         ".agentihooks/conditions",
     ):
         (root / name).mkdir(parents=True)
@@ -180,6 +181,7 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
         "evidence/",
         "observability/",
         "docker/swarm-node/",
+        "deploy/compose/",
         ".agentihooks/conditions/",
         ".test_durations",
         "Swarm-v2.md",
@@ -206,6 +208,7 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
         "evidence",
         "observability",
         "docker/swarm-node",
+        "deploy/compose",
         ".agentihooks/conditions",
     ):
         assert (work / name / "asset.txt").read_text() == name
