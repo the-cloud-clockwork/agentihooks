@@ -32,7 +32,8 @@ def launch_args(root=ROOT, python=sys.executable):
 
 def event(item):
     meta = {"item_id": item.id, "sender": item.sender, "sent_at_ms": str(item.created_at)}
-    return {"method": METHOD, "params": {"content": item.text, "meta": meta}}
+    content = f"Information only; closes on read or confirmed receipt.\n{item.text}" if item.fyi else item.text
+    return {"method": METHOD, "params": {"content": content, "meta": meta}}
 
 
 def answer(store, me, item_id, text):
