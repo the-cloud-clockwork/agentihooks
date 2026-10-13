@@ -24,6 +24,30 @@ def test_ci_creates_no_commits_or_bot_pull_requests():
                 assert "git commit" not in command
                 assert "HEAD:dev" not in command
                 assert "ci_bot_pr" not in command
+        if "ORG_GITHUB_TOKEN" in json.dumps(workflow):
+            assert path.name == "access-audit.yml"
+            assert workflow.get("on", workflow.get(True)) == {
+                "schedule": [{"cron": "17 7 * * 1"}],
+                "workflow_dispatch": None,
+            }
+            assert workflow["permissions"] == {"contents": "read"}
+            assert set(workflow["jobs"]) == {"audit"}
+            job = workflow["jobs"]["audit"]
+            assert job["runs-on"] == "ubuntu-latest"
+            steps = job["steps"]
+            assert steps[0] == {
+                "uses": "actions/checkout@v4",
+                "with": {"ref": "dev", "persist-credentials": False},
+            }
+            token_steps = [step for step in steps if "ORG_GITHUB_TOKEN" in json.dumps(step)]
+            assert token_steps == [
+                {
+                    "name": "List collaborators and installed apps against protected approvals",
+                    "env": {"GH_TOKEN": "${{ secrets.ORG_GITHUB_TOKEN }}"},
+                    "run": 'python -m scripts.ci_access_audit --repo "$GITHUB_REPOSITORY"',
+                }
+            ]
+            token_steps[0]["env"] = {}
         assert "ORG_GITHUB_TOKEN" not in json.dumps(workflow)
     assert not (_ROOT / ".github/workflows/refresh-durations.yml").exists()
     assert not (_ROOT / "scripts/ci_bot_pr.sh").exists()
