@@ -60,8 +60,55 @@ def test_confirmed_work_reminds_its_receiver_until_explicit_settlement(store, mo
     assert delivery.pending_context("receipt-session", env) == ""
     clock[0] = 1599.0
     assert delivery.pending_context("receipt-session", env) == ""
-    clock[0] = 1600.0
+    clock[0] = 1600.001
     assert item.id in delivery.pending_context("receipt-session", env)
     store.close(item.id, "bob", "done", "deployed proof verified")
     clock[0] = 1900.0
     assert delivery.pending_context("receipt-session", env) == ""
+
+
+@pytest.mark.parametrize("receipt", ["read", "confirm"])
+def test_information_receipt_enforces_receiver_ownership(store, receipt):
+    from scripts.inbox.store import InboxError
+
+    item = store.send("alice", "bob", "The branch merged", fyi=True)
+    store.deliver(item.id, "bob")
+    with pytest.raises(InboxError, match="belongs to bob"):
+        getattr(store, receipt)(item.id, "carol")
+    assert store.get(item.id).state == "delivered"
+
+
+def test_another_session_cannot_confirm_information(store):
+    item = store.send("alice", "bob", "The branch merged", fyi=True)
+    store.deliver(item.id, "bob")
+    successor = InboxStore(store.redis, session_id="successor-session")
+    assert successor.confirm(item.id, "bob") is None
+    assert store.get(item.id).state == "delivered"
+
+
+@pytest.mark.parametrize("receipt", ["read", "confirm"])
+def test_reminders_include_only_the_receivers_due_work_and_preserve_seat_history(store, monkeypatch, receipt):
+    from hooks.context import inbox_delivery as delivery
+
+    monkeypatch.setattr("scripts.inbox.store.now_ms", lambda: 1_000_000)
+    monkeypatch.setattr(delivery, "now_ms", lambda: 1_100_000)
+    monkeypatch.setattr(delivery, "connect", lambda environ: store)
+    store.seats.occupy("master@sw", "bob", 1_000_000)
+    own = store.send("alice", "master@sw", "Verify the deployed proof")
+    other = store.send("alice", "carol", "Verify another proof")
+    for item, receiver in [(own, "bob"), (other, "carol")]:
+        store.deliver(item.id, receiver)
+        getattr(store, receipt)(item.id, receiver)
+    recent = store.send("alice", "bob", "Keep this pending check open")
+    history = store.history(own.id)
+    env = {"AGENTIHOOKS_AGENT_NAME": "bob", "AGENTIHOOKS_INBOX_RETRY_WINDOW_S": "100"}
+
+    context = delivery.pending_context("receipt-session", env)
+    assert own.id in context
+    assert other.id not in context
+    assert "awaiting explicit settlement" in context
+    assert recent.id in context
+    assert store.get(recent.id).state == "delivered"
+    assert store.history(own.id) == history
+    assert store.get(own.id).state == ("read" if receipt == "read" else "confirmed")
+    assert store.get(other.id).state == ("read" if receipt == "read" else "confirmed")

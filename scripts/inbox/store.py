@@ -239,9 +239,21 @@ class InboxStore:
     def unsettled(self, receiver: str, before: int) -> list[Item]:
         return [
             item
-            for item in self._with_seat(receiver, self.open_items)
+            for item in self._with_seat(receiver, lambda address: self._due_open(address, before))
             if not item.fyi and item.state in ("read", "confirmed") and item.updated_at <= before
         ]
+
+    def _due_open(self, address, before):
+        with self.redis.pipeline(transaction=False) as pipe:
+            pipe.sismember(self.key("open-indexed"), address)
+            pipe.get(self.key("open-size", address))
+            pipe.zcard(self.key("address", address))
+            pipe.zrangebyscore(self.key("open", address), "-inf", before)
+            indexed, size, total, ids = pipe.execute()
+        if not _index_current(indexed, size, total):
+            self._index_open(address)
+            ids = self.redis.zrangebyscore(self.key("open", address), "-inf", before)
+        return [self.get(item_id) for item_id in ids]
 
     def pending_mail(self, me):
         return self._with_seat(me, self.pending_items)

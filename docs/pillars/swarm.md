@@ -452,6 +452,12 @@ it delivered. A later hook confirms items delivered to that receiver before the 
 continued past delivery. `agentihooks msg read <id>` records receipt as read; `msg reply` or `msg close`
 settles the work. Confirmation proves receipt, and leaves the agent responsible for answering or closing it.
 
+Mark pure information with `--fyi` at send time: it closes as `done: information received` on explicit read
+or confirmed receipt. Status reports that request an action, proof checks and unresolved follow ups remain
+work items. After handling confirmed work, explicitly reply or close it with an outcome. The hook reminds
+the receiver of read or confirmed work still open after `AGENTIHOOKS_INBOX_RETRY_WINDOW_S`, at most once
+per window. Reminders preserve the item's state and history; unresolved work stays open.
+
 If delivery remains unconfirmed for `AGENTIHOOKS_INBOX_REDELIVER_S` (default 300 seconds), the inbox returns
 the same item to pending. Whichever transport claims next can deliver it: the channel, hook or wake path.
 A failed channel write returns its unsent items to pending immediately. The redelivery window is separate
