@@ -294,6 +294,20 @@ def test_a_first_push_before_the_branch_is_recorded_grades_the_agent_worktree(re
     check_prepush(payload)
 
 
+def test_two_agent_worktrees_of_the_repository_keep_the_payload_directory(repo, swarm_worktree, tmp_path):
+    from tests.swarm_ledger import legacy_page
+
+    for folder in ("engineer-test", "engineer-test-2"):
+        _git(repo, "worktree", "add", "-q", "-b", folder, str(tmp_path / "worktrees" / "repo" / folder))
+        _stamp(tmp_path / "worktrees" / "repo" / folder)
+    task = {"id": "push", "state": "claimed", "claimed_by": "engineer@test"}
+    legacy_page.store(tmp_path / "ledgers", "rig", {"tasks": [task]})
+    payload = _bash("git push -u origin HEAD", repo)
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(payload)
+    assert str(blocked.value) == _message(repo)
+
+
 @pytest.mark.parametrize("directory", [None, "", "~/development-ledger"])
 def test_default_swarm_ledger_location_resolves_the_task_worktree(repo, swarm_worktree, monkeypatch, directory):
     from tests.swarm_ledger import legacy_page
