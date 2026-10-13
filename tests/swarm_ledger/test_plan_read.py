@@ -365,6 +365,47 @@ def test_task_read_appends_the_linked_cases_after_the_slice(tmp_path, monkeypatc
     assert run(capsys, ["--phase", "p1"], {"AGENTIHOOKS_SWARM": "linked"}) == LINKED_PLAN
 
 
+def test_task_read_resolves_its_anchor_after_lines_are_inserted(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)
+    original = "<!-- slice: first -->\n### First\nEarlier work\n\n<!-- slice: assigned -->\n### Assigned\nDo assigned work\n\n<!-- slice: later -->\n### Later\nLater work\n"
+    file = ledger_artifacts.store("shifted", "plan.md", original.encode())
+    ref = {"artifact": f"http://127.0.0.1:8765/artifacts/shifted/{file['id']}", "lines": "1-11"}
+    doc = {
+        "artifacts": [{"plan": True, "file": file}],
+        "phases": [{"id": "p1", "plan_ref": ref}],
+        "tasks": [{"id": "assigned", "phase": "p1", "plan_slice": "assigned", "plan_lines": "5-7"}],
+    }
+    SQLiteLedgerRepository(tmp_path / DATABASE).import_document("shifted", {**doc, "_meta": {"rev": 1}})
+    inserted = "".join(f"Inserted row {n}\n" for n in range(30))
+    ledger_artifacts.path_of("shifted", file["id"]).write_text(inserted + original)
+    assert run(capsys, ["--task", "assigned"], {"AGENTIHOOKS_SWARM": "shifted"}) == (
+        "".join(f"Inserted row {n}\n" for n in range(24, 30)) + original
+    )
+
+
+def test_task_read_refuses_a_missing_anchor_instead_of_using_stored_lines(monkeypatch):
+    task = {"id": "assigned", "phase": "p1", "plan_slice": "missing", "plan_lines": "1-1"}
+    doc = {"tasks": [task], "phases": [{"id": "p1", "plan_ref": {"lines": "1-1"}}]}
+    monkeypatch.setattr(plan_read, "_stored", lambda *args: "# Other section\n")
+    with pytest.raises(ValueError, match="slice anchor missing is missing or repeated"):
+        plan_read.read(doc, "missing", "assigned", None)
+
+
+def test_task_read_resolves_a_package_anchor_from_current_text(monkeypatch):
+    from scripts.swarm_ledger import plan_packages
+
+    original = "## 1. One\n## 2. Two\n## 3. Three\n## 4. Packages\n<!-- slice: SV2-CTL-04 -->\n### Assigned\nDo assigned work\n"
+    source = original.replace("## 4. Packages\n", "## 4. Packages\n" + "Earlier row\n" * 30)
+    monkeypatch.setattr(plan_packages, "text", lambda: source)
+    task = {"id": "assigned", "phase": "p9", "plan_lines": "4-6", "plan_slice": "SV2-CTL-04", "plan_url": ISSUE}
+    doc = {"phases": [{"id": "p9"}], "tasks": [task]}
+    assert plan_read.read(doc, "package", "assigned", None) == (
+        "## 1. One\n## 2. Two\n## 3. Three\n\n"
+        + "Earlier row\n" * 10
+        + "<!-- slice: SV2-CTL-04 -->\n### Assigned\nDo assigned work\n"
+    )
+
+
 def test_swarm_v2_package_read_appends_the_linked_cases(monkeypatch):
     from scripts.swarm_ledger import plan_packages
 
