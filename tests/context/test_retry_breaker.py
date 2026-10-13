@@ -558,6 +558,8 @@ class TestOnlyExitStatusCounts:
             "Process exited with code 0\nExit code: 1",
             "Process running with session ID 4242\nOutput:\nExit code: 1",
             "xExit code: 1\nOutput:\nboom",
+            "Chunk ID: 1\nOutput:\nExit code: 1",
+            "log line\nExit code: 1",
         ],
         ids=[
             "claude-dict",
@@ -570,6 +572,8 @@ class TestOnlyExitStatusCounts:
             "exit-line-without-output-marker",
             "running-with-exit-line-in-output",
             "exit-text-mid-line",
+            "exit-line-only-in-output",
+            "exit-line-after-first-line-without-marker",
         ],
     )
     def test_a_successful_call_never_counts(self, response):
@@ -586,6 +590,11 @@ class TestOnlyExitStatusCounts:
             ("Process exited with code 2\nOutput:\nboom", {}, "Process exited with code 2\nOutput:\nboom"),
             ("Wall time: 1 seconds\nExit code: -1\nOutput:\n", {}, "Wall time: 1 seconds\nExit code: -1\nOutput:\n"),
             ("Exit code: 3", {}, "Exit code: 3"),
+            (
+                "Chunk ID: 1\nProcess exited with code 2\nOutput:\nx",
+                {},
+                "Chunk ID: 1\nProcess exited with code 2\nOutput:\nx",
+            ),
             ({"is_error": True, "content": "ENOENT"}, {}, "ENOENT"),
             ({"resultType": "failure", "textResultForLlm": "denied by server"}, {}, "denied by server"),
             ({"stdout": "partial"}, {"error": "Command failed with exit code 1"}, "Command failed with exit code 1"),
@@ -597,6 +606,7 @@ class TestOnlyExitStatusCounts:
             "codex-process-exit",
             "codex-negative-exit",
             "codex-bare-exit-line",
+            "codex-exit-after-first-header-line",
             "is-error",
             "copilot",
             "error",

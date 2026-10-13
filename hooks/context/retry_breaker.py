@@ -270,7 +270,7 @@ def _failure_text(payload: dict, tool_result) -> str | None:
     if payload.get("error"):
         return str(payload["error"])
     if isinstance(tool_result, str) and payload.get("tool_name") == "Bash":
-        header = tool_result.split("\nOutput:", 1)[0] if "\nOutput:" in tool_result else tool_result.split("\n", 1)[0]
+        header = tool_result.partition("\nOutput:")[0] if "\nOutput:" in tool_result else tool_result.partition("\n")[0]
         match = _SHELL_EXIT_RE.search(header)
         return tool_result if match and int(match.group(1)) != 0 else None
     detected, error_text = _is_error(tool_result, strict=True)
