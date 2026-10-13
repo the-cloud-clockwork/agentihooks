@@ -329,7 +329,10 @@ def _split(pieces: list, lives: list, cap: int | None) -> list[tuple]:
         at = (low + high) / 2
         waiting = sorted(piece for piece in pieces if piece[1] <= at < piece[2])
         busy = sum(start <= at < stop for start, stop in lives)
-        seats = len(waiting) if cap is None else cap if busy >= cap else 0
+        if cap is None:
+            seats = len(waiting)
+        else:
+            seats = cap if busy >= cap else 0
         for rank, (_, _, _, owner, label) in enumerate(waiting):
             found.append((owner, SEAT_WAIT if rank < seats else QUEUE_WAIT, label, (high - low) / 1000))
     return found
