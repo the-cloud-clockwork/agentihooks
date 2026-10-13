@@ -46,12 +46,42 @@ jobs:
   reuse:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
     outputs:
       reused: ${{ steps.decision.outputs.reused || 'false' }}
       run: ${{ steps.decision.outputs.run }}
       attempt: ${{ steps.decision.outputs.attempt }}
       grader: ${{ steps.grader.outputs.sha }}
     steps:
+      # Expressions cannot parse the pull request number out of the queue ref, and a
+      # job-level group keyed on it would let an older run's late job cancel the live run.
+      - name: Cancel older queue runs of the same pull request
+        if: github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          QUEUE_REF: ${{ github.event.merge_group.head_ref }}
+          RUN: ${{ github.run_id }}
+        run: |
+          [[ "$QUEUE_REF" =~ ^refs/heads/(gh-readonly-queue/.+/pr-[0-9]+-)[0-9a-f]+$ ]] || exit 0
+          prefix="${BASH_REMATCH[1]}"
+          runs="repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs"
+          for status in queued in_progress waiting pending requested; do
+            if ! listed="$(gh api --paginate "$runs?event=merge_group&status=$status&per_page=100" --jq '.workflow_runs[] | "\(.id) \(.head_branch)"')"; then
+              echo "::warning::Cannot list $status merge queue runs"
+              continue
+            fi
+            while read -r id branch; do
+              [[ -n "$id" && "$id" -lt "$RUN" && "$branch" == "$prefix"* && "${branch#"$prefix"}" =~ ^[0-9a-f]+$ ]] || continue
+              if gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/cancel" --silent; then
+                echo "Cancelled superseded queue run $id ($branch)"
+              else
+                echo "::warning::Cannot cancel superseded queue run $id ($branch)"
+              fi
+            done <<< "$listed"
+          done
+
       - uses: actions/checkout@v4
         with:
           ref: dev
