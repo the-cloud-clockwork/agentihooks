@@ -13,9 +13,40 @@ TREE = "b" * 40
 REPOSITORY = "the-cloud-clockwork/agentihooks"
 
 
-def evidence(tmp_path, *, reused=False):
+EXPECTED_ARTIFACTS = set(
+    """
+split-3.11 collected-3.11 split-3.12 collected-3.12
+durations-3.11-1 flakes-3.11-1 durations-3.11-2 flakes-3.11-2
+durations-3.11-3 flakes-3.11-3 durations-3.11-4 flakes-3.11-4
+durations-3.11-5 flakes-3.11-5 durations-3.11-6 flakes-3.11-6
+durations-3.12-1 flakes-3.12-1 coverage-3.12-1
+durations-3.12-2 flakes-3.12-2 coverage-3.12-2
+durations-3.12-3 flakes-3.12-3 coverage-3.12-3
+durations-3.12-4 flakes-3.12-4 coverage-3.12-4
+durations-3.12-5 flakes-3.12-5 coverage-3.12-5
+durations-3.12-6 flakes-3.12-6 coverage-3.12-6
+durations-3.12-7 flakes-3.12-7 coverage-3.12-7
+durations-3.12-8 flakes-3.12-8 coverage-3.12-8
+durations-3.12-9 flakes-3.12-9 coverage-3.12-9
+durations-3.12-10 flakes-3.12-10 coverage-3.12-10
+durations-3.12-11 flakes-3.12-11 coverage-3.12-11
+durations-3.12-12 flakes-3.12-12 coverage-3.12-12
+""".split()
+)
+
+
+def attest(folder, record, source=""):
+    with zipfile.ZipFile(folder / "proof.zip", "w") as archive:
+        archive.writestr("provenance.json", json.dumps(record))
+    digest = hashlib.sha256(json.dumps(record, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    (folder / "reuse.log").write_text(
+        f"2026-10-13T00:00:00Z required-tree-sha256={digest}\n2026-10-13T00:00:00Z run={source}\n"
+    )
+
+
+def evidence(tmp_path, *, reused=False, run_id=123):
     run = {
-        "id": 123,
+        "id": run_id,
         "run_attempt": 2,
         "event": "merge_group",
         "head_sha": HEAD,
@@ -26,7 +57,7 @@ def evidence(tmp_path, *, reused=False):
     }
     record = {
         "version": 1,
-        "run": 123,
+        "run": run_id,
         "attempt": 2,
         "event": "merge_group",
         "commit": HEAD,
@@ -34,19 +65,14 @@ def evidence(tmp_path, *, reused=False):
         "reused": reused,
         "inputs": {"day": datetime.now(UTC).date().isoformat(), "workflow": "c" * 40},
     }
-    folder = tmp_path / "123"
+    folder = tmp_path / str(run_id)
     folder.mkdir()
-    with zipfile.ZipFile(folder / "proof.zip", "w") as archive:
-        archive.writestr("provenance.json", json.dumps(record))
-    digest = hashlib.sha256(json.dumps(record, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-    (folder / "reuse.log").write_text(
-        f"2026-10-13T00:00:00Z required-tree-sha256={digest}\n2026-10-13T00:00:00Z run=\n"
-    )
+    attest(folder, record)
     jobs = [{"name": "reuse", "conclusion": "success"}]
     for version, count in [("3.11", 6), ("3.12", 12)]:
         jobs += [{"name": f"unit ({version}, {shard})", "conclusion": "success"} for shard in range(1, count + 1)]
     (folder / "jobs.jsonl").write_text("".join(json.dumps(job) + "\n" for job in jobs))
-    artifacts = [{"name": name, "expired": False} for name in ci_dev_reuse.artifact_names()]
+    artifacts = [{"name": name, "expired": False} for name in sorted(EXPECTED_ARTIFACTS)]
     (folder / "artifacts.jsonl").write_text("".join(json.dumps(item) + "\n" for item in artifacts))
     (tmp_path / "runs.json").write_text(json.dumps({"workflow_runs": [run]}))
     return run, record, folder
@@ -75,7 +101,7 @@ def test_mismatched_or_unpassed_queue_runs_fall_back(tmp_path, field, value):
 
 
 @pytest.mark.parametrize("kind", ["missing", "expired", "failed_unit", "unauthenticated", "old_day"])
-def test_incomplete_evidence_falls_back(tmp_path, kind):
+def test_incomplete_evidence_falls_back(tmp_path, kind, capsys):
     _, record, folder = evidence(tmp_path)
     if kind == "missing":
         (folder / "artifacts.jsonl").write_text("")
@@ -90,9 +116,10 @@ def test_incomplete_evidence_falls_back(tmp_path, kind):
         (folder / "reuse.log").write_text("")
     else:
         record["inputs"]["day"] = (datetime.now(UTC).date() - timedelta(days=1)).isoformat()
-        with zipfile.ZipFile(folder / "proof.zip", "w") as archive:
-            archive.writestr("provenance.json", json.dumps(record))
+        attest(folder, record)
     assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) is None
+    if kind == "old_day":
+        assert capsys.readouterr().out == "No dev unit reuse from run 123: dependency day changed\n"
 
 
 def test_missing_metadata_falls_back(tmp_path):
@@ -131,21 +158,22 @@ def test_cli_publishes_passed_source(tmp_path, monkeypatch):
     assert output.read_text() == "source=123\n"
 
 
-def test_queue_reused_pull_request_resolves_its_authenticated_artifacts(tmp_path):
-    queue, record, folder = evidence(tmp_path, reused=True)
+def source_evidence(tmp_path, queue, record, folder):
     source = dict(queue, id=456, event="pull_request", head_sha="d" * 40)
     source_folder = tmp_path / "456"
     source_folder.mkdir()
     source_record = dict(record, run=456, event="pull_request", commit="e" * 40, reused=False)
-    with zipfile.ZipFile(source_folder / "proof.zip", "w") as archive:
-        archive.writestr("provenance.json", json.dumps(source_record))
-    digest = hashlib.sha256(json.dumps(source_record, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-    (source_folder / "reuse.log").write_text(f"2026-10-13T00:00:00Z required-tree-sha256={digest}\n")
+    attest(source_folder, source_record)
     for name in ("jobs.jsonl", "artifacts.jsonl"):
         (source_folder / name).write_text((folder / name).read_text())
     (folder / "source.json").write_text(json.dumps(source))
-    with (folder / "reuse.log").open("a") as output:
-        output.write("2026-10-13T00:00:00Z run=456\n")
+    attest(folder, record, source="456")
+    return source, source_record, source_folder
+
+
+def test_queue_reused_pull_request_resolves_its_authenticated_artifacts(tmp_path):
+    queue, record, folder = evidence(tmp_path, reused=True)
+    source_evidence(tmp_path, queue, record, folder)
     assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) == 456
 
 
@@ -170,3 +198,100 @@ def test_workflow_preserves_downstream_artifacts():
     assert jobs["durations"]["outputs"]["source"] == "${{ steps.unit-source.outputs.source }}"
     for job in ("sonar", "coverage-baseline", "refresh-durations", "flake-budget"):
         assert "unit" in jobs[job]["needs"]
+
+
+def test_artifact_contract_matches_the_eighteen_shards():
+    assert ci_dev_reuse.artifact_names() == EXPECTED_ARTIFACTS
+
+
+@pytest.mark.parametrize("missing", sorted(EXPECTED_ARTIFACTS))
+def test_each_missing_artifact_falls_back(tmp_path, missing):
+    _, _, folder = evidence(tmp_path)
+    items = [json.loads(line) for line in (folder / "artifacts.jsonl").read_text().splitlines()]
+    (folder / "artifacts.jsonl").write_text(
+        "".join(json.dumps(item) + "\n" for item in items if item["name"] != missing)
+    )
+    assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) is None
+
+
+@pytest.mark.parametrize("failed", ["unit (3.11, 1)", "unit (3.11, 6)", "unit (3.12, 1)", "unit (3.12, 12)"])
+def test_each_edge_shard_must_pass(tmp_path, failed):
+    _, _, folder = evidence(tmp_path)
+    jobs = [json.loads(line) for line in (folder / "jobs.jsonl").read_text().splitlines()]
+    for job in jobs:
+        if job["name"] == failed:
+            job["conclusion"] = "failure"
+    (folder / "jobs.jsonl").write_text("".join(json.dumps(job) + "\n" for job in jobs))
+    assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) is None
+
+
+@pytest.mark.parametrize(
+    "field,value", [("version", 2), ("run", 789), ("attempt", 1), ("event", "push"), ("commit", "d" * 40)]
+)
+def test_signed_mismatched_provenance_falls_back(tmp_path, field, value, capsys):
+    _, record, folder = evidence(tmp_path)
+    record[field] = value
+    attest(folder, record)
+    assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) is None
+    if field != "commit":
+        assert capsys.readouterr().out == "No dev unit reuse from run 123: provenance does not describe this attempt\n"
+
+
+@pytest.mark.parametrize("mismatch", ["head", "commit", "source_id", "source_event", "source_tree", "source_inputs"])
+def test_unusable_newest_candidate_does_not_hide_a_passed_candidate(tmp_path, mismatch):
+    bad, record, folder = evidence(tmp_path, reused=mismatch.startswith("source"), run_id=789)
+    good, _, _ = evidence(tmp_path)
+    if mismatch == "head":
+        bad["head_sha"] = "d" * 40
+    elif mismatch == "commit":
+        record["commit"] = "d" * 40
+        attest(folder, record)
+    else:
+        source, source_record, source_folder = source_evidence(tmp_path, bad, record, folder)
+        if mismatch == "source_id":
+            attest(folder, record, source="999")
+        elif mismatch == "source_event":
+            source["event"] = "push"
+            (folder / "source.json").write_text(json.dumps(source))
+        elif mismatch == "source_tree":
+            source_record["tree"] = "d" * 40
+            attest(source_folder, source_record)
+        else:
+            source_record["inputs"] = dict(record["inputs"], workflow="d" * 40)
+            attest(source_folder, source_record)
+    (tmp_path / "runs.json").write_text(json.dumps({"workflow_runs": [bad, good]}))
+    assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) == 123
+
+
+def test_source_may_not_reuse_a_third_run(tmp_path):
+    queue, record, folder = evidence(tmp_path, reused=True)
+    _, source_record, source_folder = source_evidence(tmp_path, queue, record, folder)
+    source_record["reused"] = True
+    attest(source_folder, source_record)
+    assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) is None
+
+
+def test_dependency_day_is_utc(tmp_path, monkeypatch):
+    evidence(tmp_path)
+
+    class Clock:
+        @staticmethod
+        def now(tz):
+            assert tz is UTC
+            return datetime.now(UTC)
+
+    monkeypatch.setattr(ci_dev_reuse, "datetime", Clock)
+    assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) == 123
+
+
+def test_success_log_names_the_commit_and_source(tmp_path, capsys):
+    evidence(tmp_path)
+    assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) == 123
+    assert capsys.readouterr().out == f"Reusing unit artifacts from passed queue evidence on {HEAD}: run 123\n"
+
+
+def test_rejection_log_names_the_run_and_cause(tmp_path, capsys):
+    _, _, folder = evidence(tmp_path)
+    (folder / "reuse.log").write_text("")
+    assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) is None
+    assert capsys.readouterr().out == "No dev unit reuse from run 123: unauthenticated provenance\n"

@@ -87,7 +87,7 @@ def select_source(evidence: Path, head: str, repository: str) -> int | None:
                 print(f"Reusing unit artifacts from passed queue evidence on {head}: run {run['id']}")
                 return run["id"]
         except ci_reuse.UNUSABLE + (TypeError, AttributeError) as exc:
-            print(f"No dev unit reuse from run {run.get('id')}: {type(exc).__name__}")
+            print(f"No dev unit reuse from run {run.get('id')}: {exc}")
     return None
 
 
