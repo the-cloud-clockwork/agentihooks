@@ -1,0 +1,145 @@
+import json
+import os
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+import yaml
+
+pytestmark = pytest.mark.unit
+ROOT = Path(__file__).resolve().parents[2]
+CHART = ROOT / "deploy/helm/agentihooks-swarm"
+START = ROOT / "deploy/worker/start.sh"
+
+
+def startup(tmp_path, *, joined=False, refused=False):
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    log = tmp_path / "commands"
+    cli = tools / "agentihooks"
+    cli.write_text(
+        "#!/usr/bin/env bash\nset -euo pipefail\n"
+        'printf "%s\\n" "$*" >> "$COMMAND_LOG"\n'
+        'if [[ "$*" == "hive join "* ]]; then\n'
+        '  [[ "$REFUSE_JOIN" == no ]] || exit 9\n'
+        '  touch "$AGENTIHOOKS_HOME/hive.env"\nfi\n'
+    )
+    cli.chmod(0o755)
+    home = tmp_path / "state"
+    home.mkdir()
+    credential = tmp_path / "member"
+    credential.write_text("fixture member credential\n")
+    code = tmp_path / "code"
+    code.write_text("fixture-code\n")
+    repo = tmp_path / "source"
+    subprocess.run(["git", "init", "--initial-branch=dev", str(repo)], check=True, capture_output=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "-c",
+            "user.name=fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "fixture",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    env = {
+        **os.environ,
+        "PATH": f"{tools}:{os.environ['PATH']}",
+        "AGENTIHOOKS_HOME": str(home),
+        "SWARM_HIVE_ID": "worker-pod",
+        "HIVE_REPO_ROOT": str(tmp_path / "repos"),
+        "HIVE_REPOSITORIES": json.dumps([{"url": str(repo), "name": "checkout", "ref": "dev"}]),
+        "HIVE_JOIN_URL": "https://join.example.test",
+        "HIVE_JOIN_CODE_FILE": str(code),
+        "HIVE_CREDENTIAL_FILE": str(credential) if joined else "",
+        "COMMAND_LOG": str(log),
+        "REFUSE_JOIN": "yes" if refused else "no",
+    }
+    result = subprocess.run(["bash", str(START)], env=env, capture_output=True, text=True)
+    return result, log.read_text() if log.exists() else "", home, tmp_path / "repos/checkout"
+
+
+def test_code_join_clones_repo_and_configures_before_run(tmp_path):
+    result, commands, home, repo = startup(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert commands.splitlines() == [
+        "hive join https://join.example.test fixture-code",
+        "hive set worker-pod ui=no ephemeral=yes roles=eng,ci,plan max-agents=1",
+        "hive run",
+    ]
+    assert (repo / ".git").is_dir()
+    assert (home / "hive.env").exists()
+
+
+def test_mounted_member_skips_join_and_keeps_private_credentials(tmp_path):
+    result, commands, home, _ = startup(tmp_path, joined=True)
+    assert result.returncode == 0, result.stderr
+    assert "hive join" not in commands
+    assert commands.endswith("hive run\n")
+    assert (home / "hive.env").stat().st_mode & 0o777 == 0o600
+    assert "fixture member credential" not in result.stdout + result.stderr
+
+
+def test_refused_join_never_runs_the_worker(tmp_path):
+    result, commands, _, _ = startup(tmp_path, refused=True)
+    assert result.returncode == 9
+    assert "hive run" not in commands
+    assert "hive set" not in commands
+
+
+def render(tmp_path, workers):
+    if not shutil.which("helm"):
+        pytest.fail("helm is required to prove the worker hive chart")
+    values = tmp_path / "values.yaml"
+    values.write_text(yaml.safe_dump({"workers": workers}))
+    return subprocess.run(["helm", "template", "proof", str(CHART), "-f", str(values)], capture_output=True, text=True)
+
+
+def test_chart_scales_independent_hives_with_named_credentials(tmp_path):
+    result = render(
+        tmp_path, {"replicas": 2, "maxAgents": 3, "credentialSecret": {"name": "member", "key": "credential"}}
+    )
+    assert result.returncode == 0, result.stderr
+    objects = list(yaml.safe_load_all(result.stdout))
+    workers = [
+        obj
+        for obj in objects
+        if obj and obj.get("kind") == "Deployment" and obj["metadata"]["name"].endswith("-worker-hive")
+    ]
+    assert len(workers) == 1
+    assert workers[0]["spec"]["replicas"] == 2
+    pod = workers[0]["spec"]["template"]["spec"]
+    assert pod["automountServiceAccountToken"] is False
+    container = pod["containers"][0]
+    env = {item["name"]: item for item in container["env"]}
+    assert env["SWARM_HIVE_ID"]["valueFrom"]["fieldRef"]["fieldPath"] == "metadata.name"
+    assert env["HIVE_MAX_AGENTS"]["value"] == "3"
+    assert env["HIVE_ROLES"]["value"] == "eng,ci,plan"
+    assert container["image"] == "ghcr.io/the-cloud-clockwork/agentihooks-hive-worker:dev"
+    assert pod["volumes"][0]["secret"]["secretName"] == "member"
+    assert pod["volumes"][0]["secret"]["items"] == [{"key": "credential", "path": "credential"}]
+    assert container["volumeMounts"][0]["readOnly"] is True
+
+
+def test_chart_refuses_workers_without_join_material(tmp_path):
+    result = render(tmp_path, {"replicas": 1})
+    assert result.returncode != 0
+    assert "workers need a credentialSecret or joinCodeSecret" in result.stderr
+
+
+def test_chart_refuses_reusing_a_one_time_code_between_replicas(tmp_path):
+    result = render(
+        tmp_path,
+        {"replicas": 2, "joinUrl": "https://join.example.test", "joinCodeSecret": {"name": "code", "key": "code"}},
+    )
+    assert result.returncode != 0
+    assert "one time join codes require workers.replicas=1" in result.stderr
