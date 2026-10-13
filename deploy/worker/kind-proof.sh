@@ -11,6 +11,8 @@ cleanup() {
     kubectl describe pods > "$out/pods.txt" 2>&1 || true
     kubectl logs -l app.kubernetes.io/component=worker-hive --tail=100 > "$out/failed-worker.txt" 2>&1 || true
     kubectl logs -l app.kubernetes.io/component=worker-hive --previous --tail=100 > "$out/previous-worker.txt" 2>&1 || true
+    kubectl logs deployment/hive-join --tail=100 > "$out/join.txt" 2>&1 || true
+    kubectl logs deployment/hive-join --previous --tail=100 > "$out/previous-join.txt" 2>&1 || true
   fi
   kind delete cluster --name "$cluster"
 }
@@ -42,6 +44,9 @@ spec:
       containers:
         - name: redis
           image: mirror.gcr.io/library/redis:7-alpine
+          readinessProbe:
+            tcpSocket: {port: 6379}
+            periodSeconds: 1
 ---
 apiVersion: v1
 kind: Service
@@ -68,6 +73,9 @@ spec:
           image: $image
           imagePullPolicy: Never
           command: [agentihooks, hive, serve, --host, 0.0.0.0, --port, "8770", --tls-cert, /tls/cert.pem, --tls-key, /tls/key.pem]
+          readinessProbe:
+            tcpSocket: {port: 8770}
+            periodSeconds: 1
           env:
             - {name: AGENTIHOOKS_SWARM_REDIS_URL, value: "redis://hive-redis:6379/0"}
           volumeMounts:
