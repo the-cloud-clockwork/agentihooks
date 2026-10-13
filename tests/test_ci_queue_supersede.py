@@ -8,21 +8,31 @@ import yaml
 
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[1]
-STEP = "Cancel older queue runs of the same pull request"
+STEP = "Cancel superseded and dead merge queue runs"
 RUN = 500
 QUEUE = "gh-readonly-queue/dev/pr-123-"
+OWN = QUEUE + "fff666"
 RUNS = {
     "queued": [(410, QUEUE + "aaa111"), (420, "gh-readonly-queue/dev/pr-1234-bbb222")],
     "in_progress": [
         (430, QUEUE + "ccc333"),
-        (RUN, QUEUE + "fff666"),
+        (RUN, OWN),
         (510, QUEUE + "ddd444"),
         (440, "gh-readonly-queue/dev/pr-12-eee555"),
+        (480, "gh-readonly-queue/dev/pr-77-abc777"),
+        (520, "gh-readonly-queue/dev/pr-88-abc888"),
     ],
     "waiting": [(450, QUEUE + "not-a-sha"), (455, QUEUE + "0a0b0c")],
     "pending": [(460, QUEUE + "1a1b1c")],
     "requested": [(470, QUEUE + "2a2b2c")],
 }
+LIVE = [
+    OWN,
+    QUEUE + "ddd444",
+    QUEUE + "not-a-sha",
+    "gh-readonly-queue/dev/pr-1234-bbb222",
+    "gh-readonly-queue/dev/pr-12-eee555",
+]
 
 GH = r"""#!/usr/bin/env bash
 set -euo pipefail
@@ -31,8 +41,8 @@ if [[ "$1 $2" == "api -X" ]]; then
   echo "$4" >> "$CANCELLED"
   exit 0
 fi
-[[ -z "${FAIL_LIST:-}" ]] || exit 1
-pattern='^repos/owner/repo/actions/workflows/test\.yml/runs\?event=merge_group&status=([a-z_]+)&per_page=100$'
+runs='^repos/owner/repo/actions/workflows/test\.yml/runs\?event=merge_group&status=([a-z_]+)&per_page=100$'
+refs='^repos/owner/repo/git/matching-refs/heads/gh-readonly-queue/$'
 url="" filter=""
 while (($#)); do
   case "$1" in
@@ -41,7 +51,13 @@ while (($#)); do
   esac
   shift
 done
-[[ "$url" =~ $pattern && -f "$FIXTURES/${BASH_REMATCH[1]}" ]] || exit 0
+if [[ "$url" =~ $refs ]]; then
+  [[ -z "${FAIL_REFS:-}" ]] || exit 1
+  jq -r "$filter" "$FIXTURES/refs"
+  exit 0
+fi
+[[ -z "${FAIL_LIST:-}" ]] || exit 1
+[[ "$url" =~ $runs && -f "$FIXTURES/${BASH_REMATCH[1]}" ]] || exit 0
 jq -r "$filter" "$FIXTURES/${BASH_REMATCH[1]}"
 """
 
@@ -51,17 +67,17 @@ def _workflow():
 
 
 def _step():
-    [step] = _workflow()["jobs"]["supersede"]["steps"]
-    return step
+    return _workflow()["jobs"]["durations"]["steps"][0]
 
 
-def _run(tmp_path, ref, **env):
+def _run(tmp_path, ref="refs/heads/" + OWN, live=LIVE, **env):
     fixtures, bin_dir = tmp_path / "fixtures", tmp_path / "bin"
     fixtures.mkdir()
     bin_dir.mkdir()
     for status, runs in RUNS.items():
         runs = [{"id": run, "head_branch": branch, "status": status} for run, branch in runs]
         (fixtures / status).write_text(json.dumps({"total_count": len(runs), "workflow_runs": runs}))
+    (fixtures / "refs").write_text(json.dumps([{"ref": f"refs/heads/{branch}"} for branch in live]))
     gh = bin_dir / "gh"
     gh.write_text(GH)
     gh.chmod(0o755)
@@ -82,7 +98,7 @@ def _run(tmp_path, ref, **env):
         capture_output=True,
         text=True,
     )
-    return result, cancelled.read_text().split()
+    return result, [int(path.split("/")[-2]) for path in cancelled.read_text().split()]
 
 
 def test_the_workflow_concurrency_stays_unchanged():
@@ -94,27 +110,39 @@ def test_the_workflow_concurrency_stays_unchanged():
     )
 
 
-def test_the_supersede_job_runs_only_in_the_merge_queue_with_cancel_rights():
-    job = _workflow()["jobs"]["supersede"]
-    assert job["if"] == "github.event_name == 'merge_group'"
-    assert job["permissions"] == {"actions": "write"}
-    assert _step()["name"] == STEP
-    assert _step()["env"] == {
+def test_the_sweep_runs_first_only_for_the_merge_queue_bot_with_cancel_rights():
+    step = _step()
+    assert step["name"] == STEP
+    assert step["if"] == (
+        "github.event_name == 'merge_group' && github.actor == 'github-merge-queue[bot]'"
+        " && github.triggering_actor == 'github-merge-queue[bot]'"
+    )
+    assert step["env"] == {
         "GH_TOKEN": "${{ github.token }}",
         "QUEUE_REF": "${{ github.event.merge_group.head_ref }}",
         "RUN": "${{ github.run_id }}",
     }
+    assert _workflow()["jobs"]["durations"]["permissions"] == {"contents": "read", "actions": "write"}
 
 
-def test_only_older_runs_of_the_same_pull_request_are_cancelled(tmp_path):
-    result, cancelled = _run(tmp_path, "refs/heads/" + QUEUE + "fff666")
+def test_older_runs_of_the_same_pull_request_and_runs_of_gone_branches_are_cancelled(tmp_path):
+    result, cancelled = _run(tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert cancelled == [f"repos/owner/repo/actions/runs/{run}/cancel" for run in (410, 430, 455, 460, 470)]
-    assert "Cancelled superseded queue run 410 (gh-readonly-queue/dev/pr-123-aaa111)" in result.stdout
+    assert cancelled == [410, 430, 480, 520, 455, 460, 470]
+    assert f"Cancelled queue run 410 ({QUEUE}aaa111): superseded by run {RUN}" in result.stdout
+    assert "Cancelled queue run 520 (gh-readonly-queue/dev/pr-88-abc888): its queue branch is gone" in result.stdout
+
+
+@pytest.mark.parametrize(("env", "live"), [({"FAIL_REFS": "1"}, LIVE), ({}, LIVE[1:])])
+def test_unreadable_live_branches_limit_the_sweep_to_the_same_pull_request(tmp_path, env, live):
+    result, cancelled = _run(tmp_path, live=live, **env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert cancelled == [410, 430, 455, 460, 470]
+    assert "::warning::Cannot read the live queue branches" in result.stdout
 
 
 def test_a_ref_outside_the_merge_queue_warns_and_cancels_nothing(tmp_path):
-    result, cancelled = _run(tmp_path, "refs/heads/dev")
+    result, cancelled = _run(tmp_path, ref="refs/heads/dev")
     assert result.returncode == 0, result.stdout + result.stderr
     assert cancelled == []
     assert "::warning::Unrecognised merge queue ref refs/heads/dev" in result.stdout
@@ -122,7 +150,7 @@ def test_a_ref_outside_the_merge_queue_warns_and_cancels_nothing(tmp_path):
 
 @pytest.mark.parametrize("failure", ["FAIL_LIST", "FAIL_CANCEL"])
 def test_a_failed_listing_or_cancel_warns_without_failing_the_live_run(tmp_path, failure):
-    result, cancelled = _run(tmp_path, "refs/heads/" + QUEUE + "fff666", **{failure: "1"})
+    result, cancelled = _run(tmp_path, **{failure: "1"})
     assert result.returncode == 0, result.stdout + result.stderr
     assert cancelled == []
     assert "::warning::" in result.stdout
