@@ -133,6 +133,8 @@ def record(method: str, route: str, wall: float, cpu: float, lock_wait: float) -
 def measured(method: Callable) -> Callable:
     @wraps(method)
     def request(handler):
+        if CURRENT.get() is not None:
+            return method(handler)
         timing = Timing()
         token = CURRENT.set(timing)
         wall, cpu = time.perf_counter(), time.thread_time()
@@ -141,7 +143,18 @@ def measured(method: Callable) -> Callable:
         finally:
             elapsed, used = time.perf_counter() - wall, time.thread_time() - cpu
             CURRENT.reset(token)
-            record(method.__name__.removeprefix("do_"), route_name(handler.path), elapsed, used, timing.lock_wait)
+            if method.__name__ != "handle_one_request" or handler.raw_requestline:
+                name = (
+                    method.__name__.removeprefix("do_")
+                    if method.__name__.startswith("do_")
+                    else handler.command or "OTHER"
+                )
+                name = (
+                    name
+                    if name in {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE", "CONNECT"}
+                    else "OTHER"
+                )
+                record(name, route_name(handler.path), elapsed, used, timing.lock_wait)
 
     return request
 

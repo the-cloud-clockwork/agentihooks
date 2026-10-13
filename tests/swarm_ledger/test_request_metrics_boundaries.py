@@ -213,7 +213,10 @@ def test_parallel_handlers_keep_request_clocks_and_lock_wait_separate(capture, m
     ]
 
 
-@pytest.mark.parametrize(("method", "label"), [("HEAD", "HEAD"), ("DELETE", "DELETE"), ("PRIVATE", "OTHER")])
+@pytest.mark.parametrize(
+    ("method", "label"),
+    [("HEAD", "HEAD"), ("DELETE", "DELETE"), ("TRACE", "TRACE"), ("CONNECT", "CONNECT"), ("PRIVATE", "OTHER")],
+)
 def test_rejected_http_methods_record_cpu_without_arbitrary_method_labels(
     capture, monkeypatch, metrics_url, method, label
 ):
@@ -244,3 +247,57 @@ def test_command_help_describes_the_timing_report(capsys):
         metrics.main(["--help"])
     assert caught.value.code == 0
     assert "Ledger write timing and request route CPU" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("method", ["GET", "POST", "PUT", "PATCH", "OPTIONS"])
+def test_supported_methods_keep_separate_route_cpu_totals(capture, monkeypatch, method):
+    monkeypatch.setattr(api, "handle", lambda *args: None)
+    handler = server.Handler.__new__(server.Handler)
+    handler.command, handler.path, handler.headers = method, "/api/v1/ledgers/private/tasks", {}
+    handler.send_response = handler.send_header = handler.end_headers = lambda *args: None
+    getattr(handler, f"do_{method}")()
+    result = metrics.report(1.0)
+    assert len(result["routes"]) == 1
+    assert result["routes"][0]["method"] == method
+    assert result["routes"][0]["count"] == 1
+
+
+def test_supported_http_request_is_recorded_once(capture, monkeypatch, metrics_url):
+    completed = threading.Event()
+    record = metrics.record
+
+    def recorded(*args):
+        record(*args)
+        completed.set()
+
+    monkeypatch.setattr(metrics, "record", recorded)
+    with urlopen(f"{metrics_url}/api/v1/metrics", timeout=10) as response:
+        json.load(response)
+    assert completed.wait(5)
+    result = metrics.report(1.0)
+    assert len(result["routes"]) == 1
+    assert result["routes"][0]["method"] == "GET"
+    assert result["routes"][0]["count"] == 1
+
+
+def test_empty_connection_records_no_request(capture, monkeypatch, metrics_url):
+    import socket
+    from urllib.parse import urlsplit
+
+    completed = threading.Event()
+    handle = server.Handler.handle_one_request
+
+    def finished(handler):
+        try:
+            return handle(handler)
+        finally:
+            completed.set()
+
+    monkeypatch.setattr(server.Handler, "handle_one_request", finished)
+    address = urlsplit(metrics_url)
+    with socket.create_connection((address.hostname, address.port), timeout=10):
+        pass
+    assert completed.wait(5)
+    result = metrics.report(1.0)
+    assert result["routes"] == []
+    assert result["writes"]["count"] == 0

@@ -704,6 +704,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         sys.stderr.write("%s %s\n" % (time.strftime("%H:%M:%S"), fmt % args))
 
+    @request_metrics.measured
+    def handle_one_request(self) -> None:
+        self.command, self.path, self.raw_requestline = None, "/", b""
+        return super().handle_one_request()
+
     def send(self, code, body, ctype):
         if self.path.startswith("/api/v1/") and code >= 400 and ctype != "application/json":
             body = json.dumps({"error": {"code": "forbidden" if code == 403 else "request_refused", "message": body}})
