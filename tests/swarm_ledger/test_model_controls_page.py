@@ -149,3 +149,20 @@ def test_the_panel_keeps_the_sent_values_until_the_acknowledging_tick_published(
     expect(page.tab.locator("#cap-ci")).to_have_value("2")
     expect(page.tab.locator("#cap-claude_model")).to_have_value("future-claude")
     expect(page.tab.get_by_role("button", name="Apply capacity")).to_be_disabled()
+
+
+def test_a_typed_cap_settles_on_the_number_it_sent(open_page):
+    page = model_page(open_page)
+    page.tab.locator("#cap-ci").fill("02")
+    page.payload["config"]["max_ci"] = 2
+    page.payload["commands"] = [
+        {"id": "new", "command": "swarm", "argv": ["set", "max-ci-agents=2"], "state": "pending"}
+    ]
+    page.tab.get_by_role("button", name="Apply capacity").click()
+    for _ in range(100):
+        if page.puts:
+            break
+        page.tab.wait_for_timeout(100)
+    assert page.puts == [{"action": "set", "max_ci": 2}]
+    expect(page.tab.locator("#cap-ci")).to_have_value("2")
+    expect(page.tab.get_by_role("button", name="Apply capacity")).to_be_disabled()

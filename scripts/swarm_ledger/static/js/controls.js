@@ -205,7 +205,7 @@ export async function refreshQuota() {
 
 export function appliedCaps(body, sw) {
   for (const key of Object.keys(capDraft)) if (!(key in body)) delete capDraft[key];
-  applied = { body, keys: Object.keys(body).filter((key) => key !== "action"), id: ((sw && sw.commands) || []).at(-1)?.id };
+  applied = { body, draft: { ...capDraft }, keys: Object.keys(body).filter((key) => key !== "action"), id: ((sw && sw.commands) || []).at(-1)?.id };
   settleCaps(sw);
 }
 
@@ -213,7 +213,8 @@ export function settleCaps(sw) {
   if (!applied || !sw) return;
   const row = (sw.commands || []).find((c) => c.id === applied.id), values = capValues(sw);
   const done = row && (row.state === "failed" || (row.state === "acknowledged" && sw.last_tick >= row.acknowledged_at));
-  for (const key of applied.keys) if (done || String(values[key]) === String(capDraft[key]).trim()) delete capDraft[key];
+  applied.keys = applied.keys.filter((key) => capDraft[key] === applied.draft[key]);
+  for (const key of applied.keys) if (done || String(values[key]) === String(applied.body[key])) delete capDraft[key];
   if (!applied.keys.some((key) => key in capDraft)) applied = null;
 }
 
