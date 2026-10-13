@@ -245,7 +245,7 @@ def test_creating_engineer_gets_a_scoped_pause_credential(live, credential, hive
     status, created = create(live, credential, "tscope", agent=owner)
     assert status == 200
     slug = created["data"]["slug"]
-    store.create(SwarmConfig(slug, "/repo", 1, 0, scratch=True))
+    store.create(SwarmConfig(slug, "/repo", 1, 0, scratch=True, state="running"))
     headers = {"X-Ledger-Agent": owner, "X-Ledger-Token": authority.agent_token(live["admin"], SLUG, owner)}
     status, issued = post(live, f"/api/v1/proof-ledgers/{slug}/credential", {}, **headers)
     assert status == 200
@@ -265,6 +265,18 @@ def test_creating_engineer_gets_a_scoped_pause_credential(live, credential, hive
     row = commands.rows(store, slug)[0]
     assert row["command"] == "swarm" and row["argv"] == ["pause"]
     assert store.config(slug) == before
+    from scripts.swarm import cli, command_runner
+
+    def consume_pause(argv, environ):
+        with patch.dict(os.environ, environ, clear=True):
+            return "" if cli.main(argv[1:]) == 0 else "pause failed"
+
+    monkeypatch.setattr(command_runner, "run", consume_pause)
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    monkeypatch.setattr(cli, "run_tick", lambda *args, **kwargs: [])
+    assert command_runner.consume(store, slug) == ["control swarm acknowledged"]
+    assert store.config(slug).state == "paused"
+    assert store.config(slug).max_eng == before.max_eng
     for other in (SLUG, "rig-grade-swarm", "rig-grade-swarm-doctor"):
         assert (
             post(
@@ -305,7 +317,14 @@ def test_creating_engineer_drains_worker_through_client_without_cap_changes(live
     before = store.config(slug)
     body = {"control": "drain", "agent": worker.name, "op": "drain-first", **lifecycle.seen(worker, {})}
     result = proof_ledger.control(
-        slug, body, {"LEDGER_URL": f"http://{live['host']}", "AGENTIHOOKS_AGENT_NAME": owner, "AGENTIHOOKS_SWARM": SLUG}
+        slug,
+        body,
+        {
+            "LEDGER_HOST": "127.0.0.1",
+            "LEDGER_PORT": str(live["port"]),
+            "AGENTIHOOKS_AGENT_NAME": owner,
+            "AGENTIHOOKS_SWARM": SLUG,
+        },
     )
     assert result == {"state": "paused"}
     assert store.config(slug) == before
@@ -313,6 +332,15 @@ def test_creating_engineer_drains_worker_through_client_without_cap_changes(live
     assert operation["control"] == "drain" and operation["execution_id"] == worker.execution_id
     assert commands.rows(store, slug)[0]["argv"] == ["drain", worker.name, "drain-first"]
     assert "credential" not in json.dumps(operation)
+    from scripts.swarm import command_runner
+    from scripts.swarm_v2.api.commands import CommandQueue
+
+    assert command_runner.consume(store, slug) == ["control lifecycle acknowledged"]
+    pending = CommandQueue(store, slug).pending(worker.execution_id, 10)
+    assert len(pending) == 1
+    assert pending[0]["kind"] == "drain"
+    assert pending[0]["generation"] == worker.generation
+    assert store.config(slug) == before
 
 
 @pytest.mark.parametrize("identity", ["other", "operator", "missing", "forged"])
