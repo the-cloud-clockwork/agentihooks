@@ -407,7 +407,7 @@ def _restart_from_handoff(store, slug, agent, task, context):
 
     if not _recovery_current(store, slug, agent, context):
         return "task ownership changed"
-    transfer = recovery_handoff(store, slug, agent, context.at)
+    transfer = recovery_handoff(store, slug, agent, context.at, "", "")
     transfers.attach(store, slug, agent)
     task = primed(store, slug, agent.seat, {**task, "handoff": transfer["handoff"], "transfer": transfer["id"]})
     if not _recovery_current(store, slug, agent, context):
@@ -420,7 +420,7 @@ def _restart_from_handoff(store, slug, agent, task, context):
 
 
 def recovery_handoff(
-    store: RedisStore, slug: str, agent: AgentRecord, now_ms: int, fallback: str = "", avoid_harness: str = ""
+    store: RedisStore, slug: str, agent: AgentRecord, now_ms: int, fallback: str, avoid_harness: str
 ) -> dict:
     handoff = store.handoff(slug, agent.task) or transfers.last_handoff(store, slug, agent.task) or fallback
     return transfers.record(store, slug, agent, "outage", handoff, now_ms, avoid_harness)

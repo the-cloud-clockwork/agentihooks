@@ -508,7 +508,7 @@ class HerdrRuntime:
             if saved and quota_transfer
             else saved
         )
-        avoid = (task.get("transfer") or {}).get("avoid_harness", "")
+        avoid = (task.get("transfer") or {}).get("avoid_harness")
         if saved and not quota_transfer and (saved["harness"] != want if want else saved["harness"] == avoid):
             saved = {}
         if want and not saved:

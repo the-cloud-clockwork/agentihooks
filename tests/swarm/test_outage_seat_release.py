@@ -16,9 +16,10 @@ CAPACITY = "■ Selected model is at capacity. Please try a different model."
 
 @pytest.fixture(autouse=True)
 def outage_home(tmp_path, monkeypatch):
-    from scripts.swarm import snapshot
+    from scripts.swarm import reaper, snapshot
 
     monkeypatch.setattr(outage, "HOME", tmp_path)
+    monkeypatch.setattr(reaper, "SCRATCH", tmp_path / "scratch")
     monkeypatch.setattr(snapshot, "worktrees", lambda repo, names, *run: {name: str(tmp_path) for name in names})
 
 
@@ -29,10 +30,11 @@ def executing(store, agent, backend="local"):
 
 
 def stuck_owner(store, monkeypatch):
-    from scripts.swarm import pane
+    from scripts.swarm import naming, pane, reaper
 
     ledger, runtime, agents = three_owners(store)
     owner = executing(store, replace(agents[0], harness="codex", account="alpha"))
+    (reaper.SCRATCH / "home" / naming.scratch_folder("sw", owner.task)).mkdir(parents=True)
     for agent in agents[1:]:
         runtime.statuses[agent.name] = "working"
     runtime.errors[owner.name] = pane.provider_error("codex", CAPACITY)
@@ -44,10 +46,16 @@ def stuck_owner(store, monkeypatch):
     return ledger, runtime, owner
 
 
-def assert_seat_freed(store, ledger, runtime, owner):
+def assert_seat_freed(store, ledger, runtime, owner, at, claims):
+    from scripts.swarm import reaper
+    from scripts.swarm_ledger import ledger_workspace
+
     assert owner.name in runtime.killed
+    assert runtime.homes[owner.name] == reaper.scratch_homes("sw", owner.task) != []
     assert owner.name not in {agent.name for agent in store.agents("sw")}
     assert store.claimant("sw", owner.task) is None
+    assert claims >= 1 and store.claims("sw", owner.task) == claims - 1
+    assert store.redis.hget(store.key("sw", resume.RECOVERY), owner.name) is None
     assert (ledger.rows[owner.task]["state"], ledger.rows[owner.task]["claimed_by"]) == ("open", "")
     recovery = [
         row
@@ -55,8 +63,11 @@ def assert_seat_freed(store, ledger, runtime, owner):
         if (row["task"], row["predecessor"], row["reason"]) == (owner.task, owner.name, "outage")
     ]
     assert len(recovery) == 1 and not recovery[0]["successor"], recovery
-    assert recovery[0]["avoid_harness"] == owner.harness
-    assert "## Next" in recovery[0]["handoff"] and recovery[0]["next"]
+    assert (recovery[0]["avoid_harness"], recovery[0]["at"]) == (owner.harness, at)
+    handoff = recovery[0]["handoff"]
+    assert "## Next" in handoff and recovery[0]["next"]
+    assert f"task {owner.task};" in handoff and f"retired {owner.name} " in handoff
+    assert f"folder {ledger_workspace.folder('sw', owner.task)} " in handoff
     assert not store.redis.exists(
         store.key("sw", outage.PANE, owner.name), store.key("sw", outage.PANE_SINCE, owner.name)
     )
@@ -89,8 +100,9 @@ def test_an_owner_whose_turns_still_fail_after_the_probe_passes_frees_its_seat_o
         idle.beat(store.redis, "sw", owner.name, "working", at * MINUTE + 1)
     assert runtime.nudged.count(owner.name) == resume.RECOVERY_ATTEMPTS
     assert store.claimant("sw", owner.task) == owner.name
+    claims = store.claims("sw", owner.task)
     tick("sw", store, ledger, runtime, 9 * MINUTE)
-    assert_seat_freed(store, ledger, runtime, owner)
+    assert_seat_freed(store, ledger, runtime, owner, 9 * MINUTE, claims)
     store.update("sw", state="running")
     tick("sw", store, ledger, runtime, 10 * MINUTE)
     successor = next(agent for agent in store.agents("sw") if agent.task == owner.task)
@@ -107,8 +119,9 @@ def test_a_provider_error_outlasting_the_hold_window_frees_the_seat_while_the_ou
     tick("sw", store, ledger, runtime, 2 * MINUTE + outage.HOLD_LIMIT_MS - 1)
     assert store.claimant("sw", owner.task) == owner.name
     assert owner.name not in runtime.killed
+    claims = store.claims("sw", owner.task)
     tick("sw", store, ledger, runtime, 2 * MINUTE + outage.HOLD_LIMIT_MS)
-    assert_seat_freed(store, ledger, runtime, owner)
+    assert_seat_freed(store, ledger, runtime, owner, 2 * MINUTE + outage.HOLD_LIMIT_MS, claims)
 
 
 def test_a_cleared_provider_error_restarts_the_hold_window(store, monkeypatch):
@@ -161,3 +174,60 @@ def test_a_spawn_after_a_freed_seat_keeps_the_same_harness_when_no_other_has_roo
     task = {"id": "p", "title": "Continue", "transfer": {"avoid_harness": "codex"}}
     runtime.spawn(config, "plan", "planner@a1b2c3-0001", task)
     assert seen == [("p", "codex", "cx")]
+
+
+def stuck_verdict(store, monkeypatch, *, lane="eng", error="provider unavailable", exhausted=True):
+    from scripts.swarm.pane import PaneObservation
+    from scripts.swarm.tick import _stuck_on_provider
+
+    _, _, owner = stuck_owner(store, monkeypatch)
+    now = outage.HOLD_LIMIT_MS
+    outage.mark_pane(store, "sw", owner.name, error, 0)
+    observed = PaneObservation("idle", provider_error=error)
+    return owner, lambda: _stuck_on_provider("sw", store, replace(owner, lane=lane), observed, exhausted, now)
+
+
+def test_spent_attempts_with_the_error_on_the_pane_free_a_lane_seat(store, monkeypatch):
+    _, stuck = stuck_verdict(store, monkeypatch)
+    assert stuck() is True
+
+
+@pytest.mark.parametrize(("lane", "error"), [("master", "provider unavailable"), ("eng", "")])
+def test_the_master_seat_and_a_cleared_pane_are_never_freed(store, monkeypatch, lane, error):
+    _, stuck = stuck_verdict(store, monkeypatch, lane=lane, error=error)
+    assert stuck() is False
+
+
+def test_an_operator_prompt_inside_the_quiet_window_keeps_the_seat(store, monkeypatch):
+    from scripts.swarm import idle
+
+    owner, stuck = stuck_verdict(store, monkeypatch)
+    idle.prompted(store.redis, "sw", owner.name, outage.HOLD_LIMIT_MS - 1)
+    assert stuck() is False
+
+
+def test_a_declared_wait_keeps_the_seat_past_the_hold_window(store, monkeypatch):
+    from scripts.swarm import idle
+
+    owner, stuck = stuck_verdict(store, monkeypatch, exhausted=False)
+    assert stuck() is True
+    now = outage.HOLD_LIMIT_MS
+    idle.declare_wait(store.redis, "sw", owner.name, now + MINUTE, "checks", now - 1)
+    assert stuck() is False
+
+
+def test_a_refused_retire_keeps_the_agent_and_its_claim_for_the_next_tick(store, monkeypatch):
+    ledger, runtime, owner = stuck_owner(store, monkeypatch)
+    outage.observe("sw", "provider", ["provider unavailable"], MINUTE)
+    tick("sw", store, ledger, runtime, 2 * MINUTE)
+    runtime.stuck.add(owner.name)
+    actions = tick("sw", store, ledger, runtime, 2 * MINUTE + outage.HOLD_LIMIT_MS)
+    assert f"could not retire {owner.name}, stuck on a provider error, retrying next tick" in actions
+    assert owner.name in {agent.name for agent in store.agents("sw")}
+    assert store.claimant("sw", owner.task) == owner.name
+
+
+def test_a_transfer_names_an_avoided_harness_only_when_given_one(store):
+    _, _, agents = three_owners(store)
+    assert "avoid_harness" not in transfers.record(store, "sw", agents[0], "exit", "", 1)
+    assert transfers.record(store, "sw", agents[0], "outage", "", 1, "codex")["avoid_harness"] == "codex"
