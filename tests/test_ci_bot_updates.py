@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.test_ci_anton_runners import pool
+
 _ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -27,13 +29,14 @@ def test_ci_creates_no_commits_or_bot_pull_requests():
         if "ORG_GITHUB_TOKEN" in json.dumps(workflow):
             assert path.name == "access-audit.yml"
             assert workflow.get("on", workflow.get(True)) == {
+                "push": {"branches": ["dev"]},
                 "schedule": [{"cron": "17 7 * * 1"}],
                 "workflow_dispatch": None,
             }
             assert workflow["permissions"] == {"contents": "read"}
             assert set(workflow["jobs"]) == {"audit"}
             job = workflow["jobs"]["audit"]
-            assert job["runs-on"] == "ubuntu-latest"
+            assert job["runs-on"] == pool("anton-oss-light")
             steps = job["steps"]
             assert steps[0] == {
                 "uses": "actions/checkout@v4",
