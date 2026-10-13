@@ -8,6 +8,7 @@ cleanup() {
   docker compose -f "$fixture" down --volumes --remove-orphans
 }
 trap cleanup EXIT
-docker compose -f "$fixture" up --build --wait --wait-timeout 180 redis worker
+bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/redis:7
+docker compose -f "$fixture" up --pull never --build --wait --wait-timeout 180 redis worker
 docker compose -f "$fixture" run --rm controller
 printf 'Remote hive scratch agent launch passed\n'
