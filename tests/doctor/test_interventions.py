@@ -7,6 +7,7 @@ import pytest
 from scripts.doctor import interventions
 from scripts.inbox.store import InboxStore
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
+from scripts.swarm_ledger import server_code
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 WATCHED, DOCTOR = "watch", "watch-doctor"
@@ -118,6 +119,7 @@ def server_tree(tmp_path):
     pidfile = tmp_path / ".server.pid"
     pidfile.write_text("1")
     os.utime(pidfile, (200, 200))
+    server_code.record(tmp_path, 1, 200_000_000_000)
     return tmp_path / "scripts" / "swarm_ledger", pidfile
 
 
@@ -138,6 +140,30 @@ def test_the_ledger_server_restarts_only_when_its_code_changed(store, tmp_path):
     assert line == restarted(
         "scripts/swarm_ledger/ledger_gate.py, scripts/swarm_ledger/ledger_server.py changed since it started"
     )
+    assert logged_on_both(ctx)
+
+
+@pytest.mark.parametrize("recorded", [True, False])
+def test_rewritten_pidfile_does_not_hide_code_newer_than_the_process(store, tmp_path, monkeypatch, recorded):
+    code, pidfile = server_tree(tmp_path)
+    proc = tmp_path / "proc"
+    (proc / "1").mkdir(parents=True)
+    (proc / "stat").write_text("btime 100\n")
+    tail = ["0"] * 20
+    tail[19] = str(100 * os.sysconf("SC_CLK_TCK"))
+    (proc / "1" / "stat").write_text("1 (ledger server) " + " ".join(tail))
+    monkeypatch.setattr(interventions, "PROC", proc, raising=False)
+    if not recorded:
+        (tmp_path / server_code.RECORD).unlink()
+    os.utime(code / "ledger_server.py", (300, 300))
+    pidfile.write_text("1")
+    os.utime(pidfile, (400, 400))
+    ctx = context(store, code=code, pidfile=pidfile)
+
+    line = interventions.apply(ctx, "restart-ledger-server", args())
+
+    assert [call[-1] for call in ctx.run.calls] == ["--stop", "--ensure"]
+    assert line == restarted("scripts/swarm_ledger/ledger_server.py changed since it started")
     assert logged_on_both(ctx)
 
 
