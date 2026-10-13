@@ -351,6 +351,7 @@ def test_creating_engineer_drains_worker_through_client_without_cap_changes(
         slug,
         body,
         {
+            "LEDGER_DIR": str(server.core.LEDGER_DIR),
             "LEDGER_HOST": "127.0.0.1",
             "LEDGER_PORT": str(live["port"]),
             "AGENTIHOOKS_AGENT_NAME": owner,
@@ -360,6 +361,7 @@ def test_creating_engineer_drains_worker_through_client_without_cap_changes(
     assert result == {"state": "paused"}
     from scripts.swarm import cli
 
+    monkeypatch.setenv("LEDGER_DIR", str(server.core.LEDGER_DIR))
     monkeypatch.setenv("LEDGER_HOST", "127.0.0.1")
     monkeypatch.setenv("LEDGER_PORT", str(live["port"]))
     monkeypatch.setattr(cli, "connect", lambda: store)
