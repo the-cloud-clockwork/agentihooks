@@ -175,6 +175,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/shard_budget.py",
         "tests/shard_check.py",
         "scripts/ci_reuse.py",
+        "scripts/ci_runner_classes.py",
     ]
     if (ROOT / "scripts/ci_runner_trust.py").exists():
         expected.extend(("scripts/ci_runner_trust.py", "scripts/gate_protected.py"))
