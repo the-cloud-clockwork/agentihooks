@@ -121,7 +121,6 @@ def test_weekly_job_reads_dev_and_alerts_through_notifications():
     root = Path(__file__).resolve().parents[1]
     workflow = yaml.safe_load((root / ".github/workflows/access-audit.yml").read_text())
     events = workflow.get("on", workflow.get(True))
-    assert "schedule" in events and "workflow_dispatch" in events
     assert events == {"push": {"branches": ["dev"]}, "schedule": [{"cron": "17 7 * * 1"}], "workflow_dispatch": None}
     assert set(workflow["jobs"]) == {"audit"}
     job = workflow["jobs"]["audit"]
@@ -142,7 +141,6 @@ def test_weekly_job_reads_dev_and_alerts_through_notifications():
     assert mint["with"]["repositories"] == "${{ github.event.repository.name }}"
     assert {key: value for key, value in mint["with"].items() if key.startswith("permission-")} == {
         "permission-metadata": "read",
-        "permission-members": "read",
         "permission-organization-administration": "read",
     }
     inventory = next(step for step in job["steps"] if "scripts.ci_access_audit" in step.get("run", ""))
