@@ -665,6 +665,27 @@ def test_a_conflict_reopens_a_task_whose_engineer_has_not_released_its_seat(merg
     assert merging.shell.calls == []
 
 
+def test_one_tick_reports_every_unreleased_entry_it_dequeues(merging):
+    from scripts.swarm.ledger_events import pull_request
+
+    other_url = URL + "0"
+    merging.rows["t1"]["awaiting"] = ""
+    merging.rows["t2"].update({"state": "pr", "awaiting": "", "claimed_by": "another engineer", "pr_url": other_url})
+    merging.store.claim("sw", "t2", "another engineer", 60_000)
+    pull = pull_request({"state": "OPEN", "mergeQueueEntry": {"id": "entry", "state": "UNMERGEABLE"}})
+    merging.pulls.update({URL: pull, other_url: pull})
+    merging.queue.extra = {"queued": False}
+    assert merging.run() == [
+        f"task t1 reopened, {URL} is marked unmergeable by GitHub",
+        f"task t2 reopened, {other_url} is marked unmergeable by GitHub",
+    ]
+    assert merging.queued == [("dequeue", URL), ("dequeue", other_url)]
+    assert all(row["state"] == "open" and row["claimed_by"] == "" for row in merging.rows.values())
+    assert merging.store.claimant("sw", "t1") is None
+    assert merging.store.claimant("sw", "t2") is None
+    assert len(merging.ledger.comments) == 2
+
+
 @pytest.mark.parametrize("failure", ["GitHub did not answer", "still queued"])
 def test_a_dequeue_that_does_not_finish_keeps_the_task_for_the_next_tick(merging, failure):
     from scripts.swarm.ledger_events import pull_request
