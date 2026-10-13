@@ -36,7 +36,7 @@ function renderArchitecture(view) {
 async function architectureRefusal(resp) {
   try {
     return (await resp.json()).error.message;
-  } catch (e) {
+  } catch {
     return `server answered ${resp.status}`;
   }
 }
@@ -49,7 +49,7 @@ async function sendArchitecture(action, body) {
     const resp = await writeArchitecture(body);
     if (resp.ok) return renderArchitecture((await resp.json()).data);
     why = await architectureRefusal(resp);
-  } catch (e) {}
+  } catch {}
   $("architecture-status").textContent = `Could not ${ARCH_VERB[action]}: ${why}.`;
   loadArchitecture();
 }
@@ -58,6 +58,6 @@ export async function loadArchitecture() {
   try {
     const resp = await readArchitecture();
     if (resp.ok) return renderArchitecture((await resp.json()).data);
-  } catch (e) {}
+  } catch {}
   $("swarm-architecture").replaceChildren(recordEmpty("Architecture record unavailable."));
 }

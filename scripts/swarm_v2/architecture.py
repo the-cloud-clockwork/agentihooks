@@ -378,8 +378,12 @@ def _run(args, key: Ed25519PublicKey | None) -> int:
         key = _cli_approve(args)
     elif args.command == "rollback":
         print(json.dumps(rollback(args.record, args.to, args.operation, **_operator_transport(args.slug)), indent=2))
-    Path(args.markdown).write_text(render(load_record(args.record), key))
+    write_markdown(args.record, args.markdown, key)
     return 0
+
+
+def write_markdown(record: Path | str, markdown: Path | str, key: Ed25519PublicKey | None) -> None:
+    Path(markdown).write_text(render(load_record(record), key))
 
 
 def _page_credential(slug: str) -> str | None:

@@ -149,12 +149,22 @@ def test_the_operator_principal_still_needs_the_page_credential_of_that_ledger(f
     handler = request("POST", "architecture/actions")
     server = SimpleNamespace(repository=SimpleNamespace(token={"other": "page-token"}.get))
     with pytest.raises(APIError) as error:
-        architecture.operator(handler, server, SLUG, "")
+        architecture.operator_transport(handler, server, SLUG, "")
     assert (error.value.status, str(error.value)) == (403, "Architecture changes need the operator")
 
 
+def test_an_agent_principal_is_refused_even_with_the_page_credential(files):
+    with pytest.raises(APIError) as error:
+        architecture.operator_transport(request("POST", "architecture/actions"), fake_server(), SLUG, "engineer@1")
+    assert (error.value.status, error.value.code, str(error.value)) == (
+        403,
+        "forbidden",
+        "Architecture changes need the operator",
+    )
+
+
 def test_the_operator_transport_carries_the_page_credential(files):
-    transport = architecture.operator(request("POST", "architecture/actions"), fake_server(), SLUG, "")
+    transport = architecture.operator_transport(request("POST", "architecture/actions"), fake_server(), SLUG, "")
     assert (transport["slug"], transport["credential"]) == (SLUG, "page-token")
     assert transport["authenticate"](SLUG, "page-token").role.value == "operator"
 
@@ -193,4 +203,4 @@ def test_approval_needs_a_configured_inventory(files, monkeypatch):
 def test_the_record_defaults_to_the_committed_one(monkeypatch):
     monkeypatch.delenv("AGENTIHOOKS_ARCHITECTURE_RECORD", raising=False)
     monkeypatch.delenv("AGENTIHOOKS_ARCHITECTURE_INVENTORY", raising=False)
-    assert architecture.paths({}) == (ROOT / records.RECORD, None)
+    assert architecture.paths({}) == (ROOT / "docs" / "swarm-v2" / "architecture.json", None)

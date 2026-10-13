@@ -61,7 +61,7 @@ def view(environ: Mapping[str, str], key: Ed25519PublicKey | None = None) -> dic
     return {"data": data, "revision": resources.revision(data)}
 
 
-def operator(handler: object, server: ModuleType, slug: str, principal: str) -> dict:
+def operator_transport(handler: object, server: ModuleType, slug: str, principal: str) -> dict:
     credential = handler.headers.get("X-Ledger-Token") or ""
     authenticate = operator_auth.authenticator(server.repository.token)
     if principal or authenticate(slug, credential) is None:
@@ -72,7 +72,7 @@ def operator(handler: object, server: ModuleType, slug: str, principal: str) -> 
 def act(
     handler: object, server: ModuleType, slug: str, principal: str, payload: dict, environ: Mapping[str, str]
 ) -> dict:
-    transport = operator(handler, server, slug, principal)
+    transport = operator_transport(handler, server, slug, principal)
     schemas.validate(ACTION, payload)
     record_path, inventory_path = paths(environ)
     try:
@@ -88,6 +88,5 @@ def act(
             key = records.verify_key(environ)
     except records.ArchitectureError as exc:
         raise APIError(409, "architecture_refused", str(exc)) from None
-    markdown = record_path.with_name(Path(records.MARKDOWN).name)
-    markdown.write_text(records.render(records.load_record(record_path), key))
+    records.write_markdown(record_path, record_path.with_name(Path(records.MARKDOWN).name), key)
     return view(environ, key)

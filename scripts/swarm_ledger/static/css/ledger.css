@@ -606,8 +606,6 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 #architecture-table .hl-note:hover, #architecture-table .hl-note:focus { border-bottom-color: var(--accent); }
 #architecture-table .hl-note::placeholder { color: var(--muted); }
 #architecture-status:empty { display: none; }
-.lbl.approved { color: var(--positive); }
-.lbl.awaiting-approval { color: var(--warn); }
 #health-table td:nth-child(3) { min-width: 20ch; white-space: normal; color: var(--text-2); }
 #health-table .hl-pick, #health-table .hl-note { border-bottom-color: transparent; font-size: var(--fs-body); }
 #health-table .hl-pick:hover, #health-table .hl-note:hover, #health-table .hl-pick:focus, #health-table .hl-note:focus { border-bottom-color: var(--accent); }
@@ -633,6 +631,8 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 .lbl.idle, .lbl.waiting, .lbl.pending, .lbl.awaiting-decision, .lbl.unknown { color: var(--warn); }
 .lbl.stalled, .lbl.absent { color: var(--destructive); }
 .lbl.promoted { color: var(--warn); }
+.lbl.approved { color: var(--positive); }
+.lbl.awaiting-approval { color: var(--warn); }
 #quota-table .lbl.open { color: var(--positive); }
 #quota-table .lbl.closed { color: var(--destructive); }
 .sw-promoted { display: inline-flex; gap: 8px; }

@@ -60,7 +60,6 @@ def rows(tab):
 
 
 def sent_body(tab, sent):
-    tab.wait_for_function("() => true")
     for _ in range(40):
         if sent:
             break
