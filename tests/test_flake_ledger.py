@@ -133,6 +133,8 @@ _CRASHES = """
 import os
 from pathlib import Path
 
+import pytest
+
 
 def _crash_first(name, times):
     marker = Path(name)
@@ -148,11 +150,20 @@ def test_crashes_once():
 
 def test_crashes_twice():
     _crash_first("crashed-twice", 2)
+
+
+def test_crashes_always():
+    _crash_first("crashed-always", 99)
+
+
+@pytest.mark.parametrize("n", range(6))
+def test_sibling(n):
+    pass
 """
 
 
-def _run_crash(tmp_path, name, reruns="2"):
-    return _run(tmp_path, name, workers="2", probes=_CRASHES, reruns=reruns, extra=("--dist", "loadgroup"))
+def _run_crash(tmp_path, *names, reruns="2"):
+    return _run(tmp_path, *names, workers="2", probes=_CRASHES, reruns=reruns, extra=("--dist", "loadgroup"))
 
 
 def test_a_worker_crash_that_passes_on_retry_is_green_and_reports_the_crash(tmp_path):
@@ -177,6 +188,19 @@ def test_a_worker_crash_that_repeats_on_retry_stays_red(tmp_path):
     assert record["crashes"] == 2
     assert record["attempts"] == int((tmp_path / "crashed-twice").read_text()) == 3
     assert len(record["errors"]) == 2
+
+
+def test_a_test_crashing_every_attempt_stops_after_its_reruns_and_every_other_test_runs(tmp_path):
+    result, records = _run_crash(tmp_path, "test_crashes_always", "test_sibling")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "6 passed" in result.stdout
+    assert "maximum crashed workers" not in result.stdout
+    assert "crashed while running 'test_probes.py::test_crashes_always'" in result.stdout
+    assert (tmp_path / "crashed-always").read_text() == "3"
+    [record] = records
+    assert record["test"] == "test_probes.py::test_crashes_always"
+    assert record["outcome"] == "failed"
+    assert record["crashes"] == record["attempts"] == 3
 
 
 def test_a_worker_crash_without_reruns_stays_red_and_is_not_run_again(tmp_path):
