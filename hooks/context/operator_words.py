@@ -72,29 +72,35 @@ def _append(connection, swarm, name, at, words):
     )
 
 
-def _legacy_swarm(name):
-    from hooks._redis import get_redis
+def _legacy_swarm(name, redis):
+    from redis.exceptions import RedisError
+
     from scripts.swarm.naming import NameRegistry, legacy_slug, parse
 
-    redis = get_redis()
-    swarm = NameRegistry(redis).slug_of(name) if redis is not None else legacy_slug(name)
-    return None if not swarm and parse(name) else swarm
+    if redis is None:
+        return None if parse(name) else legacy_slug(name)
+    try:
+        return NameRegistry(redis).slug_of(name)
+    except RedisError:
+        return None
 
 
 def _migrate(connection):
+    from hooks._redis import get_redis
+
     if connection.execute("SELECT 1 FROM legacy WHERE name = ''").fetchone():
         return
+    redis = get_redis()
+    found = [
+        (path, data, _legacy_swarm(path.stem, redis))
+        for path in _dir().glob("*.json")
+        if (data := _load(path.stem))["rows"]
+    ]
     clean = {}
-    pending = False
     with connection:
         connection.execute("BEGIN IMMEDIATE")
-        for path in _dir().glob("*.json"):
-            data = _load(path.stem)
-            if not data["rows"]:
-                continue
-            swarm = _legacy_swarm(path.stem)
+        for path, data, swarm in found:
             if swarm is None:
-                pending = True
                 continue
             clean[path.stem] = {"sessions": data["sessions"]}
             if connection.execute("INSERT OR IGNORE INTO legacy VALUES (?)", (path.name,)).rowcount:
@@ -102,7 +108,7 @@ def _migrate(connection):
                     _append(connection, swarm, path.stem, row["at"], row["words"])
     for name, data in clean.items():
         _save(name, data)
-    if not pending:
+    if all(swarm is not None for _, _, swarm in found):
         with connection:
             connection.execute("INSERT OR IGNORE INTO legacy VALUES ('')")
 
