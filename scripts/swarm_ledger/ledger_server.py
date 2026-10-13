@@ -786,11 +786,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Access-Control-Allow-Private-Network", "true")
         self.end_headers()
 
+    @request_metrics.endpoint
     def do_GET(self):
-        if self.path.split("?", 1)[0] == "/api/v1/metrics":
-            if self.refused():
-                return None
-            return self.send(200, json.dumps(request_metrics.report(24.0)), "application/json")
         if self.path.startswith("/api/v1/"):
             from scripts.swarm_ledger import api
 

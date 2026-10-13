@@ -112,6 +112,18 @@ def report(hours: float) -> dict:
     }
 
 
+def endpoint(method):
+    @wraps(method)
+    def request(handler):
+        if handler.path.split("?", 1)[0] != "/api/v1/metrics":
+            return method(handler)
+        if handler.refused():
+            return None
+        return handler.send(200, json.dumps(report(24.0)), "application/json")
+
+    return request
+
+
 def main(argv: list[str] | None = None) -> None:
     from scripts.swarm_ledger import ledger_link
 
