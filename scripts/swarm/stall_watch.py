@@ -141,6 +141,7 @@ def _pull_request(watch, mail, task, limit, marks, seen):
 
 
 def _reopen(watch, mail, task, case, minutes, limit):
+    task = dict(task)
     tid, owner = task["id"], task.get("claimed_by") or ""
     agent = next((a for a in watch.store.agents(watch.slug) if a.name == owner and a.state != "finished"), None)
     if agent is not None and not watch.retire(agent):
