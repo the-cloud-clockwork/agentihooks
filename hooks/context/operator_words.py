@@ -33,7 +33,7 @@ def _norm(text):
 
 
 @contextmanager
-def _store():
+def _store(migrate=True):
     path = _dir() / "words.sqlite3"
     path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(path)
@@ -50,7 +50,8 @@ def _store():
             "CREATE INDEX IF NOT EXISTS line_hash ON lines(name, hash);"
             "CREATE TABLE IF NOT EXISTS legacy (name TEXT PRIMARY KEY);"
         )
-        _migrate(connection)
+        if migrate:
+            _migrate(connection)
         with connection:
             yield connection
     finally:
@@ -72,17 +73,25 @@ def _append(connection, swarm, name, at, words):
     )
 
 
-def _legacy_swarm(name, redis):
+def _offline_swarm(name):
+    from scripts.swarm.naming import legacy_slug, parse
+
+    return None if parse(name) else legacy_slug(name)
+
+
+def _legacy_swarms(names, redis):
     from redis.exceptions import RedisError
 
-    from scripts.swarm.naming import NameRegistry, legacy_slug, parse
+    from scripts.swarm.naming import NameRegistry
 
-    if redis is None:
-        return None if parse(name) else legacy_slug(name)
-    try:
-        return NameRegistry(redis).slug_of(name)
-    except RedisError:
-        return None
+    swarms = {}
+    for name in names:
+        try:
+            swarms[name] = NameRegistry(redis).slug_of(name) if redis is not None else _offline_swarm(name)
+        except RedisError:
+            redis = None
+            swarms[name] = _offline_swarm(name)
+    return swarms
 
 
 def _migrate(connection):
@@ -90,25 +99,21 @@ def _migrate(connection):
 
     if connection.execute("SELECT 1 FROM legacy WHERE name = ''").fetchone():
         return
-    redis = get_redis()
-    found = [
-        (path, data, _legacy_swarm(path.stem, redis))
-        for path in _dir().glob("*.json")
-        if (data := _load(path.stem))["rows"]
-    ]
+    swarms = _legacy_swarms([path.stem for path in _dir().glob("*.json") if _load(path.stem)["rows"]], get_redis())
     clean = {}
     with connection:
         connection.execute("BEGIN IMMEDIATE")
-        for path, data, swarm in found:
+        for name, swarm in swarms.items():
             if swarm is None:
                 continue
-            clean[path.stem] = {"sessions": data["sessions"]}
-            if connection.execute("INSERT OR IGNORE INTO legacy VALUES (?)", (path.name,)).rowcount:
+            data = _load(name)
+            clean[name] = {"sessions": data["sessions"]}
+            if connection.execute("INSERT OR IGNORE INTO legacy VALUES (?)", (f"{name}.json",)).rowcount:
                 for row in data["rows"]:
-                    _append(connection, swarm, path.stem, row["at"], row["words"])
+                    _append(connection, swarm, name, row["at"], row["words"])
     for name, data in clean.items():
         _save(name, data)
-    if all(swarm is not None for _, _, swarm in found):
+    if None not in swarms.values():
         with connection:
             connection.execute("INSERT OR IGNORE INTO legacy VALUES ('')")
 
@@ -154,7 +159,7 @@ def record(name: str, words: str, now: float | None = None, swarm: str = "") -> 
     text = str(words or "").strip()
     if not (name and text):
         return False
-    with _store() as connection:
+    with _store(migrate=False) as connection:
         _append(connection, swarm or "", name, now, text)
     return True
 
@@ -178,8 +183,6 @@ def matching(name: str, quote: str, now: float | None = None, within: float | No
 
 def _opening(name, session):
     """True once per session: the first prompt of a swarm agent is its launch or handoff prompt."""
-    with _store():
-        pass
     data = _load(name)
     if not session or session in data["sessions"]:
         return False
