@@ -183,13 +183,13 @@ def test_a_page_recovers_a_burst_in_one_stream_and_matches_a_fresh_reload(browse
         release.set()
         page.wait_for_function("() => document.body.textContent.includes('streamed note 7')", timeout=10000)
         for n in range(8):
-            assert page.get_by_text(f"streamed note {n}", exact=True).count() == 1
+            assert page.locator("#notes").get_by_text(f"streamed note {n}", exact=True).count() == 1
         assert [url for url in requests if url.endswith(f"/{SLUG}/events")] == [f"{base}/api/v1/ledgers/{SLUG}/events"]
         fresh = context.new_page()
         fresh.goto(f"{base}/{SLUG}")
         fresh.wait_for_function("() => document.body.textContent.includes('streamed note 7')", timeout=10000)
         for n in range(8):
-            assert fresh.get_by_text(f"streamed note {n}", exact=True).count() == 1
+            assert fresh.locator("#notes").get_by_text(f"streamed note {n}", exact=True).count() == 1
     finally:
         release.set()
         context.close()
