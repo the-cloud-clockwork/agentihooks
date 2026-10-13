@@ -810,6 +810,7 @@ def test_a_planted_unmergeable_entry_leaves_the_queue_within_two_full_ticks(env,
         return {"resource": dict(raw)}
 
     monkeypatch.setattr(ready.merge_queue, "graphql", graphql)
+    monkeypatch.setattr(cli.ledger_events, "views", lambda urls, cache=None: {url: ledger.pulls[url] for url in urls})
     monkeypatch.setattr(stack, "shell", Shell())
     for tick_number in (1, 2):
         monkeypatch.setattr(cli, "now_ms", lambda: NOW + tick_number * 60_000)
