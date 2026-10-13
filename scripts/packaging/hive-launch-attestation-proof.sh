@@ -10,7 +10,7 @@ cleanup() {
   rmdir "$proof_dir"
 }
 trap cleanup EXIT
-registry="$(docker run -d -i --platform linux/amd64 -p 5000:5000 mirror.gcr.io/library/python:3.12-slim-bookworm python -u - <<'PY'
+registry="$(docker run -d --platform linux/amd64 -p 5000:5000 mirror.gcr.io/library/python:3.12-slim-bookworm python -u -c "$(cat <<'PY'
 import hashlib
 import json
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -68,10 +68,12 @@ class Registry(BaseHTTPRequestHandler):
 HTTPServer(("0.0.0.0", 5000), Registry).serve_forever()
 PY
 )"
+)"
 for attempt in {1..30}; do
   if docker exec "$registry" python -c 'import urllib.request; urllib.request.urlopen("http://localhost:5000/v2/")' 2>/dev/null; then break; fi
   sleep 1
 done
+docker exec "$registry" python -c 'import urllib.request; urllib.request.urlopen("http://localhost:5000/v2/")'
 fixture=tests/integration/hive_launch/compose.yaml
 printf 'services:\n  redis:\n    image: localhost:5000/proof:present\n' > "$proof_dir/override.yaml"
 docker compose -f "$fixture" -f "$proof_dir/override.yaml" pull redis
