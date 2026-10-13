@@ -597,8 +597,8 @@ def plan_check(slug, doc, task_id, traced, mode, now_ms, home=None):
 
 def _fingerprint(doc, task):
     phase = _phase(doc, task)
-    judged = [task.get("title"), task.get("description"), phase.get("title"), phase.get("description")]
-    return hashlib.sha256(json.dumps([*judged, _plan_chunk(doc, task)]).encode()).hexdigest()
+    parent = [task.get("title"), task.get("description"), phase.get("title"), phase.get("description")]
+    return hashlib.sha256(json.dumps([*parent, _plan_chunk(doc, task)]).encode()).hexdigest()
 
 
 def _drafted(record):
@@ -610,7 +610,7 @@ class _Judgment:
     pr: dict | None
     previous: dict | None
     state: dict | None
-    answer: tuple[str, str] | None
+    answer: dict | tuple[str, str] | None
     inputs: str | None = None
 
 

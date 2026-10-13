@@ -182,18 +182,25 @@ def answered(**values):
 
 
 @pytest.mark.parametrize(
-    "state",
-    [{}, {"task_part": "tests-first", "pull_request_diff": ""}],
+    "state,lead",
+    [
+        (
+            {},
+            "the change fits the phase at probability 0.90, and the phase can use it as delivered at probability "
+            "0.50, under 0.6: a delivery shortfall, not a phase mismatch",
+        ),
+        (
+            {"task_part": "tests-first", "pull_request_diff": ""},
+            "the phase can use this change at probability 0.50, under 0.6",
+        ),
+    ],
 )
-def test_a_threshold_override_through_the_environment_changes_the_intent_verdict(state, monkeypatch):
+def test_a_threshold_override_through_the_environment_changes_the_intent_verdict(state, lead, monkeypatch):
     decide = answered(usable=0.5, weakens=0.1, changes_gate_behavior=0.1)
     assert intent.judge(state, decide=decide)[0] == "pass"
     monkeypatch.setenv("AGENTIHOOKS_CLASSIFIER_INTENT_CHECK_FAIL", "0.6")
     verdict, reason = intent.judge(state, decide=decide)
-    assert (verdict, "at probability 0.50, under 0.6" in reason) == (
-        "fail",
-        True,
-    )
+    assert (verdict, reason.startswith(lead)) == ("fail", True)
 
 
 def test_the_intent_rule_gives_pass_fail_or_unchecked_and_rejects_with_fail():

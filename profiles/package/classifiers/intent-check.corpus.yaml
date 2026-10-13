@@ -101,6 +101,8 @@ notes:
   chunk_before: 'plan chunk cases: before is the dev rule with four questions on the state without its chunk'
   aligned: adds aligned, phase fit judged apart from delivery; every case re-sampled three times on 2026-10-13 through the
     configured classifier with the aligned question; the pass and fail rule is unchanged
+  drift: g18-gates-off became a miss and lifted-t205 a hit in that re-sample; the same day the old four questions scored
+    g18-gates-off weakens 0.19 to 0.22 too, so the model moved since its unrecorded samples, not the aligned question
 cases:
 - name: pn1
   state:
