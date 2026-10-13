@@ -110,7 +110,9 @@ def test_channel_information_requests_no_action_and_work_keeps_its_content(store
 
     info = store.send("alice", "bob", "The branch merged", fyi=True)
     work = store.send("alice", "bob", "Verify the proof")
-    assert event(info)["params"]["content"] == "Information only; closes on read or confirmed receipt.\nThe branch merged"
+    assert (
+        event(info)["params"]["content"] == "Information only; closes on read or confirmed receipt.\nThe branch merged"
+    )
     assert event(work)["params"]["content"] == "Verify the proof"
 
 
