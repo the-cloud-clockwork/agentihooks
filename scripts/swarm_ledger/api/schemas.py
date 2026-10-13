@@ -132,7 +132,11 @@ TYPES = {
     "phases": {"type": "array", "maxItems": 100, "items": {"type": "object"}},
     "attachments": {"type": "array", "maxItems": 100, "items": {"type": "object"}},
 }
-KIND_TYPES = {"artifact_add": {"plan": {"type": "boolean"}}, "task_rank": {"if_owned": {"type": "boolean"}}}
+KIND_TYPES = {
+    "artifact_add": {"plan": {"type": "boolean"}},
+    "plan_add": {"artifact": {"type": "string", "maxLength": 100000}},
+    "task_rank": {"if_owned": {"type": "boolean"}},
+}
 for _field in ("depends_on", "territory", "if_state", "members", "watched", "halves"):
     TYPES[_field] = {"type": "array", "maxItems": 100, "items": {"type": "string", "maxLength": 2000}}
 
