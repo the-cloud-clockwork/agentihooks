@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.xǁSQLiteLedgerRepositoryǁ_set_up__mutmut_10:30915bc70eabbfe4f5913d1ef022a63f3b12d2196994538396ed8e94aabbd2d0": {
+    "reader": "standards_reader",
+    "reason": "Lowercases the column type and constraint keywords of the per table CREATE TABLE statement; SQLite keywords, type names and identifiers are case insensitive and type affinity is derived case insensitively, so the created columns are identical, and no ledger code reads sqlite_master schema text, row_factory or cursor.description."
+  }
+}

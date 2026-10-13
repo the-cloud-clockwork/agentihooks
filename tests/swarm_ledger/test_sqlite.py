@@ -1,5 +1,7 @@
 import copy
 import json
+import sqlite3
+import threading
 
 import pytest
 
@@ -321,3 +323,45 @@ def test_summaries_follow_writes_newest_first_and_carry_bin_facts(tmp_path):
     full = repo.summaries()[0]
     assert full["finished"] is False and full["created_at"] <= full["updated_at"]
     assert json.loads(json.dumps(rows)) == rows
+
+
+def test_concurrent_first_connections_set_up_the_store_once(tmp_path, monkeypatch):
+    setups = []
+    entered = threading.Semaphore(0)
+    both = threading.Event()
+
+    class Recording(sqlite3.Connection):
+        def execute(self, sql, *args):
+            if sql == "PRAGMA journal_mode=WAL":
+                setups.append(threading.get_ident())
+                both.wait(5)
+            return super().execute(sql, *args)
+
+    connect = sqlite3.connect
+    monkeypatch.setattr(sqlite3, "connect", lambda *args, **kwargs: connect(*args, factory=Recording, **kwargs))
+    repo = SQLiteLedgerRepository(tmp_path / "ledgers.sqlite3")
+    set_up = repo._set_up
+
+    def entering(connection, path):
+        entered.release()
+        return set_up(connection, path)
+
+    monkeypatch.setattr(repo, "_set_up", entering)
+    errors = []
+
+    def first():
+        try:
+            with repo.connect() as connection:
+                connection.execute("SELECT 1")
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=first) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    assert entered.acquire(timeout=5) and entered.acquire(timeout=5)
+    both.set()
+    for thread in threads:
+        thread.join(5)
+    assert errors == []
+    assert len(setups) == 1
