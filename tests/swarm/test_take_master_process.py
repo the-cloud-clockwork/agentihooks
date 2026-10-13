@@ -20,6 +20,7 @@ pytestmark = pytest.mark.xdist_group("fakeredis")
 @pytest.fixture
 def native_taker(remote_taker, monkeypatch):  # noqa: F811
     store = remote_taker[0]
+    monkeypatch.setenv("SWARM_HIVE_ID", "member-1")
     table = {
         pid: Process(pid, 1, pid, pid, start, "S", "codex", ("codex",)) for pid, start in ((4242, 100), (4343, 200))
     }
