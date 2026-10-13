@@ -213,6 +213,25 @@ def test_a_session_bound_to_a_ledger_gets_no_small_ledger(isolated, capsys, monk
     assert MARK not in run(todos(5), capsys, "claude", monkeypatch)
 
 
+def test_a_closed_ledger_is_read_after_an_earlier_hook_uses_another_folder(isolated, capsys, monkeypatch):
+    from unittest.mock import Mock
+
+    from scripts.swarm_ledger.repository import sqlite
+
+    run(prompt("hello", session="earlier"), capsys, "claude", monkeypatch)
+    current = isolated / "current"
+    (current / ".sessions").mkdir(parents=True)
+    (current / ".sessions" / "s1.json").write_text(json.dumps({"slug": "closed", "name": "member"}), encoding="utf-8")
+    monkeypatch.setenv("LEDGER_DIR", str(current))
+    read = Mock(wraps=sqlite.read_ledger)
+    monkeypatch.setattr(sqlite, "read_ledger", read)
+
+    assert MARK not in run(prompt("troubleshoot the page"), capsys, "claude", monkeypatch)
+
+    assert read.call_count == 1
+    assert read.call_args.args[:2] == (current, "closed")
+
+
 def test_a_bound_master_appends_its_plan_to_its_own_ledger(isolated, capsys, monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "other-swarm")
     session = RECORDED["claude_plan_accept"]["session_id"]
