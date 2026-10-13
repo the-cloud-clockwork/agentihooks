@@ -19,9 +19,8 @@ from xdist.scheduler import LoadGroupScheduling, LoadScopeScheduling
 class RefillingLoadGroupScheduling(LoadGroupScheduling):
     # A worker runs a test only once it holds the next one or is shut down, and a replacement
     # worker after a crash gets a single work unit, so keep every worker at two queued tests.
-    # A crashed test waits for FlakeLedger.pytest_handlecrashitem to release it: a worker that
-    # starts it before pytest-rerunfailures records the crash reads the old count and runs it
-    # past its reruns.
+    # Workers read pytest-rerunfailures' crash count from a controller thread, so a crashed test
+    # stays held until FlakeLedger.pytest_handlecrashitem runs after that count is recorded.
     holding = False
 
     def remove_node(self, node):
