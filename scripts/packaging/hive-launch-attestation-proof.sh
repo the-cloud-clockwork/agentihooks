@@ -4,8 +4,11 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 proof_dir="$(mktemp -d "$PWD/.hive-attestation.XXXXXX")"
 registry=""
+daemon=""
+original_docker_host="${DOCKER_HOST:-unix:///var/run/docker.sock}"
 cleanup() {
-  if [[ -n "$registry" ]]; then docker rm -f "$registry"; fi
+  if [[ -n "$daemon" ]]; then docker --host "$original_docker_host" rm -f "$daemon"; fi
+  if [[ -n "$registry" ]]; then docker --host "$original_docker_host" rm -f "$registry"; fi
   rm -f "$proof_dir/override.yaml" "$proof_dir/pull.log"
   rmdir "$proof_dir"
 }
@@ -74,6 +77,14 @@ for attempt in {1..30}; do
   sleep 1
 done
 docker exec "$registry" python -c 'import urllib.request; urllib.request.urlopen("http://localhost:5000/v2/")'
+daemon="$(docker run -d --privileged --network host --entrypoint dockerd mirror.gcr.io/library/docker:29-dind \
+  --host=tcp://127.0.0.1:2377 --tls=false --insecure-registry=127.0.0.1:5000)"
+export DOCKER_HOST=tcp://127.0.0.1:2377
+for attempt in {1..30}; do
+  if docker info > /dev/null 2>&1; then break; fi
+  sleep 1
+done
+docker info --format '{{json .DriverStatus}}'
 fixture=tests/integration/hive_launch/compose.yaml
 printf 'services:\n  redis:\n    image: 127.0.0.1:5000/proof:present\n' > "$proof_dir/override.yaml"
 docker compose -f "$fixture" -f "$proof_dir/override.yaml" pull redis
