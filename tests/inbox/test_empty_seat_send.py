@@ -4,7 +4,6 @@ import fakeredis
 
 from scripts.inbox import cli
 from scripts.inbox.store import InboxStore
-from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
 
@@ -26,7 +25,7 @@ def test_send_to_an_empty_seat_warns_and_names_only_live_overlapping_owners(monk
     monkeypatch.setattr(cli, "connect", lambda: box)
     monkeypatch.setattr(cli, "registered_name", lambda: "")
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "demo-eng-1")
-    monkeypatch.setattr(LedgerClient, "tasks", lambda self, slug: rows)
+    monkeypatch.setattr("scripts.inbox.recipient.LedgerClient.tasks", lambda self, slug: rows)
 
     assert cli.main(["send", "ci-2@demo", "Coordinate the shared inbox work"]) == 0
     result = json.loads(capsys.readouterr().out)
