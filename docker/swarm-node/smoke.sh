@@ -15,22 +15,23 @@ import json, sys
 from pathlib import Path
 output=Path(sys.argv[1])
 revision=sys.argv[2]
+fixtures={}
 for proof in ('startup','rebuild','profiles'):
     result=json.loads((output/proof/'mode-result.json').read_text())
+    fixtures[proof]=result.pop('fixture')
     assert result=={'proof':proof,'tested_commit':revision,'status':'passed'},proof
 reports={name:json.loads((output/proof/f'{name}.json').read_text()) for proof,name in (
     ('startup','first'),('startup','second'),('startup','rollback'),('rebuild','rebuild'),('profiles','profiles'))}
 first=reports['first']
+shared={'package':'SV2-IMG-01','fixture':fixtures['startup'],'leg_fixtures':fixtures,'tested_commit':revision,'mocked':False,'startup_network':'none','lock_sha256':first['manifest']['declared']['lock_sha256']}
+(output/'c-result.json').write_text(json.dumps(shared|{'uncached_rebuild_inventory_equal':reports['rebuild']==first,'retained_image_started_after_rejected_builds':reports['rollback']==first,'worker_image_build_validation_failures':0},indent=2)+'\n')
 assert all(report==first for report in reports.values()), 'independent worker inventories differ'
 assert first['manifest']['source_revision']==revision
 assert first['worker_image_build_validation_failures']==0
 profiles=json.loads((output/'profiles/SV2-IMG-02/result.json').read_text())
 assert profiles['status']=='passed' and profiles['tested_commit']==revision
-startup=json.loads((output/'startup/a-result.json').read_text())
-shared={'package':'SV2-IMG-01','fixture':startup['fixture'],'tested_commit':revision,'mocked':False,'startup_network':'none','lock_sha256':first['manifest']['declared']['lock_sha256']}
 for case in ('a','b'):
     (output/f'{case}-result.json').write_bytes((output/'startup'/f'{case}-result.json').read_bytes())
-(output/'c-result.json').write_text(json.dumps(shared|{'uncached_rebuild_inventory_equal':reports['rebuild']==first,'retained_image_started_after_rejected_builds':reports['rollback']==first,'worker_image_build_validation_failures':0},indent=2)+'\n')
 (output/'result.json').write_text(json.dumps(shared|{'cases':['A','B','C'],'status':'passed','production_rollout':'not exercised'},indent=2)+'\n')
 print('SV2-IMG-01 passed: parallel startup, rejected builds, uncached rebuild on its own daemon, retained image after rejected builds and equal inventories')
 PY
@@ -38,14 +39,15 @@ PY
 fi
 build_args=()
 if [[ "$proof" == rebuild ]]; then build_args=(--no-cache-filter worker); fi
-if [[ "$(docker info --format '{{.DriverStatus}}')" == *io.containerd.snapshotter.v1* ]]; then
+mkdir -p "$output"
+docker info --format '{{.DriverStatus}}' > "$output/docker-driver.txt"
+if [[ "$(< "$output/docker-driver.txt")" == *io.containerd.snapshotter.v1* ]]; then
     build_args+=(--provenance=false --output "type=image,compression=uncompressed")
 fi
 fixture="$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
 image="agentihooks-worker-proof:$fixture"
 rebuild="agentihooks-worker-rebuild:$fixture"
 rejected="agentihooks-worker-rejected:$fixture"
-mkdir -p "$output"
 context="$output/context-$fixture"
 mkdir "$context"
 git -C "$repo" archive HEAD | tar -x -C "$context"
@@ -70,14 +72,14 @@ if [[ "$proof" == rebuild ]]; then
     bash "$context/docker/swarm-node/scan.sh" "$image" "$output/credential-scan"
     docker run --rm --network none --read-only --tmpfs /home/worker:uid=10001,gid=10001 \
         --tmpfs /tmp "$image" > "$output/rebuild.json"
-    python3 - "$output" "$revision" "$proof" <<'PYMODE'
+    python3 - "$output" "$revision" "$proof" "$fixture" <<'PYMODE'
 import json, sys
 from pathlib import Path
 output=Path(sys.argv[1])
 report=json.loads((output/'rebuild.json').read_text())
 assert report['manifest']['source_revision']==sys.argv[2]
 assert report['worker_image_build_validation_failures']==0
-(output/'mode-result.json').write_text(json.dumps({'proof':sys.argv[3],'tested_commit':sys.argv[2],'status':'passed'})+'\n')
+(output/'mode-result.json').write_text(json.dumps({'proof':sys.argv[3],'tested_commit':sys.argv[2],'status':'passed','fixture':sys.argv[4]})+'\n')
 PYMODE
     exit 0
 fi
@@ -123,10 +125,10 @@ if [[ "$proof" == profiles ]]; then
     docker run --rm --network none --read-only --tmpfs /home/worker:uid=10001,gid=10001 \
         --tmpfs /tmp "$image" > "$output/profiles.json"
     wait "$profile_pid"
-    python3 - "$output" "$revision" "$proof" <<'PYMODE'
+    python3 - "$output" "$revision" "$proof" "$fixture" <<'PYMODE'
 import json, sys
 from pathlib import Path
-(Path(sys.argv[1])/'mode-result.json').write_text(json.dumps({'proof':sys.argv[3],'tested_commit':sys.argv[2],'status':'passed'})+'\n')
+(Path(sys.argv[1])/'mode-result.json').write_text(json.dumps({'proof':sys.argv[3],'tested_commit':sys.argv[2],'status':'passed','fixture':sys.argv[4]})+'\n')
 PYMODE
     exit 0
 fi
@@ -190,7 +192,7 @@ for case,details in {
     if case=='c' and sys.argv[4]!='all':
         continue
     (output/f'{case}-result.json').write_text(json.dumps(shared|details,indent=2)+'\n')
-(output/'mode-result.json').write_text(json.dumps({'proof':sys.argv[4],'tested_commit':sys.argv[3],'status':'passed'})+'\n')
+(output/'mode-result.json').write_text(json.dumps({'proof':sys.argv[4],'tested_commit':sys.argv[3],'status':'passed','fixture':sys.argv[2]})+'\n')
 if sys.argv[4]=='all':
     (output/'result.json').write_text(json.dumps(shared|{'cases':['A','B','C'],'status':'passed','production_rollout':'not exercised'},indent=2)+'\n')
 print('SV2-IMG-01 passed: two offline startups, three rejected builds, uncached rebuild and retained image rollback' if sys.argv[4]=='all' else 'Worker startup and rejection proof passed')

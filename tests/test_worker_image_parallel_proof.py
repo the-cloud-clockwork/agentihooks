@@ -57,6 +57,7 @@ elif args[0] == 'run':
 SCAN = """#!/usr/bin/env bash
 set -euo pipefail
 if [[ "$1" == --pull-scanner ]]; then
+    if [[ "$FAILURE" == prefetch ]]; then exit 21; fi
     touch "$STATE/scanner-pulled"
     exit 0
 fi
@@ -94,7 +95,10 @@ def run_proof(tmp_path, failure, proof="all", driver="[]"):
         if proof == "all"
         else (
             "#!/usr/bin/env bash\nset -euo pipefail\n"
-            'if [[ "$1" == --pull-scanner ]]; then touch "$STATE/scanner-pulled"; exit 0; fi\n'
+            'if [[ "$1" == --pull-scanner ]]; then\n'
+            '    if [[ "$FAILURE" == prefetch ]]; then exit 21; fi\n'
+            '    touch "$STATE/scanner-pulled"; exit 0\n'
+            "fi\n"
             'touch "$STATE/scan-${1%%:*}-finished"\n'
             'if [[ "$FAILURE" == scan ]]; then exit 17; fi\n'
         )
@@ -198,17 +202,19 @@ def test_worker_proof_modes_run_only_their_independent_checks(tmp_path, proof, b
     assert (state / "scan-agentihooks-worker-proof-finished").exists()
 
 
+@pytest.mark.parametrize("proof", ["startup", "rebuild", "profiles"])
 @pytest.mark.parametrize(
     "driver,exported", [("[[driver-type io.containerd.snapshotter.v1]]", True), ("[[Backing Filesystem extfs]]", False)]
 )
-def test_containerd_store_exports_worker_layers_uncompressed(tmp_path, driver, exported):
-    result, calls, state, output = run_proof(tmp_path, "", "rebuild", driver)
+def test_containerd_store_exports_worker_layers_uncompressed(tmp_path, proof, driver, exported):
+    result, calls, state, output = run_proof(tmp_path, "", proof, driver)
     assert result.returncode == 0, result.stderr
     build = next(call for call in calls if call[0] == "build")
     output_flag = "--output" in build and build[build.index("--output") + 1] == "type=image,compression=uncompressed"
     assert output_flag is exported
     assert ("--provenance=false" in build) is exported
     assert build[build.index("-t") + 1].startswith("agentihooks-worker-proof:")
+    assert (output / "docker-driver.txt").read_text().strip() == driver
 
 
 @pytest.mark.parametrize(
@@ -216,6 +222,8 @@ def test_containerd_store_exports_worker_layers_uncompressed(tmp_path, driver, e
     [
         ("startup", "scan", 17),
         ("rebuild", "scan", 17),
+        ("rebuild", "prefetch", 21),
+        ("profiles", "prefetch", 21),
         ("profiles", "profile", 18),
         ("profiles", "profile-evidence", 19),
     ],
@@ -241,7 +249,7 @@ def test_parallel_worker_reports_require_equal_inventories_and_all_proofs(tmp_pa
         folder = evidence / proof
         folder.mkdir(parents=True)
         (folder / "mode-result.json").write_text(
-            json.dumps({"proof": proof, "tested_commit": "checked-revision", "status": "passed"})
+            json.dumps({"proof": proof, "tested_commit": "checked-revision", "status": "passed", "fixture": proof})
         )
     for name in ("first", "second"):
         (evidence / "startup" / f"{name}.json").write_text(json.dumps(report))
@@ -257,11 +265,13 @@ def test_parallel_worker_reports_require_equal_inventories_and_all_proofs(tmp_pa
     (profiles / "result.json").write_text(json.dumps({"status": "passed", "tested_commit": "checked-revision"}))
     if change == "revision":
         (evidence / "rebuild" / "mode-result.json").write_text(
-            json.dumps({"proof": "rebuild", "tested_commit": "other", "status": "passed"})
+            json.dumps({"proof": "rebuild", "tested_commit": "other", "status": "passed", "fixture": "rebuild"})
         )
     if change == "status":
         (evidence / "startup" / "mode-result.json").write_text(
-            json.dumps({"proof": "startup", "tested_commit": "checked-revision", "status": "failed"})
+            json.dumps(
+                {"proof": "startup", "tested_commit": "checked-revision", "status": "failed", "fixture": "startup"}
+            )
         )
     if change == "missing":
         (evidence / "rebuild" / "rebuild.json").unlink()
@@ -274,12 +284,13 @@ def test_parallel_worker_reports_require_equal_inventories_and_all_proofs(tmp_pa
     )
     assert (done.returncode == 0) == (change == "none"), done.stderr
     assert (evidence / "result.json").exists() == (change == "none")
-    if change == "none":
+    if change in ("none", "inventory", "rollback", "profiles"):
         recovery = json.loads((evidence / "c-result.json").read_text())
-        assert recovery["fixture"] == "startup-fixture"
+        assert recovery["fixture"] == "startup"
+        assert recovery["leg_fixtures"] == {"startup": "startup", "rebuild": "rebuild", "profiles": "profiles"}
         assert recovery["lock_sha256"] == "locked"
-        assert recovery["uncached_rebuild_inventory_equal"] is True
-        assert recovery["retained_image_started_after_rejected_builds"] is True
+        assert recovery["uncached_rebuild_inventory_equal"] is (change != "inventory")
+        assert recovery["retained_image_started_after_rejected_builds"] is (change != "rollback")
         assert "retained_previous_image_started" not in recovery
 
 
@@ -333,3 +344,43 @@ def test_health_and_entrypoint_proofs_overlap_and_either_failure_stays_red(tmp_p
     assert done.returncode == (23 if failure else 0), done.stderr
     assert "health_proof ran" in done.stdout
     assert "entrypoint_proof ran" in done.stdout
+
+
+@pytest.mark.parametrize(
+    "driver,exported", [("[[driver-type io.containerd.snapshotter.v1]]", True), ("[[Backing Filesystem extfs]]", False)]
+)
+def test_health_worker_build_exports_uncompressed_on_the_containerd_store(tmp_path, driver, exported):
+    state = tmp_path / "state"
+    state.mkdir()
+    commands = tmp_path / "bin"
+    commands.mkdir()
+    (commands / "docker").write_text(
+        "#!/usr/bin/env bash\n"
+        'if [[ "$1" == info ]]; then echo "$DRIVER"; exit 0; fi\n'
+        'printf "%s\\n" "$*" >> "$STATE/docker-calls"\n'
+        'if [[ "${!#}" == - ]]; then cat > /dev/null; fi\n'
+    )
+    (commands / "python").write_text(HEALTH_PYTHON)
+    for name in ("docker", "python"):
+        (commands / name).chmod(0o755)
+    env = {key: value for key, value in os.environ.items() if key != "WORKER_BASE_CONTEXT"} | {
+        "PATH": f"{commands}:{os.environ['PATH']}",
+        "STATE": str(state),
+        "DRIVER": driver,
+        "SWARM_PROOF_PYTHON": str(commands / "python"),
+    }
+    done = subprocess.run(
+        ["bash", str(ROOT / "tests/integration/swarm_node/run_health_proof.sh"), str(tmp_path / "out")],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+        timeout=15,
+    )
+    assert done.returncode == 0, done.stderr
+    builds = [line for line in (state / "docker-calls").read_text().splitlines() if line.startswith("build ")]
+    worker = next(line for line in builds if "docker/swarm-node/Dockerfile" in line)
+    assert ("--provenance=false --output type=image,compression=uncompressed" in worker) is exported
+    assert not any("--output" in line for line in builds if line != worker)
+    assert (tmp_path / "out" / "docker-driver.txt").read_text().strip() == driver

@@ -15,7 +15,8 @@ cleanup() {
 }
 trap cleanup EXIT
 task_export=()
-if [[ "$(docker info --format '{{.DriverStatus}}')" == *io.containerd.snapshotter.v1* ]]; then
+docker info --format '{{.DriverStatus}}' > "$task_output/docker-driver.txt"
+if [[ "$(< "$task_output/docker-driver.txt")" == *io.containerd.snapshotter.v1* ]]; then
     task_export=(--provenance=false --output "type=image,compression=uncompressed")
 fi
 docker build "${task_export[@]}" --platform linux/amd64 ${WORKER_BASE_CONTEXT:+--build-context "$WORKER_BASE_CONTEXT"} --file "$task_repo/docker/swarm-node/Dockerfile" \
@@ -24,15 +25,14 @@ docker build --file "$task_repo/tests/integration/swarm_node/Dockerfile" \
     --build-arg WORKER_IMAGE="$task_worker" --tag "$task_fixture" "$task_repo" > "$task_output/fixture-build.log" 2>&1
 printf 'FROM %s\nUSER 0:0\nRUN rm /usr/local/bin/codex\nUSER 10001:10001\n' "$task_fixture" \
     | docker build --tag "$task_missing" - > "$task_output/missing-binary-build.log" 2>&1
-"$task_python" "$task_repo/tests/integration/swarm_node/health_proof.py" \
+("$task_python" "$task_repo/tests/integration/swarm_node/health_proof.py" \
     --image "$task_fixture" --missing-binary-image "$task_missing" \
-    --tested-commit "$task_revision" --output "$task_output/results" > "$task_output/proof.log" 2>&1 &
+    --tested-commit "$task_revision" --output "$task_output/results" 2>&1 | tee "$task_output/proof.log") &
 task_health=$!
-"$task_python" "$task_repo/tests/integration/swarm_node/entrypoint_proof.py" \
-    --image "$task_fixture" --output "$task_output/entrypoint" > "$task_output/entrypoint.log" 2>&1 &
+("$task_python" "$task_repo/tests/integration/swarm_node/entrypoint_proof.py" \
+    --image "$task_fixture" --output "$task_output/entrypoint" 2>&1 | tee "$task_output/entrypoint.log") &
 task_entrypoint=$!
 task_status=0
 wait "$task_health" || task_status=$?
 wait "$task_entrypoint" || task_status=$?
-cat "$task_output/proof.log" "$task_output/entrypoint.log"
 exit "$task_status"
