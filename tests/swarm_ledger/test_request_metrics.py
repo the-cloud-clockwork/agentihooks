@@ -186,3 +186,35 @@ def test_route_cpu_labels_have_bounded_cardinality(path, route, monkeypatch):
     handler.send = lambda *args: None
     handler.do_GET()
     assert metrics.report(1.0)["routes"] == [{"method": "GET", "route": route, "count": 1, "cpu_seconds": 0.0}]
+
+
+def test_failed_write_keeps_its_file_lock_wait(tmp_path, monkeypatch):
+    from scripts.swarm_ledger.repository import legacy
+
+    metrics = importlib.import_module("scripts.swarm_ledger.request_metrics")
+    monkeypatch.setattr(metrics, "SAMPLES", deque(maxlen=metrics.MAX_SAMPLES))
+    clock = Clock()
+    monkeypatch.setattr(metrics, "time", clock)
+
+    def flock(handle, operation):
+        if operation == legacy.fcntl.LOCK_EX:
+            clock.wall += 2.0
+
+    def write(handler, module):
+        with legacy.storage_lock(tmp_path):
+            clock.wall += 6.0
+            clock.cpu += 1.5
+            raise ValueError("refused")
+
+    monkeypatch.setattr(legacy.fcntl, "flock", flock)
+    monkeypatch.setattr(api, "handle", write)
+    handler = server.Handler.__new__(server.Handler)
+    handler.path, handler.command = "/api/v1/ledgers/timing/operations", "POST"
+    with pytest.raises(ValueError, match="refused"):
+        handler.do_POST()
+    result = metrics.report(1.0)
+    assert result["writes"]["count"] == 1
+    assert result["writes"]["p95_wall_seconds"] == 8.0
+    assert result["writes"]["cpu_seconds"] == 1.5
+    assert result["writes"]["lock_wait_seconds"] == 2.0
+    assert result["writes"]["other_wall_seconds"] == 4.5
