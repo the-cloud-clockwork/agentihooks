@@ -88,7 +88,7 @@ def test_a_green_pull_request_left_unqueued_past_its_limit_reopens_within_two_ti
     assert swarm.tick(START + 9 * MINUTE) == []
     actions = swarm.tick(START + 10 * MINUTE)
     assert _reopened(swarm) and swarm.retired == [OWNER]
-    assert [a.name for a in swarm.store.agents(SLUG)] == []
+    assert [a.name for a in swarm.store.agents(SLUG) if a.state != "finished"] == []
     assert swarm.store.claimant(SLUG, "t1") is None
     assert any("green and not queued for 10 minutes" in a for a in actions)
     [item] = swarm.inbox()

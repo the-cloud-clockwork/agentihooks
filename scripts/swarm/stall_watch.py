@@ -67,8 +67,6 @@ def limits(environ=None):
 
 def ntfy(url, title, text, opener=urllib.request.urlopen):
     """An empty answer when posted, else why not."""
-    if not url:
-        return "ntfy is not configured"
     request = urllib.request.Request(url, data=text.encode(), headers={"Title": title}, method="POST")
     try:
         with opener(request, timeout=10):
@@ -177,7 +175,9 @@ def _alert(watch, mail, task, case, minutes, action, limit):
         "at": watch.now_ms,
     }
     address = mail.owner(f"tasks/{tid}")
-    text = ALERT.format(slug=watch.slug, title=task.get("title") or "no title", case=CASES[case], wait=wait, **row)
+    text = ALERT.format(
+        slug=watch.slug, title=task.get("title") or "no title", wait=wait, **{**row, "case": CASES[case]}
+    )
     row["item"] = mail.inbox.send(SENDER, address, text, ref=f"{watch.slug}:stall:{tid}").id
     watch.store.redis.hset(_key(watch, "stall-alerts"), tid, json.dumps(row))
     return [f"stall: task {tid} {CASES[case]} for {minutes} minutes, {action}; told {address}"]
@@ -225,11 +225,10 @@ def _escalate(watch, rows):
             continue
         if row.get("escalated") or watch.now_ms - row["at"] < 2 * row["limit"] * MINUTE_MS:
             continue
-        text = OPERATOR.format(case=CASES[row["case"]], **row)
+        text = OPERATOR.format(**{**row, "case": CASES[row["case"]]})
         watch.ledger.priority(watch.slug, f"tasks/{tid}", text)
-        refused = watch.post(
-            (os.environ if watch.environ is None else watch.environ).get(NTFY, ""), f"Swarm {watch.slug} stall", text
-        )
+        url = (os.environ if watch.environ is None else watch.environ).get(NTFY, "")
+        refused = watch.post(url, f"Swarm {watch.slug} stall", text) if url else "ntfy is not configured"
         row["escalated"] = watch.now_ms
         watch.store.redis.hset(key, tid, json.dumps(row))
         actions.append(f"stall on task {tid} unanswered, raised to the operator" + (f"; {refused}" if refused else ""))
