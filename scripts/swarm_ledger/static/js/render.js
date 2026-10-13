@@ -11,7 +11,8 @@ import { renderChat, renderChatBadge } from "./chat.js";
 import { inboxPending, renderSwarm, swarm } from "./swarm.js";
 import { readWorkspace } from "./api.js";
 import { firstPage, lazy, moreButton, wanted } from "./pages.js";
-import { frozen, held, ownFreeze, snowflake } from "./freezes.js";
+import { frozen, ownFreeze, snowflake, snowflakeState } from "./freezes.js";
+import { prepareFrozenView, viewCount, viewItems, viewVisible } from "./frozen_view.js";
 
 function scopeDot(key, item, off) {
   if (item.done) return null;
@@ -43,11 +44,13 @@ function itemActions(key, item) {
 }
 
 function holdClass(key) {
-  return frozen(doc, key) ? " frozen" : held(doc, key) ? " held" : "";
+  const state = snowflakeState(doc, key);
+  return state ? ` ${state}` : "";
 }
 
 function holdMark(key) {
-  return frozen(doc, key) ? snowflake("Frozen") : held(doc, key) ? snowflake("Held by a focus") : null;
+  const state = snowflakeState(doc, key);
+  return state ? snowflake(state === "frozen" ? "Frozen" : "Held by a focus") : null;
 }
 
 function itemClass(item, key) {
@@ -73,13 +76,17 @@ function phaseLabel(phase, doc) {
   return `Waits for phase ${waits.join(", ")}`;
 }
 
+const reviewDrafts = {};
+
 function phaseReview(phase) {
   const review = phase.review || {};
   if (phaseLifecycle(phase, doc) !== "in_review" || (review.state === "sent_back" && !review.escalated)) return null;
-  const note = h("input", { class: "hl-note phase-note", type: "text", maxlength: "500", placeholder: "note for the planner", "aria-label": "Review note" });
+  const note = h("input", { class: "hl-note phase-note", type: "text", maxlength: "500", placeholder: "note for the planner", "aria-label": "Review note",
+    "data-focus": `review:${phase.id}`, value: reviewDrafts[phase.id] || "", on: { input: () => { reviewDrafts[phase.id] = note.value; } } });
   const decide = (state) => {
     const text = note.value.trim();
     if (state === "sent_back" && !text) return note.focus();
+    delete reviewDrafts[phase.id];
     queue({ op: "phase_review", id: newId("review"), by: "operator", item: `phases/${phase.id}`, state, ...(text ? { note: text } : {}) });
   };
   const button = (text, state) => {
@@ -105,7 +112,7 @@ function phaseRow(item, n) {
 }
 
 function phaseSlices(phase) {
-  const rows = doc.slices.filter((s) => s.phase === `phases/${phase.id}`);
+  const rows = viewItems("slices", doc.slices).filter((s) => s.phase === `phases/${phase.id}`);
   if (!rows.length) return null;
   const count = (s) => doc.tasks.filter((t) => !t.deleted && t.slice === `slices/${s.id}`).length;
   return h("div", { class: "phase-slices" }, h("span", { class: "phase-slices-label", text: "slices" }),
@@ -116,8 +123,8 @@ function phaseSlices(phase) {
 function planGroups() {
   const known = new Set(doc.plans.map((p) => `plans/${p.id}`));
   const groups = doc.plans.map((plan) => ({ key: `plans/${plan.id}`, id: `item-plans-${plan.id}`, title: plan.title || plan.id, plan,
-    phases: doc.phases.filter((p) => p.plan === `plans/${plan.id}`) }));
-  const loose = doc.phases.filter((p) => !known.has(p.plan));
+    phases: viewItems("phases", doc.phases).filter((p) => p.plan === `plans/${plan.id}`) })).filter((g) => viewVisible(g.key));
+  const loose = viewItems("phases", doc.phases).filter((p) => !known.has(p.plan));
   return loose.length ? [...groups, { key: "unplanned", id: "phases-unplanned", title: "Phases without a plan", phases: loose }] : groups;
 }
 
@@ -130,7 +137,7 @@ function planRow({ key, id, title, phases, plan }) {
   const idOf = (p) => `item-phases-${p.id}`;
   const fold = h("details", { class: "plan-fold" }, h("summary", {}, plan ? holdMark(key) : null, h("span", { class: "plan-title", text: title }),
     h("span", { class: "plan-count", text: `${phases.length} ${phases.length === 1 ? "phase" : "phases"}` }), planActions(key, plan)));
-  fold.open = !closedComments.has(`${key}/row`) || phases.some((p) => idOf(p) === wanted.id);
+  fold.open = !closedComments.has(`${key}/row`) || phases.some((p) => idOf(p) === wanted.id || wanted.ids.has(idOf(p)));
   fold.addEventListener("toggle", () => rememberComment(`${key}/row`, fold.open));
   lazy(fold, () => h("ol", { class: "plan-phases" }, ...firstPage(key, phases, idOf).map((p, i) => phaseRow(p, i + 1)),
     moreButton(key, phases.length, "more phases", render), phases.length ? null : h("li", { class: "empty", text: "None." })));
@@ -138,8 +145,12 @@ function planRow({ key, id, title, phases, plan }) {
 }
 
 function phaseList() {
-  if (!doc.plans.length) return listInto("phases", doc.phases, (p, i) => phaseRow(p, i + 1));
-  if (sectionOpen("phases")) $("phases").replaceChildren(...planGroups().map(planRow));
+  if (!doc.plans.length) return listInto("phases", viewItems("phases", doc.phases), (p, i) => phaseRow(p, i + 1));
+  if (sectionOpen("phases")) {
+    const groups = planGroups();
+    $("phases").replaceChildren(...groups.map(planRow));
+    if (!groups.length) $("phases").append(h("li", { class: "empty", text: "All phases are hidden." }));
+  }
 }
 
 function questionRow(item, n) {
@@ -248,10 +259,11 @@ function listInto(id, items, make, idOf = (i) => `item-${id}-${i.id}`) {
   const el = $(id);
   if (!sectionOpen(id)) return;
   el.replaceChildren(...firstPage(id, items, idOf).map(make), moreButton(id, items.length, `more ${id}`, render) || "");
-  if (!items.length) el.append(h("li", { class: "empty", text: "None." }));
+  if (!items.length) el.append(h("li", { class: "empty", text: doc[id].some((i) => !i.deleted) ? "All items are hidden." : "None." }));
 }
 
 export function render(focusKey) {
+  prepareFrozenView(doc);
   const active = document.activeElement;
   const key = focusKey || (active && active.dataset ? active.dataset.focus : null);
   const caret = !focusKey && active && active.tagName === "TEXTAREA" ? [active.selectionStart, active.selectionEnd] : null;
@@ -262,16 +274,16 @@ export function render(focusKey) {
   $("closed-banner").hidden = !doc.closed_at;
   $("sources-count").textContent = headCount([[doc.sources.length]]);
   listInto("sources", doc.sources.map((s, n) => ({ id: n, text: s })), (s) => h("li", { id: `item-sources-${s.id}`, text: s.text }));
-  $("phases-count").textContent = stateCounts("phases", { open: "open", done: "done" });
+  $("phases-count").textContent = stateCounts("phases", { open: "open", done: "done" }) + viewCount("phases", doc.phases);
   phaseList();
-  $("tasks-count").textContent = taskCounts(doc.tasks);
-  groupedWork("tasks", doc.tasks, (t) => taskRow(t, doc.tasks));
+  $("tasks-count").textContent = taskCounts(doc.tasks) + viewCount("tasks", doc.tasks);
+  groupedWork("tasks", viewItems("tasks", doc.tasks), (t) => taskRow(t, doc.tasks));
   $("questions-count").textContent = stateCounts("questions", { open: "open", done: "answered" });
   listInto("questions", [...doc.questions].sort((a, b) => (a.answers || []).length - (b.answers || []).length), (q, i) => questionRow(q, i + 1));
   $("notes-count").textContent = headCount([[doc.notes.filter((e) => !e.deleted).length]]);
   if (sectionOpen("notes")) $("notes").replaceChildren(threadView("notes", doc.notes, "thread flat"));
-  $("followups-count").textContent = stateCounts("followups", { open: "open", done: "done" });
-  groupedWork("followups", doc.followups, (f) => checkRow("followups", f, 0, f.text, ""));
+  $("followups-count").textContent = stateCounts("followups", { open: "open", done: "done" }) + viewCount("followups", doc.followups);
+  groupedWork("followups", viewItems("followups", doc.followups), (f) => checkRow("followups", f, 0, f.text, ""));
   renderSync();
   renderPriorities();
   renderNotifications();
@@ -304,6 +316,7 @@ function groupedWork(name, items, row) {
   const rank = { pr: 0, claimed: 1, open: 2, blocked: 3 };
   live.sort((a, b) => (rank[a.state || "open"] ?? 4) - (rank[b.state || "open"] ?? 4) || taskRanks().indexOf(taskRank(a)) - taskRanks().indexOf(taskRank(b)));
   $(name).replaceChildren(...firstPage(name, live, idOf).map(row), moreButton(name, live.length, `more ${NOUNS[name]}`, render) || "");
+  if (!items.length) $(name).append(h("li", { class: "empty", text: doc[name].some((i) => !i.deleted) ? "All items are hidden." : "None." }));
   if (!done.length) return;
   const box = h("details", { class: "fold", id: name + "-done" }, h("summary", { text: `${done.length} done` }));
   collapsible(box);

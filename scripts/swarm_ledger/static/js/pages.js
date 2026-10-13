@@ -2,7 +2,7 @@ import { h } from "./dom.js";
 
 export const PAGE_SIZE = 50;
 const shown = {};
-export const wanted = { id: null };
+export const wanted = { id: null, ids: new Set() };
 
 export function limit(key) {
   return shown[key] || PAGE_SIZE;
@@ -13,7 +13,7 @@ export function include(key, index) {
 }
 
 export function wantedIn(key, items, idOf) {
-  if (wanted.id) include(key, items.findIndex((item) => idOf(item) === wanted.id));
+  if (wanted.id) for (const id of [wanted.id, ...wanted.ids]) include(key, items.findIndex((item) => idOf(item) === id));
 }
 
 export function firstPage(key, items, idOf) {
