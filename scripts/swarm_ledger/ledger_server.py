@@ -42,7 +42,13 @@ import ledger_link  # noqa: E402
 import ledger_media  # noqa: E402
 
 from scripts.gates import talk  # noqa: E402
-from scripts.swarm_ledger import ledger_task_duplicates, page_policy, server_code, server_lifetime  # noqa: E402
+from scripts.swarm_ledger import (  # noqa: E402
+    ledger_task_duplicates,
+    page_policy,
+    request_metrics,
+    server_code,
+    server_lifetime,
+)
 from scripts.swarm_ledger.events import Hub  # noqa: E402
 from scripts.swarm_ledger.events.publishing import publishing  # noqa: E402
 from scripts.swarm_ledger.repository import legacy  # noqa: E402
@@ -580,7 +586,7 @@ def unrelayed() -> dict:
 
 
 def _change_unrelayed(change) -> None:
-    with _UNRELAYED_LOCK:
+    with request_metrics.locked(_UNRELAYED_LOCK):
         found = unrelayed()
         change(found)
         found = {kind: {s: revs for s, revs in slugs.items() if revs} for kind, slugs in found.items()}
@@ -698,6 +704,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         sys.stderr.write("%s %s\n" % (time.strftime("%H:%M:%S"), fmt % args))
 
+    @request_metrics.measured
+    def handle_one_request(self) -> None:
+        self.command, self.path, self.raw_requestline = None, "/", b""
+        return super().handle_one_request()
+
     def send(self, code, body, ctype):
         if self.path.startswith("/api/v1/") and code >= 400 and ctype != "application/json":
             body = json.dumps({"error": {"code": "forbidden" if code == 403 else "request_refused", "message": body}})
@@ -768,6 +779,7 @@ class Handler(BaseHTTPRequestHandler):
         }
         return self.send(200, json.dumps(reply, ensure_ascii=False), "application/json")
 
+    @request_metrics.measured
     def do_OPTIONS(self):
         self.send_response(204)
         if self.headers.get("Origin") == FILE_ORIGIN:
@@ -780,6 +792,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Access-Control-Allow-Private-Network", "true")
         self.end_headers()
 
+    @request_metrics.measured
+    @request_metrics.endpoint
     def do_GET(self):
         if self.path.startswith("/api/v1/"):
             from scripts.swarm_ledger import api
@@ -969,6 +983,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(exc.status, str(exc), "text/plain")
         return self.send(200, json.dumps(stored), "application/json")
 
+    @request_metrics.measured
     def do_POST(self):
         if self.path.startswith("/api/v1/"):
             from scripts.swarm_ledger import api
@@ -1006,6 +1021,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(404, "not in the bin", "text/plain")
         return self.send(200, json.dumps({"binned": sorted(ledger_bin.entries()), **reply}), "application/json")
 
+    @request_metrics.measured
     def do_PATCH(self):
         from scripts.swarm_ledger import api
 
@@ -1013,6 +1029,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(404, "not found", "text/plain")
         return api.handle(self, sys.modules[__name__])
 
+    @request_metrics.measured
     def do_PUT(self):
         if self.path.startswith("/api/v1/"):
             from scripts.swarm_ledger import api

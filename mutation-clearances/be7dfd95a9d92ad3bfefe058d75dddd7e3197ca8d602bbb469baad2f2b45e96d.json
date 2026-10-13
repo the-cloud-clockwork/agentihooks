@@ -1,0 +1,6 @@
+{
+  "scripts/ci_dev_reuse.py:scripts.ci_dev_reuse.x__complete__mutmut_43:00c6fb12a1726a2af74e61c9c2701faf1b376fc89a3821247ea487155a97c97f": {
+    "reader": "Standards",
+    "reason": "Authentication guarantees successful reuse outside expected unit names, making both subset comparisons identical for reachable calls."
+  }
+}
