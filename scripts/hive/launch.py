@@ -3,7 +3,7 @@ import os
 import time
 from dataclasses import dataclass, replace
 
-from scripts.hive import placement, registry
+from scripts.hive import placement, placement_waits, registry
 from scripts.hive.orders import Ack, LaunchOrder, Orders
 from scripts.routing.reservation import LaunchSlots
 from scripts.swarm import capacity, lease, profile_choice
@@ -55,6 +55,11 @@ class HiveLaunch:
             hive["agents"] = max(0, reported - masters) + pending
         return hives
 
+    def _record_wait(self, lane: str, task: dict, selected: Selection | placement.Wait) -> Selection | placement.Wait:
+        reason = selected.reason if isinstance(selected, placement.Wait) else ""
+        placement_waits.observe(self.store, self.slug, lane, task["id"], reason, lease.now_ms(self.store))
+        return selected
+
     def select(self, config: SwarmConfig, lane: str, task: dict) -> Selection | placement.Wait:
         chosen = config.lanes.get(lane, {})
         saved = task.get("launch_assignment") or profile_choice.transfer(task)
@@ -62,10 +67,10 @@ class HiveLaunch:
         hives, now = self.hives(), lease.now_ms(self.store)
         role = ROLE_PROFILES.get(decision.profile, decision.profile)
         if role in registry.UI_ROLES and not any(hive["ui"] == "yes" and registry.live(hive, now) for hive in hives):
-            return placement.Wait(placement.NO_UI_HIVE)
+            return self._record_wait(lane, task, placement.Wait(placement.NO_UI_HIVE))
         harness = saved.get("harness") or chosen.get("agent") or "claude"
         if harness not in ("claude", "auto"):
-            return placement.Wait("Codex hive placement is not enabled")
+            return self._record_wait(lane, task, placement.Wait("Codex hive placement is not enabled"))
         rows = getattr(self.herdr, "_quota_accounts", None)
         rows = capacity.accounts(dict(os.environ), now / 1000, refresh=False) if rows is None else rows
         account = saved.get("account") or self.herdr.planned_account(task["id"], "claude")
@@ -79,9 +84,9 @@ class HiveLaunch:
         for row in sorted(candidates, key=lambda row: (row.sessions, row.name)):
             hive = placement.place(role, "claude", row.name, route_kind, config.repo, hives, now)
             if isinstance(hive, str):
-                return Selection(decision, hive, row, route_kind)
+                return self._record_wait(lane, task, Selection(decision, hive, row, route_kind))
             reason = hive
-        return reason
+        return self._record_wait(lane, task, reason)
 
     def orders_for(self, task: str) -> LaunchOrder | None:
         raw = self.store.redis.hget(self.store.key(self.slug, ORDERS), task)
