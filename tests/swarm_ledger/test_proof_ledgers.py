@@ -277,6 +277,35 @@ def test_creating_engineer_gets_a_scoped_pause_credential(live, credential, hive
     assert command_runner.consume(store, slug) == ["control swarm acknowledged"]
     assert store.config(slug).state == "paused"
     assert store.config(slug).max_eng == before.max_eng
+    for payload in (
+        {"control": "cancel"},
+        {"control": "force_stop"},
+        {"control": "attach"},
+        {},
+        [],
+        {"control": "pause", "extra": True},
+    ):
+        assert post(live, f"/api/v1/proof-ledgers/{slug}/controls", payload, **{"X-Proof-Credential": token})[0] == 403
+    assert (
+        post(live, f"/api/v1/proof-ledgers/{slug}/controls", {"control": "pause"}, **{"X-Proof-Credential": "wrong"})[0]
+        == 403
+    )
+    assert post(live, f"/api/v1/proof-ledgers/{slug}/controls", {"control": "pause"})[0] == 403
+    status, sibling = create(live, credential, "tsibling", agent=owner)
+    assert status == 200
+    sibling_slug = sibling["data"]["slug"]
+    store.create(SwarmConfig(sibling_slug, "/repo", 1, 0, scratch=True))
+    assert (
+        post(
+            live,
+            f"/api/v1/proof-ledgers/{sibling_slug}/controls",
+            {"control": "pause"},
+            **{"X-Proof-Credential": token},
+        )[0]
+        == 403
+    )
+    assert commands.rows(store, sibling_slug) == []
+    assert len(commands.rows(store, slug)) == 1
     for other in (SLUG, "rig-grade-swarm", "rig-grade-swarm-doctor"):
         assert (
             post(
@@ -286,7 +315,9 @@ def test_creating_engineer_gets_a_scoped_pause_credential(live, credential, hive
         )
 
 
-def test_creating_engineer_drains_worker_through_client_without_cap_changes(live, credential, hive, monkeypatch):
+def test_creating_engineer_drains_worker_through_client_without_cap_changes(
+    live, credential, hive, monkeypatch, tmp_path, capsys
+):
     from scripts.swarm import commands, lifecycle
     from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
     from tests.swarm_ledger.test_ledger_authority import server
@@ -327,6 +358,16 @@ def test_creating_engineer_drains_worker_through_client_without_cap_changes(live
         },
     )
     assert result == {"state": "paused"}
+    from scripts.swarm import cli
+
+    monkeypatch.setenv("LEDGER_HOST", "127.0.0.1")
+    monkeypatch.setenv("LEDGER_PORT", str(live["port"]))
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    request_file = tmp_path / "drain-request.json"
+    request_file.write_text(json.dumps(body))
+    capsys.readouterr()
+    assert cli.main([slug, "proof-control", "--request", str(request_file)]) == 0
+    assert json.loads(capsys.readouterr().out) == {"state": "paused"}
     assert store.config(slug) == before
     operation = lifecycle.operations(store, slug)[0]
     assert operation["control"] == "drain" and operation["execution_id"] == worker.execution_id
