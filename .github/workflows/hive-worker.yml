@@ -2,7 +2,7 @@ name: Worker hive pod
 
 on:
   push:
-    branches: [dev, "ci-*"]
+    branches: [dev]
   workflow_dispatch:
     inputs:
       contracts_only:
@@ -13,8 +13,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: worker-hive-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'push' || github.ref != 'refs/heads/dev' }}
+  group: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && format('worker-hive-{0}', github.ref) || format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') }}
+  queue: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && 'single' || 'max' }}
+  cancel-in-progress: false
 
 jobs:
   contracts:
