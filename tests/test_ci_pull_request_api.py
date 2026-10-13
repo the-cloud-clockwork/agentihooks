@@ -388,7 +388,7 @@ def test_sonar_downloads_this_runs_coverage_after_the_shards():
     assert download["with"] == {"pattern": "coverage-3.12-*", "path": ".coverage-shards"}
     assert steps.index(download) < steps.index(merge)
     assert "env" not in merge
-    assert "bash .github/coverage/combine.sh --downloaded 8 ||" in merge["run"]
+    assert "bash .github/coverage/combine.sh --downloaded 12 ||" in merge["run"]
 
 
 @pytest.mark.parametrize("job", ["unit", "shard-check", "test-count", "lint"])
