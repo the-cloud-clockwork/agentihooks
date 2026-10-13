@@ -71,7 +71,7 @@ def main(argv: list[str] | None = None) -> int:
         for path in sorted((args.root / ".github/workflows").iterdir())
         if path.suffix in (".yml", ".yaml")
     }
-    policy = json.loads((args.root / ACTORS).read_text())
+    policy = json.loads(Path(ACTORS).read_text())
     problems = check(workflows, json.loads((args.root / TABLE).read_text()), policy)
     jobs = sum(len(workflow.get("jobs") or {}) for workflow in workflows.values())
     print(f"Runner classes: {len(workflows)} workflows, {jobs} jobs, {len(problems)} problems")

@@ -149,3 +149,14 @@ def test_table_is_sorted_json_kept_under_github(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "Runner classes: 2 workflows, 2 jobs, 1 problems" in out
     assert "::error::b.yaml/y: runner class missing" in out
+
+
+def test_the_actor_policy_comes_from_the_grader_not_the_graded_root(tmp_path, monkeypatch):
+    widened = {**POLICY, "actors": [*POLICY["actors"], "intruder"]}
+    (tmp_path / ".github/workflows").mkdir(parents=True)
+    job = {"jobs": {"x": {"runs-on": routed("anton-oss-light", widened), "steps": []}}}
+    (tmp_path / ".github/workflows/a.yml").write_text(json.dumps(job))
+    (tmp_path / ".github/workflows/trusted-actors.json").write_text(json.dumps(widened))
+    (tmp_path / ci_runner_classes.TABLE).write_text(json.dumps({"a.yml/x": "light"}))
+    monkeypatch.chdir(ROOT)
+    assert ci_runner_classes.main(["--root", str(tmp_path)]) == 1
