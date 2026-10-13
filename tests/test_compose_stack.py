@@ -51,3 +51,16 @@ def test_env_example_selects_compose_deployment():
 def test_swarm_smoke_runs_the_compose_hive_proof():
     jobs = yaml.safe_load((ROOT / ".github/workflows/swarm-smoke.yml").read_text())["jobs"]
     assert any("compose-hive-smoke.sh" in step.get("run", "") for step in jobs["compose-hive"]["steps"])
+
+
+def test_hive_join_retries_the_redis_mirror_pull_before_starting_redis():
+    jobs = yaml.safe_load((ROOT / ".github/workflows/swarm-smoke.yml").read_text())["jobs"]
+    assert any("hive-join-smoke.sh" in step.get("run", "") for step in jobs["hive-join"]["steps"])
+    script = (ROOT / "scripts/packaging/hive-join-smoke.sh").read_text()
+    pull = 'docker pull mirror.gcr.io/library/redis:7-alpine'
+    start = 'docker run --pull never -d --name "$run-redis"'
+    assert "for attempt in 1 2 3; do" in script
+    assert pull in script
+    assert '[[ "$attempt" == 3 ]] && exit "$status"' in script
+    assert "sleep 5" in script
+    assert script.index(pull) < script.index(start)
