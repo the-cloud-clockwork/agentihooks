@@ -1092,6 +1092,7 @@ def serve():
         sys.exit(str(conflict))
     legacy.adopt(stored)
     threading.Thread(target=watch_ledgers, daemon=True).start()
+
     class Server(ThreadingHTTPServer):
         request_queue_size = 128
 
