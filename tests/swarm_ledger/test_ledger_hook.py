@@ -43,8 +43,10 @@ def test_dispatch_hands_only_the_gate_parts_of_the_bound_ledger_to_the_handler(f
     ]
 
 
-def test_dispatch_skips_a_session_whose_name_left_the_crew(folder, monkeypatch):
-    legacy_page.store(folder, "demo", {"title": "Demo", "tasks": [], "_meta": {"members": {}}})
+def test_dispatch_skips_a_closed_ledger(folder, monkeypatch):
+    members = {NAME: {"role": "member"}}
+    doc = {"title": "Demo", "phases": [{"id": "p1", "done": True}], "_meta": {"members": members}}
+    legacy_page.store(folder, "demo", doc)
     (folder / ".sessions").mkdir()
     ledger_hook.write_session(folder / ".sessions" / "s1.json", ledger_hook.new_session("demo", NAME, "member"))
     seen = []
