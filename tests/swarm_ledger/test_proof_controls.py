@@ -106,8 +106,9 @@ def test_nonengineer_creation_issues_no_owner_authority(owned, lane):
     )
 
 
-def test_binned_proof_refuses_even_its_creating_engineer(owned):
-    server.ledger_bin.delete(owned.slug)
+def test_missing_proof_refuses_even_its_creating_engineer(owned, monkeypatch):
+    exists = server.repository.exists
+    monkeypatch.setattr(server.repository, "exists", lambda slug: slug != owned.slug and exists(slug))
     assert owned.invoke(f"/{owned.slug}/credential", {}, owned.parent) == (
         403,
         {"error": {"code": "forbidden", "message": "Not an owned proof fixture"}},
