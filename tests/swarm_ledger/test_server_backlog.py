@@ -8,7 +8,6 @@ from http.server import ThreadingHTTPServer
 
 import pytest
 
-from scripts.swarm_ledger import ledger_core as core
 from scripts.swarm_ledger import ledger_server as server
 from scripts.swarm_ledger import new_ledger
 from tests.swarm_ledger import legacy_page
@@ -41,10 +40,10 @@ def listening(monkeypatch, ledger_port, tmp_path):
     monkeypatch.setattr(server.server_code, "record", lambda *args: None)
     document = new_ledger.build_doc({"title": "Burst", "phases": [{"title": "Proof"} for _ in range(16)]})
     page = legacy_page.render(document, SLUG, ledger_port)
-    html, _ = core.paths(SLUG)
+    html, _ = server.core.paths(SLUG)
     html.write_text(page)
-    core.sync(SLUG, ops=[])
-    token = core.read_token(page)
+    server.core.sync(SLUG, ops=[])
+    token = server.core.read_token(page)
     worker = threading.Thread(target=server.serve)
     worker.start()
     httpd = created.get(timeout=10)
