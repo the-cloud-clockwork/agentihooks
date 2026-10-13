@@ -26,6 +26,10 @@ metadata:
     app.kubernetes.io/component: worker-hive
 spec:
   replicas: {{ $workers.replicas }}
+  {{- if $code.name }}
+  strategy:
+    type: Recreate
+  {{- end }}
   selector:
     matchLabels:
       {{- include "swarm.selector" (dict "root" . "component" "worker-hive") | nindent 6 }}
@@ -98,7 +102,12 @@ spec:
               - key: {{ required "worker join Secret key is required" $secret.key }}
                 path: {{ $path }}
         - name: home
+          {{- if $code.name }}
+          persistentVolumeClaim:
+            claimName: {{ include "swarm.fullname" . }}-worker-hive-state
+          {{- else }}
           emptyDir: {}
+          {{- end }}
         - name: tmp
           emptyDir: {}
         {{- if $workers.caSecret.name }}

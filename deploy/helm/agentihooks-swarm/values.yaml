@@ -200,6 +200,9 @@ workers:
     name: ""
     key: ""
   envFromSecrets: []
+  persistence:
+    size: 1Gi
+    storageClassName: ""
   resources:
     requests:
       cpu: 100m

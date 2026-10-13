@@ -6,6 +6,12 @@ image=local/agentihooks-hive-worker:dev
 out="$HOME/scratchpad/worker-hive-proof"
 mkdir -p "$out"
 cleanup() {
+  status=$?
+  if [[ "$status" != 0 ]]; then
+    kubectl describe pods > "$out/pods.txt" 2>&1 || true
+    kubectl logs -l app.kubernetes.io/component=worker-hive --tail=100 > "$out/failed-worker.txt" 2>&1 || true
+    kubectl logs -l app.kubernetes.io/component=worker-hive --previous --tail=100 > "$out/previous-worker.txt" 2>&1 || true
+  fi
   kind delete cluster --name "$cluster"
 }
 trap cleanup EXIT
@@ -83,15 +89,15 @@ kubectl rollout status deployment/hive-join --timeout=120s
 code="$(kubectl exec deployment/hive-join -- agentihooks hive invite worker)"
 printf '%s' "$code" | kubectl create secret generic hive-code --from-file=code=/dev/stdin >/dev/null
 unset code
-helm template proof deploy/helm/agentihooks-swarm --show-only templates/worker-hive.yaml \
+helm template proof deploy/helm/agentihooks-swarm --show-only templates/worker-hive.yaml --show-only templates/worker-hive-state.yaml \
   --set workers.replicas=1 --set workers.image.repository=local/agentihooks-hive-worker \
   --set workers.image.pullPolicy=Never --set workers.joinUrl=https://hive-join:8770 \
   --set workers.joinCodeSecret.name=hive-code --set workers.joinCodeSecret.key=code \
   --set workers.caSecret.name=hive-tls --set workers.caSecret.key=cert.pem | kubectl apply -f -
 deployment=proof-agentihooks-swarm-worker-hive
 kubectl rollout status "deployment/$deployment" --timeout=120s
-pod="$(kubectl get pods -l app.kubernetes.io/component=worker-hive -o jsonpath='{.items[0].metadata.name}')"
-kubectl exec -i deployment/hive-join -- env HIVE="$pod" python - <<'PY' | tee "$out/orders.txt"
+prove_worker() {
+kubectl exec -i deployment/hive-join -- env HIVE="$1" python - <<'PY'
 import json, os, time
 from scripts.hive import registry
 from scripts.hive.orders import CommandOrder, Orders
@@ -101,10 +107,10 @@ redis, hive = redis_client(), os.environ['HIVE']
 record = None
 for _ in range(60):
     record = registry.show(redis, hive)
-    if record and registry.live(record):
+    if record and registry.live(record, int(time.time() * 1000)):
         break
     time.sleep(1)
-assert record and registry.live(record), 'pod did not register a live hive'
+assert record and registry.live(record, int(time.time() * 1000)), 'pod did not register a live hive'
 assert record['ui'] == 'no' and record['ephemeral'] == 'yes'
 assert record['roles'] == ['eng', 'ci', 'plan'] and record['max_agents'] == 1
 print('pod registered a live worker hive with configured roles and capacity')
@@ -121,7 +127,19 @@ assert ack and ack.status == 'done', f'scratch order not acknowledged: {ack}'
 assert redis.xlen(orders.commands(hive)) == 0
 print(json.dumps({'scratch_order': order.action, 'ack': ack.status, 'pending': 0}, sort_keys=True))
 PY
+}
+pod="$(kubectl get pods -l app.kubernetes.io/component=worker-hive -o jsonpath='{.items[0].metadata.name}')"
+prove_worker "$pod" | tee "$out/orders.txt"
 kubectl logs "$pod" > "$out/worker.log"
 restarts="$(kubectl get pod "$pod" -o jsonpath='{.status.containerStatuses[0].restartCount}')"
 [[ "$restarts" == 0 ]]
+kubectl delete pod "$pod" --wait --timeout=60s
+kubectl rollout status "deployment/$deployment" --timeout=120s
+replacement="$(kubectl get pods -l app.kubernetes.io/component=worker-hive -o jsonpath='{.items[0].metadata.name}')"
+[[ "$replacement" != "$pod" ]]
+prove_worker "$replacement" | tee "$out/replacement.txt"
+echo 'replacement pod reused durable membership without redeeming the join code again' | tee -a "$out/replacement.txt"
 echo 'worker hive kind registration and scratch order acknowledgement: passed'
+if [[ "${GITHUB_EVENT_NAME:-}" == push && "${GITHUB_REF:-}" == refs/heads/dev ]]; then
+  docker save "$image" -o "$out/image.tar"
+fi
