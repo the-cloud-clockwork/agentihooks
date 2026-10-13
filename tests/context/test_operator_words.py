@@ -371,3 +371,68 @@ def test_a_recorder_failure_is_logged_and_never_raised(monkeypatch):
     monkeypatch.setattr(hook_manager, "log", lambda *args: seen.append(args))
     assert hook_manager._operator_words({"prompt": "ship it"}) is False
     assert seen == [("operator words record failed", {"error": "disk full"})]
+
+
+def _legacy_words(tmp_path, monkeypatch, slug_of):
+    import json
+
+    from hooks import _redis
+    from scripts.swarm import naming
+
+    monkeypatch.setattr(hooks.config, "AGENTIHOOKS_HOME", tmp_path)
+    monkeypatch.setattr(_redis, "get_redis", lambda: object())
+    monkeypatch.setattr(naming.NameRegistry, "slug_of", lambda self, name: slug_of(name))
+    monkeypatch.setattr(naming, "addresses", lambda name: [name])
+    folder = tmp_path / "operator_words"
+    folder.mkdir()
+    path = folder / "master@abcdef-0001.json"
+    path.write_text(json.dumps({"sessions": [], "rows": [{"at": 100, "words": "Old words"}]}))
+    return path
+
+
+def test_a_mid_turn_message_and_an_answer_are_recorded_while_the_registry_times_out(tmp_path, monkeypatch):
+    import redis
+
+    from scripts.swarm_ledger import ledger_relay
+
+    def timeout(name):
+        raise redis.exceptions.TimeoutError("Timeout reading from socket")
+
+    _legacy_words(tmp_path, monkeypatch, timeout)
+    env = {"AGENTIHOOKS_AGENT_NAME": "master@abcdef-0002", "AGENTIHOOKS_SWARM": "demo"}
+    answer = {"tool_name": "AskUserQuestion", "tool_response": {"answers": {"Freeze?": "Refreeze until push lands"}}}
+    assert not operator_words.heard({"prompt": "Launch prompt", "session_id": "s1"}, env, now=100)
+    assert operator_words.heard({"prompt": "Freeze the swarm again", "session_id": "s1"}, env, now=101)
+    assert operator_words.heard(answer, env, now=102)
+    assert ledger_relay.verified("master@abcdef-0002", "freeze the swarm again") == "Freeze the swarm again"
+    assert ledger_relay.verified("master@abcdef-0002", "refreeze until push lands") == "Refreeze until push lands"
+    assert operator_words.matching("master@abcdef-0001", "Old words", within=None) == ""
+
+
+def test_a_legacy_name_the_registry_no_longer_knows_completes_the_upgrade(tmp_path, monkeypatch):
+    import json
+
+    path = _legacy_words(tmp_path, monkeypatch, lambda name: "")
+    assert operator_words.matching("master@abcdef-0001", "Old words", now=101) == "Old words"
+    assert json.loads(path.read_text()) == {"sessions": []}
+
+    def no_scan(name):
+        raise AssertionError("completed migration scanned legacy files")
+
+    monkeypatch.setattr(operator_words, "_load", no_scan)
+    assert operator_words.matching("master@abcdef-0001", "Old words", now=101) == "Old words"
+
+
+def test_the_upgrade_asks_the_registry_before_locking_the_store(tmp_path, monkeypatch):
+    import sqlite3
+
+    def slug_of(name):
+        connection = sqlite3.connect(tmp_path / "operator_words" / "words.sqlite3", timeout=0)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+        finally:
+            connection.close()
+        return "demo"
+
+    _legacy_words(tmp_path, monkeypatch, slug_of)
+    assert operator_words.matching("master@abcdef-0001", "Old words", now=101) == "Old words"
