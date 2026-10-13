@@ -670,9 +670,7 @@ def test_a_dequeue_that_does_not_finish_keeps_the_task_for_the_next_tick(merging
     from scripts.swarm.ledger_events import pull_request
 
     queued_at_now(merging)
-    merging.pulls[URL] = pull_request(
-        {"state": "OPEN", "mergeQueueEntry": {"id": "entry", "state": "UNMERGEABLE"}}
-    )
+    merging.pulls[URL] = pull_request({"state": "OPEN", "mergeQueueEntry": {"id": "entry", "state": "UNMERGEABLE"}})
 
     def dequeue(action, url):
         assert (action, url) == ("dequeue", URL)
