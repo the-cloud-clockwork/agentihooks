@@ -21,6 +21,9 @@ jobs:
           ref: ${{ github.sha }}
       - name: Launch a scratch agent through a remote hive container
         run: bash scripts/packaging/hive-launch-smoke.sh
+      - name: Prove image pulls tolerate an absent attestation
+        if: github.event_name == 'workflow_dispatch'
+        run: bash scripts/packaging/hive-launch-attestation-proof.sh
   smoke:
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && github.triggering_actor == 'github-merge-queue[bot]') && 'anton-oss' || 'ubuntu-latest' }}
     timeout-minutes: 10

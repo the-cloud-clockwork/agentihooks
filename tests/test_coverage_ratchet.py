@@ -1,3 +1,4 @@
+import json
 import subprocess
 from pathlib import Path
 
@@ -201,10 +202,119 @@ def test_a_line_first_covered_recently_stays_graded():
     runs = [
         _measure("b1", {"hooks/a.py": {1, 2, 3}}, {"hooks/a.py": SOURCE}),
         _measure("b2", {"hooks/a.py": {1, 2}}, {"hooks/a.py": SOURCE}),
-        _measure("b3", {"hooks/a.py": {1, 2}}, {"hooks/a.py": SOURCE}),
     ]
     result = ratchet.grade({"hooks/a.py": {1, 2}}, lambda path: SOURCE, iter(runs))
     assert result.lost == {"hooks/a.py": [3]}
+    assert result.unstable == {}
+    assert getattr(result, "unconfirmed", {}) == {}
+
+
+@pytest.mark.parametrize("snapshots", [2, 3])
+def test_a_base_only_line_with_two_measured_misses_is_unconfirmed(snapshots):
+    runs = [_measure("b1", {"hooks/a.py": {1, 2, 3}}, {"hooks/a.py": SOURCE})]
+    runs += [_measure(f"older{n}", {"hooks/a.py": {1, 2}}, {"hooks/a.py": SOURCE}) for n in range(snapshots)]
+    result = ratchet.grade({"hooks/a.py": {1, 2}}, lambda path: SOURCE, iter(runs))
+    assert (result.lost, result.unstable, getattr(result, "unconfirmed", {})) in (
+        ({"hooks/a.py": [3]}, {}, {}),
+        ({}, {}, {"hooks/a.py": {3: snapshots}}),
+    )
+
+
+def test_the_ledger_hook_baseline_line_accepts_old_or_unconfirmed_grading():
+    fixture = json.loads((Path(__file__).parent / "fixtures" / "coverage_incidental.json").read_text())
+    path = fixture["path"]
+    source = fixture["source"]
+    runs = [_measure(fixture["commit"], {path: set(fixture["executed"])}, {path: source})]
+    runs += [
+        _measure(snapshot["commit"], {path: set(snapshot["executed"])}, {path: source})
+        for snapshot in fixture["history"]
+    ]
+    result = ratchet.grade({path: set()}, lambda name: source, iter(runs))
+    assert result.base == "8b25f4ed9fcd9196de364cf44e7a21ee1ed2c446"
+    assert (result.lost, result.unstable, getattr(result, "unconfirmed", {})) in (
+        ({"scripts/swarm_ledger/ledger_hook.py": [315]}, {}, {}),
+        ({}, {}, {"scripts/swarm_ledger/ledger_hook.py": {315: 20}}),
+    )
+
+
+@pytest.mark.parametrize("measured", [False, True])
+def test_missing_history_measurements_never_count_as_missed_lines(measured):
+    runs = [_measure("b1", {"hooks/a.py": {1, 2, 3}}, {"hooks/a.py": SOURCE})]
+    if measured:
+        runs.append(_measure("b2", {"hooks/a.py": {1, 2}}, {"hooks/a.py": SOURCE}))
+    runs += [_measure(f"absent{n}", {}, {"hooks/a.py": SOURCE}) for n in range(3)]
+    result = ratchet.grade({"hooks/a.py": {1, 2}}, lambda path: SOURCE, iter(runs))
+    assert result.lost == {"hooks/a.py": [3]}
+    assert result.unstable == {}
+    assert getattr(result, "unconfirmed", {}) == {}
+
+
+@pytest.mark.parametrize(
+    "older_source", [None, SOURCE.replace("return 1", "return 9"), SOURCE + "\n# another version\n"]
+)
+def test_unmappable_history_never_confirms_an_incidental_line(older_source):
+    runs = [_measure("b1", {"hooks/a.py": {1, 2, 3}}, {"hooks/a.py": SOURCE})]
+    runs += [_measure(f"older{n}", {"hooks/a.py": {1, 2}}, {"hooks/a.py": older_source}) for n in range(3)]
+    result = ratchet.grade({"hooks/a.py": {1, 2}}, lambda path: SOURCE, iter(runs))
+    assert result.lost == {"hooks/a.py": [3]}
+    assert result.unstable == {}
+    assert getattr(result, "unconfirmed", {}) == {}
+
+
+def test_history_that_ran_the_lost_line_keeps_the_regression_red():
+    runs = [
+        _measure("b1", {"hooks/a.py": {1, 2, 3}}, {"hooks/a.py": SOURCE}),
+        _measure("b2", {"hooks/a.py": {1, 2, 3}}, {"hooks/a.py": SOURCE}),
+        _measure("b3", {"hooks/a.py": {1, 2}}, {"hooks/a.py": SOURCE}),
+        _measure("b4", {"hooks/a.py": {1, 2}}, {"hooks/a.py": SOURCE}),
+    ]
+    result = ratchet.grade({"hooks/a.py": {1, 2}}, lambda path: SOURCE, iter(runs))
+    assert result.lost == {"hooks/a.py": [3]}
+    assert result.unstable == {}
+    assert getattr(result, "unconfirmed", {}) == {}
+
+
+@pytest.mark.parametrize("test_source", ["import hooks.a", "from hooks.a import f", "from hooks import a"])
+@pytest.mark.parametrize("head_test", [None, "assert True\n", "assert False\n"])
+def test_changed_or_deleted_importing_tests_keep_incidental_lines_red(test_source, head_test):
+    test_path = "tests/test_a.py"
+    base_sources = {"hooks/a.py": SOURCE, test_path: test_source + "\nassert True\n"}
+    head_source = test_source + "\n" + head_test if head_test == "assert False\n" else head_test
+    head_sources = {"hooks/a.py": SOURCE, test_path: head_source}
+    runs = [_measure("b1", {"hooks/a.py": {1, 2, 3}}, base_sources)]
+    runs += [_measure(f"older{n}", {"hooks/a.py": {1, 2}}, base_sources) for n in range(2)]
+    options = {"changed_tests": {test_path}} if hasattr(ratchet.Result("b1", {}), "unconfirmed") else {}
+    result = ratchet.grade({"hooks/a.py": {1, 2}}, head_sources.get, iter(runs), **options)
+    assert result.lost == {"hooks/a.py": [3]}
+    assert result.unstable == {}
+    assert getattr(result, "unconfirmed", {}) == {}
+
+
+@pytest.mark.parametrize("test_source", ["import hooks.a", "from hooks.a import f", "from hooks import a"])
+def test_an_import_added_in_a_changed_head_test_keeps_the_line_red(test_source):
+    test_path = "tests/test_a.py"
+    base_sources = {"hooks/a.py": SOURCE, test_path: "assert True\n"}
+    head_sources = {"hooks/a.py": SOURCE, test_path: test_source + "\nassert True\n"}
+    runs = [_measure("b1", {"hooks/a.py": {1, 2, 3}}, base_sources)]
+    runs += [_measure(f"older{n}", {"hooks/a.py": {1, 2}}, base_sources) for n in range(2)]
+    options = {"changed_tests": {test_path}} if hasattr(ratchet.Result("b1", {}), "unconfirmed") else {}
+    result = ratchet.grade({"hooks/a.py": {1, 2}}, head_sources.get, iter(runs), **options)
+    assert result.lost == {"hooks/a.py": [3]}
+    assert result.unstable == {}
+    assert getattr(result, "unconfirmed", {}) == {}
+
+
+def test_changing_an_unrelated_test_does_not_confirm_the_line():
+    test_path = "tests/test_b.py"
+    sources = {"hooks/a.py": SOURCE, test_path: "from hooks.b import f\nassert True\n"}
+    runs = [_measure("b1", {"hooks/a.py": {1, 2, 3}}, sources)]
+    runs += [_measure(f"older{n}", {"hooks/a.py": {1, 2}}, sources) for n in range(2)]
+    options = {"changed_tests": {test_path}} if hasattr(ratchet.Result("b1", {}), "unconfirmed") else {}
+    result = ratchet.grade({"hooks/a.py": {1, 2}}, sources.get, iter(runs), **options)
+    assert (result.lost, result.unstable, getattr(result, "unconfirmed", {})) in (
+        ({"hooks/a.py": [3]}, {}, {}),
+        ({}, {}, {"hooks/a.py": {3: 2}}),
+    )
 
 
 def test_history_is_read_only_when_a_line_was_lost():
