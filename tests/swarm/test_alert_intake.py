@@ -39,7 +39,7 @@ def payload(*alerts):
 
 def test_every_lost_time_stage_the_report_names_is_accepted():
     assert alert_intake.STAGES == (
-        "claim_wait",
+        "seat_wait",
         "review",
         "merge_queue",
         "intent_fix",

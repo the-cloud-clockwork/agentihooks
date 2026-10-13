@@ -5,6 +5,7 @@ from functools import partial
 
 from scripts.swarm import (
     bottleneck,
+    capacity,
     freeze,
     metrics_fleet,
     metrics_ledger,
@@ -29,7 +30,9 @@ def _collect(slug, now_ms, swarm, box, errors, environ):
     watched = freeze.watched(slug, swarm.store, swarm.ledger, swarm.doc)
     metrics_swarm.record_pass(box, slug, now_ms, swarm.store, watched, swarm.findings, pulls)
     bottleneck.record(box, swarm.store, slug, now_ms, swarm.doc.get("tasks", []))
-    ready = stages.claimable(watched, freeze.fix_phase(swarm.store.config(slug)))
+    config = swarm.store.config(slug)
+    seats = capacity.caps(capacity.read(swarm.store, slug), config)
+    ready = stages.claimable(watched, freeze.fix_phase(config), seats)
     stage_detector.record(box, swarm.store, slug, now_ms, swarm.doc.get("tasks", []), environ, ready=ready)
     from redis.exceptions import RedisError
 
