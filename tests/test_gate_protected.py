@@ -484,6 +484,14 @@ def test_protected_cli_accepts_the_gate_behind_the_selector_of_the_base_policy(r
     assert gate_protected.main(["--root", str(repo), "--base", base, "--head", head]) == 0
 
 
+def test_protected_cli_refuses_a_policy_without_its_queue_actor_before_building_a_selector(repo):
+    candidate, base = _trusted_base(repo, {"actors": _POLICY["actors"]})
+    candidate["jobs"]["gate"]["runs-on"] = _anton()
+    head = _commit(repo, {"test.yml": candidate}, {}, "gate on anton")
+    with pytest.raises(ValueError, match="trusted actors"):
+        gate_protected.main(["--root", str(repo), "--base", base, "--head", head])
+
+
 def test_protected_cli_rejects_a_private_runner_with_no_actor_check(repo, capsys):
     candidate, base = _trusted_base(repo)
     candidate["jobs"]["private"] = {"runs-on": "anton"}
