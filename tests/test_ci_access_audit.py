@@ -139,8 +139,9 @@ def test_weekly_job_reads_dev_and_alerts_through_notifications():
     assert mint["uses"] == "actions/create-github-app-token@v3.2.0"
     assert mint["with"]["client-id"] == "${{ secrets.TCC_CI_CLIENT_ID }}"
     assert mint["with"]["private-key"] == "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}"
-    assert "repositories" not in mint["with"]
+    assert mint["with"]["repositories"] == "${{ github.event.repository.name }}"
     assert {key: value for key, value in mint["with"].items() if key.startswith("permission-")} == {
+        "permission-metadata": "read",
         "permission-members": "read",
         "permission-organization-administration": "read",
     }
