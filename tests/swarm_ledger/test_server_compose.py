@@ -61,7 +61,7 @@ def test_the_ledger_folder_is_mounted_from_the_host_at_its_own_path():
 
 
 def shared(tmp_path, monkeypatch):
-    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
     folder = tmp_path / "development-ledger"
     folder.mkdir()
     return folder
