@@ -66,20 +66,29 @@ def recent(slug, limit=20, home=None):
 def since(slug, since_ms, home=None):
     try:
         with gate_log_path(slug, home).open("rb") as source:
-            start, data = source.seek(0, 2), b""
-            while start and _oldest(data) >= since_ms:
+            start = source.seek(0, 2)
+            data = b""
+            newest = math.inf
+            while start and newest >= since_ms:
                 step = min(TAIL_BYTES, start)
                 start -= step
                 source.seek(start)
-                data = source.read(step) + data
+                chunk = source.read(step)
+                newest = _newest(chunk.splitlines()[1:])
+                data = chunk + data
     except OSError:
         return []
     lines = data.splitlines()
-    return [row for row in _parse(lines[1:] if start else lines) if row.get("at", 0) >= since_ms]
+    return [row for row in _parse(lines[1:] if start else lines) if (at := _at(row)) is not None and at >= since_ms]
 
 
-def _oldest(data):
-    return next((row.get("at", 0) for row in _parse(data.splitlines()[1:])), math.inf)
+def _newest(lines):
+    return max((at for row in _parse(lines) if (at := _at(row)) is not None), default=math.inf)
+
+
+def _at(row):
+    at = row.get("at")
+    return at if isinstance(at, (int, float)) and not isinstance(at, bool) else None
 
 
 def _parse(lines):

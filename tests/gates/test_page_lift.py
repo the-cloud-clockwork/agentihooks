@@ -164,6 +164,16 @@ class TestWindow:
         assert lift.current(SLUG, 2 * HOUR_MS - 1, tmp_path) == {ME: [{"gate": "watch", "lifted": True}]}
         assert lift.current(SLUG, 2 * HOUR_MS + 1000, tmp_path) == {}
 
+    def test_stale_timeless_and_text_timed_rows_inside_the_window_do_not_end_the_read(self, tmp_path):
+        self.fill(tmp_path, HOUR_MS, later=0)
+        stray = ['{"at": 0, "kind": "count"}', '{"kind": "count"}', '{"at": "soon", "kind": "count"}', '{"at": true}']
+        with log.gate_log_path(SLUG, tmp_path).open("a") as out:
+            for step in range(300):
+                row = log.Row.of("subagents", "count", WHO, "Agent", LONG, now_ms=HOUR_MS + 1 + step)
+                out.write(json.dumps(row.__dict__) + "\n" + stray[step % len(stray)] + "\n")
+        assert lift.current(SLUG, 2 * HOUR_MS - 1, tmp_path) == {ME: [{"gate": "watch", "lifted": True}]}
+        assert len(log.since(SLUG, HOUR_MS, tmp_path)) == 301
+
     def test_since_returns_every_row_from_the_given_time_on(self, tmp_path):
         self.fill(tmp_path, HOUR_MS)
         found = log.since(SLUG, HOUR_MS, tmp_path)
