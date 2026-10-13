@@ -25,7 +25,7 @@
       "parameters": {
         "required_approving_review_count": 0,
         "dismiss_stale_reviews_on_push": false,
-        "require_code_owner_review": true,
+        "require_code_owner_review": false,
         "require_last_push_approval": false,
         "required_review_thread_resolution": false,
         "allowed_merge_methods": [
@@ -38,7 +38,8 @@
       "parameters": {
         "required_status_checks": [
           {
-            "context": "Gate \u2014 Required"
+            "context": "Gate \u2014 Required",
+            "integration_id": 15368
           }
         ],
         "strict_required_status_checks_policy": false,
@@ -50,7 +51,7 @@
       "parameters": {
         "check_response_timeout_minutes": 60,
         "grouping_strategy": "ALLGREEN",
-        "max_entries_to_build": 5,
+        "max_entries_to_build": 2,
         "max_entries_to_merge": 5,
         "merge_method": "SQUASH",
         "min_entries_to_merge": 1,

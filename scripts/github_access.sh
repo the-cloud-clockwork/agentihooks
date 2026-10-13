@@ -59,10 +59,16 @@ check_json 'organization members' "$actual" "$(jq -cn --arg operator "$operator"
 actual="$(gh api "orgs/$organization/installations?per_page=100" --paginate | jq -s '[.[].installations[]]')"
 check_json 'installed GitHub apps' "$actual" "$(jq '.installed_apps | sort_by(.app_id)' "$policy")" 'map({app_id, app_slug}) | sort_by(.app_id)'
 
+actual="$(gh api "orgs/$organization/actions/permissions/fork-pr-contributor-approval")"
+check_json 'organization contributor approval' "$actual" "$(jq .contributor_approval "$policy")" '{approval_policy}'
+public_repositories="$(gh api "orgs/$organization/repos?type=public&per_page=100" --paginate | jq -es 'add | map(.name) | unique | select(length > 0)')"
+while IFS= read -r name; do
+  actual="$(gh api "repos/$organization/$name/actions/permissions/fork-pr-contributor-approval")"
+  check_json "$name contributor approval" "$actual" "$(jq .contributor_approval "$policy")" '{approval_policy}'
+done < <(jq -r '.[]' <<< "$public_repositories")
+
 while IFS= read -r name; do
   prefix="repos/$organization/$name"
-  actual="$(gh api "$prefix/actions/permissions/fork-pr-contributor-approval")"
-  check_json "$name contributor approval" "$actual" "$(jq .contributor_approval "$policy")" '{approval_policy}'
   actual="$(gh api "$prefix/actions/permissions/workflow")"
   check_json "$name workflow token" "$actual" "$(jq .workflow_permissions "$policy")" '{default_workflow_permissions, can_approve_pull_request_reviews}'
   actual="$(gh api "$prefix/collaborators?per_page=100" --paginate | jq -s add)"
@@ -76,6 +82,12 @@ done < <(jq -r '.repositories[]' "$policy")
 
 actual="$(gh api "orgs/$organization/actions/runner-groups/$group")"
 check_json 'Default runner public access' "$actual" "$(jq .runner_group "$policy")" '{id, name, allows_public_repositories}'
+
+public_group="$(jq -r .public_runner_group.id "$policy")"
+actual="$(gh api "orgs/$organization/actions/runner-groups/$public_group")"
+check_json 'Anton open source runner group' "$actual" "$(jq '.public_runner_group | del(.repositories)' "$policy")" '{id, name, visibility, allows_public_repositories, restricted_to_workflows, selected_workflows}'
+actual="$(gh api "orgs/$organization/actions/runner-groups/$public_group/repositories?per_page=100" --paginate | jq -s '[.[].repositories[]]')"
+check_json 'Anton open source runner repositories' "$actual" "$(jq '.public_runner_group.repositories | sort' "$policy")" 'map(.name) | sort'
 
 echo "$checks access checks, $failures drift findings"
 if [[ "$failures" -ne 0 ]]; then
