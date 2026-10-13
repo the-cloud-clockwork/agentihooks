@@ -93,7 +93,7 @@ docker --host "$proof_docker_host" compose -f "$fixture" -f "$proof_dir/override
 docker --host "$proof_docker_host" image inspect 127.0.0.1:5000/proof:present --format '{{.Architecture}}' | grep -x amd64
 printf 'Absent attestation: hive launch image pull passed\n'
 printf 'services:\n  redis:\n    image: 127.0.0.1:5000/proof:missing-image\n' > "$proof_dir/override.yaml"
-if docker --host "$proof_docker_host" compose -f "$fixture" -f "$proof_dir/override.yaml" pull redis > "$proof_dir/pull.log" 2>&1; then
+if DOCKER_HOST="$proof_docker_host" bash scripts/packaging/pull-runtime-image.sh 127.0.0.1:5000/proof:missing-image --insecure > "$proof_dir/pull.log" 2>&1; then
   cat "$proof_dir/pull.log"
   printf 'Missing runnable image unexpectedly passed\n' >&2
   exit 1
