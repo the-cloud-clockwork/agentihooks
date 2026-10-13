@@ -629,6 +629,8 @@ class InboxStore:
                 return None
             if item.state in CLOSED:
                 raise InboxError(f"message {item_id} is closed: {item.reason}")
+            if item.fyi and state in ("read", "confirmed"):
+                state, reason = "done", "done: information received"
             if state == "done" and not item.fyi and reason == "done":
                 raise InboxError("done needs an outcome naming where the work went")
             if item.state == state:
