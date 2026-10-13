@@ -11,19 +11,20 @@ runs on `merge_group`, so unit, lint, Sonar and the swarm image smoke grade
 the merged tree before it lands. Mutation stays on the pull request head.
 Once the queue is active, `gh pr merge --squash` adds the pull request to the
 queue; it lands when the queue run passes the gate.
-The queue groups with `HEADGREEN`: every entry is built on dev plus the
-entries ahead of it, and when an entry passes, it merges together with every
-entry ahead of it, so one run grades several pull requests. When the last
-entry of a group fails, that entry leaves the queue, the entries behind it
-rebuild without it, and the entries ahead of it still merge on the next
-passing run among them. Each run takes about 22 `anton-oss` jobs, so two
-concurrent builds take the 40 runner pool.
+The queue groups with `ALLGREEN`: every entry is built on dev plus the
+entries ahead of it and merges only on its own passing run, so a red pull
+request never lands. A failing entry leaves the queue and the entries behind
+it rebuild without it. Each run takes about 22 `anton-oss` jobs, so the queue
+builds two entries at a time to fit the 40 runner pool, which also bounds the
+builds a failure throws away to one.
 Main keeps its existing branch match and rules; only its bypass list changes.
 
 The antoncore `Organization secrets and dev rulesets` workflow applies
 `dev-no-delete.json` from this repository's dev and reads it back on every
 antoncore dev push or dispatch, so a change here goes live on the next
-antoncore dev push or a dispatch of that workflow. The operator applies the
+antoncore dev push or a dispatch of that workflow. The reconcile requires the
+required check to name its source, `integration_id` 15368 for GitHub Actions.
+The operator applies the
 other payloads. Agents cannot mutate remote rulesets. From a checkout
 containing the reviewed payloads:
 
