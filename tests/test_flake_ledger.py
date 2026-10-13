@@ -179,9 +179,10 @@ def test_a_worker_crash_that_repeats_on_retry_stays_red(tmp_path):
     assert len(record["errors"]) == 2
 
 
-def test_a_worker_crash_without_reruns_is_not_retried(tmp_path):
+def test_a_worker_crash_without_reruns_stays_red_after_the_scheduler_reruns_it(tmp_path):
     result, records = _run_crash(tmp_path, "test_crashes_once", reruns="0")
     assert result.returncode == 1, result.stdout + result.stderr
+    assert (tmp_path / "crashed-once").read_text() == "2"
     [record] = records
     assert record["outcome"] == "failed"
     assert record["crashes"] == 1
