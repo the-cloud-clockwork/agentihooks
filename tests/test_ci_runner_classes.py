@@ -50,7 +50,7 @@ def test_a_job_with_no_class_is_red():
 
 def test_reusable_calls_are_graded_through_their_callee():
     calls = {"jobs": {"call": {"uses": "./.github/workflows/x.yml"}}}
-    assert classes({"b.yml": calls}, {}) == []
+    assert classes({"b.yml": calls, "x.yml": workflow()}, {"x.yml/build": "light"}) == []
 
 
 def test_a_reusable_call_to_a_missing_local_workflow_is_red():
