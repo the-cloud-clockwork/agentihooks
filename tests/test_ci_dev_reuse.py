@@ -132,6 +132,12 @@ def test_malformed_run_metadata_falls_back(tmp_path, payload):
     assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) is None
 
 
+def test_malformed_run_entry_does_not_hide_a_passed_candidate(tmp_path):
+    good, _, _ = evidence(tmp_path)
+    (tmp_path / "runs.json").write_text(json.dumps({"workflow_runs": [None, good]}))
+    assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) == 123
+
+
 def test_null_provenance_inputs_fall_back(tmp_path):
     _, record, folder = evidence(tmp_path)
     record["inputs"] = None
