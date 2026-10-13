@@ -270,12 +270,14 @@ def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats
     if not os.environ.get("CI"):
         print("Local mutation worker cap: 2 (mutation and stats)")
     changes = json.loads(selection.read_text())
+    # Built before mutmut runs: a mutated copy of this module records each call against the working directory.
+    bootstraps = {path: mutated_bootstrap(path) for path in changes}
     tests_by_prefix = {get_mutant_name(Path(path), ""): set(change["tests"]) for path, change in changes.items()}
     related = set()
 
     def write_selected(*, out, source, filename):
         code, names = selected_mutants(str(filename), source, set(changes[str(filename)]["lines"]))
-        bootstrap = mutated_bootstrap(str(filename))
+        bootstrap = bootstraps[str(filename)]
         statements = ast.parse(code).body
         index = 0
         for statement in statements:
