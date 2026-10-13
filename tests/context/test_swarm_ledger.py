@@ -106,6 +106,8 @@ def test_a_held_stop_finishes_the_turn_but_schedules_no_refresh_or_close(harness
     monkeypatch.setattr(hm, "_confirm_inbox", confirmed.append)
     monkeypatch.setattr("hooks.lifecycle.refresh.on_stop", scheduled.append)
     monkeypatch.setattr("hooks.lifecycle.handoff_close.on_stop", scheduled.append)
+    monkeypatch.setattr("hooks._async.fork_and_call", lambda *a, **k: None)
+    monkeypatch.setattr(hm, "_request_trace_flush", lambda *a: None)
     with pytest.raises(hm.BlockAction, match="operator event"):
         hm.on_stop({"hook_event_name": "Stop", "session_id": "s1", "cwd": "/p"})
     assert [p["hook_event_name"] for p in dispatched] == ["Stop"]
