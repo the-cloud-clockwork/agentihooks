@@ -559,6 +559,27 @@ def test_execution_home_keeps_profile_binding_and_manifests(server, tmp_path):
     assert (profile / binding.FILE).read_bytes() == original
     assert json.loads(original)["home"] == str(profile)
 
+@pytest.mark.parametrize("linked", [False, True])
+def test_execution_home_shares_package_binaries_without_copying(server, tmp_path, linked):
+    profile = Path(server.codex_home)
+    package = tmp_path / "package" if linked else profile / "bin"
+    package.mkdir()
+    binary = package / "codex"
+    binary.write_bytes(b"fixture package binary")
+    if linked:
+        (profile / "bin").symlink_to(package, target_is_directory=True)
+    directory = tmp_path / "execution"
+    directory.mkdir()
+    spec = supervisor.Launch("fixture", AgentRecord("fixture", "eng", "task"), str(tmp_path), str(profile), {})
+
+    private = supervisor.execution_home(spec, directory)
+
+    home = Path(private.codex_home)
+    assert (home / "bin").is_symlink()
+    assert (home / "bin").resolve() == package.resolve()
+    assert (home / "bin" / "codex").samefile(binary)
+    assert binary.read_bytes() == b"fixture package binary"
+
 
 def test_a_home_seed_failure_spawns_nothing_and_frees_the_endpoint(store, server, clock, root, tmp_path):
     spec = launch_spec(store, server, tmp_path, codex_home=str(tmp_path / "missing"))
