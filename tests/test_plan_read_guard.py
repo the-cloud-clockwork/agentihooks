@@ -192,6 +192,25 @@ def test_errors_while_deciding_refuse(ledger):
     assert check(read(["x", PLAN], offset=45, limit=5), env(ledger))
 
 
+@pytest.mark.parametrize("lane", ["eng", "ci"])
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cd ~; agentihooks plan read",
+        "cd ~&& gh pr view 3183",
+        "printf '%s' ~nosuchuser/x",
+    ],
+)
+def test_unexpandable_tokens_without_plan_artifacts_pass(ledger, lane, command):
+    assert check(bash(command), env(ledger, lane=lane)) is None
+
+
+@pytest.mark.parametrize("token", ["~;", "~&&", "~nosuchuser/x"])
+def test_unexpandable_token_does_not_hide_a_plan_read(ledger, token):
+    assert check(bash(f"cd {token} cat {PLAN}"), env(ledger)) == plan_read_guard.refusal((PLAN, 30, 70))
+    assert check(bash(f"cd {token} rg needle {ledger}"), env(ledger)) == plan_read_guard.refusal((PLAN, 30, 70))
+
+
 def test_ledger_root_by_variable_or_relative_name_refused(ledger, monkeypatch):
     monkeypatch.setenv("LEDGERS", str(ledger))
     assert check({"tool_name": "Grep", "tool_input": {"path": "$LEDGERS"}}, env(ledger))
