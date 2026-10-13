@@ -183,6 +183,26 @@ def requested(store, slug: str, agent, choice: str, now_ms: int) -> Outcome:
 
 RECOVERY = "outage-resumes"
 RECOVERY_ATTEMPTS = 3
+STUCK_HANDOFF = """## Intent
+Continue task {task}; the swarm retired {name} while its turns kept failing on a provider error.
+
+## Done
+unknown: {name} left no handoff document; its task folder records its steps and evidence.
+
+## Stopped at
+Its pane showed this provider error: {error}
+
+## Decisions and promises
+unknown: none recorded outside the task folder and the ledger.
+
+## Next
+Read the task folder {folder} (steering.md, progress.md, proof.md) and the ledger task {task}, then continue the task.
+
+## Read first
+{folder}/progress.md
+
+<!-- handoff complete -->
+"""
 
 
 def _recovery_record(store, slug, agent):
@@ -399,11 +419,15 @@ def _restart_from_handoff(store, slug, agent, task, context):
     return ""
 
 
-def recovery_handoff(store, slug, agent, now_ms):
+def recovery_handoff(store: RedisStore, slug: str, agent: AgentRecord, now_ms: int) -> dict:
     handoff = store.handoff(slug, agent.task) or transfers.last_handoff(store, slug, agent.task)
     return transfers.record(store, slug, agent, "outage", handoff, now_ms)
 
 
-def free_seat(store, slug, agent, now_ms):
+def free_seat(store: RedisStore, slug: str, agent: AgentRecord, now_ms: int) -> dict:
     store.redis.hdel(store.key(slug, RECOVERY), agent.name)
-    return recovery_handoff(store, slug, agent, now_ms)
+    error = store.redis.get(store.key(slug, outage.PANE, agent.name))
+    folder = ledger_workspace.folder(slug, agent.task)
+    handoff = store.handoff(slug, agent.task) or transfers.last_handoff(store, slug, agent.task)
+    text = handoff or STUCK_HANDOFF.format(task=agent.task, name=agent.name, error=error, folder=folder)
+    return transfers.record(store, slug, agent, "outage", text, now_ms, avoid_harness=agent.harness)

@@ -91,6 +91,10 @@ def held_past_limit(store: RedisStore, slug: str, name: str, now_ms: int) -> boo
     return since is not None and now_ms - int(since) >= HOLD_LIMIT_MS
 
 
+def clear_pane(store: RedisStore, slug: str, name: str) -> None:
+    store.redis.delete(store.key(slug, PANE, name), store.key(slug, PANE_SINCE, name))
+
+
 def held(store: RedisStore, slug: str, name: str | None) -> str:
     """The evidence holding an agent: the swarm's open outages, else a provider error on its own pane."""
     evidence = [line for record in open_records(slug) for line in record["evidence"]]

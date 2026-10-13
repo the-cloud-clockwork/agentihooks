@@ -16,7 +16,7 @@ def first_next(text: str) -> str:
     return next((line.strip().lstrip("- ") for line in section(text, "Next").splitlines() if line.strip()), "")
 
 
-def record(store, slug: str, agent, reason: str, text: str, at: int) -> dict:
+def record(store, slug: str, agent, reason: str, text: str, at: int, **fields) -> dict:
     row = {
         "id": uuid4().hex,
         "reason": reason,
@@ -29,6 +29,7 @@ def record(store, slug: str, agent, reason: str, text: str, at: int) -> dict:
         "next": first_next(text),
         "continuity": {"state": "pending"} if text else {"state": "unknown", "gap": "No handoff document"},
         "binding": {"state": "pending"},
+        **fields,
     }
     store.redis.hset(store.key(slug, "transfers"), row["id"], json.dumps(row))
     return row

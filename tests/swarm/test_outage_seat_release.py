@@ -36,7 +36,11 @@ def stuck_owner(store, monkeypatch):
     for agent in agents[1:]:
         runtime.statuses[agent.name] = "working"
     runtime.errors[owner.name] = pane.provider_error("codex", CAPACITY)
-    monkeypatch.setattr(runtime, "nudge", lambda agent, text: FakeRuntime.nudge(runtime, agent, text))
+
+    def nudge_whose_turn_fails(agent, text):
+        return FakeRuntime.nudge(runtime, agent, text)
+
+    monkeypatch.setattr(runtime, "nudge", nudge_whose_turn_fails)
     return ledger, runtime, owner
 
 
@@ -51,6 +55,11 @@ def assert_seat_freed(store, ledger, runtime, owner):
         if (row["task"], row["predecessor"], row["reason"]) == (owner.task, owner.name, "outage")
     ]
     assert len(recovery) == 1 and not recovery[0]["successor"], recovery
+    assert recovery[0]["avoid_harness"] == owner.harness
+    assert "## Next" in recovery[0]["handoff"] and recovery[0]["next"]
+    assert not store.redis.exists(
+        store.key("sw", outage.PANE, owner.name), store.key("sw", outage.PANE_SINCE, owner.name)
+    )
 
 
 @pytest.mark.parametrize(("backend", "recovered"), [("local", True), ("kubernetes", False)])
@@ -81,6 +90,12 @@ def test_an_owner_whose_turns_still_fail_after_the_probe_passes_frees_its_seat_o
     assert store.claimant("sw", owner.task) == owner.name
     tick("sw", store, ledger, runtime, 9 * MINUTE)
     assert_seat_freed(store, ledger, runtime, owner)
+    store.update("sw", state="running")
+    tick("sw", store, ledger, runtime, 10 * MINUTE)
+    successor = next(agent for agent in store.agents("sw") if agent.task == owner.task)
+    transfer = runtime.tasks[-1]["transfer"]
+    assert (transfer["successor"], transfer["avoid_harness"]) == (successor.name, "codex")
+    assert transfer["handoff"].startswith("## Intent") and runtime.errors[owner.name] in transfer["handoff"]
 
 
 def test_a_provider_error_outlasting_the_hold_window_frees_the_seat_while_the_outage_stays_open(store, monkeypatch):
@@ -106,3 +121,31 @@ def test_a_cleared_provider_error_restarts_the_hold_window(store, monkeypatch):
     tick("sw", store, ledger, runtime, 2 * MINUTE + outage.HOLD_LIMIT_MS)
     assert store.claimant("sw", owner.task) == owner.name
     assert owner.name not in runtime.killed
+
+
+def test_a_working_heartbeat_keeps_an_agent_whose_pane_still_shows_an_old_provider_error(store, monkeypatch):
+    from scripts.swarm import idle
+
+    ledger, runtime, owner = stuck_owner(store, monkeypatch)
+    outage.observe("sw", "provider", ["provider unavailable"], MINUTE)
+    tick("sw", store, ledger, runtime, 2 * MINUTE)
+    at = 2 * MINUTE + outage.HOLD_LIMIT_MS
+    idle.beat(store.redis, "sw", owner.name, "working", at - 1)
+    tick("sw", store, ledger, runtime, at)
+    assert store.claimant("sw", owner.task) == owner.name
+    assert owner.name not in runtime.killed
+
+
+@pytest.mark.parametrize("pinned", [False, True])
+def test_a_spawn_after_a_freed_seat_takes_another_harness_when_one_has_room(tmp_path, monkeypatch, pinned):
+    from tests.swarm.test_capacity import _runtime_probe, account
+
+    rows = [account("a", sessions=2), account("cx", harness="codex")]
+    runtime, config, seen = _runtime_probe(tmp_path, monkeypatch, rows)
+    task = {"id": "p", "title": "Continue", "transfer": {"avoid_harness": "codex"}}
+    if pinned:
+        launch = {"profile": "planner", "harness": "codex", "model": "gpt-5.5", "effort": "high", "account": "cx"}
+        task["handoff_envelope"] = {"launch": launch}
+    runtime.spawn(config, "plan", "planner@a1b2c3-0001", task)
+    runtime.spawn(config, "plan", "planner@a1b2c3-0002", {"id": "q", "title": "Plan"})
+    assert seen == [("p", "claude", "a"), ("q", "codex", "cx")]

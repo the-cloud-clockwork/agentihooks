@@ -601,7 +601,13 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
 def _stuck_on_provider(slug, store, agent, observed, exhausted, now_ms):
     if agent.lane == MASTER or not observed.provider_error or _operator_at_pane(slug, store, agent, observed, now_ms):
         return False
-    return exhausted or outage.held_past_limit(store, slug, agent.name, now_ms)
+    state = idle_state.verdict(
+        observed.state,
+        idle_state.heartbeat(store.redis, slug, agent.name),
+        idle_state.wait(store.redis, slug, agent.name),
+        now_ms,
+    )
+    return state == idle_state.IDLE and (exhausted or outage.held_past_limit(store, slug, agent.name, now_ms))
 
 
 def _free_stuck(slug, store, ledger, runtime, rows, agent, now_ms):
@@ -609,6 +615,7 @@ def _free_stuck(slug, store, ledger, runtime, rows, agent, now_ms):
         store.put_agent(slug, agent)
         return [f"could not retire {agent.name}, stuck on a provider error, retrying next tick"]
     resume.free_seat(store, slug, agent, now_ms)
+    outage.clear_pane(store, slug, agent.name)
     return [
         f"freed the seat of {agent.name}, stuck on a provider error"
         + _drop(slug, store, ledger, rows, agent, refund=True)
