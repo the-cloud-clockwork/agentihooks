@@ -38,3 +38,17 @@ def test_a_write_copies_only_changed_parts_and_keeps_published_state_isolated(mo
     assert hub.resource("s", "ledger")["notes"] == [{"id": "n1", "text": "new note"}]
     assert hub.resource("s", "ledger")["tasks"] == [{"id": "t1", "title": "unchanged task"}]
     assert all("unchanged task" not in text for text in serialized)
+
+
+def test_the_initial_snapshot_is_isolated_from_its_loader_before_the_first_write(monkeypatch):
+    hub = Hub()
+    monkeypatch.setattr(server, "HUB", hub)
+    state = {"tasks": [{"id": "t1", "title": "first"}], "notes": [], "_meta": {"rev": 1}}
+    hub.open("s", lambda: {"ledger": server.ledger_view(state)})
+    state["tasks"][0]["title"] = "changed"
+    state["_meta"]["rev"] = 2
+    assert hub.resource("s", "ledger")["tasks"] == [{"id": "t1", "title": "first"}]
+    server.publish_ledger("s", state)
+    events = hub.wait("s", 0, 0)
+    assert len(events) == 1
+    assert events[0][3]["patch"]["o"]["tasks"]["u"] == [{"id": "t1", "title": "changed"}]
