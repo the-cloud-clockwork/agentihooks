@@ -79,19 +79,19 @@ done
 docker exec "$registry" python -c 'import urllib.request; urllib.request.urlopen("http://localhost:5000/v2/")'
 daemon="$(docker run -d --privileged --network host --entrypoint dockerd mirror.gcr.io/library/docker:29-dind \
   --host=tcp://127.0.0.1:2377 --tls=false --insecure-registry=127.0.0.1:5000)"
-export DOCKER_HOST=tcp://127.0.0.1:2377
+proof_docker_host=tcp://127.0.0.1:2377
 for attempt in {1..30}; do
-  if docker info > /dev/null 2>&1; then break; fi
+  if docker --host "$proof_docker_host" info > /dev/null 2>&1; then break; fi
   sleep 1
 done
-docker info --format '{{json .DriverStatus}}'
+docker --host "$proof_docker_host" info --format '{{json .DriverStatus}} {{json .RegistryConfig.IndexConfigs}}'
 fixture=tests/integration/hive_launch/compose.yaml
 printf 'services:\n  redis:\n    image: 127.0.0.1:5000/proof:present\n' > "$proof_dir/override.yaml"
-docker compose -f "$fixture" -f "$proof_dir/override.yaml" pull redis
-docker image inspect 127.0.0.1:5000/proof:present --format '{{.Architecture}}' | grep -x amd64
+docker --host "$proof_docker_host" compose -f "$fixture" -f "$proof_dir/override.yaml" pull redis
+docker --host "$proof_docker_host" image inspect 127.0.0.1:5000/proof:present --format '{{.Architecture}}' | grep -x amd64
 printf 'Absent attestation: hive launch image pull passed\n'
 printf 'services:\n  redis:\n    image: 127.0.0.1:5000/proof:missing-image\n' > "$proof_dir/override.yaml"
-if docker compose -f "$fixture" -f "$proof_dir/override.yaml" pull redis > "$proof_dir/pull.log" 2>&1; then
+if docker --host "$proof_docker_host" compose -f "$fixture" -f "$proof_dir/override.yaml" pull redis > "$proof_dir/pull.log" 2>&1; then
   cat "$proof_dir/pull.log"
   printf 'Missing runnable image unexpectedly passed\n' >&2
   exit 1
