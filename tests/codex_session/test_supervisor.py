@@ -599,6 +599,53 @@ def test_a_home_seed_failure_spawns_nothing_and_frees_the_endpoint(store, server
     assert not store.redis.hgetall(store.key(SLUG, ENDPOINTS))
 
 
+@pytest.mark.parametrize("stage", ["seed", "spawn", "startup", "registry"])
+def test_failed_launch_removes_only_its_execution_folder(store, server, clock, root, tmp_path, monkeypatch, stage):
+    neighbor = root / "another-execution"
+    neighbor.mkdir(parents=True)
+    (neighbor / "keep").write_text("other session")
+    profile = Path(server.codex_home)
+    (profile / "config.toml").write_text("private seed")
+    package = tmp_path / "package"
+    package.mkdir()
+    (package / "codex").write_text("shared binary")
+    (profile / "bin").symlink_to(package, target_is_directory=True)
+    spec = launch_spec(store, server, tmp_path)
+    built = deps(server, clock, root)
+    if stage == "seed":
+        copytree = shutil.copytree
+
+        def partial_seed(source, destination, **kwargs):
+            copytree(source, destination, **kwargs)
+            raise OSError("home seed failed")
+
+        monkeypatch.setattr(supervisor.shutil, "copytree", partial_seed)
+    elif stage == "spawn":
+
+        def refused_spawn(*args, **kwargs):
+            raise OSError("spawn failed")
+
+        built = replace(built, popen=refused_spawn)
+    elif stage == "startup":
+        server.answers = False
+    else:
+
+        def refused_registry(*args):
+            raise SwarmError("registry failed")
+
+        monkeypatch.setattr(store, "put_agent", refused_registry)
+
+    with pytest.raises((OSError, supervisor.LaunchFailure, SwarmError)):
+        supervisor.launch(store, spec, built)
+
+    assert list(root.iterdir()) == [neighbor]
+    assert (neighbor / "keep").read_text() == "other session"
+    assert (profile / "config.toml").read_text() == "private seed"
+    assert (package / "codex").read_text() == "shared binary"
+    assert not store.redis.hgetall(store.key(SLUG, ENDPOINTS))
+    assert all(process.poll() is not None for process in server.processes)
+
+
 @pytest.mark.parametrize("stage", ["endpoint", "reservation"])
 def test_failure_before_transport_reservation_ends_admitted_execution(
     store, server, clock, root, tmp_path, monkeypatch, stage
