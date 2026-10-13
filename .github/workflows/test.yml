@@ -560,6 +560,7 @@ jobs:
           echo "Tests retried in place: $(wc -l < flakes.jsonl)" | tee -a "$GITHUB_STEP_SUMMARY"
           jq -r '"\(.outcome) after \(.attempts) attempts: \(.test)"' flakes.jsonl | tee -a "$GITHUB_STEP_SUMMARY"
           jq -r 'select(.outcome == "flaky") | "::warning title=Flaky test::\(.test) passed on attempt \(.attempts) in run \(.run)"' flakes.jsonl
+          jq -r 'select(.crashes) | "::warning title=Worker crash::\(.test) crashed its worker \(.crashes) time(s) in run \(.run)"' flakes.jsonl
 
       - name: Upload the flake report
         if: ${{ !cancelled() }}
@@ -990,6 +991,26 @@ jobs:
       - name: Check every pull request job is a need of Gate Required
         if: ${{ !cancelled() }}
         run: python -m scripts.ci_wiring
+
+      - name: Require trusted actors before private runner admission
+        if: ${{ !cancelled() }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/grader/scripts/ci_runner_trust.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+            python -m scripts.gate_protected --head "$GITHUB_SHA"
+          else
+            python -m scripts.ci_runner_trust
+          fi
+
+      - name: Hold every job to a runner class
+        if: ${{ !cancelled() }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/grader/scripts/ci_runner_classes.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+            python -m scripts.ci_runner_classes --root "$GITHUB_WORKSPACE"
+          else
+            python -m scripts.ci_runner_classes
+          fi
 
       # dev's copy grades against the base's allowlist, so a pull request cannot loosen its own limits or allowlist.
       - name: Hold the size and complexity limits

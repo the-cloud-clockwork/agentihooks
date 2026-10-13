@@ -366,3 +366,43 @@ def test_a_head_moving_the_gate_away_from_the_protected_reuse_job_is_named_not_c
     base["jobs"]["gate"]["needs"].append("reuse")
     problems = gate_protected.grade({"test.yml": base}, {}, {"other.yml": copy.deepcopy(base)}, {}, _TODAY)
     assert "The head removes the protected reuse job." in problems
+
+
+def _trusted_base(repo, actors=None):
+    candidate = _workflow()
+    candidate["jobs"]["gate"]["runs-on"] = "ubuntu-latest"
+    _commit(repo, {"test.yml": candidate}, {}, "base workflows")
+    policy = repo / ".github/workflows/trusted-actors.json"
+    policy.write_text(json.dumps(actors or ["nestorcolt", "agenticore-app[bot]", "tcc-main-ci[bot]"]))
+    _git(repo, "add", ".github/workflows/trusted-actors.json")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "protected approvals")
+    return candidate, _git(repo, "rev-parse", "HEAD")
+
+
+def test_protected_cli_accepts_a_hosted_head_from_an_actor_owned_base(repo):
+    candidate, base = _trusted_base(repo)
+    head = _commit(repo, {"test.yml": candidate}, {}, "hosted head")
+    assert gate_protected.main(["--root", str(repo), "--base", base, "--head", head]) == 0
+
+
+def test_protected_cli_rejects_a_private_runner_with_no_actor_check(repo, capsys):
+    candidate, base = _trusted_base(repo)
+    candidate["jobs"]["private"] = {"runs-on": "anton"}
+    candidate["jobs"]["gate"]["needs"].append("private")
+    head = _commit(repo, {"test.yml": candidate}, {}, "unguarded private head")
+    assert gate_protected.main(["--root", str(repo), "--base", base, "--head", head]) == 1
+    assert "test.yml/private: runner trust" in capsys.readouterr().out
+
+
+def test_protected_cli_keeps_wiring_errors_when_runner_admission_is_safe(repo):
+    candidate, base = _trusted_base(repo)
+    candidate["jobs"]["gate"]["needs"].remove("unit")
+    head = _commit(repo, {"test.yml": candidate}, {}, "lost required unit")
+    assert gate_protected.main(["--root", str(repo), "--base", base, "--head", head]) == 1
+
+
+def test_protected_cli_validates_approvals_from_the_base_not_head(repo):
+    candidate, base = _trusted_base(repo, ["nestorcolt", "agenticore-app[bot]", "tcc-main-ci[bot]", "stranger"])
+    head = _commit(repo, {"test.yml": candidate}, {}, "head without policy")
+    with pytest.raises(ValueError, match="trusted actors"):
+        gate_protected.main(["--root", str(repo), "--base", base, "--head", head])

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.x__command__mutmut_8:2bb97bdc7fde1a899131232f0f3f26536ff28526b59f7ad5e781035dbf430794": {
+    "reader": "standards_reader",
+    "reason": "partition and rpartition differ only for a seat with no @ or several. _command runs only for remote hive agents, whose seats come from seat_address in the tick as <seat>@<slug>; slugs match ^[a-z][a-z0-9-]{0,47}$ and seat names come from fixed lanes, so exactly one @ is reachable and both return the same slug."
+  }
+}

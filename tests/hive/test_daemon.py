@@ -659,3 +659,77 @@ def test_execution_report_deduplicates_processes_and_skips_stale_records(redis, 
     assert daemon._executions(redis, "hive", processes) == {
         "claude:one": [agents[0].execution_id, agents[2].execution_id, agents[6].execution_id]
     }
+
+
+def test_beat_publishes_what_this_hive_sees_of_its_own_executions(redis, monkeypatch):
+    from dataclasses import replace
+
+    from scripts.hive import orders, reports
+    from scripts.swarm.pane import PaneObservation
+    from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+
+    store = RedisStore(redis)
+    store.create(SwarmConfig("swarm", "repo", 8, 0))
+    here = AgentRecord(
+        store.next_name("swarm", "eng"), "eng", "one", pane_id="w1:p1", runtime_target={"host_id": "machine"}
+    )
+    elsewhere = AgentRecord(
+        store.next_name("swarm", "eng"), "eng", "two", pane_id="w1:p2", runtime_target={"host_id": "other"}
+    )
+    here = store.start_execution("swarm", replace(here, seat="eng-1@swarm"))
+    store.put_agent("swarm", here)
+    store.put_agent("swarm", store.start_execution("swarm", replace(elsewhere, seat="eng-2@swarm")))
+    herdr = Mock()
+    herdr.live_names.return_value = {here.name, "engineer@stray-0001"}
+    herdr.bindings.return_value = {here.name: {"process": False}}
+    herdr.conversations.return_value = {"w1:p1": "conversation"}
+    herdr.observe.return_value = PaneObservation("idle", typed="half")
+    herdr.reported.return_value = True
+    consumer = Mock(runtime=Mock(herdr=herdr))
+    monkeypatch.setattr(orders.Consumer, "local", lambda redis, hive: consumer)
+    monkeypatch.setattr(
+        daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
+    )
+    daemon.beat(redis, "machine")
+    assert [a.name for a in herdr.bindings.call_args.args[0]] == [here.name]
+    assert herdr.reported.call_args.args[0].execution_id == here.execution_id
+    assert herdr.observe.call_args.args[0].execution_id == here.execution_id
+    assert json.loads(redis.get(reports.key("machine"))) == {
+        "names": sorted({here.name, "engineer@stray-0001"}),
+        "panes": {"w1:p1": "conversation"},
+        "executions": {
+            here.execution_id: {
+                "slug": "swarm",
+                "name": here.name,
+                "generation": here.generation,
+                "reported": True,
+                "binding": {"process": False},
+                "pane": {
+                    "state": "idle",
+                    "prompt_title": "",
+                    "typed": "half",
+                    "provider_error": "",
+                    "provider_checked": False,
+                    "provider_error_id": "",
+                },
+            }
+        },
+    }
+    assert redis.ttl(reports.key("machine")) == 45
+    consumer.poll.assert_called_once_with()
+    consumer.poll_commands.assert_called_once_with()
+
+
+def test_a_hive_with_no_executions_reports_names_without_asking_herdr_more(redis, monkeypatch):
+    from scripts.hive import orders, reports
+
+    herdr = Mock()
+    herdr.live_names.return_value = set()
+    monkeypatch.setattr(orders.Consumer, "local", lambda redis, hive: Mock(runtime=Mock(herdr=herdr)))
+    monkeypatch.setattr(
+        daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
+    )
+    daemon.beat(redis, "machine")
+    assert json.loads(redis.get(reports.key("machine"))) == {"names": [], "panes": {}, "executions": {}}
+    herdr.bindings.assert_not_called()
+    herdr.conversations.assert_not_called()
