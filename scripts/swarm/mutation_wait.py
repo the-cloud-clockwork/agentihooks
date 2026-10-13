@@ -167,6 +167,16 @@ def _unfetched(outcome, conclusion, error):
     )
 
 
+def _failures(report):
+    failures = [
+        f"{file['path']}:{failure['name']}:{failure['fingerprint']} ({failure['status']})"
+        for file in report["files"]
+        for failure in file["failures"]
+    ]
+    failures.extend(f"{row['path']}: {row['reason']}" for row in report["not_mutated"])
+    return failures
+
+
 def resolution(held: dict) -> str:
     target = held["target"]
     run = read(target)
@@ -187,12 +197,7 @@ def resolution(held: dict) -> str:
     try:
         report, scope = _fetch(target, run)
         covered = _covers(target, run, scope)
-        failures = [
-            f"{file['path']}:{failure['name']}:{failure['fingerprint']} ({failure['status']})"
-            for file in report["files"]
-            for failure in file["failures"]
-        ]
-        failures.extend(f"{row['path']}: {row['reason']}" for row in report["not_mutated"])
+        failures = _failures(report)
         failed = report["failed"]
     except Skipped as skipped:
         return f"{outcome}, now skipped; the open pull request runs mutation in {skipped}"
