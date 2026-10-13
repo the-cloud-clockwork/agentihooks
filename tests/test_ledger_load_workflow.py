@@ -27,7 +27,13 @@ def test_the_ledger_load_gate_runs_beside_the_shards_with_redis_inside_the_budge
     load = yaml.safe_load((WORKFLOWS / "ledger-load.yml").read_text())["jobs"]["load"]
     assert "redis" in load["services"]
     assert load["timeout-minutes"] <= 15
-    assert "-m tests.ledger_load.gate --folder" in load["steps"][-1]["run"]
+    gate = next(
+        step
+        for step in load["steps"]
+        if step.get("name") == "Write and read a full size ledger from ten clients within the server budget"
+    )
+    assert "-m tests.ledger_load.gate --folder" in gate["run"]
+    assert gate["if"] == "${{ !inputs.streams }}"
 
 
 def test_the_ledger_load_gate_grades_with_the_budgets_of_the_fetched_base():
@@ -35,7 +41,13 @@ def test_the_ledger_load_gate_grades_with_the_budgets_of_the_fetched_base():
     triggers = workflow[True]
     assert triggers["workflow_call"]["inputs"]["base"]["required"] is True
     assert triggers["workflow_dispatch"]["inputs"]["base"]["required"] is True
-    fetch, gate = workflow["jobs"]["load"]["steps"][-2:]
+    steps = workflow["jobs"]["load"]["steps"]
+    fetch = next(step for step in steps if step.get("name") == "Fetch the base whose budgets grade the run")
+    gate = next(
+        step
+        for step in steps
+        if step.get("name") == "Write and read a full size ledger from ten clients within the server budget"
+    )
     assert fetch["env"] == {"BASE": "${{ inputs.base }}"}
     assert fetch["run"] == 'git fetch --no-tags --depth=1 origin "${BASE#origin/}"'
     assert gate["run"].rstrip().endswith("--base FETCH_HEAD")
