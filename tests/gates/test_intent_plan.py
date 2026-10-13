@@ -1,6 +1,6 @@
 import json
 
-from hooks.classifier import definitions
+from hooks.classifier import ClassifierUnavailable, definitions
 from hooks.classifier.result import Answer, DecisionResult
 from scripts.gates import intent, intent_history
 from scripts.gates.verdicts import Verdicts
@@ -225,3 +225,81 @@ def test_the_plan_state_passes_through_the_history_bounds():
     )
     assert state["stage"] == "plan"
     assert "pull_request_title" not in state
+
+
+PLAN = {"stage": "plan", "task": "T", "task_text": "do", "phase": "P", "phase_intent": "use"}
+CHUNK = {"plan_lines": "1-1", "plan_chunk": "row\n"}
+
+
+def test_the_plan_fail_line_and_weaken_line_hold_at_their_exact_values():
+    passed = intent.judged(PLAN, decide=answered(aligned=0.3, covers=0.3, weakens=0.49))
+    assert (passed["verdict"], passed["criterion"]) == ("pass", None)
+    weakened = intent.judged(PLAN, decide=answered(weakens=0.5))
+    assert (weakened["verdict"], weakened["criterion"]) == ("fail", "weakens")
+
+
+def test_a_passing_plan_cites_the_plan_lines_it_judged():
+    answer = intent.judged({**PLAN, **CHUNK}, decide=answered(weakens=0.1, underdelivers=0.1, overdelivers=0.1))
+    assert answer["reason"] == (
+        "the plan serves the phase at probability 0.90 and covers the task at probability 0.90, "
+        "judged against plan lines 1-1"
+    )
+
+
+def test_a_plan_missing_a_chunk_line_names_the_line_the_plan_leaves_out():
+    decide = answered(weakens=0.1, underdelivers=0.7, overdelivers=0.1, misses_line_1=0.7)
+    answer = intent.judged({**PLAN, **CHUNK}, decide=decide)
+    assert answer["reason"].endswith('Deliver what plan lines 1-1 ask for and the plan leaves out: line 1 "row".')
+
+
+def test_a_change_fitting_the_phase_exactly_at_the_line_fails_on_delivery():
+    answer = intent.judged({}, decide=answered(usable=0.1, aligned=0.3, weakens=0.1))
+    assert answer["criterion"] == "delivery"
+
+
+def test_a_usable_change_that_fails_names_weakens_or_its_plan_chunk():
+    assert intent.judged({}, decide=answered(usable=0.9, weakens=0.5))["criterion"] == "weakens"
+    state = {"task": "T", "task_text": "do", "phase": "P", "phase_intent": "use", **CHUNK}
+    decide = answered(usable=0.9, weakens=0.1, underdelivers=0.1, overdelivers=0.7)
+    assert intent.judged(state, decide=decide)["criterion"] == "chunk"
+
+
+def test_every_early_answer_names_its_stage(monkeypatch):
+    assert intent.judged({"task_part": "tests-first"}) == {
+        "verdict": "fail",
+        "reason": "the tests first part requires a complete pull request diff to judge gate behaviour",
+        "stage": "tests-first",
+        "criterion": "tests-first",
+    }
+    assert intent.judged({"plan_lines": "1-2", "plan_chunk": None}) == {
+        "verdict": "unchecked",
+        "reason": "the plan chunk for lines 1-2 could not be read",
+        "stage": "delivered",
+    }
+
+    def down(state, questions, purpose):
+        raise ClassifierUnavailable("down")
+
+    assert intent.judged({}, decide=down) == {
+        "verdict": "unchecked",
+        "reason": "the classifier did not answer",
+        "stage": "delivered",
+    }
+    monkeypatch.setenv("AGENTIHOOKS_CLASSIFIER_INTENT_CHECK_FAIL", "x")
+    assert intent.judged({}, decide=answered()) == {
+        "verdict": "fail",
+        "reason": "the intent definition is invalid: threshold fail must be between zero and one",
+        "stage": "delivered",
+    }
+
+
+def test_a_tests_first_part_is_judged_whatever_its_plan_chunk():
+    seen = []
+    state = {"task_part": "tests-first", "pull_request_diff": "", "plan_lines": "1-2", "plan_chunk": None}
+    answer = intent.judged(state, decide=answered(seen))
+    assert (answer["verdict"], answer["criterion"], answer["stage"], len(seen)) == (
+        "fail",
+        "tests-first",
+        "tests-first",
+        1,
+    )

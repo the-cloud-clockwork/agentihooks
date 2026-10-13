@@ -765,6 +765,10 @@ class TestPlanChunk:
         state = intent.state_of(planned, planned["tasks"][0], PR)
         assert (state["plan_lines"], state["plan_chunk"]) == ("15-17", "line 15\nline 16\nline 17\n")
 
+    def test_the_plan_state_carries_the_exact_plan_chunk_without_margin(self, planned):
+        state = intent.plan_state(planned, planned["tasks"][0], [])
+        assert (state["plan_lines"], state["plan_chunk"]) == ("15-17", "line 15\nline 16\nline 17\n")
+
     def test_a_task_without_plan_lines_carries_no_plan_fields(self, planned):
         planned["tasks"][0].pop("plan_lines")
         assert intent.state_of(planned, planned["tasks"][0], PR) == intent.state_of(DOC, DOC["tasks"][0], PR)
