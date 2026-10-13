@@ -42,11 +42,10 @@ def report(store: RedisStore, slug: str, now_ms: int) -> dict:
 
 
 def _waits(rows: list) -> list[str]:
-    seconds = {stage: 0.0 for stage in WAITS}
-    for row in rows:
-        if row["stage"] in seconds:
-            seconds[row["stage"]] += row["seconds"]
-    return [text.format(hours=seconds[stage] / 3600) for stage, text in WAITS.items()]
+    return [
+        text.format(hours=sum(row["seconds"] for row in rows if row["stage"] == stage) / 3600)
+        for stage, text in WAITS.items()
+    ]
 
 
 def line(found: dict) -> str:

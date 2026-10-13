@@ -706,6 +706,7 @@ PHASES = [{"id": "p1"}]
         ([opened("unfrozen", at(9), "phases/p1", cleared=["phases/p1", "tasks/t3"])], {}, 3600.0),
         ([opened("unfrozen", at(9), "tasks/t8", cleared=["tasks/t8"])], {}, 10800.0),
         ([opened("unfrozen", at(9), "phases/p1")], {}, 3600.0),
+        ([ledger("unfrozen", at(9), "tasks/t3")], {}, 3600.0),
         (
             [ledger("focused", at(8), "phases/p1")],
             {"freezes": [{"verb": "focus", "target": "phases/p1"}]},
@@ -740,6 +741,12 @@ def test_a_task_waits_from_the_check_that_opened_its_phase():
     task = {"id": "t3", "state": "open", "phase": "p2"}
     phases = [{"id": "p1", "done": True}, {"id": "p2", "depends_on": ["p1"]}]
     assert waited(task, ledger("checked", at(9), "phases/p1"), phases=phases) == {("seat_wait", ""): 3600.0}
+
+
+def test_a_focus_on_the_lane_of_the_task_opens_it():
+    task = {**OPEN_TASK, "lane": "eng"}
+    focus = {"freezes": [{"verb": "focus", "target": "lane:eng"}]}
+    assert waited(task, ledger("focused", at(8), "lane:eng"), phases=PHASES, **focus) == {("seat_wait", ""): 7200.0}
 
 
 def test_a_task_waits_from_the_approval_of_its_planned_phase():
