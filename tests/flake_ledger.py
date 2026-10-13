@@ -13,7 +13,16 @@ from pathlib import Path
 
 import pytest
 from xdist.dsession import get_default_max_worker_restart
-from xdist.scheduler import LoadScopeScheduling
+from xdist.scheduler import LoadGroupScheduling, LoadScopeScheduling
+
+
+class RefillingLoadGroupScheduling(LoadGroupScheduling):
+    # A worker runs a test only once it holds the next one or is shut down, and a replacement
+    # worker after a crash gets a single work unit, so keep every worker at two queued tests.
+    def _reschedule(self, node):
+        super()._reschedule(node)
+        while self.workqueue and not node.shutting_down and self._pending_of(self.assigned_work[node]) < 2:
+            self._assign_work_unit(node)
 
 
 def _error(report):
@@ -33,6 +42,11 @@ class FlakeLedger:
         self.crashing = set()
         self.crash_failed = {}
         self.workers_down = 0
+
+    def pytest_xdist_make_scheduler(self, config, log):
+        if config.getvalue("dist") == "loadgroup":
+            return RefillingLoadGroupScheduling(config, log)
+        return None
 
     def pytest_testnodedown(self, node, error):
         self.workers_down += bool(error)

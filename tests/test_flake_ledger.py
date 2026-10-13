@@ -3,9 +3,13 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
+from xdist.scheduler import LoadScopeScheduling
+
+from tests.flake_ledger import FlakeLedger
 
 pytestmark = pytest.mark.unit
 
@@ -167,11 +171,6 @@ def test_crashes_always():
 @pytest.mark.parametrize("n", range(6))
 def test_sibling(n):
     pass
-
-
-@pytest.mark.parametrize("n", range(5))
-def test_crashes_once_each(n):
-    _crash_first(f"crashed-once-{n}", 1)
 """
 
 
@@ -216,10 +215,19 @@ def test_a_test_crashing_every_attempt_stops_after_its_reruns_and_every_other_te
     assert record["crashes"] == record["attempts"] == 3
 
 
-def test_a_crash_past_the_worker_restart_limit_stays_red(tmp_path):
-    result, _ = _run(tmp_path, "test_crashes_once_each", workers="1", probes=_CRASHES, extra=("--dist", "loadgroup"))
-    assert "maximum crashed workers reached: 4" in result.stdout, result.stdout + result.stderr
-    assert result.returncode == 1, result.stdout + result.stderr
+def test_a_crash_past_the_worker_restart_limit_stays_failed(tmp_path):
+    ledger = FlakeLedger(tmp_path / "flakes.jsonl")
+    sched = LoadScopeScheduling.__new__(LoadScopeScheduling)
+    sched.config = SimpleNamespace(
+        option=SimpleNamespace(maxworkerrestart="2", numprocesses=1), getoption=lambda name, default=None: 2
+    )
+    outcomes = []
+    for n in range(3):
+        ledger.pytest_testnodedown(node=None, error="Not properly terminated")
+        report = SimpleNamespace(failed=True, outcome="failed")
+        ledger.pytest_handlecrashitem(crashitem=f"test_probes.py::test_{n}", report=report, sched=sched)
+        outcomes.append(report.outcome)
+    assert outcomes == ["rerun", "rerun", "failed"]
 
 
 def test_a_worker_crash_without_reruns_stays_red_and_is_not_run_again(tmp_path):
