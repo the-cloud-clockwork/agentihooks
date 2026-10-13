@@ -43,14 +43,18 @@ def dispatched(monkeypatch):
 @pytest.fixture
 def injected(monkeypatch):
     captured = []
-    monkeypatch.setattr(common, "inject_context", lambda message, *a, **k: captured.append(message))
+    monkeypatch.setattr(common, "inject_context", lambda message, *a, **k: captured.append((message, k)))
     return captured
+
+
+SHOWN = (NOTE, {"also_log": False, "skip_compression": True})
 
 
 def test_run_returns_each_context_and_the_block(monkeypatch):
     def fake(payload):
         print(_context("PostToolUse"))
         print("not json")
+        print("null")
         print(json.dumps({"decision": "block", "reason": "stop held"}))
 
     monkeypatch.setattr(ledger_hook, "dispatch", fake)
@@ -85,13 +89,13 @@ def test_post_tool_use_shows_ledger_events_on_every_harness(harness, dispatched,
     }
     hm.on_post_tool_use(payload)
     assert [p["hook_event_name"] for p in dispatched] == ["PostToolUse"]
-    assert NOTE in injected
+    assert SHOWN in injected
 
 
 def test_user_prompt_shows_ledger_events_on_every_harness(harness, dispatched, injected):
     hm.on_user_prompt_submit({"hook_event_name": "UserPromptSubmit", "session_id": "s1", "prompt": "go", "cwd": "/p"})
     assert [p["hook_event_name"] for p in dispatched] == ["UserPromptSubmit"]
-    assert NOTE in injected
+    assert SHOWN in injected
 
 
 def test_session_start_reaches_the_ledger_hook_on_every_harness(harness, dispatched, injected, monkeypatch):
@@ -121,9 +125,9 @@ def test_a_failing_ledger_hook_never_breaks_the_event(harness, monkeypatch, inje
         raise RuntimeError("ledger down")
 
     monkeypatch.setattr(ledger_hook, "dispatch", broken)
-    monkeypatch.setattr(hm, "log", lambda message, data=None: logged.append(message))
+    monkeypatch.setattr(hm, "log", lambda message, data=None: logged.append((message, data)))
     hm._swarm_ledger({"hook_event_name": "UserPromptSubmit", "session_id": "s1"})
-    assert logged == ["swarm ledger hook failed"]
+    assert logged == [("swarm ledger hook failed", {"error": "ledger down"})]
     assert injected == []
 
 

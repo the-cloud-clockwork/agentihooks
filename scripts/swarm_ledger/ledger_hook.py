@@ -78,10 +78,8 @@ def join_from_new(command, response):
     if not is_ledger_cli(tokens) or "new" not in tokens:
         return None
     if isinstance(response, dict):
-        stdout = response.get("stdout") or response.get("textResultForLlm", "")
-    else:
-        stdout = str(response or "")
-    for text in stdout.splitlines():
+        response = response.get("stdout") or response.get("textResultForLlm")
+    for text in str(response).splitlines():
         try:
             out = json.loads(text)
         except ValueError:
