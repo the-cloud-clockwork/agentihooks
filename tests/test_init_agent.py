@@ -605,6 +605,44 @@ def test_a_tick_spawn_keeps_its_swarm_identity_without_the_mark(monkeypatch, tmp
     assert "AGENTIHOOKS_SWARM_SPAWN" not in text
 
 
+@pytest.mark.parametrize("name", ["engineer@abcdef-0002", "master@abcdef-0001"])
+def test_swarm_launch_replaces_only_the_inherited_gateway_key(monkeypatch, tmp_path, capsys, name):
+    state = tmp_path / ".agentihooks"
+    state.mkdir()
+    managed = "managed-gateway"
+    inherited = "inherited-gateway"
+    other = "inherited-other"
+    (state / ".env").write_text(f"MCP_KEY_GATEWAY={managed}\nOTHER_KEY=file-other\n")
+    observed = {}
+
+    def terminal(launcher, directory, title, environ):
+        observed.update(environ)
+        return "linux", ["/usr/bin/terminal", str(launcher)]
+
+    monkeypatch.setattr(init_agent, "_launch_command", terminal)
+    assert (
+        init_agent.main(
+            ["--dir", str(tmp_path), "--name", name, "--agent", "claude", "--dry-run"],
+            {
+                "HOME": str(tmp_path),
+                "PATH": os.environ["PATH"],
+                "XDG_RUNTIME_DIR": str(tmp_path / "runtime"),
+                "AGENTIHOOKS_SWARM": "example",
+                "AGENTIHOOKS_SWARM_SPAWN": "1",
+                "MCP_KEY_GATEWAY": inherited,
+                "OTHER_KEY": other,
+            },
+        )
+        == 0
+    )
+    assert observed["MCP_KEY_GATEWAY"] == managed
+    assert observed["OTHER_KEY"] == other
+    output = capsys.readouterr()
+    assert all(value not in output.out + output.err for value in (managed, inherited, other))
+    launcher = next((tmp_path / "runtime" / "agentihooks-claude-terminal").glob("*.sh")).read_text()
+    assert all(value not in launcher for value in (managed, inherited, other))
+
+
 def test_a_quota_handoff_keeps_its_swarm_identity(monkeypatch, tmp_path):
     assert _handoff(monkeypatch, tmp_path, None, extra=["--dry-run"], env_extra=AGENT_ENV) == 0
     launcher = next((tmp_path / "runtime" / "agentihooks-claude-terminal").glob("*.sh"))
