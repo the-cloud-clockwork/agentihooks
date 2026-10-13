@@ -29,6 +29,7 @@ from scripts.swarm import (
     quota_view,
     retire_watch,
     snapshot,
+    stall_watch,
     tick_master,
 )
 from scripts.swarm.health import activity, checks, prompt_backlog, spawn_stall, standing, verdicts
@@ -103,6 +104,7 @@ def findings(store, slug, config, tasks, events):
         )
         + live_binding.findings(store, slug)
         + retire_watch.findings(store, slug)
+        + stall_watch.findings(store, slug)
         + drain_watch.findings(store, slug, limits, now_ms())
         + launch_check.findings(store, slug)
         + spawn_stall.findings(store, slug)
