@@ -27,7 +27,7 @@ def measured_costs(names: list[str], results: list[dict]) -> dict[str, float]:
 
 
 def plan_shards(costs: dict[str, float], target: float = 240, limit: int = 10) -> dict:
-    seconds = sum(costs.values())
+    seconds = sum(costs[name] for name in sorted(costs))
     count = shard_count(seconds, len(costs), target, limit)
     loads = [0.0] * count
     assignments = {}
