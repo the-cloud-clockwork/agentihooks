@@ -586,7 +586,7 @@ def unrelayed() -> dict:
 
 
 def _change_unrelayed(change) -> None:
-    with _UNRELAYED_LOCK:
+    with request_metrics.locked(_UNRELAYED_LOCK):
         found = unrelayed()
         change(found)
         found = {kind: {s: revs for s, revs in slugs.items() if revs} for kind, slugs in found.items()}
