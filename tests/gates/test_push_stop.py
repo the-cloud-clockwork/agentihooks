@@ -787,3 +787,22 @@ def test_a_pushed_head_with_dirty_files_never_runs_the_gate(rig):
     decision = rig.stop()
     assert (decision.allowed, decision.reason) == (False, TEMPLATE)
     assert not log.exists()
+
+
+@pytest.mark.parametrize("with_gate", [False, True])
+def test_a_push_slower_than_the_budget_is_cut_off_inside_the_stop_condition(monkeypatch, rig, with_gate):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    if with_gate:
+        install_gate(rig, 0)
+    else:
+        rig.commit()
+    slow_origin(rig, 5)
+    timeout = RESERVE_S + 0.5
+    monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", timeout)
+    started = time.monotonic()
+    decision = rig.stop(started=started)
+    took = time.monotonic() - started
+    assert not decision.allowed
+    assert took < timeout
+    assert rig.remote_head() == ""
+    assert rig.ledger.comments == []
