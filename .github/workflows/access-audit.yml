@@ -24,22 +24,29 @@ jobs:
           python-version: '3.12'
       - name: Install workflow parser
         run: python -m pip install 'pyyaml>=6.0'
+      - name: Mint the TCC Main CI audit token
+        id: app-token
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-metadata: read
+          permission-members: read
+          permission-organization-administration: read
       - name: List collaborators and installed apps against protected approvals
         env:
-          GH_TOKEN: ${{ secrets.ORG_GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: python -m scripts.ci_access_audit --repo "$GITHUB_REPOSITORY"
       - name: Notify the operator of unapproved or unreadable access
         if: ${{ always() }}
-        env:
-          NTFY_USER: ${{ secrets.NTFY_USER }}
-          NTFY_PASS: ${{ secrets.NTFY_PASS }}
         run: |
           if [[ ! -f access-alert.txt ]]; then
             printf '%s\n' "GitHub access audit could not complete for $GITHUB_REPOSITORY; inspect this run." > access-alert.txt
           fi
           if [[ -s access-alert.txt ]]; then
             curl --fail --silent --show-error \
-              --user "$NTFY_USER:$NTFY_PASS" \
               -H 'Title: GitHub runner access requires approval' \
               -H 'Priority: high' \
               --data-binary @access-alert.txt \
