@@ -11,7 +11,8 @@ _ROOT = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.unit
 
 BASE = (
-    "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha"
+    "${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && 'origin/dev'"
+    " || github.event.pull_request.base.sha || github.event.merge_group.base_sha"
     " || github.event.before || inputs.base }}"
 )
 
@@ -197,7 +198,7 @@ def test_dependency_audit_is_a_lint_step_graded_by_the_base():
     steps = {step.get("name"): step for step in job["steps"]}
     base, grade = steps["Check out the base revision"], steps["Fail on known vulnerabilities new against the base"]
     assert base["env"]["BASE"] == BASE
-    assert base["run"] == 'git worktree add --detach "$RUNNER_TEMP/base" "$BASE"'
+    assert base["run"] == 'git worktree add --detach "$RUNNER_TEMP/base" "$(git merge-base "$BASE" HEAD)"'
     assert grade["if"] == "${{ !cancelled() }}"
     assert grade["run"] == (
         'grader="$RUNNER_TEMP/base"\n'

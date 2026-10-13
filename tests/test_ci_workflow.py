@@ -255,7 +255,8 @@ def test_lint_runs_the_artifact_sanity_checks_in_a_real_browser():
 def test_queued_merges_select_artifact_checks_against_the_queue_base():
     select = next(s for s in _workflow()["jobs"]["lint"]["steps"] if s.get("id") == "artifacts")
     assert select["env"]["BASE"] == (
-        "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha"
+        "${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && 'origin/dev'"
+        " || github.event.pull_request.base.sha || github.event.merge_group.base_sha"
         " || github.event.before || inputs.base }}"
     )
 

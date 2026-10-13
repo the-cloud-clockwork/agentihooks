@@ -182,10 +182,11 @@ def test_test_count_floor_runs_per_suite_beside_unit_against_the_base():
     )
     base, floor = job["steps"][-2:]
     assert base["env"]["BASE"] == (
-        "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha"
+        "${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && 'origin/dev'"
+        " || github.event.pull_request.base.sha || github.event.merge_group.base_sha"
         " || github.event.before || inputs.base }}"
     )
-    assert base["run"] == 'git worktree add --detach "$RUNNER_TEMP/base" "$BASE"'
+    assert base["run"] == 'git worktree add --detach "$RUNNER_TEMP/base" "$(git merge-base "$BASE" HEAD)"'
     assert floor["run"] == (
         'if [[ ! -f "$RUNNER_TEMP/base/tests/count_floor.py" ]]; then\n'
         '  echo "::error::The base carries no tests/count_floor.py, so nothing trusted can grade."\n'
@@ -194,6 +195,42 @@ def test_test_count_floor_runs_per_suite_beside_unit_against_the_base():
         'cd "$RUNNER_TEMP/base"\n'
         'python -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"\n'
     )
+
+
+def test_lint_and_test_count_grade_a_pull_request_that_merged_dev_from_the_current_merge_base(tmp_path):
+    from tests.test_ci_hosted_lanes import _evaluate
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "dev")
+    pinned = _commit(repo, {"docs/base.md": "a"})
+    _git(repo, "checkout", "-q", "-b", "branch")
+    _commit(repo, {"docs/own.md": "b"})
+    _git(repo, "checkout", "-q", "dev")
+    merged = _commit(repo, {"docs/dev.md": "c", ".github/dev.yml": "d"})
+    _git(repo, "update-ref", "refs/remotes/origin/dev", merged)
+    _git(repo, "checkout", "-q", "branch")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "merge", "-q", "--no-edit", "dev")
+    selector = repo / ".github/actions/browser-cache/select-artifacts.sh"
+    selector.parent.mkdir(parents=True)
+    selector.write_text((_ROOT / ".github/actions/browser-cache/select-artifacts.sh").read_text())
+    jobs = _workflow()["jobs"]
+    steps = {
+        "test-count": next(s for s in jobs["test-count"]["steps"] if s.get("name") == "Check out the base revision"),
+        "lint": _step("lint", "Check out the base revision"),
+        "docs": next(s for s in jobs["lint"]["steps"] if s.get("id") == "docs"),
+        "artifacts": next(s for s in jobs["lint"]["steps"] if s.get("id") == "artifacts"),
+    }
+    event = {"pull_request": {"base": {"sha": pinned}}}
+    for name, step in steps.items():
+        (tmp_path / name).mkdir()
+        base = _evaluate(step["env"]["BASE"], event_name="pull_request", base_ref="dev", event=event)
+        env = dict(os.environ, BASE=base, RUNNER_TEMP=str(tmp_path / name), GITHUB_OUTPUT=str(tmp_path / name / "out"))
+        subprocess.run(["bash", "-e", "-c", step["run"]], cwd=repo, env=env, check=True, capture_output=True)
+    assert _git(tmp_path / "test-count" / "base", "rev-parse", "HEAD") == merged
+    assert _git(tmp_path / "lint" / "base", "rev-parse", "HEAD") == merged
+    assert (tmp_path / "docs" / "docs-changes").read_text() == "docs/own.md\n"
+    assert (tmp_path / "artifacts" / "out").read_text() == "browser=false\n"
 
 
 def test_coverage_ratchet_grades_the_merged_shards_from_the_base_copy():
