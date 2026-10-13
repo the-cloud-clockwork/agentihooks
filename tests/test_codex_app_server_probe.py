@@ -440,7 +440,7 @@ def test_a_late_resumer_receives_the_open_approval_a_late_reader_misses(fakes, t
     scripts.update(
         late_scripts(
             [{"method": "turn/started"}, REQUEST, agent("X"), done("T")],
-            [STATUS, PAUSE, {"method": "thread/goal/cleared"}],
+            [STATUS, PAUSE, {"method": "thread/goal/cleared"}, done("T"), {"method": "item/started"}],
             [{**REQUEST, "_at": 5.0}, RESOLVED],
             ok(running),
             {**ok(running), "_at": 4.0},
@@ -458,7 +458,7 @@ def test_a_late_resumer_receives_the_open_approval_a_late_reader_misses(fakes, t
         "delivered_to_late_resumer": True,
         "late_same_request_id": True,
         "late_request_before_resume_reply": False,
-        "late_reader_methods": ["thread/goal/cleared", "thread/status/changed"],
+        "late_reader_methods": ["thread/goal/cleared", "thread/status/changed", "turn/completed"],
         "resolved_seen_by_late_resumer": True,
         "turn_status": "completed",
         "file_created": True,
@@ -480,7 +480,7 @@ def test_a_late_approval_without_an_owner_request_keeps_the_record_short(fakes, 
             [PAUSE],
             [REQUEST],
             [{**REQUEST, "id": 8, "_at": 4.0}],
-            ok({"thread": {}}),
+            ok({}),
             {**err("gone"), "_at": 4.0},
         )
     )
