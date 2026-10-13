@@ -75,11 +75,11 @@ for attempt in {1..30}; do
 done
 docker exec "$registry" python -c 'import urllib.request; urllib.request.urlopen("http://localhost:5000/v2/")'
 fixture=tests/integration/hive_launch/compose.yaml
-printf 'services:\n  redis:\n    image: localhost:5000/proof:present\n' > "$proof_dir/override.yaml"
+printf 'services:\n  redis:\n    image: 127.0.0.1:5000/proof:present\n' > "$proof_dir/override.yaml"
 docker compose -f "$fixture" -f "$proof_dir/override.yaml" pull redis
-docker image inspect localhost:5000/proof:present --format '{{.Architecture}}' | grep -x amd64
+docker image inspect 127.0.0.1:5000/proof:present --format '{{.Architecture}}' | grep -x amd64
 printf 'Absent attestation: hive launch image pull passed\n'
-printf 'services:\n  redis:\n    image: localhost:5000/proof:missing-image\n' > "$proof_dir/override.yaml"
+printf 'services:\n  redis:\n    image: 127.0.0.1:5000/proof:missing-image\n' > "$proof_dir/override.yaml"
 if docker compose -f "$fixture" -f "$proof_dir/override.yaml" pull redis > "$proof_dir/pull.log" 2>&1; then
   cat "$proof_dir/pull.log"
   printf 'Missing runnable image unexpectedly passed\n' >&2
