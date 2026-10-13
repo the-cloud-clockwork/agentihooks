@@ -1,7 +1,9 @@
 """Writes one JSON line per test that needed a retry to the file named by CI_FLAKES.
 
 pytest-rerunfailures wraps every attempt in its own logstart and logfinish, so a test is final
-at the first logfinish whose attempt logged no rerun report.
+at the first logfinish whose attempt logged no rerun report. A worker crash ends its attempt
+without a logfinish, and a scope scheduler runs the crashed test again after every crash, so a
+crashed test is written once at session end with every attempt it took.
 """
 
 import json
@@ -27,14 +29,16 @@ class FlakeLedger:
         self.failed = set()
         self.crashes = {}
         self.crashing = set()
+        self.crashed = {}
 
-    @pytest.hookimpl(trylast=True, optionalhook=True)
+    @pytest.hookimpl(trylast=True)
     def pytest_handlecrashitem(self, crashitem, report, sched):
         # A scope scheduler puts the crashed test back in its queue but refuses
         # pytest-rerunfailures' mark_test_pending, so the report stays failed.
         self.crashes[crashitem] = self.crashes.get(crashitem, 0) + 1
         self.crashing.add(crashitem)
-        if report.failed and self.crashes[crashitem] == 1 and isinstance(sched, LoadScopeScheduling):
+        retry = self.crashes[crashitem] == 1 and sched.config.getoption("reruns", 0)
+        if report.failed and retry and isinstance(sched, LoadScopeScheduling):
             report.outcome = "rerun"
 
     def pytest_runtest_logreport(self, report):
@@ -55,12 +59,22 @@ class FlakeLedger:
             self.retrying.discard(nodeid)
             self.failed.discard(nodeid)
             return
-        attempts = self.attempts.pop(nodeid)
-        errors = self.errors.pop(nodeid, [])
         failed = nodeid in self.failed
         self.failed.discard(nodeid)
-        if attempts == 1:
+        if nodeid in self.crashes:
+            self.crashed[nodeid] = failed or self.crashed.get(nodeid, False)
             return
+        attempts = self.attempts.pop(nodeid)
+        errors = self.errors.pop(nodeid, [])
+        if attempts > 1:
+            self._write(nodeid, attempts, failed, errors)
+
+    def pytest_sessionfinish(self):
+        for nodeid, crashes in self.crashes.items():
+            failed = self.crashed.get(nodeid, True)
+            self._write(nodeid, self.attempts[nodeid], failed, self.errors[nodeid], crashes=crashes)
+
+    def _write(self, nodeid, attempts, failed, errors, **extra):
         record = {
             "test": nodeid,
             "run": os.environ.get("GITHUB_RUN_ID"),
@@ -68,9 +82,8 @@ class FlakeLedger:
             "attempts": attempts,
             "outcome": "failed" if failed else "flaky",
             "errors": errors,
+            **extra,
         }
-        if nodeid in self.crashes:
-            record["crashes"] = self.crashes[nodeid]
         with self.path.open("a") as ledger:
             ledger.write(json.dumps(record) + "\n")
 
