@@ -44,10 +44,12 @@ def _receiver(session_id, environ):
 
 
 def _render(item):
-    return (
-        f"=== INBOX: message {item.id} from {item.sender} ===\n{item.text}\n"
-        f"Answer it: agentihooks msg reply {item.id} <text>, or close it: agentihooks msg close {item.id} {CLOSE_HINT}"
+    instruction = (
+        "Information only; closes on read or confirmed receipt."
+        if item.fyi
+        else f"Answer it: agentihooks msg reply {item.id} <text>, or close it: agentihooks msg close {item.id} {CLOSE_HINT}"
     )
+    return f"=== INBOX: message {item.id} from {item.sender} ===\n{item.text}\n{instruction}"
 
 
 def _settlement_context(store, me, started, environ):
