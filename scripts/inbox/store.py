@@ -236,6 +236,13 @@ class InboxStore:
     def mailbox(self, me):
         return self._with_seat(me, self.inbox)
 
+    def unsettled(self, receiver: str, before: int) -> list[Item]:
+        return [
+            item
+            for item in self._with_seat(receiver, self.open_items)
+            if not item.fyi and item.state in ("read", "confirmed") and item.updated_at <= before
+        ]
+
     def pending_mail(self, me):
         return self._with_seat(me, self.pending_items)
 
