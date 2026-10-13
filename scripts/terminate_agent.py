@@ -38,11 +38,14 @@ def _registry() -> dict[str, dict]:
 
 
 def _name(process: Process, proc: Path, table: dict[int, Process]) -> str:
+    from scripts.swarm.naming import plain
+
     named = _argument(process.argv, "--name")
     parent = table.get(process.ppid)
-    if named or (parent and _target(parent)):
-        return named
-    return agent_environ(process.pid, ("AGENTIHOOKS_AGENT_NAME",), proc)[0]
+    if parent and _target(parent) and not named:
+        return ""
+    identity = agent_environ(process.pid, ("AGENTIHOOKS_AGENT_NAME",), proc)[0]
+    return identity if not named or named == plain(identity) else named
 
 
 def _main_thread(target: str, session_id: str, info: dict, records: dict[str, dict]) -> tuple[str, str]:
