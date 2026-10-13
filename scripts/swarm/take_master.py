@@ -8,12 +8,14 @@ from pathlib import Path
 from hooks.context.account_sessions import agent_pid
 from hooks.context.broadcast import live_session_ids, name_session, pin_session
 from hooks.observability import agent_trace
+from hooks.proc import processes
 from scripts.handoff import transfers
 from scripts.inbox.seats import seat_address
 from scripts.swarm import launch_check, launch_model, naming
 from scripts.swarm.store import MASTER, AgentRecord, SwarmError
 from scripts.swarm_ledger import ledger_link
 from scripts.swarm_v2 import masters as master_seats
+from scripts.swarm_v2.runtime import process
 
 PROC = Path("/proc")
 
@@ -66,15 +68,16 @@ def hive_of(environ=os.environ):
     return environ["AGENTIHOOKS_HIVE_ID"]
 
 
-def placed(store, slug, record, hive):
+def placed(store, slug, record, hive, pid):
     previous = store.execution_occupants(slug).get(record.seat)
-    record = replace(record, hive=hive, runtime_target={"host_id": hive})
+    target = {**process.launch_target(pid, process.local_namespace(), processes()), "host_id": hive}
+    record = replace(record, hive=hive, runtime_target=target)
     return store.start_execution(slug, record, previous.execution_id if previous else "")
 
 
 def admitted(store, slug, record, admit, pid, hive):
     if hive:
-        record = placed(store, slug, record, hive)
+        record = placed(store, slug, record, hive, pid)
     pin(slug, record.name)
     try:
         admit(record.name)

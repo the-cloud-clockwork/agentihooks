@@ -216,7 +216,23 @@ jobs:
       key: ${{ steps.stored.outputs.cache-matched-key }}
       queued: ${{ steps.republished.outputs.queued }}
       base: ${{ steps.base-run.outputs.sha }}
+      source: ${{ steps.unit-source.outputs.source }}
     steps:
+      - uses: actions/checkout@v4
+        if: github.event_name == 'push'
+        with:
+          ref: ${{ needs.reuse.outputs.grader }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        if: github.event_name == 'push'
+        with:
+          python-version: "3.12"
+
+      - name: Install unit reuse metadata dependencies
+        if: github.event_name == 'push' && hashFiles('scripts/ci_dev_reuse.py') != ''
+        run: python -m pip install "pyyaml>=6.0"
+
       - name: Look up the base revision's dev durations
         id: stored
         if: github.event_name == 'pull_request' || github.event_name == 'push'
@@ -230,7 +246,7 @@ jobs:
       # Queue refs and dispatched branches cannot read caches saved on dev, so they fetch dev's artifacts on the App's own API quota.
       - name: Mint the tcc main ci App token
         id: app-token
-        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && hashFiles('scripts/ci_dev_reuse.py') != '')
         uses: actions/create-github-app-token@v3.2.0
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
@@ -238,6 +254,49 @@ jobs:
           repositories: ${{ github.event.repository.name }}
           permission-actions: read
           permission-contents: read
+
+      - name: Fetch passed queue unit evidence for this dev commit
+        if: github.event_name == 'push' && hashFiles('scripts/ci_dev_reuse.py') != ''
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          HEAD: ${{ github.sha }}
+        run: |
+          evidence="$RUNNER_TEMP/unit-evidence"
+          actions="repos/$GITHUB_REPOSITORY/actions"
+          mkdir -p "$evidence"
+          if ! gh api "$actions/workflows/test.yml/runs?event=merge_group&status=success&head_sha=$HEAD&per_page=20" > "$evidence/runs.json"; then
+            rm -f "$evidence/runs.json"
+            exit 0
+          fi
+          fetch() {
+            local folder="$evidence/$1" artifact job
+            mkdir -p "$folder"
+            gh api --paginate "$actions/runs/$1/artifacts?per_page=100" --jq '.artifacts[]' > "$folder/artifacts.jsonl" || return 0
+            artifact="$(jq -r --arg name "required-tree-$2" 'select(.name == $name and (.expired | not)) | .id' "$folder/artifacts.jsonl" | head -n 1)"
+            [[ -n "$artifact" ]] || return 0
+            gh api "$actions/artifacts/$artifact/zip" > "$folder/proof.zip" || return 0
+            gh api --paginate "$actions/runs/$1/attempts/$2/jobs?per_page=100" --jq '.jobs[]' > "$folder/jobs.jsonl" || return 0
+            job="$(jq -r 'select(.name == "reuse" and .conclusion == "success") | .id' "$folder/jobs.jsonl" | head -n 1)"
+            [[ -n "$job" ]] || return 0
+            gh api --allow-escape-sequences "$actions/jobs/$job/logs" > "$folder/reuse.log" || return 0
+          }
+          while read -r run attempt; do
+            [[ -n "$run" ]] || continue
+            fetch "$run" "$attempt"
+            [[ -f "$evidence/$run/reuse.log" ]] || continue
+            source=$(sed -nE 's/^[^ ]+ run=([0-9]+)$/\1/p' "$evidence/$run/reuse.log")
+            [[ "$source" =~ ^[0-9]+$ ]] || continue
+            if gh api "$actions/runs/$source" > "$evidence/$run/source.json"; then
+              fetch "$source" "$(jq -r .run_attempt "$evidence/$run/source.json")"
+            fi
+          done < <(jq -r '.workflow_runs[] | "\(.id) \(.run_attempt)"' "$evidence/runs.json")
+
+      - name: Select complete unit results from the same queue commit
+        id: unit-source
+        if: github.event_name == 'push' && hashFiles('scripts/ci_dev_reuse.py') != ''
+        env:
+          HEAD: ${{ github.sha }}
+        run: python -m scripts.ci_dev_reuse --head "$HEAD" --repository "$GITHUB_REPOSITORY" --evidence "$RUNNER_TEMP/unit-evidence"
 
       - name: Find the latest passed dev push run
         id: dev-run
@@ -349,6 +408,10 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12"]
+    env:
+      UNIT_SOURCE: ${{ needs.durations.outputs.source }}
+    outputs:
+      source: ${{ needs.durations.outputs.source }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -357,6 +420,7 @@ jobs:
 
       - &python
         name: Set up Python ${{ matrix.python-version }}
+        if: env.UNIT_SOURCE == ''
         id: python
         uses: actions/setup-python@v5
         with:
@@ -367,11 +431,13 @@ jobs:
       # scan modules loaded from the repo root.
       - &day
         name: Stamp the day
+        if: env.UNIT_SOURCE == ''
         id: day
         run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
 
       - &venv
         name: Restore the test environment
+        if: env.UNIT_SOURCE == ''
         id: venv
         uses: actions/cache@v4
         with:
@@ -380,7 +446,7 @@ jobs:
 
       - &uv
         name: Set up uv
-        if: steps.venv.outputs.cache-hit != 'true'
+        if: env.UNIT_SOURCE == '' && steps.venv.outputs.cache-hit != 'true'
         uses: astral-sh/setup-uv@v10.2.0
         with:
           version: "0.12.23"
@@ -394,7 +460,7 @@ jobs:
       # resolved to "command not found" while the packages were installed fine.
       - &install
         name: Install dependencies
-        if: steps.venv.outputs.cache-hit != 'true'
+        if: env.UNIT_SOURCE == '' && steps.venv.outputs.cache-hit != 'true'
         env:
           PYTHON_PATH: ${{ steps.python.outputs.python-path }}
         run: |
@@ -403,17 +469,18 @@ jobs:
 
       - &use-venv
         name: Use the test environment
+        if: env.UNIT_SOURCE == ''
         run: echo "$HOME/venv/bin" >> "$GITHUB_PATH"
 
       - name: Download the queued run's dev durations
-        if: needs.durations.outputs.queued == 'true'
+        if: needs.durations.outputs.source == '' && needs.durations.outputs.queued == 'true'
         uses: ./.github/actions/retry-download
         with:
           name: dev-durations
           path: ~/dev-durations
 
       - name: Restore latest dev durations
-        if: needs.durations.outputs.key != ''
+        if: needs.durations.outputs.source == '' && needs.durations.outputs.key != ''
         uses: actions/cache/restore@v4
         with:
           path: ~/dev-durations
@@ -421,9 +488,36 @@ jobs:
           fail-on-cache-miss: true
 
       - name: Adopt latest dev durations
+        if: needs.durations.outputs.source == ''
         env:
           PYTHON_VERSION: ${{ matrix.python-version }}
         run: python -m tests.dev_durations "$PYTHON_VERSION" ~/dev-durations --hash durations.sha256 --collected collected.json
+
+      - name: Mint the token that restores queue unit artifacts
+        id: unit-token
+        if: needs.durations.outputs.source != ''
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+
+      - name: Restore the queue split inputs
+        if: needs.durations.outputs.source != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: split-${{ matrix.python-version }}
+          run-id: ${{ needs.durations.outputs.source }}
+          github-token: ${{ steps.unit-token.outputs.token }}
+
+      - name: Restore the queue collected tests
+        if: needs.durations.outputs.source != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: collected-${{ matrix.python-version }}
+          run-id: ${{ needs.durations.outputs.source }}
+          github-token: ${{ steps.unit-token.outputs.token }}
 
       - name: Upload the chosen durations
         uses: actions/upload-artifact@v4
@@ -456,6 +550,7 @@ jobs:
       contents: read
     env:
       CODEX_RELEASE: rust-v0.160.0
+      UNIT_SOURCE: ${{ needs.split.outputs.source }}
     strategy:
       fail-fast: false
       matrix:
@@ -490,14 +585,14 @@ jobs:
       # tests.shards pins the live Codex test's file to shard 1; only the 3.12 shard 1 installs the CLI it runs.
       - name: Restore the Codex CLI
         id: codex
-        if: matrix.python-version == '3.12' && matrix.shard == 1
+        if: needs.split.outputs.source == '' && matrix.python-version == '3.12' && matrix.shard == 1
         uses: actions/cache@v4
         with:
           path: ~/codex
           key: codex-${{ runner.os }}-${{ env.CODEX_RELEASE }}
 
       - name: Install the Codex CLI
-        if: steps.codex.outcome == 'success' && steps.codex.outputs.cache-hit != 'true'
+        if: needs.split.outputs.source == '' && steps.codex.outcome == 'success' && steps.codex.outputs.cache-hit != 'true'
         run: |
           set -o pipefail
           mkdir -p ~/codex
@@ -505,25 +600,26 @@ jobs:
           chmod +x ~/codex/codex
 
       - name: Use the Codex CLI
-        if: steps.codex.outcome == 'success'
+        if: needs.split.outputs.source == '' && steps.codex.outcome == 'success'
         run: |
           echo "$HOME/codex" >> "$GITHUB_PATH"
           echo "CODEX_CLI_REQUIRED=1" >> "$GITHUB_ENV"
 
       - name: Download the durations this run splits on
+        if: needs.split.outputs.source == ''
         uses: ./.github/actions/retry-download
         with:
           name: split-${{ matrix.python-version }}
 
       - name: Download the suite the split job collected
-        if: github.event.pull_request.base.ref != 'main'
+        if: needs.split.outputs.source == '' && github.event.pull_request.base.ref != 'main'
         uses: ./.github/actions/retry-download
         with:
           name: collected-${{ matrix.python-version }}
 
       # Page tests drive Chromium; the coverage shards run them so the page JavaScript they reach is measured.
       - name: Install the browser that page tests drive
-        if: matrix.python-version == '3.12'
+        if: needs.split.outputs.source == '' && matrix.python-version == '3.12'
         timeout-minutes: 6
         uses: ./.github/actions/browser-cache
 
@@ -531,6 +627,7 @@ jobs:
       # including every ownership-scope test guarding what uninstall and prune
       # are allowed to delete — never ran in CI at all.
       - name: Run tests
+        if: needs.split.outputs.source == ''
         timeout-minutes: 7
         env:
           PYTHONUNBUFFERED: "1"
@@ -541,6 +638,40 @@ jobs:
           CI_FLAKES: ${{ github.workspace }}/flakes.jsonl
           JS_COVERAGE_DIR: ${{ matrix.python-version == '3.12' && format('{0}/js-coverage', github.workspace) || '' }}
         run: python -c 'import os, shlex, sys, pytest; sys.exit(pytest.main(shlex.split(os.environ.pop("PYTEST_ADDOPTS", "")) + sys.argv[1:]))' tests/ -v -n auto --dist loadgroup --shard "$SHARD" -p tests.flake_ledger --reruns 2 --tb=short -o faulthandler_timeout=60 --store-durations --durations-path durations.json -p no:anyio -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml
+
+      - name: Mint the token that restores queue unit artifacts
+        id: unit-token
+        if: needs.split.outputs.source != ''
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+
+      - name: Restore queue shard durations
+        if: needs.split.outputs.source != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: durations-${{ matrix.python-version }}-${{ matrix.shard }}
+          run-id: ${{ needs.split.outputs.source }}
+          github-token: ${{ steps.unit-token.outputs.token }}
+
+      - name: Restore queue shard flakes
+        if: needs.split.outputs.source != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: flakes-${{ matrix.python-version }}-${{ matrix.shard }}
+          run-id: ${{ needs.split.outputs.source }}
+          github-token: ${{ steps.unit-token.outputs.token }}
+
+      - name: Restore queue shard coverage
+        if: needs.split.outputs.source != '' && matrix.python-version == '3.12'
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-${{ matrix.python-version }}-${{ matrix.shard }}
+          run-id: ${{ needs.split.outputs.source }}
+          github-token: ${{ steps.unit-token.outputs.token }}
 
       # Shards balance on these: per-test times here differ from a local run.
       - name: Upload durations
