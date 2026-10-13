@@ -144,10 +144,14 @@ def test_a_brief_authorization_failure_can_recover_on_the_single_retry(tmp_path,
     assert summary == ""
 
 
-def test_the_binding_check_requires_successful_proxy_startup():
+@pytest.mark.parametrize("name", ["Hold the Delivery L2 binding", "Hold the Delivery L2 conditions"])
+def test_the_dependent_checks_require_successful_proxy_startup(name):
     steps = {step.get("name"): step for step in _sonar_steps()}
-    assert "success()" in steps["Hold the Delivery L2 binding"]["if"]
-    assert "steps.proxy.outcome == 'success'" in steps["Hold the Delivery L2 binding"]["if"]
+    assert "steps.proxy.outcome == 'success'" in steps[name]["if"]
+    if name == "Hold the Delivery L2 binding":
+        assert "success()" in steps[name]["if"]
+    else:
+        assert "always()" in steps[name]["if"]
 
 
 @pytest.mark.parametrize(
