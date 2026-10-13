@@ -21,6 +21,8 @@ def record_trampoline_hit(name: str) -> None:
 
 
 def __getattr__(name: str):
+    if name.startswith("__"):
+        raise AttributeError(name)
     if getattr(sys.modules.get("mutmut.__main__"), "__getattr__", None) is __getattr__:
         del sys.modules["mutmut.__main__"]
     return getattr(importlib.import_module("mutmut.__main__"), name)
