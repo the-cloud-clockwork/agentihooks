@@ -59,9 +59,27 @@ def test_inventory_paginates_every_collaborator_and_app():
 
 def test_incomplete_installation_inventory_is_red():
     def api(endpoint):
-        return [] if "collaborators" in endpoint else {"total_count": 10, "installations": [{"app_slug": "one"}]}
+        if "collaborators" in endpoint:
+            return [{"login": "nestorcolt"}]
+        return {"total_count": 10, "installations": [{"app_slug": "one"}]}
 
-    with pytest.raises(ValueError, match="incomplete"):
+    with pytest.raises(ValueError, match="^app installation inventory incomplete$"):
+        ci_access_audit.inventory("owner/repo", api)
+
+
+@pytest.mark.parametrize("collaborators", [[], [{"login": "stranger"}]])
+def test_collaborator_list_missing_an_approved_human_is_red(collaborators):
+    with pytest.raises(ValueError, match="^collaborator inventory incomplete$"):
+        ci_access_audit.audit(APPROVED, collaborators, [{"app_slug": "tcc-main-ci"}])
+
+
+def test_empty_installation_inventory_is_red():
+    def api(endpoint):
+        if "collaborators" in endpoint:
+            return [{"login": "nestorcolt"}]
+        return {"total_count": 0, "installations": []}
+
+    with pytest.raises(ValueError, match="^app installation inventory incomplete$"):
         ci_access_audit.inventory("owner/repo", api)
 
 
@@ -121,17 +139,34 @@ def test_weekly_job_reads_dev_and_alerts_through_notifications():
     root = Path(__file__).resolve().parents[1]
     workflow = yaml.safe_load((root / ".github/workflows/access-audit.yml").read_text())
     events = workflow.get("on", workflow.get(True))
-    assert "schedule" in events and "workflow_dispatch" in events
-    assert events["push"] == {"branches": ["dev"]}
+    assert events == {"push": {"branches": ["dev"]}, "schedule": [{"cron": "17 7 * * 1"}], "workflow_dispatch": None}
+    assert set(workflow["jobs"]) == {"audit"}
     job = workflow["jobs"]["audit"]
     assert job["runs-on"] == pool("anton-oss-light")
     checkout = next(step for step in job["steps"] if step.get("uses", "").startswith("actions/checkout@"))
     assert checkout["with"]["ref"] == "dev"
+    assert checkout["with"]["persist-credentials"] is False
+    assert workflow["permissions"] == {"contents": "read"}
     notification = next(step for step in job["steps"] if "ntfy.homeofanton.com/anton-alerts" in step.get("run", ""))
     assert "always()" in notification["if"]
-    assert notification["env"]["NTFY_USER"] == "${{ secrets.NTFY_USER }}"
-    assert notification["env"]["NTFY_PASS"] == "${{ secrets.NTFY_PASS }}"
+    assert "env" not in notification
+    assert "--user" not in notification["run"]
     assert "--fail" in notification["run"]
+    mint = next(step for step in job["steps"] if step.get("id") == "app-token")
+    assert mint["uses"] == "actions/create-github-app-token@v3.2.0"
+    assert mint["with"]["client-id"] == "${{ secrets.TCC_CI_CLIENT_ID }}"
+    assert mint["with"]["private-key"] == "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}"
+    assert mint["with"]["repositories"] == "${{ github.event.repository.name }}"
+    assert {key: value for key, value in mint["with"].items() if key.startswith("permission-")} == {
+        "permission-metadata": "read",
+        "permission-members": "read",
+        "permission-organization-administration": "read",
+    }
+    inventory = next(step for step in job["steps"] if "scripts.ci_access_audit" in step.get("run", ""))
+    assert inventory["env"] == {"GH_TOKEN": "${{ steps.app-token.outputs.token }}"}
+    assert job["steps"].index(mint) < job["steps"].index(inventory) < job["steps"].index(notification)
+    assert [step for step in job["steps"] if "steps.app-token" in json.dumps(step)] == [inventory]
+    assert "NTFY_" not in json.dumps(workflow)
 
 
 @pytest.mark.parametrize("unapproved, denied", [(False, False), (True, False), (False, True)])
