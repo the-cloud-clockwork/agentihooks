@@ -567,6 +567,9 @@ def test_execution_home_shares_package_binaries_without_copying(server, tmp_path
     package.mkdir()
     binary = package / "codex"
     binary.write_bytes(b"fixture package binary")
+    skill_bin = profile / "skills" / "tool" / "bin"
+    skill_bin.mkdir(parents=True)
+    (skill_bin / "tool").write_text("private skill tool")
     if linked:
         (profile / "bin").symlink_to(package, target_is_directory=True)
     directory = tmp_path / "execution"
@@ -580,6 +583,9 @@ def test_execution_home_shares_package_binaries_without_copying(server, tmp_path
     assert (home / "bin").resolve() == package.resolve()
     assert (home / "bin" / "codex").samefile(binary)
     assert binary.read_bytes() == b"fixture package binary"
+    private_tool = home / "skills" / "tool" / "bin" / "tool"
+    assert private_tool.read_text() == "private skill tool"
+    assert not private_tool.samefile(skill_bin / "tool")
 
 
 def test_a_home_seed_failure_spawns_nothing_and_frees_the_endpoint(store, server, clock, root, tmp_path):

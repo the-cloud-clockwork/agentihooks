@@ -275,7 +275,15 @@ def spawn(spec: Launch, deps: Deps, path: Path) -> subprocess.Popen:
 def execution_home(spec: Launch, directory: Path) -> Launch:
     source = Path(spec.codex_home)
     home = directory / "codex"
-    shutil.copytree(source, home, ignore_dangling_symlinks=True)
+    shutil.copytree(
+        source,
+        home,
+        ignore=lambda directory, _names: ("bin",) if Path(directory) == source else (),
+        ignore_dangling_symlinks=True,
+    )
+    binaries = source / "bin"
+    if binaries.exists():
+        (home / "bin").symlink_to(binaries.resolve(), target_is_directory=True)
     home.chmod(PRIVATE_MODE)
     for name in ("codex.sources.json", "codex.mounts.json"):
         manifest = source.parent / name
