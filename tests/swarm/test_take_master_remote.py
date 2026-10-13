@@ -6,7 +6,7 @@ from hooks.context import account_sessions, broadcast
 from scripts.gates import base
 from scripts.swarm import take_master
 from scripts.swarm.ledger_client import LedgerRefused
-from scripts.swarm.store import AgentRecord
+from scripts.swarm.store import AgentRecord, SwarmError
 from scripts.swarm_ledger import ledger as remote
 from scripts.swarm_ledger import ledger_authority as authority
 from scripts.swarm_ledger.api import client
@@ -243,3 +243,46 @@ def test_a_remote_refusal_ends_the_placed_master_and_saves_no_seat_alias_or_pin(
     assert store.seats.occupant("master@sw").occupant == ""
     assert store.names.aliases(MASTER) == []
     assert broadcast.session_swarm(4242) == ""
+
+
+def test_a_retake_after_a_remote_refusal_replaces_the_ended_execution(remote_taker):
+    store, ledger, _, _, _ = remote_taker
+    ledger.closed = _unauthenticated
+    assert _taken(["sw", "take-master"]) == "unauthenticated: the ledger server refused the credential"
+    ledger.closed = lambda slug: False
+    assert run("sw", "take-master") == 0
+    assert [(a.name, a.generation) for a in store.execution_registry.records("sw")] == [(MASTER, 1), (MASTER, 2)]
+    assert _masters(store) == [(MASTER, HIVE_ID, {"host_id": HIVE_ID})]
+
+
+def test_pin_on_a_remote_host_without_a_carried_token_names_the_swarm_and_agent():
+    environ = {"AGENTIHOOKS_DEPLOYMENT": "compose"}
+    take_master.pin("sw", MASTER, environ)
+    assert environ == {"AGENTIHOOKS_DEPLOYMENT": "compose", "AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_AGENT_NAME": MASTER}
+
+
+def test_take_refuses_a_live_master_unless_told_to_replace(taker, monkeypatch):  # noqa: F811
+    store, _, rt, _ = taker
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
+    _started(store, rt)
+    with pytest.raises(SwarmError) as refused:
+        take_master.take(store, "sw", CARRIED, rt, 1234)
+    assert str(refused.value) == f"{MASTER} is the live master of sw; run take-master --replace to retire it first"
+
+
+def test_a_finished_master_still_named_live_does_not_block_take_master(taker, monkeypatch):  # noqa: F811
+    store, _, rt, _ = taker
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
+    store.put_agent(
+        "sw", AgentRecord(store.next_name("sw", "master"), "master", "master", seat="master@sw", state="finished")
+    )
+    rt.live.add(MASTER)
+    assert run("sw", "take-master") == 0
+    assert _masters(store) == [("master@a1b2c3-0002", "", {})]
+
+
+def test_take_names_a_new_master_at_the_time_it_was_taken(taker, monkeypatch):  # noqa: F811
+    store, _, rt, _ = taker
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
+    record, _ = take_master.take(store, "sw", CARRIED, rt, 1234)
+    assert (record.name, store.names.entry(MASTER)["spawned_at"]) == (MASTER, 1234)
