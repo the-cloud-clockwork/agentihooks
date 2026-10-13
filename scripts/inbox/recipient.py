@@ -1,7 +1,7 @@
 from scripts.inbox.seats import is_seat
 from scripts.inbox.store import InboxStore
 from scripts.swarm.ledger_client import LedgerClient
-from scripts.swarm.store import FINISHED, RedisStore, SwarmError
+from scripts.swarm.store import RedisStore, SwarmError
 
 
 def empty_seat(inbox: InboxStore, sender: str, address: str) -> dict:
@@ -24,7 +24,7 @@ def empty_seat(inbox: InboxStore, sender: str, address: str) -> dict:
 
 def _live(inbox, agent) -> bool:
     return (
-        agent.state != FINISHED
+        agent.state != "finished"
         and bool(agent.seat)
         and inbox.seats.occupant(agent.seat).occupant == agent.name
         and not inbox.seats.left(agent.name, agent.seat)
