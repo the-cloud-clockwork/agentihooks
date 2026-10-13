@@ -12,7 +12,7 @@ from urllib.request import urlopen
 
 import pytest
 
-from scripts.swarm_ledger import ledger_api as api
+from scripts.swarm_ledger import api
 from scripts.swarm_ledger import ledger_server as server
 from scripts.swarm_ledger import request_metrics as metrics
 
