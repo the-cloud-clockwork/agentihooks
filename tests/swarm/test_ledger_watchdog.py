@@ -180,7 +180,7 @@ def test_a_restart_stops_the_server_by_its_own_pid_and_starts_it_from_its_own_sc
     assert ledger_watchdog.restart(host, PID, host.argv[:2]) == ""
     assert host.calls == [
         ("kill", PID, signal.SIGTERM),
-        ("run", [sys.executable, host.argv[1], "--ensure"], str(host.folder), 210, False, True),
+        ("run", [*host.argv[:2], "--ensure"], str(host.folder), 210, False, True),
     ]
 
 
@@ -192,7 +192,7 @@ def test_a_server_that_ignores_the_stop_is_killed_after_ten_seconds(tmp_path):
         ("kill", PID, signal.SIGTERM),
         *[("sleep", 0.1)] * 100,
         ("kill", PID, signal.SIGKILL),
-        ("run", [sys.executable, host.argv[1], "--ensure"], str(host.folder), 210, False, True),
+        ("run", [*host.argv[:2], "--ensure"], str(host.folder), 210, False, True),
     ]
 
 
@@ -256,7 +256,7 @@ def test_a_start_that_fails_or_hangs_returns_its_error(tmp_path):
 
     host.run = hung
     assert ledger_watchdog.restart(host, PID, host.argv[:2]) == (
-        f"Command '{[sys.executable, host.argv[1], '--ensure']}' timed out after 30 seconds"
+        f"Command '{[*host.argv[:2], '--ensure']}' timed out after 30 seconds"
     )
 
 
