@@ -894,7 +894,7 @@ jobs:
 
       # The gate step grades against whatever gate the server binds, so a silent rebind would loosen it.
       - name: Hold the Delivery L2 conditions
-        if: always() && steps.current.outputs.superseded != 'true'
+        if: always() && steps.proxy.outcome == 'success' && steps.current.outputs.superseded != 'true'
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
