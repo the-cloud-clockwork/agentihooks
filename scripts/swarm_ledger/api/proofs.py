@@ -1,3 +1,6 @@
+import hashlib
+import hmac
+import json
 import sys
 from types import ModuleType
 
@@ -38,7 +41,64 @@ def create(server: ModuleType, payload: dict) -> dict:
         raise APIError(400, "schema_invalid", f"Content rejected: {exc}") from None
     if not created:
         raise APIError(409, "ledger_exists", "Ledger exists")
+    store = server.swarm_store()
+    owner = payload["agent"]
+    parent = store.names.slug_of(owner)
+    if parent and naming.lane_of(owner) == "eng":
+        store.redis.hset(store.key(slug, "proof-creator"), mapping={"parent": parent, "owner": owner})
     return {"data": {"slug": slug, "created": True}}
+
+
+def _owner(server: ModuleType, slug: str) -> dict:
+    if not naming.PROOF_RE.fullmatch(slug) or not server.repository.exists(slug):
+        raise APIError(403, "forbidden", "Not an owned proof fixture")
+    store = server.swarm_store()
+    owner = store.redis.hgetall(store.key(slug, "proof-creator"))
+    if not owner:
+        raise APIError(403, "forbidden", "Not an owned proof fixture")
+    return owner
+
+
+def _credential(server: ModuleType, slug: str, owner: dict) -> str:
+    key = server.repository.token(slug)
+    if not key:
+        raise APIError(403, "forbidden", "Proof fixture has no credential")
+    scope = json.dumps(["proof-controls", slug, owner["parent"], owner["owner"]], separators=(",", ":"))
+    return hmac.new(key.encode(), scope.encode(), hashlib.sha256).hexdigest()
+
+
+def credential(handler: object, server: ModuleType, slug: str) -> dict:
+    owner = _owner(server, slug)
+    caller = server.authority.principal(
+        server.repository.token(owner["parent"]),
+        owner["parent"],
+        handler.headers.get("X-Ledger-Token"),
+        handler.headers.get("X-Ledger-Agent"),
+    )
+    if caller != owner["owner"]:
+        raise APIError(403, "forbidden", "Only the creating engineer receives the fixture credential")
+    return {"data": {"credential": _credential(server, slug, owner)}}
+
+
+def control(handler: object, server: ModuleType, slug: str, payload: dict) -> dict:
+    from scripts.swarm import commands
+
+    owner = _owner(server, slug)
+    token = handler.headers.get("X-Proof-Credential")
+    if not token or not hmac.compare_digest(token.encode(), _credential(server, slug, owner).encode()):
+        raise APIError(403, "forbidden", "Wrong proof fixture credential")
+    store = server.swarm_store()
+    if not store.config(slug).scratch:
+        raise APIError(403, "forbidden", "Proof controls need a scratch swarm")
+    action = payload.get("control") if isinstance(payload, dict) else None
+    if action == "pause" and payload == {"control": "pause"}:
+        return {"data": commands.submit(store, slug, "swarm", ["pause"])}
+    if action != "drain":
+        raise APIError(403, "forbidden", "Proof controls permit only pause and drain")
+    result, error = server.lifecycle_control(slug, payload, False)
+    if error:
+        raise APIError(409, "control_refused", error)
+    return {"data": result}
 
 
 def remove(handler: object, server: ModuleType, slug: str) -> dict:
@@ -47,6 +107,8 @@ def remove(handler: object, server: ModuleType, slug: str) -> dict:
     if not handler.exists(slug):
         raise APIError(404, "ledger_missing", "No such ledger")
     server.ledger_bin.delete(slug)
+    store = server.swarm_store()
+    store.redis.delete(store.key(slug, "proof-creator"))
     data = {"slug": slug, "removed_at": server.ledger_bin.entries()[slug]}
     if server.swarm_status(slug) is not None:
         _, error = server.swarm_control(slug, ["stop", "--now"])

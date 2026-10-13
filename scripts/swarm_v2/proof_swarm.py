@@ -110,7 +110,7 @@ def _create(environ: Mapping[str, str], store: RedisStore, slug: str, ledger: Mo
         if created != slug:
             _call(ledger.remove, created, environ)
             raise SwarmError(f"the proof ledger is named {created} but the controller serves {slug}")
-    store.create(SwarmConfig(slug, repo, 1, 0))
+    store.create(SwarmConfig(slug, repo, 1, 0, scratch=True))
     return f"controller: created proof swarm {slug} with one engineer task"
 
 
