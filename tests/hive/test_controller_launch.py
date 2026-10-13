@@ -925,3 +925,51 @@ def test_terminal_order_is_cleared_even_when_replacement_has_no_account_room(set
         "spawn", Status.UNAVAILABLE, "hive", detail="no advertised Claude account has room"
     )
     assert setup.launcher.orders_for("task") is None
+
+
+def test_placement_wait_records_original_start_and_clears_on_selection(setup):
+    from dataclasses import replace
+
+    from scripts.hive import placement_waits
+
+    decision = setup.herdr._profile_decision.return_value
+    setup.herdr._profile_decision.return_value = replace(decision, profile="frontend")
+    setup.launcher.select(setup.config, "eng", {"id": "task"})
+    first = placement_waits.read(setup.store, setup.config.slug)
+    assert first["task"]["reason"] == "no UI hive live"
+    assert first["task"]["lane"] == "eng"
+    assert first["task"]["started_at"] > 0
+    setup.launcher.select(setup.config, "eng", {"id": "task"})
+    assert placement_waits.read(setup.store, setup.config.slug) == first
+    setup.herdr._profile_decision.return_value = decision
+    setup.launcher.select(setup.config, "eng", {"id": "task"})
+    assert placement_waits.read(setup.store, setup.config.slug) == {}
+
+
+def test_missing_hive_finding_starts_at_thirty_minutes_and_is_shared(setup):
+    from scripts.hive import placement, placement_waits
+
+    for task in ("first", "second"):
+        placement_waits.observe(setup.store, setup.config.slug, "eng", task, placement.NO_UI_HIVE, 1000)
+    assert placement_waits.findings(setup.store, setup.config.slug, 1_800_999) == []
+    found = placement_waits.findings(setup.store, setup.config.slug, 1_801_000)
+    assert len(found) == 1
+    assert found[0].kind == "missing hive"
+    assert found[0].subject == "ui"
+    assert found[0].threshold == "thirty minutes"
+    assert found[0].measure == 1_800_000
+    assert found == placement_waits.findings(setup.store, setup.config.slug, 1_801_000)
+    placement_waits.observe(setup.store, setup.config.slug, "eng", "first", "", 1_801_000)
+    assert len(placement_waits.findings(setup.store, setup.config.slug, 1_801_000)) == 1
+    placement_waits.observe(setup.store, setup.config.slug, "eng", "second", "", 1_801_000)
+    assert placement_waits.findings(setup.store, setup.config.slug, 1_801_000) == []
+
+
+def test_capacity_wait_is_recorded_without_a_missing_hive_finding(setup):
+    from scripts.hive import placement_waits
+
+    setup.herdr._quota_accounts = []
+    setup.launcher.select(setup.config, "eng", {"id": "task"})
+    record = placement_waits.read(setup.store, setup.config.slug)["task"]
+    assert record["reason"] == "no advertised Claude account has room"
+    assert placement_waits.findings(setup.store, setup.config.slug, record["started_at"] + 1_800_000) == []
