@@ -754,7 +754,7 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Hold the Delivery L2 binding
-        if: steps.current.outputs.superseded != 'true'
+        if: success() && steps.proxy.outcome == 'success' && steps.current.outputs.superseded != 'true'
         env:
           SONAR_READ_TOKEN: ${{ secrets.SONAR_READ_TOKEN }}
         run: |
