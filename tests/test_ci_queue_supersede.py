@@ -12,8 +12,15 @@ RUN = 500
 QUEUE = "gh-readonly-queue/dev/pr-123-"
 RUNS = {
     "queued": [(410, QUEUE + "aaa111"), (420, "gh-readonly-queue/dev/pr-1234-bbb222")],
-    "in_progress": [(430, QUEUE + "ccc333"), (510, QUEUE + "ddd444"), (440, "gh-readonly-queue/dev/pr-12-eee555")],
-    "waiting": [(450, QUEUE + "not-a-sha")],
+    "in_progress": [
+        (430, QUEUE + "ccc333"),
+        (RUN, QUEUE + "fff666"),
+        (510, QUEUE + "ddd444"),
+        (440, "gh-readonly-queue/dev/pr-12-eee555"),
+    ],
+    "waiting": [(450, QUEUE + "not-a-sha"), (455, QUEUE + "0a0b0c")],
+    "pending": [(460, QUEUE + "1a1b1c")],
+    "requested": [(470, QUEUE + "2a2b2c")],
 }
 
 GH = """#!/usr/bin/env bash
@@ -24,8 +31,9 @@ if [[ "$1 $2" == "api -X" ]]; then
   exit 0
 fi
 [[ -z "${FAIL_LIST:-}" ]] || exit 1
+pattern='[?&]event=merge_group&status=([a-z_]+)&'
 for arg in "$@"; do
-  if [[ "$arg" =~ status=([a-z_]+) ]]; then
+  if [[ "$arg" =~ $pattern ]]; then
     cat "$FIXTURES/${BASH_REMATCH[1]}" 2>/dev/null || true
   fi
 done
@@ -37,7 +45,8 @@ def _workflow():
 
 
 def _step():
-    return next(step for step in _workflow()["jobs"]["reuse"]["steps"] if step.get("name") == STEP)
+    [step] = _workflow()["jobs"]["supersede"]["steps"]
+    return step
 
 
 def _run(tmp_path, ref, **env):
@@ -78,26 +87,22 @@ def test_pull_request_and_push_concurrency_stays_unchanged():
     )
 
 
-def test_the_supersede_step_runs_first_and_only_in_the_merge_queue():
-    job = _workflow()["jobs"]["reuse"]
-    step = _step()
-    assert job["steps"][0] == step
-    assert step["if"] == "github.event_name == 'merge_group'"
-    assert step["env"] == {
+def test_the_supersede_job_runs_only_in_the_merge_queue_with_cancel_rights():
+    job = _workflow()["jobs"]["supersede"]
+    assert job["if"] == "github.event_name == 'merge_group'"
+    assert job["permissions"] == {"actions": "write"}
+    assert _step()["name"] == STEP
+    assert _step()["env"] == {
         "GH_TOKEN": "${{ github.token }}",
         "QUEUE_REF": "${{ github.event.merge_group.head_ref }}",
         "RUN": "${{ github.run_id }}",
     }
-    assert job["permissions"] == {"contents": "read", "actions": "write"}
 
 
 def test_only_older_runs_of_the_same_pull_request_are_cancelled(tmp_path):
     result, cancelled = _run(tmp_path, "refs/heads/" + QUEUE + "fff666")
     assert result.returncode == 0, result.stdout + result.stderr
-    assert cancelled == [
-        "repos/owner/repo/actions/runs/410/cancel",
-        "repos/owner/repo/actions/runs/430/cancel",
-    ]
+    assert cancelled == [f"repos/owner/repo/actions/runs/{run}/cancel" for run in (410, 430, 455, 460, 470)]
     assert "Cancelled superseded queue run 410 (gh-readonly-queue/dev/pr-123-aaa111)" in result.stdout
 
 
