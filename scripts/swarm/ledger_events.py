@@ -43,7 +43,7 @@ GATE = "Gate — Required"
 RED_NOTICE = re.compile(r"^Your pull request (\S+) for .* has red checks and no push for twenty minutes\.")
 GATE_JOB = re.compile(rf"^[ \t]+name:[ \t]*(['\"]?){re.escape(GATE)}\1[ \t]*$", re.MULTILINE)
 PULL_QUERY = (
-    "query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid mergeQueueEntry{id} "
+    "query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid mergeable mergeQueueEntry{id state} "
     "commits(last:1){nodes{commit{committedDate "
     'file(path:".github/workflows"){object{...on Tree{entries{object{...on Blob{text}}}}}} '
     "statusCheckRollup{contexts(first:100){"
@@ -66,6 +66,7 @@ class PullRequest:
     unpassed_gate: str = ""
     queued: bool = False
     gate_passed: bool = False
+    merge_problem: str = ""
 
 
 def iso_ms(text):
@@ -106,6 +107,11 @@ def pull_request(raw):
         unpassed_gate,
         raw.get("mergeQueueEntry") is not None,
         bool(raw.get("gated")) and set(_gate(checks, results)) == {"SUCCESS"},
+        "has a merge conflict"
+        if raw.get("mergeable") == "CONFLICTING"
+        else "is marked unmergeable by GitHub"
+        if (raw.get("mergeQueueEntry") or {}).get("state") == "UNMERGEABLE"
+        else "",
     )
 
 
