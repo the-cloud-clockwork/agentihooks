@@ -10,12 +10,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from scripts.swarm import merge_queue, stack, waits
+from scripts.swarm import claim_order, merge_queue, stack, waits
 from scripts.swarm.store import ASSIST, MANUAL, SwarmError
 from scripts.swarm_ledger import ledger_kinds
 
 AWAITING = "merge"
-FIX = "fix"
+FIX = claim_order.FIX
 CONFLICT = "conflicts with dev and needs an update the swarm cannot make"
 RECORDS = "ready"
 GATED = ("code", "ci")

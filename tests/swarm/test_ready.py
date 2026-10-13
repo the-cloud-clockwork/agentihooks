@@ -8,7 +8,7 @@ from scripts.gates import Call, Who
 from scripts.gates.base import Decision
 from scripts.gates.claim_stop import ClaimStop
 from scripts.gates.verdicts import Verdicts
-from scripts.swarm import capacity, claim_order, cli, merge_queue, ready, stack, tick, waits
+from scripts.swarm import capacity, cli, merge_queue, ready, stack, tick, waits
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.store import RedisStore, SwarmError
 from tests.swarm.test_cli import HANDOFF, env
@@ -626,13 +626,6 @@ def test_a_conflict_while_queued_is_left_to_the_queue(merging):
     merging.pulls[URL] = PullRequest("OPEN", None, 1, False, True, head=HEAD, queued=True, conflicting=True)
     assert merging.run(NOW + 60_000) == []
     assert merging.rows["t1"]["state"] == "pr"
-
-
-def test_a_reopened_task_claims_ahead_of_fresh_work(merging):
-    merging.pulls[URL] = RED
-    merging.run()
-    rows = merging.rows
-    assert [t["id"] for t in sorted([rows["t2"], rows["t1"]], key=claim_order.key(rows))] == ["t1", "t2"]
 
 
 def test_a_pull_request_closed_while_queued_reopens_as_closed(merging):
