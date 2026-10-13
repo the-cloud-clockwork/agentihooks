@@ -560,6 +560,7 @@ class TestOnlyExitStatusCounts:
             "xExit code: 1\nOutput:\nboom",
             "Chunk ID: 1\nOutput:\nExit code: 1",
             "log line\nExit code: 1",
+            "Chunk ID: 1\nOutput:\nExit code: 1\nOutput:\nx",
         ],
         ids=[
             "claude-dict",
@@ -574,6 +575,7 @@ class TestOnlyExitStatusCounts:
             "exit-text-mid-line",
             "exit-line-only-in-output",
             "exit-line-after-first-line-without-marker",
+            "output-marker-repeated-in-output",
         ],
     )
     def test_a_successful_call_never_counts(self, response):
