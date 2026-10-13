@@ -89,7 +89,9 @@ def routed(
 
 def hive_controller(runtime: RoutedRuntime, store: RedisStore, slug: str, held: lease.Lease) -> RoutedRuntime:
     from scripts.hive.launch import HIVE, HiveLaunch
+    from scripts.hive.reports import Reports
 
+    runtime.herdr_runtime.hive = Reports(store.redis)
     hive = HiveLaunch(store, slug, held, runtime.herdr_runtime)
     router = RuntimeRouter(
         [*runtime.router.runtimes.values(), hive],

@@ -203,6 +203,7 @@ def test_daemon_consumes_orders_after_its_heartbeat(setup, monkeypatch):
     monkeypatch.setattr(
         daemon, "observe", lambda **kwargs: {"slots": {}, "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
     )
+    monkeypatch.setattr(daemon, "execution_report", lambda *args: {"names": [], "panes": {}, "executions": {}})
     local = Mock(return_value=setup.consumer)
     monkeypatch.setattr(Consumer, "local", local)
     setup.orders.send("host", setup.order)
