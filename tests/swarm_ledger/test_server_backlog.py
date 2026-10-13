@@ -43,6 +43,7 @@ def listening(monkeypatch, ledger_port, tmp_path):
     page = legacy_page.render(document, SLUG, ledger_port)
     html, _ = core.paths(SLUG)
     html.write_text(page)
+    core.sync(SLUG, ops=[])
     token = core.read_token(page)
     worker = threading.Thread(target=server.serve)
     worker.start()
@@ -66,7 +67,9 @@ def request(port, token, method, resource, body=None):
             headers={"X-Ledger-Token": token, "Content-Type": "application/json"},
         )
         response = connection.getresponse()
-        return response.status, json.loads(response.read())
+        result = json.loads(response.read())
+        assert response.status == 200, result
+        return response.status, result
     finally:
         connection.close()
 
