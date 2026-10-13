@@ -236,8 +236,13 @@ def test_a_line_left_as_the_given_base_had_it_is_never_graded(tmp_path):
 
 
 def test_a_branch_that_merged_dev_and_edited_a_test_grades_only_its_own_lines_from_current_dev(tmp_path):
-    from scripts.ci_mutation.scope import discover_changes, own_bases
+    import yaml
 
+    from scripts.ci_mutation.scope import discover_changes, own_bases
+    from tests.test_ci_hosted_lanes import _evaluate
+
+    jobs = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/test.yml").read_text())["jobs"]
+    plan = next(step for step in jobs["mutation-plan"]["steps"] if step.get("run", "").endswith('--base "$BASE"'))
     git, commit = _repo(tmp_path)
     (tmp_path / "tests").mkdir()
     (tmp_path / "tests" / "test_x.py").write_text("def test_a():\n    assert 1\n")
@@ -254,7 +259,8 @@ def test_a_branch_that_merged_dev_and_edited_a_test_grades_only_its_own_lines_fr
     git("checkout", "-q", "branch")
     git("merge", "-q", "--no-edit", "dev")
     assert discover_changes(tmp_path, [pinned, merged_dev], "HEAD") == {"hooks/own.py": {1, 2}, "hooks/dev.py": {1, 2}}
-    bases = own_bases(tmp_path, "origin/dev", "HEAD")
+    event = {"pull_request": {"base": {"sha": pinned}}}
+    bases = own_bases(tmp_path, _evaluate(plan["env"]["BASE"], event=event), "HEAD")
     assert bases == [merged_dev]
     assert discover_changes(tmp_path, bases, "HEAD") == {"hooks/own.py": {1, 2}}
 

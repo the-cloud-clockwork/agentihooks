@@ -583,11 +583,3 @@ def test_mutation_runs_in_tests_beside_unit_and_lint():
     assert dispatch["required"] is True
     assert dispatch["default"] == "origin/dev"
     assert not (_ROOT / ".github/workflows/mutation.yml").exists()
-
-
-def test_mutation_plan_starts_a_pull_request_from_current_dev_not_the_frozen_event_base():
-    job = _workflow()["jobs"]["mutation-plan"]
-    plan = _step("mutation-plan", "Size mutation shards from stored timings")
-    assert job["steps"][0]["with"]["fetch-depth"] == 0
-    assert plan["env"]["BASE"] == "${{ inputs.base || 'origin/dev' }}"
-    assert "github.event" not in plan["env"]["BASE"]
