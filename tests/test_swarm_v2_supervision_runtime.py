@@ -746,7 +746,7 @@ def test_remote_validation_cannot_extend_the_checkpoint_deadline(supervisor, mon
 
     supervisor.launch = replace(supervisor.launch, budgets=Budgets(checkpoint=0.05))
     supervisor.environment[runtime.checkpoint_runtime.REMOTE] = "true"
-    monkeypatch.setattr(runtime.threading, "Thread", Recorded)
+    monkeypatch.setattr(runtime, "threading", SimpleNamespace(Event=threading.Event, Thread=Recorded))
     monkeypatch.setattr(supervisor, "quiesce", lambda: True)
     monkeypatch.setattr(runtime, "checkpoint", lambda *_: "checkpoint")
     monkeypatch.setattr(runtime.checkpoint_runtime, "validate_export", validate)
@@ -762,7 +762,6 @@ def test_remote_validation_cannot_extend_the_checkpoint_deadline(supervisor, mon
         cleanup.assert_called_once()
     finally:
         release.set()
-        finished.wait()
 
 
 def test_remote_validation_finishing_at_the_checkpoint_deadline_is_incomplete(supervisor, monkeypatch):
