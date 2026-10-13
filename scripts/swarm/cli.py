@@ -497,6 +497,13 @@ def cmd_pause(store, args):
     _state(store, args, "paused")
 
 
+def cmd_proof_control(store, args):
+    from scripts.swarm_ledger import proof_ledger
+
+    result = proof_ledger.control(args.slug, json.loads(Path(args.request).read_bytes()))
+    print(json.dumps(result))
+
+
 def cmd_stop(store, args):
     _snapshot(store, args.slug)
     if not args.now:
@@ -1699,6 +1706,7 @@ def build_parser():
     close.add_argument("--note", default="")
     close.add_argument("--now", action="store_true")
     sub.add_parser("take-master").add_argument("--replace", action="store_true")
+    sub.add_parser("proof-control").add_argument("--request", required=True)
     master_up = sub.add_parser("master").add_subparsers(dest="action", required=True).add_parser("up")
     pick = master_up.add_mutually_exclusive_group()
     pick.add_argument("--last", dest="choice", action="store_const", const=master_launch.LAST, default="")
