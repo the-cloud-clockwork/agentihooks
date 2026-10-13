@@ -216,7 +216,7 @@ def test_the_tick_leaves_the_task_alone_under_the_default_observe(started, monke
     store, ledger, _ = started
     ledger.rows["t1"].update(state="pr", pr_url=URL, claimed_by=ME)
     monkeypatch.setattr(intent, "pr_view", lambda url: {"title": "T", "body": "", "files": []})
-    monkeypatch.setattr(intent, "judge", lambda state: ("fail", "no"))
+    monkeypatch.setattr(intent, "judged", lambda state: {"verdict": "fail", "reason": "no"})
     assert "task t1 intent check fail" in cli.run_tick(store, "sw")
     assert ledger.rows["t1"]["state"] == "pr"
     assert Verdicts("sw", "intent").read("t1")["verdict"] == "fail"
@@ -226,7 +226,7 @@ def test_the_tick_stamps_its_own_time_on_the_verdict(started, monkeypatch):
     store, ledger, _ = started
     ledger.rows["t1"].update(state="pr", pr_url=URL, claimed_by=ME)
     monkeypatch.setattr(intent, "pr_view", lambda url: {"title": "T", "body": "", "files": []})
-    monkeypatch.setattr(intent, "judge", lambda state: ("pass", "ok"))
+    monkeypatch.setattr(intent, "judged", lambda state: {"verdict": "pass", "reason": "ok"})
     monkeypatch.setattr(cli, "now_ms", lambda: 777)
     cli.run_tick(store, "sw")
     assert Verdicts("sw", "intent").read("t1") == {

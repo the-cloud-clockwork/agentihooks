@@ -122,7 +122,7 @@ def test_the_chunk_failures_quote_the_lines_missed_or_exceeded(cases, definition
     deliver = (
         f'Deliver what plan lines 50-56 ask for and the change leaves out: line 52 "{rows[2]}", line 56 "{rows[6]}".'
     )
-    assert missed.endswith(f". {deliver} {remove}")
+    assert missed.endswith(f". {deliver}")
     assert exceeded.endswith(f"the pull request merges.. The phase must be able to use it for {PHASE}. {remove}")
 
 

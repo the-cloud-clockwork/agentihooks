@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from hooks.classifier import ClassifierUnavailable, YesNo
+from hooks.classifier import ClassifierUnavailable, YesNo, definitions
 from scripts.gates import Call, Gate, Who, entry, intent, intent_history
 from scripts.gates.verdicts import Verdicts
 from scripts.swarm import timing
@@ -730,7 +730,7 @@ class TestModeOf:
 
 PLAN = "".join(f"line {n}\n" for n in range(1, 41))
 CHUNK_STATE = {"task_text": "", "plan_lines": "15-17", "plan_chunk": "line 15\n\nline 17\n"}
-BASE_QUESTIONS = ["usable", "delivers", "reachable", "weakens"]
+BASE_QUESTIONS = ["usable", "aligned", "delivers", "reachable", "weakens"]
 CHUNK_QUESTIONS = [*BASE_QUESTIONS, "underdelivers", "overdelivers", "misses_line_15", "misses_line_17"]
 
 
@@ -930,21 +930,29 @@ TRACED = {
     ],
 }
 UNOPENED = {**DOC, "tasks": [{**{k: v for k, v in DOC["tasks"][0].items() if k != "pr_url"}, "state": "claimed"}]}
-PLANNED_REASON = "the phase can use it as delivered at probability 0.80"
+PLANNED_REASON = "the plan serves the phase at probability 0.80 and covers the task at probability 0.90"
 JUDGE = intent.judge
 
 
-def planned_ask(seen, usable=0.8):
+def plan_classifier(aligned):
+    def decide(state, questions, purpose):
+        values = {"aligned": aligned, "covers": 0.9, "weakens": 0.1}
+        return SimpleNamespace(answers={key: answer(values[key]) for key in questions})
+
+    return decide
+
+
+def planned_ask(seen, aligned=0.8):
     def ask(state):
         seen.append(state)
-        return JUDGE(state, classifier(usable))
+        return intent.judged(state, plan_classifier(aligned))
 
     return ask
 
 
 @pytest.fixture
 def asks(monkeypatch):
-    return lambda answer: monkeypatch.setattr(intent, "judge", answer)
+    return lambda ask: monkeypatch.setattr(intent, "judged", lambda state: intent._answer(ask(state)))
 
 
 class TestPlanCheck:
@@ -954,17 +962,22 @@ class TestPlanCheck:
         checked = intent.plan_check(SLUG, UNOPENED, TASK, TRACED, "coach", NOW, home=tmp_path)
         assert checked == {"verdict": "pass", "reason": PLANNED_REASON}
         [state] = seen
-        assert state["pull_request_body"] == (
-            "- read the slice | scripts/gates/intent.py, docs | the judge needs it\n"
-            "- cite the lines | docs | the verdict names them\n"
-        )
-        assert state["changed_files"] == ["docs", "scripts/gates/intent.py"]
+        assert state["planned_pieces"] == [
+            "read the slice | scripts/gates/intent.py, docs | the judge needs it",
+            "cite the lines | docs | the verdict names them",
+        ]
+        assert state["planned_areas"] == ["docs", "scripts/gates/intent.py"]
         assert verdicts(tmp_path).read(TASK) == {
             "verdict": "pass",
             "reason": PLANNED_REASON,
             "at": NOW,
             "phase": "p8",
             "planned": "h1",
+            "stage": "plan",
+            "criterion": None,
+            "model": None,
+            "definition": "intent-check-plan",
+            "definition_digest": definitions.load(intent.PLAN).digest,
         }
         [record] = [json.loads(line) for line in (tmp_path / SLUG / "gates" / "intent" / "history.jsonl").open()]
         assert {k: record[k] for k in ("task", "agent", "at", "verdict", "reason", "purpose")} == {
