@@ -1,21 +1,26 @@
 """Every task second in the window lands in exactly one named stage.
 
 Base phases run claim wait, build, ci run and review; overlays take an instant from its base in a fixed priority,
-and an instant of claim wait while host samples hold spawns is that holder's hold.
+and an instant of claim wait while host samples hold spawns is that holder's hold. Claim wait starts when the task
+became claimable and is reported as seat wait or queue wait.
 """
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
-from scripts.swarm import bottleneck, metrics_outbox
+from scripts.swarm import bottleneck, freeze, metrics_outbox
 from scripts.swarm.store import RedisStore
 from scripts.swarm_ledger.repository import hierarchy
 
 KEY = "bottleneck-stages"
 TOP = 3
 SOURCES = (*bottleneck.SOURCES, "ci_stages", "ledger_events")
-READY = ("added", "task open")
+READY = ("added", "task open", "back in scope")
+PHASE_OPENS = ("review changed", "planning changed", "depends_on changed", "back in scope")
+CHECKED, FOCUSED, UNFROZEN = "checked", "focused", "unfrozen"
+CLAIM_WAIT, SEAT_WAIT, QUEUE_WAIT = "claim_wait", "seat_wait", "queue_wait"
+LANE = "eng"
 DONE = "task done"
 JOINED = "joined"
 OVERLAYS = ("merge_queue", "intent_fix", "launch_failure", "launch", "claim_wait", "ci_overrun", "ci_queue")
@@ -46,20 +51,13 @@ class Timeline:
     base: tuple
     overlays: tuple
     task: str = ""
+    lane: str = LANE
+    seats: tuple = ()
 
 
-def _ready(task: dict, events: list, before: float) -> float | None:
-    own = f"tasks/{task['id']}"
-    needed = {f"tasks/{name}" for name in task.get("depends_on") or []}
-    marks = [
-        event["ts_ms"]
-        for event in events
-        if event["ts_ms"] <= before
-        and (
-            (event["target"] == own and event["kind"] in READY) or (event["kind"] == DONE and event["target"] in needed)
-        )
-    ]
-    return max(marks, default=None)
+def _ready(task: dict, events: list, before: float, ready: "Claim") -> float | None:
+    opens = ready.opens(task, events)
+    return max((event["ts_ms"] for event in events if event["ts_ms"] <= before and opens(event)), default=None)
 
 
 def _lives(task_id: str, rows: dict, end: float) -> list[tuple[tuple, Span]]:
@@ -138,7 +136,7 @@ def _rounds(task_id: str, rows: dict, green: float, end: float) -> list[Span]:
     ]
 
 
-def _claimed(task: dict, rows: dict, now_ms: int, live: bool) -> Timeline:
+def _claimed(task: dict, rows: dict, now_ms: int, live: bool, ready: "Claim") -> Timeline:
     task_id = task["id"]
     mine = [event for event in rows["agent_events"] if event["task"] == task_id]
     claimed = min(event["ts_ms"] for event in mine if event["kind"] == "claim")
@@ -155,8 +153,8 @@ def _claimed(task: dict, rows: dict, now_ms: int, live: bool) -> Timeline:
     ]
     pushed = min([at for at in [*map(bottleneck._created, runs), *opened] if at >= claimed] + [end])
     green = bottleneck._green(runs, pushed, end)
-    ready = _ready(task, rows["ledger_events"], claimed)
-    start = claimed if ready is None else ready
+    claimable_at = _ready(task, rows["ledger_events"], claimed, ready)
+    start = claimed if claimable_at is None else claimable_at
     lives = _lives(task_id, rows, end)
     base = (
         Span("claim_wait", start, claimed),
@@ -170,33 +168,79 @@ def _claimed(task: dict, rows: dict, now_ms: int, live: bool) -> Timeline:
         *_gaps([life for life, _ in lives], claimed, pushed),
         *_ci(runs, rows["ci_stages"], pushed, green),
     )
-    return Timeline(start, end, base, overlays, task_id)
+    seats = tuple(life for life, _ in lives)
+    return Timeline(start, end, base, overlays, task_id, task.get("lane", LANE), seats)
 
 
-def _waiting(task: dict, rows: dict, ready: Callable[[dict], bool], now_ms: int) -> Timeline | None:
+def _waiting(task: dict, rows: dict, ready: "Claim", now_ms: int) -> Timeline | None:
     if not ready(task):
         return None
-    start = _ready(task, rows["ledger_events"], now_ms)
+    start = _ready(task, rows["ledger_events"], now_ms, ready)
     if start is None:
         return None
-    return Timeline(start, now_ms, (Span("claim_wait", start, now_ms),), (), task["id"])
+    return Timeline(start, now_ms, (Span(CLAIM_WAIT, start, now_ms),), (), task["id"], task.get("lane", LANE))
 
 
-def claimable(doc: dict, fix_phase: str) -> Callable[[dict], bool]:
-    from scripts.swarm import tick
+class Claim:
+    """The tick's claim rules over one ledger doc, the events that open a task to them, and the lane seat caps."""
 
-    rows = {task["id"]: task for task in doc.get("tasks", [])}
-    graph = hierarchy.project(doc)[0]
-    return lambda task: tick.ready(task, rows, doc, graph, fix_phase)
+    def __init__(self, doc: dict, fix_phase: str, seats: Mapping[str, int] | None = None):
+        self.doc, self.fix_phase, self.seats = doc, fix_phase, seats
+        self.rows = {task["id"]: task for task in doc.get("tasks", [])}
+        self.graph = hierarchy.project(doc)[0]
+
+    def __call__(self, task: dict) -> bool:
+        from scripts.swarm import tick
+
+        return tick.ready(task, self.rows, self.doc, self.graph, self.fix_phase)
+
+    def cap(self, lane: str) -> int | None:
+        return None if self.seats is None else self.seats.get(lane)
+
+    def opens(self, task: dict, events: list) -> Callable[[dict], bool]:
+        chain = freeze.ancestry(task, self.graph)
+        phase = next((row for row in self.doc.get("phases", []) if row["id"] == task.get("phase")), {})
+        node = f"phases/{phase['id']}" if phase else None
+        before = {f"phases/{name}" for name in phase.get("depends_on") or []}
+        needed = {f"tasks/{name}" for name in task.get("depends_on") or []}
+        focused = {event["target"] for event in events if event["kind"] == FOCUSED}
+
+        def admits(target: str) -> bool:
+            return freeze.covers(target, task, chain) or target in focused
+
+        def opens(event: dict) -> bool:
+            kind, target = event["kind"], event["target"]
+            return (
+                (target == chain[0] and kind in READY)
+                or (kind == DONE and target in needed)
+                or (kind == CHECKED and target in before)
+                or (target == node and kind in PHASE_OPENS)
+                or (kind == FOCUSED and freeze.covers(target, task, chain))
+                or (kind == UNFROZEN and any(map(admits, _cleared(event))))
+            )
+
+        return opens
 
 
-def timelines(rows: dict, tasks: list, now_ms: int, ready: Callable[[dict], bool] | None = None) -> list[Timeline]:
+def _cleared(event: dict) -> list:
+    return json.loads(event.get("payload") or "{}").get("cleared") or [event["target"]]
+
+
+def claimable(doc: dict, fix_phase: str, seats: Mapping[str, int] | None = None) -> Claim:
+    return Claim(doc, fix_phase, seats)
+
+
+def timelines(rows: dict, tasks: list, now_ms: int, ready: Claim | None = None) -> list[Timeline]:
     claimed = {event["task"] for event in rows["agent_events"] if event["kind"] == "claim"}
     by_id = {task["id"]: task for task in tasks}
     ready = ready or claimable({"tasks": tasks}, NO_FIX_PHASE)
     found = [
         _claimed(
-            by_id.get(task_id, {"id": task_id}), rows, now_ms, by_id.get(task_id, {}).get("state") in bottleneck.OPEN
+            by_id.get(task_id, {"id": task_id}),
+            rows,
+            now_ms,
+            by_id.get(task_id, {}).get("state") in bottleneck.OPEN,
+            ready,
         )
         for task_id in sorted(claimed)
     ]
@@ -227,23 +271,62 @@ def holds(samples: list, now_ms: int) -> list[Span]:
 def _stage_at(timeline: Timeline, held: list[Span], at: float) -> tuple[str, str]:
     ranked = sorted(timeline.overlays, key=lambda span: OVERLAYS.index(span.stage))
     span = next(span for span in (*ranked, *timeline.base) if span.covers(at))
-    if span.stage == "claim_wait":
+    if span.stage == CLAIM_WAIT:
         hold = next((hold for hold in held if hold.covers(at)), None)
         if hold is not None:
             return hold.stage, hold.label
     return span.stage, span.label
 
 
-def attribute(timeline: Timeline, held: list[Span], window: bottleneck.Window) -> dict:
+def attribute(timeline: Timeline, held: list[Span], window: bottleneck.Window, lanes: "Lanes | None" = None) -> dict:
     low = max(timeline.start, window.start)
     high = max(low, min(timeline.end, window.end))
     spans = [*timeline.base, *timeline.overlays, *held]
-    points = sorted({low, high, *(min(max(edge, low), high) for span in spans for edge in (span.start, span.end))})
+    shared = lanes.edges[timeline.lane] if lanes else ()
+    edges = (*(edge for span in spans for edge in (span.start, span.end)), *shared)
+    points = sorted({low, high, *(min(max(edge, low), high) for edge in edges)})
     seconds = {}
     for start, end in zip(points, points[1:]):
-        key = _stage_at(timeline, held, (start + end) / 2)
-        seconds[key] = seconds.get(key, 0.0) + (end - start) / 1000
+        at = (start + end) / 2
+        stage, label = _stage_at(timeline, held, at)
+        if stage == CLAIM_WAIT:
+            stage = lanes.wait(timeline, at) if lanes else SEAT_WAIT
+        seconds[stage, label] = seconds.get((stage, label), 0.0) + (end - start) / 1000
     return seconds
+
+
+@dataclass(frozen=True)
+class Lanes:
+    """Seat wait is claim wait while every seat of the lane is busy, for at most as many tasks as it has seats."""
+
+    claim: Claim
+    held: list
+    rows: dict
+    edges: dict
+
+    def wait(self, timeline: Timeline, at: float) -> str:
+        cap = self.claim.cap(timeline.lane)
+        if cap is None:
+            return SEAT_WAIT
+        lane = self.rows[timeline.lane]
+        if sum(start <= at < stop for other in lane for start, stop in other.seats) < cap:
+            return QUEUE_WAIT
+        ahead = 0
+        for other in lane:
+            if other is timeline:
+                break
+            ahead += other.start <= at < other.end and _stage_at(other, self.held, at)[0] == CLAIM_WAIT
+        return SEAT_WAIT if ahead < cap else QUEUE_WAIT
+
+
+def lanes(found: list[Timeline], held: list[Span], ready: Claim) -> Lanes:
+    rows, edges = {}, {}
+    for timeline in sorted(found, key=lambda timeline: (timeline.start, timeline.task)):
+        rows.setdefault(timeline.lane, []).append(timeline)
+        spans = [*timeline.base, *timeline.overlays]
+        edges.setdefault(timeline.lane, set()).update(edge for span in spans for edge in (span.start, span.end))
+        edges[timeline.lane].update(edge for seat in timeline.seats for edge in seat)
+    return Lanes(ready, held, rows, edges)
 
 
 def _overrun_episodes(rows, timeline, branch, held, window):
@@ -260,15 +343,16 @@ def _overrun_episodes(rows, timeline, branch, held, window):
     return episodes
 
 
-def observations(
-    rows: dict, tasks: list, now_ms: int, window_ms: int, ready: Callable[[dict], bool] | None = None
-) -> dict:
+def observations(rows: dict, tasks: list, now_ms: int, window_ms: int, ready: Claim | None = None) -> dict:
     window = bottleneck.Window(now_ms - window_ms, now_ms)
     held = holds(rows["host_samples"], now_ms)
     branches = {task["id"]: task.get("branch") for task in tasks}
+    ready = ready or claimable({"tasks": tasks}, NO_FIX_PHASE)
+    found_timelines = timelines(rows, tasks, now_ms, ready)
+    shared = lanes(found_timelines, held, ready)
     found = {}
-    for timeline in timelines(rows, tasks, now_ms, ready):
-        for stage, _ in attribute(timeline, held, window):
+    for timeline in found_timelines:
+        for stage, _ in attribute(timeline, held, window, shared):
             if stage != "ci_overrun":
                 found.setdefault(stage, set()).add(f"{stage}:{timeline.task}:{int(timeline.start)}")
         overruns = _overrun_episodes(rows, timeline, branches.get(timeline.task), held, window)
@@ -282,13 +366,16 @@ def report(
     tasks: list,
     now_ms: int,
     window_ms: int = bottleneck.WINDOW_MS,
-    ready: Callable[[dict], bool] | None = None,
+    ready: Claim | None = None,
 ) -> dict:
     window = bottleneck.Window(now_ms - window_ms, now_ms)
     held = holds(rows["host_samples"], now_ms)
+    ready = ready or claimable({"tasks": tasks}, NO_FIX_PHASE)
+    found_timelines = timelines(rows, tasks, now_ms, ready)
+    shared = lanes(found_timelines, held, ready)
     seconds = {}
-    for timeline in timelines(rows, tasks, now_ms, ready):
-        for key, value in attribute(timeline, held, window).items():
+    for timeline in found_timelines:
+        for key, value in attribute(timeline, held, window, shared).items():
             seconds[key] = seconds.get(key, 0.0) + value
     found = [{"stage": stage, "label": label, "seconds": value} for (stage, label), value in seconds.items()]
     found.sort(key=lambda row: (-row["seconds"], row["stage"], row["label"]))
