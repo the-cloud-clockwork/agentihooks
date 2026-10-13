@@ -7,6 +7,7 @@ from typing import Any
 
 from hooks.proc import Process, processes
 from scripts.hive import reports
+from scripts.swarm import live_binding
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm.tick import SpawnError
@@ -87,7 +88,7 @@ class LocalHerdrRuntime:
         refused = foreign(self, "terminate", agent)
         if refused:
             return refused
-        if legacy(agent) or reports.host(agent):
+        if legacy(agent) or reports.host(agent) or live_binding.managed(agent):
             retired = self.herdr.retire(agent, homes=homes)
         else:
             pid = process.resolve(agent, self.namespace(), self.table())

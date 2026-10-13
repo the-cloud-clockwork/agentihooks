@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/codex.py:scripts.inbox.codex.x\u01c1Pump\u01c1run__mutmut_6:9168351699640c40a18024380e0145543ec671217282e17f27d51daecebb86e5": {
+    "reader": "standards_reader",
+    "reason": "The local starting and reconnecting flags are read only through truth tests. False and None follow identical branches and produce identical repository output, RPC calls, cleanup and exceptions. Independently cleared by the Standards reader in final review round three."
+  }
+}
