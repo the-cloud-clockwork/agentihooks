@@ -102,8 +102,14 @@ def test_a_remote_claude_worker_is_seen_live_from_its_hive_report(remote):
 
 def test_the_tick_records_a_remote_conversation_when_the_local_listing_fails(remote):
     from scripts.swarm import tick
+    from scripts.swarm.store import AgentRecord
 
-    local = replace(remote.agent, name="engineer@a1b2c3-0009", runtime_target={}, conversation_id="kept")
+    local = remote.store.start_execution(
+        "fixture",
+        AgentRecord(
+            "engineer@a1b2c3-0009", "eng", "other", pane_id="w1:p9", seat="eng-2@fixture", conversation_id="kept"
+        ),
+    )
     remote.store.put_agent("fixture", local)
     _publish(remote)
     assert remote.runtime.conversations() is None
