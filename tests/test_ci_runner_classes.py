@@ -137,6 +137,11 @@ def test_repository_jobs_all_carry_a_runner_class():
     assert ci_runner_classes.main(["--root", str(ROOT)]) == 0
 
 
+def test_the_root_defaults_to_the_working_directory(monkeypatch):
+    monkeypatch.chdir(ROOT)
+    assert ci_runner_classes.main([]) == 0
+
+
 def test_table_is_sorted_json_kept_under_github(tmp_path, capsys):
     table = json.loads((ROOT / ci_runner_classes.TABLE).read_text())
     assert list(table) == sorted(table)

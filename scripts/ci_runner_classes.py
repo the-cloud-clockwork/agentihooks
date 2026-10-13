@@ -38,7 +38,7 @@ def check(workflows: dict[str, dict], table: dict[str, str], policy: dict) -> li
         f"{file}/{name}: runner classes cannot resolve local workflow {job['uses']}"
         for file, workflow in workflows.items()
         for name, job in (workflow.get("jobs") or {}).items()
-        if str(job.get("uses", "")).startswith("./.github/workflows/") and Path(job["uses"]).name not in workflows
+        if str(job.get("uses")).startswith("./.github/workflows/") and Path(job["uses"]).name not in workflows
     ]
     jobs = {
         f"{file}/{name}": job
