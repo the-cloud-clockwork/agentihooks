@@ -1,0 +1,6 @@
+{
+  "scripts/ci_runner_trust.py:scripts.ci_runner_trust.x_check__mutmut_25:d11f9647c27d5ad8b6bac3c1d14dc38513395425068e4f45f23f2409bd72b255": {
+    "reader": "standards_reader",
+    "reason": "Diagnostic only: changing the loader problem text by adding XX decoration still appends exactly one problem for the same loader mismatch. Loader rejection, full problem count, remaining workflow checks and red exit status are unchanged, and the fault identity and explanation remain present."
+  }
+}
