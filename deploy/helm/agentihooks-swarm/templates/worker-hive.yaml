@@ -1,0 +1,112 @@
+{{- if gt (int .Values.workers.replicas) 0 }}
+{{- $workers := .Values.workers }}
+{{- $credential := $workers.credentialSecret }}
+{{- $code := $workers.joinCodeSecret }}
+{{- if eq (empty $credential.name) (empty $code.name) }}
+{{- fail "workers need a credentialSecret or joinCodeSecret, exactly one" }}
+{{- end }}
+{{- if and $code.name (ne (int $workers.replicas) 1) }}
+{{- fail "one time join codes require workers.replicas=1; use a member credential to scale" }}
+{{- end }}
+{{- if lt (int $workers.maxAgents) 1 }}
+{{- fail "workers.maxAgents must be positive" }}
+{{- end }}
+{{- $secret := $credential }}
+{{- $path := "credential" }}
+{{- if $code.name }}
+{{- $secret = $code }}
+{{- $path = "code" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "swarm.fullname" . }}-worker-hive
+  labels:
+    {{- include "swarm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker-hive
+spec:
+  replicas: {{ $workers.replicas }}
+  selector:
+    matchLabels:
+      {{- include "swarm.selector" (dict "root" . "component" "worker-hive") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "swarm.labels" . | nindent 8 }}
+        app.kubernetes.io/component: worker-hive
+    spec:
+      {{- include "swarm.podSecurity" . | nindent 6 }}
+      containers:
+        - name: worker-hive
+          image: {{ include "swarm.image" (dict "Values" (dict "image" $workers.image)) }}
+          imagePullPolicy: {{ $workers.image.pullPolicy }}
+          {{- include "swarm.containerSecurity" . | nindent 10 }}
+          env:
+            - name: SWARM_HIVE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: AGENTIHOOKS_DEPLOYMENT
+              value: {{ .Values.deployment | quote }}
+            - name: HIVE_ROLES
+              value: {{ join "," $workers.roles | quote }}
+            - name: HIVE_MAX_AGENTS
+              value: {{ $workers.maxAgents | quote }}
+            - name: HIVE_REPOSITORIES
+              value: {{ $workers.repositories | toJson | quote }}
+            {{- if $credential.name }}
+            - name: HIVE_CREDENTIAL_FILE
+              value: /run/hive-join/credential
+            {{- else }}
+            - name: HIVE_JOIN_URL
+              value: {{ required "workers.joinUrl is required with a join code" $workers.joinUrl | quote }}
+            - name: HIVE_JOIN_CODE_FILE
+              value: /run/hive-join/code
+            {{- end }}
+            {{- if $workers.caSecret.name }}
+            - name: SSL_CERT_FILE
+              value: /run/hive-ca/ca.pem
+            {{- end }}
+          {{- with $workers.envFromSecrets }}
+          envFrom:
+            {{- range . }}
+            - secretRef:
+                name: {{ . }}
+            {{- end }}
+          {{- end }}
+          volumeMounts:
+            - name: join
+              mountPath: /run/hive-join
+              readOnly: true
+            - name: home
+              mountPath: /home/worker
+            - name: tmp
+              mountPath: /tmp
+            {{- if $workers.caSecret.name }}
+            - name: ca
+              mountPath: /run/hive-ca
+              readOnly: true
+            {{- end }}
+          resources:
+            {{- toYaml $workers.resources | nindent 12 }}
+      volumes:
+        - name: join
+          secret:
+            secretName: {{ $secret.name }}
+            defaultMode: 0440
+            items:
+              - key: {{ required "worker join Secret key is required" $secret.key }}
+                path: {{ $path }}
+        - name: home
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        {{- if $workers.caSecret.name }}
+        - name: ca
+          secret:
+            secretName: {{ $workers.caSecret.name }}
+            items:
+              - key: {{ required "workers.caSecret.key is required" $workers.caSecret.key }}
+                path: ca.pem
+        {{- end }}
+{{- end }}
