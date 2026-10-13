@@ -222,6 +222,7 @@ def test_containerd_store_exports_worker_layers_uncompressed(tmp_path, proof, dr
     [
         ("startup", "scan", 17),
         ("rebuild", "scan", 17),
+        ("startup", "prefetch", 21),
         ("rebuild", "prefetch", 21),
         ("profiles", "prefetch", 21),
         ("profiles", "profile", 18),

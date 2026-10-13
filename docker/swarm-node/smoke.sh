@@ -24,7 +24,7 @@ reports={name:json.loads((output/proof/f'{name}.json').read_text()) for proof,na
     ('startup','first'),('startup','second'),('startup','rollback'),('rebuild','rebuild'),('profiles','profiles'))}
 first=reports['first']
 shared={'package':'SV2-IMG-01','fixture':fixtures['startup'],'leg_fixtures':fixtures,'tested_commit':revision,'mocked':False,'startup_network':'none','lock_sha256':first['manifest']['declared']['lock_sha256']}
-(output/'c-result.json').write_text(json.dumps(shared|{'uncached_rebuild_inventory_equal':reports['rebuild']==first,'retained_image_started_after_rejected_builds':reports['rollback']==first,'worker_image_build_validation_failures':0},indent=2)+'\n')
+(output/'c-result.json').write_text(json.dumps(shared|{'uncached_rebuild_inventory_equal':reports['rebuild']==first,'retained_image_started_after_rejected_builds':reports['rollback']==first,'worker_image_build_validation_failures':first['worker_image_build_validation_failures']},indent=2)+'\n')
 assert all(report==first for report in reports.values()), 'independent worker inventories differ'
 assert first['manifest']['source_revision']==revision
 assert first['worker_image_build_validation_failures']==0
