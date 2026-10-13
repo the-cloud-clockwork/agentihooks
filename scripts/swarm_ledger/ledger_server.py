@@ -774,6 +774,7 @@ class Handler(BaseHTTPRequestHandler):
         }
         return self.send(200, json.dumps(reply, ensure_ascii=False), "application/json")
 
+    @request_metrics.measured
     def do_OPTIONS(self):
         self.send_response(204)
         if self.headers.get("Origin") == FILE_ORIGIN:
@@ -786,6 +787,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Access-Control-Allow-Private-Network", "true")
         self.end_headers()
 
+    @request_metrics.measured
     @request_metrics.endpoint
     def do_GET(self):
         if self.path.startswith("/api/v1/"):

@@ -19,6 +19,9 @@ SAMPLES = deque(maxlen=MAX_SAMPLES)
 GUARD = threading.Lock()
 
 
+from urllib.parse import parse_qs, urlsplit
+
+
 @dataclass
 class Timing:
     lock_wait: float = 0.0
@@ -119,7 +122,18 @@ def endpoint(method):
             return method(handler)
         if handler.refused():
             return None
-        return handler.send(200, json.dumps(report(24.0)), "application/json")
+        try:
+            query = parse_qs(urlsplit(handler.path).query, keep_blank_values=True)
+            hours = float(query.get("hours", ["24"])[0])
+            if not math.isfinite(hours) or not 0 < hours <= RETENTION_SECONDS / 3600:
+                raise ValueError
+        except ValueError:
+            return handler.send(
+                400,
+                json.dumps({"error": {"code": "invalid_window", "message": "hours out of range"}}),
+                "application/json",
+            )
+        return handler.send(200, json.dumps(report(hours)), "application/json")
 
     return request
 
