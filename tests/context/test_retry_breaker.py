@@ -618,15 +618,17 @@ class TestOnlyExitStatusCounts:
         state, _ = self._record({"exitCode": 0, "stdout": "ok"}, "exit-empty-error", error="")
         assert state["count"] == 0
 
-    def test_a_tool_other_than_the_shell_keeps_its_text_detection(self):
+    def test_a_tool_other_than_the_shell_is_judged_only_by_its_status_fields(self):
         from hooks.context.retry_breaker import _get_state, on_post_tool_result
 
         payload = {
             "tool_name": "Grep",
             "tool_input": {"pattern": "x"},
-            "tool_response": "Error: ENOENT: no such file or directory",
-            "session_id": "grep-fail",
+            "tool_response": "Exit code: 1\nOutput:\nError: ENOENT: no such file or directory",
+            "session_id": "grep-text",
         }
         on_post_tool_result(payload)
         on_post_tool_result(payload)
-        assert _get_state("grep-fail", "grep")["count"] == 2
+        assert _get_state("grep-text", "grep")["count"] == 0
+        on_post_tool_result({**payload, "tool_response": {"is_error": True, "content": "ENOENT"}})
+        assert _get_state("grep-text", "grep")["count"] == 1
