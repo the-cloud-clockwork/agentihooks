@@ -191,12 +191,16 @@ def _reopen(watch, mail, task, case, minutes, limit):
     return _alert(watch, mail, task, case, minutes, REOPENED, limit)
 
 
+def _earlier(inbox, raw):
+    if not raw:
+        return []
+    item = json.loads(raw)["item"]
+    return [item] if _open(inbox, item) else []
+
+
 def _alert(watch, mail, task, case, minutes, action, limit):
     tid, wait, inbox = task["id"], 2 * getattr(limit, case), mail.inbox
-    raw = watch.store.redis.hget(_key(watch, ALERTS), tid)
-    earlier = json.loads(raw)["item"] if raw else ""
-    if earlier and not _open(inbox, earlier):
-        earlier = ""
+    earlier = _earlier(inbox, watch.store.redis.hget(_key(watch, ALERTS), tid))
     if earlier and action == ALERTED:
         return []
     row = {
@@ -215,8 +219,8 @@ def _alert(watch, mail, task, case, minutes, action, limit):
     )
     row["item"] = inbox.send(SENDER, address, text, ref=f"{watch.slug}:stall:{tid}").id
     watch.store.redis.hset(_key(watch, ALERTS), tid, json.dumps(row))
-    if earlier:
-        inbox.close(earlier, SENDER, DONE, f"superseded by a new stall alert on task {tid}")
+    for item in earlier:
+        inbox.close(item, SENDER, DONE, f"superseded by a new stall alert on task {tid}")
     return [f"stall: task {tid} {CASES[case]} for {minutes} minutes, {action}; told {address}"]
 
 
