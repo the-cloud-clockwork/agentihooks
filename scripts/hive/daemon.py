@@ -17,12 +17,16 @@ from scripts.swarm.commands import hive_id
 if TYPE_CHECKING:
     from redis import Redis
 
+    from scripts.swarm.runtime import HerdrRuntime
+
 BEAT_SECONDS = 15
 TTL_SECONDS = BEAT_SECONDS * 3
 UNIT = "agentihooks-hive.service"
 
 
 def beat(redis: "Redis", local_id: str) -> None:
+    from scripts.hive import reports
+    from scripts.hive.orders import Consumer
     from scripts.routing.reservation import LaunchSlots
 
     processes = account_sessions.local_processes()
@@ -42,9 +46,11 @@ def beat(redis: "Redis", local_id: str) -> None:
             pipe.set(f"{key}:{field}", json.dumps(report[field]), ex=TTL_SECONDS)
         pipe.execute()
     LaunchSlots(redis).refresh([execution for ids in executions.values() for execution in ids])
-    from scripts.hive.orders import Consumer
-
-    Consumer.local(redis, local_id).poll()
+    consumer = Consumer.local(redis, local_id)
+    consumer.poll()
+    consumer.poll_commands()
+    hosted = execution_report(redis, local_id, consumer.runtime.herdr)
+    redis.set(reports.key(local_id), json.dumps(hosted), ex=TTL_SECONDS)
 
 
 def run(redis: "Redis") -> None:
@@ -250,3 +256,32 @@ def _executions(redis: "Redis", local_id: str, processes: dict[str, dict[int, st
             counted.add(identity)
             found.setdefault(f"{record.harness}:{agent.account}", []).append(record.execution_id)
     return found
+
+
+def execution_report(redis: "Redis", local_id: str, herdr: "HerdrRuntime") -> dict:
+    from dataclasses import asdict
+
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(redis)
+    hosted = [
+        (slug, agent)
+        for slug in store.slugs()
+        for agent in store.agents(slug)
+        if agent.execution_id and agent.runtime_target.get("host_id") == local_id
+    ]
+    report = {"names": sorted(herdr.live_names()), "panes": {}, "executions": {}}
+    if not hosted:
+        return report
+    facts = herdr.bindings([agent for _, agent in hosted])
+    report["panes"] = herdr.conversations() or {}
+    for slug, agent in hosted:
+        report["executions"][agent.execution_id] = {
+            "slug": slug,
+            "name": agent.name,
+            "generation": agent.generation,
+            "reported": herdr.reported(agent),
+            "binding": facts.get(agent.name),
+            "pane": asdict(herdr.observe(agent)),
+        }
+    return report
