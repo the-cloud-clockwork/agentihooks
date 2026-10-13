@@ -102,7 +102,10 @@ def _names_folder(text: str, root: Path) -> bool:
     if FOLDER.search(text) or ("/artifacts/" in GITHUB.sub("", text) and "$" in text):
         return True
     for token in text.split():
-        path = Path(os.path.expandvars(token)).expanduser()
+        try:
+            path = Path(os.path.expandvars(token)).expanduser()
+        except RuntimeError:
+            continue
         if path == root or path.name == root.name:
             return True
         if path.is_relative_to(root) and any(char in token for char in "*?["):
