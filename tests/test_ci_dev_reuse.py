@@ -153,9 +153,10 @@ def test_cli_publishes_empty_source_on_mismatch(tmp_path, monkeypatch):
 def test_cli_publishes_passed_source(tmp_path, monkeypatch):
     evidence(tmp_path)
     output = tmp_path / "outputs"
+    output.write_text("existing=kept\n")
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     assert ci_dev_reuse.main(["--head", HEAD, "--repository", REPOSITORY, "--evidence", str(tmp_path)]) == 0
-    assert output.read_text() == "source=123\n"
+    assert output.read_text() == "existing=kept\nsource=123\n"
 
 
 def source_evidence(tmp_path, queue, record, folder):
@@ -252,6 +253,8 @@ def test_unusable_newest_candidate_does_not_hide_a_passed_candidate(tmp_path, mi
             attest(folder, record, source="999")
         elif mismatch == "source_event":
             source["event"] = "push"
+            source_record["event"] = "push"
+            attest(source_folder, source_record)
             (folder / "source.json").write_text(json.dumps(source))
         elif mismatch == "source_tree":
             source_record["tree"] = "d" * 40
@@ -295,3 +298,19 @@ def test_rejection_log_names_the_run_and_cause(tmp_path, capsys):
     (folder / "reuse.log").write_text("")
     assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) is None
     assert capsys.readouterr().out == "No dev unit reuse from run 123: unauthenticated provenance\n"
+
+
+@pytest.mark.parametrize("missing", ["--head", "--repository", "--evidence"])
+def test_cli_requires_all_metadata_inputs(tmp_path, missing):
+    values = {"--head": HEAD, "--repository": REPOSITORY, "--evidence": str(tmp_path)}
+    argv = [value for key, value in values.items() if key != missing for value in (key, value)]
+    with pytest.raises(SystemExit) as error:
+        ci_dev_reuse.main(argv)
+    assert error.value.code == 2
+
+
+def test_cli_without_an_output_file_reports_the_source(tmp_path, monkeypatch, capsys):
+    evidence(tmp_path)
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    assert ci_dev_reuse.main(["--head", HEAD, "--repository", REPOSITORY, "--evidence", str(tmp_path)]) == 0
+    assert capsys.readouterr().out == f"Reusing unit artifacts from passed queue evidence on {HEAD}: run 123\n"
