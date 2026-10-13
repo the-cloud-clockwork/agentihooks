@@ -1,6 +1,8 @@
 name: Weekly runner access audit
 
 on:
+  push:
+    branches: [dev]
   schedule:
     - cron: '17 7 * * 1'
   workflow_dispatch:

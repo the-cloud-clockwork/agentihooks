@@ -122,6 +122,7 @@ def test_weekly_job_reads_dev_and_alerts_through_notifications():
     workflow = yaml.safe_load((root / ".github/workflows/access-audit.yml").read_text())
     events = workflow.get("on", workflow.get(True))
     assert "schedule" in events and "workflow_dispatch" in events
+    assert events["push"] == {"branches": ["dev"]}
     job = workflow["jobs"]["audit"]
     assert job["runs-on"] == pool("anton-oss-light")
     checkout = next(step for step in job["steps"] if step.get("uses", "").startswith("actions/checkout@"))
