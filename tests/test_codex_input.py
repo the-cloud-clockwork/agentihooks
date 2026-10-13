@@ -123,6 +123,17 @@ def test_bracketed_paste_preserves_mouse_text_and_control_bytes():
         assert framer.feed(b"\x1b[<35;100;30Mafter") == b"after"
 
 
+def test_delayed_paste_terminator_does_not_expire_as_an_escape_key(monkeypatch):
+    now = [0.0]
+    monkeypatch.setattr(codex_input.time, "monotonic", lambda: now[0])
+    framer = codex_input.InputFramer()
+    assert framer.feed(b"\x1b[200~body\x1b") == b"\x1b[200~body"
+    now[0] = 100.0
+    assert framer.expire_escape() == b""
+    assert framer.feed(b"[201~after") == b"\x1b[201~after"
+    assert framer.feed(b"\x1b[MCd2") == b""
+
+
 def test_app_server_launch_has_no_terminal_guard(tmp_path):
     spec = init_agent.AgentSpec(agent="codex", transport=init_agent.APP_SERVER)
     plain = init_agent._agent_command(spec, tmp_path / "route", "probe", [], {}, tmp_path)

@@ -24,7 +24,7 @@ class InputFramer:
         return b"".join(self._consume(value) for value in data)
 
     def expire_escape(self) -> bytes:
-        if self.pending == b"\x1b" and time.monotonic() - self.escape_at >= ESCAPE_WAIT_S:
+        if not self.paste and self.pending == b"\x1b" and time.monotonic() - self.escape_at >= ESCAPE_WAIT_S:
             self.pending.clear()
             return self.escape_key
         return b""
