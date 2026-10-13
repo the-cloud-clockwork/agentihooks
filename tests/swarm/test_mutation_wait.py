@@ -132,7 +132,8 @@ def test_the_tick_ends_a_clean_preflight_once(tick, preflight):  # noqa: F811
     ]
 
 
-def test_the_tick_reports_an_open_pull_request_skip_with_its_run(tick, preflight, pauses):  # noqa: F811
+@pytest.fixture
+def open_pr(preflight):
     preflight.missing = True
     preflight.jobs = [
         {
@@ -151,6 +152,10 @@ def test_the_tick_reports_an_open_pull_request_skip_with_its_run(tick, preflight
             "pull_requests": [{"base": {"ref": "dev"}}],
         },
     ]
+    return preflight
+
+
+def test_the_tick_reports_an_open_pull_request_skip_with_its_run(tick, open_pr, pauses):  # noqa: F811
     held = {**waits.on("mutation", URL), "head": "first"}
     idle.declare_wait(tick.store.redis, "sw", ME, 10_000_000, "", 1, on=held)
     assert tick.end() == [
@@ -160,6 +165,33 @@ def test_the_tick_reports_an_open_pull_request_skip_with_its_run(tick, preflight
     assert idle.wait(tick.store.redis, "sw", ME) is None
     assert len(tick.told()) == 1
     assert tick.end() == []
+    assert pauses == []
+
+
+@pytest.mark.parametrize(
+    ("section", "field", "value"),
+    [
+        ("run", "path", ".github/workflows/proofs.yml"),
+        ("run", "conclusion", "failure"),
+        ("job", "name", "plan"),
+        ("job", "conclusion", "failure"),
+        ("step", "name", "another step"),
+        ("step", "conclusion", "success"),
+    ],
+)
+def test_missing_evidence_without_the_successful_branch_skip_stays_red(open_pr, section, field, value):
+    targets = {"run": open_pr.run, "job": open_pr.jobs[0], "step": open_pr.jobs[0]["steps"][0]}
+    targets[section][field] = value
+    if field == "path":
+        open_pr.run["event"] = "workflow_dispatch"
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert "now red; complete mutation report unavailable" in waits.resolution(held, {}, None, None, None, False)
+
+
+def test_a_skip_waits_until_its_matching_pull_request_run_is_visible(open_pr, pauses):
+    open_pr.pr_runs = open_pr.pr_runs[:2]
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert waits.resolution(held, {}, None, None, None, False) == ""
     assert pauses == []
 
 

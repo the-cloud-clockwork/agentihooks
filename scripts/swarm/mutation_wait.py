@@ -140,7 +140,7 @@ def _skip(target, run):
             pr["base"]["ref"] == "dev" for pr in candidate["pull_requests"]
         ):
             raise Skipped(candidate["html_url"])
-    raise Unreachable("the open pull request run is not available yet")
+    raise Unreachable
 
 
 def _fetch(target, run):
