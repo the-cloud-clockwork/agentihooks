@@ -49,7 +49,7 @@ PULL_QUERY = (
     'file(path:".github/workflows"){object{...on Tree{entries{object{...on Blob{text}}}}}} '
     "statusCheckRollup{contexts(first:100){"
     "nodes{...on CheckRun{name conclusion completedAt} ...on StatusContext{context state createdAt}} "
-    "pageInfo{hasNextPage}}} checkSuites(first:100){nodes{status workflowRun{databaseId createdAt}} "
+    "pageInfo{hasNextPage}}} checkSuites(first:100){nodes{status conclusion workflowRun{databaseId createdAt}} "
     "pageInfo{hasNextPage}}}}}}}}"
 )
 
@@ -69,6 +69,7 @@ class PullRequest:
     gate_passed: bool = False
     mergeable: str = ""
     draft: bool = False
+    latest_run_cancelled: bool = False
 
 
 def iso_ms(text):
@@ -111,7 +112,14 @@ def pull_request(raw):
         bool(raw.get("gated")) and set(_gate(checks, results)) == {"SUCCESS"},
         raw.get("mergeable") or "",
         bool(raw.get("isDraft")),
+        _latest_run_cancelled(suites),
     )
+
+
+def _latest_run_cancelled(suites):
+    runs = [suite for suite in suites if (suite.get("workflowRun") or {}).get("createdAt")]
+    latest = max(runs, key=lambda suite: suite["workflowRun"]["createdAt"], default={})
+    return latest.get("conclusion") == "CANCELLED"
 
 
 def red_window(pushed_at, red_at, now_ms):
