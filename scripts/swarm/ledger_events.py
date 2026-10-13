@@ -43,7 +43,8 @@ GATE = "Gate — Required"
 RED_NOTICE = re.compile(r"^Your pull request (\S+) for .* has red checks and no push for twenty minutes\.")
 GATE_JOB = re.compile(rf"^[ \t]+name:[ \t]*(['\"]?){re.escape(GATE)}\1[ \t]*$", re.MULTILINE)
 PULL_QUERY = (
-    "query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid mergeable mergeQueueEntry{id state} "
+    "query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid mergeQueueEntry{id state} "
+    "mergeable isDraft "
     "commits(last:1){nodes{commit{committedDate "
     'file(path:".github/workflows"){object{...on Tree{entries{object{...on Blob{text}}}}}} '
     "statusCheckRollup{contexts(first:100){"
@@ -67,6 +68,8 @@ class PullRequest:
     queued: bool = False
     gate_passed: bool = False
     merge_problem: str = ""
+    mergeable: str = ""
+    draft: bool = False
 
 
 def iso_ms(text):
@@ -112,6 +115,8 @@ def pull_request(raw):
         else "is marked unmergeable by GitHub"
         if (raw.get("mergeQueueEntry") or {}).get("state") == "UNMERGEABLE"
         else "",
+        raw.get("mergeable") or "",
+        bool(raw.get("isDraft")),
     )
 
 
@@ -409,7 +414,7 @@ def _settled(found):
 def findings_pass(inbox, store, slug, shown, doc=None):
     mail, sent = Mail(inbox, store, slug, doc), []
     for found in shown:
-        if found["kind"] == "spawn stall" or found["kind"] in outage.HELD.values():
+        if found["kind"] in ("spawn stall", "stall") or found["kind"] in outage.HELD.values():
             continue
         judged = (found.get("verdict") or {}).get("at", 0)
         text = (
