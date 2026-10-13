@@ -1,9 +1,10 @@
 from scripts.inbox.seats import is_seat
+from scripts.inbox.store import InboxStore
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import FINISHED, RedisStore, SwarmError
 
 
-def empty_seat(inbox, sender: str, address: str) -> dict:
+def empty_seat(inbox: InboxStore, sender: str, address: str) -> dict:
     address = inbox.names.resolve(address)
     if not is_seat(address):
         return {}
