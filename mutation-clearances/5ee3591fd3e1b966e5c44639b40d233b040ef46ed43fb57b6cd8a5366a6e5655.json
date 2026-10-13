@@ -1,0 +1,6 @@
+{
+  "scripts/ci_access_audit.py:scripts.ci_access_audit.x_inventory__mutmut_37:aed3f5b7ed460cf3368a9f1af266072d947a36f3670b7f45640b701a8d9c6e18": {
+    "reader": "standards_reader",
+    "reason": "Diagnostic only: the installation total mismatch still raises ValueError; audit main catches it and emits the same generic failure report, alert and nonzero status. The added message decoration does not change the completeness check."
+  }
+}
