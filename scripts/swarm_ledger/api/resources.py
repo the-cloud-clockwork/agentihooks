@@ -80,6 +80,8 @@ COLLECTIONS = (
     "sources",
     "alerts",
     "freezes",
+    "plans",
+    "slices",
 )
 THREADS = {
     "tasks": ("comments",),
