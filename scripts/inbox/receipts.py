@@ -57,6 +57,7 @@ class Receipts:
     def __init__(self, store):
         self.store = store
         self.redis = store.redis
+        self.authority = None
 
     def key(self, *parts):
         return self.store.key(*parts)
@@ -140,6 +141,8 @@ class Receipts:
         return moved
 
     def _open(self, pipe, delivery_id, owner, before):
+        if self.authority is not None:
+            self.authority(pipe)
         key = self.key("delivery", delivery_id)
         pipe.watch(key)
         delivery = _delivery(pipe.hgetall(key), delivery_id)
