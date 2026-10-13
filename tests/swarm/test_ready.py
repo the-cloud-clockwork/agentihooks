@@ -687,6 +687,47 @@ def test_a_dequeue_that_does_not_finish_keeps_the_task_for_the_next_tick(merging
     assert merging.run(NOW + 120_000)[0] == f"task t1 reopened, {URL} is marked unmergeable by GitHub"
 
 
+def test_a_merge_racing_the_dequeue_is_confirmed_before_the_task_finishes(merging):
+    from scripts.swarm.ledger_events import pull_request
+
+    queued_at_now(merging)
+    merging.pulls[URL] = pull_request({"state": "OPEN", "mergeQueueEntry": {"id": "entry", "state": "UNMERGEABLE"}})
+    merging.queue.extra = {"state": "MERGED", "queued": False}
+    assert merging.run(NOW + 60_000) == [f"dequeue of {URL} for task t1 awaits confirmation"]
+    assert merging.rows["t1"]["state"] == "pr"
+    assert merging.ledger.comments == []
+    merging.pulls[URL] = MERGED
+    assert merging.run(NOW + 120_000)[0] == f"task t1 finished with merged pull request {URL}"
+    assert merging.rows["t1"]["state"] == "done"
+
+
+@pytest.mark.parametrize("entry_state", ["QUEUED", "AWAITING_CHECKS", "MERGEABLE", "LOCKED", None])
+@pytest.mark.parametrize("released", [True, False])
+def test_a_queue_entry_without_a_known_merge_problem_keeps_its_place(merging, entry_state, released):
+    from scripts.swarm.ledger_events import pull_request
+
+    queued_at_now(merging)
+    if not released:
+        merging.rows["t1"]["awaiting"] = ""
+    merging.pulls[URL] = pull_request(
+        {"state": "OPEN", "mergeable": "UNKNOWN", "mergeQueueEntry": {"id": "entry", "state": entry_state}}
+    )
+    assert merging.run(NOW + 60_000) == []
+    assert merging.rows["t1"]["state"] == "pr"
+    assert merging.rows["t1"]["claimed_by"] == AGENT
+    assert merging.queued == [("queue", URL)]
+    assert merging.ledger.comments == []
+
+
+def test_an_unreleased_task_is_preserved_when_github_cannot_answer(merging):
+    merging.rows["t1"]["awaiting"] = ""
+    merging.pulls[URL] = None
+    assert merging.run() == []
+    assert merging.rows["t1"]["state"] == "pr"
+    assert merging.rows["t1"]["claimed_by"] == AGENT
+    assert merging.queued == []
+
+
 def test_a_fresh_queue_entry_not_yet_listed_holds_until_its_grace_runs_out(merging):
     queued_at_now(merging)
     assert merging.run(NOW + waits.FRESH_MS - 1) == []
