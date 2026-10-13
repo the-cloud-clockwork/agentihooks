@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from pathlib import Path
 
@@ -187,9 +188,17 @@ def test_boolean_offset_or_limit_refused(ledger):
     assert check(read(stored(ledger), offset=45, limit=True), env(ledger))
 
 
-def test_errors_while_deciding_refuse(ledger):
-    assert check(bash(f"cat ~nosuchuser/x {PLAN}"), env(ledger))
-    assert check(read(["x", PLAN], offset=45, limit=5), env(ledger))
+def test_bad_read_input_fails_open_and_logs(ledger, tmp_path, monkeypatch):
+    from hooks import common
+
+    log_file = tmp_path / "guard.log"
+    monkeypatch.setattr(common, "LOG_FILE", str(log_file))
+    monkeypatch.setattr(common, "LOG_ENABLED", True)
+    assert check(read(["x", PLAN], offset=45, limit=5), env(ledger)) is None
+    entry = json.loads(log_file.read_text())
+    assert entry["message"] == "plan_read_guard failed"
+    assert "str" in entry["payload"]["error"]
+    assert set(entry["payload"]) == {"error"}
 
 
 @pytest.mark.parametrize("lane", ["eng", "ci"])
