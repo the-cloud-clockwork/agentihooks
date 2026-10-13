@@ -281,3 +281,55 @@ def test_parallel_worker_reports_require_equal_inventories_and_all_proofs(tmp_pa
         assert recovery["uncached_rebuild_inventory_equal"] is True
         assert recovery["retained_image_started_after_rejected_builds"] is True
         assert "retained_previous_image_started" not in recovery
+
+
+HEALTH_PYTHON = f"""#!{sys.executable}
+import os, subprocess, sys, time
+from pathlib import Path
+if sys.argv[1] == '-c':
+    sys.exit(subprocess.run([{sys.executable!r}, *sys.argv[1:]]).returncode)
+state = Path(os.environ['STATE'])
+name = Path(sys.argv[1]).stem
+other = 'entrypoint_proof' if name == 'health_proof' else 'health_proof'
+(state / f'{{name}}-started').touch()
+deadline = time.monotonic() + 3
+while not (state / f'{{other}}-started').exists():
+    if time.monotonic() >= deadline:
+        sys.exit(41)
+    time.sleep(0.01)
+print(f'{{name}} ran')
+sys.exit(int(os.environ.get(name.upper(), '0')))
+"""
+
+
+@pytest.mark.parametrize("failure", ["", "HEALTH_PROOF", "ENTRYPOINT_PROOF"])
+def test_health_and_entrypoint_proofs_overlap_and_either_failure_stays_red(tmp_path, failure):
+    state = tmp_path / "state"
+    state.mkdir()
+    commands = tmp_path / "bin"
+    commands.mkdir()
+    (commands / "docker").write_text('#!/usr/bin/env bash\nif [[ "${!#}" == - ]]; then cat > /dev/null; fi\n')
+    (commands / "python").write_text(HEALTH_PYTHON)
+    for name in ("docker", "python"):
+        (commands / name).chmod(0o755)
+    env = (
+        {key: value for key, value in os.environ.items() if key != "WORKER_BASE_CONTEXT"}
+        | {
+            "PATH": f"{commands}:{os.environ['PATH']}",
+            "STATE": str(state),
+            "SWARM_PROOF_PYTHON": str(commands / "python"),
+        }
+        | ({failure: "23"} if failure else {})
+    )
+    done = subprocess.run(
+        ["bash", str(ROOT / "tests/integration/swarm_node/run_health_proof.sh"), str(tmp_path / "out")],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+        timeout=15,
+    )
+    assert done.returncode == (23 if failure else 0), done.stderr
+    assert "health_proof ran" in done.stdout
+    assert "entrypoint_proof ran" in done.stdout
