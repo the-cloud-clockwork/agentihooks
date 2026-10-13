@@ -92,7 +92,13 @@ def test_serve_runs_the_ledger_watch_on_a_daemon_thread(monkeypatch, tmp_path):
             pass
 
     class Server:
-        def __init__(self, address, handler_class):
+        def __init__(self, address, handler_class, bind_and_activate=True):
+            pass
+
+        def server_bind(self):
+            pass
+
+        def server_activate(self):
             pass
 
         def serve_forever(self):

@@ -1109,7 +1109,10 @@ def serve():
         sys.exit(str(conflict))
     legacy.adopt(stored)
     threading.Thread(target=watch_ledgers, daemon=True).start()
-    server = ThreadingHTTPServer((HOST, PORT), Handler)
+    server = ThreadingHTTPServer((HOST, PORT), Handler, bind_and_activate=False)
+    server.request_queue_size = 128
+    server.server_bind()
+    server.server_activate()
     stopped = server_lifetime.watch(server, core.LEDGER_DIR, PORT)
     server_code.record(PIDFILE.parent, os.getpid(), LOADED_STAMP)
     PIDFILE.write_text(str(os.getpid()))
