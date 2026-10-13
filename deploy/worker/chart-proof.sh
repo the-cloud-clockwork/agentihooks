@@ -37,4 +37,17 @@ if helm template proof "$chart" --set workers.replicas=2 --set workers.joinUrl=h
   exit 1
 fi
 grep -q 'one time join codes require workers.replicas=1' "$out/reused.err"
+helm template proof "$chart" --set workers.replicas=1 --set workers.joinUrl=https://join.example.test \
+  --set workers.joinCodeSecret.name=code --set workers.joinCodeSecret.key=code > "$out/joined.yaml"
+python3 - "$out/joined.yaml" <<'PY'
+import sys, yaml
+
+objects = list(yaml.safe_load_all(open(sys.argv[1])))
+worker = next(o for o in objects if o and o.get('kind') == 'Deployment' and o['metadata']['name'].endswith('-worker-hive'))
+assert worker['spec']['strategy']['type'] == 'Recreate'
+home = next(v for v in worker['spec']['template']['spec']['volumes'] if v['name'] == 'home')
+assert 'persistentVolumeClaim' in home, 'joined membership must survive pod replacement'
+assert any(o and o.get('kind') == 'PersistentVolumeClaim' and o['metadata']['name'] == home['persistentVolumeClaim']['claimName'] for o in objects)
+print('one time membership survives pod replacement: passed')
+PY
 echo 'missing and reused join material: refused'
