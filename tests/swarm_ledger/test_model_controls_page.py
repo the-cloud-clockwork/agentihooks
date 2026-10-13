@@ -129,3 +129,23 @@ def test_the_panel_shows_the_stored_config_once_the_acknowledging_tick_published
     expect(page.tab.locator("#cap-ci")).to_have_value("1")
     expect(page.tab.locator("#cap-claude_model")).to_have_value("opus")
     expect(page.tab.get_by_role("button", name="Apply capacity")).to_be_disabled()
+
+
+def test_the_panel_keeps_the_sent_values_until_the_acknowledging_tick_published(open_page):
+    page = model_page(open_page)
+    page.payload["last_tick"] = 1000
+    page.payload["commands"] = [
+        {
+            "id": "new",
+            "command": "swarm",
+            "argv": ["set", "effort-max=xhigh"],
+            "state": "acknowledged",
+            "acknowledged_at": 2000,
+        },
+    ]
+    apply_effort_ci_and_model(page)
+    page.tab.wait_for_timeout(500)
+    expect(page.tab.locator("#cap-effort_max")).to_have_value("xhigh")
+    expect(page.tab.locator("#cap-ci")).to_have_value("2")
+    expect(page.tab.locator("#cap-claude_model")).to_have_value("future-claude")
+    expect(page.tab.get_by_role("button", name="Apply capacity")).to_be_disabled()
