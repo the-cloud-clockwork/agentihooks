@@ -41,3 +41,14 @@ def test_dispatch_hands_only_the_gate_parts_of_the_bound_ledger_to_the_handler(f
     assert [(state["tasks"], state["_meta"]["members"], "overview" in state) for state in seen] == [
         ([{"id": "t1"}], members, False)
     ]
+
+
+def test_dispatch_skips_the_handler_once_every_phase_of_the_bound_ledger_is_done(folder, monkeypatch):
+    doc = {"title": "Demo", "phases": [{"id": "p1", "done": True}], "_meta": {"members": {NAME: {"role": "member"}}}}
+    legacy_page.store(folder, "demo", doc)
+    (folder / ".sessions").mkdir()
+    ledger_hook.write_session(folder / ".sessions" / "s1.json", ledger_hook.new_session("demo", NAME, "member"))
+    seen = []
+    monkeypatch.setitem(ledger_hook.HANDLERS, "Stop", lambda payload, session, state, sfile: seen.append(state))
+    ledger_hook.dispatch({"session_id": "s1", "hook_event_name": "Stop"})
+    assert seen == []
