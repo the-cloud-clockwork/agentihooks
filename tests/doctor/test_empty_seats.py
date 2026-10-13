@@ -53,11 +53,13 @@ def test_a_departed_occupant_is_empty_even_when_its_agent_record_still_says_work
         ("running", 0, "ci-1@demo"),
         ("running", 1, "ci-2@demo"),
         ("stopped", 1, "master@demo"),
+        ("stopped", 1, "ci-1@demo@partition"),
     ],
 )
 def test_a_seat_with_no_possible_successor_keeps_unread_delivery(state, cap, address):
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    store.create(SwarmConfig("demo", "/r", 1, cap, state=state))
+    slug = address.partition("@")[2]
+    store.create(SwarmConfig(slug, "/r", 1, cap, state=state))
     box = InboxStore(store.redis)
     row = {
         "id": "closed-swarm",
@@ -68,7 +70,7 @@ def test_a_seat_with_no_possible_successor_keeps_unread_delivery(state, cap, add
         "created_at": 0,
         "history": [],
     }
-    receivers = read.inbox_receivers(store, box, "demo", [row])
+    receivers = read.inbox_receivers(store, box, slug, [row])
     [finding] = inbox.past_window([row], 600_000, 300_000, receivers)
     assert finding.summary == "unread delivery; sent 10 minutes ago"
     assert "seat is empty" in finding.evidence
