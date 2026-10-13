@@ -272,3 +272,44 @@ def test_creating_engineer_gets_a_scoped_pause_credential(live, credential, hive
             )[0]
             == 403
         )
+
+
+def test_creating_engineer_drains_worker_through_client_without_cap_changes(live, credential, hive, monkeypatch):
+    from scripts.swarm import commands, lifecycle
+    from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+    from tests.swarm_ledger.test_ledger_authority import server
+
+    store = RedisStore(hive)
+    store.create(SwarmConfig(SLUG, "/repo", 1, 0))
+    owner = store.next_name(SLUG, "eng")
+    monkeypatch.setattr(server, "swarm_store", lambda: store)
+    status, created = create(live, credential, "tdrain", agent=owner)
+    assert status == 200
+    slug = created["data"]["slug"]
+    store.create(SwarmConfig(slug, "/repo", 1, 0, scratch=True))
+    worker = store.start_execution(
+        slug,
+        AgentRecord(
+            store.next_name(slug, "eng"),
+            "eng",
+            "t1",
+            seat=f"eng-1@{slug}",
+            runtime_backend="kubernetes",
+            runtime_target={"pod_namespace": "proof", "pod_name": "worker", "pod_uid": "worker-uid"},
+        ),
+    )
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", owner)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", SLUG)
+    monkeypatch.setattr(server, "swarm_status", lambda target: {"state": store.config(target).state})
+    before = store.config(slug)
+    body = {"control": "drain", "agent": worker.name, "op": "drain-first", **lifecycle.seen(worker, {})}
+    result = proof_ledger.control(
+        slug, body, {"LEDGER_URL": f"http://{live['host']}", "AGENTIHOOKS_AGENT_NAME": owner, "AGENTIHOOKS_SWARM": SLUG}
+    )
+    assert result == {"state": "paused"}
+    assert store.config(slug) == before
+    operation = lifecycle.operations(store, slug)[0]
+    assert operation["control"] == "drain" and operation["execution_id"] == worker.execution_id
+    assert commands.rows(store, slug)[0]["argv"] == ["drain", worker.name, "drain-first"]
+    assert "credential" not in json.dumps(operation)
