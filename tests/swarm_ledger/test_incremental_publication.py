@@ -53,3 +53,21 @@ def test_the_initial_snapshot_is_isolated_from_its_loader_before_the_first_write
     events = hub.wait("s", 0, 0)
     assert len(events) == 1
     assert events[0][3]["patch"]["o"]["tasks"]["u"] == [{"id": "t1", "title": "changed"}]
+
+
+def test_a_resource_published_during_initial_loading_owns_its_nested_values(monkeypatch):
+    hub = Hub()
+    monkeypatch.setattr(server, "HUB", hub)
+    state = {"tasks": [{"id": "t1", "title": "first"}], "_meta": {"rev": 1}}
+
+    def load():
+        server.publish_ledger("s", state)
+        return {}
+
+    _, first = hub.open("s", load)
+    state["tasks"][0]["title"] = "changed"
+    state["_meta"]["rev"] = 2
+    assert first[0][3]["ledger"]["tasks"] == [{"id": "t1", "title": "first"}]
+    server.publish_ledger("s", state)
+    events = hub.wait("s", 0, 0)
+    assert events[0][3]["patch"]["o"]["tasks"]["u"] == [{"id": "t1", "title": "changed"}]
