@@ -931,7 +931,7 @@ TRACED = {
 }
 UNOPENED = {**DOC, "tasks": [{**{k: v for k, v in DOC["tasks"][0].items() if k != "pr_url"}, "state": "claimed"}]}
 PLANNED_REASON = "the plan serves the phase at probability 0.80 and covers the task at probability 0.90"
-JUDGE = intent.judge
+JUDGE, JUDGED = intent.judge, intent.judged
 
 
 def plan_classifier(aligned):
@@ -945,7 +945,7 @@ def plan_classifier(aligned):
 def planned_ask(seen, aligned=0.8):
     def ask(state):
         seen.append(state)
-        return intent.judged(state, plan_classifier(aligned))
+        return JUDGED(state, plan_classifier(aligned))
 
     return ask
 
