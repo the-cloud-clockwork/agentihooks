@@ -11,24 +11,23 @@ runs on `merge_group`, so unit, lint, Sonar and the swarm image smoke grade
 the merged tree before it lands. Mutation stays on the pull request head.
 Once the queue is active, `gh pr merge --squash` adds the pull request to the
 queue; it lands when the queue run passes the gate.
-The queue groups with `HEADGREEN`: every entry is built on the entries ahead
-of it, and a passing entry merges together with every entry ahead of it, so
-one run grades several pull requests. A failing entry leaves the queue and the
-entries behind it rebuild without it, while an entry ahead of it merges on its
-own passing run. Two concurrent builds fill the 40 runner `anton-oss` pool.
+The queue groups with `HEADGREEN`: every entry is built on dev plus the
+entries ahead of it, and when an entry passes, it merges together with every
+entry ahead of it, so one run grades several pull requests. When the last
+entry of a group fails, that entry leaves the queue, the entries behind it
+rebuild without it, and the entries ahead of it still merge on the next
+passing run among them. Each run takes about 22 `anton-oss` jobs, so two
+concurrent builds take the 40 runner pool.
 Main keeps its existing branch match and rules; only its bypass list changes.
 
 The antoncore `Organization secrets and dev rulesets` workflow applies
 `dev-no-delete.json` from this repository's dev and reads it back on every
-antoncore dev push or dispatch. The operator applies the other payloads.
-Agents cannot mutate remote rulesets. From a checkout containing the reviewed
-payloads:
+antoncore dev push or dispatch, so a change here goes live on the next
+antoncore dev push or a dispatch of that workflow. The operator applies the
+other payloads. Agents cannot mutate remote rulesets. From a checkout
+containing the reviewed payloads:
 
 ```bash
-gh api \
-  --method PUT \
-  repos/The-Cloud-Clockwork/agentihooks/rulesets/16090886 \
-  --input .github/rulesets/dev-no-delete.json
 gh api \
   --method PUT \
   repos/The-Cloud-Clockwork/agentihooks/rulesets/15122747 \
@@ -45,8 +44,10 @@ gh api repos/The-Cloud-Clockwork/agentihooks/rules/branches/dev \
   --jq '.[] | select(.type == "pull_request") | .parameters.require_code_owner_review'
 ```
 
-The dev `pull_request` rule must carry `require_code_owner_review` true, so a
-pull request touching a path in `.github/CODEOWNERS` waits for owner review.
+The dev `pull_request` rule carries `require_code_owner_review` false, as it
+runs live: every path in `.github/CODEOWNERS` names the account that authors
+the swarm's pull requests, so owner review waits on an approval nobody else
+can give. Turning it on is a separate operator decision.
 The dev response must include `pull_request`, `required_linear_history`,
 `merge_queue` and `required_status_checks` requiring `Gate — Required` with
 `strict_required_status_checks_policy` false; both bypass lists must be empty.
