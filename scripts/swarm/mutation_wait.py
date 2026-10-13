@@ -26,6 +26,10 @@ class Missing(ValueError):
     pass
 
 
+class Skipped(Exception):
+    pass
+
+
 class FetchFailed(Exception):
     pass
 
@@ -112,14 +116,43 @@ def _report(target, started_at):
         return json.loads(zipped.read(name)), scope
 
 
-def _fetch(target, started_at):
+def _skip(target, run):
+    if run["path"] != WORKFLOW or run["conclusion"] != "success":
+        return
+    repo, number = RUN_URL.fullmatch(target).groups()
+    jobs = _api(f"repos/{repo}/actions/runs/{number}/jobs?per_page=100")["jobs"]
+    delegated = any(
+        job["name"] == "pull-request"
+        and job["conclusion"] == "success"
+        and any(
+            step["name"] == "Record the revisions the report grades" and step["conclusion"] == "skipped"
+            for step in job["steps"]
+        )
+        for job in jobs
+    )
+    if not delegated:
+        return
+    runs = _api(
+        f"repos/{repo}/actions/workflows/test.yml/runs?event=pull_request&head_sha={run['head_sha']}&per_page=100"
+    )["workflow_runs"]
+    for candidate in runs:
+        if candidate["head_sha"] == run["head_sha"] and any(
+            pr["base"]["ref"] == "dev" for pr in candidate["pull_requests"]
+        ):
+            raise Skipped(candidate["html_url"])
+    raise Unreachable("the open pull request run is not available yet")
+
+
+def _fetch(target, run):
     for pause in (*BACKOFF, None):
         try:
-            return _report(target, started_at)
+            return _report(target, run["run_started_at"])
         except (Unreachable, zipfile.BadZipFile, zlib.error, EOFError) as error:
             if pause is None:
                 raise FetchFailed(error) from error
         except Missing:
+            if pause == BACKOFF[0]:
+                _skip(target, run)
             if pause is None:
                 raise
         time.sleep(pause)
@@ -152,7 +185,7 @@ def resolution(held: dict) -> str:
     if run.get("conclusion") != "success" and run.get("conclusion") != "failure":
         return f"{outcome}, now red; run {run.get('conclusion')}"
     try:
-        report, scope = _fetch(target, run["run_started_at"])
+        report, scope = _fetch(target, run)
         covered = _covers(target, run, scope)
         failures = [
             f"{file['path']}:{failure['name']}:{failure['fingerprint']} ({failure['status']})"
@@ -161,6 +194,8 @@ def resolution(held: dict) -> str:
         ]
         failures.extend(f"{row['path']}: {row['reason']}" for row in report["not_mutated"])
         failed = report["failed"]
+    except Skipped as skipped:
+        return f"{outcome}, now skipped; the open pull request runs mutation in {skipped}"
     except FetchFailed as error:
         return _unfetched(outcome, run["conclusion"], error)
     except Unreachable:
