@@ -729,7 +729,7 @@ def test_a_worktree_without_a_gate_is_pushed_with_exactly_the_reserve_left(monke
     rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
     rig.commit()
     monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", RESERVE_S)
-    rig.ticks[:] = [0.0]
+    rig.ticks[:] = [0.0, 0.0]
     assert rig.stop(started=0.0).allowed
     assert rig.remote_head() == git(rig.tree, "rev-parse", "HEAD")
 
@@ -806,3 +806,25 @@ def test_a_push_slower_than_the_budget_is_cut_off_inside_the_stop_condition(monk
     assert took < timeout
     assert rig.remote_head() == ""
     assert rig.ledger.comments == []
+
+
+def test_a_second_push_is_cut_off_by_the_budget_the_first_push_left(monkeypatch, rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    second_tree_with_work(rig)
+    rig.commit()
+    hook = rig.origin / "hooks" / "pre-receive"
+    hook.write_text(
+        f'#!/bin/sh\nread old new ref\nif [ "$ref" = "refs/heads/{BRANCH}-2" ]; then sleep 0.6; else sleep 8; fi\n'
+    )
+    hook.chmod(0o755)
+    timeout = RESERVE_S + 2
+    monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", timeout)
+    started = time.monotonic()
+    decision = rig.stop(started=started)
+    took = time.monotonic() - started
+    assert not decision.allowed
+    assert took < timeout
+    assert rig.remote_head() == ""
+    assert git(rig.seed, "ls-remote", str(rig.origin), f"refs/heads/{BRANCH}-2")
+    assert len(rig.ledger.comments) == 1
+    assert PUSH_LATE.format(path=rig.tree) not in decision.reason
