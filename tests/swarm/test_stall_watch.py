@@ -1,3 +1,4 @@
+import copy
 import json
 
 import pytest
@@ -50,7 +51,7 @@ class Swarm:
         self.store.put_agent(SLUG, AgentRecord(OWNER, "eng", "t1", seat="eng-1@sw"))
         self.store.redis.set(self.store.key(SLUG, "claim", "t1"), OWNER)
 
-    def tick(self, at):
+    def tick(self, at, doc=None):
         watch = stall_watch.Watch(
             self.store,
             SLUG,
@@ -63,11 +64,10 @@ class Swarm:
             self.environ,
             lambda url, title, text: self.posted.append((url, title, text)) or "",
         )
-        return stall_watch.stall_pass(watch, self.ledger.state(SLUG))
+        return stall_watch.stall_pass(watch, doc or self.ledger.state(SLUG))
 
     def inbox(self):
-        inbox = InboxStore(self.store.redis)
-        return [item for key in ("master@sw",) for item in inbox.inbox(key)]
+        return InboxStore(self.store.redis).inbox("master@sw")
 
 
 def _reopened(swarm):
@@ -248,6 +248,46 @@ def test_the_pull_request_view_reads_mergeable_and_draft():
     raw = {"state": "OPEN", "mergeable": "CONFLICTING", "isDraft": True, "commits": [], "statusCheckRollup": []}
     pull = ledger_events.pull_request(raw)
     assert pull.mergeable == "CONFLICTING" and pull.draft is True
+
+
+def test_a_task_the_merge_pass_already_reopened_is_left_alone():
+    swarm = Swarm(GREEN)
+    swarm.tick(START)
+    before = copy.deepcopy(swarm.ledger.state(SLUG))
+    swarm.ledger.rows["t1"].update(state="open", claimed_by="")
+    assert swarm.tick(START + 10 * MINUTE, before) == []
+    assert swarm.retired == [] and swarm.ledger.comments == [] and swarm.inbox() == []
+
+
+def test_a_registered_owner_that_is_not_live_is_reopened_without_a_retire():
+    swarm = Swarm(RUNNING, live=False)
+    swarm.tick(START)
+    swarm.tick(START + 10 * MINUTE)
+    assert _reopened(swarm) and swarm.retired == []
+    assert [a.name for a in swarm.store.agents(SLUG) if a.state != "finished"] == []
+
+
+def test_an_outage_holds_the_reopen(monkeypatch):
+    monkeypatch.setattr(stall_watch.outage, "held", lambda store, slug, name: "ledger health probe failed")
+    swarm = Swarm(GREEN)
+    swarm.tick(START)
+    assert swarm.tick(START + 30 * MINUTE) == [] and not _reopened(swarm) and swarm.retired == []
+
+
+def test_a_red_pull_request_with_no_marks_is_not_a_red_stall():
+    swarm = Swarm(PullRequest("OPEN", None, None, True, True, head="h"))
+    swarm.tick(START)
+    assert swarm.tick(START + 30 * MINUTE) == [] and not _reopened(swarm)
+
+
+def test_a_closed_unclaimed_alert_is_not_sent_again_while_the_task_still_waits():
+    swarm = Swarm(RUNNING)
+    _full_lane(swarm)
+    swarm.tick(START)
+    swarm.tick(START + 15 * MINUTE)
+    InboxStore(swarm.store.redis).close(swarm.inbox()[0].id, "master@sw", "done", "seen")
+    assert swarm.tick(START + 16 * MINUTE) == []
+    assert swarm.tick(START + 17 * MINUTE) == []
 
 
 def test_the_tick_runs_the_stall_pass_after_the_merge_pass():
