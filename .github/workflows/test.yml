@@ -991,6 +991,16 @@ jobs:
         if: ${{ !cancelled() }}
         run: python -m scripts.ci_wiring
 
+      - name: Require trusted actors before private runner admission
+        if: ${{ !cancelled() }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/grader/scripts/ci_runner_trust.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+            python -m scripts.gate_protected --head "$GITHUB_SHA"
+          else
+            python -m scripts.ci_runner_trust
+          fi
+
       # dev's copy grades against the base's allowlist, so a pull request cannot loosen its own limits or allowlist.
       - name: Hold the size and complexity limits
         if: ${{ !cancelled() }}

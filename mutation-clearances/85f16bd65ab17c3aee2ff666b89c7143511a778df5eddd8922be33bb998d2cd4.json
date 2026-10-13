@@ -1,0 +1,6 @@
+{
+  "scripts/ci_runner_trust.py:scripts.ci_runner_trust.x_validate_actors__mutmut_28:d6c26f33e4a09844d58c3e42a1f3879f6c345882c77c3fa1d942d486bf485592": {
+    "reader": "standards_reader",
+    "reason": "Diagnostic only: invalid actor approvals still raise ValueError before any output or runner grading. The message retains its explanation and trusted actors phrase; added decoration changes no accepted identities or status."
+  }
+}

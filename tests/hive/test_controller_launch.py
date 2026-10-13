@@ -925,3 +925,150 @@ def test_terminal_order_is_cleared_even_when_replacement_has_no_account_room(set
         "spawn", Status.UNAVAILABLE, "hive", detail="no advertised Claude account has room"
     )
     assert setup.launcher.orders_for("task") is None
+
+
+def test_placement_wait_records_original_start_and_clears_on_selection(setup):
+    from dataclasses import replace
+
+    from scripts.hive import placement_waits
+
+    decision = setup.herdr._profile_decision.return_value
+    setup.herdr._profile_decision.return_value = replace(decision, profile="frontend")
+    setup.launcher.select(setup.config, "eng", {"id": "task"})
+    first = placement_waits.read(setup.store, setup.config.slug)
+    assert first["task"]["reason"] == "no UI hive live"
+    assert first["task"]["lane"] == "eng"
+    assert first["task"]["started_at"] > 0
+    setup.launcher.select(setup.config, "eng", {"id": "task"})
+    assert placement_waits.read(setup.store, setup.config.slug) == first
+    setup.herdr._profile_decision.return_value = decision
+    setup.launcher.select(setup.config, "eng", {"id": "task"})
+    assert placement_waits.read(setup.store, setup.config.slug) == {}
+
+
+def test_missing_hive_finding_starts_at_thirty_minutes_and_is_shared(setup):
+    from scripts.hive import placement, placement_waits
+
+    for task in ("first", "second"):
+        placement_waits.observe(setup.store, setup.config.slug, "eng", task, placement.NO_UI_HIVE, 1000)
+    assert placement_waits.findings(setup.store, setup.config.slug, 1_800_999) == []
+    found = placement_waits.findings(setup.store, setup.config.slug, 1_801_000)
+    assert len(found) == 1
+    assert found[0].kind == "missing hive"
+    assert found[0].subject == "ui"
+    assert found[0].summary == "Wanted ui hive has been missing for thirty minutes"
+    assert found[0].threshold == "thirty minutes"
+    assert found[0].measure == 1_800_000
+    assert found == placement_waits.findings(setup.store, setup.config.slug, 1_801_000)
+    placement_waits.observe(setup.store, setup.config.slug, "eng", "first", "", 1_801_000)
+    assert len(placement_waits.findings(setup.store, setup.config.slug, 1_801_000)) == 1
+    placement_waits.observe(setup.store, setup.config.slug, "eng", "second", "", 1_801_000)
+    assert placement_waits.findings(setup.store, setup.config.slug, 1_801_000) == []
+
+
+def test_capacity_wait_is_recorded_without_a_missing_hive_finding(setup):
+    from scripts.hive import placement_waits
+
+    setup.herdr._quota_accounts = []
+    setup.launcher.select(setup.config, "eng", {"id": "task"})
+    record = placement_waits.read(setup.store, setup.config.slug)["task"]
+    assert record["reason"] == "no advertised Claude account has room"
+    assert record["lane"] == "eng"
+    assert placement_waits.findings(setup.store, setup.config.slug, record["started_at"] + 1_800_000) == []
+
+
+def test_changed_wait_reason_restarts_the_missing_hive_clock(setup):
+    from scripts.hive import placement, placement_waits
+
+    placement_waits.observe(setup.store, setup.config.slug, "eng", "task", "no hive for eng has room", 1000)
+    placement_waits.observe(setup.store, setup.config.slug, "eng", "task", placement.NO_UI_HIVE, 2_000_000)
+    assert placement_waits.read(setup.store, setup.config.slug)["task"]["started_at"] == 2_000_000
+    assert placement_waits.findings(setup.store, setup.config.slug, 2_000_001) == []
+
+
+def test_missing_role_hives_raise_separate_findings_and_keep_the_oldest_wait(setup):
+    from scripts.hive import placement_waits
+
+    for lane, task, at in (
+        ("eng", "first", 1000),
+        ("eng", "second", 2000),
+        ("ci", "third", 1000),
+        ("eng", "equal", 1000),
+    ):
+        placement_waits.observe(setup.store, setup.config.slug, lane, task, f"no live hive takes {lane}", at)
+    found = placement_waits.findings(setup.store, setup.config.slug, 1_802_000)
+    assert [row.id for row in found] == ["missing-hive/ci", "missing-hive/eng"]
+    assert found[1].measure == 1_801_000
+    assert found[1].evidence == ("Task first waiting since 1000: no live hive takes eng",)
+
+
+def test_swarm_health_reports_missing_hive_and_removes_completed_waits(setup, monkeypatch):
+    from scripts.hive import placement, placement_waits
+    from scripts.swarm import status
+
+    placement_waits.observe(setup.store, setup.config.slug, "eng", "task", placement.NO_UI_HIVE, 1000)
+    monkeypatch.setattr(status, "now_ms", lambda: 1_801_000)
+    monkeypatch.setattr(status.activity, "counts", lambda slug: {})
+    tasks = [{"id": "task", "state": "open"}]
+    found = status.findings(setup.store, setup.config.slug, setup.config, tasks, [])
+    assert [(row["kind"], row["subject"]) for row in found] == [("missing hive", "ui")]
+    tasks[0]["state"] = "done"
+    assert status.findings(setup.store, setup.config.slug, setup.config, tasks, []) == []
+    assert placement_waits.read(setup.store, setup.config.slug) == {}
+
+
+@pytest.mark.parametrize("state", ["done", "cancelled"])
+def test_wait_pruning_keeps_active_tasks_and_drops_removed_tasks(setup, state):
+    from scripts.hive import placement, placement_waits
+
+    for task in ("active", "settled", "removed"):
+        placement_waits.observe(setup.store, setup.config.slug, "eng", task, placement.NO_UI_HIVE, 1000)
+    placement_waits.prune(setup.store, setup.config.slug, [{"id": "active"}, {"id": "settled", "state": state}])
+    assert list(placement_waits.read(setup.store, setup.config.slug)) == ["active"]
+
+
+def test_wait_record_retries_a_conflicting_writer(setup, monkeypatch):
+    from redis.exceptions import WatchError
+
+    from scripts.hive import placement, placement_waits
+
+    pipeline = setup.store.redis.pipeline()
+    execute = pipeline.execute
+    attempts = []
+
+    def conflict_once():
+        attempts.append(True)
+        if len(attempts) == 1:
+            pipeline.reset()
+            raise WatchError()
+        return execute()
+
+    monkeypatch.setattr(pipeline, "execute", conflict_once)
+    monkeypatch.setattr(setup.store.redis, "pipeline", lambda: pipeline)
+    placement_waits.observe(setup.store, setup.config.slug, "eng", "task", placement.NO_UI_HIVE, 1000)
+    assert len(attempts) == 2
+    assert placement_waits.read(setup.store, setup.config.slug)["task"] == {
+        "lane": "eng",
+        "reason": placement.NO_UI_HIVE,
+        "started_at": 1000,
+    }
+
+
+def test_unrelated_and_recent_waits_do_not_hide_an_overdue_missing_hive(setup):
+    from scripts.hive import placement, placement_waits
+
+    placement_waits.observe(setup.store, setup.config.slug, "eng", "capacity", "no hive for eng has room", 1000)
+    placement_waits.observe(setup.store, setup.config.slug, "ci", "recent", "no live hive takes ci", 2_000_000)
+    placement_waits.observe(setup.store, setup.config.slug, "eng", "overdue", placement.NO_UI_HIVE, 1000)
+    found = placement_waits.findings(setup.store, setup.config.slug, 2_000_001)
+    assert [row.id for row in found] == ["missing-hive/ui"]
+    assert found[0].evidence == ("Task overdue waiting since 1000: no UI hive live",)
+
+
+def test_unsupported_harness_wait_records_its_lane(setup):
+    from scripts.hive import placement_waits
+    from scripts.hive.placement import Wait
+
+    config = replace(setup.config, lanes={"ci": {"agent": "codex"}})
+    assert setup.launcher.select(config, "ci", {"id": "task"}) == Wait("Codex hive placement is not enabled")
+    assert placement_waits.read(setup.store, setup.config.slug)["task"]["lane"] == "ci"
