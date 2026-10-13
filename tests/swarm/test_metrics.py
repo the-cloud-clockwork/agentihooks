@@ -231,7 +231,9 @@ def test_a_swarm_pass_measures_the_stages_of_the_ledger_tasks_and_reports_a_flee
     monkeypatch.setattr(
         metrics.stage_detector,
         "record",
-        lambda box, store, slug, now_ms, tasks, environ, ready: seen.append((tasks, [ready(t) for t in tasks])),
+        lambda box, store, slug, now_ms, tasks, environ, ready: seen.append(
+            (tasks, [ready(t) for t in tasks], ready.seats)
+        ),
     )
     monkeypatch.setattr(metrics.metrics_fleet, "record", broken)
     tasks = [{"id": f"t{n}", "state": "open", "phase": phase} for n, phase in ((1, "p2"), (2, "p2"), (3, "p1"))]
@@ -243,4 +245,4 @@ def test_a_swarm_pass_measures_the_stages_of_the_ledger_tasks_and_reports_a_flee
     )
     swarm = metrics.metrics_swarm.TickInput(store, doc, [], lambda url: None, None)
     assert metrics.record_pass("sw", NOW, 0, ON, swarm) == ["fleet metrics failed: registry down"]
-    assert seen == [(tasks, [True, False, False])]
+    assert seen == [(tasks, [True, False, False], {"eng": 0, "ci": 0, "plan": 1})]

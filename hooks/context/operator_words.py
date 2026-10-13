@@ -33,7 +33,7 @@ def _norm(text):
 
 
 @contextmanager
-def _store():
+def _store(migrate=True):
     path = _dir() / "words.sqlite3"
     path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(path)
@@ -50,7 +50,8 @@ def _store():
             "CREATE INDEX IF NOT EXISTS line_hash ON lines(name, hash);"
             "CREATE TABLE IF NOT EXISTS legacy (name TEXT PRIMARY KEY);"
         )
-        _migrate(connection)
+        if migrate:
+            _migrate(connection)
         with connection:
             yield connection
     finally:
@@ -72,37 +73,52 @@ def _append(connection, swarm, name, at, words):
     )
 
 
-def _legacy_swarm(name):
-    from hooks._redis import get_redis
-    from scripts.swarm.naming import NameRegistry, legacy_slug, parse
+def _offline_swarm(name):
+    from scripts.swarm.naming import legacy_slug, parse
 
-    redis = get_redis()
-    swarm = NameRegistry(redis).slug_of(name) if redis is not None else legacy_slug(name)
-    return None if not swarm and parse(name) else swarm
+    return None if parse(name) else legacy_slug(name)
+
+
+def _legacy_swarms(paths, redis):
+    from redis.exceptions import RedisError
+
+    from scripts.swarm.naming import NameRegistry
+
+    swarms = dict.fromkeys(paths)
+    registry = NameRegistry(redis)
+    for path in paths:
+        if redis is None:
+            swarms[path] = _offline_swarm(path.stem)
+            continue
+        try:
+            # slug_of swallows a failed alias lookup; this read raises it so the name stays pending.
+            redis.get(registry.key("alias", path.stem))
+            swarms[path] = registry.slug_of(path.stem)
+        except RedisError:
+            break
+    return swarms
 
 
 def _migrate(connection):
+    from hooks._redis import get_redis
+
     if connection.execute("SELECT 1 FROM legacy WHERE name = ''").fetchone():
         return
+    swarms = _legacy_swarms([path for path in _dir().glob("*.json") if _load(path.stem)["rows"]], get_redis())
     clean = {}
-    pending = False
     with connection:
         connection.execute("BEGIN IMMEDIATE")
-        for path in _dir().glob("*.json"):
-            data = _load(path.stem)
-            if not data["rows"]:
-                continue
-            swarm = _legacy_swarm(path.stem)
+        for path, swarm in swarms.items():
             if swarm is None:
-                pending = True
                 continue
+            data = _load(path.stem)
             clean[path.stem] = {"sessions": data["sessions"]}
             if connection.execute("INSERT OR IGNORE INTO legacy VALUES (?)", (path.name,)).rowcount:
                 for row in data["rows"]:
                     _append(connection, swarm, path.stem, row["at"], row["words"])
     for name, data in clean.items():
         _save(name, data)
-    if not pending:
+    if None not in swarms.values():
         with connection:
             connection.execute("INSERT OR IGNORE INTO legacy VALUES ('')")
 
@@ -111,7 +127,7 @@ def _line_match(connection: sqlite3.Connection, name: str, needle: str, since: f
     return connection.execute(
         "SELECT entries.words FROM lines JOIN entries ON entries.id = lines.entry "
         "WHERE lines.name = ? AND lines.hash = ? AND (? IS NULL OR entries.at > ?) "
-        "ORDER BY entries.id DESC LIMIT 1",
+        "ORDER BY entries.at DESC, entries.id DESC LIMIT 1",
         (name, _hash(needle), since, since),
     ).fetchone()
 
@@ -148,7 +164,7 @@ def record(name: str, words: str, now: float | None = None, swarm: str = "") -> 
     text = str(words or "").strip()
     if not (name and text):
         return False
-    with _store() as connection:
+    with _store(migrate=False) as connection:
         _append(connection, swarm or "", name, now, text)
     return True
 
@@ -164,7 +180,7 @@ def matching(name: str, quote: str, now: float | None = None, within: float | No
         if row is None:
             row = connection.execute(
                 "SELECT words FROM entries WHERE name = ? AND instr(norm, ?) > 0 "
-                "AND (? IS NULL OR at > ?) ORDER BY id DESC LIMIT 1",
+                "AND (? IS NULL OR at > ?) ORDER BY at DESC, id DESC LIMIT 1",
                 (name, needle, since, since),
             ).fetchone()
     return row[0] if row else ""
@@ -172,8 +188,6 @@ def matching(name: str, quote: str, now: float | None = None, within: float | No
 
 def _opening(name, session):
     """True once per session: the first prompt of a swarm agent is its launch or handoff prompt."""
-    with _store():
-        pass
     data = _load(name)
     if not session or session in data["sessions"]:
         return False
