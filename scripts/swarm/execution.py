@@ -142,13 +142,18 @@ class ExecutionRegistry:
         if agent.execution_id or agent.generation:
             self.conflict(slug, "new execution identity and generation must be allocated by the store")
         self.validate(slug, agent)
+        from scripts.codex_session.binding import PUBLISHING
+
         key = self.store.key(slug, "executions")
+        publishing = self.store.key(slug, PUBLISHING)
         for _ in range(WRITE_ATTEMPTS):
             with self.redis.pipeline() as pipe:
                 try:
                     from scripts.swarm import lease
 
-                    pipe.watch(key)
+                    pipe.watch(key, publishing)
+                    if pipe.hget(publishing, agent.seat):
+                        raise SwarmError("current execution publication is in flight; retry after it finishes")
                     epoch = lease.EPOCH.get()
                     held = lease.current(self.store, slug) if epoch is not None else None
                     if epoch is not None and (held is None or held.epoch != epoch):
