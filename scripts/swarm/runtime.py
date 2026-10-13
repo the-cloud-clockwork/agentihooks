@@ -508,8 +508,6 @@ class HerdrRuntime:
             else self._quota_choice(agent, reason, bool(requested or quota_transfer or want), lane)
         )
         if saved and agent != saved["harness"]:
-            if quota_transfer:
-                raise SpawnError("unsupported handoff: router substituted the original harness", "unsupported")
             saved = {
                 **saved,
                 "harness": agent,
