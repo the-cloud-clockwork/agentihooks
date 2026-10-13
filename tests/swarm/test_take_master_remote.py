@@ -294,7 +294,9 @@ def test_a_finished_master_still_named_live_does_not_block_take_master(taker, mo
     )
     rt.live.add(MASTER)
     assert run("sw", "take-master") == 0
-    assert _masters(store) == [("master@a1b2c3-0002", "", {})]
+    assert _masters(store) == [
+        ("master@a1b2c3-0002", "", {"process_namespace": "boot/pidns", "pid": 4242, "pid_start": 100})
+    ]
 
 
 def test_take_names_a_new_master_at_the_time_it_was_taken(taker, monkeypatch):  # noqa: F811

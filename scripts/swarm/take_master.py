@@ -78,20 +78,16 @@ def placed(store, slug, record, hive, pid):
 
 
 def admitted(store, slug, record, admit, pid, hive):
-    if hive:
-        record = placed(store, slug, record, hive, pid)
+    record = placed(store, slug, record, hive, pid)
     pin(slug, record.name)
     try:
         admit(record.name)
     except BaseException:
-        if hive:
-            store.execution_registry.update(slug, replace(record, state="ended"))
-            store.drop_agent(slug, record.name)
+        store.execution_registry.update(slug, replace(record, state="ended"))
+        store.drop_agent(slug, record.name)
         raise
     if hive:
         pin_session(pid, slug)
-    else:
-        record = placed(store, slug, record, hive, pid)
     return record
 
 

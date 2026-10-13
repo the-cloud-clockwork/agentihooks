@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import json
 import sys
+from collections.abc import Callable
 from types import ModuleType
 
 from scripts.swarm import naming
@@ -22,7 +23,7 @@ def require_controller(handler: object, server: ModuleType) -> None:
         raise APIError(403, "forbidden", "Proof ledgers need the controller credential")
 
 
-def route(handler: object, server: ModuleType, parts: list, read_body: object) -> dict:
+def route(handler: object, server: ModuleType, parts: list, read_body: Callable[[object, ModuleType], dict]) -> dict:
     if len(parts) == 3 and parts[2] == "credential":
         schemas.validate({"type": "object", "maxProperties": 0}, read_body(handler, server))
         return credential(handler, server, parts[1])
@@ -97,6 +98,7 @@ def credential(handler: object, server: ModuleType, slug: str) -> dict:
 
 def control(handler: object, server: ModuleType, slug: str, payload: dict) -> dict:
     from scripts.swarm import commands
+    from scripts.swarm.lifecycle import Refused
 
     owner = _owner(server, slug)
     token = handler.headers.get("X-Proof-Credential")
@@ -110,7 +112,10 @@ def control(handler: object, server: ModuleType, slug: str, payload: dict) -> di
         return {"data": commands.submit(store, slug, "swarm", ["pause"])}
     if action != "drain":
         raise APIError(403, "forbidden", "Proof controls permit only pause and drain")
-    result, error = server.lifecycle_control(slug, payload, False)
+    try:
+        result, error = server.lifecycle_control(slug, payload, False)
+    except Refused as exc:
+        raise APIError(exc.status, "control_refused", str(exc)) from None
     if error:
         raise APIError(409, "control_refused", error)
     return {"data": result}

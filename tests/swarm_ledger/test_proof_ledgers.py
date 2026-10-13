@@ -313,3 +313,30 @@ def test_creating_engineer_drains_worker_through_client_without_cap_changes(live
     assert operation["control"] == "drain" and operation["execution_id"] == worker.execution_id
     assert commands.rows(store, slug)[0]["argv"] == ["drain", worker.name, "drain-first"]
     assert "credential" not in json.dumps(operation)
+
+
+@pytest.mark.parametrize("identity", ["other", "operator", "missing", "forged"])
+def test_fixture_credential_retrieval_refuses_every_identity_but_its_creator(
+    live, credential, hive, monkeypatch, identity
+):
+    from scripts.swarm.store import RedisStore, SwarmConfig
+    from tests.swarm_ledger.test_ledger_authority import server
+
+    store = RedisStore(hive)
+    store.create(SwarmConfig(SLUG, "/repo", 1, 0))
+    owner = store.next_name(SLUG, "eng")
+    monkeypatch.setattr(server, "swarm_store", lambda: store)
+    status, created = create(live, credential, "tidentity", agent=owner)
+    assert status == 200
+    name = store.next_name(SLUG, "eng") if identity == "other" else owner
+    headers = {"X-Ledger-Agent": name, "X-Ledger-Token": authority.agent_token(live["admin"], SLUG, name)}
+    if identity == "operator":
+        headers["X-Ledger-Token"] = live["admin"]
+    elif identity == "missing":
+        headers = {}
+    elif identity == "forged":
+        headers["X-Ledger-Token"] = "wrong"
+    slug = created["data"]["slug"]
+    status, refused = post(live, f"/api/v1/proof-ledgers/{slug}/credential", {}, **headers)
+    assert status == 403 and refused["error"]["code"] == "forbidden"
+    assert store.redis.lrange(store.key(slug, "command-pending"), 0, -1) == []
