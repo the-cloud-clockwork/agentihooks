@@ -88,6 +88,9 @@ def admitted(store, slug, record, admit, pid, hive):
         raise
     if hive:
         pin_session(pid, slug)
+    else:
+        previous = store.execution_occupants(slug).get(record.seat)
+        record = store.start_execution(slug, record, previous.execution_id if previous else "")
     return record
 
 
