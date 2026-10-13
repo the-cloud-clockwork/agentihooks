@@ -759,6 +759,29 @@ def test_gate_mutates_a_function_its_module_calls_at_import(tmp_path, monkeypatc
     assert report["files"][0]["counts"] == {"killed": 2}
 
 
+def test_a_subprocess_importing_a_mutated_module_skips_the_mutation_engine_and_still_kills(tmp_path, monkeypatch):
+    _gate_tree(tmp_path, monkeypatch)
+    (tmp_path / "scripts/sample.py").write_text("def value(number):\n    return number + 1\n")
+    child = (
+        "import sys\n"
+        "from scripts.sample import value\n"
+        "print(value(1), 'libcst' in sys.modules, callable(__import__('mutmut.__main__').__main__.walk_all_files))\n"
+    )
+    (tmp_path / "tests/test_sample.py").write_text(
+        "import os, subprocess, sys\n\n"
+        "from scripts.sample import value\n\n"
+        "def test_value():\n"
+        "    assert value(1) == 2\n"
+        "    env = {**os.environ, 'PYTHONPATH': os.getcwd()}\n"
+        f"    out = subprocess.run([sys.executable, '-c', {child!r}], env=env, capture_output=True, text=True, check=True)\n"
+        "    assert out.stdout.split() == ['2', 'False', 'True']\n"
+    )
+    report = run_gate(tmp_path, {"scripts/sample.py": {2}}, tmp_path / "evidence", 60)
+    assert report["not_mutated"] == []
+    assert report["failed"] is False
+    assert report["files"][0]["counts"] == {"killed": 2}
+
+
 def test_shared_run_grades_each_file_only_by_the_tests_selected_for_it(tmp_path, monkeypatch):
     _gate_tree(tmp_path, monkeypatch)
     (tmp_path / "scripts/first.py").write_text("def one(value):\n    return value + 1\n")
