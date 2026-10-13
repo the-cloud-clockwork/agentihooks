@@ -625,7 +625,7 @@ def _conversations(slug, store, runtime):
         if agent.state in {"finished", "awaiting-decision"} or not agent.pane_id:
             continue
         pane = reports.pane_key(agent)
-        if pane not in found and resume.recovery_pending(store, slug, agent):
+        if pane not in found and (reports.host(agent) or resume.recovery_pending(store, slug, agent)):
             continue
         current = found.get(pane, "")
         if current != agent.conversation_id:

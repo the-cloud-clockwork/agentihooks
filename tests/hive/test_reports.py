@@ -351,3 +351,19 @@ def test_a_local_rebind_never_takes_a_remote_pane(remote):
     assert tick._rebind("fixture", remote.store, runtime, local, 99) is None
     runtime.conversations.return_value = {"w9:p9": CONVERSATION}
     assert tick._rebind("fixture", remote.store, runtime, local, 99).pane_id == "w9:p9"
+
+
+def test_a_lost_hive_keeps_its_workers_conversation_ids(remote):
+    from scripts.swarm import tick
+
+    agent = replace(remote.agent, conversation_id=CONVERSATION)
+    remote.store.put_agent("fixture", agent)
+    remote.runtime.herdr = lambda args: {"agents": []}
+    tick._conversations("fixture", remote.store, remote.runtime)
+    assert remote.store.agents("fixture")[0].conversation_id == CONVERSATION
+    _publish(remote)
+    report = json.loads(remote.redis.get(remote.reports.key(HIVE)))
+    report["panes"] = {PANE: "resumed"}
+    remote.redis.set(remote.reports.key(HIVE), json.dumps(report))
+    tick._conversations("fixture", remote.store, remote.runtime)
+    assert remote.store.agents("fixture")[0].conversation_id == "resumed"
