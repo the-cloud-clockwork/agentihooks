@@ -89,7 +89,8 @@ done
 docker --host "$proof_docker_host" info --format '{{json .DriverStatus}} {{json .RegistryConfig.IndexConfigs}}'
 fixture=tests/integration/hive_launch/compose.yaml
 printf 'services:\n  redis:\n    image: 127.0.0.1:5000/proof:present\n' > "$proof_dir/override.yaml"
-docker --host "$proof_docker_host" compose -f "$fixture" -f "$proof_dir/override.yaml" pull redis
+DOCKER_HOST="$proof_docker_host" bash scripts/packaging/pull-runtime-image.sh 127.0.0.1:5000/proof:present --insecure
+docker --host "$proof_docker_host" compose -f "$fixture" -f "$proof_dir/override.yaml" pull --policy missing redis
 docker --host "$proof_docker_host" image inspect 127.0.0.1:5000/proof:present --format '{{.Architecture}}' | grep -x amd64
 printf 'Absent attestation: hive launch image pull passed\n'
 printf 'services:\n  redis:\n    image: 127.0.0.1:5000/proof:missing-image\n' > "$proof_dir/override.yaml"
