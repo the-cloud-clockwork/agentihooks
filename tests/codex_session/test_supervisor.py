@@ -398,7 +398,7 @@ def test_a_server_that_came_up_but_never_answered_times_out_and_is_stopped(store
     assert str(failure) == supervisor.NEVER_ANSWERED
     record = only_record(store)
     assert (record.server_pid, record.server_start_identity) == (FIRST_PID, SERVER_START)
-    assert Path(record.endpoint_ref.removeprefix("unix://")).exists()
+    assert not Path(record.endpoint_ref.removeprefix("unix://")).exists()
     assert server.processes[0].stopped
     assert clock.now == 2.0
     assert [timeout for _, timeout in server.connects] == [2.0 - 0.25 * step for step in range(8)]
@@ -644,6 +644,41 @@ def test_failed_launch_removes_only_its_execution_folder(store, server, clock, r
     assert (package / "codex").read_text() == "shared binary"
     assert not store.redis.hgetall(store.key(SLUG, ENDPOINTS))
     assert all(process.poll() is not None for process in server.processes)
+
+
+def test_failed_execution_directory_permissions_leave_no_folder(store, server, clock, root, tmp_path, monkeypatch):
+    chmod = Path.chmod
+
+    def refused_permissions(path, mode):
+        if path.parent == root:
+            raise OSError("directory permissions failed")
+        chmod(path, mode)
+
+    monkeypatch.setattr(Path, "chmod", refused_permissions)
+    with pytest.raises(OSError, match="directory permissions failed"):
+        supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, clock, root))
+    assert list(root.iterdir()) == []
+    assert not server.spawns
+
+
+def test_failed_process_stop_still_removes_execution_folder(store, server, clock, root, tmp_path, monkeypatch):
+    server.answers = False
+    popen = server.popen
+
+    def spawn(command, **kwargs):
+        process = popen(command, **kwargs)
+
+        def refused_wait(timeout=None):
+            raise OSError("process wait failed")
+
+        monkeypatch.setattr(process, "wait", refused_wait)
+        return process
+
+    with pytest.raises(OSError, match="process wait failed"):
+        supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, clock, root, popen=spawn))
+    assert server.processes[0].poll() is not None
+    assert list(root.iterdir()) == []
+    assert not store.redis.hgetall(store.key(SLUG, ENDPOINTS))
 
 
 @pytest.mark.parametrize("stage", ["endpoint", "reservation"])
