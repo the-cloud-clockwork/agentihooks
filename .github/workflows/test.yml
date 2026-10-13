@@ -1606,7 +1606,7 @@ jobs:
       - name: Size mutation shards from stored timings
         id: plan
         env:
-          BASE: ${{ github.event.pull_request.base.sha || inputs.base }}
+          BASE: ${{ inputs.base || 'origin/dev' }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: python -m scripts.ci_mutation.plan --base "$BASE"
 

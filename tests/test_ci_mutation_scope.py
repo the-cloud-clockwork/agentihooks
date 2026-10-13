@@ -235,6 +235,30 @@ def test_a_line_left_as_the_given_base_had_it_is_never_graded(tmp_path):
     assert discover_changes(tmp_path, pinned, "HEAD") == {"hooks/own.py": {1, 2}}
 
 
+def test_a_branch_that_merged_dev_and_edited_a_test_grades_only_its_own_lines_from_current_dev(tmp_path):
+    from scripts.ci_mutation.scope import discover_changes, own_bases
+
+    git, commit = _repo(tmp_path)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_x.py").write_text("def test_a():\n    assert 1\n")
+    git("add", "tests/test_x.py")
+    pinned = commit("dev.py", "a = 1\n")
+    git("checkout", "-q", "-b", "branch")
+    commit("own.py", "def f():\n    return 1\n")
+    (tmp_path / "tests" / "test_x.py").write_text("def test_a():\n    assert 2\n")
+    git("commit", "-q", "-am", "edit test")
+    git("checkout", "-q", "dev")
+    commit("dev.py", "def d():\n    return 2\n")
+    git("update-ref", "refs/remotes/origin/dev", "HEAD")
+    merged_dev = git("rev-parse", "HEAD")
+    git("checkout", "-q", "branch")
+    git("merge", "-q", "--no-edit", "dev")
+    assert discover_changes(tmp_path, [pinned, merged_dev], "HEAD") == {"hooks/own.py": {1, 2}, "hooks/dev.py": {1, 2}}
+    bases = own_bases(tmp_path, "origin/dev", "HEAD")
+    assert bases == [merged_dev]
+    assert discover_changes(tmp_path, bases, "HEAD") == {"hooks/own.py": {1, 2}}
+
+
 def test_resolved_bases_are_graded_without_looking_up_branches_again(tmp_path):
     from scripts.ci_mutation.scope import discover_changes
 
