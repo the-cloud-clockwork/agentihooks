@@ -79,6 +79,22 @@ def test_operator_off_ends_it_at_once():
     assert not operator_mode.present("s1", SWARM, now=113)
 
 
+def test_operator_on_keeps_questions_open_through_inbox_and_silence_until_off():
+    operator_mode.observe("s1", "operator on", True, now=100)
+    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=101) == ""
+    for prompt in (CHANNEL, delivery.marked("continue")):
+        assert not is_operator_prompt(prompt, "demo")
+        operator_mode.observe("s1", prompt, False, now=200)
+        assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=201) == ""
+    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=86500) == ""
+    operator_mode.observe("s1", CHANNEL, False, now=86501)
+    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=86502) == ""
+    assert operator_mode.observe("s1", "operator off", True, now=86503) == "off"
+    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=86504) == MASTER_ASK.format(
+        slug="demo", name="master@a1-1"
+    )
+
+
 def test_an_unreadable_mode_file_holds_the_session_off(tmp_path, monkeypatch):
     monkeypatch.setattr("hooks.config.AGENTIHOOKS_HOME", tmp_path)
     (tmp_path / "operator_mode").mkdir()
