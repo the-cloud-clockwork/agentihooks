@@ -1003,7 +1003,13 @@ jobs:
 
       - name: Hold every job to a runner class
         if: ${{ !cancelled() }}
-        run: python -m scripts.ci_runner_classes
+        run: |
+          if [[ -f "$RUNNER_TEMP/grader/scripts/ci_runner_classes.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+            python -m scripts.ci_runner_classes --root "$GITHUB_WORKSPACE"
+          else
+            python -m scripts.ci_runner_classes
+          fi
 
       # dev's copy grades against the base's allowlist, so a pull request cannot loosen its own limits or allowlist.
       - name: Hold the size and complexity limits

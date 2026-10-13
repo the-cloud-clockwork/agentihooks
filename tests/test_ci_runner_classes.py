@@ -53,6 +53,12 @@ def test_reusable_calls_are_graded_through_their_callee():
     assert classes({"b.yml": calls}, {}) == []
 
 
+def test_a_reusable_call_to_a_missing_local_workflow_is_red():
+    calls = {"jobs": {"call": {"uses": "./.github/workflows/missing.yml"}}}
+    problems = classes({"b.yml": calls}, {})
+    assert problems == ["b.yml/call: runner classes cannot resolve local workflow ./.github/workflows/missing.yml"]
+
+
 def test_a_stale_table_entry_is_red():
     problems = classes({"b.yml": workflow()}, {"b.yml/build": "light", "b.yml/gone": "batch"})
     assert problems == ["b.yml/gone: runner class names no job"]

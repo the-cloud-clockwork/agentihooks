@@ -34,7 +34,12 @@ def _runner_problem(key: str, cls: str, runner: object, policy: dict) -> str | N
 
 
 def check(workflows: dict[str, dict], table: dict[str, str], policy: dict) -> list[str]:
-    problems = []
+    problems = [
+        f"{file}/{name}: runner classes cannot resolve local workflow {job['uses']}"
+        for file, workflow in workflows.items()
+        for name, job in (workflow.get("jobs") or {}).items()
+        if str(job.get("uses", "")).startswith("./.github/workflows/") and Path(job["uses"]).name not in workflows
+    ]
     jobs = {
         f"{file}/{name}": job
         for file, workflow in workflows.items()
