@@ -559,6 +559,7 @@ def test_execution_home_keeps_profile_binding_and_manifests(server, tmp_path):
     assert (profile / binding.FILE).read_bytes() == original
     assert json.loads(original)["home"] == str(profile)
 
+
 @pytest.mark.parametrize("linked", [False, True])
 def test_execution_home_shares_package_binaries_without_copying(server, tmp_path, linked):
     profile = Path(server.codex_home)
