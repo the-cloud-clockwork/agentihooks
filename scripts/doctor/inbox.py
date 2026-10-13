@@ -38,19 +38,17 @@ def _waiting(item, receiver, window_ms):
     return item["state"] == "pending" or not receiver.live or receiver.quiet_ms >= window_ms
 
 
-def _route(item, receivers=None):
-    route = f"from {item['sender']} to {item['address']}"
-    if receivers is None:
-        return route
-    receiver = receivers.get(item["address"], Receiver())
-    status = (
-        f"occupant {receiver.occupant}; harness {receiver.harness or 'unknown'}"
-        if receiver.live
-        else "seat is empty"
-        if is_seat(item["address"])
-        else "recipient has no live occupant"
-    )
-    return f"{route}; {status}"
+def _route(item):
+    return f"from {item['sender']} to {item['address']}"
+
+
+def _recipient(item, receivers):
+    receiver = (receivers or {}).get(item["address"])
+    if receiver is None:
+        return "recipient state unavailable"
+    if receiver.live:
+        return f"occupant {receiver.occupant}; harness {receiver.harness or 'unknown'}"
+    return "seat is empty" if is_seat(item["address"]) else "recipient has no live occupant"
 
 
 def _steps(item, event):
