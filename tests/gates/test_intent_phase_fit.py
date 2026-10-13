@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from hooks.classifier import corpus, definitions
+from hooks.classifier import definitions
 from hooks.classifier.result import Answer
 from scripts.gates import intent
 
@@ -15,22 +15,13 @@ def rows():
     return json.loads(COHORT.read_text())["rows"]
 
 
-@pytest.fixture(scope="module")
-def plans():
-    definition = definitions.load(intent.PLAN)
-    return {case.name: case for case in corpus.load(definition, corpus.path_for(intent.PLAN))}
-
-
 def judged(state, sample):
     answers = {key: Answer.from_wire(value) for key, value in sample["answers"].items()}
     return intent._verdicts(definitions.load(intent.PURPOSE), state, {}, answers)
 
 
-def after(row, plans):
-    if row["kind"] == "plan":
-        case = plans[row["name"]]
-        return [intent._verdicts(definitions.load(intent.PURPOSE), case.state, {}, s.answers) for s in case.samples]
-    return [judged(row["before_state"], sample) for sample in row["after"]]
+def after(row):
+    return [judged(row.get("after_state", row["before_state"]), sample) for sample in row["after"]]
 
 
 def before(row):
@@ -41,9 +32,9 @@ def failed(verdicts, criteria):
     return any(item["verdict"] == "fail" and item["criterion"] in criteria for item in verdicts)
 
 
-def measure(rows, plans):
+def measure(rows):
     cohort = [row for row in rows if not row["control"]]
-    sides = {"before": [before(row) for row in cohort], "after": [after(row, plans) for row in cohort]}
+    sides = {"before": [before(row) for row in cohort], "after": [after(row) for row in cohort]}
     return {
         "rows": len(cohort),
         "plans": sum(row["kind"] == "plan" for row in cohort),
@@ -60,8 +51,8 @@ def measure(rows, plans):
     }
 
 
-def test_no_adjudicated_row_escalates_on_phase_scope_and_delivery_failures_count_apart(rows, plans):
-    assert measure(rows, plans) == {
+def test_no_adjudicated_row_escalates_on_phase_scope_and_delivery_failures_count_apart(rows):
+    assert measure(rows) == {
         "rows": 35,
         "plans": 19,
         "production_phase_scope": 35,
@@ -73,22 +64,22 @@ def test_no_adjudicated_row_escalates_on_phase_scope_and_delivery_failures_count
     }
 
 
-def test_every_negative_control_still_fails_on_the_criterion_both_readers_named(rows, plans):
+def test_every_negative_control_still_fails_on_the_criterion_both_readers_named(rows):
     controls = [row for row in rows if row["control"]]
     assert len(controls) == 5
     for row in controls:
         expected = {tuple(value) for value in row["expected"].values()}
         assert len(expected) == 1
         [(verdict, criterion)] = expected
-        verdicts = after(row, plans)
+        verdicts = after(row)
         assert [(item["verdict"], item["criterion"]) for item in verdicts] == [(verdict, criterion)] * 3, row["name"]
         assert all(item["verdict"] == "fail" for item in before(row))
 
 
-def test_a_fitting_change_short_of_delivery_is_never_reported_as_a_phase_mismatch(rows, plans):
+def test_a_fitting_change_short_of_delivery_is_never_reported_as_a_phase_mismatch(rows):
     for row in rows:
         if row["kind"] == "delivered" and not row["control"]:
-            for item in after(row, plans):
+            for item in after(row):
                 assert item["criterion"] in (None, "delivery"), row["name"]
                 assert "may not fit the phase" not in item["reason"]
 

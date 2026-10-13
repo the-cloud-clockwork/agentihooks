@@ -1033,10 +1033,10 @@ class TestPlanCheck:
         [record] = [json.loads(line) for line in (tmp_path / SLUG / "gates" / "intent" / "history.jsonl").open()]
         assert record["agent"] == ""
 
-    def test_the_tick_still_judges_the_pull_request_after_a_planned_pass(self, tmp_path, asks):
+    def test_the_tick_still_judges_the_pull_request_after_a_planned_pass(self, tmp_path, asks, monkeypatch):
         asks(planned_ask([]))
         intent.plan_check(SLUG, UNOPENED, TASK, TRACED, "enforce", NOW, home=tmp_path)
-        asks(JUDGE)
+        monkeypatch.setattr(intent, "judged", JUDGED)
         got = run_pass(tmp_path, usable=0.1)
         assert got.viewed == [URL]
         assert "planned" not in verdicts(tmp_path).read(TASK)

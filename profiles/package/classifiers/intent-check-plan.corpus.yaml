@@ -5,6 +5,8 @@ notes:
   after: the plan stage questions aligned, covers and weakens on the planned pieces, with the plan chunk questions when the
     task has a chunk; same thresholds
   sampled: 2026-10-13 through the configured classifier, liquid-d1, both sides in the same run
+  scrubbed: internal names in the plan states were replaced by plain words, and the after side re-sampled three times on the
+    replaced state; the phase fit cohort fixture keeps the exact inputs
 cases:
 - name: cohort-4-cxc7
   state:
@@ -53,9 +55,9 @@ cases:
     - tests/swarm
     - tests/swarm/test_managed_lifecycle.py
     plan_lines: 553-569
-    plan_chunk: "<!-- slice: cxc7 -->\n### cxc7 — CXCH-06b managed-execution liveness, retire and successors (source §10 lifecycle)\n\
-      \n- **Lane/kind:** eng / code. **Depends:** cxc6. **Territory:** `scripts/swarm/runtime.py` (`live_names`, `reported`,\
-      \ `bindings`, conversation discovery for managed mode), `scripts/swarm/live_binding.py`, `scripts/swarm/launch_check.py`,\
+    plan_chunk: "<!-- slice: cxc7 -->\n### cxc7 — CXCH-06b managed-execution liveness, retire and successors (source section\
+      \ 10 lifecycle)\n\n- **Lane/kind:** eng / code. **Depends:** cxc6. **Territory:** `scripts/swarm/runtime.py` (`live_names`,\
+      \ `reported`, `bindings`, conversation discovery for managed mode), `scripts/swarm/live_binding.py`, `scripts/swarm/launch_check.py`,\
       \ `scripts/swarm/idle.py`, `scripts/swarm/reaper.py`, `scripts/swarm/resume.py`, `tests/swarm/`.\n- **Change:**\n  -\
       \ **Liveness.**\n    - Managed mode observes the server and thread, not the pane.\n    - Runtime idle is distinguished\
       \ from productive waiting.\n  - **Retire.** Retirement uses the recorded process group and start identity.\n  - **Successors.**\
@@ -67,203 +69,203 @@ cases:
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 393
+    latency_ms: 797
     answers:
       aligned:
         type: noul
-        noul: 0.9796676450248561
+        noul: 0.9820137875375574
       covers:
         type: noul
-        noul: 0.5312094030599657
+        noul: 0.7057850278370112
       weakens:
         type: noul
-        noul: 0.022977365895758564
+        noul: 0.017986210488481234
       underdelivers:
         type: noul
-        noul: 0.817574471748733
+        noul: 0.7310585434730501
       overdelivers:
         type: noul
-        noul: 0.7981867873410141
+        noul: 0.8354835411997897
       misses_line_553:
         type: noul
-        noul: 0.019124038707532997
+        noul: 0.02595735757455145
       misses_line_554:
         type: noul
-        noul: 0.0024726229728655185
+        noul: 0.0017007227403306115
       misses_line_556:
         type: noul
-        noul: 0.24508500210441886
+        noul: 0.7981867633375311
       misses_line_557:
         type: noul
-        noul: 0.02297737174989824
+        noul: 0.1008786132690879
       misses_line_558:
         type: noul
-        noul: 0.008061993077410599
+        noul: 0.02758528322607434
       misses_line_559:
         type: noul
-        noul: 0.12592276647524683
+        noul: 0.035144845642852716
       misses_line_560:
         type: noul
-        noul: 0.02297737225168171
+        noul: 0.07159119647329527
       misses_line_561:
         type: noul
-        noul: 0.0373268854700467
+        noul: 0.042087725512577126
       misses_line_562:
         type: noul
-        noul: 0.00029595721050668084
+        noul: 0.027585282026933125
       misses_line_563:
         type: noul
-        noul: 0.0446808731348684
+        noul: 0.05665241575163437
       misses_line_564:
         type: noul
-        noul: 0.050330634378071046
+        noul: 0.09009300251274102
       misses_line_565:
         type: noul
-        noul: 0.34864513533394575
+        noul: 0.14033624589467186
       misses_line_566:
         type: noul
-        noul: 0.15610489351941398
+        noul: 0.0900930073989066
       misses_line_567:
         type: noul
-        noul: 0.027585283625788087
+        noul: 0.042087729717900216
       misses_line_568:
         type: noul
-        noul: 0.004070137534687356
+        noul: 0.029312227359491745
       misses_line_569:
         type: noul
-        noul: 0.0534033328129234
+        noul: 0.08509904500702024
   - source: liquid-d1
-    latency_ms: 344
+    latency_ms: 440
     answers:
       aligned:
         type: noul
-        noul: 0.9796676450248561
+        noul: 0.980875960873186
       covers:
         type: noul
-        noul: 0.5
+        noul: 0.5312093733737563
       weakens:
         type: noul
-        noul: 0.019124036750888904
+        noul: 0.04468087790523244
+      underdelivers:
+        type: noul
+        noul: 0.7981867729389246
+      overdelivers:
+        type: noul
+        noul: 0.7772998611746911
+      misses_line_553:
+        type: noul
+        noul: 0.03114383323253478
+      misses_line_554:
+        type: noul
+        noul: 0.0028009270503612984
+      misses_line_556:
+        type: noul
+        noul: 0.407333428824591
+      misses_line_557:
+        type: noul
+        noul: 0.06754669301670263
+      misses_line_558:
+        type: noul
+        noul: 0.010328154880140649
+      misses_line_559:
+        type: noul
+        noul: 0.02297737141537594
+      misses_line_560:
+        type: noul
+        noul: 0.07585818106587033
+      misses_line_561:
+        type: noul
+        noul: 0.05340333130637379
+      misses_line_562:
+        type: noul
+        noul: 0.00970847598005333
+      misses_line_563:
+        type: noul
+        noul: 0.0015978457079627386
+      misses_line_564:
+        type: noul
+        noul: 0.10087862002692255
+      misses_line_565:
+        type: noul
+        noul: 0.11279540479169524
+      misses_line_566:
+        type: noul
+        noul: 0.07159120142539066
+      misses_line_567:
+        type: noul
+        noul: 0.014957086812694342
+      misses_line_568:
+        type: noul
+        noul: 0.009125634357493535
+      misses_line_569:
+        type: noul
+        noul: 0.13296424706933604
+  - source: liquid-d1
+    latency_ms: 539
+    answers:
+      aligned:
+        type: noul
+        noul: 0.9830850898925754
+      covers:
+        type: noul
+        noul: 0.5926665999540697
+      weakens:
+        type: noul
+        noul: 0.05033062547510079
       underdelivers:
         type: noul
         noul: 0.7772998663336157
       overdelivers:
         type: noul
-        noul: 0.7981867873410141
+        noul: 0.7772998508568416
       misses_line_553:
         type: noul
-        noul: 0.019124038707532997
+        noul: 0.015906392411575272
       misses_line_554:
         type: noul
-        noul: 0.0024726229728655185
+        noul: 0.0006263340182005267
       misses_line_556:
         type: noul
-        noul: 0.24508500210441886
+        noul: 0.46879061178313897
       misses_line_557:
         type: noul
-        noul: 0.02297737174989824
+        noul: 0.01590639031229368
       misses_line_558:
         type: noul
-        noul: 0.008061993077410599
+        noul: 0.01406362817963978
       misses_line_559:
         type: noul
-        noul: 0.12592276647524683
+        noul: 0.02297737141537594
       misses_line_560:
         type: noul
-        noul: 0.02297737225168171
+        noul: 0.10669058116389178
       misses_line_561:
         type: noul
-        noul: 0.0373268854700467
+        noul: 0.04742586846527418
       misses_line_562:
         type: noul
-        noul: 0.00029595721050668084
+        noul: 0.00970847598005333
       misses_line_563:
         type: noul
-        noul: 0.0446808731348684
+        noul: 0.0018102112887254855
       misses_line_564:
         type: noul
-        noul: 0.050330634378071046
+        noul: 0.1127953943533099
       misses_line_565:
         type: noul
-        noul: 0.34864513533394575
+        noul: 0.24508501864634827
       misses_line_566:
         type: noul
-        noul: 0.15610489351941398
+        noul: 0.056652426900697224
       misses_line_567:
         type: noul
-        noul: 0.02033234963246576
+        noul: 0.015906389262652993
       misses_line_568:
         type: noul
-        noul: 0.0004583129552451567
+        noul: 0.00970847798573643
       misses_line_569:
         type: noul
-        noul: 0.0534033328129234
-  - source: liquid-d1
-    latency_ms: 381
-    answers:
-      aligned:
-        type: noul
-        noul: 0.9796676450248561
-      covers:
-        type: noul
-        noul: 0.5
-      weakens:
-        type: noul
-        noul: 0.019124036750888904
-      underdelivers:
-        type: noul
-        noul: 0.7772998663336157
-      overdelivers:
-        type: noul
-        noul: 0.7981867969424066
-      misses_line_553:
-        type: noul
-        noul: 0.04468086582031114
-      misses_line_554:
-        type: noul
-        noul: 0.0024726229728655185
-      misses_line_556:
-        type: noul
-        noul: 0.32082130082460697
-      misses_line_557:
-        type: noul
-        noul: 0.005554925609156401
-      misses_line_558:
-        type: noul
-        noul: 0.044680872180795646
-      misses_line_559:
-        type: noul
-        noul: 0.047425867792089564
-      misses_line_560:
-        type: noul
-        noul: 0.02033235363947422
-      misses_line_561:
-        type: noul
-        noul: 0.0373268854700467
-      misses_line_562:
-        type: noul
-        noul: 0.00029595721050668084
-      misses_line_563:
-        type: noul
-        noul: 0.006289900367283784
-      misses_line_564:
-        type: noul
-        noul: 0.06371498802942316
-      misses_line_565:
-        type: noul
-        noul: 0.320821326799715
-      misses_line_566:
-        type: noul
-        noul: 0.10669060104662924
-      misses_line_567:
-        type: noul
-        noul: 0.02033234963246576
-      misses_line_568:
-        type: noul
-        noul: 0.0004583129552451567
-      misses_line_569:
-        type: noul
-        noul: 0.0534033328129234
+        noul: 0.23370634623958197
   baseline:
   - verdict: fail
   - verdict: fail
@@ -283,7 +285,7 @@ cases:
         while never touching launch_check.py or resume.py. The two folded items ('a launch that fails after admission...',
         'a degraded Codex push pump reconnects with backoff') are covered by planned piece 3, and phase_fit holds since the
         task serves 'Idle or busy Codex agents receive inbox items in their live thread.'
-    input_digest: 843a3f36ec6bd983
+    input_digest: cbb71e015680259b
     baseline_input_digest: c729728adabffccd
 - name: cohort-5-t600
   state:
@@ -292,9 +294,9 @@ cases:
       health.'
     phase: 'Throughput: runners, seats and honest stats'
     phase_intent: 'Operator order: required checks stop waiting on the GitHub hosted job limit by moving onto an isolated
-      Anton runner set that only the operator, his apps and his tokens can ever reach; engineer seats are released while checks
-      and the merge queue run; claim wait measures real seat shortage; the page keeps the effort range and caps it is given;
-      the master seat can ask questions and submit plans.'
+      isolated runner set that only the operator, his apps and his tokens can ever reach; engineer seats are released while
+      checks and the merge queue run; claim wait measures real seat shortage; the page keeps the effort range and caps it
+      is given; the master seat can ask questions and submit plans.'
     task: Dev push runs reuse the merge queue unit results for the same commit
     task_text: 'Parent: the throughput plan, required checks stop waiting on runners. Measured by the runner wait task: every
       push to dev reran the full unit suite on a commit whose merge queue run had already passed, thirty of thirty push runs
@@ -337,41 +339,41 @@ cases:
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 277
+    latency_ms: 824
     answers:
       aligned:
         type: noul
-        noul: 0.9953904283334108
+        noul: 0.9964063975252927
       covers:
         type: noul
-        noul: 0.9688561667674652
-      weakens:
-        type: noul
-        noul: 0.009708476194947928
-  - source: liquid-d1
-    latency_ms: 247
-    answers:
-      aligned:
-        type: noul
-        noul: 0.9953904283334108
-      covers:
-        type: noul
-        noul: 0.9688561667674652
-      weakens:
-        type: noul
-        noul: 0.009708476194947928
-  - source: liquid-d1
-    latency_ms: 255
-    answers:
-      aligned:
-        type: noul
-        noul: 0.9961755164972911
-      covers:
-        type: noul
-        noul: 0.9603611631680359
+        noul: 0.9626731158685837
       weakens:
         type: noul
         noul: 0.01691491277114969
+  - source: liquid-d1
+    latency_ms: 275
+    answers:
+      aligned:
+        type: noul
+        noul: 0.9964063975252927
+      covers:
+        type: noul
+        noul: 0.9626731158685837
+      weakens:
+        type: noul
+        noul: 0.01691491277114969
+  - source: liquid-d1
+    latency_ms: 381
+    answers:
+      aligned:
+        type: noul
+        noul: 0.9964063970050677
+      covers:
+        type: noul
+        noul: 0.9648551495568568
+      weakens:
+        type: noul
+        noul: 0.020332348593611837
   baseline:
   - verdict: fail
   - verdict: fail
@@ -388,7 +390,7 @@ cases:
       spec: Task text requires reuse of queue results with fallback on mismatch and 'peak runner seconds measured the same
         way before and after'; pieces 1-5 build the reuse/fallback seam and piece 6 explicitly measures 'peak runner seconds
         ... before and after', so every promised behaviour is present and nothing loosens a check.
-    input_digest: 8572e48ae0589b35
+    input_digest: e8c3aa1de6f959bf
     baseline_input_digest: 06b82036a4d7f0d7
 - name: cohort-6-t600
   state:
@@ -397,9 +399,9 @@ cases:
       health.'
     phase: 'Throughput: runners, seats and honest stats'
     phase_intent: 'Operator order: required checks stop waiting on the GitHub hosted job limit by moving onto an isolated
-      Anton runner set that only the operator, his apps and his tokens can ever reach; engineer seats are released while checks
-      and the merge queue run; claim wait measures real seat shortage; the page keeps the effort range and caps it is given;
-      the master seat can ask questions and submit plans.'
+      isolated runner set that only the operator, his apps and his tokens can ever reach; engineer seats are released while
+      checks and the merge queue run; claim wait measures real seat shortage; the page keeps the effort range and caps it
+      is given; the master seat can ask questions and submit plans.'
     task: Dev push runs reuse the merge queue unit results for the same commit
     task_text: 'Parent: the throughput plan, required checks stop waiting on runners. Measured by the runner wait task: every
       push to dev reran the full unit suite on a commit whose merge queue run had already passed, thirty of thirty push runs
@@ -420,41 +422,41 @@ cases:
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 272
+    latency_ms: 274
     answers:
       aligned:
         type: noul
-        noul: 0.984093611378794
+        noul: 0.9883127440266959
       covers:
         type: noul
-        noul: 0.7057850278370112
+        noul: 0.5926665999540697
       weakens:
         type: noul
-        noul: 0.010328150082314313
-  - source: liquid-d1
-    latency_ms: 272
-    answers:
-      aligned:
-        type: noul
-        noul: 0.984093611378794
-      covers:
-        type: noul
-        noul: 0.7057850278370112
-      weakens:
-        type: noul
-        noul: 0.010328150082314313
+        noul: 0.02442308863393106
   - source: liquid-d1
     latency_ms: 266
     answers:
       aligned:
         type: noul
-        noul: 0.9840936086380656
+        noul: 0.9883127440266959
       covers:
         type: noul
-        noul: 0.7431680086124811
+        noul: 0.5926665999540697
       weakens:
         type: noul
-        noul: 0.009125637119697194
+        noul: 0.02442308863393106
+  - source: liquid-d1
+    latency_ms: 281
+    answers:
+      aligned:
+        type: noul
+        noul: 0.9928785708854985
+      covers:
+        type: noul
+        noul: 0.6654105322061351
+      weakens:
+        type: noul
+        noul: 0.010986944897465581
   baseline:
   - verdict: fail
   - verdict: fail
@@ -470,7 +472,7 @@ cases:
         immediately after this prerequisite merges', so it does not implement the reuse seam itself, the both-ways proof ('one
         dev push reusing a queue run... and a planted mismatch'), or the 'peak runner seconds measured the same way before
         and after' the task text requires.
-    input_digest: e7a09f6686388030
+    input_digest: cb4107b3aa76eda9
     baseline_input_digest: c12f6b1634d13f70
 - name: cohort-8-t603
   state:
@@ -479,9 +481,9 @@ cases:
       health.'
     phase: 'Throughput: runners, seats and honest stats'
     phase_intent: 'Operator order: required checks stop waiting on the GitHub hosted job limit by moving onto an isolated
-      Anton runner set that only the operator, his apps and his tokens can ever reach; engineer seats are released while checks
-      and the merge queue run; claim wait measures real seat shortage; the page keeps the effort range and caps it is given;
-      the master seat can ask questions and submit plans.'
+      isolated runner set that only the operator, his apps and his tokens can ever reach; engineer seats are released while
+      checks and the merge queue run; claim wait measures real seat shortage; the page keeps the effort range and caps it
+      is given; the master seat can ask questions and submit plans.'
     task: Open source runner slots refill faster between jobs
     task_text: 'Parent: the throughput plan, required checks stop waiting on runners within the operator''s forty node ceiling.
       Measured by the runner wait task: at peak each open source runner slot sits about thirty seconds between one job ending
@@ -503,41 +505,41 @@ cases:
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 340
+    latency_ms: 262
     answers:
       aligned:
         type: noul
-        noul: 0.9850429137910527
+        noul: 0.9648551500621507
       covers:
         type: noul
-        noul: 0.46879062662624377
+        noul: 0.7549149868676283
       weakens:
         type: noul
-        noul: 0.008577485920584663
+        noul: 0.003376612181157308
   - source: liquid-d1
-    latency_ms: 260
+    latency_ms: 1065
     answers:
       aligned:
         type: noul
-        noul: 0.9433475802665577
+        noul: 0.9820137856951932
       covers:
         type: noul
-        noul: 0.6513548511303336
+        noul: 0.6926419958239132
       weakens:
         type: noul
-        noul: 0.010986944573626636
+        noul: 0.009125634963830854
   - source: liquid-d1
-    latency_ms: 349
+    latency_ms: 313
     answers:
       aligned:
         type: noul
-        noul: 0.9850429137910527
+        noul: 0.9648551500621507
       covers:
         type: noul
-        noul: 0.46879062662624377
+        noul: 0.7549149868676283
       weakens:
         type: noul
-        noul: 0.008577485920584663
+        noul: 0.003376612181157308
   baseline:
   - verdict: fail
   - verdict: fail
@@ -554,7 +556,7 @@ cases:
         slot at peak, measured the same way before and after'', but neither piece records or measures that gap before and
         after the change -- piece 2 only ''observes the real startup command in CI before and after'', not the timing metric
         itself.'
-    input_digest: fdaa5de88dbb7e75
+    input_digest: 947c938ef8a8c041
     baseline_input_digest: e7b9590b82f306d7
 - name: cohort-12-t286
   state:
@@ -588,31 +590,7 @@ cases:
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 249
-    answers:
-      aligned:
-        type: noul
-        noul: 0.9997388095870334
-      covers:
-        type: noul
-        noul: 0.9850429147241161
-      weakens:
-        type: noul
-        noul: 0.0446808766331353
-  - source: liquid-d1
-    latency_ms: 258
-    answers:
-      aligned:
-        type: noul
-        noul: 0.9997965731170324
-      covers:
-        type: noul
-        noul: 0.985936370167423
-      weakens:
-        type: noul
-        noul: 0.0534033328129234
-  - source: liquid-d1
-    latency_ms: 266
+    latency_ms: 290
     answers:
       aligned:
         type: noul
@@ -623,6 +601,30 @@ cases:
       weakens:
         type: noul
         noul: 0.0446808766331353
+  - source: liquid-d1
+    latency_ms: 256
+    answers:
+      aligned:
+        type: noul
+        noul: 0.9995416871590947
+      covers:
+        type: noul
+        noul: 0.9850429147241161
+      weakens:
+        type: noul
+        noul: 0.0446808766331353
+  - source: liquid-d1
+    latency_ms: 292
+    answers:
+      aligned:
+        type: noul
+        noul: 0.9991440993090971
+      covers:
+        type: noul
+        noul: 0.982013788985129
+      weakens:
+        type: noul
+        noul: 0.033085978388704126
   baseline:
   - verdict: fail
   - verdict: fail
@@ -673,11 +675,11 @@ cases:
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 253
+    latency_ms: 259
     answers:
       aligned:
         type: noul
-        noul: 0.9995694428729825
+        noul: 0.9996200155595363
       covers:
         type: noul
         noul: 0.994088931669123
@@ -685,19 +687,19 @@ cases:
         type: noul
         noul: 0.022977367902892003
   - source: liquid-d1
-    latency_ms: 278
+    latency_ms: 390
     answers:
       aligned:
         type: noul
-        noul: 0.9995694428729825
+        noul: 0.9995121427328042
       covers:
         type: noul
-        noul: 0.9947798728749137
+        noul: 0.9973683265629025
       weakens:
         type: noul
-        noul: 0.03308597648187432
+        noul: 0.10087860921438731
   - source: liquid-d1
-    latency_ms: 259
+    latency_ms: 275
     answers:
       aligned:
         type: noul
@@ -758,41 +760,41 @@ cases:
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 261
+    latency_ms: 267
     answers:
       aligned:
         type: noul
-        noul: 0.9988304899264181
+        noul: 0.9996646498164571
       covers:
         type: noul
-        noul: 0.9850429143947996
+        noul: 0.9859363766758626
       weakens:
         type: noul
-        noul: 0.03732688306051187
+        noul: 0.02758528702335517
   - source: liquid-d1
-    latency_ms: 266
+    latency_ms: 357
     answers:
       aligned:
         type: noul
-        noul: 0.9987551567974916
+        noul: 0.999620015571564
       covers:
         type: noul
-        noul: 0.9850429129677613
+        noul: 0.9875683502444729
       weakens:
         type: noul
-        noul: 0.07585817793199003
+        noul: 0.037326884131416216
   - source: liquid-d1
-    latency_ms: 264
+    latency_ms: 338
     answers:
       aligned:
         type: noul
-        noul: 0.9991959139296838
+        noul: 0.9993736658069132
       covers:
         type: noul
-        noul: 0.9875683515250744
+        noul: 0.985936375642777
       weakens:
         type: noul
-        noul: 0.05340333582602272
+        noul: 0.05340333130637379
   baseline:
   - verdict: fail
   - verdict: fail
@@ -815,9 +817,9 @@ cases:
       health.'
     phase: 'Throughput: runners, seats and honest stats'
     phase_intent: 'Operator order: required checks stop waiting on the GitHub hosted job limit by moving onto an isolated
-      Anton runner set that only the operator, his apps and his tokens can ever reach; engineer seats are released while checks
-      and the merge queue run; claim wait measures real seat shortage; the page keeps the effort range and caps it is given;
-      the master seat can ask questions and submit plans.'
+      isolated runner set that only the operator, his apps and his tokens can ever reach; engineer seats are released while
+      checks and the merge queue run; claim wait measures real seat shortage; the page keeps the effort range and caps it
+      is given; the master seat can ask questions and submit plans.'
     task: Queue coverage baseline and ratchet share one runner
     task_text: 'Parent: the throughput plan, a correct change merges within fifteen minutes. Measured on the access audit
       merge queue run: the coverage baseline waited three hundred fifty two seconds for a runner and ran thirty four, then
@@ -853,41 +855,41 @@ cases:
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 277
+    latency_ms: 325
     answers:
       aligned:
         type: noul
-        noul: 0.9944450759136715
+        noul: 0.9953904280941112
       covers:
         type: noul
-        noul: 0.9579122702820998
+        noul: 0.9669140201811735
       weakens:
         type: noul
-        noul: 0.03308598029553404
+        noul: 0.025957356444287677
   - source: liquid-d1
-    latency_ms: 276
+    latency_ms: 253
     answers:
       aligned:
         type: noul
-        noul: 0.9919380082036082
+        noul: 0.9928785709381793
       covers:
         type: noul
-        noul: 0.9579122702820998
+        noul: 0.9626731137267751
       weakens:
         type: noul
-        noul: 0.024423085793578995
+        noul: 0.014957087910416167
   - source: liquid-d1
-    latency_ms: 276
+    latency_ms: 254
     answers:
       aligned:
         type: noul
-        noul: 0.9919380082036082
+        noul: 0.9928785709381793
       covers:
         type: noul
-        noul: 0.9579122702820998
+        noul: 0.9626731137267751
       weakens:
         type: noul
-        noul: 0.03732688306051187
+        noul: 0.014957087910416167
   baseline:
   - verdict: pass
   - verdict: pass
@@ -904,7 +906,7 @@ cases:
         drop still red, and the pull request merged'; piece 3 consolidates baseline and ratchet onto one job/runner with separate
         outcomes and piece 4 proves 'a planted covered line loss red' on that single allocation, with piece 2 explicitly avoiding
         'weakening other gate results'.
-    input_digest: 4e1ae8a0ffdc1944
+    input_digest: 70513cf123dca676
     baseline_input_digest: 5a8f4f58855e5665
 - name: cohort-19-t302
   state:
@@ -940,41 +942,41 @@ cases:
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 259
+    latency_ms: 251
     answers:
       aligned:
         type: noul
-        noul: 0.9966233874678238
+        noul: 0.9978172831043551
       covers:
         type: noul
-        noul: 0.9724147193720649
+        noul: 0.9706877679766944
       weakens:
         type: noul
-        noul: 0.0008559006622312217
+        noul: 0.0015011823460801075
   - source: liquid-d1
-    latency_ms: 267
+    latency_ms: 257
     answers:
       aligned:
         type: noul
-        noul: 0.9971990722733108
+        noul: 0.9947798741129918
       covers:
         type: noul
         noul: 0.9433475699138559
       weakens:
         type: noul
-        noul: 0.0029810329070086195
+        noul: 0.0013250222989039011
   - source: liquid-d1
-    latency_ms: 261
+    latency_ms: 250
     answers:
       aligned:
         type: noul
-        noul: 0.9971990722733108
+        noul: 0.9975273770822652
       covers:
         type: noul
-        noul: 0.952574132881095
+        noul: 0.9783846702311004
       weakens:
         type: noul
-        noul: 0.005220125384038879
+        noul: 0.0018102109454263984
   baseline:
   - verdict: fail
   - verdict: fail
@@ -1028,19 +1030,7 @@ cases:
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 261
-    answers:
-      aligned:
-        type: noul
-        noul: 0.9973683258784463
-      covers:
-        type: noul
-        noul: 0.9724147205712059
-      weakens:
-        type: noul
-        noul: 0.002323162937080077
-  - source: liquid-d1
-    latency_ms: 374
+    latency_ms: 278
     answers:
       aligned:
         type: noul
@@ -1052,17 +1042,29 @@ cases:
         type: noul
         noul: 0.0028009269255008114
   - source: liquid-d1
-    latency_ms: 260
+    latency_ms: 258
     answers:
       aligned:
         type: noul
-        noul: 0.997676837736399
+        noul: 0.9976768380904073
       covers:
         type: noul
-        noul: 0.966914017797636
+        noul: 0.9783846694432721
       weakens:
         type: noul
-        noul: 0.005554923386650931
+        noul: 0.0052201245328602945
+  - source: liquid-d1
+    latency_ms: 259
+    answers:
+      aligned:
+        type: noul
+        noul: 0.9973683265922364
+      covers:
+        type: noul
+        noul: 0.9648551576415562
+      weakens:
+        type: noul
+        noul: 0.0018102105415452035
   baseline:
   - verdict: fail
   - verdict: fail
@@ -1105,19 +1107,19 @@ cases:
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 254
+    latency_ms: 252
     answers:
       aligned:
         type: noul
-        noul: 0.9956684971118606
+        noul: 0.9966233876119922
       covers:
         type: noul
-        noul: 0.835483561681553
+        noul: 0.8670357666736773
       weakens:
         type: noul
-        noul: 0.002050743722892141
+        noul: 0.0012448431909292633
   - source: liquid-d1
-    latency_ms: 271
+    latency_ms: 325
     answers:
       aligned:
         type: noul
@@ -1129,17 +1131,17 @@ cases:
         type: noul
         noul: 0.0021827165751612514
   - source: liquid-d1
-    latency_ms: 267
+    latency_ms: 815
     answers:
       aligned:
         type: noul
-        noul: 0.9914225136675813
+        noul: 0.9933071508588627
       covers:
         type: noul
-        noul: 0.8872045966995028
+        noul: 0.9324533135530545
       weakens:
         type: noul
-        noul: 0.001410358139850301
+        noul: 0.0021827165751612514
   baseline:
   - verdict: pass
   - verdict: pass
@@ -1183,41 +1185,41 @@ cases:
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 264
+    latency_ms: 986
     answers:
       aligned:
         type: noul
-        noul: 0.9953904276838831
+        noul: 0.9890130563978902
       covers:
         type: noul
-        noul: 0.9669140239948331
+        noul: 0.960361162033533
       weakens:
         type: noul
-        noul: 0.02758528062793511
+        noul: 0.010986943602109868
   - source: liquid-d1
-    latency_ms: 262
+    latency_ms: 338
     answers:
       aligned:
         type: noul
-        noul: 0.9973683265189018
+        noul: 0.9890130563978902
       covers:
         type: noul
-        noul: 0.9626731121204184
+        noul: 0.960361162033533
       weakens:
         type: noul
-        noul: 0.013222822141165222
+        noul: 0.010986943602109868
   - source: liquid-d1
-    latency_ms: 271
+    latency_ms: 362
     answers:
       aligned:
         type: noul
-        noul: 0.9973683265189018
+        noul: 0.9984021544168387
       covers:
         type: noul
-        noul: 0.9626731121204184
+        noul: 0.9706877726405082
       weakens:
         type: noul
-        noul: 0.013222822141165222
+        noul: 0.007121429799353669
   baseline:
   - verdict: fail
   - verdict: fail
@@ -1241,18 +1243,18 @@ cases:
       health.'
     phase: 'Throughput: runners, seats and honest stats'
     phase_intent: 'Operator order: required checks stop waiting on the GitHub hosted job limit by moving onto an isolated
-      Anton runner set that only the operator, his apps and his tokens can ever reach; engineer seats are released while checks
-      and the merge queue run; claim wait measures real seat shortage; the page keeps the effort range and caps it is given;
-      the master seat can ask questions and submit plans.'
-    task: Worker image job on Anton finishes within the slowest unit shard
-    task_text: 'Parent: trusted Anton throughput plan; operator order no slower CI. Measured: the worker image job took 189
-      seconds on hosted runners on the last dev push and 423 seconds on Anton in the remaining jobs pull request, 406 of them
-      in its clean build and offline startup step, while the slowest unit shard took 249 seconds. Find why the build is slower
-      on Anton and fix it, with build cache through the shared BuildKit or by splitting independent worker proofs into parallel
-      jobs. Seam: the swarm node smoke workflow and its workflow test. Done when merged and a dev push run shows the worker
-      image job at or under the slowest unit shard, measured before and after the same way.'
+      isolated runner set that only the operator, his apps and his tokens can ever reach; engineer seats are released while
+      checks and the merge queue run; claim wait measures real seat shortage; the page keeps the effort range and caps it
+      is given; the master seat can ask questions and submit plans.'
+    task: Worker image job on isolated finishes within the slowest unit shard
+    task_text: 'Parent: trusted isolated throughput plan; operator order no slower CI. Measured: the worker image job took
+      189 seconds on hosted runners on the last dev push and 423 seconds on isolated in the remaining jobs pull request, 406
+      of them in its clean build and offline startup step, while the slowest unit shard took 249 seconds. Find why the build
+      is slower on isolated and fix it, with build cache through the shared BuildKit or by splitting independent worker proofs
+      into parallel jobs. Seam: the swarm node smoke workflow and its workflow test. Done when merged and a dev push run shows
+      the worker image job at or under the slowest unit shard, measured before and after the same way.'
     planned_pieces:
-    - Record Anton build stage durations and the matching slowest unit shard from CI logs | swarm worker image smoke, task
+    - Record isolated build stage durations and the matching slowest unit shard from CI logs | swarm worker image smoke, task
       proof | distinguish build time from proof serialization and measure the same boundaries before and after
     - Add CI contracts accepting the current workflow and parallel proof routing, plus a fake Docker harness covering selected
       commands and failure propagation | image manifest workflow contract, worker image parallel proof tests | prove the new
@@ -1280,41 +1282,41 @@ cases:
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 260
+    latency_ms: 254
     answers:
       aligned:
         type: noul
-        noul: 0.9914225141744539
+        noul: 0.9924227584239903
       covers:
         type: noul
-        noul: 0.9553191278192044
+        noul: 0.9465966694469009
       weakens:
         type: noul
-        noul: 0.05665242052980391
+        noul: 0.029312236687120234
   - source: liquid-d1
-    latency_ms: 256
+    latency_ms: 293
     answers:
       aligned:
         type: noul
-        noul: 0.9914225141744539
+        noul: 0.9919380090675509
       covers:
         type: noul
-        noul: 0.9553191278192044
+        noul: 0.9465966694469009
       weakens:
         type: noul
-        noul: 0.05665242052980391
+        noul: 0.029312236687120234
   - source: liquid-d1
-    latency_ms: 257
+    latency_ms: 262
     answers:
       aligned:
         type: noul
-        noul: 0.9914225141744539
+        noul: 0.9919380090675509
       covers:
         type: noul
-        noul: 0.9553191278192044
+        noul: 0.9525741335542797
       weakens:
         type: noul
-        noul: 0.05665242052980391
+        noul: 0.03308597457504463
   baseline:
   - verdict: fail
   - verdict: fail
@@ -1324,7 +1326,7 @@ cases:
       plan stage state rebuilt from the exact masked traced plan input
     labels:
       standards: Task text allows either shared BuildKit caching or splitting independent worker proofs into parallel jobs
-        and wants the worker image job at or under the slowest unit shard, measured before/after; the pieces record Anton
+        and wants the worker image job at or under the slowest unit shard, measured before/after; the pieces record isolated
         build-stage durations and the matching shard (baseline), add red CI contracts and a fake Docker harness before implementation,
         split proof modes into a parallel matrix without weakening existing assertions, and finish by recording the matrix
         timing against the shard and parking only on the named external runner-move dependency.
@@ -1332,7 +1334,7 @@ cases:
         parallel jobs'; pieces 2-4 take the parallel-splitting path with CI proof of clean and planted-failure cases, piece
         1 records the before/after durations against the slowest unit shard, and piece 5 parks on a named open dependency
         rather than falsely claiming completion.
-    input_digest: 6181ea40a46330de
+    input_digest: af4b7abc7a9455e0
     baseline_input_digest: 5a6b7491f614d5cd
 - name: cohort-27-t624
   state:
@@ -1341,16 +1343,16 @@ cases:
       health.'
     phase: 'Throughput: runners, seats and honest stats'
     phase_intent: 'Operator order: required checks stop waiting on the GitHub hosted job limit by moving onto an isolated
-      Anton runner set that only the operator, his apps and his tokens can ever reach; engineer seats are released while checks
-      and the merge queue run; claim wait measures real seat shortage; the page keeps the effort range and caps it is given;
-      the master seat can ask questions and submit plans.'
-    task: Worker image job on Anton finishes within the slowest unit shard
-    task_text: 'Parent: trusted Anton throughput plan; operator order no slower CI. Measured: the worker image job took 189
-      seconds on hosted runners on the last dev push and 423 seconds on Anton in the remaining jobs pull request, 406 of them
-      in its clean build and offline startup step, while the slowest unit shard took 249 seconds. Find why the build is slower
-      on Anton and fix it, with build cache through the shared BuildKit or by splitting independent worker proofs into parallel
-      jobs. Seam: the swarm node smoke workflow and its workflow test. Done when merged and a dev push run shows the worker
-      image job at or under the slowest unit shard, measured before and after the same way.'
+      isolated runner set that only the operator, his apps and his tokens can ever reach; engineer seats are released while
+      checks and the merge queue run; claim wait measures real seat shortage; the page keeps the effort range and caps it
+      is given; the master seat can ask questions and submit plans.'
+    task: Worker image job on isolated finishes within the slowest unit shard
+    task_text: 'Parent: trusted isolated throughput plan; operator order no slower CI. Measured: the worker image job took
+      189 seconds on hosted runners on the last dev push and 423 seconds on isolated in the remaining jobs pull request, 406
+      of them in its clean build and offline startup step, while the slowest unit shard took 249 seconds. Find why the build
+      is slower on isolated and fix it, with build cache through the shared BuildKit or by splitting independent worker proofs
+      into parallel jobs. Seam: the swarm node smoke workflow and its workflow test. Done when merged and a dev push run shows
+      the worker image job at or under the slowest unit shard, measured before and after the same way.'
     planned_pieces:
     - Prove independent smoke modes and failure propagation red in CI | tests/test_worker_image_parallel_proof.py | keep every
       existing assertion and test selected commands before implementation
@@ -1373,41 +1375,41 @@ cases:
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 260
+    latency_ms: 464
     answers:
       aligned:
         type: noul
-        noul: 0.9820137914854798
+        noul: 0.9820137945122202
       covers:
         type: noul
-        noul: 0.9196425333801889
+        noul: 0.9525741261492485
       weakens:
         type: noul
-        noul: 0.021615334653436125
+        noul: 0.016914912275572885
   - source: liquid-d1
-    latency_ms: 276
+    latency_ms: 250
     answers:
       aligned:
         type: noul
-        noul: 0.9840936056057696
+        noul: 0.9840936075884248
       covers:
         type: noul
-        noul: 0.9241418137109955
+        noul: 0.9496693709637113
       weakens:
         type: noul
-        noul: 0.016914909797689063
+        noul: 0.044680871544747154
   - source: liquid-d1
-    latency_ms: 291
+    latency_ms: 252
     answers:
       aligned:
         type: noul
-        noul: 0.98677718145579
+        noul: 0.9840936075884248
       covers:
         type: noul
-        noul: 0.9196425333801889
+        noul: 0.9496693709637113
       weakens:
         type: noul
-        noul: 0.021615334653436125
+        noul: 0.044680871544747154
   baseline:
   - verdict: pass
   - verdict: fail
@@ -1422,7 +1424,7 @@ cases:
       spec: Same task text and parallel-splitting approach as cohort-26-t624; piece 1 proves modes red in CI, pieces 2-3 build
         and run the split proofs with 'final equality comparison', and piece 4 measures against unit shards and names the
         park condition ('park until the runner move merges'), matching 'measured before and after' in the task.
-    input_digest: 1a181890e5873b4e
+    input_digest: 690a0540f9d008d6
     baseline_input_digest: dd5f6ffcc2cb633e
 - name: cohort-28-t305
   state:
@@ -1452,35 +1454,35 @@ cases:
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 290
+    latency_ms: 256
     answers:
       aligned:
         type: noul
-        noul: 0.9553191275011801
+        noul: 0.9099070170319189
       covers:
         type: noul
-        noul: 0.9859363727501375
+        noul: 0.986777179608705
       weakens:
         type: noul
-        noul: 0.007121429799353669
+        noul: 0.001926734204843272
   - source: liquid-d1
-    latency_ms: 274
+    latency_ms: 244
     answers:
       aligned:
         type: noul
-        noul: 0.9399133569792658
+        noul: 0.9324532971286605
       covers:
         type: noul
-        noul: 0.9896718488515023
+        noul: 0.9875683460367808
       weakens:
         type: noul
-        noul: 0.0029810322869706376
+        noul: 0.009125637254438854
   - source: liquid-d1
-    latency_ms: 262
+    latency_ms: 365
     answers:
       aligned:
         type: noul
-        noul: 0.9433475802665577
+        noul: 0.9399133468805266
       covers:
         type: noul
         noul: 0.9859363762626283
@@ -1536,37 +1538,37 @@ cases:
     answers:
       aligned:
         type: noul
-        noul: 0.9579122777916049
+        noul: 0.9324532957208552
       covers:
         type: noul
-        noul: 0.9433475699138559
+        noul: 0.9740426443092215
       weakens:
         type: noul
-        noul: 0.005554924209801001
+        noul: 0.004070137232672753
   - source: liquid-d1
-    latency_ms: 273
+    latency_ms: 247
     answers:
       aligned:
         type: noul
-        noul: 0.977022630340866
+        noul: 0.936285012415044
       covers:
         type: noul
-        noul: 0.9755769088807607
+        noul: 0.9850429156022934
       weakens:
         type: noul
-        noul: 0.004609571769146091
+        noul: 0.005554923798225951
   - source: liquid-d1
-    latency_ms: 297
+    latency_ms: 249
     answers:
       aligned:
         type: noul
-        noul: 0.9706877656447871
+        noul: 0.9324533018213448
       covers:
         type: noul
-        noul: 0.9820137929330514
+        noul: 0.9850429156022934
       weakens:
         type: noul
-        noul: 0.0012448433947209745
+        noul: 0.005554923798225951
   baseline:
   - verdict: pass
   - verdict: fail
@@ -1588,11 +1590,11 @@ cases:
       health.'
     phase: 'Throughput: runners, seats and honest stats'
     phase_intent: 'Operator order: required checks stop waiting on the GitHub hosted job limit by moving onto an isolated
-      Anton runner set that only the operator, his apps and his tokens can ever reach; engineer seats are released while checks
-      and the merge queue run; claim wait measures real seat shortage; the page keeps the effort range and caps it is given;
-      the master seat can ask questions and submit plans.'
+      isolated runner set that only the operator, his apps and his tokens can ever reach; engineer seats are released while
+      checks and the merge queue run; claim wait measures real seat shortage; the page keeps the effort range and caps it
+      is given; the master seat can ask questions and submit plans.'
     task: Sonar job fails at once on a forbidden proxy response
-    task_text: 'Parent: trusted Anton throughput plan; a red check must report fast. Measured: when the Cloudflare Access
+    task_text: 'Parent: trusted isolated throughput plan; a red check must report fast. Measured: when the Cloudflare Access
       proxy answered forbidden, the sonar job spent three hundred three seconds retrying across two steps, and the second
       step ran after the first failed. A forbidden answer at 03:57 UTC passed on a rerun forty minutes later, so it is sometimes
       transient, and failures were not tied to one runner. Seam: the sonar retry helper retries a forbidden or unauthorized
@@ -1612,41 +1614,41 @@ cases:
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 279
+    latency_ms: 270
     answers:
       aligned:
         type: noul
-        noul: 0.9890130560335713
+        noul: 0.9902915257391033
       covers:
         type: noul
-        noul: 0.893309411735131
+        noul: 0.9324533069832973
       weakens:
         type: noul
-        noul: 0.013222820974585034
+        noul: 0.021615330241596613
   - source: liquid-d1
-    latency_ms: 257
+    latency_ms: 332
     answers:
       aligned:
         type: noul
-        noul: 0.984093606713724
+        noul: 0.9867771810183227
       covers:
         type: noul
-        noul: 0.9496693666902856
+        noul: 0.9241418283357702
       weakens:
         type: noul
-        noul: 0.011687260061114644
+        noul: 0.019124040664177288
   - source: liquid-d1
-    latency_ms: 243
+    latency_ms: 480
     answers:
       aligned:
         type: noul
-        noul: 0.984093606713724
+        noul: 0.975576911366069
       covers:
         type: noul
-        noul: 0.9496693666902856
+        noul: 0.9241418158002492
       weakens:
         type: noul
-        noul: 0.011687260061114644
+        noul: 0.014063625803542697
   baseline:
   - verdict: fail
   - verdict: fail
@@ -1662,7 +1664,7 @@ cases:
         then fails naming the response; the dependent step does not run after a startup failure'; piece 1 bounds retries to
         once and reports the denial, piece 2 stops the dependent step from running after startup failure, together producing
         the fast-fail the 'within forty five seconds' done clause needs.
-    input_digest: 3b098a8b330e2cd2
+    input_digest: bdfe66a1131fae5b
     baseline_input_digest: c62c609ba7811897
 - name: cohort-33-t153
   state:
@@ -1729,7 +1731,7 @@ cases:
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 308
+    latency_ms: 539
     answers:
       aligned:
         type: noul
@@ -1741,29 +1743,29 @@ cases:
         type: noul
         noul: 0.010328153433176918
   - source: liquid-d1
-    latency_ms: 303
+    latency_ms: 511
     answers:
       aligned:
         type: noul
         noul: 0.9796676477703992
       covers:
         type: noul
-        noul: 0.9688561694652216
+        noul: 0.9648551525886194
       weakens:
         type: noul
-        noul: 0.014957088129960537
+        noul: 0.01691491004547743
   - source: liquid-d1
-    latency_ms: 263
+    latency_ms: 281
     answers:
       aligned:
         type: noul
-        noul: 0.9796676470283605
+        noul: 0.9796676477703992
       covers:
         type: noul
-        noul: 0.9724147209709196
+        noul: 0.9796676487350494
       weakens:
         type: noul
-        noul: 0.014957088129960537
+        noul: 0.010328153433176918
   baseline:
   - verdict: pass
   - verdict: pass
@@ -1846,7 +1848,7 @@ cases:
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 287
+    latency_ms: 285
     answers:
       aligned:
         type: noul
@@ -1858,29 +1860,29 @@ cases:
         type: noul
         noul: 0.02033235304584329
   - source: liquid-d1
-    latency_ms: 241
+    latency_ms: 367
     answers:
       aligned:
         type: noul
-        noul: 0.9706877677647029
+        noul: 0.9859363749196173
       covers:
         type: noul
-        noul: 0.9820137892483239
+        noul: 0.9808759612924669
       weakens:
         type: noul
-        noul: 0.02033235452992065
+        noul: 0.025957354937269386
   - source: liquid-d1
-    latency_ms: 244
+    latency_ms: 273
     answers:
       aligned:
         type: noul
-        noul: 0.9706877677647029
+        noul: 0.9783846696008378
       covers:
         type: noul
-        noul: 0.9820137892483239
+        noul: 0.9830850897067342
       weakens:
         type: noul
-        noul: 0.02033235452992065
+        noul: 0.024423090054107213
   baseline:
   - verdict: fail
   - verdict: fail
@@ -1931,41 +1933,41 @@ cases:
   control: true
   samples:
   - source: liquid-d1
-    latency_ms: 273
+    latency_ms: 255
     answers:
       aligned:
         type: noul
-        noul: 8.481107268364401e-05
+        noul: 7.967300629965423e-05
       covers:
         type: noul
-        noul: 3.120189703924976e-05
+        noul: 5.829127608382254e-05
       weakens:
         type: noul
-        noul: 0.0033766128831950342
+        noul: 0.0062899026957163855
   - source: liquid-d1
-    latency_ms: 291
+    latency_ms: 260
     answers:
       aligned:
         type: noul
-        noul: 0.00011591939500032019
+        noul: 0.00027803106742334304
       covers:
         type: noul
-        noul: 5.829123862731098e-05
+        noul: 0.0001233945667937542
       weakens:
         type: noul
-        noul: 0.011687258339931112
+        noul: 0.006289901764343242
   - source: liquid-d1
-    latency_ms: 272
+    latency_ms: 240
     answers:
       aligned:
         type: noul
-        noul: 0.00011591939500032019
+        noul: 0.00021654394827426676
       covers:
         type: noul
-        noul: 5.829123862731098e-05
+        noul: 2.931155155330803e-05
       weakens:
         type: noul
-        noul: 0.017986213120429816
+        noul: 0.005220126312597491
   baseline:
   - verdict: fail
   - verdict: fail
@@ -1988,9 +1990,9 @@ cases:
       health.'
     phase: 'Throughput: runners, seats and honest stats'
     phase_intent: 'Operator order: required checks stop waiting on the GitHub hosted job limit by moving onto an isolated
-      Anton runner set that only the operator, his apps and his tokens can ever reach; engineer seats are released while checks
-      and the merge queue run; claim wait measures real seat shortage; the page keeps the effort range and caps it is given;
-      the master seat can ask questions and submit plans.'
+      isolated runner set that only the operator, his apps and his tokens can ever reach; engineer seats are released while
+      checks and the merge queue run; claim wait measures real seat shortage; the page keeps the effort range and caps it
+      is given; the master seat can ask questions and submit plans.'
     task: Dev push runs reuse the merge queue unit results for the same commit
     task_text: 'Parent: the throughput plan, required checks stop waiting on runners. Measured by the runner wait task: every
       push to dev reran the full unit suite on a commit whose merge queue run had already passed, thirty of thirty push runs
@@ -2016,41 +2018,41 @@ cases:
   control: true
   samples:
   - source: liquid-d1
-    latency_ms: 245
+    latency_ms: 268
     answers:
       aligned:
         type: noul
-        noul: 0.002323162833467871
+        noul: 0.017986212067650338
       covers:
         type: noul
-        noul: 0.0009697517656727683
+        noul: 0.0015978459694515933
       weakens:
         type: noul
-        noul: 0.007577241716077422
+        noul: 0.008061993434904246
   - source: liquid-d1
-    latency_ms: 299
+    latency_ms: 244
     answers:
       aligned:
         type: noul
-        noul: 0.002323162833467871
+        noul: 0.01798621417320936
       covers:
         type: noul
-        noul: 0.0009697517656727683
+        noul: 0.0015978459694515933
       weakens:
         type: noul
-        noul: 0.007577241716077422
+        noul: 0.008061993434904246
   - source: liquid-d1
-    latency_ms: 249
+    latency_ms: 264
     answers:
       aligned:
         type: noul
-        noul: 0.002323162833467871
+        noul: 0.006289902323167112
       covers:
         type: noul
-        noul: 0.0009697517656727683
+        noul: 0.002800926967120973
       weakens:
         type: noul
-        noul: 0.007577241716077422
+        noul: 0.009708479346735912
   baseline:
   - verdict: fail
   - verdict: fail
@@ -2065,7 +2067,7 @@ cases:
       spec: Task text asks for 'a dev push run whose commit has a passed merge queue Tests run' to reuse unit results, but
         all three pieces instead build Codex inbox delivery through a per-session app-server thread -- work for the Codex
         Channels phase, not for 'required checks stop waiting on runners' in this task's own phase intent.
-    input_digest: 9f4d1048ecb3119d
+    input_digest: ed8e066283324ce9
     baseline_input_digest: 9f5bcb727aba582c
 - name: control-plan-weakens
   state:
@@ -2095,7 +2097,7 @@ cases:
   control: true
   samples:
   - source: liquid-d1
-    latency_ms: 269
+    latency_ms: 261
     answers:
       aligned:
         type: noul
@@ -2107,29 +2109,29 @@ cases:
         type: noul
         noul: 0.9553191297273498
   - source: liquid-d1
-    latency_ms: 254
+    latency_ms: 261
     answers:
       aligned:
         type: noul
-        noul: 0.0446808718627714
+        noul: 0.033085978388704126
       covers:
         type: noul
-        noul: 0.002182716137032044
+        noul: 0.0011695099865486702
       weakens:
         type: noul
-        noul: 0.9553191316354952
+        noul: 0.9770226285846242
   - source: liquid-d1
     latency_ms: 252
     answers:
       aligned:
         type: noul
-        noul: 0.0446808718627714
+        noul: 0.05340333055309901
       covers:
         type: noul
-        noul: 0.002182716137032044
+        noul: 0.0007554055539941062
       weakens:
         type: noul
-        noul: 0.9553191316354952
+        noul: 0.9669140225647107
   baseline:
   - verdict: fail
   - verdict: fail
@@ -2139,8 +2141,8 @@ cases:
     labels:
       standards: The task is the page autonomy-control bug, but the pieces instead turn off the intent gate default, skip
         the size/complexity check on swarm branches in pre-push, and drop required review rounds before ready -- none of it
-        fixes the autonomy control, and it directly loosens three gates the phase and manifesto rely on (intent verdicts,
-        size/complexity, review rounds).
+        fixes the autonomy control, and it directly loosens three gates the phase and doctrine rely on (intent verdicts, size/complexity,
+        review rounds).
       spec: Task text's seam is 'the page autonomy control writing the swarm config', but the pieces instead 'set the intent
         gate default mode to off', 'skip the size and complexity check on swarm branches' and 'drop the required review rounds
         before ready' -- turning off three unrelated gates instead of fixing the autonomy control bug, contrary to the phase
