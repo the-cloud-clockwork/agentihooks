@@ -109,9 +109,20 @@ def gate_refusal(tree, budget):
     return None if code == 0 else GATE_FAILED.format(path=tree.path)
 
 
-def push(tree):
+def push(tree, seconds):
     ref = f"refs/heads/{tree.branch}"
-    return git(tree.path, "push", "--set-upstream", "origin", f"{ref}:{ref}").returncode == 0
+    process = subprocess.Popen(
+        ["git", "-C", str(tree.path), "push", "--set-upstream", "origin", f"{ref}:{ref}"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    try:
+        return process.wait(min(GIT_TIMEOUT_S, seconds)) == 0
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
+        return False
 
 
 def record_text(remote, branch, head):
@@ -178,7 +189,7 @@ class PushStop:
         for tree in trees(self.root(), who.name):
             if tree.unpushed and (refused := self.held(tree)):
                 failed.append(refused)
-            elif tree.unpushed and push(tree):
+            elif tree.unpushed and push(tree, self.left() + RESERVE_S - FLOOR_S):
                 self.record(store, ledger, who, tree)
             owed = owed or tree.dirty or (tree.unpushed and not self.on_origin(tree))
             owed = owed or (doc and tree.own and not task.get("pr_url") and self.unrecorded(store, doc, who))
