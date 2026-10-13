@@ -4,7 +4,7 @@ import threading
 from collections import deque
 from http.server import ThreadingHTTPServer
 
-from scripts.swarm_ledger import api
+from scripts.swarm_ledger import api, new_ledger
 from scripts.swarm_ledger import ledger_server as server
 from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
 
