@@ -20,15 +20,14 @@ def test_ordered_event_rows_keep_duplicates_and_revision_filter(tmp_path):
     assert repo.events_since("events", 2) == [{"rev": 3, "id": "last"}]
 
 
-def test_unversioned_event_records_are_preserved(tmp_path):
+def test_unversioned_event_records_are_refused(tmp_path):
     state = document()
     state["_meta"]["events"].append({"kind": "legacy", "extension": {"x": False}})
     repo = SQLiteLedgerRepository(tmp_path / "shadow.sqlite3")
-    repo.import_document("events", state)
-    assert repo.export_document("events") == state
-    with pytest.raises(KeyError) as error:
-        repo.events_since("events", 0)
-    assert error.value.args == ("rev",)
+    with pytest.raises(ValueError, match="^ledger event must have a revision$"):
+        repo.import_document("events", state)
+    with pytest.raises(KeyError):
+        repo.export_document("events")
 
 
 def test_three_identical_events_remain_distinct_records(tmp_path):
