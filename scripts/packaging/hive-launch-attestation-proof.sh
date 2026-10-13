@@ -45,6 +45,8 @@ for tag, child in (("present", image), ("missing-image", {**image, "digest": abs
     objects[tag] = objects[index["digest"]]
 
 class Registry(BaseHTTPRequestHandler):
+    default_request_version = "HTTP/1.1"
+
     def do_HEAD(self):
         self.respond(False)
 
