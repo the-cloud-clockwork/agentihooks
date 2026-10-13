@@ -110,6 +110,14 @@ def test_server_loss_is_visible_even_when_the_viewer_survives(rig, monkeypatch):
     assert rig.runner.bindings([rig.agent]) == {rig.agent.name: {"process": False}}
 
 
+def test_an_unmanaged_execution_without_a_session_is_not_live(rig):
+    plain = rig.store.start_execution(
+        SLUG,
+        AgentRecord(rig.store.next_name(SLUG, "eng"), "eng", "plain", seat=f"eng-2@{SLUG}"),
+    )
+    assert plain.name not in rig.runner.live_names()
+
+
 def test_an_unavailable_thread_is_unknown_and_keeps_the_live_execution(rig):
     rig.connection.request.side_effect = protocol.ProtocolError("connection lost")
     assert rig.runner.status(rig.agent) == "unknown"
