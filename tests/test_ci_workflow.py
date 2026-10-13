@@ -593,6 +593,11 @@ def test_unit_shards_upload_their_durations_for_the_refresh():
             "Restore queue shard coverage",
         ],
     )
+    for step in between:
+        expected = "needs.split.outputs.source != ''"
+        if step["name"] == "Restore queue shard coverage":
+            expected += " && matrix.python-version == '3.12'"
+        assert step["if"] == expected
     assert "if" not in upload
     assert upload["uses"].startswith("actions/upload-artifact@")
     assert upload["with"]["name"] == "durations-${{ matrix.python-version }}-${{ matrix.shard }}"
