@@ -1,16 +1,22 @@
 """Codex push pump: deliver one recipient's inbox into its bound app-server thread, one submission at a time."""
 
+from __future__ import annotations
+
 import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING
 
 from scripts.codex_session import protocol
-from scripts.codex_session.binding import CONNECTED, DEGRADED, BindingStore
+from scripts.codex_session.binding import CONNECTED, DEGRADED, BindingStore, TransportRecord
 from scripts.inbox.dispatch import Dispatcher, digest
 from scripts.inbox.receipts import MISMATCH, RELEASED, Delivery, DispatchError
 from scripts.inbox.store import NOTIFY, InboxStore, Item, now_ms
 from scripts.swarm.delivery import envelope as delivery_envelope
+
+if TYPE_CHECKING:
+    from redis.client import Pipeline
 
 STOPPED = "stopped"
 UNOBSERVED = "an active turn that began before this pump connected"
@@ -31,6 +37,10 @@ def envelope(item: Item, delivery: Delivery) -> str:
 
 def stderr(line: str) -> None:
     print(f"[agentihooks codex-pump] {line}", file=sys.stderr)
+
+
+class StaleExecution(DispatchError):
+    pass
 
 
 @dataclass
@@ -78,8 +88,74 @@ class Transport:
     execution_id: str
 
     def mark(self, **changes) -> None:
+        import json
+        from dataclasses import asdict
+
+        from scripts.codex_session.binding import IDENTITY, RECORDS, BindingError
+        from scripts.inbox.receipts import transact
+
+        key = self.bindings.store.key(self.slug, RECORDS)
+
+        def update(pipe):
+            pipe.watch(key)
+            record = self.require(pipe)
+            updated = replace(record, **changes)
+            if any(getattr(record, field) != getattr(updated, field) for field in IDENTITY):
+                raise BindingError("transport record identity is immutable")
+            pipe.multi()
+            pipe.hset(key, self.execution_id, json.dumps(asdict(updated)))
+
+        transact(self.bindings.redis, update)
+
+    def require(self, pipe: Pipeline | None = None) -> TransportRecord:
+        from scripts.codex_session.binding import EXITED, FAILED
+
+        store = self.bindings.store
+        if pipe is not None:
+            from scripts.codex_session.binding import RECORDS
+
+            pipe.watch(store.key(self.slug, "executions"), store.key(self.slug, RECORDS))
         record = self.bindings.get(self.slug, self.execution_id)
-        self.bindings.put(self.slug, replace(record, **changes))
+        if record is None or record.state in {EXITED, FAILED}:
+            raise StaleExecution("execution is no longer current")
+        current = store.execution_registry.occupants(self.slug, pipe).get(record.seat)
+        if (
+            current is None
+            or (current.execution_id, current.generation, current.name, current.task)
+            != (self.execution_id, record.execution_generation, record.agent_name, record.task_id)
+            or current.state == "finished"
+        ):
+            raise StaleExecution("execution is no longer current")
+        return record
+
+    def publish(self, send: Callable[[], None]) -> None:
+        from scripts.codex_session.binding import PUBLISHING
+        from scripts.inbox.receipts import transact
+
+        key = self.bindings.store.key(self.slug, PUBLISHING)
+
+        def reserve(pipe):
+            pipe.watch(key)
+            record = self.require(pipe)
+            if pipe.hget(key, record.seat):
+                raise protocol.ProtocolError("execution already has an inbox publication in flight")
+            pipe.multi()
+            pipe.hset(key, record.seat, self.execution_id)
+            return record
+
+        record = transact(self.bindings.redis, reserve)
+        try:
+            send()
+        finally:
+
+            def release(pipe):
+                pipe.watch(key)
+                held = pipe.hget(key, record.seat)
+                pipe.multi()
+                if held == self.execution_id:
+                    pipe.hdel(key, record.seat)
+
+            transact(self.bindings.redis, release)
 
 
 @dataclass(frozen=True)
@@ -90,6 +166,7 @@ class Timing:
     poll_s: float = POLL_S
     backoff_s: float = BACKOFF_S
     backoff_max_s: float = BACKOFF_MAX_S
+    sleep: Callable[[float], None] = time.sleep
 
 
 @dataclass(frozen=True)
@@ -99,6 +176,7 @@ class Binding:
     recipient: str
     owner: str
     transport: Transport
+    reconnect: Callable[[], protocol.Connection] | None = None
 
 
 class Pump:
@@ -108,6 +186,7 @@ class Pump:
         self.store = store
         self.dispatcher = Dispatcher(store)
         self.receipts = self.dispatcher.receipts
+        self.receipts.authority = binding.transport.require
         self.binding = binding
         self.timing = timing
         self.log = log
@@ -119,25 +198,68 @@ class Pump:
         self.surfaced = ""
 
     def run(self, stop: Callable[[], bool]) -> str:
-        """Pump until stop() or a failure; a failure is logged, marks the transport degraded and returns DEGRADED.
-
-        A failure to write that mark propagates.
-        """
+        starting, reconnecting = True, False
+        backoff = self.timing.backoff_s
         try:
-            self.start()
-            while not stop():
-                self.step()
-            return STOPPED
-        except Exception as failure:
-            self.log(DEGRADED_LOG.format(self.binding.recipient, type(failure).__name__, failure))
-            self.binding.transport.mark(state=DEGRADED, last_error_class=type(failure).__name__)
-            return DEGRADED
+            while True:
+                try:
+                    if starting:
+                        self.start()
+                        starting = False
+                    elif reconnecting:
+                        self._reconnect()
+                        reconnecting = False
+                    if stop():
+                        return STOPPED
+                    self.step()
+                    backoff = self.timing.backoff_s
+                except StaleExecution as failure:
+                    self.log(DEGRADED_LOG.format(self.binding.recipient, type(failure).__name__, failure))
+                    return DEGRADED
+                except DispatchError as failure:
+                    self._degrade(failure)
+                    return DEGRADED
+                except Exception as failure:
+                    self._degrade(failure)
+                    if stop():
+                        return STOPPED
+                    self.timing.sleep(backoff)
+                    backoff = min(backoff * 2, self.timing.backoff_max_s)
+                    starting, reconnecting = False, True
         finally:
             if self.subscription is not None:
                 self.subscription.close()
+            self.binding.connection.close()
+
+    def _degrade(self, failure: Exception) -> None:
+        from redis.exceptions import RedisError
+
+        self.log(DEGRADED_LOG.format(self.binding.recipient, type(failure).__name__, failure))
+        try:
+            self.binding.transport.mark(state=DEGRADED, last_error_class=type(failure).__name__)
+        except (RedisError, StaleExecution):
+            pass
+
+    def _reconnect(self) -> None:
+        from scripts.codex_session.supervisor import UNIX
+
+        if self.subscription is not None:
+            self.subscription.close()
+            self.subscription = None
+        self.binding.connection.close()
+        record = self.binding.transport.require()
+        if self.binding.reconnect is not None:
+            connection = self.binding.reconnect()
+        else:
+            connection, _ = protocol.connect(record.endpoint_ref.removeprefix(UNIX), 5.0)
+        self.binding = replace(self.binding, connection=connection)
+        self.state = ThreadState()
+        self.queue.clear()
+        self.start()
 
     def start(self) -> None:
         binding = self.binding
+        binding.transport.require()
         binding.connection.listener = self.state.observe
         self.dispatcher.own(binding.recipient, binding.owner)
         self.receipts.recover(binding.recipient, binding.owner)
@@ -150,6 +272,7 @@ class Pump:
         binding.transport.mark(state=CONNECTED, last_error_class="")
 
     def step(self) -> None:
+        self.binding.transport.require()
         self.binding.connection.poll(self.timing.poll_s)
         woken = self._hinted()
         if self.timing.clock() >= self.next_reconcile:
@@ -233,11 +356,14 @@ class Pump:
             self._send(text)
 
     def _send(self, text: str) -> None:
-        connection, thread = self.binding.connection, self.binding.thread_id
-        if self.state.active_turn:
-            self.state.follow(protocol.steer_turn(connection, thread, self.state.active_turn, text))
-        else:
-            self.state.follow(protocol.start_turn(connection, thread, text))
+        def send():
+            connection, thread = self.binding.connection, self.binding.thread_id
+            if self.state.active_turn:
+                self.state.follow(protocol.steer_turn(connection, thread, self.state.active_turn, text))
+            else:
+                self.state.follow(protocol.start_turn(connection, thread, text))
+
+        self.binding.transport.publish(send)
 
     def _hold(self) -> None:
         self.hold_until = self.timing.clock() + self.backoff

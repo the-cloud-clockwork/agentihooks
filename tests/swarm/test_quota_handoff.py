@@ -785,6 +785,51 @@ def test_a_relaunch_without_a_quota_handoff_keeps_its_own_account(tmp_path, monk
     assert decision["tasks"] == {"r": "codex"}
 
 
+@pytest.mark.parametrize("codex_sessions,expected", [(6, "claude"), (0, "codex")])
+@pytest.mark.parametrize("lane", ["eng", "plan"])
+def test_an_exit_handoff_prefers_codex_but_uses_a_free_claude_seat(
+    tmp_path, monkeypatch, codex_sessions, expected, lane
+):
+    rows = [
+        capacity.Account("codex", "default", "OPEN", codex_sessions, 90, 90, 6),
+        capacity.Account("claude", "cc", "OPEN", 0, 90, 90, 6),
+        capacity.Account("claude", "default", "OPEN", 5, 90, 90, 6),
+    ]
+    monkeypatch.setattr(capacity, "accounts", lambda environ, now, refresh=True: list(rows))
+    monkeypatch.setattr(runtime.plugins, "claude_only", lambda _: False)
+    seen = []
+    rt = runtime.HerdrRuntime(home=tmp_path, choose=lambda requested, environ: (requested, "requested"))
+    monkeypatch.setattr(
+        rt,
+        "_launch",
+        lambda cfg, lane, task, name, argv, **kw: seen.append(argv) or runtime.Placed("pane", expected, "cc"),
+    )
+    config = SwarmConfig(
+        "sw", str(tmp_path), max_eng=int(lane == "eng"), max_ci=0, max_plan=int(lane == "plan"), code="a1b2c3"
+    )
+    task = {
+        "id": "e",
+        "title": "Continue task",
+        "handoff": "Saved Handoff v2",
+        "handoff_envelope": {"reason": "exit", "launch": CODEX_HANDING_OFF},
+    }
+    ready = {name: [task] if name == lane else [] for name in ("eng", "ci", "plan")}
+    requirements = rt.quota_requirements(config, ready)
+    demand = {name: int(name == lane) for name in ready}
+    decision = rt.quota_capacity(config, [], 100, demand, requirements)
+    assert decision["tasks"] == {"e": expected}
+    rt.spawn(config, lane, "engineer@a1b2c3-0002", task)
+    argv = seen[0]
+    assert argv[argv.index("--agent") + 1] == expected
+    assert argv[argv.index("--route") + 1] == ("cc" if expected == "claude" else "default")
+    assert argv[argv.index("--profile") + 1] == "engineer"
+    if expected == "claude":
+        assert argv[argv.index("--model") + 1] == "opus"
+        assert argv[argv.index("--effort") + 1] == "high"
+    else:
+        assert argv[argv.index("-m") + 1] == "gpt"
+
+
 def test_a_claude_only_profile_hands_off_to_claude(tmp_path, monkeypatch):
     rt = runtime.HerdrRuntime(home=tmp_path)
     rt._quota_accounts = [account("cc", five=50, week=50), account("cx", "codex", five=90, week=90)]

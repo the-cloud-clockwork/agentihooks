@@ -219,6 +219,76 @@ def test_a_resume_binds_the_existing_thread_without_starting_one(store, server, 
     assert server.params("thread/resume") == [{"threadId": "thread-kept"}]
 
 
+@pytest.mark.parametrize("account", ["default", "quota-successor"])
+def test_handoff_and_quota_successors_admit_a_new_server_and_resume_the_thread(
+    store, server, clock, root, tmp_path, account
+):
+    from scripts.inbox.codex import StaleExecution, Transport
+
+    first = supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, clock, root))
+    next_spec = launch_spec(
+        store,
+        server,
+        tmp_path,
+        resume_thread=first.record.thread_id,
+        previous_execution_id=first.agent.execution_id,
+    )
+    next_spec = replace(next_spec, agent=replace(next_spec.agent, account=account))
+    successor = supervisor.launch(store, next_spec, deps(server, clock, root))
+    assert successor.agent.generation == first.agent.generation + 1
+    assert successor.record.server_pid != first.record.server_pid
+    assert successor.record.thread_id == first.record.thread_id
+    assert successor.record.account == account
+    assert store.execution_occupants(SLUG)[SEAT].execution_id == successor.agent.execution_id
+    assert server.params("thread/resume") == [{"threadId": first.record.thread_id}]
+    with pytest.raises(StaleExecution):
+        Transport(BindingStore(store), SLUG, first.agent.execution_id).require()
+    supervisor.finish(store, SLUG, first, 2000)
+    assert store.execution_occupants(SLUG)[SEAT].execution_id == successor.agent.execution_id
+
+
+def test_finish_clears_a_dead_bridges_abandoned_publication(store, server, clock, root, tmp_path):
+    started = supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, clock, root))
+    key = store.key(SLUG, "execution-publishing")
+    store.redis.hset(key, SEAT, started.agent.execution_id)
+    supervisor.finish(store, SLUG, started, 2000)
+    assert not store.redis.hgetall(key)
+
+
+@pytest.mark.parametrize("resource", ["endpoint", "publication", "transport"])
+def test_terminal_cleanup_keeps_resources_that_change_during_release(
+    store, server, clock, root, tmp_path, monkeypatch, resource
+):
+    started = supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, clock, root))
+    bindings = BindingStore(store)
+    record = replace(started.record, state=EXITED)
+    bindings.put(SLUG, record)
+    endpoints, publishing = store.key(SLUG, ENDPOINTS), store.key(SLUG, "execution-publishing")
+    store.redis.hset(publishing, SEAT, record.execution_id)
+    original, changed = bindings.get, []
+
+    def get(*args):
+        observed = original(*args)
+        if not changed:
+            changed.append(True)
+            if resource == "endpoint":
+                store.redis.hset(endpoints, record.endpoint_ref, "successor")
+            elif resource == "publication":
+                store.redis.hset(publishing, SEAT, "successor")
+            else:
+                bindings.put(SLUG, replace(record, state=CONNECTED))
+        return observed
+
+    monkeypatch.setattr(bindings, "get", get)
+    bindings.release(SLUG, record)
+    if resource == "endpoint":
+        assert store.redis.hget(endpoints, record.endpoint_ref) == "successor"
+    elif resource == "publication":
+        assert store.redis.hget(publishing, SEAT) == "successor"
+    else:
+        assert store.redis.hget(publishing, SEAT) == record.execution_id
+
+
 def test_a_thread_without_an_id_fails_as_a_protocol_error(store, server, clock, root, tmp_path):
     server.thread = {"sessionId": "session-only"}
     failure = failed(store, server, clock, root, launch_spec(store, server, tmp_path), "protocol")
@@ -498,6 +568,29 @@ def test_a_home_seed_failure_spawns_nothing_and_frees_the_endpoint(store, server
     record = only_record(store)
     assert record.state == FAILED
     assert record.last_error_class == "FileNotFoundError"
+    assert not store.redis.hgetall(store.key(SLUG, ENDPOINTS))
+
+
+@pytest.mark.parametrize("stage", ["endpoint", "reservation"])
+def test_failure_before_transport_reservation_ends_admitted_execution(
+    store, server, clock, root, tmp_path, monkeypatch, stage
+):
+    spec = launch_spec(store, server, tmp_path)
+    failure = RuntimeError("reservation unavailable")
+
+    def refuse(*args):
+        raise failure
+
+    monkeypatch.setattr(supervisor, "socket_path" if stage == "endpoint" else "_record", refuse)
+    with pytest.raises(RuntimeError) as caught:
+        supervisor.launch(store, spec, deps(server, clock, root))
+    assert caught.value is failure
+    assert not server.spawns
+    assert not store.agents(SLUG)
+    assert store.execution_occupants(SLUG)[SEAT].state == "finished"
+    import json
+
+    assert json.loads(store.redis.lrange(store.key(SLUG, "history"), 0, -1)[0])["ended_at"] == 1000
     assert not store.redis.hgetall(store.key(SLUG, ENDPOINTS))
 
 
