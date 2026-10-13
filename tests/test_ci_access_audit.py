@@ -129,9 +129,18 @@ def test_weekly_job_reads_dev_and_alerts_through_notifications():
     assert checkout["with"]["ref"] == "dev"
     notification = next(step for step in job["steps"] if "ntfy.homeofanton.com/anton-alerts" in step.get("run", ""))
     assert "always()" in notification["if"]
-    assert notification["env"]["NTFY_USER"] == "${{ secrets.NTFY_USER }}"
-    assert notification["env"]["NTFY_PASS"] == "${{ secrets.NTFY_PASS }}"
+    assert "env" not in notification
+    assert "--user" not in notification["run"]
     assert "--fail" in notification["run"]
+    mint = next(step for step in job["steps"] if step.get("id") == "app-token")
+    assert mint["uses"] == "actions/create-github-app-token@v3.2.0"
+    assert mint["with"]["client-id"] == "${{ secrets.TCC_CI_CLIENT_ID }}"
+    assert mint["with"]["private-key"] == "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}"
+    inventory = next(step for step in job["steps"] if "scripts.ci_access_audit" in step.get("run", ""))
+    assert inventory["env"] == {"GH_TOKEN": "${{ steps.app-token.outputs.token }}"}
+    assert job["steps"].index(mint) < job["steps"].index(inventory) < job["steps"].index(notification)
+    assert "ORG_GITHUB_TOKEN" not in json.dumps(workflow)
+    assert "NTFY_" not in json.dumps(workflow)
 
 
 @pytest.mark.parametrize("unapproved, denied", [(False, False), (True, False), (False, True)])
