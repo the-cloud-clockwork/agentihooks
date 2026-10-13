@@ -6,6 +6,7 @@ and accounts show free seats only raises the alert. Every alert reaches the mast
 one still open two more limits later reaches the operator's Priorities and ntfy.
 """
 
+import base64
 import json
 import os
 import urllib.request
@@ -22,6 +23,8 @@ KIND = "stall"
 SENDER = "swarm"
 HELD = ("claimed", "pr")
 NTFY = "AGENTIHOOKS_STALL_NTFY_URL"
+NTFY_USER, NTFY_PASS = "NTFY_USER", "NTFY_PASS"
+ANTON_ALERTS = "https://ntfy.homeofanton.com/anton-alerts"
 ENV = {
     "green": "AGENTIHOOKS_STALL_GREEN_MINUTES",
     "red": "AGENTIHOOKS_STALL_RED_MINUTES",
@@ -65,9 +68,13 @@ def limits(environ=None):
     return Limits(**values)
 
 
-def ntfy(url, title, text, opener=urllib.request.urlopen):
+def ntfy(url, title, text, environ, opener=urllib.request.urlopen):
     """An empty answer when posted, else why not."""
-    request = urllib.request.Request(url, data=text.encode(), headers={"Title": title}, method="POST")
+    headers = {"Title": title}
+    user, password = environ.get(NTFY_USER, ""), environ.get(NTFY_PASS, "")
+    if user and password:
+        headers["Authorization"] = "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode()
+    request = urllib.request.Request(url, data=text.encode(), headers=headers, method="POST")
     try:
         with opener(request, timeout=10):
             return ""
@@ -253,8 +260,8 @@ def _escalate(watch, rows):
             continue
         text = OPERATOR.format(**{**row, "case": CASES[row["case"]]})
         watch.ledger.priority(watch.slug, f"tasks/{tid}", text)
-        url = (os.environ if watch.environ is None else watch.environ).get(NTFY, "")
-        refused = watch.post(url, f"Swarm {watch.slug} stall", text) if url else "ntfy is not configured"
+        env = os.environ if watch.environ is None else watch.environ
+        refused = watch.post(env.get(NTFY) or ANTON_ALERTS, f"Swarm {watch.slug} stall", text, env)
         row["escalated"] = watch.now_ms
         watch.store.redis.hset(key, tid, json.dumps(row))
         actions.append(f"stall on task {tid} unanswered, raised to the operator" + (f"; {refused}" if refused else ""))

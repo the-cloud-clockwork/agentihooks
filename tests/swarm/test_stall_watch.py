@@ -62,7 +62,7 @@ class Swarm:
             lambda lane: self.ready[lane],
             at,
             self.environ,
-            lambda url, title, text: self.posted.append((url, title, text)) or "",
+            lambda url, title, text, env: self.posted.append((url, title, text)) or "",
         )
         return stall_watch.stall_pass(watch, doc or self.ledger.state(SLUG))
 
@@ -226,14 +226,42 @@ def test_an_answered_alert_never_escalates_and_its_finding_clears():
     assert swarm.ledger.priorities == [] and stall_watch.findings(swarm.store, SLUG) == []
 
 
-def test_without_an_ntfy_setting_escalation_still_reaches_priorities():
+def test_without_an_ntfy_setting_escalation_posts_to_the_anton_alerts_topic():
     swarm = Swarm(GREEN)
     del swarm.environ[stall_watch.NTFY]
     swarm.tick(START)
     swarm.tick(START + 10 * MINUTE)
-    actions = swarm.tick(START + 30 * MINUTE)
-    assert len(swarm.ledger.priorities) == 1 and swarm.posted == []
-    assert any("ntfy is not configured" in a for a in actions)
+    swarm.tick(START + 30 * MINUTE)
+    assert len(swarm.ledger.priorities) == 1
+    assert [url for url, _, _ in swarm.posted] == ["https://ntfy.homeofanton.com/anton-alerts"]
+
+
+def test_ntfy_signs_in_with_the_access_audit_credentials_and_reports_a_refusal():
+    sent = []
+
+    class Opened:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def opener(request, timeout):
+        sent.append(request)
+        return Opened()
+
+    env = {"NTFY_USER": "alerts", "NTFY_PASS": "pw"}
+    assert stall_watch.ntfy("https://ntfy.example/t", "Stall", "body", env, opener) == ""
+    assert sent[0].get_header("Authorization") == "Basic YWxlcnRzOnB3" and sent[0].data == b"body"
+    assert stall_watch.ntfy("https://ntfy.example/t", "Stall", "body", {}, opener) == ""
+    assert sent[1].get_header("Authorization") is None
+
+    def refused(request, timeout):
+        raise OSError("HTTP Error 401: Unauthorized")
+
+    assert stall_watch.ntfy("https://ntfy.example/t", "Stall", "body", env, refused) == (
+        "ntfy failed: HTTP Error 401: Unauthorized"
+    )
 
 
 def test_stall_findings_are_not_sent_twice_by_the_findings_pass():
