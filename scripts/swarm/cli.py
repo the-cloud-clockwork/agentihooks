@@ -107,6 +107,7 @@ from scripts.swarm import (
     snapshot,
     stack,
     stages,
+    stall_watch,
     take_master,
     templates,
     tick_master,
@@ -132,7 +133,7 @@ from scripts.swarm.store import (
     Unreachable,
     connect,
 )
-from scripts.swarm.tick import agent_status, primed, skip_refused, spawn_holds, tick
+from scripts.swarm.tick import agent_status, primed, ready_in_order, skip_refused, spawn_holds, tick
 from scripts.swarm_ledger import ledger_creator, ledger_kinds, ledger_link, ledger_workspace, plan_shape
 from scripts.swarm_v2 import master_scale, masters
 from scripts.swarm_v2.runtime.routed import routed
@@ -277,7 +278,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
                     ledger,
                     mail,
                     intent.pr_view,
-                    intent.judge,
+                    intent.judged,
                     head=lambda url: getattr(view(url), "head", None),
                     named=intent.named_view,
                 ).run,
@@ -288,6 +289,21 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             actions += skip_refused(waits.end_pass, store, slug, rows, inbox, view, now_ms(), ledger_events.view)
             actions += skip_refused(
                 ready.merge_pass, ready.Pass(store, slug, ledger, view, ledger_events.view, now_ms()), rows
+            )
+            live = runtime.live_names() | {a.name for a in agents if a.runtime_backend != "local"}
+            actions += skip_refused(
+                stall_watch.stall_pass,
+                stall_watch.Watch(
+                    store,
+                    slug,
+                    ledger,
+                    view,
+                    frozenset(live),
+                    lambda agent: runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)),
+                    lambda lane: ready_in_order(slug, store, rows, doc, lane),
+                    now_ms(),
+                ),
+                doc,
             )
             actions += skip_refused(quiet.quiet_pass, store, slug, rows, now_ms())
             actions += skip_refused(dispatcher.priorities, store, slug, doc, ledger, view, now_ms())

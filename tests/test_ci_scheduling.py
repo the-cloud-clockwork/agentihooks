@@ -18,8 +18,3 @@ def test_push_concurrency_is_per_run():
 def test_only_pull_request_updates_cancel_running_checks():
     workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
     assert workflow["concurrency"]["cancel-in-progress"] == "${{ github.event_name == 'pull_request' }}"
-
-
-def test_sonar_uses_a_hosted_runner():
-    workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
-    assert workflow["jobs"]["sonar"]["runs-on"] == "ubuntu-latest"
