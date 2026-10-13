@@ -70,7 +70,7 @@ def sent_body(tab, sent):
 
 def test_the_panel_offers_approve_on_a_proposal_and_roll_back_on_an_earlier_revision(page):
     tab, _ = page
-    assert tab.locator("#architecture-count").inner_text() == "revision 2"
+    assert tab.locator("#architecture-count").text_content() == "revision 2"
     table = rows(tab)
     assert [cells[:3] for cells in table] == [
         ["Kubernetes task dispatcher", "proposal", "AWAITING APPROVAL"],
@@ -122,4 +122,4 @@ def test_a_refused_action_shows_its_reason_and_keeps_the_record(page):
     assert tab.locator("#architecture-status").inner_text() == (
         "Could not roll back: Architecture changes need the operator."
     )
-    assert tab.locator("#architecture-count").inner_text() == "revision 2"
+    assert tab.locator("#architecture-count").text_content() == "revision 2"

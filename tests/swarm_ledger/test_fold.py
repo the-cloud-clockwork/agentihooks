@@ -120,7 +120,11 @@ class OnlyLedgerSectionsFold(unittest.TestCase):
     def test_swarm_panels_follow_the_order_the_design_record_names(self):
         line = next(row for row in DESIGN.read_text().splitlines() if row.startswith("- **Panels.**"))
         names = line.split("in this order: ", 1)[1].split(".", 1)[0].split(", ")
-        heads = [node.kids[0].kids[0].text for node in walk(body(), "details") if node.attrs.get("id") in SWARM_PANELS]
+        heads = [
+            next(walk(node.kids[0], "h3")).text
+            for node in walk(body(), "details")
+            if node.attrs.get("id") in SWARM_PANELS
+        ]
         self.assertEqual(heads, names)
 
     def test_nothing_outside_the_ledger_sections_and_swarm_panels_folds(self):
