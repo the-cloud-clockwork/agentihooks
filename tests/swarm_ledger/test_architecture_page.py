@@ -120,6 +120,6 @@ def test_a_refused_action_shows_its_reason_and_keeps_the_record(page):
     sent_body(tab, sent)
     tab.wait_for_function("() => document.querySelector('#architecture-status').innerText !== ''")
     assert tab.locator("#architecture-status").inner_text() == (
-        "Could not roll back: Architecture changes need the operator. Try again or ask the master."
+        "Could not roll back: Architecture changes need the operator."
     )
     assert tab.locator("#architecture-count").inner_text() == "revision 2"

@@ -177,7 +177,7 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
 - Only four things on the ledger page fold, each remembering its choice per
   viewer across reloads: the Ledger tab's own sections below Overview; the
   Swarm tab panels below Capacity (Quota, Overlays, Agents, Health, Handoff
-  outcomes, Freezes); the outline categories, with one toggle on top flipping
+  outcomes, Freezes, Architecture); the outline categories, with one toggle on top flipping
   between Expand all and Collapse all; and comment dropdowns, each section with
   one toggle for its own items flipping between Show all comments and Hide all
   comments. Nothing else folds: the chat, artifacts, alerts and notifications
