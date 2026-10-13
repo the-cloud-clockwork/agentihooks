@@ -19,7 +19,7 @@ def outage_home(tmp_path, monkeypatch):
     from scripts.swarm import snapshot
 
     monkeypatch.setattr(outage, "HOME", tmp_path)
-    monkeypatch.setattr(snapshot, "worktrees", lambda repo, names: {name: str(tmp_path) for name in names})
+    monkeypatch.setattr(snapshot, "worktrees", lambda repo, names, *run: {name: str(tmp_path) for name in names})
 
 
 def executing(store, agent, backend="local"):
