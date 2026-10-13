@@ -601,13 +601,15 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
 def _stuck_on_provider(slug, store, agent, observed, exhausted, now_ms):
     if agent.lane == MASTER or not observed.provider_error or _operator_at_pane(slug, store, agent, observed, now_ms):
         return False
+    if exhausted:
+        return True
     state = idle_state.verdict(
         observed.state,
         idle_state.heartbeat(store.redis, slug, agent.name),
         idle_state.wait(store.redis, slug, agent.name),
         now_ms,
     )
-    return state == idle_state.IDLE and (exhausted or outage.held_past_limit(store, slug, agent.name, now_ms))
+    return state == idle_state.IDLE and outage.held_past_limit(store, slug, agent.name, now_ms)
 
 
 def _free_stuck(slug, store, ledger, runtime, rows, agent, now_ms):

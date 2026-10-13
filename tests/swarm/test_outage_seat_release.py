@@ -76,7 +76,7 @@ def test_an_execution_without_task_authority_owns_its_recovery_only_when_local(s
 def test_an_owner_whose_turns_still_fail_after_the_probe_passes_frees_its_seat_one_tick_after_its_attempts(
     store, monkeypatch
 ):
-    from scripts.swarm import provider_probe
+    from scripts.swarm import idle, provider_probe
 
     ledger, runtime, owner = stuck_owner(store, monkeypatch)
     monkeypatch.setattr(provider_probe, "check", lambda target, *args: provider_probe.Result(True, "ok"))
@@ -86,6 +86,7 @@ def test_an_owner_whose_turns_still_fail_after_the_probe_passes_frees_its_seat_o
     assert not outage.open_records("sw")
     for at in (6, 7, 8):
         tick("sw", store, ledger, runtime, at * MINUTE)
+        idle.beat(store.redis, "sw", owner.name, "working", at * MINUTE + 1)
     assert runtime.nudged.count(owner.name) == resume.RECOVERY_ATTEMPTS
     assert store.claimant("sw", owner.task) == owner.name
     tick("sw", store, ledger, runtime, 9 * MINUTE)
