@@ -109,14 +109,15 @@ def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
     assert restore["with"]["path"] == save["with"]["path"] == "~/dev-durations"
     assert save["with"]["key"] == "durations-merged-${{ github.sha }}"
     assert restore["with"]["key"] == "${{ needs.durations.outputs.key }}"
-    assert restore["if"] == "needs.durations.outputs.key != ''"
+    assert restore["if"] == "needs.durations.outputs.source == '' && needs.durations.outputs.key != ''"
     assert restore["with"]["fail-on-cache-miss"] is True
     assert jobs["split"]["needs"] in (["durations", "reuse"], ["durations", "reuse", "admission"])
-    lookup = jobs["durations"]["steps"][0]
+    lookup = next(s for s in jobs["durations"]["steps"] if s.get("id") == "stored")
     assert jobs["durations"]["outputs"] == {
         "key": "${{ steps.stored.outputs.cache-matched-key }}",
         "queued": "${{ steps.republished.outputs.queued }}",
         "base": "${{ steps.base-run.outputs.sha }}",
+        "source": "${{ steps.unit-source.outputs.source }}",
     }
     assert jobs["durations"]["timeout-minutes"] == (
         "${{ (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch') && 4 || 2 }}"
