@@ -2,7 +2,8 @@ import io
 
 import pytest
 
-from scripts.swarm_ledger.events import Expired, Hub, stream
+from scripts.swarm_ledger.events import stream
+from scripts.swarm_ledger.events.hub import Expired, Hub
 from tests.swarm_ledger.bounded import bounded
 
 SLUG = "frames-2026-01-01"

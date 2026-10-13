@@ -1,7 +1,8 @@
 import json
 
 from scripts.swarm_ledger import ledger_server as server
-from scripts.swarm_ledger.events import Hub, patch
+from scripts.swarm_ledger.events import patch
+from scripts.swarm_ledger.events.hub import Hub
 
 
 def test_a_write_copies_only_changed_parts_and_keeps_published_state_isolated(monkeypatch):
