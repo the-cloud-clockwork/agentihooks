@@ -243,6 +243,7 @@ def test_a_branch_that_merged_dev_and_edited_a_test_grades_only_its_own_lines_fr
 
     jobs = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/test.yml").read_text())["jobs"]
     plan = next(step for step in jobs["mutation-plan"]["steps"] if step.get("run", "").endswith('--base "$BASE"'))
+    assert jobs["mutation-plan"]["steps"][0]["with"]["fetch-depth"] == 0
     git, commit = _repo(tmp_path)
     (tmp_path / "tests").mkdir()
     (tmp_path / "tests" / "test_x.py").write_text("def test_a():\n    assert 1\n")
