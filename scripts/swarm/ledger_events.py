@@ -76,10 +76,15 @@ def iso_ms(text):
 
 
 def _latest_checks(checks):
+    ordered = sorted(checks, key=lambda check: (check.get("databaseId") or 0, check.get("createdAt") or ""))
     return list(
         {
-            (check.get("name"), check.get("context")): check
-            for check in sorted(checks, key=lambda check: (check.get("databaseId") or 0, check.get("createdAt") or ""))
+            (
+                check.get("name"),
+                check.get("context"),
+                None if check.get("databaseId") or check.get("createdAt") else index,
+            ): check
+            for index, check in enumerate(ordered)
         }.values()
     )
 
