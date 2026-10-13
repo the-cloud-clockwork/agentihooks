@@ -697,7 +697,7 @@ def test_a_merge_racing_the_dequeue_is_confirmed_before_the_task_finishes(mergin
     assert merging.rows["t1"]["state"] == "pr"
     assert merging.ledger.comments == []
     merging.pulls[URL] = MERGED
-    assert merging.run(NOW + 120_000)[0] == f"task t1 finished with merged pull request {URL}"
+    assert merging.run(NOW + 120_000)[0] == f"task t1 done, {URL} merged"
     assert merging.rows["t1"]["state"] == "done"
 
 
