@@ -1,0 +1,25 @@
+name: Worker hive pod
+
+on:
+  push:
+    branches: [dev]
+    paths: [deploy/worker/**, deploy/helm/agentihooks-swarm/**, scripts/hive/**, docker/swarm-node/**, .github/workflows/hive-worker.yml]
+  workflow_dispatch:
+    inputs:
+      contracts_only:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prove the rendered worker hive chart
+        run: |
+          python3 -m pip install PyYAML
+          bash deploy/worker/chart-proof.sh

@@ -1,15 +1,12 @@
 import json
 import os
-import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
-import yaml
 
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[2]
-CHART = ROOT / "deploy/helm/agentihooks-swarm"
 START = ROOT / "deploy/worker/start.sh"
 
 
@@ -94,52 +91,3 @@ def test_refused_join_never_runs_the_worker(tmp_path):
     assert result.returncode == 9
     assert "hive run" not in commands
     assert "hive set" not in commands
-
-
-def render(tmp_path, workers):
-    if not shutil.which("helm"):
-        pytest.fail("helm is required to prove the worker hive chart")
-    values = tmp_path / "values.yaml"
-    values.write_text(yaml.safe_dump({"workers": workers}))
-    return subprocess.run(["helm", "template", "proof", str(CHART), "-f", str(values)], capture_output=True, text=True)
-
-
-def test_chart_scales_independent_hives_with_named_credentials(tmp_path):
-    result = render(
-        tmp_path, {"replicas": 2, "maxAgents": 3, "credentialSecret": {"name": "member", "key": "credential"}}
-    )
-    assert result.returncode == 0, result.stderr
-    objects = list(yaml.safe_load_all(result.stdout))
-    workers = [
-        obj
-        for obj in objects
-        if obj and obj.get("kind") == "Deployment" and obj["metadata"]["name"].endswith("-worker-hive")
-    ]
-    assert len(workers) == 1
-    assert workers[0]["spec"]["replicas"] == 2
-    pod = workers[0]["spec"]["template"]["spec"]
-    assert pod["automountServiceAccountToken"] is False
-    container = pod["containers"][0]
-    env = {item["name"]: item for item in container["env"]}
-    assert env["SWARM_HIVE_ID"]["valueFrom"]["fieldRef"]["fieldPath"] == "metadata.name"
-    assert env["HIVE_MAX_AGENTS"]["value"] == "3"
-    assert env["HIVE_ROLES"]["value"] == "eng,ci,plan"
-    assert container["image"] == "ghcr.io/the-cloud-clockwork/agentihooks-hive-worker:dev"
-    assert pod["volumes"][0]["secret"]["secretName"] == "member"
-    assert pod["volumes"][0]["secret"]["items"] == [{"key": "credential", "path": "credential"}]
-    assert container["volumeMounts"][0]["readOnly"] is True
-
-
-def test_chart_refuses_workers_without_join_material(tmp_path):
-    result = render(tmp_path, {"replicas": 1})
-    assert result.returncode != 0
-    assert "workers need a credentialSecret or joinCodeSecret" in result.stderr
-
-
-def test_chart_refuses_reusing_a_one_time_code_between_replicas(tmp_path):
-    result = render(
-        tmp_path,
-        {"replicas": 2, "joinUrl": "https://join.example.test", "joinCodeSecret": {"name": "code", "key": "code"}},
-    )
-    assert result.returncode != 0
-    assert "one time join codes require workers.replicas=1" in result.stderr
