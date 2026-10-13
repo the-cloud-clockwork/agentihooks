@@ -87,6 +87,11 @@ def test_every_named_difference_is_a_real_gap(wiring):
     assert still_missing == set(UNSUPPORTED)
 
 
+def test_every_harness_reaches_swarm_hooks_only_through_the_shared_entry(wiring):
+    entries = {name for w in wiring.values() for names in w.values() for name in names}
+    assert entries == {"hooks"}
+
+
 def test_every_unheld_event_is_one_its_harness_cannot_block():
     from hooks.targets.capabilities import _COPILOT_BLOCKABLE_EVENTS
 

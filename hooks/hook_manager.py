@@ -2146,7 +2146,6 @@ def on_stop(payload: dict) -> None:
         log("conditions stop failed", {"error": str(e)})
     if _stop_block is not None:
         raise BlockAction(_stop_block)
-    _swarm_ledger(payload)
 
     session_id = payload.get("session_id", "")
     transcript_path = payload.get("transcript_path", "")
@@ -2310,6 +2309,7 @@ def on_stop(payload: dict) -> None:
             maybe_speak(session_id, payload.get("last_assistant_message", ""))
     except Exception as e:
         log("voice_output stop hook failed", {"error": str(e)})
+    _swarm_ledger(payload)
 
     try:
         from hooks.lifecycle.refresh import on_stop as refresh_on_stop

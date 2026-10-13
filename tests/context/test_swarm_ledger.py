@@ -101,13 +101,15 @@ def test_session_start_reaches_the_ledger_hook_on_every_harness(harness, dispatc
     assert [p["hook_event_name"] for p in dispatched] == ["SessionStart"]
 
 
-def test_stop_runs_the_ledger_before_any_other_stop_work_on_every_harness(harness, dispatched, monkeypatch):
-    later = []
-    monkeypatch.setattr(hm, "_confirm_inbox", later.append)
+def test_a_held_stop_finishes_the_turn_but_schedules_no_refresh_or_close(harness, dispatched, monkeypatch):
+    confirmed, scheduled = [], []
+    monkeypatch.setattr(hm, "_confirm_inbox", confirmed.append)
+    monkeypatch.setattr("hooks.lifecycle.refresh.on_stop", scheduled.append)
+    monkeypatch.setattr("hooks.lifecycle.handoff_close.on_stop", scheduled.append)
     with pytest.raises(hm.BlockAction, match="operator event"):
         hm.on_stop({"hook_event_name": "Stop", "session_id": "s1", "cwd": "/p"})
     assert [p["hook_event_name"] for p in dispatched] == ["Stop"]
-    assert later == []
+    assert (confirmed, scheduled) == (["s1"], [])
 
 
 def test_a_failing_ledger_hook_never_breaks_the_event(harness, monkeypatch, injected):
