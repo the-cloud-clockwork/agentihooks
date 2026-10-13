@@ -18,6 +18,8 @@ def run(payload: dict) -> tuple[list[str], str | None]:
             doc = json.loads(line)
         except ValueError:
             continue
+        if not isinstance(doc, dict):
+            continue
         if doc.get("decision") == "block":
             block = doc.get("reason", "")
         text = (doc.get("hookSpecificOutput") or {}).get("additionalContext")

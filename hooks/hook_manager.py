@@ -2146,6 +2146,7 @@ def on_stop(payload: dict) -> None:
         log("conditions stop failed", {"error": str(e)})
     if _stop_block is not None:
         raise BlockAction(_stop_block)
+    _swarm_ledger(payload)
 
     session_id = payload.get("session_id", "")
     transcript_path = payload.get("transcript_path", "")
@@ -2325,7 +2326,6 @@ def on_stop(payload: dict) -> None:
             log("handed-off session close scheduled", {"session_id": session_id})
     except Exception as e:
         log("handed-off session close failed", {"error": str(e)})
-    _swarm_ledger(payload)
 
 
 def on_subagent_start(payload: dict) -> None:

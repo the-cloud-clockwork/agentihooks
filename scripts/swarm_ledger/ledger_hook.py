@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Hook that keeps a crew member bound to its ledger, run on every harness by hooks.context.swarm_ledger.
 
-One entry for SessionStart, UserPromptSubmit, PostToolUse and Stop. A session is bound by
+Handles SessionStart, UserPromptSubmit, PostToolUse and Stop. A session is bound by
 `agentihooks ledger join` or `ledger.py join` (learned from the Bash command). Unbound sessions exit at once. Every error fails open.
 """
 
@@ -77,7 +77,10 @@ def join_from_new(command, response):
     tokens = tokens_of(command)
     if not is_ledger_cli(tokens) or "new" not in tokens:
         return None
-    stdout = response.get("stdout", "") if isinstance(response, dict) else str(response or "")
+    if isinstance(response, dict):
+        stdout = response.get("stdout") or response.get("textResultForLlm", "")
+    else:
+        stdout = str(response or "")
     for text in stdout.splitlines():
         try:
             out = json.loads(text)

@@ -11,10 +11,19 @@ from hooks.targets.normalizer import _COPILOT_EVENTS
 from scripts.targets.codex_target import CodexAdapter
 from scripts.targets.copilot_target import CopilotAdapter
 
+pytestmark = pytest.mark.unit
+
 HARNESSES = ("claude", "codex", "copilot")
 
 UNSUPPORTED = {
     ("codex", "Notification"): "Codex hooks.json has no Notification event",
+}
+
+UNHELD = {
+    (
+        "copilot",
+        "Stop",
+    ): "Copilot agentStop has no block channel: exit 2 is advisory there and stdout blocks only prompts",
 }
 
 _SHARED_ENTRY = re.compile(r"(?:^|\s)-m hooks(?:\s|$)")
@@ -78,6 +87,8 @@ def test_every_named_difference_is_a_real_gap(wiring):
     assert still_missing == set(UNSUPPORTED)
 
 
-def test_every_harness_reaches_only_the_shared_hooks_entry(wiring):
-    entries = {name for w in wiring.values() for names in w.values() for name in names}
-    assert entries == {"hooks"}
+def test_every_unheld_event_is_one_its_harness_cannot_block():
+    from hooks.targets.capabilities import _COPILOT_BLOCKABLE_EVENTS
+
+    blockable = {"copilot": _COPILOT_BLOCKABLE_EVENTS}
+    assert {key for key in UNHELD if key[1] not in blockable[key[0]]} == set(UNHELD)

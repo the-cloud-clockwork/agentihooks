@@ -94,22 +94,71 @@ def test_user_prompt_shows_ledger_events_on_every_harness(harness, dispatched, i
     assert NOTE in injected
 
 
-def test_session_start_reaches_the_ledger_hook_on_every_harness(harness, dispatched, injected):
+def test_session_start_reaches_the_ledger_hook_on_every_harness(harness, dispatched, injected, monkeypatch):
+    monkeypatch.setattr("hooks.lifecycle.deps_kick.kick", lambda: None)
+    monkeypatch.setattr("hooks.lifecycle.codex_refresh_kick.kick", lambda: None)
     hm.on_session_start({"hook_event_name": "SessionStart", "session_id": "s1", "cwd": "/p"})
     assert [p["hook_event_name"] for p in dispatched] == ["SessionStart"]
 
 
-def test_stop_is_held_by_the_ledger_on_every_harness(harness, dispatched, monkeypatch):
-    monkeypatch.setattr("hooks.lifecycle.refresh.on_stop", lambda payload: False)
-    monkeypatch.setattr("hooks.lifecycle.handoff_close.on_stop", lambda payload: False)
+def test_stop_runs_the_ledger_before_any_other_stop_work_on_every_harness(harness, dispatched, monkeypatch):
+    later = []
+    monkeypatch.setattr(hm, "_confirm_inbox", later.append)
     with pytest.raises(hm.BlockAction, match="operator event"):
         hm.on_stop({"hook_event_name": "Stop", "session_id": "s1", "cwd": "/p"})
     assert [p["hook_event_name"] for p in dispatched] == ["Stop"]
+    assert later == []
 
 
 def test_a_failing_ledger_hook_never_breaks_the_event(harness, monkeypatch, injected):
+    logged = []
+
     def broken(payload):
         raise RuntimeError("ledger down")
 
     monkeypatch.setattr(ledger_hook, "dispatch", broken)
-    hm.on_user_prompt_submit({"hook_event_name": "UserPromptSubmit", "session_id": "s1", "prompt": "go", "cwd": "/p"})
+    monkeypatch.setattr(hm, "log", lambda message, data=None: logged.append(message))
+    hm._swarm_ledger({"hook_event_name": "UserPromptSubmit", "session_id": "s1"})
+    assert logged == ["swarm ledger hook failed"]
+    assert injected == []
+
+
+JOIN = "agentihooks ledger --slug demo --as eng-1 join"
+JOINED = json.dumps({"joined": "eng-1", "slug": "demo", "role": "member"})
+NEW = "agentihooks ledger new plan.md"
+CREATED = json.dumps({"slug": "demo", "joined": "eng-1"})
+
+RAW_TOOL_CALLS = {
+    "claude": lambda command, out: {
+        "hook_event_name": "PostToolUse",
+        "session_id": "s1",
+        "tool_name": "Bash",
+        "tool_input": {"command": command},
+        "tool_response": {"stdout": out, "stderr": ""},
+    },
+    "codex": lambda command, out: {
+        "hook_event_name": "PostToolUse",
+        "session_id": "s1",
+        "tool_name": "Bash",
+        "tool_input": {"command": command},
+        "tool_response": out,
+    },
+    "copilot": lambda command, out: {
+        "sessionId": "s1",
+        "toolName": "bash",
+        "toolArgs": json.dumps({"command": command}),
+        "toolResult": {"resultType": "success", "textResultForLlm": out},
+    },
+}
+
+
+@pytest.mark.parametrize(("command", "out"), [(JOIN, JOINED), (NEW, CREATED)], ids=["join", "new"])
+def test_a_ledger_join_binds_the_session_from_each_harness_payload(harness, command, out, monkeypatch, tmp_path):
+    from hooks.targets.normalizer import normalize_payload
+
+    monkeypatch.setenv("AGENTIHOOKS_COPILOT_EVENT", "postToolUse")
+    monkeypatch.setattr(ledger_hook, "SESSIONS", tmp_path)
+    payload = normalize_payload(RAW_TOOL_CALLS[harness](command, out))
+    ledger_hook.bind(payload, payload["session_id"])
+    session = json.loads((tmp_path / "s1.json").read_text())
+    assert (session["slug"], session["name"]) == ("demo", "eng-1")
