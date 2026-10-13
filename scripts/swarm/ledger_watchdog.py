@@ -22,7 +22,7 @@ WRITES = 3
 WRITE_SLOW_S = 2.0
 STOP_WAIT_S = 10.0
 POLL_S = 0.1
-ENSURE_TIMEOUT_S = 30
+ENSURE_TIMEOUT_S = 210
 LOCK_KEY = f"{PREFIX}:ledger-server-restart"
 LOCK_MS = 120_000
 RUNAWAY_KEY = f"{PREFIX}:ledger-server-runaway"
@@ -78,7 +78,7 @@ def launch(pid: int, argv: list[str], proc: Path) -> list[str] | None:
     if found is None:
         return None
     path = Path(found) if Path(found).is_absolute() else (proc / str(pid) / "cwd").resolve() / found
-    return [argv[0], str(path)] if path.is_file() else None
+    return [sys.executable, str(path)] if path.is_file() else None
 
 
 def alive(pid: int, proc: Path) -> bool:
