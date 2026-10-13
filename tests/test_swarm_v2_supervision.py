@@ -247,6 +247,15 @@ def fixture_processes(fixture):
     return found
 
 
+def reap(fixture):
+    deadline = time.monotonic() + 8
+    while (found := fixture_processes(fixture)) and time.monotonic() < deadline:
+        for pid in found:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
+        time.sleep(0.05)
+
+
 @contextlib.contextmanager
 def supervised(tmp_path):
     attempt, path, spec = launch_files(tmp_path)
@@ -283,11 +292,16 @@ def supervised(tmp_path):
         children.append(child)
         return child
 
-    yield start, attempt, spec
-    for child in children:
-        if child.poll() is None:
-            child.terminate()
-        child.wait(timeout=8)
+    try:
+        yield start, attempt, spec
+        for child in children:
+            if child.poll() is None:
+                child.terminate()
+            child.wait(timeout=8)
+    finally:
+        for child in children:
+            child.kill()
+        reap(fixture)
 
 
 @pytest.fixture
