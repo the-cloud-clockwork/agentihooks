@@ -48,7 +48,7 @@ PULL_QUERY = (
     "commits(last:1){nodes{commit{committedDate "
     'file(path:".github/workflows"){object{...on Tree{entries{object{...on Blob{text}}}}}} '
     "statusCheckRollup{contexts(first:100){"
-    "nodes{...on CheckRun{name conclusion completedAt} ...on StatusContext{context state createdAt}} "
+    "nodes{...on CheckRun{name conclusion completedAt databaseId} ...on StatusContext{context state createdAt}} "
     "pageInfo{hasNextPage}}} checkSuites(first:100){nodes{status workflowRun{databaseId createdAt}} "
     "pageInfo{hasNextPage}}}}}}}}"
 )
@@ -75,8 +75,17 @@ def iso_ms(text):
     return int(datetime.fromisoformat(text).timestamp() * 1000)
 
 
+def _latest_checks(checks):
+    return list(
+        {
+            (check.get("name"), check.get("context")): check
+            for check in sorted(checks, key=lambda check: (check.get("databaseId") or 0, check.get("createdAt") or ""))
+        }.values()
+    )
+
+
 def pull_request(raw):
-    commits, checks = raw.get("commits") or [], raw.get("statusCheckRollup") or []
+    commits, checks = raw.get("commits") or [], _latest_checks(raw.get("statusCheckRollup") or [])
     suites = raw.get("checkSuites") or []
     results = [check.get("conclusion") or check.get("state") for check in checks]
     running = any(suite.get("workflowRun") and suite.get("status") != "COMPLETED" for suite in suites)
