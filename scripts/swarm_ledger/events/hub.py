@@ -88,6 +88,11 @@ class Hub:
         with self.changed:
             if cursor is not None:
                 return seq, [entry for entry in channel.log if entry[0] > seq]
+            return self.snapshot(slug)
+
+    def snapshot(self, slug: str) -> tuple[int, list]:
+        with self.changed:
+            channel = self.channels[slug]
             return channel.seq, [(channel.seq, self.cursor(channel, channel.seq), "snapshot", dict(channel.resources))]
 
     def close(self, slug):
