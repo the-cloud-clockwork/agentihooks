@@ -325,6 +325,7 @@ def on_session_start(payload: dict) -> None:
     from hooks.lifecycle.codex_refresh_kick import kick as codex_refresh_kick
 
     codex_refresh_kick()
+    _swarm_ledger(payload)
     otel.emit_event(
         "agentihooks.session.started",
         {
@@ -720,6 +721,7 @@ def on_user_prompt_submit(payload: dict) -> None:
     log("User prompt submitted", {"session_id": session_id})
     _confirm_inbox(session_id)
     _swarm_heartbeat("working", payload.get("prompt", ""))
+    _swarm_ledger(payload)
     typed = _operator_words(payload)
     _operator_mode(payload, typed)
     _request_trace_flush(payload, "prompt")
@@ -1065,6 +1067,27 @@ def _swarm_outcome(payload: dict) -> None:
         outcome(payload)
     except Exception as e:
         log("swarm outcome record failed", {"error": str(e)})
+
+
+def _swarm_ledger(payload: dict) -> None:
+    try:
+        from hooks.context.swarm_ledger import run
+
+        contexts, block = run(payload)
+    except Exception as e:
+        log("swarm ledger hook failed", {"error": str(e)})
+        return
+    from hooks.common import inject_context
+
+    for context in contexts:
+        inject_context(context, also_log=False, skip_compression=True)
+    if block:
+        raise BlockAction(block)
+
+
+def _swarm_after_tool(payload: dict) -> None:
+    _swarm_outcome(payload)
+    _swarm_ledger(payload)
 
 
 def _operator_words(payload: dict) -> bool:
@@ -1812,7 +1835,7 @@ def on_post_tool_use(payload: dict) -> None:
     log(f"Post tool use: {tool_name}", {"tool": tool_name})
     _trace_session_id = payload.get("session_id", "")
     _operator_words(payload)
-    _swarm_outcome(payload)
+    _swarm_after_tool(payload)
     _conditions = None
     try:
         from hooks.context.conditions import post_effect
@@ -2286,6 +2309,7 @@ def on_stop(payload: dict) -> None:
             maybe_speak(session_id, payload.get("last_assistant_message", ""))
     except Exception as e:
         log("voice_output stop hook failed", {"error": str(e)})
+    _swarm_ledger(payload)
 
     try:
         from hooks.lifecycle.refresh import on_stop as refresh_on_stop

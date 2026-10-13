@@ -33,6 +33,7 @@ LANE_USERS = {
     "proofs.yml",
     "test-leaks.yml",
     "swarm-node-image.yml",
+    "hive-worker.yml",
     *DIRECT,
 }
 MUTATION_LANE_USERS = {"mutation-preflight.yml:stats", "mutation-preflight.yml:mutation-shard"}

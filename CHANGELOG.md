@@ -31,6 +31,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- The ledger HTTP server uses a listen backlog of 128 to accept bursts of
+  concurrent writers and readers.
 - The swarm merge pass reopens released tasks with the reason when an unknown
   merge error prevents admission, while retaining waits for outages and checks.
 - Routed Codex exec calls keep authentication overrides in the subcommand's

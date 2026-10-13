@@ -11,17 +11,23 @@ runs on `merge_group`, so unit, lint, Sonar and the swarm image smoke grade
 the merged tree before it lands. Mutation stays on the pull request head.
 Once the queue is active, `gh pr merge --squash` adds the pull request to the
 queue; it lands when the queue run passes the gate.
+The queue groups with `ALLGREEN`: every entry is built on dev plus the
+entries ahead of it and merges only on its own passing run, so a red pull
+request never lands. A failing entry leaves the queue and the entries behind
+it rebuild without it. A full queue run takes 21 `anton-oss` jobs, so the
+queue builds two entries at a time to fit the 40 runner pool.
 Main keeps its existing branch match and rules; only its bypass list changes.
 
-The operator applies the payloads after the merge queue change to the Tests
-workflow has merged into dev. Agents cannot mutate remote
-rulesets. From a checkout containing the reviewed payloads:
+The antoncore `Organization secrets and dev rulesets` workflow applies
+`dev-no-delete.json` from this repository's dev and reads it back on every
+antoncore dev push or dispatch, so a change here goes live on the next
+antoncore dev push or a dispatch of that workflow. The reconcile requires the
+required check to name its source, `integration_id` 15368 for GitHub Actions.
+The operator applies the
+other payloads. Agents cannot mutate remote rulesets. From a checkout
+containing the reviewed payloads:
 
 ```bash
-gh api \
-  --method PUT \
-  repos/The-Cloud-Clockwork/agentihooks/rulesets/16090886 \
-  --input .github/rulesets/dev-no-delete.json
 gh api \
   --method PUT \
   repos/The-Cloud-Clockwork/agentihooks/rulesets/15122747 \
@@ -38,8 +44,10 @@ gh api repos/The-Cloud-Clockwork/agentihooks/rules/branches/dev \
   --jq '.[] | select(.type == "pull_request") | .parameters.require_code_owner_review'
 ```
 
-The dev `pull_request` rule must carry `require_code_owner_review` true, so a
-pull request touching a path in `.github/CODEOWNERS` waits for owner review.
+The dev `pull_request` rule carries `require_code_owner_review` false, as it
+runs live: every path in `.github/CODEOWNERS` names the account that authors
+the swarm's pull requests, so owner review waits on an approval nobody else
+can give. Turning it on is a separate operator decision.
 The dev response must include `pull_request`, `required_linear_history`,
 `merge_queue` and `required_status_checks` requiring `Gate — Required` with
 `strict_required_status_checks_policy` false; both bypass lists must be empty.
