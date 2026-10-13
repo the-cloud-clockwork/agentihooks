@@ -274,6 +274,19 @@ def test_an_outage_holds_the_reopen(monkeypatch):
     assert swarm.tick(START + 30 * MINUTE) == [] and not _reopened(swarm) and swarm.retired == []
 
 
+def test_outage_time_does_not_count_toward_a_limit_or_the_escalation(monkeypatch):
+    swarm = Swarm(GREEN)
+    swarm.tick(START)
+    monkeypatch.setattr(stall_watch.outage, "paused_ms", lambda slug, since, now: 5 * MINUTE)
+    assert swarm.tick(START + 14 * MINUTE) == [] and not _reopened(swarm)
+    swarm.tick(START + 15 * MINUTE)
+    assert _reopened(swarm)
+    swarm.tick(START + 39 * MINUTE)
+    assert swarm.ledger.priorities == []
+    swarm.tick(START + 40 * MINUTE)
+    assert len(swarm.ledger.priorities) == 1
+
+
 def test_a_red_pull_request_with_no_marks_is_not_a_red_stall():
     swarm = Swarm(PullRequest("OPEN", None, None, True, True, head="h"))
     swarm.tick(START)

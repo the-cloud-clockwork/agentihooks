@@ -43,7 +43,8 @@ GATE = "Gate — Required"
 RED_NOTICE = re.compile(r"^Your pull request (\S+) for .* has red checks and no push for twenty minutes\.")
 GATE_JOB = re.compile(rf"^[ \t]+name:[ \t]*(['\"]?){re.escape(GATE)}\1[ \t]*$", re.MULTILINE)
 PULL_QUERY = (
-    "query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid mergeQueueEntry{id} mergeable isDraft "
+    "query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid mergeQueueEntry{id} "
+    "mergeable isDraft "
     "commits(last:1){nodes{commit{committedDate "
     'file(path:".github/workflows"){object{...on Tree{entries{object{...on Blob{text}}}}}} '
     "statusCheckRollup{contexts(first:100){"
