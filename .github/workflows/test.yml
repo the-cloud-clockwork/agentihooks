@@ -58,7 +58,7 @@ jobs:
           QUEUE_REF: ${{ github.event.merge_group.head_ref }}
           RUN: ${{ github.run_id }}
         run: |
-          [[ "$QUEUE_REF" =~ ^refs/heads/(gh-readonly-queue/.+/pr-[0-9]+-)[0-9a-f]+$ ]] || exit 0
+          [[ "$QUEUE_REF" =~ ^refs/heads/(gh-readonly-queue/.+/pr-[0-9]+-)[0-9a-f]+$ ]] || { echo "::warning::Unrecognised merge queue ref $QUEUE_REF"; exit 0; }
           prefix="${BASH_REMATCH[1]}"
           runs="repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs"
           for status in queued in_progress waiting pending requested; do

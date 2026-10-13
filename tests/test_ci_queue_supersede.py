@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -23,7 +24,7 @@ RUNS = {
     "requested": [(470, QUEUE + "2a2b2c")],
 }
 
-GH = """#!/usr/bin/env bash
+GH = r"""#!/usr/bin/env bash
 set -euo pipefail
 if [[ "$1 $2" == "api -X" ]]; then
   [[ -z "${FAIL_CANCEL:-}" ]] || exit 1
@@ -31,12 +32,17 @@ if [[ "$1 $2" == "api -X" ]]; then
   exit 0
 fi
 [[ -z "${FAIL_LIST:-}" ]] || exit 1
-pattern='[?&]event=merge_group&status=([a-z_]+)&'
-for arg in "$@"; do
-  if [[ "$arg" =~ $pattern ]]; then
-    cat "$FIXTURES/${BASH_REMATCH[1]}" 2>/dev/null || true
-  fi
+pattern='^repos/owner/repo/actions/workflows/test\.yml/runs\?event=merge_group&status=([a-z_]+)&per_page=100$'
+url="" filter=""
+while (($#)); do
+  case "$1" in
+    --jq) filter="$2"; shift ;;
+    repos/*) url="$1" ;;
+  esac
+  shift
 done
+[[ "$url" =~ $pattern && -f "$FIXTURES/${BASH_REMATCH[1]}" ]] || exit 0
+jq -r "$filter" "$FIXTURES/${BASH_REMATCH[1]}"
 """
 
 
@@ -54,7 +60,8 @@ def _run(tmp_path, ref, **env):
     fixtures.mkdir()
     bin_dir.mkdir()
     for status, runs in RUNS.items():
-        (fixtures / status).write_text("".join(f"{run} {branch}\n" for run, branch in runs))
+        runs = [{"id": run, "head_branch": branch, "status": status} for run, branch in runs]
+        (fixtures / status).write_text(json.dumps({"total_count": len(runs), "workflow_runs": runs}))
     gh = bin_dir / "gh"
     gh.write_text(GH)
     gh.chmod(0o755)
@@ -78,7 +85,7 @@ def _run(tmp_path, ref, **env):
     return result, cancelled.read_text().split()
 
 
-def test_pull_request_and_push_concurrency_stays_unchanged():
+def test_the_workflow_concurrency_stays_unchanged():
     concurrency = _workflow()["concurrency"]
     assert concurrency["cancel-in-progress"] == "${{ github.event_name == 'pull_request' }}"
     assert concurrency["queue"] == "${{ github.event_name == 'workflow_dispatch' && 'max' || 'single' }}"
@@ -106,10 +113,11 @@ def test_only_older_runs_of_the_same_pull_request_are_cancelled(tmp_path):
     assert "Cancelled superseded queue run 410 (gh-readonly-queue/dev/pr-123-aaa111)" in result.stdout
 
 
-def test_a_ref_outside_the_merge_queue_cancels_nothing(tmp_path):
+def test_a_ref_outside_the_merge_queue_warns_and_cancels_nothing(tmp_path):
     result, cancelled = _run(tmp_path, "refs/heads/dev")
     assert result.returncode == 0, result.stdout + result.stderr
     assert cancelled == []
+    assert "::warning::Unrecognised merge queue ref refs/heads/dev" in result.stdout
 
 
 @pytest.mark.parametrize("failure", ["FAIL_LIST", "FAIL_CANCEL"])
