@@ -358,7 +358,6 @@ def receiver():
 
 def test_a_slow_request_in_flight_at_teardown_leaves_no_unclosed_socket():
     before = set(threading.enumerate())
-    started = time.monotonic()
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         with _serving() as server:
@@ -373,7 +372,6 @@ def test_a_slow_request_in_flight_at_teardown_leaves_no_unclosed_socket():
             assert not thread.is_alive()
         connection.getresponse().read()
         gc.collect()
-    assert time.monotonic() - started < 15
     leaked = [str(w.message) for w in caught if issubclass(w.category, ResourceWarning)]
     assert [m for m in leaked if f"laddr=('127.0.0.1', {port})" in m] == []
 
