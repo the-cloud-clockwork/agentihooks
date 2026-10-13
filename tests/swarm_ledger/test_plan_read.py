@@ -365,6 +365,24 @@ def test_task_read_appends_the_linked_cases_after_the_slice(tmp_path, monkeypatc
     assert run(capsys, ["--phase", "p1"], {"AGENTIHOOKS_SWARM": "linked"}) == LINKED_PLAN
 
 
+def test_task_read_resolves_its_anchor_after_lines_are_inserted(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)
+    original = '<a id="first"></a>\n### First\nEarlier work\n\n<a id="assigned"></a>\n### Assigned\nDo assigned work\n\n<a id="later"></a>\n### Later\nLater work\n'
+    file = ledger_artifacts.store("shifted", "plan.md", original.encode())
+    ref = {"artifact": f"http://127.0.0.1:8765/artifacts/shifted/{file['id']}", "lines": "1-11"}
+    doc = {
+        "artifacts": [{"plan": True, "file": file}],
+        "phases": [{"id": "p1", "plan_ref": ref}],
+        "tasks": [{"id": "assigned", "phase": "p1", "plan_slice": "assigned", "plan_lines": "5-7"}],
+    }
+    SQLiteLedgerRepository(tmp_path / DATABASE).import_document("shifted", {**doc, "_meta": {"rev": 1}})
+    inserted = "".join(f"Inserted row {n}\n" for n in range(30))
+    ledger_artifacts.path_of("shifted", file["id"]).write_text(inserted + original)
+    assert run(capsys, ["--task", "assigned"], {"AGENTIHOOKS_SWARM": "shifted"}) == (
+        "".join(f"Inserted row {n}\n" for n in range(24, 30)) + original
+    )
+
+
 def test_swarm_v2_package_read_appends_the_linked_cases(monkeypatch):
     from scripts.swarm_ledger import plan_packages
 
