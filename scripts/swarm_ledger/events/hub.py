@@ -84,7 +84,7 @@ class Hub:
                 raise
             with self.changed:
                 for name, value in loaded.items():
-                    channel.resources.setdefault(name, value)
+                    channel.resources.setdefault(name, copy.deepcopy(value))
         with self.changed:
             if cursor is not None:
                 return seq, [entry for entry in channel.log if entry[0] > seq]
