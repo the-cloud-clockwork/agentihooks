@@ -48,7 +48,10 @@ def test_server_write_command_reports_cpu_lock_wait_and_remaining_wall(tmp_path,
     clock = Clock()
     monkeypatch.setattr(metrics, "time", clock)
     repo = SQLiteLedgerRepository(tmp_path / "ledger.sqlite3", domain=server.core)
-    repo.import_document("timing", {"title": "Timing", "_meta": {"rev": 1, "stamps": {}, "events": [], "members": {}}})
+    repo.import_document(
+        "timing",
+        server.core.normalize({"title": "Timing", "_meta": {"rev": 1, "stamps": {}, "events": [], "members": {}}}),
+    )
     monkeypatch.setattr(server.core, "LOCK", DelayedLock(clock))
 
     def write(handler, module):
