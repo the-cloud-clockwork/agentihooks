@@ -36,7 +36,6 @@ jobs:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
-          repositories: agentihooks,agentibrain-kernel
           permission-actions: read
           permission-contents: read
           permission-administration: read

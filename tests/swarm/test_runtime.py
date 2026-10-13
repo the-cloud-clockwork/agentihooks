@@ -189,7 +189,11 @@ def test_status_names_a_running_pane_spawned_without_its_herdr_name(tmp_path):
 
     def agent(seat, pane, conversation=""):
         return SimpleNamespace(
-            name=f"{slug}-{seat}", pane_id=pane, conversation_id=conversation, runtime_backend="local"
+            name=f"{slug}-{seat}",
+            pane_id=pane,
+            conversation_id=conversation,
+            runtime_backend="local",
+            runtime_target={},
         )
 
     assert runtime.status(agent("eng-3", "w:p4", "c3")) == "working"
@@ -206,7 +210,9 @@ def test_status_names_a_running_pane_spawned_without_its_herdr_name(tmp_path):
 def test_a_pane_already_carrying_its_herdr_name_is_not_renamed(tmp_path):
     herdr = NamedPanes({"w:p1": {"name": "master-a1b2c3-0001", "agent_status": "idle"}})
     runtime = HerdrRuntime(home=tmp_path, herdr=herdr)
-    agent = SimpleNamespace(name="master@a1b2c3-0001", pane_id="w:p1", conversation_id="", runtime_backend="local")
+    agent = SimpleNamespace(
+        name="master@a1b2c3-0001", pane_id="w:p1", conversation_id="", runtime_backend="local", runtime_target={}
+    )
     assert runtime.name_pane(agent) is False
     assert herdr.renamed == []
 
