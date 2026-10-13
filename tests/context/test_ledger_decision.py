@@ -213,16 +213,22 @@ def test_a_session_bound_to_a_ledger_gets_no_small_ledger(isolated, capsys, monk
     assert MARK not in run(todos(5), capsys, "claude", monkeypatch)
 
 
-def test_a_closed_ledger_is_read_after_an_earlier_hook_uses_another_folder(isolated, capsys, monkeypatch):
+@pytest.mark.parametrize("configured", ["absolute", "home", "default"])
+def test_a_closed_ledger_is_read_after_an_earlier_hook_uses_another_folder(isolated, capsys, monkeypatch, configured):
     from unittest.mock import Mock
 
     from scripts.swarm_ledger.repository import sqlite
 
     run(prompt("hello", session="earlier"), capsys, "claude", monkeypatch)
-    current = isolated / "current"
+    home = isolated / "home"
+    current = home / "development-ledger"
     (current / ".sessions").mkdir(parents=True)
     (current / ".sessions" / "s1.json").write_text(json.dumps({"slug": "closed", "name": "member"}), encoding="utf-8")
-    monkeypatch.setenv("LEDGER_DIR", str(current))
+    monkeypatch.setenv("HOME", str(home))
+    if configured == "default":
+        monkeypatch.delenv("LEDGER_DIR")
+    else:
+        monkeypatch.setenv("LEDGER_DIR", str(current) if configured == "absolute" else "~/development-ledger")
     read = Mock(wraps=sqlite.read_ledger)
     monkeypatch.setattr(sqlite, "read_ledger", read)
 
