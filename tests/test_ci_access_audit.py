@@ -63,13 +63,14 @@ def test_incomplete_installation_inventory_is_red():
             return [{"login": "nestorcolt"}]
         return {"total_count": 10, "installations": [{"app_slug": "one"}]}
 
-    with pytest.raises(ValueError, match="app installation inventory incomplete"):
+    with pytest.raises(ValueError, match="^app installation inventory incomplete$"):
         ci_access_audit.inventory("owner/repo", api)
 
 
-def test_empty_collaborator_inventory_is_red():
-    with pytest.raises(ValueError, match="collaborator inventory incomplete"):
-        ci_access_audit.inventory("owner/repo", lambda endpoint: [])
+@pytest.mark.parametrize("collaborators", [[], [{"login": "stranger"}]])
+def test_collaborator_list_missing_an_approved_human_is_red(collaborators):
+    with pytest.raises(ValueError, match="^collaborator inventory incomplete$"):
+        ci_access_audit.audit(APPROVED, collaborators, [{"app_slug": "tcc-main-ci"}])
 
 
 def test_empty_installation_inventory_is_red():
@@ -78,7 +79,7 @@ def test_empty_installation_inventory_is_red():
             return [{"login": "nestorcolt"}]
         return {"total_count": 0, "installations": []}
 
-    with pytest.raises(ValueError, match="app installation inventory incomplete"):
+    with pytest.raises(ValueError, match="^app installation inventory incomplete$"):
         ci_access_audit.inventory("owner/repo", api)
 
 

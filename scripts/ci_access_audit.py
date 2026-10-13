@@ -10,6 +10,8 @@ from scripts.ci_runner_trust import ACTORS, validate_actors
 def audit(approved: list[str], collaborators: list[dict], installations: list[dict]) -> dict:
     approved = validate_actors(approved)
     names = sorted({entry["login"] for entry in collaborators})
+    if not {actor for actor in approved if not actor.endswith("[bot]")} <= set(names):
+        raise ValueError("collaborator inventory incomplete")
     apps = sorted({entry["app_slug"] + "[bot]" for entry in installations})
     return {
         "approved": approved,
@@ -35,8 +37,6 @@ def inventory(repo: str, api: Callable[[str], object] = _api) -> tuple[list[dict
         if len(entries) < 100:
             break
         page += 1
-    if not collaborators:
-        raise ValueError("collaborator inventory incomplete")
     installations = []
     page = 1
     while True:
