@@ -301,7 +301,7 @@ def launch(store: RedisStore, spec: Launch, deps: Deps) -> Started:
     check_environment(spec.environ, spec.allowed_tokens)
     agent = admit(store, spec, deps)
     bindings = BindingStore(store)
-    record, process = None, None
+    record, process, path = None, None, None
     try:
         path = socket_path(deps.runtime_root or runtime_root(spec.environ), agent.execution_id)
         record = bindings.reserve(spec.slug, _record(spec, agent, path))
@@ -319,8 +319,12 @@ def launch(store: RedisStore, spec: Launch, deps: Deps) -> Started:
                 bindings.put(spec.slug, replace(record, state=FAILED, last_error_class=error_class))
                 bindings.release(spec.slug, record)
         finally:
-            store.put_agent(spec.slug, replace(agent, state="finished"))
-            store.drop_agent(spec.slug, agent.name, deps.now_ms())
+            try:
+                store.put_agent(spec.slug, replace(agent, state="finished"))
+                store.drop_agent(spec.slug, agent.name, deps.now_ms())
+            finally:
+                if path is not None:
+                    shutil.rmtree(path.parent)
         raise
     return Started(record, agent, process)
 
