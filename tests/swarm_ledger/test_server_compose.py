@@ -82,6 +82,7 @@ def test_compose_runs_with_the_folder_the_code_and_this_user(tmp_path, monkeypat
         "LEDGER_GID": "5678",
     }
     assert (first["capture_output"], first["text"], first["check"], first["timeout"]) == (True, True, False, 120)
+    assert calls[1][1]["env"]["LEDGER_DIR"] == str(tmp_path)
 
 
 def test_a_failed_or_hung_compose_names_its_error(tmp_path):
@@ -137,12 +138,13 @@ def compose_server(tmp_path, monkeypatch, ledger_port):
 def test_ensure_starts_the_shared_server_through_compose_and_never_spawns_it(compose_server, monkeypatch, capsys):
     answers = iter([None, None, str(compose_server)])
     monkeypatch.setattr(server.ledger_link, "serving", lambda **kw: next(answers))
-    started = []
+    started, waited = [], []
     monkeypatch.setattr(server.server_compose, "start", lambda folder: started.append(folder) or "")
+    monkeypatch.setattr(server, "wait_for", lambda folder: waited.append(folder) or 5.0)
     with patch.object(server.subprocess, "Popen") as spawn:
         server.ensure()
     spawn.assert_not_called()
-    assert started == [compose_server]
+    assert started == waited == [compose_server]
     assert capsys.readouterr().out == f"{server.BASE}\n"
 
 
@@ -155,8 +157,19 @@ def test_ensure_waits_past_the_compose_timeout_for_the_container(compose_server)
 def test_a_compose_start_that_fails_ends_ensure_with_its_error(compose_server, monkeypatch):
     monkeypatch.setattr(server.ledger_link, "serving", lambda **kw: None)
     monkeypatch.setattr(server.server_compose, "start", lambda folder: "no such image")
+    monkeypatch.setattr(server, "COMPOSE_WAIT", 0.5)
     with pytest.raises(SystemExit, match="could not start the ledger service: no such image"):
         server.ensure()
+
+
+def test_a_bare_start_waits_while_the_port_or_the_old_server_is_still_there(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.core, "LEDGER_DIR", tmp_path)
+    for held, alive in ((True, False), (False, True)):
+        monkeypatch.setattr(server, "port_held", lambda held=held: held)
+        monkeypatch.setattr(server, "server_process_alive", lambda alive=alive: alive)
+        with patch.object(server.subprocess, "Popen") as spawn:
+            assert server.start_server(False) is False
+        spawn.assert_not_called()
 
 
 def test_stop_stops_the_compose_service_and_clears_its_pidfile(compose_server, monkeypatch, capsys):
@@ -250,6 +263,7 @@ def test_a_request_thread_that_starts_keeps_the_server_running(monkeypatch):
     started = []
     monkeypatch.setattr(server.threading.Thread, "start", lambda self: started.append(self))
     httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler, bind_and_activate=False)
-    httpd.process_request(None, ("127.0.0.1", 1))
+    request = object()
+    httpd.process_request(request, ("127.0.0.1", 1))
     httpd.server_close()
-    assert len(started) == 1
+    assert [thread._args for thread in started] == [(request, ("127.0.0.1", 1))]

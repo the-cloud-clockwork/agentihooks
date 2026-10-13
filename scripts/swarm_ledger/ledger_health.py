@@ -17,7 +17,7 @@ REFUSED = "not listening yet"
 
 
 def probe(base: str, urlopen: Callable = urllib.request.urlopen) -> str:
-    request = urllib.request.Request(f"{base}/healthz", data=b"", method="POST")
+    request = urllib.request.Request(f"{base}/healthz", data=b"")
     try:
         with urlopen(request, timeout=WRITE_TIMEOUT_S) as reply:
             reply.read()
@@ -37,7 +37,7 @@ def tally(folder: Path, failed: bool) -> int:
         count = int(path.read_text()) + 1
     except (OSError, ValueError):
         count = 1
-    path.write_text(str(count))
+    path.write_text(str(count % FAILS_MAX))
     return count
 
 
@@ -70,7 +70,6 @@ def main(
     print(f"probe write failed, {count} of {FAILS_MAX}: {error}", file=sys.stderr)
     if count >= FAILS_MAX:
         end(folder)
-        tally(folder, False)
     return 1
 
 

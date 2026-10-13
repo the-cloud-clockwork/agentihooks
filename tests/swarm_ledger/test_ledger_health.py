@@ -59,7 +59,8 @@ def test_a_slow_or_failed_probe_names_its_error(error, named):
 
 def test_failures_count_up_and_a_success_clears_them(tmp_path):
     assert [health.tally(tmp_path, True) for _ in range(3)] == [1, 2, 3]
-    assert (tmp_path / ".health-failures").read_text() == "3"
+    assert (tmp_path / ".health-failures").read_text() == "0"
+    assert health.tally(tmp_path, True) == 1
     assert health.tally(tmp_path, False) == 0
     assert not (tmp_path / ".health-failures").exists()
     assert health.tally(tmp_path, False) == 0
@@ -124,7 +125,7 @@ def test_the_third_failure_in_a_row_ends_the_server_and_starts_the_count_again(t
     assert killed == []
     assert run_main(tmp_path, "timed out", killed) == 1
     assert killed == [tmp_path]
-    assert not (tmp_path / ".health-failures").exists()
+    assert (tmp_path / ".health-failures").read_text() == "0"
     assert capsys.readouterr().err.splitlines() == [
         "probe write failed, 1 of 3: timed out",
         "probe write failed, 2 of 3: timed out",
