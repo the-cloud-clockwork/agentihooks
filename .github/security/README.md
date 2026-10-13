@@ -23,6 +23,13 @@ Connector for GitHub there, then presses Enter in the same pane to read every
 setting back. GitHub's uninstall REST endpoint requires the third-party app's
 JWT, which the operator's token cannot provide. Preserve the complete output
 on the task. Read-back stays red while any unapproved installation remains.
+Strict approval for all outside contributors on the organization and every
+public repository is reconciled by Antoncore's dev-only org automation. The
+inventory includes archived repositories and uses every GitHub API page.
+The readback verifies the organization, every discovered public repository,
+and the Anton open source runner group's selected repositories. Failed or
+empty public discovery fails the audit. The group keeps unrestricted workflows
+so trusted pull request jobs can run; outside contributors require approval.
 Run the same read-only verification independently with:
 
 ```bash
@@ -41,7 +48,7 @@ prefers client ID over its deprecated app ID input. The app must be installed on
 agentihooks and agentibrain-kernel with repository Administration read, Actions
 read and Contents read, plus organization Administration read, Members read and
 Self-hosted runners read. The token requests only those read permissions and
-only the two repositories. Organization Administration allows the audit to list
+all repositories in the installation. Organization Administration allows the audit to list
 installed applications and inspect organization defaults. Personal tokens are
 not used; `ORG_GITHUB_TOKEN` remains private. The job never applies settings and
 never runs on pull request code. It runs on dev pushes and manual dispatch immediately;

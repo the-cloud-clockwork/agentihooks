@@ -301,3 +301,9 @@ class TestIsErrorExplicitStatus:
 
         assert _is_error({"resultType": "failure", "textResultForLlm": "boom"}, strict=True) == (True, "boom")
         assert _is_error({"resultType": "denied", "textResultForLlm": "error: blocked by hook"}) == (False, "")
+
+    def test_a_zero_exit_outranks_error_words(self):
+        from hooks.tool_memory import _is_error
+
+        assert _is_error({"exitCode": 0, "stdout": "write_io_errs 0 error"}) == (False, "")
+        assert _is_error({"exitCode": 1, "stdout": "error"}) == (True, "error")

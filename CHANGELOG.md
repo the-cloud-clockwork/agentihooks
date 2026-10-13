@@ -15,6 +15,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Browser preparation reuses verified Chromium and OS dependencies baked into
+  ARC runners before restoring a cache or downloading browsers.
 - The swarm chart's controller API NetworkPolicy admits only the controller's
   own Pods and `controller.api.ingressFrom`; `networkPolicy.ingressFrom` no
   longer reaches port `api`. List any other API peer in

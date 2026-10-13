@@ -28,7 +28,24 @@ def _protected_config(base: dict, head: dict) -> dict:
     }
 
 
-def _aggregator_problems(base: tuple[str, str, dict], head: tuple[str, str, dict]) -> list[str]:
+def runners(policy: object = None) -> list[str]:
+    anton = [ci_runner_trust.selector(policy, "anton-oss-light")] if isinstance(policy, dict) else []
+    return ["ubuntu-latest", *anton]
+
+
+def reuse_jobs(policy: object = None) -> list[dict]:
+    jobs = []
+    for runner in runners(policy):
+        job = ci_reuse.reuse_job()
+        if runner != job["runs-on"]:
+            job["runs-on"] = runner
+            [install] = [step for step in job["steps"] if step.get("name") == "Install metadata dependencies"]
+            install["env"] = {"PYTHONNOUSERSITE": "1"}
+        jobs.append(job)
+    return jobs
+
+
+def _aggregator_problems(base: tuple[str, str, dict], head: tuple[str, str, dict], policy: object = None) -> list[str]:
     (base_file, base_id, base_job), (head_file, head_id, head_job) = base, head
     if (base_file, base_id) != (head_file, head_id):
         return [f"The head moves {GATE} from {base_file}/{base_id} to {head_file}/{head_id}."]
@@ -42,30 +59,37 @@ def _aggregator_problems(base: tuple[str, str, dict], head: tuple[str, str, dict
         for field in fields
         if base_job.get(field) != head_job.get(field)
         and not (field == "steps" and base_id == "gate-required" and head_job.get("steps") == ci_reuse.gate_steps())
+        and not (field == "runs-on" and head_job.get(field) in runners(policy))
     ]
 
 
-def _reuse_problems(base: dict, head: dict) -> list[str]:
+def _reuse_problems(base: dict, head: dict, policy: object = None) -> list[str]:
     previous = base.get("reuse")
     candidate = head.get("reuse")
     if candidate is None:
         return ["The head removes the protected reuse job."] if previous is not None else []
-    if candidate != previous and candidate != ci_reuse.reuse_job():
+    if candidate != previous and candidate not in reuse_jobs(policy):
         return ["The head changes the protected reuse job; the protected branch grades with its own."]
     return []
 
 
 def grade(
-    base_workflows: dict[str, dict], base_config: dict, head_workflows: dict[str, dict], head_config: dict, today: date
+    base_workflows: dict[str, dict],
+    base_config: dict,
+    head_workflows: dict[str, dict],
+    head_config: dict,
+    today: date,
+    policy: object = None,
 ) -> list[str]:
     base_gates, head_gates = _gates(base_workflows), _gates(head_workflows)
     if len(base_gates) != 1:
         return [f"The base holds {len(base_gates)} jobs named {GATE}; nothing protected can grade."]
     if len(head_gates) != 1:
         return [f"The head holds {len(head_gates)} jobs named {GATE}; exactly one must be."]
-    problems = _aggregator_problems(base_gates[0], head_gates[0])
+    problems = _aggregator_problems(base_gates[0], head_gates[0], policy)
     file = base_gates[0][0]
-    problems += _reuse_problems(base_workflows[file]["jobs"], (head_workflows.get(file) or {}).get("jobs") or {})
+    head_jobs = (head_workflows.get(file) or {}).get("jobs") or {}
+    problems += _reuse_problems(base_workflows[file]["jobs"], head_jobs, policy)
     return problems + ci_wiring.check(head_workflows, _protected_config(base_config, head_config), today)
 
 
@@ -99,9 +123,12 @@ def main(argv: list[str] | None = None) -> int:
         for section in ("not_gates", "outside_gate")
     }
     head_workflows, head_config = load(root, args.head)
-    problems = grade(base_workflows, base_config, head_workflows, head_config, datetime.now(UTC).date())
+    actors = None
     if ci_runner_trust.ACTORS in _git(root, "ls-tree", "-r", "--name-only", args.base).splitlines():
         actors = json.loads(_git(root, "show", f"{args.base}:{ci_runner_trust.ACTORS}"))
+        ci_runner_trust.validate_actors(actors)
+    problems = grade(base_workflows, base_config, head_workflows, head_config, datetime.now(UTC).date(), actors)
+    if actors is not None:
         problems += ci_runner_trust.check(head_workflows, actors)
     print(f"graded {args.head[:12]} against merge base {merge_base[:12]}: {len(problems)} protected gate problems")
     for problem in problems:

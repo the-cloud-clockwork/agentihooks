@@ -233,11 +233,14 @@ def test_overwritten_metadata_cannot_claim_the_planted_tree_passed(full_source, 
 
 
 def test_the_required_workflow_uses_the_protected_canonical_aggregation():
-    from scripts import ci_reuse
+    from scripts import ci_reuse, gate_protected
 
-    workflow = yaml.safe_load((PROGRAM.parents[1] / ".github/workflows/test.yml").read_text())
+    root = PROGRAM.parents[1]
+    workflow = yaml.safe_load((root / ".github/workflows/test.yml").read_text())
+    policy = json.loads((root / ".github/workflows/trusted-actors.json").read_text())
     assert workflow["jobs"]["gate-required"]["steps"] == ci_reuse.gate_steps()
-    assert workflow["jobs"]["reuse"] == ci_reuse.reuse_job()
+    assert workflow["jobs"]["gate-required"]["runs-on"] in gate_protected.runners(policy)
+    assert workflow["jobs"]["reuse"] in gate_protected.reuse_jobs(policy)
 
 
 @pytest.mark.parametrize("reuse_repo", ["dynamic"], indirect=True)

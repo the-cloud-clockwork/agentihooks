@@ -24,6 +24,28 @@ def access_responses():
             "name": "Default",
             "allows_public_repositories": False,
         },
+        "orgs/the-cloud-clockwork/actions/runner-groups/3": {
+            "id": 3,
+            "name": "anton-oss",
+            "visibility": "selected",
+            "allows_public_repositories": True,
+            "restricted_to_workflows": False,
+            "selected_workflows": [],
+        },
+        "orgs/the-cloud-clockwork/actions/runner-groups/3/repositories?per_page=100": {
+            "repositories": [{"name": "agentihooks"}, {"name": "agentibrain-kernel"}]
+        },
+        "orgs/the-cloud-clockwork/actions/permissions/fork-pr-contributor-approval": {
+            "approval_policy": "all_external_contributors"
+        },
+        "orgs/the-cloud-clockwork/repos?type=public&per_page=100": [
+            {"name": "agentihooks"},
+            {"name": "agentibrain-kernel"},
+            {"name": "later-public"},
+        ],
+        "repos/the-cloud-clockwork/later-public/actions/permissions/fork-pr-contributor-approval": {
+            "approval_policy": "all_external_contributors"
+        },
     }
     for repository in ("agentihooks", "agentibrain-kernel"):
         prefix = f"repos/the-cloud-clockwork/{repository}"
@@ -202,3 +224,58 @@ else:
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert browser_log.read_text().splitlines() == [url for _, _, url in apps]
+
+
+@pytest.mark.parametrize("target", ["organization", "later-public"])
+def test_read_back_rejects_weak_approval_outside_the_declared_repositories(tmp_path, access_responses, target):
+    access_responses["orgs/the-cloud-clockwork/repos?type=public&per_page=100"] = {
+        "pages": [[{"name": "agentihooks"}, {"name": "agentibrain-kernel"}], [{"name": "later-public"}]]
+    }
+    org_endpoint = "orgs/the-cloud-clockwork/actions/permissions/fork-pr-contributor-approval"
+    repo_endpoint = "repos/the-cloud-clockwork/later-public/actions/permissions/fork-pr-contributor-approval"
+    access_responses[org_endpoint] = {"approval_policy": "all_external_contributors"}
+    access_responses[repo_endpoint] = {"approval_policy": "all_external_contributors"}
+    access_responses[org_endpoint if target == "organization" else repo_endpoint] = {
+        "approval_policy": "first_time_contributors"
+    }
+    result = run_access(tmp_path, access_responses)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert f"DRIFT {target} contributor approval" in result.stderr
+
+
+@pytest.mark.parametrize("inventory", [[], None])
+def test_read_back_refuses_empty_or_failed_public_repository_discovery(tmp_path, access_responses, inventory):
+    access_responses["orgs/the-cloud-clockwork/actions/permissions/fork-pr-contributor-approval"] = {
+        "approval_policy": "all_external_contributors"
+    }
+    endpoint = "orgs/the-cloud-clockwork/repos?type=public&per_page=100"
+    if inventory is None:
+        del access_responses[endpoint]
+    else:
+        access_responses[endpoint] = inventory
+    result = run_access(tmp_path, access_responses)
+    assert result.returncode != 0
+    assert "GitHub access controls verified" not in result.stdout
+
+
+@pytest.mark.parametrize("drift", ["visibility", "repository"])
+def test_read_back_rejects_open_source_runner_group_access_drift(tmp_path, access_responses, drift):
+    endpoint = "orgs/the-cloud-clockwork/actions/runner-groups/3"
+    access_responses[endpoint] = {
+        "id": 3,
+        "name": "anton-oss",
+        "visibility": "selected",
+        "allows_public_repositories": True,
+        "restricted_to_workflows": False,
+        "selected_workflows": [],
+    }
+    access_responses[f"{endpoint}/repositories?per_page=100"] = {
+        "repositories": [{"name": "agentihooks"}, {"name": "agentibrain-kernel"}]
+    }
+    if drift == "visibility":
+        access_responses[endpoint]["visibility"] = "all"
+    else:
+        access_responses[f"{endpoint}/repositories?per_page=100"]["repositories"].append({"name": "outsider"})
+    result = run_access(tmp_path, access_responses)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "DRIFT Anton open source runner" in result.stderr
