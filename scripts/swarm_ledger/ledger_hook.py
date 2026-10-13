@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claude Code hook that keeps a crew member bound to its ledger.
+"""Hook that keeps a crew member bound to its ledger, run on every harness by hooks.context.swarm_ledger.
 
 One entry for SessionStart, UserPromptSubmit, PostToolUse and Stop. A session is bound by
 `agentihooks ledger join` or `ledger.py join` (learned from the Bash command). Unbound sessions exit at once. Every error fails open.
