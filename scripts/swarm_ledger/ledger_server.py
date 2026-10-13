@@ -83,7 +83,7 @@ def served_version():
 def ledger_view(state):
     meta = {key: item for key, item in state["_meta"].items() if key not in ("seeds", "api_operations")}
     meta.update(page_version=served_version(), crew=ledger_gate.crew(state["_meta"]))
-    return json.loads(json.dumps({**state, "_meta": meta}))
+    return {**state, "_meta": meta}
 
 
 def publish_ledger(slug, state):
