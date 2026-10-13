@@ -46,7 +46,7 @@ EXCLUDED = {
     "swarm-image.yml": "a manual dispatch runs no job; its jobs are gated to a dev push",
 }
 if (_WORKFLOWS / "access-audit.yml").exists():
-    EXCLUDED["access-audit.yml"] = "weekly and manual, one short hosted read only job, no pull request trigger"
+    EXCLUDED["access-audit.yml"] = "dev push, weekly and manual, one short read only job, no pull request trigger"
 CALLERS = ("test.yml", "proofs.yml")
 REQUIRED = ("pull_request", "merge_group", "pull_request_target")
 REFS = ("refs/heads/dev", "refs/heads/main", "refs/heads/diffcheck/plant", "refs/heads/task-branch")

@@ -1,5 +1,5 @@
 {
-  "access-audit.yml/audit": "hosted",
+  "access-audit.yml/audit": "light",
   "brain-smoke.yml/smoke": "dind",
   "coverage-stability.yml/compare": "batch",
   "equivalence.yml/ledger-equivalence": "light",
