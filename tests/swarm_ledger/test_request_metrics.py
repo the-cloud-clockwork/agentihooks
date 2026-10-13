@@ -90,3 +90,40 @@ def test_server_write_command_reports_cpu_lock_wait_and_remaining_wall(tmp_path,
     ]
     assert "timing" not in json.dumps(report)
     assert "hidden" not in json.dumps(report)
+
+
+def test_command_names_the_cpu_hot_route_only_inside_its_window(monkeypatch, capsys, ledger_port):
+    metrics = importlib.import_module("scripts.swarm_ledger.request_metrics")
+    monkeypatch.setattr(metrics, "SAMPLES", deque(maxlen=metrics.MAX_SAMPLES))
+    clock = Clock()
+    monkeypatch.setattr(metrics, "time", clock)
+
+    def read(handler, module):
+        clock.wall += 3.0
+        clock.cpu += 2.0
+
+    monkeypatch.setattr(api, "handle", read)
+    handler = server.Handler.__new__(server.Handler)
+    handler.command = "GET"
+    handler.path = "/api/v1/ledgers/earlier/tasks?cursor=private"
+    handler.do_GET()
+    clock.wall += 7200.0
+    for slug in ("first", "second"):
+        handler.path = f"/api/v1/ledgers/{slug}/export"
+        handler.do_GET()
+    monkeypatch.setattr(server, "ALLOWED_HOSTS", {f"127.0.0.1:{ledger_port}"})
+    with ThreadingHTTPServer(("127.0.0.1", ledger_port), server.Handler) as http:
+        thread = threading.Thread(target=http.serve_forever)
+        thread.start()
+        try:
+            metrics.main(["--hours", "1", "--url", f"http://127.0.0.1:{ledger_port}"])
+        finally:
+            http.shutdown()
+            thread.join()
+    result = json.loads(capsys.readouterr().out)
+    assert result["window_end"] - result["window_start"] == 3600.0
+    assert result["writes"]["count"] == 0
+    assert result["writes"]["p95_wall_seconds"] is None
+    assert result["routes"] == [
+        {"method": "GET", "route": "/api/v1/ledgers/:slug/export", "count": 2, "cpu_seconds": 4.0}
+    ]
