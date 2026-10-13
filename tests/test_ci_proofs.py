@@ -76,6 +76,27 @@ def test_a_focused_proof_refuses_missing_paths_before_setup(paths, tmp_path):
     assert index < next(i for i, step in enumerate(steps) if step.get("uses", "").startswith("actions/setup-python@"))
 
 
+@pytest.mark.parametrize("paths", ["tests/missing.py tests/other.py", "tests/existing.py::test_case tests/missing.py"])
+def test_focused_proof_names_every_missing_path_before_setup(paths, tmp_path):
+    steps = _workflow()["jobs"]["tests"]["steps"]
+    index = next(i for i, step in enumerate(steps) if step.get("name") == "Require explicit test paths")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/existing.py").touch()
+    result = subprocess.run(
+        ["bash", "-e", "-c", steps[index]["run"]],
+        env={**os.environ, "TEST_PATHS": paths},
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1
+    for path in paths.split():
+        if "existing" not in path:
+            assert f"Test path {path} does not exist." in result.stdout
+    assert index < next(i for i, step in enumerate(steps) if step.get("uses", "").startswith("actions/setup-python@"))
+    assert index < next(i for i, step in enumerate(steps) if step.get("name") == "Install dependencies")
+
+
 @pytest.mark.parametrize(("paths", "code"), [("tests/existing.py", 0), ("tests/missing.py", 1), ("", 1)])
 def test_selected_unit_paths_are_checked_before_setup(paths, code, tmp_path):
     jobs = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
