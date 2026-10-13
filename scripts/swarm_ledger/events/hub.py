@@ -1,6 +1,7 @@
 """Per ledger event channels: the latest value of each resource, and a bounded log of the patches between them."""
 
 import collections
+import copy
 import secrets
 import threading
 import time
@@ -103,7 +104,7 @@ class Hub:
             if channel is None:
                 return False
             if name not in channel.resources:
-                channel.resources[name] = value
+                channel.resources[name] = copy.deepcopy(value)
                 return False
             old = channel.resources[name]
             if name == "ledger" and revision(value) < revision(old):
@@ -111,7 +112,8 @@ class Hub:
             change = patch.diff(old, value)
             if change is None:
                 return False
-            channel.resources[name] = value
+            change = copy.deepcopy(change)
+            channel.resources[name] = patch.apply(old, change)
             channel.seq += 1
             data = {"patch": change, "rev": revision(value)} if name == "ledger" else {"patch": change}
             channel.log.append((channel.seq, self.cursor(channel, channel.seq), name, data))
