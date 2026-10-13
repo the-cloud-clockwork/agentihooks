@@ -274,3 +274,20 @@ def test_nonterminal_launch_preserves_stdin_and_exit_status():
     assert result.stdout == "piped input\n"
     assert result.stderr == ""
     assert result.returncode == 19
+
+
+def test_partial_terminal_writes_preserve_every_byte(monkeypatch):
+    reader, writer = os.pipe()
+    real_write = os.write
+
+    def partial(fd, data):
+        assert fd == writer
+        return real_write(fd, data[:2])
+
+    monkeypatch.setattr(codex_input.os, "write", partial)
+    try:
+        codex_input.write_all(writer, b"terminal output")
+        assert os.read(reader, 64) == b"terminal output"
+    finally:
+        os.close(reader)
+        os.close(writer)
