@@ -1,14 +1,18 @@
 import argparse
 import json
 import math
+import sqlite3
 import threading
 import time
+from _thread import LockType
 from collections import deque
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import wraps
+from urllib.parse import parse_qs, urlsplit
 from urllib.request import urlopen
 
 MAX_SAMPLES = 50000
@@ -19,12 +23,6 @@ SAMPLES = deque(maxlen=MAX_SAMPLES)
 GUARD = threading.Lock()
 STARTED_AT = time.time()
 EVICTED_THROUGH = float("-inf")
-
-
-import sqlite3
-from _thread import LockType
-from collections.abc import Callable, Iterator
-from urllib.parse import parse_qs, urlsplit
 
 
 @dataclass
