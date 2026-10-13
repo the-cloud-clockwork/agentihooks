@@ -1,14 +1,17 @@
 import json
 
-import fakeredis
 import pytest
 
 from scripts.inbox import cli
 from scripts.inbox.store import InboxStore
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
 
 def _environment(monkeypatch, slug="demo"):
+    import fakeredis
+
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig(slug, "/r", 3, 2))
     box = InboxStore(store.redis)

@@ -1,13 +1,16 @@
-import fakeredis
 import pytest
 
 from scripts.doctor import inbox, read
 from scripts.inbox.store import InboxStore
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
 
 @pytest.mark.parametrize("slug", ["demo", "demo@partition"])
 def test_empty_successor_seat_is_an_aged_wait_until_a_live_agent_binds(slug):
+    import fakeredis
+
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig(slug, "/r", max_eng=1, max_ci=2))
     box = InboxStore(store.redis)
@@ -35,6 +38,8 @@ def test_empty_successor_seat_is_an_aged_wait_until_a_live_agent_binds(slug):
 
 
 def test_a_departed_occupant_is_empty_even_when_its_agent_record_still_says_working():
+    import fakeredis
+
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("demo", "/r", 1, 1))
     box = InboxStore(store.redis)
@@ -57,6 +62,8 @@ def test_a_departed_occupant_is_empty_even_when_its_agent_record_still_says_work
     ],
 )
 def test_a_seat_with_no_possible_successor_keeps_unread_delivery(state, cap, address):
+    import fakeredis
+
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     slug = address.partition("@")[2]
     store.create(SwarmConfig(slug, "/r", 1, cap, state=state))
