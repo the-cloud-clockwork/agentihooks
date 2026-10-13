@@ -417,15 +417,6 @@ def test_a_red_job_beside_the_required_gate_is_noticed_only_when_the_gate_failed
     assert len(texts(store, ENG_SEAT)) == notices
 
 
-@pytest.mark.parametrize(
-    ("mergeable", "conflicting"), [("CONFLICTING", True), ("MERGEABLE", False), ("UNKNOWN", False)]
-)
-def test_a_pull_request_reads_whether_it_conflicts_with_its_base(mergeable, conflicting):
-    raw = {"state": "OPEN", "mergeable": mergeable, "commits": [{"committedDate": "2026-10-07T17:00:00Z"}]}
-    assert ledger_events.pull_request(raw).conflicting is conflicting
-    assert ledger_events.pull_request({"state": "OPEN"}).conflicting is False
-
-
 def test_a_red_notice_adds_to_the_notices_of_earlier_pull_requests(store):
     red, closed = answer("open_red"), answer("closed_unmerged")
     urls = {"https://github.com/o/r/pull/8": closed, "https://github.com/o/r/pull/9": red}

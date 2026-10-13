@@ -607,7 +607,7 @@ def test_red_checks_reopen_the_task_awaiting_fix_with_the_failing_step_named(mer
 
 
 def test_a_pull_request_that_conflicts_with_dev_reopens_instead_of_waiting_on_checks(merging):
-    merging.pulls[URL] = PullRequest("OPEN", None, 1, False, False, head=HEAD, conflicting=True)
+    merging.pulls[URL] = PullRequest("OPEN", None, 1, False, False, head=HEAD, mergeable="CONFLICTING")
     what = "conflicts with dev and needs an update the swarm cannot make"
     assert merging.run() == [f"task t1 reopened, {URL} {what}", f"removed the worktree {TOP}"]
     assert merging.rows["t1"]["state"] == "open" and merging.rows["t1"]["awaiting"] == "fix"
@@ -617,7 +617,7 @@ def test_a_pull_request_that_conflicts_with_dev_reopens_instead_of_waiting_on_ch
 
 def test_a_conflict_while_queued_is_left_to_the_queue(merging):
     queued_at_now(merging)
-    merging.pulls[URL] = PullRequest("OPEN", None, 1, False, True, head=HEAD, queued=True, conflicting=True)
+    merging.pulls[URL] = PullRequest("OPEN", None, 1, False, True, head=HEAD, queued=True, mergeable="CONFLICTING")
     assert merging.run(NOW + 60_000) == []
     assert merging.rows["t1"]["state"] == "pr"
 

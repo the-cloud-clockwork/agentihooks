@@ -149,7 +149,7 @@ def _advance(run, rows, row, found):
     if pull.state != "OPEN":
         return _reopen(run, row, found, "was closed without merging")
     if held["kind"] == "checks":
-        if pull.conflicting:
+        if pull.mergeable == "CONFLICTING":
             return _reopen(run, row, found, CONFLICT)
         return _checks(run, row, found, pull)
     outcome = waits.merge_resolution(held, run.github, run.reread, run.now_ms - found["queued_at"] < waits.FRESH_MS)

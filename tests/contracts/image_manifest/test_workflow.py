@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.test_ci_anton_runners import pool
+
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW = ROOT / ".github/workflows/swarm-node-image.yml"
@@ -45,12 +47,12 @@ def test_proof_branches_publish_only_to_the_proof_repository(workflow):
     )
 
 
-def test_every_job_runs_on_a_github_hosted_runner_without_swarm_services(workflow):
+def test_every_job_runs_on_the_isolated_anton_docker_pool_without_swarm_services(workflow):
     for job in workflow["jobs"].values():
-        assert job["runs-on"] == "ubuntu-latest"
+        assert job["runs-on"] == pool("anton-oss")
         assert "uses" not in job and "services" not in job and "container" not in job
     text = WORKFLOW.read_text()
-    assert not re.search(r"anton|self-hosted|LEDGER|REDIS|AGENTIHOOKS_SWARM", text)
+    assert not re.search(r"self-hosted|LEDGER|REDIS|AGENTIHOOKS_SWARM", text)
 
 
 def test_only_the_registry_login_holds_a_credential(workflow):
