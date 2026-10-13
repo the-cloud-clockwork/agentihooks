@@ -211,7 +211,9 @@ def mutated_bootstrap(filename: str) -> str:
         "import sys as _mutmut_sys\n"
         "from pathlib import Path as _mutmut_Path\n"
         # A process the mutation run did not start would import mutmut's whole engine for three trampoline names.
-        "if 'mutmut.__main__' not in _mutmut_sys.modules:\n"
+        "_mutmut_entry = getattr(getattr(_mutmut_sys.modules.get('__main__'), '__spec__', None), 'name', '')\n"
+        # The runner, mutated itself inside a nested gate test, still needs the real module for its stats.
+        "if 'mutmut.__main__' not in _mutmut_sys.modules and _mutmut_entry != 'scripts.ci_mutation.selection':\n"
         "    import importlib.util as _mutmut_util\n"
         f"    _mutmut_spec = _mutmut_util.spec_from_file_location('mutmut.__main__', {light_main_path})\n"
         "    _mutmut_sys.modules['mutmut.__main__'] = _mutmut_util.module_from_spec(_mutmut_spec)\n"
