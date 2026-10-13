@@ -114,9 +114,7 @@ def _hosted(runner: object) -> bool:
     )
 
 
-def _selector(runner: object, policy: object) -> bool:
-    if not isinstance(runner, str) or not isinstance(policy, dict):
-        return False
+def selector(policy: dict, pool: str) -> str:
     members = json.dumps(policy["actors"], separators=(",", ":"))
     queue = policy["queue_actor"]
     condition = (
@@ -126,8 +124,14 @@ def _selector(runner: object, policy: object) -> bool:
         "(github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && "
         f"github.actor == '{queue}' && github.triggering_actor == '{queue}')"
     )
+    return "${{ " + condition + " && '" + pool + "' || 'ubuntu-latest' }}"
+
+
+def _selector(runner: object, policy: object) -> bool:
+    if not isinstance(runner, str) or not isinstance(policy, dict):
+        return False
     return any(
-        _compact(runner) == _compact("${{ " + condition + " && '" + pool + "' || 'ubuntu-latest' }}")
+        _compact(runner) == _compact(selector(policy, pool))
         for pool in ("anton-oss", "anton-oss-light", "anton-oss-batch")
     )
 

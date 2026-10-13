@@ -204,6 +204,47 @@ def load_or_collect_stats(runner, test_runner, paths: list[str], mode: str, stat
         config.source_paths = relative
 
 
+# Text, not a module: a mutated copy of a stand-in module is itself trampolined and cannot serve the trampoline.
+LIGHT_MAIN = """import importlib
+import sys
+
+
+class MutmutProgrammaticFailException(Exception):
+    pass
+
+
+def mangled_name_from_mutant_name(mutant_name):
+    assert "__mutmut_" in mutant_name, mutant_name
+    return mutant_name.partition("__mutmut_")[0]
+
+
+def record_trampoline_hit(name):
+    pass
+
+
+def __getattr__(name):
+    if name.startswith("__"):
+        raise AttributeError(name)
+    if getattr(sys.modules.get("mutmut.__main__"), "__getattr__", None) is __getattr__:
+        del sys.modules["mutmut.__main__"]
+    return getattr(importlib.import_module("mutmut.__main__"), name)
+"""
+
+
+LIGHT_BOOTSTRAP = (
+    "import sys as _mutmut_sys\n"
+    # A process the mutation run did not start would import mutmut's whole engine for three trampoline names.
+    "_mutmut_entry = getattr(getattr(_mutmut_sys.modules.get('__main__'), '__spec__', None), 'name', '')\n"
+    # The runner, mutated itself inside a nested gate test, still needs the real module for its stats.
+    "if 'mutmut.__main__' not in _mutmut_sys.modules and _mutmut_entry != 'scripts.ci_mutation.selection':\n"
+    "    import types as _mutmut_types\n"
+    "    _mutmut_sys.modules['mutmut.__main__'] = _mutmut_types.ModuleType('mutmut.__main__')\n"
+    f"    exec({LIGHT_MAIN!r}, _mutmut_sys.modules['mutmut.__main__'].__dict__)\n"
+    "    import mutmut as _mutmut_package\n"
+    "    _mutmut_package.__main__ = _mutmut_sys.modules['mutmut.__main__']\n"
+)
+
+
 def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats: str) -> None:
     from mutmut import __main__ as runner
 
@@ -218,7 +259,8 @@ def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats
         bootstrap = (
             "import os as _mutmut_os\n"
             "from pathlib import Path as _mutmut_Path\n"
-            f"_mutmut_root = _mutmut_Path(__file__).resolve().parents[{len(Path(filename).parts) - 1}]\n"
+            + LIGHT_BOOTSTRAP
+            + f"_mutmut_root = _mutmut_Path(__file__).resolve().parents[{len(Path(filename).parts) - 1}]\n"
             "_mutmut_cwd = _mutmut_os.getcwd()\n"
             "try:\n"
             "    from mutmut.configuration import Config as _mutmut_Config\n"
