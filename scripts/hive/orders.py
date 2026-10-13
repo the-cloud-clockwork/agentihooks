@@ -50,6 +50,14 @@ class CommandOrder:
     text: str = ""
 
 
+DONE, FAILED = "done", "failed"
+REFUSED = Ack(FAILED, {}, "refused")
+FOREIGN = Ack(FAILED, {}, "identity")
+UNKNOWN_ACTION = Ack(FAILED, {}, "unknown_action")
+COMMAND_BATCH = 32
+SENT = {"sent": "1"}
+
+
 class Orders:
     def __init__(self, redis: "Redis") -> None:
         self.store = RedisStore(redis)
@@ -95,7 +103,7 @@ class Orders:
                 if pipe.hexists(receipt, "sent"):
                     return None
                 pipe.multi()
-                pipe.hset(receipt, "sent", "1")
+                pipe.hset(receipt, mapping=SENT)
                 pipe.expire(receipt, RECEIPT_SECONDS)
                 pipe.xadd(self.commands(hive), {"order": json.dumps(asdict(order))})
                 pipe.execute()
@@ -144,7 +152,7 @@ class Consumer:
 
     def poll_commands(self) -> int:
         stream = self.orders.commands(self.hive)
-        entries = self.store.redis.xrange(stream, count=32)
+        entries = self.store.redis.xrange(stream, count=COMMAND_BATCH)
         for item, fields in entries:
             try:
                 order = CommandOrder(**json.loads(fields["order"]))
@@ -157,7 +165,7 @@ class Consumer:
                     try:
                         ack = self.command(order)
                     except Exception as exc:
-                        ack = Ack("failed", {}, f"error: {type(exc).__name__}")
+                        ack = Ack(FAILED, {}, f"error: {type(exc).__name__}")
                     pipe.hset(receipt, "ack", json.dumps(asdict(ack)))
                     pipe.expire(receipt, RECEIPT_SECONDS)
                 pipe.xdel(stream, item)
@@ -170,9 +178,9 @@ class Consumer:
         try:
             agent = self.store.execution_registry.get(order.slug, order.execution_id)
         except SwarmError:
-            return Ack("failed", {}, "identity")
+            return FOREIGN
         if agent.generation != order.generation or agent.runtime_target.get("host_id") != self.hive:
-            return Ack("failed", {}, "identity")
+            return FOREIGN
         if order.action == "name":
             return _done(self.runtime.herdr.name_pane(agent))
         if order.action == "retire":
@@ -180,10 +188,10 @@ class Consumer:
         elif order.action == "nudge":
             outcome = self.runtime.command(agent, order.text)
         else:
-            return Ack("failed", {}, "unknown_action")
+            return UNKNOWN_ACTION
         if outcome.ok:
-            return Ack("done", agent.runtime_target)
-        return Ack("failed", agent.runtime_target, outcome.detail or outcome.status.value)
+            return Ack(DONE, agent.runtime_target)
+        return Ack(FAILED, agent.runtime_target, outcome.detail or outcome.status.value)
 
     def apply(self, order: LaunchOrder) -> Ack | None:
         now = lease.now_ms(self.store)
@@ -286,4 +294,4 @@ class Consumer:
 
 
 def _done(ok: bool) -> Ack:
-    return Ack("done", {}) if ok else Ack("failed", {}, "refused")
+    return Ack(DONE, {}) if ok else REFUSED

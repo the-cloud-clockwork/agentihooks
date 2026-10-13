@@ -144,7 +144,7 @@ def test_a_hive_reporting_a_dead_process_names_it_unbound(remote):
 
 
 def test_retire_goes_through_a_hive_order(remote):
-    from scripts.hive.orders import Consumer, Orders
+    from scripts.hive.orders import Ack, CommandOrder, Consumer, Orders
     from scripts.swarm_v2.runtime.base import LOCAL, Outcome, Status
 
     _publish(remote)
@@ -159,6 +159,9 @@ def test_retire_goes_through_a_hive_order(remote):
     retired = hive.terminate.call_args.args[0]
     assert (retired.execution_id, retired.runtime_target) == (agent.execution_id, agent.runtime_target)
     assert runtime.retire(agent) is True
+    assert agent.name not in runtime.refusals
+    order = CommandOrder(f"retire:{agent.execution_id}:{agent.generation}", "retire")
+    assert Orders(remote.redis).command(HIVE, order) == Ack("done", agent.runtime_target)
 
 
 def test_local_runtime_terminates_a_remote_worker_by_order(remote):
@@ -236,7 +239,7 @@ def test_pane_naming_and_stray_reaping_are_hive_orders(remote):
 
 
 def test_a_hive_refuses_a_command_for_an_execution_it_does_not_run(remote):
-    from scripts.hive.orders import CommandOrder, Consumer, Orders
+    from scripts.hive.orders import Ack, CommandOrder, Consumer, Orders
 
     orders = Orders(remote.redis)
     stale = CommandOrder(
@@ -251,7 +254,7 @@ def test_a_hive_refuses_a_command_for_an_execution_it_does_not_run(remote):
     Consumer(remote.redis, "elsewhere", hive).poll_commands()
     for order, at in ((stale, HIVE), (foreign, "elsewhere"), (missing, HIVE)):
         ack = orders.command(at, order)
-        assert (ack.status, ack.failure) == ("failed", "identity")
+        assert ack == Ack("failed", {}, "identity")
     hive.command.assert_not_called()
 
 
@@ -317,7 +320,10 @@ def test_a_runtime_without_hive_reports_never_acts_on_a_remote_worker_locally(re
     runtime.herdr = lambda args: calls.append(args) or {}
     _publish(remote)
     assert runtime.retire(agent) is False
-    assert "no hive reports" in runtime.refusal(agent)["refusal"]
+    assert runtime.refusals[agent.name] == {
+        "process": 0,
+        "refusal": f"no hive reports reach this runtime for hive {HIVE}",
+    }
     assert runtime.nudge(agent, "hello") == f"hive {HIVE} is not reporting"
     assert runtime.name_pane(agent) is False
     assert runtime.observe(agent).state == "unknown"
@@ -367,3 +373,170 @@ def test_a_lost_hive_keeps_its_workers_conversation_ids(remote):
     remote.redis.set(remote.reports.key(HIVE), json.dumps(report))
     tick._conversations("fixture", remote.store, remote.runtime)
     assert remote.store.agents("fixture")[0].conversation_id == "resumed"
+
+
+def _retire_order(agent):
+    from scripts.hive.orders import CommandOrder
+
+    return CommandOrder(f"retire:{agent.execution_id}:{agent.generation}", "retire")
+
+
+def _sent(redis):
+    from scripts.hive.orders import Orders
+
+    return [json.loads(fields["order"]) for _, fields in redis.xrange(Orders(redis).commands(HIVE))]
+
+
+def test_report_and_receipt_keys_name_their_hive(remote):
+    from scripts.hive import registry
+    from scripts.hive.orders import Orders
+
+    assert remote.reports.key(HIVE) == f"{registry.key(HIVE)}:executions"
+    assert Orders(remote.redis).command_receipt(HIVE, "x") == f"{registry.key(HIVE)}:command:x"
+    assert remote.runtime.hive.holder("engineer@nobody-0001") == ""
+    assert remote.reports.host(replace(remote.agent, runtime_target={})) == ""
+
+
+def test_an_execution_missing_from_a_live_report_reads_empty(remote):
+    _publish(remote)
+    assert remote.runtime.hive.execution(replace(remote.agent, execution_id="other")) == {}
+
+
+def test_command_orders_carry_their_exact_identity(remote):
+    _publish(remote)
+    runtime, agent = remote.runtime, remote.agent
+    waiting = "{} ordered on hive " + HIVE + ", waiting for its acknowledgement"
+    runtime.retire(agent)
+    assert runtime.refusals[agent.name] == {"process": 0, "refusal": waiting.format("retire")}
+    runtime.name_pane(agent)
+    assert runtime.refusals[agent.name] == {"process": 0, "refusal": waiting.format("name")}
+    runtime.reap_name(agent.name)
+    assert runtime.refusals[agent.name] == {"process": 0, "refusal": waiting.format("reap")}
+    runtime.nudge(agent, "one")
+    runtime.nudge(agent, "two")
+    retire, name, reap, first, second = _sent(remote.redis)
+    base = {
+        "slug": "fixture",
+        "name": agent.name,
+        "execution_id": agent.execution_id,
+        "generation": agent.generation,
+        "text": "",
+    }
+    identity = f"{agent.execution_id}:{agent.generation}"
+    assert retire == {**base, "id": f"retire:{identity}", "action": "retire"}
+    assert name == {**base, "id": f"name:{identity}", "action": "name"}
+    assert reap == {
+        "id": f"reap:{agent.name}",
+        "action": "reap",
+        "slug": "",
+        "name": agent.name,
+        "execution_id": "",
+        "generation": 0,
+        "text": "",
+    }
+    assert first["id"].startswith(f"nudge:{identity}:")
+    assert first["id"] != second["id"]
+    assert (first["text"], second["text"]) == ("one", "two")
+
+
+def test_a_refused_retire_names_the_hive_and_its_reason(remote):
+    from scripts.hive.orders import Ack, Consumer, Orders
+    from scripts.swarm_v2.runtime.base import LOCAL, Outcome, Status
+
+    _publish(remote)
+    runtime, agent = remote.runtime, remote.agent
+    runtime.retire(agent)
+    hive = Mock()
+    hive.terminate.return_value = Outcome("terminate", Status.REFUSED, LOCAL, detail="process held")
+    Consumer(remote.redis, HIVE, hive).poll_commands()
+    assert Orders(remote.redis).command(HIVE, _retire_order(agent)) == Ack(
+        "failed", agent.runtime_target, "process held"
+    )
+    assert runtime.retire(agent) is False
+    assert runtime.refusals[agent.name] == {"process": 0, "refusal": f"hive {HIVE} refused retire: process held"}
+
+
+def test_the_hive_retires_with_the_task_scratch_homes(remote, monkeypatch):
+    from scripts.hive.orders import Consumer
+    from scripts.swarm import reaper
+    from scripts.swarm_v2.runtime.base import LOCAL, Outcome, Status
+
+    _publish(remote)
+    asked = []
+    monkeypatch.setattr(reaper, "scratch_homes", lambda slug, task: asked.append((slug, task)) or ["/scratch/home"])
+    remote.runtime.retire(remote.agent)
+    hive = Mock()
+    hive.terminate.return_value = Outcome("terminate", Status.OK, LOCAL)
+    Consumer(remote.redis, HIVE, hive).poll_commands()
+    assert asked == [("fixture", "task")]
+    assert hive.terminate.call_args.args[1] == ("/scratch/home",)
+
+
+def test_hive_command_acknowledgements_are_exact(remote):
+    from scripts.hive.orders import Ack, CommandOrder, Consumer, Orders
+
+    agent, orders = remote.agent, Orders(remote.redis)
+    unknown = CommandOrder("explode", "explode", "fixture", agent.name, agent.execution_id, agent.generation)
+    named = CommandOrder("name", "name", "fixture", agent.name, agent.execution_id, agent.generation)
+    reaped = CommandOrder("reap", "reap", name=agent.name)
+    failing = CommandOrder("fail", "retire", "fixture", agent.name, agent.execution_id, agent.generation)
+    for order in (unknown, named, reaped, failing):
+        orders.command(HIVE, order)
+    hive = Mock()
+    hive.herdr.name_pane.return_value = False
+    hive.herdr.reap_name.return_value = True
+    hive.terminate.side_effect = RuntimeError("boom")
+    Consumer(remote.redis, HIVE, hive).poll_commands()
+    assert orders.command(HIVE, unknown) == Ack("failed", {}, "unknown_action")
+    assert orders.command(HIVE, named) == Ack("failed", {}, "refused")
+    assert orders.command(HIVE, reaped) == Ack("done", {})
+    assert orders.command(HIVE, failing) == Ack("failed", {}, "error: RuntimeError")
+
+
+def test_the_hive_reads_commands_in_batches_and_skips_bad_and_answered_entries(remote):
+    from dataclasses import asdict
+
+    from scripts.hive.orders import CommandOrder, Consumer, Orders
+
+    orders = Orders(remote.redis)
+    stream = orders.commands(HIVE)
+    remote.redis.xadd(stream, {"order": "not json"})
+    for index in range(33):
+        orders.command(HIVE, CommandOrder(f"reap:{index}", "reap", name=str(index)))
+    hive = Mock()
+    hive.herdr.reap_name.return_value = True
+    consumer = Consumer(remote.redis, HIVE, hive)
+    assert consumer.poll_commands() == 32
+    assert hive.herdr.reap_name.call_count == 31
+    assert len(remote.redis.xrange(stream)) == 2
+    assert consumer.poll_commands() == 2
+    assert hive.herdr.reap_name.call_count == 33
+    remote.redis.xadd(stream, {"order": json.dumps(asdict(CommandOrder("reap:0", "reap", name="0")))})
+    assert consumer.poll_commands() == 1
+    assert hive.herdr.reap_name.call_count == 33
+    assert remote.redis.xrange(stream) == []
+
+
+def test_remote_bindings_drop_the_rebound_process_and_cover_every_worker(remote):
+    _publish(remote)
+    report = json.loads(remote.redis.get(remote.reports.key(HIVE)))
+    report["executions"][remote.agent.execution_id]["binding"] = {**BINDING, "rebound": 77}
+    remote.redis.set(remote.reports.key(HIVE), json.dumps(report))
+    stale = replace(remote.agent, name="engineer@stale-0001", generation=remote.agent.generation + 1)
+    assert remote.runtime.bindings([stale, remote.agent]) == {remote.agent.name: BINDING}
+
+
+def test_a_runtime_without_hive_reports_reaps_local_strays_by_name(remote):
+    remote.runtime.hive = None
+    remote.runtime.reap = lambda pids: SimpleNamespace(refusal="")
+    assert remote.runtime.reap_name("engineer@nobody-0001") is True
+
+
+def test_the_hive_controller_reads_hive_reports_from_its_store(remote):
+    from scripts.swarm import lease
+    from scripts.swarm_v2.runtime.routed import hive_controller, routed
+
+    held = lease.acquire(remote.store, "fixture", "controller")
+    remote.runtime.hive = None
+    hive_controller(routed(environ={}, herdr=remote.runtime), remote.store, "fixture", held)
+    assert remote.runtime.hive.redis is remote.redis

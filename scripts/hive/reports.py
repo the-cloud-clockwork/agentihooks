@@ -19,7 +19,7 @@ def key(hive: str) -> str:
 def host(agent: "AgentRecord") -> str:
     from scripts.swarm.commands import hive_id
 
-    target = agent.runtime_target.get("host_id", "") if agent.runtime_backend == "local" else ""
+    target = agent.runtime_target.get("host_id") if agent.runtime_backend == "local" else ""
     return target if target and target != hive_id() else ""
 
 
@@ -37,9 +37,7 @@ class Reports:
         return json.loads(raw) if raw else None
 
     def live(self) -> dict[str, dict]:
-        hives = sorted(self.redis.smembers(registry.INDEX))
-        values = self.redis.mget([key(hive) for hive in hives]) if hives else []
-        return {hive: json.loads(raw) for hive, raw in zip(hives, values, strict=True) if raw}
+        return {hive: report for hive in sorted(self.redis.smembers(registry.INDEX)) if (report := self.read(hive))}
 
     def execution(self, agent: "AgentRecord") -> dict | None:
         report = self.read(host(agent))

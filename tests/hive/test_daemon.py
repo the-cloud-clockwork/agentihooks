@@ -692,6 +692,8 @@ def test_beat_publishes_what_this_hive_sees_of_its_own_executions(redis, monkeyp
     )
     daemon.beat(redis, "machine")
     assert [a.name for a in herdr.bindings.call_args.args[0]] == [here.name]
+    assert herdr.reported.call_args.args[0].execution_id == here.execution_id
+    assert herdr.observe.call_args.args[0].execution_id == here.execution_id
     assert json.loads(redis.get(reports.key("machine"))) == {
         "names": sorted({here.name, "engineer@stray-0001"}),
         "panes": {"w1:p1": "conversation"},
