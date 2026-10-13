@@ -1,5 +1,8 @@
 import importlib
 import json
+import threading
+from collections import deque
+from http.server import ThreadingHTTPServer
 
 from scripts.swarm_ledger import api
 from scripts.swarm_ledger import ledger_server as server
@@ -38,9 +41,10 @@ class DelayedLock:
         self.release()
 
 
-def test_server_write_command_reports_cpu_lock_wait_and_remaining_wall(tmp_path, monkeypatch, capsys):
+def test_server_write_command_reports_cpu_lock_wait_and_remaining_wall(tmp_path, monkeypatch, capsys, ledger_port):
     metrics = importlib.import_module("scripts.swarm_ledger.request_metrics")
     monkeypatch.setenv("LEDGER_DIR", str(tmp_path))
+    monkeypatch.setattr(metrics, "SAMPLES", deque(maxlen=metrics.MAX_SAMPLES))
     clock = Clock()
     monkeypatch.setattr(metrics, "time", clock)
     repo = SQLiteLedgerRepository(tmp_path / "ledger.sqlite3", domain=server.core)
@@ -57,7 +61,15 @@ def test_server_write_command_reports_cpu_lock_wait_and_remaining_wall(tmp_path,
     handler.path = "/api/v1/ledgers/timing/operations?private=hidden"
     handler.command = "POST"
     handler.do_POST()
-    metrics.main(["--hours", "24"])
+    monkeypatch.setattr(server, "ALLOWED_HOSTS", {f"127.0.0.1:{ledger_port}"})
+    with ThreadingHTTPServer(("127.0.0.1", ledger_port), server.Handler) as http:
+        thread = threading.Thread(target=http.serve_forever)
+        thread.start()
+        try:
+            metrics.main(["--hours", "24", "--url", f"http://127.0.0.1:{ledger_port}"])
+        finally:
+            http.shutdown()
+            thread.join()
     report = json.loads(capsys.readouterr().out)
     assert report["writes"]["count"] == 1
     assert report["writes"]["p95_wall_seconds"] == 8.0

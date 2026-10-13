@@ -42,7 +42,13 @@ import ledger_link  # noqa: E402
 import ledger_media  # noqa: E402
 
 from scripts.gates import talk  # noqa: E402
-from scripts.swarm_ledger import ledger_task_duplicates, page_policy, server_code, server_lifetime  # noqa: E402
+from scripts.swarm_ledger import (  # noqa: E402
+    ledger_task_duplicates,
+    page_policy,
+    request_metrics,
+    server_code,
+    server_lifetime,
+)
 from scripts.swarm_ledger.events import Hub  # noqa: E402
 from scripts.swarm_ledger.events.publishing import publishing  # noqa: E402
 from scripts.swarm_ledger.repository import legacy  # noqa: E402
@@ -781,6 +787,10 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        if self.path.split("?", 1)[0] == "/api/v1/metrics":
+            if self.refused():
+                return None
+            return self.send(200, json.dumps(request_metrics.report(24.0)), "application/json")
         if self.path.startswith("/api/v1/"):
             from scripts.swarm_ledger import api
 
@@ -969,6 +979,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(exc.status, str(exc), "text/plain")
         return self.send(200, json.dumps(stored), "application/json")
 
+    @request_metrics.measured
     def do_POST(self):
         if self.path.startswith("/api/v1/"):
             from scripts.swarm_ledger import api
@@ -1006,6 +1017,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(404, "not in the bin", "text/plain")
         return self.send(200, json.dumps({"binned": sorted(ledger_bin.entries()), **reply}), "application/json")
 
+    @request_metrics.measured
     def do_PATCH(self):
         from scripts.swarm_ledger import api
 
@@ -1013,6 +1025,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(404, "not found", "text/plain")
         return api.handle(self, sys.modules[__name__])
 
+    @request_metrics.measured
     def do_PUT(self):
         if self.path.startswith("/api/v1/"):
             from scripts.swarm_ledger import api
