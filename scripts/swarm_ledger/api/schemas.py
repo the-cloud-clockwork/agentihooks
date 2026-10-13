@@ -134,7 +134,7 @@ TYPES = {
 }
 KIND_TYPES = {
     "artifact_add": {"plan": {"type": "boolean"}},
-    "plan_add": {"artifact": {"type": "string"}},
+    "plan_add": {"artifact": {"type": "string", "maxLength": 100000}},
     "task_rank": {"if_owned": {"type": "boolean"}},
 }
 for _field in ("depends_on", "territory", "if_state", "members", "watched", "halves"):

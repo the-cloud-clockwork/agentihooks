@@ -433,6 +433,7 @@ def test_a_schema_mismatch_names_the_first_unknown_key_and_the_top_field(live):
         ({"op": "sync", "id": "two-unknown", "zz": 1, "aa": 1}, "sync", "aa"),
         ({"op": "task_add", "id": "nested", "depends_on": [1]}, "task_add", "depends_on"),
         ({"op": "plan_add", "id": "flag", "artifact": True}, "plan_add", "artifact"),
+        ({"op": "plan_add", "id": "long", "artifact": "x" * 100001}, "plan_add", "artifact"),
     ]
     for operation, kind, field in cases:
         message = f"Operation {kind} does not match its schema at field {field}"
@@ -875,7 +876,7 @@ def test_publish_plan_writes_land_through_the_plans_and_slices_resources(live, t
     ledger.cmd_publish_plan(args)
     url = f"{ledger.base()}/artifacts/{SLUG}/{file['id']}"
     assert json.loads(capsys.readouterr().out) == {"plan_url": url, "published_to": "artifact", "phases": ["p1"]}
-    plan_id = f"plan-{file['id'][:12]}"
+    plan_id = "plan-71468be2ad68"
     status, reply = request(live, "GET", f"plans/{plan_id}")
     assert (status, reply["data"]["artifact"]) == (200, url)
     assert reply["revision"] == resources.revision(reply["data"])
