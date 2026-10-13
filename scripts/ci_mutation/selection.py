@@ -204,6 +204,37 @@ def load_or_collect_stats(runner, test_runner, paths: list[str], mode: str, stat
         config.source_paths = relative
 
 
+def mutated_bootstrap(filename: str) -> str:
+    light_main = Path(__file__).resolve().with_name("child_main.py")
+    return (
+        "import os as _mutmut_os\n"
+        "import sys as _mutmut_sys\n"
+        "from pathlib import Path as _mutmut_Path\n"
+        # A process the mutation run did not start would import mutmut's whole engine for three trampoline names.
+        f"if 'mutmut.__main__' not in _mutmut_sys.modules and _mutmut_Path({str(light_main)!r}).is_file():\n"
+        "    import importlib.util as _mutmut_util\n"
+        f"    _mutmut_spec = _mutmut_util.spec_from_file_location('mutmut.__main__', {str(light_main)!r})\n"
+        "    _mutmut_sys.modules['mutmut.__main__'] = _mutmut_util.module_from_spec(_mutmut_spec)\n"
+        "    _mutmut_spec.loader.exec_module(_mutmut_sys.modules['mutmut.__main__'])\n"
+        f"_mutmut_root = _mutmut_Path(__file__).resolve().parents[{len(Path(filename).parts) - 1}]\n"
+        "_mutmut_cwd = _mutmut_os.getcwd()\n"
+        "try:\n"
+        "    from mutmut.configuration import Config as _mutmut_Config\n"
+        "    try:\n"
+        "        _mutmut_os.chdir(_mutmut_root)\n"
+        "        _mutmut_config = _mutmut_Config.get()\n"
+        # A test that copies the mutated tree elsewhere imports it from a folder without a mutmut config.
+        "    except FileNotFoundError:\n"
+        f"        _mutmut_root = _mutmut_Path({str((Path.cwd() / 'mutants').resolve())!r})\n"
+        "        _mutmut_os.chdir(_mutmut_root)\n"
+        "        _mutmut_config = _mutmut_Config.get()\n"
+        "    if _mutmut_root.name == 'mutants':\n"
+        "        _mutmut_config.source_paths = [(_mutmut_root / path).resolve() for path in _mutmut_config.source_paths]\n"
+        "finally:\n"
+        "    _mutmut_os.chdir(_mutmut_cwd)\n"
+    )
+
+
 def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats: str) -> None:
     from mutmut import __main__ as runner
 
@@ -215,26 +246,7 @@ def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats
 
     def write_selected(*, out, source, filename):
         code, names = selected_mutants(str(filename), source, set(changes[str(filename)]["lines"]))
-        bootstrap = (
-            "import os as _mutmut_os\n"
-            "from pathlib import Path as _mutmut_Path\n"
-            f"_mutmut_root = _mutmut_Path(__file__).resolve().parents[{len(Path(filename).parts) - 1}]\n"
-            "_mutmut_cwd = _mutmut_os.getcwd()\n"
-            "try:\n"
-            "    from mutmut.configuration import Config as _mutmut_Config\n"
-            "    try:\n"
-            "        _mutmut_os.chdir(_mutmut_root)\n"
-            "        _mutmut_config = _mutmut_Config.get()\n"
-            # A test that copies the mutated tree elsewhere imports it from a folder without a mutmut config.
-            "    except FileNotFoundError:\n"
-            f"        _mutmut_root = _mutmut_Path({str((Path.cwd() / 'mutants').resolve())!r})\n"
-            "        _mutmut_os.chdir(_mutmut_root)\n"
-            "        _mutmut_config = _mutmut_Config.get()\n"
-            "    if _mutmut_root.name == 'mutants':\n"
-            "        _mutmut_config.source_paths = [(_mutmut_root / path).resolve() for path in _mutmut_config.source_paths]\n"
-            "finally:\n"
-            "    _mutmut_os.chdir(_mutmut_cwd)\n"
-        )
+        bootstrap = mutated_bootstrap(str(filename))
         statements = ast.parse(code).body
         index = 0
         for statement in statements:
