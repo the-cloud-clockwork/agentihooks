@@ -31,3 +31,35 @@ def test_pending_information_is_not_closed_by_confirmation(store):
     item = store.send("alice", "bob", "The branch merged", fyi=True)
     assert store.confirm(item.id, "bob") is None
     assert store.get(item.id).state == "pending"
+
+
+def test_confirmed_work_reminds_its_receiver_until_explicit_settlement(store, monkeypatch):
+    from hooks.context import inbox_delivery as delivery
+
+    clock = [1000.0]
+    monkeypatch.setattr("time.time", lambda: clock[0])
+    monkeypatch.setattr(delivery, "connect", lambda environ: store)
+    env = {"AGENTIHOOKS_AGENT_NAME": "bob", "AGENTIHOOKS_INBOX_RETRY_WINDOW_S": "300"}
+    item = store.send("alice", "bob", "Verify the deployed proof")
+    store.deliver(item.id, "bob")
+    store.confirm(item.id, "bob")
+    history = store.history(item.id)
+
+    clock[0] = 1299.0
+    assert delivery.pending_context("receipt-session", env) == ""
+    clock[0] = 1300.0
+    reminder = delivery.pending_context("receipt-session", env)
+    assert item.id in reminder
+    assert "settlement" in reminder
+    assert "agentihooks msg reply" in reminder
+    assert "Keep unresolved work and proof checks open" in reminder
+    assert store.get(item.id).state == "confirmed"
+    assert store.history(item.id) == history
+    assert delivery.pending_context("receipt-session", env) == ""
+    clock[0] = 1599.0
+    assert delivery.pending_context("receipt-session", env) == ""
+    clock[0] = 1600.0
+    assert item.id in delivery.pending_context("receipt-session", env)
+    store.close(item.id, "bob", "done", "deployed proof verified")
+    clock[0] = 1900.0
+    assert delivery.pending_context("receipt-session", env) == ""
