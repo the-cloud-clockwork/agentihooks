@@ -90,7 +90,8 @@ def apply_effort_ci_and_model(page):
 def test_apply_keeps_the_sent_values_while_the_answer_still_carries_the_old_config(open_page):
     page = model_page(open_page)
     page.payload["commands"] = [
-        {"command": "swarm", "argv": ["set", "max-ci-agents=2", "effort-max=xhigh"], "state": "pending"}
+        {"id": "old", "command": "swarm", "argv": ["set", "effort-max=xhigh"], "state": "failed", "error": "refused"},
+        {"id": "new", "command": "swarm", "argv": ["set", "max-ci-agents=2", "effort-max=xhigh"], "state": "pending"},
     ]
     apply_effort_ci_and_model(page)
     page.tab.wait_for_timeout(500)
@@ -108,3 +109,23 @@ def test_a_failed_apply_returns_the_panel_to_the_stored_config(open_page):
     expect(page.tab.locator("#cap-effort_max")).to_have_value("high")
     expect(page.tab.locator("#cap-ci")).to_have_value("1")
     expect(page.tab.locator("#cap-claude_model")).to_have_value("opus")
+
+
+def test_the_panel_shows_the_stored_config_once_the_acknowledging_tick_published(open_page):
+    page = model_page(open_page)
+    page.payload["last_tick"] = 2000
+    page.payload["commands"] = [
+        {"id": "old", "command": "swarm", "argv": ["set", "effort-max=xhigh"], "state": "failed", "error": "refused"},
+        {
+            "id": "new",
+            "command": "swarm",
+            "argv": ["set", "effort-max=xhigh"],
+            "state": "acknowledged",
+            "acknowledged_at": 1000,
+        },
+    ]
+    apply_effort_ci_and_model(page)
+    expect(page.tab.locator("#cap-effort_max")).to_have_value("high")
+    expect(page.tab.locator("#cap-ci")).to_have_value("1")
+    expect(page.tab.locator("#cap-claude_model")).to_have_value("opus")
+    expect(page.tab.get_by_role("button", name="Apply capacity")).to_be_disabled()

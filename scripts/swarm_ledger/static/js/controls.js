@@ -138,7 +138,7 @@ export function showNote(phase, action, error) {
 export function renderControls() {
   const config = swarm ? swarm.config : {};
   const changes = swarm ? capChanges(capValues(swarm), capDraft, models) : { body: {}, bad: [] };
-  const off = swarm ? { ...swarmControls(config.state), ...capBounds(capCurrent()), apply: Object.keys(changes.body).length < 2 && !changes.bad.length } : swarmControls("");
+  const off = swarm ? { ...swarmControls(config.state), ...capBounds(capCurrent()), apply: !unsent(changes.body) && !changes.bad.length } : swarmControls("");
   for (const btn of [...$("swarm-box").querySelectorAll("button[data-swarm]"), ...$("closed-banner").querySelectorAll("button[data-swarm]")]) {
     const action = btn.dataset.swarm;
     btn.hidden = (action === "doctor_start" && doctorOn(swarm)) || (action === "doctor_stop" && !doctorOn(swarm));
@@ -205,21 +205,26 @@ export async function refreshQuota() {
 
 export function appliedCaps(body, sw) {
   for (const key of Object.keys(capDraft)) if (!(key in body)) delete capDraft[key];
-  applied = { keys: Object.keys(body).filter((key) => key !== "action"), id: ((sw && sw.commands) || []).at(-1)?.id };
+  applied = { body, keys: Object.keys(body).filter((key) => key !== "action"), id: ((sw && sw.commands) || []).at(-1)?.id };
   settleCaps(sw);
 }
 
 export function settleCaps(sw) {
   if (!applied || !sw) return;
   const row = (sw.commands || []).find((c) => c.id === applied.id), values = capValues(sw);
-  for (const key of applied.keys) if ((row && row.state === "failed") || String(values[key]) === String(capDraft[key]).trim()) delete capDraft[key];
+  const done = row && (row.state === "failed" || (row.state === "acknowledged" && sw.last_tick >= row.acknowledged_at));
+  for (const key of applied.keys) if (done || String(values[key]) === String(capDraft[key]).trim()) delete capDraft[key];
   if (!applied.keys.some((key) => key in capDraft)) applied = null;
+}
+
+function unsent(body) {
+  return Object.keys(body).some((key) => key !== "action" && !(applied && applied.keys.includes(key) && String(applied.body[key]) === String(body[key])));
 }
 
 function applyCaps() {
   const { body, bad } = capChanges(capValues(swarm), capDraft, models);
   if (bad.length) return showNote("error", "apply", bad.join("; "));
-  if (Object.keys(body).length > 1) swarmControl(body, "apply");
+  if (unsent(body)) swarmControl(body, "apply");
 }
 
 export function wireSwarm() {
