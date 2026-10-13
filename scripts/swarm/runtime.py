@@ -998,14 +998,12 @@ class HerdrRuntime:
             listed = self.herdr(["agent", "list"]).get("agents", [])
         except Exception:
             return None
-        remote = self.hive.conversations() if self.hive is not None else {}
         registered = _registered_conversations(sessions())
-        local = {
+        return {
             row["pane_id"]: _conversation_id(row.get("agent_session")) or registered.get(row.get("name"), "")
             for row in listed
             if row.get("pane_id")
         }
-        return {**local, **remote}
 
     def nudge(self, agent, text):
         from scripts.hive.orders import Orders

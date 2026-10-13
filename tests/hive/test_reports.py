@@ -97,7 +97,7 @@ def test_a_remote_claude_worker_is_seen_live_from_its_hive_report(remote):
     assert runtime.bindings([agent]) == {agent.name: BINDING}
     assert runtime.conversations() is None
     runtime.herdr = lambda args: {"agents": [{"pane_id": PANE, "agent_session": {"kind": "id", "value": "local"}}]}
-    assert runtime.conversations() == {PANE: "local", f"{HIVE}/{PANE}": CONVERSATION}
+    assert runtime.conversations() == {PANE: "local"}
 
 
 def test_the_tick_records_a_remote_conversation_when_the_local_listing_fails(remote):
