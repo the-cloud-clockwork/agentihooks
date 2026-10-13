@@ -196,6 +196,7 @@ class HerdrRuntime:
         self.choose = choose or agent_choice.choose
         self.sleep = time.sleep
         self._binding_pids = {}
+        self._managed = {}
         self.refusals = {}
         self.hive = None
         self.end, self.reap = reaper.retire, reaper.reap
@@ -320,7 +321,8 @@ class HerdrRuntime:
                     saved.get("harness") in agent_choice.AGENTS
                     and (task.get("handoff_envelope") or {}).get("reason") != "quota"
                 ):
-                    options.append((saved["harness"],))
+                    self._quota_preferred[lane, len(options)] = agent_choice.preferring(saved["harness"])
+                    options.append(agent_choice.AGENTS)
                 else:
                     order = profile_choice.preferred(profile)
                     if order and (lane, len(options)) not in self._quota_handoffs:
@@ -437,7 +439,10 @@ class HerdrRuntime:
             raise SpawnError(
                 "unsupported handoff: required profile cannot mount on the original harness", "unsupported"
             )
-        return self.choose(saved["harness"], environ)
+        agent, reason = self.choose(saved["harness"], environ)
+        if agent != saved["harness"]:
+            raise SpawnError("unsupported handoff: router substituted the original harness", "unsupported")
+        return agent, reason
 
     def _profile_decision(self, config, lane, chosen, task, saved, relaunch, environ):
         decision = profile_choice.kept(task, saved, relaunch)
@@ -501,7 +506,6 @@ class HerdrRuntime:
         if want and not saved:
             agent, reason = self.choose(want, environ)
         elif saved:
-            requested = saved["harness"]
             agent, reason = self._saved_choice(saved, profile, quota_transfer, environ)
         else:
             agent, reason = self._rotation(requested, environ, profile_choice.preferred(profile))
@@ -514,10 +518,10 @@ class HerdrRuntime:
         agent, reason = (
             (agent, reason)
             if route_kind == "interactive"
-            else self._quota_choice(agent, reason, bool(requested or saved or want), lane)
+            else self._quota_choice(agent, reason, bool(requested or quota_transfer or want), lane)
         )
         if saved and agent != saved["harness"]:
-            raise SpawnError("unsupported handoff: router substituted the original harness", "unsupported")
+            saved = {key: value for key, value in saved.items() if key not in ("model", "account")}
         task = {**task, "harness": agent}
         text = timing.call(
             prompt.build,
@@ -777,8 +781,32 @@ class HerdrRuntime:
     def live_names(self):
         from scripts.terminate_agent import sessions
 
-        names = {s.name for s in sessions() if s.name}
+        ordinary = {s.name for s in sessions() if s.name}
+        managed = self._managed_agents()
+        names = (ordinary - managed.keys()) | {
+            name
+            for name, agent in managed.items()
+            if live_binding.server_alive(self._managed_record(agent)) is not False
+        }
         return names | self.hive.names() if self.hive is not None else names
+
+    def _managed_agents(self):
+        from scripts.swarm.store import Unreachable
+
+        try:
+            store = connect()
+            self._managed = {
+                agent.name: agent
+                for slug in store.slugs()
+                for agent in store.agents(slug)
+                if live_binding.managed(agent) and not self.remote(agent)
+            }
+        except Unreachable:
+            pass
+        return self._managed
+
+    def _managed_record(self, agent):
+        return live_binding.transport(connect(), agent)
 
     def remote(self, agent: AgentRecord) -> str:
         from scripts.hive import reports
@@ -812,6 +840,8 @@ class HerdrRuntime:
 
         if self.remote(agent):
             return self._hosted(agent).get("reported") is True
+        if live_binding.managed(agent):
+            return self.observe(agent).state not in {"dead", "unknown"}
         session = live_binding.bound_session(agent, sessions())
         return session is not None and session.status == "alive"
 
@@ -827,6 +857,11 @@ class HerdrRuntime:
                 found = self._hosted(agent).get("binding")
                 if found is not None:
                     facts[agent.name] = {field: value for field, value in found.items() if field != "rebound"}
+                continue
+            if live_binding.managed(agent):
+                record = self._managed_record(agent)
+                alive = live_binding.server_alive(record)
+                facts[agent.name] = live_binding.read(agent, record.server_pid) if alive else {"process": alive}
                 continue
             session = live_binding.bound_session(agent, items)
             validated = agent.profile_decision.get("validation", {}).get("pid")
@@ -857,10 +892,33 @@ class HerdrRuntime:
         then close the pane; the agent's name alone never selects a process."""
         if host := self.remote(agent):
             return self._order(host, _command("retire", agent), agent.name)
+        if live_binding.managed(agent):
+            return self._retire_managed(agent)
         pid = agent.profile_decision.get("validation", {}).get("pid") or self._binding_pids.get(agent.name)
         return self.retire_process(agent, pid, homes)
 
+    def _retire_managed(self, agent):
+        from scripts.codex_session.binding import EXITED, BindingStore
+
+        store = connect()
+        record = live_binding.transport(store, agent)
+        if record is None or not record.server_pid or not record.server_start_identity:
+            self.refusals[agent.name] = {"process": 0, "refusal": "managed server identity is unknown"}
+            return False
+        outcome = self.end(agent.name, record.server_pid, [], record.server_start_identity)
+        if outcome.refusal:
+            self.refusals[agent.name] = {"process": outcome.process, "refusal": outcome.refusal}
+            return False
+        bindings = BindingStore(store)
+        slug = store.names.slug_of(agent.name)
+        bindings.put(slug, replace(record, state=EXITED, active_turn_id=""))
+        bindings.release(slug, record)
+        self.refusals.pop(agent.name, None)
+        return True
+
     def retire_process(self, agent, pid, homes=(), start=0):
+        if live_binding.managed(agent):
+            return self._retire_managed(agent)
         if agent.runtime_backend != "local":
             self.refusals[agent.name] = {"process": 0, "refusal": REMOTE_PANE}
             return False
@@ -937,6 +995,8 @@ class HerdrRuntime:
         if self.remote(agent):
             pane = self._hosted(agent).get("pane")
             return PaneObservation(**pane) if pane else PaneObservation("unknown")
+        if live_binding.managed(agent):
+            return live_binding.observe_managed(self._managed_record(agent))
         if agent.runtime_backend != "local":
             return PaneObservation("unknown")
         found = self._get(pane_target(agent))
@@ -994,10 +1054,15 @@ class HerdrRuntime:
         None when herdr cannot answer."""
         from scripts.terminate_agent import sessions
 
+        managed = {}
+        for agent in self._managed_agents().values():
+            record = self._managed_record(agent)
+            if record is not None:
+                managed[agent.pane_id or agent.execution_id] = record.thread_id
         try:
             listed = self.herdr(["agent", "list"]).get("agents", [])
         except Exception:
-            return None
+            return managed or None
         remote = self.hive.conversations() if self.hive is not None else {}
         registered = _registered_conversations(sessions())
         local = {
@@ -1005,7 +1070,7 @@ class HerdrRuntime:
             for row in listed
             if row.get("pane_id")
         }
-        return {**local, **remote}
+        return {**local, **managed, **remote}
 
     def nudge(self, agent, text):
         from scripts.hive.orders import Orders
