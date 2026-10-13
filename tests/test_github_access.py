@@ -24,6 +24,28 @@ def access_responses():
             "name": "Default",
             "allows_public_repositories": False,
         },
+        "orgs/the-cloud-clockwork/actions/runner-groups/3": {
+            "id": 3,
+            "name": "anton-oss",
+            "visibility": "selected",
+            "allows_public_repositories": True,
+            "restricted_to_workflows": False,
+            "selected_workflows": [],
+        },
+        "orgs/the-cloud-clockwork/actions/runner-groups/3/repositories?per_page=100": {
+            "repositories": [{"name": "agentihooks"}, {"name": "agentibrain-kernel"}]
+        },
+        "orgs/the-cloud-clockwork/actions/permissions/fork-pr-contributor-approval": {
+            "approval_policy": "all_external_contributors"
+        },
+        "orgs/the-cloud-clockwork/repos?type=public&per_page=100": [
+            {"name": "agentihooks"},
+            {"name": "agentibrain-kernel"},
+            {"name": "later-public"},
+        ],
+        "repos/the-cloud-clockwork/later-public/actions/permissions/fork-pr-contributor-approval": {
+            "approval_policy": "all_external_contributors"
+        },
     }
     for repository in ("agentihooks", "agentibrain-kernel"):
         prefix = f"repos/the-cloud-clockwork/{repository}"
@@ -226,8 +248,11 @@ def test_read_back_refuses_empty_or_failed_public_repository_discovery(tmp_path,
     access_responses["orgs/the-cloud-clockwork/actions/permissions/fork-pr-contributor-approval"] = {
         "approval_policy": "all_external_contributors"
     }
-    if inventory is not None:
-        access_responses["orgs/the-cloud-clockwork/repos?type=public&per_page=100"] = inventory
+    endpoint = "orgs/the-cloud-clockwork/repos?type=public&per_page=100"
+    if inventory is None:
+        del access_responses[endpoint]
+    else:
+        access_responses[endpoint] = inventory
     result = run_access(tmp_path, access_responses)
     assert result.returncode != 0
     assert "GitHub access controls verified" not in result.stdout
