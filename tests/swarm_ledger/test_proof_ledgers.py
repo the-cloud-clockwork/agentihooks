@@ -232,3 +232,43 @@ def test_the_proof_command_needs_an_action_and_its_content(argv):
     with pytest.raises(SystemExit) as exited:
         proof_ledger.main(argv)
     assert exited.value.code == 2
+
+
+def test_creating_engineer_gets_a_scoped_pause_credential(live, credential, hive, monkeypatch):
+    from scripts.swarm.store import RedisStore, SwarmConfig
+    from tests.swarm_ledger.test_ledger_authority import server
+
+    store = RedisStore(hive)
+    store.create(SwarmConfig(SLUG, "/repo", 1, 0))
+    owner = store.next_name(SLUG, "eng")
+    monkeypatch.setattr(server, "swarm_store", lambda: store)
+    status, created = create(live, credential, "tscope", agent=owner)
+    assert status == 200
+    slug = created["data"]["slug"]
+    store.create(SwarmConfig(slug, "/repo", 1, 0, scratch=True))
+    headers = {"X-Ledger-Agent": owner, "X-Ledger-Token": authority.agent_token(live["admin"], SLUG, owner)}
+    status, issued = post(live, f"/api/v1/proof-ledgers/{slug}/credential", {}, **headers)
+    assert status == 200
+    token = issued["data"]["credential"]
+    assert token and token != headers["X-Ledger-Token"]
+    before = store.config(slug)
+    status, accepted = post(
+        live,
+        f"/api/v1/proof-ledgers/{slug}/controls",
+        {"control": "pause"},
+        **{"X-Proof-Credential": token},
+    )
+    assert status == 200
+    assert accepted["data"]["state"] == "pending"
+    from scripts.swarm import commands
+
+    row = commands.rows(store, slug)[0]
+    assert row["command"] == "swarm" and row["argv"] == ["pause"]
+    assert store.config(slug) == before
+    for other in (SLUG, "rig-grade-swarm", "rig-grade-swarm-doctor"):
+        assert (
+            post(
+                live, f"/api/v1/proof-ledgers/{other}/controls", {"control": "pause"}, **{"X-Proof-Credential": token}
+            )[0]
+            == 403
+        )
