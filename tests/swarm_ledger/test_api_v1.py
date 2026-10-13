@@ -1838,6 +1838,59 @@ def test_export_validates_its_body_and_hides_receipts(live, monkeypatch):
     read.assert_called_once_with(SLUG)
 
 
+def test_export_encodes_once_per_ledger_generation(live, monkeypatch):
+    loads, dumps, counts = json.loads, json.dumps, {"decode": 0, "encode": 0}
+
+    def ledger(value):
+        return isinstance(value, dict) and "_meta" in value
+
+    def decode(*args, **kwargs):
+        value = loads(*args, **kwargs)
+        counts["decode"] += ledger(value)
+        return value
+
+    def encode(value, *args, **kwargs):
+        counts["encode"] += ledger(value) or (isinstance(value, dict) and ledger(value.get("data")))
+        return dumps(value, *args, **kwargs)
+
+    def export():
+        headers = {"X-Ledger-Token": live["admin"], "Content-Type": "application/json"}
+        status, body, _ = send(live, "POST", f"/api/v1/ledgers/{SLUG}/export", b"{}", **headers)
+        assert status == 200
+        return body
+
+    def stored():
+        state = server.repository.inner.get_document(SLUG)
+        hidden = ("seeds", "api_operations")
+        state["_meta"] = {key: item for key, item in state["_meta"].items() if key not in hidden}
+        return {"data": state}
+
+    first = export()
+    assert json.loads(first) == stored()
+    monkeypatch.setattr(json, "loads", decode)
+    monkeypatch.setattr(json, "dumps", encode)
+    server.repository.inner.get_document(SLUG)
+    assert counts == {"decode": 1, "encode": 0}
+    counts.update(decode=0)
+    assert [export() for _ in range(3)] == [first] * 3
+    assert counts == {"decode": 0, "encode": 0}
+    ops = [{"op": "add", "id": "export-generation", "thread": "chat", "text": "Written after the first export, café"}]
+    headers = {"X-Ledger-Token": live["admin"], "Content-Type": "application/json"}
+    assert send(live, "PUT", f"/api/{SLUG}", dumps({"ops": ops}).encode(), **headers)[0] == 200
+    counts.update(decode=0, encode=0)
+    after = [export() for _ in range(3)]
+    assert counts == {"decode": 0, "encode": 1}
+    monkeypatch.undo()
+    assert after == [after[0]] * 3 and after[0] != first
+    assert after[0] == json.dumps(stored(), ensure_ascii=False).encode()
+    assert "Written after the first export, café" in after[0].decode()
+
+
+def test_export_body_hides_seeds_and_receipts_and_keeps_text_unescaped():
+    state = {"title": "café", "_meta": {"seeds": [1], "api_operations": {"a": 1}, "members": ["m"]}}
+    assert routes.export_body(state) == '{"data": {"title": "café", "_meta": {"members": ["m"]}}}'
+
+
 def test_raw_upload_headers_reject_invalid_lengths_and_names(live):
     import http.client
 

@@ -22,7 +22,7 @@ def taker(env, monkeypatch, tmp_path):  # noqa: F811
     monkeypatch.setattr(take_master, "PROC", tmp_path / "no-proc")
     ledger.calls, ledger.is_closed = [], False
     ledger.closed = lambda slug: ledger.is_closed
-    ledger.reopen = lambda slug, by: ledger.calls.append(("reopened", by))
+    ledger.reopen = lambda slug, by: ledger.calls.append(("reopened", slug, by))
     monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
     monkeypatch.setattr(take_master, "agent_pid", lambda: 4242)
     monkeypatch.setattr(take_master, "harness_of", lambda pid: "codex")
@@ -300,7 +300,7 @@ def test_take_master_reopens_a_closed_ledger_and_runs_a_stopped_swarm(taker):
     store.update("sw", state="stopped")
     ledger.is_closed = True
     assert run("sw", "take-master") == 0
-    assert ledger.calls == [("reopened", "master@a1b2c3-0001")]
+    assert ledger.calls == [("reopened", "sw", "master@a1b2c3-0001")]
     assert store.config("sw").state == "running"
 
 

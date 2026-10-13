@@ -1,0 +1,6 @@
+{
+  "scripts/ci_runner_trust.py:scripts.ci_runner_trust.x_main__mutmut_35:1d319dedb0df3dfc7e9354eb66386f02e0af8de6e808ba2b4c8ef549b570be4b": {
+    "reader": "standards_reader",
+    "reason": "Equivalent for the enforced domain: validate_actors admits only a list of strings. JSON object key/value colon separators are never used for that array, so changing the colon separator cannot change the serialized actors output."
+  }
+}
