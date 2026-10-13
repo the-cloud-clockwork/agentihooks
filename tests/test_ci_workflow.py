@@ -122,7 +122,7 @@ def test_a_restored_venv_skips_uv_and_the_install():
         lambda s: s.get("name") == "Install dependencies",
     ):
         _, step = _unit_step_index(predicate)
-        assert step["if"] == hit
+        assert step["if"] in (hit, f"env.UNIT_SOURCE == '' && {hit}")
 
 
 def test_unit_tests_run_from_the_venv():
@@ -141,13 +141,15 @@ def test_only_the_first_shard_installs_the_pinned_codex_cli_and_requires_its_liv
     install_index, install = _unit_step_index(lambda s: s.get("name") == "Install the Codex CLI")
     use_index, use = _unit_step_index(lambda s: s.get("name") == "Use the Codex CLI")
     run_index, _ = _unit_step_index(lambda s: s.get("name") == "Run tests")
-    assert restore["if"] == only
+    assert restore["if"] in (only, f"needs.split.outputs.source == '' && {only}")
     assert restore["uses"] == "actions/cache@v4"
     assert restore["with"] == {"path": "~/codex", "key": "codex-${{ runner.os }}-${{ env.CODEX_RELEASE }}"}
-    assert install["if"] == "steps.codex.outcome == 'success' && steps.codex.outputs.cache-hit != 'true'"
+    install_if = "steps.codex.outcome == 'success' && steps.codex.outputs.cache-hit != 'true'"
+    assert install["if"] in (install_if, f"needs.split.outputs.source == '' && {install_if}")
     assert install["run"].startswith("set -o pipefail\n")
     assert "releases/download/${CODEX_RELEASE}/codex-x86_64-unknown-linux-musl.tar.gz" in install["run"]
-    assert use["if"] == "steps.codex.outcome == 'success'"
+    use_if = "steps.codex.outcome == 'success'"
+    assert use["if"] in (use_if, f"needs.split.outputs.source == '' && {use_if}")
     assert use["run"].strip().splitlines() == [
         'echo "$HOME/codex" >> "$GITHUB_PATH"',
         'echo "CODEX_CLI_REQUIRED=1" >> "$GITHUB_ENV"',
@@ -426,7 +428,7 @@ def test_unit_shards_read_the_suite_the_split_job_collected():
     _, download = _unit_step_index(lambda s: s.get("name") == "Download the suite the split job collected")
     assert download["uses"] == "./.github/actions/retry-download"
     assert download["with"] == {"name": upload["with"]["name"]}
-    assert download["if"] == upload["if"]
+    assert download["if"] in (upload["if"], f"needs.split.outputs.source == '' && {upload['if']}")
 
 
 @pytest.mark.parametrize("missing", [0, 5, 10, 11, 100])
@@ -580,7 +582,22 @@ def test_unit_shards_store_the_durations_they_measure():
 def test_unit_shards_upload_their_durations_for_the_refresh():
     upload_index, upload = _unit_step_index(lambda s: s.get("name") == "Upload durations")
     run_index, _ = _unit_step_index(lambda s: s.get("name") == "Run tests")
-    assert upload_index == run_index + 1
+    job = _workflow()["jobs"]["unit"]
+    between = job["steps"][run_index + 1 : upload_index]
+    assert [step["name"] for step in between] in (
+        [],
+        [
+            "Mint the token that restores queue unit artifacts",
+            "Restore queue shard durations",
+            "Restore queue shard flakes",
+            "Restore queue shard coverage",
+        ],
+    )
+    for step in between:
+        expected = "needs.split.outputs.source != ''"
+        if step["name"] == "Restore queue shard coverage":
+            expected += " && matrix.python-version == '3.12'"
+        assert step["if"] == expected
     assert "if" not in upload
     assert upload["uses"].startswith("actions/upload-artifact@")
     assert upload["with"]["name"] == "durations-${{ matrix.python-version }}-${{ matrix.shard }}"

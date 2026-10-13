@@ -21,6 +21,7 @@ from scripts.gates import claims as claim_cap
 from scripts.gates import log as gate_log
 from scripts.handoff import transfers
 from scripts.handoff.envelope import reclaim
+from scripts.hive import reports
 from scripts.inbox import exits, wake
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import CLOSED, InboxStore
@@ -378,7 +379,8 @@ def _follow(slug, store, runtime, agent, pid):
 
 
 def _rebind(slug, store, runtime, agent, pid):
-    panes = [p for p, c in (runtime.conversations() or {}).items() if c and c == agent.conversation_id]
+    found = (runtime.conversations() or {}).items()
+    panes = [p for p, c in found if c and c == agent.conversation_id and "/" not in p]
     if len(panes) != 1:
         return None
     validation = {**agent.profile_decision.get("validation", {}), "pid": pid}
@@ -493,7 +495,7 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
             else:
                 retire_watch.failed(store, slug, agent.name, runtime.refusal(agent), now_ms)
                 actions.append(f"could not retire {agent.name}, retrying next tick")
-        elif agent.runtime_backend != "local":
+        elif agent.runtime_backend != "local" or reports.host(agent):
             actions += _watch_remote(slug, store, ledger, runtime, rows, agent, now_ms)
         elif agent.name in live and agent.lane == MASTER:
             runtime.name_pane(agent)
@@ -622,9 +624,10 @@ def _conversations(slug, store, runtime):
     for agent in store.agents(slug):
         if agent.state in {"finished", "awaiting-decision"} or not agent.pane_id:
             continue
-        if agent.pane_id not in found and resume.recovery_pending(store, slug, agent):
+        pane = reports.pane_key(agent)
+        if pane not in found and (reports.host(agent) or resume.recovery_pending(store, slug, agent)):
             continue
-        current = found.get(agent.pane_id, "")
+        current = found.get(pane, "")
         if current != agent.conversation_id:
             store.put_agent(slug, replace(agent, conversation_id=current))
             store.names.note(agent.name, session_id=current)

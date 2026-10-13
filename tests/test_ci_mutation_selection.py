@@ -759,6 +759,81 @@ def test_gate_mutates_a_function_its_module_calls_at_import(tmp_path, monkeypatc
     assert report["files"][0]["counts"] == {"killed": 2}
 
 
+def test_a_subprocess_importing_a_mutated_module_skips_the_mutation_engine_and_still_kills(tmp_path, monkeypatch):
+    _gate_tree(tmp_path, monkeypatch)
+    (tmp_path / "scripts/sample.py").write_text("def value(number):\n    return number + 1\n")
+    child = (
+        "import sys\n"
+        "from scripts.sample import value\n"
+        "print(value(1), 'libcst' in sys.modules)\n"
+        "print(callable(__import__('mutmut.__main__').__main__.walk_all_files))\n"
+    )
+    (tmp_path / "tests/test_sample.py").write_text(
+        "import os, subprocess, sys\n\n"
+        "from scripts.sample import value\n\n"
+        "def test_value():\n"
+        "    assert sys.modules['mutmut.__main__'].__file__.endswith('mutmut/__main__.py')\n"
+        "    value(1)\n"
+        "    env = {**os.environ, 'PYTHONPATH': os.getcwd()}\n"
+        f"    out = subprocess.run([sys.executable, '-c', {child!r}], env=env, capture_output=True, text=True, check=True)\n"
+        "    assert out.stdout.split() == ['2', 'False', 'True']\n"
+    )
+    report = run_gate(tmp_path, {"scripts/sample.py": {2}}, tmp_path / "evidence", 60)
+    logs = [Path(item["reason"].rpartition(" ")[2]) for item in report["not_mutated"]]
+    assert report["not_mutated"] == [], [log.read_text()[-4000:] for log in logs if log.is_file()]
+    assert report["failed"] is False
+    assert report["files"][0]["counts"] == {"killed": 2}
+
+
+def test_light_main_answers_the_trampoline_and_hands_every_other_name_to_the_real_module(monkeypatch):
+    from types import ModuleType
+
+    import mutmut.__main__ as real
+
+    from scripts.ci_mutation.selection import LIGHT_MAIN
+
+    light_main = ModuleType("mutmut.__main__")
+    exec(LIGHT_MAIN, light_main.__dict__)
+    assert issubclass(light_main.MutmutProgrammaticFailException, Exception)
+    assert light_main.mangled_name_from_mutant_name("scripts.a.x_f__mutmut_3") == "scripts.a.x_f"
+    with pytest.raises(AssertionError, match="^scripts.a.x_f$"):
+        light_main.mangled_name_from_mutant_name("scripts.a.x_f")
+    assert light_main.record_trampoline_hit("scripts.a.x_f") is None
+    with pytest.raises(AttributeError, match="^__path__$"):
+        light_main.__path__
+    monkeypatch.setattr(sys.modules["mutmut"], "__main__", real)
+    monkeypatch.setitem(sys.modules, "mutmut.__main__", light_main)
+    assert light_main.walk_all_files.__module__ == "mutmut.__main__"
+    loaded = sys.modules["mutmut.__main__"]
+    assert loaded is not light_main
+    assert loaded.__file__ == real.__file__
+    assert light_main.walk_all_files is loaded.walk_all_files
+    assert sys.modules["mutmut.__main__"] is loaded
+
+
+def test_the_mutation_runner_itself_never_takes_the_light_main(tmp_path):
+    from scripts.ci_mutation.selection import LIGHT_BOOTSTRAP
+
+    package = tmp_path / "scripts/ci_mutation"
+    package.mkdir(parents=True)
+    (tmp_path / "scripts/__init__.py").touch()
+    (package / "__init__.py").touch()
+    report = (
+        "import sys\n"
+        "main = sys.modules.get('mutmut.__main__')\n"
+        "print('absent' if main is None else getattr(main, '__file__', 'light'))\n"
+    )
+    for path in ("scripts/ci_mutation/selection.py", "scripts/other.py"):
+        (tmp_path / path).write_text(LIGHT_BOOTSTRAP + report)
+    env = {**os.environ, "PYTHONPATH": str(tmp_path)}
+
+    def loaded(*command):
+        return subprocess.run(command, cwd=tmp_path, env=env, capture_output=True, text=True, check=True).stdout
+
+    assert loaded(sys.executable, "-m", "scripts.ci_mutation.selection") == "absent\n"
+    assert loaded(sys.executable, "-c", "import scripts.other") == "light\n"
+
+
 def test_shared_run_grades_each_file_only_by_the_tests_selected_for_it(tmp_path, monkeypatch):
     _gate_tree(tmp_path, monkeypatch)
     (tmp_path / "scripts/first.py").write_text("def one(value):\n    return value + 1\n")
