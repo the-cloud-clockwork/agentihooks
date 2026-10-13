@@ -31,7 +31,6 @@ jobs:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
           permission-members: read
           permission-organization-administration: read
       - name: List collaborators and installed apps against protected approvals
