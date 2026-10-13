@@ -488,8 +488,11 @@ def test_the_upgrade_asks_the_registry_before_locking_the_store(tmp_path, monkey
 def test_a_failed_alias_lookup_leaves_the_legacy_name_pending(tmp_path, monkeypatch):
     import redis
 
+    from scripts.swarm.naming import NameRegistry
+
     def timeout(key):
-        raise redis.exceptions.TimeoutError("Timeout reading from socket")
+        if key == NameRegistry.key("alias", "master@abcdef-0001"):
+            raise redis.exceptions.TimeoutError("Timeout reading from socket")
 
     _legacy_words(tmp_path, monkeypatch, lambda name: "demo", _FakeRedis(timeout))
     assert operator_words.matching("master@abcdef-0001", "Old words", within=None) == ""

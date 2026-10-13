@@ -79,21 +79,21 @@ def _offline_swarm(name):
     return None if parse(name) else legacy_slug(name)
 
 
-def _legacy_swarms(names, redis):
+def _legacy_swarms(paths, redis):
     from redis.exceptions import RedisError
 
     from scripts.swarm.naming import NameRegistry
 
-    swarms = dict.fromkeys(names)
+    swarms = dict.fromkeys(paths)
     registry = NameRegistry(redis)
-    for name in names:
+    for path in paths:
         if redis is None:
-            swarms[name] = _offline_swarm(name)
+            swarms[path] = _offline_swarm(path.stem)
             continue
         try:
             # slug_of swallows a failed alias lookup; this read raises it so the name stays pending.
-            redis.get(registry.key("alias", name))
-            swarms[name] = registry.slug_of(name)
+            redis.get(registry.key("alias", path.stem))
+            swarms[path] = registry.slug_of(path.stem)
         except RedisError:
             break
     return swarms
@@ -104,18 +104,18 @@ def _migrate(connection):
 
     if connection.execute("SELECT 1 FROM legacy WHERE name = ''").fetchone():
         return
-    swarms = _legacy_swarms([path.stem for path in _dir().glob("*.json") if _load(path.stem)["rows"]], get_redis())
+    swarms = _legacy_swarms([path for path in _dir().glob("*.json") if _load(path.stem)["rows"]], get_redis())
     clean = {}
     with connection:
         connection.execute("BEGIN IMMEDIATE")
-        for name, swarm in swarms.items():
+        for path, swarm in swarms.items():
             if swarm is None:
                 continue
-            data = _load(name)
-            clean[name] = {"sessions": data["sessions"]}
-            if connection.execute("INSERT OR IGNORE INTO legacy VALUES (?)", (f"{name}.json",)).rowcount:
+            data = _load(path.stem)
+            clean[path.stem] = {"sessions": data["sessions"]}
+            if connection.execute("INSERT OR IGNORE INTO legacy VALUES (?)", (path.name,)).rowcount:
                 for row in data["rows"]:
-                    _append(connection, swarm, name, row["at"], row["words"])
+                    _append(connection, swarm, path.stem, row["at"], row["words"])
     for name, data in clean.items():
         _save(name, data)
     if None not in swarms.values():
