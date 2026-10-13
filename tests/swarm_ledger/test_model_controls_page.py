@@ -73,3 +73,38 @@ def test_unknown_model_is_refused_before_apply(open_page):
     page.tab.locator('[data-swarm="apply"]').click()
     expect(page.tab.locator("#swarm-note")).to_contain_text("catalog")
     assert page.puts == []
+
+
+def apply_effort_ci_and_model(page):
+    page.tab.locator('[data-swarm="effort_max_up"]').click()
+    page.tab.locator('[data-swarm="ci_up"]').click()
+    page.tab.locator("#cap-claude_model").select_option("future-claude")
+    page.tab.locator('[data-swarm="apply"]').click()
+    for _ in range(100):
+        if page.puts:
+            break
+        page.tab.wait_for_timeout(100)
+    assert page.puts == [{"action": "set", "max_ci": 2, "effort_max": "xhigh", "claude_model": "future-claude"}]
+
+
+def test_apply_keeps_the_sent_values_while_the_answer_still_carries_the_old_config(open_page):
+    page = model_page(open_page)
+    page.payload["commands"] = [
+        {"command": "swarm", "argv": ["set", "max-ci-agents=2", "effort-max=xhigh"], "state": "pending"}
+    ]
+    apply_effort_ci_and_model(page)
+    page.tab.wait_for_timeout(500)
+    expect(page.tab.locator("#cap-effort_max")).to_have_value("xhigh")
+    expect(page.tab.locator("#cap-ci")).to_have_value("2")
+    expect(page.tab.locator("#cap-claude_model")).to_have_value("future-claude")
+
+
+def test_a_failed_apply_returns_the_panel_to_the_stored_config(open_page):
+    page = model_page(open_page)
+    page.payload["commands"] = [
+        {"command": "swarm", "argv": ["set", "effort-max=xhigh"], "state": "failed", "error": "refused"}
+    ]
+    apply_effort_ci_and_model(page)
+    expect(page.tab.locator("#cap-effort_max")).to_have_value("high")
+    expect(page.tab.locator("#cap-ci")).to_have_value("1")
+    expect(page.tab.locator("#cap-claude_model")).to_have_value("opus")
