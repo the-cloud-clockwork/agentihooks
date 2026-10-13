@@ -8,6 +8,9 @@ import json
 import os
 from pathlib import Path
 
+import pytest
+from xdist.scheduler import LoadScopeScheduling
+
 
 def _error(report):
     crash = getattr(report.longrepr, "reprcrash", None)
@@ -22,6 +25,17 @@ class FlakeLedger:
         self.errors = {}
         self.retrying = set()
         self.failed = set()
+        self.crashes = {}
+        self.crashing = set()
+
+    @pytest.hookimpl(trylast=True, optionalhook=True)
+    def pytest_handlecrashitem(self, crashitem, report, sched):
+        # A scope scheduler puts the crashed test back in its queue but refuses
+        # pytest-rerunfailures' mark_test_pending, so the report stays failed.
+        self.crashes[crashitem] = self.crashes.get(crashitem, 0) + 1
+        self.crashing.add(crashitem)
+        if report.failed and self.crashes[crashitem] == 1 and isinstance(sched, LoadScopeScheduling):
+            report.outcome = "rerun"
 
     def pytest_runtest_logreport(self, report):
         if report.outcome == "rerun":
@@ -31,6 +45,9 @@ class FlakeLedger:
         else:
             return
         self.errors.setdefault(report.nodeid, []).append(_error(report))
+        if report.nodeid in self.crashing:
+            self.crashing.discard(report.nodeid)
+            self.pytest_runtest_logfinish(report.nodeid)
 
     def pytest_runtest_logfinish(self, nodeid):
         self.attempts[nodeid] = self.attempts.get(nodeid, 0) + 1
@@ -52,6 +69,8 @@ class FlakeLedger:
             "outcome": "failed" if failed else "flaky",
             "errors": errors,
         }
+        if nodeid in self.crashes:
+            record["crashes"] = self.crashes[nodeid]
         with self.path.open("a") as ledger:
             ledger.write(json.dumps(record) + "\n")
 
