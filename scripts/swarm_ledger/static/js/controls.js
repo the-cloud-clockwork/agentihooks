@@ -211,9 +211,9 @@ export function appliedCaps(body, sw) {
 
 export function settleCaps(sw) {
   if (!applied || !sw) return;
-  const row = (sw.commands || []).find((c) => c.id === applied.id), values = capValues(sw);
+  const row = applied.id && (sw.commands || []).find((c) => c.id === applied.id), values = capValues(sw);
   const done = row && (row.state === "failed" || (row.state === "acknowledged" && sw.last_tick >= row.acknowledged_at));
-  applied.keys = applied.keys.filter((key) => capDraft[key] === applied.draft[key]);
+  applied.keys = applied.keys.filter((key) => String(capDraft[key]).trim() === String(applied.draft[key]).trim());
   for (const key of applied.keys) if (done || String(values[key]) === String(applied.body[key])) delete capDraft[key];
   if (!applied.keys.some((key) => key in capDraft)) applied = null;
 }

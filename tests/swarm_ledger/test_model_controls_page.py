@@ -103,7 +103,7 @@ def test_apply_keeps_the_sent_values_while_the_answer_still_carries_the_old_conf
 def test_a_failed_apply_returns_the_panel_to_the_stored_config(open_page):
     page = model_page(open_page)
     page.payload["commands"] = [
-        {"command": "swarm", "argv": ["set", "effort-max=xhigh"], "state": "failed", "error": "refused"}
+        {"id": "new", "command": "swarm", "argv": ["set", "effort-max=xhigh"], "state": "failed", "error": "refused"}
     ]
     apply_effort_ci_and_model(page)
     expect(page.tab.locator("#cap-effort_max")).to_have_value("high")
@@ -166,3 +166,23 @@ def test_a_typed_cap_settles_on_the_number_it_sent(open_page):
     assert page.puts == [{"action": "set", "max_ci": 2}]
     expect(page.tab.locator("#cap-ci")).to_have_value("2")
     expect(page.tab.get_by_role("button", name="Apply capacity")).to_be_disabled()
+
+
+def test_a_value_typed_after_apply_survives_the_failed_set(open_page):
+    page = model_page(open_page)
+    pending = {"id": "new", "command": "swarm", "argv": ["set", "max-ci-agents=2"], "state": "pending"}
+    page.payload["commands"] = [pending]
+    page.tab.get_by_role("button", name="Raise CI cap").click()
+    page.tab.get_by_role("button", name="Apply capacity").click()
+    expect(page.tab.get_by_role("button", name="Apply capacity")).to_be_disabled()
+    page.tab.locator("#cap-ci").fill("3")
+    failed = {**page.payload, "commands": [{**pending, "state": "failed", "error": "refused"}]}
+    page.tab.evaluate(
+        """async (sw) => {
+            const url = performance.getEntriesByType("resource").map((e) => e.name).find((n) => n.endsWith("/js/swarm.js"));
+            (await import(url)).receiveSwarm(sw);
+        }""",
+        failed,
+    )
+    expect(page.tab.locator("#cap-ci")).to_have_value("3")
+    expect(page.tab.get_by_role("button", name="Apply capacity")).to_be_enabled()
