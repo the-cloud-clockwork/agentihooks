@@ -1,0 +1,119 @@
+{
+  "record": "CXCH-08",
+  "observed_on": "2026-10-13",
+  "environment": {
+    "codex": "codex-cli 0.162.1",
+    "claude": "2.1.296 (Claude Code)",
+    "base_commit": "e83b0ef3b6f119faef1d6ffe7a90f1ddca3127cf",
+    "base": "stacked on the herdr and master experience branch, itself on the managed lifecycle branch",
+    "accounts": {
+      "bearer": [
+        "business",
+        "personal"
+      ],
+      "access_token": "none configured on this workstation"
+    }
+  },
+  "late_approval": {
+    "question": "Does a client that connects after an approval request opened receive that open request?",
+    "command": "PYTHONPATH=<worktree> python <scratch>/run.py <scratch> <bearer account> late_approval",
+    "runner": "starts codex --no-daemon app-server --listen unix://<scratch>/app.sock through codex_router.command and child_environment in a scratch CODEX_HOME, then runs python -m scripts.codex_app_server_probe <sock> <repo> late_approval <out>",
+    "records": [
+      "records/late_approval-bearer-business.json",
+      "records/late_approval-bearer-personal.json"
+    ],
+    "finding": "A late connection that only calls thread/read receives no approval request and no turn events; it sees only thread status notifications. A late connection that calls thread/resume receives the open request with the same id, after the resume reply, and later sees its resolution.",
+    "decision": "The push pump connects without thread/resume, and even a resumed connection learns of the open request only after the resume reply, so the hold on a turn already running at connect stays."
+  },
+  "matrix": {
+    "Idle master": {
+      "status": "pending",
+      "blocked_by": "push pump runner task"
+    },
+    "Busy worker": {
+      "status": "pending",
+      "blocked_by": "push pump runner task"
+    },
+    "Turn completes during send": {
+      "status": "pending",
+      "blocked_by": "push pump runner task"
+    },
+    "Operator composing a prompt": {
+      "status": "pending",
+      "blocked_by": "push pump runner task"
+    },
+    "Viewer closed": {
+      "status": "pending",
+      "blocked_by": "push pump runner task"
+    },
+    "Two bridge instances": {
+      "status": "pending",
+      "blocked_by": "push pump runner task"
+    },
+    "Hook/watch races bridge": {
+      "status": "pending",
+      "blocked_by": "push pump runner task"
+    },
+    "Socket loss after send": {
+      "status": "pending",
+      "blocked_by": "push pump runner task"
+    },
+    "Lost Redis notification": {
+      "status": "pending",
+      "blocked_by": "push pump runner task"
+    },
+    "Redis unavailable": {
+      "status": "pending",
+      "blocked_by": "push pump runner task"
+    },
+    "Redis state lost": {
+      "status": "pending",
+      "blocked_by": "push pump runner task"
+    },
+    "Unknown additive item field": {
+      "status": "pending",
+      "blocked_by": "push pump runner task"
+    },
+    "Background loop failure": {
+      "status": "pending",
+      "blocked_by": "push pump runner task"
+    },
+    "Reply retried after crash": {
+      "status": "pending",
+      "blocked_by": "push pump runner task"
+    },
+    "Seat reused for another task": {
+      "status": "pending",
+      "blocked_by": "push pump runner task"
+    },
+    "Quota handoff": {
+      "status": "pending",
+      "blocked_by": "push pump runner task"
+    },
+    "Profile or model mismatch": {
+      "status": "pending",
+      "blocked_by": "push pump runner task"
+    },
+    "Approval while detached": {
+      "status": "pending",
+      "blocked_by": "push pump runner task"
+    },
+    "Native resume unavailable": {
+      "status": "pending",
+      "blocked_by": "push pump runner task"
+    },
+    "Claude regression": {
+      "status": "pending",
+      "blocked_by": "push pump runner task"
+    }
+  },
+  "latency": {
+    "status": "pending",
+    "target": "100 deliveries, acceptance p95 under 2 s, every non-faulted acceptance under 10 s",
+    "blocked_by": "push pump runner task"
+  },
+  "fleets": {
+    "claude_master_codex_worker": "pending",
+    "codex_master_claude_worker": "pending"
+  }
+}
