@@ -812,9 +812,8 @@ def test_light_main_answers_the_trampoline_and_hands_every_other_name_to_the_rea
 
 
 def test_the_mutation_runner_itself_never_takes_the_light_main(tmp_path):
-    from scripts.ci_mutation.selection import mutated_bootstrap
+    from scripts.ci_mutation.selection import LIGHT_BOOTSTRAP
 
-    (tmp_path / "pyproject.toml").write_text('[tool.mutmut]\nsource_paths = ["scripts/"]\n')
     package = tmp_path / "scripts/ci_mutation"
     package.mkdir(parents=True)
     (tmp_path / "scripts/__init__.py").touch()
@@ -825,7 +824,7 @@ def test_the_mutation_runner_itself_never_takes_the_light_main(tmp_path):
         "print('absent' if main is None else getattr(main, '__file__', 'light'))\n"
     )
     for path in ("scripts/ci_mutation/selection.py", "scripts/other.py"):
-        (tmp_path / path).write_text(mutated_bootstrap(path) + report)
+        (tmp_path / path).write_text(LIGHT_BOOTSTRAP + report)
     env = {**os.environ, "PYTHONPATH": str(tmp_path)}
 
     def loaded(*command):
