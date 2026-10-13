@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from http.server import ThreadingHTTPServer
 from types import SimpleNamespace
 from urllib.error import HTTPError
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 import pytest
 
@@ -211,3 +211,36 @@ def test_parallel_handlers_keep_request_clocks_and_lock_wait_separate(capture, m
     assert result["routes"] == [
         {"method": "POST", "route": "/api/v1/ledgers/:slug/operations", "count": 8, "cpu_seconds": 12.0}
     ]
+
+
+@pytest.mark.parametrize(("method", "label"), [("HEAD", "HEAD"), ("DELETE", "DELETE"), ("PRIVATE", "OTHER")])
+def test_rejected_http_methods_record_cpu_without_arbitrary_method_labels(
+    capture, monkeypatch, metrics_url, method, label
+):
+    completed = threading.Event()
+    record = metrics.record
+
+    def recorded(*args):
+        record(*args)
+        completed.set()
+
+    monkeypatch.setattr(metrics, "record", recorded)
+    request = Request(f"{metrics_url}/api/v1/ledgers/private/tasks", method=method)
+    with pytest.raises(HTTPError) as caught:
+        urlopen(request, timeout=10)
+    assert caught.value.code == 501
+    caught.value.close()
+    assert completed.wait(5)
+    result = metrics.report(1.0)
+    assert len(result["routes"]) == 1
+    assert result["routes"][0]["method"] == label
+    assert result["routes"][0]["route"] == "/api/v1/ledgers/:slug/tasks"
+    assert result["routes"][0]["count"] == 1
+    assert result["routes"][0]["cpu_seconds"] > 0
+
+
+def test_command_help_describes_the_timing_report(capsys):
+    with pytest.raises(SystemExit) as caught:
+        metrics.main(["--help"])
+    assert caught.value.code == 0
+    assert "Ledger write timing and request route CPU" in capsys.readouterr().out
