@@ -23,9 +23,9 @@ def outage_home(tmp_path, monkeypatch):
 
 
 def executing(store, agent, backend="local"):
-    current = replace(agent, execution_id=f"exe-{agent.name}", generation=1, runtime_backend=backend)
-    store.put_agent("sw", current)
-    return current
+    target = {"pod_namespace": "swarm", "pod_name": "agent"} if backend == "kubernetes" else {}
+    fresh = replace(agent, execution_id="", generation=0, runtime_backend=backend, runtime_target=target)
+    return store.start_execution("sw", fresh)
 
 
 def stuck_owner(store, monkeypatch):
