@@ -70,7 +70,9 @@ def hive_of(environ=os.environ):
 
 def placed(store, slug, record, hive, pid):
     previous = store.execution_occupants(slug).get(record.seat)
-    target = {**process.launch_target(pid, process.local_namespace(), processes()), "host_id": hive}
+    target = process.launch_target(pid, process.local_namespace(), processes())
+    if hive:
+        target["host_id"] = hive
     record = replace(record, hive=hive, runtime_target=target)
     return store.start_execution(slug, record, previous.execution_id if previous else "")
 
@@ -89,8 +91,7 @@ def admitted(store, slug, record, admit, pid, hive):
     if hive:
         pin_session(pid, slug)
     else:
-        previous = store.execution_occupants(slug).get(record.seat)
-        record = store.start_execution(slug, record, previous.execution_id if previous else "")
+        record = placed(store, slug, record, hive, pid)
     return record
 
 

@@ -18,7 +18,13 @@ DOC = "# Handoff v2\n## Next\nRead the saved proof.\n## Read first\nNone\n"
 @pytest.fixture
 def taker(env, monkeypatch, tmp_path):  # noqa: F811
     store, ledger, rt = env
+    from hooks.proc import Process
+
     named = []
+    monkeypatch.setattr(take_master.process, "local_namespace", lambda: "boot/pidns")
+    monkeypatch.setattr(
+        take_master, "processes", lambda: {4242: Process(4242, 1, 4242, 4242, 100, "S", "codex", ("codex",))}
+    )
     monkeypatch.setattr(take_master, "PROC", tmp_path / "no-proc")
     ledger.calls, ledger.is_closed = [], False
     ledger.closed = lambda slug: ledger.is_closed
@@ -355,7 +361,14 @@ def test_the_tick_sees_the_taken_master_and_spawns_no_second_one(taker):
 
 
 def test_close_retires_the_taken_master(closing, monkeypatch):  # noqa: F811
+    from hooks.proc import Process
+
     store, ledger, rt, _ = closing
+    monkeypatch.setattr(cli, "routed", lambda **kwargs: rt)
+    monkeypatch.setattr(take_master.process, "local_namespace", lambda: "boot/pidns")
+    monkeypatch.setattr(
+        take_master, "processes", lambda: {4242: Process(4242, 1, 4242, 4242, 100, "S", "claude", ("claude",))}
+    )
     ledger.closed = lambda slug: False
     monkeypatch.setattr(take_master, "agent_pid", lambda: 4242)
     monkeypatch.setattr(take_master, "harness_of", lambda pid: "claude")
