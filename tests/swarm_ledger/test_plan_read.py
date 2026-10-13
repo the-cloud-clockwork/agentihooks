@@ -383,6 +383,27 @@ def test_task_read_resolves_its_anchor_after_lines_are_inserted(tmp_path, monkey
     )
 
 
+def test_task_read_refuses_a_missing_anchor_instead_of_using_stored_lines(monkeypatch):
+    task = {"id": "assigned", "phase": "p1", "plan_slice": "missing", "plan_lines": "1-1"}
+    doc = {"tasks": [task], "phases": [{"id": "p1", "plan_ref": {"lines": "1-1"}}]}
+    monkeypatch.setattr(plan_read, "_stored", lambda *args: "# Other section\n")
+    with pytest.raises(ValueError, match="slice anchor missing is missing or repeated"):
+        plan_read.read(doc, "missing", "assigned", None)
+
+
+def test_task_read_resolves_a_package_anchor_from_current_text(monkeypatch):
+    from scripts.swarm_ledger import plan_packages
+
+    original = '## 1. One\n## 2. Two\n## 3. Three\n<a id="SV2-CTL-04"></a>\n### Assigned\nDo assigned work\n'
+    source = original.replace("## 3. Three\n", "## 3. Three\n" + "Earlier row\n" * 30)
+    monkeypatch.setattr(plan_packages, "text", lambda: source)
+    task = {"id": "assigned", "phase": "p9", "plan_lines": "4-6", "plan_slice": "SV2-CTL-04", "plan_url": ISSUE}
+    doc = {"phases": [{"id": "p9"}], "tasks": [task]}
+    assert plan_read.read(doc, "package", "assigned", None) == (
+        "## 1. One\n## 2. Two\n\n" + "Earlier row\n" * 10 + '<a id="SV2-CTL-04"></a>\n### Assigned\nDo assigned work\n'
+    )
+
+
 def test_swarm_v2_package_read_appends_the_linked_cases(monkeypatch):
     from scripts.swarm_ledger import plan_packages
 
