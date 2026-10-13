@@ -29,8 +29,9 @@ def record(store, slug: str, agent, reason: str, text: str, at: int, avoid_harne
         "next": first_next(text),
         "continuity": {"state": "pending"} if text else {"state": "unknown", "gap": "No handoff document"},
         "binding": {"state": "pending"},
-        **({"avoid_harness": avoid_harness} if avoid_harness else {}),
     }
+    if avoid_harness:
+        row["avoid_harness"] = avoid_harness
     store.redis.hset(store.key(slug, "transfers"), row["id"], json.dumps(row))
     return row
 
