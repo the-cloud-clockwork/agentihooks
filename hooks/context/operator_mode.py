@@ -1,6 +1,6 @@
 """Whether the operator is present in a session: a bound session starts off, typed operator on turns it on.
 
-On lasts thirty minutes from the operator's last typed message; operator off ends it at once.
+On lasts until the operator types operator off.
 """
 
 import json
@@ -16,7 +16,7 @@ QUIET_EVERY = 2
 QUIET_WORDS = 20
 REMINDER = "Operator not present: replies stay within {words} words."
 SWITCH = re.compile(r"operator (on|off)\b")
-ON_NOTICE = "Operator on: the operator is present in this pane until thirty minutes after his last typed message."
+ON_NOTICE = "Operator on: the operator is present in this pane until he types operator off."
 OFF_NOTICE = "Operator off: the operator is not present in this pane."
 TURN_NOTICE = "Operator present for this turn: reply without a word limit."
 QUESTION_TOOL = "AskUserQuestion"
@@ -54,7 +54,7 @@ def _save(session_id, state):
 
 
 def _on(state, now):
-    return bool(state.get("on")) and now - state["at"] < WINDOW_SEC
+    return bool(state.get("on"))
 
 
 def switch(prompt):
