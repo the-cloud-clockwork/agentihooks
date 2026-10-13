@@ -68,10 +68,17 @@ def test_incomplete_installation_inventory_is_red():
 
 
 def test_empty_collaborator_inventory_is_red():
-    def api(endpoint):
-        return [] if "collaborators" in endpoint else {"total_count": 0, "installations": []}
-
     with pytest.raises(ValueError, match="collaborator inventory incomplete"):
+        ci_access_audit.inventory("owner/repo", lambda endpoint: [])
+
+
+def test_empty_installation_inventory_is_red():
+    def api(endpoint):
+        if "collaborators" in endpoint:
+            return [{"login": "nestorcolt"}]
+        return {"total_count": 0, "installations": []}
+
+    with pytest.raises(ValueError, match="app installation inventory incomplete"):
         ci_access_audit.inventory("owner/repo", api)
 
 

@@ -44,7 +44,7 @@ def inventory(repo: str, api: Callable[[str], object] = _api) -> tuple[list[dict
         entries = result["installations"]
         installations.extend(entries)
         if len(entries) < 100:
-            if len(installations) != result["total_count"]:
+            if not installations or len(installations) != result["total_count"]:
                 raise ValueError("app installation inventory incomplete")
             break
         page += 1
