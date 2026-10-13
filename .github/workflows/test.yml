@@ -672,7 +672,11 @@ jobs:
       - name: Check out the base revision
         env:
           BASE: ${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && 'origin/dev' || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
-        run: git worktree add --detach "$RUNNER_TEMP/base" "$(git merge-base "$BASE" HEAD)"
+        # swarm merge queue reads the graded base from this log line.
+        run: |
+          BASE="$(git merge-base "$BASE" HEAD)"
+          echo "BASE: $BASE"
+          git worktree add --detach "$RUNNER_TEMP/base" "$BASE"
 
       # The base revision's copy grades, so a pull request cannot loosen its own floor.
       - name: Hold the base revision's test count

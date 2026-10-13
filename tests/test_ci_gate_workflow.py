@@ -192,7 +192,9 @@ def test_test_count_floor_runs_per_suite_beside_unit_against_the_base():
         " || github.event.pull_request.base.sha || github.event.merge_group.base_sha"
         " || github.event.before || inputs.base }}"
     )
-    assert base["run"] == 'git worktree add --detach "$RUNNER_TEMP/base" "$(git merge-base "$BASE" HEAD)"'
+    assert base["run"] == (
+        'BASE="$(git merge-base "$BASE" HEAD)"\necho "BASE: $BASE"\ngit worktree add --detach "$RUNNER_TEMP/base" "$BASE"\n'
+    )
     assert floor["run"] == (
         'if [[ ! -f "$RUNNER_TEMP/base/tests/count_floor.py" ]]; then\n'
         '  echo "::error::The base carries no tests/count_floor.py, so nothing trusted can grade."\n'
@@ -228,11 +230,28 @@ def test_lint_and_test_count_grade_a_pull_request_that_merged_dev_from_the_curre
         "artifacts": next(s for s in jobs["lint"]["steps"] if s.get("id") == "artifacts"),
     }
     event = {"pull_request": {"base": {"sha": pinned}}}
+    logs = {}
     for name, step in steps.items():
         (tmp_path / name).mkdir()
         base = _evaluate(step["env"]["BASE"], event_name="pull_request", base_ref="dev", event=event)
         env = dict(os.environ, BASE=base, RUNNER_TEMP=str(tmp_path / name), GITHUB_OUTPUT=str(tmp_path / name / "out"))
-        subprocess.run(["bash", "-e", "-c", step["run"]], cwd=repo, env=env, check=True, capture_output=True)
+        done = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=repo, env=env, check=True, capture_output=True)
+        logs[name] = done.stdout.decode()
+    from scripts.swarm import merge_queue
+
+    replies = iter(
+        [
+            json.dumps({"workflow_runs": [{"id": 1, "head_sha": "h", "conclusion": "success"}]}),
+            json.dumps({"jobs": [{"id": 2, "name": "test-count (3.11)", "conclusion": "success"}]}),
+            "2026-10-13T00:00:00Z   BASE: origin/dev\n"
+            + "".join(f"2026-10-13T00:00:01Z {line}\n" for line in logs["test-count"].splitlines()),
+        ]
+    )
+
+    def reply(command, **kwargs):
+        return subprocess.CompletedProcess(command, 0, next(replies), "")
+
+    assert merge_queue.checked_base("o/r", "h", reply) == merged
     assert _git(tmp_path / "test-count" / "base", "rev-parse", "HEAD") == merged
     assert _git(tmp_path / "lint" / "base", "rev-parse", "HEAD") == merged
     assert (tmp_path / "docs" / "docs-changes").read_text() == "docs/own.md\n"
