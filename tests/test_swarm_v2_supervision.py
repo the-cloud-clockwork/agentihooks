@@ -1,6 +1,8 @@
+import contextlib
 import hashlib
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -231,10 +233,25 @@ def test_subprocess_keeps_actual_mutant_and_fail_sentinel(monkeypatch, value, ex
     assert subprocess_environment().get("MUTANT_UNDER_TEST") == expected
 
 
-@pytest.fixture
-def worker(tmp_path):
+def fixture_processes(fixture):
+    found = []
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            command = (entry / "cmdline").read_bytes()
+        except OSError:
+            continue
+        if str(fixture).encode() in command:
+            found.append(int(entry.name))
+    return found
+
+
+@contextlib.contextmanager
+def supervised(tmp_path):
     attempt, path, spec = launch_files(tmp_path)
-    fixture = Path(__file__).parent / "integration/swarm_node/process_fixture.py"
+    fixture = tmp_path / "process_fixture.py"
+    shutil.copyfile(Path(__file__).parent / "integration/swarm_node/process_fixture.py", fixture)
     spec.update(
         herdr=[sys.executable, str(fixture), "herdr", "server"],
         agent=[sys.executable, str(fixture), "agent", "cooperative"],
@@ -271,6 +288,24 @@ def worker(tmp_path):
         if child.poll() is None:
             child.terminate()
         child.wait(timeout=8)
+
+
+@pytest.fixture
+def worker(tmp_path):
+    with supervised(tmp_path) as value:
+        yield value
+
+
+def test_a_worker_whose_supervisor_died_leaves_no_fixture_process(tmp_path):
+    with supervised(tmp_path) as (start, attempt, _):
+        child = start()
+        root = runtime_directory(attempt, child)
+        wait_for(root / "running.json", child)
+        wait_for(root / "fixture-grandchild-two.json", child)
+        wait_for(root / "heartbeat-exporter.json", child)
+        child.kill()
+        child.wait(timeout=8)
+    assert fixture_processes(tmp_path / "process_fixture.py") == []
 
 
 def runtime_directory(attempt, child):
