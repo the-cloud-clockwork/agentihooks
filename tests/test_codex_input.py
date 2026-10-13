@@ -44,6 +44,7 @@ def test_swarm_claude_launch_keeps_its_command(tmp_path):
         (b"\x1b[1;5D", b"\x1b[1;5D"),
         (b"\x1bOA", b"\x1bOA"),
         (b"\x1b[Z", b"\x1b[Z"),
+        (b"\x1b[@", b"\x1b[@"),
         (b"\x1b[97;5u", b"\x1b[97;5u"),
     ],
 )
@@ -302,3 +303,166 @@ def test_partial_terminal_writes_preserve_every_byte(monkeypatch):
     finally:
         os.close(reader)
         os.close(writer)
+
+
+def test_fragmented_ss3_waits_for_its_final_key_byte():
+    framer = codex_input.InputFramer()
+    assert framer.feed(b"\x1bO") == b""
+    assert framer.feed(b"A") == b"\x1bOA"
+
+
+def test_interrupt_before_any_escape_is_preserved():
+    framer = codex_input.InputFramer()
+    assert framer.feed(b"\x03text") == b"\x03text"
+
+
+def test_delete_byte_inside_csi_does_not_finish_it():
+    framer = codex_input.InputFramer()
+    assert framer.feed(b"\x1b[\x7f") == b""
+    assert framer.feed(b"~") == b"\x1b[\x7f~"
+
+
+@pytest.mark.parametrize("ending", [b"", OSError(5, "terminal closed")])
+def test_relay_forwards_filtered_input_output_and_escape_timeout(monkeypatch, ending):
+    from unittest.mock import Mock
+
+    ready = iter([[0], [0], [0], [9], [0], [], [0], [9]])
+    reads = iter([b"\x1b[<35;100;30Mtext", b"\x1b", b"[3~", b"child output", b"\x1b", b"", ending])
+    descriptors = iter([0, 0, 0, 9, 0, 0, 9])
+    clocks = iter([0.0, 0.1, 0.4, 0.5, 0.6, 1.6, 1.7, 1.8])
+    rounds = iter(range(8))
+    writes = []
+    now = [0.0]
+
+    def select_readers(readers, writable, exceptional, timeout):
+        assert writable == exceptional == []
+        assert timeout == 0.05
+        assert readers == ([9] if next(rounds) == 7 else [9, 0])
+        now[0] = next(clocks)
+        return next(ready), [], []
+
+    def read(fd, limit):
+        assert limit == 65536
+        assert fd == next(descriptors)
+        result = next(reads)
+        if isinstance(result, OSError):
+            raise result
+        return result
+
+    monkeypatch.setattr(codex_input.select, "select", select_readers)
+    monkeypatch.setattr(codex_input.os, "read", read)
+    monkeypatch.setattr(codex_input.time, "monotonic", lambda: now[0])
+    write = Mock(side_effect=lambda fd, data: writes.append((fd, data)) if data else None)
+    monkeypatch.setattr(codex_input, "write_all", write)
+    codex_input.pump(9)
+    assert writes == [(9, b"text"), (9, b"\x1b[3~"), (1, b"child output"), (9, b"\x1b")]
+
+
+@pytest.mark.parametrize(("fd", "error"), [(0, 5), (9, 9)])
+def test_relay_propagates_unexpected_read_errors(monkeypatch, fd, error):
+    monkeypatch.setattr(codex_input.select, "select", lambda *args: ([fd], [], []))
+    monkeypatch.setattr(codex_input, "write_all", lambda *args: None)
+
+    def read(*args):
+        raise OSError(error, "read failed")
+
+    monkeypatch.setattr(codex_input.os, "read", read)
+    with pytest.raises(OSError) as caught:
+        codex_input.pump(9)
+    assert caught.value.errno == error
+
+
+@pytest.mark.parametrize(("status", "expected"), [(0, 0), (23 << 8, 23), (signal.SIGTERM, 143)])
+def test_terminal_relay_restores_state_and_forwards_controls(monkeypatch, status, expected):
+    from unittest.mock import Mock, call
+
+    saved = [1, 2, 3]
+    handlers = {}
+    previous = {}
+    tty_check = Mock(return_value=True)
+    getattrs = Mock(return_value=saved)
+    setattrs = Mock()
+    getsize = Mock(return_value=(55, 160))
+    setsize = Mock()
+    raw = Mock()
+    close = Mock()
+    kill = Mock()
+    wait = Mock(return_value=(42, status))
+
+    def install(number, handler):
+        old = handlers.get(number, object())
+        previous.setdefault(number, old)
+        handlers[number] = handler
+        return old
+
+    def pump(master):
+        assert master == 9
+        handlers[signal.SIGWINCH](signal.SIGWINCH, None)
+        for number in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            handlers[number](number, None)
+
+    monkeypatch.setattr(codex_input.os, "isatty", tty_check)
+    monkeypatch.setattr(codex_input.termios, "tcgetattr", getattrs)
+    monkeypatch.setattr(codex_input.termios, "tcsetattr", setattrs)
+    monkeypatch.setattr(codex_input.termios, "tcgetwinsize", getsize)
+    monkeypatch.setattr(codex_input.termios, "tcsetwinsize", setsize)
+    monkeypatch.setattr(codex_input.pty, "fork", lambda: (42, 9))
+    monkeypatch.setattr(codex_input.signal, "signal", install)
+    monkeypatch.setattr(codex_input.tty, "setraw", raw)
+    monkeypatch.setattr(codex_input, "pump", pump)
+    monkeypatch.setattr(codex_input.os, "close", close)
+    monkeypatch.setattr(codex_input.os, "killpg", kill)
+    monkeypatch.setattr(codex_input.os, "waitpid", wait)
+    assert codex_input.run(["codex", "resume", "conversation"]) == expected
+    tty_check.assert_called_once_with(0)
+    getattrs.assert_called_once_with(0)
+    assert getsize.call_args_list == [call(0), call(0)]
+    setsize.assert_called_once_with(9, (55, 160))
+    raw.assert_called_once_with(0)
+    setattrs.assert_called_once_with(0, termios.TCSADRAIN, saved)
+    close.assert_called_once_with(9)
+    wait.assert_called_once_with(42, 0)
+    assert kill.call_args_list == [call(42, number) for number in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)]
+    assert handlers == previous
+
+
+@pytest.mark.parametrize("terminal", [False, True])
+def test_exec_preserves_the_routed_argument_vector(monkeypatch, terminal):
+    from unittest.mock import Mock
+
+    class Executed(Exception):
+        pass
+
+    argv = ["codex", "resume", "conversation"]
+    execvp = Mock(side_effect=Executed)
+    saved = [1, 2, 3]
+    setattrs = Mock()
+    setsize = Mock()
+    monkeypatch.setattr(codex_input.os, "isatty", lambda fd: terminal if fd == 0 else not terminal)
+    monkeypatch.setattr(codex_input.os, "execvp", execvp)
+    monkeypatch.setattr(codex_input.termios, "tcgetattr", lambda fd: saved if fd == 0 else None)
+    monkeypatch.setattr(codex_input.termios, "tcgetwinsize", lambda fd: (55, 160) if fd == 0 else None)
+    monkeypatch.setattr(codex_input.termios, "tcsetattr", setattrs)
+    monkeypatch.setattr(codex_input.termios, "tcsetwinsize", setsize)
+    monkeypatch.setattr(codex_input.pty, "fork", lambda: (0, 9))
+    with pytest.raises(Executed):
+        codex_input.run(argv)
+    execvp.assert_called_once_with("codex", argv)
+    if terminal:
+        setattrs.assert_called_once_with(0, termios.TCSANOW, saved)
+        setsize.assert_called_once_with(0, (55, 160))
+    else:
+        setattrs.assert_not_called()
+        setsize.assert_not_called()
+
+
+@pytest.mark.parametrize("separator", [[], ["--"]])
+def test_guard_cli_preserves_all_command_arguments(monkeypatch, separator):
+    from unittest.mock import Mock
+
+    argv = ["codex", "resume", "conversation"]
+    run = Mock(return_value=23)
+    monkeypatch.setattr(codex_input.sys, "argv", ["guard", *separator, *argv])
+    monkeypatch.setattr(codex_input, "run", run)
+    assert codex_input.main() == 23
+    run.assert_called_once_with(argv)
