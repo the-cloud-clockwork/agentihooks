@@ -118,7 +118,11 @@ def pull_request(raw):
 
 def _latest_run_cancelled(suites):
     runs = [suite for suite in suites if (suite.get("workflowRun") or {}).get("createdAt")]
-    latest = max(runs, key=lambda suite: suite["workflowRun"]["createdAt"], default={})
+    latest = max(
+        runs,
+        key=lambda suite: (suite["workflowRun"]["createdAt"], suite["workflowRun"].get("databaseId", 0)),
+        default={},
+    )
     return latest.get("conclusion") == "CANCELLED"
 
 
