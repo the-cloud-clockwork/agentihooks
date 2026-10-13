@@ -796,8 +796,8 @@ def test_a_push_slower_than_the_budget_is_cut_off_inside_the_stop_condition(monk
         install_gate(rig, 0)
     else:
         rig.commit()
-    slow_origin(rig, 5)
-    timeout = RESERVE_S + 0.5
+    slow_origin(rig, 8)
+    timeout = RESERVE_S + 2
     monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", timeout)
     started = time.monotonic()
     decision = rig.stop(started=started)
