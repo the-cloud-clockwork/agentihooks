@@ -29,7 +29,7 @@ class FlakeLedger:
         self.failed = set()
         self.crashes = {}
         self.crashing = set()
-        self.crashed = {}
+        self.crash_failed = {}
 
     @pytest.hookimpl(trylast=True)
     def pytest_handlecrashitem(self, crashitem, report, sched):
@@ -62,7 +62,7 @@ class FlakeLedger:
         failed = nodeid in self.failed
         self.failed.discard(nodeid)
         if nodeid in self.crashes:
-            self.crashed[nodeid] = failed or self.crashed.get(nodeid, False)
+            self.crash_failed[nodeid] = failed or self.crash_failed.get(nodeid, False)
             return
         attempts = self.attempts.pop(nodeid)
         errors = self.errors.pop(nodeid, [])
@@ -71,7 +71,7 @@ class FlakeLedger:
 
     def pytest_sessionfinish(self):
         for nodeid, crashes in self.crashes.items():
-            failed = self.crashed.get(nodeid, True)
+            failed = self.crash_failed.get(nodeid, True)
             self._write(nodeid, self.attempts[nodeid], failed, self.errors[nodeid], crashes=crashes)
 
     def _write(self, nodeid, attempts, failed, errors, **extra):
