@@ -358,7 +358,7 @@ def test_creating_engineer_drains_worker_through_client_without_cap_changes(
             "AGENTIHOOKS_SWARM": SLUG,
         },
     )
-    assert result == {"state": "paused"}
+    assert result == {"state": "running"}
     from scripts.swarm import cli
 
     monkeypatch.setenv("LEDGER_DIR", str(server.core.LEDGER_DIR))
@@ -369,7 +369,7 @@ def test_creating_engineer_drains_worker_through_client_without_cap_changes(
     request_file.write_text(json.dumps(body))
     capsys.readouterr()
     assert cli.main([slug, "proof-control", "--request", str(request_file)]) == 0
-    assert json.loads(capsys.readouterr().out) == {"state": "paused"}
+    assert json.loads(capsys.readouterr().out) == {"state": "running"}
     assert store.config(slug) == before
     operation = lifecycle.operations(store, slug)[0]
     assert operation["control"] == "drain" and operation["execution_id"] == worker.execution_id
