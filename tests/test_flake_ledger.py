@@ -291,6 +291,11 @@ def test_a_crashed_test_skips_a_replacement_worker_that_has_not_collected(tmp_pa
     FlakeLedger(tmp_path / "flakes.jsonl").pytest_handlecrashitem(crashitem=crashing, report=report, sched=sched)
     assert events == [("sent", 0)]
     assert not sched.workqueue
+    sched.numnodes, sched.collection = 2, [crashing, sibling]
+    sched.workqueue[sibling] = {sibling: False}
+    sched.schedule()
+    assert events == [("sent", 0), ("sent", 1)]
+    assert not joining.shutting_down
 
 
 def test_a_worker_crash_without_reruns_stays_red_and_is_not_run_again(tmp_path):
