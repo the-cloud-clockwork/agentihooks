@@ -138,8 +138,12 @@ def test_semgrep_grades_registry_pack_findings_new_against_the_base_in_parallel(
     assert scan["steps"][0]["with"]["fetch-depth"] == 0
     command = scan["steps"][-1]["run"].split()
     assert {"p/ci", "p/secrets", "p/python"} == {command[i + 1] for i, a in enumerate(command) if a == "--config"}
-    assert command[:5] == ['baseline="$(git', "merge-base", '"$BASE"', 'HEAD)"', "&&"]
-    assert command[command.index("--baseline-commit") + 1 :] == ['"$baseline"']
+    baseline = scan["steps"][-2]
+    assert baseline["env"]["BASE"] == "${{ inputs.base }}"
+    assert baseline["run"] == 'sha="$(git merge-base "$BASE" HEAD)"\necho "sha=$sha" >> "$GITHUB_OUTPUT"\n'
+    assert baseline["id"] == "baseline"
+    assert scan["steps"][-1]["env"]["BASE"] == "${{ steps.baseline.outputs.sha }}"
+    assert command[command.index("--baseline-commit") + 1] == '"$BASE"'
     assert {"--error", "--strict", "--verbose"} <= set(command)
     assert int(command[command.index("--timeout") + 1]) >= 30
     assert command[:2] == ["semgrep", "scan"]
