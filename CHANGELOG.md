@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Bounded ledger write timing and request route CPU reports through the metrics
+  endpoint and `python -m scripts.swarm_ledger.request_metrics` command.
 - Swarm waits accept branch mutation preflight runs and report every failing
   mutant when the run finishes.
 - Shared `read-docs` skill answers operator questions from matching published
