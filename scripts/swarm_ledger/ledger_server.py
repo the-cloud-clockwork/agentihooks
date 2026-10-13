@@ -987,6 +987,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(exc.status, str(exc), "text/plain")
         return self.send(200, json.dumps(stored), "application/json")
 
+    def post_route(self, route):
+        if route == "/healthz":
+            return self.probe_write
+        for prefix, post in (("/api/media/", self.post_media), ("/api/artifacts/", self.post_artifact)):
+            if route.startswith(prefix):
+                return functools.partial(post, route.removeprefix(prefix))
+        return None
+
     def probe_write(self):
         with core.LOCK:
             core.atomic_write(core.LEDGER_DIR / PROBE_FILE, str(core.now_ms()))
@@ -1000,12 +1008,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.refused():
             return None
         route = self.path.split("?", 1)[0]
-        if route == "/healthz":
-            return self.probe_write()
-        if route.startswith("/api/media/"):
-            return self.post_media(route.removeprefix("/api/media/"))
-        if route.startswith("/api/artifacts/"):
-            return self.post_artifact(route.removeprefix("/api/artifacts/"))
+        if post := self.post_route(route):
+            return post()
         if route != "/api/bin":
             return self.send(404, "not found", "text/plain")
         if self.headers.get("Origin") not in ALLOWED_ORIGINS:

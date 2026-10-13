@@ -207,6 +207,17 @@ def test_a_refused_probe_writes_nothing(tmp_path, monkeypatch):
     assert not (tmp_path / ".healthz").exists()
 
 
+def test_post_routes_pick_the_probe_media_and_artifact_writers():
+    handler, _ = bare_handler("/")
+    assert handler.post_route("/healthz") == handler.probe_write
+    media = handler.post_route("/api/media/s/x")
+    assert (media.func, media.args) == (handler.post_media, ("s/x",))
+    artifact = handler.post_route("/api/artifacts/s")
+    assert (artifact.func, artifact.args) == (handler.post_artifact, ("s",))
+    assert handler.post_route("/api/bin") is None
+    assert handler.post_route("/healthz/") is None
+
+
 def test_the_server_exits_when_it_cannot_start_a_request_thread(monkeypatch):
     exits = []
     monkeypatch.setattr(server.os, "_exit", exits.append)
