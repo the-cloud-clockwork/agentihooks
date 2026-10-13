@@ -127,3 +127,31 @@ def test_command_names_the_cpu_hot_route_only_inside_its_window(monkeypatch, cap
     assert result["routes"] == [
         {"method": "GET", "route": "/api/v1/ledgers/:slug/export", "count": 2, "cpu_seconds": 4.0}
     ]
+
+
+def test_bounded_snapshot_names_capacity_and_restart_gaps(monkeypatch):
+    metrics = importlib.import_module("scripts.swarm_ledger.request_metrics")
+    monkeypatch.setattr(metrics, "SAMPLES", deque(maxlen=3))
+    clock = Clock()
+    monkeypatch.setattr(metrics, "time", clock)
+    monkeypatch.setattr(metrics, "STARTED_AT", clock.time() - 86400.0, raising=False)
+    monkeypatch.setattr(metrics, "EVICTED_THROUGH", float("-inf"), raising=False)
+    for wall in range(1, 21):
+        clock.wall += 1.0
+        metrics.record("POST", "/api/v1/ledgers/:slug/operations", float(wall), 0.25, 1.0)
+    result = metrics.report(1.0)
+    assert result["writes"]["count"] == 3
+    assert result["writes"]["p95_wall_seconds"] == 20.0
+    assert result["slow_days"] == [{"day": "2026-10-13", "count": 3}]
+    assert result["coverage"]["complete"] is False
+    assert result["coverage"]["evicted_through"] == 1791856817.0
+    assert result["coverage"]["capacity"] == 3
+    assert result["coverage"]["started_at"] == 1791770400.0
+    clock.wall += 3601.0
+    empty = metrics.report(1.0)
+    assert empty["coverage"]["complete"] is True
+    assert empty["writes"]["count"] == 0
+    assert empty["writes"]["p95_wall_seconds"] is None
+    monkeypatch.setattr(metrics, "STARTED_AT", clock.time())
+    restarted = metrics.report(1.0)
+    assert restarted["coverage"]["complete"] is False
