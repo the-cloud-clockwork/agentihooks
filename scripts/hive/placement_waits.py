@@ -36,7 +36,7 @@ def observe(store: RedisStore, slug: str, lane: str, task: str, reason: str, now
 
 
 def prune(store: RedisStore, slug: str, tasks: list[dict]) -> None:
-    active = {task["id"] for task in tasks if task["state"] not in ("done", "cancelled")}
+    active = {task["id"] for task in tasks if task.get("state") not in ("done", "cancelled")}
     for task in read(store, slug).keys() - active:
         store.redis.hdel(store.key(slug, WAITS), task)
 
