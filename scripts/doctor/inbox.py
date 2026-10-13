@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 
 from scripts.doctor.words import gist, plural
+from scripts.inbox.seats import is_seat
 from scripts.inbox.store import CLOSED
 from scripts.inbox.wake import TO_MASTER, TO_OPERATOR, WOKEN
 from scripts.swarm.health.findings import MINUTE_MS, Finding
@@ -18,10 +19,17 @@ class Receiver:
     scoped: bool = True
     live: bool = False
     quiet_ms: int = 0
+    occupant: str = ""
+    harness: str = ""
+    seat_wait: bool = False
 
 
 def findings(items, now_ms, window_ms, receivers=None):
-    return [*past_window(items, now_ms, window_ms, receivers), *escalated(items), *no_outcome(items)]
+    return [
+        *past_window(items, now_ms, window_ms, receivers),
+        *escalated(items, receivers),
+        *no_outcome(items, receivers),
+    ]
 
 
 def _waiting(item, receiver, window_ms):
@@ -30,8 +38,19 @@ def _waiting(item, receiver, window_ms):
     return item["state"] == "pending" or not receiver.live or receiver.quiet_ms >= window_ms
 
 
-def _route(item):
-    return f"from {item['sender']} to {item['address']}"
+def _route(item, receivers=None):
+    route = f"from {item['sender']} to {item['address']}"
+    if receivers is None:
+        return route
+    receiver = receivers.get(item["address"], Receiver())
+    status = (
+        f"occupant {receiver.occupant}; harness {receiver.harness or 'unknown'}"
+        if receiver.live
+        else "seat is empty"
+        if is_seat(item["address"])
+        else "recipient has no live occupant"
+    )
+    return f"{route}; {status}"
 
 
 def _steps(item, event):
@@ -54,13 +73,15 @@ def past_window(items, now_ms, window_ms, receivers=None):
             continue
         minutes = waited // MINUTE_MS
         category = "unread delivery" if item["state"] == "pending" else "delivered backlog"
+        if receivers.get(item["address"], Receiver()).seat_wait:
+            category = "seat wait"
         found.append(
             Finding(
                 "inbox past window",
                 item["id"],
                 f"{category}; sent {plural(minutes, 'minute')} ago",
                 (
-                    _route(item),
+                    _route(item, receivers),
                     gist(item["text"]),
                     plural(len(_steps(item, WOKEN)), "wake"),
                     plural(sum(len(_steps(item, e)) for e in RAISED), "escalation"),
@@ -72,7 +93,7 @@ def past_window(items, now_ms, window_ms, receivers=None):
     return found
 
 
-def escalated(items):
+def escalated(items, receivers=None):
     found = []
     for item in items:
         steps = [e for e in item["history"] if e.get("event") in RAISED]
@@ -83,7 +104,7 @@ def escalated(items):
                 "inbox escalation",
                 item["id"],
                 f"{RAISED[steps[-1]['event']]}, now {item['state']}",
-                (_route(item), gist(item["text"]), *(f"{RAISED[e['event']]}: {e['reason']}" for e in steps)),
+                (_route(item, receivers), gist(item["text"]), *(f"{RAISED[e['event']]}: {e['reason']}" for e in steps)),
                 "an item nobody read after every wake",
                 len(steps),
             )
@@ -91,7 +112,7 @@ def escalated(items):
     return found
 
 
-def no_outcome(items):
+def no_outcome(items, receivers=None):
     found = []
     for item in items:
         if item.get("fyi") or item["state"] not in BARE or item["reason"].strip() not in ("", item["state"]):
@@ -102,7 +123,7 @@ def no_outcome(items):
                 "inbox no outcome",
                 item["id"],
                 f"closed {item['state']} by {closer or 'unknown'} without naming where the work went",
-                (_route(item), gist(item["text"]), f"closed {item['state']} with no outcome named"),
+                (_route(item, receivers), gist(item["text"]), f"closed {item['state']} with no outcome named"),
                 "a close names where the work went",
                 1,
             )

@@ -22,11 +22,11 @@ def test_empty_successor_seat_is_an_aged_wait_until_a_live_agent_binds():
     [finding] = inbox.past_window([row], 660_000, 300_000, receivers)
     assert finding.summary == "seat wait; sent 10 minutes ago"
     assert finding.measure == 10
-    assert "seat is empty" in finding.evidence
+    assert any("seat is empty" in evidence for evidence in finding.evidence)
 
     store.seats.occupy(row["address"], "demo-ci-2", 1)
     store.put_agent("demo", AgentRecord(name="demo-ci-2", lane="ci", task="t2", harness="codex"))
     receivers = read.inbox_receivers(store, box, "demo", [row])
     [finding] = inbox.past_window([row], 660_000, 300_000, receivers)
     assert finding.summary == "unread delivery; sent 10 minutes ago"
-    assert "occupant demo-ci-2; harness codex" in finding.evidence
+    assert any("occupant demo-ci-2; harness codex" in evidence for evidence in finding.evidence)

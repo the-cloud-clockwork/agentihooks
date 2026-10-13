@@ -54,13 +54,13 @@ def test_inbox_receivers_name_who_is_live_how_long_quiet_and_who_sits_outside_th
     addresses = [seat, named, f"{SLUG}-eng-2", f"{SLUG}-eng-5", "engineer-100001-0001-tmp-1", "operator", doctor]
     items = [{"address": address, "history": []} for address in addresses]
     assert read.inbox_receivers(store, box, SLUG, items) == {
-        seat: Receiver(live=True, quiet_ms=2 * 60_000),
-        named: Receiver(live=True),
+        seat: Receiver(live=True, quiet_ms=2 * 60_000, occupant=f"{SLUG}-eng-1"),
+        named: Receiver(live=True, occupant=named),
         f"{SLUG}-eng-2": Receiver(),
         f"{SLUG}-eng-5": Receiver(),
         "engineer-100001-0001-tmp-1": Receiver(scoped=False),
         "operator": Receiver(),
-        doctor: Receiver(),
+        doctor: Receiver(seat_wait=True),
     }
 
 
@@ -76,7 +76,7 @@ def test_inbox_receivers_name_the_agent_that_took_delivery_apart_from_the_seat_o
     took = [{"state": "pending", "by": "swarm"}, {"state": "delivered", "by": f"{SLUG}-eng-1"}]
     items = [{"address": seat, "history": took}, {"address": seat, "history": took[:1]}]
     assert read.inbox_receivers(store, box, SLUG, items) == {
-        seat: Receiver(live=True),
+        seat: Receiver(live=True, occupant=f"{SLUG}-eng-2"),
         f"{SLUG}-eng-1": Receiver(),
     }
 
