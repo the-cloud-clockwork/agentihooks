@@ -147,7 +147,12 @@ def _swarm_exports(environ: dict[str, str]) -> str:
 def _launch_environ(environ: dict[str, str], name: str, handoff: bool) -> dict[str, str]:
     keeps = environ.get(SPAWN) == "1" or handoff or name == environ.get("AGENTIHOOKS_AGENT_NAME")
     dropped = {SPAWN} if keeps else {SPAWN, *SWARM_IDENTITY}
-    return {key: value for key, value in environ.items() if key not in dropped}
+    launch_env = {key: value for key, value in environ.items() if key not in dropped}
+    if launch_env.get("AGENTIHOOKS_SWARM"):
+        gateway = operator_env.values(environ).get("MCP_KEY_GATEWAY")
+        if gateway:
+            launch_env["MCP_KEY_GATEWAY"] = gateway
+    return launch_env
 
 
 def _with_predecessor(environ: dict[str, str], handoff: bool) -> dict[str, str]:
