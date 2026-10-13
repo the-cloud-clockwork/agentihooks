@@ -20,7 +20,7 @@ from scripts.targets._common import _atomic_write, _install_module, agents_skill
 from scripts.targets.claude_target import settings_document
 from scripts.targets.codex_target import codex_home
 
-SHARED = ("projects", "sessions", "todos", "plugins", ".credentials.json")
+SHARED = ("projects", "sessions", "todos", "plugins", ".credentials.json", "keybindings.json")
 CODEX_STATE = ("auth.json", "sessions", "history.jsonl", "session_index.jsonl", "hooks.json")
 CODEX_INHERITED = ("model", "model_reasoning_effort", "service_tier", "notify", "projects")
 COPILOT_STATE = ("config.json", "settings.json", "agentihooks-hook.sh", "hooks", "session-state", "logs")
@@ -346,6 +346,7 @@ def _claude_fresh(root: Path, stamp: dict, required: set[str]) -> bool:
     claude_json = _read_json(out / ".claude.json") or {}
     return (
         _read_json(out / STAMP) == stamp
+        and all((out / item).is_symlink() for item in SHARED)
         and not (out / "rules").exists()
         and sources.path(root.name, "claude", root.parent).is_file()
         and (out / binding.FILE).is_file()
