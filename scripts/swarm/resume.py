@@ -407,9 +407,10 @@ def _restart_from_handoff(store, slug, agent, task, context):
 
     if not _recovery_current(store, slug, agent, context):
         return "task ownership changed"
-    transfer = recovery_handoff(store, slug, agent, context.at, "", "")
+    handoff = recovery_text(store, slug, agent.task)
+    transfer = transfers.record(store, slug, agent, "outage", handoff, context.at)
     transfers.attach(store, slug, agent)
-    task = primed(store, slug, agent.seat, {**task, "handoff": transfer["handoff"], "transfer": transfer["id"]})
+    task = primed(store, slug, agent.seat, {**task, "handoff": handoff, "transfer": transfer["id"]})
     if not _recovery_current(store, slug, agent, context):
         return "task ownership changed"
     placed = context.runtime.spawn(store.config(slug), agent.lane, agent.name, task)
@@ -419,16 +420,15 @@ def _restart_from_handoff(store, slug, agent, task, context):
     return ""
 
 
-def recovery_handoff(
-    store: RedisStore, slug: str, agent: AgentRecord, now_ms: int, fallback: str, avoid_harness: str
-) -> dict:
-    handoff = store.handoff(slug, agent.task) or transfers.last_handoff(store, slug, agent.task) or fallback
-    return transfers.record(store, slug, agent, "outage", handoff, now_ms, avoid_harness)
+def recovery_text(store: RedisStore, slug: str, task: str) -> str:
+    return store.handoff(slug, task) or transfers.last_handoff(store, slug, task)
 
 
 def free_seat(store: RedisStore, slug: str, agent: AgentRecord, now_ms: int) -> dict:
     store.redis.hdel(store.key(slug, RECOVERY), agent.name)
     error = store.redis.get(store.key(slug, outage.PANE, agent.name))
     folder = ledger_workspace.folder(slug, agent.task)
-    fallback = STUCK_HANDOFF.format(task=agent.task, name=agent.name, error=error, folder=folder)
-    return recovery_handoff(store, slug, agent, now_ms, fallback, agent.harness)
+    handoff = recovery_text(store, slug, agent.task) or STUCK_HANDOFF.format(
+        task=agent.task, name=agent.name, error=error, folder=folder
+    )
+    return transfers.record(store, slug, agent, "outage", handoff, now_ms, agent.harness)

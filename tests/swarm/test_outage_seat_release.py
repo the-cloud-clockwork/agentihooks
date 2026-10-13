@@ -231,3 +231,11 @@ def test_a_transfer_names_an_avoided_harness_only_when_given_one(store):
     _, _, agents = three_owners(store)
     assert "avoid_harness" not in transfers.record(store, "sw", agents[0], "exit", "", 1)
     assert transfers.record(store, "sw", agents[0], "outage", "", 1, "codex")["avoid_harness"] == "codex"
+
+
+def test_a_freed_seat_carries_the_handoff_its_task_already_has(store, monkeypatch):
+    ledger, runtime, owner = stuck_owner(store, monkeypatch)
+    handoff = "## Next\nContinue from the saved proof.\n"
+    store.put_handoff("sw", owner.task, handoff, seat=owner.seat)
+    transfer = resume.free_seat(store, "sw", owner, MINUTE)
+    assert (transfer["handoff"], transfer["avoid_harness"]) == (handoff, "codex")
