@@ -17,6 +17,7 @@ pytestmark = pytest.mark.xdist_group("fakeredis")
 SLUG, ME, TASK = "sw", "engineer@1-1", "t1"
 WHO = Who(name=ME, swarm=SLUG, task=TASK)
 HOUR_MS = lift.LIFT_SECONDS * 1000
+LONG = "x" * 400
 
 
 def saved():
@@ -137,6 +138,49 @@ class TestStatus:
     def test_an_agent_with_no_denies_has_no_gates(self):
         report = status.status_report(saved(), SLUG, {"tasks": []})
         assert [a["gates"] for a in report["agents"]] == [[]]
+
+    def test_a_lift_behind_three_hundred_later_rows_still_shows_lifted(self):
+        log.append(SLUG, log.Row.of("watch", "deny", WHO))
+        log.append(SLUG, log.Row.of("watch", "lift", WHO))
+        for _ in range(300):
+            log.append(SLUG, log.Row.of("subagents", "count", WHO, "Agent", LONG))
+        report = status.status_report(saved(), SLUG, {"tasks": []})
+        assert [a["gates"] for a in report["agents"]] == [[{"gate": "watch", "lifted": True}]]
+
+
+class TestWindow:
+    def fill(self, home, lift_at, later=300):
+        log.append(SLUG, log.Row.of("watch", "deny", WHO, now_ms=lift_at - 1), home)
+        log.append(SLUG, log.Row.of("watch", "lift", WHO, now_ms=lift_at), home)
+        for step in range(later):
+            log.append(SLUG, log.Row.of("subagents", "count", WHO, "Agent", LONG, now_ms=lift_at + 1 + step), home)
+
+    def test_the_log_after_the_lift_is_far_larger_than_one_tail_read(self, tmp_path):
+        self.fill(tmp_path, HOUR_MS)
+        assert log.gate_log_path(SLUG, tmp_path).stat().st_size > 2 * log.TAIL_BYTES
+
+    def test_a_lift_holds_behind_three_hundred_later_rows_until_its_window_ends(self, tmp_path):
+        self.fill(tmp_path, HOUR_MS)
+        assert lift.current(SLUG, 2 * HOUR_MS - 1, tmp_path) == {ME: [{"gate": "watch", "lifted": True}]}
+        assert lift.current(SLUG, 2 * HOUR_MS + 1000, tmp_path) == {}
+
+    def test_since_returns_every_row_from_the_given_time_on(self, tmp_path):
+        self.fill(tmp_path, HOUR_MS)
+        found = log.since(SLUG, HOUR_MS, tmp_path)
+        assert [r["at"] for r in found] == list(range(HOUR_MS, HOUR_MS + 301))
+
+    def test_since_keeps_the_first_row_of_a_short_log(self, tmp_path):
+        self.fill(tmp_path, HOUR_MS, later=0)
+        assert [r["kind"] for r in log.since(SLUG, 0, tmp_path)] == ["deny", "lift"]
+
+    def test_since_skips_unreadable_lines_and_non_objects(self, tmp_path):
+        self.fill(tmp_path, HOUR_MS, later=0)
+        with log.gate_log_path(SLUG, tmp_path).open("a") as out:
+            out.write("not json\n[1]\n")
+        assert [r["kind"] for r in log.since(SLUG, 0, tmp_path)] == ["deny", "lift"]
+
+    def test_since_without_a_log_is_empty(self, tmp_path):
+        assert log.since(SLUG, 0, tmp_path) == []
 
 
 class TestCommand:
