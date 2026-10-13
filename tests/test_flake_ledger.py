@@ -6,7 +6,9 @@ from collections import OrderedDict
 from pathlib import Path
 from types import SimpleNamespace
 
+import pluggy
 import pytest
+import xdist.newhooks
 import yaml
 from xdist.scheduler import LoadScopeScheduling
 
@@ -232,20 +234,30 @@ def test_a_crash_past_the_worker_restart_limit_stays_failed(tmp_path):
 
 
 class _Worker:
-    def __init__(self):
+    def __init__(self, events):
         self.shutting_down = False
-        self.sent = []
+        self.events = events
 
     def send_runtest_some(self, indices):
-        self.sent.extend(indices)
+        self.events.extend(("sent", index) for index in indices)
 
     def shutdown(self):
         self.shutting_down = True
 
 
+class _Recorder:
+    def __init__(self, events):
+        self.events = events
+
+    @pytest.hookimpl
+    def pytest_handlecrashitem(self, crashitem, report, sched):
+        self.events.append(("recorded", crashitem))
+
+
 def test_a_crashed_test_reaches_another_worker_only_after_its_crash_is_recorded(tmp_path):
     crashing, sibling = "test_probes.py::test_crashes_always", "test_probes.py::test_sibling"
-    crashed, alive = _Worker(), _Worker()
+    events = []
+    crashed, alive = _Worker(events), _Worker(events)
     sched = RefillingLoadGroupScheduling.__new__(RefillingLoadGroupScheduling)
     sched.config = SimpleNamespace(
         option=SimpleNamespace(maxworkerrestart="2", numprocesses=2), getoption={"reruns": 2}.get
@@ -254,11 +266,15 @@ def test_a_crashed_test_reaches_another_worker_only_after_its_crash_is_recorded(
     sched.workqueue = OrderedDict()
     sched.registered_collections = {crashed: [crashing, sibling], alive: [crashing, sibling]}
     sched.assigned_work = {crashed: {crashing: {crashing: False}}, alive: {sibling: {sibling: True}}}
+    hooks = pluggy.PluginManager("pytest")
+    hooks.add_hookspecs(xdist.newhooks)
+    hooks.register(_Recorder(events))
+    hooks.register(FlakeLedger(tmp_path / "flakes.jsonl"))
     assert sched.remove_node(crashed) == crashing
-    assert alive.sent == []
+    assert events == []
     report = SimpleNamespace(failed=True, outcome="failed")
-    FlakeLedger(tmp_path / "flakes.jsonl").pytest_handlecrashitem(crashitem=crashing, report=report, sched=sched)
-    assert alive.sent == [0]
+    hooks.hook.pytest_handlecrashitem(crashitem=crashing, report=report, sched=sched)
+    assert events == [("recorded", crashing), ("sent", 0)]
     assert report.outcome == "rerun"
 
 
