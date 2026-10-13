@@ -359,10 +359,11 @@ def test_checks_wait_requires_success_or_failure_from_the_status_rollup(tick, ch
     ]
 
 
-@pytest.mark.parametrize("conclusion", [None, "SUCCESS", "FAILURE"])
+@pytest.mark.parametrize("conclusion", [None, "CANCELLED", "SUCCESS", "FAILURE"])
+@pytest.mark.parametrize("legacy_status", [False, True])
 @pytest.mark.parametrize("obsolete", ["CANCELLED", "FAILURE"])
 @pytest.mark.parametrize("reverse", [False, True])
-def test_checks_wait_uses_only_the_newest_run_of_each_check(tick, conclusion, obsolete, reverse):
+def test_checks_wait_uses_only_the_newest_run_of_each_check(tick, conclusion, obsolete, reverse, legacy_status):
     from scripts.swarm.ledger_events import pull_request
 
     tick.hold("checks", URL)
@@ -370,10 +371,15 @@ def test_checks_wait_uses_only_the_newest_run_of_each_check(tick, conclusion, ob
         {"name": "Gate — Required", "databaseId": 1, "conclusion": obsolete},
         {"name": "Gate — Required", "databaseId": 2, "conclusion": conclusion},
     ]
+    if legacy_status:
+        checks = [
+            {"context": "Gate — Required", "createdAt": f"2026-10-13T10:00:0{index}Z", "state": row["conclusion"]}
+            for index, row in enumerate(checks)
+        ]
     if reverse:
         checks.reverse()
     tick.pulls[URL] = pull_request({"state": "OPEN", "headRefOid": "first", "gated": True, "statusCheckRollup": checks})
-    if conclusion is None:
+    if conclusion in (None, "CANCELLED"):
         assert tick.end() == []
         assert idle.wait(tick.store.redis, "sw", ME) is not None
         assert tick.told() == []
@@ -827,7 +833,7 @@ def test_the_probe_requests_the_head_with_its_check_rollup():
                 "commits(last:1){nodes{commit{committedDate "
                 'file(path:".github/workflows"){object{...on Tree{entries{object{...on Blob{text}}}}}} '
                 "statusCheckRollup{contexts(first:100){"
-                "nodes{...on CheckRun{name conclusion completedAt} ...on StatusContext{context state createdAt}} "
+                "nodes{...on CheckRun{name conclusion completedAt databaseId} ...on StatusContext{context state createdAt}} "
                 "pageInfo{hasNextPage}}} checkSuites(first:100){nodes{status workflowRun{databaseId createdAt}} "
                 "pageInfo{hasNextPage}}}}}}}}",
                 "-f",
