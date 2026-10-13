@@ -288,7 +288,7 @@ def execution_home(spec: Launch, directory: Path) -> Launch:
     )
     binaries = source / "bin"
     if binaries.exists():
-        (home / "bin").symlink_to(binaries.resolve(), target_is_directory=True)
+        (home / "bin").symlink_to(binaries.resolve())
     home.chmod(PRIVATE_MODE)
     for name in ("codex.sources.json", "codex.mounts.json"):
         manifest = source.parent / name
