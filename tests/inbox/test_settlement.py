@@ -168,7 +168,7 @@ def test_legacy_open_work_is_recovered_and_recent_read_or_unconfirmed_work_is_no
     assert store.get(unconfirmed.id).state == "delivered"
 
 
-def test_warmed_open_index_does_not_reload_closed_messages_for_a_settlement_reminder(store, monkeypatch):
+def test_warmed_inbox_indexes_do_not_reload_closed_messages_for_a_settlement_reminder(store, monkeypatch):
     from hooks.context import inbox_delivery as delivery
 
     monkeypatch.setattr("scripts.inbox.store.now_ms", lambda: 1_000_000)
@@ -181,6 +181,8 @@ def test_warmed_open_index_does_not_reload_closed_messages_for_a_settlement_remi
     store.deliver(active.id, "bob")
     store.confirm(active.id, "bob")
     assert [item.id for item in store.open_items("bob")] == [active.id]
+    store.pending_items("bob")
+    store.redeliver(0, 0)
     loaded = []
     prefix = store.key("item") + ":"
     redis_execute = store.redis.execute_command
