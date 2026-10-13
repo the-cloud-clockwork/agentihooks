@@ -207,6 +207,17 @@ def test_a_line_first_covered_recently_stays_graded():
     assert result.lost == {"hooks/a.py": [3]}
 
 
+def test_a_base_only_line_with_two_measured_misses_is_unconfirmed():
+    runs = [
+        _measure("b1", {"hooks/a.py": {1, 2, 3}}, {"hooks/a.py": SOURCE}),
+        _measure("b2", {"hooks/a.py": {1, 2}}, {"hooks/a.py": SOURCE}),
+        _measure("b3", {"hooks/a.py": {1, 2}}, {"hooks/a.py": SOURCE}),
+    ]
+    result = ratchet.grade({"hooks/a.py": {1, 2}}, lambda path: SOURCE, iter(runs))
+    assert result.lost == {}
+    assert result.unconfirmed == {"hooks/a.py": {3: 2}}
+
+
 def test_history_is_read_only_when_a_line_was_lost():
     def runs():
         yield _measure("b1", {"hooks/a.py": {1, 2}}, {"hooks/a.py": SOURCE})
