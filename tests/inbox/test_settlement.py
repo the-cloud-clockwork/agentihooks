@@ -86,6 +86,34 @@ def test_another_session_cannot_confirm_information(store):
     assert store.get(item.id).state == "delivered"
 
 
+def test_hook_information_requests_no_action_and_closes_after_receipt(store, monkeypatch):
+    from hooks.context import inbox_delivery as delivery
+
+    clock = [1_000_000]
+    monkeypatch.setattr("scripts.inbox.store.now_ms", lambda: clock[0])
+    monkeypatch.setattr(delivery, "now_ms", lambda: clock[0])
+    monkeypatch.setattr(delivery, "connect", lambda environ: store)
+    env = {"AGENTIHOOKS_AGENT_NAME": "bob"}
+    item = store.send("alice", "bob", "The branch merged", fyi=True)
+    context = delivery.pending_context("receipt-session", env)
+    assert "Information only; closes on read or confirmed receipt." in context
+    assert "Answer it:" not in context
+    assert item.text in context
+    assert store.get(item.id).state == "delivered"
+    clock[0] += 1
+    assert delivery.pending_context("receipt-session", env) == ""
+    assert store.get(item.id).reason == "done: information received"
+
+
+def test_channel_information_requests_no_action_and_work_keeps_its_content(store):
+    from scripts.inbox.channel import event
+
+    info = store.send("alice", "bob", "The branch merged", fyi=True)
+    work = store.send("alice", "bob", "Verify the proof")
+    assert event(info)["params"]["content"] == "Information only; closes on read or confirmed receipt.\nThe branch merged"
+    assert event(work)["params"]["content"] == "Verify the proof"
+
+
 @pytest.mark.parametrize("receipt", ["read", "confirm"])
 def test_reminders_include_only_the_receivers_due_work_and_preserve_seat_history(store, monkeypatch, receipt):
     from hooks.context import inbox_delivery as delivery
