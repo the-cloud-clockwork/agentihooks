@@ -294,6 +294,7 @@ def test_claude_display_name_keeps_the_canonical_process_identity(tmp_path):
         found = sessions(proc, registry={})
     assert [(s.target, s.name) for s in found] == [("claude", "engineer@a1b2c3-0001")]
     assert resolve(found, "engineer@a1b2c3-0001", "claude").process.pid == 300
+    assert resolve(found, "engineer-a1b2c3-0001", "claude").process.pid == 300
 
 
 def test_a_child_agent_process_does_not_inherit_its_parents_name(tmp_path):

@@ -506,11 +506,16 @@ def _launcher_text(tmp_path, environ, agent="claude", name="swarm-buildout-eng-4
     return launcher.read_text()
 
 
-def test_swarm_display_name_preserves_the_inbox_identity(tmp_path):
-    text = _launcher_text(
+def test_swarm_display_name_preserves_the_inbox_identity(monkeypatch, tmp_path):
+    text = _dry_launcher(
+        monkeypatch,
         tmp_path,
-        {"AGENTIHOOKS_SWARM_SPAWN": "1", "AGENTIHOOKS_AGENT_NAME": "engineer@a1b2c3-0001"},
-        name="engineer-a1b2c3-0001",
+        "engineer-a1b2c3-0001",
+        {
+            "AGENTIHOOKS_SWARM": "sw",
+            "AGENTIHOOKS_SWARM_SPAWN": "1",
+            "AGENTIHOOKS_AGENT_NAME": "engineer@a1b2c3-0001",
+        },
     )
     assert "export AGENTIHOOKS_AGENT_NAME=engineer@a1b2c3-0001" in text
     assert "--name engineer-a1b2c3-0001" in text
