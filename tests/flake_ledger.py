@@ -27,7 +27,12 @@ class RefillingLoadGroupScheduling(LoadGroupScheduling):
 
 def _error(report):
     crash = getattr(report.longrepr, "reprcrash", None)
-    text = crash.message if crash else report.longreprtext
+    if crash:
+        text = crash.message
+    elif isinstance(report.longrepr, str):
+        text = report.longrepr
+    else:
+        text = report.longreprtext
     return (text.strip().splitlines() or [""])[0][:300]
 
 
