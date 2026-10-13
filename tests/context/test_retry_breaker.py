@@ -554,8 +554,23 @@ class TestOnlyExitStatusCounts:
             "Process exited with code 0\nOutput:\n" + _CI_POLL_OK,
             "Process running with session ID 4242\nOutput:\nci_prepush: size limits failed",
             _CI_POLL_OK,
+            "Chunk ID: 1\nProcess exited with code 0\nOutput:\nExit code: 1",
+            "Process exited with code 0\nExit code: 1",
+            "Process running with session ID 4242\nOutput:\nExit code: 1",
+            "xExit code: 1\nOutput:\nboom",
         ],
-        ids=["claude-dict", "claude-background", "zero-exit", "codex-exit-zero", "codex-running", "codex-no-status"],
+        ids=[
+            "claude-dict",
+            "claude-background",
+            "zero-exit",
+            "codex-exit-zero",
+            "codex-running",
+            "codex-no-status",
+            "exit-line-in-output",
+            "exit-line-without-output-marker",
+            "running-with-exit-line-in-output",
+            "exit-text-mid-line",
+        ],
     )
     def test_a_successful_call_never_counts(self, response):
         state, injected = self._record(response, "exit-ok")
@@ -569,20 +584,49 @@ class TestOnlyExitStatusCounts:
             ({"exit_code": 2, "stdout": "only stdout"}, {}, "only stdout"),
             ("Exit code: 1\nOutput:\nboom", {}, "Exit code: 1\nOutput:\nboom"),
             ("Process exited with code 2\nOutput:\nboom", {}, "Process exited with code 2\nOutput:\nboom"),
+            ("Wall time: 1 seconds\nExit code: -1\nOutput:\n", {}, "Wall time: 1 seconds\nExit code: -1\nOutput:\n"),
+            ("Exit code: 3", {}, "Exit code: 3"),
             ({"is_error": True, "content": "ENOENT"}, {}, "ENOENT"),
             ({"resultType": "failure", "textResultForLlm": "denied by server"}, {}, "denied by server"),
             ({"stdout": "partial"}, {"error": "Command failed with exit code 1"}, "Command failed with exit code 1"),
         ],
-        ids=["exit-code", "exit-code-snake", "codex-exit-code", "codex-process-exit", "is-error", "copilot", "error"],
+        ids=[
+            "exit-code",
+            "exit-code-snake",
+            "codex-exit-code",
+            "codex-process-exit",
+            "codex-negative-exit",
+            "codex-bare-exit-line",
+            "is-error",
+            "copilot",
+            "error",
+        ],
     )
     def test_a_real_failure_still_counts(self, response, extra, error_text):
-        state, injected = self._record(response, "exit-bad", **extra)
-        assert state["count"] == 5
         from hooks.config import RETRY_BREAKER_MAX
 
+        state, injected = self._record(response, "exit-bad", **extra)
+        assert state["count"] == 5
         assert state["last_error_text"] == error_text
         assert injected == max(0, 5 - RETRY_BREAKER_MAX + 1)
 
     def test_a_long_failure_text_is_cut_to_two_hundred_characters(self):
         state, _ = self._record({"exitCode": 1, "stderr": "x" * 300}, "exit-long")
         assert state["last_error_text"] == "x" * 200
+
+    def test_an_empty_error_field_is_not_a_failure(self):
+        state, _ = self._record({"exitCode": 0, "stdout": "ok"}, "exit-empty-error", error="")
+        assert state["count"] == 0
+
+    def test_a_tool_other_than_the_shell_keeps_its_text_detection(self):
+        from hooks.context.retry_breaker import _get_state, on_post_tool_result
+
+        payload = {
+            "tool_name": "Grep",
+            "tool_input": {"pattern": "x"},
+            "tool_response": "Error: ENOENT: no such file or directory",
+            "session_id": "grep-fail",
+        }
+        on_post_tool_result(payload)
+        on_post_tool_result(payload)
+        assert _get_state("grep-fail", "grep")["count"] == 2

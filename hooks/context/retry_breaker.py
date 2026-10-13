@@ -265,13 +265,18 @@ Retry-breaker is not a suggestion. It is operator policy."""
 
 def _failure_text(payload: dict, tool_result) -> str | None:
     """The failure text when the call failed by its error field or exit status, else None."""
-    from hooks.tool_memory import _is_error
+    from hooks.tool_memory import _is_error, strict_detection
 
+    tool_name = payload.get("tool_name", "unknown")
     if payload.get("error"):
-        return str(payload["error"])[:200]
+        return str(payload["error"])
+    if tool_name != "Bash":
+        detected, error_text = _is_error(tool_result, strict=strict_detection(tool_name))
+        return error_text if detected else None
     if isinstance(tool_result, str):
-        match = _SHELL_EXIT_RE.search(tool_result.split("\nOutput:", 1)[0])
-        return tool_result[:200] if match and int(match.group(1)) != 0 else None
+        header = tool_result.split("\nOutput:", 1)[0] if "\nOutput:" in tool_result else tool_result.split("\n", 1)[0]
+        match = _SHELL_EXIT_RE.search(header)
+        return tool_result if match and int(match.group(1)) != 0 else None
     detected, error_text = _is_error(tool_result, strict=True)
     return error_text if detected else None
 
