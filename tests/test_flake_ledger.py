@@ -66,7 +66,16 @@ def _run(tmp_path, *select, workers="0", probes=_PROBES, reruns="2", extra=()):
     (tmp_path / "test_probes.py").write_text(probes)
     ledger = tmp_path / "flakes.jsonl"
     targets = [f"test_probes.py::{name}" for name in select] or ["test_probes.py"]
-    result = subprocess.run(
+    try:
+        result = _pytest(tmp_path, ledger, targets, workers, reruns, extra)
+    except subprocess.TimeoutExpired as hung:
+        pytest.fail(f"probe pytest hung:\n{hung.stdout}\n{hung.stderr}")
+    lines = ledger.read_text().splitlines() if ledger.exists() else []
+    return result, [json.loads(line) for line in lines]
+
+
+def _pytest(tmp_path, ledger, targets, workers, reruns, extra):
+    return subprocess.run(
         [sys.executable, "-m", "pytest", *targets, "-p", "xdist", "-p", "rerunfailures", "-p", "tests.flake_ledger"]
         + ["-p", "no:cacheprovider", "-n", workers, "--reruns", reruns, "-q", *extra],
         cwd=tmp_path,
@@ -82,9 +91,8 @@ def _run(tmp_path, *select, workers="0", probes=_PROBES, reruns="2", extra=()):
             "GITHUB_RUN_ID": "4242",
             "GITHUB_RUN_ATTEMPT": "1",
         },
+        timeout=45,
     )
-    lines = ledger.read_text().splitlines() if ledger.exists() else []
-    return result, [json.loads(line) for line in lines]
 
 
 @pytest.mark.parametrize("workers", ["0", "2"])
