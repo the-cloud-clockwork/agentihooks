@@ -115,3 +115,19 @@ def test_receipt_posting_is_idempotent_for_the_same_accepted_message(inbox):
     [item] = ledger_server.relay_to_inbox(SLUG, state)
     chat_receipts.post(ledger_server.repository, inbox, SLUG, state["_meta"]["events"], [item.address])
     assert len(ledger_server.repository.get_document(SLUG)["chat"]) == 2
+
+
+def test_chat_after_another_operator_write_in_the_same_batch_receives_its_receipt(inbox):
+    phase = make_ledger()
+    state, _ = ledger_server.repository.apply_ops(
+        SLUG,
+        ops=[
+            {"op": "add", "thread": f"phases/{phase}/comments", "id": "before-chat", "text": "check the worker"},
+            {"op": "add", "thread": "chat", "id": "after-comment", "text": "report the worker"},
+        ],
+    )
+    assert len(ledger_server.relay_to_inbox(SLUG, state)) == 2
+    [source, receipt] = ledger_server.repository.get_document(SLUG)["chat"]
+    assert source["id"] == "after-comment"
+    assert receipt["reply_to"] == source["id"]
+    assert receipt["text"] == "Received by the master inbox."
