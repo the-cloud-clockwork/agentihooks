@@ -777,7 +777,8 @@ def test_a_subprocess_importing_a_mutated_module_skips_the_mutation_engine_and_s
         "    assert out.stdout.split() == ['2', 'False', 'True']\n"
     )
     report = run_gate(tmp_path, {"scripts/sample.py": {2}}, tmp_path / "evidence", 60)
-    assert report["not_mutated"] == []
+    logs = [Path(item["reason"].rpartition(" ")[2]) for item in report["not_mutated"]]
+    assert report["not_mutated"] == [], [log.read_text()[-4000:] for log in logs if log.is_file()]
     assert report["failed"] is False
     assert report["files"][0]["counts"] == {"killed": 2}
 
