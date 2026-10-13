@@ -9,7 +9,7 @@ from scripts.swarm import ledger_events, outage, ready, stall_watch
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.stall_watch import ALERTED, REOPENED
-from scripts.swarm.store import MASTER, AgentRecord, RedisStore
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_v2 import masters
 from scripts.swarm_v2.masters import MasterSeats
 from tests.swarm.test_tick import FakeLedger
@@ -134,6 +134,41 @@ def test_a_red_pull_request_with_no_push_past_its_limit_reopens():
     assert "red with no push for 15 minutes" in swarm.inbox()[0].text
 
 
+@pytest.mark.parametrize("pull", [RED, GREEN, CONFLICTING])
+def test_a_new_owner_gets_the_full_limit_after_hours_without_a_push(pull):
+    swarm = Swarm(pull, live=False)
+    swarm.tick(START)
+    claim = START + 180 * MINUTE
+    swarm.store.put_agent(SLUG, AgentRecord(OWNER, "eng", "t1", started_at=claim, seat="eng-1@sw"))
+    assert swarm.tick(claim + MINUTE) == []
+    assert swarm.ledger.rows["t1"]["state"] == "pr"
+    assert swarm.retired == []
+    assert swarm.inbox() == []
+    limit = 15 if pull.red else 10 if pull == GREEN else 5
+    assert swarm.tick(claim + (limit - 1) * MINUTE) == []
+    swarm.tick(claim + limit * MINUTE)
+    assert _reopened(swarm)
+
+
+def test_red_checks_in_the_merge_queue_never_reopen_the_task():
+    swarm = Swarm(replace(RED, queued=True))
+    assert swarm.tick(START + 180 * MINUTE) == []
+    assert swarm.ledger.rows["t1"]["state"] == "pr"
+    assert swarm.retired == []
+    assert swarm.inbox() == []
+
+
+@pytest.mark.parametrize("pull,state", [(replace(CONFLICTING, draft=True), "starting"), (CONFLICTING, "working")])
+def test_unmergeable_drafts_and_live_working_owners_stay_held(pull, state):
+    swarm = Swarm(pull)
+    swarm.store.put_agent(SLUG, AgentRecord(OWNER, "eng", "t1", state=state, seat="eng-1@sw"))
+    assert swarm.tick(START) == []
+    assert swarm.tick(START + 180 * MINUTE) == []
+    assert swarm.ledger.rows["t1"]["state"] == "pr"
+    assert swarm.retired == []
+    assert swarm.inbox() == []
+
+
 def test_a_push_after_red_restarts_the_red_limit():
     swarm = Swarm(PullRequest("OPEN", None, START + 10 * MINUTE, True, True, head="h", red_at=START))
     assert swarm.tick(START + 20 * MINUTE) == [] and not _reopened(swarm)
@@ -156,7 +191,7 @@ def test_a_task_awaiting_the_merge_pass_has_no_owner_to_lose():
 
 
 def test_an_unmergeable_pull_request_reopens_after_five_minutes():
-    swarm = Swarm(CONFLICTING)
+    swarm = Swarm(CONFLICTING, live=False)
     swarm.tick(START)
     assert not _reopened(swarm)
     swarm.tick(START + 5 * MINUTE)
@@ -165,7 +200,7 @@ def test_an_unmergeable_pull_request_reopens_after_five_minutes():
 
 
 def test_a_pull_request_dropped_from_the_queue_reopens_after_five_minutes():
-    swarm = Swarm(QUEUED)
+    swarm = Swarm(QUEUED, live=False)
     swarm.tick(START)
     swarm.pulls[URL] = RUNNING
     swarm.tick(START + MINUTE)
@@ -440,7 +475,7 @@ def test_a_task_that_leaves_review_drops_its_queue_mark():
 
 
 def test_a_reopen_after_a_queue_drop_clears_its_queue_mark():
-    swarm = Swarm(QUEUED)
+    swarm = Swarm(QUEUED, live=False)
     swarm.tick(START)
     swarm.pulls[URL] = RUNNING
     swarm.tick(START + MINUTE)
@@ -580,7 +615,7 @@ def test_an_unclaimed_alert_names_the_ledger_row_and_no_pull_request():
         f"stall: task t1 ready and unclaimed while its lane is full for 15 minutes, {ALERTED}; told {LEAD}"
     ]
     [item] = swarm.inbox()
-    assert item.text == _alert(**UNCLAIMED_ALERT, title="Ready work")
+    assert item.text == _alert(**UNCLAIMED_ALERT, title="Ready work; eng lane: 1 ready tasks")
 
 
 def test_an_unclaimed_task_missing_from_the_snapshot_is_named_from_its_lane():
@@ -590,7 +625,7 @@ def test_an_unclaimed_task_missing_from_the_snapshot_is_named_from_its_lane():
     swarm.tick(START)
     swarm.tick(START + 15 * MINUTE)
     [item] = swarm.inbox()
-    assert item.text == _alert(**UNCLAIMED_ALERT, title="Ghost", task="t3")
+    assert item.text == _alert(**UNCLAIMED_ALERT, title="Ghost; eng lane: 1 ready tasks", task="t3")
 
 
 def test_two_unclaimed_tasks_alert_in_the_same_tick():
@@ -599,7 +634,149 @@ def test_two_unclaimed_tasks_alert_in_the_same_tick():
     swarm.ledger.rows["t3"] = {"id": "t3", "state": "open", "claimed_by": "", "lane": "eng"}
     swarm.ready["eng"].append(swarm.ledger.rows["t3"])
     swarm.tick(START)
+    assert len(swarm.tick(START + 15 * MINUTE)) == 1
+
+
+def test_many_ready_tasks_send_one_lane_alert_with_the_ready_count():
+    swarm = Swarm(RUNNING)
+    _full_lane(swarm)
+    for index in range(3, 56):
+        task = {"id": f"t{index}", "state": "open", "claimed_by": "", "lane": "eng"}
+        swarm.ledger.rows[task["id"]] = task
+        swarm.ready["eng"].append(task)
+    swarm.tick(START)
+    assert len(swarm.tick(START + 15 * MINUTE)) == 1
+    [item] = swarm.inbox()
+    assert "54 ready tasks" in item.text
+    assert "eng lane" in item.text
+    assert swarm.tick(START + 16 * MINUTE) == []
+
+
+def test_an_operator_capped_lane_never_alerts_about_unclaimed_tasks():
+    swarm = Swarm(RUNNING)
+    _full_lane(swarm)
+    swarm.store.create(SwarmConfig(SLUG, "/repo", max_eng=1, max_ci=0, max_plan=0, scaling="manual"))
+    assert swarm.tick(START) == []
+    assert swarm.tick(START + 180 * MINUTE) == []
+    assert swarm.inbox() == []
+
+
+def test_an_existing_lane_alert_never_escalates_after_manual_caps_apply():
+    swarm = Swarm(RUNNING)
+    _full_lane(swarm)
+    swarm.tick(START)
+    swarm.tick(START + 15 * MINUTE)
+    [item] = swarm.inbox()
+    swarm.store.create(SwarmConfig(SLUG, "/repo", max_eng=1, max_ci=0, max_plan=0, scaling="manual"))
+    assert swarm.tick(START + 45 * MINUTE) == []
+    assert swarm.ledger.priorities == []
+    assert swarm.posted == []
+    assert InboxStore(swarm.store.redis).get(item.id).state == "done"
+
+
+@pytest.mark.parametrize("pull,limit", [(GREEN, 10), (CONFLICTING, 5)])
+@pytest.mark.parametrize("clock", ["pushed_at", "red_at"])
+def test_a_new_pull_request_event_restarts_the_stall_limit(pull, limit, clock):
+    swarm = Swarm(pull, live=False)
+    swarm.tick(START)
+    event = START + 3 * MINUTE
+    swarm.pulls[URL] = replace(pull, **{clock: event})
+    assert swarm.tick(event + (limit - 1) * MINUTE) == []
+    swarm.tick(event + limit * MINUTE)
+    assert _reopened(swarm)
+
+
+def test_another_task_record_cannot_extend_the_current_claim_limit():
+    swarm = Swarm(CONFLICTING, live=False)
+    swarm.store.put_agent(SLUG, AgentRecord(OWNER, "eng", "another", started_at=START + 180 * MINUTE))
+    swarm.tick(START)
+    swarm.tick(START + 5 * MINUTE)
+    assert _reopened(swarm)
+
+
+def test_a_new_push_does_not_extend_the_missing_owner_limit():
+    swarm = Swarm(RUNNING, live=False)
+    swarm.tick(START)
+    swarm.pulls[URL] = replace(RUNNING, pushed_at=START + 9 * MINUTE)
+    swarm.tick(START + 10 * MINUTE)
+    assert _reopened(swarm)
+
+
+def test_an_epoch_event_reopens_at_the_exact_red_limit_without_an_owner():
+    swarm = Swarm(PullRequest("OPEN", None, 0, True, True, head="h"), task={"claimed_by": ""})
+    swarm.tick(15 * MINUTE)
+    assert _reopened(swarm)
+    assert "red with no push for 15 minutes" in swarm.inbox()[0].text
+
+
+@pytest.mark.parametrize("state,owner", [("claimed", ""), ("open", OWNER), ("blocked", "")])
+def test_stale_ready_candidates_are_not_counted_or_alerted(state, owner):
+    swarm = Swarm(RUNNING)
+    _full_lane(swarm)
+    swarm.ledger.rows["t1"].update(state=state, claimed_by=owner)
+    assert swarm.tick(START) == []
+    assert swarm.tick(START + 180 * MINUTE) == []
+    assert swarm.inbox() == []
+
+
+def test_a_lane_alert_without_a_snapshot_task_survives_a_ready_list_gap():
+    swarm = Swarm(RUNNING)
+    _full_lane(swarm)
+    swarm.ready["eng"] = [{"id": "t3"}]
+    swarm.tick(START)
+    swarm.tick(START + 15 * MINUTE)
+    [item] = swarm.inbox()
+    assert "no title; eng lane: 1 ready tasks" in item.text
+    assert item.state != "done"
+    swarm.ready["eng"] = []
+    assert swarm.tick(START + 16 * MINUTE) == []
+    assert InboxStore(swarm.store.redis).get(item.id).state != "done"
+    swarm.tick(START + 45 * MINUTE)
+    assert [target for target, _ in swarm.ledger.priorities] == ["tasks/t3"]
+
+
+def test_a_legacy_lane_alert_reads_its_lane_from_the_task():
+    swarm = Swarm(RUNNING)
+    _full_lane(swarm)
+    swarm.tick(START)
+    swarm.tick(START + 15 * MINUTE)
+    [item] = swarm.inbox()
+    key = swarm.store.key(SLUG, "stall-alerts")
+    row = json.loads(swarm.store.redis.hget(key, "t1"))
+    del row["lane"]
+    swarm.store.redis.hset(key, "t1", json.dumps(row))
+    assert swarm.tick(START + 16 * MINUTE) == []
+    assert InboxStore(swarm.store.redis).get(item.id).state != "done"
+    swarm.tick(START + 45 * MINUTE)
+    assert [target for target, _ in swarm.ledger.priorities] == ["tasks/t1"]
+
+
+def test_each_full_lane_alerts_once_in_the_same_tick():
+    swarm = Swarm(RUNNING)
+    _full_lane(swarm)
+    swarm.store.put_agent(SLUG, AgentRecord("ci", "ci", "t3"))
+    swarm.ledger.rows["t4"] = {"id": "t4", "state": "open", "claimed_by": "", "lane": "ci"}
+    swarm.ready["ci"] = [swarm.ledger.rows["t4"]]
+    swarm.tick(START)
     assert len(swarm.tick(START + 15 * MINUTE)) == 2
+    items = swarm.inbox()
+    assert len(items) == 2
+    assert any("eng lane: 1 ready tasks" in item.text for item in items)
+    assert any("ci lane: 1 ready tasks" in item.text for item in items)
+
+
+def test_a_lane_alert_stays_open_when_its_first_task_is_taken():
+    swarm = Swarm(RUNNING)
+    _full_lane(swarm)
+    swarm.ledger.rows["t3"] = {"id": "t3", "state": "open", "claimed_by": "", "lane": "eng"}
+    swarm.ready["eng"].append(swarm.ledger.rows["t3"])
+    swarm.tick(START)
+    swarm.tick(START + 15 * MINUTE)
+    [item] = swarm.inbox()
+    swarm.ledger.rows["t1"].update(state="claimed", claimed_by=OWNER)
+    swarm.ready["eng"] = [swarm.ledger.rows["t3"]]
+    assert swarm.tick(START + 16 * MINUTE) == []
+    assert InboxStore(swarm.store.redis).get(item.id).state != "done"
 
 
 @pytest.mark.parametrize(

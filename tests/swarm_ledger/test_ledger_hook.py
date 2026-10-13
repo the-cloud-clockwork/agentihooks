@@ -41,3 +41,34 @@ def test_dispatch_hands_only_the_gate_parts_of_the_bound_ledger_to_the_handler(f
     assert [(state["tasks"], state["_meta"]["members"], "overview" in state) for state in seen] == [
         ([{"id": "t1"}], members, False)
     ]
+
+
+@pytest.mark.parametrize("members", [{}, {"another-worker": {"role": "member"}}])
+def test_dispatch_does_not_run_the_handler_for_a_session_outside_the_ledger_membership(folder, monkeypatch, members):
+    legacy_page.store(folder, "demo", {"_meta": {"members": members}})
+    ledger_hook.write_session(folder / ".sessions" / "s1.json", ledger_hook.new_session("demo", NAME, "member"))
+    seen = []
+    monkeypatch.setitem(ledger_hook.HANDLERS, "PostToolUse", lambda *args: seen.append(args))
+    ledger_hook.dispatch({"session_id": "s1", "hook_event_name": "PostToolUse", "tool_name": "Read"})
+    assert seen == []
+
+
+@pytest.mark.parametrize("event", ["PostToolUse", "Stop"])
+@pytest.mark.parametrize("phase", [{"done": True}, {"out_of_scope": True}])
+def test_dispatch_does_not_run_the_handler_for_a_closed_ledger(folder, monkeypatch, event, phase):
+    doc = {"phases": [phase], "_meta": {"members": {NAME: {"role": "member"}}}}
+    legacy_page.store(folder, "demo", doc)
+    ledger_hook.write_session(folder / ".sessions" / "s1.json", ledger_hook.new_session("demo", NAME, "member"))
+    seen = []
+    monkeypatch.setitem(ledger_hook.HANDLERS, event, lambda *args: seen.append(args))
+    ledger_hook.dispatch({"session_id": "s1", "hook_event_name": event, "tool_name": "Read"})
+    assert seen == []
+
+
+@pytest.mark.parametrize("event", ["PostToolUse", "Stop"])
+def test_dispatch_does_not_run_the_handler_for_an_unreadable_ledger(folder, monkeypatch, event):
+    ledger_hook.write_session(folder / ".sessions" / "s1.json", ledger_hook.new_session("demo", NAME, "member"))
+    seen = []
+    monkeypatch.setitem(ledger_hook.HANDLERS, event, lambda *args: seen.append(args))
+    ledger_hook.dispatch({"session_id": "s1", "hook_event_name": event, "tool_name": "Read"})
+    assert seen == []
