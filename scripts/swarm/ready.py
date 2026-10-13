@@ -151,7 +151,7 @@ def _advance(run, rows, row, found):
     if held["kind"] == "checks":
         if pull.conflicting:
             return _reopen(run, row, found, CONFLICT)
-        return _checks(run, row, found)
+        return _checks(run, row, found, pull)
     outcome = waits.merge_resolution(held, run.github, run.reread, run.now_ms - found["queued_at"] < waits.FRESH_MS)
     if not outcome:
         save(run.store, run.slug, row["id"], found)
@@ -161,14 +161,13 @@ def _advance(run, rows, row, found):
     return _reopen(run, row, found, "left the merge queue without merging")
 
 
-def _checks(run, row, found):
+def _checks(run, row, found, pull):
     outcome = waits.checks_resolution(found["on"], run.github)
     if not outcome.startswith(f"checks on {found['url']}"):
         save(run.store, run.slug, row["id"], found)
         return []
     if outcome.startswith(f"checks on {found['url']}, now red"):
-        pull = run.github(found["url"])
-        steps = ", ".join(pull.failed or [pull.unpassed_gate])
+        steps = ", ".join(pull.failed)
         return _reopen(run, row, found, f"has red checks: {steps}" if steps else "has red checks")
     return _queue(run, row, found)
 

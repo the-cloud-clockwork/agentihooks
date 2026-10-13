@@ -591,15 +591,9 @@ def test_red_checks_or_a_closed_pull_request_reopen_the_task_for_the_next_engine
     assert ready.record(merging.store, "sw", "t1") is None
 
 
-@pytest.mark.parametrize(
-    "pull, step",
-    [
-        (PullRequest("OPEN", None, 1, True, True, failed=("Tests", "Lint"), head=HEAD), "Tests, Lint"),
-        (PullRequest("OPEN", None, 1, True, True, head=HEAD, unpassed_gate="Gate"), "Gate"),
-    ],
-)
-def test_red_checks_reopen_the_task_awaiting_fix_with_the_failing_step_named(merging, pull, step):
-    merging.pulls[URL] = pull
+@pytest.mark.parametrize("failed, step", [(("Tests", "Lint"), "Tests, Lint"), (("Tests",), "Tests")])
+def test_red_checks_reopen_the_task_awaiting_fix_with_the_failing_step_named(merging, failed, step):
+    merging.pulls[URL] = PullRequest("OPEN", None, 1, True, True, failed=failed, head=HEAD)
     assert merging.run()[0] == f"task t1 reopened, {URL} has red checks: {step}"
     assert merging.rows["t1"]["awaiting"] == "fix"
     assert merging.ledger.comments == [
@@ -626,6 +620,20 @@ def test_a_conflict_while_queued_is_left_to_the_queue(merging):
     merging.pulls[URL] = PullRequest("OPEN", None, 1, False, True, head=HEAD, queued=True, conflicting=True)
     assert merging.run(NOW + 60_000) == []
     assert merging.rows["t1"]["state"] == "pr"
+
+
+def test_a_branch_update_github_refuses_reopens_the_task_awaiting_fix(merging):
+    merging.pulls[URL] = GREEN
+    error = "could not update the branch from dev: gh: merge conflict between base and head (HTTP 422)"
+
+    def refused_update(action, url):
+        raise SwarmError(error)
+
+    assert merging.run(queuer=refused_update) == [
+        f"task t1 reopened, {URL} could not be queued: {error}",
+        f"removed the worktree {TOP}",
+    ]
+    assert merging.rows["t1"]["state"] == "open" and merging.rows["t1"]["awaiting"] == "fix"
 
 
 def test_a_pull_request_closed_while_queued_reopens_as_closed(merging):
