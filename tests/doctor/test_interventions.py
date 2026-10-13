@@ -123,6 +123,16 @@ def server_tree(tmp_path):
     return tmp_path / "scripts" / "swarm_ledger", pidfile
 
 
+def process_tree(tmp_path, monkeypatch):
+    proc = tmp_path / "proc"
+    (proc / "1").mkdir(parents=True)
+    (proc / "stat").write_text("btime 100\n")
+    tail = ["0"] * 20
+    tail[19] = str(100 * os.sysconf("SC_CLK_TCK"))
+    (proc / "1" / "stat").write_text("1 (ledger server) " + " ".join(tail))
+    monkeypatch.setattr(interventions, "PROC", proc, raising=False)
+
+
 def restarted(changed):
     return f"The Doctor restarted the ledger server on its new code: {changed}."
 
@@ -146,13 +156,7 @@ def test_the_ledger_server_restarts_only_when_its_code_changed(store, tmp_path):
 @pytest.mark.parametrize("recorded", [True, False])
 def test_rewritten_pidfile_does_not_hide_code_newer_than_the_process(store, tmp_path, monkeypatch, recorded):
     code, pidfile = server_tree(tmp_path)
-    proc = tmp_path / "proc"
-    (proc / "1").mkdir(parents=True)
-    (proc / "stat").write_text("btime 100\n")
-    tail = ["0"] * 20
-    tail[19] = str(100 * os.sysconf("SC_CLK_TCK"))
-    (proc / "1" / "stat").write_text("1 (ledger server) " + " ".join(tail))
-    monkeypatch.setattr(interventions, "PROC", proc, raising=False)
+    process_tree(tmp_path, monkeypatch)
     if not recorded:
         (tmp_path / server_code.RECORD).unlink()
     os.utime(code / "ledger_server.py", (300, 300))
@@ -165,6 +169,52 @@ def test_rewritten_pidfile_does_not_hide_code_newer_than_the_process(store, tmp_
     assert [call[-1] for call in ctx.run.calls] == ["--stop", "--ensure"]
     assert line == restarted("scripts/swarm_ledger/ledger_server.py changed since it started")
     assert logged_on_both(ctx)
+
+
+def test_current_loaded_code_refuses_restart_after_same_process_reload(store, tmp_path, monkeypatch):
+    code, pidfile = server_tree(tmp_path)
+    process_tree(tmp_path, monkeypatch)
+    os.utime(code / "ledger_server.py", (300, 300))
+    server_code.record(tmp_path, 1, 300_000_000_000)
+    pidfile.write_text("1")
+    os.utime(pidfile, (400, 400))
+    ctx = context(store, code=code, pidfile=pidfile)
+
+    with pytest.raises(SwarmError, match=REFUSED):
+        interventions.apply(ctx, "restart-ledger-server", args())
+
+    assert ctx.run.calls == [] and ctx.ledger.noted == []
+
+
+@pytest.mark.parametrize("recorded_pid", [None, 2])
+def test_legacy_process_refuses_restart_when_imported_code_is_unchanged(store, tmp_path, monkeypatch, recorded_pid):
+    code, pidfile = server_tree(tmp_path)
+    process_tree(tmp_path, monkeypatch)
+    if recorded_pid is None:
+        (tmp_path / server_code.RECORD).unlink()
+    else:
+        server_code.record(tmp_path, recorded_pid, 0)
+    os.utime(pidfile, (400, 400))
+    os.utime(code / "ledger_server.py", (200, 200))
+    ctx = context(store, code=code, pidfile=pidfile)
+
+    with pytest.raises(SwarmError, match=REFUSED):
+        interventions.apply(ctx, "restart-ledger-server", args())
+
+    assert ctx.run.calls == [] and ctx.ledger.noted == []
+
+
+def test_missing_process_start_is_reported_without_restarting(store, tmp_path, monkeypatch):
+    code, pidfile = server_tree(tmp_path)
+    process_tree(tmp_path, monkeypatch)
+    (tmp_path / server_code.RECORD).unlink()
+    (tmp_path / "proc" / "1" / "stat").unlink()
+    ctx = context(store, code=code, pidfile=pidfile)
+
+    with pytest.raises(SwarmError, match="cannot read the ledger server process start"):
+        interventions.apply(ctx, "restart-ledger-server", args())
+
+    assert ctx.run.calls == [] and ctx.ledger.noted == []
 
 
 @pytest.mark.parametrize(
