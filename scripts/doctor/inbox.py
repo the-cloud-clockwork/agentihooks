@@ -81,8 +81,9 @@ def past_window(items, now_ms, window_ms, receivers=None):
                 item["id"],
                 f"{category}; sent {plural(minutes, 'minute')} ago",
                 (
-                    _route(item, receivers),
+                    _route(item),
                     gist(item["text"]),
+                    _recipient(item, receivers),
                     plural(len(_steps(item, WOKEN)), "wake"),
                     plural(sum(len(_steps(item, e)) for e in RAISED), "escalation"),
                 ),
@@ -104,7 +105,12 @@ def escalated(items, receivers=None):
                 "inbox escalation",
                 item["id"],
                 f"{RAISED[steps[-1]['event']]}, now {item['state']}",
-                (_route(item, receivers), gist(item["text"]), *(f"{RAISED[e['event']]}: {e['reason']}" for e in steps)),
+                (
+                    _route(item),
+                    gist(item["text"]),
+                    _recipient(item, receivers),
+                    *(f"{RAISED[e['event']]}: {e['reason']}" for e in steps),
+                ),
                 "an item nobody read after every wake",
                 len(steps),
             )
@@ -123,7 +129,12 @@ def no_outcome(items, receivers=None):
                 "inbox no outcome",
                 item["id"],
                 f"closed {item['state']} by {closer or 'unknown'} without naming where the work went",
-                (_route(item, receivers), gist(item["text"]), f"closed {item['state']} with no outcome named"),
+                (
+                    _route(item),
+                    gist(item["text"]),
+                    _recipient(item, receivers),
+                    f"closed {item['state']} with no outcome named",
+                ),
                 "a close names where the work went",
                 1,
             )
