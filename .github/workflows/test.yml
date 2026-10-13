@@ -212,19 +212,55 @@ jobs:
     timeout-minutes: ${{ (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch') && 4 || 2 }}
     permissions:
       contents: read
-      actions: write
     outputs:
       key: ${{ steps.stored.outputs.cache-matched-key }}
       queued: ${{ steps.republished.outputs.queued }}
       base: ${{ steps.base-run.outputs.sha }}
       source: ${{ steps.unit-source.outputs.source }}
     steps:
+      - uses: actions/checkout@v4
+        if: github.event_name == 'push'
+        with:
+          ref: ${{ needs.reuse.outputs.grader }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        if: github.event_name == 'push'
+        with:
+          python-version: "3.12"
+
+      - name: Install unit reuse metadata dependencies
+        if: github.event_name == 'push' && hashFiles('scripts/ci_dev_reuse.py') != ''
+        run: python -m pip install "pyyaml>=6.0"
+
+      - name: Look up the base revision's dev durations
+        id: stored
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/dev-durations
+          key: durations-merged-${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || github.sha }}
+          restore-keys: durations-merged-
+          lookup-only: true
+
+      # Queue refs and dispatched branches cannot read caches saved on dev, so they fetch dev's artifacts on the App's own API quota.
+      - name: Mint the tcc main ci App token
+        id: app-token
+        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && hashFiles('scripts/ci_dev_reuse.py') != '')
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: ${{ github.event_name == 'merge_group' && 'write' || 'read' }}
+          permission-contents: read
+
       # Expressions cannot parse the pull request number out of the queue ref, and a
       # job-level group keyed on it would let an older run's late job cancel the live run.
       - name: Cancel superseded and dead merge queue runs
         if: github.event_name == 'merge_group' && github.actor == 'github-merge-queue[bot]' && github.triggering_actor == 'github-merge-queue[bot]'
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           QUEUE_REF: ${{ github.event.merge_group.head_ref }}
           RUN: ${{ github.run_id }}
         run: |
@@ -260,43 +296,6 @@ jobs:
               echo "::warning::Cannot cancel queue run $id ($branch)"
             fi
           done <<< "$listed"
-
-      - uses: actions/checkout@v4
-        if: github.event_name == 'push'
-        with:
-          ref: ${{ needs.reuse.outputs.grader }}
-          persist-credentials: false
-
-      - uses: actions/setup-python@v5
-        if: github.event_name == 'push'
-        with:
-          python-version: "3.12"
-
-      - name: Install unit reuse metadata dependencies
-        if: github.event_name == 'push' && hashFiles('scripts/ci_dev_reuse.py') != ''
-        run: python -m pip install "pyyaml>=6.0"
-
-      - name: Look up the base revision's dev durations
-        id: stored
-        if: github.event_name == 'pull_request' || github.event_name == 'push'
-        uses: actions/cache/restore@v4
-        with:
-          path: ~/dev-durations
-          key: durations-merged-${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || github.sha }}
-          restore-keys: durations-merged-
-          lookup-only: true
-
-      # Queue refs and dispatched branches cannot read caches saved on dev, so they fetch dev's artifacts on the App's own API quota.
-      - name: Mint the tcc main ci App token
-        id: app-token
-        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && hashFiles('scripts/ci_dev_reuse.py') != '')
-        uses: actions/create-github-app-token@v3.2.0
-        with:
-          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
-          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
-          repositories: ${{ github.event.repository.name }}
-          permission-actions: read
-          permission-contents: read
 
       - name: Fetch passed queue unit evidence for this dev commit
         if: github.event_name == 'push' && hashFiles('scripts/ci_dev_reuse.py') != ''

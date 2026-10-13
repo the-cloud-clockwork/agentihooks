@@ -68,7 +68,8 @@ def _workflow():
 
 
 def _step():
-    return _workflow()["jobs"]["durations"]["steps"][0]
+    [step] = [step for step in _workflow()["jobs"]["durations"]["steps"] if step.get("name") == STEP]
+    return step
 
 
 def _run(tmp_path, ref="refs/heads/" + OWN, live=LIVE, **env):
@@ -112,19 +113,23 @@ def test_the_workflow_concurrency_stays_unchanged():
     )
 
 
-def test_the_sweep_runs_first_only_for_the_merge_queue_bot_with_cancel_rights():
+def test_the_sweep_runs_only_for_the_merge_queue_bot_on_the_app_token_minted_to_cancel():
+    job = _workflow()["jobs"]["durations"]
+    names = [step.get("name") for step in job["steps"]]
+    mint = job["steps"][names.index("Mint the tcc main ci App token")]
+    assert names.index(STEP) == names.index("Mint the tcc main ci App token") + 1
+    assert mint["with"]["permission-actions"] == "${{ github.event_name == 'merge_group' && 'write' || 'read' }}"
     step = _step()
-    assert step["name"] == STEP
     assert step["if"] == (
         "github.event_name == 'merge_group' && github.actor == 'github-merge-queue[bot]'"
         " && github.triggering_actor == 'github-merge-queue[bot]'"
     )
     assert step["env"] == {
-        "GH_TOKEN": "${{ github.token }}",
+        "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
         "QUEUE_REF": "${{ github.event.merge_group.head_ref }}",
         "RUN": "${{ github.run_id }}",
     }
-    assert _workflow()["jobs"]["durations"]["permissions"] == {"contents": "read", "actions": "write"}
+    assert job["permissions"] == {"contents": "read"}
 
 
 def test_older_runs_of_the_same_pull_request_and_older_runs_of_gone_branches_are_cancelled(tmp_path):

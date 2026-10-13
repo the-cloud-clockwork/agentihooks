@@ -32,7 +32,7 @@ def test_publisher_uploads_the_passed_dev_baseline_for_queue_runs():
 
 def test_queue_runs_mint_a_read_only_app_token_and_skip_the_dev_cache_lookup():
     job = _jobs()["durations"]
-    lookup = job["steps"][1]
+    lookup = job["steps"][0]
     mint = _step(job["steps"], "Mint the tcc main ci App token")
     assert not _runs_on(lookup, "merge_group")
     assert _runs_on(mint, "merge_group")
@@ -41,10 +41,10 @@ def test_queue_runs_mint_a_read_only_app_token_and_skip_the_dev_cache_lookup():
         "client-id": "${{ secrets.TCC_CI_CLIENT_ID }}",
         "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
         "repositories": "${{ github.event.repository.name }}",
-        "permission-actions": "read",
+        "permission-actions": "${{ github.event_name == 'merge_group' && 'write' || 'read' }}",
         "permission-contents": "read",
     }
-    assert job["permissions"] == {"contents": "read", "actions": "write"}
+    assert job["permissions"] == {"contents": "read"}
 
 
 def test_queue_runs_restore_the_latest_dev_durations_on_the_app_token():
