@@ -1,5 +1,7 @@
 import copy
+import gc
 import json
+import weakref
 
 import pytest
 
@@ -24,6 +26,39 @@ from tests.swarm_ledger.test_sqlite import document
 )
 def test_normalized_rows_preserve_complete_json_values(value):
     assert assemble(flatten(value)) == value
+
+
+@pytest.mark.parametrize("malformed", [False, True])
+def test_assembly_releases_rows_without_cyclic_collection(malformed, monkeypatch):
+    class Rows(dict):
+        pass
+
+    class Score(float):
+        pass
+
+    decoder = json.JSONDecoder(parse_float=Score)
+    monkeypatch.setattr(json, "loads", decoder.decode)
+    rows = Rows(flatten({"score": 1.25, "tasks": [{"id": "task", "comments": []}]}))
+    reference = weakref.ref(rows)
+    if malformed:
+        rows["[]"] = (*rows["[]"][:4], "value", "{")
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        if malformed:
+            with pytest.raises(json.JSONDecodeError):
+                assemble(rows)
+        else:
+            rebuilt = assemble(rows)
+            assert rebuilt == {"score": 1.25, "tasks": [{"id": "task", "comments": []}]}
+            output_reference = weakref.ref(rebuilt["score"])
+            del rebuilt
+            assert output_reference() is None
+        del rows
+        assert reference() is None
+    finally:
+        if enabled:
+            gc.enable()
 
 
 def test_reorder_move_and_field_removal_preserve_other_items(tmp_path):

@@ -152,6 +152,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/ci_wiring.py",
         "scripts/packaging/compose-hive-smoke.sh",
         "scripts/packaging/hive-join-smoke.sh",
+        "scripts/packaging/hive-launch-smoke.sh",
         "scripts/packaging/swarm-image-clients.sh",
         "scripts/packaging/swarm-smoke.sh",
         "scripts/size_limits.py",
@@ -387,7 +388,7 @@ def test_sonar_downloads_this_runs_coverage_after_the_shards():
     assert download["with"] == {"pattern": "coverage-3.12-*", "path": ".coverage-shards"}
     assert steps.index(download) < steps.index(merge)
     assert "env" not in merge
-    assert "bash .github/coverage/combine.sh --downloaded 8 ||" in merge["run"]
+    assert "bash .github/coverage/combine.sh --downloaded 12 ||" in merge["run"]
 
 
 @pytest.mark.parametrize("job", ["unit", "shard-check", "test-count", "lint"])

@@ -146,7 +146,7 @@ def test_only_the_first_shard_installs_the_pinned_codex_cli_and_requires_its_liv
     assert restore["with"] == {"path": "~/codex", "key": "codex-${{ runner.os }}-${{ env.CODEX_RELEASE }}"}
     assert install["if"] == "steps.codex.outcome == 'success' && steps.codex.outputs.cache-hit != 'true'"
     assert install["run"].startswith("set -o pipefail\n")
-    assert "releases/download/${CODEX_RELEASE}/codex-x86_64-unknown-linux-musl.zst" in install["run"]
+    assert "releases/download/${CODEX_RELEASE}/codex-x86_64-unknown-linux-musl.tar.gz" in install["run"]
     assert use["if"] == "steps.codex.outcome == 'success'"
     assert use["run"].strip().splitlines() == [
         'echo "$HOME/codex" >> "$GITHUB_PATH"',
@@ -300,7 +300,11 @@ def test_mutation_browser_dependencies_use_the_responsive_mirror():
     mirror = next(step for step in setup if step.get("name") == "Use the Ubuntu archive for browser dependencies")
     install = _browser_install(setup)
     assert setup.index(mirror) < setup.index(install)
-    assert mirror["if"] in ("steps.selection.outputs.browser == 'true'", "steps.launch.outputs.ready != 'true'")
+    assert mirror["if"] in (
+        "steps.selection.outputs.browser == 'true'",
+        "steps.launch.outputs.ready != 'true'",
+        "steps.launch.outputs.ready != 'true' && runner.environment == 'github-hosted'",
+    )
     assert mirror["run"] in (
         r"sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt",
         r"timeout 60s sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt",
