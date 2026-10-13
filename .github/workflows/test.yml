@@ -158,7 +158,7 @@ jobs:
     needs: [reuse, admission]
     uses: ./.github/workflows/semgrep.yml
     with:
-      base: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
+      base: ${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && 'origin/dev' || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
 
   brain-smoke:
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}
@@ -188,7 +188,7 @@ jobs:
       - name: Decide from the base branch rule whether the chart proof is due
         id: paths
         env:
-          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          BASE: ${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && 'origin/dev' || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
           HEAD: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
         run: |
           set -o pipefail
@@ -598,7 +598,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.base.ref == 'main' && github.sha || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || (inputs.base == 'origin/dev' && 'dev' || inputs.base) }}
+          ref: ${{ github.event.pull_request.base.ref == 'main' && github.sha || github.event_name == 'pull_request' && 'dev' || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || (inputs.base == 'origin/dev' && 'dev' || inputs.base) }}
           persist-credentials: false
 
       - *python

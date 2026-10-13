@@ -130,14 +130,15 @@ def test_semgrep_grades_registry_pack_findings_new_against_the_base_in_parallel(
     assert job["needs"] in (["reuse"], ["reuse", "admission"])
     assert job["uses"] == "./.github/workflows/semgrep.yml"
     assert job["with"]["base"] == (
-        "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha"
+        "${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && 'origin/dev'"
+        " || github.event.pull_request.base.sha || github.event.merge_group.base_sha"
         " || github.event.before || inputs.base }}"
     )
     scan = yaml.safe_load((_ROOT / ".github/workflows/semgrep.yml").read_text())["jobs"]["scan"]
     assert scan["steps"][0]["with"]["fetch-depth"] == 0
     command = scan["steps"][-1]["run"].split()
     assert {"p/ci", "p/secrets", "p/python"} == {command[i + 1] for i, a in enumerate(command) if a == "--config"}
-    assert command[command.index("--baseline-commit") + 1] == '"$BASE"'
+    assert command[command.index("--baseline-commit") + 1 :] == ['"$(git', "merge-base", '"$BASE"', 'HEAD)"']
     assert {"--error", "--strict", "--verbose"} <= set(command)
     assert int(command[command.index("--timeout") + 1]) >= 30
     assert command[:2] == ["semgrep", "scan"]
@@ -572,12 +573,32 @@ def test_chart_proof_runs_when_the_base_is_unknown_or_carries_no_rule(kind_repo,
 def test_chart_proof_rule_uses_the_push_before_commit_as_its_base():
     step = _workflow()["jobs"]["kind-due"]["steps"][-1]
     assert step["env"]["BASE"] == (
-        "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}"
+        "${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && 'origin/dev'"
+        " || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}"
     )
     assert step["env"]["HEAD"] == (
         "${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}"
     )
     assert step["run"].startswith("set -o pipefail\n")
+
+
+def test_chart_proof_ignores_dev_files_a_pull_request_merged_after_its_event_base(kind_repo):
+    from tests.test_ci_hosted_lanes import _evaluate
+
+    repo, base = kind_repo
+    _git(repo, "checkout", "-q", "-b", "branch")
+    _commit(repo, {"notes.txt": "own"})
+    _git(repo, "checkout", "-q", "-b", "newer", base)
+    merged = _commit(repo, {"hooks/a.py": "a = 1\n"})
+    _git(repo, "update-ref", "refs/remotes/origin/dev", merged)
+    _git(repo, "checkout", "-q", "branch")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "merge", "-q", "--no-edit", "newer")
+    step = _workflow()["jobs"]["kind-due"]["steps"][-1]
+    event = {"pull_request": {"base": {"sha": base}}}
+    current = _evaluate(step["env"]["BASE"], event_name="pull_request", base_ref="dev", event=event)
+    result, output = _due_step(repo, current, _git(repo, "rev-parse", "HEAD"))
+    assert result.returncode == 0, result.stderr
+    assert output == "due=false\n"
 
 
 def test_chart_proof_rule_fails_on_an_unknown_base(kind_repo):

@@ -38,4 +38,4 @@ jobs:
           semgrep scan --error --strict --verbose --timeout 30 --metrics off
           --config p/ci --config p/secrets --config p/python
           --exclude-rule yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag
-          --baseline-commit "$BASE"
+          --baseline-commit "$(git merge-base "$BASE" HEAD)"
