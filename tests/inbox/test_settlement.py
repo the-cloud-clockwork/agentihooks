@@ -38,6 +38,8 @@ def test_confirmed_work_reminds_its_receiver_until_explicit_settlement(store, mo
 
     clock = [1000.0]
     monkeypatch.setattr("time.time", lambda: clock[0])
+    monkeypatch.setattr("scripts.inbox.store.now_ms", lambda: int(clock[0] * 1000))
+    monkeypatch.setattr(delivery, "now_ms", lambda: int(clock[0] * 1000))
     monkeypatch.setattr(delivery, "connect", lambda environ: store)
     env = {"AGENTIHOOKS_AGENT_NAME": "bob", "AGENTIHOOKS_INBOX_RETRY_WINDOW_S": "300"}
     item = store.send("alice", "bob", "Verify the deployed proof")
