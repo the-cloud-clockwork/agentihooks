@@ -1200,7 +1200,7 @@ def ensure():
     while running is None:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            sys.exit(f"ledger server did not answer on {BASE}; see {LOGFILE}")
+            sys.exit(f"ledger server did not answer on {BASE}; see {LOGFILE} or docker compose logs ledger")
         if not started:
             started = start_server(compose)
         time.sleep(min(0.1, remaining))
@@ -1213,10 +1213,8 @@ def ensure():
 
 
 def stop():
-    if server_compose.used(core.LEDGER_DIR):
-        if error := server_compose.stop(core.LEDGER_DIR):
-            sys.exit(f"could not stop the ledger service: {error}")
-        return print("stopped")
+    if server_compose.used(core.LEDGER_DIR) and (error := server_compose.stop(core.LEDGER_DIR)):
+        sys.exit(f"could not stop the ledger service: {error}")
     if not PIDFILE.exists():
         return print(f"no server pidfile in {core.LEDGER_DIR}")
     pid = int(PIDFILE.read_text())

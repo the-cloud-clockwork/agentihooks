@@ -1,6 +1,11 @@
 import http.server
+import inspect
 import json
+import os
+import shutil
+import signal
 import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -92,7 +97,10 @@ def test_compose_runs_with_the_folder_the_code_and_this_user(tmp_path, monkeypat
     assert server_compose.start(tmp_path, {"HOME": "/h", "KEEP": "1"}, run) == ""
     assert server_compose.stop(tmp_path, {"HOME": "/h"}, run) == ""
     compose = ["docker", "compose", "-f", str(server_compose.COMPOSE_FILE)]
-    assert [argv for argv, _ in calls] == [[*compose, "up", "-d", "ledger"], [*compose, "stop", "ledger"]]
+    assert [argv for argv, _ in calls] == [
+        [*compose, "up", "-d", "--no-recreate", "ledger"],
+        [*compose, "stop", "ledger"],
+    ]
     first = calls[0][1]
     assert first["env"] == {
         "HOME": "/h",
@@ -122,6 +130,26 @@ def test_a_failed_or_hung_compose_names_its_error(tmp_path):
     assert server_compose.start(tmp_path, {}, silent) == "docker compose exit code 3"
     assert "timed out" in server_compose.start(tmp_path, {}, hung)
     assert server_compose.stop(tmp_path, {}, missing) == "docker"
+
+
+def test_compose_defaults_reach_the_real_environment_docker_and_runner():
+    def defaults(function):
+        return {name: p.default for name, p in inspect.signature(function).parameters.items() if name != "folder"}
+
+    assert defaults(server_compose.used) == {
+        "environ": os.environ,
+        "which": shutil.which,
+        "compose_file": server_compose.COMPOSE_FILE,
+    }
+    assert (
+        defaults(server_compose.start)
+        == defaults(server_compose.stop)
+        == {
+            "environ": os.environ,
+            "run": subprocess.run,
+        }
+    )
+    assert (server_compose.TIMEOUT_S, server_compose.ERROR_KEPT) == (120, 200)
 
 
 @pytest.fixture
@@ -160,14 +188,27 @@ def test_a_compose_start_that_fails_ends_ensure_with_its_error(compose_server, m
         server.ensure()
 
 
-def test_stop_stops_the_compose_service_instead_of_a_pid(compose_server, monkeypatch, capsys):
-    (compose_server / ".server.pid").write_text("4242")
+def test_stop_stops_the_compose_service_and_clears_its_pidfile(compose_server, monkeypatch, capsys):
+    (compose_server / ".server.pid").write_text("4194999")
     stopped = []
     monkeypatch.setattr(server.server_compose, "stop", lambda folder: stopped.append(folder) or "")
     monkeypatch.setattr(server.os, "kill", lambda *a: pytest.fail("a compose server is stopped through compose"))
     server.stop()
     assert stopped == [compose_server]
     assert capsys.readouterr().out == "stopped\n"
+    assert not (compose_server / ".server.pid").exists()
+
+
+def test_stop_also_ends_a_bare_server_left_from_before_the_cutover(compose_server, monkeypatch):
+    monkeypatch.setattr(server.server_compose, "stop", lambda folder: "")
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", "ledger_server.py"])
+    try:
+        (compose_server / ".server.pid").write_text(str(child.pid))
+        server.stop()
+        assert child.wait(timeout=5) == -signal.SIGTERM
+    finally:
+        child.kill()
+        child.wait(timeout=5)
 
 
 def test_a_compose_stop_that_fails_names_its_error(compose_server, monkeypatch):
@@ -228,6 +269,7 @@ def test_the_server_exits_when_it_cannot_start_a_request_thread(monkeypatch):
 
     monkeypatch.setattr(server.threading.Thread, "start", refused)
     httpd.process_request(None, ("127.0.0.1", 1))
+    httpd.server_close()
     assert exits == [server.THREADS_EXHAUSTED] == [75]
     assert issubclass(server.ThreadingHTTPServer, http.server.ThreadingHTTPServer)
 
@@ -238,4 +280,5 @@ def test_a_request_thread_that_starts_keeps_the_server_running(monkeypatch):
     monkeypatch.setattr(server.threading.Thread, "start", lambda self: started.append(self))
     httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler, bind_and_activate=False)
     httpd.process_request(None, ("127.0.0.1", 1))
+    httpd.server_close()
     assert len(started) == 1

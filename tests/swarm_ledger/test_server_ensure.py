@@ -158,7 +158,10 @@ def test_a_listening_silent_port_waits_out_the_deadline_without_starting(isolate
             pytest.raises(SystemExit) as refused,
         ):
             server.ensure()
-    assert str(refused.value) == f"ledger server did not answer on {server.BASE}; see {server.LOGFILE}"
+    assert (
+        str(refused.value)
+        == f"ledger server did not answer on {server.BASE}; see {server.LOGFILE} or docker compose logs ledger"
+    )
     held.assert_called_once_with()
     start.assert_not_called()
 

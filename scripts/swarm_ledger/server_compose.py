@@ -1,8 +1,7 @@
-"""The shared ledger server runs as the capped ledger service of the compose stack beside the code."""
-
 import os
 import shutil
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 from scripts.swarm_ledger import ledger_link
@@ -13,15 +12,22 @@ SERVICE = "ledger"
 TIMEOUT_S = 120
 ERROR_KEPT = 200
 
+Run = Callable[..., subprocess.CompletedProcess]
 
-def used(folder: Path, environ=os.environ, which=shutil.which, compose_file: Path = COMPOSE_FILE) -> bool:
+
+def used(
+    folder: Path,
+    environ: dict = os.environ,
+    which: Callable[[str], str | None] = shutil.which,
+    compose_file: Path = COMPOSE_FILE,
+) -> bool:
     if environ.get("LEDGER_SERVER_RUNTIME") == "process":
         return False
     shared = ledger_link.shared_directory(environ={"LEDGER_DIR": str(folder)})
     return shared and which("docker") is not None and compose_file.is_file()
 
 
-def _compose(action: list[str], folder: Path, environ, run) -> str:
+def _compose(action: list[str], folder: Path, environ: dict, run: Run) -> str:
     env = {
         **environ,
         "LEDGER_DIR": str(folder),
@@ -41,9 +47,9 @@ def _compose(action: list[str], folder: Path, environ, run) -> str:
     return (done.stderr or "").strip()[-ERROR_KEPT:] or f"docker compose exit code {done.returncode}"
 
 
-def start(folder: Path, environ=os.environ, run=subprocess.run) -> str:
-    return _compose(["up", "-d"], folder, environ, run)
+def start(folder: Path, environ: dict = os.environ, run: Run = subprocess.run) -> str:
+    return _compose(["up", "-d", "--no-recreate"], folder, environ, run)
 
 
-def stop(folder: Path, environ=os.environ, run=subprocess.run) -> str:
+def stop(folder: Path, environ: dict = os.environ, run: Run = subprocess.run) -> str:
     return _compose(["stop"], folder, environ, run)

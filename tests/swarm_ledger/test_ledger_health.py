@@ -1,6 +1,10 @@
+import http.client
+import inspect
+import os
 import signal
 import socket
 import urllib.error
+import urllib.request
 
 import pytest
 
@@ -41,6 +45,9 @@ def test_the_probe_posts_an_empty_write_with_a_short_timeout():
         (TimeoutError("timed out"), "timed out"),
         (urllib.error.URLError("refused"), "<urlopen error refused>"),
         (socket.timeout(), "TimeoutError"),
+        (urllib.error.URLError(ConnectionRefusedError(111, "refused")), "not listening yet"),
+        (http.client.RemoteDisconnected("closed"), "closed"),
+        (http.client.IncompleteRead(b""), "IncompleteRead(0 bytes read)"),
     ],
 )
 def test_a_slow_or_failed_probe_names_its_error(error, named):
@@ -124,3 +131,22 @@ def test_the_third_failure_in_a_row_ends_the_server_and_starts_the_count_again(t
         "probe write failed, 3 of 3: timed out",
     ]
     assert health.FAILS_MAX == 3
+
+
+def test_a_server_not_listening_yet_is_unhealthy_without_counting_toward_the_kill(tmp_path, capsys):
+    (tmp_path / ".health-failures").write_text("2")
+    killed = []
+    assert run_main(tmp_path, health.REFUSED, killed) == 1
+    assert killed == []
+    assert (tmp_path / ".health-failures").read_text() == "2"
+    assert capsys.readouterr().err == "probe write failed: not listening yet\n"
+
+
+def test_the_healthcheck_defaults_reach_the_real_server_and_process_table():
+    def defaults(function):
+        return {name: p.default for name, p in inspect.signature(function).parameters.items()}
+
+    assert defaults(health.probe)["urlopen"] is urllib.request.urlopen
+    assert defaults(health.end_server) == {"folder": inspect.Parameter.empty, "kill": os.kill, "proc": health.PROC}
+    assert health.PROC == health.Path("/proc")
+    assert defaults(health.main) == {"environ": os.environ, "check": health.probe, "end": health.end_server}
