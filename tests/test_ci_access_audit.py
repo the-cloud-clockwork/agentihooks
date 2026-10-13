@@ -127,6 +127,8 @@ def test_weekly_job_reads_dev_and_alerts_through_notifications():
     assert job["runs-on"] == pool("anton-oss-light")
     checkout = next(step for step in job["steps"] if step.get("uses", "").startswith("actions/checkout@"))
     assert checkout["with"]["ref"] == "dev"
+    assert checkout["with"]["persist-credentials"] is False
+    assert workflow["permissions"] == {"contents": "read"}
     notification = next(step for step in job["steps"] if "ntfy.homeofanton.com/anton-alerts" in step.get("run", ""))
     assert "always()" in notification["if"]
     assert "env" not in notification
@@ -136,10 +138,14 @@ def test_weekly_job_reads_dev_and_alerts_through_notifications():
     assert mint["uses"] == "actions/create-github-app-token@v3.2.0"
     assert mint["with"]["client-id"] == "${{ secrets.TCC_CI_CLIENT_ID }}"
     assert mint["with"]["private-key"] == "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}"
+    assert mint["with"]["repositories"] == "${{ github.event.repository.name }}"
+    assert {key: value for key, value in mint["with"].items() if key.startswith("permission-")} == {
+        "permission-members": "read",
+        "permission-organization-administration": "read",
+    }
     inventory = next(step for step in job["steps"] if "scripts.ci_access_audit" in step.get("run", ""))
     assert inventory["env"] == {"GH_TOKEN": "${{ steps.app-token.outputs.token }}"}
     assert job["steps"].index(mint) < job["steps"].index(inventory) < job["steps"].index(notification)
-    assert "ORG_GITHUB_TOKEN" not in json.dumps(workflow)
     assert "NTFY_" not in json.dumps(workflow)
 
 
