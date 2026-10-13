@@ -60,9 +60,7 @@ def _inbox_receiver(store, inbox, address, agent):
     from scripts.doctor.inbox import Receiver
     from scripts.inbox import exits
 
-    if is_seat(address) and agent and inbox.seats.left(agent.name, address):
-        agent = None
-    if agent:
+    if agent and (not is_seat(address) or not inbox.seats.left(agent.name, address)):
         return Receiver(live=True, quiet_ms=agent.idle_ticks * MINUTE_MS, occupant=agent.name, harness=agent.harness)
     if not is_seat(address):
         return Receiver()

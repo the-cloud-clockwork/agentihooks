@@ -6,28 +6,29 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
 
-def test_empty_successor_seat_is_an_aged_wait_until_a_live_agent_binds():
+@pytest.mark.parametrize("slug", ["demo", "demo@partition"])
+def test_empty_successor_seat_is_an_aged_wait_until_a_live_agent_binds(slug):
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    store.create(SwarmConfig("demo", "/r", max_eng=1, max_ci=2))
+    store.create(SwarmConfig(slug, "/r", max_eng=1, max_ci=2))
     box = InboxStore(store.redis)
     row = {
         "id": "waiting",
         "sender": "swarm",
-        "address": "ci-2@demo",
+        "address": f"ci-2@{slug}",
         "text": "Coordinate shared work",
         "state": "pending",
         "created_at": 60_000,
         "history": [],
     }
-    receivers = read.inbox_receivers(store, box, "demo", [row])
+    receivers = read.inbox_receivers(store, box, slug, [row])
     [finding] = inbox.past_window([row], 660_000, 300_000, receivers)
     assert finding.summary == "seat wait; sent 10 minutes ago"
     assert finding.measure == 10
     assert any("seat is empty" in evidence for evidence in finding.evidence)
 
     store.seats.occupy(row["address"], "demo-ci-2", 1)
-    store.put_agent("demo", AgentRecord(name="demo-ci-2", lane="ci", task="t2", harness="codex"))
-    receivers = read.inbox_receivers(store, box, "demo", [row])
+    store.put_agent(slug, AgentRecord(name="demo-ci-2", lane="ci", task="t2", harness="codex"))
+    receivers = read.inbox_receivers(store, box, slug, [row])
     [finding] = inbox.past_window([row], 660_000, 300_000, receivers)
     assert finding.summary == "unread delivery; sent 10 minutes ago"
     assert any("occupant demo-ci-2; harness codex" in evidence for evidence in finding.evidence)
@@ -46,7 +47,13 @@ def test_a_departed_occupant_is_empty_even_when_its_agent_record_still_says_work
 
 
 @pytest.mark.parametrize(
-    "state,cap,address", [("stopped", 1, "ci-1@demo"), ("running", 0, "ci-1@demo"), ("running", 1, "ci-2@demo")]
+    "state,cap,address",
+    [
+        ("stopped", 1, "ci-1@demo"),
+        ("running", 0, "ci-1@demo"),
+        ("running", 1, "ci-2@demo"),
+        ("stopped", 1, "master@demo"),
+    ],
 )
 def test_a_seat_with_no_possible_successor_keeps_unread_delivery(state, cap, address):
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
@@ -88,3 +95,30 @@ def test_every_inbox_finding_names_the_current_seat_occupant_and_harness():
     found = inbox.findings([pending, closed], 600_000, 300_000, receiver)
     assert {finding.kind for finding in found} == {"inbox past window", "inbox escalation", "inbox no outcome"}
     assert all("occupant demo-ci-1; harness claude" in finding.evidence for finding in found)
+    assert all("work" in finding.evidence for finding in found)
+
+
+@pytest.mark.parametrize(
+    "address,receivers,expected",
+    [
+        ("ci-1@demo", None, "recipient state unavailable"),
+        (
+            "ci-1@demo",
+            {"ci-1@demo": inbox.Receiver(live=True, occupant="demo-ci-1")},
+            "occupant demo-ci-1; harness unknown",
+        ),
+        ("demo-ci-1", {"demo-ci-1": inbox.Receiver()}, "recipient has no live occupant"),
+    ],
+)
+def test_inbox_findings_report_missing_receiver_harness_and_departed_personal_recipient(address, receivers, expected):
+    row = {
+        "id": "waiting",
+        "sender": "swarm",
+        "address": address,
+        "text": "work",
+        "state": "pending",
+        "created_at": 0,
+        "history": [],
+    }
+    [finding] = inbox.findings([row], 600_000, 300_000, receivers)
+    assert expected in finding.evidence
