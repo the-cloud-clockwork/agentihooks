@@ -11,13 +11,13 @@ def primary(root: Path) -> Path:
     marker = root / ".git"
     if not marker.is_file():
         return root
-    return Path(marker.read_text().removeprefix("gitdir:").strip()).parents[2]
+    return (root / marker.read_text().removeprefix("gitdir:").strip()).resolve().parents[2]
 
 
 ROOT = primary(Path(__file__).resolve().parents[2])
 COMPOSE_FILE = ROOT / "deploy" / "compose" / "ledger.yaml"
 SERVICE = "ledger"
-TIMEOUT_S = 60
+TIMEOUT_S = 120
 ERROR_KEPT = 200
 
 Run = Callable[..., subprocess.CompletedProcess]

@@ -63,7 +63,7 @@ BASE = f"http://{HOST}:{PORT}"
 PIDFILE = core.LEDGER_DIR / ".server.pid"
 LOGFILE = core.LEDGER_DIR / ".server.log"
 SERVER_WAIT = 5.0
-COMPOSE_WAIT = 120.0
+COMPOSE_WAIT = 180.0
 THREADS_EXHAUSTED = 75
 PROBE_FILE = ".healthz"
 FILE_ORIGIN = "null"
@@ -703,7 +703,7 @@ def sample_streams():
 
 
 class ThreadingHTTPServer(http.server.ThreadingHTTPServer):
-    def process_request(self, request, client_address):
+    def process_request(self, request: socket.socket, client_address: tuple[str, int]) -> None:
         try:
             super().process_request(request, client_address)
         except RuntimeError:
@@ -996,7 +996,7 @@ class Handler(BaseHTTPRequestHandler):
                 return functools.partial(post, route.removeprefix(prefix))
         return None
 
-    def probe_write(self):
+    def probe_write(self) -> None:
         with core.LOCK:
             core.atomic_write(core.LEDGER_DIR / PROBE_FILE, str(core.now_ms()))
         return self.send(200, json.dumps({"dir": str(core.LEDGER_DIR)}), "application/json")

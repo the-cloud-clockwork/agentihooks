@@ -31,10 +31,12 @@ def test_a_worktree_resolves_to_its_primary_checkout(tmp_path):
     worktree = tmp_path / "worktrees" / "repo" / "eng-1"
     worktree.mkdir(parents=True)
     (worktree / ".git").write_text(f"gitdir: {primary}/.git/worktrees/eng-1\n")
-    assert server_compose.primary(worktree) == primary
+    assert server_compose.primary(worktree) == primary.resolve()
     (primary / ".git").mkdir(parents=True)
     assert server_compose.primary(primary) == primary
     assert server_compose.primary(tmp_path / "installed") == tmp_path / "installed"
+    (worktree / ".git").write_text("gitdir: ../../../repo/.git/worktrees/eng-1\n")
+    assert server_compose.primary(worktree) == primary.resolve()
 
 
 def test_the_service_caps_memory_cpu_and_threads_and_restarts_itself():
@@ -122,7 +124,7 @@ def test_compose_runs_with_the_folder_the_code_and_this_user(tmp_path, monkeypat
         "LEDGER_UID": "1234",
         "LEDGER_GID": "5678",
     }
-    assert (first["capture_output"], first["text"], first["check"], first["timeout"]) == (True, True, False, 60)
+    assert (first["capture_output"], first["text"], first["check"], first["timeout"]) == (True, True, False, 120)
 
 
 def test_a_failed_or_hung_compose_names_its_error(tmp_path):
@@ -161,7 +163,7 @@ def test_compose_defaults_reach_the_real_environment_docker_and_runner():
             "run": subprocess.run,
         }
     )
-    assert (server_compose.TIMEOUT_S, server_compose.ERROR_KEPT) == (60, 200)
+    assert (server_compose.TIMEOUT_S, server_compose.ERROR_KEPT) == (120, 200)
 
 
 @pytest.fixture
@@ -187,9 +189,9 @@ def test_ensure_starts_the_shared_server_through_compose_and_never_spawns_it(com
     assert capsys.readouterr().out == f"{server.BASE}\n"
 
 
-def test_ensure_waits_a_minute_for_the_container(compose_server):
-    assert server.COMPOSE_WAIT == 120.0 > server_compose.TIMEOUT_S
-    assert server.wait_for(compose_server) == 120.0
+def test_ensure_waits_past_the_compose_timeout_for_the_container(compose_server):
+    assert server.COMPOSE_WAIT == 180.0 > server_compose.TIMEOUT_S
+    assert server.wait_for(compose_server) == 180.0
     assert server.wait_for(compose_server / "scratch") == server.SERVER_WAIT
 
 
