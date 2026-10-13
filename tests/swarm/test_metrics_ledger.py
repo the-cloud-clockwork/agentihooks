@@ -89,7 +89,9 @@ def test_a_stored_event_without_a_revision_is_reported_and_the_pass_finishes(box
     assert [row["state"] for row in rows] == ["claimed", "open"]
     assert read(box, "ledger_snapshots")
     assert ledger.calls == [("state", "example"), ("ack", "example", 6)]
-    assert [record.getMessage() for record in caplog.records] == ["ledger example event 0 has no revision; skipped"]
+    assert [(record.name, record.levelname, record.getMessage()) for record in caplog.records] == [
+        ("scripts.swarm.metrics_ledger", "WARNING", "ledger example event 0 has no revision; skipped")
+    ]
     metrics_ledger.record(box, "example", NOW + 2, ledger)
     assert len(read(box, "ledger_events")) == 2
 

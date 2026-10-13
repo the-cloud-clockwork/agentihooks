@@ -30,6 +30,17 @@ def test_unversioned_event_records_are_refused(tmp_path):
         repo.export_document("events")
 
 
+def test_appending_an_unversioned_event_reports_the_refusal(tmp_path):
+    from scripts.swarm_ledger.repository import events
+
+    repo = SQLiteLedgerRepository(tmp_path / "shadow.sqlite3")
+    with repo.connect() as connection:
+        events.write_events(connection, "events", [{"rev": 1, "kind": "valid"}])
+        with pytest.raises(ValueError, match="^ledger event must have a revision$"):
+            events.append_events(connection, "events", [{"kind": "legacy"}], 2)
+        assert events.read_events(connection, "events") == [{"rev": 1, "kind": "valid"}]
+
+
 def test_three_identical_events_remain_distinct_records(tmp_path):
     state = document()
     state["_meta"]["events"] = [{"rev": 2, "id": "duplicate"}] * 3
