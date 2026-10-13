@@ -31,8 +31,10 @@ class RefillingLoadGroupScheduling(LoadGroupScheduling):
             self.holding = False
 
     def release(self):
+        # A replacement worker still collecting gets its work from schedule() once it has collected.
         for node in self.nodes:
-            self._reschedule(node)
+            if node in self.registered_collections:
+                self._reschedule(node)
 
     def _reschedule(self, node):
         if self.holding:
