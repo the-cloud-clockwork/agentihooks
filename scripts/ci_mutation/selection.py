@@ -216,6 +216,8 @@ def mutated_bootstrap(filename: str) -> str:
         f"    _mutmut_spec = _mutmut_util.spec_from_file_location('mutmut.__main__', {str(light_main)!r})\n"
         "    _mutmut_sys.modules['mutmut.__main__'] = _mutmut_util.module_from_spec(_mutmut_spec)\n"
         "    _mutmut_spec.loader.exec_module(_mutmut_sys.modules['mutmut.__main__'])\n"
+        "    import mutmut as _mutmut_package\n"
+        "    _mutmut_package.__main__ = _mutmut_sys.modules['mutmut.__main__']\n"
         f"_mutmut_root = _mutmut_Path(__file__).resolve().parents[{len(Path(filename).parts) - 1}]\n"
         "_mutmut_cwd = _mutmut_os.getcwd()\n"
         "try:\n"
