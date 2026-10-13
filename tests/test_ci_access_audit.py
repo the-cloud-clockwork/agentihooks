@@ -122,7 +122,8 @@ def test_weekly_job_reads_dev_and_alerts_through_notifications():
     workflow = yaml.safe_load((root / ".github/workflows/access-audit.yml").read_text())
     events = workflow.get("on", workflow.get(True))
     assert "schedule" in events and "workflow_dispatch" in events
-    assert events["push"] == {"branches": ["dev"]}
+    assert events == {"push": {"branches": ["dev"]}, "schedule": [{"cron": "17 7 * * 1"}], "workflow_dispatch": None}
+    assert set(workflow["jobs"]) == {"audit"}
     job = workflow["jobs"]["audit"]
     assert job["runs-on"] == pool("anton-oss-light")
     checkout = next(step for step in job["steps"] if step.get("uses", "").startswith("actions/checkout@"))
@@ -146,6 +147,7 @@ def test_weekly_job_reads_dev_and_alerts_through_notifications():
     inventory = next(step for step in job["steps"] if "scripts.ci_access_audit" in step.get("run", ""))
     assert inventory["env"] == {"GH_TOKEN": "${{ steps.app-token.outputs.token }}"}
     assert job["steps"].index(mint) < job["steps"].index(inventory) < job["steps"].index(notification)
+    assert [step for step in job["steps"] if "steps.app-token" in json.dumps(step)] == [inventory]
     assert "NTFY_" not in json.dumps(workflow)
 
 
