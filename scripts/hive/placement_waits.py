@@ -1,7 +1,5 @@
 import json
 
-from redis.exceptions import WatchError
-
 from scripts.hive.placement import NO_UI_HIVE
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import RedisStore
@@ -15,6 +13,8 @@ def read(store: RedisStore, slug: str) -> dict:
 
 
 def observe(store: RedisStore, slug: str, lane: str, task: str, reason: str, now: int) -> None:
+    from redis.exceptions import WatchError
+
     key = store.key(slug, WAITS)
     with store.redis.pipeline() as pipe:
         while True:
