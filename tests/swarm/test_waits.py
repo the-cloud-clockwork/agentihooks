@@ -360,13 +360,14 @@ def test_checks_wait_requires_success_or_failure_from_the_status_rollup(tick, ch
 
 
 @pytest.mark.parametrize("conclusion", [None, "SUCCESS", "FAILURE"])
+@pytest.mark.parametrize("obsolete", ["CANCELLED", "FAILURE"])
 @pytest.mark.parametrize("reverse", [False, True])
-def test_checks_wait_uses_only_the_newest_run_of_each_check(tick, conclusion, reverse):
+def test_checks_wait_uses_only_the_newest_run_of_each_check(tick, conclusion, obsolete, reverse):
     from scripts.swarm.ledger_events import pull_request
 
     tick.hold("checks", URL)
     checks = [
-        {"name": "Gate — Required", "databaseId": 1, "conclusion": "CANCELLED"},
+        {"name": "Gate — Required", "databaseId": 1, "conclusion": obsolete},
         {"name": "Gate — Required", "databaseId": 2, "conclusion": conclusion},
     ]
     if reverse:
