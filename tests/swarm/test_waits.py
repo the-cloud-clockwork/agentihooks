@@ -371,9 +371,7 @@ def test_checks_wait_uses_only_the_newest_run_of_each_check(tick, conclusion, re
     ]
     if reverse:
         checks.reverse()
-    tick.pulls[URL] = pull_request(
-        {"state": "OPEN", "headRefOid": "first", "gated": True, "statusCheckRollup": checks}
-    )
+    tick.pulls[URL] = pull_request({"state": "OPEN", "headRefOid": "first", "gated": True, "statusCheckRollup": checks})
     if conclusion is None:
         assert tick.end() == []
         assert idle.wait(tick.store.redis, "sw", ME) is not None
