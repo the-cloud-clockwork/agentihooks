@@ -338,6 +338,19 @@ def test_adopt_with_an_explicit_slug_leaves_other_legacy_files_alone(tmp_path):
         assert connection.execute("SELECT 1 FROM ledgers WHERE slug=?", ("other",)).fetchone() is None
 
 
+def test_an_encoded_view_adopts_only_its_own_legacy_ledger(tmp_path):
+    directory = folder(tmp_path)
+    repo = stored(directory)
+    wanted_seed = new_ledger.build_doc({"title": "Wanted", "overview": "o", "phases": []})
+    other_seed = new_ledger.build_doc({"title": "Other", "overview": "o", "phases": []})
+    (directory / "wanted.html").write_text(page(wanted_seed), encoding="utf-8")
+    (directory / "other.html").write_text(page(other_seed), encoding="utf-8")
+    assert repo.encoded_view("wanted", lambda state: state["title"]) == "Wanted"
+    assert (directory / "other.html").exists()
+    with repo.connect() as connection:
+        assert connection.execute("SELECT 1 FROM ledgers WHERE slug=?", ("other",)).fetchone() is None
+
+
 def test_adopt_skips_a_candidate_whose_files_vanished_but_keeps_processing_others(tmp_path, monkeypatch):
     directory = folder(tmp_path)
     repo = stored(directory)
