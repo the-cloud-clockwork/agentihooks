@@ -113,11 +113,13 @@ def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan():
         "fail-fast": False,
         "matrix": {"shard": "${{ fromJSON(needs.plan.outputs.shards) }}"},
     }
-    assert (
-        jobs["mutation-shard"]["if"]
-        == "${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.changed != '0'"
-        " && needs.stats.result == 'success' }}"
-    )
+    assert jobs["mutation-shard"]["if"] in {
+        "${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.changed != '0'"
+        " && needs.stats.result == 'success' }}",
+        "${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.changed != '0'"
+        " && (needs.stats.result == 'success' || (needs.stats.result == 'skipped'"
+        " && needs.plan.outputs.shards == '[0]')) }}",
+    }
 
 
 def test_preflight_collects_one_stats_part_per_leg_with_the_pull_request_budget():
@@ -161,6 +163,32 @@ def test_preflight_mutates_each_shard_against_the_shared_stats_with_the_pull_req
     assert steps[-1]["if"] == "always()"
     assert steps[-1]["with"]["name"] == "mutation-preflight-shard-${{ matrix.shard }}"
     assert steps[-1]["with"]["path"] == ".mutation-gate/"
+
+
+def test_single_shard_collection_preserves_both_supported_workflow_states():
+    jobs = _workflow()["jobs"]
+    steps, names = _steps(jobs["mutation-shard"])
+    inline_name = "Collect stats and mutate the only shard"
+    if inline_name not in names:
+        assert jobs["stats"]["if"] == (
+            "${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.changed != '0' }}"
+        )
+        return
+    assert jobs["stats"]["if"] == (
+        "${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.changed != '0'"
+        " && needs.plan.outputs.shards != '[0]' }}"
+    )
+    assert jobs["mutation-shard"]["if"] == (
+        "${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.changed != '0'"
+        " && (needs.stats.result == 'success' || (needs.stats.result == 'skipped'"
+        " && needs.plan.outputs.shards == '[0]')) }}"
+    )
+    inline = steps[names.index(inline_name)]
+    assert inline["if"] == "needs.plan.outputs.shards == '[0]'"
+    assert inline["env"]["BASES"] == "${{ needs.plan.outputs.bases }}"
+    assert inline["run"] == 'python -m scripts.ci_mutation --bases "$BASES" --budget 1080'
+    for name in ("Download the shared mutation stats", "Mutate changed Python files"):
+        assert steps[names.index(name)]["if"] == "needs.plan.outputs.shards != '[0]'"
 
 
 def test_preflight_merges_every_shard_into_the_one_report_its_readers_take():

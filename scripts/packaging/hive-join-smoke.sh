@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 run="hive-proof-$(python3 -c 'import uuid; print(uuid.uuid4().hex[:12])')"
 image="$run:local"
-tls="$(mktemp -d)"
+tls="$(mktemp -d -p "${RUNNER_TEMP:-${TMPDIR:-/tmp}}")"
 cleanup() {
   docker rm -f "$run-redis" "$run-hive" "$run-member" >/dev/null 2>&1 || true
   docker network rm "$run" >/dev/null 2>&1 || true

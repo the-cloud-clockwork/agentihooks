@@ -264,7 +264,7 @@ bash "$chart/ci/terminal-route-proof.sh" "$image"
 helm install "$release" "$chart" -f "$chart/ci/kind-values.yaml" --wait --timeout 5m
 helm test "$release" --logs --timeout 2m
 
-kubectl exec "$ledger_pod" -- env AGENTIHOOKS_DEPLOYMENT=local python -c "from scripts.swarm.store import SwarmConfig, connect; from scripts.swarm_ledger.new_ledger import create; create('$slug', {'title': 'Kind proof', 'phases': [{'title': 'Prove the Helm chart'}]}, 'swarm'); connect().create(SwarmConfig('$slug', '/data', 0, 0, state='paused')); print('ledger and swarm $slug registered, no lease bound')"
+kubectl exec "$ledger_pod" -- env AGENTIHOOKS_DEPLOYMENT=local python -c "from scripts.swarm.store import SwarmConfig, connect; from scripts.swarm_ledger.new_ledger import create; create('$slug', {'title': 'Kind proof', 'phases': [{'title': 'Prove the Helm chart'}]}, 'swarm'); connect().create(SwarmConfig('$slug', '/data', 0, 0, state='paused', load_high=10.0, memory_per_agent_mb=1)); print('ledger and swarm $slug registered, no lease bound')"
 kubectl rollout restart deployment "$release-controller"
 kubectl rollout status deployment "$release-controller" --timeout 2m
 hive="$(kubectl get deployment "$release-controller" -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="SWARM_HIVE_ID")].value}')"
