@@ -419,15 +419,16 @@ def _restart_from_handoff(store, slug, agent, task, context):
     return ""
 
 
-def recovery_handoff(store: RedisStore, slug: str, agent: AgentRecord, now_ms: int) -> dict:
-    handoff = store.handoff(slug, agent.task) or transfers.last_handoff(store, slug, agent.task)
-    return transfers.record(store, slug, agent, "outage", handoff, now_ms)
+def recovery_handoff(
+    store: RedisStore, slug: str, agent: AgentRecord, now_ms: int, fallback: str = "", avoid_harness: str = ""
+) -> dict:
+    handoff = store.handoff(slug, agent.task) or transfers.last_handoff(store, slug, agent.task) or fallback
+    return transfers.record(store, slug, agent, "outage", handoff, now_ms, avoid_harness)
 
 
 def free_seat(store: RedisStore, slug: str, agent: AgentRecord, now_ms: int) -> dict:
     store.redis.hdel(store.key(slug, RECOVERY), agent.name)
     error = store.redis.get(store.key(slug, outage.PANE, agent.name))
     folder = ledger_workspace.folder(slug, agent.task)
-    handoff = store.handoff(slug, agent.task) or transfers.last_handoff(store, slug, agent.task)
-    text = handoff or STUCK_HANDOFF.format(task=agent.task, name=agent.name, error=error, folder=folder)
-    return transfers.record(store, slug, agent, "outage", text, now_ms, avoid_harness=agent.harness)
+    fallback = STUCK_HANDOFF.format(task=agent.task, name=agent.name, error=error, folder=folder)
+    return recovery_handoff(store, slug, agent, now_ms, fallback, agent.harness)

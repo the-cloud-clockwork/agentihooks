@@ -95,6 +95,7 @@ def test_an_owner_whose_turns_still_fail_after_the_probe_passes_frees_its_seat_o
     successor = next(agent for agent in store.agents("sw") if agent.task == owner.task)
     transfer = runtime.tasks[-1]["transfer"]
     assert (transfer["successor"], transfer["avoid_harness"]) == (successor.name, "codex")
+    assert store.seats.occupant(successor.seat).occupant == successor.name
     assert transfer["handoff"].startswith("## Intent") and runtime.errors[owner.name] in transfer["handoff"]
 
 
@@ -149,3 +150,13 @@ def test_a_spawn_after_a_freed_seat_takes_another_harness_when_one_has_room(tmp_
     runtime.spawn(config, "plan", "planner@a1b2c3-0001", task)
     runtime.spawn(config, "plan", "planner@a1b2c3-0002", {"id": "q", "title": "Plan"})
     assert seen == [("p", "claude", "a"), ("q", "codex", "cx")]
+
+
+def test_a_spawn_after_a_freed_seat_keeps_the_same_harness_when_no_other_has_room(tmp_path, monkeypatch):
+    from tests.swarm.test_capacity import _runtime_probe, account
+
+    rows = [account("a", cap=0), account("cx", harness="codex")]
+    runtime, config, seen = _runtime_probe(tmp_path, monkeypatch, rows)
+    task = {"id": "p", "title": "Continue", "transfer": {"avoid_harness": "codex"}}
+    runtime.spawn(config, "plan", "planner@a1b2c3-0001", task)
+    assert seen == [("p", "codex", "cx")]

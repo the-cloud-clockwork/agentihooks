@@ -74,9 +74,10 @@ def _set(value):
 
 
 def _prefer(profile, avoid):
+    order = profile_choice.preferred(profile)
     if not avoid:
-        return profile_choice.preferred(profile)
-    return tuple(harness for harness in agent_choice.AGENTS if harness != avoid)
+        return order
+    return tuple(harness for harness in order or agent_choice.AGENTS if harness != avoid)
 
 
 def _model_args(agent, chosen, environ, bounds, preserve=False):
