@@ -176,6 +176,8 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/shard_check.py",
         "scripts/ci_reuse.py",
     ]
+    if (ROOT / "scripts/ci_runner_trust.py").exists():
+        expected.extend(("scripts/ci_runner_trust.py", "scripts/gate_protected.py"))
     assert sorted(str(path.relative_to(ROOT)) for path in calls) == sorted(expected)
     assert {path: count for path, count in calls.items() if count} == {}
 
