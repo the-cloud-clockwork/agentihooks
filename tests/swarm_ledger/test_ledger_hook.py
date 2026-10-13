@@ -8,6 +8,7 @@ NAME = "engineer@a1-1"
 
 @pytest.fixture
 def folder(tmp_path, monkeypatch):
+    monkeypatch.setenv("LEDGER_DIR", str(tmp_path))
     monkeypatch.setattr(ledger_hook, "LEDGER_DIR", tmp_path)
     monkeypatch.setattr(ledger_hook, "SESSIONS", tmp_path / ".sessions")
     return tmp_path
