@@ -74,12 +74,11 @@ def since(slug, since_ms, home=None):
                 start -= step
                 source.seek(start)
                 chunk = source.read(step)
-                newest = _newest(chunk.splitlines()[1:])
+                newest = _newest(chunk.splitlines())
                 data = chunk + data
     except OSError:
         return []
-    lines = data.splitlines()
-    return [row for row in _parse(lines[1:] if start else lines) if (at := _at(row)) is not None and at >= since_ms]
+    return [row for row in _parse(data.splitlines()) if (at := _at(row)) is not None and at >= since_ms]
 
 
 def _newest(lines):

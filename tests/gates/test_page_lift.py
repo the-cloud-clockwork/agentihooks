@@ -174,6 +174,19 @@ class TestWindow:
         assert lift.current(SLUG, 2 * HOUR_MS - 1, tmp_path) == {ME: [{"gate": "watch", "lifted": True}]}
         assert len(log.since(SLUG, HOUR_MS, tmp_path)) == 301
 
+    def test_a_window_row_that_opens_a_chunk_is_read_and_keeps_the_read_going(self, tmp_path):
+        def line(kind, at):
+            return json.dumps(log.Row.of("watch", kind, WHO, now_ms=at).__dict__).ljust(255) + "\n"
+
+        per_chunk = log.TAIL_BYTES // 256
+        stale = [line("count", 0)] * per_chunk
+        text = "".join(stale * 2 + [line("lift", HOUR_MS)] + stale[1:])
+        assert len(text) == 3 * log.TAIL_BYTES
+        path = log.gate_log_path(SLUG, tmp_path)
+        path.parent.mkdir(parents=True)
+        path.write_text(text)
+        assert [r["kind"] for r in log.since(SLUG, HOUR_MS, tmp_path)] == ["lift"]
+
     def test_since_returns_every_row_from_the_given_time_on(self, tmp_path):
         self.fill(tmp_path, HOUR_MS)
         found = log.since(SLUG, HOUR_MS, tmp_path)
