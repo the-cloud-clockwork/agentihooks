@@ -320,7 +320,8 @@ class HerdrRuntime:
                     saved.get("harness") in agent_choice.AGENTS
                     and (task.get("handoff_envelope") or {}).get("reason") != "quota"
                 ):
-                    options.append((saved["harness"],))
+                    self._quota_preferred[lane, len(options)] = agent_choice.preferring(saved["harness"])
+                    options.append(agent_choice.AGENTS)
                 else:
                     order = profile_choice.preferred(profile)
                     if order and (lane, len(options)) not in self._quota_handoffs:
@@ -437,7 +438,10 @@ class HerdrRuntime:
             raise SpawnError(
                 "unsupported handoff: required profile cannot mount on the original harness", "unsupported"
             )
-        return self.choose(saved["harness"], environ)
+        agent, reason = self.choose(saved["harness"], environ)
+        if agent != saved["harness"]:
+            raise SpawnError("unsupported handoff: router substituted the original harness", "unsupported")
+        return agent, reason
 
     def _profile_decision(self, config, lane, chosen, task, saved, relaunch, environ):
         decision = profile_choice.kept(task, saved, relaunch)
@@ -501,7 +505,6 @@ class HerdrRuntime:
         if want and not saved:
             agent, reason = self.choose(want, environ)
         elif saved:
-            requested = saved["harness"]
             agent, reason = self._saved_choice(saved, profile, quota_transfer, environ)
         else:
             agent, reason = self._rotation(requested, environ, profile_choice.preferred(profile))
@@ -514,10 +517,10 @@ class HerdrRuntime:
         agent, reason = (
             (agent, reason)
             if route_kind == "interactive"
-            else self._quota_choice(agent, reason, bool(requested or saved or want), lane)
+            else self._quota_choice(agent, reason, bool(requested or quota_transfer or want), lane)
         )
         if saved and agent != saved["harness"]:
-            raise SpawnError("unsupported handoff: router substituted the original harness", "unsupported")
+            saved = {key: value for key, value in saved.items() if key not in ("model", "account")}
         task = {**task, "harness": agent}
         text = timing.call(
             prompt.build,
