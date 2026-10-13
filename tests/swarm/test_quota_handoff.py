@@ -793,6 +793,7 @@ def test_an_exit_handoff_prefers_codex_but_uses_a_free_claude_seat(
     rows = [
         capacity.Account("codex", "default", "OPEN", codex_sessions, 90, 90, 6),
         capacity.Account("claude", "cc", "OPEN", 0, 90, 90, 6),
+        capacity.Account("claude", "default", "OPEN", 5, 90, 90, 6),
     ]
     monkeypatch.setattr(capacity, "accounts", lambda environ, now, refresh=True: list(rows))
     monkeypatch.setattr(runtime.plugins, "claude_only", lambda _: False)
@@ -823,7 +824,10 @@ def test_an_exit_handoff_prefers_codex_but_uses_a_free_claude_seat(
     assert argv[argv.index("--route") + 1] == ("cc" if expected == "claude" else "default")
     assert argv[argv.index("--profile") + 1] == "engineer"
     if expected == "claude":
-        assert "gpt" not in argv
+        assert argv[argv.index("--model") + 1] == "opus"
+        assert argv[argv.index("--effort") + 1] == "high"
+    else:
+        assert argv[argv.index("--model") + 1] == "gpt"
 
 
 def test_a_claude_only_profile_hands_off_to_claude(tmp_path, monkeypatch):

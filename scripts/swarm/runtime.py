@@ -312,7 +312,7 @@ class HerdrRuntime:
                     and (task.get("handoff_envelope") or {}).get("reason") != "quota"
                 ):
                     self._quota_preferred[lane, len(options)] = agent_choice.preferring(saved["harness"])
-                    options.append(_harnesses(config, lane))
+                    options.append(agent_choice.AGENTS)
                 else:
                     order = profile_choice.preferred(profile)
                     if order and (lane, len(options)) not in self._quota_handoffs:
@@ -511,13 +511,7 @@ class HerdrRuntime:
             else self._quota_choice(agent, reason, bool(requested or quota_transfer or want), lane)
         )
         if saved and agent != saved["harness"]:
-            saved = {
-                **saved,
-                "harness": agent,
-                "model": "",
-                "account": "",
-                "effort": effort_range.named(agent, saved["effort"]),
-            }
+            saved = {key: value for key, value in saved.items() if key not in ("model", "account")}
         task = {**task, "harness": agent}
         text = timing.call(
             prompt.build,
