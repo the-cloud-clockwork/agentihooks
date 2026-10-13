@@ -33,6 +33,7 @@ jobs:
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
           permission-metadata: read
+          permission-members: read
           permission-organization-administration: read
       - name: List collaborators and installed apps against protected approvals
         env:

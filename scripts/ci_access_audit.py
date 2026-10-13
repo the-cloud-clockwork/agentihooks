@@ -35,6 +35,8 @@ def inventory(repo: str, api: Callable[[str], object] = _api) -> tuple[list[dict
         if len(entries) < 100:
             break
         page += 1
+    if not collaborators:
+        raise ValueError("collaborator inventory incomplete")
     installations = []
     page = 1
     while True:

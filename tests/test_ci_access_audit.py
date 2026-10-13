@@ -59,9 +59,19 @@ def test_inventory_paginates_every_collaborator_and_app():
 
 def test_incomplete_installation_inventory_is_red():
     def api(endpoint):
-        return [] if "collaborators" in endpoint else {"total_count": 10, "installations": [{"app_slug": "one"}]}
+        if "collaborators" in endpoint:
+            return [{"login": "nestorcolt"}]
+        return {"total_count": 10, "installations": [{"app_slug": "one"}]}
 
-    with pytest.raises(ValueError, match="incomplete"):
+    with pytest.raises(ValueError, match="app installation inventory incomplete"):
+        ci_access_audit.inventory("owner/repo", api)
+
+
+def test_empty_collaborator_inventory_is_red():
+    def api(endpoint):
+        return [] if "collaborators" in endpoint else {"total_count": 0, "installations": []}
+
+    with pytest.raises(ValueError, match="collaborator inventory incomplete"):
         ci_access_audit.inventory("owner/repo", api)
 
 
@@ -141,6 +151,7 @@ def test_weekly_job_reads_dev_and_alerts_through_notifications():
     assert mint["with"]["repositories"] == "${{ github.event.repository.name }}"
     assert {key: value for key, value in mint["with"].items() if key.startswith("permission-")} == {
         "permission-metadata": "read",
+        "permission-members": "read",
         "permission-organization-administration": "read",
     }
     inventory = next(step for step in job["steps"] if "scripts.ci_access_audit" in step.get("run", ""))
