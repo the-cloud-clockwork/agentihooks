@@ -2,8 +2,9 @@
 
 pytest-rerunfailures wraps every attempt in its own logstart and logfinish, so a test is final
 at the first logfinish whose attempt logged no rerun report. A worker crash ends its attempt
-without a logfinish, and a scope scheduler runs the crashed test again after every crash, so a
-crashed test is written once at session end with every attempt it took.
+without a logfinish, and a scope scheduler requeues the crashed test after every crash until its
+crash count exceeds its reruns, so a crashed test is written once at session end with every
+attempt it took.
 """
 
 import json
@@ -11,6 +12,7 @@ import os
 from pathlib import Path
 
 import pytest
+from xdist.dsession import get_default_max_worker_restart
 from xdist.scheduler import LoadScopeScheduling
 
 
@@ -30,15 +32,22 @@ class FlakeLedger:
         self.crashes = {}
         self.crashing = set()
         self.crash_failed = {}
+        self.workers_down = 0
+
+    def pytest_testnodedown(self, node, error):
+        self.workers_down += bool(error)
 
     @pytest.hookimpl(trylast=True)
     def pytest_handlecrashitem(self, crashitem, report, sched):
         # A scope scheduler puts the crashed test back in its queue but refuses
         # pytest-rerunfailures' mark_test_pending, so the report stays failed.
+        # Past xdist's restart limit the shard stops, so the crash must stay failed.
         self.crashes[crashitem] = self.crashes.get(crashitem, 0) + 1
         self.crashing.add(crashitem)
+        restarts = get_default_max_worker_restart(sched.config)
         retry = self.crashes[crashitem] == 1 and sched.config.getoption("reruns", 0)
-        if report.failed and retry and isinstance(sched, LoadScopeScheduling):
+        stopping = restarts is not None and self.workers_down > restarts
+        if report.failed and retry and not stopping and isinstance(sched, LoadScopeScheduling):
             report.outcome = "rerun"
 
     def pytest_runtest_logreport(self, report):

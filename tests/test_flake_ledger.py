@@ -159,6 +159,11 @@ def test_crashes_always():
 @pytest.mark.parametrize("n", range(6))
 def test_sibling(n):
     pass
+
+
+@pytest.mark.parametrize("n", range(5))
+def test_crashes_once_each(n):
+    _crash_first(f"crashed-once-{n}", 1)
 """
 
 
@@ -201,6 +206,12 @@ def test_a_test_crashing_every_attempt_stops_after_its_reruns_and_every_other_te
     assert record["test"] == "test_probes.py::test_crashes_always"
     assert record["outcome"] == "failed"
     assert record["crashes"] == record["attempts"] == 3
+
+
+def test_a_crash_past_the_worker_restart_limit_stays_red(tmp_path):
+    result, _ = _run(tmp_path, "test_crashes_once_each", workers="1", probes=_CRASHES, extra=("--dist", "loadgroup"))
+    assert "maximum crashed workers reached: 4" in result.stdout, result.stdout + result.stderr
+    assert result.returncode == 1, result.stdout + result.stderr
 
 
 def test_a_worker_crash_without_reruns_stays_red_and_is_not_run_again(tmp_path):
