@@ -217,6 +217,24 @@ class TestGate:
         assert ran.calls == []
         assert intent.IntentGate().run is subprocess.run
 
+    def test_a_draft_record_rechecks_its_recorded_pull_request_when_the_command_names_none(self, tmp_path):
+        verdicts(tmp_path).write(TASK, "pending", intent.DRAFT, NOW - 60_000, phase="p8", url=URL)
+        ran = Ran((0, "false\n"))
+        gate = intent.IntentGate(clock=lambda: NOW / 1000, run=ran)
+        decision = gate.decide(bash(f"agentihooks swarm {SLUG} ready /tmp/handoff.md"), WHO, verdicts(tmp_path))
+        assert decision.reason.startswith(f"intent check running for task {TASK}, started 0 s ago")
+        assert ran.calls[0][0] == ["gh", "api", "repos/o/r/pulls/9", "--jq", ".draft"]
+
+    def test_a_draft_record_ignores_a_command_naming_another_pull_request(self, tmp_path):
+        verdicts(tmp_path).write(TASK, "pending", intent.DRAFT, NOW - 60_000, phase="p8", url=URL)
+        ran = Ran()
+        gate = intent.IntentGate(clock=lambda: NOW / 1000, run=ran)
+        other = "https://github.com/o/r/pull/10"
+        decision = gate.decide(bash(f"agentihooks swarm {SLUG} merge queue {other}"), WHO, verdicts(tmp_path))
+        assert decision.reason.startswith(f"intent for task {TASK} is judged once its pull request is ready")
+        assert ran.calls == []
+        assert verdicts(tmp_path).read(TASK)["reason"] == intent.DRAFT
+
     def test_a_verdict_landing_during_the_draft_read_is_kept(self, tmp_path):
         verdicts(tmp_path).write(TASK, "pending", intent.DRAFT, NOW - 60_000, phase="p8")
 

@@ -247,6 +247,7 @@ def test_a_draft_is_not_judged_and_holds_merge_until_its_ready_head_is_judged(tm
         "reason": "draft pull request, judged once ready for review",
         "at": NOW,
         "phase": "p8",
+        "url": DOC["tasks"][0]["pr_url"],
     }
     assert Verdicts(SLUG, "intent-coach", tmp_path).read(TASK) is None
     held = intent.IntentGate(clock=lambda: NOW / 1000 + 600).decide(
@@ -654,4 +655,5 @@ def test_a_draft_whose_pull_request_cannot_be_read_keeps_its_draft_record_and_ti
         "reason": intent.DRAFT,
         "at": NOW - 60_000,
         "phase": "p8",
+        "url": DOC["tasks"][0]["pr_url"],
     }

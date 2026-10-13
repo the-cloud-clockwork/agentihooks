@@ -134,6 +134,17 @@ def _split_fields(task, url):
     return {"url": url, "split": True} if task and task.get("split") else {}
 
 
+def _draft_fields(task):
+    return {"url": task["pr_url"], **_split_fields(task, task["pr_url"])}
+
+
+def _draft_url(command, record):
+    recorded, named = PULL.search(record.get("url") or ""), PULL.search(command)
+    if recorded and named and recorded.groups() != named.groups():
+        return ""
+    return record.get("url") or command
+
+
 def _pr_field(url, field, run):
     found = PULL.search(url)
     if not found:
@@ -581,7 +592,7 @@ class Check:
                         DRAFT,
                         record["at"],
                         phase=record.get("phase"),
-                        **_split_fields(task, task["pr_url"]),
+                        **_draft_fields(task),
                     )
                 if judgment is not None:
                     actions += self._check(task, judgment, verdicts)
@@ -635,9 +646,7 @@ class Check:
     def _check(self, task, judgment, verdicts):
         previous, pr = judgment.previous, judgment.pr
         if judgment.state is None and previous is None:
-            verdicts.write(
-                task["id"], PENDING, DRAFT, self.now_ms, phase=task.get("phase"), **_split_fields(task, task["pr_url"])
-            )
+            verdicts.write(task["id"], PENDING, DRAFT, self.now_ms, phase=task.get("phase"), **_draft_fields(task))
             return []
         if judgment.state is None:
             self._keep(task, previous, verdicts)
@@ -808,7 +817,7 @@ class IntentGate:
 
     def _pending(self, call, who, state, mode, record):
         if record["reason"] == DRAFT:
-            if _pr_field(call.command, "draft", self.run) != "false":
+            if _pr_field(_draft_url(call.command, record), "draft", self.run) != "false":
                 return Decision.deny(
                     f"intent for task {who.task} is judged once its pull request is ready for review. {_next_step(who)}"
                 )
