@@ -41,7 +41,7 @@ MOVED = {
     ("test.yml", "shard-check"): "anton-oss-light",
     ("test.yml", "split"): "anton-oss",
     ("test.yml", "stage-budget"): "anton-oss-light",
-    ("test.yml", "test-count"): "anton-oss-light",
+    ("test.yml", "test-count"): "anton-oss",
     ("test.yml", "unit"): "anton-oss",
 }
 
@@ -53,6 +53,11 @@ def jobs(name):
 @pytest.mark.parametrize(("workflow", "job"), sorted(MOVED))
 def test_heavy_jobs_run_on_the_isolated_anton_pool_only_for_trusted_actors(workflow, job):
     assert jobs(workflow)[job]["runs-on"] == pool(MOVED[(workflow, job)])
+
+
+def test_test_count_timeout_holds_three_times_its_slowest_recent_run():
+    slowest_seconds = 311
+    assert jobs("test.yml")["test-count"]["timeout-minutes"] * 60 >= 3 * slowest_seconds
 
 
 def test_no_workflow_reaches_an_anton_pool_except_through_the_trusted_expression():
