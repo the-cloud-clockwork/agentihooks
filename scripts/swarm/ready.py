@@ -15,6 +15,8 @@ from scripts.swarm.store import ASSIST, MANUAL, SwarmError
 from scripts.swarm_ledger import ledger_kinds
 
 AWAITING = "merge"
+FIX = "fix"
+CONFLICT = "conflicts with dev and needs an update the swarm cannot make"
 RECORDS = "ready"
 GATED = ("code", "ci")
 QUEUE_TRIES = 5
@@ -147,6 +149,8 @@ def _advance(run, rows, row, found):
     if pull.state != "OPEN":
         return _reopen(run, row, found, "was closed without merging")
     if held["kind"] == "checks":
+        if pull.conflicting:
+            return _reopen(run, row, found, CONFLICT)
         return _checks(run, row, found)
     outcome = waits.merge_resolution(held, run.github, run.reread, run.now_ms - found["queued_at"] < waits.FRESH_MS)
     if not outcome:
@@ -163,7 +167,9 @@ def _checks(run, row, found):
         save(run.store, run.slug, row["id"], found)
         return []
     if outcome.startswith(f"checks on {found['url']}, now red"):
-        return _reopen(run, row, found, "has red checks")
+        pull = run.github(found["url"])
+        steps = ", ".join(pull.failed or [pull.unpassed_gate])
+        return _reopen(run, row, found, f"has red checks: {steps}" if steps else "has red checks")
     return _queue(run, row, found)
 
 
@@ -203,7 +209,7 @@ def _finish(run, rows, row, found):
 
 def _reopen(run, row, found, what):
     task_id, url = row["id"], found["url"]
-    run.ledger.update_task(run.slug, task_id, {"state": "open", "claimed_by": "", "awaiting": ""}, if_state=("pr",))
+    run.ledger.update_task(run.slug, task_id, {"state": "open", "claimed_by": "", "awaiting": FIX}, if_state=("pr",))
     run.ledger.comment(run.slug, task_id, REOPENED.format(url=url, what=what), by="swarm")
     run.store.release(run.slug, task_id, found["agent"])
     forget(run.store, run.slug, task_id)
