@@ -786,10 +786,14 @@ def test_a_subprocess_importing_a_mutated_module_skips_the_mutation_engine_and_s
 
 
 def test_light_main_answers_the_trampoline_and_hands_every_other_name_to_the_real_module(monkeypatch):
+    from types import ModuleType
+
     import mutmut.__main__ as real
 
-    from scripts.ci_mutation import light_main
+    from scripts.ci_mutation.selection import LIGHT_MAIN
 
+    light_main = ModuleType("mutmut.__main__")
+    exec(LIGHT_MAIN, light_main.__dict__)
     assert issubclass(light_main.MutmutProgrammaticFailException, Exception)
     assert light_main.mangled_name_from_mutant_name("scripts.a.x_f__mutmut_3") == "scripts.a.x_f"
     with pytest.raises(AssertionError, match="^scripts.a.x_f$"):
@@ -815,7 +819,11 @@ def test_the_mutation_runner_itself_never_takes_the_light_main(tmp_path):
     package.mkdir(parents=True)
     (tmp_path / "scripts/__init__.py").touch()
     (package / "__init__.py").touch()
-    report = "import sys\nprint(getattr(sys.modules.get('mutmut.__main__'), '__file__', 'absent'))\n"
+    report = (
+        "import sys\n"
+        "main = sys.modules.get('mutmut.__main__')\n"
+        "print('absent' if main is None else getattr(main, '__file__', 'light'))\n"
+    )
     for path in ("scripts/ci_mutation/selection.py", "scripts/other.py"):
         (tmp_path / path).write_text(mutated_bootstrap(path) + report)
     env = {**os.environ, "PYTHONPATH": str(tmp_path)}
@@ -824,7 +832,7 @@ def test_the_mutation_runner_itself_never_takes_the_light_main(tmp_path):
         return subprocess.run(command, cwd=tmp_path, env=env, capture_output=True, text=True, check=True).stdout
 
     assert loaded(sys.executable, "-m", "scripts.ci_mutation.selection") == "absent\n"
-    assert loaded(sys.executable, "-c", "import scripts.other").strip().endswith("light_main.py")
+    assert loaded(sys.executable, "-c", "import scripts.other") == "light\n"
 
 
 def test_shared_run_grades_each_file_only_by_the_tests_selected_for_it(tmp_path, monkeypatch):
