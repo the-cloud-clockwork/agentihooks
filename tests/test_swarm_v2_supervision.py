@@ -254,6 +254,7 @@ def reap(fixture):
             with contextlib.suppress(ProcessLookupError):
                 os.kill(pid, signal.SIGKILL)
         time.sleep(0.05)
+    assert not found, f"fixture processes survived teardown: {found}"
 
 
 @contextlib.contextmanager
