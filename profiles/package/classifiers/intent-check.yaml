@@ -7,6 +7,14 @@ questions:
     instructions: Can the phase use this change as delivered, given the project overview, the phase intent and the task?
     "true": the phase can use it as delivered
     "false": the phase cannot use it as delivered
+  - name: aligned
+    type: yesno
+    instructions: >-
+      Judge phase fit apart from completeness. Does the work this change takes on serve the phase intent and the
+      task, given the project overview? A change whose work the phase calls for fits the phase even when it is
+      unfinished, unproven or not yet reachable.
+    "true": the change's work serves the phase
+    "false": the change's work serves something other than the phase
   - name: delivers
     type: yesno
     instructions: Does the change deliver what the task text asks for?
