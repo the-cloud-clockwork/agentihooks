@@ -130,12 +130,16 @@ def _print_sessions(items: list[Session]) -> None:
 
 
 def resolve(items: list[Session], selector: str, target: str, names=None) -> Session:
-    from scripts.swarm.naming import resolve_name
+    from scripts.swarm.naming import plain, resolve_name
 
     canonical = names.resolve if names is not None else resolve_name
     selector = canonical(selector)
     scoped = [item for item in items if target == "any" or item.target == target]
-    matches = [item for item in scoped if selector in {canonical(item.name), item.session_id, str(item.process.pid)}]
+    matches = [
+        item
+        for item in scoped
+        if selector in {canonical(item.name), plain(canonical(item.name)), item.session_id, str(item.process.pid)}
+    ]
     unique = {(item.process.pid, item.session_id): item for item in matches}
     matches = list(unique.values())
     if not matches:
