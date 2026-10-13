@@ -842,27 +842,43 @@ def deregister_session(session_id: str) -> None:
         _save_sessions(sessions)
 
 
-def name_session(pid: int, name: str) -> int:
-    """Give every live session of ``pid`` an agent name; returns how many records carry it."""
+def _mark_session(pid: int, key: str, value: str) -> int:
     with _file_lock(_sessions_path()):
         sessions = _load_sessions()
         live = [info for info in sessions.values() if info.get("pid") == pid and info.get("status") == "alive"]
         for info in live:
-            info["name"] = name
+            info[key] = value
         if live:
             _save_sessions(sessions)
     return len(live)
 
 
-def session_name(pid: int) -> str:
+def _session_mark(pid: int, key: str) -> str:
     return next(
         (
-            str(info["name"])
+            str(info[key])
             for info in _load_sessions().values()
-            if info.get("pid") == pid and info.get("status") == "alive" and info.get("name")
+            if info.get("pid") == pid and info.get("status") == "alive" and info.get(key)
         ),
         "",
     )
+
+
+def name_session(pid: int, name: str) -> int:
+    """Give every live session of ``pid`` an agent name; returns how many records carry it."""
+    return _mark_session(pid, "name", name)
+
+
+def session_name(pid: int) -> str:
+    return _session_mark(pid, "name")
+
+
+def pin_session(pid: int, swarm: str) -> int:
+    return _mark_session(pid, "swarm", swarm)
+
+
+def session_swarm(pid: int) -> str:
+    return _session_mark(pid, "swarm")
 
 
 def live_session_ids(pid: int) -> list[str]:
