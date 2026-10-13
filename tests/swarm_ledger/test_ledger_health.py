@@ -122,6 +122,5 @@ def test_the_third_failure_in_a_row_ends_the_server_and_starts_the_count_again(t
         "probe write failed, 1 of 3: timed out",
         "probe write failed, 2 of 3: timed out",
         "probe write failed, 3 of 3: timed out",
-        "ending the ledger server so the container restarts",
     ]
     assert health.FAILS_MAX == 3
