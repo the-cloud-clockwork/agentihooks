@@ -7,8 +7,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-from tests.test_ci_anton_runners import pool
-
 _ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -26,31 +24,6 @@ def test_ci_creates_no_commits_or_bot_pull_requests():
                 assert "git commit" not in command
                 assert "HEAD:dev" not in command
                 assert "ci_bot_pr" not in command
-        if "ORG_GITHUB_TOKEN" in json.dumps(workflow):
-            assert path.name == "access-audit.yml"
-            assert workflow.get("on", workflow.get(True)) == {
-                "push": {"branches": ["dev"]},
-                "schedule": [{"cron": "17 7 * * 1"}],
-                "workflow_dispatch": None,
-            }
-            assert workflow["permissions"] == {"contents": "read"}
-            assert set(workflow["jobs"]) == {"audit"}
-            job = workflow["jobs"]["audit"]
-            assert job["runs-on"] == pool("anton-oss-light")
-            steps = job["steps"]
-            assert steps[0] == {
-                "uses": "actions/checkout@v4",
-                "with": {"ref": "dev", "persist-credentials": False},
-            }
-            token_steps = [step for step in steps if "ORG_GITHUB_TOKEN" in json.dumps(step)]
-            assert token_steps == [
-                {
-                    "name": "List collaborators and installed apps against protected approvals",
-                    "env": {"GH_TOKEN": "${{ secrets.ORG_GITHUB_TOKEN }}"},
-                    "run": 'python -m scripts.ci_access_audit --repo "$GITHUB_REPOSITORY"',
-                }
-            ]
-            token_steps[0]["env"] = {}
         assert "ORG_GITHUB_TOKEN" not in json.dumps(workflow)
     assert not (_ROOT / ".github/workflows/refresh-durations.yml").exists()
     assert not (_ROOT / "scripts/ci_bot_pr.sh").exists()
@@ -109,14 +82,15 @@ def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
     assert restore["with"]["path"] == save["with"]["path"] == "~/dev-durations"
     assert save["with"]["key"] == "durations-merged-${{ github.sha }}"
     assert restore["with"]["key"] == "${{ needs.durations.outputs.key }}"
-    assert restore["if"] == "needs.durations.outputs.key != ''"
+    assert restore["if"] == "needs.durations.outputs.source == '' && needs.durations.outputs.key != ''"
     assert restore["with"]["fail-on-cache-miss"] is True
     assert jobs["split"]["needs"] in (["durations", "reuse"], ["durations", "reuse", "admission"])
-    lookup = jobs["durations"]["steps"][0]
+    lookup = next(s for s in jobs["durations"]["steps"] if s.get("id") == "stored")
     assert jobs["durations"]["outputs"] == {
         "key": "${{ steps.stored.outputs.cache-matched-key }}",
         "queued": "${{ steps.republished.outputs.queued }}",
         "base": "${{ steps.base-run.outputs.sha }}",
+        "source": "${{ steps.unit-source.outputs.source }}",
     }
     assert jobs["durations"]["timeout-minutes"] == (
         "${{ (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch') && 4 || 2 }}"

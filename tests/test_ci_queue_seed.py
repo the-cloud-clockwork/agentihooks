@@ -153,7 +153,7 @@ def test_every_unit_shard_downloads_the_one_republished_dev_durations():
     steps = jobs["split"]["steps"]
     download = _step(steps, "Download the queued run's dev durations")
     adopt = _step(steps, "Adopt latest dev durations")
-    assert download["if"] == "needs.durations.outputs.queued == 'true'"
+    assert download["if"] == "needs.durations.outputs.source == '' && needs.durations.outputs.queued == 'true'"
     assert download["uses"] == "./.github/actions/retry-download"
     assert download["with"] == {"name": "dev-durations", "path": "~/dev-durations"}
     assert steps.index(download) < steps.index(adopt)
@@ -350,6 +350,9 @@ def _runs_on(step, event):
         held = True
         for atom in clause.split("&&"):
             name, op, value = atom.strip().strip("()").split()
+            if name.startswith("hashfiles("):
+                held = held and ((_ROOT / name[len("hashfiles('") : -len("')")]).exists() == (op == "!="))
+                continue
             assert name == "github.event_name", atom
             held = held and ((value.strip("'") == event) == (op == "=="))
         if held:
@@ -389,10 +392,22 @@ def test_dispatch_runs_restore_durations_and_the_base_baseline_on_the_app_token(
     assert upload["with"]["if-no-files-found"] == "error"
 
 
-@pytest.mark.parametrize("event", ["pull_request", "push"])
-def test_pull_request_and_push_runs_keep_the_dev_cache_lookup(event):
+_REUSE = [
+    "Install unit reuse metadata dependencies",
+    "Look up the base revision's dev durations",
+    "Mint the tcc main ci App token",
+    "Fetch passed queue unit evidence for this dev commit",
+    "Select complete unit results from the same queue commit",
+]
+
+
+@pytest.mark.parametrize(
+    "event, expected",
+    [("pull_request", ["Look up the base revision's dev durations"]), ("push", [None, None, *_REUSE])],
+)
+def test_pull_request_and_push_runs_keep_the_dev_cache_lookup(event, expected):
     steps = _jobs()["durations"]["steps"]
-    assert [s.get("name") for s in steps if _runs_on(s, event)] == ["Look up the base revision's dev durations"]
+    assert [s.get("name") for s in steps if _runs_on(s, event)] == expected
 
 
 _RUN_OF = 'split(":") as $p | {id: ($p[0] | tonumber), head_sha: ($p[1] // $sha), conclusion: ($p[2] // "success")}'

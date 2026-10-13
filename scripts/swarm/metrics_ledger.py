@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 from collections import Counter
 
 from scripts.swarm import metrics_outbox
@@ -180,7 +181,12 @@ def record(box: metrics_outbox.Outbox, slug: str, now_ms: int, ledger: LedgerCli
     known = {node: json.loads(value) for node, value in box.db.execute(READ_PATHS, (slug,))}
     current = paths(nodes, doc.get("tasks", []))
     known.update(current)
-    events = doc["_meta"]["events"]
+    events = []
+    for index, event in enumerate(doc["_meta"]["events"]):
+        if "rev" not in event:
+            logging.getLogger(__name__).warning("ledger %s event %s has no revision; skipped", slug, index)
+        else:
+            events.append(event)
     births = dict(box.db.execute(READ_BIRTHS, (slug,)))
     for event in events:
         if event["kind"] == "added":
