@@ -615,7 +615,14 @@ def test_unit_shards_upload_their_durations_for_the_refresh():
     assert "if" not in upload
     assert upload["uses"].startswith("actions/upload-artifact@")
     assert upload["with"]["name"] == "durations-${{ matrix.python-version }}-${{ matrix.shard }}"
-    assert upload["with"]["path"].split() == ["durations.json", "durations.sha256"]
+    assert upload["with"]["path"].split() == ["durations.json", "durations.sha256", "elapsed.json"]
+
+
+def test_unit_shards_record_the_elapsed_test_step_time_the_budget_grades():
+    command = _pytest_command()
+    assert command.strip().startswith("run: start=$SECONDS && ")
+    assert " || status=$?; " in command
+    assert command.rstrip().endswith('echo "{\\"seconds\\":$((SECONDS - start))}" > elapsed.json; exit "$status"')
 
 
 def test_every_shard_records_the_hash_of_the_durations_it_splits_on():
