@@ -107,10 +107,19 @@ def test_ready_records_the_pull_request_and_head_and_ends_the_agent(released, ca
 
 
 @pytest.mark.parametrize("retained", [TOP, ""])
-def test_ready_from_primary_carries_an_unchanged_queued_head(released, monkeypatch, retained):
+@pytest.mark.parametrize("source", ["ready", "handoff"])
+def test_ready_from_primary_carries_an_unchanged_queued_head(released, monkeypatch, retained, source):
     store, ledger, shell, doc = released
     ledger.pulls[URL] = QUEUED
-    ready.save(store, "sw", "t1", ready.held_record(URL, HEAD, retained, "predecessor", 1))
+    if source == "ready":
+        ready.save(store, "sw", "t1", ready.held_record(URL, HEAD, retained, "predecessor", 1))
+    else:
+        store.put_handoff(
+            "sw",
+            "t1",
+            doc.read_text(),
+            envelope={"pull_request": {"url": URL}, "remote_head": HEAD, "worktree": retained or "unknown"},
+        )
     original = shell.__call__
 
     def primary(argv):
@@ -124,6 +133,8 @@ def test_ready_from_primary_carries_an_unchanged_queued_head(released, monkeypat
     assert found["worktree"] == retained
     assert found["head"] == HEAD
     assert found["agent"] == AGENT
+    assert found["on"] == {"kind": "merge", "target": URL}
+    assert found["queued_at"] == NOW
     assert not working(store)
     assert ledger.rows["t1"]["awaiting"] == "merge"
 
@@ -558,6 +569,17 @@ def test_a_merged_pull_request_closes_the_task_with_the_done_proof_and_removes_t
     assert ready.record(merging.store, "sw", "t1") is None
     assert merging.store.handoff("sw", "t1") == ""
     assert merging.run() == []
+
+
+def test_a_merged_pull_request_without_a_checkout_closes_without_removing_one(merging):
+    found = ready.record(merging.store, "sw", "t1")
+    found["worktree"] = ""
+    ready.save(merging.store, "sw", "t1", found)
+    merging.pulls[URL] = MERGED
+    assert merging.run() == [f"task t1 done, {URL} merged"]
+    assert merging.rows["t1"]["state"] == "done"
+    assert merging.shell.calls == []
+    assert ready.record(merging.store, "sw", "t1") is None
 
 
 def test_a_merge_only_the_uncached_reread_sees_closes_the_task(merging):

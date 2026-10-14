@@ -1492,7 +1492,14 @@ def cmd_ready(store, args):
     text = _read(args.doc, "handoff document")
     ledger = LedgerClient()
     row = next((t for t in ledger.tasks(args.slug) if t.get("id") == agent.task), {})
-    found = ready.check(row, agent, store.config(args.slug).autonomy, ledger_events.view, now_ms())
+    found = ready.check(
+        row,
+        agent,
+        store.config(args.slug).autonomy,
+        ledger_events.view,
+        now_ms(),
+        ready.continuation(store, args.slug, agent.task),
+    )
     problems = handoff_check.problems(text, Resolver(args.slug, store.redis, ledger.state))
     if problems:
         raise SwarmError(handoff_check.refusal(problems))
