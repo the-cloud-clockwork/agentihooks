@@ -804,7 +804,7 @@ def test_the_probe_requests_the_head_with_its_check_rollup():
                 'file(path:".github/workflows"){object{...on Tree{entries{object{...on Blob{text}}}}}} '
                 "statusCheckRollup{contexts(first:100){"
                 "nodes{...on CheckRun{name conclusion completedAt} ...on StatusContext{context state createdAt}} "
-                "pageInfo{hasNextPage}}} checkSuites(first:100){nodes{status workflowRun{databaseId createdAt}} "
+                "pageInfo{hasNextPage}}} checkSuites(first:100){nodes{status conclusion workflowRun{databaseId createdAt}} "
                 "pageInfo{hasNextPage}}}}}}}}",
                 "-f",
                 f"url={URL}",
@@ -965,6 +965,38 @@ def test_a_gated_checks_wait_ends_only_on_its_gate(tick, rollup, outcome):
     assert tick.end() == []
     assert tick.end() == [f"ended the wait of {ME}: {line}" for line in outcome]
     assert (idle.wait(tick.store.redis, "sw", ME) is None) is bool(outcome)
+
+
+@pytest.mark.parametrize("conclusion", ["SUCCESS", "FAILURE", "TIMED_OUT"])
+def test_a_required_gate_ends_checks_wait_beside_a_pending_jobless_workflow(tick, conclusion):
+    tick.hold("checks", URL)
+    tick.pulls[URL] = gated_probe(
+        [{"name": "Gate — Required", "conclusion": conclusion}],
+        [QUEUED_TESTS],
+        workflows(GATE_WORKFLOW),
+    )
+    assert tick.end() == []
+    outcome = "green" if conclusion == "SUCCESS" else "red"
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now {outcome}"]
+    assert idle.wait(tick.store.redis, "sw", ME) is None
+    assert tick.told() == [
+        f"Your wait on checks on {URL}, now {outcome} has ended. Pick task t1 back up: "
+        "agentihooks swarm sw done, block, or wait on the next thing."
+    ]
+
+
+@pytest.mark.parametrize("conclusion", ["FAILURE", "ERROR", "STARTUP_FAILURE", "ACTION_REQUIRED", "TIMED_OUT"])
+@pytest.mark.parametrize("gate", [None, "SUCCESS"])
+def test_a_failed_required_check_ends_wait_beside_a_pending_jobless_workflow(tick, conclusion, gate):
+    tick.hold("checks", URL)
+    tick.pulls[URL] = gated_probe(
+        [{"name": "unit", "conclusion": conclusion}, {"name": "Gate — Required", "conclusion": gate}],
+        [QUEUED_TESTS],
+        workflows(GATE_WORKFLOW),
+    )
+    assert tick.end() == []
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now red"]
+    assert idle.wait(tick.store.redis, "sw", ME) is None
 
 
 @pytest.mark.parametrize(
