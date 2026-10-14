@@ -2057,3 +2057,35 @@ def test_an_api_account_round_trips_through_the_route_argument(tmp_path, monkeyp
     monkeypatch.setattr(runtime, "_holds", lambda pane, conversation: True)
     runtime.resume(config, agent, "text")
     assert seen == [("p", "claude", "api")]
+
+
+@pytest.mark.parametrize(
+    "harness,five_used,week_used,state,cap",
+    [
+        ("codex", None, 27, "OPEN", 6),
+        ("codex", 100, 27, "OPEN", 6),
+        ("codex", None, 96, "CLOSED", 0),
+        ("codex", 0, None, "UNKNOWN", None),
+        ("claude", None, 27, "UNKNOWN", None),
+        ("claude", 100, 27, "CLOSED", 0),
+    ],
+)
+def test_aggregate_capacity_uses_the_codex_week_rule(monkeypatch, harness, five_used, week_used, state, cap):
+    from scripts.routing import aggregate
+
+    quota = {
+        "observed_at": 100,
+        "five_hour": {"used": five_used, "resets_at": 500},
+        "seven_day": {"used": week_used, "resets_at": 600},
+    }
+    record = {"harness": harness, "account": "a", "kind": "pool", "sessions": 2, "quota": quota}
+    monkeypatch.setattr(aggregate, "current", lambda now: {"a": record})
+    rows = capacity.accounts({"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"}, 100, refresh=False)
+    assert len(rows) == 1
+    assert (rows[0].harness, rows[0].name, rows[0].state, rows[0].sessions, rows[0].cap) == (
+        harness,
+        "a",
+        state,
+        2,
+        cap,
+    )
