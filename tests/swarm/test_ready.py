@@ -119,23 +119,24 @@ def test_ready_records_the_pull_request_and_head_and_ends_the_agent(released, ca
     }
 
 
-@pytest.mark.parametrize("retained", [TOP, ""])
+@pytest.mark.parametrize("retained", [TOP, "", None])
 @pytest.mark.parametrize("source", ["ready", "handoff"])
 def test_ready_from_primary_carries_an_unchanged_queued_head(primary_checkout, retained, source):
     store, ledger, shell, doc = primary_checkout
     ledger.pulls[URL] = QUEUED
     if source == "ready":
-        ready.save(store, "sw", "t1", ready.held_record(URL, HEAD, retained, "predecessor", 1))
+        previous = ready.held_record(URL, HEAD, retained, "predecessor", 1)
+        if retained is None:
+            previous.pop("worktree")
+        ready.save(store, "sw", "t1", previous)
     else:
-        store.put_handoff(
-            "sw",
-            "t1",
-            doc.read_text(),
-            envelope={"pull_request": {"url": URL}, "remote_head": HEAD, "worktree": retained or "unknown"},
-        )
+        envelope = {"pull_request": {"url": URL}, "remote_head": HEAD}
+        if retained is not None:
+            envelope["worktree"] = retained or "unknown"
+        store.put_handoff("sw", "t1", doc.read_text(), envelope=envelope)
     assert release(doc) == 0
     found = ready.record(store, "sw", "t1")
-    assert found["worktree"] == retained
+    assert found["worktree"] == (retained or "")
     assert found["head"] == HEAD
     assert found["agent"] == AGENT
     assert found["on"] == {"kind": "merge", "target": URL}
