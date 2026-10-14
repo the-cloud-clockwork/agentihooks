@@ -152,7 +152,6 @@ class TestLiveness:
         monkeypatch.setattr(mcp_daemon.os, "kill", lambda *_a: None)
         monkeypatch.setattr(mcp_daemon, "_proc_fs_available", lambda: True)
         monkeypatch.setattr(Path, "read_bytes", read_cmdline)
-        monkeypatch.setattr(mcp_daemon, "_read_cmdline", lambda _pid: b"python\0-m\0hooks.mcp\0")
         assert mcp_daemon.pid_alive(4242) is False
         assert reads == [Path("/proc/4242/cmdline")]
 
