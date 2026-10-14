@@ -873,9 +873,14 @@ jobs:
         run: |
           read -ra files <<< "$FILES"
           [[ ${#files[@]} -gt 0 ]] || { echo "::error::Leg $LEG of the selection names no test file."; exit 1; }
+          missing=false
           for file in "${files[@]}"; do
-            [[ -f "$file" ]] || { echo "::error::Selected test path $file does not exist."; exit 1; }
+            if [[ ! -f "$file" ]]; then
+              echo "::error::Selected test path $file does not exist."
+              missing=true
+            fi
           done
+          [[ "$missing" == false ]]
 
       - *python
 
