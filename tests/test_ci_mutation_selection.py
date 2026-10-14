@@ -574,7 +574,14 @@ def test_shard_stats_run_in_stats_mode_with_their_own_basetemp_and_record_everyt
 
     output = tmp_path / "out.json"
     collect_shard_stats(SimpleNamespace(mutmut=engine), Runner(), ["tests/test_a.py"], output, "/scratch/base")
-    assert calls == [(["tests/test_a.py"], ["-q", "-m", "not wall_clock", "--basetemp=/scratch/base"], "stats", "1")]
+    assert calls == [
+        (
+            ["tests/test_a.py"],
+            ["-q", "-p", "pytest_rerunfailures", "--reruns", "1", "-m", "not wall_clock", "--basetemp=/scratch/base"],
+            "stats",
+            "1",
+        )
+    ]
     result = json.loads(output.read_text())
     assert 0 <= result.pop("cpu") <= process_time()
     assert result == {"status": 4, "tests": {"m.x_f": ["a::t", "b::t"]}, "durations": {"a::t": 2.5}}
