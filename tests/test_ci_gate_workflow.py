@@ -131,13 +131,19 @@ def test_semgrep_grades_registry_pack_findings_new_against_the_base_in_parallel(
     assert job["needs"] in (["reuse"], ["reuse", "admission"])
     assert job["uses"] == "./.github/workflows/semgrep.yml"
     assert job["with"]["base"] == (
-        "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha"
+        "${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && 'origin/dev'"
+        " || github.event.pull_request.base.sha || github.event.merge_group.base_sha"
         " || github.event.before || inputs.base }}"
     )
     scan = yaml.safe_load((_ROOT / ".github/workflows/semgrep.yml").read_text())["jobs"]["scan"]
     assert scan["steps"][0]["with"]["fetch-depth"] == 0
     command = scan["steps"][-1]["run"].split()
     assert {"p/ci", "p/secrets", "p/python"} == {command[i + 1] for i, a in enumerate(command) if a == "--config"}
+    baseline = scan["steps"][-2]
+    assert baseline["env"]["BASE"] == "${{ inputs.base }}"
+    assert baseline["run"] == 'sha="$(git merge-base "$BASE" HEAD)"\necho "sha=$sha" >> "$GITHUB_OUTPUT"\n'
+    assert baseline["id"] == "baseline"
+    assert scan["steps"][-1]["env"]["BASE"] == "${{ steps.baseline.outputs.sha }}"
     assert command[command.index("--baseline-commit") + 1] == '"$BASE"'
     assert {"--error", "--strict", "--verbose"} <= set(command)
     assert int(command[command.index("--timeout") + 1]) >= 30
@@ -183,10 +189,13 @@ def test_test_count_floor_runs_per_suite_beside_unit_against_the_base():
     )
     base, floor = job["steps"][-2:]
     assert base["env"]["BASE"] == (
-        "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha"
+        "${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && 'origin/dev'"
+        " || github.event.pull_request.base.sha || github.event.merge_group.base_sha"
         " || github.event.before || inputs.base }}"
     )
-    assert base["run"] == 'git worktree add --detach "$RUNNER_TEMP/base" "$BASE"'
+    assert base["run"] == (
+        'BASE="$(git merge-base "$BASE" HEAD)"\necho "BASE: $BASE"\ngit worktree add --detach "$RUNNER_TEMP/base" "$BASE"\n'
+    )
     assert floor["run"] == (
         'if [[ ! -f "$RUNNER_TEMP/base/tests/count_floor.py" ]]; then\n'
         '  echo "::error::The base carries no tests/count_floor.py, so nothing trusted can grade."\n'
@@ -195,6 +204,59 @@ def test_test_count_floor_runs_per_suite_beside_unit_against_the_base():
         'cd "$RUNNER_TEMP/base"\n'
         'python -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"\n'
     )
+
+
+def test_lint_and_test_count_grade_a_pull_request_that_merged_dev_from_the_current_merge_base(tmp_path):
+    from tests.test_ci_hosted_lanes import _evaluate
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "dev")
+    pinned = _commit(repo, {"docs/base.md": "a"})
+    _git(repo, "checkout", "-q", "-b", "branch")
+    _commit(repo, {"docs/own.md": "b"})
+    _git(repo, "checkout", "-q", "dev")
+    merged = _commit(repo, {"docs/dev.md": "c", ".github/dev.yml": "d"})
+    _git(repo, "update-ref", "refs/remotes/origin/dev", merged)
+    _git(repo, "checkout", "-q", "branch")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "merge", "-q", "--no-edit", "dev")
+    selector = repo / ".github/actions/browser-cache/select-artifacts.sh"
+    selector.parent.mkdir(parents=True)
+    selector.write_text((_ROOT / ".github/actions/browser-cache/select-artifacts.sh").read_text())
+    jobs = _workflow()["jobs"]
+    steps = {
+        "test-count": _step("test-count", "Check out the base revision"),
+        "lint": _step("lint", "Check out the base revision"),
+        "docs": next(s for s in jobs["lint"]["steps"] if s.get("id") == "docs"),
+        "artifacts": next(s for s in jobs["lint"]["steps"] if s.get("id") == "artifacts"),
+    }
+    event = {"pull_request": {"base": {"sha": pinned}}}
+    logs = {}
+    for name, step in steps.items():
+        (tmp_path / name).mkdir()
+        base = _evaluate(step["env"]["BASE"], event_name="pull_request", base_ref="dev", event=event)
+        env = dict(os.environ, BASE=base, RUNNER_TEMP=str(tmp_path / name), GITHUB_OUTPUT=str(tmp_path / name / "out"))
+        done = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=repo, env=env, check=True, capture_output=True)
+        logs[name] = done.stdout.decode()
+    from scripts.swarm import merge_queue
+
+    replies = iter(
+        [
+            json.dumps({"workflow_runs": [{"id": 1, "head_sha": "h", "conclusion": "success"}]}),
+            json.dumps({"jobs": [{"id": 2, "name": "test-count (3.11)", "conclusion": "success"}]}),
+            "2026-10-13T00:00:00Z   BASE: origin/dev\n"
+            + "".join(f"2026-10-13T00:00:01Z {line}\n" for line in logs["test-count"].splitlines()),
+        ]
+    )
+
+    def reply(command, **kwargs):
+        return subprocess.CompletedProcess(command, 0, next(replies), "")
+
+    assert merge_queue.checked_base("o/r", "h", reply) == merged
+    assert _git(tmp_path / "test-count" / "base", "rev-parse", "HEAD") == merged
+    assert _git(tmp_path / "lint" / "base", "rev-parse", "HEAD") == merged
+    assert (tmp_path / "docs" / "docs-changes").read_text() == "docs/own.md\n"
+    assert (tmp_path / "artifacts" / "out").read_text() == "browser=false\n"
 
 
 def test_coverage_ratchet_grades_the_merged_shards_from_the_base_copy():
@@ -561,12 +623,32 @@ def test_chart_proof_runs_when_the_base_is_unknown_or_carries_no_rule(kind_repo,
 def test_chart_proof_rule_uses_the_push_before_commit_as_its_base():
     step = _workflow()["jobs"]["kind-due"]["steps"][-1]
     assert step["env"]["BASE"] == (
-        "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}"
+        "${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && 'origin/dev'"
+        " || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}"
     )
     assert step["env"]["HEAD"] == (
         "${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}"
     )
     assert step["run"].startswith("set -o pipefail\n")
+
+
+def test_chart_proof_ignores_dev_files_a_pull_request_merged_after_its_event_base(kind_repo):
+    from tests.test_ci_hosted_lanes import _evaluate
+
+    repo, base = kind_repo
+    _git(repo, "checkout", "-q", "-b", "branch")
+    _commit(repo, {"notes.txt": "own"})
+    _git(repo, "checkout", "-q", "-b", "newer", base)
+    merged = _commit(repo, {"hooks/a.py": "a = 1\n"})
+    _git(repo, "update-ref", "refs/remotes/origin/dev", merged)
+    _git(repo, "checkout", "-q", "branch")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "merge", "-q", "--no-edit", "newer")
+    step = _workflow()["jobs"]["kind-due"]["steps"][-1]
+    event = {"pull_request": {"base": {"sha": base}}}
+    current = _evaluate(step["env"]["BASE"], event_name="pull_request", base_ref="dev", event=event)
+    result, output = _due_step(repo, current, _git(repo, "rev-parse", "HEAD"))
+    assert result.returncode == 0, result.stderr
+    assert output == "due=false\n"
 
 
 def test_chart_proof_rule_fails_on_an_unknown_base(kind_repo):
