@@ -17,13 +17,18 @@ PATHS = [
     "scripts/swarm_ledger/repository/rows.py",
     "scripts/swarm_ledger/repository/sqlite.py",
 ]
-NODE = "tests/swarm_ledger/test_api_v1.py::test_latest_thousand_operation_receipts_remain_retry_safe"
+CASE = "tests/swarm_ledger/receipt_tracing_case.py"
+NODE = f"{CASE}::test_latest_thousand_operation_receipts_remain_retry_safe"
 
 
 def statistics(root, work, baseline=False):
     work.mkdir()
     paths = [path for path in PATHS if (root / path).is_file()]
-    prepare_workspace(root, work, paths, [NODE])
+    prepare_workspace(root, work, paths, [CASE])
+    (work / CASE).write_text(
+        "from tests.swarm_ledger.test_api_v1 import authority_live, live, "
+        "test_latest_thousand_operation_receipts_remain_retry_safe\n"
+    )
     if baseline:
         transport = work / "tests/swarm_ledger/test_ledger_authority.py"
         transport.write_text(transport.read_text().replace("MUTATION_TRACE_FACTOR = 7", "MUTATION_TRACE_FACTOR = 1"))
@@ -31,7 +36,7 @@ def statistics(root, work, baseline=False):
     selection.write_text(
         json.dumps(
             {
-                path: {"lines": list(range(1, len((root / path).read_text().splitlines()) + 1)), "tests": [NODE]}
+                path: {"lines": list(range(1, len((root / path).read_text().splitlines()) + 1)), "tests": [CASE]}
                 for path in paths
             }
         )
