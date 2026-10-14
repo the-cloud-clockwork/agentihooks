@@ -1,7 +1,9 @@
 import argparse
+import faulthandler
 import itertools
 import json
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -20,7 +22,8 @@ from tests.swarm.test_tick import FakeLedger, FakeRuntime
 pytestmark = pytest.mark.xdist_group("fakeredis")
 ROOT = Path(__file__).resolve().parents[2]
 BOOT = """
-import json, shutil, sys, threading, time
+import faulthandler, json, shutil, signal, sys, threading, time
+faulthandler.register(signal.SIGUSR1)
 from pathlib import Path
 from http.server import ThreadingHTTPServer
 sys.path.insert(0, str(Path(sys.argv[1]) / 'scripts' / 'swarm_ledger'))
@@ -91,10 +94,16 @@ def remote_server(tmp_path, monkeypatch):
             headers = {"Host": found["host"], "X-Ledger-Token": found["token"], "Content-Type": "application/json"}
             data = json.dumps(body).encode() if body else None
             req = urllib.request.Request(f"http://127.0.0.1:{found['port']}/api/swarm/sw", data, headers, method=method)
-            with urllib.request.urlopen(req, timeout=5) as reply:
-                result = json.load(reply)
-                assert result is not None, (tmp_path / "server.log").read_text()
-                return result
+            try:
+                with urllib.request.urlopen(req, timeout=5) as reply:
+                    result = json.load(reply)
+                    assert result is not None, (tmp_path / "server.log").read_text()
+                    return result
+            except TimeoutError:
+                process.send_signal(signal.SIGUSR1)
+                faulthandler.dump_traceback(file=log)
+                time.sleep(0.1)
+                pytest.fail("[DEBUG-t731] " + (tmp_path / "server.log").read_text())
 
         yield saved, request, f"http://127.0.0.1:{found['port']}"
     finally:
