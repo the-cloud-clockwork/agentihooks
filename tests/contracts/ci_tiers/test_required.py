@@ -63,6 +63,21 @@ def test_main_pull_requests_skip_mutation_but_still_require_the_other_checks():
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+@pytest.mark.parametrize("forged", [False, True])
+def test_skipping_reuse_requires_protected_duration_provenance(forged):
+    base = {path.name: yaml.safe_load(path.read_text()) for path in (ROOT / ".github/workflows").glob("*.yml")}
+    head = copy.deepcopy(base)
+    head["test.yml"]["jobs"]["reuse"]["if"] = (
+        "github.event_name != 'merge_group' && github.event_name != 'pull_request'"
+    )
+    if forged:
+        head["test.yml"]["jobs"]["durations"]["steps"].insert(0, {"run": "echo required-tree-sha256=forged"})
+    config = json.loads((ROOT / ".github/gate-wiring.json").read_text())
+    policy = json.loads((ROOT / ".github/workflows/trusted-actors.json").read_text())
+    problems = gate_protected.grade(base, config, head, config, date(2026, 10, 14), policy)
+    assert any("provenance" in problem for problem in problems), problems
+
+
 def test_the_protected_grader_accepts_only_the_exact_tiered_aggregation_and_reuse_condition():
     base = {path.name: yaml.safe_load(path.read_text()) for path in (ROOT / ".github/workflows").glob("*.yml")}
     head = copy.deepcopy(base)
