@@ -13,7 +13,8 @@ TRUSTED = (
     ' && contains(fromJSON(\'["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]\'), github.actor)'
     ' && contains(fromJSON(\'["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]\'), github.triggering_actor)'
     " || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev')"
-    " && github.actor == 'github-merge-queue[bot]' && github.triggering_actor == 'github-merge-queue[bot]')"
+    " && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]'"
+    ' || contains(fromJSON(\'["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]\'), github.triggering_actor)))'
 )
 
 
@@ -179,6 +180,8 @@ UNTRUSTED_EVENTS = [
     event("pull_request_target", head="stranger/agentihooks"),
     event("pull_request_target", head=None),
     event("push", actor="github-merge-queue[bot]"),
+    event("push", actor="github-merge-queue[bot]", triggering="nestorcolt"),
+    event("workflow_dispatch", actor="github-merge-queue[bot]", triggering="nestorcolt", ref="refs/heads/dev"),
     event("workflow_dispatch", actor="nestorcolt", triggering="stranger"),
 ]
 
@@ -202,6 +205,25 @@ def test_no_job_resolves_a_hosted_runner_for_a_trusted_actor():
         if resolve(str(spec.get("runs-on", "")), **github) not in {LIGHT, STANDARD, BATCH}
     )
     assert hosted == []
+
+
+@pytest.mark.parametrize("triggering", ["nestorcolt", "agenticore-app[bot]", "tcc-main-ci[bot]"])
+@pytest.mark.parametrize("name", ["push", "merge_group"])
+def test_trusted_reruns_of_queue_runs_keep_the_classified_anton_pool(name, triggering):
+    github = event(name, actor="github-merge-queue[bot]", triggering=triggering, ref="refs/heads/dev")
+    hosted = sorted(
+        f"{workflow}:{job}"
+        for (workflow, job), spec in runner_jobs().items()
+        if (workflow, job) not in HOSTED
+        if resolve(str(spec.get("runs-on", "")), **github) != MOVED[(workflow, job)]
+    )
+    assert hosted == []
+
+
+@pytest.mark.parametrize("name", ["push", "merge_group"])
+def test_untrusted_reruns_of_queue_runs_stay_hosted(name):
+    github = event(name, actor="github-merge-queue[bot]", triggering="stranger", ref="refs/heads/dev")
+    assert all(resolve(str(spec["runs-on"]), **github) == "ubuntu-latest" for spec in runner_jobs().values())
 
 
 def test_untrusted_and_fork_runs_fall_back_to_hosted_runners():
