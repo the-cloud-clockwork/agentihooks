@@ -310,11 +310,22 @@ def test_a_server_running_from_another_codex_home_is_refused(store, server, cloc
     assert_failed_cleanly(store, server, "wrong_profile")
 
 
-def test_a_server_that_names_no_codex_home_is_refused_even_from_the_cwd(store, server, clock, root, tmp_path):
-    server.info = {}
-    spec = launch_spec(store, server, tmp_path, codex_home=os.getcwd())
+@pytest.mark.parametrize("attempt", range(10))
+@pytest.mark.parametrize("info", [{}, {"codexHome": ""}])
+def test_a_server_that_names_no_codex_home_is_refused_even_from_the_cwd(
+    store, server, clock, root, tmp_path, monkeypatch, info, attempt
+):
+    server.info = info
+    spec = launch_spec(store, server, tmp_path)
     assert Path(spec.codex_home).is_relative_to(tmp_path)
-    failed(store, server, clock, root, spec, "wrong_profile")
+
+    def connect(path, timeout):
+        monkeypatch.chdir(server.runtime_home)
+        return server.connect(path, timeout)
+
+    failed(store, server, clock, root, spec, "wrong_profile", connect=connect)
+    assert Path.cwd() == Path(server.runtime_home)
+    assert_failed_cleanly(store, server, "wrong_profile")
 
 
 def test_a_server_signed_in_with_another_account_kind_is_refused(store, server, clock, root, tmp_path):
