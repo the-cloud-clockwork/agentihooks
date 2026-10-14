@@ -179,3 +179,41 @@ def test_duration_provenance_keeps_the_global_execution_context(field, value):
     policy = json.loads((ROOT / ".github/workflows/trusted-actors.json").read_text())
     problems = gate_protected.grade(base, config, head, config, date(2026, 10, 14), policy)
     assert any("global provenance context" in problem for problem in problems), problems
+
+
+@pytest.mark.parametrize("missing", ["base-job", "head-job", "steps"])
+def test_missing_duration_definitions_are_reported_without_trusting_the_producer(missing):
+    base = {path.name: yaml.safe_load(path.read_text()) for path in (ROOT / ".github/workflows").glob("*.yml")}
+    head = copy.deepcopy(base)
+    head["test.yml"]["jobs"]["reuse"]["if"] = (
+        "github.event_name != 'merge_group' && github.event_name != 'pull_request'"
+    )
+    head["test.yml"]["jobs"]["durations"]["steps"] = (
+        ci_reuse.duration_provenance_steps() + head["test.yml"]["jobs"]["durations"]["steps"]
+    )
+    if missing == "base-job":
+        del base["test.yml"]["jobs"]["durations"]
+    elif missing == "head-job":
+        del head["test.yml"]["jobs"]["durations"]
+    else:
+        del head["test.yml"]["jobs"]["durations"]["steps"]
+    config = json.loads((ROOT / ".github/gate-wiring.json").read_text())
+    policy = json.loads((ROOT / ".github/workflows/trusted-actors.json").read_text())
+    problems = gate_protected.grade(base, config, head, config, date(2026, 10, 14), policy)
+    assert any("provenance" in problem for problem in problems), problems
+
+
+@pytest.mark.parametrize("field,value", [("env", {"BASH_ENV": "trusted.sh"}), ("defaults", {"run": {"shell": "bash"}})])
+def test_duration_provenance_accepts_unchanged_global_execution_context(field, value):
+    base = {path.name: yaml.safe_load(path.read_text()) for path in (ROOT / ".github/workflows").glob("*.yml")}
+    base["test.yml"][field] = value
+    head = copy.deepcopy(base)
+    head["test.yml"]["jobs"]["reuse"]["if"] = (
+        "github.event_name != 'merge_group' && github.event_name != 'pull_request'"
+    )
+    head["test.yml"]["jobs"]["durations"]["steps"] = (
+        ci_reuse.duration_provenance_steps() + head["test.yml"]["jobs"]["durations"]["steps"]
+    )
+    config = json.loads((ROOT / ".github/gate-wiring.json").read_text())
+    policy = json.loads((ROOT / ".github/workflows/trusted-actors.json").read_text())
+    assert gate_protected.grade(base, config, head, config, date(2026, 10, 14), policy) == []
