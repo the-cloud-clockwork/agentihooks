@@ -41,7 +41,8 @@ def test_dev_extra_declares_test_plugin(plugin):
 
 def test_workflow_runs_whole_suite_in_parallel():
     command = _pytest_command()
-    assert command.strip().startswith("run: workers=$(") and "ci_cpu_quota) && python -c " in command
+    assert command.strip().startswith("run: start=$SECONDS && status=0 && workers=$(")
+    assert "ci_cpu_quota) && python -c " in command
     assert '-n "$workers"' in command
     assert "-n auto" not in command
     assert "tests/" in command
@@ -620,8 +621,7 @@ def test_unit_shards_upload_their_durations_for_the_refresh():
 
 def test_unit_shards_record_the_elapsed_test_step_time_the_budget_grades():
     command = _pytest_command()
-    assert command.strip().startswith("run: start=$SECONDS && ")
-    assert " || status=$?; " in command
+    assert " -p no:junitxml || status=$?; " in command
     assert command.rstrip().endswith('echo "{\\"seconds\\":$((SECONDS - start))}" > elapsed.json; exit "$status"')
 
 
