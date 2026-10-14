@@ -17,8 +17,6 @@ PINNED_HOSTED = frozenset(
         "publish-pypi.yml/verify",
         "release.yml/release",
         "runner-trust.yml/actors",
-        "test.yml/gate-required",
-        "test.yml/reuse",
     }
 )
 

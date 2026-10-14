@@ -60,7 +60,7 @@ MOVED = {
     ("test-leaks.yml", "one-process"): BATCH,
     ("test.yml", "admission"): LIGHT,
     ("test.yml", "coverage-baseline"): LIGHT,
-    ("test.yml", "coverage-ratchet"): STANDARD,
+    ("test.yml", "coverage-ratchet"): LIGHT,
     ("test.yml", "durations"): LIGHT,
     ("test.yml", "flake-budget"): LIGHT,
     ("test.yml", "kind-due"): LIGHT,
