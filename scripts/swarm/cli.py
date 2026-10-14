@@ -191,7 +191,7 @@ def _publish_tick_status(store, slug, doc):
 @timing.instrument_tick
 @outage.guard_tick
 def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=False):
-    from scripts.swarm import command_runner, commands, controller, incidents, lease
+    from scripts.swarm import command_runner, commands, controller, incidents, lease, tick_activity
 
     ledger = ledger or LedgerClient()
     outbox.flush(InboxStore(store.redis))
@@ -202,9 +202,14 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
     token = controller.take_tick_lock(store, slug, held, TICK_LOCK_MS)
     if token is None:
         return ["another tick is running"]
-    keeping = timing.BEFORE_STEP.set(lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS))
+    keeping = timing.BEFORE_STEP.set(
+        lambda: tick_activity.keep(
+            store, slug, lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS), now_ms
+        )
+    )
     doc = {}
     try:
+        timing.keep()
         outage.providers(store, slug, runtime, now_ms())
         if isinstance(ledger, ledger_client.LedgerClient) and not outage.ledger_health(
             slug, now_ms(), lambda: isinstance(ledger.metadata(slug), dict)

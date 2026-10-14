@@ -55,3 +55,17 @@ def test_a_lock_skipped_tick_does_not_claim_new_activity(env, monkeypatch):  # n
     monkeypatch.setattr(cli, "now_ms", lambda: 999)
     assert cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({})) == ["another tick is running"]
     assert commands.view(store, "sw")["last_tick_activity"] == 123
+
+
+def test_lost_fencing_cannot_publish_fresh_activity(env):  # noqa: F811
+    from scripts.swarm import tick_activity
+
+    store, _, _ = env
+    store.redis.set(store.key("sw", "last-tick-activity"), 123)
+
+    def lost():
+        raise RuntimeError("stale owner")
+
+    with pytest.raises(RuntimeError, match="stale owner"):
+        tick_activity.keep(store, "sw", lost, lambda: 999)
+    assert tick_activity.read(store, "sw") == 123
