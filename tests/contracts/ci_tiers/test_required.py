@@ -63,6 +63,34 @@ def test_main_pull_requests_skip_mutation_but_still_require_the_other_checks():
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_duration_provenance_reads_the_base_and_records_the_queue_head():
+    checkout, python, install, record, publish = ci_reuse.duration_provenance_steps()
+    assert checkout["with"] == {
+        "ref": "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}",
+        "path": "provenance-grader",
+        "fetch-depth": 0,
+        "persist-credentials": False,
+    }
+    assert python["with"]["python-version"] == "3.12"
+    assert install["working-directory"] == record["working-directory"] == "${{ github.workspace }}/provenance-grader"
+    assert install["shell"] == record["shell"] == "bash"
+    assert record["env"] == {
+        "BASE": "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}",
+        "HEAD": "${{ github.sha }}",
+        "EVENT": "${{ github.event_name }}",
+        "RUN": "${{ github.run_id }}",
+        "ATTEMPT": "${{ github.run_attempt }}",
+    }
+    assert "python -I scripts/ci_reuse.py" in record["run"]
+    assert '--evidence "$RUNNER_TEMP/no-reuse"' in record["run"]
+    assert publish["with"]["name"] == "required-tree-${{ github.run_attempt }}"
+    assert publish["with"]["path"] == "${{ runner.temp }}/provenance.json"
+    assert all(
+        "github.event_name == 'merge_group'" in step["if"] and "github.event_name == 'pull_request'" in step["if"]
+        for step in (checkout, python, install, record, publish)
+    )
+
+
 @pytest.mark.parametrize("forged", [False, True])
 def test_skipping_reuse_requires_protected_duration_provenance(forged):
     base = {path.name: yaml.safe_load(path.read_text()) for path in (ROOT / ".github/workflows").glob("*.yml")}
@@ -86,6 +114,13 @@ def test_the_protected_grader_accepts_only_the_exact_tiered_aggregation_and_reus
     head["test.yml"]["jobs"]["reuse"]["if"] = (
         "github.event_name != 'merge_group' && github.event_name != 'pull_request'"
     )
+    head["test.yml"]["jobs"]["durations"]["steps"] = (
+        ci_reuse.duration_provenance_steps() + head["test.yml"]["jobs"]["durations"]["steps"]
+    )
+    head["test.yml"]["jobs"]["durations"]["if"] = (
+        "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') }}"
+    )
+    head["test.yml"]["jobs"]["durations"]["runs-on"] = "ubuntu-latest"
     config = json.loads((ROOT / ".github/gate-wiring.json").read_text())
     policy = json.loads((ROOT / ".github/workflows/trusted-actors.json").read_text())
 
@@ -98,3 +133,49 @@ def test_the_protected_grader_accepts_only_the_exact_tiered_aggregation_and_reus
     head["test.yml"]["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(queue_tier=True)
     head["test.yml"]["jobs"]["reuse"]["if"] = "false"
     assert any("changes the protected reuse job" in problem for problem in grade())
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("env", {"BASH_ENV": "forged.sh"}),
+        ("defaults", {"run": {"shell": "python"}}),
+        ("container", {"image": "example.invalid/forged:1.0"}),
+        ("services", {"forger": {"image": "example.invalid/forged:1.0"}}),
+        ("permissions", {"contents": "write"}),
+        ("continue-on-error", True),
+    ],
+)
+def test_duration_provenance_keeps_the_protected_execution_context(field, value):
+    base = {path.name: yaml.safe_load(path.read_text()) for path in (ROOT / ".github/workflows").glob("*.yml")}
+    head = copy.deepcopy(base)
+    head["test.yml"]["jobs"]["reuse"]["if"] = (
+        "github.event_name != 'merge_group' && github.event_name != 'pull_request'"
+    )
+    head["test.yml"]["jobs"]["durations"]["steps"] = (
+        ci_reuse.duration_provenance_steps() + head["test.yml"]["jobs"]["durations"]["steps"]
+    )
+    head["test.yml"]["jobs"]["durations"][field] = value
+    config = json.loads((ROOT / ".github/gate-wiring.json").read_text())
+    policy = json.loads((ROOT / ".github/workflows/trusted-actors.json").read_text())
+    problems = gate_protected.grade(base, config, head, config, date(2026, 10, 14), policy)
+    assert any("provenance context" in problem for problem in problems), problems
+
+
+@pytest.mark.parametrize(
+    "field,value", [("env", {"BASH_ENV": "forged.sh"}), ("defaults", {"run": {"shell": "python"}})]
+)
+def test_duration_provenance_keeps_the_global_execution_context(field, value):
+    base = {path.name: yaml.safe_load(path.read_text()) for path in (ROOT / ".github/workflows").glob("*.yml")}
+    head = copy.deepcopy(base)
+    head["test.yml"]["jobs"]["reuse"]["if"] = (
+        "github.event_name != 'merge_group' && github.event_name != 'pull_request'"
+    )
+    head["test.yml"]["jobs"]["durations"]["steps"] = (
+        ci_reuse.duration_provenance_steps() + head["test.yml"]["jobs"]["durations"]["steps"]
+    )
+    head["test.yml"][field] = value
+    config = json.loads((ROOT / ".github/gate-wiring.json").read_text())
+    policy = json.loads((ROOT / ".github/workflows/trusted-actors.json").read_text())
+    problems = gate_protected.grade(base, config, head, config, date(2026, 10, 14), policy)
+    assert any("global provenance context" in problem for problem in problems), problems

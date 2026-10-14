@@ -82,6 +82,32 @@ def _reuse_problems(base: dict, head: dict, policy: object = None) -> list[str]:
     return []
 
 
+def _duration_problems(base: dict, head: dict) -> list[str]:
+    if (
+        head["jobs"].get("reuse", {}).get("if")
+        != "github.event_name != 'merge_group' && github.event_name != 'pull_request'"
+    ):
+        return []
+    previous = base["jobs"].get("durations", {})
+    producer = head["jobs"].get("durations", {})
+    prefix = ci_reuse.duration_provenance_steps()
+    problems = []
+    if producer.get("steps", [])[: len(prefix)] != prefix:
+        problems.append("The head skips reuse without protected durations provenance.")
+    mutable = {"steps", "if", "runs-on"}
+    problems += [
+        f"The head changes the durations provenance context {field}."
+        for field in sorted((set(previous) | set(producer)) - mutable)
+        if previous.get(field) != producer.get(field)
+    ]
+    problems += [
+        f"The head changes the global provenance context {field}."
+        for field in ("env", "defaults")
+        if base.get(field) != head.get(field)
+    ]
+    return problems
+
+
 def grade(
     base_workflows: dict[str, dict],
     base_config: dict,
@@ -99,6 +125,7 @@ def grade(
     file = base_gates[0][0]
     head_jobs = (head_workflows.get(file) or {}).get("jobs") or {}
     problems += _reuse_problems(base_workflows[file]["jobs"], head_jobs, policy)
+    problems += _duration_problems(base_workflows[file], head_workflows.get(file, {"jobs": {}}))
     return problems + ci_wiring.check(head_workflows, _protected_config(base_config, head_config), today)
 
 

@@ -100,6 +100,10 @@ def reuse_job() -> dict:
     return yaml.safe_load(Path(__file__).with_name("ci_reuse_job.yml").read_text())
 
 
+def duration_provenance_steps() -> list[dict]:
+    return yaml.safe_load(Path(__file__).with_name("ci_duration_provenance.yml").read_text())
+
+
 def _git(*args):
     return subprocess.check_output(["git", *args], text=True).strip()
 
