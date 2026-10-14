@@ -29,7 +29,11 @@ def _protected_config(base: dict, head: dict) -> dict:
 
 
 def runners(policy: object = None) -> list[str]:
-    anton = [ci_runner_trust.selector(policy, "anton-oss-light")] if isinstance(policy, dict) else []
+    anton = (
+        [ci_runner_trust.selector(policy, "anton-oss-light", trusted_reruns=reruns) for reruns in (False, True)]
+        if isinstance(policy, dict)
+        else []
+    )
     return ["ubuntu-latest", *anton]
 
 

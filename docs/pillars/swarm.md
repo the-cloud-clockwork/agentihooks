@@ -313,6 +313,14 @@ An outage holds the affected idle and delivery decisions until recovery (see
 11. Wake idle panes holding unread items, and climb the wake ladder for items nobody reads.
 12. Write the automatic snapshot when it is due.
 
+The health pass reports `merge stall` when the dev merge queue holds entries and no pull request has merged
+into dev for sixty minutes. Its evidence names the queue length, minutes since the latest dev merge and the
+most common failed job among the ten most recent merge queue workflow runs. The master receives a notice
+on detection and every hour while it persists, even after giving the finding a verdict. This signal only
+reports the stall; it imposes no enforcement and changes nothing in the queue. GitHub observations are cached
+for five minutes. A failed observation retains the previous evidence and delays further notices until a fresh
+observation succeeds. An empty queue or a new dev merge resets the notice interval.
+
 Each tick renews the controller lease for three ticks. A tick is 60 seconds unless
 `AGENTIHOOKS_CONTROLLER_TICK_SECONDS` sets another interval of at least one second. Set it only on the controller
 of an `agentihooks controller run` install; `swarm tick` refuses to run with it set, because the host timer ticks
