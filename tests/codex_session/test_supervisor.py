@@ -310,10 +310,9 @@ def test_a_server_running_from_another_codex_home_is_refused(store, server, cloc
     assert_failed_cleanly(store, server, "wrong_profile")
 
 
-@pytest.mark.parametrize("attempt", range(10))
-@pytest.mark.parametrize("info", [{}, {"codexHome": ""}])
+@pytest.mark.parametrize("info", [{}, {"codexHome": ""}] * 10)
 def test_a_server_that_names_no_codex_home_is_refused_even_from_the_cwd(
-    store, server, clock, root, tmp_path, monkeypatch, info, attempt
+    store, server, clock, root, tmp_path, monkeypatch, info
 ):
     server.info = info
     spec = launch_spec(store, server, tmp_path)
