@@ -6,7 +6,6 @@ from pathlib import Path
 
 from scripts.ci_mutation.runner import prepare_workspace, run_gate
 
-
 PATHS = [
     "scripts/swarm_ledger/api/mutations.py",
     "scripts/swarm_ledger/events/hub.py",
@@ -62,11 +61,15 @@ def missing_coverage(root, work):
         index + 1 for index, text in enumerate(source.read_text().splitlines()) if "return json.dumps(value," in text
     )
     prepare_workspace(root, work, [path], ["tests/test_receipt_covering.py"])
+    (work / "tests").rename(work / "removed-covering-tests")
+    (work / "tests").mkdir()
+    (work / "scripts/coverage_control.py").write_text("def covered(value):\n    return value + 1\n")
     (work / "tests/test_receipt_covering.py").write_text(
-        "from scripts.swarm_ledger.repository import rows\n\n"
-        "def test_covering():\n    assert rows.__name__.endswith('rows')\n"
+        "from scripts.swarm_ledger.repository import rows\n"
+        "from scripts.coverage_control import covered\n\n"
+        "def test_covering():\n    assert rows.__name__.endswith('rows')\n    assert covered(1) == 2\n"
     )
-    report = run_gate(work, {path: {line}}, work / "evidence", 120)
+    report = run_gate(work, {path: {line}, "scripts/coverage_control.py": {2}}, work / "evidence", 120)
     print(json.dumps(report), flush=True)
     assert report["failed"]
     assert report["not_mutated"] == []
