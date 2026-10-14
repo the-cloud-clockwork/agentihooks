@@ -313,6 +313,7 @@ def test_a_server_running_from_another_codex_home_is_refused(store, server, cloc
 def test_a_server_that_names_no_codex_home_is_refused_even_from_the_cwd(store, server, clock, root, tmp_path):
     server.info = {}
     spec = launch_spec(store, server, tmp_path, codex_home=os.getcwd())
+    assert Path(spec.codex_home).is_relative_to(tmp_path)
     failed(store, server, clock, root, spec, "wrong_profile")
 
 
