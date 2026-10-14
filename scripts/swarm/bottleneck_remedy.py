@@ -18,7 +18,7 @@ from scripts.swarm.store import DELEGATE, FULL, RedisStore, SwarmError
 KEY = "bottleneck-remedies"
 RULE = "bottleneck-remedy"
 URGENT = "urgent"
-SEATS = {"claim_wait": ("ci", "eng")}
+SEATS = {"seat_wait": ("ci", "eng")}
 HARNESS = ("launch_failure", "quota_hold")
 PINNABLE = ("eng", "ci")
 FIX = "Bottleneck fix for the {label} stage"

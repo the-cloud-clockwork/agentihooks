@@ -17,7 +17,7 @@ def test_shard_graders_check_out_event_base_before_installing():
     assert checkout["uses"] == "actions/checkout@v4"
     assert checkout["with"]["ref"] == (
         "${{ github.event.pull_request.base.ref == 'main' && github.sha || "
-        "github.event.pull_request.base.sha || github.event.merge_group.base_sha || "
+        "github.event_name == 'pull_request' && 'dev' || github.event.pull_request.base.sha || github.event.merge_group.base_sha || "
         "github.event.before || (inputs.base == 'origin/dev' && 'dev' || inputs.base) }}"
     )
     assert checkout["with"]["persist-credentials"] is False

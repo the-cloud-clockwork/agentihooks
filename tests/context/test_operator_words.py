@@ -170,7 +170,7 @@ def test_upgrade_uses_the_registered_swarm_for_modern_agent_names(tmp_path, monk
     from scripts.swarm.naming import NameRegistry
 
     monkeypatch.setattr(hooks.config, "AGENTIHOOKS_HOME", tmp_path)
-    redis = object()
+    redis = _FakeRedis()
     monkeypatch.setattr(
         NameRegistry, "slug_of", lambda self, name: {(redis, "master@abcdef-0001"): "demo"}[(self.redis, name)]
     )
@@ -203,7 +203,7 @@ def test_upgrade_retries_modern_names_after_the_registry_recovers(tmp_path, monk
     assert operator_words.heard_prompt(
         "New words", {"AGENTIHOOKS_AGENT_NAME": "master@abcdef-0001", "AGENTIHOOKS_SWARM": "demo"}, now=101
     )
-    redis = object()
+    redis = _FakeRedis()
     monkeypatch.setattr(
         NameRegistry, "slug_of", lambda self, name: {(redis, "master@abcdef-0001"): "demo"}[(self.redis, name)]
     )
@@ -294,10 +294,14 @@ def test_upgrade_continues_past_empty_and_unresolved_files(tmp_path, monkeypatch
 def test_completed_upgrade_does_not_scan_legacy_files_again(tmp_path, monkeypatch):
     import json
 
+    from hooks import _redis
+
     monkeypatch.setattr(hooks.config, "AGENTIHOOKS_HOME", tmp_path)
+    monkeypatch.setattr(_redis, "get_redis", lambda: None)
     folder = tmp_path / "operator_words"
     folder.mkdir()
     (folder / "demo-master-1.json").write_text(json.dumps({"rows": [{"at": 100, "words": "Known"}]}))
+    (folder / "master@abcdef-0009.json").write_text(json.dumps({"sessions": ["s1"]}))
     assert operator_words.matching("demo-master-1", "Known", now=101) == "Known"
 
     def no_scan(name):
@@ -371,3 +375,133 @@ def test_a_recorder_failure_is_logged_and_never_raised(monkeypatch):
     monkeypatch.setattr(hook_manager, "log", lambda *args: seen.append(args))
     assert hook_manager._operator_words({"prompt": "ship it"}) is False
     assert seen == [("operator words record failed", {"error": "disk full"})]
+
+
+class _FakeRedis:
+    def __init__(self, get=lambda key: None):
+        self.get = get
+
+
+def _legacy_words(tmp_path, monkeypatch, slug_of, redis=None):
+    import json
+
+    from hooks import _redis
+    from scripts.swarm import naming
+
+    monkeypatch.setattr(hooks.config, "AGENTIHOOKS_HOME", tmp_path)
+    monkeypatch.setattr(_redis, "get_redis", lambda: redis or _FakeRedis())
+    monkeypatch.setattr(naming.NameRegistry, "slug_of", lambda self, name: slug_of(name))
+    monkeypatch.setattr(naming, "addresses", lambda name: [name])
+    folder = tmp_path / "operator_words"
+    folder.mkdir()
+    path = folder / "master@abcdef-0001.json"
+    path.write_text(json.dumps({"sessions": [], "rows": [{"at": 100, "words": "Old words"}]}))
+    return path
+
+
+def test_a_mid_turn_message_and_an_answer_are_recorded_while_the_registry_times_out(tmp_path, monkeypatch):
+    import json
+
+    import redis
+
+    from scripts.swarm_ledger import ledger_relay
+
+    asked = []
+
+    def timeout(name):
+        asked.append(name)
+        raise redis.exceptions.TimeoutError("Timeout reading from socket")
+
+    path = _legacy_words(tmp_path, monkeypatch, timeout)
+    (path.parent / "master@abcdef-0003.json").write_text(json.dumps({"rows": [{"at": 100, "words": "Older words"}]}))
+    (path.parent / "demo-master-1.json").write_text(json.dumps({"rows": [{"at": 100, "words": "Known words"}]}))
+    env = {"AGENTIHOOKS_AGENT_NAME": "master@abcdef-0002", "AGENTIHOOKS_SWARM": "demo"}
+    answer = {"tool_name": "AskUserQuestion", "tool_response": {"answers": {"Freeze?": "Refreeze until push lands"}}}
+    assert not operator_words.heard({"prompt": "Launch prompt", "session_id": "s1"}, env, now=100)
+    assert operator_words.heard({"prompt": "Freeze the swarm again", "session_id": "s1"}, env, now=101)
+    assert operator_words.heard(answer, env, now=102)
+    assert ledger_relay.verified("master@abcdef-0002", "freeze the swarm again") == "Freeze the swarm again"
+    assert ledger_relay.verified("master@abcdef-0002", "refreeze until push lands") == "Refreeze until push lands"
+    asked.clear()
+    assert operator_words.matching("demo-master-1", "Known words", within=None) == ""
+    assert len(asked) == 1
+    assert operator_words.matching("master@abcdef-0001", "Old words", within=None) == ""
+    from scripts.swarm import naming
+
+    monkeypatch.setattr(naming.NameRegistry, "slug_of", lambda self, name: "demo")
+    assert operator_words.matching("master@abcdef-0001", "Old words", within=None) == "Old words"
+    assert operator_words.matching("master@abcdef-0003", "Older words", within=None) == "Older words"
+    assert operator_words.matching("demo-master-1", "Known words", within=None) == "Known words"
+    operator_words.forget("demo")
+    assert operator_words.recorded("*") == []
+
+
+def test_words_are_recorded_while_the_upgrade_fails(tmp_path, monkeypatch):
+    from hooks import _redis
+
+    def broken():
+        raise RuntimeError("registry client failed")
+
+    _legacy_words(tmp_path, monkeypatch, lambda name: "demo")
+    monkeypatch.setattr(_redis, "get_redis", broken)
+    env = {"AGENTIHOOKS_AGENT_NAME": "master@abcdef-0002", "AGENTIHOOKS_SWARM": "demo"}
+    answer = {"tool_name": "AskUserQuestion", "tool_response": {"answers": {"Freeze?": "Refreeze until push lands"}}}
+    assert not operator_words.heard({"prompt": "Launch prompt", "session_id": "s1"}, env, now=100)
+    assert operator_words.heard({"prompt": "Freeze the swarm again", "session_id": "s1"}, env, now=101)
+    assert operator_words.heard(answer, env, now=102)
+    with operator_words._store(migrate=False) as connection:
+        assert connection.execute("SELECT name, swarm, words FROM entries ORDER BY id").fetchall() == [
+            ("master@abcdef-0002", "demo", "Freeze the swarm again"),
+            ("master@abcdef-0002", "demo", "Refreeze until push lands"),
+        ]
+
+
+def test_a_legacy_name_the_registry_no_longer_knows_completes_the_upgrade(tmp_path, monkeypatch):
+    import json
+
+    path = _legacy_words(tmp_path, monkeypatch, lambda name: "")
+    assert operator_words.matching("master@abcdef-0001", "Old words", now=101) == "Old words"
+    assert json.loads(path.read_text()) == {"sessions": []}
+
+    def no_scan(name):
+        raise AssertionError("completed migration scanned legacy files")
+
+    monkeypatch.setattr(operator_words, "_load", no_scan)
+    assert operator_words.matching("master@abcdef-0001", "Old words", now=101) == "Old words"
+
+
+def test_the_upgrade_asks_the_registry_before_locking_the_store(tmp_path, monkeypatch):
+    import sqlite3
+
+    def slug_of(name):
+        connection = sqlite3.connect(tmp_path / "operator_words" / "words.sqlite3", timeout=0)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+        finally:
+            connection.close()
+        return "demo"
+
+    _legacy_words(tmp_path, monkeypatch, slug_of)
+    assert operator_words.matching("master@abcdef-0001", "Old words", now=101) == "Old words"
+
+
+def test_a_failed_alias_lookup_leaves_the_legacy_name_pending(tmp_path, monkeypatch):
+    import redis
+
+    from scripts.swarm.naming import NameRegistry
+
+    def timeout(key):
+        if key == NameRegistry.key("alias", "master@abcdef-0001"):
+            raise redis.exceptions.TimeoutError("Timeout reading from socket")
+
+    _legacy_words(tmp_path, monkeypatch, lambda name: "demo", _FakeRedis(timeout))
+    assert operator_words.matching("master@abcdef-0001", "Old words", within=None) == ""
+    with operator_words._store(migrate=False) as connection:
+        assert connection.execute("SELECT name FROM legacy").fetchall() == []
+
+
+def test_a_newer_recorded_quote_wins_over_older_migrated_words(tmp_path, monkeypatch):
+    _legacy_words(tmp_path, monkeypatch, lambda name: "demo")
+    assert operator_words.record("master@abcdef-0001", "OLD  words", now=200, swarm="demo")
+    assert operator_words.matching("master@abcdef-0001", "old words", within=None) == "OLD  words"
+    assert operator_words.matching("master@abcdef-0001", "old", within=None) == "OLD  words"
