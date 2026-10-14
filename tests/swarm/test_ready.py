@@ -77,6 +77,19 @@ def working(store):
     return [a.state for a in store.agents("sw") if a.name == AGENT] == ["working"]
 
 
+@pytest.fixture
+def primary_checkout(released, monkeypatch):
+    shell = released[2]
+
+    def primary(argv):
+        if argv == ["git", "rev-parse", "--show-toplevel"]:
+            return subprocess.CompletedProcess(argv, 0, stdout="/home/me/dev/repo\n", stderr="")
+        return shell(argv)
+
+    monkeypatch.setattr(stack, "shell", primary)
+    return released
+
+
 @pytest.mark.parametrize("kind", ["code", "ci"])
 def test_ready_records_the_pull_request_and_head_and_ends_the_agent(released, capsys, kind):
     store, ledger, shell, doc = released
@@ -108,8 +121,8 @@ def test_ready_records_the_pull_request_and_head_and_ends_the_agent(released, ca
 
 @pytest.mark.parametrize("retained", [TOP, ""])
 @pytest.mark.parametrize("source", ["ready", "handoff"])
-def test_ready_from_primary_carries_an_unchanged_queued_head(released, monkeypatch, retained, source):
-    store, ledger, shell, doc = released
+def test_ready_from_primary_carries_an_unchanged_queued_head(primary_checkout, retained, source):
+    store, ledger, shell, doc = primary_checkout
     ledger.pulls[URL] = QUEUED
     if source == "ready":
         ready.save(store, "sw", "t1", ready.held_record(URL, HEAD, retained, "predecessor", 1))
@@ -120,14 +133,6 @@ def test_ready_from_primary_carries_an_unchanged_queued_head(released, monkeypat
             doc.read_text(),
             envelope={"pull_request": {"url": URL}, "remote_head": HEAD, "worktree": retained or "unknown"},
         )
-    original = shell.__call__
-
-    def primary(argv):
-        if argv == ["git", "rev-parse", "--show-toplevel"]:
-            return subprocess.CompletedProcess(argv, 0, stdout="/home/me/dev/repo\n", stderr="")
-        return original(argv)
-
-    monkeypatch.setattr(stack, "shell", primary)
     assert release(doc) == 0
     found = ready.record(store, "sw", "t1")
     assert found["worktree"] == retained
@@ -139,22 +144,41 @@ def test_ready_from_primary_carries_an_unchanged_queued_head(released, monkeypat
     assert ledger.rows["t1"]["awaiting"] == "merge"
 
 
-def test_ready_from_primary_refuses_a_moved_queued_head(released, monkeypatch, capsys):
-    store, ledger, shell, doc = released
+@pytest.mark.parametrize(
+    ("source", "url", "head"),
+    [
+        ("ready", URL, "b" * 40),
+        ("handoff", URL, "b" * 40),
+        ("ready", URL + "0", HEAD),
+        ("handoff", URL + "0", HEAD),
+        ("ready", URL, None),
+        ("handoff", URL, None),
+        ("missing", URL, HEAD),
+        ("unknown_pull", URL, HEAD),
+    ],
+)
+def test_ready_from_primary_refuses_a_moved_queued_head(primary_checkout, capsys, source, url, head):
+    store, ledger, shell, doc = primary_checkout
     ledger.pulls[URL] = QUEUED
-    previous = ready.held_record(URL, "b" * 40, TOP, "predecessor", 1)
-    ready.save(store, "sw", "t1", previous)
-    original = shell.__call__
-
-    def primary(argv):
-        if argv == ["git", "rev-parse", "--show-toplevel"]:
-            return subprocess.CompletedProcess(argv, 0, stdout="/home/me/dev/repo\n", stderr="")
-        return original(argv)
-
-    monkeypatch.setattr(stack, "shell", primary)
+    previous = None
+    if source == "ready":
+        previous = ready.held_record(url, head, TOP, "predecessor", 1)
+        ready.save(store, "sw", "t1", previous)
+    elif source == "handoff":
+        store.put_handoff(
+            "sw",
+            "t1",
+            doc.read_text(),
+            envelope={"pull_request": {"url": url}, "remote_head": head, "worktree": TOP},
+        )
+    elif source == "unknown_pull":
+        store.put_handoff("sw", "t1", doc.read_text(), envelope={"pull_request": "unknown"})
     capsys.readouterr()
     assert release(doc) == 1
-    assert "not one" in capsys.readouterr().err
+    assert capsys.readouterr().err == (
+        "swarm: park and ready remove only a worktree wt.sh new made under "
+        "/home/me/dev/worktrees; /home/me/dev/repo is not one\n"
+    )
     assert working(store)
     assert ready.record(store, "sw", "t1") == previous
 

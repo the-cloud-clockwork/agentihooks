@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from scripts.swarm import claim_order, merge_queue, stack, waits
-from scripts.swarm.store import ASSIST, MANUAL, RedisStore, SwarmError
+from scripts.swarm.store import ASSIST, MANUAL, AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_kinds
 
 AWAITING = "merge"
@@ -63,7 +63,9 @@ def _git(*args):
     return done.stdout.strip()
 
 
-def check(row, agent, autonomy, github, now_ms, previous=None):
+def check(
+    row: dict, agent: AgentRecord, autonomy: str, github: Callable, now_ms: int, previous: dict | None = None
+) -> dict:
     """The record of a task that may go ready, or SwarmError naming why it may not."""
     if autonomy in (MANUAL, ASSIST):
         raise SwarmError(
