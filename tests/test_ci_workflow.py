@@ -624,6 +624,8 @@ def test_unit_shards_upload_their_durations_for_the_refresh():
 
 @pytest.mark.parametrize("status", [0, 3])
 def test_unit_step_records_elapsed_time_and_preserves_pytest_status(tmp_path, status):
+    import json
+
     _, step = _unit_step_index(lambda item: item.get("name") == "Run tests")
     scripts = tmp_path / "scripts"
     scripts.mkdir()
@@ -641,7 +643,7 @@ def test_unit_step_records_elapsed_time_and_preserves_pytest_status(tmp_path, st
     )
     assert result.returncode == status, result.stdout + result.stderr
     assert (tmp_path / "durations.json").is_file()
-    elapsed = yaml.safe_load((tmp_path / "elapsed.json").read_text())
+    elapsed = json.loads((tmp_path / "elapsed.json").read_text())
     assert isinstance(elapsed["seconds"], (int, float))
     assert elapsed["seconds"] >= 0
 
