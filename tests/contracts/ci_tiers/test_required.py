@@ -67,6 +67,7 @@ def test_main_pull_requests_skip_mutation_but_still_require_the_other_checks():
 def test_skipping_reuse_requires_protected_duration_provenance(forged):
     base = {path.name: yaml.safe_load(path.read_text()) for path in (ROOT / ".github/workflows").glob("*.yml")}
     head = copy.deepcopy(base)
+    head["test.yml"]["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(queue_tier=True)
     head["test.yml"]["jobs"]["reuse"]["if"] = (
         "github.event_name != 'merge_group' && github.event_name != 'pull_request'"
     )
