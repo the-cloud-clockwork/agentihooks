@@ -76,6 +76,7 @@ def live():
 
 MUTATION_TRACE_FACTOR = 7
 
+
 def send(live, method, path, body=b"", **headers):
     timeout = 5 * (MUTATION_TRACE_FACTOR if os.environ.get("MUTANT_UNDER_TEST") else 1)
     conn = http.client.HTTPConnection("127.0.0.1", live["port"], timeout=timeout)
