@@ -1,6 +1,7 @@
 name: Mutation deadline proof
 
 on:
+  workflow_call:
   workflow_dispatch:
 
 permissions:
