@@ -78,6 +78,37 @@ def test_a_missing_shard_file_is_red(tmp_path):
     assert "::error::No shard durations at" in result.stdout
 
 
+def _elapsed_shard(tmp_path, index, summed, elapsed):
+    path = tmp_path / f"durations-3.12-{index}" / "durations.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps({"test_suite.py::test_0": summed}))
+    if elapsed is not None:
+        (path.parent / "elapsed.json").write_text(json.dumps({"seconds": elapsed}))
+    return str(path)
+
+
+def test_the_shard_budget_transition_accepts_summed_or_elapsed_time(tmp_path):
+    paths = [_elapsed_shard(tmp_path, 1, 1081.5, 396), _elapsed_shard(tmp_path, 2, 215.0, None)]
+    result = subprocess.run(
+        [sys.executable, "-m", "tests.shard_budget", *paths], cwd=_ROOT, capture_output=True, text=True
+    )
+    assert (result.returncode, result.stdout.splitlines()[1:3]) in (
+        (0, ["durations-3.12-1 396.0 s", "durations-3.12-2 215.0 s"]),
+        (1, ["durations-3.12-1 1081.5 s over budget", "durations-3.12-2 215.0 s"]),
+    ), result.stdout + result.stderr
+
+
+def test_the_shard_budget_transition_accepts_either_over_budget_result(tmp_path):
+    path = _elapsed_shard(tmp_path, 1, 10.0, 901)
+    result = subprocess.run(
+        [sys.executable, "-m", "tests.shard_budget", path], cwd=_ROOT, capture_output=True, text=True
+    )
+    assert (result.returncode, result.stdout.splitlines()[1]) in (
+        (0, "durations-3.12-1 10.0 s"),
+        (1, "durations-3.12-1 901.0 s over budget"),
+    ), result.stdout + result.stderr
+
+
 def test_the_shard_check_job_grades_the_budget_on_the_stored_durations():
     steps = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["shard-check"]["steps"]
     step = next(step for step in steps if step.get("run", "").startswith("python -m tests.shard_budget"))
