@@ -106,6 +106,48 @@ def test_ready_records_the_pull_request_and_head_and_ends_the_agent(released, ca
     }
 
 
+@pytest.mark.parametrize("retained", [TOP, ""])
+def test_ready_from_primary_carries_an_unchanged_queued_head(released, monkeypatch, retained):
+    store, ledger, shell, doc = released
+    ledger.pulls[URL] = QUEUED
+    ready.save(store, "sw", "t1", ready.held_record(URL, HEAD, retained, "predecessor", 1))
+    original = shell.__call__
+
+    def primary(argv):
+        if argv == ["git", "rev-parse", "--show-toplevel"]:
+            return subprocess.CompletedProcess(argv, 0, stdout="/home/me/dev/repo\n", stderr="")
+        return original(argv)
+
+    monkeypatch.setattr(stack, "shell", primary)
+    assert release(doc) == 0
+    found = ready.record(store, "sw", "t1")
+    assert found["worktree"] == retained
+    assert found["head"] == HEAD
+    assert found["agent"] == AGENT
+    assert not working(store)
+    assert ledger.rows["t1"]["awaiting"] == "merge"
+
+
+def test_ready_from_primary_refuses_a_moved_queued_head(released, monkeypatch, capsys):
+    store, ledger, shell, doc = released
+    ledger.pulls[URL] = QUEUED
+    previous = ready.held_record(URL, "b" * 40, TOP, "predecessor", 1)
+    ready.save(store, "sw", "t1", previous)
+    original = shell.__call__
+
+    def primary(argv):
+        if argv == ["git", "rev-parse", "--show-toplevel"]:
+            return subprocess.CompletedProcess(argv, 0, stdout="/home/me/dev/repo\n", stderr="")
+        return original(argv)
+
+    monkeypatch.setattr(stack, "shell", primary)
+    capsys.readouterr()
+    assert release(doc) == 1
+    assert "not one" in capsys.readouterr().err
+    assert working(store)
+    assert ready.record(store, "sw", "t1") == previous
+
+
 def test_a_second_ready_is_refused_once_the_seat_is_released(released, capsys):
     store, _, _, doc = released
     assert release(doc) == 0
