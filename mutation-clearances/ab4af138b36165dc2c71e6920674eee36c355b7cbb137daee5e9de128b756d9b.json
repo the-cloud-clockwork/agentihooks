@@ -1,0 +1,6 @@
+{
+  "hooks/context/ledger_decision.py:hooks.context.ledger_decision.x__is_plan_accept__mutmut_6:e7c09c71399f1a1172d3765ddbb574f82786e9b499c6a525a153eea5401ff7c9": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: plan_accept_prompts() returns frozenset({'Implement the plan.'}) for codex and an empty frozenset for every other target, so neither the empty default nor 'XXXX' is ever a member; a missing, empty or whitespace prompt misses under both the original and the mutant."
+  }
+}

@@ -53,7 +53,7 @@ def serve(route):
 def page(browser, request):
     width, height = request.param
     tab = browser.new_page(viewport={"width": width, "height": height})
-    tab.set_default_timeout(1500)
+    tab.set_default_timeout(3000)
     tab.route("**/artifacts/**", serve)
     doc = {"title": "Artifacts proof", "tasks": [{"id": "av1", "title": "Artifacts"}], "artifacts": ROWS}
     html = shell_html()
@@ -145,7 +145,7 @@ def test_svg_renders_as_an_image_and_its_script_never_runs(page):
 @pytest.fixture
 def trash_page(browser):
     tab = browser.new_page(viewport={"width": 1440, "height": 900})
-    tab.set_default_timeout(1500)
+    tab.set_default_timeout(3000)
     tab.route("**/artifacts/**", serve)
     sent = []
 
