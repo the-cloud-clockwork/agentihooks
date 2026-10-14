@@ -967,3 +967,19 @@ def test_warn_spares_the_master_lane_on_a_reserved_account():
     reserved = replace(account("main", five=10, week=70), reserved=CEILING_REASON)
     storage.redis.set(storage.key("sw", "quota-capacity"), json.dumps({"accounts": [capacity.record(reserved)]}))
     assert quota_handoff.warn("sw", storage, {}) == ["early quota handoff warning sent to worker"]
+
+
+@pytest.mark.parametrize("five", [None, 0.0, 100.0])
+@pytest.mark.parametrize("week,expected", [(73.0, []), (10.0, ["week"])])
+def test_codex_handoff_windows_use_only_the_week(five, week, expected):
+    row = capacity.Account("codex", "a", "OPEN", 0, five, week, 6)
+    assert quota_handoff.windows(row, quota_handoff.Thresholds()) == expected
+
+
+def test_codex_successor_prefers_week_remaining_and_requires_a_week():
+    thresholds = quota_handoff.Thresholds()
+    better = capacity.Account("codex", "a", "OPEN", 0, 0.0, 73.0, 6)
+    lesser = capacity.Account("codex", "b", "OPEN", 0, 80.0, 50.0, 6)
+    missing = capacity.Account("codex", "c", "OPEN", 0, 90.0, None, 6)
+    assert quota_handoff.exclusion(missing, thresholds) == "has no quota reading"
+    assert quota_handoff.successor([lesser, better, missing], ("codex",), thresholds) == better

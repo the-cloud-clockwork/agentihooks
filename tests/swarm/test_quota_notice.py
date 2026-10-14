@@ -262,3 +262,11 @@ def test_skipped_agent_does_not_prevent_the_next_agent_notice(store, monkeypatch
     assert quota_notice.apply("sw", store, reading) == [f"sent {last.name} the quota hurry"]
     assert messages(store, first) == []
     assert len(messages(store, last)) == 1
+
+
+@pytest.mark.parametrize("five", [None, 0.0, 3.0])
+@pytest.mark.parametrize("week,expected", [(73.0, ""), (15.0, "hurry"), (2.0, "handoff")])
+def test_codex_notices_ignore_the_five_hour_window(store, five, week, expected):
+    row = agent(store, harness="codex")
+    observed = quota_notice.apply("sw", store, decision(five, week, harness="codex"))
+    assert observed == ([f"sent {row.name} the quota {expected}"] if expected else [])
