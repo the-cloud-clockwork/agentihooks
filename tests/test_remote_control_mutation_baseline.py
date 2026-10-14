@@ -5,7 +5,8 @@ from scripts.ci_mutation.runner import mutate_files
 from scripts.ci_mutation.stats import SharedStats
 
 
-def test_remote_control_statistics_baseline_reaches_mutant_grading(tmp_path):
+def test_remote_control_statistics_baseline_reaches_mutant_grading(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
     root = Path(__file__).resolve().parents[1]
     source = "scripts/swarm/commands.py"
     line = next(
