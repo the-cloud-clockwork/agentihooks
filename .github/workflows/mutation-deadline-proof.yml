@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mode: [stats, missing-coverage]
+        mode: [stats, stats-baseline, missing-coverage]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -39,6 +39,7 @@ jobs:
           name: receipt-mutation-${{ matrix.mode }}
           path: |
             .receipt-mutation-proof/stats.json
+            .receipt-mutation-proof/stats.log
             .receipt-mutation-proof/evidence/report.json
             .receipt-mutation-proof/evidence/*/run.log
           include-hidden-files: true

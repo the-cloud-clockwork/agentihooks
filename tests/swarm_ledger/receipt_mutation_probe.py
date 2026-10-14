@@ -20,19 +20,23 @@ PATHS = [
 NODE = "tests/swarm_ledger/test_api_v1.py::test_latest_thousand_operation_receipts_remain_retry_safe"
 
 
-def statistics(root, work):
+def statistics(root, work, baseline=False):
     work.mkdir()
-    prepare_workspace(root, work, PATHS, [NODE])
+    paths = [path for path in PATHS if (root / path).is_file()]
+    prepare_workspace(root, work, paths, [NODE])
+    if baseline:
+        transport = work / "tests/swarm_ledger/test_ledger_authority.py"
+        transport.write_text(transport.read_text().replace("MUTATION_TRACE_FACTOR = 7", "MUTATION_TRACE_FACTOR = 1"))
     selection = work / "selection.json"
     selection.write_text(
         json.dumps(
             {
                 path: {"lines": list(range(1, len((root / path).read_text().splitlines()) + 1)), "tests": [NODE]}
-                for path in PATHS
+                for path in paths
             }
         )
     )
-    status = subprocess.call(
+    result = subprocess.run(
         [
             sys.executable,
             "-m",
@@ -48,8 +52,17 @@ def statistics(root, work):
         ],
         cwd=work,
         env={**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "PYTHONDONTWRITEBYTECODE": "1"},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
     )
-    assert status == 0, f"receipt mutation statistics failed with {status}"
+    (work / "stats.log").write_text(result.stdout)
+    print(result.stdout, flush=True)
+    if baseline:
+        assert result.returncode != 0 and "TimeoutError: timed out" in result.stdout
+        print("Original five second deadline control failed on receipt POST under mutation tracing.", flush=True)
+        return
+    assert result.returncode == 0, f"receipt mutation statistics failed with {result.returncode}"
     stats = json.loads((work / "stats.json").read_text())
     print(json.dumps(stats), flush=True)
 
@@ -82,7 +95,7 @@ def missing_coverage(root, work):
 if __name__ == "__main__":
     root = Path.cwd()
     work = root / ".receipt-mutation-proof"
-    if sys.argv[1] == "stats":
-        statistics(root, work)
+    if sys.argv[1] in ("stats", "stats-baseline"):
+        statistics(root, work, sys.argv[1] == "stats-baseline")
     else:
         missing_coverage(root, work)
