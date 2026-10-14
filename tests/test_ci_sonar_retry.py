@@ -72,7 +72,6 @@ FORBIDDEN = ("", "curl: (22) The requested URL returned error: 403\n", 22)
 @pytest.mark.parametrize(
     "failure",
     [
-        FORBIDDEN,
         ("", "curl: (7) Failed to connect to 127.0.0.1 port 9000 after 0 ms: Couldn't connect to server\n", 7),
         ("", "curl: (22) The requested URL returned error: 502\n", 22),
         ("", "curl: (28) Operation timed out after 10002 milliseconds with 0 bytes received\n", 28),
@@ -84,7 +83,7 @@ FORBIDDEN = ("", "curl: (22) The requested URL returned error: 403\n", 22)
         ),
         ("Call to URL [http://127.0.0.1:9000/api/v2/analysis/engine] failed: timeout\n", "", 1),
     ],
-    ids=["forbidden", "refused", "bad-gateway", "curl-timeout", "empty-reply", "scanner-eof", "engine-timeout"],
+    ids=["refused", "bad-gateway", "curl-timeout", "empty-reply", "scanner-eof", "engine-timeout"],
 )
 def test_a_transient_server_failure_is_retried_with_backoff_and_only_the_answer_reaches_stdout(tmp_path, failure):
     result, calls, sleeps, summary = _retry(tmp_path, [failure, failure, ('{"status":"UP"}', "", 0)])
@@ -98,17 +97,61 @@ def test_a_transient_server_failure_is_retried_with_backoff_and_only_the_answer_
 
 
 def test_a_server_that_stays_down_ends_red_with_the_infrastructure_label(tmp_path):
-    result, calls, sleeps, summary = _retry(tmp_path, [FORBIDDEN] * 20, seconds="60")
+    result, calls, sleeps, summary = _retry(
+        tmp_path, [("", "curl: (22) The requested URL returned error: 502\n", 22)] * 20, seconds="60"
+    )
     assert result.returncode == 22
     assert sum(sleeps) <= 60
     assert sleeps == [2, 4, 8, 16, 30]
     assert len(calls) == 6
     assert LABEL in result.stderr
     assert "Sonar status" in result.stderr
-    assert "returned error: 403" in result.stderr.split(LABEL)[1]
+    assert "returned error: 502" in result.stderr.split(LABEL)[1]
     assert "not a code verdict" in result.stderr
     assert "Sonar server unavailable" in summary
     assert "Quality Gate" not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("code", [401, 403])
+@pytest.mark.parametrize(
+    "message",
+    [
+        "curl: (22) The requested URL returned error: {code}",
+        "Error status returned by url [http://127.0.0.1:9000/api/x]: {code}",
+        "Call to URL [http://127.0.0.1:9000/api/x] failed with HTTP {code}",
+    ],
+)
+def test_a_repeated_authorization_failure_stops_after_one_short_retry(tmp_path, code, message):
+    failure = ("", message.format(code=code) + "\n", 22)
+    result, calls, sleeps, summary = _retry(tmp_path, [failure] * 20)
+    assert result.returncode == 22
+    assert len(calls) == 2
+    assert sleeps == [2]
+    assert LABEL in result.stderr
+    assert str(code) in result.stderr.split(LABEL)[1]
+    assert str(code) in summary
+
+
+@pytest.mark.parametrize("code", [401, 403])
+def test_a_brief_authorization_failure_can_recover_on_the_single_retry(tmp_path, code):
+    failure = ("", f"curl: (22) The requested URL returned error: {code}\n", 22)
+    result, calls, sleeps, summary = _retry(tmp_path, [failure, ('{"status":"UP"}', "", 0)])
+    assert result.returncode == 0
+    assert result.stdout == '{"status":"UP"}'
+    assert len(calls) == 2
+    assert sleeps == [2]
+    assert LABEL not in result.stderr
+    assert summary == ""
+
+
+@pytest.mark.parametrize("name", ["Hold the Delivery L2 binding", "Hold the Delivery L2 conditions"])
+def test_the_dependent_checks_require_successful_proxy_startup(name):
+    steps = {step.get("name"): step for step in _sonar_steps()}
+    assert "steps.proxy.outcome == 'success'" in steps[name]["if"]
+    if name == "Hold the Delivery L2 binding":
+        assert "success()" in steps[name]["if"]
+    else:
+        assert "always()" in steps[name]["if"]
 
 
 @pytest.mark.parametrize(

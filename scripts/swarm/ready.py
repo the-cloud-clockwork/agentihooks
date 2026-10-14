@@ -123,6 +123,11 @@ def merge_pass(run, rows):
     actions = []
     for task_id, row in rows.items():
         if row.get("awaiting") != AWAITING:
+            if row.get("state") == "pr" and row.get("pr_url"):
+                pull = run.github(row["pr_url"])
+                if pull is not None and pull.state == "OPEN" and pull.merge_problem:
+                    found = {"url": row["pr_url"], "agent": row.get("claimed_by")}
+                    actions += _unmergeable(run, row, found, pull)
             continue
         found = record(run.store, run.slug, task_id)
         if not awaiting(row) or found is None or found["agent"] != row.get("claimed_by"):
@@ -148,6 +153,8 @@ def _advance(run, rows, row, found):
         return _finish(run, rows, row, found)
     if pull.state != "OPEN":
         return _reopen(run, row, found, "was closed without merging")
+    if pull.merge_problem:
+        return _unmergeable(run, row, found, pull)
     if held["kind"] == "checks":
         if pull.mergeable == "CONFLICTING":
             return _reopen(run, row, found, CONFLICT)
@@ -206,13 +213,25 @@ def _finish(run, rows, row, found):
     return [f"task {task_id} done, {url} merged", *_remove(found)]
 
 
+def _unmergeable(run, row, found, pull):
+    if pull.queued:
+        try:
+            result = run.queue("dequeue", found["url"])
+        except SwarmError as exc:
+            return [f"could not dequeue {found['url']} for task {row['id']}: {exc}"]
+        if result.get("queued") or result.get("state") == "MERGED":
+            return [f"dequeue of {found['url']} for task {row['id']} awaits confirmation"]
+    return _reopen(run, row, found, pull.merge_problem)
+
+
 def _reopen(run, row, found, what):
     task_id, url = row["id"], found["url"]
     run.ledger.update_task(run.slug, task_id, {"state": "open", "claimed_by": "", "awaiting": FIX}, if_state=("pr",))
     run.ledger.comment(run.slug, task_id, REOPENED.format(url=url, what=what), by="swarm")
     run.store.release(run.slug, task_id, found["agent"])
     forget(run.store, run.slug, task_id)
-    return [f"task {task_id} reopened, {url} {what}", *_remove(found, "--pushed")]
+    removed = _remove(found, "--pushed") if found.get("worktree") else []
+    return [f"task {task_id} reopened, {url} {what}", *removed]
 
 
 def _remove(found, *flags):

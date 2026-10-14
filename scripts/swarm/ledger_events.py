@@ -43,13 +43,13 @@ GATE = "Gate — Required"
 RED_NOTICE = re.compile(r"^Your pull request (\S+) for .* has red checks and no push for twenty minutes\.")
 GATE_JOB = re.compile(rf"^[ \t]+name:[ \t]*(['\"]?){re.escape(GATE)}\1[ \t]*$", re.MULTILINE)
 PULL_QUERY = (
-    "query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid mergeQueueEntry{id} "
+    "query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid mergeQueueEntry{id state} "
     "mergeable isDraft "
     "commits(last:1){nodes{commit{committedDate "
     'file(path:".github/workflows"){object{...on Tree{entries{object{...on Blob{text}}}}}} '
     "statusCheckRollup{contexts(first:100){"
     "nodes{...on CheckRun{name conclusion completedAt} ...on StatusContext{context state createdAt}} "
-    "pageInfo{hasNextPage}}} checkSuites(first:100){nodes{status workflowRun{databaseId createdAt}} "
+    "pageInfo{hasNextPage}}} checkSuites(first:100){nodes{status conclusion workflowRun{databaseId createdAt}} "
     "pageInfo{hasNextPage}}}}}}}}"
 )
 
@@ -67,8 +67,10 @@ class PullRequest:
     unpassed_gate: str = ""
     queued: bool = False
     gate_passed: bool = False
+    merge_problem: str = ""
     mergeable: str = ""
     draft: bool = False
+    latest_run_cancelled: bool = False
 
 
 def iso_ms(text):
@@ -109,9 +111,25 @@ def pull_request(raw):
         unpassed_gate,
         raw.get("mergeQueueEntry") is not None,
         bool(raw.get("gated")) and set(_gate(checks, results)) == {"SUCCESS"},
+        "has a merge conflict"
+        if raw.get("mergeable") == "CONFLICTING"
+        else "is marked unmergeable by GitHub"
+        if (raw.get("mergeQueueEntry") or {}).get("state") == "UNMERGEABLE"
+        else "",
         raw.get("mergeable") or "",
         bool(raw.get("isDraft")),
+        _latest_run_cancelled(suites),
     )
+
+
+def _latest_run_cancelled(suites):
+    runs = [suite for suite in suites if (suite.get("workflowRun") or {}).get("createdAt")]
+    latest = max(
+        runs,
+        key=lambda suite: (suite["workflowRun"]["createdAt"], suite["workflowRun"].get("databaseId", 0)),
+        default={},
+    )
+    return latest.get("conclusion") == "CANCELLED"
 
 
 def red_window(pushed_at, red_at, now_ms):
@@ -127,14 +145,11 @@ def _unpassed_gate(gated, checks, results, running):
 
 
 def _resolved(gated, checks, results, running):
+    if gated:
+        return any(result in FINAL_RED | {"TIMED_OUT"} for result in results) or "SUCCESS" in _gate(checks, results)
     if not running and any(result in FINAL_RED for result in results):
         return True
-    if not gated:
-        return not running and "SUCCESS" in results and all(result in PASSED for result in results)
-    gate = _gate(checks, results)
-    if any(result in FINAL_RED for result in gate):
-        return True
-    return "SUCCESS" in gate and not running and not any(result in PENDING for result in results)
+    return not running and "SUCCESS" in results and all(result in PASSED for result in results)
 
 
 def _gate(checks, results):

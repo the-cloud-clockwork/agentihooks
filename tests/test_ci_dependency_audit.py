@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -201,11 +202,28 @@ def test_dependency_audit_is_a_lint_step_graded_by_the_base():
     assert base["run"] == 'git worktree add --detach "$RUNNER_TEMP/base" "$(git merge-base "$BASE" HEAD)"'
     assert grade["if"] == "${{ !cancelled() }}"
     assert grade["run"] == (
-        'grader="$RUNNER_TEMP/base"\n'
-        '[[ -f "$grader/scripts/ci_dependency_audit.py" ]] || grader="$GITHUB_WORKSPACE"\n'
-        'cd "$grader"\n'
+        'if [[ ! -f "$RUNNER_TEMP/base/scripts/ci_dependency_audit.py" ]]; then\n'
+        '  echo "::error::The base carries no scripts/ci_dependency_audit.py, so nothing trusted can grade."\n'
+        "  exit 1\n"
+        "fi\n"
+        'cd "$RUNNER_TEMP/base"\n'
         'python -m scripts.ci_dependency_audit --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"\n'
     )
+
+
+def test_dependency_audit_refuses_a_base_without_its_script(tmp_path):
+    steps = {step.get("name"): step for step in _workflow()["jobs"]["lint"]["steps"]}
+    grade = steps["Fail on known vulnerabilities new against the base"]
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "ci_dependency_audit.py").write_text(
+        "from pathlib import Path\nPath('head-graded').touch()\n"
+    )
+    (tmp_path / "runner" / "base").mkdir(parents=True)
+    env = dict(os.environ, RUNNER_TEMP=str(tmp_path / "runner"), GITHUB_WORKSPACE=str(tmp_path))
+    result = subprocess.run(["bash", "-e", "-c", grade["run"]], cwd=tmp_path, env=env, capture_output=True, text=True)
+    assert result.returncode == 1
+    assert "::error::The base carries no scripts/ci_dependency_audit.py, so nothing trusted can grade." in result.stdout
+    assert not (tmp_path / "head-graded").exists()
 
 
 def test_dependabot_updates_pip_and_actions_weekly_into_dev_in_one_group_each():

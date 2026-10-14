@@ -179,6 +179,7 @@ def swarm_worktree(repo, tmp_path, monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "rig")
     monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "push")
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@test")
+    monkeypatch.setenv("WORKTREE_ROOT", str(tmp_path / "worktrees"))
     return worktree
 
 
@@ -271,6 +272,55 @@ def test_swarm_push_in_pr_state_uses_its_recorded_branch(repo, swarm_worktree, t
     with pytest.raises(BlockAction) as blocked:
         check_prepush(_bash("git push origin HEAD", repo))
     assert str(blocked.value) == _message(swarm_worktree)
+
+
+@pytest.mark.parametrize("folder", ["engineer-test", "engineer-test-2"])
+def test_a_first_push_before_the_branch_is_recorded_grades_the_agent_worktree(repo, swarm_worktree, tmp_path, folder):
+    from tests.swarm_ledger import legacy_page
+
+    root = tmp_path / "worktrees"
+    own = root / "repo" / folder
+    _git(repo, "worktree", "add", "-q", "-b", folder, str(own))
+    _git(repo, "worktree", "add", "-q", "-b", "engineer-test-3", str(root / "other" / "engineer-test-3"))
+    task = {"id": "push", "state": "claimed", "claimed_by": "engineer@test"}
+    legacy_page.store(tmp_path / "ledgers", "rig", {"tasks": [task]})
+    _stamp(repo)
+    payload = _bash("git push -u origin HEAD", repo)
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(payload)
+    assert str(blocked.value) == _message(own)
+
+    _stamp(own)
+    check_prepush(payload)
+
+
+def test_two_agent_worktrees_of_the_repository_keep_the_payload_directory(repo, swarm_worktree, tmp_path):
+    from tests.swarm_ledger import legacy_page
+
+    for folder in ("engineer-test", "engineer-test-2"):
+        _git(repo, "worktree", "add", "-q", "-b", folder, str(tmp_path / "worktrees" / "repo" / folder))
+        _stamp(tmp_path / "worktrees" / "repo" / folder)
+    task = {"id": "push", "state": "claimed", "claimed_by": "engineer@test"}
+    legacy_page.store(tmp_path / "ledgers", "rig", {"tasks": [task]})
+    payload = _bash("git push -u origin HEAD", repo)
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(payload)
+    assert str(blocked.value) == _message(repo)
+
+
+def test_a_swarm_push_outside_a_repository_passes_without_a_guard_error(swarm_worktree, tmp_path, monkeypatch):
+    from tests.swarm_ledger import legacy_page
+
+    logged = []
+    monkeypatch.setattr(prepush_guard, "log", lambda *args: logged.append(args))
+    task = {"id": "push", "state": "claimed", "claimed_by": "engineer@test"}
+    legacy_page.store(tmp_path / "ledgers", "rig", {"tasks": [task]})
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    check_prepush(_bash("git push -u origin HEAD", outside))
+
+    assert logged == []
 
 
 @pytest.mark.parametrize("directory", [None, "", "~/development-ledger"])

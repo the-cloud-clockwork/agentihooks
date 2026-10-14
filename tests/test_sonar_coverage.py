@@ -213,7 +213,7 @@ def test_a_failed_python_xml_fails_the_merge_and_stops_the_js_conversion(tmp_pat
 def test_coverage_options_do_not_reach_nested_test_runners(tmp_path):
     workflow = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())
     step = next(step for step in workflow["jobs"]["unit"]["steps"] if step.get("name") == "Run tests")
-    invocation = shlex.split(step["run"].split(" tests/", 1)[0])
+    invocation = shlex.split(step["run"].partition("ci_cpu_quota) && ")[2].split(" tests/", 1)[0])
     invocation[0] = sys.executable
     fixture = tmp_path / "test_environment.py"
     fixture.write_text("import os\ndef test_nested_runner_environment():\n    assert not os.getenv('PYTEST_ADDOPTS')\n")
