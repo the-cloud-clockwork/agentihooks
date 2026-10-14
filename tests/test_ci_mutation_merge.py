@@ -55,6 +55,16 @@ def test_merged_report_sums_counts_and_keeps_every_shard_row_per_file():
     }
 
 
+def test_merge_preserves_every_measured_shard_and_accepts_legacy_reports():
+    measurements = [
+        {"index": 0, "expected": 4, "graded": 4, "complete": True},
+        {"index": 1, "expected": 3, "graded": 2, "complete": False},
+    ]
+    reports = [{"files": [], "not_mutated": [], "failed": False, "shard": measurement} for measurement in measurements]
+    reports.append({"files": [], "not_mutated": [], "failed": False})
+    assert merge.merge_reports(reports) == {"files": [], "not_mutated": [], "failed": False, "shards": measurements}
+
+
 def test_merged_report_is_green_only_when_every_shard_is_green():
     green = {"files": [_file("scripts/a.py", {"killed": 1})], "not_mutated": [], "failed": False}
     assert merge.merge_reports([green, green])["failed"] is False
