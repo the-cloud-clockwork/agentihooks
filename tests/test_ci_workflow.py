@@ -50,7 +50,7 @@ def test_workflow_runs_whole_suite_in_parallel():
 
 
 def test_workflow_worker_count_stays_within_this_container():
-    prefix = _pytest_command().strip().removeprefix("run: ").split(" && ")[0]
+    prefix = _pytest_command().strip().removeprefix("run: ").split(" && python -c ")[0]
     result = subprocess.run(
         ["bash", "-e", "-c", f'{prefix} && echo "$workers"'], cwd=_ROOT, capture_output=True, text=True, check=True
     )
