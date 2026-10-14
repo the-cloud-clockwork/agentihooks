@@ -430,9 +430,9 @@ def test_coverage_ratchet_refuses_a_base_without_its_grader(tmp_path):
         step["run"]
         for job in _workflow()["jobs"].values()
         for step in job.get("steps", [])
-        if re.search(r"-m tests\.(coverage_ratchet|count_floor)\b", step.get("run", ""))
+        if re.search(r"-m (tests\.(coverage_ratchet|count_floor)|scripts\.ci_dependency_audit)\b", step.get("run", ""))
     ]
-    assert len(graders) >= 2
+    assert len(graders) >= 3
     git = ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t"]
     subprocess.run([*git, "init", "-q"], check=True)
     subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "base"], check=True)
@@ -446,7 +446,7 @@ def test_coverage_ratchet_refuses_a_base_without_its_grader(tmp_path):
     assert result.returncode == 1
     assert "The base carries no tests/coverage_ratchet.py, so nothing trusted can grade." in result.stdout
     assert not (tmp_path / "head-graded").exists()
-    prefixes = [re.split(r"-m tests\.\w+", run)[0] for run in graders]
+    prefixes = [re.split(r"-m (?:tests|scripts)\.\w+", run)[0] for run in graders]
     assert all("GITHUB_WORKSPACE" not in prefix and 'cd "$RUNNER_TEMP/base"' in prefix for prefix in prefixes)
 
 
