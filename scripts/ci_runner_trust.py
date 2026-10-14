@@ -116,7 +116,7 @@ def _hosted(runner: object) -> bool:
     )
 
 
-def selector(policy: dict, pool: str, queue: bool = False) -> str:
+def selector(policy: dict, pool: str, queue: bool = False, *, trusted_reruns: bool = False) -> str:
     members = json.dumps(policy["actors"], separators=(",", ":"))
     queue_actor = policy["queue_actor"]
     condition = (
@@ -126,6 +126,11 @@ def selector(policy: dict, pool: str, queue: bool = False) -> str:
         "(github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && "
         f"github.actor == '{queue_actor}' && github.triggering_actor == '{queue_actor}')"
     )
+    if trusted_reruns:
+        condition = condition.replace(
+            f"github.triggering_actor == '{queue_actor}'",
+            f"(github.triggering_actor == '{queue_actor}' || contains(fromJSON('{members}'), github.triggering_actor))",
+        )
     label = f"(github.event_name == 'merge_group' && '{QUEUE_POOLS[pool]}' || '{pool}')" if queue else f"'{pool}'"
     return "${{ " + condition + " && " + label + " || 'ubuntu-latest' }}"
 
@@ -133,7 +138,11 @@ def selector(policy: dict, pool: str, queue: bool = False) -> str:
 def selectors(policy: object, pool: str) -> set[str]:
     if not isinstance(policy, dict):
         return set()
-    return {_compact(selector(policy, pool, queue)) for queue in (False, pool in QUEUE_POOLS)}
+    return {
+        _compact(selector(policy, pool, queue, trusted_reruns=reruns))
+        for queue in (False, pool in QUEUE_POOLS)
+        for reruns in (False, True)
+    }
 
 
 def _selector(runner: object, policy: object) -> bool:
