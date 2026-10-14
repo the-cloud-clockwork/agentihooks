@@ -90,6 +90,7 @@ TARGET = {("gate-protected.yml", "grade")}
 
 # The runner class table holds the release path and the access read back on hosted runners.
 CLASSED = {
+    ("mutation-deadline-proof.yml", "receipts"),
     ("pages.yml", "build"),
     ("publish-pypi.yml", "verify"),
     ("release.yml", "release"),
