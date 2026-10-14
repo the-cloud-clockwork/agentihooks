@@ -534,7 +534,7 @@ def test_a_split_task_stays_in_pr_until_its_last_pull_request_merges(merging, re
     merging.pulls[second] = MERGED
     merging.run()
     assert merging.rows["t1"]["state"] == "done"
-    assert merging.rows["t1"]["pr_url"] == second
+    assert merging.rows["t1"]["split_pulls"] == [URL, second]
     assert merging.rows["t1"]["awaiting"] == ""
     assert merging.shell.calls == [REMOVE]
     assert ready.record(merging.store, "sw", "t1") is None
