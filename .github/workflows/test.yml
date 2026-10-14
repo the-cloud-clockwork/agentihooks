@@ -675,6 +675,7 @@ jobs:
 
       # Shards balance on these: per-test times here differ from a local run.
       - name: Upload durations
+        if: ${{ !cancelled() && hashFiles('durations.json') != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: durations-${{ matrix.python-version }}-${{ matrix.shard }}

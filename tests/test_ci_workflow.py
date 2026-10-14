@@ -613,7 +613,7 @@ def test_unit_shards_upload_their_durations_for_the_refresh():
         if step["name"] == "Restore queue shard coverage":
             expected += " && matrix.python-version == '3.12'"
         assert step["if"] == expected
-    assert "if" not in upload
+    assert upload.get("if") in (None, "${{ !cancelled() && hashFiles('durations.json') != '' }}")
     assert upload["uses"].startswith("actions/upload-artifact@")
     assert upload["with"]["name"] == "durations-${{ matrix.python-version }}-${{ matrix.shard }}"
     assert upload["with"]["path"].split() == ["durations.json", "durations.sha256", "elapsed.json"]
@@ -623,6 +623,8 @@ def test_unit_shards_record_the_elapsed_test_step_time_the_budget_grades():
     command = _pytest_command()
     assert " -p no:junitxml || status=$?; " in command
     assert command.rstrip().endswith('echo "{\\"seconds\\":$((SECONDS - start))}" > elapsed.json; exit "$status"')
+    _, upload = _unit_step_index(lambda step: step.get("name") == "Upload durations")
+    assert upload["if"] == "${{ !cancelled() && hashFiles('durations.json') != '' }}"
 
 
 def test_every_shard_records_the_hash_of_the_durations_it_splits_on():
