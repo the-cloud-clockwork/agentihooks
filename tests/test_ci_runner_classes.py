@@ -121,10 +121,16 @@ def test_pinned_hosted_jobs_cover_every_named_release_path():
         "pages.yml/deploy",
         "release.yml/release",
         "gate-protected.yml/grade",
-        "test.yml/gate-required",
-        "test.yml/reuse",
         "runner-trust.yml/actors",
     } <= ci_runner_classes.PINNED_HOSTED
+
+
+@pytest.mark.parametrize("job", ["reuse", "gate-required"])
+@pytest.mark.parametrize(
+    "cls,runner", [("hosted", "ubuntu-latest"), ("light", "ubuntu-latest"), ("light", routed("anton-oss-light"))]
+)
+def test_reuse_and_required_gate_accept_hosted_and_trusted_light(job, cls, runner):
+    assert classes({"test.yml": {"jobs": {job: {"runs-on": runner}}}}, {f"test.yml/{job}": cls}) == []
 
 
 @pytest.mark.parametrize("label", ["anton-oss-light", "anton-oss", "anton-oss-batch"])
