@@ -39,6 +39,16 @@ def _path(word: str) -> str:
     return os.path.expanduser(os.path.expandvars(word))
 
 
+def _own_worktree(cwd: Path, name: str) -> Path | None:
+    from scripts.gates.push_stop import default_root, trees
+
+    checkout = _toplevel(cwd)
+    if checkout is None:
+        return None
+    found = [tree.path for tree in trees(default_root(), name) if tree.path.parent.name == checkout.name]
+    return found[0] if len(found) == 1 else None
+
+
 def _swarm_cwd(cwd: Path) -> Path:
     from scripts.gates.base import Who
     from scripts.swarm.snapshot import worktrees
@@ -54,7 +64,7 @@ def _swarm_cwd(cwd: Path) -> Path:
         return cwd
     branch = task.get("branch")
     if not branch:
-        return cwd
+        return _own_worktree(cwd, who.name) or cwd
     target = worktrees(str(cwd), [branch])[branch]
     return Path(target) if target else cwd
 

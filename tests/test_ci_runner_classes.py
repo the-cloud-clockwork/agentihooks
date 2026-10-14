@@ -25,6 +25,11 @@ def routed(label, policy=POLICY):
     return "${{ " + trusted + " && '" + label + "' || 'ubuntu-latest' }}"
 
 
+def queue_routed(route=None, policy=POLICY, label="anton-oss"):
+    route = route or f"(github.event_name == 'merge_group' && 'anton-oss-queue' || '{label}')"
+    return routed(label, policy).replace(f"&& '{label}' ||", f"&& {route} ||")
+
+
 def workflow(runner="ubuntu-latest"):
     return {"on": {"pull_request": {}}, "jobs": {"build": {"runs-on": runner, "steps": []}}}
 
@@ -116,10 +121,16 @@ def test_pinned_hosted_jobs_cover_every_named_release_path():
         "pages.yml/deploy",
         "release.yml/release",
         "gate-protected.yml/grade",
-        "test.yml/gate-required",
-        "test.yml/reuse",
         "runner-trust.yml/actors",
     } <= ci_runner_classes.PINNED_HOSTED
+
+
+@pytest.mark.parametrize("job", ["reuse", "gate-required"])
+@pytest.mark.parametrize(
+    "cls,runner", [("hosted", "ubuntu-latest"), ("light", "ubuntu-latest"), ("light", routed("anton-oss-light"))]
+)
+def test_reuse_and_required_gate_accept_hosted_and_trusted_light(job, cls, runner):
+    assert classes({"test.yml": {"jobs": {job: {"runs-on": runner}}}}, {f"test.yml/{job}": cls}) == []
 
 
 @pytest.mark.parametrize("label", ["anton-oss-light", "anton-oss", "anton-oss-batch"])
@@ -165,3 +176,35 @@ def test_the_actor_policy_comes_from_the_grader_not_the_graded_root(tmp_path, mo
     (tmp_path / ci_runner_classes.TABLE).write_text(json.dumps({"a.yml/x": "light"}))
     monkeypatch.chdir(ROOT)
     assert ci_runner_classes.main(["--root", str(tmp_path)]) == 1
+
+
+def test_a_standard_job_may_send_merge_group_runs_to_the_queue_pool():
+    assert classes({"b.yml": workflow(queue_routed())}, {"b.yml/build": "standard"}) == []
+    assert trust({"b.yml": workflow(queue_routed())}) == []
+
+
+@pytest.mark.parametrize("cls", ["light", "batch"])
+def test_only_the_standard_class_has_a_queue_pool(cls):
+    runner = queue_routed(label=ci_runner_classes.LABELS[cls])
+    problems = classes({"b.yml": workflow(runner)}, {"b.yml/build": cls})
+    assert problems == [f"b.yml/build: runs-on must be ubuntu-latest or the routed {cls} runner"]
+    assert trust({"b.yml": workflow(runner)}) != []
+
+
+@pytest.mark.parametrize(
+    "route",
+    [
+        "(github.event_name == 'merge_group' && 'anton-oss' || 'anton-oss-queue')",
+        "(github.event_name == 'push' && 'anton-oss-queue' || 'anton-oss')",
+        "(github.event_name != 'merge_group' && 'anton-oss-queue' || 'anton-oss')",
+        "(github.event_name == 'merge_group' && 'anton' || 'anton-oss')",
+        "(github.event_name == 'merge_group' && 'anton-oss-queue' || 'ubuntu-latest')",
+        "'anton-oss-queue'",
+    ],
+)
+def test_any_other_queue_route_is_red_in_both_gates(route):
+    runner = queue_routed(route)
+    assert classes({"b.yml": workflow(runner)}, {"b.yml/build": "standard"}) == [
+        "b.yml/build: runs-on must be ubuntu-latest or the routed standard runner"
+    ]
+    assert trust({"b.yml": workflow(runner)}) != []

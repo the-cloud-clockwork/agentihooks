@@ -8,11 +8,15 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from hooks.observability.trace_flush import start_time
 from scripts.inbox.seats import of_swarm, seat_address
 from scripts.inbox.store import InboxStore
 from scripts.swarm import control_notifications
 from scripts.swarm.ledger_client import LEDGER_DIR
 from scripts.swarm.store import MASTER, SwarmError
+from scripts.swarm_ledger import server_code
+
+PROC = Path("/proc")
 
 NEVER = "The Doctor never changes the watched swarm's tasks or kills an agent mid work."
 HANDOFF_ASK = (
@@ -91,10 +95,22 @@ def _server_modules(code):
     return seen
 
 
+def _started_ns(ctx: Context) -> int:
+    pid = int(ctx.pidfile.read_text())
+    held = server_code.loaded(ctx.pidfile.parent)
+    if held is not None and held.get("pid") == pid:
+        return held["stamp"]
+    ticks = start_time(pid, PROC)
+    if ticks is None:
+        raise SwarmError("cannot read the ledger server process start")
+    boot = next(int(line.split()[1]) for line in (PROC / "stat").read_text().splitlines() if line.startswith("btime "))
+    return boot * 1_000_000_000 + ticks * 1_000_000_000 // os.sysconf("SC_CLK_TCK")
+
+
 def _changed_since_start(ctx):
     pages = {p for p in ctx.code.rglob("*") if p.is_file() and "__pycache__" not in p.parts}
-    started = ctx.pidfile.stat().st_mtime
-    changed = (p for p in pages | _server_modules(ctx.code) if p.stat().st_mtime > started)
+    started = _started_ns(ctx)
+    changed = (p for p in pages | _server_modules(ctx.code) if p.stat().st_mtime_ns > started)
     return sorted(str(p.relative_to(ctx.code.parents[1])) for p in changed)
 
 

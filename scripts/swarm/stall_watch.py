@@ -140,7 +140,14 @@ def _stall(watch, task, pull, marks, seen, agent):
             return None, None
         return "unmergeable", _since(watch, marks, seen, f"{tid}:unmergeable")
     marks_red = [mark for mark in (pull.pushed_at, pull.red_at) if mark is not None]
-    if pull.red and pull.resolved and not pull.queued and marks_red:
+    if (
+        pull.red
+        and pull.resolved
+        and not pull.queued
+        and marks_red
+        and not pull.latest_run_cancelled
+        and not pull.draft
+    ):
         return "red", max(marks_red)
     if pull.resolved and not pull.red and not pull.queued and not pull.draft:
         return "green", _since(watch, marks, seen, f"{tid}:green")

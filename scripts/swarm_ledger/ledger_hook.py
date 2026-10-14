@@ -291,6 +291,9 @@ def serve_ledgers():
 
 
 def dispatch(payload):
+    global LEDGER_DIR, SESSIONS
+    LEDGER_DIR = Path(os.environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
+    SESSIONS = LEDGER_DIR / ".sessions"
     sid = payload.get("session_id")
     if not sid or not SESSIONS.exists() and payload.get("hook_event_name") not in ("SessionStart", "PostToolUse"):
         return

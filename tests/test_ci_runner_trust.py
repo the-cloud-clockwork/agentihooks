@@ -245,6 +245,11 @@ def test_safe_pool_selector_passes_without_job_admission_skip(pool):
     )
 
 
+def test_the_default_selector_names_the_plain_pool():
+    policy = {"actors": ACTORS, "queue_actor": "github-merge-queue[bot]"}
+    assert ci_runner_trust.selector(policy, "anton-oss") == selector()
+
+
 @pytest.mark.parametrize("replace", ["actor", "trigger", "target", "fork", "queue-ref", "outsider", "fallback", "pool"])
 def test_selector_cannot_loosen_actor_or_event_policy(replace):
     runner = selector()
