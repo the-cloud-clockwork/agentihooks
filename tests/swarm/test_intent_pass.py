@@ -11,7 +11,9 @@ def test_ready_intent_is_delivered_before_a_slow_runtime_launch(env, monkeypatch
     run("sw", "create", "--repo", "/repo")
     store.update("sw", state="running", gates={"intent": "observe"})
     url = "https://github.com/o/r/pull/9"
-    ledger.rows["t1"].update(state="pr", pr_url=url)
+    ledger.rows["t1"].update(
+        state="pr", pr_url=url, title="Ready intent", description="Judge this pull request promptly."
+    )
     ledger.pulls[url] = PullRequest("OPEN", None, None, False, head="h1")
     clock, delivered, at_launch = [1_000_000], [], []
     monkeypatch.setattr(cli, "now_ms", lambda: clock[0])
