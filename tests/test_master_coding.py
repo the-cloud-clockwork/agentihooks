@@ -20,6 +20,7 @@ def master(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "ah"))
     return tmp_path
 
+
 @pytest.fixture
 def unseated(tmp_path, monkeypatch):
     monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)

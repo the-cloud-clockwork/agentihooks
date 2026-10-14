@@ -49,6 +49,7 @@ def test_take_master_seats_this_session_and_names_it(taker, capsys):
     assert named == [(4242, "master@a1b2c3-0001")]
     assert rt.masters == []
 
+
 def test_take_master_writes_a_durable_seat_record_for_each_live_session(taker):
     from hooks.context import broadcast, master_coding
 
