@@ -100,6 +100,8 @@ def _lines(path):
 def _snapshot(args):
     base, head = _revision(args.base), _revision(args.head)
     grader = _git("rev-parse", "HEAD")
+    if args.event == "pull_request":
+        base = _git("merge-base", grader, head)
     return {
         "version": 1,
         "run": args.run,

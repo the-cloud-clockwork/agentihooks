@@ -38,6 +38,10 @@ MOVED = {
     ("mutation-preflight.yml", "mutation-shard"): BATCH,
     ("mutation-preflight.yml", "plan"): LIGHT,
     ("mutation-preflight.yml", "pull-request"): LIGHT,
+    ("mutation-preflight.yml", "refine"): LIGHT,
+    ("mutation-replay.yml", "plan"): LIGHT,
+    ("mutation-replay.yml", "grade"): BATCH,
+    ("mutation-replay.yml", "verify"): LIGHT,
     ("mutation-preflight.yml", "stats"): BATCH,
     ("proofs.yml", "tests"): STANDARD,
     ("semgrep.yml", "scan"): LIGHT,
@@ -70,7 +74,7 @@ MOVED = {
     ("test.yml", "sonar"): STANDARD,
     ("test.yml", "split"): STANDARD,
     ("test.yml", "stage-budget"): LIGHT,
-    ("test.yml", "test-count"): LIGHT,
+    ("test.yml", "test-count"): STANDARD,
     ("test.yml", "unit"): STANDARD,
     ("worker-resources.yml", "measure"): BATCH,
 }
@@ -182,6 +186,11 @@ UNTRUSTED_EVENTS = [
 @pytest.mark.parametrize(("workflow", "job"), sorted(MOVED))
 def test_each_job_runs_on_its_isolated_anton_pool_only_for_trusted_actors(workflow, job):
     assert workflows()[workflow]["jobs"][job]["runs-on"] == pool(MOVED[(workflow, job)])
+
+
+def test_test_count_timeout_holds_three_times_its_slowest_recent_run():
+    slowest_seconds = 311  # Tests run 38364025608: the 3.12 leg hit the old five minute timeout
+    assert workflows()["test.yml"]["jobs"]["test-count"]["timeout-minutes"] * 60 >= 3 * slowest_seconds
 
 
 def test_no_job_resolves_a_hosted_runner_for_a_trusted_actor():

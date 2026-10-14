@@ -464,6 +464,22 @@ def test_the_record_names_every_trusted_grading_input(reuse_repo, tmp_path, monk
     )
 
 
+def test_a_pull_request_record_names_the_merge_base_with_current_dev_not_the_frozen_event_base(reuse_repo, tmp_path):
+    root, base, head, _ = reuse_repo
+    git(root, "switch", "-q", "-c", "newer", base)
+    (root / "dev.txt").write_text("newer dev\n")
+    git(root, "add", "dev.txt")
+    git(root, "commit", "-m", "newer dev")
+    newer = git(root, "rev-parse", "HEAD")
+    git(root, "switch", "-q", "--detach", head)
+    git(root, "merge", "-q", "--no-edit", "newer")
+    merged = git(root, "rev-parse", "HEAD")
+    git(root, "switch", "-q", "--detach", newer)
+    output = tmp_path / "record.json"
+    invoke(root, base, merged, "pull_request", output)
+    assert json.loads(output.read_text())["inputs"]["base"] == git(root, "rev-parse", f"{newer}^{{tree}}")
+
+
 def test_an_unreadable_run_list_names_why_it_runs_fully(full_source, tmp_path):
     root, base, head, queue, env, responses, _ = full_source
     responses.pop(RUNS.format(head))

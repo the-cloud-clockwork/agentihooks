@@ -18,7 +18,9 @@ def merge_reports(reports: list[dict]) -> dict:
                 merged[key] += entry[key]
         for entry in report["not_mutated"]:
             not_mutated.setdefault(entry["path"], entry)
+    measurements = [report["shard"] for report in reports if "shard" in report]
     return {
+        **({"shards": measurements} if measurements else {}),
         "files": list(files.values()),
         "not_mutated": list(not_mutated.values()),
         "failed": any(report["failed"] for report in reports),
