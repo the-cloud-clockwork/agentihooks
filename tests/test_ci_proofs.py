@@ -124,7 +124,9 @@ def test_selected_unit_paths_are_checked_before_setup(paths, code, tmp_path):
         ("tests/existing.py hooks/missing.py", "true", 1, None),
     ],
 )
-def test_focused_proof_runs_only_existing_requests_when_explicitly_asked(paths, existing_only, code, selected, tmp_path):
+def test_focused_proof_runs_only_existing_requests_when_explicitly_asked(
+    paths, existing_only, code, selected, tmp_path
+):
     step = next(s for s in _workflow()["jobs"]["tests"]["steps"] if s.get("name") == "Require explicit test paths")
     (tmp_path / "tests").mkdir()
     (tmp_path / "tests/existing.py").touch()
