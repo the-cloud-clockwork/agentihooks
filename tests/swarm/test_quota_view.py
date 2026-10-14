@@ -122,7 +122,7 @@ def test_codex_status_and_page_report_week_remaining(five):
     assert quota_view.lines(decision, decision["at"])[-1] == (
         "quota account codex a  open  routing 73% left  sessions 0"
     )
-    assert quota_view.page(decision, decision["at"])["accounts"][0]["routing"] == 73.0
+    assert quota_view.page(decision)["accounts"][0]["routing"] == 73.0
 
 
 def test_codex_status_keeps_a_missing_week_unknown():
