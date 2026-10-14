@@ -799,7 +799,7 @@ def test_the_probe_requests_the_head_with_its_check_rollup():
                 "api",
                 "graphql",
                 "-f",
-                "query=query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid mergeQueueEntry{id} mergeable isDraft "
+                "query=query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid mergeQueueEntry{id state} mergeable isDraft "
                 "commits(last:1){nodes{commit{committedDate "
                 'file(path:".github/workflows"){object{...on Tree{entries{object{...on Blob{text}}}}}} '
                 "statusCheckRollup{contexts(first:100){"
