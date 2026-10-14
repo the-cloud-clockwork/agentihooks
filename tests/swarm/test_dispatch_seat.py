@@ -582,6 +582,17 @@ def test_a_short_or_covered_bottleneck_is_no_trigger(named, ticks):
     assert dispatch_seat.uncovered(swarm(), SLUG, NOW) == []
 
 
+def test_quota_pressure_closes_after_automatic_routing_is_applied():
+    store = swarm()
+    store.update(SLUG, lanes={"eng": {"agent": "claude"}, "ci": {"agent": "claude"}})
+    held(store, "quota")
+    assert "bottleneck" in dispatch_seat.refusal(SLUG, store.config(SLUG), store, doc(), NOW)
+
+    store.update(SLUG, lanes={"eng": {"agent": "auto"}, "ci": {"agent": "auto"}})
+
+    assert dispatch_seat.refusal(SLUG, store.config(SLUG), store, doc(), NOW) == ""
+
+
 def test_a_bottleneck_whose_report_stopped_fifteen_minutes_ago_closes():
     store, runtime = swarm(), FakeRuntime()
     held(store)
