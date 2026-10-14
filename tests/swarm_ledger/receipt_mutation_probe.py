@@ -64,6 +64,8 @@ def statistics(root, work, baseline=False):
         return
     assert result.returncode == 0, f"receipt mutation statistics failed with {result.returncode}"
     stats = json.loads((work / "stats.json").read_text())
+    assert stats["results"] and all(result["status"] == 0 for result in stats["results"])
+    assert any(NODE in tests for result in stats["results"] for tests in result["tests"].values())
     print(json.dumps(stats), flush=True)
 
 
