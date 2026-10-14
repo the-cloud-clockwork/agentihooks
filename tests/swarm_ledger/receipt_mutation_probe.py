@@ -21,7 +21,7 @@ CASE = "tests/swarm_ledger/receipt_tracing_case.py"
 NODE = f"{CASE}::test_latest_thousand_operation_receipts_remain_retry_safe"
 
 
-def statistics(root, work, baseline=False):
+def statistics(root, work, baseline=False, delay=False):
     work.mkdir()
     paths = [path for path in PATHS if (root / path).is_file()]
     prepare_workspace(root, work, paths, [CASE])
@@ -29,6 +29,19 @@ def statistics(root, work, baseline=False):
         "from tests.swarm_ledger.test_api_v1 import authority_live, live, "
         "test_latest_thousand_operation_receipts_remain_retry_safe\n"
     )
+    if delay:
+        (work / CASE).write_text(
+            "import time\n"
+            "from tests.swarm_ledger.test_api_v1 import authority_live, live, server, "
+            "test_latest_thousand_operation_receipts_remain_retry_safe as receipt_case\n\n"
+            "def test_latest_thousand_operation_receipts_remain_retry_safe(live, monkeypatch):\n"
+            "    post = server.Handler.do_POST\n"
+            "    def delayed_post(handler):\n"
+            "        time.sleep(6)\n"
+            "        return post(handler)\n"
+            "    monkeypatch.setattr(server.Handler, 'do_POST', delayed_post)\n"
+            "    receipt_case(live)\n"
+        )
     if baseline:
         transport = work / "tests/swarm_ledger/test_ledger_authority.py"
         transport.write_text(transport.read_text().replace("MUTATION_TRACE_FACTOR = 7", "MUTATION_TRACE_FACTOR = 1"))
@@ -65,7 +78,7 @@ def statistics(root, work, baseline=False):
     print(result.stdout, flush=True)
     if baseline:
         assert result.returncode != 0 and "TimeoutError: timed out" in result.stdout
-        print("Original five second deadline control failed on receipt POST under mutation tracing.", flush=True)
+        print("Original five second deadline control failed on receipt POST with six second tracing delay.", flush=True)
         return
     assert result.returncode == 0, f"receipt mutation statistics failed with {result.returncode}"
     stats = json.loads((work / "stats.json").read_text())
@@ -102,7 +115,7 @@ def missing_coverage(root, work):
 if __name__ == "__main__":
     root = Path.cwd()
     work = root / ".receipt-mutation-proof"
-    if sys.argv[1] in ("stats", "stats-baseline"):
-        statistics(root, work, sys.argv[1] == "stats-baseline")
+    if sys.argv[1] in ("stats", "stats-baseline", "stats-compensated"):
+        statistics(root, work, sys.argv[1] == "stats-baseline", sys.argv[1] != "stats")
     else:
         missing_coverage(root, work)

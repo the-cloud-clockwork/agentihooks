@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mode: [stats, stats-baseline, missing-coverage]
+        mode: [stats, stats-baseline, stats-compensated, missing-coverage]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
