@@ -606,11 +606,12 @@ def test_current_lists_every_configured_account_and_an_unprobed_one_as_unknown(m
     monkeypatch.setattr(agents_quota, "_masters", lambda harness="": {})
     monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {})
     fresh = ProbeResult("beta", "allowed", "NORMAL", 60.0, QuotaWindow(20.0, 30_000), QuotaWindow(40.0, 90_000))
-    table = agents_quota.current_table([], [fresh], {"beta", "gamma", "alpha"}, {"gamma": 2}, False, "beta")
+    unprobed = ["alpha", "delta", "eta", "gamma", "iota", "kappa", "omega", "theta", "zeta"]
+    table = agents_quota.current_table([], [fresh], {"beta", *unprobed}, {"gamma": 2}, False, "beta")
     rows = [line.split() for line in table.splitlines()[2:]]
-    assert [row[2] for row in rows] == ["beta", "alpha", "gamma"]
+    assert [row[2] for row in rows] == ["beta", *unprobed]
     assert rows[1] == ["2", "claude", "alpha", "subscription", "UNKNOWN", "0/-", "-", *["-"] * 6]
-    assert rows[2] == ["3", "claude", "gamma", "subscription", "UNKNOWN", "2/-", "-", *["-"] * 6]
+    assert rows[4] == ["5", "claude", "gamma", "subscription", "UNKNOWN", "2/-", "-", *["-"] * 6]
 
 
 def test_a_signed_out_login_has_no_routing_and_an_expired_one_no_five_hour_window():
