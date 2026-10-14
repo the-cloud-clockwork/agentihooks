@@ -688,7 +688,7 @@ def test_an_unmergeable_entry_reopens_with_its_cause_within_one_tick(merging, qu
     assert merging.queued == [("queue", URL)] + ([("dequeue", URL)] if queued else [])
     assert merging.rows["t1"]["state"] == "open"
     assert merging.rows["t1"]["claimed_by"] == ""
-    assert merging.rows["t1"]["awaiting"] == ""
+    assert merging.rows["t1"]["awaiting"] == "fix"
     assert merging.store.claimant("sw", "t1") is None
     assert ready.record(merging.store, "sw", "t1") is None
     assert cause in merging.ledger.comments[0][1]
