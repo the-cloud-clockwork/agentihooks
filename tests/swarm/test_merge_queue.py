@@ -240,6 +240,39 @@ def test_queue_refreshes_changed_grading_inputs_before_enqueueing(changed, head)
     assert not any("enqueuePullRequest(input:" in str(call[0]) for call in calls)
 
 
+def test_a_branch_update_github_refuses_names_the_update_step():
+    run, calls = runner(
+        {"data": {"resource": OPEN}},
+        {
+            "data": {
+                "resource": {
+                    "number": 12,
+                    "repository": {"nameWithOwner": "o/r", "ref": {"target": {"oid": "current"}}},
+                }
+            }
+        },
+        {"workflow_runs": [{"name": "Tests", "head_sha": "abc", "conclusion": "success", "id": 21}]},
+        {"jobs": [{"id": 31, "name": "test-count (3.11)", "conclusion": "success"}]},
+        "2026-10-09T09:20:06Z   BASE: cccccccccccccccccccccccccccccccccccccccc\n",
+        {"data": {"resource": {"repository": {"ref": {"target": {"oid": "current"}}}}}},
+        AUTHORED,
+        {"files": [{"filename": "tests/swarm/test_ready.py"}], "total_commits": 1},
+        {"data": {"resource": {"repository": {"ref": {"target": {"oid": "current"}}}}}},
+    )
+
+    def refused(command, **kwargs):
+        if command[2] == "repos/o/r/pulls/12/update-branch":
+            return subprocess.CompletedProcess(command, 1, "", "gh: merge conflict between base and head (HTTP 422)\n")
+        return run(command, **kwargs)
+
+    with pytest.raises(SwarmError) as caught:
+        merge_queue.operate("queue", URL, refused)
+    assert (
+        str(caught.value) == "could not update the branch from dev: gh: merge conflict between base and head (HTTP 422)"
+    )
+    assert not any("enqueuePullRequest(input:" in str(call[0]) for call in calls)
+
+
 def test_queue_does_not_refresh_unrelated_dev_changes():
     run, calls = runner(
         {"data": {"resource": OPEN}},

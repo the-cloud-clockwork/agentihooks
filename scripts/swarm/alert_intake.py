@@ -30,7 +30,7 @@ MAX_BODY = 1_000_000
 EPISODE_CHARS = 40
 UNIT = "task hours in the window"
 STAGES = (
-    "claim_wait",
+    "seat_wait",
     "review",
     "merge_queue",
     "intent_fix",

@@ -112,6 +112,12 @@ def mutate_files(
             results, reason = load_parts(stats.folder, key)
             if reason:
                 return {}, reason
+            plan_path = stats.folder.parent / "plan.json"
+            if plan_path.is_file():
+                plan = json.loads(plan_path.read_text())
+                if plan["head"] != stats.head or key not in plan["keys"]:
+                    return {}, "measured mutation plan stale for this commit or selection"
+                shutil.copy(plan_path, work / "shard-plan.json")
             (work / "shared-stats.json").write_text(json.dumps(results))
             stats_args = ["reuse", str(work / "shared-stats.json")]
     status = run_process(
@@ -140,6 +146,38 @@ def mutate_files(
     return json.loads(result_path.read_text()), ""
 
 
+def record_shard_measurement(
+    report: dict, output: Path, stats: SharedStats | None, started: float, budget: float, shard: tuple[int, int]
+) -> None:
+    if stats is None or stats.part is not None or not (stats.folder / "plan.json").is_file():
+        return
+    plan = json.loads((stats.folder / "plan.json").read_text())
+    owned = {name for name, index in plan["assignments"].items() if index == shard[0]}
+    completed = set()
+    for path in output.glob("*/mutants/**/*.py.meta"):
+        data = json.loads(path.read_text())
+        completed.update(
+            name for name, status in data["exit_code_by_key"].items() if status is not None and name in owned
+        )
+    graded = max(
+        len(completed),
+        sum(count for file in report["files"] for status, count in file["counts"].items() if status != "not checked"),
+    )
+    exhausted = any(entry["reason"] == "over budget" for entry in report["not_mutated"])
+    report["shard"] = {
+        "index": shard[0],
+        "total": shard[1],
+        "budget_seconds": budget,
+        "wall_seconds": time.monotonic() - started,
+        "expected": len(owned),
+        "graded": graded,
+        "complete": graded == len(owned) and not report["not_mutated"],
+        "budget_exhausted": exhausted,
+        "estimated_worker_seconds": sum(plan["costs"][name] for name in owned),
+    }
+    print(json.dumps({"shard": report["shard"]}), flush=True)
+
+
 def run_gate(
     root: Path,
     changes: dict[str, set[int]],
@@ -149,7 +187,8 @@ def run_gate(
     stats: SharedStats | None = None,
 ) -> dict:
     output.mkdir(parents=True, exist_ok=True)
-    deadline = time.monotonic() + budget
+    started = time.monotonic()
+    deadline = started + budget
     cleared = load_clearances(root)
     report = {"files": [], "not_mutated": [], "failed": False}
     rows, reasons, selected = {}, {}, {}
@@ -194,5 +233,6 @@ def run_gate(
         if result["failures"]:
             print(survivor_text(result))
             report["failed"] = True
+    record_shard_measurement(report, output, stats, started, budget, shard)
     (output / "report.json").write_text(json.dumps(report) + "\n")
     return report
