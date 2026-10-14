@@ -8,7 +8,7 @@ on:
         type: choice
         required: true
         default: tests
-        options: [tests, mutation, semgrep, worker-image, swarm-image, brain-smoke, helm-kind, github-access, row-memory]
+        options: [tests, mutation, mutation-replay, semgrep, worker-image, swarm-image, brain-smoke, helm-kind, github-access, row-memory]
       base:
         description: Base revision for mutation or Semgrep scope
         required: true
@@ -34,6 +34,12 @@ permissions:
   actions: read
 
 jobs:
+  mutation-replay:
+    if: inputs.proof == 'mutation-replay'
+    uses: ./.github/workflows/mutation-replay.yml
+    with:
+      case: ${{ inputs.base }}
+
   row-memory:
     if: inputs.proof == 'row-memory'
     uses: ./.github/workflows/ledger-row-memory.yml

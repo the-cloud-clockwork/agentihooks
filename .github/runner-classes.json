@@ -15,7 +15,11 @@
   "mutation-preflight.yml/mutation-shard": "batch",
   "mutation-preflight.yml/plan": "light",
   "mutation-preflight.yml/pull-request": "light",
+  "mutation-preflight.yml/refine": "light",
   "mutation-preflight.yml/stats": "batch",
+  "mutation-replay.yml/grade": "batch",
+  "mutation-replay.yml/plan": "light",
+  "mutation-replay.yml/verify": "light",
   "pages.yml/build": "hosted",
   "pages.yml/deploy": "hosted",
   "proofs.yml/tests": "standard",
@@ -55,7 +59,7 @@
   "test.yml/sonar": "standard",
   "test.yml/split": "standard",
   "test.yml/stage-budget": "light",
-  "test.yml/test-count": "light",
+  "test.yml/test-count": "standard",
   "test.yml/unit": "standard",
   "worker-resources.yml/measure": "batch"
 }

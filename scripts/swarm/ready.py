@@ -10,11 +10,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from scripts.swarm import merge_queue, stack, waits
+from scripts.swarm import claim_order, merge_queue, stack, waits
 from scripts.swarm.store import ASSIST, MANUAL, SwarmError
 from scripts.swarm_ledger import ledger_kinds
 
 AWAITING = "merge"
+FIX = claim_order.FIX
+CONFLICT = "conflicts with dev and needs an update the swarm cannot make"
 RECORDS = "ready"
 GATED = ("code", "ci")
 QUEUE_TRIES = 5
@@ -147,7 +149,9 @@ def _advance(run, rows, row, found):
     if pull.state != "OPEN":
         return _reopen(run, row, found, "was closed without merging")
     if held["kind"] == "checks":
-        return _checks(run, row, found)
+        if pull.mergeable == "CONFLICTING":
+            return _reopen(run, row, found, CONFLICT)
+        return _checks(run, row, found, pull)
     outcome = waits.merge_resolution(held, run.github, run.reread, run.now_ms - found["queued_at"] < waits.FRESH_MS)
     if not outcome:
         save(run.store, run.slug, row["id"], found)
@@ -157,13 +161,14 @@ def _advance(run, rows, row, found):
     return _reopen(run, row, found, "left the merge queue without merging")
 
 
-def _checks(run, row, found):
+def _checks(run, row, found, pull):
     outcome = waits.checks_resolution(found["on"], run.github)
     if not outcome.startswith(f"checks on {found['url']}"):
         save(run.store, run.slug, row["id"], found)
         return []
     if outcome.startswith(f"checks on {found['url']}, now red"):
-        return _reopen(run, row, found, "has red checks")
+        steps = ", ".join(pull.failed)
+        return _reopen(run, row, found, f"has red checks: {steps}" if steps else "has red checks")
     return _queue(run, row, found)
 
 
@@ -203,7 +208,7 @@ def _finish(run, rows, row, found):
 
 def _reopen(run, row, found, what):
     task_id, url = row["id"], found["url"]
-    run.ledger.update_task(run.slug, task_id, {"state": "open", "claimed_by": "", "awaiting": ""}, if_state=("pr",))
+    run.ledger.update_task(run.slug, task_id, {"state": "open", "claimed_by": "", "awaiting": FIX}, if_state=("pr",))
     run.ledger.comment(run.slug, task_id, REOPENED.format(url=url, what=what), by="swarm")
     run.store.release(run.slug, task_id, found["agent"])
     forget(run.store, run.slug, task_id)

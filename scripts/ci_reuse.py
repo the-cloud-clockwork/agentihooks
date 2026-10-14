@@ -34,13 +34,29 @@ QUEUE_COVERAGE = (
 )
 
 
-def gate_steps(queue_coverage: bool = False) -> list[dict]:
+SELECTED_SCOPE = (
+    '\'all(to_entries[]; .value.result == "success"',
+    '\'(.select.outputs.scope // "") as $scope | ($event != "pull_request" or $scope != "selected"'
+    ' or ."unit-selected".result == "success") and all(to_entries[]; .value.result == "success"',
+)
+SELECTED_SKIPS = (
+    ')\' <<< "$NEEDS"; then\n  echo "::error::Every required gate must succeed."',
+    ' or ((.key == "split" or .key == "unit" or .key == "shard-check" or .key == "coverage-ratchet")'
+    ' and .value.result == "skipped" and $event == "pull_request" and ($scope == "selected" or $scope == "none"))'
+    ' or (.key == "unit-selected" and .value.result == "skipped" and ($event != "pull_request" or $scope == "full" or $scope == "none"))'
+    ')\' <<< "$NEEDS"; then\n  echo "::error::Every required gate must succeed."',
+)
+
+
+def gate_steps(queue_coverage: bool = False, selected: bool = False) -> list[dict]:
     run = 'echo "$NEEDS"\nif [[ "${REUSED:-false}" == true ]]; then\n  if [[ "${EVENT:-}" != merge_group ]] || ! jq -e \'has("reuse") and .reuse.result == "success" and .reuse.outputs.reused == "true" and (.reuse.outputs.run // "" | test("^[0-9]+$")) and has("queue-baseline") and ."queue-baseline".result == "success" and all(to_entries[]; ((.key == "reuse" or .key == "queue-baseline" or .key == "stage-budget") and .value.result == "success") or (.key != "reuse" and .key != "queue-baseline" and .key != "stage-budget" and .value.result == "skipped"))\' <<< "$NEEDS"; then\n    echo "::error::Verified queue reuse and its coverage baseline must succeed."\n    exit 1\n  fi\n  exit 0\nfi\nif ! jq -e --arg event "${EVENT:-}" --arg mutation "$MUTATION" --arg kind "${KIND:-}" \'all(to_entries[]; .value.result == "success" or ((.key == "mutation" or .key == "mutation-plan" or .key == "mutation-stats") and .value.result == "skipped" and $mutation == "false") or (.key == "helm-kind" and .value.result == "skipped" and $kind == "false") or (.key == "queue-baseline" and .value.result == "skipped" and $event != "merge_group"))\' <<< "$NEEDS"; then\n  echo "::error::Every required gate must succeed."\n  exit 1\nfi\n'
     if queue_coverage:
         run = run.replace("  exit 0\nfi\n", "  exit 0\nfi\n" + QUEUE_COVERAGE).replace(
             '$event != "merge_group"))',
             '$event != "merge_group") or (.key == "coverage-ratchet" and .value.result == "skipped" and $event == "merge_group"))',
         )
+    if selected:
+        run = run.replace(*SELECTED_SCOPE).replace(*SELECTED_SKIPS)
     return [
         {
             "name": "Require every gate to succeed",
@@ -84,6 +100,8 @@ def _lines(path):
 def _snapshot(args):
     base, head = _revision(args.base), _revision(args.head)
     grader = _git("rev-parse", "HEAD")
+    if args.event == "pull_request":
+        base = _git("merge-base", grader, head)
     return {
         "version": 1,
         "run": args.run,
