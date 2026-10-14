@@ -614,6 +614,11 @@ def test_current_lists_every_configured_account_and_an_unprobed_one_as_unknown(m
     assert rows[4] == ["5", "claude", "gamma", "subscription", "UNKNOWN", "2/-", "-", *["-"] * 6]
 
 
+def test_an_unprobed_account_carries_no_provider_status_and_no_windows():
+    unread = ProbeResult("alpha", "", "UNKNOWN", None, QuotaWindow(), QuotaWindow())
+    assert agents_quota._unprobed("alpha") == unread
+
+
 def test_a_signed_out_login_has_no_routing_and_an_expired_one_no_five_hour_window():
     week = codex_quota.CodexQuota(1000, "pro", QuotaWindow(20.0, 2000), QuotaWindow(30.0, 9000))
     expired = codex_quota.CodexQuota(1000, "?", QuotaWindow(20.0, 2000), QuotaWindow(30.0, 9000), expired=True)
