@@ -553,6 +553,18 @@ def test_a_split_task_waits_for_a_pull_request_for_every_declared_half(merging):
     assert merging.store.handoff("sw", "t1") == "the handoff"
 
 
+def test_the_watched_pull_request_completes_the_remaining_split_binding(merging):
+    second = "https://github.com/o/r/pull/8"
+    merging.rows["t1"].update(split=["1-2", "3-4"], split_pulls=[second], pr_url=second)
+    merging.pulls.update({URL: MERGED, second: MERGED})
+    merging.run()
+    assert merging.rows["t1"]["state"] == "done"
+    assert merging.rows["t1"]["awaiting"] == ""
+    assert merging.shell.calls == [REMOVE]
+    assert ready.record(merging.store, "sw", "t1") is None
+    assert merging.store.handoff("sw", "t1") == ""
+
+
 def test_a_merge_only_the_uncached_reread_sees_closes_the_task(merging):
     merging.rows["t1"]["group_members"] = ["t2"]
     queued_at_now(merging)
