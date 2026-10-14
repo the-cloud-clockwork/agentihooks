@@ -20,6 +20,42 @@ def master(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "ah"))
     return tmp_path
 
+@pytest.fixture
+def unseated(tmp_path, monkeypatch):
+    monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
+    monkeypatch.delenv("AGENTIHOOKS_SWARM_TASK", raising=False)
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "ah"))
+    return tmp_path
+
+
+def test_a_seat_record_opens_the_window_without_the_swarm_env(unseated):
+    assert master_coding.observe(SID, "allow-master-coding", typed=True) == ""
+    master_coding.record_seat(SID, "rig", "master@rig-1")
+    assert master_coding.observe(SID, "allow-master-coding", typed=True, now=1000) == "open"
+    assert master_coding.is_open(SID, now=1000 + master_coding.WINDOW_SEC - 1)
+    assert not master_coding.is_open(SID, now=1000 + master_coding.WINDOW_SEC)
+    assert master_coding.observe(SID, "disallow-master-coding", typed=True) == "closed"
+    assert not master_coding.is_open(SID)
+
+
+def test_a_hand_launched_session_without_env_opens_edits_once_seated(unseated):
+    tree = unseated / "dev" / "worktrees" / "agentihooks" / "master-1"
+    master_coding.record_seat(SID, "rig", "master@rig-1")
+    assert "cannot edit outside" in guard(unseated, tree / "hooks" / "x.py")
+    master_coding.observe(SID, "allow-master-coding", typed=True)
+    assert guard(unseated, tree / "hooks" / "x.py") == ""
+    assert "stay closed" in guard(unseated, tree / ".env")
+    assert "stay closed" in guard(unseated, tree / ".claude" / "conditions" / "pre-bash-x.py")
+    assert "cannot edit outside" in guard(unseated, unseated / "dev" / "tcc-ecosystem" / "x.py")
+
+
+def test_an_unseated_session_stays_refused_even_with_an_open_window(unseated):
+    tree = unseated / "dev" / "worktrees" / "agentihooks" / "master-1"
+    record = master_coding.path(SID)
+    record.parent.mkdir(parents=True)
+    record.write_text(json.dumps({"at": master_coding.time.time()}))
+    assert "cannot edit outside" in guard(unseated, tree / "hooks" / "x.py")
+
 
 def test_only_the_typed_phrase_in_the_master_pane_opens_the_window(master):
     assert master_coding.observe(SID, "allow-master-coding", typed=False) == ""
