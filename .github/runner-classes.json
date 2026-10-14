@@ -11,6 +11,7 @@
   "hive-worker.yml/publish": "standard",
   "ledger-load.yml/load": "standard",
   "ledger-row-memory.yml/replay": "batch",
+  "mutation-deadline-proof.yml/receipts": "batch",
   "mutation-preflight.yml/mutation": "light",
   "mutation-preflight.yml/mutation-shard": "batch",
   "mutation-preflight.yml/plan": "light",
