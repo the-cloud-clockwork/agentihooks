@@ -1,5 +1,7 @@
 """Tests for hooks.context.serena_edit_guard."""
 
+import importlib
+
 import pytest
 
 from hooks.context.serena_edit_guard import check
@@ -102,3 +104,34 @@ def test_the_guard_can_be_turned_off(trees, monkeypatch):
     _, worktree = trees
     monkeypatch.setattr("hooks.config.SERENA_EDIT_GUARD_ENABLED", False)
     check(_tool("Edit", worktree, file_path=str(worktree / "pkg" / "mod.py")))
+
+
+def test_agentihooks_serena_false_turns_the_guard_off(trees, monkeypatch):
+    _, worktree = trees
+    monkeypatch.setenv("AGENTIHOOKS_SERENA", "false")
+    import hooks.config as config
+
+    importlib.reload(config)
+    try:
+        check(_tool("Edit", worktree, file_path=str(worktree / "pkg" / "mod.py")))
+    finally:
+        monkeypatch.delenv("AGENTIHOOKS_SERENA", raising=False)
+        importlib.reload(config)
+
+
+@pytest.mark.parametrize("value", [None, "", "true", "0", "banana"])
+def test_agentihooks_serena_unset_or_any_other_value_keeps_it_on(trees, monkeypatch, value):
+    _, worktree = trees
+    if value is None:
+        monkeypatch.delenv("AGENTIHOOKS_SERENA", raising=False)
+    else:
+        monkeypatch.setenv("AGENTIHOOKS_SERENA", value)
+    import hooks.config as config
+
+    importlib.reload(config)
+    try:
+        with pytest.raises(BlockAction, match="activate_project"):
+            check(_tool("Edit", worktree, file_path=str(worktree / "pkg" / "mod.py")))
+    finally:
+        monkeypatch.delenv("AGENTIHOOKS_SERENA", raising=False)
+        importlib.reload(config)
