@@ -402,7 +402,7 @@ def test_the_screen_digest_is_the_full_sha256():
 class FakeStore:
     def __init__(self, slug, state="running", agents=()):
         self.slug, self._state, self._agents = slug, state, agents
-        self.redis = object()
+        self.redis = SimpleNamespace(scan_iter=lambda match: ())
 
     def slugs(self):
         return [self.slug]
