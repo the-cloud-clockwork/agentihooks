@@ -234,6 +234,37 @@ def test_a_second_tick_does_not_overspawn(store):
     assert len(runtime.spawned) == 2
 
 
+@pytest.mark.parametrize("lost_ledger", [True, False])
+def test_a_live_owner_recovers_its_missing_lease_without_a_duplicate_launch(store, lost_ledger):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    owner = next(a for a in store.agents("sw") if a.task == "t1")
+    store.release("sw", "t1", owner.name)
+    if lost_ledger:
+        ledger.rows["t1"].update(state="open", claimed_by="")
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert len(runtime.spawned) == 1
+    assert store.claimant("sw", "t1") == owner.name
+    assert ledger.rows["t1"]["claimed_by"] == owner.name
+    assert ledger.rows["t1"]["state"] == "claimed"
+
+
+def test_a_live_owner_that_appears_during_placement_is_never_launched_over(store, monkeypatch):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    from scripts.swarm.store import AgentRecord
+
+    def admitted(*args):
+        store.put_agent("sw", AgentRecord("existing-owner", "eng", "t1", started_at=1_000))
+        runtime.live.add("existing-owner")
+        ledger.rows["t1"]["claimed_by"] = "existing-owner"
+        return ""
+
+    monkeypatch.setattr("scripts.swarm.tick._held_back", admitted)
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert runtime.spawned == []
+    assert ledger.rows["t1"]["claimed_by"] == "existing-owner"
+
+
 def test_a_finished_agent_is_retired_and_replaced_while_work_remains(store):
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)

@@ -49,6 +49,37 @@ def test_a_task_claim_is_exclusive_until_released(store):
     assert store.claim("smoke", "t1", "engineer@a1b2c3-0002", lease_ms=60_000)
 
 
+def test_lease_repair_is_fenced_against_a_newer_execution_and_other_holder(store):
+    from dataclasses import replace
+
+    from scripts.swarm.store import AgentRecord
+
+    store.create(config())
+    owner = AgentRecord("owner", "eng", "t1", started_at=1_000)
+    store.put_agent("smoke", owner)
+    assert store.ensure_claim("smoke", owner, 60_000)
+    assert store.claimant("smoke", "t1") == owner.name
+    store.release("smoke", "t1", owner.name)
+    successor = replace(owner, started_at=2_000)
+    store.put_agent("smoke", successor)
+    assert not store.ensure_claim("smoke", owner, 60_000)
+    assert store.claimant("smoke", "t1") is None
+    assert store.claim("smoke", "t1", "other", 60_000)
+    assert not store.ensure_claim("smoke", successor, 60_000)
+    assert store.claimant("smoke", "t1") == "other"
+
+
+def test_a_stale_release_cannot_delete_a_reacquired_lease_with_the_same_name(store):
+    store.create(config())
+    assert store.claim("smoke", "t1", "owner", 60_000)
+    generation = store.claim_generation("smoke", "t1")
+    assert store.release("smoke", "t1", "owner")
+    assert store.claim("smoke", "t1", "owner", 60_000)
+    assert not store.release("smoke", "t1", "owner", generation=generation)
+    assert store.claimant("smoke", "t1") == "owner"
+    assert store.release("smoke", "t1", "owner", generation=store.claim_generation("smoke", "t1"))
+
+
 def test_claims_count_agent_lives_per_task_until_reset(store):
     store.create(config())
     assert store.claims("smoke", "t1") == 0
