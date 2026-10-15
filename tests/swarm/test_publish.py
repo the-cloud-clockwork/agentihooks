@@ -583,7 +583,7 @@ def test_only_the_task_owner_can_publish(publication, fields):
     assert git(publication.root, "ls-remote", "origin", "refs/heads/engineer-test") == ""
 
 
-@pytest.mark.parametrize("location", ["worktree", "repository", "workspace", "fallback"])
+@pytest.mark.parametrize("location", ["worktree", "repository", "workspace", "workspace_with_repository", "fallback"])
 def test_publish_uses_the_repository_development_interpreter(publication, monkeypatch, location):
     import sys
     import venv
@@ -594,9 +594,16 @@ def test_publish_uses_the_repository_development_interpreter(publication, monkey
     if location == "fallback":
         expected = sys.prefix
     else:
-        base = {"worktree": root, "repository": publication.repo, "workspace": publication.repo.parent}[location]
+        base = {
+            "worktree": root,
+            "repository": publication.repo,
+            "workspace": publication.repo.parent,
+            "workspace_with_repository": publication.repo.parent,
+        }[location]
         environment = base / ".venv"
         venv.EnvBuilder().create(environment)
+        if location == "workspace_with_repository":
+            venv.EnvBuilder().create(publication.repo / ".venv")
         expected = str(environment)
         monkeypatch.setattr(sys, "executable", "/missing/installed-tool/python")
     gate = root / "scripts" / "ci_prepush" / "__main__.py"
