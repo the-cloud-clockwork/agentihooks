@@ -581,3 +581,31 @@ def test_only_the_task_owner_can_publish(publication, fields):
             "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
         )
     assert git(publication.root, "ls-remote", "origin", "refs/heads/engineer-test") == ""
+
+
+@pytest.mark.parametrize("location", ["worktree", "repository", "workspace", "fallback"])
+def test_publish_uses_the_repository_development_interpreter(publication, monkeypatch, location):
+    import sys
+    import venv
+
+    from scripts.swarm import publish
+
+    root = publication.root
+    if location == "fallback":
+        expected = sys.prefix
+    else:
+        base = {"worktree": root, "repository": publication.repo, "workspace": publication.repo.parent}[location]
+        environment = base / ".venv"
+        venv.EnvBuilder().create(environment)
+        expected = str(environment)
+        monkeypatch.setattr(sys, "executable", "/missing/installed-tool/python")
+    gate = root / "scripts" / "ci_prepush" / "__main__.py"
+    gate.write_text(f"import sys\nassert sys.prefix == {expected!r}, sys.prefix\n" + gate.read_text())
+    git(root, "add", "scripts/ci_prepush/__main__.py")
+    git(root, "commit", "-qm", "Require development interpreter")
+
+    result = publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+
+    assert git(root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == result["head"]
