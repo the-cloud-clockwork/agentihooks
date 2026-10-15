@@ -384,6 +384,98 @@ under its band cap (see Load balancing). Codex runs directly (`route_status=dire
 
 ---
 
+## `agentihooks terminate-agent`
+
+List live Claude Code and Codex sessions, end one by exact name, session UUID or
+PID, or stand down one managed Codex conversation without ending its process.
+
+```bash
+agentihooks terminate-agent --list --type any        # TYPE NAME SESSION_ID PID PGID STATUS CWD
+agentihooks terminate-agent eng@abc-0042 --dry-run     # resolve and validate, send nothing
+agentihooks terminate-agent eng@abc-0042               # SIGTERM the process group, SIGKILL if it survives
+agentihooks terminate-agent ci@abc-0815 --stand-down --dry-run
+agentihooks terminate-agent ci@abc-0815 --stand-down --swarm rig-grade-swarm
+```
+
+| Flag | Meaning |
+|---|---|
+| `--type claude\|codex\|any` | Limit listing and matching to one harness (default `any`) |
+| `--list` | Print the live sessions table |
+| `--dry-run` | Resolve and validate, print what would happen, change nothing; ends `result=validated signal=none` |
+| `--force-shared` | Allow ending a process whose other session UUIDs would end with it |
+| `--stand-down` | Stand down one managed Codex conversation instead of signalling a process |
+| `--swarm <slug>` | Swarm whose Codex records `--stand-down` reads; without it, the swarm the agent name belongs to |
+| `--term-timeout` | Seconds to wait after SIGTERM, and again after SIGKILL (default 3) |
+| `--keep-pane` | Leave the agent's herdr pane open after it exits |
+| `--json` | Print the resolution report as one JSON object |
+
+### Terminate a process
+
+A termination validates the target first: the PID still has the start time,
+command and arguments it was listed with, its process group is above 1, holds
+only processes of one session and does not contain the caller. It then sends
+SIGTERM to the whole process group, waits `--term-timeout`, rechecks the
+target's identity and sends SIGKILL to any survivor. Output is the resolution
+line (`action`, `type`, `name`, `session_id`, `pid`, `pgid`, `members`,
+`pane_id` in herdr), then `result=terminated escalation=SIGKILL|none` and, in
+herdr, `pane_id=<id> pane=closed|kept|close-failed (...)`. Exit 2 is a refused
+resolution or validation; exit 1 is a failed signal or a process that outlived
+SIGKILL.
+
+One interactive Codex process can carry several conversations, each listed as
+its own row with the same PID. Ending that process ends all of them, so a
+termination refuses it with `target process is shared by other session UUIDs:
+<ids>; use --force-shared`. Add `--force-shared` only when every listed
+conversation belongs to the agent being stopped.
+
+### Stand down one Codex conversation
+
+`--stand-down` stops one conversation of a managed Codex agent, one the swarm
+launched on the Codex app-server and recorded in its Codex transport records,
+and sends no signal. The selector is matched against each record's agent name,
+thread id, session id and execution id in the swarm. A stand down:
+
+1. Marks that execution's transport record `stood_down`. The agent's inbox pump
+   treats the execution as no longer current and stops, so the conversation
+   takes no new turns from the inbox.
+2. Waits up to 10 seconds for an inbox publication to that seat already in
+   flight to finish.
+3. Reads the thread from the app-server and, when its last turn is in
+   progress, interrupts that turn with `turn/interrupt`, then waits up to 10
+   seconds for the turn to stop.
+
+The app-server process and every other conversation it hosts keep running.
+
+```text
+$ agentihooks terminate-agent ci@abc-0815 --stand-down --dry-run
+action=stand-down-dry-run
+stops: conversation <thread> of ci@abc-0815 (execution <id> generation 3): its active turn (last recorded: <turn>) is interrupted and it takes no new turns
+keeps: app-server pid 41872: not signalled
+keeps: conversation <uuid> of eng@abc-0816: not interrupted
+result=validated signal=none
+```
+
+Without `--dry-run` the same `stops:` and `keeps:` lines print, the stand down
+runs, and the command ends `result=stood-down stood_down=<agent> thread=<thread>
+interrupted=<turn>`; `interrupted=` is empty when no turn was in progress.
+
+| Exit | Output | Meaning and next step |
+|---|---|---|
+| 0 | `result=validated signal=none` | Dry run; nothing changed |
+| 0 | `result=stood-down ...` | Fenced and, when a turn ran, interrupted |
+| 1 | `terminate-agent: <error>` then `<agent> stays fenced from new inbox turns; run the same stand down again to interrupt its turn` | The record is already `stood_down`; a publication still in flight, an unreachable app-server or a turn still running after its interrupt stopped it there. Rerun the same command |
+| 2 | `terminate-agent: refused: <reason>` then `terminate-agent: safe alternative: <alternative>` | Nothing changed; see the refusals below |
+
+| Refusal reason | Safe alternative printed |
+|---|---|
+| No `--swarm` and the selector names no swarm agent | `pass --swarm <slug>` |
+| The selector has no managed Codex conversation in the swarm, and it names one process | That process's PID and conversation ids, with `agentihooks terminate-agent <pid> --force-shared --dry-run`; the same command without `--dry-run` ends every conversation in the process, so run it only when all of them belong to this agent |
+| The selector has no managed Codex conversation, and it names no single process | `agentihooks terminate-agent --list --type codex shows the live conversations` |
+| The conversation already ended (`exited` or `failed`) | `nothing needs standing down` |
+| The selector names several live conversations | `name one thread: <thread ids>` |
+
+---
+
 ## `agentihooks herdr`
 
 Install and configure herdr, the terminal host `init-agent` opens agents in.

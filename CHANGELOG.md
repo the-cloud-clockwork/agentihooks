@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `agentihooks terminate-agent <agent|thread> --stand-down [--swarm <slug>] [--dry-run]`
+  stands down one managed Codex conversation without a signal: it fences the
+  conversation from new inbox turns and interrupts its active turn, leaving the
+  app-server and its other conversations running. A refusal names its reason and
+  a safe alternative.
 - Bounded ledger write timing and request route CPU reports through the metrics
   endpoint and `python -m scripts.swarm_ledger.request_metrics` command.
 - Swarm waits accept branch mutation preflight runs and report every failing
