@@ -30,6 +30,7 @@ from scripts.swarm import (
     bottleneck_remedy,
     ci_speed,
     claim_order,
+    continuation,
     control_notifications,
     dev_red,
     difficulty,
@@ -68,7 +69,7 @@ from scripts.swarm.pane import PaneObservation
 from scripts.swarm.profile_choice import ProfileUnresolved
 from scripts.swarm.ready import awaiting as awaiting_merge
 from scripts.swarm.store import MASTER, PREFIX, AgentRecord, SwarmConfig, SwarmError
-from scripts.swarm_ledger import ledger_rank, ledger_workspace
+from scripts.swarm_ledger import ledger_rank, ledger_workspace, task_dependencies
 from scripts.swarm_ledger.repository import hierarchy
 from scripts.swarm_v2 import master_scale
 from scripts.swarm_v2 import masters as master_seats
@@ -731,15 +732,11 @@ def _launch_order(slug, store, tasks, dispatched=None):
 
 
 def _unblocked(task, rows):
-    return not _parked(task, rows) and all(_stackable(rows.get(dep, {})) for dep in task.get("depends_on") or [])
+    return task_dependencies.ready(task, rows)
 
 
 def _parked(task, rows):
     return any(rows.get(dep, {}).get("state") != "done" for dep in task.get("parked_on") or [])
-
-
-def _stackable(dep):
-    return dep.get("state") == "done" or (dep.get("state") in ACTIVE and bool(dep.get("branch")))
 
 
 def _stack_base(task, rows, repo):
@@ -864,10 +861,14 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             _release_admission(slug, runtime, task)
             continue
         handoff = store.handoff(slug, task["id"])
+        lives = store.earlier_lives(slug, task["id"])
         if handoff:
             task["handoff"] = handoff
-        elif (lives := store.earlier_lives(slug, task["id"])) or task.get("branch"):
-            task["reclaim"] = reclaim(config.repo, lives, task.get("branch") or "")
+            task["handoff_envelope"] = continuation.resolve(
+                config.repo, task, rows, lives, store.handoff_envelope(slug, task["id"]) or {}, reclaim
+            )
+        elif lives or task.get("branch"):
+            task["reclaim"] = continuation.resolve(config.repo, task, rows, lives, {}, reclaim)
             store.put_reclaim(slug, name, task["reclaim"])
         task["stack_base"] = _stack_base(task, rows, config.repo)
         task["overlaps"] = _sharing(task, rows)
@@ -1027,7 +1028,7 @@ def primed(store, slug, seat, task):
     from scripts.swarm import priming_trace
 
     memory = {"recaps": store.memory.recaps(seat), "learned": store.memory.learned(seat)}
-    envelope = store.handoff_envelope(slug, task["id"])
+    envelope = task.get("handoff_envelope", store.handoff_envelope(slug, task["id"]))
     previous = store.execution_occupants(slug).get(seat)
     task = {
         **task,

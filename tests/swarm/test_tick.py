@@ -1164,14 +1164,15 @@ def test_a_reopened_task_with_a_branch_and_no_earlier_life_is_given_that_branch(
     assert runtime.tasks[-1]["reclaim"] == RECLAIMED
 
 
-def test_a_handed_off_task_keeps_its_handoff_continuation_and_takes_no_reclaim(store, reclaims):
+def test_a_handed_off_task_revalidates_its_handoff_continuation(store, reclaims):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
     store.put_handoff("sw", "t1", "seam 1 green", envelope={"continue_from": "origin/engineer-a1b2c3-0001"})
     store.put_agent("sw", replace(workers(store)[0], state="finished"))
     tick("sw", store, ledger, runtime, now_ms=2_000)
-    assert runtime.tasks[-1]["handoff_envelope"] == {"continue_from": "origin/engineer-a1b2c3-0001"}
-    assert reclaims == [] and "reclaim" not in runtime.tasks[-1]
+    assert runtime.tasks[-1]["handoff_envelope"] == RECLAIMED
+    assert reclaims == [("/repo", ["engineer@a1b2c3-0001"], "engineer-a1b2c3-0001")]
+    assert "reclaim" not in runtime.tasks[-1]
 
 
 def test_a_spawned_agent_keeps_the_model_and_effort_it_was_placed_with(store):
@@ -1555,6 +1556,37 @@ def test_a_task_starts_stacked_on_claimed_and_in_pr_dependencies_that_carry_a_br
         {"task": "t0", "branch": "engineer-a1b2c3-0002"},
     ]
     assert runtime.tasks[0]["stack_base"] == []
+
+
+@pytest.mark.parametrize("dependency_state", ["claimed", "pr"])
+def test_retained_pull_waits_for_dependency_merge_before_resuming(store, reclaims, dependency_state):
+    ledger = FakeLedger(
+        [
+            {"id": "t1"},
+            {"id": "t2", "depends_on": ["t1"], "branch": "reviewed-work", "pr_url": "https://github.com/o/r/pull/3"},
+        ]
+    )
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    ledger.rows["t1"].update(state=dependency_state, branch="dependency-work")
+
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+
+    assert spawned_ids(runtime) == ["t1"]
+    assert ledger.rows["t2"]["state"] == "open"
+    assert ledger.rows["t2"]["claimed_by"] == ""
+    assert reclaims == []
+    assert store.claimant("sw", "t2") is None
+    assert store.claims("sw", "t2") == 0
+
+    ledger.rows["t1"].update(state="done", done=True)
+    tick("sw", store, ledger, runtime, now_ms=3_000)
+
+    assert spawned_ids(runtime) == ["t1", "t2"]
+    assert ledger.rows["t2"]["state"] == "pr"
+    assert ledger.rows["t2"]["pr_url"] == "https://github.com/o/r/pull/3"
+    assert reclaims == [("/repo", [], "reviewed-work")]
+    assert runtime.tasks[-1]["stack_base"] == []
 
 
 def test_a_stacked_claim_carries_the_repository_only_of_a_dependency_branch_in_another_repository(store, monkeypatch):
