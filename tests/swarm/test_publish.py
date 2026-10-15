@@ -69,6 +69,31 @@ def publication(repository, tmp_path, monkeypatch):
     return SimpleNamespace(root=worktree, task=task, agent=agent, ledger=ledger, repo=repository)
 
 
+def test_dirty_push_names_selection_before_the_committed_head_gate(repository):
+    (repository / "chosen.txt").write_text("after")
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush({"tool_input": {"command": "git push"}, "cwd": str(repository)})
+    assert f"Next: cd {repository} && git status --short" in str(blocked.value)
+
+
+def test_deleted_file_publication_retries_after_a_failed_gate(publication, monkeypatch):
+    from scripts.swarm import publish
+    from scripts.swarm.store import SwarmError
+
+    root = publication.root
+    (root / "other.txt").unlink()
+    monkeypatch.setenv("PUBLISH_GATE_FAIL", "1")
+    files = ["chosen.txt", "other.txt"]
+    with pytest.raises(SwarmError, match="Next: agentihooks swarm swarm publish"):
+        publish.publish("swarm", publication.agent, str(publication.repo), publication.ledger, "Remove other", files)
+    head = git(root, "rev-parse", "HEAD")
+    assert "other.txt" not in git(root, "ls-tree", "--name-only", "HEAD").splitlines()
+    monkeypatch.delenv("PUBLISH_GATE_FAIL")
+    publish.publish("swarm", publication.agent, str(publication.repo), publication.ledger, "Remove other", files)
+    assert git(root, "rev-parse", "HEAD") == head
+    assert git(root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
+
+
 def test_publication_commits_explicit_files_before_grading_and_pushing(publication):
     from scripts.swarm import publish
 
