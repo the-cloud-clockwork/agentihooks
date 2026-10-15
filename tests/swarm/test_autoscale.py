@@ -184,3 +184,24 @@ def test_new_ready_work_gets_a_seat_while_a_capacity_raise_is_held():
     )
     assert decision["ceilings"] == {"eng": 2, "ci": 3, "plan": 0}
     assert decision["pending_raise"] == {"target": 18, "ticks": 1}
+
+
+def test_lane_shifts_respect_sparse_live_counts_and_the_requested_shift():
+    cases = [
+        ({"eng": 3, "ci": 5}, 6, 2, {"plan": 0, "ci": 5, "eng": 1}, 2),
+        ({"eng": 5, "ci": 3}, 6, -2, {"plan": 0, "ci": 1, "eng": 5}, -2),
+        ({"eng": 2, "ci": 10}, 8, -3, {"plan": 0, "ci": 6, "eng": 2}, 0),
+        ({"ci": 10}, 8, -3, {"plan": 0, "ci": 8, "eng": 0}, 0),
+        ({"eng": 10, "ci": 10}, 8, 1, {"plan": 0, "ci": 5, "eng": 3}, 1),
+    ]
+    for demand, seats, shift, expected, moved in cases:
+        decision = calculate(
+            {"ci": 0},
+            {"claude": seats},
+            10,
+            demand,
+            {"ceilings": {"eng": seats, "ci": 0, "plan": 0}, "pending_raise": {"target": None, "ticks": 0}},
+            shift=shift,
+        )
+        assert decision["ceilings"] == expected
+        assert decision["shift"] == moved
