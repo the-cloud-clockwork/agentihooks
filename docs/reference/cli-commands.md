@@ -458,25 +458,25 @@ keeps: conversation <uuid> of eng@abc-0816: not interrupted
 result=validated signal=none
 ```
 
-The dry run reads only the swarm's recorded transport state and does not contact
-the app-server, so `last recorded:` is the turn the inbox last submitted or
-reconciled, or `none`. Without `--dry-run` the same `stops:` and `keeps:` lines
-print, the stand-down runs, and the command ends `result=stood-down
-stood_down=<agent> thread=<thread> interrupted=<turn>`; the run interrupts only
-a last turn the app-server reports in progress, and `interrupted=` is empty when
-none was.
+The dry run reads the swarm's recorded transport state and the live process
+list, and does not contact the app-server, so `last recorded:` is the turn the
+inbox last submitted or reconciled, or `none`. Without `--dry-run` the same
+`stops:` and `keeps:` lines print, the stand-down runs, and the command ends
+`result=stood-down stood_down=<agent> thread=<thread> interrupted=<turn>`; the
+run interrupts only a last turn the app-server reports in progress, and
+`interrupted=` is empty when none was.
 
 | Exit | Output | Meaning and next step |
 |---|---|---|
 | 0 | `result=validated signal=none` | Dry run; nothing changed |
 | 0 | `result=stood-down ...` | Fenced and, when a turn ran, interrupted |
-| 1 | `terminate-agent: <error>` then `<agent> stays fenced from new inbox turns; run the same stand down again to interrupt its turn` | The fence is written first, so the record is `stood_down` after this exit. Causes: an inbox publication still in flight, an unreachable app-server, or a turn still running after the interrupt. Rerun the same command. A Redis error instead ends in a traceback with no fenced line; nothing is fenced when it came before the fence |
+| 1 | `terminate-agent: <error>` then `<agent> stays fenced from new inbox turns; run the same stand down again to interrupt its turn` | The fence is written first, so the record is `stood_down` after this exit. Causes: an inbox publication still in flight, an unreachable app-server, or a turn still running after the interrupt. Rerun the same command. A Redis error or an unreadable transport record raises an uncaught traceback, also exit 1, with no `stays fenced` line; check the record's state before rerunning |
 | 2 | `terminate-agent: refused: <reason>` then `terminate-agent: safe alternative: <alternative>` | Nothing changed; see the refusals below |
 
 | Refusal reason | Safe alternative |
 |---|---|
 | No `--swarm` and the selector names no swarm agent | `pass --swarm <slug>` |
-| The selector has no managed Codex conversation in the swarm, and it names one process | That process's PID and conversation ids, with `agentihooks terminate-agent <pid> --force-shared --dry-run`; the same command without `--dry-run` ends every conversation in the process, so run it only when all of them belong to this agent. An unregistered process has no conversation ids, so the list is empty |
+| The selector has no managed Codex conversation in the swarm, and it names one process | That process's PID and conversation ids, with `agentihooks terminate-agent <pid> --force-shared --dry-run`; the same command without `--dry-run` ends every conversation in the process, so run it only when all of them belong to this agent. An empty list means the process hosts no registered conversation: skip `--force-shared` and use the plain `agentihooks terminate-agent <pid> --dry-run` |
 | The selector has no managed Codex conversation, and it names no single process | `agentihooks terminate-agent --list --type codex shows the live conversations` |
 | The conversation already ended (`exited` or `failed`) | `nothing needs standing down` |
 | The selector names several live conversations | `name one thread: <thread ids>` |
