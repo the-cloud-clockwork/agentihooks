@@ -35,17 +35,7 @@ _session_counter: dict[str, int] = {}
 
 
 # Fallback signals (used if manifesto missing / unparseable). Must match §9.
-_DEFAULT_RELEASE_SIGNALS = [
-    "release to prod",
-    "push to prod",
-    "let's release",
-    "ship it",
-    "release gate",
-    "merge to main",
-    "merge the pr",
-    "merge it",
-    "release dance",
-]
+_DEFAULT_RELEASE_SIGNALS = ["release dance"]
 _DEFAULT_HOTFIX_SIGNALS = [
     "hotfix",
     "prod is broken",
@@ -77,7 +67,6 @@ _DEFAULT_PR_SIGNALS = [
     "create pr",
     "raise a pr",
     "submit a pr",
-    "release dance",
 ]
 
 

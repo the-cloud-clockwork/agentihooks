@@ -211,11 +211,13 @@ class TestProdLockdownIntegration:
         with pytest.raises(BlockAction):
             self._check("gh workflow run release.yml")
 
-    def test_release_workflow_allowed_with_bypass(self):
+    def test_release_workflow_blocked_with_bypass(self):
         from hooks.context.controls_toggle import set_controls_disabled
+        from hooks.hook_manager import BlockAction
 
         set_controls_disabled("test")
-        self._check("gh workflow run release.yml")
+        with pytest.raises(BlockAction):
+            self._check("gh workflow run release.yml")
 
     @pytest.mark.parametrize("base", ["main", "master", "v1"])
     def test_pr_merge_protected_blocked_under_bypass(self, base):

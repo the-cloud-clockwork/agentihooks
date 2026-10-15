@@ -1,18 +1,4 @@
-"""Production operations lockdown — PreToolUse hard guardrail.
-
-Default-denies prod-impacting commands; unlocks per-turn when the operator's
-message contains a release-gate or hotfix signal (CI Manifesto §9).
-
-Blocked by default:
-  - Docker/image operations with :latest/:prod/:stable tags  (hotfix bypass only)
-  - gh workflow run release.yml                              (release-gate OR hotfix)
-  - gh pr merge targeting main/master/v1                     (release-gate OR hotfix; bypass mode does not lift it)
-
-Signal vocabulary is parsed from the CI Manifesto (source of truth).
-Fallback vocabulary in ci_manifesto.py mirrors manifesto §9.
-
-Note: kubectl anton-prod is NOT blocked (operator unlocked 2026-04-15).
-"""
+"""Production workflow and image guards; CI alone owns protected promotion."""
 
 import re
 import shlex
@@ -34,8 +20,6 @@ _SESSION_SIGNAL_TTL = 14400  # 4 hours — session-scoped signals (release, hotf
 # Full signal vocabulary now sourced from CI Manifesto via ci_manifesto.py.
 BYPASS_PHRASES: list[str] = ["--emergency-prod", "prod override", "emergency"]
 
-# Block category: "hotfix" → only hotfix signals unlock
-#                 "release" → release-gate OR hotfix signals unlock
 _BLOCKED: list[tuple[re.Pattern, str, str, str]] = [
     (
         re.compile(r"(ghcr\.io|docker\.io)/[^/\s]+/[^:\s]+:(latest|prod|stable)\b", re.I),
@@ -52,8 +36,8 @@ _BLOCKED: list[tuple[re.Pattern, str, str, str]] = [
     (
         re.compile(r"\bgh\b[^|&;\n]*workflow\s+run\s+release\.yml\b", re.I),
         "release.yml workflow trigger",
-        "release-gate signal required — see CI Manifesto §4",
-        "release",
+        "CI alone creates releases.",
+        "ci",
     ),
     (
         re.compile(
@@ -61,7 +45,13 @@ _BLOCKED: list[tuple[re.Pattern, str, str, str]] = [
             re.I,
         ),
         "gh pr merge to main/master/v1",
-        "release-gate signal required — see CI Manifesto §4",
+        "CI alone promotes dev into protected branches.",
+        "ci",
+    ),
+    (
+        re.compile(r"\bgh\b[^|&;\n]*workflow\s+run\s+publish-pypi\.yml\b", re.I),
+        "PyPI publication",
+        "release dance required — see CI Manifesto §4.1",
         "release",
     ),
 ]
@@ -267,18 +257,14 @@ def _has_release_signal(session_id: str) -> bool:
 
 def check_prod_lockdown(payload: dict) -> None:
     session_id = payload.get("session_id", "")
-    # Operator-toggled bypass mode — unlocks everything, session-scoped
     try:
         from hooks.context.controls_toggle import is_controls_disabled
 
         controls_off = is_controls_disabled(session_id)
     except Exception:
         controls_off = False
-    # Legacy full bypass (--emergency-prod etc.) — unlocks everything, per-turn
     full_bypass = bool(session_id and is_bypass_active(session_id))
-    # Session-scoped hotfix signal — unlocks everything
     hotfix_unlock = bool(session_id and _has_hotfix_signal(session_id))
-    # Session-scoped release-gate signal — unlocks only release-category blocks
     release_unlock = bool(session_id and _has_release_signal(session_id))
 
     command = payload.get("tool_input", {}).get("command", "")
@@ -290,16 +276,14 @@ def check_prod_lockdown(payload: dict) -> None:
     for pattern, name, reason, category in _BLOCKED:
         if not any(pattern.search(line) for line in check_text.splitlines()):
             continue
-        # Bypass mode never opens a merge into a protected branch.
-        if controls_off and name != "gh pr merge to main/master/v1":
+        if category == "ci":
+            raise BlockAction(f"BLOCKED [{name}]: {reason}")
+        if category == "release":
+            if release_unlock:
+                continue
+            raise BlockAction(f"BLOCKED [{name}]: {reason}\nThe operator must request the release dance.")
+        if controls_off or full_bypass or hotfix_unlock:
             continue
-        if full_bypass or hotfix_unlock:
-            return
-        if category == "release" and release_unlock:
-            continue
-        hint = (
-            "Add a release-gate phrase (e.g. 'merge to main', 'ship it', 'release to prod') or --emergency-prod."
-            if category == "release"
-            else "Add --emergency-prod / 'prod override' / 'emergency' to your message."
+        raise BlockAction(
+            f"BLOCKED [{name}]: {reason}\nAdd --emergency-prod / 'prod override' / 'emergency' to your message."
         )
-        raise BlockAction(f"BLOCKED [{name}]: {reason}\n{hint}")
