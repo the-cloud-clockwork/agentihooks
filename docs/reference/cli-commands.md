@@ -25,9 +25,12 @@ Plain `agentihooks init` installs Claude and Codex. A previous Copilot install
 does not add it to this default. Use `--target copilot` to install Copilot alone,
 or `--with-copilot` to include it with Claude and Codex.
 
-Default output is one line per harness with its home, profile, resolved profile
-chain and installed MCP server, skill and plugin counts. Warnings and errors
-remain visible. Use `--verbose` for installation details and launch hints.
+Default output shows the linked bundle, installed profile, resolved profile
+chain and overlays, then each harness home and installed MCP server, skill and
+plugin counts. Stored swarm role profiles are never recalled for an operator
+home; Codex borrows the operator profile from Claude instead. Actionable
+warnings and errors remain visible. Use `--verbose` for installation details,
+kept MCP notices and launch hints.
 
 ```bash
 agentihooks init [--bundle <path>] [--profile <name>]

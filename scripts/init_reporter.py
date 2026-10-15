@@ -18,8 +18,10 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 
 class InstallOutput(TextIOBase):
-    def __init__(self, stream: TextIO) -> None:
+    def __init__(self, stream: TextIO, verbose: bool = False, seen: set[str] | None = None) -> None:
         self.stream = stream
+        self.verbose = verbose
+        self.seen = seen if seen is not None else set()
         self.pending = ""
         self.diagnostic = ""
         self.continuation = False
@@ -34,34 +36,37 @@ class InstallOutput(TextIOBase):
                 self._emit_diagnostic()
                 if _DIAGNOSTIC.search(_ANSI.sub("", line)):
                     self.diagnostic = line
+                elif self.verbose:
+                    self.stream.write(line + "\n")
             self.continuation = bool(self.diagnostic and self.pending)
         return len(text)
 
     def _emit_diagnostic(self) -> None:
         if self.diagnostic:
-            self.stream.write(self.diagnostic + "\n")
+            message = _ANSI.sub("", self.diagnostic)
+            kept = "Kept your existing MCP server(s)" in message
+            if (self.verbose or not kept) and message not in self.seen:
+                self.stream.write(self.diagnostic + "\n")
+                self.seen.add(message)
             self.diagnostic = ""
 
     def flush(self) -> None:
         self._emit_diagnostic()
-        if self.pending and (sys.stdin.isatty() or _DIAGNOSTIC.search(_ANSI.sub("", self.pending))):
+        if self.pending and (self.verbose or sys.stdin.isatty() or _DIAGNOSTIC.search(_ANSI.sub("", self.pending))):
             self.stream.write(self.pending)
         self.pending = ""
         self.stream.flush()
 
 
 @contextmanager
-def capture_details(verbose: bool) -> Iterator[None]:
-    if verbose:
-        yield
-    else:
-        output, errors = InstallOutput(sys.stdout), InstallOutput(sys.stderr)
-        with redirect_stdout(output), redirect_stderr(errors):
-            try:
-                yield
-            finally:
-                output.flush()
-                errors.flush()
+def capture_details(verbose: bool, seen: set[str] | None = None) -> Iterator[None]:
+    output, errors = InstallOutput(sys.stdout, verbose, seen), InstallOutput(sys.stderr, verbose, seen)
+    with redirect_stdout(output), redirect_stderr(errors):
+        try:
+            yield
+        finally:
+            output.flush()
+            errors.flush()
 
 
 def installed_counts(servers: dict, skills_home: Path, plugins: dict) -> dict[str, int]:
@@ -73,18 +78,41 @@ def installed_counts(servers: dict, skills_home: Path, plugins: dict) -> dict[st
 
 
 def report_target(
-    install_target: Callable[[], None], adapter: TargetAdapter, record: Callable[[], dict], *, verbose: bool = False
+    install_target: Callable[[], None],
+    adapter: TargetAdapter,
+    record: Callable[[], dict],
+    *,
+    verbose: bool = False,
+    header: bool = True,
+    seen: set[str] | None = None,
 ) -> None:
-    with capture_details(verbose):
+    with capture_details(verbose, seen):
         install_target()
         installed = record()
         counts = adapter.summary_counts()
-    profile = installed.get("profile", "default")
-    chain = ",".join(installed.get("profile_chain", profile.split(",")))
+    if header:
+        profile = installed.get("profile", "default")
+        chain = ", ".join(installed.get("profile_chain", profile.split(",")))
+        overlays = installed.get("settings_profile") or "none"
+        print("AgentiHooks installed")
+        print(f"Bundle {installed.get('bundle') or 'none'}")
+        print(f"Profile {profile} | Chain {chain} | Overlays {overlays}")
     print(
-        f"{adapter.name} {adapter.home()} | profile={profile} | chain={chain} | "
-        f"mcp={counts['mcp']} skills={counts['skills']} plugins={counts['plugins']}"
+        f"{adapter.name.capitalize()} {adapter.home()} | "
+        f"{counts['mcp']} MCP servers, {counts['skills']} skills, {counts['plugins']} plugins"
     )
+
+
+def previous_install(installer: ModuleType, state: dict, target: str) -> dict:
+    from scripts.profiles.scaffold import base_roles
+
+    roles = set(base_roles())
+    for candidate in (target, "claude"):
+        record = installer._global_record(state, candidate)
+        names = record.get("profile", "").split(",")
+        if record and not any(name.strip().removeprefix("package:") in roles for name in names):
+            return record
+    return {}
 
 
 def run_init(args: Namespace, installer: ModuleType) -> None:
@@ -96,9 +124,13 @@ def run_init(args: Namespace, installer: ModuleType) -> None:
     targets = (args.install_target,) if args.install_target else DEFAULT_TARGETS
     if args.with_copilot and "copilot" not in targets:
         targets = (*targets, "copilot")
+    seen: set[str] = set()
     for index, target in enumerate(targets):
         target_args = deepcopy(args)
         target_args.install_target = target
+        target_args.profile = args.profile or previous_install(installer, installer._load_state(), target).get(
+            "profile"
+        )
         if index:
             target_args.force = False
             target_args.bundle = None
@@ -110,6 +142,7 @@ def run_init(args: Namespace, installer: ModuleType) -> None:
                 installed["profile_chain"] = [
                     name for name, _ in installer._resolve_profile_chain(installed["profile"])
                 ]
+            installed["bundle"] = installer._get_bundle_path()
             return installed
 
         report_target(
@@ -117,6 +150,8 @@ def run_init(args: Namespace, installer: ModuleType) -> None:
             installer.get_adapter(target),
             record,
             verbose=args.verbose,
+            header=index == 0,
+            seen=seen,
         )
-    with capture_details(args.verbose):
+    with capture_details(args.verbose, seen):
         init_step(args.init_herdr, sys.stdin.isatty())

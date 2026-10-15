@@ -2119,9 +2119,9 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
     # Profile recall: this target's record first; a fresh target borrows the
     # default target's chain so `init --target codex` on a claude machine
     # installs the same persona instead of falling to 'default'.
-    _prev_global = _global_record(_prev_state, install_target) or _global_record(_prev_state)
-    if _is_force:
-        _prev_global = _global_record(_kept_state, install_target) or _global_record(_kept_state)
+    from scripts.init_reporter import previous_install
+
+    _prev_global = previous_install(sys.modules[__name__], _kept_state if _is_force else _prev_state, install_target)
     if not profile_name:
         if _prev_global.get("profile", ""):
             profile_name = _prev_global["profile"]

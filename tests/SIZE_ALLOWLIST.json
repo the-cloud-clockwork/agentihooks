@@ -220,8 +220,8 @@
   "PLR0912": 17
  },
  "scripts/install.py::cmd_init_unified": {
-  "C901": 26,
-  "PLR0912": 26
+  "C901": 25,
+  "PLR0912": 25
  },
  "scripts/install.py::cmd_migrate": {
   "C901": 20,
