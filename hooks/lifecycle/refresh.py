@@ -52,9 +52,14 @@ def process_started_at(pid: int) -> float:
 
 
 def due(payload: dict, environ: dict, home: Path, pid: int) -> bool:
+    from hooks.context.broadcast import _load_sessions
+
     if payload.get("agent_id") or payload.get("stop_hook_active"):
         return False
     if environ.get(LAUNCH_ENV) != "1" or environ.get("AGENTIHOOKS_SWARM"):
+        return False
+    session = _load_sessions().get(payload.get("session_id", ""), {})
+    if session.get("name", "").startswith("master@"):
         return False
     return latest_affecting_change(home) > process_started_at(pid)
 
