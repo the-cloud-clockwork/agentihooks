@@ -127,6 +127,15 @@ def check_build(root: Path) -> None:
         raise SwarmError(reason.getvalue().strip())
 
 
+def development_python(root: Path) -> str:
+    primary = Path(git(root, "rev-parse", "--path-format=absolute", "--git-common-dir")).parent
+    for base in (root, primary, primary.parent):
+        python = base / ".venv" / "bin" / "python"
+        if python.is_file():
+            return str(python)
+    return sys.executable
+
+
 def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, message: str, files: list[str]) -> dict:
     task = task_row(slug, agent, ledger)
     root = existing(Path(repo), task, agent)
@@ -143,7 +152,7 @@ def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, mess
             check_build(root)
             git(root, "commit", "-m", message)
         head = git(root, "rev-parse", "HEAD")
-        execute([sys.executable, "-m", "scripts.ci_prepush"], root)
+        execute([development_python(root), "-m", "scripts.ci_prepush"], root)
         if not ci_prepush.passed(root) or git(root, "rev-parse", "HEAD") != head:
             raise SwarmError("the committed HEAD has no passing prepush evidence")
         git(root, "push", "-u", "origin", f"HEAD:{fields['branch']}")
