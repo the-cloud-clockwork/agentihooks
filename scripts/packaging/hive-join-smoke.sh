@@ -17,9 +17,11 @@ hive=(python -c "import sys; from scripts.hive.cli import main; sys.exit(main(sy
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=$run-hive" -addext "subjectAltName=DNS:$run-hive" \
   -keyout "$tls/key.pem" -out "$tls/cert.pem" 2>/dev/null
 chmod 0644 "$tls/cert.pem"
+bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/redis:7-alpine
+bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm
 docker build --progress=plain -t "$image" .
 docker network create "$run" >/dev/null
-docker run -d --name "$run-redis" --network "$run" mirror.gcr.io/library/redis:7-alpine >/dev/null
+docker run --pull never -d --name "$run-redis" --network "$run" mirror.gcr.io/library/redis:7-alpine >/dev/null
 docker run -d --name "$run-hive" --network "$run" --user "$(id -u):$(id -g)" -v "$tls:/tls:ro" \
   -e AGENTIHOOKS_SWARM_REDIS_URL="redis://$run-redis:6379/0" \
   "$image" "${hive[@]}" serve --host 0.0.0.0 --port 8770 --tls-cert /tls/cert.pem --tls-key /tls/key.pem >/dev/null

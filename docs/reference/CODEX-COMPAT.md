@@ -55,10 +55,12 @@ that flag the whole hook layer is dead weight. Events map to groups of command
 hooks pointing at `~/.codex/agentihooks-hook.sh`, which sets
 `AGENTIHOOKS_TARGET=codex` and execs `python -m hooks`.
 
-Codex trusts hooks **by content hash**. Until trusted, it SILENTLY skips them —
-run `/hooks` once inside a codex session, or launch automation with
-`--dangerously-bypass-hook-trust`. `init` leaves an unchanged `hooks.json`
-untouched and prints the trust advice only when it rewrites the file.
+Codex trusts hooks **by content hash**. Until trusted, it SILENTLY skips them,
+and a TUI session stops at its hook review prompt. `init`, the herdr step of
+`init` and every rendered Codex profile home write `hooks.state` trust for each
+command entry in `hooks.json`, foreign groups such as herdr's included, with the
+hash Codex computes (`scripts.targets.codex_hook_trust`). A rendered home
+re-renders when the operator `hooks.json` changes.
 
 ### §2.3 stdout contract
 

@@ -13,6 +13,7 @@ from scripts.doctor import (
     inbox,
     master_launches,
     read,
+    runtime,
     spawn_read,
     spawns,
     traces,
@@ -51,6 +52,7 @@ def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME, telemetr
         return read.inbox_items(mail, slug)
 
     found = {
+        "runtime storage": lambda: runtime.findings(now_ms, env),
         "health": lambda: health.findings(
             read.health_records(store.redis, slug), now_ms, reported=reported(store, ledger, slug)
         ),

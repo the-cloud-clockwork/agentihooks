@@ -21,6 +21,14 @@ def age(path: Path, seconds: float) -> None:
     admin = admin_dir(path)
     items = [path, *(item for item in path.rglob("*") if item.name != ".git")]
     if admin:
+        log = admin / "logs" / "HEAD"
+        if log.exists():
+            entries = []
+            for line in log.read_text().splitlines():
+                header, _, message = line.partition("\t")
+                identity, _, zone = header.rsplit(" ", 2)
+                entries.append(f"{identity} {int(stamp)} {zone}\t{message}\n")
+            log.write_text("".join(entries))
         items += [admin / "index", admin / "HEAD", admin / "logs" / "HEAD"]
     for item in items:
         if item.exists():

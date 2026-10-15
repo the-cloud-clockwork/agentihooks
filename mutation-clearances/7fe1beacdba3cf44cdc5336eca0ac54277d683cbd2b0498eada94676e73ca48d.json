@@ -1,0 +1,6 @@
+{
+  "hooks/context/documentation_session.py:hooks.context.documentation_session.x_process_pending__mutmut_34:00a029d4a52d97cb46ef58574b2cda91d22f17230d056f851da71c0498ce59fa": {
+    "reader": "Standards",
+    "reason": "Replacing the final loop break with return preserves side effects, exceptions, and the None result; no statements follow the loop."
+  }
+}

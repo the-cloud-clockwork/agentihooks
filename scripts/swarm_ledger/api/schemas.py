@@ -100,6 +100,7 @@ FIELDS = {
     "artifact_purge": "by",
     "alert_claim": "by target",
     "alert_close": "by target outcome",
+    "alert_raise": "by source text",
     "time_left": "by slots ci_minutes fix_phase watched",
     "freeze_set": "by verb target reason quote",
     "freeze_clear": "by target reason quote",
@@ -224,6 +225,7 @@ def target(op: dict) -> str:
     return {
         "alert_claim": "alerts",
         "alert_close": "alerts",
+        "alert_raise": "alerts",
         "source_add": "sources",
         "plan_add": "plans",
         "slice_add": "slices",

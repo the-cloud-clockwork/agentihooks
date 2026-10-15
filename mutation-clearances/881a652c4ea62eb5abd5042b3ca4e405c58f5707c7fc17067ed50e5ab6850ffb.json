@@ -1,0 +1,6 @@
+{
+  "scripts/session_exit.py:scripts.session_exit.x_record_exit__mutmut_86:6691b7cd9bbb619c7c25060a9abfd8d0bae7191c506dfbbe8606c324645e3db7": {
+    "reader": "Standards /root/standards_reader round two",
+    "reason": "UTF-8 and utf-8 resolve to the identical Python codec and write identical JSON bytes."
+  }
+}

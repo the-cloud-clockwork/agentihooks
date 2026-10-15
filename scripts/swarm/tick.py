@@ -30,6 +30,7 @@ from scripts.swarm import (
     bottleneck_remedy,
     ci_speed,
     claim_order,
+    continuation,
     control_notifications,
     dev_red,
     difficulty,
@@ -50,12 +51,14 @@ from scripts.swarm import (
     outage,
     phase_state,
     profile_first,
+    promotion_watch,
     reaper,
     resume,
     retire_watch,
     seat_spawn,
     session_model,
     stack,
+    stale_nudge,
     tick_master,
     time_left,
     timing,
@@ -67,7 +70,7 @@ from scripts.swarm.pane import PaneObservation
 from scripts.swarm.profile_choice import ProfileUnresolved
 from scripts.swarm.ready import awaiting as awaiting_merge
 from scripts.swarm.store import MASTER, PREFIX, AgentRecord, SwarmConfig, SwarmError
-from scripts.swarm_ledger import ledger_rank, ledger_workspace
+from scripts.swarm_ledger import ledger_rank, ledger_workspace, task_dependencies
 from scripts.swarm_ledger.repository import hierarchy
 from scripts.swarm_v2 import master_scale
 from scripts.swarm_v2 import masters as master_seats
@@ -91,7 +94,7 @@ MASTER_DOWN = (
     "as it starts."
 )
 IDLE_NUDGE_TICKS = 3
-IDLE_KILL_TICKS = 10
+IDLE_KILL_TICKS = 20
 IDLE_TICKS = "idle-ticks"
 LANES = ("eng", "ci", "plan")
 ACTIVE = ("claimed", "pr")
@@ -204,6 +207,7 @@ def tick(slug, store, ledger, runtime, now_ms):
         actions.append("new tasks, running again")
     actions += skip_refused(_orphans, slug, store, ledger, rows)
     actions += skip_refused(dev_red.reopen_pass, slug, config, store, ledger, rows)
+    actions += skip_refused(promotion_watch.refresh, slug, config, store, ledger, doc, now_ms)
     actions += skip_refused(difficulty.size_pass, slug, ledger, doc)
     actions += skip_refused(grouping.release_pass, slug, store, ledger, doc)
     actions += skip_refused(dispatcher.group, slug, config, store, ledger, doc, now_ms)
@@ -553,7 +557,7 @@ def agent_status(agent):
 def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     observed = runtime.observe(agent)
     store.redis.set(store.key(slug, "pane-state", agent.name), observed.state, ex=idle_state.BEAT_TTL_S)
-    outage.mark_pane(store, slug, agent.name, observed.provider_error)
+    outage.mark_pane(store, slug, agent.name, observed.provider_error, now_ms)
     if observed.provider_error and not observed.prompt_title and not observed.typed:
         observed = replace(observed, state=idle_state.IDLE)
     if observed.state == idle_state.WAITING:
@@ -565,9 +569,12 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     held = outage.held(store, slug, agent.name)
     exhausted = resume.recovery_exhausted(store, slug, agent)
     pending = resume.recovery_pending(store, slug, agent)
+    if _stuck_on_provider(slug, store, agent, observed, exhausted, now_ms):
+        return _free_stuck(slug, store, ledger, runtime, rows, agent, now_ms)
+    nudged = _stale_nudge(slug, store, agent, observed, pending, now_ms)
     if agent.lane == MASTER or (held and not exhausted):
         store.put_agent(slug, agent)
-        return []
+        return nudged
     state = idle_state.verdict(
         observed.state,
         idle_state.heartbeat(store.redis, slug, agent.name),
@@ -576,10 +583,10 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     )
     if state in {idle_state.WAITING, idle_state.WORKING}:
         store.put_agent(slug, replace(agent, idle_ticks=0))
-        return []
+        return nudged
     if _operator_at_pane(slug, store, agent, observed, now_ms) or ledger_probe.holding(store, slug):
         store.put_agent(slug, agent)
-        return []
+        return nudged
     idle = replace(agent, idle_ticks=agent.idle_ticks + 1)
     store.put_agent(slug, idle)
     who = Who(name=agent.name, task=agent.task)
@@ -587,13 +594,47 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
         slug, gate_log.Row.of(IDLE_TICKS, "count", who, reason=f"idle tick {idle.idle_ticks}", now_ms=now_ms)
     )
     if pending:
-        return []
-    if idle.idle_ticks == IDLE_NUDGE_TICKS:
-        refused = runtime.nudge(idle, NUDGE.format(slug=slug))
-        return [f"nudge to {agent.name} refused: {refused}" if refused else f"nudged {agent.name}"]
+        return nudged
     if idle.idle_ticks >= IDLE_KILL_TICKS and runtime.retire(idle, homes=reaper.scratch_homes(slug, idle.task)):
-        return [f"stalled {agent.name}" + _drop(slug, store, ledger, rows, idle, refund=True)]
-    return []
+        return nudged + [f"stalled {agent.name}" + _drop(slug, store, ledger, rows, idle, refund=True)]
+    return nudged
+
+
+def _stale_nudge(slug, store, agent, observed, pending, now_ms):
+    """An open swarm outage and a pending recovery belong to provider recovery; an agent due for retirement gets none."""
+    if agent.lane == MASTER or not agent.task or pending or outage.open_records(slug):
+        return []
+    if agent.idle_ticks + 1 >= IDLE_KILL_TICKS:
+        return []
+    if _operator_at_pane(slug, store, agent, observed, now_ms) or ledger_probe.holding(store, slug):
+        return []
+    return stale_nudge.nudge(InboxStore(store.redis), slug, agent, observed.provider_error, now_ms)
+
+
+def _stuck_on_provider(slug, store, agent, observed, exhausted, now_ms):
+    if agent.lane == MASTER or not observed.provider_error or _operator_at_pane(slug, store, agent, observed, now_ms):
+        return False
+    if exhausted:
+        return True
+    state = idle_state.verdict(
+        observed.state,
+        idle_state.heartbeat(store.redis, slug, agent.name),
+        idle_state.wait(store.redis, slug, agent.name),
+        now_ms,
+    )
+    return state == idle_state.IDLE and outage.held_past_limit(store, slug, agent.name, now_ms)
+
+
+def _free_stuck(slug, store, ledger, runtime, rows, agent, now_ms):
+    if not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
+        store.put_agent(slug, agent)
+        return [f"could not retire {agent.name}, stuck on a provider error, retrying next tick"]
+    resume.free_seat(store, slug, agent, now_ms)
+    outage.clear_pane(store, slug, agent.name)
+    return [
+        f"freed the seat of {agent.name}, stuck on a provider error"
+        + _drop(slug, store, ledger, rows, agent, refund=True)
+    ]
 
 
 def _operator_at_pane(slug, store, agent, observed, now_ms):
@@ -693,15 +734,11 @@ def _launch_order(slug, store, tasks, dispatched=None):
 
 
 def _unblocked(task, rows):
-    return not _parked(task, rows) and all(_stackable(rows.get(dep, {})) for dep in task.get("depends_on") or [])
+    return task_dependencies.ready(task, rows)
 
 
 def _parked(task, rows):
     return any(rows.get(dep, {}).get("state") != "done" for dep in task.get("parked_on") or [])
-
-
-def _stackable(dep):
-    return dep.get("state") == "done" or (dep.get("state") in ACTIVE and bool(dep.get("branch")))
 
 
 def _stack_base(task, rows, repo):
@@ -826,10 +863,14 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             _release_admission(slug, runtime, task)
             continue
         handoff = store.handoff(slug, task["id"])
+        lives = store.earlier_lives(slug, task["id"])
         if handoff:
             task["handoff"] = handoff
-        elif (lives := store.earlier_lives(slug, task["id"])) or task.get("branch"):
-            task["reclaim"] = reclaim(config.repo, lives, task.get("branch") or "")
+            task["handoff_envelope"] = continuation.resolve(
+                config.repo, task, rows, lives, store.handoff_envelope(slug, task["id"]) or {}, reclaim
+            )
+        elif lives or task.get("branch"):
+            task["reclaim"] = continuation.resolve(config.repo, task, rows, lives, {}, reclaim)
             store.put_reclaim(slug, name, task["reclaim"])
         task["stack_base"] = _stack_base(task, rows, config.repo)
         task["overlaps"] = _sharing(task, rows)
@@ -989,7 +1030,7 @@ def primed(store, slug, seat, task):
     from scripts.swarm import priming_trace
 
     memory = {"recaps": store.memory.recaps(seat), "learned": store.memory.learned(seat)}
-    envelope = store.handoff_envelope(slug, task["id"])
+    envelope = task.get("handoff_envelope", store.handoff_envelope(slug, task["id"]))
     previous = store.execution_occupants(slug).get(seat)
     task = {
         **task,

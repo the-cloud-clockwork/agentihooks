@@ -2,6 +2,7 @@
 
 EFFORTS = {"claude": ("low", "medium", "high", "xhigh", "max"), "codex": ("low", "medium", "high", "xhigh")}
 DEFAULT = ("medium", "xhigh")
+MASTER_FLOOR = "high"
 VARIABLE = "AGENTIHOOKS_SWARM_EFFORT_RANGE"
 
 
@@ -29,6 +30,14 @@ def _at(harness, found):
 
 def of(config):
     return getattr(config, "effort_min", DEFAULT[0]), getattr(config, "effort_max", DEFAULT[1])
+
+
+def bounds(config, lane):
+    """The range a lane launches inside: the swarm range, lifted for a master so it never starts below high."""
+    found = of(config)
+    if lane != "master":
+        return found
+    return tuple(max(edge, MASTER_FLOOR, key=rank) for edge in found)
 
 
 def clamp(harness, effort, bounds):

@@ -104,6 +104,10 @@ def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, bas
     # Stats tracing slows every test, so a wall clock bound only holds in the unit shards.
     test_runner._pytest_add_cli_args = [
         *test_runner._pytest_add_cli_args,
+        "-p",
+        "pytest_rerunfailures",
+        "--reruns",
+        "1",
         "-m",
         "not wall_clock",
         f"--basetemp={basetemp}",

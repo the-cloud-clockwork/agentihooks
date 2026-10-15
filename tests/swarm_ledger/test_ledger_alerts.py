@@ -639,6 +639,109 @@ def test_operation_author_is_resolved_once_per_write(monkeypatch):
     assert calls == ["alias", "writer"]
 
 
+def raise_promotion(op_id, text="Dev promotion is red"):
+    return {"op": "alert_raise", "id": op_id, "by": "swarm", "source": "promotion", "text": text}
+
+
+def test_a_raised_promotion_alert_opens_one_alert_for_the_master():
+    make_ledger()
+    state, rejected = sync(ops=[raise_promotion("r1", "  Dev promotion is red  ")])
+    assert rejected == []
+    [alert] = state["alerts"]
+    assert (alert["source"], alert["target"], alert["state"], alert["text"]) == (
+        "promotion",
+        "master",
+        "open",
+        "Dev promotion is red",
+    )
+    assert alert["id"] == f"al-{alert['rev']}-0"
+
+
+def test_a_second_promotion_raise_while_one_is_live_adds_none_and_one_after_its_close_does():
+    make_ledger()
+    sync(ops=[raise_promotion("r1")])
+    state, rejected = sync(ops=[raise_promotion("r2", "Dev promotion is red again")])
+    assert rejected == [] and len(state["alerts"]) == 1
+    alert = state["alerts"][0]["id"]
+    sync(ops=[{"op": "alert_close", "id": "c1", "target": alert, "outcome": "Dev passed", "by": "swarm"}])
+    state, _ = sync(ops=[raise_promotion("r3")])
+    assert [(a["state"], a["text"]) for a in state["alerts"]] == [
+        ("done", "Dev promotion is red"),
+        ("open", "Dev promotion is red"),
+    ]
+
+
+def test_a_raise_on_a_ledger_without_alerts_starts_the_list():
+    doc, ctx = {}, SimpleNamespace(rev=4, at=9, dirty=False)
+    assert ledger_alerts.apply(doc, raise_promotion("r1"), ctx) is True
+    assert doc["alerts"] == [
+        {
+            "id": "al-4-0",
+            "text": "Dev promotion is red",
+            "source": "promotion",
+            "target": "master",
+            "state": "open",
+            "at": 9,
+            "rev": 4,
+        }
+    ]
+    assert ctx.dirty is True
+
+
+def test_the_api_routes_an_alert_raise_to_the_alerts_resource():
+    from scripts.swarm_ledger.api import schemas
+
+    op = raise_promotion("r1")
+    assert schemas.target(op) == "alerts"
+    assert schemas.mismatched_field(schemas.operation_schema("alert_raise"), op) is None
+
+
+def test_a_live_alert_of_another_source_does_not_hold_a_promotion_raise():
+    make_ledger(LONG)
+    state, _ = sync(ops=[raise_promotion("r1")])
+    assert [a["source"] for a in state["alerts"]] == ["size", "promotion"]
+
+
+RAISE_REFUSED = "alert_raise takes by, a source among ('promotion',) and a text of up to 2000 characters"
+
+
+@pytest.mark.parametrize(
+    "op",
+    [
+        {"op": "alert_raise", "id": "z", "by": "swarm", "source": "size", "text": "t"},
+        {"op": "alert_raise", "id": "z", "by": "swarm", "source": "promotion", "text": " "},
+        {"op": "alert_raise", "id": "z", "by": "swarm", "source": "promotion", "text": "x" * 2001},
+        {"op": "alert_raise", "id": "z", "by": "swarm", "source": "promotion", "text": 7},
+        {"op": "alert_raise", "id": "z", "source": "promotion", "text": "t"},
+        {"op": "alert_raise", "id": "z", "by": " ", "source": "promotion", "text": "t"},
+        {"op": "alert_raise", "id": "z", "by": "swarm", "source": "promotion", "text": "t", "target": "a"},
+    ],
+)
+def test_malformed_alert_raises_are_refused(op):
+    with pytest.raises(ValueError) as caught:
+        ledger_alerts.check(op)
+    assert str(caught.value) == RAISE_REFUSED
+
+
+def test_a_raise_of_the_full_text_length_is_accepted():
+    ledger_alerts.check({"op": "alert_raise", "id": "z", "by": "swarm", "source": "promotion", "text": "x" * 2000})
+
+
+def test_a_raised_promotion_alert_reaches_the_master_inbox(inbox):
+    make_ledger()
+    handler = ledger_server.Handler.__new__(ledger_server.Handler)
+    handler.path = f"/api/{SLUG}?view=agent"
+    handler.send = lambda code, body, ctype: None
+    handler.reply_state(SLUG, ops=[raise_promotion("r1")])
+    [item] = inbox.inbox(seat_address(SLUG, MASTER))
+    [alert] = core.sync(SLUG)[0]["alerts"]
+    assert item.text == (
+        f"On ledger {SLUG}: alert {alert['id']} (promotion): Dev promotion is red. Claim it with agentihooks "
+        f"ledger --slug {SLUG} --as <you> alert claim {alert['id']}, then close it with alert close "
+        f'{alert["id"]} "<outcome>".'
+    )
+
+
 def test_alias_operation_stores_the_canonical_author(monkeypatch):
     from scripts.swarm_ledger import ledger_core
 

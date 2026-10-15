@@ -6,6 +6,10 @@ redis:
   image:
     repository: mirror.gcr.io/library/redis
 controller:
+  startupProbe:
+    periodSeconds: 1
+  readinessProbe:
+    periodSeconds: 1
   livenessProbe:
     initialDelaySeconds: 10
     periodSeconds: 2

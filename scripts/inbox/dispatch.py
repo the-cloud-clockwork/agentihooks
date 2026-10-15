@@ -32,7 +32,7 @@ class Dispatcher:
     def owner(self, recipient):
         return self.redis.get(owner_key(self.store.names.resolve(recipient))) or ""
 
-    def own(self, recipient, owner, takeover=False):
+    def own(self, recipient, owner, takeover=False, ttl_s=None):
         recipient = self.store.names.resolve(recipient)
 
         def claim(pipe):
@@ -40,11 +40,11 @@ class Dispatcher:
             if held and held != owner and not takeover:
                 raise DispatchError(f"{recipient} is delivered by {held}; take over to replace it")
             pipe.multi()
-            pipe.set(owner_key(recipient), owner, ex=owner_ttl_s())
+            pipe.set(owner_key(recipient), owner, ex=ttl_s or owner_ttl_s())
 
         transact(self.redis, claim, [owner_key(recipient)])
 
-    def renew(self, recipient, owner):
+    def renew(self, recipient, owner, ttl_s=None):
         """Extend owner's hold on recipient; False when it no longer holds it, which a running pump must treat as lost."""
         recipient = self.store.names.resolve(recipient)
 
@@ -52,7 +52,7 @@ class Dispatcher:
             if pipe.get(owner_key(recipient)) != owner:
                 return False
             pipe.multi()
-            pipe.expire(owner_key(recipient), owner_ttl_s())
+            pipe.expire(owner_key(recipient), ttl_s or owner_ttl_s())
             return True
 
         return transact(self.redis, extend, [owner_key(recipient)])
