@@ -317,6 +317,19 @@ def on_session_start(payload: dict) -> None:
 
     session_event()
     try:
+        from hooks.context import conditions as _start_conditions
+        from hooks.targets.capabilities import can_inject_context as _can_inject_start
+
+        if _can_inject_start("SessionStart"):
+            _start_effect = _start_conditions.start_effect(payload)
+            if _start_effect:
+                from hooks.common import inject_context as _inject_start
+
+                for _ctx in _start_effect.contexts:
+                    _inject_start(_ctx)
+    except Exception as e:
+        log("conditions session_start failed", {"error": str(e)})
+    try:
         from hooks.lifecycle.deps_kick import kick as deps_kick
 
         deps_kick()

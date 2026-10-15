@@ -189,6 +189,81 @@ def test_brain_reader_session_start_dispatch(enabled, brain_dispatch, monkeypatc
         inject.assert_not_called()
 
 
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_start_condition_context_is_injected_at_session_start(target, monkeypatch, tmp_path, capsys):
+    from unittest.mock import Mock
+
+    from hooks import config
+    from hooks.context import conditions
+    from hooks.hook_manager import EVENT_HANDLERS
+    from hooks.targets import emitter
+
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", target)
+    for flag in (
+        "PROJECT_BRIDGE_ENABLED",
+        "MCP_SESSION_ID_BANNER_ENABLED",
+        "MCP_HYGIENE_ENABLED",
+        "EFFORT_POLICY_ENABLED",
+        "AGENTIHOOKS_FORCE_DEV_BRANCH",
+        "CI_MANIFESTO_ENABLED",
+        "BROADCAST_ENABLED",
+        "BRAIN_ENABLED",
+    ):
+        monkeypatch.setattr(config, flag, False)
+    monkeypatch.setattr("hooks.lifecycle.guard.session_event", Mock())
+    monkeypatch.setattr("hooks.lifecycle.deps_kick.kick", Mock())
+    monkeypatch.setattr("hooks.lifecycle.codex_refresh_kick.kick", Mock())
+    monkeypatch.setattr("hooks.context.injection_trace.record_session_start", Mock())
+    monkeypatch.setattr("hooks.context.enforcement.get_session_start_enforcements", Mock(return_value=""))
+    monkeypatch.setattr("hooks.context.voice_output.cleanup_stale_flags", Mock(return_value=0))
+    monkeypatch.setattr(
+        conditions, "start_effect", Mock(return_value=conditions.StartEffect(contexts=["hello from a start condition"]))
+    )
+
+    EVENT_HANDLERS["SessionStart"]({"session_id": "session", "cwd": str(tmp_path)})
+
+    seen = emitter.drain() if target == "codex" else capsys.readouterr().out
+    assert "hello from a start condition" in seen
+
+
+def test_start_condition_failure_fails_open(monkeypatch, tmp_path):
+    from unittest.mock import Mock
+
+    from hooks import config, hook_manager
+    from hooks.context import conditions
+    from hooks.hook_manager import EVENT_HANDLERS
+
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
+    for flag in (
+        "PROJECT_BRIDGE_ENABLED",
+        "MCP_SESSION_ID_BANNER_ENABLED",
+        "MCP_HYGIENE_ENABLED",
+        "EFFORT_POLICY_ENABLED",
+        "AGENTIHOOKS_FORCE_DEV_BRANCH",
+        "CI_MANIFESTO_ENABLED",
+        "BROADCAST_ENABLED",
+        "BRAIN_ENABLED",
+    ):
+        monkeypatch.setattr(config, flag, False)
+    monkeypatch.setattr("hooks.lifecycle.guard.session_event", Mock())
+    monkeypatch.setattr("hooks.lifecycle.deps_kick.kick", Mock())
+    monkeypatch.setattr("hooks.lifecycle.codex_refresh_kick.kick", Mock())
+    monkeypatch.setattr("hooks.context.injection_trace.record_session_start", Mock())
+    monkeypatch.setattr("hooks.context.enforcement.get_session_start_enforcements", Mock(return_value=""))
+    monkeypatch.setattr("hooks.context.voice_output.cleanup_stale_flags", Mock(return_value=0))
+
+    def broken(payload):
+        raise RuntimeError("index unreadable")
+
+    monkeypatch.setattr(conditions, "start_effect", broken)
+    logged = []
+    monkeypatch.setattr(hook_manager, "log", lambda *a, **k: logged.append(a))
+
+    EVENT_HANDLERS["SessionStart"]({"session_id": "session", "cwd": str(tmp_path)})
+
+    assert ("conditions session_start failed", {"error": "index unreadable"}) in logged
+
+
 @pytest.mark.parametrize(
     "enabled, count, claim", [(True, 7, True), (True, 7, False), (True, 0, True), (False, 7, True)]
 )
