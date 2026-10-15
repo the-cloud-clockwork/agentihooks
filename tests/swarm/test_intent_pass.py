@@ -37,3 +37,33 @@ def test_ready_intent_is_delivered_before_a_slow_runtime_launch(env, monkeypatch
     print(f"ready_to_verdict_ms={wait_ms}; runtime_launch_delay_ms=780000")
     assert at_launch and all(record and record["verdict"] == "pass" for record in at_launch)
     assert wait_ms == 0
+
+
+def test_a_merge_wait_observes_a_merge_during_a_slow_runtime_launch(env, monkeypatch):  # noqa: F811
+    from scripts.swarm import idle
+
+    store, ledger, runtime = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    store.update("sw", max_eng=2, gates={"intent": "off"})
+    agent = next(a for a in store.agents("sw") if a.lane == "eng")
+    url = "https://github.com/o/r/pull/9"
+    ledger.rows[agent.task].update(state="pr", pr_url=url)
+    ledger.rows["t3"] = {"id": "t3", "state": "open", "lane": "eng", "claimed_by": "", "out_of_scope": False}
+    ledger.pulls[url] = PullRequest("OPEN", None, None, False, queued=True)
+    clock = [cli.now_ms()]
+    monkeypatch.setattr(cli, "now_ms", lambda: clock[0])
+    idle.declare_wait(
+        store.redis, "sw", agent.name, clock[0] + 3_600_000, "", clock[0], {"kind": "merge", "target": url}
+    )
+    launch = runtime.spawn
+
+    def slow_launch(*args, **kwargs):
+        clock[0] += 780_000
+        ledger.pulls[url] = PullRequest("MERGED", clock[0], None, False)
+        return launch(*args, **kwargs)
+
+    monkeypatch.setattr(runtime, "spawn", slow_launch)
+    actions = cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
+    assert any(f"ended the wait of {agent.name}: pull request {url}, now merged" == action for action in actions)
+    assert idle.wait(store.redis, "sw", agent.name) is None

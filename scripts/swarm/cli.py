@@ -288,6 +288,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             agents = [a for a in timing.call(store.agents, slug) if a.state != "finished"]
             skip_refused(delivery.relay_to_page, inbox, slug, agents, ledger)
             doc, config = timing.call(ledger.state, slug), store.config(slug)
+            view = timing.call(ledger_events.tick_view, inbox, store, slug, doc)
             actions += skip_refused(ledger_events.event_pass, inbox, store, slug, doc, ledger, now_ms(), view)
             actions += skip_refused(done_gate.recheck_pass, store, slug, doc, ledger, now_ms(), view)
             actions += skip_refused(progress.checks_pass, store.redis, slug, doc["tasks"], view, now_ms())
