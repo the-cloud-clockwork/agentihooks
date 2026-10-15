@@ -18,6 +18,11 @@ def no_slot(config, runtime, what: str) -> str:
     return "" if runtime.has_capacity(config) else f"no session slot for the {what}, waiting"
 
 
+def no_lead_master_slot(config, runtime) -> str:
+    placeable = getattr(runtime, "lead_master_has_capacity", None) or runtime.has_capacity
+    return "" if placeable(config) else "no session slot for the master, waiting"
+
+
 def placed_elsewhere(runtime, lane: str, task: dict) -> str:
     refuses = getattr(runtime, "placement_refusal", None)
     return refuses(lane, task) if refuses else ""

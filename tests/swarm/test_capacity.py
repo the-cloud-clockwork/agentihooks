@@ -548,6 +548,121 @@ def test_runtime_refuses_an_account_when_its_harness_has_no_free_seat(tmp_path):
     assert runtime._quota_account("codex", None, None).name == "cx"
 
 
+def test_lead_master_takes_an_account_past_its_session_cap(tmp_path):
+    from scripts.swarm.runtime import HerdrRuntime
+
+    runtime = HerdrRuntime(home=tmp_path)
+    runtime._quota_accounts = [
+        account("full", sessions=3),
+        account("fuller", sessions=5),
+        account("cx", harness="codex"),
+    ]
+    with pytest.raises(SpawnError, match="no claude account has placeable quota seats"):
+        runtime._quota_choice("claude", "requested", True, "master")
+    with pytest.raises(SpawnError, match="no claude account has placeable quota seats"):
+        runtime._quota_account("claude", None, None)
+    assert runtime._quota_choice("claude", "requested", True, "master", lead=True) == (
+        "claude",
+        "lead master past the session cap: claude has no placeable quota seats",
+    )
+    assert runtime._quota_account("claude", None, None, lead=True).name == "full"
+    assert runtime._quota_account("claude", "fuller", None, lead=True).name == "fuller"
+    assert runtime._quota_account("claude", None, "full", lead=True).name == "fuller"
+
+
+def test_lead_master_keeps_a_free_seat_ahead_of_going_past_a_cap(tmp_path):
+    from scripts.swarm.runtime import HerdrRuntime
+
+    runtime = HerdrRuntime(home=tmp_path)
+    runtime._quota_accounts = [account("full", sessions=3), account("free", sessions=1)]
+    assert runtime._quota_choice("claude", "requested", True, "master", lead=True) == ("claude", "requested")
+    assert runtime._quota_account("claude", "full", None, lead=True).name == "free"
+
+
+def test_lead_master_falls_to_the_other_harness_only_when_unpinned(tmp_path):
+    from scripts.swarm.runtime import HerdrRuntime
+
+    runtime = HerdrRuntime(home=tmp_path)
+    runtime._quota_accounts = [account("closed", cap=0), account("cx", harness="codex", sessions=3)]
+    with pytest.raises(SpawnError, match="no claude account has placeable quota seats"):
+        runtime._quota_choice("claude", "requested", True, "master", lead=True)
+    assert runtime._quota_choice("claude", "priority", False, "master", lead=True)[0] == "codex"
+
+
+def test_lead_master_never_takes_a_warned_closed_or_unknown_account(tmp_path):
+    from scripts.swarm.runtime import HerdrRuntime
+
+    runtime = HerdrRuntime(home=tmp_path)
+    runtime._quota_accounts = [
+        account("closed", cap=0),
+        account("warned", sessions=0, left=5),
+        account("fuller", sessions=6),
+        account("open", sessions=4, left=60),
+        account("roomy", sessions=4),
+        account("unknown", cap=None),
+    ]
+    assert [row.name for row in runtime._lead_master_rows("claude")] == ["roomy", "open", "fuller"]
+    assert runtime._quota_account("claude", None, None, lead=True).name == "roomy"
+    runtime._quota_accounts = [account("warned", sessions=0, left=5), account("closed", cap=0)]
+    with pytest.raises(SpawnError, match="no claude account has placeable quota seats"):
+        runtime._quota_account("claude", None, None, lead=True)
+
+
+def test_lead_master_capacity_ignores_session_caps_but_not_closed_accounts(tmp_path):
+    from scripts.swarm.runtime import HerdrRuntime
+
+    config = SwarmConfig("sw", "/repo", 0, 0, lanes={"master": {"agent": "claude"}})
+    runtime = HerdrRuntime(home=tmp_path)
+    runtime._quota_accounts = [account("full", sessions=3), account("cx", harness="codex", sessions=3)]
+    assert not runtime.has_capacity(config)
+    assert runtime.lead_master_has_capacity(config)
+    runtime._quota_accounts = [account("closed", cap=0), account("cx", harness="codex", sessions=3)]
+    assert not runtime.lead_master_has_capacity(config)
+    assert runtime.lead_master_has_capacity(SwarmConfig("sw", "/repo", 0, 0))
+
+
+def test_lead_master_slot_waits_only_on_its_own_capacity():
+    from scripts.swarm import seat_spawn
+
+    class Full:
+        def has_capacity(self, config):
+            return False
+
+    class Lead(Full):
+        def lead_master_has_capacity(self, config):
+            return True
+
+    assert seat_spawn.no_lead_master_slot(None, Full()) == "no session slot for the master, waiting"
+    assert seat_spawn.no_lead_master_slot(None, Lead()) == ""
+    assert seat_spawn.no_slot(None, Lead(), "master") == "no session slot for the master, waiting"
+
+
+def test_lead_master_capacity_keeps_its_pinned_harness(tmp_path):
+    from scripts.swarm.runtime import HerdrRuntime
+
+    pinned = SwarmConfig("sw", "/repo", 0, 0, lanes={"master": {"agent": "claude"}})
+    runtime = HerdrRuntime(home=tmp_path)
+    runtime._quota_accounts = [account("closed", cap=0), account("cx", harness="codex")]
+    assert runtime.has_capacity(pinned)
+    assert not runtime.lead_master_has_capacity(pinned)
+    assert runtime.lead_master_has_capacity(SwarmConfig("sw", "/repo", 0, 0))
+
+
+def test_lead_master_quota_handoff_takes_an_account_past_its_cap(tmp_path):
+    from scripts.swarm.runtime import HerdrRuntime
+
+    runtime = HerdrRuntime(home=tmp_path)
+    runtime._quota_accounts = [account("old", sessions=1), account("full", sessions=3), account("closed", cap=0)]
+    saved = {"harness": "claude", "account": "old", "effort": "high"}
+    with pytest.raises(SpawnError, match="can take the quota handoff"):
+        runtime._quota_transfer(saved, "master", {}, "master", "claude")
+    moved = runtime._quota_transfer(saved, "master", {}, "master", "claude", lead=True)
+    assert (moved["harness"], moved["account"]) == ("claude", "full")
+    runtime._quota_accounts = [account("old", sessions=1), account("closed", cap=0)]
+    with pytest.raises(SpawnError, match="can take the quota handoff"):
+        runtime._quota_transfer(saved, "master", {}, "master", "claude", lead=True)
+
+
 def test_failed_fresh_probe_does_not_leave_a_stale_healthy_account_placeable(monkeypatch):
     healthy = balancer.ProbeResult(
         "a", "allowed", "NORMAL", 90, balancer.QuotaWindow(used=10), balancer.QuotaWindow(used=10)
@@ -854,6 +969,21 @@ def test_spawn_routes_to_the_planned_account_then_rotates_the_next_automatic_pic
     runtime.spawn(config, "plan", "planner@a1b2c3-0001", {"id": "p1", "title": "Plan"})
     runtime.spawn(config, "plan", "planner@a1b2c3-0002", {"id": "p2", "title": "Plan"})
     assert seen == [("p1", "claude", "b"), ("p2", "claude", "a")]
+
+
+def test_spawn_places_only_the_lead_master_past_the_session_cap(tmp_path, monkeypatch):
+    from scripts.swarm import runtime as module
+
+    runtime, config, seen = _runtime_probe(
+        tmp_path, monkeypatch, [account("full", sessions=3), account("cx", harness="codex")]
+    )
+    monkeypatch.setattr(module.prompt, "build", lambda *args, **kwargs: "prompt")
+    config = replace(config, lanes={"master": {"agent": "claude"}})
+    with pytest.raises(SpawnError, match="no claude account has placeable quota seats"):
+        runtime.spawn(config, "master", "master@a1b2c3-0002", {"id": "master-2", "profile": "master"})
+    runtime.spawn(config, "master", "master@a1b2c3-0001", {"id": "master", "profile": "master"})
+    assert seen == [("master", "claude", "full")]
+    assert runtime._quota_accounts[0].sessions == 4
 
 
 def test_failed_launch_does_not_consume_account_or_reserved_slots(tmp_path, monkeypatch):

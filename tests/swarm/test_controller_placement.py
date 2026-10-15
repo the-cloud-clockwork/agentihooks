@@ -199,6 +199,25 @@ def test_local_controller_spawns_every_lane(store):
     assert inner.spawned == [("plan", "one", "t")]
 
 
+def test_local_controller_asks_the_runtime_for_lead_master_room(store):
+    from scripts.swarm import controller, lease
+    from tests.swarm.test_tick import FakeRuntime
+
+    class LeadRoom(FakeRuntime):
+        def lead_master_has_capacity(self, config):
+            return True
+
+    held = lease.acquire(store, "sw", "anton")
+    config = store.config("sw")
+    plain = FakeRuntime()
+    plain.full = True
+    assert controller.FencedRuntime(store, "sw", held, plain, "local").lead_master_has_capacity(config) is False
+    room = LeadRoom()
+    room.full = True
+    assert controller.FencedRuntime(store, "sw", held, room, "local").lead_master_has_capacity(config) is True
+    assert controller.FencedRuntime(store, "sw", held, plain, "distributed").lead_master_has_capacity(config) is False
+
+
 def test_distributed_controller_refuses_a_disabled_kubernetes_backend(store):
     from scripts.swarm import controller, lease
     from scripts.swarm_v2.runtime.base import Placement, RuntimeRouter

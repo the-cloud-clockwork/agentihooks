@@ -1119,7 +1119,7 @@ def _master(slug, config, store, runtime, now_ms):
         return ["the old master is still running, waiting for it to end before starting the next"]
     if refused := seat_spawn.placed_elsewhere(runtime, MASTER, {}):
         return [refused]
-    if refused := seat_spawn.no_slot(config, runtime, MASTER):
+    if refused := seat_spawn.no_lead_master_slot(config, runtime):
         store.redis.hset(MASTER_WAITING, slug, now_ms)
         return [refused]
     if held := seat_spawn.host_hold(slug, store, now_ms, MASTER):
