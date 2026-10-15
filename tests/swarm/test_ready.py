@@ -1032,11 +1032,11 @@ def test_a_working_owner_keeps_its_claim_and_lease_when_the_pull_conflicts(mergi
     assert merging.store.claimant("sw", "t1") == AGENT
     assert merging.shell.calls == []
     assert merging.queued == []
-    messages = InboxStore(merging.store.redis).items(AGENT)
+    messages = InboxStore(merging.store.redis).inbox(AGENT)
     assert len(messages) == 1
     assert "restack" in messages[0].text.lower()
     merging.run()
-    assert len(InboxStore(merging.store.redis).items(AGENT)) == 1
+    assert len(InboxStore(merging.store.redis).inbox(AGENT)) == 1
 
 
 def test_one_tick_reports_every_unreleased_entry_it_dequeues(merging):
