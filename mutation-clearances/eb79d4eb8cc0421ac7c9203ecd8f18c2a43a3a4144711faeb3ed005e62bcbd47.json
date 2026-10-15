@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/stale_nudge.py:scripts.swarm.stale_nudge.x_stale__mutmut_26:4016fade80a17ee2309623b5448a9d71401f5f4d352d6dd8f129df524289c483": {
+    "reader": "standards_continuation",
+    "reason": "An absent until default of zero or one is expired for positive integer millisecond timestamps; an existing until value is unchanged, so neither comparison suppresses a stale nudge."
+  }
+}

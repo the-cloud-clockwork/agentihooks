@@ -21,6 +21,44 @@ def master(tmp_path, monkeypatch):
     return tmp_path
 
 
+@pytest.fixture
+def unseated(tmp_path, monkeypatch):
+    monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
+    monkeypatch.delenv("AGENTIHOOKS_SWARM_TASK", raising=False)
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "ah"))
+    return tmp_path
+
+
+def test_a_seat_record_opens_the_window_without_the_swarm_env(unseated):
+    assert master_coding.observe(SID, "allow-master-coding", typed=True) == ""
+    master_coding.record_seat(SID, "rig", "master@rig-1")
+    assert master_coding.observe(SID, "allow-master-coding", typed=True, now=1000) == "open"
+    assert master_coding.is_open(SID, now=1000 + master_coding.WINDOW_SEC - 1)
+    assert not master_coding.is_open(SID, now=1000 + master_coding.WINDOW_SEC)
+    assert master_coding.observe(SID, "disallow-master-coding", typed=True) == "closed"
+    assert not master_coding.is_open(SID)
+
+
+def test_a_hand_launched_session_without_env_opens_edits_once_seated(unseated):
+    tree = unseated / "dev" / "worktrees" / "agentihooks" / "master-1"
+    master_coding.record_seat(SID, "rig", "master@rig-1")
+    assert "cannot edit outside" in guard(unseated, tree / "hooks" / "x.py")
+    master_coding.observe(SID, "allow-master-coding", typed=True)
+    assert guard(unseated, tree / "hooks" / "x.py") == ""
+    assert "stay closed" in guard(unseated, tree / ".env")
+    assert "stay closed" in guard(unseated, tree / ".claude" / "conditions" / "pre-bash-x.py")
+    assert "cannot edit outside" in guard(unseated, unseated / "dev" / "tcc-ecosystem" / "x.py")
+
+
+def test_an_unseated_session_stays_refused_even_with_an_open_window(unseated):
+    tree = unseated / "dev" / "worktrees" / "agentihooks" / "master-1"
+    record = master_coding.path(SID)
+    record.parent.mkdir(parents=True)
+    record.write_text(json.dumps({"at": master_coding.time.time()}))
+    assert "cannot edit outside" in guard(unseated, tree / "hooks" / "x.py")
+    assert not master_coding.is_open(SID)
+
+
 def test_only_the_typed_phrase_in_the_master_pane_opens_the_window(master):
     assert master_coding.observe(SID, "allow-master-coding", typed=False) == ""
     assert not master_coding.is_open(SID)
@@ -48,14 +86,89 @@ def test_other_seats_never_open_a_window(master, monkeypatch):
 
 def test_the_window_record_lives_under_the_agentihooks_home_by_a_safe_session_name(master, monkeypatch):
     assert master_coding.path("Ab/c d") == master / "ah" / "master_coding" / "Ab_c_d.json"
+    assert master_coding.seat_path("Ab/c d.@-") == master / "ah" / "master_seats" / "Ab_c_d.@-.json"
     monkeypatch.delenv("AGENTIHOOKS_HOME")
     monkeypatch.setattr(Path, "home", lambda: master)
     assert master_coding.path("s") == master / ".agentihooks" / "master_coding" / "s.json"
+    assert master_coding.seat_path("s") == master / ".agentihooks" / "master_seats" / "s.json"
 
 
 def guard(home, file_path):
     payload = {"tool_name": "Edit", "tool_input": {"file_path": str(file_path)}, "session_id": SID, "cwd": "/"}
     return GUARD["deny_reason"](payload, "master", home)
+
+
+def test_the_operator_can_renew_an_already_open_window(master):
+    assert master_coding.observe(SID, "allow-master-coding", typed=True, now=1000) == "open"
+    assert master_coding.observe(SID, "allow-master-coding", typed=True, now=1001) == "open"
+    assert master_coding.is_open(SID, now=2800)
+    assert not master_coding.is_open(SID, now=2801)
+
+
+def test_a_taken_master_keeps_permission_and_protection_checks_without_env(unseated, monkeypatch):
+    master_coding.record_seat(SID, "rig", "master@rig-1")
+    monkeypatch.setattr(operator_mode, "_heard", lambda *args: True)
+    assert master_coding.asks_operator("AskUserQuestion", SID)
+    assert not master_coding.asks_operator("AskUserQuestion", "unseated")
+    payload = {"session_id": SID, "tool_input": {"command": "gh ruleset list"}}
+    assert master_coding.protection_refusal(payload) == master_coding.PROTECTION_REFUSAL
+    payload["session_id"] = "unseated"
+    assert master_coding.protection_refusal(payload) == ""
+
+
+@pytest.mark.parametrize(
+    ("tool", "key"),
+    [("Edit", "file_path"), ("Write", "file_path"), ("mcp__serena__replace_symbol_body", "relative_path")],
+)
+def test_a_master_subagent_edits_only_inside_a_worktree_without_a_window(master, tool, key):
+    tree = master / "dev" / "worktrees" / "agentihooks" / "child"
+    payload = {
+        "tool_name": tool,
+        "tool_input": {key: str(tree / "hooks" / "x.py")},
+        "session_id": SID,
+        "agent_id": "child-a",
+        "cwd": "/",
+    }
+    assert GUARD["deny_reason"](payload, "master", master) == ""
+    for target in [
+        master / "dev" / "tcc-ecosystem" / "agentihooks" / "x.py",
+        tree / ".env",
+        tree / ".npmrc",
+        tree / ".claude" / "conditions" / "pre-bash-x.py",
+    ]:
+        payload["tool_input"] = {key: str(target)}
+        assert GUARD["deny_reason"](payload, "master", master)
+
+
+def test_a_hand_launched_masters_subagent_uses_the_recorded_seat(unseated):
+    tree = unseated / "dev" / "worktrees" / "agentihooks" / "child"
+    payload = {
+        "tool_name": "Edit",
+        "tool_input": {"file_path": str(tree / "x.py")},
+        "session_id": SID,
+        "agent_id": "child-a",
+        "cwd": "/",
+    }
+    assert GUARD["deny_reason"](payload, "master", unseated)
+    master_coding.record_seat(SID, "rig", "master@rig-1")
+    assert GUARD["deny_reason"](payload, "master", unseated) == ""
+    assert GUARD["deny_reason"](payload, "planner", unseated)
+    payload.pop("agent_id")
+    assert GUARD["deny_reason"](payload, "master", unseated)
+
+
+def test_a_master_subagent_cannot_follow_a_worktree_symlink_outside(master):
+    tree = master / "dev" / "worktrees" / "agentihooks" / "child"
+    tree.mkdir(parents=True)
+    (tree / "outside").symlink_to(master / "dev" / "tcc-ecosystem")
+    payload = {
+        "tool_name": "Edit",
+        "tool_input": {"file_path": str(tree / "outside" / "x.py")},
+        "session_id": SID,
+        "agent_id": "child-a",
+        "cwd": "/",
+    }
+    assert GUARD["deny_reason"](payload, "master", master)
 
 
 def test_the_window_opens_worktree_edits_but_keeps_conditions_and_credentials_closed(master):

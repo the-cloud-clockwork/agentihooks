@@ -43,8 +43,10 @@ GATE = "Gate — Required"
 RED_NOTICE = re.compile(r"^Your pull request (\S+) for .* has red checks and no push for twenty minutes\.")
 GATE_JOB = re.compile(rf"^[ \t]+name:[ \t]*(['\"]?){re.escape(GATE)}\1[ \t]*$", re.MULTILINE)
 CONTEXT_NODES = (
-    "nodes{...on CheckRun{databaseId name conclusion completedAt checkSuite{workflowRun{workflow{name}}}} "
-    "...on StatusContext{context state createdAt}} pageInfo{hasNextPage endCursor}"
+    "nodes{...on CheckRun{databaseId name conclusion completedAt isRequired(pullRequestNumber:$number) "
+    "checkSuite{workflowRun{workflow{name}}}} "
+    "...on StatusContext{context state createdAt isRequired(pullRequestNumber:$number)}} "
+    "pageInfo{hasNextPage endCursor}"
 )
 SUITE_NODES = "nodes{status conclusion workflowRun{databaseId createdAt}} pageInfo{hasNextPage endCursor}"
 PULL_QUERY = (
@@ -93,7 +95,8 @@ def iso_ms(text):
 
 
 def pull_request(raw):
-    commits, checks = raw.get("commits") or [], _newest(raw.get("statusCheckRollup") or [])
+    everything = _newest(raw.get("statusCheckRollup") or [])
+    commits, checks = raw.get("commits") or [], _required(raw.get("gated"), everything)
     suites = raw.get("checkSuites") or []
     results = [check.get("conclusion") or check.get("state") for check in checks]
     running = any(suite.get("workflowRun") and suite.get("status") != "COMPLETED" for suite in suites)
@@ -110,17 +113,20 @@ def pull_request(raw):
     if not pushes and commits:
         pushes = [iso_ms(commits[-1]["committedDate"])]
     unpassed_gate = _unpassed_gate(raw.get("gated"), checks, results, running)
+    failing = any(result in RED for result in results)
     return PullRequest(
         raw["state"],
         iso_ms(raw["mergedAt"]) if raw.get("mergedAt") else None,
         min(pushes, default=None),
-        any(result in RED for result in results) or bool(unpassed_gate),
+        failing or bool(unpassed_gate),
         _resolved(raw.get("gated"), checks, results, running) or bool(unpassed_gate),
         tuple(
             check.get("name") or check.get("context") or "a check"
-            for check, result in zip(checks, results)
-            if result in RED
-        ),
+            for check in everything
+            if (check.get("conclusion") or check.get("state")) in RED
+        )
+        if failing
+        else (),
         raw.get("headRefOid") or "",
         min(reds, default=None),
         unpassed_gate,
@@ -143,6 +149,15 @@ def _newest(checks):
         run = ((check.get("checkSuite") or {}).get("workflowRun") or {}).get("workflow") or {}
         latest[(run.get("name"), check.get("name"), check.get("context"))] = (order, check)
     return [check for _, check in sorted(latest.values())]
+
+
+def _required(gated, checks):
+    required = [
+        check
+        for check in checks
+        if check.get("isRequired", True) or (check.get("name") or check.get("context")) == GATE
+    ]
+    return required if gated or required else checks
 
 
 def _mark(item):
@@ -191,16 +206,17 @@ def declares_gate(tree):
 
 
 def view(url, run=subprocess.run):
+    number = _number(url)
     try:
         done = run(
-            ["gh", "api", "graphql", "-f", f"query={PULL_QUERY}", "-f", f"url={url}"],
+            ["gh", "api", "graphql", "-f", f"query={PULL_QUERY.replace('$number', number)}", "-f", f"url={url}"],
             capture_output=True,
             text=True,
             timeout=20,
         )
         if done.returncode != 0:
             return None
-        return _view_resource(json.loads(done.stdout)["data"]["resource"], run=run)
+        return _view_resource(json.loads(done.stdout)["data"]["resource"], number, run=run)
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
         return None
 
@@ -213,7 +229,12 @@ def head(url, run=subprocess.run):
         return ""
 
 
-def _view_resource(raw, gated=None, run=subprocess.run):
+def _number(url):
+    found = re.search(r"/pull/(\d+)", url)
+    return found[1] if found else "0"
+
+
+def _view_resource(raw, number, gated=None, run=subprocess.run):
     try:
         raw = dict(raw)
         commits = [node["commit"] for node in raw["commits"]["nodes"]]
@@ -221,8 +242,8 @@ def _view_resource(raw, gated=None, run=subprocess.run):
         contexts = (commit.get("statusCheckRollup") or {}).get("contexts") or {}
         contexts = {"nodes": contexts.get("nodes") or [], "pageInfo": contexts.get("pageInfo") or {}}
         suites = commit["checkSuites"] if commits else {"nodes": [], "pageInfo": {}}
-        checks = _paged(commit.get("id"), "contexts", contexts, run)
-        suites = _paged(commit.get("id"), "checkSuites", suites, run)
+        checks = _paged(commit.get("id"), "contexts", contexts, run, number)
+        suites = _paged(commit.get("id"), "checkSuites", suites, run, number)
         if checks is None or suites is None:
             return None
         raw["commits"] = commits
@@ -234,7 +255,7 @@ def _view_resource(raw, gated=None, run=subprocess.run):
         return None
 
 
-def _paged(commit, field, page, run):
+def _paged(commit, field, page, run, number):
     nodes, info = list(page["nodes"]), page["pageInfo"]
     for _ in range(MAX_PAGES):
         if not info.get("hasNextPage"):
@@ -242,7 +263,7 @@ def _paged(commit, field, page, run):
         if not commit:
             return None
         query, path = PAGES[field]
-        page = _graphql(query, run, id=commit, after=info["endCursor"]).get("node")
+        page = _graphql(query.replace("$number", number), run, id=commit, after=info["endCursor"]).get("node")
         for key in path:
             page = page[key]
         nodes, info = nodes + list(page["nodes"]), page["pageInfo"]
@@ -260,13 +281,16 @@ def views(
     )
     for start in range(0, len(urls), 20):
         batch = urls[start : start + 20]
-        fields = [f"p{i}:" + selection.replace("$url", json.dumps(url)) for i, url in enumerate(batch)]
+        fields = [
+            f"p{i}:" + selection.replace("$url", json.dumps(url)).replace("$number", _number(url))
+            for i, url in enumerate(batch)
+        ]
         data = _graphql("{" + " ".join(fields) + "}", run)
         gates = _workflow_gates(data, run, cache)
         for i, url in enumerate(batch):
             raw = data.get(f"p{i}")
             gated = gates.get(_workflow_id(raw))
-            found[url] = _view_resource(raw, gated, run) if gated is not None else None
+            found[url] = _view_resource(raw, _number(url), gated, run) if gated is not None else None
     return found
 
 

@@ -40,7 +40,7 @@ def test_a_role_or_overlay_profile_resolves_to_its_base_role_and_name_lane(roles
     [
         ("master", "the master comes online with agentihooks swarm <id> master up"),
         ("ghost", "profile ghost is not installed: install it with agentihooks init"),
-        ("bare", "profile bare wears no base role among planner, engineer, qa, cicd"),
+        ("bare", "profile bare wears no base role among planner, engineer, qa, cicd, documentation"),
     ],
 )
 def test_a_master_missing_or_roleless_profile_is_refused(roles, profile, message):
@@ -61,7 +61,9 @@ def test_the_role_of_an_installed_profile_comes_from_its_chain(monkeypatch):
         _resolve_profile_dir=lambda name: "dir" if name in chains else None,
         _resolve_profile_chain=lambda name: chains[name],
     )
-    monkeypatch.setattr("scripts.targets._common._install_module", lambda: installer)
+    from importlib import import_module
+
+    monkeypatch.setattr(import_module("scripts.targets._common"), "_install_module", lambda: installer)
     assert (agent_up._role("qa-plus"), agent_up._role("flat"), agent_up._role("none")) == ("qa", "", None)
 
 

@@ -573,6 +573,22 @@ def _entry_is_fresh(entry: object, now: float, include_fable: bool) -> bool:
     return all(window.resets_at is None or window.resets_at > now for window in windows)
 
 
+def _current_tokens(environ: Mapping[str, str]) -> set[str]:
+    filled = dict(environ)
+    if not operator_env.files(filled):
+        return set()
+    operator_env.fill(filled)
+    return {credential.env_name for credential in discover_credentials(filled)}
+
+
+def _drop_tokenless(modes: dict, probed: set[str], current: set[str]) -> None:
+    if not current:
+        return
+    for data in modes.values():
+        if isinstance(data, dict) and isinstance(data.get("accounts"), dict):
+            data["accounts"] = {name: entry for name, entry in data["accounts"].items() if name in probed | current}
+
+
 def collect_results(
     credentials: list[Credential],
     *,
@@ -629,6 +645,7 @@ def collect_results(
                 )
                 new_entries[credential.env_name] = {"observed_at": observed_at, "result": _result_data(result)}
         modes[mode] = {"accounts": new_entries}
+        _drop_tokenless(modes, probed, _current_tokens(active_env))
         with contextlib.suppress(OSError):
             _write_cache(path, cache)
 

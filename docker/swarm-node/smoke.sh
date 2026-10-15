@@ -92,7 +92,7 @@ if [[ "$proof" != profiles ]]; then
             "$image" > "$output/$attempt.json"
     done
     docker run --rm --network none --read-only --tmpfs /home/worker:uid=10001,gid=10001 \
-        "$image" python -c 'from pathlib import Path; import os; assert os.getuid()==10001; assert not os.access("/opt/agentihooks/templates", os.W_OK); import hooks, scripts.swarm_v2.runtime; print("private home and local runtime imports passed")' \
+        "$image" python -c 'from pathlib import Path; import os; assert os.getuid()==10001; assert not os.access("/opt/agentihooks/templates", os.W_OK); assert not [p for p in Path("/opt/venv").rglob("*") if not p.is_symlink() and p.lstat().st_mode & 0o222]; import hooks, scripts.swarm_v2.runtime; print("private home and local runtime imports passed")' \
         > "$output/compatibility.log"
     docker run --rm --network none --read-only --tmpfs /home/worker:uid=10001,gid=10001 --tmpfs /tmp \
         -v "$context/tests/contracts/swarm_v2/fixtures/checkpoint/current.json:/checkpoint.json:ro" \
@@ -106,16 +106,36 @@ if [[ "$proof" != startup ]]; then
     fixtures="$context/docker/swarm-node/fixtures/profiles"
     chmod -R a+rX "$probe" "$fixtures"
     (
+        probes=()
         for case in positive positive-second rejection recovery rollback noexec; do
             volume=/home/worker:uid=10001,gid=10001,exec
             if [[ "$case" == noexec ]]; then
                 volume=/home/worker:uid=10001,gid=10001
             fi
-            docker run --rm --network none --read-only --tmpfs "$volume" --tmpfs /tmp \
+            (
+                docker run --rm --network none --read-only --tmpfs "$volume" --tmpfs /tmp \
                 -v "$fixtures:/fixtures:ro" -v "$probe:/opt/probe:ro" \
                 "$image" bash /opt/probe/profile-probe.sh "${case%-second}" \
                 > "$output/profile-$case.json" 2> "$output/profile-$case.log"
+            if [[ "$case" == positive* ]]; then
+                python3 - "$output/profile-$case.json" <<'PYEXIT'
+import json, sys, time
+from pathlib import Path
+path = Path(sys.argv[1])
+report = json.loads(path.read_text())
+latency = time.time() - report['codex_probe']['registered_at']
+assert 0 <= latency < 2, f"Codex registration to container exit took {latency:.3f} seconds"
+report['codex_probe']['registration_to_container_exit_seconds'] = latency
+path.write_text(json.dumps(report) + '\n')
+print(f"Codex registration to container exit took {latency:.3f} seconds")
+PYEXIT
+            fi
+            ) &
+            probes+=("$!")
         done
+        status=0
+        for pid in "${probes[@]}"; do wait "$pid" || status=$?; done
+        if (( status )); then exit "$status"; fi
         python3 "$probe/profile_evidence.py" "$output" "$fixture" "$revision" "$fixtures"
     ) &
     profile_pid=$!

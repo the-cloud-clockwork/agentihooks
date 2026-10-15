@@ -43,12 +43,18 @@ elif args[0] == 'info':
     print(os.environ.get('DRIVER', '[]'))
 elif args[0] == 'run':
     if '/opt/probe/profile-probe.sh' in args:
+        (state / f'probe-{os.getpid()}').touch()
+        deadline = time.monotonic() + 3
+        while len(list(state.glob('probe-*'))) < 6:
+            if time.monotonic() >= deadline:
+                sys.exit(42)
+            time.sleep(0.01)
         if args[-1] == 'positive':
             (state / 'profile-started').touch()
             wait('rebuild')
         if os.environ['FAILURE'] == 'profile':
             sys.exit(18)
-        print('{}')
+        print(json.dumps({'codex_probe': {'registered_at': time.time() -\n              (3 if os.environ['FAILURE'] == 'profile-late' else 0)}}))
     else:
         print(json.dumps({'manifest': {'source_revision': 'checked-revision',
               'declared': {'lock_sha256': 'locked'}},
@@ -168,7 +174,7 @@ def test_independent_worker_proofs_overlap_and_keep_every_check(tmp_path):
     assert len(runs) == 12
     assert all("--read-only" in call and call[call.index("--network") + 1] == "none" for call in runs)
     profiles = [call[-1] for call in runs if "/opt/probe/profile-probe.sh" in call]
-    assert profiles == ["positive", "positive", "rejection", "recovery", "rollback", "noexec"]
+    assert sorted(profiles) == ["noexec", "positive", "positive", "recovery", "rejection", "rollback"]
     assert json.loads((output / "result.json").read_text())["status"] == "passed"
     assert not list(output.glob("context-*"))
     assert calls[-1][:2] == ["image", "rm"]
@@ -198,6 +204,8 @@ def test_worker_proof_modes_run_only_their_independent_checks(tmp_path, proof, b
         assert build[build.index("--no-cache-filter") + 1] == "worker"
     if proof == "profiles":
         assert (state / "profile-evidence").exists()
+        for name in ("profile-positive.json", "profile-positive-second.json"):
+            assert json.loads((output / name).read_text())["codex_probe"]["registration_to_container_exit_seconds"] < 2
     assert (state / "scanner-pulled").exists()
     assert (state / "scan-agentihooks-worker-proof-finished").exists()
 
@@ -226,6 +234,7 @@ def test_containerd_store_exports_worker_layers_uncompressed(tmp_path, proof, dr
         ("rebuild", "prefetch", 21),
         ("profiles", "prefetch", 21),
         ("profiles", "profile", 18),
+        ("profiles", "profile-late", 1),
         ("profiles", "profile-evidence", 19),
     ],
 )
