@@ -1174,3 +1174,43 @@ def test_main_reports_its_module_usage_when_execution_arguments_are_missing(caps
         "usage: python -m scripts.inbox.codex [-h] swarm execution\n"
         "python -m scripts.inbox.codex: error: the following arguments are required: swarm, execution\n"
     )
+
+
+class IdlePane:
+    def __init__(self):
+        self.prompts = []
+
+    def agent_status(self, agent):
+        return "idle"
+
+    def typed_input(self, agent):
+        return ""
+
+    def prompt(self, agent, text):
+        self.prompts.append((agent.pane_id, text))
+
+
+def test_an_idle_codex_pane_with_mail_gets_a_pump_delivery_and_no_pane_write(rig):
+    from scripts.inbox import wake
+
+    pane = AgentRecord(ME, "eng", "task", pane_id="p1", harness="codex")
+    herdr = IdlePane()
+    rig.pump.start()
+    item = rig.store.send("alice", ME, "hello")
+    assert wake.wake_now(rig.store, SLUG, [pane], herdr, item.created_at + 1, 300_000) == []
+    assert wake.wake_pass(rig.store, SLUG, [pane], herdr, None, item.created_at + 1, 300_000) == []
+    rig.pump.step()
+    assert herdr.prompts == []
+    assert rig.store.get(item.id).state == "delivered"
+    assert [m for m in rig.server.methods() if m.startswith("turn/")] == ["turn/start"]
+    assert [e.get("event") for e in rig.store.history(item.id)].count(wake.WOKEN) == 0
+
+
+def test_a_codex_pane_is_typed_into_only_while_no_pump_owns_its_inbox(rig):
+    from scripts.inbox import wake
+
+    pane = AgentRecord(ME, "eng", "task", pane_id="p1", harness="codex")
+    assert wake.typed_wake(rig.store, pane) is True
+    rig.pump.start()
+    assert wake.typed_wake(rig.store, pane) is False
+    assert wake.typed_wake(rig.store, replace(pane, name="engineer@abc-0002")) is True
