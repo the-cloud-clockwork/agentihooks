@@ -1618,7 +1618,7 @@ URL3 = "https://github.com/o/r/pull/3"
 
 def test_the_worktree_branch_is_read_and_checked_on_origin():
     calls, fake = git_answers({"branch": (0, "engineer-a1b2c3-0001\n"), "ls-remote": (0, "abc\trefs/heads/x\n")})
-    assert cli.worktree_branch(run=fake) == "engineer-a1b2c3-0001"
+    assert cli.worktree_branch(None, run=fake) == "engineer-a1b2c3-0001"
     assert calls == [
         (["git", "branch", "--show-current"], GIT_OPTS),
         (["git", "ls-remote", "--exit-code", "--heads", "origin", "engineer-a1b2c3-0001"], GIT_OPTS),
@@ -1628,7 +1628,7 @@ def test_the_worktree_branch_is_read_and_checked_on_origin():
 def test_a_branch_missing_on_origin_is_refused():
     _, fake = git_answers({"branch": (0, "engineer-a1b2c3-0001\n"), "ls-remote": (2, "")})
     with pytest.raises(SwarmError) as refused:
-        cli.worktree_branch(run=fake)
+        cli.worktree_branch(None, run=fake)
     assert str(refused.value) == (
         "branch engineer-a1b2c3-0001 is not on origin; push it first with git push -u origin engineer-a1b2c3-0001"
     )
@@ -1638,7 +1638,7 @@ def test_a_branch_missing_on_origin_is_refused():
 def test_a_checkout_on_no_branch_is_refused(answer):
     calls, fake = git_answers({"branch": answer})
     with pytest.raises(SwarmError) as refused:
-        cli.worktree_branch(run=fake)
+        cli.worktree_branch(None, run=fake)
     assert str(refused.value) == "swarm branch runs in a worktree on a branch; this checkout is on none"
     assert len(calls) == 1
 
@@ -1652,7 +1652,7 @@ def test_a_git_call_that_cannot_run_is_a_clean_refusal(failure, step):
         return subprocess.CompletedProcess(argv, 0, "engineer-a1b2c3-0001\n", "")
 
     with pytest.raises(SwarmError) as refused:
-        cli.worktree_branch(run=fake)
+        cli.worktree_branch(None, run=fake)
     assert str(refused.value) == f"git {step} could not run: {failure}"
 
 
@@ -1664,7 +1664,7 @@ def test_a_continuation_pushing_the_recorded_remote_branch_records_that_branch()
             "ls-remote": (0, "abc\trefs/heads/engineer-a1b2c3-0001\n"),
         }
     )
-    assert cli.worktree_branch(run=fake, recorded="engineer-a1b2c3-0001") == "engineer-a1b2c3-0001"
+    assert cli.worktree_branch("engineer-a1b2c3-0001", run=fake) == "engineer-a1b2c3-0001"
     assert calls == [
         (["git", "branch", "--show-current"], GIT_OPTS),
         (["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], GIT_OPTS),
@@ -1684,7 +1684,7 @@ def test_a_continuation_pushing_the_recorded_remote_branch_records_that_branch()
 def test_a_continuation_pushing_an_unrelated_remote_branch_is_refused(upstream):
     calls, fake = git_answers({"branch": (0, "engineer-a1b2c3-0002\n"), "rev-parse": upstream, "ls-remote": (2, "")})
     with pytest.raises(SwarmError) as refused:
-        cli.worktree_branch(run=fake, recorded="engineer-a1b2c3-0001")
+        cli.worktree_branch("engineer-a1b2c3-0001", run=fake)
     assert str(refused.value) == (
         "branch engineer-a1b2c3-0002 is not on origin; push it first with git push -u origin engineer-a1b2c3-0002"
     )
@@ -1693,7 +1693,7 @@ def test_a_continuation_pushing_an_unrelated_remote_branch_is_refused(upstream):
 
 def test_a_checkout_on_the_recorded_branch_reads_no_upstream():
     calls, fake = git_answers({"branch": (0, "engineer-a1b2c3-0001\n"), "ls-remote": (0, "abc\trefs/heads/x\n")})
-    assert cli.worktree_branch(run=fake, recorded="engineer-a1b2c3-0001") == "engineer-a1b2c3-0001"
+    assert cli.worktree_branch("engineer-a1b2c3-0001", run=fake) == "engineer-a1b2c3-0001"
     assert [argv[1] for argv, _ in calls] == ["branch", "ls-remote"]
 
 
@@ -1755,7 +1755,7 @@ def test_swarm_branch_records_the_worktree_branch_on_the_agent_task(env, monkeyp
     _, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
-    monkeypatch.setattr(cli, "worktree_branch", lambda: "engineer-a1b2c3-0001")
+    monkeypatch.setattr(cli, "worktree_branch", lambda recorded: "engineer-a1b2c3-0001")
     monkeypatch.setattr(cli, "origin_repo", lambda: repo)
     writes, update = [], ledger.update_task
     ledger.update_task = lambda slug, task, fields, by="swarm": (
@@ -1777,7 +1777,7 @@ def test_swarm_branch_on_a_continuation_records_the_predecessor_branch_and_keeps
     run("sw", "start")
     ledger.rows["t1"].update(branch="engineer-a1b2c3-0001", pr_url=URL3)
     seen = []
-    monkeypatch.setattr(cli, "worktree_branch", lambda recorded="": seen.append(recorded) or recorded)
+    monkeypatch.setattr(cli, "worktree_branch", lambda recorded: seen.append(recorded) or recorded)
     monkeypatch.setattr(cli, "origin_repo", lambda: "https://github.com/o/r")
     capsys.readouterr()
     assert run("sw", "--as", "engineer@a1b2c3-0001", "branch") == 0
@@ -1810,7 +1810,7 @@ def test_swarm_branch_writes_nothing_when_the_branch_is_refused(env, monkeypatch
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
 
-    def refused():
+    def refused(recorded):
         raise SwarmError("branch x is not on origin")
 
     monkeypatch.setattr(cli, "worktree_branch", refused)
