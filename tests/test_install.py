@@ -696,14 +696,14 @@ class TestUserEnvManifest:
 
 
 class TestInitTargets:
-    def test_bare_init_installs_all_supported_targets(self, monkeypatch):
+    def test_bare_init_installs_default_targets(self, monkeypatch):
         calls = []
         monkeypatch.setattr(install, "cmd_init_unified", lambda args: calls.append(args))
         monkeypatch.setattr(sys, "argv", ["agentihooks", "init", "--profile", "default"])
 
         install.main()
 
-        assert [args.install_target for args in calls] == list(install.SUPPORTED_TARGETS)
+        assert [args.install_target for args in calls] == ["claude", "codex"]
 
     def test_target_flag_installs_only_that_target(self, monkeypatch):
         calls = []
@@ -718,7 +718,7 @@ class TestInitTargets:
 
         assert [args.install_target for args in calls] == ["codex"]
 
-    def test_target_environment_installs_only_that_target(self, monkeypatch):
+    def test_target_environment_does_not_enable_copilot(self, monkeypatch):
         calls = []
         monkeypatch.setenv("AGENTIHOOKS_TARGET", "copilot")
         monkeypatch.setattr(install, "cmd_init_unified", lambda args: calls.append(args))
@@ -726,7 +726,7 @@ class TestInitTargets:
 
         install.main()
 
-        assert [args.install_target for args in calls] == ["copilot"]
+        assert [args.install_target for args in calls] == ["claude", "codex"]
 
 
 # ---------------------------------------------------------------------------
