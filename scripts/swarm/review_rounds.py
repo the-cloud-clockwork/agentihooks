@@ -2,6 +2,7 @@
 
 import fcntl
 import hashlib
+from pathlib import Path
 
 from scripts.gates.budget import Budget
 from scripts.swarm.store import SwarmError
@@ -28,12 +29,12 @@ def _counter(budget, task, pr_url, first_pr):
     return "rounds" if pr_url == first else f"rounds-{hashlib.sha256(pr_url.encode()).hexdigest()}"
 
 
-def counts(slug: str, task: str, home=None) -> dict[str, int]:
+def counts(slug: str, task: str, home: Path | None = None) -> dict[str, int]:
     budget = Budget(slug, "reviews", home)
     return {path.name: budget.spent(task, path.name) for path in budget.path(task, "rounds").parent.glob("rounds*")}
 
 
-def start(slug, task, home=None, pr_url="", first_pr=""):
+def start(slug: str, task: str, home: Path | None = None, pr_url: str = "", first_pr: str = "") -> dict[str, str | int]:
     budget = Budget(slug, "reviews", home)
     allowed, spent = budget.spend(task, _counter(budget, task, pr_url, first_pr), ROUNDS)
     if not allowed:
