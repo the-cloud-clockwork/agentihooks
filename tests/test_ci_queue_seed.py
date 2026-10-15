@@ -41,7 +41,7 @@ def test_queue_runs_mint_a_read_only_app_token_and_skip_the_dev_cache_lookup():
         "client-id": "${{ secrets.TCC_CI_CLIENT_ID }}",
         "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
         "repositories": "${{ github.event.repository.name }}",
-        "permission-actions": "read",
+        "permission-actions": "${{ github.event_name == 'merge_group' && 'write' || 'read' }}",
         "permission-contents": "read",
     }
     assert job["permissions"] == {"contents": "read"}
@@ -132,8 +132,10 @@ def test_the_queue_baseline_holds_the_exact_base_tree_on_the_app_token():
     assert [steps.index(s) for s in (mint, find, download, hold, upload)] == sorted(
         steps.index(s) for s in (mint, find, download, hold, upload)
     )
-    assert 'wait="${WAIT_SECONDS:-600}"' in find["run"]
-    assert job["timeout-minutes"] * 60 > 600
+    rules = json.loads((_ROOT / ".github" / "rulesets" / "dev-no-delete.json").read_text())
+    queue = next(rule["parameters"] for rule in rules["rules"] if rule["type"] == "merge_queue")
+    assert job["timeout-minutes"] == queue["check_response_timeout_minutes"]
+    assert "anton-oss-light" in job["runs-on"]
 
 
 @pytest.mark.parametrize(("measured", "fails"), [("abc", False), ("old", True)])
@@ -218,10 +220,14 @@ def base_run(tmp_path):
         "#!/usr/bin/env bash\n"
         'printf "%s\\n" "$@" >> "$ARGS"\n'
         'case "$2" in\n'
+        "  */compare/*) echo ahead ;;\n"
+        '  */jobs*) jq -nc \'[range(1;13) | {name: ("unit (3.12, " + tostring + ")"), conclusion: "success"}] + [range(1;7) | {name: ("unit (3.11, " + tostring + ")"), conclusion: "success"}] + [{name: "queue-baseline", conclusion: "success", steps: [{name: "Record this run\\u0027s coverage baseline", conclusion: "success"}, {name: "Publish this run\\u0027s coverage baseline", conclusion: "success"}]}]\' | jq -c \'.[]\' ;;\n'
         '  */commits/*) printf "tree-of-base" ;;\n'
-        '  */runs\\?head_sha=*) [[ -z "$FAIL_RUNS" ]] || exit 1; for r in $FAKE_RUNS; do e=pull_request; s=$FAKE_STATUS;'
+        '  */runs\\?head_sha=*) [[ -z "$FAIL_RUNS" ]] || exit 1; '
+        '[[ "$FAKE_REMOVED_AFTER" -lt 0 || $(cat "$POLLS") -lt "$FAKE_REMOVED_AFTER" ]] || exit 0; '
+        "for r in $FAKE_RUNS; do e=merge_group; s=$FAKE_STATUS;"
         ' [[ " $FAKE_DISPATCH " == *" $r "* ]] && { e=workflow_dispatch; s=in_progress; };'
-        ' jq -n --argjson id "$r" --arg s "$s" --arg e "$e" \'{id: $id, status: $s, event: $e}\'; done'
+        ' jq -n --argjson id "$r" --arg s "$s" --arg e "$e" \'{id: $id, status: $s, event: $e, head_branch: "gh-readonly-queue/dev/pr-1", head_sha: ("b" * 40)}\'; done'
         " | jq -s '{workflow_runs: .}' | jq -r \"$4\" ;;\n"
         '  */artifacts*) n=$(cat "$POLLS"); echo $((n + 1)) > "$POLLS"; '
         '[[ "$2" == *"/$FAKE_KEPT_BY/"* && $n -ge $FAKE_AFTER ]] && printf 1 || printf 0 ;;\n'
@@ -231,7 +237,15 @@ def base_run(tmp_path):
     (tools / "sleep").write_text("#!/usr/bin/env bash\ntrue\n")
     (tools / "sleep").chmod(0o755)
 
-    def run(runs="111 222", kept_by="222", after=0, wait="600", fail_runs="", status="in_progress", dispatch=""):
+    def run(
+        runs="111 222",
+        kept_by="222",
+        after=0,
+        fail_runs="",
+        status="in_progress",
+        dispatch="",
+        removed_after=-1,
+    ):
         output = tmp_path / "output"
         output.write_text("")
         polls = tmp_path / "polls"
@@ -247,12 +261,14 @@ def base_run(tmp_path):
             FAIL_RUNS=fail_runs,
             FAKE_STATUS=status,
             FAKE_DISPATCH=dispatch,
-            WAIT_SECONDS=wait,
+            FAKE_REMOVED_AFTER=str(removed_after),
+            WAIT_SECONDS="600",
             BASE_SHA="b" * 40,
             GITHUB_OUTPUT=str(output),
             GITHUB_REPOSITORY="the-cloud-clockwork/agentihooks",
         )
-        result = subprocess.run(["bash", "-e", "-c", find["run"]], env=env, capture_output=True, text=True)
+        script = find["run"].replace('sleep "${POLL_SECONDS:-30}"', "SECONDS=$((SECONDS + 301))")
+        result = subprocess.run(["bash", "-e", "-c", script], env=env, capture_output=True, text=True, timeout=5)
         return result, output.read_text(), (tmp_path / "args").read_text().splitlines()
 
     return run
@@ -272,14 +288,15 @@ def test_the_base_run_is_any_tests_run_on_the_base_commit_that_kept_a_baseline(b
 
 
 def test_the_base_run_ignores_dispatched_runs_that_wait_on_a_hosted_lane(base_run):
-    result, output, _ = base_run(dispatch="111", kept_by="333", status="completed", wait="5")
+    result, output, _ = base_run(dispatch="111", kept_by="333", status="completed")
     assert result.returncode != 0
     assert "finished without a coverage baseline" in result.stdout
     assert output == ""
 
 
-def test_the_base_run_waits_for_an_earlier_queue_entry_to_publish(base_run):
-    result, output, _ = base_run(after=5)
+@pytest.mark.parametrize("status", ["queued", "in_progress"])
+def test_the_base_run_waits_past_ten_minutes_for_an_earlier_queue_entry_to_publish(base_run, status):
+    result, output, _ = base_run(after=7, status=status)
     assert result.returncode == 0, result.stderr
     assert output == "id=222\ntree=tree-of-base\n"
 
@@ -291,12 +308,13 @@ def test_a_failed_runs_listing_is_red_at_once_instead_of_waiting(base_run):
     assert not [arg for arg in args if "/artifacts" in arg]
 
 
-@pytest.mark.parametrize("runs", ["111 222", ""])
-def test_the_base_run_is_red_once_the_bounded_wait_ends(base_run, runs):
-    result, output, _ = base_run(runs=runs, kept_by="333", wait="0")
+@pytest.mark.parametrize("removed_after", [0, 2])
+def test_the_base_run_is_red_when_the_predecessor_is_removed(base_run, tmp_path, removed_after):
+    result, output, _ = base_run(kept_by="333", removed_after=removed_after)
     assert result.returncode != 0
-    assert "::error::" in result.stdout
+    assert "No Tests run remains" in result.stdout
     assert output == ""
+    assert int((tmp_path / "polls").read_text()) == removed_after
 
 
 def test_a_finished_base_without_a_baseline_is_red_at_once(base_run, tmp_path):
@@ -352,6 +370,9 @@ def _runs_on(step, event):
             name, op, value = atom.strip().strip("()").split()
             if name.startswith("hashfiles("):
                 held = held and ((_ROOT / name[len("hashfiles('") : -len("')")]).exists() == (op == "!="))
+                continue
+            if name in ("github.actor", "github.triggering_actor"):
+                held = held and ((value.strip("'") == "github-merge-queue[bot]") == (op == "=="))
                 continue
             assert name == "github.event_name", atom
             held = held and ((value.strip("'") == event) == (op == "=="))
@@ -426,9 +447,11 @@ def dispatch_lookup(tmp_path):
         "#!/usr/bin/env bash\n"
         'printf "%s\\n" "$@" >> "$ARGS"\n'
         'case "$2" in\n'
+        '  */compare/*) body=\'{"status":"ahead"}\' ;;\n'
+        '  */jobs*) jq -nc \'[range(1;13) | {name: ("unit (3.12, " + tostring + ")"), conclusion: "success"}] + [range(1;7) | {name: ("unit (3.11, " + tostring + ")"), conclusion: "success"}] + [{name: "coverage-baseline", conclusion: "success", steps: [{name: "Compute the coverage baseline", conclusion: "success"}, {name: "Publish the passed dev coverage baseline", conclusion: "success"}]}]\' | jq -c \'.[]\'; exit 0 ;;\n'
         '  */commits/*) [[ -z "$FAIL_COMMIT" ]] || exit 1; body="{\\"sha\\": \\"$FAKE_SHA\\"}" ;;\n'
         '  */runs\\?*) body=$(printf "%s\\n" $FAKE_RUNS | grep . | jq -R --arg sha "$FAKE_SHA" "$RUN_OF"'
-        ' | jq -s --arg q "&${2#*\\?}&" "$LISTED") ;;\n'
+        ' | jq -s --arg q "&${2#*\\?}&" "$LISTED" | jq --arg q "&${2#*\\?}&" \'.workflow_runs |= map(. + {event: "push", head_branch: "dev"} | select(($q | contains("&status=completed&") | not) or (.conclusion != "" and .conclusion != null)))\') ;;\n'
         '  */runs/*/artifacts*) run="${2#*/runs/}"; run="${run%%/*}"; v="KEPT_$run"; body="${!v:-[]}"'
         '; body="{\\"artifacts\\": $body}" ;;\n'
         "esac\n"
@@ -478,9 +501,9 @@ def test_dispatch_on_dev_restores_the_newest_passed_dev_push_run(dispatch_lookup
     assert not [arg for arg in args if "/commits/" in arg]
     assert (
         "repos/the-cloud-clockwork/agentihooks/actions/workflows/test.yml/runs"
-        "?branch=dev&event=push&status=success&per_page=20"
+        "?branch=dev&event=push&status=completed&per_page=20"
     ) in args
-    assert "from passed dev push run 222" in result.stdout
+    assert "from measured dev push run 222" in result.stdout
 
 
 def test_dispatch_on_a_pinned_commit_restores_its_passed_dev_push_run(dispatch_lookup):
@@ -498,7 +521,7 @@ def test_dispatch_on_a_pinned_commit_restores_its_passed_dev_push_run(dispatch_l
     assert "repos/the-cloud-clockwork/agentihooks/commits/" + pinned in args
     assert (
         "repos/the-cloud-clockwork/agentihooks/actions/workflows/test.yml/runs"
-        "?branch=dev&event=push&status=success&head_sha=" + pinned + "&per_page=20"
+        "?branch=dev&event=push&status=completed&head_sha=" + pinned + "&per_page=20"
     ) in args
 
 

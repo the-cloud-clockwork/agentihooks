@@ -5,7 +5,7 @@ import shutil
 import sys
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import asdict, dataclass, replace
 from typing import TYPE_CHECKING
 
@@ -13,6 +13,7 @@ from scripts import codex_router, session_bands
 from scripts.claude_quota_balancer import (
     MASTERS_ONLY,
     OPEN,
+    ProbeResult,
     QuotaWindow,
     _cap_text,
     _duration,
@@ -303,6 +304,13 @@ def with_masters(rows: list[QuotaRow], masters: dict[str, "MasterAccount"], sess
     return marked
 
 
+def router_environ(environ: MutableMapping[str, str]) -> MutableMapping[str, str]:
+    from scripts import operator_env
+
+    operator_env.fill(environ)
+    return environ
+
+
 def _claude(refresh: bool, timeout: float) -> list[QuotaRow]:
     from hooks.context.account_sessions import sessions_by_account
     from scripts.claude_quota_balancer import cached_observations, collect_results, discover_credentials
@@ -310,7 +318,7 @@ def _claude(refresh: bool, timeout: float) -> list[QuotaRow]:
     from scripts.routing.claude_api import ClaudeApiSource
 
     _load_claude_runtime_env()
-    credentials = discover_credentials(os.environ)
+    credentials = discover_credentials(router_environ(dict(os.environ)))
     sessions = sessions_by_account()
     if credentials:
         results, source = collect_results(
@@ -360,7 +368,12 @@ def current_table(
     seen.update({result.account: (now, result) for result in probed})
     observed = {account: at for account, (at, _) in seen.items()}
     results = [result for _, result in seen.values()]
+    results += [_unprobed(name) for name in sorted(names - seen.keys())]
     return balance_table(results, sessions, now, fable, current, observed)
+
+
+def _unprobed(account: str) -> ProbeResult:
+    return ProbeResult(account, "", "UNKNOWN", None, QuotaWindow(), QuotaWindow())
 
 
 def balance_table(

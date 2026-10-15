@@ -427,6 +427,24 @@ def test_subscription_records_include_caps_unknown_readings_and_login(observatio
     daemon.codex_router.quotas.assert_called_once_with([account], environ)
 
 
+def test_a_signed_out_codex_reading_publishes_no_quota_and_no_cap(observations):
+    from scripts.codex_quota import CodexQuota
+
+    balancer = observations
+    balancer.cached_observations.return_value = []
+    account = daemon.codex_router.CodexAccount("two", "AH_CX_TOKEN_two")
+    daemon.codex_router.accounts.return_value = [account]
+    reading = CodexQuota(121, "", balancer.QuotaWindow(30, 1000), balancer.QuotaWindow(40, 2000), expired=True)
+    daemon.codex_router.quotas.return_value = {"two": reading}
+    slots, quota = daemon._subscriptions({}, {"claude": {}, "codex": {}}, 122)
+    assert slots == [{"harness": "codex", "account": "two", "kind": "subscription", "cap": 0}]
+    assert quota["codex:two"] == {
+        "five_hour": {"used": None, "resets_at": None},
+        "seven_day": {"used": None, "resets_at": None},
+        "observed_at": None,
+    }
+
+
 def test_stale_claude_reading_does_not_advertise_capacity(observations):
     result = observations.ProbeResult(
         "one", "allowed", "OK", 60, observations.QuotaWindow(20, 100000), observations.QuotaWindow(40, 200000)

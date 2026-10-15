@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-SHARED = {"projects", "sessions", "todos", "plugins", ".credentials.json"}
+SHARED = {"projects", "sessions", "todos", "plugins", ".credentials.json", "keybindings.json"}
 
 
 def _write(path: Path, text: str) -> Path:
@@ -849,6 +849,37 @@ def test_claude_render_mcp_and_shared_data(world, capsys):
         assert os.readlink(out / name) == str(home / ".claude" / name)
 
 
+@pytest.mark.parametrize("present", [True, False])
+def test_claude_render_links_operator_keybindings(world, present):
+    from scripts.profiles import render
+
+    source = world["home"] / ".claude" / "keybindings.json"
+    if present:
+        _write(source, '{"bindings": []}\n')
+    out = render.render_claude("rb-role")
+    link = out / "keybindings.json"
+    assert link.is_symlink()
+    assert link.readlink() == source
+    assert link.exists() is present
+    assert render.render_claude("rb-role") is None
+
+
+@pytest.mark.parametrize("missing", sorted(SHARED))
+def test_claude_render_redoes_a_home_missing_a_shared_link(world, missing):
+    from scripts.profiles import render
+
+    out = render.render_claude("rb-role")
+    link = out / missing
+    if link.is_symlink():
+        link.unlink()
+    assert render.render_claude("rb-role") is not None
+    fresh = render.profile_dir("rb-role") / "claude"
+    assert fresh != out
+    assert (fresh / missing).is_symlink()
+    assert (fresh / missing).readlink() == world["home"] / ".claude" / missing
+    assert render.render_claude("rb-role") is None
+
+
 def test_claude_render_seeds_only_startup_state_from_the_default_home(world):
     from scripts.profiles import render
 
@@ -1597,6 +1628,90 @@ def test_codex_render_links_state_back_to_the_operator_home(world):
     assert doc["hooks"]["state"] == {f"{out / 'hooks.json'}:pre_tool_use:0:0": {"trusted_hash": "sha256:aa"}}
     assert doc["projects"] == {"/w": {"trust_level": "trusted"}}
     assert (doc["model"], doc["service_tier"], doc["notify"]) == ("gpt-op", "fast", ["py", "-m", "shim"])
+
+
+def _hooks_entries(hooks: Path) -> list[str]:
+    doc = json.loads(hooks.read_text())["hooks"]
+    labels = {
+        "PreToolUse": "pre_tool_use",
+        "PermissionRequest": "permission_request",
+        "PostToolUse": "post_tool_use",
+        "PreCompact": "pre_compact",
+        "PostCompact": "post_compact",
+        "SessionStart": "session_start",
+        "SessionEnd": "session_end",
+        "UserPromptSubmit": "user_prompt_submit",
+        "SubagentStart": "subagent_start",
+        "SubagentStop": "subagent_stop",
+        "Stop": "stop",
+        "Interrupt": "interrupt",
+    }
+    return [
+        f"{labels[event]}:{g}:{h}"
+        for event, groups in doc.items()
+        for g, group in enumerate(groups)
+        for h, hook in enumerate(group["hooks"])
+        if hook["command"].strip()
+    ]
+
+
+def test_codex_render_trusts_every_hooks_json_entry(world):
+    from scripts.profiles import render
+    from tests.codex_hook_fixtures import CODEX_HOOK_HASHES, CODEX_HOOKS
+
+    home = world["home"]
+    _operator_codex(home)
+    _write(home / ".codex" / "hooks.json", json.dumps(CODEX_HOOKS))
+
+    out = render.render_codex("rb-role")
+
+    state = tomllib.loads((out / "config.toml").read_text())["hooks"]["state"]
+    entries = _hooks_entries(out / "hooks.json")
+    assert sorted(entries) == sorted(CODEX_HOOK_HASHES)
+    assert {k: v["trusted_hash"] for k, v in state.items()} == {
+        f"{out / 'hooks.json'}:{entry}": CODEX_HOOK_HASHES[entry] for entry in entries
+    }
+
+
+def test_codex_render_keeps_operator_hook_flags_beside_computed_trust(world):
+    from scripts.profiles import render
+    from tests.codex_hook_fixtures import CODEX_HOOK_HASHES, CODEX_HOOKS
+
+    home = world["home"]
+    hooks = home / ".codex" / "hooks.json"
+    _write(hooks, json.dumps(CODEX_HOOKS))
+    text = (home / ".codex" / "config.toml").read_text()
+    _write(home / ".codex" / "config.toml", text + f'\n[hooks.state."{hooks}:stop:1:0"]\nenabled = false\n')
+
+    out = render.render_codex("rb-role")
+
+    state = tomllib.loads((out / "config.toml").read_text())["hooks"]["state"]
+    assert state[f"{out / 'hooks.json'}:stop:1:0"] == {"enabled": False, "trusted_hash": CODEX_HOOK_HASHES["stop:1:0"]}
+
+
+def test_codex_render_rerenders_when_the_operator_hooks_change(world):
+    import hashlib
+
+    from scripts.profiles import render
+    from tests.codex_hook_fixtures import CODEX_HOOK_HASHES, CODEX_HOOKS
+
+    home = world["home"]
+    hooks = home / ".codex" / "hooks.json"
+    first = render.render_codex("rb-role")
+    assert json.loads((first / render.STAMP).read_text())["hooks"] == ""
+    assert render.render_codex("rb-role") is None
+
+    text = json.dumps({"hooks": {"Stop": CODEX_HOOKS["hooks"]["Stop"]}})
+    _write(hooks, text)
+    out = render.render_codex("rb-role")
+
+    assert out is not None and out != first
+    assert json.loads((out / render.STAMP).read_text())["hooks"] == hashlib.sha256(text.encode()).hexdigest()
+    state = tomllib.loads((out / "config.toml").read_text())["hooks"]["state"]
+    assert {k: v["trusted_hash"] for k, v in state.items()} == {
+        f"{out / 'hooks.json'}:stop:0:0": CODEX_HOOK_HASHES["stop:0:0"],
+        f"{out / 'hooks.json'}:stop:1:0": CODEX_HOOK_HASHES["stop:1:0"],
+    }
 
 
 @pytest.mark.parametrize("token_kind", ["chatgpt", "agent"])

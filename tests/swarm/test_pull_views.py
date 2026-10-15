@@ -76,6 +76,30 @@ def test_a_bad_resource_does_not_discard_its_neighbors():
     assert [found[url] for url in urls[1:]] == [None, None, None]
 
 
+def test_a_batched_pull_request_pages_through_more_than_one_hundred_contexts():
+    urls = [f"https://github.com/o/r/pull/{n}" for n in range(2)]
+    big = resource("h2")
+    commit = big["commits"]["nodes"][0]["commit"]
+    commit["id"] = "C_h2"
+    first = [{"name": f"job {n}", "conclusion": "SUCCESS", "databaseId": n} for n in range(100)]
+    commit["statusCheckRollup"] = {"contexts": {"nodes": first, "pageInfo": {"hasNextPage": True, "endCursor": "c"}}}
+    rest = [{"name": "job 100", "conclusion": "FAILURE", "databaseId": 100}]
+    page = {"node": {"statusCheckRollup": {"contexts": {"nodes": rest, "pageInfo": {"hasNextPage": False}}}}}
+    replies = [{"data": {"p0": resource(), "p1": big}}, {"data": page}]
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=0, stdout=json.dumps(replies[len(calls) - 1]))
+
+    found = views(urls, run)
+    assert len(calls) == 2
+    assert {"id=C_h2", "after=c"} <= set(calls[1])
+    assert found[urls[0]].head == "h1"
+    assert found[urls[1]].failed == ("job 100",)
+    assert found[urls[1]].red is True
+
+
 def test_partial_graphql_errors_leave_other_pull_requests_readable():
     urls = [f"https://github.com/o/r/pull/{n}" for n in range(2)]
     raw = {

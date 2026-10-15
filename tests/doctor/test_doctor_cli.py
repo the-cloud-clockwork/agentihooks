@@ -570,7 +570,7 @@ def sent(store):
 def test_a_doctor_start_leaves_the_first_telemetry_pass_to_the_scheduled_tick(env, monkeypatch, scheduled):
     store, rt, _ = env
     reads, passes = reading_traces(monkeypatch)
-    every = {"health", "inbox", "handoff", "spawn", "master launch", "startup", "ci", "trace"}
+    every = {"health", "inbox", "handoff", "spawn", "master launch", "startup", "ci", "trace", "runtime storage"}
     assert doctor.main([WATCHED, "start"]) == 0
     assert reads == [] and passes == [every - {"trace"}]
     assert STALE.id in sent(store) and UNTRACED.id not in sent(store)

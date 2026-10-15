@@ -78,6 +78,17 @@ def evidence(tmp_path, *, reused=False, run_id=123):
     return run, record, folder
 
 
+@pytest.mark.parametrize("producer", ["durations", "lint", "unit (3.12, 1)"])
+@pytest.mark.parametrize("result", ["success", "failure", "skipped"])
+def test_queue_provenance_can_move_only_to_successful_durations(tmp_path, producer, result):
+    _, _, folder = evidence(tmp_path)
+    jobs = [json.loads(line) for line in (folder / "jobs.jsonl").read_text().splitlines()]
+    jobs[0] = {"name": producer, "conclusion": result}
+    (folder / "jobs.jsonl").write_text("".join(json.dumps(job) + "\n" for job in jobs))
+    expected = 123 if producer == "durations" and result == "success" else None
+    assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) == expected
+
+
 def test_exact_passed_queue_commit_reuses_all_unit_artifacts(tmp_path):
     evidence(tmp_path)
     assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) == 123

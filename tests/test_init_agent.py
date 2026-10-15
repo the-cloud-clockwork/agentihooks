@@ -506,6 +506,26 @@ def _launcher_text(tmp_path, environ, agent="claude", name="swarm-buildout-eng-4
     return launcher.read_text()
 
 
+def test_swarm_display_name_preserves_the_inbox_identity(monkeypatch, tmp_path):
+    text = _dry_launcher(
+        monkeypatch,
+        tmp_path,
+        "engineer-a1b2c3-0001",
+        {
+            "AGENTIHOOKS_SWARM": "sw",
+            "AGENTIHOOKS_SWARM_SPAWN": "1",
+            "AGENTIHOOKS_AGENT_NAME": "engineer@a1b2c3-0001",
+        },
+    )
+    assert "export AGENTIHOOKS_AGENT_NAME=engineer@a1b2c3-0001" in text
+    assert "--name engineer-a1b2c3-0001" in text
+
+
+def test_an_independent_launch_does_not_inherit_another_inbox_identity(tmp_path):
+    text = _launcher_text(tmp_path, {"AGENTIHOOKS_AGENT_NAME": "engineer@a1b2c3-0001"}, name="my-session")
+    assert "export AGENTIHOOKS_AGENT_NAME=my-session" in text
+
+
 def test_collector_unset_leaves_the_launcher_without_telemetry(tmp_path):
     for agent in ("claude", "codex"):
         text = _launcher_text(tmp_path, {}, agent)
@@ -1440,7 +1460,8 @@ def test_a_plain_codex_quota_handoff_preserves_native_choices(monkeypatch, tmp_p
         )
         == 0
     )
-    command, successor = launched[0]
+    launcher, successor = launched[0]
+    command = next(line for line in launcher.splitlines() if " codex " in line)
     assert "--agentihooks-exclude alpha" in command
     assert "resume thread-1" in command
     assert "select-profile" not in command

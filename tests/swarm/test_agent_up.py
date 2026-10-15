@@ -241,7 +241,7 @@ def test_the_operator_launch_opens_claude_in_the_swarm_space_with_the_inbox_chan
         "--dir",
         str(tmp_path),
         "--name",
-        "planner@a1b2c3-0001",
+        "planner-a1b2c3-0001",
         "--agent",
         "claude",
         "--start-timeout",
