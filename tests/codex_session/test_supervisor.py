@@ -317,15 +317,17 @@ def test_a_server_that_names_no_codex_home_is_refused_even_from_the_cwd(
     server.info = info
     spec = launch_spec(store, server, tmp_path)
     assert Path(spec.codex_home).is_relative_to(tmp_path)
+    check_binding = supervisor.check_binding
 
-    def connect(path, timeout):
-        scoped_patch.chdir(server.runtime_home)
-        return server.connect(path, timeout)
+    def check_from_home(connection, info, launch):
+        with monkeypatch.context() as scoped_patch:
+            scoped_patch.chdir(server.runtime_home)
+            assert Path.cwd() == Path(server.runtime_home)
+            return check_binding(connection, info, launch)
 
-    with monkeypatch.context() as scoped_patch:
-        failed(store, server, clock, root, spec, "wrong_profile", connect=connect)
-        assert Path.cwd() == Path(server.runtime_home)
-        assert_failed_cleanly(store, server, "wrong_profile")
+    monkeypatch.setattr(supervisor, "check_binding", check_from_home)
+    failed(store, server, clock, root, spec, "wrong_profile")
+    assert_failed_cleanly(store, server, "wrong_profile")
 
 
 def test_a_server_signed_in_with_another_account_kind_is_refused(store, server, clock, root, tmp_path):
