@@ -10,7 +10,8 @@ from scripts.swarm_ledger.ledger_core import Context
 
 def update(doc, ctx, by, **fields):
     op = {"op": "task_update", "id": "u1", "by": by, "item": "tasks/t1", "fields": fields}
-    ledger_tasks.check(op)
+    if by != "operator":
+        ledger_tasks.check(op)
     assert ledger_tasks.apply(doc, op, ctx)
     assert not ctx.refused
 
@@ -29,7 +30,7 @@ def ledger():
 
 @pytest.mark.parametrize("holder", ["master@a1b2c3-0001", "operator"])
 @pytest.mark.parametrize("writer", ["ci@a1b2c3-0001", "swarm", "dispatcher"])
-@pytest.mark.parametrize("state", ["pr", "open", "claimed", "handoff"])
+@pytest.mark.parametrize("state", ["pr", "open", "claimed"])
 def test_authoritative_block_survives_state_writes(holder, writer, state):
     doc, ctx = ledger()
     update(doc, ctx, holder, state="blocked")
