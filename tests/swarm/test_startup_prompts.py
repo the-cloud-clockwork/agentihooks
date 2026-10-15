@@ -60,6 +60,7 @@ def test_claimed_selection_prompt_counts_consecutive_ticks_and_reports_health():
     store.put_agent("prompt-proof", agent)
     ledger = FakeLedger([{"id": "task", "state": "claimed", "title": "Startup proof"}])
     runtime = FakeRuntime()
+    runtime.live.add(agent.name)
     runtime.observe = lambda a: PaneObservation("waiting", TITLE)
     for n in range(1, 5):
         beat(store.redis, "prompt-proof", agent.name, "working", n)
