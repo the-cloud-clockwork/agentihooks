@@ -1070,6 +1070,26 @@ def test_a_stale_conflict_watch_cannot_clear_a_new_claim_generation(merging, suc
     assert merging.ledger.comments == []
 
 
+def test_a_successor_claim_after_the_reopen_write_keeps_its_ready_record_and_worktree(merging, monkeypatch):
+    update = merging.ledger.update_task
+    merging.pulls[URL] = RED
+
+    def takeover(*args, **kwargs):
+        result = update(*args, **kwargs)
+        merging.store.release("sw", "t1", AGENT)
+        merging.store.claim("sw", "t1", "successor", 60_000)
+        merging.rows["t1"] = {**result, "state": "pr", "claimed_by": "successor", "claim_generation": 2}
+        ready.save(merging.store, "sw", "t1", {"agent": "successor", "head": "new-head", "worktree": TOP})
+        return result
+
+    monkeypatch.setattr(merging.ledger, "update_task", takeover)
+    assert merging.run() == []
+    assert merging.store.claimant("sw", "t1") == "successor"
+    assert ready.record(merging.store, "sw", "t1") == {"agent": "successor", "head": "new-head", "worktree": TOP}
+    assert merging.shell.calls == []
+    assert merging.ledger.comments == []
+
+
 def test_one_tick_reports_every_unreleased_entry_it_dequeues(merging):
     from scripts.swarm.ledger_events import pull_request
 

@@ -249,6 +249,20 @@ def test_a_live_owner_recovers_its_missing_lease_without_a_duplicate_launch(stor
     assert ledger.rows["t1"]["state"] == "claimed"
 
 
+@pytest.mark.parametrize("state", ["claimed", "pr"])
+def test_a_live_owner_recovers_a_missing_claimant_on_an_active_ledger_row(store, state):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    owner = next(a for a in store.agents("sw") if a.task == "t1")
+    ledger.rows["t1"].update(state=state, claimed_by="")
+    store.release("sw", "t1", owner.name)
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert ledger.rows["t1"]["claimed_by"] == owner.name
+    assert ledger.rows["t1"]["state"] == state
+    assert store.claimant("sw", "t1") == owner.name
+    assert len(runtime.spawned) == 1
+
+
 @pytest.mark.parametrize("registered", [True, False])
 def test_a_live_owner_that_appears_during_placement_is_never_launched_over(store, monkeypatch, registered):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
