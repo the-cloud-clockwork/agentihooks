@@ -192,7 +192,10 @@ def test_unit_matrix_runs_one_shard_per_split():
         )
     assert coverage_shards > plain_shards > 1
     merge = next(step for step in workflow["jobs"]["sonar"]["steps"] if step.get("name") == "Merge shard coverage")
-    assert re.search(r"combine\.sh --downloaded (\d+) ", merge["run"]).group(1) == str(coverage_shards)
+    assert 'combine.sh --downloaded "$SHARDS" ' in merge["run"]
+    assert merge["env"]["SHARDS"] == (
+        f"${{{{ needs.select.outputs.scope == 'selected' && needs.select.outputs.count || {coverage_shards} }}}}"
+    )
     assert "--splits" not in command
 
 
@@ -390,8 +393,8 @@ def _workflow() -> dict:
 def test_shards_wait_only_on_the_durations_lookup():
     jobs = _workflow()["jobs"]
     assert "already-tested" not in jobs
-    assert jobs["split"]["needs"] in (["durations", "reuse"], ["durations", "reuse", "admission"])
-    assert jobs["unit"]["needs"] in (["split", "reuse"], ["split", "reuse", "admission"])
+    assert jobs["split"]["needs"] == ["durations", "select", "reuse", "admission"]
+    assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
     assert jobs["lint"]["needs"] in (["reuse"], ["reuse", "admission"])
 
 
