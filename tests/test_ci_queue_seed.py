@@ -87,7 +87,7 @@ def test_no_queue_run_carries_a_baseline_from_the_latest_dev_run():
 
 def test_queue_has_no_coverage_baseline_publisher():
     jobs = _jobs()
-    assert jobs["queue-baseline"]["if"] is False
+    assert "queue-baseline" not in jobs
     assert "github.event_name == 'push'" in jobs["coverage-baseline"]["if"]
     assert "merge_group" not in jobs["coverage-baseline"]["if"]
 
@@ -96,9 +96,8 @@ def test_queue_has_no_coverage_baseline_publisher():
     "name",
     ["durations", "split", "unit", "shard-check", "test-count", "gate-required", "coverage-ratchet", "stage-budget"],
 )
-def test_baseline_dependencies_remain_only_for_protected_aggregation(name):
-    needs = _jobs()[name].get("needs", [])
-    assert ("queue-baseline" in needs) is (name in {"gate-required", "stage-budget", "coverage-ratchet"})
+def test_no_job_waits_on_the_retired_queue_baseline(name):
+    assert "queue-baseline" not in _jobs()[name].get("needs", [])
 
 
 @pytest.mark.parametrize(
