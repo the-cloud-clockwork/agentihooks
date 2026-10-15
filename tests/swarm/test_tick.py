@@ -1833,7 +1833,7 @@ def test_a_broad_territory_never_stops_a_claim(store):
     ]
 
 
-def test_an_overlap_with_a_running_task_without_a_claimant_names_no_claimant(store):
+def test_an_overlap_names_the_live_owner_after_its_missing_claimant_is_repaired(store):
     ledger = FakeLedger([{"id": "t1", "territory": ["hooks"]}])
     runtime = FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
@@ -1841,7 +1841,7 @@ def test_an_overlap_with_a_running_task_without_a_claimant_names_no_claimant(sto
     ledger.rows["t2"] = {"id": "t2", "lane": "eng", "state": "open", "out_of_scope": False, "territory": ["hooks"]}
     tick("sw", store, ledger, runtime, now_ms=2_000)
     assert spawned_ids(runtime) == ["t1", "t2"]
-    assert runtime.tasks[1]["overlaps"] == [{"task": "t1", "claimant": "", "areas": ["hooks"]}]
+    assert runtime.tasks[1]["overlaps"] == [{"task": "t1", "claimant": runtime.spawned[0][1], "areas": ["hooks"]}]
 
 
 def test_territories_that_only_share_a_name_prefix_do_not_overlap(store):
