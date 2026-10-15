@@ -404,9 +404,7 @@ def check_branch_guard(payload: dict) -> None:
     # Branch creation — default-deny unless operator signaled this turn (§14)
     session_id = payload.get("session_id", "")
     for pattern in _BRANCH_CREATE_PATTERNS:
-        if pattern.search(check_text):
-            if _has_branch_signal(session_id):
-                return
+        if pattern.search(check_text) and not _has_branch_signal(session_id):
             log(
                 "branch_guard: branch creation blocked",
                 {"command": command[:200], "pattern": pattern.pattern, "session_id": session_id},

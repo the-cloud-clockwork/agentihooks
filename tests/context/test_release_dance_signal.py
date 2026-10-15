@@ -105,6 +105,21 @@ def test_each_pr_creation_is_guarded(session, separator, protected_first):
     )
 
 
+@pytest.mark.parametrize("branch_command", ["git switch -c topic", "git checkout -b topic", "git branch topic"])
+@pytest.mark.parametrize("signal", ["branch", "bypass"])
+@pytest.mark.parametrize("base", ["main", "master", "v1"])
+def test_branch_authorization_cannot_skip_protected_creation(session, branch_command, signal, base):
+    if signal == "branch":
+        branch_guard.set_branch_signal(session)
+    else:
+        set_controls_disabled(session)
+    with pytest.raises(BlockAction) as blocked:
+        check(f"{branch_command} && gh pr create --base {base}", session)
+    assert str(blocked.value) == (
+        f"BLOCKED: agent PR creation into '{base}' is forbidden. CI alone promotes dev into protected branches."
+    )
+
+
 @pytest.mark.parametrize(
     "arguments",
     ["--base dev --base main", "--base=dev --base=main", "-B dev -B main"],
