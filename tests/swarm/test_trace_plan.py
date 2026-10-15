@@ -192,6 +192,7 @@ def test_intent_carries_the_scope_authorizations_the_master_or_operator_recorded
         {"id": "c-2", "by": "master@1-0", "text": "Master proof: the walls stand."},
         {"id": "c-3", "by": "engineer@1-1", "text": "In scope: a diesel generator"},
         {"id": "c-4", "by": "master@1-0", "text": "  in scope: the roof paint"},
+        {"id": "c-6", "by": "master@1-0", "text": "In scope: a dog door", "deleted": True},
     ]
     doc = {"tasks": [{"id": "t1", "description": "A house for the dog.", "comments": comments}]}
     assert trace_plan.intent(doc, "t1")["scope authorizations"] == [

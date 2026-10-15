@@ -101,7 +101,11 @@ def intent(doc, task_id):
 
 
 def authorizations(task):
-    found = [{"id": c["id"], "by": c["by"], "text": c["text"]} for c in task.get("comments", []) if _authorizes(c)]
+    found = [
+        {"id": c["id"], "by": c["by"], "text": c["text"]}
+        for c in task.get("comments", [])
+        if not c.get("deleted") and _authorizes(c)
+    ]
     return found[-MAX_AUTHORIZATIONS:]
 
 
