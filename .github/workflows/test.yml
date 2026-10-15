@@ -497,6 +497,30 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install admission ruff
+        if: github.event_name == 'pull_request'
+        run: python -m pip install ruff==0.15.12
+
+      - name: Check out the admission base
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: git worktree add --detach "$RUNNER_TEMP/base" "$BASE"
+
+      - name: Lint before shard admission
+        if: github.event_name == 'pull_request'
+        run: python -m ruff check hooks/ scripts/ tests/
+
+      - name: Format before shard admission
+        if: github.event_name == 'pull_request'
+        run: python -m ruff format --check hooks/ scripts/ tests/
+
+      - name: Size before shard admission
+        if: github.event_name == 'pull_request'
+        run: |
+          cd "$RUNNER_TEMP/grader"
+          python -m scripts.size_limits --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
+
       # The durations job's own lookup, restored here so selection runs beside it rather than after it.
       - name: Restore latest dev durations
         if: github.event_name == 'pull_request'
@@ -1630,7 +1654,7 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > "$RUNNER_TEMP/run.json"
-          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" --jq '.jobs[] | @json' > "$RUNNER_TEMP/jobs.jsonl"
+          python3 -m scripts.ci_budget.jobs "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs" > "$RUNNER_TEMP/jobs.jsonl"
 
       - name: Report each stage's wall time against its budget
         run: python3 -m scripts.ci_budget --run "$RUNNER_TEMP/run.json" --jobs "$RUNNER_TEMP/jobs.jsonl"

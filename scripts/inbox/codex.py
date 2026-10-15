@@ -21,10 +21,10 @@ if TYPE_CHECKING:
 
 STOPPED = "stopped"
 UNOBSERVED = "an active turn that began before this pump connected"
-RECONCILE_S = 30.0
+RECONCILE_S = 10.0
 POLL_S = 0.2
 BACKOFF_S = 1.0
-BACKOFF_MAX_S = 60.0
+BACKOFF_MAX_S = 15.0
 IN_PROGRESS = "inProgress"
 TURN_STARTED, TURN_COMPLETED, RESOLVED = "turn/started", "turn/completed", "serverRequest/resolved"
 LOST_OWNER = "{} no longer delivers for {}"
