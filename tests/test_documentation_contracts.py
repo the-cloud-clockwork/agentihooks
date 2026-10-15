@@ -213,3 +213,14 @@ def test_source_and_commit_metadata_are_redacted_before_classification(tmp_path)
     assert marker not in result["summary"]
     assert marker not in json.dumps(result["source_task"])
     assert result["source_task"]["description"]
+
+
+def test_credential_paths_with_documentation_extensions_are_never_sources(tmp_path):
+    base = repository(tmp_path)
+    (tmp_path / ".env.md").write_text("WidgetPolicy configuration\n")
+    git(tmp_path, "add", ".env.md")
+    git(tmp_path, "commit", "-qm", "Add private configuration")
+    result = evidence.collect(tmp_path, base, {"description": "WidgetPolicy"})
+    assert ".env.md" not in result["files"]
+    assert ".env.md" not in result["doc_sources"]
+    assert all(match["path"] != ".env.md" for match in result["docs"])
