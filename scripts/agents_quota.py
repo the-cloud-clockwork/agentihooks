@@ -336,8 +336,9 @@ def _codex(now: float) -> list[QuotaRow]:
     from scripts import codex_router
     from scripts.routing.codex_api import CodexApiSource
 
-    pool = codex_router.CodexAccountSource().pool(os.environ)
     sessions = codex_sessions_by_account()
+    pool = codex_router.CodexAccountSource().pool(os.environ)
+    pool += codex_router.live_accounts(pool, sessions)
     quotas = codex_router.quotas(pool, os.environ)
     rows = codex_rows(pool, quotas, sessions, now)
     master = _masters("codex").get("codex")
@@ -410,6 +411,7 @@ def _page_quota(now: float) -> dict:
     pool = codex_router.CodexAccountSource().pool(os.environ)
     live = account_sessions.sessions_by_account()
     codex_live = account_sessions.codex_sessions_by_account()
+    pool += codex_router.live_accounts(pool, codex_live)
     claude = claude_rows([result for _, result in cached], live, "cached", observed, now)
     claude += api_rows(ClaudeApiSource(live), "claude", now)
     rows = claude + codex_rows(pool, codex_router.quotas(pool, os.environ), codex_live, now)
