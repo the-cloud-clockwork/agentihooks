@@ -344,6 +344,57 @@ def test_evaluate_reads_the_session_snapshot_and_the_router_cache(tmp_path, monk
     assert d.target.sessions == 1
 
 
+@pytest.mark.parametrize("source", ["cache", "fleet"])
+@pytest.mark.parametrize("available", [False, True])
+def test_handoff_ignores_cached_accounts_without_credentials(tmp_path, monkeypatch, source, available):
+    from hooks.context import account_sessions, quota_usage
+    from scripts import claude_quota_balancer as balancer
+    from scripts.swarm_v2 import quota
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.delenv("AH_ROUTE_API", raising=False)
+    monkeypatch.delenv("AGENTIHOOKS_TARGET", raising=False)
+    for name in tuple(qp.os.environ):
+        if name.startswith(balancer.TOKEN_PREFIX):
+            monkeypatch.delenv(name)
+    if available:
+        monkeypatch.setenv("AH_CC_TOKEN_beta", "available")
+    monkeypatch.setattr(quota_usage, "AGENTIHOOKS_HOME", tmp_path)
+    now = time.time()
+    quota_usage.record_rate_limits(
+        "stale-target",
+        {
+            "five_hour": {"used_percentage": 40, "resets_at": now + 3600},
+            "seven_day": {"used_percentage": 99, "resets_at": now + 86400},
+        },
+    )
+    beta = balancer.ProbeResult(
+        "beta", "allowed", "NORMAL", 70.0, balancer.QuotaWindow(10.0, None), balancer.QuotaWindow(30.0, None)
+    )
+    balancer._write_cache(
+        tmp_path / "claude-router-cache.json",
+        {
+            "modes": {
+                "normal": {
+                    "accounts": {"AH_CC_TOKEN_beta": {"observed_at": now, "result": balancer._result_data(beta)}}
+                }
+            }
+        }
+        if source == "cache"
+        else {},
+    )
+    monkeypatch.setattr(quota, "fleet_observations", lambda environ: [(now, beta)] if source == "fleet" else [])
+    monkeypatch.setattr(account_sessions, "agent_pid", lambda: 1)
+    monkeypatch.setattr(account_sessions, "session_account", lambda pid: "alpha")
+    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {"alpha": 1, "beta": 1})
+    monkeypatch.setattr(qp, "_api_accounts", lambda sessions: [])
+    monkeypatch.setattr(qp, "push_active", lambda session: False)
+
+    decision = qp.evaluate("stale-target")
+    assert decision.action == ("handoff" if available else "stop")
+    assert (decision.target.account if decision.target else None) == ("beta" if available else None)
+
+
 def test_pre_tool_use_raises_the_stop_block():
     from hooks import hook_manager
 
