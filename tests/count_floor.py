@@ -15,6 +15,10 @@ class Collected:
     def pytest_collection_finish(self, session):
         Collected.nodeids = [item.nodeid for item in session.items]
 
+    def pytest_collectreport(self, report: pytest.CollectReport) -> None:
+        if report.failed:
+            print(report.nodeid, report.longrepr, sep="\\n", file=sys.stderr, flush=True)
+
 code = pytest.main(["--collect-only", "-qq", "-p", "no:cacheprovider", sys.argv[1]], plugins=[Collected()])
 with open(sys.argv[2], "w") as out:
     json.dump(Collected.nodeids if code == 0 else None, out)
