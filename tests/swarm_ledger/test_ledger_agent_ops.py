@@ -94,3 +94,15 @@ def test_rejoining_retains_each_membership_start_once():
     second = AgentRecord("worker", "eng", "t2", launched_at=150)
     assert launch_check.joined_at(first, {"_meta": state}) == 120
     assert launch_check.joined_at(second, {"_meta": state}) == 170
+
+
+def test_a_leave_from_outside_the_crew_names_its_reason():
+    state = meta()
+    ctx = ledger_core.Context(state, 10)
+    assert ledger_agent_ops.apply({}, {"op": "leave", "by": "stranger"}, ctx) is False
+    assert ctx.refused == ["leave refused: stranger has not joined this ledger"]
+    assert ctx.events == []
+    ctx = ledger_core.Context(state, 20)
+    assert ledger_agent_ops.apply({}, {"op": "leave", "by": "eng"}, ctx) is True
+    assert ctx.refused == []
+    assert "eng" not in state["members"]

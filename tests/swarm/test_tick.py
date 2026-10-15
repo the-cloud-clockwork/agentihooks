@@ -539,6 +539,17 @@ def test_an_open_task_closed_done_during_a_tick_spawns_no_agent(store):
     ]
 
 
+def test_a_master_block_during_a_tick_spawns_no_agent(store):
+    ledger, runtime = DoneMidTick([{"id": "t1", "lane": "eng"}]), FakeRuntime()
+    ledger.rows["t1"]["difficulty"] = "M"
+    ledger.closing = lambda: ledger.rows["t1"].update(state="blocked", claimed_by="")
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert ledger.rows["t1"]["state"] == "blocked"
+    assert store.claimant("sw", "t1") is None
+    assert runtime.spawned == []
+    assert workers(store) == []
+
+
 @pytest.mark.parametrize("closed_mid_tick", [True, False])
 def test_a_lost_agents_open_items_follow_the_live_reopen_result(store, closed_mid_tick):
     from scripts.inbox.store import InboxStore
@@ -580,7 +591,9 @@ def test_a_stalled_agents_open_items_follow_the_live_reopen_result(store, closed
     idle_for(store, ledger, runtime, IDLE_KILL_TICKS - 1, start=2_000)
     if closed_mid_tick:
         ledger.closing = lambda: ledger.rows["t1"].update(state="done", done=True)
+    nudges = len(stale_nudges(store))
     actions = tick("sw", store, ledger, runtime, now_ms=2_000 + IDLE_KILL_TICKS * 60_000)
+    assert nudges == 1 and len(stale_nudges(store, "eng-1@sw") + stale_nudges(store)) == 1
     moved = inbox.get(item.id)
     assert runtime.killed == ["engineer@a1b2c3-0001"]
     if closed_mid_tick:
@@ -645,8 +658,8 @@ def test_a_task_held_by_a_known_agent_is_not_reopened_as_an_orphan(store):
     assert "task t1 had no agent, reopened" not in actions
 
 
-def test_an_idle_agent_is_nudged_then_retired_and_its_task_reopened(store):
-    from scripts.swarm.tick import IDLE_KILL_TICKS, IDLE_NUDGE_TICKS
+def test_an_idle_agent_is_retired_without_a_typed_nudge_and_its_task_reopened(store):
+    from scripts.swarm.tick import IDLE_KILL_TICKS
 
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
@@ -654,39 +667,137 @@ def test_an_idle_agent_is_nudged_then_retired_and_its_task_reopened(store):
     store.update("sw", state="paused")
     for n in range(IDLE_KILL_TICKS):
         tick("sw", store, ledger, runtime, now_ms=2_000 + n)
-        if n + 1 == IDLE_NUDGE_TICKS:
-            assert runtime.nudged == ["engineer@a1b2c3-0001"]
+    assert runtime.nudged == []
     assert runtime.killed == ["engineer@a1b2c3-0001"] and ledger.rows["t1"]["state"] == "open"
 
 
-def idle_until_nudged(store, runtime):
-    from scripts.swarm.tick import IDLE_NUDGE_TICKS
+STALE_MS = 10 * 60_000
+IDLER = "engineer@a1b2c3-0001"
 
-    ledger = tasks(("t1", "eng"))
+
+def spawned(store, status="idle", runtime=None):
+    ledger, runtime = tasks(("t1", "eng")), runtime or FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
-    runtime.statuses["engineer@a1b2c3-0001"] = "idle"
     store.update("sw", state="paused")
-    return [tick("sw", store, ledger, runtime, now_ms=2_000 + n) for n in range(IDLE_NUDGE_TICKS)][-1]
+    runtime.statuses[IDLER] = status
+    return ledger, runtime
 
 
-@pytest.mark.parametrize("answer", [None, ""])
-def test_an_accepted_nudge_is_reported_as_nudged(store, answer):
-    from scripts.swarm.tick import IDLE_NUDGE_TICKS, NUDGE
+def stale_nudges(store, name=IDLER):
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import stale_nudge
 
-    runtime = FakeRuntime()
-    runtime.nudge_refusals["engineer@a1b2c3-0001"] = answer
-    assert idle_until_nudged(store, runtime) == ["nudged engineer@a1b2c3-0001"]
-    assert runtime.nudge_calls == [(IDLE_NUDGE_TICKS, NUDGE.format(slug="sw"))]
+    return [item for item in InboxStore(store.redis).inbox(name) if stale_nudge.is_nudge(item)]
 
 
-def test_a_refused_nudge_is_reported_as_refused_with_its_reason(store):
-    from scripts.swarm.tick import IDLE_NUDGE_TICKS, NUDGE
+def test_an_agent_quiet_past_ten_minutes_gets_one_inbox_nudge_per_window_and_no_typed_prompt(store):
+    ledger, runtime = spawned(store)
+    tick("sw", store, ledger, runtime, now_ms=1_000 + STALE_MS)
+    assert stale_nudges(store) == []
+    actions = tick("sw", store, ledger, runtime, now_ms=1_001 + STALE_MS)
+    [item] = stale_nudges(store)
+    assert f"nudged stale {IDLER} through its inbox as message {item.id}" in actions
+    assert (item.sender, item.task, item.state) == ("swarm", "t1", "pending")
+    tick("sw", store, ledger, runtime, now_ms=2_000 + STALE_MS)
+    assert len(stale_nudges(store)) == 1
+    tick("sw", store, ledger, runtime, now_ms=1_001 + 2 * STALE_MS)
+    assert len(stale_nudges(store)) == 2 and runtime.nudged == []
 
-    runtime = FakeRuntime()
-    runtime.nudge_refusals["engineer@a1b2c3-0001"] = "kubernetes lacks command"
-    actions = idle_until_nudged(store, runtime)
-    assert actions == ["nudge to engineer@a1b2c3-0001 refused: kubernetes lacks command"]
-    assert runtime.nudge_calls == [(IDLE_NUDGE_TICKS, NUDGE.format(slug="sw"))]
+
+def test_a_pane_reading_working_is_nudged_once_its_heartbeat_is_ten_minutes_old(store):
+    from scripts.swarm import idle
+
+    ledger, runtime = spawned(store, status="working")
+    idle.beat(store.redis, "sw", IDLER, "working", 1_000 + STALE_MS)
+    tick("sw", store, ledger, runtime, now_ms=1_000 + 2 * STALE_MS)
+    assert stale_nudges(store) == []
+    tick("sw", store, ledger, runtime, now_ms=1_001 + 2 * STALE_MS)
+    assert len(stale_nudges(store)) == 1 and runtime.nudged == []
+
+
+def test_a_named_wait_keeps_a_quiet_agent_from_being_nudged(store):
+    from scripts.swarm import idle
+
+    ledger, runtime = spawned(store)
+    idle.declare_wait(store.redis, "sw", IDLER, 1_000 + 3 * STALE_MS, "checks on the pull request", 1_000)
+    tick("sw", store, ledger, runtime, now_ms=1_000 + 2 * STALE_MS)
+    assert stale_nudges(store) == []
+
+
+class ProviderErrorRuntime(FakeRuntime):
+    def observe(self, agent):
+        from scripts.swarm.pane import PaneObservation
+
+        return PaneObservation(self.status(agent), provider_error="model at capacity", provider_checked=True)
+
+
+def test_a_pane_showing_a_provider_error_is_nudged_at_once(store):
+    ledger, runtime = spawned(store, status="working", runtime=ProviderErrorRuntime())
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    [item] = stale_nudges(store)
+    assert "provider error" in item.text and runtime.nudged == []
+
+
+def test_the_master_is_never_nudged_for_being_quiet(store):
+    ledger, runtime = spawned(store)
+    [master] = [a for a in store.agents("sw") if a.lane == MASTER]
+    runtime.statuses[master.name] = "idle"
+    tick("sw", store, ledger, runtime, now_ms=1_001 + 2 * STALE_MS)
+    assert stale_nudges(store, master.name) == [] and len(stale_nudges(store)) == 1
+
+
+def test_an_open_swarm_outage_leaves_the_quiet_agent_to_provider_recovery(store, monkeypatch):
+    from scripts.swarm import outage
+
+    ledger, runtime = spawned(store)
+    record = {"kind": "provider", "started_at": 1_000, "ended_at": None, "evidence": ["provider down"], "past": []}
+    monkeypatch.setattr(outage, "open_records", lambda slug: [record])
+    tick("sw", store, ledger, runtime, now_ms=1_001 + 2 * STALE_MS)
+    assert stale_nudges(store) == [] and runtime.nudged == []
+
+
+@pytest.mark.parametrize(("pending", "expected"), [(True, 0), (False, 1)])
+def test_a_pending_recovery_leaves_the_quiet_agent_to_provider_recovery(store, pending, expected):
+    from scripts.swarm.pane import PaneObservation
+    from scripts.swarm.tick import _stale_nudge
+
+    agent = AgentRecord(IDLER, "eng", "t1", started_at=1_000)
+    actions = _stale_nudge("sw", store, agent, PaneObservation("idle"), pending, 1_001 + STALE_MS)
+    assert len(actions) == len(stale_nudges(store)) == expected
+
+
+def test_a_pending_recovery_blocks_the_nudge_during_the_tick(store, monkeypatch):
+    from scripts.swarm import resume
+
+    ledger, runtime = spawned(store)
+    monkeypatch.setattr(resume, "recovery_pending", lambda *args: True)
+    monkeypatch.setattr(resume, "recover_outages", lambda *args: [])
+    tick("sw", store, ledger, runtime, now_ms=1_001 + STALE_MS)
+    assert stale_nudges(store) == []
+
+
+def test_the_last_idle_tick_before_retirement_still_nudges(store):
+    from dataclasses import replace
+
+    from scripts.swarm.tick import IDLE_KILL_TICKS
+
+    ledger, runtime = spawned(store)
+    agent = store.agents("sw")[0]
+    store.put_agent("sw", replace(agent, idle_ticks=IDLE_KILL_TICKS - 2))
+    tick("sw", store, ledger, runtime, now_ms=1_001 + STALE_MS)
+    assert len(stale_nudges(store)) == 1
+    assert runtime.killed == []
+
+
+def test_a_nudge_the_routed_runtime_refuses_answers_with_the_router_reason(store):
+    from scripts.swarm.tick import NUDGE
+    from scripts.swarm_v2.runtime.base import Capability
+    from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
+
+    herdr = FakeRuntime()
+    runtime = routed_tick_runtime(herdr, LocalHerdrRuntime.capabilities - {Capability.COMMAND})
+    agent = AgentRecord(IDLER, "eng", "t1", pane_id="w1:p1", started_at=1_000)
+    assert runtime.nudge(agent, NUDGE.format(slug="sw")) == "local lacks command" and herdr.nudged == []
 
 
 def routed_tick_runtime(herdr, capabilities=None):
@@ -699,69 +810,42 @@ def routed_tick_runtime(herdr, capabilities=None):
     return RoutedRuntime(herdr, RuntimeRouter([local]))
 
 
-def test_a_nudge_the_routed_runtime_refuses_is_reported_with_the_router_reason(store):
-    from scripts.swarm_v2.runtime.base import Capability
-    from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
-
-    herdr = FakeRuntime()
-    runtime = routed_tick_runtime(herdr, LocalHerdrRuntime.capabilities - {Capability.COMMAND})
-    actions = idle_until_nudged(store, runtime)
-    assert actions == ["nudge to engineer@a1b2c3-0001 refused: local lacks command"] and herdr.nudged == []
-
-
 def failing_herdr(args):
     raise RuntimeError("agent_not_found")
 
 
-@pytest.mark.parametrize(
-    ("call", "action"),
-    [
-        (lambda args: {}, "nudged engineer@a1b2c3-0001"),
-        (failing_herdr, "nudge to engineer@a1b2c3-0001 refused: agent_not_found"),
-    ],
-)
-def test_a_local_herdr_nudge_is_reported_by_whether_herdr_delivered_it(store, tmp_path, call, action):
+@pytest.mark.parametrize(("call", "answer"), [(lambda args: {}, None), (failing_herdr, "agent_not_found")])
+def test_a_local_herdr_nudge_answers_by_whether_herdr_delivered_it(store, tmp_path, call, answer):
     from scripts.swarm.runtime import HerdrRuntime
+    from scripts.swarm.tick import NUDGE
 
     herdr = FakeRuntime()
     herdr.nudge = HerdrRuntime(home=tmp_path, herdr=call).nudge
-    assert idle_until_nudged(store, routed_tick_runtime(herdr)) == [action]
+    agent = AgentRecord(IDLER, "eng", "t1", pane_id="w1:p1", started_at=1_000)
+    assert routed_tick_runtime(herdr).nudge(agent, NUDGE.format(slug="sw")) == answer
 
 
 def test_the_nudge_is_skipped_while_the_pane_holds_typed_input(store):
-    from scripts.swarm.tick import IDLE_NUDGE_TICKS
-
-    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
-    tick("sw", store, ledger, runtime, now_ms=1_000)
-    store.update("sw", state="paused")
-    runtime.statuses["engineer@a1b2c3-0001"] = "idle"
-    runtime.typed["engineer@a1b2c3-0001"] = "wait, before you"
-    for n in range(IDLE_NUDGE_TICKS + 2):
-        tick("sw", store, ledger, runtime, now_ms=2_000 + n)
-    assert runtime.nudged == [] and workers(store)[0].idle_ticks == 0
+    ledger, runtime = spawned(store)
+    runtime.typed[IDLER] = "wait, before you"
+    tick("sw", store, ledger, runtime, now_ms=1_001 + STALE_MS)
+    assert stale_nudges(store) == [] and workers(store)[0].idle_ticks == 0
     runtime.typed.clear()
-    for n in range(IDLE_NUDGE_TICKS):
-        tick("sw", store, ledger, runtime, now_ms=3_000 + n)
-    assert runtime.nudged == ["engineer@a1b2c3-0001"]
+    tick("sw", store, ledger, runtime, now_ms=1_002 + STALE_MS)
+    assert len(stale_nudges(store)) == 1 and runtime.nudged == []
 
 
 def test_the_nudge_is_skipped_inside_the_quiet_window_after_an_operator_prompt(store):
     from scripts.inbox import wake
     from scripts.swarm import idle
-    from scripts.swarm.tick import IDLE_NUDGE_TICKS
 
-    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
-    tick("sw", store, ledger, runtime, now_ms=1_000)
-    store.update("sw", state="paused")
-    runtime.statuses["engineer@a1b2c3-0001"] = "idle"
-    idle.prompted(store.redis, "sw", "engineer@a1b2c3-0001", 2_000)
+    ledger, runtime = spawned(store)
     quiet = wake.DEFAULT_QUIET_S * 1000
-    for n in range(IDLE_NUDGE_TICKS + 2):
-        tick("sw", store, ledger, runtime, now_ms=2_000 + quiet - 10 + n)
-    assert runtime.nudged == []
-    for n in range(IDLE_NUDGE_TICKS):
-        tick("sw", store, ledger, runtime, now_ms=2_000 + quiet + n)
-    assert runtime.nudged == ["engineer@a1b2c3-0001"]
+    idle.prompted(store.redis, "sw", IDLER, 1_001 + STALE_MS - quiet + 10)
+    tick("sw", store, ledger, runtime, now_ms=1_001 + STALE_MS)
+    assert stale_nudges(store) == []
+    tick("sw", store, ledger, runtime, now_ms=1_001 + STALE_MS + 10)
+    assert len(stale_nudges(store)) == 1 and runtime.nudged == []
 
 
 def test_the_nudge_says_to_answer_with_the_swarm_commands_never_in_the_terminal():
@@ -816,7 +900,7 @@ def test_a_busy_turn_resets_the_idle_count(store):
     for status in ["idle"] * (IDLE_NUDGE_TICKS - 1) + ["working"] + ["idle"] * (IDLE_NUDGE_TICKS - 1):
         runtime.statuses["engineer@a1b2c3-0001"] = status
         tick("sw", store, ledger, runtime, now_ms=2_000)
-    assert runtime.nudged == []
+    assert workers(store)[0].idle_ticks == IDLE_NUDGE_TICKS - 1
 
 
 def test_a_finished_agent_that_will_not_die_stays_registered(store):
@@ -1080,14 +1164,15 @@ def test_a_reopened_task_with_a_branch_and_no_earlier_life_is_given_that_branch(
     assert runtime.tasks[-1]["reclaim"] == RECLAIMED
 
 
-def test_a_handed_off_task_keeps_its_handoff_continuation_and_takes_no_reclaim(store, reclaims):
+def test_a_handed_off_task_revalidates_its_handoff_continuation(store, reclaims):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
     store.put_handoff("sw", "t1", "seam 1 green", envelope={"continue_from": "origin/engineer-a1b2c3-0001"})
     store.put_agent("sw", replace(workers(store)[0], state="finished"))
     tick("sw", store, ledger, runtime, now_ms=2_000)
-    assert runtime.tasks[-1]["handoff_envelope"] == {"continue_from": "origin/engineer-a1b2c3-0001"}
-    assert reclaims == [] and "reclaim" not in runtime.tasks[-1]
+    assert runtime.tasks[-1]["handoff_envelope"] == RECLAIMED
+    assert reclaims == [("/repo", ["engineer@a1b2c3-0001"], "engineer-a1b2c3-0001")]
+    assert "reclaim" not in runtime.tasks[-1]
 
 
 def test_a_spawned_agent_keeps_the_model_and_effort_it_was_placed_with(store):
@@ -1471,6 +1556,37 @@ def test_a_task_starts_stacked_on_claimed_and_in_pr_dependencies_that_carry_a_br
         {"task": "t0", "branch": "engineer-a1b2c3-0002"},
     ]
     assert runtime.tasks[0]["stack_base"] == []
+
+
+@pytest.mark.parametrize("dependency_state", ["claimed", "pr"])
+def test_retained_pull_waits_for_dependency_merge_before_resuming(store, reclaims, dependency_state):
+    ledger = FakeLedger(
+        [
+            {"id": "t1"},
+            {"id": "t2", "depends_on": ["t1"], "branch": "reviewed-work", "pr_url": "https://github.com/o/r/pull/3"},
+        ]
+    )
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    ledger.rows["t1"].update(state=dependency_state, branch="dependency-work")
+
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+
+    assert spawned_ids(runtime) == ["t1"]
+    assert ledger.rows["t2"]["state"] == "open"
+    assert ledger.rows["t2"]["claimed_by"] == ""
+    assert reclaims == []
+    assert store.claimant("sw", "t2") is None
+    assert store.claims("sw", "t2") == 0
+
+    ledger.rows["t1"].update(state="done", done=True)
+    tick("sw", store, ledger, runtime, now_ms=3_000)
+
+    assert spawned_ids(runtime) == ["t1", "t2"]
+    assert ledger.rows["t2"]["state"] == "pr"
+    assert ledger.rows["t2"]["pr_url"] == "https://github.com/o/r/pull/3"
+    assert reclaims == [("/repo", [], "reviewed-work")]
+    assert runtime.tasks[-1]["stack_base"] == []
 
 
 def test_a_stacked_claim_carries_the_repository_only_of_a_dependency_branch_in_another_repository(store, monkeypatch):
@@ -2009,6 +2125,7 @@ def test_an_agent_whose_heartbeat_says_working_is_never_retired_while_its_pane_r
 
 def test_a_stalled_agents_open_messages_move_to_its_seat_for_the_next_engineer(store):
     from scripts.inbox.store import InboxStore
+    from scripts.swarm.stale_nudge import is_nudge
     from scripts.swarm.tick import IDLE_KILL_TICKS
 
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
@@ -2021,7 +2138,8 @@ def test_a_stalled_agents_open_messages_move_to_its_seat_for_the_next_engineer(s
     runtime.statuses["engineer@a1b2c3-0001"] = "idle"
     idle_for(store, ledger, runtime, IDLE_KILL_TICKS, start=2_000)
     assert runtime.killed == ["engineer@a1b2c3-0001"]
-    assert [(i.id, i.state) for i in inbox.inbox("eng-1@sw")] == [(open_item.id, "pending")]
+    seat = [(i.id, i.state) for i in inbox.inbox("eng-1@sw") if not is_nudge(i)]
+    assert seat == [(open_item.id, "pending")] and len(stale_nudges(store, "eng-1@sw")) == 1
     assert [i.id for i in inbox.inbox("engineer@a1b2c3-0001")] == [closed.id]
 
 

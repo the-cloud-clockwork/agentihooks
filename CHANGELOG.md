@@ -17,6 +17,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Terminal and worker image tool downloads retry server errors and timeouts
+  up to five attempts with exponential backoff, preserving checksum checks.
+- Plain `agentihooks init` installs Claude and Codex; Copilot requires
+  `--target copilot` or `--with-copilot`. Output defaults to installed harness
+  summaries and warnings; `--verbose` shows installation details.
 - Browser preparation reuses verified Chromium and OS dependencies baked into
   ARC runners before restoring a cache or downloading browsers.
 - The swarm chart's controller API NetworkPolicy admits only the controller's
@@ -33,6 +38,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- The worker supervisor's workspace create and pane run commands use the remaining startup
+  budget instead of a half second timeout.
+- Stopped Codex replay test fixes export field and identity sizes independently of its environment.
 - The ledger HTTP server uses a listen backlog of 128 to accept bursts of
   concurrent writers and readers.
 - The swarm merge pass reopens released tasks with the reason when an unknown

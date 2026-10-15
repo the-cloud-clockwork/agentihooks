@@ -158,13 +158,8 @@ def _codex_windows(session_id: str) -> tuple[float, float, float | None, float |
     now = time.time()
     if quota is None or quota.seven_day.used is None or now - quota.observed_at > QUOTA_USAGE_STALE_SEC:
         return None
-    five, week = quota.five_hour, quota.seven_day
-    return (
-        _effective(five.used or 0.0, five.resets_at, now),
-        _effective(week.used, week.resets_at, now),
-        five.resets_at,
-        week.resets_at,
-    )
+    week = quota.seven_day
+    return (0.0, _effective(week.used, week.resets_at, now), None, week.resets_at)
 
 
 def _session_windows(session_id: str) -> tuple[float, float, float | None, float | None] | None:
@@ -222,10 +217,9 @@ def _codex_accounts() -> list[Candidate]:
     for name, quota in codex_router.quotas(pool, environ).items():
         if quota is None or quota.seven_day.used is None:
             continue
-        five = _effective(quota.five_hour.used or 0.0, quota.five_hour.resets_at, now)
         week = _effective(quota.seven_day.used, quota.seven_day.resets_at, now)
         cap = codex_router.account_cap(quota, now)
-        candidates.append(Candidate(name, five, week, sessions.get(name, 0), quota.observed_at, cap))
+        candidates.append(Candidate(name, 0.0, week, sessions.get(name, 0), quota.observed_at, cap))
     return candidates
 
 

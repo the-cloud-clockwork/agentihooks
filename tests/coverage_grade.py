@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from coverage import CoverageData
+from coverage.parser import PythonParser
 
 GRADED = ("hooks/", "scripts/")
 HISTORY = 30
@@ -116,22 +117,38 @@ def _lost(
         moved = renamed.get(path, path)
         targets = (moved,) if isinstance(moved, str) else moved
         gone = set()
+        old = base.source(path)
+        base_statements = statements_of(old, ran) if old is not None else {}
         for target in targets:
-            old, new = base.source(path), head_source(target)
+            new = head_source(target)
             if old is None or new is None:
                 continue
             mapped = line_map(old, new) if isinstance(moved, str) else _split_map(old, new)
-            gone.update(line for line in ran if line in mapped and mapped[line] not in head.get(target, set()))
+            head_statements = statements_of(new, [mapped[line] for line in base_statements if line in mapped])
+            covered = set(statements_of(new, head.get(target, set())).values())
+            gone.update(
+                statement
+                for line, statement in base_statements.items()
+                if line in mapped and head_statements.get(mapped[line]) not in covered
+            )
         if gone:
             lost[path] = sorted(gone)
     return lost
+
+
+def statements_of(source: str, lines: Iterable[int]) -> dict[int, int]:
+    parser = PythonParser(text=source)
+    parser.parse_source()
+    return {line: parser.first_line(line) for line in lines if parser.first_line(line) in parser.statements}
 
 
 def _statuses(base_source: str, path: str, lines: list[int], run: Measurement, old: str | None) -> dict[int, bool]:
     if old is None or path not in run.executed:
         return {}
     mapped = line_map(base_source, old)
-    return {line: mapped[line] in run.executed[path] for line in lines if line in mapped}
+    ran = set(statements_of(old, run.executed[path]).values())
+    run_statements = statements_of(old, [mapped[line] for line in lines if line in mapped])
+    return {line: run_statements.get(mapped[line]) in ran for line in lines if line in mapped}
 
 
 def _flaky(history: list[bool]) -> bool:

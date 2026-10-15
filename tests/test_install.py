@@ -412,6 +412,28 @@ class TestClaudeRouting:
         assert lines[2].split()[:8] == ["-", "claude", "home", "MASTER", "max", "interactive", "MASTERS", "3/-"]
         assert len(lines) == 3
 
+    def test_cmd_balance_lists_every_account_the_router_knows_from_a_one_token_session(self, monkeypatch, capsys):
+        import os
+
+        from scripts import agents_quota
+        from scripts import claude_quota_balancer as balancer
+        from tests.test_agents_quota import _probe, _router_accounts
+
+        accounts = _router_accounts(monkeypatch, 7)
+        monkeypatch.setattr(install, "_load_claude_runtime_env", lambda: None)
+        monkeypatch.setattr(install.shutil, "which", lambda name: "/usr/bin/claude")
+        monkeypatch.setattr(balancer, "collect_results", _probe)
+        monkeypatch.setattr(agents_quota, "_codex", lambda now: [])
+        monkeypatch.setattr(agents_quota, "api_rows", lambda source, harness, now: [])
+        monkeypatch.setattr(agents_quota, "_masters", lambda harness="": {})
+        monkeypatch.setattr("hooks.context.account_sessions.sessions_by_account", lambda: {"acct1": 1, "acct7": 2})
+
+        assert install.cmd_balance(include_fable=False, refresh=False, timeout=10) == 0
+        lines = capsys.readouterr().out.splitlines()
+        assert sorted(line.split()[2] for line in lines[2:]) == accounts
+        assert len(lines) == 9
+        assert "AH_CC_TOKEN_acct7" not in os.environ
+
     def test_cmd_balance_lists_the_claude_api_slot_with_kind_weight_and_cap(self, monkeypatch, tmp_path, capsys):
         from scripts import agents_quota
         from scripts import claude_quota_balancer as balancer
@@ -674,14 +696,14 @@ class TestUserEnvManifest:
 
 
 class TestInitTargets:
-    def test_bare_init_installs_all_supported_targets(self, monkeypatch):
+    def test_bare_init_installs_default_targets(self, monkeypatch):
         calls = []
         monkeypatch.setattr(install, "cmd_init_unified", lambda args: calls.append(args))
         monkeypatch.setattr(sys, "argv", ["agentihooks", "init", "--profile", "default"])
 
         install.main()
 
-        assert [args.install_target for args in calls] == list(install.SUPPORTED_TARGETS)
+        assert [args.install_target for args in calls] == ["claude", "codex"]
 
     def test_target_flag_installs_only_that_target(self, monkeypatch):
         calls = []
@@ -696,7 +718,7 @@ class TestInitTargets:
 
         assert [args.install_target for args in calls] == ["codex"]
 
-    def test_target_environment_installs_only_that_target(self, monkeypatch):
+    def test_target_environment_does_not_enable_copilot(self, monkeypatch):
         calls = []
         monkeypatch.setenv("AGENTIHOOKS_TARGET", "copilot")
         monkeypatch.setattr(install, "cmd_init_unified", lambda args: calls.append(args))
@@ -704,7 +726,7 @@ class TestInitTargets:
 
         install.main()
 
-        assert [args.install_target for args in calls] == ["copilot"]
+        assert [args.install_target for args in calls] == ["claude", "codex"]
 
 
 # ---------------------------------------------------------------------------
@@ -1467,8 +1489,10 @@ class TestInitProfileRecall:
     def test_explicit_profile_keeps_a_linked_profile_from_the_previous_chain(self):
         assert self._init_with("anton", "anton,brain") == "anton,brain"
 
-    def test_env_profile_keeps_a_linked_profile_from_the_previous_chain(self):
-        assert self._init_with(None, "anton,brain", env_profile="anton") == "anton,brain"
+    def test_env_profile_cannot_reapply_a_linked_profile_chain(self):
+        with pytest.raises(SystemExit) as exc:
+            self._init_with(None, "anton,brain", env_profile="anton")
+        assert exc.value.code == 1
 
     def test_switching_the_bundle_profile_still_keeps_the_linked_one(self):
         assert self._init_with("smith", "anton,brain") == "smith,brain"
@@ -1619,8 +1643,7 @@ class TestInitProfileRecall:
             called_args = mock_install.call_args[0][0]
             assert called_args.profile == "anton"
 
-    def test_env_var_overrides_state(self):
-        """AGENTIHOOKS_PROFILE env var overrides state.json."""
+    def test_env_profile_cannot_override_the_operator_state(self):
         import argparse
 
         state = self._make_state("default")
@@ -1638,9 +1661,10 @@ class TestInitProfileRecall:
             patch.object(install, "install_global") as mock_install,
             patch.dict("os.environ", {"AGENTIHOOKS_PROFILE": "admin"}, clear=False),
         ):
-            install.cmd_init_unified(args)
-            called_args = mock_install.call_args[0][0]
-            assert called_args.profile == "admin"
+            with pytest.raises(SystemExit) as exc:
+                install.cmd_init_unified(args)
+        assert exc.value.code == 1
+        mock_install.assert_not_called()
 
     def test_prompts_when_no_state(self):
         """When state.json has no profile, falls back to interactive prompt."""
@@ -2051,10 +2075,9 @@ class TestInitInsideRenderedHome:
                 install.cmd_init_unified(self._args())
         assert exc.value.code == 1
         assert capsys.readouterr().err == (
-            f"ERROR: this session runs in a rendered profile home, so init would have written the rendered "
-            f"profile home {home} instead of the operator home.\n"
-            "Run `agentihooks init` from the operator's own shell, where CLAUDE_CONFIG_DIR and "
-            "AGENTIHOOKS_PROFILE are unset.\n"
+            "ERROR: agent sessions cannot change the operator's global profile install.\n"
+            "Run this command from the operator's own shell with AGENTIHOOKS_SWARM, AGENTIHOOKS_PROFILE, "
+            "CLAUDE_CONFIG_DIR, CODEX_HOME and COPILOT_HOME unset.\n"
         )
         assert not mock_install.called
         assert not mock_rerender.called
@@ -2897,3 +2920,80 @@ class TestAgentienvMultilineValues:
         assert r.stderr.count("span several lines") == 1, r.stderr
         assert "[agentienv] WARNING: these values span several lines" in r.stderr
         assert "[agentihooks]" not in r.stderr
+
+
+@pytest.fixture
+def operator_install(monkeypatch, tmp_path):
+    from scripts import install as installer
+
+    installer._save_state({"targets": {"global": {t: {"profile": "default"} for t in ("claude", "codex", "copilot")}}})
+    external = tmp_path / "external"
+    external.mkdir()
+    monkeypatch.setattr(installer, "_get_bundle_path", lambda: None)
+    monkeypatch.setattr(installer, "_rerender_profile_homes", lambda *args: None)
+    monkeypatch.setattr(installer, "_update_bashrc_block", lambda: None)
+    return installer, external
+
+
+def _call_operator_install(installer, external, caller):
+    if caller == "init":
+        installer.cmd_init_unified(TestInitLinkProfileFlag()._make_args(profile="default"))
+    elif caller == "settings":
+        installer._cmd_settings_profile(argparse.Namespace(sp_name="default", clear=False, for_target=None))
+    elif caller == "clear":
+        installer._cmd_settings_profile(argparse.Namespace(clear=True, for_target=None))
+    elif caller == "link":
+        installer.cmd_link_profile("link", str(external))
+    elif caller == "unlink":
+        installer.cmd_link_profile("unlink", name="external")
+    else:
+        installer.install_global(argparse.Namespace(profile="default", settings_profile="", install_target="claude"))
+
+
+@pytest.mark.parametrize("caller", ["init", "settings", "clear", "link", "unlink", "global"])
+@pytest.mark.parametrize(
+    "signal", ["AGENTIHOOKS_SWARM", "AGENTIHOOKS_PROFILE", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "COPILOT_HOME"]
+)
+def test_agent_session_cannot_change_operator_install(operator_install, monkeypatch, capsys, caller, signal):
+    installer, external = operator_install
+    from scripts.profiles import render
+
+    value = (
+        "engineer"
+        if signal.startswith("AGENTIHOOKS_")
+        else str(render.rendered_root() / "engineer" / "generation" / "codex")
+    )
+    monkeypatch.setenv(signal, value)
+    before = installer.STATE_JSON.read_bytes()
+    with patch.object(installer, "_install_global_inner") as inner:
+        with pytest.raises(SystemExit) as exc:
+            _call_operator_install(installer, external, caller)
+    assert exc.value.code == 1
+    assert capsys.readouterr().err == (
+        "ERROR: agent sessions cannot change the operator's global profile install.\n"
+        "Run this command from the operator's own shell with AGENTIHOOKS_SWARM, AGENTIHOOKS_PROFILE, "
+        "CLAUDE_CONFIG_DIR, CODEX_HOME and COPILOT_HOME unset.\n"
+    )
+    inner.assert_not_called()
+    assert installer.STATE_JSON.read_bytes() == before
+
+
+@pytest.mark.parametrize("caller", ["init", "settings", "clear", "link", "global"])
+def test_operator_shell_can_install_profiles(operator_install, monkeypatch, caller):
+    installer, external = operator_install
+    for name in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "COPILOT_HOME"):
+        monkeypatch.setenv(name, str(Path.home() / "custom" / name))
+    home = Path.home() / "custom" / "CLAUDE_CONFIG_DIR"
+    home.mkdir(parents=True)
+    (home / "CLAUDE.md").write_text("<!-- profile: previous -->\n")
+    with patch.object(installer, "_install_global_inner") as inner:
+        _call_operator_install(installer, external, caller)
+    assert inner.called
+
+
+def test_global_install_refuses_before_taking_the_lock(operator_install, monkeypatch):
+    installer, external = operator_install
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "example")
+    with patch.object(installer, "_sync_lock") as lock, pytest.raises(SystemExit):
+        _call_operator_install(installer, external, "global")
+    lock.assert_not_called()

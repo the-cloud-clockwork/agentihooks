@@ -98,7 +98,7 @@ def publish(store: RedisStore, slug: str, status: dict, tails: dict) -> None:
 
 
 def view(store: RedisStore, slug: str) -> dict:
-    from scripts.swarm import lifecycle
+    from scripts.swarm import lifecycle, tick_activity
 
     config = store.config(slug)
     data = json.loads(store.redis.get(store.key(slug, "published")) or "{}")
@@ -108,6 +108,7 @@ def view(store: RedisStore, slug: str) -> dict:
     executions, errors = execution_card.cards(status.get("agents", []), terminals)
     return {
         **status,
+        "last_tick_activity": tick_activity.read(store, slug),
         "top_bottleneck": bottleneck_status.report(store, slug, now),
         "config": {**status.get("config", config.__dict__), "state": config.state},
         "commands": rows(store, slug),

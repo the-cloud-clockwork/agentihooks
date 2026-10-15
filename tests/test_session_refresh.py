@@ -50,6 +50,15 @@ def test_swarm_sessions_are_never_restarted(home):
     assert refresh.due({}, {**LAUNCHED, "AGENTIHOOKS_SWARM": "sw"}, home, os.getpid()) is False
 
 
+@pytest.mark.parametrize("name,expected", [("master@sw-0001", False), ("engineer@sw-0002", True), ("", True)])
+def test_dependency_refresh_respects_adopted_master_identity(home, monkeypatch, name, expected):
+    from hooks.context import broadcast
+
+    _log_change(home, time.time() + 60)
+    monkeypatch.setattr(broadcast, "_load_sessions", lambda: {"adopted": {"name": name, "pid": os.getpid()}})
+    assert refresh.due({"session_id": "adopted"}, LAUNCHED, home, os.getpid()) is expected
+
+
 @pytest.mark.parametrize("payload", [{"agent_id": "a1"}, {"stop_hook_active": True}])
 def test_subagent_and_reentrant_stops_are_ignored(home, payload):
     _log_change(home, time.time() + 60)
@@ -71,7 +80,7 @@ ORIGINAL = refresh.Original(
 def test_restart_kills_the_original_process_then_resumes_through_its_profile(monkeypatch):
     monkeypatch.setattr(refresh.shutil, "which", lambda name: "/bin/agentihooks")
     kill, launch = refresh.restart_commands(ORIGINAL)
-    assert kill == ["/bin/agentihooks", "terminate-agent", "4242", "--type", "claude", "--force-shared"]
+    assert kill == ["/bin/agentihooks", "terminate-agent", "4242", "--type", "claude", "--force-shared", "--keep-pane"]
     assert launch == [
         "/bin/agentihooks",
         "init-agent",
@@ -109,6 +118,14 @@ DETACHED = {"stdin": subprocess.DEVNULL, "capture_output": True, "timeout": 300,
 def _restart(monkeypatch, tmp_path, kill_rc: int, live: list[str], consumed: bool = False) -> list[list[str]]:
     ran = []
     marker = tmp_path / "closing-1"
+    record = tmp_path / "native.json"
+    record.write_text(json.dumps({"exit_status": 143, "pane_tail": "stopped"}))
+    monkeypatch.setenv("AGENTIHOOKS_EXIT_RECORD", str(record))
+
+    def sleep(delay):
+        pytest.fail("an existing native exit record must not wait")
+
+    monkeypatch.setattr(refresh.time, "sleep", sleep)
 
     def run(argv, **kwargs):
         assert kwargs == DETACHED

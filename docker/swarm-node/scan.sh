@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+scanner="aquasec/trivy:0.58.1"
+if [[ "${1:-}" == --pull-scanner ]]; then
+    exec docker pull --quiet "$scanner"
+fi
 image="${1:?worker image to scan}"
 output="$(realpath -m "${2:?scan evidence directory}")"
-scanner="aquasec/trivy:0.58.1"
 mkdir -p "$output"
 rm -f "$output/secrets.json"
 status=0

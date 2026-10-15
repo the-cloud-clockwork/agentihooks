@@ -96,16 +96,13 @@ def _codex(environ: dict, now: float, refresh: bool) -> list[Account]:
     counts = account_sessions.codex_sessions_by_account()
     found = source.readings(pool, environ, now)
     known = {account.name for account in pool}
-    live = [
-        codex_router.CodexAccount(name, f"AH_CX_TOKEN_{name}")
-        for name in counts
-        if name not in known and name not in {"default", account_sessions.API_ACCOUNT}
-    ]
+    live = codex_router.live_accounts(pool, counts)
     found.update(codex_router.quotas(live, environ))
     rows = []
     for account in pool + live:
         quota = found.get(account.name)
         cap = codex_router.account_cap(quota, now, environ) if account.name in known else None
+        quota = None if quota and quota.expired else quota
         five = _left(quota.five_hour, now) if quota else None
         week = _left(quota.seven_day, now) if quota else None
         reset = session_bands.upcoming(quota.seven_day.resets_at, now) if quota else None
@@ -134,7 +131,9 @@ def _global(environ: dict, now: float) -> list[Account]:
         quota = row["quota"]
         five = session_bands.left(quota["five_hour"]["used"], quota["five_hour"]["resets_at"], now) if quota else None
         week = session_bands.left(quota["seven_day"]["used"], quota["seven_day"]["resets_at"], now) if quota else None
-        cap = session_bands.cap(five, week) if quota and session_bands.fresh(quota["observed_at"], now) else None
+        cap = None
+        if quota and session_bands.fresh(quota["observed_at"], now):
+            cap = session_bands.week_cap(week) if row["harness"] == "codex" else session_bands.cap(five, week)
         weight = None
         if row["kind"] == API:
             policy = place.policy(row["harness"], environ)

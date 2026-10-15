@@ -158,6 +158,49 @@ def test_a_report_missing_either_kind_of_recorded_run_is_red(tmp_path, recorded,
     assert not (tmp_path / "lcov.info").exists()
 
 
+@pytest.mark.parametrize("recorded", [[], ["node"], ["browser"]], ids=["nothing", "node-only", "browser-only"])
+def test_a_selected_run_without_page_coverage_writes_an_empty_report(tmp_path, recorded):
+    captures = tmp_path / "captures"
+    captures.mkdir()
+    (captures / "capture-browser-empty.json").write_text('{"result": []}')
+    for kind in recorded:
+        stand_in(captures, kind)
+    out = tmp_path / "lcov.info"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(CONVERT),
+            "--root",
+            str(tmp_path),
+            "--captures",
+            str(captures),
+            "--out",
+            str(out),
+            "--selected",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if recorded:
+        assert result.returncode != 0
+        assert not out.exists()
+        return
+    assert result.returncode == 0
+    assert out.read_text() == ""
+    assert result.stdout == (
+        f"The selected tests recorded no browser or node coverage under {captures}; the page report is empty\n"
+    )
+
+
+def test_the_coverage_merge_marks_a_selected_scope_for_the_page_report():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())
+    merge = next(step for step in workflow["jobs"]["sonar"]["steps"] if step.get("id") == "merge")
+    assert merge["env"]["SCOPE"] == "${{ needs.select.outputs.scope }}"
+    combine = (ROOT / ".github/coverage/combine.sh").read_text()
+    assert 'if [[ "${SCOPE:-}" == selected ]]; then selected=(--selected); fi' in combine
+    assert '--out lcov.info "${selected[@]}"' in combine
+
+
 def test_code_two_page_files_share_counts_in_neither(tmp_path):
     for name in ("a", "b"):
         page = tmp_path / f"scripts/swarm_ledger/static/js/{name}.js"
