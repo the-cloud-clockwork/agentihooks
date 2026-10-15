@@ -1,9 +1,4 @@
-"""Tell a swarm-bound session to add an accepted plan as new ledger phases.
-
-A session not bound to a ledger or swarm gets no directive: ledger and swarm
-creation happen only on the operator's explicit ask or an operator-authored
-rule/condition, never from this hook.
-"""
+"""Tell a swarm-bound session to add an accepted plan as new ledger phases."""
 
 import fcntl
 import json

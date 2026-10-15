@@ -58,9 +58,6 @@ def bind(ledgers, session, slug="rig-grade-swarm", name="master@323133-0001"):
     (ledgers / ".sessions" / f"{session}.json").write_text(json.dumps({"slug": slug, "name": name}), encoding="utf-8")
 
 
-# Seam one: a session not bound to a ledger or swarm gets nothing, ever.
-
-
 def test_an_unbound_claude_session_accepting_a_plan_gets_nothing(capsys, monkeypatch):
     assert MARK not in run(recorded("claude_plan_accept"), capsys, "claude", monkeypatch)
 
@@ -80,23 +77,41 @@ def test_an_unbound_copilot_session_leaving_plan_mode_gets_nothing(monkeypatch):
     assert decision.directive(payload) == ""
 
 
-def test_an_unbound_session_with_a_four_item_task_list_gets_nothing(capsys, monkeypatch):
-    assert MARK not in run(todos(4), capsys, "claude", monkeypatch)
-    assert MARK not in run(todos(12), capsys, "claude", monkeypatch)
+@pytest.mark.parametrize("count", [4, 5, 12])
+def test_an_unbound_session_with_a_four_item_task_list_gets_nothing(count, capsys, monkeypatch):
+    assert MARK not in run(todos(count), capsys, "claude", monkeypatch)
 
 
-@pytest.mark.parametrize(
-    "text",
-    [
-        "troubleshoot why the ledger page is blank",
-        "Debug the failing shard",
-        "investigate the slow Redis test",
-        "refactor the inbox module",
-        "we have a bug, start debugging it",
-    ],
-)
-def test_an_unbound_session_asked_to_troubleshoot_gets_nothing(text, capsys, monkeypatch):
-    assert MARK not in run(prompt(text), capsys, "claude", monkeypatch)
+@pytest.mark.parametrize("count", [4, 8])
+def test_an_unbound_session_adding_four_tasks_gets_nothing(count, capsys, monkeypatch):
+    for i in range(count):
+        payload = {
+            "session_id": "s1",
+            "hook_event_name": "PostToolUse",
+            "tool_name": "TaskCreate",
+            "tool_input": {"subject": f"step {i}", "description": f"do step {i}"},
+            "tool_response": {"task": {"id": str(i)}},
+            "cwd": "/",
+        }
+        assert MARK not in run(payload, capsys, "claude", monkeypatch)
+
+
+TROUBLESHOOT_PROMPTS = [
+    "troubleshoot why the ledger page is blank",
+    "Debug the failing shard",
+    "investigate the slow Redis test",
+    "refactor the inbox module",
+    "we have a bug, start debugging it",
+    "Troubleshooting the deploy rollout",
+    "an investigation into the memory leak",
+    "please help me debug this",
+]
+
+
+@pytest.mark.parametrize("target", ["claude", "codex"])
+@pytest.mark.parametrize("text", TROUBLESHOOT_PROMPTS)
+def test_an_unbound_session_asked_to_troubleshoot_gets_nothing(text, target, capsys, monkeypatch):
+    assert MARK not in run(prompt(text), capsys, target, monkeypatch)
 
 
 def test_an_unbound_trivial_prompt_gets_nothing(capsys, monkeypatch):
@@ -107,7 +122,7 @@ def test_a_codex_prompt_naming_a_plan_but_not_accepting_one_gets_nothing(capsys,
     assert MARK not in run(recorded("codex_plan_prompt"), capsys, "codex", monkeypatch)
 
 
-def test_a_non_plan_tool_call_on_an_unbound_session_gets_nothing(capsys, monkeypatch, isolated):
+def test_a_non_plan_tool_call_on_an_unbound_session_gets_nothing(capsys, monkeypatch):
     payload = {
         "session_id": "s1",
         "hook_event_name": "PostToolUse",
@@ -117,9 +132,6 @@ def test_a_non_plan_tool_call_on_an_unbound_session_gets_nothing(capsys, monkeyp
         "cwd": "/",
     }
     assert MARK not in run(payload, capsys, "claude", monkeypatch)
-
-
-# Seam two: a session already bound to a ledger or swarm keeps its ledger duty.
 
 
 def test_a_swarm_agent_appends_its_plan_to_the_swarm_ledger(capsys, monkeypatch):
@@ -139,14 +151,16 @@ def test_a_session_bound_to_a_ledger_appends_its_plan_there(isolated, capsys, mo
     assert "without asking" in out
 
 
-def test_a_bound_session_with_a_four_item_task_list_still_gets_nothing(isolated, capsys, monkeypatch):
+@pytest.mark.parametrize("count", [4, 12])
+def test_a_bound_session_with_a_four_item_task_list_still_gets_nothing(count, isolated, capsys, monkeypatch):
     bind(isolated, "s1")
-    assert MARK not in run(todos(4), capsys, "claude", monkeypatch)
+    assert MARK not in run(todos(count), capsys, "claude", monkeypatch)
 
 
-def test_a_bound_session_asked_to_troubleshoot_still_gets_nothing(isolated, capsys, monkeypatch):
+@pytest.mark.parametrize("text", TROUBLESHOOT_PROMPTS)
+def test_a_bound_session_asked_to_troubleshoot_still_gets_nothing(text, isolated, capsys, monkeypatch):
     bind(isolated, "s1")
-    assert MARK not in run(prompt("troubleshoot the page"), capsys, "claude", monkeypatch)
+    assert MARK not in run(prompt(text), capsys, "claude", monkeypatch)
 
 
 def test_the_bound_directive_fires_once_per_session(isolated, capsys, monkeypatch):
@@ -171,7 +185,7 @@ def test_the_acceptance_signal_follows_the_harness(isolated, monkeypatch):
     assert decision.directive(recorded("claude_plan_accept", session_id="b")) == ""
 
 
-def test_a_plan_without_a_session_id_gets_nothing(isolated, monkeypatch):
+def test_a_plan_without_a_session_id_gets_nothing(monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
     assert decision.directive(recorded("claude_plan_accept", session_id="")) == ""
 
@@ -204,9 +218,6 @@ def test_an_unreadable_binding_falls_back_to_the_swarm(isolated, monkeypatch):
     (isolated / ".sessions" / "s1.json").write_text("[1]", encoding="utf-8")
     out = decision.directive(recorded("claude_plan_accept", session_id="s1"))
     assert "--slug env-swarm --as master@2 plan phases" in out
-
-
-# Seam three: the toolbelt rule states this plainly.
 
 
 def test_the_toolbelt_rule_bars_automatic_creation():
