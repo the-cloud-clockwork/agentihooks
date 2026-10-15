@@ -102,6 +102,7 @@ TARGET = {("gate-protected.yml", "grade")}
 CLASSED = {
     ("ci-templates.yml", "actionlint"),
     ("pages.yml", "build"),
+    ("promote.yml", "promote"),
     ("publish-pypi.yml", "verify"),
     ("release.yml", "release"),
     ("github-access-audit.yml", "read-back"),
