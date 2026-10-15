@@ -33,6 +33,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Swarm Codex launches isolate session files and database storage from the
+  operator home while retaining shared authentication and hooks.
 - Stopped Codex replay test fixes export field and identity sizes independently of its environment.
 - The ledger HTTP server uses a listen backlog of 128 to accept bursts of
   concurrent writers and readers.
