@@ -274,12 +274,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--force-shared", action="store_true", help="Allow terminating a process shared by multiple UUIDs"
     )
-    parser.add_argument(
-        "--stand-down",
-        action="store_true",
-        help="Interrupt one managed Codex conversation and stop its new turns, with no signal",
-    )
-    parser.add_argument("--swarm", default="", help="Swarm of the conversation to stand down")
+    parser.add_argument("--stand-down", action="store_true")
+    parser.add_argument("--swarm")
     parser.add_argument("--term-timeout", type=float, default=3.0)
     parser.add_argument("--keep-pane", action="store_true", help="Leave the agent's herdr pane open")
     parser.add_argument("--json", action="store_true")

@@ -154,7 +154,7 @@ def execute(
     return {"stood_down": record.agent_name, "thread": record.thread_id, "interrupted": turn}
 
 
-def run(selector: str, swarm: str, dry_run: bool, sessions: "list[Session]") -> int:
+def run(selector: str, swarm: str | None, dry_run: bool, sessions: "list[Session]") -> int:
     from scripts.swarm import store as swarm_store
 
     store = swarm_store.connect()
