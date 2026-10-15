@@ -412,6 +412,28 @@ class TestClaudeRouting:
         assert lines[2].split()[:8] == ["-", "claude", "home", "MASTER", "max", "interactive", "MASTERS", "3/-"]
         assert len(lines) == 3
 
+    def test_cmd_balance_lists_every_account_the_router_knows_from_a_one_token_session(self, monkeypatch, capsys):
+        import os
+
+        from scripts import agents_quota
+        from scripts import claude_quota_balancer as balancer
+        from tests.test_agents_quota import _probe, _router_accounts
+
+        accounts = _router_accounts(monkeypatch, 7)
+        monkeypatch.setattr(install, "_load_claude_runtime_env", lambda: None)
+        monkeypatch.setattr(install.shutil, "which", lambda name: "/usr/bin/claude")
+        monkeypatch.setattr(balancer, "collect_results", _probe)
+        monkeypatch.setattr(agents_quota, "_codex", lambda now: [])
+        monkeypatch.setattr(agents_quota, "api_rows", lambda source, harness, now: [])
+        monkeypatch.setattr(agents_quota, "_masters", lambda harness="": {})
+        monkeypatch.setattr("hooks.context.account_sessions.sessions_by_account", lambda: {"acct1": 1, "acct7": 2})
+
+        assert install.cmd_balance(include_fable=False, refresh=False, timeout=10) == 0
+        lines = capsys.readouterr().out.splitlines()
+        assert sorted(line.split()[2] for line in lines[2:]) == accounts
+        assert len(lines) == 9
+        assert "AH_CC_TOKEN_acct7" not in os.environ
+
     def test_cmd_balance_lists_the_claude_api_slot_with_kind_weight_and_cap(self, monkeypatch, tmp_path, capsys):
         from scripts import agents_quota
         from scripts import claude_quota_balancer as balancer

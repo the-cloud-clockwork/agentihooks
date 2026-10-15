@@ -475,6 +475,25 @@ def test_codex_accounts_with_live_sessions_keep_their_own_quotas(monkeypatch):
     assert [(seat.account, seat.free) for seat in capacity.offered(seen)] == [("a", 5), ("b", 0)]
 
 
+def test_a_signed_out_codex_account_adds_no_capacity_and_no_routing_left(monkeypatch):
+    from scripts.codex_quota import CodexQuota
+    from scripts.swarm import quota_view
+
+    monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(capacity.account_sessions, "codex_sessions_by_account", lambda: {"a": 1})
+    monkeypatch.setattr(
+        capacity.codex_router, "accounts", lambda _: [capacity.codex_router.CodexAccount("a", "AH_CX_TOKEN_a")]
+    )
+    expired = CodexQuota(100, "?", balancer.QuotaWindow(used=10), balancer.QuotaWindow(used=20), expired=True)
+    monkeypatch.setattr(capacity.codex_router, "quotas", lambda pool, environ: {"a": expired})
+    monkeypatch.setattr(capacity.codex_router, "probe", lambda *a, **kw: pytest.fail("reached the real codex probe"))
+    [row] = capacity.accounts({"AH_CX_TOKEN_a": "fake-a"}, 100)
+    assert (row.state, row.cap, row.five_left, row.week_left, row.week_resets_at) == ("CLOSED", 0, None, None, None)
+    assert quota_view.routing_left(capacity.record(row)) is None
+    assert capacity.free_seats(row) == 0
+
+
 def test_codex_rows_count_a_managed_execution_once_and_hold_it_until_termination(monkeypatch, tmp_path):
     from scripts.codex_quota import CodexQuota
     from tests.context.test_account_sessions import _held_store, _managed_host

@@ -32,7 +32,7 @@ from scripts.swarm import (
     stall_watch,
     tick_master,
 )
-from scripts.swarm.health import activity, checks, prompt_backlog, spawn_stall, standing, verdicts
+from scripts.swarm.health import activity, checks, merge_stall, prompt_backlog, spawn_stall, standing, verdicts
 from scripts.swarm.health import findings as health
 from scripts.swarm.naming import swarm_name
 from scripts.swarm.store import ASSIST, SwarmError
@@ -108,6 +108,7 @@ def findings(store, slug, config, tasks, events):
         + drain_watch.findings(store, slug, limits, now_ms())
         + launch_check.findings(store, slug)
         + spawn_stall.findings(store, slug)
+        + merge_stall.findings(store, slug, config.repo, now_ms())
         + prompt_backlog.findings(store, slug)
         + placement_waits.findings(store, slug, now_ms())
         + standing.findings(store.redis, slug, now_ms())
@@ -233,7 +234,7 @@ def observation(store, slug, agent):
 
 
 def status_report(store, slug, state):
-    from scripts.swarm import capacity
+    from scripts.swarm import capacity, tick_activity
 
     config = store.config(slug)
     tasks = state.get("tasks", [])
@@ -264,6 +265,7 @@ def status_report(store, slug, state):
         ],
         "outages": outage.open_records(slug),
         "last_tick": int(store.redis.get(store.key(slug, "last-tick")) or 0),
+        "last_tick_activity": tick_activity.read(store, slug),
         "history": [json.loads(row) for row in store.redis.lrange(store.key(slug, "history"), 0, -1)],
         "tasks": task_counts(tasks),
         "task_revisions": lifecycle.revisions(state.get("_meta", {}).get("stamps", {})),

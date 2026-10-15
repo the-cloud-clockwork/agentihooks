@@ -58,7 +58,7 @@ from urllib.parse import urlsplit
 
 from hooks.context import injection_trace, quarantine
 from scripts.doctor import priming
-from scripts.gates import Who, catalog, intent, modes, progress, quiet
+from scripts.gates import Who, catalog, intent, lift, modes, progress, quiet
 from scripts.gates import log as gate_log
 from scripts.gates.identity import refusal
 from scripts.handoff import check as handoff_check
@@ -191,7 +191,7 @@ def _publish_tick_status(store, slug, doc):
 @timing.instrument_tick
 @outage.guard_tick
 def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=False):
-    from scripts.swarm import command_runner, commands, controller, incidents, lease
+    from scripts.swarm import command_runner, commands, controller, incidents, lease, tick_activity
 
     ledger = ledger or LedgerClient()
     outbox.flush(InboxStore(store.redis))
@@ -202,9 +202,14 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
     token = controller.take_tick_lock(store, slug, held, TICK_LOCK_MS)
     if token is None:
         return ["another tick is running"]
-    keeping = timing.BEFORE_STEP.set(lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS))
+    keeping = timing.BEFORE_STEP.set(
+        lambda: tick_activity.keep(
+            store, slug, lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS), now_ms
+        )
+    )
     doc = {}
     try:
+        timing.keep()
         outage.providers(store, slug, runtime, now_ms())
         if isinstance(ledger, ledger_client.LedgerClient) and not outage.ledger_health(
             slug, now_ms(), lambda: isinstance(ledger.metadata(slug), dict)
@@ -256,19 +261,8 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
                     ledger,
                     store.config(slug),
                 )
-            actions += timing.call(tick, slug, store, ledger, runtime or routed(herdr=HerdrRuntime()), now_ms())
-            if store.config(slug).template == "doctor":
-                from scripts.doctor import cli as doctor
-
-                actions += skip_refused(doctor.timer, store, slug, now_ms(), scheduled)
-            herdr = messenger or delivery.HerdrMessenger()
-            timing.call(delivery.migrate_outbox, store, slug, inbox)
-            agents = [a for a in timing.call(store.agents, slug) if a.state != "finished"]
-            skip_refused(delivery.relay_to_page, inbox, slug, agents, ledger)
             doc, config = timing.call(ledger.state, slug), store.config(slug)
             view = timing.call(ledger_events.tick_view, inbox, store, slug, doc)
-            actions += skip_refused(ledger_events.event_pass, inbox, store, slug, doc, ledger, now_ms(), view)
-            actions += skip_refused(done_gate.recheck_pass, store, slug, doc, ledger, now_ms(), view)
             mail, mode = ledger_events.Mail(inbox, store, slug), intent.mode_of(config)
             actions += skip_refused(
                 intent.Check(
@@ -284,6 +278,19 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
                 ).run,
                 doc,
             )
+            actions += timing.call(tick, slug, store, ledger, runtime or routed(herdr=HerdrRuntime()), now_ms())
+            if store.config(slug).template == "doctor":
+                from scripts.doctor import cli as doctor
+
+                actions += skip_refused(doctor.timer, store, slug, now_ms(), scheduled)
+            herdr = messenger or delivery.HerdrMessenger()
+            timing.call(delivery.migrate_outbox, store, slug, inbox)
+            agents = [a for a in timing.call(store.agents, slug) if a.state != "finished"]
+            skip_refused(delivery.relay_to_page, inbox, slug, agents, ledger)
+            doc, config = timing.call(ledger.state, slug), store.config(slug)
+            view = timing.call(ledger_events.tick_view, inbox, store, slug, doc)
+            actions += skip_refused(ledger_events.event_pass, inbox, store, slug, doc, ledger, now_ms(), view)
+            actions += skip_refused(done_gate.recheck_pass, store, slug, doc, ledger, now_ms(), view)
             actions += skip_refused(progress.checks_pass, store.redis, slug, doc["tasks"], view, now_ms())
             rows = {t["id"]: t for t in doc["tasks"]}
             actions += skip_refused(waits.end_pass, store, slug, rows, inbox, view, now_ms(), ledger_events.view)
@@ -676,8 +683,6 @@ def lifecycle_control(args):
 
 
 def control_readings(store, args):
-    from scripts.gates import lift
-
     config = store.config(args.slug)
     if args.command == "set":
         keys = (pair.partition("=")[0] for pair in args.pairs)
@@ -687,7 +692,8 @@ def control_readings(store, args):
             if key in (*SETTABLE, *LANE_KEYS, *EFFORT_KEYS, *CONFIG_KEYS, *GATE_KEYS, "autonomy")
         }
     if args.command == "lift":
-        lifted = lift.agent_lifted(args.slug, args.agent, args.gate)
+        agent = _lifted_agent(store, args)
+        lifted = lift.held(args.slug, agent.name, agent.task, args.gate)
         return {f"{args.gate} gate lift for {args.agent}": "lifted" if lifted else "not lifted"}
     return {f"the swarm state with {lifecycle_control(args)}": config.state}
 
@@ -1084,16 +1090,33 @@ def cmd_classify(store, args):
 
 
 def cmd_lift(store, args):
-    from scripts.gates import entry, lift
+    from scripts.gates import entry
 
     store.config(args.slug)
+    agent = _lifted_agent(store, args)
+    if args.gate not in {*entry.GATES, *lift.SERVER_GATES}:
+        raise SwarmError(f"no gate named {args.gate}")
+    pull = {} if args.gate in lift.SERVER_GATES else _lifted_pull(args.slug, agent.task)
+    lift.lift_agent(Who(name=agent.name, swarm=args.slug, task=agent.task), args.gate, pull=pull)
+    bound = {"head": pull["head"]} if pull else {"minutes": lift.LIFT_SECONDS // 60}
+    print(json.dumps({"agent": agent.name, "gate": args.gate, **bound}))
+
+
+def _lifted_agent(store, args):
     agent = next((a for a in store.agents(args.slug) if a.name == args.agent), None)
     if agent is None:
         raise SwarmError(f"{args.agent} is not in this swarm")
-    if args.gate not in {*entry.GATES, *lift.SERVER_GATES}:
-        raise SwarmError(f"no gate named {args.gate}")
-    lift.lift_agent(Who(name=agent.name, swarm=args.slug, task=agent.task), args.gate)
-    print(json.dumps({"agent": agent.name, "gate": args.gate, "minutes": lift.LIFT_SECONDS // 60}))
+    return agent
+
+
+def _lifted_pull(slug, task):
+    url = task and (LedgerClient().task(slug, task) or {}).get("pr_url")
+    if not url:
+        return {}
+    head = intent.pr_head(url)
+    if not head:
+        raise SwarmError(f"could not read the head of {url}; lift again once GitHub answers")
+    return {"url": url, "head": head}
 
 
 def cmd_send_message(store, args):
@@ -1191,6 +1214,8 @@ def cmd_pr(store, args):
     row = next(t for t in doc["tasks"] if t.get("id") == agent.task)
     fields.update(_split_binding(row, args.url, args.half))
     checked = intent.stamp(args.slug, agent.task, args.url, doc, intent.mode_of(config), now_ms())
+    if row.get("pr_url") != args.url:
+        lift.drop_task(args.slug, agent.task)
     ledger.update_task(args.slug, agent.task, fields, by=agent.name)
     print(json.dumps({"task": agent.task, "pr_url": args.url, **branch, "intent": checked}))
 
@@ -1492,7 +1517,14 @@ def cmd_ready(store, args):
     text = _read(args.doc, "handoff document")
     ledger = LedgerClient()
     row = next((t for t in ledger.tasks(args.slug) if t.get("id") == agent.task), {})
-    found = ready.check(row, agent, store.config(args.slug).autonomy, ledger_events.view, now_ms())
+    found = ready.check(
+        row,
+        agent,
+        store.config(args.slug).autonomy,
+        ledger_events.view,
+        now_ms(),
+        ready.continuation(store, args.slug, agent.task),
+    )
     problems = handoff_check.problems(text, Resolver(args.slug, store.redis, ledger.state))
     if problems:
         raise SwarmError(handoff_check.refusal(problems))

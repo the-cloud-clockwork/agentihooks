@@ -1,0 +1,45 @@
+- uses: actions/checkout@v4
+  if: github.event_name == 'merge_group' || github.event_name == 'pull_request'
+  with:
+    ref: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+    path: provenance-grader
+    fetch-depth: 0
+    persist-credentials: false
+
+- uses: actions/setup-python@v5
+  if: github.event_name == 'merge_group' || github.event_name == 'pull_request'
+  with:
+    python-version: '3.12'
+
+- name: Install provenance dependencies
+  if: github.event_name == 'merge_group' || github.event_name == 'pull_request'
+  shell: bash
+  working-directory: ${{ github.workspace }}/provenance-grader
+  run: |
+    python -m venv "$RUNNER_TEMP/provenance-python"
+    "$RUNNER_TEMP/provenance-python/bin/python" -I -m pip install 'pyyaml>=6.0'
+
+- name: Record the protected tested tree
+  id: provenance
+  if: github.event_name == 'merge_group' || github.event_name == 'pull_request'
+  shell: bash
+  working-directory: ${{ github.workspace }}/provenance-grader
+  env:
+    BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+    HEAD: ${{ github.sha }}
+    EVENT: ${{ github.event_name }}
+    RUN: ${{ github.run_id }}
+    ATTEMPT: ${{ github.run_attempt }}
+  run: |
+    "$RUNNER_TEMP/provenance-python/bin/python" -I scripts/ci_reuse.py --base "$BASE" --head "$HEAD" --event "$EVENT" \
+      --repository "$GITHUB_REPOSITORY" --run "$RUN" --attempt "$ATTEMPT" \
+      --evidence "$RUNNER_TEMP/no-reuse" --record "$RUNNER_TEMP/provenance.json"
+
+- name: Publish protected tested tree evidence
+  if: (github.event_name == 'merge_group' || github.event_name == 'pull_request') && steps.provenance.outputs.recorded == 'true'
+  uses: actions/upload-artifact@v4
+  with:
+    name: required-tree-${{ github.run_attempt }}
+    path: ${{ runner.temp }}/provenance.json
+    if-no-files-found: error
+    retention-days: 7
