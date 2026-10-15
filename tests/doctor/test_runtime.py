@@ -150,7 +150,7 @@ def test_a_disappearing_execution_does_not_hide_later_execution_homes(tmp_path, 
     def stat(path, *args, **kwargs):
         if path == departing:
             calls.append(path)
-            if len(calls) == 2:
+            if len(calls) == 3:
                 raise FileNotFoundError("execution removed after listing")
         return original_stat(path, *args, **kwargs)
 
@@ -161,6 +161,7 @@ def test_a_disappearing_execution_does_not_hide_later_execution_homes(tmp_path, 
     assert len(finding.evidence) == 2
     assert str(survivor) in finding.evidence[1]
     assert "departing" not in finding.evidence[1]
+    assert len(calls) == 3
 
 
 def test_a_missing_user_runtime_is_skipped(tmp_path, monkeypatch):
