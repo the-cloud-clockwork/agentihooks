@@ -394,7 +394,7 @@ agentihooks terminate-agent --list --type any        # TYPE NAME SESSION_ID PID 
 agentihooks terminate-agent eng@abc-0042 --dry-run     # resolve and validate, send nothing
 agentihooks terminate-agent eng@abc-0042               # SIGTERM the process group, SIGKILL if it survives
 agentihooks terminate-agent ci@abc-0815 --stand-down --dry-run
-agentihooks terminate-agent ci@abc-0815 --stand-down --swarm rig-grade-swarm
+agentihooks terminate-agent ci@abc-0815 --stand-down --swarm <slug>
 ```
 
 | Flag | Meaning |
@@ -404,16 +404,16 @@ agentihooks terminate-agent ci@abc-0815 --stand-down --swarm rig-grade-swarm
 | `--dry-run` | Resolve and validate, print what would happen, change nothing; ends `result=validated signal=none` |
 | `--force-shared` | Allow ending a process whose other session UUIDs would end with it |
 | `--stand-down` | Stand down one managed Codex conversation instead of signalling a process |
-| `--swarm <slug>` | Swarm whose Codex records `--stand-down` reads; without it, the swarm the agent name belongs to |
+| `--swarm <slug>` | Swarm whose Codex records the stand-down reads; without it, the swarm the agent name belongs to |
 | `--term-timeout` | Seconds to wait after SIGTERM, and again after SIGKILL (default 3) |
 | `--keep-pane` | Leave the agent's herdr pane open after it exits |
 | `--json` | Print the resolution report as one JSON object |
 
 ### Terminate a process
 
-A termination validates the target first: the PID still has the start time,
-command and arguments it was listed with, its process group is above 1, holds
-only processes of one session and does not contain the caller. It then sends
+A termination validates the target first: the PID's start time, command and arguments match its
+listing, its process group ID is above 1, every member belongs to one POSIX session,
+and the group does not contain the caller. It then sends
 SIGTERM to the whole process group, waits `--term-timeout`, rechecks the
 target's identity and sends SIGKILL to any survivor. Output is the resolution
 line (`action`, `type`, `name`, `session_id`, `pid`, `pgid`, `members`,
@@ -433,7 +433,7 @@ conversation belongs to the agent being stopped.
 `--stand-down` stops one conversation of a managed Codex agent, one the swarm
 launched on the Codex app-server and recorded in its Codex transport records,
 and sends no signal. The selector is matched against each record's agent name,
-thread id, session id and execution id in the swarm. A stand down:
+thread id, session id and execution id in the swarm. A stand-down:
 
 1. Marks that execution's transport record `stood_down`. The agent's inbox pump
    treats the execution as no longer current and stops, so the conversation
@@ -445,6 +445,8 @@ thread id, session id and execution id in the swarm. A stand down:
    seconds for the turn to stop.
 
 The app-server process and every other conversation it hosts keep running.
+Under `--stand-down` only `--swarm` and `--dry-run` apply; `--type`, `--json`,
+`--force-shared`, `--term-timeout` and `--keep-pane` are ignored.
 
 ```text
 $ agentihooks terminate-agent ci@abc-0815 --stand-down --dry-run
@@ -455,21 +457,24 @@ keeps: conversation <uuid> of eng@abc-0816: not interrupted
 result=validated signal=none
 ```
 
-Without `--dry-run` the same `stops:` and `keeps:` lines print, the stand down
-runs, and the command ends `result=stood-down stood_down=<agent> thread=<thread>
-interrupted=<turn>`; `interrupted=` is empty when no turn was in progress.
+The dry run reads only the swarm's recorded transport state and does not
+contact the app-server, so `last recorded:` is the turn the inbox last
+submitted or reconciled, or `none`. Without `--dry-run` the same `stops:` and
+`keeps:` lines print, the stand-down runs, and the command ends `result=stood-down stood_down=<agent> thread=<thread>
+interrupted=<turn>`; the run interrupts only a last turn the app-server reports
+in progress, and `interrupted=` is empty when none was.
 
 | Exit | Output | Meaning and next step |
 |---|---|---|
 | 0 | `result=validated signal=none` | Dry run; nothing changed |
 | 0 | `result=stood-down ...` | Fenced and, when a turn ran, interrupted |
-| 1 | `terminate-agent: <error>` then `<agent> stays fenced from new inbox turns; run the same stand down again to interrupt its turn` | The record is already `stood_down`; a publication still in flight, an unreachable app-server or a turn still running after its interrupt stopped it there. Rerun the same command |
+| 1 | `terminate-agent: <error>` then `<agent> stays fenced from new inbox turns; run the same stand down again to interrupt its turn` | The fence is written first, so the record is `stood_down` after this exit. Causes: an inbox publication still in flight, an unreachable app-server, or a turn still running after the interrupt. Rerun the same command |
 | 2 | `terminate-agent: refused: <reason>` then `terminate-agent: safe alternative: <alternative>` | Nothing changed; see the refusals below |
 
-| Refusal reason | Safe alternative printed |
+| Refusal reason | Safe alternative |
 |---|---|
 | No `--swarm` and the selector names no swarm agent | `pass --swarm <slug>` |
-| The selector has no managed Codex conversation in the swarm, and it names one process | That process's PID and conversation ids, with `agentihooks terminate-agent <pid> --force-shared --dry-run`; the same command without `--dry-run` ends every conversation in the process, so run it only when all of them belong to this agent |
+| The selector has no managed Codex conversation in the swarm, and it names one process | That process's PID and conversation ids, with `agentihooks terminate-agent <pid> --force-shared --dry-run`; the same command without `--dry-run` ends every conversation in the process, so run it only when all of them belong to this agent. An unregistered process has no conversation ids, so the list is empty |
 | The selector has no managed Codex conversation, and it names no single process | `agentihooks terminate-agent --list --type codex shows the live conversations` |
 | The conversation already ended (`exited` or `failed`) | `nothing needs standing down` |
 | The selector names several live conversations | `name one thread: <thread ids>` |

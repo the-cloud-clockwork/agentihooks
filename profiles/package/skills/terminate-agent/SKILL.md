@@ -5,7 +5,7 @@ description: >
   UUID, or PID. Use when the operator says "terminate agent", "kill agent", "stop agent",
   "kill Claude session", "kill Codex session", or asks which agent sessions
   are running before terminating one.
-argument-hint: "[NAME|UUID|PID] [--type claude|codex|any] [--list] [--dry-run] [--stand-down]"
+argument-hint: "[NAME|UUID|PID] [--type claude|codex|any] [--list] [--dry-run] [--stand-down] [--swarm SLUG]"
 ---
 
 # Terminate Agent
@@ -35,22 +35,6 @@ duplicate name requires the operator to select one UUID. A Codex process shared
 by multiple UUIDs requires the operator to choose whether all listed sessions
 may be terminated; only then add `--force-shared` to both commands.
 
-## Stand down one Codex conversation
-
-To stop one swarm-managed Codex conversation and leave its process and the
-other conversations running, use the stand down; it sends no signal:
-
-```bash
-agentihooks terminate-agent "<agent-name-or-thread>" --stand-down [--swarm <slug>] --dry-run
-agentihooks terminate-agent "<agent-name-or-thread>" --stand-down [--swarm <slug>]
-```
-
-The dry-run prints `stops:` and `keeps:` lines and `result=validated signal=none`.
-The stand down ends `result=stood-down`. Exit 2 prints `refused:` and a
-`safe alternative:` line: report both and follow the alternative. Exit 1
-leaves the conversation fenced from new inbox turns; run the same stand down
-again.
-
 If the operator requested only a dry-run, report the resolved PID, PGID, member
 PIDs, and `signal=none`, then stop.
 
@@ -72,6 +56,22 @@ pane (and the tab, when it was the only pane) is closed after the agent exits.
 Report the `pane_id`. When the operator wants the pane kept ("stop it but keep
 the terminal"), add `--keep-pane`; the line then reads `pane=kept`.
 `pane=close-failed (...)` means the agent is gone but the pane is still open.
+
+## Stand down one Codex conversation
+
+To stop one swarm-managed Codex conversation and leave its process and the
+other conversations running, use the stand-down; it sends no signal:
+
+```bash
+agentihooks terminate-agent "<agent-name-or-thread>" --stand-down [--swarm <slug>] --dry-run
+agentihooks terminate-agent "<agent-name-or-thread>" --stand-down [--swarm <slug>]
+```
+
+The dry-run prints `stops:` and `keeps:` lines and `result=validated signal=none`.
+The stand-down ends `result=stood-down`. Exit 2 prints `refused:` and a
+`safe alternative:` line: report both and follow the alternative. Exit 1
+leaves the conversation fenced from new inbox turns; run the same stand-down
+again.
 
 ## Extracted Scripts
 
