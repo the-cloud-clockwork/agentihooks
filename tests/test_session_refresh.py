@@ -122,6 +122,11 @@ def _restart(monkeypatch, tmp_path, kill_rc: int, live: list[str], consumed: boo
     record.write_text(json.dumps({"exit_status": 143, "pane_tail": "stopped"}))
     monkeypatch.setenv("AGENTIHOOKS_EXIT_RECORD", str(record))
 
+    def sleep(delay):
+        pytest.fail("an existing native exit record must not wait")
+
+    monkeypatch.setattr(refresh.time, "sleep", sleep)
+
     def run(argv, **kwargs):
         assert kwargs == DETACHED
         ran.append(argv)

@@ -6,10 +6,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-import init_agent
 import pytest
 
 from hooks.lifecycle import refresh
+from scripts import init_agent
 
 
 @pytest.mark.parametrize("status", [0, 23, 143])
@@ -61,6 +61,11 @@ def test_restart_retains_exit_evidence_before_relaunch(tmp_path, monkeypatch):
     monkeypatch.setattr(refresh, "live_session_ids", lambda: [])
     calls = []
 
+    def sleep(delay):
+        pytest.fail("an existing native exit record must not wait")
+
+    monkeypatch.setattr(refresh.time, "sleep", sleep)
+
     def run(argv, **kwargs):
         calls.append(argv)
         if argv[1] == "terminate-agent":
@@ -104,7 +109,7 @@ def test_exit_record_retains_capture_outcome(tmp_path, monkeypatch, failure):
     monkeypatch.setattr(herdr_host, "_cli", read)
     monkeypatch.setattr(session_exit, "redact", redact)
     monkeypatch.setattr(session_exit.time, "time", lambda: 42)
-    path = tmp_path / "evidence" / "native.json"
+    path = tmp_path / "evidence" / "nested" / "native.json"
     session_exit.record_exit(path, 23, "claude", "master-test", environ)
     saved = json.loads(path.read_text(encoding="utf-8"))
     assert saved == {
@@ -121,6 +126,7 @@ def test_exit_record_retains_capture_outcome(tmp_path, monkeypatch, failure):
         "ended_at": 42,
     }
     assert path.stat().st_mode & 0o777 == 0o600
+    assert path.parent.stat().st_mode & 0o777 == 0o700
     assert not path.with_suffix(".pending").exists()
 
 
@@ -178,11 +184,14 @@ def test_restart_waits_for_native_evidence(tmp_path, monkeypatch, capsys, arrive
     record = tmp_path / "native.json"
     monkeypatch.setenv("AGENTIHOOKS_EXIT_RECORD", str(record))
     monkeypatch.setattr(refresh, "live_session_ids", lambda: [])
-    ticks = iter([0, 1, 36])
+    ticks = iter([0, 1, 34.9, 35, 35.1, 36])
     monkeypatch.setattr(refresh.time, "monotonic", lambda: next(ticks))
+    sleeps = []
 
     def sleep(delay):
         assert delay == 0.1
+        sleeps.append(delay)
+        assert len(sleeps) <= (1 if arrives else 2)
         if arrives:
             record.write_text(json.dumps({"exit_status": 143, "pane_tail": "native stopped"}))
 
@@ -196,6 +205,7 @@ def test_restart_waits_for_native_evidence(tmp_path, monkeypatch, capsys, arrive
     monkeypatch.setattr(refresh.subprocess, "run", run)
     refresh.restart([["ah", "terminate-agent"], ["ah", "init-agent"]], tmp_path / "closing-1", "sid")
     assert len(calls) == (2 if arrives else 1)
+    assert len(sleeps) == (1 if arrives else 2)
     if arrives:
         assert json.loads(record.read_text())["session_id"] == "sid"
     else:
