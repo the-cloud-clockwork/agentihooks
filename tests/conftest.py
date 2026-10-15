@@ -284,6 +284,7 @@ def _isolate_real_user_paths(tmp_path, monkeypatch, request):
     from hooks.targets import emitter
 
     monkeypatch.setattr(emitter, "_forced", False)
+    monkeypatch.setattr(emitter, "_plain", False)
     monkeypatch.setattr(emitter, "_buffer", [])
     monkeypatch.setattr(emitter, "_hook_fields", {})
     monkeypatch.setattr(emitter, "_top_fields", {})
