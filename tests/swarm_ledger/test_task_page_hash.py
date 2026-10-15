@@ -10,11 +10,12 @@ pytestmark = pytest.mark.unit
 def test_task_page_hash_tracks_only_returned_content():
     from scripts.swarm_ledger.api import resources
 
-    doc = {"tasks": [{"id": "t1", "title": "Visible"}, {"id": "t2", "title": "Outside"}]}
+    doc = {"tasks": [{"id": "t1", "title": "Visible"}, {"id": "t2", "title": "Outside"}], "_meta": {"rev": 1}}
     first = resources.read(doc, "tasks", {"limit": 1})
     assert first["data"][0]["title"] == "Visible"
     assert resources.read(doc, "tasks", {"limit": 1}) == first
     doc["tasks"][1]["title"] = "Changed outside"
+    doc["_meta"]["rev"] = 2
     outside = resources.read(doc, "tasks", {"limit": 1})
     assert outside["data"] == first["data"]
     assert outside["page_hash"] == first["page_hash"]
@@ -22,6 +23,7 @@ def test_task_page_hash_tracks_only_returned_content():
     with pytest.raises(resources.APIError, match="Collection changed"):
         resources.read(doc, "tasks", {"limit": 1, "cursor": first["next_cursor"]})
     doc["tasks"][0]["title"] = "Changed visible"
+    doc["_meta"]["rev"] = 3
     visible = resources.read(doc, "tasks", {"limit": 1})
     assert visible["page_hash"] != first["page_hash"]
     canonical = json.dumps(visible["data"], sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
@@ -72,22 +74,27 @@ def test_task_route_reuses_entry_revision(monkeypatch):
     from scripts.swarm_ledger.api import resources, routes
     from scripts.swarm_ledger.repository.sqlite import Entry
 
-    doc = {"tasks": [{"title": "Visible é", "id": "t1"}, {"id": "t2", "title": "Outside"}]}
-    expected = resources.revision(doc["tasks"])
+    doc = {"tasks": [{"title": "Visible é", "id": "t1"}, {"id": "t2", "title": "Outside"}], "_meta": {"rev": 7}}
+    expected = f"{7:064x}"
     entry = Entry(1, "", doc)
     server = SimpleNamespace(repository=SimpleNamespace(current=lambda slug: entry))
+    original = resources.revision
 
-    def refuse_collection_hash(doc, path):
-        pytest.fail(f"Task page read recomputed {path} collection revision")
+    def refuse_collection_hash(value):
+        assert value is not entry.state["tasks"]
+        return original(value)
 
-    monkeypatch.setattr(resources, "resource_revision", refuse_collection_hash)
+    monkeypatch.setattr(resources, "revision", refuse_collection_hash)
     first = routes.ledger_read(server, "ledger", "tasks", {"limit": 1})
     assert first["revision"] == expected
     assert routes.ledger_read(server, "ledger", "tasks", {"limit": 1}) == first
-    doc = {"tasks": [{"title": "Visible é", "id": "t1"}, {"id": "t2", "title": "Changed"}]}
+    doc = {
+        "tasks": [{"title": "Visible é", "id": "t1"}, {"id": "t2", "title": "Changed"}],
+        "_meta": {"rev": 9, "task_revision": 8},
+    }
     entry = Entry(2, "", doc)
     changed = routes.ledger_read(server, "ledger", "tasks", {"limit": 1})
-    assert changed["revision"] == resources.revision(doc["tasks"])
+    assert changed["revision"] == f"{8:064x}"
     assert changed["revision"] != expected
     assert changed["page_hash"] == first["page_hash"]
     with pytest.raises(resources.APIError, match="Collection changed"):

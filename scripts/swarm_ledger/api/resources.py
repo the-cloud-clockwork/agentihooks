@@ -42,14 +42,12 @@ def metadata(doc: dict) -> dict:
 
 
 def resource_revision(doc: dict, path: str) -> str:
+    if path == "tasks":
+        meta = doc.get("_meta", {})
+        return f"{meta.get('task_revision', meta.get('rev', 0)):064x}"
     raw = value(doc, path)
     if path == "metadata":
         raw = {**raw, "_meta": {key: item for key, item in raw["_meta"].items() if key not in ("rev", "updated_at")}}
-    if path == "tasks":
-        digest = hashlib.sha256()
-        for chunk in json.JSONEncoder(sort_keys=True, separators=(",", ":"), ensure_ascii=False).iterencode(raw):
-            digest.update(chunk.encode())
-        return digest.hexdigest()
     return revision(raw)
 
 

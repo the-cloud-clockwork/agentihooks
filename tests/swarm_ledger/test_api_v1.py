@@ -2590,7 +2590,7 @@ def test_repository_optional_collections_have_empty_http_resources(live, monkeyp
         200,
         {
             "data": [],
-            "revision": revision([]),
+            "revision": f"{0:064x}" if path == "tasks" else revision([]),
             "next_cursor": None,
             **({"page_hash": revision([])} if path == "tasks" else {}),
         },
