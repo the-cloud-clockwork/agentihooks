@@ -176,6 +176,11 @@ def codex_rows(
     return rows
 
 
+def live_rows(accounts: list, quotas: dict, sessions: dict[str, int], now: float) -> list[QuotaRow]:
+    """Accounts this environment holds no token for show their quota but take no routing share."""
+    return [replace(row, cap=None, routing_left=None) for row in codex_rows(accounts, quotas, sessions, now)]
+
+
 def next_account(pool: list, quotas: dict, sessions: dict[str, int], now: float, environ: dict[str, str]) -> str:
     """The account open placement would give the next launch, among accounts whose credential is not refused."""
     usable = [account for account in pool if not codex_router.refusal(account, environ)]
@@ -336,11 +341,11 @@ def _codex(now: float) -> list[QuotaRow]:
     from scripts import codex_router
     from scripts.routing.codex_api import CodexApiSource
 
-    sessions = codex_sessions_by_account()
     pool = codex_router.CodexAccountSource().pool(os.environ)
-    pool += codex_router.live_accounts(pool, sessions)
-    quotas = codex_router.quotas(pool, os.environ)
-    rows = codex_rows(pool, quotas, sessions, now)
+    sessions = codex_sessions_by_account()
+    live = codex_router.live_accounts(pool, sessions, os.environ)
+    quotas = codex_router.quotas(pool + live, os.environ)
+    rows = codex_rows(pool, quotas, sessions, now) + live_rows(live, quotas, sessions, now)
     master = _masters("codex").get("codex")
     marked = [_mark(row, master) for row in rows + api_rows(CodexApiSource(sessions), "codex", now)]
     return mark_next(marked, next_account(pool, quotas, sessions, now, dict(os.environ)))
@@ -411,10 +416,11 @@ def _page_quota(now: float) -> dict:
     pool = codex_router.CodexAccountSource().pool(os.environ)
     live = account_sessions.sessions_by_account()
     codex_live = account_sessions.codex_sessions_by_account()
-    pool += codex_router.live_accounts(pool, codex_live)
+    elsewhere = codex_router.live_accounts(pool, codex_live, os.environ)
+    quotas = codex_router.quotas(pool + elsewhere, os.environ)
     claude = claude_rows([result for _, result in cached], live, "cached", observed, now)
     claude += api_rows(ClaudeApiSource(live), "claude", now)
-    rows = claude + codex_rows(pool, codex_router.quotas(pool, os.environ), codex_live, now)
+    rows = claude + codex_rows(pool, quotas, codex_live, now) + live_rows(elsewhere, quotas, codex_live, now)
     rows += api_rows(CodexApiSource(codex_live), "codex", now)
     rows = with_masters(rows, _masters(), live)
     return {"probed_at": max(observed.values(), default=None), "rows": [asdict(row) for row in rows]}

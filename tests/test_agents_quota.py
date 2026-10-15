@@ -775,6 +775,7 @@ def test_codex_quota_rows_list_every_account_a_live_session_runs_on(monkeypatch)
     monkeypatch.setattr(agents_quota, "next_account", lambda *args: "")
     rows = agents_quota._codex(5.0)
     assert [(row.account, row.sessions) for row in rows] == [("alpha", 0), ("beta", 4)]
+    assert (rows[1].cap, rows[1].routing_left) == (None, None)
     assert read == ["alpha", "beta"]
 
 
