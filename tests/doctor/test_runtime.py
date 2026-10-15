@@ -52,7 +52,8 @@ def test_a_planted_full_runtime_is_reported_in_one_pass_and_returns_only_on_shar
     evidence = "\n".join(finding.evidence)
     assert str(runtime) in evidence
     assert "331776" in evidence and "409600" in evidence
-    assert str(largest) in evidence and "10.0 minutes" in evidence
+    allocated = sum(path.lstat().st_blocks * 512 for path in (largest, payload, largest / "linked-home"))
+    assert finding.evidence[1] == f"execution {largest}: {allocated} allocated bytes, age 10.0 minutes"
     assert "outside" not in evidence
     assert len(reads) == 1
     [first] = loop.record(store, "doctor", found, NOW, 60_000)
@@ -134,6 +135,32 @@ def test_a_linked_execution_root_is_not_scanned(tmp_path, monkeypatch):
     monkeypatch.setattr(os, "walk", lambda *args, **kwargs: pytest.fail("linked execution root was scanned"))
     [finding] = runtime.findings(NOW, {"XDG_RUNTIME_DIR": str(root)})
     assert finding.evidence == (f"runtime {root}: 90 of 100 bytes used",)
+
+
+def test_a_disappearing_execution_does_not_hide_later_execution_homes(tmp_path, monkeypatch):
+    from scripts.doctor import runtime
+
+    departing = tmp_path / "cx" / "departing"
+    survivor = tmp_path / "cx" / "survivor"
+    departing.mkdir(parents=True)
+    survivor.mkdir()
+    original_stat = type(tmp_path).stat
+    calls = []
+
+    def stat(path, *args, **kwargs):
+        if path == departing:
+            calls.append(path)
+            if len(calls) == 2:
+                raise FileNotFoundError("execution removed after listing")
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(type(tmp_path), "stat", stat)
+    monkeypatch.setattr(type(tmp_path), "glob", lambda path, pattern: iter((departing, survivor)))
+    monkeypatch.setattr(shutil, "disk_usage", lambda path: SimpleNamespace(used=90, total=100))
+    [finding] = runtime.findings(NOW, {"XDG_RUNTIME_DIR": str(tmp_path)})
+    assert len(finding.evidence) == 2
+    assert str(survivor) in finding.evidence[1]
+    assert "departing" not in finding.evidence[1]
 
 
 def test_a_missing_user_runtime_is_skipped(tmp_path, monkeypatch):
