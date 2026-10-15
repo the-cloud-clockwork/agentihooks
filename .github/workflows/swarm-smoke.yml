@@ -58,6 +58,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+      - name: Pull the swarm image base with bounded retries
+        run: bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm
       - name: Build the swarm image
         run: docker build -t local/agentihooks-swarm:clients-check .
       - name: Run the pinned herdr and ssh clients inside the swarm image
