@@ -13,6 +13,7 @@ from scripts.codex_session.binding import CONNECTED, DEGRADED, BindingStore, Tra
 from scripts.inbox.dispatch import Dispatcher, digest
 from scripts.inbox.receipts import MISMATCH, RELEASED, Delivery, DispatchError
 from scripts.inbox.store import NOTIFY, InboxStore, Item, now_ms
+from scripts.swarm import stale_nudge
 from scripts.swarm.delivery import envelope as delivery_envelope
 
 if TYPE_CHECKING:
@@ -282,8 +283,22 @@ class Pump:
         if woken:
             self.queue += self.dispatcher.reserve(self.binding.recipient, self.binding.owner)
         self._surface()
-        while self.queue and not self.state.requests and self.timing.clock() >= self.hold_until:
+        while self.queue and self._passes() and self.timing.clock() >= self.hold_until:
             self._submit(self.queue.pop(0))
+
+    def _passes(self) -> bool:
+        """A queued stale nudge goes first past a turn that began before this pump connected; an open server request
+        holds every delivery."""
+        if not self.state.requests:
+            return True
+        if set(self.state.requests.values()) != {UNOBSERVED}:
+            return False
+        nudge = next((d for d in self.queue if stale_nudge.is_nudge(self.store.get(d.item))), None)
+        if nudge is None:
+            return False
+        self.queue.remove(nudge)
+        self.queue.insert(0, nudge)
+        return True
 
     def _hinted(self) -> bool:
         if self.subscription.get_message(timeout=0) is None:
@@ -325,7 +340,7 @@ class Pump:
             self.receipts.reject(delivery.id, owner, str(gone))
             return
         try:
-            self._arbitrate(envelope(item, delivery))
+            self._arbitrate(envelope(item, delivery), stale_nudge.is_nudge(item))
         except protocol.Refused as refused:
             self._requeue(delivery, str(refused))
             self._hold()
@@ -346,19 +361,23 @@ class Pump:
             self.receipts.reject(queued.id, owner, RELEASED)
         self.queue.clear()
 
-    def _arbitrate(self, text: str) -> None:
+    def _arbitrate(self, text: str, fresh: bool = False) -> None:
         try:
-            self._send(text)
+            self._send(text, fresh)
         except protocol.Refused as refused:
             try:
                 self._refresh()
             except (protocol.ProtocolError, TimeoutError) as lost:
                 raise protocol.Refused(str(refused)) from lost
-            self._send(text)
+            self._send(text, fresh)
 
-    def _send(self, text: str) -> None:
+    def _send(self, text: str, fresh: bool = False) -> None:
         def send():
             connection, thread = self.binding.connection, self.binding.thread_id
+            if self.state.active_turn and fresh:
+                protocol.interrupt_turn(connection, thread, self.state.active_turn)
+                self.state.active_turn = ""
+                self.state.requests.clear()
             if self.state.active_turn:
                 self.state.follow(protocol.steer_turn(connection, thread, self.state.active_turn, text))
             else:
