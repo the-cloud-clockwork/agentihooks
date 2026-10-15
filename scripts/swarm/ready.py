@@ -10,7 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from scripts.swarm import claim_order, merge_queue, stack, waits
+from scripts.swarm import claim_order, done_gate, merge_queue, stack, waits
 from scripts.swarm.store import ASSIST, MANUAL, AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_kinds
 
@@ -234,6 +234,8 @@ def _queue(run, row, found):
 
 def _finish(run, rows, row, found):
     task_id, url = row["id"], found["url"]
+    if row.get("split") and done_gate.refusal(row, url, run.github):
+        return []
     fields = {"state": "done", "pr_url": url, "awaiting": ""}
     run.ledger.update_task(run.slug, task_id, fields)
     for member in row.get("group_members") or []:

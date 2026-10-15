@@ -1194,6 +1194,22 @@ def origin_repo(run=subprocess.run):
     return stack.public_url(done.stdout.strip()) if done.returncode == 0 else ""
 
 
+def cmd_prepare(store, args):
+    from scripts.swarm import publish
+
+    fields = publish.prepare(args.slug, _worker(store, args), store.config(args.slug).repo, LedgerClient())
+    print(json.dumps(fields))
+
+
+def cmd_publish(store, args):
+    from scripts.swarm import publish
+
+    fields = publish.publish(
+        args.slug, _worker(store, args), store.config(args.slug).repo, LedgerClient(), args.message, args.files
+    )
+    print(json.dumps(fields))
+
+
 def cmd_branch(store, args):
     agent = _worker(store, args)
     branch = worktree_branch()
@@ -1778,6 +1794,10 @@ def build_parser():
     merge = sub.add_parser("merge")
     merge.add_argument("action", choices=("queue", "dequeue", "state"))
     merge.add_argument("url")
+    sub.add_parser("prepare")
+    publish = sub.add_parser("publish")
+    publish.add_argument("--message", "-m", required=True)
+    publish.add_argument("files", nargs="*")
     sub.add_parser("branch")
     sub.add_parser("review")
     done = sub.add_parser("done")

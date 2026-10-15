@@ -596,6 +596,53 @@ def test_a_merged_pull_request_closes_the_task_with_the_done_proof_and_removes_t
     assert merging.run() == []
 
 
+@pytest.mark.parametrize("remaining", [RUNNING, CLOSED, None])
+def test_a_split_task_stays_in_pr_until_its_last_pull_request_merges(merging, remaining):
+    second = "https://github.com/o/r/pull/8"
+    merging.rows["t1"].update(split=["1-2", "3-4"], split_pulls=[URL, second], pr_url=second)
+    merging.pulls.update({URL: MERGED, second: remaining})
+    assert merging.run() == []
+    assert merging.rows["t1"]["state"] == "pr"
+    assert merging.rows["t1"]["pr_url"] == second
+    assert merging.rows["t1"]["awaiting"] == "merge"
+    assert merging.shell.calls == []
+    assert ready.record(merging.store, "sw", "t1") is not None
+    assert merging.store.handoff("sw", "t1") == "the handoff"
+
+    merging.pulls[second] = MERGED
+    merging.run()
+    assert merging.rows["t1"]["state"] == "done"
+    assert merging.rows["t1"]["split_pulls"] == [URL, second]
+    assert merging.rows["t1"]["awaiting"] == ""
+    assert merging.shell.calls == [REMOVE]
+    assert ready.record(merging.store, "sw", "t1") is None
+    assert merging.store.handoff("sw", "t1") == ""
+    assert merging.run() == []
+
+
+def test_a_split_task_waits_for_a_pull_request_for_every_declared_half(merging):
+    merging.rows["t1"].update(split=["1-2", "3-4"], split_pulls=[URL])
+    merging.pulls[URL] = MERGED
+    assert merging.run() == []
+    assert merging.rows["t1"]["state"] == "pr"
+    assert merging.rows["t1"]["awaiting"] == "merge"
+    assert merging.shell.calls == []
+    assert ready.record(merging.store, "sw", "t1") is not None
+    assert merging.store.handoff("sw", "t1") == "the handoff"
+
+
+def test_the_watched_pull_request_completes_the_remaining_split_binding(merging):
+    second = "https://github.com/o/r/pull/8"
+    merging.rows["t1"].update(split=["1-2", "3-4"], split_pulls=[second], pr_url=second)
+    merging.pulls.update({URL: MERGED, second: MERGED})
+    merging.run()
+    assert merging.rows["t1"]["state"] == "done"
+    assert merging.rows["t1"]["awaiting"] == ""
+    assert merging.shell.calls == [REMOVE]
+    assert ready.record(merging.store, "sw", "t1") is None
+    assert merging.store.handoff("sw", "t1") == ""
+
+
 def test_a_merged_pull_request_without_a_checkout_closes_without_removing_one(merging):
     found = ready.record(merging.store, "sw", "t1")
     found["worktree"] = ""

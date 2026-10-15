@@ -503,8 +503,10 @@ def code_steps(me, led, name, phase):
         issue_step(me, "the seams"),
         f"2. Create your worktree: wt.sh new {name} (never edit the primary checkout), then call {SERENA}",
         "3. Red test, least code to green.",
-        "4. Gates green (ruff check, ruff format --check and the tests), commit in the worktree; at your first commit "
-        f"push the branch (git push -u origin HEAD) and record it: {me} branch. Then review per the "
+        f'4. Gates green in CI. Publish each change with {me} publish --message "<commit message>" -- <explicit touched files>. '
+        "It resolves your task worktree, commits only those files, runs the committed HEAD prepush gate, then "
+        "pushes and records the branch; fix failures and repeat the same command. Tests run only in CI. "
+        "Then review per the "
         "dev-cycle skill: at most two critic sub agents, Standards and Spec, that never edit and send every finding "
         "back to you; fix each finding, the same reader re-reviews, and review closes after three rounds. "
         f"Start every review round with {me} review; the third round closes review and a fourth is refused.",
@@ -591,6 +593,7 @@ def task_steps(task, me, led, name, phase, autonomy):
 
 def ci_steps(me, led, name, phase):
     steps = code_steps(me, led, name, phase)
+    steps[2] = f"2. Prepare your task worktree: {me} prepare (never edit the primary checkout), then call {SERENA}"
     steps[3] = (
         "3. Red first on a real run: show the workflow failing or slow, then the least change that turns it green "
         "or fast. Put the run links before and after in the pull request."
