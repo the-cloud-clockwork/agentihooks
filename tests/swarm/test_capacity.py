@@ -1425,6 +1425,35 @@ def test_an_auto_swarm_reads_the_host_once_and_autoscales_on_the_stored_room(tmp
     assert (stored["room"], stored["limit"], stored["granted_at"]) == (46, "load", 100_000)
 
 
+@pytest.mark.parametrize("scaling", ["auto", "manual"])
+def test_ready_engineers_get_free_seats_instead_of_an_idle_shifted_ci_lane(tmp_path, monkeypatch, scaling):
+    seen = [account("a", cap=6, sessions=4), account("b", cap=6), account("c", cap=6)]
+    rt = _scaling_runtime(tmp_path, monkeypatch, seen)
+    config = SwarmConfig("sw", "/repo", max_eng=8, max_ci=12, max_plan=0, scaling=scaling, lane_shift=16)
+    agents = [AgentRecord("engineer", "eng", "e")] + [
+        AgentRecord(f"ci{index}", "ci", f"c{index}") for index in range(3)
+    ]
+    rt.quota_previous(
+        {
+            "effective": {"eng": 1, "ci": 3, "plan": 0},
+            "autoscale": {
+                "ceilings": {"eng": 1, "ci": 18, "plan": 0},
+                "pending_raise": {"target": None, "ticks": 0},
+            },
+        }
+    )
+    decision = rt.quota_capacity(config, agents, 100, {"eng": 7, "ci": 0, "plan": 0})
+    assert decision["placeable"] == {"claude": 14, "codex": 0}
+    assert decision["effective"] == {"eng": 8, "ci": 3, "plan": 0}
+    assert len(decision["placements"]["eng"]) == 7
+    assert decision["placements"]["ci"] == []
+    if scaling == "auto":
+        assert decision["autoscale"]["ceilings"]["ci"] == 3
+    else:
+        assert decision["configured"] == {"eng": 8, "ci": 12, "plan": 0}
+        assert "autoscale" not in decision
+
+
 def test_the_stored_top_level_host_room_wins_over_the_autoscale_copy():
     from scripts.swarm.host_budget import HostSample
 
