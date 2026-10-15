@@ -586,15 +586,22 @@ def test_command_keeps_changed_importing_tests_red(tmp_path, monkeypatch, change
         assert "hooks/a.py:3 unconfirmed: 2 measured history snapshots did not run it" in text
 
 
+@pytest.mark.parametrize("queued_before", [False, True])
 @pytest.mark.parametrize("event", ["merge_group", "pull_request"])
 @pytest.mark.parametrize("changed", ["hooks/a.py", "hooks/b.py", "README.md", None])
-def test_queue_ratchet_only_fails_losses_in_the_entry_diff(tmp_path, monkeypatch, event, changed):
+def test_queue_ratchet_only_fails_losses_in_the_entry_diff(tmp_path, monkeypatch, event, changed, queued_before):
     sources = {"hooks/a.py": SOURCE, "hooks/b.py": SOURCE, "README.md": "base\n"}
     subprocess.run(["git", "-C", str(tmp_path), "init", "-q"], check=True, capture_output=True)
     _repo(tmp_path, sources)
     base = coverage_history.git("rev-parse", "HEAD", cwd=tmp_path).strip()
+    if queued_before:
+        _repo(tmp_path, {"hooks/a.py": SOURCE + "\n"})
     if changed:
-        _repo(tmp_path, {changed: sources[changed] + "\n"})
+        _repo(tmp_path, {changed: sources[changed] + "\n\n"})
+    else:
+        coverage_history.git(
+            "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--allow-empty", "-qm", "entry", cwd=tmp_path
+        )
     runs = [_measure(base, {"hooks/a.py": {1, 2, 3}, "hooks/b.py": {1, 2, 3}}, sources)]
     monkeypatch.setattr(ratchet, "_cached_runs", lambda *args: iter(runs))
     monkeypatch.setenv("GITHUB_EVENT_NAME", event)
