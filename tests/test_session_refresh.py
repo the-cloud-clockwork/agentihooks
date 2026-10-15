@@ -50,6 +50,15 @@ def test_swarm_sessions_are_never_restarted(home):
     assert refresh.due({}, {**LAUNCHED, "AGENTIHOOKS_SWARM": "sw"}, home, os.getpid()) is False
 
 
+@pytest.mark.parametrize("name,expected", [("master@sw-0001", False), ("engineer@sw-0002", True), ("", True)])
+def test_dependency_refresh_respects_adopted_master_identity(home, monkeypatch, name, expected):
+    from hooks.context import broadcast
+
+    _log_change(home, time.time() + 60)
+    monkeypatch.setattr(broadcast, "_load_sessions", lambda: {"adopted": {"name": name, "pid": os.getpid()}})
+    assert refresh.due({"session_id": "adopted"}, LAUNCHED, home, os.getpid()) is expected
+
+
 @pytest.mark.parametrize("payload", [{"agent_id": "a1"}, {"stop_hook_active": True}])
 def test_subagent_and_reentrant_stops_are_ignored(home, payload):
     _log_change(home, time.time() + 60)
