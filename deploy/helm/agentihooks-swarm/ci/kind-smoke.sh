@@ -38,6 +38,7 @@ finish() {
 }
 
 (
+  bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm >/dev/null
   docker build -q --build-arg IMAGE="$image" --target packages \
     -f "$chart/ci/terminal-worker.Dockerfile" . >/dev/null &
   packages=$!
