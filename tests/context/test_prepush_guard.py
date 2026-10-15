@@ -507,7 +507,13 @@ def test_codex_unresolved_push_refuses_with_directory_guidance(repo, swarm_workt
     with pytest.raises(BlockAction) as blocked:
         check_prepush(payload)
     message = str(blocked.value)
-    assert "Could not resolve the push directory" in message
+    stage = {
+        "identity": "identity binding",
+        "ledger": "ledger task",
+        "claimant": "claimant or task state",
+        "worktree": "worktree lookup",
+    }[step]
+    assert f"Could not resolve the push directory ({stage})" in message
     assert "git -C /absolute/path/to/worktree push" in message
     assert str(repo) not in message
     payload["tool_input"]["command"] = f"git -C {repo} push -u origin HEAD"
