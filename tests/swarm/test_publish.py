@@ -289,6 +289,7 @@ def test_a_detached_checkout_never_becomes_the_unrecorded_task_worktree(publicat
         "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
     )
     assert result["worktree"] == str(root)
+    assert result["branch"] == publication.task["branch"] == "engineer-test"
 
 
 def test_multiple_unrecorded_task_worktrees_refuse_an_ambiguous_publish(publication, tmp_path):
