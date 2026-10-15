@@ -251,7 +251,7 @@ def test_committed_image_inputs_pin_base_and_keep_profiles_outside_home():
     assert "--mount=type=bind,from=python-downloads,source=/downloads/pip,target=/downloads/pip" in dockerfile
     assert "--mount=type=bind,from=tool-downloads,source=/downloads/tools,target=/downloads/tools" in dockerfile
     assert "--no-index --find-links /downloads/pip --require-hashes" in dockerfile
-    assert '--cache /downloads/tools \\\n    && chmod -R a-w /opt/venv\nCOPY pyproject' in dockerfile
+    assert "--cache /downloads/tools \\\n    && chmod -R a-w /opt/venv\nCOPY pyproject" in dockerfile
     assert "&& find /opt/venv -perm /222 -exec chmod a-w {} + \\\n" in dockerfile
     assert dockerfile.count("chmod -R a-w") == 2 and "a-w /opt/agentihooks/templates /opt/swarm-node \\\n" in dockerfile
     assert dockerfile.endswith('CMD ["python", "/opt/swarm-node/worker_image.py", "report"]\n')
