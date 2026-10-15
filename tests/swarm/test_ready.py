@@ -1098,6 +1098,19 @@ def test_a_conflict_reopens_a_task_whose_engineer_has_not_released_its_seat(merg
     assert merging.shell.calls == []
 
 
+@pytest.mark.parametrize(("name", "task"), [(AGENT, "other-task"), ("unrelated-worker", "t1")])
+def test_a_reopen_does_not_retain_an_unrelated_registered_worker(merging, name, task):
+    from scripts.swarm.store import AgentRecord
+
+    merging.store.put_agent("sw", AgentRecord(name, "eng", task))
+    merging.pulls[URL] = RED
+    merging.run()
+    assert merging.rows["t1"]["state"] == "open"
+    assert merging.rows["t1"]["claimed_by"] == ""
+    assert merging.store.claimant("sw", "t1") is None
+    assert [(agent.name, agent.task) for agent in merging.store.agents("sw")] == [(name, task)]
+
+
 def test_one_tick_reports_every_unreleased_entry_it_dequeues(merging):
     from scripts.swarm.ledger_events import pull_request
 
