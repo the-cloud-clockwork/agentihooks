@@ -64,3 +64,31 @@ def test_streamed_revision_keeps_canonical_digest(value):
 
     canonical = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
     assert revision(value) == hashlib.sha256(canonical).hexdigest()
+
+
+def test_task_route_reuses_entry_revision(monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts.swarm_ledger.api import resources, routes
+    from scripts.swarm_ledger.repository.sqlite import Entry
+
+    doc = {"tasks": [{"id": "t1", "title": "Visible"}, {"id": "t2", "title": "Outside"}]}
+    expected = resources.revision(doc["tasks"])
+    entry = Entry(1, "", doc)
+    server = SimpleNamespace(repository=SimpleNamespace(current=lambda slug: entry))
+
+    def refuse_collection_hash(doc, path):
+        pytest.fail(f"Task page read recomputed {path} collection revision")
+
+    monkeypatch.setattr(resources, "resource_revision", refuse_collection_hash)
+    first = routes.ledger_read(server, "ledger", "tasks", {"limit": 1})
+    assert first["revision"] == expected
+    assert routes.ledger_read(server, "ledger", "tasks", {"limit": 1}) == first
+    doc = {"tasks": [{"id": "t1", "title": "Visible"}, {"id": "t2", "title": "Changed"}]}
+    entry = Entry(2, "", doc)
+    changed = routes.ledger_read(server, "ledger", "tasks", {"limit": 1})
+    assert changed["revision"] == resources.revision(doc["tasks"])
+    assert changed["revision"] != expected
+    assert changed["page_hash"] == first["page_hash"]
+    with pytest.raises(resources.APIError, match="Collection changed"):
+        routes.ledger_read(server, "ledger", "tasks", {"limit": 1, "cursor": first["next_cursor"]})
