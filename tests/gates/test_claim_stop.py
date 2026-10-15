@@ -117,7 +117,7 @@ def test_a_stop_on_red_checks_preserves_an_open_dependency_wait(rig, kind):
         rig.ledger.rows["repair"]["state"] = "done"
     else:
         rig.pulls[target] = MERGED
-    assert rig.stop().verdict == "deny"
+    assert not rig.stop().allowed
 
 
 @pytest.mark.parametrize("queued", [False, True])
