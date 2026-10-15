@@ -375,9 +375,7 @@ def test_reopening_keeps_a_live_claimant_instead_of_spawning_a_successor(release
         assert release(doc) == 0
         pull = RED
     else:
-        pull = pull_request(
-            {"state": "OPEN", "mergeQueueEntry": {"id": "entry", "state": "UNMERGEABLE"}}
-        )
+        pull = pull_request({"state": "OPEN", "mergeQueueEntry": {"id": "entry", "state": "UNMERGEABLE"}})
     attempts = list(runtime.spawned)
     rows = ledger.rows
     run = ready.Pass(store, "sw", ledger, lambda url: pull, lambda url: pull, NOW, lambda *args: {"queued": False})
