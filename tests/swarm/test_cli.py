@@ -1786,6 +1786,8 @@ def test_swarm_branch_on_a_continuation_records_the_predecessor_branch_and_keeps
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     ledger.rows["t1"].update(branch="engineer-a1b2c3-0001", pr_url=URL3)
+    read = ledger.task
+    monkeypatch.setattr(ledger, "task", lambda slug, task_id: read(slug, task_id) if slug == "sw" else None)
     seen = []
     monkeypatch.setattr(cli, "worktree_branch", lambda recorded: seen.append(recorded) or recorded)
     monkeypatch.setattr(cli, "origin_repo", lambda: "https://github.com/o/r")

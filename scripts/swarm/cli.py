@@ -1168,17 +1168,16 @@ def worktree_branch(recorded, run=subprocess.run):
     target = branch
     if recorded and recorded != branch:
         target = f"HEAD:{recorded}"
-        if _upstream(run) == recorded:
+        if _tracks(run, recorded):
             branch = recorded
     if _git(run, "ls-remote", "--exit-code", "--heads", "origin", branch).returncode != 0:
         raise SwarmError(f"branch {branch} is not on origin; push it first with git push -u origin {target}")
     return branch
 
 
-def _upstream(run):
+def _tracks(run, recorded):
     done = _git(run, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
-    ref = done.stdout.strip() if done.returncode == 0 else ""
-    return ref.removeprefix("origin/") if ref.startswith("origin/") else ""
+    return done.returncode == 0 and done.stdout.strip() == f"origin/{recorded}"
 
 
 PULL_HEAD = "headRefName,headRepository,headRepositoryOwner"
