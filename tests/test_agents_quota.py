@@ -755,6 +755,40 @@ def test_codex_quota_rows_drop_the_default_login_once_token_accounts_exist(monke
     assert [row.account for row in agents_quota._codex(5.0)] == ["alpha"]
 
 
+def _one_codex_token_with_live_sessions_elsewhere(monkeypatch) -> list:
+    from hooks.context import account_sessions
+    from scripts import codex_router
+
+    read = []
+    for name in [name for name in os.environ if name.startswith("AH_CX_TOKEN_")]:
+        monkeypatch.delenv(name)
+    monkeypatch.setenv("AH_CX_TOKEN_alpha", "cx-value")
+    monkeypatch.setattr(codex_router, "quotas", lambda pool, environ: read.extend(a.name for a in pool) or {})
+    monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {"beta": 4, "default": 1, "api": 2})
+    monkeypatch.setattr(agents_quota, "_masters", lambda harness="": {})
+    monkeypatch.setattr(agents_quota, "api_rows", lambda source, harness, now: [])
+    return read
+
+
+def test_codex_quota_rows_list_every_account_a_live_session_runs_on(monkeypatch):
+    read = _one_codex_token_with_live_sessions_elsewhere(monkeypatch)
+    monkeypatch.setattr(agents_quota, "next_account", lambda *args: "")
+    rows = agents_quota._codex(5.0)
+    assert [(row.account, row.sessions) for row in rows] == [("alpha", 0), ("beta", 4)]
+    assert read == ["alpha", "beta"]
+
+
+def test_page_quota_lists_every_codex_account_a_live_session_runs_on(monkeypatch):
+    from hooks.context import account_sessions
+    from scripts import claude_quota_balancer
+
+    _one_codex_token_with_live_sessions_elsewhere(monkeypatch)
+    monkeypatch.setattr(claude_quota_balancer, "cached_observations", lambda: [])
+    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {})
+    rows = agents_quota._page_quota(5.0)["rows"]
+    assert [(row["account"], row["sessions"]) for row in rows if row["agent"] == "codex"] == [("alpha", 0), ("beta", 4)]
+
+
 def test_an_hour_old_codex_reading_shows_its_state_and_cap_until_the_max_age(monkeypatch):
     monkeypatch.delenv("AGENTIHOOKS_CODEX_READING_MAX_AGE_H", raising=False)
     quota = codex_quota.CodexQuota(1000, "pro", seven_day=QuotaWindow(used=10.0, resets_at=10**10))
