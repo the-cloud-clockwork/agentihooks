@@ -2,13 +2,14 @@
 
 from scripts.gates import modes, talk
 from scripts.gates.claims import GATE as CLAIMS
+from scripts.gates.enforcement import ENFORCEMENTS
 from scripts.gates.entry import GATES
 
 
 def defaults():
     from scripts.swarm.trace_plan import GATE as TRACE_PLAN
 
-    gates = {**GATES, CLAIMS.name: CLAIMS, TRACE_PLAN.name: TRACE_PLAN}
+    gates = {**GATES, CLAIMS.name: CLAIMS, TRACE_PLAN.name: TRACE_PLAN, **ENFORCEMENTS}
     return {name: gate.default_mode for name, gate in gates.items()} | {talk.NAME: talk.DEFAULT_MODE}
 
 

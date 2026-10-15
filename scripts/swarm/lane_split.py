@@ -6,6 +6,9 @@ from dataclasses import dataclass
 from functools import partial
 
 from scripts.gates import log as gate_log
+from scripts.gates import modes
+from scripts.gates.base import Who
+from scripts.gates.enforcement import LANE_SPLIT
 from scripts.swarm import bottleneck, capacity, dispatcher
 from scripts.swarm.store import AUTO_SCALING, DELEGATE, FULL, RedisStore, SwarmConfig
 
@@ -36,9 +39,13 @@ def streak(previous: dict, found: dict) -> dict:
     return {"named": named, "ticks": ticks, "at": found["at"]}
 
 
-def refusal(caps: dict, giver: str, taker: str, lanes: Lanes) -> str:
+def refusal(config: SwarmConfig, caps: dict, giver: str, taker: str, lanes: Lanes) -> str:
+    if config.caps_pinned:
+        return "the operator or the master set the lane caps"
     if caps[giver] <= 0:
         return f"the {giver} lane has no seat to give"
+    if not lanes.ready[taker]:
+        return f"the {taker} lane has no ready task"
     if caps[giver] <= 1 and lanes.ready[giver]:
         return f"the {giver} lane keeps its last seat for ready work"
     if caps[giver] <= lanes.live[giver]:
@@ -46,6 +53,15 @@ def refusal(caps: dict, giver: str, taker: str, lanes: Lanes) -> str:
     if lanes.room is not None and caps[taker] + 1 - lanes.live[taker] > lanes.room:
         return f"the {taker} lane would pass host room {lanes.room}"
     return ""
+
+
+def gate_hold(slug: str, config: SwarmConfig, would: str, now_ms: int) -> str:
+    chosen = modes.configured(LANE_SPLIT, config.gates)
+    if chosen == "enforce":
+        return ""
+    if chosen == "observe":
+        gate_log.append(slug, gate_log.Row.of(LANE_SPLIT.name, "observe", Who(name=AUTHOR), RULE, would, now_ms))
+    return f"the lane split switch is {modes.label(chosen)}"
 
 
 def _capacity(config, store, slug: str) -> tuple[dict, int]:
@@ -64,11 +80,7 @@ def _apply(slug: str, config, store, caps: dict, shift: int) -> None:
     store.update(slug, lane_shift=shift)
 
 
-def _record(slug: str, named: str, caps: dict, move: tuple, lanes: Lanes, now_ms: int) -> str:
-    giver, taker = move
-    text = MOVED.format(
-        giver=giver, taker=taker, named=named, ticks=TICKS, eng=caps["eng"], ci=caps["ci"], total=sum(caps.values())
-    )
+def _record(slug: str, text: str, lanes: Lanes, now_ms: int) -> str:
     room = "unknown" if lanes.room is None else lanes.room
     gate_log.append(slug, gate_log.Row(now_ms, AUTHOR, "apply", AUTHOR, "", RULE, f"{text} Host room {room}."))
     return text
@@ -90,12 +102,21 @@ def lane_pass(slug: str, config: SwarmConfig, store: RedisStore, read: Callable[
     giver, taker = move
     caps, shift = _capacity(config, store, slug)
     lanes = read()
-    reason = refusal(caps, giver, taker, lanes)
+    moved = {giver: caps[giver] - 1, taker: caps[taker] + 1}
+    text = MOVED.format(
+        giver=giver,
+        taker=taker,
+        named=current["named"],
+        ticks=TICKS,
+        eng=moved["eng"],
+        ci=moved["ci"],
+        total=sum(moved.values()),
+    )
+    reason = refusal(config, caps, giver, taker, lanes) or gate_hold(slug, config, text, now_ms)
     if reason:
         return [HELD.format(named=current["named"], ticks=TICKS, reason=reason)]
-    caps = {giver: caps[giver] - 1, taker: caps[taker] + 1}
-    _apply(slug, config, store, caps, shift + (1 if taker == "ci" else -1))
-    return [_record(slug, current["named"], caps, move, lanes, now_ms)]
+    _apply(slug, config, store, moved, shift + (1 if taker == "ci" else -1))
+    return [_record(slug, text, lanes, now_ms)]
 
 
 def _lanes(slug: str, store: RedisStore, doc: dict, now_ms: int) -> Lanes:

@@ -467,6 +467,7 @@ def cmd_create(store, args):
         links=template.links,
         autonomy=template.autonomy or DELEGATE,
         scratch=not ledger_creator.shared(os.environ),
+        caps_pinned=args.max_eng_agents is not None or args.max_ci_agents is not None,
     )
     store.create(config)
     from scripts.swarm import commands
@@ -763,6 +764,10 @@ def _store_master_rules(store, slug, rules):
         master_scale.set_rule(store.redis, slug, rule)
 
 
+def _pinned(changes):
+    return {"caps_pinned": True} if {"max_eng", "max_ci"} & changes.keys() else {}
+
+
 def cmd_set(store, args):
     changes, lanes = {}, {key: dict(value) for key, value in store.config(args.slug).lanes.items()}
     counts, pairs = _split_master_pairs(args.pairs, "masters", masters.count_of)
@@ -804,7 +809,7 @@ def cmd_set(store, args):
                 f"or {', '.join(LANE_KEYS)}=<value>"
             )
         changes[SETTABLE[key]] = int(value)
-    config = store.update(args.slug, **changes)
+    config = store.update(args.slug, **changes, **_pinned(changes))
     _store_master_counts(store, args.slug, counts, hives)
     _store_master_rules(store, args.slug, rules)
     asked = any(pair.startswith("master-agent=") for pair in args.pairs)
