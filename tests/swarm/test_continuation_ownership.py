@@ -25,7 +25,13 @@ def _launch(store, monkeypatch, case, *, recorded=True, missing=False, handoff=F
     foreign = prior.replace("@", "-")
     ledger = FakeLedger(
         [
-            {"id": task, "branch": branch if recorded else "", "branch_repo": REPO, "pr_url": f"{REPO}/pull/{pr}"},
+            {
+                "id": task,
+                "title": "Continue claimed work",
+                "branch": branch if recorded else "",
+                "branch_repo": REPO,
+                "pr_url": f"{REPO}/pull/{pr}",
+            },
             {
                 "id": foreign_task,
                 "branch": foreign,
@@ -36,7 +42,7 @@ def _launch(store, monkeypatch, case, *, recorded=True, missing=False, handoff=F
         ]
     )
     store.put_agent("sw", AgentRecord(prior, "eng", task, started_at=1))
-    store.drop_agent("sw", prior, reason="retired")
+    store.drop_agent("sw", prior, at=2)
     heads = {foreign: "b" * 40}
     if not missing:
         heads[branch] = HEAD
