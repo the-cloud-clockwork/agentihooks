@@ -56,6 +56,7 @@ def test_an_unseated_session_stays_refused_even_with_an_open_window(unseated):
     record.parent.mkdir(parents=True)
     record.write_text(json.dumps({"at": master_coding.time.time()}))
     assert "cannot edit outside" in guard(unseated, tree / "hooks" / "x.py")
+    assert not master_coding.is_open(SID)
 
 
 def test_only_the_typed_phrase_in_the_master_pane_opens_the_window(master):
@@ -85,14 +86,34 @@ def test_other_seats_never_open_a_window(master, monkeypatch):
 
 def test_the_window_record_lives_under_the_agentihooks_home_by_a_safe_session_name(master, monkeypatch):
     assert master_coding.path("Ab/c d") == master / "ah" / "master_coding" / "Ab_c_d.json"
+    assert master_coding.seat_path("Ab/c d.@-") == master / "ah" / "master_seats" / "Ab_c_d.@-.json"
     monkeypatch.delenv("AGENTIHOOKS_HOME")
     monkeypatch.setattr(Path, "home", lambda: master)
     assert master_coding.path("s") == master / ".agentihooks" / "master_coding" / "s.json"
+    assert master_coding.seat_path("s") == master / ".agentihooks" / "master_seats" / "s.json"
 
 
 def guard(home, file_path):
     payload = {"tool_name": "Edit", "tool_input": {"file_path": str(file_path)}, "session_id": SID, "cwd": "/"}
     return GUARD["deny_reason"](payload, "master", home)
+
+
+def test_the_operator_can_renew_an_already_open_window(master):
+    assert master_coding.observe(SID, "allow-master-coding", typed=True, now=1000) == "open"
+    assert master_coding.observe(SID, "allow-master-coding", typed=True, now=1001) == "open"
+    assert master_coding.is_open(SID, now=2800)
+    assert not master_coding.is_open(SID, now=2801)
+
+
+def test_a_taken_master_keeps_permission_and_protection_checks_without_env(unseated, monkeypatch):
+    master_coding.record_seat(SID, "rig", "master@rig-1")
+    monkeypatch.setattr(operator_mode, "_heard", lambda *args: True)
+    assert master_coding.asks_operator("AskUserQuestion", SID)
+    assert not master_coding.asks_operator("AskUserQuestion", "unseated")
+    payload = {"session_id": SID, "tool_input": {"command": "gh ruleset list"}}
+    assert master_coding.protection_refusal(payload) == master_coding.PROTECTION_REFUSAL
+    payload["session_id"] = "unseated"
+    assert master_coding.protection_refusal(payload) == ""
 
 
 @pytest.mark.parametrize(

@@ -1,5 +1,7 @@
 import time
 
+import pytest
+
 import hooks.config
 from hooks import hook_manager
 from hooks.context import operator_words
@@ -77,6 +79,42 @@ def test_typed_in_an_unnamed_session_is_any_prompt_the_swarm_did_not_send():
     for text in (WAKE_TEXT, NUDGE.format(slug="demo"), "<task-notification> done", ""):
         assert not operator_words.typed({"prompt": text}, swarm)
     assert not operator_words.typed({"tool_name": "AskUserQuestion", "tool_response": {"answers": {"q": "a"}}}, {})
+
+
+def test_a_taken_masters_first_typed_prompt_is_recorded_without_swarm_env():
+    from hooks.context import master_coding
+
+    master_coding.record_seat("taken", "demo", "master@a1-1")
+    payload = {"session_id": "taken", "prompt": "Use the queue for the broker"}
+    assert operator_words.typed(payload, {}, now=100)
+    assert operator_words.matching("master@a1-1", "use the queue", now=101) == "Use the queue for the broker"
+    for prompt in (WAKE_TEXT, NUDGE.format(slug="demo"), "<task-notification> use redis"):
+        assert not operator_words.typed({"session_id": "taken", "prompt": prompt}, {}, now=102)
+    assert not operator_words.matching("master@a1-1", "use redis", now=103)
+
+
+def test_a_taken_masters_question_answer_is_recorded_without_swarm_env():
+    from hooks.context import master_coding
+
+    master_coding.record_seat("taken", "demo", "master@a1-1")
+    answer = {
+        "session_id": "taken",
+        "tool_name": "AskUserQuestion",
+        "tool_response": {"answers": {"question": "Use the queue"}},
+    }
+    assert operator_words.typed(answer, {}, now=100)
+    assert operator_words.matching("master@a1-1", "use the queue", now=101) == "Use the queue"
+
+
+@pytest.mark.parametrize("content", ["invalid", "[]", "null", "{}"])
+def test_an_invalid_taken_seat_records_no_operator_words(content):
+    from hooks.context import master_coding
+
+    target = master_coding.seat_path("taken")
+    target.parent.mkdir(parents=True)
+    target.write_text(content)
+    assert operator_words.typed({"session_id": "taken", "prompt": "Use the queue"}, {}, now=100)
+    assert not operator_words.matching("master@a1-1", "Use the queue", now=101)
 
 
 def test_a_prompt_without_a_session_id_is_recorded():
