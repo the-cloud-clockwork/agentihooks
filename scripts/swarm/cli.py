@@ -336,7 +336,8 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             actions += skip_refused(
                 wake.wake_pass, inbox, slug, agents, herdr, ledger, now_ms(), window, wake.quiet_ms(os.environ)
             )
-            taken = timing.call(snapshot.auto, store, slug, now_ms(), os.environ)
+            with lease.kept(store, slug, held):
+                taken = timing.call(snapshot.auto, store, slug, now_ms(), os.environ)
             store.redis.set(store.key(slug, "last-tick"), now_ms())
             doc = timing.call(ledger.state, slug)
             return probed + controls + actions + ([f"took automatic snapshot {taken.name}"] if taken else [])

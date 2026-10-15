@@ -39,7 +39,7 @@ def test_brain_session_start_controls_refresh_and_project_context(enabled, sessi
         record.assert_not_called()
         lookup.assert_not_called()
     if enabled and context:
-        inject.assert_called_once_with(context, skip_compression=True)
+        inject.assert_called_once_with(context, skip_compression=True, kind="brain")
     else:
         inject.assert_not_called()
 

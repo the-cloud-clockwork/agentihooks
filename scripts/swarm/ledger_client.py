@@ -158,6 +158,12 @@ class LedgerClient:
     def notify(self, slug, text):
         self._call(slug, [_op("notice", "swarm", text=text)])
 
+    def raise_alert(self, slug, source, text):
+        self._call(slug, [_op("alert_raise", "swarm", source=source, text=text)])
+
+    def close_alert(self, slug, alert_id, outcome):
+        self._call(slug, [_op("alert_close", "swarm", target=alert_id, outcome=outcome)])
+
     def followup(self, slug, text, needs_operator=False):
         flag = {"needs_operator": True} if needs_operator else {}
         return self._write(slug, _op("add_item", "swarm", list="followups", text=text, **flag), "item")

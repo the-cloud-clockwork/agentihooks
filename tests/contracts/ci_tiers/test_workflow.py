@@ -19,6 +19,7 @@ PROMOTION = (PULL_REQUEST - {"mutation-plan", "mutation-stats", "mutation"}) | {
     "reuse",
     "coverage-ratchet",
     "coverage-baseline",
+    "promote",
     "refresh-durations",
     "flake-budget",
     "swarm-image",
@@ -36,13 +37,16 @@ def enabled(condition, event, needs, base_ref="dev"):
         return condition
     expression = condition.removeprefix("${{").removesuffix("}}").strip()
     expression = expression.replace("&&", " and ").replace("||", " or ").replace("!cancelled()", "not cancelled()")
+    expression = expression.replace("!contains", "not contains").replace("needs.*.result", "results")
     expression = re.sub(r"needs\.([a-z]+(?:-[a-z]+)*)", r'needs["\1"]', expression)
     return bool(
         eval(
             expression,
             {"__builtins__": {}},
             {
-                "github": SimpleNamespace(event_name=event, base_ref=base_ref),
+                "github": SimpleNamespace(event_name=event, base_ref=base_ref, ref="refs/heads/dev"),
+                "contains": lambda values, value: value in values,
+                "results": [need.result for need in needs.values()],
                 "needs": needs,
                 "always": lambda: True,
                 "cancelled": lambda: False,

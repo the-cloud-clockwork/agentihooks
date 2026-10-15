@@ -1000,6 +1000,17 @@ def test_the_worker_image_profiles_are_the_default_and_every_package_role():
     }
 
 
+def test_the_worker_image_profiles_read_the_package_roles_folder_patched_after_import(tmp_path, monkeypatch):
+    from hooks.context import profile_chain
+
+    for role in ("solo", "_hidden"):
+        (tmp_path / role).mkdir()
+    (tmp_path / "file").write_text("")
+    monkeypatch.setattr(profile_chain, "PACKAGE_ROLES", tmp_path)
+
+    assert launch_module.worker_profiles() == {"default", "solo"}
+
+
 @pytest.mark.parametrize("profile", ["frontend", "engineer", "anton-base"])
 def test_a_tick_spawn_with_a_delivered_bundle_admits_a_bundle_profile(world, profile):
     config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)

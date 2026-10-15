@@ -104,6 +104,8 @@ def test_a_newer_report_replaces_an_older_one(world):
 
 
 def test_routing_uses_the_newest_fleet_observation_over_a_stale_local_cache(world, monkeypatch):
+    for account in (ACCOUNT, SPARE):
+        monkeypatch.setenv(f"AH_CC_TOKEN_{account}", account)
     from scripts import claude_quota_balancer as balancer
 
     world.publish(EXHAUSTED)

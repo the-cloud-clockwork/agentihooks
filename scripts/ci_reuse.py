@@ -46,6 +46,15 @@ SELECTED_SKIPS = (
     ' or (.key == "unit-selected" and .value.result == "skipped" and ($event != "pull_request" or $scope == "full" or $scope == "none"))'
     ')\' <<< "$NEEDS"; then\n  echo "::error::Every required gate must succeed."',
 )
+PROMOTION_REUSE = (
+    re.compile(r'(?s)(if \[\[ "\$\{REUSED:-false\}" == true \]\]; then\n).*?\n  exit 0\nfi\n'),
+    r'\1  echo "::error::A push or dispatch run never reuses a queue result."\n  exit 1\nfi\n',
+)
+PROMOTION_SKIPS = (
+    '(.key == "queue-baseline" and .value.result == "skipped" and $event != "merge_group")',
+    '(.key == "queue-baseline" and .value.result == "skipped" and $event != "merge_group")'
+    ' or ((.key == "lint" or .key == "semgrep" or .key == "test-count") and .value.result == "skipped" and $event == "push")',
+)
 
 
 QUEUE_TIER = """if [[ "${EVENT:-}" == merge_group || "${EVENT:-}" == pull_request ]]; then
@@ -72,7 +81,9 @@ fi
 """
 
 
-def gate_steps(queue_coverage: bool = False, selected: bool = False, queue_tier: bool = False) -> list[dict]:
+def gate_steps(
+    queue_coverage: bool = False, selected: bool = False, queue_tier: bool = False, promotion: bool = False
+) -> list[dict]:
     run = 'echo "$NEEDS"\nif [[ "${REUSED:-false}" == true ]]; then\n  if [[ "${EVENT:-}" != merge_group ]] || ! jq -e \'has("reuse") and .reuse.result == "success" and .reuse.outputs.reused == "true" and (.reuse.outputs.run // "" | test("^[0-9]+$")) and has("queue-baseline") and ."queue-baseline".result == "success" and all(to_entries[]; ((.key == "reuse" or .key == "queue-baseline" or .key == "stage-budget") and .value.result == "success") or (.key != "reuse" and .key != "queue-baseline" and .key != "stage-budget" and .value.result == "skipped"))\' <<< "$NEEDS"; then\n    echo "::error::Verified queue reuse and its coverage baseline must succeed."\n    exit 1\n  fi\n  exit 0\nfi\nif ! jq -e --arg event "${EVENT:-}" --arg mutation "$MUTATION" --arg kind "${KIND:-}" \'all(to_entries[]; .value.result == "success" or ((.key == "mutation" or .key == "mutation-plan" or .key == "mutation-stats") and .value.result == "skipped" and $mutation == "false") or (.key == "helm-kind" and .value.result == "skipped" and $kind == "false") or (.key == "queue-baseline" and .value.result == "skipped" and $event != "merge_group"))\' <<< "$NEEDS"; then\n  echo "::error::Every required gate must succeed."\n  exit 1\nfi\n'
     if queue_coverage:
         run = run.replace("  exit 0\nfi\n", "  exit 0\nfi\n" + QUEUE_COVERAGE).replace(
@@ -81,6 +92,8 @@ def gate_steps(queue_coverage: bool = False, selected: bool = False, queue_tier:
         )
     if selected or queue_tier:
         run = run.replace(*SELECTED_SCOPE).replace(*SELECTED_SKIPS)
+    if promotion:
+        run = PROMOTION_REUSE[0].sub(PROMOTION_REUSE[1], run).replace(*PROMOTION_SKIPS)
     if queue_tier:
         run = QUEUE_TIER + run
     return [
@@ -104,6 +117,16 @@ def reuse_job() -> dict:
 
 def duration_provenance_steps() -> list[dict]:
     return yaml.safe_load(Path(__file__).with_name("ci_duration_provenance.yml").read_text())
+
+
+def paged_reuse_job() -> dict:
+    job = reuse_job()
+    [fetch] = [step for step in job["steps"] if step.get("name") == "Fetch the evidence of recent passed runs"]
+    fetch["run"] = fetch["run"].replace(
+        "gh api --paginate \"$actions/runs/$1/attempts/$2/jobs?per_page=100\" --jq '.jobs[]'",
+        'python3 -m scripts.ci_budget.jobs "$actions/runs/$1/attempts/$2/jobs" --page-size 5',
+    )
+    return job
 
 
 def _git(*args):
