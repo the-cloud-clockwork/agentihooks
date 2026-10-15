@@ -8,8 +8,10 @@ the next engineer, who continues from the stored handoff.
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
 
+from scripts.inbox.store import DuplicateItem, InboxStore
 from scripts.swarm import claim_order, done_gate, linked_issues, merge_queue, stack, waits
 from scripts.swarm.store import ASSIST, MANUAL, AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_kinds
@@ -248,7 +250,33 @@ def _finish(run, rows, row, found):
     return [f"task {task_id} done, {url} merged", *linked_issues.settle(url, finished, rows), *_remove(found)]
 
 
+def _working_owner(run, row, pull):
+    owners = [
+        agent
+        for agent in run.store.agents(run.slug)
+        if agent.task == row["id"] and agent.state in ("starting", "working", "awaiting-decision")
+    ]
+    for agent in owners:
+        identity = json.dumps(
+            [run.slug, row["id"], agent.name, agent.execution_id, agent.generation, pull.head, pull.merge_problem]
+        )
+        item_id = sha256(identity.encode()).hexdigest()
+        try:
+            InboxStore(run.store.redis).send(
+                "swarm",
+                agent.name,
+                f"Your pull request {row['pr_url']} {pull.merge_problem}. Restack it onto dev and publish the fix; keep your claim.",
+                task=row["id"],
+                item_id=item_id,
+            )
+        except DuplicateItem:
+            pass
+    return bool(owners)
+
+
 def _unmergeable(run, row, found, pull):
+    if _working_owner(run, row, pull):
+        return []
     if pull.queued:
         try:
             result = run.queue("dequeue", found["url"])
