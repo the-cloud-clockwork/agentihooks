@@ -109,6 +109,18 @@ def test_main_reads_the_run_and_writes_the_decision(monkeypatch, tmp_path, capsy
     assert output.read_text() == "retry=true\n"
 
 
+def test_a_signature_quoted_in_test_output_is_not_a_runner_loss(monkeypatch):
+    jobs = {"jobs": [{"id": 1, "name": "unit (3.11, 2)", "conclusion": "failure"}]}
+    quoted = "E   AssertionError: 'The runner has received a shutdown signal' != ''\n##[error]Process completed with exit code 1."
+    pages = {
+        "repos/o/r/actions/runs/9/jobs?filter=latest&per_page=100": json.dumps(jobs),
+        "repos/o/r/actions/jobs/1/logs": quoted,
+    }
+    monkeypatch.setattr(ci_queue_retry, "_api", lambda path: pages.get(path, ""))
+    failed = ci_queue_retry.failed_jobs("o/r", 9)
+    assert not ci_queue_retry.decide(RUN, failed, WORKFLOW)[0]
+
+
 def test_the_retry_workflow_reruns_only_a_first_failed_merge_group_attempt():
     workflow = yaml.safe_load((ROOT / ".github/workflows/queue-retry.yml").read_text())
     assert workflow[True] == {"workflow_run": {"workflows": ["Tests"], "types": ["completed"]}}

@@ -70,7 +70,8 @@ def failed_jobs(repo: str, run_id: int) -> list[dict]:
         annotations = json.loads(_api(f"repos/{repo}/check-runs/{job['id']}/annotations") or "[]")
         text = "\n".join(note.get("message", "") for note in annotations)
         if base_name(job["name"]) == SHARD:
-            text += "\n" + _api(f"repos/{repo}/actions/jobs/{job['id']}/logs")
+            log = _api(f"repos/{repo}/actions/jobs/{job['id']}/logs")
+            text += "\n" + "\n".join(line for line in log.splitlines() if "##[error]" in line)
         failed.append({"name": job["name"], "text": text})
     return failed
 
