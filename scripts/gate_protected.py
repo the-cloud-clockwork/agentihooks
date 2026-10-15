@@ -50,13 +50,15 @@ def reuse_jobs(policy: object = None) -> list[dict]:
     return jobs
 
 
-def _aggregator_problems(base: tuple[str, str, dict], head: tuple[str, str, dict], policy: object = None) -> list[str]:
+def _aggregator_problems(
+    base: tuple[str, str, dict], head: tuple[str, str, dict], policy: object = None, retired: frozenset = frozenset()
+) -> list[str]:
     (base_file, base_id, base_job), (head_file, head_id, head_job) = base, head
     if (base_file, base_id) != (head_file, head_id):
         return [f"The head moves {GATE} from {base_file}/{base_id} to {head_file}/{head_id}."]
     problems = [
         f"The head's {GATE} drops the base need {need}."
-        for need in sorted(ci_wiring.needs_of(base_job) - ci_wiring.needs_of(head_job))
+        for need in sorted(ci_wiring.needs_of(base_job) - ci_wiring.needs_of(head_job) - retired)
     ]
     fields = sorted((set(base_job) | set(head_job)) - {"needs"})
     return problems + [
@@ -69,7 +71,7 @@ def _aggregator_problems(base: tuple[str, str, dict], head: tuple[str, str, dict
             and head_job.get("steps")
             in (
                 [ci_reuse.gate_steps(queue, selected) for queue in (False, True) for selected in (False, True)]
-                + [ci_reuse.gate_steps(queue_tier=True)]
+                + [ci_reuse.gate_steps(queue_tier=True), ci_reuse.gate_steps(queue_tier=True, promotion=True)]
             )
         )
         and not (field == "runs-on" and head_job.get(field) in runners(policy))
@@ -125,9 +127,14 @@ def grade(
         return [f"The base holds {len(base_gates)} jobs named {GATE}; nothing protected can grade."]
     if len(head_gates) != 1:
         return [f"The head holds {len(head_gates)} jobs named {GATE}; exactly one must be."]
-    problems = _aggregator_problems(base_gates[0], head_gates[0], policy)
     file = base_gates[0][0]
     head_jobs = (head_workflows.get(file) or {}).get("jobs") or {}
+    retired = frozenset(
+        job_id
+        for job_id, job in base_workflows[file]["jobs"].items()
+        if job.get("if") is False and job_id not in head_jobs
+    )
+    problems = _aggregator_problems(base_gates[0], head_gates[0], policy, retired)
     problems += _reuse_problems(base_workflows[file]["jobs"], head_jobs, policy)
     problems += _duration_problems(base_workflows[file], head_workflows.get(file, {"jobs": {}}))
     return problems + ci_wiring.check(head_workflows, _protected_config(base_config, head_config), today)
