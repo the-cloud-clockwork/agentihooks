@@ -71,15 +71,18 @@ def checkout_fields(root: Path) -> dict:
 
 def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> dict:
     task = task_row(slug, agent, ledger)
-    repo = (task.get("repositories") or [repo])[0]
-    root = existing(Path(repo), task, agent)
-    if root is None:
-        command = ["bash", str(stack.WT_SCRIPT), "new", "--repo", repo]
-        if task.get("branch"):
-            command.extend(["--from", f"origin/{task['branch']}"])
-        output = execute(command, Path(repo))
-        root = Path(output.splitlines()[-1])
-    return checkout_fields(root)
+    fields = []
+    for repository in dict.fromkeys(task.get("repositories") or [repo]):
+        root = existing(Path(repository), task, agent)
+        if root is None:
+            command = ["bash", str(stack.WT_SCRIPT), "new", "--repo", repository]
+            if task.get("branch"):
+                command.extend(["--from", f"origin/{task['branch']}"])
+            output = execute(command, Path(repository))
+            root = Path(output.splitlines()[-1])
+        fields.append({**checkout_fields(root), "repository": repository})
+    result = fields[0] if len(fields) == 1 else {"worktrees": fields}
+    return {**result, "repository_source": "task" if task.get("repositories") else "swarm default"}
 
 
 def selected_files(root: Path, files: list[str]) -> list[str]:
