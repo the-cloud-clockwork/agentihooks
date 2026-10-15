@@ -1,10 +1,6 @@
 name: CI templates
 
 on:
-  pull_request:
-    paths:
-      - profiles/package/templates/ci/**
-      - .github/workflows/ci-templates.yml
   push:
     branches-ignore: [main, dev, 'gh-readonly-queue/**', 'wip/**', 'diffcheck/**']
     paths:
