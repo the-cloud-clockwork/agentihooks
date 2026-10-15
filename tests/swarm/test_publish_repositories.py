@@ -86,3 +86,71 @@ def test_prepare_names_the_default_repository_without_inferring_prose(repositori
     assert fields["worktree"] == f"{p.swarm}-worktree"
     assert fields["repository_source"] == "swarm default"
     assert fields["repository"] == str(p.swarm)
+
+
+def install_gate(root):
+    package = root / "scripts" / "ci_prepush"
+    package.mkdir(parents=True)
+    (root / "scripts" / "__init__.py").write_text("")
+    (package / "__init__.py").write_text("")
+    (package / "__main__.py").write_text(
+        "from pathlib import Path\nimport subprocess\n"
+        "head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True)\n"
+        "directory = subprocess.check_output(['git', 'rev-parse', '--absolute-git-dir'], text=True).strip()\n"
+        "Path(directory, 'ci_prepush').write_text(head)\n"
+    )
+    git(root, "add", "scripts")
+    git(root, "commit", "-qm", "Install repository gate")
+
+
+def test_publish_selects_the_current_repository_and_retains_both_branches(repositories, monkeypatch):
+    p = repositories
+    p.task["repositories"] = [str(p.swarm), str(p.bundle)]
+    fields = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
+    roots = [entry["worktree"] for entry in fields["worktrees"]]
+    for root in roots:
+        from pathlib import Path
+
+        install_gate(Path(root))
+        Path(root, "chosen.txt").write_text("after")
+    monkeypatch.chdir(roots[1])
+    first = publish.publish("swarm", p.agent, str(p.swarm), p.ledger, "Change bundle", ["chosen.txt"])
+    assert first["worktree"] == roots[1]
+    assert first["gate"] == str(p.bundle) + "-worktree/scripts/ci_prepush"
+    assert git(roots[0], "show", "HEAD:chosen.txt") == "agentihooks"
+    assert git(p.swarm, "ls-remote", "origin", "refs/heads/engineer-test") == ""
+    monkeypatch.chdir(roots[0])
+    second = publish.publish("swarm", p.agent, str(p.swarm), p.ledger, "Change hooks", ["chosen.txt"])
+    assert second["worktree"] == roots[0]
+    assert p.task["repository_branches"] == {str(p.bundle): "engineer-test", str(p.swarm): "engineer-test"}
+    for root, repository in zip(roots, (p.swarm, p.bundle), strict=True):
+        assert git(repository, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == git(
+            root, "rev-parse", "HEAD"
+        )
+    assert publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)["worktrees"] == fields["worktrees"]
+
+
+@pytest.mark.parametrize("source, succeeds", [("value = 1\n", True), ("value =\n", False)])
+def test_bundle_without_a_gate_uses_the_named_touched_file_fallback(repositories, monkeypatch, source, succeeds):
+    from pathlib import Path
+
+    from scripts.swarm.store import SwarmError
+
+    p = repositories
+    (p.bundle / "untouched.py").write_text("broken =\n")
+    git(p.bundle, "add", "untouched.py")
+    git(p.bundle, "commit", "-qm", "Existing unrelated source")
+    git(p.bundle, "push", "origin", "dev")
+    p.task["repositories"] = [str(p.bundle)]
+    root = Path(publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)["worktree"])
+    (root / "chosen.py").write_text(source)
+    monkeypatch.chdir(root)
+    if succeeds:
+        result = publish.publish("swarm", p.agent, str(p.swarm), p.ledger, "Change bundle", ["chosen.py"])
+        assert result["gate"] == "AgentiHooks touched Python fallback"
+        assert result["worktree"] == str(root)
+        assert git(p.bundle, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == result["head"]
+    else:
+        with pytest.raises(SwarmError, match="AgentiHooks touched Python fallback"):
+            publish.publish("swarm", p.agent, str(p.swarm), p.ledger, "Bad bundle", ["chosen.py"])
+        assert git(p.bundle, "ls-remote", "origin", "refs/heads/engineer-test") == ""
