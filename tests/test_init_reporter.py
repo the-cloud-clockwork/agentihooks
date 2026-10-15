@@ -180,7 +180,7 @@ def test_output_defaults_and_separate_diagnostics():
     output = InstallOutput(stream)
     output.write("detail\n")
     output.write("ERROR: first\n")
-    output.write("detail after warning\n")
+    output.write("detail after notice\n")
     output.write("ERROR: second\n")
     output.flush()
     assert stream.getvalue() == "ERROR: first\nERROR: second\n"
