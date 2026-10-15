@@ -5,8 +5,8 @@ nav_order: 10
 ---
 # Swarm Overlays
 
-Overlays add domain capabilities to the five swarm roles: `master`, `engineer`,
-`planner`, `qa` and `cicd`. A backtest tuner remains an engineer; a risk auditor
+Overlays add domain capabilities to the package swarm roles: `master`, `engineer`,
+`planner`, `qa`, `cicd` and `documentation`. A backtest tuner remains an engineer; a risk auditor
 can be an overlay for an engineer or qa. Each agent wears at most three selected
 overlays, and every overlay declares which roles can wear it.
 
@@ -100,7 +100,7 @@ agentihooks swarm SWARM set \
   overlays-engineer=backtest-tuner,trader
 ```
 
-Use any of the five role names after `overlays-`. The page's OVERLAYS box writes
+Use any of the package role names after `overlays-`. The page's OVERLAYS box writes
 the same role defaults. Selection is limited to three overlays whose `wears`
 include that role.
 
