@@ -295,7 +295,7 @@ def _reopen(run, row, found, what):
     live = run.ledger.update_task(
         run.slug, task_id, {"state": "open", "claimed_by": "", "awaiting": FIX}, if_state=("pr",), if_match=expected
     )
-    generation = expected["claim_generation"] + bool(expected["claimed_by"])
+    generation = expected["claim_generation"] + (row.get("claimed_by") != "")
     if live.get("state") != "open" or live.get("claimed_by") or live.get("claim_generation", 0) != generation:
         return []
     run.ledger.comment(run.slug, task_id, REOPENED.format(url=url, what=what), by="swarm")

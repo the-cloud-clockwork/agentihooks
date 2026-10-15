@@ -59,10 +59,16 @@ class FakeLedger:
             ]
         ]
 
-    def update_task(self, slug, task_id, fields, by="swarm", if_state=()):
+    def update_task(self, slug, task_id, fields, by="swarm", if_state=(), if_match=None):
         assert slug == "sw"
         row = self.rows[task_id]
+        if any(
+            row.get(key, 0 if key == "claim_generation" else "") != value for key, value in (if_match or {}).items()
+        ):
+            return dict(row)
         if not if_state or row["state"] in if_state:
+            if "claimed_by" in fields and fields["claimed_by"] != row.get("claimed_by"):
+                row["claim_generation"] = row.get("claim_generation", 0) + 1
             row.update(fields)
         return dict(row)
 
