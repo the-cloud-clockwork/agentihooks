@@ -6,6 +6,7 @@ import tomllib
 from pathlib import Path
 
 from scripts.swarm_v2 import worker_home
+from scripts.targets.codex_hook_trust import trusted_state
 
 SERVERS = {"claude": ["agentihooks", "fixture-claude-mcp"], "codex": ["agentihooks", "fixture-codex-mcp"]}
 
@@ -23,12 +24,17 @@ def snapshot(root: Path) -> dict:
 
 def configuration(attempt: Path) -> dict:
     homes = attempt / "homes"
+    hooks = homes / "codex/.codex/hooks.json"
     docs = {
         "claude": json.loads((homes / "claude/.claude/settings.json").read_text(encoding="utf-8")),
         "claude_mcp": json.loads((homes / "claude/.claude.json").read_text(encoding="utf-8"))["mcpServers"],
         "codex": tomllib.loads((homes / "codex/.codex/config.toml").read_text(encoding="utf-8")),
-        "codex_hooks": json.loads((homes / "codex/.codex/hooks.json").read_text(encoding="utf-8")),
+        "codex_hooks": json.loads(hooks.read_text(encoding="utf-8")),
     }
+    state = docs["codex"]["hooks"]["state"]
+    assert state == trusted_state(hooks, hooks)
+    for entry in state.values():
+        entry["trusted_hash"] = "<trusted>"
     return json.loads(json.dumps(docs).replace(str(attempt), "<attempt>"))
 
 

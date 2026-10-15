@@ -1460,7 +1460,8 @@ def test_a_plain_codex_quota_handoff_preserves_native_choices(monkeypatch, tmp_p
         )
         == 0
     )
-    command, successor = launched[0]
+    launcher, successor = launched[0]
+    command = next(line for line in launcher.splitlines() if " codex " in line)
     assert "--agentihooks-exclude alpha" in command
     assert "resume thread-1" in command
     assert "select-profile" not in command

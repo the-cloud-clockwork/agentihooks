@@ -694,3 +694,40 @@ def test_evaluate_hands_a_worker_off_at_the_ceiling(monkeypatch):
 
 def test_evaluate_leaves_a_master_on_its_account_at_the_ceiling(monkeypatch):
     assert _evaluate(monkeypatch, 10.0, 70.0, MASTER_HELD, agent="master@1")[1] == []
+
+
+@pytest.mark.parametrize("five_used", [None, 100.0])
+@pytest.mark.parametrize("week_used", [10.0, 98.0])
+def test_codex_handoff_policy_uses_only_current_and_target_weeks(monkeypatch, five_used, week_used):
+    from hooks.context import account_sessions
+    from scripts import codex_quota, codex_router
+    from scripts.claude_quota_balancer import QuotaWindow
+    from scripts.routing import reservation
+
+    current = codex_quota.CodexQuota(100, "pro", QuotaWindow(five_used, 500), QuotaWindow(week_used, 600))
+    target = codex_quota.CodexQuota(100, "pro", QuotaWindow(100.0, 500), QuotaWindow(27.0, 600))
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    monkeypatch.delenv("AH_ROUTE_API", raising=False)
+    monkeypatch.setattr(qp.time, "time", lambda: 100)
+    monkeypatch.setattr(codex_quota, "session_quota", lambda environ, session: current)
+    monkeypatch.setattr(codex_router.CodexAccountSource, "pool", lambda self, environ: [])
+    monkeypatch.setattr(codex_router, "quotas", lambda pool, environ: {"target": target})
+    monkeypatch.setattr(account_sessions, "agent_pid", lambda: 1)
+    monkeypatch.setattr(account_sessions, "session_account", lambda pid: "self")
+    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {"target": 0})
+    monkeypatch.setattr(reservation, "current", lambda harness, environ: None)
+    monkeypatch.setattr(qp, "_api_accounts", lambda sessions: [])
+    monkeypatch.setattr(qp, "push_active", lambda session: False)
+    observed = qp.evaluate("s")
+    if week_used == 10.0:
+        assert observed is None
+    else:
+        assert (observed.action, observed.trigger, observed.five_used, observed.five_reset) == (
+            "handoff",
+            "week",
+            0.0,
+            None,
+        )
+        assert observed.target.account == "target"
+        assert observed.target.routing_left == 73.0
