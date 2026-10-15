@@ -98,7 +98,7 @@ def publishing_root(repo: str, task: dict, agent: AgentRecord) -> tuple[Path | N
         own = re.fullmatch(rf"{re.escape(naming.plain(agent.name))}(?:-\d+)?", branch)
         if not (own or branch == scoped.get("branch")):
             raise SwarmError(f"current worktree {root} does not belong to this task")
-        return root, primary, scoped
+        return root, primary, {**scoped, "branch": branch}
     repositories = task.get("repositories") or [repo]
     if len(repositories) != 1:
         raise SwarmError("publish from the task worktree to select one of its repositories")
