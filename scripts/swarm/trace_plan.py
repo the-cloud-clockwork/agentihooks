@@ -22,6 +22,7 @@ PLAN = "plan.md"
 VERDICT = "plan-verdict.json"
 PURPOSE = "trace-plan"
 FORMAT = "one piece per line: - what | area, area | why"
+SCOPE_MARK = "in scope:"
 MAX_PIECES = 100
 RETURNS = 1
 PASS, FAIL, UNCHECKED = "pass", "fail", "unchecked"
@@ -94,12 +95,29 @@ def intent(doc, task_id):
         "task": task.get("title", ""),
         "task intent": task.get("description", ""),
         "task ids": [t["id"] for t in doc.get("tasks", [])],
+        "scope authorizations": [
+            {"id": c["id"], "by": c["by"], "text": c["text"]} for c in task.get("comments", []) if _authorizes(c)
+        ],
     }
 
 
-def _row(piece, probability, off_intent):
-    kept = _kept(_ruling(piece.areas), probability, off_intent)
-    return {"what": piece.what, "areas": list(piece.areas), "why": piece.why, "probability": probability, "kept": kept}
+def _authorizes(comment) -> bool:
+    by = comment.get("by", "")
+    return by == "operator" or (by.startswith("master@") and comment["text"].lstrip().lower().startswith(SCOPE_MARK))
+
+
+def _authorized(piece, ids):
+    return next((i for i in ids if i in piece.why), None)
+
+
+def _ids(state):
+    return [a["id"] for a in state.get("scope authorizations", [])]
+
+
+def _row(piece, probability, off_intent, by=None):
+    kept = _kept(_ruling(piece.areas) or by is not None, probability, off_intent)
+    row = {"what": piece.what, "areas": list(piece.areas), "why": piece.why, "probability": probability, "kept": kept}
+    return row | ({"authorized": by} if by else {})
 
 
 def _ruling(areas) -> bool:
@@ -123,10 +141,15 @@ def _known(previous, pieces):
     return list(rows)
 
 
-def _params(fresh, start, sized):
+def _params(fresh, start, sized, ids):
     return {
         "pieces": [
-            {"slot": start + i, "number": start + i + 1, "what": piece.what, "ruling": _ruling(piece.areas)}
+            {
+                "slot": start + i,
+                "number": start + i + 1,
+                "what": piece.what,
+                "ruling": _ruling(piece.areas) or _authorized(piece, ids) is not None,
+            }
             for i, piece in enumerate(fresh)
         ],
         "sized": [{}] if sized else [],
@@ -175,7 +198,7 @@ def _source_areas(areas: tuple) -> list[str]:
 
 
 def trace(pieces, state, previous, now_ms=None):
-    previous = previous or {}
+    previous, ids = previous or {}, _ids(state)
     known = _known(previous, pieces)
     start, fresh = len(known), pieces[len(known) :]
     wire = [
@@ -189,13 +212,13 @@ def trace(pieces, state, previous, now_ms=None):
         "at": int(time.time() * 1000) if now_ms is None else now_ms,
     }
     try:
-        output = runner.run(PURPOSE, {**state, "pieces": wire}, _params(fresh, start, not known), decider=decide)
+        output = runner.run(PURPOSE, {**state, "pieces": wire}, _params(fresh, start, not known, ids), decider=decide)
     except ClassifierError:
-        rows = known + [_row(piece, None, None) for piece in fresh]
+        rows = known + [_row(piece, None, None, _authorized(piece, ids)) for piece in fresh]
         return _record(UNCHECKED, rows, previous.get("size") if known else None, [NO_ANSWER], "", False, base)
     result, thresholds = output.raw, output.thresholds
     rows = known + [
-        _row(piece, result.answers[f"piece_{start + i}"].noul, thresholds["off_intent"])
+        _row(piece, result.answers[f"piece_{start + i}"].noul, thresholds["off_intent"], _authorized(piece, ids))
         for i, piece in enumerate(fresh)
     ]
     if known:
@@ -291,6 +314,7 @@ def report(task_id, record, block):
         "verdict": record["verdict"],
         "kept": [row["what"] for row in record["pieces"] if row["kept"]],
         "cut": [row["what"] for row in record["pieces"] if not row["kept"]],
+        "authorized": {row["what"]: row["authorized"] for row in record["pieces"] if row.get("authorized")},
         "reasons": record["reasons"],
         "next": step,
     }
