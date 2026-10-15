@@ -1203,6 +1203,20 @@ def test_a_codex_launcher_holds_its_prompt_behind_the_herdr_variable(monkeypatch
     assert init_agent.PROMPT_AFTER_START == "AGENTIHOOKS_PROMPT_AFTER_START"
 
 
+def test_a_claude_launcher_separates_its_prompt_from_a_trailing_config_option(monkeypatch, tmp_path):
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "requested"))
+    monkeypatch.setattr(init_agent.shutil, "which", lambda name: "/usr/bin/agentihooks")
+    monkeypatch.setattr(init_agent, "_launch_command", lambda launcher, directory, title, environ: ("linux", ["t"]))
+    runtime = tmp_path / "rt"
+    config = tmp_path / "mcp.json"
+    argv = ["--dir", str(tmp_path), "--name", "eng-a", "--prompt", "Start.", "--dry-run", "--", "--mcp-config"]
+    assert init_agent.main([*argv, str(config)], {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(runtime)}) == 0
+    folder = runtime / "agentihooks-claude-terminal"
+    prompt_file = next(folder.glob("*.prompt"))
+    line = next(x for x in next(folder.glob("*.sh")).read_text().splitlines() if "$(cat " in x)
+    assert line.endswith(f' --mcp-config {config} -- "$(cat {prompt_file})"')
+
+
 def test_a_channel_dry_run_writes_the_negotiation_pin_into_its_launcher(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "requested"))
     monkeypatch.setattr(init_agent, "_launch_command", lambda launcher, directory, title, environ: ("linux", ["t"]))
