@@ -8,6 +8,7 @@ import pytest
 from scripts.gates import catalog, entry, intent, log, modes, talk
 from scripts.gates.base import Decision
 from scripts.gates.claims import GATE as CLAIMS
+from scripts.gates.enforcement import ENFORCEMENTS
 from scripts.swarm import cli, status
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.trace_plan import GATE as TRACE_PLAN
@@ -126,6 +127,7 @@ class TestCatalog:
         expected = {name: gate.default_mode for name, gate in entry.GATES.items()}
         expected |= {CLAIMS.name: CLAIMS.default_mode, TRACE_PLAN.name: TRACE_PLAN.default_mode}
         expected |= {talk.NAME: talk.DEFAULT_MODE}
+        expected |= {name: gate.default_mode for name, gate in ENFORCEMENTS.items()}
         assert catalog.defaults() == expected
         assert {intent.NAME, talk.NAME, "claims", "trace-plan", "identity", "build"} <= set(catalog.defaults())
 

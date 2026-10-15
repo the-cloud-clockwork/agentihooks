@@ -17,6 +17,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- New swarm enforcements default to log only. The stall watchdog logs would-be
+  stops and reopens while retaining alerts; set `stall-gate=deny` after
+  checking those actions against reality to enforce them.
 - Browser preparation reuses verified Chromium and OS dependencies baked into
   ARC runners before restoring a cache or downloading browsers.
 - The swarm chart's controller API NetworkPolicy admits only the controller's
