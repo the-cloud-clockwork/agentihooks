@@ -316,7 +316,7 @@ def _check_pr_creation(check_text: str, command: str, session_id: str) -> None:
                 "A bare `gh pr create` targets the default branch implicitly.\n"
                 "Use --base dev for a worktree PR. CI alone opens promotion PRs."
             )
-        base = bases[-1].strip("'\"")
+        base = bases[-1]
         if base == "dev":
             log("branch_guard: PR into dev allowed", {"session_id": session_id})
             return

@@ -273,7 +273,7 @@ def _merge_view_command(line: str) -> list[str] | None:
         elif not word.startswith("-"):
             selectors.append(word)
     if len(selectors) > 1:
-        raise ValueError("ambiguous pull request selector")
+        raise ValueError
     command = ["gh", "pr", "view", *selectors]
     if repo:
         command.extend(["--repo", repo])
@@ -287,7 +287,7 @@ def _check_pr_merge(line: str, cwd: str) -> None:
             return
         base = subprocess.run(command, capture_output=True, text=True, check=True, timeout=10, cwd=cwd).stdout.strip()
         if not base:
-            raise ValueError("missing pull request base")
+            raise ValueError
     except (OSError, ValueError, StopIteration, subprocess.SubprocessError):
         raise BlockAction(
             "BLOCKED: Cannot resolve the pull request base; promotion protection remains closed."

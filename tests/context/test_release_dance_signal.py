@@ -133,6 +133,12 @@ def test_pr_message_cannot_change_the_actual_base(session, flag, value):
         ("gh pr merge 123 --rebase", "123", None),
         ("gh pr merge https://github.com/owner/repo/pull/123 --squash", "https://github.com/owner/repo/pull/123", None),
         ("gh pr merge --rebase", None, None),
+        ("gh -Rowner/repo pr merge 123 --squash", "123", "owner/repo"),
+        ("gh pr merge 123 --match-head-commit abcdef", "123", None),
+        ("gh pr merge 123 --author-email author@example.com", "123", None),
+        ("gh pr merge 123 -A author@example.com", "123", None),
+        ("gh pr merge 123 --body-file message.txt", "123", None),
+        ("gh pr merge 123 -F message.txt", "123", None),
         ("gh pr merge --subject 123 --squash", None, None),
         ("gh pr merge -t 123 -b 456 --squash", None, None),
         ("gh pr merge 123 --subject main --body master --squash", "123", None),
@@ -201,3 +207,119 @@ def test_loaded_legacy_signals_cannot_expand_publication(session, tmp_path, monk
     assert not ci_manifesto.contains_release_signal("ship it")
     assert ci_manifesto.contains_release_signal("release dance")
     assert not ci_manifesto.contains_pr_signal("release dance")
+
+
+def test_legacy_custom_hotfix_vocabulary_is_preserved(session, tmp_path, monkeypatch):
+    manifesto = tmp_path / "hotfix.md"
+    manifesto.write_text("**Hotfix signals**\n```\nrepair production now\n```\n")
+    monkeypatch.setattr(ci_manifesto, "_manifesto_paths", lambda: [manifesto])
+    assert ci_manifesto.get_hotfix_signals() == ["repair production now"]
+
+
+def test_invalid_merge_selector_stays_closed(session):
+    with pytest.raises(BlockAction) as blocked:
+        check("gh pr merge 123 456 --squash", session)
+    assert str(blocked.value) == "BLOCKED: Cannot resolve the pull request base; promotion protection remains closed."
+
+
+def test_absent_merge_cwd_uses_the_calling_directory(session, tmp_path, monkeypatch):
+    import subprocess
+
+    (tmp_path / "XXXX").mkdir()
+    monkeypatch.chdir(tmp_path)
+    seen = []
+
+    def run(argv, **kwargs):
+        seen.append(kwargs["cwd"])
+        return subprocess.CompletedProcess(argv, 0, "dev", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    prod_lockdown.check_prod_lockdown({"tool_input": {"command": "gh pr merge 123 --squash"}, "session_id": session})
+    assert seen == [str(tmp_path)]
+
+
+def test_pr_refusal_preserves_the_full_diagnostic_and_log(session, monkeypatch):
+    events = []
+    monkeypatch.setattr(branch_guard, "log", lambda *args: events.append(args))
+    command = "gh pr create --title " + "x" * 240
+    with pytest.raises(BlockAction) as blocked:
+        check(command, session)
+    assert str(blocked.value) == (
+        "BLOCKED: gh pr create needs an explicit --base.\n"
+        "A bare `gh pr create` targets the default branch implicitly.\n"
+        "Use --base dev for a worktree PR. CI alone opens promotion PRs."
+    )
+    assert events == [
+        (
+            "branch_guard: PR creation blocked (no explicit base — defaults to main)",
+            {"command": "gh pr create --title " + "x" * 179, "session_id": "release-publication"},
+        )
+    ]
+
+
+def test_dev_creation_keeps_its_diagnostic(session, monkeypatch):
+    events = []
+    monkeypatch.setattr(branch_guard, "log", lambda *args: events.append(args))
+    check("gh pr create --base dev", session)
+    assert events == [("branch_guard: PR into dev allowed", {"session_id": "release-publication"})]
+
+
+def test_nonprotected_pr_signal_and_limit_are_session_scoped(session, monkeypatch):
+    events = []
+    monkeypatch.setattr(branch_guard, "log", lambda *args: events.append(args))
+    branch_guard.set_pr_signal(session)
+    for _ in range(3):
+        check("gh pr create --base feature", session)
+    with pytest.raises(BlockAction) as blocked:
+        check("gh pr create --base feature", session)
+    assert str(blocked.value) == (
+        "BLOCKED: PR creation limit reached (3 PRs this session).\n"
+        "Include a PR phrase in your next message to re-authorize and reset the counter."
+    )
+    assert events == [
+        ("branch_guard: PR creation allowed", {"count": 1, "base": "feature", "session_id": "release-publication"}),
+        ("branch_guard: PR creation allowed", {"count": 2, "base": "feature", "session_id": "release-publication"}),
+        ("branch_guard: PR creation allowed", {"count": 3, "base": "feature", "session_id": "release-publication"}),
+        ("branch_guard: PR creation blocked (counter limit)", {"count": 3, "session_id": "release-publication"}),
+    ]
+    set_controls_disabled(session)
+    check("gh pr create --base feature", session)
+    assert events[-1] == (
+        "branch_guard: PR creation allowed",
+        {"count": 4, "base": "feature", "session_id": "release-publication"},
+    )
+
+
+def test_nonprotected_pr_without_a_signal_keeps_its_diagnostic(session, monkeypatch):
+    events = []
+    monkeypatch.setattr(branch_guard, "log", lambda *args: events.append(args))
+    command = "gh pr create --base feature --title " + "x" * 240
+    with pytest.raises(BlockAction) as blocked:
+        check(command, session)
+    assert str(blocked.value) == (
+        "BLOCKED: agent PR creation into 'feature' is disabled (CI Manifesto §15).\n"
+        "PRs into dev need no signal; CI alone promotes into main, master and v1.\n"
+        "To unlock for this session, the operator includes a PR phrase in a message\n"
+        "(e.g. 'open a PR', 'create a PR', 'make a PR', 'pr please')."
+    )
+    assert events == [
+        (
+            "branch_guard: PR creation blocked (no signal)",
+            {"command": command[:200], "base": "feature", "session_id": "release-publication"},
+        )
+    ]
+
+
+def test_controls_failure_cannot_open_a_nonprotected_pr(session, monkeypatch):
+    def unavailable(_):
+        raise RuntimeError("controls unavailable")
+
+    monkeypatch.setattr("hooks.context.controls_toggle.is_controls_disabled", unavailable)
+    with pytest.raises(BlockAction) as blocked:
+        check("gh pr create --base feature", session)
+    assert str(blocked.value) == (
+        "BLOCKED: agent PR creation into 'feature' is disabled (CI Manifesto §15).\n"
+        "PRs into dev need no signal; CI alone promotes into main, master and v1.\n"
+        "To unlock for this session, the operator includes a PR phrase in a message\n"
+        "(e.g. 'open a PR', 'create a PR', 'make a PR', 'pr please')."
+    )
