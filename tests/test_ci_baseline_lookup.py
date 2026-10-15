@@ -199,4 +199,3 @@ def test_lookup_rejects_sources_without_valid_dev_measurements(lookup, selector,
     result, output, _ = lookup(selector, fault=fault)
     assert result.returncode != 0, result.stdout + result.stderr
     assert output == ""
-
