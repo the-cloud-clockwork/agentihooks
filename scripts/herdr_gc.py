@@ -1,5 +1,6 @@
 """Close the herdr panes agentihooks launched once their agent is gone. A pane it never recorded is never read or
-closed, and nothing closes inside the launch grace, while its swarm lists its agent unfinished, while its input line holds text or inside the quiet window."""
+closed. Nothing closes inside the launch grace or the quiet window, when its swarm lists its agent unfinished, or
+when its input line holds text."""
 
 import hashlib
 import os
