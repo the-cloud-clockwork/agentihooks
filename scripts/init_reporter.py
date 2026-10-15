@@ -23,8 +23,7 @@ class InstallOutput(TextIOBase):
         self.verbose = verbose
         self.seen = seen if seen is not None else set()
         self.pending = ""
-        self.diagnostic = ""
-        self.continuation = False
+        self.diagnostic = str()
 
     def write(self, text: str) -> int:
         self.pending += text
@@ -48,7 +47,7 @@ class InstallOutput(TextIOBase):
             if (self.verbose or not kept) and message not in self.seen:
                 self.stream.write(self.diagnostic + "\n")
                 self.seen.add(message)
-            self.diagnostic = ""
+            self.diagnostic = str()
 
     def flush(self) -> None:
         self._emit_diagnostic()
@@ -109,8 +108,10 @@ def previous_install(installer: ModuleType, state: dict, target: str) -> dict:
     roles = set(base_roles())
     for candidate in (target, "claude"):
         record = installer._global_record(state, candidate)
-        names = record.get("profile", "").split(",")
-        if record and not any(name.strip().removeprefix("package:") in roles for name in names):
+        if not record.get("profile"):
+            continue
+        names = record["profile"].split(",")
+        if not any(name.strip().removeprefix("package:") in roles for name in names):
             return record
     return {}
 
@@ -153,5 +154,5 @@ def run_init(args: Namespace, installer: ModuleType) -> None:
             header=index == 0,
             seen=seen,
         )
-    with capture_details(args.verbose, seen):
+    with capture_details(args.verbose):
         init_step(args.init_herdr, sys.stdin.isatty())
