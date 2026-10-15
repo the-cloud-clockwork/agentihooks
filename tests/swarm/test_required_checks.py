@@ -53,6 +53,13 @@ def test_an_optional_failure_beside_a_skipped_gate_names_no_failed_check():
     assert (pull.unpassed_gate, pull.red, pull.failed) == (GATE, True, ())
 
 
+def test_an_optional_failure_before_the_gate_reports_leaves_the_head_running():
+    raw = {"state": "OPEN", "headRefOid": HEAD, "gated": True, "commits": []}
+    running = {**SUITE, "status": "IN_PROGRESS", "conclusion": None}
+    pull = pull_request({**raw, "statusCheckRollup": [check("measure", "FAILURE", False)], "checkSuites": [running]})
+    assert (pull.resolved, pull.red, pull.failed, pull.unpassed_gate) == (False, False, (), "")
+
+
 def test_the_merge_pass_queues_past_an_optional_failure(merging):  # noqa: F811
     merging.pulls[URL] = head(True, check(GATE, "SUCCESS", True), check("measure", "FAILURE", False))
     assert merging.run() == [f"queued {URL} for task t1"]
