@@ -13,11 +13,21 @@ from scripts import ci_reuse, gate_protected
 pytestmark = pytest.mark.unit
 
 QUEUE = {"durations", "split", "unit", "shard-check", "test-count"}
-PULL_REQUEST = QUEUE | {"lint", "semgrep", "sonar", "mutation-plan", "mutation-stats", "mutation"}
+PULL_REQUEST = QUEUE | {"select", "lint", "semgrep", "sonar", "mutation-plan", "mutation-stats", "mutation"}
+SELECTED = PULL_REQUEST - {"split", "unit", "shard-check"} | {"unit-selected"}
+UNSELECTED = PULL_REQUEST - {"split", "unit", "shard-check"}
+TIERS = [
+    ("merge_group", QUEUE, ""),
+    ("pull_request", PULL_REQUEST, "full"),
+    ("pull_request", SELECTED, "selected"),
+    ("pull_request", UNSELECTED, "none"),
+]
 ROOT = Path(__file__).parents[3]
 
 
-def gate(event, needs, mutation="true"):
+def gate(event, needs, mutation="true", scope="full"):
+    if "select" in needs:
+        needs = {**needs, "select": {**needs["select"], "outputs": {"scope": scope}}}
     [step] = ci_reuse.gate_steps(queue_tier=True)
     return subprocess.run(
         ["bash", "-e", "-c", step["run"]],
@@ -27,34 +37,43 @@ def gate(event, needs, mutation="true"):
     )
 
 
-@pytest.mark.parametrize("event,required", [("merge_group", QUEUE), ("pull_request", PULL_REQUEST)])
-def test_each_tier_accepts_its_required_jobs_and_skipped_other_jobs(event, required):
+@pytest.mark.parametrize("event,required,scope", TIERS)
+def test_each_tier_accepts_its_required_jobs_and_skipped_other_jobs(event, required, scope):
     jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     needs = {name: {"result": "success" if name in required else "skipped"} for name in jobs["gate-required"]["needs"]}
-    result = gate(event, needs)
+    result = gate(event, needs, scope=scope)
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-@pytest.mark.parametrize("event,required", [("merge_group", QUEUE), ("pull_request", PULL_REQUEST)])
+@pytest.mark.parametrize("event,required,scope", TIERS)
 @pytest.mark.parametrize("result", ["failure", "cancelled", "skipped", "pending", "missing"])
-def test_each_tier_rejects_any_unsuccessful_or_missing_required_job(event, required, result):
+def test_each_tier_rejects_any_unsuccessful_or_missing_required_job(event, required, scope, result):
     for name in required:
         needs = {job: {"result": "success"} for job in required}
         if result == "missing":
             del needs[name]
         else:
             needs[name]["result"] = result
-        outcome = gate(event, needs)
+        outcome = gate(event, needs, scope=scope)
         assert outcome.returncode != 0, name
         assert "::error::" in outcome.stdout
 
 
-@pytest.mark.parametrize("event,required", [("merge_group", QUEUE), ("pull_request", PULL_REQUEST)])
+@pytest.mark.parametrize("event,required,scope", TIERS)
 @pytest.mark.parametrize("result", ["success", "failure", "cancelled", "pending"])
-def test_each_tier_rejects_other_jobs_that_ran(event, required, result):
+@pytest.mark.parametrize("other", ["coverage-ratchet", "unit-selected", "unit"])
+def test_each_tier_rejects_other_jobs_that_ran(event, required, scope, result, other):
+    if other in required:
+        return
     needs = {name: {"result": "success"} for name in required}
-    needs["coverage-ratchet"] = {"result": result}
-    assert gate(event, needs).returncode != 0
+    needs[other] = {"result": result}
+    assert gate(event, needs, scope=scope).returncode != 0
+
+
+@pytest.mark.parametrize("scope", ["", "partial"])
+def test_a_pull_request_without_a_known_selection_scope_is_red(scope):
+    needs = {name: {"result": "success"} for name in PULL_REQUEST}
+    assert gate("pull_request", needs, scope=scope).returncode != 0
 
 
 def test_main_pull_requests_skip_mutation_but_still_require_the_other_checks():

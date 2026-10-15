@@ -430,6 +430,53 @@ engineer or CI agent is refused, and so is a phase the ledger does not hold. The
 `task moved` event. Each intent verdict records the phase it was judged under, and a verdict from another phase is
 judged again on the next tick against the task's current phase.
 
+## Freeze and focus
+
+A freeze or a focus holds open tasks back from a claim; it never stops work already claimed. Only a task in the
+`open` state is held, so an agent holding a task under a freeze or outside a focus finishes it, its pull request
+merges and the task closes as usual. Write them with `agentihooks swarm <id> freeze TARGET`, `focus TARGET` and
+`unfreeze TARGET` (see [Commands](#commands) for targets and who may write them), or from the ledger page.
+
+- **Freeze** holds the target and everything under it. A freeze on a phase holds every open task in that phase,
+  its slices included; a freeze on `lane:ci` or `kind:research` holds every open task of that lane or kind. Rank
+  does not matter: a frozen `urgent` task stays held.
+- **Focus** holds everything outside the target. While any focus record exists, every open task not under a
+  focused node, and not matching a focused selector, is held. Several focus records add up: a task under any of
+  them may be claimed. A focus on a single task leaves only that task and the exempt tasks below claimable.
+- **Urgent tasks are exempt from a focus.** A task ranked `urgent` (see [Queue rank](#queue-rank)) stays claimable
+  outside every focus, so a fix the operator raises to `urgent` is never held by a focus elsewhere. In a Doctor
+  swarm, tasks in the Doctor's fix phase are exempt too. Neither exemption applies to a freeze.
+- Freeze and focus combine: a task must pass both, so a frozen task inside a focus stays held.
+
+Both records are cleared with `unfreeze TARGET`; there is no separate unfocus command. `unfreeze` on a node clears
+every freeze and focus record on that node and on every node under it, and on a selector clears the records on that
+selector. The two release work differently. Unfreezing a frozen phase releases the open tasks under that phase
+from its freeze; a focus that does not cover them keeps them held. Clearing the last focus releases every task the focus held across the whole ledger at once, apart from
+tasks still under a freeze. A held task that becomes claimable starts its claim wait at that unfreeze or focus.
+
+A task that depends on a held task is not claimable either, because its dependency is not done; the page's time left
+counts it with the held work.
+
+### Seeing held tasks
+
+`agentihooks swarm <id> status` prints one line per active record, after the phase lines:
+
+```
+focus  phases/p92  by operator  at 2026-10-15T14:02Z  ship the docs first
+freeze  lane:ci  by operator  at 2026-10-15T14:05Z
+```
+
+Each line names the verb, the target, who wrote it, when (UTC) and its reason when one was given. Status does not
+list freeze or focus holds task by task; a phase line's `holds` list names open tasks its phase does not admit yet
+(the phase waits on another phase, is still to plan, planning or in review), not tasks held by a freeze or a focus.
+A task is held when it is `open` and a freeze covers it, or a focus exists that does not cover it and the task is
+neither `urgent` nor in a Doctor swarm's fix phase. In a Doctor swarm, a focus on the watched ledger also holds its
+tasks that are neither `urgent` nor in the fix phase. When no task is claimable and no lane agent is left, the tick
+marks the swarm drained and posts a ledger notice. It names how many open tasks are held and by which records, for
+example `The swarm has no task it may start: 3 open tasks are held by the focus on phase Documentation agents`, and
+says only `The swarm has no task left to start` when none is held. The ledger page's time left leaves held tasks out
+and says so: `with 3 frozen tasks holding 90m of work left out`.
+
 ## Redis
 
 Redis holds the swarm's runtime state, and the swarm refuses to run without it:

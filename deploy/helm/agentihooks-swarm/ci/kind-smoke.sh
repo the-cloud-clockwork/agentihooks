@@ -239,7 +239,7 @@ if [[ $refusal != *"controller.api.proof needs controller.workers.apiUrl"* ]]; t
   exit 1
 fi
 printf 'the chart renders the proof setting only when set and refuses an incomplete proof\n'
-docker build -q -t "$image" . >/dev/null &
+{ bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm >/dev/null && docker build -q -t "$image" . >/dev/null; } &
 build=$!
 trap finish EXIT
 kind create cluster --name "$cluster" --image "$KIND_NODE_IMAGE" --wait 120s
