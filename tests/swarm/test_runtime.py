@@ -940,6 +940,52 @@ def test_a_master_launches_on_the_frontier_model_at_high_effort_whatever_the_lan
     assert _launched(tmp_path, monkeypatch, "master", task, lanes, harness=harness, env=env) == launch
 
 
+MASTER_RANGES = [(("medium", "xhigh"), "high:xhigh"), (("low", "medium"), "high:high")]
+
+
+@pytest.mark.parametrize("bounds,handed", MASTER_RANGES)
+def test_a_master_handoff_successor_launches_at_high_effort_whatever_its_saved_launch_or_the_range_names(
+    tmp_path, monkeypatch, bounds, handed
+):
+    monkeypatch.delenv("AGENTIHOOKS_CLAUDE_EFFORT", raising=False)
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen.update(argv=argv, env=kwargs["env"])
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "open"))
+    config = SimpleNamespace(
+        slug="sw",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        lanes={},
+        autonomy="delegate",
+        effort_min=bounds[0],
+        effort_max=bounds[1],
+    )
+    launch = {"profile": "master", "harness": "claude", "model": "opus", "effort": "medium"}
+    task = {"id": "master", "peer": "", "handoff": "# Handoff", "handoff_envelope": {"launch": launch}}
+    runtime.spawn(config, "master", "master@a1b2c3-0002", task)
+    assert _passed(seen["argv"]) == ["--model", "opus", "--effort", "high"]
+    assert seen["env"]["AGENTIHOOKS_SWARM_EFFORT_RANGE"] == handed
+
+
+@pytest.mark.parametrize("bounds,handed", MASTER_RANGES)
+def test_a_resumed_master_launches_at_high_effort_whatever_its_previous_agent_or_the_range_names(
+    tmp_path, bounds, handed
+):
+    from dataclasses import replace
+
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee")
+    config.effort_min, config.effort_max = bounds
+    master = replace(agent, name="master@a1b2c3-0001", lane="master", task="master", profile="master", effort="medium")
+    runtime.resume(config, master, "you were restored")
+    assert _passed(seen["runs"][0]) == ["--route", "a1", "--model", "opus", "--effort", "high"]
+    assert seen["env"]["AGENTIHOOKS_SWARM_EFFORT_RANGE"] == handed
+
+
 def _lowest_pick(*args, **kwargs):
     from hooks.classifier import Answer, DecisionResult
 

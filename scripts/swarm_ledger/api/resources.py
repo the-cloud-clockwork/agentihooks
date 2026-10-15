@@ -42,6 +42,9 @@ def metadata(doc: dict) -> dict:
 
 
 def resource_revision(doc: dict, path: str) -> str:
+    if path == "tasks":
+        meta = doc.get("_meta", {})
+        return f"{meta.get('task_revision', meta.get('rev', 0)):064x}"
     raw = value(doc, path)
     if path == "metadata":
         raw = {**raw, "_meta": {key: item for key, item in raw["_meta"].items() if key not in ("rev", "updated_at")}}
@@ -62,7 +65,7 @@ def read(doc: dict, path: str, query: dict | None = None) -> dict:
     raw = value(doc, path)
     rev = resource_revision(doc, path)
     if isinstance(raw, list):
-        return page(raw, rev, query or {})
+        return page(raw, rev, query or {}, hash_page=path == "tasks")
     return bounded({"data": project(raw), "revision": rev})
 
 
@@ -132,7 +135,7 @@ def project(raw: object) -> object:
     return result
 
 
-def page(rows: list, rev: str, query: dict) -> dict:
+def page(rows: list, rev: str, query: dict, hash_page: bool = False) -> dict:
     from .schemas import PAGINATION, validate
 
     validate(PAGINATION, query)
@@ -144,6 +147,9 @@ def page(rows: list, rev: str, query: dict) -> dict:
             raise APIError(409, "revision_conflict", "Collection changed; restart pagination")
         offset = int(offset_text)
     selected = []
+    result = {"data": selected, "revision": rev, "next_cursor": None}
+    if hash_page:
+        result["page_hash"] = revision(selected)
     for row in rows[offset : offset + query.get("limit", 50)]:
         item = project(row)
         if isinstance(item, dict):
@@ -154,13 +160,15 @@ def page(rows: list, rev: str, query: dict) -> dict:
             "revision": rev,
             "next_cursor": f"{rev}:{end}" if end < len(rows) else None,
         }
+        if hash_page:
+            candidate["page_hash"] = revision(candidate["data"])
         if reply_size(candidate) > MAX_REPLY:
             if not selected:
                 raise APIError(413, "resource_too_large", "Use the explicit export operation for this resource")
             break
         selected.append(item)
-    end = offset + len(selected)
-    return bounded({"data": selected, "revision": rev, "next_cursor": f"{rev}:{end}" if end < len(rows) else None})
+        result = candidate
+    return bounded(result)
 
 
 def swarm_read(status: dict | None, path: str, query: dict) -> dict:

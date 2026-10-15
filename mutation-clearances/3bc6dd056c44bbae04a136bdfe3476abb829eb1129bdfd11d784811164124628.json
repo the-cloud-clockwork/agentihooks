@@ -1,0 +1,6 @@
+{
+  "scripts/agents_quota.py:scripts.agents_quota.x__claude__mutmut_3:90f4bd59c9fe5232fd6610455d61f30cd85b481625896fa23e3210d54e1c1ec7": {
+    "reader": "standards_reader",
+    "reason": "Changes only the source label on the no-token branch of _claude, where results is empty: claude_rows([]) yields no rows and source is not read again in _claude, so no QuotaRow, table or return value can carry it. Output-equivalent."
+  }
+}

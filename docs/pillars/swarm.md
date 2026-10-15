@@ -298,7 +298,8 @@ An outage holds the affected idle and delivery decisions until recovery (see
 [Outage holds and recovery](#outage-holds-and-recovery)). Each tick, per swarm:
 
 1. Retire agents that finished, and pass on the messages they left (see [Safe retire](#safe-retire)).
-2. Free the tasks of agents whose pane is gone, or that stayed idle for 10 ticks. An idle agent is nudged at 3.
+2. Free the tasks of agents whose pane is gone, or that stayed idle for 20 ticks. A stale agent is nudged through its inbox
+   (see Stale nudge).
 3. Reopen claimed tasks that have no agent.
 4. Spawn the master if none is online, or retire it once a stopping swarm has no worker left. After the down window, force a launch and promote an engineer when it fails (see [Master outage and promotion](#master-outage-and-promotion)).
 5. While `running`, spawn agents up to the caps, one per claimable task, as long as a Claude account has room
@@ -370,9 +371,20 @@ writes, a master `relay` carrying his verified words among them: an agent's comm
 never judged, even one that asks him for the decision. Every automatic clear is a `priority cleared` event by `swarm` with a
 `reason` in the ledger history.
 
+### Stale nudge
+
+An agent holding a task is stale when its session heartbeat is over ten minutes old and no named wait holds, or
+when its pane shows a provider error while its heartbeat is not working. The tick sends it one inbox item per ten
+minutes of silence, with an id built from the agent, its last activity and the window, so repeated ticks send it
+once; nothing is typed into its pane. The inbox channel delivers it to Claude and the Codex push pump to Codex. A
+nudge the pump delivers within two minutes of its sending interrupts a turn still running and starts a new app server
+turn; a later one is delivered like any message. An agent on a long command declares a wait first.
+The master, an agent the operator is typing to, a swarm with an open outage and an agent in provider recovery get
+no nudge.
+
 ### Safe retire
 
-The tick retires an agent for idleness only after 10 idle ticks, and a tick counts as idle only when all three
+The tick retires an agent for idleness only after 20 idle ticks, and a tick counts as idle only when all three
 say idle:
 
 - its herdr pane, read by its pane id, never by its name, reads idle;
