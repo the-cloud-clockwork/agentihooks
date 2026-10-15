@@ -19,8 +19,7 @@ def resolve(repo: str, task: dict, rows: dict, lives: list[str], envelope: dict,
         and row.get("branch")
         and row.get("pr_url")
         and row["pr_url"] != task.get("pr_url")
-        and stack.repo_key(row.get("branch_repo") or row["pr_url"].split("/pull/")[0])
-        == origin
+        and stack.repo_key(row.get("branch_repo") or row["pr_url"].split("/pull/")[0]) == origin
     }
     recorded = task.get("branch") or ""
     branch = envelope.get("continue_from", "").removeprefix("origin/")
