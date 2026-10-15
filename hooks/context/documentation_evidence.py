@@ -69,6 +69,7 @@ def collect(root: Path, base: str, context: dict | None = None) -> dict:
         name
         for name in tracked
         if Path(name).suffix in DOC_TYPES
+        and not sensitive_kind(name)
         and Path(name).name not in EXCLUDED_DOCS
         and not (root / name).is_symlink()
         and (root / name).is_file()
