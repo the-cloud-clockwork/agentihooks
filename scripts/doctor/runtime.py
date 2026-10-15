@@ -20,7 +20,10 @@ def _allocated(directory):
 
 
 def _executions(root, now_ms):
-    for directory in (root / "cx").glob("*"):
+    homes = root / "cx"
+    if homes.is_symlink():
+        return
+    for directory in homes.glob("*"):
         if directory.is_symlink() or not directory.is_dir():
             continue
         try:

@@ -122,6 +122,20 @@ def test_pressure_without_codex_homes_is_still_reported(tmp_path, monkeypatch):
     assert finding.evidence == (f"runtime {tmp_path}: 100 of 100 bytes used",)
 
 
+def test_a_linked_execution_root_is_not_scanned(tmp_path, monkeypatch):
+    from scripts.doctor import runtime
+
+    root = tmp_path / "runtime"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    (outside / "execution").mkdir(parents=True)
+    (root / "cx").symlink_to(outside, target_is_directory=True)
+    monkeypatch.setattr(shutil, "disk_usage", lambda path: SimpleNamespace(used=90, total=100))
+    monkeypatch.setattr(os, "walk", lambda *args, **kwargs: pytest.fail("linked execution root was scanned"))
+    [finding] = runtime.findings(NOW, {"XDG_RUNTIME_DIR": str(root)})
+    assert finding.evidence == (f"runtime {root}: 90 of 100 bytes used",)
+
+
 def test_a_missing_user_runtime_is_skipped(tmp_path, monkeypatch):
     from scripts.doctor import runtime
 
