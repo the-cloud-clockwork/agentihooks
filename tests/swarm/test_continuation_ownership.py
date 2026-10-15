@@ -179,7 +179,7 @@ def test_matching_handoff_checks_that_its_recorded_branch_still_exists(store, mo
 
 def test_parked_task_never_cuts_from_a_branch_registered_to_another_pull_request(store, monkeypatch):
     def parked(task):
-        task.update(branch="engineer-323133-1452", parked_on=["dependency"], stacked_base="base")
+        task.update(branch="engineer-323133-1452", parked_on=["t725"], stacked_base="base")
 
     launched, rendered = _launch(store, monkeypatch, CASES[0], setup=parked)
     assert launched["reclaim"]["continue_from"] == "fresh"
