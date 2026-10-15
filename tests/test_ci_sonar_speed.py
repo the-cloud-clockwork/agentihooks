@@ -189,7 +189,11 @@ def _merge_tree(tmp_path, combine_body):
 
 def _start_merge(tree, temp, bin_dir):
     output = temp / "output"
-    started = _run(_step("Merge shard coverage"), tree, bin_dir, RUNNER_TEMP=str(temp), GITHUB_OUTPUT=str(output))
+    unit = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["unit"]
+    shards = str(unit["strategy"]["matrix"]["shard"][-1])
+    started = _run(
+        _step("Merge shard coverage"), tree, bin_dir, RUNNER_TEMP=str(temp), GITHUB_OUTPUT=str(output), SHARDS=shards
+    )
     assert started.returncode == 0, started.stdout + started.stderr
     return output.read_text().strip().removeprefix("pid=")
 
@@ -243,7 +247,9 @@ def test_setup_and_evidence_upload_overlap_existing_waits():
     assert [names.index(name) for name in order] == sorted(names.index(name) for name in order)
     assert names.index("Check dev still points at this commit") < names.index("Download shard coverage")
     wait = _step("Wait for the coverage merge")
-    assert wait["if"] == "always() && steps.current.outputs.superseded != 'true'"
+    assert (
+        wait["if"] == "always() && steps.current.outputs.superseded != 'true' && needs.select.outputs.scope != 'none'"
+    )
     assert wait["timeout-minutes"] == 5
 
 

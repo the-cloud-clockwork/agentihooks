@@ -50,6 +50,11 @@ def reuse_repo(tmp_path, request):
     if getattr(request, "param", None) == "dynamic":
         workflow["jobs"]["mutation"] = {"strategy": {"matrix": {"shard": "${{ fromJSON(needs.plan.outputs.shards) }}"}}}
         workflow["jobs"]["gate-required"]["needs"].append("mutation")
+    if getattr(request, "param", None) == "selected":
+        workflow["jobs"]["unit-selected"] = {
+            "strategy": {"matrix": {"leg": "${{ fromJSON(needs.select.outputs.legs) }}"}}
+        }
+        workflow["jobs"]["gate-required"]["needs"].append("unit-selected")
     (workflows / "test.yml").write_text(yaml.safe_dump(workflow))
     git(root, "add", ".github/workflows/test.yml")
     git(root, "commit", "-m", "base")
@@ -136,6 +141,8 @@ def full_source(reuse_repo, tmp_path):
     jobs = [{"id": 91 + n, "name": name, "conclusion": "success"} for n, name in enumerate(names)]
     if "mutation" in yaml.safe_load((root / ".github/workflows/test.yml").read_text())["jobs"]:
         jobs.extend([{"id": 98 + n, "name": f"mutation ({n})", "conclusion": "success"} for n in range(2)])
+    if "unit-selected" in yaml.safe_load((root / ".github/workflows/test.yml").read_text())["jobs"]:
+        jobs.append({"id": 96, "name": "unit-selected", "conclusion": "skipped"})
     jobs.append({"id": 97, "name": "queue-baseline", "conclusion": "skipped"})
     artifacts = [{"id": 42, "name": "required-tree-1", "expired": False}]
     artifacts.append({"id": 51, "name": "coverage-3.12-1", "expired": False})
@@ -240,10 +247,13 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
     policy = json.loads((root / ".github/workflows/trusted-actors.json").read_text())
     steps = workflow["jobs"]["gate-required"]["steps"]
     assert steps in (
+        ci_reuse.gate_steps(selected=True),
+        ci_reuse.gate_steps(queue_coverage=True, selected=True),
         ci_reuse.gate_steps(),
         ci_reuse.gate_steps(queue_coverage=True),
         ci_reuse.gate_steps(queue_tier=True),
     )
+
     assert workflow["jobs"]["gate-required"]["runs-on"] in gate_protected.runners(policy)
     assert workflow["jobs"]["reuse"] in gate_protected.reuse_jobs(policy)
 
@@ -252,6 +262,14 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
 def test_a_full_pass_with_dynamic_mutation_shards_reuses(full_source, tmp_path):
     root, base, _, queue, env, _, _ = full_source
     result = invoke(root, base, queue, "merge_group", tmp_path / "dynamic.json", env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "reused=true" in result.stdout
+
+
+@pytest.mark.parametrize("reuse_repo", ["selected"], indirect=True)
+def test_a_full_pull_request_pass_whose_selected_tests_were_not_due_reuses(full_source, tmp_path):
+    root, base, _, queue, env, _, _ = full_source
+    result = invoke(root, base, queue, "merge_group", tmp_path / "selected.json", env)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "reused=true" in result.stdout
 

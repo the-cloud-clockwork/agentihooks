@@ -234,5 +234,6 @@ def test_every_standard_test_job_sends_merge_group_runs_to_the_queue_pool():
     )
     assert standard
     assert {name: jobs[name]["runs-on"] for name in standard} == {
-        name: queue_routed(policy=policy) for name in standard
+        name: routed("anton-oss", policy) if name == "unit-selected" else queue_routed(policy=policy)
+        for name in standard
     }

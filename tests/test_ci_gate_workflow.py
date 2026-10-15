@@ -85,11 +85,13 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
             "reuse",
             "queue-baseline",
             "stage-budget",
+            "select",
+            "unit-selected",
         }
     )
     assert gate["if"] == "${{ always() }}"
-    assert jobs["unit"]["needs"] in (["split", "reuse"], ["split", "reuse", "admission"])
-    assert jobs["split"]["needs"] in (["durations", "reuse"], ["durations", "reuse", "admission"])
+    assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
+    assert jobs["split"]["needs"] == ["durations", "select", "reuse", "admission"]
     assert jobs["lint"]["needs"] in (["reuse"], ["reuse", "admission"])
     if "swarm-image" in gate["needs"]:
         assert jobs["swarm-image"]["uses"] == "./.github/workflows/swarm-smoke.yml"
@@ -665,14 +667,22 @@ def test_chart_proof_rule_fails_on_an_unknown_base(kind_repo):
 
 def test_unit_and_lint_run_on_every_event_and_feed_the_required_gate():
     jobs = _workflow()["jobs"]
+    every_event = "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}"
+    expected = {
+        "lint": every_event,
+        "unit": every_event.removesuffix(" }}")
+        + " && (github.event_name != 'pull_request' || needs.select.outputs.scope == 'full') }}",
+    }
     for name in ("unit", "lint"):
         job = jobs[name]
         assert job["if"] in (
+            expected[name],
             "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
             "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
             "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') }}",
             "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' }}",
         )
+
         assert all("steps.lookup" not in step.get("if", "") for step in job["steps"])
     step = jobs["gate-required"]["steps"][0]
     result = subprocess.run(
