@@ -207,8 +207,10 @@ def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, mess
             raise SwarmError("the committed HEAD has no passing prepush evidence")
         git(root, "push", "-u", "origin", f"HEAD:{fields['branch']}")
     except SwarmError as exc:
-        gate = fields.get("gate", "publication")
-        raise SwarmError(f"{gate} for {root}: {exc}; Next: {retry}") from exc
+        detail = str(exc)
+        if fields.get("gate") == "AgentiHooks touched Python fallback":
+            detail = f"AgentiHooks touched Python fallback for {root}: {detail}"
+        raise SwarmError(f"{detail}; Next: {retry}") from exc
     update = {key: fields[key] for key in ("branch", "branch_repo")}
     update["repository_branches"] = {**task.get("repository_branches", {}), str(primary): fields["branch"]}
     ledger.update_task(slug, agent.task, update, by=agent.name)
