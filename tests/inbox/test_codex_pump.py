@@ -483,6 +483,18 @@ def test_an_ordinary_message_still_waits_behind_a_turn_begun_before_the_pump_con
     assert turn_methods(rig) == []
 
 
+def test_a_stale_held_nudge_never_steers_a_turn_begun_before_the_pump_connected(rig):
+    from scripts.swarm import stale_nudge
+
+    rig.server.begin_elsewhere()
+    rig.server.frames.clear()
+    rig.pump.start()
+    item = send_nudge(rig)
+    rig.clock.now = (item.created_at + stale_nudge.FRESH_MS + 1) / 1000
+    rig.pump.step()
+    assert turn_methods(rig) == [] and rig.store.get(item.id).state == "pending"
+
+
 def test_a_nudge_waits_out_the_pump_hold(rig):
     rig.server.begin_elsewhere()
     rig.server.frames.clear()

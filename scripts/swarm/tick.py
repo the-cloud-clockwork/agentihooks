@@ -598,8 +598,10 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
 
 
 def _stale_nudge(slug, store, agent, observed, pending, now_ms):
-    """An open swarm outage and a pending recovery belong to provider recovery."""
+    """An open swarm outage and a pending recovery belong to provider recovery; an agent due for retirement gets none."""
     if agent.lane == MASTER or not agent.task or pending or outage.open_records(slug):
+        return []
+    if agent.idle_ticks + 1 >= IDLE_KILL_TICKS:
         return []
     if _operator_at_pane(slug, store, agent, observed, now_ms) or ledger_probe.holding(store, slug):
         return []
