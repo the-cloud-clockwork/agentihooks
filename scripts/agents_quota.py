@@ -5,7 +5,7 @@ import shutil
 import sys
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import asdict, dataclass, replace
 from typing import TYPE_CHECKING
 
@@ -304,6 +304,13 @@ def with_masters(rows: list[QuotaRow], masters: dict[str, "MasterAccount"], sess
     return marked
 
 
+def router_environ(environ: MutableMapping[str, str]) -> MutableMapping[str, str]:
+    from scripts import operator_env
+
+    operator_env.fill(environ)
+    return environ
+
+
 def _claude(refresh: bool, timeout: float) -> list[QuotaRow]:
     from hooks.context.account_sessions import sessions_by_account
     from scripts.claude_quota_balancer import cached_observations, collect_results, discover_credentials
@@ -311,7 +318,7 @@ def _claude(refresh: bool, timeout: float) -> list[QuotaRow]:
     from scripts.routing.claude_api import ClaudeApiSource
 
     _load_claude_runtime_env()
-    credentials = discover_credentials(os.environ)
+    credentials = discover_credentials(router_environ(dict(os.environ)))
     sessions = sessions_by_account()
     if credentials:
         results, source = collect_results(

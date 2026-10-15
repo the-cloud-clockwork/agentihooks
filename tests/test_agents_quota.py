@@ -277,6 +277,41 @@ def test_every_quota_reader_appends_the_api_row_of_its_harness(monkeypatch):
     assert codex_nows == [5.0, 100.0]
 
 
+def _router_accounts(monkeypatch, count: int) -> list[str]:
+    from scripts import install, operator_env
+
+    names = [f"AH_CC_TOKEN_acct{n}" for n in range(1, count + 1)]
+    for name in [key for key in os.environ if key.startswith("AH_CC_TOKEN_")]:
+        monkeypatch.delenv(name)
+    monkeypatch.setenv(names[0], "token-1")
+    monkeypatch.setattr(install, "_load_claude_runtime_env", lambda: None)
+    monkeypatch.setattr(
+        operator_env,
+        "fill",
+        lambda environ: environ.update({name: f"token-{n}" for n, name in enumerate(names, 1)}),
+    )
+    return [name.removeprefix("AH_CC_TOKEN_") for name in names]
+
+
+def _probe(credentials, **kwargs):
+    windows = (QuotaWindow(used=20), QuotaWindow(used=30))
+    return [ProbeResult(c.account, "allowed", "NORMAL", 70, *windows) for c in credentials], "probe"
+
+
+def test_quota_lists_every_account_the_router_knows_from_a_one_token_session(monkeypatch):
+    from hooks.context import account_sessions
+    from scripts import claude_quota_balancer
+
+    accounts = _router_accounts(monkeypatch, 7)
+    monkeypatch.setattr(claude_quota_balancer, "collect_results", _probe)
+    monkeypatch.setattr(claude_quota_balancer, "cached_observations", lambda: [])
+    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(agents_quota, "api_rows", lambda source, harness, now: [])
+    monkeypatch.setattr(agents_quota, "_masters", lambda harness="": {})
+    assert [row.account for row in agents_quota._claude(False, 1.0)] == accounts
+    assert "AH_CC_TOKEN_acct7" not in os.environ
+
+
 def test_no_agent_rows_exit_one(monkeypatch, capsys):
     monkeypatch.setattr(agents_quota, "_claude", lambda refresh, timeout: [])
     monkeypatch.setattr(agents_quota, "_codex", lambda now: [])
