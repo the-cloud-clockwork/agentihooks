@@ -20,6 +20,10 @@ NOTICES = {
     "protection, condition folders, credential files and secrets stay closed. disallow-master-coding ends it.",
     "closed": "Master hotfix window closed: the master no longer edits code.",
 }
+CREDENTIALS = re.compile(
+    r"(?:^|/)(?:\.env(?:\.[\w.-]+)?|[\w.-]+\.env|\.netrc|\.npmrc|\.pypirc|\.git-credentials|\.pgpass)$"
+)
+TEMPLATES = (".example", ".sample", ".template", ".dist")
 PROTECTION_REFUSAL = (
     "BLOCKED: the master never changes rulesets or branch protection, inside the hotfix window or out of it."
 )
@@ -79,6 +83,13 @@ def is_open(session_id: str, now: float | None = None) -> bool:
     except (OSError, ValueError, KeyError, TypeError):
         return False
     return (time.time() if now is None else now) - opened < WINDOW_SEC
+
+
+def closed_in_window(value: str, cwd: Path) -> bool:
+    """Condition folders and credential files stay closed even while the window is open."""
+    target = (cwd / Path(value).expanduser()).resolve()
+    credential = CREDENTIALS.search(str(target)) and not str(target).endswith(TEMPLATES)
+    return "conditions" in target.parts or bool(credential)
 
 
 def asks_operator(tool_name: str, session_id: str | None) -> bool:

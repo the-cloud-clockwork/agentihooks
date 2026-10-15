@@ -335,6 +335,21 @@ def _spawn_seen(tmp_path, lanes, lane="eng", config=None):
     return seen
 
 
+@pytest.mark.parametrize("lane", ["eng", "ci", "master", "plan"])
+def test_claude_swarm_display_name_is_mentionable(tmp_path, lane):
+    seen = _spawn_seen(tmp_path, {lane: {"agent": "claude"}}, lane=lane)
+    argv = seen["argv"]
+    assert argv[argv.index("--name") + 1] == "engineer-a1b2c3-0001"
+
+
+def test_claude_resume_uses_a_mentionable_display_name(tmp_path):
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee")
+    runtime.resume(config, agent, "you were restored")
+    argv = seen["runs"][0]
+    assert argv[argv.index("--name") + 1] == "engineer-a1b2c3-0001"
+    assert seen["env"]["AGENTIHOOKS_AGENT_NAME"] == "engineer@a1b2c3-0001"
+
+
 @pytest.mark.parametrize("pin", ["claude", "codex"])
 @pytest.mark.parametrize("saved_kind", ["launch_assignment", "handoff_envelope", "none"])
 def test_a_lane_pin_wins_over_an_opposite_saved_harness(tmp_path, monkeypatch, pin, saved_kind):

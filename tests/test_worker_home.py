@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.swarm_v2 import filesystem, worker_home
+from scripts.targets.codex_hook_trust import trusted_state
 
 WORKSTATION_PYTHON = "/home/operator/dev/tcc-ecosystem/.venv/bin/python"
 ENDPOINTS = {"AGENTIHOOKS_LEDGER_URL": "http://ledger.swarm.svc:8765", "BRAIN_URL": "https://brain.swarm.svc"}
@@ -209,12 +210,17 @@ def test_every_home_exports_the_grant_file_path_and_never_a_grant(fixture):
 
 def comparable(volume: Path) -> dict:
     attempt = volume / "attempt-1"
+    hooks = attempt / "homes/codex/.codex/hooks.json"
     docs = {
         "claude": json.loads((attempt / "homes/claude/.claude/settings.json").read_text()),
         "claude_mcp": json.loads((attempt / "homes/claude/.claude.json").read_text())["mcpServers"],
         "codex": tomllib.loads((attempt / "homes/codex/.codex/config.toml").read_text()),
-        "codex_hooks": json.loads((attempt / "homes/codex/.codex/hooks.json").read_text()),
+        "codex_hooks": json.loads(hooks.read_text()),
     }
+    state = docs["codex"]["hooks"]["state"]
+    assert state == trusted_state(hooks, hooks)
+    for entry in state.values():
+        entry["trusted_hash"] = "<trusted>"
     return json.loads(json.dumps(docs).replace(str(volume), "<volume>"))
 
 

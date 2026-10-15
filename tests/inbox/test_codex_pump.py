@@ -88,6 +88,9 @@ class AppServer:
         turns = [{"id": turn["id"], "status": turn["status"]} for turn in self.turns]
         return {"thread": {"id": params["threadId"], "turns": turns}}
 
+    def thread_resume(self, params):
+        return self.thread_read(params)
+
     def begin_elsewhere(self):
         self.turns.append({"id": f"turn-{len(self.turns) + 1}", "status": codex.IN_PROGRESS, "inputs": []})
         self.frames.append({"method": codex.TURN_STARTED, "params": {"turn": {"id": self.active}}})
@@ -566,7 +569,8 @@ def test_a_broken_event_stream_degrades_the_transport(rig):
     assert (rig.record().state, rig.record().last_error_class) == (DEGRADED, "ProtocolError")
     assert (
         rig.logged
-        == [f"codex pump for {ME} degraded: ProtocolError: thread/read lost the connection: ConnectionClosedError"] * 4
+        == [f"codex pump for {ME} degraded: ProtocolError: thread/resume lost the connection: ConnectionClosedError"]
+        * 4
     )
 
 
@@ -593,6 +597,10 @@ def test_a_degraded_pump_reconnects_with_backoff_and_resumes_delivery(rig):
     assert rig.run(6) == codex.STOPPED
     assert sleeps[:2] == [codex.BACKOFF_S, codex.BACKOFF_S * 2]
     assert len(attempts) == 2
+    assert [m["params"] for m in rig.server.sent if m.get("method") == "thread/resume"] == [
+        {"threadId": THREAD},
+        {"threadId": THREAD},
+    ]
     assert rig.record().state == CONNECTED
     assert rig.store.get(item.id).state == "delivered"
     assert [d.state for d in deliveries(rig, item.id)] == ["accepted"]
@@ -834,9 +842,11 @@ def test_a_stray_text_frame_is_refused_and_diagnostics_stay_off_the_socket(rig):
     assert rig.logged == [f"codex pump for {ME} degraded: ProtocolError: the event stream got a frame that is not JSON"]
     assert all(message["jsonrpc"] == "2.0" for message in rig.server.sent)
     assert rig.server.sent == [
-        {"jsonrpc": "2.0", "id": 1, "method": "thread/read", "params": {"threadId": THREAD, "includeTurns": True}},
-        {"jsonrpc": "2.0", "id": 1, "method": "thread/read", "params": {"threadId": THREAD, "includeTurns": True}},
+        {"jsonrpc": "2.0", "id": 1, "method": "thread/resume", "params": {"threadId": THREAD}},
         {"jsonrpc": "2.0", "id": 2, "method": "thread/read", "params": {"threadId": THREAD, "includeTurns": True}},
+        {"jsonrpc": "2.0", "id": 1, "method": "thread/resume", "params": {"threadId": THREAD}},
+        {"jsonrpc": "2.0", "id": 2, "method": "thread/read", "params": {"threadId": THREAD, "includeTurns": True}},
+        {"jsonrpc": "2.0", "id": 3, "method": "thread/read", "params": {"threadId": THREAD, "includeTurns": True}},
     ]
 
 
@@ -899,3 +909,62 @@ def test_stderr_writes_one_prefixed_line(capsys):
     codex.stderr("degraded")
     captured = capsys.readouterr()
     assert (captured.out, captured.err) == ("", "[agentihooks codex-pump] degraded\n")
+
+
+@pytest.mark.parametrize(("status", "code"), [(codex.STOPPED, 0), (DEGRADED, 1)])
+def test_main_loads_the_bound_execution_and_stops_on_termination(rig, monkeypatch, status, code):
+    import signal
+
+    from scripts.inbox import store as inbox_store
+    from scripts.swarm import store as swarm_store
+
+    rig.bindings.put(SLUG, replace(rig.record(), thread_id=THREAD))
+    monkeypatch.setattr(swarm_store, "connect", lambda: rig.bindings.store)
+    monkeypatch.setattr(inbox_store, "connect", lambda: rig.store)
+    connections, handlers, pumps = [], {}, []
+
+    def connect(path, timeout):
+        connections.append((path, timeout))
+        return rig.connection, {}
+
+    def run(pump, stop):
+        pumps.append(pump)
+        assert stop() is False
+        handlers[signal.SIGTERM](signal.SIGTERM, None)
+        assert stop() is True
+        return status
+
+    monkeypatch.setattr(protocol, "connect", connect)
+    monkeypatch.setattr(signal, "signal", lambda number, handler: handlers.update({number: handler}))
+    monkeypatch.setattr(codex.Pump, "run", run)
+    monkeypatch.setattr(codex.sys, "argv", ["codex-pump", SLUG, EXECUTION])
+    assert codex.main() == code
+    assert connections == [("/run/cx/s", 5.0)]
+    assert set(handlers) == {signal.SIGTERM, signal.SIGHUP}
+    [pump] = pumps
+    assert pump.store is rig.store
+    assert pump.binding.connection is rig.connection
+    assert (pump.binding.thread_id, pump.binding.recipient, pump.binding.owner) == (THREAD, ME, EXECUTION)
+    assert (pump.binding.transport.slug, pump.binding.transport.execution_id) == (SLUG, EXECUTION)
+
+
+def test_main_refuses_a_retired_execution_before_opening_a_connection(rig, monkeypatch):
+    from scripts.codex_session.binding import EXITED
+    from scripts.swarm import store as swarm_store
+
+    rig.bindings.put(SLUG, replace(rig.record(), state=EXITED))
+    monkeypatch.setattr(swarm_store, "connect", lambda: rig.bindings.store)
+    monkeypatch.setattr(protocol, "connect", Mock(side_effect=AssertionError("stale pump must not connect")))
+    with pytest.raises(codex.StaleExecution) as refused:
+        codex.main([SLUG, EXECUTION])
+    assert str(refused.value) == "execution is no longer current"
+
+
+def test_main_reports_its_module_usage_when_execution_arguments_are_missing(capsys):
+    with pytest.raises(SystemExit) as refused:
+        codex.main([])
+    assert refused.value.code == 2
+    assert capsys.readouterr().err == (
+        "usage: python -m scripts.inbox.codex [-h] swarm execution\n"
+        "python -m scripts.inbox.codex: error: the following arguments are required: swarm, execution\n"
+    )
