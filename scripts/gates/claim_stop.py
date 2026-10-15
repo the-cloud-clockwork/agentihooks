@@ -2,7 +2,7 @@
 
 import json
 
-from scripts.gates import log
+from scripts.gates import lift, log
 from scripts.gates.base import Decision
 from scripts.swarm.naming import lane_of
 from scripts.swarm_ledger import ledger_kinds
@@ -99,6 +99,14 @@ class ClaimStop:
         from scripts.swarm import idle, ready
 
         store, now = self.connect(), self.now()
+        streak = Streak(store, who.swarm, who.name)
+        if (
+            lift.lifted(who.swarm, call.session, self.name, state.home)
+            or lift.agent_lifted(who.swarm, who.name, self.name, state.home)
+            or lift.held(who.swarm, who.name, who.task, self.name, state.home, command=call.command)
+        ):
+            streak.clear()
+            return Decision()
         if parked_by(store, who, task) or ready.awaiting(task):
             return Decision()
         url = task.get("pr_url")
@@ -109,7 +117,6 @@ class ClaimStop:
         if checks and (live or {}).get("on", {}).get("kind") not in KEPT:
             on = {"kind": "checks", "target": checks}
             idle.declare_wait(store.redis, who.swarm, who.name, now + CHECKS_WAIT_MS, f"checks on {checks}", now, on=on)
-        streak = Streak(store, who.swarm, who.name)
         if not owed:
             streak.clear()
             return Decision()
