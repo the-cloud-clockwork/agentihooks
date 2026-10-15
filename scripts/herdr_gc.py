@@ -14,7 +14,7 @@ from scripts import herdr_host, herdr_panes
 from scripts.herdr_host import HerdrError
 from scripts.herdr_panes import PaneRecord
 from scripts.inbox import wake
-from scripts.swarm import idle
+from scripts.swarm import idle, naming
 from scripts.swarm.pane import typed_input
 
 GRACE_ENV = "AGENTIHOOKS_HERDR_GC_GRACE_MINUTES"
@@ -103,8 +103,8 @@ def _fate(store, record: PaneRecord) -> str:
         return REMOVED
     if store.config(slug).state == "stopped":
         return STOPPED
-    names = {agent.name for agent in store.agents(slug) if agent.state != "finished"}
-    return LIVE if record.owner_session in names else RETIRED
+    names = {naming.plain(agent.name) for agent in store.agents(slug) if agent.state != "finished"}
+    return LIVE if naming.plain(record.owner_session) in names else RETIRED
 
 
 class Owners:
