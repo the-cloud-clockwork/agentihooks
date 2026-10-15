@@ -183,18 +183,13 @@ def routing_pool(environ: Mapping[str, str], run: Callable = subprocess.run) -> 
     return token_accounts(environ) or [CodexAccount(CODEX_DEFAULT)]
 
 
-def live_accounts(
-    pool: list[CodexAccount], sessions: Mapping[str, int], environ: Mapping[str, str]
-) -> list[CodexAccount]:
+def live_accounts(pool: list[CodexAccount], sessions: Mapping[str, int]) -> list[CodexAccount]:
     """Token accounts live sessions run on that the pool lacks, since a routed session holds only its own token."""
     known = {account.name for account in pool}
-    held = {environ[account.env_name] for account in pool if account.is_token}
     return [
         CodexAccount(name, f"{CODEX_TOKEN_PREFIX}{name}")
         for name in sessions
-        if name not in known
-        and name not in {CODEX_DEFAULT, API_ACCOUNT}
-        and environ.get(f"{CODEX_TOKEN_PREFIX}{name}") not in held
+        if name not in known and name not in {CODEX_DEFAULT, API_ACCOUNT}
     ]
 
 

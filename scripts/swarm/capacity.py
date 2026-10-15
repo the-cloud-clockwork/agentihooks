@@ -96,7 +96,7 @@ def _codex(environ: dict, now: float, refresh: bool) -> list[Account]:
     counts = account_sessions.codex_sessions_by_account()
     found = source.readings(pool, environ, now)
     known = {account.name for account in pool}
-    live = codex_router.live_accounts(pool, counts, environ)
+    live = codex_router.live_accounts(pool, counts)
     found.update(codex_router.quotas(live, environ))
     rows = []
     for account in pool + live:
