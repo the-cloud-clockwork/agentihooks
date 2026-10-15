@@ -97,9 +97,12 @@ def test_missing_hook_registration_is_fatal_and_keeps_diagnostics(tmp_path, caps
     }
     prefix, detail = str(raised.value.code).split(": ", 1)
     assert prefix == "missing hook registration"
-    assert json.loads(detail)["harnesses"]["codex"] == codex
     printed = json.loads(capsys.readouterr().out)["missing_hook_registration"]
-    assert printed["harnesses"]["codex"] == codex
+    assert printed == json.loads(detail)
+    missing = printed["harnesses"]["codex"]
+    assert missing.pop("error").startswith("FileNotFoundError: ")
+    assert missing == codex
+    assert "error" not in printed["harnesses"]["claude"]
     assert printed["waited_seconds"] == probe.REGISTRATION_BUDGET_SECONDS
     assert clock.now == probe.REGISTRATION_BUDGET_SECONDS
 

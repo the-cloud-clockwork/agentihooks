@@ -4,6 +4,7 @@ import os
 import sys
 import time
 import tomllib
+from collections.abc import Callable
 from pathlib import Path
 
 from hooks.secrets import redact
@@ -57,14 +58,16 @@ def harness(target: str, attempt: Path, tmp: Path = TMP) -> dict:
     }
 
 
-def registration(home: Path, deadline: float, clock=time.monotonic, sleep=time.sleep) -> dict:
+def registration(
+    home: Path, deadline: float, clock: Callable[[], float] = time.monotonic, sleep: Callable[[float], None] = time.sleep
+) -> dict:
     while True:
         try:
-            found = sessions(home)
-        except (OSError, ValueError, KeyError):
-            found = {}
+            found, error = sessions(home), None
+        except (OSError, ValueError, KeyError) as caught:
+            found, error = {}, f"{type(caught).__name__}: {caught}"
         if found or clock() >= deadline:
-            return {"sessions": found}
+            return {"sessions": found} | ({"error": error} if error and not found else {})
         sleep(POLL_SECONDS)
 
 
@@ -77,7 +80,11 @@ def launched(target: str, home: Path, tmp: Path) -> float | None:
 
 
 def diagnose(
-    attempt: Path, tmp: Path = TMP, budget: float = REGISTRATION_BUDGET_SECONDS, clock=time.monotonic, sleep=time.sleep
+    attempt: Path,
+    tmp: Path = TMP,
+    budget: float = REGISTRATION_BUDGET_SECONDS,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> dict:
     started = clock()
     observed = {}
