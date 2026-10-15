@@ -128,6 +128,12 @@ def test_jobs_reads_every_job_of_the_run():
 def test_title_names_the_job_without_dashes():
     assert promotion_watch.title("helm-kind") == "Promotion red: helm-kind"
     assert promotion_watch.title("Gate — Required") == "Promotion red: Gate Required"
+    assert promotion_watch.title("ledger-load / load") == "Promotion red: ledger-load load"
+    assert promotion_watch.title("queue_retry") == "Promotion red: queue retry"
+
+
+def test_a_job_name_the_ledger_would_refuse_gets_a_plain_title():
+    assert promotion_watch.title("check docs.md") == "Promotion red: a dev job"
 
 
 def test_a_red_run_files_one_urgent_ci_task_per_failed_job_with_run_and_sha(store):

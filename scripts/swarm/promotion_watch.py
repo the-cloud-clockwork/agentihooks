@@ -15,6 +15,7 @@ from collections.abc import Callable
 from scripts.ci_budget import GATE
 from scripts.swarm.ci_speed import FINISHED, WORKFLOW
 from scripts.swarm.store import PREFIX
+from scripts.swarm_ledger import ledger_comments
 
 RUNS = f"repos/{{owner}}/{{repo}}/actions/workflows/{WORKFLOW}/runs?branch=dev&event=push&status=completed&per_page=20"
 RUNS_JQ = ".workflow_runs[] | {id, conclusion, head_sha, html_url} | @json"
@@ -23,6 +24,7 @@ REFRESH_MS = 60_000
 SOURCE = "promotion"
 SENDER = "swarm"
 TASK_PREFIX = "promo-"
+UNNAMED = "Promotion red: a dev job"
 CLOSABLE = ("open", "blocked")
 CLEARED = "A later dev push run of Tests passed, so the swarm closed this promotion task."
 READ_ERRORS = (subprocess.SubprocessError, OSError, ValueError, KeyError, TypeError)
@@ -53,7 +55,8 @@ def failed_jobs(found: list[dict]) -> list[str]:
 
 
 def title(job: str) -> str:
-    return "Promotion red: " + " ".join(re.sub(r"[—–]", " ", job).split())
+    named = "Promotion red: " + " ".join(re.sub(r"[—–_/]", " ", job).split())
+    return UNNAMED if ledger_comments.problems(named, "item") else named
 
 
 def _promotion_tasks(doc: dict) -> list[dict]:
