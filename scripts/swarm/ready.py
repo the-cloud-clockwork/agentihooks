@@ -10,7 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from scripts.swarm import claim_order, merge_queue, stack, waits
+from scripts.swarm import claim_order, linked_issues, merge_queue, stack, waits
 from scripts.swarm.store import ASSIST, MANUAL, AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_kinds
 
@@ -236,12 +236,14 @@ def _finish(run, rows, row, found):
     task_id, url = row["id"], found["url"]
     fields = {"state": "done", "pr_url": url, "awaiting": ""}
     run.ledger.update_task(run.slug, task_id, fields)
+    finished = [task_id]
     for member in row.get("group_members") or []:
         if member in rows and rows[member].get("state") != "done":
             run.ledger.update_task(run.slug, member, fields)
+            finished.append(member)
     run.store.clear_handoff(run.slug, task_id)
     forget(run.store, run.slug, task_id)
-    return [f"task {task_id} done, {url} merged", *_remove(found)]
+    return [f"task {task_id} done, {url} merged", *linked_issues.settle(url, finished, rows), *_remove(found)]
 
 
 def _unmergeable(run, row, found, pull):

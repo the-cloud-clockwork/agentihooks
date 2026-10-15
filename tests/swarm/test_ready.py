@@ -28,6 +28,7 @@ QUEUED = PullRequest("OPEN", None, 1, False, True, head=HEAD, queued=True)
 MERGED = PullRequest("MERGED", 2, 1, False, True, head=HEAD)
 CLOSED = PullRequest("CLOSED", None, 1, False, True, head=HEAD)
 REMOVE = ["bash", str(stack.WT_SCRIPT), "done", "engineer-a1b2c3-0001", "--repo", TOP]
+BODY = ["gh", "pr", "view", URL, "--json", "body", "--jq", ".body"]
 
 
 class Shell:
@@ -590,7 +591,7 @@ def test_a_merged_pull_request_closes_the_task_with_the_done_proof_and_removes_t
     assert merging.rows["t1"]["state"] == "done" and merging.rows["t1"]["pr_url"] == URL
     assert merging.rows["t1"]["awaiting"] == ""
     assert merging.rows["t2"]["state"] == "done" and merging.rows["t2"]["pr_url"] == URL
-    assert merging.shell.calls == [REMOVE]
+    assert merging.shell.calls == [BODY, REMOVE]
     assert ready.record(merging.store, "sw", "t1") is None
     assert merging.store.handoff("sw", "t1") == ""
     assert merging.run() == []
@@ -606,14 +607,15 @@ def issues(merging, monkeypatch):
     states, body = {ISSUE: "OPEN", NAMED: "OPEN"}, "Fixes the parser.\n\nCloses #12\n"
 
     def shell(argv):
+        code = 1 if tuple(argv[:3]) in merging.shell.fail else 0
         if argv[:3] == ["gh", "pr", "view"]:
-            assert argv == ["gh", "pr", "view", URL, "--json", "body", "--jq", ".body"]
+            assert argv == BODY
             merging.shell.calls.append(argv)
-            return subprocess.CompletedProcess(argv, 0, stdout=body, stderr="")
+            return subprocess.CompletedProcess(argv, code, stdout=body, stderr=" boom\n")
         if argv[:3] == ["gh", "issue", "view"]:
             assert argv[4:] == ["--json", "state", "--jq", ".state"]
             merging.shell.calls.append(argv)
-            return subprocess.CompletedProcess(argv, 0, stdout=states[argv[3]] + "\n", stderr="")
+            return subprocess.CompletedProcess(argv, code, stdout=states[argv[3]] + "\n", stderr=" boom\n")
         return merging.shell(argv)
 
     monkeypatch.setattr(stack, "shell", shell)
@@ -667,6 +669,45 @@ def test_an_issue_the_swarm_cannot_close_is_reported_and_the_task_still_closes(m
     assert merging.rows["t1"]["state"] == "done"
 
 
+def test_an_issue_whose_state_cannot_be_read_is_reported_without_a_comment(merging, issues):
+    merging.shell.fail = (("gh", "issue", "view"),)
+    actions = merging.run()
+    assert f"could not close issue {ISSUE}: boom" in actions and f"could not close issue {NAMED}: boom" in actions
+    assert issue_writes(merging) == []
+
+
+def test_a_pull_request_body_that_cannot_be_read_still_closes_the_task_issue(merging, issues):
+    merging.shell.fail = (("gh", "pr", "view"),)
+    merging.run()
+    assert issue_writes(merging) == [
+        ["gh", "issue", "comment", ISSUE, "--body", CLOSED_BY],
+        ["gh", "issue", "close", ISSUE],
+    ]
+
+
+def test_a_group_member_issue_closes_with_the_group(merging, issues):
+    del merging.rows["t1"]["issue_url"]
+    merging.rows["t1"]["group_members"] = ["t2"]
+    merging.rows["t2"]["issue_url"] = NAMED
+    merging.run()
+    assert issue_writes(merging) == [
+        ["gh", "issue", "comment", NAMED, "--body", CLOSED_BY],
+        ["gh", "issue", "close", NAMED],
+    ]
+
+
+@pytest.mark.parametrize(
+    ("body", "numbers"),
+    [
+        ("Closes #1, fixes #2 and Resolved: #3", ["1", "2", "3"]),
+        ("close #4 fixed #5 resolves #6 fix #7 closed #8 resolve #9", ["4", "5", "6", "7", "8", "9"]),
+        ("Refs #10, see #11, enclosed #12, prefixes #13", []),
+    ],
+)
+def test_only_closing_keywords_name_an_issue(body, numbers):
+    assert ready.linked_issues.KEYWORD.findall(body) == numbers
+
+
 def test_a_merged_pull_request_without_a_checkout_closes_without_removing_one(merging):
     found = ready.record(merging.store, "sw", "t1")
     found["worktree"] = ""
@@ -674,7 +715,7 @@ def test_a_merged_pull_request_without_a_checkout_closes_without_removing_one(me
     merging.pulls[URL] = MERGED
     assert merging.run() == [f"task t1 done, {URL} merged"]
     assert merging.rows["t1"]["state"] == "done"
-    assert merging.shell.calls == []
+    assert merging.shell.calls == [BODY]
     assert ready.record(merging.store, "sw", "t1") is None
 
 
