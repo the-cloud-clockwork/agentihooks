@@ -6,10 +6,6 @@
  "hooks/context/bash_output_filter.py::truncate_test_output": {
   "PLR0912": 13
  },
- "hooks/context/branch_guard.py::check_branch_guard": {
-  "C901": 15,
-  "PLR0912": 14
- },
  "hooks/context/conditions.py::create_condition": {
   "PLR0913": 11
  },

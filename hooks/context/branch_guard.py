@@ -303,6 +303,58 @@ def _command_lines(command: str) -> str:
     return "\n".join(lines)
 
 
+def _check_pr_creation(check_text: str, command: str, session_id: str) -> None:
+    if _PR_CREATE_PATTERN.search(check_text):
+        base_match = _PR_BASE_RE.search(check_text)
+        if not base_match:
+            log(
+                "branch_guard: PR creation blocked (no explicit base — defaults to main)",
+                {"command": command[:200], "session_id": session_id},
+            )
+            raise BlockAction(
+                "BLOCKED: gh pr create needs an explicit --base.\n"
+                "A bare `gh pr create` targets the default branch implicitly.\n"
+                "Use --base dev for a worktree PR. CI alone opens promotion PRs."
+            )
+        base = base_match.group(1).strip("'\"")
+        if base == "dev":
+            log("branch_guard: PR into dev allowed", {"session_id": session_id})
+            return
+        if base in PROTECTED_PR_BASES:
+            raise BlockAction(
+                f"BLOCKED: agent PR creation into '{base}' is forbidden. CI alone promotes dev into protected branches."
+            )
+        try:
+            from hooks.context.controls_toggle import is_controls_disabled as _ctl_off
+
+            _bypass_active = _ctl_off(session_id)
+        except Exception:
+            _bypass_active = False
+        if not _bypass_active and not _has_pr_signal(session_id):
+            log(
+                "branch_guard: PR creation blocked (no signal)",
+                {"command": command[:200], "base": base, "session_id": session_id},
+            )
+            raise BlockAction(
+                f"BLOCKED: agent PR creation into '{base}' is disabled (CI Manifesto §15).\n"
+                "PRs into dev need no signal; CI alone promotes into main, master and v1.\n"
+                "To unlock for this session, the operator includes a PR phrase in a message\n"
+                "(e.g. 'open a PR', 'create a PR', 'make a PR', 'pr please')."
+            )
+        count = _get_pr_counter(session_id)
+        if not _bypass_active and count >= _PR_SIGNAL_MAX_COUNT:
+            log(
+                "branch_guard: PR creation blocked (counter limit)",
+                {"count": count, "session_id": session_id},
+            )
+            raise BlockAction(
+                f"BLOCKED: PR creation limit reached ({_PR_SIGNAL_MAX_COUNT} PRs this session).\n"
+                "Include a PR phrase in your next message to re-authorize and reset the counter."
+            )
+        new_count = increment_pr_counter(session_id)
+        log("branch_guard: PR creation allowed", {"count": new_count, "base": base, "session_id": session_id})
+
+
 def check_branch_guard(payload: dict) -> None:
     """Raise BlockAction if the Bash command targets main/master, or creates a
     branch without an active branch-creation signal (§14).
@@ -366,55 +418,7 @@ def check_branch_guard(payload: dict) -> None:
                 "(e.g. 'new branch', 'create branch', 'branch allowed')."
             )
 
-    if _PR_CREATE_PATTERN.search(check_text):
-        base_match = _PR_BASE_RE.search(check_text)
-        if not base_match:
-            log(
-                "branch_guard: PR creation blocked (no explicit base — defaults to main)",
-                {"command": command[:200], "session_id": session_id},
-            )
-            raise BlockAction(
-                "BLOCKED: gh pr create needs an explicit --base.\n"
-                "A bare `gh pr create` targets the default branch implicitly.\n"
-                "Use --base dev for a worktree PR. CI alone opens promotion PRs."
-            )
-        base = base_match.group(1).strip("'\"")
-        if base == "dev":
-            log("branch_guard: PR into dev allowed", {"session_id": session_id})
-            return
-        if base in PROTECTED_PR_BASES:
-            raise BlockAction(
-                f"BLOCKED: agent PR creation into '{base}' is forbidden. CI alone promotes dev into protected branches."
-            )
-        try:
-            from hooks.context.controls_toggle import is_controls_disabled as _ctl_off
-
-            _bypass_active = _ctl_off(session_id)
-        except Exception:
-            _bypass_active = False
-        if not _bypass_active and not _has_pr_signal(session_id):
-            log(
-                "branch_guard: PR creation blocked (no signal)",
-                {"command": command[:200], "base": base, "session_id": session_id},
-            )
-            raise BlockAction(
-                f"BLOCKED: agent PR creation into '{base}' is disabled (CI Manifesto §15).\n"
-                "PRs into dev need no signal; CI alone promotes into main, master and v1.\n"
-                "To unlock for this session, the operator includes a PR phrase in a message\n"
-                "(e.g. 'open a PR', 'create a PR', 'make a PR', 'pr please')."
-            )
-        count = _get_pr_counter(session_id)
-        if not _bypass_active and count >= _PR_SIGNAL_MAX_COUNT:
-            log(
-                "branch_guard: PR creation blocked (counter limit)",
-                {"count": count, "session_id": session_id},
-            )
-            raise BlockAction(
-                f"BLOCKED: PR creation limit reached ({_PR_SIGNAL_MAX_COUNT} PRs this session).\n"
-                "Include a PR phrase in your next message to re-authorize and reset the counter."
-            )
-        new_count = increment_pr_counter(session_id)
-        log("branch_guard: PR creation allowed", {"count": new_count, "base": base, "session_id": session_id})
+    _check_pr_creation(check_text, command, session_id)
 
 
 _COMMIT_PATTERN = re.compile(r"\bgit\s+commit\b")
