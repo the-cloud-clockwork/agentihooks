@@ -39,6 +39,8 @@ class Fake:
     def __call__(self, command, **_):
         fields = dict(part.split("=", 1) for part in command[command.index("graphql") + 1 :] if "=" in part)
         self.calls.append(fields)
+        if len(self.calls) > len(self.pages):
+            raise AssertionError(f"page read again: {fields.get('after')}")
         page = self.pages[fields.get("after")]
         return subprocess.CompletedProcess(command, 0, json.dumps(page), "")
 
@@ -77,11 +79,13 @@ def test_every_page_is_read_and_candidates_come_oldest_first():
 
 def test_the_sweep_queues_oldest_first_and_keeps_going_past_a_refusal(monkeypatch):
     pulls = [_pull(1, "2026-10-15T01:00:00Z"), _pull(2, "2026-10-15T02:00:00Z"), _pull(3, "2026-10-15T03:00:00Z")]
-    monkeypatch.setattr(ci_requeue, "candidates", lambda repo, run: pulls)
+    runner = object()
+    monkeypatch.setattr(ci_requeue, "candidates", lambda repo, run: pulls if (repo, run) == ("o/r", runner) else [])
     seen = []
 
     def operate(action, url, run):
         seen.append((action, url))
+        assert run is runner
         if url.endswith("/1"):
             return {"queued": True, "state": "OPEN"}
         if url.endswith("/2"):
@@ -89,7 +93,7 @@ def test_the_sweep_queues_oldest_first_and_keeps_going_past_a_refusal(monkeypatc
         return {"queued": False, "state": "OPEN", "waiting": "checks"}
 
     monkeypatch.setattr(ci_requeue.merge_queue, "operate", operate)
-    rows = list(ci_requeue.sweep("o/r", run=None))
+    rows = list(ci_requeue.sweep("o/r", run=runner))
     assert seen == [("queue", pull["url"]) for pull in pulls]
     assert [row["outcome"] for row in rows] == [
         "queued",
@@ -131,3 +135,30 @@ def test_main_prints_the_list(monkeypatch, capsys):
         "7 2026-10-15T01:00:00Z queued https://github.com/o/r/pull/7",
         "1 pull requests swept",
     ]
+
+
+def test_main_flushes_each_row_and_counts_every_row(monkeypatch):
+    rows = [
+        {"number": n, "created": "2026-10-15T01:00:00Z", "outcome": "queued", "url": f"https://github.com/o/r/pull/{n}"}
+        for n in (7, 8)
+    ]
+    monkeypatch.setattr(ci_requeue, "sweep", lambda repo: iter(rows))
+    printed = []
+    monkeypatch.setattr(ci_requeue, "print", lambda *a, **kw: printed.append((a, kw)), raising=False)
+    ci_requeue.main(["--repo", "o/r"])
+    assert printed == [
+        (("7 2026-10-15T01:00:00Z queued https://github.com/o/r/pull/7",), {"flush": True}),
+        (("8 2026-10-15T01:00:00Z queued https://github.com/o/r/pull/8",), {"flush": True}),
+        (("2 pull requests swept",), {}),
+    ]
+
+
+def test_main_sweeps_agentihooks_by_default_and_describes_itself(monkeypatch, capsys):
+    seen = []
+    monkeypatch.setattr(ci_requeue, "sweep", lambda repo: seen.append(repo) or iter([]))
+    ci_requeue.main([])
+    assert seen == ["The-Cloud-Clockwork/agentihooks"]
+    monkeypatch.setenv("COLUMNS", "200")
+    with pytest.raises(SystemExit):
+        ci_requeue.main(["--help"])
+    assert "Queue every green open pull request into dev, oldest first" in capsys.readouterr().out
