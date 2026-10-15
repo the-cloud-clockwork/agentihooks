@@ -100,6 +100,17 @@ def test_unknown_kind_ranks_with_notices():
     assert fit([("brain", "brain"), ("mystery", "note"), ("refocus", "focus")], 9000) == "focus\nnote\nbrain"
 
 
+@pytest.mark.parametrize(
+    ("severity", "kind"),
+    [("nuclear", "alert"), ("critical", "alert"), ("alert", "brain"), ("warning", "brain"), ("info", "brain")],
+)
+def test_only_critical_and_nuclear_broadcasts_rank_as_alerts(severity, kind):
+    from hooks.context.broadcast import context_kind, format_critical_context
+
+    msg = {"id": "b1", "severity": severity, "message": "signal"}
+    assert context_kind(format_critical_context([msg], "")) == kind
+
+
 def test_without_a_budget_blocks_keep_arrival_order():
     from hooks.context.injection_budget import fit
 

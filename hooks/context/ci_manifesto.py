@@ -331,7 +331,7 @@ def inject_on_session_start() -> None:
         if buffers_single_envelope() or emitter.forced():
             # Codex and Copilot parse hook stdout as ONE JSON object — queue
             # for the single end-of-process flush instead of printing our own.
-            emitter.buffer_context(payload, "enforcement")
+            emitter.buffer_context(payload)
             return
 
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": payload}}))
@@ -369,7 +369,7 @@ def maybe_refresh(session_id: str) -> None:
         if buffers_single_envelope() or emitter.forced():
             # Codex and Copilot parse hook stdout as ONE JSON object — queue
             # for the single end-of-process flush instead of printing our own.
-            emitter.buffer_context(payload, "enforcement")
+            emitter.buffer_context(payload)
             return
 
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": payload}}))

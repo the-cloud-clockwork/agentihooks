@@ -1177,6 +1177,12 @@ def check_and_inject_broadcasts(session_id: str) -> None:
         pass
 
 
+def context_kind(context: str) -> str:
+    """Budget kind of a formatted broadcast block: an alert only when it carries a critical or nuclear message."""
+    labels = (f"[{_SEVERITY_DISPLAY_LABEL[s]}]" for s in ("nuclear", "critical"))
+    return "alert" if any(label in context for label in labels) else "brain"
+
+
 def get_pretool_context(session_id: str, *, claim_unseen: bool = True) -> str | None:
     # get_pretool_broadcasts owns the BROADCAST_CRITICAL_ON_PRETOOL gate; this
     # layer only checks whether broadcasts are enabled at all.

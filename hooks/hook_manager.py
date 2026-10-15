@@ -1714,11 +1714,11 @@ def on_pre_tool_use(payload: dict) -> None:
     # internally; this call site only checks whether broadcasts are enabled.
     if BROADCAST_ENABLED:
         try:
-            from hooks.context.broadcast import get_pretool_context
+            from hooks.context.broadcast import context_kind, get_pretool_context
 
             _broadcast_ctx = get_pretool_context(session_id, claim_unseen=_can_inject_pretool)
             if _broadcast_ctx:
-                _pretool_blocks.append(("alert", _broadcast_ctx))
+                _pretool_blocks.append((context_kind(_broadcast_ctx), _broadcast_ctx))
         except Exception as e:
             log("broadcast pretool failed", {"error": str(e)})
 
