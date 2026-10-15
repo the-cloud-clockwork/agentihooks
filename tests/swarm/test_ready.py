@@ -537,7 +537,6 @@ def test_a_pull_request_the_queue_keeps_refusing_reopens_the_task(merging):
         ]
     assert merging.run(queuer=refused) == [
         f"task t1 reopened, {URL} could not be queued: GraphQL: Pull request is not mergeable",
-        f"removed the worktree {TOP}",
     ]
     assert merging.rows["t1"]["state"] == "open" and merging.rows["t1"]["awaiting"] == "fix"
     assert merging.ledger.comments == [
@@ -566,7 +565,6 @@ def test_an_unknown_merge_error_reopens_the_task_with_its_reason(merging, error)
 
     assert merging.run(queuer=failed) == [
         f"task t1 reopened, {URL} could not be queued: {error}",
-        f"removed the worktree {TOP}",
     ]
     assert merging.rows["t1"]["state"] == "open"
     assert merging.rows["t1"]["claimed_by"] == "" and merging.rows["t1"]["awaiting"] == "fix"
@@ -927,7 +925,6 @@ def test_a_branch_update_github_refuses_reopens_the_task_awaiting_fix(merging):
 
     assert merging.run(queuer=refused_update) == [
         f"task t1 reopened, {URL} could not be queued: {error}",
-        f"removed the worktree {TOP}",
     ]
     assert merging.rows["t1"]["state"] == "open" and merging.rows["t1"]["awaiting"] == "fix"
 
