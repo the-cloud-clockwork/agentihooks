@@ -536,7 +536,7 @@ def test_task_collection_token_survives_chat_and_reload_without_hashing(live, mo
     )
     assert request(live, "GET", "tasks?limit=1") == (200, first)
     assert request(live, "GET", f"tasks?limit=1&cursor={first['next_cursor']}")[0] == 200
-    LedgerClient(service=True).update_task(SLUG, "t2", {"title": "Changed outside page"})
+    LedgerClient(service=True).update_task(SLUG, "t2", {"description": "Changed outside page"})
     status, changed = request(live, "GET", "tasks?limit=1")
     assert status == 200
     assert changed["revision"] != first["revision"]
