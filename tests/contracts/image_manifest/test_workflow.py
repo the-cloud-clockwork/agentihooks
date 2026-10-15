@@ -90,7 +90,8 @@ def test_qualification_precedes_login_and_publication(workflow):
 
 def test_publication_runs_only_on_dev_pushes_or_an_explicit_dispatch(workflow):
     gate = (
-        "(github.event_name == 'push' || inputs.publish)"
+        "github.event_name == 'release'"
+        " || (github.event_name == 'push' || inputs.publish)"
         " && (github.ref == 'refs/heads/dev' || startsWith(github.ref, 'refs/heads/diffcheck/'))"
     )
 
@@ -120,7 +121,10 @@ def test_the_attestation_is_uploaded_even_after_a_failure(workflow):
 def test_checkout_keeps_no_credential_in_the_repository(workflow):
     [checkout] = [step for step in steps(workflow) if step.get("uses", "").startswith("actions/checkout@")]
 
-    assert checkout["with"] == {"persist-credentials": False}
+    assert checkout["with"] == {
+        "fetch-depth": "${{ github.event_name == 'release' && '0' || '1' }}",
+        "persist-credentials": False,
+    }
 
 
 COMMIT = "c" * 40
