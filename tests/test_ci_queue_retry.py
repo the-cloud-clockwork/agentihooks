@@ -246,7 +246,7 @@ def test_gh_api_runs_checked_with_text_output(monkeypatch):
 
     monkeypatch.setattr(ci_queue_retry.subprocess, "run", run)
     assert ci_queue_retry._api("repos/o/r", "-f", "x=1") == "answer"
-    assert calls == [(["gh", "api", "repos/o/r", "-f", "x=1"], {"capture_output": True, "text": True, "check": True})]
+    assert calls == [(["gh", "api", "repos/o/r", "-f", "x=1"], {"stdout": subprocess.PIPE, "text": True, "check": True})]
 
 
 def test_the_pull_request_query_reads_state_head_and_removals(monkeypatch):

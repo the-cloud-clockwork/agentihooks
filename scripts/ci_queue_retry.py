@@ -53,7 +53,7 @@ def decide(run: dict, failed: list[dict], workflow: dict) -> tuple[bool, str]:
 
 
 def _api(*args: str) -> str:
-    return subprocess.run(["gh", "api", *args], capture_output=True, text=True, check=True).stdout
+    return subprocess.run(["gh", "api", *args], stdout=subprocess.PIPE, text=True, check=True).stdout
 
 
 def failed_jobs(repo: str, run_id: int) -> list[dict]:
