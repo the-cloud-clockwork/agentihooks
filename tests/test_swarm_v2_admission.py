@@ -357,10 +357,10 @@ def test_tick_releases_the_reservation_when_the_ledger_refuses_the_claim():
     data, store, gate, ledger, runtime = tick_fixture()
     original = ledger.update_task
 
-    def refuse(slug, task_id, fields, by="swarm", if_state=()):
+    def refuse(slug, task_id, fields, by="swarm", if_state=(), if_match=None):
         if task_id == "t01" and fields.get("claimed_by"):
             return {**ledger.rows[task_id], "state": "claimed", "claimed_by": "someone"}
-        return original(slug, task_id, fields, by, if_state)
+        return original(slug, task_id, fields, by, if_state, if_match)
 
     ledger.update_task = refuse
     actions = tick("sw", store, ledger, runtime, now_ms=data["clock_ms"])
