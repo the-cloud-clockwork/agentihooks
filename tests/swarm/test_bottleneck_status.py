@@ -83,7 +83,7 @@ def test_queue_wait_never_names_the_top_bottleneck(store):
 
 @pytest.mark.parametrize(
     ("launch_seconds", "seat_seconds", "expected"),
-    [(0.0, 0.0, ""), (3600.0, 7200.0, "seat_wait"), (7200.0, 3600.0, "launch_failure")],
+    [(0.0, 0.0, ""), (3600.0, 7200.0, "seat_wait"), (7200.0, 3600.0, "launch_failure"), (1.0, 0.0, "launch_failure")],
 )
 def test_top_bottleneck_uses_positive_task_hours_in_status_and_notices(store, launch_seconds, seat_seconds, expected):
     detect(store, ("build", 3600.0, "rising"))
@@ -103,11 +103,14 @@ def test_top_bottleneck_uses_positive_task_hours_in_status_and_notices(store, la
     assert InboxStore(store.redis).pending_mail("master@sw")[-1].text == lines[0]
 
 
-def test_top_bottleneck_explains_why_the_leading_stage_was_excluded(store):
-    detect(store, ("queue_wait", 257400.0, "rising"), ("launch_failure", 0.0, "falling"), ("seat_wait", 0.0, "falling"))
+@pytest.mark.parametrize(("seconds", "hours"), [(257400.0, "71.5"), (3600000.0, "1000.0")])
+def test_top_bottleneck_explains_why_the_leading_stage_was_excluded(store, seconds, hours):
+    detect(store, ("queue_wait", seconds, "rising"), ("launch_failure", 0.0, "falling"), ("seat_wait", 0.0, "falling"))
     found = bottleneck_status.report(store, "sw", NOW)
-    assert "Leading stage queue wait 71.5 task hours skipped: tasks beyond the seat limit" in bottleneck_status.line(
-        found
+    assert bottleneck_status.line(found) == (
+        "Top bottleneck none; trend none; measured 0 minutes ago; last action none recorded;"
+        f" Leading stage queue wait {hours} task hours skipped:"
+        " tasks beyond the seat limit or ready while a seat was free are excluded from bottleneck ranking"
     )
 
 
