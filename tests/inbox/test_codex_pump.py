@@ -1190,20 +1190,27 @@ class IdlePane:
         self.prompts.append((agent.pane_id, text))
 
 
-def test_an_idle_codex_pane_with_mail_gets_a_pump_delivery_and_no_pane_write(rig):
+@pytest.mark.parametrize("pumped", [True, False])
+def test_an_idle_codex_pane_with_mail_gets_a_pump_delivery_and_no_pane_write(rig, pumped):
     from scripts.inbox import wake
 
-    pane = AgentRecord(ME, "eng", "task", pane_id="p1", harness="codex")
+    seat = f"eng-1@{SLUG}"
+    pane = AgentRecord(ME, "eng", "task", pane_id="p1", harness="codex", seat=seat)
     herdr = IdlePane()
-    rig.pump.start()
-    item = rig.store.send("alice", ME, "hello")
-    assert wake.wake_now(rig.store, SLUG, [pane], herdr, item.created_at + 1, 300_000) == []
+    rig.store.seats.occupy(seat, ME, 1)
+    if pumped:
+        rig.pump.start()
+    item = rig.store.send("alice", seat, "hello")
+    woke = [f"woke {ME} for message {item.id}"]
+    assert wake.wake_now(rig.store, SLUG, [pane], herdr, item.created_at + 1, 300_000) == ([] if pumped else woke)
     assert wake.wake_pass(rig.store, SLUG, [pane], herdr, None, item.created_at + 1, 300_000) == []
-    rig.pump.step()
-    assert herdr.prompts == []
-    assert rig.store.get(item.id).state == "delivered"
-    assert [m for m in rig.server.methods() if m.startswith("turn/")] == ["turn/start"]
-    assert [e.get("event") for e in rig.store.history(item.id)].count(wake.WOKEN) == 0
+    assert herdr.prompts == ([] if pumped else [("p1", wake.WAKE_TEXT)])
+    assert [e.get("event") for e in rig.store.history(item.id)].count(wake.WOKEN) == (0 if pumped else 1)
+    if pumped:
+        rig.pump.step()
+        assert rig.store.get(item.id).state == "delivered"
+        assert [m for m in rig.server.methods() if m.startswith("turn/")] == ["turn/start"]
+        assert herdr.prompts == []
 
 
 def test_a_codex_pane_is_typed_into_only_while_no_pump_owns_its_inbox(rig):
