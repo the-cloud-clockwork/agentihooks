@@ -17,6 +17,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Merge queue unit shards restore the Codex CLI from a cache seeded on `main`
+  instead of downloading it on every queue run.
 - Terminal and worker image tool downloads retry server errors and timeouts
   up to five attempts with exponential backoff, preserving checksum checks.
 - Plain `agentihooks init` installs Claude and Codex; Copilot requires
