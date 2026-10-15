@@ -44,7 +44,6 @@ EXCLUDED = {
     "pages.yml": "a rare manual docs build and deploy; the github-pages environment decides which branches deploy",
     "publish-pypi.yml": "operator release path from main",
     "release.yml": "operator release path; a dry run tags and pushes nothing",
-    "promote.yml": "one serialized release job after a green dev push; no direct dispatch",
     "swarm-image.yml": "a manual dispatch runs no job; its jobs are gated to a dev push",
 }
 if (_WORKFLOWS / "access-audit.yml").exists():
