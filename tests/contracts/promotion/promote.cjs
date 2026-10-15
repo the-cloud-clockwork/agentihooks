@@ -25,7 +25,11 @@ function fixture(options = {}) {
         throw Object.assign(new Error('Not Found'), { status: 404 });
       },
       createRef: async args => { refs.push(['create', args]); },
-      deleteRef: async args => { refs.push(['delete', args]); },
+      deleteRef: async args => {
+        refs.push(['delete', args]);
+        if (options.deleted) throw Object.assign(new Error('Not Found'), { status: 404 });
+        if (options.deleteFailed) throw Object.assign(new Error('Server error'), { status: 500 });
+      },
     },
     repos: { getCommit: async ({ ref }) => ({ data: ref === 'graded' ? commit('graded', 'tree') :
       ref === 'main' ? commit('main', options.already ? 'tree' : 'old') : commit('rebased', options.wrongTree ? 'wrong' : 'tree') }) },
@@ -86,6 +90,19 @@ test('reuses an existing promotion pull request', async () => {
   const f = fixture({ existing: true });
   await promote(f);
   assert.deepEqual(f.writes.map(([kind]) => kind), ['merge']);
+});
+
+test('automatic branch deletion does not prevent release outputs', async () => {
+  const f = fixture({ deleted: true });
+  await promote(f);
+  assert.equal(f.outputs.main, 'rebased');
+  assert.equal(f.outputs.graded, 'graded');
+});
+
+test('snapshot deletion failures are reported', async () => {
+  const f = fixture({ deleteFailed: true });
+  await assert.rejects(promote(f), /Server error/);
+  assert.equal(f.outputs.main, undefined);
 });
 
 test('reuses a matching snapshot left before pull request creation', async () => {

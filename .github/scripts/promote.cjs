@@ -42,7 +42,11 @@ module.exports = async ({ github, context, core, sleep = ms => new Promise(resol
     if (!merged.merged) throw new Error('GitHub refused the promotion merge');
     main = (await github.rest.repos.getCommit({ ...api, ref: merged.sha })).data;
     if (main.commit.tree.sha !== graded.commit.tree.sha) throw new Error('Promoted tree differs from the graded dev tree');
-    await github.rest.git.deleteRef({ ...api, ref });
+    try {
+      await github.rest.git.deleteRef({ ...api, ref });
+    } catch (error) {
+      if (error.status !== 404) throw error;
+    }
     core.setOutput('pull-request', pull.html_url);
   }
   core.setOutput('graded', context.sha);
