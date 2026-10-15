@@ -468,7 +468,8 @@ def test_codex_push_in_bundle_worktree_uses_bundle_repository(repo, tmp_path, mo
     monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "push")
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@test")
     monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
-    monkeypatch.setenv("WORKTREE_ROOT", str(tmp_path / "worktrees"))
+    root = tmp_path / ("unused" if directory == "task" else "worktrees")
+    monkeypatch.setenv("WORKTREE_ROOT", str(root))
     payload = {"tool_name": "exec_command", "tool_input": {"command": "git push -u origin HEAD"}, "cwd": str(repo)}
     if directory == "workdir":
         payload["tool_input"]["workdir"] = str(worktree)
