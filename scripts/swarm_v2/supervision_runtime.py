@@ -85,13 +85,13 @@ class Supervisor:
             start_new_session=True,
         )
 
-    def herdr(self, command: list[str]) -> dict:
+    def herdr(self, command: list[str], deadline: float) -> dict:
         result = subprocess.run(
             [*self.launch.herdr[:-1], *command],
             env=self.environment,
             stdin=subprocess.DEVNULL,
             capture_output=True,
-            timeout=min(0.5, self.launch.budgets.startup),
+            timeout=max(0, deadline - time.monotonic()),
             check=True,
         )
         return json.loads(result.stdout) if result.stdout.strip() else {}
@@ -106,7 +106,7 @@ class Supervisor:
                 return False
             if role == "herdr":
                 try:
-                    self.herdr(["workspace", "list"])
+                    self.herdr(["workspace", "list"], min(deadline, time.monotonic() + 0.5))
                     return True
                 except (subprocess.SubprocessError, ValueError):
                     pass
@@ -133,10 +133,10 @@ class Supervisor:
         )
         command = [sys.executable, "-m", "scripts.swarm_v2.supervision_agent", *self.opening(), *agent]
         self.phase = "workspace_create"
-        tab = self.herdr(["workspace", "create", "--cwd", str(directory), "--no-focus"])
+        tab = self.herdr(["workspace", "create", "--cwd", str(directory), "--no-focus"], deadline)
         pane = tab["result"]["root_pane"]["pane_id"]
         self.phase = "agent_launch"
-        self.herdr(["pane", "run", pane, shlex.join(command)])
+        self.herdr(["pane", "run", pane, shlex.join(command)], deadline)
         if not self.ready("agent", deadline):
             return "termination" if self.stop else "agent_startup_failure"
         if self.launch.prompt:
