@@ -364,6 +364,31 @@ def test_repeated_ticks_never_respawn_a_released_task_waiting_on_its_pull_reques
     assert attempts == ([URL] * 4 if pull is GREEN else [URL] if pull is QUEUED else [])
 
 
+@pytest.mark.parametrize("trigger", ["queue_exit", "ready_mark"])
+def test_reopening_keeps_a_live_claimant_instead_of_spawning_a_successor(released, monkeypatch, trigger):
+    from scripts.swarm.ledger_events import pull_request
+
+    store, ledger, _, doc = released
+    runtime = cli.HerdrRuntime()
+    runtime.stuck.add(AGENT)
+    if trigger == "ready_mark":
+        assert release(doc) == 0
+        pull = RED
+    else:
+        pull = pull_request(
+            {"state": "OPEN", "mergeQueueEntry": {"id": "entry", "state": "UNMERGEABLE"}}
+        )
+    attempts = list(runtime.spawned)
+    rows = ledger.rows
+    run = ready.Pass(store, "sw", ledger, lambda url: pull, lambda url: pull, NOW, lambda *args: {"queued": False})
+    ready.merge_pass(run, rows)
+    tick.tick("sw", store, ledger, runtime, NOW + 1_000)
+    assert runtime.spawned == attempts
+    assert store.claimant("sw", "t1") == AGENT
+    assert rows["t1"]["claimed_by"] == AGENT
+    assert AGENT in runtime.live_names()
+
+
 def test_the_stop_gate_lets_a_ready_engineer_stop(released, tmp_path):
     store, ledger, _, doc = released
     ledger.pulls[URL] = GREEN
