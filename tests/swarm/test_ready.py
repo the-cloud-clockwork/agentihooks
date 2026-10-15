@@ -371,6 +371,7 @@ def test_reopening_keeps_a_live_claimant_instead_of_spawning_a_successor(release
     store, ledger, _, doc = released
     runtime = cli.HerdrRuntime()
     runtime.stuck.add(AGENT)
+    monkeypatch.setattr("scripts.swarm.runtime.HerdrRuntime", lambda: runtime)
     if trigger == "ready_mark":
         assert release(doc) == 0
         pull = RED
@@ -531,6 +532,7 @@ def merging(monkeypatch):
     store.claim("sw", "t1", AGENT, 60_000)
     ready.save(store, "sw", "t1", ready.held_record(URL, HEAD, TOP, AGENT, NOW))
     pulls, queued, shell = {URL: RUNNING}, [], Shell()
+    monkeypatch.setattr("scripts.swarm.runtime.HerdrRuntime.live_names", lambda self: set())
     monkeypatch.setattr(stack, "shell", shell)
 
     def queue(action, url):

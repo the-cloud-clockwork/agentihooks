@@ -262,7 +262,11 @@ def _finish(run, rows, row, found):
 
 
 def _owners(run, task_id):
-    return [agent for agent in run.store.agents(run.slug) if agent.task == task_id and agent.state != "finished"]
+    from scripts.swarm.runtime import HerdrRuntime
+
+    agents = [agent for agent in run.store.agents(run.slug) if agent.task == task_id]
+    live = HerdrRuntime().live_names() if any(agent.state == "finished" for agent in agents) else set()
+    return [agent for agent in agents if agent.state != "finished" or agent.name in live]
 
 
 def _working_owner(run, row, pull):
