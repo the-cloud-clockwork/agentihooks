@@ -20,6 +20,9 @@ jobs:
     concurrency:
       group: release-version
       cancel-in-progress: false
+    outputs:
+      version: ${{ steps.version.outputs.next }}
+      main: ${{ steps.promote.outputs.main }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -88,3 +91,25 @@ jobs:
           if ! gh release view "v$NEXT" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release create "v$NEXT" --repo "$GITHUB_REPOSITORY" --title "v$NEXT" --generate-notes --latest --verify-tag
           fi
+
+  swarm-image:
+    needs: promote
+    if: needs.promote.outputs.version != ''
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/swarm-image.yml
+    with:
+      version: ${{ needs.promote.outputs.version }}
+      ref: ${{ needs.promote.outputs.main }}
+
+  worker-image:
+    needs: promote
+    if: needs.promote.outputs.version != ''
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/swarm-node-image.yml
+    with:
+      version: ${{ needs.promote.outputs.version }}
+      ref: ${{ needs.promote.outputs.main }}

@@ -3,13 +3,23 @@ name: Swarm image
 on:
   push:
     branches: [dev]
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: false
+        default: ""
+      ref:
+        type: string
+        required: false
+        default: ""
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: swarm-image-${{ github.event.pull_request.number || github.ref }}
+  group: swarm-image-${{ inputs.version && 'release' || github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -23,15 +33,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.ref || github.sha }}
           persist-credentials: false
       - id: tags
         env:
           IMAGE: ghcr.io/the-cloud-clockwork/agentihooks-swarm
+          VERSION: ${{ inputs.version }}
         run: |
           {
             echo 'tags<<EOF'
-            echo "$IMAGE:dev"
-            echo "$IMAGE:dev-${GITHUB_SHA:0:7}"
+            if [[ -n "$VERSION" ]]; then
+              echo "$IMAGE:$VERSION"
+              echo "$IMAGE:release"
+            else
+              echo "$IMAGE:dev"
+              echo "$IMAGE:dev-${GITHUB_SHA:0:7}"
+            fi
             echo EOF
           } >> "$GITHUB_OUTPUT"
       - name: Log in to GHCR

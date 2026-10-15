@@ -102,7 +102,9 @@ def test_only_dev_moves_the_floating_dev_tag_to_the_published_digest(workflow):
     names = [step.get("name") for step in steps(workflow)]
     move = named(workflow, "Move the floating dev tag to the published digest")
 
-    assert move["if"] == "(github.event_name == 'push' || inputs.publish) && github.ref == 'refs/heads/dev'"
+    assert move["if"] == (
+        "(github.event_name == 'push' || inputs.publish) && github.ref == 'refs/heads/dev' && inputs.version == ''"
+    )
     assert move["run"].splitlines() == [
         'digest="$(jq -r .digest "$RUNNER_TEMP/worker-image-attestation/candidate/promoted.json")"',
         'docker buildx imagetools create --tag "$REPOSITORY:dev" "$REPOSITORY@$digest"',
@@ -120,7 +122,7 @@ def test_the_attestation_is_uploaded_even_after_a_failure(workflow):
 def test_checkout_keeps_no_credential_in_the_repository(workflow):
     [checkout] = [step for step in steps(workflow) if step.get("uses", "").startswith("actions/checkout@")]
 
-    assert checkout["with"] == {"persist-credentials": False}
+    assert checkout["with"] == {"ref": "${{ inputs.ref || github.sha }}", "persist-credentials": False}
 
 
 COMMIT = "c" * 40

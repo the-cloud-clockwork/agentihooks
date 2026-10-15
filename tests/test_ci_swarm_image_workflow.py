@@ -61,7 +61,7 @@ def test_swarm_publish_builds_locally_and_pushes_the_existing_tags_and_cache(tmp
     output = tmp_path / "output"
     subprocess.run(
         ["bash", "-e", "-c", tags["run"]],
-        env=dict(os.environ, **tags["env"], GITHUB_SHA="123456789abcdef", GITHUB_OUTPUT=str(output)),
+        env=dict(os.environ, **tags["env"], VERSION="", GITHUB_SHA="123456789abcdef", GITHUB_OUTPUT=str(output)),
         check=True,
     )
     assert output.read_text().splitlines() == [
