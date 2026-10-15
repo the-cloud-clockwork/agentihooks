@@ -7,6 +7,8 @@ doctrine goes first and the lowest priority blocks give way.
 
 from __future__ import annotations
 
+from itertools import accumulate
+
 KINDS = ("inbox", "alert", "enforcement", "condition", "refocus", "other", "brain", "tool_memory")
 # Rendering an inbox block marks its items delivered, so it is never shortened or dropped.
 _WHOLE = frozenset({"inbox"})
@@ -42,21 +44,15 @@ def _rank(kind: str) -> int:
     return KINDS.index(kind) if kind in KINDS else KINDS.index("other")
 
 
+def _label(kind: str) -> str:
+    return _LABELS.get(kind, _LABELS["other"])
+
+
 def _shorten(text: str, room: int) -> str:
-    kept: list[str] = []
-    used = 0
-    for line in text.split("\n"):
-        cost = units(line) + (1 if kept else 0)
-        if used + cost > room:
-            break
-        kept.append(line)
-        used += cost
-    if kept:
-        return "\n".join(kept)
-    cut = text[:room]
-    while units(cut) > room:
-        cut = cut[: len(cut) - max(1, (units(cut) - room + 1) // 2)]
-    return cut
+    """Longest prefix within *room*, ending at a line end when it holds one."""
+    end = sum(1 for size in accumulate(units(ch) for ch in text) if size <= room)
+    head, newline, _ = text[: end + 1].rpartition("\n")
+    return head if newline else text[:end]
 
 
 def fit(blocks: list[tuple[str, str]], budget: int | None, sep: str = "\n") -> str:
@@ -73,16 +69,15 @@ def fit(blocks: list[tuple[str, str]], budget: int | None, sep: str = "\n") -> s
     dropped: list[str] = []
     shortened: list[str] = []
     for kind, text in ordered:
-        avail = room - (units(sep) if kept else 0)
-        whole = units(text) <= avail or kind in _WHOLE
-        part = text if whole else _shorten(text, avail) if avail > 0 else ""
-        if part is not text and units(part) < min(_MIN_SHORTENED, units(text) // 2):
-            part = ""
-        if part:
-            kept.append(part)
-            room = avail - units(part)
-        if part is not text:
-            (shortened if part else dropped).append(_LABELS.get(kind, _LABELS["other"]))
+        avail = room - units(sep) * bool(kept)
+        part = text if units(text) <= avail or kind in _WHOLE else _shorten(text, avail)
+        if units(part) < min(_MIN_SHORTENED, units(text) // 2):
+            dropped.append(_label(kind))
+            continue
+        kept.append(part)
+        room = avail - units(part)
+        if part != text:
+            shortened.append(_label(kind))
     notes = [f"left out {', '.join(dict.fromkeys(dropped))}"] if dropped else []
     if shortened:
         notes.append(f"shortened {', '.join(dict.fromkeys(shortened))}")
