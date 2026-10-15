@@ -647,3 +647,27 @@ def test_tool_download_does_not_retry_permanent_errors(locked, tmp_path, monkeyp
     opened.assert_called_once_with(tool["url"], timeout=120)
     sleeps.assert_not_called()
     assert not (tmp_path / tool["sha256"]).exists()
+
+
+@pytest.mark.parametrize("action", ["install", "download"])
+def test_image_tool_commands_reject_bad_checksums_without_retry(locked, tmp_path, monkeypatch, action):
+    path, lock, payloads = locked
+    herdr = lock["tools"]["herdr"]
+    opened = Mock(side_effect=lambda url, timeout: io.BytesIO(b"corrupt" if url == herdr["url"] else payloads[url]))
+    sleeps = Mock()
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", opened)
+    monkeypatch.setattr("time.sleep", sleeps)
+    install = worker_image.install_tools
+    monkeypatch.setattr(worker_image, "install_tools", lambda lock, _, cache: install(lock, tmp_path, cache))
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    argv = ["worker_image", action, "--lock", str(path), "--cache", str(cache)]
+    if action == "install":
+        argv.extend(["--tool", "herdr"])
+    monkeypatch.setattr("sys.argv", argv)
+    with pytest.raises(ValueError, match="artifact checksum mismatch: herdr"):
+        worker_image.main()
+    assert opened.call_args_list.count(call(herdr["url"], timeout=120)) == 1
+    sleeps.assert_not_called()
+    assert not (cache / herdr["sha256"]).exists()
+    assert not (tmp_path / "herdr").exists()
