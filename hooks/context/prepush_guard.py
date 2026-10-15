@@ -49,9 +49,26 @@ def _own_worktree(cwd: Path, name: str) -> Path | None:
     return found[0] if len(found) == 1 else None
 
 
+def _branch_worktree(cwd: Path, task: dict) -> Path | None:
+    from scripts.gates.push_stop import default_root
+    from scripts.swarm.naming import plain
+    from scripts.swarm.snapshot import worktrees
+
+    branch = task["branch"]
+    candidates = [cwd]
+    if task.get("worktree"):
+        candidates.append(Path(task["worktree"]))
+    candidates.extend(path for path in Path(default_root()).glob("*/*") if path.name == plain(branch))
+    found = {
+        Path(target)
+        for candidate in candidates
+        if (target := worktrees(str(candidate), [branch])[branch])
+    }
+    return found.pop() if len(found) == 1 else None
+
+
 def _swarm_cwd(cwd: Path) -> Path:
     from scripts.gates.base import Who
-    from scripts.swarm.snapshot import worktrees
     from scripts.swarm_ledger.repository.sqlite import read_ledger
 
     who = Who.from_env()
@@ -65,8 +82,7 @@ def _swarm_cwd(cwd: Path) -> Path:
     branch = task.get("branch")
     if not branch:
         return _own_worktree(cwd, who.name) or cwd
-    target = worktrees(str(cwd), [branch])[branch]
-    return Path(target) if target else cwd
+    return _branch_worktree(cwd, task) or cwd
 
 
 def _unpassed(payload: dict) -> Path | None:
