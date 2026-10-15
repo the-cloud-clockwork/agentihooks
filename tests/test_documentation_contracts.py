@@ -92,6 +92,14 @@ def test_queue_request_preserves_requirements_and_deduplicates_across_sessions(w
     ledger.source.update(description="Explain retry limits", pr_url="https://example.test/pull/1")
     monkeypatch.setattr(session.documentation.runner, "decide", answer())
     calls = []
+    original_lookup = ledger.task
+
+    def lookup(slug, task_id):
+        assert slug == "fixture"
+        assert task_id
+        return original_lookup(slug, task_id)
+
+    monkeypatch.setattr(ledger, "task", lookup)
     original = ledger.add_task
 
     def add(slug, fields, by):
@@ -192,3 +200,16 @@ def test_missing_identity_and_non_repository_end_do_not_launch_workers(world, mo
     session.end({"session_id": "missing-directory", "cwd": str(root / "missing")})
     assert jobs == []
     assert logged == [("documentation snapshot unavailable", {"error": "FileNotFoundError"})]
+
+
+def test_source_and_commit_metadata_are_redacted_before_classification(tmp_path):
+    base = repository(tmp_path)
+    marker = "fixture" * 8
+    subject = "API_TOKEN=" + marker
+    (tmp_path / "policy.py").write_text("enabled = True\n")
+    git(tmp_path, "add", "policy.py")
+    git(tmp_path, "commit", "-qm", subject)
+    result = evidence.collect(tmp_path, base, {"description": subject})
+    assert marker not in result["summary"]
+    assert marker not in json.dumps(result["source_task"])
+    assert result["source_task"]["description"]
