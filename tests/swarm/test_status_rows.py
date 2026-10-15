@@ -211,18 +211,19 @@ def test_status_agent_list_omits_gone_processes_and_keeps_live_processes(store, 
 
 @pytest.mark.parametrize(
     ("backend", "target"),
-    [("kubernetes", {}), ("local", {"host_id": "other-hive"})],
+    [("kubernetes", {"pod_namespace": "workers", "pod_name": "worker"}), ("local", {"host_id": "other-hive"})],
 )
 def test_status_keeps_remote_agents_outside_the_local_process_table(store, monkeypatch, backend, target):
     from scripts.swarm.runtime import HerdrRuntime
 
     store.create(SwarmConfig("sw", "/repo", 1, 1))
-    store.put_agent(
-        "sw", AgentRecord("remote", "eng", "t1", seat="eng-1@sw", runtime_backend=backend, runtime_target=target)
+    name = store.next_name("sw", "eng", 1_000)
+    store.start_execution(
+        "sw", AgentRecord(name, "eng", "t1", seat="eng-1@sw", runtime_backend=backend, runtime_target=target)
     )
     monkeypatch.setattr(HerdrRuntime, "live_names", lambda self: set())
     report = status.status_report(store, "sw", {"tasks": []})
-    assert [agent["name"] for agent in report["agents"]] == ["remote"]
+    assert [agent["name"] for agent in report["agents"]] == [name]
 
 
 def test_status_raises_a_base_miss_as_a_finding(store, monkeypatch):
