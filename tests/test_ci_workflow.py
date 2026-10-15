@@ -481,12 +481,12 @@ def test_stored_durations_read_the_split_jobs_collected_suite(tmp_path, monkeypa
     (tmp_path / ".test_durations").write_text(json.dumps(dict.fromkeys(nodeids[: 100 - missing], 0.1)))
     (tmp_path / "collected.json").write_text(json.dumps(nodeids))
     monkeypatch.setattr(sys.modules[__name__], "_ROOT", tmp_path)
-    session = nodeids[:1] if selected else None
+    selected_nodeids = nodeids[:1] if selected else None
     if missing <= 10:
-        _check_stored_durations(session)
+        _check_stored_durations(selected_nodeids)
     else:
         with pytest.raises(AssertionError, match=f"{missing} of 100 tests"):
-            _check_stored_durations(session)
+            _check_stored_durations(selected_nodeids)
 
 
 @pytest.mark.parametrize("missing", [0, 1, 2, 3, 10])
