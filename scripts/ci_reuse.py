@@ -50,14 +50,16 @@ SELECTED_SKIPS = (
 
 QUEUE_TIER = """if [[ "${EVENT:-}" == merge_group || "${EVENT:-}" == pull_request ]]; then
   if ! jq -e --arg event "$EVENT" --arg mutation "$MUTATION" '
-    (if $event == "merge_group" then
+    (.select.outputs.scope // "") as $scope
+    | (if $event == "merge_group" then
       ["durations", "split", "unit", "shard-check", "test-count"]
     else
-      ["durations", "split", "unit", "shard-check", "test-count", "lint", "semgrep", "sonar"]
+      ["durations", "select", "test-count", "lint", "semgrep", "sonar"]
+      + (if $scope == "full" then ["split", "unit", "shard-check"] elif $scope == "selected" then ["unit-selected"] else [] end)
       + (if $mutation == "true" then ["mutation-plan", "mutation-stats", "mutation"] else [] end)
     end) as $required
     | . as $jobs
-    | ($event == "merge_group" or $mutation == "true" or $mutation == "false")
+    | ($event == "merge_group" or (($mutation == "true" or $mutation == "false") and ($scope == "full" or $scope == "selected" or $scope == "none")))
       and all($required[]; . as $job | $jobs[$job].result == "success")
       and all(to_entries[]; .key as $job |
         if $required | index($job) then .value.result == "success" else .value.result == "skipped" end)
@@ -77,7 +79,7 @@ def gate_steps(queue_coverage: bool = False, selected: bool = False, queue_tier:
             '$event != "merge_group"))',
             '$event != "merge_group") or (.key == "coverage-ratchet" and .value.result == "skipped" and $event == "merge_group"))',
         )
-    if selected:
+    if selected or queue_tier:
         run = run.replace(*SELECTED_SCOPE).replace(*SELECTED_SKIPS)
     if queue_tier:
         run = QUEUE_TIER + run

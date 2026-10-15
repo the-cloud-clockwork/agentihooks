@@ -100,6 +100,59 @@ def test_ruling_follows_the_pull_request_then_the_wait():
     assert ruling(task, CLOSED, {"until": 1}) == ("", "")
 
 
+@pytest.mark.parametrize("kind", ["task", "merge"])
+def test_a_stop_on_red_checks_preserves_an_open_dependency_wait(rig, kind):
+    rig.task["pr_url"], rig.pulls[URL] = URL, RED
+    target = "repair" if kind == "task" else URL + "0"
+    rig.ledger.rows["repair"] = {"id": "repair", "state": "pr"}
+    rig.pulls[URL + "0"] = RED
+    on = {"kind": kind, "target": target}
+    idle.declare_wait(rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, "shared repair", rig.clock[0], on=on)
+    assert rig.stop() == Decision()
+    assert rig.stop() == Decision()
+    assert rig.stop() == Decision()
+    assert rig.task["state"] == "claimed"
+    assert idle.wait(rig.store.redis, SLUG, ME)["on"] == on
+    if kind == "task":
+        rig.ledger.rows["repair"]["state"] = "done"
+    else:
+        rig.pulls[target] = MERGED
+    assert not rig.stop().allowed
+
+
+@pytest.mark.parametrize(
+    "on, expired",
+    [
+        ({"kind": "task", "target": "t1"}, False),
+        ({"kind": "task", "target": "gone"}, False),
+        ({"kind": "merge", "target": URL}, False),
+        ({"kind": "reply", "target": "review"}, False),
+        ({"kind": "task", "target": "repair"}, True),
+    ],
+)
+def test_red_checks_still_refuse_a_wait_that_is_not_a_live_dependency(rig, on, expired):
+    rig.task["pr_url"], rig.pulls[URL] = URL, RED
+    rig.ledger.rows["repair"] = {"id": "repair", "state": "pr"}
+    until = rig.clock[0] - 1 if expired else rig.clock[0] + 60_000
+    idle.declare_wait(rig.store.redis, SLUG, ME, until, "repair", rig.clock[0] - 120_000, on=on)
+    assert not rig.stop().allowed
+
+
+def test_a_merged_task_still_owes_closure_while_a_dependency_is_open(rig):
+    rig.task["pr_url"], rig.pulls[URL] = URL, MERGED
+    rig.ledger.rows["repair"] = {"id": "repair", "state": "pr"}
+    idle.declare_wait(
+        rig.store.redis,
+        SLUG,
+        ME,
+        rig.clock[0] + 60_000,
+        "repair",
+        rig.clock[0],
+        on={"kind": "task", "target": "repair"},
+    )
+    assert not rig.stop().allowed
+
+
 @pytest.mark.parametrize("queued", [False, True])
 def test_a_red_job_outside_a_passed_required_gate_rules_as_green_and_a_red_gate_as_red(queued):
     task = {"id": "t1", "pr_url": URL}
