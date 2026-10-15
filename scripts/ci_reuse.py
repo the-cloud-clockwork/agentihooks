@@ -51,8 +51,9 @@ PROMOTION_REUSE = (
     r'\1  echo "::error::A push or dispatch run never reuses a queue result."\n  exit 1\nfi\n',
 )
 PROMOTION_SKIPS = (
-    ' or (.key == "queue-baseline" and .value.result == "skipped" and $event != "merge_group"))',
-    ' or ((.key == "lint" or .key == "semgrep" or .key == "test-count") and .value.result == "skipped" and $event == "push"))',
+    '(.key == "queue-baseline" and .value.result == "skipped" and $event != "merge_group")',
+    '(.key == "queue-baseline" and .value.result == "skipped" and $event != "merge_group")'
+    ' or ((.key == "lint" or .key == "semgrep" or .key == "test-count") and .value.result == "skipped" and $event == "push")',
 )
 
 
