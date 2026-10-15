@@ -173,9 +173,9 @@ def test_unresolved_merge_stays_closed(session, monkeypatch, failure):
 def test_loaded_legacy_signals_cannot_expand_publication(session, tmp_path, monkeypatch):
     manifesto = tmp_path / "manifesto.md"
     manifesto.write_text(
-        "## 9. Release Gate Signals\n"
+        "**Release-gate signals**\n"
         "```\nship it\nrelease dance\n```\n"
-        "## 15. PR Creation Signals\n"
+        "## 15. PR Discipline\n### Unlock (per-turn operator signal)\n"
         "```\nopen a pr\nrelease dance\n```\n"
     )
     monkeypatch.setattr(ci_manifesto, "_manifesto_paths", lambda: [manifesto])
