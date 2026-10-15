@@ -69,16 +69,60 @@ def checkout_fields(root: Path) -> dict:
     }
 
 
+def repository_root(repo: Path) -> Path:
+    return Path(git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")).parent
+
+
+def repository_task(repo: Path, task: dict) -> dict:
+    branch = task.get("repository_branches", {}).get(str(repo))
+    if branch is None:
+        branch = task.get("branch", "")
+        remote = task.get("branch_repo")
+        if remote and stack.repo_key(remote) != stack.repo_key(git(repo, "remote", "get-url", "origin")):
+            branch = ""
+        elif not remote and len(task.get("repositories", [])) > 1:
+            branch = ""
+    return {**task, "branch": require_branch(branch) if branch else ""}
+
+
+def publishing_root(repo: str, task: dict, agent: AgentRecord) -> tuple[Path | None, Path, dict]:
+    current = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    if current.returncode == 0 and (Path(current.stdout.strip()) / ".git").is_file():
+        root = Path(current.stdout.strip())
+        primary = repository_root(root)
+        declared = task.get("repositories")
+        if declared and primary not in {repository_root(Path(value)) for value in declared}:
+            raise SwarmError(f"current worktree repository {primary} is not in the task repositories")
+        scoped = repository_task(primary, task)
+        branch = require_branch(git(root, "branch", "--show-current"))
+        own = re.fullmatch(rf"{re.escape(naming.plain(agent.name))}(?:-\d+)?", branch)
+        if not (own or branch == scoped.get("branch")):
+            raise SwarmError(f"current worktree {root} does not belong to this task")
+        return root, primary, scoped
+    repositories = task.get("repositories") or [repo]
+    if len(repositories) != 1:
+        raise SwarmError("publish from the task worktree to select one of its repositories")
+    primary = repository_root(Path(repositories[0]))
+    scoped = repository_task(primary, task)
+    return existing(primary, scoped, agent), primary, scoped
+
+
 def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> dict:
     task = task_row(slug, agent, ledger)
-    root = existing(Path(repo), task, agent)
-    if root is None:
-        command = ["bash", str(stack.WT_SCRIPT), "new", "--repo", repo]
-        if task.get("branch"):
-            command.extend(["--from", f"origin/{task['branch']}"])
-        output = execute(command, Path(repo))
-        root = Path(output.splitlines()[-1])
-    return checkout_fields(root)
+    fields = []
+    repositories = dict.fromkeys(repository_root(Path(value)) for value in task.get("repositories") or [repo])
+    for repository in repositories:
+        scoped = repository_task(repository, task)
+        root = existing(repository, scoped, agent)
+        if root is None:
+            command = ["bash", str(stack.WT_SCRIPT), "new", "--repo", str(repository)]
+            if scoped.get("branch"):
+                command.extend(["--from", f"origin/{scoped['branch']}"])
+            output = execute(command, repository)
+            root = Path(output.splitlines()[-1])
+        fields.append({**checkout_fields(root), "repository": str(repository)})
+    result = fields[0] if len(fields) == 1 else {"worktrees": fields}
+    return {**result, "repository_source": "task" if task.get("repositories") else "swarm default"}
 
 
 def selected_files(root: Path, files: list[str]) -> list[str]:
@@ -135,14 +179,25 @@ def gate_python(repo: Path) -> str:
     raise SwarmError(f"no python with ruff for the prepush gate; install the dev extra into {venv}")
 
 
+def native_gate(python: str, root: Path) -> list[str]:
+    if (root / "scripts" / "__init__.py").is_file():
+        return [python, "-m", "scripts.ci_prepush"]
+    code = (
+        "import runpy, sys, types; "
+        "package = types.ModuleType('scripts'); package.__path__ = [sys.argv[1]]; "
+        "sys.modules['scripts'] = package; runpy.run_module('scripts.ci_prepush', run_name='__main__')"
+    )
+    return [python, "-c", code, str(root / "scripts")]
+
+
 def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, message: str, files: list[str]) -> dict:
     task = task_row(slug, agent, ledger)
-    root = existing(Path(repo), task, agent)
+    root, primary, scoped = publishing_root(repo, task, agent)
     if root is None:
         raise SwarmError(f"task worktree missing; Next: agentihooks swarm {shlex.quote(slug)} prepare")
     fields = checkout_fields(root)
-    if task.get("branch"):
-        fields["branch"] = task["branch"]
+    if scoped.get("branch"):
+        fields["branch"] = scoped["branch"]
     selected = selected_files(root, files)
     retry = shlex.join(["agentihooks", "swarm", slug, "publish", "--message", message, "--", *files])
     try:
@@ -151,11 +206,23 @@ def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, mess
             check_build(root)
             git(root, "commit", "-m", message)
         head = git(root, "rev-parse", "HEAD")
-        execute([gate_python(Path(repo)), "-m", "scripts.ci_prepush"], root)
+        python = gate_python(primary)
+        source = root / "scripts" / "ci_prepush"
+        if (source / "__main__.py").is_file() or source.with_suffix(".py").is_file():
+            fields["gate"] = str(source if source.is_dir() else source.with_suffix(".py"))
+            execute(native_gate(python, root), root)
+        else:
+            fields["gate"] = "AgentiHooks touched Python fallback"
+            execute([python, "-I", str(Path(__file__).with_name("publish_gate.py"))], root)
         if not ci_prepush.passed(root) or git(root, "rev-parse", "HEAD") != head:
             raise SwarmError("the committed HEAD has no passing prepush evidence")
         git(root, "push", "-u", "origin", f"HEAD:{fields['branch']}")
     except SwarmError as exc:
-        raise SwarmError(f"{exc}; Next: {retry}") from exc
-    ledger.update_task(slug, agent.task, {key: fields[key] for key in ("branch", "branch_repo")}, by=agent.name)
+        detail = str(exc)
+        if fields.get("gate") == "AgentiHooks touched Python fallback":
+            detail = f"AgentiHooks touched Python fallback for {root}: {detail}"
+        raise SwarmError(f"{detail}; Next: {retry}") from exc
+    update = {key: fields[key] for key in ("branch", "branch_repo")}
+    update["repository_branches"] = {**task.get("repository_branches", {}), str(primary): fields["branch"]}
+    ledger.update_task(slug, agent.task, update, by=agent.name)
     return {**fields, "head": head}

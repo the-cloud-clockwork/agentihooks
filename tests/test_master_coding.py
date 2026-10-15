@@ -193,7 +193,7 @@ def test_the_typed_prompt_opens_the_window_and_tells_the_master(master, monkeypa
     shown = Mock()
     monkeypatch.setattr("hooks.common.inject_context", shown)
     hook_manager._master_coding({"session_id": SID, "prompt": "allow-master-coding"}, True)
-    shown.assert_called_once_with(master_coding.NOTICES["open"], also_log=False, skip_compression=True)
+    shown.assert_called_once_with(master_coding.NOTICES["open"], also_log=False, skip_compression=True, kind="alert")
     assert master_coding.is_open(SID)
 
 
