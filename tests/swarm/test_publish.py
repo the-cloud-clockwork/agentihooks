@@ -8,7 +8,7 @@ from hooks.context.prepush_guard import check_prepush
 from hooks.hook_manager import BlockAction
 from scripts.swarm.store import AgentRecord
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
 
 def git(root, *args):
@@ -515,7 +515,6 @@ def test_cli_prepares_and_publishes_from_the_primary_checkout(publication, monke
     assert git(publication.repo, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
 
 
-@pytest.mark.xdist_group("fakeredis")
 def test_publication_preserves_the_enforced_build_gate(publication, monkeypatch):
     import fakeredis
 
