@@ -362,7 +362,7 @@ class Pump:
             self.receipts.reject(queued.id, owner, RELEASED)
         self.queue.clear()
 
-    def _arbitrate(self, text: str, fresh: bool = False) -> None:
+    def _arbitrate(self, text: str, fresh: bool) -> None:
         try:
             self._send(text, fresh)
         except protocol.Refused as refused:
@@ -372,7 +372,7 @@ class Pump:
                 raise protocol.Refused(str(refused)) from lost
             self._send(text, fresh)
 
-    def _send(self, text: str, fresh: bool = False) -> None:
+    def _send(self, text: str, fresh: bool) -> None:
         def send():
             connection, thread = self.binding.connection, self.binding.thread_id
             if self.state.active_turn and fresh:

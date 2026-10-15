@@ -528,6 +528,37 @@ def test_a_nudge_racing_a_turn_end_refreshes_and_starts_a_turn(rig):
     assert rig.store.get(item.id).state == "delivered" and len(rig.server.turns) == 2
 
 
+def test_a_nudge_retries_a_refused_interrupt_before_starting_a_fresh_turn(rig, monkeypatch):
+    rig.server.begin_elsewhere()
+    rig.pump.start()
+    rig.pump.step()
+    interrupt = rig.server.turn_interrupt
+    attempts = []
+
+    def retry(params):
+        attempts.append(params)
+        return "interrupt refused" if len(attempts) == 1 else interrupt(params)
+
+    monkeypatch.setattr(rig.server, "turn_interrupt", retry)
+    item = send_nudge(rig)
+    rig.pump.step()
+    assert turn_methods(rig) == ["turn/interrupt", "turn/interrupt", "turn/start"]
+    assert rig.store.get(item.id).state == "delivered"
+    assert len(rig.server.turns) == 2
+
+
+def test_a_nudge_reaches_an_unobserved_turn_at_the_exact_hold_boundary(rig, monkeypatch):
+    rig.server.begin_elsewhere()
+    rig.server.frames.clear()
+    rig.pump.start()
+    monkeypatch.setattr(rig.connection, "poll", lambda timeout: None)
+    rig.pump.hold_until = rig.clock.now
+    item = send_nudge(rig)
+    rig.pump.step()
+    assert turn_methods(rig) == ["turn/interrupt", "turn/start"]
+    assert rig.store.get(item.id).state == "delivered"
+
+
 def test_each_window_of_silence_reaches_the_thread_as_its_own_turn(rig):
     from scripts.swarm import stale_nudge
 

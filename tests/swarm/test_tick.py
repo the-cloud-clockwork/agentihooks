@@ -755,6 +755,28 @@ def test_a_pending_recovery_leaves_the_quiet_agent_to_provider_recovery(store, p
     assert len(actions) == len(stale_nudges(store)) == expected
 
 
+def test_a_pending_recovery_blocks_the_nudge_during_the_tick(store, monkeypatch):
+    from scripts.swarm import resume
+
+    ledger, runtime = spawned(store)
+    monkeypatch.setattr(resume, "recovery_pending", lambda *args: True)
+    tick("sw", store, ledger, runtime, now_ms=1_001 + STALE_MS)
+    assert stale_nudges(store) == []
+
+
+def test_the_last_idle_tick_before_retirement_still_nudges(store):
+    from dataclasses import replace
+
+    from scripts.swarm.tick import IDLE_KILL_TICKS
+
+    ledger, runtime = spawned(store)
+    agent = store.agents("sw")[0]
+    store.put_agent("sw", replace(agent, idle_ticks=IDLE_KILL_TICKS - 2))
+    tick("sw", store, ledger, runtime, now_ms=1_001 + STALE_MS)
+    assert len(stale_nudges(store)) == 1
+    assert runtime.killed == []
+
+
 def test_a_nudge_the_routed_runtime_refuses_answers_with_the_router_reason(store):
     from scripts.swarm.tick import NUDGE
     from scripts.swarm_v2.runtime.base import Capability

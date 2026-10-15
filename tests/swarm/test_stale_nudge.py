@@ -57,6 +57,10 @@ def test_an_agent_with_no_known_activity_time_is_stale_only_on_a_provider_error(
     assert stale_nudge.stale(None, 0, None, provider_error, BASE) is expected
 
 
+def test_a_wait_without_an_expiry_does_not_hide_a_stalled_agent():
+    assert stale_nudge.stale(IDLE_BEAT, BASE, {"reason": "checks"}, "", BASE + LIMIT + 1)
+
+
 @pytest.mark.parametrize(
     ("sender", "ref", "age_ms", "expected"),
     [
