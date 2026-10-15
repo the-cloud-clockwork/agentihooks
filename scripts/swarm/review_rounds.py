@@ -34,7 +34,9 @@ def counts(slug: str, task: str, home: Path | None = None) -> dict[str, int]:
     return {path.name: budget.spent(task, path.name) for path in budget.path(task, "rounds").parent.glob("rounds*")}
 
 
-def start(slug: str, task: str, home: Path | None = None, pr_url: str = "", first_pr: str = "") -> dict[str, str | int]:
+def start(
+    slug: str, task: str, home: Path | None = None, pr_url: str | None = None, first_pr: str = ""
+) -> dict[str, str | int]:
     budget = Budget(slug, "reviews", home)
     allowed, spent = budget.spend(task, _counter(budget, task, pr_url, first_pr), ROUNDS)
     if not allowed:

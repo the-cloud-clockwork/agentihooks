@@ -291,6 +291,12 @@ def test_review_rounds_are_not_summed_across_pull_requests():
     assert run(ledger) == []
 
 
+def test_reruns_with_no_reviews_report_zero_rounds():
+    events = [ev("task started", "tasks/t1", by="swarm") for _ in range(4)]
+    [found] = run({"tasks": [task("t1")], "_meta": {"events": events}})
+    assert found["evidence"] == ["task t1", "started 4 times (3 reruns)", "0 review rounds"]
+
+
 def test_an_idle_agent_holding_a_claim_is_named_with_its_task():
     ledger = {
         "tasks": [task("t1", state="claimed", pr_url="", title="Fold the chat panel")],

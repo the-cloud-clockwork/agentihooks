@@ -724,6 +724,8 @@ def test_review_closes_on_the_third_round_and_refuses_a_fourth(env, monkeypatch,
 @pytest.mark.parametrize("legacy", [False, True])
 def test_review_budget_keeps_each_pull_requests_rounds(env, monkeypatch, capsys, tmp_path, legacy):
     _, ledger, _ = env
+    read_task = ledger.task
+    monkeypatch.setattr(ledger, "task", lambda slug, task: read_task(slug, task) if slug == "sw" else None)
     monkeypatch.setattr(gate_log, "swarm_home", lambda: tmp_path)
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
@@ -735,6 +737,10 @@ def test_review_budget_keeps_each_pull_requests_rounds(env, monkeypatch, capsys,
     for n in (1, 2, 3):
         assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 0
         assert json.loads(capsys.readouterr().out)["round"] == n
+    if legacy:
+        ledger.rows["t1"]["pr_url"] = first
+        assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 1
+        assert "no fourth review round" in capsys.readouterr().err
     ledger.rows["t1"].update(pr_url=second, split_pulls=[first, second])
     assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 0
     assert json.loads(capsys.readouterr().out)["round"] == 1

@@ -1154,7 +1154,7 @@ def cmd_review(store, args):
     pulls = row.get("split_pulls") or []
     print(
         json.dumps(
-            review_rounds.start(args.slug, agent.task, pr_url=row.get("pr_url", ""), first_pr=pulls[0] if pulls else "")
+            review_rounds.start(args.slug, agent.task, pr_url=row.get("pr_url"), first_pr=pulls[0] if pulls else "")
         )
     )
 
