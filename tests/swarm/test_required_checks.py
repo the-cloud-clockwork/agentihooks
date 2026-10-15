@@ -1,9 +1,10 @@
 import json
+from types import SimpleNamespace
 
 import pytest
 
 from scripts.swarm import ready
-from scripts.swarm.ledger_events import GATE, pull_request
+from scripts.swarm.ledger_events import GATE, pull_request, view, views
 from tests.swarm.test_ready import HEAD, URL, merging  # noqa: F401
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -59,10 +60,6 @@ def test_an_ungated_head_without_required_checks_counts_every_check():
 
 
 def test_a_single_view_pages_its_contexts_with_the_pull_request_number():
-    from types import SimpleNamespace
-
-    from scripts.swarm.ledger_events import view
-
     commit = {
         "id": "C1",
         "committedDate": "2026-10-15T15:00:00Z",
@@ -84,10 +81,6 @@ def test_a_single_view_pages_its_contexts_with_the_pull_request_number():
 
 
 def test_a_url_without_a_pull_number_asks_for_number_zero():
-    from types import SimpleNamespace
-
-    from scripts.swarm.ledger_events import views
-
     calls = []
 
     def run(command, **kwargs):
