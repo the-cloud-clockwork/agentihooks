@@ -83,6 +83,40 @@ def test_required_gate_rejects_unsuccessful_sonar(sonar):
         assert "::error::" in result.stdout
 
 
+@pytest.mark.parametrize("dev", ["graded", "newer", ""])
+def test_dev_push_sonar_guard_rejects_unscanned_revision(tmp_path, dev):
+    steps = _workflow()["jobs"]["sonar"]["steps"]
+    step = next(s for s in steps if s.get("id") == "current")
+    assert step["if"] == "github.event_name == 'push'"
+    assert steps.index(step) < next(i for i, s in enumerate(steps) if s.get("name") == "SonarQube Scan")
+    assert not step.get("continue-on-error", False)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    git = bin_dir / "git"
+    git.write_text(
+        "#!/usr/bin/env bash\n"
+        '[[ "$*" == "ls-remote origin refs/heads/dev" ]] || exit 2\n'
+        + (f"printf '{dev}\\trefs/heads/dev\\n'\n" if dev else "")
+    )
+    git.chmod(0o755)
+    output = tmp_path / "output"
+    output.write_text("")
+    result = subprocess.run(
+        ["bash", "-eo", "pipefail", "-c", step["run"]],
+        env=dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", SHA="graded", GITHUB_OUTPUT=str(output)),
+        capture_output=True,
+        text=True,
+    )
+    if dev == "graded":
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert output.read_text() == "superseded=false\n"
+    else:
+        assert result.returncode != 0, result.stdout + result.stderr
+        if dev:
+            assert output.read_text() == "superseded=true\n"
+            assert "::error::" in result.stdout
+
+
 def _queued_step():
     steps = _workflow()["jobs"]["sonar"]["steps"]
     return next(step for step in steps if step.get("id") == "queued")
