@@ -40,7 +40,7 @@ def test_a_role_or_overlay_profile_resolves_to_its_base_role_and_name_lane(roles
     [
         ("master", "the master comes online with agentihooks swarm <id> master up"),
         ("ghost", "profile ghost is not installed: install it with agentihooks init"),
-        ("bare", "profile bare wears no base role among planner, engineer, qa, cicd"),
+        ("bare", "profile bare wears no base role among planner, engineer, qa, cicd, documentation"),
     ],
 )
 def test_a_master_missing_or_roleless_profile_is_refused(roles, profile, message):
