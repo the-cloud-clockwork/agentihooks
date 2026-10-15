@@ -106,13 +106,14 @@ def test_a_taken_masters_question_answer_is_recorded_without_swarm_env():
     assert operator_words.matching("master@a1-1", "use the queue", now=101) == "Use the queue"
 
 
-@pytest.mark.parametrize("content", ["invalid", "[]", "null", "{}"])
+@pytest.mark.parametrize("content", [None, "invalid", "[]", "null", "{}"])
 def test_an_invalid_taken_seat_records_no_operator_words(content):
     from hooks.context import master_coding
 
     target = master_coding.seat_path("taken")
     target.parent.mkdir(parents=True)
-    target.write_text(content)
+    if content is not None:
+        target.write_text(content)
     assert operator_words.typed({"session_id": "taken", "prompt": "Use the queue"}, {}, now=100)
     assert not operator_words.matching("master@a1-1", "Use the queue", now=101)
 
