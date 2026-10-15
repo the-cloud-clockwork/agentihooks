@@ -32,7 +32,7 @@ from scripts.swarm import (
     stall_watch,
     tick_master,
 )
-from scripts.swarm.health import activity, checks, prompt_backlog, spawn_stall, standing, verdicts
+from scripts.swarm.health import activity, checks, merge_stall, prompt_backlog, spawn_stall, standing, verdicts
 from scripts.swarm.health import findings as health
 from scripts.swarm.naming import swarm_name
 from scripts.swarm.store import ASSIST, SwarmError
@@ -108,6 +108,7 @@ def findings(store, slug, config, tasks, events):
         + drain_watch.findings(store, slug, limits, now_ms())
         + launch_check.findings(store, slug)
         + spawn_stall.findings(store, slug)
+        + merge_stall.findings(store, slug, config.repo, now_ms())
         + prompt_backlog.findings(store, slug)
         + placement_waits.findings(store, slug, now_ms())
         + standing.findings(store.redis, slug, now_ms())
