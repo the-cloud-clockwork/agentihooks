@@ -5,7 +5,6 @@ import subprocess
 import sys
 from collections.abc import Callable
 from importlib import metadata
-from itertools import accumulate
 from pathlib import Path
 
 from scripts.ci_mutation.scope import imported_names, is_test_file, module_name
@@ -28,12 +27,10 @@ def test_inputs(
         current = pending.pop()
         if current not in records:
             text = (root / current).read_text()
-            imports = imported_names(text, Path(current).parent.parts)
-            names = {prefix for name in imports for prefix in accumulate(name.split("."), "{}.{}".format)}
             dependencies = (
                 set(modules.values())
                 if any(marker in text for marker in DYNAMIC_IMPORTS)
-                else {modules[name] for name in names if name in modules}
+                else {modules[name] for name in imported_names(text, Path(current).parent.parts) if name in modules}
             )
             records[current] = (hashlib.sha256(text.encode()).hexdigest(), dependencies)
         digest, dependencies = records[current]
