@@ -11,8 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from hooks import gh_config
-from scripts import agent_choice, claude_trust, herdr_host, herdr_panes, operator_env
+from scripts import agent_choice, claude_trust, gh_config, herdr_host, herdr_panes, operator_env
 from scripts.swarm import effort_range
 from scripts.targets.codex_target import codex_home, restore_hook_order
 

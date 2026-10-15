@@ -4,8 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from hooks import gh_config
-from scripts import init_agent
+from scripts import gh_config, init_agent
 
 REPO = Path(__file__).resolve().parents[1]
 

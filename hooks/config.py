@@ -5,7 +5,7 @@ import re
 import sys
 from pathlib import Path
 
-from hooks import gh_config
+from scripts import gh_config
 
 # A name outside this shape cannot be a shell variable, and a mistyped line can
 # put a secret in the name, so such a line is reported by position only.
