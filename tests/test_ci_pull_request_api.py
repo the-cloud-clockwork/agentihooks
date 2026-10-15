@@ -13,8 +13,11 @@ API_CALL = re.compile(r"\b_?gh\b(?!-)|api\.github\.com|GITHUB_API_URL")
 MODULE = re.compile(r"\bpython3?\b[^\n;&|]*?\s-m\s+([\w.]+)")
 BESIDE = re.compile(r"\$\(dirname \"\$0\"\)|\$\{?GITHUB_ACTION_PATH\}?")
 WORKSPACE = re.compile(r"\$\{?GITHUB_WORKSPACE\}?")
-# The documented local `--ci` download; the workflow passes `--samples` with `--ci 5`, so CI never calls these.
-LOCAL_ONLY = {ROOT / "tests/refresh_durations.py": {"_gh", "ci_run_ids", "ci_download"}}
+# These API functions run only in local downloads or steps bound to the App token.
+LOCAL_ONLY = {
+    ROOT / "scripts/ci_budget/jobs.py": {"read_page"},
+    ROOT / "tests/refresh_durations.py": {"_gh", "ci_run_ids", "ci_download"},
+}
 TOKEN = re.compile(
     r"github\s*(\.\s*token|\[\s*['\"]token['\"]\s*\])"
     r"|secrets\s*(\.|\[\s*['\"])\s*(github|gh)(_\w*|\w*(token|pat)(?![a-z]))"
@@ -145,6 +148,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "hooks/targets/normalizer.py",
         "scripts/brain-smoke",
         "scripts/ci_budget/__main__.py",
+        "scripts/ci_budget/jobs.py",
         "scripts/ci_cpu_quota.py",
         "scripts/ci_dependency_audit.py",
         "scripts/ci_dev_reuse.py",
@@ -202,6 +206,13 @@ def test_each_local_only_exemption_names_a_function_that_calls_the_api():
         source = path.read_text()
         functions = {node.name: node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef)}
         assert all(API_CALL.search(ast.get_source_segment(source, functions[name])) for name in names)
+
+
+def test_the_budget_reader_runs_only_on_the_app_token():
+    reader = ROOT / "scripts/ci_budget/jobs.py"
+    steps = [step for _, step, here in _all_steps() if reader in _called(step.get("run", ""), here)]
+    assert steps
+    assert all(step.get("env", {}).get("GH_TOKEN") == APP_TOKEN and not _holds_token(step) for step in steps)
 
 
 @pytest.mark.parametrize(

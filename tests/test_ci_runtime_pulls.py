@@ -3,6 +3,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 CASES = [
@@ -196,6 +197,24 @@ def test_hive_join_pulls_its_images_through_the_bounded_pull_before_starting_the
         pull = f"bash scripts/packaging/pull-runtime-image.sh {image}\n"
         assert pull in script
         assert script.index(pull) < build
+
+
+@pytest.mark.parametrize("job,script", [("smoke", "swarm-smoke"), ("compose-hive", "compose-hive-smoke")])
+def test_compose_smoke_jobs_pull_every_dockerfile_base_before_building(job, script):
+    workflow = yaml.safe_load((ROOT / ".github/workflows/swarm-smoke.yml").read_text())
+    smoke = workflow["jobs"][job]
+    assert not smoke.get("needs")
+    steps = smoke["steps"]
+    build = next(i for i, step in enumerate(steps) if step.get("run") == f"bash scripts/packaging/{script}.sh")
+    for base in dockerfile_bases():
+        pull = next(
+            i
+            for i, step in enumerate(steps)
+            if step.get("run") == f"bash scripts/packaging/pull-runtime-image.sh {base}"
+        )
+        assert pull < build
+        assert "if" not in steps[pull]
+        assert "continue-on-error" not in steps[pull]
 
 
 def test_hive_launch_pulls_the_worker_base_and_never_retries_the_launch(tmp_path):
