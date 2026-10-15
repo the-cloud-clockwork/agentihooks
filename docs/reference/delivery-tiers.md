@@ -18,6 +18,8 @@ AgentiHooks ships a package rule, `delivery-tiers`, that every installed profile
 
 Each tier has a wall time budget. A check that does not fit the pull request or queue budget moves to promotion.
 
+How a green promotion run merges `dev` into `main` and creates the release is in [Promotion and releases](promotion.md).
+
 ## Rules
 
 - **A red integration branch keeps merging; promotion does not advance.** A failed promotion run never closes the queue or holds other pull requests. The release branch stays on the last green promoted head until a later run passes.
