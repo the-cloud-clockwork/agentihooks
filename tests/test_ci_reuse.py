@@ -171,7 +171,15 @@ def full_source(reuse_repo, tmp_path):
         "from pathlib import Path\n"
         "allow = '--allow-escape-sequences' in sys.argv\n"
         "args = [arg for arg in sys.argv[2:] if arg not in ('--paginate', '--allow-escape-sequences')]\n"
-        "value = json.loads(Path(os.environ['REUSE_FIXTURE']).read_text())[args[0]]\n"
+        "from urllib.parse import parse_qs, urlsplit\n"
+        "query = parse_qs(urlsplit(args[0]).query)\n"
+        "paged = '/attempts/' in args[0] and 'page' in query\n"
+        "endpoint = args[0].split('?')[0] + '?per_page=100' if paged else args[0]\n"
+        "value = json.loads(Path(os.environ['REUSE_FIXTURE']).read_text())[endpoint]\n"
+        "if paged:\n"
+        "    size, page = int(query['per_page'][0]), int(query['page'][0])\n"
+        "    start = (page - 1) * size\n"
+        "    value['jobs'] = value['jobs'][start:start + size]\n"
         "data = base64.b64decode(value.get('binary', ''))\n"
         "if args[0].endswith('/logs') and b'\\x1b' in data and not allow:\n"
         "    sys.exit('the response contains terminal escape sequences; '\n"
@@ -197,6 +205,14 @@ def test_an_identical_queue_tree_reuses_a_full_passed_run(full_source, tmp_path)
     assert "reused=true" in result.stdout
     assert "run=7" in result.stdout
     assert json.loads(output.read_text())["tree"] == git(root, "rev-parse", f"{head}^{{tree}}")
+
+
+def test_an_identical_queue_tree_reuses_a_full_passed_run_with_the_paged_reader(full_source, tmp_path, monkeypatch):
+    from scripts import ci_reuse
+
+    job = ci_reuse.paged_reuse_job()
+    monkeypatch.setattr(ci_reuse, "reuse_job", lambda: job)
+    test_an_identical_queue_tree_reuses_a_full_passed_run(full_source, tmp_path)
 
 
 def test_a_passed_run_behind_a_hundred_newer_runs_still_reuses(full_source, tmp_path):
@@ -839,6 +855,84 @@ def test_an_unreadable_run_list_says_which_head(full_source, tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout == f"No reuse: cannot list the passed runs of head {head}\n"
     assert not (temp / "evidence/runs.json").exists()
+
+
+@pytest.mark.parametrize(
+    ("failures", "status", "calls", "kept"),
+    [
+        (0, 502, 11, True),
+        (1, 500, 27, True),
+        (2, 503, 54, True),
+        (4, 504, 4, False),
+        (1, 400, 1, False),
+        (1, 403, 1, False),
+        (1, 429, 1, False),
+    ],
+)
+def test_attempt_jobs_use_five_job_pages_and_bounded_server_retries(
+    full_source, tmp_path, failures, status, calls, kept
+):
+    from scripts import ci_reuse
+
+    _, _, _, _, env, responses, _ = full_source
+    jobs = responses[JOBS]["jobs"]
+    jobs.extend({"id": 200 + n, "name": f"extra {n}", "conclusion": "success"} for n in range(45))
+    Path(env["REUSE_FIXTURE"]).write_text(json.dumps(responses))
+    bin_dir = Path(env["PATH"].split(":")[0])
+    (bin_dir / "gh").rename(bin_dir / "original-gh")
+    requests = tmp_path / "requests.jsonl"
+    (bin_dir / "gh").write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, os, subprocess, sys\n"
+        "from pathlib import Path\n"
+        "from urllib.parse import parse_qs, urlsplit\n"
+        "endpoint = next(arg for arg in sys.argv[2:] if arg.startswith('repos/'))\n"
+        "if '/attempts/' not in endpoint:\n"
+        "    sys.exit(subprocess.call([str(Path(__file__).with_name('original-gh')), *sys.argv[1:]]))\n"
+        "query = parse_qs(urlsplit(endpoint).query)\n"
+        "size, page = int(query['per_page'][0]), int(query['page'][0])\n"
+        "requests = Path(os.environ['REQUESTS'])\n"
+        "calls = len(requests.read_text().splitlines()) if requests.exists() else 0\n"
+        "with requests.open('a') as stream: stream.write(json.dumps([size, page]) + '\\n')\n"
+        "if size > 5: sys.exit('expected at most five jobs per page')\n"
+        "jobs = json.loads(Path(os.environ['REUSE_FIXTURE']).read_text())[endpoint.split('?')[0] + '?per_page=100']['jobs']\n"
+        "start = (page - 1) * size\n"
+        "rows = jobs[start:start + size]\n"
+        "print(json.dumps({'total_count': len(jobs), 'jobs': rows}), flush=True)\n"
+        "if calls < int(os.environ['FAILURES']):\n"
+        "    print(f'gh: server error (HTTP {os.environ[\"STATUS\"]})', file=sys.stderr)\n"
+        "    sys.exit(1)\n"
+    )
+    (bin_dir / "gh").chmod(0o755)
+    runner = tmp_path / "runner"
+    runner.mkdir()
+    [step] = [step for step in ci_reuse.paged_reuse_job()["steps"] if step.get("name") == FETCH]
+    result = subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        env=dict(
+            env,
+            GITHUB_REPOSITORY="o/r",
+            RUNNER_TEMP=str(runner),
+            QUEUE_REF=QUEUE_REF,
+            REQUESTS=str(requests),
+            FAILURES=str(failures),
+            STATUS=str(status),
+        ),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    attempts = [json.loads(line) for line in requests.read_text().splitlines()]
+    assert len(attempts) == calls
+    assert attempts[0] == [5, 1]
+    evidence = runner / "evidence" / "7"
+    if kept:
+        assert [json.loads(line) for line in (evidence / "jobs.jsonl").read_text().splitlines()] == jobs
+        assert (evidence / "reuse.log").is_file()
+    else:
+        assert not (evidence / "jobs.jsonl").exists()
+        assert not (evidence / "reuse.log").exists()
 
 
 def _queue_needs(baseline="success", ratchet="success", ratchet_job="skipped", queue_job="success"):
