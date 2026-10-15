@@ -509,7 +509,8 @@ jobs:
       - name: Select the tests the change reaches
         id: select
         env:
-          BASE: ${{ github.event.pull_request.base.sha }}
+          BASE: origin/${{ github.base_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           EVENT: ${{ github.event_name }}
         run: |
           if [[ "$EVENT" != pull_request || ! -f "$RUNNER_TEMP/grader/scripts/ci_select.py" ]]; then
@@ -521,7 +522,7 @@ jobs:
             [[ -f "$file" ]] && durations+=("$file")
           done
           cd "$RUNNER_TEMP/grader"
-          python -m scripts.ci_select --root "$GITHUB_WORKSPACE" --base "$BASE" --head HEAD --event "$EVENT" --legs 3 --durations "${durations[@]}"
+          python -m scripts.ci_select --root "$GITHUB_WORKSPACE" --base "$BASE" --head "$HEAD_SHA" --event "$EVENT" --legs 3 --durations "${durations[@]}"
 
   # Every shard of a version splits on the one map this job chooses, so the whole suite is collected once per version, not once per shard.
   split:
