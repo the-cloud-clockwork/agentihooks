@@ -174,6 +174,8 @@ def end_pass(store, slug, rows, inbox, github, now_ms, reread):
         held = idle.wait(store.redis, slug, agent.name)
         if agent.state == "finished" or not (held and held.get("on")):
             continue
+        if agent.task in rows and dependency(held["on"], rows[agent.task], rows, github):
+            continue
         previous = json.dumps(held)
         outcome = resolution(held["on"], rows, inbox, github, reread, now_ms - held["at"] < FRESH_MS, verdicts)
         if (outcome or json.dumps(held) != previous) and not _save_wait(

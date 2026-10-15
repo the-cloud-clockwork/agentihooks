@@ -134,7 +134,7 @@ def test_red_checks_still_refuse_a_wait_that_is_not_a_live_dependency(rig, on, e
     rig.task["pr_url"], rig.pulls[URL] = URL, RED
     rig.ledger.rows["repair"] = {"id": "repair", "state": "pr"}
     until = rig.clock[0] - 1 if expired else rig.clock[0] + 60_000
-    idle.declare_wait(rig.store.redis, SLUG, ME, until, "repair", rig.clock[0], on=on)
+    idle.declare_wait(rig.store.redis, SLUG, ME, until, "repair", rig.clock[0] - 120_000, on=on)
     assert not rig.stop().allowed
 
 
