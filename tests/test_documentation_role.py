@@ -1,7 +1,9 @@
 import json
 
 from scripts.profiles import render
-from tests.test_profile_render import world as world
+from tests.test_profile_render import world as render_world
+
+world = render_world
 
 
 def test_documentation_role_has_its_own_skill_and_only_task_browser(world):
