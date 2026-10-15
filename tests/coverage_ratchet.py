@@ -107,6 +107,9 @@ def main(argv: list[str] | None = None) -> int:
     with tempfile.TemporaryDirectory() as scratch:
         try:
             head, base, result = _grade(args, head_files, Path(scratch))
+            if os.environ.get("GITHUB_EVENT_NAME") == "merge_group":
+                changed = set(git("diff", "--name-only", "--no-renames", "HEAD^", "HEAD", cwd=args.head).splitlines())
+                result.lost = {path: lines for path, lines in result.lost.items() if path in changed}
         except (Unmeasured, subprocess.CalledProcessError, KeyError, ValueError, OSError, NotPython) as exc:
             print(f"::error::The coverage ratchet cannot grade: {exc}")
             return 1
