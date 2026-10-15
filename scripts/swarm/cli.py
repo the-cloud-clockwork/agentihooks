@@ -261,19 +261,8 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
                     ledger,
                     store.config(slug),
                 )
-            actions += timing.call(tick, slug, store, ledger, runtime or routed(herdr=HerdrRuntime()), now_ms())
-            if store.config(slug).template == "doctor":
-                from scripts.doctor import cli as doctor
-
-                actions += skip_refused(doctor.timer, store, slug, now_ms(), scheduled)
-            herdr = messenger or delivery.HerdrMessenger()
-            timing.call(delivery.migrate_outbox, store, slug, inbox)
-            agents = [a for a in timing.call(store.agents, slug) if a.state != "finished"]
-            skip_refused(delivery.relay_to_page, inbox, slug, agents, ledger)
             doc, config = timing.call(ledger.state, slug), store.config(slug)
             view = timing.call(ledger_events.tick_view, inbox, store, slug, doc)
-            actions += skip_refused(ledger_events.event_pass, inbox, store, slug, doc, ledger, now_ms(), view)
-            actions += skip_refused(done_gate.recheck_pass, store, slug, doc, ledger, now_ms(), view)
             mail, mode = ledger_events.Mail(inbox, store, slug), intent.mode_of(config)
             actions += skip_refused(
                 intent.Check(
@@ -289,6 +278,18 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
                 ).run,
                 doc,
             )
+            actions += timing.call(tick, slug, store, ledger, runtime or routed(herdr=HerdrRuntime()), now_ms())
+            if store.config(slug).template == "doctor":
+                from scripts.doctor import cli as doctor
+
+                actions += skip_refused(doctor.timer, store, slug, now_ms(), scheduled)
+            herdr = messenger or delivery.HerdrMessenger()
+            timing.call(delivery.migrate_outbox, store, slug, inbox)
+            agents = [a for a in timing.call(store.agents, slug) if a.state != "finished"]
+            skip_refused(delivery.relay_to_page, inbox, slug, agents, ledger)
+            doc, config = timing.call(ledger.state, slug), store.config(slug)
+            actions += skip_refused(ledger_events.event_pass, inbox, store, slug, doc, ledger, now_ms(), view)
+            actions += skip_refused(done_gate.recheck_pass, store, slug, doc, ledger, now_ms(), view)
             actions += skip_refused(progress.checks_pass, store.redis, slug, doc["tasks"], view, now_ms())
             rows = {t["id"]: t for t in doc["tasks"]}
             actions += skip_refused(waits.end_pass, store, slug, rows, inbox, view, now_ms(), ledger_events.view)

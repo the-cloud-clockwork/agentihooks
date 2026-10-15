@@ -36,4 +36,4 @@ def test_ready_intent_is_delivered_before_a_slow_runtime_launch(env, monkeypatch
     wait_ms = delivered[0] - 1_000_000
     print(f"ready_to_verdict_ms={wait_ms}; runtime_launch_delay_ms=780000")
     assert at_launch and all(record and record["verdict"] == "pass" for record in at_launch)
-    assert wait_ms < 60_000
+    assert wait_ms == 0
