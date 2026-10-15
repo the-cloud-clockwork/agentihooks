@@ -8,7 +8,7 @@ from scripts.gates import Call, Who
 from scripts.gates.base import Decision
 from scripts.gates.claim_stop import ClaimStop
 from scripts.gates.verdicts import Verdicts
-from scripts.swarm import capacity, cli, merge_queue, ready, stack, tick, waits
+from scripts.swarm import capacity, cli, linked_issues, merge_queue, ready, stack, tick, waits
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.store import RedisStore, SwarmError
 from tests.swarm.test_cli import HANDOFF, env
@@ -28,6 +28,7 @@ QUEUED = PullRequest("OPEN", None, 1, False, True, head=HEAD, queued=True)
 MERGED = PullRequest("MERGED", 2, 1, False, True, head=HEAD)
 CLOSED = PullRequest("CLOSED", None, 1, False, True, head=HEAD)
 REMOVE = ["bash", str(stack.WT_SCRIPT), "done", "engineer-a1b2c3-0001", "--repo", TOP]
+BODY = ["gh", "pr", "view", URL, "--json", "body", "--jq", ".body"]
 
 
 class Shell:
@@ -264,6 +265,36 @@ def test_the_reaper_retires_a_ready_agent_without_reopening_its_task(released):
     assert tick._reap("sw", store, ledger, cli.HerdrRuntime(), rows, NOW) == [f"retired {AGENT}"]
     assert ledger.rows["t1"]["state"] == "pr" and ledger.rows["t1"]["claimed_by"] == AGENT
     assert store.handoff("sw", "t1") == doc.read_text()
+
+
+@pytest.mark.parametrize("pull", [GREEN, RUNNING, QUEUED])
+def test_repeated_ticks_never_respawn_a_released_task_waiting_on_its_pull_request(released, monkeypatch, pull):
+    from scripts.swarm import stall_watch
+    from tests.swarm.test_delivery import FakeHerdr
+
+    store, ledger, _, doc = released
+    assert release(doc) == 0
+    ledger.pulls[URL] = pull
+    monkeypatch.setattr(cli.ledger_events, "views", lambda urls, cache=None: {url: ledger.pulls[url] for url in urls})
+    monkeypatch.setattr(stall_watch, "ntfy", lambda *args: "")
+    attempts = []
+
+    def queue(action, url):
+        attempts.append(url)
+        if pull.queued:
+            return {}
+        raise SwarmError("the current pull request head must pass Tests")
+
+    merge_pass = ready.Pass
+    monkeypatch.setattr(ready, "Pass", lambda *args: merge_pass(*args, queue=queue))
+    for minutes in (0, 10, 30, 60):
+        monkeypatch.setattr(cli, "now_ms", lambda: NOW + minutes * 60_000)
+        cli.run_tick(store, "sw", ledger, cli.HerdrRuntime(), FakeHerdr({}))
+        assert ledger.rows["t1"]["state"] == "pr"
+        assert ledger.rows["t1"]["awaiting"] == ready.AWAITING
+        assert not any(a.task == "t1" for a in store.agents("sw"))
+        assert ready.record(store, "sw", "t1")["head"] == HEAD
+    assert attempts == ([URL] * 4 if pull is GREEN else [URL] if pull is QUEUED else [])
 
 
 def test_the_stop_gate_lets_a_ready_engineer_stop(released, tmp_path):
@@ -590,10 +621,133 @@ def test_a_merged_pull_request_closes_the_task_with_the_done_proof_and_removes_t
     assert merging.rows["t1"]["state"] == "done" and merging.rows["t1"]["pr_url"] == URL
     assert merging.rows["t1"]["awaiting"] == ""
     assert merging.rows["t2"]["state"] == "done" and merging.rows["t2"]["pr_url"] == URL
-    assert merging.shell.calls == [REMOVE]
+    assert merging.shell.calls == [BODY, REMOVE]
     assert ready.record(merging.store, "sw", "t1") is None
     assert merging.store.handoff("sw", "t1") == ""
     assert merging.run() == []
+
+
+ISSUE = "https://github.com/o/r/issues/5"
+NAMED = "https://github.com/o/r/issues/12"
+MEMBER = "https://github.com/o/r/issues/7"
+CLOSED_BY = f"Closed by the swarm: pull request {URL} merged into dev."
+
+
+@pytest.fixture
+def issues(merging, monkeypatch):
+    states, body = {ISSUE: "OPEN", NAMED: "OPEN"}, "Fixes the parser.\n\nCloses #12\n"
+
+    def shell(argv):
+        code = 1 if tuple(argv[:3]) in merging.shell.fail else 0
+        if argv[:3] == ["gh", "pr", "view"]:
+            assert argv == BODY
+            merging.shell.calls.append(argv)
+            return subprocess.CompletedProcess(argv, code, stdout=body, stderr=" boom\n")
+        if argv[:3] == ["gh", "issue", "view"]:
+            assert argv[4:] == ["--json", "state", "--jq", ".state"]
+            merging.shell.calls.append(argv)
+            return subprocess.CompletedProcess(argv, code, stdout=states[argv[3]] + "\n", stderr=" boom\n")
+        return merging.shell(argv)
+
+    monkeypatch.setattr(stack, "shell", shell)
+    merging.rows["t1"]["issue_url"] = ISSUE
+    merging.pulls[URL] = MERGED
+    return states
+
+
+def issue_writes(merging):
+    return [c for c in merging.shell.calls if c[:3] in (["gh", "issue", "comment"], ["gh", "issue", "close"])]
+
+
+def test_a_merged_ready_pull_request_closes_the_task_issue_and_the_issue_it_names(merging, issues):
+    assert merging.run() == [
+        f"task t1 done, {URL} merged",
+        f"closed issue {ISSUE}",
+        f"closed issue {NAMED}",
+        f"removed the worktree {TOP}",
+    ]
+    assert issue_writes(merging) == [
+        ["gh", "issue", "close", ISSUE],
+        ["gh", "issue", "comment", ISSUE, "--body", CLOSED_BY],
+        ["gh", "issue", "close", NAMED],
+        ["gh", "issue", "comment", NAMED, "--body", CLOSED_BY],
+    ]
+
+
+def test_an_issue_linked_to_a_task_still_open_stays_open(merging, issues):
+    merging.rows["t2"]["issue_url"] = NAMED
+    merging.rows["t3"] = {"id": "t3", "state": "done", "issue_url": ISSUE}
+    merging.run()
+    assert issue_writes(merging) == [
+        ["gh", "issue", "close", ISSUE],
+        ["gh", "issue", "comment", ISSUE, "--body", CLOSED_BY],
+    ]
+
+
+def test_an_issue_already_closed_gets_no_second_comment(merging, issues):
+    issues[ISSUE] = "CLOSED"
+    assert f"closed issue {ISSUE}" not in merging.run()
+    assert issue_writes(merging) == [
+        ["gh", "issue", "close", NAMED],
+        ["gh", "issue", "comment", NAMED, "--body", CLOSED_BY],
+    ]
+
+
+def test_an_issue_the_swarm_cannot_close_is_reported_and_the_task_still_closes(merging, issues):
+    merging.shell.fail = (("gh", "issue", "close"),)
+    actions = merging.run()
+    assert f"could not close issue {ISSUE}: boom" in actions
+    assert merging.rows["t1"]["state"] == "done"
+    assert ["gh", "issue", "comment", ISSUE, "--body", CLOSED_BY] not in merging.shell.calls
+
+
+def test_a_closed_issue_whose_comment_fails_is_reported(merging, issues):
+    merging.shell.fail = (("gh", "issue", "comment"),)
+    actions = merging.run()
+    assert f"closed issue {ISSUE}; could not comment on it: boom" in actions
+    assert f"closed issue {ISSUE}" not in actions
+
+
+def test_an_issue_whose_state_cannot_be_read_is_reported_without_a_comment(merging, issues):
+    merging.shell.fail = (("gh", "issue", "view"),)
+    actions = merging.run()
+    assert f"could not close issue {ISSUE}: boom" in actions and f"could not close issue {NAMED}: boom" in actions
+    assert issue_writes(merging) == []
+
+
+def test_a_pull_request_body_that_cannot_be_read_still_closes_the_task_issue(merging, issues):
+    merging.shell.fail = (("gh", "pr", "view"),)
+    assert f"could not read the issues named by {URL}: boom" in merging.run()
+    assert issue_writes(merging) == [
+        ["gh", "issue", "close", ISSUE],
+        ["gh", "issue", "comment", ISSUE, "--body", CLOSED_BY],
+    ]
+
+
+def test_a_group_member_issue_closes_with_the_group(merging, issues):
+    del merging.rows["t1"]["issue_url"]
+    merging.rows["t1"]["group_members"] = ["t2"]
+    merging.rows["t2"]["issue_url"] = MEMBER
+    issues[MEMBER] = "OPEN"
+    merging.run()
+    assert issue_writes(merging) == [
+        ["gh", "issue", "close", MEMBER],
+        ["gh", "issue", "comment", MEMBER, "--body", CLOSED_BY],
+        ["gh", "issue", "close", NAMED],
+        ["gh", "issue", "comment", NAMED, "--body", CLOSED_BY],
+    ]
+
+
+@pytest.mark.parametrize(
+    ("body", "numbers"),
+    [
+        ("Closes #1, fixes #2 and Resolved: #3", ["1", "2", "3"]),
+        ("close #4 fixed #5 resolves #6 fix #7 closed #8 resolve #9", ["4", "5", "6", "7", "8", "9"]),
+        ("Refs #10, see #11, enclosed #12, prefixes #13", []),
+    ],
+)
+def test_only_closing_keywords_name_an_issue(body, numbers):
+    assert linked_issues.KEYWORD.findall(body) == numbers
 
 
 @pytest.mark.parametrize("remaining", [RUNNING, CLOSED, None])
@@ -614,7 +768,7 @@ def test_a_split_task_stays_in_pr_until_its_last_pull_request_merges(merging, re
     assert merging.rows["t1"]["state"] == "done"
     assert merging.rows["t1"]["split_pulls"] == [URL, second]
     assert merging.rows["t1"]["awaiting"] == ""
-    assert merging.shell.calls == [REMOVE]
+    assert merging.shell.calls == [BODY, REMOVE]
     assert ready.record(merging.store, "sw", "t1") is None
     assert merging.store.handoff("sw", "t1") == ""
     assert merging.run() == []
@@ -638,7 +792,7 @@ def test_the_watched_pull_request_completes_the_remaining_split_binding(merging)
     merging.run()
     assert merging.rows["t1"]["state"] == "done"
     assert merging.rows["t1"]["awaiting"] == ""
-    assert merging.shell.calls == [REMOVE]
+    assert merging.shell.calls == [BODY, REMOVE]
     assert ready.record(merging.store, "sw", "t1") is None
     assert merging.store.handoff("sw", "t1") == ""
 
@@ -650,7 +804,7 @@ def test_a_merged_pull_request_without_a_checkout_closes_without_removing_one(me
     merging.pulls[URL] = MERGED
     assert merging.run() == [f"task t1 done, {URL} merged"]
     assert merging.rows["t1"]["state"] == "done"
-    assert merging.shell.calls == []
+    assert merging.shell.calls == [BODY]
     assert ready.record(merging.store, "sw", "t1") is None
 
 

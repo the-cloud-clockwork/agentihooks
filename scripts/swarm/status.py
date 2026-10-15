@@ -28,6 +28,7 @@ from scripts.swarm import (
     overlays,
     quota_view,
     retire_watch,
+    review_rounds,
     snapshot,
     stall_watch,
     tick_master,
@@ -89,7 +90,11 @@ def findings(store, slug, config, tasks, events):
     rows = _health_rows(store, slug, agents, quiet, now_ms())
     found = (
         health.findings(
-            {"tasks": tasks, "_meta": {"events": events}},
+            {
+                "tasks": tasks,
+                "_meta": {"events": events},
+                "review_rounds": {task["id"]: review_rounds.counts(slug, task["id"]) for task in tasks},
+            },
             rows,
             activity.counts(slug),
             limits,

@@ -135,7 +135,9 @@ def _global(environ: dict, now: float) -> list[Account]:
         quota = row["quota"]
         five = session_bands.left(quota["five_hour"]["used"], quota["five_hour"]["resets_at"], now) if quota else None
         week = session_bands.left(quota["seven_day"]["used"], quota["seven_day"]["resets_at"], now) if quota else None
-        cap = session_bands.cap(five, week) if quota and session_bands.fresh(quota["observed_at"], now) else None
+        cap = None
+        if quota and session_bands.fresh(quota["observed_at"], now):
+            cap = session_bands.week_cap(week) if row["harness"] == "codex" else session_bands.cap(five, week)
         weight = None
         if row["kind"] == API:
             policy = place.policy(row["harness"], environ)

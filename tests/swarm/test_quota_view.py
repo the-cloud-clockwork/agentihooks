@@ -1,3 +1,5 @@
+import pytest
+
 from scripts.swarm import quota_view
 
 MINUTE = 60_000
@@ -121,3 +123,18 @@ def test_the_page_carries_each_api_share():
 def test_the_api_share_rounds_the_api_percent_of_its_harness_sessions():
     rows = [row("a", sessions=1), api_row(sessions=3), row("cx", sessions=5, harness="codex")]
     assert quota_view.api_share(rows[1], rows) == (75, 4)
+
+
+@pytest.mark.parametrize("five", [None, 0.0, 90.0])
+def test_codex_status_and_page_report_week_remaining(five):
+    account = row("a", five=five, week=73.0, harness="codex")
+    decision = {**DECISION, "accounts": [account]}
+    assert quota_view.routing_left(account) == 73.0
+    assert quota_view.lines(decision, decision["at"])[-1] == (
+        "quota account codex a  open  routing 73% left  sessions 0"
+    )
+    assert quota_view.page(decision)["accounts"][0]["routing"] == 73.0
+
+
+def test_codex_status_keeps_a_missing_week_unknown():
+    assert quota_view.routing_left(row("a", five=90.0, week=None, harness="codex")) is None
