@@ -467,3 +467,28 @@ def test_a_slow_launch_that_never_starts_is_recorded_against_the_launch_not_the_
         ("failed", refused)
     ]
     assert lease.current(store, "sw").epoch == 1
+
+
+def test_a_doctor_timer_slower_than_the_lease_keeps_it_through_the_merge_pass(env, clock, monkeypatch):  # noqa: F811
+    from scripts.doctor import cli as doctor
+
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    store.update("sw", template="doctor")
+    monkeypatch.delenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", raising=False)
+    monkeypatch.setattr(lease, "beat_s", lambda: 0.01)
+    events = []
+
+    def detectors(*args):
+        for _ in range(2):
+            clock[0] += 120000
+            events.append(renewed(store, clock))
+        return []
+
+    monkeypatch.setattr(doctor, "timer", detectors)
+    monkeypatch.setattr(cli.ready, "merge_pass", lambda *args: events.append("merge") or [])
+    started = clock[0]
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert clock[0] - started > lease.ttl_ms()
+    assert events == [True, True, "merge"]
+    assert lease.current(store, "sw").epoch == 1
