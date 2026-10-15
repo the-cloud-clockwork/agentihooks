@@ -371,6 +371,26 @@ def test_tick_releases_the_reservation_when_the_ledger_refuses_the_claim():
     assert gate.pending_execution_admission_total("sw") == {ADMITTED: 4, RELEASED: 1, IMPOSSIBLE: 1, DEFERRED: 5}
 
 
+def test_a_live_owner_appearing_after_admission_releases_the_unused_reservation(monkeypatch):
+    from scripts.swarm.store import AgentRecord
+
+    data, store, gate, ledger, runtime = tick_fixture()
+
+    def claimed_elsewhere(slug, ledger_arg, rows, runtime_arg, task, now_ms):
+        if task["id"] == "t01":
+            owner = AgentRecord("existing-owner", "eng", "t01", started_at=now_ms)
+            store.put_agent("sw", owner)
+            runtime.live.add(owner.name)
+            ledger.rows["t01"].update(state="claimed", claimed_by=owner.name)
+        return ""
+
+    monkeypatch.setattr("scripts.swarm.tick._held_back", claimed_elsewhere)
+    tick("sw", store, ledger, runtime, now_ms=data["clock_ms"])
+    assert "t01" not in gate.pending("sw", data["clock_ms"])
+    assert "t01" not in [task for _, _, task in runtime.spawned]
+    assert gate.pending_execution_admission_total("sw")[RELEASED] == 1
+
+
 def test_tick_takes_no_reservation_while_the_runtime_has_no_capacity():
     data, store, gate, ledger, runtime = tick_fixture()
     runtime.full = True

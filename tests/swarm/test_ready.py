@@ -407,6 +407,9 @@ class Ledger:
         self.rows, self.comments = rows, []
 
     def update_task(self, slug, task_id, fields, by="swarm", if_state=(), if_match=None):
+        from tests.swarm.test_tick import check_update_guards
+
+        check_update_guards(if_state, if_match)
         assert slug == "sw" and by == "swarm"
         row = self.rows[task_id]
         if any(
@@ -1037,6 +1040,8 @@ def test_a_working_owner_keeps_its_claim_and_lease_when_the_pull_conflicts(mergi
     assert merging.queued == []
     messages = InboxStore(merging.store.redis).inbox(AGENT)
     assert len(messages) == 1
+    assert messages[0].sender == "swarm"
+    assert messages[0].task == "t1"
     assert "restack" in messages[0].text.lower()
     merging.run()
     assert len(InboxStore(merging.store.redis).inbox(AGENT)) == 1
@@ -1085,6 +1090,107 @@ def test_a_successor_claim_after_the_reopen_write_keeps_its_ready_record_and_wor
     assert ready.record(merging.store, "sw", "t1") == {"agent": "successor", "head": "new-head", "worktree": TOP}
     assert merging.shell.calls == []
     assert merging.ledger.comments == []
+
+
+@pytest.mark.parametrize("generation", [0, 7])
+def test_a_released_claim_reopens_at_its_current_generation(merging, generation):
+    merging.rows["t1"]["claim_generation"] = generation
+    merging.pulls[URL] = RED
+    assert merging.run() == [f"task t1 reopened, {URL} has red checks"]
+    assert merging.rows["t1"]["claim_generation"] == generation + 1
+
+
+def test_an_explicitly_unowned_legacy_pull_reopens_without_a_generation(merging):
+    from scripts.swarm.ledger_events import pull_request
+
+    merging.rows["t1"].update(claimed_by="", awaiting="")
+    merging.store.release("sw", "t1", AGENT)
+    ready.forget(merging.store, "sw", "t1")
+    merging.pulls[URL] = pull_request({"state": "OPEN", "mergeable": "CONFLICTING"})
+    assert merging.run() == [f"task t1 reopened, {URL} has a merge conflict"]
+    assert merging.rows["t1"]["state"] == "open"
+    assert merging.ledger.comments
+
+
+@pytest.mark.parametrize("field,value", [("pr_url", "https://github.com/o/r/pull/99"), ("awaiting", "fix")])
+def test_a_changed_pull_binding_survives_the_stale_conflict_watch(merging, field, value):
+    from scripts.swarm.ledger_events import pull_request
+
+    merging.pulls[URL] = pull_request(
+        {"state": "OPEN", "mergeable": "CONFLICTING", "mergeQueueEntry": {"id": "entry", "state": "UNMERGEABLE"}}
+    )
+
+    def changed(action, url):
+        merging.rows["t1"] = {**merging.rows["t1"], field: value}
+        return {"queued": False}
+
+    assert merging.run(queuer=changed) == []
+    assert merging.rows["t1"]["state"] == "pr"
+    assert merging.rows["t1"][field] == value
+    assert merging.store.claimant("sw", "t1") == AGENT
+    assert ready.record(merging.store, "sw", "t1") is not None
+
+
+@pytest.mark.parametrize("state,owner,generation", [("open", "successor", 2), ("open", "", 3), ("blocked", "", 2)])
+def test_a_reopen_rejected_by_the_ledger_never_cleans_up_current_ownership(
+    merging, monkeypatch, state, owner, generation
+):
+    merging.rows["t1"]["claim_generation"] = 1
+    merging.pulls[URL] = RED
+
+    def changed(*args, **kwargs):
+        live = {**merging.rows["t1"], "state": state, "claimed_by": owner, "claim_generation": generation}
+        merging.rows["t1"] = live
+        return dict(live)
+
+    monkeypatch.setattr(merging.ledger, "update_task", changed)
+    assert merging.run() == []
+    assert merging.store.claimant("sw", "t1") == AGENT
+    assert ready.record(merging.store, "sw", "t1") is not None
+    assert merging.ledger.comments == []
+
+
+def test_an_owner_registered_during_dequeue_keeps_its_claim(merging):
+    from scripts.swarm.ledger_events import pull_request
+    from scripts.swarm.store import AgentRecord
+
+    merging.pulls[URL] = pull_request(
+        {"state": "OPEN", "mergeable": "CONFLICTING", "mergeQueueEntry": {"id": "entry", "state": "UNMERGEABLE"}}
+    )
+
+    def registered(action, url):
+        merging.store.put_agent("sw", AgentRecord(AGENT, "eng", "t1"))
+        return {"queued": False}
+
+    assert merging.run(queuer=registered) == []
+    assert merging.rows["t1"]["claimed_by"] == AGENT
+    assert merging.rows["t1"]["state"] == "pr"
+    assert merging.store.claimant("sw", "t1") == AGENT
+
+
+def test_a_finished_owner_does_not_hold_conflict_recovery(merging):
+    from scripts.swarm.ledger_events import pull_request
+    from scripts.swarm.store import AgentRecord
+
+    merging.store.put_agent("sw", AgentRecord(AGENT, "eng", "t1", state="finished"))
+    merging.pulls[URL] = pull_request({"state": "OPEN", "mergeable": "CONFLICTING"})
+    assert merging.run() == [f"task t1 reopened, {URL} has a merge conflict"]
+    assert merging.rows["t1"]["claimed_by"] == ""
+
+
+def test_a_new_conflicting_head_gets_its_own_restack_notice(merging):
+    from dataclasses import replace
+
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm.ledger_events import pull_request
+    from scripts.swarm.store import AgentRecord
+
+    merging.store.put_agent("sw", AgentRecord(AGENT, "eng", "t1"))
+    merging.pulls[URL] = pull_request({"state": "OPEN", "mergeable": "CONFLICTING", "headRefOid": "first-head"})
+    merging.run()
+    merging.pulls[URL] = replace(merging.pulls[URL], head="second-head")
+    merging.run()
+    assert len(InboxStore(merging.store.redis).inbox(AGENT)) == 2
 
 
 def test_one_tick_reports_every_unreleased_entry_it_dequeues(merging):

@@ -142,6 +142,100 @@ class OwnershipGuards(unittest.TestCase):
         self.assertEqual(state["tasks"][0]["claimed_by"], "")
 
 
+class OwnershipOperationContract(unittest.TestCase):
+    def test_the_operation_consumer_counts_claim_generations_and_rejects_aba(self):
+        from scripts.swarm_ledger import ledger_tasks
+
+        doc = make_ledger([{"title": "a", "phase": "p1", "lane": "eng"}])
+        ctx = core.Context(doc["_meta"], 1_000, SLUG)
+        task = doc["tasks"][0]
+        for n, owner in enumerate(("first", "second", "first"), 1):
+            change = op("task_update", n, item="tasks/t1", fields={"state": "pr", "claimed_by": owner})
+            ledger_tasks.check(change)
+            self.assertTrue(ledger_tasks.apply(doc, change, ctx))
+            self.assertEqual(task["claim_generation"], n)
+        for n, generation in enumerate((1, 3), 4):
+            change = op(
+                "task_update",
+                n,
+                item="tasks/t1",
+                fields={"state": "open", "claimed_by": ""},
+                if_match={"claimed_by": "first", "claim_generation": generation},
+            )
+            ledger_tasks.check(change)
+            self.assertTrue(ledger_tasks.apply(doc, change, ctx))
+            self.assertEqual(task["state"], "pr" if generation == 1 else "open")
+        self.assertEqual(task["claim_generation"], 4)
+        self.assertEqual(ctx.refused, [])
+
+    def test_the_operation_guard_matches_every_ownership_field_and_legacy_defaults(self):
+        from scripts.swarm_ledger import ledger_tasks
+
+        doc = make_ledger([{"title": "a", "phase": "p1", "lane": "eng"}])
+        ctx = core.Context(doc["_meta"], 1_000, SLUG)
+        task = doc["tasks"][0]
+        change = op(
+            "task_update",
+            1,
+            item="tasks/t1",
+            fields={
+                "state": "pr",
+                "claimed_by": "owner",
+                "pr_url": "https://github.com/o/r/pull/1",
+                "awaiting": "merge",
+            },
+            if_match={"claimed_by": "", "claim_generation": 0, "pr_url": "", "awaiting": ""},
+        )
+        ledger_tasks.check(change)
+        self.assertTrue(ledger_tasks.apply(doc, change, ctx))
+        self.assertEqual(task["claim_generation"], 1)
+        for key in ("claimed_by", "pr_url", "awaiting"):
+            stale = op(
+                "task_update",
+                2,
+                item="tasks/t1",
+                fields={"state": "open", "claimed_by": ""},
+                if_match={key: "different"},
+            )
+            ledger_tasks.check(stale)
+            self.assertTrue(ledger_tasks.apply(doc, stale, ctx))
+            self.assertEqual(task["state"], "pr")
+            self.assertEqual(task["claim_generation"], 1)
+        fresh = op(
+            "task_update",
+            3,
+            item="tasks/t1",
+            fields={"state": "open", "claimed_by": ""},
+            if_match={
+                "claimed_by": "owner",
+                "claim_generation": 1,
+                "pr_url": "https://github.com/o/r/pull/1",
+                "awaiting": "merge",
+            },
+        )
+        ledger_tasks.check(fresh)
+        self.assertTrue(ledger_tasks.apply(doc, fresh, ctx))
+        self.assertEqual((task["state"], task["claimed_by"], task["claim_generation"]), ("open", "", 2))
+
+    def test_the_operation_validator_rejects_malformed_ownership_guards(self):
+        from scripts.swarm_ledger import ledger_tasks
+
+        for expected in (None, [], "owner", {"unknown": ""}):
+            change = op("task_update", 1, item="tasks/t1", fields={"state": "open"}, if_match=expected)
+            with self.assertRaisesRegex(ValueError, "^if_match must contain task ownership fields$"):
+                ledger_tasks.check(change)
+        for key in ("claimed_by", "pr_url", "awaiting"):
+            change = op("task_update", 2, item="tasks/t1", fields={"state": "open"}, if_match={key: 1})
+            with self.assertRaisesRegex(ValueError, "^if_match ownership fields must be strings$"):
+                ledger_tasks.check(change)
+        for generation in (None, -1, True, "1", 1.5):
+            change = op(
+                "task_update", 3, item="tasks/t1", fields={"state": "open"}, if_match={"claim_generation": generation}
+            )
+            with self.assertRaisesRegex(ValueError, "^if_match claim_generation must be a nonnegative integer$"):
+                ledger_tasks.check(change)
+
+
 class TaskCli(unittest.TestCase):
     def test_task_commands_send_task_ops(self):
         import ledger
