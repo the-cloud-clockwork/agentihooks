@@ -176,9 +176,10 @@ def codex_rows(
     return rows
 
 
-def live_rows(accounts: list, quotas: dict, sessions: dict[str, int], now: float) -> list[QuotaRow]:
+def without_routing(rows: list[QuotaRow], accounts: list) -> list[QuotaRow]:
     """Accounts this environment holds no token for show their quota but take no routing share."""
-    return [replace(row, cap=None, routing_left=None) for row in codex_rows(accounts, quotas, sessions, now)]
+    names = {account.name for account in accounts}
+    return [replace(row, cap=None, routing_left=None) if row.account in names else row for row in rows]
 
 
 def next_account(pool: list, quotas: dict, sessions: dict[str, int], now: float, environ: dict[str, str]) -> str:
@@ -345,7 +346,7 @@ def _codex(now: float) -> list[QuotaRow]:
     sessions = codex_sessions_by_account()
     live = codex_router.live_accounts(pool, sessions)
     quotas = codex_router.quotas(pool + live, os.environ)
-    rows = codex_rows(pool, quotas, sessions, now) + live_rows(live, quotas, sessions, now)
+    rows = without_routing(codex_rows(pool + live, quotas, sessions, now), live)
     master = _masters("codex").get("codex")
     marked = [_mark(row, master) for row in rows + api_rows(CodexApiSource(sessions), "codex", now)]
     return mark_next(marked, next_account(pool, quotas, sessions, now, dict(os.environ)))
@@ -420,7 +421,7 @@ def _page_quota(now: float) -> dict:
     quotas = codex_router.quotas(pool + elsewhere, os.environ)
     claude = claude_rows([result for _, result in cached], live, "cached", observed, now)
     claude += api_rows(ClaudeApiSource(live), "claude", now)
-    rows = claude + codex_rows(pool, quotas, codex_live, now) + live_rows(elsewhere, quotas, codex_live, now)
+    rows = claude + without_routing(codex_rows(pool + elsewhere, quotas, codex_live, now), elsewhere)
     rows += api_rows(CodexApiSource(codex_live), "codex", now)
     rows = with_masters(rows, _masters(), live)
     return {"probed_at": max(observed.values(), default=None), "rows": [asdict(row) for row in rows]}
