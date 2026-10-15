@@ -406,6 +406,11 @@ def _write_launcher(
     opening = prompt_file if app_server else None
     command, before = _agent_command(spec, _route_report(launcher), name, claude_args, environ, directory, opening)
     identity = environ.get("AGENTIHOOKS_AGENT_NAME", name) if environ.get("AGENTIHOOKS_SWARM") else name
+    from scripts import session_exit
+
+    exit_record = session_exit.path_for(launcher, environ)
+    exit_command = shlex.join([sys.executable, "-m", "scripts.session_exit", str(exit_record)])
+    exit_identity = shlex.join([spec.agent, identity])
     command_text = shlex.join(command)
     if prompt_file is not None and not app_server:
         opening_prompt = _opening_prompt(prompt, prompt_file)
@@ -423,10 +428,12 @@ def _write_launcher(
     launcher.write_text(
         "#!/usr/bin/env bash\n"
         "set -u\n"
+        "set -m\n"
         f"cd {shlex.quote(str(directory))} || exit 1\n"
         f": > {shlex.quote(str(_started_marker(launcher)))}\n"
         f"{operator_env.source_line(environ)}"
         f"{_predecessor_export(environ)}"
+        f"export AGENTIHOOKS_EXIT_RECORD={shlex.quote(str(exit_record))}\n"
         "export AGENTIHOOKS_TERMINAL_LAUNCH=1\n"
         f"export AGENTIHOOKS_AGENT_NAME={shlex.quote(identity)}\n"
         f"{_config_home_export(environ) if spec.agent == 'claude' else ''}"
@@ -436,9 +443,12 @@ def _write_launcher(
         f"{_binding_export(environ)}"
         f"sleep {LAUNCH_GRACE_S}\n"
         f"{before}{command_text}\n"
+        "native_status=$?\n"
+        f'{exit_command} "$native_status" {exit_identity}\n'
         f"rm -f {shlex.join(cleanup)}\n"
         f"[ -e {shlex.quote(str(root))}/closing-$$ ] && {{ rm -f {shlex.quote(str(root))}/closing-$$; exit 0; }}\n"
         "unset AGENTIHOOKS_AGENT_NAME\n"
+        "unset AGENTIHOOKS_EXIT_RECORD\n"
         f"exec {shlex.quote(shell)} -l\n",
         encoding="utf-8",
     )
