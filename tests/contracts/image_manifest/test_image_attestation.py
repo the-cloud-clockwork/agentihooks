@@ -269,7 +269,6 @@ def test_promotion_records_the_registry_digest_and_tags(replayed):
     assert made["digest"] is None
 
 
-
 @pytest.mark.parametrize("replayed", [False, True])
 def test_promotion_accepts_the_tested_index_digest_and_preserves_the_config(replayed):
     made = attestation.attest(VALID, DIGEST, ORIGIN)
