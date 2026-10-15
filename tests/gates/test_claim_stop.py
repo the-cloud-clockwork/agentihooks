@@ -316,6 +316,27 @@ def test_a_lift_clears_prior_stops_and_expiry_requires_three_new_stops(rig, tmp_
     assert rig.task["state"] == "blocked"
 
 
+@pytest.mark.parametrize("invalid", ["expired", "moved-head"])
+def test_an_invalid_task_lift_cannot_fall_back_to_its_fresh_agent_lift(rig, tmp_path, monkeypatch, invalid):
+    from scripts.gates import intent, lift
+
+    now = 1_790_000_000.0
+    monkeypatch.setattr(lift.time, "time", lambda: now)
+    monkeypatch.setattr(intent, "pr_head", lambda url: "new-head")
+    state = Verdicts(SLUG, rig.gate.name, tmp_path)
+    lift.lift_agent(WHO, rig.gate.name, tmp_path, now=now)
+    record = {"at": now - lift.LIFT_SECONDS}
+    if invalid == "moved-head":
+        record = {"at": now, "url": URL, "head": "old-head"}
+    lift.task_lift_path(SLUG, WHO.task, rig.gate.name, tmp_path).write_text(json.dumps(record))
+
+    first = rig.gate.decide(STOP, WHO, state)
+    assert not first.allowed and "stop block 1 of 2" in first.reason
+    assert not rig.gate.decide(STOP, WHO, state).allowed
+    assert rig.gate.decide(STOP, WHO, state).allowed
+    assert rig.task["state"] == "blocked"
+
+
 @pytest.mark.parametrize("owed", sorted(PLAIN))
 def test_each_plain_cause_is_a_short_ledger_line(owed):
     words = PLAIN[owed].split()
