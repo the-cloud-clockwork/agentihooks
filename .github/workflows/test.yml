@@ -368,7 +368,7 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           BASE: ${{ inputs.base }}
         run: |
-          filter="status=success"
+          filter="status=completed"
           if [[ "${BASE#origin/}" == "$GITHUB_REF_NAME" ]]; then
             filter+="&head_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" --jq '.parents[0].sha')"
           elif [[ "${BASE#origin/}" != dev ]]; then
@@ -383,13 +383,34 @@ jobs:
             [[ -n "$run" ]] || continue
             kept=" $(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" --jq '[.artifacts[] | select(.expired | not) | .name] | join(" ")') "
             if [[ "$kept" == *" durations-merged "* && "$kept" == *" coverage-baseline "* ]]; then
-              echo "Restoring dev durations and the coverage baseline for base $BASE from passed dev push run $run on $head"
+              ancestry=$(gh api "repos/$GITHUB_REPOSITORY/compare/$head...dev" --jq .status)
+              [[ "$ancestry" == ahead || "$ancestry" == identical ]] || continue
+              jobs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" --paginate --jq '.jobs[]')
+              if ! jq -s -e --arg event push '
+                [.[] | select(.name | startswith("unit ("))] as $units |
+                (($units | length == 18 and all(.[]; .conclusion == "success")) or
+                 ($event == "merge_group" and
+                  all(.[] | select(.name == "unit" or (.name | startswith("unit ("))); .conclusion == "skipped") and
+                  any(.[]; .name == "reuse" and .conclusion == "success" and
+                    any(.steps[]?; .name == "Decide from protected code and record the tested tree" and .conclusion == "success")))) and
+                any(.[]; if $event == "push" then
+                  .name == "coverage-baseline" and .conclusion == "success" and
+                  any(.steps[]?; .name == "Compute the coverage baseline" and .conclusion == "success") and
+                  any(.steps[]?; .name == "Publish the passed dev coverage baseline" and .conclusion == "success")
+                else
+                  .name == "queue-baseline" and
+                  any(.steps[]?; .name == "Record this run\u0027s coverage baseline" and .conclusion == "success") and
+                  any(.steps[]?; .name == "Publish this run\u0027s coverage baseline" and .conclusion == "success")
+                end)' <<< "$jobs" > /dev/null; then
+                continue
+              fi
+              echo "Restoring dev durations and the coverage baseline for base $BASE from measured dev push run $run on $head"
               echo "id=$run" >> "$GITHUB_OUTPUT"
               echo "sha=$head" >> "$GITHUB_OUTPUT"
               exit 0
             fi
           done <<< "$runs"
-          echo "::error::No passed dev push Tests run for base $BASE kept live durations-merged and coverage-baseline artifacts; pin a base whose dev push run passed and finished."
+          echo "::error::No measured dev push Tests run for base $BASE kept live durations-merged and coverage-baseline artifacts with successful measuring and publishing jobs."
           exit 1
 
       - name: Download the dev durations
@@ -1317,16 +1338,37 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           BASE: ${{ steps.base.outputs.commit }}
         run: |
-          runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?head_sha=$BASE&status=success&per_page=20" --jq '.workflow_runs[].id')
-          for run in $runs; do
+          ancestry=$(gh api "repos/$GITHUB_REPOSITORY/compare/$BASE...dev" --jq .status)
+          [[ "$ancestry" == ahead || "$ancestry" == identical ]] || { echo "::error::Base $BASE is outside dev history."; exit 1; }
+          runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?head_sha=$BASE&per_page=20" --jq '.workflow_runs[] | select((.event == "push" and .head_branch == "dev") or (.event == "merge_group" and (.head_branch | startswith("gh-readonly-queue/dev/")))) | "\(.id) \(.event)"')
+          while read -r run event; do
+            [[ -n "$run" ]] || continue
             kept=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?name=coverage-baseline" --jq '[.artifacts[] | select(.expired | not)] | length')
-            if [[ "$kept" -gt 0 ]]; then
-              echo "Restoring the coverage baseline of base $BASE from passed run $run"
-              echo "id=$run" >> "$GITHUB_OUTPUT"
-              exit 0
+            [[ "$kept" -gt 0 ]] || continue
+            jobs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" --paginate --jq '.jobs[]')
+            if ! jq -s -e --arg event "$event" '
+              [.[] | select(.name | startswith("unit ("))] as $units |
+              (($units | length == 18 and all(.[]; .conclusion == "success")) or
+               ($event == "merge_group" and
+                all(.[] | select(.name == "unit" or (.name | startswith("unit ("))); .conclusion == "skipped") and
+                any(.[]; .name == "reuse" and .conclusion == "success" and
+                  any(.steps[]?; .name == "Decide from protected code and record the tested tree" and .conclusion == "success")))) and
+              any(.[]; if $event == "push" then
+                .name == "coverage-baseline" and .conclusion == "success" and
+                any(.steps[]?; .name == "Compute the coverage baseline" and .conclusion == "success") and
+                any(.steps[]?; .name == "Publish the passed dev coverage baseline" and .conclusion == "success")
+              else
+                .name == "queue-baseline" and
+                any(.steps[]?; .name == "Record this run\u0027s coverage baseline" and .conclusion == "success") and
+                any(.steps[]?; .name == "Publish this run\u0027s coverage baseline" and .conclusion == "success")
+              end)' <<< "$jobs" > /dev/null; then
+              continue
             fi
-          done
-          echo "::error::No passed Tests run on base $BASE kept a live coverage-baseline artifact."
+            echo "Restoring the coverage baseline of base $BASE from measured run $run"
+            echo "id=$run" >> "$GITHUB_OUTPUT"
+            exit 0
+          done <<< "$runs"
+          echo "::error::No measured Tests run on base $BASE kept a live coverage-baseline artifact with successful measuring and publishing jobs."
           exit 1
 
       - name: Download the base baseline its run published
@@ -1691,18 +1733,42 @@ jobs:
           BASE_SHA: ${{ github.event.merge_group.base_sha }}
         run: |
           tree=$(gh api "repos/$GITHUB_REPOSITORY/commits/$BASE_SHA" --jq '.commit.tree.sha')
+          ancestry=$(gh api "repos/$GITHUB_REPOSITORY/compare/$BASE_SHA...dev" --jq .status)
+          if [[ "$ancestry" != ahead && "$ancestry" != identical ]]; then
+            ancestry=$(gh api "repos/$GITHUB_REPOSITORY/compare/$BASE_SHA...$GITHUB_SHA" --jq .status)
+          fi
+          [[ "$ancestry" == ahead || "$ancestry" == identical ]] || { echo "::error::Base $BASE_SHA is outside dev and queue history."; exit 1; }
           while true; do
-            runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?head_sha=$BASE_SHA&per_page=20" --jq '.workflow_runs[] | select(.event != "workflow_dispatch") | "\(.id) \(.status)"')
+            runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?head_sha=$BASE_SHA&per_page=20" --jq '.workflow_runs[] | select((.event == "push" and .head_branch == "dev") or (.event == "merge_group" and (.head_branch | startswith("gh-readonly-queue/dev/")))) | "\(.id) \(.status) \(.event)"')
             if [[ -z "$runs" ]]; then
               echo "::error::No Tests run remains on base $BASE_SHA, so the queue entry was removed and this group is superseded."
               exit 1
             fi
             running=0
-            while read -r run status; do
+            while read -r run status event; do
               [[ -n "$run" ]] || continue
               [[ "$status" == completed ]] || running=1
               kept=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?name=coverage-baseline" --jq '[.artifacts[] | select(.expired | not)] | length')
               if [[ "$kept" -gt 0 ]]; then
+                jobs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" --paginate --jq '.jobs[]')
+                if ! jq -s -e --arg event "$event" '
+                  [.[] | select(.name | startswith("unit ("))] as $units |
+                  (($units | length == 18 and all(.[]; .conclusion == "success")) or
+                   ($event == "merge_group" and
+                    all(.[] | select(.name == "unit" or (.name | startswith("unit ("))); .conclusion == "skipped") and
+                    any(.[]; .name == "reuse" and .conclusion == "success" and
+                      any(.steps[]?; .name == "Decide from protected code and record the tested tree" and .conclusion == "success")))) and
+                  any(.[]; if $event == "push" then
+                    .name == "coverage-baseline" and .conclusion == "success" and
+                    any(.steps[]?; .name == "Compute the coverage baseline" and .conclusion == "success") and
+                    any(.steps[]?; .name == "Publish the passed dev coverage baseline" and .conclusion == "success")
+                  else
+                    .name == "queue-baseline" and
+                    any(.steps[]?; .name == "Record this run\u0027s coverage baseline" and .conclusion == "success") and
+                    any(.steps[]?; .name == "Publish this run\u0027s coverage baseline" and .conclusion == "success")
+                  end)' <<< "$jobs" > /dev/null; then
+                  continue
+                fi
                 echo "Restoring the coverage baseline of base $BASE_SHA tree $tree from run $run"
                 echo "id=$run" >> "$GITHUB_OUTPUT"
                 echo "tree=$tree" >> "$GITHUB_OUTPUT"

@@ -220,12 +220,14 @@ def base_run(tmp_path):
         "#!/usr/bin/env bash\n"
         'printf "%s\\n" "$@" >> "$ARGS"\n'
         'case "$2" in\n'
+        "  */compare/*) echo ahead ;;\n"
+        '  */jobs*) jq -nc \'[range(1;13) | {name: ("unit (3.12, " + tostring + ")"), conclusion: "success"}] + [range(1;7) | {name: ("unit (3.11, " + tostring + ")"), conclusion: "success"}] + [{name: "queue-baseline", conclusion: "success", steps: [{name: "Record this run\\u0027s coverage baseline", conclusion: "success"}, {name: "Publish this run\\u0027s coverage baseline", conclusion: "success"}]}]\' | jq -c \'.[]\' ;;\n'
         '  */commits/*) printf "tree-of-base" ;;\n'
         '  */runs\\?head_sha=*) [[ -z "$FAIL_RUNS" ]] || exit 1; '
         '[[ "$FAKE_REMOVED_AFTER" -lt 0 || $(cat "$POLLS") -lt "$FAKE_REMOVED_AFTER" ]] || exit 0; '
-        "for r in $FAKE_RUNS; do e=pull_request; s=$FAKE_STATUS;"
+        "for r in $FAKE_RUNS; do e=merge_group; s=$FAKE_STATUS;"
         ' [[ " $FAKE_DISPATCH " == *" $r "* ]] && { e=workflow_dispatch; s=in_progress; };'
-        ' jq -n --argjson id "$r" --arg s "$s" --arg e "$e" \'{id: $id, status: $s, event: $e}\'; done'
+        ' jq -n --argjson id "$r" --arg s "$s" --arg e "$e" \'{id: $id, status: $s, event: $e, head_branch: "gh-readonly-queue/dev/pr-1", head_sha: ("b" * 40)}\'; done'
         " | jq -s '{workflow_runs: .}' | jq -r \"$4\" ;;\n"
         '  */artifacts*) n=$(cat "$POLLS"); echo $((n + 1)) > "$POLLS"; '
         '[[ "$2" == *"/$FAKE_KEPT_BY/"* && $n -ge $FAKE_AFTER ]] && printf 1 || printf 0 ;;\n'
@@ -445,9 +447,11 @@ def dispatch_lookup(tmp_path):
         "#!/usr/bin/env bash\n"
         'printf "%s\\n" "$@" >> "$ARGS"\n'
         'case "$2" in\n'
+        '  */compare/*) body=\'{"status":"ahead"}\' ;;\n'
+        '  */jobs*) jq -nc \'[range(1;13) | {name: ("unit (3.12, " + tostring + ")"), conclusion: "success"}] + [range(1;7) | {name: ("unit (3.11, " + tostring + ")"), conclusion: "success"}] + [{name: "coverage-baseline", conclusion: "success", steps: [{name: "Compute the coverage baseline", conclusion: "success"}, {name: "Publish the passed dev coverage baseline", conclusion: "success"}]}]\' | jq -c \'.[]\'; exit 0 ;;\n'
         '  */commits/*) [[ -z "$FAIL_COMMIT" ]] || exit 1; body="{\\"sha\\": \\"$FAKE_SHA\\"}" ;;\n'
         '  */runs\\?*) body=$(printf "%s\\n" $FAKE_RUNS | grep . | jq -R --arg sha "$FAKE_SHA" "$RUN_OF"'
-        ' | jq -s --arg q "&${2#*\\?}&" "$LISTED") ;;\n'
+        ' | jq -s --arg q "&${2#*\\?}&" "$LISTED" | jq --arg q "&${2#*\\?}&" \'.workflow_runs |= map(. + {event: "push", head_branch: "dev"} | select(($q | contains("&status=completed&") | not) or (.conclusion != "" and .conclusion != null)))\') ;;\n'
         '  */runs/*/artifacts*) run="${2#*/runs/}"; run="${run%%/*}"; v="KEPT_$run"; body="${!v:-[]}"'
         '; body="{\\"artifacts\\": $body}" ;;\n'
         "esac\n"
@@ -497,9 +501,9 @@ def test_dispatch_on_dev_restores_the_newest_passed_dev_push_run(dispatch_lookup
     assert not [arg for arg in args if "/commits/" in arg]
     assert (
         "repos/the-cloud-clockwork/agentihooks/actions/workflows/test.yml/runs"
-        "?branch=dev&event=push&status=success&per_page=20"
+        "?branch=dev&event=push&status=completed&per_page=20"
     ) in args
-    assert "from passed dev push run 222" in result.stdout
+    assert "from measured dev push run 222" in result.stdout
 
 
 def test_dispatch_on_a_pinned_commit_restores_its_passed_dev_push_run(dispatch_lookup):
@@ -517,7 +521,7 @@ def test_dispatch_on_a_pinned_commit_restores_its_passed_dev_push_run(dispatch_l
     assert "repos/the-cloud-clockwork/agentihooks/commits/" + pinned in args
     assert (
         "repos/the-cloud-clockwork/agentihooks/actions/workflows/test.yml/runs"
-        "?branch=dev&event=push&status=success&head_sha=" + pinned + "&per_page=20"
+        "?branch=dev&event=push&status=completed&head_sha=" + pinned + "&per_page=20"
     ) in args
 
 
