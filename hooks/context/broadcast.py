@@ -8,6 +8,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -1166,13 +1167,21 @@ def check_and_inject_broadcasts(session_id: str) -> None:
                 continue
 
             banner = format_broadcast_banner(msg)
-            inject_banner("BROADCAST", banner)
+            inject_banner(
+                "BROADCAST", banner, kind="alert" if msg.get("severity") in ("critical", "nuclear") else "brain"
+            )
             injection_trace.record_broadcast(session_id, msg)
             emit_span("brain.delivery", span_attrs)
             _record_delivery(session_id, msg, now_ts)
             injected += 1
     except Exception:
         pass
+
+
+def context_kind(context: str) -> str:
+    """Budget kind of a formatted broadcast block: an alert only when it carries a critical or nuclear message."""
+    labels = "|".join(_SEVERITY_DISPLAY_LABEL[s] for s in ("nuclear", "critical"))
+    return "alert" if re.search(rf"^  - \[(?:{labels})\] \(id:", context, re.MULTILINE) else "brain"
 
 
 def get_pretool_context(session_id: str, *, claim_unseen: bool = True) -> str | None:
