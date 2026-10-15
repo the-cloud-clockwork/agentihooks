@@ -127,12 +127,23 @@ def check_build(root: Path) -> None:
         raise SwarmError(reason.getvalue().strip())
 
 
+def push_branch(root: Path, task: dict, branch: str) -> str:
+    recorded = task.get("branch")
+    if recorded:
+        ref = f"refs/remotes/origin/{recorded}"
+        done = subprocess.run(["git", "merge-base", "--is-ancestor", ref, "HEAD"], cwd=root, capture_output=True)
+        if done.returncode == 0:
+            return recorded
+    return branch
+
+
 def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, message: str, files: list[str]) -> dict:
     task = task_row(slug, agent, ledger)
     root = existing(Path(repo), task, agent)
     if root is None:
         raise SwarmError(f"task worktree missing; Next: agentihooks swarm {shlex.quote(slug)} prepare")
     fields = checkout_fields(root)
+    fields["branch"] = push_branch(root, task, fields["branch"])
     selected = selected_files(root, files)
     retry = shlex.join(["agentihooks", "swarm", slug, "publish", "--message", message, "--", *files])
     try:

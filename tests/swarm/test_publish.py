@@ -555,6 +555,21 @@ def test_protected_task_branches_never_prepare_or_publish(publication, branch):
     assert git(publication.root, "rev-parse", "HEAD") == before
 
 
+def test_continuation_publishes_back_to_the_recorded_remote_branch(publication):
+    from scripts.swarm import publish
+
+    root = publication.root
+    git(root, "push", "origin", "HEAD:predecessor")
+    publication.task["branch"] = "predecessor"
+    result = publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+    head = git(root, "rev-parse", "HEAD")
+    assert result["branch"] == publication.task["branch"] == "predecessor"
+    assert git(root, "ls-remote", "origin", "refs/heads/predecessor").split()[0] == head
+    assert git(root, "ls-remote", "origin", "refs/heads/engineer-test") == ""
+
+
 def test_a_restacked_successor_publishes_its_prepared_branch_not_the_parked_one(publication):
     from scripts.swarm import publish
 
