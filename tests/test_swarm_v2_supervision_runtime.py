@@ -646,6 +646,16 @@ def test_a_delayed_workspace_command_succeeds_within_the_remaining_startup_budge
     assert reply == {"result": {"root_pane": {"pane_id": "pane"}}}
 
 
+@pytest.mark.parametrize("now", [10, 11])
+def test_a_spent_startup_budget_refuses_the_workspace_command_without_running_it(supervisor, monkeypatch, now):
+    run = Mock()
+    monkeypatch.setattr(runtime.subprocess, "run", run)
+    monkeypatch.setattr(runtime.time, "monotonic", lambda: now)
+    with pytest.raises(subprocess.TimeoutExpired):
+        supervisor.herdr(["workspace", "create"], 10)
+    run.assert_not_called()
+
+
 def test_a_hanging_workspace_command_still_fails_at_the_startup_deadline(supervisor):
     supervisor.launch = replace(
         supervisor.launch, herdr=(sys.executable, "-c", "import time; time.sleep(60)", "server")
@@ -674,11 +684,11 @@ def test_exporter_readiness_cannot_mask_service_failure(supervisor, monkeypatch)
 
 def test_ready_accepts_successful_herdr_transport(supervisor, monkeypatch):
     monkeypatch.setattr(supervisor, "observe", lambda: None)
-    monkeypatch.setattr(runtime.time, "monotonic", Mock(side_effect=[0]))
+    monkeypatch.setattr(runtime.time, "monotonic", Mock(side_effect=[0, 0.75]))
     transport = Mock(return_value={})
     monkeypatch.setattr(supervisor, "herdr", transport)
     assert supervisor.ready("herdr", 1)
-    transport.assert_called_once_with(["workspace", "list"])
+    transport.assert_called_once_with(["workspace", "list"], 1)
 
 
 def test_readiness_closes_at_deadline(supervisor, monkeypatch):

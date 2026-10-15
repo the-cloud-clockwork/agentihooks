@@ -86,12 +86,16 @@ class Supervisor:
         )
 
     def herdr(self, command: list[str], deadline: float) -> dict:
+        argv = [*self.launch.herdr[:-1], *command]
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(argv, 0)
         result = subprocess.run(
-            [*self.launch.herdr[:-1], *command],
+            argv,
             env=self.environment,
             stdin=subprocess.DEVNULL,
             capture_output=True,
-            timeout=max(0, deadline - time.monotonic()),
+            timeout=remaining,
             check=True,
         )
         return json.loads(result.stdout) if result.stdout.strip() else {}
