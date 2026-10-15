@@ -2372,6 +2372,7 @@ def test_cli_collection_consumers_read_all_pages(live, tmp_path, capsys, monkeyp
         depends_on="",
         territory="",
         overlays="",
+        repositories="",
         gain=None,
         must="",
         check="",

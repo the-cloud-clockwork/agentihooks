@@ -175,3 +175,28 @@ def test_bundle_without_a_gate_uses_the_named_touched_file_fallback(repositories
         with pytest.raises(SwarmError, match="AgentiHooks touched Python fallback"):
             publish.publish("swarm", p.agent, str(p.swarm), p.ledger, "Bad bundle", ["chosen.py"])
         assert git(p.bundle, "ls-remote", "origin", "refs/heads/engineer-test") == ""
+
+
+@pytest.mark.parametrize("shape", ["script", "package"])
+def test_native_gate_without_a_scripts_package_runs_its_own_entry_point(repositories, monkeypatch, shape):
+    from pathlib import Path
+
+    p = repositories
+    p.task["repositories"] = [str(p.bundle)]
+    root = Path(publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)["worktree"])
+    install_gate(root)
+    (root / "scripts" / "__init__.py").unlink()
+    if shape == "script":
+        source = root / "scripts" / "ci_prepush"
+        source.with_suffix(".py").write_text((source / "__main__.py").read_text())
+        (source / "__main__.py").unlink()
+        (source / "__init__.py").unlink()
+        source.rmdir()
+    git(root, "add", "scripts")
+    git(root, "commit", "-qm", "Use namespace scripts directory")
+    (root / "chosen.txt").write_text("after")
+    monkeypatch.chdir(root)
+    result = publish.publish("swarm", p.agent, str(p.swarm), p.ledger, "Use native gate", ["chosen.txt"])
+    suffix = "scripts/ci_prepush.py" if shape == "script" else "scripts/ci_prepush"
+    assert result["gate"] == str(root / suffix)
+    assert git(p.bundle, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == result["head"]
