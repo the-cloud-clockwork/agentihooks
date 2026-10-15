@@ -161,4 +161,4 @@ def test_main_sweeps_agentihooks_by_default_and_describes_itself(monkeypatch, ca
     monkeypatch.setenv("COLUMNS", "200")
     with pytest.raises(SystemExit):
         ci_requeue.main(["--help"])
-    assert "Queue every green open pull request into dev, oldest first" in capsys.readouterr().out
+    assert "Queue every green open pull request into dev, oldest first" in capsys.readouterr().out.splitlines()
