@@ -9,7 +9,7 @@ from scripts.codex_session.binding import CONNECTED, DEGRADED, BindingStore, Tra
 from scripts.inbox import codex, wake
 from scripts.inbox.dispatch import Dispatcher
 from scripts.inbox.receipts import MISMATCH, RELEASED, DispatchError, Receipts
-from scripts.inbox.store import InboxStore
+from scripts.inbox.store import InboxStore, owner_ttl_s
 from scripts.swarm.execution import ExecutionRegistry
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
@@ -1218,3 +1218,8 @@ def test_a_codex_pane_is_typed_into_only_while_no_pump_owns_its_inbox(rig):
     assert wake.typed_wake(rig.store, pane) is False
     assert wake.typed_wake(rig.store, replace(pane, name="engineer@abc-0002")) is True
     assert wake.typed_wake(rig.store, replace(pane, name="engineer@abc-0002", pane_id="")) is False
+
+
+def test_the_pump_renews_its_inbox_lease_before_the_default_lease_expires():
+    assert (codex.RECONCILE_S, codex.BACKOFF_MAX_S) == (10.0, 15.0)
+    assert codex.Timing().reconcile_s + codex.Timing().backoff_max_s < owner_ttl_s({})
