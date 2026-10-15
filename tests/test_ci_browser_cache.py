@@ -206,11 +206,12 @@ def test_only_a_dev_push_saves_the_browser_after_installing_it():
     uses = [step.get("uses") for step in steps if "uses" in step]
     assert uses == ["actions/cache/restore@v4", "actions/cache/save@v4"]
     restore = next(step for step in steps if step.get("uses") == "actions/cache/restore@v4")
-    save = steps[-1]
-    assert save["uses"] == "actions/cache/save@v4"
+    save = next(step for step in steps if step.get("uses") == "actions/cache/save@v4")
+    assert steps.index(save) == len(steps) - 1
     assert save["with"] == {"path": restore["with"]["path"], "key": "${{ steps.cache.outputs.cache-primary-key }}"}
     assert save["if"] == (
-        "steps.launch.outputs.ready != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/dev'"
+        "steps.launch.outputs.ready != 'true' && steps.cache.outputs.cache-hit != 'true'"
+        " && github.event_name == 'push' && github.ref == 'refs/heads/dev'"
     )
 
 

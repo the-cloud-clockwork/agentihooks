@@ -76,7 +76,7 @@ runs:
         done
         exit 1
     - name: Save Chromium from dev
-      if: steps.launch.outputs.ready != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/dev'
+      if: steps.launch.outputs.ready != 'true' && steps.cache.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/dev'
       uses: actions/cache/save@v4
       with:
         path: ${{ github.workspace }}/.playwright
