@@ -192,6 +192,7 @@ def test_a_failed_copy_still_drops_the_job_token_login(tmp_path):
     [
         ("swarm-node-image.yml", "image"),
         ("swarm-node-smoke.yml", "worker-image"),
+        ("swarm-node-smoke.yml", "worker-health"),
     ],
 )
 def test_worker_build_jobs_obtain_the_locked_base_first(workflow, job):
