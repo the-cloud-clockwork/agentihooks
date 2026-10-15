@@ -160,6 +160,13 @@ class TestLiveness:
         monkeypatch.setattr(mcp_daemon, "_proc_fs_available", lambda: False)
         assert mcp_daemon.pid_alive(4242) is True
 
+    def test_an_unreadable_cmdline_reads_as_empty(self, monkeypatch):
+        def vanished(self):
+            raise FileNotFoundError(str(self))
+
+        monkeypatch.setattr(Path, "read_bytes", vanished)
+        assert mcp_daemon._read_cmdline(4242) == b""
+
 
 class TestPidfile:
     def test_round_trip(self, state_dir):

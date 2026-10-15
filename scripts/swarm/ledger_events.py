@@ -42,16 +42,31 @@ PENDING = {None, "", "PENDING", "EXPECTED"}
 GATE = "Gate — Required"
 RED_NOTICE = re.compile(r"^Your pull request (\S+) for .* has red checks and no push for twenty minutes\.")
 GATE_JOB = re.compile(rf"^[ \t]+name:[ \t]*(['\"]?){re.escape(GATE)}\1[ \t]*$", re.MULTILINE)
+CONTEXT_NODES = (
+    "nodes{...on CheckRun{databaseId name conclusion completedAt checkSuite{workflowRun{workflow{name}}}} "
+    "...on StatusContext{context state createdAt}} pageInfo{hasNextPage endCursor}"
+)
+SUITE_NODES = "nodes{status conclusion workflowRun{databaseId createdAt}} pageInfo{hasNextPage endCursor}"
 PULL_QUERY = (
     "query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid mergeQueueEntry{id state} "
     "mergeable isDraft "
-    "commits(last:1){nodes{commit{committedDate "
+    "commits(last:1){nodes{commit{id committedDate "
     'file(path:".github/workflows"){object{...on Tree{entries{object{...on Blob{text}}}}}} '
-    "statusCheckRollup{contexts(first:100){"
-    "nodes{...on CheckRun{name conclusion completedAt} ...on StatusContext{context state createdAt}} "
-    "pageInfo{hasNextPage}}} checkSuites(first:100){nodes{status conclusion workflowRun{databaseId createdAt}} "
-    "pageInfo{hasNextPage}}}}}}}}"
+    + "statusCheckRollup{contexts(first:100){"
+    + CONTEXT_NODES
+    + "}} checkSuites(first:100){"
+    + SUITE_NODES
+    + "}}}}}}}"
 )
+PAGE_PREFIX = "query($id:ID!,$after:String!){node(id:$id){...on Commit{"
+PAGES = {
+    "contexts": (
+        PAGE_PREFIX + "statusCheckRollup{contexts(first:100,after:$after){" + CONTEXT_NODES + "}}}}}",
+        ("statusCheckRollup", "contexts"),
+    ),
+    "checkSuites": (PAGE_PREFIX + "checkSuites(first:100,after:$after){" + SUITE_NODES + "}}}}", ("checkSuites",)),
+}
+MAX_PAGES = 20
 
 
 @dataclass(frozen=True)
@@ -78,7 +93,7 @@ def iso_ms(text):
 
 
 def pull_request(raw):
-    commits, checks = raw.get("commits") or [], raw.get("statusCheckRollup") or []
+    commits, checks = raw.get("commits") or [], _newest(raw.get("statusCheckRollup") or [])
     suites = raw.get("checkSuites") or []
     results = [check.get("conclusion") or check.get("state") for check in checks]
     running = any(suite.get("workflowRun") and suite.get("status") != "COMPLETED" for suite in suites)
@@ -120,6 +135,19 @@ def pull_request(raw):
         bool(raw.get("isDraft")),
         _latest_run_cancelled(suites),
     )
+
+
+def _newest(checks):
+    latest = {}
+    for order, check in sorted(enumerate(checks), key=_mark):
+        run = ((check.get("checkSuite") or {}).get("workflowRun") or {}).get("workflow") or {}
+        latest[(run.get("name"), check.get("name"), check.get("context"))] = (order, check)
+    return [check for _, check in sorted(latest.values())]
+
+
+def _mark(item):
+    order, check = item
+    return check.get("databaseId") or 0, check.get("createdAt") or "", order
 
 
 def _latest_run_cancelled(suites):
@@ -172,7 +200,7 @@ def view(url, run=subprocess.run):
         )
         if done.returncode != 0:
             return None
-        return _view_resource(json.loads(done.stdout)["data"]["resource"])
+        return _view_resource(json.loads(done.stdout)["data"]["resource"], run=run)
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
         return None
 
@@ -185,22 +213,40 @@ def head(url, run=subprocess.run):
         return ""
 
 
-def _view_resource(raw, gated=None):
+def _view_resource(raw, gated=None, run=subprocess.run):
     try:
         raw = dict(raw)
         commits = [node["commit"] for node in raw["commits"]["nodes"]]
-        rollup = (commits[-1].get("statusCheckRollup") or {}) if commits else {}
-        contexts = rollup.get("contexts") or {}
-        suites = commits[-1]["checkSuites"] if commits else {"nodes": [], "pageInfo": {}}
-        if contexts.get("pageInfo", {}).get("hasNextPage") or suites["pageInfo"].get("hasNextPage"):
+        commit = commits[-1] if commits else {}
+        contexts = (commit.get("statusCheckRollup") or {}).get("contexts") or {}
+        contexts = {"nodes": contexts.get("nodes") or [], "pageInfo": contexts.get("pageInfo") or {}}
+        suites = commit["checkSuites"] if commits else {"nodes": [], "pageInfo": {}}
+        checks = _paged(commit.get("id"), "contexts", contexts, run)
+        suites = _paged(commit.get("id"), "checkSuites", suites, run)
+        if checks is None or suites is None:
             return None
         raw["commits"] = commits
-        raw["statusCheckRollup"] = contexts.get("nodes") or []
-        raw["checkSuites"] = list(suites["nodes"])
-        raw["gated"] = gated if gated is not None else bool(commits) and declares_gate(commits[-1].get("file"))
+        raw["statusCheckRollup"] = checks
+        raw["checkSuites"] = suites
+        raw["gated"] = gated if gated is not None else bool(commits) and declares_gate(commit.get("file"))
         return pull_request(raw)
     except (ValueError, KeyError, TypeError):
         return None
+
+
+def _paged(commit, field, page, run):
+    nodes, info = list(page["nodes"]), page["pageInfo"]
+    for _ in range(MAX_PAGES):
+        if not info.get("hasNextPage"):
+            return nodes
+        if not commit:
+            return None
+        query, path = PAGES[field]
+        page = _graphql(query, run, id=commit, after=info["endCursor"]).get("node")
+        for key in path:
+            page = page[key]
+        nodes, info = nodes + list(page["nodes"]), page["pageInfo"]
+    return None if info.get("hasNextPage") else nodes
 
 
 def views(
@@ -220,14 +266,15 @@ def views(
         for i, url in enumerate(batch):
             raw = data.get(f"p{i}")
             gated = gates.get(_workflow_id(raw))
-            found[url] = _view_resource(raw, gated) if gated is not None else None
+            found[url] = _view_resource(raw, gated, run) if gated is not None else None
     return found
 
 
-def _graphql(query, run):
+def _graphql(query, run, **variables):
     try:
         done = run(
-            ["gh", "api", "graphql", "-f", f"query={query}"],
+            ["gh", "api", "graphql", "-f", f"query={query}"]
+            + [arg for name, value in variables.items() for arg in ("-f", f"{name}={value}")],
             capture_output=True,
             text=True,
             timeout=20,
