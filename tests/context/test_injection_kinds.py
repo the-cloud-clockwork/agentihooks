@@ -262,9 +262,9 @@ def test_block_that_exactly_fills_the_room_stays_whole():
 def test_second_block_pays_for_its_separator():
     from hooks.context.injection_budget import fit
 
-    out = fit([("alert", "a" * 400), ("enforcement", "r" * 399), ("brain", "b" * 10)], 1000)
+    out = fit([("alert", "a" * 400), ("enforcement", "r" * 399), ("brain", "b" * 300)], 1000)
     assert out.startswith("a" * 400 + "\n" + "r" * 399 + "\n[context budget: left out brain")
-    out = fit([("alert", "a" * 400), ("enforcement", "r" * 400), ("brain", "b" * 10)], 1000)
+    out = fit([("alert", "a" * 400), ("enforcement", "r" * 400), ("brain", "b" * 300)], 1000)
     assert out.startswith("a" * 400 + "\n" + "r" * 399 + "\n[context budget: left out brain")
     assert "shortened enforcements" in out
 
