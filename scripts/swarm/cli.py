@@ -1050,9 +1050,13 @@ def cmd_rename(store, args):
         raise SwarmError("; ".join(failed))
 
 
+def _caller(args):
+    return args.name or Who.from_env().name
+
+
 def _master_or_operator(store, args, message):
     store.config(args.slug)
-    name = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME", "")
+    name = _caller(args)
     if name in ("", "operator"):
         return "operator"
     agent = next((a for a in store.agents(args.slug) if a.name == name), None)
@@ -1614,7 +1618,7 @@ def _list_learned(store, slug):
 
 def cmd_promote(store, args):
     store.config(args.slug)
-    name = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME", "")
+    name = _caller(args)
     agent = next((a for a in store.agents(args.slug) if a.name == name), None)
     if args.maturity == CANON and agent is not None and agent.lane != MASTER:
         raise SwarmError(ONLY_MASTER_CANON)
@@ -1628,7 +1632,7 @@ def cmd_promote(store, args):
 
 def cmd_retire(store, args):
     store.config(args.slug)
-    name = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME") or "operator"
+    name = _caller(args) or "operator"
     agent = next((a for a in store.agents(args.slug) if a.name == name), None)
     if agent is not None and agent.lane != MASTER:
         raise SwarmError(ONLY_MASTER_RETIRE)
