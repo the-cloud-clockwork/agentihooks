@@ -1,7 +1,8 @@
 import pytest
 
-from scripts.swarm_ledger import ledger, ledger_tasks, legacy_page, new_ledger
+from scripts.swarm_ledger import ledger, ledger_tasks, new_ledger
 from scripts.swarm_ledger import ledger_core as core
+from tests.swarm_ledger import legacy_page
 
 SLUG = "task-repositories"
 
