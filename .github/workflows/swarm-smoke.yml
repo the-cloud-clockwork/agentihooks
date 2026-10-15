@@ -19,6 +19,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+      - name: Pull the Python base with bounded retries
+        run: bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm
       - name: Launch a scratch agent through a remote hive container
         if: ${{ !cancelled() }}
         run: bash scripts/packaging/hive-launch-smoke.sh

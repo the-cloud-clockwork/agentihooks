@@ -17,6 +17,7 @@ def test_container_proofs_share_one_runner_without_losing_commands():
     assert list(smoke) == ["smoke"]
     steps = smoke["smoke"]["steps"]
     assert [step["run"] for step in steps if "run" in step] == [
+        "bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm",
         "bash scripts/packaging/hive-launch-smoke.sh",
         "bash scripts/packaging/hive-launch-attestation-proof.sh",
         "bash scripts/packaging/swarm-smoke.sh",
@@ -29,6 +30,8 @@ def test_container_proofs_share_one_runner_without_losing_commands():
     for step in steps:
         if "hive-launch-attestation-proof.sh" in step.get("run", ""):
             assert step["if"] == "github.event_name == 'workflow_dispatch'"
+        elif "pull-runtime-image.sh" in step.get("run", ""):
+            assert "if" not in step
         elif "run" in step:
             assert step["if"] == "${{ !cancelled() }}"
         assert not step.get("continue-on-error", False)
