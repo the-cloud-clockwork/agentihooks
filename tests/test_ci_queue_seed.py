@@ -36,7 +36,7 @@ def test_publisher_uploads_the_passed_dev_baseline_for_queue_runs():
 
 def test_queue_runs_mint_a_read_only_app_token_and_skip_the_dev_cache_lookup():
     job = _jobs()["durations"]
-    lookup = job["steps"][0]
+    lookup = _step(job["steps"], "Look up the base revision's dev durations")
     mint = _step(job["steps"], "Mint the tcc main ci App token")
     assert not _runs_on(lookup, "merge_group")
     assert _runs_on(mint, "merge_group")
@@ -85,73 +85,32 @@ def test_no_queue_run_carries_a_baseline_from_the_latest_dev_run():
     assert "dev-coverage-baseline" not in (_ROOT / ".github/workflows/test.yml").read_text()
 
 
-def test_queue_runs_publish_their_own_baseline_before_sonar_and_the_gate():
+def test_queue_has_no_coverage_baseline_publisher():
     jobs = _jobs()
-    steps = jobs["queue-baseline"]["steps"]
-    download = _step(steps, "Download this run's shard coverage")
-    record = _step(steps, "Record this run's coverage baseline")
-    upload = _step(steps, "Publish this run's coverage baseline")
-    find = _step(steps, "Find the run that measured the base tree")
-    assert jobs["queue-baseline"]["needs"] == ["unit", "reuse"]
-    assert download["with"] == {"pattern": "coverage-3.12-*", "path": ".coverage-shards"}
-    assert record["run"] == (
-        "python -m tests.coverage_baseline --shards 12 --head-shards .coverage-shards"
-        ' --out "$RUNNER_TEMP/own-baseline/baseline.json"'
-    )
-    assert upload["with"]["name"] == "coverage-baseline"
-    assert upload["with"]["path"] == "${{ runner.temp }}/own-baseline/"
-    assert steps.index(download) < steps.index(record) < steps.index(upload) < steps.index(find)
+    assert jobs["queue-baseline"]["if"] is False
     assert "github.event_name == 'push'" in jobs["coverage-baseline"]["if"]
     assert "merge_group" not in jobs["coverage-baseline"]["if"]
 
 
-def test_the_queue_baseline_holds_the_exact_base_tree_on_the_app_token():
-    job = _jobs()["queue-baseline"]
-    steps = job["steps"]
-    mint = _step(steps, "Mint the tcc main ci App token")
-    find = _step(steps, "Find the run that measured the base tree")
-    download = _step(steps, "Download the base tree's coverage baseline")
-    hold = _step(steps, "Hold the base tree")
-    upload = _step(steps, "Publish the base tree's coverage baseline")
-    assert job["needs"] == ["unit", "reuse"]
-    assert job["if"] == "${{ !cancelled() && github.event_name == 'merge_group' }}"
-    assert job["permissions"] == {"contents": "read"}
-    assert mint["id"] == "app-token"
-    assert mint["with"]["permission-actions"] == mint["with"]["permission-contents"] == "read"
-    assert find["env"] == {
-        "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
-        "BASE_SHA": "${{ github.event.merge_group.base_sha }}",
-    }
-    assert download["with"] == {
-        "name": "coverage-baseline",
-        "path": "~/coverage-baseline",
-        "run-id": "${{ steps.base-run.outputs.id }}",
-        "repository": "${{ github.repository }}",
-        "github-token": "${{ steps.app-token.outputs.token }}",
-    }
-    assert hold["env"] == {"BASE_TREE": "${{ steps.base-run.outputs.tree }}"}
-    assert upload["with"]["name"] == "queue-coverage-baseline"
-    assert upload["with"]["path"] == "~/coverage-baseline/"
-    assert upload["with"]["if-no-files-found"] == "error"
-    assert [steps.index(s) for s in (mint, find, download, hold, upload)] == sorted(
-        steps.index(s) for s in (mint, find, download, hold, upload)
-    )
-    rules = json.loads((_ROOT / ".github" / "rulesets" / "dev-no-delete.json").read_text())
-    queue = next(rule["parameters"] for rule in rules["rules"] if rule["type"] == "merge_queue")
-    assert job["timeout-minutes"] == queue["check_response_timeout_minutes"]
-    assert "anton-oss-light" in job["runs-on"]
+@pytest.mark.parametrize(
+    "name",
+    ["durations", "split", "unit", "shard-check", "test-count", "gate-required", "coverage-ratchet", "stage-budget"],
+)
+def test_baseline_dependencies_remain_only_for_protected_aggregation(name):
+    needs = _jobs()[name].get("needs", [])
+    assert ("queue-baseline" in needs) is (name in {"gate-required", "stage-budget", "coverage-ratchet"})
 
 
-@pytest.mark.parametrize(("measured", "fails"), [("abc", False), ("old", True)])
-def test_a_restored_baseline_for_another_tree_is_red(tmp_path, measured, fails):
-    hold = _step(_jobs()["queue-baseline"]["steps"], "Hold the base tree")
-    folder = tmp_path / "coverage-baseline"
-    folder.mkdir()
-    (folder / "baseline.json").write_text(f'{{"tree": "{measured}"}}')
-    env = dict(os.environ, HOME=str(tmp_path), BASE_TREE="abc")
-    result = subprocess.run(["bash", "-e", "-c", hold["run"]], env=env, capture_output=True, text=True)
-    assert (result.returncode != 0) is fails
-    assert ("::error::" in result.stdout) is fails
+@pytest.mark.parametrize(
+    "step,key",
+    [
+        ("Restore measured coverage history", "coverage-baseline-\u0024{{ steps.tree.outputs.previous }}"),
+        ("Save the passed dev coverage baseline", "coverage-baseline-\u0024{{ steps.tree.outputs.tree }}"),
+    ],
+)
+def test_push_baselines_keep_the_measured_tree_key(step, key):
+    entry = _step(_jobs()["coverage-baseline"]["steps"], step)
+    assert entry["with"]["key"] == key
 
 
 def test_every_unit_shard_downloads_the_one_republished_dev_durations():
@@ -215,139 +174,27 @@ def test_a_dev_run_without_a_baseline_still_restores_its_durations(lookup):
     assert output == "id=37847322607\n"
 
 
-@pytest.fixture
-def base_run(tmp_path):
-    find = _step(_jobs()["queue-baseline"]["steps"], "Find the run that measured the base tree")
-    tools = tmp_path / "bin"
-    tools.mkdir()
-    (tools / "gh").write_text(
-        "#!/usr/bin/env bash\n"
-        'printf "%s\\n" "$@" >> "$ARGS"\n'
-        'case "$2" in\n'
-        "  */compare/*) echo ahead ;;\n"
-        '  */jobs*) jq -nc \'[range(1;13) | {name: ("unit (3.12, " + tostring + ")"), conclusion: "success"}] + [range(1;7) | {name: ("unit (3.11, " + tostring + ")"), conclusion: "success"}] + [{name: "queue-baseline", conclusion: "success", steps: [{name: "Record this run\\u0027s coverage baseline", conclusion: "success"}, {name: "Publish this run\\u0027s coverage baseline", conclusion: "success"}]}]\' | jq -c \'.[]\' ;;\n'
-        '  */commits/*) printf "tree-of-base" ;;\n'
-        '  */runs\\?head_sha=*) [[ -z "$FAIL_RUNS" ]] || exit 1; '
-        '[[ "$FAKE_REMOVED_AFTER" -lt 0 || $(cat "$POLLS") -lt "$FAKE_REMOVED_AFTER" ]] || exit 0; '
-        "for r in $FAKE_RUNS; do e=merge_group; s=$FAKE_STATUS;"
-        ' [[ " $FAKE_DISPATCH " == *" $r "* ]] && { e=workflow_dispatch; s=in_progress; };'
-        ' jq -n --argjson id "$r" --arg s "$s" --arg e "$e" \'{id: $id, status: $s, event: $e, head_branch: "gh-readonly-queue/dev/pr-1", head_sha: ("b" * 40)}\'; done'
-        " | jq -s '{workflow_runs: .}' | jq -r \"$4\" ;;\n"
-        '  */artifacts*) n=$(cat "$POLLS"); echo $((n + 1)) > "$POLLS"; '
-        '[[ "$2" == *"/$FAKE_KEPT_BY/"* && $n -ge $FAKE_AFTER ]] && printf 1 || printf 0 ;;\n'
-        "esac\n"
-    )
-    (tools / "gh").chmod(0o755)
-    (tools / "sleep").write_text("#!/usr/bin/env bash\ntrue\n")
-    (tools / "sleep").chmod(0o755)
+@pytest.mark.parametrize(
+    "name",
+    ["worker-image", "swarm-image", "brain-smoke", "ledger-load", "kind-due", "coverage-ratchet", "stage-budget"],
+)
+def test_queue_excludes_promotion_jobs(name):
+    from tests.contracts.ci_tiers.test_workflow import jobs_for
 
-    def run(
-        runs="111 222",
-        kept_by="222",
-        after=0,
-        fail_runs="",
-        status="in_progress",
-        dispatch="",
-        removed_after=-1,
-    ):
-        output = tmp_path / "output"
-        output.write_text("")
-        polls = tmp_path / "polls"
-        polls.write_text("0")
-        env = dict(
-            os.environ,
-            PATH=f"{tools}:{os.environ['PATH']}",
-            ARGS=str(tmp_path / "args"),
-            POLLS=str(polls),
-            FAKE_RUNS=runs,
-            FAKE_KEPT_BY=kept_by,
-            FAKE_AFTER=str(after),
-            FAIL_RUNS=fail_runs,
-            FAKE_STATUS=status,
-            FAKE_DISPATCH=dispatch,
-            FAKE_REMOVED_AFTER=str(removed_after),
-            WAIT_SECONDS="600",
-            BASE_SHA="b" * 40,
-            GITHUB_OUTPUT=str(output),
-            GITHUB_REPOSITORY="the-cloud-clockwork/agentihooks",
-        )
-        script = find["run"].replace('sleep "${POLL_SECONDS:-30}"', "SECONDS=$((SECONDS + 301))")
-        result = subprocess.run(["bash", "-e", "-c", script], env=env, capture_output=True, text=True, timeout=5)
-        return result, output.read_text(), (tmp_path / "args").read_text().splitlines()
-
-    return run
+    assert name not in jobs_for("merge_group")
 
 
-def test_the_base_run_is_any_tests_run_on_the_base_commit_that_kept_a_baseline(base_run):
-    result, output, args = base_run()
-    assert result.returncode == 0, result.stderr
-    assert output == "id=222\ntree=tree-of-base\n"
-    assert "repos/the-cloud-clockwork/agentihooks/commits/" + "b" * 40 in args
-    assert (
-        "repos/the-cloud-clockwork/agentihooks/actions/workflows/test.yml/runs?head_sha=" + "b" * 40 + "&per_page=20"
-    ) in args
-    assert "repos/the-cloud-clockwork/agentihooks/actions/runs/222/artifacts?name=coverage-baseline" in args
-    assert "[.artifacts[] | select(.expired | not)] | length" in args
-    assert "tree-of-base" in result.stdout
+@pytest.mark.parametrize("event", ["push", "workflow_dispatch"])
+def test_push_and_dispatch_keep_the_coverage_ratchet_and_stage_report(event):
+    from tests.contracts.ci_tiers.test_workflow import jobs_for
+
+    assert {"coverage-ratchet", "stage-budget"} <= jobs_for(event)
 
 
-def test_the_base_run_ignores_dispatched_runs_that_wait_on_a_hosted_lane(base_run):
-    result, output, _ = base_run(dispatch="111", kept_by="333", status="completed")
-    assert result.returncode != 0
-    assert "finished without a coverage baseline" in result.stdout
-    assert output == ""
-
-
-@pytest.mark.parametrize("status", ["queued", "in_progress"])
-def test_the_base_run_waits_past_ten_minutes_for_an_earlier_queue_entry_to_publish(base_run, status):
-    result, output, _ = base_run(after=7, status=status)
-    assert result.returncode == 0, result.stderr
-    assert output == "id=222\ntree=tree-of-base\n"
-
-
-def test_a_failed_runs_listing_is_red_at_once_instead_of_waiting(base_run):
-    result, output, args = base_run(fail_runs="1")
-    assert result.returncode != 0
-    assert output == ""
-    assert not [arg for arg in args if "/artifacts" in arg]
-
-
-@pytest.mark.parametrize("removed_after", [0, 2])
-def test_the_base_run_is_red_when_the_predecessor_is_removed(base_run, tmp_path, removed_after):
-    result, output, _ = base_run(kept_by="333", removed_after=removed_after)
-    assert result.returncode != 0
-    assert "No Tests run remains" in result.stdout
-    assert output == ""
-    assert int((tmp_path / "polls").read_text()) == removed_after
-
-
-def test_a_finished_base_without_a_baseline_is_red_at_once(base_run, tmp_path):
-    result, output, _ = base_run(kept_by="333", status="completed")
-    assert result.returncode != 0
-    assert "finished without a coverage baseline" in result.stdout
-    assert output == ""
-    assert (tmp_path / "polls").read_text().strip() == "2"
-
-
-def test_a_finished_base_that_kept_its_baseline_is_restored(base_run):
-    result, output, _ = base_run(status="completed")
-    assert result.returncode == 0, result.stderr
-    assert output == "id=222\ntree=tree-of-base\n"
-
-
-def test_a_failed_queue_run_publishes_its_baseline_then_stops_red():
-    job = _jobs()["queue-baseline"]
-    steps = job["steps"]
-    upload = _step(steps, "Publish this run's coverage baseline")
-    stop = _step(steps, "Stop when this run's unit shards failed")
-    mint = _step(steps, "Mint the tcc main ci App token")
-    assert "!cancelled()" in job["if"]
-    assert "if" not in upload
-    assert stop["if"] == "needs.unit.result != 'success' && needs.reuse.outputs.reused != 'true'"
-    assert steps.index(upload) < steps.index(stop) < steps.index(mint)
-    result = subprocess.run(["bash", "-e", "-c", stop["run"]], capture_output=True, text=True)
-    assert result.returncode != 0
-    assert "::error::" in result.stdout
+def test_failed_units_cannot_publish_a_push_baseline():
+    job = _jobs()["coverage-baseline"]
+    assert "needs.unit.result == 'success'" in job["if"]
+    assert job["needs"] == ["unit", "gate-required"]
 
 
 def test_the_lookup_is_red_when_the_dev_run_kept_no_live_durations(lookup):
@@ -366,6 +213,7 @@ def test_the_lookup_is_red_when_no_dev_push_run_passed(lookup):
 
 def _runs_on(step, event):
     condition = str(step.get("if", "true")).removeprefix("${{").removesuffix("}}")
+    condition = condition.replace("steps.provenance.outputs.recorded", "'true'")
     condition = re.sub(
         r"hashFiles\('([^']+)'\)", lambda found: "'x'" if (_ROOT / found.group(1)).exists() else "''", condition
     )
@@ -415,7 +263,20 @@ _REUSE = [
 
 @pytest.mark.parametrize(
     "event, expected",
-    [("pull_request", ["Look up the base revision's dev durations"]), ("push", [None, None, *_REUSE])],
+    [
+        (
+            "pull_request",
+            [
+                None,
+                None,
+                "Install provenance dependencies",
+                "Record the protected tested tree",
+                "Publish protected tested tree evidence",
+                "Look up the base revision's dev durations",
+            ],
+        ),
+        ("push", [None, None, *_REUSE]),
+    ],
 )
 def test_pull_request_and_push_runs_keep_the_dev_cache_lookup(event, expected):
     steps = _jobs()["durations"]["steps"]

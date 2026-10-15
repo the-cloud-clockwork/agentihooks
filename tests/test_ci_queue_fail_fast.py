@@ -17,7 +17,8 @@ pytestmark = pytest.mark.unit
 _QUEUE = "github.event_name == 'merge_group'"
 _GATE_NEED = (
     "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success')"
-    " && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}"
+    " && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true')"
+    " && github.event_name != 'pull_request' }}"
 )
 _APP_TOKEN = "${{ steps.app-token.outputs.token }}"
 
@@ -231,7 +232,18 @@ def test_every_merge_queue_job_but_the_watcher_is_graded():
         if "github.event_name == 'push'" in str(job.get("if", "")) and "merge_group" not in str(job.get("if", ""))
     }
     queued = set(jobs) - push_only - {"admission", "gate-required"}
-    assert push_only == {"refresh-durations", "flake-budget", "coverage-baseline"}
+    assert push_only == {
+        "refresh-durations",
+        "flake-budget",
+        "coverage-baseline",
+        "coverage-ratchet",
+        "stage-budget",
+        "kind-due",
+        "worker-image",
+        "swarm-image",
+        "brain-smoke",
+        "ledger-load",
+    }
     assert queued <= _gate_needs(jobs)
 
 

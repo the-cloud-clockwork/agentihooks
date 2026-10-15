@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import sys
 import time
 from collections.abc import Callable
@@ -12,7 +13,7 @@ from scripts.codex_session import protocol
 from scripts.codex_session.binding import CONNECTED, DEGRADED, BindingStore, TransportRecord
 from scripts.inbox.dispatch import Dispatcher, digest
 from scripts.inbox.receipts import MISMATCH, RELEASED, Delivery, DispatchError
-from scripts.inbox.store import NOTIFY, InboxStore, Item, now_ms
+from scripts.inbox.store import NOTIFY, InboxStore, Item, now_ms, owner_ttl_s
 from scripts.swarm import stale_nudge
 from scripts.swarm.delivery import envelope as delivery_envelope
 
@@ -21,10 +22,10 @@ if TYPE_CHECKING:
 
 STOPPED = "stopped"
 UNOBSERVED = "an active turn that began before this pump connected"
-RECONCILE_S = 30.0
+RECONCILE_S = 10.0
 POLL_S = 0.2
 BACKOFF_S = 1.0
-BACKOFF_MAX_S = 60.0
+BACKOFF_MAX_S = 15.0
 IN_PROGRESS = "inProgress"
 TURN_STARTED, TURN_COMPLETED, RESOLVED = "turn/started", "turn/completed", "serverRequest/resolved"
 LOST_OWNER = "{} no longer delivers for {}"
@@ -197,13 +198,17 @@ class Pump:
         self.hold_until = 0.0
         self.backoff = timing.backoff_s
         self.surfaced = ""
+        self.leased = False
 
     def run(self, stop: Callable[[], bool]) -> str:
         starting, reconnecting = True, False
-        backoff = self.timing.backoff_s
+        backoff, pause = self.timing.backoff_s, 0.0
         try:
             while True:
                 try:
+                    if pause:
+                        self._pause(pause)
+                        pause = 0.0
                     if starting:
                         self.start()
                         starting = False
@@ -224,13 +229,28 @@ class Pump:
                     self._degrade(failure)
                     if stop():
                         return STOPPED
-                    self.timing.sleep(backoff)
+                    pause = backoff
                     backoff = min(backoff * 2, self.timing.backoff_max_s)
                     starting, reconnecting = False, True
         finally:
             if self.subscription is not None:
                 self.subscription.close()
             self.binding.connection.close()
+
+    def _pause(self, delay: float) -> None:
+        whole, rest = divmod(delay, self.timing.reconcile_s)
+        for piece in [self.timing.reconcile_s] * int(whole) + ([rest] if rest else []):
+            if self.leased:
+                self._renew()
+            self.timing.sleep(piece)
+
+    def _lease_s(self) -> int:
+        return max(owner_ttl_s(), math.ceil(2 * self.timing.reconcile_s))
+
+    def _renew(self) -> None:
+        binding = self.binding
+        if not self.dispatcher.renew(binding.recipient, binding.owner, ttl_s=self._lease_s()):
+            raise DispatchError(LOST_OWNER.format(binding.owner, binding.recipient))
 
     def _degrade(self, failure: Exception) -> None:
         from redis.exceptions import RedisError
@@ -262,7 +282,8 @@ class Pump:
         binding = self.binding
         binding.transport.require()
         binding.connection.listener = self.state.observe
-        self.dispatcher.own(binding.recipient, binding.owner)
+        self.dispatcher.own(binding.recipient, binding.owner, ttl_s=self._lease_s())
+        self.leased = True
         self.receipts.recover(binding.recipient, binding.owner)
         self.subscription = self.store.redis.pubsub()
         self.subscription.subscribe(NOTIFY)
@@ -310,8 +331,7 @@ class Pump:
 
     def _reconcile(self) -> None:
         binding = self.binding
-        if not self.dispatcher.renew(binding.recipient, binding.owner):
-            raise DispatchError(LOST_OWNER.format(binding.owner, binding.recipient))
+        self._renew()
         self._refresh()
         binding.transport.mark(last_reconcile_at=self.timing.now_ms(), active_turn_id=self.state.active_turn)
         self.next_reconcile = self.timing.clock() + self.timing.reconcile_s
@@ -329,6 +349,7 @@ class Pump:
             self.log(HELD.format(self.binding.thread_id, pending))
 
     def _submit(self, delivery: Delivery) -> None:
+        self._renew()
         owner = self.binding.owner
         item = self.store.get(delivery.item)
         if digest(item) != delivery.digest:
