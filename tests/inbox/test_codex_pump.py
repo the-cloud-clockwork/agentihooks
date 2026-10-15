@@ -394,11 +394,15 @@ def test_a_turn_running_before_the_pump_connected_is_not_steered_and_holds_deliv
     assert rig.record().pending_request == ""
 
 
-def send_nudge(rig):
-    return rig.store.send("swarm", ME, "pick your task back up", ref=f"stale-nudge:{SLUG}:{ME}")
+def send_nudge(rig, kind="stale-restart", tag="a"):
+    return rig.store.send("swarm", ME, "pick your task back up", ref=f"{kind}:{tag}")
 
 
-def test_a_stale_nudge_interrupts_the_busy_turn_and_starts_a_new_app_server_turn(rig):
+def turn_methods(rig):
+    return [m for m in rig.server.methods() if m.startswith("turn/")]
+
+
+def test_a_restart_nudge_interrupts_the_busy_turn_and_starts_a_new_app_server_turn(rig):
     rig.pump.start()
     rig.pump.step()
     rig.server.begin_elsewhere()
@@ -414,37 +418,69 @@ def test_a_stale_nudge_interrupts_the_busy_turn_and_starts_a_new_app_server_turn
     assert rig.pump.state.active_turn == "turn-2"
 
 
-def test_a_stale_nudge_to_an_idle_thread_starts_a_turn_without_an_interrupt(rig):
-    send_nudge(rig)
+def test_a_first_window_nudge_steers_the_busy_turn_without_an_interrupt(rig):
+    rig.pump.start()
+    rig.pump.step()
+    rig.server.begin_elsewhere()
+    item = send_nudge(rig, kind="stale-nudge")
+    rig.pump.step()
+    assert turn_methods(rig) == ["turn/steer"]
+    assert len(rig.server.turns) == 1 and rig.store.get(item.id).state == "delivered"
+
+
+@pytest.mark.parametrize("kind", ["stale-nudge", "stale-restart"])
+def test_a_nudge_to_an_idle_thread_starts_a_turn_without_an_interrupt(rig, kind):
+    send_nudge(rig, kind=kind)
     rig.run(1)
-    assert [m for m in rig.server.methods() if m.startswith("turn/")] == ["turn/start"]
+    assert turn_methods(rig) == ["turn/start"]
 
 
-def test_a_stale_nudge_goes_first_past_a_turn_begun_before_the_pump_connected(rig):
+def test_a_restart_goes_first_past_a_turn_begun_before_the_pump_connected(rig):
     rig.server.begin_elsewhere()
     rig.server.frames.clear()
     rig.pump.start()
     held = rig.store.send("alice", ME, "careful")
     nudge = send_nudge(rig)
     rig.pump.step()
-    assert [m for m in rig.server.methods() if m.startswith("turn/")] == ["turn/interrupt", "turn/start", "turn/steer"]
+    assert turn_methods(rig) == ["turn/interrupt", "turn/start", "turn/steer"]
     assert [len(turn["inputs"]) for turn in rig.server.turns] == [0, 2]
     assert rig.server.turns[1]["inputs"][0].endswith("pick your task back up")
     assert rig.server.turns[1]["inputs"][1].endswith("careful")
     assert (rig.store.get(nudge.id).state, rig.store.get(held.id).state) == ("delivered", "delivered")
 
 
-def test_an_open_server_request_holds_a_stale_nudge_too(rig):
+def test_a_first_window_nudge_waits_behind_a_turn_begun_before_the_pump_connected(rig):
+    rig.server.begin_elsewhere()
+    rig.server.frames.clear()
     rig.pump.start()
-    rig.server.frames.append({"id": "approval-1", "method": APPROVAL, "params": {}})
+    nudge = send_nudge(rig, kind="stale-nudge")
+    rig.pump.step()
+    assert turn_methods(rig) == [] and rig.store.get(nudge.id).state == "pending"
+
+
+def test_a_restart_waits_out_the_pump_hold(rig):
+    rig.server.begin_elsewhere()
+    rig.server.frames.clear()
+    rig.pump.start()
+    rig.pump.hold_until = rig.clock.now + 30
+    send_nudge(rig)
+    rig.pump.step()
+    assert turn_methods(rig) == []
+
+
+def test_an_open_server_request_holds_a_restart_too(rig):
+    rig.server.begin_elsewhere()
+    rig.server.frames.append({"id": 90, "method": APPROVAL, "params": {"threadId": THREAD}})
+    rig.pump.start()
+    rig.pump.step()
     rig.pump.step()
     nudge = send_nudge(rig)
     rig.pump.step()
-    assert not [m for m in rig.server.methods() if m.startswith("turn/")]
-    assert rig.store.get(nudge.id).state == "pending"
+    assert turn_methods(rig) == [] and rig.store.get(nudge.id).state == "pending"
+    assert rig.record().pending_request == APPROVAL
 
 
-def test_a_nudge_racing_a_turn_end_refreshes_and_starts_a_turn(rig):
+def test_a_restart_racing_a_turn_end_refreshes_and_starts_a_turn(rig):
     rig.server.begin_elsewhere()
     rig.pump.start()
     rig.pump.step()
@@ -455,7 +491,7 @@ def test_a_nudge_racing_a_turn_end_refreshes_and_starts_a_turn(rig):
     assert rig.store.get(item.id).state == "delivered" and len(rig.server.turns) == 2
 
 
-def test_each_window_s_stale_nudge_reaches_the_thread_as_its_own_turn(rig):
+def test_each_window_of_silence_reaches_the_thread_as_its_own_turn(rig):
     from scripts.swarm import stale_nudge
 
     agent = AgentRecord(ME, "eng", "task", started_at=0)
@@ -465,9 +501,9 @@ def test_each_window_s_stale_nudge_reaches_the_thread_as_its_own_turn(rig):
     rig.server.finish()
     assert stale_nudge.nudge(rig.store, SLUG, agent, "", second) != []
     rig.run(1)
-    ids = [stale_nudge.item_id(SLUG, ME, at) for at in (first, second)]
+    ids = [stale_nudge.item_id(SLUG, ME, 0, at) for at in (first, second)]
     assert [rig.store.get(i).state for i in ids] == ["delivered", "delivered"]
-    assert [m for m in rig.server.methods() if m.startswith("turn/")] == ["turn/start", "turn/start"]
+    assert turn_methods(rig) == ["turn/start", "turn/start"]
 
 
 def test_the_backoff_doubles_to_its_cap_and_resets_on_acceptance(rig):

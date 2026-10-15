@@ -733,7 +733,21 @@ def test_the_master_is_never_nudged_for_being_quiet(store):
     assert stale_nudges(store, master.name) == [] and len(stale_nudges(store)) == 1
 
 
-def test_a_nudge_the_routed_runtime_refuses_is_reported_with_the_router_reason(store):
+@pytest.mark.parametrize("blocker", ["outage", "recovery"])
+def test_an_open_outage_or_a_pending_recovery_leaves_the_quiet_agent_to_provider_recovery(store, monkeypatch, blocker):
+    from scripts.swarm import outage, resume
+
+    ledger, runtime = spawned(store)
+    if blocker == "outage":
+        record = {"kind": "provider", "started_at": 1_000, "ended_at": None, "evidence": ["provider down"], "past": []}
+        monkeypatch.setattr(outage, "open_records", lambda slug: [record])
+    else:
+        monkeypatch.setattr(resume, "recovery_pending", lambda store, slug, agent: True)
+    tick("sw", store, ledger, runtime, now_ms=1_001 + 2 * STALE_MS)
+    assert stale_nudges(store) == [] and runtime.nudged == []
+
+
+def test_a_nudge_the_routed_runtime_refuses_answers_with_the_router_reason(store):
     from scripts.swarm.tick import NUDGE
     from scripts.swarm_v2.runtime.base import Capability
     from scripts.swarm_v2.runtime.local import LocalHerdrRuntime

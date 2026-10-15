@@ -92,7 +92,7 @@ MASTER_DOWN = (
     "as it starts."
 )
 IDLE_NUDGE_TICKS = 3
-IDLE_KILL_TICKS = 10
+IDLE_KILL_TICKS = 20
 IDLE_TICKS = "idle-ticks"
 LANES = ("eng", "ci", "plan")
 ACTIVE = ("claimed", "pr")
@@ -568,7 +568,7 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     pending = resume.recovery_pending(store, slug, agent)
     if _stuck_on_provider(slug, store, agent, observed, exhausted, now_ms):
         return _free_stuck(slug, store, ledger, runtime, rows, agent, now_ms)
-    nudged = _stale_nudge(slug, store, agent, observed, now_ms)
+    nudged = _stale_nudge(slug, store, agent, observed, pending, now_ms)
     if agent.lane == MASTER or (held and not exhausted):
         store.put_agent(slug, agent)
         return nudged
@@ -597,8 +597,9 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     return nudged
 
 
-def _stale_nudge(slug, store, agent, observed, now_ms):
-    if agent.lane == MASTER or not agent.task:
+def _stale_nudge(slug, store, agent, observed, pending, now_ms):
+    """An open swarm outage and a pending recovery belong to provider recovery."""
+    if agent.lane == MASTER or not agent.task or pending or outage.open_records(slug):
         return []
     if _operator_at_pane(slug, store, agent, observed, now_ms) or ledger_probe.holding(store, slug):
         return []

@@ -1,18 +1,15 @@
-"""Stale check run by the swarm tick: one inbox item per stale agent per ten minute window, never a typed prompt.
-
-An agent is stale when its last session heartbeat is over ten minutes old and no named wait holds, or when its pane
-shows a provider error. The item id comes from the agent and the window, so repeated ticks inside one window send it
-once. The inbox channel delivers it to Claude; the Codex push pump starts a new app server turn for it.
-"""
+"""Tick stale check: one inbox item per stale swarm agent per ten minutes of silence, never a typed prompt."""
 
 import hashlib
 
-from scripts.inbox.store import DuplicateItem
+from scripts.inbox.store import DuplicateItem, InboxStore, Item
 from scripts.swarm import idle
+from scripts.swarm.store import AgentRecord
 
 LIMIT_MS = 10 * 60_000
+RESTART_WINDOWS = 2
 SENDER = "swarm"
-REF = "stale-nudge"
+REF, RESTART = "stale-nudge", "stale-restart"
 IDLE_REASON = "no activity from you for over ten minutes"
 ERROR_REASON = "your pane shows a provider error"
 TEXT = (
@@ -23,35 +20,50 @@ TEXT = (
 )
 
 
-def last_activity(redis, slug, agent):
-    beat = idle.heartbeat(redis, slug, agent.name) or {}
-    return max(int(beat.get("at") or 0), agent.started_at or 0)
+def last_activity(beat: dict | None, agent: AgentRecord) -> int:
+    return max(int((beat or {}).get("at") or 0), agent.started_at or 0)
 
 
-def stale(last_activity_ms, wait, provider_error, now_ms):
-    if provider_error:
+def stale(beat: dict | None, last_ms: int, wait: dict | None, provider_error: str, now_ms: int) -> bool:
+    """A provider error counts unless the heartbeat shows a turn working inside the limit."""
+    silent = now_ms - last_ms > LIMIT_MS
+    working = bool(beat) and beat.get("state") == idle.WORKING and not silent
+    if provider_error and not working:
         return True
     if wait and wait.get("until", 0) > now_ms and idle.named(wait):
         return False
-    return now_ms - last_activity_ms > LIMIT_MS
+    return silent
 
 
-def item_id(slug, name, now_ms):
-    return hashlib.sha256(f"{REF}:{slug}:{name}:{now_ms // LIMIT_MS}".encode()).hexdigest()[:12]
+def window(last_ms: int, now_ms: int) -> int:
+    return (now_ms - last_ms) // LIMIT_MS
 
 
-def is_nudge(item):
-    return item.sender == SENDER and item.ref.startswith(f"{REF}:")
+def item_id(slug: str, name: str, last_ms: int, now_ms: int) -> str:
+    key = f"{REF}:{slug}:{name}:{last_ms}:{window(last_ms, now_ms)}"
+    return hashlib.sha256(key.encode()).hexdigest()[:12]
 
 
-def nudge(inbox, slug, agent, provider_error, now_ms):
+def is_nudge(item: Item) -> bool:
+    return item.sender == SENDER and item.ref.startswith((f"{REF}:", f"{RESTART}:"))
+
+
+def restarts(item: Item) -> bool:
+    return item.sender == SENDER and item.ref.startswith(f"{RESTART}:")
+
+
+def nudge(inbox: InboxStore, slug: str, agent: AgentRecord, provider_error: str, now_ms: int) -> list[str]:
     redis = inbox.redis
-    if not stale(last_activity(redis, slug, agent), idle.wait(redis, slug, agent.name), provider_error, now_ms):
+    beat = idle.heartbeat(redis, slug, agent.name)
+    last_ms = last_activity(beat, agent)
+    if not stale(beat, last_ms, idle.wait(redis, slug, agent.name), provider_error, now_ms):
         return []
     reason = ERROR_REASON if provider_error else IDLE_REASON
-    text, nudge_id = TEXT.format(slug=slug, reason=reason, task=agent.task), item_id(slug, agent.name, now_ms)
+    nudge_id = item_id(slug, agent.name, last_ms, now_ms)
+    prefix = RESTART if window(last_ms, now_ms) >= RESTART_WINDOWS else REF
+    text = TEXT.format(slug=slug, reason=reason, task=agent.task)
     try:
-        item = inbox.send(SENDER, agent.name, text, ref=f"{REF}:{nudge_id}", task=agent.task, item_id=nudge_id)
+        item = inbox.send(SENDER, agent.name, text, ref=f"{prefix}:{nudge_id}", task=agent.task, item_id=nudge_id)
     except DuplicateItem:
         return []
     return [f"nudged stale {agent.name} through its inbox as message {item.id}"]
