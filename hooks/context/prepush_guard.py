@@ -59,11 +59,7 @@ def _branch_worktree(cwd: Path, task: dict) -> Path | None:
     if task.get("worktree"):
         candidates.append(Path(task["worktree"]))
     candidates.extend(path for path in Path(default_root()).glob("*/*") if path.name == plain(branch))
-    found = {
-        Path(target)
-        for candidate in candidates
-        if (target := worktrees(str(candidate), [branch])[branch])
-    }
+    found = {Path(target) for candidate in candidates if (target := worktrees(str(candidate), [branch])[branch])}
     return found.pop() if len(found) == 1 else None
 
 
