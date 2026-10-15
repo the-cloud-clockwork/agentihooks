@@ -651,9 +651,19 @@ def test_a_spent_startup_budget_refuses_the_workspace_command_without_running_it
     run = Mock()
     monkeypatch.setattr(runtime.subprocess, "run", run)
     monkeypatch.setattr(runtime.time, "monotonic", lambda: now)
-    with pytest.raises(subprocess.TimeoutExpired):
+    with pytest.raises(subprocess.TimeoutExpired) as refused:
         supervisor.herdr(["workspace", "create"], 10)
     run.assert_not_called()
+    assert refused.value.cmd == ["herdr", "workspace", "create"]
+    assert refused.value.timeout == 0
+
+
+def test_a_sliver_of_startup_budget_still_runs_the_workspace_command(supervisor, monkeypatch):
+    run = Mock(return_value=SimpleNamespace(stdout=b""))
+    monkeypatch.setattr(runtime.subprocess, "run", run)
+    monkeypatch.setattr(runtime.time, "monotonic", lambda: 9.75)
+    assert supervisor.herdr(["workspace", "create"], 10) == {}
+    assert run.call_args.kwargs["timeout"] == 0.25
 
 
 def test_a_hanging_workspace_command_still_fails_at_the_startup_deadline(supervisor):
