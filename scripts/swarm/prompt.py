@@ -130,7 +130,7 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         ),
         plan_review.review_line(me, autonomy),
         f'- Authorize scope a task\'s description omits with {led} comment tasks/<id> "In scope: <the piece>": '
-        "the plan trace keeps a piece whose why names that comment.",
+        "the plan trace keeps a piece that comment covers.",
         *(
             [
                 f'- Answer an agent\'s question you can decide with {led} answer questions/<id> "<answer>": it is '
