@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.ci_semgrep import scan, timed_out_only
+from scripts.ci_semgrep import main, scan, timed_out_only
 
 pytestmark = pytest.mark.unit
 
@@ -50,11 +50,11 @@ def test_a_scan_whose_only_errors_are_timeouts_runs_once_more_and_grades_the_sec
     report = tmp_path / "semgrep.json"
     assert scan(command, report) == 0
     assert _calls(calls) == [["scan", "--strict", f"--json-output={report}"]] * 2
-    assert capfd.readouterr().out.splitlines() == [
-        "semgrep ran",
+    captured = capfd.readouterr()
+    assert captured.out.splitlines() == ["semgrep ran", "semgrep ran"]
+    assert captured.err.splitlines() == [
         "Semgrep timed out with no other error, scanning once more: "
-        f"a.rule on b.yml, {RULE} on .github/workflows/test.yml",
-        "semgrep ran",
+        f"a.rule on b.yml, {RULE} on .github/workflows/test.yml"
     ]
 
 
@@ -94,9 +94,19 @@ def test_timed_out_only_names_each_timed_out_rule_and_file_once(tmp_path):
     assert timed_out_only(report) == []
 
 
-def test_the_program_passes_the_scan_exit_code_through_and_flushes_its_message_before_the_rescan(tmp_path):
+def test_main_scans_into_a_report_of_its_own_and_grades_the_rescan(tmp_path):
+    command, calls = _semgrep(tmp_path, (2, {"results": [], "errors": [TIMEOUT]}), (1, {"results": [FINDING]}))
+    assert main(command) == 1
+    first, second = _calls(calls)
+    assert first == second
+    assert first[:2] == ["scan", "--strict"]
+    assert Path(first[2].removeprefix("--json-output=")).name == "semgrep.json"
+    assert not Path(first[2].removeprefix("--json-output=")).parent.exists()
+
+
+def test_the_program_passes_the_scan_exit_code_through(tmp_path):
     command, calls = _semgrep(tmp_path, (2, {"results": [], "errors": [TIMEOUT]}), (1, {"results": [FINDING]}))
     done = subprocess.run([sys.executable, str(_ROOT / "scripts/ci_semgrep.py"), *command], capture_output=True)
     assert done.returncode == 1
     assert len(_calls(calls)) == 2
-    assert done.stdout.decode().splitlines()[1].startswith("Semgrep timed out with no other error")
+    assert done.stderr.decode().startswith("Semgrep timed out with no other error")

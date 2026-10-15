@@ -21,7 +21,7 @@ def scan(command: list[str], report: Path) -> int:
     timeouts = timed_out_only(report) if code else []
     if not timeouts:
         return code
-    print(f"Semgrep timed out with no other error, scanning once more: {', '.join(timeouts)}", flush=True)
+    print(f"Semgrep timed out with no other error, scanning once more: {', '.join(timeouts)}", file=sys.stderr)
     return subprocess.run([*command, f"--json-output={report}"]).returncode
 
 
