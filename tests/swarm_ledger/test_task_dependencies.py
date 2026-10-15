@@ -58,3 +58,26 @@ def test_claim_without_dependencies_still_applies():
     work = {"id": "work", "title": "repair", "lane": "eng", "state": "open", "claimed_by": ""}
     live, ctx = claim({"tasks": [work]})
     assert (live["state"], live["claimed_by"], ctx.dirty) == ("claimed", "engineer-next", True)
+
+
+@pytest.mark.parametrize("state", ["claimed", "pr"])
+def test_retained_pull_claim_waits_for_all_dependencies_to_finish(state):
+    work = {
+        "id": "work",
+        "title": "repair",
+        "lane": "eng",
+        "state": "open",
+        "claimed_by": "",
+        "pr_url": "https://github.com/o/r/pull/3",
+        "depends_on": ["dep"],
+    }
+    dep = {"id": "dep", "state": state, "branch": "feature"}
+    doc = {"tasks": [work, dep]}
+
+    live, ctx = claim(doc, "pr")
+
+    assert (live["state"], live["claimed_by"], ctx.dirty) == ("open", "", False)
+    assert live["pr_url"] == "https://github.com/o/r/pull/3"
+    dep["state"] = "done"
+    live, ctx = claim(doc, "pr")
+    assert (live["state"], live["claimed_by"], ctx.dirty) == ("pr", "engineer-next", True)
