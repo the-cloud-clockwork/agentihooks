@@ -1460,6 +1460,7 @@ def test_status_text_shows_each_agent_model_and_effort_or_unknown(env, capsys):
         "sw", AgentRecord("engineer@a1b2c3-0001", "eng", "t1", harness="codex", model="gpt-6.1-sol", effort="high")
     )
     store.put_agent("sw", AgentRecord("engineer@a1b2c3-0002", "eng", "t2", harness="claude"))
+    env[2].live.update({"engineer@a1b2c3-0001", "engineer@a1b2c3-0002"})
     run("sw", "status")
     lines = {line.split("\t")[0]: line.split("\t") for line in capsys.readouterr().out.splitlines() if "\t" in line}
     assert "gpt-6.1-sol high" in lines["engineer@a1b2c3-0001"]
@@ -2257,6 +2258,7 @@ def test_status_shows_each_agent_conversation_id_or_a_dash(env, capsys):
     run("sw", "create", "--repo", "/repo")
     store.put_agent("sw", AgentRecord("engineer@a1b2c3-0001", "eng", "t1", pane_id="w1:p1", conversation_id="5c90d80c"))
     store.put_agent("sw", AgentRecord("engineer@a1b2c3-0002", "eng", "t2", pane_id="w1:p2"))
+    env[2].live.update({"engineer@a1b2c3-0001", "engineer@a1b2c3-0002"})
     run("sw", "status")
     lines = {line.split("\t")[0]: line.split("\t") for line in capsys.readouterr().out.splitlines() if "\t" in line}
     assert lines["engineer@a1b2c3-0001"][-3] == "5c90d80c" and lines["engineer@a1b2c3-0002"][-3] == "-"
