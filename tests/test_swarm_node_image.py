@@ -148,8 +148,10 @@ def test_download_fetches_every_locked_tool_concurrently(locked, tmp_path, monke
         return io.BytesIO(payloads[url])
 
     monkeypatch.setattr(worker_image.urllib.request, "urlopen", download)
-    worker_image.download_tools(lock, tmp_path)
-    assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == {
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    worker_image.download_tools(lock, cache)
+    assert {p.name: p.read_bytes() for p in cache.iterdir()} == {
         tool["sha256"]: payloads[tool["url"]] for tool in lock["tools"].values()
     }
 
@@ -158,10 +160,12 @@ def test_download_fails_when_any_locked_tool_fails(locked, tmp_path, monkeypatch
     _, lock, payloads = locked
     payloads[lock["tools"]["codex"]["url"]] = b"wrong binary"
     monkeypatch.setattr(worker_image.urllib.request, "urlopen", lambda url, timeout: io.BytesIO(payloads[url]))
+    cache = tmp_path / "cache"
+    cache.mkdir()
     with pytest.raises(ValueError) as error:
-        worker_image.download_tools(lock, tmp_path)
+        worker_image.download_tools(lock, cache)
     assert str(error.value) == "artifact checksum mismatch: codex"
-    assert lock["tools"]["codex"]["sha256"] not in {p.name for p in tmp_path.iterdir()}
+    assert lock["tools"]["codex"]["sha256"] not in {p.name for p in cache.iterdir()}
 
 
 def test_install_never_caches_a_mismatched_download(locked, tmp_path, monkeypatch):
