@@ -5,10 +5,9 @@ from .errors import APIError
 
 
 def revision(value: object) -> str:
-    digest = hashlib.sha256()
-    for chunk in json.JSONEncoder(sort_keys=True, separators=(",", ":"), ensure_ascii=False).iterencode(value):
-        digest.update(chunk.encode())
-    return digest.hexdigest()
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    ).hexdigest()
 
 
 def reply_size(reply: object) -> int:
@@ -46,6 +45,11 @@ def resource_revision(doc: dict, path: str) -> str:
     raw = value(doc, path)
     if path == "metadata":
         raw = {**raw, "_meta": {key: item for key, item in raw["_meta"].items() if key not in ("rev", "updated_at")}}
+    if path == "tasks":
+        digest = hashlib.sha256()
+        for chunk in json.JSONEncoder(sort_keys=True, separators=(",", ":"), ensure_ascii=False).iterencode(raw):
+            digest.update(chunk.encode())
+        return digest.hexdigest()
     return revision(raw)
 
 

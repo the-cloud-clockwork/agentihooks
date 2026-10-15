@@ -72,7 +72,7 @@ def test_task_route_reuses_entry_revision(monkeypatch):
     from scripts.swarm_ledger.api import resources, routes
     from scripts.swarm_ledger.repository.sqlite import Entry
 
-    doc = {"tasks": [{"id": "t1", "title": "Visible"}, {"id": "t2", "title": "Outside"}]}
+    doc = {"tasks": [{"title": "Visible é", "id": "t1"}, {"id": "t2", "title": "Outside"}]}
     expected = resources.revision(doc["tasks"])
     entry = Entry(1, "", doc)
     server = SimpleNamespace(repository=SimpleNamespace(current=lambda slug: entry))
@@ -84,7 +84,7 @@ def test_task_route_reuses_entry_revision(monkeypatch):
     first = routes.ledger_read(server, "ledger", "tasks", {"limit": 1})
     assert first["revision"] == expected
     assert routes.ledger_read(server, "ledger", "tasks", {"limit": 1}) == first
-    doc = {"tasks": [{"id": "t1", "title": "Visible"}, {"id": "t2", "title": "Changed"}]}
+    doc = {"tasks": [{"title": "Visible é", "id": "t1"}, {"id": "t2", "title": "Changed"}]}
     entry = Entry(2, "", doc)
     changed = routes.ledger_read(server, "ledger", "tasks", {"limit": 1})
     assert changed["revision"] == resources.revision(doc["tasks"])
@@ -92,3 +92,22 @@ def test_task_route_reuses_entry_revision(monkeypatch):
     assert changed["page_hash"] == first["page_hash"]
     with pytest.raises(resources.APIError, match="Collection changed"):
         routes.ledger_read(server, "ledger", "tasks", {"limit": 1, "cursor": first["next_cursor"]})
+
+
+def test_task_route_peak_allocation_is_bounded_by_page():
+    from types import SimpleNamespace
+
+    from scripts.swarm_ledger.api import routes
+    from scripts.swarm_ledger.repository.sqlite import Entry
+
+    doc = {"tasks": [{"id": f"t{index}", "title": "é" * 4096} for index in range(2000)]}
+    entry = Entry(1, "", doc)
+    server = SimpleNamespace(repository=SimpleNamespace(current=lambda slug: entry))
+    tracemalloc.start()
+    try:
+        reply = routes.ledger_read(server, "ledger", "tasks", {"limit": 2})
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert len(reply["data"]) == 2
+    assert peak < 512_000, f"page request allocated {peak} bytes for two returned tasks"

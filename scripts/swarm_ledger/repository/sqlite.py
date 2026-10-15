@@ -1,3 +1,4 @@
+import hashlib
 import json
 import secrets
 import sqlite3
@@ -48,8 +49,13 @@ class Missing(KeyError, ValueError):
 class Entry:
     """One ledger as last stored: its generation, canonical text, a parsed copy callers only read and views of it."""
 
-    def __init__(self, generation, text, state):
+    def __init__(self, generation, text, state, task_revision: str | None = None):
         self.generation, self.text, self.state, self.views = generation, text, state, {}
+        self.task_revision = task_revision
+        if self.task_revision is None:
+            self.task_revision = hashlib.sha256(
+                json.dumps(state.get("tasks", []), sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+            ).hexdigest()
 
 
 def summarize(slug: str, state: dict) -> dict:
@@ -389,7 +395,12 @@ class SQLiteLedgerRepository:
             UPDATE,
             (state["_meta"]["rev"], generation, encode(summarize(slug, state)), self.domain.now_ms(), slug),
         )
-        return Entry(generation, encode(state), state)
+        return Entry(
+            generation,
+            encode(state),
+            state,
+            entry.task_revision if state.get("tasks", []) == entry.state.get("tasks", []) else None,
+        )
 
     def _insert(self, connection, slug: str, state: dict, token: str, seeds: dict | None = None) -> None:
         previous = connection.execute(GENERATION, (slug,)).fetchone()
