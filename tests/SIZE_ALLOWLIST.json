@@ -164,7 +164,7 @@
   "PLR0912": 27
  },
  "scripts/install.py": {
-  "file-lines": 6918
+  "file-lines": 6906
  },
  "scripts/install.py::_clean_state_dir": {
   "C901": 14,
@@ -228,10 +228,10 @@
   "PLR0912": 20
  },
  "scripts/install.py::main": {
-  "C901": 69,
-  "PLR0912": 72,
-  "PLR0915": 327,
-  "function-lines": 670
+  "C901": 67,
+  "PLR0912": 70,
+  "PLR0915": 317,
+  "function-lines": 658
  },
  "scripts/install.py::uninstall_global": {
   "C901": 35,
