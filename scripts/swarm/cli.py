@@ -1154,7 +1154,13 @@ def cmd_issue(store, args):
 
 def cmd_review(store, args):
     agent = _worker(store, args)
-    print(json.dumps(review_rounds.start(args.slug, agent.task)))
+    row = LedgerClient().task(args.slug, agent.task) or {}
+    pulls = row.get("split_pulls") or []
+    print(
+        json.dumps(
+            review_rounds.start(args.slug, agent.task, pr_url=row.get("pr_url"), first_pr=pulls[0] if pulls else "")
+        )
+    )
 
 
 def _git(run, *args):
