@@ -12,7 +12,7 @@ def test_documentation_role_has_its_own_skill_and_only_task_browser(world):
     assert "Role: Documentation" in (out / "CLAUDE.md").read_text()
     assert (out / "skills/create-simple-docs/SKILL.md").is_file()
     config = json.loads((out / ".claude.json").read_text())
-    assert set(config["mcpServers"]) == {"playwright"}
+    assert set(config["mcpServers"]) == {"playwright-cmd"}
     engineer = render.render_claude("engineer")
     assert not (engineer / "skills/create-simple-docs").exists()
 
