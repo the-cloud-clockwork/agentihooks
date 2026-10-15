@@ -59,8 +59,8 @@ def released(env, monkeypatch, tmp_path):
     ledger.pulls[URL] = RUNNING
     ledger.tasks = lambda slug: list(ledger.rows.values()) if slug == "sw" else []
     ledger.updates, update = [], ledger.update_task
-    ledger.update_task = lambda slug, task, fields, by="swarm", if_state=(): (
-        ledger.updates.append((task, fields, by)) or update(slug, task, fields, by, if_state)
+    ledger.update_task = lambda slug, task, fields, by="swarm", if_state=(), if_match=None: (
+        ledger.updates.append((task, fields, by)) or update(slug, task, fields, by, if_state, if_match)
     )
     shell = Shell()
     monkeypatch.setattr(stack, "shell", shell)
