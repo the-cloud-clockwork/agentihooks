@@ -2539,7 +2539,12 @@ def test_repository_optional_collections_have_empty_http_resources(live, monkeyp
     stored(monkeypatch, document)
     assert request(live, "GET", path) == (
         200,
-        {"data": [], "revision": revision([]), "next_cursor": None},
+        {
+            "data": [],
+            "revision": revision([]),
+            "next_cursor": None,
+            **({"page_hash": revision([])} if path == "tasks" else {}),
+        },
     )
 
 

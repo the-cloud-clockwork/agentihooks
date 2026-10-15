@@ -42,6 +42,22 @@ def test_task_page_peak_allocation_is_bounded_by_page():
     assert peak < 512_000, f"page request allocated {peak} bytes for two returned tasks"
 
 
+def test_task_page_hash_counts_toward_reply_budget(monkeypatch):
+    from scripts.swarm_ledger.api import resources
+
+    doc = {"tasks": [{"id": "t1", "title": "Visible"}, {"id": "t2", "title": "Next"}]}
+    full = resources.read(doc, "tasks", {"limit": 2})
+    monkeypatch.setattr(resources, "MAX_REPLY", resources.reply_size(full) - 1)
+    first = resources.read(doc, "tasks", {"limit": 2})
+    assert len(first["data"]) == 1
+    assert resources.reply_size(first) <= resources.MAX_REPLY
+    second = resources.read(doc, "tasks", {"limit": 2, "cursor": first["next_cursor"]})
+    assert second["data"][0]["id"] == "t2"
+    assert second["next_cursor"] is None
+    empty = resources.read({"tasks": []}, "tasks")
+    assert empty["page_hash"] == hashlib.sha256(b"[]").hexdigest()
+
+
 @pytest.mark.parametrize("value", [{"b": [True, None, 1.5], "a": "é\n"}, [], "", 42])
 def test_streamed_revision_keeps_canonical_digest(value):
     from scripts.swarm_ledger.api.resources import revision

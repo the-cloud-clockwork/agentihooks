@@ -5,9 +5,10 @@ from .errors import APIError
 
 
 def revision(value: object) -> str:
-    return hashlib.sha256(
-        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
-    ).hexdigest()
+    digest = hashlib.sha256()
+    for chunk in json.JSONEncoder(sort_keys=True, separators=(",", ":"), ensure_ascii=False).iterencode(value):
+        digest.update(chunk.encode())
+    return digest.hexdigest()
 
 
 def reply_size(reply: object) -> int:
@@ -62,7 +63,7 @@ def read(doc: dict, path: str, query: dict | None = None) -> dict:
     raw = value(doc, path)
     rev = resource_revision(doc, path)
     if isinstance(raw, list):
-        return page(raw, rev, query or {})
+        return page(raw, rev, query or {}, hash_page=path == "tasks")
     return bounded({"data": project(raw), "revision": rev})
 
 
@@ -132,7 +133,7 @@ def project(raw: object) -> object:
     return result
 
 
-def page(rows: list, rev: str, query: dict) -> dict:
+def page(rows: list, rev: str, query: dict, hash_page: bool = False) -> dict:
     from .schemas import PAGINATION, validate
 
     validate(PAGINATION, query)
@@ -154,13 +155,18 @@ def page(rows: list, rev: str, query: dict) -> dict:
             "revision": rev,
             "next_cursor": f"{rev}:{end}" if end < len(rows) else None,
         }
+        if hash_page:
+            candidate["page_hash"] = revision(candidate["data"])
         if reply_size(candidate) > MAX_REPLY:
             if not selected:
                 raise APIError(413, "resource_too_large", "Use the explicit export operation for this resource")
             break
         selected.append(item)
     end = offset + len(selected)
-    return bounded({"data": selected, "revision": rev, "next_cursor": f"{rev}:{end}" if end < len(rows) else None})
+    result = {"data": selected, "revision": rev, "next_cursor": f"{rev}:{end}" if end < len(rows) else None}
+    if hash_page:
+        result["page_hash"] = revision(selected)
+    return bounded(result)
 
 
 def swarm_read(status: dict | None, path: str, query: dict) -> dict:
