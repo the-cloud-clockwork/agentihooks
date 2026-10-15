@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-SHARED = {"projects", "sessions", "todos", "plugins", ".credentials.json"}
+SHARED = {"projects", "sessions", "todos", "plugins", ".credentials.json", "keybindings.json"}
 
 
 def _write(path: Path, text: str) -> Path:
@@ -847,6 +847,37 @@ def test_claude_render_mcp_and_shared_data(world, capsys):
     assert links == SHARED
     for name in SHARED:
         assert os.readlink(out / name) == str(home / ".claude" / name)
+
+
+@pytest.mark.parametrize("present", [True, False])
+def test_claude_render_links_operator_keybindings(world, present):
+    from scripts.profiles import render
+
+    source = world["home"] / ".claude" / "keybindings.json"
+    if present:
+        _write(source, '{"bindings": []}\n')
+    out = render.render_claude("rb-role")
+    link = out / "keybindings.json"
+    assert link.is_symlink()
+    assert link.readlink() == source
+    assert link.exists() is present
+    assert render.render_claude("rb-role") is None
+
+
+@pytest.mark.parametrize("missing", sorted(SHARED))
+def test_claude_render_redoes_a_home_missing_a_shared_link(world, missing):
+    from scripts.profiles import render
+
+    out = render.render_claude("rb-role")
+    link = out / missing
+    if link.is_symlink():
+        link.unlink()
+    assert render.render_claude("rb-role") is not None
+    fresh = render.profile_dir("rb-role") / "claude"
+    assert fresh != out
+    assert (fresh / missing).is_symlink()
+    assert (fresh / missing).readlink() == world["home"] / ".claude" / missing
+    assert render.render_claude("rb-role") is None
 
 
 def test_claude_render_seeds_only_startup_state_from_the_default_home(world):
