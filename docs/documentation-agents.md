@@ -79,17 +79,21 @@ call. Classifier child sessions do not create documentation work.
 In a swarm, classification runs through the detached hook worker. The new task
 stays on the closing agent's own ledger, uses `profile: documentation`, retains
 its source requirements and documentation evidence, and depends on the source
-task. A handoff waits for the source task's delivered state before queueing.
-Repeated completion events use a stable documentation task identifier.
+task. Queueing happens immediately with the source dependency, including when the
+closing agent leaves CI and merge completion to the controller. Repeated
+completion events use a stable documentation task identifier.
 
 Classifier or ledger failures retain a pending request. Later bound session
-completions retry a bounded number of requests from the same swarm. Documentation
+completions retry a bounded number of requests from the same swarm, oldest
+attempt first so retained requests do not starve later work. Documentation
 tasks do not queue more documentation tasks. Session teardown continues while
 the background worker performs this work.
 
 Standalone sessions create no ledger, swarm or documentation task. They record
-the verdict in the session log and, when documentation is needed, print a line
-naming the change and the command for starting a documentation agent there.
+the verdict in the session log. When documentation is needed, the detached
+worker stores a notice for the repository. The next session starting in that
+repository receives one short line naming the change and how to start a
+documentation agent; the notice is then marked shown.
 
 The classifier follows the existing definition precedence: package defaults,
 bundle classifier definition, then runtime classifier definition. Use the

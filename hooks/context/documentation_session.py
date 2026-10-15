@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 
 from hooks._async import fork_and_call
-from hooks.common import log
+from hooks.common import inject_context, log
 from hooks.config import AGENTIHOOKS_HOME as HOME
 from hooks.context import documentation, documentation_evidence
 from scripts.swarm.ledger_client import LedgerClient
@@ -24,32 +24,47 @@ def _write(path: Path, row: dict) -> None:
     target.replace(path)
 
 
+def _show_notice(repository: Path) -> None:
+    for path in sorted((HOME / "documentation").glob("*.json")):
+        row = json.loads(path.read_text())
+        if not row.get("notice") or row.get("shown") or row["repository"] != str(repository):
+            continue
+        with path.with_suffix(".lock").open("w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            row = json.loads(path.read_text())
+            if row.get("notice") and not row.get("shown"):
+                inject_context(row["notice"])
+                row["shown"] = True
+                _write(path, row)
+                return
+
+
 def start(payload: dict) -> None:
     if os.environ.get("AGENTIHOOKS_CLASSIFIER_CHILD") == "1" or not payload.get("session_id"):
         return
     try:
         path = _path(payload["session_id"])
+        root = Path(documentation_evidence.git(Path(payload["cwd"]), "rev-parse", "--show-toplevel"))
+        repository = Path(
+            documentation_evidence.git(root, "rev-parse", "--path-format=absolute", "--git-common-dir")
+        ).parent
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _show_notice(repository)
         if path.exists():
             return
-        root = Path(documentation_evidence.git(Path(payload["cwd"]), "rev-parse", "--show-toplevel"))
-        path.parent.mkdir(parents=True, exist_ok=True)
         _write(
             path,
             {
                 "session": payload["session_id"],
                 "root": str(root),
-                "repository": str(
-                    Path(
-                        documentation_evidence.git(root, "rev-parse", "--path-format=absolute", "--git-common-dir")
-                    ).parent
-                ),
+                "repository": str(repository),
                 "base": documentation_evidence.git(root, "rev-parse", "HEAD"),
                 "swarm": os.environ.get("AGENTIHOOKS_SWARM", ""),
                 "task": os.environ.get("AGENTIHOOKS_SWARM_TASK", ""),
                 "status": "pending",
             },
         )
-    except (OSError, KeyError, subprocess.SubprocessError) as exc:
+    except (OSError, KeyError, ValueError, subprocess.SubprocessError) as exc:
         log("documentation snapshot unavailable", {"error": type(exc).__name__})
 
 
@@ -65,10 +80,7 @@ def end(payload: dict) -> None:
         row = json.loads(path.read_text())
         if row["status"] in TERMINAL:
             return
-        if row["swarm"]:
-            fork_and_call(process_pending, path, timeout_sec=180, task_name="documentation-session-end")
-        else:
-            process(path)
+        fork_and_call(process_pending, path, timeout_sec=180, task_name="documentation-session-end")
     except (OSError, ValueError) as exc:
         log("documentation dispatch unavailable", {"error": type(exc).__name__})
 
@@ -130,14 +142,12 @@ def _finish(path: Path, row: dict) -> None:
         return
     row["status"] = "complete"
     if verdict["needs_documentation"] and ledger:
-        if source and source.get("state") != "done":
-            row["status"] = "awaiting_delivery"
-        else:
-            row["documentation_task"] = _queue(ledger, row, source, evidence, verdict)
-            row["status"] = "queued"
+        row["documentation_task"] = _queue(ledger, row, source, evidence, verdict)
+        row["status"] = "queued"
     elif verdict["needs_documentation"]:
-        print(
-            f"Documentation needed for {evidence['summary']}. Start it here: agentihooks init-agent --profile documentation"
+        row["notice"] = (
+            f"Documentation needed for {evidence['summary'][:160]}. "
+            "Start it here: agentihooks init-agent --profile documentation"
         )
     _write(path, row)
 
@@ -161,7 +171,7 @@ def process_pending(path: Path) -> None:
     process(path)
     current = json.loads(path.read_text())
     retried = 0
-    for pending in sorted(path.parent.glob("*.json")):
+    for pending in sorted(path.parent.glob("*.json"), key=lambda item: (item.stat().st_mtime_ns, item.name)):
         if pending == path:
             continue
         row = json.loads(pending.read_text())
