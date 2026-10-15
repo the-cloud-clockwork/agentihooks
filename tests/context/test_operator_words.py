@@ -13,6 +13,16 @@ ENV = {"AGENTIHOOKS_AGENT_NAME": "master@a1-1", "AGENTIHOOKS_SWARM": "demo"}
 LATER = 100 + operator_words.TTL_SEC
 
 
+@pytest.fixture(autouse=True)
+def signal_state(tmp_path, monkeypatch):
+    import hooks.context.branch_guard as branch_guard
+    import hooks.context.prod_lockdown as prod_lockdown
+
+    for module in (branch_guard, prod_lockdown):
+        monkeypatch.setattr(module, "AGENTIHOOKS_HOME", tmp_path)
+        monkeypatch.setattr(module, "get_redis", lambda: None)
+
+
 def test_a_typed_prompt_is_found_by_a_quote_in_any_case_and_spacing():
     assert operator_words.heard_prompt("Approve the  Broker merge, then ship", ENV, now=100)
     assert operator_words.heard_prompt("Hold the release", ENV, now=150)
