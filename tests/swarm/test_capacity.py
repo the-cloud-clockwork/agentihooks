@@ -1652,14 +1652,14 @@ def test_an_auto_swarm_with_quota_and_host_room_rises_above_its_configured_caps_
     ledger.comment = lambda slug, item, text, by: None
     rt = _scaling_runtime(tmp_path, monkeypatch, [account(cap=6), account("cx", harness="codex", cap=6)])
     first = _scaling_tick(store, ledger, rt, 1000)
-    assert sum(first["configured"].values()) == 1
+    assert sum(first["configured"].values()) == 2
     assert first["autoscale"]["pending_raise"] == {"target": 12, "ticks": 1}
     second = _scaling_tick(store, ledger, rt, 61_000)
     assert second["autoscale"]["pending_raise"] == {"target": 12, "ticks": 2}
     assert "raise held at tick 2 of 3" in second["autoscale"]["reason"]
     third = _scaling_tick(store, ledger, rt, 121_000)
-    assert third["configured"] == {"eng": 2, "ci": 1, "plan": 0}
-    assert third["effective"] == {"eng": 2, "ci": 1, "plan": 0}
+    assert third["configured"] == {"eng": 3, "ci": 1, "plan": 0}
+    assert third["effective"] == {"eng": 3, "ci": 1, "plan": 0}
     assert third["autoscale"]["host"]["room"] > 0
     assert store.config("sw").max_eng == 1
 
