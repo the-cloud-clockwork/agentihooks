@@ -63,22 +63,38 @@ def _branch_worktree(cwd: Path, task: dict) -> Path | None:
     return found.pop() if len(found) == 1 else None
 
 
-def _swarm_cwd(cwd: Path) -> Path:
+def _swarm_cwd(cwd: Path) -> tuple[Path | None, str]:
     from scripts.gates.base import Who
     from scripts.swarm_ledger.repository.sqlite import read_ledger
 
     who = Who.from_env()
     if not (who.pinned and who.task):
-        return cwd
+        return None, "identity binding"
     folder = Path(os.environ.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser()
     doc = read_ledger(folder, who.swarm, f"tasks/{who.task}") or {}
     task = next((row for row in doc.get("tasks", []) if row.get("id") == who.task), {})
+    if not task:
+        return None, "ledger task"
     if task.get("claimed_by") != who.name or task.get("state") not in ("claimed", "pr"):
+        return None, "claimant or task state"
+    target = _branch_worktree(cwd, task) if task.get("branch") else _own_worktree(cwd, who.name)
+    return target, "worktree lookup"
+
+
+def _push_directory(cwd: Path, selected: bool) -> Path:
+    from hooks.targets import is_codex
+
+    if selected:
         return cwd
-    branch = task.get("branch")
-    if not branch:
-        return _own_worktree(cwd, who.name) or cwd
-    return _branch_worktree(cwd, task) or cwd
+    target, stage = _swarm_cwd(cwd)
+    if target is not None:
+        return target
+    if is_codex():
+        raise BlockAction(
+            f"BLOCKED: Could not resolve the push directory ({stage}). "
+            "Use git -C /absolute/path/to/worktree push with the intended repository."
+        )
+    return cwd
 
 
 def _unpassed(payload: dict) -> Path | None:
@@ -100,7 +116,7 @@ def _unpassed(payload: dict) -> Path | None:
         push = _push(tokens)
         if push is None or _exempt(push[1]):
             continue
-        base = cwd if selected or push[0] else _swarm_cwd(cwd)
+        base = _push_directory(cwd, selected or bool(push[0]))
         root = _toplevel(base.joinpath(*map(_path, push[0])))
         if root and (root / "scripts" / "ci_prepush" / "__init__.py").is_file() and not passed(root):
             return root
@@ -112,6 +128,8 @@ def check_prepush(payload: dict) -> None:
 
     try:
         root = _unpassed(payload)
+    except BlockAction:
+        raise
     except Exception as exc:
         log("prepush_guard failed", {"error": str(exc)})
         return
