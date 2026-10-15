@@ -257,6 +257,8 @@ def _isolate_real_user_paths(tmp_path, monkeypatch, request):
     (fake_state_dir / "deps.stamp").write_text(json.dumps({"ok_at": time.time()}))
     monkeypatch.setattr("hooks.config.LOG_FILE", str(fake_state_dir / "logs" / "hooks.log"))
     monkeypatch.setattr("hooks.common.LOG_FILE", str(fake_state_dir / "logs" / "hooks.log"))
+    monkeypatch.setattr("hooks._async._LOG_FILE", fake_state_dir / "logs" / "async-hooks.log")
+    monkeypatch.setattr("hooks.context.documentation_session.HOME", fake_state_dir)
     monkeypatch.setattr("hooks.config.BROADCAST_FILE", str(fake_state_dir / "broadcast.json"))
     monkeypatch.setattr("hooks.context.broadcast.BROADCAST_FILE", str(fake_state_dir / "broadcast.json"))
     monkeypatch.setattr(
@@ -282,6 +284,7 @@ def _isolate_real_user_paths(tmp_path, monkeypatch, request):
     from hooks.targets import emitter
 
     monkeypatch.setattr(emitter, "_forced", False)
+    monkeypatch.setattr(emitter, "_plain", False)
     monkeypatch.setattr(emitter, "_buffer", [])
     monkeypatch.setattr(emitter, "_hook_fields", {})
     monkeypatch.setattr(emitter, "_top_fields", {})

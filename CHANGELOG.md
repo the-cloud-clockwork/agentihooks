@@ -17,6 +17,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Terminal and worker image tool downloads retry server errors and timeouts
+  up to five attempts with exponential backoff, preserving checksum checks.
 - Plain `agentihooks init` installs Claude and Codex; Copilot requires
   `--target copilot` or `--with-copilot`. Output defaults to installed harness
   summaries and warnings; `--verbose` shows installation details.

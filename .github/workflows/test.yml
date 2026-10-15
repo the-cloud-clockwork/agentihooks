@@ -24,9 +24,9 @@ on:
         default: origin/dev
 
 concurrency:
-  group: ${{ github.event_name == 'workflow_dispatch' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}
+  group: ${{ github.event_name == 'workflow_dispatch' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || github.event_name == 'push' && 'promotion-dev' || format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}
   queue: ${{ github.event_name == 'workflow_dispatch' && 'max' || 'single' }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
 
 permissions:
   contents: read
@@ -1101,7 +1101,9 @@ jobs:
 
       - name: Check every shard's test time fits the fifteen minute budget
         if: github.event_name != 'merge_group'
-        run: python -m tests.shard_budget shard-durations/*/durations.json
+        env:
+          REPORT: ${{ github.event_name == 'push' && '--report' || '' }}
+        run: python -m tests.shard_budget $REPORT shard-durations/*/durations.json
 
   test-count:
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') }}
@@ -1580,12 +1582,23 @@ jobs:
         with:
           path: ~/coverage-baseline
           key: coverage-baseline-${{ steps.base.outputs.tree }}
+          restore-keys: coverage-baseline-
+
+      - name: Grade from the newest dev baseline when the base run published none
+        id: restored
+        if: steps.cached.outputs.cache-hit != 'true' && steps.cached.outputs.cache-matched-key != ''
+        run: |
+          commit=$(jq -r '.commit // empty' ~/coverage-baseline/baseline.json)
+          if [[ -n "$commit" ]] && git merge-base --is-ancestor "$commit" HEAD; then
+            echo "Grading from the newest dev baseline at $commit; a newer push superseded the base run before it published."
+            echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          fi
 
       # The cache evicts a baseline seven days after its last read, and a dev commit the queue merged may get no push run,
       # so a miss falls back to the artifact any passed run of the base kept.
       - name: Mint the tcc main ci App token
         id: app-token
-        if: steps.cached.outcome == 'success' && steps.cached.outputs.cache-hit != 'true'
+        if: steps.cached.outcome == 'success' && steps.cached.outputs.cache-hit != 'true' && steps.restored.outputs.commit == ''
         uses: actions/create-github-app-token@v3.2.0
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
@@ -1653,7 +1666,7 @@ jobs:
 
       - name: Hold every line the base ran
         env:
-          BASE: ${{ steps.base.outputs.commit }}
+          BASE: ${{ steps.restored.outputs.commit || steps.base.outputs.commit }}
         run: |
           base="$BASE"
           git worktree add --detach "$RUNNER_TEMP/base" "$base"
@@ -1956,6 +1969,7 @@ jobs:
         with:
           path: ~/coverage-baseline
           key: coverage-baseline-${{ steps.tree.outputs.previous }}
+          restore-keys: coverage-baseline-
 
       - name: Download this run's measured coverage
         uses: actions/download-artifact@v4
