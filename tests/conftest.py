@@ -20,7 +20,6 @@ for _redis_name in list(os.environ):
 from tests import installer_isolation, ledger_guard, redis_key_guard, swarm_v2_isolation
 from tests.shards import (
     FIRST_SHARD_FILES,
-    assign_files,
     assign_nodes,
     discover_test_files,
     grouped_files,
@@ -88,27 +87,17 @@ def _shard_files(config) -> frozenset[str]:
         discovered = discover_test_files(config.rootpath)
         pinned = FIRST_SHARD_FILES.intersection(discovered)
         files = [path for path in discovered if path not in pinned]
-        workers = (
-            getattr(config, "workerinput", {}).get("workercount")
-            or getattr(getattr(config, "option", None), "numprocesses", None)
-            or 1
-        )
-        if workers == "auto":
-            workers = os.cpu_count() or 1
-        if workers > 1:
-            measured = {node: seconds for node, seconds in durations.items() if node.split("::", 1)[0] in files}
-            sizes = source_sizes(config.rootpath, files)
-            parts = assign_nodes(measured, shards, grouped_files(config.rootpath, files), workers, sizes=sizes)
-            config.stash[NODE_SHARDS] = {node: shard for shard, part in enumerate(parts) for node in part}
-            owners = {}
-            for node, shard in config.stash[NODE_SHARDS].items():
-                owners.setdefault(node.split("::", 1)[0], set()).add(shard)
-            config.stash[FILE_SHARDS] = {path: sorted(shards) for path, shards in owners.items()}
-            config.stash[FILE_SHARDS].update({path: [0] for path in pinned})
-            known = {node.split("::", 1)[0] for node in measured}
-            files = {node.split("::", 1)[0] for node in parts[index - 1]} | (set(files) - known)
-        else:
-            files = assign_files(durations, files, shards, source_sizes(config.rootpath, files))[index - 1]
+        measured = {node: seconds for node, seconds in durations.items() if node.split("::", 1)[0] in files}
+        sizes = source_sizes(config.rootpath, files)
+        parts = assign_nodes(measured, shards, grouped_files(config.rootpath, files), 4, sizes=sizes)
+        config.stash[NODE_SHARDS] = {node: shard for shard, part in enumerate(parts) for node in part}
+        owners = {}
+        for node, shard in config.stash[NODE_SHARDS].items():
+            owners.setdefault(node.split("::", 1)[0], set()).add(shard)
+        config.stash[FILE_SHARDS] = {path: sorted(shards) for path, shards in owners.items()}
+        config.stash[FILE_SHARDS].update({path: [0] for path in pinned})
+        known = {node.split("::", 1)[0] for node in measured}
+        files = {node.split("::", 1)[0] for node in parts[index - 1]} | (set(files) - known)
         config.stash[SHARD_FILES] = frozenset(files) | (pinned if index == 1 else frozenset())
     return config.stash[SHARD_FILES]
 
