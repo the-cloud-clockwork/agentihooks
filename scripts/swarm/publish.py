@@ -95,6 +95,8 @@ def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, mess
     if root is None:
         raise SwarmError(f"task worktree missing; Next: agentihooks swarm {shlex.quote(slug)} prepare")
     fields = checkout_fields(root)
+    if task.get("branch"):
+        fields["branch"] = task["branch"]
     selected = selected_files(root, files)
     retry = shlex.join(["agentihooks", "swarm", slug, "publish", "--message", message, "--", *files])
     try:
