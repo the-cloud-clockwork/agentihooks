@@ -1567,7 +1567,7 @@ def cmd_ready(store, args):
     problems = handoff_check.problems(text, Resolver(args.slug, store.redis, ledger.state))
     if problems:
         raise SwarmError(handoff_check.refusal(problems))
-    ready.release(store, args.slug, agent.task, found, ledger, agent.name)
+    ready.release(store, args.slug, agent.task, found, ledger, agent.name, ledger_events.view)
     try:
         _hand_off(store, args.slug, agent, text, "exit", ledger)
     except Exception:

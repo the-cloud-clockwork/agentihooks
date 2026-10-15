@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/waits.py:scripts.swarm.waits.x_end_pass__mutmut_14:fe540ec2721ac8e94aa4aa0e3c6ee9767f557263d9cd49856bd7e5894f660d88": {
+    "reader": "standards_reader",
+    "reason": "The suppressed outcome is consumed only through truthiness in the save condition, _save_wait branch and continuation guard; empty string and None preserve the same wait JSON and suppress the same notification."
+  }
+}
