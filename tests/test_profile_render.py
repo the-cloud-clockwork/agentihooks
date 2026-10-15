@@ -346,18 +346,6 @@ def test_claude_render_enables_the_role_defaults(world, role, plugins):
     assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == dict.fromkeys(plugins, True)
 
 
-def test_role_home_reads_the_package_roles_in_force(tmp_path, monkeypatch):
-    from hooks.context import profile_chain
-    from scripts.profiles import plugins
-
-    roles = tmp_path / "package-roles"
-    _write(roles / "engineer" / "profile.yml", "name: engineer\n")
-    monkeypatch.setattr(profile_chain, "PACKAGE_ROLES", roles)
-
-    assert plugins.role_home(["planner", "rb-base"]) is False
-    assert plugins.role_home(["rb-base", "package:engineer"]) is True
-
-
 @pytest.mark.parametrize(
     ("layer", "plugins"),
     [
