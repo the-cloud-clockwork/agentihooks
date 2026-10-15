@@ -85,8 +85,10 @@ class LedgerClient:
     def hierarchy(self, slug):
         return self._resource(slug, "hierarchy", collection=True)
 
-    def update_task(self, slug, task_id, fields, by="swarm", if_state=()):
+    def update_task(self, slug, task_id, fields, by="swarm", if_state=(), if_match=None):
         guard = {"if_state": list(if_state)} if if_state else {}
+        if if_match is not None:
+            guard["if_match"] = if_match
         state = self._call(slug, [_op("task_update", by, item=f"tasks/{task_id}", fields=fields, **guard)])
         return next((t for t in state.get("tasks", []) if t["id"] == task_id), {})
 
