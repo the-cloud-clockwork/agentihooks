@@ -735,18 +735,24 @@ def test_the_master_is_never_nudged_for_being_quiet(store):
     assert stale_nudges(store, master.name) == [] and len(stale_nudges(store)) == 1
 
 
-@pytest.mark.parametrize("blocker", ["outage", "recovery"])
-def test_an_open_outage_or_a_pending_recovery_leaves_the_quiet_agent_to_provider_recovery(store, monkeypatch, blocker):
-    from scripts.swarm import outage, resume
+def test_an_open_swarm_outage_leaves_the_quiet_agent_to_provider_recovery(store, monkeypatch):
+    from scripts.swarm import outage
 
     ledger, runtime = spawned(store)
-    if blocker == "outage":
-        record = {"kind": "provider", "started_at": 1_000, "ended_at": None, "evidence": ["provider down"], "past": []}
-        monkeypatch.setattr(outage, "open_records", lambda slug: [record])
-    else:
-        monkeypatch.setattr(resume, "recovery_pending", lambda store, slug, agent: True)
+    record = {"kind": "provider", "started_at": 1_000, "ended_at": None, "evidence": ["provider down"], "past": []}
+    monkeypatch.setattr(outage, "open_records", lambda slug: [record])
     tick("sw", store, ledger, runtime, now_ms=1_001 + 2 * STALE_MS)
     assert stale_nudges(store) == [] and runtime.nudged == []
+
+
+@pytest.mark.parametrize(("pending", "expected"), [(True, 0), (False, 1)])
+def test_a_pending_recovery_leaves_the_quiet_agent_to_provider_recovery(store, pending, expected):
+    from scripts.swarm.pane import PaneObservation
+    from scripts.swarm.tick import _stale_nudge
+
+    agent = AgentRecord(IDLER, "eng", "t1", started_at=1_000)
+    actions = _stale_nudge("sw", store, agent, PaneObservation("idle"), pending, 1_001 + STALE_MS)
+    assert len(actions) == len(stale_nudges(store)) == expected
 
 
 def test_a_nudge_the_routed_runtime_refuses_answers_with_the_router_reason(store):

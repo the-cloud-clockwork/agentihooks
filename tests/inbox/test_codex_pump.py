@@ -531,14 +531,14 @@ def test_a_nudge_racing_a_turn_end_refreshes_and_starts_a_turn(rig):
 def test_each_window_of_silence_reaches_the_thread_as_its_own_turn(rig):
     from scripts.swarm import stale_nudge
 
-    agent = AgentRecord(ME, "eng", "task", started_at=0)
+    agent = AgentRecord(ME, "eng", "task", started_at=1)
     first, second = 1_000 * stale_nudge.LIMIT_MS, 1_001 * stale_nudge.LIMIT_MS
     assert stale_nudge.nudge(rig.store, SLUG, agent, "", first) != []
     rig.run(1)
     rig.server.finish()
     assert stale_nudge.nudge(rig.store, SLUG, agent, "", second) != []
     rig.run(1)
-    ids = [stale_nudge.item_id(SLUG, ME, 0, at) for at in (first, second)]
+    ids = [stale_nudge.item_id(SLUG, ME, 1, at) for at in (first, second)]
     assert [rig.store.get(i).state for i in ids] == ["delivered", "delivered"]
     assert turn_methods(rig) == ["turn/start", "turn/start"]
 
