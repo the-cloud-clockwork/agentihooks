@@ -102,6 +102,13 @@ def test_a_failed_dirty_lookup_keeps_the_unpassed_push_blocked(repository, monke
     assert f"Next: cd {repository} && python -m scripts.ci_prepush" in str(refused.value)
 
 
+def test_unrelated_untracked_files_do_not_change_the_gate_next_command(repository):
+    (repository / "notes.txt").write_text("unrelated")
+    with pytest.raises(BlockAction) as refused:
+        check_prepush({"tool_input": {"command": "git push"}, "cwd": str(repository)})
+    assert f"Next: cd {repository} && python -m scripts.ci_prepush" in str(refused.value)
+
+
 def test_dirty_push_names_selection_before_the_committed_head_gate(repository):
     (repository / "chosen.txt").write_text("after")
     with pytest.raises(BlockAction) as blocked:
@@ -413,20 +420,25 @@ def test_missing_selected_files_are_refused_before_staging(publication, missing,
     assert git(publication.root, "diff", "--cached", "--name-only") == ""
 
 
-def test_an_already_staged_deletion_is_published(publication):
+@pytest.mark.parametrize("deleted", ["other.txt", "new-other.txt"])
+def test_an_already_staged_deletion_is_published(publication, deleted):
     from scripts.swarm import publish
 
     root = publication.root
-    git(root, "rm", "other.txt")
+    if deleted == "new-other.txt":
+        (root / deleted).write_text("new file")
+        git(root, "add", deleted)
+        git(root, "commit", "-qm", "Seed new file")
+    git(root, "rm", deleted)
     result = publish.publish(
         "swarm",
         publication.agent,
         str(publication.repo),
         publication.ledger,
         "Delete other",
-        ["chosen.txt", "other.txt"],
+        ["chosen.txt", deleted],
     )
-    assert "other.txt" not in git(root, "ls-tree", "--name-only", "HEAD").splitlines()
+    assert deleted not in git(root, "ls-tree", "--name-only", "HEAD").splitlines()
     assert result["head"] == git(root, "rev-parse", "HEAD")
 
 
