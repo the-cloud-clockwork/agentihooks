@@ -130,7 +130,7 @@ def check_build(root: Path) -> None:
 def gate_python(repo: Path) -> str:
     venv = repo.parent / ".venv" / "bin" / "python"
     for python in (venv, Path(sys.executable)):
-        if python.is_file() and not subprocess.run([python, "-c", "import ruff"], capture_output=True).returncode:
+        if python.is_file() and not subprocess.run([python, "-I", "-c", "import ruff"], capture_output=True).returncode:
             return str(python)
     raise SwarmError(f"no python with ruff for the prepush gate; install the dev extra into {venv}")
 
