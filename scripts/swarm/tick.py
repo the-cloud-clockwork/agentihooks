@@ -56,6 +56,7 @@ from scripts.swarm import (
     seat_spawn,
     session_model,
     stack,
+    stale_nudge,
     tick_master,
     time_left,
     timing,
@@ -91,7 +92,7 @@ MASTER_DOWN = (
     "as it starts."
 )
 IDLE_NUDGE_TICKS = 3
-IDLE_KILL_TICKS = 10
+IDLE_KILL_TICKS = 20
 IDLE_TICKS = "idle-ticks"
 LANES = ("eng", "ci", "plan")
 ACTIVE = ("claimed", "pr")
@@ -567,9 +568,10 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     pending = resume.recovery_pending(store, slug, agent)
     if _stuck_on_provider(slug, store, agent, observed, exhausted, now_ms):
         return _free_stuck(slug, store, ledger, runtime, rows, agent, now_ms)
+    nudged = _stale_nudge(slug, store, agent, observed, pending, now_ms)
     if agent.lane == MASTER or (held and not exhausted):
         store.put_agent(slug, agent)
-        return []
+        return nudged
     state = idle_state.verdict(
         observed.state,
         idle_state.heartbeat(store.redis, slug, agent.name),
@@ -578,10 +580,10 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     )
     if state in {idle_state.WAITING, idle_state.WORKING}:
         store.put_agent(slug, replace(agent, idle_ticks=0))
-        return []
+        return nudged
     if _operator_at_pane(slug, store, agent, observed, now_ms) or ledger_probe.holding(store, slug):
         store.put_agent(slug, agent)
-        return []
+        return nudged
     idle = replace(agent, idle_ticks=agent.idle_ticks + 1)
     store.put_agent(slug, idle)
     who = Who(name=agent.name, task=agent.task)
@@ -589,13 +591,21 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
         slug, gate_log.Row.of(IDLE_TICKS, "count", who, reason=f"idle tick {idle.idle_ticks}", now_ms=now_ms)
     )
     if pending:
-        return []
-    if idle.idle_ticks == IDLE_NUDGE_TICKS:
-        refused = runtime.nudge(idle, NUDGE.format(slug=slug))
-        return [f"nudge to {agent.name} refused: {refused}" if refused else f"nudged {agent.name}"]
+        return nudged
     if idle.idle_ticks >= IDLE_KILL_TICKS and runtime.retire(idle, homes=reaper.scratch_homes(slug, idle.task)):
-        return [f"stalled {agent.name}" + _drop(slug, store, ledger, rows, idle, refund=True)]
-    return []
+        return nudged + [f"stalled {agent.name}" + _drop(slug, store, ledger, rows, idle, refund=True)]
+    return nudged
+
+
+def _stale_nudge(slug, store, agent, observed, pending, now_ms):
+    """An open swarm outage and a pending recovery belong to provider recovery; an agent due for retirement gets none."""
+    if agent.lane == MASTER or not agent.task or pending or outage.open_records(slug):
+        return []
+    if agent.idle_ticks + 1 >= IDLE_KILL_TICKS:
+        return []
+    if _operator_at_pane(slug, store, agent, observed, now_ms) or ledger_probe.holding(store, slug):
+        return []
+    return stale_nudge.nudge(InboxStore(store.redis), slug, agent, observed.provider_error, now_ms)
 
 
 def _stuck_on_provider(slug, store, agent, observed, exhausted, now_ms):

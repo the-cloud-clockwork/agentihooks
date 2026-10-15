@@ -124,7 +124,8 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
 - The tick counts an agent idle only when its pane reads idle, its heartbeat
   does not say working and no declared wait holds, and holds the count while its
   input line holds text or the operator prompted it inside the quiet window;
-  nudge at 3 idle ticks, retire at 10. A leaving agent's open items move to its seat when its task
+  retire at 20. A task holder silent ten minutes with no named wait, or on a provider error, gets one inbox nudge
+  per ten minute window, never a typed prompt. A leaving agent's open items move to its seat when its task
   goes on, else they are withdrawn and each sender told.
 - A session bound to a swarm task (`AGENTIHOOKS_SWARM`, `AGENTIHOOKS_SWARM_TASK`)
   receives a `SWARM REFOCUS` block: ledger overview, its phase and its task. It
