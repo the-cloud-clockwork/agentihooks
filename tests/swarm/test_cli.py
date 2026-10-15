@@ -721,6 +721,26 @@ def test_review_closes_on_the_third_round_and_refuses_a_fourth(env, monkeypatch,
     assert capsys.readouterr().err == f"swarm: task t1 gets no fourth review round. {cli.review_rounds.CLOSED}\n"
 
 
+def test_review_budget_keeps_each_pull_requests_rounds(env, monkeypatch, capsys, tmp_path):
+    _, ledger, _ = env
+    monkeypatch.setattr(gate_log, "swarm_home", lambda: tmp_path)
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    capsys.readouterr()
+    first = "https://github.com/o/r/pull/1"
+    second = "https://github.com/o/r/pull/2"
+    ledger.rows["t1"]["pr_url"] = first
+    for n in (1, 2, 3):
+        assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 0
+        assert json.loads(capsys.readouterr().out)["round"] == n
+    ledger.rows["t1"]["pr_url"] = second
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 0
+    assert json.loads(capsys.readouterr().out)["round"] == 1
+    ledger.rows["t1"]["pr_url"] = first
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 1
+    assert "no fourth review round" in capsys.readouterr().err
+
+
 def test_redis_down_is_a_clear_failure(monkeypatch, capsys):
     def down():
         raise SwarmError("Redis is unreachable; the swarm refuses to run without it")
