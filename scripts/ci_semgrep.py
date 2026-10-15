@@ -11,7 +11,7 @@ def timed_out_only(report: Path) -> list[str]:
     except (OSError, ValueError):
         return []
     errors = document.get("errors", [])
-    if document.get("results") or not errors or any(error.get("type") != "Timeout" for error in errors):
+    if document.get("results") or any(error.get("type") != "Timeout" for error in errors):
         return []
     return sorted({f"{error.get('rule_id')} on {error.get('path')}" for error in errors})
 

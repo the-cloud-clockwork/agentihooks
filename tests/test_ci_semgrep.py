@@ -25,6 +25,7 @@ if report is not None:
     Path(output).write_text(json.dumps(report))
 with open(plan_path.with_suffix(".calls"), "a") as calls:
     calls.write(json.dumps(sys.argv[2:]) + "\\n")
+print("semgrep ran", flush=True)
 sys.exit(code)
 """
 
@@ -41,12 +42,20 @@ def _calls(calls: Path) -> list[list[str]]:
     return [json.loads(line) for line in calls.read_text().splitlines()]
 
 
-def test_a_scan_whose_only_errors_are_timeouts_runs_once_more_and_grades_the_second_run(tmp_path, capsys):
-    command, calls = _semgrep(tmp_path, (2, {"results": [], "errors": [TIMEOUT]}), (0, {"results": [], "errors": []}))
+def test_a_scan_whose_only_errors_are_timeouts_runs_once_more_and_grades_the_second_run(tmp_path, capfd):
+    other = {**TIMEOUT, "rule_id": "a.rule", "path": "b.yml"}
+    command, calls = _semgrep(
+        tmp_path, (2, {"results": [], "errors": [TIMEOUT, other]}), (0, {"results": [], "errors": []})
+    )
     report = tmp_path / "semgrep.json"
     assert scan(command, report) == 0
     assert _calls(calls) == [["scan", "--strict", f"--json-output={report}"]] * 2
-    assert f"scanning once more: {RULE} on .github/workflows/test.yml" in capsys.readouterr().out
+    assert capfd.readouterr().out.splitlines() == [
+        "semgrep ran",
+        "Semgrep timed out with no other error, scanning once more: "
+        f"a.rule on b.yml, {RULE} on .github/workflows/test.yml",
+        "semgrep ran",
+    ]
 
 
 def test_a_rule_that_times_out_twice_stays_red(tmp_path):
@@ -75,9 +84,10 @@ def test_anything_but_a_failed_timeout_only_scan_is_graded_as_it_ran(tmp_path, f
 
 def test_timed_out_only_names_each_timed_out_rule_and_file_once(tmp_path):
     report = tmp_path / "semgrep.json"
-    other = {**TIMEOUT, "rule_id": "a.rule", "path": "b.yml"}
-    report.write_text(json.dumps({"results": [], "errors": [TIMEOUT, other, TIMEOUT]}))
-    assert timed_out_only(report) == ["a.rule on b.yml", f"{RULE} on .github/workflows/test.yml"]
+    names = ["e", "d", "c", "b", "a", "e"]
+    errors = [{**TIMEOUT, "rule_id": f"{name}.rule", "path": f"{name}.yml"} for name in names]
+    report.write_text(json.dumps({"results": [], "errors": errors}))
+    assert timed_out_only(report) == [f"{name}.rule on {name}.yml" for name in "abcde"]
     report.write_text("{")
     assert timed_out_only(report) == []
 
@@ -87,3 +97,4 @@ def test_the_program_passes_the_scan_exit_code_through(tmp_path):
     done = subprocess.run([sys.executable, str(_ROOT / "scripts/ci_semgrep.py"), *command], capture_output=True)
     assert done.returncode == 1
     assert len(_calls(calls)) == 2
+    assert done.stdout.decode().splitlines()[1].startswith("Semgrep timed out with no other error")
