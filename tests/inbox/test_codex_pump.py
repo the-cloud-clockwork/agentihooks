@@ -1038,7 +1038,7 @@ def test_successor_admission_cannot_overtake_an_inbox_publication(rig, monkeypat
     successor = swarm.start_execution(SLUG, candidate, EXECUTION)
     assert successor.generation == 2
     with pytest.raises(DispatchError, match="^execution is no longer current$"):
-        rig.pump._send("old mail")
+        rig.pump._send("old mail", False)
 
 
 def test_a_stray_text_frame_is_refused_and_diagnostics_stay_off_the_socket(rig):

@@ -760,6 +760,7 @@ def test_a_pending_recovery_blocks_the_nudge_during_the_tick(store, monkeypatch)
 
     ledger, runtime = spawned(store)
     monkeypatch.setattr(resume, "recovery_pending", lambda *args: True)
+    monkeypatch.setattr(resume, "recover_outages", lambda *args: [])
     tick("sw", store, ledger, runtime, now_ms=1_001 + STALE_MS)
     assert stale_nudges(store) == []
 
