@@ -108,7 +108,9 @@ def _run(tmp_path, ref="refs/heads/" + OWN, live=LIVE, **env):
 
 def test_the_workflow_concurrency_stays_unchanged():
     concurrency = _workflow()["concurrency"]
-    assert concurrency["cancel-in-progress"] == "${{ github.event_name == 'pull_request' }}"
+    assert (
+        concurrency["cancel-in-progress"] == "${{ github.event_name == 'pull_request' || github.event_name == 'push' }}"
+    )
     assert concurrency["queue"] == "${{ github.event_name == 'workflow_dispatch' && 'max' || 'single' }}"
     assert concurrency["group"].endswith(
         "|| format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}"

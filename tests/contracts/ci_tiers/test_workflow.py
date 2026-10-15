@@ -5,6 +5,8 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
+from tests.test_ci_hosted_lanes import _resolve
+
 pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).parents[3]
@@ -12,6 +14,21 @@ UNIT = {"durations", "split", "unit", "shard-check", "test-count", "gate-require
 QUEUE = UNIT | {"queue-fail-fast"}
 PULL_REQUEST = UNIT | {"select", "lint", "semgrep", "sonar", "mutation-plan", "mutation-stats", "mutation"}
 SELECTED = PULL_REQUEST - {"split", "unit", "shard-check"} | {"unit-selected"}
+PROMOTION = (PULL_REQUEST - {"mutation-plan", "mutation-stats", "mutation"}) | {
+    "queue-fail-fast",
+    "reuse",
+    "coverage-ratchet",
+    "coverage-baseline",
+    "refresh-durations",
+    "flake-budget",
+    "swarm-image",
+    "worker-image",
+    "brain-smoke",
+    "ledger-load",
+    "kind-due",
+    "helm-kind",
+    "stage-budget",
+}
 
 
 def enabled(condition, event, needs, base_ref="dev"):
@@ -62,7 +79,9 @@ def jobs_for(event, base_ref="dev", scope="full"):
     return {name for name, job in completed.items() if job.result == "success"}
 
 
-@pytest.mark.parametrize("event,expected", [("merge_group", QUEUE), ("pull_request", PULL_REQUEST)])
+@pytest.mark.parametrize(
+    "event,expected", [("merge_group", QUEUE), ("pull_request", PULL_REQUEST), ("push", PROMOTION)]
+)
 def test_each_event_runs_only_its_tier_jobs(event, expected):
     assert jobs_for(event) == expected
 
@@ -84,3 +103,32 @@ def test_the_queue_keeps_completeness_but_skips_the_shard_time_budget():
     assert "merge_group" not in completeness.get("if", "")
     assert enabled(budget.get("if", True), "merge_group", {}) is False
     assert enabled(budget.get("if", True), "pull_request", {}) is True
+
+
+def test_the_shard_time_budget_grades_pull_requests_and_reports_on_promotion():
+    job = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["shard-check"]
+    budget = next(step for step in job["steps"] if "tests.shard_budget" in step.get("run", ""))
+    flag = budget["env"]["REPORT"]
+    assert _resolve({"group": flag}, event_name="push")["group"] == "--report"
+    assert _resolve({"group": flag}, event_name="pull_request")["group"] == ""
+    assert budget["run"] == "python -m tests.shard_budget $REPORT shard-durations/*/durations.json"
+
+
+def _concurrency(event, run_id, number=None):
+    workflow = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())
+    return _resolve(
+        workflow["concurrency"], event_name=event, run_id=run_id, event={"pull_request": {"number": number}}
+    )
+
+
+def test_two_dev_pushes_share_one_promotion_group_that_cancels_the_older_run():
+    first, second = _concurrency("push", 1000), _concurrency("push", 1061)
+    assert first == second == {"group": "promotion-dev", "queue": "single", "cancel-in-progress": True}
+
+
+@pytest.mark.parametrize("event,number", [("merge_group", None), ("pull_request", 7)])
+def test_queue_and_pull_request_runs_keep_their_own_groups(event, number):
+    first, second = _concurrency(event, 1000, number), _concurrency(event, 1061, number + 1 if number else None)
+    assert first["group"] != second["group"]
+    assert "promotion" not in first["group"]
+    assert first["cancel-in-progress"] is (event == "pull_request")

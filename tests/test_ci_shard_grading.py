@@ -59,7 +59,7 @@ def test_shard_grading_keeps_head_data_separate_from_base_modules():
     assert commands == [
         "python -m tests.shard_check shard-durations/*/durations.json --collected collected-data/collected.json",
         "python -m tests.shard_check shard-durations/*/durations.json",
-        "python -m tests.shard_budget shard-durations/*/durations.json",
+        "python -m tests.shard_budget $REPORT shard-durations/*/durations.json",
     ]
 
 

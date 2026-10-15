@@ -18,6 +18,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("durations", type=Path, nargs="+", help="the durations.json each shard stored")
     parser.add_argument("--budget", type=float, default=FIFTEEN_MINUTES, help="seconds of test time per shard")
+    parser.add_argument("--report", action="store_true", help="warn on a shard over budget instead of failing")
     args = parser.parse_args(argv)
     unread = [str(path) for path in args.durations if not path.is_file()]
     if unread:
@@ -31,8 +32,9 @@ def main(argv: list[str] | None = None) -> int:
     for shard in ranked:
         print(f"{shard.parent.name} {seconds[shard]:.1f} s{' over budget' if shard in over else ''}")
     if over:
-        print(f"::error::{len(over)} of {len(seconds)} shards passed the {budget} s budget.")
-        return 1
+        level = "warning" if args.report else "error"
+        print(f"::{level}::{len(over)} of {len(seconds)} shards passed the {budget} s budget.")
+        return 0 if args.report else 1
     return 0
 
 
