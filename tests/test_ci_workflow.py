@@ -436,9 +436,10 @@ def _check_stored_durations(nodeids: list[str] | None = None):
     assert collected, output
     stored = json.loads((_ROOT / ".test_durations").read_text())
     missing = [nodeid for nodeid in collected if re.sub(r"@[^\[\]]*$", "", nodeid) not in stored]
-    assert len(missing) * 10 <= len(collected), (
-        f"{len(missing)} of {len(collected)} tests have no stored duration; "
-        "refresh them with: python -m tests.refresh_durations"
+    # A partial run holds every test its change adds, so its missing share is judged against the stored suite.
+    suite = max(len(collected), len(stored)) if partial else len(collected)
+    assert len(missing) * 10 <= suite, (
+        f"{len(missing)} of {suite} tests have no stored duration; refresh them with: python -m tests.refresh_durations"
     )
 
 
@@ -499,6 +500,18 @@ def test_stored_durations_judge_only_the_tests_a_selected_run_collected(tmp_path
     else:
         with pytest.raises(AssertionError, match=f"{missing} of 10 tests"):
             _check_stored_durations(ran)
+
+
+@pytest.mark.parametrize("stored", [99, 100])
+def test_a_selected_run_judges_its_new_tests_against_the_stored_suite(tmp_path, monkeypatch, stored):
+    new = [f"tests/test_new.py::test_{i}" for i in range(10)]
+    (tmp_path / ".test_durations").write_text(json.dumps({f"tests/test_old.py::test_{i}": 0.1 for i in range(stored)}))
+    monkeypatch.setattr(sys.modules[__name__], "_ROOT", tmp_path)
+    if stored >= 100:
+        _check_stored_durations(new)
+    else:
+        with pytest.raises(AssertionError, match=f"10 of {stored} tests"):
+            _check_stored_durations(new)
 
 
 def test_a_selected_run_strips_the_xdist_group_suffix(tmp_path, monkeypatch):
