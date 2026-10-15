@@ -11,16 +11,16 @@ COMMENT = "Closed by the swarm: pull request {url} merged into dev."
 def named(url):
     done = stack.shell(["gh", "pr", "view", url, "--json", "body", "--jq", ".body"])
     if done.returncode != 0:
-        return []
+        return [], [f"could not read the issues named by {url}: {done.stderr.strip()}"]
     repo = url.split("/pull/")[0]
-    return [f"{repo}/issues/{number}" for number in KEYWORD.findall(done.stdout)]
+    return [f"{repo}/issues/{number}" for number in KEYWORD.findall(done.stdout)], []
 
 
 def settle(url, finished, rows):
     recorded = [rows[task]["issue_url"] for task in finished if rows[task].get("issue_url")]
     held = {row.get("issue_url") for task, row in rows.items() if task not in finished and row.get("state") != "done"}
-    actions = []
-    for issue in dict.fromkeys([*recorded, *named(url)]):
+    issues, actions = named(url)
+    for issue in dict.fromkeys([*recorded, *issues]):
         if issue not in held:
             actions += _close(issue, url)
     return actions
@@ -32,8 +32,10 @@ def _close(issue, url):
         return [f"could not close issue {issue}: {state.stderr.strip()}"]
     if state.stdout.strip() != "OPEN":
         return []
-    for argv in (["gh", "issue", "comment", issue, "--body", COMMENT.format(url=url)], ["gh", "issue", "close", issue]):
-        done = stack.shell(argv)
-        if done.returncode != 0:
-            return [f"could not close issue {issue}: {done.stderr.strip()}"]
+    closed = stack.shell(["gh", "issue", "close", issue])
+    if closed.returncode != 0:
+        return [f"could not close issue {issue}: {closed.stderr.strip()}"]
+    said = stack.shell(["gh", "issue", "comment", issue, "--body", COMMENT.format(url=url)])
+    if said.returncode != 0:
+        return [f"closed issue {issue}; could not comment on it: {said.stderr.strip()}"]
     return [f"closed issue {issue}"]

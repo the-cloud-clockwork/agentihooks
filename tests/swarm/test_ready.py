@@ -637,10 +637,10 @@ def test_a_merged_ready_pull_request_closes_the_task_issue_and_the_issue_it_name
         f"removed the worktree {TOP}",
     ]
     assert issue_writes(merging) == [
-        ["gh", "issue", "comment", ISSUE, "--body", CLOSED_BY],
         ["gh", "issue", "close", ISSUE],
-        ["gh", "issue", "comment", NAMED, "--body", CLOSED_BY],
+        ["gh", "issue", "comment", ISSUE, "--body", CLOSED_BY],
         ["gh", "issue", "close", NAMED],
+        ["gh", "issue", "comment", NAMED, "--body", CLOSED_BY],
     ]
 
 
@@ -649,8 +649,8 @@ def test_an_issue_linked_to_a_task_still_open_stays_open(merging, issues):
     merging.rows["t3"] = {"id": "t3", "state": "done", "issue_url": ISSUE}
     merging.run()
     assert issue_writes(merging) == [
-        ["gh", "issue", "comment", ISSUE, "--body", CLOSED_BY],
         ["gh", "issue", "close", ISSUE],
+        ["gh", "issue", "comment", ISSUE, "--body", CLOSED_BY],
     ]
 
 
@@ -658,8 +658,8 @@ def test_an_issue_already_closed_gets_no_second_comment(merging, issues):
     issues[ISSUE] = "CLOSED"
     assert f"closed issue {ISSUE}" not in merging.run()
     assert issue_writes(merging) == [
-        ["gh", "issue", "comment", NAMED, "--body", CLOSED_BY],
         ["gh", "issue", "close", NAMED],
+        ["gh", "issue", "comment", NAMED, "--body", CLOSED_BY],
     ]
 
 
@@ -668,6 +668,14 @@ def test_an_issue_the_swarm_cannot_close_is_reported_and_the_task_still_closes(m
     actions = merging.run()
     assert f"could not close issue {ISSUE}: boom" in actions
     assert merging.rows["t1"]["state"] == "done"
+    assert ["gh", "issue", "comment", ISSUE, "--body", CLOSED_BY] not in merging.shell.calls
+
+
+def test_a_closed_issue_whose_comment_fails_is_reported(merging, issues):
+    merging.shell.fail = (("gh", "issue", "comment"),)
+    actions = merging.run()
+    assert f"closed issue {ISSUE}; could not comment on it: boom" in actions
+    assert f"closed issue {ISSUE}" not in actions
 
 
 def test_an_issue_whose_state_cannot_be_read_is_reported_without_a_comment(merging, issues):
@@ -679,10 +687,10 @@ def test_an_issue_whose_state_cannot_be_read_is_reported_without_a_comment(mergi
 
 def test_a_pull_request_body_that_cannot_be_read_still_closes_the_task_issue(merging, issues):
     merging.shell.fail = (("gh", "pr", "view"),)
-    merging.run()
+    assert f"could not read the issues named by {URL}: boom" in merging.run()
     assert issue_writes(merging) == [
-        ["gh", "issue", "comment", ISSUE, "--body", CLOSED_BY],
         ["gh", "issue", "close", ISSUE],
+        ["gh", "issue", "comment", ISSUE, "--body", CLOSED_BY],
     ]
 
 
@@ -693,10 +701,10 @@ def test_a_group_member_issue_closes_with_the_group(merging, issues):
     issues[MEMBER] = "OPEN"
     merging.run()
     assert issue_writes(merging) == [
-        ["gh", "issue", "comment", MEMBER, "--body", CLOSED_BY],
         ["gh", "issue", "close", MEMBER],
-        ["gh", "issue", "comment", NAMED, "--body", CLOSED_BY],
+        ["gh", "issue", "comment", MEMBER, "--body", CLOSED_BY],
         ["gh", "issue", "close", NAMED],
+        ["gh", "issue", "comment", NAMED, "--body", CLOSED_BY],
     ]
 
 
