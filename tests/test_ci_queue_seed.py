@@ -93,11 +93,17 @@ def test_queue_has_no_coverage_baseline_publisher():
 
 
 @pytest.mark.parametrize(
-    "name",
-    ["durations", "split", "unit", "shard-check", "test-count", "gate-required", "coverage-ratchet", "stage-budget"],
+    ("workflow", "name"),
+    [
+        (path.name, name)
+        for path in sorted((_ROOT / ".github/workflows").glob("*.yml"))
+        for name in (yaml.safe_load(path.read_text()).get("jobs") or {})
+    ],
 )
-def test_no_job_waits_on_the_retired_queue_baseline(name):
-    assert "queue-baseline" not in _jobs()[name].get("needs", [])
+def test_no_job_waits_on_the_retired_queue_baseline(workflow, name):
+    jobs = yaml.safe_load((_ROOT / ".github/workflows" / workflow).read_text())["jobs"]
+    assert "queue-baseline" not in jobs
+    assert "queue-baseline" not in jobs[name].get("needs", [])
 
 
 @pytest.mark.parametrize(
