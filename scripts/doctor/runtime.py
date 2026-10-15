@@ -8,9 +8,9 @@ from scripts.swarm.health.findings import Finding
 
 
 def _allocated(directory):
-    size = 0
+    size = directory.lstat().st_blocks * 512
     for parent, directories, files in os.walk(directory, followlinks=False):
-        for name in [".", *files]:
+        for name in [*directories, *files]:
             path = Path(parent) / name
             try:
                 size += path.lstat().st_blocks * 512
