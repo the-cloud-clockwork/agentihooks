@@ -282,6 +282,61 @@ def test_the_third_block_in_a_row_blocks_the_task_and_lets_the_stop_through(rig)
     assert rig.store.redis.get(f"{KEY_ROOT}:swarm:{SLUG}:stop-blocks:{ME}") is None
 
 
+@pytest.mark.parametrize("scope", ["session", "agent", "task"])
+def test_a_lift_clears_prior_stops_and_expiry_requires_three_new_stops(rig, tmp_path, monkeypatch, scope):
+    from scripts.gates import lift
+
+    clock = [1_790_000_000.0]
+    monkeypatch.setattr(lift.time, "time", lambda: clock[0])
+    state = Verdicts(SLUG, rig.gate.name, tmp_path)
+    call = Call("", session="stopping-session")
+    assert not rig.gate.decide(call, WHO, state).allowed
+    assert not rig.gate.decide(call, WHO, state).allowed
+    paths = {
+        "session": lift.lift_path(SLUG, call.session, rig.gate.name, tmp_path),
+        "agent": lift.agent_lift_path(SLUG, ME, rig.gate.name, tmp_path),
+        "task": lift.task_lift_path(SLUG, WHO.task, rig.gate.name, tmp_path),
+    }
+    path = paths[scope]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"at": clock[0]}))
+
+    for _ in range(4):
+        assert rig.gate.decide(call, WHO, state).allowed
+        assert rig.task["state"] == "claimed"
+        assert rig.store.claimant(SLUG, WHO.task) == ME
+    assert rig.ledger.updates == []
+    assert rig.rows() == []
+
+    clock[0] += lift.LIFT_SECONDS
+    first = rig.gate.decide(call, WHO, state)
+    assert not first.allowed and "stop block 1 of 2" in first.reason
+    assert not rig.gate.decide(call, WHO, state).allowed
+    assert rig.gate.decide(call, WHO, state).allowed
+    assert rig.task["state"] == "blocked"
+
+
+@pytest.mark.parametrize("invalid", ["expired", "moved-head"])
+def test_an_invalid_task_lift_cannot_fall_back_to_its_fresh_agent_lift(rig, tmp_path, monkeypatch, invalid):
+    from scripts.gates import intent, lift
+
+    now = 1_790_000_000.0
+    monkeypatch.setattr(lift.time, "time", lambda: now)
+    monkeypatch.setattr(intent, "pr_head", lambda url: "new-head")
+    state = Verdicts(SLUG, rig.gate.name, tmp_path)
+    lift.lift_agent(WHO, rig.gate.name, tmp_path, now=now)
+    record = {"at": now - lift.LIFT_SECONDS}
+    if invalid == "moved-head":
+        record = {"at": now, "url": URL, "head": "old-head"}
+    lift.task_lift_path(SLUG, WHO.task, rig.gate.name, tmp_path).write_text(json.dumps(record))
+
+    first = rig.gate.decide(STOP, WHO, state)
+    assert not first.allowed and "stop block 1 of 2" in first.reason
+    assert not rig.gate.decide(STOP, WHO, state).allowed
+    assert rig.gate.decide(STOP, WHO, state).allowed
+    assert rig.task["state"] == "blocked"
+
+
 @pytest.mark.parametrize("owed", sorted(PLAIN))
 def test_each_plain_cause_is_a_short_ledger_line(owed):
     words = PLAIN[owed].split()
