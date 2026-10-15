@@ -7,8 +7,11 @@ doctrine goes first and the lowest priority blocks give way.
 
 from __future__ import annotations
 
-KINDS = ("alert", "enforcement", "condition", "refocus", "other", "brain", "tool_memory")
+KINDS = ("inbox", "alert", "enforcement", "condition", "refocus", "other", "brain", "tool_memory")
+# Rendering an inbox block marks its items delivered, so it is never shortened or dropped.
+_WHOLE = frozenset({"inbox"})
 _LABELS = {
+    "inbox": "inbox messages",
     "alert": "alerts",
     "enforcement": "enforcements",
     "condition": "conditions",
@@ -71,7 +74,8 @@ def fit(blocks: list[tuple[str, str]], budget: int | None, sep: str = "\n") -> s
     shortened: list[str] = []
     for kind, text in ordered:
         avail = room - (units(sep) if kept else 0)
-        part = text if units(text) <= avail else _shorten(text, avail) if avail > 0 else ""
+        whole = units(text) <= avail or kind in _WHOLE
+        part = text if whole else _shorten(text, avail) if avail > 0 else ""
         if part is not text and units(part) < min(_MIN_SHORTENED, units(text) // 2):
             part = ""
         if part:

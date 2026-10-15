@@ -1025,7 +1025,7 @@ def _inject_inbox(session_id: str, cwd: str = "") -> None:
     from hooks.common import inject_context
 
     for context in _inbox_blocks(session_id, cwd):
-        inject_context(context, also_log=False, skip_compression=True, kind="alert")
+        inject_context(context, also_log=False, skip_compression=True, kind="inbox")
 
 
 def _confirm_inbox(session_id: str) -> None:
@@ -1723,7 +1723,7 @@ def on_pre_tool_use(payload: dict) -> None:
             log("broadcast pretool failed", {"error": str(e)})
 
     if _can_inject_pretool:
-        _pretool_blocks.extend(("alert", b) for b in _inbox_blocks(session_id, payload.get("cwd", "")))
+        _pretool_blocks.extend(("inbox", b) for b in _inbox_blocks(session_id, payload.get("cwd", "")))
         _pretool_blocks.extend(("refocus", b) for b in _refocus_blocks(session_id, "tool"))
         _pretool_blocks.extend(("refocus", b) for b in _wait_nudge_blocks(payload))
 

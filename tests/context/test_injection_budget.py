@@ -111,6 +111,16 @@ def test_only_critical_and_nuclear_broadcasts_rank_as_alerts(severity, kind):
     assert context_kind(format_critical_context([msg], "")) == kind
 
 
+def test_claimed_inbox_block_is_never_shortened_or_dropped():
+    from hooks.context.injection_budget import fit
+
+    inbox = "=== INBOX: message m1 from operator ===\n" + "\n".join("order " + "o" * 90 for _ in range(120))
+    small = "=== INBOX: message m2 from master ===\nshort"
+    out = fit([("enforcement", "rule"), ("inbox", inbox), ("alert", "a" * 600), ("inbox", small)], 9000)
+    assert out.startswith(inbox + "\n" + small + "\n")
+    assert "left out alerts, enforcements" in out.splitlines()[-1]
+
+
 def test_without_a_budget_blocks_keep_arrival_order():
     from hooks.context.injection_budget import fit
 
