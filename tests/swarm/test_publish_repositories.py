@@ -158,7 +158,14 @@ def test_bundle_without_a_gate_uses_the_named_touched_file_fallback(repositories
     p.task["repositories"] = [str(p.bundle)]
     root = Path(publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)["worktree"])
     (root / "chosen.py").write_text(source)
+    git(root, "add", "chosen.py")
+    git(root, "commit", "-qm", "Commit source for grading")
     monkeypatch.chdir(root)
+    from scripts import ci_prepush
+    from scripts.swarm import publish_gate
+
+    assert (publish_gate.main() == 0) is succeeds
+    assert ci_prepush.passed(root) is succeeds
     if succeeds:
         result = publish.publish("swarm", p.agent, str(p.swarm), p.ledger, "Change bundle", ["chosen.py"])
         assert result["gate"] == "AgentiHooks touched Python fallback"
