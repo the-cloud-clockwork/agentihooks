@@ -125,8 +125,8 @@ def test_publish_selects_the_current_repository_and_retains_both_branches(reposi
     second = publish.publish("swarm", p.agent, str(p.swarm), p.ledger, "Change hooks", ["chosen.txt"])
     assert second["worktree"] == roots[0]
     assert p.task["repository_branches"] == {str(p.bundle): "engineer-test-2", str(p.swarm): "engineer-test"}
-    for root, repository in zip(roots, (p.swarm, p.bundle), strict=True):
-        assert git(repository, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == git(
+    for root, repository, branch in zip(roots, (p.swarm, p.bundle), ("engineer-test", "engineer-test-2"), strict=True):
+        assert git(repository, "ls-remote", "origin", f"refs/heads/{branch}").split()[0] == git(
             root, "rev-parse", "HEAD"
         )
     assert publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)["worktrees"] == fields["worktrees"]
