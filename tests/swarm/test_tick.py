@@ -249,12 +249,14 @@ def test_a_live_owner_recovers_its_missing_lease_without_a_duplicate_launch(stor
     assert ledger.rows["t1"]["state"] == "claimed"
 
 
-def test_a_live_owner_that_appears_during_placement_is_never_launched_over(store, monkeypatch):
+@pytest.mark.parametrize("registered", [True, False])
+def test_a_live_owner_that_appears_during_placement_is_never_launched_over(store, monkeypatch, registered):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     from scripts.swarm.store import AgentRecord
 
     def admitted(*args):
-        store.put_agent("sw", AgentRecord("existing-owner", "eng", "t1", started_at=1_000))
+        if registered:
+            store.put_agent("sw", AgentRecord("existing-owner", "eng", "t1", started_at=1_000))
         runtime.live.add("existing-owner")
         ledger.rows["t1"]["claimed_by"] = "existing-owner"
         return ""

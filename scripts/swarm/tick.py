@@ -871,6 +871,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     taken = {a.seat for a in agents}
     held = _held_for_master(slug, store, now_ms)
     for lane, task in _spawn_order(slug, config, store, agents, rows, doc, runtime):
+        task = dict(task)
         if held:
             return actions + held
         if stop := _spawn_stop(slug, config, store, runtime, now_ms):

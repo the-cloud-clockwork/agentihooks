@@ -251,12 +251,12 @@ def _finish(run, rows, row, found):
     return [f"task {task_id} done, {url} merged", *linked_issues.settle(url, finished, rows), *_remove(found)]
 
 
+def _owners(run, task_id):
+    return [agent for agent in run.store.agents(run.slug) if agent.task == task_id and agent.state != "finished"]
+
+
 def _working_owner(run, row, pull):
-    owners = [
-        agent
-        for agent in run.store.agents(run.slug)
-        if agent.task == row["id"] and agent.state in ("starting", "working", "awaiting-decision")
-    ]
+    owners = _owners(run, row["id"])
     for agent in owners:
         identity = json.dumps(
             [run.slug, row["id"], agent.name, agent.execution_id, agent.generation, pull.head, pull.merge_problem]
@@ -290,6 +290,8 @@ def _unmergeable(run, row, found, pull):
 
 def _reopen(run, row, found, what):
     task_id, url = row["id"], found["url"]
+    if _owners(run, task_id):
+        return []
     lease_generation = run.store.claim_generation(run.slug, task_id)
     expected = {key: row.get(key, "") for key in ("claimed_by", "pr_url", "awaiting")}
     expected["claim_generation"] = row.get("claim_generation", 0)
