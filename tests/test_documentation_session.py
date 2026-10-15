@@ -10,7 +10,7 @@ from tests.test_documentation_evidence import git, repository
 
 class Ledger:
     def __init__(self):
-        self.source = {"id": "t1", "title": "Add retry policy", "phase": "p1", "profile": "engineer"}
+        self.source = {"id": "t1", "title": "Add retry policy", "phase": "p1", "profile": "engineer", "state": "done"}
         self.added = []
 
     def task(self, slug, task_id):
@@ -117,3 +117,45 @@ def test_classifier_children_schedule_no_documentation_work(world, monkeypatch):
     documentation_session.end(payload)
     assert jobs == []
     assert ledger.added == []
+
+
+def test_a_handoff_waits_for_delivered_work_before_queueing_documentation(world, monkeypatch):
+    _, payload, ledger, jobs = world
+    ledger.source["state"] = "claimed"
+    monkeypatch.setattr(documentation.runner, "decide", answer())
+    documentation_session.end(payload)
+    fn, args = jobs.pop()
+    fn(*args)
+    assert ledger.added == []
+    assert json.loads(args[0].read_text())["status"] == "awaiting_delivery"
+    ledger.source["state"] = "done"
+    fn(*args)
+    assert len(ledger.added) == 1
+
+
+def test_standalone_session_logs_the_verdict_and_prints_a_launch_instruction(tmp_path, monkeypatch, capsys):
+    root = tmp_path / "repo"
+    root.mkdir()
+    repository(root)
+    monkeypatch.setattr(documentation_session, "HOME", tmp_path / "state")
+    monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
+    monkeypatch.delenv("AGENTIHOOKS_SWARM_TASK", raising=False)
+    monkeypatch.delenv("AGENTIHOOKS_CLASSIFIER_CHILD", raising=False)
+    monkeypatch.setattr(documentation.runner, "decide", answer())
+    logged = []
+    monkeypatch.setattr(documentation_session, "log", lambda event, data: logged.append((event, data)))
+
+    def no_ledger(**kwargs):
+        raise AssertionError("standalone session must not create or contact a ledger")
+
+    monkeypatch.setattr(documentation_session, "LedgerClient", no_ledger)
+    payload = {"session_id": "standalone-fixture", "cwd": str(root)}
+    documentation_session.start(payload)
+    (root / "policy.py").write_text("class WidgetPolicy:\n    retries = 3\n")
+    git(root, "add", "policy.py")
+    git(root, "commit", "-qm", "Add retry policy")
+    documentation_session.end(payload)
+    output = capsys.readouterr().out
+    assert "Add retry policy" in output
+    assert "init-agent" in output
+    assert any(data.get("needs_documentation") is True for _, data in logged)
