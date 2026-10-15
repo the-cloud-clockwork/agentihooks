@@ -250,7 +250,7 @@ def test_a_second_tick_does_not_overspawn(store):
     assert len(runtime.spawned) == 2
 
 
-@pytest.mark.parametrize("lost_ledger", [True, False])
+@pytest.mark.parametrize("lost_ledger", ["missing", "retained", False])
 @pytest.mark.parametrize("pr_url, expected", [("", "claimed"), ("https://github.com/o/r/pull/1", "pr")])
 def test_a_live_owner_recovers_its_missing_lease_without_a_duplicate_launch(store, lost_ledger, pr_url, expected):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
@@ -259,7 +259,9 @@ def test_a_live_owner_recovers_its_missing_lease_without_a_duplicate_launch(stor
     ledger.rows["t1"].update(pr_url=pr_url, state=expected)
     store.release("sw", "t1", owner.name)
     if lost_ledger:
-        ledger.rows["t1"].update(state="open", claimed_by="")
+        ledger.rows["t1"].update(state="open")
+        if lost_ledger == "missing":
+            ledger.rows["t1"]["claimed_by"] = ""
     tick("sw", store, ledger, runtime, now_ms=2_000)
     assert len(runtime.spawned) == 1
     assert store.claimant("sw", "t1") == owner.name
