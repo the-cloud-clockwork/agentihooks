@@ -13,7 +13,7 @@ COPY --from=packages /var/cache/apt/archives/*.deb /packages/
 COPY docker/swarm-node/versions.lock docker/swarm-node/requirements.lock docker/swarm-node/layout.json /opt/swarm-node/
 COPY docker/swarm-node/ssh/ /opt/swarm-node/ssh/
 COPY deploy/helm/agentihooks-swarm/ci/terminal-worker.sh /opt/swarm-node/terminal-worker.sh
-RUN apt-get install -y --no-install-recommends --no-download /packages/*.deb \
+RUN dpkg -i /packages/*.deb \
     && rm -r /packages \
     && rm -f /etc/ssh/ssh_host_* \
     && usermod -l worker -d /home/worker -m swarm \
