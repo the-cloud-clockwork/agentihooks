@@ -61,6 +61,12 @@ def test_without_token_variables_accounts_are_the_default_login_and_the_pool_is_
     assert router.routing_pool(environ, run=_status(1)) == [router.CodexAccount("default")]
 
 
+def test_live_accounts_are_the_token_accounts_live_sessions_run_on_that_the_pool_lacks():
+    pool = [router.CodexAccount("alpha", "AH_CX_TOKEN_alpha")]
+    sessions = {"alpha": 1, "beta": 2, "default": 1, "api": 1}
+    assert router.live_accounts(pool, sessions) == [router.CodexAccount("beta", "AH_CX_TOKEN_beta")]
+
+
 def test_login_status_and_quota_read_the_profile_codex_home(tmp_path):
     operator = tmp_path / "operator"
     day = operator / "sessions" / "2026" / "10" / "06"

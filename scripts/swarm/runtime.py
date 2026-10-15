@@ -131,7 +131,11 @@ def pane_target(agent):
 def _launch_records(name):
     from scripts import herdr_panes
 
-    return [r for r in herdr_panes.load(dict(os.environ)) if r.kind == "init-agent" and r.owner_session == name]
+    return [
+        r
+        for r in herdr_panes.load(dict(os.environ))
+        if r.kind == "init-agent" and naming.plain(r.owner_session) == naming.plain(name)
+    ]
 
 
 def _opened_pane(name, since_ms):

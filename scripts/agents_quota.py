@@ -176,6 +176,12 @@ def codex_rows(
     return rows
 
 
+def without_routing(rows: list[QuotaRow], accounts: list) -> list[QuotaRow]:
+    """Accounts this environment holds no token for show their quota but take no routing share."""
+    names = {account.name for account in accounts}
+    return [replace(row, cap=None, routing_left=None) if row.account in names else row for row in rows]
+
+
 def next_account(pool: list, quotas: dict, sessions: dict[str, int], now: float, environ: dict[str, str]) -> str:
     """The account open placement would give the next launch, among accounts whose credential is not refused."""
     usable = [account for account in pool if not codex_router.refusal(account, environ)]
@@ -338,8 +344,9 @@ def _codex(now: float) -> list[QuotaRow]:
 
     pool = codex_router.CodexAccountSource().pool(os.environ)
     sessions = codex_sessions_by_account()
-    quotas = codex_router.quotas(pool, os.environ)
-    rows = codex_rows(pool, quotas, sessions, now)
+    live = codex_router.live_accounts(pool, sessions)
+    quotas = codex_router.quotas(pool + live, os.environ)
+    rows = without_routing(codex_rows(pool + live, quotas, sessions, now), live)
     master = _masters("codex").get("codex")
     marked = [_mark(row, master) for row in rows + api_rows(CodexApiSource(sessions), "codex", now)]
     return mark_next(marked, next_account(pool, quotas, sessions, now, dict(os.environ)))
@@ -416,9 +423,11 @@ def _page_quota(now: float) -> dict:
     pool = codex_router.CodexAccountSource().pool(os.environ)
     live = account_sessions.sessions_by_account()
     codex_live = account_sessions.codex_sessions_by_account()
+    elsewhere = codex_router.live_accounts(pool, codex_live)
+    quotas = codex_router.quotas(pool + elsewhere, os.environ)
     claude = claude_rows([result for _, result in cached], live, "cached", observed, now)
     claude += api_rows(ClaudeApiSource(live), "claude", now)
-    rows = claude + codex_rows(pool, codex_router.quotas(pool, os.environ), codex_live, now)
+    rows = claude + without_routing(codex_rows(pool + elsewhere, quotas, codex_live, now), elsewhere)
     rows += api_rows(CodexApiSource(codex_live), "codex", now)
     rows = with_masters(rows, _masters(), live)
     return {"probed_at": max(observed.values(), default=None), "rows": [asdict(row) for row in rows]}
