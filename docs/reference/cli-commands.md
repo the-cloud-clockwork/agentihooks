@@ -391,8 +391,8 @@ PID, or stand down one managed Codex conversation without ending its process.
 
 ```bash
 agentihooks terminate-agent --list --type any        # TYPE NAME SESSION_ID PID PGID STATUS CWD
-agentihooks terminate-agent eng@abc-0042 --dry-run     # resolve and validate, send nothing
-agentihooks terminate-agent eng@abc-0042               # SIGTERM the process group, SIGKILL if it survives
+agentihooks terminate-agent eng@abc-0042 --dry-run   # resolve and validate, send nothing
+agentihooks terminate-agent eng@abc-0042             # SIGTERM the process group, SIGKILL if it survives
 agentihooks terminate-agent ci@abc-0815 --stand-down --dry-run
 agentihooks terminate-agent ci@abc-0815 --stand-down --swarm <slug>
 ```
@@ -411,10 +411,10 @@ agentihooks terminate-agent ci@abc-0815 --stand-down --swarm <slug>
 
 ### Terminate a process
 
-A termination validates the target first: the PID's start time, command and arguments match its
-listing, its process group ID is above 1, every member belongs to one POSIX session,
-and the group does not contain the caller. It then sends
-SIGTERM to the whole process group, waits `--term-timeout`, rechecks the
+A termination validates the target first: the PID's start time, command and
+arguments match its listing, its process group ID is above 1, every member
+belongs to one POSIX session, and the group does not contain the caller. It then
+sends SIGTERM to the whole process group, waits `--term-timeout`, rechecks the
 target's identity and sends SIGKILL to any survivor. Output is the resolution
 line (`action`, `type`, `name`, `session_id`, `pid`, `pgid`, `members`,
 `pane_id` in herdr), then `result=terminated escalation=SIGKILL|none` and, in
@@ -445,8 +445,9 @@ thread id, session id and execution id in the swarm. A stand-down:
    seconds for the turn to stop.
 
 The app-server process and every other conversation it hosts keep running.
-Under `--stand-down` only `--swarm` and `--dry-run` apply; `--type`, `--json`,
-`--force-shared`, `--term-timeout` and `--keep-pane` are ignored.
+Under `--stand-down` only `--swarm` and `--dry-run` change the run; `--type`,
+`--json`, `--force-shared` and `--keep-pane` are ignored, `--term-timeout` is
+only checked to be positive, and `--list` prints the listing instead.
 
 ```text
 $ agentihooks terminate-agent ci@abc-0815 --stand-down --dry-run
@@ -457,18 +458,19 @@ keeps: conversation <uuid> of eng@abc-0816: not interrupted
 result=validated signal=none
 ```
 
-The dry run reads only the swarm's recorded transport state and does not
-contact the app-server, so `last recorded:` is the turn the inbox last
-submitted or reconciled, or `none`. Without `--dry-run` the same `stops:` and
-`keeps:` lines print, the stand-down runs, and the command ends `result=stood-down stood_down=<agent> thread=<thread>
-interrupted=<turn>`; the run interrupts only a last turn the app-server reports
-in progress, and `interrupted=` is empty when none was.
+The dry run reads only the swarm's recorded transport state and does not contact
+the app-server, so `last recorded:` is the turn the inbox last submitted or
+reconciled, or `none`. Without `--dry-run` the same `stops:` and `keeps:` lines
+print, the stand-down runs, and the command ends `result=stood-down
+stood_down=<agent> thread=<thread> interrupted=<turn>`; the run interrupts only
+a last turn the app-server reports in progress, and `interrupted=` is empty when
+none was.
 
 | Exit | Output | Meaning and next step |
 |---|---|---|
 | 0 | `result=validated signal=none` | Dry run; nothing changed |
 | 0 | `result=stood-down ...` | Fenced and, when a turn ran, interrupted |
-| 1 | `terminate-agent: <error>` then `<agent> stays fenced from new inbox turns; run the same stand down again to interrupt its turn` | The fence is written first, so the record is `stood_down` after this exit. Causes: an inbox publication still in flight, an unreachable app-server, or a turn still running after the interrupt. Rerun the same command |
+| 1 | `terminate-agent: <error>` then `<agent> stays fenced from new inbox turns; run the same stand down again to interrupt its turn` | The fence is written first, so the record is `stood_down` after this exit. Causes: an inbox publication still in flight, an unreachable app-server, or a turn still running after the interrupt. Rerun the same command. A Redis error instead ends in a traceback with no fenced line; nothing is fenced when it came before the fence |
 | 2 | `terminate-agent: refused: <reason>` then `terminate-agent: safe alternative: <alternative>` | Nothing changed; see the refusals below |
 
 | Refusal reason | Safe alternative |
