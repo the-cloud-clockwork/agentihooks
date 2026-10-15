@@ -115,6 +115,8 @@ def _finish(path: Path, row: dict) -> None:
         root = Path(row["repository"])
     evidence = documentation_evidence.collect(root, row["base"], source)
     verdict = row.get("verdict")
+    if not source and not evidence["files"]:
+        verdict = {"needs_documentation": False, "size": "none", "source": "no changes"}
     if not verdict or verdict["needs_documentation"] is None:
         verdict = documentation.classify(evidence)
     if source.get("profile") == "documentation" or (

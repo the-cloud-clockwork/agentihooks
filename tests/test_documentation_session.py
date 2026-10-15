@@ -159,3 +159,23 @@ def test_standalone_session_logs_the_verdict_and_prints_a_launch_instruction(tmp
     assert "Add retry policy" in output
     assert "init-agent" in output
     assert any(data.get("needs_documentation") is True for _, data in logged)
+
+
+def test_an_unchanged_session_records_no_documentation_need(tmp_path, monkeypatch):
+    repository(tmp_path)
+    monkeypatch.setattr(documentation_session, "HOME", tmp_path / "state")
+    monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
+    monkeypatch.delenv("AGENTIHOOKS_CLASSIFIER_CHILD", raising=False)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("unchanged work needs no model call")
+
+    monkeypatch.setattr(documentation.runner, "decide", forbidden)
+    payload = {"session_id": "unchanged-fixture", "cwd": str(tmp_path)}
+    documentation_session.start(payload)
+    documentation_session.end(payload)
+    records = list((documentation_session.HOME / "documentation").glob("*.json"))
+    assert len(records) == 1
+    row = json.loads(records[0].read_text())
+    assert row["status"] == "complete"
+    assert row["verdict"]["needs_documentation"] is False
