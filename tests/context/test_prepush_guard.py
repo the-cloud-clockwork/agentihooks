@@ -45,7 +45,8 @@ def _stamp(root):
 def _message(root):
     return (
         f"BLOCKED: HEAD in {root} has not passed `python -m scripts.ci_prepush`. "
-        "Run it there, fix what fails, commit, and push once it passes."
+        "Commit intended changes first, run the gate on that commit, then push. "
+        f"Next: cd {root} && python -m scripts.ci_prepush"
     )
 
 

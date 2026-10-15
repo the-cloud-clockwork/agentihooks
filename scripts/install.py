@@ -5548,7 +5548,7 @@ def cmd_balance(
     import time
 
     from hooks.context.account_sessions import sessions_by_account
-    from scripts.agents_quota import balance_table, current_table, tokenless_table
+    from scripts.agents_quota import balance_table, current_table, router_environ, tokenless_table
     from scripts.claude_quota_balancer import (
         RoutingError,
         ancestor_oauth_token,
@@ -5564,7 +5564,7 @@ def cmd_balance(
 
     session_env = dict(os.environ)
     _load_claude_runtime_env()
-    credentials = discover_credentials(os.environ)
+    credentials = discover_credentials(router_environ(dict(os.environ)))
     live = sessions_by_account()
     if current:
         known = discover_credentials(session_env) + credentials

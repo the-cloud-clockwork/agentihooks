@@ -87,7 +87,7 @@ def findings(ledger, agents, activity, limits, waiting=frozenset(), green=frozen
     return [
         *ceremony(events, tasks, limits, green, talk),
         *scope_inflation(events, tasks, limits),
-        *proof_loops(events, tasks, limits),
+        *proof_loops(events, tasks, limits, ledger.get("review_rounds", {})),
         *failed_launches(events, tasks),
         *idle_with_claim(agents, tasks, limits, waiting),
         *waiting_on_input(agents, tasks),
@@ -212,9 +212,11 @@ def scope_inflation(events, tasks, limits):
     return found
 
 
-def proof_loops(events, tasks, limits):
+def proof_loops(
+    events: list[dict], tasks: dict[str, dict], limits: Limits, reviews: dict[str, dict[str, int]]
+) -> list[Finding]:
     claims = Counter(_task_id(e["target"]) for e in events if e.get("kind") == "task started")
-    rounds = Counter(_task_id(e["target"]) for e in events if e.get("kind") == "task pr")
+    rounds = {tid: max(reviews.get(tid, {}).values(), default=0) for tid in tasks}
     found = []
     for tid in tasks:
         reruns = max(claims[tid] - 1, 0)

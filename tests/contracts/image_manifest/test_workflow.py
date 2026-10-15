@@ -219,7 +219,7 @@ LEAK = json.dumps(
 )
 
 
-def scan(tmp_path, status, report):
+def scan(tmp_path, status, report, args=()):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     (bin_dir / "docker").write_text(SCANNER)
@@ -231,7 +231,7 @@ def scan(tmp_path, status, report):
         "REPORT": report,
     }
     done = subprocess.run(
-        ["bash", str(ROOT / "docker/swarm-node/scan.sh"), "candidate:x", str(tmp_path / "out")],
+        ["bash", str(ROOT / "docker/swarm-node/scan.sh"), *(args or ("candidate:x", str(tmp_path / "out")))],
         env=environ,
         cwd=ROOT,
         capture_output=True,
@@ -248,6 +248,19 @@ def test_scan_reads_every_layer_and_the_image_config_for_secrets(tmp_path):
     assert "--scanners secret --image-config-scanners secret --exit-code 1" in log
     assert log.rstrip().endswith("candidate:x")
     assert "no credentials found in candidate:x" in done.stdout
+
+
+def test_scan_prefetches_the_same_pinned_scanner_it_runs(tmp_path):
+    (tmp_path / "pull").mkdir()
+    (tmp_path / "run").mkdir()
+    pulled, pull_log = scan(tmp_path / "pull", 0, "", ("--pull-scanner",))
+    done, run_log = scan(tmp_path / "run", 0, CLEAN)
+
+    assert pulled.returncode == 0, pulled.stderr
+    assert done.returncode == 0, done.stderr
+    scanner = pull_log.split()[-1]
+    assert pull_log.split() == ["pull", "--quiet", scanner]
+    assert f" {scanner} image " in run_log
 
 
 METADATA = "opt/venv/lib/python3.12/site-packages/pyjwt-2.15.1.dist-info/METADATA"
@@ -321,3 +334,40 @@ def test_the_pull_request_smoke_scans_every_image_it_built():
 
     assert smoke.index('scan.sh" "$image" "$output/credential-scan"') > build
     assert smoke.index('scan.sh" "$rebuild" "$output/credential-scan-rebuild"') > rebuild
+
+
+def test_worker_smoke_runs_independent_proofs_in_parallel_and_compares_every_inventory():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/swarm-node-smoke.yml").read_text())
+    image = workflow["jobs"]["worker-image"]
+    assert image["strategy"]["matrix"]["proof"] == ["startup", "rebuild", "profiles"]
+    assert image["strategy"]["fail-fast"] is False
+    assert "needs" not in image
+    run = next(step for step in image["steps"] if "smoke.sh" in step.get("run", ""))
+    assert run["env"]["WORKER_PROOF"] == "${{ matrix.proof }}"
+    assert run["run"].endswith(' "$WORKER_PROOF"')
+    upload = next(step for step in image["steps"] if step.get("uses", "").startswith("actions/upload-artifact@"))
+    assert upload["with"]["name"] == "swarm-worker-image-${{ matrix.proof }}"
+    compare = workflow["jobs"]["worker-image-compare"]
+    assert compare["needs"] == ["worker-image"]
+    assert compare["if"] == "always()"
+    assert compare["steps"][0]["env"]["PROOF_STATUS"] == "${{ needs.worker-image.result }}"
+    assert '[[ "$PROOF_STATUS" == success ]]' in compare["steps"][0]["run"]
+    assert any(
+        'smoke.sh "$RUNNER_TEMP/worker-image-evidence" compare "$GITHUB_SHA"' in step.get("run", "")
+        for step in compare["steps"]
+    )
+
+
+def test_worker_compare_downloads_every_proof_artifact_into_its_proof_folder():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/swarm-node-smoke.yml").read_text())
+    proofs = workflow["jobs"]["worker-image"]["strategy"]["matrix"]["proof"]
+    downloads = [
+        step["with"]
+        for step in workflow["jobs"]["worker-image-compare"]["steps"]
+        if step.get("uses", "").startswith("actions/download-artifact@")
+    ]
+
+    assert [download["name"] for download in downloads] == [f"swarm-worker-image-{proof}" for proof in proofs]
+    assert [download["path"] for download in downloads] == [
+        "${{ runner.temp }}/worker-image-evidence/" + proof for proof in proofs
+    ]

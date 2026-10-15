@@ -414,6 +414,20 @@ def test_the_reuse_job_and_the_gate_may_move_behind_the_runner_trust_selector():
     assert gate_protected.grade({"test.yml": head}, {}, {"test.yml": base}, {}, _TODAY, _POLICY) == []
 
 
+def test_the_reuse_job_and_gate_accept_trusted_queue_rerun_selectors():
+    base, head = _protected_pair()
+    runner = _anton().replace(
+        "github.triggering_actor == 'github-merge-queue[bot]'",
+        "(github.triggering_actor == 'github-merge-queue[bot]' || "
+        f"contains(fromJSON('{_MEMBERS}'), github.triggering_actor))",
+    )
+    head["jobs"]["reuse"] = _anton_reuse()
+    head["jobs"]["reuse"]["runs-on"] = runner
+    head["jobs"]["gate-required"]["runs-on"] = runner
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY, _POLICY) == []
+    assert gate_protected.grade({"test.yml": head}, {}, {"test.yml": base}, {}, _TODAY, _POLICY) == []
+
+
 @pytest.mark.parametrize(
     "runner", [_anton("anton-oss"), "anton-oss-light", "ubuntu-22.04", _anton().replace("&&", "||", 1)]
 )
