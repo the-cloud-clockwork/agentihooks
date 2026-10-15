@@ -114,6 +114,14 @@ def test_a_quota_handoff_keeps_the_seat_and_launch_settings_on_another_account(s
     pool = [OLD, FRESH, capacity.Account("codex", "roomy", "OPEN", 0, 100, 100, 6)]
     ledger, runtime = _ledger(), QuotaRuntime(tmp_path, pool, monkeypatch)
     done, first, envelope = _quota_handoff(store, ledger, runtime)
+    continuation = {
+        "continue_from": "fresh",
+        "remote_branch": "none",
+        "remote_head": "none",
+        "fresh_reason": "no branch was pushed",
+    }
+    envelope.update(continuation)
+    monkeypatch.setattr("scripts.swarm.tick.reclaim", lambda *args, **kwargs: continuation)
     actions = tick("sw", store, ledger, runtime, 2)
     (argv,) = runtime.argv
     successor = next(a for a in workers(store) if a.name != first.name)

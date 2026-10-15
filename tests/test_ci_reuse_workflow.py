@@ -16,7 +16,8 @@ def test_queue_suites_use_a_precise_reuse_condition():
         "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
         "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
     )
-    assert jobs["unit"]["if"] in condition
+    selected = " && (github.event_name != 'pull_request' || needs.select.outputs.scope == 'full') }}"
+    assert jobs["unit"]["if"] == condition[1].removesuffix(" }}") + selected
     assert "reuse" in jobs["unit"]["needs"]
     assert jobs["reuse"]["outputs"]["reused"] == "${{ steps.decision.outputs.reused || 'false' }}"
 

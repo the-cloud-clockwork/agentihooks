@@ -577,6 +577,8 @@ def task_steps(task, me, led, name, phase, autonomy):
     steps = kind_steps(kind, me, led, name, phase, autonomy, task["id"])
     if kind not in STACKED_KINDS:
         return continued(steps, name, task)
+    if task.get("parked_on") and _verdict(task).get("continue_from") == "fresh":
+        return [f"Start your worktree fresh from dev: {_verdict(task)['fresh_reason']}.", *steps]
     if task.get("parked_on") and task.get("branch") and task.get("stacked_base"):
         return finish_steps(steps, me, naming.plain(name), task)
     if task.get("parked_on"):

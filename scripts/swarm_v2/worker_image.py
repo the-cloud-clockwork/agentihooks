@@ -8,6 +8,7 @@ import re
 import subprocess
 import tarfile
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 TOOLS = ("herdr", "claude", "codex")
@@ -60,6 +61,13 @@ def fetch(name: str, artifact: dict, cache: Path | None) -> bytes:
     if cached:
         cached.write_bytes(payload)
     return payload
+
+
+def download_tools(lock: dict, cache: Path | None) -> None:
+    with ThreadPoolExecutor() as pool:
+        futures = [pool.submit(fetch, name, artifact, cache) for name, artifact in lock["tools"].items()]
+    for future in futures:
+        future.result()
 
 
 def install_tools(lock: dict, destination: Path, cache: Path | None = None) -> None:
@@ -162,8 +170,7 @@ def main() -> None:
             parser.error(f"--package names packages the lock does not pin: {', '.join(unlocked)}")
         lock = {**lock, "shell_packages": {name: lock["shell_packages"][name] for name in args.package}}
     if args.action == "download":
-        for name, artifact in lock["tools"].items():
-            fetch(name, artifact, args.cache)
+        download_tools(lock, args.cache)
     elif args.action == "install":
         install_tools(lock, Path("/usr/local/bin"), args.cache)
     elif args.action == "manifest":
