@@ -201,7 +201,7 @@ class TestActive:
 class TestStatus:
     def test_each_agent_carries_its_active_gates(self):
         log.append(SLUG, log.Row.of("watch", "deny", WHO))
-        report = status.status_report(saved(), SLUG, {"tasks": []})
+        report = status.status_report(saved(), SLUG, {"tasks": []}, SimpleNamespace(live_names=lambda: {ME}))
         assert [a["gates"] for a in report["agents"]] == [[{"gate": "watch", "lifted": False}]]
 
     def test_a_deny_behind_more_than_twenty_rows_still_counts(self):
