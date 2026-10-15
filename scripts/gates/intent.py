@@ -292,7 +292,7 @@ def _plan_chunk(doc, task):
         text = plan_read.exact(doc, task)
     except (ValueError, OSError):
         text = None
-    return {"plan_lines": task["plan_lines"], "plan_chunk": text}
+    return plan_read.scoped(doc, task, {"plan_lines": task["plan_lines"], "plan_chunk": text})
 
 
 def _parent(doc, task):
@@ -526,7 +526,8 @@ def _plan_verdict(state, answers, thresholds):
 def _verdicts(definition, state, params, answers):
     thresholds = definition.thresholds if definition.name == PURPOSE else definitions.load(PURPOSE).thresholds
     verdict, reason, criterion = _verdict(state, answers, thresholds)
-    return {"verdict": verdict, "reason": reason + _judged_on(state), "criterion": criterion}
+    shared = f"; {state['shared_slice']}" if state.get("shared_slice") else ""
+    return {"verdict": verdict, "reason": reason + _judged_on(state) + shared, "criterion": criterion}
 
 
 RULE = code_rules.CodeRule(_questions, _verdicts, {"verdict": (PASS, FAIL, UNCHECKED)}, {"verdict": FAIL})

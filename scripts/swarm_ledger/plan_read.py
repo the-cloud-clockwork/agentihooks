@@ -86,6 +86,53 @@ def pointer(task: dict) -> str:
     )
 
 
+def _lead(task: dict) -> str:
+    return task.get("merged_into") or task["id"]
+
+
+def sharers(doc: dict, task: dict) -> list[str]:
+    if not task.get("plan_lines"):
+        return []
+    held = (task.get("phase"), task["plan_lines"])
+    return [
+        other["id"]
+        for other in doc.get("tasks", [])
+        if other["id"] != task["id"]
+        and other.get("state", "open") != "done"
+        and (other.get("phase"), other.get("plan_lines")) == held
+        and _lead(other) != _lead(task)
+    ]
+
+
+def own_rows(text: str, lines: str, task: dict) -> list[tuple[int, str]]:
+    named = re.compile(rf"(?<![\w.-]){re.escape(task['id'])}(?![\w.-])")
+    title = task.get("title", "").strip().casefold()
+    start = _ledger("plan_ranges").bounds(lines)[0]
+    run: list[tuple[int, str]] = []
+    for number, row in enumerate(text.splitlines(), start):
+        if named.search(row) or (title and title in row.casefold()):
+            if run and number != run[-1][0] + 1:
+                break
+            run.append((number, row))
+    return run
+
+
+def scoped(doc: dict, task: dict, part: dict) -> dict:
+    others = sharers(doc, task)
+    if not others or not isinstance(part.get("plan_chunk"), str):
+        return part
+    shared = f"plan lines {part['plan_lines']} are shared with tasks {', '.join(others)}"
+    rows = own_rows(part["plan_chunk"], part["plan_lines"], task)
+    if not rows:
+        return {"shared_slice": f"{shared}, and no row names this task, so none of them is its scope"}
+    span = f"{rows[0][0]}-{rows[-1][0]}"
+    return {
+        "plan_lines": span,
+        "plan_chunk": "".join(f"{row}\n" for _, row in rows),
+        "shared_slice": f"{shared}; this task's scope is plan lines {span}, the rows that name it",
+    }
+
+
 def _sliced_task(doc: dict, slug: str, task_id: str | None) -> dict:
     task = next((t for t in doc.get("tasks", []) if t.get("id") == task_id), None)
     if task is None:
@@ -130,7 +177,12 @@ def read(doc: dict, slug: str, task_id: str | None, phase_id: str | None) -> str
         lines = _ledger("plan_ranges").slice_lines(source, task["plan_slice"], f"1-{len(source.splitlines())}")
     if packaged:
         return _ledger("plan_packages").read(lines)
-    return chunk(source, lines) + (linked(source, lines, margin=MARGIN) if task else "")
+    whole = chunk(source, lines) + (linked(source, lines, margin=MARGIN) if task else "")
+    part = scoped(doc, task, {"plan_lines": lines, "plan_chunk": chunk(source, lines, margin=0)}) if task else {}
+    if "shared_slice" not in part:
+        return whole
+    scope = part.get("plan_chunk", f"{task.get('description', '')}\n")
+    return f"Scope: {part['shared_slice']}.\n{scope}\nContext only, not scope:\n{whole}"
 
 
 def main(argv=None, environ=None) -> int:
