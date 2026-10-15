@@ -48,12 +48,20 @@ def _inside(tool: str, value: str, cwd: Path, roots: list[Path]) -> bool:
     return any(target.is_relative_to(root) for root in roots)
 
 
+def _seated(session: str, agentihooks: Path) -> bool:
+    if os.environ.get("AGENTIHOOKS_SWARM_TASK") == "master":
+        return True
+    return bool(session) and (agentihooks / "master_seats" / f"{session}.json").is_file()
+
+
 def hotfix_open(payload: dict, role: str, home: Path, now: float | None = None) -> bool:
     """The operator typed allow-master-coding in this master pane within the last thirty minutes."""
-    if role != "master" or os.environ.get("AGENTIHOOKS_SWARM_TASK") != "master":
+    if role != "master":
         return False
     session = re.sub(r"[^A-Za-z0-9_.@-]", "_", str(payload.get("session_id") or ""))
     agentihooks = Path(os.environ.get("AGENTIHOOKS_HOME") or home / ".agentihooks")
+    if not _seated(session, agentihooks):
+        return False
     try:
         opened = json.loads((agentihooks / "master_coding" / f"{session}.json").read_text())["at"]
     except (OSError, ValueError, KeyError, TypeError):
