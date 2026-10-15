@@ -99,6 +99,25 @@ def test_ruling_follows_the_pull_request_then_the_wait():
     assert ruling({"id": "t1"}, None, {"until": 1}) == ("", "")
     assert ruling(task, CLOSED, {"until": 1}) == ("", "")
 
+@pytest.mark.parametrize("kind", ["task", "merge"])
+def test_a_stop_on_red_checks_preserves_an_open_dependency_wait(rig, kind):
+    rig.task["pr_url"], rig.pulls[URL] = URL, RED
+    target = "repair" if kind == "task" else URL + "0"
+    rig.ledger.rows["repair"] = {"id": "repair", "state": "pr"}
+    rig.pulls[URL + "0"] = RED
+    on = {"kind": kind, "target": target}
+    idle.declare_wait(rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, "shared repair", rig.clock[0], on=on)
+    assert rig.stop() == Decision()
+    assert rig.stop() == Decision()
+    assert rig.stop() == Decision()
+    assert rig.task["state"] == "claimed"
+    assert idle.wait(rig.store.redis, SLUG, ME)["on"] == on
+    if kind == "task":
+        rig.ledger.rows["repair"]["state"] = "done"
+    else:
+        rig.pulls[target] = MERGED
+    assert rig.stop().verdict == "deny"
+
 
 @pytest.mark.parametrize("queued", [False, True])
 def test_a_red_job_outside_a_passed_required_gate_rules_as_green_and_a_red_gate_as_red(queued):
