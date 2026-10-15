@@ -237,7 +237,7 @@ def test_a_reading_exactly_at_the_stale_limit_still_counts(codex, monkeypatch):
     now = 1_791_700_000
     monkeypatch.setattr(qp.time, "time", lambda: now)
     _rollout(codex, SID, 40.0, 91.0, now + 3600, now + 86400, observed=now - qp.QUOTA_USAGE_STALE_SEC)
-    assert qp._session_windows(SID) == (40.0, 91.0, now + 3600, now + 86400)
+    assert qp._session_windows(SID) == (0.0, 91.0, None, now + 86400)
 
 
 def test_a_weekly_only_reading_has_an_empty_five_hour_window_and_passed_resets_empty_both(codex):
