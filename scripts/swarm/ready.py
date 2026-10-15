@@ -129,7 +129,15 @@ def continuation(store: RedisStore, slug: str, task_id: str) -> dict | None:
     }
 
 
-def release(store, slug, task_id, found, ledger, by):
+def release(store, slug, task_id, found, ledger, by, github):
+    from scripts.swarm import idle
+
+    held = idle.wait(store.redis, slug, by)
+    if held and held["until"] > found["at"]:
+        on = held.get("on", {})
+        rows = waits.named_tasks(on.get("kind"), on.get("target"), task_id, lambda wanted: ledger.task(slug, wanted))
+        if waits.dependency(on, {"id": task_id, "pr_url": found["url"]}, rows, github):
+            found["dependency"] = on
     save(store, slug, task_id, found)
     ledger.update_task(slug, task_id, {"state": "pr", "awaiting": AWAITING}, by=by)
 
@@ -184,6 +192,8 @@ def _advance(run, rows, row, found):
         return _finish(run, rows, row, found)
     if pull.state != "OPEN":
         return _reopen(run, row, found, "was closed without merging")
+    if waits.dependency(found.get("dependency", {}), row, rows, run.github):
+        return []
     if pull.merge_problem:
         return _unmergeable(run, row, found, pull)
     if held["kind"] == "checks":
