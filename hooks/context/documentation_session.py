@@ -1,0 +1,170 @@
+import fcntl
+import hashlib
+import json
+import os
+import subprocess
+from pathlib import Path
+
+from hooks._async import fork_and_call
+from hooks.common import log
+from hooks.config import AGENTIHOOKS_HOME as HOME
+from hooks.context import documentation, documentation_evidence
+from scripts.swarm.ledger_client import LedgerClient
+
+TERMINAL = {"queued", "complete"}
+
+
+def _path(session: str) -> Path:
+    return HOME / "documentation" / (hashlib.sha256(session.encode()).hexdigest() + ".json")
+
+
+def _write(path: Path, row: dict) -> None:
+    target = path.with_suffix(".next")
+    target.write_text(json.dumps(row))
+    target.replace(path)
+
+
+def start(payload: dict) -> None:
+    if os.environ.get("AGENTIHOOKS_CLASSIFIER_CHILD") == "1" or not payload.get("session_id"):
+        return
+    try:
+        path = _path(payload["session_id"])
+        if path.exists():
+            return
+        root = Path(documentation_evidence.git(Path(payload["cwd"]), "rev-parse", "--show-toplevel"))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _write(
+            path,
+            {
+                "session": payload["session_id"],
+                "root": str(root),
+                "repository": str(
+                    Path(
+                        documentation_evidence.git(root, "rev-parse", "--path-format=absolute", "--git-common-dir")
+                    ).parent
+                ),
+                "base": documentation_evidence.git(root, "rev-parse", "HEAD"),
+                "swarm": os.environ.get("AGENTIHOOKS_SWARM", ""),
+                "task": os.environ.get("AGENTIHOOKS_SWARM_TASK", ""),
+                "status": "pending",
+            },
+        )
+    except (OSError, KeyError, subprocess.SubprocessError) as exc:
+        log("documentation snapshot unavailable", {"error": type(exc).__name__})
+
+
+def end(payload: dict) -> None:
+    if os.environ.get("AGENTIHOOKS_CLASSIFIER_CHILD") == "1" or not payload.get("session_id"):
+        return
+    try:
+        path = _path(payload["session_id"])
+        if not path.exists():
+            start(payload)
+        if not path.exists():
+            return
+        row = json.loads(path.read_text())
+        if row["status"] in TERMINAL:
+            return
+        if row["swarm"]:
+            fork_and_call(process_pending, path, timeout_sec=180, task_name="documentation-session-end")
+        else:
+            process(path)
+    except (OSError, ValueError) as exc:
+        log("documentation dispatch unavailable", {"error": type(exc).__name__})
+
+
+def _queue(ledger: LedgerClient, row: dict, source: dict, evidence: dict, verdict: dict) -> str:
+    task = "doc-" + hashlib.sha256(f"{row['swarm']}:{row['task'] or row['session']}".encode()).hexdigest()[:16]
+    if ledger.task(row["swarm"], task):
+        return task
+    description = (
+        f"Document the delivered behavior of {source.get('title', evidence['summary'])}.\n"
+        f"Source task: {row['task']}. Delivered pull request: {source.get('pr_url', '')}.\n"
+        f"Change size: {verdict['size']}.\n"
+        f"Source requirements: {source.get('description', '')}\n"
+        f"Documentation sources: {json.dumps(evidence['doc_sources'])}\n"
+        f"Documentation matches: {json.dumps(evidence['docs'])}\n"
+        f"Delivered change evidence:\n{evidence['changes']}\n"
+        "Extend the existing documentation and navigation with complete usage and configuration examples. "
+        "Follow the project's documentation conventions; default to docs when no source exists."
+    )
+    ledger.add_task(
+        row["swarm"],
+        {
+            "task": task,
+            "title": "Document " + source.get("title", evidence["summary"]),
+            "description": description,
+            "profile": "documentation",
+            "lane": "eng",
+            "kind": "code",
+            "phase": source.get("phase", ""),
+            "depends_on": [row["task"]] if row["task"] else [],
+            "follow_up": True,
+            "not_duplicate": "Documents delivered behavior rather than implementing it",
+        },
+        by="swarm",
+    )
+    return task
+
+
+def _finish(path: Path, row: dict) -> None:
+    ledger = LedgerClient(service=True) if row["swarm"] else None
+    source = ledger.task(row["swarm"], row["task"]) or {} if ledger and row["task"] else {}
+    root = Path(row["root"])
+    if not root.is_dir():
+        root = Path(row["repository"])
+    evidence = documentation_evidence.collect(root, row["base"], source)
+    verdict = row.get("verdict")
+    if not verdict or verdict["needs_documentation"] is None:
+        verdict = documentation.classify(evidence)
+    if source.get("profile") == "documentation" or (
+        not source and not any(Path(p).suffix not in documentation_evidence.DOC_TYPES for p in evidence["files"])
+    ):
+        verdict["needs_documentation"] = False
+    row.update(verdict=verdict, status="pending")
+    log("documentation verdict", {"session": row["session"], **verdict})
+    if verdict["needs_documentation"] is None:
+        _write(path, row)
+        return
+    row["status"] = "complete"
+    if verdict["needs_documentation"] and ledger:
+        if source and source.get("state") != "done":
+            row["status"] = "awaiting_delivery"
+        else:
+            row["documentation_task"] = _queue(ledger, row, source, evidence, verdict)
+            row["status"] = "queued"
+    elif verdict["needs_documentation"]:
+        print(
+            f"Documentation needed for {evidence['summary']}. Start it here: agentihooks init-agent --profile documentation"
+        )
+    _write(path, row)
+
+
+def process(path: Path) -> None:
+    path = Path(path)
+    with path.with_suffix(".lock").open("w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        row = json.loads(path.read_text())
+        if row["status"] in TERMINAL:
+            return
+        try:
+            _finish(path, row)
+        except Exception as exc:
+            row.update(status="pending", error=type(exc).__name__)
+            _write(path, row)
+            log("documentation request retained", {"error": type(exc).__name__, "session": row["session"]})
+
+
+def process_pending(path: Path) -> None:
+    process(path)
+    current = json.loads(path.read_text())
+    retried = 0
+    for pending in sorted(path.parent.glob("*.json")):
+        if pending == path:
+            continue
+        row = json.loads(pending.read_text())
+        if row["swarm"] == current["swarm"] and row["status"] not in TERMINAL:
+            process(pending)
+            retried += 1
+            if retried == 3:
+                break
