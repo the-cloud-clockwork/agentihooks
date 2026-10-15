@@ -174,7 +174,7 @@ def test_a_deleted_or_replaced_queue_group_stops_before_jobs_finish(tmp_path, he
     assert calls == []
     ref_call = (tmp_path / "fake" / "ref-calls").read_text()
     assert "git/matching-refs/heads/gh-readonly-queue/dev/pr-1-old" in ref_call
-    assert "select(.ref == env.GITHUB_REF)" in ref_call
+    assert 'select(.ref == "refs/heads/gh-readonly-queue/dev/pr-1-old")' in ref_call
 
 
 def test_a_queue_lookup_error_is_retried_without_cancelling_a_live_group(tmp_path):
