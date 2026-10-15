@@ -1,3 +1,4 @@
+import contextlib
 import shlex
 from collections.abc import MutableMapping
 from pathlib import Path
@@ -23,6 +24,8 @@ def persist(environ: MutableMapping[str, str]) -> None:
         return
     path = Path(target)
     line = f"export {KEY}={shlex.quote(pinned)}\n"
-    if line not in (path.read_text() if path.is_file() else ""):
-        with path.open("a") as handle:
-            handle.write(line)
+    with contextlib.suppress(OSError):
+        current = path.read_text() if path.is_file() else ""
+        if line not in current:
+            with path.open("a") as handle:
+                handle.write(("\n" if current and not current.endswith("\n") else "") + line)

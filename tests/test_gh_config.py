@@ -91,6 +91,18 @@ def test_a_session_without_a_pin_writes_nothing(tmp_path):
     assert not session_env.exists()
 
 
+def test_the_pin_starts_its_own_line_in_a_session_env_file(tmp_path):
+    session_env = tmp_path / "session.env"
+    session_env.write_text("export A=1")
+    gh_config.persist({"CLAUDE_ENV_FILE": str(session_env), "GH_CONFIG_DIR": "/g"})
+    assert session_env.read_text() == "export A=1\nexport GH_CONFIG_DIR=/g\n"
+
+
+def test_an_unwritable_session_env_file_never_breaks_a_hook(tmp_path):
+    gh_config.persist({"CLAUDE_ENV_FILE": str(tmp_path / "gone" / "session.env"), "GH_CONFIG_DIR": "/g"})
+    assert not (tmp_path / "gone").exists()
+
+
 @pytest.mark.parametrize("agent", ["claude", "codex"])
 def test_an_isolated_launcher_keeps_the_home_login(monkeypatch, tmp_path, agent):
     monkeypatch.setattr("scripts.profile_telemetry.installed_langfuse_env", lambda target: {})
