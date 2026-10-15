@@ -22,20 +22,15 @@ def base_name(job_name: str) -> str:
 
 
 def dependents(workflow: dict, root: str = SHARD) -> set[str]:
-    jobs = workflow.get("jobs") or {}
+    jobs = workflow["jobs"]
 
     def needs(job_id: str) -> set[str]:
-        value = jobs[job_id].get("needs") or []
+        value = jobs[job_id].get("needs", [])
         return {value} if isinstance(value, str) else set(value)
 
     found: set[str] = set()
-    grew = True
-    while grew:
-        grew = False
-        for job_id in jobs:
-            if job_id not in found and needs(job_id) & (found | {root}):
-                found.add(job_id)
-                grew = True
+    for _ in jobs:
+        found |= {job_id for job_id in jobs if needs(job_id) & (found | {root})}
     return {jobs[job_id].get("name", job_id) for job_id in found}
 
 
@@ -51,37 +46,35 @@ def decide(run: dict, failed: list[dict], workflow: dict) -> tuple[bool, str]:
         return False, f"failed outside the unit shards: {', '.join(others)}"
     if not shards:
         return False, "no unit shard failed"
-    kept = [job["name"] for job in shards if not RUNNER_LOSS.search(job.get("text", ""))]
+    kept = [job["name"] for job in shards if not RUNNER_LOSS.search(job["text"])]
     if kept:
         return False, f"failed without a runner loss signature: {', '.join(kept)}"
     return True, f"runner lost on {', '.join(job['name'] for job in shards)}"
 
 
 def _api(*args: str) -> str:
-    done = subprocess.run(["gh", "api", *args], capture_output=True, text=True, check=False)
-    return done.stdout if done.returncode == 0 else ""
+    return subprocess.run(["gh", "api", *args], capture_output=True, text=True, check=True).stdout
 
 
 def failed_jobs(repo: str, run_id: int) -> list[dict]:
-    jobs = json.loads(_api(f"repos/{repo}/actions/runs/{run_id}/jobs?filter=latest&per_page=100") or "{}")
+    jobs = json.loads(_api(f"repos/{repo}/actions/runs/{run_id}/jobs?filter=latest&per_page=100"))
     failed = []
-    for job in jobs.get("jobs", []):
-        if job.get("conclusion") != "failure":
+    for job in jobs["jobs"]:
+        if job["conclusion"] != "failure":
             continue
-        annotations = json.loads(_api(f"repos/{repo}/check-runs/{job['id']}/annotations") or "[]")
-        text = "\n".join(note.get("message", "") for note in annotations)
+        notes = [note["message"] for note in json.loads(_api(f"repos/{repo}/check-runs/{job['id']}/annotations"))]
         if base_name(job["name"]) == SHARD:
             log = _api(f"repos/{repo}/actions/jobs/{job['id']}/logs")
-            text += "\n" + "\n".join(line for line in log.splitlines() if "##[error]" in line)
-        failed.append({"name": job["name"], "text": text})
-    unlisted = jobs.get("total_count", 0) - len(jobs.get("jobs", []))
+            notes += [line for line in log.splitlines() if "##[error]" in line]
+        failed.append({"name": job["name"], "text": "\n".join(notes)})
+    unlisted = jobs["total_count"] - len(jobs["jobs"])
     if unlisted > 0:
         failed.append({"name": f"{unlisted} unlisted jobs", "text": ""})
     return failed
 
 
 def pull_number(run: dict) -> int | None:
-    match = QUEUE_BRANCH.search(run.get("head_branch") or "")
+    match = QUEUE_BRANCH.search(str(run.get("head_branch")))
     return int(match.group(1)) if match else None
 
 
@@ -92,7 +85,7 @@ def requeue(pull: dict) -> tuple[bool, str]:
     removals = [
         event
         for event in pull["timelineItems"]["nodes"]
-        if event.get("reason") == "failed_checks" and event.get("createdAt", "") >= head_at
+        if event["reason"] == "failed_checks" and event["createdAt"] >= head_at
     ]
     if len(removals) > 1:
         return False, f"head already left the queue {len(removals)} times on failed checks"
@@ -105,10 +98,9 @@ def pull_state(repo: str, number: int) -> dict:
         f'query{{repository(owner:"{owner}",name:"{name}"){{pullRequest(number:{number}){{'
         "id state isInMergeQueue commits(last:1){nodes{commit{committedDate}}} "
         "timelineItems(last:100,itemTypes:[REMOVED_FROM_MERGE_QUEUE_EVENT])"
-        "{nodes{... on RemovedFromMergeQueueEvent{createdAt reason}}}}}}}"
+        "{nodes{... on RemovedFromMergeQueueEvent{createdAt reason}}}}}}"
     )
-    answer = json.loads(_api("graphql", "-f", f"query={query}") or "{}")
-    return ((answer.get("data") or {}).get("repository") or {}).get("pullRequest") or {}
+    return json.loads(_api("graphql", "-f", f"query={query}"))["data"]["repository"]["pullRequest"]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -116,7 +108,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo", required=True)
     parser.add_argument("--run-id", type=int, required=True)
     args = parser.parse_args(argv)
-    run = json.loads(_api(f"repos/{args.repo}/actions/runs/{args.run_id}") or "{}")
+    run = json.loads(_api(f"repos/{args.repo}/actions/runs/{args.run_id}"))
     retry, reason = decide(run, failed_jobs(args.repo, args.run_id), yaml.safe_load(WORKFLOW.read_text()))
     number = pull_number(run)
     if retry and number is None:

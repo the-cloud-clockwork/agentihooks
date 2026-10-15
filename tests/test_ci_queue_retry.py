@@ -1,4 +1,5 @@
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,12 @@ LOST = (FIXTURES / "lost_communication.txt").read_text()
 RED = (FIXTURES / "test_failure.txt").read_text()
 QUEUE_BRANCH = "gh-readonly-queue/dev/pr-3259-810e2717650390eb596adff102841b05c86eff69"
 REMOVED = {"createdAt": "2026-10-15T05:40:23Z", "reason": "failed_checks"}
+PULL_QUERY = (
+    'query{repository(owner:"o",name:"r"){pullRequest(number:3259){'
+    "id state isInMergeQueue commits(last:1){nodes{commit{committedDate}}} "
+    "timelineItems(last:100,itemTypes:[REMOVED_FROM_MERGE_QUEUE_EVENT])"
+    "{nodes{... on RemovedFromMergeQueueEvent{createdAt reason}}}}}}"
+)
 
 
 def pull(removals):
@@ -98,11 +105,12 @@ def test_judges_are_the_jobs_that_wait_on_the_unit_shards():
 
 def test_main_reads_the_run_and_writes_the_decision(monkeypatch, tmp_path, capsys):
     jobs = {
+        "total_count": 3,
         "jobs": [
-            {"id": 1, "name": "unit (3.11, 2)", "conclusion": "failure"},
             {"id": 2, "name": "unit (3.11, 3)", "conclusion": "success"},
+            {"id": 1, "name": "unit (3.11, 2)", "conclusion": "failure"},
             {"id": 3, "name": "Gate — Required", "conclusion": "failure"},
-        ]
+        ],
     }
     run = {**RUN, "id": 9, "head_branch": QUEUE_BRANCH}
     pages = {
@@ -117,40 +125,50 @@ def test_main_reads_the_run_and_writes_the_decision(monkeypatch, tmp_path, capsy
 
     def api(*args):
         asked.append(args)
-        return pages.get(args[0], "")
+        return pages[args[0]]
 
     monkeypatch.setattr(ci_queue_retry, "_api", api)
     monkeypatch.chdir(ROOT)
     output = tmp_path / "output"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     assert ci_queue_retry.main(["--repo", "o/r", "--run-id", "9"]) == 0
-    assert json.loads(capsys.readouterr().out)["requeue"] is True
+    assert json.loads(capsys.readouterr().out) == {
+        "run": 9,
+        "pull": 3259,
+        "requeue": True,
+        "reason": "runner lost on unit (3.11, 2); first failed checks removal of this head",
+    }
     assert output.read_text() == "requeue=true\npull=3259\n"
-    query = next(args for args in asked if args[0] == "graphql")[2]
-    assert 'owner:"o",name:"r"' in query and "pullRequest(number:3259)" in query
+    assert ("graphql", "-f", f"query={PULL_QUERY}") in asked
 
 
 def test_a_signature_quoted_in_test_output_is_not_a_runner_loss(monkeypatch):
-    jobs = {"jobs": [{"id": 1, "name": "unit (3.11, 2)", "conclusion": "failure"}]}
+    jobs = {"total_count": 1, "jobs": [{"id": 1, "name": "unit (3.11, 2)", "conclusion": "failure"}]}
     quoted = "E   AssertionError: 'The runner has received a shutdown signal' != ''\n##[error]Process completed with exit code 1."
     pages = {
         "repos/o/r/actions/runs/9/jobs?filter=latest&per_page=100": json.dumps(jobs),
+        "repos/o/r/check-runs/1/annotations": "[]",
         "repos/o/r/actions/jobs/1/logs": quoted,
     }
-    monkeypatch.setattr(ci_queue_retry, "_api", lambda path: pages.get(path, ""))
+    monkeypatch.setattr(ci_queue_retry, "_api", lambda path: pages[path])
     failed = ci_queue_retry.failed_jobs("o/r", 9)
+    assert failed == [{"name": "unit (3.11, 2)", "text": "##[error]Process completed with exit code 1."}]
     assert not ci_queue_retry.decide(RUN, failed, WORKFLOW)[0]
 
 
-def test_jobs_beyond_the_listed_page_refuse_the_requeue(monkeypatch):
-    jobs = {"total_count": 101, "jobs": [{"id": 1, "name": "unit (3.11, 2)", "conclusion": "failure"}]}
+@pytest.mark.parametrize("total, extra", [(1, []), (2, [{"name": "1 unlisted jobs", "text": ""}])])
+def test_jobs_beyond_the_listed_page_refuse_the_requeue(monkeypatch, total, extra):
+    jobs = {"total_count": total, "jobs": [{"id": 1, "name": "unit (3.11, 2)", "conclusion": "failure"}]}
     pages = {
         "repos/o/r/actions/runs/9/jobs?filter=latest&per_page=100": json.dumps(jobs),
+        "repos/o/r/check-runs/1/annotations": json.dumps([{"message": "a"}, {"message": "b"}]),
         "repos/o/r/actions/jobs/1/logs": SHUTDOWN,
     }
-    monkeypatch.setattr(ci_queue_retry, "_api", lambda path: pages.get(path, ""))
-    retry, reason = ci_queue_retry.decide(RUN, ci_queue_retry.failed_jobs("o/r", 9), WORKFLOW)
-    assert not retry and "unlisted" in reason
+    monkeypatch.setattr(ci_queue_retry, "_api", lambda path: pages[path])
+    failed = ci_queue_retry.failed_jobs("o/r", 9)
+    errors = [line for line in SHUTDOWN.splitlines() if "##[error]" in line]
+    assert failed == [{"name": "unit (3.11, 2)", "text": "\n".join(["a", "b", *errors])}, *extra]
+    assert ci_queue_retry.decide(RUN, failed, WORKFLOW)[0] == (not extra)
 
 
 def test_the_retry_workflow_requeues_only_when_enforcement_is_on():
@@ -198,3 +216,81 @@ def test_removals_before_the_head_commit_or_for_other_reasons_do_not_count():
 @pytest.mark.parametrize("change", [{"state": "MERGED"}, {"state": "CLOSED"}, {"isInMergeQueue": True}])
 def test_a_pull_request_merged_closed_or_queued_again_is_left_alone(change):
     assert not ci_queue_retry.requeue({**pull([REMOVED]), **change})[0]
+
+
+def test_the_decision_names_its_reason():
+    assert ci_queue_retry.decide({**RUN, "event": "push"}, [], WORKFLOW) == (False, "not a failed merge group run")
+    assert ci_queue_retry.decide({**RUN, "run_attempt": 2}, [], WORKFLOW) == (False, "attempt 2 already ran")
+    assert ci_queue_retry.decide(RUN, lost_run(), WORKFLOW) == (True, "runner lost on unit (3.11, 2)")
+
+
+def test_judges_follow_needs_through_every_level():
+    workflow = {
+        "jobs": {
+            "b": {"needs": ["a"]},
+            "a": {"needs": "unit", "name": "A"},
+            "unit": {},
+            "lint": {},
+            "c": {"needs": ["lint"]},
+        }
+    }
+    assert ci_queue_retry.dependents(workflow) == {"A", "b"}
+
+
+def test_gh_api_runs_checked_with_text_output(monkeypatch):
+    calls = []
+
+    def run(argv, **options):
+        calls.append((argv, options))
+        return subprocess.CompletedProcess(argv, 0, stdout="answer")
+
+    monkeypatch.setattr(ci_queue_retry.subprocess, "run", run)
+    assert ci_queue_retry._api("repos/o/r", "-f", "x=1") == "answer"
+    assert calls == [(["gh", "api", "repos/o/r", "-f", "x=1"], {"capture_output": True, "text": True, "check": True})]
+
+
+def test_the_pull_request_query_reads_state_head_and_removals(monkeypatch):
+    asked = []
+    answer = {"data": {"repository": {"pullRequest": {"state": "OPEN"}}}}
+    monkeypatch.setattr(ci_queue_retry, "_api", lambda *args: asked.append(args) or json.dumps(answer))
+    assert ci_queue_retry.pull_state("o/r", 3259) == {"state": "OPEN"}
+    assert asked == [("graphql", "-f", f"query={PULL_QUERY}")]
+
+
+def test_requeue_reasons_and_a_removal_at_the_head_commit_counts():
+    assert ci_queue_retry.requeue(pull([])) == (True, "first failed checks removal of this head")
+    queued = {**pull([]), "isInMergeQueue": True}
+    assert ci_queue_retry.requeue(queued) == (False, "pull request is not open outside the queue")
+    at_head = {**REMOVED, "createdAt": "2026-10-14T23:06:11Z"}
+    assert ci_queue_retry.requeue(pull([at_head, REMOVED])) == (
+        False,
+        "head already left the queue 2 times on failed checks",
+    )
+
+
+@pytest.mark.parametrize("argv", [[], ["--repo", "o/r"], ["--run-id", "9"]])
+def test_main_needs_the_repo_and_the_run(argv):
+    with pytest.raises(SystemExit):
+        ci_queue_retry.main(argv)
+
+
+def test_a_lost_shard_outside_a_queue_branch_is_not_requeued(monkeypatch, tmp_path, capsys):
+    jobs = {"total_count": 1, "jobs": [{"id": 1, "name": "unit (3.11, 2)", "conclusion": "failure"}]}
+    pages = {
+        "repos/o/r/actions/runs/9": json.dumps({**RUN, "head_branch": "dev"}),
+        "repos/o/r/actions/runs/9/jobs?filter=latest&per_page=100": json.dumps(jobs),
+        "repos/o/r/check-runs/1/annotations": "[]",
+        "repos/o/r/actions/jobs/1/logs": SHUTDOWN,
+    }
+    monkeypatch.setattr(ci_queue_retry, "_api", lambda path: pages[path])
+    monkeypatch.chdir(ROOT)
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    assert ci_queue_retry.main(["--repo", "o/r", "--run-id", "9"]) == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "run": 9,
+        "pull": None,
+        "requeue": False,
+        "reason": "no pull request in queue branch dev",
+    }
+    assert output.read_text() == "requeue=false\npull=\n"
