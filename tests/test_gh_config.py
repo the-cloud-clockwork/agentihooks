@@ -74,6 +74,23 @@ def test_an_agentihooks_process_in_an_isolated_session_keeps_the_home_login(tmp_
     assert _home_login_kept(home, environ, [sys.executable, "-c", code])
 
 
+def test_a_hook_hands_the_pin_to_the_session_shell_once(tmp_path):
+    home, environ = _isolated(tmp_path)
+    session_env = tmp_path / "session.env"
+    hook = {**environ, "PYTHONPATH": str(REPO), "CLAUDE_ENV_FILE": str(session_env)}
+    for _ in range(2):
+        subprocess.run([sys.executable, "-c", "import hooks.config"], env=hook, check=True, cwd=REPO)
+    assert session_env.read_text() == f"export GH_CONFIG_DIR={home / '.config' / 'gh'}\n"
+    assert _home_login_kept(home, environ, ["bash", "-c", f"source {session_env}\ngh"])
+
+
+def test_a_session_without_a_pin_writes_nothing(tmp_path):
+    session_env = tmp_path / "session.env"
+    gh_config.persist({"HOME": str(tmp_path), "CLAUDE_ENV_FILE": str(session_env)})
+    gh_config.persist({"HOME": str(tmp_path), "GH_CONFIG_DIR": "/g"})
+    assert not session_env.exists()
+
+
 @pytest.mark.parametrize("agent", ["claude", "codex"])
 def test_an_isolated_launcher_keeps_the_home_login(monkeypatch, tmp_path, agent):
     monkeypatch.setattr("scripts.profile_telemetry.installed_langfuse_env", lambda target: {})

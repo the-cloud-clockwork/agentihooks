@@ -1,3 +1,4 @@
+import shlex
 from collections.abc import MutableMapping
 from pathlib import Path
 
@@ -14,3 +15,14 @@ def pin(environ: MutableMapping[str, str]) -> None:
     isolated = environ.get("XDG_CONFIG_HOME")
     if isolated and Path(isolated) != default and not environ.get(KEY):
         environ[KEY] = str(default / "gh")
+
+
+def persist(environ: MutableMapping[str, str]) -> None:
+    target, pinned = environ.get("CLAUDE_ENV_FILE"), environ.get(KEY)
+    if not (target and pinned):
+        return
+    path = Path(target)
+    line = f"export {KEY}={shlex.quote(pinned)}\n"
+    if line not in (path.read_text() if path.is_file() else ""):
+        with path.open("a") as handle:
+            handle.write(line)

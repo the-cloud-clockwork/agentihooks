@@ -296,7 +296,9 @@ def _env_files_fingerprint() -> tuple:
 _load_user_env()
 _load_brain_env()
 _ENV_FINGERPRINT = _env_files_fingerprint()
+# The scripts package pin ran before the env files above could set XDG_CONFIG_HOME.
 gh_config.pin(os.environ)
+gh_config.persist(os.environ)
 
 
 def reload_brain_env(force: bool = False) -> dict:
