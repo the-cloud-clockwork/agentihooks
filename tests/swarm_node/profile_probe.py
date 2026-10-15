@@ -59,7 +59,10 @@ def harness(target: str, attempt: Path, tmp: Path = TMP) -> dict:
 
 
 def registration(
-    home: Path, deadline: float, clock: Callable[[], float] = time.monotonic, sleep: Callable[[float], None] = time.sleep
+    home: Path,
+    deadline: float,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> dict:
     while True:
         try:
