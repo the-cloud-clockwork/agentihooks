@@ -478,10 +478,16 @@ def _restore_owner(slug, store, ledger, rows, agent):
     if not store.ensure_claim(slug, agent, LEASE_MS):
         return
     row = rows.get(agent.task, {})
-    if not row.get("out_of_scope") and row.get("state") == "open" and row.get("claimed_by", "") in ("", agent.name):
-        expected = {"claimed_by": row.get("claimed_by", ""), "claim_generation": row.get("claim_generation", 0)}
-        fields = {"state": "pr" if row.get("pr_url") else "claimed", "claimed_by": agent.name}
-        rows[agent.task] = ledger.update_task(slug, agent.task, fields, if_state=("open",), if_match=expected)
+    if row.get("out_of_scope") or row.get("state") not in ("open", "claimed", "pr"):
+        return
+    owner = row.get("claimed_by", "")
+    if owner not in ("", agent.name) or (owner == agent.name and row["state"] != "open"):
+        return
+    expected = {"claimed_by": owner, "claim_generation": row.get("claim_generation", 0)}
+    fields = {"claimed_by": agent.name}
+    if row["state"] == "open":
+        fields["state"] = "pr" if row.get("pr_url") else "claimed"
+    rows[agent.task] = ledger.update_task(slug, agent.task, fields, if_state=(row["state"],), if_match=expected)
 
 
 def _reap(slug, store, ledger, runtime, rows, now_ms):

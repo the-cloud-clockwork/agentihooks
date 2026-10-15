@@ -237,6 +237,29 @@ class RedisStore:
     def claim_generation(self, slug: str, task: str) -> int:
         return int(self.redis.get(f"{self.key(slug, 'claim', task)}:generation") or 0)
 
+    def release_ready(self, slug: str, task: str, agent: str, generation: int, expected_ready: str | None) -> bool:
+        from redis.exceptions import WatchError
+
+        key, ready = self.key(slug, "claim", task), self.key(slug, "ready")
+        guards = self._claim_guards(slug, task)
+        with self.redis.pipeline() as pipe:
+            try:
+                pipe.watch(key, f"{key}:generation", ready, *guards)
+                if (
+                    pipe.get(key) not in (None, agent)
+                    or int(pipe.get(f"{key}:generation") or 0) != generation
+                    or pipe.hget(ready, task) != expected_ready
+                    or any(pipe.exists(guard) for guard in guards)
+                ):
+                    return False
+                pipe.multi()
+                pipe.delete(key)
+                pipe.hdel(ready, task)
+                pipe.execute()
+                return True
+            except WatchError:
+                return False
+
     def ensure_claim(self, slug: str, agent: AgentRecord, lease_ms: int) -> bool:
         from redis.exceptions import WatchError
 
@@ -267,23 +290,20 @@ class RedisStore:
             self._claim_guards(slug, task),
         )
 
-    def release(self, slug: str, task: str, agent: str, generation: int | None = None) -> bool:
+    def release(self, slug: str, task: str, agent: str) -> bool:
         return self._if_holder(
             self.key(slug, "claim", task),
             agent,
             lambda pipe, key: pipe.delete(key),
             self._claim_guards(slug, task),
-            generation,
         )
 
-    def _if_holder(self, key, agent, action, guards=(), generation=None):
+    def _if_holder(self, key, agent, action, guards=()):
         from redis.exceptions import WatchError
 
         with self.redis.pipeline() as pipe:
             try:
-                pipe.watch(key, f"{key}:generation", *guards)
-                if generation is not None and int(pipe.get(f"{key}:generation") or 0) != generation:
-                    return False
+                pipe.watch(key, *guards)
                 if any(pipe.exists(guard) for guard in guards) or pipe.get(key) != agent:
                     return False
                 pipe.multi()

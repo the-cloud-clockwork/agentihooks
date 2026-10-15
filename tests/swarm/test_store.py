@@ -75,9 +75,23 @@ def test_a_stale_release_cannot_delete_a_reacquired_lease_with_the_same_name(sto
     generation = store.claim_generation("smoke", "t1")
     assert store.release("smoke", "t1", "owner")
     assert store.claim("smoke", "t1", "owner", 60_000)
-    assert not store.release("smoke", "t1", "owner", generation=generation)
+    assert not store.release_ready("smoke", "t1", "owner", generation, None)
     assert store.claimant("smoke", "t1") == "owner"
-    assert store.release("smoke", "t1", "owner", generation=store.claim_generation("smoke", "t1"))
+    assert store.release_ready("smoke", "t1", "owner", store.claim_generation("smoke", "t1"), None)
+
+
+def test_ready_cleanup_compares_the_record_even_when_the_lease_did_not_change(store):
+    store.create(config())
+    store.claim("smoke", "t1", "owner", 60_000)
+    ready_key = store.key("smoke", "ready")
+    store.redis.hset(ready_key, "t1", "new-ready-record")
+    generation = store.claim_generation("smoke", "t1")
+    assert not store.release_ready("smoke", "t1", "owner", generation, "old-ready-record")
+    assert store.claimant("smoke", "t1") == "owner"
+    assert store.redis.hget(ready_key, "t1") == "new-ready-record"
+    assert store.release_ready("smoke", "t1", "owner", generation, "new-ready-record")
+    assert store.claimant("smoke", "t1") is None
+    assert store.redis.hget(ready_key, "t1") is None
 
 
 def test_claims_count_agent_lives_per_task_until_reset(store):

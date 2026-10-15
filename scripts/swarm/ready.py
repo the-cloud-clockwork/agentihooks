@@ -293,6 +293,7 @@ def _reopen(run, row, found, what):
     if _owners(run, task_id):
         return []
     lease_generation = run.store.claim_generation(run.slug, task_id)
+    expected_ready = run.store.redis.hget(run.store.key(run.slug, RECORDS), task_id)
     expected = {key: row.get(key, "") for key in ("claimed_by", "pr_url", "awaiting")}
     expected["claim_generation"] = row.get("claim_generation", 0)
     live = run.ledger.update_task(
@@ -301,11 +302,10 @@ def _reopen(run, row, found, what):
     generation = expected["claim_generation"] + (row.get("claimed_by") != "")
     if live.get("state") != "open" or live.get("claimed_by") or live.get("claim_generation", 0) != generation:
         return []
+    if not run.store.release_ready(run.slug, task_id, found["agent"], lease_generation, expected_ready):
+        return []
     run.ledger.comment(run.slug, task_id, REOPENED.format(url=url, what=what), by="swarm")
-    run.store.release(run.slug, task_id, found["agent"], generation=lease_generation)
-    forget(run.store, run.slug, task_id)
-    removed = _remove(found, "--pushed") if found.get("worktree") else []
-    return [f"task {task_id} reopened, {url} {what}", *removed]
+    return [f"task {task_id} reopened, {url} {what}"]
 
 
 def _remove(found, *flags):

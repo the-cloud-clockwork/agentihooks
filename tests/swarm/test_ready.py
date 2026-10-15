@@ -870,7 +870,7 @@ def test_a_worktree_the_merge_pass_cannot_remove_is_reported(merging):
 )
 def test_red_checks_or_a_closed_pull_request_reopen_the_task_for_the_next_engineer(merging, pull, what):
     merging.pulls[URL] = pull
-    assert merging.run() == [f"task t1 reopened, {URL} {what}", f"removed the worktree {TOP}"]
+    assert merging.run() == [f"task t1 reopened, {URL} {what}"]
     assert merging.rows["t1"]["state"] == "open" and merging.rows["t1"]["claimed_by"] == ""
     assert merging.rows["t1"]["awaiting"] == "fix"
     assert merging.ledger.comments == [
@@ -881,7 +881,7 @@ def test_red_checks_or_a_closed_pull_request_reopen_the_task_for_the_next_engine
             "swarm",
         ),
     ]
-    assert merging.shell.calls == [[*REMOVE, "--pushed"]]
+    assert merging.shell.calls == []
     assert merging.store.handoff("sw", "t1") == "the handoff"
     assert merging.store.claimant("sw", "t1") is None
     assert ready.record(merging.store, "sw", "t1") is None
@@ -905,7 +905,7 @@ def test_red_checks_reopen_the_task_awaiting_fix_with_the_failing_step_named(mer
 def test_a_pull_request_that_conflicts_with_dev_reopens_instead_of_waiting_on_checks(merging):
     merging.pulls[URL] = PullRequest("OPEN", None, 1, False, False, head=HEAD, mergeable="CONFLICTING")
     what = "conflicts with dev and needs an update the swarm cannot make"
-    assert merging.run() == [f"task t1 reopened, {URL} {what}", f"removed the worktree {TOP}"]
+    assert merging.run() == [f"task t1 reopened, {URL} {what}"]
     assert merging.rows["t1"]["state"] == "open" and merging.rows["t1"]["awaiting"] == "fix"
     assert merging.queued == []
     assert ready.record(merging.store, "sw", "t1") is None
