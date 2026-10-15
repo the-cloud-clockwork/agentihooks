@@ -542,6 +542,12 @@ def test_fill_never_leaves_a_master_launch_below_high_whatever_the_saved_launch_
     assert master_launch.fill({"harness": harness, "effort": saved}, config)["effort"] == "high"
 
 
+@pytest.mark.parametrize("bounds,launched", [(("medium", "xhigh"), "xhigh"), (("medium", "max"), "max")])
+def test_fill_keeps_a_saved_master_effort_above_high_inside_the_swarm_range(bounds, launched):
+    config = SwarmConfig("sw", "/repo", 0, 0, effort_min=bounds[0], effort_max=bounds[1])
+    assert master_launch.fill({"harness": "claude", "effort": "max"}, config)["effort"] == launched
+
+
 def test_a_master_saved_on_an_unknown_harness_is_refused_cleanly(tmp_path):
     config = SwarmConfig("sw", "/repo", 0, 0)
     launch = {"harness": "copilot", "model": "gpt-x", "effort": "max"}
