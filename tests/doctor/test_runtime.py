@@ -73,3 +73,82 @@ def test_a_planted_full_runtime_is_reported_in_one_pass_and_returns_only_on_shar
     [returned] = loop.record(store, "doctor", grown, NOW + 60_000, 60_000)
     assert returned["id"] == finding.id
     assert len(reads) == 6
+
+
+@pytest.mark.parametrize("used,total", [(0, 100), (79, 100), (80, 100), (160, 200)])
+def test_a_healthy_runtime_never_scans_execution_homes(tmp_path, monkeypatch, used, total):
+    from scripts.doctor import runtime
+
+    monkeypatch.setattr(shutil, "disk_usage", lambda path: SimpleNamespace(used=used, total=total))
+    monkeypatch.setattr(os, "walk", lambda *args, **kwargs: pytest.fail("healthy runtime was scanned"))
+    assert runtime.findings(NOW, {"XDG_RUNTIME_DIR": str(tmp_path)}) == []
+
+
+def test_runtime_pressure_names_only_the_three_largest_execution_homes_with_sizes_and_ages(tmp_path, monkeypatch):
+    from scripts.doctor import runtime
+
+    for name, blocks, stamp in (
+        ("small", 1, 9_940),
+        ("largest", 30, 8_800),
+        ("second", 20, 9_400),
+        ("third", 10, 10_060),
+    ):
+        directory = tmp_path / "cx" / name
+        directory.mkdir(parents=True)
+        (directory / "payload").write_bytes(b"x" * blocks * BLOCK)
+        os.utime(directory, (stamp, stamp))
+    (tmp_path / "cx" / "not-a-home").write_bytes(b"x")
+    (tmp_path / "cx" / "linked").symlink_to(tmp_path / "cx" / "largest", target_is_directory=True)
+    monkeypatch.setattr(shutil, "disk_usage", lambda path: SimpleNamespace(used=81, total=100))
+    [finding] = runtime.findings(NOW, {"XDG_RUNTIME_DIR": str(tmp_path)})
+    assert finding.threshold == "over 80% full"
+    assert finding.evidence[0] == f"runtime {tmp_path}: 81 of 100 bytes used"
+    assert len(finding.evidence) == 4
+    for evidence, name, minutes, blocks in zip(
+        finding.evidence[1:], ("largest", "second", "third"), ("20.0", "10.0", "0.0"), (30, 20, 10), strict=True
+    ):
+        directory = tmp_path / "cx" / name
+        allocated = directory.stat().st_blocks * 512 + blocks * BLOCK
+        assert evidence == f"execution {directory}: {allocated} allocated bytes, age {minutes} minutes"
+
+
+def test_pressure_without_codex_homes_is_still_reported(tmp_path, monkeypatch):
+    from scripts.doctor import runtime
+
+    monkeypatch.setattr(shutil, "disk_usage", lambda path: SimpleNamespace(used=100, total=100))
+    [finding] = runtime.findings(NOW, {"XDG_RUNTIME_DIR": str(tmp_path)})
+    assert finding.measure == 1
+    assert finding.summary == "user runtime folder is 100.0% full"
+    assert finding.evidence == (f"runtime {tmp_path}: 100 of 100 bytes used",)
+
+
+def test_a_missing_user_runtime_is_skipped(tmp_path, monkeypatch):
+    from scripts.doctor import runtime
+
+    monkeypatch.setattr(shutil, "disk_usage", lambda path: pytest.fail("absent runtime was read"))
+    assert runtime.findings(NOW, {"XDG_RUNTIME_DIR": str(tmp_path / "missing")}) == []
+
+
+def test_without_xdg_runtime_the_detector_reads_the_current_users_runtime(tmp_path, monkeypatch):
+    from scripts.doctor import runtime
+
+    seen = []
+    monkeypatch.setattr(os, "getuid", lambda: 1234)
+    monkeypatch.setattr(runtime, "Path", lambda path: seen.append(path) or tmp_path)
+    monkeypatch.setattr(shutil, "disk_usage", lambda path: SimpleNamespace(used=90, total=100))
+    [finding] = runtime.findings(NOW, {})
+    assert seen == ["/run/user/1234"]
+    assert finding.subject == str(tmp_path)
+    assert finding.measure == 0.9
+
+
+def test_a_runtime_capacity_read_failure_is_named_by_the_collection_pass(tmp_path, monkeypatch, store):
+    def unreadable(path):
+        raise PermissionError("runtime unavailable")
+
+    monkeypatch.setattr(shutil, "disk_usage", unreadable)
+    reader = detect.readers(store, None, "watched", NOW, environ={"XDG_RUNTIME_DIR": str(tmp_path)})
+    assert detect.collect({"runtime storage": reader["runtime storage"]}) == (
+        [],
+        ["the runtime storage detector failed: PermissionError: runtime unavailable"],
+    )
