@@ -859,6 +859,13 @@ def _record_spawn_failure(slug, store, record, error, now_ms):
         failed_panes.hold(store, slug, record, now_ms)
 
 
+def _owner_hold(slug, store, runtime, task):
+    if task["id"] not in _owned_tasks(slug, store):
+        return ""
+    _release_admission(slug, runtime, task)
+    return f"task {task['id']} retains its live owner"
+
+
 def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     agents, actions = store.agents(slug), []
     taken = {a.seat for a in agents}
@@ -868,12 +875,13 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             return actions + held
         if stop := _spawn_stop(slug, config, store, runtime, now_ms):
             return actions + [stop]
-        blocked = _lives_spent(slug, store, ledger, rows, task) or _held_back(slug, ledger, rows, runtime, task, now_ms)
+        blocked = (
+            _lives_spent(slug, store, ledger, rows, task)
+            or _held_back(slug, ledger, rows, runtime, task, now_ms)
+            or _owner_hold(slug, store, runtime, task)
+        )
         if blocked:
             actions.append(blocked)
-            continue
-        if task["id"] in _owned_tasks(slug, store):
-            _release_admission(slug, runtime, task)
             continue
         name = store.next_name(slug, lane, now_ms)
         if not store.claim(slug, task["id"], name, LEASE_MS):
