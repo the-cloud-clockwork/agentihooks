@@ -599,6 +599,7 @@ def test_a_merged_pull_request_closes_the_task_with_the_done_proof_and_removes_t
 
 ISSUE = "https://github.com/o/r/issues/5"
 NAMED = "https://github.com/o/r/issues/12"
+MEMBER = "https://github.com/o/r/issues/7"
 CLOSED_BY = f"Closed by the swarm: pull request {URL} merged into dev."
 
 
@@ -688,9 +689,12 @@ def test_a_pull_request_body_that_cannot_be_read_still_closes_the_task_issue(mer
 def test_a_group_member_issue_closes_with_the_group(merging, issues):
     del merging.rows["t1"]["issue_url"]
     merging.rows["t1"]["group_members"] = ["t2"]
-    merging.rows["t2"]["issue_url"] = NAMED
+    merging.rows["t2"]["issue_url"] = MEMBER
+    issues[MEMBER] = "OPEN"
     merging.run()
     assert issue_writes(merging) == [
+        ["gh", "issue", "comment", MEMBER, "--body", CLOSED_BY],
+        ["gh", "issue", "close", MEMBER],
         ["gh", "issue", "comment", NAMED, "--body", CLOSED_BY],
         ["gh", "issue", "close", NAMED],
     ]

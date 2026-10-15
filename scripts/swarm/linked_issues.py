@@ -17,7 +17,7 @@ def named(url):
 
 
 def settle(url, finished, rows):
-    recorded = [rows[task]["issue_url"] for task in finished if rows.get(task, {}).get("issue_url")]
+    recorded = [rows[task]["issue_url"] for task in finished if rows[task].get("issue_url")]
     held = {row.get("issue_url") for task, row in rows.items() if task not in finished and row.get("state") != "done"}
     actions = []
     for issue in dict.fromkeys([*recorded, *named(url)]):
