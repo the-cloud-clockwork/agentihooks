@@ -194,6 +194,24 @@ def test_operation_contract_covers_existing_domain_dispatch():
     assert schemas.FIELDS["title_set"] == "text"
 
 
+def test_task_update_schema_accepts_the_ownership_guard():
+    from scripts.swarm_ledger.api import schemas
+
+    schema = schemas.operation_schema("task_update")
+    guarded = {
+        "op": "task_update",
+        "id": "op-1",
+        "by": "swarm",
+        "item": "t1",
+        "fields": {"claimed_by": "engineer-two"},
+        "if_state": ["claimed"],
+        "if_match": {"claimed_by": "engineer-one", "claim_generation": 1},
+    }
+
+    assert schemas.mismatched_field(schema, guarded) is None
+    assert schemas.mismatched_field(schema, {**guarded, "if_match": "engineer-one"}) == "if_match"
+
+
 def test_export_is_explicit_and_summary_is_paginated(live):
     status, exported = request(live, "POST", "export", {})
     assert status == 200

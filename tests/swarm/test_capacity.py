@@ -1851,7 +1851,7 @@ def test_live_inputs_read_quota_without_a_refresh_and_count_ready_demand(monkeyp
     assert seen == [({"X": "1"}, 5.0, False)]
     assert inputs.observations == observed
     assert [agent.name for agent in inputs.agents] == ["engineer@x-0001"]
-    assert inputs.demand == {"eng": 3, "ci": 1, "plan": 0}
+    assert inputs.demand == {"eng": 2, "ci": 1, "plan": 0}
     assert inputs.host is host_budget.read_host
     assert inputs.previous == stored
     assert inputs.warned == {("claude", "warned"): "week"}

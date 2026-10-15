@@ -283,7 +283,7 @@ def test_a_successor_uses_the_recorded_worktree_among_other_checkouts(publicatio
 
 
 @pytest.mark.parametrize("branch", [None, "", "XXXX"])
-def test_a_detached_checkout_never_becomes_the_unrecorded_task_worktree(publication, tmp_path, branch):
+def test_a_detached_checkout_never_becomes_the_unrecorded_task_worktree(publication, tmp_path, capfd, branch):
     from scripts.swarm import publish
 
     root = publication.root
@@ -296,6 +296,8 @@ def test_a_detached_checkout_never_becomes_the_unrecorded_task_worktree(publicat
         "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
     )
     assert result["worktree"] == str(root)
+    assert result["branch"] == publication.task["branch"] == "engineer-test"
+    assert "fatal" not in capfd.readouterr().err
 
 
 def test_multiple_unrecorded_task_worktrees_refuse_an_ambiguous_publish(publication, tmp_path):
@@ -646,6 +648,29 @@ def test_continuation_publishes_back_to_the_recorded_remote_branch(publication):
     assert result["branch"] == publication.task["branch"] == "predecessor"
     assert git(root, "ls-remote", "origin", "refs/heads/predecessor").split()[0] == head
     assert git(root, "ls-remote", "origin", "refs/heads/engineer-test") == ""
+    assert git(root, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/predecessor"
+
+
+def test_a_restacked_successor_publishes_its_prepared_branch_not_the_parked_one(publication):
+    from scripts.swarm import publish
+
+    root, repository = publication.root, publication.repo
+    parked = git(repository, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "Parked predecessor work")
+    git(repository, "push", "origin", f"{parked}:refs/heads/predecessor")
+    publication.task["branch"] = "predecessor"
+    result = publish.publish(
+        "swarm", publication.agent, str(repository), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+    head = git(root, "rev-parse", "HEAD")
+    assert result["branch"] == publication.task["branch"] == "engineer-test"
+    assert git(root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
+    assert git(root, "ls-remote", "origin", "refs/heads/predecessor").split()[0] == parked
+    fields = {
+        "branch": "engineer-test",
+        "branch_repo": str(repository.parent / "remote.git"),
+        "repository_branches": {str(repository): "engineer-test"},
+    }
+    assert publication.updates == [("swarm", "t1", fields, publication.agent.name)]
 
 
 @pytest.mark.parametrize("fields", [{"claimed_by": "another"}, {"state": "done"}])

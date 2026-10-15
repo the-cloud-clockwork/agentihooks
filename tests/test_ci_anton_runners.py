@@ -33,6 +33,7 @@ MOVED = {
     ("hive-worker.yml", "kind"): STANDARD,
     ("hive-worker.yml", "publish"): STANDARD,
     ("brain-smoke.yml", "smoke"): QUEUED,
+    ("codex-cache.yml", "seed"): STANDARD,
     ("coverage-stability.yml", "compare"): BATCH,
     ("equivalence.yml", "ledger-equivalence"): STANDARD,
     ("helm-kind.yml", "kind"): QUEUED,
@@ -102,6 +103,7 @@ TARGET = {("gate-protected.yml", "grade")}
 CLASSED = {
     ("ci-templates.yml", "actionlint"),
     ("pages.yml", "build"),
+    ("promote.yml", "promote"),
     ("publish-pypi.yml", "verify"),
     ("release.yml", "release"),
     ("github-access-audit.yml", "read-back"),

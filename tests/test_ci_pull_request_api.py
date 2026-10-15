@@ -69,7 +69,10 @@ def _holds_token(step: dict) -> bool:
         TOKEN.search(_values(step.get("env")))
         or TOKEN.search(_values(step.get("with")))
         or TOKEN.search(step.get("run", ""))
-        or step.get("uses", "").startswith("actions/github-script@")
+        or (
+            step.get("uses", "").startswith("actions/github-script@")
+            and (step.get("with") or {}).get("github-token") != APP_TOKEN
+        )
     )
 
 
@@ -158,6 +161,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/ci_mutation/browser.py",
         "scripts/ci_mutation/plan.py",
         "scripts/ci_queue_fail_fast.py",
+        "scripts/ci_release.sh",
         "scripts/ci_semgrep.py",
         "scripts/ci_wiring.py",
         "scripts/packaging/compose-hive-smoke.sh",
@@ -327,6 +331,15 @@ def test_an_api_call_planted_in_a_called_script_is_counted(tmp_path, plant, plan
     ],
 )
 def test_only_an_api_step_on_the_app_token_alone_stays_off_the_shared_quota(step, offends):
+    assert _offends(step) is offends
+
+
+@pytest.mark.parametrize(
+    ("binding", "offends"),
+    [(APP_TOKEN, False), ("${{ github.token }}", True), ("", True), ("${{ secrets.OTHER_TOKEN }}", True)],
+)
+def test_github_script_requires_the_explicit_app_token(binding, offends):
+    step = {"uses": "actions/github-script@v7", "with": {"github-token": binding}}
     assert _offends(step) is offends
 
 
