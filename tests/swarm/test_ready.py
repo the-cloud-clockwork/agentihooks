@@ -129,6 +129,7 @@ def test_release_keeps_an_open_dependency_wait_after_the_agent_leaves(released, 
     target = "t2" if kind == "task" else URL + "0"
     on = {"kind": kind, "target": target}
     ledger.rows["t2"]["state"] = "pr"
+    ledger.task = lambda slug, task_id: ledger.rows.get(task_id) if slug == "sw" else None
     ledger.pulls[URL], ledger.pulls[URL + "0"] = RED, RED
     idle.declare_wait(store.redis, "sw", AGENT, NOW + 60_000, "shared repair", NOW, on=on)
     assert release(doc) == 0
@@ -167,7 +168,7 @@ def test_release_does_not_park_on_an_expired_or_unrelated_wait(released, on, unt
 
     store, ledger, _, doc = released
     ledger.pulls[URL] = RED
-    idle.declare_wait(store.redis, "sw", AGENT, until, "wait", NOW - 1, on=on)
+    idle.declare_wait(store.redis, "sw", AGENT, until, "wait", NOW - 60_000, on=on)
     assert release(doc) == 0
     assert "dependency" not in ready.record(store, "sw", "t1")
     run = ready.Pass(store, "sw", ledger, ledger.pulls.get, ledger.pulls.get, NOW)
