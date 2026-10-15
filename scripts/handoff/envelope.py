@@ -5,6 +5,7 @@ A fact the runtime looked for and could not find is "unknown"; one it found abse
 
 import json
 import subprocess
+from collections.abc import Collection
 from datetime import datetime, timezone
 
 from scripts.inbox.store import CLOSED, InboxStore
@@ -96,17 +97,10 @@ def continuation(worktree, branch, run):
     return {"remote_branch": remote, "remote_head": head, "continue_from": "fresh", "fresh_reason": why}
 
 
-def reclaim(repo: str, lives: list[str], recorded: str, run=subprocess.run) -> dict:
-    """Where a claimant after retired lives cuts its worktree: the newest branch an earlier life pushed, else fresh and why.
-
-    lives are the earlier agents on the task, newest first; recorded is the branch the ledger holds for it, if any.
-    """
-    try:
-        trees = snapshot.worktrees(repo, lives, run)
-    except FAILED:
-        trees = {}
-    branches = [_remote_branch(trees[name], plain(name), run) if trees.get(name) else plain(name) for name in lives]
-    checked, unread = list(dict.fromkeys([*branches, *([recorded] if recorded else [])])), []
+def reclaim(repo: str, lives: list[str], recorded: str, run=subprocess.run, forbidden: Collection[str] = ()) -> dict:
+    checked = [recorded] if recorded else list(dict.fromkeys(plain(name) for name in lives))
+    checked = [branch for branch in checked if branch not in forbidden]
+    unread = []
     for branch in checked:
         head = _remote_head(repo, branch, run)
         if head == UNKNOWN:
@@ -120,9 +114,11 @@ def reclaim(repo: str, lives: list[str], recorded: str, run=subprocess.run) -> d
             }
     if unread:
         why = f"the remote heads of {', '.join(unread)} could not be read"
-    else:
+    elif checked:
         names = ", ".join(checked[:-1]) + " and " + checked[-1] if len(checked) > 1 else checked[0]
         why = f"no earlier life pushed a branch: checked {names} on the remote"
+    else:
+        why = "no branch is recorded for this task outside another task's pull request"
     return {"remote_branch": NONE, "remote_head": NONE, "continue_from": "fresh", "fresh_reason": why}
 
 

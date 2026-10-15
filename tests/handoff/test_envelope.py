@@ -258,9 +258,9 @@ def test_a_reclaim_skips_a_life_that_never_pushed_for_an_older_one_that_did():
     assert (verdict["continue_from"], verdict["remote_head"]) == ("origin/engineer-a1b2c3-0001", HEAD)
 
 
-def test_a_reclaim_follows_the_upstream_a_continuing_life_pushed_to():
+def test_a_reclaim_never_infers_task_ownership_from_a_worktree_upstream():
     run = _remote({"engineer-a1b2c3-0000": HEAD}, upstreams={WORKTREE: "origin/engineer-a1b2c3-0000"})
-    assert reclaim("/repo", [OLDER], "", run=run)["continue_from"] == "origin/engineer-a1b2c3-0000"
+    assert reclaim("/repo", [OLDER], "", run=run)["continue_from"] == "fresh"
 
 
 def test_a_reclaim_falls_back_to_the_branch_the_ledger_recorded():
@@ -273,8 +273,7 @@ def test_a_reclaim_with_no_pushed_branch_starts_fresh_and_names_what_it_checked(
         "remote_branch": "none",
         "remote_head": "none",
         "continue_from": "fresh",
-        "fresh_reason": "no earlier life pushed a branch: checked engineer-a1b2c3-0002, engineer-a1b2c3-0001 and "
-        "feature-x on the remote",
+        "fresh_reason": "no earlier life pushed a branch: checked feature-x on the remote",
     }
 
 
