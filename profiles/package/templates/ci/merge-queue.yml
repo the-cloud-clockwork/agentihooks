@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   checks:
-    name: Queue unit suite
+    name: Delivery required
     runs-on: ${{ vars.CI_RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 15
     env:

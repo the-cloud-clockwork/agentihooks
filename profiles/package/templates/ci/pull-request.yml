@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   checks:
-    name: Pull request checks
+    name: Delivery required
     runs-on: ${{ vars.CI_RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 15
     env:

@@ -2,7 +2,7 @@
 
 Copy pull-request.yml, merge-queue.yml and promotion.yml into .github/workflows and delivery.yaml into the repository root. These assets ship inside the installed profiles package, under package/templates/ci. They are examples to adapt before enabling required checks, not a ready made test suite.
 
-The integration branch is dev and the release branch is main. Change the branch filters and the promotion concurrency group together if your repository uses other names. Enable the merge queue for the integration branch. Require Pull request checks for queue entry and Queue unit suite for merge groups; do not require Promotion checks on the queue. The separate check names intentionally grade different events.
+The integration branch is dev and the release branch is main. Change the branch filters and the promotion concurrency group together if your repository uses other names. Enable the merge queue for the integration branch. Require Delivery required for the integration branch; both entry workflows emit that same check name, so it is present on pull request heads and merge groups. Do not require Promotion checks on the queue.
 
 | Tier | Event | Commands |
 |---|---|---|

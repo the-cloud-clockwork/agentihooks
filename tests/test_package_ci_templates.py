@@ -30,6 +30,7 @@ def test_workflow_template_contract(filename, event, tier):
         assert promote["needs"] == "checks"
         assert promote["environment"] == "promotion"
     else:
+        assert job["name"] == "Delivery required"
         assert "promote" not in workflow["jobs"]
 
 
