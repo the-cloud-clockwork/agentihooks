@@ -6,6 +6,7 @@ from pathlib import Path
 
 from scripts import ci_prepush
 from scripts.swarm import naming, stack
+from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, SwarmError
 
 
@@ -20,10 +21,12 @@ def git(root: Path, *args: str) -> str:
     return execute(["git", *args], root)
 
 
-def task_row(slug: str, agent: AgentRecord, ledger) -> dict:
+def task_row(slug: str, agent: AgentRecord, ledger: LedgerClient) -> dict:
     task = next((row for row in ledger.tasks(slug) if row.get("id") == agent.task), {})
     if task.get("claimed_by") != agent.name or task.get("state") not in ("claimed", "pr"):
         raise SwarmError("publication requires this agent's claimed task")
+    if task.get("branch") in ("dev", "main", "master", "v1"):
+        raise SwarmError("publication requires a task branch outside the protected branches")
     return task
 
 
@@ -57,7 +60,7 @@ def checkout_fields(root: Path) -> dict:
     }
 
 
-def prepare(slug: str, agent: AgentRecord, repo: str, ledger) -> dict:
+def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> dict:
     task = task_row(slug, agent, ledger)
     root = existing(Path(repo), task, agent)
     if root is None:
@@ -86,7 +89,7 @@ def selected_files(root: Path, files: list[str]) -> list[str]:
     return selected
 
 
-def publish(slug: str, agent: AgentRecord, repo: str, ledger, message: str, files: list[str]) -> dict:
+def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, message: str, files: list[str]) -> dict:
     task = task_row(slug, agent, ledger)
     root = existing(Path(repo), task, agent)
     if root is None:
