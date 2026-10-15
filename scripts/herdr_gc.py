@@ -1,5 +1,6 @@
 """Close the herdr panes agentihooks launched once their agent is gone. A pane it never recorded is never read or
-closed, and nothing closes inside the launch grace, while its input line holds text or inside the quiet window."""
+closed. Nothing closes inside the launch grace or the quiet window, when its swarm lists its agent unfinished, or
+when its input line holds text."""
 
 import hashlib
 import os
@@ -14,7 +15,7 @@ from scripts import herdr_host, herdr_panes
 from scripts.herdr_host import HerdrError
 from scripts.herdr_panes import PaneRecord
 from scripts.inbox import wake
-from scripts.swarm import idle
+from scripts.swarm import idle, naming
 from scripts.swarm.pane import typed_input
 
 GRACE_ENV = "AGENTIHOOKS_HERDR_GC_GRACE_MINUTES"
@@ -103,8 +104,8 @@ def _fate(store, record: PaneRecord) -> str:
         return REMOVED
     if store.config(slug).state == "stopped":
         return STOPPED
-    names = {agent.name for agent in store.agents(slug) if agent.state != "finished"}
-    return LIVE if record.owner_session in names else RETIRED
+    names = {naming.plain(agent.name) for agent in store.agents(slug) if agent.state != "finished"}
+    return LIVE if naming.plain(record.owner_session) in names else RETIRED
 
 
 class Owners:
@@ -189,6 +190,8 @@ def _look(record: PaneRecord, ctx: Context) -> Finding:
     state = ctx.owners.state(record)
     if state == UNKNOWN:
         return Finding(record, KEEP, "its swarm store cannot be read")
+    if state == LIVE:
+        return Finding(record, KEEP, "its agent is live")
     bare = bare_shell(ctx.herdr.process_info(record.pane_id))
     reason = _gone(record, bare, state)
     if not reason:
