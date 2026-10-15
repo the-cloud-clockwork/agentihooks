@@ -9,6 +9,8 @@ from tests.swarm.test_delivery import FakeHerdr
 def test_status_separates_current_tick_activity_from_old_completion(env, monkeypatch):  # noqa: F811
     store, ledger, runtime = env
     run("sw", "create", "--repo", "/repo")
+    assert commands.view(store, "sw")["last_tick_activity"] == 0
+    assert status_report(store, "sw", ledger.state("sw"))["last_tick_activity"] == 0
     store.update("sw", state="running")
     store.redis.set(store.key("sw", "last-tick"), 100)
     commands.publish(store, "sw", {"last_tick": 100, "last_tick_activity": 0}, {})
