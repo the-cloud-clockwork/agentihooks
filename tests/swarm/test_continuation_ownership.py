@@ -20,7 +20,7 @@ CASES = [
 ]
 
 
-def _launch(store, monkeypatch, case, *, recorded=True, missing=False, handoff=False):
+def _launch(store, monkeypatch, case, *, recorded=True, missing=False, handoff=False, setup=None):
     task, branch, pr, prior, foreign_task, foreign_pr = case
     foreign = prior.replace("@", "-")
     ledger = FakeLedger(
@@ -41,6 +41,8 @@ def _launch(store, monkeypatch, case, *, recorded=True, missing=False, handoff=F
             },
         ]
     )
+    if setup:
+        setup(ledger.rows[task])
     store.put_agent("sw", AgentRecord(prior, "eng", task, started_at=1))
     store.drop_agent("sw", prior, at=2)
     heads = {foreign: "b" * 40}
@@ -60,15 +62,16 @@ def _launch(store, monkeypatch, case, *, recorded=True, missing=False, handoff=F
     monkeypatch.setattr("scripts.swarm.tick.reclaim", partial(envelope.reclaim, run=run))
     monkeypatch.setattr(stack, "origin_key", lambda repo: stack.repo_key(REPO))
     if handoff:
+        saved = branch if handoff == "recorded" else foreign
         store.put_handoff(
             "sw",
             task,
             "Continue the claimed task",
             envelope={
                 "task": task,
-                "remote_branch": foreign,
+                "remote_branch": saved,
                 "remote_head": "b" * 40,
-                "continue_from": f"origin/{foreign}",
+                "continue_from": f"origin/{saved}",
                 "fresh_reason": "none",
             },
         )
@@ -166,3 +169,18 @@ def test_repaired_handoff_keeps_its_transfer_facts(store, monkeypatch):
         "continue_from": "origin/recorded",
         "fresh_reason": "none",
     }
+
+
+def test_matching_handoff_checks_that_its_recorded_branch_still_exists(store, monkeypatch):
+    launched, rendered = _launch(store, monkeypatch, CASES[0], missing=True, handoff="recorded")
+    assert launched["handoff_envelope"]["continue_from"] == "fresh"
+    assert "HEAD:master-323133-0113" not in rendered
+
+
+def test_parked_task_never_cuts_from_a_branch_registered_to_another_pull_request(store, monkeypatch):
+    def parked(task):
+        task.update(branch="engineer-323133-1452", parked_on=["dependency"], stacked_base="base")
+
+    launched, rendered = _launch(store, monkeypatch, CASES[0], setup=parked)
+    assert launched["reclaim"]["continue_from"] == "fresh"
+    assert "--from origin/engineer-323133-1452" not in rendered
