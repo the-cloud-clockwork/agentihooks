@@ -110,7 +110,7 @@ class Transport:
         transact(self.bindings.redis, update)
 
     def require(self, pipe: Pipeline | None = None) -> TransportRecord:
-        from scripts.codex_session.binding import EXITED, FAILED
+        from scripts.codex_session.binding import EXITED, FAILED, STOOD_DOWN
 
         store = self.bindings.store
         if pipe is not None:
@@ -118,7 +118,7 @@ class Transport:
 
             pipe.watch(store.key(self.slug, "executions"), store.key(self.slug, RECORDS))
         record = self.bindings.get(self.slug, self.execution_id)
-        if record is None or record.state in {EXITED, FAILED}:
+        if record is None or record.state in {EXITED, FAILED, STOOD_DOWN}:
             raise StaleExecution("execution is no longer current")
         current = store.execution_registry.occupants(self.slug, pipe).get(record.seat)
         if (

@@ -143,6 +143,21 @@ def check_guards(op: dict) -> None:
     guard = op.get("if_state", [])
     if not isinstance(guard, list) or not all(state in STATES for state in guard):
         raise ValueError(f"if_state must be a list of states from {STATES}")
+    expected = op.get("if_match", {})
+    if not isinstance(expected, dict) or set(expected) - {"claimed_by", "claim_generation", "pr_url", "awaiting"}:
+        raise ValueError("if_match must contain task ownership fields")
+    if any(not isinstance(value, str) for key, value in expected.items() if key != "claim_generation"):
+        raise ValueError("if_match ownership fields must be strings")
+    generation = expected.get("claim_generation", 0)
+    if type(generation) is not int or generation < 0:
+        raise ValueError("if_match claim_generation must be a nonnegative integer")
+
+
+def _guarded(task, op):
+    expected = op.get("if_match", {})
+    return (bool(op.get("if_state")) and task.get("state", "open") not in op["if_state"]) or any(
+        task.get(key, 0 if key == "claim_generation" else "") != value for key, value in expected.items()
+    )
 
 
 def check_quote(op: dict) -> None:
@@ -492,11 +507,7 @@ def _update(doc, op, ctx):
     others = [t for t in doc["tasks"] if t["id"] != task_id]
     if task is None or not _known(others, op["fields"].get("depends_on", []) + op["fields"].get("parked_on", [])):
         return False
-    if (
-        _held_block(task, op, ctx)
-        or (op.get("if_state") and task.get("state", "open") not in op["if_state"])
-        or task_dependencies.held(task, op, doc["tasks"])
-    ):
+    if _held_block(task, op, ctx) or _guarded(task, op) or task_dependencies.held(task, op, doc["tasks"]):
         return True
     if refusal := update_refusal(doc, op, ctx.meta):
         ctx.refused.append(refusal)
@@ -549,6 +560,8 @@ def _relay_rank(doc, op, ctx):
 
 def _changed(task, fields, op, ctx):
     changed = {k: v for k, v in fields.items() if task.get(k) != v}
+    if "claimed_by" in changed:
+        changed["claim_generation"] = task.get("claim_generation", 0) + 1
     if "rank" in fields and ledger_rank.author(ctx, f"{op['item']}/rank") != op["by"]:
         changed["rank"] = fields["rank"]
     if fields.get("state") == "blocked" and _block_author(op["by"]):

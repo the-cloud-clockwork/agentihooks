@@ -100,6 +100,7 @@ def test_gate_imports_store_from_scratch_directory(tmp_path, monkeypatch, child,
     (tmp_path / "tests/test_store.py").write_text(test)
     (tmp_path / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
     store = tmp_path / "scripts/swarm/store.py"
+    store.write_text(subprocess.check_output(["git", "show", "HEAD:scripts/swarm/store.py"], cwd=root, text=True))
 
     def git(*args):
         return subprocess.check_output(["git", *args], cwd=tmp_path, text=True).strip()
