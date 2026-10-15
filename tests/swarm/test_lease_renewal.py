@@ -1,4 +1,5 @@
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -495,8 +496,6 @@ def test_a_doctor_timer_slower_than_the_lease_keeps_it_through_the_merge_pass(en
 
 
 def test_an_automatic_snapshot_slower_than_the_lease_keeps_it_through_the_pass(env, clock, monkeypatch):  # noqa: F811
-    from pathlib import Path
-
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
     monkeypatch.delenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", raising=False)
