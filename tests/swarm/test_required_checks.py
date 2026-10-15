@@ -29,6 +29,7 @@ def head(gated, *checks):
     [
         (True, [check(GATE, "SUCCESS", True), check("measure", "FAILURE", False)]),
         (True, [check(GATE, "SUCCESS", False), check("measure", "FAILURE", False)]),
+        (True, [{"context": GATE, "state": "SUCCESS", "isRequired": False}, check("measure", "FAILURE", False)]),
         (False, [check("unit", "SUCCESS", True), check("measure", "FAILURE", False)]),
         (False, [check("unit", "SUCCESS", True), {"context": "sonar", "state": "FAILURE", "isRequired": False}]),
     ],
@@ -36,6 +37,7 @@ def head(gated, *checks):
 def test_an_optional_check_failure_leaves_the_head_green(gated, checks):
     pull = head(gated, *checks)
     assert (pull.resolved, pull.red, pull.failed, pull.red_at) == (True, False, (), None)
+    assert pull.gate_passed is gated
 
 
 @pytest.mark.parametrize(

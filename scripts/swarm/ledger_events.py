@@ -152,7 +152,11 @@ def _newest(checks):
 
 
 def _required(gated, checks):
-    required = [check for check in checks if check.get("isRequired", True) or check.get("name") == GATE]
+    required = [
+        check
+        for check in checks
+        if check.get("isRequired", True) or (check.get("name") or check.get("context")) == GATE
+    ]
     return required if gated or required else checks
 
 
