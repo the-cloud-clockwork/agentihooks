@@ -9,7 +9,7 @@ def fresh(reason: str) -> dict:
 
 
 def resolve(repo: str, task: dict, rows: dict, lives: list[str], envelope: dict, reclaim: Callable[..., dict]) -> dict:
-    origin = stack.origin_key(repo) if task.get("branch_repo") else ""
+    origin = stack.origin_key(repo)
     if task.get("branch_repo") and stack.repo_key(task["branch_repo"]) != origin:
         return {**envelope, **fresh("the task branch belongs to another repository")}
     forbidden = {
@@ -20,7 +20,7 @@ def resolve(repo: str, task: dict, rows: dict, lives: list[str], envelope: dict,
         and row.get("pr_url")
         and row["pr_url"] != task.get("pr_url")
         and stack.repo_key(row.get("branch_repo") or row["pr_url"].split("/pull/")[0])
-        == (origin or stack.origin_key(repo))
+        == origin
     }
     recorded = task.get("branch") or ""
     branch = envelope.get("continue_from", "").removeprefix("origin/")
