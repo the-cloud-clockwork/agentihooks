@@ -349,7 +349,10 @@ def _agent_command(
             *agent_args,
             *(["resume", spec.resume] if spec.resume else []),
         ]
-        return _profile_command(command, spec), ""
+        command = _profile_command(command, spec)
+        if environ.get("AGENTIHOOKS_SWARM"):
+            command = [sys.executable, "-m", "scripts.codex_input", "--", *command]
+        return command, ""
     command = [
         agentihooks_bin,
         "claude",

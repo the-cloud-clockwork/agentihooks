@@ -34,6 +34,7 @@
   "swarm-node-image.yml/image": "standard",
   "swarm-node-smoke.yml/worker-health": "standard",
   "swarm-node-smoke.yml/worker-image": "standard",
+  "swarm-node-smoke.yml/worker-image-compare": "light",
   "swarm-smoke.yml/compose-hive": "standard",
   "swarm-smoke.yml/hive-join": "standard",
   "swarm-smoke.yml/hive-launch": "standard",
