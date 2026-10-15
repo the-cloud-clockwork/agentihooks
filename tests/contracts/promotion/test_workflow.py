@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
+from scripts import ci_budget
 from tests.contracts.ci_tiers.test_workflow import enabled
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -37,6 +38,7 @@ def test_promotion_reuses_the_release_environment_and_never_dispatches_or_publis
     job = workflow["jobs"]["promote"]
     assert job["environment"] == "release"
     assert job["timeout-minutes"] == 10
+    assert ci_budget.BUDGETS["promote"] == job["timeout-minutes"] * 60
     assert job["concurrency"] == {"group": "release-version", "cancel-in-progress": False}
     commands = "\n".join(step.get("run", "") for step in job["steps"])
     assert "--generate-notes" in commands

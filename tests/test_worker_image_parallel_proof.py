@@ -54,7 +54,7 @@ elif args[0] == 'run':
             wait('rebuild')
         if os.environ['FAILURE'] == 'profile':
             sys.exit(18)
-        print('{}')
+        print(json.dumps({'codex_probe': {'registered_at': time.time() -\n              (3 if os.environ['FAILURE'] == 'profile-late' else 0)}}))
     else:
         print(json.dumps({'manifest': {'source_revision': 'checked-revision',
               'declared': {'lock_sha256': 'locked'}},
@@ -204,6 +204,8 @@ def test_worker_proof_modes_run_only_their_independent_checks(tmp_path, proof, b
         assert build[build.index("--no-cache-filter") + 1] == "worker"
     if proof == "profiles":
         assert (state / "profile-evidence").exists()
+        for name in ("profile-positive.json", "profile-positive-second.json"):
+            assert json.loads((output / name).read_text())["codex_probe"]["registration_to_container_exit_seconds"] < 2
     assert (state / "scanner-pulled").exists()
     assert (state / "scan-agentihooks-worker-proof-finished").exists()
 
@@ -232,6 +234,7 @@ def test_containerd_store_exports_worker_layers_uncompressed(tmp_path, proof, dr
         ("rebuild", "prefetch", 21),
         ("profiles", "prefetch", 21),
         ("profiles", "profile", 18),
+        ("profiles", "profile-late", 1),
         ("profiles", "profile-evidence", 19),
     ],
 )

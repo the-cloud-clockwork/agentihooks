@@ -109,6 +109,13 @@ CLASSED = {
 }
 
 HOSTED = OIDC | PROTECTED | TARGET | CLASSED
+CONSOLIDATED = {
+    ("swarm-node-smoke.yml", "worker-health"),
+    ("swarm-smoke.yml", "compose-hive"),
+    ("swarm-smoke.yml", "hive-join"),
+    ("swarm-smoke.yml", "hive-launch"),
+    ("swarm-smoke.yml", "terminal-clients"),
+}
 
 
 def workflows():
@@ -199,6 +206,8 @@ UNTRUSTED_EVENTS = [
 
 @pytest.mark.parametrize(("workflow", "job"), sorted(MOVED))
 def test_each_job_runs_on_its_isolated_anton_pool_only_for_trusted_actors(workflow, job):
+    if (workflow, job) in CONSOLIDATED and job not in workflows()[workflow]["jobs"]:
+        pytest.skip("consolidated into its workflow's remaining smoke job")
     assert workflows()[workflow]["jobs"][job]["runs-on"] == pool(MOVED[(workflow, job)])
 
 
@@ -255,7 +264,7 @@ def test_every_hosted_job_stays_on_a_hosted_runner():
         assert jobs[(name, job)]["runs-on"] == "ubuntu-latest", f"{name}:{job}"
     for name, job in PROTECTED | TARGET | CLASSED:
         assert jobs[(name, job)]["runs-on"] == "ubuntu-latest", f"{name}:{job}"
-    assert set(jobs) == set(MOVED) | HOSTED
+    assert set(jobs) | CONSOLIDATED == set(MOVED) | HOSTED
 
 
 def test_jobs_with_service_or_job_containers_run_on_the_docker_pool():
