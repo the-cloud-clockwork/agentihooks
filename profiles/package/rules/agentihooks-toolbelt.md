@@ -73,24 +73,18 @@ The deterministic CLI primitives behind these skills are respectively
 
 ## Swarm, small ledger or nothing
 
-A hook decides how each piece of work is tracked and injects a `LEDGER DECISION`
-directive once per session for each trigger. Act on it at once, without asking:
+No session creates a ledger or starts a swarm on its own. That happens only
+when the operator explicitly runs or asks for the command (`agentihooks
+ledger new`, `init-swarm`), or when an operator-authored rule or condition
+triggers it. A session not bound to a ledger or swarm gets no directive and
+makes no ledger: plain requests, a growing task list and troubleshoot/debug/
+investigate/refactor wording are never themselves a reason to create one.
 
-- **Swarm** — the operator accepted a plan (Claude or Copilot leaving plan mode,
-  Codex's "Yes, implement this plan"): start a swarm from it with `init-swarm`.
-  This session does not implement the plan; the swarm's master never edits code.
-- **Small ledger** — work beyond a trivial edit with no accepted plan: the
-  session's task list reaches four items, or the operator asks to troubleshoot,
-  debug, investigate or refactor, however small the fix turns out to be. Create
-  the small ledger before any other tool call (`agentihooks ledger new --size
-  small`), join it as its worker and keep it current.
-- **Nothing** — a trivial request gets no directive and no ledger.
-
-A swarm agent or a session already bound to a ledger gets no small ledger
-directive. When it accepts a plan, the directive names its own ledger: append the
-plan there as new phases with `agentihooks ledger --slug <slug> --as <name> plan
-phases <file>`, never a new swarm. When the operator declines, run `agentihooks ledger decline`; the hook stays silent
-for the rest of that session.
+A session already bound to a ledger or swarm keeps its ledger duties. A hook
+tells a bound session, once per session, when it accepts a plan: the directive
+names its own ledger, so append the plan there as new phases with
+`agentihooks ledger --slug <slug> --as <name> plan phases <file>`, never a new
+swarm, and do not implement the plan in this session.
 
 ## Swarms and ledgers
 
@@ -99,7 +93,7 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
 
 | Trigger | Action |
 |---|---|
-| Start a swarm from an accepted plan | `$init-swarm`; the swarm starts its master, `master@<code>-<n>`, which the operator talks to on the page chat or in its pane |
+| The operator asks for a swarm from an accepted plan | `$init-swarm`; the swarm starts its master, `master@<code>-<n>`, which the operator talks to on the page chat or in its pane |
 | Steer a swarm | `agentihooks swarm <slug> start\|pause\|stop`, `set max-eng-agents=N max-ci-agents=N compact-limit=N autonomy=manual|assist|delegate|full effort-min=E effort-max=E`; the ledger page swarm panel writes the same ops. Codex is one more account in the session rotation, judged on its week alone with the top band. Every lane agent starts inside the effort range (default medium to xhigh) |
 | Working a ledger | `agentihooks ledger --slug <slug> --as <name> join`, act on every OPERATOR line, then `ack`. In a swarm each operator write arrives as an inbox message at the next tool call and the tick wakes an idle pane, so no Monitor is needed; a ledger without a swarm wakes an idle session only through a `Monitor` on `agentihooks ledger watch <slug> --as <name>` |
 | Work lands, or a blocker appears | `ledger comment phases/<id> "<text>"`, `ledger followup add "<text>"`, `ledger say "<text>"`; plain words for the operator |
@@ -130,7 +124,8 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
 - The tick counts an agent idle only when its pane reads idle, its heartbeat
   does not say working and no declared wait holds, and holds the count while its
   input line holds text or the operator prompted it inside the quiet window;
-  nudge at 3 idle ticks, retire at 10. A leaving agent's open items move to its seat when its task
+  retire at 20. A task holder silent ten minutes with no named wait, or on a provider error, gets one inbox nudge
+  per ten minute window, never a typed prompt. A leaving agent's open items move to its seat when its task
   goes on, else they are withdrawn and each sender told.
 - A session bound to a swarm task (`AGENTIHOOKS_SWARM`, `AGENTIHOOKS_SWARM_TASK`)
   receives a `SWARM REFOCUS` block: ledger overview, its phase and its task. It
