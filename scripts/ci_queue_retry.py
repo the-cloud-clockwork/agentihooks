@@ -14,6 +14,7 @@ RUNNER_LOSS = re.compile(
     r"|lost communication with the server"
     r"|The job was not acquired by Runner"
 )
+QUEUE_BRANCH = re.compile(r"^gh-readonly-queue/.+/pr-(\d+)-[0-9a-f]+$")
 
 
 def base_name(job_name: str) -> str:
@@ -56,8 +57,8 @@ def decide(run: dict, failed: list[dict], workflow: dict) -> tuple[bool, str]:
     return True, f"runner lost on {', '.join(job['name'] for job in shards)}"
 
 
-def _api(path: str) -> str:
-    done = subprocess.run(["gh", "api", path], capture_output=True, text=True, check=False)
+def _api(*args: str) -> str:
+    done = subprocess.run(["gh", "api", *args], capture_output=True, text=True, check=False)
     return done.stdout if done.returncode == 0 else ""
 
 
@@ -76,6 +77,37 @@ def failed_jobs(repo: str, run_id: int) -> list[dict]:
     return failed
 
 
+def pull_number(run: dict) -> int | None:
+    match = QUEUE_BRANCH.search(run.get("head_branch") or "")
+    return int(match.group(1)) if match else None
+
+
+def requeue(pull: dict) -> tuple[bool, str]:
+    if pull.get("state") != "OPEN" or pull.get("isInMergeQueue"):
+        return False, "pull request is not open outside the queue"
+    head_at = pull["commits"]["nodes"][-1]["commit"]["committedDate"]
+    removals = [
+        event
+        for event in pull["timelineItems"]["nodes"]
+        if event.get("reason") == "failed_checks" and event.get("createdAt", "") >= head_at
+    ]
+    if len(removals) > 1:
+        return False, f"head already left the queue {len(removals)} times on failed checks"
+    return True, "first failed checks removal of this head"
+
+
+def pull_state(repo: str, number: int) -> dict:
+    owner, name = repo.split("/")
+    query = (
+        f'query{{repository(owner:"{owner}",name:"{name}"){{pullRequest(number:{number}){{'
+        "id state isInMergeQueue commits(last:1){nodes{commit{committedDate}}} "
+        "timelineItems(last:100,itemTypes:[REMOVED_FROM_MERGE_QUEUE_EVENT])"
+        "{nodes{... on RemovedFromMergeQueueEvent{createdAt reason}}}}}}}"
+    )
+    answer = json.loads(_api("graphql", "-f", f"query={query}") or "{}")
+    return ((answer.get("data") or {}).get("repository") or {}).get("pullRequest") or {}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", required=True)
@@ -83,10 +115,16 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     run = json.loads(_api(f"repos/{args.repo}/actions/runs/{args.run_id}") or "{}")
     retry, reason = decide(run, failed_jobs(args.repo, args.run_id), yaml.safe_load(WORKFLOW.read_text()))
-    print(json.dumps({"run": args.run_id, "retry": retry, "reason": reason}))
+    number = pull_number(run)
+    if retry and number is None:
+        retry, reason = False, f"no pull request in queue branch {run.get('head_branch')}"
+    if retry:
+        allowed, why = requeue(pull_state(args.repo, number))
+        retry, reason = allowed, f"{reason}; {why}"
+    print(json.dumps({"run": args.run_id, "pull": number, "requeue": retry, "reason": reason}))
     if output := os.environ.get("GITHUB_OUTPUT"):
         with Path(output).open("a") as handle:
-            handle.write(f"retry={str(retry).lower()}\n")
+            handle.write(f"requeue={str(retry).lower()}\npull={number or ''}\n")
     return 0
 
 

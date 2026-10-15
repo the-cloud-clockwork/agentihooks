@@ -14,9 +14,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      actions: write
+      actions: read
       checks: read
       contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -36,9 +37,26 @@ jobs:
           RUN_ID: ${{ github.event.workflow_run.id }}
         run: python -m scripts.ci_queue_retry --repo "$GITHUB_REPOSITORY" --run-id "$RUN_ID"
 
-      - name: Rerun the lost unit shards once
-        if: steps.classify.outputs.retry == 'true'
+      - name: Log the requeue a runner loss would make
+        if: steps.classify.outputs.requeue == 'true' && vars.QUEUE_RETRY_ENFORCE != 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
-          RUN_ID: ${{ github.event.workflow_run.id }}
-        run: gh run rerun "$RUN_ID" --failed --repo "$GITHUB_REPOSITORY"
+          PULL: ${{ steps.classify.outputs.pull }}
+        run: |
+          echo "::notice::Log only, runner loss would requeue pull request $PULL once"
+
+      - name: Mint the TCC Main CI queue token
+        id: app-token
+        if: steps.classify.outputs.requeue == 'true' && vars.QUEUE_RETRY_ENFORCE == 'true'
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Requeue the pull request once
+        if: steps.classify.outputs.requeue == 'true' && vars.QUEUE_RETRY_ENFORCE == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PULL: ${{ steps.classify.outputs.pull }}
+        run: gh pr merge "$PULL" --squash --auto --repo "$GITHUB_REPOSITORY"

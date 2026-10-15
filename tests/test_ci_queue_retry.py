@@ -15,6 +15,17 @@ RUN = {"event": "merge_group", "conclusion": "failure", "run_attempt": 1}
 SHUTDOWN = (FIXTURES / "shutdown_signal.txt").read_text()
 LOST = (FIXTURES / "lost_communication.txt").read_text()
 RED = (FIXTURES / "test_failure.txt").read_text()
+QUEUE_BRANCH = "gh-readonly-queue/dev/pr-3259-810e2717650390eb596adff102841b05c86eff69"
+REMOVED = {"createdAt": "2026-10-15T05:40:23Z", "reason": "failed_checks"}
+
+
+def pull(removals):
+    return {
+        "state": "OPEN",
+        "isInMergeQueue": False,
+        "commits": {"nodes": [{"commit": {"committedDate": "2026-10-14T23:06:11Z"}}]},
+        "timelineItems": {"nodes": removals},
+    }
 
 
 def job(name, text):
@@ -93,20 +104,30 @@ def test_main_reads_the_run_and_writes_the_decision(monkeypatch, tmp_path, capsy
             {"id": 3, "name": "Gate — Required", "conclusion": "failure"},
         ]
     }
+    run = {**RUN, "id": 9, "head_branch": QUEUE_BRANCH}
     pages = {
-        "repos/o/r/actions/runs/9": json.dumps({**RUN, "id": 9}),
+        "repos/o/r/actions/runs/9": json.dumps(run),
         "repos/o/r/actions/runs/9/jobs?filter=latest&per_page=100": json.dumps(jobs),
         "repos/o/r/check-runs/1/annotations": json.dumps([{"message": "The operation was canceled."}]),
         "repos/o/r/check-runs/3/annotations": "[]",
         "repos/o/r/actions/jobs/1/logs": SHUTDOWN,
+        "graphql": json.dumps({"data": {"repository": {"pullRequest": pull([REMOVED])}}}),
     }
-    monkeypatch.setattr(ci_queue_retry, "_api", lambda path: pages.get(path, ""))
+    asked = []
+
+    def api(*args):
+        asked.append(args)
+        return pages.get(args[0], "")
+
+    monkeypatch.setattr(ci_queue_retry, "_api", api)
     monkeypatch.chdir(ROOT)
     output = tmp_path / "output"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     assert ci_queue_retry.main(["--repo", "o/r", "--run-id", "9"]) == 0
-    assert json.loads(capsys.readouterr().out)["retry"] is True
-    assert output.read_text() == "retry=true\n"
+    assert json.loads(capsys.readouterr().out)["requeue"] is True
+    assert output.read_text() == "requeue=true\npull=3259\n"
+    query = next(args for args in asked if args[0] == "graphql")[2]
+    assert 'owner:"o",name:"r"' in query and "pullRequest(number:3259)" in query
 
 
 def test_a_signature_quoted_in_test_output_is_not_a_runner_loss(monkeypatch):
@@ -121,14 +142,48 @@ def test_a_signature_quoted_in_test_output_is_not_a_runner_loss(monkeypatch):
     assert not ci_queue_retry.decide(RUN, failed, WORKFLOW)[0]
 
 
-def test_the_retry_workflow_reruns_only_a_first_failed_merge_group_attempt():
+def test_the_retry_workflow_requeues_only_when_enforcement_is_on():
     workflow = yaml.safe_load((ROOT / ".github/workflows/queue-retry.yml").read_text())
     assert workflow[True] == {"workflow_run": {"workflows": ["Tests"], "types": ["completed"]}}
     retry = workflow["jobs"]["retry"]
     for term in ("event == 'merge_group'", "conclusion == 'failure'", "run_attempt == 1"):
         assert term in retry["if"]
-    assert retry["permissions"]["actions"] == "write"
-    steps = retry["steps"]
-    assert "ci_queue_retry" in steps[-2]["run"]
-    assert steps[-1]["if"] == "steps.classify.outputs.retry == 'true'"
-    assert steps[-1]["run"].startswith('gh run rerun "$RUN_ID" --failed')
+    assert "write" not in retry["permissions"].values()
+    steps = {step.get("name"): step for step in retry["steps"]}
+    assert "ci_queue_retry" in steps["Classify the failed jobs"]["run"]
+    log = steps["Log the requeue a runner loss would make"]
+    assert "vars.QUEUE_RETRY_ENFORCE != 'true'" in log["if"]
+    requeue = steps["Requeue the pull request once"]
+    assert requeue["if"] == "steps.classify.outputs.requeue == 'true' && vars.QUEUE_RETRY_ENFORCE == 'true'"
+    assert steps["Mint the TCC Main CI queue token"]["if"] == requeue["if"]
+    assert requeue["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
+    assert requeue["run"].startswith('gh pr merge "$PULL" --squash --auto')
+    assert not any("rerun" in str(step.get("run", "")) for step in retry["steps"])
+
+
+def test_the_pull_request_comes_from_the_queue_branch():
+    assert ci_queue_retry.pull_number({"head_branch": QUEUE_BRANCH}) == 3259
+    assert ci_queue_retry.pull_number({"head_branch": "dev"}) is None
+    assert ci_queue_retry.pull_number({}) is None
+
+
+def test_the_first_failed_checks_removal_of_a_head_requeues():
+    assert ci_queue_retry.requeue(pull([REMOVED]))[0]
+    assert ci_queue_retry.requeue(pull([]))[0]
+
+
+def test_a_head_removed_twice_on_failed_checks_is_not_requeued_again():
+    retry, reason = ci_queue_retry.requeue(pull([REMOVED, {**REMOVED, "createdAt": "2026-10-15T06:10:00Z"}]))
+    assert not retry
+    assert "2 times" in reason
+
+
+def test_removals_before_the_head_commit_or_for_other_reasons_do_not_count():
+    earlier = {**REMOVED, "createdAt": "2026-10-14T20:00:00Z"}
+    merged = {**REMOVED, "reason": "merged"}
+    assert ci_queue_retry.requeue(pull([earlier, merged, REMOVED]))[0]
+
+
+@pytest.mark.parametrize("change", [{"state": "MERGED"}, {"state": "CLOSED"}, {"isInMergeQueue": True}])
+def test_a_pull_request_merged_closed_or_queued_again_is_left_alone(change):
+    assert not ci_queue_retry.requeue({**pull([REMOVED]), **change})[0]
