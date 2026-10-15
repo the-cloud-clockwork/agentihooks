@@ -30,8 +30,8 @@ def task_row(slug: str, agent: AgentRecord, ledger: LedgerClient) -> dict:
     task = next((row for row in ledger.tasks(slug) if row.get("id") == agent.task), {})
     if task.get("claimed_by") != agent.name or task.get("state") not in ("claimed", "pr"):
         raise SwarmError("publication requires this agent's claimed task")
-    if task.get("branch") in ("dev", "main", "master", "v1"):
-        raise SwarmError("publication requires a task branch outside the protected branches")
+    if task.get("branch"):
+        require_branch(task["branch"])
     return task
 
 
@@ -54,10 +54,14 @@ def existing(repo: Path, task: dict, agent: AgentRecord) -> Path | None:
     return found[0] if found else None
 
 
-def checkout_fields(root: Path) -> dict:
-    branch = git(root, "branch", "--show-current")
+def require_branch(branch: str) -> str:
     if not branch or branch in ("dev", "main", "master", "v1"):
         raise SwarmError("publication requires a task branch outside the protected branches")
+    return branch
+
+
+def checkout_fields(root: Path) -> dict:
+    branch = require_branch(git(root, "branch", "--show-current"))
     return {
         "worktree": str(root),
         "branch": branch,
@@ -137,7 +141,7 @@ def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, mess
     retry = shlex.join(["agentihooks", "swarm", slug, "publish", "--message", message, "--", *files])
     try:
         stage_files(root, selected)
-        if git(root, "diff", "--cached", "--name-only"):
+        if git(root, "diff", "--cached", "--name-only", "-z"):
             check_build(root, message)
             git(root, "commit", "-m", message)
         head = git(root, "rev-parse", "HEAD")

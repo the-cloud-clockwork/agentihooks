@@ -333,6 +333,10 @@ def _step(lines, number):
 def test_the_code_steps_push_and_record_the_branch_at_the_first_commit(kind):
     step = _step(_steps({"kind": kind}), 4)
     assert 'publish --message "<commit message>" -- <explicit touched files>' in step
+    assert "Then review per the dev-cycle skill" in step
+    assert "Tests run only in CI." in step
+    if kind == "ci":
+        assert "2. Prepare your task worktree: agentihooks swarm sw prepare" in _step(_steps({"kind": kind}), 2)
     assert "commits only those files, runs the committed HEAD prepush gate, then pushes and records the branch" in step
 
 

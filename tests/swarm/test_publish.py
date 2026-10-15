@@ -1,3 +1,4 @@
+import json
 import subprocess
 from types import SimpleNamespace
 
@@ -51,17 +52,23 @@ def publication(repository, tmp_path, monkeypatch):
     worktree = tmp_path / "worktrees" / "repo" / "engineer-test"
     git(repository, "worktree", "add", "-b", "engineer-test", str(worktree))
     task = {"id": "t1", "claimed_by": "engineer@test", "state": "claimed", "branch": "engineer-test"}
-    ledger = SimpleNamespace(
-        tasks=lambda slug: [task], update_task=lambda slug, task_id, fields, by: task.update(fields)
-    )
+    updates = []
+
+    def update(slug, task_id, fields, by):
+        updates.append((slug, task_id, fields, by))
+        task.update(fields)
+
+    ledger = SimpleNamespace(tasks=lambda slug: {"swarm": [task]}[slug], update_task=update)
     agent = AgentRecord("engineer@test", "ci", "t1")
     gate = worktree / "scripts" / "ci_prepush" / "__main__.py"
     gate.write_text(
         "import os, subprocess, sys\n"
-        "sys.exit(1) if os.environ.get('PUBLISH_GATE_FAIL') else None\n"
+        "sys.exit('deliberate gate failure') if os.environ.get('PUBLISH_GATE_FAIL') else None\n"
         "from pathlib import Path\n"
         "assert subprocess.check_output(['git', 'show', 'HEAD:chosen.txt'], text=True) == 'after'\n"
         "assert not subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=no'], text=True)\n"
+        "sys.exit(0) if os.environ.get('PUBLISH_GATE_UNSTAMPED') else None\n"
+        "subprocess.run(['git', 'commit', '--allow-empty', '-qm', 'Different head'], check=True) if os.environ.get('PUBLISH_GATE_NEW_HEAD') else None\n"
         "head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True)\n"
         "Path('.git-gate-head').write_text(head)\n"
         "Path(subprocess.check_output(['git', 'rev-parse', '--absolute-git-dir'], text=True).strip(), 'ci_prepush').write_text(head)\n"
@@ -69,8 +76,10 @@ def publication(repository, tmp_path, monkeypatch):
     git(worktree, "add", "scripts/ci_prepush/__main__.py")
     git(worktree, "commit", "-qm", "Install gate fixture")
     (worktree / "chosen.txt").write_text("after")
-    monkeypatch.chdir(repository)
-    return SimpleNamespace(root=worktree, task=task, agent=agent, ledger=ledger, repo=repository)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.chdir(outside)
+    return SimpleNamespace(root=worktree, task=task, agent=agent, ledger=ledger, repo=repository, updates=updates)
 
 
 def test_dirty_push_names_selection_before_the_committed_head_gate(repository):
@@ -99,11 +108,13 @@ def test_deleted_file_publication_retries_after_a_failed_gate(publication, monke
     assert git(root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
 
 
-def test_publication_commits_explicit_files_before_grading_and_pushing(publication):
+@pytest.mark.parametrize("state", ["claimed", "pr"])
+def test_publication_commits_explicit_files_before_grading_and_pushing(publication, state):
     from scripts.swarm import publish
 
     worktree, task = publication.root, publication.task
     agent, ledger, repository = publication.agent, publication.ledger, publication.repo
+    task["state"] = state
     result = publish.publish("swarm", agent, str(repository), ledger, "Change chosen", ["chosen.txt"])
     head = git(worktree, "rev-parse", "HEAD")
     assert git(repository, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
@@ -111,6 +122,10 @@ def test_publication_commits_explicit_files_before_grading_and_pushing(publicati
     assert git(worktree, "show", "HEAD:chosen.txt") == "after"
     assert result["branch"] == "engineer-test"
     assert task["branch"] == "engineer-test"
+    fields = {"branch": "engineer-test", "branch_repo": str(repository.parent / "remote.git")}
+    assert result == {"worktree": str(worktree), **fields, "head": head}
+    assert publication.updates == [("swarm", "t1", fields, agent.name)]
+    assert git(worktree, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/engineer-test"
 
 
 def test_prepare_creates_the_task_worktree_once_through_the_worktree_command(repository, tmp_path, monkeypatch):
@@ -127,7 +142,7 @@ def test_prepare_creates_the_task_worktree_once_through_the_worktree_command(rep
     monkeypatch.setattr(stack, "WT_SCRIPT", script)
     monkeypatch.setenv("PUBLISH_PREPARED", str(worktree))
     task = {"id": "t1", "claimed_by": "engineer@test", "state": "claimed"}
-    ledger = SimpleNamespace(tasks=lambda slug: [task])
+    ledger = SimpleNamespace(tasks=lambda slug: {"swarm": [task]}[slug])
     agent = AgentRecord("engineer@test", "ci", "t1")
     first = publish.prepare("swarm", agent, str(repository), ledger)
     assert first["worktree"] == str(worktree)
@@ -151,7 +166,7 @@ def test_prepare_creates_a_continuation_from_the_recorded_remote_branch(reposito
     monkeypatch.setattr(stack, "WT_SCRIPT", script)
     monkeypatch.setenv("PUBLISH_PREPARED", str(worktree))
     task = {"id": "t1", "claimed_by": "engineer@test", "state": "claimed", "branch": "predecessor"}
-    ledger = SimpleNamespace(tasks=lambda slug: [task])
+    ledger = SimpleNamespace(tasks=lambda slug: {"swarm": [task]}[slug])
     agent = AgentRecord("engineer@test", "ci", "t1")
     result = publish.prepare("swarm", agent, str(repository), ledger)
     assert result["worktree"] == str(worktree)
@@ -165,7 +180,7 @@ def test_prepare_reuses_the_recorded_worktree_without_pushing(repository, tmp_pa
     git(repository, "worktree", "add", "-b", "engineer-test", str(worktree))
     task = {"id": "t1", "claimed_by": "engineer@test", "state": "claimed", "branch": "engineer-test"}
     ledger = SimpleNamespace(
-        tasks=lambda slug: [task], update_task=lambda slug, task_id, fields, by: task.update(fields)
+        tasks=lambda slug: {"swarm": [task]}[slug], update_task=lambda slug, task_id, fields, by: task.update(fields)
     )
     agent = AgentRecord("engineer@test", "ci", "t1")
     first = publish.prepare("swarm", agent, str(repository), ledger)
@@ -179,10 +194,126 @@ def test_publication_without_a_prepared_worktree_names_the_prepare_command(repos
     from scripts.swarm.store import SwarmError
 
     task = {"id": "t1", "claimed_by": "engineer@test", "state": "claimed"}
-    ledger = SimpleNamespace(tasks=lambda slug: [task])
+    ledger = SimpleNamespace(tasks=lambda slug: {"swarm": [task]}[slug])
     agent = AgentRecord("engineer@test", "ci", "t1")
     with pytest.raises(SwarmError, match="Next: agentihooks swarm swarm prepare"):
         publish.publish("swarm", agent, str(repository), ledger, "Change chosen", ["chosen.txt"])
+
+
+def test_publish_requires_an_explicit_commit_message():
+    from scripts.swarm import cli
+
+    with pytest.raises(SystemExit) as refused:
+        cli.main(["swarm", "publish", "--", "chosen.txt"])
+    assert refused.value.code == 2
+
+
+@pytest.mark.parametrize("gate_env", ["PUBLISH_GATE_UNSTAMPED", "PUBLISH_GATE_NEW_HEAD"])
+def test_only_a_pass_for_the_original_committed_head_can_push(publication, monkeypatch, gate_env):
+    from scripts.swarm import publish
+    from scripts.swarm.store import SwarmError
+
+    monkeypatch.setenv(gate_env, "1")
+    with pytest.raises(SwarmError) as refused:
+        publish.publish(
+            "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+        )
+    assert (
+        str(refused.value)
+        == "the committed HEAD has no passing prepush evidence; Next: agentihooks swarm swarm publish --message 'Change chosen' -- chosen.txt"
+    )
+    assert git(publication.root, "ls-remote", "origin", "refs/heads/engineer-test") == ""
+
+
+def test_a_missing_claim_has_a_named_refusal(publication):
+    from scripts.swarm import publish
+    from scripts.swarm.store import SwarmError
+
+    publication.ledger.tasks = lambda slug: []
+    with pytest.raises(SwarmError, match="^publication requires this agent's claimed task$"):
+        publish.publish(
+            "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+        )
+
+
+def test_a_successor_uses_the_recorded_worktree_among_other_checkouts(publication, tmp_path):
+    from scripts.swarm import publish
+
+    root = publication.root
+    git(root, "worktree", "add", "-b", "unrelated", str(tmp_path / "unrelated"))
+    agent = AgentRecord("engineer@successor", "ci", "t1")
+    publication.task["claimed_by"] = agent.name
+    result = publish.publish("swarm", agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"])
+    assert result["worktree"] == str(root)
+    assert result["head"] == git(root, "rev-parse", "HEAD")
+
+
+def test_a_detached_checkout_never_becomes_the_unrecorded_task_worktree(publication, tmp_path):
+    from scripts.swarm import publish
+
+    root = publication.root
+    git(root, "worktree", "add", "--detach", str(tmp_path / "detached"))
+    publication.task.pop("branch")
+    result = publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+    assert result["worktree"] == str(root)
+
+
+def test_multiple_unrecorded_task_worktrees_refuse_an_ambiguous_publish(publication, tmp_path):
+    from scripts.swarm import publish
+    from scripts.swarm.store import SwarmError
+
+    git(publication.root, "worktree", "add", "-b", "engineer-test-2", str(tmp_path / "engineer-test-2"))
+    publication.task.pop("branch")
+    with pytest.raises(SwarmError, match="^multiple task worktrees match; record the task branch before publishing$"):
+        publish.publish(
+            "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+        )
+
+
+@pytest.mark.parametrize("selected", ["*.txt", "--literal.txt"])
+def test_file_names_are_staged_literally(publication, selected):
+    from scripts.swarm import publish
+
+    root = publication.root
+    (root / selected).write_text("literal name")
+    (root / "unknown.txt").write_text("unrelated")
+    publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt", selected]
+    )
+    names = git(root, "ls-tree", "--name-only", "HEAD").splitlines()
+    assert selected in names
+    assert "unknown.txt" not in names
+
+
+def test_display_filters_cannot_hide_a_staged_change(publication):
+    from scripts.swarm import publish
+
+    root = publication.root
+    (root / ".gitattributes").write_text("chosen.txt diff=constant\n")
+    git(root, "config", "diff.constant.textconv", "printf constant")
+    git(root, "add", ".gitattributes")
+    git(root, "commit", "-qm", "Configure display filter")
+    result = publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+    assert git(root, "show", "HEAD:chosen.txt") == "after"
+    assert result["head"] == git(root, "rev-parse", "HEAD")
+
+
+def test_a_whitespace_file_name_does_not_hide_the_need_to_commit(publication):
+    from scripts.swarm import publish
+
+    root = publication.root
+    (root / " ").write_text("before")
+    git(root, "add", "chosen.txt", " ")
+    git(root, "commit", "-qm", "Seed whitespace name")
+    (root / " ").write_text("after")
+    publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change whitespace file", [" "]
+    )
+    assert git(root, "show", "HEAD: ") == "after"
 
 
 @pytest.mark.parametrize("staged", [False, True])
@@ -251,23 +382,30 @@ def test_publication_rejects_broad_or_outside_file_selections(publication, files
     assert git(publication.root, "rev-parse", "HEAD") == before
 
 
-def test_cli_prepares_and_publishes_from_the_primary_checkout(publication, monkeypatch, capsys):
+@pytest.mark.parametrize("option", ["--message", "-m"])
+def test_cli_prepares_and_publishes_from_the_primary_checkout(publication, monkeypatch, capsys, option):
     from scripts.swarm import cli
 
     agent, ledger = publication.agent, publication.ledger
     store = SimpleNamespace(
         names=SimpleNamespace(resolve=lambda name: name, swarm_slug=lambda slug: slug),
-        agents=lambda slug: [agent],
-        config=lambda slug: SimpleNamespace(repo=str(publication.repo)),
+        agents=lambda slug: {"swarm": [agent]}[slug],
+        config=lambda slug: {"swarm": SimpleNamespace(repo=str(publication.repo))}[slug],
     )
+    monkeypatch.chdir(publication.repo)
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
     assert cli.main(["swarm", "--as", agent.name, "prepare"]) == 0
-    assert str(publication.root) in capsys.readouterr().out
-    assert cli.main(["swarm", "--as", agent.name, "publish", "--message", "Change chosen", "--", "chosen.txt"]) == 0
-    assert git(publication.repo, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == git(
-        publication.root, "rev-parse", "HEAD"
-    )
+    prepared = json.loads(capsys.readouterr().out)
+    assert prepared == {
+        "worktree": str(publication.root),
+        "branch": "engineer-test",
+        "branch_repo": str(publication.repo.parent / "remote.git"),
+    }
+    assert cli.main(["swarm", "--as", agent.name, "publish", option, "Change chosen", "--", "chosen.txt"]) == 0
+    head = git(publication.root, "rev-parse", "HEAD")
+    assert json.loads(capsys.readouterr().out) == {**prepared, "head": head}
+    assert git(publication.repo, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
 
 
 @pytest.mark.xdist_group("fakeredis")
@@ -289,7 +427,7 @@ def test_publication_preserves_the_enforced_build_gate(publication, monkeypatch)
     }.items():
         monkeypatch.setenv(key, value)
     before = git(publication.root, "rev-parse", "HEAD")
-    with pytest.raises(SwarmError):
+    with pytest.raises(SwarmError, match="trace-plan"):
         publish.publish("swarm", agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"])
     assert git(publication.root, "rev-parse", "HEAD") == before
     assert git(publication.root, "ls-remote", "origin", "refs/heads/engineer-test") == ""
@@ -302,9 +440,9 @@ def test_protected_task_branches_never_prepare_or_publish(publication, branch):
 
     publication.task["branch"] = branch
     before = git(publication.root, "rev-parse", "HEAD")
-    with pytest.raises(SwarmError, match="outside the protected branches"):
+    with pytest.raises(SwarmError, match="^publication requires a task branch outside the protected branches$"):
         publish.prepare("swarm", publication.agent, str(publication.repo), publication.ledger)
-    with pytest.raises(SwarmError, match="outside the protected branches"):
+    with pytest.raises(SwarmError, match="^publication requires a task branch outside the protected branches$"):
         publish.publish(
             "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
         )
@@ -332,7 +470,7 @@ def test_only_the_task_owner_can_publish(publication, fields):
     from scripts.swarm.store import SwarmError
 
     publication.task.update(fields)
-    with pytest.raises(SwarmError, match="publication requires this agent's claimed task"):
+    with pytest.raises(SwarmError, match="^publication requires this agent's claimed task$"):
         publish.publish(
             "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
         )
