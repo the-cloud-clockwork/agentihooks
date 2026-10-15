@@ -198,19 +198,19 @@ def _opening(name, session):
 
 
 def _speaker(env, session):
-    if env.get("AGENTIHOOKS_AGENT_NAME"):
-        return env["AGENTIHOOKS_AGENT_NAME"], env.get("AGENTIHOOKS_SWARM")
     seat = master_coding.seat(session)
-    return seat.get("name"), seat.get("slug")
+    if seat:
+        return seat.get("name"), seat.get("slug"), True
+    return env.get("AGENTIHOOKS_AGENT_NAME"), env.get("AGENTIHOOKS_SWARM"), False
 
 
 def heard_prompt(prompt, environ=None, now=None, session=""):
     env = os.environ if environ is None else environ
-    name, slug = _speaker(env, session)
+    name, slug, seated = _speaker(env, session)
     if not name or not is_operator_prompt(prompt, slug):
         return False
     now = time.time() if now is None else now
-    if slug and env.get("AGENTIHOOKS_AGENT_NAME") and _opening(name, session):
+    if slug and not seated and _opening(name, session):
         return False
     return record(name, prompt, now, slug)
 
@@ -227,7 +227,7 @@ def heard_answer(payload, environ=None, now=None):
     if payload.get("tool_name") != "AskUserQuestion":
         return False
     env = os.environ if environ is None else environ
-    name, slug = _speaker(env, payload.get("session_id"))
+    name, slug, _ = _speaker(env, payload.get("session_id"))
     return record(name, _answer_words(payload), now, slug)
 
 
