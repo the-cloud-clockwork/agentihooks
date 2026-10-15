@@ -106,6 +106,27 @@ def test_a_taken_masters_question_answer_is_recorded_without_swarm_env():
     assert operator_words.matching("master@a1-1", "use the queue", now=101) == "Use the queue"
 
 
+@pytest.mark.parametrize("launch_swarm", [None, "previous"])
+def test_a_taken_master_records_under_its_seat_instead_of_its_launch_identity(launch_swarm):
+    from hooks.context import master_coding
+
+    master_coding.record_seat("taken", "demo", "master@a1-1")
+    env = {"AGENTIHOOKS_AGENT_NAME": "launch-session"}
+    if launch_swarm:
+        env["AGENTIHOOKS_SWARM"] = launch_swarm
+    assert operator_words.typed({"session_id": "taken", "prompt": "Use the queue"}, env, now=100)
+    assert operator_words.matching("master@a1-1", "use the queue", now=101) == "Use the queue"
+    assert not operator_words.matching("launch-session", "use the queue", now=101)
+    answer = {
+        "session_id": "taken",
+        "tool_name": "AskUserQuestion",
+        "tool_response": {"answers": {"question": "Keep the queue"}},
+    }
+    assert operator_words.typed(answer, env, now=102)
+    assert operator_words.matching("master@a1-1", "keep the queue", now=103) == "Keep the queue"
+    assert not operator_words.typed({"session_id": "taken", "prompt": NUDGE.format(slug="demo")}, env, now=104)
+
+
 @pytest.mark.parametrize("content", [None, "invalid", "[]", "null", "{}"])
 def test_an_invalid_taken_seat_records_no_operator_words(content):
     from hooks.context import master_coding

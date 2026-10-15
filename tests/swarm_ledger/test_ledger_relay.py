@@ -174,13 +174,14 @@ def test_cli_relays_words_the_operator_said_in_the_pane(monkeypatch, capsys):
     )
 
 
-def test_cli_relays_a_quote_typed_in_a_taken_master_pane_without_swarm_env(monkeypatch, capsys):
+@pytest.mark.parametrize("environ", [{}, {"AGENTIHOOKS_AGENT_NAME": "launch-session"}])
+def test_cli_relays_a_quote_typed_in_a_taken_master_pane_without_swarm_env(monkeypatch, capsys, environ):
     from hooks.context import master_coding
 
     state = make_ledger()
     question = f"questions/{state['questions'][0]['id']}"
     master_coding.record_seat("taken", SLUG, "master@a1-1")
-    assert operator_words.typed({"session_id": "taken", "prompt": "Use the queue for the broker"}, {})
+    assert operator_words.typed({"session_id": "taken", "prompt": "Use the queue for the broker"}, environ)
     _cli(monkeypatch, question, "use the queue")
     assert json.loads(capsys.readouterr().out) == {"relayed": True, "item": question}
     state, _ = core.sync(SLUG)
