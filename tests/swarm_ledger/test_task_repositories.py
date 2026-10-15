@@ -61,15 +61,26 @@ def test_task_cli_sends_explicit_repositories(monkeypatch):
 
 @pytest.mark.parametrize("value", ("bundle", [""], [3], ["relative/repository"]))
 def test_task_repositories_require_absolute_local_paths(value):
-    with pytest.raises(ValueError, match="repositories"):
+    with pytest.raises(ValueError) as error:
         core.check_op(
             {"op": "task_update", "id": "bad", "by": "swarm", "item": "tasks/t1", "fields": {"repositories": value}}
         )
 
+    expected = (
+        "repositories must list absolute local repository paths"
+        if value == ["relative/repository"]
+        else "repositories must be a list of nonempty strings"
+    )
+    assert str(error.value) == expected
+
 
 def test_repository_publication_branches_are_persisted():
     add = {"op": "task_add", "id": "add", "by": "swarm", "task": "t1", "title": "bundle fix", "lane": "eng"}
-    core.sync(SLUG, ops=[add])
+    add["repository_branches"] = {"/workspace/agentihooks-bundle": "bundle-fix"}
+    core.check_op(add)
+    initial, refused = core.sync(SLUG, ops=[add])
+    assert refused == []
+    assert initial["tasks"][0]["repository_branches"] == {"/workspace/agentihooks-bundle": "bundle-fix"}
     branches = {"/workspace/agentihooks": "hooks-fix", "/workspace/agentihooks-bundle": "bundle-fix"}
     update = {
         "op": "task_update",
@@ -88,7 +99,7 @@ def test_repository_publication_branches_are_persisted():
     "branches", ([], {"relative": "branch"}, {"/repo": None}, {"/repo": ""}, {"/repo": "bad branch"})
 )
 def test_repository_publication_branches_are_validated(branches):
-    with pytest.raises(ValueError, match="repository_branches"):
+    with pytest.raises(ValueError) as error:
         core.check_op(
             {
                 "op": "task_update",
@@ -98,3 +109,14 @@ def test_repository_publication_branches_are_validated(branches):
                 "fields": {"repository_branches": branches},
             }
         )
+
+    assert str(error.value) == "repository_branches must map absolute local repository paths to branch names"
+
+
+def test_task_help_explains_explicit_repository_selection(capsys):
+    with pytest.raises(SystemExit) as exit_info:
+        ledger.build_parser().parse_args(["--slug", SLUG, "task", "--help"])
+    assert exit_info.value.code == 0
+    output = capsys.readouterr().out
+    text = output.split("\n  --repositories REPOSITORIES", 1)[1].split("\n  --rank", 1)[0]
+    assert " ".join(text.split()) == "comma separated absolute local repository paths; defaults to the swarm repository"

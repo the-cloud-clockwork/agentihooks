@@ -29,7 +29,7 @@ def lengths(paths: list[Path]) -> list[str]:
 
 
 def main() -> int:
-    print(f"{NAME}: {Path.cwd()}", flush=True)
+    print(f"{NAME}: {Path.cwd()}")
     paths = changed()
     if paths:
         names = [str(path) for path in paths]

@@ -179,6 +179,17 @@ def gate_python(repo: Path) -> str:
     raise SwarmError(f"no python with ruff for the prepush gate; install the dev extra into {venv}")
 
 
+def native_gate(python: str, root: Path) -> list[str]:
+    if (root / "scripts" / "__init__.py").is_file():
+        return [python, "-m", "scripts.ci_prepush"]
+    code = (
+        "import runpy, sys, types; "
+        "package = types.ModuleType('scripts'); package.__path__ = [sys.argv[1]]; "
+        "sys.modules['scripts'] = package; runpy.run_module('scripts.ci_prepush', run_name='__main__')"
+    )
+    return [python, "-c", code, str(root / "scripts")]
+
+
 def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, message: str, files: list[str]) -> dict:
     task = task_row(slug, agent, ledger)
     root, primary, scoped = publishing_root(repo, task, agent)
@@ -199,7 +210,7 @@ def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, mess
         source = root / "scripts" / "ci_prepush"
         if (source / "__main__.py").is_file() or source.with_suffix(".py").is_file():
             fields["gate"] = str(source if source.is_dir() else source.with_suffix(".py"))
-            execute([python, "-m", "scripts.ci_prepush"], root)
+            execute(native_gate(python, root), root)
         else:
             fields["gate"] = "AgentiHooks touched Python fallback"
             execute([python, "-I", str(Path(__file__).with_name("publish_gate.py"))], root)

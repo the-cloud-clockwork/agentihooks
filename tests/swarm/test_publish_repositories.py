@@ -33,7 +33,7 @@ def repositories(tmp_path, monkeypatch):
     script = tmp_path / "wt.sh"
     script.write_text(
         "#!/usr/bin/env bash\nset -euo pipefail\n"
-        '[[ "$1" == new && "$2" == --repo && "$PWD" == "$3" ]]\n'
+        '[[ "$#" == 3 && "$1" == new && "$2" == --repo && "$PWD" == "$3" ]]\n'
         'git -C "$3" fetch origin dev >&2\n'
         'dest="$3-worktree"\n'
         'git -C "$3" worktree add -b engineer-test "$dest" origin/dev >&2\n'
@@ -44,7 +44,7 @@ def repositories(tmp_path, monkeypatch):
     updates = []
 
     def update(slug, task_id, fields, by):
-        assert (slug, task_id, by) == ("swarm", "t1", "engineer@test")
+        assert (slug, task_id, by) == ("swarm", "t1", task["claimed_by"])
         updates.append(fields)
         task.update(fields)
 
@@ -63,6 +63,7 @@ def test_prepare_uses_the_explicit_bundle_repository(repositories):
     p.task["repositories"] = [str(p.bundle)]
     fields = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
     assert fields["worktree"] == f"{p.bundle}-worktree"
+    assert fields["repository_source"] == "task"
     assert git(p.bundle, "rev-parse", "origin/dev") == git(fields["worktree"], "rev-parse", "HEAD")
     assert git(fields["worktree"], "show", "HEAD:chosen.txt") == "agentihooks-bundle"
     assert publish.prepare("swarm", p.agent, str(p.swarm), p.ledger) == fields
@@ -129,7 +130,17 @@ def test_publish_selects_the_current_repository_and_retains_both_branches(reposi
         assert git(repository, "ls-remote", "origin", f"refs/heads/{branch}").split()[0] == git(
             root, "rev-parse", "HEAD"
         )
+    p.agent = AgentRecord("engineer@successor", "eng", "t1")
+    p.task["claimed_by"] = p.agent.name
     assert publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)["worktrees"] == fields["worktrees"]
+    monkeypatch.chdir(roots[1])
+    successor = publish.publish("swarm", p.agent, str(p.swarm), p.ledger, "Continue bundle", ["chosen.txt"])
+    assert successor["branch"] == "engineer-test-2"
+    p.task["repositories"] = [str(p.bundle)]
+    monkeypatch.chdir(p.swarm)
+    continued = publish.publish("swarm", p.agent, str(p.swarm), p.ledger, "Continue from primary", ["chosen.txt"])
+    assert continued["worktree"] == roots[1]
+    assert continued["branch"] == "engineer-test-2"
 
 
 @pytest.mark.parametrize(
@@ -139,13 +150,27 @@ def test_publish_selects_the_current_repository_and_retains_both_branches(reposi
         ("value =\n", False),
         ("import os\n", False),
         ("value=1\n", False),
-        ("def chosen():\n" + "    print(1)\n" * 301, False),
+        ("def chosen():\n" + "    print(1)\n" * 300, False),
+        ("def chosen():\n" + "    print(1)\n" * 299, True),
+        ("print(1)\n" * 3000, True),
         ("print(1)\n" * 3001, False),
         ("def chosen(a, b, c, d, e, f, g, h):\n    return a, b, c, d, e, f, g, h\n", False),
     ],
-    ids=["valid", "syntax", "lint", "format", "function_length", "file_length", "arguments"],
+    ids=[
+        "valid",
+        "syntax",
+        "lint",
+        "format",
+        "function_length",
+        "function_limit",
+        "file_limit",
+        "file_length",
+        "arguments",
+    ],
 )
-def test_bundle_without_a_gate_uses_the_named_touched_file_fallback(repositories, monkeypatch, source, succeeds):
+def test_bundle_without_a_gate_uses_the_named_touched_file_fallback(
+    repositories, monkeypatch, capsys, source, succeeds
+):
     from pathlib import Path
 
     from scripts.swarm.store import SwarmError
@@ -158,22 +183,30 @@ def test_bundle_without_a_gate_uses_the_named_touched_file_fallback(repositories
     p.task["repositories"] = [str(p.bundle)]
     root = Path(publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)["worktree"])
     (root / "chosen.py").write_text(source)
-    git(root, "add", "chosen.py")
+    (root / "chosen.txt").write_text("not Python source\n")
+    git(root, "add", "chosen.py", "chosen.txt")
     git(root, "commit", "-qm", "Commit source for grading")
     monkeypatch.chdir(root)
     from scripts import ci_prepush
     from scripts.swarm import publish_gate
 
-    assert (publish_gate.main() == 0) is succeeds
+    assert publish_gate.main() == (0 if succeeds else 1)
+    output = capsys.readouterr().out
+    assert output.startswith(f"AgentiHooks touched Python fallback: {root}\n")
+    if succeeds:
+        assert output.endswith("Graded 1 changed Python files\n")
     assert ci_prepush.passed(root) is succeeds
+    ci_prepush.stamp_path(root).unlink(missing_ok=True)
+    monkeypatch.chdir(p.swarm)
     if succeeds:
         result = publish.publish("swarm", p.agent, str(p.swarm), p.ledger, "Change bundle", ["chosen.py"])
         assert result["gate"] == "AgentiHooks touched Python fallback"
         assert result["worktree"] == str(root)
         assert git(p.bundle, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == result["head"]
     else:
-        with pytest.raises(SwarmError, match="AgentiHooks touched Python fallback"):
+        with pytest.raises(SwarmError) as error:
             publish.publish("swarm", p.agent, str(p.swarm), p.ledger, "Bad bundle", ["chosen.py"])
+        assert str(error.value).startswith(f"AgentiHooks touched Python fallback for {root}: ")
         assert git(p.bundle, "ls-remote", "origin", "refs/heads/engineer-test") == ""
 
 
@@ -205,3 +238,108 @@ def test_native_gate_without_a_scripts_package_runs_its_own_entry_point(reposito
     suffix = "scripts/ci_prepush.py" if shape == "script" else "scripts/ci_prepush"
     assert result["gate"] == str(root / suffix)
     assert git(p.bundle, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == result["head"]
+
+
+def test_publish_from_primary_requires_a_repository_choice(repositories, monkeypatch):
+    from scripts.swarm.store import SwarmError
+
+    p = repositories
+    p.task["repositories"] = [str(p.swarm), str(p.bundle)]
+    publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
+    monkeypatch.chdir(p.swarm)
+    with pytest.raises(SwarmError) as error:
+        publish.publish("swarm", p.agent, str(p.swarm), p.ledger, "Choose repository", ["chosen.txt"])
+    assert str(error.value) == "publish from the task worktree to select one of its repositories"
+
+
+def test_publish_refuses_a_current_worktree_outside_the_task_repositories(repositories, monkeypatch):
+    from scripts.swarm.store import SwarmError
+
+    p = repositories
+    root = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)["worktree"]
+    p.task["repositories"] = [str(p.bundle)]
+    monkeypatch.chdir(root)
+    with pytest.raises(SwarmError) as error:
+        publish.publish("swarm", p.agent, str(p.swarm), p.ledger, "Wrong repository", ["chosen.txt"])
+    assert str(error.value) == f"current worktree repository {p.swarm} is not in the task repositories"
+
+
+def test_publish_refuses_an_unowned_current_worktree(repositories, monkeypatch):
+    from scripts.swarm.store import SwarmError
+
+    p = repositories
+    root = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)["worktree"]
+    git(root, "branch", "-m", "unrelated-task")
+    monkeypatch.chdir(root)
+    with pytest.raises(SwarmError) as error:
+        publish.publish("swarm", p.agent, str(p.swarm), p.ledger, "Wrong task", ["chosen.txt"])
+    assert str(error.value) == f"current worktree {root} does not belong to this task"
+
+
+def test_prepare_scopes_legacy_branch_records_to_their_repository(repositories):
+    p = repositories
+    p.task.update(
+        repositories=[str(p.bundle)], branch="foreign-task", branch_repo=git(p.swarm, "remote", "get-url", "origin")
+    )
+    result = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
+    assert result["worktree"] == f"{p.bundle}-worktree"
+    assert git(result["worktree"], "rev-parse", "HEAD") == git(p.bundle, "rev-parse", "origin/dev")
+
+
+def test_prepare_ignores_an_unscoped_branch_for_multiple_repositories(repositories):
+    p = repositories
+    p.task.update(repositories=[str(p.swarm), str(p.bundle)], branch="ambiguous-task")
+    result = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
+    assert [entry["worktree"] for entry in result["worktrees"]] == [f"{p.swarm}-worktree", f"{p.bundle}-worktree"]
+
+
+def test_prepare_reuses_a_legacy_branch_with_one_explicit_repository(repositories):
+    p = repositories
+    p.task["repositories"] = [str(p.bundle)]
+    root = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)["worktree"]
+    git(root, "branch", "-m", "prior-task-branch")
+    p.task["branch"] = "prior-task-branch"
+    result = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
+    assert result["worktree"] == root
+    assert result["branch"] == "prior-task-branch"
+
+
+def test_fallback_grades_committed_python_files_and_ignores_deleted_untracked_source(repositories, monkeypatch, capsys):
+    from pathlib import Path
+
+    from scripts.swarm import publish_gate
+
+    p = repositories
+    (p.bundle / "deleted.py").write_text("value = 1\n")
+    git(p.bundle, "add", "deleted.py")
+    git(p.bundle, "commit", "-qm", "Base source")
+    git(p.bundle, "push", "origin", "dev")
+    p.task["repositories"] = [str(p.bundle)]
+    root = Path(publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)["worktree"])
+    git(root, "rm", "deleted.py")
+    (root / "chosen.py").write_text("value = 2\n")
+    git(root, "add", "chosen.py")
+    git(root, "commit", "-qm", "Replace source")
+    (root / "deleted.py").write_text("invalid =\n")
+    monkeypatch.chdir(root)
+    assert publish_gate.main() == 0
+    assert capsys.readouterr().out == f"AgentiHooks touched Python fallback: {root}\nGraded 1 changed Python files\n"
+
+
+def test_fallback_reports_each_size_violation(repositories, monkeypatch, capsys):
+    from pathlib import Path
+
+    from scripts.swarm import publish_gate
+
+    p = repositories
+    p.task["repositories"] = [str(p.bundle)]
+    root = Path(publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)["worktree"])
+    (root / "chosen.py").write_text("def chosen():\n" + "    print(1)\n" * 3001)
+    git(root, "add", "chosen.py")
+    git(root, "commit", "-qm", "Oversized source")
+    monkeypatch.chdir(root)
+    assert publish_gate.main() == 1
+    assert capsys.readouterr().out == (
+        f"AgentiHooks touched Python fallback: {root}\n"
+        "chosen.py: file exceeds 3000 lines\nchosen.py: chosen exceeds 300 lines\n"
+    )
