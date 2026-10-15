@@ -167,9 +167,7 @@ def test_the_watch_step_polls_this_attempt_until_a_graded_job_fails(tmp_path):
     assert result.returncode == 0, result.stderr
     assert output == "failed=lint\n"
     assert sleeps == ["15"]
-    assert (
-        calls == ["api --paginate repos/org/repo/actions/runs/7/attempts/2/jobs?per_page=100 --jq .jobs[] | @json"] * 2
-    )
+    assert calls == ["api repos/org/repo/actions/runs/7/attempts/2/jobs?per_page=10&page=1"] * 2
 
 
 def test_the_watch_step_cancels_after_large_job_pages_return_server_errors(tmp_path):

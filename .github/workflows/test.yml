@@ -1690,7 +1690,7 @@ jobs:
         run: |
           misses=0
           while true; do
-            if gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" --jq '.jobs[] | @json' > "$RUNNER_TEMP/jobs.jsonl"; then
+            if python3 -m scripts.ci_budget.jobs "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs" > "$RUNNER_TEMP/jobs.jsonl"; then
               misses=0
               verdict=$(python3 -m scripts.ci_queue_fail_fast "$RUNNER_TEMP/jobs.jsonl")
               if [[ "$verdict" != wait ]]; then
