@@ -121,7 +121,7 @@ def test_release_computes_the_requested_version_from_tags(tmp_path, bump, expect
     output = tmp_path / "output"
     result = subprocess.run(
         ["bash", "-euo", "pipefail", "-c", step["run"]],
-        cwd=tmp_path,
+        cwd=_ROOT,
         env={**os.environ, "PATH": f"{tools}:{os.environ['PATH']}", "BUMP": bump, "GITHUB_OUTPUT": str(output)},
         capture_output=True,
         text=True,
@@ -135,8 +135,11 @@ def test_release_tags_without_committing_and_dry_run_never_pushes():
     assert job["permissions"] == {"contents": "write", "actions": "write"}
     assert job["env"]["GH_TOKEN"] == "${{ github.token }}"
     tag = next(s for s in job["steps"] if s.get("name") == "Tag the release")
-    assert 'git tag "v$NEXT" "$GITHUB_SHA"' in tag["run"]
-    assert "git rev-parse HEAD" in tag["run"]
+    assert 'git tag "v$NEXT" "$GITHUB_SHA"' in tag["run"] or tag["run"] == (
+        'bash scripts/ci_release.sh tag "$GITHUB_SHA" "$NEXT"'
+    )
+    script = (_ROOT / "scripts/ci_release.sh").read_text() if "ci_release.sh" in tag["run"] else tag["run"]
+    assert "git rev-parse HEAD" in script
     for step in job["steps"]:
         if "git push" in step.get("run", "") or "gh release create" in step.get("run", ""):
             assert step["if"] == "${{ !inputs.dry_run }}"
