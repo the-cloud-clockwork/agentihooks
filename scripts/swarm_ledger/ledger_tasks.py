@@ -1,6 +1,7 @@
 """Swarm tasks: claimable units of work under a phase, each in the eng or ci lane."""
 
 import re
+from pathlib import Path
 
 import ledger_comments
 import ledger_kinds
@@ -33,6 +34,8 @@ UPDATABLE = (
     "rank",
     "branch",
     "branch_repo",
+    "repositories",
+    "repository_branches",
     "stacked_base",
     "parked_on",
     "parked_repos",
@@ -51,11 +54,11 @@ DIFFICULTIES = ("S", "M", "L")
 DIFFICULTY_SOURCES = ("operator", "rule", "classifier", "default")
 DIFFICULTY_FIELDS = ("difficulty", "difficulty_source", "difficulty_confidence")
 NUMBER_FIELDS = ("difficulty_confidence",)
-LIST_FIELDS = ("depends_on", "territory", "parked_on", "parked_repos", "overlays", "split_pulls")
+LIST_FIELDS = ("depends_on", "territory", "parked_on", "parked_repos", "overlays", "split_pulls", "repositories")
 OVERLAY_CAP = 3
 BRANCH_RE = re.compile(r"^(?!-)\S*$")
 COMMIT_RE = re.compile(r"^([0-9a-f]{7,64})?$")
-OBJECT_FIELDS = ("contract", "proof", "recovery")
+OBJECT_FIELDS = ("contract", "proof", "recovery", "repository_branches")
 URL_FIELDS = ("issue_url", "pr_url", "plan_url")
 URL_RE = re.compile(r"^https?://[^\s]+$")
 OPS = ("task_add", "task_update")
@@ -190,11 +193,27 @@ def sized(fields):
     return {"difficulty_source": "operator", "difficulty_confidence": 1.0, **fields}
 
 
+def check_repository_branches(fields: dict) -> None:
+    branches = fields.get("repository_branches", {})
+    if not isinstance(branches, dict) or not all(
+        isinstance(repo, str)
+        and Path(repo).is_absolute()
+        and isinstance(branch, str)
+        and branch
+        and BRANCH_RE.match(branch)
+        for repo, branch in branches.items()
+    ):
+        raise ValueError("repository_branches must map absolute local repository paths to branch names")
+
+
 def check_lists(fields):
+    check_repository_branches(fields)
     for key in LIST_FIELDS:
         value = fields.get(key, [])
         if not isinstance(value, list) or not all(isinstance(v, str) and v.strip() for v in value):
             raise ValueError(f"{key} must be a list of nonempty strings")
+    if not all(Path(repo).is_absolute() for repo in fields.get("repositories", [])):
+        raise ValueError("repositories must list absolute local repository paths")
     if len(set(fields.get("overlays", []))) > OVERLAY_CAP:
         raise ValueError(f"overlays lists at most {OVERLAY_CAP} overlay names")
 
@@ -280,6 +299,8 @@ def _add(doc, op, ctx):
         "profile",
         "overlays",
         "not_duplicate",
+        "repositories",
+        "repository_branches",
         "slice",
         "follow_up",
     ):
