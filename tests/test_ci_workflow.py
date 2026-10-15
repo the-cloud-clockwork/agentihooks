@@ -6,6 +6,7 @@ import sys
 import tomllib
 from importlib.metadata import entry_points
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -429,9 +430,9 @@ def _collected_suite() -> tuple[list[str], str]:
     return [line for line in result.stdout.splitlines() if line.startswith("tests/") and "::" in line], result.stdout
 
 
-def _check_stored_durations(ran: list[str] | None = None):
-    partial = ran is not None and not (_ROOT / "collected.json").exists()
-    collected, output = (ran, "\n".join(ran)) if partial else _collected_suite()
+def _check_stored_durations(nodeids: list[str] | None = None):
+    partial = nodeids is not None and not (_ROOT / "collected.json").exists()
+    collected, output = (nodeids, "\n".join(nodeids)) if partial else _collected_suite()
     assert collected, output
     stored = json.loads((_ROOT / ".test_durations").read_text())
     missing = [nodeid for nodeid in collected if re.sub(r"@[^\[\]]*$", "", nodeid) not in stored]
@@ -441,7 +442,6 @@ def _check_stored_durations(ran: list[str] | None = None):
     )
 
 
-# An unsharded run without the split job's suite, such as a selected leg, checks only the tests it collected.
 def test_stored_durations_cover_the_collected_suite(request):
     _check_stored_durations(
         None if request.config.getoption("shard") else [item.nodeid for item in request.session.items]
@@ -473,17 +473,19 @@ def test_stored_durations_allow_new_tests_concentrated_in_one_shard(tmp_path, mo
             _check_stored_durations()
 
 
+@pytest.mark.parametrize("selected", [False, True])
 @pytest.mark.parametrize("missing", [10, 11])
-def test_stored_durations_read_the_split_jobs_collected_suite(tmp_path, monkeypatch, missing):
+def test_stored_durations_read_the_split_jobs_collected_suite(tmp_path, monkeypatch, missing, selected):
     nodeids = [f"tests/test_probe.py::test_{i}" for i in range(100)]
     (tmp_path / ".test_durations").write_text(json.dumps(dict.fromkeys(nodeids[: 100 - missing], 0.1)))
     (tmp_path / "collected.json").write_text(json.dumps(nodeids))
     monkeypatch.setattr(sys.modules[__name__], "_ROOT", tmp_path)
+    session = nodeids[:1] if selected else None
     if missing <= 10:
-        _check_stored_durations()
+        _check_stored_durations(session)
     else:
         with pytest.raises(AssertionError, match=f"{missing} of 100 tests"):
-            _check_stored_durations()
+            _check_stored_durations(session)
 
 
 @pytest.mark.parametrize("missing", [0, 1, 2, 3, 10])
@@ -505,29 +507,14 @@ def test_a_selected_run_strips_the_xdist_group_suffix(tmp_path, monkeypatch):
     _check_stored_durations(["tests/test_probe.py::test_0@ledger"])
 
 
-@pytest.mark.parametrize("missing", [10, 11])
-def test_a_selected_run_with_the_split_suite_keeps_the_full_check(tmp_path, monkeypatch, missing):
-    nodeids = [f"tests/test_probe.py::test_{i}" for i in range(100)]
-    (tmp_path / ".test_durations").write_text(json.dumps(dict.fromkeys(nodeids[: 100 - missing], 0.1)))
-    (tmp_path / "collected.json").write_text(json.dumps(nodeids))
-    monkeypatch.setattr(sys.modules[__name__], "_ROOT", tmp_path)
-    if missing <= 10:
-        _check_stored_durations(nodeids[:1])
-    else:
-        with pytest.raises(AssertionError, match=f"{missing} of 100 tests"):
-            _check_stored_durations(nodeids[:1])
-
-
 def test_only_an_unsharded_session_hands_over_its_own_tests(monkeypatch):
     seen = []
     monkeypatch.setattr(sys.modules[__name__], "_check_stored_durations", seen.append)
 
-    class Session:
-        items = [type("Item", (), {"nodeid": "tests/test_probe.py::test_0"})()]
+    session = SimpleNamespace(items=[SimpleNamespace(nodeid="tests/test_probe.py::test_0")])
 
     def request(shard):
-        config = type("Config", (), {"getoption": staticmethod(lambda name: shard)})()
-        return type("Request", (), {"config": config, "session": Session})()
+        return SimpleNamespace(config=SimpleNamespace(getoption=lambda name: shard), session=session)
 
     test_stored_durations_cover_the_collected_suite(request("1/4"))
     test_stored_durations_cover_the_collected_suite(request(None))
