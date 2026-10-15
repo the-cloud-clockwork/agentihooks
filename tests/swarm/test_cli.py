@@ -1068,6 +1068,7 @@ def test_agent_record_round_trips_through_status_json(env, capsys):
     store, _, _ = env
     run("sw", "create", "--repo", "/repo")
     store.put_agent("sw", AgentRecord("engineer@a1b2c3-0009", "eng", "t1"))
+    env[2].live.add("engineer@a1b2c3-0009")
     run("sw", "status", "--json")
     assert json.loads(capsys.readouterr().out.splitlines()[-1])["agents"][0]["name"] == "engineer@a1b2c3-0009"
 
