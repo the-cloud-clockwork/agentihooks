@@ -691,7 +691,7 @@ class HerdrRuntime:
         ]
         argv += [
             "--name",
-            name,
+            naming.plain(name) if agent == "claude" else name,
             "--agent",
             agent,
             "--start-timeout",
@@ -732,6 +732,7 @@ class HerdrRuntime:
                     "AGENTIHOOKS_SWARM_TASK": task_id,
                     "AGENTIHOOKS_SWARM_AUTONOMY": config.autonomy,
                     "AGENTIHOOKS_SWARM_SPAWN": "1",
+                    "AGENTIHOOKS_AGENT_NAME": name,
                     effort_range.VARIABLE: ":".join(effort_range.of(config)),
                     **({"AGENTIHOOKS_COMPACT_LIMIT": str(config.compact_limit)} if config.compact_limit else {}),
                 },

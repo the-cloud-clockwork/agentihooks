@@ -42,6 +42,15 @@ def _inside(tool: str, value: str, cwd: Path, roots: list[Path]) -> bool:
     return any(target.is_relative_to(root) for root in roots)
 
 
+def hotfix_open(payload: dict, role: str) -> bool:
+    """The operator typed allow-master-coding in this master pane within the last thirty minutes."""
+    if role != "master":
+        return False
+    from hooks.context import master_coding
+
+    return master_coding.is_open(str(payload.get("session_id") or ""))
+
+
 def deny_reason(payload: dict, role: str, home: Path) -> str:
     tool = payload["tool_name"].lower()
     if tool not in BUILTIN_WRITES | SERENA_WRITES:
@@ -51,13 +60,22 @@ def deny_reason(payload: dict, role: str, home: Path) -> str:
     paths.extend(inputs.get("file_paths", []))
     cwd = Path(payload.get("cwd") or os.getcwd())
     roots = _allowed_roots(role, home)
+    if hotfix_open(payload, role):
+        from hooks.context.master_coding import closed_in_window
+
+        if any(closed_in_window(value, cwd) for value in paths):
+            return "master hotfix window: condition folders and credential files stay closed."
+        roots.append((home / "dev" / "worktrees").resolve())
     if paths and all(_inside(tool, value, cwd, roots) for value in paths):
         return ""
     return f"{role} cannot edit outside ~/scratchpad; send the change to its author."
 
 
 def main(role: str) -> int:
-    reason = deny_reason(json.load(sys.stdin), role, Path.home())
+    try:
+        reason = deny_reason(json.load(sys.stdin), role, Path.home())
+    except Exception:
+        reason = f"{role} cannot evaluate the coding window; edits stay closed."
     if reason:
         print(reason, file=sys.stderr)
         return 2

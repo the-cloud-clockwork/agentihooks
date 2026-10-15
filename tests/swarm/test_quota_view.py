@@ -38,6 +38,17 @@ def test_status_lines_name_each_lane_cap_the_reason_the_change_age_and_every_acc
     ]
 
 
+def test_codex_routing_left_is_its_week_left():
+    codex = row("personal", "REDUCE", 3, None, 35.0, "codex")
+    assert quota_view.routing_left(codex) == 35.0
+    assert quota_view.routing_left({**codex, "five_left": 20.0}) == 35.0
+    assert quota_view.routing_left(row("alpha", five=None)) is None
+    assert quota_view.lines({**DECISION, "accounts": [codex]}, 1_000_000)[1] == (
+        "quota account codex personal  reduce  routing 35% left  sessions 3"
+    )
+    assert quota_view.page({**DECISION, "accounts": [codex]})["accounts"][0]["routing"] == 35.0
+
+
 def test_a_change_under_a_minute_old_reads_just_now_and_one_minute_is_singular():
     assert quota_view.lines({**DECISION, "accounts": []}, 1_000_000 + 59_999)[0].split(", ")[3] == "changed just now"
     assert (

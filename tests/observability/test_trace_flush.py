@@ -621,6 +621,7 @@ def test_flush_once_reports_pending_work(monkeypatch, home):
 def test_stopped_codex_cursor_replays_all_pages_once(home, monkeypatch):
     from tests.observability.test_trace_paging import Receiver, _codex, _line
 
+    monkeypatch.setattr(trace_flush.time, "monotonic", Clock())
     transcript = home / "rollout.jsonl"
     transcript.write_text("".join(_line(record) for record in _codex(6, 2)))
     receiver = Receiver()

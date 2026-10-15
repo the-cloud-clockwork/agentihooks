@@ -1,0 +1,6 @@
+{
+  "scripts/gates/intent.py:scripts.gates.intent.x__bind_pulls__mutmut_19:e9d09153167bc59ab14f289215cd360931912f923b377ccd3f7c528ca869f15d": {
+    "reader": "Standards",
+    "reason": "The registry record is a list of registered pulls and expected input fingerprints, not an intent judgment. Its verdict field is never read by IntentGate.decide or another production consumer. Replacing PASS with None leaves the nonempty record, pull membership, fingerprint checks and per-pull judgments unchanged."
+  }
+}
