@@ -113,6 +113,8 @@ def test_publish_selects_the_current_repository_and_retains_both_branches(reposi
 
         install_gate(Path(root))
         Path(root, "chosen.txt").write_text("after")
+    git(roots[1], "branch", "-m", "engineer-test-2")
+    fields["worktrees"][1]["branch"] = "engineer-test-2"
     monkeypatch.chdir(roots[1])
     first = publish.publish("swarm", p.agent, str(p.swarm), p.ledger, "Change bundle", ["chosen.txt"])
     assert first["worktree"] == roots[1]
@@ -122,7 +124,7 @@ def test_publish_selects_the_current_repository_and_retains_both_branches(reposi
     monkeypatch.chdir(roots[0])
     second = publish.publish("swarm", p.agent, str(p.swarm), p.ledger, "Change hooks", ["chosen.txt"])
     assert second["worktree"] == roots[0]
-    assert p.task["repository_branches"] == {str(p.bundle): "engineer-test", str(p.swarm): "engineer-test"}
+    assert p.task["repository_branches"] == {str(p.bundle): "engineer-test-2", str(p.swarm): "engineer-test"}
     for root, repository in zip(roots, (p.swarm, p.bundle), strict=True):
         assert git(repository, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == git(
             root, "rev-parse", "HEAD"
@@ -141,6 +143,7 @@ def test_publish_selects_the_current_repository_and_retains_both_branches(reposi
         ("print(1)\n" * 3001, False),
         ("def chosen(a, b, c, d, e, f, g, h):\n    return a, b, c, d, e, f, g, h\n", False),
     ],
+    ids=["valid", "syntax", "lint", "format", "function_length", "file_length", "arguments"],
 )
 def test_bundle_without_a_gate_uses_the_named_touched_file_fallback(repositories, monkeypatch, source, succeeds):
     from pathlib import Path
