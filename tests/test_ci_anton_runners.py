@@ -221,7 +221,7 @@ def test_trusted_reruns_of_queue_runs_keep_the_classified_anton_pool(name, trigg
         f"{workflow}:{job}"
         for (workflow, job), spec in runner_jobs().items()
         if (workflow, job) not in HOSTED
-        if resolve(str(spec.get("runs-on", "")), **github) != MOVED[(workflow, job)]
+        if resolve(str(spec.get("runs-on", "")), **github) != resolve(pool(MOVED[(workflow, job)]), **github)
     )
     assert hosted == []
 
