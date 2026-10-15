@@ -1,10 +1,14 @@
+import io
+import json
 import re
 import shlex
 import subprocess
 import sys
+from contextlib import redirect_stderr
 from pathlib import Path
 
 from scripts import ci_prepush
+from scripts.gates import entry as gate_entry
 from scripts.swarm import naming, stack
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, SwarmError
@@ -14,11 +18,12 @@ def execute(argv: list[str], root: Path) -> str:
     done = subprocess.run(argv, cwd=root, capture_output=True, text=True)
     if done.returncode:
         raise SwarmError(f"{shlex.join(argv)} failed: {done.stderr.strip() or done.stdout.strip()}")
-    return done.stdout.strip()
+    return done.stdout
 
 
 def git(root: Path, *args: str) -> str:
-    return execute(["git", *args], root)
+    output = execute(["git", *args], root)
+    return output if "-z" in args else output.strip()
 
 
 def task_row(slug: str, agent: AgentRecord, ledger: LedgerClient) -> dict:
@@ -89,6 +94,37 @@ def selected_files(root: Path, files: list[str]) -> list[str]:
     return selected
 
 
+def stage_files(root: Path, selected: list[str]) -> None:
+    tracked = set(git(root, "ls-files", "-z").split("\0"))
+    missing = {
+        name
+        for name in selected
+        if not (root / name).exists() and not (root / name).is_symlink() and name not in tracked
+    }
+    if missing:
+        deleted = set(
+            git(root, "diff-tree", "--no-commit-id", "--name-only", "--diff-filter=D", "-r", "-z", "HEAD").split("\0")
+        )
+        if unknown := missing - deleted:
+            raise SwarmError(f"selected files do not exist: {', '.join(sorted(unknown))}")
+    pending = [name for name in selected if name not in missing]
+    if pending:
+        git(root, "--literal-pathspecs", "add", "--", *pending)
+
+
+def check_build(root: Path, message: str) -> None:
+    payload = {
+        "tool_name": "Bash",
+        "tool_input": {"command": shlex.join(["git", "commit", "-m", message])},
+        "cwd": str(root),
+    }
+    reason = io.StringIO()
+    with redirect_stderr(reason):
+        refused = gate_entry.main(["build"], stdin=io.StringIO(json.dumps(payload)))
+    if refused:
+        raise SwarmError(reason.getvalue().strip())
+
+
 def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, message: str, files: list[str]) -> dict:
     task = task_row(slug, agent, ledger)
     root = existing(Path(repo), task, agent)
@@ -100,9 +136,9 @@ def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, mess
     selected = selected_files(root, files)
     retry = shlex.join(["agentihooks", "swarm", slug, "publish", "--message", message, "--", *files])
     try:
-        if selected:
-            git(root, "--literal-pathspecs", "add", "--", *selected)
+        stage_files(root, selected)
         if git(root, "diff", "--cached", "--name-only"):
+            check_build(root, message)
             git(root, "commit", "-m", message)
         head = git(root, "rev-parse", "HEAD")
         execute([sys.executable, "-m", "scripts.ci_prepush"], root)

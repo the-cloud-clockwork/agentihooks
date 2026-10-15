@@ -100,12 +100,20 @@ def check_prepush(payload: dict) -> None:
 
     try:
         root = _unpassed(payload)
+        if root is None:
+            return
+        dirty = subprocess.run(
+            ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=no"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        command = "git status --short" if dirty else "python -m scripts.ci_prepush"
     except Exception as exc:
         log("prepush_guard failed", {"error": str(exc)})
         return
-    if root:
-        raise BlockAction(
-            f"BLOCKED: HEAD in {root} has not passed `python -m scripts.ci_prepush`. "
-            "Commit intended changes first, run the gate on that commit, then push. "
-            f"Next: cd {shlex.quote(str(root))} && python -m scripts.ci_prepush"
-        )
+    raise BlockAction(
+        f"BLOCKED: HEAD in {root} has not passed `python -m scripts.ci_prepush`. "
+        "Commit intended changes first, run the gate on that commit, then push. "
+        f"Next: cd {shlex.quote(str(root))} && {command}"
+    )

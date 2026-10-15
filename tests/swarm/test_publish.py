@@ -27,7 +27,11 @@ def repository(tmp_path):
     (gate / "__init__.py").write_text("")
     (root / "chosen.txt").write_text("before")
     (root / "other.txt").write_text("unrelated")
-    git(root, "add", "scripts/__init__.py", "scripts/ci_prepush/__init__.py", "chosen.txt", "other.txt")
+    (root / "sub").mkdir()
+    (root / "sub" / "other.txt").write_text("unrelated nested file")
+    git(
+        root, "add", "scripts/__init__.py", "scripts/ci_prepush/__init__.py", "chosen.txt", "other.txt", "sub/other.txt"
+    )
     git(root, "commit", "-qm", "base")
     remote = tmp_path / "remote.git"
     git(root, "init", "--bare", str(remote))
@@ -76,18 +80,19 @@ def test_dirty_push_names_selection_before_the_committed_head_gate(repository):
     assert f"Next: cd {repository} && git status --short" in str(blocked.value)
 
 
-def test_deleted_file_publication_retries_after_a_failed_gate(publication, monkeypatch):
+@pytest.mark.parametrize("deleted", ["other.txt", "sub/other.txt"])
+def test_deleted_file_publication_retries_after_a_failed_gate(publication, monkeypatch, deleted):
     from scripts.swarm import publish
     from scripts.swarm.store import SwarmError
 
     root = publication.root
-    (root / "other.txt").unlink()
+    (root / deleted).unlink()
     monkeypatch.setenv("PUBLISH_GATE_FAIL", "1")
-    files = ["chosen.txt", "other.txt"]
+    files = ["chosen.txt", deleted]
     with pytest.raises(SwarmError, match="Next: agentihooks swarm swarm publish"):
         publish.publish("swarm", publication.agent, str(publication.repo), publication.ledger, "Remove other", files)
     head = git(root, "rev-parse", "HEAD")
-    assert "other.txt" not in git(root, "ls-tree", "--name-only", "HEAD").splitlines()
+    assert deleted not in git(root, "ls-tree", "-r", "--name-only", "HEAD").splitlines()
     monkeypatch.delenv("PUBLISH_GATE_FAIL")
     publish.publish("swarm", publication.agent, str(publication.repo), publication.ledger, "Remove other", files)
     assert git(root, "rev-parse", "HEAD") == head
@@ -129,6 +134,28 @@ def test_prepare_creates_the_task_worktree_once_through_the_worktree_command(rep
     assert first["branch"] == "engineer-test"
     assert publish.prepare("swarm", agent, str(repository), ledger) == first
     assert git(repository, "ls-remote", "origin", "refs/heads/engineer-test") == ""
+
+
+def test_prepare_creates_a_continuation_from_the_recorded_remote_branch(repository, tmp_path, monkeypatch):
+    from scripts.swarm import publish, stack
+
+    git(repository, "push", "origin", "HEAD:predecessor")
+    worktree = tmp_path / "worktrees" / "repo" / "engineer-test"
+    script = tmp_path / "wt.sh"
+    script.write_text(
+        "#!/usr/bin/env bash\nset -euo pipefail\n"
+        '[[ "$1" == new && "$2" == --repo && "$4" == --from && "$5" == origin/predecessor ]]\n'
+        'git -C "$3" worktree add -b engineer-test "$PUBLISH_PREPARED" "$5" >&2\n'
+        'printf "%s\\n" "$PUBLISH_PREPARED"\n'
+    )
+    monkeypatch.setattr(stack, "WT_SCRIPT", script)
+    monkeypatch.setenv("PUBLISH_PREPARED", str(worktree))
+    task = {"id": "t1", "claimed_by": "engineer@test", "state": "claimed", "branch": "predecessor"}
+    ledger = SimpleNamespace(tasks=lambda slug: [task])
+    agent = AgentRecord("engineer@test", "ci", "t1")
+    result = publish.prepare("swarm", agent, str(repository), ledger)
+    assert result["worktree"] == str(worktree)
+    assert git(worktree, "rev-parse", "HEAD") == git(repository, "rev-parse", "origin/predecessor")
 
 
 def test_prepare_reuses_the_recorded_worktree_without_pushing(repository, tmp_path):
@@ -219,7 +246,7 @@ def test_publication_rejects_broad_or_outside_file_selections(publication, files
     from scripts.swarm.store import SwarmError
 
     before = git(publication.root, "rev-parse", "HEAD")
-    with pytest.raises(SwarmError, match="explicit repository relative file names only"):
+    with pytest.raises(SwarmError, match="^publish accepts explicit repository relative file names only$"):
         publish.publish("swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", files)
     assert git(publication.root, "rev-parse", "HEAD") == before
 
