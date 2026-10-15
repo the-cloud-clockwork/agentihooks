@@ -95,6 +95,53 @@ class Tasks(unittest.TestCase):
         self.assertEqual(state["tasks"], [])
 
 
+class OwnershipGuards(unittest.TestCase):
+    def test_an_old_claim_generation_cannot_clear_a_later_claim_by_the_same_owner(self):
+        make_ledger([{"title": "a", "phase": "p1", "lane": "eng"}])
+        for n, owner in enumerate(("engineer-one", "engineer-two", "engineer-one"), 1):
+            state, rejected = core.sync(
+                SLUG, ops=[op("task_update", n, item="tasks/t1", fields={"state": "pr", "claimed_by": owner})]
+            )
+            self.assertEqual(rejected, [])
+            self.assertEqual(state["tasks"][0].get("claim_generation"), n)
+        stale = op(
+            "task_update",
+            4,
+            item="tasks/t1",
+            fields={"state": "open", "claimed_by": ""},
+            if_match={"claimed_by": "engineer-one", "claim_generation": 1},
+        )
+        state, rejected = core.sync(SLUG, ops=[stale])
+        self.assertEqual(rejected, [])
+        self.assertEqual(state["tasks"][0]["claimed_by"], "engineer-one")
+        self.assertEqual(state["tasks"][0]["state"], "pr")
+        fresh = op(
+            "task_update",
+            5,
+            item="tasks/t1",
+            fields={"state": "open", "claimed_by": ""},
+            if_match={"claimed_by": "engineer-one", "claim_generation": 3},
+        )
+        state, rejected = core.sync(SLUG, ops=[fresh])
+        self.assertEqual(rejected, [])
+        self.assertEqual(state["tasks"][0]["claimed_by"], "")
+        self.assertEqual(state["tasks"][0]["claim_generation"], 4)
+
+    def test_a_mismatched_claim_guard_is_a_noop_at_the_ledger_write(self):
+        make_ledger([{"title": "a", "phase": "p1", "lane": "eng"}])
+        stale = op(
+            "task_update",
+            1,
+            item="tasks/t1",
+            fields={"state": "claimed", "claimed_by": "new-owner"},
+            if_match={"claimed_by": "old-owner", "claim_generation": 0},
+        )
+        state, rejected = core.sync(SLUG, ops=[stale])
+        self.assertEqual(rejected, [])
+        self.assertEqual(state["tasks"][0]["state"], "open")
+        self.assertEqual(state["tasks"][0]["claimed_by"], "")
+
+
 class TaskCli(unittest.TestCase):
     def test_task_commands_send_task_ops(self):
         import ledger

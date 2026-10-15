@@ -1039,6 +1039,31 @@ def test_a_working_owner_keeps_its_claim_and_lease_when_the_pull_conflicts(mergi
     assert len(InboxStore(merging.store.redis).inbox(AGENT)) == 1
 
 
+@pytest.mark.parametrize("successor", [AGENT, "successor"])
+def test_a_stale_conflict_watch_cannot_clear_a_new_claim_generation(merging, successor):
+    from scripts.swarm.ledger_events import pull_request
+
+    merging.rows["t1"]["claim_generation"] = 1
+    merging.pulls[URL] = pull_request(
+        {"state": "OPEN", "mergeable": "CONFLICTING", "mergeQueueEntry": {"id": "entry", "state": "UNMERGEABLE"}}
+    )
+
+    def replace_owner(action, url):
+        merging.rows["t1"] = {**merging.rows["t1"], "claimed_by": successor, "claim_generation": 2}
+        merging.store.release("sw", "t1", AGENT)
+        merging.store.claim("sw", "t1", successor, 60_000)
+        ready.save(merging.store, "sw", "t1", {"agent": successor, "head": "new-head"})
+        return {"queued": False}
+
+    merging.run(queuer=replace_owner)
+    assert merging.rows["t1"]["state"] == "pr"
+    assert merging.rows["t1"]["claimed_by"] == successor
+    assert merging.rows["t1"]["claim_generation"] == 2
+    assert merging.store.claimant("sw", "t1") == successor
+    assert ready.record(merging.store, "sw", "t1") == {"agent": successor, "head": "new-head"}
+    assert merging.ledger.comments == []
+
+
 def test_one_tick_reports_every_unreleased_entry_it_dequeues(merging):
     from scripts.swarm.ledger_events import pull_request
 
