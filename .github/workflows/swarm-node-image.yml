@@ -40,14 +40,6 @@ jobs:
         with:
           fetch-depth: ${{ github.event_name == 'release' && '0' || '1' }}
           persist-credentials: false
-      - name: Require a release tag on main
-        id: main
-        if: github.event_name == 'release'
-        run: |
-          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
-          newest="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-version:refname | head -n 1)"
-          if [[ "$newest" == "$GITHUB_REF_NAME" ]]; then latest=true; else latest=false; fi
-          echo "latest=$latest" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -95,6 +87,14 @@ jobs:
           grep -qE '^github-app-token (.*/)?opt/agentihooks/\.build-token$' "$out/findings.txt"
       - name: Scan the candidate for credentials
         run: bash docker/swarm-node/scan.sh "$CANDIDATE" "$RUNNER_TEMP/worker-image-attestation/candidate-scan"
+      - name: Require a release tag on main
+        id: main
+        if: github.event_name == 'release'
+        run: |
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          newest="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-version:refname | head -n 1)"
+          if [[ "$newest" == "$GITHUB_REF_NAME" ]]; then latest=true; else latest=false; fi
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
       - name: Log in to the registry
         if: >-
           github.event_name == 'release'

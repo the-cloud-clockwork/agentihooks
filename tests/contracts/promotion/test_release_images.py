@@ -49,8 +49,10 @@ def test_a_release_build_refuses_a_tag_that_main_does_not_hold(name):
     assert checkout["with"]["fetch-depth"] == "${{ github.event_name == 'release' && '0' || '1' }}"
     guard = _step(job, "Require a release tag on main")
     assert guard["if"] == "github.event_name == 'release'"
-    names = [step.get("name") for step in job["steps"]]
-    assert names.index(guard["name"]) == 1
+    position = job["steps"].index(guard)
+    publishing = [i for i, step in enumerate(job["steps"]) if "login-action" in step.get("uses", "")]
+    assert publishing
+    assert position < publishing[0]
 
 
 def _guard(tmp_path, ref_name, on_main=True):
