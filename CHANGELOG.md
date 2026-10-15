@@ -38,6 +38,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Running promotion checks finish while newer pushes replace only the pending
+  run; CI promotes the exact graded revision through a temporary snapshot branch.
 - The worker supervisor's workspace create and pane run commands use the remaining startup
   budget instead of a half second timeout.
 - Stopped Codex replay test fixes export field and identity sizes independently of its environment.
