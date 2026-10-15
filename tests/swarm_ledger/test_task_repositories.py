@@ -65,3 +65,36 @@ def test_task_repositories_require_absolute_local_paths(value):
         core.check_op(
             {"op": "task_update", "id": "bad", "by": "swarm", "item": "tasks/t1", "fields": {"repositories": value}}
         )
+
+
+def test_repository_publication_branches_are_persisted():
+    add = {"op": "task_add", "id": "add", "by": "swarm", "task": "t1", "title": "bundle fix", "lane": "eng"}
+    core.sync(SLUG, ops=[add])
+    branches = {"/workspace/agentihooks": "hooks-fix", "/workspace/agentihooks-bundle": "bundle-fix"}
+    update = {
+        "op": "task_update",
+        "id": "update",
+        "by": "swarm",
+        "item": "tasks/t1",
+        "fields": {"repository_branches": branches},
+    }
+    core.check_op(update)
+    state, rejected = core.sync(SLUG, ops=[update])
+    assert rejected == []
+    assert state["tasks"][0]["repository_branches"] == branches
+
+
+@pytest.mark.parametrize(
+    "branches", ([], {"relative": "branch"}, {"/repo": None}, {"/repo": ""}, {"/repo": "bad branch"})
+)
+def test_repository_publication_branches_are_validated(branches):
+    with pytest.raises(ValueError, match="repository_branches"):
+        core.check_op(
+            {
+                "op": "task_update",
+                "id": "bad",
+                "by": "swarm",
+                "item": "tasks/t1",
+                "fields": {"repository_branches": branches},
+            }
+        )

@@ -150,8 +150,15 @@ def test_publication_commits_explicit_files_before_grading_and_pushing(publicati
     assert result["branch"] == "engineer-test"
     assert task["branch"] == "engineer-test"
     fields = {"branch": "engineer-test", "branch_repo": str(repository.parent / "remote.git")}
-    assert result == {"worktree": str(worktree), **fields, "head": head}
-    assert publication.updates == [("swarm", "t1", fields, agent.name)]
+    assert result == {
+        "worktree": str(worktree),
+        **fields,
+        "head": head,
+        "gate": str(worktree / "scripts" / "ci_prepush"),
+    }
+    assert publication.updates == [
+        ("swarm", "t1", {**fields, "repository_branches": {str(repository): "engineer-test"}}, agent.name)
+    ]
     assert git(worktree, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/engineer-test"
 
 
@@ -578,7 +585,11 @@ def test_cli_prepares_and_publishes_from_the_primary_checkout(publication, monke
     assert prepared == {**checkout, "repository": str(publication.repo), "repository_source": "swarm default"}
     assert cli.main(["swarm", "--as", agent.name, "publish", option, "Change chosen", "--", "chosen.txt"]) == 0
     head = git(publication.root, "rev-parse", "HEAD")
-    assert json.loads(capsys.readouterr().out) == {**checkout, "head": head}
+    assert json.loads(capsys.readouterr().out) == {
+        **checkout,
+        "head": head,
+        "gate": str(publication.root / "scripts" / "ci_prepush"),
+    }
     assert git(publication.repo, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
 
 
