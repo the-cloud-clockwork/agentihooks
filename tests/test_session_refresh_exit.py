@@ -23,7 +23,7 @@ def test_launcher_retains_native_exit_before_cleanup(tmp_path, monkeypatch, stat
     herdr.write_text('#!/usr/bin/env bash\nprintf \'{"result":{"text":"native final warning\\\\n"}}\\n\'\n')
     herdr.chmod(0o700)
     shell = fake_bin / "shell"
-    shell.write_text('#!/usr/bin/env bash\ntest -s "$AGENTIHOOKS_EXIT_RECORD"\n')
+    shell.write_text('#!/usr/bin/env bash\ntest -z "${AGENTIHOOKS_EXIT_RECORD+x}"\n')
     shell.chmod(0o700)
     command = f'touch "{tmp_path}/agentihooks-claude-terminal/closing-$PPID"; ' if closing else ""
     native = "kill -TERM -- -$$" if status == 143 else f"exit {status}"
