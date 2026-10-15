@@ -128,7 +128,7 @@ def check_build(root: Path) -> None:
 
 
 def development_python(root: Path) -> str:
-    primary = Path(git(root, "rev-parse", "--path-format=absolute", "--git-common-dir")).parent
+    primary = Path(git(root, "rev-parse", "--git-common-dir")).parent
     for base in (primary.parent, root, primary):
         python = base / ".venv" / "bin" / "python"
         if python.is_file():
