@@ -177,6 +177,20 @@ def test_matching_handoff_checks_that_its_recorded_branch_still_exists(store, mo
     assert "HEAD:master-323133-0113" not in rendered
 
 
+def test_foreign_repository_rejection_preserves_handoff_facts(store, monkeypatch):
+    task = {"id": "t1", "branch": "recorded", "branch_repo": "https://github.com/other/repo"}
+    saved = {"task": "t1", "reason": "quota", "seat": "eng-1@sw", "continue_from": "origin/recorded"}
+    monkeypatch.setattr(stack, "origin_key", lambda repo: stack.repo_key(REPO))
+    result = continuation.resolve("/repo", task, {"t1": task}, [], saved, envelope.reclaim)
+    assert result == {
+        **saved,
+        "remote_branch": "none",
+        "remote_head": "none",
+        "continue_from": "fresh",
+        "fresh_reason": "the task branch belongs to another repository",
+    }
+
+
 def test_parked_task_never_cuts_from_a_branch_registered_to_another_pull_request(store, monkeypatch):
     def parked(task):
         task.update(branch="engineer-323133-1452", parked_on=["t725"], stacked_base="base")
@@ -184,3 +198,12 @@ def test_parked_task_never_cuts_from_a_branch_registered_to_another_pull_request
     launched, rendered = _launch(store, monkeypatch, CASES[0], setup=parked)
     assert launched["reclaim"]["continue_from"] == "fresh"
     assert "--from origin/engineer-323133-1452" not in rendered
+
+
+def test_parked_task_keeps_its_valid_branch_and_restack_step(store, monkeypatch):
+    def parked(task):
+        task.update(parked_on=["t725"], stacked_base="base")
+
+    _, rendered = _launch(store, monkeypatch, CASES[0], setup=parked)
+    assert "--from origin/master-323133-0113" in rendered
+    assert "restack" in rendered

@@ -5,6 +5,7 @@ A fact the runtime looked for and could not find is "unknown"; one it found abse
 
 import json
 import subprocess
+from collections.abc import Collection
 from datetime import datetime, timezone
 
 from scripts.inbox.store import CLOSED, InboxStore
@@ -96,7 +97,7 @@ def continuation(worktree, branch, run):
     return {"remote_branch": remote, "remote_head": head, "continue_from": "fresh", "fresh_reason": why}
 
 
-def reclaim(repo: str, lives: list[str], recorded: str, run=subprocess.run, forbidden=()) -> dict:
+def reclaim(repo: str, lives: list[str], recorded: str, run=subprocess.run, forbidden: Collection[str] = ()) -> dict:
     checked = [recorded] if recorded else list(dict.fromkeys(plain(name) for name in lives))
     checked = [branch for branch in checked if branch not in forbidden]
     unread = []

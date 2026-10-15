@@ -1091,14 +1091,15 @@ def test_a_reopened_task_with_a_branch_and_no_earlier_life_is_given_that_branch(
     assert runtime.tasks[-1]["reclaim"] == RECLAIMED
 
 
-def test_a_handed_off_task_keeps_its_handoff_continuation_and_takes_no_reclaim(store, reclaims):
+def test_a_handed_off_task_revalidates_its_handoff_continuation(store, reclaims):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
     store.put_handoff("sw", "t1", "seam 1 green", envelope={"continue_from": "origin/engineer-a1b2c3-0001"})
     store.put_agent("sw", replace(workers(store)[0], state="finished"))
     tick("sw", store, ledger, runtime, now_ms=2_000)
-    assert runtime.tasks[-1]["handoff_envelope"] == {"continue_from": "origin/engineer-a1b2c3-0001"}
-    assert reclaims == [] and "reclaim" not in runtime.tasks[-1]
+    assert runtime.tasks[-1]["handoff_envelope"] == RECLAIMED
+    assert reclaims == [("/repo", ["engineer@a1b2c3-0001"], "engineer-a1b2c3-0001")]
+    assert "reclaim" not in runtime.tasks[-1]
 
 
 def test_a_spawned_agent_keeps_the_model_and_effort_it_was_placed_with(store):
