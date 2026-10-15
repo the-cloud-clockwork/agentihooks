@@ -47,7 +47,7 @@ finish() {
   printf 'FROM %s\nCOPY . /\n' "$image" \
     | docker build -q -t "$bundle_image" -f - tests/fixtures/swarm_v2/worker-bundle >/dev/null
   wait "$packages"
-  docker build -q --build-arg IMAGE="$image" -t "$terminal_image" \
+  docker build --progress=plain --build-arg IMAGE="$image" -t "$terminal_image" \
     -f "$chart/ci/terminal-worker.Dockerfile" . >/dev/null
   printf 'terminal fixture image built\n'
   bash scripts/packaging/swarm-image-clients.sh "$image"
