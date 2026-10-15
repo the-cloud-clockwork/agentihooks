@@ -637,7 +637,7 @@ jobs:
           NODE_OPTIONS: ${{ matrix.python-version == '3.12' && format('--require {0}/tests/node_capture.cjs', github.workspace) || '' }}
           CI_FLAKES: ${{ github.workspace }}/flakes.jsonl
           JS_COVERAGE_DIR: ${{ matrix.python-version == '3.12' && format('{0}/js-coverage', github.workspace) || '' }}
-        run: workers=$(python -m scripts.ci_cpu_quota) && python -c 'import os, shlex, sys, pytest; sys.exit(pytest.main(shlex.split(os.environ.pop("PYTEST_ADDOPTS", "")) + sys.argv[1:]))' tests/ -v -n "$workers" --dist loadgroup --shard "$SHARD" -p tests.flake_ledger --reruns 2 --tb=short -o faulthandler_timeout=60 --store-durations --durations-path durations.json -p no:anyio -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml
+        run: start=$SECONDS && status=0 && workers=$(python -m scripts.ci_cpu_quota) && python -c 'import os, shlex, sys, pytest; sys.exit(pytest.main(shlex.split(os.environ.pop("PYTEST_ADDOPTS", "")) + sys.argv[1:]))' tests/ -v -n "$workers" --dist loadgroup --shard "$SHARD" -p tests.flake_ledger --reruns 2 --tb=short -o faulthandler_timeout=60 --store-durations --durations-path durations.json -p no:anyio -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml || status=$?; echo "{\"seconds\":$((SECONDS - start))}" > elapsed.json; exit "$status"
 
       - name: Mint the token that restores queue unit artifacts
         id: unit-token
@@ -675,12 +675,14 @@ jobs:
 
       # Shards balance on these: per-test times here differ from a local run.
       - name: Upload durations
+        if: ${{ !cancelled() && hashFiles('durations.json') != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: durations-${{ matrix.python-version }}-${{ matrix.shard }}
           path: |
             durations.json
             durations.sha256
+            elapsed.json
           retention-days: 14
           overwrite: true
 
@@ -1564,8 +1566,8 @@ jobs:
     needs: [unit, reuse]
     # The record step refuses a missing 3.12 shard, so a run red only on another shard still publishes what later entries wait on.
     if: ${{ !cancelled() && github.event_name == 'merge_group' }}
-    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && github.triggering_actor == 'github-merge-queue[bot]') && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
-    timeout-minutes: 13
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && github.triggering_actor == 'github-merge-queue[bot]') && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 60
     permissions:
       contents: read
     steps:
@@ -1645,10 +1647,12 @@ jobs:
           BASE_SHA: ${{ github.event.merge_group.base_sha }}
         run: |
           tree=$(gh api "repos/$GITHUB_REPOSITORY/commits/$BASE_SHA" --jq '.commit.tree.sha')
-          wait="${WAIT_SECONDS:-600}"
-          deadline=$((SECONDS + wait))
           while true; do
             runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?head_sha=$BASE_SHA&per_page=20" --jq '.workflow_runs[] | select(.event != "workflow_dispatch") | "\(.id) \(.status)"')
+            if [[ -z "$runs" ]]; then
+              echo "::error::No Tests run remains on base $BASE_SHA, so the queue entry was removed and this group is superseded."
+              exit 1
+            fi
             running=0
             while read -r run status; do
               [[ -n "$run" ]] || continue
@@ -1661,12 +1665,8 @@ jobs:
                 exit 0
               fi
             done <<< "$runs"
-            if [[ -n "$runs" && "$running" == 0 ]]; then
+            if [[ "$running" == 0 ]]; then
               echo "::error::Every Tests run on base $BASE_SHA finished without a coverage baseline, so the queue entry it measured failed and this group is superseded."
-              exit 1
-            fi
-            if (( SECONDS >= deadline )); then
-              echo "::error::No run kept a coverage baseline for base $BASE_SHA within $wait seconds."
               exit 1
             fi
             sleep "${POLL_SECONDS:-30}"

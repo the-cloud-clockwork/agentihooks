@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 
 from coverage import Coverage, CoverageData
+from coverage.exceptions import NotPython
 
 from tests.coverage_grade import GRADED, Measurement, Result, Unmeasured, executed, grade, line_map, pair_moves
 from tests.coverage_history import dev_runs, git, renamed
@@ -106,7 +107,7 @@ def main(argv: list[str] | None = None) -> int:
     with tempfile.TemporaryDirectory() as scratch:
         try:
             head, base, result = _grade(args, head_files, Path(scratch))
-        except (Unmeasured, subprocess.CalledProcessError, KeyError, ValueError, OSError) as exc:
+        except (Unmeasured, subprocess.CalledProcessError, KeyError, ValueError, OSError, NotPython) as exc:
             print(f"::error::The coverage ratchet cannot grade: {exc}")
             return 1
     text = report(

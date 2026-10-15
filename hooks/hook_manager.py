@@ -724,6 +724,7 @@ def on_user_prompt_submit(payload: dict) -> None:
     _swarm_ledger(payload)
     typed = _operator_words(payload)
     _operator_mode(payload, typed)
+    _master_coding(payload, typed)
     _request_trace_flush(payload, "prompt")
 
     try:
@@ -1112,6 +1113,18 @@ def _operator_mode(payload: dict, typed: bool) -> None:
         log("operator mode failed", {"error": str(e)})
 
 
+def _master_coding(payload: dict, typed: bool) -> None:
+    try:
+        from hooks.common import inject_context
+        from hooks.context import master_coding
+
+        state = master_coding.observe(payload.get("session_id"), payload.get("prompt"), typed)
+        if state:
+            inject_context(master_coding.NOTICES[state], also_log=False, skip_compression=True)
+    except Exception as e:
+        log("master coding window failed", {"error": str(e)})
+
+
 def _operator_question(payload: dict) -> str:
     try:
         from hooks.context import operator_mode
@@ -1237,9 +1250,12 @@ def _check_shell_guards(payload: dict) -> None:
         return
     try:
         from hooks.context.branch_guard import check_branch_guard, check_commit_on_main
+        from hooks.context.master_coding import protection_refusal
 
         check_branch_guard(payload)
         check_commit_on_main(payload)
+        if refusal := protection_refusal(payload):
+            raise BlockAction(refusal)
     except BlockAction:
         raise
     except Exception as e:
@@ -2529,10 +2545,12 @@ def on_permission_request(payload: dict) -> None:
     """Handle PermissionRequest event."""
     tool_name = payload.get("tool_name", "unknown")
     log(f"Permission requested: {tool_name}", {"tool": tool_name})
-    from hooks.context import planner_plan
+    from hooks.context import master_coding, planner_plan
 
     if planner_plan.accepts(tool_name):
         print(json.dumps(planner_plan.grant(payload.get("tool_input") or {})))
+    elif master_coding.asks_operator(tool_name, payload.get("session_id")):
+        return
     elif os.environ.get("AGENTIHOOKS_SWARM"):
         emit_permission_decision(
             "PermissionRequest",
