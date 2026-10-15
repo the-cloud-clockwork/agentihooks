@@ -154,7 +154,7 @@ def test_a_finished_master_record_does_not_hold_off_the_promotion(store):  # noq
 def test_swarm_status_marks_the_promoted_engineer(store):  # noqa: F811
     runtime, ledger = outage(store)
     tick("sw", store, ledger, runtime, 1 + DOWN)
-    report = status_report(store, "sw", DOC)
+    report = status_report(store, "sw", DOC, runtime)
     assert report["promotion"]["promoted"] == ENGINEER
     assert [(a["name"], a["promoted"]) for a in report["agents"]] == [(ENGINEER, True)]
 

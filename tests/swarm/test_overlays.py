@@ -333,7 +333,9 @@ def test_resume_wears_the_overlays_the_agent_was_launched_with(tmp_path, monkeyp
 def test_status_carries_agent_overlays_and_the_overlays_a_bundle_offers(bundle, swarm, monkeypatch):
     monkeypatch.setattr(status, "page_quota", lambda: [])
     swarm.put_agent("sw", store.AgentRecord("engineer@a1b2c3-0001", "eng", "t1", overlays=["tuner"]))
-    report = status.status_report(swarm, "sw", {"tasks": []})
+    report = status.status_report(
+        swarm, "sw", {"tasks": []}, SimpleNamespace(live_names=lambda: {"engineer@a1b2c3-0001"})
+    )
     assert report["agents"][0]["overlays"] == ["tuner"]
     assert report["config"]["overlays"] == {}
     assert {"name": "trader", "wears": ["engineer", "qa"]} in report["overlays_available"]
