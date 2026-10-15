@@ -81,6 +81,12 @@ def drain_blocks() -> list[tuple[str, str]]:
     return blocks
 
 
+def drain_for_block() -> str:
+    """Return the buffered content to fold into a block message; plain stdout context is dropped."""
+    content = drain()
+    return "" if _plain else content
+
+
 def flush(event_name: str) -> None:
     """Emit the buffered context as one JSON envelope. No-op when empty.
 
@@ -100,7 +106,7 @@ def flush(event_name: str) -> None:
             print(content)
         return
     if not buffers_single_envelope() and not _forced:
-        # Claude path never buffers; guard against misuse.
+        # Nothing forced buffering on this Claude event; print as is.
         if content:
             print(content)
         return

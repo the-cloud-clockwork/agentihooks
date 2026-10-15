@@ -57,10 +57,13 @@ def _shorten(text: str, room: int) -> str:
 
 
 def fit(blocks: list[tuple[str, str]], budget: int | None, sep: str = "\n") -> str:
-    """Join *blocks* (kind, text) highest priority first, within *budget* characters."""
-    ordered = sorted((b for b in blocks if b[1]), key=lambda b: _rank(b[0]))
+    """Join *blocks* (kind, text) highest priority first within *budget* characters; no budget keeps arrival order."""
+    blocks = [b for b in blocks if b[1]]
+    if budget is None:
+        return sep.join(text for _, text in blocks)
+    ordered = sorted(blocks, key=lambda b: _rank(b[0]))
     joined = sep.join(text for _, text in ordered)
-    if budget is None or units(joined) <= budget:
+    if units(joined) <= budget:
         return joined
     room = budget - _NOTICE_ROOM
     kept: list[str] = []

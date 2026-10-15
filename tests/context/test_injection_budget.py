@@ -97,7 +97,27 @@ def test_under_budget_keeps_every_block_in_priority_order():
 def test_unknown_kind_ranks_with_notices():
     from hooks.context.injection_budget import fit
 
-    assert fit([("brain", "brain"), ("mystery", "note"), ("refocus", "focus")], None) == "focus\nnote\nbrain"
+    assert fit([("brain", "brain"), ("mystery", "note"), ("refocus", "focus")], 9000) == "focus\nnote\nbrain"
+
+
+def test_without_a_budget_blocks_keep_arrival_order():
+    from hooks.context.injection_budget import fit
+
+    assert fit([("tool_memory", "memory"), ("", "skipped"), ("enforcement", "rule")], None) == "memory\nskipped\nrule"
+    assert fit([("brain", ""), ("alert", "a")], None) == "a"
+
+
+def test_plain_context_is_dropped_from_a_block_message(monkeypatch):
+    from hooks.targets import emitter
+
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
+    emitter.force_buffer(plain=True)
+    emitter.buffer_context("session context", "enforcement")
+    assert emitter.drain_for_block() == ""
+    assert not emitter.has_buffered()
+    emitter.force_buffer()
+    emitter.buffer_context("tool context")
+    assert emitter.drain_for_block() == "tool context"
 
 
 def test_shortened_block_is_named_and_total_stays_under_budget():
@@ -143,4 +163,4 @@ def test_tool_memory_is_plain_short_and_few(monkeypatch, tmp_path):
     assert not set(text) & set("╔║╠╚═")
     entries = text.splitlines()[1:]
     assert len(entries) == tool_memory.MAX_SHOW <= 5
-    assert all(len(line) <= tool_memory.ENTRY_CHARS + 22 for line in entries)
+    assert all(len(line) == tool_memory.ENTRY_CHARS and line.startswith("- [") for line in entries)

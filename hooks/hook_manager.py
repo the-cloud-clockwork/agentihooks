@@ -2746,7 +2746,7 @@ def main() -> None:
 
             # Codex and Copilot parse hook stdout as ONE JSON object —
             # everything the handlers injected was buffered and is flushed here
-            # as a single envelope. No-op on claude (nothing buffers there).
+            # as a single envelope. Claude flushes its budgeted context here too.
             emitter.flush(event_name)
 
         except BlockAction as e:
@@ -2755,12 +2755,11 @@ def main() -> None:
             # buffered ahead of branch_guard's raise) would otherwise be
             # silently lost — stdout carries nothing on the block path.
             # Fold it into the stderr message instead, which is freeform and
-            # still reaches the model with the deny. Claude never buffers
-            # (every call site there prints immediately), so this is a no-op
-            # on that target and the message is unchanged.
+            # still reaches the model with the deny. Plain stdout context
+            # (Claude SessionStart, UserPromptSubmit) is dropped instead.
             reason = str(e)
             if buffers_single_envelope() or emitter.forced():
-                drained = emitter.drain()
+                drained = emitter.drain_for_block()
                 if drained:
                     reason = f"{reason}\n\n{drained}"
             raise BlockAction(reason) from e

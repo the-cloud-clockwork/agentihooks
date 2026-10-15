@@ -406,10 +406,10 @@ def inject_memory(tool_name="", session_id=""):
         line = f"{tool}: {error}"
         if inp:
             line += f" (input: {inp})"
-        line = " ".join(line.split())
+        line = f"- [{ts}] " + " ".join(line.split())
         if len(line) > ENTRY_CHARS:
             line = line[: ENTRY_CHARS - 3] + "..."
-        lines.append(f"- [{ts}] {line}")
+        lines.append(line)
 
     from hooks.common import inject_context
 
