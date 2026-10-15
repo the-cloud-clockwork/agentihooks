@@ -5,7 +5,8 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.swarm import promotion_watch
-from scripts.swarm.store import PREFIX, RedisStore
+from scripts.swarm.ledger_client import LedgerClient, LedgerRefused
+from scripts.swarm.store import PREFIX, RedisStore, SwarmConfig
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
@@ -43,7 +44,7 @@ class Ledger:
         self.added.append((slug, fields, by))
         self.tasks.append({"id": fields["task"], "title": fields["title"], "state": "open"})
 
-    def update_task(self, slug, task_id, fields, by="swarm", if_state=()):
+    def update_task(self, slug, task_id, fields, by=None, if_state=()):
         self.updates.append((slug, task_id, fields, by, if_state))
         task = next(t for t in self.tasks if t["id"] == task_id)
         if task["state"] in if_state:
@@ -129,8 +130,17 @@ def test_the_watch_reads_the_newest_finished_dev_push_run(store):
 
 
 def test_a_red_run_files_one_urgent_ci_task_per_failed_job_with_run_and_sha(store):
-    ledger = Ledger()
-    actions = refresh(store, ledger, gh([RED], JOBS))
+    calls, ledger = [], Ledger()
+    actions = refresh(store, ledger, gh([RED], JOBS, calls))
+    kwargs = {"cwd": "/repo", "capture_output": True, "text": True, "check": True, "timeout": 60}
+    assert calls == [
+        (["gh", "api", RUNS, "--jq", ".workflow_runs[] | {id, conclusion, head_sha, html_url} | @json"], kwargs),
+        (
+            ["gh", "api", "repos/{owner}/{repo}/actions/runs/900/jobs?per_page=100", "--paginate", "--jq", JOBS_JQ],
+            kwargs,
+        ),
+    ]
+    assert {(slug, by) for slug, _, by in ledger.added} == {(SLUG, "swarm")}
     assert [fields for _, fields, _ in ledger.added] == [
         {
             "task": "promo-900-0",
@@ -294,8 +304,6 @@ def test_a_failed_read_skips_the_pass_and_leaves_the_run_unhandled(store, capsys
 
 
 def test_a_ledger_refusal_leaves_the_run_unhandled_for_the_next_pass(store):
-    from scripts.swarm.ledger_client import LedgerRefused
-
     ledger = Ledger()
 
     def refuse(slug, fields, by):
@@ -307,10 +315,64 @@ def test_a_ledger_refusal_leaves_the_run_unhandled_for_the_next_pass(store):
     assert store.redis.get(promotion_watch.key(SLUG, "seen")) is None
 
 
-def test_the_tick_runs_the_promotion_watch_through_skip_refused():
-    import inspect
-
+def test_the_tick_hands_the_watch_its_ledger_state_and_clock(store, monkeypatch):
     from scripts.swarm import tick
+    from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-    line = "    actions += skip_refused(promotion_watch.refresh, slug, config, store, ledger, doc, now_ms)\n"
-    assert line in inspect.getsource(tick.tick).splitlines(keepends=True)
+    store.create(SwarmConfig(SLUG, "/repo", max_eng=0, max_ci=0))
+    seen = []
+    monkeypatch.setattr(promotion_watch, "refresh", lambda *args: seen.append(args) or ["watched"])
+    ledger = FakeLedger([{"id": "a"}])
+    actions = tick.tick(SLUG, store, ledger, FakeRuntime(), now_ms=4_321)
+    [(slug, config, got_store, got_ledger, doc, now)] = seen
+    assert (slug, config.slug, got_store, got_ledger, [t["id"] for t in doc["tasks"]], now) == (
+        SLUG,
+        SLUG,
+        store,
+        ledger,
+        ["a"],
+        4_321,
+    )
+    assert "watched" in actions
+
+
+def test_a_ledger_without_task_or_alert_lists_still_files_and_closes(store):
+    config = SimpleNamespace(repo="/repo")
+    red = promotion_watch.refresh(SLUG, config, store, Ledger(), {}, NOW, gh([RED], JOBS))
+    assert red[-1] == "raised the promotion alert for dev push run 900"
+    green = promotion_watch.refresh(SLUG, config, store, Ledger(), {}, NOW * 2, gh([GREEN]))
+    assert green == []
+    assert store.redis.get(promotion_watch.key(SLUG, "seen")) == "901"
+
+
+def test_the_first_window_reads_once_the_refresh_interval_has_passed_since_zero(store):
+    calls = []
+    refresh(store, Ledger(), gh([GREEN], calls=calls), promotion_watch.REFRESH_MS)
+    assert len(calls) == 1
+
+
+def test_a_run_numbered_one_is_handled_on_a_fresh_watch(store):
+    ledger = Ledger()
+    refresh(store, ledger, gh([{**RED, "id": 1}], JOBS))
+    assert [fields["task"] for _, fields, _ in ledger.added] == ["promo-1-0", "promo-1-1"]
+
+
+def test_a_read_error_without_stderr_names_the_error(store, capsys):
+    def missing(argv, **kwargs):
+        raise FileNotFoundError("gh is not installed")
+
+    assert refresh(store, Ledger(), missing) == []
+    assert capsys.readouterr().err == "promotion watch skipped, reading dev push runs failed: gh is not installed\n"
+
+
+def test_the_ledger_client_raises_and_closes_alerts_as_the_swarm(monkeypatch):
+    sent = []
+    monkeypatch.setattr(LedgerClient, "_call", lambda self, slug, ops=None: sent.append((slug, ops)))
+    client = LedgerClient()
+    client.raise_alert(SLUG, "promotion", "Dev promotion is red")
+    client.close_alert(SLUG, "al-1", "Dev passed")
+    assert [(slug, [{k: v for k, v in op.items() if k != "id"} for op in ops]) for slug, ops in sent] == [
+        (SLUG, [{"op": "alert_raise", "by": "swarm", "source": "promotion", "text": "Dev promotion is red"}]),
+        (SLUG, [{"op": "alert_close", "by": "swarm", "target": "al-1", "outcome": "Dev passed"}]),
+    ]
+    assert [ops[0]["id"].split("-")[0] for _, ops in sent] == ["alert_raise", "alert_close"]

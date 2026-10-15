@@ -664,11 +664,36 @@ def test_a_second_promotion_raise_while_one_is_live_adds_none_and_one_after_its_
     assert rejected == [] and len(state["alerts"]) == 1
     alert = state["alerts"][0]["id"]
     sync(ops=[{"op": "alert_close", "id": "c1", "target": alert, "outcome": "Dev passed", "by": "swarm"}])
-    state, _ = sync(ops=[raise_promotion("r3", "Dev promotion is red again")])
+    state, _ = sync(ops=[raise_promotion("r3")])
     assert [(a["state"], a["text"]) for a in state["alerts"]] == [
         ("done", "Dev promotion is red"),
-        ("open", "Dev promotion is red again"),
+        ("open", "Dev promotion is red"),
     ]
+
+
+def test_a_raise_on_a_ledger_without_alerts_starts_the_list():
+    doc, ctx = {}, SimpleNamespace(rev=4, at=9, dirty=False)
+    assert ledger_alerts.apply(doc, raise_promotion("r1"), ctx) is True
+    assert doc["alerts"] == [
+        {
+            "id": "al-4-0",
+            "text": "Dev promotion is red",
+            "source": "promotion",
+            "target": "master",
+            "state": "open",
+            "at": 9,
+            "rev": 4,
+        }
+    ]
+    assert ctx.dirty is True
+
+
+def test_the_api_routes_an_alert_raise_to_the_alerts_resource():
+    from scripts.swarm_ledger.api import schemas
+
+    op = raise_promotion("r1")
+    assert schemas.target(op) == "alerts"
+    assert schemas.mismatched_field(schemas.operation_schema("alert_raise"), op) is None
 
 
 def test_a_live_alert_of_another_source_does_not_hold_a_promotion_raise():
