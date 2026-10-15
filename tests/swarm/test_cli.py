@@ -1656,6 +1656,47 @@ def test_a_git_call_that_cannot_run_is_a_clean_refusal(failure, step):
     assert str(refused.value) == f"git {step} could not run: {failure}"
 
 
+def test_a_continuation_pushing_the_recorded_remote_branch_records_that_branch():
+    calls, fake = git_answers(
+        {
+            "branch": (0, "engineer-a1b2c3-0002\n"),
+            "rev-parse": (0, "origin/engineer-a1b2c3-0001\n"),
+            "ls-remote": (0, "abc\trefs/heads/engineer-a1b2c3-0001\n"),
+        }
+    )
+    assert cli.worktree_branch(run=fake, recorded="engineer-a1b2c3-0001") == "engineer-a1b2c3-0001"
+    assert calls == [
+        (["git", "branch", "--show-current"], GIT_OPTS),
+        (["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], GIT_OPTS),
+        (["git", "ls-remote", "--exit-code", "--heads", "origin", "engineer-a1b2c3-0001"], GIT_OPTS),
+    ]
+
+
+@pytest.mark.parametrize(
+    "upstream",
+    [
+        (0, "origin/engineer-ffffff-0009\n"),
+        (0, "fork/engineer-a1b2c3-0001\n"),
+        (128, ""),
+        (0, "engineer-a1b2c3-0001\n"),
+    ],
+)
+def test_a_continuation_pushing_an_unrelated_remote_branch_is_refused(upstream):
+    calls, fake = git_answers({"branch": (0, "engineer-a1b2c3-0002\n"), "rev-parse": upstream, "ls-remote": (2, "")})
+    with pytest.raises(SwarmError) as refused:
+        cli.worktree_branch(run=fake, recorded="engineer-a1b2c3-0001")
+    assert str(refused.value) == (
+        "branch engineer-a1b2c3-0002 is not on origin; push it first with git push -u origin engineer-a1b2c3-0002"
+    )
+    assert calls[-1] == (["git", "ls-remote", "--exit-code", "--heads", "origin", "engineer-a1b2c3-0002"], GIT_OPTS)
+
+
+def test_a_checkout_on_the_recorded_branch_reads_no_upstream():
+    calls, fake = git_answers({"branch": (0, "engineer-a1b2c3-0001\n"), "ls-remote": (0, "abc\trefs/heads/x\n")})
+    assert cli.worktree_branch(run=fake, recorded="engineer-a1b2c3-0001") == "engineer-a1b2c3-0001"
+    assert [argv[1] for argv, _ in calls] == ["branch", "ls-remote"]
+
+
 HEAD_JSON = (
     '{"headRefName": "engineer-a1b2c3-0001", "headRepository": {"name": "bundle"}, '
     '"headRepositoryOwner": {"login": "fork-owner"}}'
@@ -1726,6 +1767,28 @@ def test_swarm_branch_records_the_worktree_branch_on_the_agent_task(env, monkeyp
     assert ledger.rows["t1"]["branch"] == "engineer-a1b2c3-0001"
     assert ledger.rows["t1"].get("branch_repo") == recorded.get("branch_repo")
     assert json.loads(capsys.readouterr().out) == {"task": "t1", "branch": "engineer-a1b2c3-0001", **recorded}
+
+
+def test_swarm_branch_on_a_continuation_records_the_predecessor_branch_and_keeps_its_pull_request(
+    env, monkeypatch, capsys
+):
+    _, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    ledger.rows["t1"].update(branch="engineer-a1b2c3-0001", pr_url=URL3)
+    seen = []
+    monkeypatch.setattr(cli, "worktree_branch", lambda recorded="": seen.append(recorded) or recorded)
+    monkeypatch.setattr(cli, "origin_repo", lambda: "https://github.com/o/r")
+    capsys.readouterr()
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "branch") == 0
+    assert seen == ["engineer-a1b2c3-0001"]
+    assert ledger.rows["t1"]["branch"] == "engineer-a1b2c3-0001" and ledger.rows["t1"]["pr_url"] == URL3
+    assert json.loads(capsys.readouterr().out) == {
+        "task": "t1",
+        "branch": "engineer-a1b2c3-0001",
+        "branch_repo": "https://github.com/o/r",
+        "pr_url": URL3,
+    }
 
 
 @pytest.mark.parametrize(
