@@ -113,6 +113,11 @@ def test_push_baselines_keep_the_measured_tree_key(step, key):
     assert entry["with"]["key"] == key
 
 
+def test_push_history_falls_back_to_the_newest_dev_baseline_when_the_previous_run_was_superseded():
+    entry = _step(_jobs()["coverage-baseline"]["steps"], "Restore measured coverage history")
+    assert entry["with"]["restore-keys"] == "coverage-baseline-"
+
+
 def test_every_unit_shard_downloads_the_one_republished_dev_durations():
     jobs = _jobs()
     steps = jobs["split"]["steps"]
