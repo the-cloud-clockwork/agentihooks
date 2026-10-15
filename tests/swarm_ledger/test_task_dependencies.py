@@ -81,3 +81,56 @@ def test_retained_pull_claim_waits_for_all_dependencies_to_finish(state):
     dep["state"] = "done"
     live, ctx = claim(doc, "pr")
     assert (live["state"], live["claimed_by"], ctx.dirty) == ("pr", "engineer-next", True)
+
+
+@pytest.mark.parametrize("field", ["depends_on", "parked_on"])
+def test_claim_waits_when_a_current_dependency_is_missing(field):
+    work = {
+        "id": "work",
+        "title": "repair",
+        "lane": "eng",
+        "state": "open",
+        "claimed_by": "",
+        field: ["done", "missing"],
+    }
+    live, ctx = claim({"tasks": [work, {"id": "done", "state": "done"}]})
+    assert (live["state"], live["claimed_by"], ctx.dirty) == ("open", "", False)
+
+
+def test_claim_treats_an_unspecified_state_as_open():
+    work = {"id": "work", "title": "repair", "lane": "eng", "claimed_by": "", "depends_on": ["dep"]}
+    live, ctx = claim({"tasks": [work, {"id": "dep", "state": "open"}]})
+    assert "state" not in live
+    assert (live["claimed_by"], ctx.dirty) == ("", False)
+
+
+@pytest.mark.parametrize(
+    ("state", "by", "fields"),
+    [
+        ("open", "engineer", {"state": "claimed", "claimed_by": "engineer-next"}),
+        ("claimed", "swarm", {"state": "pr", "claimed_by": "engineer-next"}),
+        ("open", "swarm", {"state": "open", "claimed_by": "engineer-next"}),
+        ("open", "swarm", {"state": "claimed", "claimed_by": ""}),
+        ("open", "swarm", {"branch": "retained-branch"}),
+        ("pr", "swarm", {"claimed_by": "engineer-next"}),
+    ],
+)
+def test_dependency_guard_preserves_nonclaim_updates(state, by, fields):
+    work = {
+        "id": "work",
+        "title": "repair",
+        "lane": "eng",
+        "state": state,
+        "claimed_by": "previous",
+        "depends_on": ["dep"],
+    }
+    doc = {"tasks": [work, {"id": "dep", "state": "open"}]}
+    op = {"op": "task_update", "id": "update", "by": by, "item": "tasks/work", "fields": fields}
+    ledger_tasks.check(op)
+    ctx = Context({"rev": 0, "stamps": {}}, 1)
+
+    assert ledger_tasks.apply(doc, op, ctx)
+
+    assert ctx.refused == []
+    assert ctx.dirty
+    assert all(work[key] == value for key, value in fields.items())
