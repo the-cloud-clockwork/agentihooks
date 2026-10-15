@@ -1,5 +1,15 @@
 # Tests workflow timing
 
+## Delivery tiers
+
+Pull request checks run once on the current head: lint, format, size, static analysis, changed-line coverage and mutation, and touched tests. The `dev` merge queue runs the full unit suite and test count checks on the merge group; it does not repeat the pull request checks. Shard time budgets do not hold the queue.
+
+Each integration push runs the promotion tier, including module coverage, scheduled mutation reports, image and deployment smoke checks and duration refresh. Newer heads cancel older promotion runs. A red promotion keeps `main` unchanged while `dev` keeps merging, and the swarm promotion watch files repair work. Green promotion lets CI alone merge the graded `dev` head into `main`, tag a release and publish versioned and `:release` images. The `:dev` image remains an experimentation image.
+
+See [Delivery tiers](/docs/reference/delivery-tiers/) for check ownership. The measurements below record earlier workflow versions; their old event assignments do not describe the current tiers. Tests and mutation runs execute in CI only.
+
+## Historical measurements
+
 Last ten runs of the Tests workflow on dev (35380163028, 35379942561, 35379468297, 35156774129, 35156548701, 35156299806, 35155214526, 35138446531, 35138276256, 35137837913). Seconds per step, mean and max over those runs.
 
 | Job | Step | Mean | Max | Slowest run |
