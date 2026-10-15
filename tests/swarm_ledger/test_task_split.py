@@ -81,6 +81,13 @@ def test_a_split_with_bound_pull_requests_is_not_rewritten():
     assert "tasks/t1: a half has a pull request" in state["_meta"]["warnings"][-1]
 
 
+def test_a_task_with_a_recorded_pull_request_is_not_split():
+    update("t1", {"pr_url": "https://github.com/o/r/pull/9"}, by=ENGINEER)
+    state, rejected = split("t1", ["1-2", "3-4"])
+    assert rejected == ["split-1"] and "split" not in row(state, "t1")
+    assert "tasks/t1: the task has a pull request outside the split" in state["_meta"]["warnings"][-1]
+
+
 def test_an_unknown_task_is_skipped():
     _, rejected = split("t9", ["1-2", "3-4"])
     assert rejected == ["split-1"]

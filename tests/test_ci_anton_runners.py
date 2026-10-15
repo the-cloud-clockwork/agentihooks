@@ -33,6 +33,7 @@ MOVED = {
     ("hive-worker.yml", "kind"): STANDARD,
     ("hive-worker.yml", "publish"): STANDARD,
     ("brain-smoke.yml", "smoke"): QUEUED,
+    ("codex-cache.yml", "seed"): STANDARD,
     ("coverage-stability.yml", "compare"): BATCH,
     ("equivalence.yml", "ledger-equivalence"): STANDARD,
     ("helm-kind.yml", "kind"): QUEUED,

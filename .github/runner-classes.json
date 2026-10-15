@@ -2,6 +2,7 @@
   "access-audit.yml/audit": "light",
   "brain-smoke.yml/smoke": "standard",
   "ci-templates.yml/actionlint": "hosted",
+  "codex-cache.yml/seed": "standard",
   "coverage-stability.yml/compare": "batch",
   "equivalence.yml/ledger-equivalence": "standard",
   "gate-protected.yml/grade": "hosted",
