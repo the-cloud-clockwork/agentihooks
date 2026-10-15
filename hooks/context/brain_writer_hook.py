@@ -250,7 +250,12 @@ def _drain_outbox(outbox_dir: str) -> int:
                 "attrs": attrs,
                 "idempotency_key": payload.get("idempotency_key"),
             }
-        except (OSError, KeyError, TypeError, json.JSONDecodeError):
+            body, idem = _marker_request(
+                marker,
+                payload.get("session_id") or "",
+                payload.get("cwd") or payload.get("project", ""),
+            )
+        except (OSError, KeyError, TypeError, ValueError, AttributeError):
             try:
                 f.rename(f.with_name(f.name + ".bad"))
                 log("brain_writer: quarantined unparseable outbox file", {"file": f.name})
@@ -258,9 +263,6 @@ def _drain_outbox(outbox_dir: str) -> int:
                 pass  # vanished mid-quarantine — a concurrent drain got it
             continue
 
-        body, idem = _marker_request(
-            marker, payload.get("session_id") or "", payload.get("cwd") or payload.get("project", "")
-        )
         response = post("/marker", body=body, idempotency_key=idem, surface_http_errors=True)
         status = (response or {}).get("__http_status__")
         if status in (400, 404, 422):
