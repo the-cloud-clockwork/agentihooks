@@ -118,3 +118,44 @@ def test_task_route_peak_allocation_is_bounded_by_page():
         tracemalloc.stop()
     assert len(reply["data"]) == 2
     assert peak < 512_000, f"page request allocated {peak} bytes for two returned tasks"
+
+
+@pytest.mark.parametrize("saved", [None, 3])
+@pytest.mark.parametrize(
+    "before,after,changed",
+    [
+        (None, None, False),
+        (None, [], False),
+        ([], None, False),
+        ([], [], False),
+        ([{"id": "t1"}], [{"id": "t1"}], False),
+        ([], [{"id": "t1"}], True),
+    ],
+)
+def test_task_revision_persists_across_optional_collection_writes(tmp_path, saved, before, after, changed):
+    from scripts.swarm_ledger.api.resources import resource_revision
+    from tests.swarm_ledger.test_sqlite import document, store
+
+    source = document()
+    source.pop("tasks")
+    if before is not None:
+        source["tasks"] = before
+    source["_meta"]["rev"] = 5
+    if saved is not None:
+        source["_meta"]["task_revision"] = saved
+    repository = store(tmp_path)
+    repository.import_document("ledger", source)
+    entry = repository.current("ledger")
+    state = json.loads(entry.text)
+    state.pop("tasks", None)
+    if after is not None:
+        state["tasks"] = after
+    state["title"] = "Unrelated title update"
+    state["_meta"]["rev"] = 6
+    with repository.connect() as connection, connection:
+        repository._write(connection, "ledger", entry, state, [])
+    reloaded = store(tmp_path).current("ledger").state
+    expected = 6 if changed else (5 if saved is None else saved)
+    assert reloaded["_meta"]["rev"] == 6
+    assert resource_revision(reloaded, "tasks") == f"{expected:064x}"
+    assert reloaded.get("tasks", []) == ([] if after is None else after)
