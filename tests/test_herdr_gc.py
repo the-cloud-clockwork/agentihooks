@@ -532,7 +532,7 @@ def test_a_dropped_agent_prompt_protects_its_pane_under_either_name(env, owner, 
         scan_iter=lambda match: (key for key in prompts if fnmatchcase(key, match)),
     )
     owners = herdr_gc.Owners(lambda url: store)
-    expected = (herdr_gc.KEEP, "used inside the quiet window") if kept else (herdr_gc.CLOSE, "its agent retired")
+    expected = (herdr_gc.KEEP, "used inside the quiet window") if kept else (herdr_gc.CLOSE, "its agent was retired")
     assert actions(sweep(env, herdr, owners)) == {"w1:p2": expected}
     assert herdr.closed == ([] if kept else [("pane", "w1:p2")])
 
