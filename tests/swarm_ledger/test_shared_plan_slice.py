@@ -21,6 +21,23 @@ TABLE = (
     "## Ship\n"
     "Other\n"
 )
+PADDED = (
+    "# Plan\n"
+    "## Intro\n" + "".join(f"Note {n}\n" for n in range(1, 11)) + "## Build\n"
+    "<!-- slice: table -->\n"
+    "### Tasks\n"
+    "| Task | Work |\n"
+    "| --- | --- |\n"
+    "| t1 | Cache the reads, see [ship](#ship) |\n"
+    "| t1 | Warm the cache |\n"
+    "| t2 | Batch the writes after t1 |\n"
+    "| t1 | Evict late |\n"
+    "## Notes\n"
+    "Keep it\n"
+    '<a id="ship"></a>\n'
+    "## Ship\n"
+    "Other\n"
+)
 SHARED = (
     "plan slice first already belongs to open task a: give each task its own slice anchor, "
     "a <!-- slice: name --> line above its own row or section, or group the tasks into one grouped task"
@@ -40,24 +57,34 @@ def row(task_id, title, **fields):
     }
 
 
-@pytest.fixture
-def table(tmp_path, monkeypatch):
+def stored(tmp_path, monkeypatch, text, tasks):
     from scripts.swarm_ledger import HERE
 
     monkeypatch.syspath_prepend(str(HERE))
     from scripts.swarm_ledger import ledger_artifacts
 
     monkeypatch.setattr(ledger_artifacts.core, "LEDGER_DIR", tmp_path)
-    file = ledger_artifacts.store("tables", "plan.md", TABLE.encode())
+    file = ledger_artifacts.store("tables", "plan.md", text.encode())
     ref = {"artifact": f"http://127.0.0.1:8765/artifacts/tables/{file['id']}", "lines": "2-9"}
     phase = {"id": "p1", "title": "Build", "description": "Fast integration.", "plan_ref": ref}
-    tasks = [row("t1", "Cache the reads"), row("t2", "Batch the writes"), row("t3", "Drop the old index")]
     return {
         "overview": "Project intent",
         "artifacts": [{"plan": True, "file": file}],
         "phases": [phase],
         "tasks": tasks,
     }
+
+
+@pytest.fixture
+def table(tmp_path, monkeypatch):
+    tasks = [row("t1", "Cache the reads"), row("t2", "Batch the writes"), row("t3", "Drop the old index")]
+    return stored(tmp_path, monkeypatch, TABLE, tasks)
+
+
+@pytest.fixture
+def padded(tmp_path, monkeypatch):
+    tasks = [row("t1", "Cache the reads", plan_lines="14-21"), row("t2", "Batch the writes", plan_lines="14-21")]
+    return stored(tmp_path, monkeypatch, PADDED, tasks)
 
 
 def task(doc, task_id):
@@ -104,6 +131,26 @@ class TestRefusal:
         assert plan_read.own_rows("| t2 | Batch the writes after t1 |\n", "8-8", task(table, "t1")) == []
         prose = "| Notes | Cache the reads before the batch |\n"
         assert plan_read.own_rows(prose, "8-8", task(table, "t1")) == []
+
+    def test_the_refusal_names_every_open_task_holding_the_slice(self, table):
+        from scripts.swarm_ledger import ledger_tasks
+
+        assert ledger_tasks.shared_refusal(table, row("t4", "Rename the module")).startswith(
+            "plan slice table already belongs to open task t1, t2, t3: give each task"
+        )
+
+    def test_a_ledger_without_tasks_has_no_sharers(self, table):
+        assert plan_read.sharers({}, task(table, "t1")) == []
+
+    def test_scope_is_the_first_run_of_rows_naming_the_task(self, padded):
+        rows = [(18, "| t1 | Cache the reads, see [ship](#ship) |"), (19, "| t1 | Warm the cache |")]
+        assert (
+            plan_read.own_rows("".join(f"{r}\n" for r in PADDED.splitlines()[13:21]), "14-21", task(padded, "t1"))
+            == rows
+        )
+
+    def test_a_listed_row_or_an_untitled_task_is_matched_by_its_id(self, table):
+        assert plan_read.own_rows("- t1 cache the reads\n", "5-5", {"id": "t1"}) == [(5, "- t1 cache the reads")]
 
     def test_a_task_in_another_phase_or_on_other_lines_shares_nothing(self, table):
         task(table, "t2")["phase"] = "p2"
@@ -160,6 +207,24 @@ class TestPlanRead:
             "so none of them is its scope.\n"
             "Rename the module as the plan row says.\n"
             "\nContext only, not scope:\n" + TABLE
+        )
+
+    def test_plan_read_context_keeps_the_margin_and_skips_linked_sections_already_printed(self, padded):
+        source = PADDED.splitlines()
+        context = "".join(f"{r}\n" for n, r in enumerate(source, 1) if 4 <= n and n not in (18, 19))
+        assert plan_read.read(padded, "tables", "t1", None) == (
+            "Scope: plan lines 14-21 are shared with tasks t2; "
+            "this task's scope is plan lines 18-19, the rows that name it.\n"
+            "| t1 | Cache the reads, see [ship](#ship) |\n| t1 | Warm the cache |\n"
+            "\nContext only, not scope:\n" + context
+        )
+
+    def test_plan_read_of_an_undescribed_sharer_no_row_names_prints_an_empty_scope(self, table):
+        table["tasks"].append(row("t4", "Rename the module"))
+        del table["tasks"][-1]["description"]
+        assert plan_read.read(table, "tables", "t4", None).startswith(
+            "Scope: plan lines 3-9 are shared with tasks t1, t2, t3, and no row names this task, "
+            "so none of them is its scope.\n\n\nContext only, not scope:\n"
         )
 
     def test_plan_read_of_a_slice_one_open_task_holds_prints_the_chunk(self, table):

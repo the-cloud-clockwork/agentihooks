@@ -99,7 +99,7 @@ def sharers(doc: dict, task: dict) -> list[str]:
         other["id"]
         for other in doc.get("tasks", [])
         if other["id"] != task["id"]
-        and other.get("state", "open") != "done"
+        and other.get("state") != "done"
         and (other.get("phase"), other.get("plan_lines")) == held
         and _lead(other) != _lead(task)
     ]
