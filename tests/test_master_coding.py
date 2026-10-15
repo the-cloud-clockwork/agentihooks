@@ -95,12 +95,15 @@ def guard(home, file_path):
     return GUARD["deny_reason"](payload, "master", home)
 
 
-@pytest.mark.parametrize("tool", ["Edit", "Write", "mcp__serena__replace_symbol_body"])
-def test_a_master_subagent_edits_only_inside_a_worktree_without_a_window(master, tool):
+@pytest.mark.parametrize(
+    ("tool", "key"),
+    [("Edit", "file_path"), ("Write", "file_path"), ("mcp__serena__replace_symbol_body", "relative_path")],
+)
+def test_a_master_subagent_edits_only_inside_a_worktree_without_a_window(master, tool, key):
     tree = master / "dev" / "worktrees" / "agentihooks" / "child"
     payload = {
         "tool_name": tool,
-        "tool_input": {"file_path": str(tree / "hooks" / "x.py")},
+        "tool_input": {key: str(tree / "hooks" / "x.py")},
         "session_id": SID,
         "agent_id": "child-a",
         "cwd": "/",
@@ -112,7 +115,7 @@ def test_a_master_subagent_edits_only_inside_a_worktree_without_a_window(master,
         tree / ".npmrc",
         tree / ".claude" / "conditions" / "pre-bash-x.py",
     ]:
-        payload["tool_input"] = {"file_path": str(target)}
+        payload["tool_input"] = {key: str(target)}
         assert GUARD["deny_reason"](payload, "master", master)
 
 
