@@ -7,6 +7,8 @@ import tomllib
 from collections.abc import Callable
 from pathlib import Path
 
+from codex_probe import run_codex
+
 from hooks.secrets import redact
 from scripts.swarm_v2 import worker_home
 from scripts.targets.codex_hook_trust import trusted_state
@@ -110,12 +112,13 @@ def diagnose(
 
 def positive(attempt: Path, tmp: Path = TMP) -> dict:
     record = json.loads((tmp / "record.json").read_text(encoding="utf-8"))
-    diagnostics = diagnose(attempt, tmp)
     docs = configuration(attempt)
     listed = {target: (tmp / f"{target}-mcp.txt").read_text(encoding="utf-8") for target in SERVERS}
     missing = {t: [s for s in names if s not in listed[t]] for t, names in SERVERS.items()}
     assert record["reused"] is False
     assert not any(missing.values()), (missing, listed)
+    codex = run_codex(attempt / "homes" / "codex", tmp=tmp)
+    diagnostics = diagnose(attempt, tmp)
     return {
         "record": record,
         "cli_session_start_hook_registrations": {
@@ -124,6 +127,7 @@ def positive(attempt: Path, tmp: Path = TMP) -> dict:
         "harness_diagnostics": diagnostics,
         "cli_mcp_list": listed,
         "configuration": docs,
+        "codex_probe": codex,
     }
 
 

@@ -112,10 +112,25 @@ if [[ "$proof" != startup ]]; then
             if [[ "$case" == noexec ]]; then
                 volume=/home/worker:uid=10001,gid=10001
             fi
-            docker run --rm --network none --read-only --tmpfs "$volume" --tmpfs /tmp \
+            (
+                docker run --rm --network none --read-only --tmpfs "$volume" --tmpfs /tmp \
                 -v "$fixtures:/fixtures:ro" -v "$probe:/opt/probe:ro" \
                 "$image" bash /opt/probe/profile-probe.sh "${case%-second}" \
-                > "$output/profile-$case.json" 2> "$output/profile-$case.log" &
+                > "$output/profile-$case.json" 2> "$output/profile-$case.log"
+            if [[ "$case" == positive* ]]; then
+                python3 - "$output/profile-$case.json" <<'PYEXIT'
+import json, sys, time
+from pathlib import Path
+path = Path(sys.argv[1])
+report = json.loads(path.read_text())
+latency = time.time() - report['codex_probe']['registered_at']
+assert 0 <= latency < 2, f"Codex registration to container exit took {latency:.3f} seconds"
+report['codex_probe']['registration_to_container_exit_seconds'] = latency
+path.write_text(json.dumps(report) + '\n')
+print(f"Codex registration to container exit took {latency:.3f} seconds")
+PYEXIT
+            fi
+            ) &
             probes+=("$!")
         done
         status=0
