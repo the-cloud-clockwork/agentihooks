@@ -49,3 +49,18 @@ def test_rounds_live_in_the_home_given(tmp_path, monkeypatch):
     review_rounds.start("sw", "t1", tmp_path / "given")
     assert (tmp_path / "given" / "sw" / "gates" / "reviews" / "counts" / "t1" / "rounds").read_text() == "1"
     assert not (tmp_path / "default").exists()
+
+
+@pytest.mark.parametrize("current", ["first", "second"])
+def test_legacy_rounds_remain_bound_to_the_first_pull_request(tmp_path, current):
+    first = "https://github.com/o/r/pull/1"
+    second = "https://github.com/o/r/pull/2"
+    for _ in range(3):
+        review_rounds.start("sw", "t1", tmp_path)
+    if current == "first":
+        with pytest.raises(SwarmError, match="no fourth review round"):
+            review_rounds.start("sw", "t1", tmp_path, pr_url=first)
+    assert review_rounds.start("sw", "t1", tmp_path, pr_url=second, first_pr=first)["round"] == 1
+    with pytest.raises(SwarmError, match="no fourth review round"):
+        review_rounds.start("sw", "t1", tmp_path, pr_url=first)
+    assert review_rounds.start("sw", "t1", tmp_path, pr_url=second)["round"] == 2
