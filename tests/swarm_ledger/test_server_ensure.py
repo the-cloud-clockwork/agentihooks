@@ -41,7 +41,7 @@ def test_client_waits_for_a_reloading_server_without_starting_another(
         "import os, sys, threading, time\n"
         "from pathlib import Path\n"
         "from scripts.swarm_ledger import ledger_server as server\n"
-        "httpd = server.ThreadingHTTPServer((server.HOST, server.PORT), server.Handler)\n"
+        "httpd = server.DrainingServer((server.HOST, server.PORT), server.Handler)\n"
         "server.PIDFILE.write_text(str(os.getpid()))\n"
         "threading.Thread(target=httpd.serve_forever, kwargs={'poll_interval': 0.01}, daemon=True).start()\n"
         "while not (server.core.LEDGER_DIR / 'reload').exists(): time.sleep(0.01)\n"
@@ -49,7 +49,7 @@ def test_client_waits_for_a_reloading_server_without_starting_another(
         "if os.environ['RELEASE_SOCKET'] == 'True': httpd.server_close()\n"
         "(server.core.LEDGER_DIR / 'reloading').touch()\n"
         "time.sleep(0.3)\n"
-        "server.reload_if_changed(0, (server.core.LEDGER_DIR,))\n"
+        "server.reexec()\n"
     )
     env = {**os.environ, "LEDGER_DIR": str(tmp_path), "LEDGER_PORT": str(port)}
     env["RELEASE_SOCKET"] = str(release_socket)

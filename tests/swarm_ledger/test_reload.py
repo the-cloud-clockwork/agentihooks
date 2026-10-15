@@ -6,43 +6,64 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+
+from scripts.swarm_ledger import ledger_server as server
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
-sys.path.insert(0, str(SCRIPTS))
-import ledger_server as server  # noqa: E402
 
 
 class Reload(unittest.TestCase):
     def setUp(self):
         self.dir = Path(tempfile.mkdtemp(prefix="ledger-code-"))
+        self.record = Path(tempfile.mkdtemp(prefix="ledger-record-"))
         self.page = self.dir / "template.html"
         self.page.write_text("<p>old</p>")
         os.utime(self.page, ns=(1, 1_000_000_000))
+        self.held = server.server_code.loaded_code((self.dir,))
         self.calls = []
 
-    def execv(self, *args):
-        self.calls.append(args)
+    def replace(self):
+        self.calls.append("replace")
+
+    def reload(self):
+        with patch.object(server, "PIDFILE", self.record / ".server.pid"):
+            return server.reload_if_changed(self.held, (self.dir,), self.replace)
 
     def test_unchanged_code_keeps_the_server(self):
-        started = server.code_stamp((self.dir,))
-        self.assertFalse(server.reload_if_changed(started, (self.dir,), self.execv))
+        self.assertFalse(self.reload())
         self.assertEqual(self.calls, [])
+        self.assertIsNone(server.server_code.loaded(self.record))
 
-    def test_changed_code_restarts_the_server_in_place(self):
-        started = server.code_stamp((self.dir,))
+    def test_rewritten_files_with_the_same_content_keep_the_server_and_record_their_new_times(self):
+        self.page.write_text("<p>old</p>")
         os.utime(self.page, ns=(2, 2_000_000_000))
-        self.assertTrue(server.reload_if_changed(started, (self.dir,), self.execv))
-        self.assertEqual(self.calls[0][1][-1], "--serve")
+        self.assertFalse(self.reload())
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.held["stamp"], 2_000_000_000)
+        recorded = server.server_code.loaded(self.record)
+        self.assertEqual((recorded["pid"], recorded["stamp"]), (os.getpid(), 2_000_000_000))
+        self.assertFalse(server.server_code.stale(self.record, os.getpid()))
+
+    def test_changed_code_replaces_the_server(self):
+        self.page.write_text("<p>new</p>")
+        os.utime(self.page, ns=(2, 2_000_000_000))
+        self.assertTrue(self.reload())
+        self.assertEqual(self.calls, ["replace"])
 
     def test_a_new_module_counts_as_changed_code(self):
-        started = server.code_stamp((self.dir,))
         new = self.dir / "ledger_new.py"
         new.write_text("")
         os.utime(new, ns=(3, 3_000_000_000))
-        self.assertTrue(server.reload_if_changed(started, (self.dir,), self.execv))
+        self.assertTrue(self.reload())
+
+    def test_the_server_re_execs_itself_to_serve_again(self):
+        calls = []
+        server.reexec(lambda *args: calls.append(args))
+        self.assertEqual(calls[0][1][-2:], [str(server.CODE_DIR / "ledger_server.py"), "--serve"])
 
     def test_the_real_package_has_a_stamp(self):
-        self.assertGreater(server.code_stamp(), 0)
+        self.assertGreater(server.server_code.code_stamp(), 0)
 
 
 class ImportedCode(unittest.TestCase):
@@ -69,9 +90,10 @@ class ImportedCode(unittest.TestCase):
         self.calls.append(args)
 
     def assert_reloads_after(self, changed):
-        started = server.code_stamp(self.dirs)
+        held = server.server_code.loaded_code(self.dirs)
+        changed.write_text("changed = True\n")
         os.utime(changed, ns=(2, 2_000_000_000))
-        self.assertTrue(server.reload_if_changed(started, self.dirs, self.execv))
+        self.assertTrue(server.reload_if_changed(held, self.dirs, self.execv))
 
     def test_an_inbox_change_reloads_the_server(self):
         self.assert_reloads_after(self.files[1])

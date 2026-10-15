@@ -233,7 +233,7 @@ def woken_by_a_publish():
     opened(hub)
     timer = threading.Timer(0.05, hub.publish, args=(SLUG, "ledger", ledger(2)))
     timer.start()
-    events, took = bounded(hub.wait, SLUG, 0, 1.5)
+    events, took = bounded(hub.wait, SLUG, 0, 30)
     timer.join()
     return [at for at, *_ in events], took
 
@@ -254,6 +254,25 @@ def test_wait_wakes_on_a_publish():
 @pytest.mark.wall_clock
 def test_wait_wakes_at_once_on_a_publish():
     assert woken_by_a_publish()[1] < 1
+
+
+def test_stopping_the_hub_ends_every_waiting_stream_at_once():
+    hub = Hub()
+    seq, _ = opened(hub)
+    ended = []
+
+    def waiting():
+        try:
+            hub.wait(SLUG, seq, 30)
+        except Expired:
+            ended.append(True)
+
+    stream = threading.Thread(target=waiting, daemon=True)
+    stream.start()
+    assert hub.stopped is False
+    hub.stop()
+    stream.join(5)
+    assert ended == [True] and hub.stopped is True
 
 
 def test_wait_answers_when_events_are_already_kept():

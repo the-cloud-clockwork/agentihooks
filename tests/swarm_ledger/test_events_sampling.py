@@ -139,12 +139,12 @@ def test_the_code_stamp_follows_every_page_asset_kind(tmp_path, newest):
     for name in ("a.py", "b.html", "c.js", "d.css", "e.md"):
         (tmp_path / name).write_text("x")
         os.utime(tmp_path / name, ns=(1, 90 if name == "e.md" else 50 if name == newest else 10))
-    assert server.code_stamp([tmp_path]) == 50
+    assert server.server_code.code_stamp([tmp_path]) == 50
 
 
 def test_the_code_stamp_of_a_folder_without_code_is_zero(tmp_path):
     (tmp_path / "notes.md").write_text("x")
-    assert server.code_stamp([tmp_path]) == 0
+    assert server.server_code.code_stamp([tmp_path]) == 0
 
 
 def test_stream_resources_loads_the_stored_view_without_reconciling(monkeypatch):

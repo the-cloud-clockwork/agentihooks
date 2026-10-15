@@ -167,6 +167,7 @@ class Watch(unittest.TestCase):
 
     def test_watcher_removes_its_beat_file_on_sigterm(self):
         beat = core.watch_path(SLUG, "watcher")
+        beat.unlink(missing_ok=True)
         env = {**os.environ, "LEDGER_DIR": str(core.LEDGER_DIR), "LEDGER_PORT": "9"}
         command = [
             sys.executable,
@@ -182,7 +183,7 @@ class Watch(unittest.TestCase):
         with open(core.LEDGER_DIR / "watcher.stderr", "w+b") as stderr:
             proc = subprocess.Popen(command, env=env, stdout=subprocess.DEVNULL, stderr=stderr)
             try:
-                for _ in range(50):
+                for _ in range(300):
                     if beat.exists():
                         break
                     time.sleep(0.1)

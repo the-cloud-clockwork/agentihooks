@@ -1,5 +1,6 @@
-"""The ledger server's code folders and the code stamp it loaded."""
+"""The ledger server's code folders and the code it loaded: a modification stamp and a digest of the content."""
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -25,9 +26,37 @@ def code_stamp(code_dirs: tuple[Path, ...] = CODE_DIRS) -> int:
     return max((_mtime(p) for d in code_dirs for p in d.rglob("*") if p.suffix in SUFFIXES), default=0)
 
 
-def record(folder: Path, pid: int, stamp: int, code_dirs: tuple[Path, ...] = CODE_DIRS) -> None:
+def code_digest(code_dirs: tuple[Path, ...] = CODE_DIRS) -> str:
+    digest = hashlib.sha256()
+    for path in sorted(p for d in code_dirs for p in d.rglob("*") if p.suffix in SUFFIXES):
+        try:
+            content = path.read_bytes()
+        except OSError:
+            continue
+        digest.update(f"{path}\0{len(content)}\0".encode())
+        digest.update(content)
+    return digest.hexdigest()
+
+
+def loaded_code(code_dirs: tuple[Path, ...] = CODE_DIRS) -> dict:
+    return {"stamp": code_stamp(code_dirs), "digest": code_digest(code_dirs)}
+
+
+def same(held: dict, code_dirs: tuple[Path, ...]) -> bool:
+    """Whether the code on disk has the content held names; file times that moved alone move held's stamp."""
+    stamp = code_stamp(code_dirs)
+    if stamp == held.get("stamp"):
+        return True
+    if code_digest(code_dirs) != held.get("digest"):
+        return False
+    held["stamp"] = stamp
+    return True
+
+
+def record(folder: Path, pid: int, held: dict, code_dirs: tuple[Path, ...] = CODE_DIRS) -> None:
     written = folder / f"{RECORD}.{pid}"
-    written.write_text(json.dumps({"pid": pid, "stamp": stamp, "dirs": [str(d) for d in code_dirs]}))
+    code = {"stamp": held["stamp"], "digest": held["digest"]}
+    written.write_text(json.dumps({"pid": pid, **code, "dirs": [str(d) for d in code_dirs]}))
     written.replace(folder / RECORD)
 
 
@@ -48,4 +77,10 @@ def stale(folder: Path, pid: int) -> bool:
     held = loaded(folder)
     if held is None or held.get("pid") != pid:
         return True
-    return code_stamp(tuple(Path(d) for d in held.get("dirs", ()))) != held.get("stamp")
+    dirs = tuple(Path(d) for d in held.get("dirs", ()))
+    stamp = held.get("stamp")
+    if not same(held, dirs):
+        return True
+    if held["stamp"] != stamp:
+        record(folder, pid, held, dirs)
+    return False

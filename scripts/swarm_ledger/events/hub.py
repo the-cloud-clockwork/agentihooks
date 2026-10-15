@@ -36,6 +36,7 @@ class Hub:
         self.clock = time.monotonic if clock is None else clock
         self.changed = threading.Condition()
         self.channels = {}
+        self.stopped = False
 
     @staticmethod
     def cursor(channel, seq):
@@ -126,13 +127,18 @@ class Hub:
             return True
 
     def wait(self, slug, seq, timeout):
-        """The events after seq, waiting up to timeout for one; Expired once they fell out of retention."""
+        """The events after seq, waiting up to timeout for one; Expired once they fell out of retention or the hub stopped."""
         with self.changed:
             channel = self.channels[slug]
-            self.changed.wait_for(lambda: channel.seq != seq, timeout)
-            if channel.log and channel.log[0][0] > seq + 1:
+            self.changed.wait_for(lambda: channel.seq != seq or self.stopped, timeout)
+            if self.stopped or (channel.log and channel.log[0][0] > seq + 1):
                 raise Expired
             return [entry for entry in channel.log if entry[0] > seq]
+
+    def stop(self):
+        with self.changed:
+            self.stopped = True
+            self.changed.notify_all()
 
     def evict(self, now=None, idle=IDLE_EVICT_S):
         now = self.clock() if now is None else now

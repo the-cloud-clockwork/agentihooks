@@ -102,21 +102,31 @@ def test_code_reload_runs_only_when_swarm_reload_is_one(value, expected):
     assert server.reloading({} if value is None else {"SWARM_RELOAD": value}) is expected
 
 
-@pytest.mark.parametrize(("value", "calls"), [(None, []), ("0", []), ("1", [((42,),)])])
-def test_the_seed_watcher_reloads_code_only_when_asked(monkeypatch, value, calls):
+@pytest.mark.parametrize(("value", "reloads"), [(None, False), ("0", False), ("1", True)])
+def test_the_seed_watcher_reloads_code_only_when_asked(monkeypatch, value, reloads):
     if value is None:
         monkeypatch.delenv("SWARM_RELOAD", raising=False)
     else:
         monkeypatch.setenv("SWARM_RELOAD", value)
-    monkeypatch.setattr(server, "code_stamp", lambda: 42)
-    monkeypatch.setattr(server, "reload_if_changed", Mock())
+    monkeypatch.setattr(server, "reload_if_changed", Mock(return_value=False))
     monkeypatch.setattr(server.ledger_bin, "tidy", Mock())
     monkeypatch.setattr(server, "bin_closed_without_swarm", Mock())
     monkeypatch.setattr(server, "sample_streams", Mock())
     monkeypatch.setattr(server.time, "sleep", Mock(side_effect=Stop))
+    replace = Mock()
     with pytest.raises(Stop):
-        server.watch_ledgers()
-    assert server.reload_if_changed.call_args_list == calls
+        server.watch_ledgers(replace=replace)
+    expected = [((server.LOADED,), {"replace": replace})] if reloads else []
+    assert server.reload_if_changed.call_args_list == expected
+
+
+def test_the_seed_watcher_ends_once_it_asked_for_a_replacement(monkeypatch):
+    monkeypatch.setenv("SWARM_RELOAD", "1")
+    monkeypatch.setattr(server, "reload_if_changed", Mock(return_value=True))
+    monkeypatch.setattr(server.ledger_bin, "tidy", Mock())
+    monkeypatch.setattr(server.time, "sleep", Mock(side_effect=Stop))
+    server.watch_ledgers(replace=Mock())
+    server.ledger_bin.tidy.assert_not_called()
 
 
 @pytest.mark.parametrize(("value", "child"), [(None, "1"), ("0", "0")])
@@ -139,7 +149,7 @@ def test_a_folder_other_than_the_shared_one_may_serve_on_8765(monkeypatch, tmp_p
     monkeypatch.setattr(server.core, "LEDGER_DIR", tmp_path)
     monkeypatch.setattr(server, "PORT", 8765)
     monkeypatch.setattr(server, "PIDFILE", tmp_path / ".server.pid")
-    monkeypatch.setattr(server, "ThreadingHTTPServer", Mock())
+    monkeypatch.setattr(server, "ThreadingHTTPServer", Mock(return_value=Mock(replacing=False)))
     monkeypatch.setattr(server.threading, "Thread", Mock())
     server.serve()
     server.ThreadingHTTPServer.assert_called_once_with((server.HOST, 8765), server.Handler, bind_and_activate=False)

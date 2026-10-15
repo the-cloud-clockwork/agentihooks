@@ -78,7 +78,7 @@ def current(host, tmp_path):
     code.mkdir(exist_ok=True)
     (code / "a.py").touch()
     (host.folder / ".server.pid").write_text(str(PID))
-    server_code.record(host.folder, PID, server_code.code_stamp((code,)), (code,))
+    server_code.record(host.folder, PID, server_code.loaded_code((code,)), (code,))
     return code
 
 
@@ -162,7 +162,7 @@ def test_runaway_threads_or_memory_outrank_stale_code(tmp_path):
 def test_a_server_running_the_code_on_disk_needs_nothing(tmp_path):
     code = tmp_path / "code"
     code.mkdir()
-    server_code.record(tmp_path, PID, 0, (code,))
+    server_code.record(tmp_path, PID, server_code.loaded_code((code,)), (code,))
     assert ledger_watchdog.why(tmp_path, PID, {"threads": 150, "rss_kb": 1_048_576}) is None
 
 
@@ -292,7 +292,7 @@ def test_a_stale_server_is_restarted_and_three_fast_writes_alert_nobody(store, t
     host = Host(tmp_path)
     plant(host.proc, host.argv)
     code = current(host, tmp_path)
-    os.utime(code / "a.py", ns=(1, 1))
+    (code / "a.py").write_text("changed = True\n")
     clock = Clock()
     host.clock = clock
     ledger = ProbedLedger(clock, write_s=0.3)
@@ -302,6 +302,16 @@ def test_a_stale_server_is_restarted_and_three_fast_writes_alert_nobody(store, t
     assert host.calls[0] == ("kill", PID, signal.SIGTERM)
     assert len(ledger.writes) == 3 and master_mail(store) == [] and ledger.notes == []
     assert store.redis.get(ledger_watchdog.STARTED_KEY) == "5151"
+
+
+def test_a_checkout_that_rewrites_code_without_changing_it_restarts_nothing(store, tmp_path):
+    host = Host(tmp_path)
+    plant(host.proc, host.argv)
+    code = current(host, tmp_path)
+    (code / "a.py").write_text("")
+    os.utime(code / "a.py", ns=(1, 1))
+    assert ledger_watchdog.watch(store, "sw", ProbedLedger(Clock()), FakeRuntime(), host) == []
+    assert host.calls == []
 
 
 def test_a_server_started_with_a_relative_script_is_restarted_from_its_own_folder(store, tmp_path):
@@ -370,7 +380,7 @@ def test_a_server_the_tick_started_without_its_own_record_is_not_restarted_again
     store.redis.set(ledger_watchdog.STARTED_KEY, str(PID))
     assert ledger_watchdog.watch(store, "sw", ProbedLedger(Clock()), FakeRuntime(), host) == []
     code = current(host, tmp_path)
-    os.utime(code / "a.py", ns=(1, 1))
+    (code / "a.py").write_text("changed = True\n")
     assert ledger_watchdog.watch(store, "sw", ProbedLedger(Clock()), FakeRuntime(), host) != []
 
 

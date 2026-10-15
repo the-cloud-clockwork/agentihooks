@@ -315,7 +315,7 @@ def test_the_command_needs_a_subcommand(capsys):
 def serving(monkeypatch, tmp_path):
     monkeypatch.setattr(server.core, "LEDGER_DIR", tmp_path)
     monkeypatch.setattr(server, "PIDFILE", tmp_path / ".server.pid")
-    monkeypatch.setattr(server, "ThreadingHTTPServer", Mock())
+    monkeypatch.setattr(server, "ThreadingHTTPServer", Mock(return_value=Mock(replacing=False)))
     monkeypatch.setattr(server.threading, "Thread", Mock())
     monkeypatch.setattr(server.legacy, "adopt", Mock())
     return tmp_path

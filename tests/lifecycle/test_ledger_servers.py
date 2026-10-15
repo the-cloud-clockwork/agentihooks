@@ -423,7 +423,7 @@ def test_sweep_really_terminates_a_server_from_a_deleted_working_folder(tmp_path
         assert result[0]["port"] == port
         assert result[0]["folder"] == str(folder)
         assert result[0]["reason"] == "working folder is gone"
-        assert server.wait(timeout=5) < 0
+        assert server.wait(timeout=5) == 0
         assert json.loads((tmp_path / "gc-ledger-servers.jsonl").read_text()) == result[0]
     finally:
         if server.poll() is None:

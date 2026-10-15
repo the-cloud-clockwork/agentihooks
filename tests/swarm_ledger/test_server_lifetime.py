@@ -310,7 +310,7 @@ def test_server_closes_its_socket_and_cancels_the_watch_on_exit(tmp_path, monkey
     monkeypatch.setattr(ledger_server.core, "LEDGER_DIR", tmp_path)
     monkeypatch.setattr(ledger_server, "PIDFILE", tmp_path / ".server.pid")
     monkeypatch.setattr(ledger_server.threading, "Thread", Mock())
-    httpd = Mock()
+    httpd = Mock(replacing=False)
     factory = Mock(return_value=httpd)
     monkeypatch.setattr(ledger_server, "ThreadingHTTPServer", factory)
     stopped = Mock()
@@ -324,7 +324,7 @@ def test_server_closes_its_socket_and_cancels_the_watch_on_exit(tmp_path, monkey
     assert (tmp_path / ".server.pid").read_text() == str(os.getpid())
     httpd.serve_forever.assert_called_once_with()
     stopped.set.assert_called_once_with()
-    httpd.server_close.assert_called_once_with()
+    httpd.drain.assert_called_once_with(ledger_server.HUB)
 
 
 def test_hook_pins_the_run_before_detaching_the_ensure_process(tmp_path, monkeypatch):

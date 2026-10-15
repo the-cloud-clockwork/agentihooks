@@ -101,6 +101,8 @@ def test_serve_runs_the_ledger_watch_on_a_daemon_thread(monkeypatch, tmp_path):
             pass
 
     class Server:
+        replacing = False
+
         def __init__(self, address, handler_class, bind_and_activate=True):
             pass
 
@@ -110,10 +112,16 @@ def test_serve_runs_the_ledger_watch_on_a_daemon_thread(monkeypatch, tmp_path):
         def server_activate(self):
             pass
 
+        def stop_on(self, signum):
+            pass
+
         def serve_forever(self):
             pass
 
-        def server_close(self):
+        def drain(self, hub):
+            pass
+
+        def replace(self):
             pass
 
     monkeypatch.setattr(server.threading, "Thread", Thread)
@@ -123,7 +131,8 @@ def test_serve_runs_the_ledger_watch_on_a_daemon_thread(monkeypatch, tmp_path):
     monkeypatch.setattr(server.legacy, "adopt", adopted.append)
     monkeypatch.setattr(server, "PIDFILE", tmp_path / ".server.pid")
     server.serve()
-    assert threads == [{"target": server.watch_ledgers, "daemon": True}]
+    assert len(threads) == 1 and threads[0]["target"] is server.watch_ledgers and threads[0]["daemon"] is True
+    assert threads[0]["kwargs"]["replace"].__func__ is Server.replace
     assert adopted == [server.stored]
 
 
@@ -135,7 +144,6 @@ def test_the_ledger_watch_sleeps_two_seconds_between_passes(monkeypatch):
         raise StopIteration
 
     monkeypatch.setattr(server, "reloading", lambda: False)
-    monkeypatch.setattr(server, "code_stamp", lambda: 0)
     monkeypatch.setattr(server.ledger_bin, "tidy", lambda: None)
     monkeypatch.setattr(server, "bin_closed_without_swarm", lambda: None)
     monkeypatch.setattr(server, "sample_streams", lambda: None)
