@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import init_agent
@@ -138,6 +139,27 @@ def test_exit_records_use_durable_session_home(tmp_path, home):
         else Path.home() / ".agentihooks"
     )
     assert session_exit.path_for(Path("native-launch.sh"), environ) == expected / "session-exits" / "native-launch.json"
+
+
+@pytest.mark.parametrize("implicit", [False, True])
+def test_exit_recorder_command_preserves_native_fields(tmp_path, monkeypatch, implicit):
+    from scripts import session_exit
+
+    path = tmp_path / "native.json"
+    argv = [str(path), "23", "claude", "native-session"]
+    monkeypatch.setattr(sys, "argv", ["recorder", *(argv if implicit else ["unrelated"])])
+    monkeypatch.delenv("HERDR_PANE_ID", raising=False)
+    monkeypatch.setattr(session_exit.time, "time", lambda: 42)
+    assert session_exit.main(None if implicit else argv) == 0
+    assert json.loads(path.read_text()) == {
+        "exit_status": 23,
+        "harness": "claude",
+        "name": "native-session",
+        "pane_id": "",
+        "pane_tail": "",
+        "pane_error": "no herdr pane",
+        "ended_at": 42,
+    }
 
 
 def test_restart_without_exit_recorder_preserves_the_running_session(tmp_path, monkeypatch, capsys):
