@@ -18,6 +18,7 @@ COMMAND = "agentihooks plan read"
 MARGIN = 10
 LINK = re.compile(r"\]\(#([\w.-]+)\)")
 ANCHOR = re.compile(r'<a id="[\w.-]+"></a>')
+MARKER = re.compile(r"^(?:[-*+]|#{1,6}|\d+[.)])\s+")
 
 
 def _ledger(name: str):
@@ -105,12 +106,13 @@ def sharers(doc: dict, task: dict) -> list[str]:
 
 
 def own_rows(text: str, lines: str, task: dict) -> list[tuple[int, str]]:
-    named = re.compile(rf"(?<![\w.-]){re.escape(task['id'])}(?![\w.-])")
+    named = re.compile(rf"{re.escape(task['id'])}(?![\w.-])")
     title = task.get("title", "").strip().casefold()
     start = _ledger("plan_ranges").bounds(lines)[0]
     run: list[tuple[int, str]] = []
     for number, row in enumerate(text.splitlines(), start):
-        if named.search(row) or (title and title in row.casefold()):
+        cell = MARKER.sub("", row.strip().strip("|").split("|")[0].strip())
+        if named.match(cell) or (title and cell.casefold() == title):
             if run and number != run[-1][0] + 1:
                 break
             run.append((number, row))

@@ -16,7 +16,7 @@ TABLE = (
     "| Task | Work |\n"
     "| --- | --- |\n"
     "| t1 | Cache the reads |\n"
-    "| t2 | Batch the writes |\n"
+    "| t2 | Batch the writes after t1 |\n"
     "| Drop the old index | Remove it after the batch lands |\n"
     "## Ship\n"
     "Other\n"
@@ -90,6 +90,21 @@ class TestRefusal:
         task(table, "t3")["state"] = "done"
         assert plan_read.sharers(table, task(table, "t1")) == []
 
+    def test_resending_a_task_its_own_shared_slice_is_not_refused(self, table):
+        from types import SimpleNamespace
+
+        from scripts.swarm_ledger import ledger_tasks
+
+        ctx = SimpleNamespace(refused=[])
+        op = {"item": "tasks/t1", "fields": {"plan_slice": "table"}}
+        assert ledger_tasks._set_slice(table, op, ctx) is True
+        assert ctx.refused == []
+
+    def test_a_row_naming_another_task_after_its_first_cell_is_not_its_scope(self, table):
+        assert plan_read.own_rows("| t2 | Batch the writes after t1 |\n", "8-8", task(table, "t1")) == []
+        prose = "| Notes | Cache the reads before the batch |\n"
+        assert plan_read.own_rows(prose, "8-8", task(table, "t1")) == []
+
     def test_a_task_in_another_phase_or_on_other_lines_shares_nothing(self, table):
         task(table, "t2")["phase"] = "p2"
         task(table, "t3")["plan_lines"] = "9-9"
@@ -99,7 +114,7 @@ class TestRefusal:
 class TestIntent:
     def test_a_shared_table_slice_is_judged_only_on_the_row_naming_the_task(self, table):
         state = intent.state_of(table, task(table, "t2"), PR)
-        assert (state["plan_lines"], state["plan_chunk"]) == ("8-8", "| t2 | Batch the writes |\n")
+        assert (state["plan_lines"], state["plan_chunk"]) == ("8-8", "| t2 | Batch the writes after t1 |\n")
         assert intent.judge(state, decide=chunk_classifier()) == (
             "pass",
             "the phase can use it as delivered at probability 0.90, judged against plan lines 8-8; "

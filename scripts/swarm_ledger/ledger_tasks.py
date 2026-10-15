@@ -630,7 +630,7 @@ def _set_slice(doc: dict, op: dict, ctx) -> bool:
     except ValueError as exc:
         ctx.refused.append(str(exc))
         return False
-    if refusal := shared_refusal(doc, {**task, **fields}):
+    if fields["plan_slice"] != task.get("plan_slice") and (refusal := shared_refusal(doc, {**task, **fields})):
         ctx.refused.append(refusal)
         return False
     return True
