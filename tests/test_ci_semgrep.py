@@ -88,11 +88,13 @@ def test_timed_out_only_names_each_timed_out_rule_and_file_once(tmp_path):
     errors = [{**TIMEOUT, "rule_id": f"{name}.rule", "path": f"{name}.yml"} for name in names]
     report.write_text(json.dumps({"results": [], "errors": errors}))
     assert timed_out_only(report) == [f"{name}.rule on {name}.yml" for name in "abcde"]
+    report.write_text(json.dumps({"results": []}))
+    assert timed_out_only(report) == []
     report.write_text("{")
     assert timed_out_only(report) == []
 
 
-def test_the_program_passes_the_scan_exit_code_through(tmp_path):
+def test_the_program_passes_the_scan_exit_code_through_and_flushes_its_message_before_the_rescan(tmp_path):
     command, calls = _semgrep(tmp_path, (2, {"results": [], "errors": [TIMEOUT]}), (1, {"results": [FINDING]}))
     done = subprocess.run([sys.executable, str(_ROOT / "scripts/ci_semgrep.py"), *command], capture_output=True)
     assert done.returncode == 1
