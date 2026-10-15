@@ -324,6 +324,12 @@ class CodexAdapter:
     # settings: config.toml managed keys + hooks.json + wrapper
     # ------------------------------------------------------------------
 
+    def summary_counts(self) -> dict[str, int]:
+        from scripts.init_reporter import installed_counts
+
+        config = self._load_toml(self.home() / "config.toml")
+        return installed_counts(config.get("mcp_servers", {}), agents_skills_home(), {})
+
     @staticmethod
     def _apply_managed(target: dict, recorded: dict, key: str, value, label: str) -> None:
         """Write *value* unless the operator hand-edited that key since our last write."""
