@@ -602,6 +602,7 @@ def test_only_a_disabled_job_the_head_removes_may_leave_the_gate(disabled, remov
     ("event", "skipped", "reused", "green"),
     [
         ("push", {"lint", "semgrep", "test-count"}, "false", True),
+        ("push", {"lint", "semgrep", "test-count", "queue-baseline"}, "false", True),
         ("push", {"lint", "semgrep", "test-count", "sonar"}, "false", False),
         ("push", {"unit"}, "false", False),
         ("workflow_dispatch", {"lint"}, "false", False),
@@ -613,7 +614,7 @@ def test_the_promotion_gate_skips_only_pull_request_tier_jobs_on_a_push(event, s
     from scripts import ci_reuse
 
     [step] = ci_reuse.gate_steps(queue_tier=True, promotion=True)
-    jobs = ["durations", "split", "unit", "shard-check", "test-count", "lint", "semgrep", "sonar", "reuse"]
+    jobs = ["durations", "split", "unit", "shard-check", "test-count", "lint", "semgrep", "sonar", "reuse", "queue-baseline"]
     needs = {job: {"result": "skipped" if job in skipped else "success"} for job in jobs}
     result = subprocess.run(
         ["bash", "-e", "-c", step["run"]],
