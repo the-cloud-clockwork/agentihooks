@@ -185,12 +185,17 @@ def _session_windows(session_id: str) -> tuple[float, float, float | None, float
 
 
 def _other_accounts(sessions: dict[str, int], fleet: Iterable[tuple[float, "ProbeResult"]] = ()) -> list[Candidate]:
-    from scripts import session_bands
-    from scripts.claude_quota_balancer import cached_observations
+    from scripts import operator_env, session_bands
+    from scripts.claude_quota_balancer import cached_observations, discover_credentials
 
+    environ = dict(os.environ)
+    operator_env.fill(environ)
+    current = {credential.account for credential in discover_credentials(environ)}
     now = time.time()
     newest = {}
     for observed_at, result in [*cached_observations(), *fleet]:
+        if result.account not in current:
+            continue
         if observed_at >= newest.get(result.account, (observed_at,))[0]:
             newest[result.account] = (observed_at, result)
     candidates = []

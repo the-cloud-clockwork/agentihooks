@@ -12,6 +12,7 @@ SELF = "stage-budget"
 # Spans the whole merge queue run by design, so its wall time is not a stage's.
 WATCHER = "queue-fail-fast"
 BUDGETS = {
+    "promote": 10 * 60,
     "admission": 30,
     "reuse": 30,
     "durations": 60,
