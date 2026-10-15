@@ -553,7 +553,7 @@ def agent_status(agent):
 def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     observed = runtime.observe(agent)
     store.redis.set(store.key(slug, "pane-state", agent.name), observed.state, ex=idle_state.BEAT_TTL_S)
-    outage.mark_pane(store, slug, agent.name, observed.provider_error)
+    outage.mark_pane(store, slug, agent.name, observed.provider_error, now_ms)
     if observed.provider_error and not observed.prompt_title and not observed.typed:
         observed = replace(observed, state=idle_state.IDLE)
     if observed.state == idle_state.WAITING:
@@ -565,6 +565,8 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     held = outage.held(store, slug, agent.name)
     exhausted = resume.recovery_exhausted(store, slug, agent)
     pending = resume.recovery_pending(store, slug, agent)
+    if _stuck_on_provider(slug, store, agent, observed, exhausted, now_ms):
+        return _free_stuck(slug, store, ledger, runtime, rows, agent, now_ms)
     if agent.lane == MASTER or (held and not exhausted):
         store.put_agent(slug, agent)
         return []
@@ -594,6 +596,32 @@ def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     if idle.idle_ticks >= IDLE_KILL_TICKS and runtime.retire(idle, homes=reaper.scratch_homes(slug, idle.task)):
         return [f"stalled {agent.name}" + _drop(slug, store, ledger, rows, idle, refund=True)]
     return []
+
+
+def _stuck_on_provider(slug, store, agent, observed, exhausted, now_ms):
+    if agent.lane == MASTER or not observed.provider_error or _operator_at_pane(slug, store, agent, observed, now_ms):
+        return False
+    if exhausted:
+        return True
+    state = idle_state.verdict(
+        observed.state,
+        idle_state.heartbeat(store.redis, slug, agent.name),
+        idle_state.wait(store.redis, slug, agent.name),
+        now_ms,
+    )
+    return state == idle_state.IDLE and outage.held_past_limit(store, slug, agent.name, now_ms)
+
+
+def _free_stuck(slug, store, ledger, runtime, rows, agent, now_ms):
+    if not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
+        store.put_agent(slug, agent)
+        return [f"could not retire {agent.name}, stuck on a provider error, retrying next tick"]
+    resume.free_seat(store, slug, agent, now_ms)
+    outage.clear_pane(store, slug, agent.name)
+    return [
+        f"freed the seat of {agent.name}, stuck on a provider error"
+        + _drop(slug, store, ledger, rows, agent, refund=True)
+    ]
 
 
 def _operator_at_pane(slug, store, agent, observed, now_ms):

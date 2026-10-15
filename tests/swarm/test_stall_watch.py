@@ -238,6 +238,32 @@ def test_a_task_awaiting_the_merge_pass_has_no_owner_to_lose():
     assert swarm.tick(START + 30 * MINUTE) == [] and not _reopened(swarm)
 
 
+@pytest.mark.parametrize("pull", [GREEN, RUNNING, QUEUED])
+def test_a_released_pull_request_stays_held_past_the_stall_limits(pull):
+    swarm = Swarm(pull, task={"awaiting": ready.AWAITING}, live=False)
+    swarm.store.drop_agent(SLUG, OWNER)
+    swarm.store.release(SLUG, "t1", OWNER)
+    for minutes in (0, 10, 30, 60):
+        assert swarm.tick(START + minutes * MINUTE) == []
+        assert swarm.ledger.rows["t1"]["state"] == "pr"
+        assert swarm.ledger.rows["t1"]["awaiting"] == ready.AWAITING
+    assert swarm.ledger.updates == []
+    assert swarm.retired == []
+    assert swarm.inbox() == []
+
+
+@pytest.mark.parametrize("pull", [GREEN, RUNNING])
+def test_a_ready_release_since_the_snapshot_prevents_generic_stall_recovery(pull):
+    swarm = Swarm(pull, live=False)
+    assert swarm.tick(START) == []
+    before = copy.deepcopy(swarm.ledger.state(SLUG))
+    swarm.ledger.rows["t1"]["awaiting"] = ready.AWAITING
+    assert swarm.tick(START + 30 * MINUTE, before) == []
+    assert swarm.ledger.rows["t1"]["awaiting"] == ready.AWAITING
+    assert swarm.ledger.updates == []
+    assert swarm.retired == []
+
+
 def test_an_unmergeable_pull_request_reopens_after_five_minutes():
     swarm = Swarm(CONFLICTING, live=False)
     swarm.tick(START)
