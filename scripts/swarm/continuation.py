@@ -26,4 +26,4 @@ def resolve(repo: str, task: dict, rows: dict, lives: list[str], envelope: dict,
     if envelope and branch in allowed - forbidden and envelope.get("task", task["id"]) == task["id"]:
         return envelope
     options = {"forbidden": forbidden} if forbidden else {}
-    return reclaim(repo, lives, recorded, **options)
+    return {**envelope, **reclaim(repo, lives, recorded, **options)}

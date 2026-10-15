@@ -4,7 +4,7 @@ from functools import partial
 import pytest
 
 from scripts.handoff import envelope
-from scripts.swarm import prompt, stack
+from scripts.swarm import continuation, prompt, stack
 from scripts.swarm.store import AgentRecord
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
@@ -101,3 +101,68 @@ def test_stale_handoff_never_offers_a_foreign_push_target(store, monkeypatch):
     _, rendered = _launch(store, monkeypatch, CASES[1], handoff=True)
     assert "HEAD:engineer-323133-1424" in rendered
     assert "HEAD:engineer-323133-1443" not in rendered
+
+
+@pytest.mark.parametrize(
+    "changes,other,envelope_data,expected",
+    [
+        ({}, {}, {}, "origin/engineer-a1b2c3-0001"),
+        ({"branch": "recorded"}, {}, {}, "origin/recorded"),
+        ({}, {"id": "other", "branch": "engineer-a1b2c3-0001", "pr_url": f"{REPO}/pull/2"}, {}, "fresh"),
+        ({"branch": "recorded"}, {"id": "other", "branch": "recorded", "pr_url": f"{REPO}/pull/2"}, {}, "fresh"),
+        (
+            {},
+            {"id": "other", "branch": "engineer-a1b2c3-0001", "pr_url": f"{REPO}/pull/1"},
+            {},
+            "origin/engineer-a1b2c3-0001",
+        ),
+        ({}, {"id": "other", "branch": "engineer-a1b2c3-0001"}, {}, "origin/engineer-a1b2c3-0001"),
+        (
+            {},
+            {"id": "other", "branch": "engineer-a1b2c3-0001", "pr_url": "https://github.com/other/repo/pull/2"},
+            {},
+            "origin/engineer-a1b2c3-0001",
+        ),
+        ({"branch_repo": "https://github.com/other/repo"}, {}, {}, "fresh"),
+        (
+            {},
+            {},
+            {"task": "t1", "continue_from": "origin/engineer-a1b2c3-0001", "remote_head": HEAD},
+            "origin/engineer-a1b2c3-0001",
+        ),
+        ({"branch": "recorded"}, {}, {"task": "other", "continue_from": "origin/foreign"}, "origin/recorded"),
+    ],
+)
+def test_task_continuation_respects_recorded_ownership(store, monkeypatch, changes, other, envelope_data, expected):
+    task = {"id": "t1", "pr_url": f"{REPO}/pull/1", **changes}
+    rows = {"t1": task, **({"other": other} if other else {})}
+    monkeypatch.setattr(stack, "origin_key", lambda repo: stack.repo_key(REPO))
+
+    def run(argv, **kwargs):
+        assert argv[3] == "ls-remote"
+        return subprocess.CompletedProcess(argv, 0, f"{HEAD}\t{argv[-1]}\n", "")
+
+    result = continuation.resolve(
+        "/repo", task, rows, ["engineer@a1b2c3-0001"], envelope_data, partial(envelope.reclaim, run=run)
+    )
+    assert result["continue_from"] == expected
+    if expected == "fresh":
+        assert result["fresh_reason"] != "none"
+
+
+def test_repaired_handoff_keeps_its_transfer_facts(store, monkeypatch):
+    task = {"id": "t1", "branch": "recorded"}
+    saved = {"task": "t1", "reason": "quota", "seat": "eng-1@sw", "continue_from": "origin/foreign"}
+    monkeypatch.setattr(stack, "origin_key", lambda repo: stack.repo_key(REPO))
+
+    def run(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, f"{HEAD}\t{argv[-1]}\n", "")
+
+    result = continuation.resolve("/repo", task, {"t1": task}, [], saved, partial(envelope.reclaim, run=run))
+    assert result == {
+        **saved,
+        "remote_branch": "recorded",
+        "remote_head": HEAD,
+        "continue_from": "origin/recorded",
+        "fresh_reason": "none",
+    }
