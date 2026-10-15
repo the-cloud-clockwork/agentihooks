@@ -74,6 +74,9 @@ def failed_jobs(repo: str, run_id: int) -> list[dict]:
             log = _api(f"repos/{repo}/actions/jobs/{job['id']}/logs")
             text += "\n" + "\n".join(line for line in log.splitlines() if "##[error]" in line)
         failed.append({"name": job["name"], "text": text})
+    unlisted = jobs.get("total_count", 0) - len(jobs.get("jobs", []))
+    if unlisted > 0:
+        failed.append({"name": f"{unlisted} unlisted jobs", "text": ""})
     return failed
 
 

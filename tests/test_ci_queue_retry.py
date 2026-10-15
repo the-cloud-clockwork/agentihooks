@@ -142,6 +142,17 @@ def test_a_signature_quoted_in_test_output_is_not_a_runner_loss(monkeypatch):
     assert not ci_queue_retry.decide(RUN, failed, WORKFLOW)[0]
 
 
+def test_jobs_beyond_the_listed_page_refuse_the_requeue(monkeypatch):
+    jobs = {"total_count": 101, "jobs": [{"id": 1, "name": "unit (3.11, 2)", "conclusion": "failure"}]}
+    pages = {
+        "repos/o/r/actions/runs/9/jobs?filter=latest&per_page=100": json.dumps(jobs),
+        "repos/o/r/actions/jobs/1/logs": SHUTDOWN,
+    }
+    monkeypatch.setattr(ci_queue_retry, "_api", lambda path: pages.get(path, ""))
+    retry, reason = ci_queue_retry.decide(RUN, ci_queue_retry.failed_jobs("o/r", 9), WORKFLOW)
+    assert not retry and "unlisted" in reason
+
+
 def test_the_retry_workflow_requeues_only_when_enforcement_is_on():
     workflow = yaml.safe_load((ROOT / ".github/workflows/queue-retry.yml").read_text())
     assert workflow[True] == {"workflow_run": {"workflows": ["Tests"], "types": ["completed"]}}
