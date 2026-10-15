@@ -658,6 +658,36 @@ def test_automatic_routing_without_a_recorded_capacity_deficit_leaves_quota_open
     assert dispatch_seat.uncovered(store, SLUG, NOW)
 
 
+@pytest.mark.parametrize("lanes", [{}, {"eng": {}}])
+def test_quota_recovery_accepts_the_default_automatic_routing(lanes):
+    store = swarm()
+    held(store, "quota")
+    quota_caps(store)
+    assert dispatch_seat.uncovered(store, SLUG, NOW)
+    store.update(SLUG, lanes=lanes)
+    quota_caps(store, eng=2)
+    assert dispatch_seat.uncovered(store, SLUG, NOW) == []
+
+
+@pytest.mark.parametrize("decision", [{}, {"effective": {"ci": 1}}])
+def test_quota_recovery_stays_open_when_the_affected_capacity_is_unknown(decision):
+    store = swarm()
+    held(store, "quota")
+    quota_caps(store)
+    assert dispatch_seat.uncovered(store, SLUG, NOW)
+    store.redis.set(store.key(SLUG, "quota-capacity"), json.dumps(decision))
+    assert dispatch_seat.uncovered(store, SLUG, NOW)
+
+
+def test_a_configured_lane_without_an_effective_cap_is_not_attributed_to_quota():
+    store = swarm()
+    held(store, "quota")
+    store.redis.set(store.key(SLUG, "quota-capacity"), json.dumps({"configured": {"eng": 2}}))
+    assert dispatch_seat.uncovered(store, SLUG, NOW)
+    quota_caps(store, eng=2)
+    assert dispatch_seat.uncovered(store, SLUG, NOW)
+
+
 def test_a_bottleneck_whose_report_stopped_fifteen_minutes_ago_closes():
     store, runtime = swarm(), FakeRuntime()
     held(store)
