@@ -1283,6 +1283,19 @@ def test_a_finished_owner_does_not_hold_conflict_recovery(merging):
     assert merging.rows["t1"]["claimed_by"] == ""
 
 
+@pytest.mark.parametrize("backend,target", [("kubernetes", {}), ("local", {"host_id": "remote-host"})])
+def test_a_finished_remote_owner_keeps_its_claim_until_its_runtime_retires_it(merging, monkeypatch, backend, target):
+    from scripts.swarm.store import AgentRecord
+
+    agent = AgentRecord(AGENT, "eng", "t1", state="finished", runtime_backend=backend, runtime_target=target)
+    monkeypatch.setattr(merging.store, "agents", lambda slug: [agent])
+    merging.pulls[URL] = RED
+    assert merging.run() == []
+    assert merging.rows["t1"]["claimed_by"] == AGENT
+    assert merging.store.claimant("sw", "t1") == AGENT
+    assert ready.record(merging.store, "sw", "t1") is not None
+
+
 def test_a_new_conflicting_head_gets_its_own_restack_notice(merging):
     from dataclasses import replace
 
