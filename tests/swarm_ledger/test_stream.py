@@ -5,6 +5,7 @@ import threading
 import time
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -55,7 +56,9 @@ def frames(response):
 
 
 def next_of(reader, names):
+    deadline = time.monotonic() + 5
     for name, data, cursor in reader:
+        assert time.monotonic() < deadline, f"stream missed {names} before the deadline"
         if name in names:
             return name, data, cursor
     raise AssertionError(f"stream ended before {names}")
@@ -201,3 +204,72 @@ def test_two_tabs_share_one_channel_and_both_receive_a_change(live):
     ] * 2
     one.close()
     two.close()
+
+
+def test_sampling_delivers_an_external_store_write_within_one_minute(live, monkeypatch):
+    port, token = live
+    conn, response = connect(port, token, timeout=60)
+    sampled = threading.Event()
+    seen = []
+
+    def status(slug, ledger=None):
+        seen.append(ledger["notes"])
+        sampled.set()
+        return {"config": {"state": "running"}}
+
+    monkeypatch.setattr(server, "itertools", SimpleNamespace(count=lambda: range(2)))
+    monkeypatch.setattr(server, "reloading", lambda: False)
+    monkeypatch.setattr(server, "swarm_status", status)
+    watcher = threading.Thread(target=server.watch_ledgers)
+    try:
+        reader = frames(response)
+        _, snapshot, _ = next_of(reader, {"snapshot"})
+        watcher.start()
+        assert sampled.wait(5)
+        started = time.monotonic()
+        state, rejected = server.repository.inner.apply_ops(SLUG, ops=[comment(153)])
+        assert rejected == []
+        for name, change, _ in reader:
+            assert time.monotonic() - started < 60, "external write missed the stream deadline"
+            if name == "ledger":
+                break
+        else:
+            raise AssertionError("stream ended before the external write")
+        assert apply(snapshot["ledger"], change["patch"])["notes"][-1]["text"] == "note 153"
+        assert change["rev"] == state["_meta"]["rev"]
+        assert time.monotonic() - started < 60
+    finally:
+        watcher.join(5)
+        response.close()
+        conn.close()
+    assert not watcher.is_alive()
+    assert seen[-1][-1]["text"] == "note 153"
+
+
+def test_sampling_an_unchanged_watched_ledger_costs_one_select(live):
+    port, token = live
+    conn, response = connect(port, token)
+    try:
+        next_of(frames(response), {"snapshot"})
+        statements = []
+        server.repository.inner.trace = statements.append
+        try:
+            server.sample_streams()
+        finally:
+            server.repository.inner.trace = None
+        selects = [statement for statement in statements if statement.lstrip().upper().startswith("SELECT")]
+        assert len(selects) == 1, selects
+        assert "generation" in selects[0].lower()
+    finally:
+        response.close()
+        conn.close()
+
+
+def test_sampling_a_ledger_without_an_open_page_costs_no_select(live):
+    statements = []
+    server.repository.inner.trace = statements.append
+    try:
+        server.sample_streams()
+    finally:
+        server.repository.inner.trace = None
+    assert not [statement for statement in statements if statement.lstrip().upper().startswith("SELECT")]

@@ -81,7 +81,8 @@ def test_one_ledger_failing_its_swarm_read_never_stops_the_others(folders, monke
 
     monkeypatch.setattr(server, "swarm_status", status)
     for slug in ("a", "b"):
-        server.HUB.open(slug, lambda: {"ledger": LEDGER, "swarm": None})
+        server.repository.inner.import_document(slug, LEDGER)
+        server.HUB.open(slug, lambda: {"ledger": server.ledger_view(LEDGER), "swarm": None})
     server.sample_streams()
     assert "stream sample a: redis went away" in capsys.readouterr().err
     assert server.HUB.resource("b", "swarm") == {"config": {"state": 3}}
@@ -167,7 +168,8 @@ def test_stream_resources_loads_the_stored_view_without_reconciling(monkeypatch)
 def test_sampling_leaves_work_folder_changes_to_the_lazy_read(folders, monkeypatch):
     monkeypatch.setattr(server, "swarm_status", lambda slug, state=None: None)
     server.HUB.open("empty", lambda: {"swarm": None})
-    server.HUB.open("s", lambda: {"ledger": LEDGER, "swarm": None})
+    server.repository.inner.import_document("s", LEDGER)
+    server.HUB.open("s", lambda: {"ledger": server.ledger_view(LEDGER), "swarm": None})
     (folders / "t1" / "progress.md").write_text("step one\n")
     command_runner.publish("store", "s", {"tasks": [LEDGER["tasks"][0]]})
     tails = counted(monkeypatch, ledger_workspace, "tails")
