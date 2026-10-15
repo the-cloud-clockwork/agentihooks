@@ -492,6 +492,7 @@ def _superseded(tmp_path, dev_head: str, sha: str = "a" * 40) -> tuple[int, str 
     return result.returncode, output.read_text() if output.exists() else None
 
 
+@pytest.mark.parametrize(("dev_head", "superseded"), [("a" * 40, "false"), ("b" * 40, "true")])
 def test_a_dev_push_skips_the_analysis_once_dev_moved_past_it(tmp_path, dev_head, superseded):
     status, output = _superseded(tmp_path, dev_head)
     assert status in ({0, 1} if superseded == "true" else {0})
