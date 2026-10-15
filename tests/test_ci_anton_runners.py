@@ -17,11 +17,14 @@ TRUSTED = (
 )
 
 
+LIGHT, STANDARD, BATCH, QUEUE = "anton-oss-light", "anton-oss", "anton-oss-batch", "anton-oss-queue"
+QUEUED = "(github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss')"
+
+
 def pool(label):
-    return "${{ " + TRUSTED + " && '" + label + "' || 'ubuntu-latest' }}"
+    route = label if label == QUEUED else f"'{label}'"
+    return "${{ " + TRUSTED + " && " + route + " || 'ubuntu-latest' }}"
 
-
-LIGHT, STANDARD, BATCH = "anton-oss-light", "anton-oss", "anton-oss-batch"
 
 MOVED = {
     ("access-audit.yml", "audit"): LIGHT,
@@ -64,18 +67,18 @@ MOVED = {
     ("test.yml", "durations"): LIGHT,
     ("test.yml", "flake-budget"): LIGHT,
     ("test.yml", "kind-due"): LIGHT,
-    ("test.yml", "lint"): STANDARD,
+    ("test.yml", "lint"): QUEUED,
     ("test.yml", "mutation"): BATCH,
     ("test.yml", "mutation-plan"): LIGHT,
     ("test.yml", "mutation-stats"): BATCH,
-    ("test.yml", "queue-baseline"): STANDARD,
-    ("test.yml", "refresh-durations"): STANDARD,
+    ("test.yml", "queue-baseline"): QUEUED,
+    ("test.yml", "refresh-durations"): QUEUED,
     ("test.yml", "shard-check"): LIGHT,
-    ("test.yml", "sonar"): STANDARD,
-    ("test.yml", "split"): STANDARD,
+    ("test.yml", "sonar"): QUEUED,
+    ("test.yml", "split"): QUEUED,
     ("test.yml", "stage-budget"): LIGHT,
-    ("test.yml", "test-count"): STANDARD,
-    ("test.yml", "unit"): STANDARD,
+    ("test.yml", "test-count"): QUEUED,
+    ("test.yml", "unit"): QUEUED,
     ("worker-resources.yml", "measure"): BATCH,
 }
 
@@ -199,7 +202,7 @@ def test_no_job_resolves_a_hosted_runner_for_a_trusted_actor():
         for (name, job), spec in runner_jobs().items()
         if (name, job) not in HOSTED
         for github in TRUSTED_EVENTS
-        if resolve(str(spec.get("runs-on", "")), **github) not in {LIGHT, STANDARD, BATCH}
+        if resolve(str(spec.get("runs-on", "")), **github) not in {LIGHT, STANDARD, BATCH, QUEUE}
     )
     assert hosted == []
 
@@ -228,7 +231,7 @@ def test_every_hosted_job_stays_on_a_hosted_runner():
 def test_jobs_with_service_or_job_containers_run_on_the_docker_pool():
     for (name, job), spec in runner_jobs().items():
         if "services" in spec or "container" in spec:
-            assert MOVED.get((name, job)) == STANDARD, f"{name}:{job}"
+            assert MOVED.get((name, job)) in {STANDARD, QUEUED}, f"{name}:{job}"
 
 
 def test_the_expression_reader_tells_trusted_from_untrusted_runs():
@@ -236,3 +239,6 @@ def test_the_expression_reader_tells_trusted_from_untrusted_runs():
     assert resolve(pool(LIGHT), **event("pull_request", head="stranger/agentihooks")) == "ubuntu-latest"
     assert resolve(pool(LIGHT), **event("pull_request_target")) == "ubuntu-latest"
     assert resolve("ubuntu-latest", **event("push")) == "ubuntu-latest"
+    assert resolve(pool(QUEUED), **event("merge_group", actor="github-merge-queue[bot]")) == QUEUE
+    assert resolve(pool(QUEUED), **event("pull_request")) == STANDARD
+    assert resolve(pool(QUEUED), **event("pull_request_target")) == "ubuntu-latest"
