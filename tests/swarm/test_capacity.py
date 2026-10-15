@@ -2089,3 +2089,27 @@ def test_aggregate_capacity_uses_the_codex_week_rule(monkeypatch, harness, five_
         2,
         cap,
     )
+
+
+@pytest.mark.parametrize("observed", [None, -10_000])
+def test_aggregate_capacity_keeps_missing_or_stale_codex_quota_unknown(monkeypatch, observed):
+    from scripts.routing import aggregate
+
+    quota = (
+        {
+            "observed_at": observed,
+            "five_hour": {"used": None, "resets_at": 500},
+            "seven_day": {"used": 27, "resets_at": 600},
+        }
+        if observed is not None
+        else None
+    )
+    record = {"harness": "codex", "account": "a", "kind": "pool", "sessions": 2, "quota": quota}
+    monkeypatch.setattr(aggregate, "current", lambda now: {"a": record})
+    (row,) = capacity.accounts({"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"}, 100, refresh=False)
+    assert (row.state, row.cap, row.week_left, row.sessions) == (
+        "UNKNOWN",
+        None,
+        73 if observed is not None else None,
+        2,
+    )
