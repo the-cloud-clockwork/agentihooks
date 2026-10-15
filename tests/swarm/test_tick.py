@@ -539,6 +539,17 @@ def test_an_open_task_closed_done_during_a_tick_spawns_no_agent(store):
     ]
 
 
+def test_a_master_block_during_a_tick_spawns_no_agent(store):
+    ledger, runtime = DoneMidTick([{"id": "t1", "lane": "eng"}]), FakeRuntime()
+    ledger.rows["t1"]["difficulty"] = "M"
+    ledger.closing = lambda: ledger.rows["t1"].update(state="blocked", claimed_by="")
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert ledger.rows["t1"]["state"] == "blocked"
+    assert store.claimant("sw", "t1") is None
+    assert runtime.spawned == []
+    assert workers(store) == []
+
+
 @pytest.mark.parametrize("closed_mid_tick", [True, False])
 def test_a_lost_agents_open_items_follow_the_live_reopen_result(store, closed_mid_tick):
     from scripts.inbox.store import InboxStore

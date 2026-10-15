@@ -21,7 +21,8 @@ HANDOFF = HANDOFF_OPENING + (
 
 
 def level(account: dict) -> str:
-    five, week = account["five_left"], account["week_left"]
+    five = None if account["harness"] == "codex" else account["five_left"]
+    week = account["week_left"]
     if (five is not None and five <= 5) or (week is not None and week <= 2):
         return "handoff"
     if (five is not None and five <= 15) or (week is not None and week <= 15):
