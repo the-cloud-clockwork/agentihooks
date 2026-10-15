@@ -20,6 +20,7 @@ LANE = (
 MUTATION_LANE = LANE.replace("hosted-lane", "mutation-lane")
 
 DIRECT = {
+    "ci-templates.yml": ("CI templates", "ci-templates"),
     "helm-kind.yml": ("Helm chart in kind", "helm-kind"),
     "ledger-load.yml": ("Ledger server load", "ledger-load"),
     "swarm-smoke.yml": ("Swarm container smoke", "swarm-smoke"),

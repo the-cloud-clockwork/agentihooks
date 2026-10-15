@@ -75,6 +75,7 @@ MOVED = {
     ("test.yml", "mutation-plan"): LIGHT,
     ("test.yml", "mutation-stats"): BATCH,
     ("test.yml", "queue-baseline"): LIGHT,
+    ("test.yml", "queue-fail-fast"): LIGHT,
     ("test.yml", "refresh-durations"): QUEUED,
     ("test.yml", "reuse"): LIGHT,
     ("test.yml", "select"): LIGHT,
@@ -99,6 +100,7 @@ TARGET = {("gate-protected.yml", "grade")}
 
 # The runner class table holds the release path and the access read back on hosted runners.
 CLASSED = {
+    ("ci-templates.yml", "actionlint"),
     ("pages.yml", "build"),
     ("publish-pypi.yml", "verify"),
     ("release.yml", "release"),

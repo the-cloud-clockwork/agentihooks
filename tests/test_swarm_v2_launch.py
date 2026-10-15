@@ -988,7 +988,16 @@ def test_a_launch_whose_model_answer_turned_front_end_is_refused_before_admissio
 
 
 def test_the_worker_image_profiles_are_the_default_and_every_package_role():
-    assert launch_module.worker_profiles() == {"default", "cicd", "dispatcher", "engineer", "master", "planner", "qa"}
+    assert launch_module.worker_profiles() == {
+        "default",
+        "cicd",
+        "dispatcher",
+        "documentation",
+        "engineer",
+        "master",
+        "planner",
+        "qa",
+    }
 
 
 @pytest.mark.parametrize("profile", ["frontend", "engineer", "anton-base"])

@@ -1,6 +1,6 @@
 ---
 name: swarm-maker
-description: Guides users to build bundle overlays and purpose built swarms while keeping the five base roles. Interviews for capabilities, scaffolds a missing bundle, creates and validates overlays, and selects them through shared swarm data. Use when a user asks for custom profiles, a custom swarm, domain experts, or a purpose built swarm; use init-swarm for an already accepted plan that only needs launching.
+description: Guides users to build bundle overlays and purpose built swarms while keeping the package base roles. Interviews for capabilities, scaffolds a missing bundle, creates and validates overlays, and selects them through shared swarm data. Use when a user asks for custom profiles, a custom swarm, domain experts, or a purpose built swarm; use init-swarm for an already accepted plan that only needs launching.
 ---
 
 # Swarm Maker
@@ -19,7 +19,7 @@ never recommend a restart or handoff to pick up changed overlays.
    an existing swarm or a new accepted plan, what each role needs to know or do,
    source material to reuse, and the required tools and harnesses. Summarize a
    role → overlays → capabilities → proof mapping. Keep `master`, `engineer`,
-   `planner`, `qa` and `cicd` as the five base roles; domain experts are overlays,
+   `planner`, `qa`, `cicd` and `documentation` as the package base roles; domain experts are overlays,
    not new roles. Each agent can wear at most three selected overlays. If the
    request exceeds that cap, state the three-overlay limit and ask which to
    omit before scaffolding or saving a selection.
@@ -83,7 +83,7 @@ never recommend a restart or handoff to pick up changed overlays.
      overlays-engineer=tuner,trader
    ```
 
-   Use the agreed names and one of the five base roles in `overlays-ROLE`.
+   Use the agreed names and one of the package base roles in `overlays-ROLE`.
    For a task override use the authorized ledger task command:
 
    ```bash

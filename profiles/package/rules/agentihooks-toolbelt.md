@@ -206,8 +206,9 @@ Failed channel writes return unsent items immediately. Before repeating work on
 redelivery, read the item's current state.
 A swarm Claude session also receives each item the moment it lands through its inbox
 channel, answered with the channel's reply tool. The tick types a wake only into the
-idle worker pane of a harness without that channel, Codex today: one prompt to run
-`agentihooks msg inbox` and answer with `msg reply` or the swarm commands, never as text
+idle worker pane of a harness without that channel, Codex today, and only while no
+Codex push pump owns that agent's inbox: one prompt to run `agentihooks msg inbox`
+and answer with `msg reply` or the swarm commands, never as text
 in the terminal (a busy pane, one waiting on input, one holding typed text or one the
 operator prompted inside `AGENTIHOOKS_INBOX_QUIET_S` never), retried every
 `AGENTIHOOKS_INBOX_RETRY_WINDOW_S` (default 300) up to three times. The master pane is

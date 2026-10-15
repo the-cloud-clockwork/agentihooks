@@ -120,6 +120,73 @@ def test_ready_records_the_pull_request_and_head_and_ends_the_agent(released, ca
     }
 
 
+@pytest.mark.parametrize("kind", ["task", "merge"])
+def test_release_keeps_an_open_dependency_wait_after_the_agent_leaves(released, monkeypatch, kind):
+    from scripts.swarm import idle, stall_watch
+    from tests.swarm.test_delivery import FakeHerdr
+
+    store, ledger, _, doc = released
+    target = "t2" if kind == "task" else URL + "0"
+    on = {"kind": kind, "target": target}
+    ledger.rows["t2"]["state"] = "pr"
+    ledger.task = lambda slug, task_id: ledger.rows.get(task_id) if slug == "sw" else None
+    ledger.pulls[URL], ledger.pulls[URL + "0"] = RED, RED
+    idle.declare_wait(store.redis, "sw", AGENT, NOW + 60_000, "shared repair", NOW, on=on)
+    assert release(doc) == 0
+    assert ready.record(store, "sw", "t1")["dependency"] == on
+    monkeypatch.setattr(cli.ledger_events, "views", lambda urls, cache=None: {url: ledger.pulls[url] for url in urls})
+    monkeypatch.setattr(stall_watch, "ntfy", lambda *args: "")
+    for minutes in (0, 10, 30, 60):
+        monkeypatch.setattr(cli, "now_ms", lambda: NOW + minutes * 60_000)
+        cli.run_tick(store, "sw", ledger, cli.HerdrRuntime(), FakeHerdr({}))
+        assert ledger.rows["t1"]["state"] == "pr"
+        assert ledger.rows["t1"]["awaiting"] == ready.AWAITING
+        assert not any(a.task == "t1" for a in store.agents("sw"))
+        assert ready.record(store, "sw", "t1")["dependency"] == on
+    if kind == "task":
+        ledger.rows["t2"]["state"] = "done"
+    else:
+        ledger.pulls[target] = MERGED
+    run = ready.Pass(store, "sw", ledger, ledger.pulls.get, ledger.pulls.get, NOW + 61 * 60_000)
+    ready.merge_pass(run, ledger.rows)
+    assert ledger.rows["t1"]["state"] == "open"
+    assert ledger.rows["t1"]["awaiting"] == ready.FIX
+
+
+@pytest.mark.parametrize(
+    "on, until",
+    [
+        ({"kind": "task", "target": "t2"}, NOW),
+        ({"kind": "task", "target": "t1"}, NOW + 60_000),
+        ({"kind": "merge", "target": URL}, NOW + 60_000),
+        ({"kind": "reply", "target": "review"}, NOW + 60_000),
+        ({}, NOW + 60_000),
+    ],
+)
+def test_release_does_not_park_on_an_expired_or_unrelated_wait(released, on, until):
+    from scripts.swarm import idle
+
+    store, ledger, _, doc = released
+    ledger.pulls[URL] = RED
+    idle.declare_wait(store.redis, "sw", AGENT, until, "wait", NOW - 60_000, on=on)
+    assert release(doc) == 0
+    assert "dependency" not in ready.record(store, "sw", "t1")
+    run = ready.Pass(store, "sw", ledger, ledger.pulls.get, ledger.pulls.get, NOW)
+    ready.merge_pass(run, ledger.rows)
+    assert ledger.rows["t1"]["state"] == "open"
+
+
+@pytest.mark.parametrize("pull", [MERGED, CLOSED])
+def test_a_finished_own_pull_request_is_handled_even_with_an_open_dependency(merging, pull):
+    on = {"kind": "task", "target": "t2"}
+    found = ready.record(merging.store, "sw", "t1")
+    found["dependency"] = on
+    ready.save(merging.store, "sw", "t1", found)
+    merging.pulls[URL] = pull
+    merging.run()
+    assert merging.rows["t1"]["state"] == ("done" if pull is MERGED else "open")
+
+
 @pytest.mark.parametrize("retained", [TOP, "", None])
 @pytest.mark.parametrize("source", ["ready", "handoff"])
 def test_ready_from_primary_carries_an_unchanged_queued_head(primary_checkout, retained, source):
