@@ -1,0 +1,6 @@
+{
+  "hooks/context/prod_lockdown.py:hooks.context.prod_lockdown.x__production_operands__mutmut_23:5dc74cd13d7438476c122b8ac9f66e04ed3082851a16107d096a3007d1759b9a": {
+    "reader": "standards_reader",
+    "reason": "equivalent. Omitting split maxsplit likewise leaves the prefix before the first equals sign unchanged."
+  }
+}

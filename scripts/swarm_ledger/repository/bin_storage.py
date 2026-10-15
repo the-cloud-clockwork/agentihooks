@@ -5,6 +5,7 @@ import ledger_core as core
 import ledger_media
 
 from hooks.context import operator_words
+from scripts.swarm_ledger import request_metrics
 
 from .sqlite import BEGIN_IMMEDIATE, read_registry
 
@@ -19,8 +20,8 @@ def _repository():
 @contextmanager
 def _transaction():
     repository = _repository()
-    with domain.LOCK, repository.connect() as connection, connection:
-        connection.execute(BEGIN_IMMEDIATE)
+    with request_metrics.locked(domain.LOCK), repository.connect() as connection, connection:
+        request_metrics.begin(connection, BEGIN_IMMEDIATE)
         yield repository, connection
 
 

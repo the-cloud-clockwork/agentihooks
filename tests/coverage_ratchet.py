@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 
 from coverage import Coverage, CoverageData
+from coverage.exceptions import NotPython
 
 from tests.coverage_grade import GRADED, Measurement, Result, Unmeasured, executed, grade, line_map, pair_moves
 from tests.coverage_history import dev_runs, git, renamed
@@ -19,6 +20,11 @@ def report(result: Result, missed: dict[str, list[int]], covered: dict[str, int]
         out += [f"{path}:{line} ran on base {result.base} and no head test runs it" for line in lines]
     for path, lines in sorted(result.unstable.items()):
         out += [f"{path}:{line} lost, cleared: older dev runs missed it after covering it" for line in lines]
+    for path, lines in sorted(result.unconfirmed.items()):
+        out += [
+            f"{path}:{line} unconfirmed: {count} measured history snapshots did not run it"
+            for line, count in sorted(lines.items())
+        ]
     for path in sorted(set(covered) | set(missed)):
         listed = ", ".join(str(line) for line in missed.get(path, [])) or "none"
         out.append(f"{path}: covered {covered.get(path, 0)} (base {base_covered.get(path, 0)}), missed {listed}")
@@ -58,7 +64,14 @@ def _grade(args: argparse.Namespace, head_files: list[Path], scratch: Path) -> t
     if base is None or base.commit != wanted:
         raise Unmeasured(f"no passed Tests run with coverage holds the base {wanted}")
     moved = renamed(args.head, wanted)
-    result = grade(head, lambda path: _read(args.head / path), _chain(base, runs), moved)
+    changed_tests = {
+        path
+        for path in git(
+            "diff", "--name-only", "--no-renames", wanted, "HEAD", "--", "tests", cwd=args.head
+        ).splitlines()
+        if path.endswith(".py")
+    }
+    result = grade(head, lambda path: _read(args.head / path), _chain(base, runs), moved, changed_tests=changed_tests)
     return head, base, result
 
 
@@ -94,7 +107,10 @@ def main(argv: list[str] | None = None) -> int:
     with tempfile.TemporaryDirectory() as scratch:
         try:
             head, base, result = _grade(args, head_files, Path(scratch))
-        except (Unmeasured, subprocess.CalledProcessError, KeyError, ValueError, OSError) as exc:
+            if os.environ.get("GITHUB_EVENT_NAME") == "merge_group":
+                changed = set(git("diff", "--name-only", "--no-renames", "HEAD^", "HEAD", cwd=args.head).splitlines())
+                result.lost = {path: lines for path, lines in result.lost.items() if path in changed}
+        except (Unmeasured, subprocess.CalledProcessError, KeyError, ValueError, OSError, NotPython) as exc:
             print(f"::error::The coverage ratchet cannot grade: {exc}")
             return 1
     text = report(

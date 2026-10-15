@@ -1,11 +1,12 @@
 """Swarm tasks: claimable units of work under a phase, each in the eng or ci lane."""
 
 import re
+from pathlib import Path
 
 import ledger_comments
 import ledger_kinds
 
-from scripts.swarm_ledger import ledger_plans, ledger_rank
+from scripts.swarm_ledger import ledger_plans, ledger_rank, task_dependencies
 
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 ID_RE = re.compile(r"^[A-Za-z0-9][\w.-]{0,63}$")
@@ -33,6 +34,8 @@ UPDATABLE = (
     "rank",
     "branch",
     "branch_repo",
+    "repositories",
+    "repository_branches",
     "stacked_base",
     "parked_on",
     "parked_repos",
@@ -51,11 +54,11 @@ DIFFICULTIES = ("S", "M", "L")
 DIFFICULTY_SOURCES = ("operator", "rule", "classifier", "default")
 DIFFICULTY_FIELDS = ("difficulty", "difficulty_source", "difficulty_confidence")
 NUMBER_FIELDS = ("difficulty_confidence",)
-LIST_FIELDS = ("depends_on", "territory", "parked_on", "parked_repos", "overlays", "split_pulls")
+LIST_FIELDS = ("depends_on", "territory", "parked_on", "parked_repos", "overlays", "split_pulls", "repositories")
 OVERLAY_CAP = 3
 BRANCH_RE = re.compile(r"^(?!-)\S*$")
 COMMIT_RE = re.compile(r"^([0-9a-f]{7,64})?$")
-OBJECT_FIELDS = ("contract", "proof", "recovery")
+OBJECT_FIELDS = ("contract", "proof", "recovery", "repository_branches")
 URL_FIELDS = ("issue_url", "pr_url", "plan_url")
 URL_RE = re.compile(r"^https?://[^\s]+$")
 OPS = ("task_add", "task_update")
@@ -140,6 +143,21 @@ def check_guards(op: dict) -> None:
     guard = op.get("if_state", [])
     if not isinstance(guard, list) or not all(state in STATES for state in guard):
         raise ValueError(f"if_state must be a list of states from {STATES}")
+    expected = op.get("if_match", {})
+    if not isinstance(expected, dict) or set(expected) - {"claimed_by", "claim_generation", "pr_url", "awaiting"}:
+        raise ValueError("if_match must contain task ownership fields")
+    if any(not isinstance(value, str) for key, value in expected.items() if key != "claim_generation"):
+        raise ValueError("if_match ownership fields must be strings")
+    generation = expected.get("claim_generation", 0)
+    if type(generation) is not int or generation < 0:
+        raise ValueError("if_match claim_generation must be a nonnegative integer")
+
+
+def _guarded(task, op):
+    expected = op.get("if_match", {})
+    return (bool(op.get("if_state")) and task.get("state", "open") not in op["if_state"]) or any(
+        task.get(key, 0 if key == "claim_generation" else "") != value for key, value in expected.items()
+    )
 
 
 def check_quote(op: dict) -> None:
@@ -190,11 +208,27 @@ def sized(fields):
     return {"difficulty_source": "operator", "difficulty_confidence": 1.0, **fields}
 
 
+def check_repository_branches(fields: dict) -> None:
+    branches = fields.get("repository_branches", {})
+    if not isinstance(branches, dict) or not all(
+        isinstance(repo, str)
+        and Path(repo).is_absolute()
+        and isinstance(branch, str)
+        and branch
+        and BRANCH_RE.match(branch)
+        for repo, branch in branches.items()
+    ):
+        raise ValueError("repository_branches must map absolute local repository paths to branch names")
+
+
 def check_lists(fields):
+    check_repository_branches(fields)
     for key in LIST_FIELDS:
         value = fields.get(key, [])
         if not isinstance(value, list) or not all(isinstance(v, str) and v.strip() for v in value):
             raise ValueError(f"{key} must be a list of nonempty strings")
+    if not all(Path(repo).is_absolute() for repo in fields.get("repositories", [])):
+        raise ValueError("repositories must list absolute local repository paths")
     if len(set(fields.get("overlays", []))) > OVERLAY_CAP:
         raise ValueError(f"overlays lists at most {OVERLAY_CAP} overlay names")
 
@@ -280,6 +314,8 @@ def _add(doc, op, ctx):
         "profile",
         "overlays",
         "not_duplicate",
+        "repositories",
+        "repository_branches",
         "slice",
         "follow_up",
     ):
@@ -450,13 +486,28 @@ def _update_fields(task: dict, fields: dict) -> dict:
     return fields
 
 
+def _block_author(by: str) -> bool:
+    from scripts.swarm.naming import lane_of
+
+    return by == "operator" or lane_of(by) == "master"
+
+
+def _held_block(task: dict, op: dict, ctx) -> bool:
+    return (
+        task.get("state") == "blocked"
+        and "state" in op["fields"]
+        and not _block_author(op["by"])
+        and _block_author(ledger_rank.author(ctx, f"{op['item']}/state"))
+    )
+
+
 def _update(doc, op, ctx):
     task_id = op["item"].split("/")[1]
     task = next((t for t in doc.get("tasks", []) if t["id"] == task_id), None)
     others = [t for t in doc["tasks"] if t["id"] != task_id]
     if task is None or not _known(others, op["fields"].get("depends_on", []) + op["fields"].get("parked_on", [])):
         return False
-    if op.get("if_state") and task.get("state", "open") not in op["if_state"]:
+    if _held_block(task, op, ctx) or _guarded(task, op) or task_dependencies.held(task, op, doc["tasks"]):
         return True
     if refusal := update_refusal(doc, op, ctx.meta):
         ctx.refused.append(refusal)
@@ -509,8 +560,12 @@ def _relay_rank(doc, op, ctx):
 
 def _changed(task, fields, op, ctx):
     changed = {k: v for k, v in fields.items() if task.get(k) != v}
+    if "claimed_by" in changed:
+        changed["claim_generation"] = task.get("claim_generation", 0) + 1
     if "rank" in fields and ledger_rank.author(ctx, f"{op['item']}/rank") != op["by"]:
         changed["rank"] = fields["rank"]
+    if fields.get("state") == "blocked" and _block_author(op["by"]):
+        changed["state"] = "blocked"
     return changed
 
 

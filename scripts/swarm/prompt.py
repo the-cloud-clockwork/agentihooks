@@ -104,8 +104,9 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         "types in this pane here.",
         "- A message that needs no work, such as a thanks, a confirmation or a reply that asks for nothing, carries "
         '--fyi: agentihooks msg send <address> --fyi "<text>", agentihooks msg reply <id> --fyi "<text>" or '
-        f'{me} say "<text>" --to <agent name> --fyi. Its receiver closes it done with nothing more to name; a '
-        "work item without --fyi closes with where the work went.",
+        f'{me} say "<text>" --to <agent name> --fyi. Information closes on read or confirmed receipt. '
+        "After handling a confirmed work item, explicitly reply or close it with where the work went; "
+        "keep unresolved work and proof checks open.",
         f'- Keep the ledger current: {led} phase <phase id> done|open, {led} comment phases/<phase id> "<status>", '
         f'{led} followup add "<text>", and {led} time-left "<duration>" whenever progress or blockers change it.',
         f"- {waiting_line(led)}",
@@ -321,7 +322,9 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
         "",
         f'Talk to the swarm and the operator with {me} say "<text>" (add --to <agent name>, eng or ci). '
         'Messages for you arrive in this session as inbox messages: answer one with agentihooks msg reply <id> "<text>". '
-        "Add --fyi after the id or address of a thanks or confirmation that needs no work. "
+        "Mark status reports with --fyi when they request no receiver action; information closes on receipt. "
+        "After handling confirmed work, explicitly reply or close it with an outcome. "
+        "Keep unresolved work and proof checks open. "
         "Write chat and comments in plain words for the operator: no ids, "
         "paths, hashes or dashes.",
         "Other agents work other tasks in parallel. Touch only what your task needs.",
@@ -500,8 +503,10 @@ def code_steps(me, led, name, phase):
         issue_step(me, "the seams"),
         f"2. Create your worktree: wt.sh new {name} (never edit the primary checkout), then call {SERENA}",
         "3. Red test, least code to green.",
-        "4. Gates green (ruff check, ruff format --check and the tests), commit in the worktree; at your first commit "
-        f"push the branch (git push -u origin HEAD) and record it: {me} branch. Then review per the "
+        f'4. Gates green in CI. Publish each change with {me} publish --message "<commit message>" -- <explicit touched files>. '
+        "It resolves your task worktree, commits only those files, runs the committed HEAD prepush gate, then "
+        "pushes and records the branch; fix failures and repeat the same command. Tests run only in CI. "
+        "Then review per the "
         "dev-cycle skill: at most two critic sub agents, Standards and Spec, that never edit and send every finding "
         "back to you; fix each finding, the same reader re-reviews, and review closes after three rounds. "
         f"Start every review round with {me} review; the third round closes review and a fourth is refused.",
@@ -572,6 +577,8 @@ def task_steps(task, me, led, name, phase, autonomy):
     steps = kind_steps(kind, me, led, name, phase, autonomy, task["id"])
     if kind not in STACKED_KINDS:
         return continued(steps, name, task)
+    if task.get("parked_on") and _verdict(task).get("continue_from") == "fresh":
+        return [f"Start your worktree fresh from dev: {_verdict(task)['fresh_reason']}.", *steps]
     if task.get("parked_on") and task.get("branch") and task.get("stacked_base"):
         return finish_steps(steps, me, naming.plain(name), task)
     if task.get("parked_on"):
@@ -588,6 +595,7 @@ def task_steps(task, me, led, name, phase, autonomy):
 
 def ci_steps(me, led, name, phase):
     steps = code_steps(me, led, name, phase)
+    steps[2] = f"2. Prepare your task worktree: {me} prepare (never edit the primary checkout), then call {SERENA}"
     steps[3] = (
         "3. Red first on a real run: show the workflow failing or slow, then the least change that turns it green "
         "or fast. Put the run links before and after in the pull request."

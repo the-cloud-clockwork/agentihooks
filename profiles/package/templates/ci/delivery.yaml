@@ -1,0 +1,17 @@
+pull_request:
+  - ./ci/lint
+  - ./ci/format-check
+  - ./ci/size
+  - ./ci/static-analysis
+  - ./ci/changed-line-ratchets
+  - ./ci/touched-tests
+queue:
+  - ./ci/unit
+promotion:
+  - ./ci/module-ratchets
+  - ./ci/build-images
+  - ./ci/smoke
+  - ./ci/load
+  - ./ci/budget-report
+promote:
+  - ./ci/promote "$GITHUB_SHA"

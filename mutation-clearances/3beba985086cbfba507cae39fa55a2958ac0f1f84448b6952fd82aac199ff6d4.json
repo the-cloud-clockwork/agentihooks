@@ -1,0 +1,6 @@
+{
+  "hooks/lifecycle/refresh.py:hooks.lifecycle.refresh.x_due__mutmut_12:aa793dd8a03a18aa3a7a0d7fc63750c02b251e30f0f1b2ccaee2c1abe3ce76d3": {
+    "reader": "Standards /root/standards_reader round two",
+    "reason": "The restart entry on_stop rejects missing or false session IDs before due; a present session ID bypasses this fallback, so valid restart requests select identical records."
+  }
+}

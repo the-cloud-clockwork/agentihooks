@@ -66,7 +66,7 @@ def require_target(store: object, slug: str, task_id: str, url: str, tasks: list
     if url not in _pulls(own):
         raise SwarmError("final integration must target this task's recorded pull request")
     for task in tasks:
-        if task.get("pr_url") == url:
+        if url in _pulls(task):
             require_local(store, slug, task["id"])
 
 

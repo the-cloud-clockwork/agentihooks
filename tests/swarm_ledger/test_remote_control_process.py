@@ -69,6 +69,7 @@ def remote_server(tmp_path, monkeypatch):
     import redis
 
     backend = fakeredis.TcpFakeServer(("127.0.0.1", 0), server_type="redis")
+    monkeypatch.setattr(backend.RequestHandlerClass, "disable_nagle_algorithm", True)
     thread = threading.Thread(target=backend.serve_forever, daemon=True)
     thread.start()
     url = f"redis://127.0.0.1:{backend.server_address[1]}/0"

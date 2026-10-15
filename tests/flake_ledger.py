@@ -19,7 +19,25 @@ from xdist.scheduler import LoadGroupScheduling, LoadScopeScheduling
 class RefillingLoadGroupScheduling(LoadGroupScheduling):
     # A worker runs a test only once it holds the next one or is shut down, and a replacement
     # worker after a crash gets a single work unit, so keep every worker at two queued tests.
+    # Workers read pytest-rerunfailures' crash count from a controller thread, so a crashed test
+    # stays held until FlakeLedger.pytest_handlecrashitem runs after that count is recorded.
+    holding = False
+
+    def remove_node(self, node):
+        self.holding = True
+        try:
+            return super().remove_node(node)
+        finally:
+            self.holding = False
+
+    def release(self):
+        for node in self.nodes:
+            self._reschedule(node)
+
     def _reschedule(self, node):
+        # A replacement worker still collecting gets its work from schedule() once it has collected.
+        if self.holding or node not in self.registered_collections:
+            return
         super()._reschedule(node)
         while self.workqueue and not node.shutting_down and self._pending_of(self.assigned_work[node]) < 2:
             self._assign_work_unit(node)
@@ -68,6 +86,8 @@ class FlakeLedger:
         stopping = restarts is not None and self.workers_down > restarts
         if report.failed and retry and not stopping and isinstance(sched, LoadScopeScheduling):
             report.outcome = "rerun"
+        if isinstance(sched, RefillingLoadGroupScheduling):
+            sched.release()
 
     def pytest_runtest_logreport(self, report):
         if report.outcome == "rerun":

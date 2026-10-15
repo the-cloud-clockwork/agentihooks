@@ -3,6 +3,8 @@ name: Swarm worker image
 on:
   push:
     branches: [dev]
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       publish:
@@ -14,13 +16,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && format('swarm-node-image-{0}', github.ref) || format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') }}
-  queue: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && 'single' || 'max' }}
+  group: ${{ github.event_name != 'workflow_dispatch' && format('swarm-node-image-{0}', github.ref) || format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') }}
+  queue: ${{ github.event_name == 'workflow_dispatch' && 'max' || 'single' }}
   cancel-in-progress: false
 
 jobs:
   image:
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss' || 'ubuntu-latest' }}
     timeout-minutes: 60
     permissions:
       contents: read
@@ -36,6 +38,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: ${{ github.event_name == 'release' && '0' || '1' }}
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
@@ -84,9 +87,18 @@ jobs:
           grep -qE '^github-app-token (.*/)?opt/agentihooks/\.build-token$' "$out/findings.txt"
       - name: Scan the candidate for credentials
         run: bash docker/swarm-node/scan.sh "$CANDIDATE" "$RUNNER_TEMP/worker-image-attestation/candidate-scan"
+      - name: Require a release tag on main
+        id: main
+        if: github.event_name == 'release'
+        run: |
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          newest="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-version:refname | head -n 1)"
+          if [[ "$newest" == "$GITHUB_REF_NAME" ]]; then latest=true; else latest=false; fi
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
       - name: Log in to the registry
         if: >-
-          (github.event_name == 'push' || inputs.publish)
+          github.event_name == 'release'
+          || (github.event_name == 'push' || inputs.publish)
           && (github.ref == 'refs/heads/dev' || startsWith(github.ref, 'refs/heads/diffcheck/'))
         uses: docker/login-action@v3
         with:
@@ -95,7 +107,8 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish the qualified candidate
         if: >-
-          (github.event_name == 'push' || inputs.publish)
+          github.event_name == 'release'
+          || (github.event_name == 'push' || inputs.publish)
           && (github.ref == 'refs/heads/dev' || startsWith(github.ref, 'refs/heads/diffcheck/'))
         run: |
           out="$RUNNER_TEMP/worker-image-attestation/candidate"
@@ -106,6 +119,16 @@ jobs:
         run: |
           digest="$(jq -r .digest "$RUNNER_TEMP/worker-image-attestation/candidate/promoted.json")"
           docker buildx imagetools create --tag "$REPOSITORY:dev" "$REPOSITORY@$digest"
+      - name: Tag the release version and move the release tag when it is the newest
+        if: github.event_name == 'release'
+        env:
+          RELEASE: ${{ github.event.release.tag_name }}
+          LATEST: ${{ steps.main.outputs.latest }}
+        run: |
+          digest="$(jq -r .digest "$RUNNER_TEMP/worker-image-attestation/candidate/promoted.json")"
+          tags=(--tag "$REPOSITORY:${RELEASE#v}")
+          if [[ "$LATEST" == true ]]; then tags+=(--tag "$REPOSITORY:release"); fi
+          docker buildx imagetools create "${tags[@]}" "$REPOSITORY@$digest"
       - name: Upload the attestation
         if: always()
         uses: actions/upload-artifact@v4

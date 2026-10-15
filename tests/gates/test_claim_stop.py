@@ -100,6 +100,59 @@ def test_ruling_follows_the_pull_request_then_the_wait():
     assert ruling(task, CLOSED, {"until": 1}) == ("", "")
 
 
+@pytest.mark.parametrize("kind", ["task", "merge"])
+def test_a_stop_on_red_checks_preserves_an_open_dependency_wait(rig, kind):
+    rig.task["pr_url"], rig.pulls[URL] = URL, RED
+    target = "repair" if kind == "task" else URL + "0"
+    rig.ledger.rows["repair"] = {"id": "repair", "state": "pr"}
+    rig.pulls[URL + "0"] = RED
+    on = {"kind": kind, "target": target}
+    idle.declare_wait(rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, "shared repair", rig.clock[0], on=on)
+    assert rig.stop() == Decision()
+    assert rig.stop() == Decision()
+    assert rig.stop() == Decision()
+    assert rig.task["state"] == "claimed"
+    assert idle.wait(rig.store.redis, SLUG, ME)["on"] == on
+    if kind == "task":
+        rig.ledger.rows["repair"]["state"] = "done"
+    else:
+        rig.pulls[target] = MERGED
+    assert not rig.stop().allowed
+
+
+@pytest.mark.parametrize(
+    "on, expired",
+    [
+        ({"kind": "task", "target": "t1"}, False),
+        ({"kind": "task", "target": "gone"}, False),
+        ({"kind": "merge", "target": URL}, False),
+        ({"kind": "reply", "target": "review"}, False),
+        ({"kind": "task", "target": "repair"}, True),
+    ],
+)
+def test_red_checks_still_refuse_a_wait_that_is_not_a_live_dependency(rig, on, expired):
+    rig.task["pr_url"], rig.pulls[URL] = URL, RED
+    rig.ledger.rows["repair"] = {"id": "repair", "state": "pr"}
+    until = rig.clock[0] - 1 if expired else rig.clock[0] + 60_000
+    idle.declare_wait(rig.store.redis, SLUG, ME, until, "repair", rig.clock[0] - 120_000, on=on)
+    assert not rig.stop().allowed
+
+
+def test_a_merged_task_still_owes_closure_while_a_dependency_is_open(rig):
+    rig.task["pr_url"], rig.pulls[URL] = URL, MERGED
+    rig.ledger.rows["repair"] = {"id": "repair", "state": "pr"}
+    idle.declare_wait(
+        rig.store.redis,
+        SLUG,
+        ME,
+        rig.clock[0] + 60_000,
+        "repair",
+        rig.clock[0],
+        on={"kind": "task", "target": "repair"},
+    )
+    assert not rig.stop().allowed
+
+
 @pytest.mark.parametrize("queued", [False, True])
 def test_a_red_job_outside_a_passed_required_gate_rules_as_green_and_a_red_gate_as_red(queued):
     task = {"id": "t1", "pr_url": URL}
@@ -280,6 +333,61 @@ def test_the_third_block_in_a_row_blocks_the_task_and_lets_the_stop_through(rig)
     assert [(a.state, a.pane_id) for a in rig.store.agents(SLUG)] == [("finished", "p1")]
     assert [(r["gate"], r["kind"], r["agent"], r["tool"]) for r in rig.rows()] == [("claim-stop", "blocked", ME, "")]
     assert rig.store.redis.get(f"{KEY_ROOT}:swarm:{SLUG}:stop-blocks:{ME}") is None
+
+
+@pytest.mark.parametrize("scope", ["session", "agent", "task"])
+def test_a_lift_clears_prior_stops_and_expiry_requires_three_new_stops(rig, tmp_path, monkeypatch, scope):
+    from scripts.gates import lift
+
+    clock = [1_790_000_000.0]
+    monkeypatch.setattr(lift.time, "time", lambda: clock[0])
+    state = Verdicts(SLUG, rig.gate.name, tmp_path)
+    call = Call("", session="stopping-session")
+    assert not rig.gate.decide(call, WHO, state).allowed
+    assert not rig.gate.decide(call, WHO, state).allowed
+    paths = {
+        "session": lift.lift_path(SLUG, call.session, rig.gate.name, tmp_path),
+        "agent": lift.agent_lift_path(SLUG, ME, rig.gate.name, tmp_path),
+        "task": lift.task_lift_path(SLUG, WHO.task, rig.gate.name, tmp_path),
+    }
+    path = paths[scope]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"at": clock[0]}))
+
+    for _ in range(4):
+        assert rig.gate.decide(call, WHO, state).allowed
+        assert rig.task["state"] == "claimed"
+        assert rig.store.claimant(SLUG, WHO.task) == ME
+    assert rig.ledger.updates == []
+    assert rig.rows() == []
+
+    clock[0] += lift.LIFT_SECONDS
+    first = rig.gate.decide(call, WHO, state)
+    assert not first.allowed and "stop block 1 of 2" in first.reason
+    assert not rig.gate.decide(call, WHO, state).allowed
+    assert rig.gate.decide(call, WHO, state).allowed
+    assert rig.task["state"] == "blocked"
+
+
+@pytest.mark.parametrize("invalid", ["expired", "moved-head"])
+def test_an_invalid_task_lift_cannot_fall_back_to_its_fresh_agent_lift(rig, tmp_path, monkeypatch, invalid):
+    from scripts.gates import intent, lift
+
+    now = 1_790_000_000.0
+    monkeypatch.setattr(lift.time, "time", lambda: now)
+    monkeypatch.setattr(intent, "pr_head", lambda url: "new-head")
+    state = Verdicts(SLUG, rig.gate.name, tmp_path)
+    lift.lift_agent(WHO, rig.gate.name, tmp_path, now=now)
+    record = {"at": now - lift.LIFT_SECONDS}
+    if invalid == "moved-head":
+        record = {"at": now, "url": URL, "head": "old-head"}
+    lift.task_lift_path(SLUG, WHO.task, rig.gate.name, tmp_path).write_text(json.dumps(record))
+
+    first = rig.gate.decide(STOP, WHO, state)
+    assert not first.allowed and "stop block 1 of 2" in first.reason
+    assert not rig.gate.decide(STOP, WHO, state).allowed
+    assert rig.gate.decide(STOP, WHO, state).allowed
+    assert rig.task["state"] == "blocked"
 
 
 @pytest.mark.parametrize("owed", sorted(PLAIN))

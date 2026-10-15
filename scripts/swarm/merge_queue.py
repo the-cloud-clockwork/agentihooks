@@ -118,7 +118,10 @@ def refresh(url: str, raw: dict, run) -> bool:
     if latest != current:
         raise SwarmError("dev advanced during the grading comparison; retry queueing")
     if changed:
-        rest(f"repos/{repo}/pulls/{pull['number']}/update-branch", run, {"expected_head_sha": raw["headRefOid"]})
+        try:
+            rest(f"repos/{repo}/pulls/{pull['number']}/update-branch", run, {"expected_head_sha": raw["headRefOid"]})
+        except SwarmError as exc:
+            raise SwarmError(f"could not update the branch from dev: {exc}") from exc
     return changed
 
 

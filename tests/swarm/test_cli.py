@@ -26,6 +26,13 @@ from tests.swarm.profile_fixture import validated
 def env(monkeypatch, tmp_path):
     import fakeredis
 
+    from scripts.swarm.health import merge_stall
+
+    monkeypatch.setattr(
+        merge_stall,
+        "observe",
+        lambda repo, at: {"repo": "", "queue": 0, "merged": 0, "failed": "none observed", "at": at},
+    )
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     ledger = FakeLedger([{"id": "t1", "lane": "eng"}, {"id": "t2", "lane": "ci"}])
     ledger.said = []
@@ -712,6 +719,34 @@ def test_review_closes_on_the_third_round_and_refuses_a_fourth(env, monkeypatch,
     assert json.loads(capsys.readouterr().out) == {"task": "t1", "round": 3, "notice": cli.review_rounds.CLOSED}
     assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 1
     assert capsys.readouterr().err == f"swarm: task t1 gets no fourth review round. {cli.review_rounds.CLOSED}\n"
+
+
+@pytest.mark.parametrize("legacy,register_first", [(False, False), (True, False), (True, True)])
+def test_review_budget_keeps_each_pull_requests_rounds(env, monkeypatch, capsys, tmp_path, legacy, register_first):
+    _, ledger, _ = env
+    read_task = ledger.task
+    monkeypatch.setattr(ledger, "task", lambda slug, task: read_task(slug, task) if slug == "sw" else None)
+    monkeypatch.setattr(gate_log, "swarm_home", lambda: tmp_path)
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    capsys.readouterr()
+    first = "https://github.com/o/r/pull/1"
+    second = "https://github.com/o/r/pull/2"
+    if not legacy:
+        ledger.rows["t1"]["pr_url"] = first
+    for n in (1, 2, 3):
+        assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 0
+        assert json.loads(capsys.readouterr().out)["round"] == n
+    if legacy and register_first:
+        ledger.rows["t1"]["pr_url"] = first
+        assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 1
+        assert "no fourth review round" in capsys.readouterr().err
+    ledger.rows["t1"].update(pr_url=second, split_pulls=[first, second])
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 0
+    assert json.loads(capsys.readouterr().out)["round"] == 1
+    ledger.rows["t1"]["pr_url"] = first
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 1
+    assert "no fourth review round" in capsys.readouterr().err
 
 
 def test_redis_down_is_a_clear_failure(monkeypatch, capsys):
@@ -1611,7 +1646,7 @@ URL3 = "https://github.com/o/r/pull/3"
 
 def test_the_worktree_branch_is_read_and_checked_on_origin():
     calls, fake = git_answers({"branch": (0, "engineer-a1b2c3-0001\n"), "ls-remote": (0, "abc\trefs/heads/x\n")})
-    assert cli.worktree_branch(run=fake) == "engineer-a1b2c3-0001"
+    assert cli.worktree_branch(None, run=fake) == "engineer-a1b2c3-0001"
     assert calls == [
         (["git", "branch", "--show-current"], GIT_OPTS),
         (["git", "ls-remote", "--exit-code", "--heads", "origin", "engineer-a1b2c3-0001"], GIT_OPTS),
@@ -1621,7 +1656,7 @@ def test_the_worktree_branch_is_read_and_checked_on_origin():
 def test_a_branch_missing_on_origin_is_refused():
     _, fake = git_answers({"branch": (0, "engineer-a1b2c3-0001\n"), "ls-remote": (2, "")})
     with pytest.raises(SwarmError) as refused:
-        cli.worktree_branch(run=fake)
+        cli.worktree_branch(None, run=fake)
     assert str(refused.value) == (
         "branch engineer-a1b2c3-0001 is not on origin; push it first with git push -u origin engineer-a1b2c3-0001"
     )
@@ -1631,7 +1666,7 @@ def test_a_branch_missing_on_origin_is_refused():
 def test_a_checkout_on_no_branch_is_refused(answer):
     calls, fake = git_answers({"branch": answer})
     with pytest.raises(SwarmError) as refused:
-        cli.worktree_branch(run=fake)
+        cli.worktree_branch(None, run=fake)
     assert str(refused.value) == "swarm branch runs in a worktree on a branch; this checkout is on none"
     assert len(calls) == 1
 
@@ -1645,8 +1680,59 @@ def test_a_git_call_that_cannot_run_is_a_clean_refusal(failure, step):
         return subprocess.CompletedProcess(argv, 0, "engineer-a1b2c3-0001\n", "")
 
     with pytest.raises(SwarmError) as refused:
-        cli.worktree_branch(run=fake)
+        cli.worktree_branch(None, run=fake)
     assert str(refused.value) == f"git {step} could not run: {failure}"
+
+
+def test_a_continuation_pushing_the_recorded_remote_branch_records_that_branch():
+    calls, fake = git_answers(
+        {
+            "branch": (0, "engineer-a1b2c3-0002\n"),
+            "rev-parse": (0, "origin/engineer-a1b2c3-0001\n"),
+            "ls-remote": (0, "abc\trefs/heads/engineer-a1b2c3-0001\n"),
+        }
+    )
+    assert cli.worktree_branch("engineer-a1b2c3-0001", run=fake) == "engineer-a1b2c3-0001"
+    assert calls == [
+        (["git", "branch", "--show-current"], GIT_OPTS),
+        (["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], GIT_OPTS),
+        (["git", "ls-remote", "--exit-code", "--heads", "origin", "engineer-a1b2c3-0001"], GIT_OPTS),
+    ]
+
+
+@pytest.mark.parametrize(
+    "upstream",
+    [
+        (0, "origin/engineer-ffffff-0009\n"),
+        (0, "fork/engineer-a1b2c3-0001\n"),
+        (128, ""),
+        (0, "engineer-a1b2c3-0001\n"),
+    ],
+)
+def test_a_continuation_pushing_an_unrelated_remote_branch_is_refused(upstream):
+    calls, fake = git_answers({"branch": (0, "engineer-a1b2c3-0002\n"), "rev-parse": upstream, "ls-remote": (2, "")})
+    with pytest.raises(SwarmError) as refused:
+        cli.worktree_branch("engineer-a1b2c3-0001", run=fake)
+    assert str(refused.value) == (
+        "branch engineer-a1b2c3-0002 is not on origin; push it first with git push -u origin HEAD:engineer-a1b2c3-0001"
+    )
+    assert calls[-1] == (["git", "ls-remote", "--exit-code", "--heads", "origin", "engineer-a1b2c3-0002"], GIT_OPTS)
+
+
+def test_a_checkout_on_the_recorded_branch_reads_no_upstream():
+    calls, fake = git_answers({"branch": (0, "engineer-a1b2c3-0001\n"), "ls-remote": (0, "abc\trefs/heads/x\n")})
+    assert cli.worktree_branch("engineer-a1b2c3-0001", run=fake) == "engineer-a1b2c3-0001"
+    assert [argv[1] for argv, _ in calls] == ["branch", "ls-remote"]
+
+
+def test_a_continuation_whose_recorded_branch_left_origin_is_told_to_push_head_to_it():
+    upstream = (0, "origin/engineer-a1b2c3-0001\n")
+    _, fake = git_answers({"branch": (0, "engineer-a1b2c3-0002\n"), "rev-parse": upstream, "ls-remote": (2, "")})
+    with pytest.raises(SwarmError) as refused:
+        cli.worktree_branch("engineer-a1b2c3-0001", run=fake)
+    assert str(refused.value) == (
+        "branch engineer-a1b2c3-0001 is not on origin; push it first with git push -u origin HEAD:engineer-a1b2c3-0001"
+    )
 
 
 HEAD_JSON = (
@@ -1707,7 +1793,7 @@ def test_swarm_branch_records_the_worktree_branch_on_the_agent_task(env, monkeyp
     _, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
-    monkeypatch.setattr(cli, "worktree_branch", lambda: "engineer-a1b2c3-0001")
+    monkeypatch.setattr(cli, "worktree_branch", lambda recorded: "engineer-a1b2c3-0001")
     monkeypatch.setattr(cli, "origin_repo", lambda: repo)
     writes, update = [], ledger.update_task
     ledger.update_task = lambda slug, task, fields, by="swarm": (
@@ -1719,6 +1805,30 @@ def test_swarm_branch_records_the_worktree_branch_on_the_agent_task(env, monkeyp
     assert ledger.rows["t1"]["branch"] == "engineer-a1b2c3-0001"
     assert ledger.rows["t1"].get("branch_repo") == recorded.get("branch_repo")
     assert json.loads(capsys.readouterr().out) == {"task": "t1", "branch": "engineer-a1b2c3-0001", **recorded}
+
+
+def test_swarm_branch_on_a_continuation_records_the_predecessor_branch_and_keeps_its_pull_request(
+    env, monkeypatch, capsys
+):
+    _, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    ledger.rows["t1"].update(branch="engineer-a1b2c3-0001", pr_url=URL3)
+    read = ledger.task
+    monkeypatch.setattr(ledger, "task", lambda slug, task_id: read(slug, task_id) if slug == "sw" else None)
+    seen = []
+    monkeypatch.setattr(cli, "worktree_branch", lambda recorded: seen.append(recorded) or recorded)
+    monkeypatch.setattr(cli, "origin_repo", lambda: "https://github.com/o/r")
+    capsys.readouterr()
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "branch") == 0
+    assert seen == ["engineer-a1b2c3-0001"]
+    assert ledger.rows["t1"]["branch"] == "engineer-a1b2c3-0001" and ledger.rows["t1"]["pr_url"] == URL3
+    assert json.loads(capsys.readouterr().out) == {
+        "task": "t1",
+        "branch": "engineer-a1b2c3-0001",
+        "branch_repo": "https://github.com/o/r",
+        "pr_url": URL3,
+    }
 
 
 @pytest.mark.parametrize(
@@ -1740,7 +1850,7 @@ def test_swarm_branch_writes_nothing_when_the_branch_is_refused(env, monkeypatch
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
 
-    def refused():
+    def refused(recorded):
         raise SwarmError("branch x is not on origin")
 
     monkeypatch.setattr(cli, "worktree_branch", refused)
@@ -2251,7 +2361,9 @@ def _traced(env, monkeypatch, tmp_path, plan, *p_yes):
     asked["size"] = Answer(type="score", score=1.0, confidence=0.9)
     seen = []
     monkeypatch.setattr(trace_plan, "decide", lambda state, q, **k: seen.append(state) or DecisionResult(asked, "m"))
-    monkeypatch.setattr(intent, "judge", lambda state: seen.append(state) or ("pass", "the phase can use it"))
+    monkeypatch.setattr(
+        intent, "judged", lambda state: seen.append(state) or {"verdict": "pass", "reason": "the phase can use it"}
+    )
     folder = tmp_path / "_home" / ".agentihooks" / "swarm" / "sw" / "tasks" / "t1"
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "plan.md").write_text(plan)
@@ -2285,7 +2397,7 @@ def test_trace_plan_judges_intent_on_the_kept_pieces_before_the_pull_request_ope
     assert run("sw", "--as", "engineer@a1b2c3-0001", "trace-plan") == 0
     report = json.loads(capsys.readouterr().out)
     assert report["intent"] == {"verdict": "pass", "reason": "the phase can use it"}
-    assert seen[1]["pull_request_body"] == "- walls | doghouse | it shelters the dog\n"
+    assert seen[1]["planned_pieces"] == ["walls | doghouse | it shelters the dog"]
     assert [Verdicts("sw", "intent").read("t1")[k] for k in ("verdict", "at")] == ["pass", 4242]
 
 
