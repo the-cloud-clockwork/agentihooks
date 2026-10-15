@@ -570,14 +570,15 @@ def test_cli_prepares_and_publishes_from_the_primary_checkout(publication, monke
     monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
     assert cli.main(["swarm", "--as", agent.name, "prepare"]) == 0
     prepared = json.loads(capsys.readouterr().out)
-    assert prepared == {
+    checkout = {
         "worktree": str(publication.root),
         "branch": "engineer-test",
         "branch_repo": str(publication.repo.parent / "remote.git"),
     }
+    assert prepared == {**checkout, "repository": str(publication.repo), "repository_source": "swarm default"}
     assert cli.main(["swarm", "--as", agent.name, "publish", option, "Change chosen", "--", "chosen.txt"]) == 0
     head = git(publication.root, "rev-parse", "HEAD")
-    assert json.loads(capsys.readouterr().out) == {**prepared, "head": head}
+    assert json.loads(capsys.readouterr().out) == {**checkout, "head": head}
     assert git(publication.repo, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
 
 
