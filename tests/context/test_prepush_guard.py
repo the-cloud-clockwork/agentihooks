@@ -538,6 +538,7 @@ def test_codex_explicit_directory_without_a_repository_is_refused(repo, tmp_path
     _stamp(repo)
     with pytest.raises(BlockAction) as blocked:
         check_prepush(payload)
-    assert "Could not resolve the push directory" in str(blocked.value)
-    assert "git -C /absolute/path/to/worktree push" in str(blocked.value)
-    assert str(repo) not in str(blocked.value)
+    assert str(blocked.value) == (
+        "BLOCKED: Could not resolve the push directory (repository lookup). "
+        "Use git -C /absolute/path/to/worktree push with the intended repository."
+    )
