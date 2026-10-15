@@ -132,7 +132,7 @@ def test_only_running_lane_agents_on_the_observed_account_are_notified(store, fi
 @pytest.mark.parametrize("harness", ["claude", "codex"])
 def test_each_lane_and_harness_uses_its_own_account(store, lane, harness):
     row = agent(store, lane=lane, harness=harness)
-    readings = decision(15, 90, harness=harness)
+    readings = decision(15, 15, harness=harness)
     readings["accounts"].append(decision(0, 0, harness="other")["accounts"][0])
     quota_notice.apply("sw", store, readings)
     assert [item.text for item in messages(store, row)] == [HURRY]
