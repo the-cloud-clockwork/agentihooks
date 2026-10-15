@@ -186,13 +186,12 @@ def test_main_seeds_the_codex_cache_that_unit_shards_restore():
         == jobs["unit-selected"]["env"]["CODEX_RELEASE"]
     )
     assert "'anton-oss'" in seed["runs-on"]
-    assert seed["steps"][0]["if"] == "runner.environment != 'self-hosted'"
-    assert "exit 1" in seed["steps"][0]["run"]
     restore = next(step for step in seed["steps"] if step.get("id") == "codex")
     assert restore["uses"] == "actions/cache@v4"
     assert restore["with"] == {"path": "~/codex", "key": "codex-${{ runner.os }}-${{ env.CODEX_RELEASE }}"}
     install = next(step for step in seed["steps"] if step.get("name") == "Install the Codex CLI")
-    assert install["if"] == "steps.codex.outputs.cache-hit != 'true'"
+    assert restore["if"] == "runner.environment == 'self-hosted'"
+    assert install["if"] == "steps.codex.outcome == 'success' && steps.codex.outputs.cache-hit != 'true'"
     assert "releases/download/${CODEX_RELEASE}/codex-x86_64-unknown-linux-musl.tar.gz" in install["run"]
 
 

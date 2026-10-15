@@ -1,16 +1,14 @@
 name: Codex cache
 
 # Merge queue refs restore caches only from their own ref and main, so the Codex CLI
-# that unit shard 1 restores is saved here on main. The cache version depends on the
-# runner's compression, so only the self-hosted pool the unit shards run on may save it.
+# that unit shard 1 restores is saved here on main. Hosted runners compress with zstd,
+# which saves a cache version the gzip self-hosted unit runners cannot restore.
 on:
   schedule:
     - cron: "23 */6 * * *"
   workflow_dispatch:
   push:
     branches: [main]
-    paths:
-      - .github/workflows/codex-cache.yml
 
 concurrency:
   group: codex-cache-${{ github.ref }}
@@ -26,21 +24,20 @@ jobs:
     env:
       CODEX_RELEASE: rust-v0.160.0
     steps:
-      - name: Require the self-hosted unit runner pool
+      - name: Skip the seed off the self-hosted unit runner pool
         if: runner.environment != 'self-hosted'
-        run: |
-          echo "::error::The Codex cache must be saved by the self-hosted pool unit shards restore it on."
-          exit 1
+        run: echo "::warning::Only the self-hosted pool unit shards restore on may save the Codex cache."
 
       - name: Restore the Codex CLI
         id: codex
+        if: runner.environment == 'self-hosted'
         uses: actions/cache@v4
         with:
           path: ~/codex
           key: codex-${{ runner.os }}-${{ env.CODEX_RELEASE }}
 
       - name: Install the Codex CLI
-        if: steps.codex.outputs.cache-hit != 'true'
+        if: steps.codex.outcome == 'success' && steps.codex.outputs.cache-hit != 'true'
         run: |
           set -o pipefail
           mkdir -p ~/codex
@@ -48,4 +45,5 @@ jobs:
           chmod +x ~/codex/codex
 
       - name: Check the Codex CLI runs
+        if: steps.codex.outcome == 'success'
         run: ~/codex/codex --version
