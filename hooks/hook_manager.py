@@ -307,6 +307,25 @@ def notify_on_error(transcript_path: str) -> None:
 # =============================================================================
 
 
+def _run_start_conditions(payload: dict) -> None:
+    """Inject a start condition's context; it can never deny, rewrite or block."""
+    try:
+        from hooks.context import conditions
+        from hooks.targets.capabilities import can_inject_context
+
+        if not can_inject_context("SessionStart"):
+            return
+        effect = conditions.start_effect(payload)
+        if not effect:
+            return
+        from hooks.common import inject_context
+
+        for ctx in effect.contexts:
+            inject_context(ctx)
+    except Exception as e:
+        log("conditions session_start failed", {"error": str(e)})
+
+
 def on_session_start(payload: dict) -> None:
     """Handle SessionStart event."""
     session_id = payload.get("session_id", "")
@@ -316,19 +335,7 @@ def on_session_start(payload: dict) -> None:
     from hooks.lifecycle.guard import session_event
 
     session_event()
-    try:
-        from hooks.context import conditions as _start_conditions
-        from hooks.targets.capabilities import can_inject_context as _can_inject_start
-
-        if _can_inject_start("SessionStart"):
-            _start_effect = _start_conditions.start_effect(payload)
-            if _start_effect:
-                from hooks.common import inject_context as _inject_start
-
-                for _ctx in _start_effect.contexts:
-                    _inject_start(_ctx)
-    except Exception as e:
-        log("conditions session_start failed", {"error": str(e)})
+    _run_start_conditions(payload)
     try:
         from hooks.lifecycle.deps_kick import kick as deps_kick
 
