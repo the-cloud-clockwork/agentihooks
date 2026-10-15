@@ -462,7 +462,7 @@ def test_a_slow_launch_that_never_starts_is_recorded_against_the_launch_not_the_
     monkeypatch.setattr(rt, "spawn", slow)
     monkeypatch.setattr(cli.intent, "Check", Check)
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
-    assert events == [True] * 5 + ["intent"]
+    assert events == ["intent"] + [True] * 5
     assert [(row["state"], row["error"]) for row in store.launches("sw") if row["task"] == "t1"] == [
         ("failed", refused)
     ]
