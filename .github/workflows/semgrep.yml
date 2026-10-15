@@ -39,11 +39,12 @@ jobs:
 
       # Actions are pinned to release tags by fleet policy, so the mutable tag rule only repeats it.
       # A rule that times out drops its new findings; an installer taint rule timed out at the default 5 s in a baseline scan.
+      # The shell injection rule takes 20 ms on the Tests workflow yet once stalled past 30 s, so a scan whose only errors are timeouts runs once more.
       - name: Fail on findings new against the base
         env:
           BASE: ${{ steps.baseline.outputs.sha }}
         run: >-
-          semgrep scan --error --strict --verbose --timeout 30 --metrics off
+          python scripts/ci_semgrep.py semgrep scan --error --strict --verbose --timeout 30 --metrics off
           --config p/ci --config p/secrets --config p/python
           --exclude-rule yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag
           --baseline-commit "$BASE"

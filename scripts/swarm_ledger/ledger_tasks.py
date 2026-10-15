@@ -450,13 +450,28 @@ def _update_fields(task: dict, fields: dict) -> dict:
     return fields
 
 
+def _block_author(by: str) -> bool:
+    from scripts.swarm.naming import lane_of
+
+    return by == "operator" or lane_of(by) == "master"
+
+
+def _held_block(task: dict, op: dict, ctx) -> bool:
+    return (
+        task.get("state") == "blocked"
+        and "state" in op["fields"]
+        and not _block_author(op["by"])
+        and _block_author(ledger_rank.author(ctx, f"{op['item']}/state"))
+    )
+
+
 def _update(doc, op, ctx):
     task_id = op["item"].split("/")[1]
     task = next((t for t in doc.get("tasks", []) if t["id"] == task_id), None)
     others = [t for t in doc["tasks"] if t["id"] != task_id]
     if task is None or not _known(others, op["fields"].get("depends_on", []) + op["fields"].get("parked_on", [])):
         return False
-    if op.get("if_state") and task.get("state", "open") not in op["if_state"]:
+    if _held_block(task, op, ctx) or (op.get("if_state") and task.get("state", "open") not in op["if_state"]):
         return True
     if refusal := update_refusal(doc, op, ctx.meta):
         ctx.refused.append(refusal)
@@ -511,6 +526,8 @@ def _changed(task, fields, op, ctx):
     changed = {k: v for k, v in fields.items() if task.get(k) != v}
     if "rank" in fields and ledger_rank.author(ctx, f"{op['item']}/rank") != op["by"]:
         changed["rank"] = fields["rank"]
+    if fields.get("state") == "blocked" and _block_author(op["by"]):
+        changed["state"] = "blocked"
     return changed
 
 

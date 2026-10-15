@@ -297,11 +297,12 @@ def test_the_warning_names_quota_left_and_reset_and_a_new_reset_rearms_it(window
     import fakeredis
 
     storage = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    storage.put_agent("sw", AgentRecord("cx", "eng", "e", harness="codex", account="spent", started_at=1))
+    harness = "codex" if window == "week" else "claude"
+    storage.put_agent("sw", AgentRecord("cx", "eng", "e", harness=harness, account="spent", started_at=1))
     key = storage.key("sw", "quota-capacity")
 
     def observe(reset, **quota):
-        row = replace(account(harness="codex", **quota), **{field: reset})
+        row = replace(account(harness=harness, **quota), **{field: reset})
         storage.redis.set(key, json.dumps({"accounts": [row.__dict__]}))
         return quota_handoff.warn("sw", storage, {})
 
@@ -314,7 +315,9 @@ def test_the_warning_names_quota_left_and_reset_and_a_new_reset_rearms_it(window
     left = 100 - max(used.values()) if window == "week" else 4
     assert len(texts) == 2
     for text, reset in zip(texts, (first, second), strict=True):
-        assert f"codex account spent has used {100 - left}% of its {window} window, {left}% left; it resets " in text
+        assert (
+            f"{harness} account spent has used {100 - left}% of its {window} window, {left}% left; it resets " in text
+        )
         assert datetime.fromtimestamp(reset).astimezone().strftime("%a %H:%M %Z") in text
 
 
@@ -322,11 +325,11 @@ def test_each_window_warns_once_per_reset_while_the_other_stays_crossed():
     import fakeredis
 
     storage = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    storage.put_agent("sw", AgentRecord("cx", "eng", "e", harness="codex", account="spent", started_at=1))
+    storage.put_agent("sw", AgentRecord("cx", "eng", "e", harness="claude", account="spent", started_at=1))
     key = storage.key("sw", "quota-capacity")
 
     def observe(five_reset, five, week):
-        row = replace(account(harness="codex", five=five, week=week), week_resets_at=9_000, five_resets_at=five_reset)
+        row = replace(account(harness="claude", five=five, week=week), week_resets_at=9_000, five_resets_at=five_reset)
         storage.redis.set(key, json.dumps({"accounts": [row.__dict__]}))
         return len(quota_handoff.warn("sw", storage, {}))
 
@@ -341,7 +344,7 @@ def test_each_window_warns_once_per_reset_while_the_other_stays_crossed():
         ["five", "hour"],
         ["five", "hour"],
     ]
-    storage.put_agent("sw", AgentRecord("both", "eng", "f", harness="codex", account="spent", started_at=2))
+    storage.put_agent("sw", AgentRecord("both", "eng", "f", harness="claude", account="spent", started_at=2))
     assert quota_handoff.warn("sw", storage, {}) == ["early quota handoff warning sent to both"]
     assert quota_handoff.warn("sw", storage, {}) == []
     (both,) = InboxStore(storage.redis).pending_items("both")
@@ -967,3 +970,19 @@ def test_warn_spares_the_master_lane_on_a_reserved_account():
     reserved = replace(account("main", five=10, week=70), reserved=CEILING_REASON)
     storage.redis.set(storage.key("sw", "quota-capacity"), json.dumps({"accounts": [capacity.record(reserved)]}))
     assert quota_handoff.warn("sw", storage, {}) == ["early quota handoff warning sent to worker"]
+
+
+@pytest.mark.parametrize("five", [None, 0.0, 100.0])
+@pytest.mark.parametrize("week,expected", [(73.0, []), (10.0, ["week"])])
+def test_codex_handoff_windows_use_only_the_week(five, week, expected):
+    row = capacity.Account("codex", "a", "OPEN", 0, five, week, 6)
+    assert quota_handoff.windows(row, quota_handoff.Thresholds()) == expected
+
+
+def test_codex_successor_prefers_week_remaining_and_requires_a_week():
+    thresholds = quota_handoff.Thresholds()
+    better = capacity.Account("codex", "a", "OPEN", 0, 0.0, 73.0, 6)
+    lesser = capacity.Account("codex", "b", "OPEN", 0, 80.0, 50.0, 6)
+    missing = capacity.Account("codex", "c", "OPEN", 0, 90.0, None, 6)
+    assert quota_handoff.exclusion(missing, thresholds) == "has no quota reading"
+    assert quota_handoff.successor([lesser, better, missing], ("codex",), thresholds) == better

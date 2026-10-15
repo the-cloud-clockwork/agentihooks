@@ -176,7 +176,7 @@ def _passed(workflow, jobs):
             for job in jobs
             if job["name"] == label or job["name"].startswith((f"{label} (", f"{label} /"))
         ]
-        if name in {"queue-baseline", "helm-kind"} and results == ["skipped"]:
+        if name in {"queue-baseline", "helm-kind", "unit-selected"} and results == ["skipped"]:
             continue
         if len(results) < _matrix(definitions[name]) or any(result != "success" for result in results):
             return False
