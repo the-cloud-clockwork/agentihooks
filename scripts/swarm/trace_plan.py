@@ -106,17 +106,17 @@ def authorizations(task):
 
 
 def _authorizes(comment) -> bool:
-    by = comment["by"]
-    return by == "operator" or (by.startswith("master@") and comment["text"].lstrip().lower().startswith(SCOPE_MARK))
+    marked = comment["text"].lstrip().lower().startswith(SCOPE_MARK)
+    return "relayed_by" in comment or (marked and (comment["by"] == "operator" or comment["by"].startswith("master@")))
 
 
 def _ids(state):
     return [a["id"] for a in state.get("scope authorizations", [])]
 
 
-def _covering(answers, covers, slot, off_intent):
+def _covering(answers, covers, slot, covered):
     return next(
-        (c["id"] for c in covers if c["slot"] == slot and answers[f"covers_{slot}_{c['grant']}"].noul >= off_intent),
+        (c["id"] for c in covers if c["slot"] == slot and answers[f"covers_{slot}_{c['grant']}"].noul >= covered),
         None,
     )
 
@@ -188,7 +188,8 @@ def _verdicts(definition, state, params, answers):
     rows = [
         {
             "kept": _kept(
-                piece["ruling"] or _covering(answers, params["covers"], piece["slot"], off_intent) is not None,
+                piece["ruling"]
+                or _covering(answers, params["covers"], piece["slot"], definition.thresholds["covered"]) is not None,
                 answers[f"piece_{piece['slot']}"].noul,
                 off_intent,
             )
@@ -238,7 +239,7 @@ def trace(pieces, state, previous, now_ms=None):
             piece,
             result.answers[f"piece_{start + i}"].noul,
             off_intent,
-            _covering(result.answers, params["covers"], start + i, off_intent),
+            _covering(result.answers, params["covers"], start + i, output.thresholds["covered"]),
         )
         for i, piece in enumerate(fresh)
     ]
@@ -247,7 +248,7 @@ def trace(pieces, state, previous, now_ms=None):
     size = _size(result.answers["size"], levels(output.definition))
     reasons = failures(rows, size, output.thresholds["too_big_confidence"])
     verdict = FAIL if reasons else PASS
-    base["failures"] += verdict == FAIL
+    base["failures"] += verdict == FAIL and previous.get("plan_hash") != base["plan_hash"]
     return _record(verdict, rows, size, reasons, result.source, result.calibrated, base)
 
 

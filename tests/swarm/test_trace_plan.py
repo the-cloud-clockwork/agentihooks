@@ -185,7 +185,8 @@ def test_intent_carries_the_scope_authorizations_the_master_or_operator_recorded
         "quote": "a dog bed too",
     }
     comments = [
-        {"id": "c-1", "by": "operator", "text": "add a water bowl"},
+        {"id": "c-1", "by": "operator", "text": "approved, set a condition"},
+        {"id": "c-5", "by": "operator", "text": "In scope: a water bowl"},
         relay,
         AUTHORIZED,
         {"id": "c-2", "by": "master@1-0", "text": "Master proof: the walls stand."},
@@ -194,7 +195,7 @@ def test_intent_carries_the_scope_authorizations_the_master_or_operator_recorded
     ]
     doc = {"tasks": [{"id": "t1", "description": "A house for the dog.", "comments": comments}]}
     assert trace_plan.intent(doc, "t1")["scope authorizations"] == [
-        {"id": "c-1", "by": "operator", "text": "add a water bowl"},
+        {"id": "c-5", "by": "operator", "text": "In scope: a water bowl"},
         {"id": "relay-80db2c4f89", "by": "operator", "text": "Approved: a dog bed too."},
         AUTHORIZED,
         {"id": "c-4", "by": "master@1-0", "text": "  in scope: the roof paint"},
@@ -202,7 +203,7 @@ def test_intent_carries_the_scope_authorizations_the_master_or_operator_recorded
 
 
 def test_intent_keeps_the_latest_five_scope_authorizations():
-    comments = [{"id": f"c-{n}", "by": "operator", "text": f"add piece {n}"} for n in range(7)]
+    comments = [{"id": f"c-{n}", "by": "operator", "text": f"In scope: piece {n}"} for n in range(7)]
     doc = {"tasks": [{"id": "t1", "comments": comments}]}
     assert [a["id"] for a in trace_plan.intent(doc, "t1")["scope authorizations"]] == [f"c-{n}" for n in range(2, 7)]
 
@@ -242,7 +243,7 @@ def test_a_piece_the_description_omits_is_kept_by_the_authorization_that_covers_
 
 
 def test_the_first_covering_authorization_is_named(monkeypatch):
-    covered(monkeypatch, 0.0, covers=[("covers_0_0", 0.29), ("covers_0_1", 0.3)])
+    covered(monkeypatch, 0.0, covers=[("covers_0_0", 0.69), ("covers_0_1", 0.7)])
     state = {**INTENT, "scope authorizations": [AUTHORIZED, SECOND]}
     record = trace_plan.trace([piece("a dog bed")], state, None)
     assert record["pieces"][0]["kept"] is True
@@ -671,6 +672,17 @@ def test_a_new_authorization_retraces_an_unchanged_plan(monkeypatch, tmp_path):
     assert len(fake.calls) == 1 and [row["kept"] for row in record["pieces"]] == [True, True, True]
     assert trace_plan.run(folder, state, ledger, WHO, "observe", home=home, now_ms=13)[0] == record
     assert len(fake.calls) == 1
+
+
+def test_a_retrace_for_a_new_authorization_counts_no_new_failed_plan(monkeypatch, tmp_path):
+    folder, home, ledger = tmp_path / "t1", tmp_path / "home", Ledger()
+    write_plan(folder)
+    covered(monkeypatch, 0.0, 0.0, 0.9)
+    assert run(folder, ledger, home, mode="enforce")[0]["failures"] == 1
+    covered(monkeypatch, 0.0, 0.0, 0.9, covers=[(f"covers_{n}_0", 0.0) for n in range(3)])
+    state = {**INTENT, "scope authorizations": [AUTHORIZED]}
+    record, block = trace_plan.run(folder, state, ledger, WHO, "enforce", home=home, now_ms=12)
+    assert (record["verdict"], record["failures"], block) == ("fail", 1, False)
 
 
 def test_run_saves_the_filed_cut_before_its_follow_up(ask, tmp_path):

@@ -30,6 +30,7 @@ questions:
       - a whole phase
 thresholds:
   off_intent: 0.3
+  covered: 0.7
   too_big_confidence: 0.7
 rule:
   type: code
