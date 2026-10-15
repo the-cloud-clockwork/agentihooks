@@ -547,6 +547,25 @@ def test_a_nudge_retries_a_refused_interrupt_before_starting_a_fresh_turn(rig, m
     assert len(rig.server.turns) == 2
 
 
+def test_a_nudged_turn_completed_before_its_reply_publishes_an_empty_active_turn(rig, monkeypatch):
+    rig.server.begin_elsewhere()
+    rig.pump.start()
+    rig.pump.step()
+    start = rig.server.turn_start
+
+    def complete(params):
+        result = start(params)
+        rig.server.finish(announce=False)
+        rig.server.early.append({"method": codex.TURN_COMPLETED, "params": {"turn": result["turn"]}})
+        return result
+
+    monkeypatch.setattr(rig.server, "turn_start", complete)
+    item = send_nudge(rig)
+    rig.pump.step()
+    assert rig.store.get(item.id).state == "delivered"
+    assert rig.record().active_turn_id == ""
+
+
 def test_a_nudge_reaches_an_unobserved_turn_at_the_exact_hold_boundary(rig, monkeypatch):
     rig.server.begin_elsewhere()
     rig.server.frames.clear()
