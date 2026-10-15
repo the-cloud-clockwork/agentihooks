@@ -127,7 +127,7 @@ def check_build(root: Path) -> None:
         raise SwarmError(reason.getvalue().strip())
 
 
-def push_branch(root: Path, task: dict, branch: str) -> str:
+def target_branch(root: Path, task: dict, branch: str) -> str:
     recorded = task.get("branch")
     if recorded:
         ref = f"refs/remotes/origin/{recorded}"
@@ -143,7 +143,7 @@ def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, mess
     if root is None:
         raise SwarmError(f"task worktree missing; Next: agentihooks swarm {shlex.quote(slug)} prepare")
     fields = checkout_fields(root)
-    fields["branch"] = push_branch(root, task, fields["branch"])
+    fields["branch"] = target_branch(root, task, fields["branch"])
     selected = selected_files(root, files)
     retry = shlex.join(["agentihooks", "swarm", slug, "publish", "--message", message, "--", *files])
     try:

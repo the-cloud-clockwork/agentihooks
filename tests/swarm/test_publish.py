@@ -568,6 +568,7 @@ def test_continuation_publishes_back_to_the_recorded_remote_branch(publication):
     assert result["branch"] == publication.task["branch"] == "predecessor"
     assert git(root, "ls-remote", "origin", "refs/heads/predecessor").split()[0] == head
     assert git(root, "ls-remote", "origin", "refs/heads/engineer-test") == ""
+    assert git(root, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/predecessor"
 
 
 def test_a_restacked_successor_publishes_its_prepared_branch_not_the_parked_one(publication):
