@@ -1,19 +1,20 @@
 name: Codex cache
 
 # Merge queue refs restore caches only from their own ref and main, so the Codex CLI
-# that unit shard 1 restores is saved here on main, by the gzip runners that restore it.
+# that unit shard 1 restores is saved here on main. The cache version depends on the
+# runner's compression, so only the self-hosted pool the unit shards run on may save it.
 on:
   schedule:
     - cron: "23 */6 * * *"
   workflow_dispatch:
   push:
-    branches-ignore: [dev, "gh-readonly-queue/**", "wip/**", "diffcheck/**"]
+    branches: [main]
     paths:
       - .github/workflows/codex-cache.yml
 
 concurrency:
   group: codex-cache-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -25,6 +26,12 @@ jobs:
     env:
       CODEX_RELEASE: rust-v0.160.0
     steps:
+      - name: Require the self-hosted unit runner pool
+        if: runner.environment != 'self-hosted'
+        run: |
+          echo "::error::The Codex cache must be saved by the self-hosted pool unit shards restore it on."
+          exit 1
+
       - name: Restore the Codex CLI
         id: codex
         uses: actions/cache@v4

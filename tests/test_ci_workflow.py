@@ -174,14 +174,20 @@ def test_only_the_first_shard_installs_the_pinned_codex_cli_and_requires_its_liv
 
 def test_main_seeds_the_codex_cache_that_unit_shards_restore():
     workflows = _ROOT / ".github/workflows"
-    unit = yaml.safe_load((workflows / "test.yml").read_text())["jobs"]["unit"]
+    jobs = yaml.safe_load((workflows / "test.yml").read_text())["jobs"]
     seed_workflow = yaml.safe_load((workflows / "codex-cache.yml").read_text())
     triggers = seed_workflow[True]
     assert "schedule" in triggers
-    assert "main" not in triggers["push"]["branches-ignore"]
+    assert triggers["push"]["branches"] == ["main"]
     seed = seed_workflow["jobs"]["seed"]
-    assert seed["env"]["CODEX_RELEASE"] == unit["env"]["CODEX_RELEASE"]
+    assert (
+        seed["env"]["CODEX_RELEASE"]
+        == jobs["unit"]["env"]["CODEX_RELEASE"]
+        == jobs["unit-selected"]["env"]["CODEX_RELEASE"]
+    )
     assert "'anton-oss'" in seed["runs-on"]
+    assert seed["steps"][0]["if"] == "runner.environment != 'self-hosted'"
+    assert "exit 1" in seed["steps"][0]["run"]
     restore = next(step for step in seed["steps"] if step.get("id") == "codex")
     assert restore["uses"] == "actions/cache@v4"
     assert restore["with"] == {"path": "~/codex", "key": "codex-${{ runner.os }}-${{ env.CODEX_RELEASE }}"}
