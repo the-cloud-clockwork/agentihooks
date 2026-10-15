@@ -135,6 +135,15 @@ class TestPlanRead:
             "Scope: plan lines 3-9 are shared with tasks t2, t3; "
             "this task's scope is plan lines 7-7, the rows that name it.\n"
             "| t1 | Cache the reads |\n"
+            "\nContext only, not scope:\n" + TABLE.replace("| t1 | Cache the reads |\n", "")
+        )
+
+    def test_plan_read_of_a_sharer_no_row_names_prints_its_description_as_scope(self, table):
+        table["tasks"].append(row("t4", "Rename the module"))
+        assert plan_read.read(table, "tables", "t4", None) == (
+            "Scope: plan lines 3-9 are shared with tasks t1, t2, t3, and no row names this task, "
+            "so none of them is its scope.\n"
+            "Rename the module as the plan row says.\n"
             "\nContext only, not scope:\n" + TABLE
         )
 

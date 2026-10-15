@@ -182,7 +182,18 @@ def read(doc: dict, slug: str, task_id: str | None, phase_id: str | None) -> str
     if "shared_slice" not in part:
         return whole
     scope = part.get("plan_chunk", f"{task.get('description', '')}\n")
-    return f"Scope: {part['shared_slice']}.\n{scope}\nContext only, not scope:\n{whole}"
+    rest = _without(source, lines, part.get("plan_lines")) + linked(source, lines, margin=MARGIN)
+    return f"Scope: {part['shared_slice']}.\n{scope}\nContext only, not scope:\n{rest}"
+
+
+def _without(source: str, lines: str, own: str | None) -> str:
+    start, end = _ledger("plan_ranges").bounds(lines)
+    first, last = _ledger("plan_ranges").bounds(own) if own else (0, -1)
+    return "".join(
+        f"{row}\n"
+        for number, row in enumerate(source.splitlines(), 1)
+        if start - MARGIN <= number <= end + MARGIN and not first <= number <= last
+    )
 
 
 def main(argv=None, environ=None) -> int:
