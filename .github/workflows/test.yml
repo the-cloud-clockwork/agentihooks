@@ -260,7 +260,7 @@ jobs:
       # Expressions cannot parse the pull request number out of the queue ref, and a
       # job-level group keyed on it would let an older run's late job cancel the live run.
       - name: Cancel superseded and dead merge queue runs
-        if: github.event_name == 'merge_group' && github.actor == 'github-merge-queue[bot]' && github.triggering_actor == 'github-merge-queue[bot]'
+        if: github.event_name == 'merge_group' && (contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor)))
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           QUEUE_REF: ${{ github.event.merge_group.head_ref }}
