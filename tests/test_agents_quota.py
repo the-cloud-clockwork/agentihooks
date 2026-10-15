@@ -766,7 +766,11 @@ def _one_codex_token_with_live_sessions_elsewhere(monkeypatch) -> list:
     quota = codex_quota.CodexQuota(1000, "pro", seven_day=QuotaWindow(used=10.0, resets_at=10**10))
     monkeypatch.delenv("AGENTIHOOKS_CODEX_READING_MAX_AGE_H", raising=False)
     monkeypatch.setattr(
-        codex_router, "quotas", lambda pool, environ: read.extend(a.name for a in pool) or dict.fromkeys(read, quota)
+        codex_router,
+        "quotas",
+        lambda pool, environ: (
+            read.extend(a.name for a in pool) or dict.fromkeys(read, quota) if "AH_CX_TOKEN_alpha" in environ else {}
+        ),
     )
     monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {"beta": 4, "default": 1, "api": 2})
     monkeypatch.setattr(agents_quota, "_masters", lambda harness="": {})
