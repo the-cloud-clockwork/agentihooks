@@ -155,9 +155,10 @@ def _params(fresh, start, sized, ids):
             for i, piece in enumerate(fresh)
         ],
         "covers": [
-            {"slot": start + i, "number": start + i + 1, "what": piece.what, "grant": g, "id": grant}
+            {"slot": start + i, "number": start + i + 1, "what": piece.what, "grant": g, "id": auth}
             for i, piece in enumerate(fresh)
-            for g, grant in enumerate(ids)
+            if not _ruling(piece.areas)
+            for g, auth in enumerate(ids)
         ],
         "sized": [{}] if sized else [],
     }

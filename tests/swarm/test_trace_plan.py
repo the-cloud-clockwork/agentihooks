@@ -249,6 +249,14 @@ def test_the_first_covering_authorization_is_named(monkeypatch):
     assert record["pieces"][0]["authorized"] == "relay-80db2c4f89"
 
 
+def test_a_clearance_piece_asks_no_coverage_question(monkeypatch):
+    fake = covered(monkeypatch, 0.0, 0.9, covers=[("covers_1_0", 0.0)])
+    state = {**INTENT, "scope authorizations": [AUTHORIZED]}
+    trace_plan.trace([piece("append the rulings", "mutation-cleared.txt"), piece("b")], state, None)
+    [(_, questions, _)] = fake.calls
+    assert list(questions) == ["piece_0", "piece_1", "covers_1_0", "size"]
+
+
 def test_authorized_pieces_never_count_as_cut_toward_a_failed_plan(monkeypatch):
     covers = [("covers_0_0", 0.9), ("covers_1_0", 0.0), ("covers_2_0", 0.0)]
     covered(monkeypatch, 0.0, 0.0, 0.9, covers=covers)
