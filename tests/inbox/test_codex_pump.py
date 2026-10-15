@@ -6,10 +6,10 @@ import pytest
 
 from scripts.codex_session import protocol
 from scripts.codex_session.binding import CONNECTED, DEGRADED, BindingStore, TransportRecord
-from scripts.inbox import codex
+from scripts.inbox import codex, wake
 from scripts.inbox.dispatch import Dispatcher
 from scripts.inbox.receipts import MISMATCH, RELEASED, DispatchError, Receipts
-from scripts.inbox.store import InboxStore
+from scripts.inbox.store import InboxStore, owner_ttl_s
 from scripts.swarm.execution import ExecutionRegistry
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
@@ -29,6 +29,20 @@ class Clock:
 
     def __call__(self):
         return self.now
+
+
+class IdlePane:
+    def __init__(self):
+        self.prompts = []
+
+    def agent_status(self, agent):
+        return "idle"
+
+    def typed_input(self, agent):
+        return ""
+
+    def prompt(self, agent, text):
+        self.prompts.append((agent.pane_id, text))
 
 
 class AppServer:
@@ -1174,3 +1188,38 @@ def test_main_reports_its_module_usage_when_execution_arguments_are_missing(caps
         "usage: python -m scripts.inbox.codex [-h] swarm execution\n"
         "python -m scripts.inbox.codex: error: the following arguments are required: swarm, execution\n"
     )
+
+
+@pytest.mark.parametrize("pumped", [True, False])
+def test_an_idle_codex_pane_with_mail_gets_a_pump_delivery_and_no_pane_write(rig, pumped):
+    seat = f"eng-1@{SLUG}"
+    pane = AgentRecord(ME, "eng", "task", pane_id="p1", harness="codex", seat=seat)
+    herdr = IdlePane()
+    rig.store.seats.occupy(seat, ME, 1)
+    if pumped:
+        rig.pump.start()
+    item = rig.store.send("alice", seat, "hello")
+    woke = [f"woke {ME} for message {item.id}"]
+    assert wake.wake_now(rig.store, SLUG, [pane], herdr, item.created_at + 1, 300_000) == ([] if pumped else woke)
+    assert wake.wake_pass(rig.store, SLUG, [pane], herdr, None, item.created_at + 1, 300_000) == []
+    assert herdr.prompts == ([] if pumped else [("p1", wake.WAKE_TEXT)])
+    assert [e.get("event") for e in rig.store.history(item.id)].count(wake.WOKEN) == (0 if pumped else 1)
+    if pumped:
+        rig.pump.step()
+        assert rig.store.get(item.id).state == "delivered"
+        assert [m for m in rig.server.methods() if m.startswith("turn/")] == ["turn/start"]
+        assert herdr.prompts == []
+
+
+def test_a_codex_pane_is_typed_into_only_while_no_pump_owns_its_inbox(rig):
+    pane = AgentRecord(ME, "eng", "task", pane_id="p1", harness="codex")
+    assert wake.typed_wake(rig.store, pane) is True
+    rig.pump.start()
+    assert wake.typed_wake(rig.store, pane) is False
+    assert wake.typed_wake(rig.store, replace(pane, name="engineer@abc-0002")) is True
+    assert wake.typed_wake(rig.store, replace(pane, name="engineer@abc-0002", pane_id="")) is False
+
+
+def test_the_pump_renews_its_inbox_lease_before_the_default_lease_expires():
+    assert (codex.RECONCILE_S, codex.BACKOFF_MAX_S) == (10.0, 15.0)
+    assert codex.Timing().reconcile_s + codex.Timing().backoff_max_s < owner_ttl_s({})
