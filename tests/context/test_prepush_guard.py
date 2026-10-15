@@ -438,3 +438,42 @@ def test_cmd_payloads_are_checked_for_pushes(repo):
     payload["tool_input"] = {"cmd": "git push origin HEAD"}
     with pytest.raises(BlockAction):
         check_prepush(payload)
+
+
+@pytest.mark.parametrize("directory", ["workdir", "task"])
+def test_codex_push_in_bundle_worktree_uses_bundle_repository(repo, tmp_path, monkeypatch, directory):
+    from hooks.targets.normalizer import normalize_payload
+    from tests.swarm_ledger import legacy_page
+
+    bundle = _init(tmp_path / "agentihooks-bundle")
+    _git(bundle, "add", "scripts/ci_prepush/__init__.py")
+    _git(bundle, "commit", "-q", "-m", "guard")
+    worktree = tmp_path / "worktrees" / "agentihooks-bundle" / "engineer-test"
+    worktree.parent.mkdir(parents=True)
+    _git(bundle, "worktree", "add", "-q", "-b", "engineer-test", str(worktree))
+    task = {
+        "id": "push",
+        "state": "claimed",
+        "claimed_by": "engineer@test",
+        "branch": "engineer-test",
+        "worktree": str(worktree),
+    }
+    folder = tmp_path / "ledgers"
+    folder.mkdir()
+    legacy_page.store(folder, "rig", {"tasks": [task]})
+    monkeypatch.setenv("LEDGER_DIR", str(folder))
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "rig")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "push")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@test")
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    monkeypatch.setenv("WORKTREE_ROOT", str(tmp_path / "worktrees"))
+    payload = {"tool_name": "exec_command", "tool_input": {"command": "git push -u origin HEAD"}, "cwd": str(repo)}
+    if directory == "workdir":
+        payload["tool_input"]["workdir"] = str(worktree)
+    payload = normalize_payload(payload)
+    _stamp(repo)
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(payload)
+    assert str(blocked.value) == _message(worktree)
+    _stamp(worktree)
+    check_prepush(payload)
