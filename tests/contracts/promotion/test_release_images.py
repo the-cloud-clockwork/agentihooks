@@ -78,7 +78,13 @@ def test_the_swarm_release_checks_out_main_and_tags_the_version_and_release(tmp_
 
     def run(version):
         output = tmp_path / f"output-{version or 'dev'}"
-        env = dict(os.environ, **tags["env"], VERSION=version, GITHUB_SHA="123456789abcdef", GITHUB_OUTPUT=str(output))
+        env = {
+            **os.environ,
+            **tags["env"],
+            "VERSION": version,
+            "GITHUB_SHA": "123456789abcdef",
+            "GITHUB_OUTPUT": str(output),
+        }
         subprocess.run(["bash", "-e", "-c", tags["run"]], env=env, check=True)
         return output.read_text().splitlines()
 
