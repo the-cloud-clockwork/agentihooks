@@ -448,7 +448,8 @@ def test_codex_push_in_bundle_worktree_uses_bundle_repository(repo, tmp_path, mo
     bundle = _init(tmp_path / "agentihooks-bundle")
     _git(bundle, "add", "scripts/ci_prepush/__init__.py")
     _git(bundle, "commit", "-q", "-m", "guard")
-    worktree = tmp_path / "worktrees" / "agentihooks-bundle" / "engineer-test"
+    folder_name = "continuation" if directory == "branch" else "engineer-test"
+    worktree = tmp_path / "worktrees" / "agentihooks-bundle" / folder_name
     worktree.parent.mkdir(parents=True)
     _git(bundle, "worktree", "add", "-q", "-b", "engineer-test", str(worktree))
     task = {
