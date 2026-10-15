@@ -202,8 +202,10 @@ UNTRUSTED_EVENTS = [
 ]
 
 
-@pytest.mark.parametrize(("workflow", "job"), sorted(set(MOVED) - CONSOLIDATED))
+@pytest.mark.parametrize(("workflow", "job"), sorted(MOVED))
 def test_each_job_runs_on_its_isolated_anton_pool_only_for_trusted_actors(workflow, job):
+    if (workflow, job) in CONSOLIDATED and job not in workflows()[workflow]["jobs"]:
+        pytest.skip("consolidated into its workflow's remaining smoke job")
     assert workflows()[workflow]["jobs"][job]["runs-on"] == pool(MOVED[(workflow, job)])
 
 
