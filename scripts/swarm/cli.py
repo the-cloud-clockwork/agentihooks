@@ -58,7 +58,7 @@ from urllib.parse import urlsplit
 
 from hooks.context import injection_trace, quarantine
 from scripts.doctor import priming
-from scripts.gates import Who, catalog, intent, modes, progress, quiet
+from scripts.gates import Who, catalog, intent, lift, modes, progress, quiet
 from scripts.gates import log as gate_log
 from scripts.gates.identity import refusal
 from scripts.handoff import check as handoff_check
@@ -676,8 +676,6 @@ def lifecycle_control(args):
 
 
 def control_readings(store, args):
-    from scripts.gates import lift
-
     config = store.config(args.slug)
     if args.command == "set":
         keys = (pair.partition("=")[0] for pair in args.pairs)
@@ -687,7 +685,8 @@ def control_readings(store, args):
             if key in (*SETTABLE, *LANE_KEYS, *EFFORT_KEYS, *CONFIG_KEYS, *GATE_KEYS, "autonomy")
         }
     if args.command == "lift":
-        lifted = lift.agent_lifted(args.slug, args.agent, args.gate)
+        agent = _lifted_agent(store, args)
+        lifted = lift.held(args.slug, agent.name, agent.task, args.gate)
         return {f"{args.gate} gate lift for {args.agent}": "lifted" if lifted else "not lifted"}
     return {f"the swarm state with {lifecycle_control(args)}": config.state}
 
@@ -1084,16 +1083,33 @@ def cmd_classify(store, args):
 
 
 def cmd_lift(store, args):
-    from scripts.gates import entry, lift
+    from scripts.gates import entry
 
     store.config(args.slug)
+    agent = _lifted_agent(store, args)
+    if args.gate not in {*entry.GATES, *lift.SERVER_GATES}:
+        raise SwarmError(f"no gate named {args.gate}")
+    pull = {} if args.gate in lift.SERVER_GATES else _lifted_pull(args.slug, agent.task)
+    lift.lift_agent(Who(name=agent.name, swarm=args.slug, task=agent.task), args.gate, pull=pull)
+    bound = {"head": pull["head"]} if pull else {"minutes": lift.LIFT_SECONDS // 60}
+    print(json.dumps({"agent": agent.name, "gate": args.gate, **bound}))
+
+
+def _lifted_agent(store, args):
     agent = next((a for a in store.agents(args.slug) if a.name == args.agent), None)
     if agent is None:
         raise SwarmError(f"{args.agent} is not in this swarm")
-    if args.gate not in {*entry.GATES, *lift.SERVER_GATES}:
-        raise SwarmError(f"no gate named {args.gate}")
-    lift.lift_agent(Who(name=agent.name, swarm=args.slug, task=agent.task), args.gate)
-    print(json.dumps({"agent": agent.name, "gate": args.gate, "minutes": lift.LIFT_SECONDS // 60}))
+    return agent
+
+
+def _lifted_pull(slug, task):
+    url = task and (LedgerClient().task(slug, task) or {}).get("pr_url")
+    if not url:
+        return {}
+    head = intent.pr_head(url)
+    if not head:
+        raise SwarmError(f"could not read the head of {url}; lift again once GitHub answers")
+    return {"url": url, "head": head}
 
 
 def cmd_send_message(store, args):
@@ -1191,6 +1207,8 @@ def cmd_pr(store, args):
     row = next(t for t in doc["tasks"] if t.get("id") == agent.task)
     fields.update(_split_binding(row, args.url, args.half))
     checked = intent.stamp(args.slug, agent.task, args.url, doc, intent.mode_of(config), now_ms())
+    if row.get("pr_url") != args.url:
+        lift.drop_task(args.slug, agent.task)
     ledger.update_task(args.slug, agent.task, fields, by=agent.name)
     print(json.dumps({"task": agent.task, "pr_url": args.url, **branch, "intent": checked}))
 

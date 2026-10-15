@@ -13,6 +13,7 @@ from scripts import codex_router, session_bands
 from scripts.claude_quota_balancer import (
     MASTERS_ONLY,
     OPEN,
+    ProbeResult,
     QuotaWindow,
     _cap_text,
     _duration,
@@ -360,7 +361,12 @@ def current_table(
     seen.update({result.account: (now, result) for result in probed})
     observed = {account: at for account, (at, _) in seen.items()}
     results = [result for _, result in seen.values()]
+    results += [_unprobed(name) for name in sorted(names - seen.keys())]
     return balance_table(results, sessions, now, fable, current, observed)
+
+
+def _unprobed(account: str) -> ProbeResult:
+    return ProbeResult(account, "", "UNKNOWN", None, QuotaWindow(), QuotaWindow())
 
 
 def balance_table(

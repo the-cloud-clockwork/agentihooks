@@ -595,7 +595,28 @@ def test_current_without_a_claude_account_still_lists_the_codex_rows(monkeypatch
     monkeypatch.setattr(agents_quota, "_masters", lambda harness="": {})
     monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {})
     table = agents_quota.current_table([], [], {"alpha"}, {}, False, "").splitlines()
-    assert [line.split()[1:3] for line in table[2:]] == [["codex", "personal"]]
+    assert [line.split()[1:3] for line in table[2:]] == [["claude", "alpha"], ["codex", "personal"]]
+
+
+def test_current_lists_every_configured_account_and_an_unprobed_one_as_unknown(monkeypatch):
+    from hooks.context import account_sessions
+
+    monkeypatch.setattr(agents_quota.time, "time", lambda: 20_000.0)
+    monkeypatch.setattr(agents_quota, "_codex", lambda now: [])
+    monkeypatch.setattr(agents_quota, "_masters", lambda harness="": {})
+    monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {})
+    fresh = ProbeResult("beta", "allowed", "NORMAL", 60.0, QuotaWindow(20.0, 30_000), QuotaWindow(40.0, 90_000))
+    unprobed = ["alpha", "delta", "eta", "gamma", "iota", "kappa", "omega", "theta", "zeta"]
+    table = agents_quota.current_table([], [fresh], {"beta", *unprobed}, {"gamma": 2}, False, "beta")
+    rows = [line.split() for line in table.splitlines()[2:]]
+    assert [row[2] for row in rows] == ["beta", *unprobed]
+    assert rows[1] == ["2", "claude", "alpha", "subscription", "UNKNOWN", "0/-", "-", *["-"] * 6]
+    assert rows[4] == ["5", "claude", "gamma", "subscription", "UNKNOWN", "2/-", "-", *["-"] * 6]
+
+
+def test_an_unprobed_account_carries_no_provider_status_and_no_windows():
+    unread = ProbeResult("alpha", "", "UNKNOWN", None, QuotaWindow(), QuotaWindow())
+    assert agents_quota._unprobed("alpha") == unread
 
 
 def test_a_signed_out_login_has_no_routing_and_an_expired_one_no_five_hour_window():

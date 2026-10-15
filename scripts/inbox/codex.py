@@ -265,6 +265,7 @@ class Pump:
         self.receipts.recover(binding.recipient, binding.owner)
         self.subscription = self.store.redis.pubsub()
         self.subscription.subscribe(NOTIFY)
+        protocol.resume_thread(binding.connection, binding.thread_id)
         self._refresh()
         if self.state.active_turn:
             self.state.requests[UNOBSERVED] = UNOBSERVED
@@ -369,3 +370,30 @@ class Pump:
         self.hold_until = self.timing.clock() + self.backoff
         self.next_reconcile = min(self.next_reconcile, self.hold_until)
         self.backoff = min(self.backoff * 2, self.timing.backoff_max_s)
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+    import signal
+    from threading import Event
+
+    from scripts.codex_session.supervisor import UNIX
+    from scripts.inbox.store import connect as inbox_connect
+    from scripts.swarm.store import connect as swarm_connect
+
+    parser = argparse.ArgumentParser(prog="python -m scripts.inbox.codex")
+    parser.add_argument("swarm")
+    parser.add_argument("execution")
+    args = parser.parse_args(argv)
+    transport = Transport(BindingStore(swarm_connect()), args.swarm, args.execution)
+    record = transport.require()
+    connection, _ = protocol.connect(record.endpoint_ref.removeprefix(UNIX), 5.0)
+    binding = Binding(connection, record.thread_id, record.agent_name, record.execution_id, transport)
+    stopped = Event()
+    for signum in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(signum, lambda number, frame: stopped.set())
+    return 0 if Pump(inbox_connect(), binding).run(stopped.is_set) == STOPPED else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
