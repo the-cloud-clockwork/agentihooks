@@ -7,6 +7,8 @@ import platform
 import re
 import subprocess
 import tarfile
+import time
+import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -54,8 +56,19 @@ def fetch(name: str, artifact: dict, cache: Path | None) -> bytes:
         payload = cached.read_bytes()
         if hashlib.sha256(payload).hexdigest() == artifact["sha256"]:
             return payload
-    with urllib.request.urlopen(artifact["url"], timeout=120) as response:
-        payload = response.read()
+    for attempt in range(5):
+        try:
+            with urllib.request.urlopen(artifact["url"], timeout=120) as response:
+                payload = response.read()
+            break
+        except (urllib.error.URLError, TimeoutError) as error:
+            if isinstance(error, urllib.error.HTTPError):
+                transient = 500 <= error.code < 600
+            else:
+                transient = isinstance(error, TimeoutError) or isinstance(error.reason, TimeoutError)
+            if not transient or attempt == 4:
+                raise
+            time.sleep(2**attempt)
     if hashlib.sha256(payload).hexdigest() != artifact["sha256"]:
         raise ValueError(f"artifact checksum mismatch: {name}")
     if cached:

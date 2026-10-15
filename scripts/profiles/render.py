@@ -248,8 +248,10 @@ def channels(name: str) -> str:
 
 def _mcp_servers(target: str, bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
     _i = _install_module()
-    servers = dict(_i._build_mcp_config("all")["mcpServers"])
-    for root in _roots(bundle, dirs):
+    documentation = profile_chain.role(dirs) == "documentation"
+    servers = {} if documentation else dict(_i._build_mcp_config("all")["mcpServers"])
+    roots = [root for _, root in dirs] if documentation else _roots(bundle, dirs)
+    for root in roots:
         path = _i._native_layer_path(root, target, _i._NATIVE_MCP_NAME) or _i._native_layer_path(
             root, "claude", _i._NATIVE_MCP_NAME
         )

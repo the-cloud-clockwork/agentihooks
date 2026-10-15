@@ -282,7 +282,8 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             if store.config(slug).template == "doctor":
                 from scripts.doctor import cli as doctor
 
-                actions += skip_refused(doctor.timer, store, slug, now_ms(), scheduled)
+                with lease.kept(store, slug, held):
+                    actions += skip_refused(doctor.timer, store, slug, now_ms(), scheduled)
             herdr = messenger or delivery.HerdrMessenger()
             timing.call(delivery.migrate_outbox, store, slug, inbox)
             agents = [a for a in timing.call(store.agents, slug) if a.state != "finished"]
@@ -1567,7 +1568,7 @@ def cmd_ready(store, args):
     problems = handoff_check.problems(text, Resolver(args.slug, store.redis, ledger.state))
     if problems:
         raise SwarmError(handoff_check.refusal(problems))
-    ready.release(store, args.slug, agent.task, found, ledger, agent.name)
+    ready.release(store, args.slug, agent.task, found, ledger, agent.name, ledger_events.view)
     try:
         _hand_off(store, args.slug, agent, text, "exit", ledger)
     except Exception:
