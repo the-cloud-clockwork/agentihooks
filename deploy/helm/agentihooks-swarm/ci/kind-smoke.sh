@@ -43,9 +43,10 @@ finish() {
     | docker build -q -t "$bundle_image" -f - tests/fixtures/swarm_v2/worker-bundle >/dev/null
   docker build -q --build-arg IMAGE="$image" -t "$terminal_image" \
     -f "$chart/ci/terminal-worker.Dockerfile" . >/dev/null
+  bash scripts/packaging/swarm-image-clients.sh "$image"
 ) &
 build=$!
-kind create cluster --name "$cluster" --image "$KIND_NODE_IMAGE" --wait 120s &
+kind create cluster --name "$cluster" --image "$KIND_NODE_IMAGE" &
 cluster_setup=$!
 trap finish EXIT
 
@@ -271,8 +272,8 @@ kubectl create --dry-run=server --validate=strict -f tests/fixtures/swarm_v2/her
 kubectl create --dry-run=server --validate=strict -f tests/fixtures/swarm_v2/herdr-terminal-objects.json
 printf 'worker terminal Pod, Secret, Service and NetworkPolicy passed server side strict validation\n'
 wait "$build"
-bash scripts/packaging/swarm-image-clients.sh "$image"
 kind load docker-image "$image" "$bundle_image" "$terminal_image" --name "$cluster"
+kubectl wait --for=condition=Ready node --all --timeout=120s
 bash "$chart/ci/terminal-route-proof.sh" "$image" &
 route=$!
 helm install "$release" "$chart" -f "$chart/ci/kind-values.yaml" --wait --timeout 5m
