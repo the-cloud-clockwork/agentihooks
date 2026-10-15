@@ -197,6 +197,18 @@ def test_status_report_carries_the_page_rows_without_handoff_text(store, monkeyp
     assert "long text" not in json.dumps(report["handoffs"])
 
 
+def test_status_agent_list_omits_gone_processes_and_keeps_live_processes(store, monkeypatch):
+    from scripts.swarm.runtime import HerdrRuntime
+
+    store.create(SwarmConfig("sw", "/repo", 1, 1))
+    store.put_agent("sw", AgentRecord("live", "eng", "t1", seat="eng-1@sw"))
+    store.put_agent("sw", AgentRecord("gone", "ci", "t2", seat="ci-1@sw"))
+    monkeypatch.setattr(HerdrRuntime, "live_names", lambda self: {"live"})
+    report = status.status_report(store, "sw", {"tasks": []})
+    assert [agent["name"] for agent in report["agents"]] == ["live"]
+    assert {agent.name for agent in store.agents("sw")} == {"live", "gone"}
+
+
 def test_status_raises_a_base_miss_as_a_finding(store, monkeypatch):
     from scripts.swarm import launch_check
 
