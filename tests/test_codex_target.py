@@ -211,6 +211,17 @@ class TestConfigToml:
         adapter.write_settings(_codex_base())
         assert_unambiguous(adapter._load_toml(codex_home() / "config.toml")["tui"]["status_line"])
 
+    @pytest.mark.parametrize("reinstall", [False, True])
+    def test_installed_config_suppresses_quota_model_switch_prompt(self, adapter, reinstall):
+        if reinstall:
+            adapter.write_settings({"notice": {"hide_rate_limit_model_nudge": False}})
+        adapter.write_settings({"model": "gpt-6.1-sol"})
+        adapter.write_settings(_codex_base())
+        config = adapter._load_toml(codex_home() / "config.toml")
+        prompt = (Path(__file__).parent / "fixtures" / "codex_rate_limit_switch_prompt.snap").read_text()
+        assert config.get("notice", {}).get("hide_rate_limit_model_nudge") is True, prompt
+        assert config["model"] == "gpt-6.1-sol"
+
     def test_operator_status_line_survives_reinit(self, adapter):
         adapter.write_settings(_codex_base())
         config = codex_home() / "config.toml"

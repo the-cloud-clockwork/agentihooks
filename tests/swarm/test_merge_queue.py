@@ -562,6 +562,34 @@ def test_cli_routes_each_operation_and_prints_its_state(monkeypatch, capsys, act
 
 
 @pytest.mark.parametrize("action", ["queue", "dequeue"])
+def test_cli_accepts_the_earlier_pull_the_task_lists(monkeypatch, action):
+    from types import SimpleNamespace
+
+    first = "https://github.com/o/r/pull/6"
+    task = {"id": "t1", "pr_url": URL, "split": ["1-2", "3-4"], "split_pulls": [first, URL]}
+    monkeypatch.setattr(cli, "connect", lambda: swarm_of("eng"))
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(tasks=lambda slug: [task]))
+    seen = []
+    monkeypatch.setattr(merge_queue, "operate", lambda verb, url: seen.append((verb, url)) or {})
+    assert cli.main(["sw", "merge", action, first]) == 0
+    assert seen == [(action, first)]
+
+
+def test_cli_refuses_an_unlisted_pull_before_a_queue_call(monkeypatch):
+    from types import SimpleNamespace
+
+    task = {"id": "t1", "pr_url": URL, "split": ["1-2", "3-4"], "split_pulls": ["https://github.com/o/r/pull/6", URL]}
+    monkeypatch.setattr(cli, "connect", lambda: swarm_of("eng"))
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(tasks=lambda slug: [task]))
+    seen = []
+    monkeypatch.setattr(merge_queue, "operate", lambda verb, url: seen.append((verb, url)) or {})
+    assert cli.main(["sw", "merge", "queue", "https://github.com/o/r/pull/99"]) == 1
+    assert seen == []
+
+
+@pytest.mark.parametrize("action", ["queue", "dequeue"])
 def test_cli_refuses_distributed_final_mutations_before_provider_calls(monkeypatch, action):
     state = swarm_of("eng")
     monkeypatch.setattr(cli, "connect", lambda: state)

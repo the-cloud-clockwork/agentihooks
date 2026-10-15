@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from scripts.swarm import claim_order, merge_queue, stack, waits
-from scripts.swarm.store import ASSIST, MANUAL, SwarmError
+from scripts.swarm.store import ASSIST, MANUAL, AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_kinds
 
 AWAITING = "merge"
@@ -63,7 +63,9 @@ def _git(*args):
     return done.stdout.strip()
 
 
-def check(row, agent, autonomy, github, now_ms):
+def check(
+    row: dict, agent: AgentRecord, autonomy: str, github: Callable, now_ms: int, previous: dict | None = None
+) -> dict:
     """The record of a task that may go ready, or SwarmError naming why it may not."""
     if autonomy in (MANUAL, ASSIST):
         raise SwarmError(
@@ -90,12 +92,41 @@ def check(row, agent, autonomy, github, now_ms):
         raise SwarmError(f"cannot read whether pull request {url} is a draft; run swarm ready again when it answers")
     if draft.stdout.strip() == "true":
         raise SwarmError(f"pull request {url} is a draft; mark it ready for review with gh pr ready first")
-    top = stack.worktree()
+    top = _checkout(url, pull.head, previous)
+    found = held_record(url, pull.head, top, agent.name, now_ms)
+    if pull.queued:
+        found["on"], found["queued_at"] = {"kind": "merge", "target": url}, now_ms
+    return found
+
+
+def _checkout(url, head, previous):
+    try:
+        top = stack.worktree()
+    except SwarmError:
+        if not previous or previous.get("url") != url or previous.get("head") != head:
+            raise
+        return previous.get("worktree", "")
     if _git("status", "--porcelain"):
         raise SwarmError("the worktree holds uncommitted changes; commit and push them first")
-    if _git("rev-parse", "HEAD") != pull.head:
+    if _git("rev-parse", "HEAD") != head:
         raise SwarmError("the pull request head is not this worktree's head; push your last commit before swarm ready")
-    return held_record(url, pull.head, top, agent.name, now_ms)
+    return top
+
+
+def continuation(store: RedisStore, slug: str, task_id: str) -> dict | None:
+    previous = record(store, slug, task_id)
+    if previous:
+        return previous
+    envelope = store.handoff_envelope(slug, task_id) or {}
+    pull = envelope.get("pull_request")
+    if not isinstance(pull, dict):
+        return None
+    top = envelope.get("worktree", "")
+    return {
+        "url": pull.get("url"),
+        "head": envelope.get("remote_head"),
+        "worktree": top if Path(top).is_absolute() else "",
+    }
 
 
 def release(store, slug, task_id, found, ledger, by):
@@ -236,6 +267,8 @@ def _reopen(run, row, found, what):
 
 def _remove(found, *flags):
     top = found["worktree"]
+    if not top:
+        return []
     done = stack.shell(["bash", str(stack.WT_SCRIPT), "done", Path(top).name, "--repo", top, *flags])
     if done.returncode != 0:
         return [f"could not remove the worktree {top}: {done.stderr.strip()}"]

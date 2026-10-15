@@ -423,8 +423,8 @@ def test_a_launch_slower_than_the_lease_keeps_the_intent_pass_in_the_same_tick(e
     started = clock[0]
     actions = cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
     assert clock[0] - started > lease.ttl_ms()
-    assert events[-1] == "intent"
-    assert events[:-1] and all(beat is True for beat in events[:-1])
+    assert events[0] == "intent"
+    assert events[1:] and all(beat is True for beat in events[1:])
     assert "judged" in actions
     assert lease.current(store, "sw").epoch == 1
     assert store.redis.get(store.key("sw", "last-tick"))
@@ -462,7 +462,7 @@ def test_a_slow_launch_that_never_starts_is_recorded_against_the_launch_not_the_
     monkeypatch.setattr(rt, "spawn", slow)
     monkeypatch.setattr(cli.intent, "Check", Check)
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
-    assert events == [True] * 5 + ["intent"]
+    assert events == ["intent"] + [True] * 5
     assert [(row["state"], row["error"]) for row in store.launches("sw") if row["task"] == "t1"] == [
         ("failed", refused)
     ]

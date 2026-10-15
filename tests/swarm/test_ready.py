@@ -77,6 +77,19 @@ def working(store):
     return [a.state for a in store.agents("sw") if a.name == AGENT] == ["working"]
 
 
+@pytest.fixture
+def primary_checkout(released, monkeypatch):
+    shell = released[2]
+
+    def primary(argv):
+        if argv == ["git", "rev-parse", "--show-toplevel"]:
+            return subprocess.CompletedProcess(argv, 0, stdout="/home/me/dev/repo\n", stderr="")
+        return shell(argv)
+
+    monkeypatch.setattr(stack, "shell", primary)
+    return released
+
+
 @pytest.mark.parametrize("kind", ["code", "ci"])
 def test_ready_records_the_pull_request_and_head_and_ends_the_agent(released, capsys, kind):
     store, ledger, shell, doc = released
@@ -104,6 +117,71 @@ def test_ready_records_the_pull_request_and_head_and_ends_the_agent(released, ca
         "awaiting": "merge",
         "next": "stop now; the swarm carries the pull request to merge and closes this session",
     }
+
+
+@pytest.mark.parametrize("retained", [TOP, "", None])
+@pytest.mark.parametrize("source", ["ready", "handoff"])
+def test_ready_from_primary_carries_an_unchanged_queued_head(primary_checkout, retained, source):
+    store, ledger, shell, doc = primary_checkout
+    ledger.pulls[URL] = QUEUED
+    if source == "ready":
+        previous = ready.held_record(URL, HEAD, retained, "predecessor", 1)
+        if retained is None:
+            previous.pop("worktree")
+        ready.save(store, "sw", "t1", previous)
+    else:
+        envelope = {"pull_request": {"url": URL}, "remote_head": HEAD}
+        if retained is not None:
+            envelope["worktree"] = retained or "unknown"
+        store.put_handoff("sw", "t1", doc.read_text(), envelope=envelope)
+    assert release(doc) == 0
+    found = ready.record(store, "sw", "t1")
+    assert found["worktree"] == (retained or "")
+    assert found["head"] == HEAD
+    assert found["agent"] == AGENT
+    assert found["on"] == {"kind": "merge", "target": URL}
+    assert found["queued_at"] == NOW
+    assert not working(store)
+    assert ledger.rows["t1"]["awaiting"] == "merge"
+
+
+@pytest.mark.parametrize(
+    ("source", "url", "head"),
+    [
+        ("ready", URL, "b" * 40),
+        ("handoff", URL, "b" * 40),
+        ("ready", URL + "0", HEAD),
+        ("handoff", URL + "0", HEAD),
+        ("ready", URL, None),
+        ("handoff", URL, None),
+        ("missing", URL, HEAD),
+        ("unknown_pull", URL, HEAD),
+    ],
+)
+def test_ready_from_primary_refuses_a_moved_queued_head(primary_checkout, capsys, source, url, head):
+    store, ledger, shell, doc = primary_checkout
+    ledger.pulls[URL] = QUEUED
+    previous = None
+    if source == "ready":
+        previous = ready.held_record(url, head, TOP, "predecessor", 1)
+        ready.save(store, "sw", "t1", previous)
+    elif source == "handoff":
+        store.put_handoff(
+            "sw",
+            "t1",
+            doc.read_text(),
+            envelope={"pull_request": {"url": url}, "remote_head": head, "worktree": TOP},
+        )
+    elif source == "unknown_pull":
+        store.put_handoff("sw", "t1", doc.read_text(), envelope={"pull_request": "unknown"})
+    capsys.readouterr()
+    assert release(doc) == 1
+    assert capsys.readouterr().err == (
+        "swarm: park and ready remove only a worktree wt.sh new made under "
+        "/home/me/dev/worktrees; /home/me/dev/repo is not one\n"
+    )
+    assert working(store)
+    assert ready.record(store, "sw", "t1") == previous
 
 
 def test_a_second_ready_is_refused_once_the_seat_is_released(released, capsys):
@@ -516,6 +594,17 @@ def test_a_merged_pull_request_closes_the_task_with_the_done_proof_and_removes_t
     assert ready.record(merging.store, "sw", "t1") is None
     assert merging.store.handoff("sw", "t1") == ""
     assert merging.run() == []
+
+
+def test_a_merged_pull_request_without_a_checkout_closes_without_removing_one(merging):
+    found = ready.record(merging.store, "sw", "t1")
+    found["worktree"] = ""
+    ready.save(merging.store, "sw", "t1", found)
+    merging.pulls[URL] = MERGED
+    assert merging.run() == [f"task t1 done, {URL} merged"]
+    assert merging.rows["t1"]["state"] == "done"
+    assert merging.shell.calls == []
+    assert ready.record(merging.store, "sw", "t1") is None
 
 
 def test_a_merge_only_the_uncached_reread_sees_closes_the_task(merging):

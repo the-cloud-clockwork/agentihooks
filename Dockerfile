@@ -1,4 +1,3 @@
-# syntax=mirror.gcr.io/docker/dockerfile:1
 FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS build
 WORKDIR /build
 COPY pyproject.toml README.md docker/swarm/requirements.lock ./
