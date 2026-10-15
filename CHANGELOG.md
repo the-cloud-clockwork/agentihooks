@@ -38,6 +38,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- The ledger API accepts the ownership guard on task updates, so the swarm tick's
+  guarded writes no longer fail and handed off masters are retired.
+- A selected coverage run maps the page coverage it recorded when it holds only
+  browser or only node captures, instead of failing the Sonar job.
 - Swarm Codex launches isolate session files and database storage from the
   operator home while retaining shared authentication and hooks.
 - The worker supervisor's workspace create and pane run commands use the remaining startup
