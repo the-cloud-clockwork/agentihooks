@@ -166,6 +166,36 @@ def test_posttool_condition_context_is_quiet_and_tagged(monkeypatch):
     assert calls[0] == (("PCOND",), {**QUIET, "kind": "condition"})
 
 
+@pytest.mark.parametrize(
+    ("event", "forced", "plain"),
+    [
+        ("SessionStart", True, True),
+        ("UserPromptSubmit", True, True),
+        ("PreToolUse", True, False),
+        ("PostToolUse", True, False),
+        ("Stop", False, False),
+    ],
+)
+def test_main_buffers_claude_context_events(monkeypatch, event, forced, plain):
+    import io
+
+    from hooks import hook_manager
+    from hooks.targets import emitter
+
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
+    monkeypatch.delenv("AGENTIHOOKS_CLASSIFIER_CHILD", raising=False)
+    seen = {}
+    handler = Mock(side_effect=lambda payload: seen.update(forced=emitter.forced(), plain=emitter._plain))
+    monkeypatch.setattr(hook_manager.sys, "stdin", io.StringIO(json.dumps({"hook_event_name": event})))
+    monkeypatch.setitem(hook_manager.EVENT_HANDLERS, event, handler)
+    monkeypatch.setattr(hook_manager.otel, "flush", Mock())
+    monkeypatch.setattr(hook_manager.os, "_exit", Mock())
+
+    hook_manager.main()
+
+    assert seen == {"forced": forced, "plain": plain}
+
+
 def test_banner_defaults_and_passes_its_flags(monkeypatch):
     from hooks.common import inject_banner
 
