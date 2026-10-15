@@ -38,6 +38,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- The ledger API accepts the ownership guard on task updates, so the swarm tick's
+  guarded writes no longer fail and handed off masters are retired.
 - The worker supervisor's workspace create and pane run commands use the remaining startup
   budget instead of a half second timeout.
 - Stopped Codex replay test fixes export field and identity sizes independently of its environment.
