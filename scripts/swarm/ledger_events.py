@@ -152,7 +152,7 @@ def _newest(checks):
 
 
 def _required(gated, checks):
-    required = [check for check in checks if check.get("isRequired", True)]
+    required = [check for check in checks if check.get("isRequired", True) or check.get("name") == GATE]
     return required if gated or required else checks
 
 
@@ -202,16 +202,17 @@ def declares_gate(tree):
 
 
 def view(url, run=subprocess.run):
+    number = _number(url)
     try:
         done = run(
-            ["gh", "api", "graphql", "-f", f"query={PULL_QUERY.replace('$number', _number(url))}", "-f", f"url={url}"],
+            ["gh", "api", "graphql", "-f", f"query={PULL_QUERY.replace('$number', number)}", "-f", f"url={url}"],
             capture_output=True,
             text=True,
             timeout=20,
         )
         if done.returncode != 0:
             return None
-        return _view_resource(json.loads(done.stdout)["data"]["resource"], _number(url), run=run)
+        return _view_resource(json.loads(done.stdout)["data"]["resource"], number, run=run)
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
         return None
 
@@ -225,7 +226,8 @@ def head(url, run=subprocess.run):
 
 
 def _number(url):
-    return url.split("/")[-1]
+    found = re.search(r"/pull/(\d+)", url)
+    return found[1] if found else "0"
 
 
 def _view_resource(raw, number, gated=None, run=subprocess.run):

@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from scripts.swarm import ready
@@ -26,7 +28,9 @@ def head(gated, *checks):
     "gated, checks",
     [
         (True, [check(GATE, "SUCCESS", True), check("measure", "FAILURE", False)]),
+        (True, [check(GATE, "SUCCESS", False), check("measure", "FAILURE", False)]),
         (False, [check("unit", "SUCCESS", True), check("measure", "FAILURE", False)]),
+        (False, [check("unit", "SUCCESS", True), {"context": "sonar", "state": "FAILURE", "isRequired": False}]),
     ],
 )
 def test_an_optional_check_failure_leaves_the_head_green(gated, checks):
@@ -39,13 +43,57 @@ def test_an_optional_check_failure_leaves_the_head_green(gated, checks):
     [
         (True, [check(GATE, "FAILURE", True), check("unit", "FAILURE", False)], (GATE, "unit")),
         (False, [check("unit", "FAILURE", True), check("measure", "FAILURE", False)], ("unit", "measure")),
-        (False, [check("unit", "SUCCESS", False), check("measure", "FAILURE", False)], ("measure",)),
     ],
 )
 def test_a_required_check_failure_turns_the_head_red(gated, checks, failed):
     pull = head(gated, *checks)
     assert (pull.resolved, pull.red, pull.failed) == (True, True, failed)
     assert pull.red_at is not None
+
+
+def test_an_ungated_head_without_required_checks_counts_every_check():
+    pull = head(False, check("unit", "SUCCESS", False), check("measure", "FAILURE", False))
+    assert (pull.resolved, pull.red, pull.failed) == (True, True, ("measure",))
+
+
+def test_a_single_view_pages_its_contexts_with_the_pull_request_number():
+    from types import SimpleNamespace
+
+    from scripts.swarm.ledger_events import view
+
+    commit = {
+        "id": "C1",
+        "committedDate": "2026-10-15T15:00:00Z",
+        "statusCheckRollup": {"contexts": {"nodes": [], "pageInfo": {"hasNextPage": True, "endCursor": "c"}}},
+        "checkSuites": {"nodes": [SUITE], "pageInfo": {}},
+    }
+    first = {"data": {"resource": {"state": "OPEN", "headRefOid": HEAD, "commits": {"nodes": [{"commit": commit}]}}}}
+    page = {
+        "data": {"node": {"statusCheckRollup": {"contexts": {"nodes": [check(GATE, "SUCCESS", True)], "pageInfo": {}}}}}
+    }
+    replies, calls = [first, page], []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=0, stdout=json.dumps(replies[len(calls) - 1]))
+
+    assert view("https://github.com/o/r/pull/42/", run).red is False
+    assert "isRequired(pullRequestNumber:42)" in calls[0][4] and "isRequired(pullRequestNumber:42)" in calls[1][4]
+
+
+def test_a_url_without_a_pull_number_asks_for_number_zero():
+    from types import SimpleNamespace
+
+    from scripts.swarm.ledger_events import views
+
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"data": {"p0": None}}))
+
+    assert views(["https://github.com/o/r/issues"], run) == {"https://github.com/o/r/issues": None}
+    assert "isRequired(pullRequestNumber:0)" in calls[0][-1]
 
 
 def test_an_optional_failure_beside_a_skipped_gate_names_no_failed_check():
