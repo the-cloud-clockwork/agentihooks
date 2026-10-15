@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/publish.py:scripts.swarm.publish.x_repository_task__mutmut_41:6a34c976ff21e88581652de78a119d436b7d194ab46d1470efcb911c5f4847f5": {
+    "reader": "Standards",
+    "reason": "The foreign branch reset to None and empty string both normalize to the same final empty branch."
+  }
+}

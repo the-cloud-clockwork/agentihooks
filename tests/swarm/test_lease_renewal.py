@@ -423,8 +423,8 @@ def test_a_launch_slower_than_the_lease_keeps_the_intent_pass_in_the_same_tick(e
     started = clock[0]
     actions = cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
     assert clock[0] - started > lease.ttl_ms()
-    assert events[-1] == "intent"
-    assert events[:-1] and all(beat is True for beat in events[:-1])
+    assert events[0] == "intent"
+    assert events[1:] and all(beat is True for beat in events[1:])
     assert "judged" in actions
     assert lease.current(store, "sw").epoch == 1
     assert store.redis.get(store.key("sw", "last-tick"))
@@ -462,8 +462,33 @@ def test_a_slow_launch_that_never_starts_is_recorded_against_the_launch_not_the_
     monkeypatch.setattr(rt, "spawn", slow)
     monkeypatch.setattr(cli.intent, "Check", Check)
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
-    assert events == [True] * 5 + ["intent"]
+    assert events == ["intent"] + [True] * 5
     assert [(row["state"], row["error"]) for row in store.launches("sw") if row["task"] == "t1"] == [
         ("failed", refused)
     ]
+    assert lease.current(store, "sw").epoch == 1
+
+
+def test_a_doctor_timer_slower_than_the_lease_keeps_it_through_the_merge_pass(env, clock, monkeypatch):  # noqa: F811
+    from scripts.doctor import cli as doctor
+
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    store.update("sw", template="doctor")
+    monkeypatch.delenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", raising=False)
+    monkeypatch.setattr(lease, "beat_s", lambda: 0.01)
+    events = []
+
+    def detectors(*args):
+        for _ in range(2):
+            clock[0] += 120000
+            events.append(renewed(store, clock))
+        return []
+
+    monkeypatch.setattr(doctor, "timer", detectors)
+    monkeypatch.setattr(cli.ready, "merge_pass", lambda *args: events.append("merge") or [])
+    started = clock[0]
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert clock[0] - started > lease.ttl_ms()
+    assert events == [True, True, "merge"]
     assert lease.current(store, "sw").epoch == 1

@@ -13,8 +13,12 @@ API_CALL = re.compile(r"\b_?gh\b(?!-)|api\.github\.com|GITHUB_API_URL")
 MODULE = re.compile(r"\bpython3?\b[^\n;&|]*?\s-m\s+([\w.]+)")
 BESIDE = re.compile(r"\$\(dirname \"\$0\"\)|\$\{?GITHUB_ACTION_PATH\}?")
 WORKSPACE = re.compile(r"\$\{?GITHUB_WORKSPACE\}?")
-# The documented local `--ci` download; the workflow passes `--samples` with `--ci 5`, so CI never calls these.
-LOCAL_ONLY = {ROOT / "tests/refresh_durations.py": {"_gh", "ci_run_ids", "ci_download"}}
+# These API functions run only in local downloads or steps bound to the App token.
+LOCAL_ONLY = {
+    ROOT / "scripts/ci_budget/jobs.py": {"read_page"},
+    ROOT / "tests/refresh_durations.py": {"_gh", "ci_run_ids", "ci_download"},
+}
+METADATA_ONLY = {ROOT / "scripts/ci_reuse.py": {"paged_reuse_job"}}
 TOKEN = re.compile(
     r"github\s*(\.\s*token|\[\s*['\"]token['\"]\s*\])"
     r"|secrets\s*(\.|\[\s*['\"])\s*(github|gh)(_\w*|\w*(token|pat)(?![a-z]))"
@@ -121,8 +125,9 @@ def _api_calls(runs) -> dict[Path, int]:
 
 def _reached_source(path: Path) -> str:
     lines = path.read_text().splitlines()
-    for node in ast.parse("\n".join(lines)).body if path in LOCAL_ONLY else []:
-        if isinstance(node, ast.FunctionDef) and node.name in LOCAL_ONLY[path]:
+    exemptions = LOCAL_ONLY.get(path, set()) | METADATA_ONLY.get(path, set())
+    for node in ast.parse("\n".join(lines)).body if exemptions else []:
+        if isinstance(node, ast.FunctionDef) and node.name in exemptions:
             lines[node.lineno - 1 : node.end_lineno] = [""] * (node.end_lineno - node.lineno + 1)
     return "\n".join(lines)
 
@@ -145,11 +150,15 @@ def test_no_script_a_step_runs_calls_the_api():
         "hooks/targets/normalizer.py",
         "scripts/brain-smoke",
         "scripts/ci_budget/__main__.py",
+        "scripts/ci_budget/jobs.py",
+        "scripts/ci_cpu_quota.py",
         "scripts/ci_dependency_audit.py",
         "scripts/ci_dev_reuse.py",
         "scripts/ci_mutation/__main__.py",
         "scripts/ci_mutation/browser.py",
         "scripts/ci_mutation/plan.py",
+        "scripts/ci_queue_fail_fast.py",
+        "scripts/ci_semgrep.py",
         "scripts/ci_wiring.py",
         "scripts/packaging/compose-hive-smoke.sh",
         "scripts/packaging/hive-join-smoke.sh",
@@ -179,6 +188,12 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/refresh_durations.py",
         "tests/shard_budget.py",
         "tests/shard_check.py",
+        "scripts/ci_select.py",
+        "tests/__init__.py",
+        "tests/browser_coverage.py",
+        "tests/flake_ledger.py",
+        "tests/routing/test_codex_api.py",
+        "tests/shards.py",
         "scripts/ci_reuse.py",
         "scripts/ci_runner_classes.py",
     ]
@@ -193,6 +208,27 @@ def test_each_local_only_exemption_names_a_function_that_calls_the_api():
         source = path.read_text()
         functions = {node.name: node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef)}
         assert all(API_CALL.search(ast.get_source_segment(source, functions[name])) for name in names)
+
+
+def test_the_reuse_factory_exemption_contains_only_command_replacements():
+    for path, names in METADATA_ONLY.items():
+        source = path.read_text()
+        functions = {node.name: node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef)}
+        for name in names:
+            calls = [
+                node
+                for node in ast.walk(functions[name])
+                if isinstance(node, ast.Call) and API_CALL.search(ast.get_source_segment(source, node))
+            ]
+            assert calls
+            assert all(isinstance(node.func, ast.Attribute) and node.func.attr == "replace" for node in calls)
+
+
+def test_the_budget_reader_runs_only_on_the_app_token():
+    reader = ROOT / "scripts/ci_budget/jobs.py"
+    steps = [step for _, step, here in _all_steps() if reader in _called(step.get("run", ""), here)]
+    assert steps
+    assert all(step.get("env", {}).get("GH_TOKEN") == APP_TOKEN and not _holds_token(step) for step in steps)
 
 
 @pytest.mark.parametrize(
@@ -232,10 +268,11 @@ def test_a_script_outside_the_caller_is_not_read(tmp_path):
     assert list(_called('bash "$GITHUB_ACTION_PATH/../outer.sh"', tmp_path / "action")) == []
 
 
-def test_an_api_call_outside_the_exempt_functions_is_counted(tmp_path, monkeypatch):
+@pytest.mark.parametrize("exemptions", [LOCAL_ONLY, METADATA_ONLY])
+def test_an_api_call_outside_the_exempt_functions_is_counted(tmp_path, monkeypatch, exemptions):
     script = tmp_path / "durations.py"
     script.write_text('def fetch():\n    return gh(["api"])\n\n\ndef merge():\n    return 1\n')
-    monkeypatch.setitem(LOCAL_ONLY, script.resolve(), {"fetch"})
+    monkeypatch.setitem(exemptions, script.resolve(), {"fetch"})
     run = [('bash "$GITHUB_ACTION_PATH/durations.py"', tmp_path)]
     assert _api_calls(run) == {script.resolve(): 0}
     script.write_text(script.read_text().replace("return 1", 'return urlopen("https://api.github.com/x")'))
@@ -387,16 +424,23 @@ def test_a_value_without_the_workflow_token_holds_none(value):
 
 def test_sonar_downloads_this_runs_coverage_after_the_shards():
     sonar = _jobs()["sonar"]
-    assert sonar["needs"] in (["unit", "reuse"], ["unit", "reuse", "admission"])
+    assert sonar["needs"] == ["unit", "unit-selected", "select", "reuse", "admission"]
     steps = sonar["steps"]
     download = next(step for step in steps if step.get("name") == "Download shard coverage")
     merge = next(step for step in steps if step.get("name") == "Merge shard coverage")
-    assert download["if"] == merge["if"] == "steps.current.outputs.superseded != 'true'"
+    assert (
+        download["if"]
+        == merge["if"]
+        == ("steps.current.outputs.superseded != 'true' && needs.select.outputs.scope != 'none'")
+    )
     assert download["uses"].startswith("actions/download-artifact@")
     assert download["with"] == {"pattern": "coverage-3.12-*", "path": ".coverage-shards"}
     assert steps.index(download) < steps.index(merge)
-    assert "env" not in merge
-    assert "bash .github/coverage/combine.sh --downloaded 12 ||" in merge["run"]
+    assert merge["env"] == {
+        "SHARDS": "${{ needs.select.outputs.scope == 'selected' && needs.select.outputs.count || 12 }}",
+        "SCOPE": "${{ needs.select.outputs.scope }}",
+    }
+    assert 'bash .github/coverage/combine.sh --downloaded "$SHARDS" ||' in merge["run"]
 
 
 @pytest.mark.parametrize("job", ["unit", "shard-check", "test-count", "lint"])

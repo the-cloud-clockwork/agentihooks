@@ -1,6 +1,7 @@
 import calendar
 import json
 import os
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -504,6 +505,26 @@ def _launcher_text(tmp_path, environ, agent="claude", name="swarm-buildout-eng-4
     env = {"XDG_RUNTIME_DIR": str(tmp_path), **environ}
     launcher, _ = init_agent._write_launcher(tmp_path, name, "", [], env, init_agent.AgentSpec(agent=agent))
     return launcher.read_text()
+
+
+def test_swarm_display_name_preserves_the_inbox_identity(monkeypatch, tmp_path):
+    text = _dry_launcher(
+        monkeypatch,
+        tmp_path,
+        "engineer-a1b2c3-0001",
+        {
+            "AGENTIHOOKS_SWARM": "sw",
+            "AGENTIHOOKS_SWARM_SPAWN": "1",
+            "AGENTIHOOKS_AGENT_NAME": "engineer@a1b2c3-0001",
+        },
+    )
+    assert "export AGENTIHOOKS_AGENT_NAME=engineer@a1b2c3-0001" in text
+    assert "--name engineer-a1b2c3-0001" in text
+
+
+def test_an_independent_launch_does_not_inherit_another_inbox_identity(tmp_path):
+    text = _launcher_text(tmp_path, {"AGENTIHOOKS_AGENT_NAME": "engineer@a1b2c3-0001"}, name="my-session")
+    assert "export AGENTIHOOKS_AGENT_NAME=my-session" in text
 
 
 def test_collector_unset_leaves_the_launcher_without_telemetry(tmp_path):
@@ -1183,6 +1204,24 @@ def test_a_codex_launcher_holds_its_prompt_behind_the_herdr_variable(monkeypatch
     assert init_agent.PROMPT_AFTER_START == "AGENTIHOOKS_PROMPT_AFTER_START"
 
 
+@pytest.mark.parametrize("prompt", ["Start.", "x" * init_agent.PROMPT_ARGUMENT_LIMIT])
+def test_a_claude_launcher_separates_its_prompt_from_a_trailing_config_option(monkeypatch, tmp_path, prompt):
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "requested"))
+    monkeypatch.setattr(init_agent.shutil, "which", lambda name: "/usr/bin/agentihooks")
+    monkeypatch.setattr(init_agent, "_launch_command", lambda launcher, directory, title, environ: ("linux", ["t"]))
+    runtime = tmp_path / "rt"
+    config = tmp_path / "mcp.json"
+    argv = ["--dir", str(tmp_path), "--name", "eng-a", "--prompt", prompt, "--dry-run", "--", "--mcp-config"]
+    assert init_agent.main([*argv, str(config)], {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(runtime)}) == 0
+    folder = runtime / "agentihooks-claude-terminal"
+    prompt_file = next(folder.glob("*.prompt"))
+    launcher = next(folder.glob("*.sh")).read_text()
+    written = prompt_file.read_text()
+    opening = init_agent._opening_prompt(written, prompt_file)
+    argument = f'"$(cat {prompt_file})"' if opening == written else shlex.quote(opening)
+    assert f" --mcp-config {config} -- {argument}\nnative_status=$?\n" in launcher
+
+
 def test_a_channel_dry_run_writes_the_negotiation_pin_into_its_launcher(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "requested"))
     monkeypatch.setattr(init_agent, "_launch_command", lambda launcher, directory, title, environ: ("linux", ["t"]))
@@ -1440,7 +1479,8 @@ def test_a_plain_codex_quota_handoff_preserves_native_choices(monkeypatch, tmp_p
         )
         == 0
     )
-    command, successor = launched[0]
+    launcher, successor = launched[0]
+    command = next(line for line in launcher.splitlines() if " codex " in line)
     assert "--agentihooks-exclude alpha" in command
     assert "resume thread-1" in command
     assert "select-profile" not in command

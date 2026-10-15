@@ -45,7 +45,8 @@ def _stamp(root):
 def _message(root):
     return (
         f"BLOCKED: HEAD in {root} has not passed `python -m scripts.ci_prepush`. "
-        "Run it there, fix what fails, commit, and push once it passes."
+        "Commit intended changes first, run the gate on that commit, then push. "
+        f"Next: cd {root} && python -m scripts.ci_prepush"
     )
 
 
@@ -437,3 +438,107 @@ def test_cmd_payloads_are_checked_for_pushes(repo):
     payload["tool_input"] = {"cmd": "git push origin HEAD"}
     with pytest.raises(BlockAction):
         check_prepush(payload)
+
+
+@pytest.mark.parametrize("directory", ["workdir", "task", "branch"])
+def test_codex_push_in_bundle_worktree_uses_bundle_repository(repo, tmp_path, monkeypatch, directory):
+    from hooks.targets.normalizer import normalize_payload
+    from tests.swarm_ledger import legacy_page
+
+    bundle = _init(tmp_path / "agentihooks-bundle")
+    _git(bundle, "add", "scripts/ci_prepush/__init__.py")
+    _git(bundle, "commit", "-q", "-m", "guard")
+    folder_name = "continuation" if directory == "branch" else "engineer-test"
+    worktree = tmp_path / "worktrees" / "agentihooks-bundle" / folder_name
+    worktree.parent.mkdir(parents=True)
+    _git(bundle, "worktree", "add", "-q", "-b", "engineer-test", str(worktree))
+    task = {
+        "id": "push",
+        "state": "claimed",
+        "claimed_by": "engineer@test",
+        "branch": "engineer-test",
+        "worktree": str(worktree),
+    }
+    folder = tmp_path / "ledgers"
+    folder.mkdir()
+    if directory == "branch":
+        task.pop("worktree")
+    legacy_page.store(folder, "rig", {"tasks": [task]})
+    monkeypatch.setenv("LEDGER_DIR", str(folder))
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "rig")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "push")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@test")
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    root = tmp_path / ("unused" if directory == "task" else "worktrees")
+    monkeypatch.setenv("WORKTREE_ROOT", str(root))
+    payload = {"tool_name": "exec_command", "tool_input": {"command": "git push -u origin HEAD"}, "cwd": str(repo)}
+    if directory == "workdir":
+        payload["tool_input"]["workdir"] = str(worktree)
+    payload = normalize_payload(payload)
+    _stamp(repo)
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(payload)
+    assert str(blocked.value) == _message(worktree)
+    _stamp(worktree)
+    check_prepush(payload)
+
+
+@pytest.mark.parametrize("step", ["identity", "ledger", "claimant", "worktree"])
+def test_codex_unresolved_push_refuses_with_directory_guidance(repo, swarm_worktree, tmp_path, monkeypatch, step):
+    from hooks.targets.normalizer import normalize_payload
+    from tests.swarm_ledger import legacy_page
+
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    if step == "identity":
+        monkeypatch.setenv("AGENTIHOOKS_SWARM", "")
+    elif step == "ledger":
+        monkeypatch.setenv("LEDGER_DIR", str(tmp_path / "missing"))
+    elif step == "claimant":
+        monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "other")
+    else:
+        task = {"id": "push", "state": "claimed", "claimed_by": "engineer@test", "branch": "missing"}
+        legacy_page.store(tmp_path / "ledgers", "rig", {"tasks": [task]})
+    payload = normalize_payload(
+        {
+            "tool_name": "exec_command",
+            "tool_input": {"command": "git push -u origin HEAD"},
+            "cwd": str(repo),
+        }
+    )
+    _stamp(repo)
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(payload)
+    message = str(blocked.value)
+    stage = {
+        "identity": "identity binding",
+        "ledger": "ledger task",
+        "claimant": "claimant or task state",
+        "worktree": "worktree lookup",
+    }[step]
+    assert f"Could not resolve the push directory ({stage})" in message
+    assert "git -C /absolute/path/to/worktree push" in message
+    assert str(repo) not in message
+    payload["tool_input"]["command"] = f"git -C {repo} push -u origin HEAD"
+    check_prepush(payload)
+
+
+@pytest.mark.parametrize("selection", ["workdir", "git-c"])
+def test_codex_explicit_directory_without_a_repository_is_refused(repo, tmp_path, monkeypatch, selection):
+    from hooks.targets.normalizer import normalize_payload
+
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    target = tmp_path / "not-a-repository"
+    target.mkdir()
+    tool_input = {"command": "git push -u origin HEAD"}
+    if selection == "workdir":
+        tool_input["workdir"] = str(target)
+    else:
+        tool_input["command"] = f"git -C {target} push -u origin HEAD"
+    payload = normalize_payload({"tool_name": "exec_command", "tool_input": tool_input, "cwd": str(repo)})
+    _stamp(repo)
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(payload)
+    assert str(blocked.value) == (
+        "BLOCKED: Could not resolve the push directory (repository lookup). "
+        "Use git -C /absolute/path/to/worktree push with the intended repository."
+    )

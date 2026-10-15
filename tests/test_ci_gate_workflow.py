@@ -84,12 +84,15 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
             "mutation-stats",
             "reuse",
             "queue-baseline",
+            "queue-fail-fast",
             "stage-budget",
+            "select",
+            "unit-selected",
         }
     )
     assert gate["if"] == "${{ always() }}"
-    assert jobs["unit"]["needs"] in (["split", "reuse"], ["split", "reuse", "admission"])
-    assert jobs["split"]["needs"] in (["durations", "reuse"], ["durations", "reuse", "admission"])
+    assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
+    assert jobs["split"]["needs"] == ["durations", "select", "reuse", "admission"]
     assert jobs["lint"]["needs"] in (["reuse"], ["reuse", "admission"])
     if "swarm-image" in gate["needs"]:
         assert jobs["swarm-image"]["uses"] == "./.github/workflows/swarm-smoke.yml"
@@ -147,7 +150,7 @@ def test_semgrep_grades_registry_pack_findings_new_against_the_base_in_parallel(
     assert command[command.index("--baseline-commit") + 1] == '"$BASE"'
     assert {"--error", "--strict", "--verbose"} <= set(command)
     assert int(command[command.index("--timeout") + 1]) >= 30
-    assert command[:2] == ["semgrep", "scan"]
+    assert command[:4] == ["python", "scripts/ci_semgrep.py", "semgrep", "scan"]
     assert not [s for s in ("||", "&&", ";", "exit") if s in scan["steps"][-1]["run"]]
     assert not {"set", "--exclude", "--include"} & set(command)
     assert [command[i + 1] for i, a in enumerate(command) if a == "--exclude-rule"] == [
@@ -159,6 +162,7 @@ def test_semgrep_grades_registry_pack_findings_new_against_the_base_in_parallel(
     assert job["if"] in (
         "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
         "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
+        "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' }}",
     )
 
 
@@ -263,6 +267,7 @@ def test_coverage_ratchet_grades_the_merged_shards_from_the_base_copy():
     jobs = _workflow()["jobs"]
     job = jobs["coverage-ratchet"]
     assert job["needs"] == ["durations", "unit", "queue-baseline", "reuse"]
+    assert jobs["queue-baseline"]["if"] is False
     download = next(step for step in job["steps"] if step.get("name") == "Download shard coverage")
     assert download["with"]["pattern"] == "coverage-3.12-*"
     grade = next(step for step in job["steps"] if step.get("name") == "Hold every line the base ran")
@@ -279,6 +284,9 @@ def test_coverage_ratchet_grades_the_merged_shards_from_the_base_copy():
 )
 def test_every_coverage_baseline_records_all_the_shards_the_unit_job_splits(job, step):
     jobs = _workflow()["jobs"]
+    if job == "queue-baseline":
+        assert jobs[job]["if"] is False
+        return
     record = next(entry for entry in jobs[job]["steps"] if entry.get("name") == step)
     assert f"--shards {jobs['unit']['strategy']['matrix']['shard'][-1]} " in record["run"]
 
@@ -336,6 +344,8 @@ def test_durations_restores_the_parent_baseline_when_the_dispatched_base_is_the_
     (bin_dir / "gh").write_text(
         "#!/usr/bin/env bash\n"
         'case "$2" in\n'
+        "  */compare/*) echo ahead ;;\n"
+        '  */jobs*) jq -nc \'[range(1;13) | {name: ("unit (3.12, " + tostring + ")"), conclusion: "success"}] + [range(1;7) | {name: ("unit (3.11, " + tostring + ")"), conclusion: "success"}] + [{name: "coverage-baseline", conclusion: "success", steps: [{name: "Compute the coverage baseline", conclusion: "success"}, {name: "Publish the passed dev coverage baseline", conclusion: "success"}]}]\' | jq -c \'.[]\' ;;\n'
         "  */commits/head) [[ $4 == .sha ]] && echo head || echo parent ;;\n"
         "  */commits/*) echo other ;;\n"
         '  */runs\\?*) s="${2##*head_sha=}"; s="${s%%&*}"; echo "run-$s $s" ;;\n'
@@ -368,9 +378,54 @@ def test_coverage_ratchet_restores_a_missed_base_baseline_from_a_passed_run_of_t
     download = _step("coverage-ratchet", "Download the base baseline its run published")
     assert names.index(cached["name"]) < names.index(mint["name"]) < names.index(find["name"])
     assert names.index(find["name"]) < names.index(download["name"]) < names.index("Hold every line the base ran")
-    assert mint["if"] == "steps.cached.outcome == 'success' && steps.cached.outputs.cache-hit != 'true'"
+    assert mint["if"] == (
+        "steps.cached.outcome == 'success' && steps.cached.outputs.cache-hit != 'true'"
+        " && steps.restored.outputs.commit == ''"
+    )
     assert download["with"]["run-id"] == "${{ steps.base-run.outputs.id }}"
     assert download["with"]["name"] == "coverage-baseline"
+
+
+def test_a_superseded_base_falls_back_to_the_newest_dev_baseline_before_the_artifact_lookup():
+    steps = _workflow()["jobs"]["coverage-ratchet"]["steps"]
+    names = [step.get("name") for step in steps]
+    cached = _step("coverage-ratchet", "Restore the exact coverage baseline")
+    restored = _step("coverage-ratchet", "Grade from the newest dev baseline when the base run published none")
+    hold = _step("coverage-ratchet", "Hold every line the base ran")
+    assert cached["with"]["restore-keys"] == "coverage-baseline-"
+    assert names.index(cached["name"]) < names.index(restored["name"]) < names.index("Mint the tcc main ci App token")
+    assert restored["if"] == (
+        "steps.cached.outputs.cache-hit != 'true' && steps.cached.outputs.cache-matched-key != ''"
+    )
+    assert hold["env"]["BASE"] == "${{ steps.restored.outputs.commit || steps.base.outputs.commit }}"
+
+
+@pytest.mark.parametrize("measured", ["ancestor", "unrelated", "unrecorded"])
+def test_the_newest_dev_baseline_grades_only_from_an_ancestor_of_the_head(tmp_path, measured):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run([*git, "init", "-q"], check=True)
+
+    def commit(message):
+        subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", message], check=True)
+        return subprocess.run([*git, "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+
+    ancestor = commit("ancestor")
+    head = commit("head")
+    subprocess.run([*git, "checkout", "-q", "--orphan", "side"], check=True)
+    unrelated = commit("unrelated")
+    subprocess.run([*git, "checkout", "-q", head], check=True)
+    baseline = tmp_path / "coverage-baseline"
+    baseline.mkdir()
+    recorded = {"ancestor": {"commit": ancestor}, "unrelated": {"commit": unrelated}, "unrecorded": {}}[measured]
+    (baseline / "baseline.json").write_text(json.dumps({"tree": "t", **recorded}))
+    output = tmp_path / "output"
+    output.write_text("")
+    env = dict(os.environ, HOME=str(tmp_path), GITHUB_OUTPUT=str(output))
+    step = _step("coverage-ratchet", "Grade from the newest dev baseline when the base run published none")
+    subprocess.run(["bash", "-e", "-c", step["run"]], cwd=repo, env=env, check=True)
+    assert output.read_text() == (f"commit={ancestor}\n" if measured == "ancestor" else "")
 
 
 @pytest.mark.parametrize(("kept", "found"), [("0 1", "id=run-2\n"), ("0 0", None)])
@@ -381,7 +436,9 @@ def test_the_missed_baseline_comes_from_the_first_passed_run_that_kept_it(tmp_pa
     (bin_dir / "gh").write_text(
         "#!/usr/bin/env bash\n"
         'case "$2" in\n'
-        '  */runs\\?*) [[ $2 == *"?head_sha=base&status=success&"* ]] && printf "run-1\\nrun-2\\n" ;;\n'
+        "  */compare/*) echo ahead ;;\n"
+        '  */jobs*) jq -nc \'[range(1;13) | {name: ("unit (3.12, " + tostring + ")"), conclusion: "success"}] + [range(1;7) | {name: ("unit (3.11, " + tostring + ")"), conclusion: "success"}] + [{name: "coverage-baseline", conclusion: "success", steps: [{name: "Compute the coverage baseline", conclusion: "success"}, {name: "Publish the passed dev coverage baseline", conclusion: "success"}]}]\' | jq -c \'.[]\' ;;\n'
+        '  */runs\\?*) if [[ $2 == *"status=success"* ]]; then printf "run-1\\nrun-2\\n"; else printf "run-1 push\\nrun-2 push\\n"; fi ;;\n'
         f"  */run-1/*) echo {first} ;;\n"
         f"  */run-2/*) echo {second} ;;\n"
         "esac\n"
@@ -430,9 +487,9 @@ def test_coverage_ratchet_refuses_a_base_without_its_grader(tmp_path):
         step["run"]
         for job in _workflow()["jobs"].values()
         for step in job.get("steps", [])
-        if re.search(r"-m tests\.(coverage_ratchet|count_floor)\b", step.get("run", ""))
+        if re.search(r"-m (tests\.(coverage_ratchet|count_floor)|scripts\.ci_dependency_audit)\b", step.get("run", ""))
     ]
-    assert len(graders) >= 2
+    assert len(graders) >= 3
     git = ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t"]
     subprocess.run([*git, "init", "-q"], check=True)
     subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "base"], check=True)
@@ -446,7 +503,7 @@ def test_coverage_ratchet_refuses_a_base_without_its_grader(tmp_path):
     assert result.returncode == 1
     assert "The base carries no tests/coverage_ratchet.py, so nothing trusted can grade." in result.stdout
     assert not (tmp_path / "head-graded").exists()
-    prefixes = [re.split(r"-m tests\.\w+", run)[0] for run in graders]
+    prefixes = [re.split(r"-m (?:tests|scripts)\.\w+", run)[0] for run in graders]
     assert all("GITHUB_WORKSPACE" not in prefix and 'cd "$RUNNER_TEMP/base"' in prefix for prefix in prefixes)
 
 
@@ -506,6 +563,7 @@ def test_required_gate_accepts_a_skipped_chart_proof_only_when_its_path_rule_sai
     assert jobs["helm-kind"]["if"] in (
         "${{ needs.kind-due.outputs.due == 'true' }}",
         "${{ !cancelled() && needs.kind-due.result == 'success' && needs.kind-due.outputs.due == 'true' }}",
+        "${{ !cancelled() && github.event_name != 'merge_group' && github.event_name != 'pull_request' && needs.kind-due.result == 'success' && needs.kind-due.outputs.due == 'true' }}",
     )
     assert step["env"]["KIND"] == "${{ needs.kind-due.outputs.due }}"
     needs = {"kind-due": {"result": due_job}, "helm-kind": {"result": kind}}
@@ -660,12 +718,22 @@ def test_chart_proof_rule_fails_on_an_unknown_base(kind_repo):
 
 def test_unit_and_lint_run_on_every_event_and_feed_the_required_gate():
     jobs = _workflow()["jobs"]
+    every_event = "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}"
+    expected = {
+        "lint": every_event,
+        "unit": every_event.removesuffix(" }}")
+        + " && (github.event_name != 'pull_request' || needs.select.outputs.scope == 'full') }}",
+    }
     for name in ("unit", "lint"):
         job = jobs[name]
         assert job["if"] in (
+            expected[name],
             "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
             "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
+            "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'pull_request' || needs.select.outputs.scope == 'full') }}",
+            "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' }}",
         )
+
         assert all("steps.lookup" not in step.get("if", "") for step in job["steps"])
     step = jobs["gate-required"]["steps"][0]
     result = subprocess.run(

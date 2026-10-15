@@ -222,6 +222,8 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> issue URL` | Record the task's GitHub issue, where the repo has issues; without them the ledger task is the spec. |
 | `agentihooks swarm <id> pr URL` | Record the task's pull request, its head branch and that branch's repository (`branch_repo`); the task moves to `pr`. |
 | `agentihooks swarm <id> merge queue\|dequeue\|state URL` | Queue a pull request into `dev` on the merge queue at its current head, take it out of the queue, or report its state, head and queue entry as JSON. It goes through `gh api graphql`, so any `gh` with `gh api` works; queue and dequeue run only for a swarm worker, never the master, and refuse a pull request into any other base. |
+| `agentihooks swarm <id> prepare` | Set `--repositories /absolute/repo,/absolute/other` when adding a task, or `task set <task> repositories=/absolute/repo`. Use that explicit `repositories` list of local repository paths; without it, report that the swarm repository is the default. Prose repository names do not select repositories. Create or reuse one worktree per repository from its own `dev`, with a recorded continuation branch scoped to that repository. Return each worktree and branch. |
+| `agentihooks swarm <id> publish --message TEXT -- FILE...` | Use the repository of the current task worktree; from a primary checkout, resolve the sole task repository or require a worktree selection when several are declared. Stage only explicit repository relative files, commit, run that repository’s `scripts.ci_prepush` gate, then push and retain its branch separately from other task repositories. The result names the gate. A repository without that module uses the named AgentiHooks touched Python fallback: lint, format, size and complexity on changed Python files since its own `origin/dev` merge base, without agentihooks baseline files or local tests. Unrelated tracked changes are refused before staging; unrelated untracked files are preserved. A failed stage stops publication and names the next command. Repeat the command after fixing a failure; an already committed head is graded again without an empty commit. Protected branches and tasks owned by another agent are refused. Tests run only in CI. |
 | `agentihooks swarm <id> branch` | Record the current worktree branch on the task once it is on origin, with its repository (`branch_repo`, the origin remote without credentials), so dependent tasks can start from it. |
 | `agentihooks swarm <id> review` | Start a review round on the task. The third round answers that review is closed: any finding still open gets one ruling from the other reader, then the merge proceeds. A fourth is refused with that text. |
 | `agentihooks swarm <id> done [--pr URL] [proof flags]` | Close the task with the proof its kind needs; the swarm then closes the session. |
@@ -296,7 +298,8 @@ An outage holds the affected idle and delivery decisions until recovery (see
 [Outage holds and recovery](#outage-holds-and-recovery)). Each tick, per swarm:
 
 1. Retire agents that finished, and pass on the messages they left (see [Safe retire](#safe-retire)).
-2. Free the tasks of agents whose pane is gone, or that stayed idle for 10 ticks. An idle agent is nudged at 3.
+2. Free the tasks of agents whose pane is gone, or that stayed idle for 20 ticks. A stale agent is nudged through its inbox
+   (see Stale nudge).
 3. Reopen claimed tasks that have no agent.
 4. Spawn the master if none is online, or retire it once a stopping swarm has no worker left. After the down window, force a launch and promote an engineer when it fails (see [Master outage and promotion](#master-outage-and-promotion)).
 5. While `running`, spawn agents up to the caps, one per claimable task, as long as a Claude account has room
@@ -310,8 +313,17 @@ An outage holds the affected idle and delivery decisions until recovery (see
    Each change leaves a status comment from `swarm` on the phase and an information item for the master. A phase
    with no task, or out of scope, is left to the master.
 10. Send each new health finding to the master with the `verdict` command to judge it.
-11. Wake idle panes holding unread items, and climb the wake ladder for items nobody reads.
+11. Wake idle panes holding unread items, except a Codex pane whose push pump owns its inbox, and climb the wake
+    ladder for items nobody reads.
 12. Write the automatic snapshot when it is due.
+
+The health pass reports `merge stall` when the dev merge queue holds entries and no pull request has merged
+into dev for sixty minutes. Its evidence names the queue length, minutes since the latest dev merge and the
+most common failed job among the ten most recent merge queue workflow runs. The master receives a notice
+on detection and every hour while it persists, even after giving the finding a verdict. This signal only
+reports the stall; it imposes no enforcement and changes nothing in the queue. GitHub observations are cached
+for five minutes. A failed observation retains the previous evidence and delays further notices until a fresh
+observation succeeds. An empty queue or a new dev merge resets the notice interval.
 
 Each tick renews the controller lease for three ticks. A tick is 60 seconds unless
 `AGENTIHOOKS_CONTROLLER_TICK_SECONDS` sets another interval of at least one second. Set it only on the controller
@@ -360,9 +372,20 @@ writes, a master `relay` carrying his verified words among them: an agent's comm
 never judged, even one that asks him for the decision. Every automatic clear is a `priority cleared` event by `swarm` with a
 `reason` in the ledger history.
 
+### Stale nudge
+
+An agent holding a task is stale when its session heartbeat is over ten minutes old and no named wait holds, or
+when its pane shows a provider error while its heartbeat is not working. The tick sends it one inbox item per ten
+minutes of silence, with an id built from the agent, its last activity and the window, so repeated ticks send it
+once; nothing is typed into its pane. The inbox channel delivers it to Claude and the Codex push pump to Codex. A
+nudge the pump delivers within two minutes of its sending interrupts a turn still running and starts a new app server
+turn; a later one is delivered like any message. An agent on a long command declares a wait first.
+The master, an agent the operator is typing to, a swarm with an open outage and an agent in provider recovery get
+no nudge.
+
 ### Safe retire
 
-The tick retires an agent for idleness only after 10 idle ticks, and a tick counts as idle only when all three
+The tick retires an agent for idleness only after 20 idle ticks, and a tick counts as idle only when all three
 say idle:
 
 - its herdr pane, read by its pane id, never by its name, reads idle;
@@ -407,6 +430,53 @@ A task filed under the wrong phase moves with `task set ID phase=P`. The master 
 engineer or CI agent is refused, and so is a phase the ledger does not hold. The move is stamped and recorded as a
 `task moved` event. Each intent verdict records the phase it was judged under, and a verdict from another phase is
 judged again on the next tick against the task's current phase.
+
+## Freeze and focus
+
+A freeze or a focus holds open tasks back from a claim; it never stops work already claimed. Only a task in the
+`open` state is held, so an agent holding a task under a freeze or outside a focus finishes it, its pull request
+merges and the task closes as usual. Write them with `agentihooks swarm <id> freeze TARGET`, `focus TARGET` and
+`unfreeze TARGET` (see [Commands](#commands) for targets and who may write them), or from the ledger page.
+
+- **Freeze** holds the target and everything under it. A freeze on a phase holds every open task in that phase,
+  its slices included; a freeze on `lane:ci` or `kind:research` holds every open task of that lane or kind. Rank
+  does not matter: a frozen `urgent` task stays held.
+- **Focus** holds everything outside the target. While any focus record exists, every open task not under a
+  focused node, and not matching a focused selector, is held. Several focus records add up: a task under any of
+  them may be claimed. A focus on a single task leaves only that task and the exempt tasks below claimable.
+- **Urgent tasks are exempt from a focus.** A task ranked `urgent` (see [Queue rank](#queue-rank)) stays claimable
+  outside every focus, so a fix the operator raises to `urgent` is never held by a focus elsewhere. In a Doctor
+  swarm, tasks in the Doctor's fix phase are exempt too. Neither exemption applies to a freeze.
+- Freeze and focus combine: a task must pass both, so a frozen task inside a focus stays held.
+
+Both records are cleared with `unfreeze TARGET`; there is no separate unfocus command. `unfreeze` on a node clears
+every freeze and focus record on that node and on every node under it, and on a selector clears the records on that
+selector. The two release work differently. Unfreezing a frozen phase releases the open tasks under that phase
+from its freeze; a focus that does not cover them keeps them held. Clearing the last focus releases every task the focus held across the whole ledger at once, apart from
+tasks still under a freeze. A held task that becomes claimable starts its claim wait at that unfreeze or focus.
+
+A task that depends on a held task is not claimable either, because its dependency is not done; the page's time left
+counts it with the held work.
+
+### Seeing held tasks
+
+`agentihooks swarm <id> status` prints one line per active record, after the phase lines:
+
+```
+focus  phases/p92  by operator  at 2026-10-15T14:02Z  ship the docs first
+freeze  lane:ci  by operator  at 2026-10-15T14:05Z
+```
+
+Each line names the verb, the target, who wrote it, when (UTC) and its reason when one was given. Status does not
+list freeze or focus holds task by task; a phase line's `holds` list names open tasks its phase does not admit yet
+(the phase waits on another phase, is still to plan, planning or in review), not tasks held by a freeze or a focus.
+A task is held when it is `open` and a freeze covers it, or a focus exists that does not cover it and the task is
+neither `urgent` nor in a Doctor swarm's fix phase. In a Doctor swarm, a focus on the watched ledger also holds its
+tasks that are neither `urgent` nor in the fix phase. When no task is claimable and no lane agent is left, the tick
+marks the swarm drained and posts a ledger notice. It names how many open tasks are held and by which records, for
+example `The swarm has no task it may start: 3 open tasks are held by the focus on phase Documentation agents`, and
+says only `The swarm has no task left to start` when none is held. The ledger page's time left leaves held tasks out
+and says so: `with 3 frozen tasks holding 90m of work left out`.
 
 ## Redis
 

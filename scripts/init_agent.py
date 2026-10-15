@@ -349,7 +349,10 @@ def _agent_command(
             *agent_args,
             *(["resume", spec.resume] if spec.resume else []),
         ]
-        return _profile_command(command, spec), ""
+        command = _profile_command(command, spec)
+        if environ.get("AGENTIHOOKS_SWARM"):
+            command = [sys.executable, "-m", "scripts.codex_input", "--", *command]
+        return command, ""
     command = [
         agentihooks_bin,
         "claude",
@@ -367,6 +370,14 @@ def _agent_command(
     # A server on MCP revision 2026-07-28 never registers as a channel.
     before = "export MCP_PROTOCOL_NEGOTIATION=legacy\n" if spec.channel else ""
     return _profile_command(command, spec), before
+
+
+def _opening_prompt(prompt: str, path: Path) -> str:
+    if len(prompt.encode("utf-8")) < PROMPT_ARGUMENT_LIMIT:
+        return prompt
+    from scripts.profiles import binding
+
+    return f"{binding.PROMPT}\n\n{OPENING_FILE_INSTRUCTION}{path}"
 
 
 def _write_launcher(
@@ -394,11 +405,20 @@ def _write_launcher(
     langfuse_export = f"export AGENTIHOOKS_LANGFUSE_ENABLED={shlex.quote(langfuse)}\n" if langfuse is not None else ""
     opening = prompt_file if app_server else None
     command, before = _agent_command(spec, _route_report(launcher), name, claude_args, environ, directory, opening)
+    identity = environ.get("AGENTIHOOKS_AGENT_NAME", name) if environ.get("AGENTIHOOKS_SWARM") else name
+    from scripts import session_exit
+
+    exit_record = session_exit.path_for(launcher, environ)
+    exit_command = shlex.join([sys.executable, "-m", "scripts.session_exit", str(exit_record)])
+    exit_identity = shlex.join([spec.agent, identity])
     command_text = shlex.join(command)
     if prompt_file is not None and not app_server:
-        prompt_arg = f'"$(cat {shlex.quote(str(prompt_file))})"'
+        opening_prompt = _opening_prompt(prompt, prompt_file)
+        prompt_arg = (
+            f'"$(cat {shlex.quote(str(prompt_file))})"' if opening_prompt == prompt else shlex.quote(opening_prompt)
+        )
         held = f'set --; [ -n "${{{PROMPT_AFTER_START}:-}}" ] || set -- {prompt_arg}; unset {PROMPT_AFTER_START}; '
-        command_text = f'{held}{command_text} "$@"' if spec.agent == "codex" else f"{command_text} {prompt_arg}"
+        command_text = f'{held}{command_text} "$@"' if spec.agent == "codex" else f"{command_text} -- {prompt_arg}"
     cleanup = [
         str(launcher),
         str(_route_report(launcher)),
@@ -408,22 +428,27 @@ def _write_launcher(
     launcher.write_text(
         "#!/usr/bin/env bash\n"
         "set -u\n"
+        "set -m\n"
         f"cd {shlex.quote(str(directory))} || exit 1\n"
         f": > {shlex.quote(str(_started_marker(launcher)))}\n"
         f"{operator_env.source_line(environ)}"
         f"{_predecessor_export(environ)}"
+        f"export AGENTIHOOKS_EXIT_RECORD={shlex.quote(str(exit_record))}\n"
         "export AGENTIHOOKS_TERMINAL_LAUNCH=1\n"
-        f"export AGENTIHOOKS_AGENT_NAME={shlex.quote(name)}\n"
+        f"export AGENTIHOOKS_AGENT_NAME={shlex.quote(identity)}\n"
         f"{_config_home_export(environ) if spec.agent == 'claude' else ''}"
-        f"{_telemetry_exports(name, environ)}"
+        f"{_telemetry_exports(identity, environ)}"
         f"{_swarm_exports(environ)}"
         f"{langfuse_export}"
         f"{_binding_export(environ)}"
         f"sleep {LAUNCH_GRACE_S}\n"
         f"{before}{command_text}\n"
+        "native_status=$?\n"
+        f'{exit_command} "$native_status" {exit_identity}\n'
         f"rm -f {shlex.join(cleanup)}\n"
         f"[ -e {shlex.quote(str(root))}/closing-$$ ] && {{ rm -f {shlex.quote(str(root))}/closing-$$; exit 0; }}\n"
         "unset AGENTIHOOKS_AGENT_NAME\n"
+        "unset AGENTIHOOKS_EXIT_RECORD\n"
         f"exec {shlex.quote(shell)} -l\n",
         encoding="utf-8",
     )
@@ -724,10 +749,16 @@ def _start_herdr(launcher: Path, directory: Path, name: str, args, agent: str, e
 def _held_prompt(launcher: Path, agent: str) -> str:
     """The opening prompt a Codex pane gets after its rename: typed at launch, the rename would wait behind its turn."""
     prompt_file = launcher.with_suffix(".prompt")
-    return prompt_file.read_bytes().decode() if agent == "codex" and prompt_file.exists() else ""
+    return (
+        _opening_prompt(prompt_file.read_bytes().decode(), prompt_file)
+        if agent == "codex" and prompt_file.exists()
+        else ""
+    )
 
 
 CHANNEL_WARNING_MS = 60_000
+PROMPT_ARGUMENT_LIMIT = 131_072
+OPENING_FILE_INSTRUCTION = "Read the complete opening instructions in this file and follow them: "
 
 
 def _inbox_channel_args() -> list[str]:

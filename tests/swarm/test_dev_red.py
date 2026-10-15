@@ -11,7 +11,7 @@ from tests.swarm.test_tick import FakeLedger
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
 ENDPOINT = "repos/{owner}/{repo}/actions/workflows/test.yml/runs?branch=dev&event=push&status=completed&per_page=20"
-JQ = ".workflow_runs[] | {id, conclusion} | @json"
+JQ = ".workflow_runs[] | {id, conclusion, head_sha, html_url} | @json"
 GREEN = [{"id": 42, "conclusion": "success"}]
 
 
