@@ -221,9 +221,9 @@ def test_init_help_describes_defaults_and_flags(monkeypatch, capsys):
         install.main()
     assert stopped.value.code == 0
     output = " ".join(capsys.readouterr().out.split())
-    assert "Install only one agent CLI (claude | codex | copilot). Defaults to Claude and Codex." in output
-    assert "Include Copilot in this install" in output
-    assert "Show full installation details" in output
+    assert " Install only one agent CLI (claude | codex | copilot). Defaults to Claude and Codex. " in f" {output} "
+    assert " Include Copilot in this install " in f" {output} "
+    assert " Show full installation details " in f" {output} "
 
 
 def test_init_command_forwards_options_once_and_deduplicates_notices(monkeypatch, tmp_path, capsys):
