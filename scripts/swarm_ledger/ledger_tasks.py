@@ -5,7 +5,7 @@ import re
 import ledger_comments
 import ledger_kinds
 
-from scripts.swarm_ledger import ledger_plans, ledger_rank
+from scripts.swarm_ledger import ledger_plans, ledger_rank, task_dependencies
 
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 ID_RE = re.compile(r"^[A-Za-z0-9][\w.-]{0,63}$")
@@ -471,7 +471,11 @@ def _update(doc, op, ctx):
     others = [t for t in doc["tasks"] if t["id"] != task_id]
     if task is None or not _known(others, op["fields"].get("depends_on", []) + op["fields"].get("parked_on", [])):
         return False
-    if _held_block(task, op, ctx) or (op.get("if_state") and task.get("state", "open") not in op["if_state"]):
+    if (
+        _held_block(task, op, ctx)
+        or (op.get("if_state") and task.get("state", "open") not in op["if_state"])
+        or task_dependencies.held(task, op, doc["tasks"])
+    ):
         return True
     if refusal := update_refusal(doc, op, ctx.meta):
         ctx.refused.append(refusal)

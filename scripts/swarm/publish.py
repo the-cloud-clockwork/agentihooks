@@ -127,6 +127,14 @@ def check_build(root: Path) -> None:
         raise SwarmError(reason.getvalue().strip())
 
 
+def gate_python(repo: Path) -> str:
+    venv = repo.parent / ".venv" / "bin" / "python"
+    for python in (venv, Path(sys.executable)):
+        if python.is_file() and not subprocess.run([python, "-I", "-c", "import ruff"], capture_output=True).returncode:
+            return str(python)
+    raise SwarmError(f"no python with ruff for the prepush gate; install the dev extra into {venv}")
+
+
 def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, message: str, files: list[str]) -> dict:
     task = task_row(slug, agent, ledger)
     root = existing(Path(repo), task, agent)
@@ -143,7 +151,7 @@ def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, mess
             check_build(root)
             git(root, "commit", "-m", message)
         head = git(root, "rev-parse", "HEAD")
-        execute([sys.executable, "-m", "scripts.ci_prepush"], root)
+        execute([gate_python(Path(repo)), "-m", "scripts.ci_prepush"], root)
         if not ci_prepush.passed(root) or git(root, "rev-parse", "HEAD") != head:
             raise SwarmError("the committed HEAD has no passing prepush evidence")
         git(root, "push", "-u", "origin", f"HEAD:{fields['branch']}")
