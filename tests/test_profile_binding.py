@@ -1,4 +1,5 @@
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -105,8 +106,6 @@ def test_running_session_validates_the_canary_a_later_render_delivered(tmp_path,
 
 
 def test_rehomed_request_validates_against_the_execution_copy(tmp_path, monkeypatch):
-    import shutil
-
     shared = tmp_path / "engineer" / "codex"
     shared.mkdir(parents=True)
     (shared / "AGENTS.md").write_text(binding.persona("Engineer instructions.\n"))
@@ -131,21 +130,30 @@ def test_rehomed_request_validates_against_the_execution_copy(tmp_path, monkeypa
     assert binding.validate(launched["canary"])["home"] == str(copy.resolve())
 
 
-def test_rehome_refuses_an_execution_copy_with_a_different_canary(tmp_path):
+@pytest.mark.parametrize(
+    ("persona", "stale", "reason"),
+    [
+        ("Other instructions.\n", False, "execution home canary differs from the launch request"),
+        ("Engineer instructions.\n", True, "profile mismatch in rendered binding"),
+    ],
+)
+def test_rehome_refuses_an_execution_copy_with_a_different_canary(tmp_path, persona, stale, reason):
     shared = tmp_path / "shared" / "codex"
     copy = tmp_path / "execution" / "codex"
-    for home, text in ((shared, "Engineer instructions.\n"), (copy, "Other instructions.\n")):
+    for home, text in ((shared, "Engineer instructions.\n"), (copy, persona)):
         home.mkdir(parents=True)
         (home / "AGENTS.md").write_text(binding.persona(text))
         (home.parent / "codex.sources.json").write_text("[]")
         binding.write(home, "engineer", "codex")
+    if stale:
+        (copy / binding.FILE).write_text((shared / binding.FILE).read_text())
     report = tmp_path / "report.json"
     binding.request(report, "engineer", "codex", shared)
-    before = report.read_bytes()
+    launched = json.loads(report.read_text())
 
-    with pytest.raises(ValueError, match="^execution home canary differs from the launch request$"):
+    with pytest.raises(ValueError, match=f"^{reason}$"):
         binding.rehome(report, copy)
-    assert report.read_bytes() == before
+    assert json.loads(report.read_text()) == {**launched, "state": "failed", "reason": reason}
 
 
 @pytest.mark.parametrize(
