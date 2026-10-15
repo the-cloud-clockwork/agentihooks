@@ -37,7 +37,7 @@ from scripts.swarm.health import activity, checks, merge_stall, prompt_backlog, 
 from scripts.swarm.health import findings as health
 from scripts.swarm.naming import swarm_name
 from scripts.swarm.runtime import HerdrRuntime
-from scripts.swarm.store import ASSIST, AgentRecord, SwarmError
+from scripts.swarm.store import ASSIST, AgentRecord, RedisStore, SwarmError
 from scripts.swarm.tick import STARTUP_GRACE_MS, Runtime, agent_status
 from scripts.swarm_ledger import plan_shape
 from scripts.swarm_v2 import telemetry
@@ -244,7 +244,7 @@ def live_agents(agents: list[AgentRecord], runtime: Runtime) -> list[AgentRecord
     return [a for a in agents if a.runtime_backend != "local" or reports.host(a) or a.name in names]
 
 
-def status_report(store, slug, state, runtime=None):
+def status_report(store: RedisStore, slug: str, state: dict, runtime: Runtime | None = None) -> dict:
     from scripts.swarm import capacity, tick_activity
 
     config = store.config(slug)
