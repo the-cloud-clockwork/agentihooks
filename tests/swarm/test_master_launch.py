@@ -354,7 +354,7 @@ def test_an_incomplete_saved_assignment_keeps_what_it_has_and_fills_the_rest(up,
         "profile": "master",
         "harness": "codex",
         "model": "gpt-6.1-sol",
-        "effort": "medium",
+        "effort": "high",
         "account": "acct-3",
     }
 
@@ -532,6 +532,14 @@ def test_fill_keeps_a_saved_harness_and_picks_its_frontier_model():
 def test_fill_leaves_a_saved_launch_on_an_unknown_harness_unclamped():
     saved = {"harness": "copilot", "model": "gpt-x", "effort": "max"}
     assert master_launch.fill(saved, SwarmConfig("sw", "/repo", 0, 0)) == {"profile": "master", **saved}
+
+
+@pytest.mark.parametrize("bounds", [("medium", "xhigh"), ("low", "medium")])
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+@pytest.mark.parametrize("saved", ["", "low", "medium"])
+def test_fill_never_leaves_a_master_launch_below_high_whatever_the_saved_launch_or_range_says(harness, bounds, saved):
+    config = SwarmConfig("sw", "/repo", 0, 0, effort_min=bounds[0], effort_max=bounds[1])
+    assert master_launch.fill({"harness": harness, "effort": saved}, config)["effort"] == "high"
 
 
 def test_a_master_saved_on_an_unknown_harness_is_refused_cleanly(tmp_path):
