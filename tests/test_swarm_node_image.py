@@ -2,6 +2,7 @@ import hashlib
 import io
 import json
 import tarfile
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, call
@@ -138,6 +139,35 @@ def test_install_reuses_only_verified_cached_downloads(locked, tmp_path, monkeyp
     assert {p.name: p.read_bytes() for p in second.iterdir()} == {p.name: p.read_bytes() for p in first.iterdir()}
 
 
+def test_download_fetches_every_locked_tool_concurrently(locked, tmp_path, monkeypatch):
+    _, lock, payloads = locked
+    barrier = threading.Barrier(len(lock["tools"]), timeout=5)
+
+    def download(url, timeout):
+        barrier.wait()
+        return io.BytesIO(payloads[url])
+
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", download)
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    worker_image.download_tools(lock, cache)
+    assert {p.name: p.read_bytes() for p in cache.iterdir()} == {
+        tool["sha256"]: payloads[tool["url"]] for tool in lock["tools"].values()
+    }
+
+
+def test_download_fails_when_any_locked_tool_fails(locked, tmp_path, monkeypatch):
+    _, lock, payloads = locked
+    payloads[lock["tools"]["codex"]["url"]] = b"wrong binary"
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", lambda url, timeout: io.BytesIO(payloads[url]))
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    with pytest.raises(ValueError) as error:
+        worker_image.download_tools(lock, cache)
+    assert str(error.value) == "artifact checksum mismatch: codex"
+    assert lock["tools"]["codex"]["sha256"] not in {p.name for p in cache.iterdir()}
+
+
 def test_install_never_caches_a_mismatched_download(locked, tmp_path, monkeypatch):
     _, lock, payloads = locked
     codex = lock["tools"]["codex"]
@@ -212,17 +242,24 @@ def test_committed_image_inputs_pin_base_and_keep_profiles_outside_home():
     assert "DISABLE_AUTOUPDATER=1" in dockerfile
     assert "--require-hashes" in dockerfile
     assert "--require-hashes -d /downloads/pip -r /opt/swarm-node/requirements.lock" in dockerfile
+    python_stage = dockerfile.split("FROM ${BASE_IMAGE} AS python-downloads\n", 1)[1].split("\n\n", 1)[0]
+    assert python_stage.splitlines()[0] == "COPY docker/swarm-node/requirements.lock /opt/swarm-node/"
+    assert "versions.lock" not in python_stage
     assert (
         'worker_image.py download --architecture "$TARGETARCH" --cache /downloads/tools\n\nFROM ${BASE_IMAGE} AS worker\n'
-        in dockerfile
+        in dockerfile.split("FROM ${BASE_IMAGE} AS tool-downloads\n", 1)[1]
     )
-    assert 'worker_image.py install --architecture "$TARGETARCH" --cache /downloads/tools\nCOPY pyproject' in dockerfile
+    assert 'worker_image.py install --architecture "$TARGETARCH" --cache /downloads/tools \\\n' in dockerfile
     smoke = (inputs / "smoke.sh").read_text()
     assert "docker build --no-cache-filter worker --platform" in smoke
-    assert "--mount=type=bind,from=downloads,source=/downloads,target=/downloads" in dockerfile
+    assert "--mount=type=bind,from=python-downloads,source=/downloads/pip,target=/downloads/pip" in dockerfile
+    assert "--mount=type=bind,from=tool-downloads,source=/downloads/tools,target=/downloads/tools" in dockerfile
     assert "--no-index --find-links /downloads/pip --require-hashes" in dockerfile
+    assert "--cache /downloads/tools \\\n    && chmod -R a-w /opt/venv\nCOPY pyproject" in dockerfile
+    assert "&& find /opt/venv \\! -type l -perm /222 -exec chmod a-w {} + \\\n" in dockerfile
+    assert dockerfile.count("chmod -R a-w") == 2 and "a-w /opt/agentihooks/templates /opt/swarm-node \\\n" in dockerfile
     assert dockerfile.endswith('CMD ["python", "/opt/swarm-node/worker_image.py", "report"]\n')
-    assert dockerfile.count("FROM ") == 2
+    assert dockerfile.count("FROM ") == 3
 
 
 @pytest.mark.parametrize(

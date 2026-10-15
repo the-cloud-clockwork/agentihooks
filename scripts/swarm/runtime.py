@@ -131,7 +131,11 @@ def pane_target(agent):
 def _launch_records(name):
     from scripts import herdr_panes
 
-    return [r for r in herdr_panes.load(dict(os.environ)) if r.kind == "init-agent" and r.owner_session == name]
+    return [
+        r
+        for r in herdr_panes.load(dict(os.environ))
+        if r.kind == "init-agent" and naming.plain(r.owner_session) == naming.plain(name)
+    ]
 
 
 def _opened_pane(name, since_ms):
@@ -592,7 +596,7 @@ class HerdrRuntime:
                     agent,
                     picked.__dict__,
                     environ,
-                    effort_range.of(config),
+                    effort_range.bounds(config, lane),
                     preserve=preserves_effort(bool(saved), lane),
                 ),
                 *mode,
@@ -643,7 +647,7 @@ class HerdrRuntime:
             agent.harness,
             picked.__dict__,
             dict(os.environ),
-            effort_range.of(config),
+            effort_range.bounds(config, agent.lane),
             preserve=preserves_effort(bool(agent.effort), agent.lane),
         )
         argv += ["--resume", agent.conversation_id, "--", *route, *model]
@@ -741,7 +745,7 @@ class HerdrRuntime:
                     "AGENTIHOOKS_SWARM_AUTONOMY": config.autonomy,
                     "AGENTIHOOKS_SWARM_SPAWN": "1",
                     "AGENTIHOOKS_AGENT_NAME": name,
-                    effort_range.VARIABLE: ":".join(effort_range.of(config)),
+                    effort_range.VARIABLE: ":".join(effort_range.bounds(config, lane)),
                     **({"AGENTIHOOKS_COMPACT_LIMIT": str(config.compact_limit)} if config.compact_limit else {}),
                 },
             )
