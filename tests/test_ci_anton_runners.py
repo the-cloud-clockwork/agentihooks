@@ -51,6 +51,7 @@ MOVED = {
     ("swarm-node-image.yml", "image"): STANDARD,
     ("swarm-node-smoke.yml", "worker-health"): STANDARD,
     ("swarm-node-smoke.yml", "worker-image"): STANDARD,
+    ("swarm-node-smoke.yml", "worker-image-compare"): LIGHT,
     ("swarm-smoke.yml", "compose-hive"): STANDARD,
     ("swarm-smoke.yml", "hive-join"): STANDARD,
     ("swarm-smoke.yml", "hive-launch"): STANDARD,
