@@ -222,6 +222,8 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> issue URL` | Record the task's GitHub issue, where the repo has issues; without them the ledger task is the spec. |
 | `agentihooks swarm <id> pr URL` | Record the task's pull request, its head branch and that branch's repository (`branch_repo`); the task moves to `pr`. |
 | `agentihooks swarm <id> merge queue\|dequeue\|state URL` | Queue a pull request into `dev` on the merge queue at its current head, take it out of the queue, or report its state, head and queue entry as JSON. It goes through `gh api graphql`, so any `gh` with `gh api` works; queue and dequeue run only for a swarm worker, never the master, and refuse a pull request into any other base. |
+| `agentihooks swarm <id> prepare` | Resolve the claimed task worktree or create it with the worktree command. A recorded continuation branch supplies the starting revision. Returns the path and branch; repeat calls reuse the worktree. |
+| `agentihooks swarm <id> publish --message TEXT -- FILE...` | Resolve the claimed task worktree even from the primary checkout, stage only explicit repository relative file names, commit, run `python -m scripts.ci_prepush` against that committed HEAD, then push and record the branch. Unrelated tracked changes are refused before staging; unrelated untracked files are preserved. A failed stage stops publication and names the next command. Repeat the command after fixing a failure; an already committed head is graded again without an empty commit. Protected branches and tasks owned by another agent are refused. Tests run only in CI. |
 | `agentihooks swarm <id> branch` | Record the current worktree branch on the task once it is on origin, with its repository (`branch_repo`, the origin remote without credentials), so dependent tasks can start from it. |
 | `agentihooks swarm <id> review` | Start a review round on the task. The third round answers that review is closed: any finding still open gets one ruling from the other reader, then the merge proceeds. A fourth is refused with that text. |
 | `agentihooks swarm <id> done [--pr URL] [proof flags]` | Close the task with the proof its kind needs; the swarm then closes the session. |
@@ -312,6 +314,14 @@ An outage holds the affected idle and delivery decisions until recovery (see
 10. Send each new health finding to the master with the `verdict` command to judge it.
 11. Wake idle panes holding unread items, and climb the wake ladder for items nobody reads.
 12. Write the automatic snapshot when it is due.
+
+The health pass reports `merge stall` when the dev merge queue holds entries and no pull request has merged
+into dev for sixty minutes. Its evidence names the queue length, minutes since the latest dev merge and the
+most common failed job among the ten most recent merge queue workflow runs. The master receives a notice
+on detection and every hour while it persists, even after giving the finding a verdict. This signal only
+reports the stall; it imposes no enforcement and changes nothing in the queue. GitHub observations are cached
+for five minutes. A failed observation retains the previous evidence and delays further notices until a fresh
+observation succeeds. An empty queue or a new dev merge resets the notice interval.
 
 Each tick renews the controller lease for three ticks. A tick is 60 seconds unless
 `AGENTIHOOKS_CONTROLLER_TICK_SECONDS` sets another interval of at least one second. Set it only on the controller

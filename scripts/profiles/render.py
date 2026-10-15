@@ -18,9 +18,10 @@ from scripts.claude_config import claude_home, claude_json
 from scripts.profiles import binding, browser, connectors, homes, plugins, sources
 from scripts.targets._common import _atomic_write, _install_module, agents_skills_home, build_persona
 from scripts.targets.claude_target import settings_document
+from scripts.targets.codex_hook_trust import trusted_state
 from scripts.targets.codex_target import codex_home
 
-SHARED = ("projects", "sessions", "todos", "plugins", ".credentials.json")
+SHARED = ("projects", "sessions", "todos", "plugins", ".credentials.json", "keybindings.json")
 CODEX_STATE = ("auth.json", "sessions", "history.jsonl", "session_index.jsonl", "hooks.json")
 CODEX_INHERITED = ("model", "model_reasoning_effort", "service_tier", "notify", "projects")
 COPILOT_STATE = ("config.json", "settings.json", "agentihooks-hook.sh", "hooks", "session-state", "logs")
@@ -320,6 +321,13 @@ def _read_json(path: Path) -> dict | None:
         return None
 
 
+def _file_digest(path: Path) -> str:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return ""
+
+
 def home_key(name: str, overlays: Sequence[str] = ()) -> str:
     names = [name, *sorted(set(overlays))]
     if any(KEY_SEPARATOR in part for part in names):
@@ -346,6 +354,7 @@ def _claude_fresh(root: Path, stamp: dict, required: set[str]) -> bool:
     claude_json = _read_json(out / ".claude.json") or {}
     return (
         _read_json(out / STAMP) == stamp
+        and all((out / item).is_symlink() for item in SHARED)
         and not (out / "rules").exists()
         and sources.path(root.name, "claude", root.parent).is_file()
         and (out / binding.FILE).is_file()
@@ -428,6 +437,8 @@ def _codex_config(installed: dict, operator: Path, out: Path, settings: dict) ->
     source = f"{operator / 'hooks.json'}:"
     state = (installed.get("hooks") or {}).get("state") or {}
     trusted = {f"{out / 'hooks.json'}:{k.removeprefix(source)}": v for k, v in state.items() if k.startswith(source)}
+    for key, value in trusted_state(operator / "hooks.json", out / "hooks.json").items():
+        trusted[key] = {**trusted.get(key, {}), **value}
     if trusted:
         doc["hooks"] = {"state": trusted}
     return doc
@@ -457,6 +468,7 @@ def render_codex(name: str, force: bool = False, overlays: Sequence[str] = ()) -
     current = {
         "render": stamp,
         "operator": hashlib.sha256(text.encode()).hexdigest(),
+        "hooks": _file_digest(operator / "hooks.json"),
         "login": (operator / "auth.json").is_file(),
         "skills": {skill: str(path) for skill, path in {**below, **above}.items()},
     }

@@ -1,0 +1,6 @@
+{
+  "scripts/doctor/runtime.py:scripts.doctor.runtime.x__executions__mutmut_20:87040b4f529792c568b766844daebb5253ac500b9a67e5858e13c30ee54c6fa7": {
+    "reader": "Standards",
+    "reason": "Standards third round: clamping elapsed age to one second rather than zero changes only ages below one second; both format as 0.0 minutes in the sole public evidence output. Larger ages are identical."
+  }
+}

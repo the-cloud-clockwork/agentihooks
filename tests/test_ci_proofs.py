@@ -42,12 +42,55 @@ def test_proofs_dispatch_cannot_satisfy_required_tests():
         ("hooks/test_a.py", 1),
     ],
 )
-def test_a_focused_proof_is_red_unless_every_test_path_is_on_one_line_under_tests(paths, code):
+def test_a_focused_proof_is_red_unless_every_test_path_is_on_one_line_under_tests(paths, code, tmp_path):
     step = next(s for s in _workflow()["jobs"]["tests"]["steps"] if s.get("name") == "Require explicit test paths")
+    (tmp_path / "tests").mkdir()
+    for name in ("test_a.py", "test_b.py"):
+        (tmp_path / "tests" / name).touch()
     result = subprocess.run(
-        ["bash", "-e", "-c", step["run"]], env={**os.environ, "TEST_PATHS": paths}, capture_output=True
+        ["bash", "-e", "-c", step["run"]],
+        env={**os.environ, "TEST_PATHS": paths},
+        cwd=tmp_path,
+        capture_output=True,
     )
     assert result.returncode == code, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "paths", ["tests/missing.py", "tests/missing.py::test_case", "tests/existing.py tests/missing.py"]
+)
+def test_a_focused_proof_refuses_missing_paths_before_setup(paths, tmp_path):
+    steps = _workflow()["jobs"]["tests"]["steps"]
+    index = next(i for i, step in enumerate(steps) if step.get("name") == "Require explicit test paths")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/existing.py").touch()
+    result = subprocess.run(
+        ["bash", "-e", "-c", steps[index]["run"]],
+        env={**os.environ, "TEST_PATHS": paths},
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1
+    assert "does not exist" in result.stdout
+    assert index < next(i for i, step in enumerate(steps) if step.get("uses", "").startswith("actions/setup-python@"))
+
+
+@pytest.mark.parametrize(("paths", "code"), [("tests/existing.py", 0), ("tests/missing.py", 1), ("", 1)])
+def test_selected_unit_paths_are_checked_before_setup(paths, code, tmp_path):
+    jobs = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    steps = jobs["unit-selected"]["steps"]
+    index = next(i for i, step in enumerate(steps) if step.get("name") == "Require selected test paths")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/existing.py").touch()
+    result = subprocess.run(
+        ["bash", "-e", "-c", steps[index]["run"]],
+        env={**os.environ, "FILES": paths, "LEG": "1"},
+        cwd=tmp_path,
+        capture_output=True,
+    )
+    assert result.returncode == code, result.stdout + result.stderr
+    assert index < next(i for i, step in enumerate(steps) if step.get("uses", "").startswith("actions/setup-python@"))
 
 
 def test_proofs_reuse_selected_mutation_and_smoke_execution():

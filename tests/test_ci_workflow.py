@@ -41,7 +41,8 @@ def test_dev_extra_declares_test_plugin(plugin):
 
 def test_workflow_runs_whole_suite_in_parallel():
     command = _pytest_command()
-    assert command.strip().startswith("run: workers=$(") and "ci_cpu_quota) && python -c " in command
+    assert command.strip().startswith(("run: workers=$(", "run: start=$SECONDS && status=0 && workers=$("))
+    assert "ci_cpu_quota) && python -c " in command
     assert '-n "$workers"' in command
     assert "-n auto" not in command
     assert "tests/" in command
@@ -49,7 +50,7 @@ def test_workflow_runs_whole_suite_in_parallel():
 
 
 def test_workflow_worker_count_stays_within_this_container():
-    prefix = _pytest_command().strip().removeprefix("run: ").split(" && ")[0]
+    prefix = _pytest_command().strip().removeprefix("run: ").split(" && python -c ")[0]
     result = subprocess.run(
         ["bash", "-e", "-c", f'{prefix} && echo "$workers"'], cwd=_ROOT, capture_output=True, text=True, check=True
     )
@@ -191,7 +192,10 @@ def test_unit_matrix_runs_one_shard_per_split():
         )
     assert coverage_shards > plain_shards > 1
     merge = next(step for step in workflow["jobs"]["sonar"]["steps"] if step.get("name") == "Merge shard coverage")
-    assert re.search(r"combine\.sh --downloaded (\d+) ", merge["run"]).group(1) == str(coverage_shards)
+    assert 'combine.sh --downloaded "$SHARDS" ' in merge["run"]
+    assert merge["env"]["SHARDS"] == (
+        f"${{{{ needs.select.outputs.scope == 'selected' && needs.select.outputs.count || {coverage_shards} }}}}"
+    )
     assert "--splits" not in command
 
 
@@ -389,8 +393,8 @@ def _workflow() -> dict:
 def test_shards_wait_only_on_the_durations_lookup():
     jobs = _workflow()["jobs"]
     assert "already-tested" not in jobs
-    assert jobs["split"]["needs"] in (["durations", "reuse"], ["durations", "reuse", "admission"])
-    assert jobs["unit"]["needs"] in (["split", "reuse"], ["split", "reuse", "admission"])
+    assert jobs["split"]["needs"] == ["durations", "select", "reuse", "admission"]
+    assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
     assert jobs["lint"]["needs"] in (["reuse"], ["reuse", "admission"])
 
 
@@ -612,10 +616,45 @@ def test_unit_shards_upload_their_durations_for_the_refresh():
         if step["name"] == "Restore queue shard coverage":
             expected += " && matrix.python-version == '3.12'"
         assert step["if"] == expected
-    assert "if" not in upload
+    assert upload.get("if") in (None, "${{ !cancelled() && hashFiles('durations.json') != '' }}")
     assert upload["uses"].startswith("actions/upload-artifact@")
     assert upload["with"]["name"] == "durations-${{ matrix.python-version }}-${{ matrix.shard }}"
-    assert upload["with"]["path"].split() == ["durations.json", "durations.sha256"]
+    assert upload["with"]["path"].split() in (
+        ["durations.json", "durations.sha256"],
+        ["durations.json", "durations.sha256", "elapsed.json"],
+    )
+
+
+@pytest.mark.parametrize("status", [0, 3])
+def test_unit_step_records_elapsed_time_and_preserves_pytest_status(tmp_path, status):
+    import json
+
+    _, step = _unit_step_index(lambda item: item.get("name") == "Run tests")
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "__init__.py").touch()
+    (scripts / "ci_cpu_quota.py").write_text("print(1)\n")
+    (tmp_path / "pytest.py").write_text(
+        f"def main(args):\n    open('durations.json', 'w').write('{{}}')\n    return {status}\n"
+    )
+    result = subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        cwd=tmp_path,
+        env={**os.environ, "PYTEST_ADDOPTS": ""},
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == status, result.stdout + result.stderr
+    assert (tmp_path / "durations.json").is_file()
+    elapsed = json.loads((tmp_path / "elapsed.json").read_text())
+    assert isinstance(elapsed["seconds"], (int, float))
+    assert elapsed["seconds"] >= 0
+
+
+def test_unit_shards_upload_elapsed_time_after_failed_pytest():
+    _, upload = _unit_step_index(lambda step: step.get("name") == "Upload durations")
+    assert upload["if"] == "${{ !cancelled() && hashFiles('durations.json') != '' }}"
+    assert "elapsed.json" in upload["with"]["path"].split()
 
 
 def test_every_shard_records_the_hash_of_the_durations_it_splits_on():
