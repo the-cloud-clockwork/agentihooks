@@ -3,6 +3,7 @@ import io
 import json
 import tarfile
 import threading
+import urllib.error
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, call
@@ -565,3 +566,36 @@ def test_an_unlocked_package_is_refused(locked, monkeypatch, capsys):
         worker_image.main()
     assert error.value.code == 2
     assert "--package names packages the lock does not pin: curl, zsh" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("action", ["install", "download"])
+def test_image_tool_commands_recover_from_a_server_error(locked, tmp_path, monkeypatch, action):
+    path, lock, payloads = locked
+    herdr = lock["tools"]["herdr"]
+    attempts = []
+    sleeps = Mock()
+    monkeypatch.setattr("time.sleep", sleeps)
+
+    def opened(url, timeout):
+        attempts.append(url)
+        if attempts.count(url) == 1:
+            raise urllib.error.HTTPError(url, 504, "Gateway Timeout", {}, None)
+        return io.BytesIO(payloads[url])
+
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", opened)
+    install = worker_image.install_tools
+    monkeypatch.setattr(worker_image, "install_tools", lambda lock, _, cache: install(lock, tmp_path, cache))
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    argv = ["worker_image", action, "--lock", str(path), "--cache", str(cache)]
+    if action == "install":
+        argv.extend(["--tool", "herdr"])
+    monkeypatch.setattr("sys.argv", argv)
+    worker_image.main()
+    selected = {"herdr": herdr} if action == "install" else lock["tools"]
+    for name, tool in selected.items():
+        assert attempts.count(tool["url"]) == 2
+        assert (cache / tool["sha256"]).read_bytes() == payloads[tool["url"]]
+        if action == "install":
+            assert (tmp_path / name).read_bytes() == payloads[tool["url"]]
+    assert sleeps.call_args_list == [call(1)] * len(selected)
