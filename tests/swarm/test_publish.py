@@ -478,6 +478,72 @@ def test_failed_gate_never_pushes_and_can_retry_the_committed_head(publication, 
     assert git(root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
 
 
+def fake_python(path, log, ruff):
+    import sys
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    run = f'exec {sys.executable} "$@"' if ruff else "echo 'No module named ruff' >&2\nexit 1"
+    path.write_text(f'#!/bin/sh\necho "$*" >> {log}\n{run}\n')
+    path.chmod(0o755)
+    return str(path)
+
+
+@pytest.mark.parametrize("tool_has_ruff", [False, True])
+def test_the_gate_runs_with_the_workspace_venv_python(publication, monkeypatch, tmp_path, tool_has_ruff):
+    from scripts.swarm import publish
+
+    venv_log, tool_log = tmp_path / "venv.log", tmp_path / "tool.log"
+    fake_python(publication.repo.parent / ".venv" / "bin" / "python", venv_log, True)
+    monkeypatch.setattr(publish.sys, "executable", fake_python(tmp_path / "tool" / "python", tool_log, tool_has_ruff))
+    publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+    head = git(publication.root, "rev-parse", "HEAD")
+    assert git(publication.repo, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
+    assert venv_log.read_text().splitlines() == ["-I -c import ruff", "-m scripts.ci_prepush"]
+    assert not tool_log.exists()
+    assert publish.gate_python(publication.repo) == str(publication.repo.parent / ".venv" / "bin" / "python")
+
+
+def test_a_workspace_venv_without_ruff_falls_back_to_the_running_python(publication, monkeypatch, tmp_path, capfd):
+    from scripts.swarm import publish
+
+    venv_log, tool_log = tmp_path / "venv.log", tmp_path / "tool.log"
+    fake_python(publication.repo.parent / ".venv" / "bin" / "python", venv_log, False)
+    monkeypatch.setattr(publish.sys, "executable", fake_python(tmp_path / "tool" / "python", tool_log, True))
+    capfd.readouterr()
+    publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+    head = git(publication.root, "rev-parse", "HEAD")
+    assert git(publication.repo, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
+    assert venv_log.read_text().splitlines() == ["-I -c import ruff"]
+    assert tool_log.read_text().splitlines() == ["-I -c import ruff", "-m scripts.ci_prepush"]
+    assert capfd.readouterr() == ("", "")
+
+
+def test_no_python_with_ruff_refuses_before_the_push(publication, monkeypatch, tmp_path):
+    import re
+
+    from scripts.swarm import publish
+    from scripts.swarm.store import SwarmError
+
+    venv = publication.repo.parent / ".venv" / "bin" / "python"
+    fake_python(venv, tmp_path / "venv.log", False)
+    monkeypatch.setattr(
+        publish.sys, "executable", fake_python(tmp_path / "tool" / "python", tmp_path / "tool.log", False)
+    )
+    expected = (
+        f"no python with ruff for the prepush gate; install the dev extra into {venv}; "
+        "Next: agentihooks swarm swarm publish --message 'Change chosen' -- chosen.txt"
+    )
+    with pytest.raises(SwarmError, match=f"^{re.escape(expected)}$"):
+        publish.publish(
+            "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+        )
+    assert git(publication.repo, "ls-remote", "origin", "refs/heads/engineer-test") == ""
+
+
 @pytest.mark.parametrize("files", [["."], ["../chosen.txt"], ["/chosen.txt"], ["scripts"]])
 def test_publication_rejects_broad_or_outside_file_selections(publication, files):
     from scripts.swarm import publish

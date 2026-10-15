@@ -408,7 +408,8 @@ def test_sonar_downloads_this_runs_coverage_after_the_shards():
     assert download["with"] == {"pattern": "coverage-3.12-*", "path": ".coverage-shards"}
     assert steps.index(download) < steps.index(merge)
     assert merge["env"] == {
-        "SHARDS": "${{ needs.select.outputs.scope == 'selected' && needs.select.outputs.count || 12 }}"
+        "SHARDS": "${{ needs.select.outputs.scope == 'selected' && needs.select.outputs.count || 12 }}",
+        "SCOPE": "${{ needs.select.outputs.scope }}",
     }
     assert 'bash .github/coverage/combine.sh --downloaded "$SHARDS" ||' in merge["run"]
 
