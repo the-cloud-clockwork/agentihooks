@@ -187,11 +187,11 @@ def test_a_queue_lookup_error_is_retried_without_cancelling_a_live_group(tmp_pat
 
 def test_ten_queue_lookup_errors_do_not_claim_the_group_was_deleted(tmp_path):
     result, output, sleeps, calls = _watch(tmp_path, [], heads=[None] * 10)
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 1, result.stderr
     assert output == ""
     assert len(sleeps) == 9
     assert calls == []
-    assert "Ten reads" in result.stdout
+    assert "::error::Ten reads" in result.stdout
 
 
 def test_the_watch_step_polls_this_attempt_until_a_graded_job_fails(tmp_path):

@@ -1675,8 +1675,8 @@ jobs:
               fi
             else
               if (( ++queue_misses == 10 )); then
-                echo "::warning::Ten reads of this queue reference failed in a row; the entry waits for Gate Required."
-                exit 0
+                echo "::error::Ten reads of this queue reference failed in a row; queue liveness is unknown."
+                exit 1
               fi
               sleep 15
               continue
