@@ -82,6 +82,26 @@ def publication(repository, tmp_path, monkeypatch):
     return SimpleNamespace(root=worktree, task=task, agent=agent, ledger=ledger, repo=repository, updates=updates)
 
 
+@pytest.mark.parametrize("failure", ["status", "spawn"])
+def test_a_failed_dirty_lookup_keeps_the_unpassed_push_blocked(repository, monkeypatch, failure):
+    from hooks.context import prepush_guard
+
+    if failure == "status":
+        git(repository, "config", "status.relativePaths", "invalid")
+    else:
+        native = subprocess.run
+
+        def broken_status(argv, **kwargs):
+            if "status" in argv:
+                raise OSError("status process could not start")
+            return native(argv, **kwargs)
+
+        monkeypatch.setattr(prepush_guard.subprocess, "run", broken_status)
+    with pytest.raises(BlockAction) as refused:
+        check_prepush({"tool_input": {"command": "git push"}, "cwd": str(repository)})
+    assert f"Next: cd {repository} && python -m scripts.ci_prepush" in str(refused.value)
+
+
 def test_dirty_push_names_selection_before_the_committed_head_gate(repository):
     (repository / "chosen.txt").write_text("after")
     with pytest.raises(BlockAction) as blocked:
