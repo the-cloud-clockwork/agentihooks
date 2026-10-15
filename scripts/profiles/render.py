@@ -452,7 +452,7 @@ def _codex_skills(bundle: Path | None, dirs: list[tuple[str, Path]], stamp: dict
     return below, plugins.layer_skills(_roots(bundle, dirs))
 
 
-def render_codex(name: str, force: bool = False, overlays: Sequence[str] = ()) -> Path | None:
+def render_codex(name: str, force: bool = False, overlays: Sequence[str] = (), isolate: bool = False) -> Path | None:
     import tomlkit
 
     from scripts.profiles import codex_master
@@ -472,6 +472,7 @@ def render_codex(name: str, force: bool = False, overlays: Sequence[str] = ()) -
         "operator": hashlib.sha256(text.encode()).hexdigest(),
         "hooks": _file_digest(operator / "hooks.json"),
         "login": (operator / "auth.json").is_file(),
+        "isolate": isolate,
         "skills": {skill: str(path) for skill, path in {**below, **above}.items()},
     }
     root = profile_dir(name, overlays)
@@ -502,10 +503,14 @@ def render_codex(name: str, force: bool = False, overlays: Sequence[str] = ()) -
     _relink(out / "skills", {**below, **{p.name: p for p in sorted((claude / "skills").iterdir())}, **above})
     _link_commands(out / "skills", claude / "commands")
     for item in CODEX_STATE:
+        if isolate and item not in ("auth.json", "hooks.json"):
+            continue
         if item != "auth.json" or current["login"]:
             _link(out / item, operator / item)
     _link(manifest, sources.path(root.name, "claude", root.parent))
     doc = _codex_config(installed, operator, out, _settings("codex", bundle, dirs))
+    if isolate:
+        doc["sqlite_home"] = str(out)
     doc["project_doc_max_bytes"] = max(65536, int(len((claude / "CLAUDE.md").read_bytes()) * 1.25))
     servers, mounts = connectors.codex(_mcp_servers("codex", bundle, dirs))
     connectors.write(connectors.path(root.name, "codex", root.parent), mounts, name, "codex")
@@ -556,13 +561,20 @@ def render_copilot(name: str, force: bool = False, overlays: Sequence[str] = ())
 
 
 def render(
-    target: str, name: str, force: bool = False, overlays: Sequence[str] = (), bundle_revision: str = ""
+    target: str,
+    name: str,
+    force: bool = False,
+    overlays: Sequence[str] = (),
+    bundle_revision: str = "",
+    isolate: bool = False,
 ) -> Path | None:
     renderers = {"claude": render_claude, "codex": render_codex, "copilot": render_copilot}
     if target not in renderers:
         raise ValueError(f"{target} per-run profiles are not supported")
     if bundle_revision:
         _pin(_bundle(), bundle_revision)
+    if target == "codex":
+        return render_codex(name, force=force, overlays=overlays, isolate=isolate)
     return renderers[target](name, force=force, overlays=overlays)
 
 
