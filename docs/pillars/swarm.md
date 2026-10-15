@@ -300,15 +300,15 @@ agentihooks ledger --slug <id> --as <agent> \
   task split <task> 1-10 11-20
 ```
 
-This stores the ranges in `split`. Each half still follows the normal review, checks and merge workflow. Record its pull request on the same task with:
+This stores the ranges in `split`. Each half still follows the normal review, checks and merge workflow. Record the first half's pull request on the same task with:
 
 ```bash
-agentihooks swarm <id> pr <pull-request-url>
+agentihooks swarm <id> pr <first-pull-request-url> --half 1
 ```
 
 The task's `pr_url` names the active pull request; `split_pulls` retains the pull requests for its halves. At a worker's next Stop check, when the active pull request is merged, belongs to `split_pulls` and fewer pull requests are recorded than declared halves, the stop guard clears `pr_url`. It moves a task still in `pr` back to `claimed`, preserving both `split` and `split_pulls`. This update is guarded on the task still being in `pr`.
 
-Continue the remaining half and record its pull request normally. Clearing the old link does not complete the task or permit an idle stop: with no active pull request, the worker must continue work or declare a valid wait. For example, while waiting for an actual dependency:
+Continue the remaining half and record its pull request with `--half 2`. Half numbers start at 1 and must be recorded in order; a new pull request for a split task requires `--half`. Clearing the old link does not complete the task or permit an idle stop: with no active pull request, the worker must continue work or declare a valid wait. For example, while waiting for an actual dependency:
 
 ```bash
 agentihooks swarm <id> wait --on task <dependency-task>
