@@ -249,7 +249,7 @@ def test_committed_image_inputs_pin_base_and_keep_profiles_outside_home():
         'worker_image.py download --architecture "$TARGETARCH" --cache /downloads/tools\n\nFROM ${BASE_IMAGE} AS worker\n'
         in dockerfile.split("FROM ${BASE_IMAGE} AS tool-downloads\n", 1)[1]
     )
-    assert 'worker_image.py install --architecture "$TARGETARCH" --cache /downloads/tools\nCOPY pyproject' in dockerfile
+    assert 'worker_image.py install --architecture "$TARGETARCH" --cache /downloads/tools \\\n' in dockerfile
     smoke = (inputs / "smoke.sh").read_text()
     assert "docker build --no-cache-filter worker --platform" in smoke
     assert "--mount=type=bind,from=python-downloads,source=/downloads/pip,target=/downloads/pip" in dockerfile
