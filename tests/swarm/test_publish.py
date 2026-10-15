@@ -276,7 +276,7 @@ def test_a_successor_uses_the_recorded_worktree_among_other_checkouts(publicatio
 
 
 @pytest.mark.parametrize("branch", [None, "", "XXXX"])
-def test_a_detached_checkout_never_becomes_the_unrecorded_task_worktree(publication, tmp_path, branch):
+def test_a_detached_checkout_never_becomes_the_unrecorded_task_worktree(publication, tmp_path, capfd, branch):
     from scripts.swarm import publish
 
     root = publication.root
@@ -290,6 +290,7 @@ def test_a_detached_checkout_never_becomes_the_unrecorded_task_worktree(publicat
     )
     assert result["worktree"] == str(root)
     assert result["branch"] == publication.task["branch"] == "engineer-test"
+    assert "fatal" not in capfd.readouterr().err
 
 
 def test_multiple_unrecorded_task_worktrees_refuse_an_ambiguous_publish(publication, tmp_path):
