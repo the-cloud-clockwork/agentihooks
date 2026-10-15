@@ -21,6 +21,17 @@ The `agentihooks` CLI is installed globally via `uv tool install --editable .` a
 
 The single entry point for installing agentihooks. Handles global setup and bundle linking.
 
+Plain `agentihooks init` installs Claude and Codex. A previous Copilot install
+does not add it to this default. Use `--target copilot` to install Copilot alone,
+or `--with-copilot` to include it with Claude and Codex.
+
+Default output shows the linked bundle, installed profile, resolved profile
+chain and overlays, then each harness home and installed MCP server, skill and
+plugin counts. Stored swarm role profiles are never recalled for an operator
+home; Codex borrows the operator profile from Claude instead. Actionable
+warnings and errors remain visible. Use `--verbose` for installation details,
+kept MCP notices and launch hints.
+
 ```bash
 agentihooks init [--bundle <path>] [--profile <name>]
 ```
@@ -53,6 +64,9 @@ downgrade cannot leave a process serving a port nothing points at. See
 | Flag | Description |
 |------|-------------|
 | `--bundle <path>` | Path to bundle directory. First-time: links the bundle and runs global install. |
+| `--target claude\|codex\|copilot` | Install only the selected harness. |
+| `--with-copilot` | Include Copilot alongside the default harnesses. |
+| `--verbose`, `-v` | Show all installer output, including linked skills and configuration details. |
 | `--profile <name>` | Profile to install. Comma-separated for chaining: `--profile coding,anton` (default: `default`, env: `AGENTIHOOKS_PROFILE`) |
 | `--force` | Clean install — resets install state (`state.json`, sync hashes, session caches, PID files, `prod_bypass/`, `controls_flags/`, `voice_flags/`, `force_refresh/`) and re-symlinks `~/.claude/` assets. **Preserves** broadcasts, enforcements, brain data, logs, quota accounts, `.env`, `.venv`. |
 
