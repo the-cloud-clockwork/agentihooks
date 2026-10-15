@@ -71,6 +71,7 @@ def checkout_fields(root: Path) -> dict:
 
 def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> dict:
     task = task_row(slug, agent, ledger)
+    repo = (task.get("repositories") or [repo])[0]
     root = existing(Path(repo), task, agent)
     if root is None:
         command = ["bash", str(stack.WT_SCRIPT), "new", "--repo", repo]
@@ -137,6 +138,7 @@ def gate_python(repo: Path) -> str:
 
 def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, message: str, files: list[str]) -> dict:
     task = task_row(slug, agent, ledger)
+    repo = (task.get("repositories") or [repo])[0]
     root = existing(Path(repo), task, agent)
     if root is None:
         raise SwarmError(f"task worktree missing; Next: agentihooks swarm {shlex.quote(slug)} prepare")
