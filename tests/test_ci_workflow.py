@@ -429,14 +429,22 @@ def _collected_suite() -> tuple[list[str], str]:
     return [line for line in result.stdout.splitlines() if line.startswith("tests/") and "::" in line], result.stdout
 
 
-def test_stored_durations_cover_the_collected_suite():
-    collected, output = _collected_suite()
+def _check_stored_durations(ran: list[str] | None = None):
+    partial = ran is not None and not (_ROOT / "collected.json").exists()
+    collected, output = (ran, "\n".join(ran)) if partial else _collected_suite()
     assert collected, output
     stored = json.loads((_ROOT / ".test_durations").read_text())
     missing = [nodeid for nodeid in collected if re.sub(r"@[^\[\]]*$", "", nodeid) not in stored]
     assert len(missing) * 10 <= len(collected), (
         f"{len(missing)} of {len(collected)} tests have no stored duration; "
         "refresh them with: python -m tests.refresh_durations"
+    )
+
+
+# An unsharded run without the split job's suite, such as a selected leg, checks only the tests it collected.
+def test_stored_durations_cover_the_collected_suite(request):
+    _check_stored_durations(
+        None if request.config.getoption("shard") else [item.nodeid for item in request.session.items]
     )
 
 
@@ -459,10 +467,10 @@ def test_stored_durations_allow_new_tests_concentrated_in_one_shard(tmp_path, mo
     monkeypatch.setenv("PYTEST_ADDOPTS", "--shard 1/4")
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
     if missing <= 10:
-        test_stored_durations_cover_the_collected_suite()
+        _check_stored_durations()
     else:
         with pytest.raises(AssertionError, match=f"{missing} of 100 tests"):
-            test_stored_durations_cover_the_collected_suite()
+            _check_stored_durations()
 
 
 @pytest.mark.parametrize("missing", [10, 11])
@@ -472,10 +480,58 @@ def test_stored_durations_read_the_split_jobs_collected_suite(tmp_path, monkeypa
     (tmp_path / "collected.json").write_text(json.dumps(nodeids))
     monkeypatch.setattr(sys.modules[__name__], "_ROOT", tmp_path)
     if missing <= 10:
-        test_stored_durations_cover_the_collected_suite()
+        _check_stored_durations()
     else:
         with pytest.raises(AssertionError, match=f"{missing} of 100 tests"):
-            test_stored_durations_cover_the_collected_suite()
+            _check_stored_durations()
+
+
+@pytest.mark.parametrize("missing", [0, 1, 2, 3, 10])
+def test_stored_durations_judge_only_the_tests_a_selected_run_collected(tmp_path, monkeypatch, missing):
+    ran = [f"tests/test_probe.py::test_{i}" for i in range(10)]
+    (tmp_path / ".test_durations").write_text(json.dumps(dict.fromkeys(ran[missing:], 0.1)))
+    monkeypatch.setattr(sys.modules[__name__], "_ROOT", tmp_path)
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: pytest.fail("a selected run collected the suite"))
+    if missing <= 1:
+        _check_stored_durations(ran)
+    else:
+        with pytest.raises(AssertionError, match=f"{missing} of 10 tests"):
+            _check_stored_durations(ran)
+
+
+def test_a_selected_run_strips_the_xdist_group_suffix(tmp_path, monkeypatch):
+    (tmp_path / ".test_durations").write_text(json.dumps({"tests/test_probe.py::test_0": 0.1}))
+    monkeypatch.setattr(sys.modules[__name__], "_ROOT", tmp_path)
+    _check_stored_durations(["tests/test_probe.py::test_0@ledger"])
+
+
+@pytest.mark.parametrize("missing", [10, 11])
+def test_a_selected_run_with_the_split_suite_keeps_the_full_check(tmp_path, monkeypatch, missing):
+    nodeids = [f"tests/test_probe.py::test_{i}" for i in range(100)]
+    (tmp_path / ".test_durations").write_text(json.dumps(dict.fromkeys(nodeids[: 100 - missing], 0.1)))
+    (tmp_path / "collected.json").write_text(json.dumps(nodeids))
+    monkeypatch.setattr(sys.modules[__name__], "_ROOT", tmp_path)
+    if missing <= 10:
+        _check_stored_durations(nodeids[:1])
+    else:
+        with pytest.raises(AssertionError, match=f"{missing} of 100 tests"):
+            _check_stored_durations(nodeids[:1])
+
+
+def test_only_an_unsharded_session_hands_over_its_own_tests(monkeypatch):
+    seen = []
+    monkeypatch.setattr(sys.modules[__name__], "_check_stored_durations", seen.append)
+
+    class Session:
+        items = [type("Item", (), {"nodeid": "tests/test_probe.py::test_0"})()]
+
+    def request(shard):
+        config = type("Config", (), {"getoption": staticmethod(lambda name: shard)})()
+        return type("Request", (), {"config": config, "session": Session})()
+
+    test_stored_durations_cover_the_collected_suite(request("1/4"))
+    test_stored_durations_cover_the_collected_suite(request(None))
+    assert seen == [None, ["tests/test_probe.py::test_0"]]
 
 
 def test_dev_push_refreshes_stored_durations_unless_the_run_was_cancelled():
