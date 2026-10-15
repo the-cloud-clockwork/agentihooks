@@ -234,6 +234,10 @@ def test_every_standard_test_job_sends_merge_group_runs_to_the_queue_pool():
     )
     assert standard
     assert {name: jobs[name]["runs-on"] for name in standard} == {
-        name: routed("anton-oss", policy) if name == "unit-selected" else queue_routed(policy=policy)
+        name: (routed("anton-oss", policy) if name == "unit-selected" else queue_routed(policy=policy)).replace(
+            f"github.triggering_actor == '{policy['queue_actor']}'",
+            f"(github.triggering_actor == '{policy['queue_actor']}' || "
+            f"contains(fromJSON('{json.dumps(policy['actors'], separators=(',', ':'))}'), github.triggering_actor))",
+        )
         for name in standard
     }
