@@ -315,7 +315,9 @@ def test_the_warning_names_quota_left_and_reset_and_a_new_reset_rearms_it(window
     left = 100 - max(used.values()) if window == "week" else 4
     assert len(texts) == 2
     for text, reset in zip(texts, (first, second), strict=True):
-        assert f"{harness} account spent has used {100 - left}% of its {window} window, {left}% left; it resets " in text
+        assert (
+            f"{harness} account spent has used {100 - left}% of its {window} window, {left}% left; it resets " in text
+        )
         assert datetime.fromtimestamp(reset).astimezone().strftime("%a %H:%M %Z") in text
 
 
