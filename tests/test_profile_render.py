@@ -346,6 +346,17 @@ def test_claude_render_enables_the_role_defaults(world, role, plugins):
     assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == dict.fromkeys(plugins, True)
 
 
+def test_role_home_reads_the_package_roles_folder_patched_after_import(tmp_path, monkeypatch):
+    from hooks.context import profile_chain
+    from scripts.profiles import plugins
+
+    (tmp_path / "solo").mkdir()
+    monkeypatch.setattr(profile_chain, "PACKAGE_ROLES", tmp_path)
+
+    assert plugins.role_home(["package:solo"]) is True
+    assert plugins.role_home(["engineer"]) is False
+
+
 @pytest.mark.parametrize(
     ("layer", "plugins"),
     [
