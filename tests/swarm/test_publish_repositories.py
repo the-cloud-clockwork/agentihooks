@@ -130,7 +130,18 @@ def test_publish_selects_the_current_repository_and_retains_both_branches(reposi
     assert publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)["worktrees"] == fields["worktrees"]
 
 
-@pytest.mark.parametrize("source, succeeds", [("value = 1\n", True), ("value =\n", False)])
+@pytest.mark.parametrize(
+    "source, succeeds",
+    [
+        ("value = 1\n", True),
+        ("value =\n", False),
+        ("import os\n", False),
+        ("value=1\n", False),
+        ("def chosen():\n" + "    print(1)\n" * 301, False),
+        ("print(1)\n" * 3001, False),
+        ("def chosen(a, b, c, d, e, f, g, h):\n    return a, b, c, d, e, f, g, h\n", False),
+    ],
+)
 def test_bundle_without_a_gate_uses_the_named_touched_file_fallback(repositories, monkeypatch, source, succeeds):
     from pathlib import Path
 
