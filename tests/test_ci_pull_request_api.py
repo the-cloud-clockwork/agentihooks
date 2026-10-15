@@ -18,6 +18,7 @@ LOCAL_ONLY = {
     ROOT / "scripts/ci_budget/jobs.py": {"read_page"},
     ROOT / "tests/refresh_durations.py": {"_gh", "ci_run_ids", "ci_download"},
 }
+METADATA_ONLY = {ROOT / "scripts/ci_reuse.py": {"paged_reuse_job"}}
 TOKEN = re.compile(
     r"github\s*(\.\s*token|\[\s*['\"]token['\"]\s*\])"
     r"|secrets\s*(\.|\[\s*['\"])\s*(github|gh)(_\w*|\w*(token|pat)(?![a-z]))"
@@ -124,8 +125,9 @@ def _api_calls(runs) -> dict[Path, int]:
 
 def _reached_source(path: Path) -> str:
     lines = path.read_text().splitlines()
-    for node in ast.parse("\n".join(lines)).body if path in LOCAL_ONLY else []:
-        if isinstance(node, ast.FunctionDef) and node.name in LOCAL_ONLY[path]:
+    exemptions = LOCAL_ONLY.get(path, set()) | METADATA_ONLY.get(path, set())
+    for node in ast.parse("\n".join(lines)).body if exemptions else []:
+        if isinstance(node, ast.FunctionDef) and node.name in exemptions:
             lines[node.lineno - 1 : node.end_lineno] = [""] * (node.end_lineno - node.lineno + 1)
     return "\n".join(lines)
 
@@ -208,6 +210,20 @@ def test_each_local_only_exemption_names_a_function_that_calls_the_api():
         assert all(API_CALL.search(ast.get_source_segment(source, functions[name])) for name in names)
 
 
+def test_the_reuse_factory_exemption_contains_only_command_replacements():
+    for path, names in METADATA_ONLY.items():
+        source = path.read_text()
+        functions = {node.name: node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef)}
+        for name in names:
+            calls = [
+                node
+                for node in ast.walk(functions[name])
+                if isinstance(node, ast.Call) and API_CALL.search(ast.get_source_segment(source, node))
+            ]
+            assert calls
+            assert all(isinstance(node.func, ast.Attribute) and node.func.attr == "replace" for node in calls)
+
+
 def test_the_budget_reader_runs_only_on_the_app_token():
     reader = ROOT / "scripts/ci_budget/jobs.py"
     steps = [step for _, step, here in _all_steps() if reader in _called(step.get("run", ""), here)]
@@ -252,10 +268,11 @@ def test_a_script_outside_the_caller_is_not_read(tmp_path):
     assert list(_called('bash "$GITHUB_ACTION_PATH/../outer.sh"', tmp_path / "action")) == []
 
 
-def test_an_api_call_outside_the_exempt_functions_is_counted(tmp_path, monkeypatch):
+@pytest.mark.parametrize("exemptions", [LOCAL_ONLY, METADATA_ONLY])
+def test_an_api_call_outside_the_exempt_functions_is_counted(tmp_path, monkeypatch, exemptions):
     script = tmp_path / "durations.py"
     script.write_text('def fetch():\n    return gh(["api"])\n\n\ndef merge():\n    return 1\n')
-    monkeypatch.setitem(LOCAL_ONLY, script.resolve(), {"fetch"})
+    monkeypatch.setitem(exemptions, script.resolve(), {"fetch"})
     run = [('bash "$GITHUB_ACTION_PATH/durations.py"', tmp_path)]
     assert _api_calls(run) == {script.resolve(): 0}
     script.write_text(script.read_text().replace("return 1", 'return urlopen("https://api.github.com/x")'))

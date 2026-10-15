@@ -106,6 +106,16 @@ def duration_provenance_steps() -> list[dict]:
     return yaml.safe_load(Path(__file__).with_name("ci_duration_provenance.yml").read_text())
 
 
+def paged_reuse_job() -> dict:
+    job = reuse_job()
+    [fetch] = [step for step in job["steps"] if step.get("name") == "Fetch the evidence of recent passed runs"]
+    fetch["run"] = fetch["run"].replace(
+        "gh api --paginate \"$actions/runs/$1/attempts/$2/jobs?per_page=100\" --jq '.jobs[]'",
+        'python3 -m scripts.ci_budget.jobs "$actions/runs/$1/attempts/$2/jobs" --page-size 5',
+    )
+    return job
+
+
 def _git(*args):
     return subprocess.check_output(["git", *args], text=True).strip()
 

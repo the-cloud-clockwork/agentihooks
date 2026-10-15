@@ -46,9 +46,9 @@ agentihooks settings-profile admin          # swap permissions without touching 
 | Guardrail | What it does |
 |-----------|-------------|
 | **Secrets — two-tier** | Hard-block on Write/Edit/Bash-to-file containing secrets; inline Bash args scan + log + note only (operator-managed transcript) |
-| **Branch + PR guard** | Default-deny branch creation and `gh pr create`; unlocked per-turn (branch) or per-session (PR) by operator signal phrases |
-| **Prod lockdown** | Default-deny `gh pr merge main`, `release.yml`, `:latest`/`:prod`/`:stable` image tags; session-scoped unlock via release/hotfix signals |
-| **Controls toggle (bypass mode)** | Operator phrase `disable controls` flips a session-wide bypass that lifts branch/PR/release-merge/hotfix/non-main-force-push gates at once; subagents inherit; HARD FLOOR (push-to-main, commit-on-main, secrets-in-files) stays enforced; restored by `enable controls` or SessionEnd |
+| **Branch + PR guard** | Branch creation requires an operator signal; pull requests into `dev` are open; agents cannot create promotion pull requests into `main`/`master`/`v1` |
+| **Prod lockdown** | CI alone creates releases and merges protected promotion pull requests; `release dance` authorizes only PyPI publication; production image operations retain their hotfix gate |
+| **Controls toggle (bypass mode)** | Operator phrase `disable controls` lifts branch, non-protected PR, hotfix and non-main force-push gates; subagents inherit; protected promotion, publication authorization and HARD FLOOR remain enforced; restored by `enable controls` or SessionEnd |
 | **Retry breaker** | Soft directive at N=5 (launch error-researcher agents) → hard block at N=10 on repeated identical failures |
 | **Dependency banner** | Visible banner on every pip/npm/cargo/uv/poetry/apt/brew install — supply chain audit surface |
 | **Version guard** | Blocks AI from editing version fields in manifests |
