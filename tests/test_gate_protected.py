@@ -566,15 +566,16 @@ def test_a_head_altering_the_queue_canonical_aggregation_is_red(change, selected
     ]
 
 
+@pytest.mark.parametrize("promotion", [False, True])
 @pytest.mark.parametrize("weakened", [False, True])
-def test_the_promotion_gate_form_is_an_allowed_transition(weakened):
+def test_the_promotion_gate_form_is_an_allowed_transition(weakened, promotion):
     from scripts import ci_reuse
 
     base = _workflow()
     base["jobs"]["gate-required"] = base["jobs"].pop("gate")
-    base["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(queue_tier=True)
+    base["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps()
     head = copy.deepcopy(base)
-    head["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(queue_tier=True, promotion=True)
+    head["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(queue_tier=True, promotion=promotion)
     if weakened:
         head["jobs"]["gate-required"]["steps"][0]["run"] += "true\n"
     problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)

@@ -93,7 +93,7 @@ def gate_steps(
     if selected or queue_tier:
         run = run.replace(*SELECTED_SCOPE).replace(*SELECTED_SKIPS)
     if promotion:
-        run = PROMOTION_REUSE[0].sub(PROMOTION_REUSE[1], run, count=1).replace(*PROMOTION_SKIPS)
+        run = PROMOTION_REUSE[0].sub(PROMOTION_REUSE[1], run).replace(*PROMOTION_SKIPS)
     if queue_tier:
         run = QUEUE_TIER + run
     return [
