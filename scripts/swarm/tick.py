@@ -67,7 +67,7 @@ from scripts.swarm.pane import PaneObservation
 from scripts.swarm.profile_choice import ProfileUnresolved
 from scripts.swarm.ready import awaiting as awaiting_merge
 from scripts.swarm.store import MASTER, PREFIX, AgentRecord, SwarmConfig, SwarmError
-from scripts.swarm_ledger import ledger_rank, ledger_workspace
+from scripts.swarm_ledger import ledger_rank, ledger_workspace, task_dependencies
 from scripts.swarm_ledger.repository import hierarchy
 from scripts.swarm_v2 import master_scale
 from scripts.swarm_v2 import masters as master_seats
@@ -721,15 +721,11 @@ def _launch_order(slug, store, tasks, dispatched=None):
 
 
 def _unblocked(task, rows):
-    return not _parked(task, rows) and all(_stackable(rows.get(dep, {})) for dep in task.get("depends_on") or [])
+    return task_dependencies.ready(task, rows)
 
 
 def _parked(task, rows):
     return any(rows.get(dep, {}).get("state") != "done" for dep in task.get("parked_on") or [])
-
-
-def _stackable(dep):
-    return dep.get("state") == "done" or (dep.get("state") in ACTIVE and bool(dep.get("branch")))
 
 
 def _stack_base(task, rows, repo):

@@ -1,7 +1,9 @@
 def ready(task: dict, rows: dict) -> bool:
-    if any(rows.get(dep, {}).get("state") != "done" for dep in task.get("parked_on") or []):
+    dependencies = task.get("depends_on") or []
+    finish = (task.get("parked_on") or []) + (dependencies if task.get("pr_url") else [])
+    if any(rows.get(dep, {}).get("state") != "done" for dep in finish):
         return False
-    return all(stackable(rows.get(dep, {})) for dep in task.get("depends_on") or [])
+    return all(stackable(rows.get(dep, {})) for dep in dependencies)
 
 
 def stackable(task: dict) -> bool:
