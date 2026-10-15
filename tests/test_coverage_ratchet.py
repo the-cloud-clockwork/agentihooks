@@ -496,6 +496,7 @@ def test_the_report_lists_every_missed_line_and_every_lost_line(tmp_path):
 
 @pytest.mark.parametrize("snapshots", [0, 1, 2, 3])
 def test_command_reports_unconfirmed_history_counts(tmp_path, monkeypatch, snapshots):
+    monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
     sources = {"hooks/a.py": SOURCE}
     subprocess.run(["git", "-C", str(tmp_path), "init", "-q"], check=True, capture_output=True)
     _repo(tmp_path, sources)
@@ -533,6 +534,7 @@ def test_command_reports_unconfirmed_history_counts(tmp_path, monkeypatch, snaps
 
 @pytest.mark.parametrize("change", ["unchanged", "deleted", "removed", "added", "unrelated", "renamed"])
 def test_command_keeps_changed_importing_tests_red(tmp_path, monkeypatch, change):
+    monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
     test = "tests/test_a.py"
     imports = "import hooks.a\nassert True\n"
     base_test = "assert True\n" if change in {"added", "unrelated"} else imports
