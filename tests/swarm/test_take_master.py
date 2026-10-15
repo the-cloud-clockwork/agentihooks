@@ -50,6 +50,16 @@ def test_take_master_seats_this_session_and_names_it(taker, capsys):
     assert rt.masters == []
 
 
+def test_take_master_writes_a_durable_seat_record_for_each_live_session(taker):
+    from hooks.context import broadcast, master_coding
+
+    broadcast.register_session("session-a", 4242, "/repo", "codex")
+    assert run("sw", "take-master") == 0
+    seat = json.loads(master_coding.seat_path("session-a").read_text())
+    assert seat == {"slug": "sw", "name": "master@a1b2c3-0001"}
+    assert master_coding.is_master("session-a")
+
+
 def test_take_master_records_the_model_and_effort_the_session_launched_with(taker, monkeypatch):
     store, _, _, _ = taker
     argv = ("codex", "-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="high"')

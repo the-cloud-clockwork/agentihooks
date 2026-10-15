@@ -1832,16 +1832,28 @@ def test_codex_render_leaves_an_old_plain_sources_file_of_an_earlier_layout(worl
     assert old.read_text() == '{"old": true}\n'
 
 
-@pytest.mark.parametrize("target", ["claude", "codex"])
-def test_render_leaves_global_install_untouched(world, target):
+@pytest.mark.parametrize("target", ["claude", "codex", "copilot"])
+def test_render_leaves_global_install_untouched(world, copilot_gateway, monkeypatch, target):
     from scripts.profiles import render
 
+    install = world["install"]
+    state = install._load_state()
+    state["targets"] = {
+        "global": {
+            t: {"profile": "operator", "settings_profile": "operator-settings"} for t in ("claude", "codex", "copilot")
+        }
+    }
+    install._save_state(state)
+    record = install.STATE_JSON.read_bytes()
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "proof-swarm")
+    monkeypatch.setenv("AGENTIHOOKS_PROFILE", "rb-role")
     home = world["home"]
     skip = home / ".agentihooks" / "profiles"
     before = _tree_hashes(home, skip)
 
     render.render(target, "rb-role")
 
+    assert install.STATE_JSON.read_bytes() == record
     assert _tree_hashes(home, skip) == before
 
 
