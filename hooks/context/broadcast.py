@@ -1166,7 +1166,9 @@ def check_and_inject_broadcasts(session_id: str) -> None:
                 continue
 
             banner = format_broadcast_banner(msg)
-            inject_banner("BROADCAST", banner)
+            inject_banner(
+                "BROADCAST", banner, kind="alert" if msg.get("severity") in ("critical", "nuclear") else "brain"
+            )
             injection_trace.record_broadcast(session_id, msg)
             emit_span("brain.delivery", span_attrs)
             _record_delivery(session_id, msg, now_ts)

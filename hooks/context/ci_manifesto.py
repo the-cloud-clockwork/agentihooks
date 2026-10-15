@@ -326,14 +326,12 @@ def inject_on_session_start() -> None:
             log("ci_manifesto: empty payload (file missing?)", {"paths": [str(path) for path in _manifesto_paths()]})
             return
 
-        from hooks.targets import buffers_single_envelope
+        from hooks.targets import buffers_single_envelope, emitter
 
-        if buffers_single_envelope():
+        if buffers_single_envelope() or emitter.forced():
             # Codex and Copilot parse hook stdout as ONE JSON object — queue
             # for the single end-of-process flush instead of printing our own.
-            from hooks.targets import emitter
-
-            emitter.buffer_context(payload)
+            emitter.buffer_context(payload, "enforcement")
             return
 
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": payload}}))
@@ -366,14 +364,12 @@ def maybe_refresh(session_id: str) -> None:
         if not payload:
             return
 
-        from hooks.targets import buffers_single_envelope
+        from hooks.targets import buffers_single_envelope, emitter
 
-        if buffers_single_envelope():
+        if buffers_single_envelope() or emitter.forced():
             # Codex and Copilot parse hook stdout as ONE JSON object — queue
             # for the single end-of-process flush instead of printing our own.
-            from hooks.targets import emitter
-
-            emitter.buffer_context(payload)
+            emitter.buffer_context(payload, "enforcement")
             return
 
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": payload}}))

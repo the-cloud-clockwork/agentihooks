@@ -404,7 +404,7 @@ def on_session_start(payload: dict) -> None:
 
         enforcement_context = get_session_start_enforcements(session_id, payload.get("cwd", ""))
         if enforcement_context:
-            _inject_enforcements(enforcement_context, also_log=False, skip_compression=True)
+            _inject_enforcements(enforcement_context, also_log=False, skip_compression=True, kind="enforcement")
     except Exception as e:
         log("enforcement session start failed", {"error": str(e)})
 
@@ -751,7 +751,7 @@ def on_user_prompt_submit(payload: dict) -> None:
                 log("quota policy: operator push-to-100 signal", {"session_id": session_id})
             _policy_text = prompt_context(session_id, payload.get("cwd", ""))
             if _policy_text:
-                _inject_quota_policy(_policy_text, also_log=False, skip_compression=True)
+                _inject_quota_policy(_policy_text, also_log=False, skip_compression=True, kind="alert")
     except Exception as e:
         log("quota policy user prompt failed", {"error": str(e)})
 
@@ -768,7 +768,8 @@ def on_user_prompt_submit(payload: dict) -> None:
                 inject_context(
                     f"WARNING: Possible secret(s) detected in prompt ({names}). "
                     "Do not process, echo, or store credential values. "
-                    "Ask the user to use environment variables instead."
+                    "Ask the user to use environment variables instead.",
+                    kind="alert",
                 )
     else:
         log("Secrets scanning skipped (mode=off)")
@@ -795,7 +796,7 @@ def on_user_prompt_submit(payload: dict) -> None:
 
         enforcement_context = get_user_prompt_enforcements(session_id, payload.get("cwd", ""))
         if enforcement_context:
-            _inject_enforcements(enforcement_context, also_log=False, skip_compression=True)
+            _inject_enforcements(enforcement_context, also_log=False, skip_compression=True, kind="enforcement")
     except Exception as e:
         log("enforcement user prompt failed", {"error": str(e)})
     # --- CI Manifesto: counter-gated re-injection of doctrine ---
@@ -1004,7 +1005,7 @@ def _inject_ledger_decision(payload: dict) -> None:
 
         context = directive(payload)
         if context:
-            inject_context(context, also_log=False, skip_compression=True)
+            inject_context(context, also_log=False, skip_compression=True, kind="alert")
     except Exception as e:
         log("ledger decision failed", {"error": str(e)})
 
@@ -1024,7 +1025,7 @@ def _inject_inbox(session_id: str, cwd: str = "") -> None:
     from hooks.common import inject_context
 
     for context in _inbox_blocks(session_id, cwd):
-        inject_context(context, also_log=False, skip_compression=True)
+        inject_context(context, also_log=False, skip_compression=True, kind="alert")
 
 
 def _confirm_inbox(session_id: str) -> None:
@@ -1045,7 +1046,7 @@ def _inject_after_tool(payload: dict) -> None:
     _inject_refocus(session_id, "tool")
     quota = posttool_context(session_id, payload.get("tool_name"), cwd)
     if quota:
-        inject_context(quota, also_log=False, skip_compression=True)
+        inject_context(quota, also_log=False, skip_compression=True, kind="alert")
 
 
 def _swarm_heartbeat(state: str, prompt: str | None = None, payload: dict | None = None) -> None:
@@ -1081,7 +1082,7 @@ def _swarm_ledger(payload: dict) -> None:
     from hooks.common import inject_context
 
     for context in contexts:
-        inject_context(context, also_log=False, skip_compression=True)
+        inject_context(context, also_log=False, skip_compression=True, kind="refocus")
     if block:
         raise BlockAction(block)
 
@@ -1108,7 +1109,7 @@ def _operator_mode(payload: dict, typed: bool) -> None:
 
         text = notice(payload, typed)
         if text:
-            inject_context(text, also_log=False, skip_compression=True)
+            inject_context(text, also_log=False, skip_compression=True, kind="alert")
     except Exception as e:
         log("operator mode failed", {"error": str(e)})
 
@@ -1120,7 +1121,7 @@ def _master_coding(payload: dict, typed: bool) -> None:
 
         state = master_coding.observe(payload.get("session_id"), payload.get("prompt"), typed)
         if state:
-            inject_context(master_coding.NOTICES[state], also_log=False, skip_compression=True)
+            inject_context(master_coding.NOTICES[state], also_log=False, skip_compression=True, kind="alert")
     except Exception as e:
         log("master coding window failed", {"error": str(e)})
 
@@ -1142,7 +1143,7 @@ def _operator_reminder(payload: dict) -> None:
 
         text = operator_mode.reminder(payload.get("session_id"))
         if text:
-            inject_context(text, also_log=False, skip_compression=True)
+            inject_context(text, also_log=False, skip_compression=True, kind="alert")
     except Exception as e:
         log("operator reminder failed", {"error": str(e)})
 
@@ -1176,7 +1177,7 @@ def _inject_refocus(session_id: str, event: str) -> None:
     from hooks.common import inject_context
 
     for context in _refocus_blocks(session_id, event):
-        inject_context(context, also_log=False, skip_compression=True)
+        inject_context(context, also_log=False, skip_compression=True, kind="refocus")
 
 
 def _wait_nudge_blocks(payload: dict) -> list[str]:
@@ -1292,7 +1293,7 @@ def on_pre_tool_use(payload: dict) -> None:
         from hooks.common import inject_context
 
         for _ctx in _conditions.contexts:
-            inject_context(_ctx, also_log=False, skip_compression=True)
+            inject_context(_ctx, also_log=False, skip_compression=True, kind="condition")
         if _conditions.block:
             raise BlockAction(_conditions.block)
         if _conditions.rewrite is not None:
@@ -1653,7 +1654,7 @@ def on_pre_tool_use(payload: dict) -> None:
     )
     from hooks.targets.capabilities import can_inject_context
 
-    _pretool_blocks: list[str] = []
+    _pretool_blocks: list[tuple[str, str]] = []
     _can_inject_pretool = can_inject_context("PreToolUse")
     _recycle_ctx = None
     try:
@@ -1673,16 +1674,16 @@ def on_pre_tool_use(payload: dict) -> None:
             log("tool-call counter failed", {"error": str(e)})
 
     if _recycle_ctx:
-        _pretool_blocks.append(_recycle_ctx)
+        _pretool_blocks.append(("alert", _recycle_ctx))
     if _quota_policy_ctx:
-        _pretool_blocks.append(_quota_policy_ctx)
+        _pretool_blocks.append(("alert", _quota_policy_ctx))
     elif QUOTA_USAGE_INJECTION_ENABLED and _tool_call_count % max(1, QUOTA_USAGE_TOOL_CALLS) == 0:
         try:
             from hooks.context.quota_usage import quota_banner
 
             _quota_banner = quota_banner(session_id)
             if _quota_banner:
-                _pretool_blocks.append(_quota_banner)
+                _pretool_blocks.append(("other", _quota_banner))
         except Exception as e:
             log("quota usage pretool failed", {"error": str(e)})
 
@@ -1696,7 +1697,7 @@ def on_pre_tool_use(payload: dict) -> None:
                 claim_delivery=_can_inject_pretool,
             )
             if _brain_ctx:
-                _pretool_blocks.append(_brain_ctx)
+                _pretool_blocks.append(("brain", _brain_ctx))
         except Exception as e:
             log("brain_adapter tool-call refresh failed", {"error": str(e)})
 
@@ -1708,13 +1709,14 @@ def on_pre_tool_use(payload: dict) -> None:
 
             _broadcast_ctx = get_pretool_context(session_id, claim_unseen=_can_inject_pretool)
             if _broadcast_ctx:
-                _pretool_blocks.append(_broadcast_ctx)
+                _pretool_blocks.append(("alert", _broadcast_ctx))
         except Exception as e:
             log("broadcast pretool failed", {"error": str(e)})
 
-    _pretool_blocks.extend(_inbox_blocks(session_id, payload.get("cwd", "")) if _can_inject_pretool else [])
-    _pretool_blocks.extend(_refocus_blocks(session_id, "tool") if _can_inject_pretool else [])
-    _pretool_blocks.extend(_wait_nudge_blocks(payload) if _can_inject_pretool else [])
+    if _can_inject_pretool:
+        _pretool_blocks.extend(("alert", b) for b in _inbox_blocks(session_id, payload.get("cwd", "")))
+        _pretool_blocks.extend(("refocus", b) for b in _refocus_blocks(session_id, "tool"))
+        _pretool_blocks.extend(("refocus", b) for b in _wait_nudge_blocks(payload))
 
     if ENFORCEMENT_INJECTION_ENABLED:
         try:
@@ -1729,16 +1731,17 @@ def on_pre_tool_use(payload: dict) -> None:
                 tool_input=payload.get("tool_input") or {},
             )
             if _enf_ctx:
-                _pretool_blocks.append(_enf_ctx)
+                _pretool_blocks.append(("enforcement", _enf_ctx))
         except Exception as e:
             log("enforcement pretool failed", {"error": str(e)})
 
     from hooks.targets import emitter as _emitter
 
     if _emitter.forced():
-        _drained = _emitter.drain()
-        if _drained:
-            _pretool_blocks.insert(0, _drained)
+        _pretool_blocks[:0] = _emitter.drain_blocks()
+    from hooks.context.injection_budget import budget_chars, fit
+
+    _pretool_context = fit(_pretool_blocks, budget_chars(), sep="\n\n")
 
     _cond_decision = _conditions.decision if _conditions is not None else None
     if _credential_rewrite or _cond_decision in ("allow", "ask"):
@@ -1749,12 +1752,12 @@ def on_pre_tool_use(payload: dict) -> None:
             "ask" if _cond_decision == "ask" else "allow",
             "\n".join(r for r in (_note, _conditions.reason if _conditions is not None else "") if r),
             updated_input={**(payload.get("tool_input") or {}), **_updated} if _rewritten else None,
-            additional_context="\n\n".join(_pretool_blocks) or None,
+            additional_context=_pretool_context or None,
         )
-    elif _pretool_blocks:
+    elif _pretool_context:
         if _can_inject_pretool and not _emitter.forced():
             # Copilot parses one JSON object: the blocks join the end-of-process flush.
-            _emitter.buffer_context("\n\n".join(_pretool_blocks))
+            _emitter.buffer_context(_pretool_context)
         elif _can_inject_pretool:
             import json as _json
 
@@ -1763,7 +1766,7 @@ def on_pre_tool_use(payload: dict) -> None:
                     {
                         "hookSpecificOutput": {
                             "hookEventName": "PreToolUse",
-                            "additionalContext": "\n\n".join(_pretool_blocks),
+                            "additionalContext": _pretool_context,
                         }
                     }
                 )
@@ -1862,7 +1865,7 @@ def on_post_tool_use(payload: dict) -> None:
             from hooks.targets import emitter
 
             for _ctx in _conditions.contexts:
-                inject_context(_ctx, also_log=False, skip_compression=True)
+                inject_context(_ctx, also_log=False, skip_compression=True, kind="condition")
             emitter.set_fields(_conditions.hook_fields, _conditions.top_fields)
     except Exception as e:
         log("conditions post-tool failed", {"error": str(e)})
@@ -2718,6 +2721,8 @@ def main() -> None:
 
         if event_name == "PreToolUse" and not buffers_single_envelope():
             emitter.force_buffer()
+        elif event_name in ("SessionStart", "UserPromptSubmit") and not buffers_single_envelope():
+            emitter.force_buffer(plain=True)
         elif event_name == "PostToolUse" and supports_output_rewrite():
             # updatedToolOutput / decision only parse when the envelope is all of stdout.
             emitter.force_buffer()
