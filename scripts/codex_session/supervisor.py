@@ -286,6 +286,8 @@ def execution_home(spec: Launch, directory: Path) -> Launch:
         data = json.loads(evidence.read_text())
         data["home"] = str(home.resolve())
         evidence.write_text(json.dumps(data) + "\n")
+    if spec.environ.get(binding.REPORT):
+        binding.rehome(Path(spec.environ[binding.REPORT]), home)
     return replace(spec, codex_home=str(home), environ={**spec.environ, "CODEX_HOME": str(home)})
 
 
