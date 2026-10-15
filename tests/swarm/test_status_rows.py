@@ -217,7 +217,9 @@ def test_status_keeps_remote_agents_outside_the_local_process_table(store, monke
     from scripts.swarm.runtime import HerdrRuntime
 
     store.create(SwarmConfig("sw", "/repo", 1, 1))
-    store.put_agent("sw", AgentRecord("remote", "eng", "t1", runtime_backend=backend, runtime_target=target))
+    store.put_agent(
+        "sw", AgentRecord("remote", "eng", "t1", seat="eng-1@sw", runtime_backend=backend, runtime_target=target)
+    )
     monkeypatch.setattr(HerdrRuntime, "live_names", lambda self: set())
     report = status.status_report(store, "sw", {"tasks": []})
     assert [agent["name"] for agent in report["agents"]] == ["remote"]

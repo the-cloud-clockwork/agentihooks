@@ -36,6 +36,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Reopening a swarm pull request retains its registered worker's ownership,
+  claim lease and worktree until retirement; status omits gone local processes.
 - The worker supervisor's workspace create and pane run commands use the remaining startup
   budget instead of a half second timeout.
 - Stopped Codex replay test fixes export field and identity sizes independently of its environment.
