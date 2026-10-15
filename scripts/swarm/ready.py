@@ -155,6 +155,7 @@ class Pass:
 def merge_pass(run, rows):
     actions = []
     for task_id, row in rows.items():
+        row = dict(row)
         if row.get("awaiting") != AWAITING:
             if row.get("state") == "pr" and row.get("pr_url"):
                 pull = run.github(row["pr_url"])
@@ -289,7 +290,14 @@ def _unmergeable(run, row, found, pull):
 
 def _reopen(run, row, found, what):
     task_id, url = row["id"], found["url"]
-    run.ledger.update_task(run.slug, task_id, {"state": "open", "claimed_by": "", "awaiting": FIX}, if_state=("pr",))
+    expected = {key: row.get(key, "") for key in ("claimed_by", "pr_url", "awaiting")}
+    expected["claim_generation"] = row.get("claim_generation", 0)
+    live = run.ledger.update_task(
+        run.slug, task_id, {"state": "open", "claimed_by": "", "awaiting": FIX}, if_state=("pr",), if_match=expected
+    )
+    generation = expected["claim_generation"] + bool(expected["claimed_by"])
+    if live.get("state") != "open" or live.get("claimed_by") or live.get("claim_generation", 0) != generation:
+        return []
     run.ledger.comment(run.slug, task_id, REOPENED.format(url=url, what=what), by="swarm")
     run.store.release(run.slug, task_id, found["agent"])
     forget(run.store, run.slug, task_id)
