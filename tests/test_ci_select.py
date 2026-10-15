@@ -12,6 +12,9 @@ from scripts import ci_select
 
 pytestmark = pytest.mark.unit
 
+WORKFLOW = Path(__file__).parents[1] / ".github/workflows/test.yml"
+EXPRESSION = re.compile(r"\$\{\{\s*([\w.]+)\s*\}\}")
+
 
 def write(root, files):
     for name, text in files.items():
@@ -233,10 +236,6 @@ def test_the_changed_files_come_from_the_merge_base(repo):
     git(repo, "commit", "-am", "dev moved")
     assert ci_select.changed_files(repo, "dev", head) == ["hooks/sample.py"]
     assert ci_select.changed_files(repo, base, head) == ["hooks/sample.py"]
-
-
-WORKFLOW = Path(__file__).parents[1] / ".github/workflows/test.yml"
-EXPRESSION = re.compile(r"\$\{\{\s*([\w.]+)\s*\}\}")
 
 
 def test_the_workflow_keeps_a_one_file_change_selected_after_dev_moves(repo, monkeypatch, tmp_path):
