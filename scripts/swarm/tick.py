@@ -700,8 +700,12 @@ def ready_in_order(slug, store, rows, doc, lane, dispatched=None):
     return _launch_order(slug, store, _claimable(slug, store, rows, doc, lane, dispatched), dispatched)
 
 
+def _owned_tasks(slug, store):
+    return {agent.task for agent in store.agents(slug) if agent.state != "finished"}
+
+
 def _claimable(slug, store, rows, doc, lane, dispatched=None):
-    awaiting = {a.task for a in store.agents(slug) if a.state != "finished"}
+    awaiting = _owned_tasks(slug, store)
     held = [t.get("territory") or [] for t in rows.values() if t.get("state") in ACTIVE]
     graph, fix = hierarchy.project(doc)[0], freeze.fix_phase(store.config(slug))
     clear, overlapping = [], []
@@ -868,7 +872,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
         if blocked:
             actions.append(blocked)
             continue
-        if any(a.task == task["id"] and a.state != "finished" for a in store.agents(slug)):
+        if task["id"] in _owned_tasks(slug, store):
             _release_admission(slug, runtime, task)
             continue
         name = store.next_name(slug, lane, now_ms)
