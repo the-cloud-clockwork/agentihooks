@@ -268,12 +268,16 @@ def test_a_successor_uses_the_recorded_worktree_among_other_checkouts(publicatio
     assert result["head"] == git(root, "rev-parse", "HEAD")
 
 
-def test_a_detached_checkout_never_becomes_the_unrecorded_task_worktree(publication, tmp_path):
+@pytest.mark.parametrize("branch", [None, "", "XXXX"])
+def test_a_detached_checkout_never_becomes_the_unrecorded_task_worktree(publication, tmp_path, branch):
     from scripts.swarm import publish
 
     root = publication.root
     git(root, "worktree", "add", "--detach", str(tmp_path / "detached"))
-    publication.task.pop("branch")
+    if branch is None:
+        publication.task.pop("branch")
+    else:
+        publication.task["branch"] = branch
     result = publish.publish(
         "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
     )
