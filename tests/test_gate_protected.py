@@ -326,6 +326,31 @@ def test_only_the_canonical_reuse_protocol_is_an_allowed_transition(weakened):
     assert bool(problems) == weakened, problems
 
 
+@pytest.mark.parametrize("weakened", [False, True])
+@pytest.mark.parametrize("anton", [False, True])
+def test_the_protected_grader_admits_only_the_exact_paged_reuse_variant(weakened, anton):
+    from scripts import ci_reuse
+
+    base, head = _protected_pair()
+    head["jobs"]["reuse"] = ci_reuse.paged_reuse_job()
+    policy = _POLICY if anton else None
+    if anton:
+        head["jobs"]["reuse"]["runs-on"] = _anton()
+        [install] = [
+            step for step in head["jobs"]["reuse"]["steps"] if step.get("name") == "Install metadata dependencies"
+        ]
+        install["env"] = {"PYTHONNOUSERSITE": "1"}
+    if weakened:
+        [step] = [
+            step
+            for step in head["jobs"]["reuse"]["steps"]
+            if step.get("name") == "Fetch the evidence of recent passed runs"
+        ]
+        step["run"] = step["run"].replace("--page-size 5", "--page-size 100")
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY, policy)
+    assert bool(problems) == weakened, problems
+
+
 def test_a_head_cannot_replace_the_protected_reuse_decision():
     from scripts import ci_reuse
 
