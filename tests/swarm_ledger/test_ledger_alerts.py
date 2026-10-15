@@ -709,7 +709,12 @@ def test_a_raised_promotion_alert_reaches_the_master_inbox(inbox):
     handler.send = lambda code, body, ctype: None
     handler.reply_state(SLUG, ops=[raise_promotion("r1")])
     [item] = inbox.inbox(seat_address(SLUG, MASTER))
-    assert "(promotion): Dev promotion is red." in item.text
+    [alert] = core.sync(SLUG)[0]["alerts"]
+    assert item.text == (
+        f"On ledger {SLUG}: alert {alert['id']} (promotion): Dev promotion is red. Claim it with agentihooks "
+        f"ledger --slug {SLUG} --as <you> alert claim {alert['id']}, then close it with alert close "
+        f'{alert["id"]} "<outcome>".'
+    )
 
 
 def test_alias_operation_stores_the_canonical_author(monkeypatch):

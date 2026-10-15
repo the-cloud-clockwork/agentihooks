@@ -10,7 +10,6 @@ from scripts.swarm.store import PREFIX, RedisStore
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
 RUNS = "repos/{owner}/{repo}/actions/workflows/test.yml/runs?branch=dev&event=push&status=completed&per_page=20"
-RUNS_JQ = ".workflow_runs[] | {id, conclusion, head_sha, html_url} | @json"
 JOBS_JQ = ".jobs[] | {name, conclusion} | @json"
 SHA = "c0ffee" + "0" * 34
 RED = {"id": 900, "conclusion": "failure", "head_sha": SHA, "html_url": "https://github.com/o/r/actions/runs/900"}
@@ -23,10 +22,11 @@ GREEN = {
 JOBS = [
     {"name": "lint", "conclusion": "success"},
     {"name": "unit (3.11, 1)", "conclusion": "failure"},
-    {"name": "helm-kind", "conclusion": "failure"},
+    {"name": "helm-kind", "conclusion": "timed_out"},
     {"name": "coverage-ratchet", "conclusion": "cancelled"},
     {"name": "Gate — Required", "conclusion": "failure"},
 ]
+NOT_DUPLICATE = "The promotion watch files one task per failed dev job and run, and holds a job while its task is open."
 NOW = 10_000_000
 SLUG = "sw"
 
@@ -83,27 +83,15 @@ def refresh(store, ledger, run, now=NOW):
     return promotion_watch.refresh(SLUG, config, store, ledger, ledger.doc(), now, run)
 
 
+def filed(store):
+    return store.redis.hgetall(promotion_watch.key(SLUG, "jobs"))
+
+
 def test_keys_sit_under_the_swarm_prefix():
     assert promotion_watch.key(SLUG, "seen") == f"{PREFIX}:sw:promotion:seen"
 
 
-def test_latest_reads_finished_dev_push_runs_and_takes_the_newest_success_or_failure():
-    calls = []
-    runs = [RED, {**GREEN, "id": 950, "conclusion": "cancelled"}, {**GREEN, "id": 901}]
-    assert promotion_watch.latest("/repo", gh(runs, calls=calls)) == {**GREEN, "id": 901}
-    assert calls == [
-        (
-            ["gh", "api", RUNS, "--jq", RUNS_JQ],
-            {"cwd": "/repo", "capture_output": True, "text": True, "check": True, "timeout": 60},
-        )
-    ]
-
-
-def test_latest_is_none_without_a_finished_run():
-    assert promotion_watch.latest("/repo", gh([{**RED, "conclusion": "cancelled"}])) is None
-
-
-def test_failed_jobs_names_failures_and_leaves_out_the_gate_when_another_job_failed():
+def test_failed_jobs_names_failed_and_timed_out_jobs_and_leaves_out_the_gate_when_another_job_failed():
     assert promotion_watch.failed_jobs(JOBS) == ["helm-kind", "unit (3.11, 1)"]
 
 
@@ -115,13 +103,11 @@ def test_failed_jobs_keeps_the_gate_when_it_failed_alone():
 def test_jobs_reads_every_job_of_the_run():
     calls = []
     assert promotion_watch.jobs("/repo", 900, gh([], JOBS, calls)) == JOBS
-    assert calls[0][0] == [
-        "gh",
-        "api",
-        "repos/{owner}/{repo}/actions/runs/900/jobs?per_page=100",
-        "--paginate",
-        "--jq",
-        JOBS_JQ,
+    assert calls == [
+        (
+            ["gh", "api", "repos/{owner}/{repo}/actions/runs/900/jobs?per_page=100", "--paginate", "--jq", JOBS_JQ],
+            {"cwd": "/repo", "capture_output": True, "text": True, "check": True, "timeout": 60},
+        )
     ]
 
 
@@ -134,6 +120,12 @@ def test_title_names_the_job_without_dashes():
 
 def test_a_job_name_the_ledger_would_refuse_gets_a_plain_title():
     assert promotion_watch.title("check docs.md") == "Promotion red: a dev job"
+
+
+def test_the_watch_reads_the_newest_finished_dev_push_run(store):
+    calls = []
+    refresh(store, Ledger(), gh([GREEN], calls=calls))
+    assert calls[0][0] == ["gh", "api", RUNS, "--jq", ".workflow_runs[] | {id, conclusion, head_sha, html_url} | @json"]
 
 
 def test_a_red_run_files_one_urgent_ci_task_per_failed_job_with_run_and_sha(store):
@@ -151,6 +143,7 @@ def test_a_red_run_files_one_urgent_ci_task_per_failed_job_with_run_and_sha(stor
                 "https://github.com/o/r/actions/runs/900. Fix it on dev; the swarm closes this task when a later "
                 "dev push run passes."
             ),
+            "not_duplicate": NOT_DUPLICATE,
         },
         {
             "task": "promo-900-1",
@@ -163,6 +156,7 @@ def test_a_red_run_files_one_urgent_ci_task_per_failed_job_with_run_and_sha(stor
                 "https://github.com/o/r/actions/runs/900. Fix it on dev; the swarm closes this task when a later "
                 "dev push run passes."
             ),
+            "not_duplicate": NOT_DUPLICATE,
         },
     ]
     assert {by for _, _, by in ledger.added} == {"swarm"}
@@ -179,24 +173,60 @@ def test_a_red_run_files_one_urgent_ci_task_per_failed_job_with_run_and_sha(stor
         "filed promo-900-1 for the failed dev job unit (3.11, 1)",
         "raised the promotion alert for dev push run 900",
     ]
+    assert filed(store) == {"promo-900-0": "helm-kind", "promo-900-1": "unit (3.11, 1)"}
     assert store.redis.get(promotion_watch.key(SLUG, "seen")) == "900"
 
 
-def test_a_job_with_an_open_promotion_task_is_not_filed_again(store):
-    open_task = {"id": "promo-800-0", "title": "Promotion red: helm-kind", "state": "claimed"}
-    done_task = {"id": "promo-700-0", "title": "Promotion red: unit (3.11, 1)", "state": "done"}
+def test_a_job_with_an_open_promotion_task_is_not_filed_again_and_done_ones_are_forgotten(store):
+    store.redis.hset(
+        promotion_watch.key(SLUG, "jobs"),
+        mapping={"promo-800-0": "helm-kind", "promo-700-0": "unit (3.11, 1)", "promo-600-0": "lint"},
+    )
+    tasks = [
+        {"id": "promo-800-0", "title": "Promotion red: helm-kind", "state": "claimed"},
+        {"id": "promo-700-0", "title": "Promotion red: unit (3.11, 1)", "state": "done"},
+    ]
     alert = {"id": "al-3", "source": "promotion", "text": "older", "state": "claimed"}
-    ledger = Ledger([open_task, done_task], [alert])
+    ledger = Ledger(tasks, [alert])
     actions = refresh(store, ledger, gh([RED], JOBS))
     assert [fields["task"] for _, fields, _ in ledger.added] == ["promo-900-1"]
     assert ledger.raised == []
     assert actions == ["filed promo-900-1 for the failed dev job unit (3.11, 1)"]
+    assert filed(store) == {"promo-800-0": "helm-kind", "promo-900-1": "unit (3.11, 1)"}
 
 
-def test_a_task_titled_alike_outside_the_watch_does_not_hold_a_filing(store):
-    ledger = Ledger([{"id": "t5", "title": "Promotion red: helm-kind", "state": "open"}])
-    refresh(store, ledger, gh([RED], JOBS))
-    assert [fields["task"] for _, fields, _ in ledger.added] == ["promo-900-0", "promo-900-1"]
+def test_jobs_that_share_a_title_each_get_a_task(store):
+    jobs = [{"name": "queue_retry", "conclusion": "failure"}, {"name": "queue retry", "conclusion": "failure"}]
+    ledger = Ledger()
+    refresh(store, ledger, gh([RED], jobs))
+    assert [(fields["task"], fields["title"]) for _, fields, _ in ledger.added] == [
+        ("promo-900-0", "Promotion red: queue retry"),
+        ("promo-900-1", "Promotion red: queue retry"),
+    ]
+
+
+def test_a_red_run_with_no_failed_job_raises_the_alert_alone(store):
+    ledger = Ledger()
+    actions = refresh(store, ledger, gh([RED], [{"name": "lint", "conclusion": "cancelled"}]))
+    assert ledger.added == []
+    assert ledger.raised == [
+        (
+            SLUG,
+            "promotion",
+            f"Dev promotion is red: push run 900 at commit {SHA} failed. https://github.com/o/r/actions/runs/900",
+        )
+    ]
+    assert actions == ["raised the promotion alert for dev push run 900"]
+
+
+def test_a_run_retried_after_a_partial_write_files_only_the_jobs_it_missed(store):
+    ledger = Ledger([{"id": "promo-900-0", "title": "Promotion red: helm-kind", "state": "done"}])
+    actions = refresh(store, ledger, gh([RED], JOBS))
+    assert [fields["task"] for _, fields, _ in ledger.added] == ["promo-900-1"]
+    assert actions == [
+        "filed promo-900-1 for the failed dev job unit (3.11, 1)",
+        "raised the promotion alert for dev push run 900",
+    ]
 
 
 def test_a_run_already_handled_is_not_read_for_jobs_again(store):
@@ -277,9 +307,10 @@ def test_a_ledger_refusal_leaves_the_run_unhandled_for_the_next_pass(store):
     assert store.redis.get(promotion_watch.key(SLUG, "seen")) is None
 
 
-def test_the_tick_runs_the_promotion_watch():
+def test_the_tick_runs_the_promotion_watch_through_skip_refused():
     import inspect
 
     from scripts.swarm import tick
 
-    assert "promotion_watch.refresh, slug, config, store, ledger, doc, now_ms" in inspect.getsource(tick.tick)
+    line = "    actions += skip_refused(promotion_watch.refresh, slug, config, store, ledger, doc, now_ms)\n"
+    assert line in inspect.getsource(tick.tick).splitlines(keepends=True)
