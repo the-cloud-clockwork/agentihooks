@@ -630,6 +630,34 @@ def test_quota_pressure_requires_recovery_for_every_affected_lane():
     assert dispatch_seat.uncovered(store, SLUG, NOW) == []
 
 
+@pytest.mark.parametrize(("named", "ticks", "age"), [("review", 3, 0), ("quota", 2, 0), ("quota", 3, 16 * MINUTE)])
+def test_a_new_quota_trigger_does_not_inherit_the_previous_affected_lanes(named, ticks, age):
+    store = swarm()
+    store.update(SLUG, lanes={"eng": {"agent": "claude"}, "ci": {"agent": "claude"}})
+    held(store, "quota")
+    quota_caps(store)
+    assert dispatch_seat.uncovered(store, SLUG, NOW)
+    held(store, named, ticks)
+    dispatch_seat.uncovered(store, SLUG, NOW + age)
+
+    held(store, "quota")
+    quota_caps(store, eng=2, ci=0)
+    assert dispatch_seat.uncovered(store, SLUG, NOW)
+    store.update(SLUG, lanes={"eng": {"agent": "claude"}, "ci": {"agent": "auto"}})
+    quota_caps(store, eng=2)
+
+    assert dispatch_seat.uncovered(store, SLUG, NOW) == []
+
+
+def test_automatic_routing_without_a_recorded_capacity_deficit_leaves_quota_open():
+    store = swarm()
+    store.update(SLUG, lanes={"eng": {"agent": "auto"}})
+    held(store, "quota")
+    assert dispatch_seat.uncovered(store, SLUG, NOW)
+    quota_caps(store, eng=2)
+    assert dispatch_seat.uncovered(store, SLUG, NOW)
+
+
 def test_a_bottleneck_whose_report_stopped_fifteen_minutes_ago_closes():
     store, runtime = swarm(), FakeRuntime()
     held(store)
