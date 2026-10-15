@@ -194,6 +194,11 @@ def test_native_gate_without_a_scripts_package_runs_its_own_entry_point(reposito
         source.rmdir()
     git(root, "add", "scripts")
     git(root, "commit", "-qm", "Use namespace scripts directory")
+    installed = p.bundle.parent / "installed"
+    (installed / "scripts").mkdir(parents=True)
+    (installed / "scripts" / "__init__.py").write_text("")
+    (installed / "scripts" / "ci_prepush.py").write_text("raise SystemExit('foreign installed gate selected')\n")
+    monkeypatch.setenv("PYTHONPATH", str(installed))
     (root / "chosen.txt").write_text("after")
     monkeypatch.chdir(root)
     result = publish.publish("swarm", p.agent, str(p.swarm), p.ledger, "Use native gate", ["chosen.txt"])
