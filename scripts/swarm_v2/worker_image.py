@@ -63,7 +63,7 @@ def fetch(name: str, artifact: dict, cache: Path | None) -> bytes:
     return payload
 
 
-def download_tools(lock: dict, cache: Path) -> None:
+def download_tools(lock: dict, cache: Path | None) -> None:
     with ThreadPoolExecutor(max_workers=len(lock["tools"])) as pool:
         futures = [pool.submit(fetch, name, artifact, cache) for name, artifact in lock["tools"].items()]
     for future in futures:

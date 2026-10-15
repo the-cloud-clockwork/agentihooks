@@ -48,7 +48,7 @@ COPY profiles/ /opt/agentihooks/templates/
 COPY profiles/package/roles/ /opt/agentihooks/templates/
 RUN python /opt/swarm-node/worker_image.py manifest --architecture "$TARGETARCH" --source-revision "$SOURCE_REVISION" \
     && chmod -R a-w /opt/agentihooks/templates /opt/swarm-node \
-    && find /opt/venv -perm /222 -exec chmod a-w {} + \
+    && find /opt/venv \! -type l -perm /222 -exec chmod a-w {} + \
     && chmod a+x /opt/swarm-node/entrypoint.sh /opt/swarm-node/ssh/start.sh \
     && groupadd --gid 10001 worker \
     && useradd --uid 10001 --gid worker --create-home worker \

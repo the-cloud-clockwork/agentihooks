@@ -92,7 +92,7 @@ if [[ "$proof" != profiles ]]; then
             "$image" > "$output/$attempt.json"
     done
     docker run --rm --network none --read-only --tmpfs /home/worker:uid=10001,gid=10001 \
-        "$image" python -c 'from pathlib import Path; import os; assert os.getuid()==10001; assert not os.access("/opt/agentihooks/templates", os.W_OK); import hooks, scripts.swarm_v2.runtime; print("private home and local runtime imports passed")' \
+        "$image" python -c 'from pathlib import Path; import os; assert os.getuid()==10001; assert not os.access("/opt/agentihooks/templates", os.W_OK); assert not os.access("/opt/venv/lib/python3.12/site-packages", os.W_OK); import hooks, scripts.swarm_v2.runtime; print("private home and local runtime imports passed")' \
         > "$output/compatibility.log"
     docker run --rm --network none --read-only --tmpfs /home/worker:uid=10001,gid=10001 --tmpfs /tmp \
         -v "$context/tests/contracts/swarm_v2/fixtures/checkpoint/current.json:/checkpoint.json:ro" \
@@ -118,7 +118,9 @@ if [[ "$proof" != startup ]]; then
                 > "$output/profile-$case.json" 2> "$output/profile-$case.log" &
             probes+=("$!")
         done
-        for pid in "${probes[@]}"; do wait "$pid"; done
+        status=0
+        for pid in "${probes[@]}"; do wait "$pid" || status=$?; done
+        if (( status )); then exit "$status"; fi
         python3 "$probe/profile_evidence.py" "$output" "$fixture" "$revision" "$fixtures"
     ) &
     profile_pid=$!
