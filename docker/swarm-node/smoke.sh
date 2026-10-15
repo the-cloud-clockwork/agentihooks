@@ -106,6 +106,7 @@ if [[ "$proof" != startup ]]; then
     fixtures="$context/docker/swarm-node/fixtures/profiles"
     chmod -R a+rX "$probe" "$fixtures"
     (
+        probes=()
         for case in positive positive-second rejection recovery rollback noexec; do
             volume=/home/worker:uid=10001,gid=10001,exec
             if [[ "$case" == noexec ]]; then
@@ -114,8 +115,10 @@ if [[ "$proof" != startup ]]; then
             docker run --rm --network none --read-only --tmpfs "$volume" --tmpfs /tmp \
                 -v "$fixtures:/fixtures:ro" -v "$probe:/opt/probe:ro" \
                 "$image" bash /opt/probe/profile-probe.sh "${case%-second}" \
-                > "$output/profile-$case.json" 2> "$output/profile-$case.log"
+                > "$output/profile-$case.json" 2> "$output/profile-$case.log" &
+            probes+=("$!")
         done
+        for pid in "${probes[@]}"; do wait "$pid"; done
         python3 "$probe/profile_evidence.py" "$output" "$fixture" "$revision" "$fixtures"
     ) &
     profile_pid=$!
