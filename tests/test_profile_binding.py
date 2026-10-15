@@ -137,7 +137,7 @@ def test_rehomed_request_validates_against_the_execution_copy(tmp_path, monkeypa
         ("Engineer instructions.\n", True, "profile mismatch in rendered binding"),
     ],
 )
-def test_rehome_refuses_an_execution_copy_with_a_different_canary(tmp_path, persona, stale, reason):
+def test_rehome_refuses_and_marks_an_invalid_execution_copy(tmp_path, persona, stale, reason):
     shared = tmp_path / "shared" / "codex"
     copy = tmp_path / "execution" / "codex"
     for home, text in ((shared, "Engineer instructions.\n"), (copy, persona)):
