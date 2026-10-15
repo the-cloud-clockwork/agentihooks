@@ -1,25 +1,10 @@
-"""CI Manifesto injector — doctrine-as-context primitive.
+"""Inject enabled CI manifestos at session start and on the refresh cadence.
 
-Reads every enabled bundle manifesto and injects them into the
-session context at SessionStart, with counter-gated re-injection on
-UserPromptSubmit to fight attention decay.
+Publication requires release dance. Legacy fenced signal blocks supply hotfix,
+branch creation and non-protected PR vocabulary.
 
-Also exposes signal vocabulary parsed from the manifesto (§9) so enforcement
-hooks (branch_guard, prod_lockdown) can derive their patterns from the same
-source of truth rather than hardcoding.
-
-Config (env vars via hooks.config):
-    CI_MANIFESTO_ENABLED          (bool, default True)
-    AGENTIHOOKS_SKIP_MANIFESTO    (comma-separated manifesto names to exclude)
-    CI_MANIFESTO_REFRESH_EVERY    (int,  default 8 turns)
-
-Public API:
-    inject_on_session_start()             — one-shot injection
-    maybe_refresh(session_id)             — counter-gated re-inject
-    get_release_signals() -> list[str]    — parsed phrases from §9
-    get_hotfix_signals() -> list[str]     — parsed phrases from §9
-    contains_release_signal(text) -> bool
-    contains_hotfix_signal(text) -> bool
+Configuration: CI_MANIFESTO_ENABLED, AGENTIHOOKS_SKIP_MANIFESTO,
+CI_MANIFESTO_REFRESH_EVERY.
 """
 
 from __future__ import annotations
@@ -34,7 +19,6 @@ _manifesto_cache: dict = {"path": "", "mtime": 0.0, "content": "", "release": []
 _session_counter: dict[str, int] = {}
 
 
-# Fallback signals (used if manifesto missing / unparseable). Must match §9.
 _DEFAULT_RELEASE_SIGNALS = ["release dance"]
 _DEFAULT_HOTFIX_SIGNALS = [
     "hotfix",
@@ -141,7 +125,7 @@ _PR_SECTION_RE = re.compile(
 
 
 def _parse_signals(content: str) -> tuple[list[str], list[str], list[str], list[str]]:
-    """Extract signal phrases from §9 (release/hotfix), §14 (branch), §15 (PR) of the manifesto."""
+    """Read legacy signal blocks while keeping publication authorization fixed."""
     hotfix: list[str] = []
     branch: list[str] = []
     pr: list[str] = []
