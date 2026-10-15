@@ -8,7 +8,7 @@ from scripts.gates import Call, Who
 from scripts.gates.base import Decision
 from scripts.gates.claim_stop import ClaimStop
 from scripts.gates.verdicts import Verdicts
-from scripts.swarm import capacity, cli, merge_queue, ready, stack, tick, waits
+from scripts.swarm import capacity, cli, linked_issues, merge_queue, ready, stack, tick, waits
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.store import RedisStore, SwarmError
 from tests.swarm.test_cli import HANDOFF, env
@@ -705,7 +705,7 @@ def test_a_group_member_issue_closes_with_the_group(merging, issues):
     ],
 )
 def test_only_closing_keywords_name_an_issue(body, numbers):
-    assert ready.linked_issues.KEYWORD.findall(body) == numbers
+    assert linked_issues.KEYWORD.findall(body) == numbers
 
 
 def test_a_merged_pull_request_without_a_checkout_closes_without_removing_one(merging):
