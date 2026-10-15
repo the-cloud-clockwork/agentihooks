@@ -25,7 +25,9 @@ def test_launcher_retains_native_exit_before_cleanup(tmp_path, monkeypatch, stat
     shell = fake_bin / "shell"
     shell.write_text('#!/usr/bin/env bash\ntest -z "${AGENTIHOOKS_EXIT_RECORD+x}"\n')
     shell.chmod(0o700)
-    command = f'touch "{tmp_path}/agentihooks-claude-terminal/closing-$PPID"; ' if closing else ""
+    command = f'printf "%s" "$AGENTIHOOKS_EXIT_RECORD" > "{tmp_path}/native-record-path"; '
+    if closing:
+        command += f'touch "{tmp_path}/agentihooks-claude-terminal/closing-$PPID"; '
     native = "kill -TERM -- -$$" if status == 143 else f"exit {status}"
     monkeypatch.setattr(init_agent, "_agent_command", lambda *args: (["bash", "-c", f"{command}{native}"], ""))
     monkeypatch.setattr(init_agent, "LAUNCH_GRACE_S", 0)
@@ -45,6 +47,7 @@ def test_launcher_retains_native_exit_before_cleanup(tmp_path, monkeypatch, stat
     )
     records = list((Path.home() / ".agentihooks" / "session-exits").glob("*.json"))
     assert len(records) == 1, done.stderr
+    assert Path((tmp_path / "native-record-path").read_text()) == records[0]
     record = json.loads(records[0].read_text())
     assert record["exit_status"] == status
     assert record["pane_tail"] == "native final warning\n"
