@@ -64,6 +64,7 @@ def test_a_set_proof_creates_its_ledger_and_a_one_engineer_swarm(store):
     assert content == proof_swarm.CONTENT
     assert [(task["lane"], task["phase"], task["profile"]) for task in content["tasks"]] == [("eng", "p1", "engineer")]
     config = store.config(SLUG)
+    assert config.scratch is True
     assert (config.repo, config.max_eng, config.max_ci, config.state) == (PROJECT, 1, 0, "running")
     assert store.slugs() == [SLUG]
 

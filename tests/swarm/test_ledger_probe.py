@@ -420,22 +420,24 @@ def worker(store, name):
 
 
 def test_idle_ticks_and_nudges_pause_while_the_alert_holds(store):
+    from scripts.swarm import stale_nudge
     from scripts.swarm.tick import IDLE_NUDGE_TICKS, _watch_idle
 
     name = "engineer@a1b2c3-0002"
+    stale = 1_001 + stale_nudge.LIMIT_MS
     store.put_agent("sw", AgentRecord(name, "eng", "t1", started_at=1_000))
     ledger, clock = raise_alert(store)
     runtime = FakeRuntime()
     runtime.statuses[name] = "idle"
     for n in range(IDLE_NUDGE_TICKS + 2):
-        assert _watch_idle("sw", store, ledger, runtime, {}, worker(store, name), 2_000 + n) == []
-    assert runtime.nudged == [] and worker(store, name).idle_ticks == 0
+        assert _watch_idle("sw", store, ledger, runtime, {}, worker(store, name), stale + n) == []
+    assert InboxStore(store.redis).inbox(name) == [] and worker(store, name).idle_ticks == 0
     ledger.read_s = 0.1
     observe(store, ledger, clock)
     observe(store, ledger, clock)
-    for n in range(IDLE_NUDGE_TICKS):
-        _watch_idle("sw", store, ledger, runtime, {}, worker(store, name), 3_000 + n)
-    assert runtime.nudged == [name]
+    actions = _watch_idle("sw", store, ledger, runtime, {}, worker(store, name), stale + 10)
+    [item] = InboxStore(store.redis).inbox(name)
+    assert actions == [f"nudged stale {name} through its inbox as message {item.id}"] and runtime.nudged == []
 
 
 def test_idle_and_stale_claim_findings_pause_while_the_alert_holds(store, monkeypatch):

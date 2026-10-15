@@ -5,6 +5,8 @@ from pathlib import Path
 
 ACTORS = ".github/workflows/trusted-actors.json"
 LOADER = "the-cloud-clockwork/agentihooks/.github/workflows/runner-trust.yml@dev"
+POOLS = ("anton-oss", "anton-oss-light", "anton-oss-batch")
+QUEUE_POOLS = {"anton-oss": "anton-oss-queue"}
 GUARD = (
     "github.event_name != 'pull_request_target' && "
     "(github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && "
@@ -114,26 +116,37 @@ def _hosted(runner: object) -> bool:
     )
 
 
-def selector(policy: dict, pool: str) -> str:
+def selector(policy: dict, pool: str, queue: bool = False, *, trusted_reruns: bool = False) -> str:
     members = json.dumps(policy["actors"], separators=(",", ":"))
-    queue = policy["queue_actor"]
+    queue_actor = policy["queue_actor"]
     condition = (
         "(github.event_name != 'pull_request_target' && "
         "(github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && "
         f"contains(fromJSON('{members}'), github.actor) && contains(fromJSON('{members}'), github.triggering_actor) || "
         "(github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && "
-        f"github.actor == '{queue}' && github.triggering_actor == '{queue}')"
+        f"github.actor == '{queue_actor}' && github.triggering_actor == '{queue_actor}')"
     )
-    return "${{ " + condition + " && '" + pool + "' || 'ubuntu-latest' }}"
+    if trusted_reruns:
+        condition = condition.replace(
+            f"github.triggering_actor == '{queue_actor}'",
+            f"(github.triggering_actor == '{queue_actor}' || contains(fromJSON('{members}'), github.triggering_actor))",
+        )
+    label = f"(github.event_name == 'merge_group' && '{QUEUE_POOLS[pool]}' || '{pool}')" if queue else f"'{pool}'"
+    return "${{ " + condition + " && " + label + " || 'ubuntu-latest' }}"
+
+
+def selectors(policy: object, pool: str) -> set[str]:
+    if not isinstance(policy, dict):
+        return set()
+    return {
+        _compact(selector(policy, pool, queue, trusted_reruns=reruns))
+        for queue in (False, pool in QUEUE_POOLS)
+        for reruns in (False, True)
+    }
 
 
 def _selector(runner: object, policy: object) -> bool:
-    if not isinstance(runner, str) or not isinstance(policy, dict):
-        return False
-    return any(
-        _compact(runner) == _compact(selector(policy, pool))
-        for pool in ("anton-oss", "anton-oss-light", "anton-oss-batch")
-    )
+    return isinstance(runner, str) and any(_compact(runner) in selectors(policy, pool) for pool in POOLS)
 
 
 def check(workflows: dict[str, dict], actors: object = None) -> list[str]:

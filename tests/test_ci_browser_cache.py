@@ -15,7 +15,16 @@ READY = "steps.launch.outputs.ready != 'true'"
 HOSTED = READY + " && runner.environment == 'github-hosted'"
 
 
-def _setup(tmp_path, monkeypatch, *, cached, ready, recovery=True, stall_once=False, attempt_seconds=None):
+def _setup(
+    tmp_path,
+    monkeypatch,
+    *,
+    cached,
+    ready,
+    recovery=True,
+    stall_once=False,
+    attempt_seconds=None,
+):
     executable = tmp_path / "python"
     calls = tmp_path / "calls"
     marker = tmp_path / "ready"
@@ -24,6 +33,9 @@ def _setup(tmp_path, monkeypatch, *, cached, ready, recovery=True, stall_once=Fa
         marker.touch()
     if stall_once:
         stall.touch()
+    launch_stall = tmp_path / "launch_stall"
+    if os.environ.get("BROWSER_CACHE_TEST_LAUNCH") == "stall":
+        launch_stall.touch()
     executable.write_text(
         "#!/usr/bin/env bash\nset -euo pipefail\n"
         'if [[ "$*" == *"install --with-deps chromium"* ]]; then\n'
@@ -33,7 +45,9 @@ def _setup(tmp_path, monkeypatch, *, cached, ready, recovery=True, stall_once=Fa
         '  touch "$READY"\n'
         "else\n"
         '  echo launch >> "$CALLS"\n'
-        '  [[ -f "$READY" ]]\n'
+        '  [[ -f "$READY" ]] || exit 1\n'
+        '  if [[ -f "$LAUNCH_STALL" ]]; then rm "$LAUNCH_STALL"; sleep 30; fi\n'
+        '  [[ "$LAUNCH_FAILS" != true ]]\n'
         "fi\n"
     )
     executable.chmod(0o755)
@@ -45,6 +59,8 @@ def _setup(tmp_path, monkeypatch, *, cached, ready, recovery=True, stall_once=Fa
     monkeypatch.setenv("READY", str(marker))
     monkeypatch.setenv("STALL", str(stall))
     monkeypatch.setenv("RECOVERY", str(recovery).lower())
+    monkeypatch.setenv("LAUNCH_STALL", str(launch_stall))
+    monkeypatch.setenv("LAUNCH_FAILS", str(os.environ.get("BROWSER_CACHE_TEST_LAUNCH") == "fail").lower())
     monkeypatch.setenv("CACHE_HIT", str(cached).lower())
     monkeypatch.setenv("GITHUB_ACTION_PATH", str(ACTION))
     output = tmp_path / "output"
@@ -105,6 +121,21 @@ def test_a_stalled_download_is_killed_at_its_attempt_timeout_and_retried_green(t
     assert time.monotonic() - started < 20
 
 
+def test_a_stalled_installed_browser_launch_is_retried_green(tmp_path, monkeypatch):
+    monkeypatch.setenv("BROWSER_CACHE_TEST_LAUNCH", "stall")
+    result, calls = _setup(tmp_path, monkeypatch, cached=False, ready=False, attempt_seconds=5)
+    assert result.returncode == 0, result.stderr
+    assert calls == ["mirror", "install", "launch", "install", "launch"]
+
+
+def test_failed_installed_browser_launch_is_red_after_two_attempts(tmp_path, monkeypatch):
+    monkeypatch.setenv("BROWSER_CACHE_TEST_LAUNCH", "fail")
+    result, calls = _setup(tmp_path, monkeypatch, cached=False, ready=False)
+    assert result.returncode != 0
+    assert calls == ["mirror", "install", "launch", "install", "launch"]
+    assert result.stdout.count("::warning title=Retried browser install::") == 1
+
+
 def _timeouts(run):
     return sum(
         int(kill or 0) + int(seconds) for kill, seconds in re.findall(r"timeout (?:--kill-after=(\d+)s )?(\d+)s", run)
@@ -117,7 +148,8 @@ def _attempt_budget():
     attempt = int(install["env"]["ATTEMPT_SECONDS"])
     kill = int(
         re.search(
-            r"timeout --kill-after=(\d+)s \"\$\{ATTEMPT_SECONDS\}s\" python -m playwright install", install["run"]
+            r"timeout --kill-after=(\d+)s \"\$\{ATTEMPT_SECONDS\}s\" (?:python -m playwright install|bash)",
+            install["run"],
         ).group(1)
     )
     others = sum(_timeouts(step.get("run", "")) for step in steps if step is not install)

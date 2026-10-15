@@ -483,7 +483,10 @@ RETRY_BREAKER_TTL = int(os.getenv("RETRY_BREAKER_TTL", "3600"))
 KUBECTL_MUTATION_GUARD_ENABLED = _env_bool("KUBECTL_MUTATION_GUARD_ENABLED", "true")
 
 # Python in a linked worktree is edited through Serena (Development Manifesto §7).
-SERENA_EDIT_GUARD_ENABLED = _env_bool("SERENA_EDIT_GUARD_ENABLED", "true")
+# AGENTIHOOKS_SERENA=false is the one off switch for every session or machine: the
+# guard lets every edit through and injects no Serena directive. Unset or any other
+# value keeps it on.
+SERENA_EDIT_GUARD_ENABLED = os.getenv("AGENTIHOOKS_SERENA", "true") != "false"
 
 # =============================================================================
 # BRAIN ADAPTER

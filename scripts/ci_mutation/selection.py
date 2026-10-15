@@ -104,6 +104,10 @@ def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, bas
     # Stats tracing slows every test, so a wall clock bound only holds in the unit shards.
     test_runner._pytest_add_cli_args = [
         *test_runner._pytest_add_cli_args,
+        "-p",
+        "pytest_rerunfailures",
+        "--reruns",
+        "1",
         "-m",
         "not wall_clock",
         f"--basetemp={basetemp}",
@@ -218,14 +222,8 @@ def load_or_collect_stats(runner, test_runner, paths: list[str], mode: str, stat
             files = part_files(Path.cwd(), config.pytest_add_cli_args_test_selection, (index, total))
             write_part(output, key, (index, total), collect_file_stats(runner, test_runner, files, workers, Path.cwd()))
             raise SystemExit(0)
-        if os.environ.get("MUTATION_STATS_CACHE"):
-            apply_stats(
-                runner,
-                collect_file_stats(runner, test_runner, config.pytest_add_cli_args_test_selection, workers, Path.cwd()),
-            )
-        else:
-            shards = stats_shards(Path.cwd(), config.pytest_add_cli_args_test_selection, workers)
-            collect_parallel_stats(runner, test_runner, shards, Path.cwd())
+        shards = stats_shards(Path.cwd(), config.pytest_add_cli_args_test_selection, workers)
+        collect_parallel_stats(runner, test_runner, shards, Path.cwd())
     finally:
         config.source_paths = relative
 

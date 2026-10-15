@@ -65,7 +65,7 @@ def test_setting_stores_a_role_default_and_an_empty_value_clears_it():
             "overlays-frontend",
             "tuner",
             "overlays are set per base role: overlays-master, overlays-engineer, overlays-planner, overlays-qa, "
-            "overlays-cicd",
+            "overlays-cicd, overlays-documentation",
         ),
         ("overlays-engineer", "a,b,c,d", "a role wears at most 3 overlays; 4 were set: a, b, c, d"),
         ("overlays-engineer", "tuner,nope", "overlay nope not found"),

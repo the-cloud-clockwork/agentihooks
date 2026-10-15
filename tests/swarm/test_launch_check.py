@@ -511,8 +511,12 @@ def test_a_take_master_launch_that_fails_is_reported_and_kept(store, monkeypatch
 
 
 def test_take_master_begins_a_check_that_never_relaunches(store, monkeypatch, tmp_path):
+    from hooks.proc import Process
     from scripts.swarm import take_master
 
+    monkeypatch.setattr(
+        take_master, "processes", lambda: {4242: Process(4242, 1, 4242, 4242, 100, "S", "claude", ("claude",))}
+    )
     monkeypatch.setattr(take_master, "PROC", tmp_path / "no-proc")
     monkeypatch.setattr(take_master, "agent_pid", lambda: 4242)
     monkeypatch.setattr(take_master, "harness_of", lambda pid: "claude")

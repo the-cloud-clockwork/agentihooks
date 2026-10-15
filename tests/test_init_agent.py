@@ -1,6 +1,7 @@
 import calendar
 import json
 import os
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -506,6 +507,26 @@ def _launcher_text(tmp_path, environ, agent="claude", name="swarm-buildout-eng-4
     return launcher.read_text()
 
 
+def test_swarm_display_name_preserves_the_inbox_identity(monkeypatch, tmp_path):
+    text = _dry_launcher(
+        monkeypatch,
+        tmp_path,
+        "engineer-a1b2c3-0001",
+        {
+            "AGENTIHOOKS_SWARM": "sw",
+            "AGENTIHOOKS_SWARM_SPAWN": "1",
+            "AGENTIHOOKS_AGENT_NAME": "engineer@a1b2c3-0001",
+        },
+    )
+    assert "export AGENTIHOOKS_AGENT_NAME=engineer@a1b2c3-0001" in text
+    assert "--name engineer-a1b2c3-0001" in text
+
+
+def test_an_independent_launch_does_not_inherit_another_inbox_identity(tmp_path):
+    text = _launcher_text(tmp_path, {"AGENTIHOOKS_AGENT_NAME": "engineer@a1b2c3-0001"}, name="my-session")
+    assert "export AGENTIHOOKS_AGENT_NAME=my-session" in text
+
+
 def test_collector_unset_leaves_the_launcher_without_telemetry(tmp_path):
     for agent in ("claude", "codex"):
         text = _launcher_text(tmp_path, {}, agent)
@@ -603,6 +624,44 @@ def test_a_tick_spawn_keeps_its_swarm_identity_without_the_mark(monkeypatch, tmp
     assert "export AGENTIHOOKS_SWARM_TASK=t1\n" in text
     assert "export AGENTIHOOKS_SWARM_LAUNCHER=$$\n" in text
     assert "AGENTIHOOKS_SWARM_SPAWN" not in text
+
+
+@pytest.mark.parametrize("name", ["engineer@abcdef-0002", "master@abcdef-0001"])
+def test_swarm_launch_replaces_only_the_inherited_gateway_key(monkeypatch, tmp_path, capsys, name):
+    state = tmp_path / ".agentihooks"
+    state.mkdir()
+    managed = "managed-gateway"
+    inherited = "inherited-gateway"
+    other = "inherited-other"
+    (state / ".env").write_text(f"MCP_KEY_GATEWAY={managed}\nOTHER_KEY=file-other\n")
+    observed = {}
+
+    def terminal(launcher, directory, title, environ):
+        observed.update(environ)
+        return "linux", ["/usr/bin/terminal", str(launcher)]
+
+    monkeypatch.setattr(init_agent, "_launch_command", terminal)
+    assert (
+        init_agent.main(
+            ["--dir", str(tmp_path), "--name", name, "--agent", "claude", "--dry-run"],
+            {
+                "HOME": str(tmp_path),
+                "PATH": os.environ["PATH"],
+                "XDG_RUNTIME_DIR": str(tmp_path / "runtime"),
+                "AGENTIHOOKS_SWARM": "example",
+                "AGENTIHOOKS_SWARM_SPAWN": "1",
+                "MCP_KEY_GATEWAY": inherited,
+                "OTHER_KEY": other,
+            },
+        )
+        == 0
+    )
+    assert observed["MCP_KEY_GATEWAY"] == managed
+    assert observed["OTHER_KEY"] == other
+    output = capsys.readouterr()
+    assert all(value not in output.out + output.err for value in (managed, inherited, other))
+    launcher = next((tmp_path / "runtime" / "agentihooks-claude-terminal").glob("*.sh")).read_text()
+    assert all(value not in launcher for value in (managed, inherited, other))
 
 
 def test_a_quota_handoff_keeps_its_swarm_identity(monkeypatch, tmp_path):
@@ -1145,6 +1204,24 @@ def test_a_codex_launcher_holds_its_prompt_behind_the_herdr_variable(monkeypatch
     assert init_agent.PROMPT_AFTER_START == "AGENTIHOOKS_PROMPT_AFTER_START"
 
 
+@pytest.mark.parametrize("prompt", ["Start.", "x" * init_agent.PROMPT_ARGUMENT_LIMIT])
+def test_a_claude_launcher_separates_its_prompt_from_a_trailing_config_option(monkeypatch, tmp_path, prompt):
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "requested"))
+    monkeypatch.setattr(init_agent.shutil, "which", lambda name: "/usr/bin/agentihooks")
+    monkeypatch.setattr(init_agent, "_launch_command", lambda launcher, directory, title, environ: ("linux", ["t"]))
+    runtime = tmp_path / "rt"
+    config = tmp_path / "mcp.json"
+    argv = ["--dir", str(tmp_path), "--name", "eng-a", "--prompt", prompt, "--dry-run", "--", "--mcp-config"]
+    assert init_agent.main([*argv, str(config)], {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(runtime)}) == 0
+    folder = runtime / "agentihooks-claude-terminal"
+    prompt_file = next(folder.glob("*.prompt"))
+    launcher = next(folder.glob("*.sh")).read_text()
+    written = prompt_file.read_text()
+    opening = init_agent._opening_prompt(written, prompt_file)
+    argument = f'"$(cat {prompt_file})"' if opening == written else shlex.quote(opening)
+    assert f" --mcp-config {config} -- {argument}\nnative_status=$?\n" in launcher
+
+
 def test_a_channel_dry_run_writes_the_negotiation_pin_into_its_launcher(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "requested"))
     monkeypatch.setattr(init_agent, "_launch_command", lambda launcher, directory, title, environ: ("linux", ["t"]))
@@ -1402,7 +1479,8 @@ def test_a_plain_codex_quota_handoff_preserves_native_choices(monkeypatch, tmp_p
         )
         == 0
     )
-    command, successor = launched[0]
+    launcher, successor = launched[0]
+    command = next(line for line in launcher.splitlines() if " codex " in line)
     assert "--agentihooks-exclude alpha" in command
     assert "resume thread-1" in command
     assert "select-profile" not in command

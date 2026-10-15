@@ -173,7 +173,7 @@ def test_a_local_ledger_keeps_the_session_unpinned(taker, monkeypatch):  # noqa:
     assert run("sw", "take-master") == 0
     assert (os.environ["AGENTIHOOKS_SWARM"], os.environ["AGENTIHOOKS_AGENT_NAME"]) == ("", CARRIED)
     assert os.environ["AGENTIHOOKS_LEDGER_AGENT_TOKEN"] == "carried token"
-    assert _masters(store) == [(MASTER, "", {})]
+    assert _masters(store) == [(MASTER, "", {"process_namespace": "boot/pidns", "pid": 4242, "pid_start": 100})]
 
 
 def test_only_a_remote_session_reads_its_pinned_swarm(monkeypatch, tmp_path):
@@ -294,7 +294,9 @@ def test_a_finished_master_still_named_live_does_not_block_take_master(taker, mo
     )
     rt.live.add(MASTER)
     assert run("sw", "take-master") == 0
-    assert _masters(store) == [("master@a1b2c3-0002", "", {})]
+    assert _masters(store) == [
+        ("master@a1b2c3-0002", "", {"process_namespace": "boot/pidns", "pid": 4242, "pid_start": 100})
+    ]
 
 
 def test_take_names_a_new_master_at_the_time_it_was_taken(taker, monkeypatch):  # noqa: F811

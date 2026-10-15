@@ -240,6 +240,39 @@ def test_queue_refreshes_changed_grading_inputs_before_enqueueing(changed, head)
     assert not any("enqueuePullRequest(input:" in str(call[0]) for call in calls)
 
 
+def test_a_branch_update_github_refuses_names_the_update_step():
+    run, calls = runner(
+        {"data": {"resource": OPEN}},
+        {
+            "data": {
+                "resource": {
+                    "number": 12,
+                    "repository": {"nameWithOwner": "o/r", "ref": {"target": {"oid": "current"}}},
+                }
+            }
+        },
+        {"workflow_runs": [{"name": "Tests", "head_sha": "abc", "conclusion": "success", "id": 21}]},
+        {"jobs": [{"id": 31, "name": "test-count (3.11)", "conclusion": "success"}]},
+        "2026-10-09T09:20:06Z   BASE: cccccccccccccccccccccccccccccccccccccccc\n",
+        {"data": {"resource": {"repository": {"ref": {"target": {"oid": "current"}}}}}},
+        AUTHORED,
+        {"files": [{"filename": "tests/swarm/test_ready.py"}], "total_commits": 1},
+        {"data": {"resource": {"repository": {"ref": {"target": {"oid": "current"}}}}}},
+    )
+
+    def refused(command, **kwargs):
+        if command[2] == "repos/o/r/pulls/12/update-branch":
+            return subprocess.CompletedProcess(command, 1, "", "gh: merge conflict between base and head (HTTP 422)\n")
+        return run(command, **kwargs)
+
+    with pytest.raises(SwarmError) as caught:
+        merge_queue.operate("queue", URL, refused)
+    assert (
+        str(caught.value) == "could not update the branch from dev: gh: merge conflict between base and head (HTTP 422)"
+    )
+    assert not any("enqueuePullRequest(input:" in str(call[0]) for call in calls)
+
+
 def test_queue_does_not_refresh_unrelated_dev_changes():
     run, calls = runner(
         {"data": {"resource": OPEN}},
@@ -526,6 +559,34 @@ def test_cli_routes_each_operation_and_prints_its_state(monkeypatch, capsys, act
     assert cli.main(["sw", "merge", action, URL]) == 0
     assert seen == [(action, URL)]
     assert capsys.readouterr().out == '{"queued": true}\n'
+
+
+@pytest.mark.parametrize("action", ["queue", "dequeue"])
+def test_cli_accepts_the_earlier_pull_the_task_lists(monkeypatch, action):
+    from types import SimpleNamespace
+
+    first = "https://github.com/o/r/pull/6"
+    task = {"id": "t1", "pr_url": URL, "split": ["1-2", "3-4"], "split_pulls": [first, URL]}
+    monkeypatch.setattr(cli, "connect", lambda: swarm_of("eng"))
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(tasks=lambda slug: [task]))
+    seen = []
+    monkeypatch.setattr(merge_queue, "operate", lambda verb, url: seen.append((verb, url)) or {})
+    assert cli.main(["sw", "merge", action, first]) == 0
+    assert seen == [(action, first)]
+
+
+def test_cli_refuses_an_unlisted_pull_before_a_queue_call(monkeypatch):
+    from types import SimpleNamespace
+
+    task = {"id": "t1", "pr_url": URL, "split": ["1-2", "3-4"], "split_pulls": ["https://github.com/o/r/pull/6", URL]}
+    monkeypatch.setattr(cli, "connect", lambda: swarm_of("eng"))
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(tasks=lambda slug: [task]))
+    seen = []
+    monkeypatch.setattr(merge_queue, "operate", lambda verb, url: seen.append((verb, url)) or {})
+    assert cli.main(["sw", "merge", "queue", "https://github.com/o/r/pull/99"]) == 1
+    assert seen == []
 
 
 @pytest.mark.parametrize("action", ["queue", "dequeue"])

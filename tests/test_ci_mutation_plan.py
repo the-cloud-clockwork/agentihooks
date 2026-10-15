@@ -17,6 +17,220 @@ def test_each_mutant_costs_the_measured_worker_seconds_whatever_its_tests_take(t
     assert plan.shard_count(412 * plan.MUTANT_SECONDS, 412, 240, 10) == 3
 
 
+def test_shared_statistics_replace_flat_costs_before_assigning_shards():
+    from scripts.ci_mutation.measured import measured_costs, plan_shards
+
+    names = [f"scripts.sample.x_expensive__mutmut_{i}" for i in range(8)]
+    names += [f"scripts.sample.x_cheap__mutmut_{i}" for i in range(8)]
+    stats = [
+        {
+            "tests": {"scripts.sample.x_expensive": ["slow"], "scripts.sample.x_cheap": ["fast"]},
+            "durations": {"slow": 200.0, "fast": 1.0},
+        }
+    ]
+    costs = measured_costs(names, stats)
+    assert costs[names[0]] >= 200.0
+    assert costs[names[-1]] >= 1.0
+    assert costs[names[0]] > costs[names[-1]]
+    plan = plan_shards(costs, target=100, limit=10)
+    assert plan["shards"] > 1
+    assert set(plan["assignments"]) == set(names)
+    assert plan["units"] == "worker seconds"
+    assert plan == plan_shards(dict(reversed(list(costs.items()))), target=100, limit=10)
+    expensive_shards = [plan["assignments"][name] for name in names[:8]]
+    assert len(set(expensive_shards)) == min(plan["shards"], 8)
+
+
+def test_measured_costs_merge_mappings_keep_slowest_durations_and_cover_missing_nodes():
+    from scripts.ci_mutation.measured import measured_costs
+
+    names = [
+        "scripts.sample.x_f__mutmut_1",
+        "scripts.sample.x_new__mutmut_1",
+        "scripts.sample.x_name__mutmut_tag__mutmut_1",
+    ]
+    results = [
+        {
+            "tests": {"scripts.sample.x_f": ["fast", "missing"], "scripts.sample.x_name__mutmut_tag": ["fast"]},
+            "durations": {"fast": 0.25, "slow": 10},
+        },
+        {"tests": {"scripts.sample.x_f": ["fast", "missing"]}, "durations": {"fast": 0.1, "slow": 3}},
+    ]
+    assert measured_costs(names, results) == pytest.approx({names[0]: 18.4125, names[1]: 80.6, names[2]: 5.9125})
+    assert measured_costs([names[1]], []) == {names[1]: 80.6}
+
+
+def test_expensive_mutants_are_balanced_before_cheap_names_and_totals_are_preserved():
+    from scripts.ci_mutation.measured import plan_shards
+
+    plan = plan_shards({"a": 1, "b": 1, "c": 1, "z": 9}, target=2)
+    assert plan == {
+        "shards": 2,
+        "assignments": {"z": 0, "a": 1, "b": 1, "c": 1},
+        "costs": {"a": 1, "b": 1, "c": 1, "z": 9},
+        "units": "worker seconds",
+        "estimated_worker_seconds": 12,
+        "shard_worker_seconds": [9, 3],
+        "workers": 4,
+    }
+    assert plan_shards({"a": 480, "b": 481})["shards"] == 2
+    assert plan_shards({str(i): 10000 for i in range(11)})["shards"] == 10
+
+
+@pytest.mark.parametrize("args", [[], ["--bases", "base"], ["--stats", "stats"]])
+def test_measured_cli_requires_bases_and_statistics(monkeypatch, args):
+    from scripts.ci_mutation import measured
+
+    monkeypatch.setattr("sys.argv", ["measured", *args])
+    with pytest.raises(SystemExit) as error:
+        measured.main()
+    assert error.value.code == 2
+
+
+@pytest.mark.parametrize("identity_only", [False, True])
+def test_refinement_preserves_identity_groups_and_skips_plain_modules(tmp_path, monkeypatch, identity_only):
+    from scripts.ci_mutation import measured
+    from scripts.ci_mutation.stats import SharedStats, stats_key, write_part
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mutmut.configuration._config", None)
+    _project(tmp_path, {})
+    directory = tmp_path / "scripts/ci_mutation"
+    directory.mkdir()
+    (directory / "identity.py").write_text("def f():\n    return 1\n")
+    identity = {"scripts/ci_mutation/identity.py": ({2}, ["tests/test_identity.py"])}
+    normal = {} if identity_only else {"scripts/sample.py": ({2}, ["tests/test_sample.py"])}
+    stats = SharedStats(tmp_path / "stats", "head")
+    keys = []
+    for index, group in enumerate(group for group in [normal, identity] if group):
+        key = stats_key("head", group)
+        keys.append(key)
+        write_part(stats.group(index).folder / "part-0.json", key, (0, 1), [])
+    result = measured.refine_plan(
+        tmp_path, {**normal, **identity, "scripts/plain.py": ({1}, ["tests/test_plain.py"])}, stats
+    )
+    assert result["head"] == "head"
+    assert result["keys"] == keys
+    assert any(name.startswith("scripts.ci_mutation.identity.") for name in result["assignments"])
+    assert any(name.startswith("scripts.sample.") for name in result["assignments"]) is (not identity_only)
+    assert not any(name.startswith("scripts.plain.") for name in result["assignments"])
+    empty = measured.refine_plan(
+        tmp_path, {"scripts/plain.py": ({1}, ["tests/test_plain.py"])}, SharedStats(tmp_path / "missing", "head")
+    )
+    assert empty["assignments"] == {}
+    assert empty["keys"] == []
+
+
+def test_refinement_names_the_file_whose_pragma_is_broken(tmp_path, monkeypatch):
+    from mutmut.mutation.pragma_handling import PragmaParseError
+
+    from scripts.ci_mutation import measured
+    from scripts.ci_mutation.stats import SharedStats, stats_key, write_part
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mutmut.configuration._config", None)
+    _project(tmp_path, {})
+    (tmp_path / "scripts/broken.py").write_text("# pragma: no mutate end\ndef f():\n    return 1\n")
+    selected = {"scripts/broken.py": ({3}, ["tests/test_broken.py"])}
+    stats = SharedStats(tmp_path / "stats", "head")
+    write_part(stats.group(0).folder / "part-0.json", stats_key("head", selected), (0, 1), [])
+    with pytest.raises(PragmaParseError, match="at scripts/broken.py:1"):
+        measured.refine_plan(tmp_path, selected, stats)
+
+
+@pytest.mark.parametrize("stale", [False, True])
+def test_measured_cli_refines_complete_statistics_and_rejects_another_head(tmp_path, monkeypatch, capsys, stale):
+    from scripts.ci_mutation import measured
+    from scripts.ci_mutation.stats import stats_key, write_part
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mutmut.configuration._config", None)
+    _project(tmp_path, {})
+    selected = {"scripts/sample.py": ({2}, ["tests/test_sample.py"])}
+    folder = tmp_path / "stats"
+    key = stats_key("other" if stale else "head", selected)
+    write_part(
+        folder / "group-0/part-0.json",
+        key,
+        (0, 1),
+        [{"tests": {"scripts.sample.x_f": ["test"]}, "durations": {"test": 40.0}}],
+    )
+    monkeypatch.setattr(
+        measured,
+        "discover_changes",
+        lambda root, bases, head: (
+            {"scripts/sample.py": {2}} if (root, bases, head) == (tmp_path, ["base", "earlier"], "HEAD") else {}
+        ),
+    )
+    monkeypatch.setattr(
+        measured.subprocess,
+        "check_output",
+        lambda args, text: "head\n" if args == ["git", "rev-parse", "HEAD"] and text else "wrong",
+    )
+    output = tmp_path / "github-output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setattr("sys.argv", ["measured", "--bases", "base,earlier", "--stats", str(folder)])
+    if stale:
+        with pytest.raises(ValueError, match="stats stale"):
+            measured.main()
+    else:
+        assert measured.main() == 0
+        plan = json.loads((folder / "plan.json").read_text())
+        assert plan["head"] == "head"
+        assert plan["keys"] == [key]
+        assert plan["assignments"]
+        assert all(name.startswith("scripts.sample.x_f__mutmut_") for name in plan["assignments"])
+        assert set(plan["costs"].values()) == {55.6}
+        assert plan["units"] == "worker seconds"
+        assert output.read_text() == "shards=[0]\n"
+        text = capsys.readouterr().out
+        assert "Measured mutation worker seconds:" in text
+        assert f"Measured mutation shards: 1; assigned mutants: {len(plan['assignments'])}" in text
+
+
+def test_every_consumer_uses_the_same_measured_assignment(tmp_path, monkeypatch):
+    from scripts.ci_mutation.mutant_shards import shard_names
+
+    monkeypatch.chdir(tmp_path)
+    names = ["a", "b", "c", "d"]
+    (tmp_path / "shard-plan.json").write_text(
+        json.dumps({"shards": 2, "assignments": {"a": 1, "b": 1, "c": 0, "d": 1}})
+    )
+    assert shard_names(names, (0, 2)) == {"c"}
+    assert shard_names(names[:3], (1, 2)) == {"a", "b"}
+    assert shard_names(reversed(names), (1, 2)) == {"a", "b", "d"}
+    with pytest.raises(ValueError, match="^measured mutation plan has a different shard count$"):
+        shard_names(names, (0, 3))
+    with pytest.raises(ValueError, match="missing mutant"):
+        shard_names([*names, "new"], (0, 2))
+
+
+@pytest.mark.parametrize("reason", ["", "over budget"])
+def test_reports_distinguish_complete_survivor_grades_from_budget_exhaustion(tmp_path, monkeypatch, reason):
+    from scripts.ci_mutation.runner import run_gate
+    from scripts.ci_mutation.stats import SharedStats
+
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "scripts/sample.py").write_text("def f():\n    return 1\n")
+    (tmp_path / "tests/test_sample.py").write_text("pass\n")
+    stats = tmp_path / "stats"
+    stats.mkdir()
+    name = "scripts.sample.x_f__mutmut_1"
+    (stats / "plan.json").write_text(json.dumps({"shards": 1, "assignments": {name: 0}, "costs": {name: 10}}))
+    row = {"name": name, "status": "survived", "lines": [2], "fingerprint": "abc", "diff": "changed"}
+    monkeypatch.setattr("scripts.ci_mutation.runner.mutate_files", lambda *args: ({"scripts/sample.py": [row]}, reason))
+    report = run_gate(tmp_path, {"scripts/sample.py": {2}}, tmp_path / "output", 1080, stats=SharedStats(stats, "head"))
+    assert report["failed"] is True
+    assert report["shard"]["budget_seconds"] == 1080
+    assert report["shard"]["expected"] == 1
+    assert report["shard"]["graded"] == (0 if reason else 1)
+    assert report["shard"]["complete"] is (not bool(reason))
+    assert report["shard"]["budget_exhausted"] is bool(reason)
+    assert report["shard"]["estimated_worker_seconds"] == 10
+    assert report["shard"]["wall_seconds"] >= 0
+
+
 @pytest.mark.parametrize(
     ("seconds", "mutants", "expected"),
     [

@@ -29,7 +29,11 @@ def _protected_config(base: dict, head: dict) -> dict:
 
 
 def runners(policy: object = None) -> list[str]:
-    anton = [ci_runner_trust.selector(policy, "anton-oss-light")] if isinstance(policy, dict) else []
+    anton = (
+        [ci_runner_trust.selector(policy, "anton-oss-light", trusted_reruns=reruns) for reruns in (False, True)]
+        if isinstance(policy, dict)
+        else []
+    )
     return ["ubuntu-latest", *anton]
 
 
@@ -42,6 +46,7 @@ def reuse_jobs(policy: object = None) -> list[dict]:
             [install] = [step for step in job["steps"] if step.get("name") == "Install metadata dependencies"]
             install["env"] = {"PYTHONNOUSERSITE": "1"}
         jobs.append(job)
+        jobs.append({**job, "if": "github.event_name != 'merge_group' && github.event_name != 'pull_request'"})
     return jobs
 
 
@@ -61,7 +66,11 @@ def _aggregator_problems(base: tuple[str, str, dict], head: tuple[str, str, dict
         and not (
             field == "steps"
             and base_id == "gate-required"
-            and head_job.get("steps") in (ci_reuse.gate_steps(), ci_reuse.gate_steps(queue_coverage=True))
+            and head_job.get("steps")
+            in (
+                [ci_reuse.gate_steps(queue, selected) for queue in (False, True) for selected in (False, True)]
+                + [ci_reuse.gate_steps(queue_tier=True)]
+            )
         )
         and not (field == "runs-on" and head_job.get(field) in runners(policy))
     ]
@@ -75,6 +84,32 @@ def _reuse_problems(base: dict, head: dict, policy: object = None) -> list[str]:
     if candidate != previous and candidate not in reuse_jobs(policy):
         return ["The head changes the protected reuse job; the protected branch grades with its own."]
     return []
+
+
+def _duration_problems(base: dict, head: dict) -> list[str]:
+    if (
+        head["jobs"].get("reuse", {}).get("if")
+        != "github.event_name != 'merge_group' && github.event_name != 'pull_request'"
+    ):
+        return []
+    previous = base["jobs"].get("durations", {})
+    producer = head["jobs"].get("durations", {})
+    prefix = ci_reuse.duration_provenance_steps()
+    problems = []
+    if producer.get("steps", [])[: len(prefix)] != prefix:
+        problems.append("The head skips reuse without protected durations provenance.")
+    mutable = {"steps", "if", "runs-on"}
+    problems += [
+        f"The head changes the durations provenance context {field}."
+        for field in sorted((set(previous) | set(producer)) - mutable)
+        if previous.get(field) != producer.get(field)
+    ]
+    problems += [
+        f"The head changes the global provenance context {field}."
+        for field in ("env", "defaults")
+        if base.get(field) != head.get(field)
+    ]
+    return problems
 
 
 def grade(
@@ -94,6 +129,7 @@ def grade(
     file = base_gates[0][0]
     head_jobs = (head_workflows.get(file) or {}).get("jobs") or {}
     problems += _reuse_problems(base_workflows[file]["jobs"], head_jobs, policy)
+    problems += _duration_problems(base_workflows[file], head_workflows.get(file, {"jobs": {}}))
     return problems + ci_wiring.check(head_workflows, _protected_config(base_config, head_config), today)
 
 

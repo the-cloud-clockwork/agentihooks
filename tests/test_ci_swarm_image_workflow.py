@@ -1,4 +1,3 @@
-import json
 import os
 import subprocess
 from pathlib import Path
@@ -6,7 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from tests.test_ci_hosted_lanes import _compiled, _Context
+from tests.test_ci_anton_runners import resolve
 
 pytestmark = pytest.mark.unit
 
@@ -25,16 +24,13 @@ def _publish():
         ("github-merge-queue[bot]", "github-merge-queue[bot]", "anton-oss"),
         ("outsider", "nestorcolt", "ubuntu-latest"),
         ("nestorcolt", "outsider", "ubuntu-latest"),
-        ("github-merge-queue[bot]", "nestorcolt", "ubuntu-latest"),
+        ("github-merge-queue[bot]", "nestorcolt", "anton-oss"),
+        ("github-merge-queue[bot]", "outsider", "ubuntu-latest"),
     ],
 )
 def test_swarm_publish_uses_the_public_docker_runner_only_for_trusted_actors(actor, triggering_actor, runner):
-    names = {
-        "github": _Context(event_name="push", ref="refs/heads/dev", actor=actor, triggering_actor=triggering_actor),
-        "fromJSON": json.loads,
-        "contains": lambda values, value: value in values,
-    }
-    assert eval(_compiled(_publish()["runs-on"]), {"__builtins__": {}}, names) == runner
+    github = {"event_name": "push", "ref": "refs/heads/dev", "actor": actor, "triggering_actor": triggering_actor}
+    assert resolve(_publish()["runs-on"], **github) == runner
 
 
 def test_swarm_publish_builds_locally_and_pushes_the_existing_tags_and_cache(tmp_path):

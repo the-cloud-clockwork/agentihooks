@@ -262,20 +262,26 @@ class SQLiteLedgerRepository:
         try:
             connection.execute("PRAGMA foreign_keys=ON")
             if path not in self._ready:
-                connection.execute("PRAGMA journal_mode=WAL")
-                connection.executescript(SCHEMA)
-                connection.executescript(hierarchy.SCHEMA)
-                for table in TABLES:
-                    connection.execute(
-                        f"CREATE TABLE IF NOT EXISTS {table} (slug TEXT, path TEXT, parent TEXT, key TEXT, "
-                        "position INTEGER, kind TEXT, value TEXT, PRIMARY KEY(slug,path))"
-                    )
-                self._ready.add(path)
+                self._set_up(connection, path)
             connection.execute("PRAGMA synchronous=FULL")
             connection.set_trace_callback(self.trace)
             yield connection
         finally:
             connection.close()
+
+    def _set_up(self, connection, path: Path) -> None:
+        with self._guard:
+            if path in self._ready:
+                return
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.executescript(SCHEMA)
+            connection.executescript(hierarchy.SCHEMA)
+            for table in TABLES:
+                connection.execute(
+                    f"CREATE TABLE IF NOT EXISTS {table} (slug TEXT, path TEXT, parent TEXT, key TEXT, "
+                    "position INTEGER, kind TEXT, value TEXT, PRIMARY KEY(slug,path))"
+                )
+            self._ready.add(path)
 
     def _key(self, slug):
         return str(self.path), slug
@@ -371,6 +377,12 @@ class SQLiteLedgerRepository:
         return json.loads(written.text), rejected
 
     def _write(self, connection, slug: str, entry: Entry, state: dict, events: list) -> Entry:
+        meta, previous = state["_meta"], entry.state["_meta"]
+        meta["task_revision"] = (
+            meta["rev"]
+            if state.get("tasks", []) != entry.state.get("tasks", [])
+            else previous.get("task_revision", previous["rev"])
+        )
         before, after = diff(*(without_events(document) for document in (entry.state, state)))
         write_rows(connection, slug, before, after)
         hierarchy.sync(connection, slug, state)

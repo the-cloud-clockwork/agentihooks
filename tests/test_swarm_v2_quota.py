@@ -462,3 +462,16 @@ def test_an_unreachable_fleet_store_falls_back_to_the_local_cache(monkeypatch):
 def test_the_default_clock_is_the_redis_server_clock(world):
     observer = quota.QuotaObservations(world.store, SLUG, world.authorize)
     assert abs(observer.clock() - world.store.redis.time()[0] * 1000) < 2000
+
+
+@pytest.mark.parametrize("five_used", [None, 100.0])
+@pytest.mark.parametrize("week_used, left, cap", [(27.0, 73.0, 6), (95.0, 5.0, 6), (96.0, 4.0, 0), (100.0, 0.0, 0)])
+def test_codex_fleet_quota_uses_only_the_week(world, five_used, week_used, left, cap):
+    report = {**STALE_FULL, "five_used": five_used, "week_used": week_used}
+    world.publish(report, harness="codex")
+    reading = world.quota.reading(ACCOUNT, "codex")
+    assert reading.state == quota.OBSERVED
+    assert reading.routing_left == left
+    assert reading.week_left == left
+    assert world.quota.cap(ACCOUNT, "codex") == cap
+    assert world.quota.admit(ACCOUNT, "codex").action == (quota.ADMIT if cap else quota.WAIT)
