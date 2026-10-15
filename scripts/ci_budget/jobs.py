@@ -1,3 +1,4 @@
+import argparse
 import json
 import re
 import subprocess
@@ -42,9 +43,8 @@ def read_page(endpoint: str, offset: int, size: int) -> tuple[list[dict], int]:
             return json.loads(result.stdout)["jobs"], size
 
 
-def read_jobs(endpoint: str) -> list[dict]:
+def read_jobs(endpoint: str, size: int = PAGE_SIZE) -> list[dict]:
     jobs = []
-    size = PAGE_SIZE
     while True:
         rows, size = read_page(endpoint, len(jobs), size)
         jobs.extend(rows[len(jobs) % size :])
@@ -53,8 +53,12 @@ def read_jobs(endpoint: str) -> list[dict]:
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("endpoint")
+    parser.add_argument("--page-size", type=int, choices=range(1, 101), default=PAGE_SIZE)
+    args = parser.parse_args()
     try:
-        for job in read_jobs(sys.argv[1]):
+        for job in read_jobs(args.endpoint, args.page_size):
             print(json.dumps(job))
     except subprocess.CalledProcessError as error:
         sys.exit(error.stderr)
