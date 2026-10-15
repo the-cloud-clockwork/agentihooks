@@ -32,6 +32,14 @@ permissions:
   contents: read
 
 jobs:
+  promote:
+    needs: [gate-required, refresh-durations, coverage-baseline, flake-budget]
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' && needs.gate-required.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
+    uses: ./.github/workflows/promote.yml
+    secrets:
+      TCC_CI_CLIENT_ID: ${{ secrets.TCC_CI_CLIENT_ID }}
+      TCC_CI_APP_PRIVATE_KEY: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+
   admission:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
@@ -1750,7 +1758,22 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           misses=0
+          queue_misses=0
           while true; do
+            if queue_head=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/${GITHUB_REF#refs/}" --jq ".[] | select(.ref == \"$GITHUB_REF\") | .object.sha"); then
+              queue_misses=0
+              if [[ "$queue_head" != "$GITHUB_SHA" ]]; then
+                echo 'failed=queue group is no longer current' >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+            else
+              if (( ++queue_misses == 10 )); then
+                echo "::error::Ten reads of this queue reference failed in a row; queue liveness is unknown."
+                exit 1
+              fi
+              sleep 15
+              continue
+            fi
             if gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" --jq '.jobs[] | @json' > "$RUNNER_TEMP/jobs.jsonl"; then
               misses=0
               verdict=$(python3 -m scripts.ci_queue_fail_fast "$RUNNER_TEMP/jobs.jsonl")
