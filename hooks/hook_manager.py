@@ -1264,6 +1264,15 @@ def _check_shell_guards(payload: dict) -> None:
         print(f"WARNING: branch_guard check failed ({e}) — guard bypassed", file=sys.stderr, flush=True)
 
 
+def _fit_pretool(blocks: list[tuple[str, str]]) -> str:
+    from hooks.context.injection_budget import budget_chars, fit
+    from hooks.targets import emitter
+
+    if emitter.forced():
+        blocks = emitter.drain_blocks() + blocks
+    return fit(blocks, budget_chars(), sep="\n\n")
+
+
 def on_pre_tool_use(payload: dict) -> None:
     """Handle PreToolUse event."""
     from hooks.config import SECRETS_MODE
@@ -1737,11 +1746,7 @@ def on_pre_tool_use(payload: dict) -> None:
 
     from hooks.targets import emitter as _emitter
 
-    if _emitter.forced():
-        _pretool_blocks[:0] = _emitter.drain_blocks()
-    from hooks.context.injection_budget import budget_chars, fit
-
-    _pretool_context = fit(_pretool_blocks, budget_chars(), sep="\n\n")
+    _pretool_context = _fit_pretool(_pretool_blocks)
 
     _cond_decision = _conditions.decision if _conditions is not None else None
     if _credential_rewrite or _cond_decision in ("allow", "ask"):
@@ -2719,10 +2724,8 @@ def main() -> None:
         from hooks.targets import buffers_single_envelope, emitter
         from hooks.targets.capabilities import supports_output_rewrite
 
-        if event_name == "PreToolUse" and not buffers_single_envelope():
-            emitter.force_buffer()
-        elif event_name in ("SessionStart", "UserPromptSubmit") and not buffers_single_envelope():
-            emitter.force_buffer(plain=True)
+        if event_name in ("PreToolUse", "SessionStart", "UserPromptSubmit") and not buffers_single_envelope():
+            emitter.force_buffer(plain=event_name != "PreToolUse")
         elif event_name == "PostToolUse" and supports_output_rewrite():
             # updatedToolOutput / decision only parse when the envelope is all of stdout.
             emitter.force_buffer()
