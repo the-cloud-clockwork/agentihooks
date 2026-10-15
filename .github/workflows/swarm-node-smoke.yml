@@ -34,7 +34,6 @@ jobs:
         with:
           name: swarm-worker-image-${{ matrix.proof }}
           path: ${{ runner.temp }}/worker-image-evidence
-
       - name: Prove worker probes against isolated containers
         if: ${{ !cancelled() && matrix.proof == 'startup' }}
         run: bash tests/integration/swarm_node/run_health_proof.sh "$RUNNER_TEMP/worker-health-evidence"
