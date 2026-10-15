@@ -433,6 +433,7 @@ def _write_launcher(
         f": > {shlex.quote(str(_started_marker(launcher)))}\n"
         f"{operator_env.source_line(environ)}"
         f"{_predecessor_export(environ)}"
+        f"export AGENTIHOOKS_EXIT_RECORD={shlex.quote(str(exit_record))}\n"
         "export AGENTIHOOKS_TERMINAL_LAUNCH=1\n"
         f"export AGENTIHOOKS_AGENT_NAME={shlex.quote(identity)}\n"
         f"{_config_home_export(environ) if spec.agent == 'claude' else ''}"
@@ -441,7 +442,6 @@ def _write_launcher(
         f"{langfuse_export}"
         f"{_binding_export(environ)}"
         f"sleep {LAUNCH_GRACE_S}\n"
-        f"export AGENTIHOOKS_EXIT_RECORD={shlex.quote(str(exit_record))}\n"
         f"{before}{command_text}\n"
         "native_status=$?\n"
         f'{exit_command} "$native_status" {exit_identity}\n'
