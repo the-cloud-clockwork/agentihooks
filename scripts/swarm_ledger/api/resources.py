@@ -145,6 +145,9 @@ def page(rows: list, rev: str, query: dict, hash_page: bool = False) -> dict:
             raise APIError(409, "revision_conflict", "Collection changed; restart pagination")
         offset = int(offset_text)
     selected = []
+    result = {"data": selected, "revision": rev, "next_cursor": None}
+    if hash_page:
+        result["page_hash"] = revision(selected)
     for row in rows[offset : offset + query.get("limit", 50)]:
         item = project(row)
         if isinstance(item, dict):
@@ -162,10 +165,7 @@ def page(rows: list, rev: str, query: dict, hash_page: bool = False) -> dict:
                 raise APIError(413, "resource_too_large", "Use the explicit export operation for this resource")
             break
         selected.append(item)
-    end = offset + len(selected)
-    result = {"data": selected, "revision": rev, "next_cursor": f"{rev}:{end}" if end < len(rows) else None}
-    if hash_page:
-        result["page_hash"] = revision(selected)
+        result = candidate
     return bounded(result)
 
 
