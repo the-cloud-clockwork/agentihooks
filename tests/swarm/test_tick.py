@@ -2059,6 +2059,7 @@ def test_an_agent_whose_heartbeat_says_working_is_never_retired_while_its_pane_r
 
 def test_a_stalled_agents_open_messages_move_to_its_seat_for_the_next_engineer(store):
     from scripts.inbox.store import InboxStore
+    from scripts.swarm.stale_nudge import is_nudge
     from scripts.swarm.tick import IDLE_KILL_TICKS
 
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
@@ -2071,7 +2072,8 @@ def test_a_stalled_agents_open_messages_move_to_its_seat_for_the_next_engineer(s
     runtime.statuses["engineer@a1b2c3-0001"] = "idle"
     idle_for(store, ledger, runtime, IDLE_KILL_TICKS, start=2_000)
     assert runtime.killed == ["engineer@a1b2c3-0001"]
-    assert [(i.id, i.state) for i in inbox.inbox("eng-1@sw")] == [(open_item.id, "pending")]
+    seat = [(i.id, i.state) for i in inbox.inbox("eng-1@sw") if not is_nudge(i)]
+    assert seat == [(open_item.id, "pending")] and len(stale_nudges(store, "eng-1@sw")) == 1
     assert [i.id for i in inbox.inbox("engineer@a1b2c3-0001")] == [closed.id]
 
 
