@@ -30,6 +30,7 @@ def main() -> None:
         "a": {
             "cli_session_start_hook_registrations": positive["cli_session_start_hook_registrations"],
             "cli_mcp_list": positive["cli_mcp_list"],
+            "harness_diagnostics": [positive["harness_diagnostics"], second["harness_diagnostics"]],
             "homes": positive["record"]["homes"],
             "accounts": positive["record"]["accounts"],
             "profile_digests": positive["record"]["profile_digests"],

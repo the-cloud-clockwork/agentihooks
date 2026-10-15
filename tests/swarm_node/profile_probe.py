@@ -2,13 +2,20 @@ import hashlib
 import json
 import os
 import sys
+import time
 import tomllib
+from collections.abc import Callable
 from pathlib import Path
 
+from hooks.secrets import redact
 from scripts.swarm_v2 import worker_home
 from scripts.targets.codex_hook_trust import trusted_state
 
 SERVERS = {"claude": ["agentihooks", "fixture-claude-mcp"], "codex": ["agentihooks", "fixture-codex-mcp"]}
+TMP = Path("/tmp")
+REGISTRATION_BUDGET_SECONDS = 10.0
+POLL_SECONDS = 0.25
+OUTPUT_LIMIT = 4000
 
 
 def snapshot(root: Path) -> dict:
@@ -43,18 +50,78 @@ def sessions(home: Path) -> dict:
     return {session: entry["cwd"] for session, entry in registered.items()}
 
 
-def positive(attempt: Path) -> dict:
-    record = json.loads(Path("/tmp/record.json").read_text(encoding="utf-8"))
+def harness(target: str, attempt: Path, tmp: Path = TMP) -> dict:
+    output = (tmp / f"{target}-run.txt").read_text(encoding="utf-8", errors="replace")
+    return {
+        "exit": int((tmp / f"{target}-run.exit").read_text(encoding="utf-8")),
+        "output": redact(output.replace(str(attempt), "<attempt>"), mode="strict")[-OUTPUT_LIMIT:],
+    }
+
+
+def registration(
+    home: Path,
+    deadline: float,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> dict:
+    while True:
+        try:
+            found, error = sessions(home), None
+        except (OSError, ValueError, KeyError) as caught:
+            found, error = {}, f"{type(caught).__name__}: {caught}"
+        if found or clock() >= deadline:
+            return {"sessions": found} | ({"error": error} if error and not found else {})
+        sleep(POLL_SECONDS)
+
+
+def launched(target: str, home: Path, tmp: Path) -> float | None:
+    registry = home / ".agentihooks" / "active-sessions.json"
+    if not registry.exists():
+        return None
+    started = int((tmp / f"{target}-run.started").read_text(encoding="utf-8"))
+    return round((registry.stat().st_mtime_ns - started) / 1e9, 3)
+
+
+def diagnose(
+    attempt: Path,
+    tmp: Path = TMP,
+    budget: float = REGISTRATION_BUDGET_SECONDS,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> dict:
+    started = clock()
+    observed = {}
+    for target in SERVERS:
+        home = attempt / "homes" / target
+        observed[target] = registration(home, started + budget, clock, sleep) | {
+            "registry_written_after_launch_seconds": launched(target, home, tmp),
+            "harness": harness(target, attempt, tmp),
+        }
+    diagnostics = {
+        "registration_budget_seconds": budget,
+        "waited_seconds": round(clock() - started, 3),
+        "harnesses": observed,
+    }
+    if not all(list(entry["sessions"].values()) == ["/home/worker/work"] for entry in observed.values()):
+        print(json.dumps({"missing_hook_registration": diagnostics}, sort_keys=True))
+        raise SystemExit("missing hook registration: " + json.dumps(diagnostics, sort_keys=True))
+    return diagnostics
+
+
+def positive(attempt: Path, tmp: Path = TMP) -> dict:
+    record = json.loads((tmp / "record.json").read_text(encoding="utf-8"))
+    diagnostics = diagnose(attempt, tmp)
     docs = configuration(attempt)
-    loaded = {target: sessions(attempt / "homes" / target) for target in SERVERS}
-    listed = {target: Path(f"/tmp/{target}-mcp.txt").read_text(encoding="utf-8") for target in SERVERS}
+    listed = {target: (tmp / f"{target}-mcp.txt").read_text(encoding="utf-8") for target in SERVERS}
     missing = {t: [s for s in names if s not in listed[t]] for t, names in SERVERS.items()}
     assert record["reused"] is False
-    assert all(list(found.values()) == ["/home/worker/work"] for found in loaded.values()), loaded
     assert not any(missing.values()), (missing, listed)
     return {
         "record": record,
-        "cli_session_start_hook_registrations": {target: len(found) for target, found in loaded.items()},
+        "cli_session_start_hook_registrations": {
+            target: len(entry["sessions"]) for target, entry in diagnostics["harnesses"].items()
+        },
+        "harness_diagnostics": diagnostics,
         "cli_mcp_list": listed,
         "configuration": docs,
     }
