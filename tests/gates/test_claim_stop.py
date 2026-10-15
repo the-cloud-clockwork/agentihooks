@@ -99,6 +99,7 @@ def test_ruling_follows_the_pull_request_then_the_wait():
     assert ruling({"id": "t1"}, None, {"until": 1}) == ("", "")
     assert ruling(task, CLOSED, {"until": 1}) == ("", "")
 
+
 @pytest.mark.parametrize("kind", ["task", "merge"])
 def test_a_stop_on_red_checks_preserves_an_open_dependency_wait(rig, kind):
     rig.task["pr_url"], rig.pulls[URL] = URL, RED
