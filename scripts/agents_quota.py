@@ -325,7 +325,7 @@ def _claude(refresh: bool, timeout: float) -> list[QuotaRow]:
             credentials, refresh=refresh, timeout=timeout, claude_bin=shutil.which("claude") or "claude"
         )
     else:
-        results, source = [result for _, result in cached_observations()], "cached"
+        results, source = [], "cached"
     observed = {result.account: at for at, result in cached_observations()}
     rows = claude_rows(results, sessions, source, observed) + api_rows(ClaudeApiSource(sessions), "claude", time.time())
     return with_masters(rows, _masters("claude"), sessions)
@@ -405,7 +405,13 @@ def _page_quota(now: float) -> dict:
     from scripts.routing.claude_api import ClaudeApiSource
     from scripts.routing.codex_api import CodexApiSource
 
-    cached = current_observations(claude_quota_balancer.cached_observations())
+    tokens = {
+        credential.account
+        for credential in claude_quota_balancer.discover_credentials(router_environ(dict(os.environ)))
+    }
+    cached = current_observations(
+        [(at, r) for at, r in claude_quota_balancer.cached_observations() if r.account in tokens]
+    )
     observed = {result.account: at for at, result in cached}
     pool = codex_router.CodexAccountSource().pool(os.environ)
     live = account_sessions.sessions_by_account()
