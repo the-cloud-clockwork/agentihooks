@@ -26,12 +26,16 @@ def test_evidence_uses_delivered_branch_and_ignores_dirty_checkout(tmp_path):
     git(tmp_path, "commit", "-qm", "Delivered policy")
     git(tmp_path, "branch", "delivered")
     delivered = git(tmp_path, "rev-parse", "HEAD")
+    git(tmp_path, "branch", "policy.py")
+    (tmp_path / "unrelated.py").write_text("other = True\n")
+    git(tmp_path, "add", "unrelated.py")
     (tmp_path / "policy.py").write_text("unrelated_setting = True\n")
     git(tmp_path, "add", "policy.py")
     git(tmp_path, "commit", "-qm", "Unrelated policy")
     (tmp_path / "policy.py").write_text("dirty_setting = True\n")
     result = evidence.collect(tmp_path, base, {"branch": "delivered"})
     assert result["head"] == delivered
+    assert result["files"] == ["policy.py"]
     assert result["summary"] == "Delivered policy"
     assert "removed_setting" in result["changes"]
     assert "unrelated_setting" not in result["changes"]
@@ -89,7 +93,9 @@ def test_retrieval_limits_source_count_and_changed_file_diff(tmp_path):
 
 def test_queue_request_preserves_requirements_and_deduplicates_across_sessions(world, monkeypatch):
     _, payload, ledger, jobs = world
-    ledger.source.update(description="Explain retry limits", pr_url="https://example.test/pull/1")
+    ledger.source.update(
+        title="Retry control command", description="Explain retry limits", pr_url="https://example.test/pull/1"
+    )
     monkeypatch.setattr(session.documentation.runner, "decide", answer())
     calls = []
     original_lookup = ledger.task
@@ -114,7 +120,9 @@ def test_queue_request_preserves_requirements_and_deduplicates_across_sessions(w
     task = ledger.added[0]
     assert task["task"] == row["documentation_task"]
     assert task["task"].startswith("doc-") and len(task["task"]) == 20
-    assert task["title"] == "Document Add retry policy"
+    assert task["title"] == "Document Retry control command"
+    assert "Document the delivered behavior of Retry control command.\n" in task["description"]
+    assert 'Documentation sources: ["handbook/policy.md"]\n' in task["description"]
     assert task["follow_up"] is True
     assert task["not_duplicate"] == "Documents delivered behavior rather than implementing it"
     assert "Explain retry limits" in task["description"]
@@ -224,3 +232,41 @@ def test_credential_paths_with_documentation_extensions_are_never_sources(tmp_pa
     assert ".env.md" not in result["files"]
     assert ".env.md" not in result["doc_sources"]
     assert all(match["path"] != ".env.md" for match in result["docs"])
+
+
+def test_removed_identifiers_remain_complete_retrieval_terms(tmp_path):
+    repository(tmp_path)
+    (tmp_path / "policy.py").write_text("WidgetPolicy\n")
+    git(tmp_path, "add", "policy.py")
+    git(tmp_path, "commit", "-qm", "Original policy")
+    base = git(tmp_path, "rev-parse", "HEAD")
+    (tmp_path / "policy.py").write_text("ReplacementPolicy\n")
+    git(tmp_path, "add", "policy.py")
+    git(tmp_path, "commit", "-qm", "Replace policy")
+    result = evidence.collect(tmp_path, base)
+    assert result["docs"] == [{"path": "handbook/policy.md", "line": 2, "text": "WidgetPolicy controls retries."}]
+
+
+def test_short_assignments_are_redacted_from_diffs_and_documentation(tmp_path):
+    base = repository(tmp_path)
+    marker = "demo"
+    assignment = "API_TOKEN=" + marker
+    (tmp_path / "policy.py").write_text("WidgetPolicy\n" + assignment + "\n")
+    (tmp_path / "handbook/policy.md").write_text("WidgetPolicy " + assignment + "\n")
+    git(tmp_path, "add", "policy.py", "handbook/policy.md")
+    git(tmp_path, "commit", "-qm", "Configure policy")
+    result = evidence.collect(tmp_path, base)
+    assert marker not in result["changes"]
+    assert result["docs"]
+    assert all(marker not in row["text"] for row in result["docs"])
+
+
+def test_missing_requirements_do_not_search_placeholder_documentation(tmp_path):
+    base = repository(tmp_path)
+    (tmp_path / "handbook/policy.md").write_text("XXXX is a redacted placeholder.\n")
+    git(tmp_path, "add", "handbook/policy.md")
+    git(tmp_path, "commit", "-qm", "Clarify placeholders")
+    head = git(tmp_path, "rev-parse", "HEAD")
+    result = evidence.collect(tmp_path, head)
+    assert result["docs"] == []
+    assert base != head

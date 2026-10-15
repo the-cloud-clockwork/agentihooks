@@ -58,6 +58,7 @@ def test_uncertain_verdict_is_persisted_for_retry_with_full_source_context(world
     row = json.loads(args[0].read_text())
     assert row["verdict"] == {"needs_documentation": None, "size": "medium", "source": "uncertain"}
     assert row["status"] == "pending"
+    assert "error" not in row
     assert captured[0]["source_task"] == ledger.source
     assert "+class WidgetPolicy:" in captured[0]["changes"]
     assert ledger.added == []
@@ -69,6 +70,13 @@ def test_taskless_swarm_request_uses_session_identity_and_summary(world, monkeyp
     path = session._path(payload["session_id"])
     row = json.loads(path.read_text())
     row["task"] = ""
+    original_lookup = ledger.task
+
+    def lookup(slug, task_id):
+        assert task_id
+        return original_lookup(slug, task_id)
+
+    monkeypatch.setattr(ledger, "task", lookup)
     session._write(path, row)
     session.end(payload)
     fn, args = jobs.pop()
@@ -107,6 +115,14 @@ def test_notice_scan_skips_unrelated_shown_and_empty_records(world, monkeypatch)
     folder = session._path(payload["session_id"]).parent
     notices = []
     monkeypatch.setattr(session, "inject_context", notices.append)
+    locks = []
+    original_flock = session.fcntl.flock
+
+    def lock(fd, operation):
+        locks.append(operation)
+        original_flock(fd, operation)
+
+    monkeypatch.setattr(session.fcntl, "flock", lock)
     rows = [
         {"repository": str(root), "shown": True, "notice": "already shown"},
         {"repository": str(root)},
@@ -118,6 +134,7 @@ def test_notice_scan_skips_unrelated_shown_and_empty_records(world, monkeypatch)
     session._show_notice(root)
     session._show_notice(root)
     assert notices == ["document this repository"]
+    assert len(locks) == 1
 
 
 @pytest.mark.parametrize("update", [{"shown": True}, {"notice": ""}])
@@ -152,3 +169,38 @@ def test_worker_opens_a_service_ledger_only_for_swarm_requests(world, monkeypatc
     fn, args = jobs.pop()
     fn(*args)
     assert options == [{"service": True}]
+
+
+def test_standalone_snapshots_use_empty_swarm_and_task_identifiers(world, monkeypatch):
+    root, _, _, _ = world
+    monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
+    monkeypatch.delenv("AGENTIHOOKS_SWARM_TASK", raising=False)
+    payload = {"session_id": "standalone-schema", "cwd": str(root)}
+    session.start(payload)
+    row = json.loads(session._path(payload["session_id"]).read_text())
+    assert row["swarm"] == ""
+    assert row["task"] == ""
+
+
+def test_retry_batch_processes_exactly_three_eligible_requests_even_when_current_is_first(world, monkeypatch):
+    import os
+
+    root, payload, _, _ = world
+    folder = session._path(payload["session_id"]).parent
+    current = folder / "0-current.json"
+    current.write_text(json.dumps({"swarm": "fixture", "status": "pending"}))
+    os.utime(current, (1, 1))
+    expected = []
+    for index in range(4):
+        path = folder / f"request-{index}.json"
+        path.write_text(json.dumps({"swarm": "fixture", "status": "pending"}))
+        os.utime(path, (index + 2, index + 2))
+        expected.append(path)
+    for name, swarm, status in (("active", "fixture", "active"), ("foreign", "another", "pending")):
+        path = folder / f"{name}.json"
+        path.write_text(json.dumps({"swarm": swarm, "status": status}))
+        os.utime(path, (1.5, 1.5))
+    calls = []
+    monkeypatch.setattr(session, "process", calls.append)
+    session.process_pending(current)
+    assert calls == [current, *expected[:3]]

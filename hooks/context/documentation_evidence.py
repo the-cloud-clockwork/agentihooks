@@ -14,7 +14,8 @@ import json
 
 GIT_OPTIONS = {"text": True, "stderr": subprocess.DEVNULL, "timeout": 10}
 VERIFY_REVISION = ("rev-parse", "--verify", "--end-of-options")
-HEAD_REVISION = ("rev-parse", "HEAD")
+DEFAULT_REVISION = "HEAD"
+HEAD_REVISION = ("rev-parse", DEFAULT_REVISION)
 DIFF_NAMES = ("diff", "--name-only", "-z")
 DIFF_CONTENT = ("diff", "--no-ext-diff", "--unified=3")
 TRACKED_FILES = ("ls-files", "-z")
@@ -55,7 +56,7 @@ def collect(root: Path, base: str, context: dict | None = None) -> dict:
     root = Path(root)
     context = context or {}
     try:
-        head = git(root, *VERIFY_REVISION, context.get("branch") or "HEAD")
+        head = git(root, *VERIFY_REVISION, context.get("branch") or DEFAULT_REVISION)
     except subprocess.CalledProcessError:
         head = git(root, *HEAD_REVISION)
     base = git(root, "merge-base", base, head) if base else head
