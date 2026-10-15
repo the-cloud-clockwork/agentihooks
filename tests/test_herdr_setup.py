@@ -157,13 +157,16 @@ def test_a_missing_binary_is_installed_before_configuring(monkeypatch, runner):
     assert ["/bin/herdr", "integration", "install", "claude"] in runner.calls
 
 
-def test_init_runs_the_herdr_step_once_for_all_targets(monkeypatch):
+@pytest.mark.parametrize(
+    "options, expected", [([], ["claude", "codex"]), (["--with-copilot"], ["claude", "codex", "copilot"])]
+)
+def test_init_runs_the_herdr_step_once_for_all_targets(options, expected, monkeypatch):
     calls, steps = [], []
     monkeypatch.setattr(install, "cmd_init_unified", lambda args: calls.append(args))
     monkeypatch.setattr(herdr_setup, "init_step", lambda flag, interactive: steps.append(flag))
-    monkeypatch.setattr(sys, "argv", ["agentihooks", "init", "--profile", "default", "--herdr", "no"])
+    monkeypatch.setattr(sys, "argv", ["agentihooks", "init", "--profile", "default", "--herdr", "no", *options])
     install.main()
-    assert len(calls) == len(install.SUPPORTED_TARGETS)
+    assert [args.install_target for args in calls] == expected
     assert steps == ["no"]
 
 

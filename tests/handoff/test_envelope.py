@@ -134,11 +134,14 @@ def test_a_master_envelope_records_its_launch_effort_inside_the_swarm_range(stor
     assert envelope["launch"]["harness"] == harness
 
 
-def test_a_master_envelope_follows_the_configured_swarm_range(store):
-    store.update("sw", effort_min="low", effort_max="medium")
-    master = AgentRecord("master@a1b2c3-0001", "master", "master", harness="claude", effort="max")
+@pytest.mark.parametrize(
+    ("bounds", "saved"), [(("low", "medium"), "max"), (("low", "medium"), "low"), (("medium", "xhigh"), "medium")]
+)
+def test_a_master_envelope_never_records_a_launch_effort_below_high(store, bounds, saved):
+    store.update("sw", effort_min=bounds[0], effort_max=bounds[1])
+    master = AgentRecord("master@a1b2c3-0001", "master", "master", harness="claude", effort=saved)
     envelope = build(store, "sw", master, "recycle", [], 0, run=lambda argv, **_: _done(code=1))
-    assert envelope["launch"]["effort"] == "medium"
+    assert envelope["launch"]["effort"] == "high"
 
 
 @pytest.mark.parametrize(("harness", "effort"), [("copilot", "max"), ("claude", "")])
