@@ -1008,6 +1008,37 @@ def test_a_conflict_reopens_a_task_whose_engineer_has_not_released_its_seat(merg
     assert merging.shell.calls == []
 
 
+@pytest.mark.parametrize("queued", [True, False])
+@pytest.mark.parametrize("awaiting", ["", "merge"])
+def test_a_working_owner_keeps_its_claim_and_lease_when_the_pull_conflicts(merging, queued, awaiting):
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm.ledger_events import pull_request
+    from scripts.swarm.store import AgentRecord
+
+    merging.rows["t1"]["awaiting"] = awaiting
+    merging.store.put_agent("sw", AgentRecord(AGENT, "eng", "t1", state="working"))
+    merging.pulls[URL] = pull_request(
+        {
+            "state": "OPEN",
+            "mergeable": "CONFLICTING",
+            "mergeQueueEntry": {"id": "entry", "state": "UNMERGEABLE"} if queued else None,
+        }
+    )
+    merging.queue.extra = {"queued": False}
+    merging.run()
+    assert merging.rows["t1"]["state"] == "pr"
+    assert merging.rows["t1"]["claimed_by"] == AGENT
+    assert merging.rows["t1"]["awaiting"] == awaiting
+    assert merging.store.claimant("sw", "t1") == AGENT
+    assert merging.shell.calls == []
+    assert merging.queued == []
+    messages = InboxStore(merging.store.redis).items(AGENT)
+    assert len(messages) == 1
+    assert "restack" in messages[0].text.lower()
+    merging.run()
+    assert len(InboxStore(merging.store.redis).items(AGENT)) == 1
+
+
 def test_one_tick_reports_every_unreleased_entry_it_dequeues(merging):
     from scripts.swarm.ledger_events import pull_request
 
