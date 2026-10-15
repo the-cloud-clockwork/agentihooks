@@ -95,6 +95,58 @@ def guard(home, file_path):
     return GUARD["deny_reason"](payload, "master", home)
 
 
+@pytest.mark.parametrize("tool", ["Edit", "Write", "mcp__serena__replace_symbol_body"])
+def test_a_master_subagent_edits_only_inside_a_worktree_without_a_window(master, tool):
+    tree = master / "dev" / "worktrees" / "agentihooks" / "child"
+    payload = {
+        "tool_name": tool,
+        "tool_input": {"file_path": str(tree / "hooks" / "x.py")},
+        "session_id": SID,
+        "agent_id": "child-a",
+        "cwd": "/",
+    }
+    assert GUARD["deny_reason"](payload, "master", master) == ""
+    for target in [
+        master / "dev" / "tcc-ecosystem" / "agentihooks" / "x.py",
+        tree / ".env",
+        tree / ".npmrc",
+        tree / ".claude" / "conditions" / "pre-bash-x.py",
+    ]:
+        payload["tool_input"] = {"file_path": str(target)}
+        assert GUARD["deny_reason"](payload, "master", master)
+
+
+def test_a_hand_launched_masters_subagent_uses_the_recorded_seat(unseated):
+    tree = unseated / "dev" / "worktrees" / "agentihooks" / "child"
+    payload = {
+        "tool_name": "Edit",
+        "tool_input": {"file_path": str(tree / "x.py")},
+        "session_id": SID,
+        "agent_id": "child-a",
+        "cwd": "/",
+    }
+    assert GUARD["deny_reason"](payload, "master", unseated)
+    master_coding.record_seat(SID, "rig", "master@rig-1")
+    assert GUARD["deny_reason"](payload, "master", unseated) == ""
+    assert GUARD["deny_reason"](payload, "planner", unseated)
+    payload.pop("agent_id")
+    assert GUARD["deny_reason"](payload, "master", unseated)
+
+
+def test_a_master_subagent_cannot_follow_a_worktree_symlink_outside(master):
+    tree = master / "dev" / "worktrees" / "agentihooks" / "child"
+    tree.mkdir(parents=True)
+    (tree / "outside").symlink_to(master / "dev" / "tcc-ecosystem")
+    payload = {
+        "tool_name": "Edit",
+        "tool_input": {"file_path": str(tree / "outside" / "x.py")},
+        "session_id": SID,
+        "agent_id": "child-a",
+        "cwd": "/",
+    }
+    assert GUARD["deny_reason"](payload, "master", master)
+
+
 def test_the_window_opens_worktree_edits_but_keeps_conditions_and_credentials_closed(master):
     tree = master / "dev" / "worktrees" / "agentihooks" / "master-1"
     assert "cannot edit outside" in guard(master, tree / "hooks" / "x.py")
