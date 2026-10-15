@@ -1189,7 +1189,13 @@ jobs:
         run: |
           dev=$(git ls-remote origin refs/heads/dev)
           [[ -n "$dev" ]]
-          if [[ "${dev%%[[:space:]]*}" == "$SHA" ]]; then echo "superseded=false" >> "$GITHUB_OUTPUT"; else echo "superseded=true" >> "$GITHUB_OUTPUT"; fi
+          if [[ "${dev%%[[:space:]]*}" == "$SHA" ]]; then
+            echo "superseded=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "superseded=true" >> "$GITHUB_OUTPUT"
+            echo "::error::Dev advanced before Sonar analysis; this unscanned revision cannot be promoted."
+            exit 1
+          fi
 
       - name: Download shard coverage
         if: steps.current.outputs.superseded != 'true' && needs.select.outputs.scope != 'none'
