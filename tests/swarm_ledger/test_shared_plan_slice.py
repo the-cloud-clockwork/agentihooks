@@ -149,7 +149,7 @@ class TestRefusal:
             == rows
         )
 
-    def test_a_listed_row_or_an_untitled_task_is_matched_by_its_id(self, table):
+    def test_a_listed_row_or_an_untitled_task_is_matched_by_its_id(self):
         assert plan_read.own_rows("- t1 cache the reads\n", "5-5", {"id": "t1"}) == [(5, "- t1 cache the reads")]
 
     def test_a_task_in_another_phase_or_on_other_lines_shares_nothing(self, table):
@@ -210,8 +210,12 @@ class TestPlanRead:
         )
 
     def test_plan_read_context_keeps_the_margin_and_skips_linked_sections_already_printed(self, padded):
-        source = PADDED.splitlines()
-        context = "".join(f"{r}\n" for n, r in enumerate(source, 1) if 4 <= n and n not in (18, 19))
+        context = (
+            "".join(f"Note {n}\n" for n in range(2, 11))
+            + "## Build\n<!-- slice: table -->\n### Tasks\n| Task | Work |\n| --- | --- |\n"
+            "| t2 | Batch the writes after t1 |\n| t1 | Evict late |\n## Notes\nKeep it\n"
+            '<a id="ship"></a>\n## Ship\nOther\n'
+        )
         assert plan_read.read(padded, "tables", "t1", None) == (
             "Scope: plan lines 14-21 are shared with tasks t2; "
             "this task's scope is plan lines 18-19, the rows that name it.\n"
@@ -222,9 +226,9 @@ class TestPlanRead:
     def test_plan_read_of_an_undescribed_sharer_no_row_names_prints_an_empty_scope(self, table):
         table["tasks"].append(row("t4", "Rename the module"))
         del table["tasks"][-1]["description"]
-        assert plan_read.read(table, "tables", "t4", None).startswith(
+        assert plan_read.read(table, "tables", "t4", None) == (
             "Scope: plan lines 3-9 are shared with tasks t1, t2, t3, and no row names this task, "
-            "so none of them is its scope.\n\n\nContext only, not scope:\n"
+            "so none of them is its scope.\n\n\nContext only, not scope:\n" + TABLE
         )
 
     def test_plan_read_of_a_slice_one_open_task_holds_prints_the_chunk(self, table):
