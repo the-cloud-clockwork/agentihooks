@@ -282,7 +282,8 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             if store.config(slug).template == "doctor":
                 from scripts.doctor import cli as doctor
 
-                actions += skip_refused(doctor.timer, store, slug, now_ms(), scheduled)
+                with lease.kept(store, slug, held):
+                    actions += skip_refused(doctor.timer, store, slug, now_ms(), scheduled)
             herdr = messenger or delivery.HerdrMessenger()
             timing.call(delivery.migrate_outbox, store, slug, inbox)
             agents = [a for a in timing.call(store.agents, slug) if a.state != "finished"]
