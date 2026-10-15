@@ -14,12 +14,33 @@ from scripts.swarm.ledger_client import LedgerClient
 TERMINAL = {"queued", "complete"}
 
 
+WORKER_OPTIONS = {"timeout_sec": 180, "task_name": "documentation-session-end"}
+NO_CHANGES = {"needs_documentation": False, "size": "none", "source": "no changes"}
+TASK_DEFAULTS = {
+    "profile": "documentation",
+    "lane": "eng",
+    "kind": "code",
+    "follow_up": True,
+    "not_duplicate": "Documents delivered behavior rather than implementing it",
+}
+DOCUMENTATION_INSTRUCTIONS = (
+    "Extend the existing documentation and navigation with complete usage and configuration examples. "
+    "Follow the project's documentation conventions; default to docs when no source exists."
+)
+NOTICE_COMMAND = "Start it here: agentihooks init-agent --profile documentation"
+NOTICE_SUBJECT_LENGTH = 160
+TASK_HASH_LENGTH = 16
+RETRY_LIMIT = 3
+LOCK_SUFFIX = ".lock"
+WRITE_SUFFIX = ".next"
+
+
 def _path(session: str) -> Path:
     return HOME / "documentation" / (hashlib.sha256(session.encode()).hexdigest() + ".json")
 
 
 def _write(path: Path, row: dict) -> None:
-    target = path.with_suffix(".next")
+    target = path.with_suffix(WRITE_SUFFIX)
     target.write_text(json.dumps(row))
     target.replace(path)
 
@@ -29,7 +50,7 @@ def _show_notice(repository: Path) -> None:
         row = json.loads(path.read_text())
         if not row.get("notice") or row.get("shown") or row["repository"] != str(repository):
             continue
-        with path.with_suffix(".lock").open("w") as lock:
+        with path.with_suffix(LOCK_SUFFIX).open("w") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             row = json.loads(path.read_text())
             if row.get("notice") and not row.get("shown"):
@@ -77,7 +98,7 @@ def end(payload: dict) -> None:
             start(payload)
         if not path.exists():
             return
-        with path.with_suffix(".lock").open("w") as lock:
+        with path.with_suffix(LOCK_SUFFIX).open("w") as lock:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
@@ -88,13 +109,16 @@ def end(payload: dict) -> None:
             if row["status"] == "active":
                 row["status"] = "pending"
                 _write(path, row)
-        fork_and_call(process_pending, path, timeout_sec=180, task_name="documentation-session-end")
+        fork_and_call(process_pending, path, **WORKER_OPTIONS)
     except (OSError, ValueError) as exc:
         log("documentation dispatch unavailable", {"error": type(exc).__name__})
 
 
 def _queue(ledger: LedgerClient, row: dict, source: dict, evidence: dict, verdict: dict) -> str:
-    task = "doc-" + hashlib.sha256(f"{row['swarm']}:{row['task'] or row['session']}".encode()).hexdigest()[:16]
+    task = (
+        "doc-"
+        + hashlib.sha256(f"{row['swarm']}:{row['task'] or row['session']}".encode()).hexdigest()[:TASK_HASH_LENGTH]
+    )
     if ledger.task(row["swarm"], task):
         return task
     description = (
@@ -104,9 +128,7 @@ def _queue(ledger: LedgerClient, row: dict, source: dict, evidence: dict, verdic
         f"Source requirements: {source.get('description', '')}\n"
         f"Documentation sources: {json.dumps(evidence['doc_sources'])}\n"
         f"Documentation matches: {json.dumps(evidence['docs'])}\n"
-        f"Delivered change evidence:\n{evidence['changes']}\n"
-        "Extend the existing documentation and navigation with complete usage and configuration examples. "
-        "Follow the project's documentation conventions; default to docs when no source exists."
+        f"Delivered change evidence:\n{evidence['changes']}\n" + DOCUMENTATION_INSTRUCTIONS
     )
     ledger.add_task(
         row["swarm"],
@@ -114,13 +136,9 @@ def _queue(ledger: LedgerClient, row: dict, source: dict, evidence: dict, verdic
             "task": task,
             "title": "Document " + source.get("title", evidence["summary"]),
             "description": description,
-            "profile": "documentation",
-            "lane": "eng",
-            "kind": "code",
+            **TASK_DEFAULTS,
             "phase": source.get("phase", ""),
             "depends_on": [row["task"]] if row["task"] else [],
-            "follow_up": True,
-            "not_duplicate": "Documents delivered behavior rather than implementing it",
         },
         by="swarm",
     )
@@ -136,14 +154,14 @@ def _finish(path: Path, row: dict) -> None:
     evidence = documentation_evidence.collect(root, row["base"], source)
     verdict = row.get("verdict")
     if not source and not evidence["files"]:
-        verdict = {"needs_documentation": False, "size": "none", "source": "no changes"}
+        verdict = dict(NO_CHANGES)
     if not verdict or verdict["needs_documentation"] is None:
         verdict = documentation.classify(evidence)
     if source.get("profile") == "documentation" or (
         not source and not any(Path(p).suffix not in documentation_evidence.DOC_TYPES for p in evidence["files"])
     ):
         verdict["needs_documentation"] = False
-    row.update(verdict=verdict, status="pending")
+    row.update(verdict=verdict)
     log("documentation verdict", {"session": row["session"], **verdict})
     if verdict["needs_documentation"] is None:
         _write(path, row)
@@ -153,16 +171,13 @@ def _finish(path: Path, row: dict) -> None:
         row["documentation_task"] = _queue(ledger, row, source, evidence, verdict)
         row["status"] = "queued"
     elif verdict["needs_documentation"]:
-        row["notice"] = (
-            f"Documentation needed for {evidence['summary'][:160]}. "
-            "Start it here: agentihooks init-agent --profile documentation"
-        )
+        row["notice"] = f"Documentation needed for {evidence['summary'][:NOTICE_SUBJECT_LENGTH]}. " + NOTICE_COMMAND
     _write(path, row)
 
 
 def process(path: Path) -> None:
     path = Path(path)
-    with path.with_suffix(".lock").open("w") as lock:
+    with path.with_suffix(LOCK_SUFFIX).open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         row = json.loads(path.read_text())
         if row["status"] != "pending":
@@ -187,5 +202,5 @@ def process_pending(path: Path) -> None:
         if row["swarm"] == current["swarm"] and row["status"] == "pending":
             process(pending)
             retried += 1
-            if retried == 3:
+            if retried == RETRY_LIMIT:
                 break
