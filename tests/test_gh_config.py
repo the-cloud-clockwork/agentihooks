@@ -103,6 +103,26 @@ def test_an_unwritable_session_env_file_never_breaks_a_hook(tmp_path):
     assert not (tmp_path / "gone").exists()
 
 
+def test_the_pin_is_the_whole_of_a_new_session_env_file(tmp_path):
+    session_env = tmp_path / "session.env"
+    gh_config.persist({"CLAUDE_ENV_FILE": str(session_env), "GH_CONFIG_DIR": "/g"})
+    assert session_env.read_text() == "export GH_CONFIG_DIR=/g\n"
+
+
+def test_the_pin_follows_a_complete_line_directly(tmp_path):
+    session_env = tmp_path / "session.env"
+    session_env.write_text("export A=1\n")
+    gh_config.persist({"CLAUDE_ENV_FILE": str(session_env), "GH_CONFIG_DIR": "/g"})
+    assert session_env.read_text() == "export A=1\nexport GH_CONFIG_DIR=/g\n"
+
+
+def test_an_undecodable_session_env_file_never_breaks_a_hook(tmp_path):
+    session_env = tmp_path / "session.env"
+    session_env.write_bytes(b"\xff\xfe\xfa")
+    gh_config.persist({"CLAUDE_ENV_FILE": str(session_env), "GH_CONFIG_DIR": "/g"})
+    assert session_env.read_bytes() == b"\xff\xfe\xfa"
+
+
 @pytest.mark.parametrize("agent", ["claude", "codex"])
 def test_an_isolated_launcher_keeps_the_home_login(monkeypatch, tmp_path, agent):
     monkeypatch.setattr("scripts.profile_telemetry.installed_langfuse_env", lambda target: {})
