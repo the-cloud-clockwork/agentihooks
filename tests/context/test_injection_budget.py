@@ -94,10 +94,11 @@ def test_under_budget_keeps_every_block_in_priority_order():
     assert fit(blocks, 9000) == "operator\nrule\nbrain\nmemory"
 
 
-def test_unknown_kind_ranks_with_notices():
+def test_unknown_kind_ranks_last():
     from hooks.context.injection_budget import fit
 
-    assert fit([("brain", "brain"), ("mystery", "note"), ("refocus", "focus")], 9000) == "focus\nnote\nbrain"
+    blocks = [("tool_memory", "memory"), ("mystery", "note"), ("other", "notice"), ("brain", "brain")]
+    assert fit(blocks, 9000) == "notice\nbrain\nmemory\nnote"
 
 
 @pytest.mark.parametrize(

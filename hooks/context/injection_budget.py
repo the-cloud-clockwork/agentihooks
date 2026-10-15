@@ -41,7 +41,7 @@ def budget_chars(target: str | None = None) -> int | None:
 
 
 def _rank(kind: str) -> int:
-    return KINDS.index(kind) if kind in KINDS else KINDS.index("other")
+    return KINDS.index(kind) if kind in KINDS else len(KINDS)
 
 
 def _label(kind: str) -> str:

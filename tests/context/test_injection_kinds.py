@@ -255,8 +255,16 @@ def test_exact_budget_is_kept_without_a_notice():
 def test_block_that_exactly_fills_the_room_stays_whole():
     from hooks.context.injection_budget import fit
 
-    out = fit([("alert", "a" * 800), ("brain", "b" * 300)], 1000)
-    assert out == "a" * 800 + "\n[context budget: left out brain feed and broadcasts to stay under 1000 characters]"
+    lines = "a" * 399 + "\n" + "a" * 400
+    out = fit([("alert", lines), ("brain", "b" * 300)], 1000)
+    assert out == lines + "\n[context budget: left out brain feed and broadcasts to stay under 1000 characters]"
+
+
+def test_units_counts_whole_utf16_code_units():
+    from hooks.context.injection_budget import units
+
+    assert units("a\U0001f7e3") == 3
+    assert isinstance(units("ab"), int)
 
 
 def test_second_block_pays_for_its_separator():
