@@ -19,7 +19,11 @@ function fixture(options = {}) {
   let readiness = 0;
   const github = { rest: {
     git: {
-      getRef: async () => ({ data: { object: { sha: ++reads === 1 ? options.dev || 'graded' : options.moved || 'graded' } } }),
+      getRef: async ({ ref }) => {
+        if (ref === 'heads/dev') return { data: { object: { sha: ++reads === 1 ? options.dev || 'graded' : options.moved || 'graded' } } };
+        if (options.snapshot) return { data: { object: { sha: options.snapshot } } };
+        throw Object.assign(new Error('Not Found'), { status: 404 });
+      },
       createRef: async args => { refs.push(['create', args]); },
       deleteRef: async args => { refs.push(['delete', args]); },
     },
@@ -82,6 +86,20 @@ test('reuses an existing promotion pull request', async () => {
   const f = fixture({ existing: true });
   await promote(f);
   assert.deepEqual(f.writes.map(([kind]) => kind), ['merge']);
+});
+
+test('reuses a matching snapshot left before pull request creation', async () => {
+  const f = fixture({ snapshot: 'graded' });
+  await promote(f);
+  assert.deepEqual(f.refs.map(([kind]) => kind), ['delete']);
+  assert.equal(f.outputs.main, 'rebased');
+});
+
+test('rejects a snapshot that does not identify the graded revision', async () => {
+  const f = fixture({ snapshot: 'ungraded' });
+  await assert.rejects(promote(f), /snapshot/);
+  assert.deepEqual(f.writes, []);
+  assert.deepEqual(f.refs, []);
 });
 
 test('waits for GitHub to compute a clean merge', async () => {
