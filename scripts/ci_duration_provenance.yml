@@ -15,7 +15,9 @@
   if: github.event_name == 'merge_group' || github.event_name == 'pull_request'
   shell: bash
   working-directory: ${{ github.workspace }}/provenance-grader
-  run: python -m pip install 'pyyaml>=6.0'
+  run: |
+    python -m venv "$RUNNER_TEMP/provenance-python"
+    "$RUNNER_TEMP/provenance-python/bin/python" -I -m pip install 'pyyaml>=6.0'
 
 - name: Record the protected tested tree
   id: provenance
@@ -29,7 +31,7 @@
     RUN: ${{ github.run_id }}
     ATTEMPT: ${{ github.run_attempt }}
   run: |
-    python -I scripts/ci_reuse.py --base "$BASE" --head "$HEAD" --event "$EVENT" \
+    "$RUNNER_TEMP/provenance-python/bin/python" -I scripts/ci_reuse.py --base "$BASE" --head "$HEAD" --event "$EVENT" \
       --repository "$GITHUB_REPOSITORY" --run "$RUN" --attempt "$ATTEMPT" \
       --evidence "$RUNNER_TEMP/no-reuse" --record "$RUNNER_TEMP/provenance.json"
 

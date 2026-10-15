@@ -81,7 +81,9 @@ def test_duration_provenance_reads_the_base_and_records_the_queue_head():
         "RUN": "${{ github.run_id }}",
         "ATTEMPT": "${{ github.run_attempt }}",
     }
-    assert "python -I scripts/ci_reuse.py" in record["run"]
+    interpreter = '"$RUNNER_TEMP/provenance-python/bin/python" -I'
+    assert f"{interpreter} -m pip install " in install["run"]
+    assert f"{interpreter} scripts/ci_reuse.py " in record["run"]
     assert '--evidence "$RUNNER_TEMP/no-reuse"' in record["run"]
     assert publish["with"]["name"] == "required-tree-${{ github.run_attempt }}"
     assert publish["with"]["path"] == "${{ runner.temp }}/provenance.json"
