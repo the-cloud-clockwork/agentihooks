@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -42,6 +43,30 @@ def test_worker_health_shares_startup_runner_and_preserves_independent_proofs():
     assert upload["if"] == "${{ always() && matrix.proof == 'startup' }}"
     assert upload["with"]["path"] == "${{ runner.temp }}/worker-health-evidence"
     assert worker["worker-image-compare"]["needs"] == ["worker-image"]
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        "hive-launch-smoke.sh",
+        "hive-launch-attestation-proof.sh",
+        "swarm-smoke.sh",
+        "hive-join-smoke.sh",
+        "compose-hive-smoke.sh",
+        "swarm-image-clients.sh",
+    ],
+)
+def test_each_container_proof_remains_wired(script):
+    steps = jobs("swarm-smoke.yml")["smoke"]["steps"]
+    assert sum(script in step.get("run", "") for step in steps) == 1
+
+
+def test_worker_health_obtains_the_locked_base_before_building():
+    steps = jobs("swarm-node-smoke.yml")["worker-image"]["steps"]
+    pull = next(index for index, step in enumerate(steps) if step.get("run") == "bash docker/swarm-node/pull-base.sh")
+    health = next(index for index, step in enumerate(steps) if "run_health_proof.sh" in step.get("run", ""))
+    assert pull < health
+    assert not steps[health].get("continue-on-error", False)
 
 
 def test_queue_baseline_keeps_its_light_runner():
