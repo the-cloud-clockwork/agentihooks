@@ -24,7 +24,7 @@ def persist(environ: MutableMapping[str, str]) -> None:
         return
     path = Path(target)
     line = f"export {KEY}={shlex.quote(pinned)}\n"
-    with contextlib.suppress(OSError):
+    with contextlib.suppress(OSError, ValueError):
         current = path.read_text() if path.is_file() else ""
         if line not in current:
             with path.open("a") as handle:
