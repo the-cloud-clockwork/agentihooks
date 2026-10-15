@@ -1,0 +1,66 @@
+import pytest
+
+from scripts.swarm_ledger import ledger, ledger_tasks, legacy_page, new_ledger
+from scripts.swarm_ledger import ledger_core as core
+
+SLUG = "task-repositories"
+
+
+@pytest.fixture(autouse=True)
+def ledger_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)
+    monkeypatch.setitem(core.EXTENSION_OPS, "task_add", ledger_tasks)
+    monkeypatch.setitem(core.EXTENSION_OPS, "task_update", ledger_tasks)
+    content = {"title": "Demo", "overview": "o", "sources": [], "phases": []}
+    html_path, _ = core.paths(SLUG)
+    html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
+
+
+def test_task_repositories_survive_add_update_and_clear():
+    add = {
+        "op": "task_add",
+        "id": "add",
+        "by": "swarm",
+        "task": "t1",
+        "title": "bundle fix",
+        "lane": "eng",
+        "repositories": ["/workspace/agentihooks-bundle"],
+    }
+    core.check_op(add)
+    state, rejected = core.sync(SLUG, ops=[add])
+    assert rejected == []
+    assert state["tasks"][0]["repositories"] == ["/workspace/agentihooks-bundle"]
+    for n, repositories in enumerate((["/workspace/agentihooks", "/workspace/agentihooks-bundle"], [])):
+        update = {
+            "op": "task_update",
+            "id": f"update-{n}",
+            "by": "swarm",
+            "item": "tasks/t1",
+            "fields": {"repositories": repositories},
+        }
+        core.check_op(update)
+        state, rejected = core.sync(SLUG, ops=[update])
+        assert rejected == []
+        assert state["tasks"][0]["repositories"] == repositories
+
+
+def test_task_cli_sends_explicit_repositories(monkeypatch):
+    sent = []
+    monkeypatch.setattr(ledger, "send", lambda args, kind, **fields: sent.append((kind, fields)))
+    for argv in (
+        ["task", "add", "t1", "bundle fix", "--repositories", "/workspace/agentihooks-bundle"],
+        ["task", "set", "t1", "repositories=/workspace/agentihooks,/workspace/agentihooks-bundle"],
+        ["task", "set", "t1", "repositories="],
+    ):
+        ledger.cmd_task(ledger.build_parser().parse_args(["--slug", SLUG, "--as", "swarm", *argv]))
+    assert sent[0][1]["repositories"] == ["/workspace/agentihooks-bundle"]
+    assert sent[1][1]["fields"] == {"repositories": ["/workspace/agentihooks", "/workspace/agentihooks-bundle"]}
+    assert sent[2][1]["fields"] == {"repositories": []}
+
+
+@pytest.mark.parametrize("value", ("bundle", [""], [3], ["relative/repository"]))
+def test_task_repositories_require_absolute_local_paths(value):
+    with pytest.raises(ValueError, match="repositories"):
+        core.check_op(
+            {"op": "task_update", "id": "bad", "by": "swarm", "item": "tasks/t1", "fields": {"repositories": value}}
+        )
