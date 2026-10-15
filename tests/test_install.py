@@ -2944,11 +2944,13 @@ def _call_operator_install(installer, external, caller):
         installer._cmd_settings_profile(argparse.Namespace(clear=True, for_target=None))
     elif caller == "link":
         installer.cmd_link_profile("link", str(external))
+    elif caller == "unlink":
+        installer.cmd_link_profile("unlink", name="external")
     else:
         installer.install_global(argparse.Namespace(profile="default", settings_profile="", install_target="claude"))
 
 
-@pytest.mark.parametrize("caller", ["init", "settings", "clear", "link", "global"])
+@pytest.mark.parametrize("caller", ["init", "settings", "clear", "link", "unlink", "global"])
 @pytest.mark.parametrize(
     "signal", ["AGENTIHOOKS_SWARM", "AGENTIHOOKS_PROFILE", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "COPILOT_HOME"]
 )
@@ -2981,6 +2983,9 @@ def test_operator_shell_can_install_profiles(operator_install, monkeypatch, call
     installer, external = operator_install
     for name in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "COPILOT_HOME"):
         monkeypatch.setenv(name, str(Path.home() / "custom" / name))
+    home = Path.home() / "custom" / "CLAUDE_CONFIG_DIR"
+    home.mkdir(parents=True)
+    (home / "CLAUDE.md").write_text("<!-- profile: previous -->\n")
     with patch.object(installer, "_install_global_inner") as inner:
         _call_operator_install(installer, external, caller)
     assert inner.called
