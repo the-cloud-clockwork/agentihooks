@@ -335,6 +335,9 @@ def on_session_start(payload: dict) -> None:
     )
 
     _request_trace_flush(payload, "start")
+    from hooks.context import documentation_session
+
+    documentation_session.start(payload)
 
     # Emit a trace span for session start (visible in Langfuse)
     tracer = otel.get_tracer()
@@ -567,6 +570,9 @@ def on_session_end(payload: dict) -> None:
         },
     )
     _request_trace_flush(payload, "end")
+    from hooks.context import documentation_session
+
+    documentation_session.end(payload)
 
     # Log transcript entries to hooks.log (for debugging)
     if session_id and transcript_path:

@@ -651,10 +651,11 @@ def test_overlays_box_lists_every_base_role_with_the_overlays_that_wear_it(open_
         ["planner", [["reviewer", "false", False]], ""],
         ["qa", [["qitp-tuner", "false", False]], ""],
         ["cicd", [["sre", "false", False]], ""],
+        ["documentation", [], none],
     ]
     assert page.tab.locator("#overlays-apply").is_disabled()
     payload = status(overlays_available=[])
-    assert [row[2] for row in overlay_rows(open_page(payload))] == [none] * 5
+    assert [row[2] for row in overlay_rows(open_page(payload))] == [none] * 6
 
 
 def test_overlay_names_start_at_the_role_text_edge(open_page):
@@ -665,7 +666,7 @@ def test_overlay_names_start_at_the_role_text_edge(open_page):
           const range = document.createRange(); range.selectNodeContents(t);
           return Math.round(range.getBoundingClientRect().left); })""",
     )
-    assert len(edges) == 5
+    assert len(edges) == 6
     assert len(set(edges)) == 1
 
 

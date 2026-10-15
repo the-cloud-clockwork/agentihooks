@@ -95,6 +95,8 @@ def test_a_batched_pull_request_pages_through_more_than_one_hundred_contexts():
     found = views(urls, run)
     assert len(calls) == 2
     assert {"id=C_h2", "after=c"} <= set(calls[1])
+    assert "isRequired(pullRequestNumber:1)" in calls[1][4]
+    assert "isRequired(pullRequestNumber:0)" in calls[0][-1] and "$number" not in calls[0][-1]
     assert found[urls[0]].head == "h1"
     assert found[urls[1]].failed == ("job 100",)
     assert found[urls[1]].red is True

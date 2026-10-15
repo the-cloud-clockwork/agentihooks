@@ -1,11 +1,13 @@
 import importlib.util
 import json
 import os
+import sys
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tests" / "swarm_node"))
 SPEC = importlib.util.spec_from_file_location("profile_probe", ROOT / "tests" / "swarm_node" / "profile_probe.py")
 probe = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(probe)

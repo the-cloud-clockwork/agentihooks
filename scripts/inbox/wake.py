@@ -7,6 +7,7 @@ then a follow-up on the ledger page. Every step is appended to the item's histor
 from dataclasses import replace
 
 from scripts.inbox import addresses, exits
+from scripts.inbox.dispatch import Dispatcher
 from scripts.inbox.seats import is_seat
 from scripts.inbox.seen import SEEN_ON_LEDGER, SeenMarks
 from scripts.inbox.store import redelivery_ms
@@ -38,9 +39,14 @@ def quiet_ms(environ):
     return int(environ.get(QUIET_ENV) or DEFAULT_QUIET_S) * 1000
 
 
-def typed_wake(agent):
-    """Only a worker pane whose harness has no inbox channel is typed into; the master pane is the operator's."""
-    return bool(agent.pane_id) and agent.lane != MASTER and agent.harness not in WATCHED
+def typed_wake(inbox, agent):
+    """Typed wake only for a worker pane with no inbox channel and no push pump owner; never the master pane."""
+    return (
+        bool(agent.pane_id)
+        and agent.lane != MASTER
+        and agent.harness not in WATCHED
+        and not Dispatcher(inbox).owner(agent.name)
+    )
 
 
 def decide(item, pane, history, now_ms, window, slug, since=0):
@@ -74,7 +80,7 @@ def raised_id(entry: dict) -> str:
 
 def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window, quiet=DEFAULT_QUIET_S * 1000):
     names, config = {a.name for a in agents}, _swarm_config(inbox, slug)
-    panes = {a.name: a for a in agents if typed_wake(a)}
+    panes = {a.name: a for a in agents if typed_wake(inbox, a)}
     boss = next((a for a in agents if a.lane == MASTER), None)
     master = (boss.seat or boss.name) if boss else ""
     marks = SeenMarks(inbox.redis)
@@ -122,7 +128,7 @@ def wake_now(inbox, slug, agents, herdr, now_ms, window, quiet=DEFAULT_QUIET_S *
     channel, and escalation stays with the tick's wake pass."""
     actions, names, config = [], {a.name for a in agents}, _swarm_config(inbox, slug)
     for agent in agents:
-        if agent.harness != "codex" or not typed_wake(agent) or outage.open_records(slug):
+        if agent.harness != "codex" or not typed_wake(inbox, agent) or outage.open_records(slug):
             continue
         mail = inbox.pending_mail(agent.name)
         if not mail:

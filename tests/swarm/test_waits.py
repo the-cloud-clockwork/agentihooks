@@ -219,6 +219,17 @@ def test_the_tick_accepts_a_merge_wait_only_after_the_pull_request_lands(tick):
     assert tick.end() == []
 
 
+def test_an_open_dependency_pull_request_holds_even_when_its_checks_are_red(tick):
+    tick.hold("merge", URL)
+    tick.pulls[URL] = PullRequest("OPEN", None, 1, True, resolved=True)
+    rows = {"t1": {"id": "t1", "pr_url": URL + "0"}}
+    assert tick.end(rows, now=1_000_000) == []
+    assert held(tick.store)["on"] == {"kind": "merge", "target": URL}
+    tick.pulls[URL] = PullRequest("MERGED", 2, 1, False)
+    assert tick.end(rows) == [f"ended the wait of {ME}: pull request {URL}, now merged"]
+    assert held(tick.store) is None
+
+
 LEFT = f"pull request {URL}, now red; left the merge queue without merging; fix it and queue it again"
 UNLISTED = PullRequest("OPEN", None, 1, False, resolved=True, head="first")
 LISTED = PullRequest("OPEN", None, 1, False, resolved=True, head="first", queued=True)
@@ -803,8 +814,9 @@ def test_the_probe_requests_the_head_with_its_check_rollup():
                 "commits(last:1){nodes{commit{id committedDate "
                 'file(path:".github/workflows"){object{...on Tree{entries{object{...on Blob{text}}}}}} '
                 "statusCheckRollup{contexts(first:100){"
-                "nodes{...on CheckRun{databaseId name conclusion completedAt checkSuite{workflowRun{workflow{name}}}} "
-                "...on StatusContext{context state createdAt}} "
+                "nodes{...on CheckRun{databaseId name conclusion completedAt isRequired(pullRequestNumber:7) "
+                "checkSuite{workflowRun{workflow{name}}}} "
+                "...on StatusContext{context state createdAt isRequired(pullRequestNumber:7)}} "
                 "pageInfo{hasNextPage endCursor}}} checkSuites(first:100){nodes{status conclusion workflowRun{databaseId createdAt}} "
                 "pageInfo{hasNextPage endCursor}}}}}}}}",
                 "-f",

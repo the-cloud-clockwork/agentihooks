@@ -313,7 +313,8 @@ An outage holds the affected idle and delivery decisions until recovery (see
    Each change leaves a status comment from `swarm` on the phase and an information item for the master. A phase
    with no task, or out of scope, is left to the master.
 10. Send each new health finding to the master with the `verdict` command to judge it.
-11. Wake idle panes holding unread items, and climb the wake ladder for items nobody reads.
+11. Wake idle panes holding unread items, except a Codex pane whose push pump owns its inbox, and climb the wake
+    ladder for items nobody reads.
 12. Write the automatic snapshot when it is due.
 
 The health pass reports `merge stall` when the dev merge queue holds entries and no pull request has merged

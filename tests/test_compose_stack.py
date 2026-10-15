@@ -50,4 +50,4 @@ def test_env_example_selects_compose_deployment():
 
 def test_swarm_smoke_runs_the_compose_hive_proof():
     jobs = yaml.safe_load((ROOT / ".github/workflows/swarm-smoke.yml").read_text())["jobs"]
-    assert any("compose-hive-smoke.sh" in step.get("run", "") for step in jobs["compose-hive"]["steps"])
+    assert any("compose-hive-smoke.sh" in step.get("run", "") for job in jobs.values() for step in job["steps"])
