@@ -399,6 +399,15 @@ def test_shards_wait_only_on_the_durations_lookup():
     assert jobs["lint"]["needs"] in (["reuse"], ["reuse", "admission"])
 
 
+def test_promotion_shard_reports_use_the_pushed_grader_and_prs_keep_the_base():
+    steps = _workflow()["jobs"]["shard-check"]["steps"]
+    checkout = next(step for step in steps if step.get("uses", "").startswith("actions/checkout@"))
+    ref = checkout["with"]["ref"]
+    assert "github.event_name == 'push' && github.sha" in ref
+    assert "github.event_name == 'pull_request' && 'dev'" in ref
+    assert ref.index("github.event_name == 'push' && github.sha") < ref.index("github.event.before")
+
+
 def test_unit_shards_check_out_full_history_without_old_file_contents():
     _, checkout = _unit_step_index(lambda s: s.get("uses", "").startswith("actions/checkout"))
     assert {key: value for key, value in checkout["with"].items() if key != "ref"} == {
