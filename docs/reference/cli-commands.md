@@ -282,6 +282,19 @@ and `path` fields but requires an absolute path.
 
 ---
 
+## `agentihooks ledger task split`
+
+Declare a code or CI task's pull request halves before recording its first pull request:
+
+```bash
+agentihooks ledger --slug <id> --as <agent> \
+  task split <task> 1-10 11-20
+```
+
+Ranges are ordered, non-overlapping plan lines and must cover the task's assigned plan lines when present. A task with a recorded pull request, or a split with a recorded half, refuses the change. See [Split tasks across pull requests](../pillars/swarm.md#split-tasks-across-pull-requests) for recording each half, the automatic active-link reset between merges, completion and troubleshooting.
+
+---
+
 ## `agentihooks conditions`
 
 Inspect the [conditions](../hooks/conditions.md) the running harness would execute.
