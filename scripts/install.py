@@ -2119,9 +2119,9 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
     # Profile recall: this target's record first; a fresh target borrows the
     # default target's chain so `init --target codex` on a claude machine
     # installs the same persona instead of falling to 'default'.
-    _prev_global = _global_record(_prev_state, install_target) or _global_record(_prev_state)
-    if _is_force:
-        _prev_global = _global_record(_kept_state, install_target) or _global_record(_kept_state)
+    from scripts.init_reporter import previous_install
+
+    _prev_global = previous_install(sys.modules[__name__], _kept_state if _is_force else _prev_state, install_target)
     if not profile_name:
         if _prev_global.get("profile", ""):
             profile_name = _prev_global["profile"]
@@ -6371,8 +6371,10 @@ def main() -> None:
         dest="init_target",
         choices=list(SUPPORTED_TARGETS),
         default=None,
-        help=("Install only one agent CLI (claude | codex | copilot). Without this flag, installs all supported CLIs."),
+        help="Install only one agent CLI (claude | codex | copilot). Defaults to Claude and Codex.",
     )
+    init_p.add_argument("--with-copilot", action="store_true", help="Include Copilot in this install")
+    init_p.add_argument("--verbose", "-v", action="store_true", help="Show full installation details")
     init_p.add_argument(
         "--force",
         action="store_true",
@@ -6772,23 +6774,9 @@ notes:
         elif args.action == "list":
             cmd_link_profile("list")
     elif args.command == "init":
-        args.profile = getattr(args, "init_profile", None)
-        args.settings_profile = getattr(args, "init_settings_profile", None) or ""
-        # NB: attribute name avoids link-profile's positional `args.target`.
-        args.install_target = getattr(args, "init_target", None)
-        env_target = os.environ.get("AGENTIHOOKS_TARGET", "").strip()
-        targets = (args.install_target or env_target,) if args.install_target or env_target else SUPPORTED_TARGETS
-        for index, target in enumerate(targets):
-            target_args = deepcopy(args)
-            target_args.install_target = target
-            if index:
-                target_args.force = False
-                target_args.bundle = None
-                target_args.link_profile = []
-            cmd_init_unified(target_args)
-        from scripts.herdr_setup import init_step
+        from scripts.init_reporter import run_init
 
-        init_step(args.init_herdr, sys.stdin.isatty())
+        run_init(args, sys.modules[__name__])
     elif args.command == "settings-profile":
         _cmd_settings_profile(args)
     elif args.command == "ignore":
