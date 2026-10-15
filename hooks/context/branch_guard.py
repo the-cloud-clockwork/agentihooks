@@ -418,7 +418,9 @@ def check_branch_guard(payload: dict) -> None:
                 "(e.g. 'new branch', 'create branch', 'branch allowed')."
             )
 
-    for line in check_text.splitlines():
+    from hooks.context.prod_lockdown import _strip_safe_content
+
+    for line in _strip_safe_content(command).splitlines():
         _check_pr_creation(line, command, session_id)
 
 

@@ -19,8 +19,8 @@ def session(tmp_path, monkeypatch):
     return "release-publication"
 
 
-def check(command, session):
-    payload = {"tool_input": {"command": command}, "session_id": session}
+def check(command, session, cwd=""):
+    payload = {"tool_input": {"command": command}, "session_id": session, "cwd": cwd}
     branch_guard.check_branch_guard(payload)
     prod_lockdown.check_prod_lockdown(payload)
 
@@ -117,18 +117,31 @@ def test_effective_pr_base_is_protected(session, arguments):
     )
 
 
+@pytest.mark.parametrize("flag", ["--title", "--body", "-t", "-b"])
+@pytest.mark.parametrize("value", ["--base=dev", "--base dev", "-Bdev"])
+def test_pr_message_cannot_change_the_actual_base(session, flag, value):
+    with pytest.raises(BlockAction) as blocked:
+        check(f"gh pr create --base main {flag} '{value}'", session)
+    assert str(blocked.value) == (
+        "BLOCKED: agent PR creation into 'main' is forbidden. CI alone promotes dev into protected branches."
+    )
+
+
 @pytest.mark.parametrize(
     ("command", "selector", "repo"),
     [
         ("gh pr merge 123 --rebase", "123", None),
         ("gh pr merge https://github.com/owner/repo/pull/123 --squash", "https://github.com/owner/repo/pull/123", None),
         ("gh pr merge --rebase", None, None),
+        ("gh pr merge --subject 123 --squash", None, None),
+        ("gh pr merge -t 123 -b 456 --squash", None, None),
+        ("gh pr merge 123 --subject main --body master --squash", "123", None),
         ("gh -R owner/repo pr merge 123 --rebase", "123", "owner/repo"),
         ("gh pr merge --rebase 123 --repo=owner/repo", "123", "owner/repo"),
     ],
 )
 @pytest.mark.parametrize("base", ["main", "master", "v1", "dev"])
-def test_merge_looks_up_the_actual_base(session, monkeypatch, command, selector, repo, base):
+def test_merge_looks_up_the_actual_base(session, monkeypatch, tmp_path, command, selector, repo, base):
     import subprocess
 
     seen = []
@@ -141,15 +154,15 @@ def test_merge_looks_up_the_actual_base(session, monkeypatch, command, selector,
 
     def run(argv, **kwargs):
         seen.append(argv)
-        assert kwargs == {"capture_output": True, "text": True, "check": True, "timeout": 10}
+        assert kwargs == {"capture_output": True, "text": True, "check": True, "timeout": 10, "cwd": str(tmp_path)}
         return subprocess.CompletedProcess(argv, 0, f"{base}\n", "")
 
     monkeypatch.setattr(subprocess, "run", run)
     if base == "dev":
-        check(command, session)
+        check(command, session, str(tmp_path))
     else:
         with pytest.raises(BlockAction) as blocked:
-            check(command, session)
+            check(command, session, str(tmp_path))
         assert str(blocked.value) == (
             "BLOCKED [gh pr merge to main/master/v1]: CI alone promotes dev into protected branches."
         )

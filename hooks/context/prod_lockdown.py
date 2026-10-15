@@ -204,14 +204,14 @@ def _production_operands(node: Node) -> list[str]:
     ]
     values = [shlex.split(word)[0] for word in words]
     text = _command_lines(strip_non_command_content(" ".join(words)))
-    merge = re.search(r"\bgh\b[^|&;\n]*\bpr\s+merge\b", text)
-    message_flags = {"--subject", "--body", "-t", "-b"}
+    pull_request = re.search(r"\bgh\b[^|&;\n]*\bpr\s+(merge|create)\b", text)
+    message_flags = {"--subject", "--title", "--body", "-t", "-b"}
     operands, message_next = [], False
     for word, value in zip(words, values):
         if message_next:
             message_next = False
             continue
-        if merge and value.split("=", 1)[0] in message_flags:
+        if pull_request and value.split("=", 1)[0] in message_flags:
             message_next = "=" not in value
             continue
         operands.append(word)
@@ -280,12 +280,12 @@ def _merge_view_command(line: str) -> list[str] | None:
     return [*command, "--json", "baseRefName", "--jq", ".baseRefName"]
 
 
-def _check_pr_merge(line: str) -> None:
+def _check_pr_merge(line: str, cwd: str) -> None:
     try:
         command = _merge_view_command(line)
         if command is None:
             return
-        base = subprocess.run(command, capture_output=True, text=True, check=True, timeout=10).stdout.strip()
+        base = subprocess.run(command, capture_output=True, text=True, check=True, timeout=10, cwd=cwd).stdout.strip()
         if not base:
             raise ValueError("missing pull request base")
     except (OSError, ValueError, StopIteration, subprocess.SubprocessError):
@@ -328,5 +328,8 @@ def check_prod_lockdown(payload: dict) -> None:
         raise BlockAction(
             f"BLOCKED [{name}]: {reason}\nAdd --emergency-prod / 'prod override' / 'emergency' to your message."
         )
+    from hooks.context.branch_guard import _resolve_cwd
+
+    cwd = _resolve_cwd(command, payload.get("cwd", ""))
     for line in check_text.splitlines():
-        _check_pr_merge(line)
+        _check_pr_merge(line, cwd)
