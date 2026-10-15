@@ -519,3 +519,24 @@ def test_codex_unresolved_push_refuses_with_directory_guidance(repo, swarm_workt
     assert str(repo) not in message
     payload["tool_input"]["command"] = f"git -C {repo} push -u origin HEAD"
     check_prepush(payload)
+
+
+@pytest.mark.parametrize("selection", ["workdir", "git-c"])
+def test_codex_explicit_directory_without_a_repository_is_refused(repo, tmp_path, monkeypatch, selection):
+    from hooks.targets.normalizer import normalize_payload
+
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    target = tmp_path / "not-a-repository"
+    target.mkdir()
+    tool_input = {"command": "git push -u origin HEAD"}
+    if selection == "workdir":
+        tool_input["workdir"] = str(target)
+    else:
+        tool_input["command"] = f"git -C {target} push -u origin HEAD"
+    payload = normalize_payload({"tool_name": "exec_command", "tool_input": tool_input, "cwd": str(repo)})
+    _stamp(repo)
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(payload)
+    assert "Could not resolve the push directory" in str(blocked.value)
+    assert "git -C /absolute/path/to/worktree push" in str(blocked.value)
+    assert str(repo) not in str(blocked.value)
