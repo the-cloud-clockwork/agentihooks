@@ -1,4 +1,5 @@
 import json
+import os
 
 import pytest
 
@@ -119,21 +120,19 @@ def test_classifier_children_schedule_no_documentation_work(world, monkeypatch):
     assert ledger.added == []
 
 
-def test_a_handoff_waits_for_delivered_work_before_queueing_documentation(world, monkeypatch):
+def test_a_closing_agent_queues_documentation_with_its_source_dependency(world, monkeypatch):
     _, payload, ledger, jobs = world
-    ledger.source["state"] = "claimed"
+    ledger.source["state"] = "pr"
     monkeypatch.setattr(documentation.runner, "decide", answer())
     documentation_session.end(payload)
     fn, args = jobs.pop()
     fn(*args)
-    assert ledger.added == []
-    assert json.loads(args[0].read_text())["status"] == "awaiting_delivery"
-    ledger.source["state"] = "done"
-    fn(*args)
     assert len(ledger.added) == 1
+    assert ledger.added[0]["depends_on"] == ["t1"]
+    assert json.loads(args[0].read_text())["status"] == "queued"
 
 
-def test_standalone_session_logs_the_verdict_and_prints_a_launch_instruction(tmp_path, monkeypatch, capsys):
+def test_standalone_completion_detaches_and_shows_one_notice_in_the_same_repository(tmp_path, monkeypatch):
     root = tmp_path / "repo"
     root.mkdir()
     repository(root)
@@ -142,8 +141,10 @@ def test_standalone_session_logs_the_verdict_and_prints_a_launch_instruction(tmp
     monkeypatch.delenv("AGENTIHOOKS_SWARM_TASK", raising=False)
     monkeypatch.delenv("AGENTIHOOKS_CLASSIFIER_CHILD", raising=False)
     monkeypatch.setattr(documentation.runner, "decide", answer())
-    logged = []
+    logged, notices, jobs = [], [], []
     monkeypatch.setattr(documentation_session, "log", lambda event, data: logged.append((event, data)))
+    monkeypatch.setattr(documentation_session, "inject_context", notices.append)
+    monkeypatch.setattr(documentation_session, "fork_and_call", lambda fn, *args, **kwargs: jobs.append((fn, args)))
 
     def no_ledger(**kwargs):
         raise AssertionError("standalone session must not create or contact a ledger")
@@ -155,10 +156,23 @@ def test_standalone_session_logs_the_verdict_and_prints_a_launch_instruction(tmp
     git(root, "add", "policy.py")
     git(root, "commit", "-qm", "Add retry policy")
     documentation_session.end(payload)
-    output = capsys.readouterr().out
-    assert "Add retry policy" in output
-    assert "init-agent" in output
+    assert len(jobs) == 1
+    assert not logged
+    fn, args = jobs.pop()
+    fn(*args)
     assert any(data.get("needs_documentation") is True for _, data in logged)
+    assert notices == []
+    other = tmp_path / "other"
+    other.mkdir()
+    repository(other)
+    documentation_session.start({"session_id": "other-repository", "cwd": str(other)})
+    assert notices == []
+    documentation_session.start({"session_id": "next-session", "cwd": str(root)})
+    documentation_session.start({"session_id": "later-session", "cwd": str(root)})
+    assert len(notices) == 1
+    assert "Add retry policy" in notices[0]
+    assert "init-agent" in notices[0]
+    assert len(notices[0]) < 300
 
 
 def test_an_unchanged_session_records_no_documentation_need(tmp_path, monkeypatch):
@@ -171,6 +185,7 @@ def test_an_unchanged_session_records_no_documentation_need(tmp_path, monkeypatc
         raise AssertionError("unchanged work needs no model call")
 
     monkeypatch.setattr(documentation.runner, "decide", forbidden)
+    monkeypatch.setattr(documentation_session, "fork_and_call", lambda fn, *args, **kwargs: fn(*args))
     payload = {"session_id": "unchanged-fixture", "cwd": str(tmp_path)}
     documentation_session.start(payload)
     documentation_session.end(payload)
@@ -179,3 +194,27 @@ def test_an_unchanged_session_records_no_documentation_need(tmp_path, monkeypatc
     row = json.loads(records[0].read_text())
     assert row["status"] == "complete"
     assert row["verdict"]["needs_documentation"] is False
+
+
+def test_pending_retries_rotate_past_three_retained_requests(world, monkeypatch):
+    root, payload, ledger, jobs = world
+    monkeypatch.setattr(documentation.runner, "decide", answer(0.05))
+    documentation_session.end(payload)
+    fn, args = jobs.pop()
+    fn(*args)
+    for index in range(4):
+        documentation_session.start({"session_id": f"retained-{index}", "cwd": str(root)})
+    pending = sorted(path for path in args[0].parent.glob("*.json") if path != args[0])
+    for index, path in enumerate(pending, 1):
+        os.utime(path, ns=(index, index))
+    decisions = iter([answer(0.5), answer(0.5), answer(0.5), answer()])
+
+    def decide(*args, **kwargs):
+        return next(decisions, answer(0.5))(*args, **kwargs)
+
+    monkeypatch.setattr(documentation.runner, "decide", decide)
+    fn(*args)
+    assert ledger.added == []
+    fn(*args)
+    assert json.loads(pending[3].read_text())["status"] == "queued"
+    assert len(ledger.added) == 1
