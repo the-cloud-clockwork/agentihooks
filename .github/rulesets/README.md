@@ -14,7 +14,8 @@ queue; it lands when the queue run passes the gate.
 The queue groups with `ALLGREEN`: every entry is built on dev plus the
 entries ahead of it and merges only on its own passing run, so a red pull
 request never lands. A failing entry leaves the queue and the entries behind
-it rebuild without it. A full queue run takes 21 `anton-oss` jobs, so the
+it rebuild without it. A full queue run takes 24 standard Tests jobs on
+the 20-runner `anton-oss-queue` pool, which serves only merge queue runs, so the
 queue builds five entries at a time to keep independent entries progressing.
 Main keeps its existing branch match and rules; only its bypass list changes.
 

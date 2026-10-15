@@ -96,13 +96,28 @@ def _unpassed(payload: dict) -> Path | None:
 
 
 def check_prepush(payload: dict) -> None:
+    import shlex
+
     try:
         root = _unpassed(payload)
     except Exception as exc:
         log("prepush_guard failed", {"error": str(exc)})
         return
-    if root:
-        raise BlockAction(
-            f"BLOCKED: HEAD in {root} has not passed `python -m scripts.ci_prepush`. "
-            "Run it there, fix what fails, commit, and push once it passes."
+    if root is None:
+        return
+    command = "python -m scripts.ci_prepush"
+    try:
+        status = subprocess.run(
+            ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=no"],
+            capture_output=True,
         )
+        dirty = status.returncode == 0 and bool(status.stdout.strip())
+    except (OSError, subprocess.SubprocessError):
+        dirty = False
+    if dirty:
+        command = "git status --short"
+    raise BlockAction(
+        f"BLOCKED: HEAD in {root} has not passed `python -m scripts.ci_prepush`. "
+        "Commit intended changes first, run the gate on that commit, then push. "
+        f"Next: cd {shlex.quote(str(root))} && {command}"
+    )

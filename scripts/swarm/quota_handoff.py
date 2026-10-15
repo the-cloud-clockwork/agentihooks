@@ -33,7 +33,9 @@ def windows(account: capacity.Account, thresholds: Thresholds) -> list[str]:
             ("week", account.week_left, thresholds.week),
             ("five hour", account.five_left, thresholds.five),
         )
-        if left is not None and (100 - left >= limit or (window == "week" and account.reserved != ""))
+        if (account.harness != "codex" or window == "week")
+        and left is not None
+        and (100 - left >= limit or (window == "week" and account.reserved != ""))
     ]
 
 
@@ -101,7 +103,9 @@ def exclusion(account: capacity.Account, thresholds: Thresholds, predecessor: tu
         return "has no free seats"
     if account.kind == "api":
         return ""
-    if account.state == "UNKNOWN" or (account.five_left is None and account.week_left is None):
+    if account.state == "UNKNOWN" or (
+        account.week_left is None and (account.harness == "codex" or account.five_left is None)
+    ):
         return "has no quota reading"
     if window := trigger(account, thresholds):
         return capacity.warning(window)
@@ -129,6 +133,8 @@ def successor(
                 key=lambda row: (
                     -100
                     if row.kind == "api"
+                    else -row.week_left
+                    if row.harness == "codex"
                     else -min(value for value in (row.five_left, row.week_left) if value is not None),
                     row.name,
                 ),

@@ -332,10 +332,12 @@ def _step(lines, number):
 @pytest.mark.parametrize("kind", ["code", "ci"])
 def test_the_code_steps_push_and_record_the_branch_at_the_first_commit(kind):
     step = _step(_steps({"kind": kind}), 4)
-    assert (
-        "at your first commit push the branch (git push -u origin HEAD) and record it: agentihooks swarm sw branch"
-        in step
-    )
+    assert 'publish --message "<commit message>" -- <explicit touched files>' in step
+    assert "Then review per the dev-cycle skill" in step
+    assert "Tests run only in CI." in step
+    if kind == "ci":
+        assert "2. Prepare your task worktree: agentihooks swarm sw prepare" in _step(_steps({"kind": kind}), 2)
+    assert "commits only those files, runs the committed HEAD prepush gate, then pushes and records the branch" in step
 
 
 @pytest.mark.parametrize("kind", ["code", "ci"])

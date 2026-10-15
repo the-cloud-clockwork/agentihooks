@@ -563,7 +563,7 @@ def cmd_close(store, args):
     store.config(args.slug)
     runtime = routed(herdr=HerdrRuntime())
     live = runtime.live_names()
-    by = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME") or "operator"
+    by = _caller(args) or "operator"
     master = None if args.now else _live_master(store, args.slug, live)
     if master is not None and master.name != by:
         InboxStore(store.redis).send("operator", master.name, CLOSE_ASK.format(slug=args.slug))
@@ -598,7 +598,7 @@ def cmd_reopen(store, args):
     for agent in store.agents(args.slug):
         store.release(args.slug, agent.task, agent.name)
         store.drop_agent(args.slug, agent.name)
-    by = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME") or "operator"
+    by = _caller(args) or "operator"
     LedgerClient().reopen(args.slug, by)
     _state(store, args, "running")
 
@@ -1050,9 +1050,13 @@ def cmd_rename(store, args):
         raise SwarmError("; ".join(failed))
 
 
+def _caller(args):
+    return args.name or Who.from_env().name
+
+
 def _master_or_operator(store, args, message):
     store.config(args.slug)
-    name = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME", "")
+    name = _caller(args)
     if name in ("", "operator"):
         return "operator"
     agent = next((a for a in store.agents(args.slug) if a.name == name), None)
@@ -1121,7 +1125,7 @@ def _lifted_pull(slug, task):
 
 def cmd_send_message(store, args):
     store.config(args.slug)
-    sender = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME") or delivery.OPERATOR
+    sender = _caller(args) or delivery.OPERATOR
     print(json.dumps({"sent": delivery.send(store, args.slug, args.text, sender=sender, to="all")}))
 
 
@@ -1192,6 +1196,22 @@ def _head_repo(url, found):
 def origin_repo(run=subprocess.run):
     done = _git(run, "remote", "get-url", "origin")
     return stack.public_url(done.stdout.strip()) if done.returncode == 0 else ""
+
+
+def cmd_prepare(store, args):
+    from scripts.swarm import publish
+
+    fields = publish.prepare(args.slug, _worker(store, args), store.config(args.slug).repo, LedgerClient())
+    print(json.dumps(fields))
+
+
+def cmd_publish(store, args):
+    from scripts.swarm import publish
+
+    fields = publish.publish(
+        args.slug, _worker(store, args), store.config(args.slug).repo, LedgerClient(), args.message, args.files
+    )
+    print(json.dumps(fields))
 
 
 def cmd_branch(store, args):
@@ -1569,7 +1589,7 @@ def cmd_restore_decision(store, args):
     if target is not None and target.runtime_backend == "kubernetes":
         print(json.dumps(restore_decisions.decide(store, args.slug, target, args.choice, Who.from_env())))
         return
-    name = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME", "")
+    name = _caller(args)
     if name not in {"", "operator"} and _me(store, args).lane != MASTER:
         raise SwarmError("Only the master or operator can choose resume or fresh")
     outcome = resume.decide(
@@ -1614,7 +1634,7 @@ def _list_learned(store, slug):
 
 def cmd_promote(store, args):
     store.config(args.slug)
-    name = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME", "")
+    name = _caller(args)
     agent = next((a for a in store.agents(args.slug) if a.name == name), None)
     if args.maturity == CANON and agent is not None and agent.lane != MASTER:
         raise SwarmError(ONLY_MASTER_CANON)
@@ -1628,7 +1648,7 @@ def cmd_promote(store, args):
 
 def cmd_retire(store, args):
     store.config(args.slug)
-    name = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME") or "operator"
+    name = _caller(args) or "operator"
     agent = next((a for a in store.agents(args.slug) if a.name == name), None)
     if agent is not None and agent.lane != MASTER:
         raise SwarmError(ONLY_MASTER_RETIRE)
@@ -1778,6 +1798,10 @@ def build_parser():
     merge = sub.add_parser("merge")
     merge.add_argument("action", choices=("queue", "dequeue", "state"))
     merge.add_argument("url")
+    sub.add_parser("prepare")
+    publish = sub.add_parser("publish")
+    publish.add_argument("--message", "-m", required=True)
+    publish.add_argument("files", nargs="*")
     sub.add_parser("branch")
     sub.add_parser("review")
     done = sub.add_parser("done")

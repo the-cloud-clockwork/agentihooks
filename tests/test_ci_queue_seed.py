@@ -41,7 +41,7 @@ def test_queue_runs_mint_a_read_only_app_token_and_skip_the_dev_cache_lookup():
         "client-id": "${{ secrets.TCC_CI_CLIENT_ID }}",
         "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
         "repositories": "${{ github.event.repository.name }}",
-        "permission-actions": "read",
+        "permission-actions": "${{ github.event_name == 'merge_group' && 'write' || 'read' }}",
         "permission-contents": "read",
     }
     assert job["permissions"] == {"contents": "read"}
@@ -368,6 +368,9 @@ def _runs_on(step, event):
             name, op, value = atom.strip().strip("()").split()
             if name.startswith("hashfiles("):
                 held = held and ((_ROOT / name[len("hashfiles('") : -len("')")]).exists() == (op == "!="))
+                continue
+            if name in ("github.actor", "github.triggering_actor"):
+                held = held and ((value.strip("'") == "github-merge-queue[bot]") == (op == "=="))
                 continue
             assert name == "github.event_name", atom
             held = held and ((value.strip("'") == event) == (op == "=="))

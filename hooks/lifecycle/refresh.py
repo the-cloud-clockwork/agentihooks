@@ -52,9 +52,14 @@ def process_started_at(pid: int) -> float:
 
 
 def due(payload: dict, environ: dict, home: Path, pid: int) -> bool:
+    from hooks.context.broadcast import _load_sessions
+
     if payload.get("agent_id") or payload.get("stop_hook_active"):
         return False
     if environ.get(LAUNCH_ENV) != "1" or environ.get("AGENTIHOOKS_SWARM"):
+        return False
+    session = _load_sessions().get(payload.get("session_id", ""), {})
+    if session.get("name", "").startswith("master@"):
         return False
     return latest_affecting_change(home) > process_started_at(pid)
 
@@ -98,7 +103,7 @@ def restart_commands(original: Original) -> list[list[str]]:
     if original.effort:
         launch += ["--effort", original.effort]
     launch += ["--resume", original.session_id]
-    kill = [exe, "terminate-agent", str(original.pid), "--type", "claude", "--force-shared"]
+    kill = [exe, "terminate-agent", str(original.pid), "--type", "claude", "--force-shared", "--keep-pane"]
     return [kill, launch]
 
 
@@ -116,7 +121,24 @@ def live_session_ids() -> list[str]:
     return [item.session_id for item in sessions()]
 
 
+def _retain_exit(record: Path, session_id: str) -> bool:
+    deadline = time.monotonic() + 35
+    while not record.exists() and time.monotonic() < deadline:
+        time.sleep(0.1)
+    if not record.exists():
+        print(f"session-refresh: {session_id} has no native exit record, resume skipped", file=sys.stderr)
+        return False
+    evidence = json.loads(record.read_text(encoding="utf-8"))
+    evidence["session_id"] = session_id
+    record.write_text(json.dumps(evidence), encoding="utf-8")
+    return True
+
+
 def restart(commands: list[list[str]], marker: Path, session_id: str) -> None:
+    record = os.environ.get("AGENTIHOOKS_EXIT_RECORD")
+    if not record:
+        print(f"session-refresh: {session_id} launcher has no exit recorder, restart skipped", file=sys.stderr)
+        return
     kill, launch = commands
     marker.touch()
     done = subprocess.run(kill, stdin=subprocess.DEVNULL, capture_output=True, timeout=300, check=False)
@@ -124,7 +146,8 @@ def restart(commands: list[list[str]], marker: Path, session_id: str) -> None:
         marker.unlink(missing_ok=True)
         print(f"session-refresh: {session_id} still running, resume skipped: {done.stderr!r}", file=sys.stderr)
         return
-    subprocess.run(launch, stdin=subprocess.DEVNULL, capture_output=True, timeout=300, check=False)
+    if _retain_exit(Path(record), session_id):
+        subprocess.run(launch, stdin=subprocess.DEVNULL, capture_output=True, timeout=300, check=False)
 
 
 def on_stop(payload: dict) -> bool:
