@@ -32,6 +32,14 @@ permissions:
   contents: read
 
 jobs:
+  promote:
+    needs: [gate-required, refresh-durations, coverage-baseline, flake-budget]
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' && needs.gate-required.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
+    uses: ./.github/workflows/promote.yml
+    secrets:
+      TCC_CI_CLIENT_ID: ${{ secrets.TCC_CI_CLIENT_ID }}
+      TCC_CI_APP_PRIVATE_KEY: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+
   admission:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
