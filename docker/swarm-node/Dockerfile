@@ -36,7 +36,8 @@ RUN --mount=type=bind,from=python-downloads,source=/downloads/pip,target=/downlo
     python -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir --no-index --find-links /downloads/pip --require-hashes \
         -r /opt/swarm-node/requirements.lock \
-    && python /opt/swarm-node/worker_image.py install --architecture "$TARGETARCH" --cache /downloads/tools
+    && python /opt/swarm-node/worker_image.py install --architecture "$TARGETARCH" --cache /downloads/tools \
+    && chmod -R a-w /opt/venv
 COPY pyproject.toml README.md ./
 COPY hooks/ hooks/
 COPY scripts/ scripts/
@@ -46,7 +47,8 @@ COPY docs/swarm-v2/schemas/ /opt/venv/lib/python3.12/site-packages/docs/swarm-v2
 COPY profiles/ /opt/agentihooks/templates/
 COPY profiles/package/roles/ /opt/agentihooks/templates/
 RUN python /opt/swarm-node/worker_image.py manifest --architecture "$TARGETARCH" --source-revision "$SOURCE_REVISION" \
-    && chmod -R a-w /opt/agentihooks/templates /opt/swarm-node /opt/venv \
+    && chmod -R a-w /opt/agentihooks/templates /opt/swarm-node \
+    && find /opt/venv -perm /222 -exec chmod a-w {} + \
     && chmod a+x /opt/swarm-node/entrypoint.sh /opt/swarm-node/ssh/start.sh \
     && groupadd --gid 10001 worker \
     && useradd --uid 10001 --gid worker --create-home worker \
