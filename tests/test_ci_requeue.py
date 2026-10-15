@@ -89,7 +89,7 @@ def test_the_sweep_queues_oldest_first_and_keeps_going_past_a_refusal(monkeypatc
         return {"queued": False, "state": "OPEN", "waiting": "checks"}
 
     monkeypatch.setattr(ci_requeue.merge_queue, "operate", operate)
-    rows = ci_requeue.sweep("o/r", run=None)
+    rows = list(ci_requeue.sweep("o/r", run=None))
     assert seen == [("queue", pull["url"]) for pull in pulls]
     assert [row["outcome"] for row in rows] == [
         "queued",
@@ -106,11 +106,26 @@ def test_a_repository_without_a_queue_reports_the_merge(monkeypatch):
     assert [row["outcome"] for row in ci_requeue.sweep("o/r", run=None)] == ["merged"]
 
 
+def test_rows_queued_before_an_unexpected_failure_are_already_printed(monkeypatch, capsys):
+    pulls = [_pull(1, "2026-10-15T01:00:00Z"), _pull(2, "2026-10-15T02:00:00Z")]
+    monkeypatch.setattr(ci_requeue, "candidates", lambda repo, run: pulls)
+
+    def operate(action, url, run):
+        if url.endswith("/2"):
+            raise KeyError("files")
+        return {"queued": True, "state": "OPEN"}
+
+    monkeypatch.setattr(ci_requeue.merge_queue, "operate", operate)
+    with pytest.raises(KeyError):
+        ci_requeue.main(["--repo", "o/r"])
+    assert capsys.readouterr().out.splitlines() == ["1 2026-10-15T01:00:00Z queued https://github.com/o/r/pull/1"]
+
+
 def test_main_prints_the_list(monkeypatch, capsys):
     rows = [
         {"number": 7, "created": "2026-10-15T01:00:00Z", "outcome": "queued", "url": "https://github.com/o/r/pull/7"}
     ]
-    monkeypatch.setattr(ci_requeue, "sweep", lambda repo: rows if repo == "o/r" else [])
+    monkeypatch.setattr(ci_requeue, "sweep", lambda repo: iter(rows if repo == "o/r" else []))
     assert ci_requeue.main(["--repo", "o/r"]) == 0
     assert capsys.readouterr().out.splitlines() == [
         "7 2026-10-15T01:00:00Z queued https://github.com/o/r/pull/7",
