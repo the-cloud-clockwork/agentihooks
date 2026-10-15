@@ -293,12 +293,16 @@ def test_prepare_ignores_an_unscoped_branch_for_multiple_repositories(repositori
     assert [entry["worktree"] for entry in result["worktrees"]] == [f"{p.swarm}-worktree", f"{p.bundle}-worktree"]
 
 
-def test_prepare_reuses_a_legacy_branch_with_one_explicit_repository(repositories):
+@pytest.mark.parametrize("record_remote", [False, True])
+def test_prepare_reuses_a_legacy_branch_with_one_explicit_repository(repositories, monkeypatch, record_remote):
     p = repositories
     p.task["repositories"] = [str(p.bundle)]
     root = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)["worktree"]
     git(root, "branch", "-m", "prior-task-branch")
     p.task["branch"] = "prior-task-branch"
+    if record_remote:
+        p.task["branch_repo"] = git(p.bundle, "remote", "get-url", "origin")
+    monkeypatch.chdir(p.swarm)
     result = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
     assert result["worktree"] == root
     assert result["branch"] == "prior-task-branch"
@@ -343,3 +347,46 @@ def test_fallback_reports_each_size_violation(repositories, monkeypatch, capsys)
         f"AgentiHooks touched Python fallback: {root}\n"
         "chosen.py: file exceeds 3000 lines\nchosen.py: chosen exceeds 300 lines\n"
     )
+
+
+def test_fallback_selects_the_committed_diff_when_working_source_is_reverted(repositories, monkeypatch, capsys):
+    from pathlib import Path
+
+    from scripts.swarm import publish_gate
+
+    p = repositories
+    (p.bundle / "chosen.py").write_text("value = 1\n")
+    git(p.bundle, "add", "chosen.py")
+    git(p.bundle, "commit", "-qm", "Base source")
+    git(p.bundle, "push", "origin", "dev")
+    p.task["repositories"] = [str(p.bundle)]
+    root = Path(publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)["worktree"])
+    (root / "chosen.py").write_text("value = 2\n")
+    git(root, "add", "chosen.py")
+    git(root, "commit", "-qm", "Changed source")
+    (root / "chosen.py").write_text("value = 1\n")
+    monkeypatch.chdir(root)
+    assert publish_gate.main() == 0
+    assert capsys.readouterr().out == f"AgentiHooks touched Python fallback: {root}\nGraded 1 changed Python files\n"
+
+
+def test_fallback_does_not_start_an_interactive_python(repositories, monkeypatch):
+    import sys
+    from pathlib import Path
+
+    p = repositories
+    p.task["repositories"] = [str(p.bundle)]
+    root = Path(publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)["worktree"])
+    (root / "chosen.py").write_text("value = 1\n")
+    wrapper = p.bundle.parent / "noninteractive-python"
+    wrapper.write_text(
+        "#!/usr/bin/env bash\nset -euo pipefail\n"
+        'for arg in "$@"; do [[ "$arg" != -i ]]; done\n'
+        'exec "$PUBLISH_REAL_PYTHON" "$@"\n'
+    )
+    wrapper.chmod(0o755)
+    monkeypatch.setenv("PUBLISH_REAL_PYTHON", sys.executable)
+    monkeypatch.setattr(publish, "gate_python", lambda repository: str(wrapper))
+    monkeypatch.chdir(p.swarm)
+    result = publish.publish("swarm", p.agent, str(p.swarm), p.ledger, "Noninteractive gate", ["chosen.py"])
+    assert git(p.bundle, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == result["head"]
