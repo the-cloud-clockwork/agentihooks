@@ -7,6 +7,7 @@ from pathlib import Path
 
 from hooks.context.account_sessions import agent_pid
 from hooks.context.broadcast import live_session_ids, name_session, pin_session
+from hooks.context.master_coding import record_seat
 from hooks.observability import agent_trace
 from hooks.proc import processes
 from scripts.handoff import transfers
@@ -146,5 +147,6 @@ def take(store, slug, name, runtime, now_ms, replace_live=False, admit=lambda na
     store.put_agent(slug, record)
     for session_id in live_session_ids(pid):
         agent_trace.record_seat(session_id, name, slug, MASTER, MASTER)
+        record_seat(session_id, slug, name)
     launch_check.begin(store, slug, record, now_ms, relaunch=False)
     return record, transfers.attach(store, slug, record)

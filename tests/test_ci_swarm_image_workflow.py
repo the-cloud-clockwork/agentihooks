@@ -24,7 +24,8 @@ def _publish():
         ("github-merge-queue[bot]", "github-merge-queue[bot]", "anton-oss"),
         ("outsider", "nestorcolt", "ubuntu-latest"),
         ("nestorcolt", "outsider", "ubuntu-latest"),
-        ("github-merge-queue[bot]", "nestorcolt", "ubuntu-latest"),
+        ("github-merge-queue[bot]", "nestorcolt", "anton-oss"),
+        ("github-merge-queue[bot]", "outsider", "ubuntu-latest"),
     ],
 )
 def test_swarm_publish_uses_the_public_docker_runner_only_for_trusted_actors(actor, triggering_actor, runner):

@@ -84,6 +84,13 @@ class AppServer:
         self.turns[-1]["inputs"].append(params["input"][0]["text"])
         return {"turnId": self.active}
 
+    def turn_interrupt(self, params):
+        if params["turnId"] != self.active:
+            return "no active turn to interrupt"
+        self.turns[-1]["status"] = "interrupted"
+        self.frames.append({"method": codex.TURN_COMPLETED, "params": {"turn": {"id": params["turnId"]}}})
+        return {}
+
     def thread_read(self, params):
         turns = [{"id": turn["id"], "status": turn["status"]} for turn in self.turns]
         return {"thread": {"id": params["threadId"], "turns": turns}}
@@ -385,6 +392,205 @@ def test_a_turn_running_before_the_pump_connected_is_not_steered_and_holds_deliv
     assert rig.server.methods()[-1] == "turn/start"
     assert rig.store.get(item.id).state == "delivered"
     assert rig.record().pending_request == ""
+
+
+def send_nudge(rig, tag="a", sender="swarm"):
+    return rig.store.send(sender, ME, "pick your task back up", ref=f"stale-nudge:{tag}")
+
+
+def turn_methods(rig):
+    return [m for m in rig.server.methods() if m.startswith("turn/")]
+
+
+def test_a_nudge_interrupts_the_busy_turn_and_starts_a_new_app_server_turn(rig):
+    rig.pump.start()
+    rig.pump.step()
+    rig.server.begin_elsewhere()
+    item = send_nudge(rig)
+    rig.pump.step()
+    turn_calls = [m for m in rig.server.sent if m.get("method", "").startswith("turn/")]
+    assert [m["method"] for m in turn_calls] == ["turn/interrupt", "turn/start"]
+    assert turn_calls[0]["params"] == {"threadId": THREAD, "turnId": "turn-1"}
+    assert [turn["status"] for turn in rig.server.turns] == ["interrupted", codex.IN_PROGRESS]
+    [delivery] = deliveries(rig, item.id)
+    assert rig.server.turns[1]["inputs"] == [codex.envelope(rig.store.get(item.id), delivery)]
+    assert rig.store.get(item.id).state == "delivered"
+    assert rig.pump.state.active_turn == "turn-2"
+
+
+def test_a_nudge_held_past_its_delivery_window_steers_the_busy_turn(rig):
+    from scripts.swarm import stale_nudge
+
+    rig.pump.start()
+    rig.pump.step()
+    rig.server.begin_elsewhere()
+    item = send_nudge(rig)
+    rig.clock.now = (item.created_at + stale_nudge.FRESH_MS + 1) / 1000
+    rig.pump.step()
+    assert turn_methods(rig) == ["turn/steer"]
+    assert len(rig.server.turns) == 1 and rig.store.get(item.id).state == "delivered"
+
+
+def test_a_nudge_from_anyone_but_the_swarm_steers_like_any_message(rig):
+    rig.pump.start()
+    rig.pump.step()
+    rig.server.begin_elsewhere()
+    send_nudge(rig, sender="alice")
+    rig.pump.step()
+    assert turn_methods(rig) == ["turn/steer"]
+
+
+def test_a_nudge_to_an_idle_thread_starts_a_turn_without_an_interrupt(rig):
+    send_nudge(rig)
+    rig.run(1)
+    assert turn_methods(rig) == ["turn/start"]
+
+
+def test_a_nudge_goes_ahead_of_an_earlier_message_into_the_new_turn(rig):
+    rig.pump.start()
+    rig.pump.step()
+    rig.server.begin_elsewhere()
+    rig.pump.step()
+    held = rig.store.send("alice", ME, "careful")
+    nudge = send_nudge(rig)
+    rig.pump.step()
+    assert turn_methods(rig) == ["turn/interrupt", "turn/start", "turn/steer"]
+    assert [len(turn["inputs"]) for turn in rig.server.turns] == [0, 2]
+    assert rig.server.turns[1]["inputs"][1].endswith("careful")
+    assert (rig.store.get(nudge.id).state, rig.store.get(held.id).state) == ("delivered", "delivered")
+
+
+def test_a_nudge_goes_first_past_a_turn_begun_before_the_pump_connected(rig):
+    rig.server.begin_elsewhere()
+    rig.server.frames.clear()
+    rig.pump.start()
+    held = rig.store.send("alice", ME, "careful")
+    nudge = send_nudge(rig)
+    rig.pump.step()
+    assert turn_methods(rig) == ["turn/interrupt", "turn/start", "turn/steer"]
+    assert [len(turn["inputs"]) for turn in rig.server.turns] == [0, 2]
+    assert rig.server.turns[1]["inputs"][0].endswith("pick your task back up")
+    assert rig.server.turns[1]["inputs"][1].endswith("careful")
+    assert (rig.store.get(nudge.id).state, rig.store.get(held.id).state) == ("delivered", "delivered")
+
+
+def test_an_ordinary_message_still_waits_behind_a_turn_begun_before_the_pump_connected(rig):
+    rig.server.begin_elsewhere()
+    rig.server.frames.clear()
+    rig.pump.start()
+    send_nudge(rig, sender="alice")
+    rig.pump.step()
+    assert turn_methods(rig) == []
+
+
+def test_a_stale_held_nudge_never_steers_a_turn_begun_before_the_pump_connected(rig):
+    from scripts.swarm import stale_nudge
+
+    rig.server.begin_elsewhere()
+    rig.server.frames.clear()
+    rig.pump.start()
+    item = send_nudge(rig)
+    rig.clock.now = (item.created_at + stale_nudge.FRESH_MS + 1) / 1000
+    rig.pump.step()
+    assert turn_methods(rig) == [] and rig.store.get(item.id).state == "pending"
+
+
+def test_a_nudge_waits_out_the_pump_hold(rig):
+    rig.server.begin_elsewhere()
+    rig.server.frames.clear()
+    rig.pump.start()
+    rig.pump.hold_until = rig.clock.now + 30
+    send_nudge(rig)
+    rig.pump.step()
+    assert turn_methods(rig) == []
+
+
+def test_an_open_server_request_holds_a_nudge_too(rig):
+    rig.server.begin_elsewhere()
+    rig.server.frames.append({"id": 90, "method": APPROVAL, "params": {"threadId": THREAD}})
+    rig.pump.start()
+    rig.pump.step()
+    rig.pump.step()
+    nudge = send_nudge(rig)
+    rig.pump.step()
+    assert turn_methods(rig) == [] and rig.store.get(nudge.id).state == "pending"
+    assert rig.record().pending_request == APPROVAL
+
+
+def test_a_nudge_racing_a_turn_end_refreshes_and_starts_a_turn(rig):
+    rig.server.begin_elsewhere()
+    rig.pump.start()
+    rig.pump.step()
+    rig.server.finish(announce=False)
+    item = send_nudge(rig)
+    rig.pump.step()
+    assert rig.server.methods()[-3:] == ["turn/interrupt", "thread/read", "turn/start"]
+    assert rig.store.get(item.id).state == "delivered" and len(rig.server.turns) == 2
+
+
+def test_a_nudge_retries_a_refused_interrupt_before_starting_a_fresh_turn(rig, monkeypatch):
+    rig.server.begin_elsewhere()
+    rig.pump.start()
+    rig.pump.step()
+    interrupt = rig.server.turn_interrupt
+    attempts = []
+
+    def retry(params):
+        attempts.append(params)
+        return "interrupt refused" if len(attempts) == 1 else interrupt(params)
+
+    monkeypatch.setattr(rig.server, "turn_interrupt", retry)
+    item = send_nudge(rig)
+    rig.pump.step()
+    assert turn_methods(rig) == ["turn/interrupt", "turn/interrupt", "turn/start"]
+    assert rig.store.get(item.id).state == "delivered"
+    assert len(rig.server.turns) == 2
+
+
+def test_a_nudged_turn_completed_before_its_reply_publishes_an_empty_active_turn(rig, monkeypatch):
+    rig.server.begin_elsewhere()
+    rig.pump.start()
+    rig.pump.step()
+    start = rig.server.turn_start
+
+    def complete(params):
+        result = start(params)
+        rig.server.finish(announce=False)
+        rig.server.early.append({"method": codex.TURN_COMPLETED, "params": {"turn": result["turn"]}})
+        return result
+
+    monkeypatch.setattr(rig.server, "turn_start", complete)
+    item = send_nudge(rig)
+    rig.pump.step()
+    assert rig.store.get(item.id).state == "delivered"
+    assert rig.record().active_turn_id == ""
+
+
+def test_a_nudge_reaches_an_unobserved_turn_at_the_exact_hold_boundary(rig, monkeypatch):
+    rig.server.begin_elsewhere()
+    rig.server.frames.clear()
+    rig.pump.start()
+    monkeypatch.setattr(rig.connection, "poll", lambda timeout: None)
+    rig.pump.hold_until = rig.clock.now
+    item = send_nudge(rig)
+    rig.pump.step()
+    assert turn_methods(rig) == ["turn/interrupt", "turn/start"]
+    assert rig.store.get(item.id).state == "delivered"
+
+
+def test_each_window_of_silence_reaches_the_thread_as_its_own_turn(rig):
+    from scripts.swarm import stale_nudge
+
+    agent = AgentRecord(ME, "eng", "task", started_at=1)
+    first, second = 1_000 * stale_nudge.LIMIT_MS, 1_001 * stale_nudge.LIMIT_MS
+    assert stale_nudge.nudge(rig.store, SLUG, agent, "", first) != []
+    rig.run(1)
+    rig.server.finish()
+    assert stale_nudge.nudge(rig.store, SLUG, agent, "", second) != []
+    rig.run(1)
+    ids = [stale_nudge.item_id(SLUG, ME, 1, at) for at in (first, second)]
+    assert [rig.store.get(i).state for i in ids] == ["delivered", "delivered"]
+    assert turn_methods(rig) == ["turn/start", "turn/start"]
 
 
 def test_the_backoff_doubles_to_its_cap_and_resets_on_acceptance(rig):
@@ -832,7 +1038,7 @@ def test_successor_admission_cannot_overtake_an_inbox_publication(rig, monkeypat
     successor = swarm.start_execution(SLUG, candidate, EXECUTION)
     assert successor.generation == 2
     with pytest.raises(DispatchError, match="^execution is no longer current$"):
-        rig.pump._send("old mail")
+        rig.pump._send("old mail", False)
 
 
 def test_a_stray_text_frame_is_refused_and_diagnostics_stay_off_the_socket(rig):

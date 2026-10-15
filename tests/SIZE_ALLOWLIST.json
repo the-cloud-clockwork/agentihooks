@@ -164,7 +164,7 @@
   "PLR0912": 27
  },
  "scripts/install.py": {
-  "file-lines": 6922
+  "file-lines": 6918
  },
  "scripts/install.py::_clean_state_dir": {
   "C901": 14,
@@ -220,8 +220,8 @@
   "PLR0912": 17
  },
  "scripts/install.py::cmd_init_unified": {
-  "C901": 27,
-  "PLR0912": 27
+  "C901": 26,
+  "PLR0912": 26
  },
  "scripts/install.py::cmd_migrate": {
   "C901": 20,
