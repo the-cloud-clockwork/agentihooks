@@ -17,6 +17,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Plain `agentihooks init` installs Claude and Codex; Copilot requires
+  `--target copilot` or `--with-copilot`. Output defaults to installed harness
+  summaries and warnings; `--verbose` shows installation details.
 - Browser preparation reuses verified Chromium and OS dependencies baked into
   ARC runners before restoring a cache or downloading browsers.
 - The swarm chart's controller API NetworkPolicy admits only the controller's
