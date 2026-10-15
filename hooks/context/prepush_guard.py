@@ -96,6 +96,8 @@ def _unpassed(payload: dict) -> Path | None:
 
 
 def check_prepush(payload: dict) -> None:
+    import shlex
+
     try:
         root = _unpassed(payload)
     except Exception as exc:
@@ -104,5 +106,6 @@ def check_prepush(payload: dict) -> None:
     if root:
         raise BlockAction(
             f"BLOCKED: HEAD in {root} has not passed `python -m scripts.ci_prepush`. "
-            "Run it there, fix what fails, commit, and push once it passes."
+            "Commit intended changes first, run the gate on that commit, then push. "
+            f"Next: cd {shlex.quote(str(root))} && python -m scripts.ci_prepush"
         )

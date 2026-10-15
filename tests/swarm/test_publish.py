@@ -23,10 +23,11 @@ def repository(tmp_path):
     git(root, "config", "user.email", "test@example.com")
     gate = root / "scripts" / "ci_prepush"
     gate.mkdir(parents=True)
+    (root / "scripts" / "__init__.py").write_text("")
     (gate / "__init__.py").write_text("")
     (root / "chosen.txt").write_text("before")
     (root / "other.txt").write_text("unrelated")
-    git(root, "add", "scripts/ci_prepush/__init__.py", "chosen.txt", "other.txt")
+    git(root, "add", "scripts/__init__.py", "scripts/ci_prepush/__init__.py", "chosen.txt", "other.txt")
     git(root, "commit", "-qm", "base")
     remote = tmp_path / "remote.git"
     git(root, "init", "--bare", str(remote))
@@ -57,7 +58,9 @@ def test_publication_commits_explicit_files_before_grading_and_pushing(repositor
         "from pathlib import Path\n"
         "assert subprocess.check_output(['git', 'show', 'HEAD:chosen.txt'], text=True) == 'after'\n"
         "assert not subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=no'], text=True)\n"
-        "Path('.git-gate-head').write_text(subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True))\n"
+        "head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True)\n"
+        "Path('.git-gate-head').write_text(head)\n"
+        "Path(subprocess.check_output(['git', 'rev-parse', '--absolute-git-dir'], text=True).strip(), 'ci_prepush').write_text(head)\n"
     )
     git(worktree, "add", "scripts/ci_prepush/__main__.py")
     git(worktree, "commit", "-qm", "Install gate fixture")
@@ -70,3 +73,30 @@ def test_publication_commits_explicit_files_before_grading_and_pushing(repositor
     assert git(worktree, "show", "HEAD:chosen.txt") == "after"
     assert result["branch"] == "engineer-test"
     assert task["branch"] == "engineer-test"
+
+
+def test_prepare_reuses_the_recorded_worktree_without_pushing(repository, tmp_path):
+    from scripts.swarm import publish
+
+    worktree = tmp_path / "worktrees" / "repo" / "engineer-test"
+    git(repository, "worktree", "add", "-b", "engineer-test", str(worktree))
+    task = {"id": "t1", "claimed_by": "engineer@test", "state": "claimed", "branch": "engineer-test"}
+    ledger = SimpleNamespace(
+        tasks=lambda slug: [task], update_task=lambda slug, task_id, fields, by: task.update(fields)
+    )
+    agent = AgentRecord("engineer@test", "ci", "t1")
+    first = publish.prepare("swarm", agent, str(repository), ledger)
+    assert first["worktree"] == str(worktree)
+    assert publish.prepare("swarm", agent, str(repository), ledger) == first
+    assert git(repository, "ls-remote", "origin", "refs/heads/engineer-test") == ""
+
+
+def test_publication_without_a_prepared_worktree_names_the_prepare_command(repository):
+    from scripts.swarm import publish
+    from scripts.swarm.store import SwarmError
+
+    task = {"id": "t1", "claimed_by": "engineer@test", "state": "claimed"}
+    ledger = SimpleNamespace(tasks=lambda slug: [task])
+    agent = AgentRecord("engineer@test", "ci", "t1")
+    with pytest.raises(SwarmError, match="Next: agentihooks swarm swarm prepare"):
+        publish.publish("swarm", agent, str(repository), ledger, "Change chosen", ["chosen.txt"])
