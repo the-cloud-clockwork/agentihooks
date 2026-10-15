@@ -132,8 +132,10 @@ def test_the_queue_baseline_holds_the_exact_base_tree_on_the_app_token():
     assert [steps.index(s) for s in (mint, find, download, hold, upload)] == sorted(
         steps.index(s) for s in (mint, find, download, hold, upload)
     )
-    assert 'wait="${WAIT_SECONDS:-600}"' in find["run"]
-    assert job["timeout-minutes"] * 60 > 600
+    rules = json.loads((_ROOT / ".github" / "rulesets" / "dev-no-delete.json").read_text())
+    queue = next(rule["parameters"] for rule in rules["rules"] if rule["type"] == "merge_queue")
+    assert job["timeout-minutes"] == queue["check_response_timeout_minutes"]
+    assert "anton-oss-light" in job["runs-on"]
 
 
 @pytest.mark.parametrize(("measured", "fails"), [("abc", False), ("old", True)])
@@ -219,7 +221,9 @@ def base_run(tmp_path):
         'printf "%s\\n" "$@" >> "$ARGS"\n'
         'case "$2" in\n'
         '  */commits/*) printf "tree-of-base" ;;\n'
-        '  */runs\\?head_sha=*) [[ -z "$FAIL_RUNS" ]] || exit 1; for r in $FAKE_RUNS; do e=pull_request; s=$FAKE_STATUS;'
+        '  */runs\\?head_sha=*) [[ -z "$FAIL_RUNS" ]] || exit 1; '
+        '[[ "$FAKE_REMOVED_AFTER" -lt 0 || $(cat "$POLLS") -lt "$FAKE_REMOVED_AFTER" ]] || exit 0; '
+        "for r in $FAKE_RUNS; do e=pull_request; s=$FAKE_STATUS;"
         ' [[ " $FAKE_DISPATCH " == *" $r "* ]] && { e=workflow_dispatch; s=in_progress; };'
         ' jq -n --argjson id "$r" --arg s "$s" --arg e "$e" \'{id: $id, status: $s, event: $e}\'; done'
         " | jq -s '{workflow_runs: .}' | jq -r \"$4\" ;;\n"
@@ -231,7 +235,15 @@ def base_run(tmp_path):
     (tools / "sleep").write_text("#!/usr/bin/env bash\ntrue\n")
     (tools / "sleep").chmod(0o755)
 
-    def run(runs="111 222", kept_by="222", after=0, wait="600", fail_runs="", status="in_progress", dispatch=""):
+    def run(
+        runs="111 222",
+        kept_by="222",
+        after=0,
+        fail_runs="",
+        status="in_progress",
+        dispatch="",
+        removed_after=-1,
+    ):
         output = tmp_path / "output"
         output.write_text("")
         polls = tmp_path / "polls"
@@ -247,12 +259,14 @@ def base_run(tmp_path):
             FAIL_RUNS=fail_runs,
             FAKE_STATUS=status,
             FAKE_DISPATCH=dispatch,
-            WAIT_SECONDS=wait,
+            FAKE_REMOVED_AFTER=str(removed_after),
+            WAIT_SECONDS="600",
             BASE_SHA="b" * 40,
             GITHUB_OUTPUT=str(output),
             GITHUB_REPOSITORY="the-cloud-clockwork/agentihooks",
         )
-        result = subprocess.run(["bash", "-e", "-c", find["run"]], env=env, capture_output=True, text=True)
+        script = find["run"].replace('sleep "${POLL_SECONDS:-30}"', "SECONDS=$((SECONDS + 301))")
+        result = subprocess.run(["bash", "-e", "-c", script], env=env, capture_output=True, text=True, timeout=5)
         return result, output.read_text(), (tmp_path / "args").read_text().splitlines()
 
     return run
@@ -272,14 +286,15 @@ def test_the_base_run_is_any_tests_run_on_the_base_commit_that_kept_a_baseline(b
 
 
 def test_the_base_run_ignores_dispatched_runs_that_wait_on_a_hosted_lane(base_run):
-    result, output, _ = base_run(dispatch="111", kept_by="333", status="completed", wait="5")
+    result, output, _ = base_run(dispatch="111", kept_by="333", status="completed")
     assert result.returncode != 0
     assert "finished without a coverage baseline" in result.stdout
     assert output == ""
 
 
-def test_the_base_run_waits_for_an_earlier_queue_entry_to_publish(base_run):
-    result, output, _ = base_run(after=5)
+@pytest.mark.parametrize("status", ["queued", "in_progress"])
+def test_the_base_run_waits_past_ten_minutes_for_an_earlier_queue_entry_to_publish(base_run, status):
+    result, output, _ = base_run(after=7, status=status)
     assert result.returncode == 0, result.stderr
     assert output == "id=222\ntree=tree-of-base\n"
 
@@ -291,12 +306,13 @@ def test_a_failed_runs_listing_is_red_at_once_instead_of_waiting(base_run):
     assert not [arg for arg in args if "/artifacts" in arg]
 
 
-@pytest.mark.parametrize("runs", ["111 222", ""])
-def test_the_base_run_is_red_once_the_bounded_wait_ends(base_run, runs):
-    result, output, _ = base_run(runs=runs, kept_by="333", wait="0")
+@pytest.mark.parametrize("removed_after", [0, 2])
+def test_the_base_run_is_red_when_the_predecessor_is_removed(base_run, tmp_path, removed_after):
+    result, output, _ = base_run(kept_by="333", removed_after=removed_after)
     assert result.returncode != 0
-    assert "::error::" in result.stdout
+    assert "No Tests run remains" in result.stdout
     assert output == ""
+    assert int((tmp_path / "polls").read_text()) == removed_after
 
 
 def test_a_finished_base_without_a_baseline_is_red_at_once(base_run, tmp_path):

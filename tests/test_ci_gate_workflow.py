@@ -506,6 +506,7 @@ def test_required_gate_accepts_a_skipped_chart_proof_only_when_its_path_rule_sai
     assert jobs["helm-kind"]["if"] in (
         "${{ needs.kind-due.outputs.due == 'true' }}",
         "${{ !cancelled() && needs.kind-due.result == 'success' && needs.kind-due.outputs.due == 'true' }}",
+        "${{ !cancelled() && github.event_name != 'merge_group' && github.event_name != 'pull_request' && needs.kind-due.result == 'success' && needs.kind-due.outputs.due == 'true' }}",
     )
     assert step["env"]["KIND"] == "${{ needs.kind-due.outputs.due }}"
     needs = {"kind-due": {"result": due_job}, "helm-kind": {"result": kind}}
@@ -665,6 +666,8 @@ def test_unit_and_lint_run_on_every_event_and_feed_the_required_gate():
         assert job["if"] in (
             "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
             "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
+            "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') }}",
+            "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' }}",
         )
         assert all("steps.lookup" not in step.get("if", "") for step in job["steps"])
     step = jobs["gate-required"]["steps"][0]

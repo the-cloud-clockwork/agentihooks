@@ -394,6 +394,7 @@ def _write_launcher(
     langfuse_export = f"export AGENTIHOOKS_LANGFUSE_ENABLED={shlex.quote(langfuse)}\n" if langfuse is not None else ""
     opening = prompt_file if app_server else None
     command, before = _agent_command(spec, _route_report(launcher), name, claude_args, environ, directory, opening)
+    identity = environ.get("AGENTIHOOKS_AGENT_NAME", name) if environ.get("AGENTIHOOKS_SWARM") else name
     command_text = shlex.join(command)
     if prompt_file is not None and not app_server:
         prompt_arg = f'"$(cat {shlex.quote(str(prompt_file))})"'
@@ -413,9 +414,9 @@ def _write_launcher(
         f"{operator_env.source_line(environ)}"
         f"{_predecessor_export(environ)}"
         "export AGENTIHOOKS_TERMINAL_LAUNCH=1\n"
-        f"export AGENTIHOOKS_AGENT_NAME={shlex.quote(name)}\n"
+        f"export AGENTIHOOKS_AGENT_NAME={shlex.quote(identity)}\n"
         f"{_config_home_export(environ) if spec.agent == 'claude' else ''}"
-        f"{_telemetry_exports(name, environ)}"
+        f"{_telemetry_exports(identity, environ)}"
         f"{_swarm_exports(environ)}"
         f"{langfuse_export}"
         f"{_binding_export(environ)}"
