@@ -107,7 +107,7 @@ def test_unknown_kind_ranks_with_notices():
 def test_only_critical_and_nuclear_broadcasts_rank_as_alerts(severity, kind):
     from hooks.context.broadcast import context_kind, format_critical_context
 
-    msg = {"id": "b1", "severity": severity, "message": "signal"}
+    msg = {"id": "b1", "severity": severity, "message": "signal quoting [CRITICAL] and\n  - [NUCLEAR] text"}
     assert context_kind(format_critical_context([msg], "")) == kind
 
 
