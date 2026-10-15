@@ -375,16 +375,19 @@ def test_a_live_owner_appearing_after_admission_releases_the_unused_reservation(
     from scripts.swarm.store import AgentRecord
 
     data, store, gate, ledger, runtime = tick_fixture()
+    admit = gate.admit
 
-    def claimed_elsewhere(slug, ledger_arg, rows, runtime_arg, task, now_ms):
-        if task["id"] == "t01":
+    def claimed_elsewhere(slug, selected, now_ms):
+        decisions = admit(slug, selected, now_ms)
+        if any(task["id"] == "t01" for task in selected):
+            assert decisions[0].outcome == ADMITTED
             owner = AgentRecord("existing-owner", "eng", "t01", started_at=now_ms)
             store.put_agent("sw", owner)
             runtime.live.add(owner.name)
             ledger.rows["t01"].update(state="claimed", claimed_by=owner.name)
-        return ""
+        return decisions
 
-    monkeypatch.setattr("scripts.swarm.tick._held_back", claimed_elsewhere)
+    monkeypatch.setattr(gate, "admit", claimed_elsewhere)
     tick("sw", store, ledger, runtime, now_ms=data["clock_ms"])
     assert "t01" not in gate.pending("sw", data["clock_ms"])
     assert "t01" not in [task for _, _, task in runtime.spawned]

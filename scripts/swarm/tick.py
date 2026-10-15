@@ -474,14 +474,18 @@ def _retire_launch(slug, store, runtime, agent, now_ms):
     return True
 
 
+def _current_owner(agent, row):
+    return row.get("claimed_by", "") in ("", agent.name)
+
+
 def _restore_owner(slug, store, ledger, rows, agent):
-    if not store.ensure_claim(slug, agent, LEASE_MS):
-        return
     row = rows.get(agent.task, {})
+    if not _current_owner(agent, row) or not store.ensure_claim(slug, agent, LEASE_MS):
+        return
     if row.get("out_of_scope") or row.get("state") not in ("open", "claimed", "pr"):
         return
     owner = row.get("claimed_by", "")
-    if owner not in ("", agent.name) or (owner == agent.name and row["state"] != "open"):
+    if owner == agent.name and row["state"] != "open":
         return
     expected = {"claimed_by": owner, "claim_generation": row.get("claim_generation", 0)}
     fields = {"claimed_by": agent.name}
@@ -972,7 +976,9 @@ def _spawn_order(slug, config, store, agents, rows, doc, runtime):
     dispatched = dispatcher.claim_key(config, doc)
     queue = []
     for lane, cap in caps.items():
-        busy = sum(1 for a in agents if a.lane == lane and not _ended(a, rows))
+        busy = sum(
+            1 for a in agents if a.lane == lane and not _ended(a, rows) and _current_owner(a, rows.get(a.task, {}))
+        )
         ready = ready_in_order(slug, store, rows, doc, lane, dispatched)
         if "tasks" in decision:
             ready = [task for task in ready if task["id"] in decision["tasks"]]
