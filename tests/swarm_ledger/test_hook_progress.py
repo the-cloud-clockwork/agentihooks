@@ -245,7 +245,7 @@ def test_a_wait_one_millisecond_in_the_future_still_holds(hook, monkeypatch, cap
     assert capsys.readouterr().out == ""
 
 
-@pytest.mark.parametrize("raw", ["not-json", "{}"])
+@pytest.mark.parametrize("raw", ["not-json", "{}", '{"on": "checks"}'])
 def test_an_unreadable_or_incomplete_wait_keeps_the_progress_demand(hook, monkeypatch, capsys, raw):
     from scripts.swarm import idle, store
 
