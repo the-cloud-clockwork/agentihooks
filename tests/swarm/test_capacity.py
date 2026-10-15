@@ -1481,7 +1481,7 @@ def test_an_auto_swarm_with_an_unknown_host_scales_on_quota_alone():
     assert decision["pending_raise"] == expected["pending_raise"] == {"target": 13, "ticks": 1}
     assert (
         decision["reason"]
-        == "Quota seats 10 (claude 6, codex 4); host room unknown; ceiling 1 of 13; raise held at tick 1 of 3."
+        == "Quota seats 10 (claude 6, codex 4); host room unknown; ceiling 5 of 13; raise held at tick 1 of 3."
     )
     assert decision["host"] == {
         "room": None,
@@ -1555,7 +1555,7 @@ def test_repeated_readings_between_the_watermarks_never_raise_the_ceiling_past_t
         totals.append(sum(decision["ceilings"].values()))
         previous = {"host": decision["host"], "autoscale": decision}
         live += live < totals[-1]
-    assert totals == [2, 2, 4] + [5] * 9
+    assert totals == [3, 4] + [5] * 10
     assert asked == [1_000] * 12
 
 

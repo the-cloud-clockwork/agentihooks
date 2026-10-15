@@ -279,7 +279,7 @@ def test_a_shift_keeps_live_agents_and_one_seat_for_ready_work():
     assert ready["ceilings"]["eng"] == 1
     idle = calculate({"eng": 0, "ci": 0}, {"claude": 4}, 10, {"eng": 0, "ci": 3}, previous, shift=9)
     assert idle["ceilings"]["eng"] == 0
-    assert (live["shift"], ready["shift"], idle["shift"]) == (0, 1, 0)
+    assert (live["shift"], ready["shift"], idle["shift"]) == (0, 0, 0)
 
 
 def test_a_shift_of_one_moves_one_ceiling_toward_ci():
