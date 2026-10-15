@@ -80,7 +80,7 @@ ORIGINAL = refresh.Original(
 def test_restart_kills_the_original_process_then_resumes_through_its_profile(monkeypatch):
     monkeypatch.setattr(refresh.shutil, "which", lambda name: "/bin/agentihooks")
     kill, launch = refresh.restart_commands(ORIGINAL)
-    assert kill == ["/bin/agentihooks", "terminate-agent", "4242", "--type", "claude", "--force-shared"]
+    assert kill == ["/bin/agentihooks", "terminate-agent", "4242", "--type", "claude", "--force-shared", "--keep-pane"]
     assert launch == [
         "/bin/agentihooks",
         "init-agent",
@@ -118,6 +118,9 @@ DETACHED = {"stdin": subprocess.DEVNULL, "capture_output": True, "timeout": 300,
 def _restart(monkeypatch, tmp_path, kill_rc: int, live: list[str], consumed: bool = False) -> list[list[str]]:
     ran = []
     marker = tmp_path / "closing-1"
+    record = tmp_path / "native.json"
+    record.write_text(json.dumps({"exit_status": 143, "pane_tail": "stopped"}))
+    monkeypatch.setenv("AGENTIHOOKS_EXIT_RECORD", str(record))
 
     def run(argv, **kwargs):
         assert kwargs == DETACHED
