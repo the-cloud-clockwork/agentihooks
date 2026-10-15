@@ -665,7 +665,11 @@ def test_a_restacked_successor_publishes_its_prepared_branch_not_the_parked_one(
     assert result["branch"] == publication.task["branch"] == "engineer-test"
     assert git(root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
     assert git(root, "ls-remote", "origin", "refs/heads/predecessor").split()[0] == parked
-    fields = {"branch": "engineer-test", "branch_repo": str(repository.parent / "remote.git")}
+    fields = {
+        "branch": "engineer-test",
+        "branch_repo": str(repository.parent / "remote.git"),
+        "repository_branches": {str(repository): "engineer-test"},
+    }
     assert publication.updates == [("swarm", "t1", fields, publication.agent.name)]
 
 
