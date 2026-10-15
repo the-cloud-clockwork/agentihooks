@@ -292,3 +292,108 @@ def test_distinct_files_with_identical_dependency_closures_keep_all_coverage(tmp
             "tests/test_a.py::test_sample",
             "tests/test_b.py::test_sample",
         }
+
+
+def _repository(root: Path, files: dict[str, str]) -> None:
+    root.mkdir()
+    for path, text in files.items():
+        (root / path).parent.mkdir(parents=True, exist_ok=True)
+        (root / path).write_text(text)
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "add", *files], cwd=root, check=True)
+
+
+def test_each_stored_file_keeps_only_its_own_tests_from_every_bucket(tmp_path, capsys):
+    import json
+
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    files = ["tests/test_a.py", "tests/test_b.py"]
+    _repository(root, {path: "def test_sample():\n    pass\n" for path in files})
+    a, b = "tests/test_a.py::Case::test_sample", "tests/test_b.py::Case::test_sample"
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [
+            {"status": 0, "tests": {"m.x_first": [a]}, "durations": {a: 1}, "cpu": 4},
+            {"status": 0, "tests": {"m.x_first": [b], "m.x_second": [b]}, "durations": {b: 2}, "cpu": 2},
+        ]
+
+    cache = tmp_path / "cache/nested"
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    assert "Mutation stats cache: reused 0 test files; collect 2" in capsys.readouterr().out
+    (root / files[1]).write_text("def test_sample():\n    assert True\n")
+    warm = collect_cached_stats(root, cache, {}, files, [], collect)
+    assert "Mutation stats cache: reused 1 test files; collect 1" in capsys.readouterr().out
+    assert calls == [files, ["tests/test_b.py"]]
+    assert warm[0] == {"status": 0, "tests": {"m.x_first": [a], "m.x_second": []}, "durations": {a: 1}, "cpu": 3.0}
+    stored = [json.loads(path.read_text())["durations"] for path in cache.glob("*.json")]
+    assert {a: 1} in stored and {b: 2} in stored
+
+
+@pytest.mark.parametrize(
+    ("layout", "helper"),
+    [
+        ({"tests/sub/test_sample.py": "from .test_helper import value\n"}, "tests/sub/test_helper.py"),
+        ({"tests/test_sample.py": "from test_helper import value\n"}, "test_helper.py"),
+        ({"tests/test_sample.py": "import importlib\nimportlib.import_module('test_helper')\n"}, "test_helper.py"),
+        ({"tests/test_sample.py": "__import__('test_helper')\n"}, "test_helper.py"),
+    ],
+)
+def test_relative_top_level_and_dynamic_imports_recollect_a_changed_helper(tmp_path, layout, helper):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    _repository(root, {**layout, helper: "value = 1\n"})
+    files = list(layout)
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [{"status": 0, "tests": {}, "durations": {}, "cpu": 1}]
+
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == [files]
+    (root / helper).write_text("value = 2\n")
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == [files, files]
+
+
+def test_stats_cache_refuses_a_root_outside_git(tmp_path):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    with pytest.raises(subprocess.CalledProcessError):
+        collect_cached_stats(tmp_path, tmp_path / "cache", {}, [], [], lambda files: [])
+
+
+def test_file_stats_pass_sorted_changed_lines_and_runner_options_to_the_cache(tmp_path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+
+    from scripts.ci_mutation.selection import collect_file_stats
+
+    (tmp_path / "changed-lines.json").write_text(json.dumps({"scripts/sample.py": {"lines": [5, 2], "tests": []}}))
+    monkeypatch.setenv("MUTATION_STATS_CACHE", str(tmp_path / "cache"))
+    monkeypatch.setenv("MUTATION_STATS_ROOT", str(tmp_path / "root"))
+    seen = []
+
+    def cached(root, folder, scope, files, options, collect):
+        seen.append((root, folder, scope, files, options))
+        return ["cached"]
+
+    monkeypatch.setattr("scripts.ci_mutation.stats_cache.collect_cached_stats", cached)
+    runner = SimpleNamespace(_pytest_add_cli_args=["-q", "-x"])
+    assert collect_file_stats(None, runner, ["tests/test_sample.py"], 1, tmp_path) == ["cached"]
+    assert seen == [
+        (
+            tmp_path / "root",
+            tmp_path / "cache",
+            {"scripts/sample.py": [2, 5]},
+            ["tests/test_sample.py"],
+            ["-q", "-x"],
+        )
+    ]

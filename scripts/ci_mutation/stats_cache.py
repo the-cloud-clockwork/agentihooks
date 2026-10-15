@@ -1,12 +1,22 @@
+import functools
 import hashlib
 import json
 import subprocess
 import sys
 from collections.abc import Callable
 from importlib import metadata
+from itertools import accumulate
 from pathlib import Path
 
 from scripts.ci_mutation.scope import imported_names, is_test_file, module_name
+
+SCHEMA = 2
+CONTEXT_FIELDS = ("schema", "sources", "changes", "options", "runtime")
+KEY_FIELDS = ("path", "tests")
+DYNAMIC_IMPORTS = ("importlib", "__import__")
+TRACKED = ("git", "ls-files", "-z")
+report = functools.partial(print, flush=True)
+encode = functools.partial(json.dumps, sort_keys=True)
 
 
 def test_inputs(
@@ -18,14 +28,11 @@ def test_inputs(
         current = pending.pop()
         if current not in records:
             text = (root / current).read_text()
-            package = tuple(Path(current).with_suffix("").parts[:-1])
-            imports = imported_names(text, package)
-            names = {
-                ".".join(name.split(".")[:index]) for name in imports for index in range(1, len(name.split(".")) + 1)
-            }
+            imports = imported_names(text, Path(current).parent.parts)
+            names = {prefix for name in imports for prefix in accumulate(name.split("."), "{}.{}".format)}
             dependencies = (
                 set(modules.values())
-                if "importlib" in text or "__import__" in text
+                if any(marker in text for marker in DYNAMIC_IMPORTS)
                 else {modules[name] for name in names if name in modules}
             )
             records[current] = (hashlib.sha256(text.encode()).hexdigest(), dependencies)
@@ -43,45 +50,27 @@ def collect_cached_stats(
     options: list[str],
     collect: Callable[[list[str]], list[dict]],
 ) -> list[dict]:
-    tracked = subprocess.run(
-        ["git", "ls-files", "-z"], cwd=root, capture_output=True, text=True, check=True
-    ).stdout.split("\0")
+    tracked = subprocess.check_output(TRACKED, cwd=root, text=True).split("\0")
     sources = {
         path: hashlib.sha256((root / path).read_bytes()).hexdigest()
         for path in tracked
         if path and not is_test_file(path) and (root / path).is_file()
     }
     versions = {distribution.metadata["Name"]: distribution.version for distribution in metadata.distributions()}
-    context = {
-        "schema": 2,
-        "sources": sources,
-        "changes": changes,
-        "options": options,
-        "runtime": [sys.version, sys.platform, versions],
-    }
-    modules = {module_name(Path(path)): path for path in tracked if path and Path(path).suffix == ".py"}
+    context = dict(zip(CONTEXT_FIELDS, (SCHEMA, sources, changes, options, [sys.version, sys.platform, versions])))
+    modules = {module_name(Path(path)): path for path in tracked if Path(path).suffix == ".py"}
     records = {}
     folder.mkdir(parents=True, exist_ok=True)
     keys = {
         path: hashlib.sha256(
-            json.dumps(
-                {**context, "path": path, "tests": test_inputs(root, path, modules, records)}, sort_keys=True
-            ).encode()
+            encode({**context, **dict(zip(KEY_FIELDS, (path, test_inputs(root, path, modules, records))))}).encode()
         ).hexdigest()
         for path in files
     }
-    reused, missing = [], []
-    for path, key in keys.items():
-        stored = folder / f"{key}.json"
-        if stored.is_file():
-            result = json.loads(stored.read_text())
-            if result["status"] == 0:
-                reused.append(result)
-            else:
-                missing.append(path)
-        else:
-            missing.append(path)
-    print(f"Mutation stats cache: reused {len(reused)} test files; collect {len(missing)}", flush=True)
+    stored = {path: folder / f"{key}.json" for path, key in keys.items()}
+    reused = [json.loads(file.read_text()) for file in stored.values() if file.is_file()]
+    missing = [path for path, file in stored.items() if not file.is_file()]
+    report(f"Mutation stats cache: reused {len(reused)} test files; collect {len(missing)}")
     fresh = collect(missing) if missing else []
     if any(result["status"] != 0 for result in fresh):
         raise SystemExit(1)
@@ -90,7 +79,7 @@ def collect_cached_stats(
             test: seconds
             for result in fresh
             for test, seconds in result["durations"].items()
-            if test.split("::", 1)[0] == path
+            if test.partition("::")[0] == path
         }
         tests = {
             function: sorted(
