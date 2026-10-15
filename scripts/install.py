@@ -25,6 +25,7 @@ from urllib.request import url2pathname
 
 import yaml
 
+from hooks import gh_config
 from scripts import balance_cli, runtime_env
 from scripts.claude_config import claude_home
 from scripts.claude_config import claude_json as claude_json_path
@@ -6243,6 +6244,7 @@ def _crew_doctor(argv: list[str]) -> bool:
 
 
 def main() -> None:
+    gh_config.pin(os.environ)
     _argv = sys.argv[1:]
     if _argv[:1] == ["enforcement"] and "--local" in _argv[2:]:
         _argv.remove("--local")

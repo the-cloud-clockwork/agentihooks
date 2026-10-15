@@ -5,6 +5,8 @@ import re
 import sys
 from pathlib import Path
 
+from hooks import gh_config
+
 # A name outside this shape cannot be a shell variable, and a mistyped line can
 # put a secret in the name, so such a line is reported by position only.
 _VALID_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
@@ -294,6 +296,7 @@ def _env_files_fingerprint() -> tuple:
 _load_user_env()
 _load_brain_env()
 _ENV_FINGERPRINT = _env_files_fingerprint()
+gh_config.pin(os.environ)
 
 
 def reload_brain_env(force: bool = False) -> dict:
