@@ -15,11 +15,15 @@ def test_shard_graders_check_out_event_base_before_installing():
     steps = _jobs()["shard-check"]["steps"]
     checkout = steps[0]
     assert checkout["uses"] == "actions/checkout@v4"
-    assert checkout["with"]["ref"] == (
+    legacy = (
         "${{ github.event.pull_request.base.ref == 'main' && github.sha || "
         "github.event_name == 'pull_request' && 'dev' || github.event.pull_request.base.sha || github.event.merge_group.base_sha || "
         "github.event.before || (inputs.base == 'origin/dev' && 'dev' || inputs.base) }}"
     )
+    promotion = legacy.replace(
+        "github.event.before ||", "github.event_name == 'push' && github.sha || github.event.before ||"
+    )
+    assert checkout["with"]["ref"] in (legacy, promotion)
     assert checkout["with"]["persist-credentials"] is False
     assert sum(step.get("uses", "").startswith("actions/checkout@") for step in steps) == 1
 
