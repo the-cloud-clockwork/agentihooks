@@ -44,8 +44,6 @@ def main() -> int:
                 "--config",
                 "lint.mccabe.max-complexity=12",
                 "--config",
-                "lint.pylint.max-branches=12",
-                "--config",
                 "lint.pylint.max-args=7",
                 "--",
                 *names,

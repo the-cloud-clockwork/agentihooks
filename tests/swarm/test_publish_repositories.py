@@ -155,6 +155,13 @@ def test_publish_selects_the_current_repository_and_retains_both_branches(reposi
         ("print(1)\n" * 3000, True),
         ("print(1)\n" * 3001, False),
         ("def chosen(a, b, c, d, e, f, g, h):\n    return a, b, c, d, e, f, g, h\n", False),
+        ("def chosen(a, b, c, d, e, f, g):\n    return a, b, c, d, e, f, g\n", True),
+        (
+            "def chosen(value):\n    result = 0\n"
+            + "".join(f"    if value == {n}:\n        result += 1\n" for n in range(11))
+            + "    return result\n",
+            True,
+        ),
     ],
     ids=[
         "valid",
@@ -166,6 +173,8 @@ def test_publish_selects_the_current_repository_and_retains_both_branches(reposi
         "file_limit",
         "file_length",
         "arguments",
+        "argument_limit",
+        "complexity_limit",
     ],
 )
 def test_bundle_without_a_gate_uses_the_named_touched_file_fallback(
@@ -390,3 +399,37 @@ def test_fallback_does_not_start_an_interactive_python(repositories, monkeypatch
     monkeypatch.chdir(p.swarm)
     result = publish.publish("swarm", p.agent, str(p.swarm), p.ledger, "Noninteractive gate", ["chosen.py"])
     assert git(p.bundle, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == result["head"]
+
+
+def test_fallback_applies_size_limits_even_when_repository_config_ignores_them(repositories, monkeypatch):
+    from pathlib import Path
+
+    from scripts.swarm import publish_gate
+
+    p = repositories
+    (p.bundle / ".ruff.toml").write_text('[lint.per-file-ignores]\n"chosen.py" = ["PLR0913"]\n')
+    git(p.bundle, "add", ".ruff.toml")
+    git(p.bundle, "commit", "-qm", "Existing lint configuration")
+    git(p.bundle, "push", "origin", "dev")
+    p.task["repositories"] = [str(p.bundle)]
+    root = Path(publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)["worktree"])
+    (root / "chosen.py").write_text("def chosen(a, b, c, d, e, f, g, h):\n    return a, b, c, d, e, f, g, h\n")
+    git(root, "add", "chosen.py")
+    git(root, "commit", "-qm", "Excess arguments")
+    monkeypatch.chdir(root)
+    assert publish_gate.main() == 1
+
+
+def test_fallback_grades_a_literal_leading_dash_filename(repositories, monkeypatch):
+    from pathlib import Path
+
+    from scripts.swarm import publish_gate
+
+    p = repositories
+    p.task["repositories"] = [str(p.bundle)]
+    root = Path(publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)["worktree"])
+    (root / "-chosen.py").write_text("value = 1\n")
+    git(root, "add", "--", "-chosen.py")
+    git(root, "commit", "-qm", "Literal source filename")
+    monkeypatch.chdir(root)
+    assert publish_gate.main() == 0
