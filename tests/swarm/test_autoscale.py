@@ -51,7 +51,7 @@ def test_total_ceiling_is_at_most_fifty():
 def test_reason_names_quota_seats_host_room_and_the_held_raise():
     decision = calculate({"eng": 2}, {"claude": 4, "codex": 2}, 10, {"eng": 100})
     assert decision["reason"] == (
-        "Quota seats 6 (claude 4, codex 2); host room 10; ceiling 2 of 8; raise held at tick 1 of 3."
+        "Quota seats 6 (claude 4, codex 2); host room 10; ceiling 3 of 8; raise held at tick 1 of 3."
     )
 
 
@@ -61,7 +61,7 @@ def test_a_raise_climbs_two_seats_each_tick_after_three_ticks_then_clears():
     for _ in range(6):
         previous = calculate({"eng": 2}, {"claude": 8}, 20, {"eng": 100}, previous)
         decisions.append(previous)
-    assert [sum(d["ceilings"].values()) for d in decisions] == [2, 2, 4, 6, 8, 10]
+    assert [sum(d["ceilings"].values()) for d in decisions] == [3, 3, 5, 7, 9, 10]
     assert [d["pending_raise"]["ticks"] for d in decisions] == [1, 2, 3, 3, 3, 0]
     assert decisions[-1]["pending_raise"] == {"target": None, "ticks": 0}
     assert decisions[-1]["reason"] == "Quota seats 8 (claude 8); host room 20; ceiling 10 of 10."
@@ -83,7 +83,11 @@ def test_a_quota_reset_waits_three_ticks_after_an_immediate_drain():
     for _ in range(3):
         previous = calculate(live, {"claude": 2, "codex": 0}, 20, {"eng": 100}, previous)
         decisions.append(previous)
-    assert [d["ceilings"] for d in decisions] == [live, live, {"plan": 1, "ci": 1, "eng": 4}]
+    assert [d["ceilings"] for d in decisions] == [
+        {"plan": 1, "ci": 1, "eng": 3},
+        {"plan": 1, "ci": 1, "eng": 3},
+        {"plan": 1, "ci": 1, "eng": 4},
+    ]
     assert decisions[-1]["pending_raise"] == {"target": None, "ticks": 0}
 
 
@@ -104,7 +108,7 @@ def test_a_changed_target_restarts_the_three_consecutive_ticks():
     previous = calculate({"eng": 2}, {"claude": 6}, 10, {"eng": 100})
     previous = calculate({"eng": 2}, {"claude": 6}, 10, {"eng": 100}, previous)
     changed = calculate({"eng": 2}, {"claude": 7}, 10, {"eng": 100}, previous)
-    assert changed["ceilings"] == {"plan": 0, "ci": 0, "eng": 2}
+    assert changed["ceilings"] == {"plan": 0, "ci": 0, "eng": 3}
     assert changed["pending_raise"] == {"target": 9, "ticks": 1}
     interrupted = calculate({"eng": 2}, {"claude": 0}, 10, {"eng": 100}, changed)
     assert interrupted["pending_raise"] == {"target": None, "ticks": 0}
