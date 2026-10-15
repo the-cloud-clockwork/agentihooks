@@ -175,9 +175,9 @@ def test_a_lifted_stop_never_blocks_the_claim_and_clear_restarts_the_streak(rig,
     assert rig.stop().returncode == 2
     assert rig.stop().returncode == 2
     paths = {
-        "session": lift.lift_path(SLUG, SID, "claim-stop", rig.home),
-        "agent": lift.agent_lift_path(SLUG, ME, "claim-stop", rig.home),
-        "task": lift.task_lift_path(SLUG, rig.task, "claim-stop", rig.home),
+        "session": lift.lift_path(SLUG, SID, "claim-stop", rig.home / ".agentihooks" / "swarm"),
+        "agent": lift.agent_lift_path(SLUG, ME, "claim-stop", rig.home / ".agentihooks" / "swarm"),
+        "task": lift.task_lift_path(SLUG, rig.task, "claim-stop", rig.home / ".agentihooks" / "swarm"),
     }
     path = paths[scope]
     path.parent.mkdir(parents=True, exist_ok=True)
