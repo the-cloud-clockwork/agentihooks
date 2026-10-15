@@ -162,7 +162,7 @@ def test_the_tick_batches_active_tasks_and_red_notices_then_refreshes_the_next_t
     cli.run_tick(store, "sw")
     assert heads == []
     cli.run_tick(store, "sw")
-    assert batches == [{URL, other}, {URL, other}]
+    assert batches == [{URL, other}, {URL, other}, {URL, other}, {URL, other}]
     assert heads == [URL]
 
 
@@ -183,7 +183,7 @@ def test_the_coach_tick_keeps_an_unchanged_head_from_the_ticks_pull_request_read
     monkeypatch.setattr(intent, "pr_head", lambda url: pytest.fail("a second head read"))
     monkeypatch.setattr(intent, "pr_view", lambda url: views.append(url))
     actions = cli.run_tick(store, "sw")
-    assert (reads, views) == ([URL], [])
+    assert (reads, views) == ([URL, URL], [])
     assert not any("intent check" in action for action in actions)
     assert Verdicts("sw", "intent").read("t1")["head"] == "h1"
 

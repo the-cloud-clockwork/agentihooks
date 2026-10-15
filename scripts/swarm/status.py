@@ -234,7 +234,7 @@ def observation(store, slug, agent):
 
 
 def status_report(store, slug, state):
-    from scripts.swarm import capacity
+    from scripts.swarm import capacity, tick_activity
 
     config = store.config(slug)
     tasks = state.get("tasks", [])
@@ -265,6 +265,7 @@ def status_report(store, slug, state):
         ],
         "outages": outage.open_records(slug),
         "last_tick": int(store.redis.get(store.key(slug, "last-tick")) or 0),
+        "last_tick_activity": tick_activity.read(store, slug),
         "history": [json.loads(row) for row in store.redis.lrange(store.key(slug, "history"), 0, -1)],
         "tasks": task_counts(tasks),
         "task_revisions": lifecycle.revisions(state.get("_meta", {}).get("stamps", {})),

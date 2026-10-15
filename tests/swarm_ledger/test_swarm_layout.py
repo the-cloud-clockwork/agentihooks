@@ -230,6 +230,20 @@ def test_header_names_the_swarm_state_tick_controls_and_autonomy(open_page):
     assert page.puts == [{"action": "set", "autonomy": "manual"}]
 
 
+@pytest.mark.parametrize(
+    "completed,activity,expected",
+    [
+        (NOW_MS - 1_200_000, NOW_MS - 2_000, "tick activity 2s ago · completed 20m ago"),
+        (0, NOW_MS - 2_000, "tick activity 2s ago · no completed tick"),
+        (NOW_MS - 12_000, NOW_MS - 20_000, "tick 12s ago"),
+    ],
+)
+def test_tick_label_distinguishes_recent_activity_from_completion(open_page, completed, activity, expected):
+    page = open_page(status(last_tick=completed, last_tick_activity=activity), width=1920)
+    page.tab.set_viewport_size({"width": 1920, "height": 1080})
+    assert page.text("#swarm-tick") == expected
+
+
 def test_alert_line_shows_only_while_a_finding_is_open_with_the_live_caps(open_page):
     assert not open_page().tab.locator("#swarm-alert").is_visible()
     finding = {

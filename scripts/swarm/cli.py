@@ -191,7 +191,7 @@ def _publish_tick_status(store, slug, doc):
 @timing.instrument_tick
 @outage.guard_tick
 def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=False):
-    from scripts.swarm import command_runner, commands, controller, incidents, lease
+    from scripts.swarm import command_runner, commands, controller, incidents, lease, tick_activity
 
     ledger = ledger or LedgerClient()
     outbox.flush(InboxStore(store.redis))
@@ -202,9 +202,14 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
     token = controller.take_tick_lock(store, slug, held, TICK_LOCK_MS)
     if token is None:
         return ["another tick is running"]
-    keeping = timing.BEFORE_STEP.set(lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS))
+    keeping = timing.BEFORE_STEP.set(
+        lambda: tick_activity.keep(
+            store, slug, lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS), now_ms
+        )
+    )
     doc = {}
     try:
+        timing.keep()
         outage.providers(store, slug, runtime, now_ms())
         if isinstance(ledger, ledger_client.LedgerClient) and not outage.ledger_health(
             slug, now_ms(), lambda: isinstance(ledger.metadata(slug), dict)
@@ -256,19 +261,8 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
                     ledger,
                     store.config(slug),
                 )
-            actions += timing.call(tick, slug, store, ledger, runtime or routed(herdr=HerdrRuntime()), now_ms())
-            if store.config(slug).template == "doctor":
-                from scripts.doctor import cli as doctor
-
-                actions += skip_refused(doctor.timer, store, slug, now_ms(), scheduled)
-            herdr = messenger or delivery.HerdrMessenger()
-            timing.call(delivery.migrate_outbox, store, slug, inbox)
-            agents = [a for a in timing.call(store.agents, slug) if a.state != "finished"]
-            skip_refused(delivery.relay_to_page, inbox, slug, agents, ledger)
             doc, config = timing.call(ledger.state, slug), store.config(slug)
             view = timing.call(ledger_events.tick_view, inbox, store, slug, doc)
-            actions += skip_refused(ledger_events.event_pass, inbox, store, slug, doc, ledger, now_ms(), view)
-            actions += skip_refused(done_gate.recheck_pass, store, slug, doc, ledger, now_ms(), view)
             mail, mode = ledger_events.Mail(inbox, store, slug), intent.mode_of(config)
             actions += skip_refused(
                 intent.Check(
@@ -284,6 +278,19 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
                 ).run,
                 doc,
             )
+            actions += timing.call(tick, slug, store, ledger, runtime or routed(herdr=HerdrRuntime()), now_ms())
+            if store.config(slug).template == "doctor":
+                from scripts.doctor import cli as doctor
+
+                actions += skip_refused(doctor.timer, store, slug, now_ms(), scheduled)
+            herdr = messenger or delivery.HerdrMessenger()
+            timing.call(delivery.migrate_outbox, store, slug, inbox)
+            agents = [a for a in timing.call(store.agents, slug) if a.state != "finished"]
+            skip_refused(delivery.relay_to_page, inbox, slug, agents, ledger)
+            doc, config = timing.call(ledger.state, slug), store.config(slug)
+            view = timing.call(ledger_events.tick_view, inbox, store, slug, doc)
+            actions += skip_refused(ledger_events.event_pass, inbox, store, slug, doc, ledger, now_ms(), view)
+            actions += skip_refused(done_gate.recheck_pass, store, slug, doc, ledger, now_ms(), view)
             actions += skip_refused(progress.checks_pass, store.redis, slug, doc["tasks"], view, now_ms())
             rows = {t["id"]: t for t in doc["tasks"]}
             actions += skip_refused(waits.end_pass, store, slug, rows, inbox, view, now_ms(), ledger_events.view)
