@@ -68,7 +68,7 @@ MOVED = {
     ("test.yml", "mutation"): BATCH,
     ("test.yml", "mutation-plan"): LIGHT,
     ("test.yml", "mutation-stats"): BATCH,
-    ("test.yml", "queue-baseline"): STANDARD,
+    ("test.yml", "queue-baseline"): LIGHT,
     ("test.yml", "refresh-durations"): STANDARD,
     ("test.yml", "shard-check"): LIGHT,
     ("test.yml", "sonar"): STANDARD,

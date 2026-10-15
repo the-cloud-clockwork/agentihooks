@@ -421,8 +421,12 @@ def _settled(found):
 
 
 def findings_pass(inbox, store, slug, shown, doc=None):
-    mail, sent = Mail(inbox, store, slug, doc), []
+    from scripts.swarm.health import merge_stall
+
+    mail, sent = Mail(inbox, store, slug, doc), merge_stall.deliver(inbox, store, slug)
     for found in shown:
+        if found["kind"] == "merge stall":
+            continue
         if found["kind"] in ("spawn stall", "stall") or found["kind"] in outage.HELD.values():
             continue
         judged = (found.get("verdict") or {}).get("at", 0)
