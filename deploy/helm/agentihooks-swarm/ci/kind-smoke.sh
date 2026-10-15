@@ -38,11 +38,18 @@ finish() {
 }
 
 (
+  docker build -q --build-arg IMAGE="$image" --target packages \
+    -f "$chart/ci/terminal-worker.Dockerfile" . >/dev/null &
+  packages=$!
+  trap 'status=$?; wait "$packages" || true; exit "$status"' EXIT
   docker build -q -t "$image" . >/dev/null
+  printf 'main fixture image built\n'
   printf 'FROM %s\nCOPY . /\n' "$image" \
     | docker build -q -t "$bundle_image" -f - tests/fixtures/swarm_v2/worker-bundle >/dev/null
+  wait "$packages"
   docker build -q --build-arg IMAGE="$image" -t "$terminal_image" \
     -f "$chart/ci/terminal-worker.Dockerfile" . >/dev/null
+  printf 'terminal fixture image built\n'
   bash scripts/packaging/swarm-image-clients.sh "$image"
 ) &
 build=$!
