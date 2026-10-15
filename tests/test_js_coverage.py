@@ -182,8 +182,9 @@ def test_a_selected_run_without_page_coverage_writes_an_empty_report(tmp_path, r
         text=True,
     )
     if recorded:
-        assert result.returncode != 0
-        assert not out.exists()
+        assert result.returncode == 0
+        assert out.exists()
+        assert result.stdout.startswith("Mapped 2 captured runs")
         return
     assert result.returncode == 0
     assert out.read_text() == ""
