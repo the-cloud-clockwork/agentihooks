@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,7 @@ SPEC = importlib.util.spec_from_file_location("profile_probe", ROOT / "tests" / 
 probe = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(probe)
 TOKEN = "ghp_" + "a1" * 18
+LAUNCH_NS = 1_700_000_000_000_000_000
 
 
 class Clock:
@@ -25,12 +27,15 @@ class Clock:
 def ran(tmp: Path, target: str, status: int, output: str) -> None:
     (tmp / f"{target}-run.txt").write_text(output, encoding="utf-8")
     (tmp / f"{target}-run.exit").write_text(f"{status}\n", encoding="utf-8")
+    (tmp / f"{target}-run.started").write_text(f"{LAUNCH_NS}\n", encoding="utf-8")
 
 
-def register(attempt: Path, target: str) -> None:
+def register(attempt: Path, target: str, after_launch_ns: int = 1_500_000_000) -> None:
     home = attempt / "homes" / target / ".agentihooks"
     home.mkdir(parents=True)
-    (home / "active-sessions.json").write_text(json.dumps({"s1": {"cwd": "/home/worker/work"}}), encoding="utf-8")
+    registry = home / "active-sessions.json"
+    registry.write_text(json.dumps({"s1": {"cwd": "/home/worker/work"}}), encoding="utf-8")
+    os.utime(registry, ns=(LAUNCH_NS + after_launch_ns, LAUNCH_NS + after_launch_ns))
 
 
 def test_diagnostics_keep_exit_status_redacted_output_and_registration_time(tmp_path):
@@ -38,21 +43,23 @@ def test_diagnostics_keep_exit_status_redacted_output_and_registration_time(tmp_
     ran(tmp_path, "claude", 0, f"loaded {attempt}/homes/claude\n")
     ran(tmp_path, "codex", 1, f"Authorization: Bearer {TOKEN}\n")
     register(attempt, "claude")
-    register(attempt, "codex")
+    register(attempt, "codex", 2_250_000_000)
     clock = Clock()
 
     found = probe.diagnose(attempt, tmp_path, clock=clock, sleep=clock.sleep)
 
     assert found["registration_budget_seconds"] == probe.REGISTRATION_BUDGET_SECONDS
+    assert found["waited_seconds"] == 0.0
     assert found["harnesses"]["claude"] == {
         "sessions": {"s1": "/home/worker/work"},
-        "seconds": 0.0,
+        "registry_written_after_launch_seconds": 1.5,
         "harness": {"exit": 0, "output": "loaded <attempt>/homes/claude\n"},
     }
-    codex = found["harnesses"]["codex"]["harness"]
-    assert codex["exit"] == 1
-    assert TOKEN not in codex["output"]
-    assert codex["output"] == "Authorization: Bearer [REDACTED:github_token]\n"
+    codex = found["harnesses"]["codex"]
+    assert codex["registry_written_after_launch_seconds"] == 2.25
+    assert codex["harness"]["exit"] == 1
+    assert TOKEN not in codex["harness"]["output"]
+    assert codex["harness"]["output"] == "Authorization: Bearer [REDACTED:github_token]\n"
 
 
 def test_late_registration_is_observed_within_the_budget(tmp_path):
@@ -69,11 +76,11 @@ def test_late_registration_is_observed_within_the_budget(tmp_path):
 
     found = probe.diagnose(attempt, tmp_path, clock=clock, sleep=sleep)
 
-    assert found["harnesses"]["codex"]["seconds"] == 2.0
+    assert found["waited_seconds"] == 2.0
     assert found["harnesses"]["codex"]["sessions"] == {"s1": "/home/worker/work"}
 
 
-def test_missing_hook_registration_is_fatal_and_keeps_diagnostics(tmp_path):
+def test_missing_hook_registration_is_fatal_and_keeps_diagnostics(tmp_path, capsys):
     attempt = tmp_path / "a1"
     ran(tmp_path, "claude", 0, "hello\n")
     ran(tmp_path, "codex", 124, "codex started\n")
@@ -83,11 +90,27 @@ def test_missing_hook_registration_is_fatal_and_keeps_diagnostics(tmp_path):
     with pytest.raises(SystemExit) as raised:
         probe.diagnose(attempt, tmp_path, clock=clock, sleep=clock.sleep)
 
-    prefix, detail = str(raised.value.code).split(": ", 1)
-    assert prefix == "missing hook registration"
-    assert json.loads(detail)["harnesses"]["codex"] == {
+    codex = {
         "sessions": {},
-        "seconds": probe.REGISTRATION_BUDGET_SECONDS,
+        "registry_written_after_launch_seconds": None,
         "harness": {"exit": 124, "output": "codex started\n"},
     }
+    prefix, detail = str(raised.value.code).split(": ", 1)
+    assert prefix == "missing hook registration"
+    assert json.loads(detail)["harnesses"]["codex"] == codex
+    printed = json.loads(capsys.readouterr().out)["missing_hook_registration"]
+    assert printed["harnesses"]["codex"] == codex
+    assert printed["waited_seconds"] == probe.REGISTRATION_BUDGET_SECONDS
+    assert clock.now == probe.REGISTRATION_BUDGET_SECONDS
+
+
+def test_one_budget_covers_both_harnesses(tmp_path):
+    attempt = tmp_path / "a1"
+    ran(tmp_path, "claude", 124, "")
+    ran(tmp_path, "codex", 124, "")
+    clock = Clock()
+
+    with pytest.raises(SystemExit):
+        probe.diagnose(attempt, tmp_path, clock=clock, sleep=clock.sleep)
+
     assert clock.now == probe.REGISTRATION_BUDGET_SECONDS

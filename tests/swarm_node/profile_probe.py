@@ -57,29 +57,43 @@ def harness(target: str, attempt: Path, tmp: Path = TMP) -> dict:
     }
 
 
-def registration(home: Path, budget: float, clock=time.monotonic, sleep=time.sleep) -> dict:
-    started = clock()
+def registration(home: Path, deadline: float, clock=time.monotonic, sleep=time.sleep) -> dict:
     while True:
         try:
             found = sessions(home)
         except (OSError, ValueError, KeyError):
             found = {}
-        elapsed = clock() - started
-        if found or elapsed >= budget:
-            return {"sessions": found, "seconds": round(elapsed, 3)}
+        if found or clock() >= deadline:
+            return {"sessions": found}
         sleep(POLL_SECONDS)
+
+
+def launched(target: str, home: Path, tmp: Path) -> float | None:
+    registry = home / ".agentihooks" / "active-sessions.json"
+    if not registry.exists():
+        return None
+    started = int((tmp / f"{target}-run.started").read_text(encoding="utf-8"))
+    return round((registry.stat().st_mtime_ns - started) / 1e9, 3)
 
 
 def diagnose(
     attempt: Path, tmp: Path = TMP, budget: float = REGISTRATION_BUDGET_SECONDS, clock=time.monotonic, sleep=time.sleep
 ) -> dict:
-    observed = {
-        target: registration(attempt / "homes" / target, budget, clock, sleep)
-        | {"harness": harness(target, attempt, tmp)}
-        for target in SERVERS
+    started = clock()
+    observed = {}
+    for target in SERVERS:
+        home = attempt / "homes" / target
+        observed[target] = registration(home, started + budget, clock, sleep) | {
+            "registry_written_after_launch_seconds": launched(target, home, tmp),
+            "harness": harness(target, attempt, tmp),
+        }
+    diagnostics = {
+        "registration_budget_seconds": budget,
+        "waited_seconds": round(clock() - started, 3),
+        "harnesses": observed,
     }
-    diagnostics = {"registration_budget_seconds": budget, "harnesses": observed}
     if not all(list(entry["sessions"].values()) == ["/home/worker/work"] for entry in observed.values()):
+        print(json.dumps({"missing_hook_registration": diagnostics}, sort_keys=True))
         raise SystemExit("missing hook registration: " + json.dumps(diagnostics, sort_keys=True))
     return diagnostics
 
