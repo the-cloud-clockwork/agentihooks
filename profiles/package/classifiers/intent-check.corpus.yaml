@@ -535,7 +535,7 @@ cases:
         selection, a Branch guard answer naming the published page, and unknown hyperdrive returning missing with a proposed
         documentation follow-up. These are task-specific delivery observations independent of merge or review status. Documentation
         expansion is explicitly assigned to a separate final docs task.
-    input_digest: 7f8e9fef38d9b73e
+    input_digest: 6159cd3baa624e4a
     baseline_answers:
     - usable: 0.9973
       delivers: 0.9908
@@ -1137,7 +1137,7 @@ cases:
       spec: The explicit operator task authorizes a shipped shared documentation lookup skill and live answer. Cryptocurrency
         wallet balances and market trades implement no lookup, installed skill or answer seam. General project context and
         copied authorization do not authorize this work.
-    input_digest: 90b6928285ac1478
+    input_digest: aa0d08209701fc0c
     baseline_answers:
     - usable: 0.0
       delivers: 0.0
@@ -1547,7 +1547,7 @@ cases:
       spec: The task explicitly requires a skill shipped in the package, available to every role and any project, with tests
         and one live answer. This fixed proposal-only control ships no skill, lookup command, role install or executable and
         has no live lookup proof. Approval and merge of prose do not satisfy its delivery boundary.
-    input_digest: 187a8c50c7519eb7
+    input_digest: e82ea8fff0893f27
     baseline_answers:
     - usable: 0.0001
       delivers: 0.0
@@ -2558,7 +2558,7 @@ cases:
         false, retained_verdicts: 0" and state "Exact retained disputed cases cannot yet be independently labelled or measured
         before and after" -- the PR only fixes the prerequisite gh-flag bug so verdicts can start accumulating; the corpus
         rebuild and before/after measurement the task text calls for were not done.'
-    input_digest: 8825a94095dd7b68
+    input_digest: 82470f4fa597421b
     baseline_answers:
     - usable: 0.6654
       delivers: 0.0276
@@ -3874,7 +3874,7 @@ cases:
         PR says the deployed proof follows, so it is due after merge. The ready head proof is CI: a red run on the test only
         head and a green run where "test_push_route.py 11 passed". The changed files add nothing beyond the ask, and the `ruff
         format` reflow of unrelated lines is justified in the body as needed to pass the CI format check.'
-    input_digest: 22641f19c6c2976c
+    input_digest: 0a7dbb63eca968b4
     baseline_answers:
     - usable: 0.8991213718636752
       delivers: 0.8438950947024555
