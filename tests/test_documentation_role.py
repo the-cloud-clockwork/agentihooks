@@ -1,7 +1,7 @@
 import json
 
 from scripts.profiles import render
-from tests.test_profile_render import world  # noqa: F401
+from tests.test_profile_render import world as world
 
 
 def test_documentation_role_has_its_own_skill_and_only_task_browser(world):
