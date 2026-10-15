@@ -135,7 +135,9 @@ class Placed:
 
 class Ledger(Protocol):
     def state(self, slug: str) -> dict: ...
-    def update_task(self, slug: str, task_id: str, fields: dict, by: str = ..., if_state: tuple = ...) -> dict: ...
+    def update_task(
+        self, slug: str, task_id: str, fields: dict, by: str = ..., if_state: tuple = ..., if_match: dict | None = ...
+    ) -> dict: ...
     def comment(self, slug: str, task_id: str, text: str, by: str) -> None: ...
     def notify(self, slug: str, text: str) -> None: ...
     def closed(self, slug: str) -> bool: ...
@@ -472,6 +474,16 @@ def _retire_launch(slug, store, runtime, agent, now_ms):
     return True
 
 
+def _restore_owner(slug, store, ledger, rows, agent):
+    if not store.ensure_claim(slug, agent, LEASE_MS):
+        return
+    row = rows.get(agent.task, {})
+    if row.get("state") == "open" and row.get("claimed_by", "") in ("", agent.name):
+        expected = {"claimed_by": row.get("claimed_by", ""), "claim_generation": row.get("claim_generation", 0)}
+        fields = {"state": "pr" if row.get("pr_url") else "claimed", "claimed_by": agent.name}
+        rows[agent.task] = ledger.update_task(slug, agent.task, fields, if_state=("open",), if_match=expected)
+
+
 def _reap(slug, store, ledger, runtime, rows, now_ms):
     live, actions = runtime.live_names(), []
     for agent in store.agents(slug):
@@ -503,7 +515,7 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
             runtime.name_pane(agent)
             actions += _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
         elif agent.name in live:
-            store.refresh(slug, agent.task, agent.name, LEASE_MS)
+            _restore_owner(slug, store, ledger, rows, agent)
             actions += _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
         elif resume.recovery_pending(store, slug, agent):
             store.refresh(slug, agent.task, agent.name, LEASE_MS)
@@ -689,7 +701,7 @@ def ready_in_order(slug, store, rows, doc, lane, dispatched=None):
 
 
 def _claimable(slug, store, rows, doc, lane, dispatched=None):
-    awaiting = {a.task for a in store.agents(slug) if a.state == "awaiting-decision"}
+    awaiting = {a.task for a in store.agents(slug) if a.state != "finished"}
     held = [t.get("territory") or [] for t in rows.values() if t.get("state") in ACTIVE]
     graph, fix = hierarchy.project(doc)[0], freeze.fix_phase(store.config(slug))
     clear, overlapping = [], []
@@ -856,6 +868,9 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
         if blocked:
             actions.append(blocked)
             continue
+        if any(a.task == task["id"] and a.state != "finished" for a in store.agents(slug)):
+            _release_admission(slug, runtime, task)
+            continue
         name = store.next_name(slug, lane, now_ms)
         if not store.claim(slug, task["id"], name, LEASE_MS):
             _release_admission(slug, runtime, task)
@@ -893,7 +908,8 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             kind = config.lanes.get(lane, {}).get("kind", "")
             if kind not in ("", "auto") and not task.get("kind"):
                 fields["kind"] = kind
-            live = ledger.update_task(slug, task["id"], fields, if_state=("open",))
+            expected = {"claimed_by": task.get("claimed_by", ""), "claim_generation": task.get("claim_generation", 0)}
+            live = ledger.update_task(slug, task["id"], fields, if_state=("open",), if_match=expected)
             task.update(live)
             if live["claimed_by"] != name:
                 _release_admission(slug, runtime, task)

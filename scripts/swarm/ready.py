@@ -290,6 +290,7 @@ def _unmergeable(run, row, found, pull):
 
 def _reopen(run, row, found, what):
     task_id, url = row["id"], found["url"]
+    lease_generation = run.store.claim_generation(run.slug, task_id)
     expected = {key: row.get(key, "") for key in ("claimed_by", "pr_url", "awaiting")}
     expected["claim_generation"] = row.get("claim_generation", 0)
     live = run.ledger.update_task(
@@ -299,7 +300,7 @@ def _reopen(run, row, found, what):
     if live.get("state") != "open" or live.get("claimed_by") or live.get("claim_generation", 0) != generation:
         return []
     run.ledger.comment(run.slug, task_id, REOPENED.format(url=url, what=what), by="swarm")
-    run.store.release(run.slug, task_id, found["agent"])
+    run.store.release(run.slug, task_id, found["agent"], generation=lease_generation)
     forget(run.store, run.slug, task_id)
     removed = _remove(found, "--pushed") if found.get("worktree") else []
     return [f"task {task_id} reopened, {url} {what}", *removed]
