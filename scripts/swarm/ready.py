@@ -271,11 +271,16 @@ def _unmergeable(run, row, found, pull):
 
 def _reopen(run, row, found, what):
     task_id, url = row["id"], found["url"]
-    run.ledger.update_task(run.slug, task_id, {"state": "open", "claimed_by": "", "awaiting": FIX}, if_state=("pr",))
+    owner = found["agent"]
+    retained = any(agent.name == owner and agent.task == task_id for agent in run.store.agents(run.slug))
+    run.ledger.update_task(
+        run.slug, task_id, {"state": "open", "claimed_by": owner if retained else "", "awaiting": FIX}, if_state=("pr",)
+    )
     run.ledger.comment(run.slug, task_id, REOPENED.format(url=url, what=what), by="swarm")
-    run.store.release(run.slug, task_id, found["agent"])
+    if not retained:
+        run.store.release(run.slug, task_id, owner)
     forget(run.store, run.slug, task_id)
-    removed = _remove(found, "--pushed") if found.get("worktree") else []
+    removed = _remove(found, "--pushed") if found.get("worktree") and not retained else []
     return [f"task {task_id} reopened, {url} {what}", *removed]
 
 
