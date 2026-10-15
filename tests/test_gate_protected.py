@@ -1,5 +1,6 @@
 import copy
 import json
+import os
 import subprocess
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -563,3 +564,61 @@ def test_a_head_altering_the_queue_canonical_aggregation_is_red(change, selected
     assert _grade({"test.yml": head}, base={"test.yml": base}) == [
         "The head's Gate — Required changes its steps; the protected branch grades with its own."
     ]
+
+
+@pytest.mark.parametrize("weakened", [False, True])
+def test_the_promotion_gate_form_is_an_allowed_transition(weakened):
+    from scripts import ci_reuse
+
+    base = _workflow()
+    base["jobs"]["gate-required"] = base["jobs"].pop("gate")
+    base["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(queue_tier=True)
+    head = copy.deepcopy(base)
+    head["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(queue_tier=True, promotion=True)
+    if weakened:
+        head["jobs"]["gate-required"]["steps"][0]["run"] += "true\n"
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
+    assert bool(problems) == weakened, problems
+
+
+@pytest.mark.parametrize(
+    ("disabled", "removed", "red"),
+    [(True, True, False), (True, False, True), (False, True, True)],
+)
+def test_only_a_disabled_job_the_head_removes_may_leave_the_gate(disabled, removed, red):
+    base = _workflow()
+    base["jobs"]["queue-baseline"] = {"runs-on": "ubuntu-latest", "if": False if disabled else "${{ always() }}"}
+    base["jobs"]["gate"]["needs"].append("queue-baseline")
+    head = copy.deepcopy(base)
+    head["jobs"]["gate"]["needs"].remove("queue-baseline")
+    if removed:
+        del head["jobs"]["queue-baseline"]
+    problems = _grade({"test.yml": head}, {"test.yml": base})
+    dropped = "The head's Gate — Required drops the base need queue-baseline."
+    assert (dropped in problems) == red, problems
+
+
+@pytest.mark.parametrize(
+    ("event", "skipped", "reused", "green"),
+    [
+        ("push", {"lint", "semgrep", "test-count"}, "false", True),
+        ("push", {"lint", "semgrep", "test-count", "sonar"}, "false", False),
+        ("push", {"unit"}, "false", False),
+        ("workflow_dispatch", {"lint"}, "false", False),
+        ("push", set(), "true", False),
+        ("push", set(), "false", True),
+    ],
+)
+def test_the_promotion_gate_skips_only_pull_request_tier_jobs_on_a_push(event, skipped, reused, green):
+    from scripts import ci_reuse
+
+    [step] = ci_reuse.gate_steps(queue_tier=True, promotion=True)
+    jobs = ["durations", "split", "unit", "shard-check", "test-count", "lint", "semgrep", "sonar", "reuse"]
+    needs = {job: {"result": "skipped" if job in skipped else "success"} for job in jobs}
+    result = subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        env=dict(os.environ, NEEDS=json.dumps(needs), REUSED=reused, EVENT=event, MUTATION="false", KIND="false"),
+        capture_output=True,
+        text=True,
+    )
+    assert (result.returncode == 0) == green, result.stdout + result.stderr
