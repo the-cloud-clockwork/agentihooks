@@ -580,11 +580,9 @@ def test_a_stalled_agents_open_items_follow_the_live_reopen_result(store, closed
     idle_for(store, ledger, runtime, IDLE_KILL_TICKS - 1, start=2_000)
     if closed_mid_tick:
         ledger.closing = lambda: ledger.rows["t1"].update(state="done", done=True)
-    actions = [
-        a
-        for a in tick("sw", store, ledger, runtime, now_ms=2_000 + IDLE_KILL_TICKS * 60_000)
-        if not a.startswith("nudged stale")
-    ]
+    *nudged, actions = tick("sw", store, ledger, runtime, now_ms=2_000 + IDLE_KILL_TICKS * 60_000)
+    assert [a.split(" as message ")[0] for a in nudged] == ["nudged stale engineer@a1b2c3-0001 through its inbox"]
+    actions = [actions]
     moved = inbox.get(item.id)
     assert runtime.killed == ["engineer@a1b2c3-0001"]
     if closed_mid_tick:

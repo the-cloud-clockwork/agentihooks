@@ -283,18 +283,25 @@ class Pump:
         if woken:
             self.queue += self.dispatcher.reserve(self.binding.recipient, self.binding.owner)
         self._surface()
-        if self.queue and set(self.state.requests.values()) == {UNOBSERVED} and self.timing.clock() >= self.hold_until:
-            self._promote_restart()
+        if self.queue and set(self.state.requests.values()) <= {UNOBSERVED} and self.timing.clock() >= self.hold_until:
+            self._submit_nudge()
         while self.queue and not self.state.requests and self.timing.clock() >= self.hold_until:
             self._submit(self.queue.pop(0))
 
-    def _promote_restart(self) -> None:
-        """Only a restart nudge passes a turn begun before this pump connected; it goes first and ends that turn."""
-        restart = next((d for d in self.queue if stale_nudge.restarts(self.store.get(d.item))), None)
-        if restart is None:
+    def _submit_nudge(self) -> None:
+        """A stale nudge goes first and ends the turn it finds, even one begun before this pump connected."""
+        nudge = next(
+            (
+                d
+                for d in self.queue
+                if d.ref.startswith(stale_nudge.REF) and stale_nudge.is_nudge(self.store.get(d.item))
+            ),
+            None,
+        )
+        if nudge is None:
             return
-        self.queue.remove(restart)
-        self._submit(restart)
+        self.queue.remove(nudge)
+        self._submit(nudge)
 
     def _hinted(self) -> bool:
         if self.subscription.get_message(timeout=0) is None:
@@ -336,7 +343,7 @@ class Pump:
             self.receipts.reject(delivery.id, owner, str(gone))
             return
         try:
-            self._arbitrate(envelope(item, delivery), stale_nudge.restarts(item))
+            self._arbitrate(envelope(item, delivery), stale_nudge.interrupts(item, self.timing.now_ms()))
         except protocol.Refused as refused:
             self._requeue(delivery, str(refused))
             self._hold()

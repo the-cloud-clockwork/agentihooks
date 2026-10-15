@@ -374,8 +374,9 @@ never judged, even one that asks him for the decision. Every automatic clear is 
 An agent holding a task is stale when its session heartbeat is over ten minutes old and no named wait holds, or
 when its pane shows a provider error while its heartbeat is not working. The tick sends it one inbox item per ten
 minutes of silence, with an id built from the agent, its last activity and the window, so repeated ticks send it
-once; nothing is typed into its pane. The inbox channel delivers it to Claude and the Codex push pump to Codex. From
-the third window the item is a restart: the pump interrupts a turn still running and starts a new app server turn.
+once; nothing is typed into its pane. The inbox channel delivers it to Claude and the Codex push pump to Codex. A
+nudge the pump delivers within two minutes of its sending interrupts a turn still running and starts a new app server
+turn; a later one is delivered like any message. An agent on a long command declares a wait first.
 The master, an agent the operator is typing to, a swarm with an open outage and an agent in provider recovery get
 no nudge.
 

@@ -52,6 +52,25 @@ def test_stale_past_ten_silent_minutes_without_a_named_wait_or_on_a_provider_err
     assert stale_nudge.stale(beat, BASE, wait, provider_error, BASE + idle_ms) is expected
 
 
+@pytest.mark.parametrize(("provider_error", "expected"), [("", False), ("model at capacity", True)])
+def test_an_agent_with_no_known_activity_time_is_stale_only_on_a_provider_error(provider_error, expected):
+    assert stale_nudge.stale(None, 0, None, provider_error, BASE) is expected
+
+
+@pytest.mark.parametrize(
+    ("sender", "ref", "age_ms", "expected"),
+    [
+        ("swarm", "stale-nudge:abc", 0, True),
+        ("swarm", "stale-nudge:abc", stale_nudge.FRESH_MS, True),
+        ("swarm", "stale-nudge:abc", stale_nudge.FRESH_MS + 1, False),
+        ("alice", "stale-nudge:abc", 0, False),
+    ],
+)
+def test_only_a_fresh_swarm_nudge_interrupts(inbox, sender, ref, age_ms, expected):
+    item = inbox.send(sender, NAME, "text", ref=ref)
+    assert stale_nudge.interrupts(item, item.created_at + age_ms) is expected
+
+
 @pytest.mark.parametrize(
     ("beat", "started_at", "expected"),
     [(None, BASE, BASE), ({"at": BASE + 5}, BASE, BASE + 5), ({"at": BASE + 5}, BASE + 9, BASE + 9), ({}, 0, 0)],
@@ -89,20 +108,13 @@ def test_a_stale_agent_gets_one_inbox_item_per_window_of_silence(inbox):
     assert actions == [f"nudged stale {NAME} through its inbox as message {item_id}"]
     item = inbox.get(item_id)
     assert (item.sender, item.address, item.task, item.state) == ("swarm", NAME, "t1", "pending")
-    assert item.ref == f"stale-nudge:{item_id}" and stale_nudge.is_nudge(item) and not stale_nudge.restarts(item)
+    assert item.ref == f"stale-nudge:{item_id}" and stale_nudge.is_nudge(item)
     assert "no activity from you for over ten minutes" in item.text and "task t1" in item.text
     assert "agentihooks swarm sw wait --on" in item.text
     assert stale_nudge.nudge(inbox, "sw", agent(), "", BASE + 2 * LIMIT - 1) == []
     assert [i.id for i in nudges(inbox)] == [item_id]
     assert stale_nudge.nudge(inbox, "sw", agent(), "", BASE + 2 * LIMIT) != []
     assert len(nudges(inbox)) == 2
-
-
-def test_the_third_window_of_silence_sends_a_restart(inbox):
-    now = BASE + 2 * LIMIT
-    assert stale_nudge.nudge(inbox, "sw", agent(), "", now) != []
-    item = inbox.get(stale_nudge.item_id("sw", NAME, BASE, now))
-    assert item.ref == f"stale-restart:{item.id}" and stale_nudge.restarts(item) and stale_nudge.is_nudge(item)
 
 
 def test_new_activity_starts_a_new_series(inbox):
@@ -136,16 +148,14 @@ def test_a_provider_error_under_a_working_heartbeat_waits_for_the_silence_limit(
 
 
 @pytest.mark.parametrize(
-    ("sender", "ref", "nudge", "restart"),
+    ("sender", "ref", "expected"),
     [
-        ("swarm", "stale-nudge:abc", True, False),
-        ("swarm", "stale-restart:abc", True, True),
-        ("alice", "stale-nudge:abc", False, False),
-        ("alice", "stale-restart:abc", False, False),
-        ("swarm", "inbox-escalation:abc", False, False),
-        ("swarm", "stale-nudge", False, False),
+        ("swarm", "stale-nudge:abc", True),
+        ("alice", "stale-nudge:abc", False),
+        ("swarm", "stale-restart:abc", False),
+        ("swarm", "inbox-escalation:abc", False),
+        ("swarm", "stale-nudge", False),
     ],
 )
-def test_only_a_swarm_stale_item_counts_as_a_nudge_or_restart(inbox, sender, ref, nudge, restart):
-    item = inbox.send(sender, NAME, "text", ref=ref)
-    assert (stale_nudge.is_nudge(item), stale_nudge.restarts(item)) == (nudge, restart)
+def test_only_a_swarm_stale_item_counts_as_a_nudge(inbox, sender, ref, expected):
+    assert stale_nudge.is_nudge(inbox.send(sender, NAME, "text", ref=ref)) is expected

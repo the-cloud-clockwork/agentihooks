@@ -7,9 +7,9 @@ from scripts.swarm import idle
 from scripts.swarm.store import AgentRecord
 
 LIMIT_MS = 10 * 60_000
-RESTART_WINDOWS = 2
+FRESH_MS = 2 * 60_000
 SENDER = "swarm"
-REF, RESTART = "stale-nudge", "stale-restart"
+REF = "stale-nudge"
 IDLE_REASON = "no activity from you for over ten minutes"
 ERROR_REASON = "your pane shows a provider error"
 TEXT = (
@@ -26,7 +26,7 @@ def last_activity(beat: dict | None, agent: AgentRecord) -> int:
 
 def stale(beat: dict | None, last_ms: int, wait: dict | None, provider_error: str, now_ms: int) -> bool:
     """A provider error counts unless the heartbeat shows a turn working inside the limit."""
-    silent = now_ms - last_ms > LIMIT_MS
+    silent = bool(last_ms) and now_ms - last_ms > LIMIT_MS
     working = bool(beat) and beat.get("state") == idle.WORKING and not silent
     if provider_error and not working:
         return True
@@ -45,11 +45,12 @@ def item_id(slug: str, name: str, last_ms: int, now_ms: int) -> str:
 
 
 def is_nudge(item: Item) -> bool:
-    return item.sender == SENDER and item.ref.startswith((f"{REF}:", f"{RESTART}:"))
+    return item.sender == SENDER and item.ref.startswith(f"{REF}:")
 
 
-def restarts(item: Item) -> bool:
-    return item.sender == SENDER and item.ref.startswith(f"{RESTART}:")
+def interrupts(item: Item, now_ms: int) -> bool:
+    """A nudge held past its delivery window may meet a resumed turn, so only a fresh one interrupts."""
+    return is_nudge(item) and now_ms - item.created_at <= FRESH_MS
 
 
 def nudge(inbox: InboxStore, slug: str, agent: AgentRecord, provider_error: str, now_ms: int) -> list[str]:
@@ -60,10 +61,9 @@ def nudge(inbox: InboxStore, slug: str, agent: AgentRecord, provider_error: str,
         return []
     reason = ERROR_REASON if provider_error else IDLE_REASON
     nudge_id = item_id(slug, agent.name, last_ms, now_ms)
-    prefix = RESTART if window(last_ms, now_ms) >= RESTART_WINDOWS else REF
     text = TEXT.format(slug=slug, reason=reason, task=agent.task)
     try:
-        item = inbox.send(SENDER, agent.name, text, ref=f"{prefix}:{nudge_id}", task=agent.task, item_id=nudge_id)
+        item = inbox.send(SENDER, agent.name, text, ref=f"{REF}:{nudge_id}", task=agent.task, item_id=nudge_id)
     except DuplicateItem:
         return []
     return [f"nudged stale {agent.name} through its inbox as message {item.id}"]

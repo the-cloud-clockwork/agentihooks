@@ -394,15 +394,15 @@ def test_a_turn_running_before_the_pump_connected_is_not_steered_and_holds_deliv
     assert rig.record().pending_request == ""
 
 
-def send_nudge(rig, kind="stale-restart", tag="a"):
-    return rig.store.send("swarm", ME, "pick your task back up", ref=f"{kind}:{tag}")
+def send_nudge(rig, tag="a", sender="swarm"):
+    return rig.store.send(sender, ME, "pick your task back up", ref=f"stale-nudge:{tag}")
 
 
 def turn_methods(rig):
     return [m for m in rig.server.methods() if m.startswith("turn/")]
 
 
-def test_a_restart_nudge_interrupts_the_busy_turn_and_starts_a_new_app_server_turn(rig):
+def test_a_nudge_interrupts_the_busy_turn_and_starts_a_new_app_server_turn(rig):
     rig.pump.start()
     rig.pump.step()
     rig.server.begin_elsewhere()
@@ -418,24 +418,49 @@ def test_a_restart_nudge_interrupts_the_busy_turn_and_starts_a_new_app_server_tu
     assert rig.pump.state.active_turn == "turn-2"
 
 
-def test_a_first_window_nudge_steers_the_busy_turn_without_an_interrupt(rig):
+def test_a_nudge_held_past_its_delivery_window_steers_the_busy_turn(rig):
+    from scripts.swarm import stale_nudge
+
     rig.pump.start()
     rig.pump.step()
     rig.server.begin_elsewhere()
-    item = send_nudge(rig, kind="stale-nudge")
+    item = send_nudge(rig)
+    rig.clock.now = (item.created_at + stale_nudge.FRESH_MS + 1) / 1000
     rig.pump.step()
     assert turn_methods(rig) == ["turn/steer"]
     assert len(rig.server.turns) == 1 and rig.store.get(item.id).state == "delivered"
 
 
-@pytest.mark.parametrize("kind", ["stale-nudge", "stale-restart"])
-def test_a_nudge_to_an_idle_thread_starts_a_turn_without_an_interrupt(rig, kind):
-    send_nudge(rig, kind=kind)
+def test_a_nudge_from_anyone_but_the_swarm_steers_like_any_message(rig):
+    rig.pump.start()
+    rig.pump.step()
+    rig.server.begin_elsewhere()
+    send_nudge(rig, sender="alice")
+    rig.pump.step()
+    assert turn_methods(rig) == ["turn/steer"]
+
+
+def test_a_nudge_to_an_idle_thread_starts_a_turn_without_an_interrupt(rig):
+    send_nudge(rig)
     rig.run(1)
     assert turn_methods(rig) == ["turn/start"]
 
 
-def test_a_restart_goes_first_past_a_turn_begun_before_the_pump_connected(rig):
+def test_a_nudge_goes_ahead_of_an_earlier_message_into_the_new_turn(rig):
+    rig.pump.start()
+    rig.pump.step()
+    rig.server.begin_elsewhere()
+    rig.pump.step()
+    held = rig.store.send("alice", ME, "careful")
+    nudge = send_nudge(rig)
+    rig.pump.step()
+    assert turn_methods(rig) == ["turn/interrupt", "turn/start", "turn/steer"]
+    assert [len(turn["inputs"]) for turn in rig.server.turns] == [0, 2]
+    assert rig.server.turns[1]["inputs"][1].endswith("careful")
+    assert (rig.store.get(nudge.id).state, rig.store.get(held.id).state) == ("delivered", "delivered")
+
+
+def test_a_nudge_goes_first_past_a_turn_begun_before_the_pump_connected(rig):
     rig.server.begin_elsewhere()
     rig.server.frames.clear()
     rig.pump.start()
@@ -449,16 +474,16 @@ def test_a_restart_goes_first_past_a_turn_begun_before_the_pump_connected(rig):
     assert (rig.store.get(nudge.id).state, rig.store.get(held.id).state) == ("delivered", "delivered")
 
 
-def test_a_first_window_nudge_waits_behind_a_turn_begun_before_the_pump_connected(rig):
+def test_an_ordinary_message_still_waits_behind_a_turn_begun_before_the_pump_connected(rig):
     rig.server.begin_elsewhere()
     rig.server.frames.clear()
     rig.pump.start()
-    nudge = send_nudge(rig, kind="stale-nudge")
+    send_nudge(rig, sender="alice")
     rig.pump.step()
-    assert turn_methods(rig) == [] and rig.store.get(nudge.id).state == "pending"
+    assert turn_methods(rig) == []
 
 
-def test_a_restart_waits_out_the_pump_hold(rig):
+def test_a_nudge_waits_out_the_pump_hold(rig):
     rig.server.begin_elsewhere()
     rig.server.frames.clear()
     rig.pump.start()
@@ -468,7 +493,7 @@ def test_a_restart_waits_out_the_pump_hold(rig):
     assert turn_methods(rig) == []
 
 
-def test_an_open_server_request_holds_a_restart_too(rig):
+def test_an_open_server_request_holds_a_nudge_too(rig):
     rig.server.begin_elsewhere()
     rig.server.frames.append({"id": 90, "method": APPROVAL, "params": {"threadId": THREAD}})
     rig.pump.start()
@@ -480,7 +505,7 @@ def test_an_open_server_request_holds_a_restart_too(rig):
     assert rig.record().pending_request == APPROVAL
 
 
-def test_a_restart_racing_a_turn_end_refreshes_and_starts_a_turn(rig):
+def test_a_nudge_racing_a_turn_end_refreshes_and_starts_a_turn(rig):
     rig.server.begin_elsewhere()
     rig.pump.start()
     rig.pump.step()
