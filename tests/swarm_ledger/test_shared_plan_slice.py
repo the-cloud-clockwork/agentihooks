@@ -151,6 +151,12 @@ class TestRefusal:
 
     def test_a_listed_row_or_an_untitled_task_is_matched_by_its_id(self):
         assert plan_read.own_rows("- t1 cache the reads\n", "5-5", {"id": "t1"}) == [(5, "- t1 cache the reads")]
+        assert plan_read.own_rows("| xxxx | Cache the reads |\n", "5-5", {"id": "t1"}) == []
+
+    def test_a_line_outside_a_table_is_matched_by_its_whole_title(self):
+        assert plan_read.own_rows("Drop index X\n", "5-5", {"id": "t9", "title": "Drop index X"}) == [
+            (5, "Drop index X")
+        ]
 
     def test_a_task_in_another_phase_or_on_other_lines_shares_nothing(self, table):
         task(table, "t2")["phase"] = "p2"
@@ -222,6 +228,12 @@ class TestPlanRead:
             "| t1 | Cache the reads, see [ship](#ship) |\n| t1 | Warm the cache |\n"
             "\nContext only, not scope:\n" + context
         )
+
+    def test_plan_read_context_ends_ten_lines_after_the_slice(self, tmp_path, monkeypatch):
+        text = PADDED + "## End\n" + "".join(f"Tail {n}\n" for n in range(1, 9))
+        tasks = [row("t1", "Cache the reads", plan_lines="14-21"), row("t2", "Batch the writes", plan_lines="14-21")]
+        doc = stored(tmp_path, monkeypatch, text, tasks)
+        assert plan_read.read(doc, "tables", "t1", None).endswith("## End\nTail 1\nTail 2\nTail 3\nTail 4\n")
 
     def test_plan_read_of_an_undescribed_sharer_no_row_names_prints_an_empty_scope(self, table):
         table["tasks"].append(row("t4", "Rename the module"))

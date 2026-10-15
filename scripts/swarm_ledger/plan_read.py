@@ -190,11 +190,11 @@ def read(doc: dict, slug: str, task_id: str | None, phase_id: str | None) -> str
 
 def _without(source: str, lines: str, own: str | None) -> str:
     start, end = _ledger("plan_ranges").bounds(lines)
-    first, last = _ledger("plan_ranges").bounds(own) if own else (0, -1)
+    skip = _ledger("plan_ranges").bounds(own) if own else None
     return "".join(
         f"{row}\n"
         for number, row in enumerate(source.splitlines(), 1)
-        if start - MARGIN <= number <= end + MARGIN and not first <= number <= last
+        if start - MARGIN <= number <= end + MARGIN and not (skip and skip[0] <= number <= skip[1])
     )
 
 
