@@ -75,6 +75,12 @@ def _closed_in_window(value: str, cwd: Path) -> bool:
     return "conditions" in target.parts or bool(credential)
 
 
+def _delegated(payload: dict, role: str, home: Path) -> bool:
+    session = re.sub(r"[^A-Za-z0-9_.@-]", "_", str(payload.get("session_id") or ""))
+    agentihooks = Path(os.environ.get("AGENTIHOOKS_HOME") or home / ".agentihooks")
+    return role == "master" and bool(payload.get("agent_id")) and _seated(session, agentihooks)
+
+
 def deny_reason(payload: dict, role: str, home: Path) -> str:
     tool = payload["tool_name"].lower()
     if tool not in BUILTIN_WRITES | SERENA_WRITES:
@@ -84,7 +90,7 @@ def deny_reason(payload: dict, role: str, home: Path) -> str:
     paths.extend(inputs.get("file_paths", []))
     cwd = Path(payload.get("cwd") or os.getcwd())
     roots = _allowed_roots(role, home)
-    if hotfix_open(payload, role, home):
+    if _delegated(payload, role, home) or hotfix_open(payload, role, home):
         if any(_closed_in_window(value, cwd) for value in paths):
             return "master hotfix window: condition folders and credential files stay closed."
         roots.append((home / "dev" / "worktrees").resolve())
