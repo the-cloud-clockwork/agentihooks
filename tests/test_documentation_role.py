@@ -29,3 +29,14 @@ def test_bundle_can_extend_documentation_destination_and_skill(world):
     persona = (out / "CLAUDE.md").read_text()
     assert persona.index("Role: Documentation") < persona.index("Publish documentation in handbook")
     assert "Write handbook pages." in (out / "skills/create-simple-docs/SKILL.md").read_text()
+
+
+def test_documentation_role_can_join_the_engineering_lane_and_wear_overlays(world):
+    from scripts.swarm import agent_up, overlays
+
+    world["install"]._save_state({})
+    selected = agent_up.resolve("documentation")
+    assert (selected.role, selected.lane) == ("documentation", "eng")
+    assert overlays.setting(
+        "overlays-documentation", "team-docs", {}, [{"name": "team-docs", "wears": ["documentation"]}]
+    ) == {"documentation": ["team-docs"]}
