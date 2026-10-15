@@ -1701,7 +1701,7 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           FAILED: ${{ steps.watch.outputs.failed }}
         run: |
-          echo "::error::$FAILED; Gate Required cannot pass, so cancelling this queue run."
+          echo "::error::$FAILED failed, so Gate Required cannot pass; cancelling this queue run."
           gh run cancel "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY"
 
   gate-required:
