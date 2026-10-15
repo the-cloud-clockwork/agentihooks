@@ -354,6 +354,8 @@ def test_evaluate_reads_the_session_snapshot_and_the_router_cache(tmp_path, monk
 @pytest.mark.parametrize("source", ["cache", "fleet"])
 @pytest.mark.parametrize("credentials", ["missing", "empty", "environment", "operator"])
 def test_handoff_ignores_cached_accounts_without_credentials(tmp_path, monkeypatch, source, credentials):
+    from dataclasses import replace
+
     from hooks.context import account_sessions, quota_usage
     from scripts import claude_quota_balancer as balancer
     from scripts.swarm_v2 import quota
@@ -389,14 +391,24 @@ def test_handoff_ignores_cached_accounts_without_credentials(tmp_path, monkeypat
             "version": 1,
             "modes": {
                 "normal": {
-                    "accounts": {"AH_CC_TOKEN_beta": {"observed_at": now, "result": balancer._result_data(beta)}}
+                    "accounts": {
+                        "AH_CC_TOKEN_removed": {
+                            "observed_at": now,
+                            "result": balancer._result_data(replace(beta, account="removed")),
+                        },
+                        "AH_CC_TOKEN_beta": {"observed_at": now, "result": balancer._result_data(beta)},
+                    }
                 }
             },
         }
         if source == "cache"
         else {},
     )
-    monkeypatch.setattr(quota, "fleet_observations", lambda environ: [(now, beta)] if source == "fleet" else [])
+    monkeypatch.setattr(
+        quota,
+        "fleet_observations",
+        lambda environ: [(now, replace(beta, account="removed")), (now, beta)] if source == "fleet" else [],
+    )
     monkeypatch.setattr(account_sessions, "agent_pid", lambda: 1)
     monkeypatch.setattr(account_sessions, "session_account", lambda pid: "alpha")
     monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {"alpha": 1, "beta": 1})
