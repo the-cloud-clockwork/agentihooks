@@ -569,18 +569,31 @@ def test_an_unlocked_package_is_refused(locked, monkeypatch, capsys):
 
 
 @pytest.mark.parametrize("action", ["install", "download"])
-def test_image_tool_commands_recover_from_a_server_error(locked, tmp_path, monkeypatch, action):
+@pytest.mark.parametrize("failure", [500, 504, 599, "timeout", "wrapped-timeout", "read-timeout"])
+@pytest.mark.parametrize("failures", [1, 4, 5])
+def test_image_tool_commands_recover_from_a_server_error(locked, tmp_path, monkeypatch, action, failure, failures):
     path, lock, payloads = locked
     herdr = lock["tools"]["herdr"]
     attempts = []
     sleeps = Mock()
     monkeypatch.setattr("time.sleep", sleeps)
+    if isinstance(failure, int):
+        error = urllib.error.HTTPError(herdr["url"], failure, "Server error", {}, None)
+    elif failure == "wrapped-timeout":
+        error = urllib.error.URLError(TimeoutError("timed out"))
+    else:
+        error = TimeoutError("timed out")
 
     def opened(url, timeout):
+        assert timeout == 120
         attempts.append(url)
-        if attempts.count(url) == 1:
-            raise urllib.error.HTTPError(url, 504, "Gateway Timeout", {}, None)
-        return io.BytesIO(payloads[url])
+        response = io.BytesIO(payloads[url])
+        if attempts.count(url) <= failures:
+            if failure == "read-timeout":
+                response.read = Mock(side_effect=error)
+            else:
+                raise error
+        return response
 
     monkeypatch.setattr(worker_image.urllib.request, "urlopen", opened)
     install = worker_image.install_tools
@@ -591,11 +604,46 @@ def test_image_tool_commands_recover_from_a_server_error(locked, tmp_path, monke
     if action == "install":
         argv.extend(["--tool", "herdr"])
     monkeypatch.setattr("sys.argv", argv)
-    worker_image.main()
     selected = {"herdr": herdr} if action == "install" else lock["tools"]
-    for name, tool in selected.items():
-        assert attempts.count(tool["url"]) == 2
-        assert (cache / tool["sha256"]).read_bytes() == payloads[tool["url"]]
-        if action == "install":
-            assert (tmp_path / name).read_bytes() == payloads[tool["url"]]
-    assert sleeps.call_args_list == [call(1)] * len(selected)
+    if failures == 5:
+        with pytest.raises(type(error)) as caught:
+            worker_image.main()
+        assert caught.value is error
+        assert not list(cache.iterdir())
+        assert not any((tmp_path / name).exists() for name in selected)
+    else:
+        worker_image.main()
+        for name, tool in selected.items():
+            assert (cache / tool["sha256"]).read_bytes() == payloads[tool["url"]]
+            if action == "install":
+                assert (tmp_path / name).read_bytes() == payloads[tool["url"]]
+    expected_attempts, delays = {
+        1: (2, [1]),
+        4: (5, [1, 2, 4, 8]),
+        5: (5, [1, 2, 4, 8]),
+    }[failures]
+    assert {url: attempts.count(url) for url in attempts} == {
+        tool["url"]: expected_attempts for tool in selected.values()
+    }
+    assert sorted(entry.args[0] for entry in sleeps.call_args_list) == sorted(delays * len(selected))
+
+
+@pytest.mark.parametrize("status", [404, 499, 600, "dns"])
+def test_tool_download_does_not_retry_permanent_errors(locked, tmp_path, monkeypatch, status):
+    _, lock, _ = locked
+    tool = lock["tools"]["herdr"]
+    error = (
+        urllib.error.URLError("name resolution failed")
+        if status == "dns"
+        else urllib.error.HTTPError(tool["url"], status, "Permanent error", {}, None)
+    )
+    opened = Mock(side_effect=error)
+    sleeps = Mock()
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", opened)
+    monkeypatch.setattr("time.sleep", sleeps)
+    with pytest.raises(type(error)) as caught:
+        worker_image.fetch("herdr", tool, tmp_path)
+    assert caught.value is error
+    opened.assert_called_once_with(tool["url"], timeout=120)
+    sleeps.assert_not_called()
+    assert not (tmp_path / tool["sha256"]).exists()
