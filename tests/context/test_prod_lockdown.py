@@ -1,6 +1,13 @@
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def merge_base(monkeypatch):
+    import subprocess
+
+    monkeypatch.setattr(subprocess, "run", lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, "dev\n", ""))
+
+
 def _check(command):
     from hooks.context.branch_guard import check_branch_guard
     from hooks.context.prod_lockdown import check_prod_lockdown
@@ -15,8 +22,8 @@ def _check(command):
     [
         'git status && gh issue comment 791 --body "do not run gh pr merge main"',
         "gh issue comment 791 --body 'gh workflow run release.yml is gated'; git status",
-        'gh pr merge 123 --base dev && gh issue comment 791 --body "merged into main"',
-        'gh pr merge 123 --base dev --subject "merge into main"',
+        'gh pr merge 123 --squash && gh issue comment 791 --body "merged into main"',
+        'gh pr merge 123 --squash --subject "merge into main"',
         'gh issue comment 791 --body "docker push ghcr.io/anton/agent:latest is gated"',
         'git commit -m "gh pr merge main"',
     ],
@@ -29,11 +36,11 @@ def test_quoted_message_is_not_an_operation(command):
     "message", ['--subject "main"', "--subject='master'", '-t "v1"', '--body "main"', "-b 'master'"]
 )
 def test_single_word_merge_message_is_not_a_branch(message):
-    _check(f"gh pr merge 123 --base dev {message}")
+    _check(f"gh pr merge 123 --squash {message}")
 
 
 def test_merge_message_may_contain_several_equals():
-    _check('gh pr merge 123 --base dev --subject="main=checkpoint=done"')
+    _check('gh pr merge 123 --squash --subject="main=checkpoint=done"')
 
 
 def test_inline_message_cannot_hide_the_following_real_target():
@@ -130,9 +137,9 @@ def test_arithmetic_does_not_turn_a_literal_message_into_an_operation():
     [
         "gh issue comment 791 --body '$(gh pr merge 123 --base main)'",
         "gh issue comment 791 --body '`gh pr merge 123 --base main`'",
-        'gh --repo owner/repo pr merge 123 --base dev --subject "main"',
-        'gh pr merge 123 --subject "main" --base dev',
-        'gh pr merge 123 --subject="main" --body=master --base dev',
+        'gh --repo owner/repo pr merge 123 --squash --subject "main"',
+        'gh pr merge 123 --subject "main" --squash',
+        'gh pr merge 123 --subject="main" --body=master --squash',
         "git status # gh pr merge main",
         "cat <<'EOF'\ngh pr merge main\nEOF\ngit status",
     ],

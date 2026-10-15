@@ -18,6 +18,7 @@ def _no_redis():
 
 @pytest.fixture(autouse=True)
 def _isolated_flag(tmp_path, monkeypatch):
+    monkeypatch.setattr("hooks.context.branch_guard.AGENTIHOOKS_HOME", tmp_path)
     flag_dir = tmp_path / "controls_flags"
     monkeypatch.setattr("hooks.context.controls_toggle._FLAG_DIR", flag_dir)
     monkeypatch.setattr("hooks.context.controls_toggle._GLOBAL_FLAG", flag_dir / "active.flag")

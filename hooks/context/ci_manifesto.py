@@ -142,7 +142,6 @@ _PR_SECTION_RE = re.compile(
 
 def _parse_signals(content: str) -> tuple[list[str], list[str], list[str], list[str]]:
     """Extract signal phrases from §9 (release/hotfix), §14 (branch), §15 (PR) of the manifesto."""
-    release: list[str] = []
     hotfix: list[str] = []
     branch: list[str] = []
     pr: list[str] = []
@@ -152,9 +151,7 @@ def _parse_signals(content: str) -> tuple[list[str], list[str], list[str], list[
         phrases = [
             line.strip().lower() for line in block.splitlines() if line.strip() and not line.strip().startswith("#")
         ]
-        if "release" in header:
-            release = phrases
-        elif "hotfix" in header:
+        if "hotfix" in header:
             hotfix = phrases
     bm = _BRANCH_SECTION_RE.search(content)
     if bm:
@@ -170,15 +167,13 @@ def _parse_signals(content: str) -> tuple[list[str], list[str], list[str], list[
             for line in pm.group(1).strip().splitlines()
             if line.strip() and not line.strip().startswith("#")
         ]
-    if not release:
-        release = _DEFAULT_RELEASE_SIGNALS
     if not hotfix:
         hotfix = _DEFAULT_HOTFIX_SIGNALS
     if not branch:
         branch = _DEFAULT_BRANCH_SIGNALS
     if not pr:
         pr = _DEFAULT_PR_SIGNALS
-    return release, hotfix, branch, pr
+    return _DEFAULT_RELEASE_SIGNALS, hotfix, branch, [phrase for phrase in pr if phrase != "release dance"]
 
 
 def get_release_signals() -> list[str]:

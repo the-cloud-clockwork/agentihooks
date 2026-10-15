@@ -1,6 +1,8 @@
 import pytest
 
-from hooks.context import branch_guard, ci_manifesto, prod_lockdown
+import hooks.context.branch_guard as branch_guard
+import hooks.context.ci_manifesto as ci_manifesto
+import hooks.context.prod_lockdown as prod_lockdown
 from hooks.context.controls_toggle import set_controls_disabled
 from hooks.hook_manager import BlockAction
 
@@ -10,6 +12,9 @@ def session(tmp_path, monkeypatch):
     for module in (branch_guard, prod_lockdown):
         monkeypatch.setattr(module, "get_redis", lambda: None)
         monkeypatch.setattr(module, "AGENTIHOOKS_HOME", tmp_path)
+    import subprocess
+
+    monkeypatch.setattr(subprocess, "run", lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, "dev\n", ""))
     monkeypatch.setattr(ci_manifesto, "_manifesto_paths", lambda: [])
     return "release-publication"
 
@@ -70,7 +75,7 @@ def test_dev_pull_requests_remain_open(session, signal):
         prod_lockdown.set_release_signal(session)
         branch_guard.set_pr_signal(session)
     check("gh pr create --base dev --fill", session)
-    check("gh pr merge 123 --base dev", session)
+    check("gh pr merge 123 --squash", session)
 
 
 @pytest.mark.parametrize("signal", ["release", "hotfix", "bypass", "legacy"])

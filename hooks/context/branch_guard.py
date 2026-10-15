@@ -198,10 +198,10 @@ def _has_pr_signal(session_id: str) -> bool:
 
 # PR creation pattern (CI Manifesto §15). Blocks `gh pr create` in any form.
 # Other gh pr subcommands (list/view/status/comment/review/edit/merge) pass.
-_PR_CREATE_PATTERN = re.compile(r"\bgh\s+pr\s+create\b")
+_PR_CREATE_PATTERN = re.compile(r"\bgh\b[^|&;\n]*?\bpr\s+create\b")
 
 # CI alone promotes dev into protected branches.
-_PR_BASE_RE = re.compile(r"\bgh\s+pr\s+create\b[^|&;\n]*--base[\s=]+(\S+)")
+_PR_BASE_RE = re.compile(r"(?:^|\s)(?:--base[\s=]+|-B\s*)(\S+)")
 PROTECTED_PR_BASES = frozenset({"main", "master", "v1"})
 
 
@@ -304,9 +304,9 @@ def _command_lines(command: str) -> str:
 
 
 def _check_pr_creation(check_text: str, command: str, session_id: str) -> None:
-    if _PR_CREATE_PATTERN.search(check_text):
-        base_match = _PR_BASE_RE.search(check_text)
-        if not base_match:
+    if create := _PR_CREATE_PATTERN.search(check_text):
+        bases = _PR_BASE_RE.findall(check_text[create.end() :])
+        if not bases:
             log(
                 "branch_guard: PR creation blocked (no explicit base — defaults to main)",
                 {"command": command[:200], "session_id": session_id},
@@ -316,7 +316,7 @@ def _check_pr_creation(check_text: str, command: str, session_id: str) -> None:
                 "A bare `gh pr create` targets the default branch implicitly.\n"
                 "Use --base dev for a worktree PR. CI alone opens promotion PRs."
             )
-        base = base_match.group(1).strip("'\"")
+        base = bases[-1].strip("'\"")
         if base == "dev":
             log("branch_guard: PR into dev allowed", {"session_id": session_id})
             return
@@ -418,7 +418,8 @@ def check_branch_guard(payload: dict) -> None:
                 "(e.g. 'new branch', 'create branch', 'branch allowed')."
             )
 
-    _check_pr_creation(check_text, command, session_id)
+    for line in check_text.splitlines():
+        _check_pr_creation(line, command, session_id)
 
 
 _COMMIT_PATTERN = re.compile(r"\bgit\s+commit\b")

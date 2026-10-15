@@ -2,6 +2,7 @@
 
 import re
 import shlex
+import subprocess
 from pathlib import Path
 
 import tree_sitter_bash
@@ -255,6 +256,46 @@ def _has_release_signal(session_id: str) -> bool:
         return False
 
 
+def _merge_view_command(line: str) -> list[str] | None:
+    merge = re.search(r"\bgh\b(.*?)\bpr\s+merge\b(.*)", line)
+    if not merge:
+        return None
+    words = iter(shlex.split(" ".join(merge.groups())))
+    selectors, repo = [], ""
+    for word in words:
+        option, separator, value = word.partition("=")
+        if option in {"--repo", "-R", "--match-head-commit", "--author-email", "-A", "--body-file", "-F"}:
+            value = value if separator else next(words)
+            if option in {"--repo", "-R"}:
+                repo = value
+        elif word.startswith("-R"):
+            repo = word[2:]
+        elif not word.startswith("-"):
+            selectors.append(word)
+    if len(selectors) > 1:
+        raise ValueError("ambiguous pull request selector")
+    command = ["gh", "pr", "view", *selectors]
+    if repo:
+        command.extend(["--repo", repo])
+    return [*command, "--json", "baseRefName", "--jq", ".baseRefName"]
+
+
+def _check_pr_merge(line: str) -> None:
+    try:
+        command = _merge_view_command(line)
+        if command is None:
+            return
+        base = subprocess.run(command, capture_output=True, text=True, check=True, timeout=10).stdout.strip()
+        if not base:
+            raise ValueError("missing pull request base")
+    except (OSError, ValueError, StopIteration, subprocess.SubprocessError):
+        raise BlockAction(
+            "BLOCKED: Cannot resolve the pull request base; promotion protection remains closed."
+        ) from None
+    if base in {"main", "master", "v1"}:
+        raise BlockAction("BLOCKED [gh pr merge to main/master/v1]: CI alone promotes dev into protected branches.")
+
+
 def check_prod_lockdown(payload: dict) -> None:
     session_id = payload.get("session_id", "")
     try:
@@ -287,3 +328,5 @@ def check_prod_lockdown(payload: dict) -> None:
         raise BlockAction(
             f"BLOCKED [{name}]: {reason}\nAdd --emergency-prod / 'prod override' / 'emergency' to your message."
         )
+    for line in check_text.splitlines():
+        _check_pr_merge(line)

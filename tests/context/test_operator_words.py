@@ -421,8 +421,21 @@ def test_a_codex_answer_carries_release_and_branch_signals(monkeypatch):
     seen = []
     monkeypatch.setattr(prod_lockdown, "set_release_signal", lambda session_id: seen.append(("release", session_id)))
     monkeypatch.setattr(branch_guard, "set_branch_signal", lambda session_id: seen.append(("branch", session_id)))
-    _codex_post_tool_use(monkeypatch, CODEX_ANSWER)
+    payload = {
+        **CODEX_ANSWER,
+        "tool_response": '{"answers":{"plan_color":{"answers":["release dance, then cut a new branch"]}}}',
+    }
+    _codex_post_tool_use(monkeypatch, payload)
     assert seen == [("release", "cx1"), ("branch", "cx1")]
+
+
+def test_a_codex_answer_without_release_dance_does_not_arm_publication(monkeypatch):
+    import hooks.context.prod_lockdown as prod_lockdown
+
+    seen = []
+    monkeypatch.setattr(prod_lockdown, "set_release_signal", lambda session_id: seen.append(session_id))
+    _codex_post_tool_use(monkeypatch, CODEX_ANSWER)
+    assert seen == []
 
 
 def test_a_recorder_failure_is_logged_and_never_raised(monkeypatch):
