@@ -61,7 +61,7 @@ def start(payload: dict) -> None:
                 "base": documentation_evidence.git(root, "rev-parse", "HEAD"),
                 "swarm": os.environ.get("AGENTIHOOKS_SWARM", ""),
                 "task": os.environ.get("AGENTIHOOKS_SWARM_TASK", ""),
-                "status": "pending",
+                "status": "active",
             },
         )
     except (OSError, KeyError, ValueError, subprocess.SubprocessError) as exc:
@@ -77,9 +77,17 @@ def end(payload: dict) -> None:
             start(payload)
         if not path.exists():
             return
-        row = json.loads(path.read_text())
-        if row["status"] in TERMINAL:
-            return
+        with path.with_suffix(".lock").open("w") as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return
+            row = json.loads(path.read_text())
+            if row["status"] in TERMINAL:
+                return
+            if row["status"] == "active":
+                row["status"] = "pending"
+                _write(path, row)
         fork_and_call(process_pending, path, timeout_sec=180, task_name="documentation-session-end")
     except (OSError, ValueError) as exc:
         log("documentation dispatch unavailable", {"error": type(exc).__name__})
@@ -157,8 +165,9 @@ def process(path: Path) -> None:
     with path.with_suffix(".lock").open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         row = json.loads(path.read_text())
-        if row["status"] in TERMINAL:
+        if row["status"] != "pending":
             return
+        path.touch()
         try:
             _finish(path, row)
         except Exception as exc:
@@ -175,7 +184,7 @@ def process_pending(path: Path) -> None:
         if pending == path:
             continue
         row = json.loads(pending.read_text())
-        if row["swarm"] == current["swarm"] and row["status"] not in TERMINAL:
+        if row["swarm"] == current["swarm"] and row["status"] == "pending":
             process(pending)
             retried += 1
             if retried == 3:

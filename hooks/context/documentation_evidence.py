@@ -28,7 +28,7 @@ def matches(root: Path, sources: list[str], text: str) -> list[dict]:
     for name in sources:
         for number, line in enumerate((root / name).read_text(errors="replace").splitlines(), 1):
             if pattern.search(line):
-                found.append({"path": name, "line": number, "text": redact(line[:256], mode="memory")})
+                found.append({"path": name, "line": number, "text": redact(line, mode="memory")[:256]})
                 if len(found) == 80:
                     return found
     return found
@@ -63,7 +63,7 @@ def collect(root: Path, base: str, context: dict | None = None) -> dict:
     return {
         "head": head,
         "files": files,
-        "changes": redact(changes[:24000], mode="memory"),
+        "changes": redact(changes, mode="memory")[:24000],
         "summary": redact(git(root, "log", "-1", "--format=%s", head), mode="memory"),
         "doc_sources": sources,
         "docs": matches(root, sources, content or context.get("description", context.get("title", ""))),

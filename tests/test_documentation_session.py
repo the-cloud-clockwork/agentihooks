@@ -203,7 +203,9 @@ def test_pending_retries_rotate_past_three_retained_requests(world, monkeypatch)
     fn, args = jobs.pop()
     fn(*args)
     for index in range(4):
-        documentation_session.start({"session_id": f"retained-{index}", "cwd": str(root)})
+        retained = {"session_id": f"retained-{index}", "cwd": str(root)}
+        documentation_session.start(retained)
+        documentation_session.end(retained)
     pending = sorted(path for path in args[0].parent.glob("*.json") if path != args[0])
     for index, path in enumerate(pending, 1):
         os.utime(path, ns=(index, index))
