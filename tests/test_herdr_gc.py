@@ -444,8 +444,9 @@ def test_the_swarm_store_says_what_became_of_the_agent(store, state):
         ([("ci@323133-0760", "working")], herdr_gc.RETIRED),
     ],
 )
-def test_a_claude_agent_recorded_under_its_plain_name_is_found_in_the_swarm_store(agents, state):
-    record = replace(owned(), owner_session="ci-323133-0759")
+@pytest.mark.parametrize("owner", ["ci-323133-0759", "ci@323133-0759"])
+def test_an_agent_is_found_in_the_swarm_store_under_either_name_form(agents, state, owner):
+    record = replace(owned(), owner_session=owner)
     assert herdr_gc.Owners(lambda url: FakeStore("crew", agents=agents)).state(record) == state
 
 
@@ -454,6 +455,15 @@ def test_a_just_launched_claude_agent_keeps_its_pane_past_the_launch_grace(env):
     owner = Owner(name="ci-323133-0759", swarm="crew", route="routed", at=NOW - herdr_gc.grace_ms(env) - MIN)
     launch(env, herdr, "w1:p2", "term_a", Spot(info=CLAUDE), owner)
     owners = herdr_gc.Owners(lambda url: FakeStore("crew", agents=[("ci@323133-0759", "starting")]))
+    assert actions(sweep(env, herdr, owners)) == {"w1:p2": (herdr_gc.KEEP, "its agent is live")}
+    assert herdr.closed == []
+
+
+@pytest.mark.parametrize("route", ["", "routed"])
+def test_an_agent_its_swarm_lists_keeps_its_pane_even_at_a_bare_shell(env, route):
+    herdr = FakeHerdr()
+    launch(env, herdr, "w1:p2", "term_a", owner=Owner(swarm="crew", route=route))
+    owners = FakeOwners({"eng-1": herdr_gc.LIVE})
     assert actions(sweep(env, herdr, owners)) == {"w1:p2": (herdr_gc.KEEP, "its agent is live")}
     assert herdr.closed == []
 

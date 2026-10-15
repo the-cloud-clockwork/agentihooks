@@ -1,5 +1,5 @@
 """Close the herdr panes agentihooks launched once their agent is gone. A pane it never recorded is never read or
-closed, and nothing closes inside the launch grace, while its input line holds text or inside the quiet window."""
+closed, and nothing closes inside the launch grace, while its swarm lists its agent unfinished, while its input line holds text or inside the quiet window."""
 
 import hashlib
 import os
@@ -189,6 +189,8 @@ def _look(record: PaneRecord, ctx: Context) -> Finding:
     state = ctx.owners.state(record)
     if state == UNKNOWN:
         return Finding(record, KEEP, "its swarm store cannot be read")
+    if state == LIVE:
+        return Finding(record, KEEP, "its agent is live")
     bare = bare_shell(ctx.herdr.process_info(record.pane_id))
     reason = _gone(record, bare, state)
     if not reason:
