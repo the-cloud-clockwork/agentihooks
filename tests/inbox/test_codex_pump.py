@@ -6,7 +6,7 @@ import pytest
 
 from scripts.codex_session import protocol
 from scripts.codex_session.binding import CONNECTED, DEGRADED, BindingStore, TransportRecord
-from scripts.inbox import codex
+from scripts.inbox import codex, wake
 from scripts.inbox.dispatch import Dispatcher
 from scripts.inbox.receipts import MISMATCH, RELEASED, DispatchError, Receipts
 from scripts.inbox.store import InboxStore
@@ -29,6 +29,20 @@ class Clock:
 
     def __call__(self):
         return self.now
+
+
+class IdlePane:
+    def __init__(self):
+        self.prompts = []
+
+    def agent_status(self, agent):
+        return "idle"
+
+    def typed_input(self, agent):
+        return ""
+
+    def prompt(self, agent, text):
+        self.prompts.append((agent.pane_id, text))
 
 
 class AppServer:
@@ -1176,24 +1190,8 @@ def test_main_reports_its_module_usage_when_execution_arguments_are_missing(caps
     )
 
 
-class IdlePane:
-    def __init__(self):
-        self.prompts = []
-
-    def agent_status(self, agent):
-        return "idle"
-
-    def typed_input(self, agent):
-        return ""
-
-    def prompt(self, agent, text):
-        self.prompts.append((agent.pane_id, text))
-
-
 @pytest.mark.parametrize("pumped", [True, False])
 def test_an_idle_codex_pane_with_mail_gets_a_pump_delivery_and_no_pane_write(rig, pumped):
-    from scripts.inbox import wake
-
     seat = f"eng-1@{SLUG}"
     pane = AgentRecord(ME, "eng", "task", pane_id="p1", harness="codex", seat=seat)
     herdr = IdlePane()
@@ -1214,10 +1212,9 @@ def test_an_idle_codex_pane_with_mail_gets_a_pump_delivery_and_no_pane_write(rig
 
 
 def test_a_codex_pane_is_typed_into_only_while_no_pump_owns_its_inbox(rig):
-    from scripts.inbox import wake
-
     pane = AgentRecord(ME, "eng", "task", pane_id="p1", harness="codex")
     assert wake.typed_wake(rig.store, pane) is True
     rig.pump.start()
     assert wake.typed_wake(rig.store, pane) is False
     assert wake.typed_wake(rig.store, replace(pane, name="engineer@abc-0002")) is True
+    assert wake.typed_wake(rig.store, replace(pane, name="engineer@abc-0002", pane_id="")) is False

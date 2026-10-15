@@ -40,8 +40,7 @@ def quiet_ms(environ):
 
 
 def typed_wake(inbox, agent):
-    """Only a worker pane whose harness has no inbox channel and whose inbox no push pump owns is typed into; the
-    master pane is the operator's."""
+    """Typed wake only for a worker pane with no inbox channel and no push pump owner; never the master pane."""
     return (
         bool(agent.pane_id)
         and agent.lane != MASTER
