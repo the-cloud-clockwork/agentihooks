@@ -64,7 +64,7 @@ def fetch(name: str, artifact: dict, cache: Path | None) -> bytes:
 
 
 def download_tools(lock: dict, cache: Path | None) -> None:
-    with ThreadPoolExecutor(max_workers=len(lock["tools"])) as pool:
+    with ThreadPoolExecutor() as pool:
         futures = [pool.submit(fetch, name, artifact, cache) for name, artifact in lock["tools"].items()]
     for future in futures:
         future.result()
