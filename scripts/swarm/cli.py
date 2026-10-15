@@ -1169,7 +1169,7 @@ def worktree_branch(recorded, run=subprocess.run):
     if recorded and recorded != branch:
         target = f"HEAD:{recorded}"
         if _upstream(run) == recorded:
-            branch = target = recorded
+            branch = recorded
     if _git(run, "ls-remote", "--exit-code", "--heads", "origin", branch).returncode != 0:
         raise SwarmError(f"branch {branch} is not on origin; push it first with git push -u origin {target}")
     return branch
@@ -1212,8 +1212,8 @@ def cmd_branch(store, args):
     branch = worktree_branch(row.get("branch"))
     fields = {"branch": branch, "branch_repo": origin_repo()}
     ledger.update_task(args.slug, agent.task, fields, by=agent.name)
-    pull = {"pr_url": row["pr_url"]} if row.get("pr_url") else {}
-    print(json.dumps({"task": agent.task, **fields, **pull}))
+    carried = {"pr_url": row["pr_url"]} if row.get("pr_url") else {}
+    print(json.dumps({"task": agent.task, **fields, **carried}))
 
 
 def cmd_pr(store, args):
