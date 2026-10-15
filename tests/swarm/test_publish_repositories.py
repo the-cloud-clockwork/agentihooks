@@ -67,3 +67,22 @@ def test_prepare_uses_the_explicit_bundle_repository(repositories):
     assert git(fields["worktree"], "show", "HEAD:chosen.txt") == "agentihooks-bundle"
     assert publish.prepare("swarm", p.agent, str(p.swarm), p.ledger) == fields
     assert len(git(p.swarm, "worktree", "list", "--porcelain").split("worktree ")) == 2
+
+
+def test_prepare_keeps_one_worktree_per_repository(repositories):
+    p = repositories
+    p.task["repositories"] = [str(p.swarm), str(p.bundle)]
+    fields = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
+    roots = [entry["worktree"] for entry in fields["worktrees"]]
+    assert roots == [f"{p.swarm}-worktree", f"{p.bundle}-worktree"]
+    assert [git(root, "show", "HEAD:chosen.txt") for root in roots] == ["agentihooks", "agentihooks-bundle"]
+    assert publish.prepare("swarm", p.agent, str(p.swarm), p.ledger) == fields
+
+
+def test_prepare_names_the_default_repository_without_inferring_prose(repositories):
+    p = repositories
+    p.task["description"] = f"Work in {p.bundle}"
+    fields = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
+    assert fields["worktree"] == f"{p.swarm}-worktree"
+    assert fields["repository_source"] == "swarm default"
+    assert fields["repository"] == str(p.swarm)
