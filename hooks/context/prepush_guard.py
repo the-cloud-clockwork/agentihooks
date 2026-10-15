@@ -81,20 +81,22 @@ def _swarm_cwd(cwd: Path) -> tuple[Path | None, str]:
     return target, "worktree lookup"
 
 
-def _push_directory(cwd: Path, selected: bool) -> Path:
+def _require_directory(target: Path | None, stage: str) -> Path | None:
     from hooks.targets import is_codex
 
-    if selected:
-        return cwd
-    target, stage = _swarm_cwd(cwd)
-    if target is not None:
-        return target
-    if is_codex():
+    if target is None and is_codex():
         raise BlockAction(
             f"BLOCKED: Could not resolve the push directory ({stage}). "
             "Use git -C /absolute/path/to/worktree push with the intended repository."
         )
-    return cwd
+    return target
+
+
+def _push_directory(cwd: Path, selected: bool) -> Path:
+    if selected:
+        return cwd
+    target, stage = _swarm_cwd(cwd)
+    return _require_directory(target, stage) or cwd
 
 
 def _unpassed(payload: dict) -> Path | None:
@@ -117,7 +119,7 @@ def _unpassed(payload: dict) -> Path | None:
         if push is None or _exempt(push[1]):
             continue
         base = _push_directory(cwd, selected or bool(push[0]))
-        root = _toplevel(base.joinpath(*map(_path, push[0])))
+        root = _require_directory(_toplevel(base.joinpath(*map(_path, push[0]))), "repository lookup")
         if root and (root / "scripts" / "ci_prepush" / "__init__.py").is_file() and not passed(root):
             return root
     return None
