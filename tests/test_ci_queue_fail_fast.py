@@ -128,7 +128,7 @@ def _watch(tmp_path, reads, server_error=False):
         '[[ "$1" != run ]] || exit 0\n'
         'if [[ "$SERVER_ERROR" == true && "$*" != *per_page=5\\&* ]]; then\n'
         '  echo "gh: Server Error (HTTP 500)" >&2; exit 1\n'
-        'fi\n'
+        "fi\n"
         'n=$(cat "$FAKE/count" 2>/dev/null || echo 0)\necho $((n + 1)) > "$FAKE/count"\n'
         'if [[ "$*" == *--jq* ]]; then cat "$FAKE/$n.json"; else cat "$FAKE/$n.page"; fi\n',
         "sleep": 'echo "$1" >> "$FAKE/sleeps"\n(( $(wc -l < "$FAKE/sleeps") <= 30 ))\n',
