@@ -1117,6 +1117,7 @@ jobs:
         if: steps.current.outputs.superseded != 'true' && needs.select.outputs.scope != 'none'
         env:
           SHARDS: ${{ needs.select.outputs.scope == 'selected' && needs.select.outputs.count || 12 }}
+          SCOPE: ${{ needs.select.outputs.scope }}
         run: |
           (
             status=0
