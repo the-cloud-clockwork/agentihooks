@@ -104,6 +104,7 @@ CLASSED = {
     ("publish-pypi.yml", "verify"),
     ("release.yml", "release"),
     ("github-access-audit.yml", "read-back"),
+    ("queue-retry.yml", "retry"),
 }
 
 HOSTED = OIDC | PROTECTED | TARGET | CLASSED
