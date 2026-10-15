@@ -38,11 +38,14 @@ def _registry() -> dict[str, dict]:
 
 
 def _name(process: Process, proc: Path, table: dict[int, Process]) -> str:
+    from scripts.swarm.naming import plain
+
     named = _argument(process.argv, "--name")
     parent = table.get(process.ppid)
-    if named or (parent and _target(parent)):
-        return named
-    return agent_environ(process.pid, ("AGENTIHOOKS_AGENT_NAME",), proc)[0]
+    if parent and _target(parent) and not named:
+        return ""
+    identity = agent_environ(process.pid, ("AGENTIHOOKS_AGENT_NAME",), proc)[0]
+    return identity if not named or named == plain(identity) else named
 
 
 def _main_thread(target: str, session_id: str, info: dict, records: dict[str, dict]) -> tuple[str, str]:
@@ -127,12 +130,16 @@ def _print_sessions(items: list[Session]) -> None:
 
 
 def resolve(items: list[Session], selector: str, target: str, names=None) -> Session:
-    from scripts.swarm.naming import resolve_name
+    from scripts.swarm.naming import plain, resolve_name
 
     canonical = names.resolve if names is not None else resolve_name
     selector = canonical(selector)
     scoped = [item for item in items if target == "any" or item.target == target]
-    matches = [item for item in scoped if selector in {canonical(item.name), item.session_id, str(item.process.pid)}]
+    matches = [
+        item
+        for item in scoped
+        if selector in {canonical(item.name), plain(canonical(item.name)), item.session_id, str(item.process.pid)}
+    ]
     unique = {(item.process.pid, item.session_id): item for item in matches}
     matches = list(unique.values())
     if not matches:
