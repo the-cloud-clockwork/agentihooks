@@ -142,5 +142,9 @@ def steer_turn(connection: Connection, thread_id: str, turn_id: str, text: str) 
     return connection.request("turn/steer", params).get("turnId") or turn_id
 
 
+def interrupt_turn(connection: Connection, thread_id: str, turn_id: str) -> None:
+    connection.request("turn/interrupt", {"threadId": thread_id, "turnId": turn_id})
+
+
 def read_thread(connection: Connection, thread_id: str) -> dict:
     return connection.request("thread/read", {"threadId": thread_id, "includeTurns": True}).get("thread") or {}

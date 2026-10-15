@@ -496,6 +496,7 @@ def test_the_report_lists_every_missed_line_and_every_lost_line(tmp_path):
 
 @pytest.mark.parametrize("snapshots", [0, 1, 2, 3])
 def test_command_reports_unconfirmed_history_counts(tmp_path, monkeypatch, snapshots):
+    monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
     sources = {"hooks/a.py": SOURCE}
     subprocess.run(["git", "-C", str(tmp_path), "init", "-q"], check=True, capture_output=True)
     _repo(tmp_path, sources)
@@ -533,6 +534,7 @@ def test_command_reports_unconfirmed_history_counts(tmp_path, monkeypatch, snaps
 
 @pytest.mark.parametrize("change", ["unchanged", "deleted", "removed", "added", "unrelated", "renamed"])
 def test_command_keeps_changed_importing_tests_red(tmp_path, monkeypatch, change):
+    monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
     test = "tests/test_a.py"
     imports = "import hooks.a\nassert True\n"
     base_test = "assert True\n" if change in {"added", "unrelated"} else imports
@@ -584,6 +586,52 @@ def test_command_keeps_changed_importing_tests_red(tmp_path, monkeypatch, change
         assert "hooks/a.py:3 ran on base" in text
     else:
         assert "hooks/a.py:3 unconfirmed: 2 measured history snapshots did not run it" in text
+
+
+@pytest.mark.parametrize("queued_before", [False, True])
+@pytest.mark.parametrize("event", ["merge_group", "pull_request"])
+@pytest.mark.parametrize("changed", ["hooks/a.py", "hooks/b.py", "README.md", None])
+def test_queue_ratchet_only_fails_losses_in_the_entry_diff(tmp_path, monkeypatch, event, changed, queued_before):
+    sources = {"hooks/a.py": SOURCE, "hooks/b.py": SOURCE, "README.md": "base\n"}
+    subprocess.run(["git", "-C", str(tmp_path), "init", "-q"], check=True, capture_output=True)
+    _repo(tmp_path, sources)
+    base = coverage_history.git("rev-parse", "HEAD", cwd=tmp_path).strip()
+    if queued_before:
+        _repo(tmp_path, {"hooks/a.py": SOURCE + "\n"})
+    if changed:
+        _repo(tmp_path, {changed: sources[changed] + "\n\n"})
+    else:
+        coverage_history.git(
+            "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--allow-empty", "-qm", "entry", cwd=tmp_path
+        )
+    runs = [_measure(base, {"hooks/a.py": {1, 2, 3}, "hooks/b.py": {1, 2, 3}}, sources)]
+    monkeypatch.setattr(ratchet, "_cached_runs", lambda *args: iter(runs))
+    monkeypatch.setenv("GITHUB_EVENT_NAME", event)
+    shards = tmp_path / "shards" / "coverage-3.12-1"
+    shards.mkdir(parents=True)
+    _shard(shards / ".coverage", {"hooks/a.py": [1, 2], "hooks/b.py": [1, 2]})
+    out = tmp_path / "out"
+    status = ratchet.main(
+        [
+            "--base",
+            base,
+            "--head",
+            str(tmp_path),
+            "--shards",
+            "1",
+            "--head-shards",
+            str(shards.parent),
+            "--out",
+            str(out),
+            "--base-baseline",
+            "fixture.json",
+        ]
+    )
+    expected = {"hooks/a.py", "hooks/b.py"} if event == "pull_request" else {changed} & {"hooks/a.py", "hooks/b.py"}
+    assert status == int(bool(expected))
+    text = (out / "report.txt").read_text()
+    for path in ("hooks/a.py", "hooks/b.py"):
+        assert (f"{path}:3 ran on base" in text) == (path in expected)
 
 
 def test_the_report_lists_only_lines_no_head_shard_ran(tmp_path):

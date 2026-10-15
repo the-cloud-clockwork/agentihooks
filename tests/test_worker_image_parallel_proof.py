@@ -43,6 +43,12 @@ elif args[0] == 'info':
     print(os.environ.get('DRIVER', '[]'))
 elif args[0] == 'run':
     if '/opt/probe/profile-probe.sh' in args:
+        (state / f'probe-{os.getpid()}').touch()
+        deadline = time.monotonic() + 3
+        while len(list(state.glob('probe-*'))) < 6:
+            if time.monotonic() >= deadline:
+                sys.exit(42)
+            time.sleep(0.01)
         if args[-1] == 'positive':
             (state / 'profile-started').touch()
             wait('rebuild')
@@ -168,7 +174,7 @@ def test_independent_worker_proofs_overlap_and_keep_every_check(tmp_path):
     assert len(runs) == 12
     assert all("--read-only" in call and call[call.index("--network") + 1] == "none" for call in runs)
     profiles = [call[-1] for call in runs if "/opt/probe/profile-probe.sh" in call]
-    assert profiles == ["positive", "positive", "rejection", "recovery", "rollback", "noexec"]
+    assert sorted(profiles) == ["noexec", "positive", "positive", "recovery", "rejection", "rollback"]
     assert json.loads((output / "result.json").read_text())["status"] == "passed"
     assert not list(output.glob("context-*"))
     assert calls[-1][:2] == ["image", "rm"]

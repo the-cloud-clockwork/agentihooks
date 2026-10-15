@@ -137,7 +137,17 @@ class Owners:
     def prompted_at(self, record: PaneRecord) -> int | None:
         store = self._store(record)
         try:
-            return None if store is None else idle.last_prompt(store.redis, record.owner_swarm, record.owner_session)
+            if store is None:
+                return None
+            prefix = idle.key(record.owner_swarm, "prompt", "")
+            names = {record.owner_session}
+            names.update(
+                key.removeprefix(prefix)
+                for key in store.redis.scan_iter(match=f"{prefix}*")
+                if naming.plain(key.removeprefix(prefix)) == naming.plain(record.owner_session)
+            )
+            times = (idle.last_prompt(store.redis, record.owner_swarm, name) for name in names)
+            return max((at for at in times if at is not None), default=None)
         except Exception:
             return None
 
