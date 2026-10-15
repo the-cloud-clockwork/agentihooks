@@ -243,6 +243,62 @@ def test_cli_prepares_and_publishes_from_the_primary_checkout(publication, monke
     )
 
 
+@pytest.mark.xdist_group("fakeredis")
+def test_publication_preserves_the_enforced_build_gate(publication, monkeypatch):
+    import fakeredis
+
+    from scripts.swarm import publish, store
+    from scripts.swarm.store import SwarmError
+
+    fake = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr(store, "redis_client", lambda environ: fake)
+    agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1")
+    publication.task["claimed_by"] = agent.name
+    for key, value in {
+        "AGENTIHOOKS_AGENT_NAME": agent.name,
+        "AGENTIHOOKS_SWARM": "swarm",
+        "AGENTIHOOKS_SWARM_TASK": "t1",
+        "AGENTIHOOKS_GATE_BUILD": "enforce",
+    }.items():
+        monkeypatch.setenv(key, value)
+    before = git(publication.root, "rev-parse", "HEAD")
+    with pytest.raises(SwarmError):
+        publish.publish("swarm", agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"])
+    assert git(publication.root, "rev-parse", "HEAD") == before
+    assert git(publication.root, "ls-remote", "origin", "refs/heads/engineer-test") == ""
+
+
+@pytest.mark.parametrize("branch", ["dev", "main", "master", "v1"])
+def test_protected_task_branches_never_prepare_or_publish(publication, branch):
+    from scripts.swarm import publish
+    from scripts.swarm.store import SwarmError
+
+    publication.task["branch"] = branch
+    before = git(publication.root, "rev-parse", "HEAD")
+    with pytest.raises(SwarmError, match="outside the protected branches"):
+        publish.prepare("swarm", publication.agent, str(publication.repo), publication.ledger)
+    with pytest.raises(SwarmError, match="outside the protected branches"):
+        publish.publish(
+            "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+        )
+    assert git(publication.root, "rev-parse", "HEAD") == before
+
+
+def test_continuation_publishes_back_to_the_recorded_remote_branch(publication):
+    from scripts.swarm import publish
+
+    root = publication.root
+    git(root, "push", "origin", "HEAD:predecessor")
+    publication.task["branch"] = "predecessor"
+    result = publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+    head = git(root, "rev-parse", "HEAD")
+    assert result["branch"] == publication.task["branch"] == "predecessor"
+    assert git(root, "ls-remote", "origin", "refs/heads/predecessor").split()[0] == head
+    assert git(root, "ls-remote", "origin", "refs/heads/engineer-test") == ""
+
+
 @pytest.mark.parametrize("fields", [{"claimed_by": "another"}, {"state": "done"}])
 def test_only_the_task_owner_can_publish(publication, fields):
     from scripts.swarm import publish
