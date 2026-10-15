@@ -205,6 +205,7 @@ def test_stage_budget_runs_after_every_gate_need_and_gate_required_needs_it():
     assert job["if"] in (
         "${{ always() }}",
         "${{ always() && github.event_name != 'merge_group' && github.event_name != 'pull_request' }}",
+        "${{ always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}",
     )
     assert "permissions" not in job and "continue-on-error" not in job
     mint, read, report = job["steps"][1:]
