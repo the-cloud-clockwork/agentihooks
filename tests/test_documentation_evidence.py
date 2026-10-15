@@ -43,3 +43,17 @@ def test_credential_files_and_links_are_excluded_from_documentation_evidence(tmp
     result = documentation_evidence.collect(tmp_path, base)
     assert "CREDENTIAL_SENTINEL" not in str(result)
     assert "handbook/linked.md" not in result["doc_sources"]
+
+
+def test_documentation_lines_are_redacted_before_the_evidence_is_truncated(tmp_path):
+    base = repository(tmp_path)
+    (tmp_path / "policy.py").write_text("class WidgetPolicy:\n    retries = 3\n")
+    line = "WidgetPolicy " + "x" * 229 + " " + "ghp_" + "z" * 36
+    (tmp_path / "handbook/policy.md").write_text(line + "\n")
+    git(tmp_path, "add", "policy.py", "handbook/policy.md")
+    git(tmp_path, "commit", "-qm", "Add documented retry policy")
+    result = documentation_evidence.collect(tmp_path, base)
+    excerpt = result["docs"][0]["text"]
+    assert "ghp_" not in excerpt
+    assert "REDACTED" in excerpt
+    assert len(excerpt) <= 256

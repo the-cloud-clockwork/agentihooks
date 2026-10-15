@@ -218,3 +218,38 @@ def test_pending_retries_rotate_past_three_retained_requests(world, monkeypatch)
     fn(*args)
     assert json.loads(pending[3].read_text())["status"] == "queued"
     assert len(ledger.added) == 1
+
+
+def test_retry_batch_does_not_classify_another_session_before_it_ends(world, monkeypatch):
+    root, payload, ledger, jobs = world
+    documentation_session.start({"session_id": "still-working", "cwd": str(root)})
+    calls = []
+
+    def decide(state, *args, **kwargs):
+        calls.append(state)
+        return answer(0.05)(state, *args, **kwargs)
+
+    monkeypatch.setattr(documentation.runner, "decide", decide)
+    documentation_session.end(payload)
+    fn, args = jobs.pop()
+    fn(*args)
+    assert len(calls) == 1
+    assert ledger.added == []
+
+
+def test_an_interrupted_worker_advances_the_pending_request_retry_order(world, monkeypatch):
+    _, payload, _, jobs = world
+
+    class Interrupted(BaseException):
+        pass
+
+    def interrupt(*args, **kwargs):
+        raise Interrupted()
+
+    monkeypatch.setattr(documentation.runner, "decide", interrupt)
+    documentation_session.end(payload)
+    fn, args = jobs.pop()
+    os.utime(args[0], ns=(1, 1))
+    with pytest.raises(Interrupted):
+        fn(*args)
+    assert args[0].stat().st_mtime_ns > 1
