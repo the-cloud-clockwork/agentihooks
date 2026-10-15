@@ -44,7 +44,7 @@ def existing(repo: Path, task: dict, agent: AgentRecord) -> Path | None:
         branch = next((line.removeprefix("branch refs/heads/") for line in lines if line.startswith("branch ")), "")
         if not (path / ".git").is_file():
             continue
-        if branch == task.get("branch"):
+        if task.get("branch") and branch == task["branch"]:
             recorded.append(path)
         elif own.fullmatch(branch):
             found.append(path)
@@ -98,6 +98,11 @@ def selected_files(root: Path, files: list[str]) -> list[str]:
     return selected
 
 
+def committed_file(root: Path, name: str, revision: str) -> bool:
+    done = subprocess.run(["git", "cat-file", "-t", f"{revision}:{name}"], cwd=root, capture_output=True, text=True)
+    return done.stdout.strip() == "blob"
+
+
 def stage_files(root: Path, selected: list[str]) -> None:
     tracked = set(git(root, "ls-files", "-z").split("\0"))
     missing = {
@@ -105,23 +110,16 @@ def stage_files(root: Path, selected: list[str]) -> None:
         for name in selected
         if not (root / name).exists() and not (root / name).is_symlink() and name not in tracked
     }
-    if missing:
-        deleted = set(
-            git(root, "diff-tree", "--no-commit-id", "--name-only", "--diff-filter=D", "-r", "-z", "HEAD").split("\0")
-        )
-        if unknown := missing - deleted:
-            raise SwarmError(f"selected files do not exist: {', '.join(sorted(unknown))}")
+    unknown = {name for name in missing if not any(committed_file(root, name, ref) for ref in ("HEAD", "HEAD^"))}
+    if unknown:
+        raise SwarmError(f"selected files do not exist: {', '.join(sorted(unknown))}")
     pending = [name for name in selected if name not in missing]
     if pending:
         git(root, "--literal-pathspecs", "add", "--", *pending)
 
 
-def check_build(root: Path, message: str) -> None:
-    payload = {
-        "tool_name": "Bash",
-        "tool_input": {"command": shlex.join(["git", "commit", "-m", message])},
-        "cwd": str(root),
-    }
+def check_build(root: Path) -> None:
+    payload = {"tool_name": "Bash", "tool_input": {"command": "git commit"}, "cwd": str(root)}
     reason = io.StringIO()
     with redirect_stderr(reason):
         refused = gate_entry.main(["build"], stdin=io.StringIO(json.dumps(payload)))
@@ -142,7 +140,7 @@ def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, mess
     try:
         stage_files(root, selected)
         if git(root, "diff", "--cached", "--name-only", "-z"):
-            check_build(root, message)
+            check_build(root)
             git(root, "commit", "-m", message)
         head = git(root, "rev-parse", "HEAD")
         execute([sys.executable, "-m", "scripts.ci_prepush"], root)

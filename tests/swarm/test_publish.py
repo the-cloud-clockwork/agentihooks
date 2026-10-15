@@ -155,7 +155,7 @@ def test_prepare_creates_the_task_worktree_once_through_the_worktree_command(rep
     script = tmp_path / "wt.sh"
     script.write_text(
         "#!/usr/bin/env bash\nset -euo pipefail\n"
-        '[[ "$1" == new && "$2" == --repo ]]\n'
+        '[[ "$1" == new && "$2" == --repo && "$PWD" == "$3" ]]\n'
         'git -C "$3" worktree add -b engineer-test "$PUBLISH_PREPARED" >&2\n'
         'printf "%s\\n" "$PUBLISH_PREPARED"\n'
     )
@@ -179,7 +179,7 @@ def test_prepare_creates_a_continuation_from_the_recorded_remote_branch(reposito
     script = tmp_path / "wt.sh"
     script.write_text(
         "#!/usr/bin/env bash\nset -euo pipefail\n"
-        '[[ "$1" == new && "$2" == --repo && "$4" == --from && "$5" == origin/predecessor ]]\n'
+        '[[ "$1" == new && "$2" == --repo && "$4" == --from && "$5" == origin/predecessor && "$PWD" == "$3" ]]\n'
         'git -C "$3" worktree add -b engineer-test "$PUBLISH_PREPARED" "$5" >&2\n'
         'printf "%s\\n" "$PUBLISH_PREPARED"\n'
     )
@@ -326,18 +326,19 @@ def test_display_filters_cannot_hide_a_staged_change(publication):
     assert result["head"] == git(root, "rev-parse", "HEAD")
 
 
-def test_a_whitespace_file_name_does_not_hide_the_need_to_commit(publication):
+@pytest.mark.parametrize("name", [" ", " leading.txt"])
+def test_a_whitespace_file_name_does_not_hide_the_need_to_commit(publication, name):
     from scripts.swarm import publish
 
     root = publication.root
-    (root / " ").write_text("before")
-    git(root, "add", "chosen.txt", " ")
+    (root / name).write_text("before")
+    git(root, "add", "chosen.txt", name)
     git(root, "commit", "-qm", "Seed whitespace name")
-    (root / " ").write_text("after")
+    (root / name).write_text("after")
     publish.publish(
-        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change whitespace file", [" "]
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change whitespace file", [name]
     )
-    assert git(root, "show", "HEAD: ") == "after"
+    assert git(root, "show", f"HEAD:{name}") == "after"
 
 
 @pytest.mark.parametrize("staged", [False, True])
@@ -360,6 +361,75 @@ def test_unrelated_tracked_changes_are_preserved_and_refused(publication, staged
     assert git(root, "ls-remote", "origin", "refs/heads/engineer-test") == ""
 
 
+@pytest.mark.parametrize("staged", [False, True])
+def test_unrelated_refusal_names_every_file_and_the_exact_worktree(publication, staged):
+    from scripts.swarm import publish
+    from scripts.swarm.store import SwarmError
+
+    root = publication.root
+    (root / "other.txt").write_text("someone else's work")
+    (root / "sub" / "other.txt").write_text("someone else's nested work")
+    if staged:
+        git(root, "add", "other.txt", "sub/other.txt")
+    with pytest.raises(SwarmError) as refused:
+        publish.publish(
+            "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+        )
+    assert (
+        str(refused.value)
+        == f"unrelated tracked changes remain: other.txt, sub/other.txt; Next: git -C {root} status --short"
+    )
+
+
+@pytest.mark.parametrize(
+    "missing, expected",
+    [
+        (
+            ["missing.txt"],
+            "selected files do not exist: missing.txt; Next: agentihooks swarm swarm publish --message 'Change chosen' -- chosen.txt missing.txt",
+        ),
+        (
+            ["missing.txt", "also-missing.txt"],
+            "selected files do not exist: also-missing.txt, missing.txt; Next: agentihooks swarm swarm publish --message 'Change chosen' -- chosen.txt missing.txt also-missing.txt",
+        ),
+    ],
+)
+def test_missing_selected_files_are_refused_before_staging(publication, missing, expected):
+    from scripts.swarm import publish
+    from scripts.swarm.store import SwarmError
+
+    before = git(publication.root, "rev-parse", "HEAD")
+    with pytest.raises(SwarmError) as refused:
+        publish.publish(
+            "swarm",
+            publication.agent,
+            str(publication.repo),
+            publication.ledger,
+            "Change chosen",
+            ["chosen.txt", *missing],
+        )
+    assert str(refused.value) == expected
+    assert git(publication.root, "rev-parse", "HEAD") == before
+    assert git(publication.root, "diff", "--cached", "--name-only") == ""
+
+
+def test_an_already_staged_deletion_is_published(publication):
+    from scripts.swarm import publish
+
+    root = publication.root
+    git(root, "rm", "other.txt")
+    result = publish.publish(
+        "swarm",
+        publication.agent,
+        str(publication.repo),
+        publication.ledger,
+        "Delete other",
+        ["chosen.txt", "other.txt"],
+    )
+    assert "other.txt" not in git(root, "ls-tree", "--name-only", "HEAD").splitlines()
+    assert result["head"] == git(root, "rev-parse", "HEAD")
+
+
 def test_unrelated_untracked_files_are_never_staged(publication):
     from scripts.swarm import publish
 
@@ -380,10 +450,11 @@ def test_failed_gate_never_pushes_and_can_retry_the_committed_head(publication, 
     monkeypatch.setenv("PUBLISH_GATE_FAIL", "1")
     with pytest.raises(
         SwarmError, match="Next: agentihooks swarm swarm publish --message 'Change chosen' -- chosen.txt"
-    ):
+    ) as refused:
         publish.publish(
             "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
         )
+    assert "deliberate gate failure" in str(refused.value)
     head = git(root, "rev-parse", "HEAD")
     assert git(root, "show", "HEAD:chosen.txt") == "after"
     assert git(root, "ls-remote", "origin", "refs/heads/engineer-test") == ""
