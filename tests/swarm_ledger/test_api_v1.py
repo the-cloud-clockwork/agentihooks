@@ -64,9 +64,9 @@ def request(live, method, resource, body=None, **headers):
 
 
 def stored(monkeypatch, document):
-    from scripts.swarm_ledger.repository.sqlite import Entry
+    from types import SimpleNamespace
 
-    monkeypatch.setattr(server.repository, "current", lambda slug: Entry(0, "", document))
+    monkeypatch.setattr(server.repository, "current", lambda slug: SimpleNamespace(state=document))
 
 
 def test_invalid_schema_leaves_resource_unchanged(live):

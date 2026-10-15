@@ -1,6 +1,0 @@
-{
-  "scripts/swarm_ledger/api/resources.py:scripts.swarm_ledger.api.resources.x_revision__mutmut_5:d3c93c661fc1090c4f14d89d43853f4a194447015e02d4996e7bbf587c9b88ff": {
-    "reader": "standards-reader",
-    "reason": "JSONEncoder.iterencode tests ensure_ascii by truthiness. False and None both select encode_basestring, producing identical canonical UTF8 chunks and SHA256 digests for every input. Independently approved by the Standards reader after inspecting the encoder source."
-  }
-}
