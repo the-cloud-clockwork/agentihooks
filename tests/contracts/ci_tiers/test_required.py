@@ -12,8 +12,9 @@ from scripts import ci_reuse, gate_protected
 
 pytestmark = pytest.mark.unit
 
-QUEUE = {"durations", "split", "unit", "shard-check", "test-count"}
-PULL_REQUEST = QUEUE | {"select", "lint", "semgrep", "sonar", "mutation-plan", "mutation-stats", "mutation"}
+UNIT = {"durations", "split", "unit", "shard-check", "test-count"}
+QUEUE = UNIT | {"queue-fail-fast"}
+PULL_REQUEST = UNIT | {"select", "lint", "semgrep", "sonar", "mutation-plan", "mutation-stats", "mutation"}
 SELECTED = PULL_REQUEST - {"split", "unit", "shard-check"} | {"unit-selected"}
 UNSELECTED = PULL_REQUEST - {"split", "unit", "shard-check"}
 TIERS = [
