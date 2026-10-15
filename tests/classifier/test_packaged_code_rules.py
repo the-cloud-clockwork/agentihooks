@@ -124,3 +124,15 @@ def test_trace_plan_params_carry_each_piece_ruling():
         "covers": [{"slot": 1, "number": 2, "what": "tests", "grant": 0, "id": "c-1"}],
         "sized": [],
     }
+
+
+def test_trace_plan_keeps_a_piece_its_authorization_covers():
+    answers = {"piece_0": noul(0.0), "piece_1": noul(0.0), "covers_0_0": noul(0.9), "covers_1_0": noul(0.7)}
+    covers = [{"slot": slot, "grant": 0, "id": "c-1"} for slot in (0, 1)]
+    params = {**pieces(False, False), "covers": covers}
+    assert verdicts(trace_plan, "trace-plan", answers | {"size": score(1, 0.9)}, params) == {"verdict": "pass"}
+
+
+def test_trace_plan_params_number_every_covered_piece():
+    fresh = [trace_plan.Piece("a", ("src/a.py",), "x"), trace_plan.Piece("b", ("src/b.py",), "y")]
+    assert [c["number"] for c in trace_plan._params(fresh, 3, True, ["c-1"])["covers"]] == [4, 5]

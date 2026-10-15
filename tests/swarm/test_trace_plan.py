@@ -268,6 +268,17 @@ def test_authorized_pieces_never_count_as_cut_toward_a_failed_plan(monkeypatch):
     assert trace_plan.trace([piece("a"), piece("b"), piece("c")], state, None)["verdict"] == "fail"
 
 
+def test_a_piece_appended_under_the_same_authorizations_is_traced_alone(monkeypatch):
+    state = {**INTENT, "scope authorizations": [AUTHORIZED]}
+    covered(monkeypatch, 0.9, 0.0, covers=[("covers_0_0", 0.0), ("covers_1_0", 0.9)])
+    passed = trace_plan.trace([piece("a"), piece("b")], state, None)
+    fake = covered(monkeypatch, 0.9, score=None, start=2, covers=[("covers_2_0", 0.0)])
+    later = trace_plan.trace([piece("a"), piece("b"), piece("c")], state, passed)
+    [(_, questions, _)] = fake.calls
+    assert list(questions) == ["piece_2", "covers_2_0"]
+    assert later["pieces"][:2] == passed["pieces"] and later["pieces"][1]["authorized"] == "c-41a905ae9d"
+
+
 def test_a_trace_without_authorizations_records_none(ask):
     ask(0.9)
     assert "authorizations" not in trace_plan.trace([piece("a")], INTENT, None)
