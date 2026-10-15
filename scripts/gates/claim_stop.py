@@ -102,7 +102,7 @@ class ClaimStop:
         streak = Streak(store, who.swarm, who.name)
         if (
             lift.lifted(who.swarm, call.session, self.name, state.home)
-            or lift.held(who.swarm, who.name, who.task, self.name, state.home, command=call.command)
+            or lift.task_lifted(who.swarm, who.task, self.name, state.home)
             or (
                 not lift.task_lift_path(who.swarm, who.task, self.name, state.home).exists()
                 and lift.agent_lifted(who.swarm, who.name, self.name, state.home)
