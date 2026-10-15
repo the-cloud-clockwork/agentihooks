@@ -83,6 +83,7 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
             "mutation-plan",
             "mutation-stats",
             "reuse",
+            "queue-baseline",
             "queue-fail-fast",
             "stage-budget",
             "select",
@@ -161,7 +162,7 @@ def test_semgrep_grades_registry_pack_findings_new_against_the_base_in_parallel(
     assert job["if"] in (
         "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
         "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
-        "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' && github.event_name != 'push' }}",
+        "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' }}",
     )
 
 
@@ -265,7 +266,8 @@ def test_lint_and_test_count_grade_a_pull_request_that_merged_dev_from_the_curre
 def test_coverage_ratchet_grades_the_merged_shards_from_the_base_copy():
     jobs = _workflow()["jobs"]
     job = jobs["coverage-ratchet"]
-    assert job["needs"] == ["durations", "unit", "reuse"]
+    assert job["needs"] == ["durations", "unit", "queue-baseline", "reuse"]
+    assert jobs["queue-baseline"]["if"] is False
     download = next(step for step in job["steps"] if step.get("name") == "Download shard coverage")
     assert download["with"]["pattern"] == "coverage-3.12-*"
     grade = next(step for step in job["steps"] if step.get("name") == "Hold every line the base ran")
@@ -276,11 +278,16 @@ def test_coverage_ratchet_grades_the_merged_shards_from_the_base_copy():
     assert report["with"]["path"] == "coverage-ratchet/report.txt"
 
 
-def test_every_coverage_baseline_records_all_the_shards_the_unit_job_splits():
+@pytest.mark.parametrize(
+    "job,step",
+    [("coverage-baseline", "Compute the coverage baseline"), ("queue-baseline", "Record this run's coverage baseline")],
+)
+def test_every_coverage_baseline_records_all_the_shards_the_unit_job_splits(job, step):
     jobs = _workflow()["jobs"]
-    record = next(
-        entry for entry in jobs["coverage-baseline"]["steps"] if entry.get("name") == "Compute the coverage baseline"
-    )
+    if job == "queue-baseline":
+        assert jobs[job]["if"] is False
+        return
+    record = next(entry for entry in jobs[job]["steps"] if entry.get("name") == step)
     assert f"--shards {jobs['unit']['strategy']['matrix']['shard'][-1]} " in record["run"]
 
 
@@ -724,7 +731,7 @@ def test_unit_and_lint_run_on_every_event_and_feed_the_required_gate():
             "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
             "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
             "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'pull_request' || needs.select.outputs.scope == 'full') }}",
-            "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' && github.event_name != 'push' }}",
+            "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' }}",
         )
 
         assert all("steps.lookup" not in step.get("if", "") for step in job["steps"])
