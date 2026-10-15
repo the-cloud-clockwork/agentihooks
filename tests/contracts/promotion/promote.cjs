@@ -27,7 +27,7 @@ function fixture(options = {}) {
       createRef: async args => { refs.push(['create', args]); },
       deleteRef: async args => {
         refs.push(['delete', args]);
-        if (options.deleted) throw Object.assign(new Error('Not Found'), { status: 404 });
+        if (options.deleted) throw Object.assign(new Error(options.deleted === 422 ? 'Reference does not exist' : 'Not Found'), { status: options.deleted });
         if (options.deleteFailed) throw Object.assign(new Error('Server error'), { status: 500 });
       },
     },
@@ -92,12 +92,14 @@ test('reuses an existing promotion pull request', async () => {
   assert.deepEqual(f.writes.map(([kind]) => kind), ['merge']);
 });
 
-test('automatic branch deletion does not prevent release outputs', async () => {
-  const f = fixture({ deleted: true });
-  await promote(f);
-  assert.equal(f.outputs.main, 'rebased');
-  assert.equal(f.outputs.graded, 'graded');
-});
+for (const status of [404, 422]) {
+  test(`automatic branch deletion does not prevent release outputs (${status})`, async () => {
+    const f = fixture({ deleted: status });
+    await promote(f);
+    assert.equal(f.outputs.main, 'rebased');
+    assert.equal(f.outputs.graded, 'graded');
+  });
+}
 
 test('snapshot deletion failures are reported', async () => {
   const f = fixture({ deleteFailed: true });

@@ -45,7 +45,7 @@ module.exports = async ({ github, context, core, sleep = ms => new Promise(resol
     try {
       await github.rest.git.deleteRef({ ...api, ref });
     } catch (error) {
-      if (error.status !== 404) throw error;
+      if (error.status !== 404 && !(error.status === 422 && error.message.includes('Reference does not exist'))) throw error;
     }
     core.setOutput('pull-request', pull.html_url);
   }
