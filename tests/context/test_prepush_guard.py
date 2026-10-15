@@ -440,7 +440,7 @@ def test_cmd_payloads_are_checked_for_pushes(repo):
         check_prepush(payload)
 
 
-@pytest.mark.parametrize("directory", ["workdir", "task"])
+@pytest.mark.parametrize("directory", ["workdir", "task", "branch"])
 def test_codex_push_in_bundle_worktree_uses_bundle_repository(repo, tmp_path, monkeypatch, directory):
     from hooks.targets.normalizer import normalize_payload
     from tests.swarm_ledger import legacy_page
@@ -460,6 +460,8 @@ def test_codex_push_in_bundle_worktree_uses_bundle_repository(repo, tmp_path, mo
     }
     folder = tmp_path / "ledgers"
     folder.mkdir()
+    if directory == "branch":
+        task.pop("worktree")
     legacy_page.store(folder, "rig", {"tasks": [task]})
     monkeypatch.setenv("LEDGER_DIR", str(folder))
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "rig")
