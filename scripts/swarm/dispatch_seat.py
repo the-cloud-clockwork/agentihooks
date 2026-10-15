@@ -13,7 +13,17 @@ import json
 from dataclasses import replace
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import bottleneck, capacity, dev_red, lane_split, launch_check, lifetime, priority_sweep, seat_spawn, templates
+from scripts.swarm import (
+    bottleneck,
+    capacity,
+    dev_red,
+    lane_split,
+    launch_check,
+    lifetime,
+    priority_sweep,
+    seat_spawn,
+    templates,
+)
 from scripts.swarm.store import DISPATCH, FULL
 
 LANE = DISPATCH
