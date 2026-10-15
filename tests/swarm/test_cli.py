@@ -1686,7 +1686,7 @@ def test_a_continuation_pushing_an_unrelated_remote_branch_is_refused(upstream):
     with pytest.raises(SwarmError) as refused:
         cli.worktree_branch("engineer-a1b2c3-0001", run=fake)
     assert str(refused.value) == (
-        "branch engineer-a1b2c3-0002 is not on origin; push it first with git push -u origin engineer-a1b2c3-0002"
+        "branch engineer-a1b2c3-0002 is not on origin; push it first with git push -u origin HEAD:engineer-a1b2c3-0001"
     )
     assert calls[-1] == (["git", "ls-remote", "--exit-code", "--heads", "origin", "engineer-a1b2c3-0002"], GIT_OPTS)
 
@@ -1695,6 +1695,19 @@ def test_a_checkout_on_the_recorded_branch_reads_no_upstream():
     calls, fake = git_answers({"branch": (0, "engineer-a1b2c3-0001\n"), "ls-remote": (0, "abc\trefs/heads/x\n")})
     assert cli.worktree_branch("engineer-a1b2c3-0001", run=fake) == "engineer-a1b2c3-0001"
     assert [argv[1] for argv, _ in calls] == ["branch", "ls-remote"]
+
+
+@pytest.mark.parametrize(
+    ("current", "upstream"),
+    [("engineer-a1b2c3-0002", (0, "origin/engineer-a1b2c3-0001\n")), ("engineer-a1b2c3-0001", (0, ""))],
+)
+def test_a_recorded_branch_gone_from_origin_is_refused_by_its_own_name(current, upstream):
+    _, fake = git_answers({"branch": (0, f"{current}\n"), "rev-parse": upstream, "ls-remote": (2, "")})
+    with pytest.raises(SwarmError) as refused:
+        cli.worktree_branch("engineer-a1b2c3-0001", run=fake)
+    assert str(refused.value) == (
+        "branch engineer-a1b2c3-0001 is not on origin; push it first with git push -u origin engineer-a1b2c3-0001"
+    )
 
 
 HEAD_JSON = (

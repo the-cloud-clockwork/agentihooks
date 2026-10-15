@@ -1165,10 +1165,13 @@ def worktree_branch(recorded, run=subprocess.run):
     branch = current.stdout.strip() if current.returncode == 0 else ""
     if not branch:
         raise SwarmError("swarm branch runs in a worktree on a branch; this checkout is on none")
-    if recorded and recorded != branch and _upstream(run) == recorded:
-        branch = recorded
+    target = branch
+    if recorded and recorded != branch:
+        target = f"HEAD:{recorded}"
+        if _upstream(run) == recorded:
+            branch = target = recorded
     if _git(run, "ls-remote", "--exit-code", "--heads", "origin", branch).returncode != 0:
-        raise SwarmError(f"branch {branch} is not on origin; push it first with git push -u origin {branch}")
+        raise SwarmError(f"branch {branch} is not on origin; push it first with git push -u origin {target}")
     return branch
 
 
