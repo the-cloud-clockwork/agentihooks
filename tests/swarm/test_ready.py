@@ -596,6 +596,77 @@ def test_a_merged_pull_request_closes_the_task_with_the_done_proof_and_removes_t
     assert merging.run() == []
 
 
+ISSUE = "https://github.com/o/r/issues/5"
+NAMED = "https://github.com/o/r/issues/12"
+CLOSED_BY = f"Closed by the swarm: pull request {URL} merged into dev."
+
+
+@pytest.fixture
+def issues(merging, monkeypatch):
+    states, body = {ISSUE: "OPEN", NAMED: "OPEN"}, "Fixes the parser.\n\nCloses #12\n"
+
+    def shell(argv):
+        if argv[:3] == ["gh", "pr", "view"]:
+            assert argv == ["gh", "pr", "view", URL, "--json", "body", "--jq", ".body"]
+            merging.shell.calls.append(argv)
+            return subprocess.CompletedProcess(argv, 0, stdout=body, stderr="")
+        if argv[:3] == ["gh", "issue", "view"]:
+            assert argv[4:] == ["--json", "state", "--jq", ".state"]
+            merging.shell.calls.append(argv)
+            return subprocess.CompletedProcess(argv, 0, stdout=states[argv[3]] + "\n", stderr="")
+        return merging.shell(argv)
+
+    monkeypatch.setattr(stack, "shell", shell)
+    merging.rows["t1"]["issue_url"] = ISSUE
+    merging.pulls[URL] = MERGED
+    return states
+
+
+def issue_writes(merging):
+    return [c for c in merging.shell.calls if c[:3] in (["gh", "issue", "comment"], ["gh", "issue", "close"])]
+
+
+def test_a_merged_ready_pull_request_closes_the_task_issue_and_the_issue_it_names(merging, issues):
+    assert merging.run() == [
+        f"task t1 done, {URL} merged",
+        f"closed issue {ISSUE}",
+        f"closed issue {NAMED}",
+        f"removed the worktree {TOP}",
+    ]
+    assert issue_writes(merging) == [
+        ["gh", "issue", "comment", ISSUE, "--body", CLOSED_BY],
+        ["gh", "issue", "close", ISSUE],
+        ["gh", "issue", "comment", NAMED, "--body", CLOSED_BY],
+        ["gh", "issue", "close", NAMED],
+    ]
+
+
+def test_an_issue_linked_to_a_task_still_open_stays_open(merging, issues):
+    merging.rows["t2"]["issue_url"] = NAMED
+    merging.rows["t3"] = {"id": "t3", "state": "done", "issue_url": ISSUE}
+    merging.run()
+    assert issue_writes(merging) == [
+        ["gh", "issue", "comment", ISSUE, "--body", CLOSED_BY],
+        ["gh", "issue", "close", ISSUE],
+    ]
+
+
+def test_an_issue_already_closed_gets_no_second_comment(merging, issues):
+    issues[ISSUE] = "CLOSED"
+    assert f"closed issue {ISSUE}" not in merging.run()
+    assert issue_writes(merging) == [
+        ["gh", "issue", "comment", NAMED, "--body", CLOSED_BY],
+        ["gh", "issue", "close", NAMED],
+    ]
+
+
+def test_an_issue_the_swarm_cannot_close_is_reported_and_the_task_still_closes(merging, issues):
+    merging.shell.fail = (("gh", "issue", "close"),)
+    actions = merging.run()
+    assert f"could not close issue {ISSUE}: boom" in actions
+    assert merging.rows["t1"]["state"] == "done"
+
+
 def test_a_merged_pull_request_without_a_checkout_closes_without_removing_one(merging):
     found = ready.record(merging.store, "sw", "t1")
     found["worktree"] = ""
