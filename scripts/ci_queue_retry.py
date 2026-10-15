@@ -30,7 +30,7 @@ def dependents(workflow: dict, root: str = SHARD) -> set[str]:
 
     found: set[str] = set()
     for _ in jobs:
-        found |= {job_id for job_id in jobs if needs(job_id) & (found | {root})}
+        found.update({job_id for job_id in jobs if needs(job_id) & (found | {root})})
     return {jobs[job_id].get("name", job_id) for job_id in found}
 
 

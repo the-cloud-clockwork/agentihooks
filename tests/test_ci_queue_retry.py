@@ -222,6 +222,15 @@ def test_the_decision_names_its_reason():
     assert ci_queue_retry.decide({**RUN, "event": "push"}, [], WORKFLOW) == (False, "not a failed merge group run")
     assert ci_queue_retry.decide({**RUN, "run_attempt": 2}, [], WORKFLOW) == (False, "attempt 2 already ran")
     assert ci_queue_retry.decide(RUN, lost_run(), WORKFLOW) == (True, "runner lost on unit (3.11, 2)")
+    two_lost = [job("unit (3.12, 7)", LOST), job("unit (3.12, 9)", SHUTDOWN)]
+    assert ci_queue_retry.decide(RUN, two_lost, WORKFLOW) == (True, "runner lost on unit (3.12, 7), unit (3.12, 9)")
+    two_red = [job("unit (3.11, 2)", RED), job("unit (3.12, 4)", RED)]
+    assert ci_queue_retry.decide(RUN, two_red, WORKFLOW) == (
+        False,
+        "failed without a runner loss signature: unit (3.11, 2), unit (3.12, 4)",
+    )
+    outside = [*lost_run(), job("lint", ""), job("durations", "")]
+    assert ci_queue_retry.decide(RUN, outside, WORKFLOW) == (False, "failed outside the unit shards: lint, durations")
 
 
 def test_judges_follow_needs_through_every_level():
