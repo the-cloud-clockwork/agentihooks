@@ -15,7 +15,7 @@ HOUR = 3_600_000
 @pytest.fixture
 def store():
     result = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    result.create(SwarmConfig("sw", "/repo"))
+    result.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=1))
     result.put_agent("sw", AgentRecord("master", MASTER, MASTER, seat="master@sw"))
     return result
 
