@@ -1946,9 +1946,8 @@ jobs:
           key: flake-history-${{ github.run_id }}-${{ github.run_attempt }}
 
   coverage-baseline:
-    needs: [unit, gate-required]
-    # Any measured dev push publishes: a skipped one leaves the next head with no base to grade against.
-    if: ${{ !cancelled() && github.event_name == 'push' && needs.unit.result == 'success' }}
+    needs: [unit, coverage-ratchet]
+    if: ${{ !cancelled() && github.event_name == 'push' && needs.unit.result == 'success' && needs.coverage-ratchet.result == 'success' }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 5
     steps:
