@@ -37,10 +37,9 @@ There were 100 FYI deliveries to the busy Codex worker, one every 0.3 s, after i
 
 Command outputs: `raw/b-faults.txt` and `raw/b-snapshot-restore.txt`.
 
-
 - **Redis unavailable.** The container was paused for 30 s. The pump logged `degraded: TimeoutError` and made no acceptance. Its owner lease lapsed during the pause, so after the resume it exited with `no longer delivers`. The swarm replaced the execution, and the next message went to the new one.
 - **Socket loss.** The app-server was killed. The pump logged the lost stream. Both submissions were rejected uncommitted while the server drained (`Server is draining`). The item was held as pending, and the replacement execution accepted it exactly once. An unknown outcome after a send was not produced live; CI tests cover it.
-- **Redis state lost (partial).** The swarm was snapshotted, then the database was flushed. Serve exited with `no transport record for this execution`, and nothing was resent. Restore was refused while agent processes lived. Once they ended, the swarm restored paused with both agents `awaiting-decision` and the inbox states kept. The Codex master's resume was refused as `unsupported resume: a managed Codex execution continues through its supervised server`. Gap: the restore does not bring back the receipts journal. A delivery in flight at the loss would return as pending with no journal to reconcile it against.
+- **Redis state lost (partial).** The swarm was snapshotted, then the database was flushed. Serve exited with `no transport record for this execution`, and nothing was resent. Restore was refused while agent processes lived. Once they ended, the swarm restored paused with both agents `awaiting-decision` and the inbox states kept. The Codex master's resume was refused as `unsupported resume: a managed Codex execution continues through its supervised server`. Gap: the restore does not bring back the receipts journal. A delivery in flight at the loss would return as pending with no journal to reconcile it against. The swarm master closed the row as partial: the defect has its own task in the runtime fixes phase.
 
 ## Late approval and the pre-connect hold
 

@@ -120,7 +120,8 @@
       "status": "partial",
       "basis": "live this run, partial",
       "evidence": "live fleet B (raw/b-faults.txt, raw/b-snapshot-restore.txt): snapshot then FLUSHALL; serve exited with no transport record for this execution and nothing was resent; restore was refused while agent processes lived, then restored paused with both agents awaiting decision and inbox states kept. Gap: restore does not bring back the receipts journal, so a delivery in flight at the loss could not be reconciled from it; follow up proposed",
-      "tests": []
+      "tests": [],
+      "ruling": "closed as partial by the swarm master: the receipts journal defect has its own task in the runtime fixes phase"
     },
     "Unknown additive item field": {
       "status": "pass",
@@ -261,6 +262,5 @@
     "Several replacement launches failed with the harness did not report its route within 30s, which stretched the socket loss recovery to about 270 s.",
     "A proof swarm over a real checkout filed promotion fixer tasks and its ci agent opened a real pull request; promotion_watch now skips proof swarms."
   ],
-  "accounts_note": "The fleets ran on the personal bearer account; the business bearer account was qualified by the late approval probe only and was at its week quota warning during the run.",
-  "evidence_folder": "lower case cxch-08, matching the existing cxch-01 and cxch-07 folders"
+  "accounts_note": "The fleets ran on the personal bearer account; the business bearer account was qualified by the late approval probe only and was at its week quota warning during the run."
 }
