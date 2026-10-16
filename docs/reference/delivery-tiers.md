@@ -14,7 +14,7 @@ AgentiHooks ships a package rule, `delivery-tiers`, that every installed profile
 |---|---|---|---|
 | **Pull request** | `pull_request` on each head push | lint, format, size and complexity, static analysis, coverage and mutation on changed lines, the tests the change touches | entry to the merge queue |
 | **Queue** | `merge_group` | the unit suite, once per merge group | the merge into the integration branch, usually `dev` |
-| **Promotion** | `push` to the integration branch, with `concurrency` cancelling older runs | whole module coverage and mutation, image builds and smoke tests, cluster and load tests, stage and shard time budget reports, then promotion | the release branch, usually `main`, and the release tag and images built from it |
+| **Promotion** | `push` to the integration branch, with `concurrency` preserving the running run and replacing only the pending run | whole module coverage and mutation, image builds and smoke tests, cluster and load tests, stage and shard time budget reports, then promotion | the release branch, usually `main`, and the release tag and images built from it |
 
 Each tier has a wall time budget. A check that does not fit the pull request or queue budget moves to promotion.
 

@@ -268,6 +268,7 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
         ci_reuse.gate_steps(),
         ci_reuse.gate_steps(queue_coverage=True),
         ci_reuse.gate_steps(queue_tier=True),
+        ci_reuse.gate_steps(queue_tier=True, promotion=True),
     )
 
     assert workflow["jobs"]["gate-required"]["runs-on"] in gate_protected.runners(policy)

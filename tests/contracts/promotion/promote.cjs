@@ -4,6 +4,7 @@ const promote = require('../../../.github/scripts/promote.cjs');
 
 function fixture(options = {}) {
   const writes = [];
+  const refs = [];
   const outputs = {};
   const context = {
     repo: { owner: 'owner', repo: 'repo' }, eventName: 'push', ref: 'refs/heads/dev',
@@ -17,7 +18,19 @@ function fixture(options = {}) {
   let reads = 0;
   let readiness = 0;
   const github = { rest: {
-    git: { getRef: async () => ({ data: { object: { sha: ++reads === 1 ? options.dev || 'graded' : options.moved || 'graded' } } }) },
+    git: {
+      getRef: async ({ ref }) => {
+        if (ref === 'heads/dev') return { data: { object: { sha: ++reads === 1 ? options.dev || 'graded' : options.moved || 'graded' } } };
+        if (options.snapshot) return { data: { object: { sha: options.snapshot } } };
+        throw Object.assign(new Error('Not Found'), { status: 404 });
+      },
+      createRef: async args => { refs.push(['create', args]); },
+      deleteRef: async args => {
+        refs.push(['delete', args]);
+        if (options.deleted) throw Object.assign(new Error(options.deleted === 422 ? 'Reference does not exist' : 'Not Found'), { status: options.deleted });
+        if (options.deleteFailed) throw Object.assign(new Error('Server error'), { status: 500 });
+      },
+    },
     repos: { getCommit: async ({ ref }) => ({ data: ref === 'graded' ? commit('graded', 'tree') :
       ref === 'main' ? commit('main', options.already ? 'tree' : 'old') : commit('rebased', options.wrongTree ? 'wrong' : 'tree') }) },
     pulls: {
@@ -34,14 +47,18 @@ function fixture(options = {}) {
   } };
   const summary = { addHeading() { return this; }, addTable() { return this; }, async write() {} };
   const core = { setOutput: (key, value) => { outputs[key] = value; }, summary };
-  return { github, context, core, writes, outputs, sleep: async () => {} };
+  return { github, context, core, writes, refs, outputs, sleep: async () => {} };
 }
 
 test('promotes exactly the graded head with rebase and records both revisions', async () => {
   const f = fixture();
   await promote(f);
   assert.equal(f.writes[0][1].base, 'main');
-  assert.equal(f.writes[0][1].head, 'dev');
+  assert.equal(f.writes[0][1].head, 'promotion/graded');
+  assert.deepEqual(f.refs, [
+    ['create', { owner: 'owner', repo: 'repo', ref: 'refs/heads/promotion/graded', sha: 'graded' }],
+    ['delete', { owner: 'owner', repo: 'repo', ref: 'heads/promotion/graded' }],
+  ]);
   assert.match(f.writes[0][1].body, /graded/);
   assert.deepEqual(f.writes[1], ['merge', { owner: 'owner', repo: 'repo', pull_number: 7, sha: 'graded', merge_method: 'rebase' }]);
   assert.equal(f.outputs.main, 'rebased');
@@ -60,17 +77,48 @@ for (const context of [
   });
 }
 
-test('a stale grade causes no writes', async () => {
+test('promotes the graded revision after dev has advanced', async () => {
   const f = fixture({ dev: 'newer' });
   await promote(f);
-  assert.deepEqual(f.writes, []);
-  assert.deepEqual(f.outputs, {});
+  assert.equal(f.writes[0][1].head, 'promotion/graded');
+  assert.equal(f.writes[1][1].sha, 'graded');
+  assert.equal(f.outputs.graded, 'graded');
+  assert.equal(f.outputs.main, 'rebased');
 });
 
 test('reuses an existing promotion pull request', async () => {
   const f = fixture({ existing: true });
   await promote(f);
   assert.deepEqual(f.writes.map(([kind]) => kind), ['merge']);
+});
+
+for (const status of [404, 422]) {
+  test(`automatic branch deletion does not prevent release outputs (${status})`, async () => {
+    const f = fixture({ deleted: status });
+    await promote(f);
+    assert.equal(f.outputs.main, 'rebased');
+    assert.equal(f.outputs.graded, 'graded');
+  });
+}
+
+test('snapshot deletion failures are reported', async () => {
+  const f = fixture({ deleteFailed: true });
+  await assert.rejects(promote(f), /Server error/);
+  assert.equal(f.outputs.main, undefined);
+});
+
+test('reuses a matching snapshot left before pull request creation', async () => {
+  const f = fixture({ snapshot: 'graded' });
+  await promote(f);
+  assert.deepEqual(f.refs.map(([kind]) => kind), ['delete']);
+  assert.equal(f.outputs.main, 'rebased');
+});
+
+test('rejects a snapshot that does not identify the graded revision', async () => {
+  const f = fixture({ snapshot: 'ungraded' });
+  await assert.rejects(promote(f), /snapshot/);
+  assert.deepEqual(f.writes, []);
+  assert.deepEqual(f.refs, []);
 });
 
 test('waits for GitHub to compute a clean merge', async () => {
@@ -88,11 +136,12 @@ for (const options of [{ conflict: true }, { pending: true }]) {
   });
 }
 
-test('does not merge when dev moves after the first read', async () => {
+test('promotes the graded revision while dev keeps moving', async () => {
   const f = fixture({ existing: true, moved: 'newer' });
   await promote(f);
-  assert.deepEqual(f.writes, []);
-  assert.deepEqual(f.outputs, {});
+  assert.deepEqual(f.writes.map(([kind]) => kind), ['merge']);
+  assert.equal(f.writes[0][1].sha, 'graded');
+  assert.equal(f.outputs.main, 'rebased');
 });
 
 test('a moved pull request cannot merge', async () => {

@@ -33,7 +33,9 @@ class FakeLedger:
     def tasks(self, slug):
         return list(self.rows.values()) if slug == SLUG else []
 
-    def update_task(self, slug, task_id, fields, by="swarm"):
+    def update_task(self, slug, task_id, fields, by="swarm", if_state=()):
+        if if_state and self.rows[task_id].get("state") not in if_state:
+            return
         self.updates.append((slug, task_id, fields, by))
         self.rows[task_id].update(fields)
 
@@ -243,6 +245,40 @@ def test_a_stop_after_the_merge_is_blocked(rig):
     rig.pulls[URL] = MERGED
     decision = rig.stop()
     assert not decision.allowed and "merged: close the task now" in decision.reason
+
+
+def test_a_merged_first_half_clears_the_active_pull_request_and_the_second_half_stops_on_a_wait(rig):
+    rig.task.update(state="pr", pr_url=URL, split=["1-10", "11-20"], split_pulls=[URL])
+    rig.pulls[URL] = MERGED
+    assert "you hold task t1 with no open pull request and no wait" in rig.stop().reason
+    assert rig.ledger.updates == [(SLUG, "t1", {"pr_url": "", "state": "claimed"}, "swarm")]
+    assert (rig.task["split"], rig.task["split_pulls"]) == (["1-10", "11-20"], [URL])
+    idle.declare_wait(rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, "second half", rig.clock[0])
+    assert rig.stop().allowed
+    rig.clock[0] += 60_000
+    second = URL + "1"
+    rig.task.update(state="pr", pr_url=second, split_pulls=[URL, second])
+    rig.pulls[second] = PENDING
+    assert rig.stop().allowed
+    assert len(rig.ledger.updates) == 1
+
+
+def test_the_half_reset_writes_only_a_task_still_in_pr(rig):
+    rig.task.update(state="claimed", pr_url=URL, split=["1-10", "11-20"], split_pulls=[URL])
+    rig.pulls[URL] = MERGED
+    assert "you hold task t1 with no open pull request and no wait" in rig.stop().reason
+    assert (rig.ledger.updates, rig.task["pr_url"]) == ([], URL)
+
+
+def test_the_second_half_stops_on_its_own_pull_request_and_its_merge_owes_done(rig):
+    second = URL + "1"
+    rig.task.update(state="pr", pr_url=second, split=["1-10", "11-20"], split_pulls=[URL, second])
+    rig.pulls[URL], rig.pulls[second] = MERGED, PENDING
+    assert rig.stop().allowed
+    rig.pulls[second] = MERGED
+    decision = rig.stop()
+    assert not decision.allowed and f"{second} merged: close the task now" in decision.reason
+    assert rig.ledger.updates == []
 
 
 def test_a_tune_task_with_a_merged_fix_stops_on_its_measurement_wait_until_the_wait_ends(rig):
