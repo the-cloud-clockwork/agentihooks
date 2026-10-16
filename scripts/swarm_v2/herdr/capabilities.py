@@ -165,9 +165,9 @@ class Qualifier:
     """The incarnation is the execution attempt id. herdr reports no server process id, so the server status document
     the gate reads itself tells a server restarted under one attempt."""
 
-    def __init__(self, probe: Callable[[str], Observation], status: Callable[[str], dict] | None = None) -> None:
+    def __init__(self, probe: Callable[[str], Observation], status: Callable[[str], dict]) -> None:
         self.probe = probe
-        self.status = status or (lambda target: probe(target).server)
+        self.status = status
         self.verdicts: dict[str, Verdict] = {}
         self.retired: dict[str, set[str]] = {}
         self.mismatches: Counter = Counter()

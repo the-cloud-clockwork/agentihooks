@@ -22,6 +22,11 @@ def observed(server: dict | None = None, client: dict | None = None, methods=Non
     )
 
 
+def gate_of(probe, server: dict | None = None) -> Qualifier:
+    current = cases.fixture()["server"] if server is None else server
+    return Qualifier(probe, lambda target: current)
+
+
 def test_the_pinned_pair_qualifies_every_one_window_operation():
     verdict = capabilities.qualify("t", "i", observed())
     assert (verdict.target, verdict.incarnation) == ("t", "i")
@@ -113,14 +118,14 @@ def test_a_stalled_or_missing_herdr_is_unreachable(failure):
 
 def test_a_server_without_a_method_disables_only_that_operation():
     methods = set(cases.fixture()["methods"]) - {"pane.send_input"}
-    gate = Qualifier(lambda target: observed(methods=methods))
+    gate = gate_of(lambda target: observed(methods=methods))
     with pytest.raises(Incompatible, match=r"^pane_run unsupported: server lacks pane\.send_input$"):
         gate.require("t", "i", "pane_run")
     assert gate.require("t", "i", "pane_read") == ["herdr", "--machine", "t", "pane", "read"]
 
 
 def test_require_builds_a_machine_command_for_each_operation():
-    gate = Qualifier(lambda target: observed())
+    gate = gate_of(lambda target: observed())
     for name, (cli, _) in capabilities.OPERATIONS.items():
         assert gate.require("worker", "i", name) == ["herdr", "--machine", "worker", *cli]
 
@@ -128,14 +133,14 @@ def test_require_builds_a_machine_command_for_each_operation():
 @pytest.mark.parametrize(("target", "incarnation"), [("", "i"), ("t", ""), ("--session", "i")])
 def test_an_unnamed_target_or_incarnation_is_refused_before_any_probe(target, incarnation):
     probes: list[str] = []
-    gate = Qualifier(lambda name: probes.append(name) or observed())
+    gate = gate_of(lambda name: probes.append(name) or observed())
     with pytest.raises(Incompatible, match="needs a target and a confirmed server incarnation"):
         gate.require(target, incarnation, "pane_read")
     assert probes == []
 
 
 def test_an_unknown_operation_is_refused_and_counted():
-    gate = Qualifier(lambda target: observed())
+    gate = gate_of(lambda target: observed())
     with pytest.raises(Incompatible, match=r"^attach_tui unsupported: unknown operation$"):
         gate.require("t", "i", "attach_tui")
     assert gate.mismatches == {("t", "attach_tui unsupported: unknown operation"): 1}
@@ -144,7 +149,7 @@ def test_an_unknown_operation_is_refused_and_counted():
 def test_a_refusal_counts_each_reason_per_target():
     server = copy.deepcopy(cases.fixture()["missing_forwarding_server"])
     server["capabilities"]["health_check"] = False
-    gate = Qualifier(lambda target: observed(server))
+    gate = gate_of(lambda target: observed(server), server)
     for _ in range(2):
         with pytest.raises(Incompatible) as refused:
             gate.require("t", "i", "update")
@@ -158,17 +163,17 @@ def test_a_refusal_counts_each_reason_per_target():
 
 def test_the_same_incarnation_reuses_its_verdict_and_a_new_one_rechecks():
     probes: list[str] = []
-    gate = Qualifier(lambda target: probes.append(target) or observed())
+    gate = gate_of(lambda target: probes.append(target) or observed())
     first = gate.verdict("t", "one")
     assert gate.verdict("t", "one") is first
     second = gate.verdict("t", "two")
     assert second is not first
     assert (second.target, second.incarnation) == ("t", "two")
-    assert probes == ["t", "t", "t"]
+    assert probes == ["t", "t"]
 
 
 def test_a_replaced_incarnation_cannot_return():
-    gate = Qualifier(lambda target: observed())
+    gate = gate_of(lambda target: observed())
     gate.verdict("t", "one")
     gate.verdict("t", "two")
     with pytest.raises(Incompatible, match="^herdr server incarnation one on t was replaced$"):
@@ -179,7 +184,7 @@ def test_a_replaced_incarnation_cannot_return():
 
 def test_targets_keep_separate_verdicts():
     servers = {"good": cases.fixture()["server"], "bad": cases.fixture()["missing_forwarding_server"]}
-    gate = Qualifier(lambda target: observed(servers[target]))
+    gate = Qualifier(lambda target: observed(servers[target]), servers.get)
     assert gate.require("good", "i", "pane_read")[:3] == ["herdr", "--machine", "good"]
     with pytest.raises(Incompatible):
         gate.require("bad", "i", "pane_read")
@@ -226,15 +231,6 @@ def test_an_unreachable_server_never_returns_the_cached_verdict():
     assert gate.verdicts["t"].incarnation == "one"
 
 
-def test_the_default_status_reads_the_probed_server():
-    probes: list[str] = []
-    gate = Qualifier(lambda target: probes.append(target) or observed())
-    first = gate.verdict("t", "one")
-    assert gate.verdict("t", "one") is first
-    assert first.server == cases.fixture()["server"]
-    assert probes == ["t", "t"]
-
-
 def test_the_machine_probe_reads_forwarded_server_status_and_local_schema():
     runner = cases.Runner(cases.fixture()["server"])
     found = capabilities.machine_probe(runner)(cases.TARGET)
@@ -259,7 +255,7 @@ def test_the_local_schema_is_not_trusted_for_another_server_build(field):
 def test_an_unreachable_machine_raises_and_caches_nothing():
     runner = cases.Runner(cases.fixture()["server"])
     runner.server = None
-    gate = Qualifier(capabilities.machine_probe(runner))
+    gate = _machine_gate(runner)
     with pytest.raises(Unreachable, match=r"^herdr --machine worker-fixture status: exit 2$"):
         gate.require(cases.TARGET, "i", "pane_read")
     assert gate.verdicts == {}
