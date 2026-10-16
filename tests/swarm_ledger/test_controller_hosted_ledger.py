@@ -45,10 +45,7 @@ def _hl():
 
 @pytest.fixture
 def store():
-    made = _store()
-    stamp = made.redis.time()
-    made.redis.time = lambda: stamp
-    return made
+    return _store()
 
 
 @pytest.fixture
@@ -58,44 +55,7 @@ def hosted(store, ledger_dir):
     thread = threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
     credential = hive_auth.issue_controller(store.redis)
     remote = {"AGENTIHOOKS_DEPLOYMENT": "distributed", "LEDGER_URL": f"http://{host}", _cs().CREDENTIAL_ENV: credential}
-    from scripts.swarm_ledger.api import worker_writes
-
-    holder = worker_writes.TaskAuthority._holder
-    check = worker_writes.check
-
-    def trace_holder(authority, scope, generation, claim):
-        import sys
-
-        from scripts.swarm import lease
-        from scripts.swarm.store import SwarmError
-
-        try:
-            return holder(authority, scope, generation, claim)
-        except SwarmError:
-            print(
-                f"[DEBUG-hosted-holder] scope={(scope.execution_id, scope.generation, generation)} claim={claim} now={lease.now_ms(authority.store)}",
-                file=sys.stderr,
-            )
-            raise
-
-    def trace_check(slug, doc, operation):
-        import sys
-
-        from scripts.swarm_ledger.api.errors import APIError
-
-        try:
-            return check(slug, doc, operation)
-        except APIError:
-            claim = store.redis.get(store.key(slug, "task-authority", "t1"))
-            print(
-                f"[DEBUG-hosted-check] by={operation.get('by')} pin={operation.get('worker_claim')} claim={claim}",
-                file=sys.stderr,
-            )
-            raise
-
     with (
-        patch.object(worker_writes.TaskAuthority, "_holder", trace_holder),
-        patch.object(worker_writes, "check", trace_check),
         patch("scripts.swarm.store.redis_client", return_value=store.redis),
         patch("hooks._redis.get_redis", return_value=None),
         patch("scripts.gates.talk.Budget._marks", return_value=None),

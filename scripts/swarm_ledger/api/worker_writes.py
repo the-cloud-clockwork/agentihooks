@@ -1,8 +1,5 @@
 from types import SimpleNamespace
 
-from scripts.swarm.store import SwarmError, connect
-from scripts.swarm_v2.authority import TaskAuthority
-
 from .errors import APIError
 from .schemas import target
 
@@ -10,7 +7,9 @@ from .schemas import target
 def check(slug: str, doc: dict, op: dict) -> None:
     if "worker_claim" not in op:
         return
+    from scripts.swarm.store import SwarmError, connect
     from scripts.swarm_v2.api.tasks import spec_revision
+    from scripts.swarm_v2.authority import TaskAuthority
 
     pin = op["worker_claim"]
     store = connect()
