@@ -342,8 +342,7 @@ def dev_moved(head=AUTHORED, changed=(), conclusion="success", jobs=None, log=""
             ]
         elif path == "graphql":
             reply = checked_resource(conclusion.upper() if conclusion else None)
-        elif "/workflows/test.yml/runs" in path:
-            reply = {"workflow_runs": [{"id": 21, "head_sha": "abc", "conclusion": conclusion}]}
+
         elif path.endswith("/logs"):
             return subprocess.CompletedProcess(command, 0, log)
         elif path.endswith("/jobs?per_page=100"):
