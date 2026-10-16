@@ -59,10 +59,16 @@ fi
     builds = [call for call in calls if call.startswith("build ") or " --build " in f" {call} "]
     assert bool(builds) is not shared
     if shared:
-        assert not any("agentihooks-swarm" in call and (call.startswith("manifest ") or " pull " in f" {call} ") for call in calls)
+        assert not any(
+            "agentihooks-swarm" in call and (call.startswith("manifest ") or " pull " in f" {call} ") for call in calls
+        )
         if script == "hive-join-smoke":
             assert not any(call.startswith("image rm ") and IMAGE in call for call in calls)
         else:
-            alias = "local/agentihooks-hive-proof" if script == "hive-launch-smoke" else "ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev"
+            alias = (
+                "local/agentihooks-hive-proof"
+                if script == "hive-launch-smoke"
+                else "ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev"
+            )
             assert f"tag {IMAGE} {alias}" in calls
             assert any(" --no-build " in f" {call} " for call in calls)
