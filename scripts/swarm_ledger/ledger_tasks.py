@@ -536,7 +536,12 @@ def _update(doc, op, ctx):
     task.update(changed)
     if "state" in changed:
         task["done"] = changed["state"] == "done"
-        ctx.record(op["by"], f"task {changed['state']}", op["item"])
+        extra = {"pr_url": task.get("pr_url", ""), "branch": task.get("branch", "")} if changed["state"] == "pr" else {}
+        ctx.record(op["by"], f"task {changed['state']}", op["item"], **extra)
+    elif "pr_url" in changed and task.get("state") == "pr":
+        ctx.record(op["by"], "task pr", op["item"], pr_url=task["pr_url"], branch=task.get("branch", ""))
+    if "parked_on" in changed:
+        ctx.record(op["by"], "task parked" if changed["parked_on"] else "task unparked", op["item"])
     for key in changed:
         ctx.stamp(f"{op['item']}/{key}", op["by"])
     ctx.dirty = ctx.dirty or bool(changed)
