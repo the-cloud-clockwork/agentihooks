@@ -271,6 +271,31 @@ def test_park_accepts_an_open_dependency_merged_into_dev_after_its_branch_is_del
     assert ["git", "fetch", "origin", "eng-a"] not in shell.calls
 
 
+@pytest.mark.parametrize(
+    "pull",
+    [
+        {"state": "OPEN", "baseRefName": "dev"},
+        {"state": "CLOSED", "baseRefName": "dev"},
+        {"state": "MERGED", "baseRefName": "main"},
+    ],
+)
+def test_park_keeps_the_dependency_branch_until_its_pull_request_merges_into_dev(parked, monkeypatch, pull):
+    _, ledger, _, shell, doc = parked
+    ledger.rows["a"]["pr_url"] = "https://github.com/o/r/pull/42"
+
+    def dependency_pull(argv):
+        result = shell(argv)
+        if argv[:3] == ["gh", "pr", "view"]:
+            return subprocess.CompletedProcess(argv, 0, json.dumps(pull), "")
+        return result
+
+    monkeypatch.setattr(stack, "shell", dependency_pull)
+    assert park(doc) == 0
+    assert ["git", "fetch", "origin", "eng-a"] in shell.calls
+    assert ["git", "merge-base", "HEAD", "origin/eng-a"] in shell.calls
+    assert ["git", "fetch", "origin", "dev"] not in shell.calls
+
+
 @pytest.mark.parametrize("merged_before_stop", [False, True])
 def test_a_stop_after_park_passes_the_claim_stop_gate(parked, tmp_path, merged_before_stop):
     store, ledger, _, _, doc = parked
