@@ -995,8 +995,7 @@ class IntentGate:
             done = self.run(_pull_view(words), capture_output=True, text=True, timeout=GH_TIMEOUT_SEC, cwd=cwd or None)
         except (OSError, subprocess.SubprocessError):
             return None
-        url = done.stdout.strip() if done.returncode == 0 else ""
-        return [*words, url] if PULL.search(url) else None
+        return [*words, done.stdout.strip()] if done.returncode == 0 and PULL.search(done.stdout) else None
 
     def _decide_record(self, call, who, state, mode, record, bound=False):
         if not bound and _other_half(call.command, record):
