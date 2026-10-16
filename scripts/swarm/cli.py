@@ -1292,12 +1292,23 @@ def _split_binding(row, url, half):
     return {"split_pulls": [*pulls, url]}
 
 
+def _queue_intent(store, args, agent, head):
+    state = intent.Verdicts(args.slug, intent.NAME)
+    who = Who(name=agent.name, swarm=args.slug, lane=agent.lane, task=agent.task)
+    decision = intent.queue_decision(who, state, args.url, intent.mode_of(store.config(args.slug)), head)
+    if not decision.allowed:
+        raise SwarmError(decision.reason)
+
+
 def cmd_merge(store, args):
     agent = _worker(store, args) if args.action != "state" else None
     if agent is not None:
         done_gate.require_local(store, args.slug, agent.task)
         done_gate.require_target(store, args.slug, agent.task, args.url, LedgerClient().tasks(args.slug))
-    result = merge_queue.operate(args.action, args.url)
+    if args.action == "queue":
+        result = merge_queue.operate(args.action, args.url, admit=lambda head: _queue_intent(store, args, agent, head))
+    else:
+        result = merge_queue.operate(args.action, args.url)
     print(json.dumps(result))
 
 

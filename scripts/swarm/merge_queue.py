@@ -62,13 +62,15 @@ def require_green(url: str, head: str, run) -> None:
         raise SwarmError("the current pull request head must pass Tests before queueing")
 
 
-def operate(action: str, url: str, run=subprocess.run) -> dict:
+def operate(action: str, url: str, run=subprocess.run, admit=None) -> dict:
     raw = graphql(STATE, {"url": url}, run)["resource"]
     if not raw:
         raise SwarmError("GitHub URL does not identify a pull request")
     if action != "state" and raw["baseRefName"] != "dev":
         raise SwarmError("swarm merge queue operations require a pull request into dev")
     if action == "queue" and raw["mergeQueueEntry"] is None:
+        if admit is not None:
+            admit(raw["headRefOid"])
         if raw["repository"]["mergeQueue"] is None:
             if (
                 raw["isDraft"]

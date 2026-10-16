@@ -368,7 +368,7 @@ def test_cli_routes_each_operation_and_prints_its_state(monkeypatch, capsys, act
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     seen = []
 
-    def operate(verb, url):
+    def operate(verb, url, **kwargs):
         seen.append((verb, url))
         return {"queued": True}
 
@@ -388,7 +388,7 @@ def test_cli_accepts_the_earlier_pull_the_task_lists(monkeypatch, action):
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(tasks=lambda slug: [task]))
     seen = []
-    monkeypatch.setattr(merge_queue, "operate", lambda verb, url: seen.append((verb, url)) or {})
+    monkeypatch.setattr(merge_queue, "operate", lambda verb, url, **kwargs: seen.append((verb, url)) or {})
     assert cli.main(["sw", "merge", action, first]) == 0
     assert seen == [(action, first)]
 
@@ -401,7 +401,7 @@ def test_cli_refuses_an_unlisted_pull_before_a_queue_call(monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(tasks=lambda slug: [task]))
     seen = []
-    monkeypatch.setattr(merge_queue, "operate", lambda verb, url: seen.append((verb, url)) or {})
+    monkeypatch.setattr(merge_queue, "operate", lambda verb, url, **kwargs: seen.append((verb, url)) or {})
     assert cli.main(["sw", "merge", "queue", "https://github.com/o/r/pull/99"]) == 1
     assert seen == []
 
@@ -443,7 +443,7 @@ def test_cli_refuses_another_distributed_tasks_pull_request(monkeypatch, same_li
 def test_cli_refuses_the_master_a_queue_change(monkeypatch, capsys, action):
     monkeypatch.setattr(cli, "connect", lambda: swarm_of("master"))
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
-    monkeypatch.setattr(merge_queue, "operate", lambda verb, url: pytest.fail("the master changed the queue"))
+    monkeypatch.setattr(merge_queue, "operate", lambda verb, url, **kwargs: pytest.fail("the master changed the queue"))
 
     assert cli.main(["sw", "merge", action, URL]) == 1
     assert capsys.readouterr().err == "swarm: engineer@a1b2c3-0001 is the swarm master; the master works no task\n"
@@ -451,7 +451,7 @@ def test_cli_refuses_the_master_a_queue_change(monkeypatch, capsys, action):
 
 def test_cli_lets_the_master_read_queue_state(monkeypatch, capsys):
     monkeypatch.setattr(cli, "connect", lambda: swarm_of("master"))
-    monkeypatch.setattr(merge_queue, "operate", lambda verb, url: {"queued": False})
+    monkeypatch.setattr(merge_queue, "operate", lambda verb, url, **kwargs: {"queued": False})
 
     assert cli.main(["sw", "merge", "state", URL]) == 0
     assert capsys.readouterr().out == '{"queued": false}\n'
@@ -460,7 +460,9 @@ def test_cli_lets_the_master_read_queue_state(monkeypatch, capsys):
 def test_cli_queue_declares_no_checks_wait(monkeypatch, capsys):
     monkeypatch.setattr(cli, "connect", lambda: swarm_of("eng"))
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
-    monkeypatch.setattr(merge_queue, "operate", lambda action, url: {"url": url, "queued": True, "entry": ENTRY})
+    monkeypatch.setattr(
+        merge_queue, "operate", lambda action, url, **kwargs: {"url": url, "queued": True, "entry": ENTRY}
+    )
     seen = []
     monkeypatch.setattr(cli.idle, "declare_wait", lambda *args, **kwargs: seen.append((args, kwargs)))
     assert cli.main(["sw", "merge", "queue", URL]) == 0
@@ -492,7 +494,13 @@ def test_cli_queue_applies_the_judged_intent_mode(monkeypatch, tmp_path, capsys,
     monkeypatch.setattr(intent, "pr_merged", lambda url: False)
     queued, events = [], []
     monkeypatch.setattr(intent.log, "append", lambda slug, row, home=None: events.append(row))
-    monkeypatch.setattr(merge_queue, "operate", lambda action, url: queued.append(url) or {"queued": True})
+
+    def operate(action, url, admit):
+        admit("abc")
+        queued.append(url)
+        return {"queued": True}
+
+    monkeypatch.setattr(merge_queue, "operate", operate)
     assert cli.main(["sw", "merge", "queue", URL]) == code
     output = capsys.readouterr()
     assert ("missing required behavior" in output.err) is warned
@@ -575,7 +583,7 @@ def test_api_failures_remain_cli_failures(monkeypatch, capsys, code, stderr, std
         return subprocess.CompletedProcess(command, code, stdout, stderr)
 
     original = merge_queue.operate
-    monkeypatch.setattr(merge_queue, "operate", lambda action, url: original(action, url, run))
+    monkeypatch.setattr(merge_queue, "operate", lambda action, url, **kwargs: original(action, url, run))
     assert cli.main(["sw", "merge", "state", URL]) == 1
     assert capsys.readouterr().err == f"swarm: {message}\n"
 

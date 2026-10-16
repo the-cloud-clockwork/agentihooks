@@ -6,6 +6,7 @@ import json
 import re
 import shlex
 import subprocess
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
@@ -887,6 +888,45 @@ def _same_pull(target, url):
     return bool(bound) and (named.groups() if named else target) == (bound.groups() if named else bound[3])
 
 
+def _queue_target(command):
+    for words in simple_commands(command):
+        index = program_index(words)
+        if index is not None and PurePosixPath(words[index]).name == "agentihooks":
+            rest = words[index + 1 :]
+            if rest[:1] == ["swarm"] and rest[2:4] == MERGE_QUEUE:
+                return _merge_target(words)
+    return None
+
+
+def queue_decision(who: Who, state: Verdicts, url: str, mode: str, head: str | None = None) -> Decision:
+    if mode == "off":
+        return Decision()
+    record = state.read(who.task)
+    pulls = Verdicts(state.slug, f"{NAME}-pulls", state.home)
+    bound = pulls.read(who.task)
+    if bound:
+        urls = [pull for pull in bound["pulls"] if _same_pull(url, pull)]
+        if len(urls) != 1:
+            return Decision.deny("Intent requires a pull request registered on this task.")
+        url = urls[0]
+        record = pulls.read(_pull_subject(who.task, url))
+        if record and record.get("inputs") != bound["inputs"].get(url):
+            record = None
+    if not record or record["verdict"] != FAIL:
+        return Decision()
+    judged_url = record.get("url", "")
+    if not judged_url or not _same_pull(url, judged_url) or not record.get("head"):
+        return Decision()
+    if (head if head is not None else pr_head(judged_url)) != record["head"]:
+        return Decision()
+    text = f"intent check failed for task {who.task}: {record['reason']}. {fix_steps(who.swarm)}"
+    kind = {"enforce": "deny", "coach": "coach", "observe": "observe"}[mode]
+    log.append(state.slug, log.Row.of(NAME, kind, who, "Bash", text), state.home)
+    if mode == "coach":
+        print(text, file=sys.stderr)
+    return Decision(allowed=mode != "enforce", reason=text if mode != "observe" else "")
+
+
 def _other_half(command, record):
     judged = record and record.get("split") and PULL.search(record["url"])
     if not judged:
@@ -926,6 +966,12 @@ class IntentGate:
             return self._decide_record(call, who, state, mode, record)
         for words in commands:
             single = replace(call, tool_input={**call.tool_input, "command": shlex.join(words)})
+            queued = _queue_target(single.command)
+            if queued:
+                decision = queue_decision(who, state, queued, mode)
+                if not decision.allowed:
+                    return decision
+                continue
             target = _merge_target(words)
             saved = record
             if target:
@@ -948,6 +994,9 @@ class IntentGate:
         return Decision()
 
     def _decide_record(self, call, who, state, mode, record, bound=False):
+        queued = _queue_target(call.command)
+        if queued:
+            return queue_decision(who, state, queued, mode)
         if not bound and _other_half(call.command, record):
             return Decision.deny(
                 f"intent for task {who.task} was judged on {record['url']}, not this pull request. Record this half "
