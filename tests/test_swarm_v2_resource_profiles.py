@@ -342,6 +342,17 @@ def test_accept_requires_the_recorded_run_digest_and_reproducible_evidence(tmp_p
     assert not path.with_name("accepted.json.previous").exists()
 
 
+def test_accept_preserves_provenance_across_json_key_order(tmp_path):
+    source = measured(memory_runs())
+    candidate = profiles.derive(source, NODES, POLICY)
+    reordered_source = json.loads(json.dumps(source, sort_keys=True))
+    assert profiles.derive(reordered_source, NODES, POLICY)["runs_digest"] == candidate["runs_digest"]
+    candidate = json.loads(json.dumps(candidate, sort_keys=True))
+    outcome = profiles.accept(tmp_path / "accepted.json", candidate, POLICY, "")
+    assert outcome["decision"] == "promoted"
+    assert outcome["accepted"] == candidate
+
+
 def test_derived_evidence_is_detached_and_digest_changes_with_runs():
     source = measured(memory_runs())
     report = profiles.derive(source, NODES, POLICY)

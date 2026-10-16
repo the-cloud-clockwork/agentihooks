@@ -265,7 +265,8 @@ def test_run_measures_each_child_count_and_repeat_in_a_fresh_workdir(tmp_path, m
     bench.run(path, root, generation=8, tools={}, source="s2")
 
 
-def test_changed_workload_argument_holds_promotion_without_a_version_bump(tmp_path, monkeypatch):
+@pytest.mark.parametrize("argument", ["literal", "children"])
+def test_changed_workload_argument_holds_promotion_without_a_version_bump(tmp_path, monkeypatch, argument):
     fixed_host(monkeypatch)
     workload = {
         "name": "memory",
@@ -278,7 +279,10 @@ def test_changed_workload_argument_holds_promotion_without_a_version_bump(tmp_pa
     monkeypatch.setattr(bench.sampling, "measure", lambda *args: {})
     first = bench.run(path, tmp_path / "work", 1, {}, "first")
     same = bench.run(path, tmp_path / "work", 2, {}, "same")
-    workload["command"][-1] = "32"
+    if argument == "literal":
+        workload["command"][-1] = "32"
+    else:
+        workload["children"] = [2]
     suite(tmp_path, [workload])
     changed = bench.run(path, tmp_path / "work", 2, {}, "changed")
     assert first["tools"] == same["tools"]
