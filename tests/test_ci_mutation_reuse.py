@@ -31,6 +31,14 @@ def _archive(report):
     return data.getvalue()
 
 
+@pytest.fixture(autouse=True)
+def _no_unasked_wait(monkeypatch):
+    def sleep(seconds):
+        raise AssertionError(f"unexpected wait of {seconds} seconds")
+
+    monkeypatch.setattr(reuse.time, "sleep", sleep)
+
+
 @pytest.fixture
 def repo(tmp_path, monkeypatch):
     def git(*args):
