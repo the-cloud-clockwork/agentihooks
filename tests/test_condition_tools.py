@@ -570,6 +570,12 @@ class TestCreate:
         result = _create(step="stop", matcher=matcher, name="idle")
         assert (result["file"], result["step"], result["matcher"]) == ("stop-idle.sh", "stop", "any")
 
+    @pytest.mark.parametrize("matcher", ["", "any"])
+    def test_a_start_condition_takes_no_matcher(self, bundle, matcher):
+        conditions.arm_gate(SID)
+        result = _create(step="start", matcher=matcher, name="greet")
+        assert (result["file"], result["step"], result["matcher"]) == ("start-greet.sh", "start", "any")
+
 
 class TestLayers:
     def test_directory_overrides_runtime_overrides_profile_overrides_bundle(self, bundle, tmp_path):
