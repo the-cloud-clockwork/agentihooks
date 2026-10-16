@@ -17,7 +17,9 @@ def test_main_image_is_built_once_before_every_compatible_smoke():
     assert builds == [f"docker build -t {IMAGE} ."]
     build = commands.index(builds[0])
     for script in ("hive-launch-smoke", "swarm-smoke", "hive-join-smoke", "compose-hive-smoke"):
-        assert build < commands.index(f"bash scripts/packaging/{script}.sh")
+        assert build < next(
+            i for i, command in enumerate(commands) if f"scripts/packaging/{script}.sh" in command.split()
+        )
 
 
 @pytest.mark.parametrize("script", ["hive-launch-smoke", "swarm-smoke", "hive-join-smoke", "compose-hive-smoke"])
