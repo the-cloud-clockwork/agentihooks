@@ -17,7 +17,7 @@ REDS = [
     {**GREEN, "files": [{"path": "hooks/a.py", "failures": []}, {"path": "hooks/b.py", "failures": [{"name": "m"}]}]},
 ]
 RUNS = "actions/workflows/mutation-preflight.yml/runs?event=push&status=completed&per_page=30&"
-PENDING = "actions/workflows/mutation-preflight.yml/runs?event=push&per_page=30&"
+ALL_RUNS = "actions/workflows/mutation-preflight.yml/runs?event=push&per_page=30&"
 SOURCE = {"hooks/a.py": "def f():\n    return 1\n", "tests/test_a.py": "def test_one():\n    pass\n"}
 ADDED = {"tests/test_a.py": "def test_one():\n    pass\n\n\ndef test_two():\n    pass\n"}
 
@@ -55,7 +55,7 @@ def repo(tmp_path, monkeypatch):
 def _github(monkeypatch, head, branch_runs, head_runs, reports, branch="branch", live=()):
     calls = []
     answers = {
-        f"{PENDING}head_sha={head}": {"workflow_runs": [*live, *head_runs]},
+        f"{ALL_RUNS}head_sha={head}": {"workflow_runs": [*live, *head_runs]},
         f"{RUNS}head_sha={head}": {"workflow_runs": head_runs},
         f"{RUNS}branch={branch}": {"workflow_runs": branch_runs},
     }
@@ -259,7 +259,7 @@ def test_the_lookup_reads_completed_push_runs_by_head_then_by_branch(repo, monke
     head = commit(SOURCE)
     calls = _github(monkeypatch, head, [], [], {})
     _main(monkeypatch, root)
-    assert calls == [f"{PENDING}head_sha={head}", f"{RUNS}head_sha={head}", f"{RUNS}branch=branch"]
+    assert calls == [f"{ALL_RUNS}head_sha={head}", f"{RUNS}head_sha={head}", f"{RUNS}branch=branch"]
 
 
 def test_the_newest_unexpired_report_artifact_is_read(monkeypatch):
@@ -355,7 +355,7 @@ def test_an_earlier_in_flight_run_of_the_same_head_is_awaited_then_reused(repo, 
     def finish():
         answers.update(
             {
-                f"{PENDING}head_sha={head}": {"workflow_runs": [_run(7, head, branch="other")]},
+                f"{ALL_RUNS}head_sha={head}": {"workflow_runs": [_run(7, head, branch="other")]},
                 f"{RUNS}head_sha={head}": {"workflow_runs": [_run(7, head, branch="other")]},
             }
         )
@@ -366,17 +366,27 @@ def test_an_earlier_in_flight_run_of_the_same_head_is_awaited_then_reused(repo, 
     assert _main(monkeypatch, root) == "reused=true\n"
     assert slept == [reuse.POLL]
     assert json.loads((root / ".mutation-gate/reuse.json").read_text())["run"] == 7
-    assert calls[0] == f"{PENDING}head_sha={head}"
+    assert calls[0] == f"{ALL_RUNS}head_sha={head}"
 
 
 @pytest.mark.parametrize("status", ["queued", "in_progress", "waiting", "pending", "requested"])
-def test_every_unfinished_status_of_an_earlier_run_is_awaited(repo, monkeypatch, status):
+def test_every_unfinished_status_of_an_earlier_run_is_awaited(repo, monkeypatch, capsys, status):
     root, commit, _ = repo
     head = commit(SOURCE)
     _github(monkeypatch, head, [], [], {}, live=[_run(7, head, None, branch="other", status=status)])
     slept = _clock(monkeypatch)
     assert _main(monkeypatch, root) == "reused=false\n"
     assert slept == [reuse.POLL] * (reuse.WAIT // reuse.POLL)
+    assert f"Stopped waiting after {reuse.WAIT} seconds\n" in capsys.readouterr().out
+
+
+def test_an_earlier_completed_run_is_never_awaited(repo, monkeypatch):
+    root, commit, _ = repo
+    head = commit(SOURCE)
+    _github(monkeypatch, head, [], [], {}, live=[_run(7, head, "cancelled", branch="other")])
+    slept = _clock(monkeypatch)
+    assert _main(monkeypatch, root) == "reused=false\n"
+    assert slept == []
 
 
 def test_a_later_or_the_current_in_flight_run_is_never_awaited(repo, monkeypatch):
@@ -399,7 +409,7 @@ def test_an_earlier_run_that_ends_without_a_green_report_leaves_this_run_to_muta
     lookup = reuse.api
     monkeypatch.setattr(reuse, "api", lambda path, binary=False: answers.get(path) or lookup(path, binary))
     cancelled = {"workflow_runs": [_run(7, head, "cancelled", branch="other")]}
-    slept = _clock(monkeypatch, lambda: answers.update({f"{PENDING}head_sha={head}": cancelled}))
+    slept = _clock(monkeypatch, lambda: answers.update({f"{ALL_RUNS}head_sha={head}": cancelled}))
     assert _main(monkeypatch, root) == "reused=false\n"
     assert slept == [reuse.POLL]
     assert capsys.readouterr().out == (

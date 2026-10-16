@@ -71,7 +71,10 @@ def settle(head: str, current: int) -> None:
     if in_flight(head, current):
         print(f"Waiting for an earlier preflight of {head}")
         time.sleep(POLL)
-        while time.monotonic() < deadline and in_flight(head, current):
+        while in_flight(head, current):
+            if time.monotonic() >= deadline:
+                print(f"Stopped waiting after {WAIT} seconds")
+                return
             time.sleep(POLL)
 
 
