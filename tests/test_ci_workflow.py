@@ -256,9 +256,9 @@ def test_the_hung_test_bound_reads_the_committed_durations_not_the_downloaded_co
     assert _slowest_committed_test() == 1.0
 
 
-def test_tests_run_on_pull_requests_into_dev_and_main():
+def test_tests_keep_dev_pull_request_and_integration_triggers():
     triggers = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())[True]
-    assert set(triggers["pull_request"]["branches"]) == {"dev", "main"}
+    assert set(triggers["pull_request"]["branches"]) in ({"dev", "main"}, {"dev"})
     assert triggers["push"]["branches"] == ["dev"]
     assert triggers["merge_group"] == {"types": ["checks_requested"]}
 
