@@ -111,7 +111,7 @@ def open_triggers(slug: str, config, store, doc: dict, now_ms: int, sleeping: bo
     held = [
         trigger
         for trigger in uncovered(store, slug, now_ms)
-        if not stage_cover.covered(store, slug, doc, trigger["id"].removeprefix(BOTTLENECK))
+        if not stage_cover.covered(store, slug, doc, trigger["id"].removeprefix(BOTTLENECK), share=True)
     ]
     return triggers(doc, now_ms) + held + red_dev(store, slug, doc)
 

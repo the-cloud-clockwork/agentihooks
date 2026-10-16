@@ -1,8 +1,10 @@
 """A bottleneck stage covered by an open phase or task proposes no task and holds no dispatcher seat open.
 
-A cover on a share covers every stage inside it and a cover on a stage covers its share. It lapses, and is
-forgotten, the first time `covered` reads it after that phase or task is done or out of scope; an item missing from
-the read keeps its cover, so a partial ledger read never erases one. A new cover on a stage replaces the old one.
+A cover on a share covers every stage inside it; a cover on a stage also frees its share's dispatcher seat but never
+silences a sibling stage's remedy. It lapses, and is
+forgotten, the first time `covered` reads it after that phase or task is done, out of scope or gone from a ledger
+that still lists others of its kind; a read with none of its kind keeps the cover, so an empty read never erases one.
+A new cover on a stage replaces the old one.
 """
 
 import json
@@ -43,9 +45,9 @@ def _closed(row: dict, item: str) -> bool:
     return done or bool(row.get("out_of_scope"))
 
 
-def _related(name: str) -> list[str]:
-    shares = [share for share, members in SHARE_STAGES.items() if name in members]
-    return sorted({name, *SHARE_STAGES.get(name, ()), *shares})
+def _related(name: str, share: bool) -> list[str]:
+    shares = [found for found, members in SHARE_STAGES.items() if name in members]
+    return sorted({name, *(SHARE_STAGES.get(name, ()) if share else ()), *shares})
 
 
 def _named(store: RedisStore, slug: str) -> set[str]:
@@ -57,7 +59,8 @@ def _named(store: RedisStore, slug: str) -> set[str]:
 
 
 def cover(store: RedisStore, slug: str, doc: dict, request: Request, now_ms: int) -> dict:
-    stage, named = request.stage.strip().lower().replace(" ", "_").replace("-", "_"), _named(store, slug)
+    named, spoken = _named(store, slug), request.stage.strip()
+    stage = spoken if spoken in named else spoken.lower().replace(" ", "_").replace("-", "_")
     if stage not in named:
         raise SwarmError(UNKNOWN.format(stage=request.stage, names=", ".join(sorted(named))))
     if not request.reason.strip():
@@ -70,16 +73,25 @@ def cover(store: RedisStore, slug: str, doc: dict, request: Request, now_ms: int
     return found
 
 
-def covered(store: RedisStore, slug: str, doc: dict, name: str) -> bool:
-    key, names = store.key(slug, KEY), _related(name)
+def covered(store: RedisStore, slug: str, doc: dict, name: str, share: bool = False) -> bool:
+    key, names = store.key(slug, KEY), _related(name, share)
     held = False
     for stage, raw in zip(names, store.redis.hmget(key, names), strict=True):
         if raw is None:
             continue
         item = json.loads(raw)["item"]
         row = _row(doc, item)
-        if row is not None and _closed(row, item):
-            store.redis.hdel(key, stage)
+        if (row is None and doc.get(item.partition("/")[0])) or (row is not None and _closed(row, item)):
+            _lapse(store.redis, key, stage, raw)
         else:
             held = True
     return held
+
+
+def _lapse(redis, key: str, stage: str, raw: str) -> None:
+    def apply(pipe):
+        if pipe.hget(key, stage) == raw:
+            pipe.multi()
+            pipe.hdel(key, stage)
+
+    redis.transaction(apply, key)

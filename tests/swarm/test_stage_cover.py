@@ -121,28 +121,63 @@ def test_the_cover_lapses_once_its_phase_is_done():
     assert stored(store) == {}
 
 
-def test_a_ledger_read_missing_the_item_keeps_the_cover():
+def test_a_ledger_read_with_no_tasks_keeps_the_cover():
     store = swarm()
     put(store, "ci_overrun")
     assert stage_cover.covered(store, SLUG, {"tasks": [], "phases": []}, "ci_overrun")
     assert list(stored(store)) == ["ci_overrun"]
 
 
+def test_the_cover_lapses_once_its_task_is_gone_from_a_ledger_listing_others():
+    store = swarm()
+    put(store, "ci_overrun")
+    others = {"tasks": [{"id": "t8", "state": "open"}], "phases": []}
+    assert stage_cover.covered(store, SLUG, others, "ci_overrun") is False
+    assert stored(store) == {}
+
+
+def test_a_lapse_never_deletes_a_cover_written_after_the_read():
+    store = swarm()
+    old = json.dumps(put(store, "ci_overrun", "tasks/t7", "first owner"))
+    put(store, "ci_overrun", "phases/p3", "second owner")
+    stage_cover._lapse(store.redis, store.key(SLUG, stage_cover.KEY), "ci_overrun", old)
+    assert stored(store)["ci_overrun"]["reason"] == "second owner"
+
+
+def test_a_standing_stage_is_covered_under_its_exact_name():
+    store = swarm()
+    standing.fire(store.redis, SLUG, "Burn-rate:a-b", standing.Reading(5.0, 2.0, "hours", "e1"), NOW)
+    assert put(store, "Burn-rate:a-b")["stage"] == "Burn-rate:a-b"
+    assert stage_cover.covered(store, SLUG, ledger_doc(), "Burn-rate:a-b")
+
+
 @pytest.mark.parametrize(
-    ("covered_name", "asked", "expected"),
+    ("covered_name", "asked", "share", "expected"),
     [
-        ("merge_queue", "review", True),
-        ("review", "merge_queue", True),
-        ("quota", "quota_hold", True),
-        ("quota_hold", "quota", True),
-        ("seat_wait", "ci_overrun", False),
-        ("merge_queue", "quota", False),
+        ("merge_queue", "review", True, True),
+        ("quota_hold", "quota", True, True),
+        ("seat_wait", "ci", True, False),
+        ("merge_queue", "review", False, False),
+        ("intent_fix", "merge_queue", False, False),
+        ("review", "merge_queue", False, True),
+        ("quota", "quota_hold", False, True),
+    ],
+    ids=[
+        "stage frees its share seat",
+        "hold frees its share seat",
+        "other share seat stays",
+        "stage leaves the review remedy",
+        "sibling remedy stays",
+        "share silences its stage",
+        "quota silences its hold",
     ],
 )
-def test_a_stage_cover_covers_its_share_and_a_share_cover_covers_its_stages(covered_name, asked, expected):
+def test_a_share_cover_covers_its_stages_and_a_stage_cover_frees_only_its_share_seat(
+    covered_name, asked, share, expected
+):
     store = swarm()
     put(store, covered_name)
-    assert stage_cover.covered(store, SLUG, ledger_doc(), asked) is expected
+    assert stage_cover.covered(store, SLUG, ledger_doc(), asked, share=share) is expected
 
 
 @pytest.fixture
