@@ -14,7 +14,7 @@
       "an_unreachable_reconnect_is_refused_not_replaced": true,
       "durable_journal_records_the_delivery_once": true,
       "independent_repeat_identical": true,
-      "latency_measured_on_the_fixture_clock": true,
+      "latency_measured_on_the_fixture_clock": false,
       "nothing_launched_stopped_or_closed": true,
       "reconnect_attaches_the_original_pane_and_conversation": true,
       "reconnect_only_reads": true,
@@ -96,9 +96,9 @@
       },
       "replaced_view": {
         "agent": "engineer@a1b2c3-0002",
-        "checked_at": 1790000010800,
+        "checked_at": 1790000011050,
         "fresh_ms": 30000,
-        "live_at": 1790000010650,
+        "live_at": 1790000010850,
         "machine": "swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal",
         "pane_id": "w1:p1",
         "reason": "conversation_mismatch",
@@ -118,11 +118,11 @@
         "reason": "stale_incarnation"
       },
       "terminal_reconnect_latency_seconds": [
-        0.15,
-        0.1
+        0.2,
+        0.2
       ]
     },
     "second_identical": true
   },
-  "state": "passed"
+  "state": "failed"
 }
