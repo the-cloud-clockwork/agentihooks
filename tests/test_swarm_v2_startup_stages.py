@@ -493,6 +493,11 @@ def oci_capture():
         ),
         scaled_event("2026-10-11T14:36:21Z", f"Scale-up: setting group {POOL} size to 1 instead of 0", reason="Other"),
         scaled_event("2026-10-11T14:36:22Z", "Scale-up: group size unchanged"),
+        {
+            **scaled_event("2026-10-10T09:00:00Z", f"Scale-up: setting group {POOL} size to 1 instead of 0 (max: 10)"),
+            "lastTimestamp": "2026-10-11T14:36:20Z",
+            "count": 3,
+        },
         {"reason": "ScaledUpGroup", "message": f"Scale-up: setting group {POOL} size to 2 instead of 1"},
     ]
     raw["activities"] = {"Activities": []}
@@ -506,6 +511,7 @@ def oci_capture():
 def test_the_autoscaler_scaled_up_group_events_give_each_group_its_scale_ups():
     assert stages.scaled_groups(oci_capture()["events"]["items"]) == {
         POOL: [
+            [stages.instant("2026-10-10T09:00:00Z"), 0],
             [stages.instant("2026-10-11T14:36:20Z"), 0],
             [stages.instant("2026-10-11T14:50:00.25Z"), 1],
         ]

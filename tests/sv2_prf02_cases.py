@@ -15,6 +15,7 @@ FIXTURES = Path(__file__).parent / "fixtures" / "swarm_v2" / "startup"
 ANTON = ("anton-read-1.json", "anton-read-2.json")
 KIND = ("kind-run-1.json", "kind-run-2.json")
 NATIVE = "anton-read-3.json"
+COLD_OUTAGE = "anton-outage-1.json"
 SOURCES = {
     "anton-read-1.json": "read only kubectl and aws read of anton-prod at 2026-10-11T14:57:15Z",
     "anton-read-2.json": "read only kubectl and aws read of anton-prod, the next hour of events",
@@ -24,8 +25,11 @@ SOURCES = {
     " 90 second registry outage",
     NATIVE: "read only kubectl and aws read of anton-prod at 2026-10-12T10:17:25Z with the agent log of every swarm"
     " worker Pod, one launched by the controller at 10:03:14Z",
+    COLD_OUTAGE: "startup fixture anton-outage mode at 1dd43842b6bc51122e6bf19cb539d6fc619dc14a against anton-prod,"
+    " read at 2026-10-16T20:49:20Z: one worker Pod scaled the empty Oracle research pool from zero and pulled through"
+    " a registry absent for 92 seconds after it was scheduled",
 }
-INPUTS = (*ANTON, *KIND, NATIVE)
+INPUTS = (*ANTON, *KIND, NATIVE, COLD_OUTAGE)
 FROM_ZERO_GROUP = "anton-k3s-swarm"
 EVIDENCE_CLASS = (
     "measured: Anton reads are read only kubectl and aws listings of nodes, events, Pods, autoscaling activities and "
@@ -83,6 +87,12 @@ NOTES = (
     "The kind fixture pulls from a registry on the same runner, so its pull times show image size and unpack cost,"
     " not registry distance; the Anton reads show the production registry path.",
     "With few cold samples the p95 equals the maximum.",
+    "The cold node outage read runs on the Oracle research pool, which shares the swarm pool's shape, image and"
+    " network but not its kata runtime: the swarm pool keeps two nodes by the operator's choice and cannot scale from"
+    " zero. Its scale up time is the cluster autoscaler's ScaledUpGroup event and its launch is the instance's"
+    " creation, so the instance column is scale up to Oracle instance creation and the join column runs to the node's"
+    " Ready transition. The registry is a pull through cache of ghcr.io on the new node's loopback, absent until 90"
+    " seconds after scheduling and then started, so its pull shows the production registry path after the outage.",
 )
 
 
@@ -226,6 +236,17 @@ def _account_release() -> dict:
         }
 
 
+def _cold_outage() -> dict:
+    """The Anton sample that scaled the empty swarm pool from zero and pulled through an interrupted registry."""
+    entries = [e for e in samples(COLD_OUTAGE) if e["pod"].endswith("/outage-cold")]
+    keep = ("pod", "node_kind", "node_source", "from_zero", "image_cache", "outcome", "transient", "failure_ms")
+    return {
+        "samples": [{key: e[key] for key in keep} | {"stages": e["stages"]} for e in entries],
+        "claim": _refusal(entries),
+        "unbounded": stages.unbounded(entries),
+    }
+
+
 def _recovery() -> tuple[dict, bool]:
     interrupted = [e for e in samples(KIND[1]) if e["pod"].split("/")[1].startswith("interrupted-")]
     classified = [e["transient"] or e["outcome"] for e in interrupted]
@@ -239,10 +260,17 @@ def _recovery() -> tuple[dict, bool]:
         "unbounded": stages.unbounded(interrupted),
         "grace_ms": failures.PULL_GRACE_MS,
         "account": _account_release(),
+        "cold_outage": _cold_outage(),
     }
     account = observed["account"]
+    cold = observed["cold_outage"]
     passed = (
-        bool(interrupted)
+        len(cold["samples"]) == 1
+        and cold["samples"][0]["transient"] == stages.REGISTRY_UNAVAILABLE
+        and cold["samples"][0]["outcome"] == stages.STARTED
+        and not cold["claim"]["refused"]
+        and not cold["unbounded"]
+        and bool(interrupted)
         and set(classified) == {stages.REGISTRY_UNAVAILABLE}
         and not observed["unbounded"]
         and all(e["outcome"] == stages.STARTED for e in interrupted)

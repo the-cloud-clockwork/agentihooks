@@ -155,12 +155,13 @@ def _launches(activities: Sequence[Mapping], reservations: Sequence[Mapping]) ->
 
 def scaled_groups(items: Iterable[Mapping]) -> dict[str, list[list[int]]]:
     """Each group's scale ups as [time, size before] from the autoscaler's own ScaledUpGroup events, which it records
-    when it sets the size; the TriggeredScaleUp event on a Pod can follow the launch it caused."""
+    when it sets the size; the TriggeredScaleUp event on a Pod can follow the launch it caused. A repeated identical
+    scale up is one event with a count, so only its first and last occurrence are known."""
     seen: dict[str, set[tuple[int, int]]] = {}
     for item in items:
-        when = item.get("eventTime") or item.get("firstTimestamp")
         found = SCALED_GROUP.search(item.get("message", "")) if item.get("reason") == "ScaledUpGroup" else None
-        if when and found:
+        times = {item.get("eventTime") or item.get("firstTimestamp"), item.get("lastTimestamp")} - {None}
+        for when in times if found else ():
             seen.setdefault(found["group"], set()).add((instant(when), int(found["before"])))
     return {group: [list(up) for up in sorted(ups)] for group, ups in sorted(seen.items())}
 
