@@ -525,18 +525,15 @@ def test_journal_without_a_pod_is_reported_missing(fixture):
     assert restarted.controller_orphans_by_class()["missing_pod"] == 1
 
 
-def test_ended_execution_without_a_pod_is_not_missing_while_a_vanished_live_one_is(fixture):
+def test_ended_execution_without_a_pod_is_not_missing(fixture):
     store, (first, _), transport, clock, grant = fixture
-    assert first.acquire()
-    ended = first.admit(agent(store))
-    live = first.admit(replace(agent(store), seat="eng-2@fixture"))
-    assert first.release()
-    store.put_agent("fixture", replace(ended, state="ended"))
+    attempt = launched(store, first)
+    store.put_agent("fixture", replace(attempt, state="ended"))
     restarted = observed(store, transport, grant, Pods([]))
     clock[0] += lease.ttl_ms()
     assert restarted.acquire()
-    assert restarted.reconcile().missing_pods == [live.execution_id]
-    assert restarted.controller_orphans_by_class()["missing_pod"] == 1
+    assert restarted.reconcile().missing_pods == []
+    assert restarted.controller_orphans_by_class()["missing_pod"] == 0
 
 
 def test_orphan_replaced_before_delete_is_not_deleted(fixture):
