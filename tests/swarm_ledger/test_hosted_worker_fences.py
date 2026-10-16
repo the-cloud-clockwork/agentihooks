@@ -52,6 +52,27 @@ def test_hosted_apply_accepts_the_current_spec_even_with_an_old_task_guard(deplo
     assert _held_task()["state"] == "pr"
 
 
+def test_hosted_worker_apply_uses_the_current_redis_adapter_after_module_loading(deployed):
+    import importlib
+    from unittest.mock import patch
+
+    from scripts.swarm_ledger.api import mutations, worker_writes
+    from tests.test_swarm_v2_control_service import _store
+
+    operation = _operation(deployed)
+    payload = {"operation_id": "adapter-recovery", "ops": [operation], "guards": {}}
+    try:
+        with patch("scripts.swarm.store.connect", return_value=_store()):
+            importlib.reload(worker_writes)
+
+        reply = mutations.apply(ledger_server, SLUG, "", payload)
+
+        assert reply["applied"] == ["worker-direct"]
+        assert _held_task()["state"] == "pr"
+    finally:
+        importlib.reload(worker_writes)
+
+
 @pytest.mark.parametrize(
     "field,value",
     [
