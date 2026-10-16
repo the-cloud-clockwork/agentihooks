@@ -76,8 +76,15 @@ class _Write:
                     "execution_id": self.gate.scope.execution_id,
                     "execution_generation": self.gate.scope.generation,
                     "task_generation": self.gate.request["task_generation"],
+                    "spec_revision": self.gate.expected or spec_revision(doc["tasks"][0]),
                 }
-            reply = self.hosted.client().mutate(self.slug, [write])
+                reply = self.hosted.client().request(
+                    self.slug,
+                    "operations",
+                    {"operation_id": op["id"], "ops": [{**op, "worker_claim": write["worker_claim"]}], "guards": {}},
+                )
+            else:
+                reply = self.hosted.client().mutate(self.slug, [write])
         except urllib.error.HTTPError as error:
             raise self._refusal(error) from None
         except OSError as error:
@@ -96,5 +103,6 @@ class _Write:
             return GrantRefused("invalid_request", f"the ledger refused this write: {detail.get('message')}")
         if detail.get("code") != "revision_conflict":
             return _unavailable(error)
+        self.hosted.store.redis.incr(self.hosted.store.key(self.slug, "ledger-revision-conflicts"))
         task, _ = self.hosted.fetch(self.slug, self.key)
         return RevisionConflict("revision_conflict", CHANGED, self.key.split("/")[1], spec_revision(task or {}))

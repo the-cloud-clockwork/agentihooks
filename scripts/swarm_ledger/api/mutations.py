@@ -28,7 +28,9 @@ class GuardedOperations:
             self.results = dict(known["results"])
         pending = [op for op in self.payload["ops"] if op["id"] not in self.results]
         targets = {
-            schemas.target(op) for op in pending if op["op"] not in schemas.UNGUARDED and not self.changes_for(op)
+            schemas.target(op)
+            for op in pending
+            if op["op"] not in schemas.UNGUARDED and not self.changes_for(op) and "worker_claim" not in op
         }
         for op in pending:
             targets.update(change["path"].rsplit("/", 1)[0] for change in self.changes_for(op))

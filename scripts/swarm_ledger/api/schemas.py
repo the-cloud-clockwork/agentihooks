@@ -158,12 +158,13 @@ def operation_schema(kind: str) -> dict:
             "worker_claim": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["task_id", "execution_id", "execution_generation", "task_generation"],
+                "required": ["task_id", "execution_id", "execution_generation", "task_generation", "spec_revision"],
                 "properties": {
                     "task_id": {"type": "string", "minLength": 1},
                     "execution_id": {"type": "string", "minLength": 1},
                     "execution_generation": {"type": "integer", "minimum": 1},
                     "task_generation": {"type": "integer", "minimum": 1},
+                    "spec_revision": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
                 },
             },
         },

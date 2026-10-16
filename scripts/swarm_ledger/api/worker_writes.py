@@ -4,11 +4,14 @@ from scripts.swarm.store import SwarmError, connect
 from scripts.swarm_v2.authority import TaskAuthority
 
 from .errors import APIError
+from .schemas import target
 
 
 def check(slug: str, doc: dict, op: dict) -> None:
     if "worker_claim" not in op:
         return
+    from scripts.swarm_v2.api.tasks import spec_revision
+
     pin = op["worker_claim"]
     store = connect()
     authority = TaskAuthority(store, SimpleNamespace(slug=slug), None)
@@ -19,7 +22,16 @@ def check(slug: str, doc: dict, op: dict) -> None:
         if claim.holder != op["by"]:
             raise SwarmError("stale_generation")
     except SwarmError:
-        key = store.key(slug, "hosted-worker-refusals")
-        store.redis.hset(key, op["id"], "stale_generation")
-        store.redis.expire(key, 86400)
-        raise APIError(409, "stale_generation", "Stale worker claim") from None
+        refuse(store, slug, op, "stale_generation", "Stale worker claim")
+    if target(op).split("/")[:2] != ["tasks", pin["task_id"]]:
+        refuse(store, slug, op, "stale_generation", "Wrong task claim")
+    task = next((task for task in doc["tasks"] if task["id"] == pin["task_id"]), {})
+    if spec_revision(task) != pin["spec_revision"]:
+        refuse(store, slug, op, "revision_conflict", "Changed task specification")
+
+
+def refuse(store: object, slug: str, op: dict, code: str, message: str) -> None:
+    key = store.key(slug, "hosted-worker-refusals")
+    store.redis.hset(key, op["id"], code)
+    store.redis.expire(key, 86400)
+    raise APIError(409, code, message)
