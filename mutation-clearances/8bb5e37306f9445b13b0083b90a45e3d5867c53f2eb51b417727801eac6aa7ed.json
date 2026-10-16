@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/worker_writes.py:scripts.swarm_ledger.api.worker_writes.x_check__mutmut_39:d2e81e530cbeea9fb14ca76c71a6a56c8d0664da8bf4b5cb02aecb83cdae8cb0": {
+    "reader": "Standards reader",
+    "reason": "The immediately enclosing except SwarmError ignores the exception value and emits the same recorded refusal and API response."
+  }
+}

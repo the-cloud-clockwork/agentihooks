@@ -45,7 +45,10 @@ def _hl():
 
 @pytest.fixture
 def store():
-    return _store()
+    made = _store()
+    stamp = made.redis.time()
+    made.redis.time = lambda: stamp
+    return made
 
 
 @pytest.fixture
@@ -55,23 +58,7 @@ def hosted(store, ledger_dir):
     thread = threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
     credential = hive_auth.issue_controller(store.redis)
     remote = {"AGENTIHOOKS_DEPLOYMENT": "distributed", "LEDGER_URL": f"http://{host}", _cs().CREDENTIAL_ENV: credential}
-    from scripts.swarm_v2.authority import TaskAuthority
-
-    stale = TaskAuthority._stale
-
-    def trace_stale(authority):
-        import sys
-
-        from scripts.swarm import lease
-
-        print(
-            f"[DEBUG-hosted-claim] claim={authority.current('t1')} now={lease.now_ms(authority.store)}",
-            file=sys.stderr,
-        )
-        return stale(authority)
-
     with (
-        patch.object(TaskAuthority, "_stale", trace_stale),
         patch("scripts.swarm.store.redis_client", return_value=store.redis),
         patch("hooks._redis.get_redis", return_value=None),
         patch("scripts.gates.talk.Budget._marks", return_value=None),
@@ -205,6 +192,25 @@ def test_a_claim_lost_before_hosted_apply_cannot_change_the_task(deployed, store
         return original(slug, doc, operation)
 
     with patch.object(worker_writes, "check", lose_claim):
+        status, refusal = _patch(deployed, read["revision"], {"state": "pr"})
+
+    assert status == 409
+    assert refusal["error_class"] == "stale_generation"
+    assert refusal["message"] == "the task generation is no longer current"
+    assert _held_task()["state"] == "claimed"
+
+
+def test_an_expired_claim_is_refused_by_the_hosted_apply(deployed, store):
+    _, read = _read(deployed)
+    original = _hl().ResourceClient.request
+    stamp = store.redis.time()
+
+    def expire_claim(client, slug, path, *args, **kwargs):
+        if path == "operations":
+            store.redis.time = lambda: (stamp[0] + 61, stamp[1])
+        return original(client, slug, path, *args, **kwargs)
+
+    with patch.object(_hl().ResourceClient, "request", expire_claim):
         status, refusal = _patch(deployed, read["revision"], {"state": "pr"})
 
     assert status == 409

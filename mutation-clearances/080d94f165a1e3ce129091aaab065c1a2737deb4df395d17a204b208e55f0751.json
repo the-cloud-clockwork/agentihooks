@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/hosted_ledger.py:scripts.swarm_v2.hosted_ledger.x\u01c1HostedLedger\u01c1apply_ops__mutmut_21:fc6adb8b4906c7bfb9a5c8377c0df32cdc31545b4759a5116770bd64e2bf358a": {
+    "reader": "Standards reader",
+    "reason": "ARGV[4] is read only when ARGV[3] is nonempty; this invocation always supplies an empty ARGV[3]."
+  }
+}

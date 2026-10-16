@@ -1,6 +1,5 @@
 import pytest
 
-from scripts.swarm_ledger.api import mutations, schemas, worker_writes
 from scripts.swarm_ledger.api.errors import APIError
 from tests.swarm_ledger.test_controller_hosted_ledger import (
     SLUG,
@@ -41,6 +40,8 @@ def _operation(deployed):
 
 
 def test_hosted_apply_accepts_the_current_spec_even_with_an_old_task_guard(deployed):
+    from scripts.swarm_ledger.api import mutations, schemas
+
     operation = _operation(deployed)
     payload = {"operation_id": "direct-current", "ops": [operation], "guards": {schemas.target(operation): "f" * 64}}
 
@@ -59,6 +60,8 @@ def test_hosted_apply_accepts_the_current_spec_even_with_an_old_task_guard(deplo
         ("task_id", ""),
         ("execution_id", None),
         ("execution_id", ""),
+        ("execution_id", 1),
+        ("task_id", 1),
         ("execution_generation", None),
         ("execution_generation", 0),
         ("execution_generation", "1"),
@@ -71,6 +74,8 @@ def test_hosted_apply_accepts_the_current_spec_even_with_an_old_task_guard(deplo
     ],
 )
 def test_hosted_worker_claim_schema_refuses_malformed_pins(deployed, field, value):
+    from scripts.swarm_ledger.api import schemas
+
     operation = _operation(deployed)
     if value is None:
         operation["worker_claim"].pop(field)
@@ -85,6 +90,27 @@ def test_hosted_worker_claim_schema_refuses_malformed_pins(deployed, field, valu
     assert _held_task()["state"] == "claimed"
 
 
+@pytest.mark.parametrize("pin", [None, [], 1])
+def test_hosted_worker_claim_must_be_an_object(deployed, pin):
+    from scripts.swarm_ledger.api import schemas
+
+    operation = _operation(deployed)
+    operation["worker_claim"] = pin
+    payload = {"operation_id": "invalid-object", "ops": [operation], "guards": {}}
+    with pytest.raises(APIError) as raised:
+        schemas.check_operations(payload, core, ("t1",))
+    assert raised.value.status == 400
+
+
+def test_worker_claim_schema_accepts_a_single_character_execution_identity(deployed):
+    from scripts.swarm_ledger.api import schemas
+
+    operation = _operation(deployed)
+    operation["worker_claim"]["execution_id"] = "e"
+    payload = {"operation_id": "short-identity", "ops": [operation], "guards": {}}
+    assert schemas.check_operations(payload, core, ("t1",)) == [operation]
+
+
 @pytest.mark.parametrize(
     "change,message",
     [
@@ -95,6 +121,8 @@ def test_hosted_worker_claim_schema_refuses_malformed_pins(deployed, field, valu
     ],
 )
 def test_worker_fence_records_the_refusal_without_changing_the_task(deployed, store, change, message):
+    from scripts.swarm_ledger.api import worker_writes
+
     operation = _operation(deployed)
     doc = {"tasks": [_held_task()]}
     if change == "holder":
@@ -110,6 +138,7 @@ def test_worker_fence_records_the_refusal_without_changing_the_task(deployed, st
         worker_writes.check(SLUG, doc, operation)
 
     code = "stale_generation" if change in ("holder", "target") else "revision_conflict"
+    assert raised.value.status == 409
     assert raised.value.envelope() == {"error": {"code": code, "message": message}}
     key = store.key(SLUG, "hosted-worker-refusals")
     assert store.redis.hget(key, "worker-direct") == code
