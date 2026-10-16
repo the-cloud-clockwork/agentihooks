@@ -450,6 +450,15 @@ def test_a_nudge_from_anyone_but_the_swarm_steers_like_any_message(rig):
     assert turn_methods(rig) == ["turn/steer"]
 
 
+def test_a_nudge_shaped_message_from_anyone_else_keeps_its_place_in_the_queue(rig):
+    rig.pump.start()
+    rig.store.send("bob", ME, "first")
+    send_nudge(rig, sender="alice")
+    rig.pump.step()
+    assert rig.server.turns[0]["inputs"][0].endswith("first")
+    assert rig.server.turns[0]["inputs"][1].endswith("pick your task back up")
+
+
 def test_a_nudge_to_an_idle_thread_starts_a_turn_without_an_interrupt(rig):
     send_nudge(rig)
     rig.run(1)
@@ -529,7 +538,8 @@ def test_an_open_server_request_holds_a_nudge_too(rig):
 
 def test_an_approval_replayed_on_resume_holds_the_first_delivery_into_a_turn_begun_before_the_pump(rig):
     rig.server.begin_elsewhere()
-    rig.server.frames.append({"id": 90, "method": APPROVAL, "params": {"threadId": THREAD}})
+    rig.server.frames.clear()
+    rig.server.early = [{"id": 90, "method": APPROVAL, "params": {"threadId": THREAD}}]
     rig.pump.start()
     item = rig.store.send("alice", ME, "careful")
     rig.pump.step()
@@ -592,10 +602,12 @@ def test_a_nudge_reaches_an_unobserved_turn_at_the_exact_hold_boundary(rig, monk
     rig.pump.start()
     monkeypatch.setattr(rig.connection, "poll", lambda timeout: None)
     rig.pump.hold_until = rig.clock.now
+    held = rig.store.send("alice", ME, "careful")
     item = send_nudge(rig)
     rig.pump.step()
-    assert turn_methods(rig) == ["turn/interrupt", "turn/start"]
-    assert rig.store.get(item.id).state == "delivered"
+    assert turn_methods(rig) == ["turn/interrupt", "turn/start", "turn/steer"]
+    assert rig.server.turns[1]["inputs"][0].endswith("pick your task back up")
+    assert (rig.store.get(item.id).state, rig.store.get(held.id).state) == ("delivered", "delivered")
 
 
 def test_each_window_of_silence_reaches_the_thread_as_its_own_turn(rig):
