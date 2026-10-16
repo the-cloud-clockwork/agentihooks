@@ -53,40 +53,69 @@ jobs:
         run: >-
           docker build --build-arg WORKER_IMAGE="$CANDIDATE" --tag "$INCOMPATIBLE"
           tests/contracts/image_manifest/incompatible-herdr
-      - name: Refuse the incompatible herdr fixture
-        run: |
-          out="$RUNNER_TEMP/worker-image-attestation/incompatible"
-          if bash docker/swarm-node/qualify.sh "$INCOMPATIBLE" "$out" "$GITHUB_SHA"; then
-            echo "incompatible herdr fixture qualified" >&2
-            exit 1
-          fi
-          jq -e '.promotable == false and .report.worker_image_qualified_targets == 2
-            and .report.targets.herdr.qualified == false' "$out/attestation.json"
-      - name: Qualify the candidate
-        run: bash docker/swarm-node/qualify.sh "$CANDIDATE" "$RUNNER_TEMP/worker-image-attestation/candidate" "$GITHUB_SHA"
-      - name: Requalify the candidate independently
-        run: |
-          out="$RUNNER_TEMP/worker-image-attestation"
-          bash docker/swarm-node/qualify.sh "$CANDIDATE" "$out/repeat" "$GITHUB_SHA"
-          jq -S .report "$out/candidate/attestation.json" > "$out/candidate-report.json"
-          jq -S .report "$out/repeat/attestation.json" > "$out/repeat-report.json"
-          diff "$out/candidate-report.json" "$out/repeat-report.json"
       - name: Build the planted credential fixture
         run: >-
           docker build --build-arg WORKER_IMAGE="$CANDIDATE" --tag "$PLANTED"
           tests/contracts/image_manifest/planted-credential
-      - name: Refuse the planted credential fixture
+      - name: Run every qualification and credential scan at once
+        shell: bash
         run: |
-          out="$RUNNER_TEMP/worker-image-attestation/planted-scan"
-          status=0
-          bash docker/swarm-node/scan.sh "$PLANTED" "$out" || status=$?
-          if [[ "$status" != 1 ]]; then
-            echo "planted credential fixture was not refused (exit $status)" >&2
+          out="$RUNNER_TEMP/worker-image-attestation"
+          mkdir -p "$out/proofs"
+          refuse_incompatible_herdr() {
+            if bash docker/swarm-node/qualify.sh "$INCOMPATIBLE" "$out/incompatible" "$GITHUB_SHA"; then
+              echo "incompatible herdr fixture qualified" >&2
+              return 1
+            fi
+            jq -e '.promotable == false and .report.worker_image_qualified_targets == 2
+              and .report.targets.herdr.qualified == false' "$out/incompatible/attestation.json"
+          }
+          qualify_candidate() {
+            bash docker/swarm-node/qualify.sh "$CANDIDATE" "$out/candidate" "$GITHUB_SHA"
+          }
+          requalify_candidate() {
+            bash docker/swarm-node/qualify.sh "$CANDIDATE" "$out/repeat" "$GITHUB_SHA"
+          }
+          refuse_planted_credential() {
+            local status=0
+            bash docker/swarm-node/scan.sh "$PLANTED" "$out/planted-scan" || status=$?
+            if [[ "$status" != 1 ]]; then
+              echo "planted credential fixture was not refused (exit $status)" >&2
+              return 1
+            fi
+            grep -qE '^github-app-token (.*/)?opt/agentihooks/\.build-token$' "$out/planted-scan/findings.txt"
+          }
+          scan_candidate() {
+            bash docker/swarm-node/scan.sh "$CANDIDATE" "$out/candidate-scan"
+          }
+          proofs=(refuse_incompatible_herdr qualify_candidate requalify_candidate refuse_planted_credential scan_candidate)
+          declare -A pids
+          for proof in "${proofs[@]}"; do
+            (set -euo pipefail; "$proof") > "$out/proofs/$proof.log" 2>&1 &
+            pids[$proof]=$!
+          done
+          failed=()
+          for proof in "${proofs[@]}"; do
+            status=0
+            wait "${pids[$proof]}" || status=$?
+            echo "::group::$proof exit $status"
+            cat "$out/proofs/$proof.log"
+            echo "::endgroup::"
+            if (( status != 0 )); then
+              echo "::error title=$proof::$proof failed with exit $status"
+              failed+=("$proof")
+            fi
+          done
+          if (( ${#failed[@]} > 0 )); then
+            echo "failed proofs: ${failed[*]}" >&2
             exit 1
           fi
-          grep -qE '^github-app-token (.*/)?opt/agentihooks/\.build-token$' "$out/findings.txt"
-      - name: Scan the candidate for credentials
-        run: bash docker/swarm-node/scan.sh "$CANDIDATE" "$RUNNER_TEMP/worker-image-attestation/candidate-scan"
+      - name: Require the independent requalification to match
+        run: |
+          out="$RUNNER_TEMP/worker-image-attestation"
+          jq -S .report "$out/candidate/attestation.json" > "$out/candidate-report.json"
+          jq -S .report "$out/repeat/attestation.json" > "$out/repeat-report.json"
+          diff "$out/candidate-report.json" "$out/repeat-report.json"
       - name: Require a release tag on main
         id: main
         if: github.event_name == 'release'
