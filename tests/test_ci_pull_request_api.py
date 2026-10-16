@@ -474,7 +474,7 @@ def test_no_job_skips_on_a_tree_another_run_passed():
 
 def test_sonar_scans_the_graded_revision_without_reading_the_dev_head():
     steps = _jobs()["sonar"]["steps"]
-    dev_head = re.compile(r"refs/heads/dev|origin[ /]dev\b|github\.event\.after")
+    dev_head = re.compile(r"refs/heads/dev|origin[ /]\+?dev\b|:dev\b|github\.event\.after")
     assert [step.get("name", step.get("uses")) for step in steps if dev_head.search(json.dumps(step))] == []
     assert all("steps.current" not in step.get("if", "") for step in steps)
     scan = next(step for step in steps if step.get("name") == "SonarQube Scan")

@@ -131,7 +131,7 @@ def test_the_condition_hold_skips_a_superseded_analysis_and_only_the_gate_names_
     writers = [
         step.get("name")
         for step in _sonar()["steps"]
-        if any("analysis=" in line and "GITHUB_OUTPUT" in line for line in step.get("run", "").splitlines())
+        if "analysis=" in step.get("run", "") and "GITHUB_OUTPUT" in step.get("run", "")
     ]
     assert writers == ["SonarQube Quality Gate"]
 
