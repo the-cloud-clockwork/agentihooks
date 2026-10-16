@@ -6,7 +6,7 @@ nav_order: 10
 
 # Test count floor
 
-The `test-count` job in the Tests workflow fails when the head collects fewer tests than its base. It stops a pull request from passing by deleting or skipping the tests that would fail it. One exception lets a change delete dead code together with its tests: a lost test is admitted when the head deletes a top level function or class that the test referenced.
+The `test-count` job in the Tests workflow fails when the head collects fewer tests than its base. It counts collected tests, so it stops a pull request from passing by deleting the tests that would fail it or keeping them from being collected. A skip marker leaves a test collected and is not counted as a loss. One exception lets a change delete dead code together with its tests: a lost test is admitted when the head deletes a top level function or class that the test referenced.
 
 ## Where it runs
 
@@ -37,8 +37,8 @@ Admission is computed only when the head collects fewer tests than the base. Eve
 
 A test id in the base and not in the head is admitted when all of these hold:
 
-1. **The test referenced a subject.** In the base, the test function's body (parametrize ids stripped, `Test` classes resolved) uses a name imported by its own file with `from X import n`, or an attribute of a module the file imports (`import pkg.mod` then `pkg.mod.f`, or `from pkg import mod` then `mod.f`). Relative imports, decorators, fixtures and attributes of anything that is not an imported module never count.
-2. **The subject was a top level definition in the base.** A function, async function or class defined at module level, including inside a module level `if` or `try`, in a base file outside `tests/`. The module name comes from the file path.
+1. **The test referenced a subject.** In the base, the test function's body (parametrize ids stripped, `Test` classes resolved) uses a name imported by its own file with `from X import n`, or an attribute of a module the file imports (`import pkg.mod` then `pkg.mod.f`, or `from pkg import mod` then `mod.f`). Only the statements of the test function's body are read, so decorators on the test, fixtures, relative imports and attributes of anything that is not an imported module never count.
+2. **The subject was a top level definition in the base.** A function, async function or class defined at module level, including inside a module level `if` or `try` (not `try`/`except*`), in a base file outside `tests/`. The module name comes from the file path.
 3. **The head deletes it.** No Python file anywhere in the head, `tests/` included, binds the subject's name at any depth: no function, method or class of that name, no assignment target, no import alias, no `except ... as` or `match` capture. A subject moved to another module, or into `tests/`, still binds its name and admits nothing.
 
 Each admitted test is printed with the subjects that admitted it:
@@ -64,6 +64,7 @@ The floor then grades by count alone.
 
 - Names bound dynamically (`globals()`, `setattr`, `exec`, a module `__getattr__`) are not seen, so a subject kept alive that way can still admit its tests.
 - Matching is by name in the head: an unrelated binding of the same name anywhere in the head keeps the subject alive and the lost test red.
+- The subject is matched by the module path the test imported it from. A name re-exported through a package (`from pkg import f` where `f` is defined in `pkg/impl.py`) does not match its definition, so its lost tests stay red.
 - Count masking is unchanged: an unrelated lost test passes when the head adds as many tests.
 
 ## Deleting dead code with its tests
