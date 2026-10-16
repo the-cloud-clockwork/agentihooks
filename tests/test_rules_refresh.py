@@ -313,3 +313,31 @@ class TestProfileHomeScope:
         monkeypatch.setattr("hooks.context.rules_refresh.write_refresh_marker", capture)
         install._cmd_refresh_rules(Namespace(profile=None, clear=False, dry_run=False))
         assert seen == ["frontend"]
+
+    def test_a_session_receives_only_its_own_home_after_another_render_changes_the_global_install(
+        self, tmp_home, mock_sessions, monkeypatch
+    ):
+        master = _role_home(tmp_home, "master", "m-1")
+        (master / "CLAUDE.md").write_text("You are master")
+        (master / "rules").mkdir()
+        (master / "rules" / "master-role.md").write_text("Master rule")
+        global_install = tmp_home / ".claude"
+        (global_install / "rules").mkdir(parents=True)
+        (global_install / "CLAUDE.md").write_text("You are frontend")
+        (global_install / "rules" / "frontend-role.md").write_text("Frontend rule")
+        mock_sessions.return_value = {"s-master": {"status": "alive"}}
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(master))
+        frontend_payload = rules_refresh.collect_profile_rules(
+            global_install / "rules", global_install / "CLAUDE.md", global_install / "CLAUDE.local.md"
+        )
+        rules_refresh.write_refresh_marker("master", frontend_payload)
+        received = []
+        monkeypatch.setattr(rules_refresh, "inject_context", received.append)
+
+        rules_refresh.maybe_inject("s-master")
+
+        assert len(received) == 1
+        assert "--- CLAUDE.md ---\nYou are master\n" in received[0]
+        assert "--- rules/master-role.md ---\nMaster rule\n" in received[0]
+        assert "frontend" not in received[0].lower()
+        assert rules_refresh._load_marker("master") is None
