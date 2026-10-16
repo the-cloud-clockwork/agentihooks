@@ -225,7 +225,9 @@ def test_a_swarm_pass_ships_the_worker_pool_reading_of_its_environment_to_the_si
     store.create(SwarmConfig("sw", "/repo", 0, 0))
     seen = []
     reading = [{"pool": "swarm-workers", "configured_maximum": 4, "nodes": 3}]
-    monkeypatch.setattr(deployed, "worker_pools", lambda environ, slug: seen.append((environ, slug)) or (lambda: reading))
+    monkeypatch.setattr(
+        deployed, "worker_pools", lambda environ, slug: seen.append((environ, slug)) or (lambda: reading)
+    )
     monkeypatch.setattr(metrics.metrics_swarm, "pull_rows", lambda box, now_ms, swarm: {})
     monkeypatch.setattr(metrics.metrics_swarm, "record_pass", lambda *args: None)
     swarm = metrics.metrics_swarm.TickInput(store, {"tasks": []}, [], lambda url: None, None)
