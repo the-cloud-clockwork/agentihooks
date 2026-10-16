@@ -204,8 +204,14 @@ def test_the_detector_does_not_keep_an_old_ci_budget_run_time_fresh(redis):
     assert standing.findings(redis, "sw", NOW + standing.STALE_MS) == []
 
 
+def test_the_detector_refreshes_an_alert_counted_in_the_same_task_hours(redis):
+    standing.fire(redis, "sw", "ci_overrun", reading(1.5, episode="alert-1"), NOW)
+    _detected(redis, 0.4, "d1", NOW + HOUR_MS)
+    assert standing.read(redis, "sw")["ci_overrun"]["updated_at"] == NOW + HOUR_MS
+
+
 def test_the_detector_takes_over_a_stale_ci_budget_finding_in_task_hours(redis):
-    _overran(redis, 17.4, "run-1", NOW)
+    standing.fire(redis, "sw", "ci_overrun", reading(17.4, "run-1", "Slowest stage mutation", 15.0, MINUTES), NOW)
     later = NOW + standing.STALE_MS
     _detected(redis, 0.4, "d1", later)
     row = standing.read(redis, "sw")["ci_overrun"]
