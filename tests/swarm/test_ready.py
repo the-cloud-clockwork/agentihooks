@@ -364,6 +364,30 @@ def test_repeated_ticks_never_respawn_a_released_task_waiting_on_its_pull_reques
     assert attempts == ([URL] * 4 if pull is GREEN else [URL] if pull is QUEUED else [])
 
 
+@pytest.mark.parametrize("trigger", ["queue_exit", "ready_mark"])
+def test_reopening_keeps_a_live_claimant_instead_of_spawning_a_successor(released, monkeypatch, trigger):
+    from scripts.swarm.ledger_events import pull_request
+
+    store, ledger, _, doc = released
+    runtime = cli.HerdrRuntime()
+    runtime.stuck.add(AGENT)
+    monkeypatch.setattr("scripts.swarm.runtime.HerdrRuntime", lambda: runtime)
+    if trigger == "ready_mark":
+        assert release(doc) == 0
+        pull = RED
+    else:
+        pull = pull_request({"state": "OPEN", "mergeQueueEntry": {"id": "entry", "state": "UNMERGEABLE"}})
+    attempts = list(runtime.spawned)
+    rows = ledger.rows
+    run = ready.Pass(store, "sw", ledger, lambda url: pull, lambda url: pull, NOW, lambda *args: {"queued": False})
+    ready.merge_pass(run, rows)
+    tick.tick("sw", store, ledger, runtime, NOW + 1_000)
+    assert runtime.spawned == attempts
+    assert store.claimant("sw", "t1") == AGENT
+    assert rows["t1"]["claimed_by"] == AGENT
+    assert AGENT in runtime.live_names()
+
+
 def test_the_stop_gate_lets_a_ready_engineer_stop(released, tmp_path):
     store, ledger, _, doc = released
     ledger.pulls[URL] = GREEN
@@ -508,6 +532,7 @@ def merging(monkeypatch):
     store.claim("sw", "t1", AGENT, 60_000)
     ready.save(store, "sw", "t1", ready.held_record(URL, HEAD, TOP, AGENT, NOW))
     pulls, queued, shell = {URL: RUNNING}, [], Shell()
+    monkeypatch.setattr("scripts.swarm.runtime.HerdrRuntime.live_names", lambda self: set())
     monkeypatch.setattr(stack, "shell", shell)
 
     def queue(action, url):
@@ -1081,6 +1106,19 @@ def test_a_conflict_reopens_a_task_whose_engineer_has_not_released_its_seat(merg
     assert merging.shell.calls == []
 
 
+@pytest.mark.parametrize(("name", "task"), [(AGENT, "other-task"), ("unrelated-worker", "other-task")])
+def test_a_reopen_does_not_retain_an_unrelated_registered_worker(merging, name, task):
+    from scripts.swarm.store import AgentRecord
+
+    merging.store.put_agent("sw", AgentRecord(name, "eng", task))
+    merging.pulls[URL] = RED
+    merging.run()
+    assert merging.rows["t1"]["state"] == "open"
+    assert merging.rows["t1"]["claimed_by"] == ""
+    assert merging.store.claimant("sw", "t1") is None
+    assert [(agent.name, agent.task) for agent in merging.store.agents("sw")] == [(name, task)]
+
+
 @pytest.mark.parametrize("queued", [True, False])
 @pytest.mark.parametrize("awaiting", ["", "merge"])
 def test_a_working_owner_keeps_its_claim_and_lease_when_the_pull_conflicts(merging, queued, awaiting):
@@ -1243,6 +1281,19 @@ def test_a_finished_owner_does_not_hold_conflict_recovery(merging):
     merging.pulls[URL] = pull_request({"state": "OPEN", "mergeable": "CONFLICTING"})
     assert merging.run() == [f"task t1 reopened, {URL} has a merge conflict"]
     assert merging.rows["t1"]["claimed_by"] == ""
+
+
+@pytest.mark.parametrize("backend,target", [("kubernetes", {}), ("local", {"host_id": "remote-host"})])
+def test_a_finished_remote_owner_keeps_its_claim_until_its_runtime_retires_it(merging, monkeypatch, backend, target):
+    from scripts.swarm.store import AgentRecord
+
+    agent = AgentRecord(AGENT, "eng", "t1", state="finished", runtime_backend=backend, runtime_target=target)
+    monkeypatch.setattr(merging.store, "agents", lambda slug: [agent])
+    merging.pulls[URL] = RED
+    assert merging.run() == []
+    assert merging.rows["t1"]["claimed_by"] == AGENT
+    assert merging.store.claimant("sw", "t1") == AGENT
+    assert ready.record(merging.store, "sw", "t1") is not None
 
 
 def test_a_new_conflicting_head_gets_its_own_restack_notice(merging):
