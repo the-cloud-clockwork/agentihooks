@@ -317,8 +317,24 @@ def open_followup(added_at, **fields):
     return doc
 
 
-@pytest.mark.parametrize("now_ms", [1, 15 * MINUTE])
-def test_follow_up_notices_name_each_item_and_its_completion_command(store, now_ms):
+@pytest.mark.parametrize(
+    ("now_ms", "expected_first"),
+    [
+        (
+            1,
+            "sw-eng-1 added a follow-up f1 on ledger sw: Retries need a cap\n"
+            "Decide it: turn it into a task, close it with a status, or flag it for the operator.\n"
+            "Close it: agentihooks ledger --slug sw followup done f1",
+        ),
+        (
+            15 * MINUTE,
+            "A follow-up f1 on ledger sw is still open fifteen minutes after sw-eng-1 added it: "
+            "Retries need a cap\nDecide it now, or it goes to the operator's Priorities.\n"
+            "Close it: agentihooks ledger --slug sw followup done f1",
+        ),
+    ],
+)
+def test_follow_up_notices_name_each_item_and_its_completion_command(store, now_ms, expected_first):
     run(store, recorded())
     doc = recorded(
         [
@@ -333,12 +349,20 @@ def test_follow_up_notices_name_each_item_and_its_completion_command(store, now_
     run(store, doc, now_ms=1)
     run(store, doc, now_ms=now_ms)
     first, second = texts(store, MASTER_SEAT)[-2:]
-    assert "follow-up f1 on ledger sw" in first
-    assert "Retries need a cap" in first
-    assert first.endswith("Close it: agentihooks ledger --slug sw followup done f1")
+    assert first == expected_first
     assert "follow-up f2 on ledger sw" in second
     assert "Queue needs a limit" in second
     assert second.endswith("Close it: agentihooks ledger --slug sw followup done f2")
+
+
+def test_a_follow_up_event_without_text_keeps_its_identifier_and_completion_command(store):
+    run(store, recorded())
+    run(store, recorded([event(11, 0, "sw-eng-1", "added", "followups/f1")]))
+    assert texts(store, MASTER_SEAT) == [
+        "sw-eng-1 added a follow-up f1 on ledger sw: \n"
+        "Decide it: turn it into a task, close it with a status, or flag it for the operator.\n"
+        "Close it: agentihooks ledger --slug sw followup done f1"
+    ]
 
 
 def test_an_open_follow_up_is_raised_again_after_fifteen_minutes_then_shown_to_the_operator(store):
