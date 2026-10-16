@@ -565,11 +565,11 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 @media (min-width: 1024px) {
   #agents-table { table-layout: fixed; }
   #agents-table .ag-agent { width: 15%; }
-  #agents-table .ag-lane { width: 6%; }
+  #agents-table .ag-lane { width: 5%; }
   #agents-table .ag-profile { width: 9%; }
-  #agents-table .ag-overlays { width: 10%; }
+  #agents-table .ag-overlays { width: 9%; }
   #agents-table .ag-model { width: 12%; }
-  #agents-table .ag-transport { width: 19%; }
+  #agents-table .ag-transport { width: 21%; }
   #agents-table .ag-task { width: 9%; }
   #agents-table .ag-state { width: 9%; }
   #agents-table .ag-acts { width: 0; }
