@@ -93,7 +93,7 @@ def test_a_failed_probe_keeps_the_current_incarnation():
             raise Unreachable("down")
         return replies.pop()
 
-    gate = Qualifier(probe)
+    gate = Qualifier(probe, lambda target: observed().server)
     gate.verdict("t", "one")
     with pytest.raises(Unreachable):
         gate.verdict("t", "two")
@@ -164,7 +164,7 @@ def test_the_same_incarnation_reuses_its_verdict_and_a_new_one_rechecks():
     second = gate.verdict("t", "two")
     assert second is not first
     assert (second.target, second.incarnation) == ("t", "two")
-    assert probes == ["t", "t"]
+    assert probes == ["t", "t", "t"]
 
 
 def test_a_replaced_incarnation_cannot_return():
@@ -184,6 +184,55 @@ def test_targets_keep_separate_verdicts():
     with pytest.raises(Incompatible):
         gate.require("bad", "i", "pane_read")
     assert gate.verdicts["good"].compatible and not gate.verdicts["bad"].compatible
+
+
+def _machine_gate(runner: cases.Runner) -> Qualifier:
+    return Qualifier(capabilities.machine_probe(runner), capabilities.machine_status(runner))
+
+
+def test_an_unchanged_server_reuses_its_verdict_after_one_status_read():
+    runner = cases.Runner(cases.fixture()["server"])
+    gate = _machine_gate(runner)
+    first = gate.verdict(cases.TARGET, "attempt/1")
+    runner.commands.clear()
+    assert gate.verdict(cases.TARGET, "attempt/1") is first
+    assert runner.commands == [["herdr", "--machine", cases.TARGET, *capabilities.STATUS_SERVER]]
+
+
+def test_a_server_restart_under_one_attempt_rechecks_the_verdict():
+    runner = cases.Runner(cases.fixture()["server"])
+    gate = _machine_gate(runner)
+    assert gate.require(cases.TARGET, "attempt/1", "pane_read")[:3] == ["herdr", "--machine", cases.TARGET]
+    runner.server = copy.deepcopy(cases.fixture()["missing_forwarding_server"])
+    with pytest.raises(Incompatible, match=r"^herdr server lacks surface_interest=true$"):
+        gate.require(cases.TARGET, "attempt/1", "pane_read")
+    runner.server = copy.deepcopy(cases.fixture()["server"])
+    assert gate.require(cases.TARGET, "attempt/1", "pane_read")[:3] == ["herdr", "--machine", cases.TARGET]
+    assert gate.verdicts[cases.TARGET].incarnation == "attempt/1"
+    assert gate.retired == {}
+    assert gate.herdr_capability_mismatch_total() == 1
+
+
+def test_an_unreachable_server_never_returns_the_cached_verdict():
+    replies = [observed()]
+
+    def status(target):
+        raise Unreachable("down")
+
+    gate = Qualifier(lambda target: replies[0], status)
+    gate.verdict("t", "one")
+    with pytest.raises(Unreachable, match="^down$"):
+        gate.verdict("t", "one")
+    assert gate.verdicts["t"].incarnation == "one"
+
+
+def test_the_default_status_reads_the_probed_server():
+    probes: list[str] = []
+    gate = Qualifier(lambda target: probes.append(target) or observed())
+    first = gate.verdict("t", "one")
+    assert gate.verdict("t", "one") is first
+    assert first.server == cases.fixture()["server"]
+    assert probes == ["t", "t"]
 
 
 def test_the_machine_probe_reads_forwarded_server_status_and_local_schema():
