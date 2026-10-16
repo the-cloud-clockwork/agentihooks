@@ -65,7 +65,7 @@ def git(*args):
 
 
 if previous:
-    paths = git("diff", "--name-only", "--diff-filter=A", previous, ref, "--", "changelog.d/").split()
+    paths = git("diff", "--name-only", "--no-renames", "--diff-filter=A", previous, ref, "--", "changelog.d/").split()
 else:
     paths = git("ls-tree", "-r", "--name-only", ref, "--", "changelog.d/").split()
 order = ["Added", "Changed", "Deprecated", "Removed", "Fixed", "Security"]
