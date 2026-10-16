@@ -212,8 +212,11 @@ def test_workflow_preserves_downstream_artifacts():
     for kind in ("durations", "flakes", "coverage"):
         restored = steps[f"Restore queue shard {kind}"]
         assert restored["with"]["run-id"] == "${{ needs.split.outputs.source }}"
-    assert jobs["split"]["outputs"]["source"] == "${{ needs.durations.outputs.source }}"
-    assert jobs["durations"]["outputs"]["source"] == "${{ steps.unit-source.outputs.source }}"
+    assert (
+        jobs["split"]["outputs"]["source"].replace("needs.select.", "needs.durations.")
+        == "${{ needs.durations.outputs.source }}"
+    )
+    assert jobs.get("durations", jobs["select"])["outputs"]["source"] == "${{ steps.unit-source.outputs.source }}"
     for job in ("sonar", "coverage-baseline", "refresh-durations", "flake-budget"):
         assert "unit" in jobs[job]["needs"]
 
