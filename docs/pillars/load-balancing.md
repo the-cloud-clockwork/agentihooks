@@ -357,6 +357,79 @@ waits or stops.
 A window whose reset time has passed counts as empty, so a waiting session is
 released by the reset itself.
 
+## Quota usage banner
+
+Claude Code sessions see their own remaining quota in an `ATTENTION TO QOUTA
+USAGE` banner, built by `hooks/context/quota_usage.py`:
+
+```text
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  ATTENTION TO QOUTA USAGE                                                    ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║  5H REMAINING: 96% | resets in 1h59m                                         ║
+║  7D REMAINING: 23% | resets Sun 11:00 UTC                                    ║
+║  Shown every 5 tool calls                                                    ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+```
+
+| When | Injected |
+|---|---|
+| Every user prompt | Always, when quota numbers are available |
+| PreToolUse | Every `QUOTA_USAGE_TOOL_CALLS` tool calls of the session, counted by the enforcement tool call counter; skipped on a call that already carries a quota policy directive |
+
+Where the numbers come from, first match wins:
+
+1. **The session's own snapshot.** The status line writes the `rate_limits`
+   Claude Code reports to `~/.agentihooks/quota_usage/<session id>.json`
+   (folder mode 0700, file mode 0600). SessionEnd deletes it.
+2. **The router cache.** When the session carries exactly one
+   `AH_CC_TOKEN_<slug>`, the banner reads that account's entry from
+   `~/.agentihooks/claude-router-cache.json`.
+
+A reading older than `QUOTA_USAGE_STALE_SEC` is ignored. With no fresh reading,
+or a reading missing either window, no banner is shown. A reset time under an
+hour prints as `resets in 42m`, under a day as `resets in 1h59m`, and later as
+the UTC weekday and time.
+
+Turn the banner off with `QUOTA_USAGE_INJECTION_ENABLED=false`, or change its
+cadence, in the shell before the session starts or in `~/.agentihooks/.env`:
+
+```bash
+QUOTA_USAGE_INJECTION_ENABLED=true
+QUOTA_USAGE_TOOL_CALLS=10
+QUOTA_USAGE_STALE_SEC=300
+```
+
+`QUOTA_USAGE_STALE_SEC` also bounds the reading the [quota policy](#quota-policy)
+trusts.
+
+### Testing the banner cadence
+
+`hooks.context.quota_usage` copies `QUOTA_USAGE_TOOL_CALLS` from `hooks.config`
+when it is imported, and the PreToolUse cadence reads `hooks.config`. A test
+that changes the cadence patches both with `monkeypatch`, so teardown restores
+each module's own value:
+
+```python
+monkeypatch.setattr("hooks.context.quota_usage.QUOTA_USAGE_TOOL_CALLS", 1)
+monkeypatch.setattr(config, "QUOTA_USAGE_TOOL_CALLS", 1)
+```
+
+A test that asserts the `Shown every N tool calls` line sets the cadence it
+expects instead of relying on the default:
+
+```python
+monkeypatch.setattr(quota_usage, "QUOTA_USAGE_TOOL_CALLS", 5)
+```
+
+`test_banner_renders_requested_cadence_after_injection_tests_patch_it` in
+`tests/test_quota_usage.py` guards this. It runs the injection kinds test that
+patches the cadence to 1, then the banner rendering test, in one fresh
+interpreter with xdist and the pytest cache off, and passes only when both
+exit 0. Before the isolation, that order rendered `Shown every 1 tool calls`
+and failed the banner test on unrelated pull requests whenever a CI shard
+happened to run the two tests in that order.
+
 ## Early swarm quota warnings
 
 The swarm tick checks its account quota readings and sends each unfinished agent
@@ -651,6 +724,9 @@ on becomes the refresh authority.
 | `AGENTIHOOKS_HANDOFF_MIN_LEFT` | `20` | Routing left % a handoff target needs |
 | `AGENTIHOOKS_WAIT_MIN_WEEK_LEFT` | `10` | 7-day left % that makes a spent 5h window wait instead of stop |
 | `QUOTA_POLICY_ENABLED` | `true` | Turn the quota policy off |
+| `QUOTA_USAGE_INJECTION_ENABLED` | `true` | Turn the quota usage banner off |
+| `QUOTA_USAGE_TOOL_CALLS` | `5` | Tool calls between quota usage banners |
+| `QUOTA_USAGE_STALE_SEC` | `300` | Age in seconds after which a quota reading is ignored by the banner and the quota policy |
 
 Set them in the shell or in `~/.agentihooks/.env`.
 
