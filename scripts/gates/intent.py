@@ -181,6 +181,23 @@ def pr_head(url: str, run=subprocess.run) -> str | None:
     return _pr_field(url, "head.sha", run)
 
 
+def text_key(title: str, body: str | None) -> str:
+    return hashlib.sha256(json.dumps([title, body or ""]).encode()).hexdigest()
+
+
+def pr_text(url: str, run=subprocess.run) -> str | None:
+    found = PULL.search(url)
+    if not found:
+        return None
+    owner, repo, number = found.groups()
+    try:
+        result = _gh(["gh", "api", f"repos/{owner}/{repo}/pulls/{number}", "--jq", "{title, body}"], run)
+        raw = json.loads(result.stdout) if result.returncode == 0 else None
+        return text_key(raw["title"], raw["body"]) if raw else None
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+        return None
+
+
 def pr_view(url, run=subprocess.run):
     found = PULL.search(url)
     if not found:
@@ -650,6 +667,7 @@ class Check:
     home: object = None
     head: Callable | None = None
     named: Callable | None = None
+    text: Callable | None = None
 
     def run(self, doc):
         if self.mode == "off":
@@ -726,6 +744,7 @@ class Check:
             previous
             and previous["head"] == pr.get("head")
             and previous.get("inputs") == inputs
+            and previous.get("text") == text_key(pr["title"], pr["body"])
             and not self._named_moved(previous)
         ):
             return _Judgment(pr, previous, None, None)
@@ -770,7 +789,11 @@ class Check:
         fixed = bool(previous) and previous["verdict"] == FAIL and previous["head"] != head
         rounds = min(previous["coach_rounds"] + fixed, 2) if previous else 0
         _remember(self.slug, task, self.now_ms, state, answer, self.home)
-        coached = {"coach_rounds": rounds, "head": head, "url": task["pr_url"]} if self.mode == "coach" else {}
+        coached = (
+            {"coach_rounds": rounds, "head": head, "url": task["pr_url"], "text": text_key(pr["title"], pr["body"])}
+            if self.mode == "coach"
+            else {}
+        )
         fields = {
             **_detail(answer),
             "phase": task.get("phase"),
@@ -806,10 +829,17 @@ class Check:
             or not _same_phase(previous, task)
             or previous.get("inputs") != inputs
             or previous["head"] != self.head(task["pr_url"])
+            or self._text_moved(previous, task["pr_url"])
             or self._named_moved(previous)
         ):
             return None
         return previous
+
+    def _text_moved(self, previous, url):
+        if self.text is None:
+            return False
+        current = self.text(url)
+        return current is None or previous.get("text") != current
 
     def _keep(self, task, previous, verdicts):
         verdicts.write(

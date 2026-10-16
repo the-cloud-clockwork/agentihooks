@@ -13,6 +13,33 @@ continue. Reopening the viewer attaches to the same thread.
 An unsent draft belongs to the viewer: inbox delivery preserves it while the
 viewer stays open, but closing and reopening the viewer does not restore it.
 
+## Runtime dependencies
+
+The installed `agentihooks` tool includes `websockets>=15.0` as a runtime
+dependency. Managed app-server launches can therefore connect without installing
+development extras. The client uses `websockets.sync.client` when it connects;
+an installation missing that package fails at connection time, even if importing
+the protocol module alone succeeds.
+
+Use the [installed tool setup and import check](../getting-started/installation.md#installed-tool-and-codex-app-server-dependencies)
+to verify the CLI's environment. Installing the package in a separate workspace
+venv does not repair the uv tool environment.
+
+Worker images install a hashed runtime lock before installing AgentiHooks with
+`--no-deps`. The delivered dependency change pins `websockets==17.2` in that
+worker lock and updates its recorded checksum. The runtime dependency coverage
+check scans imports across the Codex session package and app-server probe,
+maps third party imports to distributions, and requires them in both the
+runtime dependency set and the worker lock. This keeps future client imports
+from silently depending on development-only packages.
+
+The delivery proof for [the runtime dependency fix](https://github.com/the-cloud-clockwork/agentihooks/pull/3552)
+verified a fresh tool install without development extras, imported
+`websockets.sync.client`, and launched an admitted Codex worker on an isolated
+scratch swarm. Its supervisor reached `state=connected` with a thread recorded
+and its mounted profile validated. An import check alone does not establish
+that a live execution connected or that inbox delivery works.
+
 ## Choose the transport
 
 The swarm setting `codex-inbox-transport` accepts `app_server` (what
@@ -35,6 +62,18 @@ agentihooks swarm <id> set codex-inbox-transport=legacy
 The swarm launch path passes `--codex-transport app_server` and the admitted
 seat to `init-agent`. This flag is for a managed swarm execution, which needs
 its swarm identity and admission; it is not a standalone terminal switch.
+
+After the next admitted launch, inspect its recorded transport and state:
+
+```bash
+agentihooks swarm <id> status --json
+```
+
+Check the selected transport in status, then confirm the supervisor's launch
+log reports `state=connected` with its execution, endpoint and thread.
+For an end to end inbox check, follow the
+[scratch swarm canary order](codex-inbox-transport.md#canary-order) and confirm
+an item is answered from that thread. Keep the proof isolated from live work.
 
 Delivery and attachment depend on the recorded harness and transport:
 
@@ -131,6 +170,7 @@ The live qualification also recorded these viewer limits:
 
 | Symptom | Meaning and action |
 |---|---|
+| Launch fails with `ModuleNotFoundError: No module named 'websockets'` | The launching tool environment lacks its runtime dependency. Update the checkout to a revision containing the dependency fix, reinstall the tool using the installation instructions, and repeat the tool Python import check before retrying an admitted launch. Installing development extras in another venv does not fix this environment. |
 | Attach reports `failed` or `exited` | The recorded app-server ended; there is no live thread to attach through that transport. Inspect execution status before attempting recovery. |
 | Attach times out without a connected thread | Startup has not produced a connected thread within the timeout. Check the managed server's launch result and serve log; increasing the timeout alone does not repair a failed launch. |
 | Reopen reports no connected thread | The immediate reopen command requires an already connected thread. Use the waiting attach helper during startup. |

@@ -2,8 +2,9 @@ import io
 import json
 import os
 import subprocess
+from http.client import BadStatusLine
 from pathlib import Path
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 
 import pytest
 
@@ -419,6 +420,51 @@ def test_unreachable_openbao_falls_back_to_the_owner_only_codex_file(tmp_path, m
     assert _codex_vars(out) == {"AH_CX_TOKEN_oneatx_io": "cx1"}
     assert len(err.strip().splitlines()) == 2
     assert "codex.env" in err and "cx1" not in err
+
+
+@pytest.mark.parametrize(
+    "error",
+    [URLError("refused"), TimeoutError("slow"), OSError("no route")],
+)
+def test_an_unreachable_openbao_costs_one_timeout_not_two(tmp_path, monkeypatch, capsys, error):
+    _codex_environ(tmp_path, monkeypatch)
+    seen = _openbao(monkeypatch, error=error)
+    _fallback(tmp_path, "AH_CC_TOKEN_one=tok-1\n")
+    _codex_fallback(tmp_path, "AH_CX_TOKEN_oneatx_io=cx1\n")
+
+    assert account_env.main(["env"]) == 0
+
+    out, err = capsys.readouterr()
+    assert len(seen) == 1 and "codex" not in seen[0][0]
+    assert _evaluated(out) == {"AH_CC_TOKEN_one": "tok-1"}
+    assert _codex_vars(out) == {"AH_CX_TOKEN_oneatx_io": "cx1"}
+    assert len(err.strip().splitlines()) == 2
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [HTTPError("http://bao", 403, "denied", None, None), BadStatusLine("garbled"), b"not json", b'{"data": {}}'],
+)
+def test_an_openbao_that_answers_the_claude_read_with_an_error_still_gets_the_codex_read(
+    tmp_path, monkeypatch, capsys, answer
+):
+    _codex_environ(tmp_path, monkeypatch)
+    seen = []
+
+    def fake(request, timeout):
+        seen.append(request.full_url)
+        if "codex" not in request.full_url:
+            if isinstance(answer, Exception):
+                raise answer
+            return _Response(answer)
+        return _Response(json.dumps({"data": {"data": CODEX_BASE}}).encode())
+
+    monkeypatch.setattr(account_env, "urlopen", fake)
+
+    assert account_env.main(["env"]) == 0
+
+    assert len(seen) == 2
+    assert _codex_vars(capsys.readouterr().out) == CODEX_BASE
 
 
 def test_a_machine_without_openbao_loads_the_codex_file(tmp_path, monkeypatch, capsys):

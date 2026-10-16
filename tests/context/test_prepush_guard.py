@@ -132,6 +132,9 @@ def test_push_from_another_directory_resolves_the_repository(repo, tmp_path, mon
         "cd -P {worktree} && git push",
         "cd && cd worktree && git push",
         "cd {worktree}; cd missing; git push",
+        "env -C {worktree} git push",
+        "cd {worktree}; cd ..; cd -; git push",
+        "cd {worktree} && (git push)",
     ],
 )
 def test_the_push_is_graded_in_the_folder_the_command_changes_into(repo, tmp_path, monkeypatch, command):
@@ -146,6 +149,27 @@ def test_the_push_is_graded_in_the_folder_the_command_changes_into(repo, tmp_pat
     with pytest.raises(BlockAction) as blocked:
         check_prepush(_bash(command.format(worktree=worktree), repo))
     assert str(blocked.value) == _message(worktree)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "(cd {worktree}); git push",
+        "(cd {worktree} && true) && git push",
+        "cd {worktree} | true; git push",
+        "cd {worktree} & git push",
+        "env -C {worktree} true; git push",
+        "cd {worktree} && cd - && git push",
+        "cd -; git push",
+    ],
+)
+def test_a_folder_change_that_does_not_last_leaves_the_push_where_it_started(repo, tmp_path, command):
+    worktree = _init(tmp_path / "worktree")
+    _stamp(worktree)
+
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(_bash(command.format(worktree=worktree), repo))
+    assert str(blocked.value) == _message(repo)
 
 
 @pytest.mark.parametrize("workdir", ["{worktree}", "../worktree"])
