@@ -2043,7 +2043,7 @@ jobs:
           repositories: ${{ github.event.repository.name }}
           permission-actions: read
 
-      # The protected copy decides and refuses a head whose preflight producer differs from the grader's.
+      # The protected copy gives the reuse verdict and refuses a head whose preflight producer differs from the grader's.
       - name: Check out the protected grader
         if: github.event_name == 'pull_request'
         env:

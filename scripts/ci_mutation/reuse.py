@@ -114,8 +114,8 @@ def main() -> int:
     parser.add_argument("--base")
     parser.add_argument("--grader")
     args = parser.parse_args()
-    if args.head and not (args.base and args.grader):
-        parser.error("--head grades an exact head and needs --base and --grader")
+    if any((args.head, args.base, args.grader)) and not all((args.head, args.base, args.grader)):
+        parser.error("--head, --base and --grader go together")
     head = args.head or subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip()
     row = reuse(head, args.branch, args.run, args.base, args.grader)
     if row:

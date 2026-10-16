@@ -467,11 +467,20 @@ def test_a_grader_that_moved_only_outside_the_producers_still_reuses(pair, repo,
     assert written == "reused=true\n"
 
 
-@pytest.mark.parametrize("given", [["--base", "b"], ["--grader", "g"], []])
-def test_an_exact_head_without_its_base_and_grader_is_refused(pair, monkeypatch, capsys, given):
-    _, _, _, head = pair
-    monkeypatch.setattr("sys.argv", ["reuse", "a&b", "99", "--head", head, *given])
+@pytest.mark.parametrize(
+    "given",
+    [
+        ["--head", "h", "--base", "b"],
+        ["--head", "h", "--grader", "g"],
+        ["--head", "h"],
+        ["--base", "b", "--grader", "g"],
+        ["--base", "b"],
+        ["--grader", "g"],
+    ],
+)
+def test_an_exact_head_without_its_base_and_grader_is_refused(monkeypatch, capsys, given):
+    monkeypatch.setattr("sys.argv", ["reuse", "a&b", "99", *given])
     with pytest.raises(SystemExit) as refused:
         reuse.main()
     assert refused.value.code == 2
-    assert "--head grades an exact head and needs --base and --grader" in capsys.readouterr().err
+    assert "--head, --base and --grader go together" in capsys.readouterr().err
