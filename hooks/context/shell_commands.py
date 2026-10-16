@@ -111,7 +111,7 @@ def _expand(words: list[str], depth: int, folders: list[str]) -> tuple[list[tupl
 
 
 def _heredoc_marker(line: str, quote: str | None) -> tuple[int | None, str | None]:
-    escaped = skip = 0
+    escaped = skip = arithmetic = 0
     for index, character in enumerate(line):
         if index == escaped - 1 or index < skip:
             continue
@@ -119,7 +119,11 @@ def _heredoc_marker(line: str, quote: str | None) -> tuple[int | None, str | Non
             escaped = index + 2
         elif quote is None and line.startswith("<<<", index):
             skip = index + 3
-        elif quote is None and line.startswith("<<", index) and line.count("((", 0, index) > line.count("))", 0, index):
+        elif quote is None and line.startswith("((", index):
+            arithmetic, skip = arithmetic + 1, index + 2
+        elif quote is None and line.startswith("))", index):
+            arithmetic, skip = max(arithmetic - 1, 0), index + 2
+        elif quote is None and line.startswith("<<", index) and arithmetic:
             skip = index + 2
         elif quote is None and line.startswith("<<", index):
             return index, None
@@ -171,15 +175,15 @@ def _heredocs(command: str, depth: int, folders: list[str]) -> tuple[str, list[t
                 break
             body.append(content)
         kept.append(prefix + rest + "\n")
-        readers = commands(prefix, depth + 1)
+        readers = located(prefix, depth + 1, folders)
         if rest.lstrip().startswith("|"):
-            readers += commands(rest, depth + 1)
-        for tokens in readers:
+            readers += located(rest, depth + 1, readers[-1][1] if readers else folders)
+        for tokens, here in readers:
             name = Path(tokens[0]).name
             if name in _SHELLS:
-                result.extend(located("".join(body), depth + 1, folders))
+                result.extend(located("".join(body), depth + 1, here))
             elif re.fullmatch(r"python[\d.]*|pypy[\d.]*", name):
-                result.append(([name, "-c", "".join(body)], folders))
+                result.append(([name, "-c", "".join(body)], here))
     return "".join(kept), result
 
 
@@ -227,7 +231,8 @@ def located(command: str, depth: int = 0, folders: list[str] | None = None) -> l
     piped, frames, words = False, [], []
     for position, token in enumerate(tokens):
         redirect = token == "&" and (
-            (words and words[-1].endswith((">", "<"))) or "".join(tokens[position + 1 : position + 2]).startswith(">")
+            (words and words[-1].endswith((">", "<")))
+            or next(iter(tokens[position + 1 : position + 2]), "").startswith(">")
         )
         if not token or token.strip(_SEPARATORS) or redirect:
             words.append(token)
@@ -253,7 +258,8 @@ def located(command: str, depth: int = 0, folders: list[str] | None = None) -> l
                 current = pipeline if piped else current
                 piped, pipeline = False, current
                 sequence = sequence if operator in {"&&", "||"} else current
-    result.extend(_expand(words, depth, current)[0])
+    pairs, _ = _expand(words, depth, current)
+    result.extend(pairs)
     for script in _substitutions(command):
         result.extend(located(script, depth + 1, base))
     return result

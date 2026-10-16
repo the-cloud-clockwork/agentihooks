@@ -184,6 +184,8 @@ def test_heredoc_and_separated_shell_depths_share_the_limit():
         ("bash -c 'cd /a'; git push", []),
         ("env -C /a git push", ["/a"]),
         ("env --chdir=/a true; git push", []),
+        ("env --chdir=/a git push", ["/a"]),
+        ("env -C/a git push", ["/a"]),
         ("cd /b && env --chdir /a git push", ["/b", "/a"]),
         ("cd /a && cd /b && cd - && git push", ["/a", "/b", "-"]),
         ("cd -P /a && git push", ["/a"]),
@@ -239,3 +241,24 @@ def test_an_arithmetic_left_shift_is_not_a_heredoc(command):
     from hooks.context.shell_commands import commands
 
     assert ["pytest", "-q"] in commands(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cd /b && bash <<EOF\ngit push\nEOF",
+        "cd /b && cat <<EOF | bash\ngit push\nEOF",
+    ],
+)
+def test_a_heredoc_script_runs_in_the_folder_of_its_shell(command):
+    from hooks.context.shell_commands import located
+
+    assert (["git", "push"], ["/b"]) in located(command)
+
+
+def test_quoted_parentheses_do_not_hide_a_heredoc():
+    from hooks.context.shell_commands import commands
+
+    parsed = commands('echo "((" ; bash <<EOF\npytest -q\nEOF')
+    assert ["pytest", "-q"] in parsed
+    assert ["bash"] in parsed
