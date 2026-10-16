@@ -45,6 +45,14 @@ def remove(slug: str, environ=os.environ) -> dict:
     return call(f"proof-ledgers/{slug}/remove", {}, environ)
 
 
+def migrate(slug: str, owner: dict, environ=os.environ) -> dict:
+    return call(f"proof-ledgers/{slug}/migrate", owner, environ)
+
+
+def controller_control(slug: str, owner: dict, request: dict, environ=os.environ) -> dict:
+    return call(f"proof-ledgers/{slug}/controller-controls", {"owner": owner, "request": request}, environ)
+
+
 def _control_call(slug: str, route: str, payload: dict, headers: dict, environ) -> dict:
     request = urllib.request.Request(
         f"{ledger_link.base(environ)}/api/v1/proof-ledgers/{slug}/{route}",

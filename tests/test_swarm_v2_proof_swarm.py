@@ -130,6 +130,27 @@ def test_explicit_parent_alone_migrates_without_a_control(store):
     assert calls == [(SLUG, setting, environ)]
 
 
+def test_configured_control_without_parent_is_refused(store):
+    swarm(store, SLUG)
+    setting = {**json.loads(SETTING), "control": {"control": "pause"}}
+    with pytest.raises(SwarmError) as refused:
+        proof_swarm.reconcile({**ENV, proof_swarm.PROOF_ENV: json.dumps(setting)}, store, SLUG, Ledger())
+    assert str(refused.value) == "proof controls need an explicit requester parent"
+
+
+def test_configured_migration_and_control_each_check_the_lease(store):
+    swarm(store, SLUG)
+    ledger = Ledger()
+    calls = []
+    setting = {**json.loads(SETTING), "parent": "external-parent", "control": {"control": "pause"}}
+    ledger.migrate = lambda *args: calls.append("migration")
+    ledger.controller_control = lambda *args: calls.append("control")
+    proof_swarm.reconcile(
+        {**ENV, proof_swarm.PROOF_ENV: json.dumps(setting)}, store, SLUG, ledger, lambda: calls.append("lease")
+    )
+    assert calls == ["lease", "migration", "lease", "control"]
+
+
 def test_a_proof_named_other_than_the_served_swarm_is_removed_and_refused(store):
     ledger = Ledger(OTHER)
 

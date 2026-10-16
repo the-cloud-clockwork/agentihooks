@@ -292,3 +292,55 @@ def test_controller_controls_do_not_enqueue_pause_again(owned):
     status, result = owned.invoke(f"/{owned.slug}/controller-controls", payload, owned.controller)
     assert status == 200
     assert result == {"data": {"state": "paused"}}
+
+
+@pytest.mark.parametrize("target", ["missing", "real", "nonscratch"])
+def test_migration_refuses_missing_real_and_nonscratch_targets(owned, target):
+    slug = owned.slug
+    if target == "missing":
+        server.repository.delete(slug)
+    elif target == "real":
+        slug = SLUG
+    else:
+        owned.store.update(slug, scratch=False)
+    payload = {"parent": "external-parent", "agent": owned.owner, "task": "contract"}
+    status, result = owned.invoke(f"/{slug}/migrate", payload, owned.controller)
+    assert status == 403
+    assert result["error"]["message"] == "Migration needs an existing scratch proof"
+
+
+def test_migration_fences_a_concurrent_owner(owned, monkeypatch):
+    key = owned.store.key(owned.slug, "proof-creator")
+    owned.store.redis.delete(key)
+    pipeline = owned.store.redis.pipeline
+    other = {"parent": "racing-parent", "owner": owned.owner}
+
+    def racing_pipeline():
+        pipe = pipeline()
+        execute = pipe.execute
+
+        def race():
+            owned.store.redis.hset(key, mapping=other)
+            return execute()
+
+        pipe.execute = race
+        return pipe
+
+    monkeypatch.setattr(owned.store.redis, "pipeline", racing_pipeline)
+    payload = {"parent": "external-parent", "agent": owned.owner, "task": "contract"}
+    status, result = owned.invoke(f"/{owned.slug}/migrate", payload, owned.controller)
+    assert status == 409
+    assert result["error"]["message"] == "Proof creator changed during migration"
+    assert owned.store.redis.hgetall(key) == other
+
+
+def test_controller_controls_require_controller_and_enqueue_only_scoped_pause(owned):
+    payload = {"owner": {"parent": SLUG, "agent": owned.owner, "task": "contract"}, "request": {"control": "pause"}}
+    status, result = owned.invoke(f"/{owned.slug}/controller-controls", payload, owned.parent)
+    assert status == 403
+    assert result["error"]["message"] == "Proof ledgers need the controller credential"
+    status, result = owned.invoke(f"/{owned.slug}/controller-controls", payload, owned.controller)
+    assert status == 200
+    assert result["data"]["argv"] == ["pause"]
+    assert result["data"]["state"] == "pending"
+    assert "credential" not in result["data"]
