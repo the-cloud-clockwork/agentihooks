@@ -36,6 +36,24 @@ def test_native_rate_limits_render_requested_banner(monkeypatch, tmp_path):
     assert "used" not in banner
 
 
+def test_banner_renders_requested_cadence_after_injection_tests_patch_it(tmp_path):
+    leaker = "tests/context/test_injection_kinds.py::test_tool_call_blocks_rank_by_kind"
+    banner = f"{Path(__file__).resolve()}::{test_native_rate_limits_render_requested_banner.__name__}"
+    env = {k: v for k, v in os.environ.items() if k != "PYTEST_ADDOPTS"} | {"AGENTIHOOKS_HOME": str(tmp_path)}
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:xdist", "-p", "no:cacheprovider"]
+        + ["-c", str(_PROJECT_ROOT / "pyproject.toml"), "--rootdir", str(_PROJECT_ROOT), leaker, banner],
+        cwd=_PROJECT_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-2000:]
+    assert "3 passed" in result.stdout
+
+
 def test_stale_native_snapshot_is_not_injected(monkeypatch, tmp_path):
     import hooks.context.quota_usage as quota_usage
 
