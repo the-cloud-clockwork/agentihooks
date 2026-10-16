@@ -494,11 +494,15 @@ def test_the_report_names_sequential_container_image_pulls_with_their_own_durati
     assert sample["stages"]["image"] == 32000
     result = stages.report([sample])
     assert result["scenarios"]["warm-node/uncached-image"]["image_pulls"] == [
-        {"container": "bundle", "image": "registry/bundle:release", "duration_ms": {"n": 1, "p50": 2000, "p95": 2000}},
+        {
+            "container": "bundle",
+            "image": "registry/bundle:release",
+            "duration_ms": {"n": 1, "min": 2000, "p50": 2000, "p95": 2000, "max": 2000},
+        },
         {
             "container": "worker",
             "image": "registry/worker:release",
-            "duration_ms": {"n": 1, "p50": 30000, "p95": 30000},
+            "duration_ms": {"n": 1, "min": 30000, "p50": 30000, "p95": 30000, "max": 30000},
         },
     ]
     rendered = bench.markdown(result, "sequential pulls")
