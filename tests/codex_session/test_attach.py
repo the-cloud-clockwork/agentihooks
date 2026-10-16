@@ -290,14 +290,15 @@ def test_reopen_refuses_an_execution_with_no_connected_thread(monkeypatch, recor
     assert opened == []
 
 
-def test_the_local_terminal_opens_the_viewer_in_the_swarm_workspace(monkeypatch):
+@pytest.mark.parametrize(
+    ("slug", "workspace"), [("proof-323133-cxc8-1", "proof-323133-cxc8-1"), ("sw", "agentihooks-323133")]
+)
+def test_the_local_terminal_opens_the_viewer_in_the_swarm_workspace(monkeypatch, slug, workspace):
     from pathlib import Path
     from types import SimpleNamespace
 
     from scripts import herdr_host
-    from scripts.swarm import naming
 
-    slug = "proof-323133-cxc8-1"
     config = SimpleNamespace(repo="/home/op/dev/agentihooks", code="323133", slug=slug)
     store = SimpleNamespace(
         agents=lambda asked: _agents() if asked == slug else [],
@@ -321,7 +322,7 @@ def test_the_local_terminal_opens_the_viewer_in_the_swarm_workspace(monkeypatch)
             Path(config.repo),
             "sw-master-1",
             attach.viewer_argv("codex", RECORD),
-            naming.space(config.repo, config.code, config.slug),
+            workspace,
             environ,
         )
     ]
