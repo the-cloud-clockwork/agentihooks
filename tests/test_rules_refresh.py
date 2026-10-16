@@ -1,5 +1,6 @@
 """Tests for the rules_refresh one-shot delivery system."""
 
+import hashlib
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -332,7 +333,9 @@ class TestProfileHomeScope:
         )
         rules_refresh.write_refresh_marker("master", frontend_payload)
         received = []
+        logged = []
         monkeypatch.setattr(rules_refresh, "inject_context", received.append)
+        monkeypatch.setattr(rules_refresh, "log", lambda *args: logged.append(args))
 
         rules_refresh.maybe_inject("s-master")
 
@@ -340,4 +343,12 @@ class TestProfileHomeScope:
         assert "--- CLAUDE.md ---\nYou are master\n" in received[0]
         assert "--- rules/master-role.md ---\nMaster rule\n" in received[0]
         assert "frontend" not in received[0].lower()
+        assert (
+            "rules_refresh: delivered",
+            {
+                "profile": "master",
+                "session_id": "s-master",
+                "content_hash": hashlib.sha256(received[0].encode("utf-8")).hexdigest()[:16],
+            },
+        ) in logged
         assert rules_refresh._load_marker("master") is None
