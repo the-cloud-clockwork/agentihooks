@@ -3,6 +3,18 @@ import json
 import os
 
 
+async def _name_tls(request):
+    request.extensions["sni_hostname"] = request.headers["Host"]
+
+
+def gateway_client(**options):
+    from mcp.shared._httpx_utils import create_mcp_http_client
+
+    client = create_mcp_http_client(**options)
+    client.event_hooks["request"].append(_name_tls)
+    return client
+
+
 async def summary(slug: str, window: dict, timeout: float) -> dict:
     from mcp import ClientSession
     from mcp.client.streamable_http import streamablehttp_client
@@ -13,7 +25,9 @@ async def summary(slug: str, window: dict, timeout: float) -> dict:
         "x-mcp-servers": "langfuse_tools",
     }
     async with asyncio.timeout(timeout):
-        async with streamablehttp_client(os.environ["LANGFUSE_MCP_URL"], headers=headers, timeout=timeout) as (
+        async with streamablehttp_client(
+            os.environ["LANGFUSE_MCP_URL"], headers=headers, timeout=timeout, httpx_client_factory=gateway_client
+        ) as (
             read,
             write,
             _,
