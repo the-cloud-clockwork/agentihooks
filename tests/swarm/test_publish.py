@@ -735,6 +735,7 @@ def test_parked_successor_restacks_and_publishes_with_predecessor_checkout_prese
     git(repository, "merge", "--squash", "blocker")
     git(repository, "commit", "-qm", "Squash dependency")
     git(repository, "push", "origin", "dev")
+    git(root, "branch", "XX--verifyXX")
     p.task.update(branch="predecessor", parked_on=["dependency"], stacked_base=base)
     p.ledger.state = lambda slug: {"tasks": [p.task, {"id": "dependency", "state": "done"}]}
     if prepared:
