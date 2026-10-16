@@ -264,6 +264,22 @@ def test_a_judged_verdict_keeps_its_basis_and_each_rebase_it_went_through(redis)
     assert verdict["rebases"] == [{"measure": 0.5, "basis": "task hours", "at": NOW + HOUR_MS}]
 
 
+def test_a_fired_count_verdict_keeps_every_rebase_with_its_empty_basis(redis):
+    store = VerdictStore(redis, "verdicts")
+    _legacy(redis, 3)
+    later = NOW + HOUR_MS
+    _overran(redis, 22.3, "run-1", later)
+    _returns(store, redis, later)
+    standing.clear(redis, "sw", "ci_overrun")
+    _detected(redis, 0.3, "d1", later + HOUR_MS)
+    _returns(store, redis, later + HOUR_MS)
+    verdict = json.loads(redis.hget("verdicts", "bottleneck-stage/ci_overrun"))["verdict"]
+    assert verdict["rebases"] == [
+        {"measure": 3, "basis": "", "at": later},
+        {"measure": 22.3, "basis": MINUTES, "at": later + HOUR_MS},
+    ]
+
+
 def test_the_measure_basis_is_left_out_of_equality_and_the_shown_finding():
     hours = Finding("bottleneck stage", "ci_overrun", "s", (), "t", 1.0, "task hours")
     minutes = Finding("bottleneck stage", "ci_overrun", "s", (), "t", 1.0, MINUTES)
