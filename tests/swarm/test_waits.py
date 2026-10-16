@@ -271,6 +271,28 @@ def test_the_merge_wait_rereads_only_an_open_pull_request_the_queue_does_not_lis
     assert waits.resolution(on, {}, None, {URL: pull}.get, {URL: fresh}.get, False) == outcome
     assert on == {"kind": "merge", "target": URL, **({"queued": True} if pull is LISTED else {})}
 
+@pytest.mark.parametrize(
+    "current, expected",
+    [
+        (PullRequest("MERGED", 2, 1, False), "now merged"),
+        (PullRequest("OPEN", None, 1, False, resolved=True), "now green; dropped from the merge queue; queue it again"),
+        (
+            PullRequest("OPEN", None, 1, True, resolved=True, failed=("Unit tests",)),
+            "now red; failed: Unit tests; fix the failing checks and queue it again",
+        ),
+        (
+            PullRequest("CLOSED", None, 1, False, resolved=True),
+            "now closed unmerged; reopen it or record why it was closed",
+        ),
+    ],
+)
+def test_a_merge_wait_reports_the_current_outcome_and_next_step(current, expected):
+    held = {"kind": "merge", "target": URL, "queued": True}
+    stale = PullRequest("OPEN", None, 1, True, resolved=True, failed=("Old check",))
+    assert waits.resolution(held, {}, None, lambda _: stale, lambda _: current, False) == (
+        f"pull request {URL}, {expected}"
+    )
+
 
 def test_a_seen_entry_gets_no_fresh_grace_once_the_queue_drops_it():
     on = {"kind": "merge", "target": URL}
