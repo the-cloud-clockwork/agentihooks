@@ -69,6 +69,14 @@ def checkout_fields(root: Path) -> dict:
     }
 
 
+def branch_record(fields: dict, repository: Path, task: dict) -> dict:
+    return {
+        "branch": fields["branch"],
+        "branch_repo": fields["branch_repo"],
+        "repository_branches": {**task.get("repository_branches", {}), str(repository): fields["branch"]},
+    }
+
+
 def repository_root(repo: Path) -> Path:
     return Path(git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")).parent
 
@@ -121,6 +129,9 @@ def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> d
             output = execute(command, repository)
             root = Path(output.splitlines()[-1])
         fields.append({**checkout_fields(root), "repository": str(repository)})
+    update = branch_record(fields[-1], Path(fields[-1]["repository"]), task)
+    update["repository_branches"].update({entry["repository"]: entry["branch"] for entry in fields})
+    ledger.update_task(slug, agent.task, update, by=agent.name)
     result = fields[0] if len(fields) == 1 else {"worktrees": fields}
     return {**result, "repository_source": "task" if task.get("repositories") else "swarm default"}
 
@@ -231,7 +242,6 @@ def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, mess
         if fields.get("gate") == "AgentiHooks touched Python fallback":
             detail = f"AgentiHooks touched Python fallback for {root}: {detail}"
         raise SwarmError(f"{detail}; Next: {retry}") from exc
-    update = {key: fields[key] for key in ("branch", "branch_repo")}
-    update["repository_branches"] = {**task.get("repository_branches", {}), str(primary): fields["branch"]}
+    update = branch_record(fields, primary, task)
     ledger.update_task(slug, agent.task, update, by=agent.name)
     return {**fields, "head": head}

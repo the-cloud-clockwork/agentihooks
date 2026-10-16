@@ -78,6 +78,7 @@ def test_prepare_keeps_one_worktree_per_repository(repositories):
     assert roots == [f"{p.swarm}-worktree", f"{p.bundle}-worktree"]
     assert [git(root, "show", "HEAD:chosen.txt") for root in roots] == ["agentihooks", "agentihooks-bundle"]
     assert publish.prepare("swarm", p.agent, str(p.swarm), p.ledger) == fields
+    assert p.task["repository_branches"] == {str(p.swarm): "engineer-test", str(p.bundle): "engineer-test"}
 
 
 def test_prepare_names_the_default_repository_without_inferring_prose(repositories):
@@ -309,6 +310,8 @@ def test_prepare_reuses_a_legacy_branch_with_one_explicit_repository(repositorie
     root = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)["worktree"]
     git(root, "branch", "-m", "prior-task-branch")
     p.task["branch"] = "prior-task-branch"
+    p.task.pop("repository_branches", None)
+    p.task.pop("branch_repo", None)
     if record_remote:
         p.task["branch_repo"] = git(p.bundle, "remote", "get-url", "origin")
     monkeypatch.chdir(p.swarm)
