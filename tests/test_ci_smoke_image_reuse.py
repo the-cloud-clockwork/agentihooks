@@ -34,7 +34,7 @@ if [[ "$1" == manifest ]]; then
   printf '%s\\n' '{"manifests":[{"digest":"sha256:runtime","platform":{"os":"linux","architecture":"amd64"}}]}'
 fi
 if [[ "$1" == build || "$1" == network && "$2" == create || "$1" == compose && " $* " == *' up '* ]]; then
-  printf 'startup boundary reached\\n'
+  printf 'startup boundary reached\\n' >&2
   exit 23
 fi
 """
@@ -54,7 +54,7 @@ fi
         text=True,
         timeout=10,
     )
-    assert "startup boundary reached" in result.stdout, result.stderr
+    assert "startup boundary reached" in result.stderr, result
     calls = log.read_text().splitlines()
     builds = [call for call in calls if call.startswith("build ") or " --build " in f" {call} "]
     assert bool(builds) is not shared
