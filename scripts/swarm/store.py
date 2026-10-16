@@ -68,7 +68,7 @@ class SwarmConfig:
     claude_model: str = default_models.DEFAULTS["claude"]
     codex_model: str = default_models.DEFAULTS["codex"]
     scratch: bool = False
-    codex_inbox_transport: str = LEGACY_TRANSPORT
+    codex_inbox_transport: str = APP_SERVER_TRANSPORT
 
 
 def scaling_refusal(config):
@@ -195,7 +195,7 @@ class RedisStore:
             raw.get("claude_model") or default_models.DEFAULTS["claude"],
             raw.get("codex_model") or default_models.DEFAULTS["codex"],
             raw.get("scratch") == "True",
-            raw.get("codex_inbox_transport") or LEGACY_TRANSPORT,
+            raw.get("codex_inbox_transport") or APP_SERVER_TRANSPORT,
         )
 
     def update(self, slug, **changes):
