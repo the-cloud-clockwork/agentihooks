@@ -539,7 +539,10 @@ def test_profile_choice_reads_project_and_phase_intent_through_the_hosted_server
 def test_a_pinned_controller_reads_intent_with_its_controller_credential(hosted, tmp_path):
     _hold("engineer@323133-0300", tmp_path)
 
-    with patch.object(ledger, "launch_token", side_effect=AssertionError("controller read requested a worker token")):
+    with (
+        patch.object(ledger, "BASE", ""),
+        patch.object(ledger, "launch_token", side_effect=AssertionError("controller read requested a worker token")),
+    ):
         state = profile_choice.state(SLUG, {"id": "t1", "phase": "p1"})
 
     assert (state["project_intent"], state["phase_intent"]) == (
