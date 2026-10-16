@@ -187,6 +187,10 @@ Source: startup fixture anton-outage mode at 1dd43842b6bc51122e6bf19cb539d6fc619
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | cold-node/uncached-image | 1 | 1 | none | registry_unavailable 1 | 225.7 / 225.7 (n 1) | 112.0 / 112.0 (n 1) | 6.0 / 6.0 (n 1) | 21.3 / 21.3 (n 1) | 197.7 / 197.7 (n 1) | 0.8 / 0.8 (n 1) | 23.5 / 23.5 (n 1) | 88.5 / 88.5 (n 1) | 14.2 / 14.2 (n 1) | 1.0 / 1.0 (n 1) | n/a |
 
+| Scenario | Container | Image | Pull duration |
+|---|---|---|---|
+| cold-node/uncached-image |  | 127.0.0.1:5000/the-cloud-clockwork/agentihooks-worker:dev | 23.5 / 23.5 (n 1) |
+
 ## Limits of this measurement
 
 - Node provision runs from the Pod waiting to the new node accepting it: trigger, instance, join and schedule. Image pull with retries is the successful pull plus the time lost to failed pulls before it. Pod start (sandbox, containers, init containers) and bootstrap are separate columns. No column sums them into one launch figure.
