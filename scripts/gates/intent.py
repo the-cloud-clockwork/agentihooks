@@ -980,8 +980,7 @@ class IntentGate:
         return call.tool == "Bash" and any(word in call.command for word in ("merge", "done", "ready"))
 
     def decide(self, call, who, state, mode="enforce"):
-        commands = [words for words in simple_commands(call.command) if _gated(words)]
-        if not (who.pinned and who.task) or not commands:
+        if not (who.pinned and who.task) or not any(map(_gated, simple_commands(call.command))):
             return Decision()
         record = state.read(who.task)
         pulls = Verdicts(state.slug, f"{NAME}-pulls", state.home)
