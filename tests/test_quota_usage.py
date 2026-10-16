@@ -38,11 +38,16 @@ def test_native_rate_limits_render_requested_banner(monkeypatch, tmp_path):
 
 def test_banner_renders_requested_cadence_after_injection_tests_patch_it(tmp_path):
     leaker = "tests/context/test_injection_kinds.py::test_tool_call_blocks_rank_by_kind"
-    banner = f"{Path(__file__).resolve()}::{test_native_rate_limits_render_requested_banner.__name__}"
+    banner_test = f"tests/test_quota_usage.py::{test_native_rate_limits_render_requested_banner.__name__}"
+    script = (
+        "import sys, pytest\n"
+        "args = ['-q', '-p', 'no:xdist', '-p', 'no:cacheprovider']\n"
+        "codes = [int(pytest.main([*args, node])) for node in sys.argv[1:]]\n"
+        "print('CODES', codes)\n"
+    )
     env = {k: v for k, v in os.environ.items() if k != "PYTEST_ADDOPTS"} | {"AGENTIHOOKS_HOME": str(tmp_path)}
     result = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", "-p", "no:xdist", "-p", "no:cacheprovider"]
-        + ["-c", str(_PROJECT_ROOT / "pyproject.toml"), "--rootdir", str(_PROJECT_ROOT), leaker, banner],
+        [sys.executable, "-c", script, leaker, banner_test],
         cwd=_PROJECT_ROOT,
         env=env,
         capture_output=True,
@@ -50,8 +55,7 @@ def test_banner_renders_requested_cadence_after_injection_tests_patch_it(tmp_pat
         timeout=120,
     )
 
-    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-2000:]
-    assert "3 passed" in result.stdout
+    assert "CODES [0, 0]" in result.stdout, result.stdout[-3000:] + result.stderr[-2000:]
 
 
 def test_stale_native_snapshot_is_not_injected(monkeypatch, tmp_path):
