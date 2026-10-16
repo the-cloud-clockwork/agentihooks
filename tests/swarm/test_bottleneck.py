@@ -230,7 +230,7 @@ def test_pull_request_merges_without_opening_events_keep_separate_review_interva
         rows(
             agent=[claim("t4", 5 * H)],
             delivery=[
-                {"task": "t4", "kind": kind, "ts_ms": 7 * H, "pull_request": "first", "branch": "first"},
+                {"task": "t4", "kind": kind, "ts_ms": 6.5 * H, "pull_request": "first", "branch": "first"},
                 {"task": "t4", "kind": kind, "ts_ms": 9 * H, "pull_request": "second"},
             ],
             ci=[run("first", 5 * H, 6 * H, "success"), run("b-t4", 7 * H, 8 * H, "success")],
@@ -238,7 +238,7 @@ def test_pull_request_merges_without_opening_events_keep_separate_review_interva
         open_task("t4"),
         NOW,
     )
-    assert found["seconds"]["review"] == 7200.0
+    assert found["seconds"]["review"] == 5400.0
 
 
 def test_legacy_merges_use_the_latest_timestamp_in_any_event_order():
