@@ -79,7 +79,11 @@ def test_the_sample_reads_the_registry_admissions_quota_archive_and_feed(store):
         attempts["t2"]["execution_id"],
     }
     assert found["brain"] == {"feed_at_ms": NOW - 30_000, "denials": []}
-    assert found["pools"] == [] and found["checkpoints"] == []
+    assert found["pools"] == []
+    assert found["checkpoints"] == [
+        {"execution_id": attempts[task]["execution_id"], "seat": attempts[task]["seat"], "taken_at_ms": NOW - 1_000}
+        for task in ("t1", "t2")
+    ]
     assert (found["seq"], found["at_ms"]) == (NOW, NOW)
 
 
