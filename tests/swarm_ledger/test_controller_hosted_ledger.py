@@ -180,14 +180,15 @@ def test_a_worker_task_update_lands_on_the_hosted_server(deployed):
 
 def test_a_claim_lost_before_hosted_apply_cannot_change_the_task(deployed, store):
     _, read = _read(deployed)
-    original = _hl().ResourceClient.request
+    from scripts.swarm_ledger.api import worker_writes
 
-    def lose_claim(client, slug, path, *args, **kwargs):
-        if path == "operations":
-            store.redis.delete(store.key(SLUG, "task-authority", "t1"))
-        return original(client, slug, path, *args, **kwargs)
+    original = worker_writes.check
 
-    with patch.object(_hl().ResourceClient, "request", lose_claim):
+    def lose_claim(slug, doc, operation):
+        store.redis.delete(store.key(SLUG, "task-authority", "t1"))
+        return original(slug, doc, operation)
+
+    with patch.object(worker_writes, "check", lose_claim):
         status, refusal = _patch(deployed, read["revision"], {"state": "pr"})
 
     assert status == 409
