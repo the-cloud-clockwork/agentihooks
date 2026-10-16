@@ -390,7 +390,8 @@ def _many(sizes: tuple[int, ...]) -> bytes:
 
 def test_member_count_and_expanded_bytes_are_bounded(monkeypatch):
     monkeypatch.setattr(git_capture, "ARCHIVE_MEMBERS", 2)
-    monkeypatch.setattr(git_capture, "ARCHIVE_BYTES", 5)
+    policy = git_capture.Policy(total_limit=5)
+    monkeypatch.setattr(git_capture, "Policy", lambda: policy)
     assert [name for name, _, _ in git_capture._members(_many((2, 3)))] == ["m0", "m1"]
     for sizes in ((1, 1, 1), (2, 4)):
         with pytest.raises(git_capture.SourceError) as raised:
