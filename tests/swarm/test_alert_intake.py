@@ -269,9 +269,7 @@ class Sent:
 TOKEN = "s3cret"
 
 
-def handler(
-    redis, body, address="192.168.4.20", path="/alerts", networks=None, length=None, tail=b"", auth=f"Bearer {TOKEN}"
-):
+def handler(redis, body, address="192.168.4.20", path="/alerts", networks=None, length=None, auth=f"Bearer {TOKEN}"):
     raw = body if isinstance(body, bytes) else json.dumps(body).encode()
     sent = Sent()
     found = alert_intake.Handler.__new__(alert_intake.Handler)
@@ -281,7 +279,7 @@ def handler(
     found.headers = {} if length == "" else {"Content-Length": str(len(raw) if length is None else length)}
     if auth is not None:
         found.headers["Authorization"] = auth
-    found.rfile = io.BytesIO(raw + tail)
+    found.rfile = io.BytesIO(raw)
     found.wfile = io.BytesIO()
     found.send_response = lambda code: setattr(sent, "code", code)
     found.send_header = lambda name, value: sent.headers.append((name, value))
@@ -299,7 +297,8 @@ def test_a_post_from_an_allowed_source_applies_the_alerts(redis):
 
 
 def test_a_post_reads_only_its_declared_length(redis):
-    sent, body = handler(redis, payload(alert()), tail=b"trailing bytes")
+    raw = json.dumps(payload(alert())).encode()
+    sent, body = handler(redis, raw + b"trailing bytes", length=len(raw))
     assert (sent.code, body) == (200, {"actions": ["fired ci_queue on sw"]})
 
 
