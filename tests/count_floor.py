@@ -82,10 +82,16 @@ def top_level_definitions(tree: Path, tests: str) -> set[tuple[str, str]]:
 _FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
 
 
+def _parameters(function: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
+    arguments = function.args
+    return {argument.arg for argument in arguments.posonlyargs + arguments.args + arguments.kwonlyargs}
+
+
 def _branch_parameters(function: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
     conditions = (node.test for node in ast.walk(function) if isinstance(node, (ast.If, ast.IfExp, ast.While)))
     used = {name.id for condition in conditions for name in ast.walk(condition) if isinstance(name, ast.Name)}
-    return {argument.arg for argument in function.args.args + function.args.kwonlyargs if argument.arg in used}
+    rebound = {name.id for name in ast.walk(function) if isinstance(name, ast.Name) and isinstance(name.ctx, ast.Store)}
+    return _parameters(function) & used - rebound
 
 
 def deleted_branches(base: Path, head: Path, tests: str) -> set[tuple[str, str]]:
@@ -98,9 +104,13 @@ def deleted_branches(base: Path, head: Path, tests: str) -> set[tuple[str, str]]
     deleted = set()
     for module, body in _top_level(base, tests):
         for node in body:
-            if isinstance(node, _FUNCTIONS) and (survivor := kept.get((module, node.name))) and not survivor.args.kwarg:
-                accepted = {argument.arg for argument in survivor.args.args + survivor.args.kwonlyargs}
-                deleted.update((module, f"{node.name}({name})") for name in _branch_parameters(node) - accepted)
+            if not isinstance(node, _FUNCTIONS) or (survivor := kept.get((module, node.name))) is None:
+                continue
+            if survivor.args.kwarg or _parameters(survivor) - _parameters(node):
+                continue
+            deleted.update(
+                (module, f"{node.name}({name})") for name in _branch_parameters(node) - _parameters(survivor)
+            )
     return deleted
 
 

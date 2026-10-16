@@ -327,18 +327,27 @@ def test_a_lost_test_whose_keyword_branch_the_head_deletes_is_admitted(tmp_path)
         _package(mod=BRANCHED),
         _package(mod='def steps(selected=False, **options):\n    return "plain"\n'),
         _package(mod=KEPT, elsewhere=RETAINED),
+        _package(mod=BRANCHED.replace("queue=False, ", "queue=False, /, ")),
+        _package(mod=BRANCHED.replace("queue", "lane")),
     ],
-    ids=["kept", "kwargs", "moved"],
+    ids=["kept", "kwargs", "moved", "positional", "renamed"],
 )
-def test_a_keyword_the_head_still_accepts_or_moved_admits_nothing(tmp_path, head):
+def test_a_keyword_the_head_still_accepts_moved_or_renamed_admits_nothing(tmp_path, head):
     result = _lose_branch_tests(tmp_path, BRANCHED, head)
     assert result.returncode == 1
     assert "tests/test_mod.py::test_queue is in the base and not in the head" in result.stdout
 
 
-def test_a_removed_parameter_that_selected_no_branch_admits_nothing(tmp_path):
-    unbranched = 'def steps(queue=False, selected=False):\n    return f"plain {queue} {selected}"\n'
-    result = _lose_branch_tests(tmp_path, unbranched, _package(mod=RETAINED))
+@pytest.mark.parametrize(
+    "base",
+    [
+        'def steps(queue=False, selected=False):\n    return f"plain {queue} {selected}"\n',
+        BRANCHED.replace('run = "plain"', 'run = "plain"\n    queue = queue or selected'),
+    ],
+    ids=["unbranched", "rebound"],
+)
+def test_a_removed_parameter_that_selected_no_branch_admits_nothing(tmp_path, base):
+    result = _lose_branch_tests(tmp_path, base, _package(mod=RETAINED))
     assert result.returncode == 1
     assert "tests/test_mod.py::test_queue is in the base and not in the head" in result.stdout
 
