@@ -1,4 +1,3 @@
-import base64
 import json
 import subprocess
 from pathlib import Path
@@ -14,9 +13,8 @@ class El {
   addEventListener(ev, fn) { this.on[ev] = fn; }
   append(...kids) { this.kids.push(...kids); }
 }
-globalThis.document = { createElement: (tag) => new El(tag) };
-const pages = await import("data:text/javascript;base64," + %(pages)s);
-const { COMMENT_PAGE, lastPage, moreButton, threadPage, wanted } = pages;
+const document = { createElement: (tag) => new El(tag) };
+%(pages)s
 const ids = (n) => Array.from({ length: n }, (_, i) => `c${i + 1}`);
 const out = {};
 %(body)s
@@ -28,13 +26,13 @@ def pages_module():
     dom = (MODULES / "dom.js").read_text(encoding="utf-8")
     h = "function h(" + dom.split("export function h(", 1)[1].split("\n}\n", 1)[0] + "\n}\n"
     pages = (MODULES / "pages.js").read_text(encoding="utf-8")
-    body = "\n".join(line for line in pages.splitlines() if not line.startswith("import "))
-    return base64.b64encode((h + body).encode()).decode()
+    body = "\n".join(line.removeprefix("export ") for line in pages.splitlines() if not line.startswith("import "))
+    return h + body
 
 
 def run(body):
-    script = HARNESS % {"pages": json.dumps(pages_module()), "body": body}
-    done = subprocess.run(["node", "--input-type=module", "-e", script], check=True, capture_output=True, text=True)
+    script = HARNESS % {"pages": pages_module(), "body": body}
+    done = subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True)
     return json.loads(done.stdout)
 
 
