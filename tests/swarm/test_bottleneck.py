@@ -205,6 +205,25 @@ def test_partial_pull_request_telemetry_keeps_single_pull_request_review(kind):
     assert found["seconds"]["review"] == 7200.0
 
 
+def test_open_second_pull_request_continues_after_the_first_merge():
+    first, second = "https://github.com/o/r/pull/1", "https://github.com/o/r/pull/2"
+    found = bottleneck.report(
+        rows(
+            agent=[claim("t4", 2 * H)],
+            delivery=[
+                {**opened("t4", 3 * H), "pull_request": first, "branch": "first"},
+                {**merge("t4", 4.5 * H), "pull_request": first, "branch": "first"},
+                {**opened("t4", 6 * H), "pull_request": second, "branch": "b-t4"},
+            ],
+            ci=[run("first", 3 * H, 4 * H, "success"), run("b-t4", 6 * H, 6.5 * H, "success")],
+        ),
+        open_task("t4"),
+        NOW,
+        window_ms=10 * H,
+    )
+    assert found["seconds"]["review"] == 14400.0
+
+
 def test_a_cancelled_last_run_keeps_ci_holding_until_now():
     found = bottleneck.report(
         rows(agent=[claim("t4", 6 * H)], ci=[run("b-t4", 7 * H, 8 * H, "cancelled")]), open_task("t4"), NOW
