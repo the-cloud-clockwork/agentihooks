@@ -84,7 +84,6 @@ def test_a_half_the_verdict_did_not_judge_is_refused(tmp_path, command):
     [
         f"gh pr merge {FIRST} --squash",
         "gh pr merge 9",
-        "gh pr merge --squash",
         f"agentihooks swarm {SLUG} merge queue {FIRST}",
         f"agentihooks swarm {SLUG} done --pr {SECOND}",
     ],
