@@ -145,6 +145,10 @@ def p95(samples: list[float]) -> float:
     return ordered[math.ceil(0.95 * len(ordered)) - 1]
 
 
+def p95_or_none(samples: list[float]) -> float | None:
+    return p95(samples) if samples else None
+
+
 def cpu_seconds(pid: int) -> float:
     fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
     return (int(fields[11]) + int(fields[12])) / os.sysconf("SC_CLK_TCK")
@@ -363,17 +367,16 @@ def run(folder: Path) -> tuple[list[str], float | None]:
     )
     if problems:
         print(server_log[-4000:])
-    return problems, p95(writes) if writes else None
+    return problems, p95_or_none(writes)
 
 
 def measured(folder: Path) -> list[str]:
-    """A write p95 breach alone repeats the measure once on a fresh ledger; the better of the two is graded."""
     problems, first = run(folder)
     if not problems or not all(problem.startswith(WRITE_BREACH) for problem in problems):
         return problems
     print(
-        "::notice::write p95 alone broke its budget, so the gate repeated the measure once"
-        " and graded the better of two",
+        "::notice::write p95 alone broke its budget, so the gate repeated the measure once on a fresh ledger"
+        " and graded the repeat, which passes only when the better of the two is within budget",
         flush=True,
     )
     repeat_problems, repeat = run(folder / "repeat")

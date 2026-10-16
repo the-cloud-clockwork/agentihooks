@@ -180,8 +180,9 @@ def test_a_lone_write_breach_repeats_once_on_a_fresh_ledger_and_the_better_measu
     out = capsys.readouterr().out
     assert code == 0
     assert calls == [tmp_path, tmp_path / "repeat"]
-    assert "repeated the measure once and graded the better of two" in out
-    assert f"write p95 first {BREACH:.3f}s, repeat 0.400s, budget {ledger_load.WRITE_P95_S}s" in out
+    assert "::notice::write p95 alone broke its budget, so the gate repeated the measure once on a fresh ledger" in out
+    assert "graded the repeat, which passes only when the better of the two is within budget" in out
+    assert f"::notice::write p95 first {BREACH:.3f}s, repeat 0.400s, budget {ledger_load.WRITE_P95_S}s" in out
 
 
 def test_a_write_breach_on_both_measures_is_red_and_reports_both_values(monkeypatch, tmp_path, capsys):
@@ -218,7 +219,12 @@ def test_a_repeat_with_no_writes_reports_it_and_stays_red(monkeypatch, tmp_path,
 
 def test_the_write_breach_problem_names_its_measured_p95():
     problems = ledger_load.verdict([0.1] * 94 + [BREACH] * 6, 100, 0.2, [])
-    assert problems == [breach(BREACH)]
+    assert problems == ["write p95 2.500s exceeds 2.0s"]
+
+
+def test_the_reported_write_p95_is_none_without_writes():
+    assert ledger_load.p95_or_none([]) is None
+    assert ledger_load.p95_or_none([0.3, 0.1, 0.2]) == 0.3
 
 
 def test_some_open_alerts_are_past_their_quiet_hour_so_the_expiry_sweep_has_work():
