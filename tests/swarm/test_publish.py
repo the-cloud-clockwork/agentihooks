@@ -205,7 +205,9 @@ def test_prepare_creates_the_task_worktree_once_through_the_worktree_command(rep
     monkeypatch.setattr(stack, "WT_SCRIPT", script)
     monkeypatch.setenv("PUBLISH_PREPARED", str(worktree))
     task = {"id": "t1", "claimed_by": "engineer@test", "state": "claimed"}
-    ledger = SimpleNamespace(tasks=lambda slug: {"swarm": [task]}[slug])
+    ledger = SimpleNamespace(
+        tasks=lambda slug: {"swarm": [task]}[slug], update_task=lambda slug, task_id, fields, by: task.update(fields)
+    )
     agent = AgentRecord("engineer@test", "ci", "t1")
     first = publish.prepare("swarm", agent, str(repository), ledger)
     assert first["worktree"] == str(worktree)
@@ -229,11 +231,16 @@ def test_prepare_creates_a_continuation_from_the_recorded_remote_branch(reposito
     monkeypatch.setattr(stack, "WT_SCRIPT", script)
     monkeypatch.setenv("PUBLISH_PREPARED", str(worktree))
     task = {"id": "t1", "claimed_by": "engineer@test", "state": "claimed", "branch": "predecessor"}
-    ledger = SimpleNamespace(tasks=lambda slug: {"swarm": [task]}[slug])
+    ledger = SimpleNamespace(
+        tasks=lambda slug: {"swarm": [task]}[slug], update_task=lambda slug, task_id, fields, by: task.update(fields)
+    )
     agent = AgentRecord("engineer@test", "ci", "t1")
     result = publish.prepare("swarm", agent, str(repository), ledger)
     assert result["worktree"] == str(worktree)
     assert git(worktree, "rev-parse", "HEAD") == git(repository, "rev-parse", "origin/predecessor")
+    assert task["branch"] == result["branch"] == "engineer-test"
+    assert task["branch_repo"] == str(repository.parent / "remote.git")
+    assert task["repository_branches"] == {str(repository): "engineer-test"}
 
 
 def test_prepare_reuses_the_recorded_worktree_without_pushing(repository, tmp_path):
@@ -257,7 +264,9 @@ def test_publication_without_a_prepared_worktree_names_the_prepare_command(repos
     from scripts.swarm.store import SwarmError
 
     task = {"id": "t1", "claimed_by": "engineer@test", "state": "claimed"}
-    ledger = SimpleNamespace(tasks=lambda slug: {"swarm": [task]}[slug])
+    ledger = SimpleNamespace(
+        tasks=lambda slug: {"swarm": [task]}[slug], update_task=lambda slug, task_id, fields, by: task.update(fields)
+    )
     agent = AgentRecord("engineer@test", "ci", "t1")
     with pytest.raises(SwarmError, match="Next: agentihooks swarm swarm prepare"):
         publish.publish("swarm", agent, str(repository), ledger, "Change chosen", ["chosen.txt"])
