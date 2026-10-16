@@ -145,10 +145,8 @@ def test_a_worker_token_cannot_answer_the_operator_on_an_entry_but_the_service_r
     with pinned():
         reply = ledger.request(SLUG, [answer])
     assert answer["id"] in reply["rejected"]
-    assert (
-        f"{WORKER} cannot answer the operator on an entry; the swarm relay posts that answer"
-        in (reply["_meta"]["warnings"])
-    )
+    refused = f"{WORKER} cannot answer the operator on an entry; the swarm relay posts that answer"
+    assert refused in reply["_meta"]["warnings"]
     assert "Worker answer" not in phase_comments(ledger.request(SLUG))
     relayed = operation("add", by=WORKER, thread=thread, to="operator", text="Relayed answer")
     assert relayed["id"] not in ledger.request(SLUG, [relayed], service=True)["rejected"]

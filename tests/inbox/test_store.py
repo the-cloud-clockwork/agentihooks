@@ -1,6 +1,7 @@
 import pytest
+from redis.exceptions import WatchError
 
-from scripts.inbox.store import NOTIFY, InboxError, InboxStore
+from scripts.inbox.store import NOTIFY, Contended, InboxError, InboxStore
 from scripts.swarm.keyspace import ROOT as KEY_ROOT
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -206,7 +207,9 @@ def test_reopen_returns_an_answered_item_to_its_open_mail_with_a_fresh_reply_slo
     listener = store.redis.pubsub()
     listener.subscribe(NOTIFY)
     listener.get_message(timeout=1)
+    size = store.redis.get(store.key("open-size", "master"))
     reopened = store.reopen(item.id, "master", "swarm", "reopened: refused")
+    assert store.redis.get(store.key("open-size", "master")) == size
     assert (reopened.state, reopened.reason) == ("read", "reopened: refused")
     assert store.get(item.id) == reopened
     assert store.redis.zscore(store.key("open", "master"), item.id) == item.created_at
@@ -222,12 +225,21 @@ def test_reopen_returns_an_answered_item_to_its_open_mail_with_a_fresh_reply_slo
     assert second.id != answer.id and store.get(item.id).state == "done"
 
 
+@pytest.mark.parametrize("moved", ["cancel", "handoff", "open"])
+def test_reopen_leaves_an_item_no_answer_closed_as_it_is(store, moved):
+    item = store.send("operator", "master", "how far along are we")
+    if moved == "cancel":
+        store.close(item.id, "master", "cancel", "not needed")
+    elif moved == "handoff":
+        store.close(item.id, "master", "handoff", "eng-1")
+    before = store.get(item.id)
+    assert store.reopen(item.id, "master", "swarm", "reopened") is None
+    assert store.get(item.id) == before
+    assert len(store.history(item.id)) == 1 + (moved != "open")
+
+
 @pytest.mark.parametrize("conflicts", [1, 3])
 def test_reopen_retries_a_concurrent_change_then_gives_up(store, monkeypatch, conflicts):
-    from redis.exceptions import WatchError
-
-    from scripts.inbox.store import Contended
-
     item = store.send("operator", "master", "how far along are we")
     store.reply(item.id, "master", "two tasks left")
     attempt = store._try_reopen

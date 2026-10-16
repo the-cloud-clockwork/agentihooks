@@ -463,6 +463,8 @@ class InboxStore:
         with self.redis.pipeline() as pipe:
             pipe.watch(key)
             item = _item(pipe.hgetall(key), item_id)
+            if item.state != "done":
+                return None
             moved = replace(item, state="read", updated_at=now_ms(), reason=reason)
             pipe.multi()
             pipe.hset(key, mapping=_fields(moved))

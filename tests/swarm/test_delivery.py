@@ -221,6 +221,24 @@ def test_a_refused_message_without_an_entry_reopens_nothing(store):
     assert box.get(asked.id).state == "done"
 
 
+def test_a_contended_reopen_still_cancels_the_answer_and_tells_its_sender(store, monkeypatch):
+    from scripts.inbox.store import Contended
+
+    box = InboxStore(store.redis)
+    box.about("op-1", "phases/p1")
+    asked = box.send("operator", "sw-eng-1", "is the phase done", item_id="op-1")
+    answer = box.reply(asked.id, "sw-eng-1", "done at 18:45")
+
+    def contended(*args):
+        raise Contended("message op-1 changed meanwhile; run the command again")
+
+    monkeypatch.setattr(box, "reopen", contended)
+    assert delivery.post(box, box.get(answer.id), lambda: False) is False
+    assert box.get(answer.id).state == "cancelled"
+    [notice] = box.pending_items("sw-eng-1")
+    assert notice.text == delivery.REFUSED.format(id=answer.id, reason="the swarm notice was dropped")
+
+
 def test_an_outbox_entry_stays_when_moving_it_fails(store):
     class Down:
         def send(self, sender, address, text):
