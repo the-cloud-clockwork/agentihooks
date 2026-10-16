@@ -9,7 +9,7 @@ from tests.gates.test_intent_split_gate import FIRST, SECOND, judged, split_task
 
 pytestmark = pytest.mark.unit
 
-VIEWED = {"input": None, "capture_output": True, "text": True, "timeout": intent.GH_TIMEOUT_SEC}
+VIEWED = {"capture_output": True, "text": True, "timeout": intent.GH_TIMEOUT_SEC}
 UNRESOLVED = f"task {TASK} is split: name the pull request url in the merge so intent matches it to its judged half."
 
 
@@ -34,6 +34,9 @@ def view(*operands):
         ("gh pr merge --subject done half-two", view("half-two")),
         ("gh pr merge -R o/r half-two", view("half-two", "-R", "o/r")),
         ("gh pr merge --repo o/r", view("--repo", "o/r")),
+        ("gh pr merge half-two other", view("half-two")),
+        ("FOO=1 && gh pr merge -t", view()),
+        ("gh pr merge -R", view("-R", "")),
     ],
 )
 @pytest.mark.parametrize("url, allowed", [(FIRST, True), (SECOND, False)])
@@ -50,6 +53,10 @@ def test_a_pull_view_without_a_working_folder_runs_in_the_hook_folder(tmp_path):
     run = Viewed(FIRST)
     assert intent.IntentGate(run=run).decide(bash("gh pr merge"), WHO, verdicts(tmp_path)).allowed
     assert run.calls == [(view(), {**VIEWED, "cwd": None})]
+
+
+def test_a_resolved_merge_names_the_bare_pull_request_url():
+    assert intent.IntentGate(run=Viewed(SECOND))._named(["gh", "pr", "merge"], "") == ["gh", "pr", "merge", SECOND]
 
 
 @pytest.mark.parametrize("url, code", [("", 1), (FIRST, 1), ("not a pull request", 0)])
