@@ -42,6 +42,8 @@ def verified(by, quote):
     """The quoted span, as the operator wrote it, of recorded words from any master or planner of the relaying agent's swarm."""
     from hooks.context import operator_words
 
+    if len(quote.split()) < 3:
+        return ""
     words = next((w for name in speakers(by) if (w := operator_words.matching(name, quote, within=None))), "")
     found = re.search(r"\s+".join(map(re.escape, quote.split())), words, re.IGNORECASE)
     return found.group(0) if found else ""
