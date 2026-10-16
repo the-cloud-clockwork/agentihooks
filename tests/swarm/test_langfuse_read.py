@@ -83,7 +83,7 @@ def test_reader_uses_the_named_project_window_and_bounded_transport(monkeypatch,
     assert initialized == closed == [True]
 
 
-def test_gateway_client_checks_tls_against_the_gateway_name_on_an_encrypted_address():
+def test_gateway_client_names_the_host_header_for_tls_on_an_encrypted_address():
     from scripts.swarm.langfuse_read import gateway_client
 
     async def prepared():
