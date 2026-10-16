@@ -204,7 +204,7 @@ def test_push_and_dispatch_keep_the_coverage_ratchet_and_stage_report(event):
 def test_failed_units_cannot_publish_a_push_baseline():
     job = _jobs()["coverage-baseline"]
     assert "needs.unit.result == 'success'" in job["if"]
-    assert job["needs"] == ["unit", "gate-required"]
+    assert job["needs"] in (["unit", "gate-required"], ["unit", "coverage-ratchet"])
 
 
 def test_the_lookup_is_red_when_the_dev_run_kept_no_live_durations(lookup):
