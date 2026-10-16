@@ -932,6 +932,9 @@ def test_the_started_supervisor_loads_a_prepared_attempt_only_the_worker_can_rea
     assert stat.S_IMODE(attempt.parent.stat().st_mode) == 0o700
     printed = {"worker_start": "prepared", "attempt": EXECUTION, "uid": os.getuid()}
     lines = capsys.readouterr().out.splitlines()
+    passed = json.dumps({"profile_binding": "passed", "profile": "engineer", "harness": "claude"})
+    assert lines.count(passed) == 1
+    lines = [line for line in lines if line != passed]
     assert lines[-1] == json.dumps(printed)
     assert [json.loads(line)["lease"] for line in lines[:-1]] == ["renewed"] * (len(lines) - 1)
 
@@ -1077,7 +1080,10 @@ def test_the_start_prepares_the_permitted_project_checkout_on_its_branch_before_
     origin = "https://github.com/the-cloud-clockwork/agentihooks.git"
     attempt = tmp_path / "attempts" / EXECUTION
     assert prepared.calls == [(attempt, workspaces.Request(origin, "t1", 3, AGENT), False)]
-    assert record == {"checkout": {"project": PROJECT, "branch": BRANCH, "base": "dev", "base_commit": BASE_COMMIT}}
+    assert record == {
+        "homes": {"claude": "homes/claude"},
+        "checkout": {"project": PROJECT, "branch": BRANCH, "base": "dev", "base_commit": BASE_COMMIT},
+    }
     assert json.loads((attempt / "registration.json").read_text()) == AUTHORITY
 
 
@@ -1098,7 +1104,7 @@ def test_worker_configures_scoped_app_askpass_before_checkout(tmp_path, monkeypa
 def test_a_launch_record_without_a_checkout_prepares_none(tmp_path, monkeypatch):
     prepared = Workspaces()
 
-    assert checked_out(tmp_path, monkeypatch, prepared, RECORD) == {}
+    assert checked_out(tmp_path, monkeypatch, prepared, RECORD) == {"homes": {"claude": "homes/claude"}}
 
     assert prepared.calls == []
 
