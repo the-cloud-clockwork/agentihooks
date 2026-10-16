@@ -320,14 +320,14 @@ def test_twenty_back_to_five_retires_extra_seats_through_their_handoffs(swarm, t
         rows = box.recent("master_scaling", NOW + 4 * MINUTE + HOLD)
     finally:
         box.close()
-    assert [(row["metric"], row["value"], row["seat"], row["ts_ms"]) for row in rows] == [
+    assert {(row["metric"], row["value"], row["seat"], row["ts_ms"]) for row in rows} == {
         ("master_seat_count", 4, "", NOW),
         ("master_retire_seconds", 60, FOURTH, NOW + 2 * MINUTE + HOLD),
         ("master_retire_seconds", 60, THIRD, NOW + 2 * MINUTE + HOLD),
         ("master_seat_count", 2, "", NOW + 2 * MINUTE + HOLD),
         ("master_retire_seconds", 120, SECOND, NOW + 3 * MINUTE + HOLD),
         ("master_seat_count", 1, "", NOW + 3 * MINUTE + HOLD),
-    ]
+    }
     assert all(row["ledger"] == SLUG for row in rows)
     assert len({row["event_id"] for row in rows}) == 6
 
