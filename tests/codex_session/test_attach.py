@@ -297,9 +297,13 @@ def test_the_local_terminal_opens_the_viewer_in_the_swarm_workspace(monkeypatch)
     from scripts import herdr_host
     from scripts.swarm import naming
 
-    config = SimpleNamespace(repo="/home/op/dev/agentihooks", code="323133", slug="sw")
-    store = SimpleNamespace(agents=lambda slug: _agents(), config=lambda slug: config)
-    monkeypatch.setattr("scripts.swarm.live_binding.transport", lambda found, seen: RECORD)
+    slug = "proof-323133-cxc8-1"
+    config = SimpleNamespace(repo="/home/op/dev/agentihooks", code="323133", slug=slug)
+    store = SimpleNamespace(
+        agents=lambda asked: _agents() if asked == slug else [],
+        config=lambda asked: config if asked == slug else None,
+    )
+    monkeypatch.setattr("scripts.swarm.live_binding.transport", lambda found, seen: RECORD if found is store else None)
     opened = []
     monkeypatch.setattr(
         herdr_host,
@@ -339,12 +343,17 @@ def test_swarm_terminal_reopens_a_local_execution_before_the_worker_terminal(mon
 
     from scripts.swarm import cli
 
-    monkeypatch.setattr(attach, "local_terminal", lambda store, slug, execution, environ: {"pane": execution})
+    monkeypatch.setenv("AGENTIHOOKS_VIEWER_MARK", "seen")
+    monkeypatch.setattr(
+        attach,
+        "local_terminal",
+        lambda store, slug, execution, environ: {"pane": execution, "mark": environ["AGENTIHOOKS_VIEWER_MARK"]},
+    )
     monkeypatch.setattr(
         "scripts.swarm_v2.kubernetes.operator_terminal.command", lambda *args: pytest.fail("worker terminal")
     )
     cli.cmd_terminal(object(), SimpleNamespace(slug="sw", execution="exe-1"))
-    assert json.loads(capsys.readouterr().out) == {"pane": "exe-1"}
+    assert json.loads(capsys.readouterr().out) == {"pane": "exe-1", "mark": "seen"}
 
 
 def test_swarm_terminal_falls_back_to_the_worker_terminal(monkeypatch, capsys):

@@ -331,7 +331,7 @@ def _viewer_lines(serve: str, launcher: Path, name: str, environ: dict[str, str]
         "scripts.codex_session",
         "attach",
         "--slug",
-        environ.get("AGENTIHOOKS_SWARM", ""),
+        environ.get("AGENTIHOOKS_SWARM") or "",
         "--agent",
         name,
     ]
