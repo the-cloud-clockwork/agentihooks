@@ -208,15 +208,16 @@ def refused_answer(store):
     return item, store.get(answer.id)
 
 
-def test_reopen_returns_an_answered_item_to_its_open_mail_with_a_fresh_reply_slot(store):
+def test_reopen_returns_an_answered_item_to_its_open_mail_with_a_fresh_reply_slot(store, monkeypatch):
     item, answer = refused_answer(store)
+    monkeypatch.setattr("scripts.inbox.store.now_ms", lambda: 9_000_000_000_000)
     listener = store.redis.pubsub()
     listener.subscribe(NOTIFY)
     listener.get_message(timeout=1)
     size = store.redis.get(store.key("open-size", "master"))
     reopened = store.reopen(answer, "swarm", "reopened: refused")
     assert store.redis.get(store.key("open-size", "master")) == size
-    assert (reopened.state, reopened.reason) == ("read", "reopened: refused")
+    assert (reopened.state, reopened.reason, reopened.updated_at) == ("read", "reopened: refused", 9_000_000_000_000)
     assert store.get(item.id) == reopened
     assert store.redis.zscore(store.key("open", "master"), item.id) == item.created_at
     assert not store.redis.hexists(store.key("item", item.id), "reply:master")

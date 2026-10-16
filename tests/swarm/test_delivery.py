@@ -205,6 +205,11 @@ def test_a_refused_answer_on_an_entry_keeps_the_operator_item_open_for_a_resend(
     assert box.get(first.id).state == "cancelled"
     reopened = box.get(asked.id)
     assert reopened.state == "read" and asked.id in [item.id for item in box.open_items("sw-eng-1")]
+    reason = (
+        "reopened: the answer was refused by the ledger page: ledger sw refused: comment refused: clock time '18:45'"
+    )
+    assert reopened.reason == reason
+    assert box.history(asked.id)[-1] == {"state": "read", "by": "swarm", "reason": reason, "at": reopened.updated_at}
     second = box.reply(asked.id, "sw-eng-1", "the phase is done")
     assert second.id != first.id and box.entry_of(second.id) == "phases/p1"
     ledger = EntryLedger(refuse=False)
