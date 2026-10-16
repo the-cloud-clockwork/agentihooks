@@ -15,7 +15,8 @@ PANELS = metrics_outbox.Table(
     (("panel", "String"), ("series", "String"), ("subject", "String"), ("value", "Float64")),
 )
 SOURCES = metrics_outbox.Table("fleet_sources", (("source", "String"), ("available", "Int64"), ("readings", "Int64")))
-UNREAD = ("pools", "checkpoints", "brain_denials")
+UNREAD = ("brain_denials",)
+CHECKPOINTS = "fleet-checkpoints"
 VIEWER = fleet_dashboard.Viewer("metrics", frozenset())
 
 
@@ -73,17 +74,27 @@ def _quota(store: RedisStore, now_ms: int) -> list[dict]:
     return found
 
 
-def sample(store: RedisStore, slug: str, now_ms: int, feed_at: int) -> dict:
+def record_checkpoint(store: RedisStore, slug: str, execution_id: str, seat: str, taken_at_ms: int) -> None:
+    found = {"execution_id": execution_id, "seat": seat, "taken_at_ms": taken_at_ms}
+    store.redis.hset(store.key(slug, CHECKPOINTS), execution_id, json.dumps(found))
+
+
+def _checkpoints(store: RedisStore, slug: str, active: list[dict]) -> list[dict]:
+    taken = store.redis.hgetall(store.key(slug, CHECKPOINTS))
+    return [json.loads(taken[row["execution_id"]]) for row in active if row["execution_id"] in taken]
+
+
+def sample(store: RedisStore, slug: str, now_ms: int, feed_at: int, pools: list[dict] | None = None) -> dict:
     active, pending = _attempts(store, slug)
     archive = Health(store, slug, clock=lambda: now_ms / 1000).diagnose()["pipeline"]["archive"]
     return {
         "seq": now_ms,
         "at_ms": now_ms,
-        "pools": [],
+        "pools": pools or [],
         "attempts": active + pending,
         "quota": _quota(store, now_ms),
         "archive": archive,
-        "checkpoints": [],
+        "checkpoints": _checkpoints(store, slug, active),
         "brain": {"feed_at_ms": feed_at, "denials": []},
     }
 
@@ -91,7 +102,10 @@ def sample(store: RedisStore, slug: str, now_ms: int, feed_at: int) -> dict:
 def _values(panels: dict) -> list[tuple[str, str, str, float]]:
     found = []
     for panel, series in panels.items():
-        if not isinstance(series, dict):
+        if isinstance(series, list):
+            found += [
+                (panel, key, row["pool"], float(item["value"])) for row in series for key, item in row["series"].items()
+            ]
             continue
         for key, item in series.items():
             value = item["value"] if isinstance(item, dict) else item
@@ -119,7 +133,7 @@ def panel_rows(slug: str, now_ms: int, panels: dict, fresh_feed: bool) -> list[d
     ]
 
 
-def source_rows(slug: str, now_ms: int, found: dict) -> list[dict]:
+def source_rows(slug: str, now_ms: int, found: dict, pools_read: bool = False) -> list[dict]:
     active = [row for row in found["attempts"] if row["phase"] == fleet_dashboard.ACTIVE]
     counts = {
         "executions": (1, len(active)),
@@ -127,6 +141,8 @@ def source_rows(slug: str, now_ms: int, found: dict) -> list[dict]:
         "quota": (1, len(found["quota"])),
         "archive": (1, len(found["archive"])),
         "brain_feed": (1, 1) if found["brain"]["feed_at_ms"] else (0, 0),
+        "pools": (1, len(found["pools"])) if pools_read else (0, 0),
+        "checkpoints": (1, len(found.get("checkpoints", []))),
         **dict.fromkeys(UNREAD, (0, 0)),
     }
     return [
@@ -144,10 +160,16 @@ def source_rows(slug: str, now_ms: int, found: dict) -> list[dict]:
 
 
 def record(
-    box: metrics_outbox.Outbox, store: RedisStore, slug: str, now_ms: int, feed: Callable[[], int] = feed_at_ms
+    box: metrics_outbox.Outbox,
+    store: RedisStore,
+    slug: str,
+    now_ms: int,
+    feed: Callable[[], int] = feed_at_ms,
+    pools: Callable[[], list[dict] | None] | None = None,
 ) -> dict:
-    found = sample(store, slug, now_ms, feed())
+    read = pools() if pools is not None else None
+    found = sample(store, slug, now_ms, feed(), read)
     panels = fleet_dashboard.dashboard(found, VIEWER, fleet_dashboard.definition())["panels"]
     box.append(PANELS, panel_rows(slug, now_ms, panels, bool(found["brain"]["feed_at_ms"])))
-    box.append(SOURCES, source_rows(slug, now_ms, found))
+    box.append(SOURCES, source_rows(slug, now_ms, found, read is not None))
     return found

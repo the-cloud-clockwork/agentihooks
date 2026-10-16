@@ -91,8 +91,13 @@ def _writable(key: str, data: bytes, scope: Registration) -> None:
 
 
 class ArtifactsAPI:
-    def __init__(self, backend: ConditionalBackend, tasks: TaskAuthority) -> None:
-        self.backend, self.tasks = backend, tasks
+    def __init__(
+        self,
+        backend: ConditionalBackend,
+        tasks: TaskAuthority,
+        checkpointed: Callable[[str, str, int], None] | None = None,
+    ) -> None:
+        self.backend, self.tasks, self.checkpointed = backend, tasks, checkpointed
         self.lock = threading.RLock()
 
     def route(self, method: str, path: str, authorization: str, body: object) -> tuple[int, dict]:
@@ -175,6 +180,8 @@ class ArtifactsAPI:
             return {"data": base64.b64encode(self._read(key, body["start"], body["length"])).decode()}
         if operation == "write":
             self._write(key, base64.b64decode(body["data"], validate=True), scope, fence)
+            if self.checkpointed is not None and key.split("/")[2] == "pointers":
+                self.checkpointed(scope.execution_id, scope.seat_id, lease.now_ms(self.tasks.store))
         elif operation == "move":
             _staging(key, scope)
             target = _key(body["target"], scope, False)

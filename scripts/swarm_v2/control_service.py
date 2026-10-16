@@ -2,11 +2,12 @@ import json
 import os
 import threading
 from collections.abc import Callable, Iterable, Mapping
+from functools import partial
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 from scripts.hive import auth as hive_auth
-from scripts.swarm import lease, ledger_host
+from scripts.swarm import lease, ledger_host, metrics_fleet
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_link
@@ -114,7 +115,8 @@ class ControlService:
         self.tasks = TaskAuthority(store, self.controller, lambda token: self.grants.bound(slug, token))
         self.executions = ExecutionsAPI(self.grants, self.tasks)
         backend = remote.controller_backend(os.environ)
-        self.artifacts = None if backend is None else artifacts.ArtifactsAPI(backend, self.tasks)
+        checkpointed = partial(metrics_fleet.record_checkpoint, store, slug)
+        self.artifacts = None if backend is None else artifacts.ArtifactsAPI(backend, self.tasks, checkpointed)
         self.health = health.Health(store, slug, health.brain_probe(os.environ), self.controller)
         self.health_api = health.HealthAPI(self.health, self.grants, operator, health.deep_enabled())
         self.server: ThreadingHTTPServer | None = None

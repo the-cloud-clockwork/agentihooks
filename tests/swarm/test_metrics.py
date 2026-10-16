@@ -252,7 +252,7 @@ def test_a_swarm_pass_measures_the_stages_of_the_ledger_tasks_and_reports_a_flee
     store.create(SwarmConfig("sw", "/repo", 0, 0, template="doctor"))
     seen = []
 
-    def broken(*args):
+    def broken(*args, **kwargs):
         raise SwarmError("registry down")
 
     monkeypatch.setattr(metrics.metrics_swarm, "pull_rows", lambda box, now_ms, swarm: {})
