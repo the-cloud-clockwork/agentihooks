@@ -427,6 +427,22 @@ def test_master_failure_is_posted_to_the_operator_chat_and_relaunched(store, mon
     assert len(runtime.masters) == 2
 
 
+@pytest.mark.parametrize("facts", [{}, {"process": False}, {"process": None}])
+def test_master_launch_reports_unavailable_observation_and_join_failure(store, monkeypatch, facts):
+    ledger, runtime = checked(store, monkeypatch)
+    store.update("sw", state="running", max_eng=0)
+    tick("sw", store, ledger, runtime, LAUNCH)
+    first, _ = runtime.masters[0]
+    monkeypatch.setattr(runtime, "bindings", lambda agents: {agent.name: facts for agent in agents})
+    actions = tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS)
+    assert any(f"{first} after its launch check failed on joined, observation" in action for action in actions)
+    assert ledger.notes == [
+        "The master failed its launch check within a minute on joining the ledger and holding its seat, "
+        "an available process observation. It is being retired and relaunched once."
+    ]
+    assert list(launch_check.report(store, "sw", "master")["misses"]) == ["joined", "observation"]
+
+
 def test_master_notification_names_every_miss(store, monkeypatch, tmp_path):
     from hooks.context import profile_chain
 
