@@ -25,7 +25,6 @@ BUDGETS = {
     "lint": 240,
     "sonar": 240,
     "coverage-ratchet": 90,
-    "queue-baseline": 180,
     "queue-fail-fast": 60,
     "mutation-plan": 60,
     "mutation-stats": 210,

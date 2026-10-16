@@ -25,7 +25,7 @@ def test_workflow_template_contract(filename, event, tier):
     assert any("delivery.yaml" in step.get("run", "") for step in job["steps"])
     if tier == "promotion":
         assert workflow[True]["push"]["branches"] == ["dev"]
-        assert workflow["concurrency"]["cancel-in-progress"] is True
+        assert workflow["concurrency"]["cancel-in-progress"] is False
         promote = workflow["jobs"]["promote"]
         assert promote["needs"] == "checks"
         assert promote["environment"] == "promotion"
