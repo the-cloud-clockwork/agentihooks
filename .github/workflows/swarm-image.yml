@@ -3,6 +3,8 @@ name: Swarm image
 on:
   push:
     branches: [dev]
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -14,8 +16,8 @@ concurrency:
 
 jobs:
   publish:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
-    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && github.triggering_actor == 'github-merge-queue[bot]') && 'anton-oss' || 'ubuntu-latest' }}
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev' || github.event_name == 'release'
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss' || 'ubuntu-latest' }}
     timeout-minutes: 15
     permissions:
       contents: read
@@ -23,15 +25,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: ${{ github.event_name == 'release' && '0' || '1' }}
           persist-credentials: false
+      - name: Require a release tag on main
+        id: main
+        if: github.event_name == 'release'
+        run: |
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          newest="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-version:refname | head -n 1)"
+          if [[ "$newest" == "$GITHUB_REF_NAME" ]]; then latest=true; else latest=false; fi
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
       - id: tags
         env:
           IMAGE: ghcr.io/the-cloud-clockwork/agentihooks-swarm
+          RELEASE: ${{ github.event.release.tag_name }}
+          LATEST: ${{ steps.main.outputs.latest }}
         run: |
           {
             echo 'tags<<EOF'
-            echo "$IMAGE:dev"
-            echo "$IMAGE:dev-${GITHUB_SHA:0:7}"
+            if [[ -n "$RELEASE" ]]; then
+              echo "$IMAGE:${RELEASE#v}"
+              if [[ "$LATEST" == true ]]; then echo "$IMAGE:release"; fi
+            else
+              echo "$IMAGE:dev"
+              echo "$IMAGE:dev-${GITHUB_SHA:0:7}"
+            fi
             echo EOF
           } >> "$GITHUB_OUTPUT"
       - name: Log in to GHCR

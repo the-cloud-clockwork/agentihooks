@@ -87,7 +87,8 @@ if [[ $allowed != *'"private": true, "connected": true'* ]]; then
   printf 'the allowed client in %s could not reach the worker terminal over a private route: %s\n' "$control" "$allowed" >&2
   exit 1
 fi
-for client in "$other/foreign-namespace" "$control/unlabelled"; do
+deny() {
+  local client=$1 denied
   denied=""
   for _ in $(seq 15); do
     denied="$(reach "$client" "$host")"
@@ -102,7 +103,17 @@ for client in "$other/foreign-namespace" "$control/unlabelled"; do
     denied="$(reach "$client" "$host")"
   done
   printf 'worker terminal refused client %s: %s\n' "$client" "$denied"
+}
+denials=()
+for client in "$other/foreign-namespace" "$control/unlabelled"; do
+  deny "$client" &
+  denials+=("$!")
 done
+denied_status=0
+for denial in "${denials[@]}"; do
+  wait "$denial" || denied_status=$?
+done
+[[ $denied_status == 0 ]] || exit "$denied_status"
 missing="$(reach "$control/allowed" "$missing_host")"
 if [[ $missing != *'"refused": "no_route"'* ]]; then
   printf 'an execution with no terminal Service resolved: %s\n' "$missing" >&2

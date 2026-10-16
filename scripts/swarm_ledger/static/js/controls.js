@@ -13,6 +13,7 @@ const MASTER_AGENTS = ["claude", "codex"];
 
 let noteError = false;
 let models = {};
+let applied = null;
 
 async function loadModels() {
   try {
@@ -137,7 +138,7 @@ export function showNote(phase, action, error) {
 export function renderControls() {
   const config = swarm ? swarm.config : {};
   const changes = swarm ? capChanges(capValues(swarm), capDraft, models) : { body: {}, bad: [] };
-  const off = swarm ? { ...swarmControls(config.state), ...capBounds(capCurrent()), apply: Object.keys(changes.body).length < 2 && !changes.bad.length } : swarmControls("");
+  const off = swarm ? { ...swarmControls(config.state), ...capBounds(capCurrent()), apply: !unsent(changes.body) && !changes.bad.length } : swarmControls("");
   for (const btn of [...$("swarm-box").querySelectorAll("button[data-swarm]"), ...$("closed-banner").querySelectorAll("button[data-swarm]")]) {
     const action = btn.dataset.swarm;
     btn.hidden = (action === "doctor_start" && doctorOn(swarm)) || (action === "doctor_stop" && !doctorOn(swarm));
@@ -171,6 +172,7 @@ function commandAction(command) {
   if (command.command === "quota") return "quota_refresh";
   if (command.command === "doctor") return `doctor_${command.argv[0]}`;
   const action = command.argv[0] === "--as" ? command.argv[2] : command.argv[0];
+  if (action === "set" && command.argv.some((pair) => pair.startsWith("autonomy="))) return "autonomy";
   return action === "stop" && command.argv.includes("--now") ? "stop_now" : action;
 }
 
@@ -202,10 +204,29 @@ export async function refreshQuota() {
   btn.setAttribute("aria-busy", "false");
 }
 
+export function appliedCaps(body, sw) {
+  for (const key of Object.keys(capDraft)) if (!(key in body)) delete capDraft[key];
+  applied = { body, draft: { ...capDraft }, keys: Object.keys(body).filter((key) => key !== "action"), id: ((sw && sw.commands) || []).at(-1)?.id };
+  settleCaps(sw);
+}
+
+export function settleCaps(sw) {
+  if (!applied || !sw) return;
+  const row = applied.id && (sw.commands || []).find((c) => c.id === applied.id), values = capValues(sw);
+  const done = row && (row.state === "failed" || (row.state === "acknowledged" && sw.last_tick >= row.acknowledged_at));
+  applied.keys = applied.keys.filter((key) => String(capDraft[key]).trim() === String(applied.draft[key]).trim());
+  for (const key of applied.keys) if (done || String(values[key]) === String(applied.body[key])) delete capDraft[key];
+  if (!applied.keys.some((key) => key in capDraft)) applied = null;
+}
+
+function unsent(body) {
+  return Object.keys(body).some((key) => key !== "action" && !(applied && applied.keys.includes(key) && String(applied.body[key]) === String(body[key])));
+}
+
 function applyCaps() {
   const { body, bad } = capChanges(capValues(swarm), capDraft, models);
   if (bad.length) return showNote("error", "apply", bad.join("; "));
-  if (Object.keys(body).length > 1) swarmControl(body, "apply");
+  if (unsent(body)) swarmControl(body, "apply");
 }
 
 export function wireSwarm() {

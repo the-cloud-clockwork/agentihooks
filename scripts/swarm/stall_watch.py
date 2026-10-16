@@ -15,7 +15,7 @@ from dataclasses import dataclass, fields
 
 from scripts.inbox import exits
 from scripts.inbox.store import CLOSED, InboxError, InboxStore
-from scripts.swarm import capacity, outage, ready
+from scripts.swarm import capacity, outage, ready, waits
 from scripts.swarm.health.findings import MINUTE_MS, Finding
 from scripts.swarm.ledger_events import Mail
 
@@ -114,6 +114,9 @@ def stall_pass(watch, doc):
     if gone:
         watch.store.redis.srem(_key(watch, QUEUED), *gone)
     for task in held:
+        found = ready.record(watch.store, watch.slug, task["id"]) if ready.awaiting(task) else None
+        if found and waits.dependency(found.get("dependency", {}), task, rows, watch.view):
+            continue
         actions += _pull_request(watch, mail, task, limit, marks, seen)
     actions += _unclaimed(watch, mail, rows, limit, marks, seen)
     watch.store.redis.delete(_key(watch, SEEN))
@@ -149,9 +152,11 @@ def _stall(watch, task, pull, marks, seen, agent):
         and not pull.draft
     ):
         return "red", max(marks_red)
+    if ready.awaiting(task):
+        return None, None
     if pull.resolved and not pull.red and not pull.queued and not pull.draft:
         return "green", _since(watch, marks, seen, f"{tid}:green")
-    if not ready.awaiting(task) and task.get("claimed_by") not in watch.live:
+    if task.get("claimed_by") not in watch.live:
         return "owner", _since(watch, marks, seen, f"{tid}:owner")
     return None, None
 
@@ -183,6 +188,8 @@ def _reopen(watch, mail, task, case, minutes, limit):
     tid, owner = task["id"], task.get("claimed_by") or ""
     fresh = watch.ledger.task(watch.slug, tid) or {}
     if fresh.get("state") not in HELD or (fresh.get("claimed_by") or "") != owner:
+        return []
+    if case in {"green", "owner"} and ready.awaiting(fresh):
         return []
     if outage.held(watch.store, watch.slug, owner or None):
         return []

@@ -1,0 +1,6 @@
+{
+  "scripts/gates/intent.py:scripts.gates.intent.x__bind_pulls__mutmut_36:472ddb0998cdafd21edab122d6c72b79c3db70cc53f21cc51e1256587216a877": {
+    "reader": "Standards",
+    "reason": "Adding XX around the internal registry description changes only unused metadata. IntentGate.decide reads registry pulls and inputs; its decisions, head checks, cached verdicts and public refusal messages do not use this registry reason."
+  }
+}

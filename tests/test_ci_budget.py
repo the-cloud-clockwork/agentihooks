@@ -200,9 +200,13 @@ def test_cli_requires_both_files(tmp_path, dropped):
 def test_stage_budget_runs_after_every_gate_need_and_gate_required_needs_it():
     jobs = _workflow_jobs()
     job, gate = jobs[ci_budget.SELF], jobs["gate-required"]
-    assert set(job["needs"]) == set(gate["needs"]) - {ci_budget.SELF}
+    assert set(job["needs"]) == set(gate["needs"]) - {ci_budget.SELF, ci_budget.WATCHER}
     assert ci_budget.SELF in gate["needs"]
-    assert job["if"] == "${{ always() }}"
+    assert job["if"] in (
+        "${{ always() }}",
+        "${{ always() && github.event_name != 'merge_group' && github.event_name != 'pull_request' }}",
+        "${{ always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}",
+    )
     assert "permissions" not in job and "continue-on-error" not in job
     mint, read, report = job["steps"][1:]
     assert mint["uses"] == "actions/create-github-app-token@v3.2.0"

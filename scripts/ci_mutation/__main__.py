@@ -27,6 +27,8 @@ def main() -> int:
         parser.error(f"--stats-part {args.stats_part} needs --stats and is outside 0 to {args.stats_parts - 1}")
     os.environ["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
     root = Path.cwd()
+    if os.environ.get("MUTATION_STATS_CACHE"):
+        os.environ["MUTATION_STATS_ROOT"] = str(root)
     changes = discover_changes(root, args.bases.split(",") if args.bases is not None else args.base, args.head)
     print(f"Changed Python files: {len(changes)}", flush=True)
     stats = None

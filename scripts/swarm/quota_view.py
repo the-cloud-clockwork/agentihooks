@@ -6,6 +6,8 @@ from scripts.swarm.health.findings import MINUTE_MS
 
 
 def routing_left(account: dict) -> float | None:
+    if account["harness"] == "codex":
+        return account["week_left"]
     if account["five_left"] is None or account["week_left"] is None:
         return None
     return min(account["five_left"], account["week_left"])

@@ -73,6 +73,13 @@ def _set(value):
     return "" if value in (None, "", AUTO) else value
 
 
+def _prefer(profile, avoid):
+    order = profile_choice.preferred(profile)
+    if not avoid:
+        return order
+    return tuple(harness for harness in (order or agent_choice.AGENTS) if harness != avoid)
+
+
 def _model_args(agent, chosen, environ, bounds, preserve=False):
     from scripts.init_agent import model_effort, model_flags
 
@@ -124,7 +131,11 @@ def pane_target(agent):
 def _launch_records(name):
     from scripts import herdr_panes
 
-    return [r for r in herdr_panes.load(dict(os.environ)) if r.kind == "init-agent" and r.owner_session == name]
+    return [
+        r
+        for r in herdr_panes.load(dict(os.environ))
+        if r.kind == "init-agent" and naming.plain(r.owner_session) == naming.plain(name)
+    ]
 
 
 def _opened_pane(name, since_ms):
@@ -501,19 +512,20 @@ class HerdrRuntime:
             if saved and quota_transfer
             else saved
         )
-        if saved and want and saved["harness"] != want and not quota_transfer:
+        avoid = (task.get("transfer") or {}).get("avoid_harness")
+        if saved and not quota_transfer and (saved["harness"] != want if want else saved["harness"] == avoid):
             saved = {}
         if want and not saved:
             agent, reason = self.choose(want, environ)
         elif saved:
             agent, reason = self._saved_choice(saved, profile, quota_transfer, environ)
         else:
-            agent, reason = self._rotation(requested, environ, profile_choice.preferred(profile))
+            agent, reason = self._rotation(requested, environ, _prefer(profile, avoid))
         route_kind = task.get("route_kind", "subscription")
         if reason == agent_choice.ALL_FULL and not hasattr(self, "_quota_accounts") and route_kind != "interactive":
             raise SpawnError(reason, "unavailable")
         planned = getattr(self, "_quota_tasks", {}).get(task["id"])
-        if planned and not (requested or saved or want):
+        if planned and planned != avoid and not (requested or saved or want):
             agent, reason = planned, "fallthrough: quota reservation"
         agent, reason = (
             (agent, reason)
@@ -584,7 +596,7 @@ class HerdrRuntime:
                     agent,
                     picked.__dict__,
                     environ,
-                    effort_range.of(config),
+                    effort_range.bounds(config, lane),
                     preserve=preserves_effort(bool(saved), lane),
                 ),
                 *mode,
@@ -635,7 +647,7 @@ class HerdrRuntime:
             agent.harness,
             picked.__dict__,
             dict(os.environ),
-            effort_range.of(config),
+            effort_range.bounds(config, agent.lane),
             preserve=preserves_effort(bool(agent.effort), agent.lane),
         )
         argv += ["--resume", agent.conversation_id, "--", *route, *model]
@@ -691,7 +703,7 @@ class HerdrRuntime:
         ]
         argv += [
             "--name",
-            name,
+            naming.plain(name) if agent == "claude" else name,
             "--agent",
             agent,
             "--start-timeout",
@@ -732,7 +744,8 @@ class HerdrRuntime:
                     "AGENTIHOOKS_SWARM_TASK": task_id,
                     "AGENTIHOOKS_SWARM_AUTONOMY": config.autonomy,
                     "AGENTIHOOKS_SWARM_SPAWN": "1",
-                    effort_range.VARIABLE: ":".join(effort_range.of(config)),
+                    "AGENTIHOOKS_AGENT_NAME": name,
+                    effort_range.VARIABLE: ":".join(effort_range.bounds(config, lane)),
                     **({"AGENTIHOOKS_COMPACT_LIMIT": str(config.compact_limit)} if config.compact_limit else {}),
                 },
             )
