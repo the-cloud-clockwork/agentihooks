@@ -1,3 +1,4 @@
+import hashlib
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -737,3 +738,6 @@ def test_text_lookup_reads_title_and_body_with_one_call():
     assert intent.pr_text(url, lambda *a, **k: SimpleNamespace(returncode=1, stdout="")) is None
     assert intent.pr_text("not a pull", run) is None
     assert intent.text_key("T", None) == intent.text_key("T", "") != intent.text_key("T", "x")
+    assert intent.text_key("T", None) == hashlib.sha256(b'["T", ""]').hexdigest()
+    with_body = SimpleNamespace(returncode=0, stdout='{"title": "T", "body": "B"}\n')
+    assert intent.pr_text(url, lambda *a, **k: with_body) == intent.text_key("T", "B") != intent.text_key("T", "")
