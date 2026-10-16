@@ -52,9 +52,9 @@ A Codex release outside this table is unqualified. Requalify with
 
 ## Canary order
 
-A new swarm already stores `app_server`. On a swarm that stores `legacy`, each
-step sets it with `agentihooks swarm <id> set codex-inbox-transport=app_server`;
-the default is step 4. Enable one step at a time, and check each step before the next:
+Step 4 takes effect when this release deploys: from then on `swarm create`
+stores `app_server`. Steps 1 to 3 move swarms that store `legacy`, one at a
+time, with `agentihooks swarm <id> set codex-inbox-transport=app_server`. Enable one step at a time, and check each step before the next:
 
 1. One worker on a scratch swarm with its own Redis database.
 2. One real worker in an authorized swarm.
@@ -76,9 +76,10 @@ from the live thread without a typed wake.
 
 ## Roll back
 
-Rollback changes routing for new work only. The setting is written only to the
-swarm config; on a running swarm the same command runs one tick, which may
-launch new work on the new value. It deletes no accepted item, moves no history
+Rollback changes routing for new work only. The command writes the setting to
+the swarm config; on a running swarm it then runs one tick, which updates the
+inbox indexes and the tick's own records and may launch new work on the new
+value. It deletes no accepted item, moves no history
 back to pending, releases no live server's quota slot and leaves `dev` alone.
 
 1. Stop new `app_server` launches:
@@ -95,9 +96,12 @@ back to pending, releases no live server's quota slot and leaves `dev` alone.
    running turn is interrupted; the app-server is not signalled. If either wait
    runs out, the command exits 1, the execution stays fenced from new inbox
    turns, and you run the stand-down again. A delivery receipt still `submitting`
-   or `unknown` may have reached the thread; leave its item until the receipt
-   reads `accepted` or `rejected`. Transfer only items with no receipt or a
-   `rejected` one, through the seat and task rules:
+   or `unknown` may have reached the thread. The pump's recovery pass turns
+   `submitting` into `unknown`; nothing resolves `unknown` automatically, so open
+   the thread with `agentihooks swarm <id> terminal <execution-id>` and check
+   whether the item arrived before moving it. Transfer only items with no
+   receipt, a `rejected` one, or an `unknown` one the thread shows never arrived,
+   through the seat and task rules:
 
    ```bash
    agentihooks terminate-agent <agent> --stand-down --dry-run
