@@ -167,6 +167,29 @@ def test_a_single_green_run_moves_the_task_to_review():
     assert found["seconds"] == seconds(3600.0, 3600.0, 7200.0)
 
 
+@pytest.mark.parametrize("reverse", [False, True])
+def test_each_pull_request_counts_only_its_review_and_excludes_parked_time(reverse):
+    first, second = "https://github.com/org/repo/pull/1", "https://github.com/org/repo/pull/2"
+    delivery = [
+        {**opened("t4", 3 * H), "pull_request": first, "branch": "first"},
+        {**merge("t4", 5 * H), "pull_request": first, "branch": "first"},
+        {**opened("t4", 6 * H), "pull_request": second, "branch": "b-t4"},
+        {**merge("t4", 9 * H), "pull_request": second, "branch": "b-t4"},
+        {"task": "t4", "kind": "parked", "ts_ms": 7 * H},
+        {"task": "t4", "kind": "unparked", "ts_ms": 8 * H},
+    ]
+    found = bottleneck.report(
+        rows(
+            agent=[claim("t4", 2 * H)],
+            delivery=delivery[::-1] if reverse else delivery,
+            ci=[run("first", 3 * H, 4 * H, "success"), run("b-t4", 6 * H, 6.5 * H, "success")],
+        ),
+        open_task("t4", "done"),
+        NOW,
+    )
+    assert found["seconds"]["review"] == 9000.0
+
+
 def test_a_cancelled_last_run_keeps_ci_holding_until_now():
     found = bottleneck.report(
         rows(agent=[claim("t4", 6 * H)], ci=[run("b-t4", 7 * H, 8 * H, "cancelled")]), open_task("t4"), NOW
