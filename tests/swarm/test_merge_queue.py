@@ -190,6 +190,48 @@ def test_queue_waits_until_every_configured_check_exists(missing):
     assert not any("enqueuePullRequest(input:" in str(command) for command, _ in calls)
 
 
+@pytest.mark.parametrize("source, expected", [("status", False), ("other app", False), ("required app", True)])
+def test_queue_checks_the_app_required_by_repository_policy(source, expected):
+    response = checked_resource()
+    commit = response["data"]["resource"]["commits"]["nodes"][0]["commit"]
+    if source == "status":
+        check = {"context": "CI Validate", "state": "SUCCESS", "isRequired": True}
+    else:
+        check = {
+            "name": "CI Validate",
+            "conclusion": "SUCCESS",
+            "isRequired": True,
+            "checkSuite": {"app": {"databaseId": 15368 if source == "required app" else 42}},
+        }
+    commit["statusCheckRollup"]["contexts"]["nodes"] = [check]
+    original, calls = runner(
+        {"data": {"resource": OPEN}},
+        response,
+        {"data": {}},
+        {"data": {"resource": {**OPEN, "mergeQueueEntry": ENTRY}}},
+    )
+
+    def run(command, **kwargs):
+        if command[2] == "repos/o/r/rules/branches/dev":
+            rules = [
+                {
+                    "type": "required_status_checks",
+                    "parameters": {
+                        "required_status_checks": [{"context": "CI Validate", "integration_id": 15368}],
+                    },
+                }
+            ]
+            return subprocess.CompletedProcess(command, 0, json.dumps(rules))
+        return original(command, **kwargs)
+
+    if expected:
+        assert merge_queue.operate("queue", URL, run)["queued"]
+    else:
+        with pytest.raises(SwarmError, match="required checks"):
+            merge_queue.operate("queue", URL, run)
+        assert not any("enqueuePullRequest(input:" in str(command) for command, _ in calls)
+
+
 @pytest.mark.parametrize("present", [True, False])
 def test_queue_reads_classic_branch_requirements(present):
     response = checked_resource()
