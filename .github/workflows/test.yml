@@ -693,7 +693,7 @@ jobs:
         run: python -m tests.dev_durations "$PYTHON_VERSION" ~/dev-durations --hash durations.sha256 --collected collected.json
 
       - name: Mint the token that reads the dev test record
-        id: plan-token
+        id: app-token
         if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
         uses: actions/create-github-app-token@v3.2.0
         with:
@@ -707,7 +707,7 @@ jobs:
         id: plan
         if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
         env:
-          GH_TOKEN: ${{ steps.plan-token.outputs.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           GRADER: ${{ github.event.merge_group.base_sha || github.sha }}
           PYTHON_PATH: ${{ steps.python.outputs.python-path }}
         run: |
