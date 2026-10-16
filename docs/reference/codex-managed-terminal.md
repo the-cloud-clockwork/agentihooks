@@ -10,6 +10,8 @@ A Codex swarm execution using `app_server` runs through a supervised server.
 Herdr displays a native Codex terminal attached to that execution's recorded
 thread. Closing the terminal closes the viewer; the server and inbox delivery
 continue. Reopening the viewer attaches to the same thread.
+An unsent draft belongs to the viewer: inbox delivery preserves it while the
+viewer stays open, but closing and reopening the viewer does not restore it.
 
 ## Choose the transport
 
@@ -116,6 +118,15 @@ path refuses a managed execution with `unsupported resume: a managed Codex
 execution continues through its supervised server`. Use terminal reopening for
 a live execution. Renaming a managed agent renames its herdr pane and registry
 identity without typing a session-name command into the viewer.
+
+The live qualification also recorded these viewer limits:
+
+- Initial launch can leave its `/rename` command in the composer while the
+  server starts work; the recorded thread remains the attachment identity.
+- Retiring the execution can leave a reopened viewer showing
+  `Reconnecting to server…`. Close that viewer pane separately.
+- A Codex update prompt can interrupt attachment. Dismiss or complete it in
+  the viewer before checking the conversation history.
 
 | Symptom | Meaning and action |
 |---|---|

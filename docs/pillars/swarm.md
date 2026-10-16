@@ -56,7 +56,7 @@ work and ends its turn when idle; it does not run `wait --inbox`. See
 configuration, reopening the same thread and handoff behavior.
 
 Every swarm that is not stopped keeps exactly one master, named `master@<code>-<n>`. The tick spawns it when the
-swarm starts and spawns a new one when its pane dies; it is never nudged or retired for being idle, and it
+swarm starts and recovers it when its execution ends (closing a managed Codex viewer alone leaves it running); it is never nudged or retired for being idle, and it
 does not count against the `eng` and `ci` caps. A stopping swarm keeps its master until the last worker leaves.
 
 Its opening prompt makes it join the ledger as orchestrator, with operator writes reaching it as inbox messages
