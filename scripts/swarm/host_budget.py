@@ -10,6 +10,15 @@ MEMORY_PER_AGENT_MB = 700
 LOAD_HIGH = 1.5
 LOAD_LOW = 1.0
 LOAD, MEMORY, UNKNOWN = "load", "memory", "unknown"
+DEPLOYMENT_ENV = "AGENTIHOOKS_DEPLOYMENT"
+NODE_OFF = (
+    "host room off: a deployed controller's own node says nothing about worker capacity and no worker pool "
+    "reading is wired, so spawns pass"
+)
+PRESSURE_OFF = (
+    "host pressure alert off: a deployed controller's own node says nothing about worker capacity; "
+    "the worker pool room holds spawns instead"
+)
 
 
 @dataclass(frozen=True)
@@ -99,3 +108,13 @@ def read_host(proc: Path = Path("/proc")) -> HostSample | None:
     except (OSError, ValueError, IndexError):
         return None
     return HostSample(load1=load1, cpus=cpus, available_mb=available_mb, agents=agents)
+
+
+def deployed(environ) -> bool:
+    return environ.get(DEPLOYMENT_ENV, "local") != "local"
+
+
+def controller_host(environ) -> HostSample | Room | None:
+    if deployed(environ):
+        return Room(None, NODE_OFF, UNKNOWN)
+    return read_host()
