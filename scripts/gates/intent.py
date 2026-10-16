@@ -899,6 +899,8 @@ def _pull_view(words):
     for word in rest:
         if word in REPO_FLAGS:
             repo = [word, next(rest, "")]
+        elif word.startswith(("--repo=", "-R")):
+            repo = [word]
         elif word in VALUE_FLAGS:
             next(rest, None)
         elif not word.startswith("-") and not branch:

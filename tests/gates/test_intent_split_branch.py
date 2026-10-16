@@ -37,6 +37,8 @@ def view(*operands):
         ("gh pr merge half-two other", view("half-two")),
         ("FOO=1 && gh pr merge -t", view()),
         ("gh pr merge -R", view("-R", "")),
+        ("gh pr merge half-two --repo=o/r", view("half-two", "--repo=o/r")),
+        ("gh pr merge -Ro/r", view("-Ro/r")),
     ],
 )
 @pytest.mark.parametrize("url, allowed", [(FIRST, True), (SECOND, False)])
