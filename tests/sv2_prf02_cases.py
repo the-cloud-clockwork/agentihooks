@@ -34,14 +34,14 @@ INPUTS = (*ANTON, *KIND, NATIVE, COLD_OUTAGE)
 HELPERS = frozenset({"startup-bench/outage-registry"})
 FROM_ZERO_GROUP = "anton-k3s-swarm"
 EVIDENCE_CLASS = (
-    "measured: Anton reads are read only kubectl and aws listings of nodes, events, Pods, autoscaling activities and "
-    "EC2 instances, read 3 also the agent log of each swarm worker Pod, reduced by startup_bench reduce; the kind "
+    "measured: Anton reads 1 to 3 are read only kubectl and aws listings of nodes, events, Pods, autoscaling "
+    "activities and EC2 instances, read 3 also the agent log of each swarm worker Pod, reduced by startup_bench reduce; the kind "
     "reads come from the Startup stages workflow named in "
     "their source, where a GitHub hosted runner pulled the published worker image from a local registry that the "
     "fixture stopped and restarted; the Anton outage read comes from the startup fixture's anton-outage mode, which "
-    "created a namespace with a worker Pod and a registry Pod on anton-prod, then listed nodes, events and Pods, the "
-    "autoscaler's ScaledUpGroup events and the Oracle instance; attribution, report and claim are functions over "
-    "those committed reads; the "
+    "created a namespace with a worker Pod and a registry Pod on anton-prod, listed nodes, events and Pods, the "
+    "autoscaler's ScaledUpGroup events and the Oracle instance, then deleted the namespace; attribution, report and "
+    "claim are functions over those committed reads; the "
     "account release in case C runs the KUB-05 recovery over fakeredis and is mocked"
 )
 
@@ -98,7 +98,9 @@ NOTES = (
     " creation, so the instance column is scale up to Oracle instance creation and the join column runs to the node's"
     " Ready transition. The registry is a pull through cache of ghcr.io on the new node's loopback that started 96"
     " seconds after the worker was scheduled, so its pull shows the production registry path after the outage; the"
-    " registry Pod itself is not a sample. The worker image was the :dev tag, not :release.",
+    " registry Pod itself is not a sample. The fixture's outage_seconds of 90 is the wait it targets from seeing the"
+    " worker scheduled; 96 seconds is measured from the worker's Scheduled event to the registry's Started event. The"
+    " worker image was the :dev tag, not :release.",
 )
 
 

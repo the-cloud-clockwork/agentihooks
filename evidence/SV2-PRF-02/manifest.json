@@ -19,5 +19,8 @@
     "tests/fixtures/swarm_v2/startup/logs/agentihooks-swarm-workers_swarm-exe-4a990712d05642e3964f0b0374c7cd43.log": "7d2676e1713d435e2995e9d709572c785c6378312f52ba9cf2cc6d762496a1b2",
     "tests/fixtures/swarm_v2/startup/anton-outage-1.json": "8d5860d22787254ad0e1cca0bc07817a1dce6425c66fbbda3ebb5ff12ffcf276",
     "evidence/SV2-PRF-02/anton-outage-1-fixture.json": "22b98c5d6943787fbc83cbfe3438ae3e2b35201786bc4b2e55d518e7a0f60410"
+  },
+  "reductions": {
+    "anton-outage-1.json": "raw capture held outside the repo; startup_bench reduce with the startup_stages.py pinned in inputs reproduces the committed read byte for byte"
   }
 }
