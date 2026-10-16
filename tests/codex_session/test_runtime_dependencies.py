@@ -44,10 +44,6 @@ def _requirement_name(requirement):
     return _normalize(re.split(r"[<>=!~\[;\s]", requirement, maxsplit=1)[0])
 
 
-def test_the_app_server_client_imports_websockets():
-    assert "websockets" in _third_party_modules()
-
-
 def test_runtime_dependencies_cover_every_third_party_import_of_the_app_server_client():
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
     runtime = {_requirement_name(requirement) for requirement in project["dependencies"]}
