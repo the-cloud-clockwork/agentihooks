@@ -38,8 +38,8 @@ export function moreButton(key, total, label, again, tag = "li", page = FULL_PAG
 
 export function threadPage(key, items, { idOf, label, again, make }, page = FULL_PAGE) {
   const more = moreButton(key, items.length, label, again, "div", page);
-  const shown = lastPage(key, items, idOf, page).map(make);
-  return (page.below ? [...shown, more] : [more, ...shown]).filter(Boolean);
+  const rows = lastPage(key, items, idOf, page).map(make);
+  return (page.below ? [...rows, more] : [more, ...rows]).filter(Boolean);
 }
 
 export function lazy(box, fill) {
