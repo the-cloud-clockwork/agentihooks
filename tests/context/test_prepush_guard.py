@@ -288,6 +288,8 @@ def test_a_push_from_a_second_repository_grades_only_that_repository(swarm_workt
     }
     legacy_page.store(tmp_path / "ledgers", "rig", {"tasks": [task]})
     infra = _init(tmp_path / "infra")
+    _git(infra, "add", "scripts/ci_prepush/__init__.py")
+    _git(infra, "commit", "-q", "-m", "guard")
     if checkout == "worktree":
         infra_tree = tmp_path / "worktrees" / "infra" / "engineer-test-2"
         _git(infra, "worktree", "add", "-q", "-b", "engineer-test-2", str(infra_tree))
