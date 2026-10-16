@@ -22,7 +22,7 @@ SHARE_STAGES = {
     "host": ("host_hold",),
     "quota": ("quota_hold",),
 }
-NOT_OPEN = "{item} is not an open phase or task in this ledger; name one as phases/<id> or tasks/<id>"
+NOT_OPEN = "{item} is not an open phase or task in this ledger; name one as phases/ID or tasks/ID"
 NO_REASON = "a stage cover needs a reason"
 UNKNOWN = "no bottleneck stage or share is named {stage}; name one of {names}"
 
@@ -76,7 +76,8 @@ def cover(store: RedisStore, slug: str, doc: dict, request: Request, now_ms: int
 def covered(store: RedisStore, slug: str, doc: dict, name: str, share: bool = False) -> bool:
     key, names = store.key(slug, KEY), _related(name, share)
     held = False
-    for stage, raw in zip(names, store.redis.hmget(key, names), strict=True):
+    for stage in names:
+        raw = store.redis.hget(key, stage)
         if raw is None:
             continue
         item = json.loads(raw)["item"]

@@ -2,8 +2,9 @@ import json
 
 import pytest
 
+from scripts.gates import Who
 from scripts.inbox.store import InboxStore
-from scripts.swarm import bottleneck_remedy, cli, dispatch_seat, stage_cover
+from scripts.swarm import bottleneck_remedy, clearance, cli, dispatch_seat, stage_cover
 from scripts.swarm.health import standing
 from scripts.swarm.ledger_events import Mail
 from scripts.swarm.store import ASSIST, MANUAL_SCALING, AgentRecord, RedisStore, SwarmConfig, SwarmError
@@ -144,6 +145,36 @@ def test_a_lapse_never_deletes_a_cover_written_after_the_read():
     assert stored(store)["ci_overrun"]["reason"] == "second owner"
 
 
+def test_an_item_id_holding_a_slash_is_found_and_lapses_once_gone():
+    store = swarm()
+    nested = {"tasks": [{"id": "a/b", "state": "open"}], "phases": []}
+    put(store, "ci_overrun", "tasks/a/b", found=nested)
+    assert stage_cover.covered(store, SLUG, nested, "ci_overrun")
+    assert stage_cover.covered(store, SLUG, {"tasks": [{"id": "t8", "state": "open"}]}, "ci_overrun") is False
+    assert stored(store) == {}
+
+
+def test_a_ledger_without_phases_refuses_a_phase_cover_and_keeps_an_existing_one():
+    store = swarm()
+    with pytest.raises(SwarmError, match="phases/p3 is not an open phase or task"):
+        put(store, "ci_overrun", "phases/p3", found={"tasks": []})
+    put(store, "ci_overrun", "phases/p3")
+    assert stage_cover.covered(store, SLUG, {"tasks": []}, "ci_overrun")
+
+
+def test_the_remedy_reading_leaves_sibling_covers_out_by_default():
+    store = swarm()
+    put(store, "merge_queue")
+    assert stage_cover.covered(store, SLUG, ledger_doc(), "review") is False
+    assert stage_cover.covered(store, SLUG, ledger_doc(), "seat_wait", share=True) is False
+
+
+def test_the_unknown_stage_refusal_lists_every_name_comma_separated():
+    with pytest.raises(SwarmError) as refused:
+        put(swarm(), "nowhere")
+    assert "name one of build, ci, ci_overrun, ci_queue, ci_run, claim_wait, engineering, host" in str(refused.value)
+
+
 def test_a_standing_stage_is_covered_under_its_exact_name():
     store = swarm()
     standing.fire(store.redis, SLUG, "Burn-rate:a-b", standing.Reading(5.0, 2.0, "hours", "e1"), NOW)
@@ -241,8 +272,11 @@ def crew(monkeypatch):
     store.put_agent(SLUG, AgentRecord(DISPATCHER, "dispatch", "dispatcher", seat=f"dispatcher@{SLUG}"))
     ledger = TickLedger([{"id": "t7"}])
     ledger.phases = [{"id": "p3", "done": False}]
+    ledger.read, state = [], ledger.state
+    ledger.state = lambda slug: ledger.read.append(slug) or state(slug)
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
+    monkeypatch.setattr(cli, "now_ms", lambda: NOW)
     return store
 
 
@@ -259,9 +293,31 @@ def test_the_operator_master_or_dispatcher_covers_a_stage(crew, monkeypatch, cap
     acting(monkeypatch, name, SLUG if name else "")
     assert cli.main([SLUG, "cover", "ci overrun", item, "--reason", "owned by the ci fix"]) == 0
     printed = json.loads(capsys.readouterr().out)
-    expected = {"stage": "ci_overrun", "item": item, "reason": "owned by the ci fix", "by": by}
-    assert {key: printed[key] for key in expected} == expected
+    assert printed == {"stage": "ci_overrun", "item": item, "reason": "owned by the ci fix", "by": by, "at": NOW}
     assert stored(crew)["ci_overrun"] == printed
+    assert cli.LedgerClient().read == [SLUG]
+
+
+def test_the_cover_command_requires_a_reason(crew, monkeypatch):
+    acting(monkeypatch)
+    with pytest.raises(SystemExit):
+        cli.main([SLUG, "cover", "ci_overrun", "tasks/t7"])
+    assert stored(crew) == {}
+
+
+@pytest.mark.parametrize("name", [MASTER, DISPATCHER])
+def test_the_master_and_dispatcher_cover_under_their_own_names(crew, name):
+    assert clearance.coverer(crew, SLUG, Who(name=name, swarm=SLUG)) == name
+
+
+def test_the_operator_covers_as_the_operator(crew, monkeypatch):
+    acting(monkeypatch)
+    assert clearance.coverer(crew, SLUG, Who()) == clearance.OPERATOR
+
+
+def test_an_engineer_is_no_coverer(crew):
+    with pytest.raises(SwarmError, match=f"{ENGINEER} is neither"):
+        clearance.coverer(crew, SLUG, Who(name=ENGINEER, swarm=SLUG))
 
 
 def test_an_engineer_cannot_cover_a_stage(crew, monkeypatch, capsys):
