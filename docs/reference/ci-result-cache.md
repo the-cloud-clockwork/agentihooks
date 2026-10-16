@@ -223,7 +223,7 @@ Coverage: merge group runs feed no coverage consumer, since `sonar` and the ratc
 
 A merge whose base grader has no planner, which includes the queue run of this slice's own pull request, runs in full.
 
-Known limits, each caught by the next dev push, which runs every test:
+Known limits. Each is detected only after the merge, by the next dev push, which runs every test; a red dev push does not hold the queue:
 
 - The manifest is measured on 3.12, and its plan also deselects the same tests on 3.11.
 - A test that reads a Python source as text, or lists a directory, depends only on what it executed or opened.
