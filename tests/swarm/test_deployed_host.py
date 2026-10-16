@@ -66,6 +66,17 @@ def test_a_local_controller_host_room_still_reads_its_own_node(monkeypatch):
     assert HerdrRuntime().host() is sample
 
 
+def test_status_shows_the_deployed_host_room_off_reason_from_the_capacity_decision(no_node, monkeypatch):
+    from scripts.swarm import quota_view
+
+    monkeypatch.setattr(HerdrRuntime, "host", REAL_HOST)
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "distributed")
+    monkeypatch.setattr(capacity, "accounts", lambda env, now, refresh=True: [])
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
+    decision = HerdrRuntime().quota_capacity(config, [], 100, {"eng": 1, "ci": 0, "plan": 0})
+    assert quota_view.host_line(decision["host"]) == f"host room unknown: {NODE_OFF}"
+
+
 def test_deployed_host_pressure_reads_no_node_and_status_names_the_off_reason(no_node):
     store = _store()
     assert incidents.host_pressure(store, "sw", DEPLOYED) == []
