@@ -233,7 +233,7 @@ def test_an_open_dependency_pull_request_holds_even_when_its_checks_are_red(tick
     assert held(tick.store) is None
 
 
-LEFT = f"pull request {URL}, now red; left the merge queue without merging; fix it and queue it again"
+LEFT = f"pull request {URL}, now green; dropped from the merge queue; queue it again"
 UNLISTED = PullRequest("OPEN", None, 1, False, resolved=True, head="first")
 LISTED = PullRequest("OPEN", None, 1, False, resolved=True, head="first", queued=True)
 

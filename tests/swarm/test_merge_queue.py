@@ -468,6 +468,38 @@ def test_cli_queue_declares_no_checks_wait(monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out) == {"url": URL, "queued": True, "entry": ENTRY}
 
 
+@pytest.mark.parametrize(
+    "mode, code, warned, logged",
+    [
+        ("enforce", 1, True, "deny"),
+        ("coach", 0, True, "coach"),
+        ("observe", 0, False, "observe"),
+    ],
+)
+def test_cli_queue_applies_the_judged_intent_mode(monkeypatch, tmp_path, capsys, mode, code, warned, logged):
+    from types import SimpleNamespace
+
+    from scripts.gates import intent
+    from scripts.gates.verdicts import Verdicts
+
+    store = swarm_of("eng")
+    store.config = lambda slug: SimpleNamespace(gates={"intent": mode})
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    Verdicts("sw", "intent", tmp_path).write("t1", "fail", "missing required behavior", head="abc", url=URL)
+    monkeypatch.setattr(intent, "Verdicts", lambda slug, gate, home=None: Verdicts(slug, gate, tmp_path))
+    monkeypatch.setattr(intent, "pr_head", lambda url: "abc")
+    monkeypatch.setattr(intent, "pr_merged", lambda url: False)
+    queued, events = [], []
+    monkeypatch.setattr(intent.log, "append", lambda slug, row, home=None: events.append(row))
+    monkeypatch.setattr(merge_queue, "operate", lambda action, url: queued.append(url) or {"queued": True})
+    assert cli.main(["sw", "merge", "queue", URL]) == code
+    output = capsys.readouterr()
+    assert ("missing required behavior" in output.err) is warned
+    assert queued == ([URL] if code == 0 else [])
+    assert [row.kind for row in events] == [logged]
+
+
 def test_a_checks_wait_on_the_queued_head_resolves_once_it_is_green():
     from types import SimpleNamespace
 

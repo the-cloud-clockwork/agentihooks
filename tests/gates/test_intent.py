@@ -47,6 +47,30 @@ def rows(tmp_path):
     return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
 
+@pytest.mark.parametrize(
+    "mode, verdict, head, allowed",
+    [
+        ("enforce", "fail", "abc", False),
+        ("coach", "fail", "abc", True),
+        ("observe", "fail", "abc", True),
+        ("enforce", "pending", "abc", True),
+        ("enforce", "fail", "old", True),
+        ("enforce", "pass", "abc", True),
+    ],
+)
+def test_queue_uses_only_a_judged_current_head_verdict(tmp_path, monkeypatch, mode, verdict, head, allowed):
+    state = verdicts(tmp_path)
+    state.write(TASK, verdict, "missing required behavior", NOW, url=URL, head=head)
+    monkeypatch.setattr(intent, "pr_head", lambda url: "abc")
+    monkeypatch.setattr(intent, "pr_merged", lambda url: False)
+    decision = intent.IntentGate(clock=lambda: NOW / 1000).decide(
+        bash(f"agentihooks swarm {SLUG} merge queue {URL}"), WHO, state, mode
+    )
+    assert decision.allowed is allowed
+    if verdict == "fail" and head == "abc" and mode in ("enforce", "coach"):
+        assert "missing required behavior" in decision.reason
+
+
 def answer(noul):
     return SimpleNamespace(noul=noul)
 
