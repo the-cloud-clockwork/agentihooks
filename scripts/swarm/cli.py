@@ -1296,7 +1296,7 @@ def _split_binding(row, url, half):
 
 def _queue_intent(store, args, agent, head):
     state = intent.Verdicts(args.slug, intent.NAME)
-    who = Who(name=agent.name, swarm=args.slug, lane=agent.lane, task=agent.task)
+    who = Who(name=agent.name, swarm=args.slug, task=agent.task)
     decision = intent.queue_decision(who, state, args.url, intent.mode_of(store.config(args.slug)), head)
     if not decision.allowed:
         gate_log.append(args.slug, gate_log.Row.of(intent.NAME, "deny", who, "Bash", decision.reason))

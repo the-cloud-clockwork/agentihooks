@@ -279,6 +279,18 @@ def test_the_merge_wait_rereads_only_an_open_pull_request_the_queue_does_not_lis
     "current, expected",
     [
         (PullRequest("MERGED", 2, 1, False), "now merged"),
+        (
+            PullRequest("OPEN", None, 1, True, resolved=True, failed=("Unit tests", "Lint")),
+            "now red; failed: Unit tests, Lint; fix the failing checks and queue it again",
+        ),
+        (
+            PullRequest("OPEN", None, 1, True, resolved=True, unpassed_gate="Gate — Required"),
+            "now red; failed: Gate — Required; fix the failing checks and queue it again",
+        ),
+        (
+            PullRequest("OPEN", None, 1, True, resolved=True),
+            "now red; failed: a required check; fix the failing checks and queue it again",
+        ),
         (PullRequest("OPEN", None, 1, False, resolved=True), "now green; dropped from the merge queue; queue it again"),
         (
             PullRequest("OPEN", None, 1, True, resolved=True, failed=("Unit tests",)),

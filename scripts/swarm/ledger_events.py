@@ -251,7 +251,7 @@ def _required_pull_request(raw, required_checks):
             for check, result in zip(checks, results)
             if result in RED
         ),
-        head=raw.get("headRefOid") or "",
+        head=raw["headRefOid"],
     )
 
 

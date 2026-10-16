@@ -242,6 +242,111 @@ def test_queue_allows_a_repository_with_no_required_checks():
     assert merge_queue.operate("queue", URL, run)["queued"]
 
 
+@pytest.mark.parametrize(
+    "checks, expected, red, resolved, failed",
+    [
+        (
+            [
+                {"name": "Build", "conclusion": "FAILURE", "isRequired": True},
+                {"name": "Lint", "conclusion": "FAILURE", "isRequired": True},
+            ],
+            {"Build", "Lint"},
+            True,
+            False,
+            ("Build", "Lint"),
+        ),
+        ([{"context": "Legacy check", "state": "SUCCESS", "isRequired": True}], {"Legacy check"}, False, True, ()),
+        (
+            [{"context": "Legacy check", "state": "FAILURE", "isRequired": True}],
+            {"Legacy check"},
+            True,
+            False,
+            ("Legacy check",),
+        ),
+        ([{"conclusion": "FAILURE", "isRequired": True}], {"Expected check"}, True, False, ("a check",)),
+    ],
+)
+def test_required_check_view_preserves_results_and_check_names(checks, expected, red, resolved, failed):
+    response = checked_resource()
+    commit = response["data"]["resource"]["commits"]["nodes"][0]["commit"]
+    commit["statusCheckRollup"]["contexts"]["nodes"] = checks
+    run, _ = runner(response)
+    assert READ_PULL(URL, run, required_checks=expected) == ledger_events.PullRequest(
+        "OPEN", None, None, red, resolved=resolved, failed=failed, head="abc"
+    )
+
+
+def test_queue_passes_the_observed_head_to_intent_admission():
+    run, _ = runner(
+        {"data": {"resource": OPEN}},
+        checked_resource(),
+        {"data": {}},
+        {"data": {"resource": {**OPEN, "mergeQueueEntry": ENTRY}}},
+    )
+    seen = []
+    assert merge_queue.operate("queue", URL, run, admit=seen.append)["queued"]
+    assert seen == ["abc"]
+
+
+@pytest.mark.parametrize(
+    "failure, expected",
+    [
+        (OSError("missing gh"), "GitHub API: missing gh"),
+        ((1, "denied\n"), "denied"),
+        ((1, ""), "GitHub API failed"),
+    ],
+)
+def test_queue_reports_failure_reading_required_check_results(failure, expected):
+    original, _ = runner({"data": {"resource": OPEN}})
+
+    def run(command, **kwargs):
+        if command[2] == "graphql" and command[4] == f"query={ledger_events.PULL_QUERY.replace('$number', '7')}":
+            if isinstance(failure, Exception):
+                raise failure
+            code, stderr = failure
+            return subprocess.CompletedProcess(command, code, "", stderr)
+        return original(command, **kwargs)
+
+    with pytest.raises(SwarmError) as caught:
+        merge_queue.operate("queue", URL, run)
+    assert str(caught.value) == expected
+
+
+def test_queue_reports_an_unreadable_head_without_inventing_a_failed_check():
+    run, _ = runner({"data": {"resource": OPEN}}, {"data": {"resource": None}})
+    with pytest.raises(SwarmError) as caught:
+        merge_queue.operate("queue", URL, run)
+    assert str(caught.value) == "required checks on the current pull request head must pass before queueing"
+
+
+def test_queue_names_all_failing_required_checks():
+    response = checked_resource("FAILURE")
+    commit = response["data"]["resource"]["commits"]["nodes"][0]["commit"]
+    commit["statusCheckRollup"]["contexts"]["nodes"].append(
+        {"name": "Lint", "conclusion": "FAILURE", "isRequired": True}
+    )
+    original, _ = runner({"data": {"resource": OPEN}}, response)
+
+    def run(command, **kwargs):
+        if command[2] == "repos/o/r/rules/branches/dev":
+            rules = [
+                {
+                    "type": "required_status_checks",
+                    "parameters": {
+                        "required_status_checks": [{"context": "CI Validate"}, {"context": "Lint"}],
+                    },
+                }
+            ]
+            return subprocess.CompletedProcess(command, 0, json.dumps(rules))
+        return original(command, **kwargs)
+
+    with pytest.raises(SwarmError) as caught:
+        merge_queue.operate("queue", URL, run)
+    assert str(caught.value) == (
+        "required checks on the current pull request head must pass before queueing; failed: CI Validate, Lint"
+    )
+
+
 @pytest.fixture(autouse=True)
 def task_ledger(monkeypatch):
     from types import SimpleNamespace
@@ -668,6 +773,7 @@ def test_cli_queue_declares_no_checks_wait(monkeypatch, capsys):
         ("enforce", 1, True, "deny"),
         ("coach", 0, True, "coach"),
         ("observe", 0, False, "observe"),
+        ("off", 0, False, None),
     ],
 )
 def test_cli_queue_applies_the_judged_intent_mode(monkeypatch, tmp_path, capsys, mode, code, warned, logged):
@@ -677,15 +783,19 @@ def test_cli_queue_applies_the_judged_intent_mode(monkeypatch, tmp_path, capsys,
     from scripts.gates.verdicts import Verdicts
 
     store = swarm_of("eng")
-    store.config = lambda slug: SimpleNamespace(gates={"intent": mode})
+
+    def config(slug):
+        assert slug == "sw"
+        return SimpleNamespace(gates={"intent": mode})
+
+    store.config = config
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     Verdicts("sw", "intent", tmp_path).write("t1", "fail", "missing required behavior", head="abc", url=URL)
     monkeypatch.setattr(intent, "Verdicts", lambda slug, gate, home=None: Verdicts(slug, gate, tmp_path))
-    monkeypatch.setattr(intent, "pr_head", lambda url: "abc")
-    monkeypatch.setattr(intent, "pr_merged", lambda url: False)
+    monkeypatch.setattr(intent, "pr_head", lambda url: pytest.fail("use the observed head"))
     queued, events = [], []
-    monkeypatch.setattr(intent.log, "append", lambda slug, row, home=None: events.append(row))
+    monkeypatch.setattr(intent.log, "append", lambda slug, row, home=None: events.append((slug, row, home)))
 
     def operate(action, url, admit):
         admit("abc")
@@ -697,7 +807,21 @@ def test_cli_queue_applies_the_judged_intent_mode(monkeypatch, tmp_path, capsys,
     output = capsys.readouterr()
     assert ("missing required behavior" in output.err) is warned
     assert queued == ([URL] if code == 0 else [])
-    assert [row.kind for row in events] == [logged]
+    if logged is None:
+        assert events == []
+        return
+    [(slug, row, home)] = events
+    assert slug == "sw"
+    assert home == (None if mode == "enforce" else tmp_path)
+    assert (row.gate, row.kind, row.agent, row.task, row.tool) == (
+        "intent",
+        logged,
+        "engineer@a1b2c3-0001",
+        "t1",
+        "Bash",
+    )
+    assert row.reason.startswith("intent check failed for task t1: missing required behavior.")
+    assert row.reason.endswith("then run agentihooks swarm sw pr <url> for a new check.")
 
 
 def test_a_checks_wait_on_the_queued_head_resolves_once_it_is_green():

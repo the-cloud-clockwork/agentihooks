@@ -891,10 +891,8 @@ def _same_pull(target, url):
 def _queue_target(command):
     for words in simple_commands(command):
         index = program_index(words)
-        if index is not None and PurePosixPath(words[index]).name == "agentihooks":
-            rest = words[index + 1 :]
-            if rest[:1] == ["swarm"] and rest[2:4] == MERGE_QUEUE:
-                return _merge_target(words)
+        if PurePosixPath(words[index]).name == "agentihooks":
+            return _merge_target(words)
     return None
 
 
@@ -911,18 +909,17 @@ def queue_decision(who: Who, state: Verdicts, url: str, mode: str, head: str | N
         url = urls[0]
         record = pulls.read(_pull_subject(who.task, url))
         if record and record.get("inputs") != bound["inputs"].get(url):
-            record = None
+            return Decision()
     if not record or record["verdict"] != FAIL:
         return Decision()
-    judged_url = record.get("url", "")
+    judged_url = record.get("url")
     if not judged_url or not _same_pull(url, judged_url) or not record.get("head"):
         return Decision()
     if (head if head is not None else pr_head(judged_url)) != record["head"]:
         return Decision()
     text = f"intent check failed for task {who.task}: {record['reason']}. {fix_steps(who.swarm)}"
-    kind = {"enforce": "deny", "coach": "coach", "observe": "observe"}[mode]
     if mode != "enforce":
-        log.append(state.slug, log.Row.of(NAME, kind, who, "Bash", text), state.home)
+        log.append(state.slug, log.Row.of(NAME, mode, who, "Bash", text), state.home)
     if mode == "coach":
         print(text, file=sys.stderr)
     return Decision(allowed=mode != "enforce", reason=text if mode != "observe" else "")
