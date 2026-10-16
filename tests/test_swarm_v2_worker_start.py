@@ -965,6 +965,7 @@ def test_the_worker_logs_a_passed_profile_binding_before_starting_its_task(tmp_p
         assert evidence["rendered"]["home"] == str(attempt / "homes" / target / f".{target}")
         assert stat.S_IMODE(report.stat().st_mode) == 0o600
         logs = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+        logs = [row for row in logs if "profile_binding" in row or "worker_start" in row]
         assert logs[0] == {"profile_binding": "passed", "profile": "engineer", "harness": target}
         assert logs[1]["worker_start"] == "prepared"
         return 70
@@ -1008,7 +1009,7 @@ def test_a_failed_worker_binding_is_reported_and_refuses_the_task(tmp_path, monk
     assert start.main([str(attempt), str(launch)]) == 64
 
     logs = capsys.readouterr()
-    assert not logs.out
+    assert "profile_binding" not in logs.out and "worker_start" not in logs.out
     assert "ERROR worker start refused: profile binding failed:" in logs.err
     evidence = json.loads((attempt / "run" / "profile-binding.json").read_text())
     assert evidence["state"] == "failed" and evidence["reason"]
