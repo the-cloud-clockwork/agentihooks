@@ -84,14 +84,15 @@ _FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
 
 def _parameters(function: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
     arguments = function.args
-    return {argument.arg for argument in arguments.posonlyargs + arguments.args + arguments.kwonlyargs}
+    variadic = [arguments.vararg] if arguments.vararg else []
+    return {argument.arg for argument in arguments.posonlyargs + arguments.args + arguments.kwonlyargs + variadic}
 
 
 def _branch_parameters(function: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
     conditions = (node.test for node in ast.walk(function) if isinstance(node, (ast.If, ast.IfExp, ast.While)))
     used = {name.id for condition in conditions for name in ast.walk(condition) if isinstance(name, ast.Name)}
     rebound = {name.id for name in ast.walk(function) if isinstance(name, ast.Name) and isinstance(name.ctx, ast.Store)}
-    return _parameters(function) & used - rebound
+    return _parameters(function) & (used - rebound)
 
 
 def deleted_branches(base: Path, head: Path, tests: str) -> set[tuple[str, str]]:
