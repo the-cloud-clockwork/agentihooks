@@ -205,7 +205,7 @@ def test_compose_smoke_jobs_pull_every_dockerfile_base_before_building(job, scri
     smoke = workflow["jobs"].get(job, workflow["jobs"]["smoke"])
     assert not smoke.get("needs")
     steps = smoke["steps"]
-    build = next(i for i, step in enumerate(steps) if step.get("run") == f"bash scripts/packaging/{script}.sh")
+    build = next(i for i, step in enumerate(steps) if f"scripts/packaging/{script}.sh" in step.get("run", "").split())
     for base in dockerfile_bases():
         pull = next(
             i

@@ -26,21 +26,17 @@ jobs:
       - name: Build the swarm image
         if: ${{ !cancelled() }}
         run: docker build -t local/agentihooks-swarm:clients-check .
-      - name: Launch a scratch agent through a remote hive container
+      - name: Run the hive launch, Compose install, hive join and Compose hive scenarios in parallel
         if: ${{ !cancelled() }}
-        run: bash scripts/packaging/hive-launch-smoke.sh
+        run: >-
+          bash scripts/packaging/swarm-smoke-parallel.sh
+          scripts/packaging/hive-launch-smoke.sh
+          scripts/packaging/swarm-smoke.sh
+          scripts/packaging/hive-join-smoke.sh
+          scripts/packaging/compose-hive-smoke.sh
       - name: Prove image pulls tolerate an absent attestation
         if: github.event_name == 'workflow_dispatch'
         run: bash scripts/packaging/hive-launch-attestation-proof.sh
-      - name: Prove a clean local Compose install
-        if: ${{ !cancelled() }}
-        run: bash scripts/packaging/swarm-smoke.sh
-      - name: Join a member container to a hive container over Redis ACL
-        if: ${{ !cancelled() }}
-        run: bash scripts/packaging/hive-join-smoke.sh
-      - name: Join a hive container to the Compose stack and hold the controller lease
-        if: ${{ !cancelled() }}
-        run: bash scripts/packaging/compose-hive-smoke.sh
       - name: Run the pinned herdr and ssh clients inside the swarm image
         if: ${{ !cancelled() }}
         run: bash scripts/packaging/swarm-image-clients.sh local/agentihooks-swarm:clients-check

@@ -5,7 +5,8 @@ cd "$(dirname "$0")/../.."
 run="hive-compose-$(python3 -c 'import uuid; print(uuid.uuid4().hex[:12])')"
 tls="$(mktemp -d -p "${RUNNER_TEMP:-${TMPDIR:-/tmp}}")"
 export COMPOSE_PROJECT_NAME="$run" COMPOSE_PROFILES=join SWARM_TLS_DIR="$tls" SWARM_REDIS_SCHEME=rediss \
-  SWARM_CA_FILE=/tls/ca.pem SWARM_MEMBER_REDIS_URL=rediss://redis:6379/0
+  SWARM_CA_FILE=/tls/ca.pem SWARM_MEMBER_REDIS_URL=rediss://redis:6379/0 SWARM_PORT="${SWARM_PORT:-18765}" \
+  SWARM_HIVE_PORT="${SWARM_HIVE_PORT:-18770}" SWARM_REDIS_PORT="${SWARM_REDIS_PORT:-16379}"
 SWARM_REDIS_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe())')"
 export SWARM_REDIS_PASSWORD
 cleanup() {
