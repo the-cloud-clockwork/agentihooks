@@ -15,8 +15,8 @@ viewer stays open, but closing and reopening the viewer does not restore it.
 
 ## Choose the transport
 
-The swarm setting `codex-inbox-transport` accepts `app_server` (the default
-for a new swarm) or `legacy`. A swarm that stored `legacy` keeps it; set it before launching the
+The swarm setting `codex-inbox-transport` accepts `app_server` (what
+`swarm create` stores) or `legacy`. A swarm that stored `legacy` keeps it; set it before launching the
 Codex agents that should receive inbox work in their thread:
 
 ```bash
