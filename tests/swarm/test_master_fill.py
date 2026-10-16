@@ -310,11 +310,13 @@ def test_a_seat_that_leaves_the_count_after_its_alarm_closes_the_alarm(store):
 
 
 def test_a_finished_master_still_live_in_the_seat_does_not_clear_the_alarm(store):
-    ledger, runtime = _seat_two_down(store)
-    tick("sw", store, ledger, runtime, 1)
-    tick("sw", store, ledger, runtime, 2)
+    MasterSeats(store.redis).set_count("sw", 2)
+    ledger, runtime = tasks(), FakeRuntime()
+    for _ in range(2):
+        master_seat_alarm.failed(store, "sw", "master-2", "profile canary timeout")
+    master_seat_alarm.run("sw", store, ledger, runtime, {})
     store.put_agent("sw", AgentRecord("ghost", MASTER, "master-2", state="finished", seat="master-2@sw"))
     runtime.live.add("ghost")
-    tick("sw", store, ledger, runtime, 3)
+    assert master_seat_alarm.run("sw", store, ledger, runtime, {}) == []
     assert len(_seat_notes(ledger)) == 1
     assert store.redis.hget(store.key("sw", master_seat_alarm.KEY), "master-2")
