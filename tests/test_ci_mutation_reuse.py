@@ -308,3 +308,89 @@ def test_a_reused_report_never_brings_the_source_scope(repo, monkeypatch):
     assert _main(monkeypatch, root) == "reused=true\n"
     names = sorted(path.name for path in (root / ".mutation-gate").iterdir())
     assert names == ["mutants.log", "report.json", "reuse.json"]
+
+
+EXACT = "actions/workflows/mutation-preflight.yml/runs?event=push&status=completed&per_page=30&head_sha="
+H, B = "h" * 40, "b" * 40
+
+
+def _scoped(report, scope):
+    data = io.BytesIO()
+    with zipfile.ZipFile(data, "w") as zipped:
+        zipped.writestr(zipfile.ZipInfo("report.json"), json.dumps(report))
+        if scope is not None:
+            zipped.writestr(zipfile.ZipInfo("scope.json"), json.dumps(scope))
+    return data.getvalue()
+
+
+def _exact(monkeypatch, tmp_path, runs, archives):
+    calls = []
+    answers = {f"{EXACT}{H}&branch=a%26b": {"workflow_runs": runs}}
+    for run, archive in archives.items():
+        artifact = {"id": run, "name": "mutation-preflight-report", "expired": False}
+        answers[f"actions/runs/{run}/artifacts?per_page=100"] = {"artifacts": [artifact]}
+        answers[f"actions/artifacts/{run}/zip"] = archive
+
+    def api(path, binary=False):
+        calls.append(path)
+        return answers.get(path, {"artifacts": []})
+
+    monkeypatch.setattr(reuse, "api", api)
+    monkeypatch.chdir(tmp_path)
+    output = tmp_path / "output"
+    output.write_text("")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setattr("sys.argv", ["reuse", "a&b", "99", "--head", H, "--base", B])
+    assert reuse.main() == 0
+    return output.read_text(), calls
+
+
+def test_a_pull_request_reuses_the_green_preflight_of_its_exact_head_and_base(tmp_path, monkeypatch, capsys):
+    archive = _scoped(GREEN, {"base": B, "head": H})
+    written, calls = _exact(monkeypatch, tmp_path, [_run(7, H, branch="a&b")], {7: archive})
+    assert written == "reused=true\n"
+    assert calls[0] == f"{EXACT}{H}&branch=a%26b"
+    assert capsys.readouterr().out == f"Reused the green mutation report of run 7 for {H}\n"
+    assert json.loads((tmp_path / ".mutation-gate/report.json").read_text()) == GREEN
+    assert not (tmp_path / ".mutation-gate/scope.json").exists()
+    assert json.loads((tmp_path / ".mutation-gate/reuse.json").read_text()) == {"run": 7, "head": H}
+
+
+@pytest.mark.parametrize(
+    "scope",
+    [{"base": "c" * 40, "head": H}, {"base": B, "head": "c" * 40}, {"base": B}, None],
+)
+def test_a_planted_base_or_head_difference_in_the_preflight_scope_mutates_in_full(tmp_path, monkeypatch, scope):
+    written, _ = _exact(monkeypatch, tmp_path, [_run(7, H)], {7: _scoped(GREEN, scope)})
+    assert written == "reused=false\n"
+    assert not (tmp_path / ".mutation-gate").exists()
+
+
+@pytest.mark.parametrize("red", REDS)
+def test_a_red_preflight_of_the_exact_head_and_base_is_never_reused(tmp_path, monkeypatch, red):
+    written, _ = _exact(monkeypatch, tmp_path, [_run(7, H)], {7: _scoped(red, {"base": B, "head": H})})
+    assert written == "reused=false\n"
+
+
+def test_a_failed_preflight_run_with_a_green_report_is_never_reused(tmp_path, monkeypatch):
+    archive = _scoped(GREEN, {"base": B, "head": H})
+    written, _ = _exact(monkeypatch, tmp_path, [_run(7, H, "failure")], {7: archive})
+    assert written == "reused=false\n"
+
+
+def test_a_run_answered_for_another_head_is_never_reused(tmp_path, monkeypatch):
+    archive = _scoped(GREEN, {"base": B, "head": H})
+    written, _ = _exact(monkeypatch, tmp_path, [_run(7, "c" * 40)], {7: archive})
+    assert written == "reused=false\n"
+
+
+def test_the_exact_mode_reads_only_the_runs_of_its_head_on_its_branch(tmp_path, monkeypatch):
+    written, calls = _exact(monkeypatch, tmp_path, [], {})
+    assert written == "reused=false\n"
+    assert calls == [f"{EXACT}{H}&branch=a%26b"]
+
+
+def test_a_newer_red_preflight_on_the_same_head_blocks_an_older_green(tmp_path, monkeypatch):
+    green, red = _scoped(GREEN, {"base": B, "head": H}), _scoped(RED, {"base": B, "head": H})
+    written, _ = _exact(monkeypatch, tmp_path, [_run(8, H, "failure"), _run(7, H)], {8: red, 7: green})
+    assert written == "reused=false\n"

@@ -11,6 +11,7 @@ from scripts.ci_mutation.scope import PREFLIGHT, weakened_tests
 
 EVIDENCE = Path(".mutation-gate")
 REPORT = "mutation-preflight-report"
+SCOPE = "scope.json"
 
 
 def api(path: str, binary: bool = False):
@@ -58,18 +59,32 @@ def source(head: str, branch: str, current: int) -> tuple[dict, bytes] | None:
             return row, graded[0]
 
 
+def scope(archive: bytes) -> dict | None:
+    with zipfile.ZipFile(io.BytesIO(archive)) as zipped:
+        return json.loads(zipped.read(SCOPE)) if SCOPE in zipped.namelist() else None
+
+
+def exact(head: str, base: str, branch: str, current: int) -> tuple[dict, bytes] | None:
+    found = latest(f"head_sha={head}&branch={quote(branch)}", current)
+    if found:
+        row, graded = found
+        green = graded and graded[1] and row["conclusion"] == "success"
+        if green and row["head_sha"] == head and scope(graded[0]) == {"base": base, "head": head}:
+            return row, graded[0]
+
+
 def unpack(archive: bytes, row: dict) -> None:
     EVIDENCE.mkdir(exist_ok=True)
     with zipfile.ZipFile(io.BytesIO(archive)) as zipped:
         for name in zipped.namelist():
-            if name != "scope.json":
+            if name != SCOPE:
                 zipped.extract(name, EVIDENCE)
     (EVIDENCE / "reuse.json").write_text(json.dumps({"run": row["id"], "head": row["head_sha"]}) + "\n")
 
 
-def reuse(head: str, branch: str, current: int) -> dict | None:
+def reuse(head: str, branch: str, current: int, base: str | None = None) -> dict | None:
     try:
-        found = source(head, branch, current)
+        found = exact(head, base, branch, current) if base else source(head, branch, current)
         if found:
             unpack(found[1], found[0])
             return found[0]
@@ -81,9 +96,11 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("branch")
     parser.add_argument("run", type=int)
+    parser.add_argument("--head")
+    parser.add_argument("--base")
     args = parser.parse_args()
-    head = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip()
-    row = reuse(head, args.branch, args.run)
+    head = args.head or subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip()
+    row = reuse(head, args.branch, args.run, args.base)
     if row:
         print(f"Reused the green mutation report of run {row['id']} for {row['head_sha']}")
     else:
