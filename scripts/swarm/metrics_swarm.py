@@ -356,7 +356,7 @@ def pull_rows(box: metrics_outbox.Outbox, now_ms: int, swarm: TickInput) -> dict
     recorded = {
         row["pull_request"]
         for row in box.recent("delivery_events", now_ms)
-        if row["kind"] in ("merge", "pull_request_merged")
+        if row["kind"] == "merge"
     }
     return {
         url: swarm.view(url)
