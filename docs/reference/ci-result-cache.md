@@ -181,12 +181,12 @@ Each keyed job declares its inputs in `.github/input-keys.json`: repository path
 
 `.github/actions/input-key` looks the key up with `actions/cache/restore` in lookup only mode. On a hit every heavy step is skipped, the job stays green and raises an `Input key reused` notice naming the key. On a miss the heavy steps run, and `.github/actions/input-key/save` saves the key after they pass, only on push and dispatch runs. A cache entry is visible only to runs of the ref that saved it, so dev runs read only keys written by runs of code already on dev.
 
-`ledger-load` and `brain-smoke` adopt it. Over the last 100 dev merges about half changed none of their declared inputs.
+`ledger-load` keys its Redis service image id and `brain-smoke` its collector image id, both read with `docker inspect`. Both adopt it. Over the last 100 dev merges about half changed none of their declared inputs.
 
 | Run | Plant | Result |
 |---|---|---|
 | [38961789273](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38961789273), [38961792398](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38961792398) | none, first run of the head | brain smoke 33 s and ledger load 139 s: key missed, every step ran, key saved |
 | [38963275517](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38963275517), [38963279568](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38963279568) | a docs change, outside every declared input | 20 s each: key hit, install, check and save skipped |
-| [38963740312](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38963740312) | a change to `hooks/` and `tests/ledger_load/`, both declared | brain smoke 37 s: key missed, install and smoke ran, the new key saved |
+| [38963740312](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38963740312), [38965443542](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38965443542) | a change to `hooks/` and `tests/ledger_load/`, both declared | brain smoke 37 s and ledger load 131 s: key missed, every step ran, the new key saved |
 
 Known limits: the day in the key forces one full run per job per UTC day, which also bounds how long an unkeyed floating input, such as a Python patch release or a self hosted runner image, can be reused. `ci_reuse.py` keeps the whole tree queue reuse, and `kind-due` keeps its own path rule until `helm-kind` moves onto the input key.
