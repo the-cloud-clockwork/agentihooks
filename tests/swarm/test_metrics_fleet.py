@@ -108,7 +108,7 @@ def test_record_exports_the_dashboard_panels_and_one_coverage_row_per_source(tmp
             "archive": (1, 2),
             "brain_feed": (1, 1),
             "pools": (0, 0),
-            "checkpoints": (0, 0),
+            "checkpoints": (1, 0),
             "brain_denials": (0, 0),
         }
         rows = box.recent("fleet_panels", NOW) + box.recent("fleet_sources", NOW)
@@ -161,3 +161,53 @@ def test_the_feed_time_is_the_cached_feed_file_time(tmp_path, monkeypatch):
     assert metrics_fleet.feed_at_ms() == 0
     feed.write_text("{}")
     assert metrics_fleet.feed_at_ms() == int(feed.stat().st_mtime * 1000)
+
+
+def _recorded(tmp_path, store, pools=None):
+    box = Outbox(tmp_path / "outbox.db", Settings("http://sink", "u", ""))
+    try:
+        metrics_fleet.record(box, store, SLUG, NOW, lambda: NOW, pools)
+        return box.recent("fleet_panels", NOW), box.recent("fleet_sources", NOW)
+    finally:
+        box.close()
+
+
+def test_the_newest_checkpoint_of_each_active_execution_reaches_the_sink(tmp_path, store):
+    seeded(store)
+    executions = sorted(store.execution_occupants(SLUG).values(), key=lambda agent: agent.task)
+    first, second = (agent.execution_id for agent in executions)
+    metrics_fleet.record_checkpoint(store, SLUG, first, f"eng-1@{SLUG}", NOW - 3_000_000)
+    metrics_fleet.record_checkpoint(store, SLUG, first, f"eng-1@{SLUG}", NOW - 2_000_000)
+    metrics_fleet.record_checkpoint(store, SLUG, second, f"eng-2@{SLUG}", NOW - 1_800_000)
+    metrics_fleet.record_checkpoint(store, SLUG, "ended", "eng-9@scratch", NOW - 9_000_000)
+    found = metrics_fleet.sample(store, SLUG, NOW, NOW)
+    assert found["checkpoints"] == [
+        {"execution_id": first, "seat": f"eng-1@{SLUG}", "taken_at_ms": NOW - 2_000_000},
+        {"execution_id": second, "seat": f"eng-2@{SLUG}", "taken_at_ms": NOW - 1_800_000},
+    ]
+    panels, sources = _recorded(tmp_path, store)
+    values = {(row["panel"], row["series"]): row["value"] for row in panels}
+    assert values[("checkpoint_age", "stale")] == 1.0
+    assert values[("checkpoint_age", "oldest_age_ms")] == 2_000_000.0
+    assert {row["source"]: (row["available"], row["readings"]) for row in sources}["checkpoints"] == (1, 2)
+
+
+def test_a_worker_pool_reading_reaches_the_sink_per_pool(tmp_path, store):
+    seeded(store)
+    reading = [{"pool": "swarm-workers", "configured_maximum": 8, "nodes": 2}]
+    panels, sources = _recorded(tmp_path, store, lambda: reading)
+    capacity = {(row["series"], row["subject"]): row["value"] for row in panels if row["panel"] == "capacity"}
+    assert capacity == {
+        ("configured_maximum", "swarm-workers"): 8.0,
+        ("observed_nodes", "swarm-workers"): 2.0,
+        ("active_tasks", "swarm-workers"): 0.0,
+        ("pending_requests", "swarm-workers"): 0.0,
+    }
+    found = {row["source"]: (row["available"], row["readings"]) for row in sources}
+    assert (found["pools"], found["brain_denials"]) == ((1, 1), (0, 0))
+
+
+def test_an_unreadable_worker_pool_stays_an_unavailable_source(tmp_path, store):
+    panels, sources = _recorded(tmp_path, store, lambda: None)
+    assert not [row for row in panels if row["panel"] == "capacity"]
+    assert {row["source"]: (row["available"], row["readings"]) for row in sources}["pools"] == (0, 0)
