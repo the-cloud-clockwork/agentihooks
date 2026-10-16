@@ -43,8 +43,7 @@ def reuse_repo(tmp_path, request):
             "reuse": {},
             "unit": {"strategy": {"matrix": {"python-version": ["3.11", "3.12"], "shard": [1]}}},
             "lint": {},
-            "queue-baseline": {},
-            "gate-required": {"name": "Gate — Required", "needs": ["reuse", "unit", "lint", "queue-baseline"]},
+            "gate-required": {"name": "Gate — Required", "needs": ["reuse", "unit", "lint"]},
         }
     }
     if getattr(request, "param", None) == "dynamic":
@@ -143,7 +142,6 @@ def full_source(reuse_repo, tmp_path):
         jobs.extend([{"id": 98 + n, "name": f"mutation ({n})", "conclusion": "success"} for n in range(2)])
     if "unit-selected" in yaml.safe_load((root / ".github/workflows/test.yml").read_text())["jobs"]:
         jobs.append({"id": 96, "name": "unit-selected", "conclusion": "skipped"})
-    jobs.append({"id": 97, "name": "queue-baseline", "conclusion": "skipped"})
     artifacts = [{"id": 42, "name": "required-tree-1", "expired": False}]
     artifacts.append({"id": 51, "name": "coverage-3.12-1", "expired": False})
     artifacts.append({"id": 52, "name": "split-3.12", "expired": False})
@@ -264,9 +262,7 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
     steps = workflow["jobs"]["gate-required"]["steps"]
     assert steps in (
         ci_reuse.gate_steps(selected=True),
-        ci_reuse.gate_steps(queue_coverage=True, selected=True),
         ci_reuse.gate_steps(),
-        ci_reuse.gate_steps(queue_coverage=True),
         ci_reuse.gate_steps(queue_tier=True),
         ci_reuse.gate_steps(queue_tier=True, promotion=True),
     )
@@ -588,8 +584,8 @@ def test_a_pass_reads_display_names_and_only_optional_skips():
 
     workflow = {
         "jobs": {
-            "gate-required": {"name": "Gate — Required", "needs": ["queue-baseline", "helm-kind", "sonar", "unit"]},
-            "queue-baseline": {},
+            "gate-required": {"name": "Gate — Required", "needs": ["unit-selected", "helm-kind", "sonar", "unit"]},
+            "unit-selected": {},
             "helm-kind": {},
             "sonar": {"name": "SonarQube"},
             "unit": {"strategy": {"matrix": {"shard": [1, 2]}}},
@@ -597,7 +593,7 @@ def test_a_pass_reads_display_names_and_only_optional_skips():
     }
     jobs = [
         {"name": "Gate — Required", "conclusion": "success"},
-        {"name": "queue-baseline", "conclusion": "skipped"},
+        {"name": "unit-selected", "conclusion": "skipped"},
         {"name": "helm-kind", "conclusion": "skipped"},
         {"name": "SonarQube", "conclusion": "success"},
         {"name": "unit (1)", "conclusion": "success"},
@@ -863,7 +859,7 @@ def test_an_unreadable_run_list_says_which_head(full_source, tmp_path):
     [
         (0, 502, 11, True),
         (1, 500, 27, True),
-        (2, 503, 54, True),
+        (2, 503, 53, True),
         (4, 504, 4, False),
         (1, 400, 1, False),
         (1, 403, 1, False),
@@ -950,92 +946,9 @@ def _gate(steps, needs, event="merge_group"):
     return subprocess.run(["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True)
 
 
-def test_the_queue_coverage_gate_accepts_a_combined_queue_runner_when_both_outcomes_succeeded():
-    from scripts import ci_reuse
-
-    result = _gate(ci_reuse.gate_steps(queue_coverage=True), _queue_needs())
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
-@pytest.mark.parametrize("outcome", ["baseline", "ratchet"])
-@pytest.mark.parametrize("value", ["failure", "skipped", "cancelled", None])
-def test_the_queue_coverage_gate_refuses_either_outcome_unless_it_succeeded(outcome, value):
-    from scripts import ci_reuse
-
-    needs = _queue_needs()
-    if value is None:
-        del needs["queue-baseline"]["outputs"][outcome]
-    else:
-        needs["queue-baseline"]["outputs"][outcome] = value
-    result = _gate(ci_reuse.gate_steps(queue_coverage=True), needs)
-    assert result.returncode == 1
-    assert f"::error::The queue coverage {outcome} did not succeed." in result.stdout
-
-
-@pytest.mark.parametrize("missing", ["job", "outputs"])
-def test_the_queue_coverage_gate_refuses_a_queue_baseline_that_reported_nothing(missing):
-    from scripts import ci_reuse
-
-    needs = _queue_needs()
-    if missing == "job":
-        del needs["queue-baseline"]
-    else:
-        del needs["queue-baseline"]["outputs"]
-    result = _gate(ci_reuse.gate_steps(queue_coverage=True), needs)
-    assert result.returncode == 1
-    assert "::error::The queue coverage baseline did not succeed." in result.stdout
-
-
-@pytest.mark.parametrize("reported", ["success", "failure"])
-def test_the_queue_coverage_gate_leaves_a_verified_reuse_as_the_canonical_gate_grades_it(reported):
-    from scripts import ci_reuse
-
-    needs = {name: {"result": "skipped"} for name in ("unit", "lint", "coverage-ratchet")}
-    needs["reuse"] = {"result": "success", "outputs": {"reused": "true", "run": "42"}}
-    needs["stage-budget"] = {"result": "success"}
-    needs["queue-baseline"] = {"result": "success", "outputs": {"baseline": reported, "ratchet": reported}}
-    env = dict(os.environ, NEEDS=json.dumps(needs), MUTATION="false", KIND="false", EVENT="merge_group", REUSED="true")
-    runs = [
-        subprocess.run(["bash", "-e", "-c", steps[0]["run"]], env=env, capture_output=True, text=True)
-        for steps in (ci_reuse.gate_steps(), ci_reuse.gate_steps(queue_coverage=True))
-    ]
-    assert runs[0].returncode == runs[1].returncode == 0, runs[1].stdout + runs[1].stderr
-    assert runs[0].stdout == runs[1].stdout
-
-
-@pytest.mark.parametrize("queue_job", ["failure", "skipped", "cancelled"])
-def test_the_queue_coverage_gate_refuses_a_queue_baseline_job_that_did_not_succeed(queue_job):
-    from scripts import ci_reuse
-
-    result = _gate(ci_reuse.gate_steps(queue_coverage=True), _queue_needs(queue_job=queue_job))
-    assert result.returncode == 1
-    assert "::error::Every required gate must succeed." in result.stdout
-
-
-@pytest.mark.parametrize("ratchet_job", ["failure", "cancelled"])
-def test_the_queue_coverage_gate_refuses_a_standalone_ratchet_that_ran_and_failed(ratchet_job):
-    from scripts import ci_reuse
-
-    result = _gate(ci_reuse.gate_steps(queue_coverage=True), _queue_needs(ratchet_job=ratchet_job))
-    assert result.returncode == 1
-    assert "::error::Every required gate must succeed." in result.stdout
-
-
-@pytest.mark.parametrize("event", ["pull_request", "push", "workflow_dispatch"])
-def test_the_queue_coverage_gate_needs_the_standalone_ratchet_outside_the_queue(event):
-    from scripts import ci_reuse
-
-    needs = _queue_needs(baseline="skipped", ratchet="skipped", queue_job="skipped")
-    steps = ci_reuse.gate_steps(queue_coverage=True)
-    assert _gate(steps, needs, event).returncode == 1
-    needs["coverage-ratchet"] = {"result": "success"}
-    assert _gate(steps, needs, event).returncode == 0
-
-
 def test_the_canonical_gate_still_needs_the_standalone_ratchet_in_the_queue():
     from scripts import ci_reuse
 
-    assert ci_reuse.gate_steps(queue_coverage=False) == ci_reuse.gate_steps()
     assert _gate(ci_reuse.gate_steps(), _queue_needs()).returncode == 1
     assert _gate(ci_reuse.gate_steps(), _queue_needs(ratchet_job="success")).returncode == 0
 
@@ -1053,11 +966,10 @@ def _selected_needs(scope="selected", selected_job="success", skipped=FULL_SUITE
     return needs
 
 
-@pytest.mark.parametrize("queue_coverage", [False, True])
-def test_the_selected_gate_accepts_a_pull_request_that_ran_only_its_selected_tests(queue_coverage):
+def test_the_selected_gate_accepts_a_pull_request_that_ran_only_its_selected_tests():
     from scripts import ci_reuse
 
-    steps = ci_reuse.gate_steps(queue_coverage=queue_coverage, selected=True)
+    steps = ci_reuse.gate_steps(selected=True)
     result = _gate(steps, _selected_needs(), event="pull_request")
     assert result.returncode == 0, result.stdout + result.stderr
 
@@ -1153,19 +1065,17 @@ def test_the_selected_gate_grades_a_full_run_as_the_canonical_gate(event):
 
     needs = _selected_needs(scope="full", selected_job="skipped", skipped=())
     needs["queue-baseline"] = {"result": "success", "outputs": {"baseline": "success", "ratchet": "success"}}
-    for steps in (ci_reuse.gate_steps(selected=True), ci_reuse.gate_steps(queue_coverage=True, selected=True)):
-        result = _gate(steps, needs, event=event)
-        assert result.returncode == 0, result.stdout + result.stderr
+    result = _gate(ci_reuse.gate_steps(selected=True), needs, event=event)
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_the_selected_variant_leaves_both_canonical_aggregations_unchanged():
+def test_the_selected_variant_leaves_the_canonical_aggregation_unchanged():
     from scripts import ci_reuse
 
-    for queue_coverage in (False, True):
-        [plain] = ci_reuse.gate_steps(queue_coverage=queue_coverage)
-        [selected] = ci_reuse.gate_steps(queue_coverage=queue_coverage, selected=True)
-        assert plain != selected
-        assert plain["env"] == selected["env"]
+    [plain] = ci_reuse.gate_steps()
+    [selected] = ci_reuse.gate_steps(selected=True)
+    assert plain != selected
+    assert plain["env"] == selected["env"]
 
 
 @pytest.mark.parametrize("outcome", ["failure", "cancelled"])

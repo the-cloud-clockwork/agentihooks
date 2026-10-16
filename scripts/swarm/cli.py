@@ -1288,17 +1288,6 @@ def cmd_merge(store, args):
         done_gate.require_local(store, args.slug, agent.task)
         done_gate.require_target(store, args.slug, agent.task, args.url, LedgerClient().tasks(args.slug))
     result = merge_queue.operate(args.action, args.url)
-    if result.get("waiting") == "checks":
-        at = now_ms()
-        idle.declare_wait(
-            store.redis,
-            args.slug,
-            agent.name,
-            at + waits.CHECKED_MINUTES * 60_000,
-            "dev changed grading inputs; branch updated",
-            at,
-            on={**waits.on("checks", args.url), "previous_head": result["previous_head"]},
-        )
     print(json.dumps(result))
 
 

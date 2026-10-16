@@ -567,6 +567,13 @@ def test_the_merge_pass_queues_on_green_checks_and_watches_the_queue(merging):
     assert ready.record(merging.store, "sw", "t1")["on"] == {"kind": "merge", "target": URL, "queued": True}
 
 
+def test_a_queue_pass_watches_the_merge_whatever_the_queue_command_reports(merging):
+    merging.queue.extra = {"queued": False, "entry": None}
+    queued_at_now(merging)
+    assert merging.queued == [("queue", URL)]
+    assert ready.record(merging.store, "sw", "t1")["on"] == {"kind": "merge", "target": URL}
+
+
 def test_the_merge_pass_squash_merges_without_a_queue_or_tests_workflow(merging):
     merging.pulls[URL] = GREEN
     pull = {
@@ -602,14 +609,6 @@ def test_the_merge_pass_squash_merges_without_a_queue_or_tests_workflow(merging)
     assert merging.run() == [f"task t1 done, {URL} merged", f"removed the worktree {TOP}"]
     assert merging.rows["t1"]["state"] == "done" and merging.rows["t1"]["awaiting"] == ""
     assert ready.record(merging.store, "sw", "t1") is None
-
-
-def test_a_queue_that_updates_the_branch_watches_the_new_head_checks(merging):
-    merging.pulls[URL] = GREEN
-    merging.queue.extra = {"queued": False, "waiting": "checks", "previous_head": HEAD}
-    assert merging.run() == [f"{URL} for task t1 updated from dev; waiting on its checks again"]
-    assert ready.record(merging.store, "sw", "t1")["on"] == {"kind": "checks", "target": URL, "previous_head": HEAD}
-    assert merging.run() == [] and len(merging.queued) == 1
 
 
 def refused(action, url):

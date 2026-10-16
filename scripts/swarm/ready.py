@@ -226,7 +226,7 @@ def _checks(run, row, found, pull):
 def _queue(run, row, found):
     task_id, url = row["id"], found["url"]
     try:
-        result = run.queue("queue", url)
+        run.queue("queue", url)
     except SwarmError as exc:
         if str(exc).startswith(REFUSALS):
             found["refusals"] = found.get("refusals", 0) + 1
@@ -236,10 +236,6 @@ def _queue(run, row, found):
             return _reopen(run, row, found, f"could not be queued: {exc}")
         save(run.store, run.slug, task_id, found)
         return [f"could not queue {url} for task {task_id}: {exc}"]
-    if result.get("waiting") == "checks":
-        found["on"] = {"kind": "checks", "target": url, "previous_head": result["previous_head"]}
-        save(run.store, run.slug, task_id, found)
-        return [f"{url} for task {task_id} updated from dev; waiting on its checks again"]
     found["on"], found["queued_at"] = {"kind": "merge", "target": url}, run.now_ms
     save(run.store, run.slug, task_id, found)
     return [f"queued {url} for task {task_id}"]

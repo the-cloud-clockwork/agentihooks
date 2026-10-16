@@ -241,21 +241,7 @@ def test_lint_and_test_count_grade_a_pull_request_that_merged_dev_from_the_curre
         env = dict(os.environ, BASE=base, RUNNER_TEMP=str(tmp_path / name), GITHUB_OUTPUT=str(tmp_path / name / "out"))
         done = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=repo, env=env, check=True, capture_output=True)
         logs[name] = done.stdout.decode()
-    from scripts.swarm import merge_queue
-
-    replies = iter(
-        [
-            json.dumps({"workflow_runs": [{"id": 1, "head_sha": "h", "conclusion": "success"}]}),
-            json.dumps({"jobs": [{"id": 2, "name": "test-count (3.11)", "conclusion": "success"}]}),
-            "2026-10-13T00:00:00Z   BASE: origin/dev\n"
-            + "".join(f"2026-10-13T00:00:01Z {line}\n" for line in logs["test-count"].splitlines()),
-        ]
-    )
-
-    def reply(command, **kwargs):
-        return subprocess.CompletedProcess(command, 0, next(replies), "")
-
-    assert merge_queue.checked_base("o/r", "h", reply) == merged
+    assert f"BASE: {merged}" in logs["test-count"]
     assert _git(tmp_path / "test-count" / "base", "rev-parse", "HEAD") == merged
     assert _git(tmp_path / "lint" / "base", "rev-parse", "HEAD") == merged
     assert (tmp_path / "docs" / "docs-changes").read_text() == "docs/own.md\n"

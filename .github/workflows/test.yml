@@ -441,22 +441,13 @@ jobs:
               ancestry=$(gh api "repos/$GITHUB_REPOSITORY/compare/$head...dev" --jq .status)
               [[ "$ancestry" == ahead || "$ancestry" == identical ]] || continue
               jobs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" --paginate --jq '.jobs[]')
-              if ! jq -s -e --arg event push '
+              if ! jq -s -e '
                 [.[] | select(.name | startswith("unit ("))] as $units |
-                (($units | length == 18 and all(.[]; .conclusion == "success")) or
-                 ($event == "merge_group" and
-                  all(.[] | select(.name == "unit" or (.name | startswith("unit ("))); .conclusion == "skipped") and
-                  any(.[]; .name == "reuse" and .conclusion == "success" and
-                    any(.steps[]?; .name == "Decide from protected code and record the tested tree" and .conclusion == "success")))) and
-                any(.[]; if $event == "push" then
+                ($units | length == 18 and all(.[]; .conclusion == "success")) and
+                any(.[];
                   .name == "coverage-baseline" and .conclusion == "success" and
                   any(.steps[]?; .name == "Compute the coverage baseline" and .conclusion == "success") and
-                  any(.steps[]?; .name == "Publish the passed dev coverage baseline" and .conclusion == "success")
-                else
-                  .name == "queue-baseline" and
-                  any(.steps[]?; .name == "Record this run\u0027s coverage baseline" and .conclusion == "success") and
-                  any(.steps[]?; .name == "Publish this run\u0027s coverage baseline" and .conclusion == "success")
-                end)' <<< "$jobs" > /dev/null; then
+                  any(.steps[]?; .name == "Publish the passed dev coverage baseline" and .conclusion == "success"))' <<< "$jobs" > /dev/null; then
                 continue
               fi
               echo "Restoring dev durations and the coverage baseline for base $BASE from measured dev push run $run on $head"
@@ -1672,7 +1663,7 @@ jobs:
           github-token: ${{ steps.app-token.outputs.token }}
 
       - name: Download the queue base coverage baseline
-        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/download-artifact@v4
         with:
           name: queue-coverage-baseline
