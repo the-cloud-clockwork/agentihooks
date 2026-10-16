@@ -64,10 +64,11 @@ def _join(port, code):
 
 
 def test_silent_connections_never_run_more_handlers_than_the_cap(bounded):
+    before = _handlers()
     silent = [socket.create_connection(("127.0.0.1", bounded), timeout=5) for _ in range(5)]
     try:
         time.sleep(0.5)
-        assert _handlers() <= server.MAX_HANDLERS
+        assert _handlers() - before <= server.MAX_HANDLERS
     finally:
         for conn in silent:
             conn.close()

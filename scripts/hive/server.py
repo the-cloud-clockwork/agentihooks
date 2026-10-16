@@ -39,19 +39,14 @@ class _TLSHandler(BaseHTTPRequestHandler):
     def setup(self):
         if self.tls is not None:
             self.request.settimeout(self.timeout)
-            self.reaped = self.request.dup()
-            self.server.track(self.reaped)
             try:
                 self.request = self.tls.wrap_socket(self.request, server_side=True)
             except OSError as exc:
-                self.reaped.close()
                 raise Dropped from exc
         super().setup()
 
     def finish(self):
         super().finish()
-        if self.tls is not None:
-            self.reaped.close()
         if isinstance(self.request, ssl.SSLSocket):
             try:
                 self.request.unwrap()
@@ -117,20 +112,15 @@ class JoinServer(ThreadingHTTPServer):
 
     def process_request_thread(self, request, client_address):
         with self._lock:
-            self._open[threading.get_ident()] = (time.monotonic() + REQUEST_DEADLINE_S, request)
+            self._open[threading.get_ident()] = (time.monotonic() + REQUEST_DEADLINE_S, request.dup())
         try:
             super().process_request_thread(request, client_address)
         finally:
             with self._lock:
-                self._open.pop(threading.get_ident(), None)
+                self._open.pop(threading.get_ident())[1].close()
             self._slots.release()
 
-    def track(self, sock):
-        with self._lock:
-            deadline, _ = self._open[threading.get_ident()]
-            self._open[threading.get_ident()] = (deadline, sock)
-
-    def reap(self):
+    def reap(self) -> None:
         now = time.monotonic()
         with self._lock:
             for deadline, sock in self._open.values():
