@@ -64,7 +64,7 @@ _BUILD_TOOLS = frozenset(
 )
 _TEST_TASK = re.compile(r"^(?:test|tests|coverage|mutation)(?:$|[:_.-])|^.*:test$")
 _PYTHON = re.compile(r"^(?:python[\d.]*|pypy[\d.]*)$")
-_PYTHON_VALUE_OPTIONS = frozenset({"-W", "-X", "--check-hash-based-pycs"})
+_PYTHON_VALUE_OPTIONS = frozenset({"-W", "-X", "-Q", "--check-hash-based-pycs"})
 _PYTHON_TEST = re.compile(
     r"\b(?:pytest|unittest|tox|nox|mutmut|mutatest|mutpy)\b|scripts\.ci_mutation\b(?!\.clearances\b)"
 )

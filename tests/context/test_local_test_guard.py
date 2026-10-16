@@ -253,6 +253,7 @@ def test_filters_over_an_artifact_naming_a_test_file_pass(command, monkeypatch):
         "python3 -X dev /venv/bin/pytest -q",
         "python3 --check-hash-based-pycs never /venv/bin/pytest -q",
         "python3 tests/test_a.py -c x",
+        "python2 -Q new tests/test_a.py",
     ],
 )
 def test_a_test_file_run_as_the_script_is_still_blocked(command, monkeypatch):
