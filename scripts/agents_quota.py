@@ -368,7 +368,7 @@ def _codex(now: float) -> list[QuotaRow]:
     sessions = codex_sessions_by_account()
     live = codex_router.live_accounts(pool, sessions)
     quotas = codex_router.quotas(pool + live, os.environ)
-    identities = fingerprints(pool, os.environ)
+    identities = fingerprints(pool + live, os.environ)
     rows = without_routing(codex_rows(pool + live, quotas, sessions, now, identities=identities), live)
     master = _masters("codex").get("codex")
     marked = [_mark(row, master) for row in rows + api_rows(CodexApiSource(sessions), "codex", now)]
@@ -452,7 +452,7 @@ def _page_quota(now: float) -> dict:
     quotas = codex_router.quotas(pool + elsewhere, os.environ)
     claude = claude_rows([result for _, result in cached], live, "cached", observed, now)
     claude += api_rows(ClaudeApiSource(live), "claude", now)
-    codex = codex_rows(pool + elsewhere, quotas, codex_live, now, identities=fingerprints(pool, os.environ))
+    codex = codex_rows(pool + elsewhere, quotas, codex_live, now, identities=fingerprints(pool + elsewhere, os.environ))
     rows = claude + without_routing(codex, elsewhere)
     rows += api_rows(CodexApiSource(codex_live), "codex", now)
     rows = with_masters(rows, _masters(), live)
