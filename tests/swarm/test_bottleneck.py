@@ -172,7 +172,7 @@ def test_each_pull_request_counts_only_its_review_and_excludes_parked_time(rever
     first, second = "https://github.com/org/repo/pull/1", "https://github.com/org/repo/pull/2"
     delivery = [
         {**opened("t4", 3 * H), "pull_request": first, "branch": "first"},
-        {**merge("t4", 5 * H), "pull_request": first, "branch": "first"},
+        {**merge("t4", 4.5 * H), "pull_request": first, "branch": "first"},
         {**opened("t4", 6 * H), "pull_request": second, "branch": "b-t4"},
         {**merge("t4", 9 * H), "pull_request": second, "branch": "b-t4"},
         {"task": "t4", "kind": "parked", "ts_ms": 7 * H},
@@ -187,7 +187,7 @@ def test_each_pull_request_counts_only_its_review_and_excludes_parked_time(rever
         open_task("t4", "done"),
         NOW,
     )
-    assert found["seconds"]["review"] == 9000.0
+    assert found["seconds"]["review"] == 7200.0
 
 
 def test_a_cancelled_last_run_keeps_ci_holding_until_now():

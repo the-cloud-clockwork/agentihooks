@@ -113,7 +113,8 @@ def test_split_pull_requests_keep_their_own_merge_and_parking_events():
         ("pull_request_merged", second, "second", NOW + 9_000),
     ]
     assert [(row["kind"], row["ts_ms"]) for row in found if row["kind"] in ("parked", "unparked")] == [
-        ("parked", NOW + 2_000), ("unparked", NOW + 3_000)
+        ("parked", NOW + 2_000),
+        ("unparked", NOW + 3_000),
     ]
 
 
