@@ -612,8 +612,9 @@ def test_outage_time_is_measured_over_the_stall_itself(monkeypatch):
     assert _reopened(swarm) and (SLUG, START, START + 20 * MINUTE) in calls
 
 
-def test_a_red_pull_request_with_no_owner_reopens_and_names_nobody():
-    swarm = Swarm(RED, task={"claimed_by": ""})
+@pytest.mark.parametrize("nobody", ["", None])
+def test_a_red_pull_request_with_no_owner_reopens_and_names_nobody(nobody):
+    swarm = Swarm(RED, task={"claimed_by": nobody})
     swarm.tick(START + 15 * MINUTE)
     assert _reopened(swarm) and swarm.retired == []
     assert swarm.inbox()[0].text == _alert(case="red", minutes=15, wait=30, owner="nobody")
@@ -977,9 +978,28 @@ def test_an_open_dependency_holds_every_stall_rule_until_it_is_done(pull, live, 
     _held_then_released(swarm, limit, lambda: swarm.ledger.rows["fix"].update(state="done"))
 
 
-@pytest.mark.parametrize("depends_on", [["gone"], ["t1"], []])
-def test_an_unknown_or_own_dependency_does_not_hold_a_stall(depends_on):
+@pytest.mark.parametrize("depends_on", [["t1"], []])
+def test_an_own_or_no_dependency_does_not_hold_a_stall(depends_on):
     swarm = Swarm(RED, task={"depends_on": depends_on})
+    swarm.tick(START + 15 * MINUTE)
+    assert _reopened(swarm)
+
+
+@pytest.mark.parametrize("state", ["blocked", "claimed", None])
+def test_a_blocked_or_unknown_dependency_holds_a_stall_as_claiming_does(state):
+    swarm = Swarm(RED, task={"depends_on": ["fix"]})
+    if state:
+        swarm.ledger.rows["fix"] = {"id": "fix", "state": state}
+    assert swarm.tick(START + 60 * MINUTE) == []
+    assert swarm.ledger.rows["t1"]["state"] == "pr" and swarm.retired == []
+
+
+def test_a_release_record_without_awaiting_does_not_hold_a_stall():
+    swarm = Swarm(RED)
+    swarm.ledger.rows["repair"] = {"id": "repair", "state": "pr"}
+    found = ready.held_record(URL, "h", "", OWNER, START)
+    found["dependency"] = {"kind": "task", "target": "repair"}
+    ready.save(swarm.store, SLUG, "t1", found)
     swarm.tick(START + 15 * MINUTE)
     assert _reopened(swarm)
 

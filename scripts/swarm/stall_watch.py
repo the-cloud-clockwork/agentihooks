@@ -126,7 +126,7 @@ def stall_pass(watch, doc):
 
 def _waiting(watch, task, rows):
     tid, owner = task["id"], task.get("claimed_by")
-    if any(dep in rows and dep != tid and rows[dep].get("state") != "done" for dep in task.get("depends_on") or []):
+    if any(dep != tid and rows.get(dep, {}).get("state") != "done" for dep in task.get("depends_on") or []):
         return True
     found = ready.record(watch.store, watch.slug, tid) if ready.awaiting(task) else None
     declared = idle.wait(watch.store.redis, watch.slug, owner) if owner else None
