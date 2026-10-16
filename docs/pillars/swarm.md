@@ -603,9 +603,14 @@ response was lost.
 |---|---|---|
 | `AGENTIHOOKS_INBOX_OUTBOX_MAX_BYTES` | 1048576 bytes (1 MiB) | Refuse an operation that would exceed the limit, with an error; retain everything already queued. |
 | `AGENTIHOOKS_INBOX_OUTBOX_WARN_BYTES` | 786432 bytes (768 KiB) | Warn when the queued bytes reach this threshold. |
+| `AGENTIHOOKS_INBOX_OUTBOX_MAX_ATTEMPTS` | 3 | Set aside a record after this many replays that fail with an unexpected error. |
 
 Corrupt records and operations refused during replay are preserved in `inbox-outbox.skipped.jsonl`, with
-the reason reported; later valid records can continue. Inspect and resolve those refusals rather than
+the reason reported; later valid records can continue. A record whose replay fails with an unexpected error
+stops its lane and is retried on the next replay; its failures are counted in `inbox-outbox.attempts.json`,
+and at the attempt limit it is set aside the same way so the records behind it replay.
+`agentihooks swarm <id> status` prints the queued, retrying and set aside counts while any is nonzero, and
+`status --json` carries them under `outbox`. Inspect and resolve those refusals rather than
 treating them as delivered. The outbox depends on the local disk surviving and having space, and its limit
 is a refusal boundary. Restoring Redis lets replay free space; a send refused before queuing must be retried.
 

@@ -936,7 +936,7 @@ def cmd_status(store, args):
     quota = quota_view.lines(capacity.read(store, args.slug), now_ms())
     held = spawn_holds(store, args.slug) + failed_panes.status_lines(store, args.slug)
     held += incidents.status_lines(store, args.slug)
-    for line in ledger_freezes.lines(doc) + quota + held:
+    for line in ledger_freezes.lines(doc) + quota + held + outbox.status_lines():
         print(line)
     print(bottleneck.line(bottleneck.read(store, args.slug), now_ms()))
     print(stages.line(stages.read(store, args.slug), now_ms()))
