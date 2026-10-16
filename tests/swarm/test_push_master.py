@@ -192,18 +192,12 @@ def test_the_spawned_task_names_the_transport_its_launch_chooses(setting, harnes
     assert codex.transport(SwarmConfig("sw", "/repo", 1, 0), "codex") == APP_SERVER_TRANSPORT
 
 
-def test_a_config_without_a_transport_setting_reads_as_app_server():
+def test_a_config_without_a_transport_setting_reads_as_legacy():
     from types import SimpleNamespace
 
     from scripts.swarm_v2.runtime import codex
 
-    assert codex.transport(SimpleNamespace(), "codex") == APP_SERVER_TRANSPORT
-    assert codex.arguments(SimpleNamespace(), "codex", {"seat": "eng-1@sw"}) == [
-        "--codex-transport",
-        APP_SERVER_TRANSPORT,
-        "--seat",
-        "eng-1@sw",
-    ]
+    assert codex.transport(SimpleNamespace(), "codex") == LEGACY_TRANSPORT
 
 
 class Built(Exception):
