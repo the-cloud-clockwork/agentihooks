@@ -11,7 +11,7 @@ def check(slug: str, doc: dict, op: dict) -> None:
         return
     pin = op["worker_claim"]
     store = connect()
-    authority = TaskAuthority(store, None, None)
+    authority = TaskAuthority(store, SimpleNamespace(slug=slug), None)
     scope = SimpleNamespace(execution_id=pin["execution_id"], generation=pin["execution_generation"])
     try:
         claim = authority.current(pin["task_id"])
