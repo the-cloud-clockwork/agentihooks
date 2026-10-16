@@ -195,6 +195,30 @@ def test_a_claim_lost_before_hosted_apply_cannot_change_the_task(deployed, store
     assert _held_task()["state"] == "claimed"
 
 
+@pytest.mark.parametrize(
+    "fields, expected_status", [({"title": "Changed spec"}, 409), ({"pr_url": "https://example.test/pull/1"}, 200)]
+)
+def test_hosted_worker_writes_pin_the_spec_and_count_conflicts(deployed, store, fields, expected_status):
+    _, read = _read(deployed)
+    original = _hl().ResourceClient.request
+
+    def edit_task(client, slug, path, *args, **kwargs):
+        if path == "operations":
+            operation = _update(fields, MASTER)
+            operation["id"] = "operator-edit"
+            repository.apply_ops(SLUG, ops=[operation])
+        return original(client, slug, path, *args, **kwargs)
+
+    with patch.object(_hl().ResourceClient, "request", edit_task):
+        status, response = _patch(deployed, read["revision"], {"state": "pr"})
+
+    assert status == expected_status
+    assert _held_task()["state"] == ("claimed" if expected_status == 409 else "pr")
+    assert int(store.redis.get(store.key(SLUG, "ledger-revision-conflicts")) or 0) == (expected_status == 409)
+    if expected_status == 409:
+        assert response["error_class"] == "revision_conflict"
+
+
 def test_a_replayed_worker_update_returns_the_same_receipt(deployed):
     _, read = _read(deployed)
 
