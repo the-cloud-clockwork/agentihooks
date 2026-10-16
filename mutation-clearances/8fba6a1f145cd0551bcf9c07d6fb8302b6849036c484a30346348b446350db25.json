@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/bottleneck.py:scripts.swarm.bottleneck.x__active_review__mutmut_31:f79cde065a0eda0fa208c4fbbf83707c77c9db250194c1d8bbde398b9c8e7ae7": {
+    "reader": "standards_reader",
+    "reason": "Additional segments have identical start and end; Window.seconds contributes zero."
+  }
+}
