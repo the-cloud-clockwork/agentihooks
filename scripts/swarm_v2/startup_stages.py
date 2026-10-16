@@ -47,10 +47,7 @@ PULL_FAILURES = (
 )
 LAUNCH = re.compile(r"Launching a new EC2 instance(?P<warm> from warm pool)?: (?P<id>i-[0-9a-f]+)$")
 SCALE = re.compile(r"\{(?P<group>\S+) (?P<before>\d+)->(?P<after>\d+)")
-POOL_START = re.compile(
-    r"^(?P<second>\S+T\d\d:\d\d:\d\d)(?P<fraction>\.\d{1,6})?\d*(?P<zone>Z|[+-]\d\d:\d\d) (?P<pool>\S+): "
-    r"zero nodes, a pending pod needs one, pool size is 0 -- scaling to 1$"
-)
+SCALED_GROUP = re.compile(r"setting group (?P<group>\S+) size to (?P<after>\d+) instead of (?P<before>\d+)")
 PULL_TIME = re.compile(r" in (?:(?P<m>\d+)m)?(?:(?P<s>[\d.]+)s|(?P<ms>[\d.]+)ms)\b")
 ASSIGNED = re.compile(r" to (?P<node>\S+)$")
 
@@ -122,7 +119,6 @@ def reduce(raw: Mapping) -> dict:
         for node in raw["nodes"]["items"]
     }
     logs = raw.get("logs", {})
-    starts = pool_starts(raw["activities"].get("PoolStarter", []))
     pods = {}
     for pod in raw["pods"]["items"]:
         name = f"{pod['metadata']['namespace']}/{pod['metadata']['name']}"
@@ -137,8 +133,8 @@ def reduce(raw: Mapping) -> dict:
         "nodes": dict(sorted(nodes.items())),
         "pods": dict(sorted(pods.items())),
         "launches": _launches(raw["activities"]["Activities"], raw["instances"]["Reservations"])
-        | _oci_launches(raw["instances"].get("Oci", []), starts),
-        "pool_starts": starts,
+        | _oci_launches(raw["instances"].get("Oci", [])),
+        "scaled_groups": scaled_groups(raw["events"]["items"]),
     }
 
 
@@ -157,31 +153,30 @@ def _launches(activities: Sequence[Mapping], reservations: Sequence[Mapping]) ->
     return dict(sorted(launches.items()))
 
 
-def pool_starts(lines: Iterable[str]) -> dict[str, list[int]]:
-    """When the OCI pool starter decided to scale each pool from size 0 to 1, read from its timestamped log."""
-    starts: dict[str, set[int]] = {}
-    for line in lines:
-        found = POOL_START.match(line.strip())
-        if found:
-            at = instant(found["second"] + (found["fraction"] or "") + found["zone"])
-            starts.setdefault(found["pool"], set()).add(at)
-    return {pool: sorted(times) for pool, times in sorted(starts.items())}
+def scaled_groups(items: Iterable[Mapping]) -> dict[str, list[list[int]]]:
+    """Each group's scale ups as [time, size before] from the autoscaler's own ScaledUpGroup events, which it records
+    when it sets the size; the TriggeredScaleUp event on a Pod can follow the launch it caused."""
+    seen: dict[str, set[tuple[int, int]]] = {}
+    for item in items:
+        when = item.get("eventTime") or item.get("firstTimestamp")
+        found = SCALED_GROUP.search(item.get("message", "")) if item.get("reason") == "ScaledUpGroup" else None
+        if when and found:
+            seen.setdefault(found["group"], set()).add((instant(when), int(found["before"])))
+    return {group: [list(up) for up in sorted(ups)] for group, ups in sorted(seen.items())}
 
 
-def _oci_launches(records: Sequence[Mapping], starts: Mapping[str, Sequence[int]]) -> dict:
-    """An OCI instance was launched by the latest start of its pool at or before its creation."""
+def _oci_launches(instances: Sequence[Mapping]) -> dict:
+    """An OCI pool instance has no separate launch request, so its creation is both request and launch."""
     launches = {}
-    for record in records:
-        launched = instant(record["instance"]["time-created"])
-        causes = [at for at in starts.get(record["pool"], ()) if at <= launched]
-        if causes:
-            launches[record["instance"]["id"]] = {
-                "group": record["pool"],
-                "requested": causes[-1],
-                "launched": launched,
-                "source": NEW_INSTANCE,
-            }
-    return launches
+    for instance in instances:
+        created = instant(instance["time-created"])
+        launches[instance["id"]] = {
+            "group": instance["instance-pool"],
+            "requested": created,
+            "launched": created,
+            "source": NEW_INSTANCE,
+        }
+    return dict(sorted(launches.items()))
 
 
 def _first(events: Sequence[Mapping], reason: str) -> Mapping | None:
@@ -331,8 +326,8 @@ def attribute(read: Mapping) -> list[dict]:
     for event in read["events"]:
         grouped.setdefault(event["pod"], []).append(event)
     ups = scale_ups(read["events"])
-    for pool, times in read.get("pool_starts", {}).items():
-        ups[pool] = sorted({*ups.get(pool, ()), *((at, 0) for at in times)})
+    for group, scaled in read.get("scaled_groups", {}).items():
+        ups[group] = sorted({*ups.get(group, ()), *map(tuple, scaled)})
     found = (sample(name, events, read, ups) for name, events in sorted(grouped.items()))
     return [entry for entry in found if entry]
 

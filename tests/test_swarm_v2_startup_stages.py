@@ -469,66 +469,72 @@ def test_scale_ups_are_deduplicated_across_pods_and_ordered_per_group():
 
 
 OCID = "ocid1.instance.oc1.eu-frankfurt-1.abc"
-STARTER = [
-    "2026-10-11T14:36:20.123456789Z swarm: no pending pod tolerates remote=oci and workload=swarm, nothing to do",
-    "2026-10-11T14:36:30.295000001Z swarm: zero nodes, a pending pod needs one, pool size is 0 -- scaling to 1",
-    "2026-10-11T14:36:31Z swarm: scaled pool ocid1.instancepool.oc1.x to size 1",
-    "2026-10-11T14:36:30.295Z swarm: zero nodes, a pending pod needs one, pool size is 0 -- scaling to 1",
-    "2026-10-11T15:10:00+00:00 research: zero nodes, a pending pod needs one, pool size is 0 -- scaling to 1",
-    "2026-10-11T14:36:40Z ci: 23 node(s) with node-pool=oci-ci already present, leaving to cluster-autoscaler",
-]
+POOL = "ocid1.instancepool.oc1.eu-frankfurt-1.research"
 
 
-def oci_capture(created="2026-10-11T14:36:41.500000+00:00", pool="swarm"):
+def scaled_event(when, message, reason="ScaledUpGroup", field="firstTimestamp"):
+    return {
+        "reason": reason,
+        field: when,
+        "message": message,
+        "involvedObject": {"kind": "ConfigMap", "namespace": "kube-system", "name": "cluster-autoscaler-oci-status"},
+    }
+
+
+def oci_capture():
     raw = raw_capture()
     raw["nodes"]["items"][0]["spec"]["providerID"] = OCID
-    raw["activities"] = {"Activities": [], "PoolStarter": STARTER}
+    raw["events"]["items"] += [
+        scaled_event("2026-10-11T14:36:20Z", f"Scale-up: setting group {POOL} size to 1 instead of 0 (max: 10)"),
+        scaled_event(
+            "2026-10-11T14:50:00.25Z",
+            f"Scale-up: setting group {POOL} size to 3 instead of 1 (max: 10)",
+            field="eventTime",
+        ),
+        scaled_event("2026-10-11T14:36:21Z", f"Scale-up: setting group {POOL} size to 1 instead of 0", reason="Other"),
+        scaled_event("2026-10-11T14:36:22Z", "Scale-up: group size unchanged"),
+        {"reason": "ScaledUpGroup", "message": f"Scale-up: setting group {POOL} size to 2 instead of 1"},
+    ]
+    raw["activities"] = {"Activities": []}
     raw["instances"] = {
         "Reservations": [],
-        "Oci": [
-            {"pool": pool, "instance": {"id": OCID, "time-created": created}},
-            {"pool": "research", "instance": {"id": "ocid1.instance.early", "time-created": "2026-10-11T15:00:00Z"}},
-        ],
+        "Oci": [{"id": OCID, "time-created": "2026-10-11T14:36:41.500000+00:00", "instance-pool": POOL}],
     }
     return raw
 
 
-def test_the_pool_starter_log_gives_each_pool_its_scale_from_zero_decisions():
-    assert stages.pool_starts(STARTER) == {
-        "research": [stages.instant("2026-10-11T15:10:00Z")],
-        "swarm": [stages.instant("2026-10-11T14:36:30.295Z")],
+def test_the_autoscaler_scaled_up_group_events_give_each_group_its_scale_ups():
+    assert stages.scaled_groups(oci_capture()["events"]["items"]) == {
+        POOL: [
+            [stages.instant("2026-10-11T14:36:20Z"), 0],
+            [stages.instant("2026-10-11T14:50:00.25Z"), 1],
+        ]
     }
-    assert stages.pool_starts([]) == {}
+    assert stages.scaled_groups([]) == {}
 
 
-def test_reduce_charges_an_oci_instance_to_the_latest_start_of_its_pool_before_it():
+def test_reduce_charges_an_oci_instance_to_its_pool_at_its_creation():
     reduced = stages.reduce(oci_capture())
     assert reduced["nodes"][NODE]["instance"] == OCID
-    assert reduced["pool_starts"] == stages.pool_starts(STARTER)
+    assert reduced["scaled_groups"] == stages.scaled_groups(oci_capture()["events"]["items"])
+    created = stages.instant("2026-10-11T14:36:41.5Z")
     assert reduced["launches"] == {
-        OCID: {
-            "group": "swarm",
-            "requested": stages.instant("2026-10-11T14:36:30.295Z"),
-            "launched": stages.instant("2026-10-11T14:36:41.5Z"),
-            "source": stages.NEW_INSTANCE,
-        }
+        OCID: {"group": POOL, "requested": created, "launched": created, "source": stages.NEW_INSTANCE}
     }
 
 
-def test_an_oci_instance_created_before_any_start_of_its_pool_is_no_launch():
-    assert stages.reduce(oci_capture(created="2026-10-11T14:36:29Z"))["launches"] == {}
-    assert stages.reduce(oci_capture(pool="ci"))["launches"] == {}
+def test_a_read_without_oci_listings_has_no_scaled_groups_or_oci_launches():
+    reduced = stages.reduce(raw_capture())
+    assert reduced["scaled_groups"] == {}
+    assert list(reduced["launches"]) == ["i-0ad35d2621bca80ff", "i-0b28"]
 
 
-def test_a_read_without_oci_listings_has_no_pool_starts():
-    assert stages.reduce(raw_capture())["pool_starts"] == {}
-
-
-def test_an_oci_pool_start_scales_from_zero_without_an_autoscaler_event():
-    events = [e for e in cold_events(group="swarm") if e["reason"] != "TriggeredScaleUp"]
+def test_a_scaled_up_group_event_scales_from_zero_when_the_pod_event_comes_late():
+    events = [e for e in cold_events(group=POOL) if e["reason"] != "TriggeredScaleUp"]
+    events.append(ev("default/a", "TriggeredScaleUp", 80, f"pod triggered scale-up: [{{{POOL} 0->1 (max: 10)}}]"))
     pods = {"default/a": {"created": T0 - 500, "ready": T0 + 97_000}}
-    oci = {**read(events, pods), "pool_starts": {"swarm": [T0 + 9000]}}
-    oci["launches"] = {"i-0ad35d2621bca80ff": {**oci["launches"]["i-0ad35d2621bca80ff"], "group": "swarm"}}
+    oci = {**read(events, pods), "scaled_groups": {POOL: [[T0 + 9000, 0]]}}
+    oci["launches"] = {"i-0ad35d2621bca80ff": {**oci["launches"]["i-0ad35d2621bca80ff"], "group": POOL}}
     [entry] = stages.attribute(oci)
     assert (entry["node_kind"], entry["from_zero"]) == ("cold", True)
     assert {k: entry["stages"][k] for k in stages.NODE_STAGES} == {
@@ -538,8 +544,9 @@ def test_an_oci_pool_start_scales_from_zero_without_an_autoscaler_event():
         "schedule": 3000,
     }
     assert stages.claim([entry], stages.COLD_LABEL) == [entry]
-    without = {**oci, "pool_starts": {}}
-    assert stages.attribute(without)[0]["node_kind"] == "warm"
+    assert stages.attribute({**oci, "scaled_groups": {}})[0]["node_kind"] == "warm"
+    one_more = {**oci, "scaled_groups": {POOL: [[T0 + 9000, 1]]}}
+    assert stages.attribute(one_more)[0]["from_zero"] is False
 
 
 def write_capture(folder):

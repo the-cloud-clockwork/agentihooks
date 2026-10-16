@@ -14,7 +14,7 @@ WORKERS = "agentihooks-swarm-workers"
 READY_FILE = "/tmp/startup-ready"
 REMOVE_SECONDS = 120
 BOOT = f"python /opt/swarm-node/worker_image.py report > /tmp/report.json && touch {READY_FILE} && sleep 900"
-STARTER = "oci-pool-starter-"
+AUTOSCALER_STATUS = "cluster-autoscaler-oci-status"
 POOL_LABEL = "anton.io/node-pool"
 WORKLOAD_LABEL = "anton.io/workload"
 WORKLOADS = ("swarm", "research")
@@ -178,7 +178,7 @@ def tolerations(workload: str) -> list[dict]:
 
 
 def pool_pod(name: str, image: str, workload: str) -> dict:
-    """A worker Pod only a new node of the empty pool can take, so the pool starter has to scale it from zero."""
+    """A worker Pod only a new node of the empty pool can take, so the autoscaler has to scale it from zero."""
     spec = pod(name, "", image)
     spec["spec"]["nodeSelector"] = {POOL_LABEL: f"oci-{workload}"}
     spec["spec"]["tolerations"] = tolerations(workload)
@@ -216,29 +216,33 @@ def apply(manifest: dict) -> None:
     subprocess.run(["kubectl", "apply", "-f", "-"], input=json.dumps(manifest), text=True, check=True)
 
 
-def starter_lines(seen: set[str]) -> None:
-    """Pool starter Jobs keep only their last few runs, so their timestamped logs are collected while waiting."""
-    for name in kubectl("-n", "kube-system", "get", "pods", "-o", "name").split():
-        if name.removeprefix("pod/").startswith(STARTER):
-            seen.update(kubectl("-n", "kube-system", "logs", name, "--timestamps", check=False).splitlines())
-
-
-def scheduled_node(name: str, seen: set[str], seconds: int) -> str:
+def wait_event(name: str, reason: str, seconds: int) -> bool:
+    """The kubelet records events after the state they describe, so the capture waits for the last one it reads."""
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
-        starter_lines(seen)
+        found = kubectl(
+            "-n", NAMESPACE, "get", "events", "--field-selector", f"involvedObject.name={name}", "-o", "json"
+        )
+        if any(e["reason"] == reason for e in json.loads(found)["items"]):
+            return True
+        time.sleep(2)
+    return False
+
+
+def scheduled_node(name: str, seconds: int) -> str:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
         node = kubectl("-n", NAMESPACE, "get", "pod", name, "-o", "jsonpath={.spec.nodeName}")
         if node:
-            starter_lines(seen)
             return node
-        time.sleep(15)
+        time.sleep(2)
     return ""
 
 
 def oci_instance(node: str) -> dict:
-    """Only the instance id and creation time are read: the instance metadata carries the join credentials."""
+    """Only the instance id, creation time and pool are read: the instance metadata carries the join credentials."""
     found = json.loads(kubectl("get", "node", node, "-o", "json"))
-    query = 'data.{id:id,"time-created":"time-created"}'
+    query = 'data.{id:id,"time-created":"time-created","instance-pool":"freeform-tags"."oci:compute:instancepool"}'
     instance = run(
         "oci",
         "--profile",
@@ -251,16 +255,29 @@ def oci_instance(node: str) -> dict:
         "--query",
         query,
     )
-    return {"pool": found["metadata"]["labels"][WORKLOAD_LABEL], "instance": json.loads(instance)}
+    return json.loads(instance)
 
 
-def capture_anton(output: Path, seen: set[str], node: str) -> None:
+def capture_anton(output: Path, node: str) -> None:
+    """The fixture namespace's listings plus the autoscaler's ScaledUpGroup events, which time the scale up."""
     output.mkdir(parents=True, exist_ok=True)
     (output / "read_at").write_text(datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ") + "\n")
-    for name, args in (("nodes", ("get", "nodes")), ("events", ("get", "events", "-n", NAMESPACE))):
-        (output / f"{name}.json").write_text(kubectl(*args, "-o", "json"))
+    (output / "nodes.json").write_text(kubectl("get", "nodes", "-o", "json"))
+    events = json.loads(kubectl("-n", NAMESPACE, "get", "events", "-o", "json"))
+    scaled = kubectl(
+        "-n",
+        "kube-system",
+        "get",
+        "events",
+        "--field-selector",
+        f"involvedObject.name={AUTOSCALER_STATUS}",
+        "-o",
+        "json",
+    )
+    events["items"] += json.loads(scaled)["items"]
+    (output / "events.json").write_text(json.dumps(events))
     (output / "pods.json").write_text(kubectl("-n", NAMESPACE, "get", "pods", "-o", "json"))
-    (output / "activities.json").write_text(json.dumps({"Activities": [], "PoolStarter": sorted(seen)}))
+    (output / "activities.json").write_text(json.dumps({"Activities": []}))
     (output / "instances.json").write_text(json.dumps({"Reservations": [], "Oci": [oci_instance(node)]}))
 
 
@@ -271,25 +288,25 @@ def cold_outage(args: argparse.Namespace) -> dict:
     if kubectl("get", "nodes", "-l", f"{POOL_LABEL}={pool}", "-o", "name").strip():
         raise SystemExit(f"the {pool} pool has nodes; a scale from zero needs it empty")
     kubectl("create", "namespace", NAMESPACE)
-    seen: set[str] = set()
     apply(pool_pod(COLD_POD, args.image, args.workload))
-    node = scheduled_node(COLD_POD, seen, 1200)
+    node = scheduled_node(COLD_POD, 1200)
     if not node:
         raise SystemExit(f"{COLD_POD} was not scheduled onto a new {pool} node")
     stopped = time.monotonic()
-    outcome = {
-        "node": node,
-        "pool": pool,
-        "outage_seconds": args.outage,
-        "classified_within_grace": wait_pull_failure(COLD_POD, args.grace),
-    }
+    outcome = {"node": node, "pool": pool, "outage_seconds": args.outage, "scheduled_seen": now()}
+    outcome["classified_within_grace"] = wait_pull_failure(COLD_POD, args.grace)
     time.sleep(max(args.outage - (time.monotonic() - stopped), 0))
+    outcome["registry_applied"] = now()
     apply(registry_pod(node, args.workload))
     outcome["registry_ready"] = wait_ready("outage-registry", 300)
     outcome["recovered"] = wait_ready(COLD_POD, 600)
-    starter_lines(seen)
-    capture_anton(args.output, seen, node)
+    outcome["started_event"] = wait_event(COLD_POD, "Started", 120)
+    capture_anton(args.output, node)
     return outcome
+
+
+def now() -> str:
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 def anton_outage(args: argparse.Namespace) -> None:
