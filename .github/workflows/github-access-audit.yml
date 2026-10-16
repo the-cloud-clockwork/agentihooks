@@ -29,6 +29,35 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Inspect App registration and installation permissions
+        env:
+          APP_CLIENT_ID: ${{ secrets.TCC_CI_CLIENT_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          APP_OWNER: ${{ github.repository_owner }}
+        run: |
+          node --input-type=module <<'JS'
+          import { createSign } from 'node:crypto';
+          const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
+          const now = Math.floor(Date.now() / 1000);
+          const payload = `${encode({ alg: 'RS256', typ: 'JWT' })}.${encode({ iat: now - 60, exp: now + 540, iss: process.env.APP_CLIENT_ID })}`;
+          const signature = createSign('RSA-SHA256').update(payload).sign(process.env.APP_PRIVATE_KEY.replace(/\\n/g, '\n'), 'base64url');
+          const authorization = `Bearer ${payload}.${signature}`;
+          const read = async path => {
+            const response = await fetch(`${process.env.GITHUB_API_URL}${path}`, {
+              headers: { authorization, accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28' },
+            });
+            const body = await response.json();
+            if (!response.ok) throw new Error(`${path}: HTTP ${response.status}: ${body.message}`);
+            return body;
+          };
+          const [app, installation] = await Promise.all([read('/app'), read(`/orgs/${process.env.APP_OWNER}/installation`)]);
+          console.log('APP_PERMISSION_DIAGNOSTIC', JSON.stringify({
+            app: { id: app.id, slug: app.slug, permissions: app.permissions },
+            installation: { id: installation.id, app_id: installation.app_id, account: installation.account.login,
+              permissions: installation.permissions, updated_at: installation.updated_at, suspended_at: installation.suspended_at },
+          }));
+          JS
+
       - name: Mint the TCC Main CI audit token
         id: app-token
         uses: actions/create-github-app-token@v3.2.0
@@ -42,6 +71,24 @@ jobs:
           permission-organization-administration: read
           permission-members: read
           permission-organization-self-hosted-runners: read
+
+      - name: Verify repository metadata reads with existing App permissions
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const api = context.repo;
+            const results = await Promise.allSettled([
+              github.rest.actions.listJobsForWorkflowRun({ ...api, run_id: context.runId, per_page: 1 }),
+              github.rest.checks.listForRef({ ...api, ref: context.sha, per_page: 1 }),
+              github.rest.repos.listCommitStatusesForRef({ ...api, ref: context.sha, per_page: 1 }),
+            ]);
+            for (let index = 0; index < results.length; index++) {
+              const result = results[index];
+              core.info(JSON.stringify({ endpoint: ['actions', 'checks', 'statuses'][index],
+                http_status: result.status === 'fulfilled' ? result.value.status : result.reason.status }));
+            }
+            if (results.some(result => result.status === 'rejected')) throw new Error('Repository metadata read rejected');
 
       - name: Read effective access controls
         env:
