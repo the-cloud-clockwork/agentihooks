@@ -266,9 +266,11 @@ def test_deselection_keeps_new_tests_and_skips_only_wholly_reused_files(tmp_path
 
 
 def test_queue_shards_split_on_the_tests_the_planner_did_not_reuse():
-    plan = _step("durations", "Plan the tests whose inputs did not change")
-    assert "hashFiles('provenance-grader/scripts/ci_test_plan.py')" in plan["if"]
-    assert _job("durations")["outputs"]["reused"] == "${{ steps.plan.outputs.reused }}"
+    plan = _step("split", "Plan the tests whose inputs did not change")
+    assert plan["env"]["GRADER"] == "${{ github.event.merge_group.base_sha || github.sha }}"
+    assert 'cd "$RUNNER_TEMP/planner"' in plan["run"]
+    assert _job("split")["outputs"]["reused"] == "${{ steps.plan.outputs.reused }}"
+    assert _job("unit")["outputs"]["reused"] == "${{ needs.split.outputs.reused }}"
     assert _step("split", "Deselect the reused tests")["run"].startswith("python -m tests.dep_manifest deselect")
     assert _step("unit", "Run tests")["env"]["CI_REUSED"] == "${{ github.workspace }}/reused.json"
     check = _step("shard-check", "Check every collected test ran in exactly one shard")

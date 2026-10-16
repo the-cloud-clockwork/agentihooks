@@ -228,7 +228,6 @@ jobs:
       queued: ${{ steps.republished.outputs.queued }}
       base: ${{ steps.base-run.outputs.sha }}
       source: ${{ steps.unit-source.outputs.source }}
-      reused: ${{ steps.plan.outputs.reused }}
     steps:
       - uses: actions/checkout@v4
         if: github.event_name == 'merge_group' || github.event_name == 'pull_request'
@@ -508,36 +507,6 @@ jobs:
           ls -A ~/dev-durations
           echo "queued=true" >> "$GITHUB_OUTPUT"
 
-      - name: Check out the dispatched test planner
-        if: github.event_name == 'workflow_dispatch'
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          path: provenance-grader
-          fetch-depth: 0
-          persist-credentials: false
-
-      # The protected grader plans, so a queued change cannot widen what it reuses.
-      - name: Plan the tests whose inputs did not change
-        id: plan
-        if: (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch') && hashFiles('provenance-grader/scripts/ci_test_plan.py') != ''
-        working-directory: ${{ github.workspace }}/provenance-grader
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          HEAD: ${{ github.sha }}
-        run: |
-          git fetch --no-tags origin "$HEAD"
-          python3 -m scripts.ci_test_plan --repository "$GITHUB_REPOSITORY" --head "$HEAD" --out "$RUNNER_TEMP/reused-tests.json"
-
-      - name: Publish the test plan
-        if: steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
-        uses: actions/upload-artifact@v4
-        with:
-          name: reused-tests
-          path: ${{ runner.temp }}/reused-tests.json
-          if-no-files-found: error
-          retention-days: 7
-
   # Pull requests run only the tests their change reaches; the merge queue still runs every shard before merge.
   select:
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' }}
@@ -641,7 +610,7 @@ jobs:
       UNIT_SOURCE: ${{ needs.durations.outputs.source }}
     outputs:
       source: ${{ needs.durations.outputs.source }}
-      reused: ${{ needs.durations.outputs.reused }}
+      reused: ${{ steps.plan.outputs.reused }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -723,18 +692,51 @@ jobs:
           PYTHON_VERSION: ${{ matrix.python-version }}
         run: python -m tests.dev_durations "$PYTHON_VERSION" ~/dev-durations --hash durations.sha256 --collected collected.json
 
-      - name: Download the test plan
-        if: needs.durations.outputs.reused != '' && needs.durations.outputs.reused != '0'
-        uses: ./.github/actions/retry-download
+      - name: Mint the token that reads the dev test record
+        id: plan-token
+        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
+        uses: actions/create-github-app-token@v3.2.0
         with:
-          name: reused-tests
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+
+      # The protected grader plans, so a queued change cannot widen what it reuses.
+      - name: Plan the tests whose inputs did not change
+        id: plan
+        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ steps.plan-token.outputs.token }}
+          GRADER: ${{ github.event.merge_group.base_sha || github.sha }}
+          PYTHON_PATH: ${{ steps.python.outputs.python-path }}
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/planner" "$GRADER"
+          if [[ ! -f "$RUNNER_TEMP/planner/scripts/ci_test_plan.py" ]]; then
+            echo "The grader has no test planner; every test runs."
+            echo "reused=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          cd "$RUNNER_TEMP/planner"
+          "$PYTHON_PATH" -m scripts.ci_test_plan --repository "$GITHUB_REPOSITORY" --head "$GITHUB_SHA" \
+            --repo "$GITHUB_WORKSPACE" --out "$GITHUB_WORKSPACE/reused-tests.json"
+
+      - name: Upload the test plan
+        if: steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: reused-tests-${{ matrix.python-version }}
+          path: reused-tests.json
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
 
       - name: Deselect the reused tests
-        if: needs.durations.outputs.reused != '' && needs.durations.outputs.reused != '0'
+        if: steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
         run: python -m tests.dep_manifest deselect --plan reused-tests.json --collected collected.json --out reused.json
 
       - name: Upload the deselected tests
-        if: needs.durations.outputs.reused != '' && needs.durations.outputs.reused != '0'
+        if: steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
         uses: actions/upload-artifact@v4
         with:
           name: reused-${{ matrix.python-version }}
@@ -1157,7 +1159,7 @@ jobs:
         if: needs.unit.outputs.reused != '' && needs.unit.outputs.reused != '0'
         uses: actions/download-artifact@v4
         with:
-          name: reused-tests
+          name: reused-tests-${{ matrix.python-version }}
           path: reused-plan
 
       - name: Download shard flake reports
