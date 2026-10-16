@@ -280,7 +280,8 @@ class OutlineFolds(unittest.TestCase):
     def build(self):
         script = (
             FakeDom.SCRIPT
-            + "const PAGE_SIZE = 50; const shown = {}; const wanted = { id: null };"
+            + "const PAGE_SIZE = 50; const FULL_PAGE = { first: PAGE_SIZE, more: PAGE_SIZE };"
+            + "const shown = {}; const wanted = { id: null };"
             + "".join(
                 function_source(n) + "\n"
                 for n in (

@@ -5,7 +5,7 @@ import { attachable, attaching, attachmentsView, withAttachments } from "./media
 import { render } from "./render.js";
 import { jumpTo } from "./outline.js";
 import { toggles } from "./folds.js";
-import { lastPage, lazy, moreButton } from "./pages.js";
+import { COMMENT_PAGE, FULL_PAGE, lastPage, lazy, moreButton } from "./pages.js";
 
 export const composing = {};
 export const editing = {};
@@ -80,9 +80,11 @@ export function threadView(path, list, cls) {
   const noun = NOUN[path.split("/").pop()];
   const box = h("div", { class: cls });
   const live = list.filter((e) => !e.deleted);
-  const older = moreButton(path, live.length, `older ${noun}s`, render, "div");
-  if (older) box.append(older);
-  for (const entry of lastPage(path, live, (e) => `item-notes-${e.id}`)) box.append(entryView(path, entry, noun));
+  const comments = path.endsWith("/comments");
+  const page = comments ? COMMENT_PAGE : FULL_PAGE;
+  const older = moreButton(path, live.length, `older ${noun}s`, render, "div", page);
+  const entries = lastPage(path, live, (e) => `item-notes-${e.id}`, page).map((entry) => entryView(path, entry, noun));
+  box.append(...(comments ? [...entries, older] : [older, ...entries]).filter(Boolean));
   if (path in composing) {
     const close = () => { delete composing[path]; render(); };
     const line = lineBox(`compose:${path}`, composing[path], `Write a ${noun}…`, (text) => {
