@@ -82,7 +82,7 @@ def test_a_render_outside_the_client_namespace_names_the_namespace():
 
 class RefusingCreate(cases.ApiServer):
     def create_pod(self, body):
-        raise ApiRefused("forbidden")
+        raise ApiRefused(403, "Forbidden")
 
 
 def test_an_api_refusal_of_the_create_is_named():
