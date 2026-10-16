@@ -1,5 +1,6 @@
 import json
 import socket
+import socketserver
 import ssl
 import subprocess
 import threading
@@ -106,6 +107,35 @@ def test_a_saturated_server_drops_a_stalled_connection_soon_after_its_deadline(a
         waiting.join(timeout=10)
         for conn in silent:
             conn.close()
+
+
+class _Saturated:
+    def __init__(self):
+        self.waits = []
+
+    def acquire(self, timeout):
+        self.waits.append(timeout)
+        return len(self.waits) > 2
+
+    def release(self):
+        pass
+
+
+def test_a_saturated_accept_loop_reaps_well_inside_the_deadline(admin, monkeypatch):
+    monkeypatch.setattr(server, "REQUEST_DEADLINE_S", 1)
+    monkeypatch.setattr(socketserver.ThreadingMixIn, "process_request", lambda *_: None)
+    httpd = server.make_server(admin, PUBLIC, "127.0.0.1", 0)
+    try:
+        httpd._slots = _Saturated()
+        reaps = []
+        monkeypatch.setattr(httpd, "reap", lambda: reaps.append(True))
+        with socket.socket() as request:
+            httpd.process_request(request, ("127.0.0.1", 1))
+
+        assert reaps == [True, True]
+        assert all(wait <= server.REQUEST_DEADLINE_S / 5 for wait in httpd._slots.waits)
+    finally:
+        httpd.server_close()
 
 
 @pytest.fixture
