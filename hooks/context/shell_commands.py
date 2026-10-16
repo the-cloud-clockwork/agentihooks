@@ -4,6 +4,7 @@ from pathlib import Path
 
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z_0-9]*=")
 _SEPARATORS = ";|&(){}\n"
+_ARITHMETIC = {"((": 1, "))": -1}
 _OPERATORS = ("&&", "||", ";;", "|&", ";", "|", "&", "(", ")", "{", "}", "\n")
 _PREFIXES = frozenset({"if", "then", "else", "elif", "do", "while", "until", "!"})
 _WRAPPERS = {
@@ -119,10 +120,8 @@ def _heredoc_marker(line: str, quote: str | None) -> tuple[int | None, str | Non
             escaped = index + 2
         elif quote is None and line.startswith("<<<", index):
             skip = index + 3
-        elif quote is None and line.startswith("((", index):
-            arithmetic, skip = arithmetic + 1, index + 2
-        elif quote is None and line.startswith("))", index):
-            arithmetic, skip = max(arithmetic - 1, 0), index + 2
+        elif quote is None and line[index : index + 2] in _ARITHMETIC:
+            arithmetic, skip = max(arithmetic + _ARITHMETIC[line[index : index + 2]], 0), index + 2
         elif quote is None and line.startswith("<<", index) and arithmetic:
             skip = index + 2
         elif quote is None and line.startswith("<<", index):
