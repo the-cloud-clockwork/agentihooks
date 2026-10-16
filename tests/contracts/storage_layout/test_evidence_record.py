@@ -44,7 +44,7 @@ def test_the_manifest_hashes_every_current_input_of_the_record():
     inputs = _generator().INPUTS
     current = {path: _digest(path) for path in inputs if path != PLAN}
     manifest = _committed("manifest.json") or {"inputs": {}}
-    assert sorted(manifest["inputs"]) == sorted(inputs)
+    assert sorted(manifest["inputs"]) == sorted(inputs), json.dumps(current, indent=2)
     recorded = {path: digest for path, digest in manifest["inputs"].items() if path != PLAN}
     assert recorded == current, json.dumps(current, indent=2)
 
