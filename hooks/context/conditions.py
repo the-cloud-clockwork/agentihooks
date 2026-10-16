@@ -27,6 +27,7 @@ from hooks.context import injection_trace, profile_chain, quarantine, tool_match
 
 STEPS = {"pre": "PreToolUse", "post": "PostToolUse", "stop": "Stop", "start": "SessionStart"}
 _NO_MATCHER_STEPS = frozenset({"stop", "start"})
+TOOL_STEPS = ("pre", "post")
 _RUNNERS = {".sh": ["bash"], ".bash": ["bash"], ".py": [sys.executable]}
 FILTER_SUFFIX = ".filter.yaml"
 JUDGE, LEDGER_WRITE, INBOX_SEND = "judge", "ledger_write", "inbox_send"

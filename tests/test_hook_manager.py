@@ -242,7 +242,6 @@ def start_condition(tmp_path, quiet_session_start):
     bundle = tmp_path / "bundle"
     conditions_dir = bundle / ".claude" / "conditions"
     conditions_dir.mkdir(parents=True)
-    (bundle / "profiles" / "alpha" / ".claude" / "conditions").mkdir(parents=True)
     (conditions_dir / "start-greet.sh").write_text("echo hello from a start condition\n")
     state = profile_chain.state_path()
     state.parent.mkdir(parents=True, exist_ok=True)
