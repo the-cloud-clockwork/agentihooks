@@ -155,7 +155,8 @@ def test_the_repo_flag_names_the_diffed_checkout(monkeypatch, tmp_path):
     seen = []
     monkeypatch.setattr(ci_test_plan.dep_manifest, "changes", lambda repo, base, head: seen.append(repo) or [])
     monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
-    args = ["--repository", REPOSITORY, "--head", HEAD, "--repo", str(tmp_path), "--out", str(tmp_path / "p.json")]
+    args = ["--repository", REPOSITORY, "--head", HEAD, "--before", LATER, "--repo", str(tmp_path)]
+    args += ["--out", str(tmp_path / "p.json")]
     assert ci_test_plan.main(args) == 0
     assert seen == [tmp_path]
 
