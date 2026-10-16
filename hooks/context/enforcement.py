@@ -23,6 +23,7 @@ import functools
 import json
 import os
 import uuid
+from collections.abc import Callable
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -527,12 +528,20 @@ def format_enforcement_context(msgs: list[dict]) -> str:
 
 def format_enforcement_digest(msgs: list[dict]) -> str:
     lines = ["=== ENFORCEMENTS [IMPORTANT] ==="]
-    lines.extend(f"{m.get('id', '')}: {_enforcement_message(m)}" for m in msgs)
+    for m in msgs:
+        if m.get("type") == "rule":
+            lines.append(f"{m.get('id', '')} (rule {m.get('path', '')}):\n{_enforcement_message(m)}")
+        else:
+            lines.append(f"{m.get('id', '')}: {_enforcement_message(m)}")
     return "\n".join(lines)
 
 
 def _deliver(
-    session_id: str, entries: list[dict], *, record: bool = True, render=format_enforcement_context
+    session_id: str,
+    entries: list[dict],
+    *,
+    record: bool = True,
+    render: Callable[[list[dict]], str] = format_enforcement_context,
 ) -> str | None:
     entries = quarantine.keep(
         session_id, "enforcement", entries, lambda e: [e.get("id")], lambda e: e.get("message") or e.get("path")
