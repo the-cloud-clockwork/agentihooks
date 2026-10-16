@@ -248,6 +248,29 @@ def test_park_writes_the_open_dependencies_and_the_stacked_base(parked, capsys):
     }
 
 
+def test_park_accepts_an_open_dependency_merged_into_dev_after_its_branch_is_deleted(parked, monkeypatch):
+    _, ledger, _, shell, doc = parked
+    dependency_pr = "https://github.com/o/r/pull/42"
+    ledger.rows["a"]["pr_url"] = dependency_pr
+
+    def merged_dependency(argv):
+        result = shell(argv)
+        if argv[:3] == ["gh", "pr", "view"]:
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"state": "MERGED", "baseRefName": "dev"}), "")
+        if argv == ["git", "fetch", "origin", "eng-a"]:
+            return subprocess.CompletedProcess(argv, 1, "", "remote branch deleted")
+        return result
+
+    monkeypatch.setattr(stack, "shell", merged_dependency)
+    assert park(doc) == 0
+    assert ledger.rows["a"]["state"] == "pr"
+    assert ledger.rows["t1"]["parked_on"] == ["a"]
+    assert ledger.rows["t1"]["stacked_base"] == BASE
+    assert ["git", "fetch", "origin", "dev"] in shell.calls
+    assert ["git", "merge-base", "HEAD", "origin/dev"] in shell.calls
+    assert ["git", "fetch", "origin", "eng-a"] not in shell.calls
+
+
 @pytest.mark.parametrize("merged_before_stop", [False, True])
 def test_a_stop_after_park_passes_the_claim_stop_gate(parked, tmp_path, merged_before_stop):
     store, ledger, _, _, doc = parked
