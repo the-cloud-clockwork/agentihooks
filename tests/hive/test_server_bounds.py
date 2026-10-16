@@ -91,6 +91,23 @@ def test_trickling_connections_are_dropped_and_a_real_join_is_served(admin, boun
     assert all(elapsed < server.REQUEST_DEADLINE_S + 2 for elapsed in dropped)
 
 
+@pytest.mark.wall_clock
+def test_a_saturated_server_drops_a_stalled_connection_soon_after_its_deadline(admin, bounded):
+    opened = time.monotonic()
+    silent = [socket.create_connection(("127.0.0.1", bounded), timeout=5) for _ in range(server.MAX_HANDLERS)]
+    time.sleep(0.8)
+    waiting = threading.Thread(target=_join, args=(bounded, auth.invite(admin, "laptop")))
+    waiting.start()
+    try:
+        for conn in silent:
+            assert conn.recv(1) == b""
+        assert time.monotonic() - opened < server.REQUEST_DEADLINE_S + 0.6
+    finally:
+        waiting.join(timeout=10)
+        for conn in silent:
+            conn.close()
+
+
 @pytest.fixture
 def cert(tmp_path):
     subprocess.run(
