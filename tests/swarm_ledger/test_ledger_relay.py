@@ -89,6 +89,14 @@ class Relay(unittest.TestCase):
         state, _ = core.sync(SLUG, ops=[relay(2, self.question)])
         self.assertNotIn(self.question, [p["item"] for p in state["priorities"]])
 
+    def test_short_recorded_quotes_cannot_answer_a_question(self):
+        for n, quote in enumerate(("queue", "the queue"), start=40):
+            with self.subTest(quote=quote):
+                state, rejected = core.sync(SLUG, ops=[relay(n, self.question, quote=quote)])
+                self.assertEqual(rejected, [f"rl-{n}"])
+                self.assertEqual(state["questions"][0]["answers"], [])
+                self.assertIn(self.question, [p["item"] for p in state["priorities"]])
+
     def test_a_relay_on_another_item_is_an_operator_comment(self):
         state, rejected = core.sync(SLUG, ops=[relay(3, self.phase, text="Approved, merge it.", quote="approve")])
         self.assertEqual(rejected, [])
