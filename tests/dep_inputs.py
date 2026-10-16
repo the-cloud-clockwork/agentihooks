@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-ESCAPES = {"subprocess.Popen", "os.posix_spawn", "os.system", "os.exec", "os.fork", "os.forkpty"}
+ESCAPES = {"subprocess.Popen", "os.posix_spawn", "os.system", "os.exec", "os.spawn", "os.fork", "os.forkpty"}
 SKIPPED = (".git/", ".venv/", ".playwright/", "node_modules/")
 
 
@@ -19,18 +19,19 @@ class DepInputs:
     def __init__(self, folder: Path, root: Path):
         self.folder = folder
         self.root = str(root) + os.sep
-        self.current = None
+        self.shared = [set(), False]
+        self.current = self.shared
         self.tests = {}
 
-    def audit(self, event, args):
+    def audit(self, event: str, args: tuple) -> None:
         test = self.current
-        if test is None:
-            return
         if event == "open":
             path, mode = args[0], args[1]
+            if isinstance(path, os.PathLike):
+                path = os.fspath(path)
             if isinstance(path, (str, bytes)) and (mode is None or not set(str(mode)) & set("wax")):
-                test[0].add(os.fsdecode(path))
-        elif event in ESCAPES:
+                test[0].add(os.path.abspath(os.fsdecode(path)))
+        elif event in ESCAPES and test is not self.shared:
             test[1] = True
 
     @pytest.hookimpl(hookwrapper=True)
@@ -39,12 +40,11 @@ class DepInputs:
         try:
             yield
         finally:
-            self.current = None
+            self.current = self.shared
 
-    def relative(self, opened):
+    def relative(self, opened: set[str]) -> list[str]:
         kept = set()
-        for path in opened:
-            full = os.path.abspath(path)
+        for full in opened:
             if not full.startswith(self.root):
                 continue
             relative = full[len(self.root) :]
@@ -58,8 +58,9 @@ class DepInputs:
         if not self.tests:
             return
         self.folder.mkdir(parents=True, exist_ok=True)
+        shared = self.shared[0]
         lines = [
-            json.dumps({"test": test, "files": self.relative(opened), "escapes": escapes})
+            json.dumps({"test": test, "files": self.relative(opened | shared), "escapes": escapes})
             for test, (opened, escapes) in self.tests.items()
         ]
         (self.folder / f"{uuid.uuid4().hex}.jsonl").write_text("".join(line + "\n" for line in lines))

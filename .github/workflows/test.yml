@@ -2029,12 +2029,14 @@ jobs:
           overwrite: true
 
       - name: Download the test dependency manifest
+        if: needs.gate-required.result == 'success'
         uses: actions/download-artifact@v4
         with:
           name: dep-manifest
           path: dep-manifest
 
       - name: Save the dev test dependency manifest
+        if: needs.gate-required.result == 'success'
         uses: actions/cache/save@v4
         with:
           path: dep-manifest

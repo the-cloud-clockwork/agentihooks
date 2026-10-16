@@ -62,6 +62,16 @@ def test_a_body_change_moves_only_its_function_and_a_new_function_moves_nothing(
     }
     assert dep_manifest.changed_units(SOURCE, "def broken(:\n") >= {"<module>", "double", "Box.grow", "unused"}
     assert dep_manifest.changed_units(SOURCE, None) == set(dep_manifest.unit_hashes(SOURCE))
+    assert dep_manifest.changed_units(SOURCE, SOURCE.replace("LIMIT = 3", "# limit\nLIMIT = 3")) == set()
+    texts = 'NOTE = """\n# one\n"""\n'
+    assert dep_manifest.changed_units(texts, texts.replace("# one", "# two")) == {"<module>"}
+
+
+def test_a_build_without_input_reports_is_red(tmp_path, capsys):
+    (tmp_path / "inputs").mkdir()
+    argv = ["build", "--coverage", str(tmp_path / ".coverage"), "--inputs", str(tmp_path / "inputs")]
+    assert dep_manifest.main([*argv, "--commit", "abc", "--environment", "x", "--out", str(tmp_path / "m.json")]) == 1
+    assert "No dependency input reports" in capsys.readouterr().err
 
 
 def _measure(tmp_path):
@@ -85,7 +95,7 @@ def _measure(tmp_path):
     (inputs / "w.jsonl").write_text(
         json.dumps({"test": "tests/test_c.py::test_nothing", "files": ["docs/data.json"], "escapes": True}) + "\n"
     )
-    return dep_manifest.build(tmp_path / ".coverage", inputs, tmp_path, "abc", "py3.12-x")
+    return dep_manifest.build(tmp_path / ".coverage", sorted(inputs.glob("*.jsonl")), tmp_path, "abc", "py3.12-x")
 
 
 def _units(manifest, test):
@@ -120,8 +130,14 @@ def test_a_planted_change_to_one_function_invalidates_exactly_the_tests_that_ran
 
 def test_tests_files_and_global_inputs_invalidate_their_dependants(tmp_path):
     manifest = _measure(tmp_path)
-    assert dep_manifest.invalidated(manifest, [("tests/test_b.py", "", "x")])[0] == {"tests/test_b.py::test_grow[1]"}
+    assert dep_manifest.invalidated(manifest, [("tests/test_b.py", "", "x")])[0] == {
+        "tests/test_b.py::test_grow[1]",
+        "tests/test_c.py::test_nothing",
+    }
     assert dep_manifest.invalidated(manifest, [("tests/conftest.py", "", "x")])[0] == set(manifest["tests"])
+    assert dep_manifest.invalidated(manifest, [("tests/helpers/x.py", "", "x")])[0] == set(manifest["tests"])
+    escaped = dep_manifest.invalidated(manifest, [("tests/data/x.json", None, None)])[0]
+    assert escaped == {"tests/test_c.py::test_nothing"}
     assert dep_manifest.invalidated(manifest, [("docs/data.json", None, None)])[0] == {"tests/test_c.py::test_nothing"}
     assert dep_manifest.invalidated(manifest, [("docs/other.md", None, None)])[0] == set()
     hit, cause = dep_manifest.invalidated(manifest, [(".github/workflows/test.yml", None, None)])
@@ -152,9 +168,11 @@ def test_changes_read_both_sides_of_a_git_diff(tmp_path):
 
 def test_the_inputs_plugin_records_opened_files_and_escapes(tmp_path):
     (tmp_path / "data.txt").write_text("x")
+    (tmp_path / "shared.txt").write_text("x")
     (tmp_path / "test_sample.py").write_text(
-        "import subprocess, sys\n"
-        "def test_reads():\n    open('data.txt').read()\n"
+        "import subprocess, sys\nfrom pathlib import Path\n"
+        "SHARED = open('shared.txt').read()\n"
+        "def test_reads():\n    open(Path('data.txt')).read()\n"
         "def test_spawns():\n    subprocess.run([sys.executable, '-c', 'pass'], check=True)\n"
     )
     out = tmp_path / "inputs"
@@ -167,8 +185,8 @@ def test_the_inputs_plugin_records_opened_files_and_escapes(tmp_path):
     )
     lines = [json.loads(line) for report in out.glob("*.jsonl") for line in report.read_text().splitlines()]
     assert sorted(lines, key=lambda line: line["test"]) == [
-        {"test": "test_sample.py::test_reads", "files": ["data.txt"], "escapes": False},
-        {"test": "test_sample.py::test_spawns", "files": [], "escapes": True},
+        {"test": "test_sample.py::test_reads", "files": ["data.txt", "shared.txt"], "escapes": False},
+        {"test": "test_sample.py::test_spawns", "files": ["shared.txt"], "escapes": True},
     ]
 
 
@@ -191,5 +209,6 @@ def test_sonar_builds_the_manifest_and_only_dev_pushes_save_it():
     assert "github.event_name == 'push'" in _job("coverage-baseline")["if"]
     assert _step("coverage-baseline", "Download the test dependency manifest")["with"]["name"] == "dep-manifest"
     save = _step("coverage-baseline", "Save the dev test dependency manifest")
+    assert save["if"] == "needs.gate-required.result == 'success'"
     assert save["uses"].startswith("actions/cache/save@")
     assert save["with"]["key"] == "dep-manifest-${{ github.sha }}"

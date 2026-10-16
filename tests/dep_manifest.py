@@ -8,10 +8,12 @@ a process the tracer cannot follow also depends on every file under the measured
 import argparse
 import ast
 import hashlib
+import io
 import json
 import statistics
 import subprocess
 import sys
+import tokenize
 from pathlib import Path
 
 MODULE = "<module>"
@@ -46,6 +48,15 @@ def line_units(source: str) -> dict[int, str]:
     return units
 
 
+def _code_lines(source: str) -> set[int]:
+    lines = set()
+    skipped = {tokenize.COMMENT, tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT, tokenize.ENDMARKER}
+    for token in tokenize.generate_tokens(io.StringIO(source).readline):
+        if token.type not in skipped:
+            lines.update(range(token.start[0], token.end[0] + 1))
+    return lines
+
+
 def unit_hashes(source: str) -> dict[str, str]:
     lines = source.splitlines()
     try:
@@ -57,13 +68,8 @@ def unit_hashes(source: str) -> dict[str, str]:
     for start, _, end, name in spans:
         parts.setdefault(name, []).append("\n".join(lines[start - 1 : end]))
         inside.update(range(start, end + 1))
-    parts[MODULE] = [
-        "\n".join(
-            line
-            for number, line in enumerate(lines, 1)
-            if number not in inside and line.strip() and not line.lstrip().startswith("#")
-        )
-    ]
+    code = _code_lines(source)
+    parts[MODULE] = ["\n".join(line for number, line in enumerate(lines, 1) if number in code - inside)]
     return {name: hashlib.sha256("\0".join(texts).encode()).hexdigest() for name, texts in parts.items()}
 
 
@@ -100,7 +106,7 @@ def _executed(coverage_file: Path, root: Path) -> dict[str, set[str]]:
     return executed
 
 
-def build(coverage_file: Path, inputs: Path | None, root: Path, commit: str, environment: str) -> dict:
+def build(coverage_file: Path, inputs: list[Path], root: Path, commit: str, environment: str) -> dict:
     executed = _executed(coverage_file, root)
     units = sorted(set().union(*executed.values()))
     index = {name: number for number, name in enumerate(units)}
@@ -108,7 +114,7 @@ def build(coverage_file: Path, inputs: Path | None, root: Path, commit: str, env
         test: {"units": sorted(index[name] for name in found), "files": [], "escapes": False}
         for test, found in executed.items()
     }
-    for report in sorted(inputs.rglob("*.jsonl")) if inputs else []:
+    for report in inputs:
         for line in filter(str.strip, report.read_text().splitlines()):
             seen = json.loads(line)
             test = tests.setdefault(seen["test"], {"units": [], "files": [], "escapes": False})
@@ -165,12 +171,11 @@ def invalidated(manifest: dict, changed: list[tuple[str, str | None, str | None]
                 units.update(index[f"{path}::{name}"] for name in changed_units(old, new) if f"{path}::{name}" in index)
                 continue
         if path.startswith("tests/") and path.endswith(".py"):
-            name = path.rsplit("/", 1)[-1]
-            if name.startswith("test_"):
+            source_changed = True
+            if path.rsplit("/", 1)[-1].startswith("test_"):
                 hit.update(test for test in tests if test.split("::", 1)[0] == path)
             else:
-                folder = path.rsplit("/", 1)[0] + "/"
-                hit.update(test for test in tests if test.startswith(folder))
+                hit.update(tests)
             continue
         if path.startswith("tests/"):
             source_changed = True
@@ -203,7 +208,7 @@ def main(argv: list[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     built = commands.add_parser("build")
     built.add_argument("--coverage", type=Path, required=True)
-    built.add_argument("--inputs", type=Path)
+    built.add_argument("--inputs", type=Path, required=True)
     built.add_argument("--root", type=Path, default=Path.cwd())
     built.add_argument("--commit", required=True)
     built.add_argument("--environment", required=True)
@@ -220,7 +225,11 @@ def main(argv: list[str] | None = None) -> int:
     measured.add_argument("--merges", type=int, default=40)
     args = parser.parse_args(argv)
     if args.command == "build":
-        manifest = build(args.coverage, args.inputs, args.root.resolve(), args.commit, args.environment)
+        reports = sorted(args.inputs.rglob("*.jsonl"))
+        if not reports:
+            print(f"::error::No dependency input reports under {args.inputs}.", file=sys.stderr)
+            return 1
+        manifest = build(args.coverage, reports, args.root.resolve(), args.commit, args.environment)
         if not manifest["tests"]:
             print("::error::The coverage data holds no per test contexts.", file=sys.stderr)
             return 1
