@@ -273,7 +273,7 @@ def test_changed_workload_argument_holds_promotion_without_a_version_bump(tmp_pa
         "class": "memory",
         "version": "1",
         "children": [1],
-        "command": ["{python}", "-c", "pass", "16"],
+        "command": ["{python}", "-c", "pass", "{children}", "16"],
     }
     path = suite(tmp_path, [workload])
     monkeypatch.setattr(bench.sampling, "measure", lambda *args: {})
