@@ -135,7 +135,7 @@ class ClaimStop:
         dependency = waits.dependency((live or {}).get("on", {}), task, rows, self.github())
         owed, checks = ruling(task, pull, live, dependency)
         held_on = (live or {}).get("on", {})
-        run_wait = waits.mutation_wait.RUN_URL.fullmatch(held_on.get("target", ""))
+        run_wait = held_on.get("kind") == "checks" and waits.mutation_wait.RUN_URL.fullmatch(held_on["target"])
         if checks and held_on.get("kind") not in KEPT and not run_wait:
             on = {"kind": "checks", "target": checks}
             idle.declare_wait(store.redis, who.swarm, who.name, now + CHECKS_WAIT_MS, f"checks on {checks}", now, on=on)

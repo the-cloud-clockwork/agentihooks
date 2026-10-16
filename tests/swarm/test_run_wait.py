@@ -3,7 +3,7 @@ import subprocess
 
 import pytest
 
-from scripts.swarm import cli, idle, waits
+from scripts.swarm import cli, idle, mutation_wait, waits
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_waits import ME, held, started, tick  # noqa: F401
 
@@ -83,6 +83,7 @@ def test_the_tick_ends_a_run_wait_with_its_conclusion(tick, actions, conclusion,
 def test_a_missing_run_ends_the_wait_with_that_reason(tick, actions):  # noqa: F811
     actions["code"], actions["stderr"] = 1, b"gh: Not Found (HTTP 404)"
     hold_run(tick)
+    assert mutation_wait.run_resolution(RUN) == f"checks on {RUN}, missing; GitHub has no such run"
     assert tick.end() == [f"ended the wait of {ME}: checks on {RUN}, missing; GitHub has no such run"]
 
 
