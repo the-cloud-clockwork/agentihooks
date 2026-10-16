@@ -20,6 +20,7 @@ LANE = (
 MUTATION_LANE = LANE.replace("hosted-lane", "mutation-lane")
 
 DIRECT = {
+    "ci-templates.yml": ("CI templates", "ci-templates"),
     "helm-kind.yml": ("Helm chart in kind", "helm-kind"),
     "ledger-load.yml": ("Ledger server load", "ledger-load"),
     "swarm-smoke.yml": ("Swarm container smoke", "swarm-smoke"),
@@ -39,6 +40,7 @@ LANE_USERS = {
 MUTATION_LANE_USERS = {"mutation-preflight.yml:stats", "mutation-preflight.yml:mutation-shard"}
 LEGS = {"mutation-preflight.yml:stats": "stats", "mutation-preflight.yml:mutation-shard": "shard"}
 EXCLUDED = {
+    "codex-cache.yml": "main push, six hourly and manual, one short job that seeds the Codex cache, no pull request trigger",
     "coverage-stability.yml": "a manual dispatch runs one short job that only reads dev run data",
     "pages.yml": "a rare manual docs build and deploy; the github-pages environment decides which branches deploy",
     "publish-pypi.yml": "operator release path from main",

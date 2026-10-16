@@ -17,7 +17,8 @@ pytestmark = pytest.mark.unit
 _QUEUE = "github.event_name == 'merge_group'"
 _GATE_NEED = (
     "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success')"
-    " && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}"
+    " && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true')"
+    " && github.event_name != 'pull_request' }}"
 )
 _APP_TOKEN = "${{ steps.app-token.outputs.token }}"
 
@@ -115,7 +116,7 @@ def test_the_module_runs_from_the_command_line(tmp_path, monkeypatch, capsys):
     assert capsys.readouterr().out == "wait\n"
 
 
-def _watch(tmp_path, reads, server_error=False):
+def _watch(tmp_path, reads, heads=None, server_error=False):
     fake, bin_dir = tmp_path / "fake", tmp_path / "bin"
     fake.mkdir()
     bin_dir.mkdir()
@@ -123,8 +124,20 @@ def _watch(tmp_path, reads, server_error=False):
         if jobs is not None:
             (fake / f"{index}.json").write_text("".join(json.dumps(job) + "\n" for job in jobs))
             (fake / f"{index}.page").write_text(json.dumps({"jobs": jobs}))
+    if heads is not None:
+        for index, head in enumerate(heads):
+            if head is not None:
+                (fake / f"head-{index}").write_text(head)
     scripts = {
-        "gh": 'echo "$*" >> "$FAKE/calls"\n'
+        "gh": 'if [[ "$*" == *git/matching-refs/* ]]; then\n'
+        '  n=$(cat "$FAKE/ref-count" 2>/dev/null || echo 0)\n'
+        '  echo $((n + 1)) > "$FAKE/ref-count"\n'
+        '  echo "$*" >> "$FAKE/ref-calls"\n'
+        '  if [[ "$FAKE_HEADS" == no ]]; then echo old; exit 0; fi\n'
+        '  [[ -f "$FAKE/head-$n" ]] && cat "$FAKE/head-$n"\n'
+        "  exit $?\n"
+        "fi\n"
+        'echo "$*" >> "$FAKE/calls"\n'
         '[[ "$1" != run ]] || exit 0\n'
         'if [[ "$SERVER_ERROR" == true && "$*" != *per_page=5\\&* ]]; then\n'
         '  echo "gh: Server Error (HTTP 500)" >&2; exit 1\n'
@@ -149,6 +162,9 @@ def _watch(tmp_path, reads, server_error=False):
         "GITHUB_REPOSITORY": "org/repo",
         "GITHUB_RUN_ID": "7",
         "GITHUB_RUN_ATTEMPT": "2",
+        "GITHUB_SHA": "old",
+        "GITHUB_REF": "refs/heads/gh-readonly-queue/dev/pr-1-old",
+        "FAKE_HEADS": "no" if heads is None else "yes",
     }
     run = _step(_jobs()["queue-fail-fast"], "Watch for the first failed graded job")["run"]
     result = subprocess.run(["bash", "-e", "-c", run], cwd=_ROOT, env=env, capture_output=True, text=True)
@@ -158,8 +174,37 @@ def _watch(tmp_path, reads, server_error=False):
             ["bash", "-e", "-c", cancel], cwd=_ROOT, env={**env, "FAILED": "lint"}, capture_output=True, text=True
         )
     sleeps = (fake / "sleeps").read_text().split() if (fake / "sleeps").exists() else []
-    calls = (fake / "calls").read_text().splitlines()
+    calls = (fake / "calls").read_text().splitlines() if (fake / "calls").exists() else []
     return result, output.read_text(), sleeps, calls
+
+
+@pytest.mark.parametrize("head", ["", "replacement"])
+def test_a_deleted_or_replaced_queue_group_stops_before_jobs_finish(tmp_path, head):
+    result, output, sleeps, calls = _watch(tmp_path, [[_job("lint")]], heads=[head])
+    assert result.returncode == 0, result.stderr
+    assert output == "failed=queue group is no longer current\n"
+    assert sleeps == []
+    assert calls == []
+    ref_call = (tmp_path / "fake" / "ref-calls").read_text()
+    assert "git/matching-refs/heads/gh-readonly-queue/dev/pr-1-old" in ref_call
+    assert 'select(.ref == "refs/heads/gh-readonly-queue/dev/pr-1-old")' in ref_call
+
+
+def test_a_queue_lookup_error_is_retried_without_cancelling_a_live_group(tmp_path):
+    result, output, sleeps, calls = _watch(tmp_path, [[_job("lint", "failure")]], heads=[None, "old"])
+    assert result.returncode == 0, result.stderr
+    assert output == "failed=lint\n"
+    assert sleeps == ["15"]
+    assert len(calls) == 1
+
+
+def test_ten_queue_lookup_errors_do_not_claim_the_group_was_deleted(tmp_path):
+    result, output, sleeps, calls = _watch(tmp_path, [], heads=[None] * 10)
+    assert result.returncode == 1, result.stderr
+    assert output == ""
+    assert len(sleeps) == 9
+    assert calls == []
+    assert "::error::Ten reads" in result.stdout
 
 
 def test_the_watch_step_polls_this_attempt_until_a_graded_job_fails(tmp_path):
@@ -251,7 +296,19 @@ def test_every_merge_queue_job_but_the_watcher_is_graded():
         if "github.event_name == 'push'" in str(job.get("if", "")) and "merge_group" not in str(job.get("if", ""))
     }
     queued = set(jobs) - push_only - {"admission", "gate-required"}
-    assert push_only == {"refresh-durations", "flake-budget", "coverage-baseline"}
+    assert push_only == {
+        "promote",
+        "refresh-durations",
+        "flake-budget",
+        "coverage-baseline",
+        "coverage-ratchet",
+        "stage-budget",
+        "kind-due",
+        "worker-image",
+        "swarm-image",
+        "brain-smoke",
+        "ledger-load",
+    }
     assert queued <= _gate_needs(jobs)
 
 

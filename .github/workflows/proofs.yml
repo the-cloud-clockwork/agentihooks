@@ -146,4 +146,4 @@ jobs:
           PYTHONUNBUFFERED: '1'
         run: |
           read -r -a paths <<< "$TEST_PATHS"
-          python -m pytest "${paths[@]}" -v -n auto --dist loadgroup --tb=short
+          workers=$(python -m scripts.ci_cpu_quota) && python -m pytest "${paths[@]}" -v -n "$workers" --dist loadgroup --tb=short

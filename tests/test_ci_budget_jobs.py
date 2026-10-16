@@ -210,3 +210,33 @@ def test_reader_fails_an_unknown_error_without_retry(monkeypatch):
         reader.read_jobs("repos/owner/repo/jobs")
     assert caught.value is error
     assert len(calls) == 1
+
+
+def test_reader_accepts_a_five_job_initial_page_size(monkeypatch):
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command[-1])
+        page = int(parse_qs(urlsplit(command[-1]).query)["page"][0])
+        rows = {1: [{"id": n} for n in range(5)], 2: [{"id": n} for n in range(5, 10)], 3: [{"id": 10}]}[page]
+        return subprocess.CompletedProcess(command, 0, stdout=json.dumps({"jobs": rows}))
+
+    monkeypatch.setattr(reader.subprocess, "run", run)
+    assert reader.read_jobs("repos/owner/repo/jobs", 5) == [{"id": n} for n in range(11)]
+    assert calls == [
+        "repos/owner/repo/jobs?per_page=5&page=1",
+        "repos/owner/repo/jobs?per_page=5&page=2",
+        "repos/owner/repo/jobs?per_page=5&page=3",
+    ]
+
+
+@pytest.mark.parametrize("size", [0, -1, 101])
+def test_reader_cli_refuses_a_page_size_outside_the_github_range(size):
+    result = subprocess.run(
+        [sys.executable, "-m", "scripts.ci_budget.jobs", "repos/owner/repo/jobs", "--page-size", str(size)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 2
+    assert "invalid choice" in result.stderr

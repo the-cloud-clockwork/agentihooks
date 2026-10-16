@@ -157,7 +157,7 @@ def test_only_the_first_shard_installs_the_pinned_codex_cli_and_requires_its_liv
     use_index, use = _unit_step_index(lambda s: s.get("name") == "Use the Codex CLI")
     run_index, _ = _unit_step_index(lambda s: s.get("name") == "Run tests")
     assert restore["if"] in (only, f"needs.split.outputs.source == '' && {only}")
-    assert restore["uses"] == "actions/cache@v4"
+    assert restore["uses"] == "actions/cache/restore@v4"
     assert restore["with"] == {"path": "~/codex", "key": "codex-${{ runner.os }}-${{ env.CODEX_RELEASE }}"}
     install_if = "steps.codex.outcome == 'success' && steps.codex.outputs.cache-hit != 'true'"
     assert install["if"] in (install_if, f"needs.split.outputs.source == '' && {install_if}")
@@ -170,6 +170,29 @@ def test_only_the_first_shard_installs_the_pinned_codex_cli_and_requires_its_liv
         'echo "CODEX_CLI_REQUIRED=1" >> "$GITHUB_ENV"',
     ]
     assert restore_index < install_index < use_index < run_index
+
+
+def test_main_seeds_the_codex_cache_that_unit_shards_restore():
+    workflows = _ROOT / ".github/workflows"
+    jobs = yaml.safe_load((workflows / "test.yml").read_text())["jobs"]
+    seed_workflow = yaml.safe_load((workflows / "codex-cache.yml").read_text())
+    triggers = seed_workflow[True]
+    assert "schedule" in triggers
+    assert triggers["push"]["branches"] == ["main"]
+    seed = seed_workflow["jobs"]["seed"]
+    assert (
+        seed["env"]["CODEX_RELEASE"]
+        == jobs["unit"]["env"]["CODEX_RELEASE"]
+        == jobs["unit-selected"]["env"]["CODEX_RELEASE"]
+    )
+    assert "'anton-oss'" in seed["runs-on"]
+    restore = next(step for step in seed["steps"] if step.get("id") == "codex")
+    assert restore["uses"] == "actions/cache@v4"
+    assert restore["with"] == {"path": "~/codex", "key": "codex-${{ runner.os }}-${{ env.CODEX_RELEASE }}"}
+    install = next(step for step in seed["steps"] if step.get("name") == "Install the Codex CLI")
+    assert restore["if"] == "runner.environment == 'self-hosted'"
+    assert install["if"] == "steps.codex.outcome == 'success' && steps.codex.outputs.cache-hit != 'true'"
+    assert "releases/download/${CODEX_RELEASE}/codex-x86_64-unknown-linux-musl.tar.gz" in install["run"]
 
 
 def test_unit_install_keeps_playwright_and_excludes_the_grpc_exporter():
@@ -397,6 +420,15 @@ def test_shards_wait_only_on_the_durations_lookup():
     assert jobs["split"]["needs"] == ["durations", "select", "reuse", "admission"]
     assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
     assert jobs["lint"]["needs"] in (["reuse"], ["reuse", "admission"])
+
+
+def test_promotion_shard_reports_use_the_pushed_grader_and_prs_keep_the_base():
+    steps = _workflow()["jobs"]["shard-check"]["steps"]
+    checkout = next(step for step in steps if step.get("uses", "").startswith("actions/checkout@"))
+    ref = checkout["with"]["ref"]
+    assert "github.event_name == 'push' && github.sha" in ref
+    assert "github.event_name == 'pull_request' && 'dev'" in ref
+    assert ref.index("github.event_name == 'push' && github.sha") < ref.index("github.event.before")
 
 
 def test_unit_shards_check_out_full_history_without_old_file_contents():

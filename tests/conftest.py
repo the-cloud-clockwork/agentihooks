@@ -194,6 +194,9 @@ def _isolate_real_user_paths(tmp_path, monkeypatch, request):
     # A suite run from a swarm agent's shell inherits its swarm, seat, task and routed account.
     for _inherited in [name for name in os.environ if name.startswith("AGENTIHOOKS_")]:
         monkeypatch.delenv(_inherited)
+    # Mutation stats collection runs this suite with its cache set; nested gate runs must not share it.
+    monkeypatch.delenv("MUTATION_STATS_CACHE", raising=False)
+    monkeypatch.delenv("MUTATION_STATS_ROOT", raising=False)
     # AGENTIBRAIN_HOME — and its Path.home()-derived default — is where the brain
     # keeps its own .env. hooks.config adopts BRAIN_URL / KB_ROUTER_TOKEN from that
     # file, and it does so at IMPORT, which happens at collection before any fixture
@@ -257,6 +260,8 @@ def _isolate_real_user_paths(tmp_path, monkeypatch, request):
     (fake_state_dir / "deps.stamp").write_text(json.dumps({"ok_at": time.time()}))
     monkeypatch.setattr("hooks.config.LOG_FILE", str(fake_state_dir / "logs" / "hooks.log"))
     monkeypatch.setattr("hooks.common.LOG_FILE", str(fake_state_dir / "logs" / "hooks.log"))
+    monkeypatch.setattr("hooks._async._LOG_FILE", fake_state_dir / "logs" / "async-hooks.log")
+    monkeypatch.setattr("hooks.context.documentation_session.HOME", fake_state_dir)
     monkeypatch.setattr("hooks.config.BROADCAST_FILE", str(fake_state_dir / "broadcast.json"))
     monkeypatch.setattr("hooks.context.broadcast.BROADCAST_FILE", str(fake_state_dir / "broadcast.json"))
     monkeypatch.setattr(
@@ -266,6 +271,10 @@ def _isolate_real_user_paths(tmp_path, monkeypatch, request):
         "hooks.context.broadcast.BROADCAST_DELIVERY_STATE_FILE", str(fake_state_dir / "broadcast_delivery_state.json")
     )
     monkeypatch.setattr("hooks.context.quota_policy.AGENTIHOOKS_HOME", fake_state_dir)
+    monkeypatch.setattr("hooks.context.branch_guard.AGENTIHOOKS_HOME", fake_state_dir)
+    monkeypatch.setattr("hooks.context.prod_lockdown.AGENTIHOOKS_HOME", fake_state_dir)
+    monkeypatch.setattr("hooks.context.controls_toggle._FLAG_DIR", fake_state_dir / "controls_flags")
+    monkeypatch.setattr("hooks.context.controls_toggle._GLOBAL_FLAG", fake_state_dir / "controls_flags" / "active.flag")
     monkeypatch.setattr("hooks.observability.agent_trace.CURSOR_DIR", fake_state_dir / "agent_trace")
     monkeypatch.setattr("hooks.context.brain_adapter._HASH_CACHE_FILE", fake_state_dir / "brain_feed_hash")
     monkeypatch.setattr("hooks.context.profile_chain.state_path", lambda: fake_state_dir / "state.json")
@@ -282,6 +291,7 @@ def _isolate_real_user_paths(tmp_path, monkeypatch, request):
     from hooks.targets import emitter
 
     monkeypatch.setattr(emitter, "_forced", False)
+    monkeypatch.setattr(emitter, "_plain", False)
     monkeypatch.setattr(emitter, "_buffer", [])
     monkeypatch.setattr(emitter, "_hook_fields", {})
     monkeypatch.setattr(emitter, "_top_fields", {})

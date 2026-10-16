@@ -56,6 +56,40 @@ def test_profile_defaults_and_native_codex_layer(profile):
     renderer.assert_called_once_with("codex", "qa", overlays=(), bundle_revision="")
 
 
+@pytest.mark.parametrize("agent,swarm", [("codex", "crew"), ("codex", ""), ("claude", "crew")])
+def test_prepare_isolates_only_swarm_codex(profile, agent, swarm):
+    root, renderer = profile
+
+    env, _ = select_profile.prepare("qa", agent, "", "", [], {"AGENTIHOOKS_SWARM": swarm})
+
+    options = {"isolate": True} if agent == "codex" and swarm else {}
+    renderer.assert_called_once_with(
+        "codex" if agent == "codex" else "claude", "qa", overlays=(), bundle_revision="", **options
+    )
+    key = "CODEX_HOME" if agent == "codex" else "CLAUDE_CONFIG_DIR"
+    assert env[key] == str(root / "rendered" / "qa" / agent)
+
+
+@pytest.mark.parametrize("alias", [False, True])
+def test_swarm_codex_prepare_refuses_the_real_home(profile, monkeypatch, alias):
+    root, _ = profile
+    operator = root / "operator" / "codex"
+    operator.mkdir(parents=True)
+    selected = root / "rendered" / "qa"
+    selected.mkdir(parents=True)
+    if alias:
+        (selected / "codex").symlink_to(operator, target_is_directory=True)
+    else:
+        selected = operator.parent
+    monkeypatch.setattr(select_profile.profiles, "operator_codex_home", lambda: operator)
+    monkeypatch.setattr(select_profile.profiles, "profile_dir", lambda *args: selected)
+
+    with pytest.raises(ValueError) as error:
+        select_profile.prepare("qa", "codex", "", "", [], {"AGENTIHOOKS_SWARM": "crew"})
+
+    assert str(error.value) == "swarm codex profile resolves to the operator Codex home"
+
+
 @pytest.mark.parametrize("agent,effort,mapped", [("claude", "minimal", "low"), ("codex", "max", "xhigh")])
 def test_effort_mapping(profile, capsys, agent, effort, mapped):
     _, argv = select_profile.prepare("engineer", agent, "m", effort, [], {})

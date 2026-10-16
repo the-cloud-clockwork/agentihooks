@@ -51,6 +51,7 @@ from scripts.swarm import (
     outage,
     phase_state,
     profile_first,
+    promotion_watch,
     reaper,
     resume,
     retire_watch,
@@ -135,7 +136,9 @@ class Placed:
 
 class Ledger(Protocol):
     def state(self, slug: str) -> dict: ...
-    def update_task(self, slug: str, task_id: str, fields: dict, by: str = ..., if_state: tuple = ...) -> dict: ...
+    def update_task(
+        self, slug: str, task_id: str, fields: dict, by: str = ..., if_state: tuple = ..., if_match: dict | None = ...
+    ) -> dict: ...
     def comment(self, slug: str, task_id: str, text: str, by: str) -> None: ...
     def notify(self, slug: str, text: str) -> None: ...
     def closed(self, slug: str) -> bool: ...
@@ -206,6 +209,7 @@ def tick(slug, store, ledger, runtime, now_ms):
         actions.append("new tasks, running again")
     actions += skip_refused(_orphans, slug, store, ledger, rows)
     actions += skip_refused(dev_red.reopen_pass, slug, config, store, ledger, rows)
+    actions += skip_refused(promotion_watch.refresh, slug, config, store, ledger, doc, now_ms)
     actions += skip_refused(difficulty.size_pass, slug, ledger, doc)
     actions += skip_refused(grouping.release_pass, slug, store, ledger, doc)
     actions += skip_refused(dispatcher.group, slug, config, store, ledger, doc, now_ms)
@@ -472,6 +476,26 @@ def _retire_launch(slug, store, runtime, agent, now_ms):
     return True
 
 
+def _current_owner(agent, row):
+    return row.get("claimed_by", "") in ("", agent.name)
+
+
+def _restore_owner(slug, store, ledger, rows, agent):
+    row = rows.get(agent.task, {})
+    if not _current_owner(agent, row) or not store.ensure_claim(slug, agent, LEASE_MS):
+        return
+    if row.get("out_of_scope") or row.get("state") not in ("open", "claimed", "pr"):
+        return
+    owner = row.get("claimed_by", "")
+    if owner == agent.name and row["state"] != "open":
+        return
+    expected = {"claimed_by": owner, "claim_generation": row.get("claim_generation", 0)}
+    fields = {"claimed_by": agent.name}
+    if row["state"] == "open":
+        fields["state"] = "pr" if row.get("pr_url") else "claimed"
+    rows[agent.task] = ledger.update_task(slug, agent.task, fields, if_state=(row["state"],), if_match=expected)
+
+
 def _reap(slug, store, ledger, runtime, rows, now_ms):
     live, actions = runtime.live_names(), []
     for agent in store.agents(slug):
@@ -503,7 +527,7 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
             runtime.name_pane(agent)
             actions += _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
         elif agent.name in live:
-            store.refresh(slug, agent.task, agent.name, LEASE_MS)
+            _restore_owner(slug, store, ledger, rows, agent)
             actions += _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
         elif resume.recovery_pending(store, slug, agent):
             store.refresh(slug, agent.task, agent.name, LEASE_MS)
@@ -688,8 +712,12 @@ def ready_in_order(slug, store, rows, doc, lane, dispatched=None):
     return _launch_order(slug, store, _claimable(slug, store, rows, doc, lane, dispatched), dispatched)
 
 
+def _owned_tasks(slug, store):
+    return {agent.task for agent in store.agents(slug) if agent.state != "finished"}
+
+
 def _claimable(slug, store, rows, doc, lane, dispatched=None):
-    awaiting = {a.task for a in store.agents(slug) if a.state == "awaiting-decision"}
+    awaiting = _owned_tasks(slug, store)
     held = [t.get("territory") or [] for t in rows.values() if t.get("state") in ACTIVE]
     graph, fix = hierarchy.project(doc)[0], freeze.fix_phase(store.config(slug))
     clear, overlapping = [], []
@@ -843,16 +871,28 @@ def _record_spawn_failure(slug, store, record, error, now_ms):
         failed_panes.hold(store, slug, record, now_ms)
 
 
+def _owner_hold(slug, store, runtime, task):
+    if task["id"] not in _owned_tasks(slug, store):
+        return ""
+    _release_admission(slug, runtime, task)
+    return f"task {task['id']} retains its live owner"
+
+
 def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     agents, actions = store.agents(slug), []
     taken = {a.seat for a in agents}
     held = _held_for_master(slug, store, now_ms)
     for lane, task in _spawn_order(slug, config, store, agents, rows, doc, runtime):
+        expected = {"claimed_by": task.get("claimed_by", ""), "claim_generation": task.get("claim_generation", 0)}
         if held:
             return actions + held
         if stop := _spawn_stop(slug, config, store, runtime, now_ms):
             return actions + [stop]
-        blocked = _lives_spent(slug, store, ledger, rows, task) or _held_back(slug, ledger, rows, runtime, task, now_ms)
+        blocked = (
+            _lives_spent(slug, store, ledger, rows, task)
+            or _held_back(slug, ledger, rows, runtime, task, now_ms)
+            or _owner_hold(slug, store, runtime, task)
+        )
         if blocked:
             actions.append(blocked)
             continue
@@ -893,7 +933,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             kind = config.lanes.get(lane, {}).get("kind", "")
             if kind not in ("", "auto") and not task.get("kind"):
                 fields["kind"] = kind
-            live = ledger.update_task(slug, task["id"], fields, if_state=("open",))
+            live = ledger.update_task(slug, task["id"], fields, if_state=("open",), if_match=expected)
             task.update(live)
             if live["claimed_by"] != name:
                 _release_admission(slug, runtime, task)
@@ -938,7 +978,9 @@ def _spawn_order(slug, config, store, agents, rows, doc, runtime):
     dispatched = dispatcher.claim_key(config, doc)
     queue = []
     for lane, cap in caps.items():
-        busy = sum(1 for a in agents if a.lane == lane and not _ended(a, rows))
+        busy = sum(
+            1 for a in agents if a.lane == lane and not _ended(a, rows) and _current_owner(a, rows.get(a.task, {}))
+        )
         ready = ready_in_order(slug, store, rows, doc, lane, dispatched)
         if "tasks" in decision:
             ready = [task for task in ready if task["id"] in decision["tasks"]]

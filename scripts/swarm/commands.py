@@ -110,7 +110,7 @@ def view(store: RedisStore, slug: str) -> dict:
         **status,
         "last_tick_activity": tick_activity.read(store, slug),
         "top_bottleneck": bottleneck_status.report(store, slug, now),
-        "config": {**status.get("config", config.__dict__), "state": config.state},
+        "config": {**status.get("config", config.__dict__), "state": config.state, "autonomy": config.autonomy},
         "commands": rows(store, slug),
         "terminals": terminals,
         "executions": executions,
