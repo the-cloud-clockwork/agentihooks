@@ -954,6 +954,8 @@ def _gate(steps, needs, event="merge_group"):
 
 
 def test_queue_gate_keeps_legacy_duration_admission_by_default():
+    from scripts import ci_reuse
+
     implicit = ci_reuse.gate_steps(queue_tier=True)
     assert implicit == ci_reuse.gate_steps(queue_tier=True, consolidated=False)
     assert implicit != ci_reuse.gate_steps(queue_tier=True, consolidated=True)
