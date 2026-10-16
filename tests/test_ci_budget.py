@@ -24,7 +24,7 @@ def _job(name, created, completed, conclusion="success"):
 
 
 JOBS = [
-    _job("durations", "00:05", "00:40"),
+    _job("select", "00:05", "00:40"),
     _job("unit (3.12, 1)", "02:00", "05:00"),
     _job("unit (3.11, 4)", "02:10", "06:30"),
     _job("swarm-image / smoke", "00:05", "01:00"),
@@ -61,7 +61,7 @@ def test_stage_of_names_the_job_or_reusable_workflow_id(name, stage):
 
 def test_a_stage_spans_first_job_creation_to_last_job_end():
     assert ci_budget.stages(JOBS) == {
-        "durations": 35,
+        "select": 35,
         "unit": 270,
         "swarm-image": 95,
         "mutation": 600,
@@ -111,7 +111,7 @@ def test_render_prints_every_stage_and_the_run_against_the_budget():
         ["mutation", "10m00s", "8m00s", "over"],
         ["unit", "4m30s", "5m00s", "ok"],
         ["swarm-image", "1m35s", "3m00s", "ok"],
-        ["durations", "0m35s", "1m00s", "ok"],
+        ["select", "0m35s", "1m00s", "ok"],
         ["brand-new", "0m10s", "none", "no", "budget"],
         ["push", "to", "this", "report", "16m00s", "15m00s", "over"],
     ]
@@ -161,7 +161,7 @@ def test_cli_prints_the_table_summary_and_annotations(tmp_path, monkeypatch, cap
             "| Stage | Wall | Budget | Verdict |",
             "| --- | ---: | ---: | --- |",
             "| mutation | 10m00s | 8m00s | over |",
-            "| durations | 0m35s | 1m00s | ok |",
+            "| select | 0m35s | 1m00s | ok |",
             "| brand-new | 0m10s | none | no budget |",
             "| push to this report | 16m00s | 15m00s | over |",
             "",
