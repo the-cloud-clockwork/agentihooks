@@ -225,8 +225,9 @@ def test_removals_before_the_head_commit_or_for_other_reasons_do_not_count():
 
 
 def test_a_head_last_removed_for_another_reason_is_not_requeued():
+    merged = {**REMOVED, "createdAt": "2026-10-15T06:00:00Z", "reason": "merged"}
     dequeued = {**REMOVED, "createdAt": "2026-10-15T06:10:00Z", "reason": "manually_removed"}
-    assert ci_queue_retry.requeue(pull([REMOVED, dequeued])) == (
+    assert ci_queue_retry.requeue(pull([REMOVED, merged, dequeued])) == (
         False,
         "head last left the queue for manually_removed",
     )
