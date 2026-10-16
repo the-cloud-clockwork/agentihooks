@@ -327,6 +327,7 @@ def test_stdin_script_boundaries():
         commands("bash <<< pytest", 10)
     assert ["cat"] in commands("cat <<EOF | bash -c 'echo'\nx\nEOF", 8)
     assert commands("env -i") == []
+    assert commands("echo $((1)); cat <<EOF\nx\nEOF") == [["echo", "$"], ["1"], ["cat"]]
     assert located("env -- -C /a")[-1] == (["-C", "/a"], [])
     for command in (
         "echo $((1)); bash <<EOF\npytest -q\nEOF",
