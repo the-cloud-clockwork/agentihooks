@@ -39,7 +39,7 @@ def run(body):
 
 
 def test_comment_page_is_eight_first_then_ten_per_click():
-    assert run("out.page = COMMENT_PAGE;")["page"] == {"first": 8, "more": 10}
+    assert run("out.page = COMMENT_PAGE;")["page"] == {"first": 8, "more": 10, "below": True}
 
 
 def test_a_comment_list_shows_its_newest_eight():
