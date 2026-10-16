@@ -414,6 +414,7 @@ def cmd_tick(store, args):
         )
     slugs = store.slugs()
     if slugs:
+        timer.reconcile(timer.entry_point())
         firsts, until = _Firsts(len(slugs)), time.monotonic() + EXTRA_TICKS_UNTIL
         with ThreadPoolExecutor(max_workers=len(slugs)) as pool:
             list(pool.map(lambda slug: _tick_while_others_run(store, slug, firsts, until), slugs))

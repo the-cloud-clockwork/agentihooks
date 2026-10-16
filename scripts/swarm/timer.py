@@ -86,6 +86,14 @@ def ensure(binary, unit_dir=None, run=subprocess.run):
     return proc.returncode == 0
 
 
+def reconcile(binary, unit_dir=None, run=subprocess.run):
+    unit_dir = unit_dir or UNIT_DIR
+    expected = units(binary).items()
+    if all((unit_dir / name).is_file() and (unit_dir / name).read_text() == text for name, text in expected):
+        return True
+    return ensure(binary, unit_dir, run)
+
+
 def _roots():
     from scripts.targets._common import _install_module
 
