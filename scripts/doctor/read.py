@@ -52,8 +52,22 @@ def inbox_receivers(store, inbox, slug, items):
         for key, name in ((address, held), (taker, taker)):
             if key and key not in found:
                 agent = agents.get(names.resolve(name))
-                found[key] = Receiver(live=True, quiet_ms=agent.idle_ticks * MINUTE_MS) if agent else Receiver()
+                found[key] = _inbox_receiver(store, inbox, key, agent)
     return found
+
+
+def _inbox_receiver(store, inbox, address, agent):
+    from scripts.doctor.inbox import Receiver
+    from scripts.inbox import exits
+
+    if agent and (not is_seat(address) or not inbox.seats.left(agent.name, address)):
+        return Receiver(live=True, quiet_ms=agent.idle_ticks * MINUTE_MS, occupant=agent.name, harness=agent.harness)
+    if not is_seat(address):
+        return Receiver()
+    slug = address.split("@", 1)[1]
+    config = store.config(slug) if store.redis.exists(store.key(slug, "config")) else None
+    waiting = config is None or (config.state != "stopped" and not exits.no_successor(address, config))
+    return Receiver(seat_wait=waiting)
 
 
 def _handoff(prompt):
