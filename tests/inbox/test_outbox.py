@@ -530,10 +530,11 @@ def test_a_record_that_replays_after_an_unexpected_failure_forgets_its_attempts(
     assert run("send", "bob", "flaky") == 0
     assert run("send", "bob", "steady") == 0
     outage.down = False
-    poisoned(monkeypatch, {"flaky"})
+    failing = {"flaky"}
+    poisoned(monkeypatch, failing)
     outbox.flush(InboxStore(outage.redis))
     assert json.loads(outbox.attempts_path().read_text()) == {records()[0]["sum"]: 1}
-    poisoned(monkeypatch, set())
+    failing.clear()
     report = outbox.flush(InboxStore(outage.redis))
     assert (len(report.applied), report.rejected, report.left) == (2, [], 0)
     assert outage.texts("bob") == ["flaky", "steady"]
