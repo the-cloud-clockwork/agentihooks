@@ -85,6 +85,40 @@ def test_the_default_login_is_never_counted_as_a_token_duplicate(tmp_path):
     assert codex_router.duplicates(pool, environ) == {}
 
 
+def test_accounts_without_a_token_never_count_as_duplicates_of_each_other(tmp_path):
+    environ = {"HOME": str(tmp_path)}
+    pool = [CodexAccount("default"), CodexAccount("api", key_env="CODEX_API_KEY")]
+    assert codex_router.duplicates(pool, environ) == {}
+    assert codex_router.identity(CodexAccount("gone", "AH_CX_TOKEN_gone"), environ) == ""
+
+
+def test_the_launcher_warns_on_stderr_about_a_duplicate_token_account(tmp_path, monkeypatch, capsys):
+    environ = {
+        "HOME": str(tmp_path),
+        "AH_CX_TOKEN_alpha": _jwt("acct-1"),
+        "AH_CX_TOKEN_beta": _jwt("acct-1", "second login"),
+    }
+    monkeypatch.setattr(codex_router, "codex_sessions_by_account", lambda: {})
+    monkeypatch.setattr(codex_router, "quotas", lambda accounts, environ: {})
+    monkeypatch.setattr(codex_router.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("scripts.deps_preflight.refresh_codex_wrapper", lambda name: None)
+    seen = []
+    rc = codex_router.main(["--route", "alpha"], environ=environ, execvpe=lambda *a: seen.append(a[0]))
+    assert (rc, seen) == (0, ["/usr/bin/codex"])
+    assert capsys.readouterr().err == (
+        "agentihooks codex: warning: AH_CX_TOKEN_beta is the same ChatGPT account as alpha; it is not routed\n"
+    )
+
+
+def test_the_stop_hook_hands_its_transcript_to_the_rollout_link(monkeypatch):
+    seen = []
+    monkeypatch.setattr(hook_manager, "_link_codex_rollout", seen.append)
+    monkeypatch.setattr(hook_manager, "_confirm_inbox", lambda session_id: None)
+    monkeypatch.setattr("hooks.config.BRAIN_WRITER_ENABLED", False)
+    hook_manager.on_stop({"session_id": "s-link", "transcript_path": "/nonexistent/rollout.jsonl"})
+    assert seen == ["/nonexistent/rollout.jsonl"]
+
+
 def test_balance_names_whether_the_default_login_and_ncgma_are_distinct(tmp_path):
     _default_login(tmp_path, "acct-shared")
     same = {"HOME": str(tmp_path), "AH_CX_TOKEN_ncgma": _jwt("acct-shared")}

@@ -216,7 +216,7 @@ def quotas(pool: list[CodexAccount], environ: Mapping[str, str]) -> dict[str, Co
 
     def read(account: CodexAccount) -> CodexQuota | None:
         own = codex_rollouts.folder(environ, account.name)
-        found = codex_quota.latest_codex_quota(dict(environ), sessions=own) if own.is_dir() else None
+        found = codex_quota.latest_codex_quota(sessions=own) if own.is_dir() else None
         return found or codex_quota.latest_codex_quota(dict(environ), keep(account))
 
     usage = codex_usage.cached()
@@ -291,8 +291,11 @@ def identity(account: CodexAccount, environ: Mapping[str, str]) -> str:
     """The ChatGPT account id claim behind this account's credential; empty when its credential carries none."""
     if account.is_api:
         return ""
-    token = environ.get(account.env_name, "") if account.is_token else _default_token(environ) or ""
-    return _chatgpt_account_id(_claims(token))
+    return _token_identity(environ.get(account.env_name) if account.is_token else _default_token(environ))
+
+
+def _token_identity(token: str | None) -> str:
+    return _chatgpt_account_id(_claims(token)) if token else ""
 
 
 def fingerprint(account_id: str) -> str:
@@ -321,14 +324,14 @@ def identity_warnings(environ: Mapping[str, str]) -> list[str]:
 
 def default_distinction(environ: Mapping[str, str]) -> str:
     """One line naming whether the default login is a ChatGPT account no token account repeats."""
-    tokens = sorted(account.name for account in token_accounts(environ))
-    if not tokens:
+    found = {account.name: identity(account, environ) for account in token_accounts(environ)}
+    if not found:
         return ""
-    default = identity(CodexAccount(CODEX_DEFAULT), environ)
+    default = _token_identity(_default_token(environ))
     if not default:
         return "codex default login: identity unknown"
-    same = [name for name in tokens if identity(CodexAccount(name, f"{CODEX_TOKEN_PREFIX}{name}"), environ) == default]
-    verdict = f"same ChatGPT account as {', '.join(same)}" if same else f"distinct from {', '.join(tokens)}"
+    same = [name for name, account_id in found.items() if account_id == default]
+    verdict = f"same ChatGPT account as {', '.join(same)}" if same else f"distinct from {', '.join(found)}"
     return f"codex default login #{fingerprint(default)}: {verdict}"
 
 

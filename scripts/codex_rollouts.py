@@ -1,6 +1,5 @@
 """Each Codex account's own sessions folder: hard links to the rollouts its sessions wrote under CODEX_HOME/sessions."""
 
-import contextlib
 import glob
 import os
 from collections.abc import Mapping
@@ -18,9 +17,7 @@ def folder(environ: Mapping[str, str], account: str) -> Path:
 
 
 def session_ids(environ: Mapping[str, str], account: str) -> set[str]:
-    with contextlib.suppress(OSError):
-        return {rollout_session_id(path) for path in folder(environ, account).glob(ROLLOUTS)}
-    return set()
+    return {rollout_session_id(path) for path in folder(environ, account).glob(ROLLOUTS)}
 
 
 def link(environ: Mapping[str, str], account: str, rollout: Path) -> Path | None:
