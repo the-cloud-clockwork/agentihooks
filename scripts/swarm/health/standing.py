@@ -74,7 +74,8 @@ def _detector(old, reading, now_ms, threshold):
         return old
     known = {*old.get("episodes", []), *old.get("detector", {}).get("episodes", [])}
     added = [episode for episode in reading["episodes"] if episode not in known]
-    foreign = SAME_MEASURE.get(old.get("unit", DETECTOR_UNIT), old.get("unit")) != DETECTOR_UNIT
+    unit = old.get("unit", DETECTOR_UNIT)
+    foreign = SAME_MEASURE.get(unit, unit) != DETECTOR_UNIT
     if foreign and now_ms - old["updated_at"] >= STALE_MS:
         old = {**old, "unit": DETECTOR_UNIT, "detail": ""}
         foreign = False
