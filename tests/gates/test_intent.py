@@ -71,6 +71,15 @@ def test_queue_uses_only_a_judged_current_head_verdict(tmp_path, monkeypatch, mo
         assert "missing required behavior" in decision.reason
 
 
+def test_queue_admission_does_not_skip_another_gated_command(tmp_path):
+    state = verdicts(tmp_path)
+    state.write(TASK, "pending", intent.RUNNING, NOW)
+    command = f"agentihooks swarm {SLUG} merge queue {URL}; gh pr merge 9"
+    decision = intent.IntentGate(clock=lambda: NOW / 1000).decide(bash(command), WHO, state)
+    assert not decision.allowed
+    assert "intent check running" in decision.reason
+
+
 def answer(noul):
     return SimpleNamespace(noul=noul)
 
@@ -206,7 +215,7 @@ class TestGate:
         )
         assert row["reason"] == "intent check still pending after two minutes, passed unchecked"
 
-    @pytest.mark.parametrize("command", ["gh pr merge 9", f"agentihooks swarm {SLUG} done --pr {URL}"])
+    @pytest.mark.parametrize("command", [f"gh pr merge {URL}", f"agentihooks swarm {SLUG} done --pr {URL}"])
     def test_a_draft_record_on_a_ready_pull_request_refuses_as_running(self, tmp_path, command):
         verdicts(tmp_path).write(TASK, "pending", intent.DRAFT, NOW - 60_000, phase="p8")
         ran = Ran((0, "false\n"))
@@ -246,7 +255,7 @@ class TestGate:
             return subprocess.CompletedProcess(args, 0, stdout="false\n", stderr="")
 
         gate = intent.IntentGate(clock=lambda: NOW / 1000, run=judged)
-        assert gate.decide(bash("gh pr merge 9"), WHO, verdicts(tmp_path)).allowed
+        assert gate.decide(bash(f"gh pr merge {URL}"), WHO, verdicts(tmp_path)).allowed
         assert verdicts(tmp_path).read(TASK) == {"verdict": "pass", "reason": "fine", "at": NOW - 1, "phase": "p8"}
 
     def test_a_verdict_landing_during_the_draft_read_is_decided_in_the_same_mode(self, tmp_path):
@@ -257,7 +266,7 @@ class TestGate:
             return subprocess.CompletedProcess(args, 0, stdout="false\n", stderr="")
 
         gate = intent.IntentGate(clock=lambda: NOW / 1000, run=failed)
-        command = bash("gh pr merge 9")
+        command = bash(f"gh pr merge {URL}")
         assert gate.decide(command, WHO, verdicts(tmp_path), "coach").allowed
 
 

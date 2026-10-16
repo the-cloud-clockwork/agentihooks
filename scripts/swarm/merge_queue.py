@@ -1,6 +1,7 @@
 import json
 import subprocess
 
+from scripts.swarm import ledger_events
 from scripts.swarm.store import SwarmError
 
 FRESHNESS = """query($url: URI!) { resource(url: $url) { ... on PullRequest {
@@ -55,11 +56,19 @@ def rest(path: str, run) -> dict | str:
 
 
 def require_green(url: str, head: str, run) -> None:
-    repo = graphql(FRESHNESS, {"url": url}, run)["resource"]["repository"]["nameWithOwner"]
-    runs = rest(f"repos/{repo}/actions/workflows/test.yml/runs?event=pull_request&head_sha={head}&per_page=1", run)
-    records = runs["workflow_runs"]
-    if not records or records[0]["conclusion"] != "success" or records[0]["head_sha"] != head:
-        raise SwarmError("the current pull request head must pass Tests before queueing")
+    def read(command, **kwargs):
+        try:
+            done = run(command, **kwargs)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise SwarmError(f"GitHub API: {exc}") from exc
+        if done.returncode:
+            raise SwarmError(done.stderr.strip() or "GitHub API failed")
+        return done
+
+    pull = ledger_events.view(url, read)
+    if pull is None or pull.head != head or not pull.resolved or pull.red:
+        failed = f"; failed: {', '.join(pull.failed)}" if pull and pull.failed else ""
+        raise SwarmError(f"required checks on the current pull request head must pass before queueing{failed}")
 
 
 def operate(action: str, url: str, run=subprocess.run, admit=None) -> dict:
@@ -72,12 +81,9 @@ def operate(action: str, url: str, run=subprocess.run, admit=None) -> dict:
         if admit is not None:
             admit(raw["headRefOid"])
         if raw["repository"]["mergeQueue"] is None:
-            if (
-                raw["isDraft"]
-                or raw["reviewDecision"] not in (None, "APPROVED")
-                or (raw["statusCheckRollup"] or {}).get("state") != "SUCCESS"
-            ):
+            if raw["isDraft"] or raw["reviewDecision"] not in (None, "APPROVED"):
                 raise SwarmError("squash merge requires a ready pull request with green checks and no pending review")
+            require_green(url, raw["headRefOid"], run)
             graphql(MERGE, {"id": raw["id"], "head": raw["headRefOid"]}, run)
         else:
             require_green(url, raw["headRefOid"], run)

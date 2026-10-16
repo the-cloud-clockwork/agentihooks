@@ -1297,6 +1297,7 @@ def _queue_intent(store, args, agent, head):
     who = Who(name=agent.name, swarm=args.slug, lane=agent.lane, task=agent.task)
     decision = intent.queue_decision(who, state, args.url, intent.mode_of(store.config(args.slug)), head)
     if not decision.allowed:
+        gate_log.append(args.slug, gate_log.Row.of(intent.NAME, "deny", who, "Bash", decision.reason))
         raise SwarmError(decision.reason)
 
 

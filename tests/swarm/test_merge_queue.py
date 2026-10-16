@@ -3,7 +3,7 @@ import subprocess
 
 import pytest
 
-from scripts.swarm import cli, merge_queue, waits
+from scripts.swarm import cli, ledger_events, merge_queue, waits
 from scripts.swarm.store import SwarmError
 
 URL = "https://github.com/o/r/pull/7"
@@ -39,7 +39,13 @@ def runner(*responses):
             assert command[3] == "-f"
             assert command[4] in [
                 f"query={query}"
-                for query in (merge_queue.STATE, merge_queue.FRESHNESS, merge_queue.QUEUE, merge_queue.DEQUEUE)
+                for query in (
+                    merge_queue.STATE,
+                    merge_queue.FRESHNESS,
+                    merge_queue.QUEUE,
+                    merge_queue.DEQUEUE,
+                    ledger_events.PULL_QUERY.replace("$number", "7"),
+                )
             ]
             if command[4] in (f"query={merge_queue.STATE}", f"query={merge_queue.FRESHNESS}"):
                 assert command[5:] == ["-f", f"url={URL}"]
@@ -143,8 +149,7 @@ def test_state_reports_an_open_pull_request_without_a_queue_entry():
 def test_queue_enqueues_the_observed_head_and_reports_the_queue_entry():
     run, calls = runner(
         {"data": {"resource": OPEN}},
-        {"data": {"resource": {"number": 12, "repository": {"nameWithOwner": "o/r"}}}},
-        {"workflow_runs": [{"id": 21, "head_sha": "abc", "conclusion": "success"}]},
+        checked_resource(),
         {"data": {"enqueuePullRequest": {"mergeQueueEntry": {"id": "MQ_one"}}}},
         {"data": {"resource": {**OPEN, "mergeQueueEntry": ENTRY}}},
     )
@@ -155,7 +160,7 @@ def test_queue_enqueues_the_observed_head_and_reports_the_queue_entry():
         "queued": True,
         "entry": ENTRY,
     }
-    command, _ = calls[3]
+    command, _ = calls[2]
     assert command[:3] == ["gh", "api", "graphql"]
     assert "enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head})" in command[4]
     assert command[5:] == ["-f", "id=PR_one", "-f", "head=abc"]
@@ -168,6 +173,7 @@ def test_queue_squash_merges_the_observed_head_when_the_repository_has_no_queue(
     responses = iter(
         [
             {"data": {"resource": {**OPEN, "repository": {"mergeQueue": None}, "reviewDecision": review}}},
+            checked_resource(),
             {"data": {"mergePullRequest": {"pullRequest": {"state": "MERGED"}}}},
             {"data": {"resource": {**OPEN, "state": "MERGED", "repository": {"mergeQueue": None}}}},
         ]
@@ -184,11 +190,11 @@ def test_queue_squash_merges_the_observed_head_when_the_repository_has_no_queue(
         "queued": False,
         "entry": None,
     }
-    assert len(calls) == 3
-    assert "mergePullRequest(input:" in calls[1][4]
-    assert "expectedHeadOid: $head" in calls[1][4]
-    assert "mergeMethod: SQUASH" in calls[1][4]
-    assert calls[1][5:] == ["-f", "id=PR_one", "-f", "head=abc"]
+    assert len(calls) == 4
+    assert "mergePullRequest(input:" in calls[2][4]
+    assert "expectedHeadOid: $head" in calls[2][4]
+    assert "mergeMethod: SQUASH" in calls[2][4]
+    assert calls[2][5:] == ["-f", "id=PR_one", "-f", "head=abc"]
 
 
 @pytest.mark.parametrize(
@@ -197,9 +203,6 @@ def test_queue_squash_merges_the_observed_head_when_the_repository_has_no_queue(
         {"isDraft": True},
         {"reviewDecision": "CHANGES_REQUESTED"},
         {"reviewDecision": "REVIEW_REQUIRED"},
-        {"statusCheckRollup": None},
-        {"statusCheckRollup": {"state": "PENDING"}},
-        {"statusCheckRollup": {"state": "FAILURE"}},
     ],
 )
 def test_queue_without_a_queue_refuses_an_unready_pull_request(change):
@@ -211,33 +214,18 @@ def test_queue_without_a_queue_refuses_an_unready_pull_request(change):
     assert len(calls) == 1
 
 
-@pytest.mark.parametrize("conclusion", [None, "failure", "cancelled"])
+@pytest.mark.parametrize("conclusion", [None, "FAILURE", "CANCELLED"])
 def test_queue_waits_for_green_checks_on_the_current_head(conclusion):
-    run, calls = runner(
-        {"data": {"resource": OPEN}},
-        {
-            "data": {
-                "resource": {
-                    "number": 12,
-                    "repository": {"nameWithOwner": "o/r", "ref": {"target": {"oid": "current"}}},
-                }
-            }
-        },
-        {"workflow_runs": [{"id": 21, "head_sha": "abc", "conclusion": conclusion}]},
-    )
-    with pytest.raises(SwarmError, match="^the current pull request head must pass Tests before queueing$"):
+    run, calls = runner({"data": {"resource": OPEN}}, checked_resource(conclusion))
+    with pytest.raises(SwarmError, match="^required checks on the current pull request head must pass before queueing"):
         merge_queue.operate("queue", URL, run)
     assert not any("update-branch" in str(call[0]) or "enqueuePullRequest(input:" in str(call[0]) for call in calls)
 
 
-@pytest.mark.parametrize("records", [[], [{"id": 21, "head_sha": "older", "conclusion": "success"}]])
-def test_queue_requires_a_run_for_its_observed_head(records):
-    run, _ = runner(
-        {"data": {"resource": OPEN}},
-        {"data": {"resource": {"number": 12, "repository": {"nameWithOwner": "o/r"}}}},
-        {"workflow_runs": records},
-    )
-    with pytest.raises(SwarmError, match="^the current pull request head must pass Tests before queueing$"):
+@pytest.mark.parametrize("head", [None, "older"])
+def test_queue_requires_checks_on_its_observed_head(head):
+    run, _ = runner({"data": {"resource": OPEN}}, checked_resource(head=head))
+    with pytest.raises(SwarmError, match="^required checks on the current pull request head must pass before queueing"):
         merge_queue.operate("queue", URL, run)
 
 
@@ -256,7 +244,7 @@ def dev_moved(head=AUTHORED, changed=(), conclusion="success", jobs=None, log=""
         elif path == "graphql" and command[4] == f"query={merge_queue.STATE}":
             reply = {"data": {"resource": {**OPEN, "mergeQueueEntry": ENTRY if queued else None}}}
         elif path == "graphql":
-            reply = {"data": {"resource": {"repository": {"nameWithOwner": "o/r"}}}}
+            reply = checked_resource(conclusion.upper() if conclusion else None)
         elif "/workflows/test.yml/runs" in path:
             reply = {"workflow_runs": [{"id": 21, "head_sha": "abc", "conclusion": conclusion}]}
         elif path.endswith("/logs"):
@@ -319,7 +307,7 @@ def test_queue_enqueues_a_green_head_as_is_whatever_dev_changed(changed, head):
 @pytest.mark.parametrize("conclusion", [None, "failure"])
 def test_queue_blocks_a_red_head_without_reading_dev(conclusion):
     run, calls = dev_moved(REFRESHED, [{"filename": "tests/swarm/test_tick.py"}], conclusion)
-    with pytest.raises(SwarmError, match="^the current pull request head must pass Tests before queueing$"):
+    with pytest.raises(SwarmError, match="^required checks on the current pull request head must pass before queueing"):
         merge_queue.operate("queue", URL, run)
     assert not any(call[2] == "graphql" and call[4] == f"query={merge_queue.QUEUE}" for call in calls)
     assert_left_dev_alone(calls)
@@ -356,11 +344,10 @@ def test_a_refused_enqueue_names_github_and_leaves_the_branch_alone():
 def test_queue_reports_rest_api_failure(stderr, message):
     initial, calls = runner(
         {"data": {"resource": OPEN}},
-        {"data": {"resource": {"number": 12, "repository": {"nameWithOwner": "o/r"}}}},
     )
 
     def run(command, **kwargs):
-        if len(calls) < 2:
+        if len(calls) < 1:
             return initial(command, **kwargs)
         return subprocess.CompletedProcess(command, 1, "", stderr)
 
@@ -373,11 +360,10 @@ def test_queue_reports_rest_api_failure(stderr, message):
 def test_queue_reports_rest_transport_failure(error):
     initial, calls = runner(
         {"data": {"resource": OPEN}},
-        {"data": {"resource": {"number": 12, "repository": {"nameWithOwner": "o/r"}}}},
     )
 
     def run(command, **kwargs):
-        if len(calls) < 2:
+        if len(calls) < 1:
             return initial(command, **kwargs)
         raise error
 

@@ -921,7 +921,8 @@ def queue_decision(who: Who, state: Verdicts, url: str, mode: str, head: str | N
         return Decision()
     text = f"intent check failed for task {who.task}: {record['reason']}. {fix_steps(who.swarm)}"
     kind = {"enforce": "deny", "coach": "coach", "observe": "observe"}[mode]
-    log.append(state.slug, log.Row.of(NAME, kind, who, "Bash", text), state.home)
+    if mode != "enforce":
+        log.append(state.slug, log.Row.of(NAME, kind, who, "Bash", text), state.home)
     if mode == "coach":
         print(text, file=sys.stderr)
     return Decision(allowed=mode != "enforce", reason=text if mode != "observe" else "")
@@ -963,7 +964,12 @@ class IntentGate:
         pulls = Verdicts(state.slug, f"{NAME}-pulls", state.home)
         bound = pulls.read(who.task)
         if not bound:
-            return self._decide_record(call, who, state, mode, record)
+            for words in commands:
+                single = replace(call, tool_input={**call.tool_input, "command": shlex.join(words)})
+                decision = self._decide_record(single, who, state, mode, record)
+                if not decision.allowed:
+                    return decision
+            return decision
         for words in commands:
             single = replace(call, tool_input={**call.tool_input, "command": shlex.join(words)})
             queued = _queue_target(single.command)
