@@ -235,17 +235,23 @@ def test_migration_requires_controller_and_preserves_existing_creator(owned):
     assert status == 403
     status, result = owned.invoke(f"/{owned.slug}/migrate", payload, owned.controller)
     assert status == 409
-    assert result["error"]["message"] == "Proof creator already differs from the requested migration"
+    assert result["error"] == {
+        "code": "ownership_conflict",
+        "message": "Proof creator already differs from the requested migration",
+    }
     assert owned.store.redis.hgetall(owned.store.key(owned.slug, "proof-creator")) == before
 
 
-@pytest.mark.parametrize("field,value", [("agent", "engineer@fedcba-0001"), ("task", "another")])
+@pytest.mark.parametrize(
+    "field,value",
+    [("agent", "engineer@fedcba-0001"), ("agent", "master@a1b2c3-0001"), ("agent", "invalid"), ("task", "another")],
+)
 def test_migration_refuses_a_different_proof_identity(owned, field, value):
     owned.store.redis.delete(owned.store.key(owned.slug, "proof-creator"))
     payload = {"parent": "external-parent", "agent": owned.owner, "task": "contract", field: value}
     status, result = owned.invoke(f"/{owned.slug}/migrate", payload, owned.controller)
     assert status == 403
-    assert result["error"]["message"] == "Migration must match the proof engineer and task"
+    assert result["error"] == {"code": "forbidden", "message": "Migration must match the proof engineer and task"}
     assert owned.store.redis.hgetall(owned.store.key(owned.slug, "proof-creator")) == {}
 
 
@@ -278,7 +284,10 @@ def test_controller_controls_refuse_wrong_owner_and_ungranted_actions(owned):
     }
     status, result = owned.invoke(f"/{owned.slug}/controller-controls", payload, owned.controller)
     assert status == 409
-    assert result["error"]["message"] == "Proof creator differs from the configured requester"
+    assert result["error"] == {
+        "code": "ownership_conflict",
+        "message": "Proof creator differs from the configured requester",
+    }
     payload["owner"]["parent"] = SLUG
     payload["request"] = {"control": "resume"}
     status, result = owned.invoke(f"/{owned.slug}/controller-controls", payload, owned.controller)
@@ -309,7 +318,7 @@ def test_migration_refuses_missing_real_and_nonscratch_targets(owned, target, mo
     payload = {"parent": "external-parent", "agent": owned.owner, "task": "contract"}
     status, result = owned.invoke(f"/{slug}/migrate", payload, owned.controller)
     assert status == 403
-    assert result["error"]["message"] == "Migration needs an existing scratch proof"
+    assert result["error"] == {"code": "forbidden", "message": "Migration needs an existing scratch proof"}
 
 
 def test_migration_fences_a_concurrent_owner(owned, monkeypatch):
@@ -333,7 +342,7 @@ def test_migration_fences_a_concurrent_owner(owned, monkeypatch):
     payload = {"parent": "external-parent", "agent": owned.owner, "task": "contract"}
     status, result = owned.invoke(f"/{owned.slug}/migrate", payload, owned.controller)
     assert status == 409
-    assert result["error"]["message"] == "Proof creator changed during migration"
+    assert result["error"] == {"code": "ownership_conflict", "message": "Proof creator changed during migration"}
     assert owned.store.redis.hgetall(key) == other
 
 
@@ -358,3 +367,41 @@ def test_migration_refuses_incomplete_requester_identity(owned, owner):
         "parent": SLUG,
         "owner": owned.owner,
     }
+
+
+@pytest.mark.parametrize(
+    "change", ["parent", "agent", "task", "extra", "parent-type", "agent-type", "task-type", "task-pattern", "list"]
+)
+def test_migration_schema_refuses_malformed_payload_before_authority(owned, change):
+    payload = {"parent": "external-parent", "agent": owned.owner, "task": "contract"}
+    if change in ("parent", "agent", "task"):
+        payload.pop(change)
+    elif change == "extra":
+        payload["extra"] = True
+    elif change.endswith("-type"):
+        payload[change.removesuffix("-type")] = 1
+    elif change == "task-pattern":
+        payload["task"] = "Contract"
+    else:
+        payload = []
+    with pytest.raises(proofs.APIError) as refused:
+        proofs.migrate(server, owned.slug, payload)
+    assert refused.value.status == 400
+    assert refused.value.code == "schema_invalid"
+
+
+@pytest.mark.parametrize("change", ["owner", "request", "extra", "request-type", "owner-type", "list"])
+def test_controller_control_schema_refuses_malformed_payload(owned, change):
+    payload = {"owner": {"parent": SLUG, "agent": owned.owner, "task": "contract"}, "request": {"control": "pause"}}
+    if change in ("owner", "request"):
+        payload.pop(change)
+    elif change == "extra":
+        payload["extra"] = True
+    elif change.endswith("-type"):
+        payload[change.removesuffix("-type")] = []
+    else:
+        payload = []
+    with pytest.raises(proofs.APIError) as refused:
+        proofs.controller_control(server, owned.slug, payload)
+    assert refused.value.status == 400
+    assert refused.value.code == "schema_invalid"

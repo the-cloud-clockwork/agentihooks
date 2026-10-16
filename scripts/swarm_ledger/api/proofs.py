@@ -142,7 +142,7 @@ def controller_control(server: ModuleType, slug: str, payload: dict) -> dict:
             "type": "object",
             "required": ["owner", "request"],
             "additionalProperties": False,
-            "properties": {"owner": {"type": "object"}, "request": {"type": "object"}},
+            "properties": {"owner": {}, "request": {"type": "object"}},
         },
         payload,
     )
