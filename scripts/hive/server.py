@@ -97,6 +97,7 @@ def _handler(redis: "Redis", redis_url: str, context: ssl.SSLContext | None) -> 
 class JoinServer(ThreadingHTTPServer):
     def __init__(self, address, handler):
         self._slots = threading.BoundedSemaphore(MAX_HANDLERS)
+        self._admitted: set[int] = set()
         self._open: dict[int, tuple[float, socket.socket]] = {}
         self._lock = threading.Lock()
         super().__init__(address, handler)
@@ -104,10 +105,12 @@ class JoinServer(ThreadingHTTPServer):
     def process_request(self, request, client_address):
         while not self._slots.acquire(timeout=0.1):
             self.reap()
+        with self._lock:
+            self._admitted.add(id(request))
         try:
             super().process_request(request, client_address)
         except BaseException:
-            self._slots.release()
+            self._release(request)
             raise
 
     def process_request_thread(self, request, client_address):
@@ -122,7 +125,14 @@ class JoinServer(ThreadingHTTPServer):
                     entry[1].close()
             if entry is None:
                 self.shutdown_request(request)
-            self._slots.release()
+            self._release(request)
+
+    def _release(self, request):
+        with self._lock:
+            if id(request) not in self._admitted:
+                return
+            self._admitted.discard(id(request))
+        self._slots.release()
 
     def reap(self) -> None:
         now = time.monotonic()
