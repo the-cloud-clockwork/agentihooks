@@ -129,10 +129,6 @@ function executionView(c, now) {
   return { shown, tone: c.wait ? "waiting" : OBSERVED_TONES[c.observed] || "unknown", seen, where, behind: !!c.terminal_behind };
 }
 
-function transportView(c) {
-  return c ? { push: !!c.push_inbox, attach: !!c.native_terminal_attach } : null;
-}
-
 function remoteSwarm(sw) {
   return Object.keys(sw.terminals || {}).length > 0 || Object.values(sw.executions || {}).some((c) => c.backend !== "local");
 }
@@ -141,7 +137,7 @@ function agentRows(sw, now) {
   const agents = [...(sw.agents || [])].sort((x, y) => (y.lane === "master") - (x.lane === "master"));
   return agents.map((a) => {
     const master = a.lane === "master", offer = sw.lifecycle && sw.lifecycle.agents && sw.lifecycle.agents[a.name];
-    return { name: a.name, master, gates: a.gates || [], lane: master ? "—" : a.lane, profile: a.profile || "—", overlays: (a.overlays || []).join(" · ") || "—", model: modelText(a) || "—", transport: transportView(a.capabilities), task: master ? "" : a.task || "",
+    return { name: a.name, master, gates: a.gates || [], lane: master ? "—" : a.lane, profile: a.profile || "—", overlays: (a.overlays || []).join(" · ") || "—", model: modelText(a) || "—", transport: a.capabilities || null, task: master ? "" : a.task || "",
       state: master && (a.status || "working") === "working" ? "live" : a.status || "working", promoted: !!a.promoted, age: a.started_at ? span(now - a.started_at) : "—",
       finished: a.status === "finished", since: a.state_since || 0, terminal: terminalView((sw.terminals || {})[a.name], now),
       execution: executionView((sw.executions || {})[a.name], now), lifecycle: offer ? { offer, controls: sw.lifecycle.controls.filter((c) => c.action in offer.disabled), terminate: !!offer.terminate } : null };
@@ -154,10 +150,8 @@ function agentRow(a, remote) {
     ...(remote ? [executionCell(a.execution), terminalCell(a.terminal, a.execution)] : []), a.age, a.finished ? h("span") : agentActions(a, pending, swarmReadError)), `agent-${a.name}`);
 }
 
-function transportCell(t) {
-  if (!t) return "—";
-  return h("span", { class: "sw-transport" }, label(t.push ? "push" : "no push", t.push ? "on" : "off"), label(t.attach ? "native terminal" : "no native terminal", t.attach ? "on" : "off"));
-}
+const transportCell = (c) => c ? h("span", { class: "sw-transport" }, label(c.push_inbox ? "push" : "no push", c.push_inbox ? "on" : "off"),
+  label(c.native_terminal_attach ? "native terminal" : "no native terminal", c.native_terminal_attach ? "on" : "off")) : "—";
 
 function executionCell(e) {
   return e ? h("span", {}, label(e.shown, e.tone), ` ${e.seen}`, h("span", { class: "sw-sub", text: e.where })) : "—";

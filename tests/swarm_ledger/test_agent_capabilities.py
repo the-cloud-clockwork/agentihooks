@@ -11,7 +11,7 @@ def _function(page, name):
 
 def test_agent_rows_carry_push_inbox_and_native_terminal_per_agent():
     page = page_source()
-    names = ("span", "modelText", "terminalView", "executionView", "transportView", "agentRows")
+    names = ("span", "modelText", "terminalView", "executionView", "agentRows")
     js = (
         "\n".join(_function(page, name) for name in names)
         + """
@@ -26,19 +26,19 @@ console.log(JSON.stringify(agentRows(raw, 0).map((r) => [r.name, r.transport])))
     )
     rows = json.loads(subprocess.check_output(["node", "-e", js], text=True))
     assert rows == [
-        ["c", {"push": True, "attach": False}],
-        ["p", {"push": True, "attach": True}],
-        ["l", {"push": False, "attach": False}],
+        ["c", {"push_inbox": True, "native_terminal_attach": False}],
+        ["p", {"push_inbox": True, "native_terminal_attach": True}],
+        ["l", {"push_inbox": False, "native_terminal_attach": False}],
         ["old", None],
     ]
 
 
 def test_transport_cell_names_both_capabilities_in_plain_labels():
     page = page_source()
-    body = _function(page, "transportCell")
+    body = page.split("  const transportCell = (c) =>", 1)[1].split(' : "—";', 1)[0]
     for text in ("push", "no push", "native terminal", "no native terminal"):
         assert f'"{text}"' in body
-    assert "agentRow(a, remote)" in page and "transportCell(a.transport)" in page
+    assert "transportCell(a.transport)" in page
 
 
 def test_agents_table_has_a_transport_column_with_a_set_width():
