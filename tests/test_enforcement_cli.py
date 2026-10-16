@@ -166,4 +166,4 @@ def test_conditions_list_help_names_the_steps(monkeypatch, capsys):
     with pytest.raises(SystemExit):
         _run(monkeypatch, "conditions", "--help")
     out = " ".join(capsys.readouterr().out.split())
-    assert "--step {pre,post,stop} Only this step" in out
+    assert "--step {pre,post,stop,start} Only this step" in out
