@@ -111,13 +111,15 @@ class JoinServer(ThreadingHTTPServer):
             raise
 
     def process_request_thread(self, request, client_address):
-        with self._lock:
-            self._open[threading.get_ident()] = (time.monotonic() + REQUEST_DEADLINE_S, request.dup())
         try:
+            with self._lock:
+                self._open[threading.get_ident()] = (time.monotonic() + REQUEST_DEADLINE_S, request.dup())
             super().process_request_thread(request, client_address)
         finally:
             with self._lock:
-                self._open.pop(threading.get_ident())[1].close()
+                entry = self._open.pop(threading.get_ident(), None)
+                if entry is not None:
+                    entry[1].close()
             self._slots.release()
 
     def reap(self) -> None:
