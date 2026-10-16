@@ -1,6 +1,6 @@
 # CXCH-08 mixed-fleet qualification
 
-Run on 2026-10-16 with codex-cli 0.162.1 and Claude Code 2.1.301, on the branch built on dev `572153ea` (CXCH-07 merged). The live run used branch head `eb5ae9c7` and later: the pump without the pre-connect hold. `qualification.json` is the manifest. It lists every row of the acceptance matrix with its status, its live evidence and its tests. No message bodies or credentials are kept here.
+Run on 2026-10-16 with codex-cli 0.162.1 and Claude Code 2.1.301, on the branch built on dev `572153ea` (CXCH-07 merged). The live run used branch head `eb5ae9c7` and later: the pump without the pre-connect hold. `qualification.json` is the manifest. It lists every row of the acceptance matrix with its status, its basis (live in this run, CI tests, or an earlier live proof), its evidence and its tests. Nineteen rows pass. Redis state lost is partial (below). No message bodies or credentials are kept here.
 
 Full suite: merge group Tests run 38937215723 on `572153ea`. Changed tests on the head: pull request Tests run 38944785112 on `669c0319`.
 
@@ -22,7 +22,7 @@ Full suite: merge group Tests run 38937215723 on `572153ea`. Changed tests on th
 | FYI fan-out | every agent; closed as information received | delivered to the worker in 12 ms |
 | Viewer closed | pane closed; app-server and pump kept running; next message accepted in 115 ms | |
 | Handoff | worker handed off; the successor took the seat as generation 4 and received seat mail in 151 ms | master handed off; the successor took the seat as generation 2 and received chat in 112 ms |
-| Retirement | serve, app-server, pump and the Claude channel ended (`raw/a-retire-*.txt`) | by fault and restore, below |
+| Retirement | orderly: serve, app-server and pump ended (`raw/a-retire-*.txt`); the launch viewer outlived it and was closed by its pid | not orderly: the fleet ended through the Redis state loss fault and restore |
 
 ## Latency
 
@@ -30,14 +30,17 @@ There were 100 FYI deliveries to the busy Codex worker, one every 0.3 s, after i
 
 - Median 0.1425 s, p95 0.224 s, max 0.239 s.
 - No sample over 2 s or over 10 s.
-- The worker's launch check passed 13 to 18 s after spawn.
+- Codex worker launch checks passed 12 to 18 s after spawn.
 - The same figures came from the item histories after the restore (`raw/latency.json`).
 
 ## Faults, live on the Codex master's pump
 
+Command outputs: `raw/b-faults.txt` and `raw/b-snapshot-restore.txt`.
+
+
 - **Redis unavailable.** The container was paused for 30 s. The pump logged `degraded: TimeoutError` and made no acceptance. Its owner lease lapsed during the pause, so after the resume it exited with `no longer delivers`. The swarm replaced the execution, and the next message went to the new one.
-- **Socket loss.** The app-server was killed. The pump logged the lost stream. Both submissions were rejected uncommitted while the server drained (`Server is draining`). The item stayed pending, and the replacement execution accepted it exactly once.
-- **Redis state lost.** The swarm was snapshotted, then the database was flushed. Serve exited with `no transport record for this execution`, and nothing was resent. Restore was refused while agent processes lived. Once they ended, the swarm restored paused with both agents `awaiting-decision`. The Codex master's resume was refused as `unsupported resume: a managed Codex execution continues through its supervised server`.
+- **Socket loss.** The app-server was killed. The pump logged the lost stream. Both submissions were rejected uncommitted while the server drained (`Server is draining`). The item was held as pending, and the replacement execution accepted it exactly once. An unknown outcome after a send was not produced live; CI tests cover it.
+- **Redis state lost (partial).** The swarm was snapshotted, then the database was flushed. Serve exited with `no transport record for this execution`, and nothing was resent. Restore was refused while agent processes lived. Once they ended, the swarm restored paused with both agents `awaiting-decision` and the inbox states kept. The Codex master's resume was refused as `unsupported resume: a managed Codex execution continues through its supervised server`. Gap: the restore does not bring back the receipts journal. A delivery in flight at the loss would return as pending with no journal to reconcile it against.
 
 ## Late approval and the pre-connect hold
 
@@ -48,6 +51,14 @@ The probe is `late-run.py.txt` with `scripts.codex_app_server_probe late_approva
 - The pump starts with resume, then read, so it records an open approval before its first step.
 
 The hold on a turn already running at connect is therefore dropped. Such a turn is now steered like any observed turn, and an open approval still holds delivery. Before the change, a live Codex worker whose opening turn never ended got no push delivery and pulled its mail through `msg inbox`.
+
+## Live coverage limits
+
+- The handoffs were ordinary, not quota triggered. The successor account choice rests on CI tests.
+- No profile or model mismatch was launched live. CI tests cover it.
+- The pump holding delivery on an open approval rests on CI tests. Those tests replay the approval in the order the live probe observed.
+- The draft-intact case of the composing operator rests on CXCH-07 run 2.
+- Both fleets ran on the personal bearer account. The business bearer account was qualified by the late approval probe only, and it was at its week quota warning.
 
 ## Not run
 

@@ -1,0 +1,15 @@
+=== 2026-10-16T18:17:40Z agentihooks swarm proof-323133-cxc9-1 snapshot
+{"swarm": "proof-323133-cxc9-1", "snapshot": "/home/iamroot/.agentihooks/swarm/proof-323133-cxc9-1/snapshot.json", "agents": ["engineer@ed3ec8-0007", "master@ed3ec8-0006"]}
+=== exit 0
+=== 2026-10-16T18:18:23Z agentihooks swarm proof-323133-cxc9-1 restore
+swarm: swarm proof-323133-cxc9-1 still has live agents (engineer@ed3ec8-0007, master@ed3ec8-0006); stop it with stop --now first
+=== exit 1
+=== 2026-10-16T18:18:36Z agentihooks swarm proof-323133-cxc9-1 restore
+filed promo-38944064236-0 for the failed dev job promote / promote
+raised the promotion alert for dev push run 38944064236
+quota capacity eng 1 ci 1 plan 0 because accounts are unknown; Claude has 3 free seats and Codex has 9 free seats
+{"swarm": "proof-323133-cxc9-1", "state": "paused", "snapshot": "/home/iamroot/.agentihooks/swarm/proof-323133-cxc9-1/snapshot.json", "restored": [{"name": "engineer@ed3ec8-0007", "lane": "eng", "task": "w1", "outcome": "awaiting-decision", "reason": "no worktree", "conversation_id": "fa1eaf28-149a-4691-9c91-fe0ac0b4ddc1", "at": 1792174716758, "transfer": "ed85884955bc41beae93a8ea42d842a8"}, {"name": "master@ed3ec8-0006", "lane": "master", "task": "master", "outcome": "awaiting-decision", "reason": "resume failed to start: unsupported resume: a managed Codex execution continues through its supervised server", "conversation_id": "01a145ee-2414-7d82-a478-1b2064b9f279", "at": 1792174716758, "transfer": "0c5b41c9258d495baf9cb4296aab73e1"}]}
+=== exit 0
+=== 2026-10-16T18:20:08Z agentihooks swarm proof-323133-cxc9-1 remove
+swarm: swarm proof-323133-cxc9-1 still has agents; stop it with stop --now first
+=== exit 1

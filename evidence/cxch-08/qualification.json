@@ -34,7 +34,8 @@
       "tests": [
         "tests/inbox/test_codex_pump.py::test_an_idle_thread_wakes_with_turn_start_and_no_wait_tool",
         "tests/swarm/test_push_master.py::test_a_push_mode_codex_master_prompt_drops_the_wait_inbox_loop"
-      ]
+      ],
+      "basis": "live this run"
     },
     "Busy worker": {
       "status": "pass",
@@ -42,7 +43,8 @@
       "tests": [
         "tests/inbox/test_codex_pump.py::test_busy_delivery_steers_the_observed_turn_on_the_same_thread",
         "tests/inbox/test_codex_pump.py::test_a_steer_reply_for_a_turn_that_already_completed_leaves_the_thread_idle"
-      ]
+      ],
+      "basis": "live this run"
     },
     "Turn completes during send": {
       "status": "pass",
@@ -50,7 +52,8 @@
       "tests": [
         "tests/inbox/test_codex_pump.py::test_a_turn_end_race_refreshes_after_the_refusal_and_starts_a_turn",
         "tests/inbox/test_codex_pump.py::test_a_second_refusal_rejects_the_delivery_and_holds_the_pump"
-      ]
+      ],
+      "basis": "ci"
     },
     "Operator composing a prompt": {
       "status": "pass",
@@ -58,14 +61,16 @@
       "tests": [
         "tests/context/test_operator_mode.py::test_verified_peer_delivery_never_switches_or_renews_operator_presence",
         "tests/context/test_operator_mode.py::test_every_prompt_the_swarm_types_into_a_pane_carries_the_mark_and_is_not_typed"
-      ]
+      ],
+      "basis": "live CXCH-07 run 2 for the draft; ci for presence"
     },
     "Viewer closed": {
       "status": "pass",
       "evidence": "live fleet A: herdr pane closed; app-server and pump kept running (raw/a-viewer-*.txt); next task message accepted in 115 ms and answered; one agent on the seat",
       "tests": [
         "tests/swarm/test_managed_lifecycle.py::test_managed_server_and_thread_are_live_without_a_viewer"
-      ]
+      ],
+      "basis": "live this run"
     },
     "Two bridge instances": {
       "status": "pass",
@@ -73,42 +78,48 @@
       "tests": [
         "tests/inbox/test_dispatch.py::test_a_second_bridge_takes_over_and_the_first_loses_every_write",
         "tests/inbox/test_codex_pump.py::test_old_generation_mail_cannot_publish_or_ack_after_successor_admission"
-      ]
+      ],
+      "basis": "ci; live successor fencing"
     },
     "Hook/watch races bridge": {
       "status": "pass",
-      "evidence": "deterministic tests in CI; live on the old held code the worker read its mail through msg inbox while the pump only held a reservation, and no second delivery followed",
+      "evidence": "deterministic tests in CI",
       "tests": [
         "tests/inbox/test_dispatch.py::test_hook_delivery_is_refused_while_an_owner_holds_the_recipient",
         "tests/inbox/test_dispatch.py::test_a_lapsed_bridge_cannot_submit_an_item_the_hook_path_delivered"
-      ]
+      ],
+      "basis": "ci"
     },
     "Socket loss after send": {
       "status": "pass",
-      "evidence": "live fleet B: app-server killed; pump degraded on the lost stream; two submissions rejected uncommitted while the server drained; the item stayed pending and was accepted exactly once by the replacement execution",
+      "evidence": "live fleet B (raw/b-faults.txt): app-server killed; pump degraded on the lost stream; both submissions rejected uncommitted while the server drained; the item stayed pending (held) and the replacement execution accepted it exactly once. The unknown outcome after a send is covered by CI tests",
       "tests": [
         "tests/inbox/test_codex_pump.py::test_a_lost_acknowledgement_stays_unknown_and_is_never_replayed",
         "tests/inbox/test_dispatch.py::test_crash_after_write_turns_unknown_and_never_sends_twice"
-      ]
+      ],
+      "basis": "live this run for the held case; ci for the unknown case"
     },
     "Lost Redis notification": {
       "status": "pass",
       "evidence": "deterministic tests in CI",
       "tests": [
         "tests/inbox/test_codex_pump.py::test_a_lost_notify_is_recovered_by_the_scan_and_not_before"
-      ]
+      ],
+      "basis": "ci"
     },
     "Redis unavailable": {
       "status": "pass",
-      "evidence": "live fleet B: Redis container paused 30 s; pump logged degraded TimeoutError, made no acceptance, then found its owner lease lapsed and exited; the swarm replaced the execution and the next message was accepted by the new one",
+      "evidence": "live fleet B (raw/b-faults.txt): Redis paused 30 s; pump logged degraded TimeoutError, made no acceptance, then found its owner lease lapsed and exited; the swarm replaced the execution and the next message was accepted by the new one",
       "tests": [
         "tests/inbox/test_outbox.py::test_a_refused_send_is_not_queued",
         "tests/inbox/test_channel_reconnect.py::test_channel_opens_while_redis_is_down_and_delivers_after_restore"
-      ]
+      ],
+      "basis": "live this run"
     },
     "Redis state lost": {
-      "status": "pass",
-      "evidence": "live fleet B: snapshot then FLUSHALL; serve exited with no transport record for this execution, nothing resent; restore refused while agent processes lived, then restored paused with both agents awaiting decision and the inbox states kept. Observation: restore does not bring back the receipts journal",
+      "status": "partial",
+      "basis": "live this run, partial",
+      "evidence": "live fleet B (raw/b-faults.txt, raw/b-snapshot-restore.txt): snapshot then FLUSHALL; serve exited with no transport record for this execution and nothing was resent; restore was refused while agent processes lived, then restored paused with both agents awaiting decision and inbox states kept. Gap: restore does not bring back the receipts journal, so a delivery in flight at the loss could not be reconciled from it; follow up proposed",
       "tests": []
     },
     "Unknown additive item field": {
@@ -117,7 +128,8 @@
       "tests": [
         "tests/inbox/test_realtime.py::test_claim_delivers_an_item_a_newer_writer_stored_with_a_field_this_code_lacks",
         "tests/inbox/test_dispatch.py::test_a_malformed_payload_is_rejected"
-      ]
+      ],
+      "basis": "ci"
     },
     "Background loop failure": {
       "status": "pass",
@@ -125,7 +137,8 @@
       "tests": [
         "tests/inbox/test_codex_pump.py::test_a_broken_event_stream_degrades_the_transport",
         "tests/inbox/test_codex_pump.py::test_losing_ownership_degrades_at_the_next_reconcile"
-      ]
+      ],
+      "basis": "live this run and ci"
     },
     "Reply retried after crash": {
       "status": "pass",
@@ -133,7 +146,8 @@
       "tests": [
         "tests/inbox/test_reply_relay.py::test_reply_and_page_relay_retries_keep_one_answer_and_one_page_post",
         "tests/inbox/test_store.py::test_reply_retry_after_a_lost_close_keeps_one_outgoing_item"
-      ]
+      ],
+      "basis": "ci"
     },
     "Seat reused for another task": {
       "status": "pass",
@@ -141,31 +155,35 @@
       "tests": [
         "tests/inbox/test_exits.py::test_stale_exit_settlement_leaves_transferred_work_with_the_successor",
         "tests/inbox/test_exits.py::test_task_mail_waits_until_a_live_successor_takes_the_seat"
-      ]
+      ],
+      "basis": "ci"
     },
     "Quota handoff": {
       "status": "pass",
-      "evidence": "live handoff in both fleets: the Codex worker and the Codex master each handed off; successors took the same seat and task with a new execution, seat mail reached them (151 ms, 112 ms) and old pumps stopped stale",
+      "evidence": "live: ordinary handoffs, not quota triggered. The Codex worker and the Codex master each handed off; successors took the same seat and task with a new execution, seat mail reached them (151 ms, 112 ms) and the old pumps stopped stale. The successor account choice is covered by CI tests only",
       "tests": [
         "tests/codex_session/test_supervisor.py::test_handoff_and_quota_successors_admit_a_new_server_and_resume_the_thread",
         "tests/inbox/test_codex_pump.py::test_successor_admission_cannot_overtake_an_inbox_publication"
-      ]
+      ],
+      "basis": "ci for the account; live this run for seat, task and old bridge fencing"
     },
     "Profile or model mismatch": {
       "status": "pass",
-      "evidence": "deterministic tests in CI; every live launch passed its profile launch check",
+      "evidence": "deterministic tests in CI; no mismatch was run live",
       "tests": [
         "tests/swarm/test_launch_check.py::test_missing_hooks_or_wrong_model_or_effort_is_named_settings",
         "tests/codex_session/test_supervisor.py::test_a_server_signed_in_with_another_account_kind_is_refused"
-      ]
+      ],
+      "basis": "ci"
     },
     "Approval while detached": {
       "status": "pass",
-      "evidence": "live probe on both bearer accounts: a resuming late client receives the open approval with its id before its next read reply; the pump keeps the item reserved and surfaces the request",
+      "evidence": "live probe on both bearer accounts (records/): a resuming late client receives the open approval with its id after the resume reply and before its next read reply; the pump holding delivery on it is covered by CI tests, with the replay placed in that observed order",
       "tests": [
         "tests/inbox/test_codex_pump.py::test_a_pending_approval_keeps_the_item_reserved_and_surfaces_the_request",
         "tests/inbox/test_codex_pump.py::test_an_approval_replayed_on_resume_holds_the_first_delivery_into_a_turn_begun_before_the_pump"
-      ]
+      ],
+      "basis": "live probe this run and ci for the pump"
     },
     "Native resume unavailable": {
       "status": "pass",
@@ -173,7 +191,8 @@
       "tests": [
         "tests/codex_session/test_attach.py::test_reopen_refuses_an_execution_with_no_connected_thread",
         "tests/swarm/test_managed_viewer.py::test_a_managed_agent_never_resumes_into_a_new_pane"
-      ]
+      ],
+      "basis": "live this run"
     },
     "Claude regression": {
       "status": "pass",
@@ -181,7 +200,8 @@
       "tests": [
         "tests/inbox/test_channel_server.py::test_an_item_is_pushed_at_its_notify_and_answered_through_the_reply_tool",
         "tests/inbox/test_realtime.py::test_the_reply_tool_answers_the_sender_and_closes_the_item"
-      ]
+      ],
+      "basis": "live this run and ci"
     }
   },
   "latency": {
@@ -195,7 +215,7 @@
     "max_s": 0.239,
     "over_2s": 0,
     "over_10s": 0,
-    "startup": "Codex worker launch check passed 13 to 18 s after spawn; transport connected before the burst"
+    "startup": "Codex worker launch checks passed 12 to 18 s after spawn; transport connected before the burst"
   },
   "fleets": {
     "claude_master_codex_worker": {
@@ -210,7 +230,8 @@
         "handoff",
         "retirement",
         "latency"
-      ]
+      ],
+      "retirement": "orderly: drive.py retire ended serve, app-server and pump (raw/a-retire-*.txt); the launch viewer outlived it and was closed by pid"
     },
     "codex_master_claude_worker": {
       "status": "pass",
@@ -222,9 +243,9 @@
         "fyi fan-out",
         "direct replies",
         "handoff",
-        "fault matrix",
-        "retirement by Redis loss and restore"
-      ]
+        "fault matrix"
+      ],
+      "retirement": "not orderly: the fleet ended through the Redis state loss fault and restore; orderly retirement was shown in fleet A"
     }
   },
   "full_suite": {
@@ -239,5 +260,7 @@
     "A launch viewer outlived retire once and was closed by its pid (raw/a-retire-after.txt).",
     "Several replacement launches failed with the harness did not report its route within 30s, which stretched the socket loss recovery to about 270 s.",
     "A proof swarm over a real checkout filed promotion fixer tasks and its ci agent opened a real pull request; promotion_watch now skips proof swarms."
-  ]
+  ],
+  "accounts_note": "The fleets ran on the personal bearer account; the business bearer account was qualified by the late approval probe only and was at its week quota warning during the run.",
+  "evidence_folder": "lower case cxch-08, matching the existing cxch-01 and cxch-07 folders"
 }
