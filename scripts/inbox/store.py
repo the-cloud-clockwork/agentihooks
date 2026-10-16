@@ -417,6 +417,8 @@ class InboxStore:
             raise InboxError(f"message {item_id} is closed: {item.reason}")
         self.redis.hsetnx(key, field, answer_id or new_item_id())
         reply_id = self.redis.hget(key, field)
+        if self.redis.hget(self.key("item", reply_id), "state") == "cancelled":
+            raise InboxError(f"answer {reply_id} to message {item_id} was refused")
         if entry := self.entry_of(item_id):
             self.about(reply_id, entry)
         try:
@@ -447,30 +449,30 @@ class InboxStore:
             if (item.state, item.reason) != expected:
                 raise
 
-    def reopen(self, item_id, replier, by, reason):
-        """Open an item an answer closed, with the replier's answer slot cleared so its next reply is a new message."""
+    def reopen(self, answer, by, reason):
+        """Open the item a refused answer closed, with its answer slot cleared so the next reply is a new message."""
         from redis.exceptions import WatchError
 
         for _ in range(MOVE_ATTEMPTS):
             try:
-                return self._try_reopen(item_id, replier, by, reason)
+                return self._try_reopen(answer, by, reason)
             except WatchError:
                 continue
-        raise Contended(f"message {item_id} changed meanwhile; run the command again")
+        raise Contended(f"message {answer.ref} changed meanwhile; run the command again")
 
-    def _try_reopen(self, item_id, replier, by, reason):
-        key = self.key("item", item_id)
+    def _try_reopen(self, answer, by, reason):
+        key = self.key("item", answer.ref)
         with self.redis.pipeline() as pipe:
             pipe.watch(key)
-            item = _item(pipe.hgetall(key), item_id)
-            if item.state != "done":
+            item = _item(pipe.hgetall(key), answer.ref)
+            if (item.state, item.reason) != close_reason("done", replied(answer.id)):
                 return None
             moved = replace(item, state="read", updated_at=now_ms(), reason=reason)
             pipe.multi()
             pipe.hset(key, mapping=_fields(moved))
-            pipe.hdel(key, f"reply:{self.names.resolve(replier)}")
-            pipe.zadd(self.key("open", item.address), {item_id: item.created_at})
-            pipe.rpush(self.key("history", item_id), _entry("read", by, reason, moved.updated_at))
+            pipe.hdel(key, f"reply:{answer.sender}")
+            pipe.zadd(self.key("open", item.address), {item.id: item.created_at})
+            pipe.rpush(self.key("history", item.id), _entry("read", by, reason, moved.updated_at))
             pipe.publish(NOTIFY, item.address)
             pipe.execute()
             return moved

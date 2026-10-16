@@ -201,14 +201,20 @@ def test_reply_goes_to_the_sender_and_closes_the_original_done(store):
     assert closed.state == "done" and answer.id in closed.reason
 
 
-def test_reopen_returns_an_answered_item_to_its_open_mail_with_a_fresh_reply_slot(store):
+def refused_answer(store):
     item = store.send("operator", "master", "how far along are we")
     answer = store.reply(item.id, "master", "two tasks left")
+    store.close(answer.id, "operator", "cancel", "refused by the ledger page")
+    return item, store.get(answer.id)
+
+
+def test_reopen_returns_an_answered_item_to_its_open_mail_with_a_fresh_reply_slot(store):
+    item, answer = refused_answer(store)
     listener = store.redis.pubsub()
     listener.subscribe(NOTIFY)
     listener.get_message(timeout=1)
     size = store.redis.get(store.key("open-size", "master"))
-    reopened = store.reopen(item.id, "master", "swarm", "reopened: refused")
+    reopened = store.reopen(answer, "swarm", "reopened: refused")
     assert store.redis.get(store.key("open-size", "master")) == size
     assert (reopened.state, reopened.reason) == ("read", "reopened: refused")
     assert store.get(item.id) == reopened
@@ -225,23 +231,40 @@ def test_reopen_returns_an_answered_item_to_its_open_mail_with_a_fresh_reply_slo
     assert second.id != answer.id and store.get(item.id).state == "done"
 
 
-@pytest.mark.parametrize("moved", ["cancel", "handoff", "open"])
-def test_reopen_leaves_an_item_no_answer_closed_as_it_is(store, moved):
-    item = store.send("operator", "master", "how far along are we")
+def test_a_replayed_reply_bound_to_a_refused_answer_is_refused_and_keeps_the_item_open(store):
+    item, answer = refused_answer(store)
+    store.reopen(answer, "swarm", "reopened: refused")
+    with pytest.raises(InboxError) as refused:
+        store.reply(item.id, "master", "two tasks left", answer_id=answer.id)
+    assert str(refused.value) == f"answer {answer.id} to message {item.id} was refused"
+    assert store.get(item.id).state == "read"
+
+
+@pytest.mark.parametrize("moved", ["cancel", "handoff", "open", "other answer"])
+def test_reopen_leaves_an_item_this_answer_did_not_close_as_it_is(store, moved):
+    item, answer = refused_answer(store)
+    store.reopen(answer, "swarm", "reopened")
     if moved == "cancel":
         store.close(item.id, "master", "cancel", "not needed")
     elif moved == "handoff":
         store.close(item.id, "master", "handoff", "eng-1")
-    before = store.get(item.id)
-    assert store.reopen(item.id, "master", "swarm", "reopened") is None
-    assert store.get(item.id) == before
-    assert len(store.history(item.id)) == 1 + (moved != "open")
+    elif moved == "other answer":
+        store.reply(item.id, "master", "one task left")
+    before, history = store.get(item.id), store.history(item.id)
+    assert store.reopen(answer, "swarm", "reopened again") is None
+    assert (store.get(item.id), store.history(item.id)) == (before, history)
+
+
+def test_reopen_refuses_a_ref_that_names_no_inbox_message(store):
+    item = store.send("master", "operator", "a ledger event", ref="ledger-write-1")
+    with pytest.raises(InboxError) as refused:
+        store.reopen(item, "swarm", "reopened")
+    assert str(refused.value) == "no message ledger-write-1"
 
 
 @pytest.mark.parametrize("conflicts", [1, 3])
 def test_reopen_retries_a_concurrent_change_then_gives_up(store, monkeypatch, conflicts):
-    item = store.send("operator", "master", "how far along are we")
-    store.reply(item.id, "master", "two tasks left")
+    item, answer = refused_answer(store)
     attempt = store._try_reopen
     calls = []
 
@@ -253,12 +276,12 @@ def test_reopen_retries_a_concurrent_change_then_gives_up(store, monkeypatch, co
 
     monkeypatch.setattr(store, "_try_reopen", racing)
     if conflicts < 3:
-        assert store.reopen(item.id, "master", "swarm", "reopened").state == "read"
+        assert store.reopen(answer, "swarm", "reopened").state == "read"
     else:
         with pytest.raises(Contended) as refused:
-            store.reopen(item.id, "master", "swarm", "reopened")
+            store.reopen(answer, "swarm", "reopened")
         assert str(refused.value) == f"message {item.id} changed meanwhile; run the command again"
-    assert calls == [(item.id, "master", "swarm", "reopened")] * min(conflicts + 1, 3)
+    assert calls == [(answer, "swarm", "reopened")] * min(conflicts + 1, 3)
 
 
 def test_reply_retry_returns_the_same_outgoing_item(store):
