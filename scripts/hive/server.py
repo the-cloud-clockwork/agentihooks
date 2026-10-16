@@ -131,7 +131,7 @@ class JoinServer(ThreadingHTTPServer):
         with self._lock:
             if id(request) not in self._admitted:
                 return
-            self._admitted.discard(id(request))
+            self._admitted.remove(id(request))
         self._slots.release()
 
     def reap(self) -> None:

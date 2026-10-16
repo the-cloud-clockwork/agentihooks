@@ -145,3 +145,55 @@ def test_silent_tls_handshakes_are_dropped_and_a_real_https_join_is_served(admin
     finally:
         httpd.shutdown()
         httpd.server_close()
+
+
+def test_a_handler_error_names_the_accepted_client(admin, bounded, monkeypatch, capsys):
+    def broken(*_):
+        raise RuntimeError("exchange broke")
+
+    monkeypatch.setattr(auth, "exchange", broken)
+    body = b'{"code": "any"}'
+    with socket.create_connection(("127.0.0.1", bounded), timeout=5) as conn:
+        conn.sendall(b"POST /hive/join HTTP/1.0\r\nContent-Length: %d\r\n\r\n%s" % (len(body), body))
+        while conn.recv(65536):
+            pass
+    time.sleep(0.3)
+
+    assert "request from ('127.0.0.1'" in capsys.readouterr().err
+
+
+def _refuse(thread):
+    raise RuntimeError("no thread")
+
+
+def test_a_thread_that_cannot_start_gives_its_slot_back(admin, monkeypatch):
+    monkeypatch.setattr(server, "MAX_HANDLERS", 1)
+    httpd = server.make_server(admin, PUBLIC, "127.0.0.1", 0)
+    try:
+        monkeypatch.setattr(threading.Thread, "start", _refuse)
+        with socket.socket() as request, pytest.raises(RuntimeError):
+            httpd.process_request(request, ("127.0.0.1", 1))
+        monkeypatch.undo()
+
+        assert httpd._slots.acquire(blocking=False)
+        assert not httpd._admitted
+    finally:
+        httpd.server_close()
+
+
+class _Undupable(socket.socket):
+    def dup(self):
+        raise OSError("descriptor table full")
+
+
+def test_a_request_whose_socket_cannot_be_duplicated_is_closed(admin):
+    httpd = server.make_server(admin, PUBLIC, "127.0.0.1", 0)
+    try:
+        request = _Undupable()
+        with pytest.raises(OSError, match="descriptor table full"):
+            httpd.process_request_thread(request, ("127.0.0.1", 1))
+
+        assert request.fileno() == -1
+        assert not httpd._open
+    finally:
+        httpd.server_close()
