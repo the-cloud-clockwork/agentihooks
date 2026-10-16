@@ -1,5 +1,4 @@
 import pytest
-from redis.exceptions import WatchError
 
 from scripts.inbox.store import NOTIFY, Contended, InboxError, InboxStore
 from scripts.swarm.keyspace import ROOT as KEY_ROOT
@@ -276,6 +275,8 @@ def test_reopen_skips_a_ref_that_names_no_inbox_message(store):
 
 @pytest.mark.parametrize("conflicts", [1, 3])
 def test_reopen_retries_a_concurrent_change_then_gives_up(store, monkeypatch, conflicts):
+    from redis.exceptions import WatchError
+
     item, answer = refused_answer(store)
     attempt = store._try_reopen
     calls = []
