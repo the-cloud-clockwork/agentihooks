@@ -70,7 +70,7 @@ def settings(environ: Mapping[str, str]) -> Settings:
 
 
 def authorized(header: str | None, token: str) -> bool:
-    return bool(token) and hmac.compare_digest((header or "").encode(), f"Bearer {token}".encode())
+    return bool(token) and hmac.compare_digest(str(header).encode(), f"Bearer {token}".encode())
 
 
 def _loopback(host: str) -> bool:
