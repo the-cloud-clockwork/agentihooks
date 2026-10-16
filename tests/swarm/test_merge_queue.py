@@ -190,6 +190,58 @@ def test_queue_waits_until_every_configured_check_exists(missing):
     assert not any("enqueuePullRequest(input:" in str(command) for command, _ in calls)
 
 
+@pytest.mark.parametrize("present", [True, False])
+def test_queue_reads_classic_branch_requirements(present):
+    response = checked_resource()
+    check = response["data"]["resource"]["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"]["nodes"][0]
+    check["name"] = "Legacy required" if present else "Different required"
+    original, calls = runner(
+        {"data": {"resource": OPEN}},
+        response,
+        {"data": {}},
+        {"data": {"resource": {**OPEN, "mergeQueueEntry": ENTRY}}},
+    )
+
+    def run(command, **kwargs):
+        if command[2] == "repos/o/r/rules/branches/dev":
+            return subprocess.CompletedProcess(command, 0, "[]")
+        if command[2] == "graphql" and command[4] == f"query={merge_queue.FRESHNESS}":
+            metadata = {
+                "baseRefName": "dev",
+                "repository": {"nameWithOwner": "o/r"},
+                "baseRef": {"branchProtectionRule": {"requiredStatusCheckContexts": ["Legacy required"]}},
+            }
+            return subprocess.CompletedProcess(command, 0, json.dumps({"data": {"resource": metadata}}))
+        return original(command, **kwargs)
+
+    if present:
+        assert merge_queue.operate("queue", URL, run)["queued"]
+    else:
+        with pytest.raises(SwarmError, match="required checks"):
+            merge_queue.operate("queue", URL, run)
+        assert not any("enqueuePullRequest(input:" in str(command) for command, _ in calls)
+
+
+def test_queue_allows_a_repository_with_no_required_checks():
+    response = checked_resource()
+    checks = response["data"]["resource"]["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"]["nodes"]
+    for check in checks:
+        check["isRequired"] = False
+    original, _ = runner(
+        {"data": {"resource": OPEN}},
+        response,
+        {"data": {}},
+        {"data": {"resource": {**OPEN, "mergeQueueEntry": ENTRY}}},
+    )
+
+    def run(command, **kwargs):
+        if command[2] == "repos/o/r/rules/branches/dev":
+            return subprocess.CompletedProcess(command, 0, "[]")
+        return original(command, **kwargs)
+
+    assert merge_queue.operate("queue", URL, run)["queued"]
+
+
 @pytest.fixture(autouse=True)
 def task_ledger(monkeypatch):
     from types import SimpleNamespace
