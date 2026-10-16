@@ -123,6 +123,7 @@ from scripts.swarm.ledger_client import LedgerClient, LedgerGone, LedgerRefused
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.status import auto_snapshot, findings, live_agents, status_report, task_counts, verdict_store
 from scripts.swarm.store import (
+    APP_SERVER_TRANSPORT,
     ASSIST,
     AUTO_SCALING,
     AUTONOMY,
@@ -470,6 +471,7 @@ def cmd_create(store, args):
         links=template.links,
         autonomy=template.autonomy or DELEGATE,
         scratch=not ledger_creator.shared(os.environ),
+        codex_inbox_transport=APP_SERVER_TRANSPORT,
     )
     store.create(config)
     from scripts.swarm import commands

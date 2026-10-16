@@ -25,4 +25,5 @@ Complete reference documentation for configuration and CLI commands.
 | [WSL disk reclaim](wsl-disk.md) | Sparse VHDX so space `agentihooks gc` frees returns to Windows; why `/tmp` empties on WSL |
 | [CODEX-COMPAT](CODEX-COMPAT.md) | The `codex` install target: hook contract, surface map, divergences |
 | [Managed Codex terminals](codex-managed-terminal.md) | Transport selection, herdr viewer reopening, push master inbox duties, handoffs and attachment failures |
+| [Codex inbox transport](codex-inbox-transport.md) | The `app_server` default, the Claude inbox channel against broadcast topics and Bun plugins, qualified versions, canary order, failure diagnosis and rollback |
 | [COPILOT-COMPAT](COPILOT-COMPAT.md) | The `copilot` install target: hook contract, surface map, divergences |
