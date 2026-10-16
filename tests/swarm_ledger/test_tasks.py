@@ -72,6 +72,31 @@ class Tasks(unittest.TestCase):
             ("done", "smoke-eng-1", "https://github.com/o/r/pull/2", True),
         )
 
+    def test_review_history_records_pull_request_identity_and_parking(self):
+        make_ledger([{"title": "a", "phase": "p1", "lane": "eng"}, {"title": "dependency", "phase": "p1"}])
+        first, second = "https://github.com/o/r/pull/1", "https://github.com/o/r/pull/2"
+        changes = [
+            {"state": "pr", "pr_url": first, "branch": "first"},
+            {"pr_url": second, "branch": "second"},
+            {"parked_on": ["t2"], "stacked_base": "origin/first"},
+            {"parked_on": []},
+        ]
+        for index, fields in enumerate(changes):
+            state, rejected = core.sync(SLUG, ops=[op("task_update", index, item="tasks/t1", fields=fields)])
+            self.assertEqual(rejected, [])
+        found = [
+            event for event in state["_meta"]["events"] if event["kind"] in ("task pr", "task parked", "task unparked")
+        ]
+        self.assertEqual(
+            [(event["kind"], event.get("pr_url"), event.get("branch")) for event in found],
+            [
+                ("task pr", first, "first"),
+                ("task pr", second, "second"),
+                ("task parked", None, None),
+                ("task unparked", None, None),
+            ],
+        )
+
     def test_task_update_rewrites_the_description(self):
         make_ledger([{"title": "a", "phase": "p1", "lane": "eng", "description": "old spec"}])
         update = op("task_update", 1, item="tasks/t1", fields={"description": "new spec"})
