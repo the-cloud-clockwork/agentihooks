@@ -16,6 +16,8 @@ PRODUCERS = (
     ".github/workflows/mutation-preflight.yml",
     ".github/workflows/test.yml",
     ".github/actions/",
+    ".github/test-excludes.txt",
+    "pyproject.toml",
     "scripts/ci_mutation/",
 )
 

@@ -1109,6 +1109,7 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
     reused = steps["Download the reused preflight report"]
     assert reused["if"] == "needs.mutation-plan.outputs.reused == 'true'"
     assert reused["with"] == {"name": "mutation-preflight-reuse", "path": ".mutation-gate"}
-    order = list(steps)
-    assert order.index("Download the reused preflight report") < order.index("Upload complete mutation evidence")
+    shard_order = list(steps)
+    reused_index = shard_order.index("Download the reused preflight report")
+    assert reused_index < shard_order.index("Upload complete mutation evidence")
     assert steps["Upload complete mutation evidence"]["if"] == "always()"
