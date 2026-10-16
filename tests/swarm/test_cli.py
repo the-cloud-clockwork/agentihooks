@@ -982,20 +982,26 @@ def test_timer_reconcile_installs_a_newly_added_service_and_leaves_current_units
 
     def run(argv, **kw):
         calls.append((argv, kw))
-        return subprocess.CompletedProcess(argv, 1 if argv[2] in failing else 0)
+        return subprocess.CompletedProcess(argv, 1 if failing & {argv[2], argv[-1]} else 0)
 
     kw = {"capture_output": True, "text": True, "timeout": 30}
     enable = lambda name: (["systemctl", "--user", "enable", "--now", name], kw)  # noqa: E731
     assert timer.ensure("/bin/agentihooks", tmp_path, run=run)
     calls.clear()
     assert timer.reconcile("/bin/agentihooks", tmp_path, run=run)
-    services = ["agentihooks-inbox-waker.service", "agentihooks-alert-intake.service"]
-    assert calls == [(["systemctl", "--user", "is-enabled", "--quiet", *services, "agentihooks-swarm.timer"], kw)]
+    names = ["agentihooks-inbox-waker.service", "agentihooks-alert-intake.service", "agentihooks-swarm.timer"]
+    assert calls == [(["systemctl", "--user", "is-enabled", "--quiet", name], kw) for name in names]
 
     calls.clear()
     failing.add("is-enabled")
     assert timer.reconcile("/bin/agentihooks", tmp_path, run=run)
     assert [call[0][2] for call in calls] == ["is-enabled", "enable", "enable", "enable"]
+
+    calls.clear()
+    failing.clear()
+    failing.add(names[1])
+    assert timer.reconcile("/bin/agentihooks", tmp_path, run=run) is False
+    assert [call[0][2] for call in calls] == ["is-enabled", "is-enabled", "enable", "enable", "enable"]
     failing.clear()
 
     calls.clear()

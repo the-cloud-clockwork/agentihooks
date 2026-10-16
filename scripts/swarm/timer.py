@@ -88,17 +88,19 @@ def ensure(binary, unit_dir=None, run=subprocess.run):
             changed = True
     if changed:
         run(["systemctl", "--user", "daemon-reload"], capture_output=True, text=True, timeout=30, check=False)
-    for name in _services(binary):
+    procs = [
         run(["systemctl", "--user", "enable", "--now", name], capture_output=True, text=True, timeout=30)
-    proc = run(["systemctl", "--user", "enable", "--now", f"{UNIT}.timer"], capture_output=True, text=True, timeout=30)
-    return proc.returncode == 0
+        for name in [*_services(binary), f"{UNIT}.timer"]
+    ]
+    return all(proc.returncode == 0 for proc in procs)
 
 
 def reconcile(binary, unit_dir=None, run=subprocess.run):
     unit_dir = unit_dir or UNIT_DIR
     if all(_current(unit_dir / name, text) for name, text in units(binary).items()):
-        enabled = ["systemctl", "--user", "is-enabled", "--quiet", *_services(binary), f"{UNIT}.timer"]
-        if run(enabled, capture_output=True, text=True, timeout=30).returncode == 0:
+        names = [*_services(binary), f"{UNIT}.timer"]
+        enabled = ["systemctl", "--user", "is-enabled", "--quiet"]
+        if all(run([*enabled, name], capture_output=True, text=True, timeout=30).returncode == 0 for name in names):
             return True
     return ensure(binary, unit_dir, run)
 
