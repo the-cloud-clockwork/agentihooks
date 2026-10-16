@@ -295,3 +295,14 @@ def test_a_seat_that_leaves_the_count_drops_its_failures(store):
     MasterSeats(store.redis).set_count("sw", 2)
     tick("sw", store, ledger, runtime, 3)
     assert _seat_notes(ledger) == []
+
+
+def test_a_seat_that_leaves_the_count_after_its_alarm_closes_the_alarm(store):
+    ledger, runtime = _seat_two_down(store)
+    tick("sw", store, ledger, runtime, 1)
+    tick("sw", store, ledger, runtime, 2)
+    MasterSeats(store.redis).set_count("sw", 1)
+    closed = tick("sw", store, ledger, runtime, 3)
+    assert _seat_notes(ledger)[1:] == [master_seat_alarm.RETIRED.format(address="master-2@sw")]
+    assert "closed the launch alarm of retired master seat master-2@sw" in closed
+    assert store.redis.hgetall(store.key("sw", master_seat_alarm.KEY)) == {}

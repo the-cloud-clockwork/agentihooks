@@ -14,6 +14,7 @@ DOWN = (
     "error: {error}. Operator action is required."
 )
 BACK = "Master seat {address} is live again after its failed launches and answers the phases it owns: {held}."
+RETIRED = "Master seat {address} left the master count, so its launch alarm needs no operator action any more."
 
 
 def failed(store, slug: str, seat_name: str, error: str) -> None:
@@ -38,6 +39,9 @@ def run(slug: str, store, ledger, runtime, doc: dict) -> list[str]:
         address = seat_address(slug, seat_name)
         held = _held(owners, address)
         if address not in counted:
+            if state.get("alerted"):
+                ledger.notify(slug, RETIRED.format(address=address))
+                actions.append(f"closed the launch alarm of retired master seat {address}")
             store.redis.hdel(key, seat_name)
         elif address in bound:
             if state.get("alerted"):
