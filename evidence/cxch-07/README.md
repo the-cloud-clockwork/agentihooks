@@ -1,6 +1,8 @@
 # CXCH-07 live proof: herdr and the push-mode master
 
-Two runs on 2026-10-16 against branch head `03fd0e89` (the task branch merged with dev `a20cba82`). Run 2 (15:35 to 15:41 UTC, `raw/run2/`) is the proof of record. Run 1 (15:23 to 15:29 UTC, `raw/run1/`) passed the same rows using engineer inbox messages in place of ledger chat lines.
+Two runs on 2026-10-16 against branch head `03fd0e89` (the task branch merged with dev `a20cba82`). CI: focused Proofs run 38926773721 on head `55030969` (attach, lifecycle, managed lifecycle and viewer, push master, rename, resume, herdr host, init agent suites); the pull request checks grade the final head.
+
+Commits after the proof change no reopen behaviour: the `typed_wake` docstring is removed, `_viewer_lines` reads `environ.get("AGENTIHOOKS_SWARM") or ""` in place of `environ.get("AGENTIHOOKS_SWARM", "")` (the same value for every string environment), and the rest are tests, clearances and evidence. Run 2 (15:35 to 15:41 UTC, `raw/run2/`) is the proof of record. Run 1 (15:23 to 15:29 UTC, `raw/run1/`) passed the same rows using engineer inbox messages in place of ledger chat lines.
 
 ## Fixture
 
@@ -29,5 +31,6 @@ Two runs on 2026-10-16 against branch head `03fd0e89` (the task branch merged wi
 ## Known issues (filed as follow-ups, outside this change)
 
 - The launch names the Codex session by typing `/rename` in the viewer. The server starts the first turn on its own, so the rename lands mid-turn and stays in the composer, and the thread keeps its default name.
-- A reopened viewer is not closed by retire. It shows `Reconnecting to server…` until its pane is closed, and the agent record keeps the launch pane id after a reopen.
-- Codex 0.163.0 was released between runs. The reopened viewer first showed Codex's interactive update prompt, which was skipped with Escape. The viewer launch does not suppress the update check.
+- A reopened viewer is not closed by retire. It shows `Reconnecting to server…` until its pane is closed (captured in `raw/run1/retire.txt`; in run 2 the viewer still showed the composer when read three seconds after retire, `raw/run2/retire.txt`). The agent record keeps the launch pane id after a reopen.
+- Codex 0.163.0 was released between runs. The run 2 reopened viewer first stopped at Codex's interactive update prompt (`Update available · 0.162.1 → 0.163.0`, options Update now, Skip, Skip until next version; herdr reported `"agent_status":"blocked"` in `raw/run2/row4-reopen.txt`). It was skipped with Escape. That pane read was overwritten by the history capture in `raw/run2/row4-pane.txt`. The viewer launch does not suppress the update check.
+- The shared Codex profile text still maps Monitor to `swarm wait --inbox` for long-running work. The push prompt overrides it (`never run … wait --inbox, even where your profile instructions describe that loop`). Row 5 covers a run with no long-running work, and the full rollout stays outside the repository because it carries the whole profile prompt.
