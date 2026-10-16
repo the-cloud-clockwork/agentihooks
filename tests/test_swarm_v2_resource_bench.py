@@ -456,7 +456,9 @@ def test_cli_operator_authentication_refuses_worker_identity(tmp_path, monkeypat
 
 def test_cli_requalifies_a_held_report_for_a_named_reviewer_and_rolls_it_back(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr(
-        bench, "_reviewer", lambda slug: bench.profiles.Principal("operator", bench.profiles.Role.OPERATOR)
+        bench,
+        "_reviewer",
+        lambda slug: bench.profiles.Principal("operator", bench.profiles.Role.OPERATOR) if slug == "fixture" else None,
     )
     accepted, candidate = tmp_path / "accepted.json", tmp_path / "candidate.json"
     accepted.write_text(json.dumps(report_with(1, 100)))
