@@ -164,6 +164,22 @@ def test_a_template_refusal_survives_the_absent_observation_of_restart_recovery(
     assert refusals[attempt.execution_id]["field"] == "harness"
 
 
+def test_a_controller_refused_spawn_names_its_reason_and_field_in_the_runtime_status():
+    world = cases.World()
+    with world.clocked():
+        controller, _ = world.controller()
+        assert controller.acquire()
+        attempt = world.admit(controller)
+        payload = world.request(controller, attempt).payload
+        squat(world, attempt)
+        task = {"id": "task", "execution_id": attempt.execution_id, "generation": attempt.generation}
+        outcome = KubernetesRuntime(controller.execute, lambda _: payload).spawn(
+            SpawnRequest(object(), "eng", attempt.name, task)
+        )
+    assert outcome.status is Status.REFUSED
+    assert outcome.detail.endswith(" is refused: mismatch on execution")
+
+
 def test_an_applied_spawn_clears_its_journaled_refusal():
     world = cases.World()
     with world.clocked():
