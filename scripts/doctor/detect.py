@@ -21,8 +21,7 @@ from scripts.doctor import (
 )
 from scripts.inbox import wake
 from scripts.inbox.store import InboxStore
-from scripts.swarm import idle
-from scripts.swarm import status, timing
+from scripts.swarm import idle, status, timing
 from scripts.swarm.health import activity
 from scripts.swarm.runtime import SWARM_HOME
 
