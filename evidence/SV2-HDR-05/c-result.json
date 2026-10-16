@@ -14,7 +14,7 @@
       "an_unreachable_reconnect_is_refused_not_replaced": true,
       "durable_journal_records_the_delivery_once": true,
       "independent_repeat_identical": true,
-      "latency_measured_on_the_fixture_clock": false,
+      "latency_measured_on_the_fixture_clock": true,
       "nothing_launched_stopped_or_closed": true,
       "reconnect_attaches_the_original_pane_and_conversation": true,
       "reconnect_only_reads": true,
@@ -124,5 +124,5 @@
     },
     "second_identical": true
   },
-  "state": "failed"
+  "state": "passed"
 }
