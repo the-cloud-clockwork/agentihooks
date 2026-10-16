@@ -493,7 +493,7 @@ def test_the_report_names_sequential_container_image_pulls_with_their_own_durati
     ]
     assert sample["stages"]["image"] == 32000
     result = stages.report([sample])
-    assert result["scenarios"]["cold-node/uncached-image"]["image_pulls"] == [
+    assert result["scenarios"]["warm-node/uncached-image"]["image_pulls"] == [
         {"container": "bundle", "image": "registry/bundle:release", "duration_ms": {"n": 1, "p50": 2000, "p95": 2000}},
         {
             "container": "worker",
@@ -502,8 +502,8 @@ def test_the_report_names_sequential_container_image_pulls_with_their_own_durati
         },
     ]
     rendered = bench.markdown(result, "sequential pulls")
-    assert "| cold-node/uncached-image | bundle | registry/bundle:release | 2.0 / 2.0 (n 1) |" in rendered
-    assert "| cold-node/uncached-image | worker | registry/worker:release | 30.0 / 30.0 (n 1) |" in rendered
+    assert "| warm-node/uncached-image | bundle | registry/bundle:release | 2.0 / 2.0 (n 1) |" in rendered
+    assert "| warm-node/uncached-image | worker | registry/worker:release | 30.0 / 30.0 (n 1) |" in rendered
 
 
 def test_scale_ups_are_deduplicated_across_pods_and_ordered_per_group():
