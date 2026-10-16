@@ -10,7 +10,7 @@ import json
 
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import CLOSED, InboxStore
-from scripts.swarm import metrics, metrics_outbox
+from scripts.swarm import metrics_outbox
 from scripts.swarm.store import MASTER
 from scripts.swarm_v2 import master_fill, masters
 from scripts.swarm_v2.masters_channel import SWARM, MastersChannel
@@ -156,6 +156,8 @@ def _withdraw_asks(store, retiring):
 
 
 def _measure(slug, metric, value, seat, now_ms):
+    from scripts.swarm import metrics
+
     row = {
         "event_id": f"master-scaling:{slug}:{metric}:{seat}:{now_ms}:{value}",
         "ledger": slug,
