@@ -22,6 +22,7 @@ from scripts.swarm import (
     lifetime,
     priority_sweep,
     seat_spawn,
+    stage_cover,
     templates,
 )
 from scripts.swarm.store import DISPATCH, FULL
@@ -104,7 +105,14 @@ def line(trigger: dict) -> str:
 
 def open_triggers(slug: str, config, store, doc: dict, now_ms: int, sleeping: bool) -> list[dict]:
     active = config.autonomy == FULL and config.state not in ENDED_STATES and not sleeping
-    return triggers(doc, now_ms) + uncovered(store, slug, now_ms) + red_dev(store, slug, doc) if active else []
+    if not active:
+        return []
+    held = [
+        trigger
+        for trigger in uncovered(store, slug, now_ms)
+        if not stage_cover.covered(store, slug, doc, trigger["id"].partition(":")[2])
+    ]
+    return triggers(doc, now_ms) + held + red_dev(store, slug, doc)
 
 
 def refusal(slug: str, config, store, doc: dict, now_ms: int) -> str:
