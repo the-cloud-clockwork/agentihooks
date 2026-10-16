@@ -65,14 +65,14 @@ def test_seed_task_ranks_are_refused_before_creation(ledger_dir, rank):
 
     assert new_ledger.check(content) == [reason]
     with pytest.raises(SystemExit) as rejected:
-        new_ledger.create(SLUG, content)
+        new_ledger.create("ranked-seed", content)
     assert str(rejected.value) == f"content rejected:\n  {reason}"
-    assert not new_ledger.repository.exists(SLUG)
+    assert not new_ledger.repository.exists("ranked-seed")
 
 
 def test_unranked_seed_tasks_can_be_created(ledger_dir):
-    assert new_ledger.create(SLUG, {**CONTENT, "tasks": [{"title": "a", "phase": "p1"}]}) is True
-    stored = new_ledger.repository.export_document(SLUG)
+    assert new_ledger.create("unranked-seed", {**CONTENT, "tasks": [{"title": "a", "phase": "p1"}]}) is True
+    stored = new_ledger.repository.export_document("unranked-seed")
     assert stored["tasks"][0]["title"] == "a"
     assert "rank" not in stored["tasks"][0]
 
