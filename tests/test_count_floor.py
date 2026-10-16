@@ -311,8 +311,17 @@ def _lose_branch_tests(tmp_path, base_source: str, head_sources: dict[str, str])
     )
 
 
-def test_a_lost_test_whose_keyword_branch_the_head_deletes_is_admitted(tmp_path):
-    result = _lose_branch_tests(tmp_path, BRANCHED, _package(mod=RETAINED))
+@pytest.mark.parametrize(
+    "base",
+    [
+        BRANCHED,
+        'def steps(queue=False, selected=False):\n    return "plain queue" if queue else "plain"\n',
+        'def steps(queue=False, selected=False):\n    while queue:\n        return "plain queue"\n    return "plain"\n',
+    ],
+    ids=["if", "conditional", "while"],
+)
+def test_a_lost_test_whose_keyword_branch_the_head_deletes_is_admitted(tmp_path, base):
+    result = _lose_branch_tests(tmp_path, base, _package(mod=RETAINED))
     assert result.returncode == 1
     assert "tests/test_mod.py::test_queue is admitted: the head deletes pkg.mod.steps(queue), which it referenced" in (
         result.stdout
