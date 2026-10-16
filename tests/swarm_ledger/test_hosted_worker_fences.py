@@ -1,4 +1,3 @@
-
 import pytest
 
 from scripts.swarm_ledger.api import mutations, schemas, worker_writes
