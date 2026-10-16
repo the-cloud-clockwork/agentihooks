@@ -45,6 +45,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Launch checks report unavailable process observations without inventing profile,
+  settings, base role or overlay mismatches; observed mismatches and join failures
+  remain visible.
 - Judged bottleneck stage findings return only when current stage load grows,
   instead of when the cumulative fired count increases.
 - Ledger task set accepts split pull request addresses as comma or JSON lists.
