@@ -271,6 +271,7 @@ def test_the_merge_wait_rereads_only_an_open_pull_request_the_queue_does_not_lis
     assert waits.resolution(on, {}, None, {URL: pull}.get, {URL: fresh}.get, False) == outcome
     assert on == {"kind": "merge", "target": URL, **({"queued": True} if pull is LISTED else {})}
 
+
 @pytest.mark.parametrize(
     "current, expected",
     [
