@@ -953,6 +953,12 @@ def _gate(steps, needs, event="merge_group"):
     return subprocess.run(["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True)
 
 
+def test_queue_gate_keeps_legacy_duration_admission_by_default():
+    implicit = ci_reuse.gate_steps(queue_tier=True)
+    assert implicit == ci_reuse.gate_steps(queue_tier=True, consolidated=False)
+    assert implicit != ci_reuse.gate_steps(queue_tier=True, consolidated=True)
+
+
 @pytest.mark.parametrize("event", ["merge_group", "pull_request"])
 @pytest.mark.parametrize("promotion", [False, True])
 @pytest.mark.parametrize("admission", ["success", "failure", "skipped", "cancelled", None])
