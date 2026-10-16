@@ -67,6 +67,7 @@ def wanted(rule: str, agents: list) -> int:
 def run(slug: str, config, store, runtime, doc: dict, now_ms: int) -> list[str]:
     seats, found = masters.MasterSeats(store.redis), rule(store.redis, slug)
     if not found or config.state in ENDED:
+        seats.keep_retired(slug, seats.count(slug), seats.count(slug))
         return master_fill.run(slug, config, store, runtime, doc, now_ms)
     agents = [a for a in store.agents(slug) if a.state != "finished"]
     want = wanted(found, agents)
@@ -77,9 +78,10 @@ def run(slug: str, config, store, runtime, doc: dict, now_ms: int) -> list[str]:
 def _resize(slug, store, doc, agents, count, want, now_ms):
     key = masters.MasterSeats(store.redis).key(slug)
     retiring = json.loads(store.redis.hget(key, RETIRING) or "{}")
+    masters.MasterSeats(store.redis).keep_retired(slug, want, count)
     if want >= count:
         _withdraw_asks(store, retiring)
-        store.redis.hdel(key, BELOW, RETIRING, masters.RETIRED)
+        store.redis.hdel(key, BELOW, RETIRING)
         return _recount(slug, store, doc, agents, count, want, now_ms) if want > count else []
     below = int(store.redis.hget(key, BELOW) or 0)
     if not below:
@@ -139,11 +141,12 @@ def _retire(slug, store, address, asked, now_ms):
 
 def _retire_early(slug, store, doc, address, asked, now_ms):
     """A seat below a live higher seat stays counted; its phases move to the remaining seats in the same step."""
-    action, seats = _retire(slug, store, address, asked, now_ms), masters.MasterSeats(store.redis)
+    action = _retire(slug, store, address, asked, now_ms)
+    seats = masters.MasterSeats(store.redis)
     owned = [p for p, owner in seats.owners(slug, doc).items() if owner == address]
     seats.retire(slug, address)
     owners = seats.owners(slug, doc)
-    moved = ", ".join(f"{p} to {owners[p]}" for p in owned)
+    moved = ", ".join(f"{p} to {owners.get(p, _address(slug, 1))}" for p in owned)
     text = EARLY.format(address=address, moved=moved) if owned else EARLY_EMPTY.format(address=address)
     MastersChannel(store.redis).announce(slug, text, now_ms / 1000)
     return action

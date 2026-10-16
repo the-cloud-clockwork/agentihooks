@@ -290,6 +290,45 @@ def test_a_lower_count_forgets_a_retired_seat_it_no_longer_holds(swarm):
     assert owners(store) and set(owners(store).values()) == {LEAD, THIRD}
 
 
+def test_a_partial_regrowth_refills_a_retired_seat_it_now_wants_with_an_even_share(swarm):
+    store, runtime = swarm
+    second, _, _ = asked(swarm)
+    hand_off(store, runtime, second)
+    run(store, runtime, NOW + 2 * MINUTE + HOLD)
+
+    staffed(store, 10)
+    actions = run(store, runtime, NOW + 3 * MINUTE + HOLD)
+
+    assert masters.MasterSeats(store.redis).retired(SLUG) == []
+    assert any(action.endswith(f"in seat {SECOND}") for action in actions)
+    assert Counter(owners(store).values())[SECOND] == len(PHASES) // 4
+
+
+def test_turning_the_rule_off_refills_a_retired_seat_with_its_phases(swarm):
+    store, runtime = swarm
+    seats = masters.MasterSeats(store.redis)
+    seats.set_count(SLUG, 4)
+    seats.retire(SLUG, SECOND)
+    master_scale.set_rule(store.redis, SLUG, "")
+
+    run(store, runtime)
+
+    assert seats.retired(SLUG) == []
+    assert SECOND in owners(store).values()
+
+
+def test_an_early_retired_seat_hands_its_hive_back_to_the_lead(swarm):
+    store, _ = swarm
+    seats = masters.MasterSeats(store.redis)
+    seats.set_count(SLUG, 4)
+    seats.own_hive(SLUG, "h1", THIRD)
+
+    master_scale._retire_early(SLUG, store, DOC, THIRD, [NOW, "none"], NOW + MINUTE)
+
+    assert THIRD not in owners(store).values()
+    assert posts(store)[-1].text.endswith(f"{masters.HIVES}/h1 to {LEAD}.")
+
+
 def test_an_early_retired_seat_that_owns_no_phase_says_so(swarm):
     store, _ = swarm
     empty = {**DOC, "phases": []}

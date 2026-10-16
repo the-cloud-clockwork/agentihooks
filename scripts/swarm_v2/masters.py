@@ -152,14 +152,17 @@ class MasterSeats:
 
     def set_count(self, slug: str, count: int) -> None:
         self.redis.hset(self.key(slug), "count", _checked(count))
-        held = [address for address in self.retired(slug) if address in seats(slug, count)]
+        self.keep_retired(slug, 0, count)
+
+    def keep_retired(self, slug: str, above: int, upto: int) -> None:
+        """A retired seat numbered at or below above is to be refilled, and one past upto is no longer counted."""
+        held = [address for address in self.retired(slug) if above < _number(slug, address) <= upto]
         if held:
             self.redis.hset(self.key(slug), RETIRED, json.dumps(held))
         else:
             self.redis.hdel(self.key(slug), RETIRED)
 
     def retire(self, slug: str, address: str) -> None:
-        """A retired seat below a live higher seat stays counted but owns no phase until the count falls past it."""
         held = self.retired(slug)
         if address not in held:
             self.redis.hset(self.key(slug), RETIRED, json.dumps([*held, address]))
