@@ -647,7 +647,7 @@ UNCOUNTED = {
         "a pane mutation needs an operation id",
     ),
     "journal_unreadable": (
-        lambda c, f, t: ((c.root / DELIVERIES).write_text("{"), c.router.send(t, "agent_prompt", "op", "x")),
+        lambda c, f, t: ((c.root / DELIVERIES).write_text("{"), c.router.settle("op", delivered=True)),
         "the pane delivery journal is unreadable",
     ),
     "not_pending": (
@@ -695,14 +695,63 @@ def test_resolve_expects_no_conversation_unless_one_is_named(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "text", ["{", "[]", '{"version": 2, "deliveries": {}}', '{"version": 1}', '{"version": 1, "deliveries": []}']
+    ("text", "reason"),
+    [
+        ("{", "JSONDecodeError: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"),
+        ("[]", "TypeError: list indices must be integers or slices, not str"),
+        ('{"version": 2, "deliveries": {}}', "ValueError: not a version 1 delivery journal"),
+        ('{"version": 1}', "KeyError: 'deliveries'"),
+        ('{"version": 1, "deliveries": []}', "ValueError: not a version 1 delivery journal"),
+    ],
 )
-def test_an_unreadable_journal_refuses_every_send(tmp_path, text):
+def test_an_unreadable_journal_is_set_aside_and_the_next_send_is_delivered(tmp_path, text, reason):
     client, fleet, desired = world(tmp_path)
+    found = resolved(client, desired[0])
+    client.router.clock = lambda: 1700000000.5
     (tmp_path / DELIVERIES).write_text(text)
-    reason = refusal(lambda: client.router.send(resolved(client, desired[0]), "agent_prompt", "op", "x"))[0]
-    assert reason == "journal_unreadable"
+    client.router.send(found, "agent_prompt", "op", "x")
+    assert fleet.received()[EXE_A] == ["x"]
+    aside = tmp_path / f"{DELIVERIES}.unreadable-1700000000"
+    assert aside.read_text() == text
+    assert json.loads((tmp_path / DELIVERIES).read_text())["deliveries"] == {
+        "op": {"target": f"{found.incarnation}/{PANE}", "state": "sent"}
+    }
+    record = tmp_path / f"{DELIVERIES}.set-aside.jsonl"
+    assert [json.loads(line) for line in record.read_text().splitlines()] == [
+        {"at": 1700000000, "file": aside.name, "reason": reason}
+    ]
+    assert record.stat().st_mode & 0o777 == 0o600
+
+
+def test_a_second_unreadable_journal_appends_its_own_record(tmp_path):
+    client, fleet, desired = world(tmp_path)
+    found = resolved(client, desired[0])
+    times = iter([100.0, 200.0])
+    client.router.clock = lambda: next(times)
+    for number in range(2):
+        (tmp_path / DELIVERIES).write_text("{")
+        client.router.send(found, "agent_prompt", f"op-{number}", f"m{number}")
+    assert fleet.received()[EXE_A] == ["m0", "m1"]
+    record = (tmp_path / f"{DELIVERIES}.set-aside.jsonl").read_text().splitlines()
+    assert [json.loads(line)["file"] for line in record] == [
+        f"{DELIVERIES}.unreadable-100",
+        f"{DELIVERIES}.unreadable-200",
+    ]
+
+
+def test_a_journal_that_cannot_be_set_aside_still_refuses_the_send(tmp_path, monkeypatch):
+    client, fleet, desired = world(tmp_path)
+    (tmp_path / DELIVERIES).write_text("{")
+
+    def refuse(self, target):
+        raise PermissionError(target)
+
+    monkeypatch.setattr(Path, "replace", refuse)
+    reason = refusal(lambda: client.router.send(resolved(client, desired[0]), "agent_prompt", "op", "x"))
+    assert reason == ("journal_unreadable", "the pane delivery journal is unreadable")
     assert fleet.mutations() == []
+    assert (tmp_path / DELIVERIES).read_text() == "{"
+    assert not (tmp_path / f"{DELIVERIES}.set-aside.jsonl").exists()
 
 
 def test_the_journal_is_private_and_versioned(tmp_path):
