@@ -43,12 +43,8 @@ def graphql(query: str, variables: dict, run=subprocess.run) -> dict:
         raise SwarmError(f"GitHub API: {exc}") from exc
 
 
-def rest(path: str, run, fields: dict | None = None) -> dict | str:
+def rest(path: str, run) -> dict | str:
     command = ["gh", "api", path]
-    if fields is not None:
-        command += ["--method", "PUT"]
-        for name, value in fields.items():
-            command += ["-f", f"{name}={value}"]
     try:
         done = run(command, capture_output=True, text=True, timeout=20)
         if done.returncode:
