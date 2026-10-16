@@ -359,8 +359,9 @@ released by the reset itself.
 
 ## Quota usage banner
 
-Claude Code sessions see their own remaining quota in an `ATTENTION TO QOUTA
-USAGE` banner, built by `hooks/context/quota_usage.py`:
+Claude Code sessions see their own remaining quota in a banner built by
+`hooks/context/quota_usage.py`. Its title, `ATTENTION TO QOUTA USAGE`, is
+printed with that spelling:
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════════╗
@@ -387,9 +388,11 @@ Where the numbers come from, first match wins:
    `~/.agentihooks/claude-router-cache.json`.
 
 A reading older than `QUOTA_USAGE_STALE_SEC` is ignored. With no fresh reading,
-or a reading missing either window, no banner is shown. A reset time under an
-hour prints as `resets in 42m`, under a day as `resets in 1h59m`, and later as
-the UTC weekday and time.
+or a reading missing either window, no banner is shown; a fresh snapshot missing
+a window also keeps the router cache from being read. A reset time under an
+hour prints as `resets in 42m`, under a day as `resets in 1h59m`, later as the
+UTC weekday and time, and as `reset unknown` when the reading has no reset
+time.
 
 Turn the banner off with `QUOTA_USAGE_INJECTION_ENABLED=false`, or change its
 cadence, in the shell before the session starts or in `~/.agentihooks/.env`:
@@ -411,7 +414,10 @@ that changes the cadence patches both with `monkeypatch`, so teardown restores
 each module's own value:
 
 ```python
-monkeypatch.setattr("hooks.context.quota_usage.QUOTA_USAGE_TOOL_CALLS", 1)
+import hooks.config as config
+import hooks.context.quota_usage as quota_usage
+
+monkeypatch.setattr(quota_usage, "QUOTA_USAGE_TOOL_CALLS", 1)
 monkeypatch.setattr(config, "QUOTA_USAGE_TOOL_CALLS", 1)
 ```
 
@@ -424,11 +430,10 @@ monkeypatch.setattr(quota_usage, "QUOTA_USAGE_TOOL_CALLS", 5)
 
 `test_banner_renders_requested_cadence_after_injection_tests_patch_it` in
 `tests/test_quota_usage.py` guards this. It runs the injection kinds test that
-patches the cadence to 1, then the banner rendering test, in one fresh
-interpreter with xdist and the pytest cache off, and passes only when both
-exit 0. Before the isolation, that order rendered `Shown every 1 tool calls`
-and failed the banner test on unrelated pull requests whenever a CI shard
-happened to run the two tests in that order.
+patches the cadence to 1, then the banner rendering test, both in one
+subprocess interpreter with the xdist and cache plugins disabled, and passes
+only when both exit 0. The banner test's result therefore does not depend on
+which tests a CI shard ran before it.
 
 ## Early swarm quota warnings
 
@@ -724,7 +729,7 @@ on becomes the refresh authority.
 | `AGENTIHOOKS_HANDOFF_MIN_LEFT` | `20` | Routing left % a handoff target needs |
 | `AGENTIHOOKS_WAIT_MIN_WEEK_LEFT` | `10` | 7-day left % that makes a spent 5h window wait instead of stop |
 | `QUOTA_POLICY_ENABLED` | `true` | Turn the quota policy off |
-| `QUOTA_USAGE_INJECTION_ENABLED` | `true` | Turn the quota usage banner off |
+| `QUOTA_USAGE_INJECTION_ENABLED` | `true` | Inject the quota usage banner on every prompt and on the tool call cadence |
 | `QUOTA_USAGE_TOOL_CALLS` | `5` | Tool calls between quota usage banners |
 | `QUOTA_USAGE_STALE_SEC` | `300` | Age in seconds after which a quota reading is ignored by the banner and the quota policy |
 
