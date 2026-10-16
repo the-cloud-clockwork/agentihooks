@@ -37,8 +37,6 @@ jobs:
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           permission-actions: read
-          permission-checks: read
-          permission-statuses: read
           permission-contents: read
           permission-administration: read
           permission-organization-administration: read
