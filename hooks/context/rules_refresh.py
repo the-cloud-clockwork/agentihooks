@@ -4,8 +4,8 @@ When an operator runs `agentihooks refresh-rules`, a marker file is written
 containing the current rule content and a snapshot of session IDs that were
 alive at the time. On each session's next UserPromptSubmit, the hook checks
 the marker; if that session is in the pending list and runs from the profile
-home the marker was rendered from, it receives the rule payload as
-additionalContext. Either way it is removed from the list.
+home the marker was rendered from, it receives the rules collected from its
+own config home as additionalContext. Either way it is removed from the list.
 
 Properties:
 - Running sessions get the one-shot on their next prompt
@@ -170,10 +170,11 @@ def maybe_inject(session_id: str) -> None:
             continue
 
         payload = marker.get("payload", "")
-        if marker.get("home") != profile_home(claude_home()):
+        home = claude_home()
+        if marker.get("home") != profile_home(home):
             log("rules_refresh: other profile home skipped", {"profile": profile, "session_id": session_id})
         elif payload:
-            inject_context(payload)
+            inject_context(collect_profile_rules(home / "rules", home / "CLAUDE.md", home / "CLAUDE.local.md"))
             log(
                 "rules_refresh: delivered",
                 {"profile": profile, "session_id": session_id, "content_hash": marker.get("content_hash", "")},
