@@ -1,6 +1,7 @@
 import hashlib
 import json
 import subprocess
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -56,8 +57,8 @@ def repo(tmp_path, monkeypatch):
     return tmp_path
 
 
-def _key(repo, job="job", **kwargs):
-    return ci_input_key.key(job, registry=repo / "registry.json", day="2026-10-16", **kwargs)
+def _key(repo, job="job", base="", day="2026-10-16", **kwargs):
+    return ci_input_key.key(job, base, day, registry=repo / "registry.json", **kwargs)
 
 
 def test_an_unchanged_declared_input_keeps_the_key_and_an_undeclared_change_does_too(repo):
@@ -89,7 +90,7 @@ def test_the_job_tools_and_day_are_part_of_the_key(repo):
     registry["job"]["tools"] = ["python 3.13"]
     (repo / "registry.json").write_text(json.dumps(registry))
     assert _key(repo) != before
-    assert ci_input_key.key("job", registry=repo / "registry.json", day="2026-10-17") != _key(repo)
+    assert _key(repo, day="2026-10-17") != _key(repo)
     registry["other"] = registry["job"]
     (repo / "registry.json").write_text(json.dumps(registry))
     assert _key(repo, "other").removeprefix("input-pass-other-") != _key(repo).removeprefix("input-pass-job-")
@@ -142,31 +143,29 @@ def test_an_undeclared_job_cannot_key(repo):
         _key(repo, "nobody")
 
 
-def test_main_keys_the_runner_and_the_given_base_and_environment(repo, monkeypatch, capsys):
+class _Clock:
+    @staticmethod
+    def now(zone):
+        return datetime(2026, 10, 16, 23, 30, tzinfo=timezone.utc).astimezone(zone or timezone(timedelta(hours=2)))
+
+
+def test_main_keys_the_runner_the_utc_day_and_the_given_base_and_environment(repo, monkeypatch, capsys):
     registry = repo / ".github/input-keys.json"
     registry.write_text((repo / "registry.json").read_text())
     base = _git(repo, "rev-parse", "HEAD")
     _commit(repo, {"budget.txt": "2"})
-    runner = {
-        "RUNNER_OS": "Linux",
-        "RUNNER_ARCH": "X64",
-        "RUNNER_ENVIRONMENT": "self-hosted",
-        "ImageOS": "",
-        "ImageVersion": "7",
-    }
+    monkeypatch.setattr(ci_input_key, "datetime", _Clock)
+    runner = {"RUNNER_OS": "Linux", "RUNNER_ARCH": "X64", "RUNNER_ENVIRONMENT": "self-hosted", "ImageVersion": "7"}
     for name, value in runner.items():
         monkeypatch.setenv(name, value)
+    monkeypatch.delenv("ImageOS", raising=False)
     output = repo / "output.txt"
     output.write_text("before=1\n")
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     args = ["--job", "graded", "--base", base, "--environment", "redis=sha256:1"]
     assert ci_input_key.main(args) == 0
-    expected = ci_input_key.key(
-        "graded",
-        base=base,
-        registry=registry,
-        environment=("redis=sha256:1", *(f"{name}={value}" for name, value in runner.items())),
-    )
+    environment = ("redis=sha256:1", "ImageOS=", *(f"{name}={value}" for name, value in runner.items()))
+    expected = ci_input_key.key("graded", base, "2026-10-16", registry=registry, environment=environment)
     assert capsys.readouterr().out == f"key={expected}\n"
     assert output.read_text() == f"before=1\nkey={expected}\n"
     assert ci_input_key.main([*args[:3], "HEAD", *args[4:]]) == 0
@@ -174,6 +173,19 @@ def test_main_keys_the_runner_and_the_given_base_and_environment(repo, monkeypat
     monkeypatch.setenv("ImageVersion", "8")
     assert ci_input_key.main(args) == 0
     assert capsys.readouterr().out != f"key={expected}\n"
+    monkeypatch.delenv("GITHUB_OUTPUT")
+    assert ci_input_key.main(["--job", "job", "--base", ""]) == 0
+    plain = ci_input_key.key(
+        "job", "", "2026-10-16", registry=registry, environment=environment[1:5] + ("ImageVersion=8",)
+    )
+    assert capsys.readouterr().out == f"key={plain}\n"
+
+
+@pytest.mark.parametrize("args", [["--base", ""], ["--job", "job"]])
+def test_main_needs_the_job_and_an_explicit_base(repo, args):
+    with pytest.raises(SystemExit) as exit_info:
+        ci_input_key.main(args)
+    assert exit_info.value.code == 2
 
 
 def test_every_declared_input_exists_and_covers_its_own_workflow():
