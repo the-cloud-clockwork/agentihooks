@@ -5,7 +5,7 @@ import shutil
 import sys
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import asdict, dataclass, replace
 from typing import TYPE_CHECKING
 
@@ -13,6 +13,7 @@ from scripts import codex_router, session_bands
 from scripts.claude_quota_balancer import (
     MASTERS_ONLY,
     OPEN,
+    ProbeResult,
     QuotaWindow,
     _cap_text,
     _duration,
@@ -175,6 +176,12 @@ def codex_rows(
     return rows
 
 
+def without_routing(rows: list[QuotaRow], accounts: list) -> list[QuotaRow]:
+    """Accounts this environment holds no token for show their quota but take no routing share."""
+    names = {account.name for account in accounts}
+    return [replace(row, cap=None, routing_left=None) if row.account in names else row for row in rows]
+
+
 def next_account(pool: list, quotas: dict, sessions: dict[str, int], now: float, environ: dict[str, str]) -> str:
     """The account open placement would give the next launch, among accounts whose credential is not refused."""
     usable = [account for account in pool if not codex_router.refusal(account, environ)]
@@ -303,6 +310,13 @@ def with_masters(rows: list[QuotaRow], masters: dict[str, "MasterAccount"], sess
     return marked
 
 
+def router_environ(environ: MutableMapping[str, str]) -> MutableMapping[str, str]:
+    from scripts import operator_env
+
+    operator_env.fill(environ)
+    return environ
+
+
 def _claude(refresh: bool, timeout: float) -> list[QuotaRow]:
     from hooks.context.account_sessions import sessions_by_account
     from scripts.claude_quota_balancer import cached_observations, collect_results, discover_credentials
@@ -310,14 +324,14 @@ def _claude(refresh: bool, timeout: float) -> list[QuotaRow]:
     from scripts.routing.claude_api import ClaudeApiSource
 
     _load_claude_runtime_env()
-    credentials = discover_credentials(os.environ)
+    credentials = discover_credentials(router_environ(dict(os.environ)))
     sessions = sessions_by_account()
     if credentials:
         results, source = collect_results(
             credentials, refresh=refresh, timeout=timeout, claude_bin=shutil.which("claude") or "claude"
         )
     else:
-        results, source = [result for _, result in cached_observations()], "cached"
+        results, source = [], "cached"
     observed = {result.account: at for at, result in cached_observations()}
     rows = claude_rows(results, sessions, source, observed) + api_rows(ClaudeApiSource(sessions), "claude", time.time())
     return with_masters(rows, _masters("claude"), sessions)
@@ -330,8 +344,9 @@ def _codex(now: float) -> list[QuotaRow]:
 
     pool = codex_router.CodexAccountSource().pool(os.environ)
     sessions = codex_sessions_by_account()
-    quotas = codex_router.quotas(pool, os.environ)
-    rows = codex_rows(pool, quotas, sessions, now)
+    live = codex_router.live_accounts(pool, sessions)
+    quotas = codex_router.quotas(pool + live, os.environ)
+    rows = without_routing(codex_rows(pool + live, quotas, sessions, now), live)
     master = _masters("codex").get("codex")
     marked = [_mark(row, master) for row in rows + api_rows(CodexApiSource(sessions), "codex", now)]
     return mark_next(marked, next_account(pool, quotas, sessions, now, dict(os.environ)))
@@ -360,7 +375,12 @@ def current_table(
     seen.update({result.account: (now, result) for result in probed})
     observed = {account: at for account, (at, _) in seen.items()}
     results = [result for _, result in seen.values()]
+    results += [_unprobed(name) for name in sorted(names - seen.keys())]
     return balance_table(results, sessions, now, fable, current, observed)
+
+
+def _unprobed(account: str) -> ProbeResult:
+    return ProbeResult(account, "", "UNKNOWN", None, QuotaWindow(), QuotaWindow())
 
 
 def balance_table(
@@ -392,14 +412,22 @@ def _page_quota(now: float) -> dict:
     from scripts.routing.claude_api import ClaudeApiSource
     from scripts.routing.codex_api import CodexApiSource
 
-    cached = current_observations(claude_quota_balancer.cached_observations())
+    tokens = {
+        credential.account
+        for credential in claude_quota_balancer.discover_credentials(router_environ(dict(os.environ)))
+    }
+    cached = current_observations(
+        [(at, r) for at, r in claude_quota_balancer.cached_observations() if r.account in tokens]
+    )
     observed = {result.account: at for at, result in cached}
     pool = codex_router.CodexAccountSource().pool(os.environ)
     live = account_sessions.sessions_by_account()
     codex_live = account_sessions.codex_sessions_by_account()
+    elsewhere = codex_router.live_accounts(pool, codex_live)
+    quotas = codex_router.quotas(pool + elsewhere, os.environ)
     claude = claude_rows([result for _, result in cached], live, "cached", observed, now)
     claude += api_rows(ClaudeApiSource(live), "claude", now)
-    rows = claude + codex_rows(pool, codex_router.quotas(pool, os.environ), codex_live, now)
+    rows = claude + without_routing(codex_rows(pool + elsewhere, quotas, codex_live, now), elsewhere)
     rows += api_rows(CodexApiSource(codex_live), "codex", now)
     rows = with_masters(rows, _masters(), live)
     return {"probed_at": max(observed.values(), default=None), "rows": [asdict(row) for row in rows]}

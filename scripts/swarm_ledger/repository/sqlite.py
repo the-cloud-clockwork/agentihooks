@@ -377,6 +377,12 @@ class SQLiteLedgerRepository:
         return json.loads(written.text), rejected
 
     def _write(self, connection, slug: str, entry: Entry, state: dict, events: list) -> Entry:
+        meta, previous = state["_meta"], entry.state["_meta"]
+        meta["task_revision"] = (
+            meta["rev"]
+            if state.get("tasks", []) != entry.state.get("tasks", [])
+            else previous.get("task_revision", previous["rev"])
+        )
         before, after = diff(*(without_events(document) for document in (entry.state, state)))
         write_rows(connection, slug, before, after)
         hierarchy.sync(connection, slug, state)

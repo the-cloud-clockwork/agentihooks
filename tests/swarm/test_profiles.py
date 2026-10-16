@@ -132,6 +132,7 @@ def test_status_displays_profile_column_and_record_fields(monkeypatch, capsys):
         )
     ledger = FakeLedger([])
     monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
+    monkeypatch.setattr(status.HerdrRuntime, "live_names", lambda self: {"m", "e", "old"})
     cli.cmd_status(saved, SimpleNamespace(slug="sw", json=False))
     rows = [line.split("\t") for line in capsys.readouterr().out.splitlines() if "\t" in line]
     assert rows[0] == [

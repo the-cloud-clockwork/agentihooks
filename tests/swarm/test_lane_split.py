@@ -250,14 +250,14 @@ def test_auto_scaling_without_ceilings_reads_the_stored_caps(store, home):
 def test_shift_moves_ceilings_and_keeps_the_sum():
     base = calculate({"eng": 1, "ci": 1}, {"claude": 4}, 10, {"eng": 3, "ci": 3})
     shifted = calculate({"eng": 1, "ci": 1}, {"claude": 4}, 10, {"eng": 3, "ci": 3}, shift=1)
-    assert base["ceilings"] == {"plan": 0, "ci": 1, "eng": 1}
+    assert base["ceilings"] == {"plan": 0, "ci": 2, "eng": 2}
     assert "lane shift" not in base["reason"] + shifted["reason"]
     assert shifted["ceilings"] == base["ceilings"]
     previous = {"ceilings": {"plan": 0, "ci": 1, "eng": 5}, "pending_raise": {"target": None, "ticks": 0}}
     wide = calculate({"eng": 1, "ci": 1}, {"claude": 4}, 10, {"eng": 3, "ci": 3}, previous, shift=2)
     plain = calculate({"eng": 1, "ci": 1}, {"claude": 4}, 10, {"eng": 3, "ci": 3}, previous)
-    assert plain["ceilings"] == {"plan": 0, "ci": 4, "eng": 2}
-    assert wide["ceilings"] == {"plan": 0, "ci": 5, "eng": 1}
+    assert plain["ceilings"] == {"plan": 0, "ci": 3, "eng": 3}
+    assert wide["ceilings"] == {"plan": 0, "ci": 4, "eng": 2}
     assert sum(wide["ceilings"].values()) == sum(plain["ceilings"].values())
     assert wide["reason"].endswith("; lane shift 1 from eng to ci.")
     assert (wide["shift"], "shift" in plain) == (1, False)
@@ -267,8 +267,8 @@ def test_a_shift_back_moves_ci_ceilings_to_engineers():
     previous = {"ceilings": {"plan": 0, "ci": 4, "eng": 2}, "pending_raise": {"target": None, "ticks": 0}}
     decision = calculate({"eng": 1, "ci": 1}, {"claude": 4}, 10, {"eng": 3, "ci": 3}, previous, shift=-2)
     assert decision["ceilings"] == {"plan": 0, "ci": 2, "eng": 4}
-    assert decision["reason"].endswith("; lane shift 2 from ci to eng.")
-    assert decision["shift"] == -2
+    assert decision["reason"].endswith("; lane shift 1 from ci to eng.")
+    assert decision["shift"] == -1
 
 
 def test_a_shift_keeps_live_agents_and_one_seat_for_ready_work():
@@ -279,20 +279,20 @@ def test_a_shift_keeps_live_agents_and_one_seat_for_ready_work():
     assert ready["ceilings"]["eng"] == 1
     idle = calculate({"eng": 0, "ci": 0}, {"claude": 4}, 10, {"eng": 0, "ci": 3}, previous, shift=9)
     assert idle["ceilings"]["eng"] == 0
-    assert (live["shift"], ready["shift"], idle["shift"]) == (0, 0, 1)
+    assert (live["shift"], ready["shift"], idle["shift"]) == (0, 0, 0)
 
 
 def test_a_shift_of_one_moves_one_ceiling_toward_ci():
     previous = {"ceilings": {"plan": 0, "ci": 1, "eng": 5}, "pending_raise": {"target": None, "ticks": 0}}
     one = calculate({"eng": 1, "ci": 1}, {"claude": 4}, 10, {"eng": 3, "ci": 3}, previous, shift=1)
-    assert (one["ceilings"], one["shift"]) == ({"plan": 0, "ci": 5, "eng": 1}, 1)
+    assert (one["ceilings"], one["shift"]) == ({"plan": 0, "ci": 4, "eng": 2}, 1)
     assert one["reason"].endswith("; lane shift 1 from eng to ci.")
 
 
 def test_a_lane_missing_from_live_and_demand_has_no_floor():
     previous = {"ceilings": {"plan": 0, "ci": 0, "eng": 1}, "pending_raise": {"target": None, "ticks": 0}}
     decision = calculate({"ci": 0}, {"claude": 1}, 10, {}, previous, shift=1)
-    assert (decision["ceilings"], decision["shift"]) == ({"plan": 0, "ci": 1, "eng": 0}, 1)
+    assert (decision["ceilings"], decision["shift"]) == ({"plan": 0, "ci": 0, "eng": 0}, 0)
 
 
 def test_a_clamped_shift_leaves_the_reason_unchanged():

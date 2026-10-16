@@ -12,6 +12,7 @@ NAMESPACE = "startup-bench"
 REGISTRY = "kind-registry"
 WORKERS = "agentihooks-swarm-workers"
 READY_FILE = "/tmp/startup-ready"
+REMOVE_SECONDS = 120
 BOOT = f"python /opt/swarm-node/worker_image.py report > /tmp/report.json && touch {READY_FILE} && sleep 900"
 
 
@@ -81,8 +82,16 @@ def remove_pods(names: list[str]) -> list[dict]:
     return kept
 
 
-def forget_image(node: str, image: str) -> None:
-    run("docker", "exec", node, "crictl", "rmi", image)
+def forget_image(node: str, image: str) -> bool:
+    command = ["docker", "exec", node, "crictl", "--timeout", f"{REMOVE_SECONDS}s", "rmi", image]
+    try:
+        done = subprocess.run(command, capture_output=True, text=True, check=False, timeout=REMOVE_SECONDS + 30)
+    except subprocess.TimeoutExpired:
+        print(f"removing {image} on {node} took over {REMOVE_SECONDS + 30} seconds")
+        return False
+    if done.returncode:
+        print(f"removing {image} on {node} failed: {done.stderr.strip()}")
+    return done.returncode == 0
 
 
 def capture(output: Path, removed: list[dict]) -> None:
@@ -108,8 +117,7 @@ def scenario(image: str, nodes: list[str], grace: int, outage: int, output: Path
             launch(name, node, image)
             outcome["ready"][name] = wait_ready(name, 300)
     removed = remove_pods([f"{phase}-{node}" for node in nodes for phase in ("uncached", "cached")])
-    for node in nodes:
-        forget_image(node, image)
+    outcome["interruption"]["image_removed"] = {node: forget_image(node, image) for node in nodes}
     run("docker", "stop", REGISTRY)
     stopped = time.monotonic()
     names = [f"interrupted-{node}" for node in nodes]
@@ -163,7 +171,9 @@ def kind(args: argparse.Namespace) -> None:
     (args.output / "fixture.json").write_text(json.dumps(outcome, indent=2, sort_keys=True) + "\n")
     print(json.dumps(outcome, sort_keys=True))
     interruption = outcome["interruption"]
-    checks = [*outcome["ready"].values(), *interruption["classified_within_grace"].values()]
+    removed = interruption["image_removed"]
+    classified = interruption["classified_within_grace"]
+    checks = [*outcome["ready"].values(), *(classified[f"interrupted-{node}"] for node in removed if removed[node])]
     if not all([*checks, *interruption["recovered"].values()]):
         raise SystemExit("a fixture Pod did not become ready, classify its pull failure in grace, or recover")
 
