@@ -107,7 +107,7 @@ def _shard_files(config) -> frozenset[str]:
         measured = {
             node: seconds
             for node, seconds in durations.items()
-            if node.split("::", 1)[0] in files and node not in reused
+            if node.split("::", 1)[0] in files and re.sub(r"@[^\[\]]*$", "", node) not in reused
         }
         sizes = source_sizes(config.rootpath, files)
         parts = assign_nodes(measured, shards, grouped_files(config.rootpath, files), 4, sizes=sizes)

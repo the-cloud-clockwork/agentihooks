@@ -20,6 +20,7 @@ def _run(run_id, **changes):
         "head_branch": "dev",
         "head_sha": f"{run_id:040d}",
         "status": "completed",
+        "updated_at": f"2026-10-16T22:{run_id:02d}:00Z",
         "path": ".github/workflows/test.yml",
         "repository": {"full_name": REPOSITORY},
         **changes,
@@ -68,6 +69,12 @@ def test_the_newest_dev_run_whose_unit_shards_passed_and_kept_a_manifest_is_the_
     run, manifest = ci_test_plan.find_record(REPOSITORY)
     assert run["id"] == 1
     assert manifest["commit"] == f"{1:040d}"
+
+
+def test_every_interpreter_leg_ignores_dev_runs_that_finished_after_its_run_started(monkeypatch):
+    _github(monkeypatch, [_run(3), _run(1)], manifests={3: _manifest(3), 1: _manifest(1)})
+    assert ci_test_plan.find_record(REPOSITORY, "2026-10-16T22:02:00Z")[0]["id"] == 1
+    assert ci_test_plan.find_record(REPOSITORY, "2026-10-16T22:03:00Z")[0]["id"] == 3
 
 
 @pytest.mark.parametrize(

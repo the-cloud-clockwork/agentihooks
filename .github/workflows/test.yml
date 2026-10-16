@@ -717,9 +717,10 @@ jobs:
             echo "reused=0" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          before=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)
           cd "$RUNNER_TEMP/planner"
           "$PYTHON_PATH" -m scripts.ci_test_plan --repository "$GITHUB_REPOSITORY" --head "$GITHUB_SHA" \
-            --repo "$GITHUB_WORKSPACE" --out "$GITHUB_WORKSPACE/reused-tests.json"
+            --repo "$GITHUB_WORKSPACE" --before "$before" --out "$GITHUB_WORKSPACE/reused-tests.json"
 
       - name: Upload the test plan
         if: steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
@@ -1183,7 +1184,7 @@ jobs:
           ran=$(jq -s '[.[] | keys[] | sub("@[^\\[\\]]*$"; "")] | unique | length' shard-durations/*/durations.json)
           flaky=$(cat shard-flakes/*/flakes.jsonl 2> /dev/null | jq -s '[.[] | select(.outcome == "flaky")] | length')
           reused=0
-          source="no dev record"
+          source="no plan"
           if [[ -f "$PLAN" ]]; then
             reused=$(jq -n --slurpfile plan "$PLAN" --slurpfile collected collected-data/collected.json \
               '($collected[0] | map({(.): true}) | add // {}) as $set | [$plan[0].tests[] | select($set[.])] | length')

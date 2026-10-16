@@ -29,13 +29,13 @@ def _recorded(run: dict, repository: str) -> bool:
     )
 
 
-def find_record(repository: str) -> tuple[dict, dict] | None:
+def find_record(repository: str, before: str = "") -> tuple[dict, dict] | None:
     actions = f"repos/{repository}/actions"
     runs = json.loads(
         _api(f"{actions}/workflows/test.yml/runs?branch=dev&event=push&status=completed&per_page={CANDIDATES}")
     )["workflow_runs"]
     for run in runs:
-        if not _recorded(run, repository):
+        if not _recorded(run, repository) or (before and run["updated_at"] > before):
             continue
         artifacts = json.loads(_api(f"{actions}/runs/{run['id']}/artifacts?per_page=100"))["artifacts"]
         kept = [item for item in artifacts if item["name"] == "dep-manifest" and not item["expired"]]
@@ -59,8 +59,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--head", required=True)
     parser.add_argument("--repo", type=Path, default=Path.cwd())
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--before", default="", help="ignore dev runs that changed after this ISO time")
     args = parser.parse_args(argv)
-    found = find_record(args.repository)
+    found = find_record(args.repository, args.before)
     reused = 0
     if found is None:
         print(
