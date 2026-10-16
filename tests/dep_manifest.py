@@ -77,56 +77,49 @@ def _test_id(context: str) -> str:
     return context.rsplit("|", 1)[0]
 
 
-def build(coverage_file: Path, inputs: Path | None, root: Path, commit: str, environment: str) -> dict:
+def _executed(coverage_file: Path, root: Path) -> dict[str, set[str]]:
     from coverage import CoverageData
 
     data = CoverageData(basename=str(coverage_file))
     data.read()
-    units = []
-    index = {}
-    tests = {}
-
-    def entry(test):
-        return tests.setdefault(test, {"units": set(), "files": [], "escapes": False})
-
+    executed = {}
     for measured in sorted(data.measured_files()):
         path = Path(measured)
         relative = path.relative_to(root).as_posix() if path.is_absolute() else path.as_posix()
-        source_path = root / relative
-        if not source_path.is_file():
+        if not (root / relative).is_file():
             continue
         try:
-            by_line = line_units(source_path.read_text(encoding="utf-8"))
+            by_line = line_units((root / relative).read_text(encoding="utf-8"))
         except SyntaxError:
             by_line = {}
+        module = f"{relative}::{MODULE}"
         for line, contexts in data.contexts_by_lineno(measured).items():
             unit = f"{relative}::{by_line.get(line, MODULE)}"
-            module = f"{relative}::{MODULE}"
-            for context in contexts:
-                if not context:
-                    continue
-                found = entry(_test_id(context))["units"]
-                for name in (unit, module):
-                    if name not in index:
-                        index[name] = len(units)
-                        units.append(name)
-                    found.add(index[name])
+            for context in filter(None, contexts):
+                executed.setdefault(_test_id(context), set()).update((unit, module))
+    return executed
+
+
+def build(coverage_file: Path, inputs: Path | None, root: Path, commit: str, environment: str) -> dict:
+    executed = _executed(coverage_file, root)
+    units = sorted(set().union(*executed.values()))
+    index = {name: number for number, name in enumerate(units)}
+    tests = {
+        test: {"units": sorted(index[name] for name in found), "files": [], "escapes": False}
+        for test, found in executed.items()
+    }
     for report in sorted(inputs.rglob("*.jsonl")) if inputs else []:
-        for line in report.read_text().splitlines():
-            if line.strip():
-                seen = json.loads(line)
-                test = entry(seen["test"])
-                test["files"] = sorted(set(test["files"]) | set(seen["files"]))
-                test["escapes"] = test["escapes"] or seen["escapes"]
+        for line in filter(str.strip, report.read_text().splitlines()):
+            seen = json.loads(line)
+            test = tests.setdefault(seen["test"], {"units": [], "files": [], "escapes": False})
+            test["files"] = sorted(set(test["files"]) | set(seen["files"]))
+            test["escapes"] = test["escapes"] or seen["escapes"]
     return {
         "version": 1,
         "commit": commit,
         "environment": environment,
         "units": units,
-        "tests": {
-            test: {"units": sorted(found["units"]), "files": found["files"], "escapes": found["escapes"]}
-            for test, found in sorted(tests.items())
-        },
+        "tests": dict(sorted(tests.items())),
     }
 
 
