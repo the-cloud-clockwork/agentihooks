@@ -120,7 +120,7 @@ from scripts.swarm.health import activity
 from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import LedgerClient, LedgerGone, LedgerRefused
 from scripts.swarm.runtime import HerdrRuntime
-from scripts.swarm.status import auto_snapshot, findings, status_report, task_counts, verdict_store
+from scripts.swarm.status import auto_snapshot, findings, live_agents, status_report, task_counts, verdict_store
 from scripts.swarm.store import (
     ASSIST,
     AUTO_SCALING,
@@ -906,11 +906,11 @@ def _affinity_line(report):
 def cmd_status(store, args):
     if args.json:
         store.config(args.slug)
-        print(json.dumps(status_report(store, args.slug, LedgerClient().state(args.slug))))
+        print(json.dumps(status_report(store, args.slug, LedgerClient().state(args.slug), HerdrRuntime())))
         return
     outage.show(args.slug, False)
     config = store.config(args.slug)
-    agents = store.agents(args.slug)
+    agents = live_agents(store.agents(args.slug), HerdrRuntime())
     ledger = LedgerClient()
     doc = ledger.state(args.slug)
     tasks = doc["tasks"]
@@ -1458,7 +1458,7 @@ def cmd_wait(store, args):
         get = InboxStore(store.redis).get
         if problem := waits.target_problem(held["kind"], held["target"], agent.task, rows, get):
             raise SwarmError(problem)
-        if held["kind"] == "checks":
+        if held["kind"] == "checks" and waits.PULL_URL.fullmatch(held["target"]):
             head = ledger_events.head(held["target"])
             if not head:
                 raise SwarmError("cannot read the pull request head; retry the checks wait")

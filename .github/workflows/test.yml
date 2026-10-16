@@ -1180,7 +1180,13 @@ jobs:
         run: |
           dev=$(git ls-remote origin refs/heads/dev)
           [[ -n "$dev" ]]
-          if [[ "${dev%%[[:space:]]*}" == "$SHA" ]]; then echo "superseded=false" >> "$GITHUB_OUTPUT"; else echo "superseded=true" >> "$GITHUB_OUTPUT"; fi
+          if [[ "${dev%%[[:space:]]*}" == "$SHA" ]]; then
+            echo "superseded=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "superseded=true" >> "$GITHUB_OUTPUT"
+            echo "::error::Dev advanced before Sonar analysis; this unscanned revision cannot be promoted."
+            exit 1
+          fi
 
       - name: Download shard coverage
         if: steps.current.outputs.superseded != 'true' && needs.select.outputs.scope != 'none'
@@ -1765,7 +1771,7 @@ jobs:
               sleep 15
               continue
             fi
-            if gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" --jq '.jobs[] | @json' > "$RUNNER_TEMP/jobs.jsonl"; then
+            if python3 -m scripts.ci_budget.jobs "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs" > "$RUNNER_TEMP/jobs.jsonl"; then
               misses=0
               verdict=$(python3 -m scripts.ci_queue_fail_fast "$RUNNER_TEMP/jobs.jsonl")
               if [[ "$verdict" != wait ]]; then

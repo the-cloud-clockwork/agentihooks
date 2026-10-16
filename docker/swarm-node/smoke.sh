@@ -55,6 +55,7 @@ cleanup() {
     if [[ -n "${scanner_pid:-}" ]]; then wait "$scanner_pid" || true; fi
     if [[ -n "${scan_pid:-}" ]]; then wait "$scan_pid" || true; fi
     if [[ -n "${profile_pid:-}" ]]; then wait "$profile_pid" || true; fi
+    docker rm -f "worker-profile-positive-$fixture" "worker-profile-positive-second-$fixture" >/dev/null 2>&1 || true
     docker image rm "$image" "$rebuild" "$rejected" >/dev/null 2>&1 || true
     python3 - "$context" <<'PY'
 import shutil, sys
@@ -112,18 +113,25 @@ if [[ "$proof" != startup ]]; then
             if [[ "$case" == noexec ]]; then
                 volume=/home/worker:uid=10001,gid=10001
             fi
+            lifetime=(--rm)
+            if [[ "$case" == positive* ]]; then lifetime=(--name "worker-profile-$case-$fixture"); fi
             (
-                docker run --rm --network none --read-only --tmpfs "$volume" --tmpfs /tmp \
+                docker run "${lifetime[@]}" --network none --read-only --tmpfs "$volume" --tmpfs /tmp \
                 -v "$fixtures:/fixtures:ro" -v "$probe:/opt/probe:ro" \
                 "$image" bash /opt/probe/profile-probe.sh "${case%-second}" \
                 > "$output/profile-$case.json" 2> "$output/profile-$case.log"
             if [[ "$case" == positive* ]]; then
-                python3 - "$output/profile-$case.json" <<'PYEXIT'
-import json, sys, time
+                exited="$(docker inspect --format '{{.State.FinishedAt}}' "worker-profile-$case-$fixture")"
+                docker rm "worker-profile-$case-$fixture" > /dev/null
+                python3 - "$output/profile-$case.json" "$exited" <<'PYEXIT'
+import json, sys
+from datetime import datetime, timezone
 from pathlib import Path
 path = Path(sys.argv[1])
 report = json.loads(path.read_text())
-latency = time.time() - report['codex_probe']['registered_at']
+whole, _, fraction = sys.argv[2].rstrip('Z').partition('.')
+exited = datetime.strptime(whole, '%Y-%m-%dT%H:%M:%S').replace(tzinfo=timezone.utc).timestamp() + float('0.' + (fraction or '0'))
+latency = exited - report['codex_probe']['registered_at']
 assert 0 <= latency < 2, f"Codex registration to container exit took {latency:.3f} seconds"
 report['codex_probe']['registration_to_container_exit_seconds'] = latency
 path.write_text(json.dumps(report) + '\n')

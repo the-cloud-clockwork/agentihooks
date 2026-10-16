@@ -45,6 +45,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Reopening a swarm pull request retains its registered worker's ownership,
+  claim lease and worktree until retirement; status omits gone local processes.
 - Offline worker profile proofs replay the rendered Codex startup hook so
   session registration does not depend on a live Codex session.
 - The ledger API accepts the ownership guard on task updates, so the swarm tick's

@@ -116,13 +116,14 @@ def test_the_module_runs_from_the_command_line(tmp_path, monkeypatch, capsys):
     assert capsys.readouterr().out == "wait\n"
 
 
-def _watch(tmp_path, reads, heads=None):
+def _watch(tmp_path, reads, heads=None, server_error=False):
     fake, bin_dir = tmp_path / "fake", tmp_path / "bin"
     fake.mkdir()
     bin_dir.mkdir()
     for index, jobs in enumerate(reads):
         if jobs is not None:
             (fake / f"{index}.json").write_text("".join(json.dumps(job) + "\n" for job in jobs))
+            (fake / f"{index}.page").write_text(json.dumps({"jobs": jobs}))
     if heads is not None:
         for index, head in enumerate(heads):
             if head is not None:
@@ -136,8 +137,13 @@ def _watch(tmp_path, reads, heads=None):
         '  [[ -f "$FAKE/head-$n" ]] && cat "$FAKE/head-$n"\n'
         "  exit $?\n"
         "fi\n"
+        'echo "$*" >> "$FAKE/calls"\n'
+        '[[ "$1" != run ]] || exit 0\n'
+        'if [[ "$SERVER_ERROR" == true && "$*" != *per_page=5\\&* ]]; then\n'
+        '  echo "gh: Server Error (HTTP 500)" >&2; exit 1\n'
+        "fi\n"
         'n=$(cat "$FAKE/count" 2>/dev/null || echo 0)\necho $((n + 1)) > "$FAKE/count"\n'
-        'echo "$*" >> "$FAKE/calls"\n[[ -f "$FAKE/$n.json" ]] && cat "$FAKE/$n.json"\n',
+        'if [[ "$*" == *--jq* ]]; then cat "$FAKE/$n.json"; else cat "$FAKE/$n.page"; fi\n',
         "sleep": 'echo "$1" >> "$FAKE/sleeps"\n(( $(wc -l < "$FAKE/sleeps") <= 30 ))\n',
         "python3": f'exec "{sys.executable}" "$@"\n',
     }
@@ -150,6 +156,7 @@ def _watch(tmp_path, reads, heads=None):
         **os.environ,
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
         "FAKE": str(fake),
+        "SERVER_ERROR": str(server_error).lower(),
         "RUNNER_TEMP": str(tmp_path),
         "GITHUB_OUTPUT": str(output),
         "GITHUB_REPOSITORY": "org/repo",
@@ -161,6 +168,11 @@ def _watch(tmp_path, reads, heads=None):
     }
     run = _step(_jobs()["queue-fail-fast"], "Watch for the first failed graded job")["run"]
     result = subprocess.run(["bash", "-e", "-c", run], cwd=_ROOT, env=env, capture_output=True, text=True)
+    if server_error and output.read_text().strip() == "failed=lint":
+        cancel = _step(_jobs()["queue-fail-fast"], "Cancel this queue run so the queue drops the entry")["run"]
+        result = subprocess.run(
+            ["bash", "-e", "-c", cancel], cwd=_ROOT, env={**env, "FAILED": "lint"}, capture_output=True, text=True
+        )
     sleeps = (fake / "sleeps").read_text().split() if (fake / "sleeps").exists() else []
     calls = (fake / "calls").read_text().splitlines() if (fake / "calls").exists() else []
     return result, output.read_text(), sleeps, calls
@@ -200,9 +212,17 @@ def test_the_watch_step_polls_this_attempt_until_a_graded_job_fails(tmp_path):
     assert result.returncode == 0, result.stderr
     assert output == "failed=lint\n"
     assert sleeps == ["15"]
-    assert (
-        calls == ["api --paginate repos/org/repo/actions/runs/7/attempts/2/jobs?per_page=100 --jq .jobs[] | @json"] * 2
-    )
+    assert calls == ["api repos/org/repo/actions/runs/7/attempts/2/jobs?per_page=10&page=1"] * 2
+
+
+def test_the_watch_step_cancels_after_large_job_pages_return_server_errors(tmp_path):
+    result, output, sleeps, calls = _watch(tmp_path, [[_job("lint", "failure")]], server_error=True)
+    assert result.returncode == 0, result.stderr
+    assert output == "failed=lint\n"
+    assert any("per_page=5&page=1" in call for call in calls)
+    assert all("/attempts/2/jobs?" in call for call in calls[:-1])
+    assert calls[-1] == "run cancel 7 -R org/repo"
+    assert sleeps == []
 
 
 def test_the_watch_step_stops_without_a_name_once_every_graded_job_settled(tmp_path):

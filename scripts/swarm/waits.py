@@ -63,6 +63,8 @@ def checks_resolution(held, github):
     if not current.resolved or (current.unpassed_gate and not current.failed):
         return ""
     outcome = f"checks on {target}, now {'red' if current.red else 'green'}"
+    if current.red and current.failed:
+        outcome += f"; failed: {', '.join(current.failed)}"
     return f"{outcome}; {current.unpassed_gate} never passed" if current.unpassed_gate else outcome
 
 
@@ -85,8 +87,11 @@ def _save_wait(redis, slug, name, previous, held, outcome, now_ms):
 
 def target_problem(kind, target, mine, rows, get):
     """Why the target cannot be waited on, or '' when the tick can check it."""
-    if kind in ("checks", "merge"):
-        return "" if PULL_URL.fullmatch(target) else f"wait on {kind} needs a pull request url, not {target}"
+    if kind == "checks":
+        known = PULL_URL.fullmatch(target) or mutation_wait.RUN_URL.fullmatch(target)
+        return "" if known else f"wait on checks needs a pull request url or an Actions run url, not {target}"
+    if kind == "merge":
+        return "" if PULL_URL.fullmatch(target) else f"wait on merge needs a pull request url, not {target}"
     if kind == "mutation":
         return "" if mutation_wait.RUN_URL.fullmatch(target) else "wait on mutation needs an Actions run url"
     if kind == "intent":
@@ -152,6 +157,8 @@ def resolution(held, rows, inbox, github, reread, fresh, verdicts=None):
         return mutation_wait.resolution(held)
     if kind == "intent":
         return intent_resolution(held, verdicts.read(held["task"]), github)
+    if kind == "checks" and mutation_wait.RUN_URL.fullmatch(target):
+        return mutation_wait.run_resolution(target)
     if kind == "checks":
         return checks_resolution(held, github)
     if kind == "merge":

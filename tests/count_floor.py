@@ -45,6 +45,10 @@ def _definitions(body: list[ast.stmt]) -> Iterator[str]:
     for node in body:
         if isinstance(node, _DEFINITIONS):
             yield node.name
+        elif isinstance(node, ast.Assign):
+            yield from (target.id for target in node.targets if isinstance(target, ast.Name))
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            yield node.target.id
         elif isinstance(node, (ast.If, ast.Try)):
             yield from _definitions(node.body + node.orelse + getattr(node, "finalbody", []))
             for handler in getattr(node, "handlers", []):
@@ -62,16 +66,53 @@ def _sources(tree: Path, skipped: set[Path]) -> Iterator[Path]:
         yield from (Path(root) / name for name in files if name.endswith(".py"))
 
 
-def top_level_definitions(tree: Path, tests: str) -> set[tuple[str, str]]:
-    definitions = set()
+def _top_level(tree: Path, tests: str) -> Iterator[tuple[str, list[ast.stmt]]]:
     for path in _sources(tree, {(tree / tests).resolve()}):
         try:
             body = ast.parse(path.read_bytes()).body
         except (OSError, SyntaxError, ValueError):
             continue
-        module = _module_name(path.relative_to(tree))
-        definitions.update((module, definition) for definition in _definitions(body))
-    return definitions
+        yield _module_name(path.relative_to(tree)), body
+
+
+def top_level_definitions(tree: Path, tests: str) -> set[tuple[str, str]]:
+    return {(module, definition) for module, body in _top_level(tree, tests) for definition in _definitions(body)}
+
+
+_FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
+
+
+def _parameters(function: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
+    arguments = function.args
+    variadic = [arguments.vararg] if arguments.vararg else []
+    return {argument.arg for argument in arguments.posonlyargs + arguments.args + arguments.kwonlyargs + variadic}
+
+
+def _branch_parameters(function: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
+    conditions = (node.test for node in ast.walk(function) if isinstance(node, (ast.If, ast.IfExp, ast.While)))
+    used = {name.id for condition in conditions for name in ast.walk(condition) if isinstance(name, ast.Name)}
+    rebound = {name.id for name in ast.walk(function) if isinstance(name, ast.Name) and isinstance(name.ctx, ast.Store)}
+    return _parameters(function) & (used - rebound)
+
+
+def deleted_branches(base: Path, head: Path, tests: str) -> set[tuple[str, str]]:
+    kept = {
+        (module, node.name): node
+        for module, body in _top_level(head, tests)
+        for node in body
+        if isinstance(node, _FUNCTIONS)
+    }
+    deleted = set()
+    for module, body in _top_level(base, tests):
+        for node in body:
+            if not isinstance(node, _FUNCTIONS) or (survivor := kept.get((module, node.name))) is None:
+                continue
+            if survivor.args.kwarg or _parameters(survivor) - _parameters(node):
+                continue
+            deleted.update(
+                (module, f"{node.name}({name})") for name in _branch_parameters(node) - _parameters(survivor)
+            )
+    return deleted
 
 
 def bound_names(tree: Path) -> tuple[set[str], list[Path]]:
@@ -132,6 +173,17 @@ def _test_function(module: ast.Module, scopes: list[str]) -> ast.FunctionDef | a
     return None if isinstance(node, ast.ClassDef) else node
 
 
+def _resolve(
+    node: ast.expr, names: dict[str, set[tuple[str, str]]], modules: dict[str, set[str]]
+) -> set[tuple[str, str]]:
+    if isinstance(node, ast.Name):
+        return names.get(node.id, set())
+    if isinstance(node, ast.Attribute) and (prefix := _dotted(node.value)):
+        root, _, rest = prefix.partition(".")
+        return {(f"{bound}.{rest}" if rest else bound, node.attr) for bound in modules.get(root, ())}
+    return set()
+
+
 def referenced_subjects(tree: Path, nodeid: str) -> set[tuple[str, str]]:
     path, *scopes = nodeid.split("[", 1)[0].split("::")
     try:
@@ -143,11 +195,14 @@ def referenced_subjects(tree: Path, nodeid: str) -> set[tuple[str, str]]:
     names, modules = _imports(module)
     subjects = set()
     for child in (descendant for statement in node.body for descendant in ast.walk(statement)):
-        if isinstance(child, ast.Name):
-            subjects.update(names.get(child.id, ()))
-        elif isinstance(child, ast.Attribute) and (prefix := _dotted(child.value)):
-            root, _, rest = prefix.partition(".")
-            subjects.update((f"{bound}.{rest}" if rest else bound, child.attr) for bound in modules.get(root, ()))
+        subjects.update(_resolve(child, names, modules))
+        if isinstance(child, ast.Call):
+            subjects.update(
+                (callee, f"{function}({keyword.arg})")
+                for callee, function in _resolve(child.func, names, modules)
+                for keyword in child.keywords
+                if keyword.arg
+            )
     return subjects
 
 
@@ -172,6 +227,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{path} hides its names in the head (unparseable or a star import), so no lost test is admitted")
         definitions = set() if opaque else top_level_definitions(args.base, args.tests)
         deleted = {definition for definition in definitions if definition[1] not in surviving}
+        deleted |= set() if opaque else deleted_branches(args.base, args.head, args.tests)
         for nodeid in lost:
             if subjects := sorted(".".join(subject) for subject in referenced_subjects(args.base, nodeid) & deleted):
                 admitted[nodeid] = subjects
