@@ -190,20 +190,23 @@ def test_a_checks_wait_stays_while_checks_run_or_github_cannot_answer(tick, pull
     assert tick.told() == []
 
 
-@pytest.mark.parametrize("state", ["OPEN", "CLOSED"])
-def test_a_merge_wait_ends_red_when_the_queued_pull_request_drops_out(tick, state):
+@pytest.mark.parametrize(
+    "state, outcome",
+    [
+        ("OPEN", "now green; dropped from the merge queue; queue it again"),
+        ("CLOSED", "now closed unmerged; reopen it or record why it was closed"),
+    ],
+)
+def test_a_merge_wait_reports_when_the_queued_pull_request_drops_out(tick, state, outcome):
     tick.hold("merge", URL)
     tick.pulls[URL] = PullRequest("OPEN", None, 1, False, resolved=True, queued=True)
     assert tick.end() == []
     tick.pulls[URL] = None
     assert tick.end() == []
     tick.pulls[URL] = PullRequest(state, None, 1, False, resolved=True)
-    assert tick.end() == [
-        f"ended the wait of {ME}: pull request {URL}, now red; left the merge queue without merging; fix it and queue it again"
-    ]
+    assert tick.end() == [f"ended the wait of {ME}: pull request {URL}, {outcome}"]
     assert held(tick.store) is None
-    assert "now red" in tick.told()[0]
-    assert "fix it and queue it again" in tick.told()[0]
+    assert outcome in tick.told()[0]
     assert tick.end() == []
 
 
