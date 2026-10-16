@@ -796,6 +796,12 @@ class CodexAdapter:
             "  [--] Hook trust cannot be verified from outside codex — run /hooks in a "
             "codex session to confirm; untrusted hooks are SILENTLY skipped."
         )
+        from scripts.swarm.store import APP_SERVER_TRANSPORT, LEGACY_TRANSPORT
+
+        print(
+            f"  [--] Codex inbox transport: swarm create stores {APP_SERVER_TRANSPORT}; roll a swarm back "
+            f"with: agentihooks swarm <id> set codex-inbox-transport={LEGACY_TRANSPORT}"
+        )
         return failed
 
     # ------------------------------------------------------------------

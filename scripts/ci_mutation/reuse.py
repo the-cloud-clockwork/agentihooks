@@ -3,6 +3,7 @@ import io
 import json
 import os
 import subprocess
+import time
 import zipfile
 from pathlib import Path
 from urllib.parse import quote
@@ -11,6 +12,8 @@ from scripts.ci_mutation.scope import PREFLIGHT, weakened_tests
 
 EVIDENCE = Path(".mutation-gate")
 REPORT = "mutation-preflight-report"
+WAIT = 2400
+POLL = 30
 
 
 def api(path: str, binary: bool = False):
@@ -50,11 +53,38 @@ def only_tests_added(source: str, head: str) -> bool:
     return all(name.startswith("tests/") for name in names if name) and not weakened_tests(Path.cwd(), source, head)
 
 
+def same_base(archive: bytes, row: dict, head: str) -> bool:
+    if row["head_sha"] != head:
+        return True
+    with zipfile.ZipFile(io.BytesIO(archive)) as zipped:
+        theirs = json.loads(zipped.read("scope.json"))["base"]
+    return theirs == json.loads((EVIDENCE / "scope.json").read_text())["base"]
+
+
+def in_flight(head: str, current: int) -> bool:
+    found = api(f"{PREFLIGHT}?event=push&per_page=30&head_sha={head}")["workflow_runs"]
+    return any(row["id"] < current and row["status"] != "completed" for row in found)
+
+
+def settle(head: str, current: int) -> None:
+    deadline = time.monotonic() + WAIT
+    if in_flight(head, current):
+        print(f"Waiting for an earlier preflight of {head}")
+        time.sleep(POLL)
+        while in_flight(head, current):
+            if time.monotonic() >= deadline:
+                print(f"Stopped waiting after {WAIT} seconds")
+                return
+            time.sleep(POLL)
+
+
 def source(head: str, branch: str, current: int) -> tuple[dict, bytes] | None:
+    settle(head, current)
     found = latest(f"head_sha={head}", current) or latest(f"branch={quote(branch)}", current)
     if found:
         row, graded = found
-        if graded and graded[1] and row["conclusion"] == "success" and only_tests_added(row["head_sha"], head):
+        ok = graded and graded[1] and row["conclusion"] == "success"
+        if ok and only_tests_added(row["head_sha"], head) and same_base(graded[0], row, head):
             return row, graded[0]
 
 

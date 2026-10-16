@@ -21,7 +21,6 @@ if TYPE_CHECKING:
     from redis.client import Pipeline
 
 STOPPED = "stopped"
-UNOBSERVED = "an active turn that began before this pump connected"
 RECONCILE_S = 10.0
 POLL_S = 0.2
 BACKOFF_S = 1.0
@@ -289,8 +288,6 @@ class Pump:
         self.subscription.subscribe(NOTIFY)
         protocol.resume_thread(binding.connection, binding.thread_id)
         self._refresh()
-        if self.state.active_turn:
-            self.state.requests[UNOBSERVED] = UNOBSERVED
         self.next_reconcile = self.timing.clock()
         binding.transport.mark(state=CONNECTED, last_error_class="")
 
@@ -304,23 +301,20 @@ class Pump:
         if woken:
             self.queue += self.dispatcher.reserve(self.binding.recipient, self.binding.owner)
         self._surface()
-        if self.queue and set(self.state.requests.values()) <= {UNOBSERVED} and self.timing.clock() >= self.hold_until:
+        if self.queue and not self.state.requests and self.timing.clock() >= self.hold_until:
             self._submit_nudge()
         while self.queue and not self.state.requests and self.timing.clock() >= self.hold_until:
             self._submit(self.queue.pop(0))
 
     def _submit_nudge(self) -> None:
-        """A stale nudge goes first; past a turn begun before this pump connected only a fresh one, which ends it."""
-        now = self.timing.now_ms()
-        nudge = next((d for d in self.queue if d.ref.startswith(stale_nudge.REF) and self._jumps(d, now)), None)
+        nudge = next((d for d in self.queue if d.ref.startswith(stale_nudge.REF) and self._jumps(d)), None)
         if nudge is None:
             return
         self.queue.remove(nudge)
         self._submit(nudge)
 
-    def _jumps(self, delivery: Delivery, now: int) -> bool:
-        item = self.store.get(delivery.item)
-        return stale_nudge.interrupts(item, now) if self.state.requests else stale_nudge.is_nudge(item)
+    def _jumps(self, delivery: Delivery) -> bool:
+        return stale_nudge.is_nudge(self.store.get(delivery.item))
 
     def _hinted(self) -> bool:
         if self.subscription.get_message(timeout=0) is None:

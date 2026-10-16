@@ -352,6 +352,7 @@ rm -rf ~/.agentihooks
 | **[Hook System]({{ site.baseurl }}/docs/hooks/)** | All 10 hook events, broadcast system, lifecycle reference |
 | **[MCP Tools]({{ site.baseurl }}/docs/mcp-tools/)** | MCP tools across 3 categories (channels, enforcement, conditions) |
 | **[Reference]({{ site.baseurl }}/docs/reference/)** | CLI commands, configuration variables, env vars |
+| **[Developer account login]({{ site.baseurl }}/docs/reference/account-login.html)** | Claude and Codex login, token storage, OpenBao keys and refresh authority |
 | **[Extending]({{ site.baseurl }}/docs/extending/)** | Add tools, add profiles, fork safely |
 | **[Bundles]({{ site.baseurl }}/docs/bundles/)** | Prebuilt capability bundles |
 | **[Connectors]({{ site.baseurl }}/docs/connectors/)** | Integrations with external systems |

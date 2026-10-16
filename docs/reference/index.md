@@ -14,6 +14,7 @@ Complete reference documentation for configuration and CLI commands.
 |------|---------------|
 | [Configuration](configuration.md) | All environment variables across every integration, in one place |
 | [CLI Commands](cli-commands.md) | All `agentihooks` subcommands and flags: init, uninstall, claude, ignore |
+| [Developer account login](account-login.md) | Claude and Codex login, managed shell tokens, OpenBao paths and key names, refresh authority and token stores |
 | [Decision classifier](classifier.md) | `hooks.classifier`: typed questions to the LiteLLM decision models, failover, down cache, decision log, `classify` and `classifier stats` |
 | [Observability with Langfuse](observability-langfuse.md) | Every telemetry path and where it goes, turning Langfuse on per profile, other OTLP backends, checking a trace arrived, how the Doctor reads traces |
 | [Presentation layer architecture](presentation-layer.md) | The ledger pages, HOME and BIN as a product: constraints, today's architecture, limits, target (static pages, `/api/v1`, server-sent events, SQLite behind a repository) and the migration order |
@@ -25,4 +26,5 @@ Complete reference documentation for configuration and CLI commands.
 | [WSL disk reclaim](wsl-disk.md) | Sparse VHDX so space `agentihooks gc` frees returns to Windows; why `/tmp` empties on WSL |
 | [CODEX-COMPAT](CODEX-COMPAT.md) | The `codex` install target: hook contract, surface map, divergences |
 | [Managed Codex terminals](codex-managed-terminal.md) | Transport selection, herdr viewer reopening, push master inbox duties, handoffs and attachment failures |
+| [Codex inbox transport](codex-inbox-transport.md) | The `app_server` default, the Claude inbox channel against broadcast topics and Bun plugins, qualified versions, canary order, failure diagnosis and rollback |
 | [COPILOT-COMPAT](COPILOT-COMPAT.md) | The `copilot` install target: hook contract, surface map, divergences |
