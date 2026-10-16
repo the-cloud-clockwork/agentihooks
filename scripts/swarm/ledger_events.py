@@ -205,7 +205,7 @@ def declares_gate(tree):
     return any(GATE_JOB.search(text) for text in texts if text)
 
 
-def view(url, run=subprocess.run):
+def view(url, run=subprocess.run, required_only=False):
     number = _number(url)
     try:
         done = run(
@@ -216,7 +216,7 @@ def view(url, run=subprocess.run):
         )
         if done.returncode != 0:
             return None
-        return _view_resource(json.loads(done.stdout)["data"]["resource"], number, run=run)
+        return _view_resource(json.loads(done.stdout)["data"]["resource"], number, run=run, required_only=required_only)
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
         return None
 
@@ -234,7 +234,25 @@ def _number(url):
     return found[1] if found else "0"
 
 
-def _view_resource(raw, number, gated=None, run=subprocess.run):
+def _required_pull_request(raw):
+    checks = [check for check in _newest(raw["statusCheckRollup"]) if check.get("isRequired")]
+    results = [check.get("conclusion") or check.get("state") for check in checks]
+    return PullRequest(
+        raw["state"],
+        None,
+        None,
+        any(result in RED for result in results),
+        resolved=all(result in PASSED | {"NEUTRAL"} for result in results),
+        failed=tuple(
+            check.get("name") or check.get("context") or "a check"
+            for check, result in zip(checks, results)
+            if result in RED
+        ),
+        head=raw.get("headRefOid") or "",
+    )
+
+
+def _view_resource(raw, number, gated=None, run=subprocess.run, required_only=False):
     try:
         raw = dict(raw)
         commits = [node["commit"] for node in raw["commits"]["nodes"]]
@@ -249,6 +267,8 @@ def _view_resource(raw, number, gated=None, run=subprocess.run):
         raw["commits"] = commits
         raw["statusCheckRollup"] = checks
         raw["checkSuites"] = suites
+        if required_only:
+            return _required_pull_request(raw)
         raw["gated"] = gated if gated is not None else bool(commits) and declares_gate(commit.get("file"))
         return pull_request(raw)
     except (ValueError, KeyError, TypeError):

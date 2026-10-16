@@ -24,6 +24,7 @@ REFRESHED = {"sha": "abc", "commit": {"message": "Merge branch 'dev' into ci-1"}
 
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
+READ_PULL = ledger_events.view
 
 
 def runner(*responses):
@@ -118,9 +119,38 @@ def test_queue_uses_antoncores_required_checks_in_its_own_workflow():
     assert all("workflows/test.yml" not in str(command) for command in calls)
 
 
+@pytest.mark.parametrize(
+    "conclusion, optional_running, expected",
+    [("SUCCESS", True, True), (None, False, False), ("FAILURE", False, False), ("NEUTRAL", False, True)],
+)
+def test_queue_waits_for_all_and_only_required_checks(conclusion, optional_running, expected):
+    response = checked_resource(conclusion)
+    commit = response["data"]["resource"]["commits"]["nodes"][0]["commit"]
+    commit["file"] = {"object": {"entries": [{"object": {"text": "jobs:\n  gate:\n    name: Gate — Required\n"}}]}}
+    commit["statusCheckRollup"]["contexts"]["nodes"].append(
+        {"name": "Gate — Required", "conclusion": "SUCCESS", "isRequired": True}
+    )
+    if optional_running:
+        commit["checkSuites"]["nodes"] = [{"status": "IN_PROGRESS", "workflowRun": {"databaseId": 1}}]
+    run, calls = runner(
+        {"data": {"resource": OPEN}},
+        response,
+        {"data": {}},
+        {"data": {"resource": {**OPEN, "mergeQueueEntry": ENTRY}}},
+    )
+    if expected:
+        assert merge_queue.operate("queue", URL, run)["queued"]
+    else:
+        with pytest.raises(SwarmError, match="required checks"):
+            merge_queue.operate("queue", URL, run)
+        assert not any("enqueuePullRequest(input:" in str(command) for command, _ in calls)
+
+
 @pytest.fixture(autouse=True)
 def task_ledger(monkeypatch):
     from types import SimpleNamespace
+
+    monkeypatch.setattr(ledger_events, "view", READ_PULL)
 
     def tasks(slug):
         assert slug == "sw"
