@@ -223,7 +223,8 @@ def test_the_app_server_pane_runs_the_server_in_its_own_session_and_the_viewer_i
         "--agent",
         "sw-master-1",
     ]
-    removal = next(line for line in lines[serve + 2 :] if line.startswith("rm -f "))
+    removal = next((line for line in lines[serve + 2 :] if line.startswith("rm -f ")), "")
+    assert removal
     assert shlex.split(removal) == ["rm", "-f", str(launcher)]
 
 

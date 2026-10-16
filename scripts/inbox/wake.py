@@ -39,7 +39,6 @@ def quiet_ms(environ):
 
 
 def typed_wake(inbox, agent):
-    """Typed wake only for a worker pane whose transport does not own delivery and no push pump owns; never the master pane."""
     return (
         bool(agent.pane_id)
         and agent.lane != MASTER
