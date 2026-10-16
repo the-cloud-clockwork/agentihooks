@@ -305,6 +305,12 @@ def test_a_push_from_a_second_repository_grades_only_that_repository(swarm_workt
     check_prepush(payload)
 
 
+def test_a_worktree_shares_its_repository_common_dir(repo, swarm_worktree, tmp_path):
+    assert prepush_guard._common_dir(swarm_worktree) == str(repo / ".git")
+    assert prepush_guard._common_dir(repo) == str(repo / ".git")
+    assert prepush_guard._common_dir(tmp_path) is None
+
+
 @pytest.mark.parametrize("folder", ["engineer-test", "engineer-test-2"])
 def test_a_first_push_before_the_branch_is_recorded_grades_the_agent_worktree(repo, swarm_worktree, tmp_path, folder):
     from tests.swarm_ledger import legacy_page
