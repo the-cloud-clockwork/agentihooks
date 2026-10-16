@@ -392,20 +392,16 @@ def test_a_reply_naming_the_completed_turn_keeps_a_newer_active_turn():
     assert idle.active_turn == ""
 
 
-def test_a_turn_running_before_the_pump_connected_is_not_steered_and_holds_delivery_until_it_ends(rig):
+def test_a_turn_running_before_the_pump_connected_is_steered_like_an_observed_turn(rig):
     rig.server.begin_elsewhere()
     rig.server.frames.clear()
     rig.pump.start()
     item = rig.store.send("alice", ME, "careful")
     rig.pump.step()
-    assert not [m for m in rig.server.methods() if m.startswith("turn/")]
-    assert rig.record().pending_request == codex.UNOBSERVED
-    assert rig.logged == [f"thread {THREAD} waits on {codex.UNOBSERVED}; inbox delivery is held"]
-    rig.server.finish()
-    rig.pump.step()
-    assert rig.server.methods()[-1] == "turn/start"
+    assert [m for m in rig.server.methods() if m.startswith("turn/")] == ["turn/steer"]
     assert rig.store.get(item.id).state == "delivered"
     assert rig.record().pending_request == ""
+    assert rig.logged == []
 
 
 def send_nudge(rig, tag="a", sender="swarm"):
@@ -488,16 +484,16 @@ def test_a_nudge_goes_first_past_a_turn_begun_before_the_pump_connected(rig):
     assert (rig.store.get(nudge.id).state, rig.store.get(held.id).state) == ("delivered", "delivered")
 
 
-def test_an_ordinary_message_still_waits_behind_a_turn_begun_before_the_pump_connected(rig):
+def test_a_nudge_shaped_message_from_anyone_else_steers_a_turn_begun_before_the_pump_connected(rig):
     rig.server.begin_elsewhere()
     rig.server.frames.clear()
     rig.pump.start()
-    send_nudge(rig, sender="alice")
+    item = send_nudge(rig, sender="alice")
     rig.pump.step()
-    assert turn_methods(rig) == []
+    assert turn_methods(rig) == ["turn/steer"] and rig.store.get(item.id).state == "delivered"
 
 
-def test_a_stale_held_nudge_never_steers_a_turn_begun_before_the_pump_connected(rig):
+def test_a_stale_nudge_steers_a_turn_begun_before_the_pump_connected(rig):
     from scripts.swarm import stale_nudge
 
     rig.server.begin_elsewhere()
@@ -506,7 +502,7 @@ def test_a_stale_held_nudge_never_steers_a_turn_begun_before_the_pump_connected(
     item = send_nudge(rig)
     rig.clock.now = (item.created_at + stale_nudge.FRESH_MS + 1) / 1000
     rig.pump.step()
-    assert turn_methods(rig) == [] and rig.store.get(item.id).state == "pending"
+    assert turn_methods(rig) == ["turn/steer"] and rig.store.get(item.id).state == "delivered"
 
 
 def test_a_nudge_waits_out_the_pump_hold(rig):
@@ -528,6 +524,16 @@ def test_an_open_server_request_holds_a_nudge_too(rig):
     nudge = send_nudge(rig)
     rig.pump.step()
     assert turn_methods(rig) == [] and rig.store.get(nudge.id).state == "pending"
+    assert rig.record().pending_request == APPROVAL
+
+
+def test_an_approval_replayed_on_resume_holds_the_first_delivery_into_a_turn_begun_before_the_pump(rig):
+    rig.server.begin_elsewhere()
+    rig.server.frames.append({"id": 90, "method": APPROVAL, "params": {"threadId": THREAD}})
+    rig.pump.start()
+    item = rig.store.send("alice", ME, "careful")
+    rig.pump.step()
+    assert turn_methods(rig) == [] and rig.store.get(item.id).state == "pending"
     assert rig.record().pending_request == APPROVAL
 
 

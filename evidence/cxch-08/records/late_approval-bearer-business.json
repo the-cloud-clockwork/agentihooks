@@ -8,6 +8,7 @@
   "delivered_to_late_resumer": true,
   "late_same_request_id": true,
   "late_request_before_resume_reply": false,
+  "late_request_before_read_reply": true,
   "late_reader_methods": [
     "configWarning",
     "deprecationNotice",

@@ -16,14 +16,15 @@
   },
   "late_approval": {
     "question": "Does a client that connects after an approval request opened receive that open request?",
-    "command": "PYTHONPATH=<worktree> python <scratch>/run.py <scratch> <bearer account> late_approval",
+    "command": "PYTHONPATH=<worktree> python <scratch>/late/run.py <scratch> <bearer account> late_approval",
     "runner": "starts codex --no-daemon app-server --listen unix://<scratch>/app.sock through codex_router.command and child_environment in a scratch CODEX_HOME, then runs python -m scripts.codex_app_server_probe <sock> <repo> late_approval <out>",
     "records": [
       "records/late_approval-bearer-business.json",
       "records/late_approval-bearer-personal.json"
     ],
-    "finding": "A late connection that only calls thread/read receives no approval request and no turn events; it sees only thread status notifications. A late connection that calls thread/resume receives the open request with the same id, after the resume reply, and later sees its resolution.",
-    "decision": "The push pump connects without thread/resume, and even a resumed connection learns of the open request only after the resume reply, so the hold on a turn already running at connect stays."
+    "finding": "A late connection that only calls thread/read receives no approval request and no turn events. A late connection that calls thread/resume receives the open request with the same id, after the resume reply and before the reply to its next thread/read, and later sees its resolution. Both bearer accounts.",
+    "decision": "The pump starts with thread/resume then thread/read, so an open approval is recorded before its first step. The hold on a turn already running at connect is dropped: such a turn is steered like any observed turn, and an open approval still holds delivery.",
+    "observed_on": "2026-10-16"
   },
   "matrix": {
     "Idle master": {
