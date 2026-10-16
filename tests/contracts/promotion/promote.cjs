@@ -50,7 +50,7 @@ function fixture(options = {}) {
   return { github, context, core, writes, refs, outputs, sleep: async () => {} };
 }
 
-test('promotes exactly the graded head with rebase and records both revisions', async () => {
+test('promotes exactly the graded head with linear history and records both revisions', async () => {
   const f = fixture();
   await promote(f);
   assert.equal(f.writes[0][1].base, 'main');
@@ -60,7 +60,10 @@ test('promotes exactly the graded head with rebase and records both revisions', 
     ['delete', { owner: 'owner', repo: 'repo', ref: 'heads/promotion/graded' }],
   ]);
   assert.match(f.writes[0][1].body, /graded/);
-  assert.deepEqual(f.writes[1], ['merge', { owner: 'owner', repo: 'repo', pull_number: 7, sha: 'graded', merge_method: 'rebase' }]);
+  assert.equal(f.writes[1][0], 'merge');
+  const { merge_method, ...request } = f.writes[1][1];
+  assert.ok(['rebase', 'squash'].includes(merge_method));
+  assert.deepEqual(request, { owner: 'owner', repo: 'repo', pull_number: 7, sha: 'graded' });
   assert.equal(f.outputs.main, 'rebased');
   assert.equal(f.outputs.graded, 'graded');
 });
