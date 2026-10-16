@@ -13,6 +13,8 @@ from scripts.swarm_v2.runtime.observe import Observer, Signal
 from scripts.swarm_v2.runtime.operations import Observation, Operation, OperationRequest, Operations, OperationTransport
 from scripts.swarm_v2.telemetry import Telemetry
 
+ENDED = "ended"
+
 
 class FencedTransport:
     def __init__(self, transport: OperationTransport, require: Callable[[], None]) -> None:
@@ -138,7 +140,9 @@ class Controller:
         if self.pods is None:
             return None
         occupants = self.store.execution_occupants(self.slug).values()
-        journals = {agent.execution_id for agent in occupants if agent.runtime_backend == BACKEND}
+        journals = {
+            agent.execution_id for agent in occupants if agent.runtime_backend == BACKEND and agent.state != ENDED
+        }
         records = {agent.execution_id for agent in self.store.execution_registry.records(self.slug)}
         plan = self.reconciler.plan(journals, self.pods.sync().pods(), records - journals)
         for pod in plan.delete:
