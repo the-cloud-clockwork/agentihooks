@@ -506,7 +506,10 @@ def _state(store, args, state):
         store.redis.delete(store.key(args.slug, "master-retired-tasks"))
     store.update(args.slug, state=state)
     if state == "running" and not timer.ensure(timer.entry_point()):
-        print("warning: the systemd timer or swarm services could not be enabled; run agentihooks swarm tick yourself", file=sys.stderr)
+        print(
+            "warning: the systemd timer or swarm services could not be enabled; run agentihooks swarm tick yourself",
+            file=sys.stderr,
+        )
     for action in run_tick(store, args.slug):
         print(action)
     print(json.dumps({"swarm": args.slug, "state": store.config(args.slug).state}))
