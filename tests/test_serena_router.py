@@ -101,6 +101,61 @@ async def test_child_read_inherits_parent_worktree_without_activation(router, re
         assert _text(parent_read) == f"root={repo['b']}"
 
 
+async def test_child_inherits_primary_read_restriction_and_removed_worktree(router, repo):
+    from hooks.serena_router.server import UNBOUND
+
+    parent_meta = {"sessionId": "parent", "threadId": "parent"}
+    child_meta = {"sessionId": "parent", "threadId": "child"}
+    async with connect(router) as parent, connect(router) as child:
+        await parent.call_tool("activate_project", {"project": str(repo["primary"])}, meta=parent_meta)
+        read = await child.call_tool("find_symbol", {}, meta=child_meta)
+        assert _text(read) == f"root={repo['primary']}"
+        edit = await child.call_tool("replace_content", {"relative_path": "f.txt", "repl": "refused"}, meta=child_meta)
+        assert edit.isError
+        assert "primary checkout" in _text(edit)
+        await parent.call_tool("activate_project", {"project": str(repo["a"])}, meta=parent_meta)
+        _git(repo["primary"], "worktree", "remove", "--force", str(repo["a"]))
+        removed = await child.call_tool("find_symbol", {}, meta=child_meta)
+        assert removed.isError
+        assert UNBOUND in _text(removed)
+        parent_read = await parent.call_tool("find_symbol", {}, meta=parent_meta)
+        assert parent_read.isError
+        assert UNBOUND in _text(parent_read)
+
+
+async def test_child_cannot_supply_another_child_as_the_root(router, repo):
+    async with connect(router) as first, connect(router) as second:
+        await first.call_tool(
+            "activate_project", {"project": str(repo["a"])}, meta={"sessionId": "parent", "threadId": "first"}
+        )
+        result = await second.call_tool("find_symbol", {}, meta={"sessionId": "parent", "threadId": "second"})
+        assert result.isError
+        assert "No project" in _text(result)
+
+
+@pytest.mark.parametrize(
+    "meta",
+    [
+        None,
+        {},
+        {"sessionId": "parent"},
+        {"threadId": "child"},
+        {"sessionId": "", "threadId": "child"},
+        {"sessionId": 7, "threadId": "child"},
+        {"sessionId": "parent", "threadId": ""},
+        {"sessionId": "parent", "threadId": 7},
+    ],
+)
+async def test_child_requires_complete_string_identity(router, repo, meta):
+    async with connect(router) as parent, connect(router) as child:
+        await parent.call_tool(
+            "activate_project", {"project": str(repo["a"])}, meta={"sessionId": "parent", "threadId": "parent"}
+        )
+        result = await child.call_tool("find_symbol", {}, meta=meta)
+        assert result.isError
+        assert "No project" in _text(result)
+
+
 async def test_edit_refused_while_unbound(router, repo):
     from hooks.serena_router.server import UNBOUND
 
