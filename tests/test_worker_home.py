@@ -1000,6 +1000,9 @@ def test_a_bundle_request_renders_the_bundle_chain_global_layer_and_channels(fix
     env = json.loads((home / "settings.json").read_text())["env"]
     assert (env["FIXTURE_BUNDLE_GLOBAL"], env["FIXTURE_FRONTEND"]) == ("1", "1")
     assert "brain" in env["AGENTIHOOKS_BASE_CHANNELS"].split(",")
+    sources = json.loads((home.parent / "claude.sources.json").read_text())
+    assert "# Fixture bundle global persona" in {row["text"] for row in sources if row["layer"] == "doctrine"}
+    assert "# Fixture global rule" in {row["text"] for row in sources if row["layer"] == "rule"}
 
 
 def test_the_request_document_names_the_delivered_bundle(fixture):

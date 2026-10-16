@@ -1,6 +1,7 @@
 import functools
 import http.client
 import importlib.util
+import io
 import json
 import os
 import shutil
@@ -951,7 +952,10 @@ def test_the_start_prints_the_rendered_chain_when_bootstrap_names_one(monkeypatc
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
-def test_the_worker_logs_a_passed_profile_binding_before_starting_its_task(tmp_path, monkeypatch, capsys, target):
+def test_the_worker_logs_a_passed_profile_binding_before_starting_its_task(tmp_path, monkeypatch, target):
+    output = io.BytesIO()
+    stream = io.TextIOWrapper(output)
+    monkeypatch.setattr(sys, "stdout", stream)
     launch = material(tmp_path, {**RECORD, "harness": target, "agent": [target]})
     attempt = tmp_path / "attempts" / EXECUTION
     controller = Controller((200, ANSWER))
@@ -967,7 +971,9 @@ def test_the_worker_logs_a_passed_profile_binding_before_starting_its_task(tmp_p
         assert evidence["profile"] == "engineer" and evidence["harness"] == target
         assert evidence["rendered"]["home"] == str(attempt / "homes" / target / f".{target}")
         assert stat.S_IMODE(report.stat().st_mode) == 0o600
-        logs = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+        assert b'"profile_binding": "passed"' in output.getvalue()
+        stream.flush()
+        logs = [json.loads(line) for line in output.getvalue().decode().splitlines()]
         logs = [row for row in logs if "profile_binding" in row or "worker_start" in row]
         assert logs[0] == {"profile_binding": "passed", "profile": "engineer", "harness": target}
         assert logs[1]["worker_start"] == "prepared"
@@ -1018,6 +1024,7 @@ def test_a_failed_worker_binding_is_reported_and_refuses_the_task(tmp_path, monk
     assert "ERROR worker start refused: profile binding failed:" in logs.err
     evidence = json.loads((attempt / "run" / "profile-binding.json").read_text())
     assert evidence["state"] == "failed" and evidence["reason"]
+    assert logs.err == f"ERROR worker start refused: profile binding failed: {evidence['reason']}\n"
     assert evidence["profile"] == "engineer" and evidence["harness"] == target
     assert not (attempt / start.RECORD).exists()
 
