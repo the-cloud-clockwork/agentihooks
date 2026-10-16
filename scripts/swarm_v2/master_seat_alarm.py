@@ -27,19 +27,23 @@ def run(slug: str, store, ledger, runtime, doc: dict) -> list[str]:
     states = {seat_name: json.loads(raw) for seat_name, raw in store.redis.hgetall(key).items()}
     if not states:
         return []
+    seats = masters.MasterSeats(store.redis)
+    counted = set(masters.seats(slug, seats.count(slug)))
     addresses = {seat_address(slug, seat_name) for seat_name in states}
     bound = {
         a.seat for a in store.agents(slug) if a.seat in addresses and a.state != "finished" and runtime.reported(a)
     }
-    owners, actions = masters.MasterSeats(store.redis).owners(slug, doc), []
+    owners, actions = seats.owners(slug, doc), []
     for seat_name, state in sorted(states.items()):
         address = seat_address(slug, seat_name)
         held = _held(owners, address)
-        if address in bound:
+        if address not in counted:
             store.redis.hdel(key, seat_name)
+        elif address in bound:
             if state.get("alerted"):
                 ledger.notify(slug, BACK.format(address=address, held=held))
                 actions.append(f"cleared the launch alarm of master seat {address}")
+            store.redis.hdel(key, seat_name)
         elif state["count"] >= LAUNCHES and not state.get("alerted"):
             ledger.notify(slug, DOWN.format(address=address, count=state["count"], held=held, error=state["error"]))
             _save(store, slug, seat_name, {**state, "alerted": True})

@@ -4,7 +4,7 @@ import pytest
 
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import MASTER_DOWN, STARTUP_GRACE_MS, SpawnError, tick
-from scripts.swarm_v2 import master_fill
+from scripts.swarm_v2 import master_fill, master_seat_alarm
 from scripts.swarm_v2.masters import MasterSeats
 from tests.swarm.test_tick import FakeRuntime, masters, tasks
 
@@ -242,8 +242,6 @@ def test_one_failed_seat_two_launch_raises_no_operator_alarm(store):
 
 
 def test_repeated_failed_seat_two_launches_raise_one_alarm_naming_seat_phases_and_error(store):
-    from scripts.swarm_v2 import master_seat_alarm
-
     ledger, runtime = _seat_two_down(store)
     tick("sw", store, ledger, runtime, 1)
     raised = tick("sw", store, ledger, runtime, 2)
@@ -267,8 +265,6 @@ def test_an_alarm_for_a_seat_owning_no_phase_says_none(store):
 
 
 def test_a_seat_two_master_that_binds_clears_the_alarm(store):
-    from scripts.swarm_v2 import master_seat_alarm
-
     ledger, runtime = _seat_two_down(store)
     tick("sw", store, ledger, runtime, 1)
     tick("sw", store, ledger, runtime, 2)
@@ -286,3 +282,16 @@ def test_a_seat_two_master_that_binds_clears_the_alarm(store):
     runtime.live.discard(second.name)
     tick("sw", store, ledger, runtime, 5 + STARTUP_GRACE_MS)
     assert len(_seat_notes(ledger)) == 2
+    tick("sw", store, ledger, runtime, 6 + STARTUP_GRACE_MS)
+    assert len(_seat_notes(ledger)) == 3
+
+
+def test_a_seat_that_leaves_the_count_drops_its_failures(store):
+    ledger, runtime = _seat_two_down(store)
+    tick("sw", store, ledger, runtime, 1)
+    MasterSeats(store.redis).set_count("sw", 1)
+    tick("sw", store, ledger, runtime, 2)
+    assert store.redis.hgetall(store.key("sw", master_seat_alarm.KEY)) == {}
+    MasterSeats(store.redis).set_count("sw", 2)
+    tick("sw", store, ledger, runtime, 3)
+    assert _seat_notes(ledger) == []
