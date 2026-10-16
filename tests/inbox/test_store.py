@@ -240,6 +240,12 @@ def test_a_replayed_reply_bound_to_a_refused_answer_is_refused_and_keeps_the_ite
     assert store.get(item.id).state == "read"
 
 
+def test_a_reply_without_an_operation_id_keeps_returning_its_refused_answer(store):
+    item, answer = refused_answer(store)
+    assert store.reply(item.id, "master", "two tasks left").id == answer.id
+    assert store.get(item.id).state == "done"
+
+
 @pytest.mark.parametrize("moved", ["cancel", "handoff", "open", "other answer"])
 def test_reopen_leaves_an_item_this_answer_did_not_close_as_it_is(store, moved):
     item, answer = refused_answer(store)
