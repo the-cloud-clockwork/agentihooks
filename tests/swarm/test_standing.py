@@ -236,12 +236,15 @@ def test_a_fired_count_verdict_still_lets_a_task_hours_regression_return(redis):
 
 def test_an_alert_and_the_detector_count_the_same_task_hours(redis):
     store = VerdictStore(redis, "verdicts")
-    standing.fire(redis, "sw", "ci_overrun", reading(1.5, episode="alert-1"), NOW)
-    _judge(store, redis, NOW)
-    standing.clear(redis, "sw", "ci_overrun")
+    standing.fire(redis, "sw", "merge_queue", reading(1.5, episode="alert-1"), NOW)
+    store.visible(standing.findings(redis, "sw", NOW), NOW, HOUR_MS)
+    store.judge("bottleneck-stage/merge_queue", "established", "known", "master", NOW)
+    standing.clear(redis, "sw", "merge_queue")
     later = NOW + 2 * HOUR_MS
-    _detected(redis, 2.5, "d1", later)
-    assert _returns(store, redis, later) == ["bottleneck-stage/ci_overrun"]
+    row = {"stage": "merge_queue", "seconds": 2.5 * 3600, "previous_seconds": 0.0, "trend": "rising"}
+    standing.update_detector(redis, "sw", {**row, "episodes": ["d1"], "labels": [], "label": ""}, later, 1.0)
+    shown = store.visible(standing.findings(redis, "sw", later), later, HOUR_MS)
+    assert [found["id"] for found in shown] == ["bottleneck-stage/merge_queue"]
 
 
 def test_a_judged_verdict_keeps_its_basis_and_each_rebase_it_went_through(redis):
