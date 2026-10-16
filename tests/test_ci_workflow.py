@@ -1074,7 +1074,8 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
     assert decide["env"]["HEAD_SHA"] == "${{ github.event.pull_request.head.sha }}"
     assert 'base=$(git merge-base origin/dev "$HEAD_SHA")' in decide["run"]
     assert 'PYTHONPATH="$RUNNER_TEMP/grader" python -P -m scripts.ci_mutation.reuse' in decide["run"]
-    assert decide["run"].rstrip().endswith('--head "$HEAD_SHA" --base "$base"')
+    assert decide["run"].rstrip().endswith('--head "$HEAD_SHA" --base "$base" --grader "$GRADER"')
+    assert decide["env"]["GRADER"] == grader["env"]["GRADER"]
     assert 'grep -q "^def exact(" "$RUNNER_TEMP/grader/scripts/ci_mutation/reuse.py"' in decide["run"]
     assert "||" not in decide["run"]
     upload = plan["steps"][names.index("Upload the reused preflight report")]

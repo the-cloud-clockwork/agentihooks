@@ -2043,7 +2043,7 @@ jobs:
           repositories: ${{ github.event.repository.name }}
           permission-actions: read
 
-      # The protected copy decides, so a pull request cannot widen what it may reuse.
+      # The protected copy decides and refuses a head whose preflight producer differs from the grader's.
       - name: Check out the protected grader
         if: github.event_name == 'pull_request'
         env:
@@ -2059,6 +2059,7 @@ jobs:
           BRANCH: ${{ github.head_ref }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GRADER: ${{ github.event.pull_request.base.sha }}
         run: |
           if ! grep -q "^def exact(" "$RUNNER_TEMP/grader/scripts/ci_mutation/reuse.py"; then
             echo "The protected copy has no exact head reuse; mutating"
@@ -2067,7 +2068,7 @@ jobs:
           fi
           base=$(git merge-base origin/dev "$HEAD_SHA")
           PYTHONPATH="$RUNNER_TEMP/grader" python -P -m scripts.ci_mutation.reuse "$BRANCH" "$GITHUB_RUN_ID" \
-            --head "$HEAD_SHA" --base "$base"
+            --head "$HEAD_SHA" --base "$base" --grader "$GRADER"
 
       - name: Upload the reused preflight report
         if: steps.reuse.outputs.reused == 'true'

@@ -330,7 +330,7 @@ def pair(repo):
     return root, commit, base, head
 
 
-def _exact(monkeypatch, root, base, head, runs, archives, argv=None):
+def _exact(monkeypatch, root, base, head, runs, archives, grader=None):
     calls = []
     answers = {f"{EXACT}{head}&branch=a%26b": {"workflow_runs": runs}}
     for run, archive in archives.items():
@@ -346,7 +346,8 @@ def _exact(monkeypatch, root, base, head, runs, archives, argv=None):
     output = root.parent / f"{root.name}-output"
     output.write_text("")
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
-    monkeypatch.setattr("sys.argv", argv or ["reuse", "a&b", "99", "--head", head, "--base", base])
+    argv = ["reuse", "a&b", "99", "--head", head, "--base", base, "--grader", grader or base]
+    monkeypatch.setattr("sys.argv", argv)
     assert reuse.main() == 0
     return output.read_text(), calls
 
@@ -443,10 +444,34 @@ def test_a_newer_red_preflight_on_the_same_head_blocks_an_older_green(pair, monk
     assert written == "reused=false\n"
 
 
-def test_an_exact_head_without_its_base_is_refused(pair, monkeypatch, capsys):
+def test_a_producer_the_protected_grader_changed_after_the_branch_point_blocks_reuse(pair, repo, monkeypatch):
+    root, commit, base, head = pair
+    git = repo[2]
+    git("checkout", "-q", "-b", "dev", base)
+    grader = commit({"scripts/ci_mutation/x.py": "newer\n"})
+    git("checkout", "-q", "branch")
+    archive = _scoped(GREEN, {"base": base, "head": head})
+    written, calls = _exact(monkeypatch, root, base, head, [_run(7, head)], {7: archive}, grader=grader)
+    assert written == "reused=false\n"
+    assert calls == []
+
+
+def test_a_grader_that_moved_only_outside_the_producers_still_reuses(pair, repo, monkeypatch):
+    root, commit, base, head = pair
+    git = repo[2]
+    git("checkout", "-q", "-b", "dev", base)
+    grader = commit({"hooks/b.py": "x = 1\n"})
+    git("checkout", "-q", "branch")
+    archive = _scoped(GREEN, {"base": base, "head": head})
+    written, _ = _exact(monkeypatch, root, base, head, [_run(7, head)], {7: archive}, grader=grader)
+    assert written == "reused=true\n"
+
+
+@pytest.mark.parametrize("given", [["--base", "b"], ["--grader", "g"], []])
+def test_an_exact_head_without_its_base_and_grader_is_refused(pair, monkeypatch, capsys, given):
     _, _, _, head = pair
-    monkeypatch.setattr("sys.argv", ["reuse", "a&b", "99", "--head", head])
+    monkeypatch.setattr("sys.argv", ["reuse", "a&b", "99", "--head", head, *given])
     with pytest.raises(SystemExit) as refused:
         reuse.main()
     assert refused.value.code == 2
-    assert "--head grades an exact head and needs --base" in capsys.readouterr().err
+    assert "--head grades an exact head and needs --base and --grader" in capsys.readouterr().err

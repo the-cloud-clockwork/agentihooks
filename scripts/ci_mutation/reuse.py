@@ -76,9 +76,9 @@ def scope(archive: bytes) -> dict:
         return json.loads(zipped.read(SCOPE))
 
 
-def exact(head: str, base: str, branch: str, current: int) -> tuple[dict, bytes] | None:
-    # The branch's own preflight produced the report, so a head that edits its producer never reuses it.
-    if subprocess.run(["git", "diff", "--quiet", base, head, "--", *PRODUCERS]).returncode:
+def exact(head: str, base: str, grader: str, branch: str, current: int) -> tuple[dict, bytes] | None:
+    # The branch's own preflight produced the report, so its producer must match the protected grader's.
+    if subprocess.run(["git", "diff", "--quiet", grader, head, "--", *PRODUCERS]).returncode:
         return None
     found = latest(f"head_sha={head}&branch={quote(branch)}", current)
     if found:
@@ -96,9 +96,9 @@ def unpack(archive: bytes, row: dict) -> None:
     (EVIDENCE / "reuse.json").write_text(json.dumps({"run": row["id"], "head": row["head_sha"]}) + "\n")
 
 
-def reuse(head: str, branch: str, current: int, base: str | None = None) -> dict | None:
+def reuse(head: str, branch: str, current: int, base: str | None = None, grader: str | None = None) -> dict | None:
     try:
-        found = exact(head, base, branch, current) if base else source(head, branch, current)
+        found = exact(head, base, grader, branch, current) if base else source(head, branch, current)
         if found:
             unpack(found[1], found[0])
             return found[0]
@@ -112,11 +112,12 @@ def main() -> int:
     parser.add_argument("run", type=int)
     parser.add_argument("--head")
     parser.add_argument("--base")
+    parser.add_argument("--grader")
     args = parser.parse_args()
-    if args.head and not args.base:
-        parser.error("--head grades an exact head and needs --base")
+    if args.head and not (args.base and args.grader):
+        parser.error("--head grades an exact head and needs --base and --grader")
     head = args.head or subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip()
-    row = reuse(head, args.branch, args.run, args.base)
+    row = reuse(head, args.branch, args.run, args.base, args.grader)
     if row:
         print(f"Reused the green mutation report of run {row['id']} for {row['head_sha']}")
     else:
