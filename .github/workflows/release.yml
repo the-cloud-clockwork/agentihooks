@@ -73,7 +73,9 @@ jobs:
         if: ${{ !inputs.dry_run }}
         env:
           NEXT: ${{ steps.version.outputs.next }}
-        run: gh release create "v$NEXT" --repo "$GITHUB_REPOSITORY" --title "v$NEXT" --generate-notes --latest
+        run: |
+          bash scripts/ci_release.sh notes "$GITHUB_SHA" "$NEXT" "$RUNNER_TEMP/notes.md"
+          gh release create "v$NEXT" --repo "$GITHUB_REPOSITORY" --title "v$NEXT" --notes-file "$RUNNER_TEMP/notes.md" --generate-notes --latest
 
       - name: Dispatch publish-pypi at the new tag
         if: ${{ !inputs.dry_run && inputs.publish_pypi }}

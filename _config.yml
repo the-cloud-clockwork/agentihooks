@@ -62,6 +62,7 @@ exclude:
   - pyproject.toml
   - CONTRIBUTING.md
   - CHANGELOG.md
+  - changelog.d/
   - CODE_OF_CONDUCT.md
   - SECURITY.md
   - README.md
