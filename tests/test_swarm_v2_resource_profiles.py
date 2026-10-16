@@ -309,6 +309,15 @@ def test_accept_checks_the_reviewer_role_and_identity(tmp_path, role, name, deci
     assert json.loads(path.read_text())["generation"] == (2 if decision == "requalified" else 1)
 
 
+def test_accept_rederives_profiles_instead_of_installing_idle_figures_under_a_real_class(tmp_path):
+    candidate = profiles.derive(measured(memory_runs()), NODES, POLICY)
+    candidate["profiles"]["memory"]["measured"]["peak_rss_mib"]["max"] = 40
+    path = tmp_path / "accepted.json"
+    outcome = profiles.accept(path, candidate, POLICY, "operator")
+    assert outcome["decision"] == "refused"
+    assert not path.exists()
+
+
 def test_accept_does_not_trust_a_requalifying_reviewer_name(tmp_path):
     path = tmp_path / "accepted.json"
     accepted = profiles.derive(measured(memory_runs()), NODES, POLICY)
