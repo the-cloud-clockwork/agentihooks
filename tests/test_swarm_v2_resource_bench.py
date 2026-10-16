@@ -265,6 +265,24 @@ def test_run_measures_each_child_count_and_repeat_in_a_fresh_workdir(tmp_path, m
     bench.run(path, root, generation=8, tools={}, source="s2")
 
 
+def test_changed_workload_argument_holds_promotion_without_a_version_bump(tmp_path, monkeypatch):
+    fixed_host(monkeypatch)
+    workload = {"name": "memory", "class": "memory", "version": "1", "children": [1], "command": ["{python}", "-c", "pass", "16"]}
+    path = suite(tmp_path, [workload])
+    monkeypatch.setattr(bench.sampling, "measure", lambda *args: {})
+    first = bench.run(path, tmp_path / "work", 1, {}, "first")
+    same = bench.run(path, tmp_path / "work", 2, {}, "same")
+    workload["command"][-1] = "32"
+    suite(tmp_path, [workload])
+    changed = bench.run(path, tmp_path / "work", 2, {}, "changed")
+    assert first["tools"] == same["tools"]
+    assert first["tools"] != changed["tools"]
+    accepted, candidate = report_with(1, 100), report_with(2, 100)
+    accepted["tools"], candidate["tools"] = first["tools"], changed["tools"]
+    outcome = profiles.promote(accepted, candidate, profiles.Policy(), "")
+    assert outcome["decision"] == "requalify"
+    assert outcome["changes"]["tools_changed"]
+
 def test_run_stops_a_workload_at_its_timeout(tmp_path):
     command = ["{python}", "-c", "import time; time.sleep(30)"]
     path = suite(
