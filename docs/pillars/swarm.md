@@ -49,6 +49,12 @@ agent name, and a test walks `scripts/` and `hooks/` to keep it so.
 
 ## The master
 
+For Codex executions using `app_server`, herdr is a viewer of the managed
+thread. Closing it leaves the execution running. A push master handles inbox
+work and ends its turn when idle; it does not run `wait --inbox`. See
+[Managed Codex terminals](../reference/codex-managed-terminal.md) for transport
+configuration, reopening the same thread and handoff behavior.
+
 Every swarm that is not stopped keeps exactly one master, named `master@<code>-<n>`. The tick spawns it when the
 swarm starts and spawns a new one when its pane dies; it is never nudged or retired for being idle, and it
 does not count against the `eng` and `ci` caps. A stopping swarm keeps its master until the last worker leaves.
