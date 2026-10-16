@@ -87,16 +87,21 @@ def record_checkpoint(store: RedisStore, slug: str, execution_id: str, seat: str
     store.redis.set(store.key(slug, CHECKPOINTS, execution_id), json.dumps(found), px=CHECKPOINT_TTL_MS)
 
 
-def _checkpoints(store: RedisStore, slug: str, active: list[dict]) -> list[dict]:
-    if not active:
+def _checkpoints(store: RedisStore, slug: str) -> list[dict]:
+    """An execution with no checkpoint yet ages from its start."""
+    agents = sorted(store.execution_occupants(slug).items())
+    if not agents:
         return []
-    keys = [store.key(slug, CHECKPOINTS, row["execution_id"]) for row in active]
+    keys = [store.key(slug, CHECKPOINTS, agent.execution_id) for _, agent in agents]
     taken = store.redis.mget(keys)
     with store.redis.pipeline() as pipe:
         for key in keys:
             pipe.pexpire(key, CHECKPOINT_TTL_MS)
         pipe.execute()
-    return [json.loads(raw) for raw in taken if raw]
+    return [
+        json.loads(raw) if raw else {"execution_id": agent.execution_id, "seat": seat, "taken_at_ms": agent.started_at}
+        for (seat, agent), raw in zip(agents, taken, strict=True)
+    ]
 
 
 def sample(store: RedisStore, slug: str, now_ms: int, feed_at: int, pools: list[dict] | None = None) -> dict:
@@ -109,7 +114,7 @@ def sample(store: RedisStore, slug: str, now_ms: int, feed_at: int, pools: list[
         "attempts": active + pending,
         "quota": _quota(store, now_ms),
         "archive": archive,
-        "checkpoints": _checkpoints(store, slug, active),
+        "checkpoints": _checkpoints(store, slug),
         "brain": {"feed_at_ms": feed_at, "denials": []},
     }
 

@@ -22,8 +22,11 @@ def store():
 
 
 def seeded(store):
-    attached = AgentRecord(store.next_name(SLUG, "eng"), "eng", "t1", pane_id="w1:p1", seat=f"eng-1@{SLUG}")
-    detached = AgentRecord(store.next_name(SLUG, "eng"), "eng", "t2", seat=f"eng-2@{SLUG}")
+    started = NOW - 1_000
+    attached = AgentRecord(
+        store.next_name(SLUG, "eng"), "eng", "t1", pane_id="w1:p1", seat=f"eng-1@{SLUG}", started_at=started
+    )
+    detached = AgentRecord(store.next_name(SLUG, "eng"), "eng", "t2", seat=f"eng-2@{SLUG}", started_at=started)
     ex1 = store.execution_registry.start(SLUG, attached, "").execution_id
     ex2 = store.execution_registry.start(SLUG, detached, "").execution_id
     beat = {"state": "working", "accepted_at_ms": NOW - 1_000, "archive_watermark": 3}
@@ -108,7 +111,7 @@ def test_record_exports_the_dashboard_panels_and_one_coverage_row_per_source(tmp
             "archive": (1, 2),
             "brain_feed": (1, 1),
             "pools": (0, 0),
-            "checkpoints": (1, 0),
+            "checkpoints": (1, 2),
             "brain_denials": (0, 0),
         }
         rows = box.recent("fleet_panels", NOW) + box.recent("fleet_sources", NOW)
@@ -197,6 +200,21 @@ def test_the_newest_checkpoint_of_each_active_execution_reaches_the_sink(tmp_pat
     assert values[("knowledge", "feed_age_ms")] == 0.0
     assert ("knowledge", "cross_scope_denials") not in values
     assert {row["source"]: (row["available"], row["readings"]) for row in sources}["checkpoints"] == (1, 2)
+
+
+def test_an_execution_without_a_checkpoint_ages_from_its_start(tmp_path, store):
+    late = AgentRecord(store.next_name(SLUG, "eng"), "eng", "t1", seat=f"eng-1@{SLUG}", started_at=NOW - 1_900_000)
+    fresh = AgentRecord(store.next_name(SLUG, "eng"), "eng", "t2", seat=f"eng-2@{SLUG}", started_at=NOW - 5_000)
+    late_id = store.execution_registry.start(SLUG, late, "").execution_id
+    fresh_id = store.execution_registry.start(SLUG, fresh, "").execution_id
+    metrics_fleet.record_checkpoint(store, SLUG, fresh_id, f"eng-2@{SLUG}", NOW - 1_000)
+    assert metrics_fleet.sample(store, SLUG, NOW, NOW)["checkpoints"] == [
+        {"execution_id": late_id, "seat": f"eng-1@{SLUG}", "taken_at_ms": NOW - 1_900_000},
+        {"execution_id": fresh_id, "seat": f"eng-2@{SLUG}", "taken_at_ms": NOW - 1_000},
+    ]
+    panels, _ = _recorded(tmp_path, store)
+    values = {(row["panel"], row["series"]): row["value"] for row in panels}
+    assert (values[("checkpoint_age", "stale")], values[("checkpoint_age", "oldest_age_ms")]) == (1.0, 1_900_000.0)
 
 
 def test_a_worker_pool_reading_reaches_the_sink_per_pool(tmp_path, store):

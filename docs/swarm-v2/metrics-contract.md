@@ -14,7 +14,7 @@ One observation of the fleet at `at_ms`, numbered by a rising `seq`.
 | `attempts` | `execution_id`, `seat`, `task`, `phase` (`active` or `pending`), `pool`, `permitted_pools`, `requested`, `pending_since_ms`, `protected`, `idle_since_ms`, `terminal`, `authority` | Execution registry and runtime observation |
 | `quota` | `account`, `state` (`waiting` or `allowed`), `since_ms`, `resets_at_ms` | Fleet quota readings |
 | `archive` | The SV2-OBS-04 diagnose archive entry: `execution_id`, `seat`, `process`, `activity`, `heartbeat_at_ms`, `watermark`, `advanced_at_ms`, `state`, `observed_at_ms` | `Health.diagnose` |
-| `checkpoints` | `execution_id`, `seat`, `taken_at_ms` of the newest checkpoint | Each pointer the controller artifacts API commits; a reading expires seven days after its execution leaves the active set |
+| `checkpoints` | `execution_id`, `seat`, `taken_at_ms` of the newest checkpoint | Each pointer the controller artifacts API commits; an active execution with none yet ages from its start; a reading expires seven days after its execution leaves the active set |
 | `brain.feed_at_ms` | Time of the newest brain feed | Brain adapter |
 | `brain.denials` | `denial_id`, `at_ms`, `requester_scope`, `target_brain`, `session_title` | Brain routing refusals; not measured yet, because the brain does not refuse a cross scope query |
 
