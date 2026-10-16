@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from scripts.swarm_v2.herdr.capabilities import Qualifier, machine_probe
+from scripts.swarm_v2.herdr.capabilities import Qualifier, machine_probe, machine_status
 from scripts.swarm_v2.herdr.catalog import Catalog
 from scripts.swarm_v2.herdr.endpoints import Endpoint, EndpointRefused
 from scripts.swarm_v2.herdr.reconcile import Registrations, Store
@@ -94,7 +94,7 @@ class Client:
     def __init__(self, fleet: Fleet, root: Path) -> None:
         self.fleet, self.root = fleet, root
         self.registrations = Registrations(Catalog(fleet), Store(root / "registrations.json"))
-        self.qualifier = Qualifier(machine_probe(fleet))
+        self.qualifier = Qualifier(machine_probe(fleet), machine_status(fleet))
         self.router = Router(self.registrations.store, Catalog(fleet), self.qualifier, fleet, root / DELIVERIES)
         self.router.clock = lambda: CLOCK
 

@@ -8,7 +8,7 @@ from scripts.swarm.store import RedisStore, SwarmError
 from scripts.swarm_v2 import image_tag, masters, proof_swarm
 from scripts.swarm_v2.accounts import AccountCapacity, fleet_held
 from scripts.swarm_v2.auth_context import Registration
-from scripts.swarm_v2.herdr.capabilities import Qualifier, machine_probe
+from scripts.swarm_v2.herdr.capabilities import Qualifier, machine_probe, machine_status
 from scripts.swarm_v2.herdr.endpoints import Clients
 from scripts.swarm_v2.herdr.target import DELIVERIES, Router
 from scripts.swarm_v2.herdr.viewer import Viewer
@@ -235,7 +235,7 @@ def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[s
 def terminal_views(controller: "Controller", environ: Mapping[str, str]) -> TerminalViews:
     terminal = controller.terminals.terminal
     registrations, journal = terminal.registrations, terminal.home.terminals / DELIVERIES
-    qualifier = Qualifier(machine_probe(terminal.run))
+    qualifier = Qualifier(machine_probe(terminal.run), machine_status(terminal.run))
     router = Router(registrations.store, registrations.catalog, qualifier, terminal.run, journal, mutations=False)
     aggregation = environ.get(AGGREGATION_ENV) != "off"
     viewer = Viewer(router, terminal.run, OPERATOR, aggregation=aggregation)

@@ -56,7 +56,7 @@ class Runner:
 
 
 def qualifier(runner: Runner) -> Qualifier:
-    return Qualifier(capabilities.machine_probe(runner))
+    return Qualifier(capabilities.machine_probe(runner), capabilities.machine_status(runner))
 
 
 def _refused(action) -> str:
