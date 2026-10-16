@@ -14,6 +14,8 @@ from tests.test_swarm_v2_deployed_runtime import PoolPods, _policy, _worker_pod,
 
 pytestmark = pytest.mark.unit
 
+REAL_HOST = HerdrRuntime.host
+
 DEPLOYED = {"AGENTIHOOKS_DEPLOYMENT": "distributed"}
 NODE_OFF = (
     "host room off: a deployed controller's own node says nothing about worker capacity and no worker pool "
@@ -51,6 +53,7 @@ def test_deployed_mode_is_any_deployment_other_than_local(environ, expected):
 
 
 def test_the_deployed_controller_host_room_is_off_without_reading_its_own_node(no_node, monkeypatch):
+    monkeypatch.setattr(HerdrRuntime, "host", REAL_HOST)
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "distributed")
     assert HerdrRuntime().host() == Room(None, NODE_OFF, UNKNOWN)
 
@@ -58,6 +61,7 @@ def test_the_deployed_controller_host_room_is_off_without_reading_its_own_node(n
 def test_a_local_controller_host_room_still_reads_its_own_node(monkeypatch):
     sample = host_budget.HostSample(load1=0.5, cpus=8, available_mb=64000, agents=2)
     monkeypatch.setattr(host_budget, "read_host", lambda: sample)
+    monkeypatch.setattr(HerdrRuntime, "host", REAL_HOST)
     monkeypatch.delenv("AGENTIHOOKS_DEPLOYMENT", raising=False)
     assert HerdrRuntime().host() is sample
 
