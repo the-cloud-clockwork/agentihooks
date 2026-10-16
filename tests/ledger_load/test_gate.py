@@ -1,6 +1,7 @@
 import inspect
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -225,6 +226,20 @@ def test_the_write_breach_problem_names_its_measured_p95():
 def test_the_reported_write_p95_is_none_without_writes():
     assert ledger_load.p95_or_none([]) is None
     assert ledger_load.p95_or_none([0.3, 0.1, 0.2]) == 0.3
+
+
+def test_a_run_returns_its_problems_and_its_measured_write_p95(monkeypatch, tmp_path):
+    results = {"writes": [0.1] * 9 + [0.7], "reads": [0.05] * 10, "item_reads": [0.01] * 100, "errors": []}
+    results["cpu"] = [(0.0, 0.0), (float(ledger_load.CPU_WINDOW_S), 1.0)]
+    monkeypatch.setattr(ledger_load, "full_size", lambda at: {"tasks": []})
+    monkeypatch.setattr(ledger_load, "store", lambda folder, doc: "token")
+    monkeypatch.setattr(ledger_load, "free_port", lambda: 0)
+    monkeypatch.setattr(ledger_load, "duration", lambda: 10.0)
+    monkeypatch.setattr(ledger_load, "start_server", lambda folder, port, log: SimpleNamespace(pid=1))
+    monkeypatch.setattr(ledger_load, "stop_server", lambda server: None)
+    monkeypatch.setattr(ledger_load, "load", lambda port, token, pid, seconds: results)
+    monkeypatch.setattr(ledger_load, "unexpired", lambda folder, at: [])
+    assert ledger_load.run(tmp_path) == ([], 0.7)
 
 
 def test_some_open_alerts_are_past_their_quiet_hour_so_the_expiry_sweep_has_work():
