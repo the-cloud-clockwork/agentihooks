@@ -311,7 +311,6 @@ def test_a_reused_report_never_brings_the_source_scope(repo, monkeypatch):
 
 
 EXACT = "actions/workflows/mutation-preflight.yml/runs?event=push&status=completed&per_page=30&head_sha="
-H, B = "h" * 40, "b" * 40
 
 
 def _scoped(report, scope):
@@ -323,9 +322,17 @@ def _scoped(report, scope):
     return data.getvalue()
 
 
-def _exact(monkeypatch, tmp_path, runs, archives):
+@pytest.fixture
+def pair(repo):
+    root, commit, _ = repo
+    base = commit(SOURCE)
+    head = commit({"hooks/a.py": "def f():\n    return 2\n"})
+    return root, commit, base, head
+
+
+def _exact(monkeypatch, root, base, head, runs, archives, argv=None):
     calls = []
-    answers = {f"{EXACT}{H}&branch=a%26b": {"workflow_runs": runs}}
+    answers = {f"{EXACT}{head}&branch=a%26b": {"workflow_runs": runs}}
     for run, archive in archives.items():
         artifact = {"id": run, "name": "mutation-preflight-report", "expired": False}
         answers[f"actions/runs/{run}/artifacts?per_page=100"] = {"artifacts": [artifact]}
@@ -336,61 +343,107 @@ def _exact(monkeypatch, tmp_path, runs, archives):
         return answers.get(path, {"artifacts": []})
 
     monkeypatch.setattr(reuse, "api", api)
-    monkeypatch.chdir(tmp_path)
-    output = tmp_path / "output"
+    output = root.parent / f"{root.name}-output"
     output.write_text("")
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
-    monkeypatch.setattr("sys.argv", ["reuse", "a&b", "99", "--head", H, "--base", B])
+    monkeypatch.setattr("sys.argv", argv or ["reuse", "a&b", "99", "--head", head, "--base", base])
     assert reuse.main() == 0
     return output.read_text(), calls
 
 
-def test_a_pull_request_reuses_the_green_preflight_of_its_exact_head_and_base(tmp_path, monkeypatch, capsys):
-    archive = _scoped(GREEN, {"base": B, "head": H})
-    written, calls = _exact(monkeypatch, tmp_path, [_run(7, H, branch="a&b")], {7: archive})
+def test_a_pull_request_reuses_the_green_preflight_of_its_exact_head_and_base(pair, monkeypatch, capsys):
+    root, _, base, head = pair
+    archive = _scoped(GREEN, {"base": base, "head": head})
+    written, calls = _exact(monkeypatch, root, base, head, [_run(7, head, branch="a&b")], {7: archive})
     assert written == "reused=true\n"
-    assert calls[0] == f"{EXACT}{H}&branch=a%26b"
-    assert capsys.readouterr().out == f"Reused the green mutation report of run 7 for {H}\n"
-    assert json.loads((tmp_path / ".mutation-gate/report.json").read_text()) == GREEN
-    assert not (tmp_path / ".mutation-gate/scope.json").exists()
-    assert json.loads((tmp_path / ".mutation-gate/reuse.json").read_text()) == {"run": 7, "head": H}
+    assert calls[0] == f"{EXACT}{head}&branch=a%26b"
+    assert capsys.readouterr().out == f"Reused the green mutation report of run 7 for {head}\n"
+    assert json.loads((root / ".mutation-gate/report.json").read_text()) == GREEN
+    assert not (root / ".mutation-gate/scope.json").exists()
+    assert json.loads((root / ".mutation-gate/reuse.json").read_text()) == {"run": 7, "head": head}
+
+
+@pytest.mark.parametrize("planted", ["base", "head", "missing", "absent"])
+def test_a_planted_base_or_head_difference_in_the_preflight_scope_mutates_in_full(pair, monkeypatch, planted):
+    root, _, base, head = pair
+    scope = {
+        "base": {"base": head, "head": head},
+        "head": {"base": base, "head": base},
+        "missing": {"base": base},
+        "absent": None,
+    }[planted]
+    written, _ = _exact(monkeypatch, root, base, head, [_run(7, head)], {7: _scoped(GREEN, scope)})
+    assert written == "reused=false\n"
+    assert not (root / ".mutation-gate").exists()
 
 
 @pytest.mark.parametrize(
-    "scope",
-    [{"base": "c" * 40, "head": H}, {"base": B, "head": "c" * 40}, {"base": B}, None],
+    "producer",
+    [
+        ".github/workflows/mutation-preflight.yml",
+        ".github/actions/browser-cache/action.yml",
+        "scripts/ci_mutation/x.py",
+    ],
 )
-def test_a_planted_base_or_head_difference_in_the_preflight_scope_mutates_in_full(tmp_path, monkeypatch, scope):
-    written, _ = _exact(monkeypatch, tmp_path, [_run(7, H)], {7: _scoped(GREEN, scope)})
+def test_a_head_that_edits_the_preflight_producer_never_reuses_its_report(pair, monkeypatch, producer):
+    root, commit, base, _ = pair
+    head = commit({producer: "changed\n"})
+    archive = _scoped(GREEN, {"base": base, "head": head})
+    written, calls = _exact(monkeypatch, root, base, head, [_run(7, head)], {7: archive})
     assert written == "reused=false\n"
-    assert not (tmp_path / ".mutation-gate").exists()
+    assert calls == []
+
+
+def test_an_unknown_base_never_reuses(pair, monkeypatch):
+    root, _, _, head = pair
+    base = "0" * 40
+    archive = _scoped(GREEN, {"base": base, "head": head})
+    written, calls = _exact(monkeypatch, root, base, head, [_run(7, head)], {7: archive})
+    assert written == "reused=false\n"
+    assert calls == []
 
 
 @pytest.mark.parametrize("red", REDS)
-def test_a_red_preflight_of_the_exact_head_and_base_is_never_reused(tmp_path, monkeypatch, red):
-    written, _ = _exact(monkeypatch, tmp_path, [_run(7, H)], {7: _scoped(red, {"base": B, "head": H})})
+def test_a_red_preflight_of_the_exact_head_and_base_is_never_reused(pair, monkeypatch, red):
+    root, _, base, head = pair
+    archive = _scoped(red, {"base": base, "head": head})
+    written, _ = _exact(monkeypatch, root, base, head, [_run(7, head)], {7: archive})
     assert written == "reused=false\n"
 
 
-def test_a_failed_preflight_run_with_a_green_report_is_never_reused(tmp_path, monkeypatch):
-    archive = _scoped(GREEN, {"base": B, "head": H})
-    written, _ = _exact(monkeypatch, tmp_path, [_run(7, H, "failure")], {7: archive})
+def test_a_failed_preflight_run_with_a_green_report_is_never_reused(pair, monkeypatch):
+    root, _, base, head = pair
+    archive = _scoped(GREEN, {"base": base, "head": head})
+    written, _ = _exact(monkeypatch, root, base, head, [_run(7, head, "failure")], {7: archive})
     assert written == "reused=false\n"
 
 
-def test_a_run_answered_for_another_head_is_never_reused(tmp_path, monkeypatch):
-    archive = _scoped(GREEN, {"base": B, "head": H})
-    written, _ = _exact(monkeypatch, tmp_path, [_run(7, "c" * 40)], {7: archive})
+def test_a_run_answered_for_another_head_is_never_reused(pair, monkeypatch):
+    root, _, base, head = pair
+    archive = _scoped(GREEN, {"base": base, "head": head})
+    written, _ = _exact(monkeypatch, root, base, head, [_run(7, base)], {7: archive})
     assert written == "reused=false\n"
 
 
-def test_the_exact_mode_reads_only_the_runs_of_its_head_on_its_branch(tmp_path, monkeypatch):
-    written, calls = _exact(monkeypatch, tmp_path, [], {})
+def test_the_exact_mode_reads_only_the_runs_of_its_head_on_its_branch(pair, monkeypatch):
+    root, _, base, head = pair
+    written, calls = _exact(monkeypatch, root, base, head, [], {})
     assert written == "reused=false\n"
-    assert calls == [f"{EXACT}{H}&branch=a%26b"]
+    assert calls == [f"{EXACT}{head}&branch=a%26b"]
 
 
-def test_a_newer_red_preflight_on_the_same_head_blocks_an_older_green(tmp_path, monkeypatch):
-    green, red = _scoped(GREEN, {"base": B, "head": H}), _scoped(RED, {"base": B, "head": H})
-    written, _ = _exact(monkeypatch, tmp_path, [_run(8, H, "failure"), _run(7, H)], {8: red, 7: green})
+def test_a_newer_red_preflight_on_the_same_head_blocks_an_older_green(pair, monkeypatch):
+    root, _, base, head = pair
+    scope = {"base": base, "head": head}
+    runs = [_run(8, head, "failure"), _run(7, head)]
+    written, _ = _exact(monkeypatch, root, base, head, runs, {8: _scoped(RED, scope), 7: _scoped(GREEN, scope)})
     assert written == "reused=false\n"
+
+
+def test_an_exact_head_without_its_base_is_refused(pair, monkeypatch, capsys):
+    _, _, _, head = pair
+    monkeypatch.setattr("sys.argv", ["reuse", "a&b", "99", "--head", head])
+    with pytest.raises(SystemExit) as refused:
+        reuse.main()
+    assert refused.value.code == 2
+    assert "--head grades an exact head and needs --base" in capsys.readouterr().err

@@ -1069,7 +1069,9 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
     assert decide["env"]["HEAD_SHA"] == "${{ github.event.pull_request.head.sha }}"
     assert 'base=$(git merge-base origin/dev "$HEAD_SHA")' in decide["run"]
     assert 'PYTHONPATH="$RUNNER_TEMP/grader" python -P -m scripts.ci_mutation.reuse' in decide["run"]
-    assert '--head "$HEAD_SHA" --base "$base" || echo "reused=false" >> "$GITHUB_OUTPUT"' in decide["run"]
+    assert decide["run"].rstrip().endswith('--head "$HEAD_SHA" --base "$base"')
+    assert 'grep -q "^def exact(" "$RUNNER_TEMP/grader/scripts/ci_mutation/reuse.py"' in decide["run"]
+    assert "||" not in decide["run"]
     upload = plan["steps"][names.index("Upload the reused preflight report")]
     assert upload["if"] == "steps.reuse.outputs.reused == 'true'"
     assert upload["with"]["name"] == "mutation-preflight-reuse"
@@ -1102,6 +1104,6 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
     reused = steps["Download the reused preflight report"]
     assert reused["if"] == "needs.mutation-plan.outputs.reused == 'true'"
     assert reused["with"] == {"name": "mutation-preflight-reuse", "path": ".mutation-gate"}
-    names = list(steps)
-    assert names.index("Download the reused preflight report") < names.index("Upload complete mutation evidence")
+    order = list(steps)
+    assert order.index("Download the reused preflight report") < order.index("Upload complete mutation evidence")
     assert steps["Upload complete mutation evidence"]["if"] == "always()"

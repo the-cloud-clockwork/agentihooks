@@ -12,6 +12,7 @@ from scripts.ci_mutation.scope import PREFLIGHT, weakened_tests
 EVIDENCE = Path(".mutation-gate")
 REPORT = "mutation-preflight-report"
 SCOPE = "scope.json"
+PRODUCERS = (".github/workflows/mutation-preflight.yml", ".github/actions/", "scripts/ci_mutation/")
 
 
 def api(path: str, binary: bool = False):
@@ -51,11 +52,15 @@ def only_tests_added(source: str, head: str) -> bool:
     return all(name.startswith("tests/") for name in names if name) and not weakened_tests(Path.cwd(), source, head)
 
 
+def green(row: dict, graded: tuple[bytes, bool] | None) -> bool:
+    return bool(graded and graded[1] and row["conclusion"] == "success")
+
+
 def source(head: str, branch: str, current: int) -> tuple[dict, bytes] | None:
     found = latest(f"head_sha={head}", current) or latest(f"branch={quote(branch)}", current)
     if found:
         row, graded = found
-        if graded and graded[1] and row["conclusion"] == "success" and only_tests_added(row["head_sha"], head):
+        if green(row, graded) and only_tests_added(row["head_sha"], head):
             return row, graded[0]
 
 
@@ -65,11 +70,13 @@ def scope(archive: bytes) -> dict | None:
 
 
 def exact(head: str, base: str, branch: str, current: int) -> tuple[dict, bytes] | None:
+    # The branch's own preflight produced the report, so a head that edits its producer never reuses it.
+    if subprocess.run(["git", "diff", "--quiet", base, head, "--", *PRODUCERS]).returncode:
+        return None
     found = latest(f"head_sha={head}&branch={quote(branch)}", current)
     if found:
         row, graded = found
-        green = graded and graded[1] and row["conclusion"] == "success"
-        if green and row["head_sha"] == head and scope(graded[0]) == {"base": base, "head": head}:
+        if green(row, graded) and row["head_sha"] == head and scope(graded[0]) == {"base": base, "head": head}:
             return row, graded[0]
 
 
@@ -99,6 +106,8 @@ def main() -> int:
     parser.add_argument("--head")
     parser.add_argument("--base")
     args = parser.parse_args()
+    if args.head and not args.base:
+        parser.error("--head grades an exact head and needs --base")
     head = args.head or subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip()
     row = reuse(head, args.branch, args.run, args.base)
     if row:
