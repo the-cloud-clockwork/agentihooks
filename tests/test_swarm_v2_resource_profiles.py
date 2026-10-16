@@ -287,6 +287,18 @@ def test_accept_writes_only_a_promoted_report_and_rollback_restores_the_one_it_r
     assert path.read_bytes() == installed
 
 
+def test_accept_does_not_trust_a_requalifying_reviewer_name(tmp_path):
+    path = tmp_path / "accepted.json"
+    accepted = profiles.derive(measured(memory_runs()), NODES, POLICY)
+    candidate = profiles.derive(measured(memory_runs(2), 2), NODES, POLICY)
+    profiles.accept(path, accepted, POLICY, "")
+    before = path.read_bytes()
+    outcome = profiles.accept(path, candidate, POLICY, "operator")
+    assert outcome["decision"] == "requalify"
+    assert path.read_bytes() == before
+    assert not path.with_name("accepted.json.previous").exists()
+
+
 def test_an_interrupted_rollback_keeps_both_reports_on_disk(tmp_path):
     folder = tmp_path / "reports"
     folder.mkdir()

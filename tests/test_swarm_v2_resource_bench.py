@@ -329,7 +329,7 @@ def test_cli_runs_reads_nodes_derives_and_renders(tmp_path):
     measured = json.loads(measurements.read_text())
     assert measurements.read_text() == json.dumps(measured, indent=2) + "\n"
     assert (measured["generation"], measured["source"]) == (3, "s3")
-    assert set(measured["tools"]) == {*bench.TOOLS, "workload:memory"}
+    assert set(measured["tools"]) == {*bench.TOOLS, "workload:memory", "workload-command:memory"}
     (files / "listing.json").write_text(json.dumps(NODE_LISTING))
     (files / "pods.json").write_text(json.dumps({"items": []}))
     nodes = files / "nodes.json"
