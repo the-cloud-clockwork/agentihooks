@@ -138,6 +138,24 @@ def test_bootstrap_renders_both_targets_into_separate_homes(fixture):
     assert "AH_CC_TOKEN_POOL_A" not in claude_text + codex_text
 
 
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_bootstrap_emits_binding_evidence_accepted_by_the_local_inspector(fixture, target):
+    from scripts.profiles import binding
+
+    templates, volume = fixture
+    worker_home.bootstrap(request(templates, volume))
+    home = volume / "attempt-1" / "homes" / target / f".{target}"
+
+    evidence = binding.inspect(home, f"fixture-{target}", target)
+
+    assert evidence["canary"]
+    assert f"--canary {evidence['canary']}" in (home / binding.PERSONAS[target]).read_text()
+    assert evidence["source_blobs"]
+    (home / binding.PERSONAS[target]).write_text("changed mounted persona")
+    with pytest.raises(ValueError, match="mounted persona changed"):
+        binding.inspect(home, f"fixture-{target}", target)
+
+
 @pytest.mark.parametrize("attempt_id", ["attempt-1", "attempt-2"])
 def test_bootstrap_completes_native_claude_onboarding(fixture, attempt_id):
     from scripts.claude_config import claude_json
