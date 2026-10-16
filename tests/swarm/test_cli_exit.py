@@ -10,7 +10,7 @@ pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 @pytest.mark.parametrize("case", ["obsolete_wait", "blocked_dependency"])
-def test_a_claimless_worker_exits_and_its_seat_is_free_on_the_next_tick(env, monkeypatch, capsys, case):
+def test_a_claimless_worker_exits_and_its_seat_is_free_on_the_next_tick(env, monkeypatch, capsys, case):  # noqa: F811
     from scripts.swarm.tick import tick
 
     store, ledger, runtime = env
@@ -49,7 +49,7 @@ def test_a_claimless_worker_exits_and_its_seat_is_free_on_the_next_tick(env, mon
     assert store.claimant("sw", "t1") == ("successor" if case == "obsolete_wait" else None)
 
 
-def test_exit_does_not_abandon_an_active_worker_claim(env, monkeypatch):
+def test_exit_does_not_abandon_an_active_worker_claim(env, monkeypatch):  # noqa: F811
     store, _, runtime = env
     run("sw", "create", "--repo", ".")
     name = store.next_name("sw", "eng", 1000)
