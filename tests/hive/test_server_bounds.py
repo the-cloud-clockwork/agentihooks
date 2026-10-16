@@ -1,5 +1,7 @@
 import json
 import socket
+import ssl
+import subprocess
 import threading
 import time
 
@@ -86,3 +88,59 @@ def test_trickling_connections_are_dropped_and_a_real_join_is_served(admin, boun
         thread.join(timeout=10)
     assert len(dropped) == server.MAX_HANDLERS
     assert all(elapsed < server.REQUEST_DEADLINE_S + 2 for elapsed in dropped)
+
+
+@pytest.fixture
+def cert(tmp_path):
+    subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-days",
+            "1",
+            "-subj",
+            "/CN=localhost",
+            "-addext",
+            "subjectAltName=DNS:localhost",
+            "-keyout",
+            tmp_path / "key.pem",
+            "-out",
+            tmp_path / "cert.pem",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    return str(tmp_path / "cert.pem"), str(tmp_path / "key.pem")
+
+
+def test_silent_tls_handshakes_are_dropped_and_a_real_https_join_is_served(admin, cert, monkeypatch):
+    monkeypatch.setattr(server, "MAX_HANDLERS", 2)
+    monkeypatch.setattr(server, "REQUEST_DEADLINE_S", 1)
+    monkeypatch.setattr(server, "REQUEST_TIMEOUT_S", 30)
+    httpd = server.make_server(admin, PUBLIC, "localhost", 0, cert)
+    threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
+    port = httpd.server_address[1]
+    try:
+        silent = [socket.create_connection(("localhost", port), timeout=5) for _ in range(server.MAX_HANDLERS)]
+        time.sleep(0.3)
+        body = json.dumps({"code": auth.invite(admin, "laptop")}).encode()
+        trusting = ssl.create_default_context(cafile=cert[0])
+        started = time.monotonic()
+        with socket.create_connection(("localhost", port), timeout=5) as raw:
+            with trusting.wrap_socket(raw, server_hostname="localhost") as conn:
+                conn.sendall(b"POST /hive/join HTTP/1.0\r\nContent-Length: %d\r\n\r\n%s" % (len(body), body))
+                reply = b""
+                while chunk := conn.recv(65536):
+                    reply += chunk
+        assert int(reply.split()[1]) == 200
+        assert time.monotonic() - started < server.REQUEST_DEADLINE_S + 2
+        for conn in silent:
+            assert conn.recv(1) == b""
+            conn.close()
+    finally:
+        httpd.shutdown()
+        httpd.server_close()

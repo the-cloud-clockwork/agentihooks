@@ -39,15 +39,19 @@ class _TLSHandler(BaseHTTPRequestHandler):
     def setup(self):
         if self.tls is not None:
             self.request.settimeout(self.timeout)
+            self.reaped = self.request.dup()
+            self.server.track(self.reaped)
             try:
                 self.request = self.tls.wrap_socket(self.request, server_side=True)
             except OSError as exc:
+                self.reaped.close()
                 raise Dropped from exc
-            self.server.track(self.request)
         super().setup()
 
     def finish(self):
         super().finish()
+        if self.tls is not None:
+            self.reaped.close()
         if isinstance(self.request, ssl.SSLSocket):
             try:
                 self.request.unwrap()
