@@ -58,6 +58,20 @@ def test_one_failed_scenario_fails_the_step_and_every_scenario_reports(tmp_path)
     assert f"::error title={passing}" not in result.stdout
 
 
+def test_scenarios_sharing_a_file_name_keep_their_own_results(tmp_path):
+    scenarios = []
+    for name, status in (("one", 0), ("two", 4)):
+        folder = tmp_path / name
+        folder.mkdir()
+        script = folder / "scenario.sh"
+        script.write_text(f"echo {name} output\nexit {status}\n")
+        scenarios.append(str(script))
+    result = run(tmp_path, *scenarios)
+    assert result.returncode == 1
+    assert re.search(rf"::group::{re.escape(scenarios[0])} passed in \d+s\none output\n", result.stdout)
+    assert re.search(rf"::group::{re.escape(scenarios[1])} failed with exit 4 in \d+s\ntwo output\n", result.stdout)
+
+
 def test_the_swarm_image_job_runs_every_scenario_in_one_parallel_step_on_the_built_image():
     job = yaml.safe_load((ROOT / ".github/workflows/swarm-smoke.yml").read_text())["jobs"]["smoke"]
     steps = job["steps"]
