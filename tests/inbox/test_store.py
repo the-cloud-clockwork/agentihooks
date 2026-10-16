@@ -246,6 +246,12 @@ def test_a_reply_without_an_operation_id_keeps_returning_its_refused_answer(stor
     assert store.get(item.id).state == "done"
 
 
+def test_a_new_reply_operation_on_a_refused_answer_slot_is_not_taken_for_a_replay(store):
+    item, answer = refused_answer(store)
+    assert store.reply(item.id, "master", "two tasks left", answer_id="op-new").id == answer.id
+    assert store.get(item.id).state == "done"
+
+
 @pytest.mark.parametrize("moved", ["cancel", "handoff", "open", "other answer"])
 def test_reopen_leaves_an_item_this_answer_did_not_close_as_it_is(store, moved):
     item, answer = refused_answer(store)
@@ -261,11 +267,10 @@ def test_reopen_leaves_an_item_this_answer_did_not_close_as_it_is(store, moved):
     assert (store.get(item.id), store.history(item.id)) == (before, history)
 
 
-def test_reopen_refuses_a_ref_that_names_no_inbox_message(store):
+def test_reopen_skips_a_ref_that_names_no_inbox_message(store):
     item = store.send("master", "operator", "a ledger event", ref="ledger-write-1")
-    with pytest.raises(InboxError) as refused:
-        store.reopen(item, "swarm", "reopened")
-    assert str(refused.value) == "no message ledger-write-1"
+    assert store.reopen(item, "swarm", "reopened") is None
+    assert not store.redis.exists(store.key("item", "ledger-write-1"))
 
 
 @pytest.mark.parametrize("conflicts", [1, 3])

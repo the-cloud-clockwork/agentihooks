@@ -417,7 +417,7 @@ class InboxStore:
             raise InboxError(f"message {item_id} is closed: {item.reason}")
         self.redis.hsetnx(key, field, answer_id or new_item_id())
         reply_id = self.redis.hget(key, field)
-        if answer_id and self.redis.hget(self.key("item", reply_id), "state") == "cancelled":
+        if answer_id == reply_id and self.redis.hget(self.key("item", reply_id), "state") == "cancelled":
             raise InboxError(f"answer {reply_id} to message {item_id} was refused")
         if entry := self.entry_of(item_id):
             self.about(reply_id, entry)
@@ -464,7 +464,10 @@ class InboxStore:
         key = self.key("item", answer.ref)
         with self.redis.pipeline() as pipe:
             pipe.watch(key)
-            item = _item(pipe.hgetall(key), answer.ref)
+            raw = pipe.hgetall(key)
+            if not raw:
+                return None
+            item = _item(raw, answer.ref)
             if (item.state, item.reason) != close_reason("done", replied(answer.id)):
                 return None
             moved = replace(item, state="read", updated_at=now_ms(), reason=reason)

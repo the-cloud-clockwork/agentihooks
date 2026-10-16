@@ -132,7 +132,7 @@ def post(inbox, item, write):
     except SwarmError as exc:
         refused = exc
     if refused:
-        if not reopened(inbox, item, refused):
+        if not may_cancel(inbox, item, refused):
             return False
         inbox.close(item.id, item.address, "cancel", f"refused by the ledger page: {refused}")
         if item.sender != BY:
@@ -141,7 +141,7 @@ def post(inbox, item, write):
     return True
 
 
-def reopened(inbox, item, refused):
+def may_cancel(inbox, item, refused):
     """False while the entry item a refused answer closed cannot be reopened yet: the answer waits for the next pass."""
     if not (item.ref and inbox.entry_of(item.id)):
         return True
@@ -149,8 +149,6 @@ def reopened(inbox, item, refused):
         inbox.reopen(item, BY, f"reopened: the answer was refused by the ledger page: {refused}")
     except Contended:
         return False
-    except InboxError:
-        pass
     return True
 
 
