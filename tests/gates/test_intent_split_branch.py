@@ -50,6 +50,18 @@ def test_a_merge_by_branch_or_unnamed_is_matched_to_its_half(tmp_path, command, 
     assert run.calls == [(args, {**VIEWED, "cwd": "/work/tree"})]
 
 
+@pytest.mark.parametrize(
+    "flag", ["-A", "--author-email", "-b", "--body", "-F", "--body-file", "--match-head-commit", "-t", "--subject"]
+)
+def test_a_merge_option_value_is_not_read_as_the_branch(tmp_path, flag):
+    verdicts(tmp_path).write(TASK, "pass", "judged", NOW, url=FIRST, split=True)
+    run = Viewed(FIRST)
+    assert (
+        intent.IntentGate(run=run).decide(bash(f"gh pr merge {flag} value half-two"), WHO, verdicts(tmp_path)).allowed
+    )
+    assert run.calls[0][0] == view("half-two")
+
+
 def test_a_pull_view_without_a_working_folder_runs_in_the_hook_folder(tmp_path):
     verdicts(tmp_path).write(TASK, "pass", "judged", NOW, url=FIRST, split=True)
     run = Viewed(FIRST)
