@@ -224,6 +224,83 @@ def test_open_second_pull_request_continues_after_the_first_merge():
     assert found["seconds"]["review"] == 14400.0
 
 
+@pytest.mark.parametrize("kind", ["merge", "pull_request_merged"])
+def test_pull_request_merges_without_opening_events_keep_separate_review_intervals(kind):
+    found = bottleneck.report(
+        rows(
+            agent=[claim("t4", 5 * H)],
+            delivery=[
+                {"task": "t4", "kind": kind, "ts_ms": 7 * H, "pull_request": "first", "branch": "first"},
+                {"task": "t4", "kind": kind, "ts_ms": 9 * H, "pull_request": "second"},
+            ],
+            ci=[run("first", 5 * H, 6 * H, "success"), run("b-t4", 7 * H, 8 * H, "success")],
+        ),
+        open_task("t4"),
+        NOW,
+    )
+    assert found["seconds"]["review"] == 7200.0
+
+
+def test_legacy_merges_use_the_latest_timestamp_in_any_event_order():
+    found = bottleneck.report(
+        rows(
+            agent=[claim("t4", 6 * H)],
+            delivery=[merge("t4", 9 * H), merge("t4", 8 * H)],
+            ci=[run("b-t4", 6 * H, 7 * H, "success")],
+        ),
+        open_task("t4", "done"),
+        NOW,
+    )
+    assert found["seconds"]["review"] == 7200.0
+
+
+def test_a_current_park_stops_review_before_now():
+    found = bottleneck.report(
+        rows(
+            agent=[claim("t4", 6 * H)],
+            ci=[run("b-t4", 7 * H, 8 * H, "success")],
+            delivery=[{"task": "t4", "kind": "parked", "ts_ms": 8.5 * H}],
+        ),
+        open_task("t4"),
+        NOW,
+    )
+    assert found["seconds"]["review"] == 1800.0
+
+
+def test_reused_branch_checks_start_after_each_previous_pull_request_merge():
+    found = bottleneck.report(
+        rows(
+            agent=[claim("t4", 6 * H)],
+            delivery=[
+                {**opened("t4", 6 * H), "pull_request": "first"},
+                {**merge("t4", 8 * H), "pull_request": "first"},
+                {**opened("t4", 8.25 * H), "pull_request": "second"},
+                {**merge("t4", 9 * H), "pull_request": "second"},
+            ],
+            ci=[run("b-t4", 6 * H, 7 * H, "success"), run("b-t4", 8.25 * H, 8.5 * H, "success")],
+        ),
+        open_task("t4", "done"),
+        NOW,
+    )
+    assert found["seconds"]["review"] == 5400.0
+
+
+def test_open_pull_requests_on_distinct_branches_each_accrue_review():
+    found = bottleneck.report(
+        rows(
+            agent=[claim("t4", 6 * H)],
+            delivery=[
+                {**opened("t4", 6 * H), "pull_request": "first", "branch": "first"},
+                {**opened("t4", 8 * H), "pull_request": "second", "branch": "b-t4"},
+            ],
+            ci=[run("first", 6 * H, 7 * H, "success"), run("b-t4", 8 * H, 9 * H, "success")],
+        ),
+        open_task("t4"),
+        NOW,
+    )
+    assert found["seconds"]["review"] == 14400.0
+
+
 def test_a_cancelled_last_run_keeps_ci_holding_until_now():
     found = bottleneck.report(
         rows(agent=[claim("t4", 6 * H)], ci=[run("b-t4", 7 * H, 8 * H, "cancelled")]), open_task("t4"), NOW

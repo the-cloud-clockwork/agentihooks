@@ -65,13 +65,11 @@ def _pull_reviews(events: list, runs: list, claimed: float, end: float, branch: 
             pulls.setdefault(event["pull_request"], []).append(event)
     spans, bounds = [], {}
     for mine in sorted(pulls.values(), key=lambda mine: min(event["ts_ms"] for event in mine)):
-        opened = min((event["ts_ms"] for event in mine if event["kind"] == "pull_request_opened"), default=claimed)
         stop = min((event["ts_ms"] for event in mine if event["kind"] in ("merge", "pull_request_merged")), default=end)
         head = next((event["branch"] for event in mine if event.get("branch")), branch)
         lower = bounds.get(head, claimed)
         checks = [run for run in runs if run["branch"] == head and _created(run) >= lower]
-        pushed = min([opened, *map(_created, checks)])
-        spans.extend(_active_review(_green(checks, pushed, stop), stop, events))
+        spans.extend(_active_review(_green(checks, lower, stop), stop, events))
         bounds[head] = stop
     return spans
 
