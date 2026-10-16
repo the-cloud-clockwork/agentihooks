@@ -384,21 +384,40 @@ def test_cli_derive_refuses_an_idle_only_measurement(tmp_path, capsys):
 def test_cli_promote_prints_the_decision_and_keeps_the_accepted_file(tmp_path, capsys):
     accepted = tmp_path / "accepted.json"
     candidate = tmp_path / "candidate.json"
-    candidate.write_text(json.dumps({"generation": 1, "profiles": {}, "tools": {}}))
+    candidate.write_text(json.dumps(report_with(1, 100)))
     promote = ["promote", "--accepted", str(accepted), "--candidate"]
     assert bench.main([*promote, str(candidate)]) == 0
     assert capsys.readouterr().out == '{"decision": "promoted", "changes": null}\n'
     assert bench.main([*promote, str(candidate)]) == 0
     assert json.loads(capsys.readouterr().out)["decision"] == "replayed"
     stale = tmp_path / "stale.json"
-    stale.write_text(json.dumps({"generation": 0, "profiles": {}, "tools": {}}))
+    stale.write_text(json.dumps(report_with(0, 100)))
     assert bench.main([*promote, str(stale)]) == 1
     assert json.loads(capsys.readouterr().out)["decision"] == "stale"
 
 
 def report_with(generation, peak):
-    measured = {metric: {"max": peak} for metric in bench.profiles.COMPARED}
-    return {"generation": generation, "tools": {}, "profiles": {"memory": {"measured": measured}}}
+    runs = [
+        {
+            "workload": "memory",
+            "class": "memory",
+            "children": 1,
+            "repeat": repeat,
+            "exit_code": 0,
+            "timed_out": False,
+            **dict.fromkeys(bench.profiles.METRICS, peak),
+        }
+        for repeat in range(1, 4)
+    ]
+    measured = {
+        "suite": "fixture",
+        "generation": generation,
+        "source": "fixture",
+        "host": {},
+        "tools": {},
+        "runs": runs,
+    }
+    return bench.profiles.derive(measured, [], bench.profiles.Policy())
 
 
 def test_cli_promote_holds_a_material_change_with_the_default_tolerance(tmp_path, capsys):

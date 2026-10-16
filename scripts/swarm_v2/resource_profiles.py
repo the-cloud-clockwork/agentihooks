@@ -1,5 +1,6 @@
 """Derive conservative worker resource profiles from measured workload runs and gate their promotion."""
 
+import hashlib
 import json
 import math
 import os
@@ -160,6 +161,8 @@ def derive(measured: dict, nodes: Sequence[dict], policy: Policy) -> dict:
         "host": measured["host"],
         "tools": measured["tools"],
         "policy": asdict(policy),
+        "runs_digest": hashlib.sha256(json.dumps(measured["runs"], sort_keys=True).encode()).hexdigest(),
+        "evidence": json.loads(json.dumps({"measurements": measured, "nodes": nodes})),
         "profiles": built,
         "refused": refused,
         "coexistence": coexistence(built, nodes) if nodes else "unmeasured: no node capacity was recorded",
@@ -231,6 +234,15 @@ def _install(path: Path, report: dict) -> None:
     staged.replace(path)
 
 
+def _rederived(candidate: dict) -> dict | None:
+    try:
+        evidence = candidate["evidence"]
+        report = derive(evidence["measurements"], evidence["nodes"], Policy(**candidate["policy"]))
+    except (KeyError, TypeError, ValueError, ClaimRefused):
+        return None
+    return report if _canonical(report) == _canonical(candidate) else None
+
+
 def accept(
     path: Path, candidate: dict, policy: Policy, requalified_by: str, *, reviewer: Principal | None = None
 ) -> dict:
@@ -241,6 +253,16 @@ def accept(
     )
     outcome = promote(current, candidate, policy, requalified_by if authorized else "")
     if outcome["decision"] in INSTALLS:
+        verified = _rederived(candidate)
+        if verified is None:
+            return {
+                "decision": "refused",
+                "accepted": current,
+                "changes": {"evidence": "candidate does not match its recorded runs"},
+            }
+        outcome["accepted"] = (
+            {**verified, REVIEWER: reviewer.name} if outcome["decision"] == "requalified" else verified
+        )
         if current is not None:
             _install(_previous(path), current)
         _install(path, outcome["accepted"])

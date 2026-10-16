@@ -318,6 +318,40 @@ def test_accept_rederives_profiles_instead_of_installing_idle_figures_under_a_re
     assert not path.exists()
 
 
+@pytest.mark.parametrize("tamper", ["digest", "runs", "missing", "malformed"])
+def test_accept_requires_the_recorded_run_digest_and_reproducible_evidence(tmp_path, tamper):
+    path = tmp_path / "accepted.json"
+    profiles.accept(path, profiles.derive(measured(memory_runs()), NODES, POLICY), POLICY, "")
+    before = path.read_bytes()
+    candidate = profiles.derive(measured(memory_runs(2), 2), NODES, POLICY)
+    if tamper == "digest":
+        candidate["runs_digest"] = "wrong"
+    elif tamper == "runs":
+        for row in candidate["evidence"]["measurements"]["runs"]:
+            row["children"] = 0
+            row["peak_processes"] = 1
+    elif tamper == "missing":
+        del candidate["evidence"]
+    else:
+        candidate["evidence"] = None
+    outcome = profiles.accept(
+        path, candidate, POLICY, "operator", reviewer=profiles.Principal("operator", profiles.Role.OPERATOR)
+    )
+    assert outcome["decision"] == "refused"
+    assert path.read_bytes() == before
+    assert not path.with_name("accepted.json.previous").exists()
+
+
+def test_derived_evidence_is_detached_and_digest_changes_with_runs():
+    source = measured(memory_runs())
+    report = profiles.derive(source, NODES, POLICY)
+    snapshot = json.loads(json.dumps(report["evidence"]))
+    source["runs"][0]["peak_rss_mib"] += 1
+    assert report["evidence"] == snapshot
+    assert profiles.derive(source, NODES, POLICY)["runs_digest"] != report["runs_digest"]
+    assert len(report["runs_digest"]) == 64
+
+
 def test_accept_does_not_trust_a_requalifying_reviewer_name(tmp_path):
     path = tmp_path / "accepted.json"
     accepted = profiles.derive(measured(memory_runs()), NODES, POLICY)
