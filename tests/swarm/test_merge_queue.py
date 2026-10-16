@@ -33,28 +33,38 @@ def runner(*responses):
 
     def run(command, **kwargs):
         calls.append((command, kwargs))
-        response = next(pending)
         assert command[:2] == ["gh", "api"]
         assert kwargs == {"capture_output": True, "text": True, "timeout": 20}
-        if command[2] == "graphql":
-            assert command[3] == "-f"
+        if command[2:] == ["graphql", "-f", f"query={merge_queue.FRESHNESS}", "-f", f"url={URL}"]:
+            response = {
+                "data": {
+                    "resource": {
+                        "baseRefName": "dev",
+                        "baseRef": {"branchProtectionRule": None},
+                        "repository": {"nameWithOwner": "o/r"},
+                    }
+                },
+            }
+        elif command[2] == "repos/o/r/rules/branches/dev":
+            response = [
+                {
+                    "type": "required_status_checks",
+                    "parameters": {
+                        "required_status_checks": [{"context": "CI Validate"}],
+                    },
+                }
+            ]
+        else:
+            response = next(pending)
+            assert command[2] == "graphql"
             assert command[4] in [
                 f"query={query}"
                 for query in (
                     merge_queue.STATE,
-                    merge_queue.FRESHNESS,
                     merge_queue.QUEUE,
                     merge_queue.DEQUEUE,
                     ledger_events.PULL_QUERY.replace("$number", "7"),
                 )
-            ]
-            if command[4] in (f"query={merge_queue.STATE}", f"query={merge_queue.FRESHNESS}"):
-                assert command[5:] == ["-f", f"url={URL}"]
-        elif "workflow_runs" in response:
-            assert command == [
-                "gh",
-                "api",
-                "repos/o/r/actions/workflows/test.yml/runs?event=pull_request&head_sha=abc&per_page=1",
             ]
         return subprocess.CompletedProcess(command, 0, response if isinstance(response, str) else json.dumps(response))
 
@@ -100,11 +110,27 @@ def test_queue_uses_antoncores_required_checks_in_its_own_workflow():
     def run(command, **kwargs):
         calls.append(command)
         if command[2] != "graphql":
-            response = {"workflow_runs": []}
+            assert command[2] == "repos/the-cloud-clockwork/antoncore/rules/branches/dev"
+            response = [
+                {
+                    "type": "required_status_checks",
+                    "parameters": {
+                        "required_status_checks": [{"context": "Gate — Required"}],
+                    },
+                }
+            ]
         elif command[4] == f"query={merge_queue.STATE}":
             response = {"data": {"resource": {**OPEN, "mergeQueueEntry": ENTRY if queued else None}}}
         elif command[4] == f"query={merge_queue.FRESHNESS}":
-            response = {"data": {"resource": {"repository": {"nameWithOwner": "the-cloud-clockwork/antoncore"}}}}
+            response = {
+                "data": {
+                    "resource": {
+                        "repository": {"nameWithOwner": "the-cloud-clockwork/antoncore"},
+                        "baseRefName": "dev",
+                        "baseRef": {"branchProtectionRule": None},
+                    }
+                }
+            }
         elif command[4] == f"query={merge_queue.QUEUE}":
             queued.append(True)
             response = {"data": {}}
@@ -112,6 +138,11 @@ def test_queue_uses_antoncores_required_checks_in_its_own_workflow():
             assert command[4] == f"query={ledger_events.PULL_QUERY.replace('$number', '42')}"
             assert command[5:] == ["-f", f"url={url}"]
             response = checked_resource()
+            required = response["data"]["resource"]["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"][
+                "nodes"
+            ][0]
+            required["name"] = "Gate — Required"
+            required["checkSuite"] = {"workflowRun": {"workflow": {"name": "CI Validate"}}}
         return subprocess.CompletedProcess(command, 0, json.dumps(response))
 
     assert merge_queue.operate("queue", url, run)["queued"]
@@ -144,6 +175,19 @@ def test_queue_waits_for_all_and_only_required_checks(conclusion, optional_runni
         with pytest.raises(SwarmError, match="required checks"):
             merge_queue.operate("queue", URL, run)
         assert not any("enqueuePullRequest(input:" in str(command) for command, _ in calls)
+
+
+@pytest.mark.parametrize("missing", ["all", "one"])
+def test_queue_waits_until_every_configured_check_exists(missing):
+    response = checked_resource()
+    commit = response["data"]["resource"]["commits"]["nodes"][0]["commit"]
+    commit["statusCheckRollup"]["contexts"]["nodes"] = (
+        [] if missing == "all" else [{"name": "Other required", "conclusion": "SUCCESS", "isRequired": True}]
+    )
+    run, calls = runner({"data": {"resource": OPEN}}, response)
+    with pytest.raises(SwarmError, match="required checks"):
+        merge_queue.operate("queue", URL, run)
+    assert not any("enqueuePullRequest(input:" in str(command) for command, _ in calls)
 
 
 @pytest.fixture(autouse=True)
@@ -190,7 +234,7 @@ def test_queue_enqueues_the_observed_head_and_reports_the_queue_entry():
         "queued": True,
         "entry": ENTRY,
     }
-    command, _ = calls[2]
+    command, _ = calls[4]
     assert command[:3] == ["gh", "api", "graphql"]
     assert "enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head})" in command[4]
     assert command[5:] == ["-f", "id=PR_one", "-f", "head=abc"]
@@ -209,8 +253,12 @@ def test_queue_squash_merges_the_observed_head_when_the_repository_has_no_queue(
         ]
     )
 
+    policy, _ = runner()
+
     def run(command, **kwargs):
         calls.append(command)
+        if command[2] != "graphql" or command[4] == f"query={merge_queue.FRESHNESS}":
+            return policy(command, **kwargs)
         return subprocess.CompletedProcess(command, 0, json.dumps(next(responses)))
 
     assert merge_queue.operate("queue", URL, run) == {
@@ -220,11 +268,11 @@ def test_queue_squash_merges_the_observed_head_when_the_repository_has_no_queue(
         "queued": False,
         "entry": None,
     }
-    assert len(calls) == 4
-    assert "mergePullRequest(input:" in calls[2][4]
-    assert "expectedHeadOid: $head" in calls[2][4]
-    assert "mergeMethod: SQUASH" in calls[2][4]
-    assert calls[2][5:] == ["-f", "id=PR_one", "-f", "head=abc"]
+    assert len(calls) == 6
+    assert "mergePullRequest(input:" in calls[4][4]
+    assert "expectedHeadOid: $head" in calls[4][4]
+    assert "mergeMethod: SQUASH" in calls[4][4]
+    assert calls[4][5:] == ["-f", "id=PR_one", "-f", "head=abc"]
 
 
 @pytest.mark.parametrize(
@@ -273,6 +321,25 @@ def dev_moved(head=AUTHORED, changed=(), conclusion="success", jobs=None, log=""
             reply = {"data": {"enqueuePullRequest": {"mergeQueueEntry": {"id": "MQ_one"}}}}
         elif path == "graphql" and command[4] == f"query={merge_queue.STATE}":
             reply = {"data": {"resource": {**OPEN, "mergeQueueEntry": ENTRY if queued else None}}}
+        elif path == "graphql" and command[4] == f"query={merge_queue.FRESHNESS}":
+            reply = {
+                "data": {
+                    "resource": {
+                        "baseRefName": "dev",
+                        "baseRef": {"branchProtectionRule": None},
+                        "repository": {"nameWithOwner": "o/r"},
+                    }
+                }
+            }
+        elif path == "repos/o/r/rules/branches/dev":
+            reply = [
+                {
+                    "type": "required_status_checks",
+                    "parameters": {
+                        "required_status_checks": [{"context": "CI Validate"}],
+                    },
+                }
+            ]
         elif path == "graphql":
             reply = checked_resource(conclusion.upper() if conclusion else None)
         elif "/workflows/test.yml/runs" in path:

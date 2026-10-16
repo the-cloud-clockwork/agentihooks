@@ -6,6 +6,7 @@ from scripts.swarm.store import SwarmError
 
 FRESHNESS = """query($url: URI!) { resource(url: $url) { ... on PullRequest {
     repository { nameWithOwner }
+    baseRefName baseRef { branchProtectionRule { requiredStatusCheckContexts } }
 } } }"""
 FIELDS = 'id state headRefOid baseRefName mergeQueueEntry { id position state } isDraft reviewDecision statusCheckRollup { state } repository { mergeQueue(branch: "dev") { id } }'
 STATE = "query($url: URI!) { resource(url: $url) { ... on PullRequest { " + FIELDS + " } } }"
@@ -44,7 +45,7 @@ def graphql(query: str, variables: dict, run=subprocess.run) -> dict:
         raise SwarmError(f"GitHub API: {exc}") from exc
 
 
-def rest(path: str, run) -> dict | str:
+def rest(path: str, run) -> dict | list | str:
     command = ["gh", "api", path]
     try:
         done = run(command, capture_output=True, text=True, timeout=20)
@@ -65,7 +66,18 @@ def require_green(url: str, head: str, run) -> None:
             raise SwarmError(done.stderr.strip() or "GitHub API failed")
         return done
 
-    pull = ledger_events.view(url, read, required_only=True)
+    resource = graphql(FRESHNESS, {"url": url}, run)["resource"]
+    repo = resource["repository"]["nameWithOwner"]
+    rules = rest(f"repos/{repo}/rules/branches/{resource['baseRefName']}", run)
+    protection = (resource.get("baseRef") or {}).get("branchProtectionRule") or {}
+    expected = set(protection.get("requiredStatusCheckContexts") or [])
+    expected.update(
+        check["context"]
+        for rule in rules
+        if rule["type"] == "required_status_checks"
+        for check in rule["parameters"]["required_status_checks"]
+    )
+    pull = ledger_events.view(url, read, required_checks=expected)
     if pull is None or pull.head != head or not pull.resolved or pull.red:
         failed = f"; failed: {', '.join(pull.failed)}" if pull and pull.failed else ""
         raise SwarmError(f"required checks on the current pull request head must pass before queueing{failed}")
