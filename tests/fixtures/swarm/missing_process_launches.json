@@ -1,0 +1,197 @@
+{
+  "source": "read-only RedisStore launch_check.reports and retained history on 16 October 2026",
+  "reports": [
+    {
+      "agent": "master@323133-0152",
+      "task": "master",
+      "at": 1792161606669,
+      "elapsed_ms": 114466,
+      "state": "failed",
+      "misses": {
+        "joined": {
+          "expected": {
+            "joined_within_ms": 60000,
+            "seat": "master@rig-grade-swarm"
+          },
+          "actual": {
+            "joined_after_ms": null,
+            "seat": ""
+          }
+        },
+        "profile": {
+          "expected": "master",
+          "actual": null
+        },
+        "settings": {
+          "expected": {
+            "hooks": true,
+            "model": "claude-opus-5-5",
+            "effort": "high"
+          },
+          "actual": {
+            "hooks": null,
+            "model": null,
+            "effort": null
+          }
+        },
+        "base": {
+          "expected": "package:<role>, master",
+          "actual": []
+        },
+        "overlay": {
+          "expected": [
+            "brain"
+          ],
+          "actual": []
+        }
+      },
+      "held": true
+    },
+    {
+      "agent": "engineer@323133-1626",
+      "task": "t390",
+      "at": 1792136431663,
+      "elapsed_ms": 671521,
+      "state": "failed",
+      "misses": {
+        "profile": {
+          "expected": "engineer",
+          "actual": null
+        },
+        "settings": {
+          "expected": {
+            "hooks": true,
+            "model": "opus",
+            "effort": "medium"
+          },
+          "actual": {
+            "hooks": null,
+            "model": null,
+            "effort": null
+          }
+        },
+        "base": {
+          "expected": "package:<role>, engineer",
+          "actual": []
+        },
+        "overlay": {
+          "expected": [
+            "brain"
+          ],
+          "actual": []
+        }
+      },
+      "held": false
+    },
+    {
+      "agent": "ci@323133-0953",
+      "task": "t422",
+      "at": 1792136431663,
+      "elapsed_ms": 903421,
+      "state": "failed",
+      "misses": {
+        "joined": {
+          "expected": {
+            "joined_within_ms": 60000,
+            "seat": "ci-4@rig-grade-swarm"
+          },
+          "actual": {
+            "joined_after_ms": null,
+            "seat": "ci-4@rig-grade-swarm"
+          }
+        },
+        "profile": {
+          "expected": "cicd",
+          "actual": null
+        },
+        "settings": {
+          "expected": {
+            "hooks": true,
+            "model": "gpt-6.1-sol",
+            "effort": "medium"
+          },
+          "actual": {
+            "hooks": null,
+            "model": null,
+            "effort": null
+          }
+        },
+        "base": {
+          "expected": "package:<role>, cicd",
+          "actual": []
+        },
+        "overlay": {
+          "expected": [
+            "brain"
+          ],
+          "actual": []
+        }
+      },
+      "held": false
+    }
+  ],
+  "history": [
+    {
+      "agent": "master@323133-0152",
+      "state": "working",
+      "reason": "retired",
+      "started_at": 1792012355672,
+      "ended_at": 1792034456517,
+      "profile": "master",
+      "validation_state": "validated",
+      "validated_at": 1792012334.516733
+    },
+    {
+      "agent": "ci@323133-0953",
+      "state": "starting",
+      "reason": "retired",
+      "started_at": 1792135291106,
+      "ended_at": 1792135538454,
+      "profile": "",
+      "validation_state": null,
+      "validated_at": null
+    },
+    {
+      "agent": "ci@323133-0953",
+      "state": "working",
+      "reason": "retired",
+      "started_at": 1792135291106,
+      "ended_at": 1792136434422,
+      "profile": "cicd",
+      "validation_state": "validated",
+      "validated_at": 1792135539.4338794
+    },
+    {
+      "agent": "engineer@323133-1626",
+      "state": "working",
+      "reason": "retired",
+      "started_at": 1792135291106,
+      "ended_at": 1792136434550,
+      "profile": "engineer",
+      "validation_state": "validated",
+      "validated_at": 1792135766.7646646
+    },
+    {
+      "agent": "master@323133-0152",
+      "state": "starting",
+      "reason": "retired",
+      "started_at": 1792012355672,
+      "ended_at": 1792136436345,
+      "profile": "master",
+      "validation_state": "validated",
+      "validated_at": 1792135808.4368343
+    },
+    {
+      "agent": "master@323133-0152",
+      "state": "starting",
+      "reason": "retired",
+      "started_at": 1792012355672,
+      "ended_at": 1792163341703,
+      "profile": "master",
+      "validation_state": "validated",
+      "validated_at": 1792161502.6945026
+    }
+  ],
+  "raw_process_facts_captured": false,
+  "gap": "Original reports contain configuration nulls; the process=False pathway was observed in source, not a captured original runtime facts envelope."
+}
