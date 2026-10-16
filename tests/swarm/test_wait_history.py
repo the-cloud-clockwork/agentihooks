@@ -95,8 +95,18 @@ def test_doctor_reads_ended_wait_history_for_historical_agents(redis, monkeypatc
         "sessions": [],
         "merged": [],
     }
-    monkeypatch.setattr(traces_read, "client", lambda env: None)
-    monkeypatch.setattr(traces_read, "record", lambda *args: record)
+    get = object()
+
+    def client(env):
+        assert env == {}
+        return get
+
+    def read(slug, tasks, agents, now_ms, reader):
+        assert (slug, tasks, agents, now_ms, reader) == ("sw", [], [], 4_000_000, get)
+        return record
+
+    monkeypatch.setattr(traces_read, "client", client)
+    monkeypatch.setattr(traces_read, "record", read)
     store = SimpleNamespace(redis=redis, agents=lambda slug: [])
     ledger = SimpleNamespace(tasks=lambda slug: [])
     idle.declare_wait(redis, "sw", "engineer", until, "proof", 60_000)

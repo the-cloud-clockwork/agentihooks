@@ -33,3 +33,17 @@ def test_uncovered_gap_names_its_bounds_and_wait_result(waits):
     [finding] = traces.turn_gaps(record(waits), traces.Limits())
     assert finding.measure == 60
     assert "turn 1 to turn 2: 60 minutes; gap 60000 to 3660000; no declared wait covered it" in finding.evidence
+
+
+@pytest.mark.parametrize(
+    "waits, covered",
+    [
+        ([{"at": 1_860_000, "until": 3_660_000}, {"at": 60_000, "until": 1_860_000}], True),
+        ([{"at": 60_000, "until": 1_860_000}, {"at": 1_860_001, "until": 3_660_000}], False),
+        ([{"at": 59_999, "until": 3_660_001}], True),
+        ([{"at": 0, "until": 59_999}, {"at": 60_001, "until": 3_660_000}], False),
+    ],
+)
+def test_renewed_waits_must_cover_the_whole_gap(waits, covered):
+    found = traces.turn_gaps(record(waits), traces.Limits())
+    assert bool(found) is not covered

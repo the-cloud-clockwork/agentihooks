@@ -56,9 +56,12 @@ def remember_wait(redis, slug: str, name: str, entry: dict, end: int) -> None:
 def wait_history(redis, slug: str, name: str) -> list[dict]:
     from scripts.swarm.naming import NameRegistry
 
-    name = NameRegistry(redis).resolve(name)
-    entries = redis.hvals(key(slug, "wait-history", name))
-    return sorted((json.loads(raw) for raw in entries), key=lambda held: held["at"])
+    names = NameRegistry(redis)
+    name = names.resolve(name)
+    entries = {}
+    for candidate in [*names.aliases(name), name]:
+        entries.update(redis.hgetall(key(slug, "wait-history", candidate)))
+    return sorted((json.loads(raw) for raw in entries.values()), key=lambda held: held["at"])
 
 
 def declare_wait(redis, slug, name, until, reason, at, on=None):
