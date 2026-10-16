@@ -294,10 +294,13 @@ def test_controller_controls_do_not_enqueue_pause_again(owned):
     assert result == {"data": {"state": "paused"}}
 
 
-@pytest.mark.parametrize("target", ["missing", "real", "nonscratch"])
-def test_migration_refuses_missing_real_and_nonscratch_targets(owned, target):
+@pytest.mark.parametrize("target", ["missing", "binned", "real", "nonscratch"])
+def test_migration_refuses_missing_real_and_nonscratch_targets(owned, target, monkeypatch):
     slug = owned.slug
     if target == "missing":
+        exists = server.repository.exists
+        monkeypatch.setattr(server.repository, "exists", lambda other: other != slug and exists(other))
+    elif target == "binned":
         server.repository.delete(slug)
     elif target == "real":
         slug = SLUG

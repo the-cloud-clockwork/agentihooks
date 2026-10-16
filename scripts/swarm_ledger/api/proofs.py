@@ -94,7 +94,12 @@ def _migration_owner(server: ModuleType, slug: str, payload: dict) -> dict:
         payload,
     )
     store = server.swarm_store()
-    if not naming.PROOF_RE.fullmatch(slug) or not server.repository.exists(slug) or slug not in store.slugs():
+    if (
+        not naming.PROOF_RE.fullmatch(slug)
+        or not server.repository.exists(slug)
+        or slug in server.ledger_bin.entries()
+        or slug not in store.slugs()
+    ):
         raise APIError(403, "forbidden", "Migration needs an existing scratch proof")
     if not store.config(slug).scratch:
         raise APIError(403, "forbidden", "Migration needs an existing scratch proof")

@@ -78,6 +78,7 @@ def test_remote_client_reports_the_refusal_without_exposing_credentials(owned):
 def test_controller_client_adopts_external_owner_and_uses_scoped_controls(owned, monkeypatch):
     owner = {"parent": "external-parent", "agent": owned.owner, "task": "contract"}
     environ = {
+        "AGENTIHOOKS_DEPLOYMENT": "compose",
         "LEDGER_URL": f"http://{owned.live['host']}",
         "AGENTIHOOKS_CONTROLLER_CREDENTIAL": owned.controller["X-Controller-Credential"],
     }
