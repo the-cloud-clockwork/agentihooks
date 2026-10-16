@@ -307,7 +307,9 @@ def test_coverage_ratchet_grades_against_the_base_its_baseline_was_restored_for(
     assert job["needs"][0] in ("durations", "select")
     step = _step("coverage-ratchet", "Resolve the measured base tree")
     assert (
-        step["env"]["DISPATCHED_BASE"].replace("needs.select.", "needs.durations.")
+        step["env"]["DISPATCHED_BASE"].replace(
+            "needs." + ("durations" if "durations" in _workflow()["jobs"] else "select") + ".", "needs.durations."
+        )
         == "${{ needs.durations.outputs.base }}"
     )
     subprocess.run(["bash", "-e", "-c", step["run"]], cwd=repo, env=env, check=True)
