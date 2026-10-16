@@ -549,6 +549,30 @@ def test_live_pod_of_an_ended_execution_is_kept(fixture):
     assert restarted.controller_orphans_by_class()["superseded"] == 1
 
 
+def test_only_the_live_execution_without_a_pod_is_missing_beside_an_ended_one(fixture):
+    store, (first, _), transport, clock, grant = fixture
+    assert first.acquire()
+    ended = first.admit(agent(store))
+    live = first.admit(
+        replace(
+            agent(store),
+            seat="eng-2@fixture",
+            runtime_target={"pod_namespace": "workers", "pod_name": "attempt-2"},
+        )
+    )
+    assert first.release()
+    store.put_agent("fixture", replace(store.execution("fixture", ended.execution_id), state="ended"))
+    assert {seat: row.state for seat, row in store.execution_occupants("fixture").items()} == {
+        "eng-1@fixture": "ended",
+        "eng-2@fixture": live.state,
+    }
+    restarted = observed(store, transport, grant, Pods([]))
+    clock[0] += lease.ttl_ms()
+    assert restarted.acquire()
+    assert restarted.reconcile().missing_pods == [live.execution_id]
+    assert restarted.controller_orphans_by_class()["missing_pod"] == 1
+
+
 def test_orphan_replaced_before_delete_is_not_deleted(fixture):
     store, _, transport, _, grant = fixture
     pods = Pods([managed("eng-2", "exec-orphan")])
