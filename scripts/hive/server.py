@@ -120,6 +120,8 @@ class JoinServer(ThreadingHTTPServer):
                 entry = self._open.pop(threading.get_ident(), None)
                 if entry is not None:
                     entry[1].close()
+            if entry is None:
+                self.shutdown_request(request)
             self._slots.release()
 
     def reap(self) -> None:
