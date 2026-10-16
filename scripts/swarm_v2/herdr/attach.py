@@ -11,7 +11,14 @@ from typing import NoReturn
 from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.hazmat.primitives import serialization
 
-from scripts.swarm_v2.herdr.capabilities import Incompatible, Qualifier, Unreachable, Verdict, machine_probe, machine_status
+from scripts.swarm_v2.herdr.capabilities import (
+    Incompatible,
+    Qualifier,
+    Unreachable,
+    Verdict,
+    machine_probe,
+    machine_status,
+)
 from scripts.swarm_v2.herdr.catalog import Catalog
 from scripts.swarm_v2.herdr.endpoints import (
     PORT,
