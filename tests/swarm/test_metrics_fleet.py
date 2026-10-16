@@ -194,6 +194,8 @@ def test_the_newest_checkpoint_of_each_active_execution_reaches_the_sink(tmp_pat
     values = {(row["panel"], row["series"]): row["value"] for row in panels}
     assert values[("checkpoint_age", "stale")] == 1.0
     assert values[("checkpoint_age", "oldest_age_ms")] == 2_000_000.0
+    assert values[("knowledge", "feed_age_ms")] == 0.0
+    assert ("knowledge", "cross_scope_denials") not in values
     assert {row["source"]: (row["available"], row["readings"]) for row in sources}["checkpoints"] == (1, 2)
 
 

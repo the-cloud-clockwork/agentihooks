@@ -35,7 +35,7 @@ def _pool(name: str) -> dict:
     return {"pool": name} if name else {}
 
 
-def _attempts(store: RedisStore, slug: str, pool: str = "") -> tuple[list, list]:
+def _attempts(store: RedisStore, slug: str, pool: str) -> tuple[list, list]:
     beats = {key: json.loads(raw) for key, raw in store.redis.hgetall(store.key(slug, "heartbeats")).items()}
     active = [
         {
@@ -92,7 +92,7 @@ def _checkpoints(store: RedisStore, slug: str, active: list[dict]) -> list[dict]
         return []
     keys = [store.key(slug, CHECKPOINTS, row["execution_id"]) for row in active]
     taken = store.redis.mget(keys)
-    with store.redis.pipeline(transaction=False) as pipe:
+    with store.redis.pipeline() as pipe:
         for key in keys:
             pipe.pexpire(key, CHECKPOINT_TTL_MS)
         pipe.execute()

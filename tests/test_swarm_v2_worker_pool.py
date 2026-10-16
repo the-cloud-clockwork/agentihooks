@@ -381,10 +381,12 @@ def _placed(node, phase="Running"):
 
 
 def test_the_pool_reading_names_the_policy_pod_limit_and_the_distinct_nodes_running_workers():
-    pods = [_placed("n1"), _placed("n1"), _placed("n2"), _placed("n3", "Succeeded"), _pod("Pending")]
-    listing = Listing(pods)
+    unreported = _placed("n4")
+    del unreported["status"]
+    pods = [_placed("n1"), _placed("n1"), _placed("n2"), _placed("n3", "Succeeded"), _pod("Pending"), _placed("")]
+    listing = Listing([*pods, unreported])
     found = pool.reading(listing, "swarm-workers", POOL)
-    assert found == [{"pool": "swarm-workers", "configured_maximum": 8, "nodes": 2}]
+    assert found == [{"pool": "swarm-workers", "configured_maximum": 8, "nodes": 3}]
     assert listing.selectors == [""]
 
 

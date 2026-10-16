@@ -151,7 +151,12 @@ def test_worker_pools_are_unread_without_the_kubernetes_runtime_or_with_refused_
 def test_worker_pools_read_the_declared_worker_pool_in_the_worker_namespace(tmp_path, monkeypatch):
     placed = {**_worker_pod("Running"), "spec": {**_worker_pod("Running")["spec"], "nodeName": "n1"}}
     pods = PoolPods("swarm-pod-proof", [placed])
-    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: pods)
+    apis, slugs = [], []
+    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: apis.append((environ, namespace)) or pods)
+    real = deployed.Workers.from_environ
+    monkeypatch.setattr(
+        deployed.Workers, "from_environ", lambda environ, slug: slugs.append(slug) or real(environ, slug)
+    )
     policy = tmp_path / "pool-policy.json"
     declared = json.loads(_policy(tmp_path).read_text())
     environ = {**DEPLOYED, **_workers(tmp_path, **{deployed.POLICY_ENV: str(policy)})}
@@ -161,6 +166,8 @@ def test_worker_pools_read_the_declared_worker_pool_in_the_worker_namespace(tmp_
     assert deployed.worker_pools(environ, "sw")() == [
         {"pool": declared["namespace"], "configured_maximum": 4, "nodes": 1}
     ]
+    assert slugs == ["sw", "sw"]
+    assert apis == [(environ, declared["namespace"])]
 
 
 def test_the_autoscale_command_on_a_deployed_controller_names_the_off_reason(no_node, monkeypatch, capsys):

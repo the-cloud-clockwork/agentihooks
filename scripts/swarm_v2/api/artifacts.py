@@ -200,7 +200,7 @@ class ArtifactsAPI:
         try:
             self.checkpointed(scope.execution_id, scope.seat_id, lease.now_ms(self.tasks.store))
         except RedisError as error:
-            print(json.dumps({"event": "checkpoint_reading_lost", "error": type(error).__name__}), flush=True)
+            print(json.dumps({"event": "checkpoint_reading_lost", "error": type(error).__name__}))
 
     def _read(self, key: str, start: int, length: int) -> bytes:
         if type(start) is not int or type(length) is not int or start < 0 or not 0 <= length <= MAX_BYTES:
