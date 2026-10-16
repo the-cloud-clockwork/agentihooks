@@ -45,6 +45,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- The swarm stall watchdog no longer reopens a task or stops its owner while
+  the task depends on a task not yet done, or while its owner has declared a
+  wait on another open task or on another open pull request's merge.
 - Ledger task set accepts split pull request addresses as comma or JSON lists.
 - Reopening a swarm pull request retains its registered worker's ownership,
   claim lease and worktree until retirement; status omits gone local processes.
