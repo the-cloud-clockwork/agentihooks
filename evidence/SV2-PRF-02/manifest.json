@@ -12,7 +12,7 @@
     "tests/fixtures/swarm_v2/startup/kind-run-1.json": "9cdad8aecf741089cc741a5424792136f103c038982b54886cc0db5898fecc17",
     "tests/fixtures/swarm_v2/startup/kind-run-2.json": "a2b14c83b40160e2de8be5c949f78c28e7ec73cc82a2e175ffa2959a091b1b16",
     "tests/performance/swarm_v2/startup.py": "893b6ae084e804bee947ae73a669e1de9f568da1041dbbe176ab1b2da39eb579",
-    "scripts/swarm_v2/startup_stages.py": "21795bf829fd1e0c4783f7d86a9f3e6eefa9a897da90e42397b8600f21db039c",
+    "scripts/swarm_v2/startup_stages.py": "31d5196ac4447b49a75031e313af40db349c405107f9b1c45a290f2b4c974e90",
     "scripts/swarm_v2/startup_bench.py": "86b416972cb491c8b66a06fddf0cd4e59ea6d20ad15ca0f591c73efca9e5523a",
     ".github/workflows/startup-stages.yml": "adbc0e9beb24d913c34f5c223a7ce4c07b0daaf41e49ff2d3675e9a4d6bef0c9",
     "tests/fixtures/swarm_v2/startup/anton-read-3.json": "d55c97ca370de23b73af9e80ecc9db06a3f3742855d8df56a646d4137728a2a8",

@@ -159,7 +159,7 @@ def scaled_groups(items: Iterable[Mapping]) -> dict[str, list[list[int]]]:
     count, so only its first and last occurrence are known."""
     seen: dict[str, set[tuple[int, int]]] = {}
     for item in items:
-        found = SCALED_GROUP.search(item.get("message", "")) if item.get("reason") == "ScaledUpGroup" else None
+        found = SCALED_GROUP.search(item["message"]) if item.get("reason") == "ScaledUpGroup" else None
         times = {item.get("eventTime") or item.get("firstTimestamp"), item.get("lastTimestamp")} - {None}
         for when in times if found else ():
             seen.setdefault(found["group"], set()).add((instant(when), int(found["before"])))

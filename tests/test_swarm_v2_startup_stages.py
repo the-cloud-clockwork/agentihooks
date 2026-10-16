@@ -495,7 +495,7 @@ def oci_capture():
         scaled_event("2026-10-11T14:36:22Z", "Scale-up: group size unchanged"),
         {
             **scaled_event("2026-10-10T09:00:00Z", f"Scale-up: setting group {POOL} size to 1 instead of 0 (max: 10)"),
-            "lastTimestamp": "2026-10-11T14:36:20Z",
+            "lastTimestamp": "2026-10-11T14:40:00Z",
             "count": 3,
         },
         {"reason": "ScaledUpGroup", "message": f"Scale-up: setting group {POOL} size to 2 instead of 1"},
@@ -513,6 +513,7 @@ def test_the_autoscaler_scaled_up_group_events_give_each_group_its_scale_ups():
         POOL: [
             [stages.instant("2026-10-10T09:00:00Z"), 0],
             [stages.instant("2026-10-11T14:36:20Z"), 0],
+            [stages.instant("2026-10-11T14:40:00Z"), 0],
             [stages.instant("2026-10-11T14:50:00.25Z"), 1],
         ]
     }
@@ -560,6 +561,14 @@ def test_a_scaled_up_group_event_scales_from_zero_when_the_pod_event_comes_late(
     assert stages.attribute({**oci, "scaled_groups": {}})[0]["node_kind"] == "warm"
     one_more = {**oci, "scaled_groups": {POOL: [[T0 + 9000, 1]]}}
     assert stages.attribute(one_more)[0]["from_zero"] is False
+
+
+def test_scaled_up_group_events_join_the_pod_scale_ups_of_the_same_group():
+    pods = {"default/a": {"created": T0 - 500, "ready": T0 + 97_000}}
+    both = {**read(cold_events(group=POOL), pods), "scaled_groups": {POOL: [[T0 - 60_000, 1]]}}
+    both["launches"] = {"i-0ad35d2621bca80ff": {**both["launches"]["i-0ad35d2621bca80ff"], "group": POOL}}
+    [entry] = stages.attribute(both)
+    assert (entry["from_zero"], entry["stages"]["trigger"]) == (True, 9000)
 
 
 def write_capture(folder):
