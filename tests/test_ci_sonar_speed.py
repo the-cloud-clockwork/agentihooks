@@ -125,10 +125,14 @@ def test_a_dev_push_analysis_sonar_refuses_as_older_ends_superseded_and_ungraded
     assert not any("project_status" in url for url in (tmp_path / "urls").read_text().splitlines())
 
 
-def test_a_superseded_analysis_skips_only_the_condition_hold():
+def test_the_condition_hold_skips_a_superseded_analysis_and_only_the_gate_names_one():
     hold = _step("Hold the Delivery L2 conditions")
     assert hold["if"] == "always() && steps.proxy.outcome == 'success' && steps.gate.outputs.superseded != 'true'"
-    writers = [step["name"] for step in _sonar()["steps"] if 'echo "analysis=' in step.get("run", "")]
+    writers = [
+        step.get("name")
+        for step in _sonar()["steps"]
+        if any("analysis=" in line and "GITHUB_OUTPUT" in line for line in step.get("run", "").splitlines())
+    ]
     assert writers == ["SonarQube Quality Gate"]
 
 
