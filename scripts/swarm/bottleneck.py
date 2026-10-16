@@ -101,7 +101,11 @@ def task_spans(rows: dict, tasks: list, now_ms: int) -> list[tuple]:
         spans += [("engineering", claimed, pushed), ("ci", pushed, green)]
         events = [event for event in rows["delivery_events"] if event["task"] == task]
         reviews = _pull_reviews(events, rows["ci_runs"], claimed, end, branches.get(task))
-        spans += reviews if any(event.get("pull_request") for event in events) else _active_review(green, end, events)
+        has_pulls = any(
+            event.get("pull_request") and event["kind"] in ("pull_request_opened", "pull_request_merged", "merge")
+            for event in events
+        )
+        spans += reviews if has_pulls else _active_review(green, end, events)
     return spans
 
 

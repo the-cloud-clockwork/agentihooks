@@ -190,6 +190,20 @@ def test_each_pull_request_counts_only_its_review_and_excludes_parked_time(rever
     assert found["seconds"]["review"] == 7200.0
 
 
+@pytest.mark.parametrize("kind", ["review_round", "merge_queued"])
+def test_partial_pull_request_telemetry_keeps_single_pull_request_review(kind):
+    found = bottleneck.report(
+        rows(
+            agent=[claim("t4", 6 * H)],
+            delivery=[{"task": "t4", "kind": kind, "ts_ms": 9 * H, "pull_request": "https://github.com/o/r/pull/1"}],
+            ci=[run("b-t4", 7 * H, 8 * H, "success")],
+        ),
+        open_task("t4"),
+        NOW,
+    )
+    assert found["seconds"]["review"] == 7200.0
+
+
 def test_a_cancelled_last_run_keeps_ci_holding_until_now():
     found = bottleneck.report(
         rows(agent=[claim("t4", 6 * H)], ci=[run("b-t4", 7 * H, 8 * H, "cancelled")]), open_task("t4"), NOW
