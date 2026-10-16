@@ -11,7 +11,7 @@ from scripts.gates import log as gate_log
 from scripts.gates import quiet as quiet_gate
 from scripts.gates.talk import WORKER_LANES
 from scripts.handoff import transfers
-from scripts.hive import placement_waits
+from scripts.hive import placement_waits, reports
 from scripts.inbox.store import InboxStore
 from scripts.swarm import (
     affinity,
@@ -36,8 +36,9 @@ from scripts.swarm import (
 from scripts.swarm.health import activity, checks, merge_stall, prompt_backlog, spawn_stall, standing, verdicts
 from scripts.swarm.health import findings as health
 from scripts.swarm.naming import swarm_name
-from scripts.swarm.store import ASSIST, SwarmError
-from scripts.swarm.tick import STARTUP_GRACE_MS, agent_status
+from scripts.swarm.runtime import HerdrRuntime
+from scripts.swarm.store import ASSIST, AgentRecord, RedisStore, SwarmError
+from scripts.swarm.tick import STARTUP_GRACE_MS, Runtime, agent_status
 from scripts.swarm_ledger import plan_shape
 from scripts.swarm_v2 import telemetry
 from scripts.swarm_v2.reconciliation import accounts as account_reconciliation
@@ -238,13 +239,19 @@ def observation(store, slug, agent):
     return {"state": UNCLASSIFIED, "observed_at": at, "sources": {observe.Source.HEARTBEAT.value: heartbeat}}
 
 
-def status_report(store, slug, state):
+def live_agents(agents: list[AgentRecord], runtime: Runtime) -> list[AgentRecord]:
+    names = runtime.live_names()
+    return [a for a in agents if a.runtime_backend != "local" or reports.host(a) or a.name in names]
+
+
+def status_report(store: RedisStore, slug: str, state: dict, runtime: Runtime | None = None) -> dict:
     from scripts.swarm import capacity, tick_activity
 
     config = store.config(slug)
     tasks = state.get("tasks", [])
     events = state.get("_meta", {}).get("events", [])
     agents = [a.__dict__ for a in store.agents(slug)]
+    visible = live_agents(store.agents(slug), runtime or HerdrRuntime())
     handed = transfers.list_transfers(store, slug)
     active = lift.current(slug, now_ms())
     promotion = tick_master.read(store, slug)
@@ -266,7 +273,7 @@ def status_report(store, slug, state):
                     for item in InboxStore(store.redis).pending_mail(a.name)
                 ],
             }
-            for a in store.agents(slug)
+            for a in visible
         ],
         "outages": outage.open_records(slug),
         "last_tick": int(store.redis.get(store.key(slug, "last-tick")) or 0),

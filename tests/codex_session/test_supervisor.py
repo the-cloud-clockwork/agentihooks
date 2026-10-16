@@ -574,6 +574,34 @@ def test_execution_home_keeps_profile_binding_and_manifests(server, tmp_path):
     assert json.loads(original)["home"] == str(profile)
 
 
+@pytest.mark.parametrize("reported", [True, False])
+def test_execution_home_rerecords_the_profile_report_for_the_copy(server, tmp_path, reported):
+    import json
+
+    from scripts.profiles import binding
+
+    profile = Path(server.codex_home)
+    (profile / "AGENTS.md").write_text(binding.persona("Engineer instructions.\n"))
+    (profile.parent / "codex.sources.json").write_text("[]")
+    binding.write(profile, "engineer", "codex")
+    report = tmp_path / "report.json"
+    binding.request(report, "engineer", "codex", profile)
+    launched = report.read_bytes()
+    directory = tmp_path / "execution"
+    directory.mkdir()
+    environ = {binding.REPORT: str(report)} if reported else {}
+    spec = supervisor.Launch("fixture", AgentRecord("fixture", "eng", "task"), str(tmp_path), str(profile), environ)
+
+    home = Path(supervisor.execution_home(spec, directory).codex_home)
+
+    if not reported:
+        assert report.read_bytes() == launched
+        return
+    rendered = json.loads(report.read_text())["rendered"]
+    assert rendered["home"] == str(home.resolve())
+    assert rendered["canary"] == json.loads(launched)["rendered"]["canary"]
+
+
 @pytest.mark.parametrize("linked", [False, True])
 def test_execution_home_shares_package_binaries_without_copying(server, tmp_path, linked):
     profile = Path(server.codex_home)

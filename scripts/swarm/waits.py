@@ -63,6 +63,8 @@ def checks_resolution(held, github):
     if not current.resolved or (current.unpassed_gate and not current.failed):
         return ""
     outcome = f"checks on {target}, now {'red' if current.red else 'green'}"
+    if current.red and current.failed:
+        outcome += f"; failed: {', '.join(current.failed)}"
     return f"{outcome}; {current.unpassed_gate} never passed" if current.unpassed_gate else outcome
 
 
