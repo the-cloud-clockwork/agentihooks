@@ -281,13 +281,13 @@ def test_a_lower_count_forgets_a_retired_seat_it_no_longer_holds(swarm):
     store, _ = swarm
     seats = masters.MasterSeats(store.redis)
     seats.set_count(SLUG, 4)
-    seats.retire(SLUG, SECOND)
-    seats.retire(SLUG, FOURTH)
+    for address in (SECOND, THIRD, FOURTH):
+        seats.retire(SLUG, address)
 
     seats.set_count(SLUG, 3)
 
-    assert seats.retired(SLUG) == [SECOND]
-    assert owners(store) and set(owners(store).values()) == {LEAD, THIRD}
+    assert seats.retired(SLUG) == [SECOND, THIRD]
+    assert set(owners(store).values()) == {LEAD}
 
 
 def test_a_partial_regrowth_refills_a_retired_seat_it_now_wants_with_an_even_share(swarm):

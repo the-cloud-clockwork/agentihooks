@@ -67,7 +67,7 @@ def wanted(rule: str, agents: list) -> int:
 def run(slug: str, config, store, runtime, doc: dict, now_ms: int) -> list[str]:
     seats, found = masters.MasterSeats(store.redis), rule(store.redis, slug)
     if not found or config.state in ENDED:
-        seats.keep_retired(slug, seats.count(slug), seats.count(slug))
+        store.redis.hdel(seats.key(slug), masters.RETIRED)
         return master_fill.run(slug, config, store, runtime, doc, now_ms)
     agents = [a for a in store.agents(slug) if a.state != "finished"]
     want = wanted(found, agents)

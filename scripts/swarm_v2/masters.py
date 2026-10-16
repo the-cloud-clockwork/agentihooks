@@ -152,7 +152,7 @@ class MasterSeats:
 
     def set_count(self, slug: str, count: int) -> None:
         self.redis.hset(self.key(slug), "count", _checked(count))
-        self.keep_retired(slug, 0, count)
+        self.keep_retired(slug, 1, count)
 
     def keep_retired(self, slug: str, above: int, upto: int) -> None:
         """A retired seat numbered at or below above is to be refilled, and one past upto is no longer counted."""
