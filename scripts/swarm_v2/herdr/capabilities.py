@@ -168,6 +168,10 @@ class Qualifier:
     def __init__(self, probe: Callable[[str], Observation], status: Callable[[str], dict]) -> None:
         self.probe = probe
         self.status = status
+
+    @classmethod
+    def machine(cls, run: Callable[[list[str]], subprocess.CompletedProcess]) -> "Qualifier":
+        return cls(machine_probe(run), machine_status(run))
         self.verdicts: dict[str, Verdict] = {}
         self.retired: dict[str, set[str]] = {}
         self.mismatches: Counter = Counter()
@@ -210,8 +214,7 @@ def main(argv: list[str], environ: dict[str, str]) -> int:
         print(f"ERROR: {AGENT_REFUSAL}", file=sys.stderr)
         return 2
     try:
-        run = runner(environ)
-        verdict = Qualifier(machine_probe(run), machine_status(run)).verdict(*argv)
+        verdict = Qualifier.machine(runner(environ)).verdict(*argv)
     except (Incompatible, Unreachable) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2

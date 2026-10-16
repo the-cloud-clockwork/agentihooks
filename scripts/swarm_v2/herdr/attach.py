@@ -16,8 +16,6 @@ from scripts.swarm_v2.herdr.capabilities import (
     Qualifier,
     Unreachable,
     Verdict,
-    machine_probe,
-    machine_status,
 )
 from scripts.swarm_v2.herdr.catalog import Catalog
 from scripts.swarm_v2.herdr.endpoints import (
@@ -202,7 +200,7 @@ class Terminal:
     ) -> None:
         self.home, self.authority, self.namespace = home, authority, namespace
         self.run, self.lookup = run, lookup
-        self.qualifier = Qualifier(machine_probe(run), machine_status(run))
+        self.qualifier = Qualifier.machine(run)
         self.registrations = Registrations(Catalog(run), Store(home.terminals / STORE))
         self.failures: Counter = Counter()
 

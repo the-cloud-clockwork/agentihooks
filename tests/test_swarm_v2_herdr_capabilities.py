@@ -192,7 +192,7 @@ def test_targets_keep_separate_verdicts():
 
 
 def _machine_gate(runner: cases.Runner) -> Qualifier:
-    return Qualifier(capabilities.machine_probe(runner), capabilities.machine_status(runner))
+    return Qualifier.machine(runner)
 
 
 def test_an_unchanged_server_reuses_its_verdict_after_one_status_read():
