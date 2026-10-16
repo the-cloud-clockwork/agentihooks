@@ -168,13 +168,13 @@ class Qualifier:
     def __init__(self, probe: Callable[[str], Observation], status: Callable[[str], dict]) -> None:
         self.probe = probe
         self.status = status
+        self.verdicts: dict[str, Verdict] = {}
+        self.retired: dict[str, set[str]] = {}
+        self.mismatches: Counter = Counter()
 
     @classmethod
     def machine(cls, run: Callable[[list[str]], subprocess.CompletedProcess]) -> "Qualifier":
         return cls(machine_probe(run), machine_status(run))
-        self.verdicts: dict[str, Verdict] = {}
-        self.retired: dict[str, set[str]] = {}
-        self.mismatches: Counter = Counter()
 
     def verdict(self, target: str, incarnation: str) -> Verdict:
         if not target or target.startswith("-") or not incarnation:
