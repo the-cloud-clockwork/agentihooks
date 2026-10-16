@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import json
+import os
 
 import pytest
 
@@ -202,7 +203,72 @@ def test_a_claude_stop_links_nothing(tmp_path, monkeypatch):
 def test_a_failed_link_is_logged_and_never_raises(monkeypatch):
     seen = []
     monkeypatch.setattr("hooks.targets.is_codex", lambda: True)
-    monkeypatch.setattr(codex_rollouts, "link_current", lambda path: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    def boom(path):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(codex_rollouts, "link_current", boom)
     monkeypatch.setattr(hook_manager, "log", lambda message, data: seen.append((message, data)))
     hook_manager._link_codex_rollout("/x.jsonl")
     assert seen == [("codex rollout link failed", {"error": "boom"})]
+
+
+def test_a_stale_reading_past_its_week_reset_gives_no_cap_while_a_fresh_one_does():
+    old = codex_quota.CodexQuota(NOW - 3600, "pro", seven_day=QuotaWindow(80.0, int(NOW - 60)))
+    fresh = codex_quota.CodexQuota(NOW - 60, "pro", seven_day=QuotaWindow(80.0, int(NOW - 30)))
+    running = codex_quota.CodexQuota(NOW - 3600, "pro", seven_day=QuotaWindow(80.0, int(NOW + 3600)))
+    assert [codex_router.stale_reset(q, NOW) for q in (old, fresh, running)] == [True, False, False]
+    assert codex_router.account_cap(old, NOW, {}) is None
+    assert codex_router.account_cap(fresh, NOW, {}) == 6
+    assert codex_router.account_cap(running, NOW, {}) == 6
+    spent = codex_quota.CodexQuota(NOW - 3600, "pro", seven_day=QuotaWindow(99.0, int(NOW + 3600)))
+    assert codex_router.account_cap(spent, NOW, {}) == 0
+
+
+def test_an_empty_account_folder_falls_back_to_the_registry_reading(tmp_path, monkeypatch):
+    environ = {"HOME": str(tmp_path), "AH_CX_TOKEN_alpha": "at-a"}
+    monkeypatch.setattr(codex_router, "_registry", lambda: {ALPHA: {"account": "alpha"}})
+    monkeypatch.setattr(codex_router.codex_usage, "cached", lambda: {})
+    _rollout(tmp_path, ALPHA, 40.0)
+    codex_rollouts.folder(environ, "alpha").mkdir(parents=True)
+    found = codex_router.quotas([CodexAccount("alpha", "AH_CX_TOKEN_alpha")], environ)
+    assert found["alpha"].seven_day.used == 40.0
+
+
+def test_a_thread_id_is_matched_literally(tmp_path):
+    environ = {"HOME": str(tmp_path)}
+    _rollout(tmp_path, ALPHA, 10.0)
+    assert codex_rollouts.link_thread(environ, "alpha", "*") is None
+    assert codex_rollouts.session_ids(environ, "alpha") == set()
+
+
+def test_an_exec_probe_links_its_rollout_into_the_account_folder(tmp_path, monkeypatch):
+    environ = {"HOME": str(tmp_path), "AH_CX_TOKEN_alpha": "at-a"}
+    rollout = _rollout(tmp_path, ALPHA, 25.0)
+
+    class Done:
+        stdout = json.dumps({"type": "thread.started", "thread_id": ALPHA}) + "\n"
+
+    found = codex_router.probe(CodexAccount("alpha", "AH_CX_TOKEN_alpha"), environ, lambda *a, **k: Done())
+    assert found.seven_day.used == 25.0
+    linked = codex_rollouts.folder(environ, "alpha") / "2026" / "10" / "04" / rollout.name
+    assert linked.samefile(rollout)
+
+
+def test_the_balance_table_ends_with_the_duplicate_warning_and_the_default_verdict(tmp_path, monkeypatch):
+    _default_login(tmp_path, "acct-1")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    for name in [name for name in os.environ if name.startswith("AH_CX_TOKEN_")]:
+        monkeypatch.delenv(name)
+    monkeypatch.setenv("AH_CX_TOKEN_alpha", _jwt("acct-1"))
+    monkeypatch.setenv("AH_CX_TOKEN_ncgma", _jwt("acct-1"))
+    monkeypatch.setattr("hooks.context.account_sessions.codex_sessions_by_account", lambda: {})
+    row = agents_quota.QuotaRow("codex", "alpha", "UNKNOWN", 0, None, None, None, "log")
+    lines = agents_quota._render_live([row], {}, NOW).splitlines()
+    mark = codex_router.fingerprint("acct-1")
+    assert lines[3:] == [
+        "AH_CX_TOKEN_ncgma is the same ChatGPT account as alpha; it is not routed",
+        f"codex default login #{mark}: same ChatGPT account as alpha, ncgma",
+    ]
+    assert len(agents_quota._render_live([row], {}, NOW, fable=True).splitlines()) == 3

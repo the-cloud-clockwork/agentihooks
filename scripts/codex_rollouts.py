@@ -1,6 +1,7 @@
 """Each Codex account's own sessions folder: hard links to the rollouts its sessions wrote under CODEX_HOME/sessions."""
 
 import contextlib
+import glob
 import os
 from collections.abc import Mapping
 from pathlib import Path
@@ -40,7 +41,7 @@ def link(environ: Mapping[str, str], account: str, rollout: Path) -> Path | None
 
 
 def link_thread(environ: Mapping[str, str], account: str, thread: str) -> Path | None:
-    found = sorted((codex_home(dict(environ)) / SESSIONS).glob(f"*/*/*/rollout-*{thread}.jsonl"))
+    found = sorted((codex_home(dict(environ)) / SESSIONS).glob(f"*/*/*/rollout-*{glob.escape(thread)}.jsonl"))
     return link(environ, account, found[-1]) if found else None
 
 

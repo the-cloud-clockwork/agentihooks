@@ -9,7 +9,7 @@ from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import asdict, dataclass, replace
 from typing import TYPE_CHECKING
 
-from scripts import codex_quota, codex_router, session_bands
+from scripts import codex_router, session_bands
 from scripts.claude_quota_balancer import (
     MASTERS_ONLY,
     OPEN,
@@ -159,9 +159,8 @@ def codex_rows(
         quota = quotas.get(account.name)
         known = quota is not None and not quota.expired
         fresh = known and session_bands.fresh(quota.observed_at, now)
-        inferred = known and not fresh and codex_quota.passed(quota.seven_day, now)
-        week = session_bands.left(quota.seven_day.used, quota.seven_day.resets_at, now) if known else None
-        week = None if inferred else week
+        measured = known and not codex_router.stale_reset(quota, now)
+        week = session_bands.left(quota.seven_day.used, quota.seven_day.resets_at, now) if measured else None
         cap = codex_router.account_cap(quota, now, environ) if account.signed_in and known else None
         rows.append(
             QuotaRow(
@@ -383,8 +382,8 @@ def _render_live(
 
     live = {"claude": sessions, **({} if fable else {"codex": codex_sessions_by_account()})}
     table = render(rows, int(now), unlisted_sessions(rows, live), fable, current)
-    distinction = "" if fable else codex_router.default_distinction(os.environ)
-    return f"{table}\n{distinction}" if distinction else table
+    notes = [] if fable else [*codex_router.identity_warnings(os.environ), codex_router.default_distinction(os.environ)]
+    return "\n".join([table, *(note for note in notes if note)])
 
 
 def tokenless_table(master: "MasterAccount | None", sessions: dict[str, int]) -> str:

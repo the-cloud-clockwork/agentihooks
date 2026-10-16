@@ -215,10 +215,8 @@ def quotas(pool: list[CodexAccount], environ: Mapping[str, str]) -> dict[str, Co
         return lambda session_id: session_id in owner and owner[session_id] not in tokens and session_id not in linked
 
     def read(account: CodexAccount) -> CodexQuota | None:
-        own = codex_rollouts.folder(environ, account.name)
-        if own.is_dir():
-            return codex_quota.latest_codex_quota(dict(environ), sessions=own)
-        return codex_quota.latest_codex_quota(dict(environ), keep(account))
+        own = codex_quota.latest_codex_quota(dict(environ), sessions=codex_rollouts.folder(environ, account.name))
+        return own or codex_quota.latest_codex_quota(dict(environ), keep(account))
 
     usage = codex_usage.cached()
     return {account.name: _newest(read(account), usage.get(account.name)) for account in pool}
@@ -243,13 +241,18 @@ def usable(quota: CodexQuota, now: float, environ: Mapping[str, str] | None = No
     return now - quota.observed_at <= _reading_max_age(os.environ if environ is None else environ)
 
 
+def stale_reset(quota: CodexQuota, now: float) -> bool:
+    """A reading older than the freshness window whose week has reset since says nothing about the new week."""
+    return not session_bands.fresh(quota.observed_at, now) and codex_quota.passed(quota.seven_day, now)
+
+
 def account_cap(quota: CodexQuota | None, now: float, environ: Mapping[str, str] | None = None) -> int | None:
     """Live sessions under the session bands: the week alone sets it; None without a usable reading."""
     if quota is None:
         return None
     if quota.expired:
         return 0
-    if not usable(quota, now, environ):
+    if not usable(quota, now, environ) or stale_reset(quota, now):
         return None
     if quota.reached and not codex_quota.passed(quota.seven_day, now):
         return 0
