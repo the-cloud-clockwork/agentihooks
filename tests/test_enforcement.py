@@ -225,6 +225,17 @@ class TestSessionStartEntry:
         assert "second rule" in context
         assert increment_and_get_count("session-start") == 2
 
+    def test_session_start_renders_one_compact_digest(self):
+        from hooks.context.enforcement import add_enforcement, get_session_start_enforcements
+
+        first = add_enforcement("first rule", 3, "doctrine")
+        second = add_enforcement("second rule", 7)
+        context = get_session_start_enforcements("session-start")
+        assert context.count("=== ENFORCEMENT") == 1
+        assert "Cadence:" not in context
+        assert f"{first}: first rule" in context.splitlines()
+        assert f"{second}: second rule" in context.splitlines()
+
     def test_disabled_returns_none(self):
         from hooks.context.enforcement import add_enforcement, get_session_start_enforcements
 
