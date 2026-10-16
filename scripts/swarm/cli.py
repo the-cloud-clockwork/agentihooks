@@ -1458,7 +1458,7 @@ def cmd_wait(store, args):
         get = InboxStore(store.redis).get
         if problem := waits.target_problem(held["kind"], held["target"], agent.task, rows, get):
             raise SwarmError(problem)
-        if held["kind"] == "checks":
+        if held["kind"] == "checks" and waits.PULL_URL.fullmatch(held["target"]):
             head = ledger_events.head(held["target"])
             if not head:
                 raise SwarmError("cannot read the pull request head; retry the checks wait")
