@@ -1305,13 +1305,6 @@ jobs:
           retention-days: 7
           overwrite: true
 
-      - name: Save the dev test dependency manifest
-        if: needs.select.outputs.scope == 'full' && github.event_name == 'push' && github.ref == 'refs/heads/dev'
-        uses: actions/cache/save@v4
-        with:
-          path: dep-manifest
-          key: dep-manifest-${{ github.sha }}
-
       # Runs the CLI directly: sonarqube-scan-action never finds its tool cache entry, since a four part version is not semver.
       - name: SonarQube Scan
         env:
@@ -2034,6 +2027,18 @@ jobs:
           if-no-files-found: error
           retention-days: 90
           overwrite: true
+
+      - name: Download the test dependency manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: dep-manifest
+          path: dep-manifest
+
+      - name: Save the dev test dependency manifest
+        uses: actions/cache/save@v4
+        with:
+          path: dep-manifest
+          key: dep-manifest-${{ github.sha }}
 
   mutation-plan:
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}
