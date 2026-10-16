@@ -483,4 +483,11 @@ def test_an_exact_head_without_its_base_and_grader_is_refused(monkeypatch, capsy
     with pytest.raises(SystemExit) as refused:
         reuse.main()
     assert refused.value.code == 2
-    assert "--head, --base and --grader go together" in capsys.readouterr().err
+    assert capsys.readouterr().err.endswith("reuse: error: --head, --base and --grader go together\n")
+
+
+def test_the_current_run_never_reuses_its_own_report_in_exact_mode(pair, monkeypatch):
+    root, _, base, head = pair
+    archive = _scoped(GREEN, {"base": base, "head": head})
+    written, _ = _exact(monkeypatch, root, base, head, [_run(99, head)], {99: archive})
+    assert written == "reused=false\n"
