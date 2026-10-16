@@ -142,6 +142,7 @@ async def test_child_cannot_supply_another_child_as_the_root(router, repo):
         {"threadId": "child"},
         {"sessionId": "", "threadId": "child"},
         {"sessionId": 7, "threadId": "child"},
+        {"sessionId": ["parent"], "threadId": "child"},
         {"sessionId": "parent", "threadId": ""},
         {"sessionId": "parent", "threadId": 7},
     ],
