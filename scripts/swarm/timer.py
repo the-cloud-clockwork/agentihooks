@@ -52,6 +52,14 @@ def units(binary):
     }
 
 
+def _current(path, text):
+    return path.is_file() and path.read_text() == text
+
+
+def _services(binary):
+    return [name for name in units(binary) if name.endswith(".service") and name != f"{UNIT}.service"]
+
+
 def _foreign_run(unit_dir):
     from scripts.targets._common import _install_module
 
@@ -75,22 +83,23 @@ def ensure(binary, unit_dir=None, run=subprocess.run):
     changed = False
     for name, text in units(binary).items():
         path = unit_dir / name
-        if not path.exists() or path.read_text() != text:
+        if not _current(path, text):
             path.write_text(text)
             changed = True
     if changed:
         run(["systemctl", "--user", "daemon-reload"], capture_output=True, text=True, timeout=30, check=False)
-    run(["systemctl", "--user", "enable", "--now", f"{WAKER}.service"], capture_output=True, text=True, timeout=30)
-    run(["systemctl", "--user", "enable", "--now", f"{ALERTS}.service"], capture_output=True, text=True, timeout=30)
+    for name in _services(binary):
+        run(["systemctl", "--user", "enable", "--now", name], capture_output=True, text=True, timeout=30)
     proc = run(["systemctl", "--user", "enable", "--now", f"{UNIT}.timer"], capture_output=True, text=True, timeout=30)
     return proc.returncode == 0
 
 
 def reconcile(binary, unit_dir=None, run=subprocess.run):
     unit_dir = unit_dir or UNIT_DIR
-    expected = units(binary).items()
-    if all((unit_dir / name).is_file() and (unit_dir / name).read_text() == text for name, text in expected):
-        return True
+    if all(_current(unit_dir / name, text) for name, text in units(binary).items()):
+        enabled = ["systemctl", "--user", "is-enabled", "--quiet", *_services(binary), f"{UNIT}.timer"]
+        if run(enabled, capture_output=True, text=True, timeout=30).returncode == 0:
+            return True
     return ensure(binary, unit_dir, run)
 
 

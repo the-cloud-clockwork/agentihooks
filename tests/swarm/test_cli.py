@@ -977,27 +977,77 @@ def test_timer_ensure_also_runs_the_alert_intake_service(tmp_path):
     assert calls[-1][0] == ["systemctl", "--user", "enable", "--now", "agentihooks-swarm.timer"]
 
 
-def test_timer_reconcile_installs_a_newly_added_service_and_leaves_current_units_alone(tmp_path):
-    calls = []
-    run = lambda argv, **kw: calls.append(argv) or subprocess.CompletedProcess(argv, 0)  # noqa: E731
+def test_timer_reconcile_installs_a_newly_added_service_and_leaves_current_units_alone(tmp_path, monkeypatch):
+    calls, failing = [], set()
+
+    def run(argv, **kw):
+        calls.append((argv, kw))
+        return subprocess.CompletedProcess(argv, 1 if argv[2] in failing else 0)
+
+    kw = {"capture_output": True, "text": True, "timeout": 30}
+    enable = lambda name: (["systemctl", "--user", "enable", "--now", name], kw)  # noqa: E731
     assert timer.ensure("/bin/agentihooks", tmp_path, run=run)
     calls.clear()
     assert timer.reconcile("/bin/agentihooks", tmp_path, run=run)
-    assert calls == []
+    services = ["agentihooks-inbox-waker.service", "agentihooks-alert-intake.service"]
+    assert calls == [(["systemctl", "--user", "is-enabled", "--quiet", *services, "agentihooks-swarm.timer"], kw)]
 
+    calls.clear()
+    failing.add("is-enabled")
+    assert timer.reconcile("/bin/agentihooks", tmp_path, run=run)
+    assert [call[0][2] for call in calls] == ["is-enabled", "enable", "enable", "enable"]
+    failing.clear()
+
+    calls.clear()
     (tmp_path / "agentihooks-alert-intake.service").unlink()
     assert timer.reconcile("/bin/agentihooks", tmp_path, run=run)
     assert (tmp_path / "agentihooks-alert-intake.service").read_text() == timer.units("/bin/agentihooks")[
         "agentihooks-alert-intake.service"
     ]
-    assert calls[0] == ["systemctl", "--user", "daemon-reload"]
-    assert ["systemctl", "--user", "enable", "--now", "agentihooks-alert-intake.service"] in calls
+    assert calls[0] == (["systemctl", "--user", "daemon-reload"], {**kw, "check": False})
+
+    original = timer.units
+    added = "[Unit]\nDescription=a service merged while the swarm runs\n"
+    monkeypatch.setattr(timer, "units", lambda binary: {**original(binary), "agentihooks-new-intake.service": added})
+    calls.clear()
+    assert timer.reconcile("/bin/agentihooks", tmp_path, run=run)
+    assert (tmp_path / "agentihooks-new-intake.service").read_text() == added
+    assert calls == [
+        (["systemctl", "--user", "daemon-reload"], {**kw, "check": False}),
+        enable("agentihooks-inbox-waker.service"),
+        enable("agentihooks-alert-intake.service"),
+        enable("agentihooks-new-intake.service"),
+        enable("agentihooks-swarm.timer"),
+    ]
 
 
 def test_the_host_tick_reconciles_the_user_services_once_per_pass(monkeypatch):
     monkeypatch.setattr(timer, "entry_point", lambda: "/installed/bin/agentihooks")
     store = _tick_all(monkeypatch, lambda store, slug: [], ["a", "b"])
     assert store.reconciled == ["/installed/bin/agentihooks"]
+    assert _tick_all(monkeypatch, lambda store, slug: [], []).reconciled == []
+
+
+def test_a_failed_service_install_warns_and_lets_the_tick_go_on(monkeypatch, capsys):
+    monkeypatch.setattr(timer, "entry_point", lambda: "/installed/bin/agentihooks")
+    outcomes = iter([True, False, subprocess.TimeoutExpired(["systemctl"], 30), OSError("read only")])
+
+    def reconcile(binary):
+        assert binary == "/installed/bin/agentihooks"
+        outcome = next(outcomes)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(timer, "reconcile", reconcile)
+    for _ in range(4):
+        cli._reconcile_services()
+    warning = "warning: the swarm user services could not be installed or enabled"
+    assert capsys.readouterr().err.splitlines() == [
+        warning,
+        f"{warning}: Command '['systemctl']' timed out after 30 seconds",
+        f"{warning}: read only",
+    ]
 
 
 def test_main_runs_the_alert_intake_without_a_slug(monkeypatch):
