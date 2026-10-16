@@ -174,7 +174,7 @@ def _delivery(row: dict, task: dict, duration: float = -1.0) -> dict:
 
 def _split_merges(slug: str, doc: dict, agents: list, pulls: dict) -> list[dict]:
     rows = []
-    for task in doc["tasks"]:
+    for task in doc.get("tasks", []):
         for url in task.get("split_pulls") or []:
             pull = pulls.get(url)
             if pull is None or pull.state != "MERGED" or pull.merged_at is None:

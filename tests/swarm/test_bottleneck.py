@@ -186,6 +186,7 @@ def test_each_pull_request_counts_only_its_review_and_excludes_parked_time(rever
         ),
         open_task("t4", "done"),
         NOW,
+        window_ms=10 * H,
     )
     assert found["seconds"]["review"] == 7200.0
 
