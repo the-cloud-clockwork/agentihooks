@@ -254,6 +254,23 @@ def test_hosted_receipts_keep_each_operation_and_remove_expired_entries(deployed
     assert set(store.redis.hkeys(key)) == {"first", "second"}
 
 
+def test_legacy_receipts_migrate_and_keep_the_original_acknowledgement(deployed, store):
+    _, read = _read(deployed)
+    first = _patch(deployed, read["revision"], {"state": "pr"})
+    assert first[0] == 200
+    key = store.key(SLUG, _hl().RECEIPTS_KEY, "tasks/t1")
+    record = json.loads(store.redis.hget(key, "op-1"))
+    legacy = {"generation": record["generation"], "operations": {"op-1": {"digest": record["digest"], "ack": first[1]}}}
+    store.redis.delete(key)
+    store.redis.set(key, json.dumps(legacy))
+
+    again = _patch(deployed, read["revision"], {"state": "pr"})
+
+    assert again == first
+    assert store.redis.type(key) == "hash"
+    assert store.redis.ttl(key) > 0
+
+
 def test_a_replayed_worker_update_returns_the_same_receipt(deployed):
     _, read = _read(deployed)
 
@@ -512,6 +529,18 @@ def test_profile_choice_reads_project_and_phase_intent_through_the_hosted_server
     _hold("engineer@323133-0300", tmp_path)
 
     state = profile_choice.state(SLUG, {"id": "t1", "phase": "p1"})
+
+    assert (state["project_intent"], state["phase_intent"]) == (
+        OVERVIEW,
+        "Ledger: Tasks read through the hosted server",
+    )
+
+
+def test_a_pinned_controller_reads_intent_with_its_controller_credential(hosted, tmp_path):
+    _hold("engineer@323133-0300", tmp_path)
+
+    with patch.object(ledger, "launch_token", side_effect=AssertionError("controller read requested a worker token")):
+        state = profile_choice.state(SLUG, {"id": "t1", "phase": "p1"})
 
     assert (state["project_intent"], state["phase_intent"]) == (
         OVERVIEW,
