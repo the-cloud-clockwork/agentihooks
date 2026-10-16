@@ -963,7 +963,9 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
             "${{ !cancelled() && needs.mutation-plan.result == 'success' && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}",
         ),
     )
-    assert plan["outputs"]["shards"] == "${{ steps.plan.outputs.shards || '[0]' }}"
+    assert (
+        plan["outputs"]["shards"] == "${{ steps.reuse.outputs.reused == 'true' && '[0]' || steps.plan.outputs.shards }}"
+    )
     step = next(step for step in plan["steps"] if step.get("id") == "plan")
     assert step["if"] == "steps.reuse.outputs.reused != 'true'"
     assert step["run"] == "python -m scripts.ci_mutation." + 'plan --base "$BASE"'
@@ -1008,7 +1010,10 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
 def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
     jobs = _mutation_workflow()["jobs"]
     plan, stats, mutation = jobs["mutation-plan"], jobs["mutation-stats"], jobs["mutation"]
-    assert plan["outputs"]["stats_parts"] == "${{ steps.plan.outputs.stats_parts || '[0]' }}"
+    assert (
+        plan["outputs"]["stats_parts"]
+        == "${{ steps.reuse.outputs.reused == 'true' && '[0]' || steps.plan.outputs.stats_parts }}"
+    )
     assert stats["needs"] in ("mutation-plan", ["mutation-plan", "admission"])
     assert (stats["if"], mutation["if"]) in (
         (

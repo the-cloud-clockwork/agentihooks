@@ -12,7 +12,12 @@ from scripts.ci_mutation.scope import PREFLIGHT, weakened_tests
 EVIDENCE = Path(".mutation-gate")
 REPORT = "mutation-preflight-report"
 SCOPE = "scope.json"
-PRODUCERS = (".github/workflows/mutation-preflight.yml", ".github/actions/", "scripts/ci_mutation/")
+PRODUCERS = (
+    ".github/workflows/mutation-preflight.yml",
+    ".github/workflows/test.yml",
+    ".github/actions/",
+    "scripts/ci_mutation/",
+)
 
 
 def api(path: str, binary: bool = False):
@@ -64,9 +69,9 @@ def source(head: str, branch: str, current: int) -> tuple[dict, bytes] | None:
             return row, graded[0]
 
 
-def scope(archive: bytes) -> dict | None:
+def scope(archive: bytes) -> dict:
     with zipfile.ZipFile(io.BytesIO(archive)) as zipped:
-        return json.loads(zipped.read(SCOPE)) if SCOPE in zipped.namelist() else None
+        return json.loads(zipped.read(SCOPE))
 
 
 def exact(head: str, base: str, branch: str, current: int) -> tuple[dict, bytes] | None:

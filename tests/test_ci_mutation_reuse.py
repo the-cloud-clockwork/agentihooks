@@ -381,6 +381,7 @@ def test_a_planted_base_or_head_difference_in_the_preflight_scope_mutates_in_ful
     "producer",
     [
         ".github/workflows/mutation-preflight.yml",
+        ".github/workflows/test.yml",
         ".github/actions/browser-cache/action.yml",
         "scripts/ci_mutation/x.py",
     ],
