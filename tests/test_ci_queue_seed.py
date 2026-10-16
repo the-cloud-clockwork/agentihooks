@@ -136,7 +136,9 @@ def test_every_unit_shard_downloads_the_one_republished_dev_durations():
     download = _step(steps, "Download the queued run's dev durations")
     adopt = _step(steps, "Adopt latest dev durations")
     assert (
-        download["if"].replace("needs.select.", "needs.durations.")
+        download["if"].replace(
+            "needs." + ("durations" if "durations" in _jobs() else "select") + ".", "needs.durations."
+        )
         == "needs.durations.outputs.source == '' && needs.durations.outputs.queued == 'true'"
     )
     assert download["uses"] == "./.github/actions/retry-download"

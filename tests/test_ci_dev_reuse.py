@@ -213,7 +213,9 @@ def test_workflow_preserves_downstream_artifacts():
         restored = steps[f"Restore queue shard {kind}"]
         assert restored["with"]["run-id"] == "${{ needs.split.outputs.source }}"
     assert (
-        jobs["split"]["outputs"]["source"].replace("needs.select.", "needs.durations.")
+        jobs["split"]["outputs"]["source"].replace(
+            "needs." + ("durations" if "durations" in jobs else "select") + ".", "needs.durations."
+        )
         == "${{ needs.durations.outputs.source }}"
     )
     assert jobs.get("durations", jobs["select"])["outputs"]["source"] == "${{ steps.unit-source.outputs.source }}"
