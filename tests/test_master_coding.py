@@ -194,6 +194,11 @@ def test_the_window_opens_serena_edits_by_project_relative_path(master):
     assert GUARD["deny_reason"](payload, "master", master) == ""
     payload["tool_input"] = {"relative_path": ".claude/conditions/pre-bash-x.py"}
     assert "stay closed" in GUARD["deny_reason"](payload, "master", master)
+    payload["tool_input"] = {"relative_path": ""}
+    assert "cannot edit outside" in GUARD["deny_reason"](payload, "master", master)
+    payload["tool_name"] = "mcp__serena__rename_symbol"
+    payload["tool_input"] = {"relative_path": "scripts/swarm/master_launch.py"}
+    assert "cannot edit outside" in GUARD["deny_reason"](payload, "master", master)
 
 
 def test_an_expired_window_record_no_longer_opens_edits(master):

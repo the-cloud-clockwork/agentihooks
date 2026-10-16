@@ -78,7 +78,8 @@ def deny_reason(payload: dict, role: str, home: Path) -> str:
         if any(closed_in_window(value, cwd) for value in paths):
             return "master hotfix window: condition folders and credential files stay closed."
         roots.append((home / "dev" / "worktrees").resolve())
-        if tool in SERENA_WRITES and paths and not any(Path(value).expanduser().is_absolute() for value in paths):
+        relative = all(value and not Path(value).expanduser().is_absolute() for value in paths)
+        if tool in SERENA_WRITES - {"mcp__serena__rename_symbol"} and paths and relative:
             return ""
     if paths and all(_inside(tool, value, cwd, roots) for value in paths):
         return ""
