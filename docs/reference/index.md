@@ -19,6 +19,7 @@ Complete reference documentation for configuration and CLI commands.
 | [Presentation layer architecture](presentation-layer.md) | The ledger pages, HOME and BIN as a product: constraints, today's architecture, limits, target (static pages, `/api/v1`, server-sent events, SQLite behind a repository) and the migration order |
 | [Ledger design with Impeccable live](ledger-design-live.md) | Start an Impeccable live session against a scratch ledger server; the rules that keep it away from the shared server |
 | [Delivery tiers](delivery-tiers.md) | The three CI tiers (pull request, queue, promotion), why a red integration branch keeps merging, promotion owning the slow checks, fixer tasks for a red promotion, and where coverage is graded |
+| [Promotion and releases](promotion.md) | How a green `dev` push run of Tests rebase merges its graded revision into `main` through a snapshot branch, tags a patch release with generated notes, what blocks it, reruns and manual `release.yml` runs |
 | [CI result cache and in place retry](ci-result-cache.md) | The design for one CI algorithm: reuse a check's green result while its real inputs are unchanged, retry a failed test in place, before numbers and slices |
 | [WSL disk reclaim](wsl-disk.md) | Sparse VHDX so space `agentihooks gc` frees returns to Windows; why `/tmp` empties on WSL |
 | [CODEX-COMPAT](CODEX-COMPAT.md) | The `codex` install target: hook contract, surface map, divergences |
