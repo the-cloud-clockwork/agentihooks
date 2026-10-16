@@ -11,13 +11,12 @@ chosen by the swarm setting `codex-inbox-transport`:
 
 | Value | Delivery | Master inbox loop |
 |---|---|---|
-| `app_server` (default) | The supervised `codex app-server` owns the thread; the push pump starts or steers a turn for each item, idle or busy. No pane typing. | Ends its turn when idle; no `wait --inbox`. |
+| `app_server` (default for new swarms) | The supervised `codex app-server` owns the thread; the push pump starts or steers a turn for each item, idle or busy. No pane typing. | Ends its turn when idle; no `wait --inbox`. |
 | `legacy` | The tick types one wake prompt into an idle worker pane; the agent reads `agentihooks msg inbox`. | Runs the foreground `wait --inbox` loop. |
 
-A new swarm, and a swarm whose stored config has no `codex_inbox_transport`,
-reads `app_server`. `swarm create` stores every setting, so a swarm created
-before this default change holds `legacy` and keeps it until someone sets the
-value. Each launch records its transport on its execution; a setting change
+`agentihooks swarm <id> create` stores `app_server` for a new swarm. A swarm
+created before this default change stores `legacy`, and a stored config without
+the setting reads `legacy`; either keeps it until someone sets the value. Each launch records its transport on its execution; a setting change
 applies to the next launch and never converts a running execution.
 
 ```bash
@@ -58,7 +57,7 @@ the default is step 4. Enable one step at a time, and check each step before the
 1. One worker on a scratch swarm with its own Redis database.
 2. One real worker in an authorized swarm.
 3. The master.
-4. New Codex executions generally (the default).
+4. New Codex executions generally: every swarm created from now on (the default).
 
 At each step, `agentihooks swarm <id> status` shows the agent's transport and
 state, and an item sent with `agentihooks msg send <seat> <text>` is answered

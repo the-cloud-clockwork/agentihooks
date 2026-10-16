@@ -16,12 +16,11 @@ def test_codex_inbox_transport_defaults_to_app_server(env):  # noqa: F811
     assert store.config("sw").codex_inbox_transport == APP_SERVER_TRANSPORT
 
 
-def test_a_stored_config_without_the_setting_reads_app_server(env):  # noqa: F811
+def test_a_stored_config_without_the_setting_keeps_legacy(env):  # noqa: F811
     store, _, _ = env
     run("sw", "create", "--repo", "/repo")
-    run("sw", "set", "codex-inbox-transport=legacy")
     store.redis.hdel(store.key("sw", "config"), "codex_inbox_transport")
-    assert store.config("sw").codex_inbox_transport == APP_SERVER_TRANSPORT
+    assert store.config("sw").codex_inbox_transport == LEGACY_TRANSPORT
 
 
 def test_rollback_to_legacy_holds_for_new_executions_and_keeps_admitted_ones(env):  # noqa: F811

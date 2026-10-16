@@ -4,7 +4,7 @@ from dataclasses import replace
 import pytest
 
 from scripts.swarm import stack
-from scripts.swarm.store import LEGACY_TRANSPORT, MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import MASTER_DOWN, STARTUP_GRACE_MS, Placed, SpawnError, tick
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -214,7 +214,7 @@ def store():
     import fakeredis
 
     s = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    s.create(SwarmConfig("sw", "/repo", max_eng=2, max_ci=1, codex_inbox_transport=LEGACY_TRANSPORT))
+    s.create(SwarmConfig("sw", "/repo", max_eng=2, max_ci=1))
     return s
 
 

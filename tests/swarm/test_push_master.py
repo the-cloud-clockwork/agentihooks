@@ -189,7 +189,7 @@ def test_the_spawned_task_names_the_transport_its_launch_chooses(setting, harnes
 
     config = SwarmConfig("sw", "/repo", 1, 0, codex_inbox_transport=setting)
     assert codex.transport(config, harness) == expected
-    assert codex.transport(SwarmConfig("sw", "/repo", 1, 0), "codex") == APP_SERVER_TRANSPORT
+    assert codex.transport(SwarmConfig("sw", "/repo", 1, 0), "codex") == LEGACY_TRANSPORT
 
 
 def test_a_config_without_a_transport_setting_reads_as_legacy():

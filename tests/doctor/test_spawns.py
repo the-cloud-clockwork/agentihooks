@@ -30,13 +30,11 @@ def test_runtime_records_the_launcher_overflow_placement(tmp_path):
     import fakeredis
 
     from scripts.swarm.runtime import HerdrRuntime
-    from scripts.swarm.store import LEGACY_TRANSPORT, RedisStore, SwarmConfig
+    from scripts.swarm.store import RedisStore, SwarmConfig
     from scripts.swarm.tick import tick
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    config = SwarmConfig(
-        "sw", str(tmp_path), max_eng=1, max_ci=0, state="running", codex_inbox_transport=LEGACY_TRANSPORT
-    )
+    config = SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, state="running")
     store.create(config)
     launched = []
 

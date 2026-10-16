@@ -799,7 +799,7 @@ class CodexAdapter:
         from scripts.swarm.store import APP_SERVER_TRANSPORT, LEGACY_TRANSPORT
 
         print(
-            f"  [--] Codex inbox transport: new swarm executions default to {APP_SERVER_TRANSPORT}; roll a swarm back "
+            f"  [--] Codex inbox transport: new swarms default to {APP_SERVER_TRANSPORT}; roll a swarm back "
             f"with: agentihooks swarm <id> set codex-inbox-transport={LEGACY_TRANSPORT}"
         )
         return failed

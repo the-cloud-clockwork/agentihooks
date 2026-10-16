@@ -1223,6 +1223,6 @@ class TestDoctorInboxTransport:
         adapter.doctor()
         lines = capsys.readouterr().out.splitlines()
         assert lines[-1] == (
-            "  [--] Codex inbox transport: new swarm executions default to app_server; roll a swarm back "
+            "  [--] Codex inbox transport: new swarms default to app_server; roll a swarm back "
             "with: agentihooks swarm <id> set codex-inbox-transport=legacy"
         )

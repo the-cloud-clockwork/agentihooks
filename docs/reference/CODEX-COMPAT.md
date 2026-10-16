@@ -285,8 +285,8 @@ written to disk — a HARD FLOOR path.
 
 ### Inbox transport
 
-Swarm Codex executions take inbox work through the supervised `codex
-app-server` by default (`codex-inbox-transport=app_server`); `legacy` keeps the
+Codex executions in a swarm made by `swarm create` take inbox work through the
+supervised `codex app-server` (`codex-inbox-transport=app_server`); `legacy` keeps the
 typed wake and the master's `wait --inbox` loop. `doctor` prints the default and
 the rollback command. The setting, qualified versions, canary order and rollback
 are in [Codex inbox transport](codex-inbox-transport.md).
