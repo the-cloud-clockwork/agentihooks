@@ -67,6 +67,11 @@ def grade(base, head):
     return gate_protected.grade(base, config, head, config, date(2026, 10, 16), policy)
 
 
+def test_protected_grading_accepts_separate_duration_admission():
+    base = legacy(ci_wiring.load(ROOT))
+    assert grade(base, copy.deepcopy(base)) == []
+
+
 @pytest.mark.parametrize("already_combined", [False, True])
 @pytest.mark.parametrize("promotion", [False, True])
 def test_protected_grading_accepts_combined_duration_admission(already_combined, promotion):
