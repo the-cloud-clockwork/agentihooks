@@ -339,8 +339,9 @@ def test_a_lost_test_whose_keyword_branch_the_head_deletes_is_admitted(tmp_path,
         _package(mod=BRANCHED.replace("queue=False, ", "queue=False, /, ")),
         _package(mod=BRANCHED.replace("queue", "lane")),
         _package(mod=BRANCHED.replace("queue=False, selected=False", "*queue, selected=False")),
+        _package(mod="if True:\n" + RETAINED.replace("\n    ", "\n        ").replace("def", "    def")),
     ],
-    ids=["kept", "kwargs", "moved", "positional", "renamed", "variadic"],
+    ids=["kept", "kwargs", "moved", "positional", "renamed", "variadic", "nested"],
 )
 def test_a_keyword_the_head_still_accepts_moved_or_renamed_admits_nothing(tmp_path, head):
     result = _lose_branch_tests(tmp_path, BRANCHED, head)
