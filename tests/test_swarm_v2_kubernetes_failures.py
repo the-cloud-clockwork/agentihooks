@@ -1313,7 +1313,8 @@ def test_a_takeover_during_legacy_supersession_cannot_commit_the_old_epoch(world
     with pytest.raises(SwarmError):
         world.reconcile(recovery)
     assert not once[0]
-    assert world.store.redis.hget(key, operation.operation_id) == before
+    recovered = {**json.loads(before), "refusal": {"reason": "mismatch", "field": "spec"}}
+    assert json.loads(world.store.redis.hget(key, operation.operation_id)) == recovered
     assert world.occupant() == world.old
 
 
