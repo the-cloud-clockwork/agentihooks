@@ -293,9 +293,7 @@ def test_start_condition_failure_fails_open(quiet_session_start, monkeypatch, tm
     assert ("conditions session_start failed", {"error": "index unreadable"}) in logged
 
 
-def test_start_conditions_skip_a_target_that_cannot_inject_at_session_start(
-    quiet_session_start, monkeypatch, tmp_path
-):
+def test_start_conditions_skip_a_target_that_cannot_inject_at_session_start(quiet_session_start, monkeypatch, tmp_path):
     from unittest.mock import Mock
 
     from hooks.context import conditions
