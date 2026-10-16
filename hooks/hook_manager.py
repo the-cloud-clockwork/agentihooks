@@ -308,7 +308,6 @@ def notify_on_error(transcript_path: str) -> None:
 
 
 def _run_start_conditions(payload: dict) -> None:
-    """Inject a start condition's context; it can never deny, rewrite or block."""
     try:
         from hooks.context import conditions
         from hooks.targets.capabilities import can_inject_context

@@ -267,8 +267,7 @@ condition that blocks on every Stop keeps the agent working forever: read
 
 ## Start step
 
-A `start` condition runs at SessionStart, before the rest of the handler's own
-context injection. Its stdin is the SessionStart payload: `session_id`, `cwd`,
+A `start` condition runs at SessionStart. Its stdin is the SessionStart payload: `session_id`, `cwd`,
 `source` (`startup`, `resume`, `clear`, `compact`), `transcript_path`. A `start`
 condition can only add context — `tool_input`, `tool_output` and `decision` are
 never read from it, so it can never deny, rewrite or block the session. A
