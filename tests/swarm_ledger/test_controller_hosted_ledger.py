@@ -55,7 +55,23 @@ def hosted(store, ledger_dir):
     thread = threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
     credential = hive_auth.issue_controller(store.redis)
     remote = {"AGENTIHOOKS_DEPLOYMENT": "distributed", "LEDGER_URL": f"http://{host}", _cs().CREDENTIAL_ENV: credential}
+    from scripts.swarm_v2.authority import TaskAuthority
+
+    stale = TaskAuthority._stale
+
+    def trace_stale(authority):
+        import sys
+
+        from scripts.swarm import lease
+
+        print(
+            f"[DEBUG-hosted-claim] claim={authority.current('t1')} now={lease.now_ms(authority.store)}",
+            file=sys.stderr,
+        )
+        return stale(authority)
+
     with (
+        patch.object(TaskAuthority, "_stale", trace_stale),
         patch("scripts.swarm.store.redis_client", return_value=store.redis),
         patch("hooks._redis.get_redis", return_value=None),
         patch("scripts.gates.talk.Budget._marks", return_value=None),
