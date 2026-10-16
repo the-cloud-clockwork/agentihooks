@@ -16,15 +16,15 @@ from scripts.swarm_v2.runtime import process
 
 
 def transport(config: SwarmConfig, harness: str) -> str:
-    return getattr(config, "codex_inbox_transport", LEGACY_TRANSPORT) if harness == "codex" else ""
+    return getattr(config, "codex_inbox_transport", APP_SERVER_TRANSPORT) if harness == "codex" else ""
 
 
 def arguments(config: SwarmConfig, harness: str, task: dict) -> list[str]:
     if harness != "codex":
         return []
-    transport = getattr(config, "codex_inbox_transport", LEGACY_TRANSPORT)
-    result = ["--codex-transport", transport]
-    if transport == APP_SERVER_TRANSPORT:
+    chosen = transport(config, harness)
+    result = ["--codex-transport", chosen]
+    if chosen == APP_SERVER_TRANSPORT:
         result += ["--seat", task["seat"]]
         previous = task.get("previous_execution_id")
         if previous:
@@ -35,14 +35,14 @@ def arguments(config: SwarmConfig, harness: str, task: dict) -> list[str]:
 def complete(config: SwarmConfig, name: str, placed: Placed, terminate: Callable[[str], object]) -> Placed:
     if placed.harness != "codex":
         return placed
-    transport = getattr(config, "codex_inbox_transport", LEGACY_TRANSPORT)
-    if transport == LEGACY_TRANSPORT:
-        return replace(placed, transport=transport)
+    chosen = transport(config, placed.harness)
+    if chosen == LEGACY_TRANSPORT:
+        return replace(placed, transport=chosen)
     try:
         execution = next((row for row in connect().execution_occupants(config.slug).values() if row.name == name), None)
-        if execution is None or execution.transport != transport:
+        if execution is None or execution.transport != chosen:
             raise SwarmError("the Codex app server launch has no matching admitted execution")
-        return replace(placed, transport=transport, execution=execution)
+        return replace(placed, transport=chosen, execution=execution)
     except Exception as exc:
         terminate(name)
         raise SpawnError(str(exc), pane_id=placed.pane_id) from exc

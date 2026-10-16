@@ -15,8 +15,9 @@ chosen by the swarm setting `codex-inbox-transport`:
 | `legacy` | The tick types one wake prompt into an idle worker pane; the agent reads `agentihooks msg inbox`. | Runs the foreground `wait --inbox` loop. |
 
 A new swarm, and a swarm whose stored config has no `codex_inbox_transport`,
-reads `app_server`. A swarm that stored `legacy` keeps it until someone sets
-the value. Each launch records its transport on its execution; a setting change
+reads `app_server`. `swarm create` stores every setting, so a swarm created
+since the setting existed holds `legacy` and keeps it until someone sets the
+value. Each launch records its transport on its execution; a setting change
 applies to the next launch and never converts a running execution.
 
 ```bash
@@ -50,7 +51,9 @@ A Codex release outside this table is unqualified. Requalify with
 
 ## Canary order
 
-Enable `app_server` one step at a time, and check each step before the next:
+Steps 1 to 3 run on swarms that store `legacy`, setting `app_server` per swarm
+with `agentihooks swarm <id> set codex-inbox-transport=app_server`; the default
+is step 4. Enable one step at a time, and check each step before the next:
 
 1. One worker on a scratch swarm with its own Redis database.
 2. One real worker in an authorized swarm.
@@ -72,9 +75,9 @@ from the live thread without a typed wake.
 
 ## Roll back
 
-Rollback changes routing for new work only. It never deletes accepted items,
-rewrites history to pending, releases a live server's quota slot or resets
-`dev`.
+Rollback changes routing for new work only. The setting change writes only the
+swarm config: it deletes no accepted item, moves no history back to pending,
+releases no live server's quota slot and leaves `dev` alone.
 
 1. Stop new `app_server` launches:
 
@@ -87,7 +90,10 @@ rewrites history to pending, releases a live server's quota slot or resets
    still own.
 3. Stand down an execution that must stop now. Its pump stops taking items,
    a publication already in flight gets up to 10 seconds to finish and a
-   running turn is interrupted; the app-server is not signalled:
+   running turn is interrupted; the app-server is not signalled. If either wait
+   runs out, the command exits 1, the execution stays fenced from new inbox
+   turns, and you run the stand-down again. Transfer only items no execution
+   accepted, through the seat and task rules:
 
    ```bash
    agentihooks terminate-agent <agent> --stand-down --dry-run
@@ -95,8 +101,10 @@ rewrites history to pending, releases a live server's quota slot or resets
    ```
 
 4. The next launch in that seat reads the swarm setting, so the successor
-   starts on `legacy` with its task, seat memory and handoff.
+   starts on `legacy` with its task, seat memory, handoff and, where the
+   harness supports it, native resume material.
 5. Transport records, receipts and native sessions stay as recovery evidence.
+   Remove an endpoint or process artifact only after its owner has ended.
 6. Verify Claude delivery, a legacy Codex worker wake and a legacy Codex master
    waiting on `wait --inbox`.
 
