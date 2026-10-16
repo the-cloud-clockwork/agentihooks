@@ -5,6 +5,8 @@ import json
 import socket
 import ssl
 import sys
+import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import TYPE_CHECKING
 
@@ -16,6 +18,8 @@ if TYPE_CHECKING:
 JOIN_PATH = "/hive/join"
 MAX_BODY = 4096
 REQUEST_TIMEOUT_S = 10
+MAX_HANDLERS = 32
+REQUEST_DEADLINE_S = 30
 REFRESH_PATH = "/hive/refresh"
 BAD_BODY = "the body must be a JSON object with a string code"
 BAD_REFRESH_BODY = "the body must be a JSON object with a string ledger_credential"
@@ -39,6 +43,7 @@ class _TLSHandler(BaseHTTPRequestHandler):
                 self.request = self.tls.wrap_socket(self.request, server_side=True)
             except OSError as exc:
                 raise Dropped from exc
+            self.server.track(self.request)
         super().setup()
 
     def finish(self):
@@ -91,6 +96,49 @@ def _handler(redis: "Redis", redis_url: str, context: ssl.SSLContext | None) -> 
 
 
 class JoinServer(ThreadingHTTPServer):
+    def __init__(self, address, handler):
+        self._slots = threading.BoundedSemaphore(MAX_HANDLERS)
+        self._open: dict[int, tuple[float, socket.socket]] = {}
+        self._lock = threading.Lock()
+        super().__init__(address, handler)
+
+    def process_request(self, request, client_address):
+        while not self._slots.acquire(timeout=0.1):
+            self.reap()
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        with self._lock:
+            self._open[threading.get_ident()] = (time.monotonic() + REQUEST_DEADLINE_S, request)
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            with self._lock:
+                self._open.pop(threading.get_ident(), None)
+            self._slots.release()
+
+    def track(self, sock):
+        with self._lock:
+            deadline, _ = self._open[threading.get_ident()]
+            self._open[threading.get_ident()] = (deadline, sock)
+
+    def reap(self):
+        now = time.monotonic()
+        with self._lock:
+            for deadline, sock in self._open.values():
+                if deadline <= now:
+                    try:
+                        sock.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass
+
+    def service_actions(self):
+        self.reap()
+
     def handle_error(self, request, client_address):
         if not isinstance(sys.exc_info()[1], Dropped):
             super().handle_error(request, client_address)

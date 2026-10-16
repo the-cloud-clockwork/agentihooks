@@ -21,8 +21,8 @@ def admin():
 
 @pytest.fixture
 def bounded(admin, monkeypatch):
-    monkeypatch.setattr(server, "MAX_HANDLERS", 2, raising=False)
-    monkeypatch.setattr(server, "REQUEST_DEADLINE_S", 1, raising=False)
+    monkeypatch.setattr(server, "MAX_HANDLERS", 2)
+    monkeypatch.setattr(server, "REQUEST_DEADLINE_S", 1)
     monkeypatch.setattr(server, "REQUEST_TIMEOUT_S", 30)
     httpd = server.make_server(admin, PUBLIC, "127.0.0.1", 0)
     threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
