@@ -1,13 +1,17 @@
 import asyncio
 import json
 import os
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import httpx
 
 
 async def _name_tls(request):
     request.extensions["sni_hostname"] = request.headers["Host"]
 
 
-def gateway_client(**options):
+def gateway_client(**options: Any) -> "httpx.AsyncClient":
     from mcp.shared._httpx_utils import create_mcp_http_client
 
     client = create_mcp_http_client(**options)
