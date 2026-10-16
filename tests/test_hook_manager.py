@@ -293,6 +293,24 @@ def test_start_condition_failure_fails_open(quiet_session_start, monkeypatch, tm
     assert ("conditions session_start failed", {"error": "index unreadable"}) in logged
 
 
+def test_start_conditions_skip_a_target_that_cannot_inject_at_session_start(
+    quiet_session_start, monkeypatch, tmp_path
+):
+    from unittest.mock import Mock
+
+    from hooks.context import conditions
+    from hooks.hook_manager import EVENT_HANDLERS
+
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    monkeypatch.setattr("hooks.targets.capabilities._CODEX_NO_CONTEXT_EVENTS", frozenset({"SessionStart"}))
+    start_effect = Mock(return_value=None)
+    monkeypatch.setattr(conditions, "start_effect", start_effect)
+
+    EVENT_HANDLERS["SessionStart"]({"session_id": "session", "cwd": str(tmp_path)})
+
+    start_effect.assert_not_called()
+
+
 @pytest.mark.parametrize(
     "enabled, count, claim", [(True, 7, True), (True, 7, False), (True, 0, True), (False, 7, True)]
 )
