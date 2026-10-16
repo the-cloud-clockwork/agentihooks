@@ -179,7 +179,7 @@ def pr_head(url: str, run=subprocess.run) -> str | None:
     return _pr_field(url, "head.sha", run)
 
 
-def text_key(title, body) -> str:
+def text_key(title: str, body: str | None) -> str:
     return hashlib.sha256(json.dumps([title, body or ""]).encode()).hexdigest()
 
 

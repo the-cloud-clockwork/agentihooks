@@ -671,7 +671,7 @@ def test_a_changed_pull_request_text_is_judged_again_on_the_same_head(tmp_path, 
     assert gate(tmp_path).allowed
 
 
-def text_check(tmp_path, views, text, asked=None):
+def text_check(tmp_path, views, text, asked):
     return intent.Check(
         SLUG,
         "coach",
@@ -679,7 +679,7 @@ def text_check(tmp_path, views, text, asked=None):
         Ledger(),
         Mail(),
         lambda url: views.append(url) or {**PR, "body": "edited", "head": "original"},
-        lambda state: (asked if asked is not None else []).append(state) or ("pass", "ok"),
+        lambda state: asked.append(state) or ("pass", "ok"),
         home=tmp_path,
         head=lambda url: "original",
         text=text,
@@ -701,7 +701,7 @@ def test_an_unmoved_head_with_edited_text_takes_the_full_view_and_is_judged_agai
 def test_an_unmoved_head_and_text_skips_the_full_view(tmp_path, readable):
     run_check(tmp_path, "original")
     views, key = [], intent.text_key(PR["title"], PR["body"])
-    actions = text_check(tmp_path, views, lambda url: key if readable else None).run(DOC)
+    actions = text_check(tmp_path, views, lambda url: key if readable else None, []).run(DOC)
     assert actions == ([] if readable else [f"task {TASK} intent check pass"])
     assert views == ([] if readable else [DOC["tasks"][0]["pr_url"]])
 
