@@ -9,7 +9,7 @@ from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import asdict, dataclass, replace
 from typing import TYPE_CHECKING
 
-from scripts import codex_router, session_bands
+from scripts import codex_quota, codex_router, session_bands
 from scripts.claude_quota_balancer import (
     MASTERS_ONLY,
     OPEN,
@@ -80,6 +80,7 @@ class QuotaRow:
     routing_left: float | None = None
     fable_left: float | None = None
     fable_resets_at: int | None = None
+    identity: str = ""
 
 
 def claude_rows(
@@ -146,14 +147,21 @@ def _codex_source(account: "codex_router.CodexAccount", quota: "CodexQuota | Non
 
 
 def codex_rows(
-    accounts: list, quotas: dict, sessions: dict[str, int], now: float, environ: Mapping[str, str] | None = None
+    accounts: list,
+    quotas: dict,
+    sessions: dict[str, int],
+    now: float,
+    environ: Mapping[str, str] | None = None,
+    identities: Mapping[str, str] | None = None,
 ) -> list[QuotaRow]:
     rows = []
     for account in accounts:
         quota = quotas.get(account.name)
         known = quota is not None and not quota.expired
         fresh = known and session_bands.fresh(quota.observed_at, now)
+        inferred = known and not fresh and codex_quota.passed(quota.seven_day, now)
         week = session_bands.left(quota.seven_day.used, quota.seven_day.resets_at, now) if known else None
+        week = None if inferred else week
         cap = codex_router.account_cap(quota, now, environ) if account.signed_in and known else None
         rows.append(
             QuotaRow(
@@ -171,9 +179,14 @@ def codex_rows(
                 observed_at=quota.observed_at if quota else None,
                 cap=cap,
                 routing_left=week if account.signed_in else None,
+                identity=(identities or {}).get(account.name, ""),
             )
         )
     return rows
+
+
+def fingerprints(accounts: list, environ: Mapping[str, str]) -> dict[str, str]:
+    return {account.name: codex_router.fingerprint(codex_router.identity(account, environ)) for account in accounts}
 
 
 def without_routing(rows: list[QuotaRow], accounts: list) -> list[QuotaRow]:
@@ -231,7 +244,17 @@ def _cells(rank: str, row: QuotaRow, now: int, current: str) -> list[str]:
     return [
         rank,
         row.agent,
-        " ".join(part for part in (row.account, mark, row.master, NEXT_MARK if row.selected else "") if part),
+        " ".join(
+            part
+            for part in (
+                row.account,
+                row.identity and f"#{row.identity}",
+                mark,
+                row.master,
+                NEXT_MARK if row.selected else "",
+            )
+            if part
+        ),
         row.kind,
         row.state,
         f"{row.sessions}/{cap}",
@@ -346,7 +369,8 @@ def _codex(now: float) -> list[QuotaRow]:
     sessions = codex_sessions_by_account()
     live = codex_router.live_accounts(pool, sessions)
     quotas = codex_router.quotas(pool + live, os.environ)
-    rows = without_routing(codex_rows(pool + live, quotas, sessions, now), live)
+    identities = fingerprints(pool, os.environ)
+    rows = without_routing(codex_rows(pool + live, quotas, sessions, now, identities=identities), live)
     master = _masters("codex").get("codex")
     marked = [_mark(row, master) for row in rows + api_rows(CodexApiSource(sessions), "codex", now)]
     return mark_next(marked, next_account(pool, quotas, sessions, now, dict(os.environ)))
@@ -358,7 +382,9 @@ def _render_live(
     from hooks.context.account_sessions import codex_sessions_by_account
 
     live = {"claude": sessions, **({} if fable else {"codex": codex_sessions_by_account()})}
-    return render(rows, int(now), unlisted_sessions(rows, live), fable, current)
+    table = render(rows, int(now), unlisted_sessions(rows, live), fable, current)
+    distinction = "" if fable else codex_router.default_distinction(os.environ)
+    return f"{table}\n{distinction}" if distinction else table
 
 
 def tokenless_table(master: "MasterAccount | None", sessions: dict[str, int]) -> str:
@@ -427,7 +453,8 @@ def _page_quota(now: float) -> dict:
     quotas = codex_router.quotas(pool + elsewhere, os.environ)
     claude = claude_rows([result for _, result in cached], live, "cached", observed, now)
     claude += api_rows(ClaudeApiSource(live), "claude", now)
-    rows = claude + without_routing(codex_rows(pool + elsewhere, quotas, codex_live, now), elsewhere)
+    codex = codex_rows(pool + elsewhere, quotas, codex_live, now, identities=fingerprints(pool, os.environ))
+    rows = claude + without_routing(codex, elsewhere)
     rows += api_rows(CodexApiSource(codex_live), "codex", now)
     rows = with_masters(rows, _masters(), live)
     return {"probed_at": max(observed.values(), default=None), "rows": [asdict(row) for row in rows]}
