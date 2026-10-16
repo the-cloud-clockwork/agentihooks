@@ -317,6 +317,30 @@ def open_followup(added_at, **fields):
     return doc
 
 
+@pytest.mark.parametrize("now_ms", [1, 15 * MINUTE])
+def test_follow_up_notices_name_each_item_and_its_completion_command(store, now_ms):
+    run(store, recorded())
+    doc = recorded(
+        [
+            event(11, 0, "sw-eng-1", "added", "followups/f1", "Retries need a cap"),
+            event(12, 0, "sw-eng-1", "added", "followups/f2", "Queue needs a limit"),
+        ],
+        followups=[
+            {"id": "f1", "text": "Retries need a cap", "done": False},
+            {"id": "f2", "text": "Queue needs a limit", "done": False},
+        ],
+    )
+    run(store, doc, now_ms=1)
+    run(store, doc, now_ms=now_ms)
+    first, second = texts(store, MASTER_SEAT)[-2:]
+    assert "follow-up f1 on ledger sw" in first
+    assert "Retries need a cap" in first
+    assert first.endswith("Close it: agentihooks ledger --slug sw followup done f1")
+    assert "follow-up f2 on ledger sw" in second
+    assert "Queue needs a limit" in second
+    assert second.endswith("Close it: agentihooks ledger --slug sw followup done f2")
+
+
 def test_an_open_follow_up_is_raised_again_after_fifteen_minutes_then_shown_to_the_operator(store):
     ledger = FakeLedger()
     run(store, recorded())
