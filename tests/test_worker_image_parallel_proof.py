@@ -43,10 +43,14 @@ elif args[:2] == ['image', 'inspect']:
 elif args[0] == 'info':
     print(os.environ.get('DRIVER', '[]'))
 elif args[0] == 'inspect':
+    if (state / f'removed-{args[-1]}').exists():
+        sys.exit(1)
     finished = datetime.fromtimestamp(float((state / f'exited-{args[-1]}').read_text()), timezone.utc)
     print(finished.strftime('%Y-%m-%dT%H:%M:%S.%f') + '123Z')
 elif args[0] == 'rm':
-    if os.environ['FAILURE'] == 'slow-removal':
+    for name in args[1:]:
+        (state / f'removed-{name}').touch()
+    if os.environ['FAILURE'] == 'slow-removal' and '-f' not in args:
         time.sleep(2.5)
 elif args[0] == 'run':
     if '/opt/probe/profile-probe.sh' in args:
