@@ -122,7 +122,7 @@ def _answer(status: int, body: dict) -> dict:
     raise ApiRefused(status, body.get("reason", ""))
 
 
-def _items(answer: dict) -> list[dict]:
+def _items(answer: object) -> list[dict]:
     items = answer.get("items") if isinstance(answer, dict) else None
     if not isinstance(items, list):
         raise ConnectionError("the API server list answer carries no items")
@@ -195,11 +195,12 @@ class PodClient:
         """None when the nodes cannot be listed, so an unlisted node is never taken as proof of loss."""
         try:
             status, answer = self.http.send("GET", NODES)
+            nodes = _items(answer)
         except ConnectionError:
             return None
         if status != 200:
             return None
-        return [node["metadata"]["name"] for node in answer["items"] if _ready(node)]
+        return [node["metadata"]["name"] for node in nodes if _ready(node)]
 
     def list_services(self, selector: str) -> list[dict]:
         query = urllib.parse.urlencode({"labelSelector": selector})
