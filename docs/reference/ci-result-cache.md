@@ -8,7 +8,7 @@ nav_order: 5
 
 One CI algorithm for every repo and workflow: a check whose real inputs did not change reuses its last green result, and a check that fails is retried in place a bounded number of times inside the same job. No run is ever restarted from zero because one test flaked.
 
-Status: slices 1 to 3 delivered (see [Slice 1 as delivered](#slice-1-as-delivered), [Slice 2 as delivered](#slice-2-as-delivered) and [Slice 3 as delivered](#slice-3-as-delivered)); slices 4 to 7 are design. Issue [#2365](https://github.com/the-cloud-clockwork/agentihooks/issues/2365). Slices are listed in [Slices](#slices); each one is a separate pull request.
+Status: slices 1 to 4 delivered (see [Slice 1 as delivered](#slice-1-as-delivered), [Slice 2 as delivered](#slice-2-as-delivered), [Slice 3 as delivered](#slice-3-as-delivered) and [Slice 4 as delivered](#slice-4-as-delivered)); slices 5 to 7 are design. Issue [#2365](https://github.com/the-cloud-clockwork/agentihooks/issues/2365). Slices are listed in [Slices](#slices); each one is a separate pull request.
 
 ## Before numbers
 
@@ -174,3 +174,37 @@ CI runners cannot reach the ledger, so the follow up is filed by the swarm's min
 The proof branch ran the job on dispatch instead of push; everything else is the delivered code.
 
 Known limits: two dev pushes whose `flake-budget` jobs overlap restore the same history, and the later save drops the earlier run's lines, so the count can undercount. A job concurrency group would instead cancel a pending dev push run, so it is not used. A follow up whose write lands but whose reply times out is filed again on the next pass.
+
+## Slice 4 as delivered
+
+The 3.12 unit shards run with `--cov-context=test` and `-p tests.dep_inputs`. The plugin's audit hook records every repository file opened for reading (Python sources excluded; coverage covers them) and whether a test starts a process (`subprocess.Popen`, `os.posix_spawn`, `os.spawn`, `os.system`, `os.exec`, `os.fork`). A read made outside any test, during collection for instance, counts for every test of that worker. Each shard ships its `dep-inputs/` lines in its `coverage-3.12-<shard>` artifact.
+
+After the coverage merge, `sonar` runs `python -m tests.dep_manifest build` on full scope runs and uploads `dep-manifest`; a build with no input reports is red. Each executed line maps to the innermost function whose body holds it; every other line, def and decorator lines included, is the file's module level unit, and every test that ran a line of a file also depends on that file's module level unit. A function's fingerprint is its source from the def line to its end, so a nested function's change also moves its parent. The module level fingerprint skips blank lines and comment tokens, so adding a function moves nothing a test ran. `coverage-baseline`, which runs only on dev pushes, saves the run's manifest to the Actions cache as `dep-manifest-<sha>` once `Gate — Required` passed; the sonar job itself never names the dev head.
+
+`python -m tests.dep_manifest invalidated` lists the tests a diff invalidates, from the manifest's commit to a head:
+
+- a change under `.github/`, to `pyproject.toml`, `uv.lock` or the stored durations, or to Python outside `hooks/`, `scripts/` and `tests/` invalidates every test;
+- a changed function or module level unit under `hooks/` or `scripts/` invalidates the tests that ran it;
+- a test module invalidates its own tests; any other Python file under `tests/` invalidates every test;
+- any other file invalidates the tests that opened it;
+- any change under `hooks/`, `scripts/` or `tests/` invalidates every test that started a process.
+
+A test that only reads a module constant runs no line of that module, so no context names the dependency; the dev push full run is the backstop for it, as for every hidden input.
+
+Manifest from run [38958729422](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38958729422): 32389 tests, 9385 units, 5062 tests that start a process.
+
+| Number | Static imports | Manifests |
+|---|---|---|
+| Reusable share over the last 40 dev merges, mean | 34.9 % (29.9 % with data files) | 68.7 % |
+| Same, median | 0 | 82.9 % |
+
+Measured with `python -m tests.dep_manifest share --manifest manifest.json --ref origin/dev --merges 40` on 2026-10-16. The share applies that one manifest to each merge diff, so it measures the invalidation rule, not 40 separate records; a unit renamed or removed since a merge cannot be hit, which leans the figure upward. 7 of the 40 merges reuse nothing: five `.github/` changes, one Python guard under `profiles/` and one shared helper under `tests/`. Most other merges invalidate about 5100 tests, the process starting tests included, because nearly every merge changes `hooks/` or `scripts/`.
+
+| Run | Plant | Result |
+|---|---|---|
+| [38958729422](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38958729422) | none | every job green; the manifest above |
+| [38954524795](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38954524795) | `scripts/doctor/rates.py::table` raises on entry | 4 tests failed on 3.12 and the same 4 on 3.11; those are exactly the 4 tests whose manifest units hold that function. `invalidated` from the base to the plant commit returns those 4 plus the 5062 process starting tests, which every source change invalidates by rule, and nothing else |
+
+Cost, from run [38952385459](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38952385459) against queue runs 38950629400 to 38956012323: 3.12 Run tests mean 217 s against 178 to 210 s, slowest shard 227 s against 198 to 246 s; `sonar` 185 s against 168 s on dev push run 38950625810, of which the merge wait grew to 37 s and the build takes 24 s; the 12 coverage artifacts grew from 19 MB to 202 MB; `coverage-ratchet` 84 s against 80 s.
+
+Not done here: the queue run's read of the dev cache entry, which slice 5 needs, is still unproven.

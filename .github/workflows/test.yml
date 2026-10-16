@@ -829,7 +829,8 @@ jobs:
         timeout-minutes: 7
         env:
           PYTHONUNBUFFERED: "1"
-          PYTEST_ADDOPTS: ${{ matrix.python-version == '3.12' && format('--cov=hooks --cov=scripts --cov-report= --cov-config={0}/.github/coverage/coverage.ini -p tests.browser_coverage', github.workspace) || '-p no:pytest_cov' }}
+          PYTEST_ADDOPTS: ${{ matrix.python-version == '3.12' && format('--cov=hooks --cov=scripts --cov-report= --cov-config={0}/.github/coverage/coverage.ini --cov-context=test -p tests.browser_coverage -p tests.dep_inputs', github.workspace) || '-p no:pytest_cov' }}
+          DEP_INPUTS_DIR: ${{ matrix.python-version == '3.12' && format('{0}/dep-inputs', github.workspace) || '' }}
           PLAYWRIGHT_BROWSERS_PATH: ${{ matrix.python-version == '3.12' && format('{0}/.playwright', github.workspace) || '' }}
           SHARD: ${{ matrix.shard }}/${{ matrix.python-version == '3.12' && 12 || 6 }}
           NODE_OPTIONS: ${{ matrix.python-version == '3.12' && format('--require {0}/tests/node_capture.cjs', github.workspace) || '' }}
@@ -911,6 +912,7 @@ jobs:
           path: |
             .coverage
             js-coverage/
+            dep-inputs/
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -1283,6 +1285,25 @@ jobs:
           done
           cat "$RUNNER_TEMP/combine.log"
           exit "$(< "$RUNNER_TEMP/combine.status")"
+
+      - name: Build the test dependency manifest
+        if: needs.select.outputs.scope == 'full'
+        env:
+          ENVIRONMENT: py3.12-${{ hashFiles('pyproject.toml') }}
+        run: |
+          mkdir -p dep-manifest
+          python -m tests.dep_manifest build --coverage .coverage --inputs .coverage-shards --root . \
+            --commit "$GITHUB_SHA" --environment "$ENVIRONMENT" --out dep-manifest/manifest.json
+
+      - name: Upload the test dependency manifest
+        if: needs.select.outputs.scope == 'full'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dep-manifest
+          path: dep-manifest/manifest.json
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
 
       # Runs the CLI directly: sonarqube-scan-action never finds its tool cache entry, since a four part version is not semver.
       - name: SonarQube Scan
@@ -2006,6 +2027,20 @@ jobs:
           if-no-files-found: error
           retention-days: 90
           overwrite: true
+
+      - name: Download the test dependency manifest
+        if: needs.gate-required.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: dep-manifest
+          path: dep-manifest
+
+      - name: Save the dev test dependency manifest
+        if: needs.gate-required.result == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: dep-manifest
+          key: dep-manifest-${{ github.sha }}
 
   mutation-plan:
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}

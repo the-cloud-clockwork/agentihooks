@@ -565,14 +565,23 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 #agents-table th, #agents-table td { padding-right: 6px; }
 @media (min-width: 1024px) {
   #agents-table { table-layout: fixed; }
-  #agents-table .ag-agent { width: 20%; }
-  #agents-table .ag-lane { width: 6%; }
-  #agents-table .ag-profile { width: 11%; }
-  #agents-table .ag-overlays { width: 12%; }
-  #agents-table .ag-model { width: 18%; }
+  #agents-table .ag-agent { width: 15%; }
+  #agents-table .ag-lane { width: 5%; }
+  #agents-table .ag-profile { width: 9%; }
+  #agents-table .ag-overlays { width: 9%; }
+  #agents-table .ag-model { width: 12%; }
+  #agents-table .ag-transport { width: 21%; }
   #agents-table .ag-task { width: 9%; }
-  #agents-table .ag-state { width: 12%; }
+  #agents-table .ag-state { width: 9%; }
   #agents-table .ag-acts { width: 0; }
+  #agents-table:has(th[data-execution]) .ag-agent { width: 14%; }
+  #agents-table:has(th[data-execution]) .ag-lane { width: 4%; }
+  #agents-table:has(th[data-execution]) .ag-profile { width: 7%; }
+  #agents-table:has(th[data-execution]) .ag-overlays { width: 6%; }
+  #agents-table:has(th[data-execution]) .ag-model { width: 8%; }
+  #agents-table:has(th[data-execution]) .ag-transport { width: 20%; }
+  #agents-table:has(th[data-execution]) .ag-task { width: 4%; }
+  #agents-table:has(th[data-execution]) .ag-state { width: 7%; }
   #agents-table td:not(:has(> .sw-acts)) { overflow: hidden; text-overflow: ellipsis; }
 }
 #agents-table td:has(> .sw-acts) { position: sticky; right: 0; width: 0; padding: 0; }
@@ -636,7 +645,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 .lbl.awaiting-approval { color: var(--warn); }
 #quota-table .lbl.open { color: var(--positive); }
 #quota-table .lbl.closed { color: var(--destructive); }
-.sw-promoted { display: inline-flex; gap: 8px; }
+.sw-promoted, .sw-transport { display: inline-flex; gap: 8px; }
 .lbl.on::before, .lbl.off::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: currentColor; vertical-align: middle; }
 .lbl.master { letter-spacing: .06em; }
 .lbl.master::before { content: ""; display: inline-block; margin-right: 6px; border-top: 4px solid transparent; border-bottom: 4px solid transparent; border-right: 6px solid currentColor; }

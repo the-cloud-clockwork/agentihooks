@@ -73,3 +73,30 @@ def test_remote_client_reports_the_refusal_without_exposing_credentials(owned):
         proof_ledger.control(owned.slug, {"control": "cancel"}, environ)
     assert refused.value.code == "proof control refused: 403 Proof controls permit only pause and drain"
     assert owned.parent["X-Ledger-Token"] not in refused.value.code
+
+
+def test_controller_client_adopts_external_owner_and_uses_scoped_controls(owned, monkeypatch):
+    owner = {"parent": "external-parent", "agent": owned.owner, "task": "contract"}
+    environ = {
+        "AGENTIHOOKS_DEPLOYMENT": "compose",
+        "LEDGER_URL": f"http://{owned.live['host']}",
+        "AGENTIHOOKS_CONTROLLER_CREDENTIAL": owned.controller["X-Controller-Credential"],
+    }
+    owned.store.redis.delete(owned.store.key(owned.slug, "proof-creator"))
+    original = urllib.request.urlopen
+    sent = []
+
+    def open_request(request, **options):
+        assert options == {"timeout": 10}
+        sent.append(request.full_url)
+        return original(request, **options)
+
+    monkeypatch.setattr(urllib.request, "urlopen", open_request)
+    assert proof_ledger.migrate(owned.slug, owner, environ) == {"parent": "external-parent", "owner": owned.owner}
+    result = proof_ledger.controller_control(owned.slug, owner, {"control": "pause"}, environ)
+    assert result["state"] == "pending" and result["argv"] == ["pause"]
+    assert "credential" not in result
+    assert sent == [
+        f"http://{owned.live['host']}/api/v1/proof-ledgers/{owned.slug}/migrate",
+        f"http://{owned.live['host']}/api/v1/proof-ledgers/{owned.slug}/controller-controls",
+    ]

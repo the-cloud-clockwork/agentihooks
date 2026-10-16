@@ -275,7 +275,12 @@ def test_accept_writes_only_a_promoted_report_and_rollback_restores_the_one_it_r
     assert profiles.accept(path, accepted, POLICY, "")["decision"] == "replayed"
     assert path.read_bytes() == before
     assert sorted(p.name for p in folder.iterdir()) == ["accepted.json"]
-    assert profiles.accept(path, grown, POLICY, "operator")["decision"] == "requalified"
+    assert (
+        profiles.accept(
+            path, grown, POLICY, "operator", reviewer=profiles.Principal("operator", profiles.Role.OPERATOR)
+        )["decision"]
+        == "requalified"
+    )
     installed = path.read_bytes()
     assert json.loads(installed) == {**grown, "requalified_by": "operator"}
     assert (folder / "accepted.json.previous").read_bytes() == before
@@ -287,6 +292,102 @@ def test_accept_writes_only_a_promoted_report_and_rollback_restores_the_one_it_r
     assert path.read_bytes() == installed
 
 
+@pytest.mark.parametrize(
+    "role,name,decision",
+    [
+        (profiles.Role.MASTER, "operator", "requalify"),
+        (profiles.Role.OPERATOR, "other", "requalify"),
+        (profiles.Role.OPERATOR, "operator", "requalified"),
+    ],
+)
+def test_accept_checks_the_reviewer_role_and_identity(tmp_path, role, name, decision):
+    path = tmp_path / "accepted.json"
+    profiles.accept(path, profiles.derive(measured(memory_runs()), NODES, POLICY), POLICY, "")
+    candidate = profiles.derive(measured(memory_runs(2), 2), NODES, POLICY)
+    outcome = profiles.accept(path, candidate, POLICY, "operator", reviewer=profiles.Principal(name, role))
+    assert outcome["decision"] == decision
+    assert json.loads(path.read_text())["generation"] == (2 if decision == "requalified" else 1)
+
+
+def test_accept_rederives_profiles_instead_of_installing_idle_figures_under_a_real_class(tmp_path):
+    candidate = profiles.derive(measured(memory_runs()), NODES, POLICY)
+    candidate["profiles"]["memory"]["measured"]["peak_rss_mib"]["max"] = 40
+    path = tmp_path / "accepted.json"
+    outcome = profiles.accept(path, candidate, POLICY, "operator")
+    assert outcome["decision"] == "refused"
+    assert not path.exists()
+
+
+@pytest.mark.parametrize("tamper", ["digest", "runs", "missing", "malformed"])
+def test_accept_requires_the_recorded_run_digest_and_reproducible_evidence(tmp_path, tamper):
+    path = tmp_path / "accepted.json"
+    profiles.accept(path, profiles.derive(measured(memory_runs()), NODES, POLICY), POLICY, "")
+    before = path.read_bytes()
+    candidate = profiles.derive(measured(memory_runs(2), 2), NODES, POLICY)
+    if tamper == "digest":
+        candidate["runs_digest"] = "wrong"
+    elif tamper == "runs":
+        for row in candidate["evidence"]["measurements"]["runs"]:
+            row["children"] = 0
+            row["peak_processes"] = 1
+    elif tamper == "missing":
+        del candidate["evidence"]
+    else:
+        candidate["evidence"] = None
+    outcome = profiles.accept(
+        path, candidate, POLICY, "operator", reviewer=profiles.Principal("operator", profiles.Role.OPERATOR)
+    )
+    assert outcome == {
+        "decision": "refused",
+        "accepted": json.loads(before),
+        "changes": {"evidence": "candidate does not match its recorded runs"},
+    }
+    assert path.read_bytes() == before
+    assert not path.with_name("accepted.json.previous").exists()
+
+
+def test_accept_installs_recomputed_output_without_a_self_declared_reviewer(tmp_path):
+    expected = profiles.derive(measured(memory_runs()), NODES, POLICY)
+    candidate = {**expected, "requalified_by": "untrusted"}
+    path = tmp_path / "accepted.json"
+    outcome = profiles.accept(path, candidate, POLICY, "")
+    assert outcome == {"decision": "promoted", "accepted": expected, "changes": None}
+    assert json.loads(path.read_text()) == expected
+
+
+def test_accept_preserves_provenance_across_json_key_order(tmp_path):
+    source = measured(memory_runs())
+    candidate = profiles.derive(source, NODES, POLICY)
+    reordered_source = json.loads(json.dumps(source, sort_keys=True))
+    assert profiles.derive(reordered_source, NODES, POLICY)["runs_digest"] == candidate["runs_digest"]
+    candidate = json.loads(json.dumps(candidate, sort_keys=True))
+    outcome = profiles.accept(tmp_path / "accepted.json", candidate, POLICY, "")
+    assert outcome["decision"] == "promoted"
+    assert outcome["accepted"] == candidate
+
+
+def test_derived_evidence_is_detached_and_digest_changes_with_runs():
+    source = measured(memory_runs())
+    report = profiles.derive(source, NODES, POLICY)
+    snapshot = json.loads(json.dumps(report["evidence"]))
+    source["runs"][0]["peak_rss_mib"] += 1
+    assert report["evidence"] == snapshot
+    assert profiles.derive(source, NODES, POLICY)["runs_digest"] != report["runs_digest"]
+    assert len(report["runs_digest"]) == 64
+
+
+def test_accept_does_not_trust_a_requalifying_reviewer_name(tmp_path):
+    path = tmp_path / "accepted.json"
+    accepted = profiles.derive(measured(memory_runs()), NODES, POLICY)
+    candidate = profiles.derive(measured(memory_runs(2), 2), NODES, POLICY)
+    profiles.accept(path, accepted, POLICY, "")
+    before = path.read_bytes()
+    outcome = profiles.accept(path, candidate, POLICY, "operator")
+    assert outcome["decision"] == "requalify"
+    assert path.read_bytes() == before
+    assert not path.with_name("accepted.json.previous").exists()
+
+
 def test_an_interrupted_rollback_keeps_both_reports_on_disk(tmp_path):
     folder = tmp_path / "reports"
     folder.mkdir()
@@ -294,7 +395,7 @@ def test_an_interrupted_rollback_keeps_both_reports_on_disk(tmp_path):
     accepted = profiles.derive(measured(memory_runs()), NODES, POLICY)
     grown = profiles.derive(measured(memory_runs(1.5), 2), NODES, POLICY)
     profiles.accept(path, accepted, POLICY, "")
-    profiles.accept(path, grown, POLICY, "operator")
+    profiles.accept(path, grown, POLICY, "operator", reviewer=profiles.Principal("operator", profiles.Role.OPERATOR))
     reports = {p.read_bytes() for p in folder.iterdir()}
     real = Path.replace
     calls = []
