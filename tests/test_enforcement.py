@@ -246,6 +246,14 @@ class TestSessionStartEntry:
         context = get_session_start_enforcements("session-start")
         assert f"{enforcement_id} (rule {rule.resolve()}):\n# Rule\n\nFirst version.\n" in context
 
+    def test_drumbeat_banner_still_names_a_rule_file(self, tmp_path):
+        from hooks.context.enforcement import add_enforcement, format_enforcement_banner, list_enforcements
+
+        rule = tmp_path / "rule.md"
+        rule.write_text("# Rule\n")
+        add_enforcement("", 4, enforcement_type="rule", path=rule)
+        assert f"Type: rule\nPath: {rule.resolve()}\n" in format_enforcement_banner(list_enforcements()[0])
+
     def test_disabled_returns_none(self):
         from hooks.context.enforcement import add_enforcement, get_session_start_enforcements
 

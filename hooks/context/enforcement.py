@@ -487,7 +487,7 @@ def _due_enforcements(entries: list[dict], tool_call_count: int) -> list[dict]:
 
 def _enforcement_message(msg: dict) -> str:
     message = msg.get("message", "")
-    if msg.get("type", "message") == "rule":
+    if msg.get("type") == "rule":
         try:
             path = resolve_rule_path(msg.get("path"))
             message = path.read_text(encoding="utf-8")
@@ -500,7 +500,6 @@ def _enforcement_message(msg: dict) -> str:
 
 
 def format_enforcement_banner(msg: dict) -> str:
-    enforcement_type = msg.get("type", "message")
     message = _enforcement_message(msg)
     tag = msg.get("tag") or ""
     enforcement_id = msg.get("id", "")
@@ -512,7 +511,7 @@ def format_enforcement_banner(msg: dict) -> str:
     ]
     if msg.get("matcher"):
         lines.append(f"Matcher: {msg['matcher']}")
-    if enforcement_type == "rule":
+    if msg.get("type") == "rule":
         lines.extend(["Type: rule", f"Path: {msg.get('path', '')}"])
     if tag:
         lines.append(f"Tag: {tag}")
@@ -530,9 +529,9 @@ def format_enforcement_digest(msgs: list[dict]) -> str:
     lines = ["=== ENFORCEMENTS [IMPORTANT] ==="]
     for m in msgs:
         if m.get("type") == "rule":
-            lines.append(f"{m.get('id', '')} (rule {m.get('path', '')}):\n{_enforcement_message(m)}")
+            lines.append(f"{m.get('id')} (rule {m.get('path')}):\n{_enforcement_message(m)}")
         else:
-            lines.append(f"{m.get('id', '')}: {_enforcement_message(m)}")
+            lines.append(f"{m.get('id')}: {_enforcement_message(m)}")
     return "\n".join(lines)
 
 
