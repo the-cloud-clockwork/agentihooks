@@ -440,9 +440,7 @@ def test_an_unreachable_openbao_costs_one_timeout_not_two(tmp_path, monkeypatch,
     assert len(err.strip().splitlines()) == 2
 
 
-def test_an_openbao_that_answers_the_claude_read_with_an_error_still_gets_the_codex_read(
-    tmp_path, monkeypatch, capsys
-):
+def test_an_openbao_that_answers_the_claude_read_with_an_error_still_gets_the_codex_read(tmp_path, monkeypatch, capsys):
     _codex_environ(tmp_path, monkeypatch)
     seen = []
 
