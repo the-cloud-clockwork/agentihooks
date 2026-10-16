@@ -8,6 +8,7 @@ from pathlib import Path
 
 REGISTRY = Path(".github/input-keys.json")
 KEYER = ("scripts/ci_input_key.py", ".github/actions/input-key")
+RUNNER = ("RUNNER_OS", "RUNNER_ARCH", "RUNNER_ENVIRONMENT", "ImageOS", "ImageVersion")
 
 
 def _object(revision: str, path: str) -> str:
@@ -19,8 +20,18 @@ def _object(revision: str, path: str) -> str:
     return result.stdout.strip()
 
 
-def key(job: str, head: str = "HEAD", base: str = "", registry: Path = REGISTRY, day: str = "") -> str:
-    entry = json.loads(registry.read_text())[job]
+def key(
+    job: str,
+    head: str = "HEAD",
+    base: str = "",
+    registry: Path = REGISTRY,
+    day: str = "",
+    environment: tuple[str, ...] = (),
+) -> str:
+    entries = json.loads(registry.read_text())
+    if job not in entries:
+        raise SystemExit(f"{job} declares no inputs in {registry}")
+    entry = entries[job]
     if entry.get("base_paths") and not base:
         raise SystemExit(f"{job} declares base paths and needs --base")
     record = {
@@ -30,6 +41,7 @@ def key(job: str, head: str = "HEAD", base: str = "", registry: Path = REGISTRY,
         "keyer": [_object(head, path) for path in KEYER],
         "paths": {path: _object(head, path) for path in entry["paths"]},
         "base_paths": {path: _object(base, path) for path in entry.get("base_paths", [])},
+        "environment": sorted(environment),
         "day": day or datetime.now(timezone.utc).date().isoformat(),
     }
     digest = hashlib.sha256(json.dumps(record, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
@@ -40,8 +52,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--job", required=True)
     parser.add_argument("--base", default="")
+    parser.add_argument("--environment", action="append", default=[])
     args = parser.parse_args(argv)
-    value = key(args.job, base=args.base)
+    runner = [f"{name}={os.environ.get(name, '')}" for name in RUNNER]
+    value = key(args.job, base=args.base, environment=(*runner, *args.environment))
     print(f"key={value}")
     if destination := os.environ.get("GITHUB_OUTPUT"):
         with Path(destination).open("a") as output:

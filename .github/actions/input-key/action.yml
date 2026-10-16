@@ -8,6 +8,10 @@ inputs:
     description: Revision the declared base paths are read at
     required: false
     default: ""
+  environment:
+    description: Resolved external input the key must cover, such as a service image id
+    required: false
+    default: ""
 outputs:
   key:
     description: Cache key of the declared inputs
@@ -24,7 +28,8 @@ runs:
       env:
         JOB: ${{ inputs.job }}
         BASE: ${{ inputs.base }}
-      run: python3 -I scripts/ci_input_key.py --job "$JOB" --base "$BASE"
+        ENVIRONMENT: ${{ inputs.environment }}
+      run: python3 -I scripts/ci_input_key.py --job "$JOB" --base "$BASE" --environment "$ENVIRONMENT"
     - name: Look the key up
       id: lookup
       uses: actions/cache/restore@v4

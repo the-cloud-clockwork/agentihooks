@@ -52,6 +52,13 @@ jobs:
           BASE: ${{ inputs.base }}
         run: git fetch --no-tags --depth=1 origin "${BASE#origin/}"
 
+      - name: Read the Redis service image
+        id: redis
+        if: ${{ !inputs.streams }}
+        env:
+          SERVICE: ${{ job.services.redis.id }}
+        run: echo "image=$(docker inspect --format '{{.Image}}' "$SERVICE")" >> "$GITHUB_OUTPUT"
+
       - name: Key the declared inputs
         id: key
         if: ${{ !inputs.streams }}
@@ -59,6 +66,7 @@ jobs:
         with:
           job: ledger-load
           base: FETCH_HEAD
+          environment: redis=${{ steps.redis.outputs.image }}
 
       - name: Set up Python
         id: python
@@ -90,7 +98,7 @@ jobs:
           "$HOME/venv/bin/python" -m tests.ledger_load.gate --folder "$RUNNER_TEMP/ledger-load" --base FETCH_HEAD
 
       - name: Save the passed input key
-        if: steps.key.outputs.hit == 'false'
+        if: steps.key.outputs.hit == 'false' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         uses: ./.github/actions/input-key/save
         with:
           key: ${{ steps.key.outputs.key }}

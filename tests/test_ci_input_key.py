@@ -1,3 +1,4 @@
+import hashlib
 import json
 import subprocess
 from pathlib import Path
@@ -117,15 +118,62 @@ def test_a_missing_declared_input_or_base_cannot_key(repo):
         _key(repo, "graded", base="nosuchref")
 
 
-def test_main_writes_the_key_to_the_step_output(repo, monkeypatch, capsys):
-    (repo / ".github/input-keys.json").write_text((repo / "registry.json").read_text())
+def test_the_key_is_the_digest_of_every_declared_input(repo):
+    head = _git(repo, "rev-parse", "HEAD")
+    record = {
+        "version": 1,
+        "job": "graded",
+        "entry": {"paths": ["src"], "base_paths": ["budget.txt"], "tools": []},
+        "keyer": [
+            _git(repo, "rev-parse", "HEAD:scripts/ci_input_key.py"),
+            _git(repo, "rev-parse", "HEAD:.github/actions/input-key"),
+        ],
+        "paths": {"src": _git(repo, "rev-parse", "HEAD:src")},
+        "base_paths": {"budget.txt": _git(repo, "rev-parse", f"{head}:budget.txt")},
+        "environment": ["a=1", "b=2"],
+        "day": "2026-10-16",
+    }
+    digest = hashlib.sha256(json.dumps(record, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    assert _key(repo, "graded", base=head, environment=("b=2", "a=1")) == f"input-pass-graded-{digest}"
+
+
+def test_an_undeclared_job_cannot_key(repo):
+    with pytest.raises(SystemExit, match="nobody declares no inputs in"):
+        _key(repo, "nobody")
+
+
+def test_main_keys_the_runner_and_the_given_base_and_environment(repo, monkeypatch, capsys):
+    registry = repo / ".github/input-keys.json"
+    registry.write_text((repo / "registry.json").read_text())
+    base = _git(repo, "rev-parse", "HEAD")
+    _commit(repo, {"budget.txt": "2"})
+    runner = {
+        "RUNNER_OS": "Linux",
+        "RUNNER_ARCH": "X64",
+        "RUNNER_ENVIRONMENT": "self-hosted",
+        "ImageOS": "",
+        "ImageVersion": "7",
+    }
+    for name, value in runner.items():
+        monkeypatch.setenv(name, value)
     output = repo / "output.txt"
     output.write_text("before=1\n")
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
-    assert ci_input_key.main(["--job", "job"]) == 0
-    value = ci_input_key.key("job", registry=repo / ".github/input-keys.json")
-    assert capsys.readouterr().out == f"key={value}\n"
-    assert output.read_text() == f"before=1\nkey={value}\n"
+    args = ["--job", "graded", "--base", base, "--environment", "redis=sha256:1"]
+    assert ci_input_key.main(args) == 0
+    expected = ci_input_key.key(
+        "graded",
+        base=base,
+        registry=registry,
+        environment=("redis=sha256:1", *(f"{name}={value}" for name, value in runner.items())),
+    )
+    assert capsys.readouterr().out == f"key={expected}\n"
+    assert output.read_text() == f"before=1\nkey={expected}\n"
+    assert ci_input_key.main([*args[:3], "HEAD", *args[4:]]) == 0
+    assert capsys.readouterr().out != f"key={expected}\n"
+    monkeypatch.setenv("ImageVersion", "8")
+    assert ci_input_key.main(args) == 0
+    assert capsys.readouterr().out != f"key={expected}\n"
 
 
 def test_every_declared_input_exists_and_covers_its_own_workflow():
@@ -137,10 +185,11 @@ def test_every_declared_input_exists_and_covers_its_own_workflow():
             assert (_ROOT / path).exists(), path
 
 
-def test_the_lookup_never_restores_and_reports_a_hit_as_true_or_false():
+def test_the_lookup_only_checks_the_key_and_reports_a_hit_as_true_or_false():
     steps = yaml.safe_load((_ROOT / ".github/actions/input-key/action.yml").read_text())["runs"]["steps"]
     key, lookup, notice = steps
-    assert key["run"] == 'python3 -I scripts/ci_input_key.py --job "$JOB" --base "$BASE"'
+    assert key["run"] == 'python3 -I scripts/ci_input_key.py --job "$JOB" --base "$BASE" --environment "$ENVIRONMENT"'
+    assert key["env"]["ENVIRONMENT"] == "${{ inputs.environment }}"
     assert lookup["uses"] == "actions/cache/restore@v4"
     assert lookup["with"]["lookup-only"] is True
     assert lookup["with"]["key"] == "${{ steps.key.outputs.key }}"
@@ -159,9 +208,11 @@ def test_a_keyed_job_runs_its_heavy_steps_only_on_a_miss_and_saves_only_after_th
     index = next(i for i, step in enumerate(steps) if step.get("uses") == _KEY)
     assert steps[index]["id"] == "key"
     assert steps[index]["with"]["job"] == job
-    assert all("if" not in step for step in steps[:index])
+    assert all(step.get("if") in {None, "${{ !inputs.streams }}"} for step in steps[:index])
     [save] = [step for step in steps if step.get("uses") == _SAVE]
-    assert save["if"] == "steps.key.outputs.hit == 'false'"
+    assert save["if"] == (
+        "steps.key.outputs.hit == 'false' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')"
+    )
     assert save["with"] == {"key": "${{ steps.key.outputs.key }}"}
     heavy = [step for step in steps[index + 1 :] if step is not save]
     assert steps.index(save) > max(i for i, step in enumerate(steps) if _SKIP in step.get("if", ""))
