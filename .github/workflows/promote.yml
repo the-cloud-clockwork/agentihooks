@@ -35,6 +35,7 @@ jobs:
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
           repositories: ${{ github.event.repository.name }}
           permission-metadata: read
+          permission-actions: read
           permission-contents: write
           permission-pull-requests: write
           permission-workflows: write

@@ -2184,6 +2184,19 @@ def on_post_tool_use(payload: dict) -> None:
     _trace_mark("post_tool_use_done", tool_name, _trace_session_id)
 
 
+def _link_codex_rollout(transcript_path: str) -> None:
+    from hooks.targets import is_codex
+
+    if not is_codex():
+        return
+    try:
+        from scripts import codex_rollouts
+
+        codex_rollouts.link_current(transcript_path)
+    except Exception as e:
+        log("codex rollout link failed", {"error": str(e)})
+
+
 def on_stop(payload: dict) -> None:
     """Handle Stop event."""
     _stop_block = None
@@ -2199,6 +2212,7 @@ def on_stop(payload: dict) -> None:
     session_id = payload.get("session_id", "")
     transcript_path = payload.get("transcript_path", "")
     _confirm_inbox(session_id)
+    _link_codex_rollout(transcript_path)
 
     # Parse transcript to get metrics (Claude Code doesn't include these in hook payload)
     metrics = parse_transcript_metrics(transcript_path) if transcript_path else {}

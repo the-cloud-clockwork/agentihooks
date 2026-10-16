@@ -75,7 +75,9 @@ def jobs_for(event, base_ref="dev", scope="full"):
                 runs = all(need.result == "success" for need in needs.values())
             completed[name] = SimpleNamespace(
                 result="success" if runs else "skipped",
-                outputs=SimpleNamespace(due="true", reused="false", scope=scope if runs else ""),
+                outputs=SimpleNamespace(
+                    due="true", reused="false", scope=scope if runs else "", analysis="A1" if runs else ""
+                ),
             )
             del pending[name]
             ready = True

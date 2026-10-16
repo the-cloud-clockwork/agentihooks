@@ -1,7 +1,7 @@
 import ast
+import json
 import os
 import re
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -441,11 +441,7 @@ def test_sonar_downloads_this_runs_coverage_after_the_shards():
     steps = sonar["steps"]
     download = next(step for step in steps if step.get("name") == "Download shard coverage")
     merge = next(step for step in steps if step.get("name") == "Merge shard coverage")
-    assert (
-        download["if"]
-        == merge["if"]
-        == ("steps.current.outputs.superseded != 'true' && needs.select.outputs.scope != 'none'")
-    )
+    assert download["if"] == merge["if"] == "needs.select.outputs.scope != 'none'"
     assert download["uses"].startswith("actions/download-artifact@")
     assert download["with"] == {"pattern": "coverage-3.12-*", "path": ".coverage-shards"}
     assert steps.index(download) < steps.index(merge)
@@ -476,50 +472,12 @@ def test_no_job_skips_on_a_tree_another_run_passed():
     assert "steps.lookup" not in (ROOT / ".github/workflows/test.yml").read_text()
 
 
-def _superseded(tmp_path, dev_head: str, sha: str = "a" * 40) -> tuple[int, str | None]:
-    step = next(step for step in _jobs()["sonar"]["steps"] if step.get("id") == "current")
-    tools = tmp_path / "bin"
-    tools.mkdir()
-    listing = f'echo "{dev_head}\trefs/heads/dev"' if dev_head else "true"
-    (tools / "git").write_text(f'#!/usr/bin/env bash\n[[ "$*" == "ls-remote origin refs/heads/dev" ]]\n{listing}\n')
-    (tools / "git").chmod(0o755)
-    output = tmp_path / "output"
-    result = subprocess.run(
-        ["bash", "-e", "-c", step["run"]],
-        env={**os.environ, "PATH": f"{tools}:{os.environ['PATH']}", "GITHUB_OUTPUT": str(output), "SHA": sha},
-        check=False,
-    )
-    return result.returncode, output.read_text() if output.exists() else None
-
-
-@pytest.mark.parametrize(("dev_head", "superseded"), [("a" * 40, "false"), ("b" * 40, "true")])
-def test_a_dev_push_skips_the_analysis_once_dev_moved_past_it(tmp_path, dev_head, superseded):
-    status, output = _superseded(tmp_path, dev_head)
-    assert status in ({0, 1} if superseded == "true" else {0})
-    assert output == f"superseded={superseded}\n"
-
-
-def test_an_unreadable_dev_head_fails_the_check_instead_of_skipping_the_analysis(tmp_path):
-    status, output = _superseded(tmp_path, "")
-    assert status != 0
-    assert output is None
-
-
-def test_sonar_names_the_current_dev_head_from_git_and_gates_the_scan_on_it():
+def test_sonar_scans_the_graded_revision_without_reading_the_dev_head():
     steps = _jobs()["sonar"]["steps"]
-    current = next(step for step in steps if step.get("id") == "current")
-    assert current["if"] == "github.event_name == 'push'"
-    assert current["env"] == {"SHA": "${{ github.sha }}"}
-    names = [step.get("name") for step in steps]
-    assert "Wait for older dev analyses" not in names
-    later = steps[steps.index(current) + 1 :]
-    gated = {
-        "Download shard coverage",
-        "Merge shard coverage",
-        "SonarQube Scan",
-        "SonarQube Quality Gate",
-        "Hold the Delivery L2 conditions",
-    }
-    assert {
-        step["name"] for step in later if "steps.current.outputs.superseded != 'true'" in step.get("if", "")
-    } >= gated
+    dev_head = re.compile(r"refs/heads/dev|origin[ /]\+?dev\b|:dev\b|github\.event\.after")
+    assert [step.get("name", step.get("uses")) for step in steps if dev_head.search(json.dumps(step))] == []
+    assert all("steps.current" not in step.get("if", "") for step in steps)
+    scan = next(step for step in steps if step.get("name") == "SonarQube Scan")
+    gate = next(step for step in steps if step.get("name") == "SonarQube Quality Gate")
+    assert "if" not in scan
+    assert "if" not in gate

@@ -1,3 +1,25 @@
+async function gradeIsComplete(github, context, api) {
+  const [jobs, checks, statuses] = await Promise.all([
+    github.paginate(github.rest.actions.listJobsForWorkflowRun, { ...api, run_id: context.runId, filter: 'latest', per_page: 100 }),
+    github.paginate(github.rest.checks.listForRef, { ...api, ref: context.sha, filter: 'latest', per_page: 100 }),
+    github.paginate(github.rest.repos.listCommitStatusesForRef, { ...api, ref: context.sha, per_page: 100 }),
+  ]);
+  const current = jobs.filter(job => job.run_id === context.runId && job.name === 'promote / promote' && job.status === 'in_progress');
+  if (current.length !== 1) return false;
+  const runUrl = `${context.serverUrl}/${api.owner}/${api.repo}/actions/runs/${context.runId}/job/`;
+  const own = check => check.url === current[0].check_run_url && check.details_url === `${runUrl}${current[0].id}` &&
+    check.name === current[0].name && check.status === 'in_progress' && check.conclusion === null;
+  const latest = new Map();
+  for (const status of statuses) {
+    if (!latest.has(status.context)) latest.set(status.context, status.state);
+  }
+  return checks.filter(own).length === 1 &&
+    checks.some(check => check.name === 'Gate — Required' && check.status === 'completed' &&
+      check.conclusion === 'success' && check.details_url.startsWith(runUrl)) &&
+    checks.every(check => own(check) || check.status === 'completed' && ['success', 'skipped'].includes(check.conclusion)) &&
+    [...latest.values()].every(state => state === 'success');
+}
+
 module.exports = async ({ github, context, core, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) }) => {
   const { owner, repo } = context.repo;
   const repository = `${owner}/${repo}`;
@@ -31,7 +53,8 @@ module.exports = async ({ github, context, core, sleep = ms => new Promise(resol
       const latest = (await github.rest.pulls.get({ ...api, pull_number: pull.number })).data;
       if (latest.head.sha !== context.sha) throw new Error('Promotion pull request moved away from the graded head');
       if (latest.mergeable === false) throw new Error('Promotion pull request has merge conflicts');
-      if (latest.mergeable === true && latest.mergeable_state === 'clean') {
+      if (latest.mergeable === true && (latest.mergeable_state === 'clean' ||
+          latest.mergeable_state === 'unstable' && await gradeIsComplete(github, context, api))) {
         ready = true;
         break;
       }

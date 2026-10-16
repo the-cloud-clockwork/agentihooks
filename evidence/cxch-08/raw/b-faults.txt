@@ -1,0 +1,32 @@
+Outputs of the live fault commands on 2026-10-16, copied from the session that ran them. Message bodies are omitted.
+
+== Redis unavailable: docker pause cxc9-redis; sleep 30; docker unpause cxc9-redis
+18:10:26 paused
+18:10:56 unpaused
+serve log of master@ed3ec8-0003 (raw/serve-lines.txt):
+  codex pump for master@ed3ec8-0003 degraded: TimeoutError: Timeout reading from socket
+  codex pump for master@ed3ec8-0003 degraded: DispatchError: exe-7386fd747fe44c5d85ea42d4d33168ca no longer delivers for master@ed3ec8-0003
+ps after: no scripts.inbox.codex process for exe-7386fd747fe44c5d
+next chat item d24185ef7d84: pending 1792174288636 operator; delivered 1792174288696 master@ed3ec8-0004
+receipt: recipient master@ed3ec8-0004 owner exe-90fa11acafe842c996d5619b5508b9c3 state accepted committed True
+new execution processes started 20:11:13 local (app-server, pump, viewer for exe-90fa11acafe842c9)
+
+== Socket loss: kill <pid of codex app-server for exe-90fa11acafe842c9>
+18:12:03 killed; chat item 1d9f2cc58c4a sent 4 s later
+serve log of master@ed3ec8-0004:
+  codex pump for master@ed3ec8-0004 degraded: ProtocolError: the event stream lost the connection: ConnectionClosedError
+  codex pump for master@ed3ec8-0004 degraded: ProtocolError: cannot open the app-server socket: FileNotFoundError
+item 1d9f2cc58c4a after 25 s: state pending, history [pending 1792174327976 operator]
+receipt 7fb9821c2250: recipient master@ed3ec8-0004 state rejected committed False reason "turn/steer refused: Server is draining; retry after reconnecting"
+receipt 44a3be459e74: recipient master@ed3ec8-0004 state rejected committed False reason "turn/steer refused: Server is draining; retry after reconnecting"
+receipt 7a33d421d498: recipient master@ed3ec8-0006 owner exe-14812a3b04ea431cb0551a0a1c8da31e state accepted committed True at 1792174597727
+item 1d9f2cc58c4a final: delivered 1792174597726 master@ed3ec8-0006; done 1792174631434
+
+== Redis state lost: swarm snapshot; FLUSHALL on 127.0.0.1:6439
+keys before 746
+keys after 0
+serve log of master@ed3ec8-0006 after 30 s:
+  scripts.codex_session.binding.BindingError: no transport record for this execution
+ps after: no codex_session serve, scripts.inbox.codex or scripts.inbox.channel process
+restore outputs: raw/b-snapshot-restore.txt
+after restore: swarm paused; inbox states done 29, handed_off 2, pending 1 (the pending item 908d332e5767 was created by the ledger after restore); receipts journal entries 0

@@ -33,8 +33,8 @@ permissions:
 
 jobs:
   promote:
-    needs: [gate-required, refresh-durations, coverage-baseline, flake-budget]
-    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' && needs.gate-required.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
+    needs: [gate-required, refresh-durations, coverage-baseline, flake-budget, sonar]
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' && needs.gate-required.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && needs.sonar.outputs.analysis != '' }}
     uses: ./.github/workflows/promote.yml
     secrets:
       TCC_CI_CLIENT_ID: ${{ secrets.TCC_CI_CLIENT_ID }}
@@ -1153,6 +1153,8 @@ jobs:
     needs: [unit, unit-selected, select, reuse, admission]
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
     timeout-minutes: 15
+    outputs:
+      analysis: ${{ steps.gate.outputs.analysis }}
     env:
       SONAR_SCANNER_VERSION: 7.2.0.5079
       SONAR_SCANNER_SHA256: da9f4e64a3d555f08ce38b5469ebd91fe2b311af473f7001a5ee5c1fd58b004b
@@ -1171,25 +1173,8 @@ jobs:
       - name: Install coverage
         run: python -m pip install "coverage>=7.4"
 
-      # Sonar refuses an analysis dated before the project's latest one, so a dev push run that dev already moved past leaves the analysis to the newer run.
-      - name: Check dev still points at this commit
-        id: current
-        if: github.event_name == 'push'
-        env:
-          SHA: ${{ github.sha }}
-        run: |
-          dev=$(git ls-remote origin refs/heads/dev)
-          [[ -n "$dev" ]]
-          if [[ "${dev%%[[:space:]]*}" == "$SHA" ]]; then
-            echo "superseded=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "superseded=true" >> "$GITHUB_OUTPUT"
-            echo "::error::Dev advanced before Sonar analysis; this unscanned revision cannot be promoted."
-            exit 1
-          fi
-
       - name: Download shard coverage
-        if: steps.current.outputs.superseded != 'true' && needs.select.outputs.scope != 'none'
+        if: needs.select.outputs.scope != 'none'
         uses: actions/download-artifact@v4
         with:
           pattern: coverage-3.12-*
@@ -1198,7 +1183,7 @@ jobs:
       # The merge runs while the proxy starts and the downloads restore; the scan waits for it below.
       - name: Merge shard coverage
         id: merge
-        if: steps.current.outputs.superseded != 'true' && needs.select.outputs.scope != 'none'
+        if: needs.select.outputs.scope != 'none'
         env:
           SHARDS: ${{ needs.select.outputs.scope == 'selected' && needs.select.outputs.count || 12 }}
           SCOPE: ${{ needs.select.outputs.scope }}
@@ -1226,7 +1211,7 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Hold the Delivery L2 binding
-        if: success() && steps.proxy.outcome == 'success' && steps.current.outputs.superseded != 'true'
+        if: success() && steps.proxy.outcome == 'success'
         env:
           SONAR_READ_TOKEN: ${{ secrets.SONAR_READ_TOKEN }}
         run: |
@@ -1283,7 +1268,7 @@ jobs:
         run: echo "args=-Dsonar.pullrequest.key=dispatch-${REF_NAME//\//-} -Dsonar.pullrequest.branch=$REF_NAME -Dsonar.pullrequest.base=dev" >> "$GITHUB_OUTPUT"
 
       - name: Wait for the coverage merge
-        if: always() && steps.current.outputs.superseded != 'true' && needs.select.outputs.scope != 'none'
+        if: always() && needs.select.outputs.scope != 'none'
         timeout-minutes: 5
         env:
           MERGE_PID: ${{ steps.merge.outputs.pid }}
@@ -1301,7 +1286,6 @@ jobs:
 
       # Runs the CLI directly: sonarqube-scan-action never finds its tool cache entry, since a four part version is not semver.
       - name: SonarQube Scan
-        if: steps.current.outputs.superseded != 'true'
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: http://127.0.0.1:9000
@@ -1321,7 +1305,7 @@ jobs:
           bash "$GITHUB_WORKSPACE/.github/coverage/sonar-retry.sh" --unless .scannerwork/report-task.txt "SonarQube Scan" -- "$scanner/bin/sonar-scanner" -Dsonar.projectBaseDir=. "${extra[@]}"
 
       - name: Upload coverage and analysis evidence
-        if: always() && steps.current.outputs.superseded != 'true'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: sonar-report
@@ -1334,9 +1318,9 @@ jobs:
           retention-days: 7
           overwrite: true
 
+      # Sonar refuses an analysis dated before the dev branch's latest one; that revision ends superseded, ungraded and never promoted.
       - name: SonarQube Quality Gate
         id: gate
-        if: steps.current.outputs.superseded != 'true'
         timeout-minutes: 5
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -1352,7 +1336,13 @@ jobs:
             sleep 1
           done
           if [[ "$status" != SUCCESS ]]; then
-            echo "::error::The Sonar background task ended $status: $(jq -r '.task.errorMessage // "no message"' <<<"$report")"
+            message=$(jq -r '.task.errorMessage // "no message"' <<<"$report")
+            if [[ "$status" == FAILED && "$GITHUB_EVENT_NAME" == push && "$message" == *"cannot be older than the date of the last known analysis"* ]]; then
+              echo "superseded=true" >> "$GITHUB_OUTPUT"
+              echo "::notice::Sonar refused this analysis for a newer dev analysis, so the revision is superseded and not promoted: $message"
+              exit 0
+            fi
+            echo "::error::The Sonar background task ended $status: $message"
             exit 1
           fi
           analysis=$(jq -er .task.analysisId <<<"$report")
@@ -1363,10 +1353,11 @@ jobs:
             exit 1
           fi
           echo "Quality Gate has PASSED. $dashboard"
+          echo "analysis=$analysis" >> "$GITHUB_OUTPUT"
 
       # The gate step grades against whatever gate the server binds, so a silent rebind would loosen it.
       - name: Hold the Delivery L2 conditions
-        if: always() && steps.proxy.outcome == 'success' && steps.current.outputs.superseded != 'true'
+        if: always() && steps.proxy.outcome == 'success' && steps.gate.outputs.superseded != 'true'
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |

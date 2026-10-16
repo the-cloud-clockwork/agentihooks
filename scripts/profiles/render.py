@@ -15,7 +15,7 @@ from pathlib import Path
 
 from hooks.context import profile_chain, quarantine
 from scripts.claude_config import claude_home, claude_json
-from scripts.profiles import binding, browser, connectors, homes, plugins, sources
+from scripts.profiles import binding, browser, bundle_copy, connectors, homes, plugins, sources
 from scripts.targets._common import _atomic_write, _install_module, agents_skills_home, build_persona
 from scripts.targets.claude_target import settings_document
 from scripts.targets.codex_hook_trust import trusted_state
@@ -66,54 +66,48 @@ def _global_env() -> dict[str, str]:
     return {k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}
 
 
-def declared(name: str) -> list[str]:
+def _resolve(name: str) -> Path | None:
     _i = _install_module()
-    found = [o for _, path in _i._resolve_profile_chain(name) for o in profile_chain.overlays(path)]
-    return [o for o in dict.fromkeys(found) if _i._resolve_profile_dir(o) is not None]
+    copy = bundle_copy.current()
+    if copy is None or name.startswith(profile_chain.PACKAGE_PREFIX):
+        return _i._resolve_profile_dir(name)
+    local = _i.PROFILES_DIR / name
+    if local.is_dir():
+        return local
+    candidate = copy / "profiles" / name
+    if candidate.is_dir():
+        return candidate
+    return _i._resolve_linked_profile_dir(name) or _i._package_role_dir(name)
+
+
+def _resolve_chain(names: list[str]) -> list[tuple[str, Path]]:
+    if bundle_copy.current() is None:
+        return _install_module()._resolve_profile_chain(",".join(names))
+    return [(name, _resolve(name)) for name in profile_chain.expand_profiles(names, _resolve)]
+
+
+def declared(name: str) -> list[str]:
+    found = [o for _, path in _resolve_chain([name]) for o in profile_chain.overlays(path)]
+    return [o for o in dict.fromkeys(found) if _resolve(o) is not None]
 
 
 def _chain(name: str, overlays: Sequence[str] = ()) -> list[tuple[str, Path]]:
-    _i = _install_module()
-    if _i._resolve_profile_dir(name) is None:
+    if _resolve(name) is None:
         raise ValueError(f"Profile '{name}' not found")
     always = [name, *declared(name)]
-    worn = profile_chain.worn(_i._resolve_profile_chain(",".join(always)), list(overlays), _i._resolve_profile_dir)
-    return _i._resolve_profile_chain(",".join([*always, *worn]))
+    worn = profile_chain.worn(_resolve_chain(always), list(overlays), _resolve)
+    return _resolve_chain([*always, *worn])
 
 
 def _bundle() -> Path | None:
     _i = _install_module()
-    bundle = _i._get_bundle_path()
+    bundle = bundle_copy.current() or _i._get_bundle_path()
     linked = (_i._load_state().get("bundle") or {}).get("path")
     if bundle is None and linked:
         raise ValueError(
             f"linked bundle {linked} is missing; relink it with agentihooks bundle link <path> before rendering"
         )
     return bundle
-
-
-def _pin(bundle: Path | None, revision: str) -> None:
-    recorded = f"the launch recorded bundle commit {revision}, but"
-    if bundle is None:
-        raise ValueError(f"{recorded} no bundle is linked")
-    git = ["git", "-C", str(bundle)]
-    try:
-        head = subprocess.run([*git, "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10)
-        status = subprocess.run([*git, "status", "--porcelain"], capture_output=True, text=True, timeout=10)
-    except subprocess.TimeoutExpired as exc:
-        raise ValueError(f"{recorded} git did not answer within 10 seconds for the bundle at {bundle}") from exc
-    for done in (head, status):
-        if done.returncode:
-            raise ValueError(f"{recorded} git cannot read the bundle at {bundle}: {done.stderr.strip()}")
-    if head.stdout.strip() != revision:
-        differs = f"is at commit {head.stdout.strip()}"
-    elif status.stdout.strip():
-        differs = "has uncommitted changes"
-    else:
-        return
-    raise ValueError(
-        f"{recorded} the bundle at {bundle} {differs}; check out {revision} in the bundle before this launch renders"
-    )
 
 
 def _base_digest() -> str:
@@ -133,7 +127,7 @@ def _profiles_digest(dirs: list[tuple[str, Path]]) -> str:
     digest = hashlib.sha256()
     for root in [_install_module().PACKAGE_FEATURES_DIR, *(d for _, d in dirs)]:
         for path in sorted(p for p in root.rglob("*") if p.is_file() and "__pycache__" not in p.parts):
-            digest.update(f"{path}\0".encode())
+            digest.update(f"{bundle_copy.identity(path)}\0".encode())
             digest.update(path.read_bytes())
     return digest.hexdigest()
 
@@ -378,10 +372,12 @@ def render_claude(name: str, force: bool = False, overlays: Sequence[str] = ()) 
     connectors.require_environment(declared)
     required = {server for server, spec in declared.items() if spec.get("enabled_tools") is not None}
     prior = profile_dir(name, overlays)
-    if not force and prior is not None and _claude_fresh(prior, current, required):
+    if not force and prior is not None and _claude_fresh(prior, current, required) and bundle_copy.reuse(prior):
         return None
     kept = _home_plugins(prior, current["enabled_plugins"])
     root = homes.fresh(rendered_root(), key, current)
+    bundle_copy.attach(root)
+    bundle, dirs = _bundle(), _chain(name, overlays)
     out = root / "claude"
     out.mkdir()
     if prior is not None and (prior / "claude" / ".claude.json").is_file():
@@ -458,9 +454,10 @@ def render_codex(name: str, force: bool = False, overlays: Sequence[str] = (), i
     from scripts.profiles import codex_master
 
     _i = _install_module()
+    # render_claude binds the recorded bundle copy inside the home; resolve the chain only after it.
+    claude_fresh = render_claude(name, force=force, overlays=overlays) is None
     bundle, dirs = _bundle(), _chain(name, overlays)
     master = any(n.removeprefix("package:") == "master" for n, _ in dirs)
-    claude_fresh = render_claude(name, force=force, overlays=overlays) is None
     operator = operator_codex_home()
     config = operator / "config.toml"
     text = config.read_text() if config.exists() else ""
@@ -490,6 +487,9 @@ def render_codex(name: str, force: bool = False, overlays: Sequence[str] = (), i
     if out.exists():
         root = render_claude(name, force=True, overlays=overlays).parent
         out = root / "codex"
+        bundle, dirs = _bundle(), _chain(name, overlays)
+        below, above = _codex_skills(bundle, dirs, stamp)
+        current["skills"] = {skill: str(path) for skill, path in {**below, **above}.items()}
     manifest = sources.path(root.name, "codex", root.parent)
     claude = root / "claude"
     out.mkdir()
@@ -532,8 +532,8 @@ def render_codex(name: str, force: bool = False, overlays: Sequence[str] = (), i
 def render_copilot(name: str, force: bool = False, overlays: Sequence[str] = ()) -> Path | None:
     from scripts.targets.copilot_target import CopilotAdapter, copilot_home
 
-    bundle, dirs = _bundle(), _chain(name, overlays)
     claude_fresh = render_claude(name, force=force, overlays=overlays) is None
+    bundle, dirs = _bundle(), _chain(name, overlays)
     current = _stamp(bundle, dirs)
     config = {"mcpServers": CopilotAdapter().mcp_entries(_mcp_servers("copilot", bundle, dirs))}
     root = profile_dir(name, overlays)
@@ -548,6 +548,8 @@ def render_copilot(name: str, force: bool = False, overlays: Sequence[str] = ())
     if out.exists():
         root = render_claude(name, force=True, overlays=overlays).parent
         out = root / "copilot"
+        bundle, dirs = _bundle(), _chain(name, overlays)
+        config = {"mcpServers": CopilotAdapter().mcp_entries(_mcp_servers("copilot", bundle, dirs))}
     out.mkdir()
     _link(out / "copilot-instructions.md", root / "claude" / "CLAUDE.md")
     operator = copilot_home()
@@ -571,11 +573,11 @@ def render(
     renderers = {"claude": render_claude, "codex": render_codex, "copilot": render_copilot}
     if target not in renderers:
         raise ValueError(f"{target} per-run profiles are not supported")
+    options = {"isolate": isolate} if target == "codex" else {}
     if bundle_revision:
-        _pin(_bundle(), bundle_revision)
-    if target == "codex":
-        return render_codex(name, force=force, overlays=overlays, isolate=isolate)
-    return renderers[target](name, force=force, overlays=overlays)
+        with bundle_copy.recorded(_bundle(), bundle_revision, rendered_root()):
+            return renderers[target](name, force=force, overlays=overlays, **options)
+    return renderers[target](name, force=force, overlays=overlays, **options)
 
 
 def rendered_profiles(target: str) -> list[str]:

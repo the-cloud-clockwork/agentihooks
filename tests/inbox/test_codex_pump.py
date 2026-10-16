@@ -536,10 +536,18 @@ def test_an_open_server_request_holds_a_nudge_too(rig):
     assert rig.record().pending_request == APPROVAL
 
 
-def test_an_approval_replayed_on_resume_holds_the_first_delivery_into_a_turn_begun_before_the_pump(rig):
+def test_an_approval_replayed_on_resume_holds_the_first_delivery_into_a_turn_begun_before_the_pump(rig, monkeypatch):
     rig.server.begin_elsewhere()
     rig.server.frames.clear()
-    rig.server.early = [{"id": 90, "method": APPROVAL, "params": {"threadId": THREAD}}]
+    read, calls = rig.server.thread_read, []
+
+    def replay_before_the_read_reply(params):
+        calls.append(params)
+        if len(calls) == 2:
+            rig.server.early = [{"id": 90, "method": APPROVAL, "params": {"threadId": THREAD}}]
+        return read(params)
+
+    monkeypatch.setattr(rig.server, "thread_read", replay_before_the_read_reply)
     rig.pump.start()
     item = rig.store.send("alice", ME, "careful")
     rig.pump.step()
@@ -596,7 +604,7 @@ def test_a_nudged_turn_completed_before_its_reply_publishes_an_empty_active_turn
     assert rig.record().active_turn_id == ""
 
 
-def test_a_nudge_reaches_an_unobserved_turn_at_the_exact_hold_boundary(rig, monkeypatch):
+def test_a_nudge_goes_ahead_of_a_held_message_at_the_exact_hold_boundary(rig, monkeypatch):
     rig.server.begin_elsewhere()
     rig.server.frames.clear()
     rig.pump.start()
