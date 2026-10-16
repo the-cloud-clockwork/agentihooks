@@ -63,7 +63,7 @@ def test_the_load_covers_every_sweep_of_the_watch_loop_more_than_once():
 
 def test_the_gate_refuses_to_run_outside_ci(monkeypatch, tmp_path):
     ran = []
-    monkeypatch.setattr(ledger_load, "run", lambda folder: ran.append(folder) or [])
+    monkeypatch.setattr(ledger_load, "run", lambda folder: ran.append(folder) or ([], 0.1))
     monkeypatch.setattr(ledger_load, "base_budgets", lambda revision: head_budgets())
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     with pytest.raises(SystemExit, match="CI only"):
@@ -145,10 +145,80 @@ def test_the_gate_runs_on_the_stricter_of_base_and_head_budgets(monkeypatch, tmp
     strict = {**head_budgets(), "WRITE_P95_S": 0.5, "CPU_CORES": 0.25, "LEDGER_BYTES": 10**8}
     revisions = []
     monkeypatch.setattr(ledger_load, "base_budgets", lambda revision: revisions.append(revision) or strict)
-    monkeypatch.setattr(ledger_load, "run", lambda folder: [] if head_budgets() == strict else ["head budgets graded"])
+    monkeypatch.setattr(
+        ledger_load, "run", lambda folder: ([] if head_budgets() == strict else ["head budgets graded"], 0.1)
+    )
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     assert ledger_load.main(["--folder", str(tmp_path), "--base", "abc123"]) == 0
     assert revisions == ["abc123"]
+
+
+BREACH = ledger_load.WRITE_P95_S + 0.5
+
+
+def breach(p95: float) -> str:
+    return f"{ledger_load.WRITE_BREACH} {p95:.3f}s exceeds {ledger_load.WRITE_P95_S}s"
+
+
+def graded_main(monkeypatch, tmp_path, *outcomes) -> tuple[int, list[Path]]:
+    calls = []
+
+    def measure(folder):
+        calls.append(folder)
+        return outcomes[len(calls) - 1]
+
+    monkeypatch.setattr(ledger_load, "run", measure)
+    monkeypatch.setattr(ledger_load, "base_budgets", lambda revision: head_budgets())
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    return ledger_load.main(["--folder", str(tmp_path), "--base", "HEAD"]), calls
+
+
+def test_a_lone_write_breach_repeats_once_on_a_fresh_ledger_and_the_better_measure_passes(
+    monkeypatch, tmp_path, capsys
+):
+    code, calls = graded_main(monkeypatch, tmp_path, ([breach(BREACH)], BREACH), ([], 0.4))
+    out = capsys.readouterr().out
+    assert code == 0
+    assert calls == [tmp_path, tmp_path / "repeat"]
+    assert "repeated the measure once and graded the better of two" in out
+    assert f"write p95 first {BREACH:.3f}s, repeat 0.400s, budget {ledger_load.WRITE_P95_S}s" in out
+
+
+def test_a_write_breach_on_both_measures_is_red_and_reports_both_values(monkeypatch, tmp_path, capsys):
+    code, calls = graded_main(monkeypatch, tmp_path, ([breach(BREACH)], BREACH), ([breach(3.0)], 3.0))
+    out = capsys.readouterr().out
+    assert code == 1
+    assert calls == [tmp_path, tmp_path / "repeat"]
+    assert f"write p95 first {BREACH:.3f}s, repeat 3.000s" in out
+    assert f"::error::{breach(3.0)}" in out
+
+
+def test_a_write_breach_beside_another_problem_is_red_without_a_repeat(monkeypatch, tmp_path, capsys):
+    code, calls = graded_main(monkeypatch, tmp_path, ([breach(BREACH), "1 requests failed, first: x"], BREACH))
+    out = capsys.readouterr().out
+    assert code == 1
+    assert calls == [tmp_path]
+    assert "repeated the measure" not in out
+    assert f"::error::{breach(BREACH)}" in out
+
+
+def test_another_problem_alone_is_red_without_a_repeat(monkeypatch, tmp_path):
+    code, calls = graded_main(monkeypatch, tmp_path, (["1 requests failed, first: x"], 0.3))
+    assert code == 1
+    assert calls == [tmp_path]
+
+
+def test_a_repeat_with_no_writes_reports_it_and_stays_red(monkeypatch, tmp_path, capsys):
+    shortfall = "0 writes completed of 100 expected"
+    code, _ = graded_main(monkeypatch, tmp_path, ([breach(BREACH)], BREACH), ([shortfall], None))
+    out = capsys.readouterr().out
+    assert code == 1
+    assert f"write p95 first {BREACH:.3f}s, repeat no writes" in out
+
+
+def test_the_write_breach_problem_names_its_measured_p95():
+    problems = ledger_load.verdict([0.1] * 94 + [BREACH] * 6, 100, 0.2, [])
+    assert problems == [breach(BREACH)]
 
 
 def test_some_open_alerts_are_past_their_quiet_hour_so_the_expiry_sweep_has_work():
