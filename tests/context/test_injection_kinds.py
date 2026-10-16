@@ -99,6 +99,7 @@ def _quiet_pretool(monkeypatch, *, policy: bool):
     ):
         monkeypatch.setattr(config, flag, True)
     monkeypatch.setattr(config, "QUOTA_POLICY_ENABLED", policy)
+    monkeypatch.setattr("hooks.context.quota_usage.QUOTA_USAGE_TOOL_CALLS", 1)
     monkeypatch.setattr(config, "QUOTA_USAGE_TOOL_CALLS", 1)
     monkeypatch.setattr("hooks.context.quota_policy.pretool", Mock(return_value=(None, "POLICY")))
     monkeypatch.setattr("hooks.context.quota_usage.quota_banner", Mock(return_value="BANNER"))
