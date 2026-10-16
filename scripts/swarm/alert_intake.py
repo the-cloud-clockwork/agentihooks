@@ -198,7 +198,7 @@ def serve(redis: Redis, found: Settings, clock: Callable[[], int]) -> bool:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.load_cert_chain(found.cert, found.key)
-        # The handshake runs on the handler's first read, under its timeout, so a stalled client cannot hold accept.
+        # The handshake runs on the handler's first read, so the handler timeout bounds a stalled client.
         server.socket = context.wrap_socket(server.socket, server_side=True, do_handshake_on_connect=False)
     server.redis, server.networks, server.clock, server.token = redis, found.networks, clock, found.token
     server.serve_forever()
