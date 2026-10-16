@@ -25,6 +25,7 @@ agentihooks swarm <id> classify EXECUTION lost|working --reason TEXT  master or 
 agentihooks swarm <id> terminal EXECUTION                         operator opens the worker terminal of an execution in herdr
 agentihooks swarm <id> lift AGENT GATE                            operator or master lets one agent past a gate for one hour
 agentihooks swarm <id> freeze | focus | unfreeze TARGET [--reason TEXT] [--quote WORDS]   operator, or master with his words
+agentihooks swarm <id> cover STAGE ITEM --reason TEXT              operator, master or dispatcher marks a bottleneck stage owned by an open phases/ID or tasks/ID
 agentihooks swarm <id> learned                                    list every seat's learned notes with seat and number
 agentihooks swarm <id> promote SEAT NUMBER insight|canon --reason TEXT   raise a learned note; canon only by master or operator
 agentihooks swarm <id> retire SEAT NUMBER --reason TEXT           master or operator retires a learned note from every later prompt
@@ -975,6 +976,15 @@ def cmd_freeze(store, args):
     print(json.dumps({args.command: args.target, "by": writer}))
 
 
+def cmd_cover(store, args):
+    from scripts.swarm import stage_cover
+
+    by = clearance.coverer(store, args.slug, Who.from_env())
+    doc = LedgerClient().state(args.slug)
+    request = stage_cover.Request(args.stage, args.item, args.reason, by)
+    print(json.dumps(stage_cover.cover(store, args.slug, doc, request, now_ms())))
+
+
 cmd_focus = cmd_unfreeze = cmd_freeze
 
 
@@ -1801,6 +1811,10 @@ def build_parser():
     lift = sub.add_parser("lift")
     lift.add_argument("agent")
     lift.add_argument("gate")
+    cover = sub.add_parser("cover")
+    cover.add_argument("stage")
+    cover.add_argument("item")
+    cover.add_argument("--reason", required=True)
     sub.add_parser("issue").add_argument("url")
     pr = sub.add_parser("pr")
     pr.add_argument("url")
