@@ -247,7 +247,8 @@ def test_the_master_writes_a_freeze_only_with_the_operators_recorded_words():
 def test_short_recorded_quotes_cannot_change_freezes(quote, op):
     operator_words.record(MASTER, "Freeze the plan")
     freeze("plans/a")
-    state, rejected = write(op, by=MASTER, target="plans/a", quote=quote)
+    fields = {"verb": "freeze"} if op == "freeze_set" else {}
+    state, rejected = write(op, by=MASTER, target="plans/a", quote=quote, **fields)
     assert rejected
     assert targets(state) == [("freeze", "plans/a")]
 
