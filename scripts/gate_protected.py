@@ -73,6 +73,10 @@ def _aggregator_problems(
             in (
                 [ci_reuse.gate_steps(selected=selected) for selected in (False, True)]
                 + [ci_reuse.gate_steps(queue_tier=True), ci_reuse.gate_steps(queue_tier=True, promotion=True)]
+                + [
+                    ci_reuse.gate_steps(queue_tier=True, consolidated=True),
+                    ci_reuse.gate_steps(queue_tier=True, promotion=True, consolidated=True),
+                ]
             )
         )
         and not (field == "runs-on" and head_job.get(field) in runners(policy))
@@ -95,10 +99,18 @@ def _duration_problems(base: dict, head: dict) -> list[str]:
         != "github.event_name != 'merge_group' && github.event_name != 'pull_request'"
     ):
         return []
-    previous = base["jobs"].get("durations", {})
-    producer = head["jobs"].get("durations", {})
+    previous = base["jobs"].get("durations", base["jobs"].get("select", {}))
+    producer = head["jobs"].get("durations", head["jobs"].get("select", {}))
     prefix = ci_reuse.duration_provenance_steps()
     problems = []
+    if "durations" in base["jobs"] and "durations" not in head["jobs"]:
+        selection = base["jobs"].get("select", {})
+        if not selection:
+            problems.append("The head moves durations provenance without existing selection admission.")
+        previous = previous | {
+            "outputs": previous.get("outputs", {}) | selection.get("outputs", {}),
+            "timeout-minutes": selection.get("timeout-minutes"),
+        }
     if producer.get("steps", [])[: len(prefix)] != prefix:
         problems.append("The head skips reuse without protected durations provenance.")
     mutable = {"steps", "if", "runs-on"}
@@ -135,9 +147,18 @@ def grade(
         for job_id, job in base_workflows[file]["jobs"].items()
         if job.get("if") is False and job_id not in head_jobs
     )
+    duration_problems = _duration_problems(base_workflows[file], head_workflows.get(file, {"jobs": {}}))
+    if (
+        "durations" in base_workflows[file]["jobs"]
+        and "durations" not in head_jobs
+        and head_jobs.get("reuse", {}).get("if")
+        == "github.event_name != 'merge_group' && github.event_name != 'pull_request'"
+        and not duration_problems
+    ):
+        retired = retired | {"durations"}
     problems = _aggregator_problems(base_gates[0], head_gates[0], policy, retired)
     problems += _reuse_problems(base_workflows[file]["jobs"], head_jobs, policy)
-    problems += _duration_problems(base_workflows[file], head_workflows.get(file, {"jobs": {}}))
+    problems += duration_problems
     return problems + ci_wiring.check(head_workflows, _protected_config(base_config, head_config), today)
 
 
