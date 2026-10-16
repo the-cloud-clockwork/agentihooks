@@ -205,8 +205,8 @@ function difficultyLabel(item) {
 }
 
 function awaitingLabel(item) {
-  const awaiting = String(item.awaiting || "").replace(/[_-]+/g, " ").trim();
-  return awaiting ? h("span", { class: "awaiting", text: awaiting, title: `awaiting ${awaiting}` }) : null;
+  const awaiting = item.state === "done" ? "" : (item.awaiting || "").replace(/[_-]+/g, " ");
+  return awaiting ? h("span", { class: "awaiting", text: awaiting }) : null;
 }
 
 function taskRow(item, tasks) {

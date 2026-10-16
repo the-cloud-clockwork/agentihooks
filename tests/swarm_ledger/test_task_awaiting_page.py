@@ -25,15 +25,13 @@ def test_a_task_row_shows_its_awaiting_state(awaiting, text):
 
 
 def test_the_awaiting_label_names_what_the_task_waits_on():
-    assert label({"awaiting": "recovery_pending"}) == {
-        "tag": "span",
-        "class": "awaiting",
-        "text": "recovery pending",
-        "title": "awaiting recovery pending",
-    }
+    assert label({"awaiting": "recovery_pending"}) == {"tag": "span", "class": "awaiting", "text": "recovery pending"}
 
 
-@pytest.mark.parametrize("task", [PLAIN, {**PLAIN, "awaiting": ""}, {**PLAIN, "awaiting": None}])
+@pytest.mark.parametrize(
+    "task",
+    [PLAIN, {**PLAIN, "awaiting": ""}, {**PLAIN, "awaiting": None}, {**PLAIN, "state": "done", "awaiting": "merge"}],
+)
 def test_a_task_row_without_an_awaiting_state_shows_none(task):
     assert label(task) is None
     assert nodes(render(task)["tree"], "awaiting") == []
