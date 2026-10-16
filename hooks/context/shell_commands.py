@@ -122,9 +122,7 @@ def _heredoc_marker(line: str, quote: str | None) -> tuple[int | None, str | Non
             skip = index + 3
         elif quote is None and line[index : index + 2] in _ARITHMETIC:
             arithmetic, skip = max(arithmetic + _ARITHMETIC[line[index : index + 2]], 0), index + 2
-        elif quote is None and line.startswith("<<", index) and arithmetic:
-            skip = index + 2
-        elif quote is None and line.startswith("<<", index):
+        elif quote is None and line.startswith("<<", index) and not arithmetic:
             return index, None
         elif quote is None and character == "#" and (index == 0 or (line[index - 1].isspace() and index != escaped)):
             return index, None
@@ -165,7 +163,7 @@ def _heredocs(command: str, depth: int, folders: list[str]) -> tuple[str, list[t
         delimiters = shlex.split(tail[:end])
         if not delimiters:
             raise ValueError("Missing heredoc delimiter")
-        rest = tail[end:].rstrip("\r\n")
+        rest = tail[end:].rstrip()
         cut, _ = _heredoc_marker(rest, None)
         rest = rest if cut is None else rest[:cut]
         body = []
@@ -231,7 +229,7 @@ def located(command: str, depth: int = 0, folders: list[str] | None = None) -> l
     for position, token in enumerate(tokens):
         redirect = token == "&" and (
             (words and words[-1].endswith((">", "<")))
-            or next(iter(tokens[position + 1 : position + 2]), "").startswith(">")
+            or any(word.startswith(">") for word in tokens[position + 1 : position + 2])
         )
         if not token or token.strip(_SEPARATORS) or redirect:
             words.append(token)
@@ -247,8 +245,7 @@ def located(command: str, depth: int = 0, folders: list[str] | None = None) -> l
                 pipeline = current
             elif operator in {"(", "{"}:
                 frames.append((operator, current, sequence, pipeline, piped))
-                sequence = pipeline = current
-                piped = False
+                sequence, pipeline, piped = current, current, False
             elif operator in {")", "}"}:
                 if frames:
                     kind, saved, sequence, pipeline, piped = frames.pop()

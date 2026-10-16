@@ -186,6 +186,13 @@ def test_heredoc_and_separated_shell_depths_share_the_limit():
         ("env --chdir=/a true; git push", []),
         ("env --chdir=/a git push", ["/a"]),
         ("env -C/a git push", ["/a"]),
+        ("env -C /a -C /b git push", ["/a", "/b"]),
+        ("env --chdir=/a=b git push", ["/a=b"]),
+        ("env -u X -C /a git push", ["/a"]),
+        ("cd /a && bash -c 'git push'", ["/a"]),
+        ("cd /a <&0 && git push", ["/a"]),
+        ("cd /a |& true; git push", []),
+        ("true | (cd /a && git push)", ["/a"]),
         ("cd /b && env --chdir /a git push", ["/b", "/a"]),
         ("cd /a && cd /b && cd - && git push", ["/a", "/b", "-"]),
         ("cd -P /a && git push", ["/a"]),
@@ -248,6 +255,7 @@ def test_an_arithmetic_left_shift_is_not_a_heredoc(command):
     [
         "cd /b && bash <<EOF\ngit push\nEOF",
         "cd /b && cat <<EOF | bash\ngit push\nEOF",
+        "cd /b && bash -c 'bash <<EOF\ngit push\nEOF\necho'",
     ],
 )
 def test_a_heredoc_script_runs_in_the_folder_of_its_shell(command):
@@ -262,3 +270,41 @@ def test_quoted_parentheses_do_not_hide_a_heredoc():
     parsed = commands('echo "((" ; bash <<EOF\npytest -q\nEOF')
     assert ["pytest", "-q"] in parsed
     assert ["bash"] in parsed
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "bash <<<'<<x'; echo done",
+        'x=$((1))"<<"; echo done',
+        "echo done &",
+        "bash <<'E F'\necho ok\nE F\necho done",
+    ],
+)
+def test_markers_and_quotes_leave_later_commands_intact(command):
+    from hooks.context.shell_commands import commands
+
+    assert ["echo", "done"] in commands(command)
+
+
+def test_a_substitution_inside_a_nested_shell_keeps_the_outer_folder():
+    from hooks.context.shell_commands import located
+
+    pushes = [
+        folders for tokens, folders in located("cd /b && bash -c 'echo $(git push)'") if tokens == ["git", "push"]
+    ]
+    assert pushes and all(folders == ["/b"] for folders in pushes)
+
+
+def test_stdin_scripts_share_the_nesting_limit():
+    import shlex
+
+    from hooks.context.shell_commands import commands, located
+
+    assert commands("bash <<< pytest", 9) == [["pytest"]]
+    with pytest.raises(ValueError):
+        commands("cat <<EOF | bash -c 'echo'\nx\nEOF", 9)
+    nested = "pytest"
+    for _ in range(10):
+        nested = "bash -c " + shlex.quote(nested)
+    assert located(nested) == [(["pytest"], [])]
