@@ -30,6 +30,7 @@ def live(authority_live):
     html, document = core.paths(SLUG)
     html.write_text(page)
     document.unlink(missing_ok=True)
+    server.ledger_bin.restore(SLUG)
     core.sync(
         SLUG,
         ops=[
@@ -38,7 +39,8 @@ def live(authority_live):
             {"op": "add", "id": "seed-chat-two", "thread": "chat", "text": "Second message"},
         ],
     )
-    return {**authority_live, "admin": core.read_token(page)}
+    yield {**authority_live, "admin": core.read_token(page)}
+    server.ledger_bin.restore(SLUG)
 
 
 from scripts.swarm_ledger import api as api
