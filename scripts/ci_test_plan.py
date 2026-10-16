@@ -54,7 +54,7 @@ def find_record(repository: str, before: str = "") -> tuple[dict, dict] | None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="plan which tests reuse their passed dev result")
+    parser = argparse.ArgumentParser()
     parser.add_argument("--repository", required=True)
     parser.add_argument("--head", required=True)
     parser.add_argument("--repo", type=Path, default=Path.cwd())
