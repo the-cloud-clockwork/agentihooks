@@ -1,0 +1,25 @@
+{
+  "tested_commit": "92907cf4a5cbf45ec902c8e4a89febd0b9968d8e",
+  "evidence_class": "mocked: rendered Pod manifests checked without a cluster, a cache store whose read only mount is simulated by the store's mount probe, and a local artifact directory replaced by a file to model lost shared storage; no NFS, no Pod and no live rollout proof",
+  "then": "mounting the entire operator home into all workers is refused by the template checker",
+  "passed": true,
+  "dimensions": {
+    "fixture": "sv2-fsy-05"
+  },
+  "operator_home": {
+    "operator_home_refused": true,
+    "policy_unchanged": true,
+    "no_host_path_disclosed": true,
+    "correction_needs_a_new_policy": true,
+    "validation_failures": {
+      "storage": 1
+    },
+    "shared_runtime_mount_rejections_total": {
+      "operator_home": 1
+    }
+  },
+  "node_cache_seed": {
+    "attempt_seed_write_refused": true,
+    "store_unchanged": true
+  }
+}
