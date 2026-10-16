@@ -38,6 +38,7 @@ def legacy(workflows):
     jobs["gate-required"]["steps"] = ci_reuse.gate_steps(queue_tier=True, promotion=True)
     return base
 
+
 def combined(base, promotion=True):
     head = copy.deepcopy(base)
     jobs = head["test.yml"]["jobs"]
