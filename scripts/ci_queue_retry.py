@@ -35,7 +35,7 @@ def dependents(workflow: dict, root: str = SHARD) -> set[str]:
 
 
 def decide(run: dict, failed: list[dict], workflow: dict) -> tuple[bool, str]:
-    if run.get("event") != "merge_group" or run.get("conclusion") != "failure":
+    if run.get("event") != "merge_group" or run.get("conclusion") not in ("failure", "cancelled"):
         return False, "not a failed merge group run"
     if run.get("run_attempt") != 1:
         return False, f"attempt {run.get('run_attempt')} already ran"
