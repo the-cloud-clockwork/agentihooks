@@ -316,6 +316,7 @@ def main():
                 "fixture_manifest": fixture,
             }
             (args.output / "failure.json").write_text(json.dumps(failure, indent=2, sort_keys=True) + "\n")
+            pool.shutdown(cancel_futures=True)
             raise
     versions = json.loads((Path(__file__).resolve().parents[3] / "docker/swarm-node/versions.lock").read_text())
     summary = {
