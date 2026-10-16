@@ -103,12 +103,28 @@ def _foreign(open_):
     return [b for b in marked if repo_key(b["branch_repo"]) != home]
 
 
+def _merged_into_dev(dep):
+    if not dep.get("pr_url"):
+        return False
+    answer = _out(
+        ["gh", "pr", "view", dep["pr_url"], "--json", "state,baseRefName"],
+        "cannot read the dependency pull request",
+    )
+    try:
+        pull = json.loads(answer)
+        return pull["state"] == "MERGED" and pull["baseRefName"] == "dev"
+    except (ValueError, KeyError) as exc:
+        raise SwarmError(f"cannot read the dependency pull request: {exc}") from exc
+
+
 def _base_of(dep, foreign):
     branch = dep["branch"]
-    if dep not in foreign:
+    merged = _merged_into_dev(dep)
+    if dep not in foreign and not merged:
         _out(["git", "fetch", "origin", branch], f"cannot fetch {branch}")
         return _out(["git", "merge-base", "HEAD", f"origin/{branch}"], f"{branch} shares no history")
-    _out(["git", "fetch", "--", dep["branch_repo"], branch], f"cannot fetch {branch} from {dep['branch_repo']}")
+    if not merged:
+        _out(["git", "fetch", "--", dep["branch_repo"], branch], f"cannot fetch {branch} from {dep['branch_repo']}")
     _out(["git", "fetch", "origin", "dev"], "cannot fetch dev")
     return _out(["git", "merge-base", "HEAD", "origin/dev"], "the task shares no history with dev")
 
