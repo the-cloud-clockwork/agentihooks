@@ -371,6 +371,36 @@ def test_checks_wait_requires_success_or_failure_from_the_status_rollup(tick, ch
     ]
 
 
+@pytest.mark.parametrize("conclusion", [None, "CANCELLED", "SUCCESS", "FAILURE"])
+@pytest.mark.parametrize("legacy_status", [False, True])
+@pytest.mark.parametrize("obsolete", ["CANCELLED", "FAILURE"])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_checks_wait_uses_only_the_newest_run_of_each_check(tick, conclusion, obsolete, reverse, legacy_status):
+    from scripts.swarm.ledger_events import pull_request
+
+    tick.hold("checks", URL)
+    checks = [
+        {"name": "Gate — Required", "databaseId": 1, "conclusion": obsolete},
+        {"name": "Gate — Required", "databaseId": 2, "conclusion": conclusion},
+    ]
+    if legacy_status:
+        checks = [
+            {"context": "Gate — Required", "createdAt": f"2026-10-13T10:00:0{index}Z", "state": row["conclusion"]}
+            for index, row in enumerate(checks)
+        ]
+    if reverse:
+        checks.reverse()
+    tick.pulls[URL] = pull_request({"state": "OPEN", "headRefOid": "first", "gated": True, "statusCheckRollup": checks})
+    if conclusion in (None, "CANCELLED"):
+        assert tick.end() == []
+        assert idle.wait(tick.store.redis, "sw", ME) is not None
+        assert tick.told() == []
+    else:
+        outcome = "green" if conclusion == "SUCCESS" else "red; failed: Gate — Required"
+        assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now {outcome}"]
+        assert idle.wait(tick.store.redis, "sw", ME) is None
+
+
 def test_checks_wait_with_no_checks_stays_unresolved(tick):
     from scripts.swarm.ledger_events import pull_request
 
