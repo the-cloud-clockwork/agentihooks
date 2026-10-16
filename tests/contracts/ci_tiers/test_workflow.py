@@ -14,7 +14,7 @@ UNIT = {"durations", "split", "unit", "shard-check", "test-count", "gate-require
 QUEUE = UNIT | {"queue-fail-fast"}
 PULL_REQUEST = UNIT | {"select", "lint", "semgrep", "sonar", "mutation-plan", "mutation-stats", "mutation"}
 SELECTED = PULL_REQUEST - {"split", "unit", "shard-check"} | {"unit-selected"}
-PROMOTION = (PULL_REQUEST - {"mutation-plan", "mutation-stats", "mutation"}) | {
+PROMOTION = (PULL_REQUEST - {"mutation-plan", "mutation-stats", "mutation", "lint", "semgrep", "test-count"}) | {
     "queue-fail-fast",
     "reuse",
     "coverage-ratchet",
@@ -98,6 +98,15 @@ def test_main_pull_requests_keep_their_nonmutation_checks():
     assert jobs_for("pull_request", "main") == PULL_REQUEST - {"mutation-plan", "mutation-stats", "mutation"}
 
 
+def test_the_retired_queue_baseline_leaves_the_workflow_and_the_gate_takes_the_promotion_form():
+    from scripts import ci_reuse
+
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    assert "queue-baseline" not in jobs
+    assert not any("queue-baseline" in job.get("needs", []) for job in jobs.values())
+    assert jobs["gate-required"]["steps"] == ci_reuse.gate_steps(queue_tier=True, promotion=True)
+
+
 def test_the_queue_keeps_completeness_but_skips_the_shard_time_budget():
     job = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["shard-check"]
     completeness = next(
@@ -125,9 +134,9 @@ def _concurrency(event, run_id, number=None):
     )
 
 
-def test_two_dev_pushes_share_one_promotion_group_that_cancels_the_older_run():
+def test_dev_pushes_preserve_the_running_promotion_and_replace_only_the_pending_run():
     first, second = _concurrency("push", 1000), _concurrency("push", 1061)
-    assert first == second == {"group": "promotion-dev", "queue": "single", "cancel-in-progress": True}
+    assert first == second == {"group": "promotion-dev", "queue": "single", "cancel-in-progress": False}
 
 
 @pytest.mark.parametrize("event,number", [("merge_group", None), ("pull_request", 7)])
