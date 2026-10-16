@@ -62,9 +62,15 @@ def test_a_command_tab_opens_in_the_crew_workspace_and_runs_only_that_command(he
     argv = ["codex", "resume", "--remote", "unix:///run/exe 1/codex.sock", "thread-1"]
     environ = {"HERDR_WORKSPACE_ID": "w5"}
     environs = []
-    monkeypatch.setattr(herdr_host, "_cli", lambda args, given: environs.append(given) or herdr(args, given))
+
+    def recording(args, given):
+        environs.append(given)
+        return herdr(args, given)
+
+    monkeypatch.setattr(herdr_host, "_cli", recording)
     placed = herdr_host.open_command(tmp_path, "sw-master-1", argv, "crew-a", environ)
-    assert len(environs) == len(herdr.calls) >= 2
+    assert len(environs) == len(herdr.calls)
+    assert len(environs) >= 2
     assert all(given is environ for given in environs)
     call = herdr.made("tab create")
     assert call[call.index("--workspace") + 1] == "w2"
