@@ -1145,6 +1145,63 @@ def test_a_fresh_replacement_launches_without_a_checkpoint_and_a_refused_mark_wa
     assert _hash(world, "recovery-pending-tasks") == {}
 
 
+@pytest.mark.parametrize("phase", ["accepted", "unknown", "refused"])
+def test_controller_replays_a_predigest_spawn_as_one_fresh_generation(world, phase):
+    key = world.store.key(cases.SLUG, "runtime-operations")
+    operation = world.store.operation_journal.records(cases.SLUG)[0]
+    legacy = json.loads(world.store.redis.hget(key, operation.operation_id))
+    legacy.pop("spec_digest")
+    legacy["phase"] = phase
+    world.store.redis.hset(key, operation.operation_id, json.dumps(legacy))
+    world.checkpoints.by_execution.clear()
+    assert world.live.release()
+    restarted, _ = world.controller()
+    assert restarted.acquire()
+    world.live = restarted
+    recovery, ledger = world.recovery(restarted), _Ledger()
+    relaunch = _Relaunch()
+    relaunch.recovery = recovery
+
+    def launch(request, successor):
+        restarted.execute(world.request(restarted, successor))
+        return relaunch(request, successor)
+
+    replacements = replacement.Replacements(recovery, launch, ledger)
+    world.reconcile(recovery)
+    assert replacements() == {world.old.execution_id: "ok"}
+    successor = world.occupant()
+    assert successor.generation == world.old.generation + 1
+    assert successor.execution_id != world.old.execution_id
+    assert f"swarm-{successor.execution_id}" in world.api.objects
+    superseded = world.store.operation_journal.get(cases.SLUG, operation.operation_id)
+    assert superseded.phase.value == "superseded"
+    assert superseded.result == {"reason": "missing_spec_digest"}
+    assert recovery.decision(world.old.execution_id).reason == "missing_spec_digest"
+    assert recovery.decision(world.old.execution_id).mode == "fresh"
+    assert world.old.execution_id not in world.slots()
+    assert world.old.execution_id not in world.grants
+    world.reconcile(recovery)
+    assert replacements() == {}
+    assert world.occupant() == successor
+    assert world.store.operation_journal.get(cases.SLUG, operation.operation_id) == superseded
+    assert len(relaunch.calls) == 1
+
+
+@pytest.mark.parametrize("phase", ["accepted", "unknown", "refused", "applied"])
+def test_controller_replay_preserves_a_spawn_with_a_spec_digest(world, phase):
+    key = world.store.key(cases.SLUG, "runtime-operations")
+    operation = world.store.operation_journal.records(cases.SLUG)[0]
+    row = json.loads(world.store.redis.hget(key, operation.operation_id))
+    row["phase"] = phase
+    world.store.redis.hset(key, operation.operation_id, json.dumps(row))
+    before = world.store.redis.hget(key, operation.operation_id)
+    recovery = world.recovery(world.live)
+    world.reconcile(recovery)
+    assert world.store.redis.hget(key, operation.operation_id) == before
+    assert world.occupant() == world.old
+    assert recovery.decision(world.old.execution_id) is None
+
+
 def test_a_stale_controller_records_no_launch_and_writes_no_mark(world):
     recovery, ledger, relaunch = world.recovery(world.live), _Ledger(), _Relaunch()
     relaunch.recovery = recovery
