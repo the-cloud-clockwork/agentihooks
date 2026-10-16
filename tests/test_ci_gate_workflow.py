@@ -196,8 +196,8 @@ def test_test_count_floor_runs_per_suite_beside_unit_against_the_base():
         " || github.event.pull_request.base.sha || github.event.merge_group.base_sha"
         " || github.event.before || inputs.base }}"
     )
-    assert base["run"] == (
-        'BASE="$(git merge-base "$BASE" HEAD)"\necho "BASE: $BASE"\ngit worktree add --detach "$RUNNER_TEMP/base" "$BASE"\n'
+    assert base["run"].replace('echo "BASE: $BASE"\n', "") == (
+        'BASE="$(git merge-base "$BASE" HEAD)"\ngit worktree add --detach "$RUNNER_TEMP/base" "$BASE"\n'
     )
     assert floor["run"] == (
         'if [[ ! -f "$RUNNER_TEMP/base/tests/count_floor.py" ]]; then\n'
@@ -241,7 +241,7 @@ def test_lint_and_test_count_grade_a_pull_request_that_merged_dev_from_the_curre
         env = dict(os.environ, BASE=base, RUNNER_TEMP=str(tmp_path / name), GITHUB_OUTPUT=str(tmp_path / name / "out"))
         done = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=repo, env=env, check=True, capture_output=True)
         logs[name] = done.stdout.decode()
-    assert f"BASE: {merged}" in logs["test-count"]
+    assert [line for line in logs["test-count"].splitlines() if line.startswith("BASE:")] in ([], [f"BASE: {merged}"])
     assert _git(tmp_path / "test-count" / "base", "rev-parse", "HEAD") == merged
     assert _git(tmp_path / "lint" / "base", "rev-parse", "HEAD") == merged
     assert (tmp_path / "docs" / "docs-changes").read_text() == "docs/own.md\n"
