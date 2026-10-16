@@ -37,6 +37,7 @@ CLOSED = "its triggers closed"
 DEPARTED = "it left the ledger"
 ENDED_STATES = ("stopping", "stopped")
 PAUSED = "paused"
+BOTTLENECK = "bottleneck:"
 REFUSED = "dispatcher triggers are still open; settle them, or the tick ends your seat once they close:\n{lines}"
 WAKE = "New dispatcher triggers in swarm {slug}:\n{lines}\nSettle each one, then tell the master what you did."
 LINES = {
@@ -87,7 +88,7 @@ def uncovered(store, slug: str, now_ms: int) -> list[dict]:
     elif _routing_applied(store, slug):
         return []
     text = bottleneck.line(bottleneck.read(store, slug), now_ms)
-    return [{"id": f"bottleneck:{named}", "kind": "bottleneck", "ticks": held["ticks"], "text": text}]
+    return [{"id": f"{BOTTLENECK}{named}", "kind": "bottleneck", "ticks": held["ticks"], "text": text}]
 
 
 def red_dev(store, slug: str, doc: dict) -> list[dict]:
@@ -110,7 +111,7 @@ def open_triggers(slug: str, config, store, doc: dict, now_ms: int, sleeping: bo
     held = [
         trigger
         for trigger in uncovered(store, slug, now_ms)
-        if not stage_cover.covered(store, slug, doc, trigger["id"].partition(":")[2])
+        if not stage_cover.covered(store, slug, doc, trigger["id"].removeprefix(BOTTLENECK))
     ]
     return triggers(doc, now_ms) + held + red_dev(store, slug, doc)
 

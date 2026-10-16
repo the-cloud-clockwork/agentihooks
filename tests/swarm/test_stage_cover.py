@@ -4,6 +4,7 @@ import pytest
 
 from scripts.inbox.store import InboxStore
 from scripts.swarm import bottleneck_remedy, cli, dispatch_seat, stage_cover
+from scripts.swarm.health import standing
 from scripts.swarm.ledger_events import Mail
 from scripts.swarm.store import ASSIST, MANUAL_SCALING, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from tests.swarm.test_bottleneck_remedy import FakeLedger, fire, home, shipped  # noqa: F401
@@ -24,6 +25,16 @@ def ledger_doc(task_state="open", phase_done=False, **extra):
     }
 
 
+def put(store, stage, item="tasks/t7", reason="owned", found=None):
+    request = stage_cover.Request(stage, item, reason, MASTER)
+    return stage_cover.cover(store, SLUG, found or ledger_doc(), request, NOW)
+
+
+def stored(store):
+    raw = store.redis.hgetall(store.key(SLUG, stage_cover.KEY))
+    return {stage: json.loads(value) for stage, value in raw.items()}
+
+
 def master_items(store):
     mail = Mail(InboxStore(store.redis), store, SLUG)
     return [item.text for item in InboxStore(store.redis).inbox(mail.master)]
@@ -32,12 +43,30 @@ def master_items(store):
 @pytest.mark.parametrize("item", ["tasks/t7", "phases/p3"])
 def test_a_cover_names_its_open_item_reason_author_and_time(item):
     store = swarm()
-    row = stage_cover.cover(
-        store, SLUG, ledger_doc(), stage_cover.Request("merge queue", item, "owned by the queue fix", MASTER), NOW
-    )
+    row = put(store, "merge_queue", item, "owned by the queue fix")
     assert row == {"stage": "merge_queue", "item": item, "reason": "owned by the queue fix", "by": MASTER, "at": NOW}
+    assert stored(store) == {"merge_queue": row}
     assert stage_cover.covered(store, SLUG, ledger_doc(), "merge_queue")
-    assert stage_cover.read(store, SLUG) == {"merge_queue": row}
+
+
+@pytest.mark.parametrize("spoken", ["merge queue", "Merge-Queue", " MERGE_QUEUE "])
+def test_a_spoken_stage_name_is_stored_under_its_stage(spoken):
+    store = swarm()
+    assert put(store, spoken)["stage"] == "merge_queue"
+    assert list(stored(store)) == ["merge_queue"]
+
+
+def test_an_unknown_stage_is_refused_with_the_names_it_takes():
+    store = swarm()
+    with pytest.raises(SwarmError, match="no bottleneck stage or share is named ci overrunn; name one of .*ci_overrun"):
+        put(store, "ci overrunn")
+    assert stored(store) == {}
+
+
+def test_a_stage_with_a_standing_finding_is_accepted_though_no_share_lists_it():
+    store = swarm()
+    standing.fire(store.redis, SLUG, "account_burn", standing.Reading(5.0, 2.0, "hours", "e1"), NOW)
+    assert put(store, "account_burn")["stage"] == "account_burn"
 
 
 @pytest.mark.parametrize(
@@ -50,41 +79,70 @@ def test_a_cover_names_its_open_item_reason_author_and_time(item):
         ("plans/a", ledger_doc()),
         ("t7", ledger_doc()),
     ],
+    ids=["missing task", "done task", "out of scope task", "done phase", "other kind", "bare id"],
 )
 def test_a_cover_on_a_missing_or_closed_item_is_refused(item, found):
     store = swarm()
     with pytest.raises(SwarmError, match="is not an open phase or task"):
-        stage_cover.cover(store, SLUG, found, stage_cover.Request("ci_overrun", item, "owned", MASTER), NOW)
-    assert stage_cover.read(store, SLUG) == {}
+        put(store, "ci_overrun", item, found=found)
+    assert stored(store) == {}
 
 
 def test_a_cover_without_a_reason_is_refused():
     with pytest.raises(SwarmError, match="needs a reason"):
-        stage_cover.cover(swarm(), SLUG, ledger_doc(), stage_cover.Request("ci_overrun", "tasks/t7", "  ", MASTER), NOW)
+        put(swarm(), "ci_overrun", reason="  ")
+
+
+def test_a_new_cover_on_a_stage_replaces_the_old_one():
+    store = swarm()
+    put(store, "ci_overrun", "tasks/t7", "first owner")
+    put(store, "ci_overrun", "phases/p3", "second owner")
+    assert {key: stored(store)["ci_overrun"][key] for key in ("item", "reason")} == {
+        "item": "phases/p3",
+        "reason": "second owner",
+    }
 
 
 @pytest.mark.parametrize(
-    "closed", [ledger_doc("done"), ledger_doc(out_of_scope=True), {"tasks": [], "phases": []}], ids=str
+    "closed", [ledger_doc("done"), ledger_doc(out_of_scope=True)], ids=["done task", "out of scope task"]
 )
 def test_the_cover_lapses_and_is_forgotten_once_its_task_closes(closed):
     store = swarm()
-    stage_cover.cover(store, SLUG, ledger_doc(), stage_cover.Request("ci_overrun", "tasks/t7", "owned", MASTER), NOW)
+    put(store, "ci_overrun")
     assert stage_cover.covered(store, SLUG, closed, "ci_overrun") is False
-    assert stage_cover.read(store, SLUG) == {}
+    assert stored(store) == {}
     assert stage_cover.covered(store, SLUG, ledger_doc(), "ci_overrun") is False
 
 
 def test_the_cover_lapses_once_its_phase_is_done():
     store = swarm()
-    stage_cover.cover(store, SLUG, ledger_doc(), stage_cover.Request("seat_wait", "phases/p3", "owned", MASTER), NOW)
+    put(store, "seat_wait", "phases/p3")
     assert stage_cover.covered(store, SLUG, ledger_doc(phase_done=True), "seat_wait") is False
+    assert stored(store) == {}
 
 
-def test_an_uncovered_stage_is_not_covered_and_another_stage_keeps_its_cover():
+def test_a_ledger_read_missing_the_item_keeps_the_cover():
     store = swarm()
-    stage_cover.cover(store, SLUG, ledger_doc(), stage_cover.Request("seat_wait", "tasks/t7", "owned", MASTER), NOW)
-    assert stage_cover.covered(store, SLUG, ledger_doc(), "ci_overrun") is False
-    assert stage_cover.covered(store, SLUG, ledger_doc(), "seat_wait")
+    put(store, "ci_overrun")
+    assert stage_cover.covered(store, SLUG, {"tasks": [], "phases": []}, "ci_overrun")
+    assert list(stored(store)) == ["ci_overrun"]
+
+
+@pytest.mark.parametrize(
+    ("covered_name", "asked", "expected"),
+    [
+        ("merge_queue", "review", True),
+        ("review", "merge_queue", True),
+        ("quota", "quota_hold", True),
+        ("quota_hold", "quota", True),
+        ("seat_wait", "ci_overrun", False),
+        ("merge_queue", "quota", False),
+    ],
+)
+def test_a_stage_cover_covers_its_share_and_a_share_cover_covers_its_stages(covered_name, asked, expected):
+    store = swarm()
+    put(store, covered_name)
+    assert stage_cover.covered(store, SLUG, ledger_doc(), asked) is expected
 
 
 @pytest.fixture
@@ -96,32 +154,48 @@ def remedy_store():
     return saved
 
 
-def test_a_covered_stage_proposes_no_task_and_fires_again_once_the_cover_lapses(remedy_store, home, shipped):  # noqa: F811
+@pytest.mark.parametrize(
+    ("stage", "cover_name", "item"),
+    [
+        ("review", "review", "tasks/t7"),
+        ("merge_queue", "merge queue", "phases/p3"),
+        ("quota_hold", "quota", "tasks/t7"),
+    ],
+)
+def test_a_covered_stage_proposes_no_task_and_fires_again_once_the_cover_lapses(
+    remedy_store,
+    home,  # noqa: F811
+    shipped,  # noqa: F811
+    stage,
+    cover_name,
+    item,
+):
     store = remedy_store
-    stage_cover.cover(
-        store, SLUG, ledger_doc(), stage_cover.Request("review", "tasks/t7", "owned by the review fix", MASTER), NOW
-    )
-    fire(store, "review")
+    put(store, cover_name, item, "owned by the fix")
+    fire(store, stage)
     run = bottleneck_remedy.remedy_pass
     assert run(SLUG, store, FakeLedger(), ledger_doc(), lambda: None, NOW) == []
     assert master_items(store) == []
     assert store.redis.hgetall(store.key(SLUG, bottleneck_remedy.KEY)) == {}
 
-    assert run(SLUG, store, FakeLedger(), ledger_doc("done"), lambda: None, NOW)
+    closed = ledger_doc("done", phase_done=True)
+    assert run(SLUG, store, FakeLedger(), closed, lambda: None, NOW)
     [text] = master_items(store)
-    assert text.startswith("The bottleneck hunter proposes a task for the review stage")
+    assert text.startswith(f"The bottleneck hunter proposes a task for the {stage.replace('_', ' ')} stage")
 
 
-def test_a_covered_share_holds_no_dispatcher_seat_and_triggers_again_once_the_cover_lapses():
+@pytest.mark.parametrize(("share", "cover_name"), [("review", "merge_queue"), ("review", "review"), ("quota", "quota")])
+def test_a_covered_share_holds_no_dispatcher_seat_and_triggers_again_once_the_cover_lapses(share, cover_name):
     store = swarm()
-    held(store, "review")
+    held(store, share)
     config = store.config(SLUG)
-    stage_cover.cover(store, SLUG, ledger_doc(), stage_cover.Request("review", "tasks/t7", "owned", MASTER), NOW)
+    put(store, cover_name, "phases/p3")
     assert dispatch_seat.open_triggers(SLUG, config, store, {**doc(), **ledger_doc()}, NOW, False) == []
     assert dispatch_seat.refusal(SLUG, config, store, {**doc(), **ledger_doc()}, NOW) == ""
 
-    found = dispatch_seat.open_triggers(SLUG, config, store, {**doc(), **ledger_doc("done")}, NOW, False)
-    assert [trigger["id"] for trigger in found] == ["bottleneck:review"]
+    closed = {**doc(), **ledger_doc(phase_done=True)}
+    found = dispatch_seat.open_triggers(SLUG, config, store, closed, NOW, False)
+    assert [trigger["id"] for trigger in found] == [f"bottleneck:{share}"]
 
 
 @pytest.fixture
@@ -131,6 +205,7 @@ def crew(monkeypatch):
     store.put_agent(SLUG, AgentRecord(ENGINEER, "eng", "t1"))
     store.put_agent(SLUG, AgentRecord(DISPATCHER, "dispatch", "dispatcher", seat=f"dispatcher@{SLUG}"))
     ledger = TickLedger([{"id": "t7"}])
+    ledger.phases = [{"id": "p3", "done": False}]
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
     return store
@@ -141,28 +216,28 @@ def acting(monkeypatch, name="", swarm_slug=""):
     monkeypatch.setenv("AGENTIHOOKS_SWARM", swarm_slug)
 
 
-@pytest.mark.parametrize(("name", "by"), [("", "operator"), (MASTER, MASTER), (DISPATCHER, DISPATCHER)])
-def test_the_operator_master_or_dispatcher_covers_a_stage(crew, monkeypatch, capsys, name, by):
+@pytest.mark.parametrize(
+    ("name", "by", "item"),
+    [("", "operator", "tasks/t7"), (MASTER, MASTER, "phases/p3"), (DISPATCHER, DISPATCHER, "tasks/t7")],
+)
+def test_the_operator_master_or_dispatcher_covers_a_stage(crew, monkeypatch, capsys, name, by, item):
     acting(monkeypatch, name, SLUG if name else "")
-    assert cli.main([SLUG, "cover", "ci_overrun", "tasks/t7", "--reason", "owned by the ci fix"]) == 0
+    assert cli.main([SLUG, "cover", "ci overrun", item, "--reason", "owned by the ci fix"]) == 0
     printed = json.loads(capsys.readouterr().out)
-    assert {key: printed[key] for key in ("stage", "item", "reason", "by")} == {
-        "stage": "ci_overrun",
-        "item": "tasks/t7",
-        "reason": "owned by the ci fix",
-        "by": by,
-    }
-    assert stage_cover.read(crew, SLUG)["ci_overrun"]["by"] == by
+    expected = {"stage": "ci_overrun", "item": item, "reason": "owned by the ci fix", "by": by}
+    assert {key: printed[key] for key in expected} == expected
+    assert stored(crew)["ci_overrun"] == printed
 
 
 def test_an_engineer_cannot_cover_a_stage(crew, monkeypatch, capsys):
     acting(monkeypatch, ENGINEER, SLUG)
     assert cli.main([SLUG, "cover", "ci_overrun", "tasks/t7", "--reason", "mine"]) == 1
     assert "is neither" in capsys.readouterr().err
-    assert stage_cover.read(crew, SLUG) == {}
+    assert stored(crew) == {}
 
 
 def test_the_cover_command_refuses_a_closed_item(crew, monkeypatch, capsys):
     acting(monkeypatch)
     assert cli.main([SLUG, "cover", "ci_overrun", "tasks/t8", "--reason", "owned"]) == 1
     assert "tasks/t8 is not an open phase or task" in capsys.readouterr().err
+    assert stored(crew) == {}
