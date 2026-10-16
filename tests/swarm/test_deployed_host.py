@@ -115,14 +115,19 @@ def test_worker_host_is_off_with_the_refusal_when_the_runtime_settings_are_refus
 
 def test_worker_host_reads_the_worker_namespace_pods(no_node, tmp_path, monkeypatch):
     pods = PoolPods("swarm-pod-proof", [_worker_pod("Running")])
-    namespaces = []
-    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: namespaces.append(namespace) or pods)
+    apis, slugs = [], []
+    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: apis.append((environ, namespace)) or pods)
+    real = deployed.Workers.from_environ
+    monkeypatch.setattr(
+        deployed.Workers, "from_environ", lambda environ, slug: slugs.append(slug) or real(environ, slug)
+    )
     policy = tmp_path / "pool-policy.json"
     pool = {"pods": 4, "cpu_millis": 8000, "memory_mib": 12288}
     policy.write_text(json.dumps({**json.loads(_policy(tmp_path).read_text()), "worker_pool": pool}))
     environ = {**DEPLOYED, **_workers(tmp_path, **{deployed.POLICY_ENV: str(policy)})}
     room = deployed.worker_host(environ, "sw")()
-    assert namespaces == [json.loads(policy.read_text())["namespace"]]
+    assert apis == [(environ, json.loads(policy.read_text())["namespace"])]
+    assert slugs == ["sw"]
     assert pods.selectors == [""]
     assert (room.room, room.limit) == (2, "memory")
 
