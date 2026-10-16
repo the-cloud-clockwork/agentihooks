@@ -444,7 +444,7 @@ def test_a_late_resumer_receives_the_open_approval_a_late_reader_misses(fakes, t
             [{**REQUEST, "_at": 5.0}, RESOLVED],
             ok(running),
             {**ok(running), "_at": 4.0},
-            {**ok(running), "_at": 6.0},
+            {**ok(running), "_at": 5.0},
         )
     )
     record = probe.late_approval("SOCK", repo)
