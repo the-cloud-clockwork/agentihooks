@@ -19,6 +19,7 @@ SETTINGS = ("hooks", "model", "effort")
 WORDS = {
     "joined": "joining the ledger and holding its seat",
     "late": "joining the ledger within a minute of its session start",
+    "observation": "an available process observation",
     "profile": "its profile",
     "settings": "its hooks, model and effort",
     "base": "its role on the package base role",
@@ -107,9 +108,9 @@ def _joined(store, agent, doc, started_at):
 def _process(agent, facts):
     differences = live_binding.compare(agent, facts)
     found = {}
-    if "process" in differences or "profile" in differences:
+    if "profile" in differences:
         found["profile"] = {"expected": agent.profile, "actual": facts.get("profile")}
-    if "process" in differences or any(key in differences for key in SETTINGS):
+    if any(key in differences for key in SETTINGS):
         expected = {**live_binding.assignment(agent), "hooks": True}
         found["settings"] = {
             "expected": {key: expected[key] for key in SETTINGS},
@@ -146,13 +147,12 @@ def _name(store, slug, agent):
 def misses(
     store: RedisStore, slug: str, agent: AgentRecord, facts: dict, doc: dict, on_bundle: bool, declared: list[str]
 ) -> dict:
-    return {
-        **_joined(store, agent, doc, session_started_at(agent)),
-        **_process(agent, facts),
-        **_base(agent, facts, on_bundle),
-        **_overlays(facts, declared),
-        **_name(store, slug, agent),
-    }
+    found = _joined(store, agent, doc, session_started_at(agent))
+    if not facts or facts.get("process", True) is not True:
+        found["observation"] = {"expected": "available process observation", "actual": "unavailable"}
+    else:
+        found.update({**_process(agent, facts), **_base(agent, facts, on_bundle), **_overlays(facts, declared)})
+    return {**found, **_name(store, slug, agent)}
 
 
 def record(
