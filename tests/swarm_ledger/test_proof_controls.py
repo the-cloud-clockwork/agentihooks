@@ -8,7 +8,7 @@ import pytest
 from scripts.swarm import cli
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm_ledger import ledger_authority as authority
-from scripts.swarm_ledger.api import routes
+from scripts.swarm_ledger.api import proofs, routes
 from tests.swarm_ledger.test_ledger_authority import SLUG, server
 from tests.swarm_ledger.test_proof_ledgers import CONTENT
 from tests.swarm_ledger.test_proof_ledgers import credential as _credential
@@ -347,3 +347,14 @@ def test_controller_controls_require_controller_and_enqueue_only_scoped_pause(ow
     assert result["data"]["argv"] == ["pause"]
     assert result["data"]["state"] == "pending"
     assert "credential" not in result["data"]
+
+
+@pytest.mark.parametrize("owner", [{}, {"parent": "", "agent": "engineer@a1b2c3-0001", "task": "contract"}])
+def test_migration_refuses_incomplete_requester_identity(owned, owner):
+    with pytest.raises(proofs.APIError) as refused:
+        proofs.migrate(server, owned.slug, owner)
+    assert refused.value.status == 400
+    assert owned.store.redis.hgetall(owned.store.key(owned.slug, "proof-creator")) == {
+        "parent": SLUG,
+        "owner": owned.owner,
+    }
