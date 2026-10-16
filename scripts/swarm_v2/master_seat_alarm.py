@@ -31,9 +31,8 @@ def run(slug: str, store, ledger, runtime, doc: dict) -> list[str]:
     seats = masters.MasterSeats(store.redis)
     counted = set(masters.seats(slug, seats.count(slug)))
     addresses = {seat_address(slug, seat_name) for seat_name in states}
-    bound = {
-        a.seat for a in store.agents(slug) if a.seat in addresses and a.state != "finished" and runtime.reported(a)
-    }
+    held_seats = [a for a in store.agents(slug) if a.seat in addresses]
+    bound = {a.seat for a in held_seats if a.state != "finished" and runtime.reported(a)}
     owners, actions = seats.owners(slug, doc), []
     for seat_name, state in sorted(states.items()):
         address = seat_address(slug, seat_name)

@@ -243,13 +243,14 @@ def test_one_failed_seat_two_launch_raises_no_operator_alarm(store):
 
 def test_repeated_failed_seat_two_launches_raise_one_alarm_naming_seat_phases_and_error(store):
     ledger, runtime = _seat_two_down(store)
+    MasterSeats(store.redis).own_hive("sw", "anton-1", "master-2@sw")
     tick("sw", store, ledger, runtime, 1)
     raised = tick("sw", store, ledger, runtime, 2)
     tick("sw", store, ledger, runtime, 3)
     owners = MasterSeats(store.redis).owners("sw", ledger.state("sw"))
     owned = sorted(phase for phase, owner in owners.items() if owner == "master-2@sw")
     held = ", ".join(owned)
-    assert owned and _seat_notes(ledger) == [
+    assert len(owned) >= 2 and _seat_notes(ledger) == [
         master_seat_alarm.DOWN.format(address="master-2@sw", count=2, held=held, error="profile canary timeout")
     ]
     assert "raised the launch alarm of master seat master-2@sw" in raised
@@ -306,3 +307,14 @@ def test_a_seat_that_leaves_the_count_after_its_alarm_closes_the_alarm(store):
     assert _seat_notes(ledger)[1:] == [master_seat_alarm.RETIRED.format(address="master-2@sw")]
     assert "closed the launch alarm of retired master seat master-2@sw" in closed
     assert store.redis.hgetall(store.key("sw", master_seat_alarm.KEY)) == {}
+
+
+def test_a_finished_master_still_live_in_the_seat_does_not_clear_the_alarm(store):
+    ledger, runtime = _seat_two_down(store)
+    tick("sw", store, ledger, runtime, 1)
+    tick("sw", store, ledger, runtime, 2)
+    store.put_agent("sw", AgentRecord("ghost", MASTER, "master-2", state="finished", seat="master-2@sw"))
+    runtime.live.add("ghost")
+    tick("sw", store, ledger, runtime, 3)
+    assert len(_seat_notes(ledger)) == 1
+    assert store.redis.hget(store.key("sw", master_seat_alarm.KEY), "master-2")
