@@ -6,6 +6,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -183,10 +184,20 @@ def test_stop_stops_the_compose_service_and_clears_its_pidfile(compose_server, m
     assert not (compose_server / ".server.pid").exists()
 
 
+def running_as_server(child):
+    cmdline = Path(f"/proc/{child.pid}/cmdline")
+    argv = b"".join(os.fsencode(arg) + b"\0" for arg in child.args)
+    deadline = time.monotonic() + 5
+    while cmdline.read_bytes() != argv:
+        assert time.monotonic() < deadline, "the child never showed the server command line"
+        time.sleep(0.01)
+
+
 def test_stop_also_ends_a_bare_server_left_from_before_the_cutover(compose_server, monkeypatch):
     monkeypatch.setattr(server.server_compose, "stop", lambda folder: "")
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", "ledger_server.py"])
     try:
+        running_as_server(child)
         (compose_server / ".server.pid").write_text(str(child.pid))
         server.stop()
         assert child.wait(timeout=5) == -signal.SIGTERM

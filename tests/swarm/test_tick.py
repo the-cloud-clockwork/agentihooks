@@ -10,6 +10,21 @@ from scripts.swarm.tick import MASTER_DOWN, STARTUP_GRACE_MS, Placed, SpawnError
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
+def check_update_guards(if_state, if_match):
+    import sys
+    from unittest.mock import patch
+
+    from scripts.swarm_ledger import HERE
+
+    with patch.object(sys, "path", [str(HERE), *sys.path]):
+        from scripts.swarm_ledger import ledger_tasks
+
+        guard = {"if_state": list(if_state)} if if_state else {}
+        if if_match is not None:
+            guard["if_match"] = if_match
+        ledger_tasks.check_guards(guard)
+
+
 class FakeLedger:
     def __init__(self, tasks):
         self.rows = {
@@ -59,10 +74,17 @@ class FakeLedger:
             ]
         ]
 
-    def update_task(self, slug, task_id, fields, by="swarm", if_state=()):
+    def update_task(self, slug, task_id, fields, by="swarm", if_state=(), if_match=None):
+        check_update_guards(if_state, if_match)
         assert slug == "sw"
         row = self.rows[task_id]
+        if any(
+            row.get(key, 0 if key == "claim_generation" else "") != value for key, value in (if_match or {}).items()
+        ):
+            return dict(row)
         if not if_state or row["state"] in if_state:
+            if "claimed_by" in fields and fields["claimed_by"] != row.get("claimed_by"):
+                row["claim_generation"] = row.get("claim_generation", 0) + 1
             row.update(fields)
         return dict(row)
 
@@ -226,6 +248,164 @@ def test_a_second_tick_does_not_overspawn(store):
     tick("sw", store, ledger, runtime, now_ms=1_000)
     tick("sw", store, ledger, runtime, now_ms=2_000)
     assert len(runtime.spawned) == 2
+
+
+@pytest.mark.parametrize("lost_ledger", ["missing", "retained", False])
+@pytest.mark.parametrize("pr_url, expected", [("", "claimed"), ("https://github.com/o/r/pull/1", "pr")])
+def test_a_live_owner_recovers_its_missing_lease_without_a_duplicate_launch(store, lost_ledger, pr_url, expected):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    owner = next(a for a in store.agents("sw") if a.task == "t1")
+    ledger.rows["t1"].update(pr_url=pr_url, state=expected)
+    store.release("sw", "t1", owner.name)
+    if lost_ledger:
+        ledger.rows["t1"].update(state="open")
+        if lost_ledger == "missing":
+            ledger.rows["t1"]["claimed_by"] = ""
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert len(runtime.spawned) == 1
+    assert store.claimant("sw", "t1") == owner.name
+    assert ledger.rows["t1"]["claimed_by"] == owner.name
+    assert ledger.rows["t1"]["state"] == expected
+    assert store.redis.pttl(store.key("sw", "claim", "t1")) > 0
+
+
+@pytest.mark.parametrize("state", ["claimed", "pr"])
+def test_a_live_owner_recovers_a_missing_claimant_on_an_active_ledger_row(store, state):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    owner = next(a for a in store.agents("sw") if a.task == "t1")
+    ledger.rows["t1"].update(state=state, claimed_by="")
+    store.release("sw", "t1", owner.name)
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert ledger.rows["t1"]["claimed_by"] == owner.name
+    assert ledger.rows["t1"]["state"] == state
+    assert store.claimant("sw", "t1") == owner.name
+    assert len(runtime.spawned) == 1
+
+
+def test_a_stale_live_agent_cannot_restore_a_lease_over_the_ledger_successor(store):
+    from scripts.swarm.store import AgentRecord
+
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    owner = next(a for a in store.agents("sw") if a.task == "t1")
+    store.release("sw", "t1", owner.name)
+    stale = AgentRecord("a-stale-owner", "eng", "t1", pane_id="old-pane", started_at=100)
+    store.put_agent("sw", stale)
+    runtime.live.add(stale.name)
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert ledger.rows["t1"]["claimed_by"] == owner.name
+    assert store.claimant("sw", "t1") == owner.name
+    assert len(runtime.spawned) == 1
+
+
+def test_a_stale_predecessor_does_not_hold_the_ci_lane_a_successor_owns(store):
+    from scripts.swarm.store import AgentRecord
+
+    store.update("sw", max_eng=0, max_ci=2)
+    ledger = FakeLedger(
+        [
+            {"id": "owned", "lane": "ci", "state": "claimed", "claimed_by": "ci-successor"},
+            {"id": "urgent", "lane": "ci", "rank": "urgent"},
+        ]
+    )
+    runtime = FakeRuntime()
+    for name, seat in [("ci-predecessor", "ci-1@sw"), ("ci-successor", "ci-2@sw")]:
+        store.put_agent("sw", AgentRecord(name, "ci", "owned", seat=seat, started_at=1_000))
+        store.seats.occupy(seat, name, 1_000)
+        runtime.live.add(name)
+    store.claim("sw", "owned", "ci-successor", 60_000)
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert [task for _, _, task in runtime.spawned] == ["urgent"]
+    assert ledger.rows["owned"]["claimed_by"] == "ci-successor"
+    assert store.claimant("sw", "owned") == "ci-successor"
+
+
+def test_ownership_repair_keeps_a_newer_ledger_state_and_claim(store, monkeypatch):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    ledger.rows["t1"].update(state="open", claimed_by="")
+    update = ledger.update_task
+
+    def blocked(slug, task_id, fields, by="swarm", if_state=(), if_match=None):
+        ledger.rows[task_id]["state"] = "blocked"
+        return update(slug, task_id, fields, by, if_state, if_match)
+
+    monkeypatch.setattr(ledger, "update_task", blocked)
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert ledger.rows["t1"]["state"] == "blocked"
+    assert ledger.rows["t1"]["claimed_by"] == ""
+
+
+def test_a_finished_predecessor_cannot_hold_reopened_work_when_retirement_is_stuck(store):
+    from dataclasses import replace
+
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    owner = next(a for a in store.agents("sw") if a.task == "t1")
+    store.put_agent("sw", replace(owner, state="finished"))
+    store.release("sw", "t1", owner.name)
+    runtime.stuck.add(owner.name)
+    ledger.rows["t1"].update(state="open", claimed_by="")
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert len(runtime.spawned) == 2
+    assert ledger.rows["t1"]["claimed_by"] != owner.name
+
+
+def test_a_legacy_live_owner_recovers_without_a_ledger_generation(store):
+    from scripts.swarm.store import AgentRecord
+
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    store.put_agent("sw", AgentRecord("legacy-owner", "eng", "t1", started_at=1_000))
+    runtime.live.add("legacy-owner")
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert ledger.rows["t1"]["claimed_by"] == "legacy-owner"
+    assert ledger.rows["t1"]["claim_generation"] == 1
+    assert ledger.rows["t1"]["state"] == "claimed"
+    assert runtime.spawned == []
+
+
+def test_an_open_row_with_a_dead_claimant_can_be_claimed_from_its_exact_snapshot(store):
+    ledger = FakeLedger([{"id": "t1", "claimed_by": "gone-owner"}])
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [task for _, _, task in runtime.spawned] == ["t1"]
+    assert ledger.rows["t1"]["claimed_by"] != "gone-owner"
+
+
+def test_ownership_repair_keeps_a_successor_claim_created_at_the_write_boundary(store, monkeypatch):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    ledger.rows["t1"].update(state="open", claimed_by="")
+    update = ledger.update_task
+
+    def successor(slug, task_id, fields, by="swarm", if_state=(), if_match=None):
+        ledger.rows[task_id].update(claimed_by="successor", claim_generation=9)
+        return update(slug, task_id, fields, by, if_state, if_match)
+
+    monkeypatch.setattr(ledger, "update_task", successor)
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert ledger.rows["t1"]["claimed_by"] == "successor"
+    assert ledger.rows["t1"]["claim_generation"] == 9
+
+
+@pytest.mark.parametrize("registered", [True, False])
+def test_a_live_owner_that_appears_during_placement_is_never_launched_over(store, monkeypatch, registered):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    from scripts.swarm.store import AgentRecord
+
+    def admitted(*args):
+        if registered:
+            store.put_agent("sw", AgentRecord("existing-owner", "eng", "t1", started_at=1_000))
+        runtime.live.add("existing-owner")
+        ledger.rows["t1"]["claimed_by"] = "existing-owner"
+        return ""
+
+    monkeypatch.setattr("scripts.swarm.tick._held_back", admitted)
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert runtime.spawned == []
+    assert ledger.rows["t1"]["claimed_by"] == "existing-owner"
 
 
 def test_a_finished_agent_is_retired_and_replaced_while_work_remains(store):
@@ -1780,7 +1960,7 @@ def test_a_broad_territory_never_stops_a_claim(store):
     ]
 
 
-def test_an_overlap_with_a_running_task_without_a_claimant_names_no_claimant(store):
+def test_an_overlap_names_the_live_owner_after_its_missing_claimant_is_repaired(store):
     ledger = FakeLedger([{"id": "t1", "territory": ["hooks"]}])
     runtime = FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
@@ -1788,7 +1968,7 @@ def test_an_overlap_with_a_running_task_without_a_claimant_names_no_claimant(sto
     ledger.rows["t2"] = {"id": "t2", "lane": "eng", "state": "open", "out_of_scope": False, "territory": ["hooks"]}
     tick("sw", store, ledger, runtime, now_ms=2_000)
     assert spawned_ids(runtime) == ["t1", "t2"]
-    assert runtime.tasks[1]["overlaps"] == [{"task": "t1", "claimant": "", "areas": ["hooks"]}]
+    assert runtime.tasks[1]["overlaps"] == [{"task": "t1", "claimant": runtime.spawned[0][1], "areas": ["hooks"]}]
 
 
 def test_territories_that_only_share_a_name_prefix_do_not_overlap(store):

@@ -60,12 +60,13 @@ def test_claimed_selection_prompt_counts_consecutive_ticks_and_reports_health():
     store.put_agent("prompt-proof", agent)
     ledger = FakeLedger([{"id": "task", "state": "claimed", "title": "Startup proof"}])
     runtime = FakeRuntime()
+    runtime.live.add(agent.name)
     runtime.observe = lambda a: PaneObservation("waiting", TITLE)
     for n in range(1, 5):
         beat(store.redis, "prompt-proof", agent.name, "working", n)
         agent = store.agents("prompt-proof")[0]
         _watch_idle("prompt-proof", store, ledger, runtime, ledger.rows, agent, n)
-        report = status_report(store, "prompt-proof", ledger.state("prompt-proof"))
+        report = status_report(store, "prompt-proof", ledger.state("prompt-proof"), runtime)
         assert report["agents"][0]["status"] == "waiting"
         assert report["agents"][0]["input_ticks"] == n
         assert report["agents"][0]["input_prompt"] == TITLE
@@ -77,7 +78,7 @@ def test_claimed_selection_prompt_counts_consecutive_ticks_and_reports_health():
     assert runtime.nudged == runtime.killed == []
     runtime.observe = lambda a: PaneObservation("working")
     _watch_idle("prompt-proof", store, ledger, runtime, ledger.rows, store.agents("prompt-proof")[0], 5)
-    report = status_report(store, "prompt-proof", ledger.state("prompt-proof"))
+    report = status_report(store, "prompt-proof", ledger.state("prompt-proof"), runtime)
     assert report["agents"][0]["status"] == "working"
     assert report["agents"][0]["input_ticks"] == 0
     assert report["agents"][0]["input_prompt"] == ""
@@ -276,6 +277,8 @@ def test_status_text_shows_a_pane_held_at_a_prompt_as_waiting_and_the_finding_na
     ledger = FakeLedger([{"id": "task", "state": "claimed", "title": "Startup proof"}])
     monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
     runtime = FakeRuntime()
+    runtime.live.add("engineer-one")
+    monkeypatch.setattr(cli, "HerdrRuntime", lambda: runtime)
     runtime.observe = HerdrRuntime(home=tmp_path, herdr=_herdr_showing("claude-trust-prompt.txt")).observe
     for tick in range(1, 5):
         agent = store.agents("prompt-proof")[0]

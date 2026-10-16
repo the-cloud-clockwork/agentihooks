@@ -742,7 +742,12 @@ def cmd_task(args):
         title = " ".join(args.values)
         lists = {
             k: comma_list(v)
-            for k, v in (("depends_on", args.depends_on), ("territory", args.territory), ("overlays", args.overlays))
+            for k, v in (
+                ("depends_on", args.depends_on),
+                ("territory", args.territory),
+                ("overlays", args.overlays),
+                ("repositories", args.repositories),
+            )
             if v
         }
         if args.gain is not None:
@@ -785,9 +790,9 @@ def cmd_task(args):
     fields = dict(value.split("=", 1) for value in args.values if "=" in value)
     if len(fields) != len(args.values):
         sys.exit("task set takes FIELD=VALUE pairs")
-    for key in ("depends_on", "territory", "overlays"):
+    for key in ("depends_on", "territory", "overlays", "repositories", "split_pulls"):
         if key in fields:
-            fields[key] = comma_list(fields[key])
+            fields[key] = task_list(key, fields[key])
     for key in [key for key in ("artifact", "follow_up") if key in fields]:
         if fields[key] not in ("yes", "no"):
             sys.exit(f"task set takes {key}=yes or {key}=no")
@@ -810,6 +815,12 @@ def cmd_task(args):
 
 def comma_list(text):
     return [part.strip() for part in text.split(",") if part.strip()]
+
+
+def task_list(key: str, text: str) -> list[str]:
+    if key == "split_pulls" and text.lstrip().startswith("["):
+        return json.loads(text)
+    return comma_list(text)
 
 
 def refuse_plain_objects(fields):
@@ -953,6 +964,9 @@ def build_parser():
     task.add_argument("--artifact", action="store_true", help="the operator asked this task for a file to review")
     task.add_argument("--profile")
     task.add_argument("--overlays", help="comma separated overlays this task's agent wears, at most three")
+    task.add_argument(
+        "--repositories", help="comma separated absolute local repository paths; defaults to the swarm repository"
+    )
     task.add_argument("--rank", help="queue rank: urgent, high, normal (default) or low; next means urgent")
     task.add_argument("--plan-slice", default="", help="task slice anchor; computes its plan lines")
     task.add_argument(

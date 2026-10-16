@@ -219,6 +219,17 @@ def test_the_tick_accepts_a_merge_wait_only_after_the_pull_request_lands(tick):
     assert tick.end() == []
 
 
+def test_an_open_dependency_pull_request_holds_even_when_its_checks_are_red(tick):
+    tick.hold("merge", URL)
+    tick.pulls[URL] = PullRequest("OPEN", None, 1, True, resolved=True)
+    rows = {"t1": {"id": "t1", "pr_url": URL + "0"}}
+    assert tick.end(rows, now=1_000_000) == []
+    assert held(tick.store)["on"] == {"kind": "merge", "target": URL}
+    tick.pulls[URL] = PullRequest("MERGED", 2, 1, False)
+    assert tick.end(rows) == [f"ended the wait of {ME}: pull request {URL}, now merged"]
+    assert held(tick.store) is None
+
+
 LEFT = f"pull request {URL}, now red; left the merge queue without merging; fix it and queue it again"
 UNLISTED = PullRequest("OPEN", None, 1, False, resolved=True, head="first")
 LISTED = PullRequest("OPEN", None, 1, False, resolved=True, head="first", queued=True)
@@ -351,12 +362,43 @@ def test_checks_wait_requires_success_or_failure_from_the_status_rollup(tick, ch
         assert idle.wait(tick.store.redis, "sw", ME)["on"] == {"kind": "checks", "target": URL, "head": "first"}
         assert tick.told() == []
         return
+    outcome += "; failed: mutation" if outcome == "red" else ""
     assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now {outcome}"]
     assert idle.wait(tick.store.redis, "sw", ME) is None
     assert tick.told() == [
         f"Your wait on checks on {URL}, now {outcome} has ended. Pick task t1 back up: "
         "agentihooks swarm sw done, block, or wait on the next thing."
     ]
+
+
+@pytest.mark.parametrize("conclusion", [None, "CANCELLED", "SUCCESS", "FAILURE"])
+@pytest.mark.parametrize("legacy_status", [False, True])
+@pytest.mark.parametrize("obsolete", ["CANCELLED", "FAILURE"])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_checks_wait_uses_only_the_newest_run_of_each_check(tick, conclusion, obsolete, reverse, legacy_status):
+    from scripts.swarm.ledger_events import pull_request
+
+    tick.hold("checks", URL)
+    checks = [
+        {"name": "Gate — Required", "databaseId": 1, "conclusion": obsolete},
+        {"name": "Gate — Required", "databaseId": 2, "conclusion": conclusion},
+    ]
+    if legacy_status:
+        checks = [
+            {"context": "Gate — Required", "createdAt": f"2026-10-13T10:00:0{index}Z", "state": row["conclusion"]}
+            for index, row in enumerate(checks)
+        ]
+    if reverse:
+        checks.reverse()
+    tick.pulls[URL] = pull_request({"state": "OPEN", "headRefOid": "first", "gated": True, "statusCheckRollup": checks})
+    if conclusion in (None, "CANCELLED"):
+        assert tick.end() == []
+        assert idle.wait(tick.store.redis, "sw", ME) is not None
+        assert tick.told() == []
+    else:
+        outcome = "green" if conclusion == "SUCCESS" else "red; failed: Gate — Required"
+        assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now {outcome}"]
+        assert idle.wait(tick.store.redis, "sw", ME) is None
 
 
 def test_checks_wait_with_no_checks_stays_unresolved(tick):
@@ -385,10 +427,11 @@ def test_a_failure_ends_the_checks_wait_even_with_an_unresolved_check(tick, unre
             ],
         }
     )
-    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now red"]
+    failed = "mutation, lint" if unresolved == "TIMED_OUT" else "lint"
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now red; failed: {failed}"]
     assert idle.wait(tick.store.redis, "sw", ME) is None
     assert tick.told() == [
-        f"Your wait on checks on {URL}, now red has ended. Pick task t1 back up: "
+        f"Your wait on checks on {URL}, now red; failed: {failed} has ended. Pick task t1 back up: "
         "agentihooks swarm sw done, block, or wait on the next thing."
     ]
 
@@ -716,7 +759,7 @@ def test_a_new_head_resets_checks_before_current_head_resolution(tick, red):
     assert tick.end() == []
     before = idle.wait(tick.store.redis, "sw", ME)
     assert before["on"]["head"] == "first"
-    tick.pulls[URL] = SimpleNamespace(state="OPEN", head="second", resolved=True, red=red, unpassed_gate="")
+    tick.pulls[URL] = SimpleNamespace(state="OPEN", head="second", resolved=True, red=red, unpassed_gate="", failed=())
     assert tick.end() == []
     after = idle.wait(tick.store.redis, "sw", ME)
     assert after == {**before, "on": {"kind": "checks", "target": URL, "head": "second"}}
@@ -803,8 +846,9 @@ def test_the_probe_requests_the_head_with_its_check_rollup():
                 "commits(last:1){nodes{commit{id committedDate "
                 'file(path:".github/workflows"){object{...on Tree{entries{object{...on Blob{text}}}}}} '
                 "statusCheckRollup{contexts(first:100){"
-                "nodes{...on CheckRun{databaseId name conclusion completedAt checkSuite{workflowRun{workflow{name}}}} "
-                "...on StatusContext{context state createdAt}} "
+                "nodes{...on CheckRun{databaseId name conclusion completedAt isRequired(pullRequestNumber:7) "
+                "checkSuite{workflowRun{workflow{name}}}} "
+                "...on StatusContext{context state createdAt isRequired(pullRequestNumber:7)}} "
                 "pageInfo{hasNextPage endCursor}}} checkSuites(first:100){nodes{status conclusion workflowRun{databaseId createdAt}} "
                 "pageInfo{hasNextPage endCursor}}}}}}}}",
                 "-f",
@@ -1048,7 +1092,7 @@ def test_the_probe_reads_a_running_suite_from_a_later_page(later, resolved):
     [
         ("FAILURE", None, []),
         ("FAILURE", "SUCCESS", [f"ended the wait of {ME}: checks on {URL}, now green"]),
-        ("SUCCESS", "FAILURE", [f"ended the wait of {ME}: checks on {URL}, now red"]),
+        ("SUCCESS", "FAILURE", [f"ended the wait of {ME}: checks on {URL}, now red; failed: unit"]),
     ],
 )
 def test_a_superseded_failure_never_ends_a_checks_wait(tick, older, newer, told):
@@ -1153,7 +1197,10 @@ def test_the_probe_reads_the_gate_from_the_last_commit():
     [
         (UNIT_PASSED, []),
         (UNIT_PASSED + [{"name": "Gate — Required", "conclusion": "SUCCESS"}], [f"checks on {URL}, now green"]),
-        (UNIT_PASSED + [{"name": "Gate — Required", "conclusion": "FAILURE"}], [f"checks on {URL}, now red"]),
+        (
+            UNIT_PASSED + [{"name": "Gate — Required", "conclusion": "FAILURE"}],
+            [f"checks on {URL}, now red; failed: Gate — Required"],
+        ),
     ],
 )
 def test_a_gated_checks_wait_ends_only_on_its_gate(tick, rollup, outcome):
@@ -1173,7 +1220,7 @@ def test_a_required_gate_ends_checks_wait_beside_a_pending_jobless_workflow(tick
         workflows(GATE_WORKFLOW),
     )
     assert tick.end() == []
-    outcome = "green" if conclusion == "SUCCESS" else "red"
+    outcome = "green" if conclusion == "SUCCESS" else "red; failed: Gate — Required"
     assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now {outcome}"]
     assert idle.wait(tick.store.redis, "sw", ME) is None
     assert tick.told() == [
@@ -1192,8 +1239,47 @@ def test_a_failed_required_check_ends_wait_beside_a_pending_jobless_workflow(tic
         workflows(GATE_WORKFLOW),
     )
     assert tick.end() == []
-    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now red"]
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now red; failed: unit"]
     assert idle.wait(tick.store.redis, "sw", ME) is None
+
+
+@pytest.mark.parametrize("conclusion", ["FAILURE", "ERROR", "STARTUP_FAILURE", "ACTION_REQUIRED", "TIMED_OUT"])
+def test_the_first_failed_job_ends_the_wait_and_names_it_while_siblings_run(tick, conclusion, capsys):
+    tick.hold("checks", URL)
+    tick.pulls[URL] = gated_probe(
+        [
+            {"name": "stats (1)", "conclusion": conclusion},
+            {"name": "stats (2)", "status": "IN_PROGRESS"},
+            {"name": "Gate — Required", "status": "IN_PROGRESS"},
+        ],
+        [QUEUED_TESTS],
+        workflows(GATE_WORKFLOW),
+    )
+    assert tick.end() == []
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now red; failed: stats (1)"]
+    assert idle.wait(tick.store.redis, "sw", ME) is None
+    assert "now red; failed: stats (1) has ended" in tick.told()[0]
+    assert tick.end() == []
+    assert len(tick.told()) == 1
+    with capsys.disabled():
+        print(
+            f"Scratch wait ended on {conclusion}: stats (1) failed; stats (2) and Gate Required still running; owner notified once."
+        )
+
+
+def test_the_failure_notice_names_only_jobs_from_the_confirming_read(tick):
+    tick.hold("checks", URL)
+    replies = iter(
+        [
+            PullRequest("OPEN", None, 1, True, True, ("stats (1)",), head="first"),
+            PullRequest("OPEN", None, 1, True, True, ("stats (2)",), head="first"),
+        ]
+    )
+    assert waits.end_pass(tick.store, "sw", {}, tick.inbox, lambda url: next(replies), 5_000, None) == [
+        f"ended the wait of {ME}: checks on {URL}, now red; failed: stats (2)"
+    ]
+    assert "failed: stats (2) has ended" in tick.told()[0]
+    assert "stats (1)" not in tick.told()[0]
 
 
 @pytest.mark.parametrize(
@@ -1258,7 +1344,7 @@ def test_checks_resolution_uses_the_confirmed_current_head_result(tick):
     replies = iter(
         [
             SimpleNamespace(state="OPEN", head="first", resolved=True, red=False, unpassed_gate=""),
-            SimpleNamespace(state="OPEN", head="first", resolved=True, red=True, unpassed_gate=""),
+            SimpleNamespace(state="OPEN", head="first", resolved=True, red=True, unpassed_gate="", failed=()),
         ]
     )
     assert waits.end_pass(tick.store, "sw", {}, tick.inbox, lambda url: next(replies), 5_000, None) == [
@@ -1391,7 +1477,9 @@ def test_a_concluded_failure_ends_the_wait_with_a_missing_gate(tick):
     tick.hold("checks", URL)
     tick.pulls[URL] = gated_probe([{"name": "Unit tests", "conclusion": "FAILURE"}], [], workflows(GATE_WORKFLOW))
     assert tick.end() == []
-    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now red; Gate — Required never passed"]
+    assert tick.end() == [
+        f"ended the wait of {ME}: checks on {URL}, now red; failed: Unit tests; Gate — Required never passed"
+    ]
     assert idle.wait(tick.store.redis, "sw", ME) is None
     assert len(tick.told()) == 1
 

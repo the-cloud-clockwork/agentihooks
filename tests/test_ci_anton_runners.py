@@ -32,11 +32,12 @@ MOVED = {
     ("hive-worker.yml", "contracts"): LIGHT,
     ("hive-worker.yml", "kind"): STANDARD,
     ("hive-worker.yml", "publish"): STANDARD,
-    ("brain-smoke.yml", "smoke"): STANDARD,
+    ("brain-smoke.yml", "smoke"): QUEUED,
+    ("codex-cache.yml", "seed"): STANDARD,
     ("coverage-stability.yml", "compare"): BATCH,
     ("equivalence.yml", "ledger-equivalence"): STANDARD,
-    ("helm-kind.yml", "kind"): STANDARD,
-    ("ledger-load.yml", "load"): STANDARD,
+    ("helm-kind.yml", "kind"): QUEUED,
+    ("ledger-load.yml", "load"): QUEUED,
     ("ledger-row-memory.yml", "replay"): BATCH,
     ("mutation-preflight.yml", "mutation"): LIGHT,
     ("mutation-preflight.yml", "mutation-shard"): BATCH,
@@ -53,14 +54,14 @@ MOVED = {
     ("swarm-image.yml", "publish"): STANDARD,
     ("swarm-node-base.yml", "copy"): STANDARD,
     ("swarm-node-image.yml", "image"): STANDARD,
-    ("swarm-node-smoke.yml", "worker-health"): STANDARD,
-    ("swarm-node-smoke.yml", "worker-image"): STANDARD,
+    ("swarm-node-smoke.yml", "worker-health"): QUEUED,
+    ("swarm-node-smoke.yml", "worker-image"): QUEUED,
     ("swarm-node-smoke.yml", "worker-image-compare"): LIGHT,
-    ("swarm-smoke.yml", "compose-hive"): STANDARD,
-    ("swarm-smoke.yml", "hive-join"): STANDARD,
-    ("swarm-smoke.yml", "hive-launch"): STANDARD,
-    ("swarm-smoke.yml", "smoke"): STANDARD,
-    ("swarm-smoke.yml", "terminal-clients"): STANDARD,
+    ("swarm-smoke.yml", "compose-hive"): QUEUED,
+    ("swarm-smoke.yml", "hive-join"): QUEUED,
+    ("swarm-smoke.yml", "hive-launch"): QUEUED,
+    ("swarm-smoke.yml", "smoke"): QUEUED,
+    ("swarm-smoke.yml", "terminal-clients"): QUEUED,
     ("test-leaks.yml", "followup"): LIGHT,
     ("test-leaks.yml", "one-process"): BATCH,
     ("test.yml", "admission"): LIGHT,
@@ -74,7 +75,7 @@ MOVED = {
     ("test.yml", "mutation"): BATCH,
     ("test.yml", "mutation-plan"): LIGHT,
     ("test.yml", "mutation-stats"): BATCH,
-    ("test.yml", "queue-baseline"): LIGHT,
+    ("test.yml", "queue-fail-fast"): LIGHT,
     ("test.yml", "refresh-durations"): QUEUED,
     ("test.yml", "reuse"): LIGHT,
     ("test.yml", "select"): LIGHT,
@@ -99,13 +100,23 @@ TARGET = {("gate-protected.yml", "grade")}
 
 # The runner class table holds the release path and the access read back on hosted runners.
 CLASSED = {
+    ("ci-templates.yml", "actionlint"),
     ("pages.yml", "build"),
+    ("promote.yml", "promote"),
     ("publish-pypi.yml", "verify"),
     ("release.yml", "release"),
     ("github-access-audit.yml", "read-back"),
+    ("queue-retry.yml", "retry"),
 }
 
 HOSTED = OIDC | PROTECTED | TARGET | CLASSED
+CONSOLIDATED = {
+    ("swarm-node-smoke.yml", "worker-health"),
+    ("swarm-smoke.yml", "compose-hive"),
+    ("swarm-smoke.yml", "hive-join"),
+    ("swarm-smoke.yml", "hive-launch"),
+    ("swarm-smoke.yml", "terminal-clients"),
+}
 
 
 def workflows():
@@ -196,6 +207,8 @@ UNTRUSTED_EVENTS = [
 
 @pytest.mark.parametrize(("workflow", "job"), sorted(MOVED))
 def test_each_job_runs_on_its_isolated_anton_pool_only_for_trusted_actors(workflow, job):
+    if (workflow, job) in CONSOLIDATED and job not in workflows()[workflow]["jobs"]:
+        pytest.skip("consolidated into its workflow's remaining smoke job")
     assert workflows()[workflow]["jobs"][job]["runs-on"] == pool(MOVED[(workflow, job)])
 
 
@@ -252,7 +265,7 @@ def test_every_hosted_job_stays_on_a_hosted_runner():
         assert jobs[(name, job)]["runs-on"] == "ubuntu-latest", f"{name}:{job}"
     for name, job in PROTECTED | TARGET | CLASSED:
         assert jobs[(name, job)]["runs-on"] == "ubuntu-latest", f"{name}:{job}"
-    assert set(jobs) == set(MOVED) | HOSTED
+    assert set(jobs) | CONSOLIDATED == set(MOVED) | HOSTED
 
 
 def test_jobs_with_service_or_job_containers_run_on_the_docker_pool():
@@ -269,3 +282,17 @@ def test_the_expression_reader_tells_trusted_from_untrusted_runs():
     assert resolve(pool(QUEUED), **event("merge_group", actor="github-merge-queue[bot]")) == QUEUE
     assert resolve(pool(QUEUED), **event("pull_request")) == STANDARD
     assert resolve(pool(QUEUED), **event("pull_request_target")) == "ubuntu-latest"
+
+
+def test_every_standard_job_the_tests_run_calls_sends_merge_group_runs_to_the_queue_pool():
+    called = {spec["uses"].rsplit("/", 1)[1] for spec in workflows()["test.yml"]["jobs"].values() if "uses" in spec}
+    jobs = runner_jobs()
+    standard = {key for key, spec in jobs.items() if key[0] in called and "'anton-oss'" in spec["runs-on"]}
+    assert standard
+    assert {key: MOVED[key] for key in standard} == dict.fromkeys(standard, QUEUED)
+    merge_group = event("merge_group", actor="github-merge-queue[bot]")
+    for key in standard:
+        runs_on = jobs[key]["runs-on"]
+        assert resolve(runs_on, **merge_group) == QUEUE, key
+        assert resolve(runs_on, **event("pull_request")) == STANDARD, key
+        assert resolve(runs_on, **event("push", actor="github-merge-queue[bot]", ref="refs/heads/dev")) == STANDARD, key

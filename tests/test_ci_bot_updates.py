@@ -40,12 +40,11 @@ def test_dev_push_publishes_merged_durations_with_read_permissions():
     assert upload["with"]["include-hidden-files"] is True
 
 
-def test_a_newer_dev_push_never_cancels_a_running_dev_push_run():
+def test_a_newer_dev_push_replaces_only_the_pending_dev_push_run():
     concurrency = _workflow("test.yml")["concurrency"]
     assert concurrency["cancel-in-progress"] == "${{ github.event_name == 'pull_request' }}"
-    assert concurrency["group"].endswith(
-        "|| format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}"
-    )
+    assert concurrency["queue"] == "${{ github.event_name == 'workflow_dispatch' && 'max' || 'single' }}"
+    assert "github.event_name == 'push' && 'promotion-dev'" in concurrency["group"]
 
 
 ADOPT = (
@@ -121,7 +120,7 @@ def test_release_computes_the_requested_version_from_tags(tmp_path, bump, expect
     output = tmp_path / "output"
     result = subprocess.run(
         ["bash", "-euo", "pipefail", "-c", step["run"]],
-        cwd=tmp_path,
+        cwd=_ROOT,
         env={**os.environ, "PATH": f"{tools}:{os.environ['PATH']}", "BUMP": bump, "GITHUB_OUTPUT": str(output)},
         capture_output=True,
         text=True,
@@ -135,8 +134,11 @@ def test_release_tags_without_committing_and_dry_run_never_pushes():
     assert job["permissions"] == {"contents": "write", "actions": "write"}
     assert job["env"]["GH_TOKEN"] == "${{ github.token }}"
     tag = next(s for s in job["steps"] if s.get("name") == "Tag the release")
-    assert 'git tag "v$NEXT" "$GITHUB_SHA"' in tag["run"]
-    assert "git rev-parse HEAD" in tag["run"]
+    assert 'git tag "v$NEXT" "$GITHUB_SHA"' in tag["run"] or tag["run"] == (
+        'bash scripts/ci_release.sh tag "$GITHUB_SHA" "$NEXT"'
+    )
+    script = (_ROOT / "scripts/ci_release.sh").read_text() if "ci_release.sh" in tag["run"] else tag["run"]
+    assert "git rev-parse HEAD" in script
     for step in job["steps"]:
         if "git push" in step.get("run", "") or "gh release create" in step.get("run", ""):
             assert step["if"] == "${{ !inputs.dry_run }}"

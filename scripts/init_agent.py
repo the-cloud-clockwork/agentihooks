@@ -11,7 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from scripts import agent_choice, claude_trust, herdr_host, herdr_panes, operator_env
+from scripts import agent_choice, claude_trust, gh_config, herdr_host, herdr_panes, operator_env
 from scripts.swarm import effort_range
 from scripts.targets.codex_target import codex_home, restore_hook_order
 
@@ -418,7 +418,7 @@ def _write_launcher(
             f'"$(cat {shlex.quote(str(prompt_file))})"' if opening_prompt == prompt else shlex.quote(opening_prompt)
         )
         held = f'set --; [ -n "${{{PROMPT_AFTER_START}:-}}" ] || set -- {prompt_arg}; unset {PROMPT_AFTER_START}; '
-        command_text = f'{held}{command_text} "$@"' if spec.agent == "codex" else f"{command_text} {prompt_arg}"
+        command_text = f'{held}{command_text} "$@"' if spec.agent == "codex" else f"{command_text} -- {prompt_arg}"
     cleanup = [
         str(launcher),
         str(_route_report(launcher)),
@@ -433,6 +433,7 @@ def _write_launcher(
         f": > {shlex.quote(str(_started_marker(launcher)))}\n"
         f"{operator_env.source_line(environ)}"
         f"{_predecessor_export(environ)}"
+        f"{gh_config.SHELL_PIN}"
         f"export AGENTIHOOKS_EXIT_RECORD={shlex.quote(str(exit_record))}\n"
         "export AGENTIHOOKS_TERMINAL_LAUNCH=1\n"
         f"export AGENTIHOOKS_AGENT_NAME={shlex.quote(identity)}\n"

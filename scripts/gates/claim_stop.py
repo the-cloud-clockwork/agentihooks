@@ -28,7 +28,7 @@ CONTRACT_PROOF = {
 }
 
 
-def ruling(task, pull, waiting):
+def ruling(task, pull, waiting, dependency=False):
     """The work this stop leaves owed ('' when it may pass), and the pull request whose pending checks become the wait."""
     url = task.get("pr_url")
     if url and pull is None:
@@ -38,6 +38,8 @@ def ruling(task, pull, waiting):
             return "merged", ""
         if not waiting or waiting.get("on") == {"kind": "checks", "target": url}:
             return "contract", ""
+    if dependency:
+        return "", ""
     if pull is not None and pull.state == "OPEN":
         if not pull.resolved:
             return "", url
@@ -50,6 +52,16 @@ def ruling(task, pull, waiting):
     return "idle", ""
 
 
+def between_halves(task, pull):
+    pulls = task.get("split_pulls") or []
+    return (
+        pull is not None
+        and pull.state == "MERGED"
+        and task["pr_url"] in pulls
+        and len(pulls) < len(task.get("split") or [])
+    )
+
+
 def parked_by(store, who, task):
     if not task.get("parked_on"):
         return False
@@ -59,7 +71,7 @@ def parked_by(store, who, task):
 def refusal(owed, slug, task, pull):
     url, block = task.get("pr_url"), f'agentihooks swarm {slug} block "<why>"'
     name_wait = (
-        f"Name the wait: agentihooks swarm {slug} wait --on checks <pr url> | reply <inbox item> | task <id>, or a bare "
+        f"Name the wait: agentihooks swarm {slug} wait --on checks <pr or Actions run url> | reply <inbox item> | task <id>, or a bare "
         f"wait of at most 60 minutes; or block with {block}"
     )
     if owed == "merged":
@@ -93,10 +105,11 @@ class ClaimStop:
         if not (who.pinned and who.task) or lane_of(who.name) not in WORKERS:
             return Decision()
         ledger = self.ledger()
-        task = next((t for t in ledger.tasks(who.swarm) if t.get("id") == who.task), None)
+        rows = {t["id"]: t for t in ledger.tasks(who.swarm)}
+        task = rows.get(who.task)
         if task is None or task.get("state") not in ACTIVE or task.get("claimed_by") != who.name:
             return Decision()
-        from scripts.swarm import idle, ready
+        from scripts.swarm import idle, ready, waits
 
         store, now = self.connect(), self.now()
         streak = Streak(store, who.swarm, who.name)
@@ -116,8 +129,14 @@ class ClaimStop:
         held = idle.wait(store.redis, who.swarm, who.name)
         live = held if held and held["until"] > now else None
         pull = self.github()(url) if url else None
-        owed, checks = ruling(task, pull, live)
-        if checks and (live or {}).get("on", {}).get("kind") not in KEPT:
+        if between_halves(task, pull):
+            ledger.update_task(who.swarm, task["id"], {"pr_url": "", "state": "claimed"}, if_state=("pr",))
+            task, pull = {**task, "pr_url": ""}, None
+        dependency = waits.dependency((live or {}).get("on", {}), task, rows, self.github())
+        owed, checks = ruling(task, pull, live, dependency)
+        held_on = (live or {}).get("on", {})
+        run_wait = held_on.get("kind") == "checks" and waits.mutation_wait.RUN_URL.fullmatch(held_on["target"])
+        if checks and held_on.get("kind") not in KEPT and not run_wait:
             on = {"kind": "checks", "target": checks}
             idle.declare_wait(store.redis, who.swarm, who.name, now + CHECKS_WAIT_MS, f"checks on {checks}", now, on=on)
         if not owed:

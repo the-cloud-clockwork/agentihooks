@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 SCHEMA_VERSION = 1
 TRANSPORT = "codex_app_server"
 STARTING, CONNECTED, FAILED, EXITED, DEGRADED = "starting", "connected", "failed", "exited", "degraded"
+STOOD_DOWN = "stood_down"
 RECORDS, ENDPOINTS, OPENINGS = "codex-transport", "codex-endpoints", "codex-openings"
 PUBLISHING = "execution-publishing"
 IDENTITY = ("execution_id", "execution_generation", "seat", "agent_name", "task_id", "endpoint_ref", "transport")

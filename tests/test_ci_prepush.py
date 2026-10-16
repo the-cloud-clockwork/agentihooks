@@ -258,3 +258,21 @@ def test_main_runs_in_the_repository_top_level(repo, monkeypatch, argv, base):
     assert ci_prepush.main(argv) == 0
 
     assert seen == [(repo.resolve(), base)]
+
+
+@pytest.mark.parametrize("missing", ["ruff", "pytest"])
+def test_missing_gate_tool_names_the_module_and_interpreter(repo, monkeypatch, capsys, missing):
+    import importlib.util
+
+    _commit(repo, {"scripts/alpha.py": "A = 3\n"}, "change")
+    assert ci_prepush.run(repo, "base", _Runner()) == 0
+    capsys.readouterr()
+    find_spec = importlib.util.find_spec
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None if name == missing else find_spec(name))
+    runner = _Runner()
+
+    assert ci_prepush.run(repo, "base", runner) == 1
+
+    assert f"missing gate tool {missing}; interpreter: {sys.executable}" in capsys.readouterr().out
+    assert not ci_prepush.passed(repo)
+    assert all(command[2] != missing for command, _, _ in runner.calls)

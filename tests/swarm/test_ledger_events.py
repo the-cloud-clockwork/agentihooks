@@ -814,6 +814,18 @@ def test_the_view_records_whether_the_required_gate_passed_beside_a_red_job(gate
     assert ledger_events.pull_request(raw).gate_passed is False
 
 
+def test_distinct_failed_checks_all_stay_red():
+    rollup = [
+        {"name": "unit", "databaseId": 1, "conclusion": "FAILURE"},
+        {"name": "lint", "databaseId": 2, "conclusion": "FAILURE"},
+        {"context": "sonar", "createdAt": "2026-10-13T10:00:01Z", "state": "FAILURE"},
+        {"context": "codeql", "createdAt": "2026-10-13T10:00:02Z", "state": "FAILURE"},
+        {"name": "docs", "conclusion": "FAILURE"},
+    ]
+    raw = {"state": "OPEN", "statusCheckRollup": rollup, "checkSuites": [FINISHED_RUN]}
+    assert ledger_events.pull_request(raw).failed == ("unit", "lint", "sonar", "codeql", "docs")
+
+
 def test_a_failed_check_beside_a_pending_gate_resolves_red_while_runs_are_queued():
     rollup = [{"name": "unit", "conclusion": "FAILURE"}, {"name": GATE, "conclusion": None}]
     raw = {"state": "OPEN", "gated": True, "statusCheckRollup": rollup, "checkSuites": [FINISHED_RUN]}

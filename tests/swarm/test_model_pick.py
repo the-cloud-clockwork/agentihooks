@@ -430,6 +430,7 @@ def test_status_shows_model_source_and_confidence(monkeypatch, capsys):
         "sw", AgentRecord("a", "eng", "t", model="sonnet", effort="low", model_source="jev-1.13", model_confidence=0.72)
     )
     monkeypatch.setattr(cli, "LedgerClient", lambda: FakeLedger([]))
+    monkeypatch.setattr(status.HerdrRuntime, "live_names", lambda self: {"a", "old"})
     cli.cmd_status(saved, SimpleNamespace(slug="sw", json=False))
     output = capsys.readouterr().out
     assert "Model source\tConfidence" in output

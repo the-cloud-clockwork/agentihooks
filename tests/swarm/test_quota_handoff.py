@@ -128,7 +128,7 @@ def test_a_quota_handoff_keeps_the_seat_and_launch_settings_on_another_account(s
     assert actions == [
         f"retired {done.name}",
         f"retired {first.name}",
-        _capacity(1, 5, 6, "eng has no more ready tasks; ") + WARNED,
+        _capacity(1, 5, 6) + WARNED,
         f"spawned {successor.name} for {first.task}",
     ]
     assert successor.seat == first.seat

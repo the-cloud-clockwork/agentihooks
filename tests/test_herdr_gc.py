@@ -402,7 +402,7 @@ def test_the_screen_digest_is_the_full_sha256():
 class FakeStore:
     def __init__(self, slug, state="running", agents=()):
         self.slug, self._state, self._agents = slug, state, agents
-        self.redis = object()
+        self.redis = SimpleNamespace(scan_iter=lambda match: ())
 
     def slugs(self):
         return [self.slug]
@@ -510,6 +510,31 @@ def test_the_last_prompt_comes_from_the_agents_swarm(monkeypatch):
     monkeypatch.setattr(herdr_gc.idle, "last_prompt", lambda redis, slug, name: seen.append((redis, slug, name)) or 42)
     assert herdr_gc.Owners(lambda url: store).prompted_at(owned()) == 42
     assert seen == [(store.redis, "crew", "eng-1")]
+
+
+@pytest.mark.parametrize(
+    "owner,prompt_name", [("ci-323133-0759", "ci@323133-0759"), ("ci@323133-0759", "ci-323133-0759")]
+)
+@pytest.mark.parametrize("age,kept", [(MIN, True), (QUIET, False)])
+def test_a_dropped_agent_prompt_protects_its_pane_under_either_name(env, owner, prompt_name, age, kept):
+    from fnmatch import fnmatchcase
+
+    herdr = FakeHerdr()
+    launch(env, herdr, "w1:p2", "term_a", Spot(info=CLAUDE), Owner(name=owner, swarm="crew", route="routed"))
+    store = FakeStore("crew")
+    prompts = {
+        herdr_gc.idle.key("crew", "prompt", prompt_name): str(NOW - age),
+        herdr_gc.idle.key("crew", "prompt", "ci@323133-0760"): str(NOW),
+        herdr_gc.idle.key("other", "prompt", prompt_name): str(NOW),
+    }
+    store.redis = SimpleNamespace(
+        get=prompts.get,
+        scan_iter=lambda match: (key for key in prompts if fnmatchcase(key, match)),
+    )
+    owners = herdr_gc.Owners(lambda url: store)
+    expected = (herdr_gc.KEEP, "used inside the quiet window") if kept else (herdr_gc.CLOSE, "its agent was retired")
+    assert actions(sweep(env, herdr, owners)) == {"w1:p2": expected}
+    assert herdr.closed == ([] if kept else [("pane", "w1:p2")])
 
 
 def test_a_failing_last_prompt_read_is_none(monkeypatch):

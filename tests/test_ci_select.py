@@ -1,11 +1,19 @@
 import json
+import os
+import re
+import shlex
 import subprocess
+from pathlib import Path
 
 import pytest
+import yaml
 
 from scripts import ci_select
 
 pytestmark = pytest.mark.unit
+
+WORKFLOW = Path(__file__).parents[1] / ".github/workflows/test.yml"
+EXPRESSION = re.compile(r"\$\{\{\s*([\w.]+)\s*\}\}")
 
 
 def write(root, files):
@@ -228,6 +236,38 @@ def test_the_changed_files_come_from_the_merge_base(repo):
     git(repo, "commit", "-am", "dev moved")
     assert ci_select.changed_files(repo, "dev", head) == ["hooks/sample.py"]
     assert ci_select.changed_files(repo, base, head) == ["hooks/sample.py"]
+
+
+def test_the_workflow_keeps_a_one_file_change_selected_after_dev_moves(repo, monkeypatch, tmp_path):
+    opened = git(repo, "rev-parse", "HEAD")
+    git(repo, "switch", "-c", "change")
+    write(repo, {"hooks/sample.py": "VALUE = 3\n"})
+    git(repo, "commit", "-am", "change")
+    head = git(repo, "rev-parse", "HEAD")
+    git(repo, "switch", "dev")
+    for text in ("import os\n", "import sys\n"):
+        write(repo, {"tests/conftest.py": text})
+        git(repo, "add", ".")
+        git(repo, "commit", "-m", "dev moved")
+    git(repo, "update-ref", "refs/remotes/origin/dev", "dev")
+    git(repo, "switch", "--detach", "dev")
+    git(repo, "merge", "--no-ff", "-m", "pull merge", head)
+    context = {
+        "github.event.pull_request.base.sha": opened,
+        "github.event.pull_request.head.sha": head,
+        "github.base_ref": "dev",
+        "github.event_name": "pull_request",
+    }
+    step = next(s for s in yaml.safe_load(WORKFLOW.read_text())["jobs"]["select"]["steps"] if s.get("id") == "select")
+    for name, value in step["env"].items():
+        monkeypatch.setenv(name, EXPRESSION.sub(lambda found: context[found.group(1)], value))
+    monkeypatch.setenv("GITHUB_WORKSPACE", str(repo))
+    output = tmp_path / "github-output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    line = next(line for line in step["run"].splitlines() if "scripts.ci_select" in line)
+    argv = [os.path.expandvars(part) for part in shlex.split(line.partition("--durations")[0])[3:]]
+    assert ci_select.main(argv) == 0
+    assert output.read_text() == "scope=selected\nlegs=[1]\ncount=1\nfiles_1=tests/test_sample.py\n"
 
 
 def run_main(repo, monkeypatch, tmp_path, event, base="HEAD~1"):

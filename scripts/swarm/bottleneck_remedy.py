@@ -9,7 +9,7 @@ from functools import partial
 
 from scripts import agent_choice
 from scripts.inbox.store import InboxStore
-from scripts.swarm import bottleneck, bottleneck_status, dispatcher, lane_split, templates
+from scripts.swarm import bottleneck, bottleneck_status, dispatcher, lane_split, stage_cover, templates
 from scripts.swarm.health import standing
 from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.ledger_events import SENDER, Mail
@@ -67,7 +67,7 @@ def remedy_pass(
     done = []
     try:
         for row in standing.read(store.redis, slug).values():
-            if not _due(row, last, now_ms):
+            if not _due(row, last, now_ms) or stage_cover.covered(store, slug, doc, row["stage"]):
                 continue
             action = _remedy(slug, store, ledger, doc, lanes, _stage(row))
             if action is None:

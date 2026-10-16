@@ -150,9 +150,45 @@ def test_publication_commits_explicit_files_before_grading_and_pushing(publicati
     assert result["branch"] == "engineer-test"
     assert task["branch"] == "engineer-test"
     fields = {"branch": "engineer-test", "branch_repo": str(repository.parent / "remote.git")}
-    assert result == {"worktree": str(worktree), **fields, "head": head}
-    assert publication.updates == [("swarm", "t1", fields, agent.name)]
+    assert result == {
+        "worktree": str(worktree),
+        **fields,
+        "head": head,
+        "gate": str(worktree / "scripts" / "ci_prepush"),
+    }
+    assert publication.updates == [
+        ("swarm", "t1", {**fields, "repository_branches": {str(repository): "engineer-test"}}, agent.name)
+    ]
     assert git(worktree, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/engineer-test"
+
+
+@pytest.mark.parametrize("record_repository_branch", [False, True])
+def test_publish_from_second_worktree_pushes_and_records_its_branch(
+    publication, tmp_path, monkeypatch, record_repository_branch
+):
+    from scripts.swarm import publish
+
+    first = publication.root
+    git(first, "push", "origin", "HEAD:engineer-test")
+    first_head = git(first, "rev-parse", "HEAD")
+    second = tmp_path / "second"
+    git(first, "worktree", "add", "-b", "engineer-test-2", str(second))
+    if record_repository_branch:
+        publication.task["repository_branches"] = {str(publication.repo): "engineer-test"}
+    (second / "chosen.txt").write_text("after")
+    monkeypatch.chdir(second)
+
+    result = publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+
+    head = git(second, "rev-parse", "HEAD")
+    assert result["worktree"] == str(second)
+    assert result["branch"] == publication.task["branch"] == "engineer-test-2"
+    assert publication.task["repository_branches"] == {str(publication.repo): "engineer-test-2"}
+    assert git(second, "ls-remote", "origin", "refs/heads/engineer-test-2").split()[0] == head
+    assert git(first, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == first_head
+    assert git(second, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/engineer-test-2"
 
 
 def test_prepare_creates_the_task_worktree_once_through_the_worktree_command(repository, tmp_path, monkeypatch):
@@ -169,7 +205,9 @@ def test_prepare_creates_the_task_worktree_once_through_the_worktree_command(rep
     monkeypatch.setattr(stack, "WT_SCRIPT", script)
     monkeypatch.setenv("PUBLISH_PREPARED", str(worktree))
     task = {"id": "t1", "claimed_by": "engineer@test", "state": "claimed"}
-    ledger = SimpleNamespace(tasks=lambda slug: {"swarm": [task]}[slug])
+    ledger = SimpleNamespace(
+        tasks=lambda slug: {"swarm": [task]}[slug], update_task=lambda slug, task_id, fields, by: task.update(fields)
+    )
     agent = AgentRecord("engineer@test", "ci", "t1")
     first = publish.prepare("swarm", agent, str(repository), ledger)
     assert first["worktree"] == str(worktree)
@@ -193,11 +231,16 @@ def test_prepare_creates_a_continuation_from_the_recorded_remote_branch(reposito
     monkeypatch.setattr(stack, "WT_SCRIPT", script)
     monkeypatch.setenv("PUBLISH_PREPARED", str(worktree))
     task = {"id": "t1", "claimed_by": "engineer@test", "state": "claimed", "branch": "predecessor"}
-    ledger = SimpleNamespace(tasks=lambda slug: {"swarm": [task]}[slug])
+    ledger = SimpleNamespace(
+        tasks=lambda slug: {"swarm": [task]}[slug], update_task=lambda slug, task_id, fields, by: task.update(fields)
+    )
     agent = AgentRecord("engineer@test", "ci", "t1")
     result = publish.prepare("swarm", agent, str(repository), ledger)
     assert result["worktree"] == str(worktree)
     assert git(worktree, "rev-parse", "HEAD") == git(repository, "rev-parse", "origin/predecessor")
+    assert task["branch"] == result["branch"] == "engineer-test"
+    assert task["branch_repo"] == str(repository.parent / "remote.git")
+    assert task["repository_branches"] == {str(repository): "engineer-test"}
 
 
 def test_prepare_reuses_the_recorded_worktree_without_pushing(repository, tmp_path):
@@ -221,7 +264,9 @@ def test_publication_without_a_prepared_worktree_names_the_prepare_command(repos
     from scripts.swarm.store import SwarmError
 
     task = {"id": "t1", "claimed_by": "engineer@test", "state": "claimed"}
-    ledger = SimpleNamespace(tasks=lambda slug: {"swarm": [task]}[slug])
+    ledger = SimpleNamespace(
+        tasks=lambda slug: {"swarm": [task]}[slug], update_task=lambda slug, task_id, fields, by: task.update(fields)
+    )
     agent = AgentRecord("engineer@test", "ci", "t1")
     with pytest.raises(SwarmError, match="Next: agentihooks swarm swarm prepare"):
         publish.publish("swarm", agent, str(repository), ledger, "Change chosen", ["chosen.txt"])
@@ -276,7 +321,7 @@ def test_a_successor_uses_the_recorded_worktree_among_other_checkouts(publicatio
 
 
 @pytest.mark.parametrize("branch", [None, "", "XXXX"])
-def test_a_detached_checkout_never_becomes_the_unrecorded_task_worktree(publication, tmp_path, branch):
+def test_a_detached_checkout_never_becomes_the_unrecorded_task_worktree(publication, tmp_path, capfd, branch):
     from scripts.swarm import publish
 
     root = publication.root
@@ -289,6 +334,8 @@ def test_a_detached_checkout_never_becomes_the_unrecorded_task_worktree(publicat
         "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
     )
     assert result["worktree"] == str(root)
+    assert result["branch"] == publication.task["branch"] == "engineer-test"
+    assert "fatal" not in capfd.readouterr().err
 
 
 def test_multiple_unrecorded_task_worktrees_refuse_an_ambiguous_publish(publication, tmp_path):
@@ -478,6 +525,72 @@ def test_failed_gate_never_pushes_and_can_retry_the_committed_head(publication, 
     assert git(root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
 
 
+def fake_python(path, log, ruff):
+    import sys
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    run = f'exec {sys.executable} "$@"' if ruff else "echo 'No module named ruff' >&2\nexit 1"
+    path.write_text(f'#!/bin/sh\necho "$*" >> {log}\n{run}\n')
+    path.chmod(0o755)
+    return str(path)
+
+
+@pytest.mark.parametrize("tool_has_ruff", [False, True])
+def test_the_gate_runs_with_the_workspace_venv_python(publication, monkeypatch, tmp_path, tool_has_ruff):
+    from scripts.swarm import publish
+
+    venv_log, tool_log = tmp_path / "venv.log", tmp_path / "tool.log"
+    fake_python(publication.repo.parent / ".venv" / "bin" / "python", venv_log, True)
+    monkeypatch.setattr(publish.sys, "executable", fake_python(tmp_path / "tool" / "python", tool_log, tool_has_ruff))
+    publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+    head = git(publication.root, "rev-parse", "HEAD")
+    assert git(publication.repo, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
+    assert venv_log.read_text().splitlines() == ["-I -c import ruff", "-m scripts.ci_prepush"]
+    assert not tool_log.exists()
+    assert publish.gate_python(publication.repo) == str(publication.repo.parent / ".venv" / "bin" / "python")
+
+
+def test_a_workspace_venv_without_ruff_falls_back_to_the_running_python(publication, monkeypatch, tmp_path, capfd):
+    from scripts.swarm import publish
+
+    venv_log, tool_log = tmp_path / "venv.log", tmp_path / "tool.log"
+    fake_python(publication.repo.parent / ".venv" / "bin" / "python", venv_log, False)
+    monkeypatch.setattr(publish.sys, "executable", fake_python(tmp_path / "tool" / "python", tool_log, True))
+    capfd.readouterr()
+    publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+    head = git(publication.root, "rev-parse", "HEAD")
+    assert git(publication.repo, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
+    assert venv_log.read_text().splitlines() == ["-I -c import ruff"]
+    assert tool_log.read_text().splitlines() == ["-I -c import ruff", "-m scripts.ci_prepush"]
+    assert capfd.readouterr() == ("", "")
+
+
+def test_no_python_with_ruff_refuses_before_the_push(publication, monkeypatch, tmp_path):
+    import re
+
+    from scripts.swarm import publish
+    from scripts.swarm.store import SwarmError
+
+    venv = publication.repo.parent / ".venv" / "bin" / "python"
+    fake_python(venv, tmp_path / "venv.log", False)
+    monkeypatch.setattr(
+        publish.sys, "executable", fake_python(tmp_path / "tool" / "python", tmp_path / "tool.log", False)
+    )
+    expected = (
+        f"no python with ruff for the prepush gate; install the dev extra into {venv}; "
+        "Next: agentihooks swarm swarm publish --message 'Change chosen' -- chosen.txt"
+    )
+    with pytest.raises(SwarmError, match=f"^{re.escape(expected)}$"):
+        publish.publish(
+            "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+        )
+    assert git(publication.repo, "ls-remote", "origin", "refs/heads/engineer-test") == ""
+
+
 @pytest.mark.parametrize("files", [["."], ["../chosen.txt"], ["/chosen.txt"], ["scripts"]])
 def test_publication_rejects_broad_or_outside_file_selections(publication, files):
     from scripts.swarm import publish
@@ -504,14 +617,19 @@ def test_cli_prepares_and_publishes_from_the_primary_checkout(publication, monke
     monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
     assert cli.main(["swarm", "--as", agent.name, "prepare"]) == 0
     prepared = json.loads(capsys.readouterr().out)
-    assert prepared == {
+    checkout = {
         "worktree": str(publication.root),
         "branch": "engineer-test",
         "branch_repo": str(publication.repo.parent / "remote.git"),
     }
+    assert prepared == {**checkout, "repository": str(publication.repo), "repository_source": "swarm default"}
     assert cli.main(["swarm", "--as", agent.name, "publish", option, "Change chosen", "--", "chosen.txt"]) == 0
     head = git(publication.root, "rev-parse", "HEAD")
-    assert json.loads(capsys.readouterr().out) == {**prepared, "head": head}
+    assert json.loads(capsys.readouterr().out) == {
+        **checkout,
+        "head": head,
+        "gate": str(publication.root / "scripts" / "ci_prepush"),
+    }
     assert git(publication.repo, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
 
 
@@ -568,6 +686,81 @@ def test_continuation_publishes_back_to_the_recorded_remote_branch(publication):
     assert result["branch"] == publication.task["branch"] == "predecessor"
     assert git(root, "ls-remote", "origin", "refs/heads/predecessor").split()[0] == head
     assert git(root, "ls-remote", "origin", "refs/heads/engineer-test") == ""
+    assert git(root, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/predecessor"
+
+
+def test_a_restacked_successor_publishes_its_prepared_branch_not_the_parked_one(publication):
+    from scripts.swarm import publish
+
+    root, repository = publication.root, publication.repo
+    parked = git(repository, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "Parked predecessor work")
+    git(repository, "push", "origin", f"{parked}:refs/heads/predecessor")
+    publication.task["branch"] = "predecessor"
+    result = publish.publish(
+        "swarm", publication.agent, str(repository), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+    head = git(root, "rev-parse", "HEAD")
+    assert result["branch"] == publication.task["branch"] == "engineer-test"
+    assert git(root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
+    assert git(root, "ls-remote", "origin", "refs/heads/predecessor").split()[0] == parked
+    fields = {
+        "branch": "engineer-test",
+        "branch_repo": str(repository.parent / "remote.git"),
+        "repository_branches": {str(repository): "engineer-test"},
+    }
+    assert publication.updates == [("swarm", "t1", fields, publication.agent.name)]
+
+
+@pytest.mark.parametrize("prepared", [False, True])
+def test_parked_successor_restacks_and_publishes_with_predecessor_checkout_present(
+    publication, tmp_path, monkeypatch, prepared
+):
+    from scripts.swarm import publish, stack
+
+    p = publication
+    root, repository = p.root, p.repo
+    (root / "chosen.txt").write_text("before")
+    git(repository, "switch", "-c", "blocker")
+    (repository / "blocker.txt").write_text("dependency")
+    git(repository, "add", "blocker.txt")
+    git(repository, "commit", "-qm", "Dependency work")
+    base = git(repository, "rev-parse", "HEAD")
+    git(root, "merge", "--no-edit", "blocker")
+    (root / "task.txt").write_text("parked work")
+    git(root, "add", "task.txt")
+    git(root, "commit", "-qm", "Parked task work")
+    parked = git(root, "rev-parse", "HEAD")
+    git(root, "push", "origin", "HEAD:predecessor")
+    git(repository, "switch", "dev")
+    git(repository, "merge", "--squash", "blocker")
+    git(repository, "commit", "-qm", "Squash dependency")
+    git(repository, "push", "origin", "dev")
+    git(root, "branch", "XX--verifyXX")
+    p.task.update(branch="predecessor", parked_on=["dependency"], stacked_base=base)
+    p.ledger.state = lambda slug: {"tasks": [p.task, {"id": "dependency", "state": "done"}]}
+    if prepared:
+        result = publish.prepare("swarm", p.agent, str(repository), p.ledger)
+        assert result["worktree"] == str(root)
+        assert p.task["branch"] == "engineer-test"
+    predecessor = tmp_path / "predecessor"
+    git(repository, "worktree", "add", "-b", "predecessor", str(predecessor), "origin/predecessor")
+    monkeypatch.chdir(root)
+
+    stack.restack("swarm", p.agent, p.ledger)
+
+    assert p.task["branch"] == "engineer-test"
+    assert p.task["repository_branches"] == {str(repository): "engineer-test"}
+    assert p.task["parked_on"] == []
+    (root / "chosen.txt").write_text("after")
+    result = publish.publish("swarm", p.agent, str(repository), p.ledger, "Continue task", ["chosen.txt"])
+
+    head = git(root, "rev-parse", "HEAD")
+    assert result["worktree"] == str(root)
+    assert result["branch"] == p.task["branch"] == "engineer-test"
+    assert git(root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
+    assert git(root, "ls-remote", "origin", "refs/heads/predecessor").split()[0] == parked
+    assert git(predecessor, "rev-parse", "HEAD") == parked
+    assert (root / "task.txt").read_text() == "parked work"
 
 
 @pytest.mark.parametrize("fields", [{"claimed_by": "another"}, {"state": "done"}])

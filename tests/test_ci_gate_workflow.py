@@ -83,7 +83,7 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
             "mutation-plan",
             "mutation-stats",
             "reuse",
-            "queue-baseline",
+            "queue-fail-fast",
             "stage-budget",
             "select",
             "unit-selected",
@@ -161,6 +161,7 @@ def test_semgrep_grades_registry_pack_findings_new_against_the_base_in_parallel(
     assert job["if"] in (
         "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
         "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
+        "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' && github.event_name != 'push' }}",
     )
 
 
@@ -240,21 +241,7 @@ def test_lint_and_test_count_grade_a_pull_request_that_merged_dev_from_the_curre
         env = dict(os.environ, BASE=base, RUNNER_TEMP=str(tmp_path / name), GITHUB_OUTPUT=str(tmp_path / name / "out"))
         done = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=repo, env=env, check=True, capture_output=True)
         logs[name] = done.stdout.decode()
-    from scripts.swarm import merge_queue
-
-    replies = iter(
-        [
-            json.dumps({"workflow_runs": [{"id": 1, "head_sha": "h", "conclusion": "success"}]}),
-            json.dumps({"jobs": [{"id": 2, "name": "test-count (3.11)", "conclusion": "success"}]}),
-            "2026-10-13T00:00:00Z   BASE: origin/dev\n"
-            + "".join(f"2026-10-13T00:00:01Z {line}\n" for line in logs["test-count"].splitlines()),
-        ]
-    )
-
-    def reply(command, **kwargs):
-        return subprocess.CompletedProcess(command, 0, next(replies), "")
-
-    assert merge_queue.checked_base("o/r", "h", reply) == merged
+    assert f"BASE: {merged}" in logs["test-count"]
     assert _git(tmp_path / "test-count" / "base", "rev-parse", "HEAD") == merged
     assert _git(tmp_path / "lint" / "base", "rev-parse", "HEAD") == merged
     assert (tmp_path / "docs" / "docs-changes").read_text() == "docs/own.md\n"
@@ -264,7 +251,7 @@ def test_lint_and_test_count_grade_a_pull_request_that_merged_dev_from_the_curre
 def test_coverage_ratchet_grades_the_merged_shards_from_the_base_copy():
     jobs = _workflow()["jobs"]
     job = jobs["coverage-ratchet"]
-    assert job["needs"] == ["durations", "unit", "queue-baseline", "reuse"]
+    assert job["needs"] == ["durations", "unit", "reuse"]
     download = next(step for step in job["steps"] if step.get("name") == "Download shard coverage")
     assert download["with"]["pattern"] == "coverage-3.12-*"
     grade = next(step for step in job["steps"] if step.get("name") == "Hold every line the base ran")
@@ -275,13 +262,11 @@ def test_coverage_ratchet_grades_the_merged_shards_from_the_base_copy():
     assert report["with"]["path"] == "coverage-ratchet/report.txt"
 
 
-@pytest.mark.parametrize(
-    "job,step",
-    [("coverage-baseline", "Compute the coverage baseline"), ("queue-baseline", "Record this run's coverage baseline")],
-)
-def test_every_coverage_baseline_records_all_the_shards_the_unit_job_splits(job, step):
+def test_every_coverage_baseline_records_all_the_shards_the_unit_job_splits():
     jobs = _workflow()["jobs"]
-    record = next(entry for entry in jobs[job]["steps"] if entry.get("name") == step)
+    record = next(
+        entry for entry in jobs["coverage-baseline"]["steps"] if entry.get("name") == "Compute the coverage baseline"
+    )
     assert f"--shards {jobs['unit']['strategy']['matrix']['shard'][-1]} " in record["run"]
 
 
@@ -372,9 +357,54 @@ def test_coverage_ratchet_restores_a_missed_base_baseline_from_a_passed_run_of_t
     download = _step("coverage-ratchet", "Download the base baseline its run published")
     assert names.index(cached["name"]) < names.index(mint["name"]) < names.index(find["name"])
     assert names.index(find["name"]) < names.index(download["name"]) < names.index("Hold every line the base ran")
-    assert mint["if"] == "steps.cached.outcome == 'success' && steps.cached.outputs.cache-hit != 'true'"
+    assert mint["if"] == (
+        "steps.cached.outcome == 'success' && steps.cached.outputs.cache-hit != 'true'"
+        " && steps.restored.outputs.commit == ''"
+    )
     assert download["with"]["run-id"] == "${{ steps.base-run.outputs.id }}"
     assert download["with"]["name"] == "coverage-baseline"
+
+
+def test_a_superseded_base_falls_back_to_the_newest_dev_baseline_before_the_artifact_lookup():
+    steps = _workflow()["jobs"]["coverage-ratchet"]["steps"]
+    names = [step.get("name") for step in steps]
+    cached = _step("coverage-ratchet", "Restore the exact coverage baseline")
+    restored = _step("coverage-ratchet", "Grade from the newest dev baseline when the base run published none")
+    hold = _step("coverage-ratchet", "Hold every line the base ran")
+    assert cached["with"]["restore-keys"] == "coverage-baseline-"
+    assert names.index(cached["name"]) < names.index(restored["name"]) < names.index("Mint the tcc main ci App token")
+    assert restored["if"] == (
+        "steps.cached.outputs.cache-hit != 'true' && steps.cached.outputs.cache-matched-key != ''"
+    )
+    assert hold["env"]["BASE"] == "${{ steps.restored.outputs.commit || steps.base.outputs.commit }}"
+
+
+@pytest.mark.parametrize("measured", ["ancestor", "unrelated", "unrecorded"])
+def test_the_newest_dev_baseline_grades_only_from_an_ancestor_of_the_head(tmp_path, measured):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run([*git, "init", "-q"], check=True)
+
+    def commit(message):
+        subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", message], check=True)
+        return subprocess.run([*git, "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+
+    ancestor = commit("ancestor")
+    head = commit("head")
+    subprocess.run([*git, "checkout", "-q", "--orphan", "side"], check=True)
+    unrelated = commit("unrelated")
+    subprocess.run([*git, "checkout", "-q", head], check=True)
+    baseline = tmp_path / "coverage-baseline"
+    baseline.mkdir()
+    recorded = {"ancestor": {"commit": ancestor}, "unrelated": {"commit": unrelated}, "unrecorded": {}}[measured]
+    (baseline / "baseline.json").write_text(json.dumps({"tree": "t", **recorded}))
+    output = tmp_path / "output"
+    output.write_text("")
+    env = dict(os.environ, HOME=str(tmp_path), GITHUB_OUTPUT=str(output))
+    step = _step("coverage-ratchet", "Grade from the newest dev baseline when the base run published none")
+    subprocess.run(["bash", "-e", "-c", step["run"]], cwd=repo, env=env, check=True)
+    assert output.read_text() == (f"commit={ancestor}\n" if measured == "ancestor" else "")
 
 
 @pytest.mark.parametrize(("kept", "found"), [("0 1", "id=run-2\n"), ("0 0", None)])
@@ -679,8 +709,8 @@ def test_unit_and_lint_run_on_every_event_and_feed_the_required_gate():
             expected[name],
             "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
             "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
-            "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') }}",
-            "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' }}",
+            "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'pull_request' || needs.select.outputs.scope == 'full') }}",
+            "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' && github.event_name != 'push' }}",
         )
 
         assert all("steps.lookup" not in step.get("if", "") for step in job["steps"])

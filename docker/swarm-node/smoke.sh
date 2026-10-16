@@ -55,6 +55,7 @@ cleanup() {
     if [[ -n "${scanner_pid:-}" ]]; then wait "$scanner_pid" || true; fi
     if [[ -n "${scan_pid:-}" ]]; then wait "$scan_pid" || true; fi
     if [[ -n "${profile_pid:-}" ]]; then wait "$profile_pid" || true; fi
+    docker rm -f "worker-profile-positive-$fixture" "worker-profile-positive-second-$fixture" >/dev/null 2>&1 || true
     docker image rm "$image" "$rebuild" "$rejected" >/dev/null 2>&1 || true
     python3 - "$context" <<'PY'
 import shutil, sys
@@ -92,7 +93,7 @@ if [[ "$proof" != profiles ]]; then
             "$image" > "$output/$attempt.json"
     done
     docker run --rm --network none --read-only --tmpfs /home/worker:uid=10001,gid=10001 \
-        "$image" python -c 'from pathlib import Path; import os; assert os.getuid()==10001; assert not os.access("/opt/agentihooks/templates", os.W_OK); import hooks, scripts.swarm_v2.runtime; print("private home and local runtime imports passed")' \
+        "$image" python -c 'from pathlib import Path; import os; assert os.getuid()==10001; assert not os.access("/opt/agentihooks/templates", os.W_OK); assert not [p for p in Path("/opt/venv").rglob("*") if not p.is_symlink() and p.lstat().st_mode & 0o222]; import hooks, scripts.swarm_v2.runtime; print("private home and local runtime imports passed")' \
         > "$output/compatibility.log"
     docker run --rm --network none --read-only --tmpfs /home/worker:uid=10001,gid=10001 --tmpfs /tmp \
         -v "$context/tests/contracts/swarm_v2/fixtures/checkpoint/current.json:/checkpoint.json:ro" \
@@ -106,16 +107,43 @@ if [[ "$proof" != startup ]]; then
     fixtures="$context/docker/swarm-node/fixtures/profiles"
     chmod -R a+rX "$probe" "$fixtures"
     (
+        probes=()
         for case in positive positive-second rejection recovery rollback noexec; do
             volume=/home/worker:uid=10001,gid=10001,exec
             if [[ "$case" == noexec ]]; then
                 volume=/home/worker:uid=10001,gid=10001
             fi
-            docker run --rm --network none --read-only --tmpfs "$volume" --tmpfs /tmp \
+            lifetime=(--rm)
+            if [[ "$case" == positive* ]]; then lifetime=(--name "worker-profile-$case-$fixture"); fi
+            (
+                docker run "${lifetime[@]}" --network none --read-only --tmpfs "$volume" --tmpfs /tmp \
                 -v "$fixtures:/fixtures:ro" -v "$probe:/opt/probe:ro" \
                 "$image" bash /opt/probe/profile-probe.sh "${case%-second}" \
                 > "$output/profile-$case.json" 2> "$output/profile-$case.log"
+            if [[ "$case" == positive* ]]; then
+                exited="$(docker inspect --format '{{.State.FinishedAt}}' "worker-profile-$case-$fixture")"
+                docker rm "worker-profile-$case-$fixture" > /dev/null
+                python3 - "$output/profile-$case.json" "$exited" <<'PYEXIT'
+import json, sys
+from datetime import datetime, timezone
+from pathlib import Path
+path = Path(sys.argv[1])
+report = json.loads(path.read_text())
+whole, _, fraction = sys.argv[2].rstrip('Z').partition('.')
+exited = datetime.strptime(whole, '%Y-%m-%dT%H:%M:%S').replace(tzinfo=timezone.utc).timestamp() + float('0.' + (fraction or '0'))
+latency = exited - report['codex_probe']['registered_at']
+assert 0 <= latency < 2, f"Codex registration to container exit took {latency:.3f} seconds"
+report['codex_probe']['registration_to_container_exit_seconds'] = latency
+path.write_text(json.dumps(report) + '\n')
+print(f"Codex registration to container exit took {latency:.3f} seconds")
+PYEXIT
+            fi
+            ) &
+            probes+=("$!")
         done
+        status=0
+        for pid in "${probes[@]}"; do wait "$pid" || status=$?; done
+        if (( status )); then exit "$status"; fi
         python3 "$probe/profile_evidence.py" "$output" "$fixture" "$revision" "$fixtures"
     ) &
     profile_pid=$!

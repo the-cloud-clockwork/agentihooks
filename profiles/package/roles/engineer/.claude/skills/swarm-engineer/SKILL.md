@@ -101,7 +101,9 @@ Otherwise, merge on green checks and closed review. On a base branch with a merg
 a merge only queues the pull request and it lands when the queue run passes, so
 do not merge there: queue it on green checks with
 `agentihooks swarm <slug> merge queue <url>`, which goes through the GitHub API
-and works with any gh, then wait with
+and works with any gh. It queues the green head as is; do not merge dev into it
+first, since the merge group retests it against the newest dev. Merge dev only on
+a real conflict or when GitHub refuses the enqueue. Then wait with
 `agentihooks swarm <slug> wait --on merge <url>` and keep the worktree until it
 merges. `agentihooks swarm <slug> merge state <url>` reports whether it sits in
 the queue. GitHub refuses a push while the pull request sits in the queue. To

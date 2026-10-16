@@ -1425,6 +1425,35 @@ def test_an_auto_swarm_reads_the_host_once_and_autoscales_on_the_stored_room(tmp
     assert (stored["room"], stored["limit"], stored["granted_at"]) == (46, "load", 100_000)
 
 
+@pytest.mark.parametrize("scaling", ["auto", "manual"])
+def test_ready_engineers_get_free_seats_instead_of_an_idle_shifted_ci_lane(tmp_path, monkeypatch, scaling):
+    seen = [account("a", cap=6, sessions=4), account("b", cap=6), account("c", cap=6)]
+    rt = _scaling_runtime(tmp_path, monkeypatch, seen)
+    config = SwarmConfig("sw", "/repo", max_eng=8, max_ci=12, max_plan=0, scaling=scaling, lane_shift=16)
+    agents = [AgentRecord("engineer", "eng", "e")] + [
+        AgentRecord(f"ci{index}", "ci", f"c{index}") for index in range(3)
+    ]
+    rt.quota_previous(
+        {
+            "effective": {"eng": 1, "ci": 3, "plan": 0},
+            "autoscale": {
+                "ceilings": {"eng": 1, "ci": 18, "plan": 0},
+                "pending_raise": {"target": None, "ticks": 0},
+            },
+        }
+    )
+    decision = rt.quota_capacity(config, agents, 100, {"eng": 7, "ci": 0, "plan": 0})
+    assert decision["placeable"] == {"claude": 14, "codex": 0}
+    assert decision["effective"] == {"eng": 8, "ci": 3, "plan": 0}
+    assert len(decision["placements"]["eng"]) == 7
+    assert decision["placements"]["ci"] == []
+    if scaling == "auto":
+        assert decision["autoscale"]["ceilings"]["ci"] == 3
+    else:
+        assert decision["configured"] == {"eng": 8, "ci": 12, "plan": 0}
+        assert "autoscale" not in decision
+
+
 def test_the_stored_top_level_host_room_wins_over_the_autoscale_copy():
     from scripts.swarm.host_budget import HostSample
 
@@ -1452,7 +1481,7 @@ def test_an_auto_swarm_with_an_unknown_host_scales_on_quota_alone():
     assert decision["pending_raise"] == expected["pending_raise"] == {"target": 13, "ticks": 1}
     assert (
         decision["reason"]
-        == "Quota seats 10 (claude 6, codex 4); host room unknown; ceiling 1 of 13; raise held at tick 1 of 3."
+        == "Quota seats 10 (claude 6, codex 4); host room unknown; ceiling 5 of 13; raise held at tick 1 of 3."
     )
     assert decision["host"] == {
         "room": None,
@@ -1526,7 +1555,7 @@ def test_repeated_readings_between_the_watermarks_never_raise_the_ceiling_past_t
         totals.append(sum(decision["ceilings"].values()))
         previous = {"host": decision["host"], "autoscale": decision}
         live += live < totals[-1]
-    assert totals == [2, 2, 4] + [5] * 9
+    assert totals == [3, 4] + [5] * 10
     assert asked == [1_000] * 12
 
 
@@ -1623,14 +1652,14 @@ def test_an_auto_swarm_with_quota_and_host_room_rises_above_its_configured_caps_
     ledger.comment = lambda slug, item, text, by: None
     rt = _scaling_runtime(tmp_path, monkeypatch, [account(cap=6), account("cx", harness="codex", cap=6)])
     first = _scaling_tick(store, ledger, rt, 1000)
-    assert sum(first["configured"].values()) == 1
+    assert sum(first["configured"].values()) == 2
     assert first["autoscale"]["pending_raise"] == {"target": 12, "ticks": 1}
     second = _scaling_tick(store, ledger, rt, 61_000)
     assert second["autoscale"]["pending_raise"] == {"target": 12, "ticks": 2}
     assert "raise held at tick 2 of 3" in second["autoscale"]["reason"]
     third = _scaling_tick(store, ledger, rt, 121_000)
-    assert third["configured"] == {"eng": 2, "ci": 1, "plan": 0}
-    assert third["effective"] == {"eng": 2, "ci": 1, "plan": 0}
+    assert third["configured"] == {"eng": 3, "ci": 1, "plan": 0}
+    assert third["effective"] == {"eng": 3, "ci": 1, "plan": 0}
     assert third["autoscale"]["host"]["room"] > 0
     assert store.config("sw").max_eng == 1
 
@@ -1851,7 +1880,7 @@ def test_live_inputs_read_quota_without_a_refresh_and_count_ready_demand(monkeyp
     assert seen == [({"X": "1"}, 5.0, False)]
     assert inputs.observations == observed
     assert [agent.name for agent in inputs.agents] == ["engineer@x-0001"]
-    assert inputs.demand == {"eng": 3, "ci": 1, "plan": 0}
+    assert inputs.demand == {"eng": 2, "ci": 1, "plan": 0}
     assert inputs.host is host_budget.read_host
     assert inputs.previous == stored
     assert inputs.warned == {("claude", "warned"): "week"}

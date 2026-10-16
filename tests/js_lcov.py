@@ -103,6 +103,7 @@ def main() -> int:
     parser.add_argument("--root", type=Path, default=Path("."))
     parser.add_argument("--captures", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--selected", action="store_true")
     args = parser.parse_args()
     captures = sorted(args.captures.rglob("capture-*.json"))
     totals, kinds = {}, set()
@@ -118,7 +119,13 @@ def main() -> int:
                 if count is not None:
                     summed[number] = (summed[number] or 0) + count
     missing = sorted({"browser", "node"} - kinds)
-    if missing:
+    if args.selected and not kinds:
+        args.out.write_text("", encoding="utf-8")
+        print(
+            f"The selected tests recorded no browser or node coverage under {args.captures}; the page report is empty"
+        )
+        return 0
+    if missing and not args.selected:
         print(f"::error::No {' or '.join(missing)} coverage recorded under {args.captures}")
         return 1
     sources = Sources(args.root)

@@ -13,8 +13,12 @@ API_CALL = re.compile(r"\b_?gh\b(?!-)|api\.github\.com|GITHUB_API_URL")
 MODULE = re.compile(r"\bpython3?\b[^\n;&|]*?\s-m\s+([\w.]+)")
 BESIDE = re.compile(r"\$\(dirname \"\$0\"\)|\$\{?GITHUB_ACTION_PATH\}?")
 WORKSPACE = re.compile(r"\$\{?GITHUB_WORKSPACE\}?")
-# The documented local `--ci` download; the workflow passes `--samples` with `--ci 5`, so CI never calls these.
-LOCAL_ONLY = {ROOT / "tests/refresh_durations.py": {"_gh", "ci_run_ids", "ci_download"}}
+# These API functions run only in local downloads or steps bound to the App token.
+LOCAL_ONLY = {
+    ROOT / "scripts/ci_budget/jobs.py": {"read_page"},
+    ROOT / "tests/refresh_durations.py": {"_gh", "ci_run_ids", "ci_download"},
+}
+METADATA_ONLY = {ROOT / "scripts/ci_reuse.py": {"paged_reuse_job"}}
 TOKEN = re.compile(
     r"github\s*(\.\s*token|\[\s*['\"]token['\"]\s*\])"
     r"|secrets\s*(\.|\[\s*['\"])\s*(github|gh)(_\w*|\w*(token|pat)(?![a-z]))"
@@ -65,7 +69,10 @@ def _holds_token(step: dict) -> bool:
         TOKEN.search(_values(step.get("env")))
         or TOKEN.search(_values(step.get("with")))
         or TOKEN.search(step.get("run", ""))
-        or step.get("uses", "").startswith("actions/github-script@")
+        or (
+            step.get("uses", "").startswith("actions/github-script@")
+            and (step.get("with") or {}).get("github-token") != APP_TOKEN
+        )
     )
 
 
@@ -121,8 +128,9 @@ def _api_calls(runs) -> dict[Path, int]:
 
 def _reached_source(path: Path) -> str:
     lines = path.read_text().splitlines()
-    for node in ast.parse("\n".join(lines)).body if path in LOCAL_ONLY else []:
-        if isinstance(node, ast.FunctionDef) and node.name in LOCAL_ONLY[path]:
+    exemptions = LOCAL_ONLY.get(path, set()) | METADATA_ONLY.get(path, set())
+    for node in ast.parse("\n".join(lines)).body if exemptions else []:
+        if isinstance(node, ast.FunctionDef) and node.name in exemptions:
             lines[node.lineno - 1 : node.end_lineno] = [""] * (node.end_lineno - node.lineno + 1)
     return "\n".join(lines)
 
@@ -145,12 +153,15 @@ def test_no_script_a_step_runs_calls_the_api():
         "hooks/targets/normalizer.py",
         "scripts/brain-smoke",
         "scripts/ci_budget/__main__.py",
+        "scripts/ci_budget/jobs.py",
         "scripts/ci_cpu_quota.py",
         "scripts/ci_dependency_audit.py",
         "scripts/ci_dev_reuse.py",
         "scripts/ci_mutation/__main__.py",
         "scripts/ci_mutation/browser.py",
         "scripts/ci_mutation/plan.py",
+        "scripts/ci_queue_fail_fast.py",
+        "scripts/ci_release.sh",
         "scripts/ci_semgrep.py",
         "scripts/ci_wiring.py",
         "scripts/packaging/compose-hive-smoke.sh",
@@ -203,6 +214,27 @@ def test_each_local_only_exemption_names_a_function_that_calls_the_api():
         assert all(API_CALL.search(ast.get_source_segment(source, functions[name])) for name in names)
 
 
+def test_the_reuse_factory_exemption_contains_only_command_replacements():
+    for path, names in METADATA_ONLY.items():
+        source = path.read_text()
+        functions = {node.name: node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef)}
+        for name in names:
+            calls = [
+                node
+                for node in ast.walk(functions[name])
+                if isinstance(node, ast.Call) and API_CALL.search(ast.get_source_segment(source, node))
+            ]
+            assert calls
+            assert all(isinstance(node.func, ast.Attribute) and node.func.attr == "replace" for node in calls)
+
+
+def test_the_budget_reader_runs_only_on_the_app_token():
+    reader = ROOT / "scripts/ci_budget/jobs.py"
+    steps = [step for _, step, here in _all_steps() if reader in _called(step.get("run", ""), here)]
+    assert steps
+    assert all(step.get("env", {}).get("GH_TOKEN") == APP_TOKEN and not _holds_token(step) for step in steps)
+
+
 @pytest.mark.parametrize(
     ("call", "script"),
     [
@@ -240,10 +272,11 @@ def test_a_script_outside_the_caller_is_not_read(tmp_path):
     assert list(_called('bash "$GITHUB_ACTION_PATH/../outer.sh"', tmp_path / "action")) == []
 
 
-def test_an_api_call_outside_the_exempt_functions_is_counted(tmp_path, monkeypatch):
+@pytest.mark.parametrize("exemptions", [LOCAL_ONLY, METADATA_ONLY])
+def test_an_api_call_outside_the_exempt_functions_is_counted(tmp_path, monkeypatch, exemptions):
     script = tmp_path / "durations.py"
     script.write_text('def fetch():\n    return gh(["api"])\n\n\ndef merge():\n    return 1\n')
-    monkeypatch.setitem(LOCAL_ONLY, script.resolve(), {"fetch"})
+    monkeypatch.setitem(exemptions, script.resolve(), {"fetch"})
     run = [('bash "$GITHUB_ACTION_PATH/durations.py"', tmp_path)]
     assert _api_calls(run) == {script.resolve(): 0}
     script.write_text(script.read_text().replace("return 1", 'return urlopen("https://api.github.com/x")'))
@@ -298,6 +331,15 @@ def test_an_api_call_planted_in_a_called_script_is_counted(tmp_path, plant, plan
     ],
 )
 def test_only_an_api_step_on_the_app_token_alone_stays_off_the_shared_quota(step, offends):
+    assert _offends(step) is offends
+
+
+@pytest.mark.parametrize(
+    ("binding", "offends"),
+    [(APP_TOKEN, False), ("${{ github.token }}", True), ("", True), ("${{ secrets.OTHER_TOKEN }}", True)],
+)
+def test_github_script_requires_the_explicit_app_token(binding, offends):
+    step = {"uses": "actions/github-script@v7", "with": {"github-token": binding}}
     assert _offends(step) is offends
 
 
@@ -408,7 +450,8 @@ def test_sonar_downloads_this_runs_coverage_after_the_shards():
     assert download["with"] == {"pattern": "coverage-3.12-*", "path": ".coverage-shards"}
     assert steps.index(download) < steps.index(merge)
     assert merge["env"] == {
-        "SHARDS": "${{ needs.select.outputs.scope == 'selected' && needs.select.outputs.count || 12 }}"
+        "SHARDS": "${{ needs.select.outputs.scope == 'selected' && needs.select.outputs.count || 12 }}",
+        "SCOPE": "${{ needs.select.outputs.scope }}",
     }
     assert 'bash .github/coverage/combine.sh --downloaded "$SHARDS" ||' in merge["run"]
 
@@ -433,7 +476,7 @@ def test_no_job_skips_on_a_tree_another_run_passed():
     assert "steps.lookup" not in (ROOT / ".github/workflows/test.yml").read_text()
 
 
-def _superseded(tmp_path, dev_head: str, sha: str = "a" * 40) -> str | None:
+def _superseded(tmp_path, dev_head: str, sha: str = "a" * 40) -> tuple[int, str | None]:
     step = next(step for step in _jobs()["sonar"]["steps"] if step.get("id") == "current")
     tools = tmp_path / "bin"
     tools.mkdir()
@@ -446,16 +489,20 @@ def _superseded(tmp_path, dev_head: str, sha: str = "a" * 40) -> str | None:
         env={**os.environ, "PATH": f"{tools}:{os.environ['PATH']}", "GITHUB_OUTPUT": str(output), "SHA": sha},
         check=False,
     )
-    return output.read_text() if result.returncode == 0 else None
+    return result.returncode, output.read_text() if output.exists() else None
 
 
 @pytest.mark.parametrize(("dev_head", "superseded"), [("a" * 40, "false"), ("b" * 40, "true")])
 def test_a_dev_push_skips_the_analysis_once_dev_moved_past_it(tmp_path, dev_head, superseded):
-    assert _superseded(tmp_path, dev_head) == f"superseded={superseded}\n"
+    status, output = _superseded(tmp_path, dev_head)
+    assert status in ({0, 1} if superseded == "true" else {0})
+    assert output == f"superseded={superseded}\n"
 
 
 def test_an_unreadable_dev_head_fails_the_check_instead_of_skipping_the_analysis(tmp_path):
-    assert _superseded(tmp_path, "") is None
+    status, output = _superseded(tmp_path, "")
+    assert status != 0
+    assert output is None
 
 
 def test_sonar_names_the_current_dev_head_from_git_and_gates_the_scan_on_it():

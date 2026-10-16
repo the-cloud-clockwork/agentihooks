@@ -559,10 +559,64 @@ def test_restack_after_a_squash_merge_replays_only_task_work(stacked_repo, capsy
     assert (repo / "shared.txt").read_text() == "task work\n"
     assert ledger.rows["t1"]["parked_on"] == []
     assert ledger.rows["t1"]["stacked_base"] == base
-    assert ("t1", {"parked_on": []}, AGENT) in ledger.updates
+    assert (
+        "t1",
+        {
+            "parked_on": [],
+            "branch": "finisher",
+            "branch_repo": str(repo.parent / "origin.git"),
+            "repository_branches": {str(repo): "finisher"},
+        },
+        AGENT,
+    ) in ledger.updates
     assert json.loads(capsys.readouterr().out.splitlines()[-1]) == {"task": "t1", "parked_on": []}
     assert store.agents("sw")[0] == agent
     assert not (repo / _git(repo, "rev-parse", "--git-path", "agentihooks-restack.json")).exists()
+
+
+def test_restack_registers_the_successor_branch_before_returning(stacked_repo):
+    _, ledger, repo, _ = stacked_repo
+    ledger.rows["t1"]["repository_branches"] = {"/other/repository": "keep-other", str(repo): "parked"}
+    assert restack() == 0
+    task = ledger.rows["t1"]
+    assert task["branch"] == "finisher"
+    assert task["branch_repo"] == str(repo.parent / "origin.git")
+    assert task["repository_branches"] == {"/other/repository": "keep-other", str(repo): "finisher"}
+    assert task["parked_on"] == []
+
+
+def test_restack_refuses_when_the_remote_predecessor_has_work_missing_locally(stacked_repo, capsys):
+    _, ledger, repo, _ = stacked_repo
+    advanced = _git(repo, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "New predecessor work")
+    _git(repo, "push", "origin", f"{advanced}:parked")
+    before = _git(repo, "rev-parse", "HEAD")
+
+    assert restack() == 1
+
+    assert capsys.readouterr().err.endswith(
+        "the stacked base is not in this branch; use a worktree cut from the parked branch\n"
+    )
+    assert _git(repo, "rev-parse", "HEAD") == before
+    assert ledger.rows["t1"]["branch"] == "parked"
+    assert ledger.updates == []
+
+
+def test_restack_reports_checkout_lookup_failure_without_changing_task_metadata(stacked_repo, monkeypatch, capsys):
+    _, ledger, _, _ = stacked_repo
+    real_shell = stack.shell
+
+    def failed(argv):
+        if argv == ["git", "rev-parse", "--show-toplevel"]:
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="git failure\n")
+        return real_shell(argv)
+
+    monkeypatch.setattr(stack, "shell", failed)
+
+    assert restack() == 1
+    assert capsys.readouterr().err == "swarm: cannot locate the worktree: git failure\n"
+    assert ledger.rows["t1"]["branch"] == "parked"
+    assert ledger.rows["t1"]["parked_on"] == ["a"]
+    assert ledger.updates == []
 
 
 def test_restack_removes_stacked_commits_even_after_merging_dev(stacked_repo):

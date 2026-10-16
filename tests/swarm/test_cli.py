@@ -1068,6 +1068,7 @@ def test_agent_record_round_trips_through_status_json(env, capsys):
     store, _, _ = env
     run("sw", "create", "--repo", "/repo")
     store.put_agent("sw", AgentRecord("engineer@a1b2c3-0009", "eng", "t1"))
+    env[2].live.add("engineer@a1b2c3-0009")
     run("sw", "status", "--json")
     assert json.loads(capsys.readouterr().out.splitlines()[-1])["agents"][0]["name"] == "engineer@a1b2c3-0009"
 
@@ -1423,6 +1424,7 @@ def test_status_json_gives_every_agent_a_status_and_its_model(env, capsys):
     }
     for record in records.values():
         store.put_agent("sw", record)
+    env[2].live.update(records)
     run("sw", "status", "--json")
     agents = {a["name"]: a for a in json.loads(capsys.readouterr().out.splitlines()[-1])["agents"]}
     assert {n: a["status"] for n, a in agents.items()} == {
@@ -1435,6 +1437,23 @@ def test_status_json_gives_every_agent_a_status_and_its_model(env, capsys):
     assert (agents["engineer@a1b2c3-0001"]["model"], agents["engineer@a1b2c3-0001"]["effort"]) == ("opus", "high")
 
 
+@pytest.mark.parametrize("json_output", [True, False])
+def test_status_omits_gone_processes_in_both_formats(env, capsys, json_output):
+    store, _, runtime = env
+    run("sw", "create", "--repo", "/repo")
+    store.put_agent("sw", AgentRecord("living-worker", "eng", "t1"))
+    store.put_agent("sw", AgentRecord("gone-worker", "ci", "t2"))
+    runtime.live.add("living-worker")
+    capsys.readouterr()
+    run("sw", "status", *(["--json"] if json_output else []))
+    output = capsys.readouterr().out
+    if json_output:
+        assert [agent["name"] for agent in json.loads(output)["agents"]] == ["living-worker"]
+    else:
+        assert "living-worker" in output
+        assert "gone-worker" not in output
+
+
 def test_status_text_shows_each_agent_model_and_effort_or_unknown(env, capsys):
     store, _, _ = env
     run("sw", "create", "--repo", "/repo")
@@ -1442,6 +1461,7 @@ def test_status_text_shows_each_agent_model_and_effort_or_unknown(env, capsys):
         "sw", AgentRecord("engineer@a1b2c3-0001", "eng", "t1", harness="codex", model="gpt-6.1-sol", effort="high")
     )
     store.put_agent("sw", AgentRecord("engineer@a1b2c3-0002", "eng", "t2", harness="claude"))
+    env[2].live.update({"engineer@a1b2c3-0001", "engineer@a1b2c3-0002"})
     run("sw", "status")
     lines = {line.split("\t")[0]: line.split("\t") for line in capsys.readouterr().out.splitlines() if "\t" in line}
     assert "gpt-6.1-sol high" in lines["engineer@a1b2c3-0001"]
@@ -2239,6 +2259,7 @@ def test_status_shows_each_agent_conversation_id_or_a_dash(env, capsys):
     run("sw", "create", "--repo", "/repo")
     store.put_agent("sw", AgentRecord("engineer@a1b2c3-0001", "eng", "t1", pane_id="w1:p1", conversation_id="5c90d80c"))
     store.put_agent("sw", AgentRecord("engineer@a1b2c3-0002", "eng", "t2", pane_id="w1:p2"))
+    env[2].live.update({"engineer@a1b2c3-0001", "engineer@a1b2c3-0002"})
     run("sw", "status")
     lines = {line.split("\t")[0]: line.split("\t") for line in capsys.readouterr().out.splitlines() if "\t" in line}
     assert lines["engineer@a1b2c3-0001"][-3] == "5c90d80c" and lines["engineer@a1b2c3-0002"][-3] == "-"
@@ -2335,6 +2356,7 @@ def test_status_exposes_pending_inbox_state_duration_tick_and_crew_history(env, 
     store.put_agent("sw", agent)
     inbox = InboxStore(store.redis)
     inbox.send("operator", agent.name, "Review this work")
+    env[2].live.add(agent.name)
     store.redis.set(store.key("sw", "last-tick"), "1234")
     run("sw", "status", "--json")
     status = json.loads(capsys.readouterr().out.splitlines()[-1])

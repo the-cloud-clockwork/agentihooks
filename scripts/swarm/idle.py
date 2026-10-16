@@ -48,6 +48,22 @@ def last_prompt(redis, slug, name):
     return int(raw) if raw else None
 
 
+def remember_wait(redis, slug: str, name: str, entry: dict, end: int) -> None:
+    ended = {**entry, "until": min(entry["until"], end)}
+    redis.hset(key(slug, "wait-history", name), str(entry["at"]), json.dumps(ended))
+
+
+def wait_history(redis, slug: str, name: str) -> list[dict]:
+    from scripts.swarm.naming import NameRegistry
+
+    names = NameRegistry(redis)
+    name = names.resolve(name)
+    entries = {}
+    for candidate in [*names.aliases(name), name]:
+        entries.update(redis.hgetall(key(slug, "wait-history", candidate)))
+    return sorted((json.loads(raw) for raw in entries.values()), key=lambda held: held["at"])
+
+
 def declare_wait(redis, slug, name, until, reason, at, on=None):
     from scripts.swarm.naming import NameRegistry
 
@@ -55,9 +71,19 @@ def declare_wait(redis, slug, name, until, reason, at, on=None):
     if until <= at:
         raise SwarmError("a wait needs an end time in the future")
     entry = {"until": until, "reason": reason, "at": at, **({"on": on} if on else {})}
-    redis.set(key(slug, "wait", name), json.dumps(entry), px=until - at)
-    if named(entry):
-        redis.set(key(slug, "waited", name), until, px=until - at + BEAT_TTL_S * 1000)
+    active = key(slug, "wait", name)
+
+    def update(pipe):
+        previous = pipe.get(active)
+        pipe.multi()
+        if previous:
+            remember_wait(pipe, slug, name, json.loads(previous), at)
+        remember_wait(pipe, slug, name, entry, until)
+        pipe.set(active, json.dumps(entry), px=until - at)
+        if named(entry):
+            pipe.set(key(slug, "waited", name), until, px=until - at + BEAT_TTL_S * 1000)
+
+    redis.transaction(update, active)
 
 
 def named(entry):
@@ -84,8 +110,17 @@ def end_wait(redis, slug, name, at):
     from scripts.swarm.naming import NameRegistry
 
     name = NameRegistry(redis).resolve(name)
-    redis.delete(key(slug, "wait", name))
-    redis.set(key(slug, "waited", name), at, ex=BEAT_TTL_S)
+    active = key(slug, "wait", name)
+
+    def update(pipe):
+        previous = pipe.get(active)
+        pipe.multi()
+        if previous:
+            remember_wait(pipe, slug, name, json.loads(previous), at)
+        pipe.delete(active)
+        pipe.set(key(slug, "waited", name), at, ex=BEAT_TTL_S)
+
+    redis.transaction(update, active)
 
 
 def verdict(pane, heartbeat, wait, now_ms):
