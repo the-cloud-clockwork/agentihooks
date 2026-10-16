@@ -42,8 +42,8 @@ tick. The number has four digits and counts each type on its own within the swar
 master takes the next master number. A removed swarm's code stays taken; created again, the swarm gets a new one.
 
 That name is the Claude or Codex session name, the inbox address, the ledger crew name, the `status` row and the
-`terminate-agent` target. herdr refuses an at sign in agent names, so the herdr agent name carries a dash in its
-place (`engineer-a1b2c3-0002`). An inbox item left for a retired engineer or ci agent moves to its
+`terminate-agent` target ([one Codex conversation can be stood down alone](../reference/cli-commands.md#stand-down-one-codex-conversation)).
+herdr refuses an at sign in agent names, so the herdr agent name carries a dash in its place (`engineer-a1b2c3-0002`). An inbox item left for a retired engineer or ci agent moves to its
 seat when its task goes on, else it is withdrawn and its sender told; a master's passes to its successor. `scripts/swarm/naming.py` is the only code that builds or parses an
 agent name, and a test walks `scripts/` and `hooks/` to keep it so.
 
@@ -222,14 +222,16 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> issue URL` | Record the task's GitHub issue, where the repo has issues; without them the ledger task is the spec. |
 | `agentihooks swarm <id> pr URL` | Record the task's pull request, its head branch and that branch's repository (`branch_repo`); the task moves to `pr`. |
 | `agentihooks swarm <id> merge queue\|dequeue\|state URL` | Queue a pull request into `dev` on the merge queue at its current head, take it out of the queue, or report its state, head and queue entry as JSON. It goes through `gh api graphql`, so any `gh` with `gh api` works; queue and dequeue run only for a swarm worker, never the master, and refuse a pull request into any other base. |
+| `agentihooks swarm <id> prepare` | Set `--repositories /absolute/repo,/absolute/other` when adding a task, or `task set <task> repositories=/absolute/repo`. Use that explicit `repositories` list of local repository paths; without it, report that the swarm repository is the default. Prose repository names do not select repositories. Create or reuse one worktree per repository from its own `dev`, with a recorded continuation branch scoped to that repository. Return each worktree and branch. |
+| `agentihooks swarm <id> publish --message TEXT -- FILE...` | Use the repository of the current task worktree; from a primary checkout, resolve the sole task repository or require a worktree selection when several are declared. Stage only explicit repository relative files, commit, run that repository’s `scripts.ci_prepush` gate, then push and retain its branch separately from other task repositories. The result names the gate. A repository without that module uses the named AgentiHooks touched Python fallback: lint, format, size and complexity on changed Python files since its own `origin/dev` merge base, without agentihooks baseline files or local tests. Unrelated tracked changes are refused before staging; unrelated untracked files are preserved. A failed stage stops publication and names the next command. Repeat the command after fixing a failure; an already committed head is graded again without an empty commit. Protected branches and tasks owned by another agent are refused. Tests run only in CI. |
 | `agentihooks swarm <id> branch` | Record the current worktree branch on the task once it is on origin, with its repository (`branch_repo`, the origin remote without credentials), so dependent tasks can start from it. |
 | `agentihooks swarm <id> review` | Start a review round on the task. The third round answers that review is closed: any finding still open gets one ruling from the other reader, then the merge proceeds. A fourth is refused with that text. |
 | `agentihooks swarm <id> done [--pr URL] [proof flags]` | Close the task with the proof its kind needs; the swarm then closes the session. |
-| `agentihooks swarm <id> ready DOC` | Release the seat of a code or ci task whose reviewed pull request waits only on checks and the merge queue. Refuses at manual or assist autonomy, without a recorded open pull request, or unless the worktree is clean and its head is the pull request head. Checks the document like `handoff`, records the pull request, head and worktree, marks the task `awaiting` `merge` (still `pr`), stores the handoff and ends the session; the finished agent no longer holds a seat and the tick never reopens the task as an orphan. Each tick the merge pass watches its checks like a checks wait, queues it on green like `merge queue` (watching the checks again when the queue updates the branch), waits on the queue like a merge wait, then writes the same done fields `done` writes, closes its group members and removes the worktree with `wt.sh done`. Red checks, a closed pull request or a queue ejection reopen the task for the next engineer with the handoff, removing the worktree with `wt.sh done --pushed`. Five refusals GitHub returns (a GraphQL error, or a base other than `dev`) reopen it too; any other queue failure, an outage or checks still running, is retried and never counted. The intent gate holds `ready` like `done` in its enforce and coach modes; off and observe let it pass without a verdict. |
+| `agentihooks swarm <id> ready DOC` | Release the seat of a code or ci task whose reviewed pull request waits only on checks and the merge queue. Refuses at manual or assist autonomy, without a recorded open pull request, or unless the worktree is clean and its head is the pull request head. Checks the document like `handoff`, records the pull request, head and worktree, marks the task `awaiting` `merge` (still `pr`), stores the handoff and ends the session; the finished agent no longer holds a seat and the tick never reopens the task as an orphan. Each tick the merge pass watches its checks like a checks wait, queues its green head as is like `merge queue`, waits on the queue like a merge wait, then writes the same done fields `done` writes, closes its group members and removes the worktree with `wt.sh done`. Red checks, a closed pull request or a queue ejection reopen the task for the next engineer with the handoff, removing the worktree with `wt.sh done --pushed`. Five refusals GitHub returns (a GraphQL error, or a base other than `dev`) reopen it too; any other queue failure, an outage or checks still running, is retried and never counted. The intent gate holds `ready` like `done` in its enforce and coach modes; off and observe let it pass without a verdict. |
 | `agentihooks swarm <id> block NOTE` | Comment the blocker, mark the task `blocked`, end the session. |
-| `agentihooks swarm <id> trace-plan` | Trace `plan.md` in your task work folder, one piece per line (`- what \| area, area \| why`), to the task, its phase and the project intent through the classifier. A piece under 0.3 is cut and, once the plan passes, filed as a follow-up. A plan with more than half its pieces cut, or sized above one pull request at confidence 0.7, fails; the second failed plan blocks the task when `trace-plan-gate=deny` (default `log only` logs it). A piece appended to a passing plan is traced alone. Before the task's pull request opens, a plan that does not fail is also judged by the intent check as a plan, on its kept pieces and plan slice: whether the planned work serves the phase, covers the task and weakens nothing, with no demand for shipped code or proof; that verdict is printed as `intent` and logged like a pull request verdict. The verdict lands in `plan-verdict.json`; no classifier answer gives `unchecked`, counted in the gate log. The `build` gate (`python -m scripts.gates build`, on Edit, Write, MultiEdit, NotebookEdit, Serena edit tools and `git commit`) refuses an engineer's or CI agent's edit before a passing verdict for the current `plan.md`, and an edit or staged file outside the kept pieces' areas and the task territory; the work folder, `~/scratchpad` and files outside any git work tree are exempt, and an `unchecked` verdict lets edits through, counted. `build-gate` defaults to `log only`. |
+| `agentihooks swarm <id> trace-plan` | Trace `plan.md` in your task work folder, one piece per line (`- what \| area, area \| why`), to the task, its phase and the project intent through the classifier. A piece under 0.3 is cut and, once the plan passes, filed as a follow-up. The task's latest five scope authorizations, master relays of operator words and operator or master comments starting `In scope:`, travel in the trace intent, and the classifier asks whether each covers each piece that is not a clearance; a piece covered at 0.7 is kept, its row and the report's `authorized` name the authorization and it is never filed as a cut. A new authorization retraces an unchanged plan without counting a failed plan; a follow up filed before the authorization stays filed. A plan with more than half its pieces cut, or sized above one pull request at confidence 0.7, fails; the second failed plan blocks the task when `trace-plan-gate=deny` (default `log only` logs it). A piece appended to a passing plan is traced alone. Before the task's pull request opens, a plan that does not fail is also judged by the intent check as a plan, on its kept pieces and plan slice: whether the planned work serves the phase, covers the task and weakens nothing, with no demand for shipped code or proof; that verdict is printed as `intent` and logged like a pull request verdict. The verdict lands in `plan-verdict.json`; no classifier answer gives `unchecked`, counted in the gate log. The `build` gate (`python -m scripts.gates build`, on Edit, Write, MultiEdit, NotebookEdit, Serena edit tools and `git commit`) refuses an engineer's or CI agent's edit before a passing verdict for the current `plan.md`, and an edit or staged file outside the kept pieces' areas and the task territory; the work folder, `~/scratchpad` and files outside any git work tree are exempt, and an `unchecked` verdict lets edits through, counted. `build-gate` defaults to `log only`. |
 | `agentihooks swarm <id> plan approve PHASE [--note TEXT]` / `plan send-back PHASE --note TEXT` | Decide the slice of a phase in review. At `manual` and `assist` autonomy the operator decides with the **Approve plan** and **Send back** buttons on the phase row, and the command refuses an agent naming them (at `assist` the master posts its recommendation as a phase comment). At `delegate` and `full` only the master decides. Approve moves the phase to building and the tick claims its tasks on the same pass. Send back reopens the plan task, records the note for the planner's steering and counts a round; when the planner finishes again the tick reopens the review. The third send back leaves the plan task done, marks the review escalated and raises a priority naming the notes; only the operator decides after that, and an operator send back reopens the plan task whatever the count. |
-| `agentihooks swarm <id> wait [MINUTES] [--on checks PR_URL\|reply ITEM\|task ID] [--reason TEXT]` | Declare a wait. While it holds, the tick counts no idle tick for you, so you are neither nudged nor retired. A checked wait (`--on`) lasts until the tick sees its thing resolve (the checks finish or the pull request closes or merges, the inbox item closes, the task is done or blocked), at most MINUTES or 12 hours; the tick then ends it and sends you an inbox item. A bare wait lasts MINUTES, at most 60. The `claim-stop` gate (`python -m scripts.gates claim-stop`, run from a Stop condition) refuses an eng or ci agent's stop while it holds a claimed or pr task with work owed: its pull request merged (run `done`), checks failed (fix or block) or green (merge), or no pull request and no live wait. Pending checks pass the stop and record a checked wait on them, unless a live wait on a reply or a task already holds, which is kept with its reason. The third block in a row with no outcome between blocks the task. The `push-stop` gate, beside it in the engineer, cicd and qa roles, pushes the agent's task branches itself (any worktree `~/dev/worktrees/<repo>/<agent>[-N]` on its own branch, never `dev` or `main`), records branch and head on the task, and refuses the stop with one fixed message, also sent to the agent's inbox, over uncommitted changes, a push origin refused, or pushed work with no pull request and no ledger line since the push. Planners, plan tasks, the master and the operator's sessions pass. |
+| `agentihooks swarm <id> wait [MINUTES] [--on checks PR_URL\|RUN_URL\|reply ITEM\|task ID] [--reason TEXT]` | Declare a wait. While it holds, the tick counts no idle tick for you, so you are neither nudged nor retired. A checked wait (`--on`) lasts until the tick sees its thing resolve (the checks finish or the pull request closes or merges, an Actions run completes, is cancelled or is missing, the inbox item closes, the task is done or blocked), at most MINUTES or 12 hours; the tick then ends it and sends you an inbox item. A bare wait lasts MINUTES, at most 60. The `claim-stop` gate (`python -m scripts.gates claim-stop`, run from a Stop condition) refuses an eng or ci agent's stop while it holds a claimed or pr task with work owed: its pull request merged (run `done`), checks failed (fix or block) or green (merge), or no pull request and no live wait. Pending checks pass the stop and record a checked wait on them, unless a live wait on a reply or a task already holds, which is kept with its reason. The third block in a row with no outcome between blocks the task. The `push-stop` gate, beside it in the engineer, cicd and qa roles, pushes the agent's task branches itself (any worktree `~/dev/worktrees/<repo>/<agent>[-N]` on its own branch, never `dev` or `main`), records branch and head on the task, and refuses the stop with one fixed message, also sent to the agent's inbox, over uncommitted changes, a push origin refused, or pushed work with no pull request and no ledger line since the push. Planners, plan tasks, the master and the operator's sessions pass. |
 | `agentihooks swarm <id> progress --doing TEXT --ends-when TEXT` | Say what you are doing and when it ends: a ledger line on your task, a line in its work folder `progress.md` and an outcome on the progress signal. The tick raises a quiet flag (`gates/quiet/<agent>`, a gate log `count` row) on an eng or ci agent holding a claimed or pr task with no progress signal (last outcome, work folder progress line, start) for 30 minutes and no live checked wait. While it stands the `quiet` gate (`python -m scripts.gates quiet`, behind a bash flag test on every tool call) refuses every call except `agentihooks ledger`, `swarm` and `msg` commands; `progress` clears it. The stale claim finding reads the same quiet minutes, and each idle tick is a gate log `count` row (`idle-ticks`) for `doctor rates`. |
 | `agentihooks swarm <id> handoff DOC [--recap FILE]` | Finish the session but keep the task: the next tick spawns a successor with the document in its prompt. `--recap` adds the recap (what you did, where you stopped, what you promised) to your seat; older recaps are kept. A hook asks for it when the session reaches `AGENTIHOOKS_COMPACT_LIMIT` thousand tokens (default 600). |
 | `agentihooks swarm <id> park DOC` | Park a stacked task whose dependency is still open. Refuses unless the task's `branch` is on origin at the worktree head, the worktree holds no uncommitted changes or untracked files and, where the repo has issues, the task has an issue. Checks the document like `handoff`, writes `parked_on` (the open dependencies) and `stacked_base` (where the branch left the newest dependency branch; for a dependency whose `branch_repo` is another repository, fetched from there, the task's own fork from `origin/dev`), records those other repositories in `parked_repos`, comments the issue with the branch and the ledger task with the blocker, stores the handoff, ends the session and removes the worktree with `wt.sh done --pushed`, which keeps the pushed branch, since the next engineer cuts its own from the pushed branch. The tick reopens the task, which waits until its blockers are done. |
@@ -287,6 +289,49 @@ seen merged is not read again.
 `--must`, `--check` and `--judge` on `task add` store a proof contract (what must be true, how it is
 checked, who judges it) that the agent's prompt carries.
 
+### Split tasks across pull requests
+
+A `code` or `ci` task can declare several plan line ranges for separate pull requests while keeping one task and its completion proof. Declare the split **before recording any pull request**. The ranges must be ordered, must not overlap and, when the task has `plan_lines`, must cover that range completely.
+
+For example, a task covering plan lines 1 through 20 can declare two halves:
+
+```bash
+agentihooks ledger --slug <id> --as <agent> \
+  task split <task> 1-10 11-20
+```
+
+This stores the ranges in `split`. Each half still follows the normal review, checks and merge workflow. Record the first half's pull request on the same task with:
+
+```bash
+agentihooks swarm <id> pr <first-pull-request-url> --half 1
+```
+
+The task's `pr_url` names the active pull request; `split_pulls` retains the pull requests for its halves. At a worker's next Stop check, when the active pull request is merged, belongs to `split_pulls` and fewer pull requests are recorded than declared halves, the stop guard clears `pr_url`. It moves a task still in `pr` back to `claimed`, preserving both `split` and `split_pulls`. This update is guarded on the task still being in `pr`.
+
+Continue the remaining half and record its pull request with `--half 2`. Half numbers start at 1 and must be recorded in order; a new pull request for a split task requires `--half`. Clearing the old link does not complete the task or permit an idle stop: with no active pull request, the worker must continue work or declare a valid wait. For example, while waiting for an actual dependency:
+
+```bash
+agentihooks swarm <id> wait --on task <dependency-task>
+```
+
+After every declared half has a recorded, merged pull request, close the task with the final pull request:
+
+```bash
+agentihooks swarm <id> done --pr <final-pull-request-url>
+```
+
+The merged final half still requires `done`. Completion refuses a missing half or any recorded pull request that is open, closed without merging or unreadable on GitHub. There is no separate configuration switch for the between-halves reset; the declared split and recorded merge state determine it.
+
+#### Split refusals and stop messages
+
+| Message or condition | Meaning and action |
+|---|---|
+| `the task has a pull request outside the split` | A pull request was already recorded before the split. The split is refused without changing the task; declare splits before recording the first pull request. |
+| `a half has a pull request` | A split half already has a recorded pull request, so the split cannot be rewritten. Keep the declared ranges and history. |
+| No open pull request and no wait, after a half merged | The stop guard has moved past the merged half. Continue the next half or declare the real condition being awaited. |
+| A half has no pull request yet | Completion is premature. Record and merge the remaining half before `done`. |
+| The final pull request merged; close the task now | All halves have recorded pull requests. Run `done`; it verifies that each one merged. |
+
 ## The minute tick
 
 A systemd user timer (`agentihooks-swarm.timer`) runs `agentihooks swarm tick` every minute. `start` installs
@@ -296,7 +341,8 @@ An outage holds the affected idle and delivery decisions until recovery (see
 [Outage holds and recovery](#outage-holds-and-recovery)). Each tick, per swarm:
 
 1. Retire agents that finished, and pass on the messages they left (see [Safe retire](#safe-retire)).
-2. Free the tasks of agents whose pane is gone, or that stayed idle for 10 ticks. An idle agent is nudged at 3.
+2. Free the tasks of agents whose pane is gone, or that stayed idle for 20 ticks. A stale agent is nudged through its inbox
+   (see Stale nudge).
 3. Reopen claimed tasks that have no agent.
 4. Spawn the master if none is online, or retire it once a stopping swarm has no worker left. After the down window, force a launch and promote an engineer when it fails (see [Master outage and promotion](#master-outage-and-promotion)).
 5. While `running`, spawn agents up to the caps, one per claimable task, as long as a Claude account has room
@@ -310,7 +356,8 @@ An outage holds the affected idle and delivery decisions until recovery (see
    Each change leaves a status comment from `swarm` on the phase and an information item for the master. A phase
    with no task, or out of scope, is left to the master.
 10. Send each new health finding to the master with the `verdict` command to judge it.
-11. Wake idle panes holding unread items, and climb the wake ladder for items nobody reads.
+11. Wake idle panes holding unread items, except a Codex pane whose push pump owns its inbox, and climb the wake
+    ladder for items nobody reads.
 12. Write the automatic snapshot when it is due.
 
 The health pass reports `merge stall` when the dev merge queue holds entries and no pull request has merged
@@ -368,9 +415,20 @@ writes, a master `relay` carrying his verified words among them: an agent's comm
 never judged, even one that asks him for the decision. Every automatic clear is a `priority cleared` event by `swarm` with a
 `reason` in the ledger history.
 
+### Stale nudge
+
+An agent holding a task is stale when its session heartbeat is over ten minutes old and no named wait holds, or
+when its pane shows a provider error while its heartbeat is not working. The tick sends it one inbox item per ten
+minutes of silence, with an id built from the agent, its last activity and the window, so repeated ticks send it
+once; nothing is typed into its pane. The inbox channel delivers it to Claude and the Codex push pump to Codex. A
+nudge the pump delivers within two minutes of its sending interrupts a turn still running and starts a new app server
+turn; a later one is delivered like any message. An agent on a long command declares a wait first.
+The master, an agent the operator is typing to, a swarm with an open outage and an agent in provider recovery get
+no nudge.
+
 ### Safe retire
 
-The tick retires an agent for idleness only after 10 idle ticks, and a tick counts as idle only when all three
+The tick retires an agent for idleness only after 20 idle ticks, and a tick counts as idle only when all three
 say idle:
 
 - its herdr pane, read by its pane id, never by its name, reads idle;
@@ -415,6 +473,53 @@ A task filed under the wrong phase moves with `task set ID phase=P`. The master 
 engineer or CI agent is refused, and so is a phase the ledger does not hold. The move is stamped and recorded as a
 `task moved` event. Each intent verdict records the phase it was judged under, and a verdict from another phase is
 judged again on the next tick against the task's current phase.
+
+## Freeze and focus
+
+A freeze or a focus holds open tasks back from a claim; it never stops work already claimed. Only a task in the
+`open` state is held, so an agent holding a task under a freeze or outside a focus finishes it, its pull request
+merges and the task closes as usual. Write them with `agentihooks swarm <id> freeze TARGET`, `focus TARGET` and
+`unfreeze TARGET` (see [Commands](#commands) for targets and who may write them), or from the ledger page.
+
+- **Freeze** holds the target and everything under it. A freeze on a phase holds every open task in that phase,
+  its slices included; a freeze on `lane:ci` or `kind:research` holds every open task of that lane or kind. Rank
+  does not matter: a frozen `urgent` task stays held.
+- **Focus** holds everything outside the target. While any focus record exists, every open task not under a
+  focused node, and not matching a focused selector, is held. Several focus records add up: a task under any of
+  them may be claimed. A focus on a single task leaves only that task and the exempt tasks below claimable.
+- **Urgent tasks are exempt from a focus.** A task ranked `urgent` (see [Queue rank](#queue-rank)) stays claimable
+  outside every focus, so a fix the operator raises to `urgent` is never held by a focus elsewhere. In a Doctor
+  swarm, tasks in the Doctor's fix phase are exempt too. Neither exemption applies to a freeze.
+- Freeze and focus combine: a task must pass both, so a frozen task inside a focus stays held.
+
+Both records are cleared with `unfreeze TARGET`; there is no separate unfocus command. `unfreeze` on a node clears
+every freeze and focus record on that node and on every node under it, and on a selector clears the records on that
+selector. The two release work differently. Unfreezing a frozen phase releases the open tasks under that phase
+from its freeze; a focus that does not cover them keeps them held. Clearing the last focus releases every task the focus held across the whole ledger at once, apart from
+tasks still under a freeze. A held task that becomes claimable starts its claim wait at that unfreeze or focus.
+
+A task that depends on a held task is not claimable either, because its dependency is not done; the page's time left
+counts it with the held work.
+
+### Seeing held tasks
+
+`agentihooks swarm <id> status` prints one line per active record, after the phase lines:
+
+```
+focus  phases/p92  by operator  at 2026-10-15T14:02Z  ship the docs first
+freeze  lane:ci  by operator  at 2026-10-15T14:05Z
+```
+
+Each line names the verb, the target, who wrote it, when (UTC) and its reason when one was given. Status does not
+list freeze or focus holds task by task; a phase line's `holds` list names open tasks its phase does not admit yet
+(the phase waits on another phase, is still to plan, planning or in review), not tasks held by a freeze or a focus.
+A task is held when it is `open` and a freeze covers it, or a focus exists that does not cover it and the task is
+neither `urgent` nor in a Doctor swarm's fix phase. In a Doctor swarm, a focus on the watched ledger also holds its
+tasks that are neither `urgent` nor in the fix phase. When no task is claimable and no lane agent is left, the tick
+marks the swarm drained and posts a ledger notice. It names how many open tasks are held and by which records, for
+example `The swarm has no task it may start: 3 open tasks are held by the focus on phase Documentation agents`, and
+says only `The swarm has no task left to start` when none is held. The ledger page's time left leaves held tasks out
+and says so: `with 3 frozen tasks holding 90m of work left out`.
 
 ## Redis
 

@@ -23,11 +23,11 @@ def test_sonar_uses_all_shards_without_running_tests_again():
     workflow = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())
     jobs = workflow["jobs"]
     scan = jobs["sonar"]
-    assert scan["needs"] in (["unit", "reuse"], ["unit", "reuse", "admission"])
+    assert scan["needs"] == ["unit", "unit-selected", "select", "reuse", "admission"]
     merge = next(step for step in scan["steps"] if step.get("name") == "Merge shard coverage")
     assert "pytest" not in merge["run"]
     assert "combine.sh" in merge["run"]
-    assert "env" not in merge
+    assert set(merge["env"]) == {"SHARDS", "SCOPE"}
     assert "sonar" in jobs["gate-required"]["needs"]
     assert not (ROOT / ".github/workflows/sonar-scan.yml").exists()
 

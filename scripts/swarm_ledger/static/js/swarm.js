@@ -10,7 +10,7 @@ import { snowflake, targetText } from "./freezes.js";
 import { agentActions, reconcile, settle, titlePause } from "./lifecycle.js";
 
 const LIVE_LANES = [["eng", "max_eng"], ["ci", "max_ci"], ["plan", "max_plan"]];
-const ROLES = ["master", "engineer", "planner", "qa", "cicd"];
+const ROLES = ["master", "engineer", "planner", "qa", "cicd", "documentation"];
 const OVERLAY_CAP = 3;
 const VERDICTS = ["false-positive", "early-real", "established", "insufficient-evidence", "resolved"];
 const VERDICT_TEXT = { "false-positive": "FP", "early-real": "early real", established: "established", "insufficient-evidence": "insufficient", resolved: "resolved" };

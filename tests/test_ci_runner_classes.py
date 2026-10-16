@@ -221,3 +221,23 @@ def test_any_other_queue_route_is_red_in_both_gates(route):
         "b.yml/build: runs-on must be ubuntu-latest or the routed standard runner"
     ]
     assert trust({"b.yml": workflow(runner)}) != []
+
+
+def test_every_standard_test_job_sends_merge_group_runs_to_the_queue_pool():
+    import yaml
+
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    table = json.loads((ROOT / ci_runner_classes.TABLE).read_text())
+    policy = json.loads((ROOT / ci_runner_classes.ACTORS).read_text())
+    standard = sorted(
+        key.split("/")[1] for key, cls in table.items() if key.startswith("test.yml/") and cls == "standard"
+    )
+    assert standard
+    assert {name: jobs[name]["runs-on"] for name in standard} == {
+        name: (routed("anton-oss", policy) if name == "unit-selected" else queue_routed(policy=policy)).replace(
+            f"github.triggering_actor == '{policy['queue_actor']}'",
+            f"(github.triggering_actor == '{policy['queue_actor']}' || "
+            f"contains(fromJSON('{json.dumps(policy['actors'], separators=(',', ':'))}'), github.triggering_actor))",
+        )
+        for name in standard
+    }

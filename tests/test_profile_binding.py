@@ -1,4 +1,5 @@
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -102,6 +103,57 @@ def test_running_session_validates_the_canary_a_later_render_delivered(tmp_path,
     assert json.loads(report.read_text())["validation"] == result
     with pytest.raises(ValueError, match="^mounted instruction canary mismatch$"):
         binding.validate("0" * 24)
+
+
+def test_rehomed_request_validates_against_the_execution_copy(tmp_path, monkeypatch):
+    shared = tmp_path / "engineer" / "codex"
+    shared.mkdir(parents=True)
+    (shared / "AGENTS.md").write_text(binding.persona("Engineer instructions.\n"))
+    (shared.parent / "codex.sources.json").write_text("[]")
+    binding.write(shared, "engineer", "codex")
+    report = tmp_path / "report.json"
+    binding.request(report, "engineer", "codex", shared)
+    launched = json.loads(report.read_text())["rendered"]
+    copy = tmp_path / "execution" / "codex"
+    shutil.copytree(shared, copy)
+    shutil.copyfile(shared.parent / "codex.sources.json", copy.parent / "codex.sources.json")
+    evidence = json.loads((copy / binding.FILE).read_text())
+    (copy / binding.FILE).write_text(json.dumps({**evidence, "home": str(copy.resolve())}) + "\n")
+    env = {"AGENTIHOOKS_PROFILE": "engineer", "CODEX_HOME": str(copy), binding.REPORT: str(report)}
+    monkeypatch.setattr(binding, "process", lambda: (123, "codex", env, "default"))
+
+    binding.rehome(report, copy)
+
+    rendered = json.loads(report.read_text())["rendered"]
+    assert rendered["home"] == str(copy.resolve())
+    assert rendered["canary"] == launched["canary"]
+    assert binding.validate(launched["canary"])["home"] == str(copy.resolve())
+
+
+@pytest.mark.parametrize(
+    ("persona", "stale", "reason"),
+    [
+        ("Other instructions.\n", False, "execution home canary differs from the launch request"),
+        ("Engineer instructions.\n", True, "profile mismatch in rendered binding"),
+    ],
+)
+def test_rehome_refuses_and_marks_an_invalid_execution_copy(tmp_path, persona, stale, reason):
+    shared = tmp_path / "shared" / "codex"
+    copy = tmp_path / "execution" / "codex"
+    for home, text in ((shared, "Engineer instructions.\n"), (copy, persona)):
+        home.mkdir(parents=True)
+        (home / "AGENTS.md").write_text(binding.persona(text))
+        (home.parent / "codex.sources.json").write_text("[]")
+        binding.write(home, "engineer", "codex")
+    if stale:
+        (copy / binding.FILE).write_text((shared / binding.FILE).read_text())
+    report = tmp_path / "report.json"
+    binding.request(report, "engineer", "codex", shared)
+    launched = json.loads(report.read_text())
+
+    with pytest.raises(ValueError, match=f"^{reason}$"):
+        binding.rehome(report, copy)
+    assert json.loads(report.read_text()) == {**launched, "state": "failed", "reason": reason}
 
 
 @pytest.mark.parametrize(

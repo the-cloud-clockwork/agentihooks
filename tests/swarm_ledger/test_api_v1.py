@@ -194,6 +194,24 @@ def test_operation_contract_covers_existing_domain_dispatch():
     assert schemas.FIELDS["title_set"] == "text"
 
 
+def test_task_update_schema_accepts_the_ownership_guard():
+    from scripts.swarm_ledger.api import schemas
+
+    schema = schemas.operation_schema("task_update")
+    guarded = {
+        "op": "task_update",
+        "id": "op-1",
+        "by": "swarm",
+        "item": "t1",
+        "fields": {"claimed_by": "engineer-two"},
+        "if_state": ["claimed"],
+        "if_match": {"claimed_by": "engineer-one", "claim_generation": 1},
+    }
+
+    assert schemas.mismatched_field(schema, guarded) is None
+    assert schemas.mismatched_field(schema, {**guarded, "if_match": "engineer-one"}) == "if_match"
+
+
 def test_export_is_explicit_and_summary_is_paginated(live):
     status, exported = request(live, "POST", "export", {})
     assert status == 200
@@ -495,6 +513,55 @@ def test_guarded_task_update_returns_only_the_requested_row(live):
     assert row["id"] == "t1"
     assert row["state"] == "claimed"
     assert "comments" not in row
+
+
+def test_task_collection_token_survives_chat_and_reload_without_hashing(live, monkeypatch):
+    from scripts.swarm.ledger_client import LedgerClient
+    from tests.swarm_ledger.test_ledger_authority import ledger
+
+    ledger.request(SLUG, [{"op": "join", "id": "token-planner", "by": "boss", "role": "orchestrator"}], service=True)
+    ledger.request(
+        SLUG,
+        [
+            {
+                "op": "task_add",
+                "id": f"token-create-{index}",
+                "by": "boss",
+                "task": f"t{index}",
+                "title": f"Token task {index}",
+                "lane": "eng",
+                "phase": "p1",
+            }
+            for index in (1, 2)
+        ],
+        service=True,
+    )
+    status, first = request(live, "GET", "tasks?limit=1")
+    assert status == 200
+    assert first["next_cursor"] is not None
+    original = json.dumps
+
+    def bounded_dumps(value, *args, **kwargs):
+        if isinstance(value, list) and {row.get("id") for row in value if isinstance(row, dict)} >= {"t1", "t2"}:
+            raise AssertionError("Whole task collection serialized for revision")
+        return original(value, *args, **kwargs)
+
+    monkeypatch.setattr(json, "dumps", bounded_dumps)
+    ledger.request(
+        SLUG,
+        [{"op": "add", "id": "token-chat", "by": "boss", "thread": "chat", "text": "Unrelated collection update"}],
+        service=True,
+    )
+    assert request(live, "GET", "tasks?limit=1") == (200, first)
+    assert request(live, "GET", f"tasks?limit=1&cursor={first['next_cursor']}")[0] == 200
+    LedgerClient(service=True).update_task(SLUG, "t2", {"description": "Changed outside page"})
+    status, changed = request(live, "GET", "tasks?limit=1")
+    assert status == 200
+    assert changed["revision"] != first["revision"]
+    assert changed["page_hash"] == first["page_hash"]
+    assert request(live, "GET", f"tasks?limit=1&cursor={first['next_cursor']}")[0] == 409
+    server.repository.inner._cache.clear()
+    assert request(live, "GET", "tasks?limit=1") == (200, changed)
 
 
 def test_repeated_edit_and_delete_keep_entry_identity(live):
@@ -2323,6 +2390,7 @@ def test_cli_collection_consumers_read_all_pages(live, tmp_path, capsys, monkeyp
         depends_on="",
         territory="",
         overlays="",
+        repositories="",
         gain=None,
         must="",
         check="",
@@ -2539,7 +2607,12 @@ def test_repository_optional_collections_have_empty_http_resources(live, monkeyp
     stored(monkeypatch, document)
     assert request(live, "GET", path) == (
         200,
-        {"data": [], "revision": revision([]), "next_cursor": None},
+        {
+            "data": [],
+            "revision": f"{0:064x}" if path == "tasks" else revision([]),
+            "next_cursor": None,
+            **({"page_hash": revision([])} if path == "tasks" else {}),
+        },
     )
 
 

@@ -5,7 +5,8 @@ import os
 from collections.abc import Iterable
 from pathlib import Path
 
-from hooks.context.profile_chain import PACKAGE_PREFIX, PACKAGE_ROLES
+from hooks.context import profile_chain
+from hooks.context.profile_chain import PACKAGE_PREFIX
 
 MATTPOCOCK = "mattpocock-skills@claude-plugins-official"
 PLAYWRIGHT = "playwright@claude-plugins-official"
@@ -29,7 +30,7 @@ def role_defaults(chain: list[str]) -> dict[str, bool]:
 
 
 def role_home(chain: list[str]) -> bool:
-    return any((PACKAGE_ROLES / name.removeprefix(PACKAGE_PREFIX)).is_dir() for name in chain)
+    return any((profile_chain.PACKAGE_ROLES / name.removeprefix(PACKAGE_PREFIX)).is_dir() for name in chain)
 
 
 def carried(chain: list[str], operator: dict) -> dict[str, bool]:

@@ -1,0 +1,35 @@
+version: 1
+purpose: documentation-needed
+fallbacks: cli
+questions:
+  - name: needed
+    type: yesno
+    instructions: >-
+      Did the closing agent deliver a new feature or change code or business logic
+      that a user, operator or maintainer needs documented? Judge delivered
+      behavior from the change evidence, not the presence of code files alone.
+      Documentation-only, formatting-only and unchanged behavior need no new task.
+    "true": delivered behavior needs documentation
+    "false": the job needs no documentation
+  - name: covered
+    type: yesno
+    instructions: >-
+      Do the current documentation sources already explain the delivered behavior,
+      its usage and relevant configuration sufficiently? Regex and grep matches
+      are retrieval evidence only; a name mention does not establish coverage.
+      Missing sources or missing evidence of the new behavior mean uncovered.
+    "true": existing documentation already covers the behavior
+    "false": documentation is missing or insufficient
+  - name: size
+    type: choice
+    instructions: How large is the delivered behavior change and its documentation impact?
+    options:
+      none: No feature or logic change requiring documentation.
+      small: One setting, command option or localized behavior.
+      medium: A feature spanning several related behaviors or documentation sections.
+      large: A major workflow, architecture or business domain change.
+thresholds:
+  "yes": 0.7
+  "no": 0.3
+rule:
+  type: code
