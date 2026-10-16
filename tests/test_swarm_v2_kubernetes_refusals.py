@@ -115,6 +115,11 @@ def test_a_render_that_differs_from_the_journal_names_the_field(journal, field):
     assert observed.refusal == {"reason": "render", "field": field}
 
 
+def test_a_render_for_another_swarms_owner_names_the_owner():
+    sender = transport(slug="other")
+    assert sender.apply_operation(operation(), cases.launch()).refusal == {"reason": "render", "field": "owner"}
+
+
 def test_a_render_outside_the_client_namespace_names_the_namespace():
     sender = transport(cases.ApiServer("another-namespace"))
     assert sender.apply_operation(operation(), cases.launch()).refusal == {"reason": "render", "field": "namespace"}

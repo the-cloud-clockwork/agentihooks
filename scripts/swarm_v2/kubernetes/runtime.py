@@ -71,8 +71,8 @@ class KubernetesTransport:
             rendered = self._render(payload)
         except PodSpecRefused as refused:
             return Observation(Phase.REFUSED, refusal=refusal("template", refused.reason))
-        if field := self._differs(operation, rendered):
-            return Observation(Phase.REFUSED, refusal=refusal("render", field))
+        if differs := self._differs(operation, rendered):
+            return Observation(Phase.REFUSED, refusal=refusal("render", differs[0]))
         body = rendered.pod
         # The API server defaults the live spec, so a later match compares the digests and the adoption fields.
         body["metadata"]["annotations"].update(
@@ -112,7 +112,7 @@ class KubernetesTransport:
             raise prepared[1]
         return prepared[1]
 
-    def _differs(self, operation: Operation, rendered: Rendered) -> str:
+    def _differs(self, operation: Operation, rendered: Rendered) -> list[str]:
         metadata = rendered.pod["metadata"]
         expected = {
             "namespace": (metadata["namespace"], self.api.namespace),
@@ -121,7 +121,7 @@ class KubernetesTransport:
             "generation": (metadata["labels"][GENERATION_LABEL], str(operation.generation)),
             "spec": (adoption.identity(rendered.digest, rendered.pod["spec"]), operation.spec_digest),
         }
-        return next((name for name, (actual, wanted) in expected.items() if actual != wanted), "")
+        return [name for name, (actual, wanted) in expected.items() if actual != wanted]
 
     def _adopt(self, operation: Operation, body: dict) -> Observation:
         try:
