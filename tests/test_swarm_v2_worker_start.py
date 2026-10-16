@@ -975,7 +975,7 @@ def test_the_worker_logs_a_passed_profile_binding_before_starting_its_task(tmp_p
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
-@pytest.mark.parametrize("fault", ["persona", "sources", "binding", "profile", "home"])
+@pytest.mark.parametrize("fault", ["persona", "sources", "binding", "profile", "home", "null", "list"])
 def test_a_failed_worker_binding_is_reported_and_refuses_the_task(tmp_path, monkeypatch, capsys, target, fault):
     from scripts.profiles import binding
 
@@ -991,6 +991,8 @@ def test_a_failed_worker_binding_is_reported_and_refuses_the_task(tmp_path, monk
                 (home / binding.FILE).unlink()
             elif fault == "profile":
                 binding.write(home, "frontend", target)
+            elif fault in ("null", "list"):
+                (home / binding.FILE).write_text("null" if fault == "null" else "[]")
             else:
                 record["homes"][target] = "missing-home"
             return record

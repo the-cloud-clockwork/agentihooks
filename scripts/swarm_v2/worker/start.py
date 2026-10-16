@@ -184,7 +184,7 @@ def _binding(attempt: Path, spec: dict, built: dict) -> None:
     try:
         home = attempt / built["homes"][target] / f".{target}"
         rendered = binding.inspect(home, profile, target)
-    except (KeyError, ValueError) as exc:
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
         _private(report, {**result, "state": "failed", "reason": str(exc)})
         raise LaunchRefused(f"profile binding failed: {exc}") from exc
     _private(report, {**result, "state": "passed", "rendered": rendered})
