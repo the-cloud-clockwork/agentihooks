@@ -827,11 +827,17 @@ class Check:
             or not _same_phase(previous, task)
             or previous.get("inputs") != inputs
             or previous["head"] != self.head(task["pr_url"])
-            or (self.text is not None and previous.get("text") != self.text(task["pr_url"]))
+            or self._text_moved(previous, task["pr_url"])
             or self._named_moved(previous)
         ):
             return None
         return previous
+
+    def _text_moved(self, previous, url):
+        if self.text is None:
+            return False
+        current = self.text(url)
+        return current is None or previous.get("text") != current
 
     def _keep(self, task, previous, verdicts):
         verdicts.write(

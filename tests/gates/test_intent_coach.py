@@ -706,6 +706,24 @@ def test_an_unmoved_head_and_text_skips_the_full_view(tmp_path, readable):
     assert views == ([] if readable else [DOC["tasks"][0]["pr_url"]])
 
 
+def test_a_record_without_text_and_an_unreadable_text_takes_the_full_view(tmp_path):
+    Verdicts(SLUG, "intent-coach", tmp_path).write(
+        TASK,
+        "fail",
+        "missing behavior",
+        5,
+        coach_rounds=1,
+        head="original",
+        url=DOC["tasks"][0]["pr_url"],
+        phase="p8",
+        inputs=intent._fingerprint(DOC, DOC["tasks"][0]),
+    )
+    views = []
+    actions = text_check(tmp_path, views, lambda url: None, []).run(DOC)
+    assert views == [DOC["tasks"][0]["pr_url"]]
+    assert actions == [f"task {TASK} intent check pass"]
+
+
 def test_text_lookup_reads_title_and_body_with_one_call():
     calls = []
 
