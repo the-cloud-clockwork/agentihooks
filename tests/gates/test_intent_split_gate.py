@@ -1,3 +1,5 @@
+import subprocess
+
 import pytest
 
 from scripts.gates import intent
@@ -185,7 +187,8 @@ def test_a_passing_pull_does_not_override_a_failed_command_in_the_same_call(tmp_
     main = {**task, "pr_url": SECOND, "split_pulls": [FIRST, SECOND]}
     judged(tmp_path, main, verdict="fail")
     monkeypatch.setattr(intent, "pr_head", lambda url: "abc")
-    decision = intent.IntentGate().decide(bash(f"gh pr merge {FIRST}; {suffix}"), WHO, verdicts(tmp_path))
+    gate = intent.IntentGate(run=lambda args, **kwargs: subprocess.CompletedProcess(args, 0, stdout=SECOND))
+    decision = gate.decide(bash(f"gh pr merge {FIRST}; {suffix}"), WHO, verdicts(tmp_path))
     assert not decision.allowed
     assert "failed" in decision.reason
 
