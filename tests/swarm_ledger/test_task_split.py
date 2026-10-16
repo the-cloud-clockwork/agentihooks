@@ -151,7 +151,9 @@ def test_task_set_stores_split_pull_addresses_as_a_list(value, monkeypatch, caps
 
     def send(args, kind, **fields):
         assert args.slug == SLUG
-        state, rejected = core.sync(SLUG, ops=[ledger.op(kind, args, **fields)])
+        operation = ledger.op(kind, args, **fields)
+        ledger_tasks.check(operation)
+        state, rejected = core.sync(SLUG, ops=[operation])
         assert rejected == []
         assert row(state, "t1")["split_pulls"] == [
             "https://github.com/o/r/pull/9",
