@@ -46,7 +46,7 @@ def test_status_text_prints_push_inbox_and_native_terminal_per_agent(saved, caps
     cli.cmd_status(store, SimpleNamespace(slug="sw", json=False))
     lines = capsys.readouterr().out.splitlines()
     start = next(i for i, line in enumerate(lines) if line.startswith("Agent\t"))
-    head, *rows = [line.split("\t") for line in lines[start : start + 5]]
+    head, *rows = [line.split("\t") for line in lines[start : start + len(names) + 1]]
     push, attach = head.index("Push inbox"), head.index("Native terminal")
     shown = {row[0]: (row[push], row[attach]) for row in rows}
     assert {key: shown[name] for key, name in names.items()} == {
