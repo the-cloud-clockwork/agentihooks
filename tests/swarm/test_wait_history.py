@@ -1,0 +1,87 @@
+from types import SimpleNamespace
+
+import pytest
+
+from scripts.doctor import detect, traces_read
+from scripts.swarm import idle, waits
+
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
+
+@pytest.fixture
+def redis():
+    import fakeredis
+
+    return fakeredis.FakeRedis(decode_responses=True)
+
+
+@pytest.mark.parametrize("kind", [None, "checks", "reply", "task"])
+def test_wait_history_survives_expiry_and_explicit_end(redis, kind):
+    on = {"kind": kind, "target": "proof"} if kind else None
+    idle.declare_wait(redis, "sw", "engineer", 3_660_000, "proof", 60_000, on=on)
+    expected = {"at": 60_000, "until": 3_660_000, "reason": "proof", **({"on": on} if on else {})}
+    assert idle.wait_history(redis, "sw", "engineer") == [expected]
+    idle.end_wait(redis, "sw", "engineer", 3_000_000)
+    assert idle.wait_history(redis, "sw", "engineer") == [{**expected, "until": 3_000_000}]
+    idle.declare_wait(redis, "sw", "engineer", 4_000_000, "another proof", 3_100_000)
+    redis.delete(idle.key("sw", "wait", "engineer"))
+    assert idle.wait_history(redis, "sw", "engineer") == [
+        {**expected, "until": 3_000_000},
+        {"at": 3_100_000, "until": 4_000_000, "reason": "another proof"},
+    ]
+    assert redis.ttl(idle.key("sw", "wait-history", "engineer")) == -1
+    assert idle.wait_history(redis, "other", "engineer") == []
+    assert idle.wait_history(redis, "sw", "someone-else") == []
+
+
+def test_redeclaring_a_wait_records_the_end_of_the_previous_one(redis):
+    idle.declare_wait(redis, "sw", "engineer", 4_000_000, "first", 60_000)
+    idle.declare_wait(redis, "sw", "engineer", 5_000_000, "second", 120_000)
+    assert idle.wait_history(redis, "sw", "engineer") == [
+        {"at": 60_000, "until": 120_000, "reason": "first"},
+        {"at": 120_000, "until": 5_000_000, "reason": "second"},
+    ]
+
+
+def test_tick_resolution_records_the_actual_end_of_the_wait(redis):
+    agent = SimpleNamespace(name="engineer", state="working", task="own", seat="")
+    store = SimpleNamespace(redis=redis, agents=lambda slug: [agent])
+    inbox = SimpleNamespace(send=lambda *args: None)
+    idle.declare_wait(redis, "sw", "engineer", 5_000_000, "proof", 60_000, on=waits.on("task", "proof"))
+    assert waits.end_pass(store, "sw", {"proof": {"state": "done"}}, inbox, None, 3_660_000, None)
+    assert idle.wait(redis, "sw", "engineer") is None
+    assert idle.wait_history(redis, "sw", "engineer") == [
+        {
+            "at": 60_000,
+            "until": 3_660_000,
+            "reason": "proof",
+            "on": {"kind": "task", "target": "proof"},
+        }
+    ]
+
+
+@pytest.mark.parametrize("until, expected", [(3_660_000, []), (3_600_000, ["turn-gap/session"])])
+def test_doctor_reads_ended_wait_history_for_historical_agents(redis, monkeypatch, until, expected):
+    record = {
+        "traces": [
+            {
+                "name": "engineer",
+                "tags": ["agent:engineer"],
+                "session_id": "session",
+                "observations": [
+                    {"type": "SPAN", "turn": 1, "start": 0, "end": 60_000},
+                    {"type": "SPAN", "turn": 2, "start": 3_660_000, "end": 3_720_000},
+                ],
+            }
+        ],
+        "sessions": [],
+        "merged": [],
+    }
+    monkeypatch.setattr(traces_read, "client", lambda env: None)
+    monkeypatch.setattr(traces_read, "record", lambda *args: record)
+    store = SimpleNamespace(redis=redis, agents=lambda slug: [])
+    ledger = SimpleNamespace(tasks=lambda slug: [])
+    idle.declare_wait(redis, "sw", "engineer", until, "proof", 60_000)
+    idle.end_wait(redis, "sw", "engineer", until)
+    found = detect.readers(store, ledger, "sw", 4_000_000, environ={})["trace"]()
+    assert [f.id for f in found if f.kind == "turn gap"] == expected
