@@ -14,7 +14,6 @@ controller=(-l "app.kubernetes.io/instance=$release,app.kubernetes.io/component=
 ca_dir=""
 route=""
 terminal=""
-load_lock="$(mktemp)"
 
 python3 tests/kind_request.py
 
@@ -58,6 +57,7 @@ finish() {
 build=$!
 kind create cluster --name "$cluster" --image "$KIND_NODE_IMAGE" &
 cluster_setup=$!
+load_lock="$(mktemp)"
 trap finish EXIT
 
 helm lint --strict "$chart"
@@ -283,11 +283,11 @@ kubectl create --dry-run=server --validate=strict -f tests/fixtures/swarm_v2/her
 printf 'worker terminal Pod, Secret, Service and NetworkPolicy passed server side strict validation\n'
 wait "$build"
 (
+  bash scripts/packaging/swarm-image-clients.sh "$image"
   docker build --progress=plain --build-arg IMAGE="$image" -t "$terminal_image" \
     -f "$chart/ci/terminal-worker.Dockerfile" . >/dev/null
   printf 'terminal fixture image built\n'
   flock "$load_lock" kind load docker-image "$terminal_image" --name "$cluster"
-  bash scripts/packaging/swarm-image-clients.sh "$image"
 ) &
 terminal=$!
 flock "$load_lock" kind load docker-image "$image" "$bundle_image" --name "$cluster"
