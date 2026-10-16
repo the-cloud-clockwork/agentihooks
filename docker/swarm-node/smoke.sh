@@ -129,7 +129,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 path = Path(sys.argv[1])
 report = json.loads(path.read_text())
-whole, _, fraction = sys.argv[2].removesuffix('Z').partition('.')
+whole, _, fraction = sys.argv[2].rstrip('Z').partition('.')
 exited = datetime.strptime(whole, '%Y-%m-%dT%H:%M:%S').replace(tzinfo=timezone.utc).timestamp() + float('0.' + (fraction or '0'))
 latency = exited - report['codex_probe']['registered_at']
 assert 0 <= latency < 2, f"Codex registration to container exit took {latency:.3f} seconds"
