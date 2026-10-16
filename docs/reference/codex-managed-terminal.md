@@ -15,17 +15,18 @@ viewer stays open, but closing and reopening the viewer does not restore it.
 
 ## Choose the transport
 
-The swarm setting `codex-inbox-transport` accepts `legacy` (the default) or
-`app_server`. Set it before launching the Codex agents that should receive
-inbox work in their thread:
+The swarm setting `codex-inbox-transport` accepts `app_server` (what
+`swarm create` stores) or `legacy`. A swarm that stored `legacy` keeps it; set it before launching the
+Codex agents that should receive inbox work in their thread:
 
 ```bash
 agentihooks swarm <id> set codex-inbox-transport=app_server
 ```
 
 The launch records the chosen transport. Changing the setting affects subsequent
-executions; it does not convert a running legacy session. To select legacy for
-subsequent launches:
+executions; it does not convert a running session. To select legacy for
+subsequent launches (the full rollback is in
+[Codex inbox transport](codex-inbox-transport.md#roll-back)):
 
 ```bash
 agentihooks swarm <id> set codex-inbox-transport=legacy

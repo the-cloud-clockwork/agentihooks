@@ -13,6 +13,7 @@ ledger_pod="$release-ledger-0"
 controller=(-l "app.kubernetes.io/instance=$release,app.kubernetes.io/component=controller")
 ca_dir=""
 route=""
+terminal=""
 
 python3 tests/kind_request.py
 
@@ -20,6 +21,10 @@ finish() {
   status=$?
   wait "$build" || true
   wait "$cluster_setup" || true
+  if [[ -n $terminal ]]; then
+    wait "$terminal" || true
+  fi
+  rm -f "$load_lock"
   if [[ -n $route ]]; then
     wait "$route" || true
   fi
@@ -48,14 +53,11 @@ finish() {
   printf 'FROM %s\nCOPY . /\n' "$image" \
     | docker build -q -t "$bundle_image" -f - tests/fixtures/swarm_v2/worker-bundle >/dev/null
   wait "$packages"
-  docker build --progress=plain --build-arg IMAGE="$image" -t "$terminal_image" \
-    -f "$chart/ci/terminal-worker.Dockerfile" . >/dev/null
-  printf 'terminal fixture image built\n'
-  bash scripts/packaging/swarm-image-clients.sh "$image"
 ) &
 build=$!
 kind create cluster --name "$cluster" --image "$KIND_NODE_IMAGE" &
 cluster_setup=$!
+load_lock="$(mktemp)"
 trap finish EXIT
 
 helm lint --strict "$chart"
@@ -280,7 +282,15 @@ kubectl create --dry-run=server --validate=strict -f tests/fixtures/swarm_v2/her
 kubectl create --dry-run=server --validate=strict -f tests/fixtures/swarm_v2/herdr-terminal-objects.json
 printf 'worker terminal Pod, Secret, Service and NetworkPolicy passed server side strict validation\n'
 wait "$build"
-kind load docker-image "$image" "$bundle_image" "$terminal_image" --name "$cluster"
+(
+  bash scripts/packaging/swarm-image-clients.sh "$image"
+  docker build --progress=plain --build-arg IMAGE="$image" -t "$terminal_image" \
+    -f "$chart/ci/terminal-worker.Dockerfile" . >/dev/null
+  printf 'terminal fixture image built\n'
+  flock "$load_lock" kind load docker-image "$terminal_image" --name "$cluster"
+) &
+terminal=$!
+flock "$load_lock" kind load docker-image "$image" "$bundle_image" --name "$cluster"
 kubectl wait --for=condition=Ready node --all --timeout=120s
 bash "$chart/ci/terminal-route-proof.sh" "$image" &
 route=$!
@@ -842,6 +852,7 @@ if [[ $kept != *"refused {}"* ]]; then
   exit 1
 fi
 printf 'the controller start pass reached the herdr client and refused nothing\n'
+wait "$terminal"
 bash "$chart/ci/terminal-attach-proof.sh" "$terminal_image" "$release" "$slug"
 wait "$route"
 printf 'Helm chart kind proof passed\n'

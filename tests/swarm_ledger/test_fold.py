@@ -71,7 +71,16 @@ def sections():
     return list(walk(body(), "section"))
 
 
-SWARM_PANELS = {"quota-fold", "overlays-fold", "agents-fold", "health-fold", "handoff-fold", "freeze-fold"}
+SWARM_PANELS = {
+    "quota-fold",
+    "overlays-fold",
+    "agents-fold",
+    "health-fold",
+    "handoff-fold",
+    "freeze-fold",
+    "architecture-fold",
+}
+DESIGN = TEMPLATE.parents[2] / "DESIGN.md"
 
 
 def in_ledger_section(node):
@@ -107,6 +116,16 @@ class OnlyLedgerSectionsFold(unittest.TestCase):
             self.assertIn("fold", box.attrs.get("class", "").split(), name)
             self.assertIn("open", box.attrs, name)
             self.assertEqual(box.kids[0].tag, "summary", name)
+
+    def test_swarm_panels_follow_the_order_the_design_record_names(self):
+        line = next(row for row in DESIGN.read_text().splitlines() if row.startswith("- **Panels.**"))
+        names = line.split("in this order: ", 1)[1].split(".", 1)[0].split(", ")
+        heads = [
+            next(walk(node.kids[0], "h3")).text
+            for node in walk(body(), "details")
+            if node.attrs.get("id") in SWARM_PANELS
+        ]
+        self.assertEqual(heads, names)
 
     def test_nothing_outside_the_ledger_sections_and_swarm_panels_folds(self):
         stray = [
