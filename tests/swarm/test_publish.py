@@ -711,6 +711,57 @@ def test_a_restacked_successor_publishes_its_prepared_branch_not_the_parked_one(
     assert publication.updates == [("swarm", "t1", fields, publication.agent.name)]
 
 
+@pytest.mark.parametrize("prepared", [False, True])
+def test_parked_successor_restacks_and_publishes_with_predecessor_checkout_present(
+    publication, tmp_path, monkeypatch, prepared
+):
+    from scripts.swarm import publish, stack
+
+    p = publication
+    root, repository = p.root, p.repo
+    (root / "chosen.txt").write_text("before")
+    git(repository, "switch", "-c", "blocker")
+    (repository / "blocker.txt").write_text("dependency")
+    git(repository, "add", "blocker.txt")
+    git(repository, "commit", "-qm", "Dependency work")
+    base = git(repository, "rev-parse", "HEAD")
+    git(root, "merge", "--no-edit", "blocker")
+    (root / "task.txt").write_text("parked work")
+    git(root, "add", "task.txt")
+    git(root, "commit", "-qm", "Parked task work")
+    parked = git(root, "rev-parse", "HEAD")
+    git(root, "push", "origin", "HEAD:predecessor")
+    git(repository, "switch", "dev")
+    git(repository, "merge", "--squash", "blocker")
+    git(repository, "commit", "-qm", "Squash dependency")
+    git(repository, "push", "origin", "dev")
+    p.task.update(branch="predecessor", parked_on=["dependency"], stacked_base=base)
+    p.ledger.state = lambda slug: {"tasks": [p.task, {"id": "dependency", "state": "done"}]}
+    if prepared:
+        result = publish.prepare("swarm", p.agent, str(repository), p.ledger)
+        assert result["worktree"] == str(root)
+        assert p.task["branch"] == "engineer-test"
+    predecessor = tmp_path / "predecessor"
+    git(repository, "worktree", "add", "-b", "predecessor", str(predecessor), "origin/predecessor")
+    monkeypatch.chdir(root)
+
+    stack.restack("swarm", p.agent, p.ledger)
+
+    assert p.task["branch"] == "engineer-test"
+    assert p.task["repository_branches"] == {str(repository): "engineer-test"}
+    assert p.task["parked_on"] == []
+    (root / "chosen.txt").write_text("after")
+    result = publish.publish("swarm", p.agent, str(repository), p.ledger, "Continue task", ["chosen.txt"])
+
+    head = git(root, "rev-parse", "HEAD")
+    assert result["worktree"] == str(root)
+    assert result["branch"] == p.task["branch"] == "engineer-test"
+    assert git(root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
+    assert git(root, "ls-remote", "origin", "refs/heads/predecessor").split()[0] == parked
+    assert git(predecessor, "rev-parse", "HEAD") == parked
+    assert (root / "task.txt").read_text() == "parked work"
+
+
 @pytest.mark.parametrize("fields", [{"claimed_by": "another"}, {"state": "done"}])
 def test_only_the_task_owner_can_publish(publication, fields):
     from scripts.swarm import publish

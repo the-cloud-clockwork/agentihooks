@@ -565,6 +565,17 @@ def test_restack_after_a_squash_merge_replays_only_task_work(stacked_repo, capsy
     assert not (repo / _git(repo, "rev-parse", "--git-path", "agentihooks-restack.json")).exists()
 
 
+def test_restack_registers_the_successor_branch_before_returning(stacked_repo):
+    _, ledger, repo, _ = stacked_repo
+    ledger.rows["t1"]["repository_branches"] = {"/other/repository": "keep-other", str(repo): "parked"}
+    assert restack() == 0
+    task = ledger.rows["t1"]
+    assert task["branch"] == "finisher"
+    assert task["branch_repo"] == str(repo.parent / "origin.git")
+    assert task["repository_branches"] == {"/other/repository": "keep-other", str(repo): "finisher"}
+    assert task["parked_on"] == []
+
+
 def test_restack_removes_stacked_commits_even_after_merging_dev(stacked_repo):
     _, ledger, repo, _ = stacked_repo
     _git(repo, "fetch", "origin")
