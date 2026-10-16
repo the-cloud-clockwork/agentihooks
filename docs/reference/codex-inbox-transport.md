@@ -93,8 +93,10 @@ back to pending, releases no live server's quota slot and leaves `dev` alone.
    a publication already in flight gets up to 10 seconds to finish and a
    running turn is interrupted; the app-server is not signalled. If either wait
    runs out, the command exits 1, the execution stays fenced from new inbox
-   turns, and you run the stand-down again. Transfer only items that stay
-   definitely unaccepted after reconciliation, through the seat and task rules:
+   turns, and you run the stand-down again. A delivery receipt still `submitting`
+   or `unknown` may have reached the thread; leave its item until the receipt
+   reads `accepted` or `rejected`. Transfer only items with no receipt or a
+   `rejected` one, through the seat and task rules:
 
    ```bash
    agentihooks terminate-agent <agent> --stand-down --dry-run
