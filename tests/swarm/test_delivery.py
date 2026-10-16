@@ -4,7 +4,7 @@ import pytest
 
 from scripts.inbox.store import InboxStore
 from scripts.swarm import delivery
-from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
@@ -182,6 +182,43 @@ def test_a_shown_item_stays_open_for_its_caller(store):
     item = box.send("sw-eng-1", "operator", "the docs are merged")
     assert delivery.post(box, item, lambda: None) is True
     assert box.get(item.id).state == "pending"
+
+
+class EntryLedger(PageLedger):
+    def __init__(self, refuse):
+        super().__init__()
+        self.refuse, self.commented = refuse, []
+
+    def relay_comment(self, slug, entry, text, by, op_id):
+        if self.refuse:
+            raise SwarmError("ledger sw refused: comment refused: clock time '18:45'")
+        self.commented.append((entry, text, by))
+
+
+def test_a_refused_answer_on_an_entry_keeps_the_operator_item_open_for_a_resend(store):
+    box = InboxStore(store.redis)
+    box.about("op-1", "phases/p1")
+    asked = box.send("operator", "sw-eng-1", "is the phase done", item_id="op-1")
+    first = box.reply(asked.id, "sw-eng-1", "done at 18:45")
+    assert box.get(asked.id).state == "done"
+    assert delivery.relay_to_page(box, "sw", store.agents("sw"), EntryLedger(refuse=True)) == 0
+    assert box.get(first.id).state == "cancelled"
+    reopened = box.get(asked.id)
+    assert reopened.state == "read" and asked.id in [item.id for item in box.open_items("sw-eng-1")]
+    second = box.reply(asked.id, "sw-eng-1", "the phase is done")
+    assert second.id != first.id and box.entry_of(second.id) == "phases/p1"
+    ledger = EntryLedger(refuse=False)
+    assert delivery.relay_to_page(box, "sw", store.agents("sw"), ledger) == 1
+    assert ledger.commented == [("phases/p1", "the phase is done", "sw-eng-1")]
+    assert box.get(asked.id).state == "done"
+
+
+def test_a_refused_message_without_an_entry_reopens_nothing(store):
+    box = InboxStore(store.redis)
+    asked = box.send("operator", "sw-eng-1", "how is it going")
+    answer = box.reply(asked.id, "sw-eng-1", "done at 18:45")
+    assert delivery.post(box, box.get(answer.id), lambda: False) is False
+    assert box.get(asked.id).state == "done"
 
 
 def test_an_outbox_entry_stays_when_moving_it_fails(store):
