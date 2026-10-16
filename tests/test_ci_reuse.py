@@ -260,12 +260,19 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
     workflow = yaml.safe_load((root / ".github/workflows/test.yml").read_text())
     policy = json.loads((root / ".github/workflows/trusted-actors.json").read_text())
     steps = workflow["jobs"]["gate-required"]["steps"]
-    assert steps in (
-        ci_reuse.gate_steps(selected=True),
-        ci_reuse.gate_steps(),
-        ci_reuse.gate_steps(queue_tier=True),
-        ci_reuse.gate_steps(queue_tier=True, promotion=True),
-    )
+    if "durations" in workflow["jobs"]:
+        expected = (
+            ci_reuse.gate_steps(selected=True),
+            ci_reuse.gate_steps(),
+            ci_reuse.gate_steps(queue_tier=True),
+            ci_reuse.gate_steps(queue_tier=True, promotion=True),
+        )
+    else:
+        expected = (
+            ci_reuse.gate_steps(queue_tier=True, consolidated=True),
+            ci_reuse.gate_steps(queue_tier=True, promotion=True, consolidated=True),
+        )
+    assert steps in expected
 
     assert workflow["jobs"]["gate-required"]["runs-on"] in gate_protected.runners(policy)
     assert workflow["jobs"]["reuse"] in gate_protected.reuse_jobs(policy)
@@ -944,6 +951,27 @@ def _gate(steps, needs, event="merge_group"):
     [step] = steps
     env = dict(os.environ, NEEDS=json.dumps(needs), MUTATION="false", KIND="false", EVENT=event, REUSED="false")
     return subprocess.run(["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True)
+
+
+@pytest.mark.parametrize("event", ["merge_group", "pull_request"])
+@pytest.mark.parametrize("promotion", [False, True])
+@pytest.mark.parametrize("admission", ["success", "failure", "skipped", "cancelled", None])
+def test_consolidated_gate_requires_the_shared_admission(event, promotion, admission):
+    from scripts import ci_reuse
+
+    required = (
+        {"select", "split", "unit", "shard-check", "test-count", "queue-fail-fast"}
+        if event == "merge_group"
+        else {"select", "test-count", "lint", "semgrep", "sonar"}
+    )
+    needs = {name: {"result": "success"} for name in required}
+    needs["select"]["outputs"] = {"scope": "none"}
+    if admission is None:
+        del needs["select"]
+    else:
+        needs["select"]["result"] = admission
+    result = _gate(ci_reuse.gate_steps(queue_tier=True, promotion=promotion, consolidated=True), needs, event)
+    assert (result.returncode == 0) == (admission == "success"), result.stdout + result.stderr
 
 
 def test_the_canonical_gate_still_needs_the_standalone_ratchet_in_the_queue():
