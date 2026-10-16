@@ -476,7 +476,7 @@ def test_no_job_skips_on_a_tree_another_run_passed():
     assert "steps.lookup" not in (ROOT / ".github/workflows/test.yml").read_text()
 
 
-def _superseded(tmp_path, dev_head: str, sha: str = "a" * 40) -> str | None:
+def _superseded(tmp_path, dev_head: str, sha: str = "a" * 40) -> tuple[int, str | None]:
     step = next(step for step in _jobs()["sonar"]["steps"] if step.get("id") == "current")
     tools = tmp_path / "bin"
     tools.mkdir()
@@ -489,16 +489,20 @@ def _superseded(tmp_path, dev_head: str, sha: str = "a" * 40) -> str | None:
         env={**os.environ, "PATH": f"{tools}:{os.environ['PATH']}", "GITHUB_OUTPUT": str(output), "SHA": sha},
         check=False,
     )
-    return output.read_text() if result.returncode == 0 else None
+    return result.returncode, output.read_text() if output.exists() else None
 
 
 @pytest.mark.parametrize(("dev_head", "superseded"), [("a" * 40, "false"), ("b" * 40, "true")])
 def test_a_dev_push_skips_the_analysis_once_dev_moved_past_it(tmp_path, dev_head, superseded):
-    assert _superseded(tmp_path, dev_head) == f"superseded={superseded}\n"
+    status, output = _superseded(tmp_path, dev_head)
+    assert status in ({0, 1} if superseded == "true" else {0})
+    assert output == f"superseded={superseded}\n"
 
 
 def test_an_unreadable_dev_head_fails_the_check_instead_of_skipping_the_analysis(tmp_path):
-    assert _superseded(tmp_path, "") is None
+    status, output = _superseded(tmp_path, "")
+    assert status != 0
+    assert output is None
 
 
 def test_sonar_names_the_current_dev_head_from_git_and_gates_the_scan_on_it():
