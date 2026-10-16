@@ -242,25 +242,44 @@ def test_one_failed_seat_two_launch_raises_no_operator_alarm(store):
 
 
 def test_repeated_failed_seat_two_launches_raise_one_alarm_naming_seat_phases_and_error(store):
+    from scripts.swarm_v2 import master_seat_alarm
+
     ledger, runtime = _seat_two_down(store)
-    for now in (1, 2, 3):
-        tick("sw", store, ledger, runtime, now)
+    tick("sw", store, ledger, runtime, 1)
+    raised = tick("sw", store, ledger, runtime, 2)
+    tick("sw", store, ledger, runtime, 3)
     owners = MasterSeats(store.redis).owners("sw", ledger.state("sw"))
     owned = sorted(phase for phase, owner in owners.items() if owner == "master-2@sw")
+    held = ", ".join(owned)
+    assert owned and _seat_notes(ledger) == [
+        master_seat_alarm.DOWN.format(address="master-2@sw", count=2, held=held, error="profile canary timeout")
+    ]
+    assert "raised the launch alarm of master seat master-2@sw" in raised
+
+
+def test_an_alarm_for_a_seat_owning_no_phase_says_none(store):
+    ledger, runtime = _seat_two_down(store)
+    ledger.phases = []
+    tick("sw", store, ledger, runtime, 1)
+    tick("sw", store, ledger, runtime, 2)
     (note,) = _seat_notes(ledger)
-    assert owned and all(phase in note for phase in owned)
-    assert "profile canary timeout" in note
+    assert "go unattended: none." in note
 
 
 def test_a_seat_two_master_that_binds_clears_the_alarm(store):
+    from scripts.swarm_v2 import master_seat_alarm
+
     ledger, runtime = _seat_two_down(store)
     tick("sw", store, ledger, runtime, 1)
     tick("sw", store, ledger, runtime, 2)
     runtime.down = False
-    tick("sw", store, ledger, runtime, 3)
+    cleared = tick("sw", store, ledger, runtime, 3)
     tick("sw", store, ledger, runtime, 4)
-    alarm, back = _seat_notes(ledger)
-    assert "profile canary timeout" in alarm and "live again" in back
+    owners = MasterSeats(store.redis).owners("sw", ledger.state("sw"))
+    held = ", ".join(sorted(phase for phase, owner in owners.items() if owner == "master-2@sw"))
+    assert _seat_notes(ledger)[1:] == [master_seat_alarm.BACK.format(address="master-2@sw", held=held)]
+    assert "cleared the launch alarm of master seat master-2@sw" in cleared
+    assert store.redis.hgetall(store.key("sw", master_seat_alarm.KEY)) == {}
     runtime.down = True
     (second,) = [a for a in masters(store) if a.seat == "master-2@sw"]
     store.put_agent("sw", replace(second, state="finished"))
