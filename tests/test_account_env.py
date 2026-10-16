@@ -2,6 +2,7 @@ import io
 import json
 import os
 import subprocess
+from http.client import BadStatusLine
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 
@@ -440,14 +441,22 @@ def test_an_unreachable_openbao_costs_one_timeout_not_two(tmp_path, monkeypatch,
     assert len(err.strip().splitlines()) == 2
 
 
-def test_an_openbao_that_answers_the_claude_read_with_an_error_still_gets_the_codex_read(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize(
+    "answer",
+    [HTTPError("http://bao", 403, "denied", None, None), BadStatusLine("garbled"), b"not json", b'{"data": {}}'],
+)
+def test_an_openbao_that_answers_the_claude_read_with_an_error_still_gets_the_codex_read(
+    tmp_path, monkeypatch, capsys, answer
+):
     _codex_environ(tmp_path, monkeypatch)
     seen = []
 
     def fake(request, timeout):
         seen.append(request.full_url)
         if "codex" not in request.full_url:
-            raise HTTPError(request.full_url, 403, "denied", None, None)
+            if isinstance(answer, Exception):
+                raise answer
+            return _Response(answer)
         return _Response(json.dumps({"data": {"data": CODEX_BASE}}).encode())
 
     monkeypatch.setattr(account_env, "urlopen", fake)

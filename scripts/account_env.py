@@ -12,6 +12,7 @@ import shlex
 import stat
 import sys
 from collections.abc import Callable, Mapping
+from http.client import HTTPException
 from pathlib import Path
 from typing import NamedTuple
 from urllib.error import HTTPError
@@ -57,7 +58,7 @@ def from_openbao(environ: Mapping[str, str], accounts: Accounts) -> dict[str, st
     try:
         with urlopen(request, timeout=TIMEOUT_S) as response:
             tokens = _exported(json.load(response)["data"]["data"], accounts)
-    except (HTTPError, ValueError, KeyError, TypeError, AttributeError):
+    except (HTTPError, HTTPException, ValueError, KeyError, TypeError, AttributeError):
         return None
     except OSError as error:
         raise Unreachable from error
