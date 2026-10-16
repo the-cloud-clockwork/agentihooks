@@ -235,6 +235,9 @@ def test_reads_and_quoted_runner_names_pass(command, monkeypatch):
         "python3 -I scripts/read_artifact.py --test tests/context/test_local_test_guard.py artifact/report.json",
         "python3 -W ignore filter.py tests/test_a.py",
         "unzip -p artifact.zip report.json | python3 filter.py - tests/test_a.py",
+        "python3 - tests/test_a.py < filter.py",
+        "python3 -mjson.tool tests/test_a.py",
+        "python3 -cpass tests/test_a.py",
         "jq '.tests[] | select(.nodeid | startswith(\"tests/test_a.py\"))' artifact/report.json",
     ],
 )
