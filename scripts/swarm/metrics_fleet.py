@@ -99,8 +99,10 @@ def _checkpoints(store: RedisStore, slug: str) -> list[dict]:
             pipe.pexpire(key, CHECKPOINT_TTL_MS)
         pipe.execute()
     return [
-        json.loads(raw) if raw else {"execution_id": agent.execution_id, "seat": seat, "taken_at_ms": agent.started_at}
-        for (seat, agent), raw in zip(agents, taken, strict=True)
+        json.loads(taken[index])
+        if taken[index]
+        else {"execution_id": agent.execution_id, "seat": seat, "taken_at_ms": agent.started_at}
+        for index, (seat, agent) in enumerate(agents)
     ]
 
 
