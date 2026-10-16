@@ -559,7 +559,16 @@ def test_restack_after_a_squash_merge_replays_only_task_work(stacked_repo, capsy
     assert (repo / "shared.txt").read_text() == "task work\n"
     assert ledger.rows["t1"]["parked_on"] == []
     assert ledger.rows["t1"]["stacked_base"] == base
-    assert ("t1", {"parked_on": []}, AGENT) in ledger.updates
+    assert (
+        "t1",
+        {
+            "parked_on": [],
+            "branch": "finisher",
+            "branch_repo": str(repo.parent / "origin.git"),
+            "repository_branches": {str(repo): "finisher"},
+        },
+        AGENT,
+    ) in ledger.updates
     assert json.loads(capsys.readouterr().out.splitlines()[-1]) == {"task": "t1", "parked_on": []}
     assert store.agents("sw")[0] == agent
     assert not (repo / _git(repo, "rev-parse", "--git-path", "agentihooks-restack.json")).exists()
