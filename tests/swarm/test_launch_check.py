@@ -117,15 +117,15 @@ def test_missing_hooks_or_wrong_model_or_effort_is_named_settings(store, launche
     assert found["settings"]["actual"][field] == value
 
 
-def test_no_live_process_misses_profile_and_settings(store, launched):
+@pytest.mark.parametrize("facts", [{}, {"process": False}, {"process": None}])
+def test_unavailable_process_reports_an_observation_without_configuration_mismatches(store, launched, facts):
     agent, _, doc = launched
-    assert list(misses(store, agent, {"process": False}, doc)) == ["profile", "settings", "base"]
-    assert list(misses(store, agent, {"process": False}, doc, declared=["brain"])) == [
-        "profile",
-        "settings",
-        "base",
-        "overlay",
-    ]
+    found = misses(store, agent, facts, doc, declared=["brain"])
+    assert found == {"observation": {"expected": "available process observation", "actual": "unavailable"}}
+    launch_check.record(store, "sw", agent, found, LAUNCH_CHECKED, launch_check.DEADLINE_MS)
+    findings = launch_check.findings(store, "sw")
+    assert [finding.id for finding in findings] == [f"launch-check/{agent.name}/observation"]
+    assert findings[0].evidence == ("expected available process observation; observed unavailable",)
 
 
 @pytest.mark.parametrize(
@@ -610,11 +610,71 @@ def test_settings_miss_names_the_assigned_values(store, launched):
     }
 
 
-def test_missing_facts_miss_profile_and_settings_with_nothing_observed(store, launched):
-    agent, _, doc = launched
-    found = misses(store, agent, {}, doc)
-    assert found["profile"] == {"expected": "engineer", "actual": None}
-    assert found["settings"]["actual"] == {"hooks": None, "model": None, "effort": None}
+def test_unavailable_process_still_reports_a_real_join_failure(store, launched):
+    agent, _, _ = launched
+    found = misses(store, agent, {}, {}, declared=["brain"])
+    assert list(found) == ["joined", "observation"]
+    assert found["joined"]["actual"]["joined_after_ms"] is None
+    assert found["observation"]["actual"] == "unavailable"
+
+
+@pytest.mark.parametrize("process", [False, None])
+def test_unavailable_process_does_not_grade_stale_configuration(store, launched, process):
+    agent, facts, doc = launched
+    facts.update(process=process, profile="wrong", model="wrong", hooks=False, chain=[], overlays=[])
+    assert misses(store, agent, facts, doc, declared=["brain"]) == {
+        "observation": {"expected": "available process observation", "actual": "unavailable"}
+    }
+
+
+def test_observed_configuration_mismatches_still_report(store, launched):
+    agent, facts, doc = launched
+    facts.update(profile="wrong", model="wrong", hooks=False, chain=[], overlays=[])
+    found = misses(store, agent, facts, doc, declared=["brain"])
+    assert list(found) == ["profile", "settings", "base", "overlay"]
+    assert found["profile"]["actual"] == "wrong"
+    assert found["settings"]["actual"] == {"hooks": False, "model": "wrong", "effort": "high"}
+    assert found["base"]["actual"] == []
+    assert found["overlay"]["actual"] == []
+
+
+@pytest.mark.parametrize("facts", [{}, {"process": False}, {"process": None}])
+def test_captured_missing_process_cases_have_no_unsupported_configuration_findings(store, facts):
+    from pathlib import Path
+
+    captured = json.loads((Path(__file__).parents[1] / "fixtures/swarm/missing_process_launches.json").read_text())
+    configuration = {"profile", "settings", "base", "overlay"}
+    before = sum(len(configuration.intersection(case["misses"])) for case in captured["reports"])
+    assert before == 12
+    store.update("sw", code="323133")
+    for case in captured["reports"]:
+        expected = case["misses"]
+        lane = {"master": MASTER, "engineer": "eng", "ci": "ci"}[case["agent"].split("@")[0]]
+        seat = expected.get("joined", {}).get("expected", {}).get("seat", "eng-1@sw")
+        agent = AgentRecord(
+            case["agent"],
+            lane,
+            case["task"],
+            profile=expected["profile"]["expected"],
+            model=expected["settings"]["expected"]["model"],
+            effort=expected["settings"]["expected"]["effort"],
+            seat=seat,
+            started_at=LAUNCH,
+        )
+        store.seats.occupy(seat, agent.name, LAUNCH)
+        doc = {} if "joined" in expected else {"_meta": {"members": {agent.name: {"joined_at": LAUNCH}}}}
+        found = misses(store, agent, facts, doc, declared=expected["overlay"]["expected"])
+        launch_check.record(store, "sw", agent, found, case["at"], case["elapsed_ms"])
+    findings = launch_check.findings(store, "sw")
+    after = sum(finding.id.rsplit("/", 1)[-1] in configuration for finding in findings)
+    observations = sum(finding.id.endswith("/observation") for finding in findings)
+    joins = sum(finding.id.endswith("/joined") for finding in findings)
+    print(
+        f"captured cases=3 unsupported configuration before={before} after={after} unavailable={observations} joined={joins}"
+    )
+    assert after == 0
+    assert observations == 3
+    assert joins == 2
 
 
 def test_base_miss_names_the_expected_chain(store, launched):
