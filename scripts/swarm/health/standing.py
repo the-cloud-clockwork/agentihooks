@@ -16,6 +16,7 @@ KIND = "bottleneck stage"
 STALE_MS = 6 * 3_600_000
 EPISODES = 20
 DETECTOR_UNIT = "task hours"
+SAME_MEASURE = {"task hours in the window": DETECTOR_UNIT}
 
 
 @dataclass(frozen=True)
@@ -129,7 +130,8 @@ def _finding(row: dict) -> Finding:
         f"{row['stage'].replace('_', ' ')} at {row['value']} {row['unit']}, over its {row['threshold']} threshold",
         evidence,
         f"{row['threshold']} {row['unit']}",
-        row["fired"],
+        row["value"],
+        SAME_MEASURE.get(row["unit"], row["unit"]),
     )
 
 

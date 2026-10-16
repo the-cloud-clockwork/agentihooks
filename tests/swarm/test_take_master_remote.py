@@ -3,6 +3,7 @@ import os
 import pytest
 
 from hooks.context import account_sessions, broadcast
+from hooks.proc import Process
 from scripts.gates import base
 from scripts.swarm import take_master
 from scripts.swarm.ledger_client import LedgerRefused
@@ -10,6 +11,7 @@ from scripts.swarm.store import AgentRecord, SwarmError
 from scripts.swarm_ledger import ledger as remote
 from scripts.swarm_ledger import ledger_authority as authority
 from scripts.swarm_ledger.api import client
+from scripts.swarm_v2.runtime import process
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_take_master import taker  # noqa: F401
 
@@ -58,6 +60,10 @@ def remote_taker(taker, monkeypatch, tmp_path):  # noqa: F811
     monkeypatch.setattr(broadcast, "BROADCAST_FILE", str(tmp_path / "broadcast.json"))
     monkeypatch.setattr(account_sessions, "agent_pid", lambda: 4242)
     monkeypatch.setattr(take_master, "name_session", broadcast.name_session)
+    monkeypatch.setattr(process, "local_namespace", lambda: "boot/pidns")
+    monkeypatch.setattr(
+        take_master, "processes", lambda: {4242: Process(4242, 1, 4242, 4242, 100, "S", "codex", ("codex",))}
+    )
     broadcast.register_session("session", 4242, "/repo", "sol", name=CARRIED)
     monkeypatch.setattr(remote, "BASE", "")
     monkeypatch.setattr(remote.repository, "token", _operator_token)
@@ -92,7 +98,9 @@ def test_take_master_on_a_remote_ledger_places_and_pins_the_new_master_before_it
     assert sent == [("sw", "agent-token", MINT), ("sw", "agent-token", MINT), ("sw", "metadata", PINNED)]
     assert (os.environ["AGENTIHOOKS_SWARM"], os.environ["AGENTIHOOKS_AGENT_NAME"]) == ("sw", MASTER)
     assert "AGENTIHOOKS_LEDGER_AGENT_TOKEN" not in os.environ
-    assert _masters(store) == [(MASTER, HIVE_ID, {"host_id": HIVE_ID})]
+    assert _masters(store) == [
+        (MASTER, HIVE_ID, {"host_id": HIVE_ID, "process_namespace": "boot/pidns", "pid": 4242, "pid_start": 100})
+    ]
     assert store.seats.occupant("master@sw").occupant == MASTER
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "")
     assert broadcast.session_swarm(4242) == "sw"
@@ -127,7 +135,13 @@ def test_replace_on_a_remote_host_retires_the_old_master_before_placing_the_new_
     ledger.closed = lambda slug: killed.append(list(rt.killed)) or False
     assert run("sw", "take-master", "--replace") == 0
     assert killed == [[MASTER]]
-    assert _masters(store) == [("master@a1b2c3-0002", HIVE_ID, {"host_id": HIVE_ID})]
+    assert _masters(store) == [
+        (
+            "master@a1b2c3-0002",
+            HIVE_ID,
+            {"host_id": HIVE_ID, "process_namespace": "boot/pidns", "pid": 4242, "pid_start": 100},
+        )
+    ]
 
 
 def test_a_refused_replace_on_a_remote_host_leaves_the_old_master_retired_and_no_new_one(remote_taker, monkeypatch):
@@ -159,7 +173,7 @@ def test_a_local_ledger_keeps_the_session_unpinned(taker, monkeypatch):  # noqa:
     assert run("sw", "take-master") == 0
     assert (os.environ["AGENTIHOOKS_SWARM"], os.environ["AGENTIHOOKS_AGENT_NAME"]) == ("", CARRIED)
     assert os.environ["AGENTIHOOKS_LEDGER_AGENT_TOKEN"] == "carried token"
-    assert _masters(store) == [(MASTER, "", {})]
+    assert _masters(store) == [(MASTER, "", {"process_namespace": "boot/pidns", "pid": 4242, "pid_start": 100})]
 
 
 def test_only_a_remote_session_reads_its_pinned_swarm(monkeypatch, tmp_path):
@@ -252,7 +266,9 @@ def test_a_retake_after_a_remote_refusal_replaces_the_ended_execution(remote_tak
     ledger.closed = lambda slug: False
     assert run("sw", "take-master") == 0
     assert [(a.name, a.generation) for a in store.execution_registry.records("sw")] == [(MASTER, 1), (MASTER, 2)]
-    assert _masters(store) == [(MASTER, HIVE_ID, {"host_id": HIVE_ID})]
+    assert _masters(store) == [
+        (MASTER, HIVE_ID, {"host_id": HIVE_ID, "process_namespace": "boot/pidns", "pid": 4242, "pid_start": 100})
+    ]
 
 
 def test_pin_on_a_remote_host_without_a_carried_token_names_the_swarm_and_agent():
@@ -278,7 +294,9 @@ def test_a_finished_master_still_named_live_does_not_block_take_master(taker, mo
     )
     rt.live.add(MASTER)
     assert run("sw", "take-master") == 0
-    assert _masters(store) == [("master@a1b2c3-0002", "", {})]
+    assert _masters(store) == [
+        ("master@a1b2c3-0002", "", {"process_namespace": "boot/pidns", "pid": 4242, "pid_start": 100})
+    ]
 
 
 def test_take_names_a_new_master_at_the_time_it_was_taken(taker, monkeypatch):  # noqa: F811

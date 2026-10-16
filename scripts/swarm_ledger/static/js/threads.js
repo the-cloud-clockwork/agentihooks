@@ -5,7 +5,7 @@ import { attachable, attaching, attachmentsView, withAttachments } from "./media
 import { render } from "./render.js";
 import { jumpTo } from "./outline.js";
 import { toggles } from "./folds.js";
-import { lastPage, lazy, moreButton } from "./pages.js";
+import { COMMENT_PAGE, lazy, threadPage } from "./pages.js";
 
 export const composing = {};
 export const editing = {};
@@ -76,13 +76,12 @@ function entryView(path, entry, noun) {
     path === "notes" ? commentsView(`notes/${entry.id}`, entry.comments || []) : null);
 }
 
-export function threadView(path, list, cls) {
+export function threadView(path, list, cls, page) {
   const noun = NOUN[path.split("/").pop()];
   const box = h("div", { class: cls });
   const live = list.filter((e) => !e.deleted);
-  const older = moreButton(path, live.length, `older ${noun}s`, render, "div");
-  if (older) box.append(older);
-  for (const entry of lastPage(path, live, (e) => `item-notes-${e.id}`)) box.append(entryView(path, entry, noun));
+  box.append(...threadPage(path, live, { idOf: (e) => `item-notes-${e.id}`, label: `older ${noun}s`, again: render,
+    make: (entry) => entryView(path, entry, noun) }, page));
   if (path in composing) {
     const close = () => { delete composing[path]; render(); };
     const line = lineBox(`compose:${path}`, composing[path], `Write a ${noun}…`, (text) => {
@@ -103,7 +102,7 @@ export function commentsView(key, list) {
   const shown = toggles[`sec-${key.split("/")[0]}`];
   box.open = openComments.has(key) || (!closedComments.has(key) && shown === true);
   box.addEventListener("toggle", () => rememberComment(key, box.open));
-  return lazy(box, () => threadView(`${key}/comments`, list, "thread flat"));
+  return lazy(box, () => threadView(`${key}/comments`, list, "thread flat", COMMENT_PAGE));
 }
 
 export function rememberComment(key, open) {

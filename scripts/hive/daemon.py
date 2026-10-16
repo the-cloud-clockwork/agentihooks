@@ -172,7 +172,7 @@ def _subscriptions(environ, counts: dict, now: float) -> tuple[list, dict]:
         )
         quota[f"codex:{account.name}"] = (
             _reading(reading.five_hour, reading.seven_day, reading.observed_at)
-            if reading
+            if reading and not reading.expired
             else _reading(balancer.QuotaWindow(), balancer.QuotaWindow(), None)
         )
     return slots, quota

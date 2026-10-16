@@ -24,8 +24,9 @@ def launched(tmp_path, spec, prompt="Open the task."):
     launcher, prompt_file = init_agent._write_launcher(
         tmp_path, "engineer@abc-0001", prompt, ["-m", "gpt-6.1-sol"], {"XDG_RUNTIME_DIR": str(tmp_path)}, spec
     )
-    line = next(line for line in launcher.read_text().splitlines() if "scripts.codex_session" in line)
-    return launcher, prompt_file, shlex.split(line)
+    line = next(line for line in launcher.read_text().splitlines() if line.startswith("setsid -f "))
+    server, _, _ = shlex.split(line)[4].partition("; rm -f ")
+    return launcher, prompt_file, shlex.split(server)
 
 
 def test_the_app_server_branch_runs_the_supervisor_with_the_opening_prompt_file(tmp_path):

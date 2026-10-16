@@ -75,6 +75,27 @@ def test_identical_events_in_one_revision_each_survive_replay(box):
     assert all(row["revision"] == 5 and row["catch_up"] == 1 for row in rows)
 
 
+def test_a_stored_event_without_a_revision_is_reported_and_the_pass_finishes(box, caplog):
+    from scripts.swarm import metrics_ledger
+
+    ledger = Ledger()
+    ledger.move("claimed", 5, NOW)
+    ledger.move("open", 6, NOW + 1)
+    ledger.doc["_meta"]["events"].insert(0, {"at": NOW, "by": "old", "kind": "added", "target": "tasks/bad"})
+    ledger.doc["_meta"]["events_ack"] = 0
+    metrics_ledger.record(box, "example", NOW + 1, ledger)
+    rows = read(box, "ledger_events")
+    assert [row["revision"] for row in rows] == [5, 6]
+    assert [row["state"] for row in rows] == ["claimed", "open"]
+    assert read(box, "ledger_snapshots")
+    assert ledger.calls == [("state", "example"), ("ack", "example", 6)]
+    assert [(record.name, record.levelname, record.getMessage()) for record in caplog.records] == [
+        ("scripts.swarm.metrics_ledger", "WARNING", "ledger example event 0 has no revision; skipped")
+    ]
+    metrics_ledger.record(box, "example", NOW + 2, ledger)
+    assert len(read(box, "ledger_events")) == 2
+
+
 def test_a_failed_checkpoint_rolls_back_rows_and_retry_records_one_gap(box, monkeypatch):
     from scripts.swarm import metrics_ledger
 

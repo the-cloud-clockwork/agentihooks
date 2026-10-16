@@ -2,7 +2,7 @@ import json
 import uuid
 from dataclasses import asdict, replace
 
-from scripts.swarm import naming
+from scripts.swarm import live_binding, naming
 from scripts.swarm.runtime import herdr_target
 from scripts.swarm.store import MASTER, SwarmError
 
@@ -27,7 +27,7 @@ def rename_swarm(store, slug, ledger, runtime, at):
             if pane.get("name") != herdr_target(new):
                 runtime.herdr(["agent", "rename", agent.pane_id, herdr_target(new)])
                 actions.append(f"renamed {agent.name} to {new}")
-            if agent.harness == "codex":
+            if agent.harness == "codex" and not live_binding.managed(agent):
                 _name_session(store, slug, runtime, agent.pane_id, new)
             store.names.alias(agent.name, new)
             _move_agent(store, slug, agent, new, at)

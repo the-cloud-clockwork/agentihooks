@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/proofs.py:scripts.swarm_ledger.api.proofs.x_control__mutmut_100:f0fb8e6d81764fe69f75fb2c2f412ade5c63c495507e32ebd8c4466c021d9d7d": {
+    "reader": "independent Standards reader",
+    "reason": "Only drain reaches lifecycle_control here. Its Control.destructive is False; request reads operator only in control.destructive and not operator and neither stores nor forwards it. False, None and True therefore produce identical accepted state, fenced lifecycle operation and worker command for every reachable payload."
+  }
+}

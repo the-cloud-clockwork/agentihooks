@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/request_metrics.py:scripts.swarm_ledger.request_metrics.x_route_name__mutmut_5:2bcdde7d858aa587889699b57a0def7969037366dcec32bed3046af24de0685a": {
+    "reader": "standards_reader",
+    "reason": "For every string, split at '?' with maxsplit one, two or omitted returns the identical prefix at index zero. Only that prefix is used to normalize the route; multiple question marks do not alter this equality. Standards independently ruled these two mutations equivalent."
+  }
+}

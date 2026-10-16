@@ -1,5 +1,7 @@
+import json
 import subprocess
 import sys
+import tomllib
 
 import install
 import pytest
@@ -99,6 +101,40 @@ def test_a_rewritten_integration_file_marks_sessions_changed(runner, tmp_path):
     assert runner.marked == [["mark-changed", "--reason", "herdr-integration:claude"]]
 
 
+def _herdr_hooks(monkeypatch, tmp_path):
+    from tests.codex_hook_fixtures import CODEX_HOOKS
+
+    home = tmp_path / "codex-home"
+    home.mkdir()
+    monkeypatch.setenv("CODEX_HOME", str(home))
+    (home / "hooks.json").write_text(json.dumps({"hooks": {"Interrupt": CODEX_HOOKS["hooks"]["Interrupt"][:1]}}))
+    return home
+
+
+def test_configure_trusts_the_codex_hooks_herdr_installed(monkeypatch, runner, tmp_path):
+    from tests.codex_hook_fixtures import CODEX_HOOK_HASHES
+
+    home = _herdr_hooks(monkeypatch, tmp_path)
+    assert herdr_setup.configure() == 0
+    state = tomllib.loads((home / "config.toml").read_text())["hooks"]["state"]
+    assert state == {f"{home / 'hooks.json'}:interrupt:0:0": {"trusted_hash": CODEX_HOOK_HASHES["interrupt:0:0"]}}
+
+
+def test_a_failed_codex_integration_still_trusts_what_it_wrote(monkeypatch, runner, tmp_path):
+    from tests.codex_hook_fixtures import CODEX_HOOK_HASHES
+
+    home = _herdr_hooks(monkeypatch, tmp_path)
+
+    def failing(command, **kwargs):
+        runner(command, **kwargs)
+        return subprocess.CompletedProcess(command, int(command[1:] == ["integration", "install", "codex"]), "", "")
+
+    monkeypatch.setattr(herdr_setup.subprocess, "run", failing)
+    assert herdr_setup.configure() == 1
+    state = tomllib.loads((home / "config.toml").read_text())["hooks"]["state"]
+    assert state == {f"{home / 'hooks.json'}:interrupt:0:0": {"trusted_hash": CODEX_HOOK_HASHES["interrupt:0:0"]}}
+
+
 def test_integration_files_reads_each_installed_file_from_the_status_paths(runner, tmp_path):
     folder = tmp_path / "home:with colon"
     folder.mkdir()
@@ -121,13 +157,16 @@ def test_a_missing_binary_is_installed_before_configuring(monkeypatch, runner):
     assert ["/bin/herdr", "integration", "install", "claude"] in runner.calls
 
 
-def test_init_runs_the_herdr_step_once_for_all_targets(monkeypatch):
+@pytest.mark.parametrize(
+    "options, expected", [([], ["claude", "codex"]), (["--with-copilot"], ["claude", "codex", "copilot"])]
+)
+def test_init_runs_the_herdr_step_once_for_all_targets(options, expected, monkeypatch):
     calls, steps = [], []
     monkeypatch.setattr(install, "cmd_init_unified", lambda args: calls.append(args))
     monkeypatch.setattr(herdr_setup, "init_step", lambda flag, interactive: steps.append(flag))
-    monkeypatch.setattr(sys, "argv", ["agentihooks", "init", "--profile", "default", "--herdr", "no"])
+    monkeypatch.setattr(sys, "argv", ["agentihooks", "init", "--profile", "default", "--herdr", "no", *options])
     install.main()
-    assert len(calls) == len(install.SUPPORTED_TARGETS)
+    assert [args.install_target for args in calls] == expected
     assert steps == ["no"]
 
 

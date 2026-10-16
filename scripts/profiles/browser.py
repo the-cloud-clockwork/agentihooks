@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 from hooks.context.profile_chain import PACKAGE_PREFIX
 from scripts.targets._common import _install_module
 
-ROLES = frozenset(("engineer", "cicd", "planner", "master", "qa"))
+ROLES = frozenset(("engineer", "cicd", "planner", "master", "qa", "documentation"))
 NAME = "playwright-cmd"
 EXTENSION = "playwright-ext-"
 

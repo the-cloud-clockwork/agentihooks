@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 run="hive-compose-$(python3 -c 'import uuid; print(uuid.uuid4().hex[:12])')"
-tls="$(mktemp -d)"
+tls="$(mktemp -d -p "${RUNNER_TEMP:-${TMPDIR:-/tmp}}")"
 export COMPOSE_PROJECT_NAME="$run" COMPOSE_PROFILES=join SWARM_TLS_DIR="$tls" SWARM_REDIS_SCHEME=rediss \
   SWARM_CA_FILE=/tls/ca.pem SWARM_MEMBER_REDIS_URL=rediss://redis:6379/0
 SWARM_REDIS_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe())')"
@@ -20,7 +20,9 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=$run" -addext "subj
 cp "$tls/cert.pem" "$tls/ca.pem"
 chmod 0755 "$tls"
 chmod 0644 "$tls"/*.pem
-if ! docker compose up --build --wait --wait-timeout 180; then
+bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/redis:7
+bash scripts/packaging/pull-runtime-image.sh ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev
+if ! docker compose up --pull never --build --wait --wait-timeout 180; then
   docker compose logs >&2
   exit 1
 fi

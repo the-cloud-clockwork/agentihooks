@@ -178,6 +178,9 @@ def _restack_branch() -> str:
 
 
 def _restack_base(row, context):
+    ref = f"refs/remotes/origin/{row.get('branch', '')}"
+    if shell(["git", "show-ref", "--verify", "--quiet", ref]).returncode != 0:
+        ref = f"refs/heads/{row.get('branch', '')}"
     base = _out(
         ["git", "rev-parse", "--verify", "--end-of-options", f"{row['stacked_base']}^{{commit}}"],
         "cannot resolve the stacked base",
@@ -186,7 +189,7 @@ def _restack_base(row, context):
     if (
         shell(["git", "merge-base", "--is-ancestor", base, "HEAD"]).returncode == 0
         and row.get("branch")
-        and shell(["git", "merge-base", "--is-ancestor", f"origin/{row['branch']}", "HEAD"]).returncode == 0
+        and shell(["git", "merge-base", "--is-ancestor", ref, "HEAD"]).returncode == 0
     ):
         onto = _out(["git", "rev-parse", "origin/dev"], "cannot resolve origin/dev")
         path.write_text(json.dumps({"context": context, "onto": onto}))
@@ -222,7 +225,11 @@ def restack(slug: str, agent, ledger) -> dict:
     _out(["git", "fetch", "origin"], "cannot fetch origin")
     base, path = _restack_base(row, [slug, agent.task, branch, row["stacked_base"]])
     _rebase(base)
+    from . import publish
+
+    root = Path(_out(["git", "rev-parse", "--show-toplevel"], "cannot locate the worktree"))
     fields = {"parked_on": []}
-    ledger.update_task(slug, agent.task, fields, by=agent.name)
+    update = {**fields, **publish.branch_record(publish.checkout_fields(root), publish.repository_root(root), row)}
+    ledger.update_task(slug, agent.task, update, by=agent.name)
     path.unlink()
     return fields

@@ -236,6 +236,9 @@ See [Claude Account Load Balancing](../pillars/load-balancing.md).
 | `AGENTIHOOKS_HANDOFF_5H_PCT` | `99` | 5-hour used % that triggers the quota policy |
 | `AGENTIHOOKS_HANDOFF_MIN_LEFT` | `20` | Routing left % (tighter of 5h and 7d) a handoff target needs |
 | `AGENTIHOOKS_WAIT_MIN_WEEK_LEFT` | `10` | 7-day left % that makes a spent 5-hour window wait for its reset instead of stopping |
+| `QUOTA_USAGE_INJECTION_ENABLED` | `true` | Inject the [quota usage banner](../pillars/load-balancing.md#quota-usage-banner) on every prompt and on the tool call cadence |
+| `QUOTA_USAGE_TOOL_CALLS` | `5` | Tool calls between quota usage banners |
+| `QUOTA_USAGE_STALE_SEC` | `300` | Age in seconds after which a quota reading is ignored by the banner and the quota policy |
 
 ---
 
@@ -370,5 +373,6 @@ duplicating them into its own environment file.
 | `RETRY_BREAKER_MAX` | `5` | Soft limit -- warn after this many identical failures. |
 | `RETRY_BREAKER_HARD_MAX` | `10` | Hard limit -- block after this many identical failures. |
 | `RETRY_BREAKER_TTL` | `300` | Seconds before a failure fingerprint expires from the counter. |
-| `CONTROLS_BYPASS_ENABLED` | `true` | Enable the controls toggle (bypass mode). Operator phrase `disable controls` short-circuits branch / PR / release-merge / hotfix / non-main force-push gates session-wide. See [Guardrail 9](/docs/pillars/guardrails/#guardrail-9-controls-toggle-bypass-mode). |
+| `CONTROLS_BYPASS_ENABLED` | `true` | Enable the controls toggle (bypass mode). Operator phrase `disable controls` lifts branch, non-protected PR, hotfix and non-main force-push gates session-wide. Protected promotion remains CI-only; PyPI publication still requires `release dance`. See [Guardrail 9](/docs/pillars/guardrails/#guardrail-9-controls-toggle-bypass-mode). |
 | `KUBECTL_MUTATION_GUARD_ENABLED` | `true` | HARD-FLOOR live-patching guard. PreToolUse Bash hook that blocks `kubectl exec`/`cp` writes, `kubectl edit`/`patch`/`set`/`scale`/`rollout-restart`/`annotate`/`label`/`drain`/`debug`/`create -f`/`apply -f`/`autoscale`, `helm install`/`upgrade`/`rollback` outside CI, `argocd app sync --local`, SSH-edit, `scp` INTO host, and `docker exec` writes. Does NOT honor bypass mode, hotfix signals, or release-gate signals — code is the source of truth. See CI Manifesto §3.5 and `rules/code-is-source.md`. |
+| `AGENTIHOOKS_SERENA` | `true` | Serena edit guard. PreToolUse hook that blocks a built-in or shell rewrite of Python in a linked worktree, routing it to Serena's symbol tools instead. `false` turns the whole guard off for that session or machine: every edit is let through and no Serena directive is injected; unset or any other value keeps it on. See Development Manifesto §7 and `rules/code-intelligence.md`. |

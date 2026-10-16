@@ -15,6 +15,10 @@ from scripts.swarm.tick import Placed, Runtime, SpawnError
 from scripts.swarm_v2.runtime import process
 
 
+def transport(config: SwarmConfig, harness: str) -> str:
+    return getattr(config, "codex_inbox_transport", LEGACY_TRANSPORT) if harness == "codex" else ""
+
+
 def arguments(config: SwarmConfig, harness: str, task: dict) -> list[str]:
     if harness != "codex":
         return []

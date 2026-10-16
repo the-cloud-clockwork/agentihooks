@@ -1,6 +1,7 @@
 import os
 import signal
 import subprocess
+import sys
 
 import pytest
 
@@ -123,14 +124,14 @@ def test_only_a_ledger_server_process_has_a_server_script():
 
 def test_the_launch_command_needs_the_server_script_on_disk(tmp_path):
     script = server_script(tmp_path)
-    assert ledger_watchdog.launch(PID, [PYTHON, script, "--serve"], tmp_path) == [PYTHON, script]
+    assert ledger_watchdog.launch(PID, [PYTHON, script, "--serve"], tmp_path) == [sys.executable, script]
     assert ledger_watchdog.launch(PID, [PYTHON, str(tmp_path / "gone" / "ledger_server.py")], tmp_path) is None
     assert ledger_watchdog.launch(PID, ["python3", "-m", "http.server"], tmp_path) is None
     relative = [PYTHON, "scripts/swarm_ledger/ledger_server.py"]
     assert ledger_watchdog.launch(PID, relative, tmp_path) is None
     (tmp_path / str(PID)).mkdir()
     (tmp_path / str(PID) / "cwd").symlink_to(tmp_path / "repo")
-    assert ledger_watchdog.launch(PID, relative, tmp_path) == [PYTHON, script]
+    assert ledger_watchdog.launch(PID, relative, tmp_path) == [sys.executable, script]
 
 
 def test_a_zombie_or_missing_process_is_not_alive(tmp_path):
@@ -179,7 +180,7 @@ def test_a_restart_stops_the_server_by_its_own_pid_and_starts_it_from_its_own_sc
     assert ledger_watchdog.restart(host, PID, host.argv[:2]) == ""
     assert host.calls == [
         ("kill", PID, signal.SIGTERM),
-        ("run", [*host.argv[:2], "--ensure"], str(host.folder), 30, False, True),
+        ("run", [*host.argv[:2], "--ensure"], str(host.folder), 210, False, True),
     ]
 
 
@@ -191,7 +192,7 @@ def test_a_server_that_ignores_the_stop_is_killed_after_ten_seconds(tmp_path):
         ("kill", PID, signal.SIGTERM),
         *[("sleep", 0.1)] * 100,
         ("kill", PID, signal.SIGKILL),
-        ("run", [*host.argv[:2], "--ensure"], str(host.folder), 30, False, True),
+        ("run", [*host.argv[:2], "--ensure"], str(host.folder), 210, False, True),
     ]
 
 
@@ -310,7 +311,7 @@ def test_a_server_started_with_a_relative_script_is_restarted_from_its_own_folde
     (host.proc / str(PID) / "cwd").symlink_to(tmp_path / "repo")
     (host.folder / ".server.pid").write_text(str(PID))
     assert ledger_watchdog.watch(store, "sw", ProbedLedger(Clock()), FakeRuntime(), host) != []
-    assert host.calls[-1][1] == [PYTHON, host.argv[1], "--ensure"]
+    assert host.calls[-1][1] == [sys.executable, host.argv[1], "--ensure"]
 
 
 def test_the_writes_after_a_stale_restart_carry_this_swarm_s_inputs(store, tmp_path, monkeypatch):

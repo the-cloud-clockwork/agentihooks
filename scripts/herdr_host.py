@@ -151,6 +151,12 @@ def run(pane_id: str, launcher: Path, environ: dict[str, str]) -> None:
     _cli(["pane", "run", pane_id, f"exec {shlex.quote(str(launcher))}"], environ)
 
 
+def open_command(directory: Path, title: str, argv: list[str], workspace: str, environ: dict[str, str]) -> Placement:
+    placed = open_pane(directory, title, {}, "tab", workspace, environ)
+    _cli(["pane", "run", placed.pane_id, shlex.join(argv)], environ)
+    return placed
+
+
 def agent_name(name: str) -> str:
     cleaned = re.sub(r"[^a-z0-9_-]", "-", name.lower()).strip("-_")
     cleaned = cleaned if cleaned[:1].isalpha() else f"a-{cleaned}"

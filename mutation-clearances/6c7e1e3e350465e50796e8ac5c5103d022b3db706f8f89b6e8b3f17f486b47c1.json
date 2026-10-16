@@ -1,0 +1,6 @@
+{
+  "hooks/context/prepush_guard.py:hooks.context.prepush_guard.x_check_prepush__mutmut_27:90a68474c3241093a75849999fb6ef87796fe532c1541cb2dd1221682acccfff": {
+    "reader": "Standards",
+    "reason": "In the optional status lookup exception path, False and None are both false under the sole subsequent use if dirty. Neither value is returned, logged, interpolated, persisted or passed onward. Both retain the committed HEAD gate next command and raise byte-identical BlockAction text for the same root; outside that exception path the mutation is not executed."
+  }
+}

@@ -1,0 +1,94 @@
+{
+  "run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38397807278",
+  "artifact": 11819071581,
+  "commit": "8b25f4ed9fcd9196de364cf44e7a21ee1ed2c446",
+  "blob": "8d850b673cd28edecd92e5a0b83e08ad641b218f",
+  "path": "scripts/swarm_ledger/ledger_hook.py",
+  "line": 315,
+  "source": "#!/usr/bin/env python3\n\"\"\"Hook that keeps a crew member bound to its ledger, run on every harness by hooks.context.swarm_ledger.\n\nHandles SessionStart, UserPromptSubmit, PostToolUse and Stop. A session is bound by\n`agentihooks ledger join` or `ledger.py join` (learned from the Bash command). Unbound sessions exit at once. Every error fails open.\n\"\"\"\n\nimport json\nimport os\nimport shlex\nimport socket\nimport subprocess\nimport sys\nimport time\nimport uuid\nfrom pathlib import Path\n\nHERE = Path(__file__).resolve().parent\nsys.path.insert(0, str(HERE))\nsys.path.insert(1, str(HERE.parents[1]))\nLEDGER_DIR = Path(os.environ.get(\"LEDGER_DIR\", Path.home() / \"development-ledger\")).expanduser()\nSESSIONS = LEDGER_DIR / \".sessions\"\nGATE_READS = (\"_meta.members\", \"_meta.events\", \"tasks\", \"phases\", \"followups\", \"policy\")\nSHOWN = 5\nCLI = \"agentihooks ledger\"\n\n\ndef log(message):\n    import ledger_core as core\n\n    try:\n        core.append_capped(LEDGER_DIR / \".hook.log\", f\"{time.strftime('%H:%M:%S')} {message}\\n\")\n    except OSError:\n        pass\n\n\ndef read_json(path):\n    try:\n        return json.loads(path.read_text(encoding=\"utf-8\"))\n    except (OSError, ValueError):\n        return None\n\n\ndef write_session(path, data):\n    SESSIONS.mkdir(parents=True, exist_ok=True)\n    tmp = path.with_suffix(f\".{os.getpid()}.tmp\")\n    tmp.write_text(json.dumps(data), encoding=\"utf-8\")\n    os.replace(tmp, path)\n\n\ndef tokens_of(command):\n    try:\n        return shlex.split(command or \"\")\n    except ValueError:\n        return []\n\n\ndef is_ledger_cli(tokens):\n    return any(Path(t).name == \"ledger.py\" for t in tokens) or any(\n        a.endswith(\"agentihooks\") and b == \"ledger\" for a, b in zip(tokens, tokens[1:])\n    )\n\n\ndef join_from_command(command):\n    tokens = tokens_of(command)\n    if not is_ledger_cli(tokens) or \"join\" not in tokens:\n        return None\n    opts = {}\n    for i, token in enumerate(tokens[:-1]):\n        if token in (\"--slug\", \"--as\", \"--role\"):\n            opts[token] = tokens[i + 1]\n    slug, name = opts.get(\"--slug\"), opts.get(\"--as\")\n    return (slug, name, opts.get(\"--role\", \"member\")) if slug and name else None\n\n\ndef join_from_new(command, response):\n    tokens = tokens_of(command)\n    if not is_ledger_cli(tokens) or \"new\" not in tokens:\n        return None\n    if isinstance(response, dict):\n        response = response.get(\"stdout\") or response.get(\"textResultForLlm\")\n    for text in str(response).splitlines():\n        try:\n            out = json.loads(text)\n        except ValueError:\n            continue\n        if isinstance(out, dict) and isinstance(out.get(\"slug\"), str) and isinstance(out.get(\"joined\"), str):\n            return out[\"slug\"], out[\"joined\"], \"member\"\n    return None\n\n\ndef new_session(slug, name, role):\n    return {\n        \"slug\": slug,\n        \"name\": name,\n        \"role\": role,\n        \"calls\": 0,\n        \"nudged_rev\": 0,\n        \"nudge_calls\": 0,\n        \"blocks\": 0,\n        \"bypass_posted\": False,\n    }\n\n\ndef bind(payload, sid):\n    event = payload.get(\"hook_event_name\")\n    found = None\n    if (\n        event == \"PostToolUse\"\n        and payload.get(\"tool_name\") == \"Bash\"\n        and '\"joined\"' in str(payload.get(\"tool_response\"))\n    ):\n        command = (payload.get(\"tool_input\") or {}).get(\"command\")\n        found = join_from_command(command) or join_from_new(command, payload.get(\"tool_response\"))\n    if found:\n        write_session(SESSIONS / f\"{sid}.json\", new_session(*found))\n\n\ndef context_text(session, owed, extra=\"\"):\n    import watch_ledger\n\n    lines = [watch_ledger.line(e) for e in owed[:SHOWN]]\n    if len(owed) > SHOWN:\n        lines.append(\n            f\"... and {len(owed) - SHOWN} more (run: {CLI} --slug {session['slug']} --as {session['name']} events)\"\n        )\n    head = (\n        f\"SWARM LEDGER {session['slug']}: {len(owed)} operator event(s) owe you a reaction.\"\n        if owed\n        else f\"SWARM LEDGER {session['slug']}:\"\n    )\n    tail = f\"Act on them, then run: {CLI} --slug {session['slug']} --as {session['name']} ack\" if owed else \"\"\n    return \"\\n\".join(x for x in [head, *lines, extra, tail] if x)\n\n\ndef first_shown(session, owed):\n    \"\"\"The owed events no other path (inbox, watch) has shown this agent yet; all of them when that is unknown.\"\"\"\n    try:\n        from scripts.inbox import seen\n    except ImportError:\n        return owed\n    return seen.first_showing(seen.marks_for(session[\"slug\"]), session[\"name\"], session[\"slug\"], owed)\n\n\ndef emit(event, text):\n    print(json.dumps({\"hookSpecificOutput\": {\"hookEventName\": event, \"additionalContext\": text}}))\n\n\ndef touched(command):\n    import ledger_gate\n\n    tokens = tokens_of(command)\n    return is_ledger_cli(tokens) and any(t in ledger_gate.WRITE_COMMANDS for t in tokens)\n\n\ndef restart(session):\n    session.update(calls=0, nudge_calls=0, blocks=0, bypass_posted=False)\n\n\ndef progress_of(session):\n    from scripts.gates.progress import Progress\n    from scripts.swarm.store import redis_client\n\n    return Progress(redis_client(), session[\"slug\"])\n\n\ndef note_outcome(session, kind):\n    try:\n        progress_of(session).outcome(session[\"name\"], kind)\n    except Exception as exc:  # the tool call stands whatever Redis does\n        log(f\"outcome not recorded: {exc}\")\n\n\ndef outcome_seen(session):\n    try:\n        at = progress_of(session).read(session[\"name\"]).outcome_at\n    except Exception as exc:  # no signal reads as no outcome\n        log(f\"progress unreadable: {exc}\")\n        return False\n    if at <= session.get(\"outcome_at\", 0):\n        return False\n    session[\"outcome_at\"] = at\n    restart(session)\n    return True\n\n\ndef on_tool(payload, session, state, sfile):\n    import ledger_gate\n\n    from scripts.gates.progress import outcome_of\n\n    command = (payload.get(\"tool_input\") or {}).get(\"command\") if payload.get(\"tool_name\") == \"Bash\" else None\n    kind = outcome_of(command)\n    if kind:\n        note_outcome(session, kind)\n    if touched(command) or kind:\n        restart(session)\n    elif not payload.get(\"agent_id\"):\n        session[\"calls\"] += 1\n    pol = ledger_gate.policy(state)\n    owed = ledger_gate.unhandled_for(state[\"_meta\"], session[\"name\"], state.get(\"tasks\", []))\n    top = max((e[\"rev\"] for e in owed), default=0)\n    idle = session[\"calls\"] - session[\"nudge_calls\"] >= pol[\"nudge_after_calls\"] and not outcome_seen(session)\n    if owed and top > session[\"nudged_rev\"]:\n        session[\"nudged_rev\"] = top\n        fresh = first_shown(session, owed)\n        if fresh:\n            emit(\"PostToolUse\", context_text(session, fresh))\n    elif idle:\n        session[\"nudge_calls\"] = session[\"calls\"]\n        note = f\"You have made {session['calls']} tool calls without recording progress: update phases, follow-ups, comments or chat.\"\n        emit(\"PostToolUse\", context_text(session, first_shown(session, owed), note))\n    write_session(sfile, session)\n\n\ndef on_prompt(payload, session, state, sfile):\n    import ledger_gate\n\n    owed = first_shown(session, ledger_gate.unhandled_for(state[\"_meta\"], session[\"name\"], state.get(\"tasks\", [])))\n    if owed:\n        emit(\"UserPromptSubmit\", context_text(session, owed))\n\n\ndef stop_reasons(session, state):\n    import ledger_gate\n\n    pol = ledger_gate.policy(state)\n    owed = ledger_gate.unhandled_for(state[\"_meta\"], session[\"name\"], state.get(\"tasks\", []))\n    reasons = []\n    if owed:\n        reasons.append(f\"{len(owed)} operator event(s) are unhandled\")\n    if session[\"calls\"] >= pol[\"stop_after_calls\"] and not outcome_seen(session):\n        reasons.append(f\"{session['calls']} tool calls since you last recorded progress in the ledger\")\n    return reasons, len(owed), pol\n\n\ndef post_bypass(session, unhandled):\n    try:\n        import ledger\n\n        op = {\"op\": \"gate_bypass\", \"id\": f\"gb-{uuid.uuid4().hex[:8]}\", \"by\": session[\"name\"], \"unhandled\": unhandled}\n        ledger.request(session[\"slug\"], [op], service=True, timeout=2)\n    except Exception as exc:  # the stop must go through whatever the server does\n        log(f\"bypass not recorded: {exc}\")\n\n\ndef on_stop(payload, session, state, sfile):\n    reasons, unhandled, pol = stop_reasons(session, state)\n    if not reasons or payload.get(\"permission_mode\") == \"plan\":\n        write_session(sfile, session)\n        return\n    if session[\"blocks\"] >= pol[\"stop_blocks\"]:\n        if not session[\"bypass_posted\"]:\n            session[\"bypass_posted\"] = True\n            write_session(sfile, session)\n            post_bypass(session, unhandled)\n        return\n    session[\"blocks\"] += 1\n    write_session(sfile, session)\n    fix = f\"Handle them and run: {CLI} --slug {session['slug']} --as {session['name']} ack (or record progress with phase/followup/comment/say).\"\n    print(json.dumps({\"decision\": \"block\", \"reason\": f\"SWARM LEDGER {session['slug']}: {'; '.join(reasons)}. {fix}\"}))\n\n\nHANDLERS = {\"PostToolUse\": on_tool, \"UserPromptSubmit\": on_prompt, \"Stop\": on_stop}\n\n\ndef serve_ledgers():\n    import ledger_link\n\n    from scripts.swarm_ledger import server_lifetime\n    from scripts.swarm_ledger.repository.sqlite import DATABASE\n\n    if (\n        os.environ.get(\"LEDGER_AUTOSTART\") == \"0\"\n        or ledger_link.remote()\n        or (not (LEDGER_DIR / DATABASE).exists() and not any(LEDGER_DIR.glob(\"*.json\")))\n    ):\n        return\n    try:\n        address = ledger_link.address()\n        socket.create_connection(address, timeout=0.3).close()\n    except OSError:\n        subprocess.Popen(\n            [sys.executable, str(HERE / \"ledger_server.py\"), \"--ensure\"],\n            stdin=subprocess.DEVNULL,\n            stdout=subprocess.DEVNULL,\n            stderr=subprocess.DEVNULL,\n            start_new_session=True,\n            env=server_lifetime.environment(LEDGER_DIR, address[1]),\n        )\n\n\ndef dispatch(payload):\n    sid = payload.get(\"session_id\")\n    if not sid or not SESSIONS.exists() and payload.get(\"hook_event_name\") not in (\"SessionStart\", \"PostToolUse\"):\n        return\n    bind(payload, sid)\n    if payload.get(\"hook_event_name\") == \"SessionStart\":\n        serve_ledgers()\n    sfile = SESSIONS / f\"{sid}.json\"\n    session = read_json(sfile)\n    if session is not None:\n        from scripts.swarm.naming import resolve_name\n\n        session[\"name\"] = resolve_name(session[\"name\"])\n    handler = HANDLERS.get(payload.get(\"hook_event_name\"))\n    if session is None or handler is None:\n        return\n    import ledger_gate\n\n    from scripts.swarm_ledger.repository.sqlite import read_ledger\n\n    state = read_ledger(LEDGER_DIR, session[\"slug\"], *GATE_READS)\n    if not isinstance(state, dict) or not isinstance(state.get(\"_meta\"), dict) or ledger_gate.closed(state):\n        return\n    if session[\"name\"] not in state[\"_meta\"].get(\"members\", {}):\n        return\n    handler(payload, session, state, sfile)\n\n\ndef main():\n    try:\n        payload = json.load(sys.stdin)\n        dispatch(payload if isinstance(payload, dict) else {})\n    except Exception as exc:  # fail open: a broken hook must never stop an agent\n        log(f\"hook error: {exc!r}\")\n    return 0\n\n\nif __name__ == \"__main__\":\n    sys.exit(main())\n",
+  "executed": [
+    315
+  ],
+  "history": [
+    {
+      "commit": "2420b9f9b410a7af2b2db74fee75c7e290180182",
+      "executed": []
+    },
+    {
+      "commit": "6500c199bbada7ae40f24441a4f5a32e79f3e3a8",
+      "executed": []
+    },
+    {
+      "commit": "576bf16becb480efe1a1890fc3142f529d8eb339",
+      "executed": []
+    },
+    {
+      "commit": "0a6d2151b0fbfcd89d404873ba4a2cbaa5e63721",
+      "executed": []
+    },
+    {
+      "commit": "324e78773f4c004777414df6b88445b75a701260",
+      "executed": []
+    },
+    {
+      "commit": "92820eb86c081e1317b7cc4ac7e5ad9d95a99cc9",
+      "executed": []
+    },
+    {
+      "commit": "934013cc0dbb1b50fa4c53241c2ebc0d0d127b23",
+      "executed": []
+    },
+    {
+      "commit": "337ee5c8181ee76c49d5f36810aa0fa9262f491f",
+      "executed": []
+    },
+    {
+      "commit": "76af5e6d84271d50a1e033d620829fffc8218154",
+      "executed": []
+    },
+    {
+      "commit": "ecf3d2d340b9ac4f5e938123e70a32270e58c848",
+      "executed": []
+    },
+    {
+      "commit": "baa67bb212ffa8dcc4a334bd51eefc928e52fc76",
+      "executed": []
+    },
+    {
+      "commit": "f1e2508a1823865aaeae3e0237ac92590d101b4d",
+      "executed": []
+    },
+    {
+      "commit": "a3bfdd0c5ca2f8066bb877e2281b606bf56e3a20",
+      "executed": []
+    },
+    {
+      "commit": "c0b44d382e75db66515c9026816cb61bdcfb87c4",
+      "executed": []
+    },
+    {
+      "commit": "dba17fe27e3f7729611b0e9bd222cc8e826a7120",
+      "executed": []
+    },
+    {
+      "commit": "afc7611741551eb5516491c8a4e4920c794b7690",
+      "executed": []
+    },
+    {
+      "commit": "11eb534e6ef1f97b8ca329dc6398af271e6724b9",
+      "executed": []
+    },
+    {
+      "commit": "65dbae73457d5f8b758733a30454160e5349cba7",
+      "executed": []
+    },
+    {
+      "commit": "1d9e4aeeb955bb4c90eb6987a61cd167edcb5a47",
+      "executed": []
+    },
+    {
+      "commit": "a2ee5ea4b2b5221d64e1d81a0d96c7bf8394ea09",
+      "executed": []
+    }
+  ]
+}

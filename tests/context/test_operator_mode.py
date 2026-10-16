@@ -174,7 +174,7 @@ def test_the_hook_injects_the_notice_uncompressed_and_unlogged(monkeypatch):
     monkeypatch.setattr("hooks.common.inject_context", lambda *a, **k: injected.append((a, k)))
     hook_manager._operator_mode({"session_id": "s1", "prompt": "operator on"}, False)
     hook_manager._operator_mode({"session_id": "s1", "prompt": "operator on"}, True)
-    assert injected == [((operator_mode.ON_NOTICE,), {"also_log": False, "skip_compression": True})]
+    assert injected == [((operator_mode.ON_NOTICE,), {"also_log": False, "skip_compression": True, "kind": "alert"})]
 
 
 def test_a_failing_mode_store_is_logged_and_never_raises_into_the_hook(monkeypatch):
@@ -313,7 +313,10 @@ def test_prompt_reminders_use_the_configured_limit_uncompressed_and_unlogged(mon
     monkeypatch.setattr("hooks.common.inject_context", lambda *a, **k: injected.append((a, k)))
     hook_manager._operator_mode({"session_id": "s1", "prompt": delivery.marked("continue")}, False)
     assert injected == [
-        (("Operator not present: replies stay within 35 words.",), {"also_log": False, "skip_compression": True})
+        (
+            ("Operator not present: replies stay within 35 words.",),
+            {"also_log": False, "skip_compression": True, "kind": "alert"},
+        )
     ]
 
 
@@ -482,7 +485,7 @@ def test_the_pre_tool_hook_injects_the_reminder_uncompressed_and_unlogged(monkey
     monkeypatch.setattr("hooks.common.inject_context", lambda *a, **k: injected.append((a, k)))
     hook_manager._operator_reminder({"session_id": "s1"})
     hook_manager._operator_reminder({"session_id": "s1"})
-    assert injected == [((REMINDER,), {"also_log": False, "skip_compression": True})]
+    assert injected == [((REMINDER,), {"also_log": False, "skip_compression": True, "kind": "alert"})]
 
 
 def test_every_pre_tool_call_counts_toward_the_reminder(monkeypatch):

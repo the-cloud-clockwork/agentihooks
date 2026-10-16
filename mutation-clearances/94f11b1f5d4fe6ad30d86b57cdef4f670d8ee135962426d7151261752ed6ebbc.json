@@ -1,0 +1,6 @@
+{
+  "scripts/init_agent.py:scripts.init_agent.x__viewer_lines__mutmut_15:b611e52da7a222beceae7bfb417e3fef81815a6781d615ed98fe2e918f5840ee": {
+    "reader": "standards_reader",
+    "reason": "Omits the empty default of the swarm variable in _viewer_lines, so get returns None. The value only feeds shlex.join, and CPython shlex.quote returns two single quotes for any falsy argument, so the launcher line --slug '' is unchanged."
+  }
+}
