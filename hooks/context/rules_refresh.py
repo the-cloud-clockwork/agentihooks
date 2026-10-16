@@ -180,7 +180,7 @@ def maybe_inject(session_id: str) -> None:
                 {
                     "profile": profile,
                     "session_id": session_id,
-                    "content_hash": hashlib.sha256(rules.encode("utf-8")).hexdigest()[:16],
+                    "content_hash": hashlib.sha256(rules.encode()).hexdigest()[:16],
                 },
             )
 

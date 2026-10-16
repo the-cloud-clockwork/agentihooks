@@ -322,6 +322,7 @@ class TestProfileHomeScope:
         (master / "CLAUDE.md").write_text("You are master")
         (master / "rules").mkdir()
         (master / "rules" / "master-role.md").write_text("Master rule")
+        (master / "CLAUDE.local.md").write_text("Master local")
         global_install = tmp_home / ".claude"
         (global_install / "rules").mkdir(parents=True)
         (global_install / "CLAUDE.md").write_text("You are frontend")
@@ -342,6 +343,7 @@ class TestProfileHomeScope:
         assert len(received) == 1
         assert "--- CLAUDE.md ---\nYou are master\n" in received[0]
         assert "--- rules/master-role.md ---\nMaster rule\n" in received[0]
+        assert "--- CLAUDE.local.md (local override) ---\nMaster local\n" in received[0]
         assert "frontend" not in received[0].lower()
         assert (
             "rules_refresh: delivered",
