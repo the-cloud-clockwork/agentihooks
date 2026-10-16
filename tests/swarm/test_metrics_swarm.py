@@ -87,6 +87,36 @@ def test_full_task_lifecycle_keeps_identity_and_actual_merge_time():
     assert metrics_swarm.agent_rows(SLUG, doc(events), [agent]) == agents
 
 
+def test_split_pull_requests_keep_their_own_merge_and_parking_events():
+    first, second = TASK["pr_url"], "https://github.com/org/repo/pull/2"
+    events = [
+        event("task claimed", NOW),
+        {**event("task pr", NOW + 1_000), "pr_url": first, "branch": "first"},
+        event("task parked", NOW + 2_000),
+        event("task unparked", NOW + 3_000),
+        {**event("task pr", NOW + 6_000), "pr_url": second, "branch": "second"},
+    ]
+    state = {"tasks": [{**DONE, "pr_url": second, "split_pulls": [first, second]}], "_meta": {"events": events}}
+    pulls = {
+        first: SimpleNamespace(state="MERGED", merged_at=NOW + 5_000),
+        second: SimpleNamespace(state="MERGED", merged_at=NOW + 9_000),
+    }
+    found = metrics_swarm.delivery_rows(SLUG, state, [AGENT], pulls)
+    assert [
+        (row["kind"], row["pull_request"], row["branch"], row["ts_ms"])
+        for row in found
+        if row["kind"] in ("pull_request_opened", "pull_request_merged")
+    ] == [
+        ("pull_request_opened", first, "first", NOW + 1_000),
+        ("pull_request_opened", second, "second", NOW + 6_000),
+        ("pull_request_merged", first, "first", NOW + 5_000),
+        ("pull_request_merged", second, "second", NOW + 9_000),
+    ]
+    assert [(row["kind"], row["ts_ms"]) for row in found if row["kind"] in ("parked", "unparked")] == [
+        ("parked", NOW + 2_000), ("unparked", NOW + 3_000)
+    ]
+
+
 def test_reclaimed_task_attributes_each_claim_to_its_own_life():
     first = {**AGENT, "ended_at": NOW + 500, "reason": "retired"}
     second = {**AGENT, "name": "replacement", "started_at": NOW + 1_000, "execution_id": "other"}
