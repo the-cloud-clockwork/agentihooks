@@ -224,6 +224,14 @@ def test_removals_before_the_head_commit_or_for_other_reasons_do_not_count():
     assert ci_queue_retry.requeue(pull([earlier, merged, REMOVED]))[0]
 
 
+def test_a_head_last_removed_for_another_reason_is_not_requeued():
+    dequeued = {**REMOVED, "createdAt": "2026-10-15T06:10:00Z", "reason": "manually_removed"}
+    assert ci_queue_retry.requeue(pull([REMOVED, dequeued])) == (
+        False,
+        "head last left the queue for manually_removed",
+    )
+
+
 @pytest.mark.parametrize("change", [{"state": "MERGED"}, {"state": "CLOSED"}, {"isInMergeQueue": True}])
 def test_a_pull_request_merged_closed_or_queued_again_is_left_alone(change):
     assert not ci_queue_retry.requeue({**pull([REMOVED]), **change})[0]
