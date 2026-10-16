@@ -82,10 +82,7 @@ def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
     assert save["with"]["key"] == "durations-merged-${{ github.sha }}"
     producer = "durations" if "durations" in jobs else "select"
     assert restore["with"]["key"] == "${{ needs." + producer + ".outputs.key }}"
-    assert (
-        restore["if"].replace(f"needs.{producer}.", "needs.durations.")
-        == "needs.durations.outputs.source == '' && needs.durations.outputs.key != ''"
-    )
+    assert restore["if"] == f"needs.{producer}.outputs.source == '' && needs.{producer}.outputs.key != ''"
     assert restore["with"]["fail-on-cache-miss"] is True
     assert jobs["split"]["needs"] in (["durations", "select", "reuse", "admission"], ["select", "reuse", "admission"])
     lookup = next(s for s in jobs.get("durations", jobs["select"])["steps"] if s.get("id") == "stored")

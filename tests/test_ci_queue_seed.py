@@ -135,12 +135,8 @@ def test_every_unit_shard_downloads_the_one_republished_dev_durations():
     steps = jobs["split"]["steps"]
     download = _step(steps, "Download the queued run's dev durations")
     adopt = _step(steps, "Adopt latest dev durations")
-    assert (
-        download["if"].replace(
-            "needs." + ("durations" if "durations" in _jobs() else "select") + ".", "needs.durations."
-        )
-        == "needs.durations.outputs.source == '' && needs.durations.outputs.queued == 'true'"
-    )
+    producer = "durations" if "durations" in jobs else "select"
+    assert download["if"] == f"needs.{producer}.outputs.source == '' && needs.{producer}.outputs.queued == 'true'"
     assert download["uses"] == "./.github/actions/retry-download"
     assert download["with"] == {"name": "dev-durations", "path": "~/dev-durations"}
     assert steps.index(download) < steps.index(adopt)
