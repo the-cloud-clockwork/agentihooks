@@ -21,6 +21,11 @@
     "evidence/SV2-PRF-02/anton-outage-1-fixture.json": "22b98c5d6943787fbc83cbfe3438ae3e2b35201786bc4b2e55d518e7a0f60410"
   },
   "reductions": {
-    "anton-outage-1.json": "raw capture held outside the repo; startup_bench reduce with the startup_stages.py pinned in inputs reproduces the committed read byte for byte"
+    "anton-outage-1.json": {
+      "command": "python -m scripts.swarm_v2.startup_bench reduce --capture <raw capture> --output <read>",
+      "ran_at": "2026-10-16T21:00:10Z",
+      "output_sha256": "8d5860d22787254ad0e1cca0bc07817a1dce6425c66fbbda3ebb5ff12ffcf276",
+      "note": "raw capture held outside the repo; run with the startup_stages.py pinned in inputs, the output matches the committed read byte for byte"
+    }
   }
 }
