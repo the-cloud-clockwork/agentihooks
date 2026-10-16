@@ -75,7 +75,6 @@ MOVED = {
     ("test.yml", "mutation"): BATCH,
     ("test.yml", "mutation-plan"): LIGHT,
     ("test.yml", "mutation-stats"): BATCH,
-    ("test.yml", "queue-baseline"): LIGHT,
     ("test.yml", "queue-fail-fast"): LIGHT,
     ("test.yml", "refresh-durations"): QUEUED,
     ("test.yml", "reuse"): LIGHT,

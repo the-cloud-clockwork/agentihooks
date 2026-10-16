@@ -14,7 +14,7 @@ UNIT = {"durations", "split", "unit", "shard-check", "test-count", "gate-require
 QUEUE = UNIT | {"queue-fail-fast"}
 PULL_REQUEST = UNIT | {"select", "lint", "semgrep", "sonar", "mutation-plan", "mutation-stats", "mutation"}
 SELECTED = PULL_REQUEST - {"split", "unit", "shard-check"} | {"unit-selected"}
-PROMOTION = (PULL_REQUEST - {"mutation-plan", "mutation-stats", "mutation"}) | {
+PROMOTION = (PULL_REQUEST - {"mutation-plan", "mutation-stats", "mutation", "lint", "semgrep", "test-count"}) | {
     "queue-fail-fast",
     "reuse",
     "coverage-ratchet",
@@ -96,6 +96,15 @@ def test_selected_pull_requests_run_the_selected_leg_instead_of_the_shards():
 
 def test_main_pull_requests_keep_their_nonmutation_checks():
     assert jobs_for("pull_request", "main") == PULL_REQUEST - {"mutation-plan", "mutation-stats", "mutation"}
+
+
+def test_the_retired_queue_baseline_leaves_the_workflow_and_the_gate_takes_the_promotion_form():
+    from scripts import ci_reuse
+
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    assert "queue-baseline" not in jobs
+    assert not any("queue-baseline" in job.get("needs", []) for job in jobs.values())
+    assert jobs["gate-required"]["steps"] == ci_reuse.gate_steps(queue_tier=True, promotion=True)
 
 
 def test_the_queue_keeps_completeness_but_skips_the_shard_time_budget():
