@@ -78,6 +78,25 @@ def test_cli_defaults_and_success(tmp_path, monkeypatch):
     assert main() == 0
 
 
+def test_cli_passes_the_original_checkout_to_cached_collectors(tmp_path, monkeypatch):
+    import os
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["gate"])
+    monkeypatch.setattr("scripts.ci_mutation.__main__.discover_changes", lambda *args: {})
+    for folder in ("", str(tmp_path / "cache")):
+        monkeypatch.setenv("MUTATION_STATS_CACHE", folder)
+        monkeypatch.setenv("MUTATION_STATS_ROOT", "previous")
+        expected = str(tmp_path) if folder else "previous"
+
+        def gate(*args):
+            assert os.environ["MUTATION_STATS_ROOT"] == expected
+            return {"failed": False}
+
+        monkeypatch.setattr("scripts.ci_mutation.__main__.run_gate", gate)
+        assert main() == 0
+
+
 @pytest.mark.parametrize(
     ("extra", "part", "line"),
     [

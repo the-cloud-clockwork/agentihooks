@@ -45,6 +45,7 @@ AUTO = "auto"
 PICKED_LANES = ("eng", "ci")
 PLAN_MODE = ["--permission-mode", "plan"]
 REMOTE_PANE = "a remote agent's pane lives on its worker herdr server, never on the local one"
+MANAGED_RESUME = "unsupported resume: a managed Codex execution continues through its supervised server"
 
 
 def codex_plan_mode(environ):
@@ -71,6 +72,13 @@ def parse_fields(text):
 
 def _set(value):
     return "" if value in (None, "", AUTO) else value
+
+
+def _prefer(profile, avoid):
+    order = profile_choice.preferred(profile)
+    if not avoid:
+        return order
+    return tuple(harness for harness in (order or agent_choice.AGENTS) if harness != avoid)
 
 
 def _model_args(agent, chosen, environ, bounds, preserve=False):
@@ -124,7 +132,11 @@ def pane_target(agent):
 def _launch_records(name):
     from scripts import herdr_panes
 
-    return [r for r in herdr_panes.load(dict(os.environ)) if r.kind == "init-agent" and r.owner_session == name]
+    return [
+        r
+        for r in herdr_panes.load(dict(os.environ))
+        if r.kind == "init-agent" and naming.plain(r.owner_session) == naming.plain(name)
+    ]
 
 
 def _opened_pane(name, since_ms):
@@ -501,19 +513,20 @@ class HerdrRuntime:
             if saved and quota_transfer
             else saved
         )
-        if saved and want and saved["harness"] != want and not quota_transfer:
+        avoid = (task.get("transfer") or {}).get("avoid_harness")
+        if saved and not quota_transfer and (saved["harness"] != want if want else saved["harness"] == avoid):
             saved = {}
         if want and not saved:
             agent, reason = self.choose(want, environ)
         elif saved:
             agent, reason = self._saved_choice(saved, profile, quota_transfer, environ)
         else:
-            agent, reason = self._rotation(requested, environ, profile_choice.preferred(profile))
+            agent, reason = self._rotation(requested, environ, _prefer(profile, avoid))
         route_kind = task.get("route_kind", "subscription")
         if reason == agent_choice.ALL_FULL and not hasattr(self, "_quota_accounts") and route_kind != "interactive":
             raise SpawnError(reason, "unavailable")
         planned = getattr(self, "_quota_tasks", {}).get(task["id"])
-        if planned and not (requested or saved or want):
+        if planned and planned != avoid and not (requested or saved or want):
             agent, reason = planned, "fallthrough: quota reservation"
         agent, reason = (
             (agent, reason)
@@ -522,7 +535,10 @@ class HerdrRuntime:
         )
         if saved and agent != saved["harness"]:
             saved = {key: value for key, value in saved.items() if key not in ("model", "account")}
-        task = {**task, "harness": agent}
+        from scripts.swarm_v2.runtime import codex
+
+        transport = codex.transport(config, agent)
+        task = {**task, "harness": agent, **({"transport": transport} if transport else {})}
         text = timing.call(
             prompt.build,
             config.slug,
@@ -535,8 +551,6 @@ class HerdrRuntime:
         )
         timing.call(priming_trace.write, self.home, config.slug, name, task)
         argv = self._argv(config, name, agent, text, f"{name}.md", profile, decision.overlays)
-        from scripts.swarm_v2.runtime import codex
-
         argv += codex.arguments(config, agent, task)
         argv += _pinned(decision.overlays, decision.bundle_revision)
         if saved.get("model"):
@@ -584,7 +598,7 @@ class HerdrRuntime:
                     agent,
                     picked.__dict__,
                     environ,
-                    effort_range.of(config),
+                    effort_range.bounds(config, lane),
                     preserve=preserves_effort(bool(saved), lane),
                 ),
                 *mode,
@@ -606,6 +620,8 @@ class HerdrRuntime:
 
     def resume(self, config, agent, text):
         """Reopen the agent's own conversation in a new pane of the same name; SpawnError unless herdr shows it there."""
+        if live_binding.managed(agent):
+            raise SpawnError(MANAGED_RESUME, "unsupported")
         if not agent.profile:
             raise SpawnError("unsupported resume: original profile is missing", "unsupported")
         if agent.harness not in effort_range.EFFORTS:
@@ -635,7 +651,7 @@ class HerdrRuntime:
             agent.harness,
             picked.__dict__,
             dict(os.environ),
-            effort_range.of(config),
+            effort_range.bounds(config, agent.lane),
             preserve=preserves_effort(bool(agent.effort), agent.lane),
         )
         argv += ["--resume", agent.conversation_id, "--", *route, *model]
@@ -691,7 +707,7 @@ class HerdrRuntime:
         ]
         argv += [
             "--name",
-            name,
+            naming.plain(name) if agent == "claude" else name,
             "--agent",
             agent,
             "--start-timeout",
@@ -732,7 +748,8 @@ class HerdrRuntime:
                     "AGENTIHOOKS_SWARM_TASK": task_id,
                     "AGENTIHOOKS_SWARM_AUTONOMY": config.autonomy,
                     "AGENTIHOOKS_SWARM_SPAWN": "1",
-                    effort_range.VARIABLE: ":".join(effort_range.of(config)),
+                    "AGENTIHOOKS_AGENT_NAME": name,
+                    effort_range.VARIABLE: ":".join(effort_range.bounds(config, lane)),
                     **({"AGENTIHOOKS_COMPACT_LIMIT": str(config.compact_limit)} if config.compact_limit else {}),
                 },
             )
@@ -1063,14 +1080,13 @@ class HerdrRuntime:
             listed = self.herdr(["agent", "list"]).get("agents", [])
         except Exception:
             return managed or None
-        remote = self.hive.conversations() if self.hive is not None else {}
         registered = _registered_conversations(sessions())
         local = {
             row["pane_id"]: _conversation_id(row.get("agent_session")) or registered.get(row.get("name"), "")
             for row in listed
             if row.get("pane_id")
         }
-        return {**local, **managed, **remote}
+        return {**local, **managed}
 
     def nudge(self, agent, text):
         from scripts.hive.orders import Orders
@@ -1084,6 +1100,12 @@ class HerdrRuntime:
         if agent.runtime_backend != "local":
             return
         try:
+            if live_binding.managed(agent):
+                from scripts.inbox.store import InboxStore
+                from scripts.inbox.wake import BY
+
+                InboxStore(connect().redis).send(BY, agent.name, text, fyi=True)
+                return
             self.herdr(["agent", "prompt", pane_target(agent), marked(text)])
         except Exception as exc:
             return str(exc) or type(exc).__name__

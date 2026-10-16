@@ -4,11 +4,12 @@ intent gate refuses merge and done while that answer is fail, or pending for und
 import hashlib
 import json
 import re
+import shlex
 import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Callable
 
@@ -43,7 +44,10 @@ NAMED_LIMIT = 3
 DIFF_CHARS, BODY_CHARS = 6000, 1000
 SECTION = re.compile(f"{re.escape(START)}.*?{re.escape(END)}", re.S)
 TESTS_FIRST = f"{PURPOSE}-tests-first"
-BASE_QUESTIONS = ("usable", "delivers", "reachable", "weakens")
+PLAN = f"{PURPOSE}-plan"
+BASE_QUESTIONS = ("usable", "aligned", "delivers", "reachable", "weakens")
+PLAN_QUESTIONS = ("aligned", "covers", "weakens")
+DETAIL = ("stage", "criterion", "model", "definition", "definition_digest")
 CHUNK_QUESTIONS = ("underdelivers", "overdelivers")
 TESTS_FIRST_GUIDANCE = (
     "What would meet intent: Accept both old and new gate states in the preparatory tests "
@@ -123,6 +127,7 @@ def stamp(slug, task_id, url, doc, mode, now_ms, home=None):
         return {"verdict": "off", "body": body}
     verdicts = Verdicts(slug, NAME, home)
     planned = verdicts.read(task_id)
+    _bind_pulls(verdicts, task, url, doc)
     if task is not None and not task.get("split") and planned and planned.get("planned") and planned["verdict"] == PASS:
         if _same_phase(planned, task):
             return {"verdict": PASS, "body": body}
@@ -132,6 +137,26 @@ def stamp(slug, task_id, url, doc, mode, now_ms, home=None):
 
 def _split_fields(task, url):
     return {"url": url, "split": True} if task and task.get("split") else {}
+
+
+def _pull_subject(task, url):
+    return f"{task}.{hashlib.sha256(url.encode()).hexdigest()}"
+
+
+def _bind_pulls(state, task, url, doc):
+    if task and task.get("split"):
+        from scripts.swarm.done_gate import _pulls
+
+        task = {**task, "pr_url": url}
+        pulls = [pull for pull in _pulls(task) if PULL.search(pull)]
+        inputs = {pull: _fingerprint(doc, {**task, "pr_url": pull}) for pull in pulls}
+        Verdicts(state.slug, f"{NAME}-pulls", state.home).write(
+            task["id"],
+            PASS,
+            "registered split pulls",
+            pulls=pulls,
+            inputs=inputs,
+        )
 
 
 def _pr_field(url, field, run):
@@ -270,7 +295,7 @@ def _plan_chunk(doc, task):
     return {"plan_lines": task["plan_lines"], "plan_chunk": text}
 
 
-def state_of(doc, task, pr, proof_chars=PROOF_CHARS):
+def _parent(doc, task):
     phase = _phase(doc, task)
     return {
         "overview": doc["overview"],
@@ -278,6 +303,12 @@ def state_of(doc, task, pr, proof_chars=PROOF_CHARS):
         "phase_intent": phase.get("description", ""),
         "task": task["title"],
         "task_text": task["description"] + _split_note(task),
+    }
+
+
+def state_of(doc, task, pr, proof_chars=PROOF_CHARS):
+    return {
+        **_parent(doc, task),
         "pull_request_title": pr["title"],
         "pull_request_body": pr["body"],
         "changed_files": pr["files"],
@@ -287,6 +318,16 @@ def state_of(doc, task, pr, proof_chars=PROOF_CHARS):
         **({"task_part": "tests-first", "pull_request_diff": pr.get("diff")} if _tests_first(pr["body"]) else {}),
         **_plan_chunk(doc, task),
         **_named_state(pr),
+    }
+
+
+def plan_state(doc, task, kept):
+    return {
+        "stage": "plan",
+        **_parent(doc, task),
+        "planned_pieces": [f"{row['what']} | {', '.join(row['areas'])} | {row['why']}" for row in kept],
+        "planned_areas": sorted({area for row in kept for area in row["areas"]}),
+        **_plan_chunk(doc, task),
     }
 
 
@@ -322,20 +363,27 @@ def _rows(state):
     return plan_read.numbered(text, state["plan_lines"]) if isinstance(text, str) else []
 
 
+def _stage(state):
+    if state.get("task_part") == "tests-first":
+        return "tests-first"
+    return "plan" if state.get("stage") == "plan" else "delivered"
+
+
 def _definition(state):
-    return TESTS_FIRST if state.get("task_part") == "tests-first" else PURPOSE
+    return {"tests-first": TESTS_FIRST, "plan": PLAN}.get(_stage(state), PURPOSE)
 
 
 def _questions(definition, state, params):
     if state.get("task_part") == "tests-first":
         return runner.questions_for(definition)
+    base = PLAN_QUESTIONS if definition.name == PLAN else BASE_QUESTIONS
     rows = _rows(state)
-    fits = len(BASE_QUESTIONS) + len(CHUNK_QUESTIONS) + len(rows) <= MAX_QUESTIONS
+    fits = len(base) + len(CHUNK_QUESTIONS) + len(rows) <= MAX_QUESTIONS
     asked = runner.questions_for(definition, {**params, "rows": [list(row) for row in rows] if fits else []})
     if not rows:
-        return {key: asked[key] for key in BASE_QUESTIONS}
+        return {key: asked[key] for key in base}
     lines = {f"misses_line_{number}": asked[f"misses_line_{index}"] for index, (number, _) in enumerate(rows) if fits}
-    return {**{key: asked[key] for key in (*BASE_QUESTIONS, *CHUNK_QUESTIONS)}, **lines}
+    return {**{key: asked[key] for key in (*base, *CHUNK_QUESTIONS)}, **lines}
 
 
 def questions_for(state):
@@ -346,19 +394,19 @@ def _quoted(rows):
     return ", ".join(f'line {number} "{row}"' for number, row in rows)
 
 
-def _chunk_reasons(state, answers, thresholds):
+def _chunk_reasons(state, answers, thresholds, subject="the change"):
     if not _rows(state):
         return []
     lines, under, over = state["plan_lines"], answers["underdelivers"].noul, answers["overdelivers"].noul
     reasons = []
     if under >= thresholds["chunk"]:
-        reasons.append(f"the change may leave out something plan lines {lines} ask for, at probability {under:.2f}")
+        reasons.append(f"{subject} may leave out something plan lines {lines} ask for, at probability {under:.2f}")
     if over >= thresholds["chunk"]:
-        reasons.append(f"the change may add scope plan lines {lines} do not ask for, at probability {over:.2f}")
+        reasons.append(f"{subject} may add scope plan lines {lines} do not ask for, at probability {over:.2f}")
     return reasons
 
 
-def _chunk_steps(state, answers, thresholds):
+def _chunk_steps(state, answers, thresholds, subject="the change"):
     rows, lines, steps = _rows(state), state.get("plan_lines"), []
     if not rows:
         return steps
@@ -367,7 +415,7 @@ def _chunk_steps(state, answers, thresholds):
         named = [(n, row) for n, row in rows if f"misses_line_{n}" in answers]
         missed = [(n, row) for n, row in named if answers[f"misses_line_{n}"].noul >= line]
         if missed:
-            steps.append(f"Deliver what plan lines {lines} ask for and the change leaves out: {_quoted(missed)}.")
+            steps.append(f"Deliver what plan lines {lines} ask for and {subject} leaves out: {_quoted(missed)}.")
         else:
             steps.append(
                 f"Deliver what plan lines {lines} ask for. No single line was named, so check each: {_quoted(rows)}."
@@ -405,13 +453,15 @@ def _verdict(state, answers, thresholds):
         if answers["changes_gate_behavior"].noul >= thresholds["weaken"]:
             faults.append("the tests first part may change gate behaviour")
         if faults:
-            return FAIL, "; ".join([*faults, TESTS_FIRST_GUIDANCE])
+            return FAIL, "; ".join([*faults, TESTS_FIRST_GUIDANCE]), "tests-first"
+    if state.get("stage") == "plan":
+        return _plan_verdict(state, answers, thresholds)
     usable, weakens, fail = answers["usable"].noul, answers["weakens"].noul, thresholds["fail"]
     chunk = _chunk_reasons(state, answers, thresholds)
     if usable >= fail and weakens < thresholds["weaken"] and not chunk:
         cited = f", judged against plan lines {state['plan_lines']}" if _rows(state) else ""
-        return PASS, f"the phase can use it as delivered at probability {usable:.2f}{cited}"
-    lead = f"the phase can use this change at probability {usable:.2f}"
+        return PASS, f"the phase can use it as delivered at probability {usable:.2f}{cited}", None
+    lead, criterion = _delivered_lead(answers, thresholds)
     reasons = [text for key, text in REASONS.items() if answers[key].noul < thresholds["reason"]]
     if weakens >= thresholds["weaken"]:
         reasons.append(f"the change may weaken what the phase builds, at probability {weakens:.2f}")
@@ -419,31 +469,95 @@ def _verdict(state, answers, thresholds):
     guidance = remediation(state, answers, thresholds)
     if guidance:
         reasons.append(guidance)
-    return FAIL, "; ".join([f"{lead}, under {fail}" if usable < fail else lead, *reasons])
+    return FAIL, "; ".join([lead, *reasons]), criterion
+
+
+def _delivered_lead(answers, thresholds):
+    usable, fail = answers["usable"].noul, thresholds["fail"]
+    if usable >= fail:
+        weakened = answers["weakens"].noul >= thresholds["weaken"]
+        return f"the phase can use this change at probability {usable:.2f}", "weakens" if weakened else "chunk"
+    if "aligned" not in answers:
+        return f"the phase can use this change at probability {usable:.2f}, under {fail}", "usable"
+    aligned = answers["aligned"].noul
+    if aligned >= fail:
+        return (
+            f"the change fits the phase at probability {aligned:.2f}, and the phase can use it as delivered at "
+            f"probability {usable:.2f}, under {fail}: a delivery shortfall, not a phase mismatch",
+            "delivery",
+        )
+    return (
+        f"the change may not fit the phase: it fits at probability {aligned:.2f}, under {fail}, and the phase can use "
+        f"it at probability {usable:.2f}",
+        "phase",
+    )
+
+
+def _plan_verdict(state, answers, thresholds):
+    aligned, covers, weakens = (answers[key].noul for key in PLAN_QUESTIONS)
+    fail = thresholds["fail"]
+    faults = []
+    if aligned < fail:
+        faults.append(
+            ("phase", f"the plan may not serve the phase: it serves it at probability {aligned:.2f}, under {fail}")
+        )
+    if covers < fail:
+        faults.append(
+            (
+                "coverage",
+                f"the plan may leave out what the task asks: it covers it at probability {covers:.2f}, under {fail}",
+            )
+        )
+    if weakens >= thresholds["weaken"]:
+        faults.append(("weakens", f"the planned work may weaken what the phase builds, at probability {weakens:.2f}"))
+    faults += [("chunk", text) for text in _chunk_reasons(state, answers, thresholds, "the plan")]
+    if not faults:
+        cited = f", judged against plan lines {state['plan_lines']}" if _rows(state) else ""
+        served = f"the plan serves the phase at probability {aligned:.2f}"
+        return PASS, f"{served} and covers the task at probability {covers:.2f}{cited}", None
+    task, phase = f"{state['task']}: {state['task_text']}", f"{state['phase']}: {state['phase_intent']}"
+    steps = [
+        f"Plan work that serves {phase}, and covers {task}.",
+        *_chunk_steps(state, answers, thresholds, "the plan"),
+    ]
+    return FAIL, "; ".join([*(text for _, text in faults), "What would meet intent: " + " ".join(steps)]), faults[0][0]
 
 
 def _verdicts(definition, state, params, answers):
     thresholds = definition.thresholds if definition.name == PURPOSE else definitions.load(PURPOSE).thresholds
-    verdict, reason = _verdict(state, answers, thresholds)
-    return {"verdict": verdict, "reason": reason + _judged_on(state)}
+    verdict, reason, criterion = _verdict(state, answers, thresholds)
+    return {"verdict": verdict, "reason": reason + _judged_on(state), "criterion": criterion}
 
 
 RULE = code_rules.CodeRule(_questions, _verdicts, {"verdict": (PASS, FAIL, UNCHECKED)}, {"verdict": FAIL})
 
 
-def judge(state, decide=decide):
-    preparatory = state.get("task_part") == "tests-first"
-    if preparatory and not isinstance(state.get("pull_request_diff"), str):
-        return FAIL, "the tests first part requires a complete pull request diff to judge gate behaviour"
-    if not preparatory and state.get("plan_lines") and not isinstance(state.get("plan_chunk"), str):
-        return UNCHECKED, f"the plan chunk for lines {state['plan_lines']} could not be read"
+def judged(state, decide=decide):
+    stage = _stage(state)
+    if stage == "tests-first" and not isinstance(state.get("pull_request_diff"), str):
+        reason = "the tests first part requires a complete pull request diff to judge gate behaviour"
+        return {"verdict": FAIL, "reason": reason, "stage": stage, "criterion": "tests-first"}
+    if stage != "tests-first" and state.get("plan_lines") and not isinstance(state.get("plan_chunk"), str):
+        reason = f"the plan chunk for lines {state['plan_lines']} could not be read"
+        return {"verdict": UNCHECKED, "reason": reason, "stage": stage}
     try:
-        verdicts = runner.run(_definition(state), state, decider=decide).verdicts
+        ran = runner.run(_definition(state), state, decider=decide)
     except definitions.DefinitionError as exc:
-        return FAIL, f"the intent definition is invalid: {exc}"
+        return {"verdict": FAIL, "reason": f"the intent definition is invalid: {exc}", "stage": stage}
     except ClassifierError:
-        return UNCHECKED, "the classifier did not answer"
-    return verdicts["verdict"], verdicts["reason"]
+        return {"verdict": UNCHECKED, "reason": "the classifier did not answer", "stage": stage}
+    return {
+        **ran.verdicts,
+        "stage": stage,
+        "model": getattr(ran.raw, "source", None),
+        "definition": ran.definition.name,
+        "definition_digest": ran.definition.digest,
+    }
+
+
+def judge(state, decide=decide):
+    answer = judged(state, decide)
+    return answer["verdict"], answer["reason"]
 
 
 def fix_steps(slug: str) -> str:
@@ -458,15 +572,23 @@ def _fail_kind(mode):
     return "deny" if mode == "enforce" else "observe"
 
 
+def _answer(value):
+    return value if isinstance(value, dict) else {"verdict": value[0], "reason": value[1]}
+
+
+def _detail(answer):
+    return {key: answer[key] for key in DETAIL if key in answer}
+
+
 def _remember(slug, task, now_ms, state, answer, home):
-    verdict, reason = answer
     record = {
         "task": task["id"],
         "agent": task.get("claimed_by", ""),
         "at": now_ms,
         "purpose": PURPOSE,
-        "verdict": verdict,
-        "reason": reason,
+        "verdict": answer["verdict"],
+        "reason": answer["reason"],
+        **_detail(answer),
         "classifier_input": intent_history.request(state, questions_for(state)),
     }
     intent_history.append(slug, record, home)
@@ -481,15 +603,12 @@ def plan_check(slug, doc, task_id, traced, mode, now_ms, home=None):
     if previous and previous.get("planned") == traced["plan_hash"] and _same_phase(previous, task):
         return {"verdict": previous["verdict"], "reason": previous["reason"]}
     kept = [row for row in traced["pieces"] if row["kept"]]
-    plan = {
-        "title": f"Traced plan for task {task_id}",
-        "body": "".join(f"- {row['what']} | {', '.join(row['areas'])} | {row['why']}\n" for row in kept),
-        "files": sorted({area for row in kept for area in row["areas"]}),
-    }
-    state = intent_history.prepare(state_of(doc, task, plan))
-    verdict, reason = judge(state)
-    _remember(slug, task, now_ms, state, (verdict, reason), home)
-    verdicts.write(task_id, verdict, reason, now_ms, phase=task.get("phase"), planned=traced["plan_hash"])
+    state = intent_history.prepare(plan_state(doc, task, kept))
+    answer = judged(state)
+    verdict, reason = answer["verdict"], answer["reason"]
+    _remember(slug, task, now_ms, state, answer, home)
+    fields = {"phase": task.get("phase"), "planned": traced["plan_hash"], **_detail(answer)}
+    verdicts.write(task_id, verdict, reason, now_ms, **fields)
     who = Who(name=task.get("claimed_by", ""), task=task_id)
     if verdict == UNCHECKED:
         log.append(slug, log.Row.of(NAME, "count", who, reason=reason), home)
@@ -500,8 +619,8 @@ def plan_check(slug, doc, task_id, traced, mode, now_ms, home=None):
 
 def _fingerprint(doc, task):
     phase = _phase(doc, task)
-    judged = [task.get("title"), task.get("description"), phase.get("title"), phase.get("description")]
-    return hashlib.sha256(json.dumps([*judged, _plan_chunk(doc, task)]).encode()).hexdigest()
+    parent = [task.get("title"), task.get("description"), phase.get("title"), phase.get("description")]
+    return hashlib.sha256(json.dumps([*parent, _plan_chunk(doc, task)]).encode()).hexdigest()
 
 
 def _drafted(record):
@@ -513,7 +632,7 @@ class _Judgment:
     pr: dict | None
     previous: dict | None
     state: dict | None
-    answer: tuple[str, str] | None
+    answer: dict | tuple[str, str] | None
     inputs: str | None = None
 
 
@@ -538,6 +657,7 @@ class Check:
             states = ("pr", "claimed") if self.mode == "coach" else ("pr",)
             if task.get("state") not in states or not task.get("pr_url"):
                 continue
+            _bind_pulls(verdicts, task, task["pr_url"], doc)
             record = verdicts.read(task["id"])
             judged = record and record["verdict"] != PENDING and not record.get("planned")
             moved = (
@@ -642,20 +762,23 @@ class Check:
         if judgment.state is None:
             self._keep(task, previous, verdicts)
             return []
-        state, (verdict, reason) = judgment.state, judgment.answer
+        state, answer = judgment.state, _answer(judgment.answer)
+        verdict, reason = answer["verdict"], answer["reason"]
         head = pr.get("head")
         fixed = bool(previous) and previous["verdict"] == FAIL and previous["head"] != head
         rounds = min(previous["coach_rounds"] + fixed, 2) if previous else 0
-        _remember(self.slug, task, self.now_ms, state, judgment.answer, self.home)
+        _remember(self.slug, task, self.now_ms, state, answer, self.home)
         coached = {"coach_rounds": rounds, "head": head, "url": task["pr_url"]} if self.mode == "coach" else {}
         fields = {
+            **_detail(answer),
             "phase": task.get("phase"),
             **coached,
             "inputs": judgment.inputs,
             **_pending(pr),
             **_split_fields(task, task["pr_url"]),
         }
-        verdicts.write(task["id"], verdict, reason, self.now_ms, **fields)
+        record = verdicts.write(task["id"], verdict, reason, self.now_ms, **fields)
+        self._save_pull(task, {**record, "head": head, "url": task["pr_url"]})
         if self.mode == "coach":
             self._coaching().write(task["id"], verdict, reason, self.now_ms, **fields)
         who = Who(name=task.get("claimed_by", ""), task=task["id"])
@@ -697,6 +820,19 @@ class Check:
             phase=task.get("phase"),
             **{"url": task["pr_url"], **_split_fields(task, task["pr_url"])},
         )
+
+        self._save_pull(task, {**previous, "url": task["pr_url"]})
+
+    def _save_pull(self, task, record):
+        if task.get("split"):
+            fields = {key: value for key, value in record.items() if key not in ("verdict", "reason", "at")}
+            Verdicts(self.slug, f"{NAME}-pulls", self.home).write(
+                _pull_subject(task["id"], task["pr_url"]),
+                record["verdict"],
+                record["reason"],
+                record["at"],
+                **fields,
+            )
 
     def _failed(self, task, who, reason, rounds=0, merged=False):
         log.append(self.slug, log.Row.of(NAME, _fail_kind(self.mode), who, reason=reason), self.home)
@@ -746,6 +882,11 @@ def _merge_target(words):
     return next((word for word in operands if PULL.search(word) or word.isdigit()), None)
 
 
+def _same_pull(target, url):
+    named, bound = PULL.search(target), PULL.search(url)
+    return bool(bound) and (named.groups() if named else target) == (bound.groups() if named else bound[3])
+
+
 def _other_half(command, record):
     judged = record and record.get("split") and PULL.search(record["url"])
     if not judged:
@@ -775,10 +916,39 @@ class IntentGate:
         return call.tool == "Bash" and any(word in call.command for word in ("merge", "done", "ready"))
 
     def decide(self, call, who, state, mode="enforce"):
-        if not (who.pinned and who.task) or not any(map(_gated, simple_commands(call.command))):
+        commands = [words for words in simple_commands(call.command) if _gated(words)]
+        if not (who.pinned and who.task) or not commands:
             return Decision()
         record = state.read(who.task)
-        if _other_half(call.command, record):
+        pulls = Verdicts(state.slug, f"{NAME}-pulls", state.home)
+        bound = pulls.read(who.task)
+        if not bound:
+            return self._decide_record(call, who, state, mode, record)
+        for words in commands:
+            single = replace(call, tool_input={**call.tool_input, "command": shlex.join(words)})
+            target = _merge_target(words)
+            saved = record
+            if target:
+                urls = [url for url in bound["pulls"] if _same_pull(target, url)]
+                if len(urls) != 1:
+                    return Decision.deny("Intent requires a pull request registered on this task.")
+                saved = pulls.read(_pull_subject(who.task, urls[0]))
+                if (
+                    not saved
+                    or not saved.get("head")
+                    or pr_head(urls[0]) != saved["head"]
+                    or saved.get("inputs") != bound["inputs"].get(urls[0])
+                ):
+                    return Decision.deny(
+                        "Intent must be checked on this pull request head and contract before it can merge."
+                    )
+            decision = self._decide_record(single, who, state, mode, saved, bound=True)
+            if not decision.allowed:
+                return decision
+        return Decision()
+
+    def _decide_record(self, call, who, state, mode, record, bound=False):
+        if not bound and _other_half(call.command, record):
             return Decision.deny(
                 f"intent for task {who.task} was judged on {record['url']}, not this pull request. Record this half "
                 f"first: agentihooks swarm {who.swarm} pr <pull request url> --half <n>, then wait for its verdict."

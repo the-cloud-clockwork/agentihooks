@@ -14,26 +14,27 @@ def _workflow():
     return yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
 
 
-def test_sonar_is_required_on_dev_and_main_pull_requests():
+def test_sonar_remains_required_during_promotion_trigger_rollout():
     workflow = _workflow()
     event = workflow[True]["pull_request"]
-    assert set(event["branches"]) == {"dev", "main"}
+    assert set(event["branches"]) in ({"dev", "main"}, {"dev"})
     assert "paths" not in event
     assert "paths-ignore" not in event
     jobs = workflow["jobs"]
     assert "sonar" in jobs["gate-required"]["needs"]
     sonar = jobs["sonar"]
-    assert sonar["needs"] in (["unit", "reuse"], ["unit", "reuse", "admission"])
+    assert sonar["needs"] == ["unit", "unit-selected", "select", "reuse", "admission"]
     assert sonar["if"] in (
         "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
         "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
+        "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' }}",
     )
     assert not sonar.get("continue-on-error")
     gate = next(step for step in sonar["steps"] if step.get("name") == "SonarQube Quality Gate")
-    assert gate["if"] == "steps.current.outputs.superseded != 'true'"
+    assert "if" not in gate
     assert not gate.get("continue-on-error")
     assert jobs["lint"]["needs"] in (["reuse"], ["reuse", "admission"])
-    assert jobs["unit"]["needs"] in (["split", "reuse"], ["split", "reuse", "admission"])
+    assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
 
 
 def test_sonar_restores_downloads_before_every_scan():
@@ -49,7 +50,7 @@ def test_sonar_restores_downloads_before_every_scan():
     assert "${{ runner.arch }}" in key
     assert "hashFiles(" not in key
     assert "if" not in cache
-    assert steps[scan_index]["if"] == "steps.current.outputs.superseded != 'true'"
+    assert "if" not in steps[scan_index]
     assert not cache.get("continue-on-error")
 
 

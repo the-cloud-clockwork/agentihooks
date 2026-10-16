@@ -1,5 +1,6 @@
 import json
 import re
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -55,6 +56,28 @@ def test_outside_herdr_a_tab_opens_in_the_repository_workspace(herdr, tmp_path):
     herdr_host.open_pane(tmp_path, "eng-a", {}, "tab", "", {})
     call = herdr.made("tab create")
     assert call[call.index("--workspace") + 1] == "w1"
+
+
+def test_a_command_tab_opens_in_the_crew_workspace_and_runs_only_that_command(herdr, tmp_path, monkeypatch):
+    argv = ["codex", "resume", "--remote", "unix:///run/exe 1/codex.sock", "thread-1"]
+    environ = {"HERDR_WORKSPACE_ID": "w5"}
+    environs = []
+
+    def recording(args, given):
+        environs.append(given)
+        return herdr(args, given)
+
+    monkeypatch.setattr(herdr_host, "_cli", recording)
+    placed = herdr_host.open_command(tmp_path, "sw-master-1", argv, "crew-a", environ)
+    assert len(environs) == len(herdr.calls)
+    assert len(environs) >= 2
+    assert all(given is environ for given in environs)
+    call = herdr.made("tab create")
+    assert call[call.index("--workspace") + 1] == "w2"
+    assert call[call.index("--label") + 1] == "sw-master-1"
+    assert call[call.index("--cwd") + 1] == str(tmp_path)
+    assert herdr.made("pane run") == ["pane", "run", "w9:p4", shlex.join(argv)]
+    assert placed == herdr_host.Placement("w9", "w9:t2", "w9:p4")
 
 
 def test_a_missing_workspace_is_created_with_its_label(herdr, tmp_path):

@@ -57,7 +57,7 @@ def test_image_browser_is_used_only_after_a_successful_launch(tmp_path, present,
             text=True,
         )
         assert result.returncode == 0, result.stderr
-    assert image_output.read_text().strip() == f"linked={str(present and not existing).lower()}"
+    assert image_output.read_text().strip() == f"linked={str(present and usable and not existing).lower()}"
     assert launch_output.read_text().strip() == f"ready={str(present and usable and not existing).lower()}"
     if present and not existing:
         assert calls.read_text().splitlines() == [str(target)]
@@ -83,5 +83,5 @@ def test_usable_image_browser_skips_cache_restoration_and_duplicate_launch():
     assert cache["if"] == "steps.image.outputs.linked != 'true'"
     assert version["if"] == "steps.image.outputs.linked != 'true'"
     assert launch["env"]["IMAGE_LINKED"] == "${{ steps.image.outputs.linked }}"
-    assert "timeout" not in image["run"]
+    assert "verify.sh" in image["run"]
     assert launch["run"].count("verify.sh") == 1

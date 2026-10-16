@@ -8,6 +8,8 @@ from pathlib import Path
 
 import ledger_core as core
 
+from scripts.swarm_ledger import request_metrics
+
 MAX_BYTES = 8 << 20
 MAX_PER_ENTRY = 6
 EXTENSIONS = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif"}
@@ -69,7 +71,7 @@ def inspect(data):
 
 
 def write_file(path: Path, data: bytes) -> None:
-    with core.LOCK:
+    with request_metrics.locked(core.LOCK):
         if not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
             tmp = path.with_suffix(".part")

@@ -61,7 +61,7 @@ def _previous(store, slug):
         for row in history
         if row.get("lane") == MASTER and row["name"] not in names
     ]
-    return max(current + ended, key=lambda p: p.ran_at, default=None)
+    return max(current + ended, key=lambda p: (p.agent.started_at, p.ran_at), default=None)
 
 
 def describe(previous):
@@ -125,14 +125,12 @@ def fill(saved, config):
     """A saved launch with its empty keys filled: master profile, affinity or open seat harness, frontier model."""
     harness = saved.get("harness") or affinity.desired(config) or _open_seat()
     defaults = {"profile": _profile(config)}
-    if harness in effort_range.EFFORTS:
-        pick = model_pick.frontier(harness)
-        defaults |= {
-            "harness": harness,
-            "model": pick.model,
-            "effort": effort_range.clamp(harness, pick.effort, effort_range.of(config)),
-        }
-    return {**defaults, **{key: value for key, value in saved.items() if value}}
+    kept = {key: value for key, value in saved.items() if value}
+    if harness not in effort_range.EFFORTS:
+        return {**defaults, **kept}
+    pick = model_pick.frontier(harness)
+    effort = effort_range.clamp(harness, kept.get("effort", pick.effort), effort_range.bounds(config, MASTER))
+    return {**defaults, "harness": harness, "model": pick.model, **kept, "effort": effort}
 
 
 def _open_seat():
@@ -176,7 +174,8 @@ def _new(store, slug, runtime, at):
             store.redis.delete(store.key(slug, "master-start"))
         raise SwarmError(f"the new master could not start: {exc}") from exc
     affinity.placed(store, slug, placed.harness)
-    record = placed_record(store.execution_occupants(slug).get(record.seat, record), placed)
+    occupant = store.execution_occupants(slug).get(record.seat)
+    record = placed_record(occupant if occupant and occupant.name == name else record, placed)
     reported = runtime.reported(record)
     store.put_agent(slug, replace(record, state="working" if reported else "starting"))
     launch_check.begin(store, slug, record, at)
