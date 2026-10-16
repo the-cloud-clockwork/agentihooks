@@ -30,6 +30,7 @@ def main() -> None:
         "a": {
             "cli_session_start_hook_registrations": positive["cli_session_start_hook_registrations"],
             "cli_mcp_list": positive["cli_mcp_list"],
+            "session_start_invocation": positive["session_start_invocation"],
             "harness_diagnostics": [positive["harness_diagnostics"], second["harness_diagnostics"]],
             "homes": positive["record"]["homes"],
             "accounts": positive["record"]["accounts"],
@@ -54,7 +55,9 @@ def main() -> None:
         "production_rollout": "not exercised",
     }
     (evidence / "result.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print("SV2-IMG-02 passed: both CLIs load their hooks and MCP servers offline, refusals, recovery and rollback")
+    print(
+        "SV2-IMG-02 passed: offline CLI MCP listings and native Claude and replayed Codex hooks, refusals, recovery and rollback"
+    )
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ def test_native_rate_limits_render_requested_banner(monkeypatch, tmp_path):
     import hooks.context.quota_usage as quota_usage
 
     monkeypatch.setattr(quota_usage, "AGENTIHOOKS_HOME", tmp_path)
+    monkeypatch.setattr(quota_usage, "QUOTA_USAGE_TOOL_CALLS", 5)
     now = time.time()
     quota_usage.record_rate_limits(
         "session-1",

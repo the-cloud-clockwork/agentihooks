@@ -1,9 +1,6 @@
 from pathlib import Path
 
-import pytest
 import yaml
-
-from tests.test_ci_anton_runners import LIGHT, event, resolve
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -56,10 +53,3 @@ def test_worker_health_obtains_the_locked_base_before_building():
     health = next(index for index, step in enumerate(steps) if "run_health_proof.sh" in step.get("run", ""))
     assert pull < health
     assert not steps[health].get("continue-on-error", False)
-
-
-@pytest.mark.parametrize("name", ["merge_group", "push"])
-def test_queue_baseline_keeps_its_light_runner(name):
-    runs_on = jobs("test.yml")["queue-baseline"]["runs-on"]
-    github = event(name, actor="github-merge-queue[bot]", ref="refs/heads/dev")
-    assert resolve(runs_on, **github) == LIGHT
