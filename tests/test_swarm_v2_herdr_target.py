@@ -779,6 +779,21 @@ def test_a_journal_whose_reason_cannot_be_recorded_is_refused_and_kept(tmp_path)
     assert fleet.received()[EXE_A] == ["x"]
 
 
+def test_a_set_aside_whose_cleanup_fails_is_still_refused(tmp_path, monkeypatch):
+    client, fleet, desired = world(tmp_path)
+    (tmp_path / DELIVERIES).write_text("{")
+    (tmp_path / f"{DELIVERIES}.set-aside.jsonl").mkdir()
+
+    def refuse(self, missing_ok=False):
+        raise PermissionError(self)
+
+    monkeypatch.setattr(Path, "unlink", refuse)
+    reason = refusal(lambda: client.router.send(resolved(client, desired[0]), "agent_prompt", "op", "x"))
+    assert reason == ("journal_unreadable", "the pane delivery journal is unreadable")
+    assert fleet.mutations() == []
+    assert (tmp_path / DELIVERIES).read_text() == "{"
+
+
 def test_the_journal_is_private_and_versioned(tmp_path):
     client, _, desired = world(tmp_path)
     client.router.send(resolved(client, desired[0]), "agent_prompt", "op", "x")

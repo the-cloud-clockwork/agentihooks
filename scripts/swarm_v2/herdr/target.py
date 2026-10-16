@@ -5,6 +5,7 @@ import subprocess
 import time
 from collections import Counter
 from collections.abc import Callable, Mapping
+from contextlib import suppress
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import NoReturn
@@ -151,7 +152,8 @@ class Deliveries:
                     handle.write(json.dumps(record) + "\n")
                 self.path.unlink()
             except OSError:
-                aside.unlink()
+                with suppress(OSError):
+                    aside.unlink()
                 raise refused from None
         return {}
 
