@@ -22,7 +22,10 @@ class VerdictStore:
                 record["basis"] = finding.basis
             verdict = record["verdict"]
             if verdict and verdict.get("basis", "") != finding.basis:
-                verdict = record["verdict"] = {**verdict, "measure": finding.measure, "basis": finding.basis}
+                rebase = {"measure": verdict["measure"], "basis": verdict.get("basis", ""), "at": now_ms}
+                verdict = {**verdict, "measure": finding.measure, "basis": finding.basis}
+                verdict["rebases"] = [*verdict.get("rebases", []), rebase]
+                record["verdict"] = verdict
             show = verdict is None or record["returned"]
             grew = verdict and finding.measure > verdict["measure"]
             if grew and new_evidence:

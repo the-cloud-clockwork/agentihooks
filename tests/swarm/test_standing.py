@@ -232,3 +232,37 @@ def test_a_fired_count_verdict_still_lets_a_task_hours_regression_return(redis):
         "by": "master",
         "at": NOW,
     }
+
+
+def test_an_alert_and_the_detector_count_the_same_task_hours(redis):
+    store = VerdictStore(redis, "verdicts")
+    standing.fire(redis, "sw", "ci_overrun", reading(1.5, episode="alert-1"), NOW)
+    _judge(store, redis, NOW)
+    standing.clear(redis, "sw", "ci_overrun")
+    later = NOW + 2 * HOUR_MS
+    _detected(redis, 2.5, "d1", later)
+    assert _returns(store, redis, later) == ["bottleneck-stage/ci_overrun"]
+
+
+def test_a_judged_verdict_keeps_its_basis_and_each_rebase_it_went_through(redis):
+    store = VerdictStore(redis, "verdicts")
+    _detected(redis, 0.5, "d1", NOW)
+    _judge(store, redis, NOW)
+    record = json.loads(redis.hget("verdicts", "bottleneck-stage/ci_overrun"))
+    assert (record["basis"], record["verdict"]["basis"], record["verdict"]["measure"]) == (
+        "task hours",
+        "task hours",
+        0.5,
+    )
+    _overran(redis, 22.3, "run-1", NOW + HOUR_MS)
+    _returns(store, redis, NOW + HOUR_MS)
+    verdict = json.loads(redis.hget("verdicts", "bottleneck-stage/ci_overrun"))["verdict"]
+    assert (verdict["measure"], verdict["basis"]) == (22.3, MINUTES)
+    assert verdict["rebases"] == [{"measure": 0.5, "basis": "task hours", "at": NOW + HOUR_MS}]
+
+
+def test_the_measure_basis_is_left_out_of_equality_and_the_shown_finding():
+    hours = Finding("bottleneck stage", "ci_overrun", "s", (), "t", 1.0, "task hours")
+    minutes = Finding("bottleneck stage", "ci_overrun", "s", (), "t", 1.0, MINUTES)
+    assert hours == minutes
+    assert "basis" not in hours.as_dict()
