@@ -38,6 +38,11 @@ def test_a_claimless_worker_exits_and_its_seat_is_free_on_the_next_tick(env, mon
     assert runtime.reaped == [name]
     assert name not in runtime.live
     assert store.agents("sw")[0].state == "finished"
+    assert store.seats.exit_of(name) == {
+        "seat": "",
+        "reason": "finished its session without a claim",
+        "generation": 1,
+    }
     assert ledger.rows == before
     assert store.claimant("sw", "t1") == ("successor" if case == "obsolete_wait" else None)
 
