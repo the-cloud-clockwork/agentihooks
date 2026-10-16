@@ -34,7 +34,7 @@ def fake_server():
         MAX_BODY=10_000,
         core=SimpleNamespace(SLUG_RE=re.compile(r"[a-z0-9-]+"), loads=json.loads),
         authority=SimpleNamespace(
-            principal=lambda admin, slug, token, agent: PRINCIPALS.get(token),
+            principal=lambda admin, slug, token, agent: agent or PRINCIPALS.get(token),
             controller=lambda credential: False,
         ),
         repository=SimpleNamespace(token={SLUG: "page-token"}.get),
@@ -143,6 +143,46 @@ def test_an_agent_is_refused_both_actions_and_the_record_is_unchanged(files, pay
     )
     assert files.record.read_bytes() == before
     assert not files.markdown.exists()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"action": "approve", "proposal": "duplicate-dispatcher", "reason": "agent asks"},
+        {"action": "rollback", "to": 1},
+    ],
+)
+def test_an_agent_holding_the_page_credential_is_refused_through_the_route(files, payload):
+    second_revision(files)
+    before = files.record.read_bytes()
+    assert refused(payload, token="page-token", agent="engineer@1") == (
+        403,
+        "forbidden",
+        "Architecture changes need the operator",
+    )
+    assert files.record.read_bytes() == before
+
+
+def test_the_page_reads_an_approval_signed_by_the_configured_key(files):
+    act({"action": "approve", "proposal": "duplicate-dispatcher", "reason": "operator moves dispatch"})
+    reply = routes.dispatch(request("GET", "architecture"), fake_server())
+    assert reply["data"]["proposals"] == [{**DISPATCHER, "approved": True}]
+
+
+def test_an_approval_without_a_configured_public_key_reads_with_the_signing_key(files, monkeypatch):
+    monkeypatch.delenv("SWARM_ARCHITECTURE_PUBLIC_KEY")
+    reply = act({"action": "approve", "proposal": "duplicate-dispatcher", "reason": "operator moves dispatch"})
+    assert reply["data"]["proposals"] == [{**DISPATCHER, "approved": True}]
+    assert "Operator architecture changes: duplicate-dispatcher by operator" in files.markdown.read_text()
+
+
+def test_a_rollback_keeps_signed_approvals_in_the_decisions(files):
+    second_revision(files)
+    act({"action": "approve", "proposal": "duplicate-dispatcher", "reason": "operator moves dispatch"})
+    act({"action": "rollback", "to": 1})
+    assert "Operator architecture changes: duplicate-dispatcher by operator at revision 2" in (
+        files.markdown.read_text()
+    )
 
 
 def test_the_operator_principal_still_needs_the_page_credential_of_that_ledger(files):

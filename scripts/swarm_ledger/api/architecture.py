@@ -62,7 +62,7 @@ def view(environ: Mapping[str, str], key: Ed25519PublicKey | None = None) -> dic
 
 
 def operator_transport(handler: object, server: ModuleType, slug: str, principal: str) -> dict:
-    credential = handler.headers.get("X-Ledger-Token") or ""
+    credential = handler.headers.get("X-Ledger-Token")
     authenticate = operator_auth.authenticator(server.repository.token)
     if principal or authenticate(slug, credential) is None:
         raise APIError(403, "forbidden", "Architecture changes need the operator")
