@@ -149,7 +149,7 @@ def test_panel_rows_carry_no_plan_path():
     assert [(row["plan"], row["phase"], row["slice"], row["task"], row["value"]) for row in rows] == [
         ("", "", "", "", 1.0)
     ]
-    found = {"attempts": [], "quota": [], "archive": [], "brain": {"feed_at_ms": 0}}
+    found = {"attempts": [], "quota": [], "archive": [], "checkpoints": [], "brain": {"feed_at_ms": 0}}
     assert {
         (row["plan"], row["phase"], row["slice"], row["task"]) for row in metrics_fleet.source_rows(SLUG, NOW, found)
     } == {("", "", "", "")}
