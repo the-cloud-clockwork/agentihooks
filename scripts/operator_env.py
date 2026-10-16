@@ -1,5 +1,6 @@
 """The env files the operator's shell loads through the agentienv block, for processes that never ran that shell."""
 
+import json
 import shlex
 import subprocess
 from collections.abc import Iterable, Mapping, MutableMapping
@@ -11,6 +12,8 @@ SHELL_NAMES = frozenset({"PWD", "OLDPWD", "SHLVL", "_"})
 SOURCE = 'set -a; for f in "$@"; do . "$f" 2>/dev/null; done; set +a'
 ACCOUNT_PREFIX = "AH_CC_TOKEN_"
 ACCOUNTS_MARK = "agentihooks-accounts"
+CLASSIFIER_PREFIX = "AGENTIHOOKS_CLASSIFIER_"
+CLASSIFIER_NEEDS = ("AGENTIHOOKS_CLASSIFIER_URL", "AGENTIHOOKS_CLASSIFIER_LITELLM_KEY")
 
 
 def files(environ: Mapping[str, str]) -> list[Path]:
@@ -69,11 +72,35 @@ def source_line(environ: Mapping[str, str]) -> str:
     return f"set -- {shlex.join(map(str, paths))}; {SOURCE}; set --\n" if paths else ""
 
 
-def accounts(environ: Mapping[str, str]) -> dict[str, str]:
+def _shell_exports(environ: Mapping[str, str], prefix: str) -> dict[str, str]:
     script = f"printf '\\0{ACCOUNTS_MARK}\\0'; env -0"
     done = subprocess.run(["bash", "-lic", script], env=dict(environ), stdin=subprocess.DEVNULL, capture_output=True)
     _, marked, listing = done.stdout.rpartition(f"\0{ACCOUNTS_MARK}\0".encode())
     if not marked:
         return {}
     pairs = (item.decode(errors="surrogateescape").partition("=") for item in listing.split(b"\0") if item)
-    return {key: value for key, _, value in pairs if key.startswith(ACCOUNT_PREFIX)}
+    return {key: value for key, _, value in pairs if key.startswith(prefix)}
+
+
+def accounts(environ: Mapping[str, str]) -> dict[str, str]:
+    return _shell_exports(environ, ACCOUNT_PREFIX)
+
+
+def _claude_settings_env(environ: Mapping[str, str], prefix: str) -> dict[str, str]:
+    path = Path(environ.get("HOME") or Path.home()) / ".claude" / "settings.json"
+    try:
+        env = json.loads(path.read_text()).get("env")
+    except (OSError, ValueError, AttributeError):
+        return {}
+    if not isinstance(env, dict):
+        return {}
+    return {key: value for key, value in env.items() if key.startswith(prefix) and isinstance(value, str) and value}
+
+
+def classifier(environ: MutableMapping[str, str]) -> list[str]:
+    found = _claude_settings_env(environ, CLASSIFIER_PREFIX)
+    if not all(environ.get(name) or found.get(name) for name in CLASSIFIER_NEEDS):
+        found = {**_shell_exports(environ, CLASSIFIER_PREFIX), **found}
+    added = sorted(key for key, value in found.items() if value and not environ.get(key))
+    environ.update({key: found[key] for key in added})
+    return added

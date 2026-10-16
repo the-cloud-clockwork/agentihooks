@@ -11,7 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from scripts import agent_choice, claude_trust, herdr_host, herdr_panes, operator_env
+from scripts import agent_choice, claude_trust, gh_config, herdr_host, herdr_panes, operator_env
 from scripts.swarm import effort_range
 from scripts.targets.codex_target import codex_home, restore_hook_order
 
@@ -90,8 +90,12 @@ class AgentSpec:
     overlays: tuple = ()
     bundle_revision: str = ""
     auth: str = ""
+    transport: str = ""
+    seat: str = ""
+    previous_execution: str = ""
 
 
+APP_SERVER = "app_server"
 SPAWN = "AGENTIHOOKS_SWARM_SPAWN"
 PREDECESSOR = "AGENTIHOOKS_PREDECESSOR_SESSION"
 SWARM_IDENTITY = (
@@ -143,7 +147,12 @@ def _swarm_exports(environ: dict[str, str]) -> str:
 def _launch_environ(environ: dict[str, str], name: str, handoff: bool) -> dict[str, str]:
     keeps = environ.get(SPAWN) == "1" or handoff or name == environ.get("AGENTIHOOKS_AGENT_NAME")
     dropped = {SPAWN} if keeps else {SPAWN, *SWARM_IDENTITY}
-    return {key: value for key, value in environ.items() if key not in dropped}
+    launch_env = {key: value for key, value in environ.items() if key not in dropped}
+    if launch_env.get("AGENTIHOOKS_SWARM"):
+        gateway = operator_env.values(environ).get("MCP_KEY_GATEWAY")
+        if gateway:
+            launch_env["MCP_KEY_GATEWAY"] = gateway
+    return launch_env
 
 
 def _with_predecessor(environ: dict[str, str], handoff: bool) -> dict[str, str]:
@@ -282,11 +291,50 @@ def _profile_command(command: list[str], spec: AgentSpec) -> list[str]:
     return [command[0], "select-profile", spec.profile, *worn, "--agent", spec.agent, "--", *command[2:]]
 
 
+def _app_server_command(
+    spec: AgentSpec, report: Path, agent_args: list[str], environ: dict[str, str], directory: Path, opening: Path | None
+) -> list[str]:
+    return [
+        sys.executable,
+        "-m",
+        "scripts.codex_session",
+        "serve",
+        "--cwd",
+        str(directory),
+        "--profile",
+        spec.profile,
+        "--seat",
+        spec.seat,
+        *[f"--overlay={overlay}" for overlay in spec.overlays],
+        *([f"--bundle-revision={spec.bundle_revision}"] if spec.bundle_revision else []),
+        *(["--exclude", spec.exclude] if spec.exclude else []),
+        "--report",
+        str(report),
+        *(["--previous-execution", spec.previous_execution] if spec.previous_execution else []),
+        *(["--resume", spec.resume] if spec.resume else []),
+        *(["--prompt-file", str(opening)] if opening else []),
+        "--",
+        *(["--route", spec.auth] if spec.auth else []),
+        *_codex_otel_args(environ),
+        *_codex_trust_args(directory, environ),
+        *_model_args("codex", agent_args, environ),
+        *agent_args,
+    ]
+
+
 def _agent_command(
-    spec: AgentSpec, report: Path, name: str, agent_args: list[str], environ: dict[str, str], directory: Path
+    spec: AgentSpec,
+    report: Path,
+    name: str,
+    agent_args: list[str],
+    environ: dict[str, str],
+    directory: Path,
+    opening: Path | None = None,
 ) -> tuple[list[str], str]:
     """(command, line run before it): Claude routes through `agentihooks claude`, Codex through `agentihooks codex`."""
     agentihooks_bin = shutil.which("agentihooks") or str(Path(sys.argv[0]).resolve())
+    if spec.agent == "codex" and spec.transport == APP_SERVER:
+        return _app_server_command(spec, report, agent_args, environ, directory, opening), ""
     if spec.agent == "codex":
         command = [
             agentihooks_bin,
@@ -301,7 +349,10 @@ def _agent_command(
             *agent_args,
             *(["resume", spec.resume] if spec.resume else []),
         ]
-        return _profile_command(command, spec), ""
+        command = _profile_command(command, spec)
+        if environ.get("AGENTIHOOKS_SWARM"):
+            command = [sys.executable, "-m", "scripts.codex_input", "--", *command]
+        return command, ""
     command = [
         agentihooks_bin,
         "claude",
@@ -321,6 +372,14 @@ def _agent_command(
     return _profile_command(command, spec), before
 
 
+def _opening_prompt(prompt: str, path: Path) -> str:
+    if len(prompt.encode("utf-8")) < PROMPT_ARGUMENT_LIMIT:
+        return prompt
+    from scripts.profiles import binding
+
+    return f"{binding.PROMPT}\n\n{OPENING_FILE_INSTRUCTION}{path}"
+
+
 def _write_launcher(
     directory: Path,
     name: str,
@@ -333,7 +392,8 @@ def _write_launcher(
     safe_name = "".join(character if character.isalnum() or character in "._-" else "_" for character in name)
     stamp = f"{time.strftime('%y%m%d-%H%M%S')}-{os.getpid()}"
     launcher = root / f"{safe_name}-{stamp}.sh"
-    prompt_file = root / f"{safe_name}-{stamp}.prompt" if prompt else None
+    app_server = spec.transport == APP_SERVER
+    prompt_file = root / f"{safe_name}-{stamp}.{'opening' if app_server else 'prompt'}" if prompt else None
     if prompt_file is not None:
         prompt_file.write_text(prompt, encoding="utf-8")
         prompt_file.chmod(0o600)
@@ -343,12 +403,22 @@ def _write_launcher(
     environ = {**installed_langfuse_env(spec.agent), **environ}
     langfuse = environ.get("AGENTIHOOKS_LANGFUSE_ENABLED")
     langfuse_export = f"export AGENTIHOOKS_LANGFUSE_ENABLED={shlex.quote(langfuse)}\n" if langfuse is not None else ""
-    command, before = _agent_command(spec, _route_report(launcher), name, claude_args, environ, directory)
+    opening = prompt_file if app_server else None
+    command, before = _agent_command(spec, _route_report(launcher), name, claude_args, environ, directory, opening)
+    identity = environ.get("AGENTIHOOKS_AGENT_NAME", name) if environ.get("AGENTIHOOKS_SWARM") else name
+    from scripts import session_exit
+
+    exit_record = session_exit.path_for(launcher, environ)
+    exit_command = shlex.join([sys.executable, "-m", "scripts.session_exit", str(exit_record)])
+    exit_identity = shlex.join([spec.agent, identity])
     command_text = shlex.join(command)
-    if prompt_file is not None:
-        prompt_arg = f'"$(cat {shlex.quote(str(prompt_file))})"'
+    if prompt_file is not None and not app_server:
+        opening_prompt = _opening_prompt(prompt, prompt_file)
+        prompt_arg = (
+            f'"$(cat {shlex.quote(str(prompt_file))})"' if opening_prompt == prompt else shlex.quote(opening_prompt)
+        )
         held = f'set --; [ -n "${{{PROMPT_AFTER_START}:-}}" ] || set -- {prompt_arg}; unset {PROMPT_AFTER_START}; '
-        command_text = f'{held}{command_text} "$@"' if spec.agent == "codex" else f"{command_text} {prompt_arg}"
+        command_text = f'{held}{command_text} "$@"' if spec.agent == "codex" else f"{command_text} -- {prompt_arg}"
     cleanup = [
         str(launcher),
         str(_route_report(launcher)),
@@ -358,22 +428,28 @@ def _write_launcher(
     launcher.write_text(
         "#!/usr/bin/env bash\n"
         "set -u\n"
+        "set -m\n"
         f"cd {shlex.quote(str(directory))} || exit 1\n"
         f": > {shlex.quote(str(_started_marker(launcher)))}\n"
         f"{operator_env.source_line(environ)}"
         f"{_predecessor_export(environ)}"
+        f"{gh_config.SHELL_PIN}"
+        f"export AGENTIHOOKS_EXIT_RECORD={shlex.quote(str(exit_record))}\n"
         "export AGENTIHOOKS_TERMINAL_LAUNCH=1\n"
-        f"export AGENTIHOOKS_AGENT_NAME={shlex.quote(name)}\n"
+        f"export AGENTIHOOKS_AGENT_NAME={shlex.quote(identity)}\n"
         f"{_config_home_export(environ) if spec.agent == 'claude' else ''}"
-        f"{_telemetry_exports(name, environ)}"
+        f"{_telemetry_exports(identity, environ)}"
         f"{_swarm_exports(environ)}"
         f"{langfuse_export}"
         f"{_binding_export(environ)}"
         f"sleep {LAUNCH_GRACE_S}\n"
         f"{before}{command_text}\n"
+        "native_status=$?\n"
+        f'{exit_command} "$native_status" {exit_identity}\n'
         f"rm -f {shlex.join(cleanup)}\n"
         f"[ -e {shlex.quote(str(root))}/closing-$$ ] && {{ rm -f {shlex.quote(str(root))}/closing-$$; exit 0; }}\n"
         "unset AGENTIHOOKS_AGENT_NAME\n"
+        "unset AGENTIHOOKS_EXIT_RECORD\n"
         f"exec {shlex.quote(shell)} -l\n",
         encoding="utf-8",
     )
@@ -560,6 +636,16 @@ def _launch_command(
     raise RuntimeError(f"unsupported host OS: {system}")
 
 
+def _transport(args: argparse.Namespace, agent: str) -> str:
+    if args.codex_transport != APP_SERVER:
+        return args.codex_transport
+    if agent != "codex":
+        raise ValueError("--codex-transport app_server runs only a Codex agent")
+    if not (args.seat and args.profile):
+        raise ValueError("--codex-transport app_server needs --seat and --profile")
+    return APP_SERVER
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Open a routed Claude session in a new terminal")
     parser.add_argument("--dir", default="", help="Target directory; relative paths resolve below the configured base")
@@ -613,6 +699,14 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--bundle-revision", default="", help="Render the profile only from this bundle commit")
     parser.add_argument("--resume", default="", help="Reopen this conversation id (Claude --resume, Codex resume)")
     parser.add_argument(
+        "--codex-transport",
+        choices=("legacy", APP_SERVER),
+        default="",
+        help="Codex: run the supervised app-server for this swarm execution instead of the interactive terminal",
+    )
+    parser.add_argument("--seat", default="", help="Codex app-server: the swarm seat this execution occupies")
+    parser.add_argument("--previous-execution", default="", help="Codex app-server: the execution this launch replaces")
+    parser.add_argument(
         "--inbox-channel",
         action="store_true",
         help="Claude: load the agentihooks inbox channel and answer its development channels warning in herdr",
@@ -656,10 +750,16 @@ def _start_herdr(launcher: Path, directory: Path, name: str, args, agent: str, e
 def _held_prompt(launcher: Path, agent: str) -> str:
     """The opening prompt a Codex pane gets after its rename: typed at launch, the rename would wait behind its turn."""
     prompt_file = launcher.with_suffix(".prompt")
-    return prompt_file.read_bytes().decode() if agent == "codex" and prompt_file.exists() else ""
+    return (
+        _opening_prompt(prompt_file.read_bytes().decode(), prompt_file)
+        if agent == "codex" and prompt_file.exists()
+        else ""
+    )
 
 
 CHANNEL_WARNING_MS = 60_000
+PROMPT_ARGUMENT_LIMIT = 131_072
+OPENING_FILE_INSTRUCTION = "Read the complete opening instructions in this file and follow them: "
 
 
 def _inbox_channel_args() -> list[str]:
@@ -772,6 +872,9 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
                 overlays=tuple(args.overlay),
                 bundle_revision=args.bundle_revision,
                 auth=args.auth,
+                transport=_transport(args, agent),
+                seat=args.seat,
+                previous_execution=args.previous_execution,
             ),
         )
         host, explicit = _select_host(args.host, active_env)

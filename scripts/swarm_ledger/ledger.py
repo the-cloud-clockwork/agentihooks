@@ -43,7 +43,9 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       or his comment on another item; WORDS, of any length, must be in an operator
                                       prompt or AskUserQuestion answer any master or planner of this swarm recorded
   answer ITEM TEXT                    the master answers questions/<id> as itself at delegate or full autonomy,
-                                      which clears it from Priorities; members cannot answer
+                                      which clears it from Priorities; members other than a master seat cannot answer
+  fold candidates | check PLAN | apply PLAN
+                                      fold open tasks that change the same code into one grouped task (fold-tasks skill)
   time-left DURATION                 record remaining time, e.g. "3h 20m"
   claim ITEM                          take ownership of an item's operator events
   task add ID TITLE --lane eng|ci [--phase P] [--description D] [--depends-on IDS] [--territory AREAS] [--gain N] [--profile NAME]
@@ -117,6 +119,7 @@ REMOTE_READ_ATTEMPTS = 3
 REMOTE_READ_PAUSE = 0.5
 REQUEST_TIMEOUT = 10
 TALK_OPS = ("answer", "add_item", "relay")
+TASK_LISTS = {"group": ("task_group", "members", "group_members"), "split": ("task_split", "halves", "split")}
 CREDENTIAL_REFUSED = '"Missing or wrong ledger credential"'
 AUTH_FAILURES = collections.Counter()
 SHOW_JSON = functools.partial(json.dumps, indent=1, ensure_ascii=False)
@@ -522,7 +525,7 @@ def cmd_publish_plan(args):
         except ledger_publish.PublishError as exc:
             print(exc, file=sys.stderr)
     refused(state, ops)
-    tasks = ledger_plans.resliced(doc["tasks"], state["tasks"])
+    tasks = ledger_plans.resliced(doc["tasks"], call(args.slug)["tasks"])
     reslice = {"tasks": tasks} if any(tasks.values()) else {}
     print(json.dumps({"plan_url": url, "published_to": where, "phases": phases, **reslice}))
 
@@ -698,6 +701,12 @@ def _duration(value):
     return minutes
 
 
+def cmd_fold(args):
+    from scripts.swarm_ledger import ledger_fold
+
+    ledger_fold.run(args)
+
+
 def cmd_time_left(args):
     send(args, "set", path="time_left_minutes", value=args.minutes)
     print(json.dumps({"time_left_minutes": args.minutes}))
@@ -733,7 +742,12 @@ def cmd_task(args):
         title = " ".join(args.values)
         lists = {
             k: comma_list(v)
-            for k, v in (("depends_on", args.depends_on), ("territory", args.territory), ("overlays", args.overlays))
+            for k, v in (
+                ("depends_on", args.depends_on),
+                ("territory", args.territory),
+                ("overlays", args.overlays),
+                ("repositories", args.repositories),
+            )
             if v
         }
         if args.gain is not None:
@@ -768,16 +782,17 @@ def cmd_task(args):
         )
         print(json.dumps({"task": args.id, "added": title}))
         return
-    if args.action == "group":
-        send(args, "task_group", item=f"tasks/{args.id}", members=args.values)
-        print(json.dumps({"task": args.id, "group_members": args.values}))
+    if args.action in TASK_LISTS:
+        kind, field, shown = TASK_LISTS[args.action]
+        send(args, kind, item=f"tasks/{args.id}", **{field: args.values})
+        print(json.dumps({"task": args.id, shown: args.values}))
         return
     fields = dict(value.split("=", 1) for value in args.values if "=" in value)
     if len(fields) != len(args.values):
         sys.exit("task set takes FIELD=VALUE pairs")
-    for key in ("depends_on", "territory", "overlays"):
+    for key in ("depends_on", "territory", "overlays", "repositories", "split_pulls"):
         if key in fields:
-            fields[key] = comma_list(fields[key])
+            fields[key] = task_list(key, fields[key])
     for key in [key for key in ("artifact", "follow_up") if key in fields]:
         if fields[key] not in ("yes", "no"):
             sys.exit(f"task set takes {key}=yes or {key}=no")
@@ -800,6 +815,12 @@ def cmd_task(args):
 
 def comma_list(text):
     return [part.strip() for part in text.split(",") if part.strip()]
+
+
+def task_list(key: str, text: str) -> list[str]:
+    if key == "split_pulls" and text.lstrip().startswith("["):
+        return json.loads(text)
+    return comma_list(text)
 
 
 def refuse_plain_objects(fields):
@@ -907,10 +928,13 @@ def build_parser():
     answer = sub.add_parser("answer")
     answer.add_argument("item")
     answer.add_argument("text")
+    fold = sub.add_parser("fold")
+    fold.add_argument("action", choices=["candidates", "check", "apply"])
+    fold.add_argument("plan", nargs="?")
     sub.add_parser("time-left").add_argument("minutes", type=_duration)
     sub.add_parser("claim").add_argument("item")
     task = sub.add_parser("task")
-    task.add_argument("action", choices=["add", "set", "group"])
+    task.add_argument("action", choices=["add", "set", "group", "split"])
     task.add_argument("id", help="task id; task add - mints the next free t<n>")
     task.add_argument("values", nargs="+")
     task.add_argument("--lane", choices=["eng", "ci", "plan"], default="eng")
@@ -940,6 +964,9 @@ def build_parser():
     task.add_argument("--artifact", action="store_true", help="the operator asked this task for a file to review")
     task.add_argument("--profile")
     task.add_argument("--overlays", help="comma separated overlays this task's agent wears, at most three")
+    task.add_argument(
+        "--repositories", help="comma separated absolute local repository paths; defaults to the swarm repository"
+    )
     task.add_argument("--rank", help="queue rank: urgent, high, normal (default) or low; next means urgent")
     task.add_argument("--plan-slice", default="", help="task slice anchor; computes its plan lines")
     task.add_argument(

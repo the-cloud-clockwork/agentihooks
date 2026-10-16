@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Claude Code hook that keeps a crew member bound to its ledger.
+"""Hook that keeps a crew member bound to its ledger, run on every harness by hooks.context.swarm_ledger.
 
-One entry for SessionStart, UserPromptSubmit, PostToolUse and Stop. A session is bound by
+Handles SessionStart, UserPromptSubmit, PostToolUse and Stop. A session is bound by
 `agentihooks ledger join` or `ledger.py join` (learned from the Bash command). Unbound sessions exit at once. Every error fails open.
 """
 
@@ -77,8 +77,9 @@ def join_from_new(command, response):
     tokens = tokens_of(command)
     if not is_ledger_cli(tokens) or "new" not in tokens:
         return None
-    stdout = response.get("stdout", "") if isinstance(response, dict) else str(response or "")
-    for text in stdout.splitlines():
+    if isinstance(response, dict):
+        response = response.get("stdout") or response.get("textResultForLlm")
+    for text in str(response).splitlines():
         try:
             out = json.loads(text)
         except ValueError:
@@ -170,6 +171,20 @@ def note_outcome(session, kind):
         log(f"outcome not recorded: {exc}")
 
 
+def wait_seen(session: dict) -> bool:
+    from scripts.swarm import idle
+
+    try:
+        held = idle.wait(progress_of(session).redis, session["slug"], session["name"])
+    except Exception as exc:
+        log(f"wait unreadable: {exc}")
+        return False
+    if not held or held.get("until", 0) <= int(time.time() * 1000):
+        return False
+    restart(session)
+    return True
+
+
 def outcome_seen(session):
     try:
         at = progress_of(session).read(session["name"]).outcome_at
@@ -192,7 +207,7 @@ def on_tool(payload, session, state, sfile):
     kind = outcome_of(command)
     if kind:
         note_outcome(session, kind)
-    if touched(command) or kind:
+    if touched(command) or kind or wait_seen(session):
         restart(session)
     elif not payload.get("agent_id"):
         session["calls"] += 1
@@ -228,7 +243,7 @@ def stop_reasons(session, state):
     reasons = []
     if owed:
         reasons.append(f"{len(owed)} operator event(s) are unhandled")
-    if session["calls"] >= pol["stop_after_calls"] and not outcome_seen(session):
+    if session["calls"] >= pol["stop_after_calls"] and not wait_seen(session) and not outcome_seen(session):
         reasons.append(f"{session['calls']} tool calls since you last recorded progress in the ledger")
     return reasons, len(owed), pol
 
@@ -290,6 +305,9 @@ def serve_ledgers():
 
 
 def dispatch(payload):
+    global LEDGER_DIR, SESSIONS
+    LEDGER_DIR = Path(os.environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
+    SESSIONS = LEDGER_DIR / ".sessions"
     sid = payload.get("session_id")
     if not sid or not SESSIONS.exists() and payload.get("hook_event_name") not in ("SessionStart", "PostToolUse"):
         return

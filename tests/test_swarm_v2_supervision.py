@@ -1,6 +1,8 @@
+import contextlib
 import hashlib
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -9,10 +11,13 @@ from pathlib import Path
 
 import pytest
 
+from scripts.swarm_v2 import supervision_runtime
+from scripts.swarm_v2.broadcast_bridge import grant_path
 from scripts.swarm_v2.supervision import Launch, LaunchRefused
 from scripts.swarm_v2.supervision_agent import native_command
 from scripts.swarm_v2.supervision_protocol import checkpoint, write
 from scripts.swarm_v2.supervision_runtime import Supervisor, main
+from scripts.swarm_v2.worker import lease_renewal
 
 
 def launch_files(tmp_path):
@@ -228,10 +233,35 @@ def test_subprocess_keeps_actual_mutant_and_fail_sentinel(monkeypatch, value, ex
     assert subprocess_environment().get("MUTANT_UNDER_TEST") == expected
 
 
-@pytest.fixture
-def worker(tmp_path):
+def fixture_processes(fixture):
+    found = []
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            command = (entry / "cmdline").read_bytes()
+        except OSError:
+            continue
+        if str(fixture).encode() in command:
+            found.append(int(entry.name))
+    return found
+
+
+def reap(fixture):
+    deadline = time.monotonic() + 8
+    while (found := fixture_processes(fixture)) and time.monotonic() < deadline:
+        for pid in found:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
+        time.sleep(0.05)
+    assert not found, f"fixture processes survived teardown: {found}"
+
+
+@contextlib.contextmanager
+def supervised(tmp_path):
     attempt, path, spec = launch_files(tmp_path)
-    fixture = Path(__file__).parent / "integration/swarm_node/process_fixture.py"
+    fixture = tmp_path / "process_fixture.py"
+    shutil.copyfile(Path(__file__).parent / "integration/swarm_node/process_fixture.py", fixture)
     spec.update(
         herdr=[sys.executable, str(fixture), "herdr", "server"],
         agent=[sys.executable, str(fixture), "agent", "cooperative"],
@@ -263,11 +293,34 @@ def worker(tmp_path):
         children.append(child)
         return child
 
-    yield start, attempt, spec
-    for child in children:
-        if child.poll() is None:
-            child.terminate()
+    try:
+        yield start, attempt, spec
+        for child in children:
+            if child.poll() is None:
+                child.terminate()
+            child.wait(timeout=8)
+    finally:
+        for child in children:
+            child.kill()
+        reap(fixture)
+
+
+@pytest.fixture
+def worker(tmp_path):
+    with supervised(tmp_path) as value:
+        yield value
+
+
+def test_a_worker_whose_supervisor_died_leaves_no_fixture_process(tmp_path):
+    with supervised(tmp_path) as (start, attempt, _):
+        child = start()
+        root = runtime_directory(attempt, child)
+        wait_for(root / "running.json", child)
+        wait_for(root / "fixture-grandchild-two.json", child)
+        wait_for(root / "heartbeat-exporter.json", child)
+        child.kill()
         child.wait(timeout=8)
+    assert fixture_processes(tmp_path / "process_fixture.py") == []
 
 
 def runtime_directory(attempt, child):
@@ -482,4 +535,81 @@ def test_successful_herdr_command_without_json_output_is_accepted(tmp_path, monk
     monkeypatch.setattr(
         subprocess, "run", lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout=b"", stderr=b"")
     )
-    assert supervisor.herdr(["pane", "run", "fixture", "true"]) == {}
+    assert supervisor.herdr(["pane", "run", "fixture", "true"], time.monotonic() + 5) == {}
+
+
+class LapsingLease:
+    def __init__(self) -> None:
+        self.lost, self.ticks = None, 0
+
+    def tick(self) -> None:
+        self.ticks += 1
+        if self.ticks == 3:
+            self.lost = "heartbeat_refused_409"
+
+
+def test_a_launch_without_an_admission_runs_without_a_lease(tmp_path):
+    attempt, path, _ = launch_files(tmp_path)
+
+    assert isinstance(Supervisor(Launch.load(attempt, path)).lease, lease_renewal.Unleased)
+
+
+def test_an_admitted_launch_renews_its_lease_from_the_attempt(tmp_path):
+    attempt, path, spec = launch_files(tmp_path)
+    (attempt / "run").mkdir()
+    grant_path(attempt).write_text("sv2.grant-fixture")
+    (attempt / "launch.json").write_text(json.dumps({**spec, "control_url": "http://controller.invalid:8780"}))
+    admission = {
+        "execution_id": spec["authority"]["execution_id"],
+        "task_id": "fixture",
+        "task_generation": 2,
+        "controller_epoch": 1,
+        "owner_identity": "engineer@fixture",
+        "lease_deadline_ms": int(time.time() * 1000) + 60_000,
+    }
+    (attempt / lease_renewal.ADMISSION).write_text(json.dumps(admission))
+
+    lease = Supervisor(Launch.load(attempt, path)).lease
+
+    assert isinstance(lease, lease_renewal.Renewer)
+    assert lease.authority["task_generation"] == 2
+
+
+def test_a_lost_lease_stops_the_running_worker(tmp_path, monkeypatch):
+    attempt, path, _ = launch_files(tmp_path)
+    supervisor = Supervisor(Launch.load(attempt, path))
+    supervisor.lease = LapsingLease()
+    monkeypatch.setattr(supervisor, "wait", lambda: None)
+
+    assert supervisor.running() == "lease_lost"
+    assert supervisor.lease.ticks == 3
+
+
+def test_a_worker_without_a_lease_runs_until_its_agent_completes(tmp_path, monkeypatch):
+    attempt, path, _ = launch_files(tmp_path)
+    supervisor = Supervisor(Launch.load(attempt, path))
+    supervisor.exits["agent"] = 0
+    monkeypatch.setattr(supervisor, "wait", lambda: None)
+
+    assert isinstance(supervisor.lease, lease_renewal.Unleased)
+    assert supervisor.running() == "agent_completed"
+
+
+def test_a_drain_after_a_lost_lease_writes_no_checkpoint(tmp_path, monkeypatch):
+    attempt, path, _ = launch_files(tmp_path)
+    supervisor = Supervisor(Launch.load(attempt, path))
+    supervisor.root.mkdir(parents=True)
+    supervisor.lease = LapsingLease()
+    supervisor.lease.lost = "lease_expired"
+
+    def refused(*args):
+        raise AssertionError("checkpoint read after the lease was lost")
+
+    monkeypatch.setattr(supervision_runtime, "checkpoint", refused)
+    monkeypatch.setattr(supervision_runtime.trees, "living", lambda *args: {})
+    monkeypatch.setattr(supervision_runtime.trees, "cleanup", lambda *args: True)
+
+    result = supervisor.drain("lease_lost")
+
+    assert result["checkpoint_status"] == "incomplete"
+    assert result["reason"] == "lease_lost"

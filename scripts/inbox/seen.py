@@ -76,11 +76,11 @@ def first_showing(marks, name, slug, events):
 
 
 def claim(store, me):
-    """Deliver each item pending for me, its seat and aliases included; a ledger write already shown closes instead."""
+    """Deliver at most five oldest pending items across me, my seat and aliases; close ledger writes already shown."""
     store.redeliver(now_ms(), redelivery_ms())
     marks = SeenMarks(store.redis)
     shown = []
-    for item in filter(None, (store.deliver(item.id, me) for item in store.pending_mail(me))):
+    for item in filter(None, (store.deliver(item.id, me) for item in store.pending_mail(me)[:5])):
         try:
             elsewhere = item.ref and _shown_elsewhere(marks, store, item, me)
         except InboxError:
@@ -99,3 +99,15 @@ def _shown_elsewhere(marks, store, item, me):
 
 def _delivered_before(store, item_id, me):
     return sum(e.get("state") == "delivered" and e.get("by") == me for e in store.history(item_id)) > 1
+
+
+def receiving_session(environ=None):
+    from hooks.context.account_sessions import agent_pid
+    from hooks.context.broadcast import get_active_sessions
+
+    env = os.environ if environ is None else environ
+    session_id = env.get("CLAUDE_CODE_SESSION_ID", "") or env.get("CODEX_THREAD_ID", "")
+    if session_id:
+        return session_id
+    pid = agent_pid()
+    return next((sid for sid, row in get_active_sessions().items() if row.get("pid") == pid), "")

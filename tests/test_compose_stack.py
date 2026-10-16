@@ -28,7 +28,8 @@ def test_redis_starts_from_an_acl_file_with_optional_tls():
     start = (ROOT / "deploy/compose/redis/start.sh").read_text()
     assert "--aclfile" in start
     assert "--tls-port" in start
-    assert "user default off" in (ROOT / "deploy/compose/redis/users.acl.template").read_text()
+    users = (ROOT / "deploy/compose/redis/users.acl.template").read_text().splitlines()
+    assert users[0] == "user default off ~* &* +@all"
 
 
 def test_published_ports_bind_to_the_swarm_bind_address():
@@ -49,4 +50,4 @@ def test_env_example_selects_compose_deployment():
 
 def test_swarm_smoke_runs_the_compose_hive_proof():
     jobs = yaml.safe_load((ROOT / ".github/workflows/swarm-smoke.yml").read_text())["jobs"]
-    assert any("compose-hive-smoke.sh" in step.get("run", "") for step in jobs["compose-hive"]["steps"])
+    assert any("compose-hive-smoke.sh" in step.get("run", "") for job in jobs.values() for step in job["steps"])

@@ -23,6 +23,7 @@ PROVIDER_ERRORS = {
         r"stream disconnected before completion",
         r"unexpected status (?:500|502|503|504)\b",
         r"error sending request for url",
+        r"(?m)^\W*(Selected model is at capacity)",
     ),
     "copilot": (
         r"Request failed with status code (?:500|502|503|504)\b",
@@ -35,7 +36,7 @@ def provider_error(harness: str, text: str) -> str:
     plain = ESCAPE.sub("", text)
     for pattern in PROVIDER_ERRORS.get(harness, ()):
         if match := re.search(pattern, plain, re.I):
-            return match.group()
+            return match.group(match.lastindex or 0)
     return ""
 
 

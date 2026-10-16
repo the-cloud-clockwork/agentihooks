@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 
-from scripts import ci_reuse, ci_wiring
+from scripts import ci_reuse, ci_runner_trust, ci_wiring
 
 GATE = ci_wiring.GATE
 WORKFLOWS = ".github/workflows"
@@ -28,44 +28,116 @@ def _protected_config(base: dict, head: dict) -> dict:
     }
 
 
-def _aggregator_problems(base: tuple[str, str, dict], head: tuple[str, str, dict]) -> list[str]:
+def runners(policy: object = None) -> list[str]:
+    anton = (
+        [ci_runner_trust.selector(policy, "anton-oss-light", trusted_reruns=reruns) for reruns in (False, True)]
+        if isinstance(policy, dict)
+        else []
+    )
+    return ["ubuntu-latest", *anton]
+
+
+def reuse_jobs(policy: object = None) -> list[dict]:
+    jobs = []
+    for factory in (ci_reuse.reuse_job, ci_reuse.paged_reuse_job):
+        for runner in runners(policy):
+            job = factory()
+            if runner != job["runs-on"]:
+                job["runs-on"] = runner
+                [install] = [step for step in job["steps"] if step.get("name") == "Install metadata dependencies"]
+                install["env"] = {"PYTHONNOUSERSITE": "1"}
+            jobs.append(job)
+            jobs.append({**job, "if": "github.event_name != 'merge_group' && github.event_name != 'pull_request'"})
+    return jobs
+
+
+def _aggregator_problems(
+    base: tuple[str, str, dict], head: tuple[str, str, dict], policy: object = None, retired: frozenset = frozenset()
+) -> list[str]:
     (base_file, base_id, base_job), (head_file, head_id, head_job) = base, head
     if (base_file, base_id) != (head_file, head_id):
         return [f"The head moves {GATE} from {base_file}/{base_id} to {head_file}/{head_id}."]
     problems = [
         f"The head's {GATE} drops the base need {need}."
-        for need in sorted(ci_wiring.needs_of(base_job) - ci_wiring.needs_of(head_job))
+        for need in sorted(ci_wiring.needs_of(base_job) - ci_wiring.needs_of(head_job) - retired)
     ]
     fields = sorted((set(base_job) | set(head_job)) - {"needs"})
     return problems + [
         f"The head's {GATE} changes its {field}; the protected branch grades with its own."
         for field in fields
         if base_job.get(field) != head_job.get(field)
-        and not (field == "steps" and base_id == "gate-required" and head_job.get("steps") == ci_reuse.gate_steps())
+        and not (
+            field == "steps"
+            and base_id == "gate-required"
+            and head_job.get("steps")
+            in (
+                [ci_reuse.gate_steps(selected=selected) for selected in (False, True)]
+                + [ci_reuse.gate_steps(queue_tier=True), ci_reuse.gate_steps(queue_tier=True, promotion=True)]
+            )
+        )
+        and not (field == "runs-on" and head_job.get(field) in runners(policy))
     ]
 
 
-def _reuse_problems(base: dict, head: dict) -> list[str]:
+def _reuse_problems(base: dict, head: dict, policy: object = None) -> list[str]:
     previous = base.get("reuse")
     candidate = head.get("reuse")
     if candidate is None:
         return ["The head removes the protected reuse job."] if previous is not None else []
-    if candidate != previous and candidate != ci_reuse.reuse_job():
+    if candidate != previous and candidate not in reuse_jobs(policy):
         return ["The head changes the protected reuse job; the protected branch grades with its own."]
     return []
 
 
+def _duration_problems(base: dict, head: dict) -> list[str]:
+    if (
+        head["jobs"].get("reuse", {}).get("if")
+        != "github.event_name != 'merge_group' && github.event_name != 'pull_request'"
+    ):
+        return []
+    previous = base["jobs"].get("durations", {})
+    producer = head["jobs"].get("durations", {})
+    prefix = ci_reuse.duration_provenance_steps()
+    problems = []
+    if producer.get("steps", [])[: len(prefix)] != prefix:
+        problems.append("The head skips reuse without protected durations provenance.")
+    mutable = {"steps", "if", "runs-on"}
+    problems += [
+        f"The head changes the durations provenance context {field}."
+        for field in sorted((set(previous) | set(producer)) - mutable)
+        if previous.get(field) != producer.get(field)
+    ]
+    problems += [
+        f"The head changes the global provenance context {field}."
+        for field in ("env", "defaults")
+        if base.get(field) != head.get(field)
+    ]
+    return problems
+
+
 def grade(
-    base_workflows: dict[str, dict], base_config: dict, head_workflows: dict[str, dict], head_config: dict, today: date
+    base_workflows: dict[str, dict],
+    base_config: dict,
+    head_workflows: dict[str, dict],
+    head_config: dict,
+    today: date,
+    policy: object = None,
 ) -> list[str]:
     base_gates, head_gates = _gates(base_workflows), _gates(head_workflows)
     if len(base_gates) != 1:
         return [f"The base holds {len(base_gates)} jobs named {GATE}; nothing protected can grade."]
     if len(head_gates) != 1:
         return [f"The head holds {len(head_gates)} jobs named {GATE}; exactly one must be."]
-    problems = _aggregator_problems(base_gates[0], head_gates[0])
     file = base_gates[0][0]
-    problems += _reuse_problems(base_workflows[file]["jobs"], (head_workflows.get(file) or {}).get("jobs") or {})
+    head_jobs = (head_workflows.get(file) or {}).get("jobs") or {}
+    retired = frozenset(
+        job_id
+        for job_id, job in base_workflows[file]["jobs"].items()
+        if job.get("if") is False and job_id not in head_jobs
+    )
+    problems = _aggregator_problems(base_gates[0], head_gates[0], policy, retired)
+    problems += _reuse_problems(base_workflows[file]["jobs"], head_jobs, policy)
+    problems += _duration_problems(base_workflows[file], head_workflows.get(file, {"jobs": {}}))
     return problems + ci_wiring.check(head_workflows, _protected_config(base_config, head_config), today)
 
 
@@ -99,7 +171,13 @@ def main(argv: list[str] | None = None) -> int:
         for section in ("not_gates", "outside_gate")
     }
     head_workflows, head_config = load(root, args.head)
-    problems = grade(base_workflows, base_config, head_workflows, head_config, datetime.now(UTC).date())
+    actors = None
+    if ci_runner_trust.ACTORS in _git(root, "ls-tree", "-r", "--name-only", args.base).splitlines():
+        actors = json.loads(_git(root, "show", f"{args.base}:{ci_runner_trust.ACTORS}"))
+        ci_runner_trust.validate_actors(actors)
+    problems = grade(base_workflows, base_config, head_workflows, head_config, datetime.now(UTC).date(), actors)
+    if actors is not None:
+        problems += ci_runner_trust.check(head_workflows, actors)
     print(f"graded {args.head[:12]} against merge base {merge_base[:12]}: {len(problems)} protected gate problems")
     for problem in problems:
         print(f"::error::{problem}")

@@ -154,3 +154,42 @@ def test_tabs_get_ledger_and_swarm_changes_without_polling_the_document(browser,
             break
         time.sleep(0.05)
     assert server.HUB.watched() == []
+
+
+def test_a_page_recovers_a_burst_in_one_stream_and_matches_a_fresh_reload(browser, live, monkeypatch):
+    base, _ = live
+    context = browser.new_context(viewport={"width": 1920, "height": 1080})
+    page = context.new_page()
+    requests = []
+    page.on("request", lambda request: requests.append(request.url))
+    hub = server.HUB
+    hub.retained = 1
+    waiting, release = threading.Event(), threading.Event()
+    original_wait = hub.wait
+
+    def held_wait(slug, seq, timeout):
+        if not waiting.is_set():
+            waiting.set()
+            if not release.wait(10):
+                raise TimeoutError("burst was never released")
+        return original_wait(slug, seq, timeout)
+
+    monkeypatch.setattr(hub, "wait", held_wait)
+    try:
+        page.goto(f"{base}/{SLUG}")
+        assert waiting.wait(10)
+        for n in range(8):
+            server.repository.apply_ops(SLUG, ops=[note(n)])
+        release.set()
+        page.wait_for_function("() => document.body.textContent.includes('streamed note 7')", timeout=10000)
+        for n in range(8):
+            assert page.locator("#notes").get_by_text(f"streamed note {n}", exact=True).count() == 1
+        assert [url for url in requests if url.endswith(f"/{SLUG}/events")] == [f"{base}/api/v1/ledgers/{SLUG}/events"]
+        fresh = context.new_page()
+        fresh.goto(f"{base}/{SLUG}")
+        fresh.wait_for_function("() => document.body.textContent.includes('streamed note 7')", timeout=10000)
+        for n in range(8):
+            assert fresh.locator("#notes").get_by_text(f"streamed note {n}", exact=True).count() == 1
+    finally:
+        release.set()
+        context.close()

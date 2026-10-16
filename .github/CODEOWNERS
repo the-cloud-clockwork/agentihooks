@@ -7,6 +7,7 @@
 /scripts/gate_* @nestorcolt
 /scripts/size_limits.py @nestorcolt
 /scripts/check_* @nestorcolt
+/scripts/github_access.sh @nestorcolt
 /scripts/swarm_ledger/artifact_sanity.py @nestorcolt
 /scripts/swarm_v2/resource_bench.py @nestorcolt
 /scripts/swarm_v2/startup_bench.py @nestorcolt
@@ -30,6 +31,7 @@
 /tests/test_dev_durations.py @nestorcolt
 /tests/test_gate_protected.py @nestorcolt
 /tests/test_rulesets.py @nestorcolt
+/tests/test_github_access.py @nestorcolt
 /tests/test_shard_budget.py @nestorcolt
 /tests/test_shard_check.py @nestorcolt
 /tests/test_shards.py @nestorcolt
@@ -37,3 +39,4 @@
 /mutation-cleared.txt @nestorcolt
 /mutation-clearances/ @nestorcolt
 /delivery.yaml @nestorcolt
+/.github/workflows/trusted-actors.json @nestorcolt

@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 
 import pytest
 
@@ -222,7 +223,7 @@ class Langfuse:
 
 def _clock(*times):
     values = iter(times)
-    return lambda: next(values)
+    return lambda: next(values, times[-1])
 
 
 def test_read_joins_the_newest_trace_and_reads_freshness_from_a_watermark(cursors):
@@ -318,13 +319,115 @@ def test_one_slow_read_is_retried_once_inside_the_budget(cursors):
     assert registry.ATTEMPTS == 2
 
 
-def test_the_read_budget_leaves_later_bindings_unread_and_says_so(cursors):
+def test_a_budget_spent_before_reading_leaves_every_binding_unread_and_says_so(cursors):
     second = {**AGENT, "name": "engineer@1-0002"}
     langfuse = Langfuse([], [])
-    found, failures = registry.read("s", [AGENT, second], langfuse, {}, 15, 50, clock=_clock(0, 1, 16))
+    found, failures = registry.read("s", [AGENT, second], langfuse, {}, 15, 50, clock=_clock(0, 16))
+    assert [b["read"] for b in found] == [False, False]
+    assert failures == [
+        "active read budget of 15 seconds spent before engineer@1-0001",
+        "active read budget of 15 seconds spent before engineer@1-0002",
+    ]
+    assert langfuse.calls == []
+
+
+def test_a_failure_before_the_budget_ends_keeps_its_text(cursors):
+    release, tries = threading.Event(), []
+
+    def get(path, params):
+        tries.append(path)
+        if len(tries) == 1:
+            raise ConnectionError("refused")
+        release.wait(5)
+        raise ConnectionError("late")
+
+    [found], failures = registry.read("s", [AGENT], get, {}, 2, 50)
+    release.set()
+    assert found["read"] is False
+    assert failures == ["active read of engineer@1-0001 failed: ConnectionError: refused"]
+
+
+def test_no_retry_starts_after_the_budget_ends(cursors):
+    release, retried = threading.Event(), threading.Event()
+    tries = []
+
+    def get(path, params):
+        tries.append(path)
+        if len(tries) > 1:
+            retried.set()
+        release.wait(5)
+        raise ConnectionError("refused")
+
+    registry.read("s", [AGENT], get, {}, 0.2, 50)
+    release.set()
+    assert not retried.wait(0.5)
+
+
+def test_bindings_are_read_at_the_same_time(cursors):
+    second = {**AGENT, "name": "engineer@1-0002"}
+    langfuse = Langfuse([], [])
+    both = threading.Barrier(2, timeout=5)
+
+    def get(path, params):
+        both.wait()
+        return langfuse(path, params)
+
+    found, failures = registry.read("s", [AGENT, second], get, {}, 15, 50)
+    assert failures == [] and [b["read"] for b in found] == [True, True]
+
+
+def test_no_more_bindings_than_the_workers_are_read_at_once(cursors, monkeypatch):
+    monkeypatch.setattr(registry, "WORKERS", 2)
+    agents = [{**AGENT, "name": f"engineer@1-000{n}"} for n in range(1, 5)]
+    langfuse, lock = Langfuse([], []), threading.Lock()
+    running, peak = [0], [0]
+
+    def get(path, params):
+        with lock:
+            running[0] += 1
+            peak[0] = max(peak[0], running[0])
+        threading.Event().wait(0.1)
+        with lock:
+            running[0] -= 1
+        return langfuse(path, params)
+
+    found, failures = registry.read("s", agents, get, {}, 15, 50)
+    assert failures == [] and all(b["read"] for b in found)
+    assert peak[0] == 2
+
+
+def test_a_budget_under_one_second_still_reads(cursors):
+    found, failures = registry.read("s", [AGENT], Langfuse([], []), {}, 15, 50, clock=_clock(0, 14.5))
+    assert failures == [] and found[0]["read"] is True
+
+
+def test_a_failing_binding_is_tried_exactly_the_attempts(cursors):
+    tries = []
+
+    def get(path, params):
+        tries.append(path)
+        raise ConnectionError("refused")
+
+    [found], failures = registry.read("s", [AGENT], get, {}, 1, 50)
+    assert found["read"] is False
+    assert len(tries) == registry.ATTEMPTS
+    assert failures == ["active read of engineer@1-0001 failed: ConnectionError: refused"]
+
+
+def test_a_read_unfinished_when_the_budget_ends_leaves_its_binding_unread(cursors):
+    second = {**AGENT, "name": "engineer@1-0002"}
+    langfuse = Langfuse([], [])
+    release = threading.Event()
+
+    def get(path, params):
+        if "agent:engineer@1-0002" in params.get("tags", []):
+            release.wait(5)
+        return langfuse(path, params)
+
+    found, failures = registry.read("s", [AGENT, second], get, {}, 2, 50)
+    release.set()
     assert [b["read"] for b in found] == [True, False]
-    assert failures == ["active read budget of 15 seconds spent before engineer@1-0002"]
-    assert len(langfuse.calls) == 1
+    assert failures == ["active read budget of 2 seconds spent before engineer@1-0002"]
 
 
 def test_a_full_read_drops_watermarks_of_traces_no_longer_active(cursors):
@@ -451,8 +554,8 @@ def test_every_failed_binding_is_reported(cursors):
 
 def test_a_budget_spent_exactly_leaves_the_binding_unread(cursors):
     second = {**AGENT, "name": "engineer@1-0002"}
-    found, failures = registry.read("s", [AGENT, second], Langfuse([], []), {}, 15, 50, clock=_clock(0, 1, 15))
-    assert [b["read"] for b in found] == [True, False]
+    found, failures = registry.read("s", [AGENT, second], Langfuse([], []), {}, 15, 50, clock=_clock(0, 15))
+    assert [b["read"] for b in found] == [False, False]
 
 
 def test_a_codex_binding_reads_its_rollout_through_its_harness(cursors, monkeypatch):

@@ -1093,6 +1093,8 @@ def cmd_link_profile(
     *outside* the lock to avoid a same-process flock deadlock (it acquires
     its own ``_sync_lock``).
     """
+    if action in ("link", "unlink"):
+        _refuse_inside_rendered_home()
     if action == "link":
         with _sync_lock():
             targets = _chain_targets(for_target)
@@ -1994,14 +1996,15 @@ def _keep_chained_linked_profiles(profile_name: str, previous_record: dict, stat
 def _refuse_inside_rendered_home() -> None:
     from scripts.profiles import render
 
-    home = claude_home()
-    if not home.resolve().is_relative_to(render.rendered_root().resolve()):
+    homes = (os.environ.get(key) for key in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "COPILOT_HOME"))
+    if not (os.environ.get("AGENTIHOOKS_SWARM") or os.environ.get("AGENTIHOOKS_PROFILE")) and not any(
+        Path(home).expanduser().resolve().is_relative_to(render.rendered_root().resolve()) for home in homes if home
+    ):
         return
     print(
-        f"ERROR: this session runs in a rendered profile home, so init would have written the rendered "
-        f"profile home {home} instead of the operator home.\n"
-        "Run `agentihooks init` from the operator's own shell, where CLAUDE_CONFIG_DIR and "
-        "AGENTIHOOKS_PROFILE are unset.",
+        "ERROR: agent sessions cannot change the operator's global profile install.\n"
+        "Run this command from the operator's own shell with AGENTIHOOKS_SWARM, AGENTIHOOKS_PROFILE, "
+        "CLAUDE_CONFIG_DIR, CODEX_HOME and COPILOT_HOME unset.",
         file=sys.stderr,
     )
     sys.exit(1)
@@ -2094,11 +2097,8 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
             )
             _print_bundle_discover_hint(profile_hint=_hint_profile)
 
-    # Resolve profile — prefer: CLI flag > env var > state.json > interactive prompt
     _is_force = getattr(args, "force", False)
     profile_name = args.profile
-    if not profile_name:
-        profile_name = os.environ.get("AGENTIHOOKS_PROFILE", "")
     _prev_state = _load_state()
     _migrate_profile_rename(_prev_state, "colt", "anton")
     # Resolve install target — flag > AGENTIHOOKS_TARGET env > exactly-one-
@@ -2119,9 +2119,9 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
     # Profile recall: this target's record first; a fresh target borrows the
     # default target's chain so `init --target codex` on a claude machine
     # installs the same persona instead of falling to 'default'.
-    _prev_global = _global_record(_prev_state, install_target) or _global_record(_prev_state)
-    if _is_force:
-        _prev_global = _global_record(_kept_state, install_target) or _global_record(_kept_state)
+    from scripts.init_reporter import previous_install
+
+    _prev_global = previous_install(sys.modules[__name__], _kept_state if _is_force else _prev_state, install_target)
     if not profile_name:
         if _prev_global.get("profile", ""):
             profile_name = _prev_global["profile"]
@@ -2151,13 +2151,8 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
     # CLAUDE.md on disk was installed from a different profile means state.json
     # has lost (or never had) the profile record — silently stomping the live
     # profile with 'default' is exactly the failure this blocks. Explicit
-    # --profile / AGENTIHOOKS_PROFILE / --force still win.
-    if (
-        profile_name == "default"
-        and not args.profile
-        and not os.environ.get("AGENTIHOOKS_PROFILE", "")
-        and not _is_force
-    ):
+    # --profile / --force still win.
+    if profile_name == "default" and not args.profile and not _is_force:
         _md_path = Path(_prev_state.get("managed_claude_md") or (claude_home() / "CLAUDE.md"))
         _marker_profile = ""
         try:
@@ -2875,6 +2870,7 @@ def _skill_dir_filter() -> Callable[[Path], bool]:
 
 
 def install_global(args: argparse.Namespace) -> None:
+    _refuse_inside_rendered_home()
     with _sync_lock():
         _install_global_inner(args)
 
@@ -2945,37 +2941,6 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         print(f"ERROR: {_base_settings} not found.", file=sys.stderr)
         sys.exit(1)
 
-    raw_settings = _load_native_layer(_base_settings)
-    rendered: dict = substitute_paths(raw_settings)
-    rendered = substitute_paths(rendered, "__PYTHON__", _canonical_python)
-
-    # --- 1a. Bundle-global native overrides ---
-    # Settings gain the bundle rung that MCP already had; without it a bundle
-    # can only express fleet-wide settings by repeating them in every profile.
-    _bundle_root = _get_bundle_path()
-    if _bundle_root:
-        _bundle_overrides = _native_layer_path(_bundle_root, install_target, _NATIVE_SETTINGS_NAME)
-        if _bundle_overrides:
-            _data = _load_native_layer(_bundle_overrides)
-            if install_target == "claude":
-                _data = _resolve_profile_hook_paths(_data, _bundle_root)
-            rendered = _deep_merge(rendered, _data)
-            print(f"Applied bundle overrides: {_bundle_overrides}")
-
-    # --- 1b. Apply per-profile overrides (chained: each profile merges on top) ---
-    for pname, pdir in profile_dirs:
-        overrides_path = _native_layer_path(pdir, install_target, _NATIVE_SETTINGS_NAME)
-        if overrides_path:
-            overrides = _load_native_layer(overrides_path)
-            # Resolve relative paths in hook commands against the profile's root
-            # (claude only — codex/copilot hooks are adapter-written, never
-            # declared in their native settings files).
-            if install_target == "claude":
-                overrides = _resolve_profile_hook_paths(overrides, pdir)
-            rendered = _deep_merge(rendered, overrides)
-            print(f"Applied profile overrides: {overrides_path}")
-
-    # --- 1b2. Apply settings-profile overlay (settings.json + MCP only, not rules/CLAUDE.md) ---
     settings_profile_name: str = getattr(args, "settings_profile", "") or ""
     settings_profile_dir: Path | None = None
     if settings_profile_name:
@@ -2985,35 +2950,11 @@ def _install_global_inner(args: argparse.Namespace) -> None:
             print(f"ERROR: Settings profile '{settings_profile_name}' not found.", file=sys.stderr)
             print(f"Available profiles: {', '.join(available)}", file=sys.stderr)
             sys.exit(1)
+    settings_profile = (settings_profile_name, settings_profile_dir) if settings_profile_dir else None
+    from scripts.native_settings import native_settings
 
-        sp_overrides = _native_layer_path(settings_profile_dir, install_target, _NATIVE_SETTINGS_NAME)
-        if sp_overrides:
-            sp_data = _load_native_layer(sp_overrides)
-            if install_target == "claude":
-                sp_data = _resolve_profile_hook_paths(sp_data, settings_profile_dir)
-            rendered = _deep_merge(rendered, sp_data)
-            src = _profile_source_label(settings_profile_name)
-            print(f"Applied settings-profile overlay: {settings_profile_name} ({src})")
-
-    # --- 1c. Apply linked connectors (from last profile in chain) ---
+    rendered = native_settings(install_target, profile_dirs, settings_profile)
     last_profile = profile_chain[-1]
-    conn_env, conn_deny, conn_disabled = _load_connectors(last_profile)
-    if conn_env:
-        rendered.setdefault("env", {}).update(conn_env)
-        _cprint(f"  [OK] Connector env: {list(conn_env.keys())}")
-    if conn_deny:
-        rendered.setdefault("permissions", {}).setdefault("deny", []).extend(conn_deny)
-        _cprint(f"  [OK] Connector deny rules: {len(conn_deny)}")
-    if conn_disabled:
-        existing_disabled = rendered.get("disabledMcpjsonServers", [])
-        merged_disabled = list(dict.fromkeys(existing_disabled + conn_disabled))
-        rendered["disabledMcpjsonServers"] = merged_disabled
-        _cprint(f"  [OK] Connector disabled MCP servers: {merged_disabled}")
-
-    from scripts.profile_telemetry import apply_collector_env, apply_langfuse_env
-
-    apply_langfuse_env(rendered, profile_dirs, settings_profile_dir)
-    apply_collector_env(rendered)
 
     # --- 2 + 3. Personal-key merge, backup, and settings write (target-specific) ---
     existing_settings_path = adapter.write_settings(rendered)
@@ -5603,7 +5544,7 @@ def cmd_balance(
     import time
 
     from hooks.context.account_sessions import sessions_by_account
-    from scripts.agents_quota import balance_table, current_table, tokenless_table
+    from scripts.agents_quota import balance_table, current_table, router_environ, tokenless_table
     from scripts.claude_quota_balancer import (
         RoutingError,
         ancestor_oauth_token,
@@ -5619,7 +5560,7 @@ def cmd_balance(
 
     session_env = dict(os.environ)
     _load_claude_runtime_env()
-    credentials = discover_credentials(os.environ)
+    credentials = discover_credentials(router_environ(dict(os.environ)))
     live = sessions_by_account()
     if current:
         known = discover_credentials(session_env) + credentials
@@ -6430,8 +6371,10 @@ def main() -> None:
         dest="init_target",
         choices=list(SUPPORTED_TARGETS),
         default=None,
-        help=("Install only one agent CLI (claude | codex | copilot). Without this flag, installs all supported CLIs."),
+        help="Install only one agent CLI (claude | codex | copilot). Defaults to Claude and Codex.",
     )
+    init_p.add_argument("--with-copilot", action="store_true", help="Include Copilot in this install")
+    init_p.add_argument("--verbose", "-v", action="store_true", help="Show full installation details")
     init_p.add_argument(
         "--force",
         action="store_true",
@@ -6521,7 +6464,7 @@ def main() -> None:
     sub.add_parser("quota", help="One table for every Claude and Codex account")
     sub.add_parser("skill", help="Run skill evaluations with quota routed Claude authentication: eval -- <command>")
     sub.add_parser("serena", help="Run the Serena router: start|stop|restart|status|release <path>")
-    sub.add_parser("ledger", help="Swarm ledger: agent CLI, or new|serve|watch|chat|decline <args>")
+    sub.add_parser("ledger", help="Swarm ledger: agent CLI, or new|serve|watch|chat <args>")
     sub.add_parser(
         "swarm",
         help="Swarm of agents over a swarm ledger: <id> create|start|pause|stop|set|status|send-message, list, tick",
@@ -6831,23 +6774,9 @@ notes:
         elif args.action == "list":
             cmd_link_profile("list")
     elif args.command == "init":
-        args.profile = getattr(args, "init_profile", None)
-        args.settings_profile = getattr(args, "init_settings_profile", None) or ""
-        # NB: attribute name avoids link-profile's positional `args.target`.
-        args.install_target = getattr(args, "init_target", None)
-        env_target = os.environ.get("AGENTIHOOKS_TARGET", "").strip()
-        targets = (args.install_target or env_target,) if args.install_target or env_target else SUPPORTED_TARGETS
-        for index, target in enumerate(targets):
-            target_args = deepcopy(args)
-            target_args.install_target = target
-            if index:
-                target_args.force = False
-                target_args.bundle = None
-                target_args.link_profile = []
-            cmd_init_unified(target_args)
-        from scripts.herdr_setup import init_step
+        from scripts.init_reporter import run_init
 
-        init_step(args.init_herdr, sys.stdin.isatty())
+        run_init(args, sys.modules[__name__])
     elif args.command == "settings-profile":
         _cmd_settings_profile(args)
     elif args.command == "ignore":

@@ -1,0 +1,153 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cluster="$(python3 -c 'import uuid; print("worker-hive-" + uuid.uuid4().hex[:12])')"
+image=local/agentihooks-hive-worker:dev
+out="$HOME/scratchpad/worker-hive-proof"
+mkdir -p "$out"
+cleanup() {
+  status=$?
+  if [[ "$status" != 0 ]]; then
+    kubectl describe pods > "$out/pods.txt" 2>&1 || true
+    kubectl logs -l app.kubernetes.io/component=worker-hive --tail=100 > "$out/failed-worker.txt" 2>&1 || true
+    kubectl logs -l app.kubernetes.io/component=worker-hive --previous --tail=100 > "$out/previous-worker.txt" 2>&1 || true
+    kubectl logs deployment/hive-join --tail=100 > "$out/join.txt" 2>&1 || true
+    kubectl logs deployment/hive-join --previous --tail=100 > "$out/previous-join.txt" 2>&1 || true
+  fi
+  kind delete cluster --name "$cluster"
+}
+trap cleanup EXIT
+kind create cluster --name "$cluster" --image mirror.gcr.io/kindest/node:v1.37.0 --wait 120s > "$out/cluster.log" 2>&1 &
+cluster_pid=$!
+build_started="$SECONDS"
+docker build -f docker/swarm-node/Dockerfile -t local/worker-base:dev .
+docker build -f deploy/worker/Dockerfile --build-arg WORKER_IMAGE=local/worker-base:dev -t "$image" .
+printf 'worker_hive_image_build_seconds=%s\n' "$((SECONDS - build_started))" | tee "$out/build.txt"
+wait "$cluster_pid"
+kind load docker-image "$image" --name "$cluster"
+docker run --rm --entrypoint bash "$image" -c 'claude --version && codex --version && herdr --version && git --version && bash /usr/local/bin/wt.sh root && agentihooks hive --help' > "$out/tools.txt"
+openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=hive-join -addext subjectAltName=DNS:hive-join \
+  -keyout "$out/key.pem" -out "$out/cert.pem" 2>/dev/null
+kubectl create secret generic hive-tls --from-file=key.pem="$out/key.pem" --from-file=cert.pem="$out/cert.pem" >/dev/null
+kubectl apply -f - <<EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hive-redis
+spec:
+  selector:
+    matchLabels: {proof: redis}
+  template:
+    metadata:
+      labels: {proof: redis}
+    spec:
+      containers:
+        - name: redis
+          image: mirror.gcr.io/library/redis:7-alpine
+          readinessProbe:
+            tcpSocket: {port: 6379}
+            periodSeconds: 1
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hive-redis
+spec:
+  selector: {proof: redis}
+  ports: [{port: 6379}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hive-join
+spec:
+  selector:
+    matchLabels: {proof: join}
+  template:
+    metadata:
+      labels: {proof: join}
+    spec:
+      securityContext: {runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001}
+      containers:
+        - name: join
+          image: $image
+          imagePullPolicy: Never
+          command: [agentihooks, hive, serve, --host, 0.0.0.0, --port, "8770", --tls-cert, /tls/cert.pem, --tls-key, /tls/key.pem]
+          readinessProbe:
+            tcpSocket: {port: 8770}
+            periodSeconds: 1
+          env:
+            - {name: AGENTIHOOKS_SWARM_REDIS_URL, value: "redis://hive-redis:6379/0"}
+          volumeMounts:
+            - {name: tls, mountPath: /tls, readOnly: true}
+      volumes:
+        - name: tls
+          secret: {secretName: hive-tls}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hive-join
+spec:
+  selector: {proof: join}
+  ports: [{port: 8770}]
+EOF
+kubectl rollout status deployment/hive-redis --timeout=120s
+kubectl rollout status deployment/hive-join --timeout=120s
+code="$(kubectl exec deployment/hive-join -- agentihooks hive invite worker)"
+printf '%s' "$code" | kubectl create secret generic hive-code --from-file=code=/dev/stdin >/dev/null
+unset code
+helm template proof deploy/helm/agentihooks-swarm --show-only templates/worker-hive.yaml --show-only templates/worker-hive-state.yaml \
+  --set workers.replicas=1 --set workers.image.repository=local/agentihooks-hive-worker \
+  --set workers.image.pullPolicy=Never --set workers.joinUrl=https://hive-join:8770 \
+  --set workers.joinCodeSecret.name=hive-code --set workers.joinCodeSecret.key=code \
+  --set workers.caSecret.name=hive-tls --set workers.caSecret.key=cert.pem | kubectl apply -f -
+deployment=proof-agentihooks-swarm-worker-hive
+kubectl rollout status "deployment/$deployment" --timeout=120s
+prove_worker() {
+kubectl exec -i deployment/hive-join -- env HIVE="$1" python - <<'PY'
+import json, os, time
+from scripts.hive import registry
+from scripts.hive.orders import CommandOrder, Orders
+from scripts.swarm.store import redis_client
+
+redis, hive = redis_client(), os.environ['HIVE']
+record = None
+for _ in range(60):
+    record = registry.show(redis, hive)
+    if record and registry.live(record, int(time.time() * 1000)):
+        break
+    time.sleep(1)
+assert record and registry.live(record, int(time.time() * 1000)), 'pod did not register a live hive'
+assert record['ui'] == 'no' and record['ephemeral'] == 'yes'
+assert record['roles'] == ['eng', 'ci', 'plan'] and record['max_agents'] == 1
+print('pod registered a live worker hive with configured roles and capacity')
+orders = Orders(redis)
+order = CommandOrder('scratch-reap', 'reap', name='scratch-absent')
+orders.command(hive, order)
+ack = None
+for _ in range(60):
+    ack = orders.command(hive, order)
+    if ack:
+        break
+    time.sleep(1)
+assert ack and ack.status == 'done', f'scratch order not acknowledged: {ack}'
+assert redis.xlen(orders.commands(hive)) == 0
+print(json.dumps({'scratch_order': order.action, 'ack': ack.status, 'pending': 0}, sort_keys=True))
+PY
+}
+pod="$(kubectl get pods -l app.kubernetes.io/component=worker-hive -o jsonpath='{.items[0].metadata.name}')"
+prove_worker "$pod" | tee "$out/orders.txt"
+kubectl logs "$pod" > "$out/worker.log"
+restarts="$(kubectl get pod "$pod" -o jsonpath='{.status.containerStatuses[0].restartCount}')"
+[[ "$restarts" == 0 ]]
+kubectl delete pod "$pod" --wait --timeout=60s
+kubectl rollout status "deployment/$deployment" --timeout=120s
+replacement="$(kubectl get pods -l app.kubernetes.io/component=worker-hive -o jsonpath='{.items[0].metadata.name}')"
+[[ "$replacement" != "$pod" ]]
+prove_worker "$replacement" | tee "$out/replacement.txt"
+echo 'replacement pod reused durable membership without redeeming the join code again' | tee -a "$out/replacement.txt"
+echo 'worker hive kind registration and scratch order acknowledgement: passed'
+if [[ "${GITHUB_EVENT_NAME:-}" == push && "${GITHUB_REF:-}" == refs/heads/dev ]]; then
+  docker save "$image" -o "$out/image.tar"
+fi

@@ -36,6 +36,12 @@ def freezer(store, slug, who):
     return store.names.resolve(who.name)
 
 
+def coverer(store, slug, who):
+    if _seated(store, slug, who, DISPATCH):
+        return store.names.resolve(who.name)
+    return holder(store, slug, who)
+
+
 def record(ledger, slug, name, before, after):
     changes = ", ".join(f"{control} from {before[control]} to {after[control]}" for control in before)
     text = f"{name} changed {changes}."

@@ -1,11 +1,11 @@
 import json
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 from typing import TYPE_CHECKING
 
 from scripts.swarm.store import RedisStore, SwarmError
-from scripts.swarm_v2 import image_tag, proof_swarm
+from scripts.swarm_v2 import image_tag, masters, proof_swarm
 from scripts.swarm_v2.accounts import AccountCapacity, fleet_held
 from scripts.swarm_v2.auth_context import Registration
 from scripts.swarm_v2.herdr.capabilities import Qualifier, machine_probe
@@ -33,6 +33,7 @@ from scripts.swarm_v2.quota import QuotaObservations
 from scripts.swarm_v2.registry import FleetRegistry
 from scripts.swarm_v2.runtime.base import SpawnRequest
 from scripts.swarm_v2.runtime.routed import RoutedRuntime, routed
+from scripts.swarm_v2.supervision import Budgets
 
 if TYPE_CHECKING:
     from scripts.swarm_v2.auth_context import LaunchAuthority
@@ -187,6 +188,7 @@ class Workers:
             HARNESS,
             self.exporter,
             self.terms.api_url,
+            budgets=Budgets(checkpoint=40),
             checkpoint_remote=bool(environ.get("AGENTIHOOKS_CHECKPOINT_BUCKET")),
         )
         api = pod_api(environ, self.policy["namespace"])
@@ -214,6 +216,14 @@ def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[s
     runtime = routed(
         environ, kubernetes=kubernetes, launch=partial(launcher.from_tick, terms=workers.terms, target=workers.target)
     )
+
+    def seats() -> frozenset[str]:
+        owners = masters.MasterSeats(controller.store.redis).hive_owners(slug)
+        return frozenset(
+            owner.partition("@")[0] for hive, owner in owners.items() if hive == f"hives/{controller.owner}"
+        )
+
+    runtime.router.placement = replace(runtime.router.placement, master_seats=seats)
     runtime.herdr_runtime.quota_accounts = FleetAccounts(route, workers.terms.cap)
     runtime.herdr_runtime.host = WorkerPool(api, workers.policy.get("worker_pool"), workers.requested)
     launcher.planned = partial(runtime.herdr_runtime.planned_account, agent=HARNESS)

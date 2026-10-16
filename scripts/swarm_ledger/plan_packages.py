@@ -45,5 +45,5 @@ def read(lines: str) -> str:
         plan_read.chunk(source, shared_lines(source), margin=0)
         + "\n"
         + plan_read.chunk(source, lines)
-        + plan_read.linked(source, lines)
+        + plan_read.linked(source, lines, margin=plan_read.MARGIN)
     )

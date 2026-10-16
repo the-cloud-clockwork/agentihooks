@@ -17,6 +17,7 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from hooks.context.account_sessions import (
     API_ACCOUNT,
@@ -29,6 +30,9 @@ from scripts import codex_quota, codex_sessions, codex_usage, operator_env, sess
 from scripts.codex_quota import CodexQuota
 from scripts.routing import codex_api, envs, place
 from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION, Slot
+
+if TYPE_CHECKING:
+    from scripts.routing.reservation import Reservation
 
 TOKEN_ENV = envs.CODEX_TOKEN_ENV
 PROBE_ARGS = ["exec", "--json", "--skip-git-repo-check", "Reply with the single word ok."]
@@ -179,6 +183,16 @@ def routing_pool(environ: Mapping[str, str], run: Callable = subprocess.run) -> 
     return token_accounts(environ) or [CodexAccount(CODEX_DEFAULT)]
 
 
+def live_accounts(pool: list[CodexAccount], sessions: Mapping[str, int]) -> list[CodexAccount]:
+    """Token accounts live sessions run on that the pool lacks, since a routed session holds only its own token."""
+    known = {account.name for account in pool}
+    return [
+        CodexAccount(name, f"{CODEX_TOKEN_PREFIX}{name}")
+        for name in sessions
+        if name not in known and name not in {CODEX_DEFAULT, API_ACCOUNT}
+    ]
+
+
 def _registry() -> dict:
     from hooks.context.broadcast import _load_sessions
 
@@ -318,6 +332,7 @@ class CodexAccountSource:
     run: Callable | None = None
     sessions: Mapping[str, int] = field(default_factory=dict)
     refresh: bool = True
+    held: "Reservation | None" = None
 
     def _run(self) -> tuple[Callable, ...]:
         return () if self.run is None else (self.run,)
@@ -345,8 +360,14 @@ class CodexAccountSource:
                 kind=SUBSCRIPTION if account.is_token else INTERACTIVE,
             )
             for account in pool
-            if account.signed_in and (cap := account_cap(quota := readings.get(account.name), now)) is not None
+            if account.signed_in
+            and (cap := self._cap(account.name, quota := readings.get(account.name), now)) is not None
         ]
+
+    def _cap(self, name: str, quota: "CodexQuota | None", now: float) -> int | None:
+        if self.held is not None and quota is not None and self.held.closes(name, quota.seven_day.used):
+            return 0
+        return account_cap(quota, now)
 
     def slots(self, environ: Mapping[str, str], now: float) -> list[Slot]:
         pool = self.pool(environ)
@@ -382,7 +403,12 @@ def select(
     by_name = {account.name: account for account in pool}
     api, weight = place.api_side(codex_api.CodexApiSource(sessions), "codex", environ or {}, now)
     pool_live = sum(sessions.get(account.name, 0) for account in pool)
-    seat = place.place(api, CodexAccountSource(sessions=sessions).offer(pool, quotas, now), weight, pool_live)
+    from scripts.routing import reservation
+
+    held = reservation.for_worker("codex", environ or {})
+    seat = place.place(
+        api, CodexAccountSource(sessions=sessions, held=held).offer(pool, quotas, now), weight, pool_live
+    )
     if seat is None:
         refused = [text for account in token_accounts(environ or {}) if (text := refusal(account, environ or {}))]
         no_seat = "no signed in Codex account has a fresh reading and a free session under its quota band"
@@ -543,14 +569,19 @@ def main(
     except RoutingError as exc:
         print(f"agentihooks codex: {exc}", file=sys.stderr)
         _report(report, status="failed", error=str(exc))
+        lock.close()
         return 3
     _report(report, status="routed", account=account.name, placement=placement)
     print(f"[agentihooks codex] account={account.name} sessions={live}/{cap} placement={placement}", flush=True)
     codex_bin = shutil.which("codex") or "codex"
+    from scripts.deps_preflight import refresh_codex_wrapper
+
+    refresh_codex_wrapper("codex")
     child = (
         envs.codex_interactive_child(active, account.name)
         if route == "interactive"
         else child_environment(account, active)
     )
     execvpe(codex_bin, command(account, codex_bin, args), child)
+    lock.close()
     return 0

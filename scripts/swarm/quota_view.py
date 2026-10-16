@@ -6,6 +6,8 @@ from scripts.swarm.health.findings import MINUTE_MS
 
 
 def routing_left(account: dict) -> float | None:
+    if account["harness"] == "codex":
+        return account["week_left"]
     if account["five_left"] is None or account["week_left"] is None:
         return None
     return min(account["five_left"], account["week_left"])
@@ -35,6 +37,7 @@ def api_share(account: dict, accounts: list[dict]) -> tuple[int, int]:
 def _account_line(row: dict, accounts: list[dict]) -> str:
     if row.get("kind") != API:
         detail = f"routing {left_text(routing_left(row))}"
+        detail += f", {row['reserved']}" if row.get("reserved") else ""
     else:
         share, total = api_share(row, accounts)
         weight = "no weight" if row.get("weight") is None else f"weight {row['weight']}%"

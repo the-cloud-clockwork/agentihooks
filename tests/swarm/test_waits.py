@@ -7,6 +7,7 @@ from scripts.gates.verdicts import Verdicts
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import cli, idle, waits
 from scripts.swarm.ledger_events import PullRequest
+from scripts.swarm.ledger_events import head as github_head
 from scripts.swarm.ledger_events import view as github_view
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from tests.swarm.test_cli import env, run  # noqa: F401
@@ -27,6 +28,7 @@ def started(env, monkeypatch):  # noqa: F811
     monkeypatch.setattr(cli, "now_ms", lambda: 1_000)
     ledger.tasks = lambda slug: list(ledger.rows.values()) if slug == "sw" else []
     monkeypatch.setattr(cli.ledger_events, "view", lambda url: PullRequest("MERGED", 2, 1, False, head="first"))
+    monkeypatch.setattr(cli.ledger_events, "head", lambda url: "first")
     return store, ledger
 
 
@@ -217,6 +219,17 @@ def test_the_tick_accepts_a_merge_wait_only_after_the_pull_request_lands(tick):
     assert tick.end() == []
 
 
+def test_an_open_dependency_pull_request_holds_even_when_its_checks_are_red(tick):
+    tick.hold("merge", URL)
+    tick.pulls[URL] = PullRequest("OPEN", None, 1, True, resolved=True)
+    rows = {"t1": {"id": "t1", "pr_url": URL + "0"}}
+    assert tick.end(rows, now=1_000_000) == []
+    assert held(tick.store)["on"] == {"kind": "merge", "target": URL}
+    tick.pulls[URL] = PullRequest("MERGED", 2, 1, False)
+    assert tick.end(rows) == [f"ended the wait of {ME}: pull request {URL}, now merged"]
+    assert held(tick.store) is None
+
+
 LEFT = f"pull request {URL}, now red; left the merge queue without merging; fix it and queue it again"
 UNLISTED = PullRequest("OPEN", None, 1, False, resolved=True, head="first")
 LISTED = PullRequest("OPEN", None, 1, False, resolved=True, head="first", queued=True)
@@ -349,6 +362,7 @@ def test_checks_wait_requires_success_or_failure_from_the_status_rollup(tick, ch
         assert idle.wait(tick.store.redis, "sw", ME)["on"] == {"kind": "checks", "target": URL, "head": "first"}
         assert tick.told() == []
         return
+    outcome += "; failed: mutation" if outcome == "red" else ""
     assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now {outcome}"]
     assert idle.wait(tick.store.redis, "sw", ME) is None
     assert tick.told() == [
@@ -383,10 +397,11 @@ def test_a_failure_ends_the_checks_wait_even_with_an_unresolved_check(tick, unre
             ],
         }
     )
-    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now red"]
+    failed = "mutation, lint" if unresolved == "TIMED_OUT" else "lint"
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now red; failed: {failed}"]
     assert idle.wait(tick.store.redis, "sw", ME) is None
     assert tick.told() == [
-        f"Your wait on checks on {URL}, now red has ended. Pick task t1 back up: "
+        f"Your wait on checks on {URL}, now red; failed: {failed} has ended. Pick task t1 back up: "
         "agentihooks swarm sw done, block, or wait on the next thing."
     ]
 
@@ -615,31 +630,87 @@ def test_notice_task_names_the_task_only_a_swarm_wait_ended_notice_asks_back():
 
 
 def test_checks_declaration_records_the_remote_head(started, monkeypatch, capsys):
-    from types import SimpleNamespace
-
     store, _ = started
     calls = []
 
-    def view(url):
+    def head(url):
         calls.append(url)
-        return SimpleNamespace(head="first")
+        return "first"
 
-    monkeypatch.setattr(cli.ledger_events, "view", view)
+    monkeypatch.setattr(cli.ledger_events, "head", head)
+    monkeypatch.setattr(cli.ledger_events, "view", lambda url: pytest.fail("the checks view was read"))
     assert run("sw", "--as", ME, "wait", "--on", "checks", URL) == 0
     assert held(store)["on"] == {"kind": "checks", "target": URL, "head": "first"}
     assert json.loads(capsys.readouterr().out)["on"] == held(store)["on"]
     assert calls == [URL]
 
 
-@pytest.mark.parametrize("pull", [None, {"head": ""}])
-def test_checks_declaration_refuses_an_unknown_head(started, monkeypatch, capsys, pull):
-    from types import SimpleNamespace
-
+def test_checks_declaration_refuses_an_unknown_head(started, monkeypatch, capsys):
     store, _ = started
-    monkeypatch.setattr(cli.ledger_events, "view", lambda url: SimpleNamespace(**pull) if pull else None)
+    monkeypatch.setattr(cli.ledger_events, "head", lambda url: "")
     assert run("sw", "--as", ME, "wait", "--on", "checks", URL) == 1
     assert held(store) is None
     assert capsys.readouterr().err == "swarm: cannot read the pull request head; retry the checks wait\n"
+
+
+GH_2_4 = """#!/usr/bin/env bash
+case "$1 $2" in
+  "api graphql") echo "HTTP 502: Bad Gateway (https://api.github.com/graphql)" >&2; exit 1 ;;
+  "pr view") [[ "$*" == *headRefOid* ]] && { echo 'Unknown JSON field: "headRefOid"' >&2; exit 1; } ;;
+  "api repos/o/r/pulls/7") echo '{"state": "open", "head": {"sha": "first", "ref": "branch"}}' ;;
+  *) echo "unexpected gh $*" >&2; exit 1 ;;
+esac
+"""
+
+
+def test_a_checks_wait_reads_the_head_through_rest_on_gh_2_4(started, monkeypatch, tmp_path, capsys):
+    import os
+
+    store, _ = started
+    gh = tmp_path / "gh"
+    gh.write_text(GH_2_4)
+    gh.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setattr(cli.ledger_events, "view", github_view)
+    monkeypatch.setattr(cli.ledger_events, "head", github_head)
+    assert run("sw", "--as", ME, "wait", "--on", "checks", URL) == 0, capsys.readouterr().err
+    assert held(store)["on"] == {"kind": "checks", "target": URL, "head": "first"}
+
+
+@pytest.mark.parametrize(
+    ("code", "out", "found"),
+    [
+        (0, '{"head": {"sha": "first"}}', "first"),
+        (1, '{"head": {"sha": "first"}}', ""),
+        (0, "not json", ""),
+        (0, '{"head": {}}', ""),
+        (0, '{"head": null}', ""),
+    ],
+)
+def test_the_head_read_asks_the_rest_pulls_endpoint(code, out, found):
+    from types import SimpleNamespace
+
+    from scripts.swarm.ledger_events import head
+
+    calls = []
+
+    def run(command, **options):
+        calls.append((command, options))
+        return SimpleNamespace(returncode=code, stdout=out, stderr="refused")
+
+    assert head(URL, run) == found
+    assert calls == [(["gh", "api", "repos/o/r/pulls/7"], {"capture_output": True, "text": True, "timeout": 20})]
+
+
+def test_the_head_read_is_empty_when_gh_cannot_run():
+    import subprocess
+
+    from scripts.swarm.ledger_events import head
+
+    def run(command, **options):
+        raise subprocess.TimeoutExpired(command, 20)
+
+    assert head(URL, run) == ""
 
 
 def test_pull_request_reads_the_head_commit():
@@ -658,7 +729,7 @@ def test_a_new_head_resets_checks_before_current_head_resolution(tick, red):
     assert tick.end() == []
     before = idle.wait(tick.store.redis, "sw", ME)
     assert before["on"]["head"] == "first"
-    tick.pulls[URL] = SimpleNamespace(state="OPEN", head="second", resolved=True, red=red, unpassed_gate="")
+    tick.pulls[URL] = SimpleNamespace(state="OPEN", head="second", resolved=True, red=red, unpassed_gate="", failed=())
     assert tick.end() == []
     after = idle.wait(tick.store.redis, "sw", ME)
     assert after == {**before, "on": {"kind": "checks", "target": URL, "head": "second"}}
@@ -741,13 +812,15 @@ def test_the_probe_requests_the_head_with_its_check_rollup():
                 "api",
                 "graphql",
                 "-f",
-                "query=query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid mergeQueueEntry{id} "
-                "commits(last:1){nodes{commit{committedDate "
+                "query=query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid mergeQueueEntry{id state} mergeable isDraft "
+                "commits(last:1){nodes{commit{id committedDate "
                 'file(path:".github/workflows"){object{...on Tree{entries{object{...on Blob{text}}}}}} '
                 "statusCheckRollup{contexts(first:100){"
-                "nodes{...on CheckRun{name conclusion completedAt} ...on StatusContext{context state createdAt}} "
-                "pageInfo{hasNextPage}}} checkSuites(first:100){nodes{status workflowRun{databaseId createdAt}} "
-                "pageInfo{hasNextPage}}}}}}}}",
+                "nodes{...on CheckRun{databaseId name conclusion completedAt isRequired(pullRequestNumber:7) "
+                "checkSuite{workflowRun{workflow{name}}}} "
+                "...on StatusContext{context state createdAt isRequired(pullRequestNumber:7)}} "
+                "pageInfo{hasNextPage endCursor}}} checkSuites(first:100){nodes{status conclusion workflowRun{databaseId createdAt}} "
+                "pageInfo{hasNextPage endCursor}}}}}}}}",
                 "-f",
                 f"url={URL}",
             ],
@@ -807,6 +880,202 @@ def test_the_probe_ignores_a_queued_suite_without_a_workflow_run():
 
 def test_the_probe_refuses_a_partial_list_of_check_suites():
     assert probe(SKIPPED_ONLY, [APP_SUITE], suites_more=True) is None
+
+
+def paged(*pages):
+    from types import SimpleNamespace
+
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append(args)
+        return SimpleNamespace(returncode=0, stdout=json.dumps(pages[len(calls) - 1]))
+
+    return run, calls
+
+
+def big_head(contexts, suites):
+    commit = {
+        "id": "C_head",
+        "committedDate": "2026-10-07T17:00:00Z",
+        "statusCheckRollup": {"contexts": contexts},
+        "checkSuites": suites,
+    }
+    return {"data": {"resource": {"state": "OPEN", "headRefOid": "second", "commits": {"nodes": [{"commit": commit}]}}}}
+
+
+@pytest.mark.parametrize("last", ["SUCCESS", "FAILURE"])
+def test_the_probe_pages_through_more_than_one_hundred_contexts(last):
+    first = [{"name": f"job {n}", "conclusion": "SUCCESS", "databaseId": n} for n in range(100)]
+    rest = [{"name": f"job {n}", "conclusion": "SUCCESS", "databaseId": n} for n in range(100, 129)]
+    rest.append({"name": "job 129", "conclusion": last, "databaseId": 129})
+    run, calls = paged(
+        big_head(
+            {"nodes": first, "pageInfo": {"hasNextPage": True, "endCursor": "c100"}},
+            {"nodes": [], "pageInfo": {"hasNextPage": True, "endCursor": "s100"}},
+        ),
+        {"data": {"node": {"statusCheckRollup": {"contexts": {"nodes": rest, "pageInfo": {"hasNextPage": False}}}}}},
+        {"data": {"node": {"checkSuites": {"nodes": [APP_SUITE], "pageInfo": {"hasNextPage": False}}}}},
+    )
+    pull = github_view(URL, run)
+    assert pull.resolved is True
+    assert pull.red is (last == "FAILURE")
+    assert pull.failed == (("job 129",) if last == "FAILURE" else ())
+    assert len(calls) == 3
+    assert calls[1][5:] == ["-f", "id=C_head", "-f", "after=c100"]
+    assert calls[2][5:] == ["-f", "id=C_head", "-f", "after=s100"]
+    assert "contexts(first:100,after:$after)" in calls[1][4] and "checkSuites(first:100,after:$after)" in calls[2][4]
+
+
+@pytest.mark.parametrize(
+    "page",
+    [
+        {"errors": [{"message": "rate limited"}]},
+        {"data": {"node": None}},
+        {"data": {"node": {"statusCheckRollup": {"contexts": {"nodes": None, "pageInfo": {"hasNextPage": False}}}}}},
+    ],
+)
+def test_the_probe_refuses_a_context_page_it_cannot_read(page):
+    first = [{"name": "unit", "conclusion": "SUCCESS", "databaseId": 1}]
+    run, _ = paged(
+        big_head({"nodes": first, "pageInfo": {"hasNextPage": True, "endCursor": "c1"}}, NO_SUITES),
+        page,
+    )
+    assert github_view(URL, run) is None
+
+
+def test_the_probe_refuses_a_next_page_without_a_cursor():
+    first = [{"name": "unit", "conclusion": "SUCCESS", "databaseId": 1}]
+    run, calls = paged(big_head({"nodes": first, "pageInfo": {"hasNextPage": True}}, NO_SUITES))
+    assert github_view(URL, run) is None
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("more", [False, True])
+def test_the_probe_reads_up_to_its_page_cap_and_refuses_beyond(more):
+    from scripts.swarm.ledger_events import MAX_PAGES
+
+    def page(n, last):
+        info = {"hasNextPage": not last or more, "endCursor": f"c{n}"}
+        nodes = [{"name": f"job {n}", "conclusion": "SUCCESS", "databaseId": n}]
+        return {"data": {"node": {"statusCheckRollup": {"contexts": {"nodes": nodes, "pageInfo": info}}}}}
+
+    first = {"nodes": [], "pageInfo": {"hasNextPage": True, "endCursor": "c0"}}
+    pages = [page(n, n == MAX_PAGES) for n in range(1, MAX_PAGES + 1)]
+    run, calls = paged(big_head(first, NO_SUITES), *pages)
+    pull = github_view(URL, run)
+    assert len(calls) == MAX_PAGES + 1
+    assert (pull is None) is more
+    assert more or pull.resolved is True
+
+
+TESTS_SUITE = {"workflowRun": {"workflow": {"name": "Tests"}}}
+DOCS_SUITE = {"workflowRun": {"workflow": {"name": "Docs"}}}
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize(
+    "older, newer, red",
+    [("FAILURE", "SUCCESS", False), ("SUCCESS", "FAILURE", True), ("TIMED_OUT", "SUCCESS", False)],
+)
+def test_the_probe_judges_only_the_newest_run_of_each_check(reverse, older, newer, red):
+    rollup = [
+        {"name": "unit", "conclusion": older, "databaseId": 11, "checkSuite": TESTS_SUITE},
+        {"name": "unit", "conclusion": newer, "databaseId": 12, "checkSuite": TESTS_SUITE},
+        {"name": "unit", "conclusion": "SUCCESS", "databaseId": 10, "checkSuite": DOCS_SUITE},
+    ]
+    pull = probe(rollup[::-1] if reverse else rollup, [APP_SUITE])
+    assert pull.resolved is True
+    assert pull.red is red
+    assert pull.failed == (("unit",) if red else ())
+
+
+def test_the_probe_keeps_the_same_check_name_of_another_workflow():
+    rollup = [
+        {"name": "unit", "conclusion": "SUCCESS", "databaseId": 12, "checkSuite": TESTS_SUITE},
+        {"name": "unit", "conclusion": "FAILURE", "databaseId": 11, "checkSuite": DOCS_SUITE},
+    ]
+    assert probe(rollup, [APP_SUITE]).failed == ("unit",)
+
+
+@pytest.mark.parametrize(
+    "rollup, red",
+    [
+        (
+            [
+                {"context": "ci/ext", "state": "SUCCESS", "createdAt": "2026-10-07T18:00:00Z"},
+                {"context": "ci/ext", "state": "FAILURE", "createdAt": "2026-10-07T17:00:00Z"},
+            ],
+            False,
+        ),
+        (
+            [
+                {"context": "ci/ext", "state": "FAILURE", "createdAt": "2026-10-07T18:00:00Z"},
+                {"context": "ci/ext", "state": "SUCCESS", "createdAt": "2026-10-07T17:00:00Z"},
+            ],
+            True,
+        ),
+        (
+            [
+                {"context": "ci/ext", "state": "SUCCESS", "createdAt": "2026-10-07T17:00:00Z"},
+                {"context": "ci/ext", "state": "FAILURE"},
+            ],
+            False,
+        ),
+        (
+            [{"name": "unit", "conclusion": "SUCCESS", "databaseId": 1}, {"name": "unit", "conclusion": "FAILURE"}],
+            False,
+        ),
+    ],
+)
+def test_the_newest_status_and_check_win_over_rollup_position(rollup, red):
+    pull = probe(rollup, [APP_SUITE])
+    assert pull.resolved is True
+    assert pull.red is red
+
+
+def test_the_probe_keeps_the_rollup_order_of_newest_failures():
+    rollup = [
+        {"name": "b", "conclusion": "FAILURE", "databaseId": 5},
+        {"name": "a", "conclusion": "FAILURE", "databaseId": 2},
+        {"name": "c", "conclusion": "SUCCESS", "databaseId": 1},
+        {"name": "a", "conclusion": "FAILURE", "databaseId": 3},
+    ]
+    assert probe(rollup, [APP_SUITE]).failed == ("b", "a")
+
+
+@pytest.mark.parametrize("later, resolved", [(QUEUED_TESTS, False), (APP_SUITE, True)])
+def test_the_probe_reads_a_running_suite_from_a_later_page(later, resolved):
+    passed = [{"name": "unit", "conclusion": "SUCCESS", "databaseId": 1}]
+    run, _ = paged(
+        big_head(
+            {"nodes": passed, "pageInfo": {"hasNextPage": False}},
+            {"nodes": [APP_SUITE], "pageInfo": {"hasNextPage": True, "endCursor": "s1"}},
+        ),
+        {"data": {"node": {"checkSuites": {"nodes": [later], "pageInfo": {"hasNextPage": False}}}}},
+    )
+    assert github_view(URL, run).resolved is resolved
+
+
+@pytest.mark.parametrize(
+    "older, newer, told",
+    [
+        ("FAILURE", None, []),
+        ("FAILURE", "SUCCESS", [f"ended the wait of {ME}: checks on {URL}, now green"]),
+        ("SUCCESS", "FAILURE", [f"ended the wait of {ME}: checks on {URL}, now red; failed: unit"]),
+    ],
+)
+def test_a_superseded_failure_never_ends_a_checks_wait(tick, older, newer, told):
+    rollup = [
+        {"name": "unit", "conclusion": older, "databaseId": 1, "checkSuite": TESTS_SUITE},
+        {"name": "lint", "conclusion": "SUCCESS", "databaseId": 2, "checkSuite": TESTS_SUITE},
+        {"name": "unit", "conclusion": newer, "databaseId": 3, "checkSuite": TESTS_SUITE},
+    ]
+    tick.hold("checks", URL)
+    tick.pulls[URL] = probe(rollup, [APP_SUITE])
+    assert tick.end() == []
+    assert tick.end() == told
+    assert (idle.wait(tick.store.redis, "sw", ME) is None) is bool(told)
 
 
 def test_a_checks_wait_stays_held_while_the_new_heads_run_is_queued(tick):
@@ -896,9 +1165,12 @@ def test_the_probe_reads_the_gate_from_the_last_commit():
 @pytest.mark.parametrize(
     ("rollup", "outcome"),
     [
-        (UNIT_PASSED, [f"checks on {URL}, now red; Gate — Required never passed"]),
+        (UNIT_PASSED, []),
         (UNIT_PASSED + [{"name": "Gate — Required", "conclusion": "SUCCESS"}], [f"checks on {URL}, now green"]),
-        (UNIT_PASSED + [{"name": "Gate — Required", "conclusion": "FAILURE"}], [f"checks on {URL}, now red"]),
+        (
+            UNIT_PASSED + [{"name": "Gate — Required", "conclusion": "FAILURE"}],
+            [f"checks on {URL}, now red; failed: Gate — Required"],
+        ),
     ],
 )
 def test_a_gated_checks_wait_ends_only_on_its_gate(tick, rollup, outcome):
@@ -907,6 +1179,77 @@ def test_a_gated_checks_wait_ends_only_on_its_gate(tick, rollup, outcome):
     assert tick.end() == []
     assert tick.end() == [f"ended the wait of {ME}: {line}" for line in outcome]
     assert (idle.wait(tick.store.redis, "sw", ME) is None) is bool(outcome)
+
+
+@pytest.mark.parametrize("conclusion", ["SUCCESS", "FAILURE", "TIMED_OUT"])
+def test_a_required_gate_ends_checks_wait_beside_a_pending_jobless_workflow(tick, conclusion):
+    tick.hold("checks", URL)
+    tick.pulls[URL] = gated_probe(
+        [{"name": "Gate — Required", "conclusion": conclusion}],
+        [QUEUED_TESTS],
+        workflows(GATE_WORKFLOW),
+    )
+    assert tick.end() == []
+    outcome = "green" if conclusion == "SUCCESS" else "red; failed: Gate — Required"
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now {outcome}"]
+    assert idle.wait(tick.store.redis, "sw", ME) is None
+    assert tick.told() == [
+        f"Your wait on checks on {URL}, now {outcome} has ended. Pick task t1 back up: "
+        "agentihooks swarm sw done, block, or wait on the next thing."
+    ]
+
+
+@pytest.mark.parametrize("conclusion", ["FAILURE", "ERROR", "STARTUP_FAILURE", "ACTION_REQUIRED", "TIMED_OUT"])
+@pytest.mark.parametrize("gate", [None, "SUCCESS"])
+def test_a_failed_required_check_ends_wait_beside_a_pending_jobless_workflow(tick, conclusion, gate):
+    tick.hold("checks", URL)
+    tick.pulls[URL] = gated_probe(
+        [{"name": "unit", "conclusion": conclusion}, {"name": "Gate — Required", "conclusion": gate}],
+        [QUEUED_TESTS],
+        workflows(GATE_WORKFLOW),
+    )
+    assert tick.end() == []
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now red; failed: unit"]
+    assert idle.wait(tick.store.redis, "sw", ME) is None
+
+
+@pytest.mark.parametrize("conclusion", ["FAILURE", "ERROR", "STARTUP_FAILURE", "ACTION_REQUIRED", "TIMED_OUT"])
+def test_the_first_failed_job_ends_the_wait_and_names_it_while_siblings_run(tick, conclusion, capsys):
+    tick.hold("checks", URL)
+    tick.pulls[URL] = gated_probe(
+        [
+            {"name": "stats (1)", "conclusion": conclusion},
+            {"name": "stats (2)", "status": "IN_PROGRESS"},
+            {"name": "Gate — Required", "status": "IN_PROGRESS"},
+        ],
+        [QUEUED_TESTS],
+        workflows(GATE_WORKFLOW),
+    )
+    assert tick.end() == []
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now red; failed: stats (1)"]
+    assert idle.wait(tick.store.redis, "sw", ME) is None
+    assert "now red; failed: stats (1) has ended" in tick.told()[0]
+    assert tick.end() == []
+    assert len(tick.told()) == 1
+    with capsys.disabled():
+        print(
+            f"Scratch wait ended on {conclusion}: stats (1) failed; stats (2) and Gate Required still running; owner notified once."
+        )
+
+
+def test_the_failure_notice_names_only_jobs_from_the_confirming_read(tick):
+    tick.hold("checks", URL)
+    replies = iter(
+        [
+            PullRequest("OPEN", None, 1, True, True, ("stats (1)",), head="first"),
+            PullRequest("OPEN", None, 1, True, True, ("stats (2)",), head="first"),
+        ]
+    )
+    assert waits.end_pass(tick.store, "sw", {}, tick.inbox, lambda url: next(replies), 5_000, None) == [
+        f"ended the wait of {ME}: checks on {URL}, now red; failed: stats (2)"
+    ]
+    assert "failed: stats (2) has ended" in tick.told()[0]
+    assert "stats (1)" not in tick.told()[0]
 
 
 @pytest.mark.parametrize(
@@ -971,7 +1314,7 @@ def test_checks_resolution_uses_the_confirmed_current_head_result(tick):
     replies = iter(
         [
             SimpleNamespace(state="OPEN", head="first", resolved=True, red=False, unpassed_gate=""),
-            SimpleNamespace(state="OPEN", head="first", resolved=True, red=True, unpassed_gate=""),
+            SimpleNamespace(state="OPEN", head="first", resolved=True, red=True, unpassed_gate="", failed=()),
         ]
     )
     assert waits.end_pass(tick.store, "sw", {}, tick.inbox, lambda url: next(replies), 5_000, None) == [
@@ -1038,18 +1381,77 @@ def test_a_replaced_wait_does_not_stop_resolution_for_the_next_agent(tick):
 
 
 @pytest.mark.parametrize("rollup", [[], UNIT_PASSED, [{"name": "Gate — Required", "conclusion": "SKIPPED"}]])
-def test_a_dead_required_gate_ends_the_wait_red_and_names_the_gate(tick, rollup):
+def test_a_missing_or_skipped_required_gate_keeps_the_checks_wait_active(tick, rollup):
+    tick.hold("checks", URL)
+    tick.pulls[URL] = gated_probe(rollup, [], workflows(GATE_WORKFLOW))
+    assert tick.pulls[URL].failed == ()
+    assert tick.end() == []
+    held = idle.wait(tick.store.redis, "sw", ME)
+    assert held["on"] == {"kind": "checks", "target": URL, "head": "second"}
+    assert tick.end() == []
+    assert idle.wait(tick.store.redis, "sw", ME) == held
+    assert tick.told() == []
+    assert idle.verdict("idle", None, held, 9_999_999) == "waiting"
+    assert idle.verdict("idle", None, held, 10_000_000) == "idle"
+
+
+@pytest.mark.parametrize(
+    "rollup",
+    [
+        UNIT_PASSED + [{"name": "Gate — Required", "status": "QUEUED"}],
+        UNIT_PASSED + [{"name": "Gate — Required", "status": "IN_PROGRESS"}],
+    ],
+)
+def test_a_pending_required_gate_keeps_the_checks_wait_active(tick, rollup):
     tick.hold("checks", URL)
     tick.pulls[URL] = gated_probe(rollup, [], workflows(GATE_WORKFLOW))
     assert tick.end() == []
-    outcome = f"checks on {URL}, now red; Gate — Required never passed"
-    assert tick.end() == [f"ended the wait of {ME}: {outcome}"]
-    assert idle.wait(tick.store.redis, "sw", ME) is None
-    assert tick.told() == [
-        f"Your wait on {outcome} has ended. Pick task t1 back up: "
-        "agentihooks swarm sw done, block, or wait on the next thing."
-    ]
+    held = idle.wait(tick.store.redis, "sw", ME)
     assert tick.end() == []
+    assert idle.wait(tick.store.redis, "sw", ME) == held
+    assert tick.told() == []
+
+
+def test_a_missing_gate_on_the_confirming_read_keeps_the_wait(tick):
+    tick.hold("checks", URL)
+    tick.pulls[URL] = gated_probe(UNIT_PASSED, [], workflows(GATE_WORKFLOW))
+    assert tick.end() == []
+    held = idle.wait(tick.store.redis, "sw", ME)
+    passed = gated_probe(
+        UNIT_PASSED + [{"name": "Gate — Required", "conclusion": "SUCCESS"}], [], workflows(GATE_WORKFLOW)
+    )
+    replies = iter([passed, tick.pulls[URL]])
+    assert waits.end_pass(tick.store, "sw", {}, tick.inbox, lambda url: next(replies), 5_000, None) == []
+    assert idle.wait(tick.store.redis, "sw", ME) == held
+    assert tick.told() == []
+
+
+def test_a_pending_first_read_keeps_waiting_before_a_successful_confirmation(tick):
+    tick.hold("checks", URL)
+    pending = gated_probe(
+        UNIT_PASSED + [{"name": "Gate — Required", "status": "IN_PROGRESS"}], [], workflows(GATE_WORKFLOW)
+    )
+    tick.pulls[URL] = pending
+    assert tick.end() == []
+    held = idle.wait(tick.store.redis, "sw", ME)
+    passed = gated_probe(
+        UNIT_PASSED + [{"name": "Gate — Required", "conclusion": "SUCCESS"}], [], workflows(GATE_WORKFLOW)
+    )
+    replies = iter([pending, passed])
+    assert waits.end_pass(tick.store, "sw", {}, tick.inbox, lambda url: next(replies), 5_000, None) == []
+    assert idle.wait(tick.store.redis, "sw", ME) == held
+    assert tick.told() == []
+
+
+def test_a_concluded_failure_ends_the_wait_with_a_missing_gate(tick):
+    tick.hold("checks", URL)
+    tick.pulls[URL] = gated_probe([{"name": "Unit tests", "conclusion": "FAILURE"}], [], workflows(GATE_WORKFLOW))
+    assert tick.end() == []
+    assert tick.end() == [
+        f"ended the wait of {ME}: checks on {URL}, now red; failed: Unit tests; Gate — Required never passed"
+    ]
+    assert idle.wait(tick.store.redis, "sw", ME) is None
+    assert len(tick.told()) == 1
 
 
 @pytest.mark.parametrize("rollup", [[], UNIT_PASSED, [{"name": "Gate — Required", "conclusion": "SKIPPED"}]])
@@ -1077,6 +1479,23 @@ def test_a_wait_on_intent_names_its_own_tasks_pull_request(started, capsys):
     capsys.readouterr()
     assert run("sw", "--as", ME, "wait", "--on", "intent", OTHER) == 1
     assert f"wait on intent needs the pull request of your task t1, not {OTHER}" in capsys.readouterr().err
+
+
+def test_a_checked_wait_reads_only_the_task_it_names(started):
+    _, ledger = started
+    read = []
+
+    def whole(slug):
+        raise AssertionError("a checked wait read the whole task collection")
+
+    ledger.tasks = whole
+    ledger.task = lambda slug, task_id: read.append((slug, task_id)) or ledger.rows.get(task_id)
+    ledger.rows["t1"]["pr_url"] = URL
+    assert run("sw", "--as", ME, "wait", "--on", "task", "t2") == 0
+    assert run("sw", "--as", ME, "wait", "--on", "intent", URL) == 0
+    assert run("sw", "--as", ME, "wait", "--on", "checks", URL) == 0
+    assert run("sw", "--as", ME, "wait", "--on", "task", "t9") == 1
+    assert read == [("sw", "t2"), ("sw", "t1"), ("sw", "t9")]
 
 
 def test_target_problem_takes_intent_only_on_the_own_tasks_pull_request():

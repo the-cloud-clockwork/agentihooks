@@ -6,6 +6,7 @@ import shlex
 import signal
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -19,6 +20,7 @@ from scripts.swarm_v2.checkpoints import runtime as checkpoint_runtime
 from scripts.swarm_v2.supervision import Launch, LaunchRefused
 from scripts.swarm_v2.supervision_agent import native_command
 from scripts.swarm_v2.supervision_protocol import checkpoint, matches, read, write
+from scripts.swarm_v2.worker import lease_renewal
 
 PROMPT = "prompt.md"
 
@@ -39,6 +41,7 @@ class Supervisor:
         self.stop = None
         self.failure_class = None
         self.phase = "startup"
+        self.lease = lease_renewal.load(launch.attempt)
         self.environment = {k: v for k, v in os.environ.items() if not k.startswith("HERDR_")}
         self.environment.update(oauth_env(self.environment))
         self.environment.update(
@@ -82,13 +85,17 @@ class Supervisor:
             start_new_session=True,
         )
 
-    def herdr(self, command: list[str]) -> dict:
+    def herdr(self, command: list[str], deadline: float) -> dict:
+        argv = [*self.launch.herdr[:-1], *command]
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(argv, 0)
         result = subprocess.run(
-            [*self.launch.herdr[:-1], *command],
+            argv,
             env=self.environment,
             stdin=subprocess.DEVNULL,
             capture_output=True,
-            timeout=min(0.5, self.launch.budgets.startup),
+            timeout=remaining,
             check=True,
         )
         return json.loads(result.stdout) if result.stdout.strip() else {}
@@ -103,7 +110,7 @@ class Supervisor:
                 return False
             if role == "herdr":
                 try:
-                    self.herdr(["workspace", "list"])
+                    self.herdr(["workspace", "list"], min(deadline, time.monotonic() + 0.5))
                     return True
                 except (subprocess.SubprocessError, ValueError):
                     pass
@@ -130,10 +137,10 @@ class Supervisor:
         )
         command = [sys.executable, "-m", "scripts.swarm_v2.supervision_agent", *self.opening(), *agent]
         self.phase = "workspace_create"
-        tab = self.herdr(["workspace", "create", "--cwd", str(directory), "--no-focus"])
+        tab = self.herdr(["workspace", "create", "--cwd", str(directory), "--no-focus"], deadline)
         pane = tab["result"]["root_pane"]["pane_id"]
         self.phase = "agent_launch"
-        self.herdr(["pane", "run", pane, shlex.join(command)])
+        self.herdr(["pane", "run", pane, shlex.join(command)], deadline)
         if not self.ready("agent", deadline):
             return "termination" if self.stop else "agent_startup_failure"
         if self.launch.prompt:
@@ -159,6 +166,9 @@ class Supervisor:
             self.wait()
             if self.stop:
                 return "termination"
+            self.lease.tick()
+            if self.lease.lost is not None:
+                return "lease_lost"
             for role in ("herdr", "exporter", "agent"):
                 if role in self.exits:
                     return "agent_completed" if role == "agent" and self.exits[role] == 0 else f"{role}_failure"
@@ -180,22 +190,32 @@ class Supervisor:
             return False
         return True
 
+    def validated(self, identifier: str, deadline: float) -> bool:
+        verified = threading.Event()
+
+        def validate():
+            if checkpoint_runtime.validate_export(self.launch.attempt, identifier, self.environment):
+                verified.set()
+
+        worker = threading.Thread(target=validate, daemon=True)
+        worker.start()
+        worker.join(max(0, deadline - time.monotonic()))
+        return verified.is_set() and time.monotonic() < deadline
+
     def drain(self, reason: str) -> dict:
         write(self.root / "drain.json", {**self.scope, "reason": reason, "status": "draining"})
         clean = self.quiesce()
         write(self.root / "quiesced.json", {**self.scope, "status": "quiesced" if clean else "forced"})
         identifier = None
         deadline = time.monotonic() + self.launch.budgets.checkpoint
-        while clean and self.launch.exporter and time.monotonic() < deadline:
+        while clean and self.lease.lost is None and self.launch.exporter and time.monotonic() < deadline:
             identifier = checkpoint(self.launch.attempt, read(self.root / "exporter.checkpoint.json"), self.scope)
             if identifier:
                 portable = (
                     self.environment.get(checkpoint_runtime.ROOT)
                     or self.environment.get(checkpoint_runtime.REMOTE) == "true"
                 )
-                if portable and not checkpoint_runtime.validate_export(
-                    self.launch.attempt, identifier, self.environment
-                ):
+                if portable and not self.validated(identifier, deadline):
                     identifier = None
                 break
             if "exporter" in self.exits:

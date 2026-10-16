@@ -134,10 +134,20 @@ def _lock():
         yield
 
 
+def refresh_codex_wrapper(caller: str) -> None:
+    from scripts.targets import codex_target
+
+    try:
+        codex_target.refresh_wrapper()
+    except Exception as exc:  # noqa: BLE001 - a broken bundle must not stop installs or a launch
+        print(f"[agentihooks {caller}] hook wrapper refresh skipped: {exc}", file=sys.stderr)
+
+
 def ensure(*, quiet: bool = False) -> int:
     from scripts.skill_links import repair
 
     repair()
+    refresh_codex_wrapper("deps")
     path = manifest_path()
     if path is None or stamp_fresh(path):
         return 0

@@ -104,6 +104,10 @@ def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, bas
     # Stats tracing slows every test, so a wall clock bound only holds in the unit shards.
     test_runner._pytest_add_cli_args = [
         *test_runner._pytest_add_cli_args,
+        "-p",
+        "pytest_rerunfailures",
+        "--reruns",
+        "1",
         "-m",
         "not wall_clock",
         f"--basetemp={basetemp}",
@@ -171,6 +175,27 @@ def shard_collector(collect, shard: tuple[int, int]):
     return collect_shard_mutants
 
 
+def collect_file_stats(runner, test_runner, files: list[str], workers: int, work: Path) -> list[dict]:
+    def collect(chosen):
+        buckets = stats_shards(work, chosen, workers) if chosen else []
+        return run_stats_buckets(runner, test_runner, buckets, work)
+
+    if folder := os.environ.get("MUTATION_STATS_CACHE"):
+        from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+        changes = json.loads((work / "changed-lines.json").read_text())
+        scope = {path: sorted(change["lines"]) for path, change in changes.items()}
+        return collect_cached_stats(
+            Path(os.environ["MUTATION_STATS_ROOT"]),
+            Path(folder),
+            scope,
+            files,
+            test_runner._pytest_add_cli_args,
+            collect,
+        )
+    return collect(files)
+
+
 def load_or_collect_stats(runner, test_runner, paths: list[str], mode: str, stats: tuple[str, ...]) -> None:
     if mode not in ("", "collect", "reuse"):
         raise ValueError(f"unknown mutation stats mode {mode!r}")
@@ -195,13 +220,53 @@ def load_or_collect_stats(runner, test_runner, paths: list[str], mode: str, stat
         if mode == "collect":
             output, key, index, total = Path(stats[0]), stats[1], int(stats[2]), int(stats[3])
             files = part_files(Path.cwd(), config.pytest_add_cli_args_test_selection, (index, total))
-            buckets = stats_shards(Path.cwd(), files, workers) if files else []
-            write_part(output, key, (index, total), run_stats_buckets(runner, test_runner, buckets, Path.cwd()))
+            write_part(output, key, (index, total), collect_file_stats(runner, test_runner, files, workers, Path.cwd()))
             raise SystemExit(0)
         shards = stats_shards(Path.cwd(), config.pytest_add_cli_args_test_selection, workers)
         collect_parallel_stats(runner, test_runner, shards, Path.cwd())
     finally:
         config.source_paths = relative
+
+
+# Text, not a module: a mutated copy of a stand-in module is itself trampolined and cannot serve the trampoline.
+LIGHT_MAIN = """import importlib
+import sys
+
+
+class MutmutProgrammaticFailException(Exception):
+    pass
+
+
+def mangled_name_from_mutant_name(mutant_name):
+    assert "__mutmut_" in mutant_name, mutant_name
+    return mutant_name.partition("__mutmut_")[0]
+
+
+def record_trampoline_hit(name):
+    pass
+
+
+def __getattr__(name):
+    if name.startswith("__"):
+        raise AttributeError(name)
+    if getattr(sys.modules.get("mutmut.__main__"), "__getattr__", None) is __getattr__:
+        del sys.modules["mutmut.__main__"]
+    return getattr(importlib.import_module("mutmut.__main__"), name)
+"""
+
+
+LIGHT_BOOTSTRAP = (
+    "import sys as _mutmut_sys\n"
+    # A process the mutation run did not start would import mutmut's whole engine for three trampoline names.
+    "_mutmut_entry = getattr(getattr(_mutmut_sys.modules.get('__main__'), '__spec__', None), 'name', '')\n"
+    # The runner, mutated itself inside a nested gate test, still needs the real module for its stats.
+    "if 'mutmut.__main__' not in _mutmut_sys.modules and _mutmut_entry != 'scripts.ci_mutation.selection':\n"
+    "    import types as _mutmut_types\n"
+    "    _mutmut_sys.modules['mutmut.__main__'] = _mutmut_types.ModuleType('mutmut.__main__')\n"
+    f"    exec({LIGHT_MAIN!r}, _mutmut_sys.modules['mutmut.__main__'].__dict__)\n"
+    "    import mutmut as _mutmut_package\n"
+    "    _mutmut_package.__main__ = _mutmut_sys.modules['mutmut.__main__']\n"
+)
 
 
 def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats: str) -> None:
@@ -218,7 +283,8 @@ def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats
         bootstrap = (
             "import os as _mutmut_os\n"
             "from pathlib import Path as _mutmut_Path\n"
-            f"_mutmut_root = _mutmut_Path(__file__).resolve().parents[{len(Path(filename).parts) - 1}]\n"
+            + LIGHT_BOOTSTRAP
+            + f"_mutmut_root = _mutmut_Path(__file__).resolve().parents[{len(Path(filename).parts) - 1}]\n"
             "_mutmut_cwd = _mutmut_os.getcwd()\n"
             "try:\n"
             "    from mutmut.configuration import Config as _mutmut_Config\n"

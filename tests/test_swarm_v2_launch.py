@@ -934,6 +934,7 @@ def test_a_tick_spawn_admits_its_agent_with_the_seat_profile(world, lane, lanes,
 
     [sent] = world.runtime.requests
     assert world.store.execution(SLUG, sent.task["execution_id"]).profile == profile
+    assert world.store.execution(SLUG, sent.task["execution_id"]).harness == "claude"
 
 
 @pytest.mark.parametrize("profile", ["designer", "_guards", "../engineer"])
@@ -987,7 +988,27 @@ def test_a_launch_whose_model_answer_turned_front_end_is_refused_before_admissio
 
 
 def test_the_worker_image_profiles_are_the_default_and_every_package_role():
-    assert launch_module.worker_profiles() == {"default", "cicd", "dispatcher", "engineer", "master", "planner", "qa"}
+    assert launch_module.worker_profiles() == {
+        "default",
+        "cicd",
+        "dispatcher",
+        "documentation",
+        "engineer",
+        "master",
+        "planner",
+        "qa",
+    }
+
+
+def test_the_worker_image_profiles_read_the_package_roles_folder_patched_after_import(tmp_path, monkeypatch):
+    from hooks.context import profile_chain
+
+    for role in ("solo", "_hidden"):
+        (tmp_path / role).mkdir()
+    (tmp_path / "file").write_text("")
+    monkeypatch.setattr(profile_chain, "PACKAGE_ROLES", tmp_path)
+
+    assert launch_module.worker_profiles() == {"default", "solo"}
 
 
 @pytest.mark.parametrize("profile", ["frontend", "engineer", "anton-base"])
@@ -1154,3 +1175,67 @@ def test_a_relaunch_on_a_full_account_keeps_its_replacement_for_the_next_pass(wo
     assert world.endings() == {}
     assert world.store.execution(SLUG, admitted.execution_id) == admitted
     assert [request.name for request in world.runtime.requests] == [held.agent.name]
+
+
+def test_hive_live_counts_refuse_a_launch_before_the_runtime(world):
+    from scripts.hive import registry
+
+    redis = world.store.redis
+    registry.update(redis, "hive", ["max-agents=4"])
+    redis.hset(registry.key("hive"), "heartbeat_at", world.clock[0])
+    redis.set(f"{registry.key('hive')}:sessions", json.dumps({f"claude:{ACCOUNT}": 1}), ex=45)
+    launch = world.launch(FIRST)
+    assert launch.outcome.status is Status.UNAVAILABLE
+    assert launch.outcome.detail == launch_module.ACCOUNT_FULL
+    assert world.runtime.requests == []
+
+
+def test_hive_launch_registration_and_exit_keep_one_global_slot(world):
+    from scripts.hive import registry
+    from scripts.routing import reservation
+
+    redis = world.store.redis
+    registry.update(redis, "hive", ["max-agents=4"])
+    redis.hset(registry.key("hive"), "heartbeat_at", world.clock[0])
+    redis.set(f"{registry.key('hive')}:sessions", "{}", ex=45)
+    launch = world.launch(FIRST)
+    slots = reservation.LaunchSlots(redis)
+    assert slots.counts() == {f"claude:{ACCOUNT}": 1}
+    world.launcher.registered(world.session(launch), launch.grant)
+    world.clock[0] += TTL + 1
+    assert slots.counts() == {f"claude:{ACCOUNT}": 1}
+    world.launcher.exited(launch.agent)
+    assert slots.counts() == {}
+
+
+@pytest.mark.parametrize(("harness", "live"), [("claude", 0), ("claude", 1), ("codex", 0), ("codex", 1)])
+def test_tick_launch_reserves_the_selected_harness(world, harness, live):
+    from scripts.hive import registry
+
+    redis = world.store.redis
+    registry.update(redis, "hive", ["max-agents=4"])
+    redis.hset(registry.key("hive"), "heartbeat_at", world.clock[0])
+    redis.set(f"{registry.key('hive')}:sessions", json.dumps({f"{harness}:{ACCOUNT}": live}), ex=45)
+    config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
+    request = SpawnRequest(
+        config, "eng", world.store.next_name(SLUG, "eng"), {"id": "task", "seat": FIRST, "harness": harness}
+    )
+
+    outcome = world.launcher.from_tick(request, world.terms, pod_target)
+
+    if live:
+        assert outcome.status is Status.UNAVAILABLE
+        assert world.runtime.requests == []
+    else:
+        assert outcome.status is Status.OK
+        [sent] = world.runtime.requests
+        admitted = world.store.execution(SLUG, sent.task["execution_id"])
+        assert admitted.harness == harness
+        assert world.launcher.launch_slots.counts() == {f"{harness}:{ACCOUNT}": 1}
+
+
+def test_registration_reports_a_missing_global_reservation(world, monkeypatch):
+    launch = world.launch(FIRST)
+    monkeypatch.setattr(type(world.launcher.launch_slots), "acknowledge", lambda self, execution: False)
+    with pytest.raises(SwarmError, match="^reservation_expired$"):
+        world.launcher.registered(world.session(launch), launch.grant)

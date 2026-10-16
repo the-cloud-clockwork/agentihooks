@@ -189,7 +189,11 @@ def test_status_names_a_running_pane_spawned_without_its_herdr_name(tmp_path):
 
     def agent(seat, pane, conversation=""):
         return SimpleNamespace(
-            name=f"{slug}-{seat}", pane_id=pane, conversation_id=conversation, runtime_backend="local"
+            name=f"{slug}-{seat}",
+            pane_id=pane,
+            conversation_id=conversation,
+            runtime_backend="local",
+            runtime_target={},
         )
 
     assert runtime.status(agent("eng-3", "w:p4", "c3")) == "working"
@@ -206,7 +210,9 @@ def test_status_names_a_running_pane_spawned_without_its_herdr_name(tmp_path):
 def test_a_pane_already_carrying_its_herdr_name_is_not_renamed(tmp_path):
     herdr = NamedPanes({"w:p1": {"name": "master-a1b2c3-0001", "agent_status": "idle"}})
     runtime = HerdrRuntime(home=tmp_path, herdr=herdr)
-    agent = SimpleNamespace(name="master@a1b2c3-0001", pane_id="w:p1", conversation_id="", runtime_backend="local")
+    agent = SimpleNamespace(
+        name="master@a1b2c3-0001", pane_id="w:p1", conversation_id="", runtime_backend="local", runtime_target={}
+    )
     assert runtime.name_pane(agent) is False
     assert herdr.renamed == []
 
@@ -327,6 +333,21 @@ def _spawn_seen(tmp_path, lanes, lane="eng", config=None):
     )
     runtime.spawn(config, lane, "engineer@a1b2c3-0001", {"id": "t1", "title": "x"})
     return seen
+
+
+@pytest.mark.parametrize("lane", ["eng", "ci", "master", "plan"])
+def test_claude_swarm_display_name_is_mentionable(tmp_path, lane):
+    seen = _spawn_seen(tmp_path, {lane: {"agent": "claude"}}, lane=lane)
+    argv = seen["argv"]
+    assert argv[argv.index("--name") + 1] == "engineer-a1b2c3-0001"
+
+
+def test_claude_resume_uses_a_mentionable_display_name(tmp_path):
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee")
+    runtime.resume(config, agent, "you were restored")
+    argv = seen["runs"][0]
+    assert argv[argv.index("--name") + 1] == "engineer-a1b2c3-0001"
+    assert seen["env"]["AGENTIHOOKS_AGENT_NAME"] == "engineer@a1b2c3-0001"
 
 
 @pytest.mark.parametrize("pin", ["claude", "codex"])
@@ -917,6 +938,52 @@ def test_a_master_launches_on_the_frontier_model_at_high_effort_whatever_the_lan
     env = {f"AGENTIHOOKS_{harness.upper()}_MODEL": "haiku", f"AGENTIHOOKS_{harness.upper()}_EFFORT": "low"}
     task = {**SEAT_TASKS["master"], **({"handoff": handoff} if handoff else {})}
     assert _launched(tmp_path, monkeypatch, "master", task, lanes, harness=harness, env=env) == launch
+
+
+MASTER_RANGES = [(("medium", "xhigh"), "high:xhigh"), (("low", "medium"), "high:high")]
+
+
+@pytest.mark.parametrize("bounds,handed", MASTER_RANGES)
+def test_a_master_handoff_successor_launches_at_high_effort_whatever_its_saved_launch_or_the_range_names(
+    tmp_path, monkeypatch, bounds, handed
+):
+    monkeypatch.delenv("AGENTIHOOKS_CLAUDE_EFFORT", raising=False)
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen.update(argv=argv, env=kwargs["env"])
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "open"))
+    config = SimpleNamespace(
+        slug="sw",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        lanes={},
+        autonomy="delegate",
+        effort_min=bounds[0],
+        effort_max=bounds[1],
+    )
+    launch = {"profile": "master", "harness": "claude", "model": "opus", "effort": "medium"}
+    task = {"id": "master", "peer": "", "handoff": "# Handoff", "handoff_envelope": {"launch": launch}}
+    runtime.spawn(config, "master", "master@a1b2c3-0002", task)
+    assert _passed(seen["argv"]) == ["--model", "opus", "--effort", "high"]
+    assert seen["env"]["AGENTIHOOKS_SWARM_EFFORT_RANGE"] == handed
+
+
+@pytest.mark.parametrize("bounds,handed", MASTER_RANGES)
+def test_a_resumed_master_launches_at_high_effort_whatever_its_previous_agent_or_the_range_names(
+    tmp_path, bounds, handed
+):
+    from dataclasses import replace
+
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee")
+    config.effort_min, config.effort_max = bounds
+    master = replace(agent, name="master@a1b2c3-0001", lane="master", task="master", profile="master", effort="medium")
+    runtime.resume(config, master, "you were restored")
+    assert _passed(seen["runs"][0]) == ["--route", "a1", "--model", "opus", "--effort", "high"]
+    assert seen["env"]["AGENTIHOOKS_SWARM_EFFORT_RANGE"] == handed
 
 
 def _lowest_pick(*args, **kwargs):

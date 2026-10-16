@@ -1,0 +1,297 @@
+import json
+from dataclasses import asdict, dataclass, replace
+from typing import TYPE_CHECKING
+
+from scripts.hive import registry
+from scripts.swarm import lease, reaper
+from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
+from scripts.swarm_v2.runtime.base import SpawnRequest
+from scripts.swarm_v2.runtime.process import launch_target
+
+if TYPE_CHECKING:
+    from redis import Redis
+
+    from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
+
+RECEIPT_SECONDS = 86400
+
+
+@dataclass(frozen=True)
+class LaunchOrder:
+    slug: str
+    execution_id: str
+    generation: int
+    profile: str
+    lane: str
+    task: str
+    slot: str
+    harness: str
+    route_kind: str
+    prompt_ref: str
+    epoch: int
+    expires_at: int
+
+
+@dataclass(frozen=True)
+class Ack:
+    status: str
+    target: dict
+    failure: str = ""
+
+
+@dataclass(frozen=True)
+class CommandOrder:
+    id: str
+    action: str
+    slug: str = ""
+    name: str = ""
+    execution_id: str = ""
+    generation: int = 0
+    text: str = ""
+
+
+DONE, FAILED = "done", "failed"
+REFUSED = Ack(FAILED, {}, "refused")
+FOREIGN = Ack(FAILED, {}, "identity")
+UNKNOWN_ACTION = Ack(FAILED, {}, "unknown_action")
+COMMAND_BATCH = 32
+SENT = {"sent": "1"}
+
+
+class Orders:
+    def __init__(self, redis: "Redis") -> None:
+        self.store = RedisStore(redis)
+        self.redis = redis
+
+    def stream(self, hive: str) -> str:
+        return f"{registry.key(hive)}:orders"
+
+    def receipt(self, order: LaunchOrder) -> str:
+        return f"{self.store.key(order.slug, 'launch-orders')}:{order.execution_id}:{order.generation}"
+
+    def send(self, hive: str, order: LaunchOrder) -> str:
+        return self.redis.xadd(self.stream(hive), {"order": json.dumps(asdict(order))})
+
+    def ack(self, order: LaunchOrder) -> Ack | None:
+        raw = self.redis.hget(self.receipt(order), "ack")
+        return Ack(**json.loads(raw)) if raw else None
+
+    def finish(self, hive: str, item: str, order: LaunchOrder, ack: Ack) -> None:
+        self.redis.hsetnx(self.receipt(order), "ack", json.dumps(asdict(ack)))
+        canonical = self.redis.hget(self.receipt(order), "ack")
+        with self.redis.pipeline() as pipe:
+            pipe.hset(f"{self.stream(hive)}:acks", item, canonical)
+            pipe.xdel(self.stream(hive), item)
+            pipe.execute()
+
+    def commands(self, hive: str) -> str:
+        return f"{registry.key(hive)}:commands"
+
+    def command_receipt(self, hive: str, order_id: str) -> str:
+        return f"{registry.key(hive)}:command:{order_id}"
+
+    def command(self, hive: str, order: CommandOrder) -> Ack | None:
+        from redis.exceptions import WatchError
+
+        receipt = self.command_receipt(hive, order.id)
+        raw = self.redis.hget(receipt, "ack")
+        if raw:
+            return Ack(**json.loads(raw))
+        with self.redis.pipeline() as pipe:
+            try:
+                pipe.watch(receipt)
+                if pipe.hexists(receipt, "sent"):
+                    return None
+                pipe.multi()
+                pipe.hset(receipt, mapping=SENT)
+                pipe.expire(receipt, RECEIPT_SECONDS)
+                pipe.xadd(self.commands(hive), {"order": json.dumps(asdict(order))})
+                pipe.execute()
+            except WatchError:
+                return None
+        return None
+
+    def forget(self, hive: str, order_id: str) -> None:
+        self.redis.delete(self.command_receipt(hive, order_id))
+
+
+class Consumer:
+    def __init__(self, redis: "Redis", hive: str, runtime: "LocalHerdrRuntime") -> None:
+        self.store = RedisStore(redis)
+        self.orders = Orders(redis)
+        self.hive, self.runtime = hive, runtime
+
+    @classmethod
+    def local(cls, redis: "Redis", hive: str) -> "Consumer":
+        from scripts.swarm.runtime import HerdrRuntime
+        from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
+
+        return cls(redis, hive, LocalHerdrRuntime(HerdrRuntime()))
+
+    def poll(self) -> int:
+        entries = self.store.redis.xrange(self.orders.stream(self.hive), count=32)
+        for item, fields in entries:
+            try:
+                order = LaunchOrder(**json.loads(fields["order"]))
+                ack = self.orders.ack(order)
+                if ack is None:
+                    ack = self.apply(order)
+            except (KeyError, TypeError, ValueError):
+                with self.store.redis.pipeline() as pipe:
+                    pipe.hset(
+                        f"{self.orders.stream(self.hive)}:acks",
+                        item,
+                        json.dumps(asdict(Ack("failed", {}, "invalid_order"))),
+                    )
+                    pipe.xdel(self.orders.stream(self.hive), item)
+                    pipe.execute()
+                continue
+            if ack is not None:
+                self.orders.finish(self.hive, item, order, ack)
+        return len(entries)
+
+    def poll_commands(self) -> int:
+        stream = self.orders.commands(self.hive)
+        entries = self.store.redis.xrange(stream, count=COMMAND_BATCH)
+        for item, fields in entries:
+            try:
+                order = CommandOrder(**json.loads(fields["order"]))
+            except (KeyError, TypeError, ValueError):
+                self.store.redis.xdel(stream, item)
+                continue
+            receipt = self.orders.command_receipt(self.hive, order.id)
+            with self.store.redis.pipeline() as pipe:
+                if not self.store.redis.hexists(receipt, "ack"):
+                    try:
+                        ack = self.command(order)
+                    except Exception as exc:
+                        ack = Ack(FAILED, {}, f"error: {type(exc).__name__}")
+                    pipe.hset(receipt, "ack", json.dumps(asdict(ack)))
+                    pipe.expire(receipt, RECEIPT_SECONDS)
+                pipe.xdel(stream, item)
+                pipe.execute()
+        return len(entries)
+
+    def command(self, order: CommandOrder) -> Ack:
+        if order.action == "reap":
+            return _done(self.runtime.herdr.reap_name(order.name))
+        try:
+            agent = self.store.execution_registry.get(order.slug, order.execution_id)
+        except SwarmError:
+            return FOREIGN
+        if agent.generation != order.generation or agent.runtime_target.get("host_id") != self.hive:
+            return FOREIGN
+        if order.action == "name":
+            return _done(self.runtime.herdr.name_pane(agent))
+        if order.action == "retire":
+            outcome = self.runtime.terminate(agent, tuple(reaper.scratch_homes(order.slug, agent.task)))
+        elif order.action == "nudge":
+            outcome = self.runtime.command(agent, order.text)
+        else:
+            return UNKNOWN_ACTION
+        if outcome.ok:
+            return Ack(DONE, agent.runtime_target)
+        return Ack(FAILED, agent.runtime_target, outcome.detail or outcome.status.value)
+
+    def apply(self, order: LaunchOrder) -> Ack | None:
+        now = lease.now_ms(self.store)
+        started = self.store.redis.hget(self.orders.receipt(order), "started")
+        if started is not None:
+            if order.expires_at <= now:
+                return Ack("failed", {}, "expired")
+            return Ack("failed", {}, "ambiguous") if now - int(started) >= 300000 else None
+        if not self.store.redis.hsetnx(self.orders.receipt(order), "started", str(now)):
+            return None
+        if order.expires_at <= now:
+            return Ack("failed", {}, "expired")
+        try:
+            lease.require_epoch(self.store, order.slug, order.epoch)
+        except SwarmError:
+            return Ack("failed", {}, "stale_epoch")
+        try:
+            agent = self.store.execution_registry.get(order.slug, order.execution_id)
+            self.identity(order, agent)
+        except SwarmError:
+            return Ack("failed", {}, "identity")
+        raw = self.store.redis.get(order.prompt_ref)
+        if raw is None:
+            return Ack("failed", {}, "prompt")
+        try:
+            task = json.loads(raw)
+        except ValueError:
+            return Ack("failed", {}, "prompt")
+        if not isinstance(task, dict) or task.get("id") != order.task:
+            return Ack("failed", {}, "prompt")
+        try:
+            return self.launch(order, agent, task)
+        except SwarmError:
+            return Ack("failed", {}, "refused")
+
+    def identity(self, order: LaunchOrder, agent: AgentRecord) -> None:
+        if (
+            agent.generation != order.generation
+            or agent.lane != order.lane
+            or agent.task != order.task
+            or agent.harness != order.harness
+            or agent.profile != order.profile
+            or agent.account != order.slot
+            or agent.route_kind != order.route_kind
+            or agent.runtime_backend != "local"
+            or agent.runtime_target != {"host_id": self.hive}
+            or agent.state != "launching"
+        ):
+            raise SwarmError("launch order does not match the admitted execution")
+        current = self.store.execution_registry.occupants(order.slug).get(agent.seat)
+        if current is None or current.execution_id != agent.execution_id:
+            raise SwarmError("launch order names a replaced execution")
+
+    def launch(self, order: LaunchOrder, agent: AgentRecord, task: dict) -> Ack:
+        config = self.store.config(order.slug)
+        chosen = {**config.lanes.get(order.lane, {}), "agent": order.harness, "role": order.profile}
+        config = replace(config, lanes={**config.lanes, order.lane: chosen})
+        task = {**task, "route_kind": order.route_kind, "controller_epoch": order.epoch}
+        task["launch_assignment"] = {
+            "profile": order.profile,
+            "harness": order.harness,
+            "account": order.slot,
+            "model": agent.model or config.lanes[order.lane].get("model") or getattr(config, f"{order.harness}_model"),
+            "effort": agent.effort or config.effort_min,
+        }
+        lease.require_epoch(self.store, order.slug, order.epoch)
+        self.store.execution_registry.update(order.slug, agent)
+        outcome = self.runtime.spawn(SpawnRequest(config, order.lane, agent.name, task))
+        if not outcome.ok:
+            return Ack("failed", {}, outcome.status.value)
+        placed = outcome.value
+        pid = placed.profile_decision.get("validation", {}).get("pid")
+        try:
+            target = {"host_id": self.hive, **launch_target(pid, self.runtime.namespace(), self.runtime.table())}
+        except SwarmError:
+            return Ack("failed", {"host_id": self.hive}, "ambiguous")
+        live = replace(
+            agent,
+            runtime_target=target,
+            state="working",
+            pane_id=placed.pane_id,
+            model=placed.model,
+            effort=placed.effort,
+            profile_decision=placed.profile_decision,
+        )
+        if order.expires_at <= lease.now_ms(self.store):
+            return self._stop(live, "expired")
+        if (placed.harness, placed.profile, placed.account) != (order.harness, order.profile, order.slot):
+            return self._stop(live, "identity")
+        try:
+            lease.require_epoch(self.store, order.slug, order.epoch)
+            self.store.execution_registry.update(order.slug, live)
+        except SwarmError:
+            return self._stop(live, "refused")
+        return Ack("live", target)
+
+    def _stop(self, agent: AgentRecord, failure: str) -> Ack:
+        outcome = self.runtime.terminate(agent)
+        return Ack("failed", agent.runtime_target, failure if outcome.ok else "ambiguous")
+
+
+def _done(ok: bool) -> Ack:
+    return Ack(DONE, {}) if ok else REFUSED

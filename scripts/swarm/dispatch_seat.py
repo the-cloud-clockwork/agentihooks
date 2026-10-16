@@ -13,7 +13,18 @@ import json
 from dataclasses import replace
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import bottleneck, dev_red, lane_split, launch_check, lifetime, priority_sweep, seat_spawn
+from scripts.swarm import (
+    bottleneck,
+    capacity,
+    dev_red,
+    lane_split,
+    launch_check,
+    lifetime,
+    priority_sweep,
+    seat_spawn,
+    stage_cover,
+    templates,
+)
 from scripts.swarm.store import DISPATCH, FULL
 
 LANE = DISPATCH
@@ -26,6 +37,7 @@ CLOSED = "its triggers closed"
 DEPARTED = "it left the ledger"
 ENDED_STATES = ("stopping", "stopped")
 PAUSED = "paused"
+BOTTLENECK = "bottleneck:"
 REFUSED = "dispatcher triggers are still open; settle them, or the tick ends your seat once they close:\n{lines}"
 WAKE = "New dispatcher triggers in swarm {slug}:\n{lines}\nSettle each one, then tell the master what you did."
 LINES = {
@@ -44,13 +56,39 @@ def triggers(doc: dict, now_ms: int) -> list[dict]:
     ]
 
 
+def _routing_applied(store, slug: str) -> bool:
+    key = store.key(slug, "dispatcher-quota-lanes")
+    decision = capacity.read(store, slug)
+    effective = decision.get("effective", {})
+    affected = json.loads(store.redis.get(key) or "{}")
+    if not affected:
+        affected = {
+            lane: effective[lane]
+            for lane, cap in decision.get("configured", {}).items()
+            if effective.get(lane, cap) < cap
+        }
+        if affected:
+            store.redis.set(key, json.dumps(affected))
+        return False
+    lanes = store.config(slug).lanes
+    return all(
+        lanes.get(lane, {}).get("agent", templates.AUTO) == templates.AUTO and effective.get(lane, 0) > cap
+        for lane, cap in affected.items()
+    )
+
+
 def uncovered(store, slug: str, now_ms: int) -> list[dict]:
     held = json.loads(store.redis.get(store.key(slug, lane_split.KEY)) or "{}")
     named = held.get("named")
     if not named or named in lane_split.MOVES or held["ticks"] < lane_split.TICKS or now_ms - held["at"] > STALE_MS:
+        store.redis.delete(store.key(slug, "dispatcher-quota-lanes"))
+        return []
+    if named != "quota":
+        store.redis.delete(store.key(slug, "dispatcher-quota-lanes"))
+    elif _routing_applied(store, slug):
         return []
     text = bottleneck.line(bottleneck.read(store, slug), now_ms)
-    return [{"id": f"bottleneck:{named}", "kind": "bottleneck", "ticks": held["ticks"], "text": text}]
+    return [{"id": f"{BOTTLENECK}{named}", "kind": "bottleneck", "ticks": held["ticks"], "text": text}]
 
 
 def red_dev(store, slug: str, doc: dict) -> list[dict]:
@@ -68,7 +106,14 @@ def line(trigger: dict) -> str:
 
 def open_triggers(slug: str, config, store, doc: dict, now_ms: int, sleeping: bool) -> list[dict]:
     active = config.autonomy == FULL and config.state not in ENDED_STATES and not sleeping
-    return triggers(doc, now_ms) + uncovered(store, slug, now_ms) + red_dev(store, slug, doc) if active else []
+    if not active:
+        return []
+    held = [
+        trigger
+        for trigger in uncovered(store, slug, now_ms)
+        if not stage_cover.covered(store, slug, doc, trigger["id"].removeprefix(BOTTLENECK), share=True)
+    ]
+    return triggers(doc, now_ms) + held + red_dev(store, slug, doc)
 
 
 def refusal(slug: str, config, store, doc: dict, now_ms: int) -> str:

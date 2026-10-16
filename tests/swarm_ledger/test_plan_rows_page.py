@@ -1,6 +1,6 @@
 import pytest
 
-from tests.swarm_ledger.ledger_page import ledger_state, shell_html, show
+from tests.swarm_ledger.ledger_page import ledger_state, reload_after_folds, shell_html, show
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
 browser = chromium_browser
@@ -49,16 +49,9 @@ def tab(browser):
     context.close()
 
 
-V2_FOLD_STORED = """() => Object.values(localStorage).some((value) => {
-    try { return (JSON.parse(value).closed || []).includes('plans/v2/row'); } catch (e) { return false; }
-})"""
-
-
 def fold_v2_and_reload(tab):
     tab.click("#item-plans-v2 > details.plan-fold > summary")
-    tab.wait_for_function(V2_FOLD_STORED)
-    tab.reload()
-    tab.wait_for_function("() => document.getElementById('status').textContent !== 'loading'")
+    reload_after_folds(tab, "#item-plans-v2 > details.plan-fold")
     assert tab.locator("#item-phases-p3").count() == 0
 
 
@@ -110,9 +103,7 @@ def test_a_plan_row_folds_and_remembers_it_after_a_reload(tab):
     show(tab, shell_html(), ledger=ledger_state(DOC))
     tab.click("#item-plans-v2 > details.plan-fold > summary")
     assert tab.locator("#item-phases-p3").is_hidden()
-    tab.wait_for_function(V2_FOLD_STORED)
-    tab.reload()
-    tab.wait_for_function("() => document.getElementById('status').textContent !== 'loading'")
+    reload_after_folds(tab, "#item-plans-v2 > details.plan-fold")
     assert tab.evaluate("() => document.querySelector('#item-plans-v2 > details.plan-fold').open") is False
     assert tab.evaluate("() => document.querySelector('#item-plans-hier > details.plan-fold').open") is True
 
@@ -153,9 +144,7 @@ def test_a_plan_without_phases_shows_none(tab):
 def test_the_phases_section_folds_and_refills_its_plan_rows(tab):
     show(tab, shell_html(), ledger=ledger_state(DOC))
     tab.click("#phases-box > summary")
-    tab.wait_for_function("() => Object.values(localStorage).some((value) => value.includes('\"phases-box\":false'))")
-    tab.reload()
-    tab.wait_for_function("() => document.getElementById('status').textContent !== 'loading'")
+    reload_after_folds(tab, "#phases-box")
     assert tab.evaluate("() => document.getElementById('phases-box').open") is False
     assert tab.locator("#phases > li").count() == 0
     tab.click("#phases-box > summary")

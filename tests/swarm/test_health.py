@@ -234,7 +234,7 @@ def test_rising_gain_or_master_queued_tasks_are_not_inflation():
 
 def test_proof_loop_names_the_task_its_reruns_and_review_rounds():
     events = [ev("task started", "tasks/t1", by="swarm") for _ in range(4)] + [ev("task pr", "tasks/t1")]
-    assert run({"tasks": [task("t1")], "_meta": {"events": events}}) == [
+    assert run({"tasks": [task("t1")], "_meta": {"events": events}, "review_rounds": {"t1": {"first": 1}}}) == [
         {
             "kind": "proof loop",
             "subject": "t1",
@@ -275,10 +275,26 @@ def test_failed_launch_findings_require_repetition_and_keep_each_launch_error():
 
 def test_review_rounds_over_the_cap_are_a_proof_loop():
     events = [ev("task started", "tasks/t1", by="swarm")] + [ev("task pr", "tasks/t1") for _ in range(4)]
-    found = run({"tasks": [task("t1")], "_meta": {"events": events}})
+    found = run({"tasks": [task("t1")], "_meta": {"events": events}, "review_rounds": {"t1": {"first": 4}}})
     assert [(f["kind"], f["evidence"]) for f in found] == [
         ("proof loop", ["task t1", "started 1 time (0 reruns)", "4 review rounds"])
     ]
+
+
+def test_pull_request_registrations_are_not_review_rounds():
+    events = [ev("task pr", "tasks/t1") for _ in range(4)]
+    assert run({"tasks": [task("t1")], "_meta": {"events": events}}) == []
+
+
+def test_review_rounds_are_not_summed_across_pull_requests():
+    ledger = {"tasks": [task("t1")], "review_rounds": {"t1": {"first": 3, "second": 1}}}
+    assert run(ledger) == []
+
+
+def test_reruns_with_no_reviews_report_zero_rounds():
+    events = [ev("task started", "tasks/t1", by="swarm") for _ in range(4)]
+    [found] = run({"tasks": [task("t1")], "_meta": {"events": events}})
+    assert found["evidence"] == ["task t1", "started 4 times (3 reruns)", "0 review rounds"]
 
 
 def test_an_idle_agent_holding_a_claim_is_named_with_its_task():

@@ -28,6 +28,8 @@ AUTO_SCALING, MANUAL_SCALING = SCALING
 DEFAULT_LOAD_HIGH, DEFAULT_LOAD_LOW = 1.5, 1.0
 DEFAULT_MEMORY_PER_AGENT_MB = 700
 MAX_LOAD = 10.0
+CODEX_TRANSPORTS = ("legacy", "app_server")
+LEGACY_TRANSPORT, APP_SERVER_TRANSPORT = CODEX_TRANSPORTS
 
 
 class SwarmError(RuntimeError):
@@ -66,6 +68,7 @@ class SwarmConfig:
     claude_model: str = default_models.DEFAULTS["claude"]
     codex_model: str = default_models.DEFAULTS["codex"]
     scratch: bool = False
+    codex_inbox_transport: str = LEGACY_TRANSPORT
 
 
 def scaling_refusal(config):
@@ -114,6 +117,7 @@ class AgentRecord:
     launch_timings: dict = field(default_factory=dict)
     hive: str = ""
     route_kind: str = "subscription"
+    transport: str = ""
 
 
 class RedisStore:
@@ -191,6 +195,7 @@ class RedisStore:
             raw.get("claude_model") or default_models.DEFAULTS["claude"],
             raw.get("codex_model") or default_models.DEFAULTS["codex"],
             raw.get("scratch") == "True",
+            raw.get("codex_inbox_transport") or LEGACY_TRANSPORT,
         )
 
     def update(self, slug, **changes):
@@ -200,6 +205,8 @@ class RedisStore:
             raise SwarmError(f"state must be one of {STATES}")
         if changes.get("autonomy", DELEGATE) not in AUTONOMY:
             raise SwarmError(f"autonomy must be one of {AUTONOMY}")
+        if changes.get("codex_inbox_transport", LEGACY_TRANSPORT) not in CODEX_TRANSPORTS:
+            raise SwarmError(f"codex inbox transport must be one of {', '.join(CODEX_TRANSPORTS)}")
         if set(default_models.FIELDS.values()) & changes.keys():
             if refused := default_models.refusal(changes, model_catalog.catalog(os.environ, self.redis, time.time())):
                 raise SwarmError(refused)
@@ -220,12 +227,60 @@ class RedisStore:
         return self._if_holder(
             self.key(slug, "claim", task),
             None,
-            lambda pipe, key: pipe.set(key, agent, nx=True, px=lease_ms),
+            lambda pipe, key: (pipe.set(key, agent, nx=True, px=lease_ms), pipe.incr(f"{key}:generation")),
             self._claim_guards(slug, task),
         )
 
     def claimant(self, slug, task):
         return self.redis.get(self.key(slug, "claim", task))
+
+    def claim_generation(self, slug: str, task: str) -> int:
+        return int(self.redis.get(f"{self.key(slug, 'claim', task)}:generation") or 0)
+
+    def release_ready(self, slug: str, task: str, agent: str, generation: int, expected_ready: str | None) -> bool:
+        from redis.exceptions import WatchError
+
+        key, ready = self.key(slug, "claim", task), self.key(slug, "ready")
+        guards = self._claim_guards(slug, task)
+        with self.redis.pipeline() as pipe:
+            try:
+                pipe.watch(key, f"{key}:generation", ready, *guards)
+                if (
+                    pipe.get(key) not in (None, agent)
+                    or int(pipe.get(f"{key}:generation") or 0) != generation
+                    or pipe.hget(ready, task) != expected_ready
+                    or any(pipe.exists(guard) for guard in guards)
+                ):
+                    return False
+                pipe.multi()
+                pipe.delete(key)
+                pipe.hdel(ready, task)
+                pipe.execute()
+                return True
+            except WatchError:
+                return False
+
+    def ensure_claim(self, slug: str, agent: AgentRecord, lease_ms: int) -> bool:
+        from redis.exceptions import WatchError
+
+        key = self.key(slug, "claim", agent.task)
+        guards = self._claim_guards(slug, agent.task)
+        with self.redis.pipeline() as pipe:
+            try:
+                pipe.watch(key, self.key(slug, "agents"), self.key(slug, "executions"), *guards)
+                current = next((a for a in self.agents(slug) if a.name == agent.name), None)
+                if current != agent or agent.state not in ("starting", "working", "awaiting-decision"):
+                    return False
+                holder = pipe.get(key)
+                if holder not in (None, agent.name) or any(pipe.exists(guard) for guard in guards):
+                    return False
+                pipe.multi()
+                pipe.set(key, agent.name, px=lease_ms)
+                if holder is None:
+                    pipe.incr(f"{key}:generation")
+                return bool(pipe.execute()[0])
+            except WatchError:
+                return False
 
     def refresh(self, slug: str, task: str, agent: str, lease_ms: int) -> bool:
         return self._if_holder(
@@ -513,7 +568,40 @@ def redis_client(environ=None):
 
     import hooks.config  # noqa: F401  loads ~/.agentihooks/*.env, where REDIS_URL lives
 
-    url = redis_url(os.environ if environ is None else environ)
+    environ = os.environ if environ is None else environ
+    url = redis_url(environ)
+    try:
+        return _pinged(redis, url)
+    except redis.AuthenticationError:
+        if url != environ.get("AGENTIHOOKS_HIVE_REDIS_URL"):
+            raise
+    return _hive_recovered(redis, environ, url)
+
+
+def _hive_recovered(redis, environ, refused):
+    from scripts.hive import auth, cli
+
+    # One refresh per host: a second would retire the password the first just saved.
+    with cli.refresh_lock(environ):
+        saved = cli.saved_redis_url(environ)
+        if saved not in (None, refused):
+            try:
+                client = _pinged(redis, saved)
+            except redis.AuthenticationError:
+                pass
+            else:
+                environ["AGENTIHOOKS_HIVE_REDIS_URL"] = saved
+                return client
+        try:
+            cli.refresh_env(environ)
+        except auth.HiveError as exc:
+            raise redis.AuthenticationError(
+                f"the hive Redis credential was refused and the hive refused a refresh ({exc})"
+            ) from exc
+    return _pinged(redis, environ["AGENTIHOOKS_HIVE_REDIS_URL"])
+
+
+def _pinged(redis, url):
     client = redis.Redis.from_url(url, decode_responses=True, socket_connect_timeout=3, socket_timeout=10)
     client.ping()
     return client

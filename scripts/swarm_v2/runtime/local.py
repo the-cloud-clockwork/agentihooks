@@ -6,6 +6,8 @@ from dataclasses import replace
 from typing import Any
 
 from hooks.proc import Process, processes
+from scripts.hive import reports
+from scripts.swarm import live_binding
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm.tick import SpawnError
@@ -25,7 +27,8 @@ from scripts.swarm_v2.runtime.base import (
 
 def _failed(operation: str, exc: SpawnError) -> Outcome:
     status = Status.AMBIGUOUS if isinstance(exc.__cause__, subprocess.TimeoutExpired) else Status(exc.status)
-    return Outcome(operation, status, LOCAL, detail=str(exc))
+    value = {"pane_id": exc.pane_id} if exc.pane_id else None
+    return Outcome(operation, status, LOCAL, value, detail=str(exc))
 
 
 class LocalHerdrRuntime:
@@ -85,7 +88,7 @@ class LocalHerdrRuntime:
         refused = foreign(self, "terminate", agent)
         if refused:
             return refused
-        if legacy(agent):
+        if legacy(agent) or reports.host(agent) or live_binding.managed(agent):
             retired = self.herdr.retire(agent, homes=homes)
         else:
             pid = process.resolve(agent, self.namespace(), self.table())

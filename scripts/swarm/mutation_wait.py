@@ -2,7 +2,9 @@ import io
 import json
 import re
 import subprocess
+import time
 import zipfile
+import zlib
 from datetime import datetime
 
 from scripts.swarm.store import SwarmError
@@ -13,8 +15,18 @@ PROOFS = ".github/workflows/proofs.yml"
 EVENTS = {WORKFLOW: "push", PROOFS: "workflow_dispatch"}
 UNREADABLE = (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError)
 
+BACKOFF = (2, 4)
+
 
 class Unreachable(ValueError):
+    pass
+
+
+class Missing(ValueError):
+    pass
+
+
+class FetchFailed(Exception):
     pass
 
 
@@ -22,10 +34,16 @@ def _api(endpoint, binary=False):
     try:
         done = subprocess.run(["gh", "api", endpoint], capture_output=True, timeout=20)
     except (OSError, subprocess.SubprocessError) as error:
-        raise Unreachable from error
+        raise Unreachable(f"gh api {endpoint}: {error}") from error
     if done.returncode:
-        raise Unreachable
-    return done.stdout if binary else json.loads(done.stdout)
+        stderr = (done.stderr or b"").decode(errors="replace").strip()
+        raise Unreachable(f"gh api {endpoint}: {stderr or f'exited {done.returncode}'}")
+    if binary:
+        return done.stdout
+    try:
+        return json.loads(done.stdout)
+    except ValueError as error:
+        raise Unreachable(f"gh api {endpoint}: {error}") from error
 
 
 def read(target: str) -> dict | None:
@@ -84,12 +102,36 @@ def _report(target, started_at):
         and not artifact["expired"]
         and datetime.fromisoformat(artifact["created_at"]) >= since
     ]
+    if not matching:
+        raise Missing
     artifact = max(matching, key=lambda row: row["id"])
     archive = _api(f"repos/{repo}/actions/artifacts/{artifact['id']}/zip", binary=True)
     with zipfile.ZipFile(io.BytesIO(archive)) as zipped:
         name = next(name for name in zipped.namelist() if name == "report.json" or name.endswith("/report.json"))
         scope = json.loads(zipped.read("scope.json")) if "scope.json" in zipped.namelist() else None
         return json.loads(zipped.read(name)), scope
+
+
+def _fetch(target, started_at):
+    for pause in (*BACKOFF, None):
+        try:
+            return _report(target, started_at)
+        except (Unreachable, zipfile.BadZipFile, zlib.error, EOFError) as error:
+            if pause is None:
+                raise FetchFailed(error) from error
+        except Missing:
+            if pause is None:
+                raise
+        time.sleep(pause)
+
+
+def _unfetched(outcome, conclusion, error):
+    if conclusion == "failure":
+        return f"{outcome}, now red; run failure; its mutation report could not be fetched: {error}"
+    return (
+        f"{outcome}, now unknown; the run concluded success but its mutation report could not be fetched: "
+        f"{error}; wait on the run again"
+    )
 
 
 def resolution(held: dict) -> str:
@@ -110,7 +152,7 @@ def resolution(held: dict) -> str:
     if run.get("conclusion") != "success" and run.get("conclusion") != "failure":
         return f"{outcome}, now red; run {run.get('conclusion')}"
     try:
-        report, scope = _report(target, run["run_started_at"])
+        report, scope = _fetch(target, run["run_started_at"])
         covered = _covers(target, run, scope)
         failures = [
             f"{file['path']}:{failure['name']}:{failure['fingerprint']} ({failure['status']})"
@@ -119,6 +161,8 @@ def resolution(held: dict) -> str:
         ]
         failures.extend(f"{row['path']}: {row['reason']}" for row in report["not_mutated"])
         failed = report["failed"]
+    except FetchFailed as error:
+        return _unfetched(outcome, run["conclusion"], error)
     except Unreachable:
         return ""
     except (*UNREADABLE, StopIteration, zipfile.BadZipFile):
@@ -129,3 +173,20 @@ def resolution(held: dict) -> str:
         return f"{outcome}, now green; no failing mutants"
     detail = "; ".join(failures) or "mutation failed without a named survivor"
     return f"{outcome}, now red; {detail}"
+
+
+def run_resolution(target: str) -> str:
+    repo, number = RUN_URL.fullmatch(target).groups()
+    outcome = f"checks on {target}"
+    try:
+        run = _api(f"repos/{repo}/actions/runs/{number}")
+    except Unreachable as error:
+        return f"{outcome}, missing; GitHub has no such run" if "HTTP 404" in str(error) else ""
+    if run.get("status") != "completed":
+        return ""
+    conclusion = run.get("conclusion")
+    if conclusion == "success":
+        return f"{outcome}, now green"
+    if conclusion == "cancelled":
+        return f"{outcome}, cancelled; dispatch the run again and wait on the new one"
+    return f"{outcome}, now red; the run concluded {conclusion}"

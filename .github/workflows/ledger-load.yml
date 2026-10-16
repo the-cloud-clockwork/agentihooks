@@ -9,6 +9,10 @@ on:
         required: true
   workflow_dispatch:
     inputs:
+      streams:
+        description: Compare one and three page streams at two writes per second on base and head
+        type: boolean
+        default: false
       base:
         description: Revision whose budgets grade the run
         type: string
@@ -24,7 +28,7 @@ concurrency:
 
 jobs:
   load:
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
     timeout-minutes: 10
     services:
       redis:
@@ -69,6 +73,23 @@ jobs:
         run: git fetch --no-tags --depth=1 origin "${BASE#origin/}"
 
       - name: Write and read a full size ledger from ten clients within the server budget
+        if: ${{ !inputs.streams }}
         run: |
           mkdir -p "$RUNNER_TEMP/ledger-load"
           "$HOME/venv/bin/python" -m tests.ledger_load.gate --folder "$RUNNER_TEMP/ledger-load" --base FETCH_HEAD
+
+      - name: Compare stream publication CPU on identical base and head workloads
+        if: inputs.streams
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/ledger-load-base" FETCH_HEAD
+          "$HOME/venv/bin/python" -m tests.ledger_load.streams \
+            --base "$RUNNER_TEMP/ledger-load-base" \
+            --head "$GITHUB_WORKSPACE" \
+            --folder "$RUNNER_TEMP/ledger-streams"
+
+      - name: Preserve both stream CPU measurements and server logs
+        if: ${{ always() && inputs.streams }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ledger-stream-cpu
+          path: ${{ runner.temp }}/ledger-streams

@@ -8,6 +8,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -842,27 +843,43 @@ def deregister_session(session_id: str) -> None:
         _save_sessions(sessions)
 
 
-def name_session(pid: int, name: str) -> int:
-    """Give every live session of ``pid`` an agent name; returns how many records carry it."""
+def _mark_session(pid: int, key: str, value: str) -> int:
     with _file_lock(_sessions_path()):
         sessions = _load_sessions()
         live = [info for info in sessions.values() if info.get("pid") == pid and info.get("status") == "alive"]
         for info in live:
-            info["name"] = name
+            info[key] = value
         if live:
             _save_sessions(sessions)
     return len(live)
 
 
-def session_name(pid: int) -> str:
+def _session_mark(pid: int, key: str) -> str:
     return next(
         (
-            str(info["name"])
+            str(info[key])
             for info in _load_sessions().values()
-            if info.get("pid") == pid and info.get("status") == "alive" and info.get("name")
+            if info.get("pid") == pid and info.get("status") == "alive" and info.get(key)
         ),
         "",
     )
+
+
+def name_session(pid: int, name: str) -> int:
+    """Give every live session of ``pid`` an agent name; returns how many records carry it."""
+    return _mark_session(pid, "name", name)
+
+
+def session_name(pid: int) -> str:
+    return _session_mark(pid, "name")
+
+
+def pin_session(pid: int, swarm: str) -> int:
+    return _mark_session(pid, "swarm", swarm)
+
+
+def session_swarm(pid: int) -> str:
+    return _session_mark(pid, "swarm")
 
 
 def live_session_ids(pid: int) -> list[str]:
@@ -1150,13 +1167,21 @@ def check_and_inject_broadcasts(session_id: str) -> None:
                 continue
 
             banner = format_broadcast_banner(msg)
-            inject_banner("BROADCAST", banner)
+            inject_banner(
+                "BROADCAST", banner, kind="alert" if msg.get("severity") in ("critical", "nuclear") else "brain"
+            )
             injection_trace.record_broadcast(session_id, msg)
             emit_span("brain.delivery", span_attrs)
             _record_delivery(session_id, msg, now_ts)
             injected += 1
     except Exception:
         pass
+
+
+def context_kind(context: str) -> str:
+    """Budget kind of a formatted broadcast block: an alert only when it carries a critical or nuclear message."""
+    labels = "|".join(_SEVERITY_DISPLAY_LABEL[s] for s in ("nuclear", "critical"))
+    return "alert" if re.search(rf"^  - \[(?:{labels})\] \(id:", context, re.MULTILINE) else "brain"
 
 
 def get_pretool_context(session_id: str, *, claim_unseen: bool = True) -> str | None:

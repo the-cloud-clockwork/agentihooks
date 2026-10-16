@@ -72,10 +72,11 @@ FIELDS = {
     "notification_clear": "target",
     "notice": "by text",
     "task_add": "by task title lane phase description depends_on territory kind contract proof workspace artifact profile plan_url plan_slice rank gain difficulty difficulty_source difficulty_confidence not_duplicate slice follow_up",
-    "task_update": "by item fields if_state if_plan_lines_missing quote",
+    "task_update": "by item fields if_state if_match if_plan_lines_missing quote",
     "task_rank": "by item rank if_owned",
     "task_group": "by item members",
     "task_ungroup": "by item",
+    "task_split": "by item halves",
     "title_set": "text",
     "overview_set": "text",
     "agent_rename": "by old new",
@@ -99,6 +100,7 @@ FIELDS = {
     "artifact_purge": "by",
     "alert_claim": "by target",
     "alert_close": "by target outcome",
+    "alert_raise": "by source text",
     "time_left": "by slots ci_minutes fix_phase watched",
     "freeze_set": "by verb target reason quote",
     "freeze_clear": "by target reason quote",
@@ -122,6 +124,7 @@ TYPES = {
     "ci_minutes": {"type": ["number", "null"], "minimum": 0},
     "value": {"type": ["boolean", "integer"]},
     "fields": {"type": "object"},
+    "if_match": {"type": "object"},
     "contract": {"type": "object"},
     "proof": {"type": "object"},
     "file": {"type": "object"},
@@ -131,8 +134,12 @@ TYPES = {
     "phases": {"type": "array", "maxItems": 100, "items": {"type": "object"}},
     "attachments": {"type": "array", "maxItems": 100, "items": {"type": "object"}},
 }
-KIND_TYPES = {"artifact_add": {"plan": {"type": "boolean"}}, "task_rank": {"if_owned": {"type": "boolean"}}}
-for _field in ("depends_on", "territory", "if_state", "members", "watched"):
+KIND_TYPES = {
+    "artifact_add": {"plan": {"type": "boolean"}},
+    "plan_add": {"artifact": {"type": "string", "maxLength": 100000}},
+    "task_rank": {"if_owned": {"type": "boolean"}},
+}
+for _field in ("depends_on", "territory", "if_state", "members", "watched", "halves"):
     TYPES[_field] = {"type": "array", "maxItems": 100, "items": {"type": "string", "maxLength": 2000}}
 
 
@@ -191,6 +198,9 @@ def check_operations(payload: dict, core: ModuleType, task_ids: tuple) -> list:
     return operations
 
 
+UNGUARDED = ("ack", "task_add")
+
+
 def target(op: dict) -> str:
     kind = op["op"]
     if kind in ("add", "edit", "delete", "clear"):
@@ -216,6 +226,7 @@ def target(op: dict) -> str:
     return {
         "alert_claim": "alerts",
         "alert_close": "alerts",
+        "alert_raise": "alerts",
         "source_add": "sources",
         "plan_add": "plans",
         "slice_add": "slices",

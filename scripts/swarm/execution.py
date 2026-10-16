@@ -8,10 +8,10 @@ from uuid import uuid4
 
 from scripts.inbox.seats import is_seat
 
-IMMUTABLE = ("execution_id", "generation", "name", "lane", "task", "seat", "started_at", "runtime_backend")
+IMMUTABLE = ("execution_id", "generation", "name", "lane", "task", "seat", "started_at", "runtime_backend", "transport")
 WRITE_ATTEMPTS = 5
 EXECUTION_FIELDS = ("execution_id", "generation", "runtime_backend", "runtime_target")
-PROJECTION_OMITTED = (*EXECUTION_FIELDS, "hive")
+PROJECTION_OMITTED = (*EXECUTION_FIELDS, "hive", "transport")
 
 
 if TYPE_CHECKING:
@@ -82,6 +82,7 @@ class ExecutionRegistry:
             if name in latest:
                 row.update({field: latest[name][field] for field in EXECUTION_FIELDS})
                 row["hive"] = latest[name].get("hive", "")
+                row["transport"] = latest[name].get("transport", "")
             result.append(AgentRecord(**row))
         return result
 
@@ -141,13 +142,18 @@ class ExecutionRegistry:
         if agent.execution_id or agent.generation:
             self.conflict(slug, "new execution identity and generation must be allocated by the store")
         self.validate(slug, agent)
+        from scripts.codex_session.binding import PUBLISHING
+
         key = self.store.key(slug, "executions")
+        publishing = self.store.key(slug, PUBLISHING)
         for _ in range(WRITE_ATTEMPTS):
             with self.redis.pipeline() as pipe:
                 try:
                     from scripts.swarm import lease
 
-                    pipe.watch(key)
+                    pipe.watch(key, publishing)
+                    if pipe.hget(publishing, agent.seat):
+                        raise SwarmError("current execution publication is in flight; retry after it finishes")
                     epoch = lease.EPOCH.get()
                     held = lease.current(self.store, slug) if epoch is not None else None
                     if epoch is not None and (held is None or held.epoch != epoch):
@@ -258,7 +264,7 @@ def _validate_target(backend, target, refuse):
     allowed = (
         {"pod_namespace", "pod_name", "pod_uid"}
         if backend == "kubernetes"
-        else {"server_id", "process_namespace", "pid", "pid_start"}
+        else {"host_id", "server_id", "process_namespace", "pid", "pid_start"}
     )
     if set(target) - allowed:
         refuse("unsupported runtime target identity field")
@@ -278,6 +284,9 @@ def _validate_target(backend, target, refuse):
 
 
 def _check_binding(previous, current, refuse):
+    if set(previous) == {"host_id"} and set(current) == {"host_id", "process_namespace", "pid", "pid_start"}:
+        if previous["host_id"] == current["host_id"]:
+            return
     for field in sorted(set(previous) | set(current)):
         if field == "pod_uid" and not previous.get(field):
             continue

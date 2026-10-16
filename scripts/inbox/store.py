@@ -62,6 +62,7 @@ class Item:
     sequence: int = 0
     fyi: bool = False
     task: str = ""
+    delivery_session: str = ""
 
 
 def now_ms():
@@ -100,11 +101,12 @@ def close_reason(kind, detail=""):
 
 
 class InboxStore:
-    def __init__(self, redis, *, persist=None):
+    def __init__(self, redis, *, persist=None, session_id=""):
         if redis is None:
             raise InboxError("no Redis client; the inbox refuses to run without it")
         self.redis = redis
         self.persist = persist
+        self.session_id = session_id
         self.seats = SeatRegistry(redis)
         self.names = NameRegistry(redis)
 
@@ -233,6 +235,25 @@ class InboxStore:
 
     def mailbox(self, me):
         return self._with_seat(me, self.inbox)
+
+    def unsettled(self, receiver: str, before: int) -> list[Item]:
+        return [
+            item
+            for item in self._with_seat(receiver, lambda address: self._due_open(address, before))
+            if not item.fyi and item.state in ("read", "confirmed") and item.updated_at <= before
+        ]
+
+    def _due_open(self, address, before):
+        with self.redis.pipeline() as pipe:
+            pipe.sismember(self.key("open-indexed"), address)
+            pipe.get(self.key("open-size", address))
+            pipe.zcard(self.key("address", address))
+            pipe.zrangebyscore(self.key("open", address), "-inf", before)
+            indexed, size, total, ids = pipe.execute()
+        if not _index_current(indexed, size, total):
+            self._index_open(address)
+            ids = self.redis.zrangebyscore(self.key("open", address), "-inf", before)
+        return [self.get(item_id) for item_id in ids]
 
     def pending_mail(self, me):
         return self._with_seat(me, self.pending_items)
@@ -380,26 +401,51 @@ class InboxStore:
             pipe.execute()
             return moved
 
-    def reply(self, item_id, replier, text, fyi=False, answer_id=""):
-        """A given answer_id makes the reply replayable: an answer already sent is kept and only the close runs."""
+    def reply(self, item_id: str, replier: str, text: str, fyi: bool = False, answer_id: str = "") -> Item:
+        from redis.exceptions import WatchError
+
         item = self.get(item_id)
+        replier = self.names.resolve(replier)
         if not self.acts_for(replier, item.address):
             raise InboxError(f"message {item_id} belongs to {item.address}, not {replier}")
-        if answer_id and (item.state, item.reason) == close_reason("done", replied(answer_id)):
-            raise DuplicateItem(f"message {item_id} was already answered with message {answer_id}")
-        if item.state in CLOSED:
-            raise InboxError(f"message {item_id} is closed: {item.reason}")
         if not text.strip():
             raise InboxError("a reply needs text")
-        answer_id = answer_id or new_item_id()
+        key = self.key("item", item_id)
+        field = f"reply:{replier}"
+        legacy = answer_id and (item.state, item.reason) == close_reason("done", replied(answer_id))
+        if item.state in CLOSED and not self.redis.hexists(key, field) and not legacy:
+            raise InboxError(f"message {item_id} is closed: {item.reason}")
+        self.redis.hsetnx(key, field, answer_id or new_item_id())
+        reply_id = self.redis.hget(key, field)
         if entry := self.entry_of(item_id):
-            self.about(answer_id, entry)
+            self.about(reply_id, entry)
         try:
-            answer = self.send(replier, item.sender, text, fyi=fyi, item_id=answer_id)
-        except DuplicateItem:
-            answer = self.get(answer_id)
-        self.close(item_id, replier, "done", replied(answer.id))
+            answer = self.send(replier, item.sender, text, ref=item_id, fyi=fyi, item_id=reply_id)
+        except (DuplicateItem, WatchError):
+            answer = self.get(reply_id)
+            legacy_recipient = not answer.ref and (
+                legacy or self.names.resolve(answer.address) == self.names.resolve(item.sender)
+            )
+            if (self.names.resolve(answer.sender), answer.text, answer.fyi) != (replier, text, fyi) or not (
+                answer.ref == item_id or legacy_recipient
+            ):
+                raise InboxError("a reply retry must keep its sender, recipient, text and informational flag") from None
+        self._close_reply(item_id, replier, answer.id, answer_id)
         return answer
+
+    def _close_reply(self, item_id, replier, reply_id, operation_id):
+        item = self.get(item_id)
+        expected = close_reason("done", replied(reply_id))
+        if (item.state, item.reason) == expected:
+            if operation_id == reply_id:
+                raise DuplicateItem(f"message {item_id} was already answered with message {reply_id}")
+            return
+        try:
+            self.close(item_id, replier, "done", replied(reply_id))
+        except InboxError:
+            item = self.get(item_id)
+            if (item.state, item.reason) != expected:
+                raise
 
     def about(self, item_id, entry):
         """Name the ledger entry an item is about, before the item is written."""
@@ -423,10 +469,15 @@ class InboxStore:
         """Confirm every item delivered to receiver before this hook event began: the session lived past it."""
         receiver = self.names.resolve(receiver)
         confirmed = []
+        if not self.session_id:
+            return confirmed
         for item_id in self.redis.zrangebyscore(self.key("delivered"), "-inf", before - 1):
             if self.names.resolve(self._delivered_to(item_id)) != receiver:
                 continue
             try:
+                if self.get(item_id).delivery_session != self.session_id:
+                    self.requeue(item_id, receiver, "receiving session changed", before=before - 1)
+                    continue
                 item = self.confirm(item_id, receiver)
             except InboxError:
                 continue
@@ -593,8 +644,12 @@ class InboxStore:
                 raise InboxError(f"message {item_id} belongs to {item.address}, not {by}")
             if only_from is not None and item.state not in only_from:
                 return None
+            if state == "confirmed" and item.state == "delivered" and item.delivery_session != self.session_id:
+                return None
             if item.state in CLOSED:
                 raise InboxError(f"message {item_id} is closed: {item.reason}")
+            if item.fyi and state in ("read", "confirmed"):
+                state, reason = "done", "done: information received"
             if state == "done" and not item.fyi and reason == "done":
                 raise InboxError("done needs an outcome naming where the work went")
             if item.state == state:
@@ -602,6 +657,8 @@ class InboxStore:
             if state == "delivered" and (self._owned(pipe, by) or self._reserved(pipe, item_id)):
                 return None
             moved = replace(item, state=state, updated_at=now_ms(), reason=reason)
+            if state == "delivered":
+                moved = replace(moved, delivery_session=self.session_id)
             last = self.last_pending(pipe, item)
             pipe.multi()
             self.stage_move(pipe, item, moved, by, last)
@@ -640,7 +697,10 @@ class InboxStore:
         pipe.zrem(self.key("pending", item.address), item.id)
         if last:
             pipe.srem(self.key("waiting"), item.address)
-        pipe.rpush(self.key("history", item.id), _entry(moved.state, by, moved.reason, moved.updated_at))
+        pipe.rpush(
+            self.key("history", item.id),
+            _entry(moved.state, by, moved.reason, moved.updated_at, moved.delivery_session),
+        )
 
 
 def _index_current(indexed, size, total: int) -> bool:
@@ -670,18 +730,22 @@ def _item(raw, item_id):
     )
 
 
-def _entry(state, by, reason, at):
-    return json.dumps({"state": state, "by": by, "reason": reason, "at": at})
+def _entry(state, by, reason, at, session_id=""):
+    entry = {"state": state, "by": by, "reason": reason, "at": at}
+    if state == "delivered":
+        entry["session_id"] = session_id
+    return json.dumps(entry)
 
 
 def connect(environ=None):
     import redis
 
     from scripts.inbox import outbox
+    from scripts.inbox.seen import receiving_session
     from scripts.swarm.store import redis_client
 
     try:
-        store = InboxStore(redis_client(environ))
+        store = InboxStore(redis_client(environ), session_id=receiving_session(environ))
     except redis.RedisError as exc:
         raise Unreachable(f"Redis is unreachable ({exc}); the inbox refuses to run without it") from exc
     outbox.flush(store)

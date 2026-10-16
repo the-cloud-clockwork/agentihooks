@@ -30,7 +30,7 @@ All domain mutations use POST or PUT `/operations`. The envelope has a transport
 | Reconciliation | sync, stats_sync | Metadata |
 | Membership | join, leave, agent_rename; ack needs no guard because it only raises the caller's handled revision | Members |
 | Agent state | claim, set, add_item, retext, gate_bypass, gate_lift | Named item, list or metadata |
-| Tasks | task_add, task_update, task_rank, task_group, task_ungroup | Tasks collection or named task |
+| Tasks | task_add, task_update, task_rank, task_group, task_ungroup | Named task or tasks collection; task_add needs no guard because the locked apply refuses an id already in use, so adds of different ids never conflict |
 | Phases | phase_add, phase_update, phase_review, phase_append | Phases collection or named phase |
 | Decisions | priority, priority_clear, notification_clear, relay, answer, verdict | Priority or notification collection, or named item |
 | Ledger lifecycle | title_set, overview_set, summary_set, close, reopen, size_set, source_add | Metadata or sources |

@@ -39,6 +39,28 @@ def test_started_lives_still_raise_the_proof_loop_finding():
     assert "started 4 times (3 reruns)" in found[0]["evidence"]
 
 
+def test_proof_loop_reads_each_pull_requests_review_budget(monkeypatch, tmp_path):
+    import fakeredis
+
+    from scripts.gates import log as gate_log
+    from scripts.swarm import review_rounds
+
+    monkeypatch.setattr(gate_log, "swarm_home", lambda: tmp_path)
+    monkeypatch.setenv("AGENTIHOOKS_HEALTH_REVIEW_ROUNDS", "1")
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
+    tasks = [{"id": "t1", "title": "Review split task"}]
+    first = "https://github.com/o/r/pull/1"
+    second = "https://github.com/o/r/pull/2"
+    review_rounds.start("sw", "t1", pr_url=first)
+    review_rounds.start("sw", "t1", pr_url=second)
+    assert findings(store, "sw", store.config("sw"), tasks, []) == []
+    review_rounds.start("sw", "t1", pr_url=first)
+    found = findings(store, "sw", store.config("sw"), tasks, [])
+    assert [(row["kind"], row["subject"]) for row in found] == [("proof loop", "t1")]
+    assert "2 review rounds" in found[0]["evidence"]
+
+
 def test_busy_tool_stall_is_reported_until_a_new_tool_call_or_named_wait(monkeypatch, tmp_path):
     import fakeredis
 

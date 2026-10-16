@@ -2,6 +2,7 @@ import json
 import sys
 from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING
 
 from hooks.context import account_sessions
 from scripts import claude_quota_balancer as balancer
@@ -10,6 +11,9 @@ from scripts.routing import claude_api, codex_api, place
 from scripts.routing.slots import API, SUBSCRIPTION
 from scripts.swarm import autoscale, freeze, host_budget
 from scripts.swarm.store import AUTO_SCALING, RedisStore, SwarmConfig
+
+if TYPE_CHECKING:
+    from scripts.routing.reservation import Reservation
 
 LANES = ("eng", "ci", "plan")
 LABELS = {"claude": "Claude", "codex": "Codex"}
@@ -28,6 +32,7 @@ class Account:
     kind: str = SUBSCRIPTION
     weight: int | None = None
     five_resets_at: int | None = None
+    reserved: str = ""
 
 
 def _left(window: balancer.QuotaWindow, now: float) -> float | None:
@@ -91,16 +96,13 @@ def _codex(environ: dict, now: float, refresh: bool) -> list[Account]:
     counts = account_sessions.codex_sessions_by_account()
     found = source.readings(pool, environ, now)
     known = {account.name for account in pool}
-    live = [
-        codex_router.CodexAccount(name, f"AH_CX_TOKEN_{name}")
-        for name in counts
-        if name not in known and name not in {"default", account_sessions.API_ACCOUNT}
-    ]
+    live = codex_router.live_accounts(pool, counts)
     found.update(codex_router.quotas(live, environ))
     rows = []
     for account in pool + live:
         quota = found.get(account.name)
         cap = codex_router.account_cap(quota, now, environ) if account.name in known else None
+        quota = None if quota and quota.expired else quota
         five = _left(quota.five_hour, now) if quota else None
         week = _left(quota.seven_day, now) if quota else None
         reset = session_bands.upcoming(quota.seven_day.resets_at, now) if quota else None
@@ -121,9 +123,63 @@ def _codex(environ: dict, now: float, refresh: bool) -> list[Account]:
     return rows + _api(codex_api.CodexApiSource(counts), "codex", environ, now)
 
 
+def _global(environ: dict, now: float) -> list[Account]:
+    from scripts.routing import aggregate
+
+    rows = []
+    for row in aggregate.current(now).values():
+        quota = row["quota"]
+        five = session_bands.left(quota["five_hour"]["used"], quota["five_hour"]["resets_at"], now) if quota else None
+        week = session_bands.left(quota["seven_day"]["used"], quota["seven_day"]["resets_at"], now) if quota else None
+        cap = None
+        if quota and session_bands.fresh(quota["observed_at"], now):
+            cap = session_bands.week_cap(week) if row["harness"] == "codex" else session_bands.cap(five, week)
+        weight = None
+        if row["kind"] == API:
+            policy = place.policy(row["harness"], environ)
+            cap, weight = policy.cap, policy.weight
+        rows.append(
+            Account(
+                row["harness"],
+                row["account"],
+                _state(cap),
+                row["sessions"],
+                five,
+                week,
+                cap,
+                session_bands.upcoming(quota["seven_day"]["resets_at"], now) if quota else None,
+                kind=row["kind"],
+                weight=weight,
+                five_resets_at=session_bands.upcoming(quota["five_hour"]["resets_at"], now) if quota else None,
+            )
+        )
+    return rows
+
+
 def accounts(environ: dict, now: float, refresh: bool = True) -> list[Account]:
     """Every account with its band cap; ``refresh`` probes stale Codex readings, which costs a Codex request."""
-    return _claude(environ, now) + _codex(environ, now, refresh)
+    from scripts.routing import aggregate, reservation
+
+    rows = (
+        _global(environ, now) if aggregate.enabled(environ) else _claude(environ, now) + _codex(environ, now, refresh)
+    )
+    for harness in LABELS:
+        rows = reserve(rows, reservation.current(harness, environ))
+    return rows
+
+
+def reserve(rows: list[Account], held: "Reservation | None") -> list[Account]:
+    if held is None:
+        return rows
+    return [
+        replace(row, state=_state(0), cap=0, reserved=held.reason)
+        if row.harness == held.harness
+        and row.kind != API
+        and row.week_left is not None
+        and held.closes(row.name, 100 - row.week_left)
+        else row
+        for row in rows
+    ]
 
 
 def _seat(row: Account, cap: int) -> session_bands.Seat:
@@ -363,9 +419,9 @@ def fixture_inputs(readings: dict) -> ScaleInputs:
 
 def record(row: Account) -> dict:
     """The stored row; pool rows keep their pre-api fields so decisions without an api stay byte identical."""
-    if row.kind == API:
-        return dict(row.__dict__)
-    return {key: value for key, value in row.__dict__.items() if key not in {"kind", "weight"}}
+    dropped = set() if row.kind == API else {"kind", "weight"}
+    dropped |= set() if row.reserved else {"reserved"}
+    return {key: value for key, value in row.__dict__.items() if key not in dropped}
 
 
 def _api_reason(row: Account) -> str:

@@ -18,13 +18,14 @@ INTERACTIVE_PREFIX = "AH_ROUTE_INTERACTIVE_"
 API_ACCOUNT = "api"
 _SHELLS = frozenset({"sh", "bash", "dash", "zsh", "fish", "ksh"})
 _PROC = Path("/proc")
+REMOTE = "--remote"
 VALUE_FLAGS = frozenset(
     {
         "-c",
         "--config",
         "--enable",
         "--disable",
-        "--remote",
+        REMOTE,
         "--remote-auth-token-env",
         "-i",
         "--image",
@@ -44,6 +45,11 @@ VALUE_FLAGS = frozenset(
 )
 SERVERS = frozenset({"app-server", "mcp-server"})
 INTERNAL_RUN = "AGENTIHOOKS_INTERNAL_RUN"
+LISTEN = "--listen"
+UNIX = "unix://"
+MANAGED_RUNTIME = "cx"
+MANAGED_SOCKET = "s"
+_LAST_HELD: set[tuple[str, str]] = set()
 
 
 def account_from_names(names: Iterable[str], prefix: str = TOKEN_PREFIX) -> str:
@@ -175,32 +181,105 @@ def _is_codex_session(pid: int, proc: Path) -> bool:
     argv = _cmdline(pid, proc)
     if "app-server" in argv[0] or SERVERS.intersection(_codex_positionals(argv)[:1]):
         return False
+    if any(part == REMOTE or part.startswith(f"{REMOTE}=") for part in argv[1:]):
+        return False
     if INTERNAL_RUN in _env_names(pid, proc):
         return False
     return _comm(_ppid(pid, proc), proc) != "codex"
 
 
-def live_codex_sessions(proc: Path = _PROC) -> int:
-    """Interactive Codex sessions and exec runs on this host; one CODEX_HOME is one account."""
-    try:
-        entries = [int(entry.name) for entry in proc.iterdir() if entry.name.isdigit()]
-    except OSError:
-        return 0
-    return sum(1 for pid in entries if _is_codex_session(pid, proc))
+def execution_key(endpoint: str) -> str:
+    if not endpoint.startswith(UNIX):
+        return ""
+    path = Path(endpoint)
+    return path.parent.name if path.name == MANAGED_SOCKET and path.parent.parent.name == MANAGED_RUNTIME else ""
 
 
-def codex_sessions_by_account(proc: Path = _PROC) -> dict[str, int]:
-    """Interactive Codex sessions and exec runs per Codex account: a token slug, or the default login."""
+def _managed_execution(pid: int, proc: Path) -> str:
+    if not _is_codex(pid, proc):
+        return ""
+    argv = _cmdline(pid, proc)
+    if _codex_positionals(argv)[:1] != ["app-server"] or LISTEN not in argv[:-1]:
+        return ""
+    return execution_key(argv[argv.index(LISTEN) + 1])
+
+
+def _codex_processes(proc: Path) -> tuple[dict[int, str], dict[tuple[str, str], int]]:
+    """Codex sessions by pid, and each managed execution by execution key and account with its server pid."""
+    sessions: dict[int, str] = {}
+    managed: dict[tuple[str, str], int] = {}
     try:
-        entries = [int(entry.name) for entry in proc.iterdir() if entry.name.isdigit()]
+        entries = sorted(int(entry.name) for entry in proc.iterdir() if entry.name.isdigit())
     except OSError:
-        return {}
-    counts: dict[str, int] = {}
+        return sessions, managed
     for pid in entries:
         if _is_codex_session(pid, proc):
-            account = codex_account_from_names(_env_names(pid, proc))
-            counts[account] = counts.get(account, 0) + 1
+            sessions[pid] = codex_account_from_names(_env_names(pid, proc))
+        elif key := _managed_execution(pid, proc):
+            managed.setdefault((key, codex_account_from_names(_env_names(pid, proc))), pid)
+    return sessions, managed
+
+
+def live_codex_sessions(proc: Path = _PROC) -> int:
+    """Interactive Codex sessions, exec runs and managed executions on this host; one CODEX_HOME is one account."""
+    sessions, managed = _codex_processes(proc)
+    return len(sessions) + len(managed)
+
+
+def _held(raw: str) -> tuple[str, str] | None:
+    from scripts.codex_session import binding
+
+    try:
+        record = binding.decode(raw)
+    except (binding.BindingError, ValueError, TypeError, AttributeError):
+        return raw, CODEX_DEFAULT
+    if record.state in (binding.EXITED, binding.FAILED):
+        return None
+    return execution_key(record.endpoint_ref) or record.execution_id, record.account or CODEX_DEFAULT
+
+
+def managed_held() -> set[tuple[str, str]]:
+    """Transport records are written before the server starts; an unreadable record or store holds what it last held."""
+    from hooks._redis import get_redis
+
+    redis = get_redis()
+    if redis is None:
+        return set()
+    from redis.exceptions import RedisError
+
+    from scripts.codex_session import binding
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(redis)
+    try:
+        raws = [raw for slug in store.slugs() for raw in redis.hvals(store.key(slug, binding.RECORDS))]
+    except RedisError:
+        return set(_LAST_HELD)
+    _LAST_HELD.clear()
+    _LAST_HELD.update(held for raw in raws if (held := _held(raw)))
+    return set(_LAST_HELD)
+
+
+def codex_sessions_by_account(proc: Path = _PROC, *, local: bool = False) -> dict[str, int]:
+    """Codex sessions per account: a token slug or the default login; a managed execution counts once."""
+    from scripts.routing import aggregate
+
+    if not local and aggregate.enabled():
+        import time
+
+        return aggregate.counts("codex", time.time())
+    sessions, managed = _codex_processes(proc)
+    executions = set(managed) if local else set(managed) | managed_held()
+    counts: dict[str, int] = {}
+    for account in [*sessions.values(), *(account for _, account in executions)]:
+        counts[account] = counts.get(account, 0) + 1
     return counts
+
+
+def local_processes(proc: Path = _PROC) -> dict[str, dict[int, str]]:
+    sessions, managed = _codex_processes(proc)
+    executions = {pid: account for (_, account), pid in managed.items()}
+    return {"claude": live_sessions(proc, handed_off_pids()), "codex": sessions | executions}
 
 
 def handed_off_pids() -> set[int]:
@@ -237,8 +316,14 @@ def fleet_held(environ: Mapping[str, str] | None = None) -> dict[str, int]:
         return {}
 
 
-def sessions_by_account(proc: Path = _PROC) -> dict[str, int]:
+def sessions_by_account(proc: Path = _PROC, *, local: bool = False) -> dict[str, int]:
     """Live sessions per account; sessions that already handed off their work do not hold a slot."""
+    from scripts.routing import aggregate
+
+    if not local and aggregate.enabled():
+        import time
+
+        return aggregate.counts("claude", time.time())
     try:
         skip = handed_off_pids()
     except Exception:
@@ -246,6 +331,7 @@ def sessions_by_account(proc: Path = _PROC) -> dict[str, int]:
     counts: dict[str, int] = {}
     for account in live_sessions(proc, skip).values():
         counts[account] = counts.get(account, 0) + 1
-    for account, held in fleet_held().items():
-        counts[account] = counts.get(account, 0) + held
+    if not local:
+        for account, held in fleet_held().items():
+            counts[account] = counts.get(account, 0) + held
     return counts

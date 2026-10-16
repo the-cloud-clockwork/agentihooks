@@ -84,6 +84,7 @@ def test_phase_slice_flags_a_big_or_off_intent_task(size, serves, confidence, ex
 def pieces(*rulings, sized=True):
     return {
         "pieces": [{"slot": i, "ruling": ruling} for i, ruling in enumerate(rulings)],
+        "covers": [],
         "sized": [{}] if sized else [],
     }
 
@@ -106,7 +107,7 @@ def test_trace_plan_fails_a_mostly_cut_or_oversized_plan(first, second, size, ru
 
 def test_trace_plan_passes_a_grown_plan_without_a_size_answer():
     answers = {"piece_2": noul(0.1)}
-    params = {"pieces": [{"slot": 2, "ruling": False}], "sized": []}
+    params = {"pieces": [{"slot": 2, "ruling": False}], "covers": [], "sized": []}
     assert verdicts(trace_plan, "trace-plan", answers, params) == {"verdict": "pass"}
 
 
@@ -115,10 +116,23 @@ def test_trace_plan_params_carry_each_piece_ruling():
         trace_plan.Piece("tests", ("tests/test_a.py",), "proof"),
         trace_plan.Piece("clear", ("mutation-clearances/a.json",), "none"),
     ]
-    assert trace_plan._params(fresh, 1, False) == {
+    assert trace_plan._params(fresh, 1, False, ["c-1"]) == {
         "pieces": [
             {"slot": 1, "number": 2, "what": "tests", "ruling": False},
             {"slot": 2, "number": 3, "what": "clear", "ruling": True},
         ],
+        "covers": [{"slot": 1, "number": 2, "what": "tests", "grant": 0, "id": "c-1"}],
         "sized": [],
     }
+
+
+def test_trace_plan_keeps_a_piece_its_authorization_covers():
+    answers = {"piece_0": noul(0.0), "piece_1": noul(0.0), "covers_0_0": noul(0.9), "covers_1_0": noul(0.7)}
+    covers = [{"slot": slot, "grant": 0, "id": "c-1"} for slot in (0, 1)]
+    params = {**pieces(False, False), "covers": covers}
+    assert verdicts(trace_plan, "trace-plan", answers | {"size": score(1, 0.9)}, params) == {"verdict": "pass"}
+
+
+def test_trace_plan_params_number_every_covered_piece():
+    fresh = [trace_plan.Piece("a", ("src/a.py",), "x"), trace_plan.Piece("b", ("src/b.py",), "y")]
+    assert [c["number"] for c in trace_plan._params(fresh, 3, True, ["c-1"])["covers"]] == [4, 5]
