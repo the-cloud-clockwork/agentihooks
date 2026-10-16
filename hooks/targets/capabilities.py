@@ -61,8 +61,7 @@ _REWRITE_TARGETS = frozenset({"claude"})
 # Codex accepts deny only; copilot's command transport ignores stdout decisions.
 _ALLOW_ASK_TARGETS = frozenset({"claude"})
 
-# Targets whose hook payload cwd is the shell's working directory. Codex sends its
-# launch directory and Copilot its workspace root, whatever the command runs in.
+# Targets whose hook payload cwd is the shell's working directory.
 _SHELL_CWD_TARGETS = frozenset({"claude"})
 
 
