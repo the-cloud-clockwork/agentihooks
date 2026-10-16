@@ -991,14 +991,9 @@ class IntentGate:
                 f"task {who.task} is split: name the pull request url in the merge so intent matches it to its "
                 "judged half."
             )
-        commands = [words for words in simple_commands(call.command) if _gated(words)]
         if not bound:
-            for words in commands:
-                single = replace(call, tool_input={**call.tool_input, "command": shlex.join(words)})
-                decision = self._decide_record(single, who, state, mode, record)
-                if not decision.allowed:
-                    return decision
-            return decision
+            return self._decide_unbound(call, who, state, mode, record)
+        commands = [words for words in simple_commands(call.command) if _gated(words)]
         for words in commands:
             single = replace(call, tool_input={**call.tool_input, "command": shlex.join(words)})
             queued = _queue_target(single.command)
@@ -1027,6 +1022,15 @@ class IntentGate:
             if not decision.allowed:
                 return decision
         return Decision()
+
+    def _decide_unbound(self, call, who, state, mode, record):
+        commands = [words for words in simple_commands(call.command) if _gated(words)]
+        for words in commands:
+            single = replace(call, tool_input={**call.tool_input, "command": shlex.join(words)})
+            decision = self._decide_record(single, who, state, mode, record)
+            if not decision.allowed:
+                return decision
+        return decision
 
     def _resolve(self, call, split):
         if not split:
