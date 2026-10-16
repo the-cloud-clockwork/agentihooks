@@ -43,6 +43,24 @@ def test_redeclaring_a_wait_records_the_end_of_the_previous_one(redis):
     ]
 
 
+def test_renamed_agents_keep_ended_history_under_both_names(redis):
+    from scripts.swarm.store import RedisStore, SwarmConfig
+
+    store = RedisStore(redis)
+    store.create(SwarmConfig("sw", "/home/x/agentihooks", 2, 1))
+    idle.declare_wait(redis, "sw", "old-engineer", 3_660_000, "old proof", 60_000)
+    idle.end_wait(redis, "sw", "old-engineer", 3_660_000)
+    new = store.next_name("sw", "eng")
+    store.names.alias("old-engineer", new)
+    idle.declare_wait(redis, "sw", new, 5_000_000, "new proof", 4_000_000)
+    expected = [
+        {"at": 60_000, "until": 3_660_000, "reason": "old proof"},
+        {"at": 4_000_000, "until": 5_000_000, "reason": "new proof"},
+    ]
+    assert idle.wait_history(redis, "sw", new) == expected
+    assert idle.wait_history(redis, "sw", "old-engineer") == expected
+
+
 def test_tick_resolution_records_the_actual_end_of_the_wait(redis):
     agent = SimpleNamespace(name="engineer", state="working", task="own", seat="")
     store = SimpleNamespace(redis=redis, agents=lambda slug: [agent])
