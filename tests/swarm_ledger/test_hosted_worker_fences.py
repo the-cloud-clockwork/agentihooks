@@ -102,11 +102,12 @@ def test_hosted_worker_claim_must_be_an_object(deployed, pin):
     assert raised.value.status == 400
 
 
-def test_worker_claim_schema_accepts_a_single_character_execution_identity(deployed):
+@pytest.mark.parametrize("field", ["task_id", "execution_id"])
+def test_worker_claim_schema_accepts_single_character_identities(deployed, field):
     from scripts.swarm_ledger.api import schemas
 
     operation = _operation(deployed)
-    operation["worker_claim"]["execution_id"] = "e"
+    operation["worker_claim"][field] = "e"
     payload = {"operation_id": "short-identity", "ops": [operation], "guards": {}}
     assert schemas.check_operations(payload, core, ("t1",)) == [operation]
 
