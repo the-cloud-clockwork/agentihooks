@@ -16,7 +16,7 @@ class El {
 }
 globalThis.document = { createElement: (tag) => new El(tag) };
 const pages = await import("data:text/javascript;base64," + %(pages)s);
-const { COMMENT_PAGE, lastPage, moreButton, wanted } = pages;
+const { COMMENT_PAGE, lastPage, moreButton, threadPage, wanted } = pages;
 const ids = (n) => Array.from({ length: n }, (_, i) => `c${i + 1}`);
 const out = {};
 %(body)s
@@ -106,8 +106,23 @@ out.after = lastPage("chat", ids(120), (c) => c).length;
     assert out == {"first": 50, "label": "Show 50 older messages · 70 left", "after": 100}
 
 
-def test_comment_threads_use_the_comment_page_with_show_more_under_the_list():
+THREAD = """
+const parts = (page) => threadPage("%s", ids(25), { idOf: (c) => c, label: "older comments", again: () => {}, make: (c) => c }, page);
+out.comments = parts(COMMENT_PAGE).map((p) => (typeof p === "string" ? p : `more: ${p.kids[0].textContent}`));
+out.notes = parts(undefined).map((p) => (typeof p === "string" ? p : "more"));
+"""
+
+
+def test_a_comment_thread_puts_show_more_under_its_newest_eight():
+    out = run(THREAD % "x/comments")
+    assert out["comments"] == [f"c{i}" for i in range(18, 26)] + ["more: Show 10 older comments · 17 left"]
+
+
+def test_other_threads_keep_their_older_control_above_a_full_page():
+    out = run(THREAD.replace("ids(25)", "ids(60)") % "notes")
+    assert out["notes"] == ["more"] + [f"c{i}" for i in range(11, 61)]
+
+
+def test_comment_dropdowns_pass_the_comment_page():
     source = (MODULES / "threads.js").read_text(encoding="utf-8")
-    view = source.split("export function threadView(", 1)[1].split("\n}\n", 1)[0]
-    assert 'path.endsWith("/comments") ? COMMENT_PAGE : FULL_PAGE' in view
-    assert "comments ? [...entries, older] : [older, ...entries]" in view
+    assert 'threadView(`${key}/comments`, list, "thread flat", COMMENT_PAGE)' in source
