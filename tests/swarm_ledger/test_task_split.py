@@ -138,6 +138,53 @@ def test_split_pulls_is_a_list_field_a_worker_updates():
     assert rejected == [] and row(state, "t1")["split_pulls"] == ["https://github.com/o/r/pull/9"]
 
 
+@pytest.mark.parametrize(
+    "value",
+    [
+        "https://github.com/o/r/pull/9,https://github.com/o/r/pull/10",
+        '["https://github.com/o/r/pull/9", "https://github.com/o/r/pull/10"]',
+        '  ["https://github.com/o/r/pull/9", "https://github.com/o/r/pull/10"]',
+    ],
+    ids=["comma", "json", "indented-json"],
+)
+def test_task_set_stores_split_pull_addresses_as_a_list(value, monkeypatch, capsys):
+    from scripts.swarm_ledger import ledger
+
+    def send(args, kind, **fields):
+        assert args.slug == SLUG
+        operation = ledger.op(kind, args, **fields)
+        ledger_tasks.check(operation)
+        state, rejected = core.sync(SLUG, ops=[operation])
+        assert rejected == []
+        assert row(state, "t1")["split_pulls"] == [
+            "https://github.com/o/r/pull/9",
+            "https://github.com/o/r/pull/10",
+        ]
+
+    monkeypatch.setattr(ledger, "send", send)
+    args = ledger.build_parser().parse_args(
+        ["--slug", SLUG, "--as", ENGINEER, "task", "set", "t1", f"split_pulls={value}"]
+    )
+    ledger.cmd_task(args)
+    assert row(core.sync(SLUG)[0], "t1")["split_pulls"] == [
+        "https://github.com/o/r/pull/9",
+        "https://github.com/o/r/pull/10",
+    ]
+    assert (
+        '"split_pulls": ["https://github.com/o/r/pull/9", "https://github.com/o/r/pull/10"]' in capsys.readouterr().out
+    )
+
+
+def test_task_set_preserves_bracketed_territory_as_a_comma_list(monkeypatch):
+    from scripts.swarm_ledger import ledger
+
+    sent = []
+    monkeypatch.setattr(ledger, "send", lambda args, kind, **fields: sent.append(fields))
+    args = ledger.build_parser().parse_args(["task", "set", "t1", "territory=[local],remote"])
+    ledger.cmd_task(args)
+    assert sent == [{"item": "tasks/t1", "fields": {"territory": ["[local]", "remote"]}}]
+
+
 def test_task_split_cli_sends_the_ordered_halves(monkeypatch, capsys):
     from scripts.swarm_ledger import ledger
 

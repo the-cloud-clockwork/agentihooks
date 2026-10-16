@@ -77,7 +77,7 @@ def test_repeated_notifications_of_one_alert_update_rather_than_repeat(redis):
     alert_intake.receive(redis, payload(alert(hours=3.25)), NOW + 3_600_000)
     (found,) = standing.findings(redis, "sw", NOW + 3_600_000)
     assert (found.measure, found.summary) == (
-        1,
+        3.25,
         "ci queue at 3.25 task hours in the window, over its 1.0 threshold",
     )
 

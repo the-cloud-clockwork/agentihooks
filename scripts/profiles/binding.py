@@ -46,6 +46,18 @@ def request(report: Path, profile: str, target: str, home: Path | None = None) -
     _report(report, data)
 
 
+def rehome(report: Path, home: Path) -> None:
+    requested = json.loads(report.read_text())
+    try:
+        rendered = inspect(home, requested["profile"], requested["harness"])
+        if rendered.get("canary") != requested["rendered"].get("canary"):
+            raise ValueError("execution home canary differs from the launch request")
+    except ValueError as exc:
+        refuse(report, str(exc))
+        raise
+    _report(report, {**requested, "rendered": rendered})
+
+
 def refuse(report: Path, reason: str) -> None:
     requested = json.loads(report.read_text())
     if requested["state"] == "pending":

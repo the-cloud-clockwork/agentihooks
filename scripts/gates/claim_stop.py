@@ -71,7 +71,7 @@ def parked_by(store, who, task):
 def refusal(owed, slug, task, pull):
     url, block = task.get("pr_url"), f'agentihooks swarm {slug} block "<why>"'
     name_wait = (
-        f"Name the wait: agentihooks swarm {slug} wait --on checks <pr url> | reply <inbox item> | task <id>, or a bare "
+        f"Name the wait: agentihooks swarm {slug} wait --on checks <pr or Actions run url> | reply <inbox item> | task <id>, or a bare "
         f"wait of at most 60 minutes; or block with {block}"
     )
     if owed == "merged":
@@ -134,7 +134,9 @@ class ClaimStop:
             task, pull = {**task, "pr_url": ""}, None
         dependency = waits.dependency((live or {}).get("on", {}), task, rows, self.github())
         owed, checks = ruling(task, pull, live, dependency)
-        if checks and (live or {}).get("on", {}).get("kind") not in KEPT:
+        held_on = (live or {}).get("on", {})
+        run_wait = held_on.get("kind") == "checks" and waits.mutation_wait.RUN_URL.fullmatch(held_on["target"])
+        if checks and held_on.get("kind") not in KEPT and not run_wait:
             on = {"kind": "checks", "target": checks}
             idle.declare_wait(store.redis, who.swarm, who.name, now + CHECKS_WAIT_MS, f"checks on {checks}", now, on=on)
         if not owed:

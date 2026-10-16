@@ -25,6 +25,7 @@ agentihooks swarm <id> classify EXECUTION lost|working --reason TEXT  master or 
 agentihooks swarm <id> terminal EXECUTION                         operator opens the worker terminal of an execution in herdr
 agentihooks swarm <id> lift AGENT GATE                            operator or master lets one agent past a gate for one hour
 agentihooks swarm <id> freeze | focus | unfreeze TARGET [--reason TEXT] [--quote WORDS]   operator, or master with his words
+agentihooks swarm <id> cover STAGE ITEM --reason TEXT              operator, master or dispatcher marks a bottleneck stage owned by an open phases/ID or tasks/ID
 agentihooks swarm <id> learned                                    list every seat's learned notes with seat and number
 agentihooks swarm <id> promote SEAT NUMBER insight|canon --reason TEXT   raise a learned note; canon only by master or operator
 agentihooks swarm <id> retire SEAT NUMBER --reason TEXT           master or operator retires a learned note from every later prompt
@@ -120,7 +121,7 @@ from scripts.swarm.health import activity
 from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import LedgerClient, LedgerGone, LedgerRefused
 from scripts.swarm.runtime import HerdrRuntime
-from scripts.swarm.status import auto_snapshot, findings, status_report, task_counts, verdict_store
+from scripts.swarm.status import auto_snapshot, findings, live_agents, status_report, task_counts, verdict_store
 from scripts.swarm.store import (
     ASSIST,
     AUTO_SCALING,
@@ -906,11 +907,11 @@ def _affinity_line(report):
 def cmd_status(store, args):
     if args.json:
         store.config(args.slug)
-        print(json.dumps(status_report(store, args.slug, LedgerClient().state(args.slug))))
+        print(json.dumps(status_report(store, args.slug, LedgerClient().state(args.slug), HerdrRuntime())))
         return
     outage.show(args.slug, False)
     config = store.config(args.slug)
-    agents = store.agents(args.slug)
+    agents = live_agents(store.agents(args.slug), HerdrRuntime())
     ledger = LedgerClient()
     doc = ledger.state(args.slug)
     tasks = doc["tasks"]
@@ -973,6 +974,15 @@ def cmd_freeze(store, args):
         raise SwarmError("the master writes freezes only with the operator's words: pass them with --quote")
     LedgerClient().freeze(args.slug, args.command, args.target, by=by, reason=args.reason, quote=args.quote)
     print(json.dumps({args.command: args.target, "by": writer}))
+
+
+def cmd_cover(store, args):
+    from scripts.swarm import stage_cover
+
+    by = clearance.coverer(store, args.slug, Who.from_env())
+    doc = LedgerClient().state(args.slug)
+    request = stage_cover.Request(args.stage, args.item, args.reason, by)
+    print(json.dumps(stage_cover.cover(store, args.slug, doc, request, now_ms())))
 
 
 cmd_focus = cmd_unfreeze = cmd_freeze
@@ -1288,17 +1298,6 @@ def cmd_merge(store, args):
         done_gate.require_local(store, args.slug, agent.task)
         done_gate.require_target(store, args.slug, agent.task, args.url, LedgerClient().tasks(args.slug))
     result = merge_queue.operate(args.action, args.url)
-    if result.get("waiting") == "checks":
-        at = now_ms()
-        idle.declare_wait(
-            store.redis,
-            args.slug,
-            agent.name,
-            at + waits.CHECKED_MINUTES * 60_000,
-            "dev changed grading inputs; branch updated",
-            at,
-            on={**waits.on("checks", args.url), "previous_head": result["previous_head"]},
-        )
     print(json.dumps(result))
 
 
@@ -1458,7 +1457,7 @@ def cmd_wait(store, args):
         get = InboxStore(store.redis).get
         if problem := waits.target_problem(held["kind"], held["target"], agent.task, rows, get):
             raise SwarmError(problem)
-        if held["kind"] == "checks":
+        if held["kind"] == "checks" and waits.PULL_URL.fullmatch(held["target"]):
             head = ledger_events.head(held["target"])
             if not head:
                 raise SwarmError("cannot read the pull request head; retry the checks wait")
@@ -1821,6 +1820,10 @@ def build_parser():
     lift = sub.add_parser("lift")
     lift.add_argument("agent")
     lift.add_argument("gate")
+    cover = sub.add_parser("cover")
+    cover.add_argument("stage")
+    cover.add_argument("item")
+    cover.add_argument("--reason", required=True)
     sub.add_parser("issue").add_argument("url")
     pr = sub.add_parser("pr")
     pr.add_argument("url")

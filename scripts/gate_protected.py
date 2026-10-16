@@ -71,7 +71,7 @@ def _aggregator_problems(
             and base_id == "gate-required"
             and head_job.get("steps")
             in (
-                [ci_reuse.gate_steps(queue, selected) for queue in (False, True) for selected in (False, True)]
+                [ci_reuse.gate_steps(selected=selected) for selected in (False, True)]
                 + [ci_reuse.gate_steps(queue_tier=True), ci_reuse.gate_steps(queue_tier=True, promotion=True)]
             )
         )

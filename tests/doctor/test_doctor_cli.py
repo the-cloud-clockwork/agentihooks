@@ -550,7 +550,7 @@ def reading_traces(monkeypatch):
 
     monkeypatch.setattr(doctor.detect, "readers", readers)
     monkeypatch.setattr(doctor.detect.traces_read, "client", client)
-    monkeypatch.setattr(doctor.detect.traces_read, "record", lambda *args: {})
+    monkeypatch.setattr(doctor.detect.traces_read, "record", lambda *args: {"traces": []})
     monkeypatch.setattr(doctor.detect.traces, "findings", lambda data, limits: [UNTRACED])
     return reads, passes
 

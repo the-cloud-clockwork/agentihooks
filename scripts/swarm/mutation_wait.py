@@ -173,3 +173,20 @@ def resolution(held: dict) -> str:
         return f"{outcome}, now green; no failing mutants"
     detail = "; ".join(failures) or "mutation failed without a named survivor"
     return f"{outcome}, now red; {detail}"
+
+
+def run_resolution(target: str) -> str:
+    repo, number = RUN_URL.fullmatch(target).groups()
+    outcome = f"checks on {target}"
+    try:
+        run = _api(f"repos/{repo}/actions/runs/{number}")
+    except Unreachable as error:
+        return f"{outcome}, missing; GitHub has no such run" if "HTTP 404" in str(error) else ""
+    if run.get("status") != "completed":
+        return ""
+    conclusion = run.get("conclusion")
+    if conclusion == "success":
+        return f"{outcome}, now green"
+    if conclusion == "cancelled":
+        return f"{outcome}, cancelled; dispatch the run again and wait on the new one"
+    return f"{outcome}, now red; the run concluded {conclusion}"

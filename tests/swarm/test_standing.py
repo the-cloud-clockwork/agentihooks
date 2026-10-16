@@ -3,6 +3,7 @@ import pytest
 from scripts.swarm import status
 from scripts.swarm.health import standing
 from scripts.swarm.health.findings import Finding
+from scripts.swarm.health.verdicts import VerdictStore
 from scripts.swarm.store import PREFIX
 from tests.swarm.test_cli import env as env
 from tests.swarm.test_spawn_stall import stalled as stalled
@@ -48,7 +49,7 @@ def test_a_first_reading_creates_one_finding_with_its_numbers(redis):
             "ci overrun at 2.5 task hours in the window, over its 1.0 threshold",
             ("Fired 1 time", "Slowest job mutation"),
             "1.0 task hours in the window",
-            1,
+            2.5,
         )
     ]
 
@@ -65,7 +66,7 @@ def test_a_new_episode_counts_once_and_stays_one_finding(redis):
     for episode in ("e1", "e2", "e3", "e2"):
         standing.fire(redis, "sw", "ci_overrun", reading(episode=episode), NOW)
     (found,) = standing.findings(redis, "sw", NOW)
-    assert (found.measure, found.evidence) == (3, ("Fired 3 times",))
+    assert (found.measure, found.evidence) == (2.5, ("Fired 3 times",))
     assert standing.read(redis, "sw")["ci_overrun"]["episodes"] == ["e1", "e2", "e3"]
 
 
@@ -82,8 +83,8 @@ def test_each_stage_and_ledger_is_its_own_finding(redis):
     standing.fire(redis, "sw", "ci_overrun", reading(2.0), NOW)
     standing.fire(redis, "other", "ci_overrun", reading(9.0), NOW)
     assert [(f.subject, f.measure) for f in standing.findings(redis, "sw", NOW)] == [
-        ("ci_overrun", 1),
-        ("merge_queue", 1),
+        ("ci_overrun", 2.0),
+        ("merge_queue", 1.5),
     ]
     assert [f.id for f in standing.findings(redis, "other", NOW)] == ["bottleneck-stage/ci_overrun"]
 
@@ -106,6 +107,25 @@ def test_a_finding_not_updated_within_the_stale_window_is_not_shown(redis):
 def test_an_empty_ledger_has_no_standing_findings(redis):
     assert standing.read(redis, "sw") == {}
     assert standing.findings(redis, "sw", NOW) == []
+
+
+def _judged_then_refired(redis, value, episode="e2"):
+    store = VerdictStore(redis, "verdicts")
+    standing.fire(redis, "sw", "ci_overrun", reading(0.89, episode="e1"), NOW)
+    store.visible(standing.findings(redis, "sw", NOW), NOW, HOUR_MS)
+    store.judge("bottleneck-stage/ci_overrun", "established", "known", "master", NOW)
+    later = NOW + HOUR_MS
+    standing.fire(redis, "sw", "ci_overrun", reading(value, episode=episode), later)
+    return store.visible(standing.findings(redis, "sw", later), later, HOUR_MS)
+
+
+def test_a_judged_finding_whose_load_fell_stays_hidden_though_it_fired_again(redis):
+    assert _judged_then_refired(redis, 0.097) == []
+
+
+def test_a_judged_finding_whose_load_rose_past_its_verdict_returns(redis):
+    (shown,) = _judged_then_refired(redis, 1.2)
+    assert (shown["id"], shown["verdict"]["value"]) == ("bottleneck-stage/ci_overrun", "established")
 
 
 def test_swarm_status_shows_the_standing_finding(stalled):

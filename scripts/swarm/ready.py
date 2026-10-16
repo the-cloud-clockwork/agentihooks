@@ -226,7 +226,7 @@ def _checks(run, row, found, pull):
 def _queue(run, row, found):
     task_id, url = row["id"], found["url"]
     try:
-        result = run.queue("queue", url)
+        run.queue("queue", url)
     except SwarmError as exc:
         if str(exc).startswith(REFUSALS):
             found["refusals"] = found.get("refusals", 0) + 1
@@ -236,10 +236,6 @@ def _queue(run, row, found):
             return _reopen(run, row, found, f"could not be queued: {exc}")
         save(run.store, run.slug, task_id, found)
         return [f"could not queue {url} for task {task_id}: {exc}"]
-    if result.get("waiting") == "checks":
-        found["on"] = {"kind": "checks", "target": url, "previous_head": result["previous_head"]}
-        save(run.store, run.slug, task_id, found)
-        return [f"{url} for task {task_id} updated from dev; waiting on its checks again"]
     found["on"], found["queued_at"] = {"kind": "merge", "target": url}, run.now_ms
     save(run.store, run.slug, task_id, found)
     return [f"queued {url} for task {task_id}"]
@@ -262,7 +258,12 @@ def _finish(run, rows, row, found):
 
 
 def _owners(run, task_id):
-    return [agent for agent in run.store.agents(run.slug) if agent.task == task_id and agent.state != "finished"]
+    from scripts.swarm.runtime import HerdrRuntime
+    from scripts.swarm.status import live_agents
+
+    agents = [agent for agent in run.store.agents(run.slug) if agent.task == task_id]
+    live = live_agents(agents, HerdrRuntime())
+    return [agent for agent in agents if agent.state != "finished" or agent in live]
 
 
 def _working_owner(run, row, pull):

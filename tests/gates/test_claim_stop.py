@@ -193,7 +193,7 @@ def test_each_refusal_names_the_one_command_that_clears_it():
     )
     assert refusal("idle", SLUG, {"id": "t1"}, None) == (
         f"you hold task t1 with no open pull request and no wait. Name the wait: agentihooks swarm {SLUG} wait --on "
-        "checks <pr url> | reply <inbox item> | task <id>, or a bare wait of at most 60 minutes; or block with "
+        "checks <pr or Actions run url> | reply <inbox item> | task <id>, or a bare wait of at most 60 minutes; or block with "
         f"{block}"
     )
 
@@ -228,7 +228,7 @@ def test_the_contract_refusal_names_the_proof_its_kind_closes_on(kind, proof):
     task, block = {"id": "t1", "pr_url": URL, "kind": kind}, f'agentihooks swarm {SLUG} block "<why>"'
     assert refusal("contract", SLUG, task, MERGED) == (
         f"your pull request {URL} merged, and {kind} task t1 closes on its proof contract: close it with agentihooks "
-        f"swarm {SLUG} done {proof}. Name the wait: agentihooks swarm {SLUG} wait --on checks <pr url> | reply "
+        f"swarm {SLUG} done {proof}. Name the wait: agentihooks swarm {SLUG} wait --on checks <pr or Actions run url> | reply "
         f"<inbox item> | task <id>, or a bare wait of at most 60 minutes; or block with {block}"
     )
 
@@ -314,8 +314,15 @@ def test_a_stop_on_pending_checks_passes_and_records_a_checked_wait(rig):
     assert held["reason"] == f"checks on {URL}"
 
 
-@pytest.mark.parametrize("on", [{"kind": "reply", "target": "a1b2c3"}, {"kind": "task", "target": "t9"}])
-def test_a_stop_on_pending_checks_keeps_a_live_reply_or_task_wait_and_its_reason(rig, on):
+@pytest.mark.parametrize(
+    "on",
+    [
+        {"kind": "reply", "target": "a1b2c3"},
+        {"kind": "task", "target": "t9"},
+        {"kind": "checks", "target": "https://github.com/o/r/actions/runs/123"},
+    ],
+)
+def test_a_stop_on_pending_checks_keeps_a_live_reply_task_or_run_wait_and_its_reason(rig, on):
     rig.task.update(state="pr", pr_url=URL)
     rig.pulls[URL] = PENDING
     until = rig.clock[0] + 60_000
