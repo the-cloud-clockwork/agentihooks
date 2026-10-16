@@ -80,6 +80,27 @@ async def test_each_session_edits_only_its_own_worktree(router, repo):
         assert not (repo["primary"] / "f.txt").exists()
 
 
+async def test_child_read_inherits_parent_worktree_without_activation(router, repo):
+    parent_meta = {"sessionId": "parent", "threadId": "parent"}
+    child_meta = {"sessionId": "parent", "threadId": "child"}
+    async with connect(router) as parent, connect(router) as child, connect(router) as unrelated:
+        await parent.call_tool("activate_project", {"project": str(repo["a"])}, meta=parent_meta)
+        result = await child.call_tool("find_symbol", {"name_path_pattern": "Binding"}, meta=child_meta)
+        assert not result.isError
+        assert _text(result) == f"root={repo['a']}"
+        isolated = await unrelated.call_tool("find_symbol", {}, meta={"sessionId": "other", "threadId": "other-child"})
+        assert isolated.isError
+        assert "No project" in _text(isolated)
+        await parent.call_tool("activate_project", {"project": str(repo["b"])}, meta=parent_meta)
+        moved = await child.call_tool("find_symbol", {}, meta=child_meta)
+        assert _text(moved) == f"root={repo['b']}"
+        await child.call_tool("activate_project", {"project": str(repo["a"])}, meta=child_meta)
+        explicit = await child.call_tool("find_symbol", {}, meta=child_meta)
+        assert _text(explicit) == f"root={repo['a']}"
+        parent_read = await parent.call_tool("find_symbol", {}, meta=parent_meta)
+        assert _text(parent_read) == f"root={repo['b']}"
+
+
 async def test_edit_refused_while_unbound(router, repo):
     from hooks.serena_router.server import UNBOUND
 
