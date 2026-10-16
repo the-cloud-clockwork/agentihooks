@@ -67,9 +67,17 @@ class KubernetesTransport:
         if not self.creation_enabled:
             self.reconciliations["disabled"] += 1
             return Observation(Phase.ABSENT)
-        body = self._body(operation, payload)
-        if isinstance(body, Observation):
-            return body
+        try:
+            rendered = self._render(payload)
+        except PodSpecRefused as refused:
+            return Observation(Phase.REFUSED, refusal=refusal("template", refused.reason))
+        if field := self._differs(operation, rendered):
+            return Observation(Phase.REFUSED, refusal=refusal("render", field))
+        body = rendered.pod
+        # The API server defaults the live spec, so a later match compares the digests and the adoption fields.
+        body["metadata"]["annotations"].update(
+            {SPEC_DIGEST: rendered.digest, OPERATION_DIGEST: operation.payload_digest}
+        )
         try:
             return self._applied(self.api.create_pod(body), "created")
         except AlreadyExists:
@@ -104,27 +112,16 @@ class KubernetesTransport:
             raise prepared[1]
         return prepared[1]
 
-    def _body(self, operation: Operation, payload: dict) -> dict | Observation:
-        try:
-            rendered = self._render(payload)
-        except PodSpecRefused as refused:
-            return Observation(Phase.REFUSED, refusal=refusal("template", refused.reason))
+    def _differs(self, operation: Operation, rendered: Rendered) -> str:
         metadata = rendered.pod["metadata"]
         expected = {
-            "owner": (OWNER_LABEL, self.owner),
-            "execution": (EXECUTION_LABEL, operation.execution_id),
-            "generation": (GENERATION_LABEL, str(operation.generation)),
+            "namespace": (metadata["namespace"], self.api.namespace),
+            "owner": (metadata["labels"][OWNER_LABEL], self.owner),
+            "execution": (metadata["labels"][EXECUTION_LABEL], operation.execution_id),
+            "generation": (metadata["labels"][GENERATION_LABEL], str(operation.generation)),
+            "spec": (adoption.identity(rendered.digest, rendered.pod["spec"]), operation.spec_digest),
         }
-        differs = [name for name, (key, value) in expected.items() if metadata["labels"][key] != value]
-        if metadata["namespace"] != self.api.namespace:
-            differs.insert(0, "namespace")
-        if not differs and adoption.identity(rendered.digest, rendered.pod["spec"]) != operation.spec_digest:
-            differs.append("spec")
-        if differs:
-            return Observation(Phase.REFUSED, refusal=refusal("render", differs[0]))
-        # The API server defaults the live spec, so a later match compares the digests and the adoption fields.
-        metadata["annotations"].update({SPEC_DIGEST: rendered.digest, OPERATION_DIGEST: operation.payload_digest})
-        return rendered.pod
+        return next((name for name, (actual, wanted) in expected.items() if actual != wanted), "")
 
     def _adopt(self, operation: Operation, body: dict) -> Observation:
         try:

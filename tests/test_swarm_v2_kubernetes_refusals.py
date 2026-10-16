@@ -8,9 +8,9 @@ from scripts.swarm_v2.kubernetes import runtime, watch
 from scripts.swarm_v2.kubernetes.adapter import KubernetesRuntime
 from scripts.swarm_v2.kubernetes.client import ApiRefused
 from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
-from scripts.swarm_v2.runtime.operations import Observation, Operation, Phase
+from scripts.swarm_v2.runtime.operations import Observation, Operation, Operations, Phase
 from tests import sv2_kub02_cases as cases
-from tests.test_swarm_v2_kubernetes_runtime import existing, operation, transport
+from tests.test_swarm_v2_kubernetes_runtime import defaulted, existing, operation, tamper_security, transport
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
@@ -49,6 +49,46 @@ def test_a_mismatched_pod_refusal_names_the_field(change, field):
     observed = sender.apply_operation(operation(), cases.launch())
     assert observed.phase is Phase.REFUSED
     assert observed.refusal == {"reason": "mismatch", "field": field}
+
+
+def test_a_live_pod_whose_security_context_drifted_names_the_field_group():
+    sender = transport()
+    pod = defaulted(existing(sender))
+    tamper_security(pod["spec"])
+    sender.api.objects[pod["metadata"]["name"]] = pod
+    observed = sender.apply_operation(operation(), cases.launch())
+    assert observed.refusal == {"reason": "mismatch", "field": "security-context"}
+
+
+def test_an_identity_mismatch_of_an_applied_observation_is_named():
+    class Lying:
+        backend = "kubernetes"
+
+        def observe_operation(self, operation):
+            return Observation(Phase.APPLIED, "exe-other", 1, "kubernetes", "d")
+
+    world = cases.World()
+    with world.clocked():
+        controller, _ = world.controller()
+        assert controller.acquire()
+        attempt = world.admit(controller)
+        request = world.request(controller, attempt)
+        refused = Operations(world.store, [Lying()]).execute(cases.SLUG, request)
+    assert refused.phase is Phase.REFUSED
+    assert refused.refusal == {"reason": "identity", "field": ""}
+
+
+def test_a_journaled_refusal_survives_an_unknown_observation():
+    world = cases.World()
+    with world.clocked():
+        controller, _ = world.controller()
+        assert controller.acquire()
+        attempt = world.admit(controller)
+        squat(world, attempt)
+        refused = controller.execute(world.request(controller, attempt))
+        unknown = world.store.operation_journal.settle(cases.SLUG, refused, Observation(Phase.UNKNOWN))
+    assert unknown.phase is Phase.UNKNOWN
+    assert unknown.refusal == {"reason": "mismatch", "field": "execution"}
 
 
 def test_two_pods_for_one_execution_refuse_as_ambiguous():

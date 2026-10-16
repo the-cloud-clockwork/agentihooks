@@ -260,8 +260,9 @@ class Operations:
             return Observation(Phase.UNKNOWN)
 
     def _qualified(self, operation: Operation, observation: Observation) -> Observation:
+        refused = Observation(Phase.REFUSED, refusal={"reason": "identity", "field": ""})
         if not isinstance(observation.phase, Phase):
-            return Observation(Phase.REFUSED)
+            return refused
         if observation.phase is Phase.APPLIED and (
             type(observation.generation) is not int
             or (
@@ -272,5 +273,5 @@ class Operations:
             )
             != (operation.execution_id, operation.generation, operation.backend, operation.payload_digest)
         ):
-            return Observation(Phase.REFUSED)
+            return refused
         return observation
