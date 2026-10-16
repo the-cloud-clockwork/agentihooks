@@ -981,7 +981,8 @@ def cmd_cover(store, args):
 
     by = clearance.coverer(store, args.slug, Who.from_env())
     doc = LedgerClient().state(args.slug)
-    print(json.dumps(stage_cover.cover(store, args.slug, doc, args.stage, args.item, args.reason, by, now_ms())))
+    request = stage_cover.Request(args.stage, args.item, args.reason, by)
+    print(json.dumps(stage_cover.cover(store, args.slug, doc, request, now_ms())))
 
 
 cmd_focus = cmd_unfreeze = cmd_freeze

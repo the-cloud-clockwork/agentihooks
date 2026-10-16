@@ -3,6 +3,7 @@ lapses, and is forgotten, the first time it is read after that phase or task clo
 """
 
 import json
+from dataclasses import dataclass
 
 from scripts.swarm import dispatcher
 from scripts.swarm.store import RedisStore, SwarmError
@@ -25,17 +26,22 @@ def _open(doc: dict, item: str) -> bool:
     return not row.get("done") and not row.get("out_of_scope")
 
 
-def stage_name(stage: str) -> str:
-    return stage.strip().replace(" ", "_")
+@dataclass(frozen=True)
+class Request:
+    stage: str
+    item: str
+    reason: str
+    by: str
 
 
-def cover(store: RedisStore, slug: str, doc: dict, stage: str, item: str, reason: str, by: str, now_ms: int) -> dict:
-    if not reason.strip():
+def cover(store: RedisStore, slug: str, doc: dict, request: Request, now_ms: int) -> dict:
+    if not request.reason.strip():
         raise SwarmError(NO_REASON)
-    if not _open(doc, item):
-        raise SwarmError(NOT_OPEN.format(item=item))
-    row = {"stage": stage_name(stage), "item": item, "reason": reason, "by": by, "at": now_ms}
-    store.redis.hset(store.key(slug, KEY), row["stage"], json.dumps(row))
+    if not _open(doc, request.item):
+        raise SwarmError(NOT_OPEN.format(item=request.item))
+    stage = request.stage.strip().replace(" ", "_")
+    row = {"stage": stage, "item": request.item, "reason": request.reason, "by": request.by, "at": now_ms}
+    store.redis.hset(store.key(slug, KEY), stage, json.dumps(row))
     return row
 
 

@@ -32,7 +32,9 @@ def master_items(store):
 @pytest.mark.parametrize("item", ["tasks/t7", "phases/p3"])
 def test_a_cover_names_its_open_item_reason_author_and_time(item):
     store = swarm()
-    row = stage_cover.cover(store, SLUG, ledger_doc(), "merge queue", item, "owned by the queue fix", MASTER, NOW)
+    row = stage_cover.cover(
+        store, SLUG, ledger_doc(), stage_cover.Request("merge queue", item, "owned by the queue fix", MASTER), NOW
+    )
     assert row == {"stage": "merge_queue", "item": item, "reason": "owned by the queue fix", "by": MASTER, "at": NOW}
     assert stage_cover.covered(store, SLUG, ledger_doc(), "merge_queue")
     assert stage_cover.read(store, SLUG) == {"merge_queue": row}
@@ -52,13 +54,13 @@ def test_a_cover_names_its_open_item_reason_author_and_time(item):
 def test_a_cover_on_a_missing_or_closed_item_is_refused(item, found):
     store = swarm()
     with pytest.raises(SwarmError, match="is not an open phase or task"):
-        stage_cover.cover(store, SLUG, found, "ci_overrun", item, "owned", MASTER, NOW)
+        stage_cover.cover(store, SLUG, found, stage_cover.Request("ci_overrun", item, "owned", MASTER), NOW)
     assert stage_cover.read(store, SLUG) == {}
 
 
 def test_a_cover_without_a_reason_is_refused():
     with pytest.raises(SwarmError, match="needs a reason"):
-        stage_cover.cover(swarm(), SLUG, ledger_doc(), "ci_overrun", "tasks/t7", "  ", MASTER, NOW)
+        stage_cover.cover(swarm(), SLUG, ledger_doc(), stage_cover.Request("ci_overrun", "tasks/t7", "  ", MASTER), NOW)
 
 
 @pytest.mark.parametrize(
@@ -66,7 +68,7 @@ def test_a_cover_without_a_reason_is_refused():
 )
 def test_the_cover_lapses_and_is_forgotten_once_its_task_closes(closed):
     store = swarm()
-    stage_cover.cover(store, SLUG, ledger_doc(), "ci_overrun", "tasks/t7", "owned", MASTER, NOW)
+    stage_cover.cover(store, SLUG, ledger_doc(), stage_cover.Request("ci_overrun", "tasks/t7", "owned", MASTER), NOW)
     assert stage_cover.covered(store, SLUG, closed, "ci_overrun") is False
     assert stage_cover.read(store, SLUG) == {}
     assert stage_cover.covered(store, SLUG, ledger_doc(), "ci_overrun") is False
@@ -74,13 +76,13 @@ def test_the_cover_lapses_and_is_forgotten_once_its_task_closes(closed):
 
 def test_the_cover_lapses_once_its_phase_is_done():
     store = swarm()
-    stage_cover.cover(store, SLUG, ledger_doc(), "seat_wait", "phases/p3", "owned", MASTER, NOW)
+    stage_cover.cover(store, SLUG, ledger_doc(), stage_cover.Request("seat_wait", "phases/p3", "owned", MASTER), NOW)
     assert stage_cover.covered(store, SLUG, ledger_doc(phase_done=True), "seat_wait") is False
 
 
 def test_an_uncovered_stage_is_not_covered_and_another_stage_keeps_its_cover():
     store = swarm()
-    stage_cover.cover(store, SLUG, ledger_doc(), "seat_wait", "tasks/t7", "owned", MASTER, NOW)
+    stage_cover.cover(store, SLUG, ledger_doc(), stage_cover.Request("seat_wait", "tasks/t7", "owned", MASTER), NOW)
     assert stage_cover.covered(store, SLUG, ledger_doc(), "ci_overrun") is False
     assert stage_cover.covered(store, SLUG, ledger_doc(), "seat_wait")
 
@@ -96,7 +98,9 @@ def remedy_store():
 
 def test_a_covered_stage_proposes_no_task_and_fires_again_once_the_cover_lapses(remedy_store, home, shipped):  # noqa: F811
     store = remedy_store
-    stage_cover.cover(store, SLUG, ledger_doc(), "review", "tasks/t7", "owned by the review fix", MASTER, NOW)
+    stage_cover.cover(
+        store, SLUG, ledger_doc(), stage_cover.Request("review", "tasks/t7", "owned by the review fix", MASTER), NOW
+    )
     fire(store, "review")
     run = bottleneck_remedy.remedy_pass
     assert run(SLUG, store, FakeLedger(), ledger_doc(), lambda: None, NOW) == []
@@ -112,7 +116,7 @@ def test_a_covered_share_holds_no_dispatcher_seat_and_triggers_again_once_the_co
     store = swarm()
     held(store, "review")
     config = store.config(SLUG)
-    stage_cover.cover(store, SLUG, ledger_doc(), "review", "tasks/t7", "owned", MASTER, NOW)
+    stage_cover.cover(store, SLUG, ledger_doc(), stage_cover.Request("review", "tasks/t7", "owned", MASTER), NOW)
     assert dispatch_seat.open_triggers(SLUG, config, store, {**doc(), **ledger_doc()}, NOW, False) == []
     assert dispatch_seat.refusal(SLUG, config, store, {**doc(), **ledger_doc()}, NOW) == ""
 
