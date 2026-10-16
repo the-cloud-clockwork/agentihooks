@@ -11,6 +11,7 @@ from scripts import ci_test_plan
 REPOSITORY = "the-cloud-clockwork/agentihooks"
 HEAD = "a" * 40
 ACTIONS = f"repos/{REPOSITORY}/actions"
+LATER = "2026-10-17T00:00:00Z"
 
 pytestmark = pytest.mark.unit
 
@@ -86,7 +87,7 @@ def test_the_api_reads_through_gh_and_fails_on_an_error(monkeypatch):
 def test_the_newest_dev_run_whose_unit_shards_passed_and_kept_a_manifest_is_the_record(monkeypatch):
     runs = [_run(4, event="merge_group"), _run(3), _run(2), _run(1)]
     _github(monkeypatch, runs, manifests={2: _manifest(2), 1: _manifest(1)}, failed={(2, "unit (3.11, 4)")})
-    run, manifest = ci_test_plan.find_record(REPOSITORY)
+    run, manifest = ci_test_plan.find_record(REPOSITORY, LATER)
     assert run["id"] == 1
     assert manifest["commit"] == f"{1:040d}"
 
@@ -103,12 +104,12 @@ def test_every_interpreter_leg_ignores_dev_runs_that_finished_after_its_run_star
 )
 def test_runs_that_are_not_dev_pushes_of_the_tests_workflow_are_no_record(monkeypatch, field, value):
     _github(monkeypatch, [_run(1, **{field: value})], manifests={1: _manifest(1)})
-    assert ci_test_plan.find_record(REPOSITORY) is None
+    assert ci_test_plan.find_record(REPOSITORY, LATER) is None
 
 
 def test_a_manifest_for_another_commit_is_skipped_for_an_older_record(monkeypatch, capsys):
     _github(monkeypatch, [_run(2), _run(1)], manifests={2: _manifest(9), 1: _manifest(1)})
-    assert ci_test_plan.find_record(REPOSITORY)[0]["id"] == 1
+    assert ci_test_plan.find_record(REPOSITORY, LATER)[0]["id"] == 1
     assert capsys.readouterr().out == f"Dev run 2 recorded a manifest for {9:040d}, not {2:040d}\n"
 
 
@@ -117,7 +118,7 @@ def test_a_missing_record_plans_a_full_run(monkeypatch, tmp_path, capsys):
     output = tmp_path / "output"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     out = tmp_path / "reused-tests.json"
-    assert ci_test_plan.main(["--repository", REPOSITORY, "--head", HEAD, "--out", str(out)]) == 0
+    assert ci_test_plan.main(["--repository", REPOSITORY, "--head", HEAD, "--before", LATER, "--out", str(out)]) == 0
     assert not out.exists()
     assert output.read_text() == "reused=0\n"
     assert "every test runs" in capsys.readouterr().out
@@ -134,7 +135,7 @@ def test_a_record_plans_the_unchanged_tests(monkeypatch, tmp_path, capsys, cause
     output = tmp_path / "output"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     out = tmp_path / "reused-tests.json"
-    assert ci_test_plan.main(["--repository", REPOSITORY, "--head", HEAD, "--out", str(out)]) == 0
+    assert ci_test_plan.main(["--repository", REPOSITORY, "--head", HEAD, "--before", LATER, "--out", str(out)]) == 0
     assert seen == [(Path.cwd(), f"{1:040d}", HEAD)]
     assert isinstance(seen[0][0], Path)
     plan = json.loads(out.read_text())
@@ -159,9 +160,19 @@ def test_the_repo_flag_names_the_diffed_checkout(monkeypatch, tmp_path):
     assert seen == [tmp_path]
 
 
-@pytest.mark.parametrize("missing", ["--repository", "--head", "--out"])
+@pytest.mark.parametrize("missing", ["--repository", "--head", "--before", "--out"])
 def test_every_required_flag_is_required(tmp_path, missing):
-    flags = {"--repository": REPOSITORY, "--head": HEAD, "--out": str(tmp_path / "p.json")}
+    flags = {"--repository": REPOSITORY, "--head": HEAD, "--before": LATER, "--out": str(tmp_path / "p.json")}
     args = [part for flag, value in flags.items() if flag != missing for part in (flag, value)]
     with pytest.raises(SystemExit):
         ci_test_plan.main(args)
+
+
+def test_the_before_flag_reaches_the_record_lookup(monkeypatch, tmp_path):
+    _github(monkeypatch, [_run(3), _run(1)], manifests={3: _manifest(3), 1: _manifest(1)})
+    monkeypatch.setattr(ci_test_plan.dep_manifest, "changes", lambda repo, base, head: [])
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    out = tmp_path / "p.json"
+    args = ["--repository", REPOSITORY, "--head", HEAD, "--before", "2026-10-16T22:02:00Z", "--out", str(out)]
+    assert ci_test_plan.main(args) == 0
+    assert json.loads(out.read_text())["run"] == "1"
