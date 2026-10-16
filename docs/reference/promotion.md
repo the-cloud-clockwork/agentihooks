@@ -6,7 +6,7 @@ nav_order: 10
 
 # Promotion and releases
 
-A green push run of the Tests workflow on `dev` promotes the exact revision it graded into `main` and creates a patch release from it. No agent and no operator opens or merges the `dev` to `main` pull request: CI does it with the TCC Main CI GitHub App. This is the promotion tier described in [Delivery tiers](delivery-tiers.md).
+A green push run of the Tests workflow on `dev` promotes the tree it graded into `main` as a rebased commit and creates a patch release from it. No agent and no operator opens or merges the `dev` to `main` pull request: CI does it with the TCC Main CI GitHub App. This is the promotion tier described in [Delivery tiers](delivery-tiers.md).
 
 ## When promotion runs
 
@@ -58,8 +58,9 @@ A rerun after a partial failure is safe:
 |---|---|
 | `Gate — Required` or any promotion dependency is red or cancelled | The `promote` job is skipped. `main` stays on the last promoted head; `dev` keeps merging. |
 | A newer push to `dev` arrived while a run was pending | The pending run is replaced and never runs; the running run still finishes and promotes its own revision when green. |
-| The snapshot branch points at another commit, the pull request conflicts or its head differs from the graded commit, or it is not mergeable and clean within four minutes | The job fails and nothing is merged or tagged. |
-| GitHub refuses the merge, or the promoted tree differs | The job fails before tagging. |
+| No open promotion pull request exists and the snapshot branch points at another commit, or the pull request conflicts or its head differs from the graded commit, or it is not mergeable and clean within four minutes | The job fails and nothing is merged or tagged. |
+| GitHub refuses the merge | The job fails before tagging. |
+| The promoted tree differs | The job fails before tagging; `main` has already advanced to the merged commit and the snapshot branch is kept for inspection. |
 
 A red promotion produces one fixer task per failing check under the [delivery tiers rule](delivery-tiers.md#rules); the fix lands through an ordinary pull request into `dev`, and the next green push run promotes it.
 
@@ -86,7 +87,7 @@ gh release list -R "$R" -L 3                                                    
 gh pr list -R "$R" --base main --state all -S 'Promote green dev to main' -L 3     # promotion pull requests
 ```
 
-After a green push run, `main` carries the graded `dev` tree, a patch tag points at that tree (a new one on the promoted `main` commit, or the existing tag reused) and a GitHub release with generated notes exists for it.
+Immediately after a green push run promotes, `main` carries the graded `dev` tree, a patch tag points at that tree (a new one on the promoted `main` commit, or the existing tag reused) and a GitHub release with generated notes exists for it. A later promotion moves `main` past it.
 
 ## Configuration
 
