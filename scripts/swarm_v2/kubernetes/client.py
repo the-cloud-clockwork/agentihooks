@@ -122,6 +122,13 @@ def _answer(status: int, body: dict) -> dict:
     raise ApiRefused(status, body.get("reason", ""))
 
 
+def _items(answer: dict) -> list[dict]:
+    items = answer.get("items") if isinstance(answer, dict) else None
+    if not isinstance(items, list):
+        raise ConnectionError("the API server list answer carries no items")
+    return items
+
+
 def _events(raw: bytes) -> list[dict]:
     return [json.loads(line) for line in raw.splitlines() if line.strip()]
 
@@ -169,7 +176,7 @@ class PodClient:
         """The resource version is empty when the answer names none, so the caller lists again instead of watching."""
         query = urllib.parse.urlencode({"labelSelector": selector})
         answer = _answer(*self.http.send("GET", f"{self._path()}?{query}"))
-        return answer["items"], answer.get("metadata", {}).get("resourceVersion", "")
+        return _items(answer), answer.get("metadata", {}).get("resourceVersion", "")
 
     def watch_pods(self, selector: str, version: str) -> list[tuple[str, dict]]:
         """Raises CursorExpired when the API server no longer holds events after `version`."""
@@ -196,10 +203,10 @@ class PodClient:
 
     def list_services(self, selector: str) -> list[dict]:
         query = urllib.parse.urlencode({"labelSelector": selector})
-        return _answer(*self.http.send("GET", f"{self._path(kind='services')}?{query}"))["items"]
+        return _items(_answer(*self.http.send("GET", f"{self._path(kind='services')}?{query}")))
 
     def list_quotas(self) -> list[dict]:
-        return _answer(*self.http.send("GET", self._path(kind="resourcequotas")))["items"]
+        return _items(_answer(*self.http.send("GET", self._path(kind="resourcequotas"))))
 
     def read(self, kind: str, name: str) -> dict | None:
         status, answer = self.http.send("GET", self._path(name, kind))

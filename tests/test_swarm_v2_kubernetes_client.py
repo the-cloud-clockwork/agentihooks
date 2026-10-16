@@ -425,7 +425,7 @@ def test_snapshot_lists_the_selected_pods_with_their_resource_version():
         PodClient(Http((403, {"reason": "Forbidden"})), "ns").snapshot("a=b")
 
 
-@pytest.mark.parametrize("body", [{}, {"items": None}, {"items": {}}, {"kind": "Status"}])
+@pytest.mark.parametrize("body", [{}, {"items": None}, {"items": {}}, {"kind": "Status"}, []])
 @pytest.mark.parametrize("call", ["list_pods", "snapshot", "list_services"])
 def test_a_list_answer_without_items_is_a_connection_failure(call, body):
     with pytest.raises(ConnectionError):
