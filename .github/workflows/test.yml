@@ -1318,7 +1318,7 @@ jobs:
           retention-days: 7
           overwrite: true
 
-      # Sonar refuses an analysis dated before the dev branch's latest one; that revision ends superseded, unscanned and never promoted.
+      # Sonar refuses an analysis dated before the dev branch's latest one; that revision ends superseded, ungraded and never promoted.
       - name: SonarQube Quality Gate
         id: gate
         timeout-minutes: 5
@@ -1339,7 +1339,7 @@ jobs:
             message=$(jq -r '.task.errorMessage // "no message"' <<<"$report")
             if [[ "$status" == FAILED && "$GITHUB_EVENT_NAME" == push && "$message" == *"cannot be older than the date of the last known analysis"* ]]; then
               echo "superseded=true" >> "$GITHUB_OUTPUT"
-              echo "::notice::A newer dev analysis superseded this revision, so it stays unscanned and is not promoted: $message"
+              echo "::notice::Sonar refused this analysis for a newer dev analysis, so the revision is superseded and not promoted: $message"
               exit 0
             fi
             echo "::error::The Sonar background task ended $status: $message"

@@ -38,7 +38,7 @@ def test_a_red_or_cancelled_promotion_dependency_prevents_all_promotion_writes(j
     assert not enabled(promote["if"], "push", needs)
 
 
-def test_a_revision_sonar_graded_promotes_however_far_dev_moved_since():
+def test_a_revision_sonar_graded_promotes_from_its_own_analysis():
     workflow = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())
     promote = workflow["jobs"]["promote"]
     assert "sonar" in promote["needs"]

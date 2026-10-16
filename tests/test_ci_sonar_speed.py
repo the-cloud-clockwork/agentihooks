@@ -31,7 +31,13 @@ def _run(step, cwd, bin_dir, **env):
     return subprocess.run(
         ["bash", "-e", "-c", step["run"]],
         cwd=cwd,
-        env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "GITHUB_WORKSPACE": str(_ROOT), **env},
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "GITHUB_WORKSPACE": str(_ROOT),
+            "GITHUB_EVENT_NAME": "pull_request",
+            **env,
+        },
         capture_output=True,
         text=True,
         timeout=30,
@@ -80,8 +86,9 @@ def test_the_quality_gate_is_polled_every_second_until_the_analysis_is_processed
 
 
 _OLDER = (
-    'Date of analysis cannot be older than the date of the last known analysis on this project. Value: "1". '
-    'Latest analysis: "2". It\'s only possible to rebuild the past in a chronological order.'
+    "Date of analysis cannot be older than the date of the last known analysis on this project. "
+    'Value: "2026-10-08T01:09:38+0000". Latest analysis: "2026-10-08T01:09:50+0000". '
+    "It's only possible to rebuild the past in a chronological order."
 )
 
 
@@ -109,13 +116,20 @@ def test_a_passed_gate_names_the_analysis_that_grades_the_promoted_revision(tmp_
     assert (tmp_path / "output").read_text() == "analysis=A1\n"
 
 
-def test_a_dev_push_analysis_sonar_refuses_as_older_ends_superseded_and_unscanned(tmp_path):
+def test_a_dev_push_analysis_sonar_refuses_as_older_ends_superseded_and_ungraded(tmp_path):
     result, _ = _gate(tmp_path, ["FAILED"], message=_OLDER)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "::error::" not in result.stdout
     assert "::notice::" in result.stdout
     assert (tmp_path / "output").read_text() == "superseded=true\n"
     assert not any("project_status" in url for url in (tmp_path / "urls").read_text().splitlines())
+
+
+def test_a_superseded_analysis_skips_only_the_condition_hold():
+    hold = _step("Hold the Delivery L2 conditions")
+    assert hold["if"] == "always() && steps.proxy.outcome == 'success' && steps.gate.outputs.superseded != 'true'"
+    writers = [step["name"] for step in _sonar()["steps"] if 'echo "analysis=' in step.get("run", "")]
+    assert writers == ["SonarQube Quality Gate"]
 
 
 def test_the_gate_step_replaces_the_quality_gate_action():
