@@ -45,7 +45,7 @@ A lost test is admitted through a definition when all of these hold:
 2. **The subject was a top level definition in the base.** In a base file outside `tests/`, at module level, including inside a module level `if` or `try` (not `try`/`except*`):
 
    - a function, async function or class;
-   - a constant, meaning any module level name bound by assignment: the name on the left of a plain assignment (`LIMIT = 3`, `log = getLogger()`, each name of `A = B = 3`) or of an annotation, with or without a value (`LIMIT: int = 3`, `LIMIT: int`). Unpacking (`A, B = ...`), augmented assignment (`LIMIT += 1`) and attribute targets do not define a constant.
+   - a constant, meaning any module level name that is the target of an assignment or annotation, with or without a value: the name on the left of a plain assignment (`LIMIT = 3`, `log = getLogger()`, each name of `A = B = 3`) or of an annotation, with or without a value (`LIMIT: int = 3`, `LIMIT: int`). Unpacking (`A, B = ...`), augmented assignment (`LIMIT += 1`) and attribute targets do not define a constant.
 
    The module name comes from the file path.
 3. **The head deletes it.** No Python file anywhere in the head, `tests/` included, binds the subject's name at any depth: no function, method or class of that name, no assignment target, no import alias, no `except ... as` or `match` capture. A subject moved to another module, or into `tests/`, still binds its name and admits nothing.
@@ -68,7 +68,7 @@ def test_retry_limit_is_three():
 A lost test is also admitted when it passed a keyword to a function whose branch on that keyword the head removed, while the function itself stays. All of these hold:
 
 1. **The test passed the keyword.** In the base test body, a call resolves to an imported function by the same rules as above and passes the parameter by name (`gate_steps(jobs, queue_coverage=True)`). A value passed by position, or through `**options`, does not count.
-2. **The keyword selected a branch in the base.** The function is defined directly at module level in a base file outside `tests/` (not inside an `if` or `try`, and not a method). The keyword is one of its parameters other than `**kwargs` (the name of `*args` counts too), it appears in the condition of an `if` or `elif`, a conditional expression (`a if flag else b`) or a `while` anywhere in the function, nested functions included, and the function never assigns to that name with `=`, `:=`, an augmented assignment or a loop or `with` target. Other bindings of the name inside the function, such as an import alias, a nested `def` or an `except ... as`, are not checked.
+2. **The keyword selected a branch in the base.** The function is defined directly at module level in a base file outside `tests/` (not inside an `if` or `try`, and not a method). The keyword is one of its parameters other than `**kwargs` (a `*args` parameter's name also counts), it appears in the condition of an `if` or `elif`, a conditional expression (`a if flag else b`) or a `while` anywhere in the function, nested functions included, and the function never assigns to that name with `=`, `:=`, an augmented assignment or a loop or `with` target. Other bindings of the name inside the function, such as an import alias, a nested `def` or an `except ... as`, are not checked.
 3. **The head keeps the function and drops the keyword.** The head defines a function of the same name directly at module level in the same module. Its parameters are a subset of the base parameters, it has no `**kwargs`, and it no longer accepts the keyword. A head copy that adds any parameter, a renamed one included, admits no branch, and a function moved to another module admits none either.
 
 The subject is written `module.function(keyword)`. A simplified example:
@@ -135,9 +135,9 @@ Definition admission, both ways on planted branches, graded by the delivered gat
 
 Constant and keyword branch admission (pull request [3545](https://github.com/the-cloud-clockwork/agentihooks/pull/3545)) on the dead code removal in pull request [3512](https://github.com/the-cloud-clockwork/agentihooks/pull/3512), which deleted the queue coverage branch of `scripts.ci_reuse.gate_steps` and its tests. The second run grades a later head of that pull request, so its counts differ from the first:
 
-| Run | Gate | Result |
-|---|---|---|
-| [38833970029](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38833970029) | before 3545 | `test-count` red on 3.11 and 3.12: head 31960 against floor 31984 |
-| [38840053037](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38840053037) | after 3545 | `test-count` green on 3.11 and 3.12: 28 lost tests admitted through `scripts.ci_reuse.gate_steps(queue_coverage)`, head 32039 against floor 32035 |
+| Run | Gate | Base | Head | Result |
+|---|---|---|---|---|
+| [38833970029](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38833970029) | before 3545 | `bad534fe`, 31984 tests | `96b27de8`, 31960 tests | `test-count` red on 3.11 and 3.12: no test admitted, floor 31984 |
+| [38840053037](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38840053037) | after 3545 | `43d47665`, 32063 tests | `f0b21c39`, 32039 tests | `test-count` green on 3.11 and 3.12: 28 lost tests admitted through `scripts.ci_reuse.gate_steps(queue_coverage)`, floor 32035 |
 
 Behaviour is pinned by `tests/test_count_floor.py`.
