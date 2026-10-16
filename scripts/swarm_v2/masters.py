@@ -10,6 +10,7 @@ DEFAULT_COUNT = 1
 SAVE_ATTEMPTS = 5
 UNNUMBERED = 10_000
 HIVES = "hives"
+RETIRED = "retired"
 HIVE_KEY = "hive."
 HIVE_PAIR = f"a hive owner is set as {HIVE_KEY}<hive id>=<master seat>"
 
@@ -151,6 +152,20 @@ class MasterSeats:
 
     def set_count(self, slug: str, count: int) -> None:
         self.redis.hset(self.key(slug), "count", _checked(count))
+        held = [address for address in self.retired(slug) if address in seats(slug, count)]
+        if held:
+            self.redis.hset(self.key(slug), RETIRED, json.dumps(held))
+        else:
+            self.redis.hdel(self.key(slug), RETIRED)
+
+    def retire(self, slug: str, address: str) -> None:
+        """A retired seat below a live higher seat stays counted but owns no phase until the count falls past it."""
+        held = self.retired(slug)
+        if address not in held:
+            self.redis.hset(self.key(slug), RETIRED, json.dumps([*held, address]))
+
+    def retired(self, slug: str) -> list[str]:
+        return json.loads(self.redis.hget(self.key(slug), RETIRED) or "[]")
 
     def count(self, slug: str) -> int:
         return int(self.redis.hget(self.key(slug), "count") or DEFAULT_COUNT)
@@ -180,7 +195,9 @@ class MasterSeats:
                     pipe.watch(key)
                     saved = json.loads(pipe.hget(key, "owners") or "{}")
                     known = json.loads(pipe.hget(key, "seats") or "[]")
-                    current = seats(slug, int(pipe.hget(key, "count") or DEFAULT_COUNT))
+                    retired = json.loads(pipe.hget(key, RETIRED) or "[]")
+                    counted = seats(slug, int(pipe.hget(key, "count") or DEFAULT_COUNT))
+                    current = [address for address in counted if address not in retired]
                     hives = hive_targets(pipe.hget(key, HIVES), current)
                     owners = assign(phases, current, saved, known)
                     if (owners, current) != (saved, known):
