@@ -193,6 +193,13 @@ def test_heredoc_and_separated_shell_depths_share_the_limit():
         ("cd /a <&0 && git push", ["/a"]),
         ("cd /a |& true; git push", []),
         ("true | (cd /a && git push)", ["/a"]),
+        ("true |(cd /a; git push)", ["/a"]),
+        ("cd /a & true >x; git push", []),
+        ("cd /a >x & git push", []),
+        ("true & cd /a; git push", ["/a"]),
+        ("true & true | git push", []),
+        ("cd /a || cd /b & git push", []),
+        ("env -C /a env -C /b git push", ["/a", "/b"]),
         ("cd /b && env --chdir /a git push", ["/b", "/a"]),
         ("cd /a && cd /b && cd - && git push", ["/a", "/b", "-"]),
         ("cd -P /a && git push", ["/a"]),
@@ -279,6 +286,7 @@ def test_quoted_parentheses_do_not_hide_a_heredoc():
         'x=$((1))"<<"; echo done',
         "echo done &",
         "bash <<'E F'\necho ok\nE F\necho done",
+        'bash <<"E F"\necho ok\nE F\necho done',
     ],
 )
 def test_markers_and_quotes_leave_later_commands_intact(command):
@@ -308,3 +316,21 @@ def test_stdin_scripts_share_the_nesting_limit():
     for _ in range(10):
         nested = "bash -c " + shlex.quote(nested)
     assert located(nested) == [(["pytest"], [])]
+
+
+def test_stdin_script_boundaries():
+    from hooks.context.shell_commands import commands, located
+
+    assert commands("bash <<< x y") == [["x"]]
+    assert commands("bash <<<") == []
+    with pytest.raises(ValueError):
+        commands("bash <<< pytest", 10)
+    assert ["cat"] in commands("cat <<EOF | bash -c 'echo'\nx\nEOF", 8)
+    assert commands("env -i") == []
+    assert located("env -- -C /a")[-1] == (["-C", "/a"], [])
+    for command in (
+        "echo $((1)); bash <<EOF\npytest -q\nEOF",
+        "bash << EOF\npytest -q\nEOF",
+        "bash <<EOF | cat\npytest -q\nEOF",
+    ):
+        assert ["pytest", "-q"] in commands(command)

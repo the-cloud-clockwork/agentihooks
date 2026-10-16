@@ -99,10 +99,10 @@ def _push_directory(cwd: Path, selected: bool) -> Path:
 
 
 def _folder(cwd: Path, folders: list[str]) -> Path:
-    previous = None
+    previous = cwd
     for folder in folders:
         target = previous if folder == "-" else cwd / _path(folder)
-        if target is not None and os.path.isdir(target):
+        if os.path.isdir(target):
             cwd, previous = target, cwd
     return cwd
 

@@ -160,6 +160,7 @@ def test_the_push_is_graded_in_the_folder_the_command_changes_into(repo, tmp_pat
         "cd {worktree} & git push",
         "env -C {worktree} true; git push",
         "cd {worktree} && cd - && git push",
+        "cd -; git push",
     ],
 )
 def test_a_folder_change_that_does_not_last_leaves_the_push_where_it_started(repo, tmp_path, command):

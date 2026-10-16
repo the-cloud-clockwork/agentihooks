@@ -5,6 +5,7 @@ from pathlib import Path
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z_0-9]*=")
 _SEPARATORS = ";|&(){}\n"
 _ARITHMETIC = {"((": 1, "))": -1}
+_WORD = re.compile(r"""(?:[^\s;|&()<>'"]|'[^']*'|"[^"]*")*""")
 _OPERATORS = ("&&", "||", ";;", "|&", ";", "|", "&", "(", ")", "{", "}", "\n")
 _PREFIXES = frozenset({"if", "then", "else", "elif", "do", "while", "until", "!"})
 _WRAPPERS = {
@@ -104,7 +105,7 @@ def _expand(words: list[str], depth: int, folders: list[str]) -> tuple[list[tupl
             if _SHELL_FLAG.fullmatch(token) and "c" in token and index + 1 < len(tokens):
                 return located(tokens[index + 1], depth + 1, here), folders
             if token.startswith("<<<"):
-                return located(token[3:] or " ".join(tokens[index + 1 : index + 2]), depth + 1, here), folders
+                return located(token[3:] or (tokens + [""])[index + 1], depth + 1, here), folders
     if Path(tokens[0]).name == "cd" and not chdirs:
         folder = next((word for word in tokens[1:] if word == "-" or not word.startswith("-")), "~")
         return [(tokens, here)], folders + [folder]
@@ -121,7 +122,7 @@ def _heredoc_marker(line: str, quote: str | None) -> tuple[int | None, str | Non
         elif quote is None and line.startswith("<<<", index):
             skip = index + 3
         elif quote is None and line[index : index + 2] in _ARITHMETIC:
-            arithmetic, skip = max(arithmetic + _ARITHMETIC[line[index : index + 2]], 0), index + 2
+            arithmetic = max(arithmetic + _ARITHMETIC[line[index : index + 2]], 0)
         elif quote is None and line.startswith("<<", index) and not arithmetic:
             return index, None
         elif quote is None and character == "#" and (index == 0 or (line[index - 1].isspace() and index != escaped)):
@@ -136,15 +137,7 @@ def _heredoc_marker(line: str, quote: str | None) -> tuple[int | None, str | Non
 
 
 def _word_end(text: str) -> int:
-    quote = None
-    for index, character in enumerate(text):
-        if quote:
-            quote = None if character == quote else quote
-        elif character in {"'", '"'}:
-            quote = character
-        elif character.isspace() or character in ";|&()<>":
-            return index
-    return len(text)
+    return _WORD.match(text).end()
 
 
 def _heredocs(command: str, depth: int, folders: list[str]) -> tuple[str, list[tuple[list[str], list[str]]]]:
@@ -158,12 +151,12 @@ def _heredocs(command: str, depth: int, folders: list[str]) -> tuple[str, list[t
         if line[start] == "#":
             kept.append(line[:start] + "\n")
             continue
-        prefix, tail = line[:start], line[start + 2 :].removeprefix("-").lstrip(" \t")
+        prefix, tail = line[:start], line[start + 2 :].removeprefix("-").lstrip()
         end = _word_end(tail)
         delimiters = shlex.split(tail[:end])
         if not delimiters:
             raise ValueError("Missing heredoc delimiter")
-        rest = tail[end:].rstrip()
+        rest = tail[end:]
         cut, _ = _heredoc_marker(rest, None)
         rest = rest if cut is None else rest[:cut]
         body = []
