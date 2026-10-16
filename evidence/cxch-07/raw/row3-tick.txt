@@ -1,0 +1,1 @@
+{'name': 'master@2572f1-0001', 'state': 'working', 'pane_id': 'w1:p1', 'transport': 'app_server', 'execution_id': 'exe-36e5cdccdc554952a1b7cf9822bc343f', 'conversation_id': '01a1454f-45f4-7111-a07c-c247c6be6587'}

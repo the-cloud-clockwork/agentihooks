@@ -1,0 +1,41 @@
+› Validate your mounted profile using the binding canary command in its instructions before continuing. Stop if valid…
+
+• Failed (exit 1) agentihooks ledger --slug proof-323133-cxc8-1 --as master@2572f1-0001 comment tasks/promo-3892212084…
+  └ server refused: 400 {"error": {"code": "schema_invalid", "message": "Operation does not match its domain schema: c…
+    + 1 line (^t to expand)
+
+• Ran agentihooks ledger --slug proof-323133-cxc8-1 --as master@2572f1-0001 alert close al-6-0 "Triaged into the exist…
+  └ {"alert": "al-6-0", "action": "close"}
+    + Show details
+
+• Failed (exit 1) agentihooks msg reply ab1fa261b192 --fyi "The failed step and skipped scan are recorded on the exist…
+  └ agentihooks msg: unknown inbox address ledger; valid addresses: master@2572f1-0001, master@proof-323133-cxc8-1, op…
+    + 1 line (^t to expand)
+
+• Ran agentihooks ledger --slug proof-323133-cxc8-1 --as master@2572f1-0001 ack
+  └ {"acked": 19}
+
+• Ran agentihooks msg inbox
+  └ ab1fa261b192    read    ledger    On ledger proof-323133-cxc8-1: alert al-6-0 (promotion): Dev promotion is red: p…
+    + 1 line (^t to expand)
+
+• Ran agentihooks ledger --slug proof-323133-cxc8-1 --as master@2572f1-0001 comment tasks/promo-38922120848-0 "The com…
+  └ {"posted": true}
+    + Show details
+
+• Ran agentihooks msg close ab1fa261b192 done "Alert triaged and closed. Failure evidence recorded on the existing CI …
+  └ {"id": "ab1fa261b192", "state": "done", "reason": "done: Alert triaged and closed. Failure evidence recorded on th…
+    + 1 line (^t to expand)
+
+• Ran agentihooks ledger --slug proof-323133-cxc8-1 --as master@2572f1-0001 ack
+  └ {"acked": 21}
+
+• Working (2m 01s • esc to interrupt)
+
+                                                                                    ⚠ weekly limit: 11% left · /status
+
+› unsent draft cxc8 alpha bravo
+
+  GPT-6.1-Sol high · ~/dev/worktrees/agentihooks/engineer-323133-1629 · Context 10% used · 828K window
+  tab to queue message
+2026-10-16T15:25:08Z
