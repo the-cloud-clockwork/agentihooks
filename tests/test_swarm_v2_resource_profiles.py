@@ -275,7 +275,12 @@ def test_accept_writes_only_a_promoted_report_and_rollback_restores_the_one_it_r
     assert profiles.accept(path, accepted, POLICY, "")["decision"] == "replayed"
     assert path.read_bytes() == before
     assert sorted(p.name for p in folder.iterdir()) == ["accepted.json"]
-    assert profiles.accept(path, grown, POLICY, "operator")["decision"] == "requalified"
+    assert (
+        profiles.accept(
+            path, grown, POLICY, "operator", reviewer=profiles.Principal("operator", profiles.Role.OPERATOR)
+        )["decision"]
+        == "requalified"
+    )
     installed = path.read_bytes()
     assert json.loads(installed) == {**grown, "requalified_by": "operator"}
     assert (folder / "accepted.json.previous").read_bytes() == before
@@ -285,6 +290,23 @@ def test_accept_writes_only_a_promoted_report_and_rollback_restores_the_one_it_r
     assert sorted(p.name for p in folder.iterdir()) == ["accepted.json", "accepted.json.previous"]
     assert profiles.rollback(path) == 2
     assert path.read_bytes() == installed
+
+
+@pytest.mark.parametrize(
+    "role,name,decision",
+    [
+        (profiles.Role.MASTER, "operator", "requalify"),
+        (profiles.Role.OPERATOR, "other", "requalify"),
+        (profiles.Role.OPERATOR, "operator", "requalified"),
+    ],
+)
+def test_accept_checks_the_reviewer_role_and_identity(tmp_path, role, name, decision):
+    path = tmp_path / "accepted.json"
+    profiles.accept(path, profiles.derive(measured(memory_runs()), NODES, POLICY), POLICY, "")
+    candidate = profiles.derive(measured(memory_runs(2), 2), NODES, POLICY)
+    outcome = profiles.accept(path, candidate, POLICY, "operator", reviewer=profiles.Principal(name, role))
+    assert outcome["decision"] == decision
+    assert json.loads(path.read_text())["generation"] == (2 if decision == "requalified" else 1)
 
 
 def test_accept_does_not_trust_a_requalifying_reviewer_name(tmp_path):
@@ -306,7 +328,7 @@ def test_an_interrupted_rollback_keeps_both_reports_on_disk(tmp_path):
     accepted = profiles.derive(measured(memory_runs()), NODES, POLICY)
     grown = profiles.derive(measured(memory_runs(1.5), 2), NODES, POLICY)
     profiles.accept(path, accepted, POLICY, "")
-    profiles.accept(path, grown, POLICY, "operator")
+    profiles.accept(path, grown, POLICY, "operator", reviewer=profiles.Principal("operator", profiles.Role.OPERATOR))
     reports = {p.read_bytes() for p in folder.iterdir()}
     real = Path.replace
     calls = []

@@ -415,7 +415,26 @@ def test_cli_promote_holds_a_material_change_with_the_default_tolerance(tmp_path
     assert json.loads(accepted.read_text())["generation"] == 2
 
 
-def test_cli_requalifies_a_held_report_for_a_named_reviewer_and_rolls_it_back(tmp_path, capsys):
+def test_cli_operator_authentication_refuses_worker_identity(tmp_path, monkeypatch):
+    from scripts.swarm_ledger.repository import repository
+
+    monkeypatch.setattr(repository, "token", lambda slug: "fixture-credential")
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
+    monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
+    assert bench._reviewer("") is None
+    principal = bench._reviewer("fixture")
+    assert principal == bench.operator_auth.OPERATOR
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "worker")
+    assert bench._reviewer("fixture") is None
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "fixture")
+    assert bench._reviewer("") is None
+
+
+def test_cli_requalifies_a_held_report_for_a_named_reviewer_and_rolls_it_back(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(
+        bench, "_reviewer", lambda slug: bench.profiles.Principal("operator", bench.profiles.Role.OPERATOR)
+    )
     accepted, candidate = tmp_path / "accepted.json", tmp_path / "candidate.json"
     accepted.write_text(json.dumps(report_with(1, 100)))
     candidate.write_text(json.dumps(report_with(2, 200)))
