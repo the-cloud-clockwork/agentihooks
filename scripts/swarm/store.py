@@ -429,7 +429,7 @@ class RedisStore:
     def launch_failure(self, slug, task):
         return self.redis.hget(self.key(slug, "launch-failures"), task) or ""
 
-    def record_launch(self, slug: str, agent: AgentRecord, state: str, error: str = "") -> None:
+    def record_launch(self, slug: str, agent: AgentRecord, state: str, error: str = "", after: str = "") -> None:
         row = {
             "agent": agent.name,
             "task": agent.task,
@@ -437,8 +437,17 @@ class RedisStore:
             "state": state,
             "error": error,
             "pane_id": agent.pane_id,
+            "after": after,
         }
         self.redis.hset(self.key(slug, "launches"), agent.name, json.dumps(row))
+
+    def mark_restart(self, slug: str, task: str, cause: str) -> None:
+        self.redis.hset(self.key(slug, "restart-causes"), task, cause)
+
+    def take_restart(self, slug: str, task: str) -> str:
+        cause = self.redis.hget(self.key(slug, "restart-causes"), task) or ""
+        self.redis.hdel(self.key(slug, "restart-causes"), task)
+        return cause
 
     def note_launch_pane(self, slug: str, name: str, lines: list[str], reason: str = "") -> None:
         raw = self.redis.hget(self.key(slug, "launches"), name)

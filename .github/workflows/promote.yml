@@ -39,7 +39,7 @@ jobs:
           permission-pull-requests: write
           permission-workflows: write
 
-      - name: Rebase the graded dev head into main
+      - name: Squash the graded dev head into main
         id: promote
         uses: actions/github-script@v7
         with:

@@ -24,4 +24,5 @@ Complete reference documentation for configuration and CLI commands.
 | [CI result cache and in place retry](ci-result-cache.md) | The design for one CI algorithm: reuse a check's green result while its real inputs are unchanged, retry a failed test in place, before numbers and slices |
 | [WSL disk reclaim](wsl-disk.md) | Sparse VHDX so space `agentihooks gc` frees returns to Windows; why `/tmp` empties on WSL |
 | [CODEX-COMPAT](CODEX-COMPAT.md) | The `codex` install target: hook contract, surface map, divergences |
+| [Managed Codex terminals](codex-managed-terminal.md) | Transport selection, herdr viewer reopening, push master inbox duties, handoffs and attachment failures |
 | [COPILOT-COMPAT](COPILOT-COMPAT.md) | The `copilot` install target: hook contract, surface map, divergences |

@@ -217,12 +217,11 @@ def scope_inflation(events, tasks, limits):
 def proof_loops(
     events: list[dict], tasks: dict[str, dict], limits: Limits, reviews: dict[str, dict[str, int]]
 ) -> list[Finding]:
-    claims = Counter(_task_id(e["target"]) for e in events if e.get("kind") == "task started")
+    claims, reruns = _lives(events)
     rounds = {tid: max(reviews.get(tid, {}).values(), default=0) for tid in tasks}
     found = []
     for tid in tasks:
-        reruns = max(claims[tid] - 1, 0)
-        if reruns > limits.reruns or rounds[tid] > limits.review_rounds:
+        if reruns[tid] > limits.reruns or rounds[tid] > limits.review_rounds:
             found.append(
                 Finding(
                     "proof loop",
@@ -230,14 +229,24 @@ def proof_loops(
                     "reruns or review rounds over the cap",
                     (
                         f"task {_title(tasks, tid)}",
-                        f"started {_plural(claims[tid], 'time')} ({_plural(reruns, 'rerun')})",
+                        f"started {_plural(claims[tid], 'time')} ({_plural(reruns[tid], 'rerun')})",
                         _plural(rounds[tid], "review round"),
                     ),
                     f"more than {limits.reruns} reruns or {limits.review_rounds} review rounds",
-                    reruns + rounds[tid],
+                    reruns[tid] + rounds[tid],
                 )
             )
     return found
+
+
+def _lives(events: list[dict]) -> tuple[Counter, Counter]:
+    starts, reruns = Counter(), Counter()
+    for e in sorted((e for e in events if e.get("kind") == "task started"), key=lambda e: e["at"]):
+        tid = _task_id(e["target"])
+        if starts[tid] and not e.get("after"):
+            reruns[tid] += 1
+        starts[tid] += 1
+    return starts, reruns
 
 
 def failed_launches(events: list[dict], tasks: dict) -> list[Finding]:

@@ -482,6 +482,33 @@ def test_park_stores_the_handoff_and_retires_the_agent_so_the_reaped_task_waits(
     assert store.handoff("sw", "t1") == text
 
 
+def test_park_marks_the_next_start_as_after_a_park(parked, capsys):
+    store, _, _, _, doc = parked
+    assert store.take_restart("sw", "t1") == ""
+    assert park(doc) == 0
+    assert store.take_restart("sw", "t1") == "park"
+
+
+def test_a_refused_park_leaves_no_restart_mark(parked, capsys):
+    store, ledger, _, _, doc = parked
+    del ledger.rows["t1"]["branch"]
+    assert park(doc) == 1
+    assert store.take_restart("sw", "t1") == ""
+
+
+def test_the_life_launched_after_a_park_is_recorded_as_after_the_park(parked):
+    store, ledger, rt, _, doc = parked
+    assert park(doc) == 0
+    tick._reap("sw", store, ledger, rt, ledger.rows, 1)
+    ledger.rows["a"]["state"] = "done"
+    ledger.update_task = type(ledger).update_task.__get__(ledger)
+    tick.tick("sw", store, ledger, rt, now_ms=NOW + 1)
+    lives = sorted(
+        (row["agent"] == AGENT, row["state"], row["after"]) for row in store.launches("sw") if row["task"] == "t1"
+    )
+    assert lives == [(False, "started", "park"), (True, "started", "")]
+
+
 def test_shell_runs_with_captured_text_and_a_timeout(monkeypatch):
     seen = []
     done = subprocess.CompletedProcess(["git", "status"], 0, stdout="ok\n", stderr="")

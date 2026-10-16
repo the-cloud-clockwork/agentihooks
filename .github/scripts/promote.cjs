@@ -38,7 +38,7 @@ module.exports = async ({ github, context, core, sleep = ms => new Promise(resol
       await sleep(5000);
     }
     if (!ready) throw new Error('Promotion checks did not become mergeable within four minutes');
-    const merged = (await github.rest.pulls.merge({ ...api, pull_number: pull.number, sha: context.sha, merge_method: 'rebase' })).data;
+    const merged = (await github.rest.pulls.merge({ ...api, pull_number: pull.number, sha: context.sha, merge_method: 'squash' })).data;
     if (!merged.merged) throw new Error('GitHub refused the promotion merge');
     main = (await github.rest.repos.getCommit({ ...api, ref: merged.sha })).data;
     if (main.commit.tree.sha !== graded.commit.tree.sha) throw new Error('Promoted tree differs from the graded dev tree');

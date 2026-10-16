@@ -34,7 +34,7 @@ function fixture(options = {}) {
     repos: { getCommit: async ({ ref }) => ({ data: ref === 'graded' ? commit('graded', 'tree') :
       ref === 'main' ? commit('main', options.already ? 'tree' : 'old') : commit('rebased', options.wrongTree ? 'wrong' : 'tree') }) },
     pulls: {
-      get: async () => ({ data: { ...pull, mergeable: options.conflict ? false : true,
+      get: async () => ({ data: { ...pull, mergeable: options.conflict ? false : true, rebaseable: !options.nonrebaseable,
         mergeable_state: options.pending || options.waitOnce && readiness++ === 0 ? 'blocked' : 'clean' } }),
       list: async () => ({ data: options.existing ? [pull] : [] }),
       create: async args => { writes.push(['create', args]); return { data: pull }; },
@@ -87,6 +87,12 @@ test('promotes the graded revision after dev has advanced', async () => {
   assert.equal(f.writes[1][1].sha, 'graded');
   assert.equal(f.outputs.graded, 'graded');
   assert.equal(f.outputs.main, 'rebased');
+});
+
+test('squashes the graded integration history when GitHub cannot rebase it', async () => {
+  const f = fixture({ nonrebaseable: true });
+  await promote(f);
+  assert.equal(f.writes[1][1].merge_method, 'squash');
 });
 
 test('reuses an existing promotion pull request', async () => {

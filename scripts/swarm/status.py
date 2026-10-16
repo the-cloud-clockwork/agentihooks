@@ -82,6 +82,8 @@ def findings(store, slug, config, tasks, events):
                 "kind": "task started" if row["state"] == "started" else "launch failed",
                 "target": f"tasks/{row['task']}",
                 "error": row["error"],
+                "at": row["at"],
+                "after": row.get("after"),
             }
             for row in store.launches(slug)
             if row["state"] in ("started", "failed")

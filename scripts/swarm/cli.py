@@ -1535,6 +1535,7 @@ def cmd_park(store, args):
     text = _read(args.doc, "handoff document")
     ledger = LedgerClient()
     fields, top = stack.park(store, args.slug, agent, text, ledger)
+    store.mark_restart(args.slug, agent.task, "park")
     _hand_off(store, args.slug, agent, text, "exit", ledger)
     removed = stack.remove_worktree(top)
     print(

@@ -65,7 +65,7 @@ from scripts.swarm import (
 )
 from scripts.swarm import idle as idle_state
 from scripts.swarm.ledger_client import LedgerRefused
-from scripts.swarm.naming import parse
+from scripts.swarm.naming import lane_of, parse
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.profile_choice import ProfileUnresolved
 from scripts.swarm.ready import awaiting as awaiting_merge
@@ -784,6 +784,11 @@ def _refund_parked(slug, store, rows, task_id):
         store.refund_claim(slug, task_id)
 
 
+def _master_set(doc, task_id):
+    by = doc.get("_meta", {}).get("stamps", {}).get(f"tasks/{task_id}/state", {}).get("by")
+    return "master" if lane_of(by) == MASTER else ""
+
+
 def _overlaps(mine, theirs):
     return bool(_shared(mine, theirs))
 
@@ -957,7 +962,8 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
                 actions.append(_unresolved(slug, ledger, rows, task["id"], str(exc)))
             continue
         store.count_claim(slug, task["id"])
-        store.record_launch(slug, replace(record, pane_id=placed.pane_id), "started")
+        after = store.take_restart(slug, task["id"]) or _master_set(doc, task["id"])
+        store.record_launch(slug, replace(record, pane_id=placed.pane_id), "started", after=after)
         store.put_agent(slug, launched)
         launch_check.begin(store, slug, record, now_ms)
         store.count_spawn(slug, placed.harness)

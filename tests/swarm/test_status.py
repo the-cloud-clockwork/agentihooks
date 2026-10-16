@@ -39,6 +39,17 @@ def test_started_lives_still_raise_the_proof_loop_finding():
     assert "started 4 times (3 reruns)" in found[0]["evidence"]
 
 
+def test_restarts_that_are_all_parks_never_reach_the_reruns_threshold():
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
+    store.record_launch("sw", AgentRecord("worker0", "eng", "t1", started_at=0), "started")
+    for n in range(1, 8):
+        store.record_launch("sw", AgentRecord(f"worker{n}", "eng", "t1", started_at=n), "started", after="park")
+    assert findings(store, "sw", store.config("sw"), [{"id": "t1", "title": "Repair launch"}], []) == []
+
+
 def test_proof_loop_reads_each_pull_requests_review_budget(monkeypatch, tmp_path):
     import fakeredis
 
