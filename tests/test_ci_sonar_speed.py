@@ -78,7 +78,7 @@ def test_the_gate_step_replaces_the_quality_gate_action():
     sonar = _sonar()
     assert not any("sonarqube-quality-gate-action" in step.get("uses", "") for step in sonar["steps"])
     gate = _step("SonarQube Quality Gate")
-    assert gate["if"] == "steps.current.outputs.superseded != 'true'"
+    assert "if" not in gate
     assert gate["timeout-minutes"] == 5
     assert not gate.get("continue-on-error")
 
@@ -245,11 +245,8 @@ def test_setup_and_evidence_upload_overlap_existing_waits():
         "Hold the Delivery L2 conditions",
     ]
     assert [names.index(name) for name in order] == sorted(names.index(name) for name in order)
-    assert names.index("Check dev still points at this commit") < names.index("Download shard coverage")
     wait = _step("Wait for the coverage merge")
-    assert (
-        wait["if"] == "always() && steps.current.outputs.superseded != 'true' && needs.select.outputs.scope != 'none'"
-    )
+    assert wait["if"] == "always() && needs.select.outputs.scope != 'none'"
     assert wait["timeout-minutes"] == 5
 
 
@@ -260,7 +257,7 @@ def test_sonar_evidence_does_not_upload_shard_databases_twice():
         "lcov.info",
         ".scannerwork/report-task.txt",
     ]
-    assert upload["if"] == "always() && steps.current.outputs.superseded != 'true'"
+    assert upload["if"] == "always()"
     assert upload["with"]["if-no-files-found"] == "error"
     unit = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["unit"]
     shards = next(step for step in unit["steps"] if step.get("name") == "Upload coverage")
