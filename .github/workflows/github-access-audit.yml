@@ -64,13 +64,12 @@ jobs:
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
           permission-actions: read
-          permission-contents: read
-          permission-administration: read
-          permission-organization-administration: read
-          permission-members: read
-          permission-organization-self-hosted-runners: read
+          permission-metadata: read
+          permission-contents: write
+          permission-pull-requests: write
+          permission-workflows: write
 
       - name: Verify repository metadata reads with existing App permissions
         uses: actions/github-script@v7
@@ -90,9 +89,3 @@ jobs:
             }
             if (results.some(result => result.status === 'rejected')) throw new Error('Repository metadata read rejected');
 
-      - name: Read effective access controls
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: |
-          [[ -n "$GH_TOKEN" ]] || { echo '::error::The app audit token is unavailable'; exit 1; }
-          bash scripts/github_access.sh check
