@@ -287,7 +287,7 @@ def test_controller_controls_refuse_wrong_owner_and_ungranted_actions(owned):
 
 
 def test_controller_controls_do_not_enqueue_pause_again(owned):
-    owned.store.update_config(owned.slug, state="paused")
+    owned.store.update(owned.slug, state="paused")
     payload = {"owner": {"parent": SLUG, "agent": owned.owner, "task": "contract"}, "request": {"control": "pause"}}
     status, result = owned.invoke(f"/{owned.slug}/controller-controls", payload, owned.controller)
     assert status == 200
