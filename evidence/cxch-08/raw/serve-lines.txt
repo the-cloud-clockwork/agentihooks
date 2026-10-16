@@ -1,0 +1,35 @@
+== engineer_ed3ec8-0001
+== engineer_ed3ec8-0002
+== engineer_ed3ec8-0003
+[agentihooks codex-session] execution=exe-bf195b3268c5448c9e545a77e656d4dc thread=01a145ca-eb76-7d82-806c-c22de8628ec7 endpoint=unix:///run/user/1000/cx/bf195b3268c5448c/s state=connected
+[agentihooks codex-pump] thread 01a145ca-eb76-7d82-806c-c22de8628ec7 waits on an active turn that began before this pump connected; inbox delivery is held
+[agentihooks codex-pump] codex pump for engineer@ed3ec8-0003 degraded: ProtocolError: the event stream lost the connection: ConnectionClosedError
+[agentihooks codex-pump] codex pump for engineer@ed3ec8-0003 degraded: StaleExecution: execution is no longer current
+== engineer_ed3ec8-0004
+[agentihooks codex-session] execution=exe-c4728002b1764ca5a80d7271f875cf50 thread=01a145d0-a8c0-7100-b059-d98e32707b33 endpoint=unix:///run/user/1000/cx/c4728002b1764ca5/s state=connected
+[agentihooks codex-pump] thread 01a145d0-a8c0-7100-b059-d98e32707b33 waits on an active turn that began before this pump connected; inbox delivery is held
+[agentihooks codex-pump] codex pump for engineer@ed3ec8-0004 degraded: ProtocolError: the event stream lost the connection: ConnectionClosedError
+== engineer_ed3ec8-0005
+[agentihooks codex-session] execution=exe-69aede3172ac4d8684b12daafaeaf201 thread=01a145d4-2fae-7ee2-8d53-1f3845acbb63 endpoint=unix:///run/user/1000/cx/69aede3172ac4d86/s state=connected
+[agentihooks codex-pump] codex pump for engineer@ed3ec8-0005 degraded: StaleExecution: execution is no longer current
+== engineer_ed3ec8-0006
+[agentihooks codex-session] execution=exe-d7a15e2c0efc4a3fa6f8db0122d229be thread=01a145db-364c-7cd1-845d-1d05fe92862c endpoint=unix:///run/user/1000/cx/d7a15e2c0efc4a3f/s state=connected
+[agentihooks codex-pump] codex pump for engineer@ed3ec8-0006 degraded: ProtocolError: the event stream lost the connection: ConnectionClosedError
+[agentihooks codex-pump] codex pump for engineer@ed3ec8-0006 degraded: StaleExecution: execution is no longer current
+== master_ed3ec8-0002
+[agentihooks codex-session] execution=exe-996f2a8568304ea98418679e5d1c7d4c thread=01a145e1-fbf9-77d1-ac90-7ff6175d8a28 endpoint=unix:///run/user/1000/cx/996f2a8568304ea9/s state=connected
+[agentihooks codex-pump] codex pump for master@ed3ec8-0002 degraded: StaleExecution: execution is no longer current
+== master_ed3ec8-0003
+[agentihooks codex-session] execution=exe-7386fd747fe44c5d85ea42d4d33168ca thread=01a145e7-30c7-7d11-90e6-73c2c9f65dac endpoint=unix:///run/user/1000/cx/7386fd747fe44c5d/s state=connected
+[agentihooks codex-pump] codex pump for master@ed3ec8-0003 degraded: TimeoutError: Timeout reading from socket
+[agentihooks codex-pump] codex pump for master@ed3ec8-0003 degraded: DispatchError: exe-7386fd747fe44c5d85ea42d4d33168ca no longer delivers for master@ed3ec8-0003
+== master_ed3ec8-0004
+[agentihooks codex-session] execution=exe-90fa11acafe842c996d5619b5508b9c3 thread=01a145e9-376f-75b2-b249-63751c226e3d endpoint=unix:///run/user/1000/cx/90fa11acafe842c9/s state=connected
+[agentihooks codex-pump] codex pump for master@ed3ec8-0004 degraded: ProtocolError: the event stream lost the connection: ConnectionClosedError
+[agentihooks codex-pump] codex pump for master@ed3ec8-0004 degraded: ProtocolError: cannot open the app-server socket: FileNotFoundError
+== master_ed3ec8-0005
+== master_ed3ec8-0006
+[agentihooks codex-session] execution=exe-14812a3b04ea431cb0551a0a1c8da31e thread=01a145ee-2414-7d82-a478-1b2064b9f279 endpoint=unix:///run/user/1000/cx/14812a3b04ea431c/s state=connected
+[agentihooks codex-pump] codex pump for master@ed3ec8-0006 degraded: StaleExecution: execution is no longer current
+    raise BindingError("no transport record for this execution")
+scripts.codex_session.binding.BindingError: no transport record for this execution
