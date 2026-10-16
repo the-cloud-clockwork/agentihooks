@@ -235,7 +235,7 @@ class WorkerGate:
 
     def remember(self, task: dict, ctx: object) -> None:
         generation = self.request["task_generation"]
-        receipts = ctx.meta.setdefault(RECEIPTS, {}).get(self.scope.task_id)
+        receipts = ctx.meta[RECEIPTS].get(self.scope.task_id)
         if receipts is None or receipts["generation"] != generation:
             receipts = {"generation": generation, "operations": {}}
         self.ack = {

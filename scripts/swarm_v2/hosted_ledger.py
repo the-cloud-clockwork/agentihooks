@@ -72,7 +72,7 @@ class HostedLedger:
             write.gate = gate
             task_id, receipts = key.split("/")[1], self.store.key(slug, RECEIPTS_KEY, key)
             if hasattr(gate, "scope"):
-                self.store.redis.eval(RECEIPTS_SCRIPT, 1, receipts, time.time(), RECEIPT_TTL, "", "")
+                self.store.redis.eval(RECEIPTS_SCRIPT, 1, receipts, time.time(), RECEIPT_TTL, "")
                 operation_id = gate.request["operation_id"]
                 if stored := self.store.redis.hget(receipts, operation_id):
                     record = json.loads(stored)

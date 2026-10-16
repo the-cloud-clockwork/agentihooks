@@ -199,11 +199,7 @@ def check_operations(payload: dict, core: ModuleType, task_ids: tuple) -> list:
             raise APIError(400, "schema_invalid", f"Operation {kind} does not match its schema at field {field}")
     try:
         core.check_body(
-            {
-                "ops": [
-                    {k: v for k, v in op.items() if k not in ("controller_epoch", "worker_claim")} for op in operations
-                ]
-            },
+            {"ops": [{k: v for k, v in op.items() if k != "controller_epoch"} for op in operations]},
             task_ids,
         )
     except ValueError as exc:

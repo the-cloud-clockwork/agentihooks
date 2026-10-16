@@ -1,6 +1,0 @@
-{
-  "scripts/swarm_v2/api/tasks.py:scripts.swarm_v2.api.tasks.x\u01c1WorkerGate\u01c1remember__mutmut_9:591d4540ba0900834606a8bbe7a800634857dfa1868001b9b18b0e542a67b3c4": {
-    "reader": "Standards reader",
-    "reason": "WorkerGate.apply establishes ctx.meta[RECEIPTS] before every reachable remember call; the setdefault default is unused."
-  }
-}

@@ -66,8 +66,6 @@ class GuardedOperations:
             not self.core.apply_changes(doc, changes, ctx) if changes else self.budget.apply(doc, op, ctx, apply_op)
         )
         self.check_controller(op)
-        from . import worker_writes
-
         worker_writes.check(self.slug, doc, op)
         self.results[op["id"]] = bool(accepted)
         receipts = ctx.meta.setdefault("api_operations", {})

@@ -20,7 +20,7 @@ def check(slug: str, doc: dict, op: dict) -> None:
         claim = authority.current(pin["task_id"])
         authority._holder(scope, pin["task_generation"], claim)
         if claim.holder != op["by"]:
-            raise SwarmError("stale_generation")
+            raise SwarmError
     except SwarmError:
         refuse(store, slug, op, "stale_generation", "Stale worker claim")
     if target(op).split("/")[:2] != ["tasks", pin["task_id"]]:
