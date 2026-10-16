@@ -146,8 +146,8 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> restore [--from FILE]` | After a reboot or a lost Redis: refuse while any agent of the swarm is live, write the newest snapshot back (manual, stop or automatic, by the time it was taken; `--from` names an older file) and leave the swarm paused. Each agent with a conversation id, its worktree still on disk (the master: the swarm repo) and its account not out of quota is relaunched through `init-agent --resume` into its own conversation, with the same pane name, seat, task and account (`--route`) on its lane's current model and effort, never the recorded one (a master on the frontier model at high effort); it counts as resumed only once herdr shows that conversation on the new pane, and its first message tells it to re-read its task folder and the ledger before acting. Every failed resume retains its seat and task as awaiting decision. The tick never starts a fresh replacement until the master or operator chooses Fresh on the page or runs `restore-decision`. Resume retries the old conversation; a failed retry keeps the decision open. Each agent's outcome, resumed or awaiting decision with the reason, shows as a `restored` line in `status`, under `restored` in `status --json` and in the Last restore list of the ledger page swarm panel. The ledger copy is written back only when the ledger file is gone. |
 | `agentihooks swarm <id> restore-decision AGENT resume\|fresh` | The master or operator chooses how an awaiting seat returns. Resume retries the saved conversation; fresh explicitly permits a new successor. The Last restore list offers the same two controls. |
 | `agentihooks swarm <id> confirm-handoff TRANSFER --next TEXT` | A live successor confirms that it read the handoff and its first Next action. Continuity remains pending until that confirmation; binding independently records live seat occupancy. Both appear in Handoff outcomes on the page and in `status --json`. |
-| `agentihooks swarm <id> status [--json]` | Config, task counts, when the last automatic snapshot was taken (`snapshots  last automatic snapshot 2026-10-05 13:15 UTC  every 30 min  kept 4`), one row per agent, and the health findings. An agent's model and effort are what its running session last reported (the Claude status line, a Codex hook) once that differs from the launch, with model source `session`, so a manual `/model` or `/effort` switch shows on the next tick. It also prints the host room (`host room 3: <reason>`, or `host room unknown` when the process files cannot be read) and, when the last spawn pass stopped at that room, the hold (`holding spawns: host memory room 3, 3 spawned since it was granted: <reason>`). The host room gates every spawn in manual and auto scaling, and the tick's master seat too, after the quota seat check. Spawns from every swarm on the host count against the room from thirty seconds before it was granted, since a new agent takes that long to show in a reading; a room held between the load watermarks keeps its first grant time, so spawns made under it keep counting. An unknown host lets spawns pass and keeps the last known room for the next reading. An operator's own master start and restore relaunches after a reboot are not gated. |
-| `agentihooks swarm <id> autoscale [--fixture <file>] [--json]` | Read only: the autoscale decision (lane ceilings, pending raise, host room and reason) for the live swarm, or for a fixture of accounts and host readings. It never refreshes quota or writes the stored decision; `applied` is false when the swarm runs manual scaling. |
+| `agentihooks swarm <id> status [--json]` | Config, task counts, when the last automatic snapshot was taken (`snapshots  last automatic snapshot 2026-10-05 13:15 UTC  every 30 min  kept 4`), one row per agent, and the health findings. An agent's model and effort are what its running session last reported (the Claude status line, a Codex hook) once that differs from the launch, with model source `session`, so a manual `/model` or `/effort` switch shows on the next tick. It also prints the host room (`host room 3: <reason>`, or `host room unknown` with its reason when capacity is unavailable; see [Deployed host capacity](#deployed-host-capacity)) and, when the last spawn pass stopped at that room, the hold (`holding spawns: host memory room 3, 3 spawned since it was granted: <reason>`). The host room gates every spawn in manual and auto scaling, and the tick's master seat too, after the quota seat check. Spawns from every swarm on the host count against the room from thirty seconds before it was granted, since a new agent takes that long to show in a reading; a room held between the load watermarks keeps its first grant time, so spawns made under it keep counting. An unknown host lets spawns pass and keeps the last known room for the next reading. An operator's own master start and restore relaunches after a reboot are not gated. |
+| `agentihooks swarm <id> autoscale [--fixture <file>] [--json]` | Read only: the autoscale decision (lane ceilings, pending raise, host room and reason) for the live swarm, or for a fixture of accounts and host readings. It never refreshes quota or writes the stored decision; `applied` is false when the swarm runs manual scaling. In deployed mode it reads the Kubernetes worker namespace or reports why host room is off; see [Deployed host capacity](#deployed-host-capacity). |
 | `agentihooks swarm <id> names [--json]` | The swarm code, its herdr space and every agent name the swarm gave, each with its type, number, session id and spawn and retire times. |
 | `agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N max-plan-agents=N` | Change the caps; `swarm <id> max-eng-agents=N` also works. |
 | `agentihooks swarm <id> set masters=N` | The master seat count: `master@<id>` is the lead and answers the operator, `master-2@<id>` and up each own phases assigned by code. The tick launches a master in every empty seat after the lead. |
@@ -249,6 +249,108 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> restack` | After the parked blockers finish, fetch origin and rebase task work from `stacked_base` onto `origin/dev`. Run in a clean branch cut from the parked branch. Success clears `parked_on`; a conflict lists the files and retains the parked list. Resolve the files, run `git rebase --continue`, then run restack again to finish. |
 | `agentihooks swarm <id> learned TEXT [--maturity data\|note\|insight\|canon]` | Add a lesson to your seat's learned notes, kept for every later occupant. The maturity defaults to `note`; only the master writes `canon`. |
 | `agentihooks swarm <id> say TEXT [--to NAME\|eng\|ci]` | Post to the swarm chat. |
+
+## Deployed host capacity
+
+When `AGENTIHOOKS_DEPLOYMENT` is unset or `local`, host room and the host pressure
+alert use the local host. Any other value, including `compose` and `distributed`,
+selects deployed behavior: neither check nor the live `autoscale` command reads
+the controller's own node for worker capacity.
+
+The Kubernetes runtime supplies host room from the worker namespace's
+ResourceQuota and the Pod policy's optional `worker_pool` budget. It uses the
+smallest known room from those sources. The pool reading lists every Pod in the
+policy namespace without a swarm label selector, counts unfinished Pods and
+their CPU and memory requests, and subtracts those requests from the declared
+budget. The next worker's selected profile supplies its CPU request (or CPU
+limit when no request is set) and memory limit. The smallest remaining Pod,
+CPU or memory allowance determines how many more workers fit, with a floor of
+zero. This measures declared capacity and requests, not node load or live CPU
+and memory utilization; it does not add Kubernetes nodes.
+
+### Configure the worker reading
+
+Use the deployed controller's existing Kubernetes runtime configuration. These
+Helm values map to the runtime environment:
+
+| Helm value | Environment variable | Purpose |
+|---|---|---|
+| `deployment` | `AGENTIHOOKS_DEPLOYMENT` | `distributed` enables Kubernetes worker placement. |
+| `controller.workers.apiUrl` | `AGENTIHOOKS_CONTROL_API_URL` | Worker registration API URL; an empty value leaves the worker runtime unconfigured. |
+| `controller.workers.podPolicy` or `podPolicyConfigMap` | `AGENTIHOOKS_POD_POLICY_FILE` | Approved Pod policy, including namespace, profiles and optional pool budget. |
+| `controller.workers.imageTag` | `AGENTIHOOKS_WORKER_IMAGE_TAG` | Worker image tag, never a digest. |
+| `controller.workers.profile` | `AGENTIHOOKS_WORKER_PROFILE` | Profile present in the policy; determines the next worker's requests. |
+| `controller.workers.cap` | `AGENTIHOOKS_LAUNCH_CAP` | Positive whole-number launch cap. |
+| `controller.workers.projects` | `AGENTIHOOKS_LAUNCH_PROJECTS` | Nonempty project list, rendered as comma-separated project names. |
+| `controller.workers.brain` | `AGENTIHOOKS_LAUNCH_BRAIN` | Required brain setting for worker launches. |
+
+For example, merge this fragment into an already valid Pod policy, retaining
+its namespace, selected profile and other required fields:
+
+```json
+{
+  "worker_pool": {
+    "pods": 4,
+    "cpu_millis": 8000,
+    "memory_mib": 12288
+  }
+}
+```
+
+The values declare a four Pod budget with eight CPUs and 12288 MiB of memory.
+Use the [Pod policy schema](../swarm-v2/schemas/pod-policy.json) for the complete
+policy contract. The chart can read that policy from an existing ConfigMap:
+
+```yaml
+deployment: distributed
+controller:
+  workers:
+    podPolicyConfigMap: approved-worker-policy
+```
+
+The ConfigMap must contain `pod-policy.json`; retain the deployment's existing
+API URL, image tag, profile, cap, projects, brain and service account settings.
+The controller needs Kubernetes access to list Pods and ResourceQuotas in the
+policy namespace. A missing `worker_pool` still permits a known namespace quota
+to supply room. If only one source is readable, that source supplies the room.
+
+### Inspect capacity and off reasons
+
+Run the live command in the deployed controller environment, so it receives the
+same deployment flag and worker settings:
+
+```bash
+agentihooks swarm example-swarm autoscale
+agentihooks swarm example-swarm autoscale --json
+agentihooks swarm example-swarm status
+```
+
+`autoscale` computes a read-only decision; it neither refreshes account quota nor
+writes the stored capacity decision. `status` shows the stored host room from
+the last capacity decision. A pool reading reports Pods, CPU and memory requested
+against the declared budget and how many more fit. A zero room holds new spawns;
+manual scaling still obeys the host room gate.
+
+The host pressure alert is always off in deployed mode, even when worker room is
+available. After the pressure check records that state, `status` prints:
+
+```text
+host pressure alert off: a deployed controller's own node says nothing about worker capacity; the host room line shows the worker pool reading or why it is off
+```
+
+If the Kubernetes runtime is absent, autoscale instead reports:
+
+```text
+host room None: host room off: the Kubernetes runtime is not configured on this deployed controller, so the worker pool cannot be read and spawns pass
+```
+
+Refused worker settings append the settings refusal to that reason. If no worker
+reading is wired into the controller tick, its host room is also off with an
+explicit reason. If neither namespace quota nor pool budget yields known room,
+the reason names the missing budget or failed reading. Unknown room permits
+spawns through the host gate; quota and launch controls still apply. Check the
+runtime settings, policy profile, declared pool and namespace API permissions
+when room is unknown. Do not use the controller node's load to infer worker room.
 
 ## Context recycle
 
