@@ -45,7 +45,7 @@ A lost test is admitted through a definition when all of these hold:
 2. **The subject was a top level definition in the base.** In a base file outside `tests/`, at module level, including inside a module level `if` or `try` (not `try`/`except*`):
 
    - a function, async function or class;
-   - a constant, meaning any module level name that is the target of an assignment or annotation, with or without a value: the name on the left of a plain assignment (`LIMIT = 3`, `log = getLogger()`, each name of `A = B = 3`) or of an annotation, with or without a value (`LIMIT: int = 3`, `LIMIT: int`). Unpacking (`A, B = ...`), augmented assignment (`LIMIT += 1`) and attribute targets do not define a constant.
+   - a constant, meaning any module level name that is the target of an assignment or annotation: the name on the left of a plain assignment (`LIMIT = 3`, `log = getLogger()`, each name of `A = B = 3`) or of an annotation, with or without a value (`LIMIT: int = 3`, `LIMIT: int`). Unpacking (`A, B = ...`), augmented assignment (`LIMIT += 1`) and attribute targets do not define a constant.
 
    The module name comes from the file path.
 3. **The head deletes it.** No Python file anywhere in the head, `tests/` included, binds the subject's name at any depth: no function, method or class of that name, no assignment target, no import alias, no `except ... as` or `match` capture. A subject moved to another module, or into `tests/`, still binds its name and admits nothing.
