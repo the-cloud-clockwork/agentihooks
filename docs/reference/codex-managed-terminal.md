@@ -69,9 +69,9 @@ After the next admitted launch, inspect its recorded transport and state:
 agentihooks swarm <id> status --json
 ```
 
-Confirm the execution uses `app_server`, reaches `connected` and records a
-thread. The supervisor's launch log also reports `state=connected` with its
-execution, endpoint and thread. For an end to end inbox check, follow the
+Check the selected transport in status, then confirm the supervisor's launch
+log reports `state=connected` with its execution, endpoint and thread.
+For an end to end inbox check, follow the
 [scratch swarm canary order](codex-inbox-transport.md#canary-order) and confirm
 an item is answered from that thread. Keep the proof isolated from live work.
 
