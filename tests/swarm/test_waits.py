@@ -396,7 +396,7 @@ def test_checks_wait_uses_only_the_newest_run_of_each_check(tick, conclusion, ob
         assert idle.wait(tick.store.redis, "sw", ME) is not None
         assert tick.told() == []
     else:
-        outcome = "green" if conclusion == "SUCCESS" else "red"
+        outcome = "green" if conclusion == "SUCCESS" else "red; failed: Gate — Required"
         assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now {outcome}"]
         assert idle.wait(tick.store.redis, "sw", ME) is None
 
