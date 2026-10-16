@@ -258,8 +258,10 @@ def test_a_lost_test_whose_constant_the_head_deletes_is_admitted(tmp_path, const
         {"test_c.py": OTHER},
         {"base": _package(mod=constant + KEPT), "head": _package(mod=KEPT)},
     )
-    assert result.returncode in (0, 1), result.stdout + result.stderr
-    assert "tests/test_mod.py::test_form" in result.stdout
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (
+        "tests/test_mod.py::test_form is admitted: the head deletes pkg.mod.FORM, which it referenced" in result.stdout
+    )
 
 
 def test_a_lost_test_whose_constant_the_head_keeps_is_red(tmp_path):
@@ -312,7 +314,10 @@ def _lose_branch_tests(tmp_path, base_source: str, head_sources: dict[str, str])
 def test_a_lost_test_whose_keyword_branch_the_head_deletes_is_admitted(tmp_path):
     result = _lose_branch_tests(tmp_path, BRANCHED, _package(mod=RETAINED))
     assert result.returncode == 1
-    assert "tests/test_mod.py::test_queue" in result.stdout
+    assert "tests/test_mod.py::test_queue is admitted: the head deletes pkg.mod.steps(queue), which it referenced" in (
+        result.stdout
+    )
+    assert "head collects 1 tests, base floor 2" in result.stdout
     assert "tests/test_mod.py::test_default is in the base and not in the head" in result.stdout
 
 
