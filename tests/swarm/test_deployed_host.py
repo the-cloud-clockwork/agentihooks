@@ -23,7 +23,7 @@ NODE_OFF = (
 )
 PRESSURE_OFF = (
     "host pressure alert off: a deployed controller's own node says nothing about worker capacity; "
-    "the worker pool room holds spawns instead"
+    "the host room line shows the worker pool reading or why it is off"
 )
 WORKERS_OFF = (
     "host room off: the Kubernetes runtime is not configured on this deployed controller, "

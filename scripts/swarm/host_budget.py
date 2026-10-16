@@ -1,5 +1,6 @@
 import math
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,7 +18,7 @@ NODE_OFF = (
 )
 PRESSURE_OFF = (
     "host pressure alert off: a deployed controller's own node says nothing about worker capacity; "
-    "the worker pool room holds spawns instead"
+    "the host room line shows the worker pool reading or why it is off"
 )
 
 
@@ -110,11 +111,11 @@ def read_host(proc: Path = Path("/proc")) -> HostSample | None:
     return HostSample(load1=load1, cpus=cpus, available_mb=available_mb, agents=agents)
 
 
-def deployed(environ) -> bool:
+def deployed(environ: Mapping[str, str]) -> bool:
     return environ.get(DEPLOYMENT_ENV, "local") != "local"
 
 
-def controller_host(environ) -> HostSample | Room | None:
+def controller_host(environ: Mapping[str, str]) -> HostSample | Room | None:
     if deployed(environ):
         return Room(None, NODE_OFF, UNKNOWN)
     return read_host()
