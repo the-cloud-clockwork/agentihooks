@@ -479,8 +479,8 @@ def test_a_replayed_progress_after_newer_progress_is_answered_from_the_controlle
     assert again == first
     assert first[0] == 200
     assert [entry["text"] for entry in _held_task()["comments"]] == ["Opened the pull request for review"]
-    stored = store.redis.get(store.key(SLUG, _hl().RECEIPTS_KEY, "tasks/t1"))
-    assert set(json.loads(stored)["operations"]) == {"op-a", "op-b"}
+    stored = store.redis.hgetall(store.key(SLUG, _hl().RECEIPTS_KEY, "tasks/t1"))
+    assert set(stored) == {"op-a", "op-b"}
 
 
 def test_a_deployed_controller_without_its_credential_is_refused_at_start(hosted, store, tmp_path):
