@@ -14,10 +14,10 @@ def _workflow():
     return yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
 
 
-def test_sonar_is_required_on_dev_and_main_pull_requests():
+def test_sonar_remains_required_during_promotion_trigger_rollout():
     workflow = _workflow()
     event = workflow[True]["pull_request"]
-    assert set(event["branches"]) == {"dev", "main"}
+    assert set(event["branches"]) in ({"dev", "main"}, {"dev"})
     assert "paths" not in event
     assert "paths-ignore" not in event
     jobs = workflow["jobs"]

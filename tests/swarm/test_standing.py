@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from scripts.swarm import status
@@ -143,3 +145,143 @@ def test_swarm_status_shows_the_standing_finding(stalled):
         "verdict": None,
         "seen_at": clock[0],
     }
+
+
+MINUTES = "minutes from push to Gate Required"
+
+
+def _detected(redis, hours, episode, now):
+    row = {"stage": "ci_overrun", "seconds": hours * 3600, "previous_seconds": 0.0, "trend": "rising"}
+    standing.update_detector(redis, "sw", {**row, "episodes": [episode], "labels": [], "label": ""}, now, 0.25)
+
+
+def _overran(redis, minutes, episode, now):
+    standing.fire(redis, "sw", "ci_overrun", reading(minutes, episode=episode, threshold=15.0, unit=MINUTES), now)
+
+
+def _returns(store, redis, now):
+    return [row["id"] for row in store.visible(standing.findings(redis, "sw", now), now, HOUR_MS)]
+
+
+def _judge(store, redis, now):
+    store.visible(standing.findings(redis, "sw", now), now, HOUR_MS)
+    store.judge("bottleneck-stage/ci_overrun", "established", "known", "master", now)
+
+
+def test_a_judged_detector_finding_does_not_return_when_the_ci_budget_rewrites_it_in_minutes(redis):
+    store = VerdictStore(redis, "verdicts")
+    _detected(redis, 0.5, "d1", NOW)
+    _judge(store, redis, NOW)
+    later = NOW + 2 * HOUR_MS
+    _overran(redis, 22.3, "run-1", later)
+    assert _returns(store, redis, later) == [], "returned on the change from task hours to minutes alone"
+    _overran(redis, 22.0, "run-2", later + HOUR_MS)
+    assert _returns(store, redis, later + HOUR_MS) == []
+    _overran(redis, 31.0, "run-3", later + 2 * HOUR_MS)
+    assert _returns(store, redis, later + 2 * HOUR_MS) == ["bottleneck-stage/ci_overrun"]
+
+
+def test_a_judged_ci_budget_finding_does_not_return_when_the_detector_recreates_it_in_task_hours(redis):
+    store = VerdictStore(redis, "verdicts")
+    _overran(redis, 18.0, "run-1", NOW)
+    _judge(store, redis, NOW)
+    later = NOW + 2 * HOUR_MS
+    _detected(redis, 0.4, "d1", later)
+    assert standing.read(redis, "sw")["ci_overrun"]["unit"] == MINUTES
+    assert _returns(store, redis, later) == []
+    standing.clear(redis, "sw", "ci_overrun")
+    _detected(redis, 0.3, "d2", later + HOUR_MS)
+    assert _returns(store, redis, later + HOUR_MS) == [], "returned on the change from minutes to task hours alone"
+    _detected(redis, 0.9, "d3", later + 2 * HOUR_MS)
+    assert _returns(store, redis, later + 2 * HOUR_MS) == ["bottleneck-stage/ci_overrun"]
+
+
+def _legacy(redis, fired):
+    verdict = {"value": "established", "note": "known", "by": "master", "at": NOW, "measure": fired}
+    evidence = [f"Fired {fired} times"]
+    record = {"seen_at": NOW, "verdict": {**verdict, "evidence": evidence}, "returned": False}
+    redis.hset(
+        "verdicts", "bottleneck-stage/ci_overrun", json.dumps({**record, "evidence": evidence, "measure": fired})
+    )
+
+
+def test_a_fired_count_verdict_does_not_return_on_a_larger_value_in_minutes(redis):
+    store = VerdictStore(redis, "verdicts")
+    _legacy(redis, 3)
+    later = NOW + 2 * HOUR_MS
+    _overran(redis, 22.3, "run-1", later)
+    assert _returns(store, redis, later) == [], "returned on the change from fired count to minutes alone"
+    _overran(redis, 31.0, "run-2", later + 2 * HOUR_MS)
+    assert _returns(store, redis, later + 2 * HOUR_MS) == ["bottleneck-stage/ci_overrun"]
+
+
+def test_a_fired_count_verdict_still_lets_a_task_hours_regression_return(redis):
+    store = VerdictStore(redis, "verdicts")
+    _legacy(redis, 5)
+    later = NOW + 2 * HOUR_MS
+    _detected(redis, 0.5, "d1", later)
+    assert _returns(store, redis, later) == []
+    _detected(redis, 2.0, "d2", later + 2 * HOUR_MS)
+    assert _returns(store, redis, later + 2 * HOUR_MS) == ["bottleneck-stage/ci_overrun"], (
+        "a regression in task hours stayed hidden under a larger fired count"
+    )
+    record = json.loads(redis.hget("verdicts", "bottleneck-stage/ci_overrun"))
+    assert {k: record["verdict"][k] for k in ("value", "note", "by", "at")} == {
+        "value": "established",
+        "note": "known",
+        "by": "master",
+        "at": NOW,
+    }
+
+
+def test_an_alert_and_the_detector_count_the_same_task_hours(redis):
+    store = VerdictStore(redis, "verdicts")
+    standing.fire(redis, "sw", "merge_queue", reading(1.5, episode="alert-1"), NOW)
+    store.visible(standing.findings(redis, "sw", NOW), NOW, HOUR_MS)
+    store.judge("bottleneck-stage/merge_queue", "established", "known", "master", NOW)
+    standing.clear(redis, "sw", "merge_queue")
+    later = NOW + 2 * HOUR_MS
+    row = {"stage": "merge_queue", "seconds": 2.5 * 3600, "previous_seconds": 0.0, "trend": "rising"}
+    standing.update_detector(redis, "sw", {**row, "episodes": ["d1"], "labels": [], "label": ""}, later, 1.0)
+    shown = store.visible(standing.findings(redis, "sw", later), later, HOUR_MS)
+    assert [found["id"] for found in shown] == ["bottleneck-stage/merge_queue"]
+
+
+def test_a_judged_verdict_keeps_its_basis_and_each_rebase_it_went_through(redis):
+    store = VerdictStore(redis, "verdicts")
+    _detected(redis, 0.5, "d1", NOW)
+    _judge(store, redis, NOW)
+    record = json.loads(redis.hget("verdicts", "bottleneck-stage/ci_overrun"))
+    assert (record["basis"], record["verdict"]["basis"], record["verdict"]["measure"]) == (
+        "task hours",
+        "task hours",
+        0.5,
+    )
+    _overran(redis, 22.3, "run-1", NOW + HOUR_MS)
+    _returns(store, redis, NOW + HOUR_MS)
+    verdict = json.loads(redis.hget("verdicts", "bottleneck-stage/ci_overrun"))["verdict"]
+    assert (verdict["measure"], verdict["basis"]) == (22.3, MINUTES)
+    assert verdict["rebases"] == [{"measure": 0.5, "basis": "task hours", "at": NOW + HOUR_MS}]
+
+
+def test_a_fired_count_verdict_keeps_every_rebase_with_its_empty_basis(redis):
+    store = VerdictStore(redis, "verdicts")
+    _legacy(redis, 3)
+    later = NOW + HOUR_MS
+    _overran(redis, 22.3, "run-1", later)
+    _returns(store, redis, later)
+    standing.clear(redis, "sw", "ci_overrun")
+    _detected(redis, 0.3, "d1", later + HOUR_MS)
+    _returns(store, redis, later + HOUR_MS)
+    verdict = json.loads(redis.hget("verdicts", "bottleneck-stage/ci_overrun"))["verdict"]
+    assert verdict["rebases"] == [
+        {"measure": 3, "basis": "", "at": later},
+        {"measure": 22.3, "basis": MINUTES, "at": later + HOUR_MS},
+    ]
+
+
+def test_the_measure_basis_is_left_out_of_equality_and_the_shown_finding():
+    hours = Finding("bottleneck stage", "ci_overrun", "s", (), "t", 1.0, "task hours")
+    minutes = Finding("bottleneck stage", "ci_overrun", "s", (), "t", 1.0, MINUTES)
+    assert hours == minutes
+    assert "basis" not in hours.as_dict()

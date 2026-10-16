@@ -25,7 +25,9 @@ from typing import Any
 
 from hooks.context import injection_trace, profile_chain, quarantine, tool_matcher
 
-STEPS = {"pre": "PreToolUse", "post": "PostToolUse", "stop": "Stop"}
+STEPS = {"pre": "PreToolUse", "post": "PostToolUse", "stop": "Stop", "start": "SessionStart"}
+_NO_MATCHER_STEPS = frozenset({"stop", "start"})
+TOOL_STEPS = ("pre", "post")
 _RUNNERS = {".sh": ["bash"], ".bash": ["bash"], ".py": [sys.executable]}
 FILTER_SUFFIX = ".filter.yaml"
 JUDGE, LEDGER_WRITE, INBOX_SEND = "judge", "ledger_write", "inbox_send"
@@ -54,9 +56,10 @@ def parse_filename(filename: str) -> dict:
     if is_async:
         stem = stem[: -len(".async")]
     parts = stem.split("-")
-    if parts[0].lower() == "stop":
+    if parts[0].lower() in _NO_MATCHER_STEPS:
         if len(parts) != 2:
-            raise ValueError("expected stop-<name>.<ext>: Stop has no tool to match")
+            event = STEPS[parts[0].lower()]
+            raise ValueError(f"expected {parts[0].lower()}-<name>.<ext>: {event} has no tool to match")
         parts.insert(1, "any")
     if len(parts) < 3:
         raise ValueError("expected <step>-<matcher>-<name>.<ext>")
@@ -623,6 +626,19 @@ def stop_block(payload: dict) -> str | None:
     return "\n".join(result.reasons) or "blocked by a condition"
 
 
+@dataclass
+class StartEffect:
+    contexts: list[str]
+
+
+def start_effect(payload: dict) -> StartEffect | None:
+    """Context a start condition adds at SessionStart; it can never deny or rewrite."""
+    result = run_step("start", payload)
+    if result is None:
+        return None
+    return StartEffect(contexts=list(result.contexts))
+
+
 # ---------------------------------------------------------------------------
 # Operator gate — conditions are created or removed only when the operator
 # asks: his prompt this turn, his ledger comment or the master's relay of it
@@ -1054,7 +1070,7 @@ def create_condition(
     if language == "filter":
         _check_filter(script, run_async)
     ext, shebang, mode = _LANGUAGES[language]
-    head = step if step == "stop" and matcher in ("", "any") else f"{step}-{matcher}"
+    head = step if step in _NO_MATCHER_STEPS and matcher in ("", "any") else f"{step}-{matcher}"
     filename = f"{head}-{name}{'.async' if run_async else ''}{ext}"
     try:
         meta = parse_filename(filename)

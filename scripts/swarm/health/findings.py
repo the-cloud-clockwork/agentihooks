@@ -3,6 +3,7 @@
 The calculator only reports; the master diagnoses and the operator decides.
 """
 
+import dataclasses
 import os
 from collections import Counter
 from dataclasses import asdict, dataclass, fields
@@ -60,6 +61,7 @@ class Finding:
     evidence: tuple
     threshold: str
     measure: int = 0
+    basis: str = dataclasses.field(default="", compare=False)
 
     @property
     def id(self):
@@ -67,7 +69,7 @@ class Finding:
 
     def as_dict(self):
         found = asdict(self)
-        del found["measure"]
+        del found["measure"], found["basis"]
         return {**found, "evidence": list(self.evidence)}
 
 

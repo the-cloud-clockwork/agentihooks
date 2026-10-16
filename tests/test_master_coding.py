@@ -182,6 +182,25 @@ def test_the_window_opens_worktree_edits_but_keeps_conditions_and_credentials_cl
     assert "cannot edit outside" in guard(master, master / "dev" / "tcc-ecosystem" / "agentihooks" / "x.py")
 
 
+def test_the_window_opens_serena_edits_by_project_relative_path(master):
+    payload = {
+        "tool_name": "mcp__serena__replace_content",
+        "tool_input": {"relative_path": "scripts/swarm/master_launch.py"},
+        "session_id": SID,
+        "cwd": str(master / "dev" / "tcc-ecosystem" / "agentihooks"),
+    }
+    assert "cannot edit outside" in GUARD["deny_reason"](payload, "master", master)
+    master_coding.observe(SID, "allow-master-coding", typed=True)
+    assert GUARD["deny_reason"](payload, "master", master) == ""
+    payload["tool_input"] = {"relative_path": ".claude/conditions/pre-bash-x.py"}
+    assert "stay closed" in GUARD["deny_reason"](payload, "master", master)
+    payload["tool_input"] = {"relative_path": ""}
+    assert "cannot edit outside" in GUARD["deny_reason"](payload, "master", master)
+    payload["tool_name"] = "mcp__serena__rename_symbol"
+    payload["tool_input"] = {"relative_path": "scripts/swarm/master_launch.py"}
+    assert "cannot edit outside" in GUARD["deny_reason"](payload, "master", master)
+
+
 def test_an_expired_window_record_no_longer_opens_edits(master):
     record = master_coding.path(SID)
     record.parent.mkdir(parents=True)
