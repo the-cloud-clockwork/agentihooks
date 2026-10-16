@@ -74,6 +74,10 @@ def _detector(old, reading, now_ms, threshold):
         return old
     known = {*old.get("episodes", []), *old.get("detector", {}).get("episodes", [])}
     added = [episode for episode in reading["episodes"] if episode not in known]
+    foreign = SAME_MEASURE.get(old.get("unit", DETECTOR_UNIT), old.get("unit")) != DETECTOR_UNIT
+    if foreign and now_ms - old["updated_at"] >= STALE_MS:
+        old = {**old, "unit": DETECTOR_UNIT, "detail": ""}
+        foreign = False
     row = {
         "stage": reading["stage"],
         "unit": DETECTOR_UNIT,
@@ -83,7 +87,7 @@ def _detector(old, reading, now_ms, threshold):
         "fired": old.get("fired", 0) + len(added),
         "episodes": [*old.get("episodes", []), *added][-EPISODES:],
         "detector": reading,
-        "updated_at": now_ms,
+        "updated_at": old["updated_at"] if foreign else now_ms,
     }
     if row["unit"] == DETECTOR_UNIT:
         row["value"] = reading["seconds"] / 3600

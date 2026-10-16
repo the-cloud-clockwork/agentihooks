@@ -196,6 +196,23 @@ def test_a_judged_ci_budget_finding_does_not_return_when_the_detector_recreates_
     assert _returns(store, redis, later + 2 * HOUR_MS) == ["bottleneck-stage/ci_overrun"]
 
 
+def test_the_detector_does_not_keep_an_old_ci_budget_run_time_fresh(redis):
+    _overran(redis, 17.4, "run-1", NOW)
+    _detected(redis, 0.4, "d1", NOW + 5 * HOUR_MS)
+    row = standing.read(redis, "sw")["ci_overrun"]
+    assert (row["value"], row["unit"], row["updated_at"]) == (17.4, MINUTES, NOW)
+    assert standing.findings(redis, "sw", NOW + standing.STALE_MS) == []
+
+
+def test_the_detector_takes_over_a_stale_ci_budget_finding_in_task_hours(redis):
+    _overran(redis, 17.4, "run-1", NOW)
+    later = NOW + standing.STALE_MS
+    _detected(redis, 0.4, "d1", later)
+    row = standing.read(redis, "sw")["ci_overrun"]
+    assert (row["value"], row["unit"], row["detail"], row["updated_at"]) == (0.4, "task hours", "", later)
+    assert [found.value for found in standing.findings(redis, "sw", later)] == [0.4]
+
+
 def _legacy(redis, fired):
     verdict = {"value": "established", "note": "known", "by": "master", "at": NOW, "measure": fired}
     evidence = [f"Fired {fired} times"]
