@@ -56,8 +56,8 @@ def _current(path, text):
     return path.is_file() and path.read_text() == text
 
 
-def _services(binary):
-    return [name for name in units(binary) if name.endswith(".service") and name != f"{UNIT}.service"]
+def _services(names):
+    return [name for name in names if name.endswith(".service") and name != f"{UNIT}.service"]
 
 
 def _foreign_run(unit_dir):
@@ -80,8 +80,8 @@ def ensure(binary, unit_dir=None, run=subprocess.run):
         print(refusal, file=sys.stderr)
         return False
     unit_dir.mkdir(parents=True, exist_ok=True)
-    changed = False
-    for name, text in units(binary).items():
+    changed, expected = False, units(binary)
+    for name, text in expected.items():
         path = unit_dir / name
         if not _current(path, text):
             path.write_text(text)
@@ -90,15 +90,16 @@ def ensure(binary, unit_dir=None, run=subprocess.run):
         run(["systemctl", "--user", "daemon-reload"], capture_output=True, text=True, timeout=30, check=False)
     procs = [
         run(["systemctl", "--user", "enable", "--now", name], capture_output=True, text=True, timeout=30)
-        for name in [*_services(binary), f"{UNIT}.timer"]
+        for name in [*_services(expected), f"{UNIT}.timer"]
     ]
     return all(proc.returncode == 0 for proc in procs)
 
 
 def reconcile(binary, unit_dir=None, run=subprocess.run):
     unit_dir = unit_dir or UNIT_DIR
-    if all(_current(unit_dir / name, text) for name, text in units(binary).items()):
-        names = [*_services(binary), f"{UNIT}.timer"]
+    expected = units(binary)
+    if all(_current(unit_dir / name, text) for name, text in expected.items()):
+        names = [*_services(expected), f"{UNIT}.timer"]
         enabled = ["systemctl", "--user", "is-enabled", "--quiet"]
         if all(run([*enabled, name], capture_output=True, text=True, timeout=30).returncode == 0 for name in names):
             return True
