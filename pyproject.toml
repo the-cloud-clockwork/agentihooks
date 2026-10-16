@@ -51,6 +51,8 @@ dependencies = [
     "orjson>=3.10",
     # Operator architecture approvals are Ed25519 signed (scripts/swarm_v2/architecture.py).
     "cryptography>=42",
+    # The Codex app server client connects over a unix socket (scripts/codex_session/protocol.py).
+    "websockets>=15.0",
 ]
 
 [project.optional-dependencies]
@@ -87,7 +89,6 @@ dev = [
     "pytest-rerunfailures>=16.7",
     "detect-test-pollution==1.2.0",
     "uv>=0.5",
-    "websockets>=15.0",
 ]
 
 [project.scripts]
