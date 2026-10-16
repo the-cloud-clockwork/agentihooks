@@ -454,6 +454,7 @@ def render_codex(name: str, force: bool = False, overlays: Sequence[str] = (), i
     from scripts.profiles import codex_master
 
     _i = _install_module()
+    # render_claude binds the recorded bundle copy inside the home; resolve the chain only after it.
     claude_fresh = render_claude(name, force=force, overlays=overlays) is None
     bundle, dirs = _bundle(), _chain(name, overlays)
     master = any(n.removeprefix("package:") == "master" for n, _ in dirs)

@@ -40,8 +40,9 @@ def test_an_overlay_render_uses_the_recorded_commit_after_the_bundle_advances(wo
     assert not list(render.rendered_root().glob("bundle-*"))
 
 
+@pytest.mark.parametrize(("target", "persona"), [("claude", "CLAUDE.md"), ("codex", "AGENTS.md")])
 @pytest.mark.usefixtures("recorded_assets")
-def test_an_overlay_render_ignores_uncommitted_bundle_changes(world, overlays):
+def test_an_overlay_render_ignores_uncommitted_bundle_changes(world, overlays, target, persona):
     from scripts.profiles import render
 
     recorded = _git(world["bundle"], "rev-parse", "HEAD").strip()
@@ -49,10 +50,10 @@ def test_an_overlay_render_ignores_uncommitted_bundle_changes(world, overlays):
     _write(rule, "EDITED RULE\n")
     status = _git(world["bundle"], "status", "--porcelain")
 
-    out = render.render("codex", "rb-eng", overlays=["ov-a"], bundle_revision=recorded)
+    out = render.render(target, "rb-eng", overlays=["ov-a"], bundle_revision=recorded)
 
-    assert "OV-A RULE MARKER" in (out / "AGENTS.md").read_text()
-    assert "EDITED RULE" not in (out / "AGENTS.md").read_text()
+    assert "OV-A RULE MARKER" in (out / persona).read_text()
+    assert "EDITED RULE" not in (out / persona).read_text()
     assert rule.read_text() == "EDITED RULE\n"
     assert _git(world["bundle"], "status", "--porcelain") == status
     assert world["install"]._get_bundle_path() == world["bundle"]
@@ -207,7 +208,7 @@ def test_pinned_render_repairs_a_home_missing_its_bundle_copy(world, overlays):
 @pytest.mark.parametrize("failure", ["returncode", "timeout"])
 @pytest.mark.parametrize("operation", ["rev-parse", "status"])
 @pytest.mark.usefixtures("recorded_assets")
-def test_pinned_cache_git_errors_report_the_recorded_bundle(world, overlays, monkeypatch, failure, operation):
+def test_an_unreadable_cached_copy_renders_a_fresh_home(world, overlays, monkeypatch, failure, operation):
     from scripts.profiles import bundle_copy, render
 
     recorded = _git(world["bundle"], "rev-parse", "HEAD").strip()
@@ -224,16 +225,37 @@ def test_pinned_cache_git_errors_report_the_recorded_bundle(world, overlays, mon
 
     monkeypatch.setattr(subprocess, "run", fail_copy)
 
+    repaired = render.render("claude", "rb-eng", overlays=["ov-a"], bundle_revision=recorded)
+
+    assert repaired is not None
+    assert repaired.parent != first.parent
+    assert _git(repaired.parent / "bundle" / world["bundle"].name, "rev-parse", "HEAD").strip() == recorded
+    assert bundle_copy.current() is None
+
+
+@pytest.mark.parametrize("step", ["init", "fetch", "update-ref", "read-tree", "checkout-index"])
+@pytest.mark.usefixtures("recorded_assets")
+def test_a_slow_copy_step_waits_longer_than_a_bundle_read(world, overlays, monkeypatch, step):
+    from scripts.profiles import bundle_copy, render
+
+    recorded = _git(world["bundle"], "rev-parse", "HEAD").strip()
+    run = subprocess.run
+
+    def hang(argv, **kwargs):
+        if argv[:2] == ["git", "-C"] and argv[3:4] == [step] and argv[2] != str(world["bundle"]):
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        return run(argv, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", hang)
+
     with pytest.raises(ValueError) as refused:
         render.render("claude", "rb-eng", overlays=["ov-a"], bundle_revision=recorded)
 
-    prefix = f"the launch recorded bundle commit {recorded}, but"
-    detail = (
-        f"git did not answer within 10 seconds for the bundle at {world['bundle']}"
-        if failure == "timeout"
-        else f"git cannot read the bundle at {world['bundle']}: copy failure"
+    assert str(refused.value) == (
+        f"the launch recorded bundle commit {recorded}, but git did not answer within 300 seconds for the bundle at "
+        f"{world['bundle']}"
     )
-    assert str(refused.value) == f"{prefix} {detail}"
+    assert render.profile_dir("rb-eng", ["ov-a"]) is None
     assert bundle_copy.current() is None
 
 

@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 
+COPY_SECONDS = 300
 _ACTIVE: ContextVar[tuple[Path, Path, str] | None] = ContextVar("recorded_bundle", default=None)
 
 
@@ -39,20 +40,23 @@ def reuse(root: Path) -> bool:
     if not destination.is_dir():
         return False
     git = ["git", "-C", str(destination)]
-    head = _git(active[0], active[2], [*git, "rev-parse", "HEAD"])
-    status = _git(active[0], active[2], [*git, "status", "--porcelain", "--untracked-files=all"])
+    try:
+        head = _git(active[0], active[2], [*git, "rev-parse", "HEAD"])
+        status = _git(active[0], active[2], [*git, "status", "--porcelain", "--untracked-files=all"])
+    except ValueError:
+        return False
     if head != active[2] or status:
         return False
     _ACTIVE.set((active[0], destination, active[2]))
     return True
 
 
-def _git(bundle: Path, revision: str, argv: list[str]) -> str:
+def _git(bundle: Path, revision: str, argv: list[str], timeout: int = 10) -> str:
     recorded = f"the launch recorded bundle commit {revision}, but"
     try:
-        done = subprocess.run(argv, capture_output=True, text=True, timeout=10)
+        done = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired as exc:
-        raise ValueError(f"{recorded} git did not answer within 10 seconds for the bundle at {bundle}") from exc
+        raise ValueError(f"{recorded} git did not answer within {timeout} seconds for the bundle at {bundle}") from exc
     if done.returncode:
         raise ValueError(f"{recorded} git cannot read the bundle at {bundle}: {done.stderr.strip()}")
     return done.stdout.strip()
@@ -79,7 +83,7 @@ def recorded(bundle: Path | None, revision: str, root: Path) -> Iterator[None]:
             ["read-tree", "HEAD"],
             ["checkout-index", "--all"],
         ):
-            _git(bundle, revision, [*git, *args])
+            _git(bundle, revision, [*git, *args], COPY_SECONDS)
         token = _ACTIVE.set((bundle, copy, commit))
         try:
             yield
