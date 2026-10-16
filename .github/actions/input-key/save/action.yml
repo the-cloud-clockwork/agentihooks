@@ -1,0 +1,20 @@
+name: Save a passed input key
+description: Save the input key after the job's heavy steps passed. Cache entries are scoped to the saving ref, so only runs on dev write keys that dev runs read.
+inputs:
+  key:
+    description: Key from the input-key action
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Write the pass record
+      shell: bash
+      env:
+        KEY: ${{ inputs.key }}
+      run: |
+        mkdir -p "$RUNNER_TEMP/input-pass"
+        printf '{"key": "%s", "run": %s, "attempt": %s, "sha": "%s"}\n' "$KEY" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$GITHUB_SHA" > "$RUNNER_TEMP/input-pass/record.json"
+    - uses: actions/cache/save@v4
+      with:
+        path: ${{ runner.temp }}/input-pass
+        key: ${{ inputs.key }}
