@@ -424,11 +424,11 @@ def test_the_approval_prompt_touches_one_file():
 STATUS = {"method": "thread/status/changed"}
 
 
-def late_scripts(a_events, reader_events, late_events, read, resumed):
+def late_scripts(a_events, reader_events, late_events, read, resumed, reread):
     return {
         "probe-owner-a": ({"thread/start": [thread()], "turn/start": [turn("T")]}, a_events),
         "probe-late-reader": ({"thread/read": [read]}, reader_events),
-        "probe-late-resumer": ({"thread/resume": [resumed]}, late_events),
+        "probe-late-resumer": ({"thread/resume": [resumed], "thread/read": [reread]}, late_events),
     }
 
 
@@ -444,6 +444,7 @@ def test_a_late_resumer_receives_the_open_approval_a_late_reader_misses(fakes, t
             [{**REQUEST, "_at": 5.0}, RESOLVED],
             ok(running),
             {**ok(running), "_at": 4.0},
+            {**ok(running), "_at": 6.0},
         )
     )
     record = probe.late_approval("SOCK", repo)
@@ -458,6 +459,7 @@ def test_a_late_resumer_receives_the_open_approval_a_late_reader_misses(fakes, t
         "delivered_to_late_resumer": True,
         "late_same_request_id": True,
         "late_request_before_resume_reply": False,
+        "late_request_before_read_reply": True,
         "late_reader_methods": ["thread/goal/cleared", "thread/status/changed", "turn/completed"],
         "resolved_seen_by_late_resumer": True,
         "turn_status": "completed",
@@ -466,7 +468,10 @@ def test_a_late_resumer_receives_the_open_approval_a_late_reader_misses(fakes, t
     a, reader, late = made["probe-owner-a"], made["probe-late-reader"], made["probe-late-resumer"]
     assert a.calls == [start_call(repo, approvalPolicy="untrusted"), turn_call("TH", probe.APPROVAL_PROMPT)]
     assert reader.calls == [("thread/read", {"threadId": "TH", "includeTurns": True}, DEFAULT)]
-    assert late.calls == [("thread/resume", {"threadId": "TH"}, DEFAULT)]
+    assert late.calls == [
+        ("thread/resume", {"threadId": "TH"}, DEFAULT),
+        ("thread/read", {"threadId": "TH", "includeTurns": True}, DEFAULT),
+    ]
     assert a.answers == [(7, {"decision": "decline"})]
     assert (reader.answers, late.answers) == ([], [])
     assert (a.waits, reader.waits, late.waits) == ([120, 180], [10, 5], [10, 20])
@@ -482,6 +487,7 @@ def test_a_late_approval_without_an_owner_request_keeps_the_record_short(fakes, 
             [{**REQUEST, "id": 8, "_at": 4.0}],
             ok({}),
             {**err("gone"), "_at": 4.0},
+            {**ok({}), "_at": 3.0},
         )
     )
     record = probe.late_approval("SOCK", str(tmp_path))
@@ -496,6 +502,7 @@ def test_a_late_approval_without_an_owner_request_keeps_the_record_short(fakes, 
         "delivered_to_late_resumer": True,
         "late_same_request_id": False,
         "late_request_before_resume_reply": True,
+        "late_request_before_read_reply": False,
     }
     assert made["probe-owner-a"].answers == []
     assert made["probe-late-resumer"].waits == [10]

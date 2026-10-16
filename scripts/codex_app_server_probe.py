@@ -267,6 +267,7 @@ def late_approval(sock: str, repo: str) -> dict:
     req_reader, reader_early = reader.until(is_approval_request, 10)
     late = Client(sock, "probe-late-resumer")
     resumed = late.request("thread/resume", {"threadId": thread})
+    reread = late.request("thread/read", {"threadId": thread, "includeTurns": True})
     req_late, _ = late.until(is_approval_request, 10)
     turns = (read.get("result") or {}).get("thread", {}).get("turns") or [{}]
     resumed_turns = (resumed.get("result") or {}).get("thread", {}).get("turns") or [{}]
@@ -281,6 +282,7 @@ def late_approval(sock: str, repo: str) -> dict:
         "delivered_to_late_resumer": req_late is not None,
         "late_same_request_id": bool(req_a and req_late and req_a["id"] == req_late["id"]),
         "late_request_before_resume_reply": bool(req_late and req_late["_at"] <= resumed["_at"]),
+        "late_request_before_read_reply": bool(req_late and req_late["_at"] <= reread["_at"]),
     }
     if req_a:
         a.answer(req_a["id"], {"decision": "decline"})
