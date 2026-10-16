@@ -215,3 +215,80 @@ def test_proof_control_requires_its_request_file(capsys):
         cli.build_parser().parse_args(["proof-a1b2c3-contract-1", "proof-control"])
     assert refused.value.code == 2
     assert "--request" in capsys.readouterr().err
+
+
+def test_controller_migrates_missing_external_creator_once(owned):
+    key = owned.store.key(owned.slug, "proof-creator")
+    owned.store.redis.delete(key)
+    payload = {"parent": "external-parent", "agent": owned.owner, "task": "contract"}
+    for _ in range(2):
+        status, result = owned.invoke(f"/{owned.slug}/migrate", payload, owned.controller)
+        assert status == 200
+        assert result == {"data": {"parent": "external-parent", "owner": owned.owner}}
+    assert owned.store.redis.hgetall(key) == {"parent": "external-parent", "owner": owned.owner}
+
+
+def test_migration_requires_controller_and_preserves_existing_creator(owned):
+    payload = {"parent": "external-parent", "agent": owned.owner, "task": "contract"}
+    before = owned.store.redis.hgetall(owned.store.key(owned.slug, "proof-creator"))
+    status, _ = owned.invoke(f"/{owned.slug}/migrate", payload, owned.parent)
+    assert status == 403
+    status, result = owned.invoke(f"/{owned.slug}/migrate", payload, owned.controller)
+    assert status == 409
+    assert result["error"]["message"] == "Proof creator already differs from the requested migration"
+    assert owned.store.redis.hgetall(owned.store.key(owned.slug, "proof-creator")) == before
+
+
+@pytest.mark.parametrize("field,value", [("agent", "engineer@fedcba-0001"), ("task", "another")])
+def test_migration_refuses_a_different_proof_identity(owned, field, value):
+    owned.store.redis.delete(owned.store.key(owned.slug, "proof-creator"))
+    payload = {"parent": "external-parent", "agent": owned.owner, "task": "contract", field: value}
+    status, result = owned.invoke(f"/{owned.slug}/migrate", payload, owned.controller)
+    assert status == 403
+    assert result["error"]["message"] == "Migration must match the proof engineer and task"
+    assert owned.store.redis.hgetall(owned.store.key(owned.slug, "proof-creator")) == {}
+
+
+def test_controller_controls_use_the_existing_drain_fences(owned, monkeypatch):
+    request = {
+        "control": "drain",
+        "agent": "attempt",
+        "op": "chosen",
+        "incarnation": "old",
+        "generation": 3,
+        "task_revision": 4,
+    }
+    seen = []
+    monkeypatch.setattr(
+        server,
+        "lifecycle_control",
+        lambda slug, body, operator: (seen.append((slug, body, operator)) or None, "stale attempt"),
+    )
+    payload = {"owner": {"parent": SLUG, "agent": owned.owner, "task": "contract"}, "request": request}
+    status, result = owned.invoke(f"/{owned.slug}/controller-controls", payload, owned.controller)
+    assert status == 409
+    assert result["error"]["message"] == "stale attempt"
+    assert seen == [(owned.slug, request, False)]
+
+
+def test_controller_controls_refuse_wrong_owner_and_ungranted_actions(owned):
+    payload = {
+        "owner": {"parent": "wrong-parent", "agent": owned.owner, "task": "contract"},
+        "request": {"control": "pause"},
+    }
+    status, result = owned.invoke(f"/{owned.slug}/controller-controls", payload, owned.controller)
+    assert status == 409
+    assert result["error"]["message"] == "Proof creator differs from the configured requester"
+    payload["owner"]["parent"] = SLUG
+    payload["request"] = {"control": "resume"}
+    status, result = owned.invoke(f"/{owned.slug}/controller-controls", payload, owned.controller)
+    assert status == 403
+    assert result["error"]["message"] == "Proof controls permit only pause and drain"
+
+
+def test_controller_controls_do_not_enqueue_pause_again(owned):
+    owned.store.update_config(owned.slug, state="paused")
+    payload = {"owner": {"parent": SLUG, "agent": owned.owner, "task": "contract"}, "request": {"control": "pause"}}
+    status, result = owned.invoke(f"/{owned.slug}/controller-controls", payload, owned.controller)
+    assert status == 200
+    assert result == {"data": {"state": "paused"}}

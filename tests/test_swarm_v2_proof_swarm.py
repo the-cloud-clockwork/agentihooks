@@ -100,6 +100,36 @@ def test_a_served_proof_swarm_that_exists_is_kept_without_a_ledger_call(store):
     assert store.slugs() == [SLUG]
 
 
+def test_explicit_parent_migrates_the_existing_served_proof_before_control(store):
+    swarm(store, SLUG)
+    ledger = Ledger()
+    calls = []
+    setting = {**json.loads(SETTING), "parent": "external-parent", "control": {"control": "pause"}}
+    ledger.migrate = lambda slug, owner, environ: calls.append(("migrate", slug, owner, environ))
+    ledger.controller_control = lambda slug, owner, request, environ: calls.append(
+        ("control", slug, owner, request, environ)
+    )
+    environ = {**ENV, proof_swarm.PROOF_ENV: json.dumps(setting)}
+    proof_swarm.reconcile(environ, store, SLUG, ledger)
+    owner = {key: setting[key] for key in ("agent", "task", "parent")}
+    assert calls == [
+        ("migrate", SLUG, owner, environ),
+        ("control", SLUG, owner, {"control": "pause"}, environ),
+    ]
+    assert ledger.created == []
+
+
+def test_explicit_parent_alone_migrates_without_a_control(store):
+    swarm(store, SLUG)
+    ledger = Ledger()
+    calls = []
+    setting = {**json.loads(SETTING), "parent": "external-parent"}
+    ledger.migrate = lambda slug, owner, environ: calls.append((slug, owner, environ))
+    environ = {**ENV, proof_swarm.PROOF_ENV: json.dumps(setting)}
+    proof_swarm.reconcile(environ, store, SLUG, ledger)
+    assert calls == [(SLUG, setting, environ)]
+
+
 def test_a_proof_named_other_than_the_served_swarm_is_removed_and_refused(store):
     ledger = Ledger(OTHER)
 
