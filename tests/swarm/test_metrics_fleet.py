@@ -181,7 +181,11 @@ def test_the_newest_checkpoint_of_each_active_execution_reaches_the_sink(tmp_pat
     metrics_fleet.record_checkpoint(store, SLUG, second, f"eng-2@{SLUG}", NOW - 1_800_000)
     metrics_fleet.record_checkpoint(store, SLUG, "ended", "eng-9@scratch", NOW - 9_000_000)
     assert 604_000_000 < store.redis.pttl(store.key(SLUG, "fleet-checkpoint", first)) <= 604_800_000
+    store.redis.pexpire(store.key(SLUG, "fleet-checkpoint", first), 1_000)
+    store.redis.pexpire(store.key(SLUG, "fleet-checkpoint", "ended"), 1_000)
     found = metrics_fleet.sample(store, SLUG, NOW, NOW)
+    assert 604_000_000 < store.redis.pttl(store.key(SLUG, "fleet-checkpoint", first)) <= 604_800_000
+    assert store.redis.pttl(store.key(SLUG, "fleet-checkpoint", "ended")) <= 1_000
     assert found["checkpoints"] == [
         {"execution_id": first, "seat": f"eng-1@{SLUG}", "taken_at_ms": NOW - 2_000_000},
         {"execution_id": second, "seat": f"eng-2@{SLUG}", "taken_at_ms": NOW - 1_800_000},

@@ -90,7 +90,12 @@ def record_checkpoint(store: RedisStore, slug: str, execution_id: str, seat: str
 def _checkpoints(store: RedisStore, slug: str, active: list[dict]) -> list[dict]:
     if not active:
         return []
-    taken = store.redis.mget([store.key(slug, CHECKPOINTS, row["execution_id"]) for row in active])
+    keys = [store.key(slug, CHECKPOINTS, row["execution_id"]) for row in active]
+    taken = store.redis.mget(keys)
+    with store.redis.pipeline(transaction=False) as pipe:
+        for key in keys:
+            pipe.pexpire(key, CHECKPOINT_TTL_MS)
+        pipe.execute()
     return [json.loads(raw) for raw in taken if raw]
 
 
