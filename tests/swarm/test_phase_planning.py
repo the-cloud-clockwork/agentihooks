@@ -126,12 +126,13 @@ def test_manual_phase_admits_build_tasks_without_requeuing_its_old_plan(env, clo
     store, ledger = env
     set_phase("p1", planning="auto")
     run(store, ledger)
-    build_task(ledger, "build", done=False)
-    set_phase("p1", planning="manual")
     if close_plan:
-        ledger.update_task(SLUG, "plan-p1", {"out_of_scope": True})
+        build_task(ledger, "build", done=False)
+        op = {"op": "set", "id": "close-plan", "by": "engineer", "path": "tasks/plan-p1/out_of_scope", "value": True}
+        assert core.sync(SLUG, ops=[op])[1] == []
     else:
-        ledger.update_task(SLUG, "plan-p1", {"state": "done", "proof": {"slice": "build"}})
+        slice_done(ledger, ("build", DONE_WHEN))
+    set_phase("p1", planning="manual")
     for _ in range(2):
         run(store, ledger)
         current = state(SLUG)

@@ -95,6 +95,24 @@ def test_an_auto_phase_holds_its_tasks_until_the_plan_is_approved(store):
     assert spawned(runtime) == ["b"]
 
 
+@pytest.mark.parametrize("completion", ["done", "closed", "released"])
+def test_manual_phase_claims_its_build_task_after_plan_closure_or_release(store, completion):
+    planner = plan("p1", "done" if completion == "done" else "open")
+    if completion != "done":
+        planner["out_of_scope"] = True
+    ledger = FakeLedger([planner, {"id": "build", "phase": "p1"}])
+    ledger.phases = [{"id": "p1", "planning": "manual", "out_of_scope": completion == "released"}]
+    runtime = FakeRuntime()
+    if completion == "released":
+        tick("sw", store, ledger, runtime, now_ms=1_000)
+        assert spawned(runtime) == []
+        ledger.phases[0]["out_of_scope"] = False
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert spawned(runtime) == ["build"]
+    tick("sw", store, ledger, runtime, now_ms=3_000)
+    assert spawned(runtime) == ["build"]
+
+
 def test_the_plan_task_is_claimed_only_while_its_phase_is_planning(store):
     from pathlib import Path
 
