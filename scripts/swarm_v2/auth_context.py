@@ -273,6 +273,8 @@ class LaunchAuthority:
         occupants = self.store.execution_occupants(slug).values()
         if (claims["execution_id"], claims["generation"]) not in {(a.execution_id, a.generation) for a in occupants}:
             self.refuse(slug, "stale_generation", "launch grant is for a superseded execution")
+        if self.store.execution(slug, claims["execution_id"]).state == "ended":
+            self.refuse(slug, "stale_generation", "launch grant is for an ended execution")
         existing = pipe.hget(registrations, claims["execution_id"])
         if existing:
             registration = Registration(**json.loads(existing))
