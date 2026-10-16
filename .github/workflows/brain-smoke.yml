@@ -26,11 +26,18 @@ jobs:
         with:
           ref: ${{ github.sha }}
 
+      - name: Read the collector service image
+        id: collector
+        env:
+          SERVICE: ${{ job.services.otel-collector.id }}
+        run: echo "image=$(docker inspect --format '{{.Image}}' "$SERVICE")" >> "$GITHUB_OUTPUT"
+
       - name: Key the declared inputs
         id: key
         uses: ./.github/actions/input-key
         with:
           job: brain-smoke
+          environment: otel-collector=${{ steps.collector.outputs.image }}
 
       - name: Set up Python
         if: steps.key.outputs.hit != 'true'
