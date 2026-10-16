@@ -506,17 +506,23 @@ def test_a_record_that_keeps_failing_unexpectedly_is_set_aside_after_its_attempt
     item = json.loads(poison)["item"]
     outage.down = False
     poisoned(monkeypatch, {"poison"})
+    capsys.readouterr()
     for attempt in (1, 2):
         report = outbox.flush(InboxStore(outage.redis))
         assert (report.applied, report.rejected, report.left) == ([], [], 2)
+        assert capsys.readouterr().err == (
+            "agentihooks msg: outbox replay stopped (RuntimeError: disk gone)\n"
+            f"agentihooks msg: 2 queued messages wait in {outbox.path()} for Redis or the ledger server\n"
+        )
         assert json.loads(outbox.attempts_path().read_text()) == {json.loads(poison)["sum"]: attempt}
         assert outbox.status() == {"queued": 2, "retrying": 1, "set_aside": 0}
         assert outbox.status_lines() == ["inbox outbox  queued 2  retrying 1  set aside 0"]
-    capsys.readouterr()
     report = outbox.flush(InboxStore(outage.redis))
     reason = "RuntimeError: disk gone on 3 replays (AGENTIHOOKS_INBOX_OUTBOX_MAX_ATTEMPTS)"
     assert (report.rejected, len(report.applied), report.left) == ([(item, reason)], 1, 0)
-    assert f"queued message {item} was refused on replay ({reason})" in capsys.readouterr().err
+    assert capsys.readouterr().err == (
+        f"agentihooks msg: queued message {item} was refused on replay ({reason}); kept in {outbox.skipped_path()}\n"
+    )
     assert outage.texts("bob") == ["behind"]
     assert records() == []
     assert json.loads(outbox.skipped_path().read_text()) == {"reason": reason, "line": poison}
@@ -545,6 +551,7 @@ def test_a_record_that_replays_after_an_unexpected_failure_forgets_its_attempts(
 
 def test_the_attempt_cap_defaults_and_reads_the_environment(monkeypatch):
     assert outbox.max_attempts({}) == 3
+    assert outbox.max_attempts({"AGENTIHOOKS_INBOX_OUTBOX_MAX_ATTEMPTS": ""}) == 3
     assert outbox.max_attempts({"AGENTIHOOKS_INBOX_OUTBOX_MAX_ATTEMPTS": "5"}) == 5
     monkeypatch.setenv("AGENTIHOOKS_INBOX_OUTBOX_MAX_ATTEMPTS", "1")
     assert outbox.max_attempts() == 1

@@ -206,7 +206,7 @@ def _replay(store, report: Report) -> None:
     from scripts.inbox.cli import apply
 
     kept, down = [], {"redis"} if store is None else set()
-    tracked = _attempts()
+    tracked, cap = _attempts(), max_attempts()
     for line in path().read_text().splitlines(keepends=True):
         entry = parse(line)
         if entry is None:
@@ -237,7 +237,7 @@ def _replay(store, report: Report) -> None:
             report.rejected.append((entry["item"], str(exc)))
         except Exception as exc:
             tracked[entry["sum"]] = tracked.get(entry["sum"], 0) + 1
-            if _gave_up(line, entry, f"{type(exc).__name__}: {exc}", tracked[entry["sum"]], report):
+            if _gave_up(line, entry, f"{type(exc).__name__}: {exc}", tracked[entry["sum"]], report, cap):
                 continue
             down.add(lane(entry))
             kept.append(line)
@@ -248,8 +248,8 @@ def _replay(store, report: Report) -> None:
         _clear()
 
 
-def _gave_up(line: str, entry: dict, error: str, count: int, report: Report) -> bool:
-    if count < max_attempts():
+def _gave_up(line: str, entry: dict, error: str, count: int, report: Report, cap: int) -> bool:
+    if count < cap:
         print(f"agentihooks msg: outbox replay stopped ({error})", file=sys.stderr)
         return False
     reason = f"{error} on {count} replays ({ATTEMPTS_ENV})"
@@ -264,7 +264,7 @@ def _attempts() -> dict:
 
 def _save_attempts(counts: dict) -> None:
     if counts:
-        attempts_path().write_text(json.dumps(counts))
+        _replace(attempts_path(), json.dumps(counts))
     else:
         attempts_path().unlink(missing_ok=True)
 
@@ -286,11 +286,15 @@ def _clear() -> None:
 
 
 def _rewrite(lines: list[str]) -> None:
+    _replace(path(), "".join(lines))
+
+
+def _replace(target: Path, text: str) -> None:
     descriptor, staged = tempfile.mkstemp(dir=home())
     with os.fdopen(descriptor, "w") as handle:
-        handle.write("".join(lines))
+        handle.write(text)
         _sync(handle)
-    os.replace(staged, path())
+    os.replace(staged, target)
     _sync_home()
 
 
