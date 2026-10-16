@@ -40,6 +40,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Offline worker profile proofs replay the rendered Codex startup hook so
+  session registration does not depend on a live Codex session.
 - The ledger API accepts the ownership guard on task updates, so the swarm tick's
   guarded writes no longer fail and handed off masters are retired.
 - A selected coverage run maps the page coverage it recorded when it holds only
