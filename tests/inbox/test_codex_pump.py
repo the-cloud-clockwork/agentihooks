@@ -529,7 +529,8 @@ def test_an_open_server_request_holds_a_nudge_too(rig):
 
 def test_an_approval_replayed_on_resume_holds_the_first_delivery_into_a_turn_begun_before_the_pump(rig):
     rig.server.begin_elsewhere()
-    rig.server.frames.append({"id": 90, "method": APPROVAL, "params": {"threadId": THREAD}})
+    rig.server.frames.clear()
+    rig.server.early = [{"id": 90, "method": APPROVAL, "params": {"threadId": THREAD}}]
     rig.pump.start()
     item = rig.store.send("alice", ME, "careful")
     rig.pump.step()
