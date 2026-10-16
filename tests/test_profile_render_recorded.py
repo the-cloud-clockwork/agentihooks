@@ -147,11 +147,35 @@ def test_pinned_codex_rebuild_keeps_bundle_links_in_its_new_home(world, overlays
 
     assert rebuilt.parent != first.parent
     skill = rebuilt / "skills" / "pinned-skill"
+    bundled = rebuilt / "skills" / "bundle-skill"
     assert skill.resolve().is_relative_to(rebuilt.parent)
+    assert bundled.resolve().is_relative_to(rebuilt.parent)
     shutil.rmtree(first.parent)
     assert (skill / "SKILL.md").read_text() == "PINNED SKILL\n"
+    assert (bundled / "SKILL.md").read_text() == "---\nname: bundle-skill\n---\n"
     assert bundle_copy.current() is None
     assert render.render("codex", "rb-eng", overlays=["ov-a"], bundle_revision=recorded) is None
+
+
+@pytest.mark.usefixtures("recorded_assets")
+def test_a_pinned_codex_render_keeps_its_isolation(world, overlays):
+    from scripts.profiles import render
+
+    recorded = _git(world["bundle"], "rev-parse", "HEAD").strip()
+
+    out = render.render("codex", "rb-eng", overlays=["ov-a"], bundle_revision=recorded, isolate=True)
+
+    assert json.loads((out / render.STAMP).read_text())["isolate"] is True
+
+
+@pytest.mark.usefixtures("recorded_assets")
+def test_an_unpinned_render_reuses_its_home(world, overlays):
+    from scripts.profiles import render
+
+    first = render.render("claude", "rb-eng", overlays=["ov-a"])
+
+    assert first is not None
+    assert render.render("claude", "rb-eng", overlays=["ov-a"]) is None
 
 
 @pytest.mark.usefixtures("recorded_assets")
@@ -218,6 +242,7 @@ def test_an_unreadable_cached_copy_renders_a_fresh_home(world, overlays, monkeyp
 
     def fail_copy(argv, **kwargs):
         if argv[:3] == ["git", "-C", str(copied)] and argv[3] == operation:
+            assert kwargs["timeout"] == 10
             if failure == "timeout":
                 raise subprocess.TimeoutExpired(argv, 10)
             return subprocess.CompletedProcess(argv, 1, stdout="", stderr="copy failure\n")

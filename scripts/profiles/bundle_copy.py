@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 
+READ_SECONDS = 10
 COPY_SECONDS = 300
 _ACTIVE: ContextVar[tuple[Path, Path, str] | None] = ContextVar("recorded_bundle", default=None)
 
@@ -40,18 +41,23 @@ def reuse(root: Path) -> bool:
     if not destination.is_dir():
         return False
     git = ["git", "-C", str(destination)]
-    try:
-        head = _git(active[0], active[2], [*git, "rev-parse", "HEAD"])
-        status = _git(active[0], active[2], [*git, "status", "--porcelain", "--untracked-files=all"])
-    except ValueError:
-        return False
-    if head != active[2] or status:
+    head = _read([*git, "rev-parse", "HEAD"])
+    status = _read([*git, "status", "--porcelain", "--untracked-files=all"])
+    if head != active[2] or status != "":
         return False
     _ACTIVE.set((active[0], destination, active[2]))
     return True
 
 
-def _git(bundle: Path, revision: str, argv: list[str], timeout: int = 10) -> str:
+def _read(argv: list[str]) -> str | None:
+    try:
+        done = subprocess.run(argv, capture_output=True, text=True, timeout=READ_SECONDS)
+    except subprocess.TimeoutExpired:
+        return None
+    return None if done.returncode else done.stdout.strip()
+
+
+def _git(bundle: Path, revision: str, argv: list[str], timeout: int = READ_SECONDS) -> str:
     recorded = f"the launch recorded bundle commit {revision}, but"
     try:
         done = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
@@ -73,7 +79,7 @@ def recorded(bundle: Path | None, revision: str, root: Path) -> Iterator[None]:
     )
     root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="bundle-", dir=root) as temporary:
-        copy = Path(temporary) / bundle.name
+        copy = Path(temporary) / "recorded"
         copy.mkdir()
         git = ["git", "-C", str(copy)]
         for args in (
