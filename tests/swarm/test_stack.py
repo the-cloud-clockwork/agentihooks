@@ -248,10 +248,11 @@ def test_park_writes_the_open_dependencies_and_the_stacked_base(parked, capsys):
     }
 
 
-def test_park_accepts_an_open_dependency_merged_into_dev_after_its_branch_is_deleted(parked, monkeypatch):
+@pytest.mark.parametrize("repo", [None, OTHER])
+def test_park_accepts_an_open_dependency_merged_into_dev_after_its_branch_is_deleted(parked, monkeypatch, repo):
     _, ledger, _, shell, doc = parked
     dependency_pr = "https://github.com/o/r/pull/42"
-    ledger.rows["a"]["pr_url"] = dependency_pr
+    ledger.rows["a"].update({"pr_url": dependency_pr, "branch_repo": repo})
 
     def merged_dependency(argv):
         result = shell(argv)
@@ -269,6 +270,8 @@ def test_park_accepts_an_open_dependency_merged_into_dev_after_its_branch_is_del
     assert ["git", "fetch", "origin", "dev"] in shell.calls
     assert ["git", "merge-base", "HEAD", "origin/dev"] in shell.calls
     assert ["git", "fetch", "origin", "eng-a"] not in shell.calls
+    assert ["git", "fetch", "--", OTHER, "eng-a"] not in shell.calls
+    assert ["gh", "pr", "view", dependency_pr, "--json", "state,baseRefName"] in shell.calls
 
 
 @pytest.mark.parametrize(
@@ -294,6 +297,29 @@ def test_park_keeps_the_dependency_branch_until_its_pull_request_merges_into_dev
     assert ["git", "fetch", "origin", "eng-a"] in shell.calls
     assert ["git", "merge-base", "HEAD", "origin/eng-a"] in shell.calls
     assert ["git", "fetch", "origin", "dev"] not in shell.calls
+
+
+@pytest.mark.parametrize("answer", ["not json", "{}", '{"state": "MERGED"}'])
+def test_park_refuses_unreadable_dependency_pull_request_state(parked, monkeypatch, capsys, answer):
+    _, ledger, _, shell, _ = parked
+    ledger.rows["a"]["pr_url"] = "https://github.com/o/r/pull/42"
+
+    def unreadable_pull(argv):
+        result = shell(argv)
+        if argv[:3] == ["gh", "pr", "view"]:
+            return subprocess.CompletedProcess(argv, 0, answer, "")
+        return result
+
+    monkeypatch.setattr(stack, "shell", unreadable_pull)
+    _refused(parked, capsys, "cannot read the dependency pull request:")
+    assert ["git", "fetch", "origin", "dev"] not in shell.calls
+
+
+def test_park_refuses_when_the_dependency_pull_request_cannot_be_read(parked, capsys):
+    _, ledger, _, shell, _ = parked
+    ledger.rows["a"]["pr_url"] = "https://github.com/o/r/pull/42"
+    shell.fail = (("gh", "pr", "view"),)
+    _refused(parked, capsys, "cannot read the dependency pull request: boom")
 
 
 @pytest.mark.parametrize("merged_before_stop", [False, True])
