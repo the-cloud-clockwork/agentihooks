@@ -5,7 +5,8 @@ The calculator only reports; the master diagnoses and the operator decides.
 
 import os
 from collections import Counter
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass, fields
+from dataclasses import field as attribute
 
 from scripts.swarm import naming
 from scripts.swarm_ledger import ledger_kinds
@@ -60,7 +61,7 @@ class Finding:
     evidence: tuple
     threshold: str
     measure: int = 0
-    basis: str = field(default="", compare=False)
+    basis: str = attribute(default="", compare=False)
 
     @property
     def id(self):
