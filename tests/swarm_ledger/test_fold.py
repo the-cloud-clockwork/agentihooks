@@ -281,7 +281,8 @@ class OutlineFolds(unittest.TestCase):
         script = (
             FakeDom.SCRIPT
             + "const PAGE_SIZE = 50;"
-            + "const FULL_PAGE" + page().split("  const FULL_PAGE", 1)[1].split("\n", 1)[0]
+            + "const FULL_PAGE"
+            + page().split("  const FULL_PAGE", 1)[1].split("\n", 1)[0]
             + "const shown = {}; const wanted = { id: null };"
             + "".join(
                 function_source(n) + "\n"
