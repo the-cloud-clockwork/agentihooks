@@ -994,14 +994,14 @@ class IntentGate:
         return Decision()
 
     def _decide_record(self, call, who, state, mode, record, bound=False):
-        queued = _queue_target(call.command)
-        if queued:
-            return queue_decision(who, state, queued, mode)
         if not bound and _other_half(call.command, record):
             return Decision.deny(
                 f"intent for task {who.task} was judged on {record['url']}, not this pull request. Record this half "
                 f"first: agentihooks swarm {who.swarm} pr <pull request url> --half <n>, then wait for its verdict."
             )
+        queued = _queue_target(call.command)
+        if queued:
+            return queue_decision(who, state, queued, mode)
         verdict = record and record["verdict"]
         if mode == "coach" and record and record.get("head"):
             head = pr_head(record["url"])

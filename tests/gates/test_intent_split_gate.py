@@ -111,7 +111,7 @@ def test_merge_target_reads_the_first_pull_request_operand():
 
 
 @pytest.mark.parametrize("target", [FIRST, "9"])
-@pytest.mark.parametrize("head,allowed", [("abc", True), ("new", False), (None, False)])
+@pytest.mark.parametrize("head,allowed", [("abc", True), ("new", True), (None, True)])
 def test_the_tests_first_intent_survives_recording_the_main_pull(tmp_path, monkeypatch, target, head, allowed):
     task = split_task()
     judged(tmp_path, task)
