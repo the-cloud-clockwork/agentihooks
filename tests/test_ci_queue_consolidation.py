@@ -15,12 +15,12 @@ def test_container_proofs_share_one_runner_without_losing_commands():
     steps = smoke["smoke"]["steps"]
     assert [step["run"] for step in steps if "run" in step] == [
         "bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm",
+        "docker build -t local/agentihooks-swarm:clients-check .",
         "bash scripts/packaging/hive-launch-smoke.sh",
         "bash scripts/packaging/hive-launch-attestation-proof.sh",
         "bash scripts/packaging/swarm-smoke.sh",
         "bash scripts/packaging/hive-join-smoke.sh",
         "bash scripts/packaging/compose-hive-smoke.sh",
-        "docker build -t local/agentihooks-swarm:clients-check .",
         "bash scripts/packaging/swarm-image-clients.sh local/agentihooks-swarm:clients-check",
     ]
     assert sum(step.get("uses") == "actions/checkout@v4" for step in steps) == 1
