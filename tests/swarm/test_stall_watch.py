@@ -5,7 +5,7 @@ from dataclasses import replace
 import pytest
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import ledger_events, outage, ready, stall_watch
+from scripts.swarm import idle, ledger_events, outage, ready, stall_watch
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.stall_watch import ALERTED, REOPENED
@@ -951,3 +951,68 @@ def test_each_alert_row_is_judged_on_its_own():
     swarm.store.redis.hset(key, "t9", _row("t9", inbox.send("swarm", "master@sw", "due").id))
     assert swarm.tick(START + 20 * MINUTE) == ["stall on task t9 unanswered, raised to the operator"]
     assert [item for item, _ in swarm.ledger.priorities] == ["tasks/t9"]
+
+
+RULES = [(GREEN, True, 10), (RED, True, 15), (RUNNING, False, 10), (CONFLICTING, False, 5)]
+
+
+def _wait(swarm, on, name=OWNER):
+    idle.declare_wait(swarm.store.redis, SLUG, name, START + 600 * MINUTE, "held behind its fix", START, on=on)
+
+
+def _held_then_released(swarm, limit, release):
+    assert swarm.tick(START) == []
+    assert swarm.tick(START + 6 * limit * MINUTE) == []
+    assert not _reopened(swarm) and swarm.retired == [] and swarm.inbox() == [] and swarm.ledger.updates == []
+    release()
+    swarm.tick(START + 7 * limit * MINUTE)
+    swarm.tick(START + 8 * limit * MINUTE)
+    assert _reopened(swarm)
+
+
+@pytest.mark.parametrize(("pull", "live", "limit"), RULES)
+def test_an_open_dependency_holds_every_stall_rule_until_it_is_done(pull, live, limit):
+    swarm = Swarm(pull, task={"depends_on": ["fix"]}, live=live)
+    swarm.ledger.rows["fix"] = {"id": "fix", "state": "pr"}
+    _held_then_released(swarm, limit, lambda: swarm.ledger.rows["fix"].update(state="done"))
+
+
+@pytest.mark.parametrize("depends_on", [["gone"], ["t1"], []])
+def test_an_unknown_or_own_dependency_does_not_hold_a_stall(depends_on):
+    swarm = Swarm(RED, task={"depends_on": depends_on})
+    swarm.tick(START + 15 * MINUTE)
+    assert _reopened(swarm)
+
+
+@pytest.mark.parametrize(("pull", "live", "limit"), RULES)
+def test_an_owner_wait_on_an_open_task_holds_every_stall_rule_until_it_is_done(pull, live, limit):
+    swarm = Swarm(pull, live=live)
+    swarm.ledger.rows["fix"] = {"id": "fix", "state": "claimed"}
+    _wait(swarm, {"kind": "task", "target": "fix"})
+    _held_then_released(swarm, limit, lambda: swarm.ledger.rows["fix"].update(state="done"))
+
+
+@pytest.mark.parametrize(("pull", "live", "limit"), RULES)
+def test_an_owner_wait_on_another_open_pull_request_holds_every_stall_rule_until_it_merges(pull, live, limit):
+    swarm = Swarm(pull, live=live)
+    other = URL + "1"
+    swarm.pulls[other] = RUNNING
+    _wait(swarm, {"kind": "merge", "target": other})
+    _held_then_released(swarm, limit, lambda: swarm.pulls.update({other: replace(RUNNING, state="MERGED")}))
+
+
+@pytest.mark.parametrize(
+    ("name", "on"),
+    [
+        (OWNER, {"kind": "checks", "target": URL}),
+        (OWNER, {"kind": "merge", "target": URL}),
+        (OWNER, None),
+        ("engineer@abc-0002", {"kind": "task", "target": "fix"}),
+    ],
+)
+def test_a_wait_on_its_own_pull_request_or_by_another_agent_does_not_hold_a_stall(name, on):
+    swarm = Swarm(RED)
+    swarm.ledger.rows["fix"] = {"id": "fix", "state": "claimed"}
+    _wait(swarm, on, name)
+    swarm.tick(START + 15 * MINUTE)
+    assert _reopened(swarm)
