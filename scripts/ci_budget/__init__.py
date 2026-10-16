@@ -15,7 +15,6 @@ BUDGETS = {
     "promote": 10 * 60,
     "admission": 30,
     "reuse": 30,
-    "durations": 60,
     "split": 120,
     "select": 60,
     "unit": 300,

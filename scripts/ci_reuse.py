@@ -50,9 +50,9 @@ QUEUE_TIER = """if [[ "${EVENT:-}" == merge_group || "${EVENT:-}" == pull_reques
   if ! jq -e --arg event "$EVENT" --arg mutation "$MUTATION" '
     (.select.outputs.scope // "") as $scope
     | (if $event == "merge_group" then
-      ["select", "split", "unit", "shard-check", "test-count", "queue-fail-fast"]
+      ["durations", "split", "unit", "shard-check", "test-count", "queue-fail-fast"]
     else
-      ["select", "test-count", "lint", "semgrep", "sonar"]
+      ["durations", "select", "test-count", "lint", "semgrep", "sonar"]
       + (if $scope == "full" then ["split", "unit", "shard-check"] elif $scope == "selected" then ["unit-selected"] else [] end)
       + (if $mutation == "true" then ["mutation-plan", "mutation-stats", "mutation"] else [] end)
     end) as $required
