@@ -26,7 +26,7 @@ on:
 concurrency:
   group: ${{ github.event_name == 'workflow_dispatch' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || github.event_name == 'push' && 'promotion-dev' || format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}
   queue: ${{ github.event_name == 'workflow_dispatch' && 'max' || 'single' }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -121,7 +121,7 @@ jobs:
             artifact="$(jq -r --arg name "required-tree-$2" 'select(.name == $name and (.expired | not)) | .id' "$folder/artifacts.jsonl" | head -n 1)"
             [[ -n "$artifact" ]] || return 0
             gh api "$actions/artifacts/$artifact/zip" > "$folder/proof.zip" || { rm -f "$folder/proof.zip"; return 0; }
-            gh api --paginate "$actions/runs/$1/attempts/$2/jobs?per_page=100" --jq '.jobs[]' > "$folder/jobs.jsonl" || { rm -f "$folder/jobs.jsonl"; return 0; }
+            python3 -m scripts.ci_budget.jobs "$actions/runs/$1/attempts/$2/jobs" --page-size 5 > "$folder/jobs.jsonl" || { rm -f "$folder/jobs.jsonl"; return 0; }
             job="$(jq -r 'select(.name == "reuse" and .conclusion == "success") | .id' "$folder/jobs.jsonl" | head -n 1)"
             [[ -n "$job" ]] || return 0
             gh api --allow-escape-sequences "$actions/jobs/$job/logs" > "$folder/reuse.log" || rm -f "$folder/reuse.log"
@@ -374,7 +374,7 @@ jobs:
             artifact="$(jq -r --arg name "required-tree-$2" 'select(.name == $name and (.expired | not)) | .id' "$folder/artifacts.jsonl" | head -n 1)"
             [[ -n "$artifact" ]] || return 0
             gh api "$actions/artifacts/$artifact/zip" > "$folder/proof.zip" || return 0
-            gh api --paginate "$actions/runs/$1/attempts/$2/jobs?per_page=100" --jq '.jobs[]' > "$folder/jobs.jsonl" || return 0
+            python3 -m scripts.ci_budget.jobs "$actions/runs/$1/attempts/$2/jobs" --page-size 5 > "$folder/jobs.jsonl" || return 0
             job="$(jq -r 'select((.name == "reuse" or .name == "durations") and .conclusion == "success") | .id' "$folder/jobs.jsonl" | head -n 1)"
             [[ -n "$job" ]] || return 0
             gh api --allow-escape-sequences "$actions/jobs/$job/logs" > "$folder/reuse.log" || return 0
@@ -793,7 +793,7 @@ jobs:
       - name: Restore the Codex CLI
         id: codex
         if: needs.split.outputs.source == '' && matrix.python-version == '3.12' && matrix.shard == 1
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ~/codex
           key: codex-${{ runner.os }}-${{ env.CODEX_RELEASE }}
@@ -991,7 +991,7 @@ jobs:
       - name: Restore the Codex CLI
         id: codex
         if: matrix.python-version == '3.12' && contains(format(' {0} ', env.FILES), ' tests/routing/test_codex_api.py ')
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ~/codex
           key: codex-${{ runner.os }}-${{ env.CODEX_RELEASE }}

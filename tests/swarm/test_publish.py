@@ -162,6 +162,35 @@ def test_publication_commits_explicit_files_before_grading_and_pushing(publicati
     assert git(worktree, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/engineer-test"
 
 
+@pytest.mark.parametrize("record_repository_branch", [False, True])
+def test_publish_from_second_worktree_pushes_and_records_its_branch(
+    publication, tmp_path, monkeypatch, record_repository_branch
+):
+    from scripts.swarm import publish
+
+    first = publication.root
+    git(first, "push", "origin", "HEAD:engineer-test")
+    first_head = git(first, "rev-parse", "HEAD")
+    second = tmp_path / "second"
+    git(first, "worktree", "add", "-b", "engineer-test-2", str(second))
+    if record_repository_branch:
+        publication.task["repository_branches"] = {str(publication.repo): "engineer-test"}
+    (second / "chosen.txt").write_text("after")
+    monkeypatch.chdir(second)
+
+    result = publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+
+    head = git(second, "rev-parse", "HEAD")
+    assert result["worktree"] == str(second)
+    assert result["branch"] == publication.task["branch"] == "engineer-test-2"
+    assert publication.task["repository_branches"] == {str(publication.repo): "engineer-test-2"}
+    assert git(second, "ls-remote", "origin", "refs/heads/engineer-test-2").split()[0] == head
+    assert git(first, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == first_head
+    assert git(second, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/engineer-test-2"
+
+
 def test_prepare_creates_the_task_worktree_once_through_the_worktree_command(repository, tmp_path, monkeypatch):
     from scripts.swarm import publish, stack
 

@@ -125,9 +125,9 @@ def _concurrency(event, run_id, number=None):
     )
 
 
-def test_two_dev_pushes_share_one_promotion_group_that_cancels_the_older_run():
+def test_dev_pushes_preserve_the_running_promotion_and_replace_only_the_pending_run():
     first, second = _concurrency("push", 1000), _concurrency("push", 1061)
-    assert first == second == {"group": "promotion-dev", "queue": "single", "cancel-in-progress": True}
+    assert first == second == {"group": "promotion-dev", "queue": "single", "cancel-in-progress": False}
 
 
 @pytest.mark.parametrize("event,number", [("merge_group", None), ("pull_request", 7)])
