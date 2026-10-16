@@ -102,8 +102,17 @@ class Boot:
 
     def __call__(self, request: worker_home.Request) -> dict:
         self.requests.append(request)
-        (request.root / request.attempt / "run").mkdir(parents=True)
-        return {}
+        from scripts.profiles import binding
+
+        attempt = request.root / request.attempt
+        (attempt / "run").mkdir(parents=True)
+        for target, profile in request.profiles.items():
+            home = attempt / "homes" / target / f".{target}"
+            home.mkdir(parents=True)
+            (home.parent / f"{target}.sources.json").write_text("[]")
+            (home / binding.PERSONAS[target]).write_text(binding.persona(profile))
+            binding.write(home, profile, target)
+        return {"homes": {target: f"homes/{target}" for target in request.profiles}}
 
 
 def shipped(tmp_path: Path) -> Path:
@@ -887,7 +896,7 @@ class Bootstrap(Boot):
     def __call__(self, request: worker_home.Request) -> dict:
         super().__call__(request)
         attempt = request.root / request.attempt
-        (attempt / "homes" / "claude").mkdir(parents=True)
+        (attempt / "homes" / "claude").mkdir(parents=True, exist_ok=True)
         layout = filesystem.mapping(filesystem.load())
         record = {"attempt": request.attempt, "homes": {"claude": "homes/claude"}, "layout": layout}
         (attempt / "execution.json").write_text(json.dumps(record))
@@ -936,6 +945,75 @@ def test_the_start_prints_the_rendered_chain_when_bootstrap_names_one(monkeypatc
 
     printed = {"worker_start": "prepared", "attempt": "a", "uid": os.getuid(), "chains": chains}
     assert capsys.readouterr().out == json.dumps(printed) + "\n"
+
+
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_the_worker_logs_a_passed_profile_binding_before_starting_its_task(tmp_path, monkeypatch, capsys, target):
+    launch = material(tmp_path, {**RECORD, "harness": target, "agent": [target]})
+    attempt = tmp_path / "attempts" / EXECUTION
+    controller = Controller((200, ANSWER))
+    original = start.prepare
+    monkeypatch.setattr(
+        start, "prepare", lambda a, l: original(a, l, controller.send, controller.sleep, Boot(), shipped(tmp_path))
+    )
+
+    def supervise(argv):
+        report = attempt / "run" / "profile-binding.json"
+        evidence = json.loads(report.read_text())
+        assert evidence["state"] == "passed"
+        assert evidence["profile"] == "engineer" and evidence["harness"] == target
+        assert evidence["rendered"]["home"] == str(attempt / "homes" / target / f".{target}")
+        assert stat.S_IMODE(report.stat().st_mode) == 0o600
+        logs = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+        assert logs[0] == {"profile_binding": "passed", "profile": "engineer", "harness": target}
+        assert logs[1]["worker_start"] == "prepared"
+        return 70
+
+    monkeypatch.setattr(start.supervision_runtime, "main", supervise)
+    assert start.main([str(attempt), str(launch)]) == 70
+
+
+@pytest.mark.parametrize("target", ["claude", "codex"])
+@pytest.mark.parametrize("fault", ["persona", "sources", "binding", "profile", "home"])
+def test_a_failed_worker_binding_is_reported_and_refuses_the_task(tmp_path, monkeypatch, capsys, target, fault):
+    from scripts.profiles import binding
+
+    class Damaged(Boot):
+        def __call__(self, request):
+            record = super().__call__(request)
+            home = request.root / request.attempt / record["homes"][target] / f".{target}"
+            if fault == "persona":
+                (home / binding.PERSONAS[target]).write_text("changed persona")
+            elif fault == "sources":
+                (home.parent / f"{target}.sources.json").write_text("[{}]")
+            elif fault == "binding":
+                (home / binding.FILE).unlink()
+            elif fault == "profile":
+                binding.write(home, "frontend", target)
+            else:
+                record["homes"][target] = "missing-home"
+            return record
+
+    launch = material(tmp_path, {**RECORD, "harness": target, "agent": [target]})
+    attempt = tmp_path / "attempts" / EXECUTION
+    controller = Controller((200, ANSWER))
+    original = start.prepare
+    monkeypatch.setattr(
+        start, "prepare", lambda a, l: original(a, l, controller.send, controller.sleep, Damaged(), shipped(tmp_path))
+    )
+    monkeypatch.setattr(
+        start.supervision_runtime, "main", lambda argv: pytest.fail("task started after failed binding")
+    )
+
+    assert start.main([str(attempt), str(launch)]) == 64
+
+    logs = capsys.readouterr()
+    assert not logs.out
+    assert "ERROR worker start refused: profile binding failed:" in logs.err
+    evidence = json.loads((attempt / "run" / "profile-binding.json").read_text())
+    assert evidence["state"] == "failed" and evidence["reason"]
+    assert evidence["profile"] == "engineer" and evidence["harness"] == target
+    assert not (attempt / start.RECORD).exists()
 
 
 def test_the_image_supervisor_entry_is_the_worker_start_step():
