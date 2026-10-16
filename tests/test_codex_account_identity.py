@@ -16,11 +16,11 @@ BETA = "22222222-2222-2222-2222-222222222222"
 OWN = "33333333-3333-3333-3333-333333333333"
 
 
-def _jwt(account_id):
+def _jwt(account_id, session=""):
     def part(data):
         return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
 
-    claims = {codex_router.OPENAI_AUTH_CLAIM: {"chatgpt_account_id": account_id}}
+    claims = {codex_router.OPENAI_AUTH_CLAIM: {"chatgpt_account_id": account_id}, "sid": session}
     return ".".join([part(b'{"alg":"RS256"}'), part(json.dumps(claims).encode()), "c2ln"])
 
 
@@ -63,7 +63,7 @@ def test_a_token_account_repeating_an_earlier_chatgpt_account_is_refused_with_a_
     environ = {
         "HOME": str(tmp_path),
         "AH_CX_TOKEN_alpha": _jwt("acct-1"),
-        "AH_CX_TOKEN_beta": _jwt("acct-1"),
+        "AH_CX_TOKEN_beta": _jwt("acct-1", "second login"),
         "AH_CX_TOKEN_gamma": _jwt("acct-2"),
     }
     tokens = codex_router.token_accounts(environ)
@@ -111,17 +111,21 @@ def test_each_codex_row_shows_its_fingerprint_beside_the_account(tmp_path):
     assert [row.identity for row in agents_quota.codex_rows(pool, {}, {}, NOW)] == ["", ""]
 
 
-def test_a_stale_row_whose_week_has_reset_reads_unknown_instead_of_a_full_window():
-    old = codex_quota.CodexQuota(NOW - 3600, "pro", seven_day=QuotaWindow(80.0, int(NOW - 60)))
+def test_a_stale_row_whose_week_has_reset_reads_unknown_instead_of_a_full_window(monkeypatch):
+    monkeypatch.delenv("AGENTIHOOKS_CODEX_READING_MAX_AGE_H", raising=False)
     account = CodexAccount("alpha", "AH_CX_TOKEN_alpha")
+    old = codex_quota.CodexQuota(NOW - 7 * 3600, "pro", seven_day=QuotaWindow(80.0, int(NOW - 60)))
     [row] = agents_quota.codex_rows([account], {"alpha": old}, {}, NOW)
-    assert (row.seven_day_left, row.routing_left) == (None, None)
-    fresh = codex_quota.CodexQuota(NOW - 60, "pro", seven_day=QuotaWindow(80.0, int(NOW - 30)))
-    [row] = agents_quota.codex_rows([account], {"alpha": fresh}, {}, NOW)
-    assert (row.seven_day_left, row.routing_left) == (100.0, 100.0)
-    running = codex_quota.CodexQuota(NOW - 3600, "pro", seven_day=QuotaWindow(80.0, int(NOW + 3600)))
+    assert (row.state, row.seven_day_left, row.routing_left, row.cap) == ("STALE", None, None, None)
+    recent = codex_quota.CodexQuota(NOW - 3600, "pro", seven_day=QuotaWindow(80.0, int(NOW - 60)))
+    [row] = agents_quota.codex_rows([account], {"alpha": recent}, {}, NOW)
+    assert (row.seven_day_left, row.routing_left, row.cap) == (100.0, 100.0, 6)
+    running = codex_quota.CodexQuota(NOW - 7 * 3600, "pro", seven_day=QuotaWindow(80.0, int(NOW + 3600)))
     [row] = agents_quota.codex_rows([account], {"alpha": running}, {}, NOW)
-    assert (row.seven_day_left, row.routing_left) == (20.0, 20.0)
+    assert (row.state, row.seven_day_left, row.routing_left) == ("STALE", 20.0, 20.0)
+    short = {"AGENTIHOOKS_CODEX_READING_MAX_AGE_H": "0.5"}
+    [row] = agents_quota.codex_rows([account], {"alpha": recent}, {}, NOW, short)
+    assert (row.seven_day_left, row.routing_left) == (None, None)
 
 
 def test_a_rollout_links_into_its_own_account_folder_once(tmp_path):
@@ -213,16 +217,13 @@ def test_a_failed_link_is_logged_and_never_raises(monkeypatch):
     assert seen == [("codex rollout link failed", {"error": "boom"})]
 
 
-def test_a_stale_reading_past_its_week_reset_gives_no_cap_while_a_fresh_one_does():
-    old = codex_quota.CodexQuota(NOW - 3600, "pro", seven_day=QuotaWindow(80.0, int(NOW - 60)))
-    fresh = codex_quota.CodexQuota(NOW - 60, "pro", seven_day=QuotaWindow(80.0, int(NOW - 30)))
-    running = codex_quota.CodexQuota(NOW - 3600, "pro", seven_day=QuotaWindow(80.0, int(NOW + 3600)))
-    assert [codex_router.stale_reset(q, NOW) for q in (old, fresh, running)] == [True, False, False]
-    assert codex_router.account_cap(old, NOW, {}) is None
-    assert codex_router.account_cap(fresh, NOW, {}) == 6
-    assert codex_router.account_cap(running, NOW, {}) == 6
-    spent = codex_quota.CodexQuota(NOW - 3600, "pro", seven_day=QuotaWindow(99.0, int(NOW + 3600)))
-    assert codex_router.account_cap(spent, NOW, {}) == 0
+def test_a_stale_reset_needs_both_a_reading_past_its_max_age_and_a_passed_week(monkeypatch):
+    monkeypatch.delenv("AGENTIHOOKS_CODEX_READING_MAX_AGE_H", raising=False)
+    old = codex_quota.CodexQuota(NOW - 7 * 3600, "pro", seven_day=QuotaWindow(80.0, int(NOW - 60)))
+    recent = codex_quota.CodexQuota(NOW - 3600, "pro", seven_day=QuotaWindow(80.0, int(NOW - 60)))
+    running = codex_quota.CodexQuota(NOW - 7 * 3600, "pro", seven_day=QuotaWindow(80.0, int(NOW + 3600)))
+    assert [codex_router.stale_reset(q, NOW) for q in (old, recent, running)] == [True, False, False]
+    assert codex_router.stale_reset(recent, NOW, {"AGENTIHOOKS_CODEX_READING_MAX_AGE_H": "0.5"}) is True
 
 
 def test_an_empty_account_folder_falls_back_to_the_registry_reading(tmp_path, monkeypatch):
@@ -262,7 +263,7 @@ def test_the_balance_table_ends_with_the_duplicate_warning_and_the_default_verdi
     for name in [name for name in os.environ if name.startswith("AH_CX_TOKEN_")]:
         monkeypatch.delenv(name)
     monkeypatch.setenv("AH_CX_TOKEN_alpha", _jwt("acct-1"))
-    monkeypatch.setenv("AH_CX_TOKEN_ncgma", _jwt("acct-1"))
+    monkeypatch.setenv("AH_CX_TOKEN_ncgma", _jwt("acct-1", "second login"))
     monkeypatch.setattr("hooks.context.account_sessions.codex_sessions_by_account", lambda: {})
     row = agents_quota.QuotaRow("codex", "alpha", "UNKNOWN", 0, None, None, None, "log")
     lines = agents_quota._render_live([row], {}, NOW).splitlines()

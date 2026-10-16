@@ -237,6 +237,7 @@ def test_quota_json_lists_every_row(monkeypatch, capsys):
             "routing_left": None,
             "fable_left": None,
             "fable_resets_at": None,
+            "identity": "",
             "harness": "claude",
         }
     ]

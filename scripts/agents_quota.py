@@ -159,7 +159,7 @@ def codex_rows(
         quota = quotas.get(account.name)
         known = quota is not None and not quota.expired
         fresh = known and session_bands.fresh(quota.observed_at, now)
-        measured = known and not codex_router.stale_reset(quota, now)
+        measured = known and not codex_router.stale_reset(quota, now, environ)
         week = session_bands.left(quota.seven_day.used, quota.seven_day.resets_at, now) if measured else None
         cap = codex_router.account_cap(quota, now, environ) if account.signed_in and known else None
         rows.append(
