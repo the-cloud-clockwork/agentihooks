@@ -1,5 +1,6 @@
 import math
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -10,6 +11,15 @@ MEMORY_PER_AGENT_MB = 700
 LOAD_HIGH = 1.5
 LOAD_LOW = 1.0
 LOAD, MEMORY, UNKNOWN = "load", "memory", "unknown"
+DEPLOYMENT_ENV = "AGENTIHOOKS_DEPLOYMENT"
+NODE_OFF = (
+    "host room off: a deployed controller's own node says nothing about worker capacity and no worker pool "
+    "reading is wired, so spawns pass"
+)
+PRESSURE_OFF = (
+    "host pressure alert off: a deployed controller's own node says nothing about worker capacity; "
+    "the host room line shows the worker pool reading or why it is off"
+)
 
 
 @dataclass(frozen=True)
@@ -99,3 +109,13 @@ def read_host(proc: Path = Path("/proc")) -> HostSample | None:
     except (OSError, ValueError, IndexError):
         return None
     return HostSample(load1=load1, cpus=cpus, available_mb=available_mb, agents=agents)
+
+
+def deployed(environ: Mapping[str, str]) -> bool:
+    return environ.get(DEPLOYMENT_ENV, "local") != "local"
+
+
+def controller_host(environ: Mapping[str, str]) -> HostSample | Room | None:
+    if deployed(environ):
+        return Room(None, NODE_OFF, UNKNOWN)
+    return read_host()

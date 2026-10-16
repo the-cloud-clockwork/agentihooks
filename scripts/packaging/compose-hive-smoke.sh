@@ -20,7 +20,15 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=$run" -addext "subj
 cp "$tls/cert.pem" "$tls/ca.pem"
 chmod 0755 "$tls"
 chmod 0644 "$tls"/*.pem
-if ! docker compose up --build --wait --wait-timeout 180; then
+bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/redis:7
+build=(--build)
+if [[ -n "${SWARM_SMOKE_IMAGE:-}" ]]; then
+  docker tag "$SWARM_SMOKE_IMAGE" ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev
+  build=(--no-build)
+else
+  bash scripts/packaging/pull-runtime-image.sh ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev
+fi
+if ! docker compose up --pull never "${build[@]}" --wait --wait-timeout 180; then
   docker compose logs >&2
   exit 1
 fi

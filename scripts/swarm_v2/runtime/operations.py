@@ -35,6 +35,7 @@ class Phase(StrEnum):
     UNKNOWN = "unknown"
     APPLIED = "applied"
     REFUSED = "refused"
+    SUPERSEDED = "superseded"
 
 
 @dataclass(frozen=True)
@@ -156,12 +157,29 @@ class OperationJournal:
             settled = {"phase": Phase.ACCEPTED, "result": {}, "attempted": False}
             if replace(current, **settled) != replace(operation, **settled):
                 raise OperationConflict(_ERRORS["identity"])
-            if current.phase is Phase.APPLIED:
+            if current.phase in (Phase.APPLIED, Phase.SUPERSEDED):
                 return current
             phase = Phase.ACCEPTED if observation.phase is Phase.ABSENT else observation.phase
             result = observation.result if phase is Phase.APPLIED else {}
             sent = (current.attempted or attempted) and phase in (Phase.UNKNOWN, Phase.APPLIED)
             return replace(current, phase=phase, result=result, attempted=sent)
+
+        return self._write(slug, update)
+
+    def supersede_legacy_spawn(self, slug: str, operation: Operation) -> Operation:
+        def update(pipe):
+            self._current(slug, operation.execution_id, operation.generation, pipe)
+            raw = pipe.hget(self.store.key(slug, "runtime-operations"), operation.operation_id)
+            if not raw or _decode(raw) != operation:
+                raise OperationConflict(_ERRORS["identity"])
+            if (
+                operation.backend != "kubernetes"
+                or operation.action != SPAWN
+                or operation.spec_digest
+                or operation.phase in (Phase.APPLIED, Phase.SUPERSEDED)
+            ):
+                return operation
+            return replace(operation, phase=Phase.SUPERSEDED, result={"reason": "missing_spec_digest"})
 
         return self._write(slug, update)
 
@@ -208,7 +226,7 @@ class Operations:
     def execute(self, slug: str, request: OperationRequest) -> Operation:
         request = replace(request, payload=json.loads(json.dumps(request.payload)))
         operation = self.journal.prepare(slug, request, self._specs(request))
-        if operation.phase is Phase.APPLIED:
+        if operation.phase in (Phase.APPLIED, Phase.SUPERSEDED):
             return operation
         transport = self.transports.get(operation.backend)
         if transport is None:
@@ -233,7 +251,11 @@ class Operations:
         }
 
     def unresolved(self, slug: str) -> list[Operation]:
-        return [operation for operation in self.journal.records(slug) if operation.phase is not Phase.APPLIED]
+        return [
+            operation
+            for operation in self.journal.records(slug)
+            if operation.phase not in (Phase.APPLIED, Phase.SUPERSEDED)
+        ]
 
     def recover(self, slug: str) -> list[Operation]:
         recovered = []

@@ -3,6 +3,7 @@
 The calculator only reports; the master diagnoses and the operator decides.
 """
 
+import dataclasses
 import os
 from collections import Counter
 from dataclasses import asdict, dataclass, fields
@@ -60,6 +61,7 @@ class Finding:
     evidence: tuple
     threshold: str
     measure: int = 0
+    basis: str = dataclasses.field(default="", compare=False)
 
     @property
     def id(self):
@@ -67,7 +69,7 @@ class Finding:
 
     def as_dict(self):
         found = asdict(self)
-        del found["measure"]
+        del found["measure"], found["basis"]
         return {**found, "evidence": list(self.evidence)}
 
 
@@ -87,7 +89,7 @@ def findings(ledger, agents, activity, limits, waiting=frozenset(), green=frozen
     return [
         *ceremony(events, tasks, limits, green, talk),
         *scope_inflation(events, tasks, limits),
-        *proof_loops(events, tasks, limits),
+        *proof_loops(events, tasks, limits, ledger.get("review_rounds", {})),
         *failed_launches(events, tasks),
         *idle_with_claim(agents, tasks, limits, waiting),
         *waiting_on_input(agents, tasks),
@@ -212,13 +214,14 @@ def scope_inflation(events, tasks, limits):
     return found
 
 
-def proof_loops(events, tasks, limits):
-    claims = Counter(_task_id(e["target"]) for e in events if e.get("kind") == "task started")
-    rounds = Counter(_task_id(e["target"]) for e in events if e.get("kind") == "task pr")
+def proof_loops(
+    events: list[dict], tasks: dict[str, dict], limits: Limits, reviews: dict[str, dict[str, int]]
+) -> list[Finding]:
+    claims, reruns = _lives(events)
+    rounds = {tid: max(reviews.get(tid, {}).values(), default=0) for tid in tasks}
     found = []
     for tid in tasks:
-        reruns = max(claims[tid] - 1, 0)
-        if reruns > limits.reruns or rounds[tid] > limits.review_rounds:
+        if reruns[tid] > limits.reruns or rounds[tid] > limits.review_rounds:
             found.append(
                 Finding(
                     "proof loop",
@@ -226,14 +229,24 @@ def proof_loops(events, tasks, limits):
                     "reruns or review rounds over the cap",
                     (
                         f"task {_title(tasks, tid)}",
-                        f"started {_plural(claims[tid], 'time')} ({_plural(reruns, 'rerun')})",
+                        f"started {_plural(claims[tid], 'time')} ({_plural(reruns[tid], 'rerun')})",
                         _plural(rounds[tid], "review round"),
                     ),
                     f"more than {limits.reruns} reruns or {limits.review_rounds} review rounds",
-                    reruns + rounds[tid],
+                    reruns[tid] + rounds[tid],
                 )
             )
     return found
+
+
+def _lives(events: list[dict]) -> tuple[Counter, Counter]:
+    starts, reruns = Counter(), Counter()
+    for e in sorted((e for e in events if e.get("kind") == "task started"), key=lambda e: e["at"]):
+        tid = _task_id(e["target"])
+        if starts[tid] and not e.get("after"):
+            reruns[tid] += 1
+        starts[tid] += 1
+    return starts, reruns
 
 
 def failed_launches(events: list[dict], tasks: dict) -> list[Finding]:

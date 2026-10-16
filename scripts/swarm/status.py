@@ -11,7 +11,7 @@ from scripts.gates import log as gate_log
 from scripts.gates import quiet as quiet_gate
 from scripts.gates.talk import WORKER_LANES
 from scripts.handoff import transfers
-from scripts.hive import placement_waits
+from scripts.hive import placement_waits, reports
 from scripts.inbox.store import InboxStore
 from scripts.swarm import (
     affinity,
@@ -28,15 +28,17 @@ from scripts.swarm import (
     overlays,
     quota_view,
     retire_watch,
+    review_rounds,
     snapshot,
     stall_watch,
     tick_master,
 )
-from scripts.swarm.health import activity, checks, prompt_backlog, spawn_stall, standing, verdicts
+from scripts.swarm.health import activity, checks, merge_stall, prompt_backlog, spawn_stall, standing, verdicts
 from scripts.swarm.health import findings as health
 from scripts.swarm.naming import swarm_name
-from scripts.swarm.store import ASSIST, SwarmError
-from scripts.swarm.tick import STARTUP_GRACE_MS, agent_status
+from scripts.swarm.runtime import HerdrRuntime
+from scripts.swarm.store import ASSIST, AgentRecord, RedisStore, SwarmError
+from scripts.swarm.tick import STARTUP_GRACE_MS, Runtime, agent_status
 from scripts.swarm_ledger import plan_shape
 from scripts.swarm_v2 import telemetry
 from scripts.swarm_v2.reconciliation import accounts as account_reconciliation
@@ -80,6 +82,8 @@ def findings(store, slug, config, tasks, events):
                 "kind": "task started" if row["state"] == "started" else "launch failed",
                 "target": f"tasks/{row['task']}",
                 "error": row["error"],
+                "at": row["at"],
+                "after": row.get("after"),
             }
             for row in store.launches(slug)
             if row["state"] in ("started", "failed")
@@ -89,7 +93,11 @@ def findings(store, slug, config, tasks, events):
     rows = _health_rows(store, slug, agents, quiet, now_ms())
     found = (
         health.findings(
-            {"tasks": tasks, "_meta": {"events": events}},
+            {
+                "tasks": tasks,
+                "_meta": {"events": events},
+                "review_rounds": {task["id"]: review_rounds.counts(slug, task["id"]) for task in tasks},
+            },
             rows,
             activity.counts(slug),
             limits,
@@ -108,6 +116,7 @@ def findings(store, slug, config, tasks, events):
         + drain_watch.findings(store, slug, limits, now_ms())
         + launch_check.findings(store, slug)
         + spawn_stall.findings(store, slug)
+        + merge_stall.findings(store, slug, config.repo, now_ms())
         + prompt_backlog.findings(store, slug)
         + placement_waits.findings(store, slug, now_ms())
         + standing.findings(store.redis, slug, now_ms())
@@ -232,13 +241,19 @@ def observation(store, slug, agent):
     return {"state": UNCLASSIFIED, "observed_at": at, "sources": {observe.Source.HEARTBEAT.value: heartbeat}}
 
 
-def status_report(store, slug, state):
-    from scripts.swarm import capacity
+def live_agents(agents: list[AgentRecord], runtime: Runtime) -> list[AgentRecord]:
+    names = runtime.live_names()
+    return [a for a in agents if a.runtime_backend != "local" or reports.host(a) or a.name in names]
+
+
+def status_report(store: RedisStore, slug: str, state: dict, runtime: Runtime | None = None) -> dict:
+    from scripts.swarm import capacity, tick_activity
 
     config = store.config(slug)
     tasks = state.get("tasks", [])
     events = state.get("_meta", {}).get("events", [])
     agents = [a.__dict__ for a in store.agents(slug)]
+    visible = live_agents(store.agents(slug), runtime or HerdrRuntime())
     handed = transfers.list_transfers(store, slug)
     active = lift.current(slug, now_ms())
     promotion = tick_master.read(store, slug)
@@ -260,10 +275,11 @@ def status_report(store, slug, state):
                     for item in InboxStore(store.redis).pending_mail(a.name)
                 ],
             }
-            for a in store.agents(slug)
+            for a in visible
         ],
         "outages": outage.open_records(slug),
         "last_tick": int(store.redis.get(store.key(slug, "last-tick")) or 0),
+        "last_tick_activity": tick_activity.read(store, slug),
         "history": [json.loads(row) for row in store.redis.lrange(store.key(slug, "history"), 0, -1)],
         "tasks": task_counts(tasks),
         "task_revisions": lifecycle.revisions(state.get("_meta", {}).get("stamps", {})),

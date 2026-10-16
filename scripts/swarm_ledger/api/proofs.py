@@ -32,6 +32,10 @@ def route(handler: object, server: ModuleType, parts: list, read_body: Callable[
     require_controller(handler, server)
     if len(parts) == 1:
         return create(server, read_body(handler, server))
+    if len(parts) == 3 and parts[2] == "migrate":
+        return migrate(server, parts[1], read_body(handler, server))
+    if len(parts) == 3 and parts[2] == "controller-controls":
+        return controller_control(server, parts[1], read_body(handler, server))
     if len(parts) == 3 and parts[2] == "remove":
         schemas.validate({"type": "object", "maxProperties": 0}, read_body(handler, server))
         return remove(handler, server, parts[1])
@@ -73,6 +77,82 @@ def _owner(server: ModuleType, slug: str) -> dict:
     if not owner:
         raise APIError(403, "forbidden", "Not an owned proof fixture")
     return owner
+
+
+def _migration_owner(server: ModuleType, slug: str, payload: dict) -> dict:
+    schemas.validate(
+        {
+            "type": "object",
+            "required": ["parent", "agent", "task"],
+            "additionalProperties": False,
+            "properties": {
+                "parent": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+                "agent": {"type": "string"},
+                "task": {"type": "string", "pattern": "^[a-z0-9]+$"},
+            },
+        },
+        payload,
+    )
+    store = server.swarm_store()
+    if (
+        not naming.PROOF_RE.fullmatch(slug)
+        or not server.repository.exists(slug)
+        or slug in server.ledger_bin.entries()
+        or slug not in store.slugs()
+    ):
+        raise APIError(403, "forbidden", "Migration needs an existing scratch proof")
+    if not store.config(slug).scratch:
+        raise APIError(403, "forbidden", "Migration needs an existing scratch proof")
+    agent = naming.parse(payload["agent"])
+    if (
+        not agent
+        or naming.lane_of(payload["agent"]) != "eng"
+        or not slug.startswith(f"proof-{agent.code}-{payload['task']}-")
+    ):
+        raise APIError(403, "forbidden", "Migration must match the proof engineer and task")
+    return {"parent": payload["parent"], "owner": payload["agent"]}
+
+
+def migrate(server: ModuleType, slug: str, payload: dict) -> dict:
+    from redis.exceptions import WatchError
+
+    owner = _migration_owner(server, slug, payload)
+    store = server.swarm_store()
+    key = store.key(slug, "proof-creator")
+    try:
+        with store.redis.pipeline() as pipe:
+            pipe.watch(key)
+            saved = pipe.hgetall(key)
+            if saved and saved != owner:
+                raise APIError(409, "ownership_conflict", "Proof creator already differs from the requested migration")
+            if not saved:
+                pipe.multi()
+                pipe.hset(key, mapping=owner)
+                pipe.execute()
+    except WatchError:
+        raise APIError(409, "ownership_conflict", "Proof creator changed during migration") from None
+    return {"data": owner}
+
+
+def controller_control(server: ModuleType, slug: str, payload: dict) -> dict:
+    from types import SimpleNamespace
+
+    schemas.validate(
+        {
+            "type": "object",
+            "required": ["owner", "request"],
+            "additionalProperties": False,
+            "properties": {"owner": {}, "request": {"type": "object"}},
+        },
+        payload,
+    )
+    owner = _migration_owner(server, slug, payload["owner"])
+    if owner != _owner(server, slug):
+        raise APIError(409, "ownership_conflict", "Proof creator differs from the configured requester")
+    if payload["request"] == {"control": "pause"} and server.swarm_store().config(slug).state == "paused":
+        return {"data": {"state": "paused"}}
+    handler = SimpleNamespace(headers={"X-Proof-Credential": _credential(server, slug, owner)})
+    return control(handler, server, slug, payload["request"])
 
 
 def _credential(server: ModuleType, slug: str, owner: dict) -> str:

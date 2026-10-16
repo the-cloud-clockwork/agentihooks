@@ -11,7 +11,7 @@ import traceback
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 
-from scripts.swarm import commands, lease
+from scripts.swarm import commands, lease, live_binding
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 
 VIEW, AGENT, SWARM = "terminal view", "one agent", "one swarm"
@@ -268,6 +268,13 @@ def _fenced(agent: AgentRecord | None, record: dict, destructive: bool, now: int
     return ""
 
 
+def _retire_managed(agent: AgentRecord) -> str:
+    from scripts.swarm import runtime
+
+    herdr = runtime.HerdrRuntime()
+    return "" if herdr.retire(agent) else herdr.refusal(agent)["refusal"]
+
+
 def _apply(store: RedisStore, slug: str, agent: AgentRecord, record: dict, run: Callable[[list[str]], str]):
     from scripts.swarm_v2.api.commands import CommandQueue
     from scripts.swarm_v2.auth_context import GrantRefused
@@ -283,6 +290,8 @@ def _apply(store: RedisStore, slug: str, agent: AgentRecord, record: dict, run: 
         except GrantRefused as error:
             return str(error), {}
         return "", {"worker_command": issued["command_id"]}
+    if live_binding.managed(agent):
+        return _retire_managed(agent), {}
     target = ["terminate-agent", agent.name, "--type", "any"]
     return run([*target, "--dry-run"]) or run(target), {}
 

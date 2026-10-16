@@ -154,7 +154,7 @@ def test_a_finished_master_record_does_not_hold_off_the_promotion(store):  # noq
 def test_swarm_status_marks_the_promoted_engineer(store):  # noqa: F811
     runtime, ledger = outage(store)
     tick("sw", store, ledger, runtime, 1 + DOWN)
-    report = status_report(store, "sw", DOC)
+    report = status_report(store, "sw", DOC, runtime)
     assert report["promotion"]["promoted"] == ENGINEER
     assert [(a["name"], a["promoted"]) for a in report["agents"]] == [(ENGINEER, True)]
 
@@ -200,7 +200,7 @@ def test_a_master_that_binds_ends_the_promotion_and_hands_back(store):  # noqa: 
         ("message", "the hand back", 1 + 2 * DOWN),
     ]
     assert events(store, MASTER_SEAT)[-1] == ("handed back", f"{ENGINEER}: {master}", 1 + 2 * DOWN)
-    assert [a["promoted"] for a in status_report(store, "sw", DOC)["agents"]] == [False, False]
+    assert [a["promoted"] for a in status_report(store, "sw", DOC, runtime)["agents"]] == [False, False]
 
 
 def test_a_forced_launch_with_no_hook_promotes_after_the_startup_deadline(store):  # noqa: F811

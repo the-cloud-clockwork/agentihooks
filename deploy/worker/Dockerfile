@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 ARG WORKER_IMAGE=ghcr.io/the-cloud-clockwork/agentihooks-worker:dev
 FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS wheel
 WORKDIR /build

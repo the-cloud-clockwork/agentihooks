@@ -104,6 +104,10 @@ def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, bas
     # Stats tracing slows every test, so a wall clock bound only holds in the unit shards.
     test_runner._pytest_add_cli_args = [
         *test_runner._pytest_add_cli_args,
+        "-p",
+        "pytest_rerunfailures",
+        "--reruns",
+        "1",
         "-m",
         "not wall_clock",
         f"--basetemp={basetemp}",
@@ -171,6 +175,27 @@ def shard_collector(collect, shard: tuple[int, int]):
     return collect_shard_mutants
 
 
+def collect_file_stats(runner, test_runner, files: list[str], workers: int, work: Path) -> list[dict]:
+    def collect(chosen):
+        buckets = stats_shards(work, chosen, workers) if chosen else []
+        return run_stats_buckets(runner, test_runner, buckets, work)
+
+    if folder := os.environ.get("MUTATION_STATS_CACHE"):
+        from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+        changes = json.loads((work / "changed-lines.json").read_text())
+        scope = {path: sorted(change["lines"]) for path, change in changes.items()}
+        return collect_cached_stats(
+            Path(os.environ["MUTATION_STATS_ROOT"]),
+            Path(folder),
+            scope,
+            files,
+            test_runner._pytest_add_cli_args,
+            collect,
+        )
+    return collect(files)
+
+
 def load_or_collect_stats(runner, test_runner, paths: list[str], mode: str, stats: tuple[str, ...]) -> None:
     if mode not in ("", "collect", "reuse"):
         raise ValueError(f"unknown mutation stats mode {mode!r}")
@@ -195,8 +220,7 @@ def load_or_collect_stats(runner, test_runner, paths: list[str], mode: str, stat
         if mode == "collect":
             output, key, index, total = Path(stats[0]), stats[1], int(stats[2]), int(stats[3])
             files = part_files(Path.cwd(), config.pytest_add_cli_args_test_selection, (index, total))
-            buckets = stats_shards(Path.cwd(), files, workers) if files else []
-            write_part(output, key, (index, total), run_stats_buckets(runner, test_runner, buckets, Path.cwd()))
+            write_part(output, key, (index, total), collect_file_stats(runner, test_runner, files, workers, Path.cwd()))
             raise SystemExit(0)
         shards = stats_shards(Path.cwd(), config.pytest_add_cli_args_test_selection, workers)
         collect_parallel_stats(runner, test_runner, shards, Path.cwd())

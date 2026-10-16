@@ -55,10 +55,12 @@ that flag the whole hook layer is dead weight. Events map to groups of command
 hooks pointing at `~/.codex/agentihooks-hook.sh`, which sets
 `AGENTIHOOKS_TARGET=codex` and execs `python -m hooks`.
 
-Codex trusts hooks **by content hash**. Until trusted, it SILENTLY skips them —
-run `/hooks` once inside a codex session, or launch automation with
-`--dangerously-bypass-hook-trust`. `init` leaves an unchanged `hooks.json`
-untouched and prints the trust advice only when it rewrites the file.
+Codex trusts hooks **by content hash**. Until trusted, it SILENTLY skips them,
+and a TUI session stops at its hook review prompt. `init`, the herdr step of
+`init` and every rendered Codex profile home write `hooks.state` trust for each
+command entry in `hooks.json`, foreign groups such as herdr's included, with the
+hash Codex computes (`scripts.targets.codex_hook_trust`). A rendered home
+re-renders when the operator `hooks.json` changes.
 
 ### §2.3 stdout contract
 
@@ -280,6 +282,14 @@ written to disk — a HARD FLOOR path.
   `CODEX_HOOK_EVENTS`; it has no `hook_manager` handler today.
 - **`PostCompact`** fires in codex-cli 0.160.0. It remains unregistered because
   the subsequent compact `SessionStart` restores swarm intent (§2.1).
+
+### Inbox transport
+
+Codex executions in a swarm made by `swarm create` take inbox work through the
+supervised `codex app-server` (`codex-inbox-transport=app_server`); `legacy` keeps the
+typed wake and the master's `wait --inbox` loop. `doctor` prints the default and
+the rollback command. The setting, qualified versions, canary order and rollback
+are in [Codex inbox transport](codex-inbox-transport.md).
 
 ## §9 Verification
 

@@ -4,6 +4,7 @@ from dataclasses import dataclass, replace
 from functools import partial
 from typing import TYPE_CHECKING
 
+from scripts.swarm.host_budget import UNKNOWN, Room
 from scripts.swarm.store import RedisStore, SwarmError
 from scripts.swarm_v2 import image_tag, masters, proof_swarm
 from scripts.swarm_v2.accounts import AccountCapacity, fleet_held
@@ -53,6 +54,10 @@ TERMINAL_ENV = "AGENTIHOOKS_WORKER_TERMINAL"
 AGGREGATION_ENV = "AGENTIHOOKS_TERMINAL_AGGREGATION"
 REQUIRED = (POLICY_ENV, IMAGE_TAG_ENV, PROFILE_ENV, CAP_ENV, PROJECTS_ENV, BRAIN_ENV)
 RESERVATION_MS = 300_000
+WORKERS_OFF = (
+    "host room off: the Kubernetes runtime is not configured on this deployed controller, "
+    "so the worker pool cannot be read and spawns pass"
+)
 HARNESS = "claude"
 
 
@@ -230,6 +235,17 @@ def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[s
     launcher.router = runtime.router
     runtime.relaunch = partial(launcher.relaunch, terms=workers.terms)
     return runtime
+
+
+def worker_host(environ: Mapping[str, str], slug: str) -> Callable[[], Room]:
+    try:
+        workers = Workers.from_environ(environ, slug)
+        if workers is not None:
+            api = pod_api(environ, workers.policy["namespace"])
+            return WorkerPool(api, workers.policy.get("worker_pool"), workers.requested)
+    except WorkerSettingsRefused as refused:
+        return partial(Room, None, f"{WORKERS_OFF}: {refused}", UNKNOWN)
+    return partial(Room, None, WORKERS_OFF, UNKNOWN)
 
 
 def terminal_views(controller: "Controller", environ: Mapping[str, str]) -> TerminalViews:

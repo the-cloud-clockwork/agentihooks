@@ -5,6 +5,7 @@ import subprocess
 import time
 from collections import Counter
 from collections.abc import Callable, Mapping
+from contextlib import suppress
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import NoReturn
@@ -20,6 +21,7 @@ READS = frozenset({"pane_read", "pane_wait_output", "pane_process_info", "agent_
 MUTATIONS = frozenset({"pane_run", "pane_send_text", "pane_send_keys", "pane_close", "agent_prompt", "agent_rename"})
 LISTING = "agent_list"
 DELIVERIES = "deliveries.json"
+SET_ASIDE = ".set-aside.jsonl"
 VERSION = 1
 KEPT = 1024
 PENDING_LIMIT = 64
@@ -123,11 +125,37 @@ class Deliveries:
         try:
             document = json.loads(self.path.read_text())
             entries = document["deliveries"]
-            if document["version"] != VERSION or not isinstance(entries, dict):
-                raise ValueError
+            if document["version"] != VERSION:
+                raise ValueError(f"not a version {VERSION} delivery journal")
+            if not isinstance(entries, dict):
+                raise ValueError("deliveries is not an object")
         except (OSError, ValueError, TypeError, KeyError):
             raise EndpointRefused("journal_unreadable", "the pane delivery journal is unreadable") from None
         return entries
+
+    def recover(self, now: int) -> dict[str, dict]:
+        try:
+            return self.load()
+        except EndpointRefused as refused:
+            cause = refused.__context__
+            if isinstance(cause, OSError):
+                raise
+            aside = self.path.with_name(f"{self.path.name}.unreadable-{now}")
+            record = {"at": now, "file": aside.name, "reason": f"{type(cause).__name__}: {cause}"}
+            log = self.path.with_name(f"{self.path.name}{SET_ASIDE}")
+            try:
+                os.link(self.path, aside)
+            except OSError:
+                raise refused from None
+            try:
+                with open(log, "a", opener=lambda name, flags: os.open(name, flags, 0o600)) as handle:
+                    handle.write(json.dumps(record) + "\n")
+                self.path.unlink()
+            except OSError:
+                with suppress(OSError):
+                    aside.unlink()
+                raise refused from None
+        return {}
 
     def save(self, entries: dict[str, dict]) -> None:
         settled = [key for key, entry in entries.items() if entry.get("state") != "pending"]
@@ -263,11 +291,11 @@ class Router:
             raise EndpointRefused("operation_id", "a pane mutation needs an operation id")
         key = f"{target.incarnation}/{target.pane_id}"
         with self.deliveries.locked():
-            entries = self.deliveries.load()
+            now = int(self.clock())
+            entries = self.deliveries.recover(now)
             held = entries.get(operation_id)
             if held is not None:
                 return self._replayed(held, target, key, operation_id)
-            now = int(self.clock())
             _expire(entries, now)
             _make_room(entries)
             argv = self.command(target, operation, *args)

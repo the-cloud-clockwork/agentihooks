@@ -1,0 +1,64 @@
+import json
+import os
+import sys
+import time
+
+assert os.environ["AGENTIHOOKS_SWARM_REDIS_URL"].endswith("/12")
+assert os.environ["LEDGER_PORT"] == "8797"
+
+from scripts.swarm import cli
+from scripts.swarm.store import connect
+
+SLUG = "proof-323133-cxc8-1"
+store = connect()
+mode = sys.argv[1]
+if mode == "fixture":
+    lanes = {k: dict(v) for k, v in store.config(SLUG).lanes.items()}
+    lanes.setdefault("master", {})["agent"] = "codex"
+    store.update(SLUG, codex_inbox_transport="app_server", lanes=lanes)
+    config = store.config(SLUG)
+    print(json.dumps({"transport": config.codex_inbox_transport, "lanes": config.lanes, "state": config.state}))
+elif mode == "tick":
+    for _ in range(int(sys.argv[2]) if len(sys.argv) > 2 else 1):
+        for action in cli.run_tick(store, SLUG):
+            print(time.strftime("%H:%M:%S"), action, flush=True)
+        time.sleep(20)
+elif mode == "retire":
+    from scripts.swarm.runtime import HerdrRuntime
+
+    runtime = HerdrRuntime()
+    for agent in store.agents(SLUG):
+        ok = runtime.retire(agent)
+        print(json.dumps({"agent": agent.name, "retired": ok, "refusal": runtime.refusals.get(agent.name)}))
+        if ok:
+            store.release(SLUG, agent.task, agent.name)
+            store.drop_agent(SLUG, agent.name)
+elif mode == "chat":
+    from scripts.swarm.ledger_client import LedgerClient
+
+    LedgerClient().say(SLUG, sys.argv[2])
+    print(json.dumps({"chat": sys.argv[2], "by": "operator page"}))
+elif mode == "rollout":
+    calls, waits, mentions = [], 0, []
+    for line in open(sys.argv[2]):
+        record = json.loads(line)
+        payload = record.get("payload", {})
+        text = json.dumps(payload)
+        if payload.get("type") in ("function_call", "custom_tool_call", "local_shell_call"):
+            args = payload.get("arguments") or payload.get("input") or json.dumps(payload.get("action", {}))
+            calls.append(args[:160])
+            waits += "swarm" in args and " wait" in args
+        if "wait --inbox" in text:
+            kind = f"{record.get('type')}/{payload.get('type')}/{payload.get('role', '')}"
+            at = text.index("wait --inbox")
+            mentions.append(f"{kind}: ...{text[max(0, at - 120):at + 40]}...")
+    print(f"tool calls: {len(calls)}")
+    print(f"swarm wait calls: {waits}")
+    for call in calls:
+        print(f"  call: {call}")
+    print(f"records mentioning wait --inbox: {len(mentions)}")
+    for mention in mentions:
+        print(f"  {mention}")
+elif mode == "agents":
+    for agent in store.agents(SLUG):
+        print(json.dumps(agent.__dict__, default=str))

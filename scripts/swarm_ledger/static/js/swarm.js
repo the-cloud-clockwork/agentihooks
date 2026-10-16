@@ -10,7 +10,7 @@ import { snowflake, targetText } from "./freezes.js";
 import { agentActions, reconcile, settle, titlePause } from "./lifecycle.js";
 
 const LIVE_LANES = [["eng", "max_eng"], ["ci", "max_ci"], ["plan", "max_plan"]];
-const ROLES = ["master", "engineer", "planner", "qa", "cicd"];
+const ROLES = ["master", "engineer", "planner", "qa", "cicd", "documentation"];
 const OVERLAY_CAP = 3;
 const VERDICTS = ["false-positive", "early-real", "established", "insufficient-evidence", "resolved"];
 const VERDICT_TEXT = { "false-positive": "FP", "early-real": "early real", established: "established", "insufficient-evidence": "insufficient", resolved: "resolved" };
@@ -293,13 +293,23 @@ function seatText(seat) {
   return seat.startsWith("master@") ? seat : seat.split("@")[0].replace(/-(\d+)$/, " $1");
 }
 
+function tickText(sw, now) {
+  if (!sw) return "";
+  const completed = sw.last_tick || 0, activity = sw.last_tick_activity || 0;
+  if (activity > completed) {
+    const previous = completed ? `completed ${age(now - completed)} ago` : "no completed tick";
+    return `tick activity ${age(now - activity)} ago · ${previous}`;
+  }
+  return completed ? `tick ${age(now - completed)} ago` : "tick not recorded";
+}
+
 export function renderSwarm(sw) {
   swarm = sw;
   const state = sw ? sw.config.state : "unavailable";
   $("swarm-state").className = `sw-state ${state}`;
   $("swarm-state").textContent = state;
   $("swarm-name").textContent = (sw && (sw.config.name || sw.config.slug)) || SLUG;
-  $("swarm-tick").textContent = !sw ? "" : sw.last_tick ? `tick ${age(Date.now() - sw.last_tick)} ago` : "tick not recorded";
+  $("swarm-tick").textContent = tickText(sw, Date.now());
   $("tab-swarm").replaceChildren(...["Swarm ", h("span", { class: $("swarm-state").className, text: state }),
     sw && (openFindings(sw).length || sw.tasks.blocked) ? h("span", { class: "attention-dot", "aria-label": "Needs attention" }) : null].filter(Boolean));
   renderGates(sw);
