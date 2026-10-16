@@ -167,7 +167,9 @@ def test_task_set_stores_split_pull_addresses_as_a_list(value, monkeypatch, caps
         "https://github.com/o/r/pull/9",
         "https://github.com/o/r/pull/10",
     ]
-    assert '"split_pulls": ["https://github.com/o/r/pull/9", "https://github.com/o/r/pull/10"]' in capsys.readouterr().out
+    assert (
+        '"split_pulls": ["https://github.com/o/r/pull/9", "https://github.com/o/r/pull/10"]' in capsys.readouterr().out
+    )
 
 
 def test_task_split_cli_sends_the_ordered_halves(monkeypatch, capsys):
