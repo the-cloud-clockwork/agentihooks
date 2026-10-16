@@ -118,6 +118,25 @@ def test_split_pull_requests_keep_their_own_merge_and_parking_events():
     ]
 
 
+def test_split_merge_observation_still_collects_the_final_task_sample():
+    first, final = TASK["pr_url"], "https://github.com/org/repo/pull/2"
+    state = {
+        "tasks": [{**DONE, "pr_url": final, "split_pulls": [first, final]}],
+        "_meta": {"events": [event("task done", NOW)]},
+    }
+    saved = [
+        {"kind": "pull_request_merged", "pull_request": first},
+        {"kind": "pull_request_merged", "pull_request": final},
+    ]
+    calls = []
+    box = SimpleNamespace(recent=lambda *args: saved)
+    snapshot = SimpleNamespace(doc=state, view=lambda url: calls.append(url) or "observed")
+    assert metrics_swarm.pull_rows(box, NOW, snapshot) == {final: "observed"}
+    assert calls == [final]
+    saved.append({"kind": "merge", "pull_request": final})
+    assert metrics_swarm.pull_rows(box, NOW, snapshot) == {}
+
+
 def test_reclaimed_task_attributes_each_claim_to_its_own_life():
     first = {**AGENT, "ended_at": NOW + 500, "reason": "retired"}
     second = {**AGENT, "name": "replacement", "started_at": NOW + 1_000, "execution_id": "other"}

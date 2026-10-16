@@ -353,17 +353,15 @@ def pull_rows(box: metrics_outbox.Outbox, now_ms: int, swarm: TickInput) -> dict
         for event in swarm.doc.get("_meta", {}).get("events", [])
         if event["kind"] == "task done" and event["at"] >= now_ms - metrics_outbox.DAY_MS
     }
-    recorded = {
-        row["pull_request"]
-        for row in box.recent("delivery_events", now_ms)
-        if row["kind"] == "merge"
-    }
+    recent = box.recent("delivery_events", now_ms)
+    recorded = {row["pull_request"] for row in recent if row["kind"] == "merge"}
+    merged = {row["pull_request"] for row in recent if row["kind"] == "pull_request_merged"}
     return {
         url: swarm.view(url)
         for task in swarm.doc["tasks"]
         if task["state"] in ("pr", "claimed") or task["id"] in completed
         for url in dict.fromkeys([*(task.get("split_pulls") or []), task.get("pr_url")])
-        if url and url not in recorded
+        if url and url not in (recorded if url == task.get("pr_url") else merged)
     }
 
 
