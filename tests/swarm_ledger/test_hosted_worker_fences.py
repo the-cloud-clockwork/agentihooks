@@ -1,4 +1,3 @@
-import json
 
 import pytest
 
@@ -9,9 +8,15 @@ from tests.swarm_ledger.test_controller_hosted_ledger import (
     _held_task,
     _hl,
     core,
-    deployed as deployed,
-    hosted as hosted,
     ledger_server,
+)
+from tests.swarm_ledger.test_controller_hosted_ledger import (
+    deployed as deployed,
+)
+from tests.swarm_ledger.test_controller_hosted_ledger import (
+    hosted as hosted,
+)
+from tests.swarm_ledger.test_controller_hosted_ledger import (
     store as store,
 )
 
