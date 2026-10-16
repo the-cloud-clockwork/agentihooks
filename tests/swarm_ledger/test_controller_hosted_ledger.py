@@ -178,6 +178,118 @@ def test_a_worker_task_update_lands_on_the_hosted_server(deployed):
     assert not deployed.folder.exists()
 
 
+def test_a_claim_lost_before_hosted_apply_cannot_change_the_task(deployed, store):
+    _, read = _read(deployed)
+    from scripts.swarm_ledger.api import worker_writes
+
+    original = worker_writes.check
+
+    def lose_claim(slug, doc, operation):
+        store.redis.delete(store.key(SLUG, "task-authority", "t1"))
+        return original(slug, doc, operation)
+
+    with patch.object(worker_writes, "check", lose_claim):
+        status, refusal = _patch(deployed, read["revision"], {"state": "pr"})
+
+    assert status == 409
+    assert refusal["error_class"] == "stale_generation"
+    assert refusal["message"] == "the task generation is no longer current"
+    assert _held_task()["state"] == "claimed"
+
+
+def test_an_expired_claim_is_refused_by_the_hosted_apply(deployed, store):
+    _, read = _read(deployed)
+    original = _hl().ResourceClient.request
+    stamp = store.redis.time()
+
+    def expire_claim(client, slug, path, *args, **kwargs):
+        if path == "operations":
+            store.redis.time = lambda: (stamp[0] + 61, stamp[1])
+        return original(client, slug, path, *args, **kwargs)
+
+    with patch.object(_hl().ResourceClient, "request", expire_claim):
+        status, refusal = _patch(deployed, read["revision"], {"state": "pr"})
+
+    assert status == 409
+    assert refusal["error_class"] == "stale_generation"
+    assert _held_task()["state"] == "claimed"
+
+
+@pytest.mark.parametrize(
+    "fields, expected_status", [({"title": "Changed spec"}, 409), ({"pr_url": "https://example.test/pull/1"}, 200)]
+)
+def test_hosted_worker_writes_pin_the_spec_and_count_conflicts(deployed, store, fields, expected_status):
+    _, read = _read(deployed)
+    original = _hl().ResourceClient.request
+
+    def edit_task(client, slug, path, *args, **kwargs):
+        if path == "operations":
+            operation = _update(fields, MASTER)
+            operation["id"] = "operator-edit"
+            repository.apply_ops(SLUG, ops=[operation])
+        return original(client, slug, path, *args, **kwargs)
+
+    with patch.object(_hl().ResourceClient, "request", edit_task):
+        status, response = _patch(deployed, read["revision"], {"state": "pr"})
+
+    assert status == expected_status
+    assert _held_task()["state"] == ("claimed" if expected_status == 409 else "pr")
+    assert int(store.redis.get(store.key(SLUG, "ledger-revision-conflicts")) or 0) == (expected_status == 409)
+    if expected_status == 409:
+        assert response["error_class"] == "revision_conflict"
+
+
+def test_hosted_receipts_survive_claim_loss_after_the_server_answers(deployed, store):
+    _, read = _read(deployed)
+    original = _hl().ResourceClient.request
+
+    def lose_after_reply(client, slug, path, *args, **kwargs):
+        reply = original(client, slug, path, *args, **kwargs)
+        if path == "operations":
+            store.redis.delete(store.key(SLUG, "task-authority", "t1"))
+        return reply
+
+    with patch.object(_hl().ResourceClient, "request", lose_after_reply):
+        status, ack = _patch(deployed, read["revision"], {"state": "pr"})
+
+    assert status == 200
+    assert _held_task()["state"] == "pr"
+    key = store.key(SLUG, _hl().RECEIPTS_KEY, "tasks/t1")
+    assert store.redis.type(key) == "hash"
+    receipt = json.loads(store.redis.hget(key, "op-1"))
+    assert receipt["ack"] == ack
+    assert store.redis.hlen(key) == 1
+    assert 0 < store.redis.ttl(key) <= 86400
+
+
+def test_hosted_receipts_keep_each_operation_and_remove_expired_entries(deployed, store):
+    _, read = _read(deployed)
+    first, _ = _patch(deployed, read["revision"], {"state": "pr"}, "first")
+    assert first == 200
+    key = store.key(SLUG, _hl().RECEIPTS_KEY, "tasks/t1")
+    store.redis.hset(key, "expired", json.dumps({"expires_at": 0}))
+    second, _ = _patch(deployed, read["revision"], {"state": "blocked"}, "second")
+    assert second == 200
+    assert set(store.redis.hkeys(key)) == {"first", "second"}
+
+
+def test_legacy_receipts_migrate_and_keep_the_original_acknowledgement(deployed, store):
+    _, read = _read(deployed)
+    first = _patch(deployed, read["revision"], {"state": "pr"})
+    assert first[0] == 200
+    key = store.key(SLUG, _hl().RECEIPTS_KEY, "tasks/t1")
+    record = json.loads(store.redis.hget(key, "op-1"))
+    legacy = {"generation": record["generation"], "operations": {"op-1": {"digest": record["digest"], "ack": first[1]}}}
+    store.redis.delete(key)
+    store.redis.set(key, json.dumps(legacy))
+
+    again = _patch(deployed, read["revision"], {"state": "pr"})
+
+    assert again == first
+    assert store.redis.type(key) == "hash"
+    assert store.redis.ttl(key) > 0
+
+
 def test_a_replayed_worker_update_returns_the_same_receipt(deployed):
     _, read = _read(deployed)
 
@@ -403,8 +515,8 @@ def test_a_replayed_progress_after_newer_progress_is_answered_from_the_controlle
     assert again == first
     assert first[0] == 200
     assert [entry["text"] for entry in _held_task()["comments"]] == ["Opened the pull request for review"]
-    stored = store.redis.get(store.key(SLUG, _hl().RECEIPTS_KEY, "tasks/t1"))
-    assert set(json.loads(stored)["operations"]) == {"op-a", "op-b"}
+    stored = store.redis.hgetall(store.key(SLUG, _hl().RECEIPTS_KEY, "tasks/t1"))
+    assert set(stored) == {"op-a", "op-b"}
 
 
 def test_a_deployed_controller_without_its_credential_is_refused_at_start(hosted, store, tmp_path):
@@ -436,6 +548,21 @@ def test_profile_choice_reads_project_and_phase_intent_through_the_hosted_server
     _hold("engineer@323133-0300", tmp_path)
 
     state = profile_choice.state(SLUG, {"id": "t1", "phase": "p1"})
+
+    assert (state["project_intent"], state["phase_intent"]) == (
+        OVERVIEW,
+        "Ledger: Tasks read through the hosted server",
+    )
+
+
+def test_a_pinned_controller_reads_intent_with_its_controller_credential(hosted, tmp_path):
+    _hold("engineer@323133-0300", tmp_path)
+
+    with (
+        patch.object(ledger, "BASE", ""),
+        patch.object(ledger, "launch_token", side_effect=AssertionError("controller read requested a worker token")),
+    ):
+        state = profile_choice.state(SLUG, {"id": "t1", "phase": "p1"})
 
     assert (state["project_intent"], state["phase_intent"]) == (
         OVERVIEW,

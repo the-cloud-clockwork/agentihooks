@@ -39,6 +39,8 @@ START, END = "<!-- agentihooks intent -->", "<!-- /agentihooks intent -->"
 MERGE_QUEUE = ["merge", "queue"]
 RELEASES = (["done"], ["ready"])
 PULL = re.compile(r"github\.com/([^/]+)/([^/]+)/pull/(\d+)")
+REPO_FLAGS = ("-R", "--repo")
+VALUE_FLAGS = ("-A", "--author-email", "-b", "--body", "-F", "--body-file", "--match-head-commit", "-t", "--subject")
 SHORT = re.compile(r"(?<![\w./-])([A-Za-z0-9-]+)/([\w.-]+)#(\d+)\b")
 NAMED_LIMIT = 3
 DIFF_CHARS, BODY_CHARS = 6000, 1000
@@ -882,6 +884,30 @@ def _merge_target(words):
     return next((word for word in operands if PULL.search(word) or word.isdigit()), None)
 
 
+def _unnamed_merge(words):
+    index = program_index(words)
+    return (
+        index is not None
+        and PurePosixPath(words[index]).name == "gh"
+        and words[index + 1 : index + 3] == ["pr", "merge"]
+        and _merge_target(words) is None
+    )
+
+
+def _pull_view(words):
+    rest, branch, repo = iter(words[program_index(words) + 3 :]), [], []
+    for word in rest:
+        if word in REPO_FLAGS:
+            repo = [word, next(rest, "")]
+        elif word.startswith(("--repo=", "-R")):
+            repo = [word]
+        elif word in VALUE_FLAGS:
+            next(rest, None)
+        elif not word.startswith("-") and not branch:
+            branch = [word]
+    return ["gh", "pr", "view", *branch, *repo, "--json", "url", "--jq", ".url"]
+
+
 def _same_pull(target, url):
     named, bound = PULL.search(target), PULL.search(url)
     return bool(bound) and (named.groups() if named else target) == (bound.groups() if named else bound[3])
@@ -922,6 +948,13 @@ class IntentGate:
         record = state.read(who.task)
         pulls = Verdicts(state.slug, f"{NAME}-pulls", state.home)
         bound = pulls.read(who.task)
+        call = self._resolve(call, bound or (record and record.get("split")))
+        if call is None:
+            return Decision.deny(
+                f"task {who.task} is split: name the pull request url in the merge so intent matches it to its "
+                "judged half."
+            )
+        commands = [words for words in simple_commands(call.command) if _gated(words)]
         if not bound:
             return self._decide_record(call, who, state, mode, record)
         for words in commands:
@@ -946,6 +979,23 @@ class IntentGate:
             if not decision.allowed:
                 return decision
         return Decision()
+
+    def _resolve(self, call, split):
+        if not split:
+            return call
+        named = [self._named(words, call.cwd) for words in simple_commands(call.command)]
+        if None in named:
+            return None
+        return replace(call, tool_input={**call.tool_input, "command": " && ".join(map(shlex.join, named))})
+
+    def _named(self, words, cwd):
+        if not _unnamed_merge(words):
+            return words
+        try:
+            done = self.run(_pull_view(words), capture_output=True, text=True, timeout=GH_TIMEOUT_SEC, cwd=cwd or None)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return [*words, done.stdout.strip()] if done.returncode == 0 and PULL.search(done.stdout) else None
 
     def _decide_record(self, call, who, state, mode, record, bound=False):
         if not bound and _other_half(call.command, record):

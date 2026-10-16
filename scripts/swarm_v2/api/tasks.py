@@ -228,7 +228,16 @@ class WorkerGate:
             raise GrantRefused("invalid_request", f"the ledger refused this write: {error}") from error
         if not apply_op(doc, write, ctx):
             raise GrantRefused("invalid_request", "the ledger refused this write")
-        self.api._hold(self.scope, generation)
+        if not getattr(ctx, "receipted", False):
+            self.api._hold(self.scope, generation)
+            self.remember(task, ctx)
+        return True
+
+    def remember(self, task: dict, ctx: object) -> None:
+        generation = self.request["task_generation"]
+        receipts = ctx.meta[RECEIPTS].get(self.scope.task_id)
+        if receipts is None or receipts["generation"] != generation:
+            receipts = {"generation": generation, "operations": {}}
         self.ack = {
             "task_id": self.scope.task_id,
             "operation_id": self.request["operation_id"],
@@ -238,7 +247,6 @@ class WorkerGate:
         receipts["operations"][self.request["operation_id"]] = {"digest": self.digest, "ack": self.ack}
         ctx.meta[RECEIPTS][self.scope.task_id] = receipts
         ctx.dirty = True
-        return True
 
 
 def _request(body: object, names: tuple[str, ...]) -> dict:

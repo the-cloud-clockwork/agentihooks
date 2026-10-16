@@ -295,8 +295,8 @@ class HerdrRuntime:
             decision["tasks"] = dict(self._quota_tasks)
         return decision
 
-    def host(self) -> host_budget.HostSample | None:
-        return host_budget.read_host()
+    def host(self) -> host_budget.HostSample | host_budget.Room | None:
+        return host_budget.controller_host(os.environ)
 
     def quota_previous(self, decision: dict) -> None:
         self._quota_previous = decision

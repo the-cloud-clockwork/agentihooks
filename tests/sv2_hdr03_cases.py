@@ -11,7 +11,7 @@ from types import SimpleNamespace
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from scripts.swarm_v2.herdr.attach import SSH, ClientHome, Terminal
-from scripts.swarm_v2.herdr.capabilities import Qualifier, machine_probe
+from scripts.swarm_v2.herdr.capabilities import Qualifier, machine_probe, machine_status
 from scripts.swarm_v2.herdr.catalog import Catalog
 from scripts.swarm_v2.herdr.endpoints import Endpoint, EndpointRefused, TerminalAuthority, operator_scope
 from scripts.swarm_v2.herdr.reconcile import Record, Registrations, Report, Store
@@ -118,7 +118,7 @@ class Client:
     def __init__(self, herdr: Herdr, store: Path) -> None:
         self.herdr = herdr
         self.registrations = Registrations(Catalog(herdr), Store(store))
-        self.qualifier = Qualifier(machine_probe(herdr))
+        self.qualifier = Qualifier(machine_probe(herdr), machine_status(herdr))
 
     def reconcile(self, desired: list[Endpoint]) -> Report:
         return self.registrations.reconcile(desired, self.qualifier)

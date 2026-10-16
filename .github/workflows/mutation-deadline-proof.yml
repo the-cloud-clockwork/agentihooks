@@ -1,0 +1,45 @@
+name: Mutation deadline proof
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  receipts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [stats, stats-baseline, stats-compensated, missing-coverage]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: '0.12.23'
+          checksum: '9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6'
+          enable-cache: false
+      - name: Install dependencies
+        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+      - name: Exercise real mutation statistics or removal of covering tests
+        env:
+          PROOF_MODE: ${{ matrix.mode }}
+          PYTHONUNBUFFERED: '1'
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+        run: python -m tests.swarm_ledger.receipt_mutation_probe "$PROOF_MODE"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: receipt-mutation-${{ matrix.mode }}
+          path: |
+            .receipt-mutation-proof/stats.json
+            .receipt-mutation-proof/stats.log
+            .receipt-mutation-proof/evidence/report.json
+            .receipt-mutation-proof/evidence/*/run.log
+          include-hidden-files: true
+          retention-days: 7

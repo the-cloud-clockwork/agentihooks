@@ -35,6 +35,10 @@ def pod_status(pod: dict) -> PodStatus:
     return PodStatus(metadata["name"], metadata["uid"], phase, tuple(reasons), "deletionTimestamp" in metadata)
 
 
+def refusal(reason: str, field: str = "") -> dict:
+    return {"reason": reason, "field": field}
+
+
 class KubernetesTransport:
     backend = BACKEND
 
@@ -63,15 +67,23 @@ class KubernetesTransport:
         if not self.creation_enabled:
             self.reconciliations["disabled"] += 1
             return Observation(Phase.ABSENT)
-        body = self._body(operation, payload)
-        if body is None:
-            return Observation(Phase.REFUSED)
+        try:
+            rendered = self._render(payload)
+        except PodSpecRefused as refused:
+            return Observation(Phase.REFUSED, refusal=refusal("template", refused.reason))
+        if differs := self._differs(operation, rendered):
+            return Observation(Phase.REFUSED, refusal=refusal("render", differs[0]))
+        body = rendered.pod
+        # The API server defaults the live spec, so a later match compares the digests and the adoption fields.
+        body["metadata"]["annotations"].update(
+            {SPEC_DIGEST: rendered.digest, OPERATION_DIGEST: operation.payload_digest}
+        )
         try:
             return self._applied(self.api.create_pod(body), "created")
         except AlreadyExists:
             return self._adopt(operation, body)
         except ApiRefused:
-            return Observation(Phase.REFUSED)
+            return Observation(Phase.REFUSED, refusal=refusal("api"))
 
     def spec_digest(self, payload: dict) -> str:
         try:
@@ -100,26 +112,16 @@ class KubernetesTransport:
             raise prepared[1]
         return prepared[1]
 
-    def _body(self, operation: Operation, payload: dict) -> dict | None:
-        try:
-            rendered = self._render(payload)
-        except PodSpecRefused:
-            return None
+    def _differs(self, operation: Operation, rendered: Rendered) -> list[str]:
         metadata = rendered.pod["metadata"]
         expected = {
-            OWNER_LABEL: self.owner,
-            EXECUTION_LABEL: operation.execution_id,
-            GENERATION_LABEL: str(operation.generation),
+            "namespace": (metadata["namespace"], self.api.namespace),
+            "owner": (metadata["labels"][OWNER_LABEL], self.owner),
+            "execution": (metadata["labels"][EXECUTION_LABEL], operation.execution_id),
+            "generation": (metadata["labels"][GENERATION_LABEL], str(operation.generation)),
+            "spec": (adoption.identity(rendered.digest, rendered.pod["spec"]), operation.spec_digest),
         }
-        if (
-            metadata["namespace"] != self.api.namespace
-            or {key: metadata["labels"][key] for key in expected} != expected
-            or adoption.identity(rendered.digest, rendered.pod["spec"]) != operation.spec_digest
-        ):
-            return None
-        # The API server defaults the live spec, so a later match compares the digests and the adoption fields.
-        metadata["annotations"].update({SPEC_DIGEST: rendered.digest, OPERATION_DIGEST: operation.payload_digest})
-        return rendered.pod
+        return [name for name, (actual, wanted) in expected.items() if actual != wanted]
 
     def _adopt(self, operation: Operation, body: dict) -> Observation:
         try:
@@ -136,7 +138,9 @@ class KubernetesTransport:
             return self._applied(pods[0], outcome)
         for pod, reason in zip(pods, reasons):
             self._quarantine(pod, reason or "ambiguous")
-        return Observation(Phase.REFUSED)
+        if len(pods) > 1:
+            return Observation(Phase.REFUSED, refusal=refusal("ambiguous"))
+        return Observation(Phase.REFUSED, refusal=refusal("mismatch", reasons[0]))
 
     def _mismatch(self, operation: Operation, pod: dict, rendered: dict | None) -> str:
         labels = pod["metadata"].get("labels", {})

@@ -170,6 +170,12 @@ def test_publisher_checks_parent_results_without_inheriting_skips():
     assert job["if"] == "${{ " + condition + " }}"
 
 
+def test_publisher_waits_only_for_measurements_and_the_ratchet():
+    workflow = Path(__file__).parents[1] / ".github/workflows/test.yml"
+    job = yaml.safe_load(workflow.read_text())["jobs"]["coverage-baseline"]
+    assert job["needs"] == ["unit", "coverage-ratchet"]
+
+
 def test_publisher_reads_shards_without_the_optional_sonar_report():
     workflow = Path(__file__).parents[1] / ".github/workflows/test.yml"
     job = yaml.safe_load(workflow.read_text())["jobs"]["coverage-baseline"]

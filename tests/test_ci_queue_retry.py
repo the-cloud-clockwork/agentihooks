@@ -83,11 +83,22 @@ def test_a_failure_outside_the_unit_shards_is_not_retried(name):
         {**RUN, "run_attempt": 2},
         {**RUN, "event": "pull_request"},
         {**RUN, "event": "push"},
-        {**RUN, "conclusion": "cancelled"},
+        {**RUN, "conclusion": "success"},
     ],
 )
 def test_only_a_first_failed_merge_group_attempt_is_retried(run):
     assert not ci_queue_retry.decide(run, lost_run(), WORKFLOW)[0]
+
+
+def test_a_lost_shard_in_a_run_cancelled_by_fail_fast_is_retried():
+    cancelled = {**RUN, "conclusion": "cancelled"}
+    retry, reason = ci_queue_retry.decide(cancelled, lost_run(), WORKFLOW)
+    assert retry, reason
+
+
+def test_a_cancelled_run_with_no_failed_shard_is_not_retried():
+    cancelled = {**RUN, "conclusion": "cancelled"}
+    assert ci_queue_retry.decide(cancelled, [], WORKFLOW) == (False, "no unit shard failed")
 
 
 def test_a_run_whose_only_failures_are_judges_is_not_retried():
@@ -175,7 +186,7 @@ def test_the_retry_workflow_requeues_only_when_enforcement_is_on():
     workflow = yaml.safe_load((ROOT / ".github/workflows/queue-retry.yml").read_text())
     assert workflow[True] == {"workflow_run": {"workflows": ["Tests"], "types": ["completed"]}}
     retry = workflow["jobs"]["retry"]
-    for term in ("event == 'merge_group'", "conclusion == 'failure'", "run_attempt == 1"):
+    for term in ("event == 'merge_group'", "conclusion == 'failure'", "conclusion == 'cancelled'", "run_attempt == 1"):
         assert term in retry["if"]
     assert "write" not in retry["permissions"].values()
     steps = {step.get("name"): step for step in retry["steps"]}
@@ -211,6 +222,15 @@ def test_removals_before_the_head_commit_or_for_other_reasons_do_not_count():
     earlier = {**REMOVED, "createdAt": "2026-10-14T20:00:00Z"}
     merged = {**REMOVED, "reason": "merged"}
     assert ci_queue_retry.requeue(pull([earlier, merged, REMOVED]))[0]
+
+
+def test_a_head_last_removed_for_another_reason_is_not_requeued():
+    merged = {**REMOVED, "createdAt": "2026-10-15T06:00:00Z", "reason": "merged"}
+    dequeued = {**REMOVED, "createdAt": "2026-10-15T06:10:00Z", "reason": "manually_removed"}
+    assert ci_queue_retry.requeue(pull([REMOVED, merged, dequeued])) == (
+        False,
+        "head last left the queue for manually_removed",
+    )
 
 
 @pytest.mark.parametrize("change", [{"state": "MERGED"}, {"state": "CLOSED"}, {"isInMergeQueue": True}])

@@ -61,6 +61,7 @@ class Operation:
     controller_epoch: int | None = None
     attempted: bool = False
     spec_digest: str = ""
+    refusal: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -71,6 +72,7 @@ class Observation:
     backend: str = ""
     payload_digest: str = ""
     result: dict = field(default_factory=dict)
+    refusal: dict = field(default_factory=dict, compare=False)
 
 
 class OperationTransport(Protocol):
@@ -135,9 +137,9 @@ class OperationJournal:
             if not raw:
                 return expected
             previous = _decode(raw)
-            if replace(previous, phase=Phase.ACCEPTED, result={}, attempted=False, spec_digest="") != replace(
-                expected, controller_epoch=previous.controller_epoch, spec_digest=""
-            ):
+            if replace(
+                previous, phase=Phase.ACCEPTED, result={}, attempted=False, spec_digest="", refusal={}
+            ) != replace(expected, controller_epoch=previous.controller_epoch, spec_digest=""):
                 raise OperationConflict(_ERRORS["payload"])
             if agent.runtime_backend in (specs or {}) and previous.spec_digest not in ("", expected.spec_digest):
                 raise OperationConflict(_ERRORS["spec"])
@@ -154,7 +156,7 @@ class OperationJournal:
             if not raw:
                 raise OperationConflict(_ERRORS["missing"])
             current = _decode(raw)
-            settled = {"phase": Phase.ACCEPTED, "result": {}, "attempted": False}
+            settled = {"phase": Phase.ACCEPTED, "result": {}, "attempted": False, "refusal": {}}
             if replace(current, **settled) != replace(operation, **settled):
                 raise OperationConflict(_ERRORS["identity"])
             if current.phase in (Phase.APPLIED, Phase.SUPERSEDED):
@@ -162,7 +164,8 @@ class OperationJournal:
             phase = Phase.ACCEPTED if observation.phase is Phase.ABSENT else observation.phase
             result = observation.result if phase is Phase.APPLIED else {}
             sent = (current.attempted or attempted) and phase in (Phase.UNKNOWN, Phase.APPLIED)
-            return replace(current, phase=phase, result=result, attempted=sent)
+            refusal = {Phase.APPLIED: {}, Phase.REFUSED: observation.refusal}.get(phase, current.refusal)
+            return replace(current, phase=phase, result=result, attempted=sent, refusal=refusal)
 
         return self._write(slug, update)
 
@@ -279,8 +282,9 @@ class Operations:
             return Observation(Phase.UNKNOWN)
 
     def _qualified(self, operation: Operation, observation: Observation) -> Observation:
+        refused = Observation(Phase.REFUSED, refusal={"reason": "identity", "field": ""})
         if not isinstance(observation.phase, Phase):
-            return Observation(Phase.REFUSED)
+            return refused
         if observation.phase is Phase.APPLIED and (
             type(observation.generation) is not int
             or (
@@ -291,5 +295,5 @@ class Operations:
             )
             != (operation.execution_id, operation.generation, operation.backend, operation.payload_digest)
         ):
-            return Observation(Phase.REFUSED)
+            return refused
         return observation

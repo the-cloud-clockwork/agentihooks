@@ -1,6 +1,7 @@
 {
   "access-audit.yml/audit": "light",
   "brain-smoke.yml/smoke": "standard",
+  "branch-lanes.yml/grade": "light",
   "ci-templates.yml/actionlint": "hosted",
   "codex-cache.yml/seed": "standard",
   "coverage-stability.yml/compare": "batch",
@@ -13,6 +14,7 @@
   "hive-worker.yml/publish": "standard",
   "ledger-load.yml/load": "standard",
   "ledger-row-memory.yml/replay": "batch",
+  "mutation-deadline-proof.yml/receipts": "batch",
   "mutation-preflight.yml/mutation": "light",
   "mutation-preflight.yml/mutation-shard": "batch",
   "mutation-preflight.yml/plan": "light",

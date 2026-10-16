@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/mutations.py:scripts.swarm_ledger.api.mutations.x\u01c1GuardedOperations\u01c1__init____mutmut_1:970040ed348bb648048037190d187e82aa5b6d66cd5f82a8ff2f2a67818ec407": {
+    "reader": "Standards reader",
+    "reason": "The production construction explicitly supplies slug. For legacy constructions without worker_claim, worker_writes.check returns before using slug; changing its unused default changes no output."
+  }
+}

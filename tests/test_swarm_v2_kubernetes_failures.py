@@ -434,7 +434,8 @@ def test_only_ready_nodes_are_listed_and_a_failed_listing_is_none():
     http = _Nodes((200, {"items": items}))
     assert client.PodClient(http, "swarm").ready_nodes() == ["a"]
     assert http.paths == [("GET", "/api/v1/nodes")]
-    for answer in ((403, {"reason": "Forbidden"}), (201, {"items": items}), ConnectionError("down")):
+    unreadable = ((200, {}), (200, {"items": None}), (200, []))
+    for answer in ((403, {"reason": "Forbidden"}), (201, {"items": items}), ConnectionError("down"), *unreadable):
         assert client.PodClient(_Nodes(answer), "swarm").ready_nodes() is None
 
 
@@ -1313,7 +1314,8 @@ def test_a_takeover_during_legacy_supersession_cannot_commit_the_old_epoch(world
     with pytest.raises(SwarmError):
         world.reconcile(recovery)
     assert not once[0]
-    assert world.store.redis.hget(key, operation.operation_id) == before
+    recovered = {**json.loads(before), "refusal": {"reason": "mismatch", "field": "spec"}}
+    assert json.loads(world.store.redis.hget(key, operation.operation_id)) == recovered
     assert world.occupant() == world.old
 
 

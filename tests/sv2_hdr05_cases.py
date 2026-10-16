@@ -392,7 +392,7 @@ def _recovery() -> tuple[dict, bool]:
         }
         == {"op-1": "sent"},
         "latency_measured_on_the_fixture_clock": first["terminal_reconnect_latency_seconds"]
-        == [3 * fx["command_ms"] / 1000, 2 * fx["command_ms"] / 1000],
+        == [4 * fx["command_ms"] / 1000, 4 * fx["command_ms"] / 1000],
         "independent_repeat_identical": first == second,
     }
     return {"checks": checks, "first": first, "second_identical": first == second}, all(checks.values())

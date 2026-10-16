@@ -7,11 +7,12 @@ from .errors import APIError
 
 
 class GuardedOperations:
-    def __init__(self, payload: dict, budget: object, core: ModuleType, fence=None) -> None:
+    def __init__(self, payload: dict, budget: object, core: ModuleType, fence=None, slug: str = "") -> None:
         self.payload = payload
         self.budget = budget
         self.core = core
         self.fence = fence
+        self.slug = slug
         self.checked = False
         self.results = {}
         self.digest = resources.revision({"ops": payload["ops"], "changes": payload.get("changes", [])})
@@ -27,7 +28,9 @@ class GuardedOperations:
             self.results = dict(known["results"])
         pending = [op for op in self.payload["ops"] if op["id"] not in self.results]
         targets = {
-            schemas.target(op) for op in pending if op["op"] not in schemas.UNGUARDED and not self.changes_for(op)
+            schemas.target(op)
+            for op in pending
+            if op["op"] not in schemas.UNGUARDED and not self.changes_for(op) and "worker_claim" not in op
         }
         for op in pending:
             targets.update(change["path"].rsplit("/", 1)[0] for change in self.changes_for(op))
@@ -51,6 +54,9 @@ class GuardedOperations:
 
     def apply(self, doc: dict, op: dict, ctx: object, apply_op: object) -> bool:
         self.check_controller(op)
+        from . import worker_writes
+
+        worker_writes.check(self.slug, doc, op)
         if not self.checked:
             self.check(doc, ctx)
         if op["id"] in self.results:
@@ -60,6 +66,7 @@ class GuardedOperations:
             not self.core.apply_changes(doc, changes, ctx) if changes else self.budget.apply(doc, op, ctx, apply_op)
         )
         self.check_controller(op)
+        worker_writes.check(self.slug, doc, op)
         self.results[op["id"]] = bool(accepted)
         receipts = ctx.meta.setdefault("api_operations", {})
         receipts[self.payload["operation_id"]] = {"digest": self.digest, "results": dict(self.results)}
@@ -88,7 +95,7 @@ def apply(server: ModuleType, slug: str, principal: str, payload: dict) -> dict:
     fence = server.write_gate(slug)
     gate = ledger_task_duplicates.Gate(
         screen,
-        GuardedOperations(payload, fence, server.core, lambda epoch: server.authority.fence(slug, epoch)),
+        GuardedOperations(payload, fence, server.core, lambda epoch: server.authority.fence(slug, epoch), slug),
     )
     state, rejected = server.repository.apply_ops(slug, ops=operations, gate=gate)
     fence.publish(rejected)
