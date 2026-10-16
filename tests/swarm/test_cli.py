@@ -16,6 +16,8 @@ from scripts.swarm_v2.runtime.routed import RoutedRuntime
 from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
+real_reconcile = timer.reconcile
+
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
@@ -978,6 +980,7 @@ def test_timer_ensure_also_runs_the_alert_intake_service(tmp_path):
 
 
 def test_timer_reconcile_installs_a_newly_added_service_and_leaves_current_units_alone(tmp_path, monkeypatch):
+    monkeypatch.setattr(timer, "reconcile", real_reconcile)
     calls, failing = [], set()
 
     def run(argv, **kw):
