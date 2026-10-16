@@ -144,10 +144,14 @@ class Deliveries:
             log = self.path.with_name(f"{self.path.name}{SET_ASIDE}")
             try:
                 os.link(self.path, aside)
-                with os.fdopen(os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600), "w") as handle:
+            except OSError:
+                raise refused from None
+            try:
+                with open(log, "a", opener=lambda name, flags: os.open(name, flags, 0o600)) as handle:
                     handle.write(json.dumps(record) + "\n")
                 self.path.unlink()
             except OSError:
+                aside.unlink()
                 raise refused from None
         return {}
 

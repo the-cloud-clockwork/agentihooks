@@ -767,10 +767,16 @@ def test_a_journal_whose_reason_cannot_be_recorded_is_refused_and_kept(tmp_path)
     client, fleet, desired = world(tmp_path)
     (tmp_path / DELIVERIES).write_text("{")
     (tmp_path / f"{DELIVERIES}.set-aside.jsonl").mkdir()
-    reason = refusal(lambda: client.router.send(resolved(client, desired[0]), "agent_prompt", "op", "x"))
-    assert reason == ("journal_unreadable", "the pane delivery journal is unreadable")
+    found = resolved(client, desired[0])
+    for _ in range(2):
+        reason = refusal(lambda: client.router.send(found, "agent_prompt", "op", "x"))
+        assert reason == ("journal_unreadable", "the pane delivery journal is unreadable")
     assert fleet.mutations() == []
     assert (tmp_path / DELIVERIES).read_text() == "{"
+    assert not list(tmp_path.glob(f"{DELIVERIES}.unreadable-*"))
+    (tmp_path / f"{DELIVERIES}.set-aside.jsonl").rmdir()
+    client.router.send(found, "agent_prompt", "op", "x")
+    assert fleet.received()[EXE_A] == ["x"]
 
 
 def test_the_journal_is_private_and_versioned(tmp_path):
