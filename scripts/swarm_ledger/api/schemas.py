@@ -155,6 +155,17 @@ def operation_schema(kind: str) -> dict:
             "op": {"const": kind},
             "id": {"type": "string", "minLength": 1, "maxLength": 200},
             "controller_epoch": {"type": "integer", "minimum": 1},
+            "worker_claim": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["task_id", "execution_id", "execution_generation", "task_generation"],
+                "properties": {
+                    "task_id": {"type": "string", "minLength": 1},
+                    "execution_id": {"type": "string", "minLength": 1},
+                    "execution_generation": {"type": "integer", "minimum": 1},
+                    "task_generation": {"type": "integer", "minimum": 1},
+                },
+            },
         },
     }
 
@@ -187,7 +198,12 @@ def check_operations(payload: dict, core: ModuleType, task_ids: tuple) -> list:
             raise APIError(400, "schema_invalid", f"Operation {kind} does not match its schema at field {field}")
     try:
         core.check_body(
-            {"ops": [{k: v for k, v in op.items() if k != "controller_epoch"} for op in operations]}, task_ids
+            {
+                "ops": [
+                    {k: v for k, v in op.items() if k not in ("controller_epoch", "worker_claim")} for op in operations
+                ]
+            },
+            task_ids,
         )
     except ValueError as exc:
         raise APIError(400, "schema_invalid", f"Operation does not match its domain schema: {exc}") from None

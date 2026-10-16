@@ -50,6 +50,7 @@ class HostedLedger:
             key = _task_key(op)
             task, revision = self.fetch(slug, key)
             write = _Write(self, slug, key, revision)
+            write.gate = gate
             task_id, receipts = key.split("/")[1], self.store.key(slug, RECEIPTS_KEY, key)
             if stored := self.store.redis.get(receipts):
                 write.meta = {RECEIPTS: {task_id: json.loads(stored)}}
@@ -68,7 +69,15 @@ class _Write:
     def send(self, doc: dict, op: dict, ctx: object) -> bool:
         pin = {"expected_revision": self.revision} if op["op"] == "task_update" else {}
         try:
-            reply = self.hosted.client().mutate(self.slug, [{**op, "operation_id": op["id"], **pin}])
+            write = {**op, "operation_id": op["id"], **pin}
+            if hasattr(self.gate, "scope"):
+                write["worker_claim"] = {
+                    "task_id": self.gate.scope.task_id,
+                    "execution_id": self.gate.scope.execution_id,
+                    "execution_generation": self.gate.scope.generation,
+                    "task_generation": self.gate.request["task_generation"],
+                }
+            reply = self.hosted.client().mutate(self.slug, [write])
         except urllib.error.HTTPError as error:
             raise self._refusal(error) from None
         except OSError as error:
@@ -79,6 +88,8 @@ class _Write:
 
     def _refusal(self, error: urllib.error.HTTPError) -> GrantRefused:
         detail = failure(error)[1]
+        if detail.get("code") == "stale_generation":
+            return GrantRefused("stale_generation", "the task generation is no longer current")
         if detail.get("code") == "operation_conflict":
             return GrantRefused("operation_conflict", REUSED)
         if error.code == 400:
