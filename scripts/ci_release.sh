@@ -65,7 +65,7 @@ def git(*args):
 
 
 if previous:
-    paths = git("diff", "--name-only", "--diff-filter=AM", previous, ref, "--", "changelog.d/").split()
+    paths = git("diff", "--name-only", "--diff-filter=A", previous, ref, "--", "changelog.d/").split()
 else:
     paths = git("ls-tree", "-r", "--name-only", ref, "--", "changelog.d/").split()
 order = ["Added", "Changed", "Deprecated", "Removed", "Fixed", "Security"]
@@ -73,7 +73,7 @@ sections = {}
 for path in sorted(p for p in paths if p.endswith(".md") and p != "changelog.d/README.md"):
     heading = "Changed"
     for line in git("show", f"{ref}:{path}").splitlines():
-        match = re.fullmatch(r"#+\s*(.+?)\s*", line)
+        match = re.fullmatch(r"#{2,3}\s+(.+?)\s*", line)
         if match:
             heading = match.group(1)
         elif line.strip():
