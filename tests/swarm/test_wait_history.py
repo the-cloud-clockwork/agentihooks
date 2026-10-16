@@ -107,8 +107,13 @@ def test_doctor_reads_ended_wait_history_for_historical_agents(redis, monkeypatc
 
     monkeypatch.setattr(traces_read, "client", client)
     monkeypatch.setattr(traces_read, "record", read)
-    store = SimpleNamespace(redis=redis, agents=lambda slug: [])
-    ledger = SimpleNamespace(tasks=lambda slug: [])
+
+    def rows(slug):
+        assert slug == "sw"
+        return []
+
+    store = SimpleNamespace(redis=redis, agents=rows)
+    ledger = SimpleNamespace(tasks=rows)
     idle.declare_wait(redis, "sw", "engineer", until, "proof", 60_000)
     idle.end_wait(redis, "sw", "engineer", until)
     found = detect.readers(store, ledger, "sw", 4_000_000, environ={})["trace"]()
