@@ -441,7 +441,7 @@ def test_cli_promote_holds_a_material_change_with_the_default_tolerance(tmp_path
 def test_cli_operator_authentication_refuses_worker_identity(tmp_path, monkeypatch):
     from scripts.swarm_ledger.repository import repository
 
-    monkeypatch.setattr(repository, "token", lambda slug: "fixture-credential")
+    monkeypatch.setattr(repository, "token", lambda slug: {"fixture": "fixture-credential"}.get(slug))
     monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
     monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
     assert bench._reviewer("") is None
@@ -462,7 +462,7 @@ def test_cli_requalifies_a_held_report_for_a_named_reviewer_and_rolls_it_back(tm
     accepted.write_text(json.dumps(report_with(1, 100)))
     candidate.write_text(json.dumps(report_with(2, 200)))
     promote = ["promote", "--accepted", str(accepted), "--candidate", str(candidate)]
-    assert bench.main([*promote, "--requalified-by", "operator"]) == 0
+    assert bench.main([*promote, "--swarm", "fixture", "--requalified-by", "operator"]) == 0
     printed = json.loads(capsys.readouterr().out)
     assert printed["decision"] == "requalified" and printed["changes"]["requalified_by"] == "operator"
     assert json.loads(accepted.read_text())["generation"] == 2

@@ -337,9 +337,22 @@ def test_accept_requires_the_recorded_run_digest_and_reproducible_evidence(tmp_p
     outcome = profiles.accept(
         path, candidate, POLICY, "operator", reviewer=profiles.Principal("operator", profiles.Role.OPERATOR)
     )
-    assert outcome["decision"] == "refused"
+    assert outcome == {
+        "decision": "refused",
+        "accepted": json.loads(before),
+        "changes": {"evidence": "candidate does not match its recorded runs"},
+    }
     assert path.read_bytes() == before
     assert not path.with_name("accepted.json.previous").exists()
+
+
+def test_accept_installs_recomputed_output_without_a_self_declared_reviewer(tmp_path):
+    expected = profiles.derive(measured(memory_runs()), NODES, POLICY)
+    candidate = {**expected, "requalified_by": "untrusted"}
+    path = tmp_path / "accepted.json"
+    outcome = profiles.accept(path, candidate, POLICY, "")
+    assert outcome == {"decision": "promoted", "accepted": expected, "changes": None}
+    assert json.loads(path.read_text()) == expected
 
 
 def test_accept_preserves_provenance_across_json_key_order(tmp_path):
