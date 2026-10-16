@@ -1,6 +1,6 @@
 # CXCH-07 live proof: herdr and the push-mode master
 
-Two runs on 2026-10-16 against branch head `03fd0e89` (the task branch merged with dev `a20cba82`). CI: focused Proofs run 38926773721 on head `55030969` (attach, lifecycle, managed lifecycle and viewer, push master, rename, resume, herdr host, init agent suites); the pull request checks grade the final head.
+Two runs on 2026-10-16 against branch head `03fd0e89` (the task branch merged with dev `a20cba82`). CI: focused Proofs run 38928222292 on head `ffb5c4c0` (attach, lifecycle, managed lifecycle and viewer, push master, rename, resume, herdr host, init agent suites); the pull request checks grade the final head.
 
 Commits after the proof change no reopen behaviour: the `typed_wake` docstring is removed, `_viewer_lines` reads `environ.get("AGENTIHOOKS_SWARM") or ""` in place of `environ.get("AGENTIHOOKS_SWARM", "")` (the same value for every string environment), and the rest are tests, clearances and evidence. Run 2 (15:35 to 15:41 UTC, `raw/run2/`) is the proof of record. Run 1 (15:23 to 15:29 UTC, `raw/run1/`) passed the same rows using engineer inbox messages in place of ledger chat lines.
 
