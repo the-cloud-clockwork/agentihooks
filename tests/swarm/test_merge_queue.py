@@ -54,6 +54,64 @@ def runner(*responses):
     return run, calls
 
 
+def checked_resource(conclusion="SUCCESS", head="abc"):
+    return {
+        "data": {
+            "resource": {
+                "state": "OPEN",
+                "headRefOid": head,
+                "commits": {
+                    "nodes": [
+                        {
+                            "commit": {
+                                "id": "commit",
+                                "committedDate": "2026-10-15T15:00:00Z",
+                                "statusCheckRollup": {
+                                    "contexts": {
+                                        "nodes": [
+                                            {"name": "CI Validate", "conclusion": conclusion, "isRequired": True},
+                                            {"name": "Optional report", "conclusion": "FAILURE", "isRequired": False},
+                                        ],
+                                    },
+                                },
+                                "checkSuites": {"nodes": []},
+                            },
+                        }
+                    ],
+                },
+            },
+        },
+    }
+
+
+def test_queue_uses_antoncores_required_checks_in_its_own_workflow():
+    from scripts.swarm import ledger_events
+
+    url = "https://github.com/the-cloud-clockwork/antoncore/pull/42"
+    calls, queued = [], []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        if command[2] != "graphql":
+            response = {"workflow_runs": []}
+        elif command[4] == f"query={merge_queue.STATE}":
+            response = {"data": {"resource": {**OPEN, "mergeQueueEntry": ENTRY if queued else None}}}
+        elif command[4] == f"query={merge_queue.FRESHNESS}":
+            response = {"data": {"resource": {"repository": {"nameWithOwner": "the-cloud-clockwork/antoncore"}}}}
+        elif command[4] == f"query={merge_queue.QUEUE}":
+            queued.append(True)
+            response = {"data": {}}
+        else:
+            assert command[4] == f"query={ledger_events.PULL_QUERY.replace('$number', '42')}"
+            assert command[5:] == ["-f", f"url={url}"]
+            response = checked_resource()
+        return subprocess.CompletedProcess(command, 0, json.dumps(response))
+
+    assert merge_queue.operate("queue", url, run)["queued"]
+    assert queued == [True]
+    assert all("workflows/test.yml" not in str(command) for command in calls)
+
+
 @pytest.fixture(autouse=True)
 def task_ledger(monkeypatch):
     from types import SimpleNamespace
