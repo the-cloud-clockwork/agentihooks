@@ -112,6 +112,49 @@ def test_report_keeps_the_unified_diff_of_every_unkilled_mutant(tmp_path, monkey
     )
 
 
+def _two_function_rows(folder, monkeypatch, source, mutant):
+    import json
+
+    from scripts.ci_mutation.report import collect_results
+
+    for name in ("hooks", "scripts", "mutants/hooks"):
+        (folder / name).mkdir(parents=True)
+    (folder / "hooks/sample.py").write_text(source)
+    (folder / "setup.cfg").write_text("[mutmut]\nsource_paths=hooks/\n")
+    (folder / "mutants/hooks/sample.py").write_text(
+        "".join(
+            f"def x_{name}__mutmut_orig():\n    return 7\n\ndef x_{name}__mutmut_1():\n    {mutant}\n\n"
+            for name in ("first", "second")
+        )
+    )
+    keys = {"hooks.sample.x_first__mutmut_1": 0, "hooks.sample.x_second__mutmut_1": 0}
+    meta = {"exit_code_by_key": keys, "durations_by_key": {}, "estimated_durations_by_key": {}}
+    (folder / "mutants/hooks/sample.py.meta").write_text(json.dumps(meta))
+    monkeypatch.chdir(folder)
+    return sorted(collect_results(Path("hooks/sample.py")), key=lambda row: row["name"])
+
+
+def test_clearance_survives_unrelated_line_shift_and_tells_identical_mutants_apart(tmp_path, monkeypatch):
+    from scripts.ci_mutation.report import clearance_key
+
+    body = "def first():\n    return 7\n\n\ndef second():\n    return 7\n"
+    base = _two_function_rows(tmp_path / "base", monkeypatch, body, "return 8")
+    shifted = _two_function_rows(tmp_path / "shifted", monkeypatch, "import os\nimport sys\n\n\n" + body, "return 8")
+    changed = _two_function_rows(tmp_path / "changed", monkeypatch, body, "return 9")
+    assert [row["lines"] for row in base] == [[2], [6]]
+    assert [row["lines"] for row in shifted] == [[6], [10]]
+    keys = [clearance_key("hooks/sample.py", row) for row in base]
+    assert len(set(keys)) == 2
+    assert [clearance_key("hooks/sample.py", row) for row in shifted] == keys
+    cleared = {keys[0]: {"reader": "Standards", "reason": "The returned value has no observable effect"}}
+    report = evaluate("hooks/sample.py", shifted, {6, 10}, cleared)
+    assert [row["name"] for row in report["cleared"]] == ["hooks.sample.x_first__mutmut_1"]
+    assert [row["name"] for row in report["failures"]] == ["hooks.sample.x_second__mutmut_1"]
+    report = evaluate("hooks/sample.py", changed, {2, 6}, cleared)
+    assert report["cleared"] == []
+    assert len(report["failures"]) == 2
+
+
 def test_survivor_text_prints_each_failure_with_its_diff_and_clearance_file():
     from scripts.ci_mutation.report import survivor_text
 
