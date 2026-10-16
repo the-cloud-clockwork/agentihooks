@@ -248,7 +248,7 @@ def test_park_writes_the_open_dependencies_and_the_stacked_base(parked, capsys):
     }
 
 
-@pytest.mark.parametrize("repo", [None, OTHER])
+@pytest.mark.parametrize("repo", [None, "https://github.com/o/other"])
 def test_park_accepts_an_open_dependency_merged_into_dev_after_its_branch_is_deleted(parked, monkeypatch, repo):
     _, ledger, _, shell, doc = parked
     dependency_pr = "https://github.com/o/r/pull/42"
@@ -270,7 +270,7 @@ def test_park_accepts_an_open_dependency_merged_into_dev_after_its_branch_is_del
     assert ["git", "fetch", "origin", "dev"] in shell.calls
     assert ["git", "merge-base", "HEAD", "origin/dev"] in shell.calls
     assert ["git", "fetch", "origin", "eng-a"] not in shell.calls
-    assert ["git", "fetch", "--", OTHER, "eng-a"] not in shell.calls
+    assert ["git", "fetch", "--", repo, "eng-a"] not in shell.calls
     assert ["gh", "pr", "view", dependency_pr, "--json", "state,baseRefName"] in shell.calls
 
 
@@ -299,8 +299,15 @@ def test_park_keeps_the_dependency_branch_until_its_pull_request_merges_into_dev
     assert ["git", "fetch", "origin", "dev"] not in shell.calls
 
 
-@pytest.mark.parametrize("answer", ["not json", "{}", '{"state": "MERGED"}'])
-def test_park_refuses_unreadable_dependency_pull_request_state(parked, monkeypatch, capsys, answer):
+@pytest.mark.parametrize(
+    ("answer", "error"),
+    [
+        ("not json", "Expecting value: line 1 column 1 (char 0)"),
+        ("{}", "'state'"),
+        ('{"state": "MERGED"}', "'baseRefName'"),
+    ],
+)
+def test_park_refuses_unreadable_dependency_pull_request_state(parked, monkeypatch, capsys, answer, error):
     _, ledger, _, shell, _ = parked
     ledger.rows["a"]["pr_url"] = "https://github.com/o/r/pull/42"
 
@@ -311,7 +318,7 @@ def test_park_refuses_unreadable_dependency_pull_request_state(parked, monkeypat
         return result
 
     monkeypatch.setattr(stack, "shell", unreadable_pull)
-    _refused(parked, capsys, "cannot read the dependency pull request:")
+    _refused(parked, capsys, f"cannot read the dependency pull request: {error}")
     assert ["git", "fetch", "origin", "dev"] not in shell.calls
 
 
