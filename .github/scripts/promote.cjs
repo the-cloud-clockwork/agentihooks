@@ -32,18 +32,20 @@ module.exports = async ({ github, context, core, sleep = ms => new Promise(resol
     const head = `promotion/${context.sha}`;
     const ref = `heads/${head}`;
     const pulls = (await github.rest.pulls.list({ ...api, state: 'open', base: 'main', head: `${owner}:${head}` })).data;
+    const promoted = /^Graded dev revision: ([0-9a-f]{40})$/m.exec(main.commit.message)?.[1];
+    if (promoted && (await github.rest.repos.compareCommits({ ...api, base: promoted, head: context.sha })).data.status !== 'ahead') {
+      throw new Error('Graded revision is not newer than the last promotion');
+    }
     const body = `Graded dev revision: ${context.sha}\n\nTests: ${context.serverUrl}/${repository}/actions/runs/${context.runId}`;
-    let snapshot = pulls[0]?.head.sha;
-    if (!snapshot) {
-      try {
-        snapshot = (await github.rest.git.getRef({ ...api, ref })).data.object.sha;
-      } catch (error) {
-        if (error.status !== 404) throw error;
-        snapshot = (await github.rest.git.createCommit({
-          ...api, message: `Promote green dev to main\n\n${body}`, tree: graded.commit.tree.sha, parents: [main.sha],
-        })).data.sha;
-        await github.rest.git.createRef({ ...api, ref: `refs/${ref}`, sha: snapshot });
-      }
+    let snapshot;
+    try {
+      snapshot = (await github.rest.git.getRef({ ...api, ref })).data.object.sha;
+    } catch (error) {
+      if (error.status !== 404 || pulls.length) throw error;
+      snapshot = (await github.rest.git.createCommit({
+        ...api, message: `Promote green dev to main\n\n${body}`, tree: graded.commit.tree.sha, parents: [main.sha],
+      })).data.sha;
+      await github.rest.git.createRef({ ...api, ref: `refs/${ref}`, sha: snapshot });
     }
     const staged = (await github.rest.git.getCommit({ ...api, commit_sha: snapshot })).data;
     if (staged.tree.sha !== graded.commit.tree.sha || staged.parents.length !== 1 || staged.parents[0].sha !== main.sha) {
@@ -53,7 +55,7 @@ module.exports = async ({ github, context, core, sleep = ms => new Promise(resol
       ...api, base: 'main', head, title: 'Promote green dev to main', body,
     })).data;
     if (pull.head.sha !== snapshot || pull.head.repo.full_name !== repository || pull.base.ref !== 'main') {
-      throw new Error('Promotion pull request does not match the graded dev head');
+      throw new Error('Promotion pull request does not match the snapshot commit');
     }
     let ready = false;
     for (let attempt = 0; attempt < 48; attempt++) {
@@ -68,7 +70,8 @@ module.exports = async ({ github, context, core, sleep = ms => new Promise(resol
       await sleep(5000);
     }
     if (!ready) throw new Error('Promotion checks did not become mergeable within four minutes');
-    const merged = (await github.rest.pulls.merge({ ...api, pull_number: pull.number, sha: snapshot, merge_method: 'squash' })).data;
+    const merged = (await github.rest.pulls.merge({ ...api, pull_number: pull.number, sha: snapshot, merge_method: 'squash',
+      commit_title: `Promote green dev to main (#${pull.number})`, commit_message: body })).data;
     if (!merged.merged) throw new Error('GitHub refused the promotion merge');
     main = (await github.rest.repos.getCommit({ ...api, ref: merged.sha })).data;
     if (main.commit.tree.sha !== graded.commit.tree.sha) throw new Error('Promoted tree differs from the graded dev tree');

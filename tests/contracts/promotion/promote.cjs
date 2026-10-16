@@ -12,7 +12,7 @@ function fixture(options = {}) {
     serverUrl: 'https://github.com', runId: 42,
     ...options.context,
   };
-  const commit = (sha, tree) => ({ sha, commit: { tree: { sha: tree } } });
+  const commit = (sha, tree, message = '') => ({ sha, commit: { tree: { sha: tree }, message } });
   const pull = { number: 7, head: { sha: options.pullHead || 'snapshot', repo: { full_name: 'owner/repo' } },
     base: { ref: 'main' }, html_url: 'https://github.com/owner/repo/pull/7' };
   const runUrl = 'https://github.com/owner/repo/actions/runs/42';
@@ -33,7 +33,7 @@ function fixture(options = {}) {
     git: {
       getRef: async ({ ref }) => {
         if (ref === 'heads/dev') return { data: { object: { sha: ++reads === 1 ? options.dev || 'graded' : options.moved || 'graded' } } };
-        if (options.snapshot) return { data: { object: { sha: options.snapshot } } };
+        if (options.snapshot || options.existing) return { data: { object: { sha: options.snapshot || 'snapshot' } } };
         throw Object.assign(new Error('Not Found'), { status: 404 });
       },
       createCommit: async args => { refs.push(['commit', args]); return { data: { sha: 'snapshot' } }; },
@@ -48,8 +48,9 @@ function fixture(options = {}) {
     },
     repos: {
       getCommit: async ({ ref }) => ({ data: ref === 'graded' ? commit('graded', 'tree') :
-        ref === 'main' ? commit('main', options.already ? 'tree' : 'old') : commit('rebased', options.wrongTree ? 'wrong' : 'tree') }),
+        ref === 'main' ? commit('main', options.already ? 'tree' : 'old', options.promoted ? `Promote green dev to main (#6)\n\nGraded dev revision: ${options.promoted}\n` : '') : commit('rebased', options.wrongTree ? 'wrong' : 'tree') }),
       listCommitStatusesForRef: async () => ({ data: statuses.slice(0, 100) }),
+      compareCommits: async args => { refs.push(['compare', args]); return { data: { status: options.order || 'ahead' } }; },
     },
     pulls: {
       get: async () => ({ data: { ...pull, mergeable: options.conflict ? false : true, rebaseable: !options.nonrebaseable,
@@ -90,7 +91,8 @@ test('promotes the graded tree as one commit on main and records both revisions'
   assert.equal(f.writes[1][0], 'merge');
   const { merge_method, ...request } = f.writes[1][1];
   assert.ok(['rebase', 'squash'].includes(merge_method));
-  assert.deepEqual(request, { owner: 'owner', repo: 'repo', pull_number: 7, sha: 'snapshot' });
+  assert.deepEqual(request, { owner: 'owner', repo: 'repo', pull_number: 7, sha: 'snapshot',
+    commit_title: 'Promote green dev to main (#7)', commit_message: f.writes[0][1].body });
   assert.equal(f.outputs.main, 'rebased');
   assert.equal(f.outputs.graded, 'graded');
 });
@@ -191,8 +193,40 @@ test('promotes the graded revision while dev keeps moving', async () => {
 
 test('a moved pull request cannot merge', async () => {
   const f = fixture({ existing: true, pullHead: 'ungraded' });
-  await assert.rejects(promote(f), /graded/);
+  await assert.rejects(promote(f), /snapshot commit/);
   assert.deepEqual(f.writes, []);
+});
+
+test('an open pull request without its snapshot branch cannot merge', async () => {
+  const f = fixture({ existing: true });
+  f.github.rest.git.getRef = async () => { throw Object.assign(new Error('Not Found'), { status: 404 }); };
+  await assert.rejects(promote(f), /Not Found/);
+  assert.deepEqual(f.writes, []);
+  assert.deepEqual(f.refs, []);
+});
+
+const last = 'a'.repeat(40);
+
+test('promotes a revision newer than the last promotion', async () => {
+  const f = fixture({ promoted: last });
+  await promote(f);
+  assert.deepEqual(f.refs[0], ['compare', { owner: 'owner', repo: 'repo', base: last, head: 'graded' }]);
+  assert.equal(f.outputs.main, 'rebased');
+});
+
+for (const order of ['behind', 'identical', 'diverged']) {
+  test(`never rolls main back to a revision that is ${order} the last promotion`, async () => {
+    const f = fixture({ promoted: last, order });
+    await assert.rejects(promote(f), /not newer than the last promotion/);
+    assert.deepEqual(f.writes, []);
+    assert.deepEqual(f.refs.map(([kind]) => kind), ['compare']);
+  });
+}
+
+test('a created pull request on another head cannot merge', async () => {
+  const f = fixture({ pullHead: 'ungraded' });
+  await assert.rejects(promote(f), /snapshot commit/);
+  assert.deepEqual(f.writes.map(([kind]) => kind), ['create']);
 });
 
 for (const options of [{ refused: true }, { wrongTree: true }, { unmerged: true }]) {
