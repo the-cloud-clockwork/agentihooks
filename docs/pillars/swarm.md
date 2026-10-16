@@ -51,9 +51,13 @@ agent name, and a test walks `scripts/` and `hooks/` to keep it so.
 
 For Codex executions using `app_server`, herdr is a viewer of the managed
 thread. Closing it leaves the execution running. A push master handles inbox
-work and ends its turn when idle; it does not run `wait --inbox`. See
-[Managed Codex terminals](../reference/codex-managed-terminal.md) for transport
-configuration, reopening the same thread and handoff behavior.
+work and ends its turn when idle; it does not run `wait --inbox`. A swarm made
+with `swarm create` uses `app_server` unless it sets `codex-inbox-transport=legacy`.
+See [Managed Codex terminals](../reference/codex-managed-terminal.md) for
+reopening the same thread and handoff behavior, and
+[Codex inbox transport](../reference/codex-inbox-transport.md) for the setting,
+the canary order and rollback. The Claude inbox channel, the Codex push pump and
+broadcast topics are separate paths; that page tells them apart.
 
 Every swarm that is not stopped keeps exactly one master, named `master@<code>-<n>`. The tick spawns it when the
 swarm starts and recovers it when its execution ends (closing a managed Codex viewer alone leaves it running); it is never nudged or retired for being idle, and it

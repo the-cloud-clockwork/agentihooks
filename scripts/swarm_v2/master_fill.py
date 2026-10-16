@@ -4,7 +4,7 @@ holds, so a raised count fills its seats and a seat whose master ended is filled
 from scripts.inbox.seats import seat_address
 from scripts.swarm import launch_check, seat_spawn
 from scripts.swarm.store import MASTER
-from scripts.swarm_v2 import masters
+from scripts.swarm_v2 import master_seat_alarm, masters
 
 ENDED = "stopping"
 ASSIGNMENTS = "launch-assignments"
@@ -50,6 +50,7 @@ def _place(slug, config, store, runtime, seat_name, now_ms, doc):
         )
     except seat_spawn.SeatFailed as failed:
         store.drop_agent(slug, failed.record.name)
+        master_seat_alarm.failed(store, slug, seat_name, str(failed.error))
         return FAILED.format(seat=failed.record.seat, error=failed.error)
     record = tick.placed_record(store.execution_occupants(slug).get(record.seat, record), placed)
     store.put_agent(slug, record)

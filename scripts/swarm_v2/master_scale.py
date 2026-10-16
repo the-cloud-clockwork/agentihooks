@@ -29,7 +29,8 @@ ASK = (
     "the remaining masters."
 )
 HANDED = "Master seat {address} of swarm {slug} retired as the swarm shrank. Its handoff document follows.\n\n"
-EARLY = "Master seat {address} retired; the lead {lead} answers {held} until the count falls or the seat refills."
+EARLY = "Master seat {address} retired; its phases moved: {moved}."
+EARLY_EMPTY = "Master seat {address} retired owning no phase."
 
 
 def rule_of(text: str) -> str:
@@ -66,6 +67,7 @@ def wanted(rule: str, agents: list) -> int:
 def run(slug: str, config, store, runtime, doc: dict, now_ms: int) -> list[str]:
     seats, found = masters.MasterSeats(store.redis), rule(store.redis, slug)
     if not found or config.state in ENDED:
+        store.redis.hdel(seats.key(slug), masters.RETIRED)
         return master_fill.run(slug, config, store, runtime, doc, now_ms)
     agents = [a for a in store.agents(slug) if a.state != "finished"]
     want = wanted(found, agents)
@@ -76,6 +78,7 @@ def run(slug: str, config, store, runtime, doc: dict, now_ms: int) -> list[str]:
 def _resize(slug, store, doc, agents, count, want, now_ms):
     key = masters.MasterSeats(store.redis).key(slug)
     retiring = json.loads(store.redis.hget(key, RETIRING) or "{}")
+    masters.MasterSeats(store.redis).keep_retired(slug, want, count)
     if want >= count:
         _withdraw_asks(store, retiring)
         store.redis.hdel(key, BELOW, RETIRING)
@@ -137,11 +140,14 @@ def _retire(slug, store, address, asked, now_ms):
 
 
 def _retire_early(slug, store, doc, address, asked, now_ms):
-    """A seat below a live higher seat keeps its phases until the count falls; the lead answers them meanwhile."""
+    """A seat below a live higher seat stays counted; its phases move to the remaining seats in the same step."""
     action = _retire(slug, store, address, asked, now_ms)
-    owned = [p for p, owner in masters.MasterSeats(store.redis).owners(slug, doc).items() if owner == address]
-    held = f"its phases {', '.join(owned)}" if owned else "no phase (the seat owned none)"
-    text = EARLY.format(address=address, lead=_address(slug, 1), held=held)
+    seats = masters.MasterSeats(store.redis)
+    owned = [p for p, owner in seats.owners(slug, doc).items() if owner == address]
+    seats.retire(slug, address)
+    owners = seats.owners(slug, doc)
+    moved = ", ".join(f"{p} to {owners.get(p, _address(slug, 1))}" for p in owned)
+    text = EARLY.format(address=address, moved=moved) if owned else EARLY_EMPTY.format(address=address)
     MastersChannel(store.redis).announce(slug, text, now_ms / 1000)
     return action
 

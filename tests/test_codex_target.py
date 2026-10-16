@@ -1216,3 +1216,13 @@ class TestRestoreHookOrder:
 
         assert restore_hook_order(home) == ["SessionStart"]
         assert (home / "hooks.json").read_text() == installed
+
+
+class TestDoctorInboxTransport:
+    def test_doctor_names_the_default_transport_and_the_rollback(self, adapter, capsys):
+        adapter.doctor()
+        lines = capsys.readouterr().out.splitlines()
+        assert lines[-1] == (
+            "  [--] Codex inbox transport: swarm create stores app_server; roll a swarm back "
+            "with: agentihooks swarm <id> set codex-inbox-transport=legacy"
+        )
