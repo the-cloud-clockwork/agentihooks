@@ -192,12 +192,12 @@ def test_verify_names_a_failed_integrity_check(tmp_path, monkeypatch):
     (tmp_path / "copy.sqlite3").touch()
     connection = Mock()
     connection.execute.return_value.fetchone.return_value = ("row 3 missing from index",)
-    connect = Mock(return_value=connection)
-    monkeypatch.setattr(ledger_writer.sqlite3, "connect", connect)
+    existing = Mock(return_value=connection)
+    monkeypatch.setattr(ledger_writer, "existing", existing)
     with pytest.raises(ValueError) as failed:
         ledger_writer.verify(tmp_path / "copy.sqlite3")
     assert str(failed.value) == f"{tmp_path / 'copy.sqlite3'} failed its integrity check: row 3 missing from index"
-    connect.assert_called_once_with(tmp_path / "copy.sqlite3")
+    existing.assert_called_once_with(tmp_path / "copy.sqlite3")
     connection.execute.assert_called_once_with("PRAGMA integrity_check")
     connection.close.assert_called_once_with()
 

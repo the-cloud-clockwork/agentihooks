@@ -135,6 +135,24 @@ def test_pinned_worker_cannot_write_as_another_worker_or_the_operator(crew):
     assert "only the operator writes without an author" in reply["_meta"]["warnings"]
 
 
+def phase_comments(reply):
+    return [entry["text"] for entry in next(p for p in reply["phases"] if p["id"] == "p1")["comments"]]
+
+
+def test_a_worker_token_cannot_answer_the_operator_on_an_entry_but_the_service_relay_can(crew):
+    thread = "phases/p1/comments"
+    answer = operation("add", by=WORKER, thread=thread, to="operator", text="Worker answer")
+    with pinned():
+        reply = ledger.request(SLUG, [answer])
+    assert answer["id"] in reply["rejected"]
+    refused = f"{WORKER} cannot answer the operator on an entry; the swarm relay posts that answer"
+    assert refused in reply["_meta"]["warnings"]
+    assert "Worker answer" not in phase_comments(ledger.request(SLUG))
+    relayed = operation("add", by=WORKER, thread=thread, to="operator", text="Relayed answer")
+    assert relayed["id"] not in ledger.request(SLUG, [relayed], service=True)["rejected"]
+    assert "Relayed answer" in phase_comments(ledger.request(SLUG))
+
+
 def test_a_worker_cannot_raise_its_own_role_but_a_master_can_join_as_orchestrator(crew):
     with pinned():
         raised = operation("join", by=WORKER, role="orchestrator")

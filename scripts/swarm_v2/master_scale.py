@@ -10,6 +10,7 @@ import json
 
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import CLOSED, InboxStore
+from scripts.swarm import metrics_outbox
 from scripts.swarm.store import MASTER
 from scripts.swarm_v2 import master_fill, masters
 from scripts.swarm_v2.masters_channel import SWARM, MastersChannel
@@ -20,6 +21,7 @@ RULE = "per"
 BELOW = "below"
 RETIRING = "retiring"
 RETIRE_SECONDS = "retire-seconds"
+TABLE = metrics_outbox.Table("master_scaling", (("metric", "String"), ("value", "Int64"), ("seat", "String")))
 SENDER = SWARM
 HOLD_MS = 10 * 60_000
 ENDED = ("stopping", "stopped")
@@ -136,6 +138,7 @@ def _retire(slug, store, address, asked, now_ms):
         return f"closed empty master seat {address}"
     seconds = (now_ms - asked[0]) // 1000
     store.redis.rpush(f"{masters.MasterSeats(store.redis).key(slug)}:{RETIRE_SECONDS}", seconds)
+    _measure(slug, "master_retire_seconds", seconds, address, now_ms)
     return f"retired master seat {address} after {seconds} seconds"
 
 
@@ -158,6 +161,24 @@ def _withdraw_asks(store, retiring):
         inbox.withdraw(ask_id, SENDER, f"the swarm grew again, so seat {address} stays", expected_address=address)
 
 
+def _measure(slug, metric, value, seat, now_ms):
+    from scripts.swarm import metrics
+
+    row = {
+        "event_id": f"master-scaling:{slug}:{metric}:{seat}:{now_ms}:{value}",
+        "ledger": slug,
+        "ts_ms": now_ms,
+        "plan": "",
+        "phase": "",
+        "slice": "",
+        "task": "",
+        "metric": metric,
+        "value": value,
+        "seat": seat,
+    }
+    metrics.record(TABLE, [row], now_ms)
+
+
 def measurements(redis, slug: str) -> dict:
     key = masters.MasterSeats(redis).key(slug)
     return {
@@ -169,6 +190,7 @@ def measurements(redis, slug: str) -> dict:
 def _recount(slug, store, doc, agents, before, after, now_ms):
     seats = masters.MasterSeats(store.redis)
     seats.set_count(slug, after)
+    _measure(slug, "master_seat_count", after, "", now_ms)
     owners, size = seats.owners(slug, doc), len(working(agents))
     MastersChannel(store.redis).announce(slug, announcement(slug, after, size, owners), now_ms / 1000)
     return [f"master seats {before} to {after} for {size} working agents"]

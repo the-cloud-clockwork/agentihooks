@@ -4,7 +4,7 @@ import subprocess
 import sys
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from scripts.gates.base import Who
 
@@ -71,6 +71,7 @@ class Verdict:
     incarnation: str
     refusals: tuple[str, ...]
     matrix: dict[str, str]
+    server: dict = field(default_factory=dict)
 
     @property
     def compatible(self) -> bool:
@@ -107,7 +108,7 @@ def matrix(methods: frozenset[str]) -> dict[str, str]:
 
 
 def qualify(target: str, incarnation: str, observed: Observation) -> Verdict:
-    return Verdict(target, incarnation, tuple(refusals(observed)), matrix(observed.methods))
+    return Verdict(target, incarnation, tuple(refusals(observed)), matrix(observed.methods), observed.server)
 
 
 def _json(run: Callable[[list[str]], subprocess.CompletedProcess], command: list[str]) -> dict:
@@ -131,9 +132,18 @@ def _schema_methods(schema: dict) -> frozenset[str]:
     return frozenset(name for name in found if isinstance(name, str))
 
 
+def machine_status(run: Callable[[list[str]], subprocess.CompletedProcess]) -> Callable[[str], dict]:
+    def status(target: str) -> dict:
+        return _json(run, ["herdr", "--machine", target, *STATUS_SERVER])
+
+    return status
+
+
 def machine_probe(run: Callable[[list[str]], subprocess.CompletedProcess]) -> Callable[[str], Observation]:
+    status = machine_status(run)
+
     def probe(target: str) -> Observation:
-        server = _json(run, ["herdr", "--machine", target, *STATUS_SERVER])
+        server = status(target)
         client = _json(run, ["herdr", *STATUS_CLIENT])
         same = server.get("version") == client.get("version") and server.get("protocol") == client.get("protocol")
         methods = _schema_methods(_json(run, ["herdr", *SCHEMA])) if same else frozenset()
@@ -152,13 +162,19 @@ def runner(environ: dict[str, str]) -> Callable[[list[str]], subprocess.Complete
 
 
 class Qualifier:
-    """The incarnation is the execution attempt id: one supervised herdr server lives per attempt."""
+    """The incarnation is the execution attempt id. herdr reports no server process id, so the server status document
+    the gate reads itself tells a server restarted under one attempt."""
 
-    def __init__(self, probe: Callable[[str], Observation]) -> None:
+    def __init__(self, probe: Callable[[str], Observation], status: Callable[[str], dict]) -> None:
         self.probe = probe
+        self.status = status
         self.verdicts: dict[str, Verdict] = {}
         self.retired: dict[str, set[str]] = {}
         self.mismatches: Counter = Counter()
+
+    @classmethod
+    def machine(cls, run: Callable[[list[str]], subprocess.CompletedProcess]) -> "Qualifier":
+        return cls(machine_probe(run), machine_status(run))
 
     def verdict(self, target: str, incarnation: str) -> Verdict:
         if not target or target.startswith("-") or not incarnation:
@@ -166,10 +182,11 @@ class Qualifier:
         if incarnation in self.retired.get(target, ()):
             raise Incompatible(f"herdr server incarnation {incarnation} on {target} was replaced")
         cached = self.verdicts.get(target)
-        if cached is not None and cached.incarnation == incarnation:
+        same = cached is not None and cached.incarnation == incarnation
+        if same and self.status(target) == cached.server:
             return cached
         fresh = qualify(target, incarnation, self.probe(target))
-        if cached is not None:
+        if cached is not None and not same:
             self.retired.setdefault(target, set()).add(cached.incarnation)
         self.verdicts[target] = fresh
         return fresh
@@ -197,7 +214,7 @@ def main(argv: list[str], environ: dict[str, str]) -> int:
         print(f"ERROR: {AGENT_REFUSAL}", file=sys.stderr)
         return 2
     try:
-        verdict = Qualifier(machine_probe(runner(environ))).verdict(*argv)
+        verdict = Qualifier.machine(runner(environ)).verdict(*argv)
     except (Incompatible, Unreachable) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2

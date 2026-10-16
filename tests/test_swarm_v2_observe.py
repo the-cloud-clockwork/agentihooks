@@ -383,7 +383,15 @@ def test_status_report_rows_keep_their_fields_and_add_the_observation(monkeypatc
     Observer(store, "kubernetes", LIMITS).observe("fixture", agent, [beat(agent)], NOW)
     monkeypatch.setattr(status, "page_quota", lambda: {})
     [row] = status.status_report(store, "fixture", {"tasks": []})["agents"]
-    assert set(row) == set(asdict(agent)) | {"status", "promoted", "state_since", "gates", "inbox", "observation"}
+    assert set(row) == set(asdict(agent)) | {
+        "status",
+        "promoted",
+        "state_since",
+        "gates",
+        "inbox",
+        "observation",
+        "capabilities",
+    }
     assert (row["name"], row["observation"]["sources"]["heartbeat"]["observed_at"]) == (agent.name, NOW - 5.0)
 
 

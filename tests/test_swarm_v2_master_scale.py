@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import cli, prompt
+from scripts.swarm import cli, metrics_outbox, prompt
 from scripts.swarm import tick as tick_module
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_v2 import master_scale, masters
@@ -340,7 +340,12 @@ def test_an_early_retired_seat_that_owns_no_phase_says_so(swarm):
     assert masters.MasterSeats(store.redis).retired(SLUG) == [THIRD]
 
 
-def test_twenty_back_to_five_retires_extra_seats_through_their_handoffs(swarm):
+def test_twenty_back_to_five_retires_extra_seats_through_their_handoffs(swarm, tmp_path, monkeypatch):
+    path = tmp_path / "metrics.sqlite"
+    sink = metrics_outbox.Settings("http://metrics.invalid", "", "")
+    monkeypatch.setattr(metrics_outbox, "settings", lambda environ: sink)
+    monkeypatch.setattr(metrics_outbox, "spool_path", lambda: path)
+    monkeypatch.setattr(metrics_outbox, "post", lambda sink, query, body: False)
     store, runtime = swarm
     inbox = InboxStore(store.redis)
     second, third, fourth = asked(swarm)
@@ -379,6 +384,23 @@ def test_twenty_back_to_five_retires_extra_seats_through_their_handoffs(swarm):
         "master_seat_count": 1,
         "master_retire_seconds": [60, 60, 120],
     }
+
+    box = metrics_outbox.Outbox(path, sink)
+    try:
+        rows = box.recent("master_scaling", NOW + 4 * MINUTE + HOLD)
+    finally:
+        box.close()
+    assert {(row["metric"], row["value"], row["seat"], row["ts_ms"]) for row in rows} == {
+        ("master_seat_count", 4, "", NOW),
+        ("master_retire_seconds", 60, FOURTH, NOW + 2 * MINUTE + HOLD),
+        ("master_retire_seconds", 60, THIRD, NOW + 2 * MINUTE + HOLD),
+        ("master_seat_count", 2, "", NOW + 2 * MINUTE + HOLD),
+        ("master_retire_seconds", 120, SECOND, NOW + 3 * MINUTE + HOLD),
+        ("master_seat_count", 1, "", NOW + 3 * MINUTE + HOLD),
+    }
+    assert all(row["ledger"] == SLUG for row in rows)
+    assert all((row["plan"], row["phase"], row["slice"], row["task"]) == ("", "", "", "") for row in rows)
+    assert len({row["event_id"] for row in rows}) == 6
 
     import fakeredis
 

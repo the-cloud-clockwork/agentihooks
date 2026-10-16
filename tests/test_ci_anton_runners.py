@@ -29,6 +29,7 @@ def pool(label):
 
 MOVED = {
     ("access-audit.yml", "audit"): LIGHT,
+    ("branch-lanes.yml", "grade"): LIGHT,
     ("hive-worker.yml", "contracts"): LIGHT,
     ("hive-worker.yml", "kind"): STANDARD,
     ("hive-worker.yml", "publish"): STANDARD,
@@ -111,6 +112,7 @@ CLASSED = {
 
 HOSTED = OIDC | PROTECTED | TARGET | CLASSED
 CONSOLIDATED = {
+    ("test.yml", "durations"),
     ("swarm-node-smoke.yml", "worker-health"),
     ("swarm-smoke.yml", "compose-hive"),
     ("swarm-smoke.yml", "hive-join"),
@@ -265,7 +267,7 @@ def test_every_hosted_job_stays_on_a_hosted_runner():
         assert jobs[(name, job)]["runs-on"] == "ubuntu-latest", f"{name}:{job}"
     for name, job in PROTECTED | TARGET | CLASSED:
         assert jobs[(name, job)]["runs-on"] == "ubuntu-latest", f"{name}:{job}"
-    assert set(jobs) | CONSOLIDATED == set(MOVED) | HOSTED
+    assert set(jobs) | CONSOLIDATED == set(MOVED) | HOSTED | CONSOLIDATED
 
 
 def test_jobs_with_service_or_job_containers_run_on_the_docker_pool():

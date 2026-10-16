@@ -390,12 +390,26 @@ def _many(sizes: tuple[int, ...]) -> bytes:
 
 def test_member_count_and_expanded_bytes_are_bounded(monkeypatch):
     monkeypatch.setattr(git_capture, "ARCHIVE_MEMBERS", 2)
-    monkeypatch.setattr(git_capture, "ARCHIVE_BYTES", 5)
+    policy = git_capture.Policy(total_limit=5)
+    monkeypatch.setattr(git_capture, "Policy", lambda: policy)
     assert [name for name, _, _ in git_capture._members(_many((2, 3)))] == ["m0", "m1"]
     for sizes in ((1, 1, 1), (2, 4)):
         with pytest.raises(git_capture.SourceError) as raised:
             git_capture._members(_many(sizes))
         assert str(raised.value) == "the untracked archive holds more members or bytes than an extraction allows"
+
+
+@pytest.mark.parametrize("extra", (0, 1))
+def test_source_archive_reader_enforces_writer_total_limit(extra):
+    policy = git_capture.Policy()
+    sizes = (policy.file_limit,) * (policy.total_limit // policy.file_limit)
+    if extra:
+        with pytest.raises(git_capture.SourceError) as raised:
+            git_capture._members(_many((*sizes, extra)))
+        assert str(raised.value) == "the untracked archive holds more members or bytes than an extraction allows"
+    else:
+        members = git_capture._members(_many(sizes))
+        assert sum(len(data) for _, _, data in members) == policy.total_limit
 
 
 def test_a_compressed_archive_is_not_expanded():

@@ -17,6 +17,7 @@ from scripts.swarm import (
     affinity,
     bottleneck,
     bottleneck_status,
+    capabilities,
     drain_watch,
     failed_panes,
     idle,
@@ -241,6 +242,11 @@ def observation(store, slug, agent):
     return {"state": UNCLASSIFIED, "observed_at": at, "sources": {observe.Source.HEARTBEAT.value: heartbeat}}
 
 
+def transport(agent: AgentRecord) -> dict:
+    found = capabilities.of_agent(agent)
+    return {"push_inbox": found.push_inbox, "native_terminal_attach": found.native_terminal_attach}
+
+
 def live_agents(agents: list[AgentRecord], runtime: Runtime) -> list[AgentRecord]:
     names = runtime.live_names()
     return [a for a in agents if a.runtime_backend != "local" or reports.host(a) or a.name in names]
@@ -269,6 +275,7 @@ def status_report(store: RedisStore, slug: str, state: dict, runtime: Runtime | 
                 "promoted": a.name == promotion.get("promoted"),
                 "state_since": int(store.redis.hget(store.key(slug, "state-since"), a.name) or 0),
                 "observation": observation(store, slug, a),
+                "capabilities": transport(a),
                 "gates": active.get(a.name, []),
                 "inbox": [
                     {"text": item.text, "sender": item.sender, "state": item.state}

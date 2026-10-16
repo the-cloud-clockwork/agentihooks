@@ -17,6 +17,8 @@
 /tests/*ALLOWLIST* @nestorcolt
 /tests/count_floor.py @nestorcolt
 /tests/coverage_*.py @nestorcolt
+/tests/dep_inputs.py @nestorcolt
+/tests/dep_manifest.py @nestorcolt
 /tests/test_coverage_*.py @nestorcolt
 /tests/dev_durations.py @nestorcolt
 /tests/flake_budget.py @nestorcolt

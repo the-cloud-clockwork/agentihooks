@@ -10,7 +10,14 @@ from scripts.swarm_v2.kubernetes.watch import BACKEND, CLASSES, Plan, Pod, PodVi
 from scripts.swarm_v2.operator_auth import OPERATOR
 from scripts.swarm_v2.reconciliation.accounts import AccountReconciler, Finding, exit_source
 from scripts.swarm_v2.runtime.observe import Observer, Signal
-from scripts.swarm_v2.runtime.operations import Observation, Operation, OperationRequest, Operations, OperationTransport
+from scripts.swarm_v2.runtime.operations import (
+    SPAWN,
+    Observation,
+    Operation,
+    OperationRequest,
+    Operations,
+    OperationTransport,
+)
 from scripts.swarm_v2.telemetry import Telemetry
 
 ENDED = "ended"
@@ -216,6 +223,14 @@ class Controller:
         self._authorize()
         counts = self.store.redis.hgetall(self.store.key(self.slug, "controller-orphans"))
         return {name: int(counts.get(name, 0)) for name in CLASSES}
+
+    def spawn_refusals(self) -> dict[str, dict]:
+        self._authorize()
+        return {
+            operation.execution_id: {"operation_id": operation.operation_id, **operation.refusal}
+            for operation in self.store.operation_journal.records(self.slug)
+            if operation.action == SPAWN and operation.refusal
+        }
 
     def _attempts(self) -> list[Attempt]:
         return self.host_keys.attempts(self.slug, self.store.execution_occupants(self.slug).values(), OPERATOR)

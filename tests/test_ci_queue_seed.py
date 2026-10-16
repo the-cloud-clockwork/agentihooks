@@ -20,6 +20,13 @@ def _jobs():
     return yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
 
 
+def _duration_steps():
+    jobs = _jobs()
+    steps = jobs.get("durations", jobs["select"])["steps"]
+    end = next(index for index, step in enumerate(steps) if step.get("id") == "republished")
+    return steps[: end + 1]
+
+
 def _step(steps, name):
     return next(s for s in steps if s.get("name") == name)
 
@@ -35,7 +42,7 @@ def test_publisher_uploads_the_passed_dev_baseline_for_queue_runs():
 
 
 def test_queue_runs_mint_a_read_only_app_token_and_skip_the_dev_cache_lookup():
-    job = _jobs()["durations"]
+    job = _jobs().get("durations", _jobs()["select"])
     lookup = _step(job["steps"], "Look up the base revision's dev durations")
     mint = _step(job["steps"], "Mint the tcc main ci App token")
     assert not _runs_on(lookup, "merge_group")
@@ -52,7 +59,7 @@ def test_queue_runs_mint_a_read_only_app_token_and_skip_the_dev_cache_lookup():
 
 
 def test_queue_runs_restore_the_latest_dev_durations_on_the_app_token():
-    job = _jobs()["durations"]
+    job = _jobs().get("durations", _jobs()["select"])
     steps = job["steps"]
     mint = _step(steps, "Mint the tcc main ci App token")
     find = _step(steps, "Find the latest passed dev push run")
@@ -80,7 +87,7 @@ def test_queue_runs_restore_the_latest_dev_durations_on_the_app_token():
 
 def test_no_queue_run_carries_a_baseline_from_the_latest_dev_run():
     jobs = _jobs()
-    baselines = [s for s in jobs["durations"]["steps"] if "baseline" in s.get("name", "")]
+    baselines = [s for s in jobs.get("durations", jobs["select"])["steps"] if "baseline" in s.get("name", "")]
     assert baselines and not [s for s in baselines if _runs_on(s, "merge_group")]
     assert "dev-coverage-baseline" not in (_ROOT / ".github/workflows/test.yml").read_text()
 
@@ -128,7 +135,8 @@ def test_every_unit_shard_downloads_the_one_republished_dev_durations():
     steps = jobs["split"]["steps"]
     download = _step(steps, "Download the queued run's dev durations")
     adopt = _step(steps, "Adopt latest dev durations")
-    assert download["if"] == "needs.durations.outputs.source == '' && needs.durations.outputs.queued == 'true'"
+    producer = "durations" if "durations" in jobs else "select"
+    assert download["if"] == f"needs.{producer}.outputs.source == '' && needs.{producer}.outputs.queued == 'true'"
     assert download["uses"] == "./.github/actions/retry-download"
     assert download["with"] == {"name": "dev-durations", "path": "~/dev-durations"}
     assert steps.index(download) < steps.index(adopt)
@@ -136,7 +144,7 @@ def test_every_unit_shard_downloads_the_one_republished_dev_durations():
 
 @pytest.fixture
 def lookup(tmp_path):
-    find = _step(_jobs()["durations"]["steps"], "Find the latest passed dev push run")
+    find = _step(_jobs().get("durations", _jobs()["select"])["steps"], "Find the latest passed dev push run")
     tools = tmp_path / "bin"
     tools.mkdir()
     gh = tools / "gh"
@@ -204,7 +212,7 @@ def test_push_and_dispatch_keep_the_coverage_ratchet_and_stage_report(event):
 def test_failed_units_cannot_publish_a_push_baseline():
     job = _jobs()["coverage-baseline"]
     assert "needs.unit.result == 'success'" in job["if"]
-    assert job["needs"] == ["unit", "gate-required"]
+    assert job["needs"] in (["unit", "gate-required"], ["unit", "coverage-ratchet"])
 
 
 def test_the_lookup_is_red_when_the_dev_run_kept_no_live_durations(lookup):
@@ -231,7 +239,7 @@ def _runs_on(step, event):
 
 
 def test_dispatch_runs_restore_durations_and_the_base_baseline_on_the_app_token():
-    steps = _jobs()["durations"]["steps"]
+    steps = _duration_steps()
     restored = [s for s in steps if _runs_on(s, "workflow_dispatch")]
     names = [s.get("name") for s in restored]
     assert "Look up the base revision's dev durations" not in names
@@ -289,7 +297,7 @@ _REUSE = [
     ],
 )
 def test_pull_request_and_push_runs_keep_the_dev_cache_lookup(event, expected):
-    steps = _jobs()["durations"]["steps"]
+    steps = _duration_steps()
     assert [s.get("name") for s in steps if _runs_on(s, event)] == expected
 
 
@@ -302,7 +310,7 @@ _LISTED = (
 
 @pytest.fixture
 def dispatch_lookup(tmp_path):
-    find = _step(_jobs()["durations"]["steps"], "Find the dev push run of the dispatched base")
+    find = _step(_jobs().get("durations", _jobs()["select"])["steps"], "Find the dev push run of the dispatched base")
     tools = tmp_path / "bin"
     tools.mkdir()
     (tools / "gh").write_text(

@@ -39,6 +39,8 @@ class KubernetesRuntime:
         status = STATUSES.get(operation.phase, Status.UNAVAILABLE)
         if status is not Status.OK:
             detail = f"spawn operation {operation.operation_id} is {operation.phase.value}"
+            if refusal := operation.refusal:
+                detail += f": {refusal['reason']}" + (f" on {refusal['field']}" if refusal["field"] else "")
             return Outcome(SPAWN, status, BACKEND, detail=detail)
         placed = Placed(
             "",

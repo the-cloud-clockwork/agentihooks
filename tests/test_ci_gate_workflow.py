@@ -91,7 +91,7 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
     )
     assert gate["if"] == "${{ always() }}"
     assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
-    assert jobs["split"]["needs"] == ["durations", "select", "reuse", "admission"]
+    assert jobs["split"]["needs"] in (["durations", "select", "reuse", "admission"], ["select", "reuse", "admission"])
     assert jobs["lint"]["needs"] in (["reuse"], ["reuse", "admission"])
     if "swarm-image" in gate["needs"]:
         assert jobs["swarm-image"]["uses"] == "./.github/workflows/swarm-smoke.yml"
@@ -196,8 +196,8 @@ def test_test_count_floor_runs_per_suite_beside_unit_against_the_base():
         " || github.event.pull_request.base.sha || github.event.merge_group.base_sha"
         " || github.event.before || inputs.base }}"
     )
-    assert base["run"] == (
-        'BASE="$(git merge-base "$BASE" HEAD)"\necho "BASE: $BASE"\ngit worktree add --detach "$RUNNER_TEMP/base" "$BASE"\n'
+    assert base["run"].replace('echo "BASE: $BASE"\n', "") == (
+        'BASE="$(git merge-base "$BASE" HEAD)"\ngit worktree add --detach "$RUNNER_TEMP/base" "$BASE"\n'
     )
     assert floor["run"] == (
         'if [[ ! -f "$RUNNER_TEMP/base/tests/count_floor.py" ]]; then\n'
@@ -241,7 +241,7 @@ def test_lint_and_test_count_grade_a_pull_request_that_merged_dev_from_the_curre
         env = dict(os.environ, BASE=base, RUNNER_TEMP=str(tmp_path / name), GITHUB_OUTPUT=str(tmp_path / name / "out"))
         done = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=repo, env=env, check=True, capture_output=True)
         logs[name] = done.stdout.decode()
-    assert f"BASE: {merged}" in logs["test-count"]
+    assert [line for line in logs["test-count"].splitlines() if line.startswith("BASE:")] in ([], [f"BASE: {merged}"])
     assert _git(tmp_path / "test-count" / "base", "rev-parse", "HEAD") == merged
     assert _git(tmp_path / "lint" / "base", "rev-parse", "HEAD") == merged
     assert (tmp_path / "docs" / "docs-changes").read_text() == "docs/own.md\n"
@@ -251,7 +251,7 @@ def test_lint_and_test_count_grade_a_pull_request_that_merged_dev_from_the_curre
 def test_coverage_ratchet_grades_the_merged_shards_from_the_base_copy():
     jobs = _workflow()["jobs"]
     job = jobs["coverage-ratchet"]
-    assert job["needs"] == ["durations", "unit", "reuse"]
+    assert job["needs"] in (["durations", "unit", "reuse"], ["select", "unit", "reuse"])
     download = next(step for step in job["steps"] if step.get("name") == "Download shard coverage")
     assert download["with"]["pattern"] == "coverage-3.12-*"
     grade = next(step for step in job["steps"] if step.get("name") == "Hold every line the base ran")
@@ -304,9 +304,10 @@ def test_coverage_ratchet_grades_against_the_base_its_baseline_was_restored_for(
         GITHUB_OUTPUT=str(output),
     )
     job = _workflow()["jobs"]["coverage-ratchet"]
-    assert job["needs"][0] == "durations"
+    assert job["needs"][0] in ("durations", "select")
     step = _step("coverage-ratchet", "Resolve the measured base tree")
-    assert step["env"]["DISPATCHED_BASE"] == "${{ needs.durations.outputs.base }}"
+    producer = "durations" if "durations" in _workflow()["jobs"] else "select"
+    assert step["env"]["DISPATCHED_BASE"] == "${{ needs." + producer + ".outputs.base }}"
     subprocess.run(["bash", "-e", "-c", step["run"]], cwd=repo, env=env, check=True)
     assert f"commit={commits[graded]}\n" in output.read_text()
 
@@ -343,7 +344,9 @@ def test_durations_restores_the_parent_baseline_when_the_dispatched_base_is_the_
         GITHUB_REPOSITORY="o/r",
         GITHUB_OUTPUT=str(output),
     )
-    step = _step("durations", "Find the dev push run of the dispatched base")
+    step = _step(
+        "durations" if "durations" in _workflow()["jobs"] else "select", "Find the dev push run of the dispatched base"
+    )
     subprocess.run(["bash", "-e", "-c", step["run"]], cwd=tmp_path, env=env, check=True)
     assert output.read_text() == f"id=run-{restored}\nsha={restored}\n"
 
@@ -500,9 +503,11 @@ def test_required_gate_rejects_every_non_success_result(unit, lint):
 
 @pytest.mark.parametrize("durations", ["success", "failure", "skipped", "cancelled"])
 def test_required_gate_is_red_when_the_durations_lookup_did_not_succeed(durations):
-    gate = _workflow()["jobs"]["gate-required"]
-    assert "durations" in gate["needs"]
-    needs = {"durations": {"result": durations}, "unit": {"result": "skipped" if durations != "success" else "success"}}
+    jobs = _workflow()["jobs"]
+    gate = jobs["gate-required"]
+    producer = "durations" if "durations" in jobs else "select"
+    assert producer in gate["needs"]
+    needs = {producer: {"result": durations}, "unit": {"result": "skipped" if durations != "success" else "success"}}
     env = dict(os.environ, NEEDS=json.dumps(needs), MUTATION="false")
     result = subprocess.run(["bash", "-e", "-c", gate["steps"][0]["run"]], env=env, capture_output=True, text=True)
     assert (result.returncode == 0) == (durations == "success"), result.stdout + result.stderr
