@@ -163,6 +163,9 @@ def run(suite: Path, root: Path, generation: int, tools: Mapping[str, Sequence[s
     runs = []
     for workload in plan["workloads"]:
         found[f"workload:{workload['name']}"] = workload["version"]
+        found[f"workload-command:{workload['name']}"] = hashlib.sha256(
+            json.dumps(workload["command"], separators=(",", ":")).encode()
+        ).hexdigest()
         for children in workload["children"]:
             for repeat in range(1, plan["repeats"] + 1):
                 workdir = Path(tempfile.mkdtemp(prefix=f"{workload['name']}-", dir=root))

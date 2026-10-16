@@ -231,7 +231,7 @@ def test_run_measures_each_child_count_and_repeat_in_a_fresh_workdir(tmp_path, m
     root = tmp_path / "work" / "nested"
     result = bench.run(path, root, generation=7, tools={"python": [sys.executable, "--version"]}, source="s1")
     assert result["suite"] == "fixture" and result["generation"] == 7 and result["source"] == "s1"
-    assert result["tools"] == {
+    assert {key: value for key, value in result["tools"].items() if not key.startswith("workload-command:")} == {
         "python": f"Python {sys.version.split()[0]}",
         "workload:memory": "1",
         "workload:probe": "2",
