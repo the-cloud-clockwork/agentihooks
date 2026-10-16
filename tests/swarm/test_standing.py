@@ -210,7 +210,7 @@ def test_the_detector_takes_over_a_stale_ci_budget_finding_in_task_hours(redis):
     _detected(redis, 0.4, "d1", later)
     row = standing.read(redis, "sw")["ci_overrun"]
     assert (row["value"], row["unit"], row["detail"], row["updated_at"]) == (0.4, "task hours", "", later)
-    assert [found.value for found in standing.findings(redis, "sw", later)] == [0.4]
+    assert [found.measure for found in standing.findings(redis, "sw", later)] == [0.4]
 
 
 def _legacy(redis, fired):
