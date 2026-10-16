@@ -790,9 +790,9 @@ def cmd_task(args):
     fields = dict(value.split("=", 1) for value in args.values if "=" in value)
     if len(fields) != len(args.values):
         sys.exit("task set takes FIELD=VALUE pairs")
-    for key in ("depends_on", "territory", "overlays", "repositories"):
+    for key in ("depends_on", "territory", "overlays", "repositories", "split_pulls"):
         if key in fields:
-            fields[key] = comma_list(fields[key])
+            fields[key] = task_list(key, fields[key])
     for key in [key for key in ("artifact", "follow_up") if key in fields]:
         if fields[key] not in ("yes", "no"):
             sys.exit(f"task set takes {key}=yes or {key}=no")
@@ -815,6 +815,12 @@ def cmd_task(args):
 
 def comma_list(text):
     return [part.strip() for part in text.split(",") if part.strip()]
+
+
+def task_list(key: str, text: str) -> list[str]:
+    if key == "split_pulls" and text.lstrip().startswith("["):
+        return json.loads(text)
+    return comma_list(text)
 
 
 def refuse_plain_objects(fields):
