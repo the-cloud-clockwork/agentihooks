@@ -91,7 +91,7 @@ def checked_resource(conclusion="SUCCESS", head="abc"):
                                         ],
                                     },
                                 },
-                                "checkSuites": {"nodes": []},
+                                "checkSuites": {"nodes": [], "pageInfo": {"hasNextPage": False}},
                             },
                         }
                     ],
