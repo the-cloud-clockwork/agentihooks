@@ -63,6 +63,8 @@ def test_a_body_change_moves_only_its_function_and_a_new_function_moves_nothing(
     assert dep_manifest.changed_units(SOURCE, "def broken(:\n") >= {"<module>", "double", "Box.grow", "unused"}
     assert dep_manifest.changed_units(SOURCE, None) == set(dep_manifest.unit_hashes(SOURCE))
     assert dep_manifest.changed_units(SOURCE, SOURCE.replace("LIMIT = 3", "# limit\nLIMIT = 3")) == set()
+    feed = "A = 1\n\fB = 2\n\n\ndef f():\n    return 1\n"
+    assert dep_manifest.changed_units(feed, feed.replace("return 1", "return 2")) == {"f"}
     texts = 'NOTE = """\n# one\n"""\n'
     assert dep_manifest.changed_units(texts, texts.replace("# one", "# two")) == {"<module>"}
 
@@ -174,6 +176,11 @@ def test_the_inputs_plugin_records_opened_files_and_escapes(tmp_path):
         "SHARED = open('shared.txt').read()\n"
         "def test_reads():\n    open(Path('data.txt')).read()\n"
         "def test_spawns():\n    subprocess.run([sys.executable, '-c', 'pass'], check=True)\n"
+        "import pytest\n"
+        "@pytest.fixture(scope='session')\n"
+        "def server():\n    subprocess.run([sys.executable, '-c', 'pass'], check=True)\n"
+        "def test_first(server):\n    pass\n"
+        "def test_second(server):\n    pass\n"
     )
     out = tmp_path / "inputs"
     subprocess.run(
@@ -185,7 +192,9 @@ def test_the_inputs_plugin_records_opened_files_and_escapes(tmp_path):
     )
     lines = [json.loads(line) for report in out.glob("*.jsonl") for line in report.read_text().splitlines()]
     assert sorted(lines, key=lambda line: line["test"]) == [
+        {"test": "test_sample.py::test_first", "files": ["shared.txt"], "escapes": True},
         {"test": "test_sample.py::test_reads", "files": ["data.txt", "shared.txt"], "escapes": False},
+        {"test": "test_sample.py::test_second", "files": ["shared.txt"], "escapes": True},
         {"test": "test_sample.py::test_spawns", "files": ["shared.txt"], "escapes": True},
     ]
 

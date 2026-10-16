@@ -10,6 +10,7 @@ import ast
 import hashlib
 import io
 import json
+import re
 import statistics
 import subprocess
 import sys
@@ -58,7 +59,7 @@ def _code_lines(source: str) -> set[int]:
 
 
 def unit_hashes(source: str) -> dict[str, str]:
-    lines = source.splitlines()
+    lines = re.split(r"\r\n|\r|\n", source)
     try:
         spans = _spans(ast.parse(source))
     except SyntaxError:

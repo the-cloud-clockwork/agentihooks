@@ -22,6 +22,9 @@ class DepInputs:
         self.shared = [set(), False]
         self.current = self.shared
         self.tests = {}
+        self.fixtures = {}
+        self.setting_up = []
+        self.escaping = set()
 
     def audit(self, event: str, args: tuple) -> None:
         test = self.current
@@ -30,13 +33,26 @@ class DepInputs:
             if isinstance(path, os.PathLike):
                 path = os.fspath(path)
             if isinstance(path, (str, bytes)) and (mode is None or not set(str(mode)) & set("wax")):
-                test[0].add(os.path.abspath(os.fsdecode(path)))
+                try:
+                    test[0].add(os.path.abspath(os.fsdecode(path)))
+                except OSError:
+                    pass
         elif event in ESCAPES and test is not self.shared:
             test[1] = True
+            self.escaping.update(self.setting_up)
+
+    @pytest.hookimpl(hookwrapper=True)
+    def pytest_fixture_setup(self, fixturedef, request):
+        self.setting_up.append(fixturedef.argname)
+        try:
+            yield
+        finally:
+            self.setting_up.pop()
 
     @pytest.hookimpl(hookwrapper=True)
     def pytest_runtest_protocol(self, item, nextitem):
         self.current = self.tests.setdefault(item.nodeid, [set(), False])
+        self.fixtures[item.nodeid] = set(getattr(item, "fixturenames", ()))
         try:
             yield
         finally:
@@ -60,7 +76,13 @@ class DepInputs:
         self.folder.mkdir(parents=True, exist_ok=True)
         shared = self.shared[0]
         lines = [
-            json.dumps({"test": test, "files": self.relative(opened | shared), "escapes": escapes})
+            json.dumps(
+                {
+                    "test": test,
+                    "files": self.relative(opened | shared),
+                    "escapes": escapes or bool(self.fixtures[test] & self.escaping),
+                }
+            )
             for test, (opened, escapes) in self.tests.items()
         ]
         (self.folder / f"{uuid.uuid4().hex}.jsonl").write_text("".join(line + "\n" for line in lines))
