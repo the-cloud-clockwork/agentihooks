@@ -1,6 +1,6 @@
 import pytest
 
-from scripts.inbox.store import InboxError, InboxStore
+from scripts.inbox.store import NOTIFY, InboxError, InboxStore
 from scripts.swarm.keyspace import ROOT as KEY_ROOT
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -198,6 +198,55 @@ def test_reply_goes_to_the_sender_and_closes_the_original_done(store):
     )
     closed = store.get(item.id)
     assert closed.state == "done" and answer.id in closed.reason
+
+
+def test_reopen_returns_an_answered_item_to_its_open_mail_with_a_fresh_reply_slot(store):
+    item = store.send("operator", "master", "how far along are we")
+    answer = store.reply(item.id, "master", "two tasks left")
+    listener = store.redis.pubsub()
+    listener.subscribe(NOTIFY)
+    listener.get_message(timeout=1)
+    reopened = store.reopen(item.id, "master", "swarm", "reopened: refused")
+    assert (reopened.state, reopened.reason) == ("read", "reopened: refused")
+    assert store.get(item.id) == reopened
+    assert store.redis.zscore(store.key("open", "master"), item.id) == item.created_at
+    assert not store.redis.hexists(store.key("item", item.id), "reply:master")
+    assert store.history(item.id)[-1] == {
+        "state": "read",
+        "by": "swarm",
+        "reason": "reopened: refused",
+        "at": reopened.updated_at,
+    }
+    assert listener.get_message(timeout=1)["data"] == "master"
+    second = store.reply(item.id, "master", "one task left")
+    assert second.id != answer.id and store.get(item.id).state == "done"
+
+
+@pytest.mark.parametrize("conflicts", [1, 3])
+def test_reopen_retries_a_concurrent_change_then_gives_up(store, monkeypatch, conflicts):
+    from redis.exceptions import WatchError
+
+    from scripts.inbox.store import Contended
+
+    item = store.send("operator", "master", "how far along are we")
+    store.reply(item.id, "master", "two tasks left")
+    attempt = store._try_reopen
+    calls = []
+
+    def racing(*args):
+        calls.append(args)
+        if len(calls) <= conflicts:
+            raise WatchError()
+        return attempt(*args)
+
+    monkeypatch.setattr(store, "_try_reopen", racing)
+    if conflicts < 3:
+        assert store.reopen(item.id, "master", "swarm", "reopened").state == "read"
+    else:
+        with pytest.raises(Contended) as refused:
+            store.reopen(item.id, "master", "swarm", "reopened")
+        assert str(refused.value) == f"message {item.id} changed meanwhile; run the command again"
+    assert calls == [(item.id, "master", "swarm", "reopened")] * min(conflicts + 1, 3)
 
 
 def test_reply_retry_returns_the_same_outgoing_item(store):

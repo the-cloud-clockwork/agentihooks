@@ -447,6 +447,32 @@ class InboxStore:
             if (item.state, item.reason) != expected:
                 raise
 
+    def reopen(self, item_id, replier, by, reason):
+        """Open an item an answer closed, with the replier's answer slot cleared so its next reply is a new message."""
+        from redis.exceptions import WatchError
+
+        for _ in range(MOVE_ATTEMPTS):
+            try:
+                return self._try_reopen(item_id, replier, by, reason)
+            except WatchError:
+                continue
+        raise Contended(f"message {item_id} changed meanwhile; run the command again")
+
+    def _try_reopen(self, item_id, replier, by, reason):
+        key = self.key("item", item_id)
+        with self.redis.pipeline() as pipe:
+            pipe.watch(key)
+            item = _item(pipe.hgetall(key), item_id)
+            moved = replace(item, state="read", updated_at=now_ms(), reason=reason)
+            pipe.multi()
+            pipe.hset(key, mapping=_fields(moved))
+            pipe.hdel(key, f"reply:{self.names.resolve(replier)}")
+            pipe.zadd(self.key("open", item.address), {item_id: item.created_at})
+            pipe.rpush(self.key("history", item_id), _entry("read", by, reason, moved.updated_at))
+            pipe.publish(NOTIFY, item.address)
+            pipe.execute()
+            return moved
+
     def about(self, item_id, entry):
         """Name the ledger entry an item is about, before the item is written."""
         self.redis.set(self.key("entry", item_id), entry)

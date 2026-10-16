@@ -133,6 +133,8 @@ def post(inbox, item, write):
         refused = exc
     if refused:
         inbox.close(item.id, item.address, "cancel", f"refused by the ledger page: {refused}")
+        if item.ref and inbox.entry_of(item.id):
+            inbox.reopen(item.ref, item.sender, BY, f"reopened: the answer was refused by the ledger page: {refused}")
         if item.sender != BY:
             inbox.send(BY, item.sender, REFUSED.format(id=item.id, reason=refused))
         return False
