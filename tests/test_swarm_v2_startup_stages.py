@@ -535,6 +535,13 @@ def test_a_read_without_oci_listings_has_no_scaled_groups_or_oci_launches():
     assert list(reduced["launches"]) == ["i-0ad35d2621bca80ff", "i-0b28"]
 
 
+def test_an_oci_instance_without_its_pool_tag_fails_the_read():
+    raw = oci_capture()
+    raw["instances"]["Oci"][0]["instance-pool"] = None
+    with pytest.raises(ValueError, match=OCID):
+        stages.reduce(raw)
+
+
 def test_a_scaled_up_group_event_scales_from_zero_when_the_pod_event_comes_late():
     events = [e for e in cold_events(group=POOL) if e["reason"] != "TriggeredScaleUp"]
     events.append(ev("default/a", "TriggeredScaleUp", 80, f"pod triggered scale-up: [{{{POOL} 0->1 (max: 10)}}]"))

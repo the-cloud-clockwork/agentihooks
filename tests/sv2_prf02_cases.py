@@ -26,17 +26,22 @@ SOURCES = {
     NATIVE: "read only kubectl and aws read of anton-prod at 2026-10-12T10:17:25Z with the agent log of every swarm"
     " worker Pod, one launched by the controller at 10:03:14Z",
     COLD_OUTAGE: "startup fixture anton-outage mode at 1dd43842b6bc51122e6bf19cb539d6fc619dc14a against anton-prod,"
-    " read at 2026-10-16T20:49:20Z: one worker Pod scaled the empty Oracle research pool from zero and pulled through"
-    " a registry absent for 92 seconds after it was scheduled",
+    " read at 2026-10-16T20:49:20Z: one worker Pod of the agentihooks-worker:dev image scaled the empty Oracle"
+    " research pool, which has no kata runtime, from zero and pulled through a registry that started 96 seconds after"
+    " the Pod was scheduled",
 }
 INPUTS = (*ANTON, *KIND, NATIVE, COLD_OUTAGE)
+HELPERS = frozenset({"startup-bench/outage-registry"})
 FROM_ZERO_GROUP = "anton-k3s-swarm"
 EVIDENCE_CLASS = (
     "measured: Anton reads are read only kubectl and aws listings of nodes, events, Pods, autoscaling activities and "
     "EC2 instances, read 3 also the agent log of each swarm worker Pod, reduced by startup_bench reduce; the kind "
     "reads come from the Startup stages workflow named in "
     "their source, where a GitHub hosted runner pulled the published worker image from a local registry that the "
-    "fixture stopped and restarted; attribution, report and claim are functions over those committed reads; the "
+    "fixture stopped and restarted; the Anton outage read comes from the startup fixture's anton-outage mode, which "
+    "created a namespace with a worker Pod and a registry Pod on anton-prod, then listed nodes, events and Pods, the "
+    "autoscaler's ScaledUpGroup events and the Oracle instance; attribution, report and claim are functions over "
+    "those committed reads; the "
     "account release in case C runs the KUB-05 recovery over fakeredis and is mocked"
 )
 
@@ -50,7 +55,7 @@ def digests() -> dict[str, str]:
 
 
 def samples(name: str) -> list[dict]:
-    return stages.attribute(load(name))
+    return [entry for entry in stages.attribute(load(name)) if entry["pod"] not in HELPERS]
 
 
 def _row(row: dict) -> dict:
@@ -91,8 +96,9 @@ NOTES = (
     " network but not its kata runtime: the swarm pool keeps two nodes by the operator's choice and cannot scale from"
     " zero. Its scale up time is the cluster autoscaler's ScaledUpGroup event and its launch is the instance's"
     " creation, so the instance column is scale up to Oracle instance creation and the join column runs to the node's"
-    " Ready transition. The registry is a pull through cache of ghcr.io on the new node's loopback, absent until 90"
-    " seconds after scheduling and then started, so its pull shows the production registry path after the outage.",
+    " Ready transition. The registry is a pull through cache of ghcr.io on the new node's loopback that started 96"
+    " seconds after the worker was scheduled, so its pull shows the production registry path after the outage; the"
+    " registry Pod itself is not a sample. The worker image was the :dev tag, not :release.",
 )
 
 
@@ -237,12 +243,19 @@ def _account_release() -> dict:
 
 
 def _cold_outage() -> dict:
-    """The Anton sample that scaled the empty swarm pool from zero and pulled through an interrupted registry."""
+    read = load(COLD_OUTAGE)
     entries = [e for e in samples(COLD_OUTAGE) if e["pod"].endswith("/outage-cold")]
     keep = ("pod", "node_kind", "node_source", "from_zero", "image_cache", "outcome", "transient", "failure_ms")
+    placed = {e["pod"]: e["at"] for e in read["events"] if e["reason"] == "Scheduled"}
+    started = next(e["at"] for e in read["events"] if e["reason"] == "Started" and e["pod"] in HELPERS)
+    with contextlib.redirect_stdout(io.StringIO()) as printed:
+        code = bench.main(["claim", "--read", str(FIXTURES / COLD_OUTAGE), "--scenario", "cold-node/uncached-image"])
     return {
+        "pool": "Oracle research pool, no kata runtime",
+        "registry_started_after_schedule_ms": started - placed["startup-bench/outage-cold"],
         "samples": [{key: e[key] for key in keep} | {"stages": e["stages"]} for e in entries],
         "claim": _refusal(entries),
+        "cli_claim": {"exit_code": code, "printed": json.loads(printed.getvalue())},
         "unbounded": stages.unbounded(entries),
     }
 
@@ -269,6 +282,7 @@ def _recovery() -> tuple[dict, bool]:
         and cold["samples"][0]["transient"] == stages.REGISTRY_UNAVAILABLE
         and cold["samples"][0]["outcome"] == stages.STARTED
         and not cold["claim"]["refused"]
+        and cold["cli_claim"] == {"exit_code": 0, "printed": {"claimed": stages.COLD_LABEL, "samples": 1}}
         and not cold["unbounded"]
         and bool(interrupted)
         and set(classified) == {stages.REGISTRY_UNAVAILABLE}

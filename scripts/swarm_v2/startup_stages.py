@@ -154,9 +154,9 @@ def _launches(activities: Sequence[Mapping], reservations: Sequence[Mapping]) ->
 
 
 def scaled_groups(items: Iterable[Mapping]) -> dict[str, list[list[int]]]:
-    """Each group's scale ups as [time, size before] from the autoscaler's own ScaledUpGroup events, which it records
-    when it sets the size; the TriggeredScaleUp event on a Pod can follow the launch it caused. A repeated identical
-    scale up is one event with a count, so only its first and last occurrence are known."""
+    """Each group's scale ups as [time, size before]. A Pod's TriggeredScaleUp event can be recorded after the launch
+    it caused; ScaledUpGroup is recorded when the size is set. A repeated identical scale up is one event with a
+    count, so only its first and last occurrence are known."""
     seen: dict[str, set[tuple[int, int]]] = {}
     for item in items:
         found = SCALED_GROUP.search(item.get("message", "")) if item.get("reason") == "ScaledUpGroup" else None
@@ -170,6 +170,8 @@ def _oci_launches(instances: Sequence[Mapping]) -> dict:
     """An OCI pool instance has no separate launch request, so its creation is both request and launch."""
     launches = {}
     for instance in instances:
+        if not instance.get("instance-pool"):
+            raise ValueError(f"OCI instance {instance['id']} carries no instance pool tag")
         created = instant(instance["time-created"])
         launches[instance["id"]] = {
             "group": instance["instance-pool"],

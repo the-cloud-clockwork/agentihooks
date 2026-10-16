@@ -22,6 +22,7 @@ OUTAGE_REGISTRY = "127.0.0.1:5000"
 REGISTRY_IMAGE = "mirror.gcr.io/library/registry:2"
 UPSTREAM = "https://ghcr.io"
 COLD_POD = "outage-cold"
+REGISTRY_POD = "outage-registry"
 
 
 def run(*command: str, check: bool = True) -> str:
@@ -35,13 +36,13 @@ def kubectl(*args: str, check: bool = True) -> str:
     return run("kubectl", *args, check=check)
 
 
-def pod(name: str, node: str, image: str) -> dict:
+def pod(name: str, selector: dict, image: str) -> dict:
     return {
         "apiVersion": "v1",
         "kind": "Pod",
         "metadata": {"name": name, "namespace": NAMESPACE, "labels": {"app": "startup-bench"}},
         "spec": {
-            "nodeSelector": {"kubernetes.io/hostname": node},
+            "nodeSelector": selector,
             "restartPolicy": "Never",
             "terminationGracePeriodSeconds": 0,
             "containers": [
@@ -58,7 +59,12 @@ def pod(name: str, node: str, image: str) -> dict:
 
 
 def launch(name: str, node: str, image: str) -> None:
-    subprocess.run(["kubectl", "apply", "-f", "-"], input=json.dumps(pod(name, node, image)), text=True, check=True)
+    subprocess.run(
+        ["kubectl", "apply", "-f", "-"],
+        input=json.dumps(pod(name, {"kubernetes.io/hostname": node}, image)),
+        text=True,
+        check=True,
+    )
 
 
 def wait_ready(name: str, seconds: int) -> bool:
@@ -178,9 +184,7 @@ def tolerations(workload: str) -> list[dict]:
 
 
 def pool_pod(name: str, image: str, workload: str) -> dict:
-    """A worker Pod only a new node of the empty pool can take, so the autoscaler has to scale it from zero."""
-    spec = pod(name, "", image)
-    spec["spec"]["nodeSelector"] = {POOL_LABEL: f"oci-{workload}"}
+    spec = pod(name, {POOL_LABEL: f"oci-{workload}"}, image)
     spec["spec"]["tolerations"] = tolerations(workload)
     return spec
 
@@ -191,7 +195,7 @@ def registry_pod(node: str, workload: str) -> dict:
     return {
         "apiVersion": "v1",
         "kind": "Pod",
-        "metadata": {"name": "outage-registry", "namespace": NAMESPACE, "labels": {"app": "startup-bench"}},
+        "metadata": {"name": REGISTRY_POD, "namespace": NAMESPACE, "labels": {"app": "startup-bench"}},
         "spec": {
             "nodeSelector": {"kubernetes.io/hostname": node},
             "tolerations": tolerations(workload),
@@ -251,7 +255,7 @@ def oci_instance(node: str) -> dict:
         "instance",
         "get",
         "--instance-id",
-        found["spec"]["providerID"],
+        found["spec"]["providerID"].rsplit("/", 1)[-1],
         "--query",
         query,
     )
@@ -259,7 +263,6 @@ def oci_instance(node: str) -> dict:
 
 
 def capture_anton(output: Path, node: str) -> None:
-    """The fixture namespace's listings plus the autoscaler's ScaledUpGroup events, which time the scale up."""
     output.mkdir(parents=True, exist_ok=True)
     (output / "read_at").write_text(datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ") + "\n")
     (output / "nodes.json").write_text(kubectl("get", "nodes", "-o", "json"))
@@ -281,24 +284,20 @@ def capture_anton(output: Path, node: str) -> None:
     (output / "instances.json").write_text(json.dumps({"Reservations": [], "Oci": [oci_instance(node)]}))
 
 
-def cold_outage(args: argparse.Namespace) -> dict:
-    """One worker Pod scales an empty OCI pool from zero and pulls through a registry that is absent from its
-    scheduling for `outage` seconds, then started on the same node; the Pod must start once it returns."""
-    pool = f"oci-{args.workload}"
-    if kubectl("get", "nodes", "-l", f"{POOL_LABEL}={pool}", "-o", "name").strip():
-        raise SystemExit(f"the {pool} pool has nodes; a scale from zero needs it empty")
-    kubectl("create", "namespace", NAMESPACE)
+def cold_outage(args: argparse.Namespace, pool: str) -> dict:
+    """The registry is absent from the worker's scheduling for `outage` seconds, then started on the same node; the
+    worker must start once it returns."""
     apply(pool_pod(COLD_POD, args.image, args.workload))
     node = scheduled_node(COLD_POD, 1200)
     if not node:
         raise SystemExit(f"{COLD_POD} was not scheduled onto a new {pool} node")
-    stopped = time.monotonic()
+    scheduled = time.monotonic()
     outcome = {"node": node, "pool": pool, "outage_seconds": args.outage, "scheduled_seen": now()}
     outcome["classified_within_grace"] = wait_pull_failure(COLD_POD, args.grace)
-    time.sleep(max(args.outage - (time.monotonic() - stopped), 0))
+    time.sleep(max(args.outage - (time.monotonic() - scheduled), 0))
     outcome["registry_applied"] = now()
     apply(registry_pod(node, args.workload))
-    outcome["registry_ready"] = wait_ready("outage-registry", 300)
+    outcome["registry_ready"] = wait_ready(REGISTRY_POD, 300)
     outcome["recovered"] = wait_ready(COLD_POD, 600)
     outcome["started_event"] = wait_event(COLD_POD, "Started", 120)
     capture_anton(args.output, node)
@@ -310,8 +309,12 @@ def now() -> str:
 
 
 def anton_outage(args: argparse.Namespace) -> None:
+    pool = f"oci-{args.workload}"
+    if kubectl("get", "nodes", "-l", f"{POOL_LABEL}={pool}", "-o", "name").strip():
+        raise SystemExit(f"the {pool} pool has nodes; a scale from zero needs it empty")
+    kubectl("create", "namespace", NAMESPACE)
     try:
-        outcome = cold_outage(args)
+        outcome = cold_outage(args, pool)
     finally:
         kubectl("delete", "namespace", NAMESPACE, "--wait=false", check=False)
     (args.output / "fixture.json").write_text(json.dumps(outcome, indent=2, sort_keys=True) + "\n")
