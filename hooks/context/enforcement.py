@@ -484,10 +484,9 @@ def _due_enforcements(entries: list[dict], tool_call_count: int) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
-def format_enforcement_banner(msg: dict) -> str:
-    enforcement_type = msg.get("type", "message")
+def _enforcement_message(msg: dict) -> str:
     message = msg.get("message", "")
-    if enforcement_type == "rule":
+    if msg.get("type", "message") == "rule":
         try:
             path = resolve_rule_path(msg.get("path"))
             message = path.read_text(encoding="utf-8")
@@ -496,6 +495,12 @@ def format_enforcement_banner(msg: dict) -> str:
 
             log("rule enforcement file unavailable", {"id": msg.get("id"), "error": str(e)})
             message = f"RULE FILE UNAVAILABLE: {e}"
+    return message
+
+
+def format_enforcement_banner(msg: dict) -> str:
+    enforcement_type = msg.get("type", "message")
+    message = _enforcement_message(msg)
     tag = msg.get("tag") or ""
     enforcement_id = msg.get("id", "")
     cadence = msg.get("cadence", "")
@@ -520,7 +525,15 @@ def format_enforcement_context(msgs: list[dict]) -> str:
     return "\n\n".join(format_enforcement_banner(m) for m in msgs)
 
 
-def _deliver(session_id: str, entries: list[dict], *, record: bool = True) -> str | None:
+def format_enforcement_digest(msgs: list[dict]) -> str:
+    lines = ["=== ENFORCEMENTS [IMPORTANT] ==="]
+    lines.extend(f"{m.get('id', '')}: {_enforcement_message(m)}" for m in msgs)
+    return "\n".join(lines)
+
+
+def _deliver(
+    session_id: str, entries: list[dict], *, record: bool = True, render=format_enforcement_context
+) -> str | None:
     entries = quarantine.keep(
         session_id, "enforcement", entries, lambda e: [e.get("id")], lambda e: e.get("message") or e.get("path")
     )
@@ -528,7 +541,7 @@ def _deliver(session_id: str, entries: list[dict], *, record: bool = True) -> st
         return None
     if record:
         injection_trace.record_enforcements(session_id, entries)
-    return format_enforcement_context(entries)
+    return render(entries)
 
 
 # ---------------------------------------------------------------------------
@@ -541,7 +554,7 @@ def get_session_start_enforcements(session_id: str, cwd: str | Path | None = Non
         return None
     try:
         plain, _ = _split_by_matcher(load_all_enforcements(cwd))
-        return _deliver(session_id, _claim_unseen_enforcements(session_id, plain))
+        return _deliver(session_id, _claim_unseen_enforcements(session_id, plain), render=format_enforcement_digest)
     except Exception:
         return None
 
