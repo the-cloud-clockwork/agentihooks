@@ -6,7 +6,7 @@ from scripts.swarm.store import SwarmError
 
 FRESHNESS = """query($url: URI!) { resource(url: $url) { ... on PullRequest {
     repository { nameWithOwner }
-    baseRefName baseRef { branchProtectionRule { requiredStatusCheckContexts } }
+    baseRefName baseRef { branchProtectionRule { requiredStatusCheckContexts requiredStatusChecks { context app { databaseId } } } }
 } } }"""
 FIELDS = 'id state headRefOid baseRefName mergeQueueEntry { id position state } isDraft reviewDecision statusCheckRollup { state } repository { mergeQueue(branch: "dev") { id } }'
 STATE = "query($url: URI!) { resource(url: $url) { ... on PullRequest { " + FIELDS + " } } }"
@@ -70,9 +70,13 @@ def require_green(url: str, head: str, run) -> None:
     repo = resource["repository"]["nameWithOwner"]
     rules = rest(f"repos/{repo}/rules/branches/{resource['baseRefName']}", run)
     protection = (resource.get("baseRef") or {}).get("branchProtectionRule") or {}
-    expected = set(protection.get("requiredStatusCheckContexts") or [])
+    expected = dict.fromkeys(protection.get("requiredStatusCheckContexts") or [])
     expected.update(
-        check["context"]
+        (check["context"], (check.get("app") or {}).get("databaseId"))
+        for check in protection.get("requiredStatusChecks") or []
+    )
+    expected.update(
+        (check["context"], check.get("integration_id"))
         for rule in rules
         if rule["type"] == "required_status_checks"
         for check in rule["parameters"]["required_status_checks"]

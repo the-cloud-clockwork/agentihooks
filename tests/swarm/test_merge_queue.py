@@ -115,7 +115,7 @@ def test_queue_uses_antoncores_required_checks_in_its_own_workflow():
                 {
                     "type": "required_status_checks",
                     "parameters": {
-                        "required_status_checks": [{"context": "Gate — Required"}],
+                        "required_status_checks": [{"context": "Gate — Required", "integration_id": 15368}],
                     },
                 }
             ]
@@ -142,7 +142,10 @@ def test_queue_uses_antoncores_required_checks_in_its_own_workflow():
                 "nodes"
             ][0]
             required["name"] = "Gate — Required"
-            required["checkSuite"] = {"workflowRun": {"workflow": {"name": "CI Validate"}}}
+            required["checkSuite"] = {
+                "app": {"databaseId": 15368},
+                "workflowRun": {"workflow": {"name": "CI Validate"}},
+            }
         return subprocess.CompletedProcess(command, 0, json.dumps(response))
 
     assert merge_queue.operate("queue", url, run)["queued"]
@@ -190,8 +193,17 @@ def test_queue_waits_until_every_configured_check_exists(missing):
     assert not any("enqueuePullRequest(input:" in str(command) for command, _ in calls)
 
 
-@pytest.mark.parametrize("source, expected", [("status", False), ("other app", False), ("required app", True)])
-def test_queue_checks_the_app_required_by_repository_policy(source, expected):
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        ("status", False),
+        ("other app", False),
+        ("required app", True),
+        ("both apps", True),
+    ],
+)
+@pytest.mark.parametrize("policy", ["rules", "classic"])
+def test_queue_checks_the_app_required_by_repository_policy(source, expected, policy):
     response = checked_resource()
     commit = response["data"]["resource"]["commits"]["nodes"][0]["commit"]
     if source == "status":
@@ -201,9 +213,23 @@ def test_queue_checks_the_app_required_by_repository_policy(source, expected):
             "name": "CI Validate",
             "conclusion": "SUCCESS",
             "isRequired": True,
-            "checkSuite": {"app": {"databaseId": 15368 if source == "required app" else 42}},
+            "checkSuite": {"app": {"databaseId": 15368 if source != "other app" else 42}},
         }
     commit["statusCheckRollup"]["contexts"]["nodes"] = [check]
+    if source == "both apps":
+        commit["statusCheckRollup"]["contexts"]["nodes"].append(
+            {
+                "name": "CI Validate",
+                "databaseId": 2,
+                "conclusion": "FAILURE",
+                "isRequired": True,
+                "checkSuite": {"app": {"databaseId": 42}},
+            }
+        )
+    reader, _ = runner(response)
+    assert READ_PULL(URL, reader, required_checks={"CI Validate": 15368}) == ledger_events.PullRequest(
+        "OPEN", None, None, False, resolved=expected, head="abc"
+    )
     original, calls = runner(
         {"data": {"resource": OPEN}},
         response,
@@ -213,15 +239,32 @@ def test_queue_checks_the_app_required_by_repository_policy(source, expected):
 
     def run(command, **kwargs):
         if command[2] == "repos/o/r/rules/branches/dev":
-            rules = [
-                {
-                    "type": "required_status_checks",
-                    "parameters": {
-                        "required_status_checks": [{"context": "CI Validate", "integration_id": 15368}],
-                    },
-                }
-            ]
+            rules = (
+                []
+                if policy == "classic"
+                else [
+                    {
+                        "type": "required_status_checks",
+                        "parameters": {
+                            "required_status_checks": [{"context": "CI Validate", "integration_id": 15368}],
+                        },
+                    }
+                ]
+            )
             return subprocess.CompletedProcess(command, 0, json.dumps(rules))
+        if policy == "classic" and command[2] == "graphql" and command[4] == f"query={merge_queue.FRESHNESS}":
+            protection = {
+                "requiredStatusCheckContexts": ["CI Validate"],
+                "requiredStatusChecks": [
+                    {"context": "CI Validate", "app": {"databaseId": 15368}},
+                ],
+            }
+            metadata = {
+                "baseRefName": "dev",
+                "repository": {"nameWithOwner": "o/r"},
+                "baseRef": {"branchProtectionRule": protection},
+            }
+            return subprocess.CompletedProcess(command, 0, json.dumps({"data": {"resource": metadata}}))
         return original(command, **kwargs)
 
     if expected:
@@ -313,7 +356,7 @@ def test_required_check_view_preserves_results_and_check_names(checks, expected,
     commit = response["data"]["resource"]["commits"]["nodes"][0]["commit"]
     commit["statusCheckRollup"]["contexts"]["nodes"] = checks
     run, _ = runner(response)
-    assert READ_PULL(URL, run, required_checks=expected) == ledger_events.PullRequest(
+    assert READ_PULL(URL, run, required_checks=dict.fromkeys(expected)) == ledger_events.PullRequest(
         "OPEN", None, None, red, resolved=resolved, failed=failed, head="abc"
     )
 

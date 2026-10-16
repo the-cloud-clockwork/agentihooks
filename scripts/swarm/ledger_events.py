@@ -44,7 +44,7 @@ RED_NOTICE = re.compile(r"^Your pull request (\S+) for .* has red checks and no 
 GATE_JOB = re.compile(rf"^[ \t]+name:[ \t]*(['\"]?){re.escape(GATE)}\1[ \t]*$", re.MULTILINE)
 CONTEXT_NODES = (
     "nodes{...on CheckRun{databaseId name conclusion completedAt isRequired(pullRequestNumber:$number) "
-    "checkSuite{workflowRun{workflow{name}}}} "
+    "checkSuite{app{databaseId} workflowRun{workflow{name}}}} "
     "...on StatusContext{context state createdAt isRequired(pullRequestNumber:$number)}} "
     "pageInfo{hasNextPage endCursor}"
 )
@@ -236,8 +236,20 @@ def _number(url):
     return found[1] if found else "0"
 
 
+def _required_app(check, required_checks):
+    app_id = required_checks.get(check.get("name") or check.get("context"))
+    app = ((check.get("checkSuite") or {}).get("app") or {}).get("databaseId")
+    return app_id is None or app == app_id
+
+
 def _required_pull_request(raw, required_checks):
-    checks = [check for check in _newest(raw["statusCheckRollup"]) if check.get("isRequired")]
+    checks = _newest(
+        [
+            check
+            for check in raw["statusCheckRollup"]
+            if check.get("isRequired") and _required_app(check, required_checks)
+        ]
+    )
     results = [check.get("conclusion") or check.get("state") for check in checks]
     return PullRequest(
         raw["state"],
