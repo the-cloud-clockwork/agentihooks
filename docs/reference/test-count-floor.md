@@ -10,7 +10,7 @@ The `test-count` job in the Tests workflow fails when the head collects fewer te
 
 ## Where it runs
 
-`test-count` runs on Python 3.11 and 3.12 for pull requests, merge groups and pushes. It checks out the base revision into a second worktree and runs the base revision's own `tests/count_floor.py`:
+`test-count` runs on Python 3.11 and 3.12 for pull requests, merge groups and dispatched runs that pass admission. Pushes do not run it. It checks out the base revision into a second worktree and runs the base revision's own `tests/count_floor.py`:
 
 ```bash
 cd "$RUNNER_TEMP/base"
@@ -19,7 +19,7 @@ python -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE
 
 The base revision's copy grades, so a pull request cannot loosen its own floor. A base without `tests/count_floor.py` fails the job. A change to the gate therefore takes two pull requests: the first changes the tests to accept both the old and the new behaviour, the second changes the gate, which grades from the next pull request on.
 
-The base is the merge base of the head with the event's base: `origin/dev` for pull requests into dev, the pull request base, the merge group base, the push's previous commit, or the `base` input of a dispatched run. The job prints it as `BASE: <sha>`; `swarm merge queue` reads that line.
+The base is the merge base of the head with the event's base: `origin/dev` for pull requests into dev, the pull request base, the merge group base, or the `base` input of a dispatched run. The job prints it as `BASE: <sha>`; `swarm merge queue` reads that line.
 
 ## What it compares
 
