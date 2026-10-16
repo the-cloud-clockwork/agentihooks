@@ -468,6 +468,80 @@ def test_scale_ups_are_deduplicated_across_pods_and_ordered_per_group():
     assert stages.scale_ups(events) == {"g1": [(T0 + 1000, 2), (T0 + 5000, 4)], "g2": [(T0 + 5000, 0)]}
 
 
+OCID = "ocid1.instance.oc1.eu-frankfurt-1.abc"
+STARTER = [
+    "2026-10-11T14:36:20.123456789Z swarm: no pending pod tolerates remote=oci and workload=swarm, nothing to do",
+    "2026-10-11T14:36:30.295000001Z swarm: zero nodes, a pending pod needs one, pool size is 0 -- scaling to 1",
+    "2026-10-11T14:36:31Z swarm: scaled pool ocid1.instancepool.oc1.x to size 1",
+    "2026-10-11T14:36:30.295Z swarm: zero nodes, a pending pod needs one, pool size is 0 -- scaling to 1",
+    "2026-10-11T15:10:00+00:00 research: zero nodes, a pending pod needs one, pool size is 0 -- scaling to 1",
+    "2026-10-11T14:36:40Z ci: 23 node(s) with node-pool=oci-ci already present, leaving to cluster-autoscaler",
+]
+
+
+def oci_capture(created="2026-10-11T14:36:41.500000+00:00", pool="swarm"):
+    raw = raw_capture()
+    raw["nodes"]["items"][0]["spec"]["providerID"] = OCID
+    raw["activities"] = {"Activities": [], "PoolStarter": STARTER}
+    raw["instances"] = {
+        "Reservations": [],
+        "Oci": [
+            {"pool": pool, "instance": {"id": OCID, "time-created": created}},
+            {"pool": "research", "instance": {"id": "ocid1.instance.early", "time-created": "2026-10-11T15:00:00Z"}},
+        ],
+    }
+    return raw
+
+
+def test_the_pool_starter_log_gives_each_pool_its_scale_from_zero_decisions():
+    assert stages.pool_starts(STARTER) == {
+        "research": [stages.instant("2026-10-11T15:10:00Z")],
+        "swarm": [stages.instant("2026-10-11T14:36:30.295Z")],
+    }
+    assert stages.pool_starts([]) == {}
+
+
+def test_reduce_charges_an_oci_instance_to_the_latest_start_of_its_pool_before_it():
+    reduced = stages.reduce(oci_capture())
+    assert reduced["nodes"][NODE]["instance"] == OCID
+    assert reduced["pool_starts"] == stages.pool_starts(STARTER)
+    assert reduced["launches"] == {
+        OCID: {
+            "group": "swarm",
+            "requested": stages.instant("2026-10-11T14:36:30.295Z"),
+            "launched": stages.instant("2026-10-11T14:36:41.5Z"),
+            "source": stages.NEW_INSTANCE,
+        }
+    }
+
+
+def test_an_oci_instance_created_before_any_start_of_its_pool_is_no_launch():
+    assert stages.reduce(oci_capture(created="2026-10-11T14:36:29Z"))["launches"] == {}
+    assert stages.reduce(oci_capture(pool="ci"))["launches"] == {}
+
+
+def test_a_read_without_oci_listings_has_no_pool_starts():
+    assert stages.reduce(raw_capture())["pool_starts"] == {}
+
+
+def test_an_oci_pool_start_scales_from_zero_without_an_autoscaler_event():
+    events = [e for e in cold_events(group="swarm") if e["reason"] != "TriggeredScaleUp"]
+    pods = {"default/a": {"created": T0 - 500, "ready": T0 + 97_000}}
+    oci = {**read(events, pods), "pool_starts": {"swarm": [T0 + 9000]}}
+    oci["launches"] = {"i-0ad35d2621bca80ff": {**oci["launches"]["i-0ad35d2621bca80ff"], "group": "swarm"}}
+    [entry] = stages.attribute(oci)
+    assert (entry["node_kind"], entry["from_zero"]) == ("cold", True)
+    assert {k: entry["stages"][k] for k in stages.NODE_STAGES} == {
+        "trigger": 9000,
+        "instance": 12000,
+        "join": 46000,
+        "schedule": 3000,
+    }
+    assert stages.claim([entry], stages.COLD_LABEL) == [entry]
+    without = {**oci, "pool_starts": {}}
+    assert stages.attribute(without)[0]["node_kind"] == "warm"
+
+
 def write_capture(folder):
     folder.mkdir()
     raw = raw_capture()
