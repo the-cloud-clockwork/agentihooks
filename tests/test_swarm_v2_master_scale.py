@@ -275,7 +275,7 @@ def test_twenty_back_to_five_retires_extra_seats_through_their_handoffs(swarm, t
     sink = metrics_outbox.Settings("http://metrics.invalid", "", "")
     monkeypatch.setattr(metrics_outbox, "settings", lambda environ: sink)
     monkeypatch.setattr(metrics_outbox, "spool_path", lambda: path)
-    monkeypatch.setattr(metrics_outbox.Outbox, "flush", lambda self, now_ms: [])
+    monkeypatch.setattr(metrics_outbox, "post", lambda sink, query, body: False)
     store, runtime = swarm
     inbox = InboxStore(store.redis)
     second, third, fourth = asked(swarm)
@@ -329,6 +329,7 @@ def test_twenty_back_to_five_retires_extra_seats_through_their_handoffs(swarm, t
         ("master_seat_count", 1, "", NOW + 3 * MINUTE + HOLD),
     }
     assert all(row["ledger"] == SLUG for row in rows)
+    assert all((row["plan"], row["phase"], row["slice"], row["task"]) == ("", "", "", "") for row in rows)
     assert len({row["event_id"] for row in rows}) == 6
 
     import fakeredis
