@@ -536,6 +536,19 @@ def test_ended_execution_without_a_pod_is_not_missing(fixture):
     assert restarted.controller_orphans_by_class()["missing_pod"] == 0
 
 
+def test_live_pod_of_an_ended_execution_is_kept(fixture):
+    store, (first, _), transport, clock, grant = fixture
+    attempt = launched(store, first)
+    store.put_agent("fixture", replace(attempt, state="ended"))
+    pods = Pods([managed("eng-1", attempt.execution_id, uid="uid-ended")])
+    restarted = observed(store, transport, grant, pods)
+    clock[0] += lease.ttl_ms()
+    assert restarted.acquire()
+    plan = restarted.reconcile()
+    assert pods.deleted == [] and plan.missing_pods == []
+    assert restarted.controller_orphans_by_class()["superseded"] == 1
+
+
 def test_orphan_replaced_before_delete_is_not_deleted(fixture):
     store, _, transport, _, grant = fixture
     pods = Pods([managed("eng-2", "exec-orphan")])
