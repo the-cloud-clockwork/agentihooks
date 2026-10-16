@@ -311,7 +311,7 @@ def test_the_local_terminal_opens_the_viewer_in_the_swarm_workspace(monkeypatch)
         lambda *call: opened.append(call) or herdr_host.Placement("w1", "w1:t1", "w1:p1"),
     )
     environ = {"HERDR_SOCKET": "/run/herdr.sock"}
-    assert attach.local_terminal(store, "sw", "exe-1", environ) == {
+    assert attach.local_terminal(store, slug, "exe-1", environ) == {
         "agent": "sw-master-1",
         "thread": "thread-1",
         "pane": "w1:p1",
