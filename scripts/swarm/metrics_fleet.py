@@ -16,7 +16,9 @@ PANELS = metrics_outbox.Table(
 )
 SOURCES = metrics_outbox.Table("fleet_sources", (("source", "String"), ("available", "Int64"), ("readings", "Int64")))
 UNREAD = ("brain_denials",)
-CHECKPOINTS = "fleet-checkpoints"
+CHECKPOINTS = "fleet-checkpoint"
+CHECKPOINT_TTL_MS = 7 * 24 * 3600 * 1000
+KUBERNETES = "kubernetes"
 VIEWER = fleet_dashboard.Viewer("metrics", frozenset())
 
 
@@ -29,7 +31,11 @@ def feed_at_ms() -> int:
     return int(path.stat().st_mtime * 1000) if path.exists() else 0
 
 
-def _attempts(store: RedisStore, slug: str) -> tuple[list, list]:
+def _pool(name: str) -> dict:
+    return {"pool": name} if name else {}
+
+
+def _attempts(store: RedisStore, slug: str, pool: str = "") -> tuple[list, list]:
     beats = {key: json.loads(raw) for key, raw in store.redis.hgetall(store.key(slug, "heartbeats")).items()}
     active = [
         {
@@ -39,6 +45,7 @@ def _attempts(store: RedisStore, slug: str) -> tuple[list, list]:
             "phase": fleet_dashboard.ACTIVE,
             "terminal": "attached" if agent.pane_id else "detached",
             "authority": beats[agent.execution_id]["state"] if agent.execution_id in beats else "local",
+            **_pool(pool if agent.runtime_backend == KUBERNETES else ""),
         }
         for seat, agent in sorted(store.execution_occupants(slug).items())
     ]
@@ -51,6 +58,7 @@ def _attempts(store: RedisStore, slug: str) -> tuple[list, list]:
             "requested": json.loads(raw)["resources"],
             "terminal": "detached",
             "authority": "pending",
+            **_pool(pool),
         }
         for task, raw in sorted(store.redis.hgetall(store.key(slug, "pending-admission")).items())
     ]
@@ -76,16 +84,18 @@ def _quota(store: RedisStore, now_ms: int) -> list[dict]:
 
 def record_checkpoint(store: RedisStore, slug: str, execution_id: str, seat: str, taken_at_ms: int) -> None:
     found = {"execution_id": execution_id, "seat": seat, "taken_at_ms": taken_at_ms}
-    store.redis.hset(store.key(slug, CHECKPOINTS), execution_id, json.dumps(found))
+    store.redis.set(store.key(slug, CHECKPOINTS, execution_id), json.dumps(found), px=CHECKPOINT_TTL_MS)
 
 
 def _checkpoints(store: RedisStore, slug: str, active: list[dict]) -> list[dict]:
-    taken = store.redis.hgetall(store.key(slug, CHECKPOINTS))
-    return [json.loads(taken[row["execution_id"]]) for row in active if row["execution_id"] in taken]
+    if not active:
+        return []
+    taken = store.redis.mget([store.key(slug, CHECKPOINTS, row["execution_id"]) for row in active])
+    return [json.loads(raw) for raw in taken if raw]
 
 
 def sample(store: RedisStore, slug: str, now_ms: int, feed_at: int, pools: list[dict] | None = None) -> dict:
-    active, pending = _attempts(store, slug)
+    active, pending = _attempts(store, slug, pools[0]["pool"] if pools else "")
     archive = Health(store, slug, clock=lambda: now_ms / 1000).diagnose()["pipeline"]["archive"]
     return {
         "seq": now_ms,
@@ -129,7 +139,7 @@ def panel_rows(slug: str, now_ms: int, panels: dict, fresh_feed: bool) -> list[d
             "value": value,
         }
         for panel, series, subject, value in _values(panels)
-        if fresh_feed or panel != "knowledge" or series == "cross_scope_denials"
+        if series != "cross_scope_denials" and (fresh_feed or panel != "knowledge")
     ]
 
 
@@ -142,7 +152,7 @@ def source_rows(slug: str, now_ms: int, found: dict, pools_read: bool = False) -
         "archive": (1, len(found["archive"])),
         "brain_feed": (1, 1) if found["brain"]["feed_at_ms"] else (0, 0),
         "pools": (1, len(found["pools"])) if pools_read else (0, 0),
-        "checkpoints": (1, len(found.get("checkpoints", []))),
+        "checkpoints": (1, len(found["checkpoints"])),
         **dict.fromkeys(UNREAD, (0, 0)),
     }
     return [

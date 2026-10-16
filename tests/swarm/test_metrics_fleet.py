@@ -128,7 +128,7 @@ def test_a_missing_brain_feed_is_an_unavailable_source_not_a_fresh_one(tmp_path,
         assert sources["brain_feed"] == (0, 0)
         assert sources["executions"] == (1, 0)
         assert panels[("attempts", "active")] == 0.0
-        assert panels[("knowledge", "cross_scope_denials")] == 0.0
+        assert ("knowledge", "cross_scope_denials") not in panels
     finally:
         box.close()
 
@@ -180,6 +180,7 @@ def test_the_newest_checkpoint_of_each_active_execution_reaches_the_sink(tmp_pat
     metrics_fleet.record_checkpoint(store, SLUG, first, f"eng-1@{SLUG}", NOW - 2_000_000)
     metrics_fleet.record_checkpoint(store, SLUG, second, f"eng-2@{SLUG}", NOW - 1_800_000)
     metrics_fleet.record_checkpoint(store, SLUG, "ended", "eng-9@scratch", NOW - 9_000_000)
+    assert 604_000_000 < store.redis.pttl(store.key(SLUG, "fleet-checkpoint", first)) <= 604_800_000
     found = metrics_fleet.sample(store, SLUG, NOW, NOW)
     assert found["checkpoints"] == [
         {"execution_id": first, "seat": f"eng-1@{SLUG}", "taken_at_ms": NOW - 2_000_000},
@@ -194,14 +195,31 @@ def test_the_newest_checkpoint_of_each_active_execution_reaches_the_sink(tmp_pat
 
 def test_a_worker_pool_reading_reaches_the_sink_per_pool(tmp_path, store):
     seeded(store)
+    target = {"pod_namespace": "swarm-workers", "pod_name": "worker-t4"}
+    pod = AgentRecord(
+        store.next_name(SLUG, "eng"),
+        "eng",
+        "t4",
+        seat=f"eng-3@{SLUG}",
+        runtime_backend="kubernetes",
+        runtime_target=target,
+    )
+    store.execution_registry.start(SLUG, pod, "")
     reading = [{"pool": "swarm-workers", "configured_maximum": 8, "nodes": 2}]
+    found = metrics_fleet.sample(store, SLUG, NOW, NOW, reading)
+    assert {row["task"]: row.get("pool") for row in found["attempts"]} == {
+        "t1": None,
+        "t2": None,
+        "t3": "swarm-workers",
+        "t4": "swarm-workers",
+    }
     panels, sources = _recorded(tmp_path, store, lambda: reading)
     capacity = {(row["series"], row["subject"]): row["value"] for row in panels if row["panel"] == "capacity"}
     assert capacity == {
         ("configured_maximum", "swarm-workers"): 8.0,
         ("observed_nodes", "swarm-workers"): 2.0,
-        ("active_tasks", "swarm-workers"): 0.0,
-        ("pending_requests", "swarm-workers"): 0.0,
+        ("active_tasks", "swarm-workers"): 1.0,
+        ("pending_requests", "swarm-workers"): 1.0,
     }
     found = {row["source"]: (row["available"], row["readings"]) for row in sources}
     assert (found["pools"], found["brain_denials"]) == ((1, 1), (0, 0))

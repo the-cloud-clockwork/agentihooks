@@ -286,3 +286,20 @@ def test_a_committed_checkpoint_pointer_is_recorded_with_its_execution_seat_and_
     assert seen == [("execution", "seat", lease.now_ms(authority.store))]
     assert request(api, "write", key="swarm/task/pointers/0000000008/0000000002.json", data=encoded(document))[0] == 403
     assert len(seen) == 1
+
+
+def test_a_lost_checkpoint_reading_never_fails_the_committed_pointer(storage, capsys):
+    from redis.exceptions import ConnectionError as RedisDown
+
+    _, backend, authority = storage
+
+    def down(*args):
+        raise RedisDown("gone")
+
+    api = artifacts.ArtifactsAPI(backend, authority, down)
+    document = json.dumps({"execution_id": "execution", "generation": 7}).encode()
+    pointer = "swarm/task/pointers/0000000007/0000000001.json"
+    assert request(api, "write", key=pointer, data=encoded(document)) == (200, {})
+    assert backend.size(pointer) == len(document)
+    events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert {"event": "checkpoint_reading_lost", "error": "ConnectionError"} in events

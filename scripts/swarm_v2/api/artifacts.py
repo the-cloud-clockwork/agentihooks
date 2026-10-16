@@ -181,7 +181,7 @@ class ArtifactsAPI:
         if operation == "write":
             self._write(key, base64.b64decode(body["data"], validate=True), scope, fence)
             if self.checkpointed is not None and key.split("/")[2] == "pointers":
-                self.checkpointed(scope.execution_id, scope.seat_id, lease.now_ms(self.tasks.store))
+                self._checkpointed(scope)
         elif operation == "move":
             _staging(key, scope)
             target = _key(body["target"], scope, False)
@@ -192,6 +192,15 @@ class ArtifactsAPI:
         else:
             self._remove(key, scope, fence)
         return {}
+
+    def _checkpointed(self, scope: Registration) -> None:
+        """The pointer is already committed, so a lost reading never fails the write."""
+        from redis.exceptions import RedisError
+
+        try:
+            self.checkpointed(scope.execution_id, scope.seat_id, lease.now_ms(self.tasks.store))
+        except RedisError as error:
+            print(json.dumps({"event": "checkpoint_reading_lost", "error": type(error).__name__}), flush=True)
 
     def _read(self, key: str, start: int, length: int) -> bytes:
         if type(start) is not int or type(length) is not int or start < 0 or not 0 <= length <= MAX_BYTES:
