@@ -91,8 +91,7 @@ test('promotes the graded tree as one commit on main and records both revisions'
   assert.equal(f.writes[1][0], 'merge');
   const { merge_method, ...request } = f.writes[1][1];
   assert.ok(['rebase', 'squash'].includes(merge_method));
-  assert.deepEqual(request, { owner: 'owner', repo: 'repo', pull_number: 7, sha: 'snapshot',
-    commit_title: 'Promote green dev to main (#7)', commit_message: f.writes[0][1].body });
+  assert.deepEqual(request, { owner: 'owner', repo: 'repo', pull_number: 7, sha: 'snapshot', commit_message: f.writes[0][1].body });
   assert.equal(f.outputs.main, 'rebased');
   assert.equal(f.outputs.graded, 'graded');
 });
@@ -207,14 +206,16 @@ test('an open pull request without its snapshot branch cannot merge', async () =
 
 const last = 'a'.repeat(40);
 
-test('promotes a revision newer than the last promotion', async () => {
-  const f = fixture({ promoted: last });
-  await promote(f);
-  assert.deepEqual(f.refs[0], ['compare', { owner: 'owner', repo: 'repo', base: last, head: 'graded' }]);
-  assert.equal(f.outputs.main, 'rebased');
-});
+for (const order of ['ahead', 'diverged']) {
+  test(`promotes a revision ${order} of the last promotion`, async () => {
+    const f = fixture({ promoted: last, order });
+    await promote(f);
+    assert.deepEqual(f.refs[0], ['compare', { owner: 'owner', repo: 'repo', base: last, head: 'graded' }]);
+    assert.equal(f.outputs.main, 'rebased');
+  });
+}
 
-for (const order of ['behind', 'identical', 'diverged']) {
+for (const order of ['behind', 'identical']) {
   test(`never rolls main back to a revision that is ${order} the last promotion`, async () => {
     const f = fixture({ promoted: last, order });
     await assert.rejects(promote(f), /not newer than the last promotion/);

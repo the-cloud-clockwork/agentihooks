@@ -33,7 +33,7 @@ module.exports = async ({ github, context, core, sleep = ms => new Promise(resol
     const ref = `heads/${head}`;
     const pulls = (await github.rest.pulls.list({ ...api, state: 'open', base: 'main', head: `${owner}:${head}` })).data;
     const promoted = /^Graded dev revision: ([0-9a-f]{40})$/m.exec(main.commit.message)?.[1];
-    if (promoted && (await github.rest.repos.compareCommits({ ...api, base: promoted, head: context.sha })).data.status !== 'ahead') {
+    if (promoted && ['behind', 'identical'].includes((await github.rest.repos.compareCommits({ ...api, base: promoted, head: context.sha })).data.status)) {
       throw new Error('Graded revision is not newer than the last promotion');
     }
     const body = `Graded dev revision: ${context.sha}\n\nTests: ${context.serverUrl}/${repository}/actions/runs/${context.runId}`;
@@ -70,8 +70,7 @@ module.exports = async ({ github, context, core, sleep = ms => new Promise(resol
       await sleep(5000);
     }
     if (!ready) throw new Error('Promotion checks did not become mergeable within four minutes');
-    const merged = (await github.rest.pulls.merge({ ...api, pull_number: pull.number, sha: snapshot, merge_method: 'squash',
-      commit_title: `Promote green dev to main (#${pull.number})`, commit_message: body })).data;
+    const merged = (await github.rest.pulls.merge({ ...api, pull_number: pull.number, sha: snapshot, merge_method: 'squash', commit_message: body })).data;
     if (!merged.merged) throw new Error('GitHub refused the promotion merge');
     main = (await github.rest.repos.getCommit({ ...api, ref: merged.sha })).data;
     if (main.commit.tree.sha !== graded.commit.tree.sha) throw new Error('Promoted tree differs from the graded dev tree');
