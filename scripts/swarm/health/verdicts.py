@@ -18,7 +18,11 @@ class VerdictStore:
             before = json.loads(stored[finding.id]) if finding.id in stored else None
             record = {**(before or {"seen_at": now_ms, "verdict": None, "returned": False})}
             record.update(evidence=list(finding.evidence), measure=finding.measure)
+            if finding.basis:
+                record["basis"] = finding.basis
             verdict = record["verdict"]
+            if verdict and verdict.get("basis", "") != finding.basis:
+                verdict = record["verdict"] = {**verdict, "measure": finding.measure, "basis": finding.basis}
             show = verdict is None or record["returned"]
             grew = verdict and finding.measure > verdict["measure"]
             if grew and new_evidence:
@@ -47,6 +51,8 @@ class VerdictStore:
             "measure": record["measure"],
             "evidence": record["evidence"],
         }
+        if record.get("basis"):
+            verdict["basis"] = record["basis"]
         record.update(verdict=verdict, returned=False)
         self.redis.hset(self.key, finding_id, json.dumps(record))
         return verdict

@@ -130,6 +130,7 @@ def _finding(row: dict) -> Finding:
         evidence,
         f"{row['threshold']} {row['unit']}",
         row["value"],
+        row["unit"],
     )
 
 
