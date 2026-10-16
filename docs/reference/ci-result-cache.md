@@ -8,7 +8,7 @@ nav_order: 5
 
 One CI algorithm for every repo and workflow: a check whose real inputs did not change reuses its last green result, and a check that fails is retried in place a bounded number of times inside the same job. No run is ever restarted from zero because one test flaked.
 
-Status: slices 1 to 4 delivered (see [Slice 1 as delivered](#slice-1-as-delivered), [Slice 2 as delivered](#slice-2-as-delivered), [Slice 3 as delivered](#slice-3-as-delivered) and [Slice 4 as delivered](#slice-4-as-delivered)); slices 5 to 7 are design. Issue [#2365](https://github.com/the-cloud-clockwork/agentihooks/issues/2365). Slices are listed in [Slices](#slices); each one is a separate pull request.
+Status: slices 1 to 5 delivered (see [Slice 1 as delivered](#slice-1-as-delivered), [Slice 2 as delivered](#slice-2-as-delivered), [Slice 3 as delivered](#slice-3-as-delivered), [Slice 4 as delivered](#slice-4-as-delivered) and [Slice 5 as delivered](#slice-5-as-delivered)); slices 6 and 7 are design. Issue [#2365](https://github.com/the-cloud-clockwork/agentihooks/issues/2365). Slices are listed in [Slices](#slices); each one is a separate pull request.
 
 ## Before numbers
 
@@ -208,3 +208,18 @@ Measured with `python -m tests.dep_manifest share --manifest manifest.json --ref
 Cost, from run [38952385459](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38952385459) against queue runs 38950629400 to 38956012323: 3.12 Run tests mean 217 s against 178 to 210 s, slowest shard 227 s against 198 to 246 s; `sonar` 185 s against 168 s on dev push run 38950625810, of which the merge wait grew to 37 s and the build takes 24 s; the 12 coverage artifacts grew from 19 MB to 202 MB; `coverage-ratchet` 84 s against 80 s.
 
 Not done here: the queue run's read of the dev cache entry, which slice 5 needs, is still unproven.
+
+## Slice 5 as delivered
+
+Merge queue runs, and gate plant dispatches, skip every test whose manifest inputs did not change since a dev push in which it passed.
+
+- **Record.** `scripts/ci_test_plan.py` reads the last 10 completed dev push Tests runs and takes the newest one whose 18 unit shards passed and that kept a `dep-manifest` artifact whose commit is the run's head. It does not require the whole run to pass, because promotion checks such as `helm-kind` fail dev pushes without touching the unit results. No such run is a missing record: the planner raises a `No test record` notice and every test runs.
+- **Plan.** Each `split` leg adds the protected grader as a worktree. For a queue run the grader is the merge group base; for a dispatch it is the head. The leg runs the planner from that worktree with the interpreter outside the test venv. Every manifest test that the diff from the record commit to the head leaves valid is reused, keyed without its xdist group suffix. The leg publishes the plan as `reused-tests-<python>`. The protected gate freezes the durations job's outputs, so the plan cannot live there.
+- **Deselect.** `tests.dep_manifest deselect` intersects the plan with the head collection and also lists the test files whose collected tests are all reused. It publishes `reused-<python>`. Each unit shard downloads that list into `CI_REUSED`. `conftest` leaves the wholly reused files uncollected and drops reused nodes from the duration split, so shards balance on the tests that remain, and then deselects the remaining reused items. A shard that has nothing left passes.
+- **Grade.** `shard-check` runs from the base and passes the grader's plan to `shard_check --reused`. Collected tests the plan does not reuse must each run exactly once, and reused tests must not run at all. Its step summary prints the counts of tests ran, tests reused (naming the dev run that recorded them) and flaky tests for each Python version.
+- **Dev push.** `ci_dev_reuse` refuses a queue run that published a plan, so a dev push runs the full suite and records the next manifest.
+
+Coverage: merge group runs feed no coverage consumer, since `sonar` and the ratchet do not run there. The only reader of queue coverage is dev unit reuse, and it is refused for partial runs, so no combine is needed on this path. Pull request full scope runs stay on the full suite. `select` sends a pull request to full scope only for changes that the manifest rule also treats as global, such as `.github/` and `pyproject.toml`.
+
+A merge whose base grader has no planner, which includes the queue run of this slice's own pull request, runs in full.
+
