@@ -220,6 +220,40 @@ def test_hosted_worker_writes_pin_the_spec_and_count_conflicts(deployed, store, 
         assert response["error_class"] == "revision_conflict"
 
 
+def test_hosted_receipts_survive_claim_loss_after_the_server_answers(deployed, store):
+    _, read = _read(deployed)
+    original = _hl().ResourceClient.request
+
+    def lose_after_reply(client, slug, path, *args, **kwargs):
+        reply = original(client, slug, path, *args, **kwargs)
+        if path == "operations":
+            store.redis.delete(store.key(SLUG, "task-authority", "t1"))
+        return reply
+
+    with patch.object(_hl().ResourceClient, "request", lose_after_reply):
+        status, ack = _patch(deployed, read["revision"], {"state": "pr"})
+
+    assert status == 200
+    assert _held_task()["state"] == "pr"
+    key = store.key(SLUG, _hl().RECEIPTS_KEY, "tasks/t1")
+    assert store.redis.type(key) == "hash"
+    receipt = json.loads(store.redis.hget(key, "op-1"))
+    assert receipt["ack"] == ack
+    assert store.redis.hlen(key) == 1
+    assert 0 < store.redis.ttl(key) <= 86400
+
+
+def test_hosted_receipts_keep_each_operation_and_remove_expired_entries(deployed, store):
+    _, read = _read(deployed)
+    first, _ = _patch(deployed, read["revision"], {"state": "pr"}, "first")
+    assert first == 200
+    key = store.key(SLUG, _hl().RECEIPTS_KEY, "tasks/t1")
+    store.redis.hset(key, "expired", json.dumps({"expires_at": 0}))
+    second, _ = _patch(deployed, read["revision"], {"state": "blocked"}, "second")
+    assert second == 200
+    assert set(store.redis.hkeys(key)) == {"first", "second"}
+
+
 def test_a_replayed_worker_update_returns_the_same_receipt(deployed):
     _, read = _read(deployed)
 
