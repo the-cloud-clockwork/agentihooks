@@ -164,3 +164,78 @@ def test_heredoc_and_separated_shell_depths_share_the_limit():
     assert commands(script, 8) == [["pytest"], ["bash"]]
     with pytest.raises(ValueError):
         commands(script, 9)
+
+
+@pytest.mark.parametrize(
+    "command, folders",
+    [
+        ("git push", []),
+        ("cd /a && git push", ["/a"]),
+        ("(cd /a; git push)", ["/a"]),
+        ("(cd /a); git push", []),
+        ("(cd /a && true) && git push", []),
+        ("cd /a | true; git push", []),
+        ("true | cd /a\ngit push", []),
+        ("cd /a | git push", []),
+        ("cd /a & git push", []),
+        ("cd /a && cd /b & git push", []),
+        ("{ cd /a; }; git push", ["/a"]),
+        ("{ cd /a; } | true; git push", []),
+        ("bash -c 'cd /a'; git push", []),
+        ("env -C /a git push", ["/a"]),
+        ("env --chdir=/a true; git push", []),
+        ("cd /b && env --chdir /a git push", ["/b", "/a"]),
+        ("cd /a && cd /b && cd - && git push", ["/a", "/b", "-"]),
+        ("cd -P /a && git push", ["/a"]),
+        ("cd && git push", ["~"]),
+        ("cd /a 2>&1 && git push", ["/a"]),
+        ("cd /a &>/dev/null && git push", ["/a"]),
+        ("cd /a >&2 && git push", ["/a"]),
+        ("bash -c 'cd /a && git push'", ["/a"]),
+        ("cd /b; bash <<< 'git push'", ["/b"]),
+    ],
+)
+def test_folder_changes_last_only_inside_their_own_shell(command, folders):
+    from hooks.context.shell_commands import located
+
+    assert located(command)[-1] == (["git", "push"], folders)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "bash <<< 'pytest -q'",
+        "bash <<<'pytest -q'",
+        'sudo bash <<< "echo a; pytest -q"',
+        "cat <<'EOF' | bash\npytest -q\nEOF",
+        "cat <<EOF | sudo sh -s\npytest -q\nEOF\necho done",
+    ],
+)
+def test_scripts_fed_to_a_shell_on_stdin_are_parsed(command):
+    from hooks.context.shell_commands import commands
+
+    assert ["pytest", "-q"] in commands(command)
+
+
+def test_piped_heredoc_keeps_the_rest_of_its_line():
+    from hooks.context.shell_commands import commands
+
+    assert commands("cat <<EOF | grep x && echo done\npytest\nEOF") == [
+        ["cat"],
+        ["grep", "x"],
+        ["echo", "done"],
+    ]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo $((1 << 2)); pytest -q",
+        "(( x <<= 1 ))\npytest -q",
+        "echo $(( 1<<2 )) && pytest -q",
+    ],
+)
+def test_an_arithmetic_left_shift_is_not_a_heredoc(command):
+    from hooks.context.shell_commands import commands
+
+    assert ["pytest", "-q"] in commands(command)
