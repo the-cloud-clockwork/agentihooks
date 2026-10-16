@@ -124,27 +124,31 @@ class Deliveries:
         try:
             document = json.loads(self.path.read_text())
             entries = document["deliveries"]
-            if document["version"] != VERSION or not isinstance(entries, dict):
+            if document["version"] != VERSION:
                 raise ValueError(f"not a version {VERSION} delivery journal")
+            if not isinstance(entries, dict):
+                raise ValueError("deliveries is not an object")
         except (OSError, ValueError, TypeError, KeyError):
             raise EndpointRefused("journal_unreadable", "the pane delivery journal is unreadable") from None
         return entries
 
     def recover(self, now: int) -> dict[str, dict]:
-        """Every prompt carries a fresh operation id, so an unreadable journal is set aside and delivery starts empty."""
         try:
             return self.load()
         except EndpointRefused as refused:
             cause = refused.__context__
+            if isinstance(cause, OSError):
+                raise
             aside = self.path.with_name(f"{self.path.name}.unreadable-{now}")
+            record = {"at": now, "file": aside.name, "reason": f"{type(cause).__name__}: {cause}"}
+            log = self.path.with_name(f"{self.path.name}{SET_ASIDE}")
             try:
-                self.path.replace(aside)
+                os.link(self.path, aside)
+                with os.fdopen(os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600), "w") as handle:
+                    handle.write(json.dumps(record) + "\n")
+                self.path.unlink()
             except OSError:
                 raise refused from None
-        record = {"at": now, "file": aside.name, "reason": f"{type(cause).__name__}: {cause}"}
-        log = self.path.with_name(f"{self.path.name}{SET_ASIDE}")
-        with os.fdopen(os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600), "a") as handle:
-            handle.write(json.dumps(record) + "\n")
         return {}
 
     def save(self, entries: dict[str, dict]) -> None:
