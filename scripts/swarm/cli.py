@@ -956,7 +956,8 @@ def cmd_status(store, args):
     for a in agents:
         model = " ".join(filter(None, (a.model, a.effort))) if a.model else "unknown"
         can = transport(a)
-        push, attach = ("yes" if can[key] else "no" for key in ("push_inbox", "native_terminal_attach"))
+        push = "yes" if can["push_inbox"] else "no"
+        attach = "yes" if can["native_terminal_attach"] else "no"
         print(
             f"{a.name}\t{a.lane}\t{a.harness}\t{a.profile or 'unknown'}\t{model}\t{a.account or '-'}\t{a.pane_id}\t{a.task}\t{agent_status(a)}\t{a.conversation_id or '-'}\t{push}\t{attach}\t{a.model_source or '-'}\t{a.model_confidence if a.model_confidence is not None else '-'}"
         )

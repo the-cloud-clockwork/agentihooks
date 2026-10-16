@@ -44,10 +44,11 @@ def test_status_report_carries_each_agents_transport_capabilities(saved):
 def test_status_text_prints_push_inbox_and_native_terminal_per_agent(saved, capsys):
     store, names = saved
     cli.cmd_status(store, SimpleNamespace(slug="sw", json=False))
-    rows = [line.split("\t") for line in capsys.readouterr().out.splitlines() if "\t" in line]
-    head = rows[0]
+    lines = capsys.readouterr().out.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith("Agent\t"))
+    head, *rows = [line.split("\t") for line in lines[start : start + 5]]
     push, attach = head.index("Push inbox"), head.index("Native terminal")
-    shown = {row[0]: (row[push], row[attach]) for row in rows[1:]}
+    shown = {row[0]: (row[push], row[attach]) for row in rows}
     assert {key: shown[name] for key, name in names.items()} == {
         "claude": ("yes", "no"),
         "push": ("yes", "yes"),

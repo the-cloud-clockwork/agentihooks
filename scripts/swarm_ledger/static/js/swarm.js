@@ -156,7 +156,7 @@ function agentRow(a, remote) {
 
 function transportCell(t) {
   if (!t) return "—";
-  return h("span", { class: "sw-transport" }, label(t.push ? "push" : "no push", t.push ? "on" : "off"), label(t.attach ? "terminal" : "no terminal", t.attach ? "on" : "off"));
+  return h("span", { class: "sw-transport" }, label(t.push ? "push" : "no push", t.push ? "on" : "off"), label(t.attach ? "native terminal" : "no native terminal", t.attach ? "on" : "off"));
 }
 
 function executionCell(e) {

@@ -434,6 +434,21 @@ def test_agents_table_lists_the_master_first_with_overlays_and_stats_carry_the_t
     ]
 
 
+def test_agents_table_shows_push_inbox_and_native_terminal_for_each_agent(open_page):
+    payload = status()
+    payload["agents"][0]["capabilities"] = {"push_inbox": True, "native_terminal_attach": False}
+    payload["agents"][1]["capabilities"] = {"push_inbox": False, "native_terminal_attach": True}
+    page = open_page(payload)
+    cells = page.tab.eval_on_selector_all(
+        "#swarm-agents tr",
+        "rows => rows.map(r => [...r.querySelectorAll('.sw-transport .lbl')].map(l => [l.textContent, l.className]))",
+    )
+    assert cells == [
+        [["push", "lbl on"], ["no native terminal", "lbl off"]],
+        [["no push", "lbl off"], ["native terminal", "lbl on"]],
+    ]
+
+
 def test_agents_table_shows_live_terminals_and_never_shows_an_aged_or_failed_view_as_live(open_page):
     payload = status()
     fresh = {"state": "live", "checked_at": NOW_MS - 30_000, "live_at": NOW_MS - 30_000, "fresh_ms": 30_000}
@@ -514,7 +529,7 @@ def test_agents_table_shows_each_agents_execution_identity_beside_its_terminal(o
     }
     page = open_page(payload, clock=True)
     heads = page.tab.eval_on_selector_all("#agents-table thead th", "ths => ths.map(t => t.innerText.trim())")
-    assert heads[:10] == [
+    assert heads[:11] == [
         "agent",
         "lane",
         "profile",
