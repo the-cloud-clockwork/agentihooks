@@ -755,7 +755,6 @@ class TestCopilotCapabilities:
         assert supports_arg_mutation("codex") is False
         assert supports_arg_mutation("claude") is True
 
-
     def test_only_claude_reports_the_shell_cwd(self, codex):
         assert reports_shell_cwd("claude") is True
         assert reports_shell_cwd("codex") is False
