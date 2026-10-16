@@ -277,6 +277,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
                     intent.judged,
                     head=lambda url: getattr(view(url), "head", None),
                     named=intent.named_view,
+                    text=intent.pr_text,
                 ).run,
                 doc,
             )
