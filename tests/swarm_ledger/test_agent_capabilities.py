@@ -36,7 +36,7 @@ console.log(JSON.stringify(agentRows(raw, 0).map((r) => [r.name, r.transport])))
 def test_transport_cell_names_both_capabilities_in_plain_labels():
     page = page_source()
     body = _function(page, "transportCell")
-    for text in ("push inbox", "no push inbox", "native terminal", "no terminal"):
+    for text in ("push", "no push", "terminal", "no terminal"):
         assert f'"{text}"' in body
     assert "agentRow(a, remote)" in page and "transportCell(a.transport)" in page
 

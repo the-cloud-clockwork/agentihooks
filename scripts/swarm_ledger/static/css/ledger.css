@@ -566,12 +566,12 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   #agents-table { table-layout: fixed; }
   #agents-table .ag-agent { width: 17%; }
   #agents-table .ag-lane { width: 6%; }
-  #agents-table .ag-profile { width: 11%; }
-  #agents-table .ag-overlays { width: 12%; }
-  #agents-table .ag-model { width: 14%; }
-  #agents-table .ag-transport { width: 12%; }
+  #agents-table .ag-profile { width: 10%; }
+  #agents-table .ag-overlays { width: 10%; }
+  #agents-table .ag-model { width: 13%; }
+  #agents-table .ag-transport { width: 16%; }
   #agents-table .ag-task { width: 9%; }
-  #agents-table .ag-state { width: 12%; }
+  #agents-table .ag-state { width: 11%; }
   #agents-table .ag-acts { width: 0; }
   #agents-table td:not(:has(> .sw-acts)) { overflow: hidden; text-overflow: ellipsis; }
 }
