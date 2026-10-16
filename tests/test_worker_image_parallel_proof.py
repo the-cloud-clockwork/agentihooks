@@ -10,6 +10,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCKER = """import json, os, sys, time
+from datetime import datetime, timezone
 from pathlib import Path
 args = sys.argv[1:]
 state = Path(os.environ['STATE'])
@@ -41,6 +42,16 @@ elif args[:2] == ['image', 'inspect']:
     sys.exit(1)
 elif args[0] == 'info':
     print(os.environ.get('DRIVER', '[]'))
+elif args[0] == 'inspect':
+    if (state / f'removed-{args[-1]}').exists():
+        sys.exit(1)
+    finished = datetime.fromtimestamp(float((state / f'exited-{args[-1]}').read_text()), timezone.utc)
+    print(finished.strftime('%Y-%m-%dT%H:%M:%S.%f').rstrip('0').rstrip('.') + 'Z')
+elif args[0] == 'rm':
+    for name in args[1:]:
+        (state / f'removed-{name}').touch()
+    if os.environ['FAILURE'] == 'slow-removal' and '-f' not in args:
+        time.sleep(2.5)
 elif args[0] == 'run':
     if '/opt/probe/profile-probe.sh' in args:
         (state / f'probe-{os.getpid()}').touch()
@@ -55,6 +66,10 @@ elif args[0] == 'run':
         if os.environ['FAILURE'] == 'profile':
             sys.exit(18)
         print(json.dumps({'codex_probe': {'registered_at': time.time() -\n              (3 if os.environ['FAILURE'] == 'profile-late' else 0)}}))
+        if '--name' in args:
+            (state / f"exited-{args[args.index('--name') + 1]}").write_text(str(time.time()))
+        if '--rm' in args and os.environ['FAILURE'] == 'slow-removal':
+            time.sleep(2.5)
     else:
         print(json.dumps({'manifest': {'source_revision': 'checked-revision',
               'declared': {'lock_sha256': 'locked'}},
@@ -208,6 +223,15 @@ def test_worker_proof_modes_run_only_their_independent_checks(tmp_path, proof, b
             assert json.loads((output / name).read_text())["codex_probe"]["registration_to_container_exit_seconds"] < 2
     assert (state / "scanner-pulled").exists()
     assert (state / "scan-agentihooks-worker-proof-finished").exists()
+
+
+def test_slow_container_removal_is_not_counted_as_codex_exit_latency(tmp_path):
+    result, calls, state, output = run_proof(tmp_path, "slow-removal", "profiles")
+    assert result.returncode == 0, result.stderr
+    for name in ("profile-positive.json", "profile-positive-second.json"):
+        assert json.loads((output / name).read_text())["codex_probe"]["registration_to_container_exit_seconds"] < 2
+    removed = sorted(call[1] for call in calls if call[0] == "rm" and call[1] != "-f")
+    assert [name.rsplit("-", 1)[0] for name in removed] == ["worker-profile-positive", "worker-profile-positive-second"]
 
 
 @pytest.mark.parametrize("proof", ["startup", "rebuild", "profiles"])
