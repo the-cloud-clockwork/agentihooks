@@ -168,6 +168,14 @@ def test_conditions_list_tool_reports_only_the_tool_steps(one_condition_per_step
     assert reports == ["pre Bash 'ls': pre-bash-guard.sh", "post Bash 'ls': post-any-trim.sh"]
 
 
+@pytest.mark.parametrize("step", ["stop", "start"])
+def test_conditions_list_tool_reports_nothing_for_a_step_without_tools(
+    one_condition_per_step, monkeypatch, capsys, step
+):
+    _run(monkeypatch, "conditions", "list", "--step", step, "--tool", "Bash", "--command", "ls")
+    assert "Bash 'ls':" not in capsys.readouterr().out
+
+
 def test_conditions_list_help_names_the_steps(monkeypatch, capsys):
     with pytest.raises(SystemExit):
         _run(monkeypatch, "conditions", "--help")
