@@ -11,6 +11,7 @@ NAME = "AgentiHooks touched Python fallback"
 RULES = ("C901", "PLR0912", "PLR0913")
 LIMITS = ("--config", "lint.mccabe.max-complexity=12", "--config", "lint.pylint.max-args=7")
 _MEASURED = re.compile(r"\((\d+) > \d+\)")
+_HUNK = re.compile(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@", re.MULTILINE)
 _SPEC = importlib.util.spec_from_file_location("size_limits", Path(__file__).resolve().parents[1] / "size_limits.py")
 size_limits = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(size_limits)
@@ -29,6 +30,27 @@ def changed(base: str) -> dict[Path, Path]:
         if new.endswith(".py") and Path(new).is_file():
             found[Path(new)] = Path(old if old.endswith(".py") else new)
     return found
+
+
+def changed_lines(base: str, path: Path, old: Path) -> set[int]:
+    lines = set()
+    for hunk in _HUNK.finditer(git("diff", "-U0", "-M", base, "HEAD", "--", old.as_posix(), path.as_posix())):
+        start = int(hunk[1])
+        lines.update(range(start, start + int(hunk[2] or 1)))
+    return lines
+
+
+def lint(base: str, paths: dict[Path, Path]) -> list[str]:
+    command = [sys.executable, "-m", "ruff", "check", "--output-format", "json", "--", *map(str, paths)]
+    root, errors = Path.cwd().resolve(), []
+    lines = {path.as_posix(): changed_lines(base, path, old) for path, old in paths.items()}
+    for hit in json.loads(subprocess.run(command, capture_output=True).stdout):
+        rel = Path(hit["filename"]).relative_to(root).as_posix()
+        start, end = hit["location"]["row"], hit["end_location"]["row"]
+        code = hit["code"] or "invalid-syntax"
+        if code == "invalid-syntax" or lines[rel] & set(range(start, end + 1)):
+            errors.append(f"{rel}:{start}:{hit['location']['column']}: {code} {hit['message']}")
+    return errors
 
 
 def measure(tree: Path, paths: list[Path]) -> dict[tuple[str, str], tuple[int, str]]:
@@ -139,10 +161,12 @@ def main() -> int:
     base = git("merge-base", "origin/dev", "HEAD").strip()
     paths = changed(base)
     if paths:
+        if errors := lint(base, paths):
+            print("\n".join(errors))
+            return 1
         names = [str(path) for path in paths]
-        for command in (["check", "--", *names], ["format", "--check", "--", *names]):
-            if code := subprocess.run([sys.executable, "-m", "ruff", *command]).returncode:
-                return code
+        if code := subprocess.run([sys.executable, "-m", "ruff", "format", "--check", "--", *names]).returncode:
+            return code
         head = graded(measure(Path.cwd().resolve(), list(paths)), touched(base, paths))
         if errors := grade(allowance(base, baseline(base, paths), head), head):
             print("\n".join(errors))
