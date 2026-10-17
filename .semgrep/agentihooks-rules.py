@@ -169,6 +169,13 @@ def paced(stop: threading.Event, work):
         stop.wait(60)
 
 
+def keyword_paced(stop: threading.Event, work):
+    while True:
+        work()
+        # ruleid: periodic-sleep-loop
+        stop.wait(timeout=60)
+
+
 def once(args, work):
     while True:
         work()
@@ -250,6 +257,16 @@ def expiring(order, clock, ack):
             return False
         # ok: periodic-sleep-loop
         time.sleep(1)
+
+
+# ok: machine-cron-entry
+# The quota refresh runs at 09:00 UTC, so cache it.
+# ok: machine-cron-entry
+NOTE = "the digest is sent at midnight"
+# ok: machine-cron-entry
+LABEL = "rows | batch size 50"
+# ok: machine-cron-entry
+TEXT = "looks at now and then"
 
 
 # ok: machine-timer-unit

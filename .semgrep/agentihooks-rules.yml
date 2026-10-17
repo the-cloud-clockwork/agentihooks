@@ -13,7 +13,7 @@ rules:
     message: A crontab, at, launchd or Task Scheduler entry schedules work outside the agentihooks scheduler. Register the job with scripts.scheduler instead.
     severity: ERROR
     languages: [regex]
-    pattern-regex: '\bcrontab\b|/etc/cron\.|/var/spool/cron|\bsystemd-run\b[^\n]*--on-|\bStart(Calendar)?Interval\b|\bschtasks\b|\b(at|batch) (now|midnight|noon|teatime|\d{1,2}:\d{2})\b|\|\s*(at|batch)\s|\[\s*"at"\s*,'
+    pattern-regex: '\bcrontab\b|/etc/cron\.|/var/spool/cron|\bsystemd-run\b[^\n]*--on-|\bStart(Calendar)?Interval\b|\bschtasks\b|(?:^|[;&|(]\s*)(?:at|batch)\s+(?:now|midnight|noon|teatime|tomorrow|\d{1,2}(?::\d{2})?\s*(?:am|pm)?)(?=[\s\"'']|$)|\[\s*"at"\s*,'
     paths:
       include: ["*.py", "*.sh", "*.bash", "*.timer", "*.service", "*.unit", "*.conf", "*.ini", "Dockerfile*", "*.cron", "crontab"]
       exclude: [/scripts/scheduler/]
@@ -42,10 +42,13 @@ rules:
           - pattern-inside: |
               for $X in count(...):
                   ...
-      - pattern: $SLEEP($ARG, ...)
-      - metavariable-regex:
-          metavariable: $SLEEP
-          regex: (.*\.)?(sleep|wait)$
+      - pattern-either:
+          - patterns:
+              - pattern: $SLEEP($ARG, ...)
+              - metavariable-regex:
+                  metavariable: $SLEEP
+                  regex: (.*\.)?(sleep|wait)$
+          - pattern: $EVENT.wait(..., timeout=$ARG, ...)
       - pattern-not-inside: |
           try:
               ...
@@ -707,7 +710,7 @@ rules:
     message: An endless shell loop that sleeps runs a timed job outside the agentihooks scheduler. Register the job with scripts.scheduler instead.
     severity: ERROR
     languages: [regex]
-    pattern-regex: '\bwhile\s+sleep\b[^\n]*;\s*do\b|\b(?:while\s+(?:true|:|\[\[?\s*1\s*\]\]?)|until\s+false)\s*;?\s*do\b(?:(?!\b(?:done|exit|break|return)\b)[\s\S])*\bsleep\b(?:(?!\b(?:done|exit|break|return)\b)[\s\S])*\bdone\b'
+    pattern-regex: '\bwhile\s+sleep\b[^\n]*;\s*do\b|\b(?:while\s+(?:true|:|\[\[?\s*1\s*\]\]?)|until\s+false)\s*;?\s*do\b(?:(?!\bdone\b)[\s\S])*\bsleep\b(?:(?!\bdone\b)[\s\S])*\bdone\b'
     paths:
       include: ["*.sh", "*.bash", "Dockerfile*"]
-      exclude: [/scripts/scheduler/]
+      exclude: [/scripts/scheduler/, /.github/coverage/sonar-retry.sh]

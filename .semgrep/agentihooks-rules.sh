@@ -10,7 +10,7 @@ done
 # ruleid: machine-cron-entry
 echo "* * * * * agentihooks swarm tick" | crontab -
 
-# ok: periodic-shell-sleep-loop
+# ruleid: periodic-shell-sleep-loop
 while true; do
     if curl -fsS http://127.0.0.1:8765/health; then
         break
