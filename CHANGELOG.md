@@ -53,6 +53,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Judged bottleneck stage findings return only when current stage load grows,
   instead of when the cumulative fired count increases.
 - Ledger task set accepts split pull request addresses as comma or JSON lists.
+- The intent gate matches a split task's `gh pr merge` named only by its branch, or by no
+  pull request, to the half it belongs to, and refuses a merge that resolves to none.
 - Reopening a swarm pull request retains its registered worker's ownership,
   claim lease and worktree until retirement; status omits gone local processes.
 - Offline worker profile proofs replay the rendered Codex startup hook so
