@@ -159,7 +159,17 @@ def _recorded_floor(tmp_path, base_files, head_files, recorded, environ=None):
         (base / "tests" / name).write_text(text)
     subprocess.run(["git", "add", "tests"], cwd=base, check=True, capture_output=True)
     subprocess.run(
-        ["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-m", "Base"],
+        [
+            "git",
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "Base",
+        ],
         cwd=base,
         check=True,
         capture_output=True,

@@ -2,11 +2,13 @@ import argparse
 import ast
 import hashlib
 import importlib.metadata
+import io
 import json
 import os
 import subprocess
 import sys
 import tempfile
+import zipfile
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -26,9 +28,7 @@ with open(sys.argv[2], "w") as out:
 """
 
 
-def collection_cache(root: Path, tests: str, cache: Path | None, environment: str) -> Path | None:
-    if cache is None or not environment:
-        return None
+def collection_identity(root: Path, tests: str, environment: str) -> str | None:
     status = subprocess.run(["git", "status", "--porcelain"], cwd=root, capture_output=True, text=True, check=False)
     if status.returncode or status.stdout:
         return None
@@ -38,8 +38,57 @@ def collection_cache(root: Path, tests: str, cache: Path | None, environment: st
     identity = json.dumps(
         [tree, tests, environment, sys.version, sys.platform, packages, _COLLECT, options], sort_keys=True
     )
-    key = hashlib.sha256(identity.encode()).hexdigest()
-    return cache / f"{key}.json"
+    return hashlib.sha256(identity.encode()).hexdigest()
+
+
+def collection_cache(root: Path, tests: str, cache: Path | None, environment: str) -> Path | None:
+    if cache is None or not environment:
+        return None
+    key = collection_identity(root, tests, environment)
+    return cache / f"{key}.json" if key else None
+
+
+def recorded_base(record: Path, tree: Path, tests: str) -> list[str] | None:
+    try:
+        recorded = json.loads(record.read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(recorded, dict) or recorded.get("identity") != collection_identity(tree, tests, ""):
+        return None
+    nodeids = recorded.get("nodeids")
+    return nodeids if isinstance(nodeids, list) and nodeids and all(isinstance(n, str) for n in nodeids) else None
+
+
+def dev_record(listing: dict, base: str) -> int | None:
+    for artifact in listing.get("artifacts", []):
+        run = artifact.get("workflow_run") or {}
+        if (
+            not artifact.get("expired")
+            and run.get("head_branch") == "dev"
+            and run.get("head_sha") == base
+            and run.get("repository_id") is not None
+            and run.get("repository_id") == run.get("head_repository_id")
+        ):
+            return artifact["id"]
+    return None
+
+
+# Only a run on dev itself can have uploaded the trusted record; a pull request's own runs never match.
+def fetch_dev_record(repository: str, name: str, base: str, out: Path) -> bool:
+    try:
+        listing = subprocess.check_output(
+            ["gh", "api", f"repos/{repository}/actions/artifacts?name={name}&per_page=100"], timeout=60
+        )
+        if (artifact := dev_record(json.loads(listing), base)) is None:
+            return False
+        archive = subprocess.check_output(
+            ["gh", "api", f"repos/{repository}/actions/artifacts/{artifact}/zip"], timeout=60
+        )
+        with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
+            out.write_bytes(bundle.read("record.json"))
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, zipfile.BadZipFile):
+        return False
+    return True
 
 
 def collect_all(
@@ -243,17 +292,40 @@ def referenced_subjects(tree: Path, nodeid: str) -> set[tuple[str, str]]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="fail when the head collects fewer tests than the base")
-    parser.add_argument("--base", type=Path, required=True, help="checkout of the base revision")
+    parser.add_argument("--base", type=Path, help="checkout of the base revision")
     parser.add_argument("--head", type=Path, default=Path.cwd(), help="checkout of the head revision")
     parser.add_argument("--tests", default="tests/")
+    parser.add_argument("--record", type=Path, help="write the head's collection as a record a later base can reuse")
     args = parser.parse_args(argv)
+    if args.record:
+        nodeids = collect_all({"head": args.head}, args.tests)["head"]
+        identity = collection_identity(args.head, args.tests, "")
+        if not nodeids or identity is None:
+            print("::error::The tree did not collect cleanly, so no record is written.")
+            return 1
+        args.record.write_text(json.dumps({"identity": identity, "nodeids": nodeids}))
+        print(f"recorded {len(nodeids)} tests")
+        return 0
+    if args.base is None:
+        parser.error("--base is required")
+    record = os.environ.get("TEST_COUNT_BASE_RECORD")
+    if record and (repository := os.environ.get("TEST_COUNT_RECORD_REPOSITORY")):
+        base_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=args.base, text=True).strip()
+        fetch_dev_record(repository, os.environ.get("TEST_COUNT_RECORD_NAME", ""), base_sha, Path(record))
+    recorded = recorded_base(Path(record), args.base, args.tests) if record else None
+    if record:
+        print(
+            "base count read from the dev record" if recorded else "no dev record matches the base, so it is collected"
+        )
     cache = os.environ.get("TEST_COUNT_COLLECTION_CACHE")
     collected = collect_all(
-        {"base": args.base, "head": args.head},
+        {"head": args.head} if recorded else {"base": args.base, "head": args.head},
         args.tests,
         cache=Path(cache) if cache else None,
         environment=os.environ.get("TEST_COUNT_ENVIRONMENT", ""),
     )
+    if recorded:
+        collected = {"base": recorded, **collected}
     failed = [side for side, nodeids in collected.items() if not nodeids]
     for side in failed:
         print(f"::error::Collecting the {side} tests failed or found none, so the floor cannot be graded.")
