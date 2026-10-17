@@ -104,13 +104,16 @@ def reopenable(store: "RedisStore", slug: str, execution_id: str) -> "AgentRecor
     return agent
 
 
-def reopen(store: "RedisStore", agent: "AgentRecord", open_viewer: Open, codex_bin: str) -> dict:
+def reopen(store: "RedisStore", slug: str, agent: "AgentRecord", open_viewer: Open, codex_bin: str) -> dict:
+    from dataclasses import replace
+
     from scripts.swarm import live_binding
 
     record = live_binding.transport(store, agent)
     if not attachable(record):
         raise AttachError(NO_THREAD.format(agent.name))
     placed = open_viewer(agent.name, viewer_argv(codex_bin, record))
+    store.put_agent(slug, replace(agent, pane_id=placed.pane_id))
     return {"agent": agent.name, "thread": record.thread_id, "pane": placed.pane_id}
 
 
@@ -127,7 +130,7 @@ def local_terminal(store: "RedisStore", slug: str, execution_id: str, environ: d
     def open_viewer(title: str, argv: list[str]) -> "Placement":
         return herdr_host.open_command(Path(config.repo), title, argv, workspace, environ)
 
-    return reopen(store, agent, open_viewer, "codex")
+    return reopen(store, slug, agent, open_viewer, "codex")
 
 
 def _parser() -> argparse.ArgumentParser:
