@@ -2,12 +2,13 @@
 
 import json
 
-from scripts.swarm import claim_hold, timing
+from scripts.swarm import claim_hold, release_wait, timing
 from scripts.swarm.health.findings import MINUTE_MS, Finding
 from scripts.swarm_ledger.repository import hierarchy
 
 HOLD_MS = 600_000
 KEY = "urgent-hold"
+RELEASE = "it waits on a release newer than {after_release}"
 
 
 def read(store, slug: str) -> dict:
@@ -17,13 +18,14 @@ def read(store, slug: str) -> dict:
 
 def observe(store, slug: str, doc: dict, at: int) -> dict:
     before = read(store, slug).get("tasks", {})
-    graph = hierarchy.project(doc)[0]
+    graph, released = hierarchy.project(doc)[0], release_wait.checker(store.config(slug).repo)
     rows = {t["id"]: t for t in doc.get("tasks", [])}
     held = {}
     for task in rows.values():
         if task.get("rank") != "urgent" or task.get("state") != "open" or task.get("out_of_scope"):
             continue
-        if task.get("merged_into") or not (why := claim_hold.hold(task, rows, doc, graph, "")):
+        why = claim_hold.hold(task, rows, doc, graph, "") or (not released(task) and RELEASE.format(**task))
+        if task.get("merged_into") or not why:
             continue
         since = before.get(task["id"], {}).get("since", at)
         held[task["id"]] = {"since": since, "why": why, "title": task.get("title") or task["id"]}
@@ -37,7 +39,7 @@ def findings(store, slug: str) -> list[Finding]:
     found = []
     for task_id, row in state.get("tasks", {}).items():
         held_ms = state["at"] - row["since"]
-        if held_ms < HOLD_MS:
+        if held_ms <= HOLD_MS:
             continue
         minutes = held_ms // MINUTE_MS
         summary = f"urgent task {row['title']} has been unclaimable for {minutes} minutes"

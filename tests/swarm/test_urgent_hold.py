@@ -83,9 +83,9 @@ def test_an_urgent_task_held_ten_minutes_raises_a_finding_naming_the_hold(store)
 
     found = doc([task("a", phase="p2", rank="urgent"), task("b", phase="p2"), task("c", rank="urgent")])
     urgent_hold.observe(store, SLUG, found, 0)
-    urgent_hold.observe(store, SLUG, found, 10 * MINUTE - 1)
-    assert urgent_hold.findings(store, SLUG) == []
     urgent_hold.observe(store, SLUG, found, 10 * MINUTE)
+    assert urgent_hold.findings(store, SLUG) == []
+    urgent_hold.observe(store, SLUG, found, 10 * MINUTE + 1)
     (finding,) = urgent_hold.findings(store, SLUG)
     assert finding.id == "urgent-unclaimable/a"
     assert finding.summary == "urgent task title a has been unclaimable for 10 minutes"
@@ -100,9 +100,9 @@ def test_an_urgent_hold_clears_once_the_task_is_claimable_and_restarts_its_clock
     urgent_hold.observe(store, SLUG, held, 0)
     urgent_hold.observe(store, SLUG, doc([task("a", rank="urgent")]), 5 * MINUTE)
     urgent_hold.observe(store, SLUG, held, 6 * MINUTE)
-    urgent_hold.observe(store, SLUG, held, 15 * MINUTE)
-    assert urgent_hold.findings(store, SLUG) == []
     urgent_hold.observe(store, SLUG, held, 16 * MINUTE)
+    assert urgent_hold.findings(store, SLUG) == []
+    urgent_hold.observe(store, SLUG, held, 16 * MINUTE + 1)
     assert [f.id for f in urgent_hold.findings(store, SLUG)] == ["urgent-unclaimable/a"]
 
 
@@ -143,7 +143,7 @@ def test_swarm_status_reports_the_urgent_hold(store):
 
     found = doc([task("a", phase="p2", rank="urgent")])
     urgent_hold.observe(store, SLUG, found, 0)
-    urgent_hold.observe(store, SLUG, found, 10 * MINUTE)
+    urgent_hold.observe(store, SLUG, found, 11 * MINUTE)
     rows = status.findings(store, SLUG, store.config(SLUG), found["tasks"], [])
     assert [row["id"] for row in rows if row["kind"] == "urgent unclaimable"] == ["urgent-unclaimable/a"]
 
@@ -184,3 +184,17 @@ def test_an_untitled_urgent_task_is_named_by_its_id(store):
     urgent_hold.observe(store, SLUG, found, 12 * MINUTE)
     (finding,) = urgent_hold.findings(store, SLUG)
     assert finding.summary == "urgent task a has been unclaimable for 12 minutes"
+
+
+def test_an_urgent_task_waiting_on_a_release_is_reported(store, monkeypatch):
+    from scripts.swarm import release_wait
+    from scripts.swarm.health import urgent_hold
+
+    tags = {"/repo": ["v1.2.3"]}
+    monkeypatch.setattr(release_wait, "tags", lambda repo: tags[repo])
+    found = doc([task("a", rank="urgent", after_release="v1.2.3"), task("b", rank="urgent", after_release="v1.2.2")])
+    urgent_hold.observe(store, SLUG, found, 0)
+    urgent_hold.observe(store, SLUG, found, 11 * MINUTE)
+    assert [(f.id, f.evidence) for f in urgent_hold.findings(store, SLUG)] == [
+        ("urgent-unclaimable/a", ("it waits on a release newer than v1.2.3",))
+    ]

@@ -8,7 +8,7 @@ SLUG = "urgentrank-2026-01-01"
 MASTER = "master@abcdef-0001"
 WAITING = "task t2 cannot be urgent: its phase two is waiting on an earlier phase"
 FROZEN = "task t1 cannot be urgent: the freeze on phase one holds it"
-HINT = "; move it to a phase that is building or lift the hold first"
+HINT = "; move it to a phase that admits it or lift the hold first"
 
 
 @pytest.fixture(autouse=True)
@@ -107,6 +107,13 @@ def test_an_unrelated_update_to_a_held_urgent_task_still_lands():
     state, rejected = update("t1", {"title": "renamed"}, 2)
     assert rejected == []
     assert next(t for t in state["tasks"] if t["id"] == "t1")["title"] == "renamed"
+
+
+def test_an_urgent_rank_outside_the_focus_lands_because_urgent_tasks_skip_the_focus():
+    _, rejected = sync({"op": "freeze_set", "id": "fc-1", "verb": "focus", "target": "phases/p2", "reason": "rush"})
+    assert rejected == []
+    state, rejected = update("t1", {"rank": "urgent"})
+    assert (rejected, rank_of(state, "t1")) == ([], "urgent")
 
 
 def test_an_urgent_task_add_into_a_waiting_phase_is_refused_and_one_without_a_phase_lands():

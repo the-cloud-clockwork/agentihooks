@@ -29,8 +29,10 @@ jobs:
       - name: Install Semgrep
         run: python -m pip install semgrep==1.177.0
 
-      - name: Prove the repository rules red on their fixtures
-        run: semgrep --test --strict --metrics off --config semgrep/claim_holds.yaml tests/semgrep/claim_holds.py
+      - name: Prove the repository rules red on their fixtures and green on the code
+        run: |
+          semgrep --test --strict --metrics off --config semgrep/claim_holds.yaml tests/semgrep/claim_holds.py
+          semgrep scan --error --strict --metrics off --config semgrep/ scripts hooks
 
       - name: Resolve the merge base of the head and the base
         id: baseline

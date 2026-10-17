@@ -12,7 +12,7 @@ OPERATOR = "operator"
 QUOTE_WORDS = 3
 OPS = ("task_rank",)
 ITEM_RE = re.compile(r"^tasks/[^/]+$")
-HELD = "; move it to a phase that is building or lift the hold first"
+HELD = "; move it to a phase that admits it or lift the hold first"
 
 
 def canonical(value) -> str:

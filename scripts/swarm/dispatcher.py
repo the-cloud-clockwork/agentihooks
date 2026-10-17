@@ -46,6 +46,7 @@ ENTERED = "The dispatcher put this task at the head of the {lane} claim queue: {
 LEFT = "The dispatcher moved this task out of the head of the {lane} claim queue: {why}."
 LEADS = "it leads a chain of {chain} and unblocks {work}"
 OPERATOR_RANK = "the operator ranked it {rank}"
+URGENT_RANK = "it is ranked urgent"
 OUTRANKED = "it was outranked by {ahead} in focus with longer chains, more unblocked work or an operator rank"
 ENTER = (ENTERED, "put task {} at the head of")
 LEAVE = (LEFT, "moved task {} out of the head of")
@@ -182,8 +183,8 @@ def rank_pass(slug, config, store, ledger, doc, now_ms):
     claimable = {task_id for task_id, t in known.items() if tick.ready(t, known, doc, graph, fix) and released(t)}
     scores, fixed = leverage(doc), _fixed(doc)
     if config.autonomy in APPLIES:
-        before = _saved_heads(store, slug)
-        leading = [t for t in queue(doc, fix) if t in claimable and (scores[t] or t in fixed)]
+        before, banded = _saved_heads(store, slug), _banded(doc)
+        leading = [t for t in queue(doc, fix) if t in claimable and (scores[t] or t in banded)]
         heads = _heads(store, slug, config, leading, known, before)
         landed = {
             lane: [t for t in before.get(lane, []) if t in head or known.get(t, {}).get("state") == "open"]
@@ -247,6 +248,8 @@ def _head_steps(slug, ledger, doc, before, heads, standing, landed):
 def _entered_why(task, fixed, depth, scores):
     if task["id"] in fixed:
         return OPERATOR_RANK.format(rank=task["rank"])
+    if task.get("rank") == "urgent":
+        return URGENT_RANK
     return LEADS.format(chain=_work(depth[task["id"]]), work=_work(scores[task["id"]]))
 
 

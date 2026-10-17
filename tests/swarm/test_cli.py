@@ -2991,3 +2991,24 @@ def test_the_tick_records_an_urgent_task_its_phase_holds(env):
     assert {task_id: row["why"] for task_id, row in held.items()} == {
         "t1": "its phase later is waiting on an earlier phase"
     }
+
+
+def test_the_tick_hands_an_urgent_hold_past_ten_minutes_to_the_findings_pass(env, monkeypatch):
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    ledger.phases = [{"id": "p1", "depends_on": []}, {"id": "p2", "title": "later", "depends_on": ["p1"]}]
+    ledger.rows["t1"].update(phase="p2", rank="urgent", title="fix quota")
+    clock = [1_000_000]
+    monkeypatch.setattr(cli, "now_ms", lambda: clock[0])
+    shown, real = [], cli.ledger_events.findings_pass
+
+    def spy(inbox, store, slug, found, doc=None):
+        shown.append([row["id"] for row in found])
+        return real(inbox, store, slug, found, doc)
+
+    monkeypatch.setattr(cli.ledger_events, "findings_pass", spy)
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    clock[0] += 600_001
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert "urgent-unclaimable/t1" not in shown[0]
+    assert "urgent-unclaimable/t1" in shown[-1]

@@ -984,3 +984,11 @@ def test_an_urgent_rank_sorts_in_the_urgent_band_whoever_set_it(store, author):
     key = dispatcher.claim_key(config, found)
     assert [key(rows[t])[0] for t in ("u", "h", "m")] == [0, 1, 2]
     assert dispatcher.queue(found, "") == ["u", "h", "m"]
+
+
+def test_a_master_urgent_task_with_no_leverage_heads_its_lane_at_delegate(store, home, shipped):
+    config = store.update(SLUG, autonomy="delegate", max_eng=1)
+    found = stamped([task("x", phase=""), task("u", phase="")], {"u": MASTER_NAME}, rank="urgent")
+    ledger = Ledger()
+    dispatcher.rank_pass(SLUG, config, store, ledger, found, NOW)
+    assert (ledger.ranks, ledger.comments) == ([], [entered("u", dispatcher.URGENT_RANK)])
