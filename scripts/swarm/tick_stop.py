@@ -57,23 +57,22 @@ def release_all() -> int:
 def _pending(futures: Iterable[Future], signaled: list[int], until: float) -> set[Future]:
     pending = set(futures)
     while pending and not signaled and time.monotonic() < until:
-        pending = wait(pending, timeout=min(POLL_S, max(0.0, until - time.monotonic()))).not_done
+        pending = wait(pending, timeout=POLL_S).not_done
     return pending
 
 
 def _report(futures: Iterable[Future]) -> None:
     for future in futures:
-        failure = future.exception() if future.done() and not future.cancelled() else None
+        failure = future.exception() if future.done() else None
         if failure is not None and not isinstance(failure, Stopped):
             print(f"a swarm tick failed while the tick stopped: {type(failure).__name__}: {failure}", file=sys.stderr)
 
 
-def _stop(pool: ThreadPoolExecutor, futures: list[Future], pending: set[Future], why: str) -> set[Future]:
+def _stop(futures: list[Future], pending: set[Future], why: str) -> set[Future]:
     pending = wait(pending, timeout=GRACE_S).not_done
     released = release_all()
-    print(f"the swarm tick stopped {why}; released {released} held tick locks", file=sys.stderr, flush=True)
+    print(f"the swarm tick stopped {why}; released {released} held tick locks", file=sys.stderr)
     _report(futures)
-    pool.shutdown(wait=False, cancel_futures=True)
     return pending
 
 
@@ -92,10 +91,12 @@ def run(slugs: list[str], work: Callable[[str], object], on_stop: Callable[[], o
             return False
         STOP.set()
         on_stop()
-        why = "by the service" if signaled else f"at its {DEADLINE_S} second deadline"
-        code = SIGTERM_EXIT if signaled else 0
-        if _stop(pool, futures, pending, why):
+        by_service = signal.SIGTERM in signaled
+        why = "by the service" if by_service else f"at its {DEADLINE_S} second deadline"
+        code = SIGTERM_EXIT if by_service else 0
+        if _stop(futures, pending, why):
             sys.stdout.flush()
+            sys.stderr.flush()
             os._exit(code)
         STOP.clear()
         if code:

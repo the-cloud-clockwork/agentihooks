@@ -87,9 +87,11 @@ def test_a_stop_releases_a_lock_whose_step_has_not_returned(env, monkeypatch, ca
     seen = blocked_tick(store, monkeypatch, step)
     monkeypatch.setattr(tick_stop, "GRACE_S", 0.2)
     monkeypatch.setattr(tick_stop.os, "_exit", hard_exit)
+    began = time.monotonic()
     try:
         with pytest.raises(SystemExit):
             tick_stop.run(["sw"], tick_each(store, finished), no_stop, 0)
+        assert time.monotonic() - began < 10
         assert tick_stop.STOP.is_set()
     finally:
         free.set()
@@ -150,6 +152,31 @@ def test_a_stop_releases_the_locks_of_every_swarm_still_ticking(monkeypatch, cap
     assert sorted(released) == ["a", "b"]
     assert exits == [0]
     assert "released 2 held tick locks" in capsys.readouterr().err
+
+
+def test_every_swarm_starts_its_tick_before_the_stop(monkeypatch):
+    early = []
+
+    def work(slug):
+        early.append(not tick_stop.STOP.is_set())
+        tick_stop.STOP.wait(10)
+
+    monkeypatch.setattr(tick_stop, "DEADLINE_S", 1)
+    assert tick_stop.run([f"s{n}" for n in range(64)], work, no_stop, 0) is True
+    assert early == [True] * 64
+
+
+def test_the_tick_stops_once_its_deadline_is_reached(monkeypatch):
+    clock, waits, real_wait = iter([100.0, 100.0]), [], tick_stop.wait
+
+    def timed_wait(futures, timeout):
+        waits.append(timeout)
+        return real_wait(futures, timeout=timeout)
+
+    monkeypatch.setattr(tick_stop, "time", types.SimpleNamespace(monotonic=lambda: next(clock, 200.0)))
+    monkeypatch.setattr(tick_stop, "wait", timed_wait)
+    assert tick_stop.run(["a"], lambda slug: tick_stop.STOP.wait(10), no_stop, tick_stop.DEADLINE_S) is True
+    assert waits == [tick_stop.GRACE_S]
 
 
 def test_a_stop_reports_a_swarm_tick_that_failed(monkeypatch, capsys):
