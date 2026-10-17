@@ -1,5 +1,5 @@
 """Each swarm timer pass times one ledger read and one write. Two slow or failed passes in a row raise the ledger slow
-alert to the master's inbox and the operator's notifications; two fast passes clear it."""
+alert with its deciding samples; latency recovery needs two passes below the lower threshold."""
 
 import http.client
 import json
@@ -168,7 +168,7 @@ def _incident(redis, slug: str, active: bool, raised: str, resolved: str) -> dic
         updates = {"probes": json.dumps(probes), "active": int(combined)}
         if changed:
             field = "raised_text" if combined else "resolved_text"
-            updates[field] = raised if combined else resolved
+            updates[field] = (raised if combined else resolved) or "Ledger incident changed; triggering passes unknown."
             if combined:
                 updates["generation"] = int(held.get("generation", 0)) + 1
         pipe.multi()

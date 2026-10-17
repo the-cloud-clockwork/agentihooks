@@ -216,7 +216,7 @@ def test_watchdog_failures_and_fast_probes_form_one_incident_per_tick(store, mon
     assert len(master_mail(store)) == expected
     current(host, tmp_path)
     cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
-    assert sent.call_count == expected
+    assert sent.call_count == expected * 2
     cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
     assert sent.call_count == expected * 2
     assert len(master_mail(store)) == expected * 2
