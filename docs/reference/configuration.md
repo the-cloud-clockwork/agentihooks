@@ -264,6 +264,87 @@ See [Claude Account Load Balancing](../pillars/load-balancing.md).
 
 ---
 
+## GitHub CLI Config Pin
+
+gh 2.x moves the operator's login. When `XDG_CONFIG_HOME` is set,
+`GH_CONFIG_DIR` is unset and `$XDG_CONFIG_HOME/gh` does not exist, gh renames
+`~/.config/gh` into `$XDG_CONFIG_HOME/gh` on its next run. A proof, render or
+launch that points `XDG_CONFIG_HOME` at a scratch folder then takes the login
+with it, and every other session on the machine loses GitHub until the folder is
+moved back. This happened twice on 15 October: once from a proof wrapper and
+once from the Claude session it had already started.
+
+AgentiHooks pins `GH_CONFIG_DIR` to the home gh folder whenever
+`XDG_CONFIG_HOME` points away from the home default, so gh reads the operator's
+login in place and never migrates it.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GH_CONFIG_DIR` | -- | Read by gh. AgentiHooks sets it to `$HOME/.config/gh` when `XDG_CONFIG_HOME` is set to anything other than `$HOME/.config` and `GH_CONFIG_DIR` is unset or empty. A value you set is kept. |
+| `XDG_CONFIG_HOME` | -- | Decides whether the pin applies. Unset, or equal to `$HOME/.config`, leaves the environment unchanged. |
+| `CLAUDE_ENV_FILE` | -- | Set by Claude Code for each session. When a hook pins `GH_CONFIG_DIR`, it appends `export GH_CONFIG_DIR=...` to this file once, so the agent's own shell commands inherit the pin. |
+
+### Where the pin applies
+
+| Process | How |
+|---------|-----|
+| Every `agentihooks` CLI command and every `scripts` module | Importing the `scripts` package pins its own environment and every child it starts. |
+| Every hook | The hook process pins its environment after loading `~/.agentihooks/.env` and `~/.agentihooks/*.env`, which may set `XDG_CONFIG_HOME`. |
+| A Claude session's shell | The hook writes the pin to `CLAUDE_ENV_FILE`, which covers a session that was not started by an AgentiHooks launcher. The line is written once; an existing copy is left alone. |
+| Agents opened by `init-agent`, including swarm spawns and handoffs | The launcher script runs the same check in shell before it starts Claude or Codex. |
+
+The pin never stops a hook. If `CLAUDE_ENV_FILE` cannot be read, decoded or
+written, the hook continues without it.
+
+### Isolated proofs you write
+
+A wrapper that sets `XDG_CONFIG_HOME` and runs commands outside AgentiHooks must
+pin gh itself, in every shell and session it starts. The engineer role carries
+this rule.
+
+```bash
+export XDG_CONFIG_HOME="$SCRATCH/config"
+export XDG_STATE_HOME="$SCRATCH/state"
+export XDG_DATA_HOME="$SCRATCH/data"
+export GH_CONFIG_DIR="$HOME/.config/gh"
+```
+
+The same check the launcher writes, for a script that may or may not be isolated:
+
+```bash
+if [ -n "${XDG_CONFIG_HOME:-}" ] && [ "$XDG_CONFIG_HOME" != "$HOME/.config" ]; then
+  export GH_CONFIG_DIR="${GH_CONFIG_DIR:-$HOME/.config/gh}"
+fi
+```
+
+### Limits
+
+- A session started before the pin shipped keeps its old environment. A long
+  lived isolated session runs gh too, for example for pull request status, so it
+  needs the pin as much as a new command does. Restart it.
+- The pin only fills an unset value. A `GH_CONFIG_DIR` pointing elsewhere is
+  used as given.
+- The shell check compares text: an `XDG_CONFIG_HOME` of `$HOME/.config/`, with
+  a trailing slash, counts as isolated and is pinned to the home folder, which is
+  harmless.
+
+### Troubleshooting
+
+Every agent reports gh as logged out at once:
+
+1. Check whether the home folder is gone: `test -d ~/.config/gh && echo present || echo missing`.
+2. Look for a moved copy under scratch config folders:
+   `find ~/scratchpad -maxdepth 6 -type d -path '*/config/gh'`. A moved folder
+   keeps its original file times; the folder that received it carries the time
+   of the move.
+3. Move it back with `mv <found folder> ~/.config/gh`, then confirm with
+   `gh api user --jq .login`. List the folder rather than reading its files: it
+   holds the login token.
+4. Find the process that ran with an isolated `XDG_CONFIG_HOME` and no
+   `GH_CONFIG_DIR`, and add the pin to it.
+
+---
+
 ## Email / SMTP
 
 | Variable | Default | Description |
