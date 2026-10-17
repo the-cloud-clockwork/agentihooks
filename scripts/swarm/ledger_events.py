@@ -107,11 +107,11 @@ def pull_request(raw):
     results = [check.get("conclusion") or check.get("state") for check in checks]
     required_runs = {_run_key(check) for check in required if _run_key(check)[0]}
     expected = {
-        (_run_key(check), check.get("name") or check.get("context"))
+        (_run_key(check), check.get("name"))
         for check in rollup
-        if check.get("isRequired") or (check.get("name") or check.get("context")) == GATE
+        if check.get("isRequired") or check.get("name") == GATE
     }
-    reported = {(_run_key(check), check.get("name") or check.get("context")) for check in checks}
+    reported = {(_run_key(check), check.get("name")) for check in checks}
     running = any(
         suite.get("workflowRun")
         and suite.get("status") != "COMPLETED"
