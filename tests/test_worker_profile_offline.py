@@ -117,9 +117,9 @@ def test_offline_codex_profile_fails_on_a_hook_child_that_outlives_registration(
         os.kill(child, 0)
 
 
-def test_offline_codex_profile_waits_for_a_hook_child_that_exits_in_time(tmp_path, monkeypatch):
+def test_offline_codex_profile_passes_a_hook_child_that_exits_with_its_hook(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    home = registering_hook(tmp_path, "subprocess.Popen(['sleep', '0.2'], start_new_session=True)\n")
+    home = registering_hook(tmp_path, "subprocess.Popen(['sleep', '0.2'], start_new_session=True).wait()\n")
 
     result = profile_probe.codex_session_start(home)
 
