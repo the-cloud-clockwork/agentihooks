@@ -187,6 +187,15 @@ def test_a_swarm_chat_line_reaches_the_master_seat_while_no_master_is_recorded(s
     assert len(pending(inbox, ENG.seat)) == 1
 
 
+def test_a_swarm_chat_line_carries_the_master_rule_while_no_master_seat_is_held(swarm):
+    store, inbox = swarm
+    store.drop_agent(SLUG, BOSS.name)
+    store.redis.delete(store.seats.key(MASTER_SEAT))
+    relay(swarm, write(5, "chat", kind="message added", text="@swarm the master launch failed"))
+    [(_, text, _)] = pending(inbox, MASTER_SEAT)
+    assert text.endswith(operator_mail.MASTER_RULE)
+
+
 def test_a_write_for_an_agent_that_is_gone_goes_to_the_master(swarm):
     _, inbox = swarm
     relay(swarm, write(5, "tasks/t9"), write(6, "chat", kind="message added", text="@sw-eng-7 hello"))
