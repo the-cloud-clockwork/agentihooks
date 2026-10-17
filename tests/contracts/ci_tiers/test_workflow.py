@@ -106,7 +106,9 @@ def test_the_retired_queue_baseline_leaves_the_workflow_and_the_gate_takes_the_p
     jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     assert "queue-baseline" not in jobs
     assert not any("queue-baseline" in job.get("needs", []) for job in jobs.values())
-    assert jobs["gate-required"]["steps"] == ci_reuse.gate_steps(queue_tier=True, promotion=True)
+    assert jobs["gate-required"]["steps"] in [
+        ci_reuse.gate_steps(queue_tier=True, promotion=True, summary=summary) for summary in (False, True)
+    ]
 
 
 def test_the_queue_keeps_completeness_but_skips_the_shard_time_budget():

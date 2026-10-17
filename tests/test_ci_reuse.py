@@ -260,12 +260,11 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
     workflow = yaml.safe_load((root / ".github/workflows/test.yml").read_text())
     policy = json.loads((root / ".github/workflows/trusted-actors.json").read_text())
     steps = workflow["jobs"]["gate-required"]["steps"]
-    assert steps in (
-        ci_reuse.gate_steps(selected=True),
-        ci_reuse.gate_steps(),
-        ci_reuse.gate_steps(queue_tier=True),
-        ci_reuse.gate_steps(queue_tier=True, promotion=True),
-    )
+    assert steps in [
+        ci_reuse.gate_steps(**form, summary=summary)
+        for form in ({"selected": True}, {}, {"queue_tier": True}, {"queue_tier": True, "promotion": True})
+        for summary in (False, True)
+    ]
 
     assert workflow["jobs"]["gate-required"]["runs-on"] in gate_protected.runners(policy)
     assert workflow["jobs"]["reuse"] in gate_protected.reuse_jobs(policy)

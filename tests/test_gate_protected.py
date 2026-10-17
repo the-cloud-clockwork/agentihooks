@@ -590,6 +590,83 @@ def test_a_head_altering_the_queue_canonical_aggregation_is_red(change, selected
     ]
 
 
+_REVIEWED_SUMMARY = """
+- uses: actions/checkout@v4
+  if: ${{ always() }}
+  with:
+    ref: ${{ github.sha }}
+    sparse-checkout: scripts/ci_gate_summary.py
+    sparse-checkout-cone-mode: false
+    persist-credentials: false
+
+- name: Download this run's test durations
+  if: ${{ always() }}
+  uses: actions/download-artifact@v4
+  with:
+    pattern: durations-3.*
+    path: test-reports
+
+- name: Download this run's test flakes
+  if: ${{ always() }}
+  uses: actions/download-artifact@v4
+  with:
+    pattern: flakes-3.*
+    path: test-reports
+
+- name: Summarize this run's tests
+  if: ${{ always() }}
+  run: python3 "$GITHUB_WORKSPACE/scripts/ci_gate_summary.py" test-reports | tee -a "$GITHUB_STEP_SUMMARY"
+"""
+
+_FORMS = [
+    {},
+    {"selected": True},
+    {"queue_tier": True},
+    {"queue_tier": True, "promotion": True},
+    {"queue_tier": True, "consolidated": True},
+    {"queue_tier": True, "promotion": True, "consolidated": True},
+]
+
+
+@pytest.mark.parametrize("form", _FORMS)
+def test_the_summary_follows_the_unchanged_aggregation(form):
+    from scripts import ci_reuse
+
+    [aggregation, *summary] = ci_reuse.gate_steps(**form, summary=True)
+    assert [aggregation] == ci_reuse.gate_steps(**form)
+    assert summary == yaml.safe_load(_REVIEWED_SUMMARY)
+
+
+@pytest.mark.parametrize("form", _FORMS)
+@pytest.mark.parametrize("summary", [False, True])
+def test_a_head_adding_the_reviewed_summary_is_green(form, summary):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    base["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(**form)
+    head["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(**form, summary=summary)
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == []
+
+
+@pytest.mark.parametrize("change", ["extra", "before", "reordered", "altered", "partial"])
+def test_a_head_changing_the_summary_steps_is_red(change):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    [aggregation, *summary] = ci_reuse.gate_steps(queue_tier=True, promotion=True, summary=True)
+    altered = {
+        "extra": [aggregation, *summary, {"run": "true"}],
+        "before": [{"run": "true"}, aggregation, *summary],
+        "reordered": [*summary, aggregation],
+        "altered": [aggregation, *summary[:-1], {**summary[-1], "run": "true"}],
+        "partial": [aggregation, *summary[1:]],
+    }
+    head["jobs"]["gate-required"]["steps"] = altered[change]
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == [
+        "The head's Gate — Required changes its steps; the protected branch grades with its own."
+    ]
+
+
 @pytest.mark.parametrize("promotion", [False, True])
 @pytest.mark.parametrize("weakened", [False, True])
 def test_the_promotion_gate_form_is_an_allowed_transition(weakened, promotion):
