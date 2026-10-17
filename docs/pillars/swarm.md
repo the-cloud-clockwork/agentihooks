@@ -433,7 +433,38 @@ After every declared half has a recorded, merged pull request, close the task wi
 agentihooks swarm <id> done --pr <final-pull-request-url>
 ```
 
-The merged final half still requires `done`. Completion refuses a missing half or any recorded pull request that is open, closed without merging or unreadable on GitHub. There is no separate configuration switch for the between-halves reset; the declared split and recorded merge state determine it.
+When the worker keeps the task, the merged final half still requires `done`. Completion refuses a missing half or any recorded pull request that is open, closed without merging or unreadable on GitHub. There is no separate configuration switch for the between-halves reset; the declared split and recorded merge state determine it.
+
+#### Ready handoffs for split tasks
+
+A reviewed split task can release its seat with `ready` while checks and merges finish. The ready merge pass applies the same split completion guard as `done`: every declared half needs a pull request, and every registered pull request must have merged. A merge of the watched pull request alone cannot complete the task.
+
+For a two half task declared above, record each half in order as its pull request becomes available:
+
+```bash
+agentihooks swarm <id> pr <first-pull-request-url> --half 1
+agentihooks swarm <id> pr <second-pull-request-url> --half 2
+```
+
+After the work is complete and review is closed, prepare a [Handoff v2 document](#handoff-v2), leave the ledger crew and release the seat:
+
+```bash
+agentihooks ledger --slug <id> --as <agent> leave
+agentihooks swarm <id> ready <handoff-document>
+```
+
+The normal `ready` requirements still apply: a code or ci task, delegate or full autonomy, a recorded open pull request, and a clean worktree whose head matches that pull request. No additional environment variable enables split completion; `split` and `split_pulls` supply the configuration. Register all halves before releasing completed work. `ready` does not create a missing half or its pull request.
+
+| Merge observation | Task and cleanup behavior |
+|---|---|
+| First half merged; another registered half has not merged | The task stays `pr`, with `awaiting` set to `merge` and its active `pr_url` retained, normally naming the remaining half. The ready record, handoff and worktree remain. The released worker does not need to hold its seat. |
+| A declared half has no recorded pull request | Completion stays blocked even if the watched pull request merged. Finish and register the missing half; waiting alone cannot supply it. |
+| Another half is open, closed without merging or unreadable on GitHub | The split guard refuses completion. Check that half's URL and GitHub state; repair unfinished work or restore the read before expecting completion. |
+| Every declared half has a recorded, merged pull request | The merge pass completes the task and its group members, clears `awaiting`, removes the ready record and handoff, and runs normal worktree cleanup. `split_pulls` remains as the history. No worker `done` command is needed. |
+
+Inspect the ledger's task and each registered pull request when completion appears stuck. The split guard does not replace normal ready recovery: red checks, closure or queue ejection of the watched pull request follow the `ready` command's reopening rules above. A different half failing the split guard prevents completion without discarding the handoff.
+
+Delivered by [pull request 3290](https://github.com/the-cloud-clockwork/agentihooks/pull/3290). Its regression proof reproduced premature closure before the fix ([red](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38646452965)); the continuation proof passed 114 focused tests, including ready and split completion ([green](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38679415151)).
 
 #### Split refusals and stop messages
 
