@@ -48,7 +48,7 @@ def graded_green(sha: str) -> bool:
     runs = api(TESTS, "-f", f"head_sha={sha}", "-f", "event=pull_request", "--jq", ".workflow_runs[].id")
     shards = '.jobs[] | select(.name | startswith("mutation (")) | .conclusion'
     for run in runs.split():
-        found = api(f"actions/runs/{run}/jobs", "--paginate", "--jq", shards).split()
+        found = api(f"actions/runs/{run}/jobs", "-f", "filter=all", "--paginate", "--jq", shards).split()
         if found and all(conclusion == "success" for conclusion in found):
             return True
     return False
@@ -58,11 +58,10 @@ def discover_changes(root: Path, base: str | list[str], head: str) -> dict[str, 
     bases = own_bases(root, base, head) if isinstance(base, str) else base
     given, *newer = [changes_since(root, own, head) for own in bases]
     weak = [weakened_tests(root, own, head) for own in bases[1:]]
-    imports = imports_by_test(root)
     found = {}
     for name, lines in given.items():
         kept = [
-            lines if tests or oracle_changed(name, changes, imports) else changes.get(name)
+            lines if tests or oracle_changed(root, name, changes) else changes.get(name)
             for changes, tests in zip(newer, weak)
         ]
         if None not in kept:
@@ -70,15 +69,12 @@ def discover_changes(root: Path, base: str | list[str], head: str) -> dict[str, 
     return found
 
 
-def imports_by_test(root: Path) -> list[frozenset[str]]:
-    paths = (root / "tests").rglob("*.py")
-    return [imported_names(path.read_text(), path.relative_to(root).parent.parts) for path in paths]
-
-
-def oracle_changed(name: str, changes: dict[str, set[int]], imports: list[frozenset[str]]) -> bool:
-    module = module_name(Path(name))
-    helpers = {module_name(Path(path)) for path in changes} - {module}
-    return any(module in imported and imported & helpers for imported in imports)
+def oracle_changed(root: Path, name: str, changes: dict[str, set[int]]) -> bool:
+    helpers = {module_name(Path(path)) for path in changes} - {module_name(Path(name))}
+    return any(
+        helpers & imported_names((root / test).read_text(), Path(test).parent.parts)
+        for test in select_tests(root, Path(name))
+    )
 
 
 def is_test_file(path: str) -> bool:

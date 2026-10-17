@@ -496,18 +496,20 @@ def test_a_commit_is_graded_only_by_a_push_preflight_whose_mutation_job_passed(
 
 
 @pytest.mark.parametrize(
-    ("runs", "jobs", "expected"),
+    ("preflight", "runs", "jobs", "expected"),
     [
-        ("9\n", {"9": "success\nsuccess\n"}, True),
-        ("9\n", {"9": "success\nfailure\n"}, False),
-        ("9\n", {"9": "success\nskipped\n"}, False),
-        ("9\n", {"9": ""}, False),
-        ("8\n9\n", {"8": "cancelled\n", "9": "success\n"}, True),
-        ("", {}, False),
+        ("", "9\n", {"9": "success\nsuccess\n"}, True),
+        ("5\n", "9\n", {"9": "success\n"}, True),
+        ("", "9\n", {"9": "success\nfailure\n"}, False),
+        ("", "9\n", {"9": "failure\nsuccess\n"}, False),
+        ("", "9\n", {"9": "success\nskipped\n"}, False),
+        ("", "9\n", {"9": ""}, False),
+        ("", "8\n9\n", {"8": "cancelled\n", "9": "success\n"}, True),
+        ("", "", {}, False),
     ],
 )
 def test_an_open_branch_is_graded_by_its_pull_request_mutation_shards_when_its_push_preflight_skipped(
-    monkeypatch, runs, jobs, expected
+    monkeypatch, preflight, runs, jobs, expected
 ):
     import subprocess
 
@@ -519,9 +521,11 @@ def test_an_open_branch_is_graded_by_its_pull_request_mutation_shards_when_its_p
         calls.append(command)
         path = command[4]
         if "mutation-preflight.yml" in path:
-            out = ""
+            out = preflight
         elif "test.yml" in path:
             out = runs
+        elif "--paginate" not in command:
+            out = "0\n"
         else:
             out = jobs[path.split("/")[5]]
         return subprocess.CompletedProcess(command, 0, out, "")
@@ -540,21 +544,31 @@ def test_an_open_branch_is_graded_by_its_pull_request_mutation_shards_when_its_p
         "--jq",
         ".workflow_runs[].id",
     ]
-    assert calls[1] == listed
+    checked = len(preflight.split())
+    assert calls[checked + 1] == listed
     asked = runs.split()[: runs.split().index("9") + 1] if expected else runs.split()
-    assert calls[2:] == [
-        [*api, f"repos/{{owner}}/{{repo}}/actions/runs/{run}/jobs", "--paginate", "--jq", shards] for run in asked
+    jobs_listed = [
+        [*api, f"repos/{{owner}}/{{repo}}/actions/runs/{run}/jobs", "-f", "filter=all", "--paginate", "--jq", shards]
+        for run in asked
     ]
+    assert calls[checked + 2 :] == jobs_listed
 
 
-@pytest.mark.parametrize("helper", ["oracle.py", "other.py", "dev.py"])
+@pytest.mark.parametrize("helper", ["oracle.py", "transitive", "other.py", "dev.py"])
 def test_inherited_lines_are_regraded_once_the_branch_changes_a_source_helper_their_tests_import(tmp_path, helper):
     from scripts.ci_mutation.scope import discover_changes
 
     git, commit = _repo(tmp_path)
     (tmp_path / "tests").mkdir()
     test = tmp_path / "tests" / "test_dev.py"
-    test.write_text("from hooks import dev, oracle\n\n\ndef test_d():\n    assert dev.d() == oracle.ONE\n")
+    if helper == "transitive":
+        (tmp_path / "tests" / "fixtures.py").write_text("from hooks import dev\n")
+        test.write_text(
+            "from hooks import oracle\nfrom tests.fixtures import dev\n\n\ndef test_d():\n    assert dev.d() == oracle.ONE\n"
+        )
+        helper = "oracle.py"
+    else:
+        test.write_text("from hooks import dev, oracle\n\n\ndef test_d():\n    assert dev.d() == oracle.ONE\n")
     (tmp_path / "tests" / "test_other.py").write_text("from hooks import other\n")
     git("add", "tests")
     commit("oracle.py", "ONE = 1\n")
