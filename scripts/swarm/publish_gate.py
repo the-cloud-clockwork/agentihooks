@@ -34,7 +34,7 @@ def changed(base: str) -> dict[Path, Path]:
 
 def changed_lines(base: str, path: Path, old: Path) -> set[int]:
     lines = set()
-    for hunk in _HUNK.finditer(git("diff", "-U0", "-M", base, "HEAD", "--", old.as_posix(), path.as_posix())):
+    for hunk in _HUNK.finditer(git("diff", "-U0", base, "--", old.as_posix(), path.as_posix())):
         start = int(hunk[1])
         lines.update(range(start, start + int(hunk[2] or 1)))
     return lines
@@ -52,9 +52,9 @@ def lint(base: str, paths: dict[Path, Path]) -> list[str]:
         "--",
         *map(str, paths),
     ]
-    result = subprocess.run(command, capture_output=True, text=True)
+    result = subprocess.run(command, stdout=subprocess.PIPE)
     if result.returncode > 1:
-        return [result.stderr.strip() or f"ruff check exited {result.returncode}"]
+        return [f"ruff check exited {result.returncode}"]
     root, errors = Path.cwd().resolve(), []
     lines = {path.as_posix(): changed_lines(base, path, old) for path, old in paths.items()}
     for hit in json.loads(result.stdout):

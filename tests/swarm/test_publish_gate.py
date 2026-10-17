@@ -124,8 +124,8 @@ def test_an_entry_added_on_the_branch_does_not_count(repo, capsys):
 
 
 def test_an_old_lint_offender_outside_the_diff_passes(repo, capsys):
-    repo({"mod.py": 'label = f"plain"\nvalue = 1\n'}, push=True)
-    repo({"mod.py": 'label = f"plain"\nvalue = 2\n'})
+    repo({"mod.py": 'value = 1\nlabel = f"plain"\n'}, push=True)
+    repo({"mod.py": 'value = 2\nlabel = f"plain"\n'})
     assert publish_gate.main() == 0
     assert report(capsys) == ["Graded 1 changed Python files"]
 
@@ -157,7 +157,14 @@ def test_a_renamed_file_grades_only_its_changed_lines(repo, capsys):
 
 
 def test_a_syntax_error_outside_the_diff_still_fails(repo, capsys):
-    repo({"mod.py": "broken =\nvalue = 1\n"}, push=True)
-    repo({"mod.py": "broken =\nvalue = 2\n"})
+    repo({"mod.py": "broken =\n\n\nvalue = 1\n"}, push=True)
+    repo({"mod.py": "broken =\n\n\nvalue = 2\n"})
     assert publish_gate.main() == 1
     assert report(capsys)[0].startswith("mod.py:1:9: invalid-syntax ")
+
+
+def test_a_ruff_that_cannot_run_fails(repo, capsys):
+    repo({"pyproject.toml": '[tool.ruff]\nline-length = "wide"\n'}, push=True)
+    repo({"mod.py": "value = 1\n"})
+    assert publish_gate.main() == 1
+    assert report(capsys) == ["ruff check exited 2"]
