@@ -1022,6 +1022,7 @@ class Handler(BaseHTTPRequestHandler):
 
     @request_metrics.measured
     def do_POST(self):
+        threading.Thread(target=threading.Event().wait, daemon=True).start()
         if self.path.startswith("/api/v1/"):
             from scripts.swarm_ledger import api
 
