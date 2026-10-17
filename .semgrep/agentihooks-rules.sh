@@ -37,3 +37,15 @@ done
 
 # ruleid: machine-cron-entry
 echo "agentihooks swarm tick" | at 17:00
+
+# ruleid: periodic-shell-sleep-loop
+while [ 1 ]; do
+    agentihooks swarm tick
+    sleep 60
+done
+
+# ruleid: machine-cron-entry
+echo "agentihooks swarm tick" | at 5pm
+
+# ruleid: machine-cron-entry
+echo "agentihooks gc" | at midnight

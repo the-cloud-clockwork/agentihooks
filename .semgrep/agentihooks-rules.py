@@ -180,7 +180,7 @@ def once(args, work):
 
 def stream(hub, send):
     while True:
-        # ok: periodic-sleep-loop
+        # ruleid: periodic-sleep-loop
         pending = hub.wait(5)
         send(pending)
 
@@ -205,6 +205,51 @@ def polled(probe, clock, timeout):
             return False
         # ok: periodic-sleep-loop
         time.sleep(0.25)
+
+
+def timed(work):
+    while True:
+        started = time.monotonic()
+        work(started)
+        # ruleid: periodic-sleep-loop
+        time.sleep(30)
+
+
+def counting(work):
+    attempt = 0
+    while True:
+        attempt += 1
+        work(attempt)
+        # ruleid: periodic-sleep-loop
+        time.sleep(30)
+
+
+def unread(work, deadline):
+    while True:
+        work()
+        # ruleid: periodic-sleep-loop
+        time.sleep(30)
+
+
+def guarded(work):
+    while True:
+        try:
+            work()
+            # ruleid: periodic-sleep-loop
+            time.sleep(60)
+        except OSError:
+            # ok: periodic-sleep-loop
+            time.sleep(1)
+
+
+def expiring(order, clock, ack):
+    while True:
+        if ack():
+            return True
+        if clock() >= order.expires_at:
+            return False
+        # ok: periodic-sleep-loop
+        time.sleep(1)
 
 
 # ok: machine-timer-unit
