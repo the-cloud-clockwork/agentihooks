@@ -143,6 +143,12 @@ def _since(watch, marks, seen, mark):
     return seen[mark]
 
 
+def _woken(watch, task):
+    owner = task.get("claimed_by")
+    ended = idle.waited(watch.store.redis, watch.slug, owner) if owner else 0
+    return ended if ended <= watch.now_ms else 0
+
+
 def _stall(watch, task, pull, marks, seen, agent):
     tid, queued = task["id"], _key(watch, QUEUED)
     if pull.queued:
@@ -185,7 +191,7 @@ def _pull_request(watch, mail, task, limit, marks, seen):
     if case is None:
         return []
     if case != "owner":
-        since = max(since, pull.pushed_at or 0, pull.red_at or 0, agent.started_at if agent else 0)
+        since = max(since, pull.pushed_at or 0, pull.red_at or 0, agent.started_at if agent else 0, _woken(watch, task))
     minutes = _minutes(watch, since)
     if minutes < getattr(limit, case):
         return []
