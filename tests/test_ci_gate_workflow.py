@@ -190,7 +190,8 @@ def test_test_count_floor_runs_per_suite_beside_unit_against_the_base():
         job["strategy"]["matrix"]["python-version"]
         == _workflow()["jobs"]["unit"]["strategy"]["matrix"]["python-version"]
     )
-    base, floor = job["steps"][-2:]
+    base = next(step for step in job["steps"] if step.get("name") == "Check out the base revision")
+    floor = next(step for step in job["steps"] if step.get("name") == "Hold the base revision's test count")
     assert base["env"]["BASE"] == (
         "${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && 'origin/dev'"
         " || github.event.pull_request.base.sha || github.event.merge_group.base_sha"
@@ -456,7 +457,7 @@ def test_coverage_ratchet_grades_a_batched_dev_push_against_the_previous_tip(tmp
 
 
 def test_test_count_refuses_a_base_without_its_grader(tmp_path):
-    floor = _workflow()["jobs"]["test-count"]["steps"][-1]
+    floor = _step("test-count", "Hold the base revision's test count")
     (tmp_path / "base").mkdir()
     env = dict(os.environ, RUNNER_TEMP=str(tmp_path), GITHUB_WORKSPACE=str(tmp_path))
     result = subprocess.run(["bash", "-e", "-c", floor["run"]], env=env, capture_output=True, text=True)

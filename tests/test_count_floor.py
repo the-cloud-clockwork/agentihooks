@@ -53,9 +53,7 @@ def _floor(tmp_path, base: dict[str, str], head: dict[str, str], sources: dict[s
     )
 
 
-def test_collection_reuses_only_an_exact_clean_tree_and_environment(tmp_path):
-    from tests.count_floor import collect_all
-
+def _collection_tree(tmp_path):
     root = _tree(tmp_path / "tree", {"test_a.py": SUITE})
     (root / ".gitignore").write_text("__pycache__/\n.collection-runs\n")
     probe = root / "conftest.py"
@@ -70,6 +68,13 @@ def test_collection_reuses_only_an_exact_clean_tree_and_environment(tmp_path):
         ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-m", "Fixture"],
     ):
         subprocess.run(["git", *arguments], cwd=root, check=True, capture_output=True)
+    return root
+
+
+def test_collection_reuses_only_an_exact_clean_tree_and_environment(tmp_path):
+    from tests.count_floor import collect_all
+
+    root = _collection_tree(tmp_path)
     cache = tmp_path / "cache"
     expected = {"head": ["tests/test_a.py::test_a", "tests/test_a.py::test_b[1]", "tests/test_a.py::test_b[2]"]}
     assert collect_all({"head": root}, "tests/", cache=cache, environment="first") == expected
@@ -81,6 +86,55 @@ def test_collection_reuses_only_an_exact_clean_tree_and_environment(tmp_path):
     changed = collect_all({"head": root}, "tests/", cache=cache, environment="first")
     assert len(changed["head"]) == 4
     assert (root / ".collection-runs").read_text() == "xxx"
+
+
+@pytest.mark.parametrize("record", ["{}", "[3]", "[]", "null"])
+def test_an_invalid_cached_collection_cannot_grade_a_floor(tmp_path, record):
+    from tests.count_floor import collect_all
+
+    root = _collection_tree(tmp_path)
+    cache = tmp_path / "cache"
+    assert collect_all({"head": root}, "tests/", cache=cache, environment="first")["head"]
+    next(cache.glob("*.json")).write_text(record)
+    assert not collect_all({"head": root}, "tests/", cache=cache, environment="first")["head"]
+    assert (root / ".collection-runs").read_text() == "x"
+
+
+def test_a_failed_collection_is_never_cached(tmp_path):
+    from tests.count_floor import collect_all
+
+    root = _collection_tree(tmp_path)
+    (root / "tests" / "test_a.py").write_text("raise RuntimeError('collection fails')\n")
+    subprocess.run(["git", "add", "tests/test_a.py"], cwd=root, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-m", "Failure"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+    )
+    cache = tmp_path / "cache"
+    assert collect_all({"head": root}, "tests/", cache=cache, environment="first") == {"head": None}
+    assert not cache.exists()
+
+
+def test_committed_collection_changes_cannot_reuse_an_old_count(tmp_path):
+    from tests.count_floor import collect_all
+
+    root = _collection_tree(tmp_path)
+    cache = tmp_path / "cache"
+    assert len(collect_all({"head": root}, "tests/", cache=cache, environment="first")["head"]) == 3
+    (root / "tests" / "test_a.py").write_text(OTHER)
+    subprocess.run(["git", "add", "tests/test_a.py"], cwd=root, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-m", "Changed"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+    )
+    assert collect_all({"head": root}, "tests/", cache=cache, environment="first") == {
+        "head": ["tests/test_a.py::test_c"]
+    }
+    assert (root / ".collection-runs").read_text() == "xx"
 
 
 def test_head_matching_the_base_count_passes(tmp_path):
