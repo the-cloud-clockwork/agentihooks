@@ -138,7 +138,7 @@ class Ledger:
 
 def test_a_failed_lookup_raises_one_release_alert_while_a_task_waits_on_a_release(tmp_path):
     ledger, held = Ledger(), task("proof", after_release="v2.17.1")
-    config = SwarmConfig("sw", str(tmp_path))
+    config = SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0)
     assert release_wait.alert_pass("sw", config, ledger, {"tasks": [task("plain"), held]})
     [(slug, source, text)] = ledger.alerts
     assert (slug, source) == ("sw", release_wait.SOURCE) and "proof" in text and str(tmp_path) in text
@@ -151,5 +151,5 @@ def test_a_failed_lookup_raises_one_release_alert_while_a_task_waits_on_a_releas
 def test_a_working_lookup_raises_no_release_alert(origin):
     ledger = Ledger()
     held = {"tasks": [task("proof", after_release="v2.17.1")]}
-    assert release_wait.alert_pass("sw", SwarmConfig("sw", str(origin)), ledger, held) == []
+    assert release_wait.alert_pass("sw", SwarmConfig("sw", str(origin), max_eng=1, max_ci=0), ledger, held) == []
     assert ledger.alerts == []
