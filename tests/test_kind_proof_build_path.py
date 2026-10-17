@@ -90,10 +90,10 @@ def test_a_new_layer_export_replaces_the_restored_one(cache):
     assert not (cache / "swarm" / "stale").exists()
 
 
-def test_a_restored_completion_mark_is_cleared_until_the_builds_finish(cache):
-    (cache / "complete").touch()
-    env = {"KIND_LAYER_CACHE": str(cache), "KIND_LAYER_CACHE_HIT": "false"}
-    assert "complete" not in _layer_flags(cache, env, then="true")
+def test_a_restored_completion_mark_is_cleared_before_anything_in_the_build_can_fail():
+    build = SCRIPT[_at("(\n  if [[ -n ${KIND_LAYER_CACHE:-} ]]; then\n") : _at("build=$!\n")]
+    clear = build.index('rm -f "$KIND_LAYER_CACHE/complete"')
+    assert clear < build.index("pull-runtime-image.sh") < build.index("keep_layers swarm terminal")
 
 
 def test_fixture_builds_without_a_layer_cache_pass_no_cache_flags(cache):
@@ -124,10 +124,14 @@ def test_the_kind_job_restores_and_saves_the_layers_it_builds_with():
     order = list(steps)
     assert order.index("layers") < order.index(smoke_name) < order.index("exported")
     assert order.index("exported") < order.index("Save the fixture image layers")
-    for source in (
+    sources = (
         "Dockerfile",
+        "pyproject.toml",
+        "README.md",
         "docker/swarm/requirements.lock",
         "docker/swarm-node/versions.lock",
+        "docker/swarm-node/requirements.lock",
+        "scripts/swarm_v2/worker_image.py",
         "deploy/helm/agentihooks-swarm/ci/terminal-worker.Dockerfile",
-    ):
-        assert f"'{source}'" in restore["with"]["key"]
+    )
+    assert restore["with"]["key"] == f"kind-layers-${{{{ hashFiles({', '.join(map(repr, sources))}) }}}}"

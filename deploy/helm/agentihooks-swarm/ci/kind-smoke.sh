@@ -46,8 +46,6 @@ layers() {
   if [[ -z ${KIND_LAYER_CACHE:-} ]]; then
     return
   fi
-  mkdir -p "$KIND_LAYER_CACHE"
-  rm -f "$KIND_LAYER_CACHE/complete"
   if [[ -d $KIND_LAYER_CACHE/$1 ]]; then
     printf '%s\n' --cache-from "type=local,src=$KIND_LAYER_CACHE/$1"
   fi
@@ -68,6 +66,10 @@ keep_layers() {
   touch "$KIND_LAYER_CACHE/complete"
 }
 (
+  if [[ -n ${KIND_LAYER_CACHE:-} ]]; then
+    mkdir -p "$KIND_LAYER_CACHE"
+    rm -f "$KIND_LAYER_CACHE/complete"
+  fi
   bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm >/dev/null
   mapfile -t terminal_layers < <(layers terminal)
   docker build -q "${terminal_layers[@]}" --build-arg IMAGE="$image" --target packages \
