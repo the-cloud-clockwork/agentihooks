@@ -1068,6 +1068,15 @@ def test_a_wait_the_tick_ended_gives_its_owner_the_full_limit_from_the_wake(pull
     assert _reopened(swarm)
 
 
+def test_a_wait_the_owner_ends_itself_moves_no_stall_clock():
+    swarm = Swarm(GREEN)
+    assert swarm.tick(START) == []
+    idle.end_wait(swarm.store.redis, SLUG, OWNER, START + 9 * MINUTE)
+    assert idle.woke(swarm.store.redis, SLUG, OWNER) == 0
+    swarm.tick(START + 10 * MINUTE)
+    assert _reopened(swarm)
+
+
 @pytest.mark.parametrize(("pull", "live", "limit"), RULES)
 def test_a_release_hold_keeps_every_stall_rule_until_a_newer_release_exists(pull, live, limit):
     swarm = Swarm(pull, task={release_wait.FIELD: "v2.17.3"}, live=live)

@@ -34,9 +34,9 @@ def lookup(repo: str) -> tuple[list[str], str]:
             timeout=30,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
-        return [], str(exc)
+        return [], str(exc) or type(exc).__name__
     if found.returncode:
-        return [], found.stderr.strip() or f"git ls-remote exited {found.returncode}"
+        return [], f"git ls-remote exited {found.returncode}"
     return [ref.removeprefix("refs/tags/") for _, ref in (line.split("\t") for line in found.stdout.splitlines())], ""
 
 
