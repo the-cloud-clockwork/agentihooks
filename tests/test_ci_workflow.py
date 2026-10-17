@@ -479,6 +479,7 @@ def test_full_suite_collection_starts_beside_selection_and_feeds_split():
     assert "collect" in jobs["split"]["needs"]
     adopt = next(step for step in jobs["split"]["steps"] if step.get("name") == "Adopt latest dev durations")
     assert "--collection collected.json" in adopt["run"]
+    assert "collect" in jobs["gate-required"]["needs"]
     assert "split" in jobs["gate-required"]["needs"]
 
 
