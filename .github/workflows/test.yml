@@ -1627,7 +1627,7 @@ jobs:
           repositories: antoncore
           permission-contents: read
 
-      # antoncore dev owns the dashboard and its checker, so a pull request cannot loosen what grades its columns.
+      # antoncore dev owns the dashboard and its checker, so the pull request head is only the data they grade.
       - name: Check out the antoncore dashboard column checker
         if: ${{ !cancelled() && steps.antoncore-token.outcome == 'success' }}
         uses: actions/checkout@v4
@@ -1649,7 +1649,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ -f .antoncore/scripts/swarm_dashboard_columns.py ]] || { echo "::error::The antoncore dashboard column checker could not be checked out."; exit 1; }
-          python -m pip install --quiet jsonschema==4.25.1
+          python -m pip install --quiet PyYAML==6.0.3 jsonschema==4.25.1
           git -C .antoncore rev-parse HEAD
           docker run -d --rm --name "$CLICKHOUSE" clickhouse/clickhouse-server:24.1-alpine
           trap 'docker rm -f "$CLICKHOUSE" >/dev/null 2>&1 || true' EXIT
@@ -1657,6 +1657,7 @@ jobs:
             docker exec "$CLICKHOUSE" clickhouse-client -q 'SELECT 1' >/dev/null 2>&1 && break
             sleep 1
           done
+          docker exec "$CLICKHOUSE" clickhouse-client -q 'SELECT 1' >/dev/null 2>&1 || { docker logs "$CLICKHOUSE"; echo "::error::ClickHouse never became ready."; exit 1; }
           python .antoncore/scripts/swarm_dashboard_columns.py check --agentihooks "$GITHUB_WORKSPACE" --container "$CLICKHOUSE"
 
       - name: Select docs build

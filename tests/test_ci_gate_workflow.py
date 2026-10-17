@@ -121,12 +121,19 @@ def test_each_cheap_gate_grades_in_lint_after_its_setup_even_after_an_earlier_re
 
 def test_lint_grades_dashboard_columns_with_the_antoncore_dev_checker():
     steps = _workflow()["jobs"]["lint"]["steps"]
-    checkout = next(s for s in steps if s.get("with", {}).get("repository") == "the-cloud-clockwork/antoncore")
+    token = next((s for s in steps if s.get("id") == "antoncore-token"), None)
+    assert token is not None
+    assert token["with"]["repositories"] == "antoncore"
+    assert token["with"]["permission-contents"] == "read"
+    checkout = next((s for s in steps if s.get("with", {}).get("repository") == "the-cloud-clockwork/antoncore"), None)
+    assert checkout is not None
+    assert checkout["with"]["token"] == "${{ steps.antoncore-token.outputs.token }}"
     assert checkout["with"]["ref"] == "dev"
     assert checkout["with"]["persist-credentials"] is False
     assert "scripts/swarm_dashboard_columns.py" in checkout["with"]["sparse-checkout"]
-    check = next(s for s in steps if "swarm_dashboard_columns.py check" in s.get("run", ""))
-    assert steps.index(checkout) < steps.index(check)
+    check = next((s for s in steps if "swarm_dashboard_columns.py check" in s.get("run", "")), None)
+    assert check is not None
+    assert steps.index(token) < steps.index(checkout) < steps.index(check)
     assert '--agentihooks "$GITHUB_WORKSPACE"' in check["run"]
 
 
