@@ -428,3 +428,18 @@ def test_launch_receiver_accepts_the_current_epoch(store, monkeypatch, tmp_path)
     with pytest.raises(SwarmError) as error:
         receiver._launch(config, "eng", "t", "one", ["--agent", "claude"], controller_epoch=held.epoch)
     assert str(error.value) == "launch reached"
+
+
+@pytest.mark.parametrize(
+    ("mode", "member_url", "expected"),
+    [("compose", "rediss://hive:6379/0", "m1"), ("local", "rediss://hive:6379/0", "home"), ("compose", "", "home")],
+)
+def test_a_joined_member_beats_under_its_member_id_only_when_it_uses_the_member_redis(
+    monkeypatch, mode, member_url, expected
+):
+    monkeypatch.setenv("SWARM_HIVE_ID", "home")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "m1")
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", mode)
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_REDIS_URL", member_url)
+
+    assert commands.hive_id() == expected

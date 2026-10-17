@@ -59,13 +59,50 @@ def test_a_valid_code_joins_with_a_ledger_credential_and_a_redis_acl_user(admin,
     assert auth.ledger_member(admin, grant["ledger_credential"]) == grant["id"]
     assert grant["ledger_credential"] not in str({key: admin.dump(key) for key in admin.keys("*")})
     user = admin.acl_getuser(f"hive-{grant['id']}")
-    assert user["keys"] == [f"~{ROOT}:*"]
     assert user["channels"] == [f"&{ROOT}:*"]
     assert user["categories"] == ["+@all", "-@admin", "-@dangerous"]
     assert user["commands"] == []
     password = redis_lib.connection.parse_url(grant["redis_url"])["password"]
     assert user["passwords"] == [hashlib.sha256(password.encode()).hexdigest()]
     assert not auth.PREFIX.startswith(f"{ROOT}:")
+
+
+def test_the_member_user_writes_only_its_own_keys_and_reads_agent_records():
+    calls = []
+
+    class Recorder:
+        def acl_setuser(self, *args, **kwargs):
+            calls.append((args, kwargs))
+
+    auth._set_user(Recorder(), "m1", "pw")
+
+    assert calls == [
+        (
+            ("hive-m1",),
+            {
+                "enabled": True,
+                "reset": True,
+                "hashed_passwords": [f"+{hashlib.sha256(b'pw').hexdigest()}"],
+                "categories": ("+@all", "-@admin", "-@dangerous"),
+                "keys": (
+                    f"%R~{ROOT}:*",
+                    f"~{ROOT}:hive:m1",
+                    f"~{ROOT}:hive:m1:*",
+                    f"~{ROOT}:inbox:*",
+                    f"~{ROOT}:swarm:*:heartbeat:*",
+                    f"~{ROOT}:swarm:*:prompt:*",
+                    f"~{ROOT}:swarm:*:session-model:*",
+                    f"~{ROOT}:swarm:*:progress:*",
+                    f"~{ROOT}:swarm:*:wait:*",
+                    f"~{ROOT}:swarm:*:waited:*",
+                    f"~{ROOT}:swarm:*:wait-history:*",
+                    f"~{ROOT}:swarm:*:stop-blocks:*",
+                ),
+                "channels": (f"{ROOT}:*",),
+                "selectors": (("+sadd", f"~{ROOT}:hives"), ("+pexpire", f"~{ROOT}:launch-slot:*")),
+            },
+        )
+    ]
 
 
 def test_the_grant_sizes_and_member_record(admin, redis_lib):
