@@ -27,7 +27,15 @@ from hooks.context.account_sessions import (
     INTERNAL_RUN,
     codex_sessions_by_account,
 )
-from scripts import codex_quota, codex_rollouts, codex_sessions, codex_usage, operator_env, session_bands
+from scripts import (
+    codex_quota,
+    codex_rollouts,
+    codex_sessions,
+    codex_usage,
+    operator_env,
+    quota_freshness,
+    session_bands,
+)
 from scripts.codex_quota import CodexQuota
 from scripts.routing import codex_api, envs, place
 from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION, Slot
@@ -374,15 +382,23 @@ def _probe_attempts() -> dict[str, float]:
 
 
 def fresh_quotas(
-    pool: list[CodexAccount], environ: Mapping[str, str], now: float, run: Callable = subprocess.run
+    pool: list[CodexAccount],
+    environ: Mapping[str, str],
+    now: float,
+    run: Callable = subprocess.run,
+    force: bool = False,
 ) -> dict[str, CodexQuota | None]:
-    """Each account's newest reading, probed again when it is missing or stale, at most once per freshness window."""
+    """Each account's newest reading, probed again when it is missing or stale, at most once per freshness window;
+    ``force`` probes every signed in account."""
     found = quotas(pool, environ)
     attempts = _probe_attempts()
     for account in pool:
         seen = found.get(account.name)
-        stale = not session_bands.fresh(seen.observed_at if seen else None, now)
-        if account.signed_in and stale and not session_bands.fresh(attempts.get(account.name), now):
+        stale = seen is None or quota_freshness.stale(
+            seen.observed_at, (seen.five_hour.resets_at, seen.seven_day.resets_at), now
+        )
+        due = force or (stale and not session_bands.fresh(attempts.get(account.name), now))
+        if account.signed_in and due:
             attempts[account.name] = now
             found[account.name] = probe(account, environ, run) or seen
     with contextlib.suppress(OSError):

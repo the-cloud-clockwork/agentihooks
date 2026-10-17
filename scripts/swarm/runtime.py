@@ -12,7 +12,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
-from scripts import agent_choice
+from scripts import agent_choice, master_claude_login
 from scripts.handoff import envelope
 from scripts.init_agent import PREDECESSOR
 from scripts.profiles import binding, plugins
@@ -31,11 +31,13 @@ from scripts.swarm import (
     profile_choice,
     prompt,
     reaper,
+    remote_control,
     timing,
 )
 from scripts.swarm.pane import PaneObservation, provider_error, provider_error_id, selection_prompt, typed_input
 from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig, connect
 from scripts.swarm.tick import Placed, SpawnError
+from scripts.swarm_v2 import front_door
 
 SWARM_HOME = Path.home() / ".agentihooks" / "swarm"
 SPAWN_TIMEOUT_S = 300
@@ -261,9 +263,8 @@ class HerdrRuntime:
     ) -> dict:
         from scripts.swarm import capacity
 
-        placing = demand is None or any(demand.values())
         read = self.quota_accounts or capacity.accounts
-        self._quota_accounts = read(dict(os.environ), now, refresh=placing and refresh)
+        self._quota_accounts = read(dict(os.environ), now, refresh=refresh)
         self._quota_held = {}
         accounts = self._quota_successor_accounts(requirements) if requirements else None
         if requirements:
@@ -581,11 +582,15 @@ class HerdrRuntime:
         picked = replace(picked, model=_set(picked.model) or default_models.model(config, agent))
         picked = replace(picked, effort=saved["effort"]) if saved else picked
         mode = [] if lane != "plan" else PLAN_MODE if agent == "claude" else codex_plan_mode(environ)
-        route = (
+        front = front_door.holds(config.slug, task.get("seat", ""))
+        login = front and master_claude_login.enabled(config, lane, agent)
+        route_kind = "interactive" if login else route_kind
+        route = master_claude_login.route(login) or (
             ["--route", "interactive"]
             if route_kind == "interactive"
             else (["--route", saved["account"]] if saved.get("account") else [])
         )
+        rc = remote_control.decision(lane, agent, route_kind, config.slug, login) if front else {}
         account = None
         if hasattr(self, "_quota_accounts") and route_kind != "interactive":
             account = self._quota_account(agent, saved.get("account") or self.planned_account(task["id"], agent), None)
@@ -600,6 +605,7 @@ class HerdrRuntime:
                 *argv,
                 "--",
                 *route,
+                *remote_control.arguments(rc),
                 *_model_args(
                     agent,
                     picked.__dict__,
@@ -614,6 +620,7 @@ class HerdrRuntime:
         )
         self._reserve_account(account, lane, agent)
         placed = codex.complete(config, name, placed, self._terminate)
+        placed_kind = "api" if placed.account == "api" else route_kind
         return replace(
             placed,
             model_source=picked.source,
@@ -621,7 +628,8 @@ class HerdrRuntime:
             profile_decision={**decision.record(), **placed.profile_decision},
             choice=agent_choice.choice_kind(reason),
             overlays=list(decision.overlays),
-            route_kind="api" if placed.account == "api" else route_kind,
+            route_kind=placed_kind,
+            remote_control=remote_control.decision(lane, agent, placed_kind, config.slug, login) if front else {},
         )
 
     def resume(self, config, agent, text):
@@ -648,7 +656,9 @@ class HerdrRuntime:
             agent.effort or defaults.effort,
             source=agent.model_source or ("recorded" if agent.model else defaults.source),
         )
-        route = (
+        front = front_door.holds(config.slug, agent.seat)
+        login = front and master_claude_login.enabled(config, agent.lane, agent.harness)
+        route = master_claude_login.route(login) or (
             ["--route", "interactive"]
             if agent.route_kind == "interactive"
             else (["--route", agent.account] if agent.account else [])
@@ -660,7 +670,9 @@ class HerdrRuntime:
             effort_range.bounds(config, agent.lane),
             preserve=preserves_effort(bool(agent.effort), agent.lane),
         )
-        argv += ["--resume", agent.conversation_id, "--", *route, *model]
+        kind = "interactive" if login else agent.route_kind
+        rc = remote_control.decision(agent.lane, agent.harness, kind, config.slug, login) if front else {}
+        argv += ["--resume", agent.conversation_id, "--", *route, *remote_control.arguments(rc), *model]
         placed = timing.call(self._launch, config, agent.lane, agent.task, agent.name, argv)
         if not self._holds(placed.pane_id, agent.conversation_id):
             self.retire(
@@ -675,7 +687,8 @@ class HerdrRuntime:
             model_source=picked.source,
             profile_decision={**agent.profile_decision, **placed.profile_decision},
             overlays=agent.overlays,
-            route_kind=agent.route_kind,
+            route_kind=kind,
+            remote_control=rc,
         )
 
     def operator(self, config, name, profile, text):

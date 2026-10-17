@@ -1387,6 +1387,26 @@ jobs:
           ) < /dev/null > "$RUNNER_TEMP/combine.log" 2>&1 &
           echo "pid=$!" >> "$GITHUB_OUTPUT"
 
+      # Builds beside the cache restores and the scan, outside the scanned tree; the wait after the scan holds its result.
+      - name: Build the test dependency manifest
+        id: manifest
+        if: needs.select.outputs.scope == 'full'
+        env:
+          ENVIRONMENT: py3.12-${{ hashFiles('pyproject.toml') }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/dep-manifest"
+          (
+            status=0
+            shopt -s nullglob
+            python -m coverage combine --rcfile=.github/coverage/coverage.ini --keep --data-file="$RUNNER_TEMP/dep-manifest/.coverage" \
+              .coverage-shards/coverage-3.12-*/.coverage .coverage-shards/coverage-3.12-*/reused-coverage/.coverage || status=$?
+            [[ "$status" != 0 ]] || python -m tests.dep_manifest build --coverage "$RUNNER_TEMP/dep-manifest/.coverage" --inputs .coverage-shards --root . \
+              --commit "$GITHUB_SHA" --environment "$ENVIRONMENT" --out "$RUNNER_TEMP/dep-manifest/manifest.json" || status=$?
+            echo "$status" > "$RUNNER_TEMP/manifest.next"
+            mv "$RUNNER_TEMP/manifest.next" "$RUNNER_TEMP/manifest.status"
+          ) < /dev/null > "$RUNNER_TEMP/manifest.log" 2>&1 &
+          echo "pid=$!" >> "$GITHUB_OUTPUT"
+
       - name: Start Cloudflare Access proxy
         id: proxy
         env:
@@ -1474,23 +1494,6 @@ jobs:
           done
           cat "$RUNNER_TEMP/combine.log"
           exit "$(< "$RUNNER_TEMP/combine.status")"
-
-      # Builds beside the scan, outside the scanned tree; the wait after the scan holds its result.
-      - name: Build the test dependency manifest
-        id: manifest
-        if: needs.select.outputs.scope == 'full'
-        env:
-          ENVIRONMENT: py3.12-${{ hashFiles('pyproject.toml') }}
-        run: |
-          mkdir -p "$RUNNER_TEMP/dep-manifest"
-          (
-            status=0
-            python -m tests.dep_manifest build --coverage .coverage --inputs .coverage-shards --root . \
-              --commit "$GITHUB_SHA" --environment "$ENVIRONMENT" --out "$RUNNER_TEMP/dep-manifest/manifest.json" || status=$?
-            echo "$status" > "$RUNNER_TEMP/manifest.next"
-            mv "$RUNNER_TEMP/manifest.next" "$RUNNER_TEMP/manifest.status"
-          ) < /dev/null > "$RUNNER_TEMP/manifest.log" 2>&1 &
-          echo "pid=$!" >> "$GITHUB_OUTPUT"
 
       # Runs the CLI directly: sonarqube-scan-action never finds its tool cache entry, since a four part version is not semver.
       - name: SonarQube Scan

@@ -58,6 +58,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from hooks.context import injection_trace, quarantine
+from scripts import master_claude_login
 from scripts.doctor import priming
 from scripts.gates import Who, catalog, intent, lift, modes, progress, quiet
 from scripts.gates import log as gate_log
@@ -104,6 +105,7 @@ from scripts.swarm import (
     prompt,
     ready,
     reaper,
+    remote_control,
     review_rounds,
     snapshot,
     stack,
@@ -138,6 +140,7 @@ from scripts.swarm.store import (
     DELEGATE,
     DISPATCH,
     MASTER,
+    RedisStore,
     SwarmConfig,
     SwarmError,
     Unreachable,
@@ -166,7 +169,14 @@ SCALING_KEYS = {
 ADDRESS_KEYS = {"api-url": "api_url"}
 NO_API_ADDRESS = "api-url takes an http or https address with a host and no credentials"
 TRANSPORT_KEYS = {"codex-inbox-transport": "codex_inbox_transport"}
-CONFIG_KEYS = {**SCALING_KEYS, **ADDRESS_KEYS, **default_models.KEYS, **TRANSPORT_KEYS}
+ON_OFF = {"on": True, "off": False}
+CONFIG_KEYS = {
+    **SCALING_KEYS,
+    **ADDRESS_KEYS,
+    **default_models.KEYS,
+    **TRANSPORT_KEYS,
+    master_claude_login.KEY: master_claude_login.FIELD,
+}
 GATE_KEYS = {f"{name}-gate": name for name in catalog.defaults()}
 GATE_MODES = modes.MODES
 RETIRES_MASTER = frozenset({"stop now", "close ledger"})
@@ -409,6 +419,45 @@ def _reconcile_services():
         why = ""
     if not installed:
         print(f"warning: the swarm user services could not be installed or enabled{why}", file=sys.stderr)
+
+
+def run_waits(store: RedisStore, slug: str, ledger=None) -> list[str]:
+    from scripts.swarm import commands, lease
+
+    held = lease.acquire(store, slug, commands.hive_id())
+    if held is None:
+        return []
+    if not any(
+        agent.state != "finished" and (idle.wait(store.redis, slug, agent.name) or {}).get("on")
+        for agent in store.agents(slug)
+    ):
+        return []
+    ledger = ledger or LedgerClient()
+    doc = ledger.state(slug)
+    inbox = InboxStore(store.redis)
+    view = ledger_events.tick_view(inbox, store, slug, doc)
+    lease.require(store, slug, held)
+    return waits.end_pass(
+        store, slug, {task["id"]: task for task in doc["tasks"]}, inbox, view, now_ms(), ledger_events.view
+    )
+
+
+@outage.guard_command
+def cmd_waits(store, args):
+    if why := timer.installed_refusal():
+        raise SwarmError(f"the wait pass refused to run: {why}")
+
+    def check(slug):
+        try:
+            for action in run_waits(store, slug):
+                timing.emit(sys.stdout, f"{slug}: {action}")
+        except Exception as exc:
+            timing.emit(sys.stderr, f"{slug}: {type(exc).__name__}: {exc}")
+
+    slugs = store.slugs()
+    if slugs:
+        with ThreadPoolExecutor(max_workers=len(slugs)) as pool:
+            list(pool.map(check, slugs))
 
 
 @outage.guard_command
@@ -770,7 +819,15 @@ def api_address(value):
     return value
 
 
+def _on_off(key, value):
+    if value not in ON_OFF:
+        raise SwarmError(f"{key} takes on or off")
+    return ON_OFF[value]
+
+
 def config_value(key, value):
+    if key == master_claude_login.KEY:
+        return _on_off(key, value)
     if key in default_models.KEYS or key in TRANSPORT_KEYS:
         return value
     return api_address(value) if key in ADDRESS_KEYS else scaling_value(key, value)
@@ -833,7 +890,7 @@ def cmd_set(store, args):
             raise SwarmError(
                 f"set takes {', '.join(SETTABLE)}=<whole number>, masters=N, master-per=N|hive|off, "
                 f"{masters.HIVE_KEY}<hive id>=<master seat>, autonomy={'|'.join(AUTONOMY)}, "
-                f"effort-min=E, effort-max=E, claude-model=M, codex-model=M, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB, api-url=URL, codex-inbox-transport=legacy|app_server "
+                f"effort-min=E, effort-max=E, claude-model=M, codex-model=M, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB, api-url=URL, codex-inbox-transport=legacy|app_server, master-claude-login=on|off "
                 f"or {', '.join(LANE_KEYS)}=<value>"
             )
         changes[SETTABLE[key]] = int(value)
@@ -934,6 +991,10 @@ def _affinity_line(report):
     return f"{line}  order to {order['to']} {order['state']}{reason}"
 
 
+def _remote_control_text(agents):
+    return "".join(f"{line}\n" for a in agents if (line := remote_control.line(a.__dict__)))
+
+
 def cmd_status(store, args):
     if args.json:
         store.config(args.slug)
@@ -971,6 +1032,7 @@ def cmd_status(store, args):
     print(bottleneck_status.line(bottleneck_status.report(store, args.slug, now_ms())))
     print(_snapshot_line(auto_snapshot(config)))
     print(_affinity_line(affinity.report(store, args.slug, config, agents)))
+    sys.stdout.write(_remote_control_text(agents))
     if promotion := tick_master.status_line(tick_master.read(store, args.slug)):
         print(promotion)
     print(
@@ -1980,7 +2042,7 @@ def _tick_store():
 
 
 def main(argv):
-    if argv and argv[0] in ("list", "tick", "templates", "rename", "waker", "alerts"):
+    if argv and argv[0] in ("list", "tick", "templates", "rename", "waker", "alerts", "waits"):
         handler, args = globals()[f"cmd_{argv[0]}"], argparse.Namespace()
     else:
         if len(argv) > 1 and argv[1].partition("=")[0] in (
@@ -2003,7 +2065,7 @@ def main(argv):
     from redis.exceptions import RedisError
 
     try:
-        store = _tick_store() if handler is cmd_tick else connect()
+        store = _tick_store() if handler in (cmd_tick, cmd_waits) else connect()
         if store is None:
             return 0
         if "slug" in args:
