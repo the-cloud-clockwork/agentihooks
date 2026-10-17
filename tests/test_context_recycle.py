@@ -324,6 +324,20 @@ def test_a_session_without_a_usage_snapshot_leaves_no_pin(tmp_path):
     assert not (tmp_path / "context_usage").exists()
 
 
+def test_only_the_session_with_its_own_usage_snapshot_is_pinned(monkeypatch, tmp_path):
+    usage = {"s1": 100_000}
+    monkeypatch.setattr(recycle, "used_tokens", usage.get)
+    assert recycle.directive("s1", MASTER) is None
+    assert recycle.directive("s2", MASTER) is None
+    assert sorted(path.name for path in (tmp_path / "context_usage").iterdir()) == ["s1.swarm"]
+
+
+def test_an_identity_lookup_without_a_session_pins_nothing(monkeypatch, tmp_path):
+    monkeypatch.setattr(recycle, "used_tokens", lambda session_id: 100_000)
+    assert recycle._swarm_of(MASTER) == "sw"
+    assert not (tmp_path / "context_usage").exists()
+
+
 def test_an_unmarked_overrun_uses_the_compact_limit_the_session_enforces(monkeypatch):
     monkeypatch.setattr(recycle, "COMPACT_LIMIT", 700)
     monkeypatch.setattr(recycle, "used_tokens", lambda session_id: 100_000)
