@@ -17,6 +17,8 @@ import sys
 import tokenize
 from pathlib import Path
 
+import yaml
+
 MODULE = "<module>"
 MEASURED = ("hooks/", "scripts/")
 GLOBAL_FILES = {"pyproject.toml", "uv.lock"}
@@ -123,7 +125,7 @@ def build(coverage_file: Path, inputs: list[Path], root: Path, commit: str, envi
             test["files"] = sorted(set(test["files"]) | set(seen["files"]))
             test["escapes"] = test["escapes"] or seen["escapes"]
     return {
-        "version": 1,
+        "version": 2,
         "commit": commit,
         "environment": environment,
         "units": units,
@@ -157,10 +159,41 @@ def _global(path: str) -> bool:
     return path.endswith(".py") and not path.startswith(MEASURED + ("tests/",))
 
 
+def workflow_execution_changed(old: str | None, new: str | None) -> bool:
+    try:
+        before, after = (yaml.safe_load(text) for text in (old, new))
+        for workflow in (before, after):
+            jobs = workflow["jobs"]
+            if not isinstance(jobs, dict) or not all(isinstance(jobs[name], dict) for name in ("unit", "split")):
+                return True
+        pending = ["unit", "unit-selected"]
+        producers = set()
+        while pending:
+            name = pending.pop()
+            if name in producers:
+                continue
+            producers.add(name)
+            for workflow in (before, after):
+                job = workflow["jobs"].get(name, {})
+                needs = job.get("needs", [])
+                pending.extend([needs] if isinstance(needs, str) else needs)
+        return any(before.get(key) != after.get(key) for key in ("env", "defaults")) or any(
+            before["jobs"].get(name) != after["jobs"].get(name) for name in producers
+        )
+    except (TypeError, KeyError, AttributeError, yaml.YAMLError):
+        return True
+
+
+def global_input(path: str, old: str | None, new: str | None, version: int | None) -> bool:
+    if path.startswith(".github/workflows/") and not path.endswith(".py") and version == 2:
+        return path == ".github/workflows/test.yml" and workflow_execution_changed(old, new)
+    return _global(path)
+
+
 def invalidated(manifest: dict, changed: list[tuple[str, str | None, str | None]]) -> tuple[set[str], str | None]:
     tests = manifest["tests"]
-    for path, _, _ in changed:
-        if _global(path):
+    for path, old, new in changed:
+        if global_input(path, old, new, manifest.get("version")):
             return set(tests), path
     index = {name: number for number, name in enumerate(manifest["units"])}
     units = set()
@@ -179,7 +212,7 @@ def invalidated(manifest: dict, changed: list[tuple[str, str | None, str | None]
             else:
                 hit.update(tests)
             continue
-        if path.startswith("tests/"):
+        if path.startswith(("tests/", ".github/workflows/")):
             source_changed = True
         hit.update(test for test, found in tests.items() if path in found["files"])
     for test, found in tests.items():

@@ -270,3 +270,29 @@ def test_branch_repository_identity_takes_precedence_over_pull_request_repositor
         "/repo", task, {"t1": task, "other": other}, ["engineer@a1b2c3-0001"], {}, partial(envelope.reclaim, run=run)
     )
     assert result["continue_from"] == expected
+
+
+@pytest.mark.parametrize(
+    ("task", "expected"),
+    [
+        ({"handoff_envelope": {"continue_from": "origin/engineer-a1b2c3-0001"}}, "engineer-a1b2c3-0001"),
+        ({"reclaim": {"continue_from": "origin/engineer-a1b2c3-0002"}}, "engineer-a1b2c3-0002"),
+        (
+            {
+                "handoff_envelope": {"continue_from": "origin/engineer-a1b2c3-0001"},
+                "reclaim": {"continue_from": "origin/engineer-a1b2c3-0002"},
+            },
+            "engineer-a1b2c3-0001",
+        ),
+        ({"handoff_envelope": None, "reclaim": {"continue_from": "origin/origin/x"}}, "origin/x"),
+        ({"handoff_envelope": {"continue_from": None}}, ""),
+        ({"handoff_envelope": {}}, ""),
+        ({}, ""),
+        ({"handoff_envelope": {"continue_from": "fresh"}}, ""),
+        ({"handoff_envelope": {"continue_from": "upstream/engineer-a1b2c3-0001"}}, ""),
+        ({"handoff_envelope": {"continue_from": "engineer-a1b2c3-0001"}}, ""),
+        *[({"reclaim": {"continue_from": f"origin/{name}"}}, "") for name in ("dev", "main", "master", "v1")],
+    ],
+)
+def test_retained_names_the_predecessor_branch_a_continuation_carries_on(task, expected):
+    assert continuation.retained(task) == expected

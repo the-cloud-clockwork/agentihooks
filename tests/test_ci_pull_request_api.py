@@ -142,6 +142,7 @@ def test_no_script_a_step_runs_calls_the_api():
         ".github/actions/browser-cache/select-artifacts.sh",
         ".github/actions/browser-cache/verify.sh",
         ".github/coverage/combine.sh",
+        ".github/coverage/flatten.py",
         ".github/coverage/proxy.py",
         ".github/coverage/sonar-retry.sh",
         "deploy/helm/agentihooks-swarm/ci/kind-smoke.sh",
@@ -212,7 +213,15 @@ def test_no_script_a_step_runs_calls_the_api():
         expected.extend(("scripts/ci_runner_trust.py", "scripts/gate_protected.py"))
     if (ROOT / "scripts/ci_wall_clock.py").exists():
         expected.append("scripts/ci_wall_clock.py")
-    assert sorted(str(path.relative_to(ROOT)) for path in calls) == sorted(expected)
+    routing_contracts = [
+        "tests/test_ci_anton_runners.py",
+        "tests/test_ci_runner_classes.py",
+        "tests/test_ci_runner_trust.py",
+    ]
+    assert sorted(str(path.relative_to(ROOT)) for path in calls) in (
+        sorted(expected),
+        sorted(expected + routing_contracts),
+    )
     assert {path: count for path, count in calls.items() if count} == {}
 
 

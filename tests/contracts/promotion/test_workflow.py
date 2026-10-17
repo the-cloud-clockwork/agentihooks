@@ -69,3 +69,15 @@ def test_promotion_reuses_the_release_environment_and_never_dispatches_or_publis
     assert mint["with"]["permission-metadata"] == "read"
     assert mint["with"]["permission-contents"] == "write"
     assert mint["with"]["permission-pull-requests"] == "write"
+
+
+def test_abandoned_promotion_cleanup_runs_last_as_the_app_even_after_a_failed_promotion():
+    steps = yaml.safe_load((ROOT / ".github/workflows/promote.yml").read_text())["jobs"]["promote"]["steps"]
+    cleanup = steps[-1]
+    assert cleanup["if"] == "!cancelled() && steps.app-token.outcome == 'success'"
+    assert cleanup["with"]["github-token"] == "${{ steps.app-token.outputs.token }}"
+    assert cleanup["env"] == {"PROMOTION_APP": "${{ steps.app-token.outputs.app-slug }}"}
+    assert (
+        "closeAbandoned({ github, context, core, app: process.env.PROMOTION_APP, deadline: Date.now() + 180000 })"
+        in cleanup["with"]["script"]
+    )

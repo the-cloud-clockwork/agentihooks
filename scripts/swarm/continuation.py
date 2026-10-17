@@ -3,9 +3,17 @@ from collections.abc import Callable
 from scripts.swarm import stack
 from scripts.swarm.naming import plain
 
+PROTECTED = frozenset({"dev", "main", "master", "v1"})
+
 
 def fresh(reason: str) -> dict:
     return {"remote_branch": "none", "remote_head": "none", "continue_from": "fresh", "fresh_reason": reason}
+
+
+def retained(task: dict) -> str:
+    ref = (task.get("handoff_envelope") or task.get("reclaim") or {}).get("continue_from")
+    branch = ref.removeprefix("origin/") if isinstance(ref, str) and ref.startswith("origin/") else ""
+    return "" if branch in PROTECTED else branch
 
 
 def resolve(repo: str, task: dict, rows: dict, lives: list[str], envelope: dict, reclaim: Callable[..., dict]) -> dict:

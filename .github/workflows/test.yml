@@ -713,6 +713,7 @@ jobs:
             echo "reused=0" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          "$PYTHON_PATH" -m pip install --quiet PyYAML==6.0.3
           before=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)
           cd "$RUNNER_TEMP/planner"
           "$PYTHON_PATH" -m scripts.ci_test_plan --repository "$GITHUB_REPOSITORY" --head "$GITHUB_SHA" \
@@ -820,11 +821,24 @@ jobs:
           - {python-version: "3.11", shard: 11}
           - {python-version: "3.11", shard: 12}
     steps:
-      - uses: actions/checkout@v4
-        with:
+      # The action retries git fetch but not the lazy blob fetch inside git checkout; a silent connection there held a shard ten minutes.
+      - name: Check out the graded commit
+        id: checkout
+        continue-on-error: true
+        uses: actions/checkout@v4
+        env: &low-speed
+          GIT_HTTP_LOW_SPEED_LIMIT: "1000"
+          GIT_HTTP_LOW_SPEED_TIME: "60"
+        with: &unit-checkout
           ref: ${{ github.sha }}
           fetch-depth: 0
           filter: blob:none
+
+      - name: Check out the graded commit, attempt 2
+        if: steps.checkout.outcome == 'failure'
+        uses: actions/checkout@v4
+        env: *low-speed
+        with: *unit-checkout
 
       - *python
 
@@ -1348,7 +1362,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install coverage
-        run: python -m pip install "coverage>=7.4"
+        run: python -m pip install "coverage>=7.4" PyYAML==6.0.3
 
       - name: Download shard coverage
         if: needs.select.outputs.scope != 'none'
@@ -1471,7 +1485,10 @@ jobs:
           mkdir -p "$RUNNER_TEMP/dep-manifest"
           (
             status=0
-            python -m tests.dep_manifest build --coverage .coverage --inputs .coverage-shards --root . \
+            shopt -s nullglob
+            python -m coverage combine --rcfile=.github/coverage/coverage.ini --keep --data-file="$RUNNER_TEMP/dep-manifest/.coverage" \
+              .coverage-shards/coverage-3.12-*/.coverage .coverage-shards/coverage-3.12-*/reused-coverage/.coverage || status=$?
+            [[ "$status" != 0 ]] || python -m tests.dep_manifest build --coverage "$RUNNER_TEMP/dep-manifest/.coverage" --inputs .coverage-shards --root . \
               --commit "$GITHUB_SHA" --environment "$ENVIRONMENT" --out "$RUNNER_TEMP/dep-manifest/manifest.json" || status=$?
             echo "$status" > "$RUNNER_TEMP/manifest.next"
             mv "$RUNNER_TEMP/manifest.next" "$RUNNER_TEMP/manifest.status"
@@ -2404,7 +2421,7 @@ jobs:
         run: python -m scripts.ci_mutation.plan --base "$BASE"
 
       - name: Grade the empty change set
-        if: steps.plan.outputs.changed == '0'
+        if: steps.reuse.outputs.reused != 'true' && steps.plan.outputs.changed == '0'
         env:
           BASES: ${{ steps.plan.outputs.bases }}
         run: python -m scripts.ci_mutation --bases "$BASES" --budget 1080

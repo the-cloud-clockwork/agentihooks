@@ -151,6 +151,7 @@ def test_main_reads_the_run_and_writes_the_decision(monkeypatch, tmp_path, capsy
     }
     assert output.read_text() == "requeue=true\npull=3259\n"
     assert ("graphql", "-f", f"query={PULL_QUERY}") in asked
+    assert ("repos/o/r/actions/jobs/1/logs", "--allow-escape-sequences") in asked
 
 
 def test_a_signature_quoted_in_test_output_is_not_a_runner_loss(monkeypatch):
@@ -161,7 +162,7 @@ def test_a_signature_quoted_in_test_output_is_not_a_runner_loss(monkeypatch):
         "repos/o/r/check-runs/1/annotations": "[]",
         "repos/o/r/actions/jobs/1/logs": quoted,
     }
-    monkeypatch.setattr(ci_queue_retry, "_api", lambda path: pages[path])
+    monkeypatch.setattr(ci_queue_retry, "_api", lambda path, *flags: pages[path])
     failed = ci_queue_retry.failed_jobs("o/r", 9)
     assert failed == [{"name": "unit (3.11, 2)", "text": "##[error]Process completed with exit code 1."}]
     assert not ci_queue_retry.decide(RUN, failed, WORKFLOW)[0]
@@ -175,7 +176,7 @@ def test_jobs_beyond_the_listed_page_refuse_the_requeue(monkeypatch, total, extr
         "repos/o/r/check-runs/1/annotations": json.dumps([{"message": "a"}, {"message": "b"}]),
         "repos/o/r/actions/jobs/1/logs": SHUTDOWN,
     }
-    monkeypatch.setattr(ci_queue_retry, "_api", lambda path: pages[path])
+    monkeypatch.setattr(ci_queue_retry, "_api", lambda path, *flags: pages[path])
     failed = ci_queue_retry.failed_jobs("o/r", 9)
     errors = [line for line in SHUTDOWN.splitlines() if "##[error]" in line]
     assert failed == [{"name": "unit (3.11, 2)", "text": "\n".join(["a", "b", *errors])}, *extra]
@@ -313,7 +314,7 @@ def test_a_lost_shard_outside_a_queue_branch_is_not_requeued(monkeypatch, tmp_pa
         "repos/o/r/check-runs/1/annotations": "[]",
         "repos/o/r/actions/jobs/1/logs": SHUTDOWN,
     }
-    monkeypatch.setattr(ci_queue_retry, "_api", lambda path: pages[path])
+    monkeypatch.setattr(ci_queue_retry, "_api", lambda path, *flags: pages[path])
     monkeypatch.chdir(ROOT)
     output = tmp_path / "output"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
@@ -325,3 +326,52 @@ def test_a_lost_shard_outside_a_queue_branch_is_not_requeued(monkeypatch, tmp_pa
         "reason": "no pull request in queue branch dev",
     }
     assert output.read_text() == "requeue=false\npull=\n"
+
+
+def queued_then(states, monkeypatch):
+    asked, slept = [], []
+
+    def state(repo, number):
+        asked.append((repo, number))
+        return states[min(len(asked), len(states)) - 1]
+
+    monkeypatch.setattr(ci_queue_retry, "pull_state", state)
+    monkeypatch.setattr(ci_queue_retry.time, "sleep", slept.append)
+    return asked, slept
+
+
+def test_the_requeue_waits_for_the_queue_to_drop_the_pull_request(monkeypatch):
+    queued = {**pull([REMOVED]), "isInMergeQueue": True}
+    left = pull([REMOVED])
+    asked, slept = queued_then([queued, queued, left], monkeypatch)
+    assert ci_queue_retry.pull_after_exit("o/r", 3259) is left
+    assert asked == [("o/r", 3259)] * 3
+    assert slept == [15, 15]
+    assert ci_queue_retry.requeue(left) == (True, "first failed checks removal of this head")
+
+
+def test_a_pull_request_still_queued_after_three_minutes_is_not_requeued(monkeypatch):
+    queued = {**pull([REMOVED]), "isInMergeQueue": True}
+    asked, slept = queued_then([queued], monkeypatch)
+    assert ci_queue_retry.pull_after_exit("o/r", 3259) is queued
+    assert len(asked) == 13
+    assert slept == [15] * 12
+    assert ci_queue_retry.requeue(queued) == (False, "pull request is not open outside the queue")
+
+
+def test_main_requeues_once_the_queue_drops_the_pull_request(monkeypatch, tmp_path, capsys):
+    jobs = {"total_count": 1, "jobs": [{"id": 1, "name": "unit (3.11, 2)", "conclusion": "failure"}]}
+    pages = {
+        "repos/o/r/actions/runs/9": json.dumps({**RUN, "id": 9, "head_branch": QUEUE_BRANCH}),
+        "repos/o/r/actions/runs/9/jobs?filter=latest&per_page=100": json.dumps(jobs),
+        "repos/o/r/check-runs/1/annotations": "[]",
+        "repos/o/r/actions/jobs/1/logs": SHUTDOWN,
+    }
+    monkeypatch.setattr(ci_queue_retry, "_api", lambda path, *flags: pages[path])
+    asked, slept = queued_then([{**pull([REMOVED]), "isInMergeQueue": True}, pull([REMOVED])], monkeypatch)
+    monkeypatch.chdir(ROOT)
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
+    assert ci_queue_retry.main(["--repo", "o/r", "--run-id", "9"]) == 0
+    assert json.loads(capsys.readouterr().out)["requeue"] is True
+    assert asked == [("o/r", 3259)] * 2
+    assert slept == [15]
