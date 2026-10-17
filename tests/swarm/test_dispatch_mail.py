@@ -64,3 +64,111 @@ def test_sender_reports_dispatcher_ownership_and_activation_deferral(mailbox, ca
     sent = json.loads(capsys.readouterr().out)
     assert sent["dispatch"] == {"owner": f"dispatcher@{SLUG}", "consumer": "", "activation": expected}
     assert inbox.get(sent["id"]).state == "pending"
+
+
+@pytest.mark.parametrize("receipt", ["pending", "delivered", "confirmed", "read"])
+@pytest.mark.parametrize("named", [False, True])
+def test_mail_arriving_as_structured_triggers_clear_retains_its_consumer(mailbox, monkeypatch, capsys, receipt, named):
+    from tests.swarm.test_dispatch_seat import priority
+
+    store, inbox = mailbox
+    runtime = FakeRuntime()
+    run(store, runtime, doc(priority()))
+    [seat] = seats(store)
+    address = seat.name if named else seat.seat
+    assert cli.main(["send", address, "Consider new rank evidence"]) == 0
+    sent = json.loads(capsys.readouterr().out)
+    assert sent["dispatch"]["consumer"] == seat.name
+    if receipt in ("delivered", "confirmed"):
+        assert inbox.deliver(sent["id"], seat.name).state == "delivered"
+    if receipt == "confirmed":
+        assert inbox.confirm(sent["id"], seat.name).state == "confirmed"
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", seat.name)
+    if receipt == "read":
+        assert cli.main(["read", sent["id"]]) == 0
+        capsys.readouterr()
+    run(store, runtime, doc(), NOW + 60_000)
+    assert seats(store)[0].state != "finished"
+    assert len(runtime.spawned) == 1
+    assert cli.main(["close", sent["id"], "handoff", "master@" + SLUG]) == 0
+    capsys.readouterr()
+    run(store, runtime, doc(), NOW + 120_000)
+    assert seats(store)[0].state == "finished"
+
+
+@pytest.mark.parametrize("policy", ["paused", "delegate", "stopped", "sleeping", "capacity"])
+def test_accepted_mail_waits_for_existing_policy_before_activation(mailbox, capsys, policy):
+    store, inbox = mailbox
+    runtime = FakeRuntime(full=policy == "capacity")
+    if policy in ("paused", "stopped"):
+        store.update(SLUG, state=policy)
+    elif policy == "delegate":
+        store.update(SLUG, autonomy=policy)
+    assert cli.main(["send", f"dispatcher@{SLUG}", "Consider rank evidence"]) == 0
+    sent = json.loads(capsys.readouterr().out)
+    dispatch_seat.run(SLUG, store.config(SLUG), store, runtime, doc(), NOW, sleeping=policy == "sleeping")
+    assert not runtime.spawned
+    assert inbox.get(sent["id"]).state == "pending"
+    store.update(SLUG, state="running", autonomy="full")
+    runtime.full = False
+    run(store, runtime, doc(), NOW + 60_000)
+    assert len(runtime.spawned) == 1
+
+
+def test_information_does_not_activate_or_retain_a_dispatcher(mailbox, capsys):
+    from tests.swarm.test_dispatch_seat import priority
+
+    store, inbox = mailbox
+    runtime = FakeRuntime()
+    assert cli.main(["send", f"dispatcher@{SLUG}", "--fyi", "Status only"]) == 0
+    sent = json.loads(capsys.readouterr().out)
+    assert "dispatch" not in sent
+    assert inbox.get(sent["id"]).fyi
+    assert run(store, runtime, doc()) == []
+    assert not runtime.spawned
+    run(store, runtime, doc(priority()))
+    run(store, runtime, doc(), NOW + 60_000)
+    assert seats(store)[0].state == "finished"
+
+
+def test_send_response_loss_replays_one_item_and_duplicate_delivery_retains_one_owner(mailbox, monkeypatch, capsys):
+    from redis.exceptions import ConnectionError
+
+    from scripts.inbox import outbox
+
+    store, inbox = mailbox
+    original = cli.apply
+    attempts = []
+
+    def lose_response(mail, record):
+        attempts.append(record["item"])
+        result = original(mail, record)
+        if len(attempts) == 1:
+            raise ConnectionError("response lost after acceptance")
+        return result
+
+    monkeypatch.setattr(cli, "apply", lose_response)
+    assert cli.main(["send", f"dispatcher@{SLUG}", "Consider rank evidence"]) == 0
+    queued = json.loads(capsys.readouterr().out)
+    assert queued["state"] == "queued"
+    report = outbox.flush(inbox)
+    assert report.already == [queued["id"]]
+    assert attempts == [queued["id"], queued["id"]]
+    assert len(inbox.open_items(f"dispatcher@{SLUG}")) == 1
+    runtime = FakeRuntime()
+    run(store, runtime, doc())
+    [seat] = seats(store)
+    delivered = inbox.deliver(queued["id"], seat.name)
+    assert delivered.state == "delivered"
+    assert inbox.deliver(queued["id"], seat.name) is None
+    assert [item.id for item in inbox.redeliver(delivered.updated_at + 301_000, 300_000)] == [queued["id"]]
+    run(store, runtime, doc(), NOW + 60_000)
+    assert len(runtime.spawned) == 1
+    assert seats(store)[0].state != "finished"
+    assert inbox.deliver(queued["id"], seat.name).state == "delivered"
+    assert inbox.confirm(queued["id"], seat.name).state == "confirmed"
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", seat.name)
+    assert cli.main(["reply", queued["id"], "Evidence considered"]) == 0
+    capsys.readouterr()
+    run(store, runtime, doc(), NOW + 120_000)
+    assert seats(store)[0].state == "finished"
