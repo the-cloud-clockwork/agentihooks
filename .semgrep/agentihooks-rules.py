@@ -2,6 +2,7 @@ import asyncio
 import itertools
 import threading
 import time
+from itertools import count
 
 TIMER = (
     # ruleid: machine-timer-unit
@@ -74,7 +75,7 @@ def drain(queue):
         item = queue.get()
         if item is None:
             break
-        # ok: periodic-sleep-loop
+        # ruleid: periodic-sleep-loop
         time.sleep(0.01)
 
 
@@ -102,6 +103,108 @@ class Pump:
             self.work()
             # ruleid: periodic-sleep-loop
             timing.sleep(5)
+
+
+UNIT_KEYS = (
+    # ruleid: machine-timer-unit
+    "OnBootSec=1min",
+    # ruleid: machine-timer-unit
+    "OnStartupSec=1min",
+    # ruleid: machine-timer-unit
+    "OnActiveSec=5m",
+    # ruleid: machine-timer-unit
+    "OnUnitInactiveSec=5m",
+)
+CRON_PATHS = (
+    # ruleid: machine-cron-entry
+    "/etc/cron.d/agentihooks",
+    # ruleid: machine-cron-entry
+    "/var/spool/cron/iamroot",
+    # ruleid: machine-cron-entry
+    "<key>StartInterval</key>",
+    # ruleid: machine-cron-entry
+    "<key>StartCalendarInterval</key>",
+    # ruleid: machine-cron-entry
+    "schtasks /create /sc minute",
+    # ruleid: machine-cron-entry
+    "echo agentihooks swarm tick | at now",
+    # ruleid: machine-cron-entry
+    "echo agentihooks swarm tick | batch now",
+)
+
+
+def legacy(work):
+    while 1:
+        work()
+        # ruleid: periodic-sleep-loop
+        time.sleep(30)
+
+
+def counted(work):
+    for _ in count():
+        work()
+        # ruleid: periodic-sleep-loop
+        time.sleep(30)
+
+
+def flagged(stop: threading.Event, work):
+    while not stop.is_set():
+        work()
+        # ruleid: periodic-sleep-loop
+        stop.wait(5)
+
+
+class Worker:
+    def run(self, work):
+        while self.running:
+            work()
+            # ruleid: periodic-sleep-loop
+            time.sleep(5)
+
+
+def paced(stop: threading.Event, work):
+    while True:
+        work()
+        # ruleid: periodic-sleep-loop
+        stop.wait(60)
+
+
+def once(args, work):
+    while True:
+        work()
+        if args.once:
+            return 0
+        # ruleid: periodic-sleep-loop
+        time.sleep(60)
+
+
+def stream(hub, send):
+    while True:
+        # ok: periodic-sleep-loop
+        pending = hub.wait(5)
+        send(pending)
+
+
+def retried(read, attempts):
+    for attempt in itertools.count(1):
+        try:
+            return read()
+        except OSError:
+            if attempt >= attempts:
+                raise
+        # ok: periodic-sleep-loop
+        time.sleep(attempt)
+
+
+def polled(probe, clock, timeout):
+    deadline = clock() + timeout
+    while True:
+        if probe():
+            return True
+        if clock() >= deadline:
+            return False
+        # ok: periodic-sleep-loop
+        time.sleep(0.25)
 
 
 # ok: machine-timer-unit

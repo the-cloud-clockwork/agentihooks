@@ -17,3 +17,23 @@ while true; do
     fi
     sleep 1
 done
+
+# ruleid: periodic-shell-sleep-loop
+while :; do
+    agentihooks swarm tick
+    sleep 60
+done
+
+# ruleid: periodic-shell-sleep-loop
+until false; do
+    agentihooks swarm tick
+    sleep 60
+done
+
+# ruleid: periodic-shell-sleep-loop
+while sleep 60; do
+    agentihooks swarm tick
+done
+
+# ruleid: machine-cron-entry
+echo "agentihooks swarm tick" | at 17:00
