@@ -102,6 +102,7 @@ class Pool:
     def __init__(self, config: BackendConfig) -> None:
         self.config = config
         self.bindings: weakref.WeakSet[Binding] = weakref.WeakSet()
+        self.parents: weakref.WeakValueDictionary[str, Binding] = weakref.WeakValueDictionary()
         self._backends: dict[Path, Backend] = {}
         self._start_lock = asyncio.Lock()
 

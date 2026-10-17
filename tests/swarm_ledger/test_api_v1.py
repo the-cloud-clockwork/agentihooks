@@ -30,6 +30,7 @@ def live(authority_live):
     html, document = core.paths(SLUG)
     html.write_text(page)
     document.unlink(missing_ok=True)
+    server.ledger_bin.restore(SLUG)
     core.sync(
         SLUG,
         ops=[
@@ -38,7 +39,8 @@ def live(authority_live):
             {"op": "add", "id": "seed-chat-two", "thread": "chat", "text": "Second message"},
         ],
     )
-    return {**authority_live, "admin": core.read_token(page)}
+    yield {**authority_live, "admin": core.read_token(page)}
+    server.ledger_bin.restore(SLUG)
 
 
 from scripts.swarm_ledger import api as api
@@ -722,11 +724,13 @@ def test_metadata_resource_reports_its_named_fields(live, monkeypatch):
 
 
 def test_forbidden_error_envelope_keeps_its_status_and_bounds(live, monkeypatch):
+    from types import SimpleNamespace
+
     from scripts.swarm_ledger.api.resources import MAX_REPLY
     from tests.swarm_ledger.test_ledger_authority import authority
 
     document = {"tasks": [], "_meta": {"warnings": ["x" * 3000] * 100}}
-    monkeypatch.setattr(server.repository, "get_document", lambda slug, **kwargs: document)
+    monkeypatch.setattr(server.repository, "current", lambda slug, **kwargs: SimpleNamespace(state=document))
     headers = {
         "X-Ledger-Agent": "api-reader",
         "X-Ledger-Token": authority.agent_token(live["admin"], SLUG, "api-reader"),
@@ -2617,15 +2621,17 @@ def test_repository_optional_collections_have_empty_http_resources(live, monkeyp
 
 
 def test_optional_repository_fields_preserve_forbidden_details(live, monkeypatch):
+    from types import SimpleNamespace
+
     from tests.swarm_ledger.test_ledger_authority import authority
 
     document = {"_meta": {}}
 
     def read(slug):
         assert slug == SLUG
-        return document
+        return SimpleNamespace(state=document)
 
-    monkeypatch.setattr(server.repository, "get_document", read)
+    monkeypatch.setattr(server.repository, "current", read)
     headers = {
         "X-Ledger-Agent": "api-reader",
         "X-Ledger-Token": authority.agent_token(live["admin"], SLUG, "api-reader"),

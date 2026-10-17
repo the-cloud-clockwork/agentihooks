@@ -71,7 +71,7 @@ FIELDS = {
     "priority_clear": "by target reason",
     "notification_clear": "target",
     "notice": "by text",
-    "task_add": "by task title lane phase description depends_on territory kind contract proof workspace artifact profile plan_url plan_slice rank gain difficulty difficulty_source difficulty_confidence not_duplicate slice follow_up",
+    "task_add": "by task title lane phase description depends_on territory overlays repositories kind contract proof workspace artifact profile plan_url plan_slice rank gain difficulty difficulty_source difficulty_confidence not_duplicate slice follow_up",
     "task_update": "by item fields if_state if_match if_plan_lines_missing quote",
     "task_rank": "by item rank if_owned",
     "task_group": "by item members",
@@ -139,7 +139,7 @@ KIND_TYPES = {
     "plan_add": {"artifact": {"type": "string", "maxLength": 100000}},
     "task_rank": {"if_owned": {"type": "boolean"}},
 }
-for _field in ("depends_on", "territory", "if_state", "members", "watched", "halves"):
+for _field in ("depends_on", "territory", "overlays", "repositories", "if_state", "members", "watched", "halves"):
     TYPES[_field] = {"type": "array", "maxItems": 100, "items": {"type": "string", "maxLength": 2000}}
 
 
@@ -155,6 +155,18 @@ def operation_schema(kind: str) -> dict:
             "op": {"const": kind},
             "id": {"type": "string", "minLength": 1, "maxLength": 200},
             "controller_epoch": {"type": "integer", "minimum": 1},
+            "worker_claim": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["task_id", "execution_id", "execution_generation", "task_generation", "spec_revision"],
+                "properties": {
+                    "task_id": {"type": "string", "minLength": 1},
+                    "execution_id": {"type": "string", "minLength": 1},
+                    "execution_generation": {"type": "integer", "minimum": 1},
+                    "task_generation": {"type": "integer", "minimum": 1},
+                    "spec_revision": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+                },
+            },
         },
     }
 
@@ -187,7 +199,8 @@ def check_operations(payload: dict, core: ModuleType, task_ids: tuple) -> list:
             raise APIError(400, "schema_invalid", f"Operation {kind} does not match its schema at field {field}")
     try:
         core.check_body(
-            {"ops": [{k: v for k, v in op.items() if k != "controller_epoch"} for op in operations]}, task_ids
+            {"ops": [{k: v for k, v in op.items() if k != "controller_epoch"} for op in operations]},
+            task_ids,
         )
     except ValueError as exc:
         raise APIError(400, "schema_invalid", f"Operation does not match its domain schema: {exc}") from None

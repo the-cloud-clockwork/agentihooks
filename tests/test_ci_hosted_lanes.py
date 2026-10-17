@@ -30,6 +30,7 @@ DIRECT = {
     "startup-stages.yml": ("Startup stages", "startup-stages"),
 }
 LANE_USERS = {
+    "mutation-refinement-proof.yml",
     "test.yml",
     "proofs.yml",
     "test-leaks.yml",
@@ -40,6 +41,7 @@ LANE_USERS = {
 MUTATION_LANE_USERS = {"mutation-preflight.yml:stats", "mutation-preflight.yml:mutation-shard"}
 LEGS = {"mutation-preflight.yml:stats": "stats", "mutation-preflight.yml:mutation-shard": "shard"}
 EXCLUDED = {
+    "branch-lanes.yml": "every branch push runs one short grader that must refuse and cancel lane skipping workflows at once",
     "codex-cache.yml": "main push, six hourly and manual, one short job that seeds the Codex cache, no pull request trigger",
     "coverage-stability.yml": "a manual dispatch runs one short job that only reads dev run data",
     "pages.yml": "a rare manual docs build and deploy; the github-pages environment decides which branches deploy",
@@ -242,7 +244,7 @@ def test_a_called_workflow_never_waits_on_its_callers_lane(caller):
         assert mutation["group"] != _resolve(_block("mutation-preflight.yml"), **github)["group"]
 
 
-def test_direct_dispatches_and_branch_pushes_queue_on_a_lane():
+def test_direct_dispatches_and_mutation_branch_pushes_queue_on_a_lane():
     dispatch = {"event_name": "workflow_dispatch", "ref": "refs/heads/diffcheck/plant", "run_id": 1000}
     for name, (title, _) in DIRECT.items():
         assert _is_lane(_resolve(_block(name), workflow=title, **dispatch)["group"]), name
@@ -257,6 +259,20 @@ def test_direct_dispatches_and_branch_pushes_queue_on_a_lane():
         "queue": "single",
         "cancel-in-progress": True,
     }
+
+
+@pytest.mark.parametrize("name", ["startup-stages.yml", "worker-resources.yml"])
+def test_a_measurement_branch_push_never_holds_a_lane_that_proof_dispatches_wait_on(name):
+    title, own = DIRECT[name]
+    push = {"event_name": "push", "ref": "refs/heads/task-branch", "workflow": title}
+    for run_id in range(1000, 1010):
+        assert _resolve(_block(name), run_id=run_id, **push) == {
+            "group": f"{own}-refs/heads/task-branch",
+            "queue": "single",
+            "cancel-in-progress": None,
+        }
+    dispatch = {"event_name": "workflow_dispatch", "ref": "refs/heads/task-branch", "workflow": title, "run_id": 1000}
+    assert _resolve(_block(name), **dispatch) == {"group": "hosted-lane-a", "queue": "max", "cancel-in-progress": None}
 
 
 @pytest.mark.parametrize("event", ["push", "workflow_dispatch"])

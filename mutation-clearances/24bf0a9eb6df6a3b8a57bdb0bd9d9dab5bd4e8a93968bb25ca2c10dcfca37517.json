@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/runtime/operations.py:scripts.swarm_v2.runtime.operations.x\u01c1OperationJournal\u01c1settle__mutmut_8:2ea4f73d6b48dc1405d0ca003684d0a3b484d76405e8df1fd271d1c910aef13a": {
+    "reader": "standards_reader",
+    "reason": "settled is read only by the identity comparison, which overrides both sides with the same constants, so attempted True or False cannot change the outcome; later lines use current, phase, result, sent and refusal."
+  }
+}

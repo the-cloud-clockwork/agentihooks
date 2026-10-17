@@ -114,7 +114,7 @@ def test_task_add_without_phases_in_the_ledger_takes_only_its_own_link():
     assert doc["tasks"][0]["plan_url"] == PLAN
 
 
-def test_a_move_into_an_anchored_phase_is_judged_on_the_moved_task(monkeypatch):
+def test_a_move_into_an_anchored_phase_is_never_refused_for_a_missing_slice(monkeypatch):
     from scripts.swarm_ledger import plan_ranges
 
     monkeypatch.setattr(plan_ranges, "anchors", lambda doc, phase: ["first"] if phase.get("id") == "p1" else [])
@@ -126,11 +126,11 @@ def test_a_move_into_an_anchored_phase_is_judged_on_the_moved_task(monkeypatch):
     def move(item, by="planner"):
         return {"op": "task_update", "by": by, "item": f"tasks/{item}", "fields": {"phase": "p1"}}
 
-    refused = "phase p1 has a plan with slice anchors"
-    assert ledger_tasks.update_refusal(doc, move("mine")).startswith(refused)
-    assert ledger_tasks.update_refusal(doc, move("ghost")).startswith(refused)
-    assert ledger_tasks.update_refusal(doc, move("home")) == ""
+    assert [ledger_tasks.update_refusal(doc, move(item)) for item in ("mine", "ghost", "home")] == ["", "", ""]
     assert ledger_tasks.update_refusal(doc, move("mine", by="swarm")) == ""
+    assert ledger_tasks.unsliced_refusal(doc, {"id": "new", "phase": "p1"}, "planner").startswith(
+        "phase p1 has a plan with slice anchors"
+    )
     assert ledger_tasks.unsliced_refusal({}, {"phase": "p1"}, "planner") == ""
 
 
@@ -341,7 +341,7 @@ def test_publish_plan_command_links_each_phase_and_comments_it(plan_ledger, tmp_
 
 def served(slug, ops=None):
     state, rejected = core.sync(slug, ops=ops)
-    return {**state, "rejected": rejected}
+    return {**state, "applied": [op["id"] for op in ops or [] if op["id"] not in rejected], "rejected": rejected}
 
 
 def cli(monkeypatch, slug, *argv):
@@ -623,7 +623,10 @@ def test_task_cli_forwards_each_set_option_and_names_the_plan_slice(monkeypatch)
     parser = ledger.build_parser()
     commands = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction)).choices
     option = next(a for a in commands["task"]._actions if a.dest == "plan_slice")
-    assert (option.default, option.help) == ("", "task slice anchor; computes its plan lines")
+    assert (option.default, option.help) == (
+        "",
+        "task slice anchor; computes its plan lines; none uses the task description",
+    )
 
 
 def test_ledger_page_shows_the_plan_link_on_a_task():

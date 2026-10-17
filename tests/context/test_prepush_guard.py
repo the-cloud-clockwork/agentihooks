@@ -132,6 +132,9 @@ def test_push_from_another_directory_resolves_the_repository(repo, tmp_path, mon
         "cd -P {worktree} && git push",
         "cd && cd worktree && git push",
         "cd {worktree}; cd missing; git push",
+        "env -C {worktree} git push",
+        "cd {worktree}; cd ..; cd -; git push",
+        "cd {worktree} && (git push)",
     ],
 )
 def test_the_push_is_graded_in_the_folder_the_command_changes_into(repo, tmp_path, monkeypatch, command):
@@ -146,6 +149,27 @@ def test_the_push_is_graded_in_the_folder_the_command_changes_into(repo, tmp_pat
     with pytest.raises(BlockAction) as blocked:
         check_prepush(_bash(command.format(worktree=worktree), repo))
     assert str(blocked.value) == _message(worktree)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "(cd {worktree}); git push",
+        "(cd {worktree} && true) && git push",
+        "cd {worktree} | true; git push",
+        "cd {worktree} & git push",
+        "env -C {worktree} true; git push",
+        "cd {worktree} && cd - && git push",
+        "cd -; git push",
+    ],
+)
+def test_a_folder_change_that_does_not_last_leaves_the_push_where_it_started(repo, tmp_path, command):
+    worktree = _init(tmp_path / "worktree")
+    _stamp(worktree)
+
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(_bash(command.format(worktree=worktree), repo))
+    assert str(blocked.value) == _message(repo)
 
 
 @pytest.mark.parametrize("workdir", ["{worktree}", "../worktree"])
@@ -273,6 +297,42 @@ def test_swarm_push_in_pr_state_uses_its_recorded_branch(repo, swarm_worktree, t
     with pytest.raises(BlockAction) as blocked:
         check_prepush(_bash("git push origin HEAD", repo))
     assert str(blocked.value) == _message(swarm_worktree)
+
+
+@pytest.mark.parametrize("checkout", ["primary", "worktree"])
+def test_a_push_from_a_second_repository_grades_only_that_repository(swarm_worktree, tmp_path, checkout):
+    from tests.swarm_ledger import legacy_page
+
+    task = {
+        "id": "push",
+        "state": "claimed",
+        "claimed_by": "engineer@test",
+        "branch": "task-branch",
+        "worktree": str(swarm_worktree),
+    }
+    legacy_page.store(tmp_path / "ledgers", "rig", {"tasks": [task]})
+    infra = _init(tmp_path / "infra")
+    _git(infra, "add", "scripts/ci_prepush/__init__.py")
+    _git(infra, "commit", "-q", "-m", "guard")
+    if checkout == "worktree":
+        infra_tree = tmp_path / "worktrees" / "infra" / "engineer-test-2"
+        _git(infra, "worktree", "add", "-q", "-b", "engineer-test-2", str(infra_tree))
+        infra = infra_tree
+    payload = _bash("git push -u origin HEAD", infra)
+    _stamp(swarm_worktree)
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(payload)
+    assert str(blocked.value) == _message(infra)
+
+    _stamp(infra)
+    _git(swarm_worktree, "commit", "-q", "--allow-empty", "-m", "more")
+    check_prepush(payload)
+
+
+def test_a_worktree_shares_its_repository_common_dir(repo, swarm_worktree, tmp_path):
+    assert prepush_guard._common_dir(swarm_worktree) == str(repo / ".git")
+    assert prepush_guard._common_dir(repo) == str(repo / ".git")
+    assert prepush_guard._common_dir(tmp_path) is None
 
 
 @pytest.mark.parametrize("folder", ["engineer-test", "engineer-test-2"])

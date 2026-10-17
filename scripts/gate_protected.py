@@ -1,12 +1,13 @@
 import argparse
 import json
 import subprocess
+from copy import deepcopy
 from datetime import UTC, date, datetime
 from pathlib import Path
 
 import yaml
 
-from scripts import ci_reuse, ci_runner_trust, ci_wiring
+from scripts import ci_branch_lanes, ci_reuse, ci_runner_trust, ci_wiring
 
 GATE = ci_wiring.GATE
 WORKFLOWS = ".github/workflows"
@@ -70,10 +71,18 @@ def _aggregator_problems(
             field == "steps"
             and base_id == "gate-required"
             and head_job.get("steps")
-            in (
-                [ci_reuse.gate_steps(selected=selected) for selected in (False, True)]
-                + [ci_reuse.gate_steps(queue_tier=True), ci_reuse.gate_steps(queue_tier=True, promotion=True)]
-            )
+            in [
+                ci_reuse.gate_steps(**form, summary=summary)
+                for form in (
+                    {},
+                    {"selected": True},
+                    {"queue_tier": True},
+                    {"queue_tier": True, "promotion": True},
+                    {"queue_tier": True, "consolidated": True},
+                    {"queue_tier": True, "promotion": True, "consolidated": True},
+                )
+                for summary in (False, True)
+            ]
         )
         and not (field == "runs-on" and head_job.get(field) in runners(policy))
     ]
@@ -95,10 +104,18 @@ def _duration_problems(base: dict, head: dict) -> list[str]:
         != "github.event_name != 'merge_group' && github.event_name != 'pull_request'"
     ):
         return []
-    previous = base["jobs"].get("durations", {})
-    producer = head["jobs"].get("durations", {})
+    previous = base["jobs"].get("durations", base["jobs"].get("select", {}))
+    producer = head["jobs"].get("durations", head["jobs"].get("select", {}))
     prefix = ci_reuse.duration_provenance_steps()
     problems = []
+    if "durations" in base["jobs"] and "durations" not in head["jobs"]:
+        selection = base["jobs"].get("select", {})
+        if not selection:
+            problems.append("The head moves durations provenance without existing selection admission.")
+        previous = previous | {
+            "outputs": previous.get("outputs", {}) | selection.get("outputs", {}),
+            "timeout-minutes": selection.get("timeout-minutes"),
+        }
     if producer.get("steps", [])[: len(prefix)] != prefix:
         problems.append("The head skips reuse without protected durations provenance.")
     mutable = {"steps", "if", "runs-on"}
@@ -135,9 +152,18 @@ def grade(
         for job_id, job in base_workflows[file]["jobs"].items()
         if job.get("if") is False and job_id not in head_jobs
     )
+    duration_problems = _duration_problems(base_workflows[file], head_workflows.get(file, {"jobs": {}}))
+    if (
+        "durations" in base_workflows[file]["jobs"]
+        and "durations" not in head_jobs
+        and head_jobs.get("reuse", {}).get("if")
+        == "github.event_name != 'merge_group' && github.event_name != 'pull_request'"
+        and not duration_problems
+    ):
+        retired = retired | {"durations"}
     problems = _aggregator_problems(base_gates[0], head_gates[0], policy, retired)
     problems += _reuse_problems(base_workflows[file]["jobs"], head_jobs, policy)
-    problems += _duration_problems(base_workflows[file], head_workflows.get(file, {"jobs": {}}))
+    problems += duration_problems
     return problems + ci_wiring.check(head_workflows, _protected_config(base_config, head_config), today)
 
 
@@ -156,6 +182,20 @@ def load(root: Path, rev: str) -> tuple[dict[str, dict], dict]:
     return workflows, config
 
 
+def _preflight_problems(base_workflows: dict[str, dict], head_workflows: dict[str, dict]) -> list[str]:
+    baseline = base_workflows.get("branch-lanes.yml")
+    if baseline is None:
+        return []
+    expanded = deepcopy(baseline)
+    events = expanded[True] if True in expanded else expanded["on"]
+    ignored = (events.get("push") or {}).get("branches-ignore", [])
+    if "diffcheck/**" in ignored:
+        ignored.remove("diffcheck/**")
+    if head_workflows.get("branch-lanes.yml") in (baseline, expanded):
+        return []
+    return ["The head changes or removes the trusted branch lane preflight."]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default=".")
@@ -165,7 +205,7 @@ def main(argv: list[str] | None = None) -> int:
     root = Path(args.root)
     merge_base = _git(root, "merge-base", args.base, args.head).strip()
     base_workflows, branched_config = load(root, merge_base)
-    _, tip_config = load(root, args.base)
+    tip_workflows, tip_config = load(root, args.base)
     base_config = {
         section: {**branched_config.get(section, {}), **tip_config.get(section, {})}
         for section in ("not_gates", "outside_gate")
@@ -176,6 +216,15 @@ def main(argv: list[str] | None = None) -> int:
         actors = json.loads(_git(root, "show", f"{args.base}:{ci_runner_trust.ACTORS}"))
         ci_runner_trust.validate_actors(actors)
     problems = grade(base_workflows, base_config, head_workflows, head_config, datetime.now(UTC).date(), actors)
+    preflight = _preflight_problems(tip_workflows, head_workflows)
+    governed = {"branch-lanes.yml"} if "branch-lanes.yml" in tip_workflows and not preflight else set()
+    problems += preflight
+    problems += [
+        f"{file}: {problem}"
+        for file, workflow in head_workflows.items()
+        if file not in governed and workflow != base_workflows.get(file)
+        for problem in ci_branch_lanes.problems(workflow, base_workflows.get(file))
+    ]
     if actors is not None:
         problems += ci_runner_trust.check(head_workflows, actors)
     print(f"graded {args.head[:12]} against merge base {merge_base[:12]}: {len(problems)} protected gate problems")

@@ -104,7 +104,7 @@
     [".entry-actions .link.danger", "Delete this entry."],
     [".entry-actions .link", "Edit this entry."],
     [".add", "Write a new entry here. Enter sends it, Esc cancels."],
-    ['.freeze[aria-pressed="true"]', "Lift this freeze so the item and everything under it can be claimed again."],
+    ['.freeze[aria-pressed="true"]', "Lift this freeze. Items under it keep their own freezes."],
     [".freeze", "Freeze this item and everything under it. Claimed work finishes; nothing new is claimed."],
     ["#swarm-freezes button", "End this freeze or focus so the work it held can be claimed again."],
     ['.scope[aria-pressed="true"]', "Bring this item back in scope."],

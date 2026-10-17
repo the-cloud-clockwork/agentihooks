@@ -11,7 +11,7 @@ pytestmark = pytest.mark.unit
 _ROOT = Path(__file__).resolve().parents[1]
 _SELECTORS = [
     ("coverage-ratchet", "Find the run that published the base baseline"),
-    ("durations", "Find the dev push run of the dispatched base"),
+    ("select", "Find the dev push run of the dispatched base"),
 ]
 
 
@@ -138,7 +138,8 @@ def lookup(tmp_path):
             WAIT_SECONDS="0",
         )
         job, name = selector
-        steps = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"][job]["steps"]
+        definitions = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+        steps = definitions["select" if job == "durations" and job not in definitions else job]["steps"]
         script = next(step["run"] for step in steps if step.get("name") == name)
         result = subprocess.run(["bash", "-e", "-o", "pipefail", "-c", script], env=env, capture_output=True, text=True)
         return result, output.read_text(), requests.read_text()
@@ -152,7 +153,7 @@ def lookup(tmp_path):
         (selector, event)
         for selector in _SELECTORS
         for event in ("push", "merge_group")
-        if selector[0] != "durations" or event == "push"
+        if selector[0] != "select" or event == "push"
     ],
 )
 def test_lookup_accepts_measured_publication_when_its_ratchet_failed(lookup, selector, event):

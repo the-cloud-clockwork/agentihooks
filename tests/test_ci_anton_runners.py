@@ -28,7 +28,9 @@ def pool(label):
 
 
 MOVED = {
+    ("mutation-refinement-proof.yml", "planning"): LIGHT,
     ("access-audit.yml", "audit"): LIGHT,
+    ("branch-lanes.yml", "grade"): LIGHT,
     ("hive-worker.yml", "contracts"): LIGHT,
     ("hive-worker.yml", "kind"): STANDARD,
     ("hive-worker.yml", "publish"): STANDARD,
@@ -42,12 +44,14 @@ MOVED = {
     ("mutation-preflight.yml", "mutation"): LIGHT,
     ("mutation-preflight.yml", "mutation-shard"): BATCH,
     ("mutation-preflight.yml", "plan"): LIGHT,
-    ("mutation-preflight.yml", "pull-request"): LIGHT,
     ("mutation-preflight.yml", "refine"): LIGHT,
     ("mutation-replay.yml", "plan"): LIGHT,
     ("mutation-replay.yml", "grade"): BATCH,
     ("mutation-replay.yml", "verify"): LIGHT,
     ("mutation-preflight.yml", "stats"): BATCH,
+    ("mutation-preflight.yml", "touched-tests"): STANDARD,
+    ("proofs.yml", "operations-cpu"): BATCH,
+    ("proofs.yml", "operations-receipts"): BATCH,
     ("proofs.yml", "tests"): STANDARD,
     ("semgrep.yml", "scan"): LIGHT,
     ("startup-stages.yml", "measure"): STANDARD,
@@ -67,10 +71,9 @@ MOVED = {
     ("test.yml", "admission"): LIGHT,
     ("test.yml", "coverage-baseline"): LIGHT,
     ("test.yml", "coverage-ratchet"): LIGHT,
-    ("test.yml", "durations"): LIGHT,
     ("test.yml", "flake-budget"): LIGHT,
     ("test.yml", "gate-required"): LIGHT,
-    ("test.yml", "kind-due"): LIGHT,
+    ("test.yml", "kind-due"): QUEUED,
     ("test.yml", "lint"): QUEUED,
     ("test.yml", "mutation"): BATCH,
     ("test.yml", "mutation-plan"): LIGHT,
@@ -100,6 +103,7 @@ TARGET = {("gate-protected.yml", "grade")}
 
 # The runner class table holds the release path and the access read back on hosted runners.
 CLASSED = {
+    ("mutation-deadline-proof.yml", "receipts"),
     ("ci-templates.yml", "actionlint"),
     ("pages.yml", "build"),
     ("promote.yml", "promote"),
@@ -111,6 +115,7 @@ CLASSED = {
 
 HOSTED = OIDC | PROTECTED | TARGET | CLASSED
 CONSOLIDATED = {
+    ("test.yml", "durations"),
     ("swarm-node-smoke.yml", "worker-health"),
     ("swarm-smoke.yml", "compose-hive"),
     ("swarm-smoke.yml", "hive-join"),
@@ -265,7 +270,7 @@ def test_every_hosted_job_stays_on_a_hosted_runner():
         assert jobs[(name, job)]["runs-on"] == "ubuntu-latest", f"{name}:{job}"
     for name, job in PROTECTED | TARGET | CLASSED:
         assert jobs[(name, job)]["runs-on"] == "ubuntu-latest", f"{name}:{job}"
-    assert set(jobs) | CONSOLIDATED == set(MOVED) | HOSTED
+    assert set(jobs) | CONSOLIDATED == set(MOVED) | HOSTED | CONSOLIDATED
 
 
 def test_jobs_with_service_or_job_containers_run_on_the_docker_pool():

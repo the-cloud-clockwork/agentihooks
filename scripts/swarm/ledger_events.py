@@ -6,6 +6,7 @@ Each item is sent once, so a replay of the same ledger sends nothing; the wake l
 reader.
 """
 
+import collections
 import functools
 import json
 import re
@@ -44,11 +45,13 @@ RED_NOTICE = re.compile(r"^Your pull request (\S+) for .* has red checks and no 
 GATE_JOB = re.compile(rf"^[ \t]+name:[ \t]*(['\"]?){re.escape(GATE)}\1[ \t]*$", re.MULTILINE)
 CONTEXT_NODES = (
     "nodes{...on CheckRun{databaseId name conclusion completedAt isRequired(pullRequestNumber:$number) "
-    "checkSuite{workflowRun{workflow{name}}}} "
+    "checkSuite{app{databaseId} workflowRun{databaseId event workflow{id name}}}} "
     "...on StatusContext{context state createdAt isRequired(pullRequestNumber:$number)}} "
     "pageInfo{hasNextPage endCursor}"
 )
-SUITE_NODES = "nodes{status conclusion workflowRun{databaseId createdAt}} pageInfo{hasNextPage endCursor}"
+SUITE_NODES = (
+    "nodes{status conclusion workflowRun{databaseId createdAt event workflow{id}}} pageInfo{hasNextPage endCursor}"
+)
 PULL_QUERY = (
     "query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid mergeQueueEntry{id state} "
     "mergeable isDraft "
@@ -95,11 +98,16 @@ def iso_ms(text):
 
 
 def pull_request(raw):
-    everything = _newest(raw.get("statusCheckRollup") or [])
-    commits, checks = raw.get("commits") or [], _required(raw.get("gated"), everything)
     suites = raw.get("checkSuites") or []
+    rollup = raw.get("statusCheckRollup") or []
+    newest = _newest_runs(rollup, suites)
+    everything = _newest([check for check in rollup if not _superseded(check, newest)])
+    commits, checks = raw.get("commits") or [], _required(raw.get("gated"), everything)
     results = [check.get("conclusion") or check.get("state") for check in checks]
-    running = any(suite.get("workflowRun") and suite.get("status") != "COMPLETED" for suite in suites)
+    running = any(
+        suite.get("workflowRun") and suite.get("status") != "COMPLETED" and not _superseded(suite, newest)
+        for suite in suites
+    )
     pushes = [
         iso_ms(suite["workflowRun"]["createdAt"])
         for suite in suites
@@ -146,9 +154,32 @@ def pull_request(raw):
 def _newest(checks):
     latest = {}
     for order, check in sorted(enumerate(checks), key=_mark):
-        run = ((check.get("checkSuite") or {}).get("workflowRun") or {}).get("workflow") or {}
-        latest[(run.get("name"), check.get("name"), check.get("context"))] = (order, check)
+        workflow = (_workflow_run(check).get("workflow") or {}).get("name")
+        latest[(workflow, _run_key(check), check.get("name"), check.get("context"))] = (order, check)
     return [check for _, check in sorted(latest.values())]
+
+
+def _workflow_run(item):
+    return (item.get("checkSuite") or item).get("workflowRun") or {}
+
+
+def _newest_runs(checks, suites):
+    newest = collections.defaultdict(int)
+    for item in [*checks, *suites]:
+        key, run = _run_key(item), _workflow_run(item).get("databaseId")
+        if key[0] and run:
+            newest[key] = max(newest[key], run)
+    return newest
+
+
+def _superseded(item, newest):
+    run = _workflow_run(item).get("databaseId")
+    return bool(run) and run < newest.get(_run_key(item), run)
+
+
+def _run_key(item):
+    run = _workflow_run(item)
+    return (run.get("workflow") or {}).get("id"), run.get("event")
 
 
 def _required(gated, checks):
@@ -205,7 +236,7 @@ def declares_gate(tree):
     return any(GATE_JOB.search(text) for text in texts if text)
 
 
-def view(url, run=subprocess.run):
+def view(url, run=subprocess.run, required_checks=None):
     number = _number(url)
     try:
         done = run(
@@ -216,7 +247,9 @@ def view(url, run=subprocess.run):
         )
         if done.returncode != 0:
             return None
-        return _view_resource(json.loads(done.stdout)["data"]["resource"], number, run=run)
+        return _view_resource(
+            json.loads(done.stdout)["data"]["resource"], number, run=run, required_checks=required_checks
+        )
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
         return None
 
@@ -234,7 +267,39 @@ def _number(url):
     return found[1] if found else "0"
 
 
-def _view_resource(raw, number, gated=None, run=subprocess.run):
+def _required_app(check, required_checks):
+    app_id = required_checks.get(check.get("name") or check.get("context"))
+    app = ((check.get("checkSuite") or {}).get("app") or {}).get("databaseId")
+    return app_id is None or app == app_id
+
+
+def _required_pull_request(raw, required_checks):
+    newest = _newest_runs(raw["statusCheckRollup"], raw["checkSuites"])
+    checks = _newest(
+        [
+            check
+            for check in raw["statusCheckRollup"]
+            if check.get("isRequired") and _required_app(check, required_checks) and not _superseded(check, newest)
+        ]
+    )
+    results = [check.get("conclusion") or check.get("state") for check in checks]
+    return PullRequest(
+        raw["state"],
+        None,
+        None,
+        any(result in RED for result in results),
+        resolved=set(required_checks).issubset(check.get("name") or check.get("context") for check in checks)
+        and all(result in PASSED | {"NEUTRAL"} for result in results),
+        failed=tuple(
+            check.get("name") or check.get("context") or "a check"
+            for check, result in zip(checks, results)
+            if result in RED
+        ),
+        head=raw["headRefOid"],
+    )
+
+
+def _view_resource(raw, number, gated=None, run=subprocess.run, required_checks=None):
     try:
         raw = dict(raw)
         commits = [node["commit"] for node in raw["commits"]["nodes"]]
@@ -249,6 +314,8 @@ def _view_resource(raw, number, gated=None, run=subprocess.run):
         raw["commits"] = commits
         raw["statusCheckRollup"] = checks
         raw["checkSuites"] = suites
+        if required_checks is not None:
+            return _required_pull_request(raw, required_checks)
         raw["gated"] = gated if gated is not None else bool(commits) and declares_gate(commit.get("file"))
         return pull_request(raw)
     except (ValueError, KeyError, TypeError):
@@ -556,8 +623,9 @@ def _describe(slug, event, tasks):
     name, _, item = target.partition("/")
     if kind == "added" and name == "followups":
         return (
-            f"{by} added a follow-up on ledger {slug}: {event.get('text', '')}\n"
-            "Decide it: turn it into a task, close it with a status, or flag it for the operator."
+            f"{by} added a follow-up {item} on ledger {slug}: {event.get('text', '')}\n"
+            "Decide it: turn it into a task, close it with a status, or flag it for the operator.\n"
+            f"Close it: agentihooks ledger --slug {slug} followup done {item}"
         )
     if kind == "added" and name == "questions":
         return f"{by} asked on ledger {slug}: {event.get('text', '')}\nAnswer it, or raise it to the operator."
@@ -584,8 +652,10 @@ def _followups(mail, doc, events, ledger, now_ms):
         age = now_ms - event["at"]
         if age >= FOLLOWUP_RAISE_MS:
             text = (
-                f"A follow-up on ledger {mail.slug} is still open fifteen minutes after {event['by']} added it: "
-                f"{followup['text']}\nDecide it now, or it goes to the operator's Priorities."
+                f"A follow-up {followup['id']} on ledger {mail.slug} is still open fifteen minutes "
+                f"after {event['by']} added it: {followup['text']}\n"
+                "Decide it now, or it goes to the operator's Priorities.\n"
+                f"Close it: agentihooks ledger --slug {mail.slug} followup done {followup['id']}"
             )
             sent += mail.send(f"{target}:raised", mail.owner(target), text, ref=f"{mail.slug}:event:{target}")
         if age >= FOLLOWUP_OPERATOR_MS:

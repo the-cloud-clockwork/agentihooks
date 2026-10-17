@@ -3,6 +3,7 @@
 /scripts/ci_mutation/ @nestorcolt
 /scripts/ci_*.py @nestorcolt
 /scripts/ci_reuse_job.yml @nestorcolt
+/scripts/ci_gate_summary_steps.yml @nestorcolt
 /scripts/gates/ @nestorcolt
 /scripts/gate_* @nestorcolt
 /scripts/size_limits.py @nestorcolt
@@ -17,6 +18,9 @@
 /tests/*ALLOWLIST* @nestorcolt
 /tests/count_floor.py @nestorcolt
 /tests/coverage_*.py @nestorcolt
+/tests/dep_inputs.py @nestorcolt
+/tests/dep_manifest.py @nestorcolt
+/tests/reused_coverage.py @nestorcolt
 /tests/test_coverage_*.py @nestorcolt
 /tests/dev_durations.py @nestorcolt
 /tests/flake_budget.py @nestorcolt
@@ -27,6 +31,9 @@
 /tests/shards.py @nestorcolt
 /tests/test_ci_*.py @nestorcolt
 /tests/test_codeowners.py @nestorcolt
+/tests/swarm_ledger/receipt_mutation_probe.py @nestorcolt
+/tests/swarm_ledger/receipt_stats_probe.py @nestorcolt
+/tests/ledger_load/paired.py @nestorcolt
 /tests/test_count_floor.py @nestorcolt
 /tests/test_dev_durations.py @nestorcolt
 /tests/test_gate_protected.py @nestorcolt

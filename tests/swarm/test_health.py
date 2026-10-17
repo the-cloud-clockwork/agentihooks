@@ -297,6 +297,36 @@ def test_reruns_with_no_reviews_report_zero_rounds():
     assert found["evidence"] == ["task t1", "started 4 times (3 reruns)", "0 review rounds"]
 
 
+@pytest.mark.parametrize("cause", ["watchdog", "park", "master"])
+def test_restarts_after_a_watchdog_reopen_a_park_or_a_master_change_are_not_reruns(cause):
+    first = ev("task started", "tasks/t1", by="swarm")
+    events = [first] + [{**first, "after": cause} for _ in range(5)]
+    assert run({"tasks": [task("t1")], "_meta": {"events": events}}) == []
+
+
+def test_plain_restarts_among_excused_ones_still_raise_the_proof_loop():
+    plain = ev("task started", "tasks/t1", by="swarm")
+    events = [plain, {**plain, "after": "park"}, plain, {**plain, "after": "watchdog"}, plain, plain]
+    [found] = run({"tasks": [task("t1")], "_meta": {"events": events}})
+    assert found["evidence"] == ["task t1", "started 6 times (3 reruns)", "0 review rounds"]
+
+
+def test_plain_restarts_after_an_excused_first_life_are_all_reruns():
+    plain = ev("task started", "tasks/t1", by="swarm")
+    events = [{**plain, "at": NOW + n} for n in (3, 2, 1)] + [{**plain, "after": "master", "at": NOW}]
+    [found] = run({"tasks": [task("t1")], "_meta": {"events": events}})
+    assert found["evidence"] == ["task t1", "started 4 times (3 reruns)", "0 review rounds"]
+
+
+def test_reruns_at_the_cap_are_no_proof_loop_and_one_more_measures_reruns_plus_rounds():
+    started = ev("task started", "tasks/t1", by="swarm")
+    tasks = {"t1": task("t1")}
+    reviews = {"t1": {"first": 1}}
+    assert health.proof_loops([started] * 3, tasks, LIMITS, reviews) == []
+    [found] = health.proof_loops([started] * 4, tasks, LIMITS, reviews)
+    assert found.measure == 4
+
+
 def test_an_idle_agent_holding_a_claim_is_named_with_its_task():
     ledger = {
         "tasks": [task("t1", state="claimed", pr_url="", title="Fold the chat panel")],

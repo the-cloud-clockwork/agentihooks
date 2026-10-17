@@ -11,7 +11,7 @@ from time import process_time
 from mutmut.utils.format_utils import get_mutant_name
 
 from scripts.ci_mutation.killers import KillMemory
-from scripts.ci_mutation.mutant_shards import shard_names
+from scripts.ci_mutation.mutant_shards import shard_names, shard_tests
 from scripts.ci_mutation.report import mutation_lines
 from scripts.ci_mutation.stats import write_part
 
@@ -47,6 +47,29 @@ def selected_mutants(filename: str, source: str, changed: set[int]) -> tuple[str
     module, selected = changed_mutations(filename, source, changed)
     code, names = combine_mutations_to_source(module, selected)
     return code, list(names)
+
+
+def selected_mutant_names(filename: str, source: str, changed: set[int]) -> list[str]:
+    import libcst as cst
+    from mutmut.mutation.file_mutation import group_by_top_level_node
+    from mutmut.mutation.trampoline_templates import mangle_function_name
+
+    module, selected = changed_mutations(filename, source, changed)
+    grouped = group_by_top_level_node(selected)
+    names = []
+    for statement in module.body:
+        if isinstance(statement, cst.FunctionDef):
+            functions = [(statement, None)]
+        elif isinstance(statement, cst.ClassDef) and isinstance(statement.body, cst.IndentedBlock):
+            functions = [
+                (method, statement.name.value) for method in statement.body.body if isinstance(method, cst.FunctionDef)
+            ]
+        else:
+            continue
+        for function, class_name in functions:
+            name = mangle_function_name(name=function.name.value, class_name=class_name)
+            names.extend(f"{name}__mutmut_{index + 1}" for index in range(len(grouped.get(function, ()))))
+    return names
 
 
 def keep_selected_tests(stats: dict[str, set[str]], tests_by_prefix: dict[str, set[str]]) -> set[str]:
@@ -269,6 +292,15 @@ LIGHT_BOOTSTRAP = (
 )
 
 
+def run_unit(
+    run_tests, runner, mutant_name: str | None, tests: list[str], chosen: list[str], memory: KillMemory
+) -> int:
+    if tests and not chosen:
+        # Each unit runs the head and one slice and together they cover every test, so a unit with none votes survived.
+        return 0
+    return run_tests(runner, mutant_name=mutant_name, tests=memory.prepare(mutant_name, chosen))
+
+
 def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats: str) -> None:
     from mutmut import __main__ as runner
 
@@ -335,7 +367,8 @@ def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats
             except runner.BadTestExecutionCommandsException:
                 # The stats shards proved these node ids collect, so a usage error here is the forced failure at import.
                 return 1
-        return run_tests(self, mutant_name=mutant_name, tests=memory.prepare(mutant_name, tests))
+        tests = list(tests)
+        return run_unit(run_tests, self, mutant_name, tests, shard_tests(tests, mutant_name, shard[0]), memory)
 
     memory = KillMemory(Path.cwd() / "killers")
 

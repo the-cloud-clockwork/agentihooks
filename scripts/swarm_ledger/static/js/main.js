@@ -12,6 +12,7 @@ import { showChat, wireChat, wireChatInput } from "./chat.js";
 import { refreshQuota, wireSwarm } from "./controls.js";
 import { connectEvents } from "./events.js";
 import { toggleFrozenView } from "./frozen_view.js";
+import { loadArchitecture } from "./architecture.js";
 
 function start() {
   loadSaved();
@@ -95,6 +96,7 @@ function start() {
 }
 
 wireSwarm();
+loadArchitecture();
 window.addEventListener("pagehide", () => flush(true));
 document.addEventListener("visibilitychange", () => { if (document.hidden) flush(true); });
 start();

@@ -45,6 +45,7 @@ AUTO = "auto"
 PICKED_LANES = ("eng", "ci")
 PLAN_MODE = ["--permission-mode", "plan"]
 REMOTE_PANE = "a remote agent's pane lives on its worker herdr server, never on the local one"
+MANAGED_RESUME = "unsupported resume: a managed Codex execution continues through its supervised server"
 
 
 def codex_plan_mode(environ):
@@ -294,8 +295,8 @@ class HerdrRuntime:
             decision["tasks"] = dict(self._quota_tasks)
         return decision
 
-    def host(self) -> host_budget.HostSample | None:
-        return host_budget.read_host()
+    def host(self) -> host_budget.HostSample | host_budget.Room | None:
+        return host_budget.controller_host(os.environ)
 
     def quota_previous(self, decision: dict) -> None:
         self._quota_previous = decision
@@ -534,7 +535,10 @@ class HerdrRuntime:
         )
         if saved and agent != saved["harness"]:
             saved = {key: value for key, value in saved.items() if key not in ("model", "account")}
-        task = {**task, "harness": agent}
+        from scripts.swarm_v2.runtime import codex
+
+        transport = codex.transport(config, agent)
+        task = {**task, "harness": agent, **({"transport": transport} if transport else {})}
         text = timing.call(
             prompt.build,
             config.slug,
@@ -547,8 +551,6 @@ class HerdrRuntime:
         )
         timing.call(priming_trace.write, self.home, config.slug, name, task)
         argv = self._argv(config, name, agent, text, f"{name}.md", profile, decision.overlays)
-        from scripts.swarm_v2.runtime import codex
-
         argv += codex.arguments(config, agent, task)
         argv += _pinned(decision.overlays, decision.bundle_revision)
         if saved.get("model"):
@@ -618,6 +620,8 @@ class HerdrRuntime:
 
     def resume(self, config, agent, text):
         """Reopen the agent's own conversation in a new pane of the same name; SpawnError unless herdr shows it there."""
+        if live_binding.managed(agent):
+            raise SpawnError(MANAGED_RESUME, "unsupported")
         if not agent.profile:
             raise SpawnError("unsupported resume: original profile is missing", "unsupported")
         if agent.harness not in effort_range.EFFORTS:
@@ -912,6 +916,7 @@ class HerdrRuntime:
 
     def _retire_managed(self, agent):
         from scripts.codex_session.binding import EXITED, BindingStore
+        from scripts.codex_session.supervisor import execution_directory
 
         store = connect()
         record = live_binding.transport(store, agent)
@@ -924,10 +929,39 @@ class HerdrRuntime:
             return False
         bindings = BindingStore(store)
         slug = store.names.slug_of(agent.name)
+        recorded = bindings.viewers(slug, record.execution_id)
+        try:
+            viewers = self._viewer_panes(agent.pane_id, recorded)
+        except Exception as exc:
+            self.refusals[agent.name] = {"process": record.server_pid, "refusal": f"pane list: {exc}"}
+            return False
+        for pane in viewers:
+            try:
+                self.close_pane(pane)
+            except Exception as exc:
+                self.refusals[agent.name] = {"process": record.server_pid, "refusal": f"viewer pane {pane}: {exc}"}
+                return False
+        directory = execution_directory(record)
+        if directory is not None and directory.exists():
+            try:
+                shutil.rmtree(directory)
+            except OSError as exc:
+                self.refusals[agent.name] = {"process": record.server_pid, "refusal": f"runtime home: {exc}"}
+                return False
         bindings.put(slug, replace(record, state=EXITED, active_turn_id=""))
         bindings.release(slug, record)
+        bindings.forget_viewers(slug, list(recorded))
         self.refusals.pop(agent.name, None)
         return True
+
+    def _viewer_panes(self, launch_pane, recorded):
+        """A recorded viewer is closed only while herdr still lists its pane on the terminal it was opened with,
+        because herdr reuses a closed pane's id."""
+        live = []
+        if recorded:
+            listed = {p["pane_id"]: p.get("terminal_id") for p in self.herdr(["pane", "list"])["panes"]}
+            live = [pane for pane, terminal in recorded.items() if terminal and listed.get(pane) == terminal]
+        return [pane for pane in dict.fromkeys((launch_pane, *live)) if pane]
 
     def retire_process(self, agent, pid, homes=(), start=0):
         if live_binding.managed(agent):
@@ -1096,6 +1130,12 @@ class HerdrRuntime:
         if agent.runtime_backend != "local":
             return
         try:
+            if live_binding.managed(agent):
+                from scripts.inbox.store import InboxStore
+                from scripts.inbox.wake import BY
+
+                InboxStore(connect().redis).send(BY, agent.name, text, fyi=True)
+                return
             self.herdr(["agent", "prompt", pane_target(agent), marked(text)])
         except Exception as exc:
             return str(exc) or type(exc).__name__

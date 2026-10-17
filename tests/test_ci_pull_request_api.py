@@ -1,7 +1,7 @@
 import ast
+import json
 import os
 import re
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -16,6 +16,7 @@ WORKSPACE = re.compile(r"\$\{?GITHUB_WORKSPACE\}?")
 # These API functions run only in local downloads or steps bound to the App token.
 LOCAL_ONLY = {
     ROOT / "scripts/ci_budget/jobs.py": {"read_page"},
+    ROOT / "scripts/ci_mutation/reuse.py": {"api"},
     ROOT / "tests/refresh_durations.py": {"_gh", "ci_run_ids", "ci_download"},
 }
 METADATA_ONLY = {ROOT / "scripts/ci_reuse.py": {"paged_reuse_job"}}
@@ -143,7 +144,6 @@ def test_no_script_a_step_runs_calls_the_api():
         ".github/coverage/combine.sh",
         ".github/coverage/proxy.py",
         ".github/coverage/sonar-retry.sh",
-        "deploy/helm/agentihooks-swarm/ci/kind-due.sh",
         "deploy/helm/agentihooks-swarm/ci/kind-smoke.sh",
         "docker/swarm-node/base-copy.sh",
         "docker/swarm-node/pull-base.sh",
@@ -157,9 +157,12 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/ci_cpu_quota.py",
         "scripts/ci_dependency_audit.py",
         "scripts/ci_dev_reuse.py",
+        "scripts/ci_gate_summary.py",
+        "scripts/ci_input_key.py",
         "scripts/ci_mutation/__main__.py",
         "scripts/ci_mutation/browser.py",
         "scripts/ci_mutation/plan.py",
+        "scripts/ci_mutation/reuse.py",
         "scripts/ci_queue_fail_fast.py",
         "scripts/ci_release.sh",
         "scripts/ci_semgrep.py",
@@ -171,6 +174,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/packaging/pull-runtime-image.sh",
         "scripts/packaging/swarm-image-clients.sh",
         "scripts/packaging/swarm-smoke.sh",
+        "scripts/packaging/swarm-smoke-parallel.sh",
         "scripts/size_limits.py",
         "scripts/swarm_ledger/artifact_sanity.py",
         "scripts/swarm_ledger/ledger_server.py",
@@ -182,14 +186,17 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/count_floor.py",
         "tests/coverage_baseline.py",
         "tests/coverage_ratchet.py",
+        "tests/dep_manifest.py",
         "tests/dev_durations.py",
         "tests/flake_budget.py",
         "tests/integration/swarm_node/run_health_proof.sh",
         "tests/js_lcov.py",
         "tests/kind_request.py",
         "tests/ledger_load/gate.py",
+        "tests/ledger_load/paired.py",
         "tests/ledger_load/streams.py",
         "tests/refresh_durations.py",
+        "tests/reused_coverage.py",
         "tests/shard_budget.py",
         "tests/shard_check.py",
         "scripts/ci_select.py",
@@ -203,6 +210,8 @@ def test_no_script_a_step_runs_calls_the_api():
     ]
     if (ROOT / "scripts/ci_runner_trust.py").exists():
         expected.extend(("scripts/ci_runner_trust.py", "scripts/gate_protected.py"))
+    if (ROOT / "scripts/ci_wall_clock.py").exists():
+        expected.append("scripts/ci_wall_clock.py")
     assert sorted(str(path.relative_to(ROOT)) for path in calls) == sorted(expected)
     assert {path: count for path, count in calls.items() if count} == {}
 
@@ -231,6 +240,13 @@ def test_the_reuse_factory_exemption_contains_only_command_replacements():
 def test_the_budget_reader_runs_only_on_the_app_token():
     reader = ROOT / "scripts/ci_budget/jobs.py"
     steps = [step for _, step, here in _all_steps() if reader in _called(step.get("run", ""), here)]
+    assert steps
+    assert all(step.get("env", {}).get("GH_TOKEN") == APP_TOKEN and not _holds_token(step) for step in steps)
+
+
+def test_the_preflight_reuse_lookup_runs_only_on_the_app_token():
+    lookup = ROOT / "scripts/ci_mutation/reuse.py"
+    steps = [step for _, step, here in _all_steps() if lookup in _called(step.get("run", ""), here)]
     assert steps
     assert all(step.get("env", {}).get("GH_TOKEN") == APP_TOKEN and not _holds_token(step) for step in steps)
 
@@ -441,11 +457,7 @@ def test_sonar_downloads_this_runs_coverage_after_the_shards():
     steps = sonar["steps"]
     download = next(step for step in steps if step.get("name") == "Download shard coverage")
     merge = next(step for step in steps if step.get("name") == "Merge shard coverage")
-    assert (
-        download["if"]
-        == merge["if"]
-        == ("steps.current.outputs.superseded != 'true' && needs.select.outputs.scope != 'none'")
-    )
+    assert download["if"] == merge["if"] == "needs.select.outputs.scope != 'none'"
     assert download["uses"].startswith("actions/download-artifact@")
     assert download["with"] == {"pattern": "coverage-3.12-*", "path": ".coverage-shards"}
     assert steps.index(download) < steps.index(merge)
@@ -476,50 +488,12 @@ def test_no_job_skips_on_a_tree_another_run_passed():
     assert "steps.lookup" not in (ROOT / ".github/workflows/test.yml").read_text()
 
 
-def _superseded(tmp_path, dev_head: str, sha: str = "a" * 40) -> tuple[int, str | None]:
-    step = next(step for step in _jobs()["sonar"]["steps"] if step.get("id") == "current")
-    tools = tmp_path / "bin"
-    tools.mkdir()
-    listing = f'echo "{dev_head}\trefs/heads/dev"' if dev_head else "true"
-    (tools / "git").write_text(f'#!/usr/bin/env bash\n[[ "$*" == "ls-remote origin refs/heads/dev" ]]\n{listing}\n')
-    (tools / "git").chmod(0o755)
-    output = tmp_path / "output"
-    result = subprocess.run(
-        ["bash", "-e", "-c", step["run"]],
-        env={**os.environ, "PATH": f"{tools}:{os.environ['PATH']}", "GITHUB_OUTPUT": str(output), "SHA": sha},
-        check=False,
-    )
-    return result.returncode, output.read_text() if output.exists() else None
-
-
-@pytest.mark.parametrize(("dev_head", "superseded"), [("a" * 40, "false"), ("b" * 40, "true")])
-def test_a_dev_push_skips_the_analysis_once_dev_moved_past_it(tmp_path, dev_head, superseded):
-    status, output = _superseded(tmp_path, dev_head)
-    assert status in ({0, 1} if superseded == "true" else {0})
-    assert output == f"superseded={superseded}\n"
-
-
-def test_an_unreadable_dev_head_fails_the_check_instead_of_skipping_the_analysis(tmp_path):
-    status, output = _superseded(tmp_path, "")
-    assert status != 0
-    assert output is None
-
-
-def test_sonar_names_the_current_dev_head_from_git_and_gates_the_scan_on_it():
+def test_sonar_scans_the_graded_revision_without_reading_the_dev_head():
     steps = _jobs()["sonar"]["steps"]
-    current = next(step for step in steps if step.get("id") == "current")
-    assert current["if"] == "github.event_name == 'push'"
-    assert current["env"] == {"SHA": "${{ github.sha }}"}
-    names = [step.get("name") for step in steps]
-    assert "Wait for older dev analyses" not in names
-    later = steps[steps.index(current) + 1 :]
-    gated = {
-        "Download shard coverage",
-        "Merge shard coverage",
-        "SonarQube Scan",
-        "SonarQube Quality Gate",
-        "Hold the Delivery L2 conditions",
-    }
-    assert {
-        step["name"] for step in later if "steps.current.outputs.superseded != 'true'" in step.get("if", "")
-    } >= gated
+    dev_head = re.compile(r"refs/heads/dev|origin[ /]\+?dev\b|:dev\b|github\.event\.after")
+    assert [step.get("name", step.get("uses")) for step in steps if dev_head.search(json.dumps(step))] == []
+    assert all("steps.current" not in step.get("if", "") for step in steps)
+    scan = next(step for step in steps if step.get("name") == "SonarQube Scan")
+    gate = next(step for step in steps if step.get("name") == "SonarQube Quality Gate")
+    assert "if" not in scan
+    assert "if" not in gate

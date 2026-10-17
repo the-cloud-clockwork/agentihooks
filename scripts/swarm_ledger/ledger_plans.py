@@ -145,6 +145,11 @@ def task_refusal(doc: dict, task: dict) -> str:
 
 
 def with_plan_slice(doc: dict, fields: dict) -> dict:
+    if fields.get("plan_slice") == "none":
+        return {
+            **{key: value for key, value in fields.items() if key not in ("plan_slice", "slice")},
+            "follow_up": True,
+        }
     row = next((s for s in doc.get("slices", []) if f"slices/{s.get('id')}" == fields.get("slice")), {})
     if not row.get("lines") or "plan_slice" in fields:
         return fields

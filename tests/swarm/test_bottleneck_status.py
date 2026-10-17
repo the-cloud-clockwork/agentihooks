@@ -226,6 +226,20 @@ def test_status_json_and_text_share_the_detectors_stage_trend_and_action(env, mo
     assert "Top bottleneck seat wait; trend rising; measured 0 minutes ago; last action Added a seat" in out
 
 
+def test_status_json_and_text_show_the_inbox_outbox_records_set_aside(env, capsys):
+    from scripts.inbox import outbox
+
+    store, _, _ = env
+    cli.main(["sw", "create", "--repo", "/repo"])
+    cli.cmd_status(store, SimpleNamespace(slug="sw", json=False))
+    assert "inbox outbox" not in capsys.readouterr().out
+    outbox.home().mkdir(parents=True, exist_ok=True)
+    outbox.skipped_path().write_text('{"reason": "corrupt", "line": "x"}\n')
+    assert status.status_report(store, "sw", {"tasks": []})["outbox"] == {"queued": 0, "retrying": 0, "set_aside": 1}
+    cli.cmd_status(store, SimpleNamespace(slug="sw", json=False))
+    assert "inbox outbox  queued 0  retrying 0  set aside 1\n" in capsys.readouterr().out
+
+
 def test_tick_delivers_new_metric_stage_once_before_status_publication(env, monkeypatch):
     from tests.inbox.test_wake import FakeHerdr
 

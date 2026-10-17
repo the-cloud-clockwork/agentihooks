@@ -44,6 +44,28 @@ def ready(container):
     raise AssertionError("container readiness timeout")
 
 
+def heartbeats(container: str, root: str, initial: dict | None = None) -> dict:
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        try:
+            ticks = json.loads(
+                docker(
+                    "exec",
+                    container,
+                    "python",
+                    "-c",
+                    f"import json; from pathlib import Path; r=Path({root!r}); print(json.dumps({{p.name:json.loads(p.read_text())['tick'] for p in r.glob('heartbeat-*.json')}}))",
+                )
+            )
+        except (subprocess.CalledProcessError, ValueError) as exc:
+            ticks = getattr(exc, "output", None) or exc
+        else:
+            if len(ticks) == 5 and all(ticks.get(key, value) > value for key, value in (initial or {}).items()):
+                return ticks
+        time.sleep(0.02)
+    raise AssertionError(f"heartbeats not accepted before timeout: initial={initial}, observed={ticks}")
+
+
 def herdr_argv(container, root):
     attempt = str(Path(root).parent.parent.parent)
     return [
@@ -130,23 +152,9 @@ def run_case(image, mode, output, kill=False, supervised=False, viewer=True):
                 if exc.returncode != 137:
                     raise
         else:
-            before = docker(
-                "exec",
-                container,
-                "python",
-                "-c",
-                f"import json; from pathlib import Path; r=Path({root!r}); print(json.dumps({{p.name:json.loads(p.read_text())['tick'] for p in r.glob('heartbeat-*.json')}}))",
-            )
+            initial = heartbeats(container, root)
             terminal = terminal_disconnect(container, root) if viewer else None
-            time.sleep(0.2)
-            after = docker(
-                "exec",
-                container,
-                "python",
-                "-c",
-                f"import json; from pathlib import Path; r=Path({root!r}); print(json.dumps({{p.name:json.loads(p.read_text())['tick'] for p in r.glob('heartbeat-*.json')}}))",
-            )
-            initial, final = json.loads(before), json.loads(after)
+            final = heartbeats(container, root, initial)
             assert len(initial) == 5 and all(final[k] > v for k, v in initial.items())
             start = time.monotonic()
             docker("kill", "--signal", "TERM", container)

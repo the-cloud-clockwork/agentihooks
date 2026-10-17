@@ -43,6 +43,7 @@ mkdir -p "$output"
 docker info --format '{{.DriverStatus}}' > "$output/docker-driver.txt"
 if [[ "$(< "$output/docker-driver.txt")" == *io.containerd.snapshotter.v1* ]]; then
     build_args+=(--provenance=false --output "type=image,compression=uncompressed")
+    if [[ -n "${WORKER_LAYERS:-}" ]]; then build_args+=(--cache-from "type=local,src=$WORKER_LAYERS"); fi
 fi
 fixture="$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
 image="agentihooks-worker-proof:$fixture"
@@ -225,3 +226,4 @@ if sys.argv[4]=='all':
     (output/'result.json').write_text(json.dumps(shared|{'cases':['A','B','C'],'status':'passed','production_rollout':'not exercised'},indent=2)+'\n')
 print('SV2-IMG-01 passed: two offline startups, three rejected builds, uncached rebuild and retained image rollback' if sys.argv[4]=='all' else 'Worker startup and rejection proof passed')
 PY
+if [[ -n "${WORKER_KEEP_IMAGE:-}" ]]; then docker tag "$image" "$WORKER_KEEP_IMAGE"; fi

@@ -51,7 +51,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", default="origin/dev")
     parser.add_argument("--head", default="HEAD")
-    parser.add_argument("--target", type=float, default=240)
+    parser.add_argument("--target", type=float, default=120)
     parser.add_argument("--stats-target", type=float, default=30)
     parser.add_argument("--limit", type=int, default=10)
     args = parser.parse_args()

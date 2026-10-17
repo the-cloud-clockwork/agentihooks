@@ -78,14 +78,14 @@ def evidence(tmp_path, *, reused=False, run_id=123):
     return run, record, folder
 
 
-@pytest.mark.parametrize("producer", ["durations", "lint", "unit (3.12, 1)"])
+@pytest.mark.parametrize("producer", ["durations", "select", "lint", "unit (3.12, 1)"])
 @pytest.mark.parametrize("result", ["success", "failure", "skipped"])
 def test_queue_provenance_can_move_only_to_successful_durations(tmp_path, producer, result):
     _, _, folder = evidence(tmp_path)
     jobs = [json.loads(line) for line in (folder / "jobs.jsonl").read_text().splitlines()]
     jobs[0] = {"name": producer, "conclusion": result}
     (folder / "jobs.jsonl").write_text("".join(json.dumps(job) + "\n" for job in jobs))
-    expected = 123 if producer == "durations" and result == "success" else None
+    expected = 123 if producer in {"durations", "select"} and result == "success" else None
     assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) == expected
 
 
@@ -212,8 +212,9 @@ def test_workflow_preserves_downstream_artifacts():
     for kind in ("durations", "flakes", "coverage"):
         restored = steps[f"Restore queue shard {kind}"]
         assert restored["with"]["run-id"] == "${{ needs.split.outputs.source }}"
-    assert jobs["split"]["outputs"]["source"] == "${{ needs.durations.outputs.source }}"
-    assert jobs["durations"]["outputs"]["source"] == "${{ steps.unit-source.outputs.source }}"
+    producer = "durations" if "durations" in jobs else "select"
+    assert jobs["split"]["outputs"]["source"] == "${{ needs." + producer + ".outputs.source }}"
+    assert jobs.get("durations", jobs["select"])["outputs"]["source"] == "${{ steps.unit-source.outputs.source }}"
     for job in ("sonar", "coverage-baseline", "refresh-durations", "flake-budget"):
         assert "unit" in jobs[job]["needs"]
 
@@ -331,3 +332,10 @@ def test_cli_without_an_output_file_reports_the_source(tmp_path, monkeypatch, ca
     monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
     assert ci_dev_reuse.main(["--head", HEAD, "--repository", REPOSITORY, "--evidence", str(tmp_path)]) == 0
     assert capsys.readouterr().out == f"Reusing unit artifacts from passed queue evidence on {HEAD}: run 123\n"
+
+
+def test_a_queue_run_that_reused_tests_never_feeds_a_dev_push(tmp_path):
+    _, _, folder = evidence(tmp_path)
+    with (folder / "artifacts.jsonl").open("a") as items:
+        items.write(json.dumps({"name": "reused-tests-3.11", "expired": False}) + "\n")
+    assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) is None

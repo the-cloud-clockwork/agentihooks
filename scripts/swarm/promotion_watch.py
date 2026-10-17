@@ -1,5 +1,6 @@
 """Dev promotion watch: the newest finished push run of Tests on dev files one urgent ci task per failed job and
-raises a ledger alert; the next green run closes those tasks and the alert.
+raises a ledger alert; the next green run closes those tasks and the alert. A run whose only failure is the Sonar job
+finding dev already moved past its commit is reported as superseded and files nothing.
 
 The minute tick calls it; CI runners cannot reach the ledger, so the fixer tasks are filed from the machine that can.
 """
@@ -14,7 +15,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from scripts.ci_budget import GATE
-from scripts.swarm import dev_red
+from scripts.swarm import dev_red, naming
 from scripts.swarm.store import PREFIX
 from scripts.swarm_ledger import ledger_comments
 
@@ -22,8 +23,12 @@ if TYPE_CHECKING:
     from scripts.swarm.ledger_client import LedgerClient
     from scripts.swarm.store import RedisStore, SwarmConfig
 
-JOBS_JQ = ".jobs[] | {name, conclusion} | @json"
+JOBS_JQ = ".jobs[] | {name, conclusion, check_run_url, steps} | @json"
+ANNOTATIONS_JQ = ".[] | {annotation_level, message} | @json"
 FAILED = ("failure", "timed_out")
+SUPERSEDED_STEP = "Check dev still points at this commit"
+SUPERSEDED = "Dev advanced before Sonar analysis; this unscanned revision cannot be promoted."
+STEP_EXIT = "Process completed with exit code 1."
 REFRESH_MS = 60_000
 SOURCE = "promotion"
 SENDER = "swarm"
@@ -38,10 +43,9 @@ def key(slug: str, part: str) -> str:
     return ":".join((PREFIX, slug, SOURCE, part))
 
 
-def jobs(repo_dir: str, run_id: int, run: Callable = subprocess.run) -> list[dict]:
-    endpoint = f"repos/{{owner}}/{{repo}}/actions/runs/{run_id}/jobs?per_page=100"
+def _read(repo_dir: str, endpoint: str, jq: str, run: Callable) -> list[dict]:
     output = run(
-        ["gh", "api", endpoint, "--paginate", "--jq", JOBS_JQ],
+        ["gh", "api", endpoint, "--paginate", "--jq", jq],
         cwd=repo_dir,
         capture_output=True,
         text=True,
@@ -49,6 +53,19 @@ def jobs(repo_dir: str, run_id: int, run: Callable = subprocess.run) -> list[dic
         timeout=60,
     ).stdout
     return [json.loads(line) for line in output.splitlines() if line]
+
+
+def jobs(repo_dir: str, run_id: int, run: Callable = subprocess.run) -> list[dict]:
+    return _read(repo_dir, f"repos/{{owner}}/{{repo}}/actions/runs/{run_id}/jobs?per_page=100", JOBS_JQ, run)
+
+
+def superseded(repo_dir: str, job: dict, run: Callable = subprocess.run) -> bool:
+    steps = [s["name"] for s in job.get("steps") or [] if s.get("conclusion") in FAILED]
+    if steps != [SUPERSEDED_STEP]:
+        return False
+    found = _read(repo_dir, f"{job['check_run_url']}/annotations?per_page=100", ANNOTATIONS_JQ, run)
+    messages = {a["message"] for a in found if a["annotation_level"] == "failure"}
+    return SUPERSEDED in messages and messages <= {SUPERSEDED, STEP_EXIT}
 
 
 def failed_jobs(found: list[dict]) -> list[str]:
@@ -125,19 +142,23 @@ def refresh(
     run: Callable = subprocess.run,
 ) -> list[str]:
     redis = store.redis
-    if now_ms - int(redis.get(key(slug, "checked")) or 0) < REFRESH_MS:
+    if naming.PROOF_RE.fullmatch(slug) or now_ms - int(redis.get(key(slug, "checked")) or 0) < REFRESH_MS:
         return []
     redis.set(key(slug, "checked"), now_ms)
     try:
         last = dev_red.latest(config.repo, run)
         if last is None or int(redis.get(key(slug, "seen")) or 0) >= last["id"]:
             return []
-        failed = failed_jobs(jobs(config.repo, last["id"], run)) if last["conclusion"] == "failure" else []
+        found = jobs(config.repo, last["id"], run) if last["conclusion"] == "failure" else []
+        failed = failed_jobs(found)
+        stale = bool(failed) and all(superseded(config.repo, j, run) for j in found if j["name"] in failed)
     except dev_red.READ_ERRORS as exc:
         error = getattr(exc, "stderr", None) or str(exc)
         print(f"promotion watch skipped, reading dev push runs failed: {error}", file=sys.stderr)
         return []
-    if last["conclusion"] == "failure":
+    if stale:
+        actions = [f"dev push run {last['id']} was superseded before Sonar analysis"]
+    elif last["conclusion"] == "failure":
         actions = _red(slug, redis, ledger, doc, last, failed)
     else:
         actions = _green(slug, ledger, doc, last)

@@ -1,3 +1,4 @@
+import json
 import tomllib
 from pathlib import Path
 
@@ -36,9 +37,10 @@ def test_the_swarm_image_installs_the_herdr_client_the_worker_lock_pins():
     assert "COPY --from=herdr /usr/local/bin/herdr /usr/local/bin/herdr" in dockerfile
     assert "herdrdev/herdr" not in dockerfile
     assert "sha256:" not in dockerfile.split("AS herdr")[1]
-    assert dockerfile.count("FROM mirror.gcr.io/library/python:3.12-slim-bookworm") == 3
+    bases = [line.split()[1] for line in dockerfile.splitlines() if line.startswith("FROM ")]
+    assert len(bases) >= 3
+    assert set(bases) == {"mirror.gcr.io/library/python:3.12-slim-bookworm"}
     assert "worker_image.py shell-packages --package openssh-client)" in dockerfile
     assert '["debian_snapshot"]' in dockerfile
-    due = (root / "deploy/helm/agentihooks-swarm/ci/kind-due.sh").read_text().splitlines()
-    assert "  docker/swarm-node/versions.lock" in due
-    assert "  docker/swarm-node/requirements.lock" in due
+    keyed = json.loads((root / ".github/input-keys.json").read_text())["helm-kind"]["paths"]
+    assert "docker/swarm-node" in keyed

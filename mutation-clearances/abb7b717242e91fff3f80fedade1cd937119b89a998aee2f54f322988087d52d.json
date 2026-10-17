@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/bottleneck.py:scripts.swarm.bottleneck.x__active_review__mutmut_44:5e1b25d309dcdcae1369179feff7d076d8d0bba788036d2a6a5849b2ae2f5ea0": {
+    "reader": "standards_reader",
+    "reason": "Additional trailing segments have zero duration; reported measurements remain identical."
+  }
+}
