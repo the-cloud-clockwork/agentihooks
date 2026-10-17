@@ -186,3 +186,34 @@ def test_swarm_engineer_guidance_names_no_raw_gh_merge_or_dequeue_mutation(skill
     text = skill.read_text()
 
     assert [raw for raw in ("dequeuePullRequest", "gh pr merge") if raw in text] == []
+
+
+def test_rendered_qa_persona_reads_tests_from_ci_only(world):
+    from scripts.profiles import render
+
+    world["install"]._save_state({})
+    persona = " ".join((render.render_claude("qa") / "CLAUDE.md").read_text().split())
+
+    assert "run the gates, mutation and smoke runs" not in persona
+    steps = ("results from their CI runs", "never on this machine", "AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN")
+    assert [step for step in steps if step not in persona] == []
+
+
+def test_rendered_swarm_engineer_skill_reads_red_and_green_in_ci(world):
+    from scripts.profiles import render
+
+    world["install"]._save_state({})
+    out = render.render_claude("engineer")
+    text = " ".join((out / "skills" / "swarm-engineer" / "SKILL.md").read_text().split())
+
+    assert "lint and tests green" not in text
+    steps = (
+        "read it red in CI on a draft pull request",
+        "read it green in CI",
+        "branch mutation preflight",
+        "wait until it is green on the current head",
+        "then open the first draft",
+        "AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN",
+    )
+    assert [step for step in steps if step not in text] == []
+    assert [text.index(step) for step in steps] == sorted(text.index(step) for step in steps)
