@@ -82,8 +82,9 @@ FORBIDDEN = ("", "curl: (22) The requested URL returned error: 403\n", 22)
             3,
         ),
         ("Call to URL [http://127.0.0.1:9000/api/v2/analysis/engine] failed: timeout\n", "", 1),
+        ("ERROR Failed to download analysis cache: HTTP code 502: <html>Bad gateway</html>\n", "", 3),
     ],
-    ids=["refused", "bad-gateway", "curl-timeout", "empty-reply", "scanner-eof", "engine-timeout"],
+    ids=["refused", "bad-gateway", "curl-timeout", "empty-reply", "scanner-eof", "engine-timeout", "analysis-cache"],
 )
 def test_a_transient_server_failure_is_retried_with_backoff_and_only_the_answer_reaches_stdout(tmp_path, failure):
     result, calls, sleeps, summary = _retry(tmp_path, [failure, failure, ('{"status":"UP"}', "", 0)])
@@ -119,6 +120,7 @@ def test_a_server_that_stays_down_ends_red_with_the_infrastructure_label(tmp_pat
         "curl: (22) The requested URL returned error: {code}",
         "Error status returned by url [http://127.0.0.1:9000/api/x]: {code}",
         "Call to URL [http://127.0.0.1:9000/api/x] failed with HTTP {code}",
+        "ERROR Failed to download analysis cache: HTTP code {code}: Unauthorized",
     ],
 )
 def test_a_repeated_authorization_failure_stops_after_one_short_retry(tmp_path, code, message):
