@@ -196,14 +196,15 @@ folder is removed. The reasons are:
 
 | Reason | Cause |
 |---|---|
-| `execution home canary differs from the launch request` | The execution home's instructions carry another canary than the shared home did at launch: the profile was rendered again between the request and the copy. |
-| `profile mismatch in rendered binding` | The execution home's evidence names another profile or harness than the request: the shared home was rendered for another profile or harness after the request was written. |
+| `execution home canary differs from the launch request` | The execution home's instructions carry another canary than the shared home did at launch: the profile was rendered again between the request and the execution home. |
+| `profile mismatch in rendered binding` | The execution home's evidence names another profile, harness or home than the request: the shared home was rendered for another profile or harness after the request was written. |
 | `mounted persona changed since render`, `rendered source manifest changed`, `missing or invalid rendered profile evidence: …` | The execution home's instructions or source manifest no longer match its evidence, or the evidence file is missing or unreadable. |
 
 The reason is written to the report, so `init-agent` prints
-`profile_validation=failed` and `agentihooks init-agent: <reason>` and exits 3. The supervisor process itself exits with an
-uncaught `ValueError` traceback carrying the same reason, not the
-`agentihooks codex-session: launch refused:` line other launch refusals print.
+`profile_validation=failed` and `agentihooks init-agent: <reason>` and exits 3.
+Read the reason there or in the report. Known gap: the supervisor process
+does not print the `agentihooks codex-session: launch refused:` line other
+launch refusals print; a follow up on the ledger tracks it.
 
 A failure while copying the home (an `OSError` from the copy) refuses no
 request: the report stays `pending`, and `init-agent` fails with
@@ -259,7 +260,7 @@ The live qualification also recorded these viewer limits:
 |---|---|
 | Launch fails with `ModuleNotFoundError: No module named 'websockets'` | The launching tool environment lacks its runtime dependency. Update the checkout to a revision containing the dependency fix, reinstall the tool using the installation instructions, and repeat the tool Python import check before retrying an admitted launch. Installing development extras in another venv does not fix this environment. |
 | Profile check fails with `live process binding changed since validation` on an `app_server` execution | The report records a home other than the execution home. A revision without the execution home re-record step produces this on every launch; update to one that contains it. See [Profile check in the execution home](#profile-check-in-the-execution-home). |
-| Launch fails with `execution home canary differs from the launch request` | The profile was rendered again between the launch request and the execution home copy. Relaunch; the new request records the current canary. |
+| Launch fails with `execution home canary differs from the launch request` | The profile was rendered again between the launch request and the execution home. Relaunch; the new request records the current canary. |
 | Attach reports `failed` or `exited` | The recorded app-server ended; there is no live thread to attach through that transport. Inspect execution status before attempting recovery. |
 | Attach times out without a connected thread | Startup has not produced a connected thread within the timeout. Check the managed server's launch result and serve log; increasing the timeout alone does not repair a failed launch. |
 | Reopen reports no connected thread | The immediate reopen command requires an already connected thread. Use the waiting attach helper during startup. |
