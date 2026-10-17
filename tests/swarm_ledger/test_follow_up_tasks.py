@@ -205,7 +205,7 @@ def test_task_set_unmarking_a_follow_up_still_computes_a_named_slice(sliced, mon
 
 
 def test_the_coach_fingerprint_changes_when_task_set_marks_a_follow_up(sliced, monkeypatch):
-    monkeypatch.setattr(plan_read, "exact", lambda doc, task: "borrowed plan lines\n")
+    monkeypatch.setattr(plan_read, "exact", lambda doc, task: "<!-- slice: first -->\nborrowed plan lines\n")
     before = intent._fingerprint(sliced, sliced["tasks"][0])
     assert ledger_tasks.apply(sliced, task_set({"follow_up": True}), update_ctx()) is True
     unsliced = {"overview": sliced["overview"], "phases": sliced["phases"], "tasks": []}
