@@ -59,6 +59,7 @@ def test_a_valid_code_joins_with_a_ledger_credential_and_a_redis_acl_user(admin,
     assert auth.ledger_member(admin, grant["ledger_credential"]) == grant["id"]
     assert grant["ledger_credential"] not in str({key: admin.dump(key) for key in admin.keys("*")})
     user = admin.acl_getuser(f"hive-{grant['id']}")
+    assert f"~{ROOT}:hive:{grant['id']}" in user["keys"]
     assert user["channels"] == [f"&{ROOT}:*"]
     assert user["categories"] == ["+@all", "-@admin", "-@dangerous"]
     assert user["commands"] == []
@@ -67,7 +68,7 @@ def test_a_valid_code_joins_with_a_ledger_credential_and_a_redis_acl_user(admin,
     assert not auth.PREFIX.startswith(f"{ROOT}:")
 
 
-def test_the_member_user_writes_only_its_own_keys_and_reads_agent_records():
+def test_the_member_user_grants_reads_on_every_swarm_key_and_writes_only_on_member_keys():
     calls = []
 
     class Recorder:

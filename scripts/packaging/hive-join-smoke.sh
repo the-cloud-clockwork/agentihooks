@@ -61,9 +61,13 @@ import os
 import stat
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import redis
 
+from scripts.hive import daemon, orders, registry
+from scripts.inbox.store import InboxStore
+from scripts.swarm import idle
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.store import redis_client
 
@@ -73,10 +77,6 @@ assert stat.S_IMODE(env_file.stat().st_mode) == 0o600
 assert env["AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL"] not in os.environ["JOINED"]
 assert env["AGENTIHOOKS_HIVE_REDIS_URL"] not in os.environ["JOINED"]
 print("hive.env: mode 0600, credentials absent from the join output")
-from scripts.hive import daemon, orders, registry
-from scripts.inbox.store import InboxStore
-from scripts.swarm import idle
-
 client = redis_client()
 member = env["AGENTIHOOKS_HIVE_ID"]
 assert client.acl_whoami() == f"hive-{member}"
@@ -103,7 +103,7 @@ assert daemon.hive_id() == member
 
 
 class NoOrders:
-    runtime = type("Runtime", (), {"herdr": None})()
+    runtime = SimpleNamespace(herdr=None)
 
     def poll(self):
         return 0
