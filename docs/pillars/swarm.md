@@ -207,7 +207,7 @@ skill. A swarm below one step behaves exactly as a single master swarm.
   `AGENTIHOOKS_INBOX_REDELIVER_S` and goes to the next master with the same id, and a gone master's unconfirmed
   items return the same way. Items from the operator bypass the pool and go to the front door. With one live master
   delivery is unchanged.
-- **Front door.** Only `master@<id>` faces the operator: page chat, every operator write, Priorities and, with
+- **Front door.** Only `master@<id>` faces the operator: it receives page chat and every operator write, holds Priorities and, with
   `master-claude-login` on, the claude ai login and Remote Control. A backend master's page chat write is refused
   naming the front door, and its launch carries no login route and no Remote Control. The operator reaches a backend
   master through its herdr pane, or through the front door.
