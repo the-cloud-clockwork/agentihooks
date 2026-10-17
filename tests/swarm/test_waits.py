@@ -1419,7 +1419,9 @@ def test_checks_wait_holds_the_new_required_run_after_an_old_green_gate(tick, st
 @pytest.mark.parametrize("reverse", [False, True])
 @pytest.mark.parametrize("sibling", [False, True])
 @pytest.mark.parametrize("name", ["security", "Gate — Required"])
-def test_checks_wait_retains_a_separate_required_workflow_after_superseding_its_check(tick, status, reverse, sibling, name):
+def test_checks_wait_retains_a_separate_required_workflow_after_superseding_its_check(
+    tick, status, reverse, sibling, name
+):
     tick.hold("checks", URL)
     gate = {**_run_check("Gate — Required", 10, 1, "SUCCESS"), "isRequired": True}
     old = {**_run_check(name, 20, 2, "SUCCESS", workflow="W2"), "isRequired": name == "security"}
