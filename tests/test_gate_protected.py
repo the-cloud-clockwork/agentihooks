@@ -834,6 +834,13 @@ def test_the_required_grader_refuses_widened_events_behind_a_conditional_lane(re
     assert "::error::replay.yml: job replay has no shared hosted lane concurrency group" in out
 
 
+def test_the_required_grader_skips_lane_grading_of_an_unchanged_workflow(repo, capsys):
+    unchanged = {"name": "Replay", "concurrency": float("nan"), "jobs": {"replay": {"runs-on": "x"}}}
+    head = _commit(repo, {"test.yml": _workflow(), "replay.yml": unchanged}, {}, "unchanged lane")
+    assert gate_protected.main(["--root", str(repo), "--head", head]) == 0
+    assert "replay.yml" not in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("trusted", [False, True])
 def test_only_the_trusted_preflight_skips_lane_grading(repo, capsys, trusted):
     preflight = yaml.safe_load((_ROOT / ".github/workflows/branch-lanes.yml").read_text())
