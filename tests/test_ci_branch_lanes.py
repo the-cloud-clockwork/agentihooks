@@ -174,6 +174,20 @@ def test_an_edit_cannot_escape_trusted_concurrency(tmp_path, monkeypatch, change
     }
 
 
+def test_an_edit_cannot_widen_the_events_of_a_trusted_conditional_lane(tmp_path, monkeypatch):
+    block = {"group": "${{ github.event_name == 'push' && github.ref || 'hosted-lane-a' }}", "queue": "max"}
+    baseline = _workflow(block)
+    baseline["on"] = {"push": {"branches": ["dev"]}}
+    updated = _workflow(block)
+    updated["on"] = {"push": None}
+    base, head, sha = _repo(tmp_path, {"replay.yml": updated})
+    (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(baseline))
+    monkeypatch.chdir(head)
+    assert lanes.refused(sha, base) == {
+        f"{lanes.WORKFLOWS}/replay.yml": ["job replay has no shared hosted lane concurrency group"]
+    }
+
+
 def test_an_edited_workflow_cannot_add_an_uncapped_job(tmp_path, monkeypatch):
     baseline = _workflow(allowed={"runs-on": "x", "concurrency": LANED})
     updated = _workflow(allowed={"runs-on": "x", "concurrency": LANED}, escape={"runs-on": "x"})
