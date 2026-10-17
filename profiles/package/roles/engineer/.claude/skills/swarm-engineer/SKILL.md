@@ -42,10 +42,15 @@ call. `agentihooks msg inbox` lists them, `agentihooks msg read <id>` shows one.
 
 1. A spec naming the seams: a GitHub issue where the repo has issues, recorded
    with `agentihooks swarm <slug> issue <url>`; otherwise the ledger task is the spec.
-2. Your own worktree off the base branch (the worktree skill), red test first,
-   then the least code to green, lint and tests green, commit.
-3. Push, open the pull request into the base branch, record it with
-   `agentihooks swarm <slug> pr <url>`.
+2. Your own worktree off the base branch (the worktree skill). Commit the
+   seam's failing test, push it and read it red in CI on a draft pull request
+   into the base branch, then commit the least code to green, push and read it
+   green in CI. In a repo with the branch mutation preflight, push, wait until
+   it is green on the current head, then open the first draft. Lint, format and
+   size may run locally; tests and mutation never run on this machine unless
+   the user set `AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN=true`.
+3. Record the pull request with `agentihooks swarm <slug> pr <url>` and mark
+   it ready once its checks are green.
 4. Record landed work in plain words:
    `agentihooks ledger --slug <slug> --as <name> comment phases/<phase> "<what landed>"`.
    A follow up you find is proposed, never queued as your own task:
