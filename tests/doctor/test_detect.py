@@ -78,6 +78,35 @@ def test_the_master_launch_reader_reads_the_watched_swarm(monkeypatch):
     assert seen == [(store, "sw")]
 
 
+@pytest.mark.parametrize(("configured", "limit"), [(0, 600), (700, 700)])
+def test_the_context_overrun_reader_reads_the_swarm_agents_at_its_compact_limit(monkeypatch, configured, limit):
+    import fakeredis
+
+    from hooks.context import context_recycle
+    from scripts.doctor import context_overruns
+    from scripts.swarm.store import AgentRecord
+
+    asked = []
+    monkeypatch.setenv("AGENTIHOOKS_COMPACT_LIMIT", "600")
+    monkeypatch.setattr(
+        context_recycle, "unmarked_overrun", lambda session, compact: asked.append((session, compact)) or 1
+    )
+
+    def found(agents, overrun):
+        assert [(a["name"], a["conversation_id"]) for a in agents] == [("master@323133-0175", "c1")]
+        return [STALE] if overrun("c1") == 1 else []
+
+    monkeypatch.setattr(context_overruns, "findings", found)
+    agent = AgentRecord("master@323133-0175", "master", "master", conversation_id="c1")
+    store = SimpleNamespace(
+        redis=fakeredis.FakeRedis(decode_responses=True),
+        config=lambda slug: SimpleNamespace(compact_limit=configured if slug == "sw" else 1),
+        agents=lambda slug: [agent] if slug == "sw" else [],
+    )
+    assert detect.readers(store, None, "sw", 42, environ={})["context overrun"]() == [STALE]
+    assert asked == [("c1", limit)]
+
+
 def test_the_inbox_reader_holds_delivered_mail_to_its_receiver_and_leaves_out_outside_sessions():
     import fakeredis
 

@@ -101,56 +101,59 @@ def checked_resource(conclusion="SUCCESS", head="abc"):
     }
 
 
-def test_queue_uses_antoncores_required_checks_in_its_own_workflow():
-    from scripts.swarm import ledger_events
-
-    url = "https://github.com/the-cloud-clockwork/antoncore/pull/42"
-    calls, queued = [], []
+@pytest.mark.parametrize(
+    "repo, number, workflow",
+    [("the-cloud-clockwork/antoncore", "42", "CI Validate"), ("the-cloud-clockwork/agentibrain-kernel", "127", "ci")],
+)
+def test_queue_adds_another_repositorys_pull_request_to_its_own_merge_queue(repo, number, workflow):
+    url = f"https://github.com/{repo}/pull/{number}"
+    rest_paths, enqueued = [], []
 
     def run(command, **kwargs):
-        calls.append(command)
         if command[2] != "graphql":
-            assert command[2] == "repos/the-cloud-clockwork/antoncore/rules/branches/dev"
+            rest_paths.append(command[2])
+            if command[2] != f"repos/{repo}/rules/branches/dev":
+                return subprocess.CompletedProcess(command, 1, "", "gh: Not Found (HTTP 404)")
             response = [
+                {"type": "required_linear_history"},
                 {
                     "type": "required_status_checks",
-                    "parameters": {
-                        "required_status_checks": [{"context": "Gate — Required", "integration_id": 15368}],
-                    },
-                }
+                    "parameters": {"required_status_checks": [{"context": "Gate — Required", "integration_id": 15368}]},
+                },
+                {"type": "merge_queue", "parameters": {"merge_method": "SQUASH", "grouping_strategy": "ALLGREEN"}},
             ]
         elif command[4] == f"query={merge_queue.STATE}":
-            response = {"data": {"resource": {**OPEN, "mergeQueueEntry": ENTRY if queued else None}}}
+            assert command[5:] == ["-f", f"url={url}"]
+            response = {"data": {"resource": {**OPEN, "mergeQueueEntry": ENTRY if enqueued else None}}}
         elif command[4] == f"query={merge_queue.FRESHNESS}":
             response = {
                 "data": {
                     "resource": {
-                        "repository": {"nameWithOwner": "the-cloud-clockwork/antoncore"},
+                        "repository": {"nameWithOwner": repo},
                         "baseRefName": "dev",
                         "baseRef": {"branchProtectionRule": None},
                     }
                 }
             }
         elif command[4] == f"query={merge_queue.QUEUE}":
-            queued.append(True)
-            response = {"data": {}}
+            enqueued.append(command[5:])
+            response = {"data": {"enqueuePullRequest": {"mergeQueueEntry": {"id": ENTRY["id"]}}}}
         else:
-            assert command[4] == f"query={ledger_events.PULL_QUERY.replace('$number', '42')}"
+            assert command[4] == f"query={ledger_events.PULL_QUERY.replace('$number', number)}"
             assert command[5:] == ["-f", f"url={url}"]
             response = checked_resource()
-            required = response["data"]["resource"]["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"][
+            check = response["data"]["resource"]["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"][
                 "nodes"
             ][0]
-            required["name"] = "Gate — Required"
-            required["checkSuite"] = {
-                "app": {"databaseId": 15368},
-                "workflowRun": {"workflow": {"name": "CI Validate"}},
-            }
+            check["name"] = "Gate — Required"
+            check["checkSuite"] = {"app": {"databaseId": 15368}, "workflowRun": {"workflow": {"name": workflow}}}
         return subprocess.CompletedProcess(command, 0, json.dumps(response))
 
-    assert merge_queue.operate("queue", url, run)["queued"]
-    assert queued == [True]
-    assert all("workflows/test.yml" not in str(command) for command in calls)
+    result = merge_queue.operate("queue", url, run)
+
+    assert enqueued == [["-f", "id=PR_one", "-f", "head=abc"]]
+    assert result == {"url": url, "state": "OPEN", "head": "abc", "queued": True, "entry": ENTRY}
+    assert rest_paths and all(path.startswith(f"repos/{repo}/") for path in rest_paths)
 
 
 @pytest.mark.parametrize(

@@ -133,6 +133,7 @@ class Placed:
     route_kind: str = "subscription"
     transport: str = ""
     execution: AgentRecord | None = None
+    remote_control: dict = field(default_factory=dict)
 
 
 class Ledger(Protocol):
@@ -1123,6 +1124,7 @@ def placed_record(record, placed):
         launch_timings=placed.launch_timings,
         route_kind=placed.route_kind,
         transport=placed.transport or record.transport,
+        remote_control=placed.remote_control or record.remote_control,
         state="working",
     )
 

@@ -105,11 +105,8 @@ def test_the_operator_can_renew_an_already_open_window(master):
     assert not master_coding.is_open(SID, now=2801)
 
 
-def test_a_taken_master_keeps_permission_and_protection_checks_without_env(unseated, monkeypatch):
+def test_a_taken_master_keeps_protection_checks_without_env(unseated, monkeypatch):
     master_coding.record_seat(SID, "rig", "master@rig-1")
-    monkeypatch.setattr(operator_mode, "_heard", lambda *args: True)
-    assert master_coding.asks_operator("AskUserQuestion", SID)
-    assert not master_coding.asks_operator("AskUserQuestion", "unseated")
     payload = {"session_id": SID, "tool_input": {"command": "gh ruleset list"}}
     assert master_coding.protection_refusal(payload) == master_coding.PROTECTION_REFUSAL
     payload["session_id"] = "unseated"
@@ -255,29 +252,53 @@ def test_every_typed_prompt_reaches_the_window(monkeypatch):
     window.assert_called_once_with(payload, True)
 
 
-def test_the_master_asks_the_present_operator_and_other_seats_stay_denied(master, monkeypatch):
+def test_any_seat_asks_the_operator_only_after_he_typed_operator_on(master, monkeypatch):
     heard = Mock(return_value=True)
     monkeypatch.setattr(operator_mode, "_heard", heard)
     assert master_coding.asks_operator("AskUserQuestion", SID)
-    heard.assert_called_with(SID, None, None)
+    heard.assert_called_with(SID)
     assert master_coding.asks_operator("ExitPlanMode", SID)
     assert not master_coding.asks_operator("Bash", SID)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "t12")
+    assert master_coding.asks_operator("AskUserQuestion", SID)
     heard.return_value = False
     assert not master_coding.asks_operator("AskUserQuestion", SID)
-    heard.return_value = True
-    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "t12")
-    assert not master_coding.asks_operator("AskUserQuestion", SID)
+    assert not master_coding.asks_operator("ExitPlanMode", SID)
 
 
-def test_the_permission_request_passes_to_the_present_operator_only_from_the_master(master, monkeypatch, capsys):
-    heard = Mock(return_value=True)
-    monkeypatch.setattr(operator_mode, "_heard", heard)
-    hook_manager.on_permission_request({"tool_name": "AskUserQuestion", "session_id": SID})
-    assert capsys.readouterr().out == ""
-    heard.assert_called_with(SID, None, None)
-    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "t12")
-    hook_manager.on_permission_request({"tool_name": "AskUserQuestion", "session_id": SID})
-    assert "swarm sessions and subagents cannot wait for permission" in capsys.readouterr().out
+def _permission(capsys, tool_name, session_id):
+    hook_manager.on_permission_request({"tool_name": tool_name, "session_id": session_id})
+    out = capsys.readouterr().out
+    return json.loads(out)["hookSpecificOutput"]["decision"] if out else None
+
+
+PROMPT_REFUSAL = (
+    "Denied {tool}: the operator is not present in this pane, and only his typed operator on opens this prompt. "
+    "Keep working without it."
+)
+
+
+@pytest.mark.parametrize("task", ["master", "t12"])
+def test_the_question_and_plan_prompts_reach_the_operator_only_after_operator_on(master, monkeypatch, capsys, task):
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", task)
+    for tool in ("AskUserQuestion", "ExitPlanMode"):
+        assert _permission(capsys, tool, SID) == {"behavior": "deny", "message": PROMPT_REFUSAL.format(tool=tool)}
+    operator_mode.observe(SID, "rebase it", True, now=100)
+    assert _permission(capsys, "ExitPlanMode", SID)["behavior"] == "deny"
+    operator_mode.observe(SID, "operator on", True, now=101)
+    assert _permission(capsys, "AskUserQuestion", SID) is None
+    assert _permission(capsys, "ExitPlanMode", SID) is None
+    assert "swarm sessions and subagents cannot wait for permission" in _permission(capsys, "Bash", SID)["message"]
+
+
+def test_a_standalone_plan_prompt_is_denied_until_operator_on(unseated, capsys):
+    assert _permission(capsys, "ExitPlanMode", "solo") == {
+        "behavior": "deny",
+        "message": PROMPT_REFUSAL.format(tool="ExitPlanMode"),
+    }
+    assert _permission(capsys, "Bash", "solo") is None
+    operator_mode.observe("solo", "operator on", True, now=100)
+    assert _permission(capsys, "ExitPlanMode", "solo") is None
 
 
 @pytest.mark.parametrize(
