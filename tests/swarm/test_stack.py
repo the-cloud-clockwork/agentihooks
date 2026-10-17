@@ -509,9 +509,10 @@ def test_park_fetches_an_antoncore_dependency_through_the_antoncore_checkout(par
     assert ledger.rows["t1"]["parked_repos"] == [ANTONCORE]
 
 
-def test_park_fetches_by_url_when_the_recorded_checkout_belongs_to_another_repository(parked, monkeypatch):
+@pytest.mark.parametrize("origin", ["git@github.com:o/bundle.git", ""])
+def test_park_fetches_by_url_when_the_recorded_checkout_belongs_to_another_repository(parked, monkeypatch, origin):
     _, ledger, _, shell, doc = parked
-    _antoncore_dependency(parked, monkeypatch, "git@github.com:o/bundle.git")
+    _antoncore_dependency(parked, monkeypatch, origin)
     assert park(doc) == 0
     assert ["git", "fetch", "--", ANTONCORE, "eng-a"] in shell.calls
     assert [c for c in shell.calls if c[:2] == ["git", "-C"]] == []
@@ -545,7 +546,7 @@ def test_park_names_a_title_the_comment_filter_refuses_only_as_an_open_dependenc
 
 
 def test_park_writes_the_ledger_note_before_the_issue_comment_and_the_task_update(parked, monkeypatch, capsys):
-    _, ledger, _, shell, doc = parked
+    store, ledger, _, shell, doc = parked
     note = ("sw", "t1", f"Parked on its branch until Build the parser is done. {NOTE}", AGENT)
     seen = []
 
@@ -554,16 +555,23 @@ def test_park_writes_the_ledger_note_before_the_issue_comment_and_the_task_updat
             seen.append((list(ledger.comments), list(ledger.updates)))
         return shell(argv)
 
+    def amend(slug, task, text, by):
+        if ledger.comments[-1:] != [(slug, task, text, by)]:
+            ledger.comments.append((slug, task, text, by))
+
     monkeypatch.setattr(stack, "shell", answer)
+    ledger.comment = amend
     shell.fail = (("gh", "issue", "comment"),)
     assert park(doc) == 1
     assert capsys.readouterr().err == "swarm: could not comment on the issue: boom\n"
     assert seen == [([note], [])]
     assert "parked_on" not in ledger.rows["t1"] and REMOVE not in shell.calls
+    assert store.handoff("sw", "t1") == ""
+    assert [a.state for a in store.agents("sw") if a.name == AGENT] == ["working"]
     shell.fail = ()
     assert park(doc) == 0
     assert ledger.rows["t1"]["parked_on"] == ["a"]
-    assert set(ledger.comments) == {note}
+    assert ledger.comments == [note]
 
 
 @pytest.mark.parametrize(
