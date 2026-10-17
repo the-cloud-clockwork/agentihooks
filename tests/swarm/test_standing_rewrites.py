@@ -1,4 +1,3 @@
-import fakeredis
 import pytest
 
 from scripts.inbox.store import InboxStore
@@ -6,7 +5,7 @@ from scripts.swarm import ledger_events, status
 from scripts.swarm.health import standing
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
 NOW = 1_800_000_000_000
 HOUR = 3_600_000
@@ -14,6 +13,8 @@ HOUR = 3_600_000
 
 @pytest.fixture
 def store():
+    import fakeredis
+
     result = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     result.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=1))
     result.put_agent("sw", AgentRecord("master", MASTER, MASTER, seat="master@sw"))
