@@ -101,73 +101,12 @@ def checked_resource(conclusion="SUCCESS", head="abc"):
     }
 
 
-def test_queue_uses_antoncores_required_checks_in_its_own_workflow():
-    from scripts.swarm import ledger_events
-
-    url = "https://github.com/the-cloud-clockwork/antoncore/pull/42"
-    calls, queued = [], []
-
-    def run(command, **kwargs):
-        calls.append(command)
-        if command[2] != "graphql":
-            assert command[2] == "repos/the-cloud-clockwork/antoncore/rules/branches/dev"
-            response = [
-                {
-                    "type": "required_status_checks",
-                    "parameters": {
-                        "required_status_checks": [{"context": "Gate — Required", "integration_id": 15368}],
-                    },
-                }
-            ]
-        elif command[4] == f"query={merge_queue.STATE}":
-            response = {"data": {"resource": {**OPEN, "mergeQueueEntry": ENTRY if queued else None}}}
-        elif command[4] == f"query={merge_queue.FRESHNESS}":
-            response = {
-                "data": {
-                    "resource": {
-                        "repository": {"nameWithOwner": "the-cloud-clockwork/antoncore"},
-                        "baseRefName": "dev",
-                        "baseRef": {"branchProtectionRule": None},
-                    }
-                }
-            }
-        elif command[4] == f"query={merge_queue.QUEUE}":
-            queued.append(True)
-            response = {"data": {}}
-        else:
-            assert command[4] == f"query={ledger_events.PULL_QUERY.replace('$number', '42')}"
-            assert command[5:] == ["-f", f"url={url}"]
-            response = checked_resource()
-            required = response["data"]["resource"]["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"][
-                "nodes"
-            ][0]
-            required["name"] = "Gate — Required"
-            required["checkSuite"] = {
-                "app": {"databaseId": 15368},
-                "workflowRun": {"workflow": {"name": "CI Validate"}},
-            }
-        return subprocess.CompletedProcess(command, 0, json.dumps(response))
-
-    assert merge_queue.operate("queue", url, run)["queued"]
-    assert queued == [True]
-    assert all("workflows/test.yml" not in str(command) for command in calls)
-
-
-def test_queue_adds_a_kernel_pull_request_to_the_kernels_own_merge_queue():
-    url = "https://github.com/the-cloud-clockwork/agentibrain-kernel/pull/127"
-    repo = "the-cloud-clockwork/agentibrain-kernel"
-    pull = {
-        "id": "PR_kernel",
-        "state": "OPEN",
-        "headRefOid": "ba87ecd",
-        "baseRefName": "dev",
-        "mergeQueueEntry": None,
-        "isDraft": False,
-        "reviewDecision": None,
-        "statusCheckRollup": {"state": "SUCCESS"},
-        "repository": {"mergeQueue": {"id": "MQ_kernel_dev"}},
-    }
-    entry = {"id": "MQE_kernel", "position": 1, "state": "AWAITING_CHECKS"}
+@pytest.mark.parametrize(
+    "repo, number, workflow",
+    [("the-cloud-clockwork/antoncore", "42", "CI Validate"), ("the-cloud-clockwork/agentibrain-kernel", "127", "ci")],
+)
+def test_queue_adds_another_repositorys_pull_request_to_its_own_merge_queue(repo, number, workflow):
+    url = f"https://github.com/{repo}/pull/{number}"
     rest_paths, enqueued = [], []
 
     def run(command, **kwargs):
@@ -185,7 +124,7 @@ def test_queue_adds_a_kernel_pull_request_to_the_kernels_own_merge_queue():
             ]
         elif command[4] == f"query={merge_queue.STATE}":
             assert command[5:] == ["-f", f"url={url}"]
-            response = {"data": {"resource": {**pull, "mergeQueueEntry": entry if enqueued else None}}}
+            response = {"data": {"resource": {**OPEN, "mergeQueueEntry": ENTRY if enqueued else None}}}
         elif command[4] == f"query={merge_queue.FRESHNESS}":
             response = {
                 "data": {
@@ -198,21 +137,22 @@ def test_queue_adds_a_kernel_pull_request_to_the_kernels_own_merge_queue():
             }
         elif command[4] == f"query={merge_queue.QUEUE}":
             enqueued.append(command[5:])
-            response = {"data": {"enqueuePullRequest": {"mergeQueueEntry": {"id": entry["id"]}}}}
+            response = {"data": {"enqueuePullRequest": {"mergeQueueEntry": {"id": ENTRY["id"]}}}}
         else:
-            assert command[4] == f"query={ledger_events.PULL_QUERY.replace('$number', '127')}"
-            response = checked_resource(head=pull["headRefOid"])
+            assert command[4] == f"query={ledger_events.PULL_QUERY.replace('$number', number)}"
+            assert command[5:] == ["-f", f"url={url}"]
+            response = checked_resource()
             check = response["data"]["resource"]["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"][
                 "nodes"
             ][0]
             check["name"] = "Gate — Required"
-            check["checkSuite"] = {"app": {"databaseId": 15368}, "workflowRun": {"workflow": {"name": "CI"}}}
+            check["checkSuite"] = {"app": {"databaseId": 15368}, "workflowRun": {"workflow": {"name": workflow}}}
         return subprocess.CompletedProcess(command, 0, json.dumps(response))
 
     result = merge_queue.operate("queue", url, run)
 
-    assert enqueued == [["-f", "id=PR_kernel", "-f", "head=ba87ecd"]]
-    assert result == {"url": url, "state": "OPEN", "head": "ba87ecd", "queued": True, "entry": entry}
+    assert enqueued == [["-f", "id=PR_one", "-f", "head=abc"]]
+    assert result == {"url": url, "state": "OPEN", "head": "abc", "queued": True, "entry": ENTRY}
     assert rest_paths and all(path.startswith(f"repos/{repo}/") for path in rest_paths)
 
 
