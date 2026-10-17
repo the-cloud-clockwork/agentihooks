@@ -700,7 +700,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           GRADER: ${{ github.event.merge_group.base_sha || github.event_name == 'pull_request' && 'origin/dev' || github.sha }}
-          PYTHON_PATH: ${{ steps.python.outputs.python-path }}
+          PYTHON_PATH: python
         run: |
           git worktree add --detach "$RUNNER_TEMP/planner" "$GRADER"
           if [[ ! -f "$RUNNER_TEMP/planner/scripts/ci_test_plan.py" ]]; then
@@ -732,7 +732,7 @@ jobs:
       - name: Deselect the reused tests
         if: steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
         env:
-          PYTHON_PATH: ${{ steps.python.outputs.python-path }}
+          PYTHON_PATH: python
         run: |
           cd "$RUNNER_TEMP/planner"
           "$PYTHON_PATH" -m tests.dep_manifest deselect --plan "$GITHUB_WORKSPACE/reused-tests.json" \

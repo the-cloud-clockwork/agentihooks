@@ -438,6 +438,7 @@ def test_queue_shards_split_on_the_tests_the_planner_did_not_reuse():
         "${{ github.event.merge_group.base_sha || github.event_name == 'pull_request' && 'origin/dev' || github.sha }}"
     )
     assert 'cd "$RUNNER_TEMP/planner"' in plan["run"]
+    assert plan["env"]["PYTHON_PATH"] == "python"
     assert _job("split")["outputs"]["reused"] == "${{ steps.plan.outputs.reused }}"
     assert _job("unit")["outputs"]["reused"] == "${{ needs.split.outputs.reused }}"
     deselected = _step("split", "Deselect the reused tests")
