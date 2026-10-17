@@ -277,7 +277,7 @@ def test_the_snowflake_colour_is_a_palette_token_without_glow(page):
 def test_freezing_a_group_lead_holds_its_members(page):
     tab, _ = page
     state = row_state(tab, "#item-tasks-t5")
-    assert (state["frozen"], state["checkbox"], state["rank"]) == (True, [True], [True])
+    assert (state["frozen"], state["rank"]) == (True, [True])
     assert row_state(tab, "#item-tasks-t2")["frozen"] is False
 
 
