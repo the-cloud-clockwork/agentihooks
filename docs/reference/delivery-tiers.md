@@ -60,7 +60,7 @@ Dev push run [39064628062](https://github.com/the-cloud-clockwork/agentihooks/ac
 - **A red integration branch keeps merging; promotion does not advance.** A failed promotion run never closes the queue or holds other pull requests. The release branch stays on the last green promoted head until a later run passes.
 - **Promotion owns the slow checks.** Nothing is dropped to make the earlier tiers fast; it runs at promotion instead, and a pull request is never held for a check only promotion runs.
 - **A red promotion must produce one fixer task per failing check.** Each must be a `ci` task naming the job, the run and the commit, raised with a ledger alert and closed by the next green run. The fix is an ordinary pull request.
-- **A lost runner is retried once.** A retry after runner loss is not a pass on a failed check.
+- **A lost runner is retried once.** A retry after runner loss is not a pass on a failed check. In the merge queue the [Queue retry workflow](#lost-runner-requeue) does this for unit shards.
 
 ## Entering the merge queue
 
@@ -97,6 +97,83 @@ A repository with no merge queue on `dev` gets a squash merge from the same comm
 | A GitHub GraphQL error from the enqueue | GitHub refused the entry, for example because the head moved after the read or the pull request conflicts with `dev`. | Read `agentihooks swarm <slug> merge state <url>`, fix the cause, and queue once the new head is green. |
 
 `tests/swarm/test_merge_queue.py` pins this behaviour: a green head is queued as is whatever `dev` changed, and a red head is refused without reading `dev`. Delivered by pull request [3476](https://github.com/the-cloud-clockwork/agentihooks/pull/3476). Its Tests run on the merged head passed: [38840793791](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38840793791). The red and green proofs it cites are Proofs workflow dispatches on branch `ci-323133-0814`: [38745333203](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38745333203) failed on the old path, which still updated the branch from `dev`, and [38746154923](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38746154923) passed on the new one.
+
+## Lost runner requeue
+
+A merge group whose unit shard loses its runner fails `Gate — Required`, and GitHub removes the pull request from the queue. The Queue retry workflow, `.github/workflows/queue-retry.yml`, puts it back once, so a lost runner costs neither a queue slot nor an agent round trip. A real test failure is never requeued.
+
+### When it runs
+
+Queue retry runs on `workflow_run` when a Tests run completes. Its job starts only when that run:
+
+- ran on the `merge_group` event,
+- ended `failure` or `cancelled`, and
+- is the first attempt of the run (`run_attempt` 1).
+
+GitHub runs `workflow_run` workflows from the default branch, `main`. A change to `queue-retry.yml` or `scripts/ci_queue_retry.py` merged on `dev` takes effect only after it is [promoted](promotion.md) to `main`. Until then the queue keeps the behaviour of the last promoted release.
+
+### How a failed run is classified
+
+`python -m scripts.ci_queue_retry --repo <owner>/<repo> --run-id <id>` reads the run and its latest failed jobs, then decides:
+
+1. Every failed job must be a `unit` shard or a job that depends on the `unit` jobs, directly or through other jobs, in `.github/workflows/test.yml` (for example `shard-check` and `Gate — Required`). A failure in any other job, such as `lint`, `test-count` or `durations`, refuses the requeue. So does a run with more than 100 jobs, since the jobs beyond the first page are counted as unclassified failures.
+2. At least one `unit` shard must have failed.
+3. Every failed `unit` shard must carry a runner loss signature in its check annotations or in the `##[error]` lines of its job log:
+   - `The runner has received a shutdown signal`
+   - `lost communication with the server`
+   - `The job was not acquired by Runner`
+
+   One red shard beside a lost one refuses the requeue.
+4. The pull request number comes from the merge group branch, `gh-readonly-queue/<base>/pr-<number>-<sha>`.
+5. The pull request must be open and outside the queue. If it left the queue since its head commit, the newest removal must be for failed checks, and there must be at most one failed checks removal. A head that already failed in the queue twice, or that last left the queue for another reason, is not requeued. Pushing a new head starts the count again.
+
+The step prints one JSON line with the decision and writes `requeue` and `pull` to the step outputs:
+
+```json
+{"run": 1234567890, "pull": 4321, "requeue": true, "reason": "runner lost on unit (3.11, 4); first failed checks removal of this head"}
+```
+
+### Enforcement
+
+The repository variable `QUEUE_RETRY_ENFORCE` controls what happens when the decision is `requeue: true`:
+
+| `QUEUE_RETRY_ENFORCE` | Behaviour |
+|---|---|
+| unset, or any value other than `false` | The workflow mints a token for the TCC Main CI GitHub App (`TCC_CI_CLIENT_ID`, `TCC_CI_APP_PRIVATE_KEY`, with contents and pull request write) and runs `gh pr merge <number> --squash --auto`, which adds the pull request back to the queue. The `Requeue the pull request once` step shows the result. |
+| `false` | Log only. The workflow writes the notice `Log only, runner loss would requeue pull request <number> once` and leaves the pull request out of the queue. |
+
+Enforcement is on by default. To return to log only, without a code change:
+
+```bash
+gh variable set QUEUE_RETRY_ENFORCE --body false --repo the-cloud-clockwork/agentihooks
+```
+
+To turn enforcement back on, delete the variable:
+
+```bash
+gh variable delete QUEUE_RETRY_ENFORCE --repo the-cloud-clockwork/agentihooks
+```
+
+The variable is read at run time, so it applies to the next failed merge group run. A pull request requeued this way merges only on its own passing run, like any other queue entry.
+
+### Checking a requeue
+
+```bash
+gh run list --workflow queue-retry.yml --limit 5
+gh run view <run id> --log | grep -E '"requeue"|Log only'
+```
+
+| What you see | Cause | Action |
+|---|---|---|
+| The Queue retry job is skipped | The Tests run was not a merge group, did not fail, or was a rerun attempt. | None. Only first attempt merge group failures are classified. |
+| `"requeue": false` with `failed outside the unit shards: <jobs>` | A job other than the unit shards and their dependents failed. | Fix that job; the pull request needs a new queue entry once its checks pass. |
+| `"requeue": false` with `failed without a runner loss signature: <shards>` | A shard failed on a test, or its loss left none of the three signatures. | Read the shard log. Fix a real failure; queue again by hand for an unrecognised runner loss. |
+| `"requeue": false` with `head already left the queue 2 times on failed checks` | The same head was already requeued once and failed again. | Treat it as a real failure until the shard logs show otherwise. |
+| `"requeue": false` with `pull request is not open outside the queue` | The pull request was closed, merged or already queued again. | None. |
+| The `Log only` notice | `QUEUE_RETRY_ENFORCE` is `false`. | Queue the pull request by hand, or delete the variable to turn enforcement on. |
+| A change to the retry rules has no effect | It is merged on `dev` but not promoted to `main`. | Wait for the next green promotion; see [Promotion and releases](promotion.md). |
+
+`tests/test_ci_queue_retry.py` pins the classification and the once per head guard against recorded shard logs in `tests/fixtures/queue_retry/`. Enforcement by default was delivered by pull request [3511](https://github.com/the-cloud-clockwork/agentihooks/pull/3511) under issue [3508](https://github.com/the-cloud-clockwork/agentihooks/issues/3508).
 
 ## Coverage grading
 
