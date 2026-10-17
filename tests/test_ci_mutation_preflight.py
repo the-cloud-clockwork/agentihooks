@@ -82,6 +82,14 @@ def test_preflight_reuses_a_green_report_before_the_plan_installs_anything():
         assert step["if"] == gated, step
 
 
+def test_pull_request_reuse_does_not_grade_the_skipped_empty_plan():
+    plan = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["mutation-plan"]
+    steps, names = _steps(plan)
+    grade = steps[names.index("Grade the empty change set")]
+    install = steps[names.index("Install dependencies")]
+    assert grade["if"] == f"{install['if']} && steps.plan.outputs.changed == '0'"
+
+
 def _steps(job):
     steps = job["steps"]
     return steps, [step.get("name") for step in steps]
@@ -97,6 +105,7 @@ def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan():
         "bases": "${{ steps.plan.outputs.bases }}",
         "changed": "${{ steps.plan.outputs.changed }}",
         "graded": "${{ steps.plan.conclusion == 'success' }}",
+        "open": "${{ steps.open.outputs.open }}",
     }
     steps, names = _steps(plan)
     assert steps[names.index(None)]["with"] == {"fetch-depth": 0, "persist-credentials": False}
@@ -248,3 +257,24 @@ def test_only_the_push_preflight_reports_the_check_that_proves_a_commit_graded()
     assert "strategy" in _workflow()["jobs"]["mutation-shard"]
     proofs = yaml.safe_load((_ROOT / ".github/workflows/proofs.yml").read_text())["jobs"]
     assert proofs["mutation"]["uses"] == "./.github/workflows/mutation-preflight.yml"
+
+
+def test_touched_tests_job_selects_and_runs_the_tests_the_branch_touches():
+    job = _workflow()["jobs"]["touched-tests"]
+    assert job["needs"] == "plan"
+    assert job["if"] == "${{ !cancelled() && needs.plan.outputs.open == 'false' }}"
+    assert job["timeout-minutes"] == 15
+    steps, names = _steps(job)
+    select = steps[names.index("Select the tests the branch touches")]
+    assert select["id"] == "touched"
+    assert 'changed_files(root, "origin/dev", "HEAD")' in select["run"]
+    assert "if is_test(path) and (root / path).is_file()" in select["run"]
+    browser = steps[names.index("Install the browser that page tests drive")]
+    assert browser["if"] == "steps.touched.outputs.browser == 'true'"
+    run = steps[names.index("Run the tests the branch touches")]
+    assert run["if"] == "steps.touched.outputs.files != ''"
+    assert run["env"]["FILES"] == "${{ steps.touched.outputs.files }}"
+    assert run["run"] == (
+        'read -ra files <<< "$FILES"\npython -m pytest "${files[@]}" -n auto --tb=short -p no:cacheprovider\n'
+    )
+    assert not any(step.get("continue-on-error") for step in steps)

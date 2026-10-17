@@ -1,3 +1,4 @@
+import ast
 import json
 import os
 import subprocess
@@ -236,6 +237,10 @@ def test_sonar_builds_the_manifest_and_only_dev_pushes_save_it():
     assert "python -m tests.dep_manifest build" in build["run"]
     assert "< /dev/null" in build["run"] and 'echo "pid=$!"' in build["run"]
     assert '--out "$RUNNER_TEMP/dep-manifest/manifest.json"' in build["run"]
+    contexts = '--data-file="$RUNNER_TEMP/dep-manifest/.coverage"'
+    assert f"python -m coverage combine --rcfile=.github/coverage/coverage.ini --keep {contexts}" in build["run"]
+    assert '--coverage "$RUNNER_TEMP/dep-manifest/.coverage"' in build["run"]
+    assert build["run"].index(contexts) < build["run"].index("python -m tests.dep_manifest build")
     assert (
         steps.index("Build the test dependency manifest")
         < steps.index("SonarQube Scan")
@@ -447,6 +452,64 @@ def test_queue_shards_split_on_the_tests_the_planner_did_not_reuse():
     check = _step("shard-check", "Check every collected test ran in exactly one shard")
     assert check["run"].endswith(" $REUSED")
     assert "reused-plan/reused-tests.json" in check["env"]["REUSED"]
+
+
+def _imports(module):
+    path = ROOT / Path(*module.split("."))
+    path = path / "__init__.py" if path.is_dir() else path.with_suffix(".py")
+    loaded, lazy = [], []
+    for statement in ast.parse(path.read_text()).body:
+        names = lazy if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)) else loaded
+        for node in ast.walk(statement):
+            if isinstance(node, ast.Import):
+                names += [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                names += [node.module] + [f"{node.module}.{a.name}" for a in node.names]
+    return loaded, lazy
+
+
+def test_the_manifest_code_needs_only_yaml_beyond_the_standard_library():
+    pending, seen = ["scripts", "tests", "scripts.ci_test_plan", "tests.dep_manifest"], set()
+    third_party = {"loaded": set(), "lazy": set()}
+    while pending:
+        module = pending.pop()
+        if module in seen:
+            continue
+        seen.add(module)
+        for kind, names in zip(("loaded", "lazy"), _imports(module), strict=True):
+            for name in names:
+                parts = name.split(".")
+                if parts[0] not in {"scripts", "tests", "hooks"}:
+                    if parts[0] not in sys.stdlib_module_names:
+                        third_party[kind].add(parts[0])
+                    continue
+                for depth in range(1, len(parts) + 1):
+                    candidate = ROOT / Path(*parts[:depth])
+                    if candidate.is_dir() or candidate.with_suffix(".py").is_file():
+                        pending.append(".".join(parts[:depth]))
+    assert third_party == {"loaded": {"yaml"}, "lazy": {"coverage"}}
+
+
+def test_every_bare_interpreter_call_into_the_manifest_code_installs_pyyaml_first():
+    calls = set()
+    for name, job in yaml.safe_load(WORKFLOW.read_text())["jobs"].items():
+        steps = job.get("steps", [])
+        for index, step in enumerate(steps):
+            run = step.get("run", "")
+            for call in ("-m scripts.ci_test_plan", "-m tests.dep_manifest"):
+                if call in run:
+                    calls.add((name, step["name"]))
+                    earlier = [s.get("run", "") for s in steps[:index]]
+                    lines = "\n".join([*earlier, run[: run.index(call)]]).splitlines()
+                    assert any("-m pip install" in line and "PyYAML==6.0.3" in line for line in lines), (
+                        name,
+                        step["name"],
+                    )
+    assert calls == {
+        ("split", "Plan the tests whose inputs did not change"),
+        ("split", "Deselect the reused tests"),
+        ("sonar", "Build the test dependency manifest"),
+    }
 
 
 def test_the_split_deselects_with_the_grader_manifest_code_not_the_heads(tmp_path):

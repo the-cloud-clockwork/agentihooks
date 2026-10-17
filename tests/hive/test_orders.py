@@ -1,5 +1,5 @@
 import json
-from dataclasses import replace
+from dataclasses import asdict, replace
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -306,6 +306,39 @@ def test_missing_delivery_payload_is_acknowledged(setup):
     item = setup.redis.xadd(setup.orders.stream("host"), {"bad": "payload"})
     setup.consumer.poll()
     assert json.loads(setup.redis.hget(f"{setup.orders.stream('host')}:acks", item))["failure"] == "invalid_order"
+
+
+def test_a_delivery_redis_refuses_is_acknowledged_refused_and_leaves_the_stream(setup, monkeypatch):
+    from redis.exceptions import NoPermissionError
+
+    item = setup.orders.send("host", setup.order)
+
+    def refuse(order):
+        raise NoPermissionError("No permissions to access a key")
+
+    monkeypatch.setattr(setup.consumer, "apply", refuse)
+    assert setup.consumer.poll() == 1
+    ack = json.loads(setup.redis.hget(f"{setup.orders.stream('host')}:acks", item))
+    assert ack == {"status": "failed", "target": {}, "failure": "refused"}
+    assert not setup.redis.xrange(setup.orders.stream("host"))
+
+
+def test_a_refused_receipt_write_for_an_acknowledged_order_still_leaves_the_stream(setup, monkeypatch):
+    from redis.exceptions import NoPermissionError
+
+    from scripts.hive.orders import Ack
+
+    item = setup.orders.send("host", setup.order)
+    setup.redis.hset(setup.orders.receipt(setup.order), "ack", json.dumps(asdict(Ack("live", {"host_id": "host"}))))
+
+    def refuse(hive, entry, order, ack):
+        raise NoPermissionError("No permissions to access a key")
+
+    monkeypatch.setattr(setup.consumer.orders, "finish", refuse)
+    assert setup.consumer.poll() == 1
+    ack = json.loads(setup.redis.hget(f"{setup.orders.stream('host')}:acks", item))
+    assert ack == {"status": "failed", "target": {}, "failure": "refused"}
+    assert not setup.redis.xrange(setup.orders.stream("host"))
 
 
 @pytest.mark.parametrize("field,value", [("harness", "claude"), ("profile", "qa"), ("account", "other")])

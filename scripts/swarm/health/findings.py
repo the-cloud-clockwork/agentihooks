@@ -62,6 +62,7 @@ class Finding:
     threshold: str
     measure: int = 0
     basis: str = dataclasses.field(default="", compare=False)
+    links: tuple = ()
 
     @property
     def id(self):
@@ -70,6 +71,10 @@ class Finding:
     def as_dict(self):
         found = asdict(self)
         del found["measure"], found["basis"]
+        if not self.links:
+            del found["links"]
+        else:
+            found["links"] = list(self.links)
         return {**found, "evidence": list(self.evidence)}
 
 

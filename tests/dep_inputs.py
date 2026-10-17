@@ -11,8 +11,6 @@ from pathlib import Path
 
 import pytest
 
-from scripts.ci_mutation.scope import imported_names
-
 ESCAPES = {"subprocess.Popen", "os.posix_spawn", "os.system", "os.exec", "os.spawn", "os.fork", "os.forkpty"}
 SKIPPED = (".git/", ".venv/", ".playwright/", "node_modules/")
 
@@ -66,6 +64,9 @@ class DepInputs:
                     found[1] = found[1] or collected[1]
 
     def pytest_collection_finish(self, session):
+        # -p loads this plugin before pytest-cov starts; a module level import leaves scripts import lines unmeasured.
+        from scripts.ci_mutation.scope import imported_names
+
         imports = {}
         for path in self.collections:
             source = Path(self.root) / path

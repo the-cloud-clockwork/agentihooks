@@ -823,12 +823,14 @@ def test_a_passed_gate_resolves_green_beside_pending_workflows_and_checks():
     raw["checkSuites"] = [QUEUED_TESTS]
     assert ledger_events.pull_request(raw).resolved is True
     raw["checkSuites"] = [FINISHED_RUN]
-    raw["statusCheckRollup"] = rollup + [{"name": "sonar", "conclusion": None}]
+    raw["statusCheckRollup"] = rollup + [{"name": "sonar", "conclusion": None, "isRequired": False}]
     assert ledger_events.pull_request(raw).resolved is True
     for state in ("PENDING", "EXPECTED", ""):
-        raw["statusCheckRollup"] = rollup + [{"context": "sonar", "state": state}]
+        raw["statusCheckRollup"] = rollup + [{"context": "sonar", "state": state, "isRequired": False}]
         assert ledger_events.pull_request(raw).resolved is True
-    raw["statusCheckRollup"] = rollup + [{"name": "sonar", "conclusion": "CANCELLED"}]
+        raw["statusCheckRollup"] = rollup + [{"context": "sonar", "state": state, "isRequired": True}]
+        assert ledger_events.pull_request(raw).resolved is False
+    raw["statusCheckRollup"] = rollup + [{"name": "sonar", "conclusion": "CANCELLED", "isRequired": False}]
     assert ledger_events.pull_request(raw).resolved is True
 
 

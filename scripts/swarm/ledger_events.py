@@ -55,7 +55,7 @@ SUITE_NODES = (
 PULL_QUERY = (
     "query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid mergeQueueEntry{id state} "
     "mergeable isDraft "
-    "commits(last:1){nodes{commit{id committedDate "
+    "commits(last:1){nodes{commit{id oid committedDate "
     'file(path:".github/workflows"){object{...on Tree{entries{object{...on Blob{text}}}}}} '
     + "statusCheckRollup{contexts(first:100){"
     + CONTEXT_NODES
@@ -135,7 +135,7 @@ def pull_request(raw):
         )
         if failing
         else (),
-        raw.get("headRefOid") or "",
+        _read_head(raw.get("headRefOid") or "", commits),
         min(reds, default=None),
         unpassed_gate,
         raw.get("mergeQueueEntry") is not None,
@@ -149,6 +149,11 @@ def pull_request(raw):
         bool(raw.get("isDraft")),
         _latest_run_cancelled(suites),
     )
+
+
+def _read_head(head, commits):
+    read = (commits[-1].get("oid") if commits else None) or head
+    return head if read == head else ""
 
 
 def _newest(checks):
@@ -220,7 +225,9 @@ def _unpassed_gate(gated, checks, results, running):
 
 def _resolved(gated, checks, results, running):
     if gated:
-        return any(result in FINAL_RED | {"TIMED_OUT"} for result in results) or "SUCCESS" in _gate(checks, results)
+        return any(result in FINAL_RED | {"TIMED_OUT"} for result in results) or (
+            "SUCCESS" in _gate(checks, results) and all(result in PASSED | {"NEUTRAL"} for result in results)
+        )
     if not running and any(result in FINAL_RED for result in results):
         return True
     return not running and "SUCCESS" in results and all(result in PASSED for result in results)
@@ -295,7 +302,7 @@ def _required_pull_request(raw, required_checks):
             for check, result in zip(checks, results)
             if result in RED
         ),
-        head=raw["headRefOid"],
+        head=_read_head(raw["headRefOid"], raw.get("commits")),
     )
 
 
