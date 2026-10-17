@@ -20,7 +20,9 @@ def test_hive_join_acquires_redis_before_starting_without_another_pull():
 def test_terminal_clients_acquires_every_python_base_before_building():
     workflow = yaml.safe_load((ROOT / ".github/workflows/swarm-smoke.yml").read_text())
     steps = workflow["jobs"].get("terminal-clients", workflow["jobs"]["smoke"])["steps"]
-    commands = "\n".join(step.get("run", "") for step in steps)
+    commands = "\n".join(
+        "docker build " if step.get("uses") == "docker/build-push-action@v6" else step.get("run", "") for step in steps
+    )
     build = commands.index("docker build ")
     bases = {line.split()[1] for line in (ROOT / "Dockerfile").read_text().splitlines() if line.startswith("FROM ")}
     assert bases
