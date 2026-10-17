@@ -119,7 +119,7 @@ def _message(**fields):
 INITIALIZE = {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}}
 
 
-def session(store, scenario, active=True):
+def session(store, scenario, active=None):
     """Run the channel server for bob over memory streams; scenario(send, receive) drives it as Claude would."""
     import anyio
 
@@ -132,7 +132,8 @@ def session(store, scenario, active=True):
             return got.message.root.model_dump(exclude_none=True)
 
         async with anyio.create_task_group() as group:
-            group.start_soon(channel.run, store, "bob", server_in, server_out, active)
+            options = () if active is None else (active,)
+            group.start_soon(channel.run, store, "bob", server_in, server_out, *options)
             await to_server.send(_message(id=1, method="initialize", params=INITIALIZE))
             opened = await receive()
             await to_server.send(_message(method="notifications/initialized"))
@@ -361,9 +362,9 @@ def test_registered_server_without_channel_activation_never_claims_messages(monk
     calls = []
     monkeypatch.setattr(channel, "identity", lambda: pytest.fail("dormant registration must not require an identity"))
     monkeypatch.setattr(channel, "connect", lambda: pytest.fail("an inactive channel must not connect to the inbox"))
-    monkeypatch.setattr(anyio, "run", lambda serve, store, me, active: calls.append((store, me, active)))
+    monkeypatch.setattr(anyio, "run", lambda serve, store, me, active: calls.append((serve, store, me, active)))
     channel.main(active=False)
-    assert calls == [(None, "", False)]
+    assert calls == [(channel.serve, None, "", False)]
 
 
 @pytest.mark.parametrize("connected", [False, True])
