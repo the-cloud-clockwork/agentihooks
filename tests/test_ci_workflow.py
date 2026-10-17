@@ -202,12 +202,16 @@ def test_unit_install_keeps_playwright_and_excludes_the_grpc_exporter():
 
 def test_only_a_dev_push_saves_the_test_environment_after_installing_it():
     jobs = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
-    callers = {name: job["steps"] for name, job in jobs.items() if any(s.get("id") == "venv" for s in job.get("steps", []))}
+    callers = {
+        name: job["steps"] for name, job in jobs.items() if any(s.get("id") == "venv" for s in job.get("steps", []))
+    }
     assert sorted(callers) == ["split", "test-count", "unit", "unit-selected"]
     for name, steps in callers.items():
         restore = next(step for step in steps if step.get("id") == "venv")
         assert restore["uses"] == "actions/cache/restore@v4"
-        saves = [step for step in steps if step.get("uses") == "actions/cache/save@v4" and step["with"]["path"] == "~/venv"]
+        saves = [
+            step for step in steps if step.get("uses") == "actions/cache/save@v4" and step["with"]["path"] == "~/venv"
+        ]
         if name in ("unit-selected", "test-count"):
             assert "github.event_name != 'push'" in jobs[name]["if"] or "== 'pull_request'" in jobs[name]["if"]
             assert saves == []
