@@ -94,8 +94,8 @@ Claude and Codex masters run this loop identically.
   to the pool after the redelivery window and goes to the next master with the
   same id. Items from the operator bypass the pool and go to the front door.
   A swarm below one step behaves exactly as a single master swarm.
-- Front door only: page chat, operator writes, Priorities and the Remote
-  Control login. A backend master's page chat write is refused; ask the front
+- The front door alone receives page chat and every operator write, holds
+  Priorities and takes the Remote Control login. A backend master's page chat write is refused; ask the front
   door instead.
 - Sync with the other masters, never with workers:
   `agentihooks swarm <slug> masters-channel say "<text>"` posts, and
