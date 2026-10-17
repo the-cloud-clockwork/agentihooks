@@ -38,6 +38,7 @@ SPOOL = (
     "CREATE TABLE IF NOT EXISTS spool (tbl TEXT NOT NULL, event_id TEXT NOT NULL, ts_ms INTEGER NOT NULL,"
     " row TEXT NOT NULL, shipped INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (tbl, event_id))",
     "CREATE INDEX IF NOT EXISTS spool_pending ON spool (shipped, tbl)",
+    "CREATE INDEX IF NOT EXISTS spool_retention ON spool (ts_ms) WHERE shipped = 1",
     "CREATE TABLE IF NOT EXISTS tables"
     " (name TEXT PRIMARY KEY, ddl TEXT NOT NULL, widen TEXT NOT NULL, created INTEGER NOT NULL DEFAULT 0)",
 )
