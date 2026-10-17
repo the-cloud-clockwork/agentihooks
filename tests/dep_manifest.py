@@ -17,8 +17,6 @@ import sys
 import tokenize
 from pathlib import Path
 
-import yaml
-
 MODULE = "<module>"
 MEASURED = ("hooks/", "scripts/")
 GLOBAL_FILES = {"pyproject.toml", "uv.lock"}
@@ -160,6 +158,11 @@ def _global(path: str) -> bool:
 
 
 def workflow_execution_changed(old: str | None, new: str | None) -> bool:
+    # The queue planner runs this module under the runner's bare Python, which has no yaml.
+    try:
+        import yaml
+    except ImportError:
+        return True
     try:
         before, after = (yaml.safe_load(text) for text in (old, new))
         for workflow in (before, after):

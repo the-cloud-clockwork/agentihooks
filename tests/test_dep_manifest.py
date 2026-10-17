@@ -65,6 +65,17 @@ def _deselect_in_split(tmp_path, head_manifest):
     return json.loads((workspace / "reused.json").read_text()), dep_manifest.deselect(reused, collected)
 
 
+def test_the_queue_planner_imports_the_manifest_under_a_python_without_yaml():
+    code = (
+        "import sys; sys.modules['yaml'] = None; "
+        "from tests import dep_manifest; "
+        "print(dep_manifest.workflow_execution_changed('jobs: {}', 'jobs: {}'))"
+    )
+    root = Path(__file__).resolve().parent.parent
+    done = subprocess.run([sys.executable, "-c", code], cwd=root, capture_output=True, text=True)
+    assert (done.returncode, done.stdout.strip()) == (0, "True"), done.stderr
+
+
 def test_lines_map_to_the_innermost_function_and_definitions_to_their_scope():
     units = dep_manifest.line_units(SOURCE)
     assert units[7] == "double"
