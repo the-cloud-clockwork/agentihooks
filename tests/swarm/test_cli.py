@@ -1087,19 +1087,24 @@ def test_timer_reconcile_installs_a_newly_added_service_and_leaves_current_units
     assert timer.ensure("/bin/agentihooks", tmp_path, run=run)
     calls.clear()
     assert timer.reconcile("/bin/agentihooks", tmp_path, run=run)
-    names = ["agentihooks-inbox-waker.service", "agentihooks-alert-intake.service", "agentihooks-swarm.timer"]
+    names = [
+        "agentihooks-inbox-waker.service",
+        "agentihooks-alert-intake.service",
+        "agentihooks-swarm-waits.timer",
+        "agentihooks-swarm.timer",
+    ]
     assert calls == [(["systemctl", "--user", "is-enabled", "--quiet", name], kw) for name in names]
 
     calls.clear()
     failing.add("is-enabled")
     assert timer.reconcile("/bin/agentihooks", tmp_path, run=run)
-    assert [call[0][2] for call in calls] == ["is-enabled", "enable", "enable", "enable"]
+    assert [call[0][2] for call in calls] == ["is-enabled", "enable", "enable", "enable", "enable"]
 
     calls.clear()
     failing.clear()
     failing.add(names[1])
     assert timer.reconcile("/bin/agentihooks", tmp_path, run=run) is False
-    assert [call[0][2] for call in calls] == ["is-enabled", "is-enabled", "enable", "enable", "enable"]
+    assert [call[0][2] for call in calls] == ["is-enabled", "is-enabled", "enable", "enable", "enable", "enable"]
     failing.clear()
 
     calls.clear()
@@ -1121,6 +1126,7 @@ def test_timer_reconcile_installs_a_newly_added_service_and_leaves_current_units
         enable("agentihooks-inbox-waker.service"),
         enable("agentihooks-alert-intake.service"),
         enable("agentihooks-new-intake.service"),
+        enable("agentihooks-swarm-waits.timer"),
         enable("agentihooks-swarm.timer"),
     ]
 
