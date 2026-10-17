@@ -276,3 +276,24 @@ def test_queue_shards_split_on_the_tests_the_planner_did_not_reuse():
     check = _step("shard-check", "Check every collected test ran in exactly one shard")
     assert check["run"].endswith(" $REUSED")
     assert "reused-plan/reused-tests.json" in check["env"]["REUSED"]
+
+
+def test_the_reused_plan_reaches_workers_but_never_nested_pytest_runs(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    import pytest
+
+    from tests import conftest
+
+    plan = tmp_path / "reused.json"
+    plan.write_text(json.dumps({"tests": ["tests/test_a.py::one"], "files": ["tests/test_b.py"]}))
+    monkeypatch.setenv("CI_REUSED", str(plan))
+    controller = SimpleNamespace(stash=pytest.Stash())
+    assert conftest._reused(controller) == (frozenset({"tests/test_a.py::one"}), frozenset({"tests/test_b.py"}))
+    assert "CI_REUSED" not in os.environ
+    node = SimpleNamespace(config=controller, workerinput={})
+    conftest.pytest_configure_node(node)
+    assert node.workerinput == {"ci_reused": str(plan)}
+    worker = SimpleNamespace(stash=pytest.Stash(), workerinput=node.workerinput)
+    assert conftest._reused(worker) == conftest._reused(controller)
+    assert conftest._reused(SimpleNamespace(stash=pytest.Stash())) == (frozenset(), frozenset())
