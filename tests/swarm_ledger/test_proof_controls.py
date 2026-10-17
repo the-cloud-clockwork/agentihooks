@@ -451,7 +451,7 @@ def test_controller_controls_refuse_wrong_owner_and_ungranted_actions(owned):
     payload["request"] = {"control": "resume"}
     status, result = owned.invoke(f"/{owned.slug}/controller-controls", payload, owned.controller)
     assert status == 403
-    assert result["error"]["message"] == "Proof controls permit only pause and drain"
+    assert result["error"]["message"] == "Proof controls permit only pause, drain, set and start"
 
 
 def test_controller_controls_do_not_enqueue_pause_again(owned):
