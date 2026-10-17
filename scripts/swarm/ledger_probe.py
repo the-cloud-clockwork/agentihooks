@@ -128,7 +128,7 @@ def _incident(redis, slug: str, active: bool) -> None:
         held = pipe.hgetall(root)
         probes = json.loads(held.get("probes", "{}"))
         probes[slug] = active
-        combined = any(probes.values()) or bool(held.get("watchdog"))
+        combined = any(probes.values())
         changed = combined != (held.get("active") == "1")
         updates = {"probes": json.dumps(probes), "active": int(combined)}
         if changed and combined:
