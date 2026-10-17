@@ -42,6 +42,7 @@ SPOOL = (
     " row TEXT NOT NULL, shipped INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (tbl, event_id))",
     "CREATE INDEX IF NOT EXISTS spool_pending ON spool (shipped, tbl)",
     "CREATE INDEX IF NOT EXISTS spool_retention ON spool (shipped, ts_ms) WHERE shipped = 1",
+    "CREATE TABLE IF NOT EXISTS flush_cursor (id INTEGER PRIMARY KEY, tbl TEXT NOT NULL)",
     "CREATE TABLE IF NOT EXISTS tables"
     " (name TEXT PRIMARY KEY, ddl TEXT NOT NULL, widen TEXT NOT NULL, created INTEGER NOT NULL DEFAULT 0)",
 )
@@ -178,13 +179,24 @@ class Outbox:
 
     def flush(self, now_ms):
         until = time.monotonic() + 5
-        shipped = 0
-        for name, ddl, widen, created in self.db.execute(WAITING).fetchall():
+        previous = self.db.execute("SELECT tbl FROM flush_cursor WHERE id = 1").fetchone()
+        waiting = self.db.execute(WAITING).fetchall()
+        if previous:
+            waiting.sort(key=lambda row: (row[0] <= previous[0], row[0]))
+        shipped, last = 0, None
+        for name, ddl, widen, created in waiting:
+            if time.monotonic() >= until:
+                break
             sent, reached = self._ship(name, (ddl, widen), created, until)
             shipped += sent
+            last = name
             if not reached:
                 break
         with timing.step("scripts.swarm.metrics_outbox.retention"), self.db:
+            if last is not None:
+                self.db.execute(
+                    "INSERT INTO flush_cursor VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET tbl = excluded.tbl", (last,)
+                )
             self.db.execute(PRUNE, (now_ms - DAY_MS,))
         return shipped
 

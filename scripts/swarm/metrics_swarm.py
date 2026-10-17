@@ -347,21 +347,29 @@ def classifier_rows(calls: list, host: str) -> list[dict]:
     ]
 
 
-def pull_rows(box: metrics_outbox.Outbox, now_ms: int, swarm: TickInput) -> dict:
+def pull_targets(doc: dict, now_ms: int) -> list[tuple[str, bool]]:
     completed = {
         event["target"].removeprefix("tasks/")
-        for event in swarm.doc.get("_meta", {}).get("events", [])
+        for event in doc.get("_meta", {}).get("events", [])
         if event["kind"] == "task done" and event["at"] >= now_ms - metrics_outbox.DAY_MS
     }
+    return [
+        (url, url == task.get("pr_url"))
+        for task in doc["tasks"]
+        if task["state"] in ("pr", "claimed") or task["id"] in completed
+        for url in dict.fromkeys([*(task.get("split_pulls") or []), task.get("pr_url")])
+        if url
+    ]
+
+
+def pull_rows(box: metrics_outbox.Outbox, now_ms: int, swarm: TickInput) -> dict:
     recent = box.recent("delivery_events", now_ms)
     recorded = {row["pull_request"] for row in recent if row["kind"] == "merge"}
     merged = {row["pull_request"] for row in recent if row["kind"] == "pull_request_merged"}
     return {
         url: swarm.view(url)
-        for task in swarm.doc["tasks"]
-        if task["state"] in ("pr", "claimed") or task["id"] in completed
-        for url in dict.fromkeys([*(task.get("split_pulls") or []), task.get("pr_url")])
-        if url and url not in (recorded if url == task.get("pr_url") else merged)
+        for url, primary in pull_targets(swarm.doc, now_ms)
+        if url not in (recorded if primary else merged)
     }
 
 
