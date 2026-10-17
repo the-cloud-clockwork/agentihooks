@@ -890,6 +890,83 @@ every 60 seconds. Redis server time determines expiry. The owner comes
 from `SWARM_HIVE_ID`, falling back to the hostname. Ledger and spawn writes carry the epoch; stale controllers
 are refused. The tick lock prevents two ticks in the same epoch and lets a higher epoch take over.
 
+### Stalled activity findings
+
+A `stalled` health finding means a pane reports `working` while its recorded
+tool activity has been quiet for at least `AGENTIHOOKS_HEALTH_STALLED_MINUTES`
+(default **10**). A pane that is not working, or an agent with no recorded
+tool timestamp, does not produce this finding. Inspect the finding through:
+
+```bash
+agentihooks swarm <slug> status --json
+```
+
+Compare the finding with recent tool calls and the agent's progress. Inbox
+messages and task changes can show that work continued, but successful commands
+alone do not establish that the hook retained the identity needed to record
+activity. A finding is evidence to investigate; the master or operator judges
+it with `verdict`.
+
+#### Wrapper loss and swarm identity
+
+A launched Claude agent can keep running after its agentihooks wrapper exits.
+Its process is then reparented, so the hook's parent walk no longer reaches the
+original launcher. Before the correction delivered in
+[pull request 3906](https://github.com/the-cloud-clockwork/agentihooks/pull/3906),
+that condition caused hooks to treat the agent as nested and drop its swarm
+identity. Tool calls continued while activity recording returned early, leaving
+the stall clock frozen and producing false findings.
+
+The hook now checks the launcher's terminal session when its parent walk sees
+one agent but misses the launcher. The launched agent keeps its identity when
+it is the only recognized agent in that session. This requires no manual
+identity repair or new setting. A recognized agent in another terminal session,
+a session containing another agent, or an agent nested inside an orphaned
+agent remains isolated from the outer swarm identity. Consecutive processes
+with the same agent command name are treated as one wrapper chain.
+
+The check recognizes Claude and Codex process names. This correction does not
+establish Copilot orphan recovery or explain why a wrapper exited.
+
+#### Configure the threshold
+
+Set the threshold in the environment used by the health pass. For a manually
+invoked tick, this example raises it to twenty minutes for that invocation:
+
+```bash
+AGENTIHOOKS_HEALTH_STALLED_MINUTES=20 agentihooks swarm tick
+```
+
+For a timer or controller, supply the variable through that service's managed
+environment so later passes use the same value. Setting it only in a worker
+shell does not configure a separately running health pass. Raising the threshold
+changes when the finding appears; it does not repair a frozen activity record.
+
+#### Investigate an active agent reported as stalled
+
+1. Read `status --json` and compare the reported inactivity with recent tool
+   calls, progress and task changes. Successful hook execution with a frozen
+   activity clock matches the symptom investigated in
+   [issue 3899](https://github.com/the-cloud-clockwork/agentihooks/issues/3899).
+2. Confirm the running hook installation includes the correction. Use read-only
+   process diagnostics to compare the agent's parent and terminal session with
+   the launcher when investigating wrapper loss; do not dump its environment.
+3. Observe a subsequent tool call and the next health pass. If inactivity still
+   grows, retain the hook and process evidence for investigation. Do not remove
+   `AGENTIHOOKS_SWARM_LAUNCHER` to force identity acceptance: it protects nested
+   sessions from inheriting the outer task.
+4. The master or operator records the evidence-based verdict. For example,
+   substitute the finding identifier returned by status:
+
+   ```bash
+   agentihooks swarm <slug> verdict <finding> false-positive --note 'Recent tool calls continued while activity recording was frozen'
+   ```
+
+A verdict suppresses the finding under the existing cooldown rules; it does
+not update the activity clock. See the `verdict` command above for recurrence
+behavior and [Outage holds and recovery](#outage-holds-and-recovery) for provider
+or Redis outages, which have their own hold and resume behavior.
+
 ### Ledger event pass
 
 Each swarm keeps a cursor on the ledger's event list. The tick reads the events written since it and sends one

@@ -1920,6 +1920,15 @@ jobs:
           source: ./
           destination: ./_site
 
+      - name: Retain the rendered documentation
+        if: steps.docs.outputs.build == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: documentation-site
+          path: _site/
+          retention-days: 7
+          if-no-files-found: error
+
       - name: Select artifact browser checks
         if: ${{ !cancelled() }}
         id: artifacts
