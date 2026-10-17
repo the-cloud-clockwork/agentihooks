@@ -74,23 +74,29 @@ def reaper(flag: int) -> None:
         raise OSError(ctypes.get_errno(), "PR_SET_CHILD_SUBREAPER failed")
 
 
+def hook_descendants(existing: dict) -> dict:
+    return {
+        pid: item
+        for pid, item in supervision_processes.descendants(os.getpid(), processes()).items()
+        if existing.get(pid) != item.start_time
+    }
+
+
 def surviving_hook_children(existing: dict, seconds: float = HOOK_CHILD_SECONDS) -> list[str]:
     deadline = time.monotonic() + seconds
     while True:
-        table = processes()
-        survivors = {
-            pid: item
-            for pid, item in supervision_processes.living(os.getpid()).items()
-            if existing.get(pid) != item.start_time
-        }
+        new = hook_descendants(existing)
+        survivors = {pid: item for pid, item in new.items() if item.state != "Z"}
         if not survivors or time.monotonic() >= deadline:
             break
         time.sleep(POLL_HOOK_SECONDS)
     supervision_processes.send(survivors, signal.SIGKILL)
-    for pid, item in table.items():
-        if item.ppid == os.getpid() and existing.get(pid) != item.start_time:
+    deadline = time.monotonic() + 1
+    while (children := [pid for pid, item in new.items() if item.ppid == os.getpid()]) and time.monotonic() < deadline:
+        for pid in children:
             with suppress(ChildProcessError):
                 os.waitpid(pid, 0)
+        new = hook_descendants(existing)
     return sorted(f"{pid} {' '.join(item.argv) or item.comm}" for pid, item in survivors.items())
 
 
@@ -108,38 +114,46 @@ def codex_session_start(home: Path, tmp: Path | None = None) -> dict:
     )
     existing = {pid: item.start_time for pid, item in supervision_processes.living(os.getpid()).items()}
     registered_at = None
+    failure = None
     (tmp / "codex-run.started").write_text(str(time.time_ns()))
     started = time.monotonic()
     reaper(1)
     try:
-        with (tmp / "codex-run.txt").open("w") as output:
-            for command in commands:
-                with payload.open() as stdin:
-                    process = subprocess.Popen(
-                        command,
-                        shell=True,
-                        stdin=stdin,
-                        env=os.environ | {"HOME": str(home), "CODEX_HOME": str(home / ".codex")},
-                        stdout=output,
-                        stderr=subprocess.STDOUT,
-                        start_new_session=True,
-                    )
-                deadline = time.monotonic() + 60
-                while process.poll() is None:
+        try:
+            with (tmp / "codex-run.txt").open("w") as output:
+                for command in commands:
+                    with payload.open() as stdin:
+                        process = subprocess.Popen(
+                            command,
+                            shell=True,
+                            stdin=stdin,
+                            env=os.environ | {"HOME": str(home), "CODEX_HOME": str(home / ".codex")},
+                            stdout=output,
+                            stderr=subprocess.STDOUT,
+                            start_new_session=True,
+                        )
+                    deadline = time.monotonic() + 60
+                    while process.poll() is None:
+                        registered_at = registered_at or first_registration(home, session)
+                        if time.monotonic() >= deadline:
+                            with suppress(ProcessLookupError):
+                                os.killpg(process.pid, signal.SIGKILL)
+                            process.wait()
+                            raise subprocess.TimeoutExpired(command, 60)
+                        time.sleep(POLL_HOOK_SECONDS)
                     registered_at = registered_at or first_registration(home, session)
-                    if time.monotonic() >= deadline:
-                        os.killpg(process.pid, signal.SIGKILL)
-                        process.wait()
-                        raise subprocess.TimeoutExpired(command, 60)
-                    time.sleep(POLL_HOOK_SECONDS)
-                registered_at = registered_at or first_registration(home, session)
-                (tmp / "codex-run.exit").write_text(str(process.returncode))
-                if process.returncode:
-                    raise subprocess.CalledProcessError(process.returncode, command)
-    finally:
+                    (tmp / "codex-run.exit").write_text(str(process.returncode))
+                    if process.returncode:
+                        raise subprocess.CalledProcessError(process.returncode, command)
+        except Exception as error:
+            failure = error
         survivors = surviving_hook_children(existing)
+    finally:
         reaper(0)
-    assert not survivors, f"Codex hook children outlived registration: {survivors}"
+    if survivors:
+        raise AssertionError(f"Codex hook children outlived registration: {survivors}") from failure
+    if failure:
+        raise failure
     assert sessions(home) == {session: str(Path.cwd())}
     return {
         "registered_at": registered_at,

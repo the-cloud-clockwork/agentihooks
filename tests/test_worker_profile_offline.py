@@ -117,6 +117,22 @@ def test_offline_codex_profile_fails_on_a_hook_child_that_outlives_registration(
         os.kill(child, 0)
 
 
+def test_offline_codex_profile_names_a_surviving_child_of_a_failing_hook(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    home = registering_hook(
+        tmp_path,
+        "child = subprocess.Popen(['sleep', '30'], start_new_session=True)\n"
+        "(home / 'child').write_text(str(child.pid))\n"
+        "sys.exit(3)\n",
+    )
+
+    with pytest.raises(AssertionError, match="Codex hook children outlived registration") as failed:
+        profile_probe.codex_session_start(home)
+
+    assert isinstance(failed.value.__cause__, subprocess.CalledProcessError)
+    assert f"{int((home / 'child').read_text())} sleep 30" in str(failed.value)
+
+
 def test_offline_codex_profile_passes_a_hook_child_that_exits_with_its_hook(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     home = registering_hook(tmp_path, "subprocess.Popen(['sleep', '0.2'], start_new_session=True).wait()\n")
