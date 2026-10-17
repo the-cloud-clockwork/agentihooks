@@ -15,6 +15,10 @@ ca_dir=""
 route=""
 terminal=""
 
+if [[ -n ${KIND_LAYER_CACHE:-} ]]; then
+  mkdir -p "$KIND_LAYER_CACHE"
+  rm -f "$KIND_LAYER_CACHE/complete"
+fi
 python3 tests/kind_request.py
 
 finish() {
@@ -66,10 +70,6 @@ keep_layers() {
   touch "$KIND_LAYER_CACHE/complete"
 }
 (
-  if [[ -n ${KIND_LAYER_CACHE:-} ]]; then
-    mkdir -p "$KIND_LAYER_CACHE"
-    rm -f "$KIND_LAYER_CACHE/complete"
-  fi
   bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm >/dev/null
   mapfile -t terminal_layers < <(layers terminal)
   docker build -q "${terminal_layers[@]}" --build-arg IMAGE="$image" --target packages \

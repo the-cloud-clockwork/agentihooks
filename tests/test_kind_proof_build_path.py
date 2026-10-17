@@ -90,10 +90,14 @@ def test_a_new_layer_export_replaces_the_restored_one(cache):
     assert not (cache / "swarm" / "stale").exists()
 
 
-def test_a_restored_completion_mark_is_cleared_before_anything_in_the_build_can_fail():
-    build = SCRIPT[_at("(\n  if [[ -n ${KIND_LAYER_CACHE:-} ]]; then\n") : _at("build=$!\n")]
-    clear = build.index('rm -f "$KIND_LAYER_CACHE/complete"')
-    assert clear < build.index("pull-runtime-image.sh") < build.index("keep_layers swarm terminal")
+def test_a_restored_completion_mark_is_cleared_before_any_step_can_fail():
+    clear = _at(
+        'if [[ -n ${KIND_LAYER_CACHE:-} ]]; then\n  mkdir -p "$KIND_LAYER_CACHE"\n  rm -f "$KIND_LAYER_CACHE/complete"\nfi\n'
+    )
+    assert (
+        clear < _at("python3 tests/kind_request.py") < _at("pull-runtime-image.sh") < _at("keep_layers swarm terminal")
+    )
+    assert SCRIPT.count('rm -f "$KIND_LAYER_CACHE/complete"') == 1
 
 
 def test_fixture_builds_without_a_layer_cache_pass_no_cache_flags(cache):
