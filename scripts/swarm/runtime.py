@@ -655,6 +655,9 @@ class HerdrRuntime:
             overlays=list(decision.overlays),
             route_kind=placed_kind,
             remote_control=remote_control.decision(lane, agent, placed_kind, config.slug, login),
+            desired_route_kind="interactive"
+            if lane == MASTER and agent == "claude" and not task.get("route_kind")
+            else "",
         )
 
     def resume(self, config, agent, text):
@@ -713,6 +716,7 @@ class HerdrRuntime:
             overlays=agent.overlays,
             route_kind=kind,
             remote_control=rc,
+            desired_route_kind=agent.desired_route_kind,
         )
 
     def operator(self, config, name, profile, text):

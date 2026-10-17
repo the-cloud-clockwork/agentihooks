@@ -120,6 +120,7 @@ class AgentRecord:
     route_kind: str = "subscription"
     transport: str = ""
     remote_control: dict = field(default_factory=dict)
+    desired_route_kind: str = ""
 
 
 class RedisStore:
@@ -398,6 +399,7 @@ class RedisStore:
                 reason = "handed off"
             self.redis.rpush(self.key(slug, "history"), json.dumps({**row, "ended_at": ended, "reason": reason}))
         self.redis.hdel(self.key(slug, "agents"), name)
+        self.redis.hdel(self.key(slug, "desired-routes"), name)
         self.redis.hdel(self.key(slug, "state-since"), name)
         self.redis.hdel(self.key(slug, "retire-failures"), name)
         self.names.retire(name, ended)
