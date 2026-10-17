@@ -4,6 +4,7 @@
   "branch-lanes.yml/grade": "light",
   "ci-templates.yml/actionlint": "hosted",
   "codex-cache.yml/seed": "standard",
+  "coverage-ratchet-speed.yml/replay": "hosted",
   "coverage-stability.yml/compare": "batch",
   "equivalence.yml/ledger-equivalence": "standard",
   "gate-protected.yml/grade": "hosted",
