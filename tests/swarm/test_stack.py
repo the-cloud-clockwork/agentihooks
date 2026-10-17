@@ -510,7 +510,7 @@ def test_park_fetches_an_antoncore_dependency_through_the_antoncore_checkout(par
 
 
 @pytest.mark.parametrize("origin", ["git@github.com:o/bundle.git", ""])
-def test_park_fetches_by_url_when_the_recorded_checkout_belongs_to_another_repository(parked, monkeypatch, origin):
+def test_park_fetches_by_url_when_the_recorded_checkout_has_no_matching_origin(parked, monkeypatch, origin):
     _, ledger, _, shell, doc = parked
     _antoncore_dependency(parked, monkeypatch, origin)
     assert park(doc) == 0
