@@ -234,17 +234,18 @@ def test_notice_streaks_and_cpu_survive_long_watchdog_details(store):
     assert all(row["watchdog"] == reason for row in ledger_probe.state(store, "sw")["raised_samples"])
 
 
-def test_refused_probe_writes_are_retained_separately_from_outages(store):
+@pytest.mark.parametrize("field", ["read", "write"])
+def test_refused_probe_requests_are_retained_separately_from_outages(store, field):
     clock = Clock()
-    ledger = ProbedLedger(clock, read_s=6.0)
-    ledger.write_error = LedgerRefused("write refused")
+    ledger = ProbedLedger(clock, read_s=6.0 if field == "write" else 0.1, write_s=6.0 if field == "read" else 0.1)
+    setattr(ledger, f"{field}_error", LedgerRefused("request refused"))
     observe(store, ledger, clock)
     observe(store, ledger, clock)
     rows = ledger_probe.state(store, "sw")["raised_samples"]
-    assert all(row["write_failure"] == "" for row in rows)
-    assert all(row["write_refusal"] == "request refused" for row in rows)
-    assert "write 0.1 seconds, request refused" in master_mail(store)[0]
-    ledger.read_s = 0.1
+    assert all(row[f"{field}_failure"] == "" for row in rows)
+    assert all(row[f"{field}_refusal"] == "request refused" for row in rows)
+    assert f"{field} 0.1 seconds, request refused" in master_mail(store)[0]
+    ledger.read_s, ledger.write_s = 0.1, 0.1
     observe(store, ledger, clock)
     observe(store, ledger, clock)
     assert not ledger_probe.holding(store, "sw")
