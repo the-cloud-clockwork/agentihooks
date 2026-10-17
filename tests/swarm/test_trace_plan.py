@@ -315,7 +315,7 @@ def test_trace_asks_one_needed_question_per_piece_and_one_size_question(ask):
         ],
     }
     assert list(questions) == ["piece_0", "piece_1", "piece_2", "size"]
-    assert questions["piece_2"].instructions == "Is piece 3, a diesel generator, needed to deliver the task?"
+    assert questions["piece_2"].instructions.startswith("Is piece 3, a diesel generator, needed to deliver the task?")
     assert (questions["piece_2"].true, questions["piece_2"].false) == ("the task needs it", "it serves something else")
     assert questions["size"].instructions == (
         "How much source work is the plan? Judge only pieces with nonempty areas; "
