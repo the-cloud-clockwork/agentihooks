@@ -2977,38 +2977,3 @@ def test_list_and_status_header_show_the_scaling_mode(env, capsys):
     assert "\tscaling manual\t" in capsys.readouterr().out
     run("sw", "status")
     assert "  scaling manual  " in capsys.readouterr().out.splitlines()[0]
-
-
-def test_the_tick_records_an_urgent_task_its_phase_holds(env):
-    from scripts.swarm.health import urgent_hold
-
-    store, ledger, rt = env
-    run("sw", "create", "--repo", "/repo")
-    ledger.phases = [{"id": "p1", "depends_on": []}, {"id": "p2", "title": "later", "depends_on": ["p1"]}]
-    ledger.rows["t1"].update(phase="p2", rank="urgent", title="fix quota")
-    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
-    held = urgent_hold.read(store, "sw")["tasks"]
-    assert {task_id: row["why"] for task_id, row in held.items()} == {
-        "t1": "its phase later is waiting on an earlier phase"
-    }
-
-
-def test_the_tick_hands_an_urgent_hold_past_ten_minutes_to_the_findings_pass(env, monkeypatch):
-    store, ledger, rt = env
-    run("sw", "create", "--repo", "/repo")
-    ledger.phases = [{"id": "p1", "depends_on": []}, {"id": "p2", "title": "later", "depends_on": ["p1"]}]
-    ledger.rows["t1"].update(phase="p2", rank="urgent", title="fix quota")
-    clock = [1_000_000]
-    monkeypatch.setattr(cli, "now_ms", lambda: clock[0])
-    shown, real = [], cli.ledger_events.findings_pass
-
-    def spy(inbox, store, slug, found, doc=None):
-        shown.append([row["id"] for row in found])
-        return real(inbox, store, slug, found, doc)
-
-    monkeypatch.setattr(cli.ledger_events, "findings_pass", spy)
-    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
-    clock[0] += 600_001
-    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
-    assert "urgent-unclaimable/t1" not in shown[0]
-    assert "urgent-unclaimable/t1" in shown[-1]

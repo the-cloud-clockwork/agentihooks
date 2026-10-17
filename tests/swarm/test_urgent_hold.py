@@ -1,5 +1,8 @@
 import pytest
 
+from tests.swarm.test_cli import env as env
+from tests.swarm.test_cli import run
+
 pytestmark = pytest.mark.unit
 
 SLUG = "sw"
@@ -198,3 +201,45 @@ def test_an_urgent_task_waiting_on_a_release_is_reported(store, monkeypatch):
     assert [(f.id, f.evidence) for f in urgent_hold.findings(store, SLUG)] == [
         ("urgent-unclaimable/a", ("it waits on a release newer than v1.2.3",))
     ]
+
+
+def held_tick_env(env):
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    ledger.phases = [{"id": "p1", "depends_on": []}, {"id": "p2", "title": "later", "depends_on": ["p1"]}]
+    ledger.rows["t1"].update(phase="p2", rank="urgent", title="fix quota")
+    return store, ledger, rt
+
+
+def test_the_tick_records_an_urgent_task_its_phase_holds(env):
+    from scripts.swarm import cli
+    from scripts.swarm.health import urgent_hold
+    from tests.swarm.test_delivery import FakeHerdr
+
+    store, ledger, rt = held_tick_env(env)
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    held = urgent_hold.read(store, "sw")["tasks"]
+    assert {task_id: row["why"] for task_id, row in held.items()} == {
+        "t1": "its phase later is waiting on an earlier phase"
+    }
+
+
+def test_the_tick_hands_an_urgent_hold_past_ten_minutes_to_the_findings_pass(env, monkeypatch):
+    from scripts.swarm import cli
+    from tests.swarm.test_delivery import FakeHerdr
+
+    store, ledger, rt = held_tick_env(env)
+    clock = [1_000_000]
+    monkeypatch.setattr(cli, "now_ms", lambda: clock[0])
+    shown, real = [], cli.ledger_events.findings_pass
+
+    def spy(inbox, store, slug, found, doc=None):
+        shown.append([row["id"] for row in found])
+        return real(inbox, store, slug, found, doc)
+
+    monkeypatch.setattr(cli.ledger_events, "findings_pass", spy)
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    clock[0] += 600_001
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert "urgent-unclaimable/t1" not in shown[0]
+    assert "urgent-unclaimable/t1" in shown[-1]
