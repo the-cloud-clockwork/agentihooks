@@ -281,6 +281,23 @@ def test_freezing_a_group_lead_holds_its_members(page):
     assert row_state(tab, "#item-tasks-t2")["frozen"] is False
 
 
+def test_page_snapshot_carries_the_shared_group_freeze_ancestry():
+    from scripts.swarm_ledger import ledger_server
+
+    snapshot = ledger_server.ledger_view(ledger_state(DOC))
+    member = next(row for row in snapshot["tasks"] if row["id"] == "t5")
+    assert member["freeze_ancestry"] == [
+        "tasks/t5",
+        "tasks/t1",
+        "slices/hier.hy-page",
+        "phases/p1",
+        "plans/hier",
+        "phases/p3",
+        "plans/v2",
+    ]
+    assert "freeze_ancestry" not in DOC["tasks"][-1]
+
+
 @pytest.mark.parametrize("page", [[freeze("phases/p4")]], indirect=True)
 def test_an_out_of_scope_item_keeps_its_freeze_button(page):
     tab, sent = page
