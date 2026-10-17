@@ -215,6 +215,71 @@ def test_notices_keep_both_triggering_passes_and_do_not_substitute_a_new_swarms_
     assert held["raised_samples"][1]["streak_after"] == {"slow": 2, "fast": 0}
 
 
+def test_notice_streaks_and_cpu_survive_long_watchdog_details(store):
+    clock = Clock()
+    ledger = ProbedLedger(clock)
+    reason = "The ledger server restart failed: " + "x" * 200
+    store.redis.hset(incidents.key("ledger"), "watchdog", reason)
+    observe(store, ledger, clock, 1_000)
+    observe(store, ledger, clock, 2_000)
+    [notice] = ledger.notes
+    assert len(notice) <= ledger_probe.TEXT_KEPT
+    assert "sw pass 1" in notice and "sw pass 2" in notice
+    assert notice.count("read 0.1 seconds") == 2
+    assert notice.count("write 0.1 seconds") == 2
+    assert notice.count("CPU unknown over pass") == 2
+    assert "slow 0/1" in notice and "slow 1/2" in notice
+    assert notice.count("fast 0/0") == 2
+    assert "restart failed" in notice
+    assert all(row["watchdog"] == reason for row in ledger_probe.state(store, "sw")["raised_samples"])
+
+
+def test_refused_probe_writes_are_retained_separately_from_outages(store):
+    clock = Clock()
+    ledger = ProbedLedger(clock, read_s=6.0)
+    ledger.write_error = LedgerRefused("write refused")
+    observe(store, ledger, clock)
+    observe(store, ledger, clock)
+    rows = ledger_probe.state(store, "sw")["raised_samples"]
+    assert all(row["write_failure"] == "" for row in rows)
+    assert all(row["write_refusal"] == "request refused" for row in rows)
+    assert "write 0.1 seconds, request refused" in master_mail(store)[0]
+    ledger.read_s = 0.1
+    observe(store, ledger, clock)
+    observe(store, ledger, clock)
+    assert not ledger_probe.holding(store, "sw")
+
+
+@pytest.mark.parametrize("departure", ["remove", "stop"])
+def test_a_departed_swarm_does_not_hold_an_incident_after_two_answered_sibling_passes(store, departure):
+    store.create(SwarmConfig("sibling", "/repo", max_eng=1, max_ci=0))
+    clock = Clock()
+    ledger = ProbedLedger(clock, read_s=6.0)
+    observe(store, ledger, clock)
+    observe(store, ledger, clock)
+    if departure == "remove":
+        for agent in store.agents("sw"):
+            store.drop_agent("sw", agent.name)
+        store.remove("sw")
+    else:
+        store.update("sw", state="stopped")
+    ledger.read_s = 0.1
+    read, write = ledger.metadata, ledger.time_left
+    ledger.metadata = lambda slug: read("sw")
+    ledger.time_left = lambda slug, slots, ci_minutes: write("sw", slots, ci_minutes)
+    ledger_probe.observe(store, "sibling", ledger, FakeRuntime(), 3_000, clock=clock, facts=lambda: FACTS)
+    assert store.redis.hget(incidents.key("ledger"), "active") == "1"
+    ledger_probe.observe(store, "sibling", ledger, FakeRuntime(), 4_000, clock=clock, facts=lambda: FACTS)
+    assert store.redis.hget(incidents.key("ledger"), "active") == "0"
+    [raised, recovered] = InboxStore(store.redis).pending_items("master@sibling")
+    assert "slow" in raised.text
+    assert "sibling pass 1" in recovered.text and "sibling pass 2" in recovered.text
+    ledger.read_s = 6.0
+    for at in (5_000, 6_000):
+        ledger_probe.observe(store, "sibling", ledger, FakeRuntime(), at, clock=clock, facts=lambda: FACTS)
+    assert store.redis.hget(incidents.key("ledger"), "generation") == "2"
+
+
 def test_two_failed_passes_raise_the_alert_naming_the_failure(store):
     clock = Clock()
     ledger = ProbedLedger(clock)
