@@ -139,6 +139,7 @@ def test_the_merge_drops_per_test_contexts_and_reports_every_arc_they_held(tmp_p
     (tmp_path / "hooks").mkdir()
     (tmp_path / "hooks/branchy.py").write_text("def pick(flag):\n    if flag:\n        return 1\n    return 2\n")
     (tmp_path / "hooks/never.py").write_text("value = 1\n")
+    (tmp_path / "hooks/__init__.py").write_text("")
     generator = """
 import sys
 from coverage import Coverage
