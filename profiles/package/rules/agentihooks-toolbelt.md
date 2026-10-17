@@ -71,6 +71,14 @@ The deterministic CLI primitives behind these skills are respectively
 `agentihooks init-agent`, and `agentihooks run-in-terminal`. Follow each
 `SKILL.md`; do not reconstruct its process manually.
 
+`init-agent`, `run-in-terminal` and every herdr pane split, pane run, tab or
+workspace creation run only when the operator's own prompt this turn, typed
+in your terminal, says `open pane` (or `open a pane`, `open the pane`); a
+PreToolUse guard denies them otherwise, and a quota handoff's
+`init-agent --handoff` stays allowed. A step only the operator can do goes to
+Priorities in a swarm or ledger session, or is written in your own terminal as
+a command for him to run. Reading, listing and closing panes stay allowed.
+
 ## Swarm, small ledger or nothing
 
 No session creates a ledger or starts a swarm on its own. That happens only
