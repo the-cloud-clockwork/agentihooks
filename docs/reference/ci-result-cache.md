@@ -252,7 +252,7 @@ Known limits: the day in the key forces one full run per job per UTC day, which 
 
 ## Full scope pull request reuse as delivered
 
-Pull requests into dev from a branch of this repository plan reuse the same way the queue does. A full scope run, one that `select` did not narrow to the tests its change reaches, skips every test that passed on the dev record with unchanged inputs and carries those tests' dev coverage into its own, so `sonar` and the coverage ratchet still grade the whole suite. A narrowed run skips the `split` job, so it plans nothing and runs only its selected tests. Gate plant dispatches take the same path with the head as grader.
+Pull requests into dev from a branch of this repository plan reuse the same way the queue does. A full scope run, one that `select` did not narrow to the tests its change reaches, skips every test that passed on the dev record with unchanged inputs and carries those tests' dev coverage into its own, so `sonar` and the coverage ratchet still grade the whole suite. A narrowed run skips the `split` job, so it plans nothing and runs only its selected tests.
 
 ### When a pull request run reuses tests
 
