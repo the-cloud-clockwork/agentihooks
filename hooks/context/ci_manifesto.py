@@ -38,6 +38,7 @@ _DEFAULT_BRANCH_SIGNALS = [
     "branch it",
     "feature branch",
 ]
+PANE_SIGNALS = ["open pane", "open a pane", "open the pane"]
 _DEFAULT_PR_SIGNALS = [
     "open a pr",
     "open the pr",
@@ -224,6 +225,10 @@ def contains_branch_signal(text: str) -> bool:
 
 def contains_pr_signal(text: str) -> bool:
     return _signal_match(text, get_pr_signals())
+
+
+def contains_pane_signal(text: str) -> bool:
+    return _signal_match(text, PANE_SIGNALS)
 
 
 # Claude Code injects hook stdout and additionalContext into the model's

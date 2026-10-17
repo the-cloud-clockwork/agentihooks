@@ -677,6 +677,9 @@ def on_session_end(payload: dict) -> None:
         clear_hotfix_signal(session_id)
         clear_branch_signal(session_id)
         clear_pr_signal(session_id)
+        from hooks.context.pane_guard import clear_pane_signal
+
+        clear_pane_signal(session_id)
     except Exception:
         pass
     try:
@@ -875,6 +878,7 @@ def on_user_prompt_submit(payload: dict) -> None:
             contains_pr_signal,
             contains_release_signal,
         )
+        from hooks.context.pane_guard import observe_pane_signal
         from hooks.context.prod_lockdown import set_hotfix_signal, set_release_signal
 
         prompt = payload.get("prompt", "")
@@ -901,6 +905,7 @@ def on_user_prompt_submit(payload: dict) -> None:
                     "ci_manifesto: branch-creation signal active this turn",
                     {"session_id": session_id},
                 )
+            observe_pane_signal(session_id, prompt)
             if session_id not in _KNOWN_SUBAGENT_IDS and contains_pr_signal(prompt):
                 set_pr_signal(session_id)
                 log(
@@ -1278,10 +1283,12 @@ def _plan_read_guard(payload: dict, tool_name: str) -> None:
 
 def _check_shell_guards(payload: dict) -> None:
     from hooks.context.local_test_guard import check_local_tests
+    from hooks.context.pane_guard import check_panes
     from hooks.context.swarm_wait_nudge import check_github_watch
 
     check_local_tests(payload)
     check_github_watch(payload)
+    check_panes(payload)
     if payload.get("tool_name") != "Bash":
         return
     try:
@@ -2300,10 +2307,12 @@ def on_stop(payload: dict) -> None:
     try:
         from hooks.context.branch_guard import clear_branch_signal
         from hooks.context.conditions import disarm_gate
+        from hooks.context.pane_guard import clear_pane_signal
         from hooks.context.prod_lockdown import clear_bypass
 
         clear_bypass(session_id)
         clear_branch_signal(session_id)
+        clear_pane_signal(session_id)
         disarm_gate(session_id)
     except Exception as e:
         log("prod_lockdown.clear_bypass failed", {"error": str(e)})
