@@ -1777,8 +1777,10 @@ jobs:
             sleep 1
           done
           docker exec "$CLICKHOUSE" clickhouse-client -q 'SELECT 1' >/dev/null 2>&1 || { docker logs "$CLICKHOUSE"; echo "::error::ClickHouse never became ready."; exit 1; }
-          if ! "$RUNNER_TEMP/columns/bin/python" .antoncore/scripts/swarm_dashboard_columns.py check --agentihooks "$GITHUB_WORKSPACE" --container "$CLICKHOUSE" 2> "$RUNNER_TEMP/columns.err"; then
-            cat "$RUNNER_TEMP/columns.err" >&2
+          status=0
+          "$RUNNER_TEMP/columns/bin/python" .antoncore/scripts/swarm_dashboard_columns.py check --agentihooks "$GITHUB_WORKSPACE" --container "$CLICKHOUSE" 2> "$RUNNER_TEMP/columns.err" || status=$?
+          cat "$RUNNER_TEMP/columns.err" >&2
+          if (( status )); then
             missing=$(grep -oP "No module named '\K[^']+" "$RUNNER_TEMP/columns.err" | sort -u | paste -sd, - || true)
             [[ -z "$missing" ]] || echo "::error::The dashboard column checker imports $missing, which its environment lacks; pin it on this step's pip install line."
             exit 1
