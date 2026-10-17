@@ -212,8 +212,9 @@ def test_only_a_dev_push_saves_the_test_environment_after_installing_it():
         saves = [
             step for step in steps if step.get("uses") == "actions/cache/save@v4" and step["with"]["path"] == "~/venv"
         ]
-        if name in ("unit-selected", "test-count"):
-            assert "github.event_name != 'push'" in jobs[name]["if"] or "== 'pull_request'" in jobs[name]["if"]
+        guards = {"unit-selected": "github.event_name == 'pull_request'", "test-count": "github.event_name != 'push'"}
+        if name in guards:
+            assert guards[name] in jobs[name]["if"]
             assert saves == []
             continue
         [save] = saves
