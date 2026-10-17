@@ -168,3 +168,17 @@ def test_a_ruff_that_cannot_run_fails(repo, capsys):
     repo({"mod.py": "value = 1\n"})
     assert publish_gate.main() == 1
     assert report(capsys) == ["ruff check exited 2"]
+
+
+def test_an_old_unformatted_line_outside_the_diff_passes(repo, capsys):
+    repo({"mod.py": "value = 1\n\n\n\n\nlabel=1\n"}, push=True)
+    repo({"mod.py": "value = 2\n\n\n\n\nlabel=1\n"})
+    assert publish_gate.main() == 0
+    assert report(capsys) == ["Graded 1 changed Python files"]
+
+
+def test_an_unformatted_changed_line_fails(repo, capsys):
+    repo({"mod.py": "value = 1\n\n\n\n\nlabel=1\n"}, push=True)
+    repo({"mod.py": "value = 1\nother=2\n\n\n\nlabel=1\n"})
+    assert publish_gate.main() == 1
+    assert report(capsys) == ["mod.py:2: would reformat a changed line"]
