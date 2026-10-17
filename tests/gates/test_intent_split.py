@@ -37,6 +37,16 @@ def test_a_split_task_without_plan_lines_is_graded_by_its_description(planned, s
     assert "plan_chunk" not in plan
 
 
+@pytest.mark.parametrize("source", ["task", "phase"])
+def test_a_split_task_keeps_its_half_when_the_plan_is_linked(planned, source):  # noqa: F811
+    doc = split(planned)
+    phase = doc["phases"][0]
+    url = phase.pop("plan_ref")["artifact"]
+    (doc["tasks"][0] if source == "task" else phase)["plan_url"] = url
+    state = intent.state_of(doc, doc["tasks"][0], PR)
+    assert (state["plan_lines"], state["plan_chunk"]) == ("15-16", "line 15\\nline 16\\n")
+
+
 def test_the_first_pull_request_of_a_split_task_is_judged_against_its_own_half(planned):  # noqa: F811
     doc = split(planned)
     state = intent.state_of(doc, doc["tasks"][0], PR)

@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm_ledger import ledger, ledger_artifacts, ledger_publish
+from scripts.swarm_ledger import ledger, ledger_artifacts, ledger_plans, ledger_publish
 from scripts.swarm_ledger import ledger_core as core
 from tests.swarm_ledger import test_plan_kind
 from tests.swarm_ledger.test_plan_kind import add, update
@@ -94,6 +94,17 @@ def test_publication_and_three_computed_ranges(published, monkeypatch):
     state, rejected = update(published, state="done", proof={"slice": "first,second,third"})
     assert rejected == []
     assert task(state, "plan")["state"] == "done"
+
+
+def test_explicit_no_plan_lines_normalizes_slice_metadata_only():
+    fields = {"plan_slice": "none", "slice": "slices/old", "description": "Independent work", "phase": "p1"}
+    assert ledger_plans.with_plan_slice({}, fields) == {
+        "description": "Independent work",
+        "phase": "p1",
+        "follow_up": True,
+    }
+    assert fields["plan_slice"] == "none"
+    assert fields["slice"] == "slices/old"
 
 
 @pytest.mark.parametrize("existing", [False, True])
