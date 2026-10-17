@@ -323,7 +323,19 @@ def test_a_completed_pod_waits_for_its_reported_final_transcript():
 
 
 @pytest.mark.parametrize(
-    "problem", ["missing", "malformed", "generation", "execution", "container", "duplicate", "failed"]
+    "problem",
+    [
+        "missing",
+        "missing_state",
+        "missing_terminated",
+        "missing_message",
+        "malformed",
+        "generation",
+        "execution",
+        "container",
+        "duplicate",
+        "failed",
+    ],
 )
 def test_a_completed_pod_without_a_valid_final_report_is_kept(problem):
     world = cases.World()
@@ -336,6 +348,12 @@ def test_a_completed_pod_without_a_valid_final_report_is_kept(problem):
         terminated = statuses[0]["state"]["terminated"]
         if problem == "missing":
             pod["status"].pop("containerStatuses")
+        elif problem == "missing_state":
+            statuses[0].pop("state")
+        elif problem == "missing_terminated":
+            statuses[0]["state"].pop("terminated")
+        elif problem == "missing_message":
+            terminated.pop("message")
         elif problem == "malformed":
             terminated["message"] = "broken"
         elif problem in ("generation", "execution"):
