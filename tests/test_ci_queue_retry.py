@@ -326,3 +326,34 @@ def test_a_lost_shard_outside_a_queue_branch_is_not_requeued(monkeypatch, tmp_pa
         "reason": "no pull request in queue branch dev",
     }
     assert output.read_text() == "requeue=false\npull=\n"
+
+
+def queued_then(states, monkeypatch):
+    asked, slept = [], []
+
+    def state(repo, number):
+        asked.append((repo, number))
+        return states[min(len(asked), len(states)) - 1]
+
+    monkeypatch.setattr(ci_queue_retry, "pull_state", state)
+    monkeypatch.setattr(ci_queue_retry.time, "sleep", slept.append)
+    return asked, slept
+
+
+def test_the_requeue_waits_for_the_queue_to_drop_the_pull_request(monkeypatch):
+    queued = {**pull([REMOVED]), "isInMergeQueue": True}
+    left = pull([REMOVED])
+    asked, slept = queued_then([queued, queued, left], monkeypatch)
+    assert ci_queue_retry.pull_after_exit("o/r", 3259) is left
+    assert asked == [("o/r", 3259)] * 3
+    assert slept == [15, 15]
+    assert ci_queue_retry.requeue(left) == (True, "first failed checks removal of this head")
+
+
+def test_a_pull_request_still_queued_after_three_minutes_is_not_requeued(monkeypatch):
+    queued = {**pull([REMOVED]), "isInMergeQueue": True}
+    asked, slept = queued_then([queued], monkeypatch)
+    assert ci_queue_retry.pull_after_exit("o/r", 3259) is queued
+    assert len(asked) == 13
+    assert slept == [15] * 12
+    assert ci_queue_retry.requeue(queued) == (False, "pull request is not open outside the queue")
