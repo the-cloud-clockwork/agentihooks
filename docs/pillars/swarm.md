@@ -409,8 +409,9 @@ or `pr` state. Two entries share an area when they are equal or one is a folder 
 spaces, a leading `./` and trailing slashes are ignored, and the narrower entry is the one named. Sharing an area
 never blocks a claim; it moves the task back within its rank. The launch order is queue rank (or the dispatcher's
 band), then tasks without an earlier failed launch, then resumed work, then tasks clear of every held territory, then
-the S exception, critical path and ledger order described under [Queue rank](#queue-rank). An `urgent` task that
-shares an area still claims ahead of a clear `normal` task.
+the S exception, critical path and ledger order described under [Queue rank](#queue-rank). With dispatch active,
+the dispatcher's queue position replaces those last three within a band. An `urgent` task that shares an area still
+claims ahead of a clear `normal` task.
 
 The opening prompt then carries a header line once, followed by one line per running task that shares an area,
 after the task, contract, workspace and group lines. Several shared areas are joined with `and`:
