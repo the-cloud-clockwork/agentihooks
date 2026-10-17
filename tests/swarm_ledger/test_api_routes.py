@@ -16,7 +16,7 @@ def fake_server(calls):
         ALLOWED_ORIGINS=set(),
         HUB=Hub(),
         core=SimpleNamespace(SLUG_RE=re.compile(r"[a-z0-9-]+"), read_token=lambda page: "tok"),
-        authority=SimpleNamespace(principal=lambda token, slug, given, agent: "operator"),
+        authority=SimpleNamespace(caller=lambda headers, admin, slug: "operator"),
         repository=SimpleNamespace(
             token=lambda slug: "tok", current=lambda slug: SimpleNamespace(state={"events": []})
         ),

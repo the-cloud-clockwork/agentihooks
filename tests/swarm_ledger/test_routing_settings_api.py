@@ -40,7 +40,11 @@ def fake_server(calls=None):
         ALLOWED_ORIGINS=set(),
         MAX_BODY=10_000,
         core=SimpleNamespace(SLUG_RE=re.compile(r"[a-z0-9-]+"), loads=json.loads),
-        authority=SimpleNamespace(principal=principal),
+        authority=SimpleNamespace(
+            caller=lambda headers, admin, slug: principal(
+                admin, slug, headers.get("X-Ledger-Token"), headers.get("X-Ledger-Agent")
+            )
+        ),
         repository=SimpleNamespace(token=token),
     )
 

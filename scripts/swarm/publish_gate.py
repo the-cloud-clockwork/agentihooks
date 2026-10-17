@@ -48,7 +48,7 @@ def complexity(
     tree: Path, paths: list[Path], defs: dict[str, dict[int, tuple[str, int]]]
 ) -> dict[tuple[str, str], tuple[int, str]]:
     found = {}
-    command = [sys.executable, "-m", "ruff", "check", "--isolated", "--output-format", "json"]
+    command = [sys.executable, "-m", "ruff", "check", "--isolated", "--ignore-noqa", "--output-format", "json"]
     command += ["--select", ",".join(RULES), *LIMITS, *(str(tree / path) for path in paths)]
     for hit in json.loads(subprocess.run(command, capture_output=True).stdout):
         rel = Path(hit["filename"]).relative_to(tree).as_posix()
@@ -58,20 +58,70 @@ def complexity(
     return found
 
 
+def base_source(base: str, old: Path) -> bytes | None:
+    shown = subprocess.run(["git", "show", f"{base}:{old.as_posix()}"], capture_output=True)
+    try:
+        ast.parse(shown.stdout)
+    except (SyntaxError, ValueError):
+        return None
+    return shown.stdout if shown.returncode == 0 else None
+
+
 def baseline(base: str, paths: dict[Path, Path]) -> dict[tuple[str, str], tuple[int, str]]:
     with tempfile.TemporaryDirectory() as directory:
         tree, present = Path(directory).resolve(), []
         for path, old in paths.items():
-            shown = subprocess.run(["git", "show", f"{base}:{old.as_posix()}"], capture_output=True)
-            try:
-                ast.parse(shown.stdout)
-            except (SyntaxError, ValueError):
-                continue
-            if shown.returncode == 0:
+            if (content := base_source(base, old)) is not None:
                 (tree / path).parent.mkdir(parents=True, exist_ok=True)
-                (tree / path).write_bytes(shown.stdout)
+                (tree / path).write_bytes(content)
                 present.append(path)
         return measure(tree, present) if present else {}
+
+
+def logic(source: bytes) -> dict[str, str]:
+    names = size_limits.functions(source)
+    nodes = ast.walk(ast.parse(source))
+    return {
+        names[node.lineno][0]: ast.dump(node)
+        for node in nodes
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+    }
+
+
+def touched(base: str, paths: dict[Path, Path]) -> dict[str, set[str]]:
+    found = {}
+    for path, old in paths.items():
+        before = {} if (content := base_source(base, old)) is None else logic(content)
+        found[path.as_posix()] = {name for name, dump in logic(path.read_bytes()).items() if before.get(name) != dump}
+    return found
+
+
+def graded(
+    head: dict[tuple[str, str], tuple[int, str]], names: dict[str, set[str]]
+) -> dict[tuple[str, str], tuple[int, str]]:
+    return {
+        key: hit for key, hit in head.items() if key[1] == "file lines" or key[1].rsplit(" ", 1)[0] in names[key[0]]
+    }
+
+
+def allowance(
+    base: str, measured: dict[tuple[str, str], tuple[int, str]], head: dict[tuple[str, str], tuple[int, str]]
+) -> dict[tuple[str, str], tuple[int, str]]:
+    shown = subprocess.run(["git", "show", f"{base}:{size_limits.ALLOWLIST.as_posix()}"], capture_output=True)
+    listed = json.loads(shown.stdout) if shown.returncode == 0 else {}
+    allowed = dict(measured)
+    for (path, unit), (_, message) in head.items():
+        name, rule = unit.rsplit(" ", 1)
+        if unit == "file lines":
+            limit = listed.get(path, {}).get("file-lines")
+        else:
+            limit = listed.get(f"{path}::{name}", {}).get("function-lines" if rule == "lines" else rule)
+        if limit is None:
+            continue
+        if (path, unit) in allowed:
+            limit = min(limit, allowed[(path, unit)][0])
+        allowed[(path, unit)] = (limit, message)
+    return allowed
 
 
 def grade(base: dict[tuple[str, str], tuple[int, str]], head: dict[tuple[str, str], tuple[int, str]]) -> list[str]:
@@ -93,7 +143,8 @@ def main() -> int:
         for command in (["check", "--", *names], ["format", "--check", "--", *names]):
             if code := subprocess.run([sys.executable, "-m", "ruff", *command]).returncode:
                 return code
-        if errors := grade(baseline(base, paths), measure(Path.cwd().resolve(), list(paths))):
+        head = graded(measure(Path.cwd().resolve(), list(paths)), touched(base, paths))
+        if errors := grade(allowance(base, baseline(base, paths), head), head):
             print("\n".join(errors))
             return 1
     print(f"Graded {len(paths)} changed Python files")

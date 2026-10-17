@@ -12,8 +12,8 @@ function fixture(options = {}) {
     serverUrl: 'https://github.com', runId: 42,
     ...options.context,
   };
-  const commit = (sha, tree) => ({ sha, commit: { tree: { sha: tree } } });
-  const pull = { number: 7, head: { sha: options.pullHead || 'graded', repo: { full_name: 'owner/repo' } },
+  const commit = (sha, tree, message = '') => ({ sha, commit: { tree: { sha: tree }, message } });
+  const pull = { number: 7, head: { sha: options.pullHead || 'snapshot', repo: { full_name: 'owner/repo' } },
     base: { ref: 'main' }, html_url: 'https://github.com/owner/repo/pull/7' };
   const runUrl = 'https://github.com/owner/repo/actions/runs/42';
   const jobs = [{ id: 71, run_id: 42, name: 'promote / promote', status: 'in_progress',
@@ -33,9 +33,12 @@ function fixture(options = {}) {
     git: {
       getRef: async ({ ref }) => {
         if (ref === 'heads/dev') return { data: { object: { sha: ++reads === 1 ? options.dev || 'graded' : options.moved || 'graded' } } };
-        if (options.snapshot) return { data: { object: { sha: options.snapshot } } };
+        if (options.snapshot || options.existing) return { data: { object: { sha: options.snapshot || 'snapshot' } } };
         throw Object.assign(new Error('Not Found'), { status: 404 });
       },
+      createCommit: async args => { refs.push(['commit', args]); return { data: { sha: 'snapshot' } }; },
+      getCommit: async ({ commit_sha }) => ({ data: { sha: commit_sha, tree: { sha: commit_sha === 'snapshot' ? 'tree' : 'other' },
+        parents: options.snapshotParents || [{ sha: 'main' }] } }),
       createRef: async args => { refs.push(['create', args]); },
       deleteRef: async args => {
         refs.push(['delete', args]);
@@ -45,8 +48,9 @@ function fixture(options = {}) {
     },
     repos: {
       getCommit: async ({ ref }) => ({ data: ref === 'graded' ? commit('graded', 'tree') :
-        ref === 'main' ? commit('main', options.already ? 'tree' : 'old') : commit('rebased', options.wrongTree ? 'wrong' : 'tree') }),
+        ref === 'main' ? commit('main', options.already ? 'tree' : 'old', options.promoted ? `Promote green dev to main (#6)\n\nGraded dev revision: ${options.promoted}\n` : '') : commit('rebased', options.wrongTree ? 'wrong' : 'tree') }),
       listCommitStatusesForRef: async () => ({ data: statuses.slice(0, 100) }),
+      compareCommits: async args => { refs.push(['compare', args]); return { data: { status: options.order || 'ahead' } }; },
     },
     pulls: {
       get: async () => ({ data: { ...pull, mergeable: options.conflict ? false : true, rebaseable: !options.nonrebaseable,
@@ -72,20 +76,22 @@ function fixture(options = {}) {
   return { github, context, core, writes, refs, outputs, jobs, checks, statuses, pages, sleep: async () => {} };
 }
 
-test('promotes exactly the graded head with linear history and records both revisions', async () => {
+test('promotes the graded tree as one commit on main and records both revisions', async () => {
   const f = fixture();
   await promote(f);
   assert.equal(f.writes[0][1].base, 'main');
   assert.equal(f.writes[0][1].head, 'promotion/graded');
+  assert.match(f.refs[0][1].message, /graded/);
   assert.deepEqual(f.refs, [
-    ['create', { owner: 'owner', repo: 'repo', ref: 'refs/heads/promotion/graded', sha: 'graded' }],
+    ['commit', { owner: 'owner', repo: 'repo', message: f.refs[0][1].message, tree: 'tree', parents: ['main'] }],
+    ['create', { owner: 'owner', repo: 'repo', ref: 'refs/heads/promotion/graded', sha: 'snapshot' }],
     ['delete', { owner: 'owner', repo: 'repo', ref: 'heads/promotion/graded' }],
   ]);
   assert.match(f.writes[0][1].body, /graded/);
   assert.equal(f.writes[1][0], 'merge');
   const { merge_method, ...request } = f.writes[1][1];
   assert.ok(['rebase', 'squash'].includes(merge_method));
-  assert.deepEqual(request, { owner: 'owner', repo: 'repo', pull_number: 7, sha: 'graded' });
+  assert.deepEqual(request, { owner: 'owner', repo: 'repo', pull_number: 7, sha: 'snapshot', commit_message: f.writes[0][1].body });
   assert.equal(f.outputs.main, 'rebased');
   assert.equal(f.outputs.graded, 'graded');
 });
@@ -106,7 +112,7 @@ test('promotes the graded revision after dev has advanced', async () => {
   const f = fixture({ dev: 'newer' });
   await promote(f);
   assert.equal(f.writes[0][1].head, 'promotion/graded');
-  assert.equal(f.writes[1][1].sha, 'graded');
+  assert.equal(f.writes[1][1].sha, 'snapshot');
   assert.equal(f.outputs.graded, 'graded');
   assert.equal(f.outputs.main, 'rebased');
 });
@@ -139,18 +145,27 @@ test('snapshot deletion failures are reported', async () => {
 });
 
 test('reuses a matching snapshot left before pull request creation', async () => {
-  const f = fixture({ snapshot: 'graded' });
+  const f = fixture({ snapshot: 'snapshot' });
   await promote(f);
   assert.deepEqual(f.refs.map(([kind]) => kind), ['delete']);
   assert.equal(f.outputs.main, 'rebased');
 });
 
-test('rejects a snapshot that does not identify the graded revision', async () => {
+test('rejects a snapshot that does not hold the graded tree', async () => {
   const f = fixture({ snapshot: 'ungraded' });
   await assert.rejects(promote(f), /snapshot/);
   assert.deepEqual(f.writes, []);
   assert.deepEqual(f.refs, []);
 });
+
+for (const snapshotParents of [[{ sha: 'older' }], [{ sha: 'main' }, { sha: 'graded' }], []]) {
+  test(`rejects a snapshot that is not one commit on main ${JSON.stringify(snapshotParents)}`, async () => {
+    const f = fixture({ snapshot: 'snapshot', snapshotParents });
+    await assert.rejects(promote(f), /snapshot/);
+    assert.deepEqual(f.writes, []);
+    assert.deepEqual(f.refs, []);
+  });
+}
 
 test('waits for GitHub to compute a clean merge', async () => {
   const f = fixture({ waitOnce: true });
@@ -171,14 +186,48 @@ test('promotes the graded revision while dev keeps moving', async () => {
   const f = fixture({ existing: true, moved: 'newer' });
   await promote(f);
   assert.deepEqual(f.writes.map(([kind]) => kind), ['merge']);
-  assert.equal(f.writes[0][1].sha, 'graded');
+  assert.equal(f.writes[0][1].sha, 'snapshot');
   assert.equal(f.outputs.main, 'rebased');
 });
 
 test('a moved pull request cannot merge', async () => {
   const f = fixture({ existing: true, pullHead: 'ungraded' });
-  await assert.rejects(promote(f), /graded dev head/);
+  await assert.rejects(promote(f), /snapshot commit/);
   assert.deepEqual(f.writes, []);
+});
+
+test('an open pull request without its snapshot branch cannot merge', async () => {
+  const f = fixture({ existing: true });
+  f.github.rest.git.getRef = async () => { throw Object.assign(new Error('Not Found'), { status: 404 }); };
+  await assert.rejects(promote(f), /Not Found/);
+  assert.deepEqual(f.writes, []);
+  assert.deepEqual(f.refs, []);
+});
+
+const last = 'a'.repeat(40);
+
+for (const order of ['ahead', 'diverged']) {
+  test(`promotes a revision ${order} of the last promotion`, async () => {
+    const f = fixture({ promoted: last, order });
+    await promote(f);
+    assert.deepEqual(f.refs[0], ['compare', { owner: 'owner', repo: 'repo', base: last, head: 'graded' }]);
+    assert.equal(f.outputs.main, 'rebased');
+  });
+}
+
+for (const order of ['behind', 'identical']) {
+  test(`never rolls main back to a revision that is ${order} the last promotion`, async () => {
+    const f = fixture({ promoted: last, order });
+    await assert.rejects(promote(f), /not newer than the last promotion/);
+    assert.deepEqual(f.writes, []);
+    assert.deepEqual(f.refs.map(([kind]) => kind), ['compare']);
+  });
+}
+
+test('a created pull request on another head cannot merge', async () => {
+  const f = fixture({ pullHead: 'ungraded' });
+  await assert.rejects(promote(f), /snapshot commit/);
+  assert.deepEqual(f.writes.map(([kind]) => kind), ['create']);
 });
 
 for (const options of [{ refused: true }, { wrongTree: true }, { unmerged: true }]) {
@@ -203,7 +252,7 @@ test('admits only its running check after the current run grade passed', async (
   f.checks.push({ name: 'unit-selected', status: 'completed', conclusion: 'skipped' });
   await promote(f);
   assert.equal(f.outputs.main, 'rebased');
-  assert.equal(f.writes[0][1].sha, 'graded');
+  assert.equal(f.writes[0][1].sha, 'snapshot');
   assert.ok(f.pages.every(args => args.per_page === 100));
   assert.equal(f.pages.filter(args => args.ref === 'graded').length, 2);
   assert.equal(f.pages.find(args => args.run_id === 42).filter, 'latest');

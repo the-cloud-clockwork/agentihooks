@@ -110,10 +110,11 @@ def gate_refusal(tree, budget):
     return None if code == 0 else GATE_FAILED.format(path=tree.path)
 
 
-def push(tree, seconds):
-    ref = f"refs/heads/{tree.branch}"
+def push(tree, branch, seconds):
+    ref = f"refs/heads/{branch}"
+    lease = [] if branch == tree.branch else [f"--force-with-lease={ref}"]
     process = subprocess.Popen(
-        ["git", "-C", str(tree.path), "push", "--set-upstream", "origin", f"{ref}:{ref}"],
+        ["git", "-C", str(tree.path), "push", *lease, "--set-upstream", "origin", f"refs/heads/{tree.branch}:{ref}"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,
@@ -124,6 +125,17 @@ def push(tree, seconds):
         os.killpg(process.pid, signal.SIGKILL)
         process.wait()
         return False
+
+
+def target(tree, task):
+    """The retained pull request branch HEAD continues, as swarm publish pushes it, else the worktree's own branch."""
+    from scripts.swarm.continuation import retained
+
+    branch = retained(task)
+    if not branch:
+        return tree.branch
+    continues = git(tree.path, "merge-base", "--is-ancestor", f"refs/remotes/origin/{branch}", "HEAD")
+    return branch if continues.returncode == 0 else tree.branch
 
 
 def record_text(remote, branch, head):
@@ -190,8 +202,8 @@ class PushStop:
         for tree in trees(self.root(), who.name):
             if tree.unpushed and (refused := self.held(tree)):
                 failed.append(refused)
-            elif tree.unpushed and push(tree, self.left() + RESERVE_S - FLOOR_S):
-                self.record(store, ledger, who, tree)
+            elif tree.unpushed and push(tree, branch := target(tree, task), self.left() + RESERVE_S - FLOOR_S):
+                self.record(store, ledger, who, tree, branch)
             owed = owed or tree.dirty or (tree.unpushed and not self.on_origin(tree))
             owed = owed or (doc and tree.own and not task.get("pr_url") and self.unrecorded(store, doc, who))
         if not owed:
@@ -226,7 +238,7 @@ class PushStop:
             doc.get("_meta", {}).get("events", []), who.name, mark.outcome_at
         )
 
-    def record(self, store, ledger, who, tree):
+    def record(self, store, ledger, who, tree, branch):
         from scripts.gates.progress import Progress
         from scripts.swarm.store import SwarmError
 
@@ -234,7 +246,7 @@ class PushStop:
         head = git(tree.path, "rev-parse", "HEAD").stdout.strip()
         Progress(store.redis, who.swarm).outcome(who.name, PUSHED, self.now())
         try:
-            ledger.comment(who.swarm, who.task, record_text(remote, tree.branch, head), by=SENDER)
+            ledger.comment(who.swarm, who.task, record_text(remote, branch, head), by=SENDER)
         except SwarmError:
             pass
 

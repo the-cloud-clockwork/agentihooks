@@ -705,6 +705,19 @@ def test_only_a_registered_master_or_the_operator_may_classify(cautious, monkeyp
     assert observer.get("fixture", agent.execution_id) == before
 
 
+def test_a_session_naming_an_unregistered_agent_cannot_classify_as_the_operator(cautious, monkeypatch, capsys):
+    from scripts.swarm import cli
+
+    store, agent, observer = cautious
+    before = flagged(observer, agent)
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "master@unregistered-0001")
+    args = ["fixture", "--as", "operator", "classify", agent.execution_id, "lost", "--reason", "gone"]
+    assert cli.main(args) == 1
+    assert capsys.readouterr().err == "swarm: only the master or the operator classifies an execution attempt\n"
+    assert observer.get("fixture", agent.execution_id) == before
+
+
 @pytest.mark.parametrize(
     ("reason", "message"),
     [

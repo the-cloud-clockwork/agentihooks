@@ -99,9 +99,11 @@ agentihooks swarm <id> terminal <execution-id>
 
 For a connected local execution this opens a herdr tab in the swarm workspace
 and prints JSON containing `agent`, `thread` and `pane`. The viewer runs
-`codex resume --remote` with the recorded endpoint and thread. It does not create
-a new conversation. The same command retains the existing worker-terminal path
-for Kubernetes executions; see [Swarm](../pillars/swarm.md).
+`codex resume --remote` with the recorded endpoint and thread, with the Codex
+update check turned off so a new Codex release never stops it at the update
+prompt. It does not create a new conversation. The same command retains the
+existing worker-terminal path for Kubernetes executions; see
+[Swarm](../pillars/swarm.md).
 
 For attachment diagnostics, the launcher helper can wait for the recorded thread:
 

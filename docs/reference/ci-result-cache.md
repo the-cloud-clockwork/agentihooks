@@ -8,7 +8,7 @@ nav_order: 5
 
 One CI algorithm for every repo and workflow: a check whose real inputs did not change reuses its last green result, and a check that fails is retried in place a bounded number of times inside the same job. No run is ever restarted from zero because one test flaked.
 
-Status: slices 1 to 6 delivered (see [Slice 1 as delivered](#slice-1-as-delivered), [Slice 2 as delivered](#slice-2-as-delivered), [Slice 3 as delivered](#slice-3-as-delivered), [Slice 4 as delivered](#slice-4-as-delivered), [Slice 5 as delivered](#slice-5-as-delivered) and [Slice 6 as delivered](#slice-6-as-delivered)); slice 7 is design. Issue [#2365](https://github.com/the-cloud-clockwork/agentihooks/issues/2365). Slices are listed in [Slices](#slices); each one is a separate pull request.
+Status: slices 1 to 6 delivered (see [Slice 1 as delivered](#slice-1-as-delivered), [Slice 2 as delivered](#slice-2-as-delivered), [Slice 3 as delivered](#slice-3-as-delivered), [Slice 4 as delivered](#slice-4-as-delivered), [Slice 5 as delivered](#slice-5-as-delivered) and [Slice 6 as delivered](#slice-6-as-delivered)), with full scope pull request reuse added to slice 5 (see [Full scope pull request reuse as delivered](#full-scope-pull-request-reuse-as-delivered)); slice 7 is design. Issue [#2365](https://github.com/the-cloud-clockwork/agentihooks/issues/2365). Slices are listed in [Slices](#slices); each one is a separate pull request.
 
 ## Before numbers
 
@@ -249,3 +249,74 @@ Each keyed job declares its inputs in `.github/input-keys.json`: repository path
 | [38963740312](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38963740312), [38965443542](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38965443542) | a change to `hooks/` and `tests/ledger_load/`, both declared | brain smoke 37 s and ledger load 131 s: key missed, every step ran, the new key saved |
 
 Known limits: the day in the key forces one full run per job per UTC day, which also bounds how long an unkeyed floating input, such as a Python patch release or a self hosted runner image, can be reused. `ci_reuse.py` keeps the whole tree queue reuse. `kind-due` looks up the `helm-kind` key of the chart, the swarm image inputs and the kind proof files on the same runner pool, and a hit skips `helm-kind`.
+
+## Full scope pull request reuse as delivered
+
+Pull requests into dev from a branch of this repository plan reuse the same way the queue does. A full scope run, one that `select` did not narrow to the tests its change reaches, skips every test that passed on the dev record with unchanged inputs and carries those tests' dev coverage into its own, so `sonar` and the coverage ratchet still grade the whole suite. A narrowed run skips the `split` job, so it plans nothing and runs only its selected tests.
+
+### When a pull request run reuses tests
+
+The `split` job's plan step runs on `merge_group`, on `workflow_dispatch`, and on a `pull_request` event when all of these hold:
+
+- the base branch is `dev` and the head branch lives in this repository; a fork pull request plans nothing;
+- the grader, a detached worktree of `origin/dev`, has `scripts/ci_test_plan.py`;
+- the grader also has `tests/reused_coverage.py`. A grader without it cannot carry reused coverage, so the step prints `The grader cannot carry reused tests' coverage into Sonar; every test runs.` and plans no reuse. Merge group runs skip this check. A dispatch's grader is its own head, so it runs the check and the coverage filter from the head.
+
+The planner runs from the grader, never from the head, so a pull request cannot widen what it reuses. It mints the CI App token with `actions: read` to read dev's runs and artifacts.
+
+### Record
+
+`scripts/ci_test_plan.py` keeps the slice 5 rule and adds one condition: the dev push run must also keep all twelve `coverage-3.12-1` to `coverage-3.12-12` artifacts unexpired, beside its `dep-manifest`. A run missing any of them is skipped and the next older candidate is tried, up to 10. With no record the planner raises the `No test record` notice and every test runs.
+
+Besides `reused`, the planner writes `run` and `commit` to the step output: the dev run that holds the record and the commit its manifest was measured on. `split` passes both to `unit`.
+
+### Reused coverage on each shard
+
+On every 3.12 unit shard of a full scope run that reuses at least one test, outside merge groups:
+
+1. **Token.** `Mint the token that reads the dev coverage` mints the CI App token with `actions: read`.
+2. **Download.** `Download this shard's dev coverage` downloads the same shard's `coverage-3.12-<shard>` artifact from the record run into the runner's temporary folder.
+3. **Filter and remap.** `Keep the reused tests' dev coverage` adds the grader as a worktree (`origin/dev` for a pull request, the head for a dispatch) and runs `python -m tests.reused_coverage` from it, so the filter that moves dev coverage is protected code.
+
+`tests.reused_coverage` writes `reused-coverage/.coverage` and adds page captures to the shard's `js-coverage/`:
+
+- **Contexts.** It keeps the arcs of the per test contexts whose test is in the shard's `reused.json`, plus arcs with the empty context, which coverage records at import time. Contexts of tests this run executes are dropped, so their coverage comes from this run only.
+- **Changed sources.** For every Python file that differs between the record commit and the head, it maps old line numbers to new ones with a line diff and moves each kept arc onto the head line. An arc whose end lines no longer exist is dropped. A file deleted at the head is removed from the data. A reused test ran only code whose text did not change, so its arcs land on the same statements at their new lines.
+- **Page captures.** Browser and node captures now record the test that took them in a `test` field (`tests/browser_coverage.py` reads `PYTEST_CURRENT_TEST` when the page opens, `tests/node_capture.cjs` when the node process starts). A capture whose test is not reused is dropped. A capture with no test, taken outside a test or written before captures carried the field, is kept whole.
+
+The step prints `Kept the dev coverage of <n> reused tests and <m> page captures from <commit>; <k> changed files remapped`. Each shard uploads `reused-coverage/` inside its `coverage-3.12-<shard>` artifact.
+
+### Combine and grade
+
+- `.github/coverage/combine.sh`, which builds the report `sonar` reads, adds each shard's `reused-coverage/.coverage` when the file exists and is not empty.
+- `tests/coverage_ratchet.py` adds every `coverage-3.12-*/reused-coverage/.coverage` it finds to the head measurement.
+- Merge group runs never produce `reused-coverage/`, so both read the shards' own data as before.
+
+### Checking a run
+
+```bash
+RUN=<tests run id>
+# Planner decision on each split leg
+gh run view "$RUN" --log | grep -E "Dev run [0-9]+ on|No dev push run with passed|cannot carry reused"
+# Reused coverage kept on each 3.12 unit shard
+gh run view "$RUN" --log | grep "Kept the dev coverage of"
+# Ran, reused and flaky counts from both shard-check legs
+gh run view "$RUN" --log | grep -E "Python 3\.1[12]: ran [0-9]+, reused"
+```
+
+`shard-check`'s step summary prints `Python 3.12: ran <n>, reused <m> from <dev run>, flaky <k>`.
+
+### Proof and evidence gap
+
+- Prototype on dev run [39014881228](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39014881228), shard 1: with every test reused the filtered data kept arcs identical to the dev shard; filter and remap took 0.1 to 0.9 s. Each shard's coverage file is about 50 MB with per test contexts.
+- The source pull request changed `.github/`, which invalidates every test, so its own runs reused nothing. Dispatch 39022758285 planned from dev run 39021960767 and found all 33788 tests invalidated by `.github/CODEOWNERS`.
+- Open: a CI comparison of a reusing full scope run against a full run of the same head, coverage within the ratchet. It needs a dev record written after this change, so page captures carry their test, and a head whose change is not global. The first such record is dev push run [39026074158](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39026074158).
+
+### Known limits
+
+- Everything listed under slice 5's known limits applies: the manifest is measured on 3.12 and its plan also deselects on 3.11, and the next dev push, which runs every test, is the backstop for any hidden input.
+- Reused coverage is the dev record's measurement moved by a line diff. A changed line that the diff matches to an unchanged one elsewhere can carry an arc onto it; the next dev push measures the real figure.
+- Only `*.py` files are remapped, and the diff runs with `--no-renames`: a renamed file counts as deleted, so the reused tests' arcs on it are dropped and that coverage is missing until the next dev push.
+- A page capture with no test is kept whenever any test is reused, so it can carry coverage from tests that ran on the dev record but run again here.
+- The download of the dev shard's coverage has no fallback: if the artifact cannot be downloaded, the shard fails instead of running every test.
+- A dev record whose coverage artifacts expired, after 7 days, is never chosen, so a quiet dev plans no reuse until its next push.
