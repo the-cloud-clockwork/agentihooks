@@ -95,7 +95,8 @@ def surviving_hook_children(existing: dict, seconds: float = HOOK_CHILD_SECONDS)
     while (children := [pid for pid, item in new.items() if item.ppid == os.getpid()]) and time.monotonic() < deadline:
         for pid in children:
             with suppress(ChildProcessError):
-                os.waitpid(pid, 0)
+                os.waitpid(pid, os.WNOHANG)
+        time.sleep(POLL_HOOK_SECONDS)
         new = hook_descendants(existing)
     return sorted(f"{pid} {' '.join(item.argv) or item.comm}" for pid, item in survivors.items())
 
@@ -145,14 +146,14 @@ def codex_session_start(home: Path, tmp: Path | None = None) -> dict:
                     (tmp / "codex-run.exit").write_text(str(process.returncode))
                     if process.returncode:
                         raise subprocess.CalledProcessError(process.returncode, command)
-        except Exception as error:
+        except BaseException as error:
             failure = error
         survivors = surviving_hook_children(existing)
     finally:
         reaper(0)
     if survivors:
         raise AssertionError(f"Codex hook children outlived registration: {survivors}") from failure
-    if failure:
+    if failure is not None:
         raise failure
     assert sessions(home) == {session: str(Path.cwd())}
     return {
