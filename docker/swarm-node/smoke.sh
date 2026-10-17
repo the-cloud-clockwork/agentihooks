@@ -225,3 +225,4 @@ if sys.argv[4]=='all':
     (output/'result.json').write_text(json.dumps(shared|{'cases':['A','B','C'],'status':'passed','production_rollout':'not exercised'},indent=2)+'\n')
 print('SV2-IMG-01 passed: two offline startups, three rejected builds, uncached rebuild and retained image rollback' if sys.argv[4]=='all' else 'Worker startup and rejection proof passed')
 PY
+if [[ -n "${WORKER_KEEP_IMAGE:-}" ]]; then docker tag "$image" "$WORKER_KEEP_IMAGE"; fi

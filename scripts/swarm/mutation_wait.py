@@ -123,7 +123,7 @@ def _skip(target, run):
     repo, number = RUN_URL.fullmatch(target).groups()
     jobs = _api(f"repos/{repo}/actions/runs/{number}/jobs?per_page=100")["jobs"]
     delegated = any(
-        job["name"] == "pull-request"
+        job["name"] in ("pull-request", "plan")
         and job["conclusion"] == "success"
         and any(
             step["name"] == "Record the revisions the report grades" and step["conclusion"] == "skipped"

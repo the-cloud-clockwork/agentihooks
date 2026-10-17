@@ -916,6 +916,7 @@ class HerdrRuntime:
 
     def _retire_managed(self, agent):
         from scripts.codex_session.binding import EXITED, BindingStore
+        from scripts.codex_session.supervisor import execution_directory
 
         store = connect()
         record = live_binding.transport(store, agent)
@@ -928,10 +929,39 @@ class HerdrRuntime:
             return False
         bindings = BindingStore(store)
         slug = store.names.slug_of(agent.name)
+        recorded = bindings.viewers(slug, record.execution_id)
+        try:
+            viewers = self._viewer_panes(agent.pane_id, recorded)
+        except Exception as exc:
+            self.refusals[agent.name] = {"process": record.server_pid, "refusal": f"pane list: {exc}"}
+            return False
+        for pane in viewers:
+            try:
+                self.close_pane(pane)
+            except Exception as exc:
+                self.refusals[agent.name] = {"process": record.server_pid, "refusal": f"viewer pane {pane}: {exc}"}
+                return False
+        directory = execution_directory(record)
+        if directory is not None and directory.exists():
+            try:
+                shutil.rmtree(directory)
+            except OSError as exc:
+                self.refusals[agent.name] = {"process": record.server_pid, "refusal": f"runtime home: {exc}"}
+                return False
         bindings.put(slug, replace(record, state=EXITED, active_turn_id=""))
         bindings.release(slug, record)
+        bindings.forget_viewers(slug, list(recorded))
         self.refusals.pop(agent.name, None)
         return True
+
+    def _viewer_panes(self, launch_pane, recorded):
+        """A recorded viewer is closed only while herdr still lists its pane on the terminal it was opened with,
+        because herdr reuses a closed pane's id."""
+        live = []
+        if recorded:
+            listed = {p["pane_id"]: p.get("terminal_id") for p in self.herdr(["pane", "list"])["panes"]}
+            live = [pane for pane, terminal in recorded.items() if terminal and listed.get(pane) == terminal]
+        return [pane for pane in dict.fromkeys((launch_pane, *live)) if pane]
 
     def retire_process(self, agent, pid, homes=(), start=0):
         if live_binding.managed(agent):

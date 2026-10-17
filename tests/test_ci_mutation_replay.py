@@ -42,8 +42,8 @@ def test_replay_preserves_sources_tests_and_selected_mutants(tmp_path, monkeypat
 
     monkeypatch.setattr(replay.subprocess, "run", download)
     monkeypatch.setattr(
-        "scripts.ci_mutation.measured.selected_mutants",
-        lambda *args: ("", ["x_other__mutmut_1" if changed_scope else "x_f__mutmut_1"]),
+        "scripts.ci_mutation.measured.selected_mutant_names",
+        lambda *args: ["x_other__mutmut_1" if changed_scope else "x_f__mutmut_1"],
     )
     output = tmp_path / "github-output"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
