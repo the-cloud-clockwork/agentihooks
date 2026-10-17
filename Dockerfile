@@ -1,13 +1,12 @@
-FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS tools
+FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS dependencies
 COPY --from=ghcr.io/astral-sh/uv:0.10.9 /uv /usr/local/bin/uv
-
-FROM tools AS dependencies
 WORKDIR /build
 COPY docker/swarm/requirements.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv venv /opt/venv && uv pip install --python /opt/venv/bin/python --compile-bytecode --require-hashes -r requirements.lock
 
-FROM tools AS build
+FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS build
+COPY --from=ghcr.io/astral-sh/uv:0.10.9 /uv /usr/local/bin/uv
 WORKDIR /build
 COPY pyproject.toml README.md ./
 RUN --mount=type=cache,target=/root/.cache/uv \
