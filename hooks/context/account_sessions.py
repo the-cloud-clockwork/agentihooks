@@ -86,16 +86,8 @@ def _comm(pid: int, proc: Path) -> str | None:
 
 
 def _ppid(pid: int, proc: Path) -> int:
-    return _stat(pid, proc, 1)
-
-
-def _sid(pid: int, proc: Path) -> int:
-    return _stat(pid, proc, 3)
-
-
-def _stat(pid: int, proc: Path, field: int) -> int:
     try:
-        return int((proc / str(pid) / "stat").read_text(encoding="utf-8").rsplit(")", 1)[1].split()[field])
+        return int((proc / str(pid) / "stat").read_text(encoding="utf-8").rsplit(")", 1)[1].split()[1])
     except (OSError, ValueError, IndexError):
         return 0
 

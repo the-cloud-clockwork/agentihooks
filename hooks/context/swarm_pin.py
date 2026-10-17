@@ -4,7 +4,7 @@ import os
 from collections.abc import MutableMapping
 from pathlib import Path
 
-from hooks.context.account_sessions import _PROC, _comm, _ppid, _sid
+from hooks.context.account_sessions import _PROC, _comm, _ppid
 
 LAUNCHER = "AGENTIHOOKS_SWARM_LAUNCHER"
 IDENTITY = (
@@ -28,7 +28,9 @@ def nested(environ, start: int | None = None, proc: Path = _PROC) -> bool:
         if comm is None:
             return False
         if comm in AGENTS:
-            sessions, agent = sessions + (comm != previous), pid
+            agent = pid
+            if comm != previous:
+                sessions += 1
         previous, pid = comm, _ppid(pid, proc)
     if sessions > 1:
         return True
@@ -36,13 +38,21 @@ def nested(environ, start: int | None = None, proc: Path = _PROC) -> bool:
 
 
 def _session_agents(sid: int, proc: Path) -> list[int]:
-    found = []
-    for entry in proc.iterdir():
-        pid = int(entry.name) if entry.name.isdigit() else 0
-        comm = _comm(pid, proc) if pid else None
-        if comm in AGENTS and _sid(pid, proc) == sid and _comm(_ppid(pid, proc), proc) != comm:
-            found.append(pid)
-    return found
+    rows = {int(entry.name): _row(entry) for entry in proc.iterdir() if entry.name.isdigit()}
+    return [
+        pid
+        for pid, (comm, ppid, session) in rows.items()
+        if comm in AGENTS and session == sid and rows.get(ppid, ("", 0, 0))[0] != comm
+    ]
+
+
+def _row(entry: Path) -> tuple[str, int, int]:
+    try:
+        text = (entry / "stat").read_text(encoding="utf-8")
+        fields = text.rsplit(")", 1)[1].split()
+        return text.split("(", 1)[1].rsplit(")", 1)[0], int(fields[1]), int(fields[3])
+    except (OSError, ValueError, IndexError):
+        return "", 0, 0
 
 
 def unpin(environ: MutableMapping[str, str] = os.environ, start: int | None = None, proc: Path = _PROC) -> bool:
