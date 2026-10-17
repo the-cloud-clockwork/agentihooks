@@ -222,10 +222,12 @@ def test_a_lock_taken_after_the_stop_is_released_at_once():
 def test_a_tick_started_after_the_stop_takes_no_lease(env):  # noqa: F811
     store, ledger, runtime = env
     run("sw", "create", "--repo", ".")
+    owner = store.key("sw", "control-owner")
+    store.redis.delete(owner)
     tick_stop.STOP.set()
     with pytest.raises(tick_stop.Stopped):
         cli.run_tick(store, "sw", ledger, runtime)
-    assert lease.current(store, "sw") is None
+    assert store.redis.get(owner) is None
     assert lock_of(store) is None
 
 
