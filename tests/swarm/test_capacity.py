@@ -863,12 +863,56 @@ def test_worker_capacity_leaves_a_claude_seat_for_the_master(tmp_path, monkeypat
     assert decision["accounts"] == [capacity.record(row) for row in observed]
     for index in range(2):
         runtime.spawn(config, lane, f"worker{index}", {"id": f"t{index}", "title": "Worker"})
-    with pytest.raises(SpawnError, match="^no claude account has placeable quota seats$"):
+    with pytest.raises(SpawnError) as error:
         runtime.spawn(config, lane, "extra", {"id": "extra", "title": "Worker"})
+    assert str(error.value) == "no claude account has placeable quota seats: claude warned is at its week quota warning"
     placed = runtime.spawn(config, "master", "master@a1b2c3-0001", {"id": "master", "title": "Master"})
     assert placed.harness == "claude"
     assert placed.account == "open"
     assert seen == [("t0", "claude", "open"), ("t1", "claude", "open"), ("master", "claude", "open")]
+
+
+@pytest.mark.parametrize("harness", ["claude", "auto"])
+def test_master_reservation_spends_one_subscription_seat_only(harness):
+    config = SwarmConfig(
+        "sw",
+        "/repo",
+        max_eng=10,
+        max_ci=0,
+        max_plan=0,
+        lanes={"master": {"agent": harness}, "eng": {"agent": "claude"}},
+    )
+    observed = [account("full", sessions=3), account("a"), account("b"), account("warned")]
+    decision = capacity.calculate(config, observed, [], warned={("claude", "warned"): "week"})
+    assert decision["effective"] == {"eng": 5, "ci": 0, "plan": 0}
+    assert len(decision["placements"]["eng"]) == 5
+    assert decision["accounts"] == [capacity.record(row) for row in observed]
+
+
+@pytest.mark.parametrize("state", ["starting", "working"])
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+def test_an_occupied_master_does_not_reserve_another_claude_seat(state, harness):
+    config = SwarmConfig("sw", "/repo", max_eng=4, max_ci=0, max_plan=0, lanes={"master": {"agent": "auto"}})
+    agents = [AgentRecord("master", "master", "master", harness=harness, state=state)]
+    decision = capacity.calculate(config, [account()], agents)
+    assert decision["effective"] == {"eng": 3, "ci": 0, "plan": 0}
+
+
+@pytest.mark.parametrize("master", [None, {"agent": "codex"}])
+def test_workers_keep_claude_capacity_without_a_claude_master(master):
+    config = SwarmConfig(
+        "sw", "/repo", max_eng=4, max_ci=0, max_plan=0, lanes={} if master is None else {"master": master}
+    )
+    decision = capacity.calculate(config, [account()], [])
+    assert decision["effective"] == {"eng": 3, "ci": 0, "plan": 0}
+
+
+@pytest.mark.parametrize("observed", [[], [account(cap=0)], [account(sessions=3)], [account(cap=None)]])
+def test_a_missing_master_without_open_claude_capacity_keeps_codex_seats(observed):
+    config = SwarmConfig("sw", "/repo", max_eng=4, max_ci=0, max_plan=0, lanes={"master": {"agent": "claude"}})
+    decision = capacity.calculate(config, [*observed, account("cx", harness="codex")], [])
+    assert decision["effective"] == {"eng": 3, "ci": 0, "plan": 0}
+    assert decision["allocation"]["eng"] == {"claude": 0, "codex": 3}
 
 
 def test_saved_healthy_account_wins_over_another_accounts_higher_quota(tmp_path, monkeypatch):
