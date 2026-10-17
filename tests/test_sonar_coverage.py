@@ -158,7 +158,8 @@ for shard, flags in ((1, (True,)), (2, (False, True))):
     del sys.modules['hooks.branchy']
 (folder / 'js-coverage' / 'sources').mkdir(parents=True)
 (folder / 'js-coverage' / 'sources' / 's.js').write_text('void 0;\\n')
-(folder / 'js-coverage' / 'capture-node-1.json').write_text('{"result": [{"source": "s", "functions": [{"ranges": [{"startOffset": 0, "endOffset": 7, "count": 1}]}]}]}')
+for kind in ('node', 'browser'):
+    (folder / 'js-coverage' / f'capture-{kind}-1.json').write_text('{"result": [{"source": "s", "functions": [{"ranges": [{"startOffset": 0, "endOffset": 7, "count": 1}]}]}]}')
 """
     config = str(ROOT / ".github/coverage/coverage.ini")
     subprocess.run([sys.executable, "-c", generator, config], cwd=tmp_path, check=True, capture_output=True)
