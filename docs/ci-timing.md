@@ -8,6 +8,42 @@ Each integration push runs the promotion tier, including module coverage, schedu
 
 See [Delivery tiers](/docs/reference/delivery-tiers/) for check ownership. The measurements below record earlier workflow versions; their old event assignments do not describe the current tiers. Tests and mutation runs execute in CI only.
 
+## Proof dispatch lanes
+
+Proof dispatches share three hosted lanes, the concurrency groups `hosted-lane-a`, `hosted-lane-b` and `hosted-lane-c`. A run picks its lane from the last digit of its run id: 0 to 2 is lane a, 3 to 5 lane b and 6 to 9 lane c. Each lane runs one run at a time and queues the rest (`queue: max`), so at most three such runs hold hosted runners at once. The lanes are used by every `proofs.yml` dispatch except `proof=tests` (that one gets its own `focused-proof-<run id>` group), by `workflow_dispatch` runs of the swarm worker image and test leak workflows, and by the brain smoke, Helm chart in kind, CI templates, swarm worker image smoke and ledger load workflows when they run under their own name.
+
+Branch pushes of the Startup stages and Worker resources workflows stay off the lanes. Each push resolves to a per branch group, `startup-stages-<ref>` or `worker-resources-<ref>`, with `queue: single`: a newer push to the same branch replaces the pending one, and the push never waits behind or blocks a proof dispatch. A `workflow_dispatch` of either workflow still queues on a lane. When another workflow calls either one, the call runs under the caller's name and gets its own `startup-stages-<run id>` or `worker-resources-<run id>` group.
+
+| Run | Concurrency group | Queue |
+|---|---|---|
+| Startup stages, branch push | `startup-stages-<ref>` | single |
+| Startup stages, dispatch | `hosted-lane-<a, b or c>` | max |
+| Worker resources, branch push | `worker-resources-<ref>` | single |
+| Worker resources, dispatch | `hosted-lane-<a, b or c>` | max |
+| `proofs.yml`, any proof but `tests` | `hosted-lane-<a, b or c>` | max |
+| `proofs.yml`, `proof=tests` | `focused-proof-<run id>` | max |
+
+Before this split, a Startup stages push measurement held a lane for minutes and every proof dispatch hashed to that lane waited behind it: a push created at 03:55:26 queued on lane a until 04:21:36 and held it until 04:27:39, and a swarm worker image dispatch on the same lane, created at 04:06:34, never got a job and was cancelled after 20 minutes in the queue. After it, on lane c, a Startup stages push created at 08:47:30 ran from 08:47:43 to 08:52:00, and a worker image proof dispatch created at 08:50:49, while that push was still running, started its first jobs at 08:50:50 and passed at 08:53:58 (runs 39018691198 and 39018894036, pull request #3956).
+
+Dispatch a worker image proof on a branch:
+
+```bash
+gh workflow run proofs.yml \
+  --ref <branch> \
+  -f proof=worker-image
+```
+
+Check that a proof dispatch did not wait on a branch push, from the queued and started times of both runs:
+
+```bash
+gh api "repos/the-cloud-clockwork/agentihooks/actions/workflows/startup-stages.yml/runs?branch=<branch>&event=push" \
+  --jq '.workflow_runs[] | {id, created_at, run_started_at, status}'
+gh api repos/the-cloud-clockwork/agentihooks/actions/runs/<run id>/jobs \
+  --jq '[.jobs[].started_at] | min'
+```
+
+A dispatch whose first job starts within seconds of its `created_at` did not queue. If a dispatch still sits queued for minutes, list the runs on its lane: another dispatch or a lane workflow run holds it, not a Startup stages or Worker resources push. `tests/test_ci_hosted_lanes.py` checks that a branch push of either workflow never resolves to a lane while a dispatch still does.
+
 ## Historical measurements
 
 Last ten runs of the Tests workflow on dev (35380163028, 35379942561, 35379468297, 35156774129, 35156548701, 35156299806, 35155214526, 35138446531, 35138276256, 35137837913). Seconds per step, mean and max over those runs.
