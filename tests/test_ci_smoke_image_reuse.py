@@ -12,13 +12,24 @@ IMAGE = "local/agentihooks-swarm:clients-check"
 def test_main_image_is_built_once_before_every_compatible_smoke():
     job = yaml.safe_load((ROOT / ".github/workflows/swarm-smoke.yml").read_text())["jobs"]["smoke"]
     assert job["env"]["SWARM_SMOKE_IMAGE"] == IMAGE
-    commands = [step["run"] for step in job["steps"] if "run" in step]
-    builds = [command for command in commands if command.startswith("docker build ")]
-    assert builds == [f"docker build -t {IMAGE} ."]
-    build = commands.index(builds[0])
+    steps = job["steps"]
+    builds = [
+        i
+        for i, step in enumerate(steps)
+        if step.get("run", "").startswith("docker build ") or step.get("uses") == "docker/build-push-action@v6"
+    ]
+    assert len(builds) == 1
+    build = builds[0]
+    step = steps[build]
+    if "run" in step:
+        assert step["run"] == f"docker build -t {IMAGE} ."
+    else:
+        assert step["with"]["context"] == "."
+        assert step["with"]["load"] is True
+        assert step["with"]["tags"] == IMAGE
     for script in ("hive-launch-smoke", "swarm-smoke", "hive-join-smoke", "compose-hive-smoke"):
         assert build < next(
-            i for i, command in enumerate(commands) if f"scripts/packaging/{script}.sh" in command.split()
+            i for i, step in enumerate(steps) if f"scripts/packaging/{script}.sh" in step.get("run", "").split()
         )
 
 
