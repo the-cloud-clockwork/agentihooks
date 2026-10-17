@@ -211,3 +211,122 @@ def test_the_wait_timer_ends_a_run_wait_while_the_tick_snapshot_is_blocked(env, 
         finally:
             release.set()
         future.result()
+
+
+def test_the_wait_pass_leaves_a_foreign_controllers_wait_untouched(tick, monkeypatch):  # noqa: F811
+    from scripts.swarm import lease
+
+    hold_run(tick)
+    before = idle.wait(tick.store.redis, "sw", ME)
+    lease.acquire(tick.store, "sw", "another-controller")
+    monkeypatch.setattr(cli, "LedgerClient", lambda: pytest.fail("foreign ledger was read"))
+    assert cli.run_waits(tick.store, "sw") == []
+    assert idle.wait(tick.store.redis, "sw", ME) == before
+    assert tick.told() == []
+
+
+@pytest.mark.parametrize("held", ["none", "bare", "finished"])
+def test_the_wait_pass_skips_ledger_reads_without_active_checked_waits(tick, monkeypatch, held):  # noqa: F811
+    if held != "none":
+        hold_run(tick)
+    if held == "bare":
+        idle.declare_wait(tick.store.redis, "sw", ME, 10_000_000, "a short break", 1)
+    if held == "finished":
+        from dataclasses import replace
+
+        tick.store.put_agent("sw", replace(tick.store.agents("sw")[0], state="finished"))
+    monkeypatch.setattr(cli, "LedgerClient", lambda: pytest.fail("idle ledger was read"))
+    assert cli.run_waits(tick.store, "sw") == []
+    assert tick.told() == []
+
+
+def test_the_wait_command_checks_other_swarms_despite_a_failure_or_slow_pass(monkeypatch, capsys):
+    from argparse import Namespace
+    from threading import Event
+    from types import SimpleNamespace
+
+    slow, checked = Event(), Event()
+
+    def check(store, slug):
+        if slug == "broken":
+            raise RuntimeError("unavailable")
+        if slug == "slow":
+            slow.set()
+            assert checked.wait(5)
+        else:
+            assert slow.wait(5)
+            checked.set()
+        return ["wait checked"]
+
+    monkeypatch.setattr(cli.timer, "installed_refusal", lambda: "")
+    monkeypatch.setattr(cli, "run_waits", check)
+    cli.cmd_waits(SimpleNamespace(slugs=lambda: ["broken", "slow", "fast"]), Namespace())
+    output = capsys.readouterr()
+    assert set(output.out.splitlines()) == {"slow: wait checked", "fast: wait checked"}
+    assert output.err == "broken: RuntimeError: unavailable\n"
+
+
+def test_the_wait_command_accepts_an_empty_swarm_list(monkeypatch, capsys):
+    from argparse import Namespace
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(cli.timer, "installed_refusal", lambda: "")
+    cli.cmd_waits(SimpleNamespace(slugs=lambda: []), Namespace())
+    assert capsys.readouterr() == ("", "")
+
+
+def test_the_wait_command_refuses_a_run_outside_the_install(monkeypatch):
+    from argparse import Namespace
+
+    from scripts.swarm.store import SwarmError
+
+    monkeypatch.setattr(cli.timer, "installed_refusal", lambda: "outside the installed checkout")
+    with pytest.raises(SwarmError, match="the wait pass refused to run: outside the installed checkout"):
+        cli.cmd_waits(None, Namespace())
+
+
+def test_the_wait_pass_rechecks_ownership_after_reading_github(tick, monkeypatch):  # noqa: F811
+    from types import SimpleNamespace
+
+    from scripts.swarm import lease
+    from scripts.swarm.store import SwarmError
+
+    hold_run(tick)
+    before = idle.wait(tick.store.redis, "sw", ME)
+
+    def changed_owner(*args):
+        tick.store.redis.delete(tick.store.key("sw", "control-owner"))
+        lease.acquire(tick.store, "sw", "another-controller")
+        return lambda url: None
+
+    monkeypatch.setattr(cli.ledger_events, "tick_view", changed_owner)
+    ledger = SimpleNamespace(state=lambda slug: {"tasks": []})
+    with pytest.raises(SwarmError):
+        cli.run_waits(tick.store, "sw", ledger)
+    assert idle.wait(tick.store.redis, "sw", ME) == before
+    assert tick.told() == []
+
+
+def test_the_wait_pass_confirms_a_merge_wait_with_an_uncached_github_read(tick, monkeypatch):  # noqa: F811
+    from types import SimpleNamespace
+
+    from tests.swarm.test_waits import LISTED, UNLISTED, URL
+
+    tick.hold("merge", URL)
+    monkeypatch.setattr(cli.ledger_events, "tick_view", lambda *args: {URL: UNLISTED}.get)
+    monkeypatch.setattr(cli.ledger_events, "view", {URL: LISTED}.get)
+    ledger = SimpleNamespace(state=lambda slug: {"tasks": []})
+    assert cli.run_waits(tick.store, "sw", ledger) == []
+    assert idle.wait(tick.store.redis, "sw", ME)["on"] == {"kind": "merge", "target": URL, "queued": True}
+    assert tick.told() == []
+
+
+def test_the_wait_pass_resolves_against_current_ledger_tasks(tick):  # noqa: F811
+    from types import SimpleNamespace
+
+    tick.hold("task", "t2")
+    documents = {"sw": {"tasks": [{"id": "t2", "state": "done"}]}}
+    ledger = SimpleNamespace(state=documents.__getitem__)
+    assert cli.run_waits(tick.store, "sw", ledger) == [f"ended the wait of {ME}: task t2, now done"]
+    assert idle.wait(tick.store.redis, "sw", ME) is None
+    assert len(tick.told()) == 1
