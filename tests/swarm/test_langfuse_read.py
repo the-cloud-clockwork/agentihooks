@@ -20,7 +20,10 @@ def test_reader_uses_the_named_project_window_and_bounded_transport(monkeypatch,
     calls, initialized, closed = [], [], []
 
     @asynccontextmanager
-    async def transport(url, headers, timeout):
+    async def transport(url, headers, timeout, httpx_client_factory):
+        from scripts.swarm.langfuse_read import gateway_client
+
+        assert httpx_client_factory is gateway_client
         assert url == "http://fixture/mcp/"
         assert headers == {
             "Authorization": "Bearer fixture",
@@ -78,6 +81,23 @@ def test_reader_uses_the_named_project_window_and_bounded_transport(monkeypatch,
         )
     ]
     assert initialized == closed == [True]
+
+
+def test_gateway_client_names_the_host_header_for_tls_on_an_encrypted_address():
+    from scripts.swarm.langfuse_read import gateway_client
+
+    async def prepared():
+        async with gateway_client(headers={"Host": "llm.homeofanton.com"}) as client:
+            request = client.build_request("POST", "https://10.10.30.200/toolset/swarm-controller/mcp")
+            for hook in client.event_hooks["request"]:
+                await hook(request)
+            return request
+
+    request = asyncio.run(prepared())
+    assert request.url.scheme == "https"
+    assert request.url.host == "10.10.30.200"
+    assert request.headers["Host"] == "llm.homeofanton.com"
+    assert request.extensions["sni_hostname"] == "llm.homeofanton.com"
 
 
 def test_reader_requires_the_configured_endpoint_before_connecting(monkeypatch):

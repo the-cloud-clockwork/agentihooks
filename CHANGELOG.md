@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+New entries go in one fragment per pull request under `changelog.d/`; each
+release assembles them into its release notes. See `changelog.d/README.md`.
+
 ## [Unreleased]
 
 ### Added
@@ -47,6 +50,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Master notices for new and overdue follow ups include the item identifier and
   its exact completion command.
+- The swarm stall watchdog no longer reopens a task or stops its owner while
+  the task depends on a task not yet done, or while its owner has declared a
+  wait on another open task or on another open pull request's merge.
 - The quota usage banner test passes in any test order: tests that change the
   banner cadence restore it, and a regression test runs them before it.
 - Launch checks report unavailable process observations without inventing profile,

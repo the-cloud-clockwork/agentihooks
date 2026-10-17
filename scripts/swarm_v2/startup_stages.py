@@ -68,6 +68,18 @@ def pull_ms(message: str) -> int | None:
     return round((int(found["m"] or 0) * 60 + float(found["s"])) * 1000)
 
 
+def image_pulls(events: Sequence[Mapping]) -> list[dict]:
+    pulls = []
+    for event in events:
+        if event["reason"] != "Pulled":
+            continue
+        image = event["message"].partition('"')[2].partition('"')[0]
+        pulls.append(
+            {"container": event.get("container", ""), "image": image, "duration_ms": pull_ms(event["message"])}
+        )
+    return pulls
+
+
 def _ready_at(conditions: Iterable[Mapping]) -> int | None:
     for condition in conditions:
         if condition.get("type") == "Ready" and condition.get("status") == "True":
@@ -83,6 +95,8 @@ def _event(item: Mapping) -> dict | None:
     if not when or target.get("kind") != "Pod":
         return None
     kept = {"pod": f"{target.get('namespace')}/{target.get('name')}", "reason": item["reason"], "at": instant(when)}
+    if target.get("fieldPath"):
+        kept["container"] = target["fieldPath"].partition("{")[2].removesuffix("}")
     if item["reason"] in MESSAGE_REASONS:
         kept["message"] = item.get("message", "")
     return kept
@@ -315,6 +329,7 @@ def sample(name: str, events: Sequence[Mapping], read: Mapping, ups: Mapping) ->
         "node_source": launch["source"] if cold else EXISTING,
         "from_zero": from_zero,
         "image_cache": _cache(pulls),
+        "image_pulls": image_pulls(events),
         "outcome": STARTED if started else kind or PENDING,
         "transient": kind if started else "",
         "sandbox_retries": sum(1 for e in events if e["reason"] == "FailedCreatePodSandBox"),
@@ -349,6 +364,17 @@ def _spread(values: Iterable[int | None]) -> dict | None:
     return distribution(present) if present else None
 
 
+def summarize_pulls(samples: Sequence[Mapping]) -> list[dict]:
+    grouped: dict[tuple[str, str], list[int | None]] = {}
+    for sample in samples:
+        for pull in sample.get("image_pulls", []):
+            grouped.setdefault((pull["container"], pull["image"]), []).append(pull["duration_ms"])
+    return [
+        {"container": container, "image": image, "duration_ms": _spread(durations)}
+        for (container, image), durations in sorted(grouped.items())
+    ]
+
+
 def summarize(group: Sequence[Mapping]) -> dict:
     started = [e for e in group if e["outcome"] == STARTED]
     failed = [e for e in group if e["outcome"] not in (STARTED, PENDING)]
@@ -366,6 +392,7 @@ def summarize(group: Sequence[Mapping]) -> dict:
         "stages": {stage: spread for stage, spread in stages.items() if spread},
         "node_provision_ms": _spread(_total(e, NODE_STAGES) for e in started),
         "image_init_ms": _spread(_total(e, IMAGE_STAGES) for e in started),
+        "image_pulls": summarize_pulls(started),
     }
 
 

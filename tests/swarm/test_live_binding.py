@@ -302,7 +302,7 @@ def test_tick_reclaims_each_mismatched_agent_on_its_task(ticking, field):
     assert runtime.tasks[-1]["launch_assignment"]["account"] == old.account
     assert any(field in action for action in actions)
     found = live_binding.findings(store, "sw")
-    assert any(f.subject == f"{old.name}/{field}" for f in found)
+    assert not any(f.subject.startswith(f"{old.name}/") for f in found)
     assert ledger.rows["one"]["claimed_by"] == new.name
 
 
@@ -440,6 +440,7 @@ def test_reports_are_visible_in_swarm_health(ticking):
 
     store, _, ledger = ticking
     agent = AgentRecord("engineer", "eng", "one", profile="engineer", harness="claude")
+    store.put_agent("sw", agent)
     live_binding.record(store, "sw", agent, {**live_binding.assignment(agent), "hooks": False}, 10)
     found = findings(store, "sw", store.config("sw"), ledger.tasks("sw"), [])
     assert any(f["id"] == "live-binding/engineer/hooks" for f in found)
@@ -548,6 +549,7 @@ def test_legacy_assignment_uses_the_profile_home_and_saved_fields(tmp_path, monk
 def test_mismatch_report_and_health_evidence_are_complete(ticking):
     store, _, _ = ticking
     agent = AgentRecord("engineer", "eng", "one", harness="claude", profile="engineer")
+    store.put_agent("sw", agent)
     differences = live_binding.record(store, "sw", agent, {"pane": "open"}, 123)
     assert differences == {"pane": {"expected": "closed", "actual": "open"}}
     assert json.loads(store.redis.hget(store.key("sw", "live-bindings"), "engineer")) == {
@@ -566,6 +568,21 @@ def test_mismatch_report_and_health_evidence_are_complete(ticking):
         "threshold": "assigned launch must match",
     }
     assert found[0].measure == 1
+
+
+def test_departed_agents_raise_no_finding_while_a_seated_mismatch_does(ticking):
+    store, _, _ = ticking
+    seated = AgentRecord("seated", "eng", "one", harness="claude", profile="engineer", started_at=2)
+    superseded = AgentRecord("superseded", "eng", "one", harness="claude", profile="engineer", started_at=1)
+    finished = AgentRecord("finished", "eng", "two", harness="claude", profile="engineer", state="finished")
+    dropped = AgentRecord("dropped", "eng", "three", harness="claude", profile="engineer")
+    older = AgentRecord("older", "eng", "four", harness="claude", profile="engineer", started_at=1)
+    ended = AgentRecord("ended", "eng", "four", harness="claude", profile="engineer", started_at=2, state="finished")
+    for agent in (seated, superseded, finished, older, ended):
+        store.put_agent("sw", agent)
+    for agent in (superseded, seated, finished, dropped, older, ended):
+        live_binding.record(store, "sw", agent, {"process": False}, 10)
+    assert [f.subject for f in live_binding.findings(store, "sw")] == ["seated/process"]
 
 
 def test_relaunch_never_reclassifies_the_assigned_profile(tmp_path, monkeypatch):

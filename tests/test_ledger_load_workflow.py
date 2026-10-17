@@ -34,7 +34,7 @@ def test_the_ledger_load_gate_runs_beside_the_shards_with_redis_inside_the_budge
         if step.get("name") == "Write and read a full size ledger from ten clients within the server budget"
     )
     assert "-m tests.ledger_load.gate --folder" in gate["run"]
-    assert gate["if"] == "${{ !inputs.streams }}"
+    assert gate["if"] == "${{ !inputs.streams && steps.key.outputs.hit != 'true' }}"
 
 
 def test_the_ledger_load_gate_grades_with_the_budgets_of_the_fetched_base():

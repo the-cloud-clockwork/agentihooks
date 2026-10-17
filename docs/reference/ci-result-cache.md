@@ -8,7 +8,7 @@ nav_order: 5
 
 One CI algorithm for every repo and workflow: a check whose real inputs did not change reuses its last green result, and a check that fails is retried in place a bounded number of times inside the same job. No run is ever restarted from zero because one test flaked.
 
-Status: slices 1 to 4 delivered (see [Slice 1 as delivered](#slice-1-as-delivered), [Slice 2 as delivered](#slice-2-as-delivered), [Slice 3 as delivered](#slice-3-as-delivered) and [Slice 4 as delivered](#slice-4-as-delivered)); slices 5 to 7 are design. Issue [#2365](https://github.com/the-cloud-clockwork/agentihooks/issues/2365). Slices are listed in [Slices](#slices); each one is a separate pull request.
+Status: slices 1 to 4 and 6 delivered (see [Slice 1 as delivered](#slice-1-as-delivered), [Slice 2 as delivered](#slice-2-as-delivered), [Slice 3 as delivered](#slice-3-as-delivered), [Slice 4 as delivered](#slice-4-as-delivered) and [Slice 6 as delivered](#slice-6-as-delivered)); slices 5 and 7 are design. Issue [#2365](https://github.com/the-cloud-clockwork/agentihooks/issues/2365). Slices are listed in [Slices](#slices); each one is a separate pull request.
 
 ## Before numbers
 
@@ -208,3 +208,19 @@ Measured with `python -m tests.dep_manifest share --manifest manifest.json --ref
 Cost, from run [38952385459](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38952385459) against queue runs 38950629400 to 38956012323: 3.12 Run tests mean 217 s against 178 to 210 s, slowest shard 227 s against 198 to 246 s; `sonar` 185 s against 168 s on dev push run 38950625810, of which the merge wait grew to 37 s and the build takes 24 s; the 12 coverage artifacts grew from 19 MB to 202 MB; `coverage-ratchet` 84 s against 80 s.
 
 Not done here: the queue run's read of the dev cache entry, which slice 5 needs, is still unproven.
+
+## Slice 6 as delivered
+
+Each keyed job declares its inputs in `.github/input-keys.json`: repository paths at the head, base paths read at the grading base, and the tools it runs. `scripts/ci_input_key.py` hashes the git object of every declared path, the keyer's own script and action, the declared tools, the runner (`RUNNER_OS`, `RUNNER_ARCH`, `RUNNER_ENVIRONMENT`, `ImageOS`, `ImageVersion`), any resolved external input the job passes, such as the Redis service image id, and the UTC day. A declared path missing at its revision fails the step.
+
+`.github/actions/input-key` looks the key up with `actions/cache/restore` in lookup only mode. On a hit every heavy step is skipped, the job stays green and raises an `Input key reused` notice naming the key. On a miss the heavy steps run, and `.github/actions/input-key/save` saves the key after they pass, only on push and dispatch runs. A cache entry is visible only to runs of the ref that saved it, so dev runs read only keys written by runs of code already on dev.
+
+`ledger-load` keys its Redis service image id and `brain-smoke` its collector image id, both read with `docker inspect`. Both adopt it. Over the last 100 dev merges about half changed none of their declared inputs.
+
+| Run | Plant | Result |
+|---|---|---|
+| [38961789273](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38961789273), [38961792398](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38961792398) | none, first run of the head | brain smoke 33 s and ledger load 139 s: key missed, every step ran, key saved |
+| [38963275517](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38963275517), [38963279568](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38963279568) | a docs change, outside every declared input | 20 s each: key hit, install, check and save skipped |
+| [38963740312](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38963740312), [38965443542](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38965443542) | a change to `hooks/` and `tests/ledger_load/`, both declared | brain smoke 37 s and ledger load 131 s: key missed, every step ran, the new key saved |
+
+Known limits: the day in the key forces one full run per job per UTC day, which also bounds how long an unkeyed floating input, such as a Python patch release or a self hosted runner image, can be reused. `ci_reuse.py` keeps the whole tree queue reuse, and `kind-due` keeps its own path rule until `helm-kind` moves onto the input key.

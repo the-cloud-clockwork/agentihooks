@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/startup_stages.py:scripts.swarm_v2.startup_stages.x__event__mutmut_11:f250fd4b16658e0ceb8c502ddd8bf13f615b427fff768c0999bf3c8a1546032e": {
+    "reader": "standards_reader",
+    "reason": "Valid container fieldPaths contain one opening brace; partition and rpartition give the same container name."
+  }
+}

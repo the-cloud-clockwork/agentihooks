@@ -35,6 +35,15 @@ def _toplevel(cwd: Path) -> Path | None:
     return Path(result.stdout.strip()) if result.returncode == 0 else None
 
 
+def _common_dir(cwd: Path) -> str | None:
+    result = subprocess.run(
+        ["git", "-C", str(cwd), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
 def _path(word: str) -> str:
     return os.path.expanduser(os.path.expandvars(word))
 
@@ -92,9 +101,13 @@ def _require_directory(target: Path | None, stage: str) -> Path | None:
 
 
 def _push_directory(cwd: Path, selected: bool) -> Path:
+    from hooks.targets.capabilities import reports_shell_cwd
+
     if selected:
         return cwd
     target, stage = _swarm_cwd(cwd)
+    if target is not None and reports_shell_cwd() and _common_dir(target) != _common_dir(cwd):
+        return cwd
     return _require_directory(target, stage) or cwd
 
 

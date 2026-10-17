@@ -232,6 +232,45 @@ def test_reads_and_quoted_runner_names_pass(command, monkeypatch):
 
 
 @pytest.mark.parametrize(
+    "command",
+    [
+        "python3 filter.py report.json tests/test_a.py",
+        "python3 -I scripts/read_artifact.py --test tests/context/test_local_test_guard.py artifact/report.json",
+        "python3 -W ignore filter.py tests/test_a.py",
+        "unzip -p artifact.zip report.json | python3 filter.py - tests/test_a.py",
+        "python3 - tests/test_a.py < filter.py",
+        "python3 -mjson.tool tests/test_a.py",
+        "python3 -cpass tests/test_a.py",
+        "jq '.tests[] | select(.nodeid | startswith(\"tests/test_a.py\"))' artifact/report.json",
+    ],
+)
+def test_filters_over_an_artifact_naming_a_test_file_pass(command, monkeypatch):
+    from hooks.context.local_test_guard import check_local_tests
+
+    monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
+    check_local_tests({"tool_name": "Bash", "tool_input": {"command": command}})
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "python3 -I tests/test_a.py report.json",
+        "python3 -W ignore tests/test_a.py",
+        "python3 -X dev /venv/bin/pytest -q",
+        "python3 --check-hash-based-pycs never /venv/bin/pytest -q",
+        "python3 tests/test_a.py -c x",
+        "python2 -Q new tests/test_a.py",
+    ],
+)
+def test_a_test_file_run_as_the_script_is_still_blocked(command, monkeypatch):
+    from hooks.context.local_test_guard import check_local_tests
+
+    monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
+    with pytest.raises(BlockAction, match="draft pull request"):
+        check_local_tests({"tool_name": "Bash", "tool_input": {"command": command}})
+
+
+@pytest.mark.parametrize(
     "target,name,args",
     [
         ("claude", "Bash", {"command": "pytest"}),

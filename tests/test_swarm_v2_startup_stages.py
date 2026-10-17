@@ -458,6 +458,67 @@ def test_reduce_keeps_only_what_attribution_reads():
     assert reduced["read_at"] == "2026-10-11T14:57:00Z"
 
 
+def test_the_report_names_sequential_container_image_pulls_with_their_own_durations():
+    raw = raw_capture()
+    for container, image, when, duration in [
+        ("bundle", "registry/bundle:release", "2026-10-11T14:38:54Z", "2s"),
+        ("worker", "registry/worker:release", "2026-10-11T14:39:24Z", "30s"),
+    ]:
+        raw["events"]["items"].append(
+            {
+                "reason": "Pulled",
+                "firstTimestamp": when,
+                "message": f'Successfully pulled image "{image}" in {duration} (including waiting)',
+                "involvedObject": {
+                    "kind": "Pod",
+                    "namespace": "default",
+                    "name": "a",
+                    "fieldPath": f"spec.initContainers{{{container}}}"
+                    if container == "bundle"
+                    else f"spec.containers{{{container}}}",
+                },
+            }
+        )
+    raw["events"]["items"].append(
+        {
+            "reason": "Started",
+            "firstTimestamp": "2026-10-11T14:39:25Z",
+            "involvedObject": {"kind": "Pod", "namespace": "default", "name": "a"},
+        }
+    )
+    [sample] = stages.attribute(stages.reduce(raw))
+    assert sample["image_pulls"] == [
+        {"container": "bundle", "image": "registry/bundle:release", "duration_ms": 2000},
+        {"container": "worker", "image": "registry/worker:release", "duration_ms": 30000},
+    ]
+    assert sample["stages"]["image"] == 32000
+    result = stages.report([sample])
+    assert result["scenarios"]["warm-node/uncached-image"]["image_pulls"] == [
+        {
+            "container": "bundle",
+            "image": "registry/bundle:release",
+            "duration_ms": {"n": 1, "min": 2000, "p50": 2000, "p95": 2000, "max": 2000},
+        },
+        {
+            "container": "worker",
+            "image": "registry/worker:release",
+            "duration_ms": {"n": 1, "min": 30000, "p50": 30000, "p95": 30000, "max": 30000},
+        },
+    ]
+    rendered = bench.markdown(result, "sequential pulls")
+    assert "| warm-node/uncached-image | bundle | registry/bundle:release | 2.0 / 2.0 (n 1) |" in rendered
+    assert "| warm-node/uncached-image | worker | registry/worker:release | 30.0 / 30.0 (n 1) |" in rendered
+
+
+def test_a_report_of_an_older_attributed_sample_has_no_container_pull_details():
+    [sample] = stages.attribute(read(cold_events()))
+    del sample["image_pulls"]
+    result = stages.report([sample])
+    row = result["scenarios"]["cold-node/uncached-image"]
+    assert row["image_pulls"] == []
+    assert row["stages"]["image"]["p50"] == 20000
+
+
 def test_scale_ups_are_deduplicated_across_pods_and_ordered_per_group():
     message = "pod triggered scale-up: [{g1 4->7 (max: 20)} {g2 0->1 (max: 4)}]"
     events = [

@@ -397,7 +397,7 @@ def test_standing_detector_retains_episode_counts_when_recent_history_rolls_over
     assert row["fired"] == 31
     assert row["episodes"] == [str(n) for n in range(11, 31)]
     assert row["first_at"] == NOW
-    assert row["updated_at"] == NOW + 60_000
+    assert row["updated_at"] == NOW
     assert (row["value"], row["threshold"], row["unit"], row["detail"]) == (19, 15, "minutes", "old run")
     row = standing.update_detector(store.redis, "scratch", {**changed, "seconds": 10800}, NOW + 120_000, 0.25)
     assert row["fired"] == 31

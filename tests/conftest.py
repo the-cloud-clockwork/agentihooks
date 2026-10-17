@@ -400,6 +400,13 @@ def _swarm_runs_as_installed(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _swarm_tick_leaves_user_units_alone(monkeypatch):
+    from scripts.swarm import timer
+
+    monkeypatch.setattr(timer, "reconcile", lambda binary: True)
+
+
+@pytest.fixture(autouse=True)
 def _ci_speed_offline(request, monkeypatch):
     from scripts.swarm import ci_speed
 
