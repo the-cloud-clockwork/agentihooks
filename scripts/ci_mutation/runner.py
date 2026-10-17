@@ -247,8 +247,7 @@ def run_gate(
             failing += failing_tests(work / "run.log")
         else:
             rows.update(results)
-    if failing:
-        report["failing_tests"] = list(dict.fromkeys(failing))
+    report.update({"failing_tests": list(dict.fromkeys(failing))} if failing else {})
     for path, lines in changes.items():
         if path in reasons:
             report["not_mutated"].append({"path": path, "reason": reasons[path]})
