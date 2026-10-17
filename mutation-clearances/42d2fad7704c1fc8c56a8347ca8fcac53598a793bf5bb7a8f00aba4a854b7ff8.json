@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/events/hub.py:scripts.swarm_ledger.events.hub.x\u01c1Hub\u01c1publish__mutmut_4:3147427707f9a2496a97e96aa47c43b1c2aa3a68acbe2e5623c1a0e392fa3f34": {
+    "reader": "Standards",
+    "reason": "False and None take identical truth branches in Hub._publish; no output or aliasing change."
+  }
+}

@@ -7,7 +7,7 @@ on:
         type: string
         required: true
   push:
-    branches-ignore: [dev, main, "gh-readonly-queue/**", "wip/**", "diffcheck/**"]
+    branches-ignore: [dev, main, "gh-readonly-queue/**", "wip/**", "diffcheck/**", "promotion/**"]
 
 concurrency:
   group: mutation-preflight-${{ github.event_name == 'push' && github.ref || github.run_id }}
@@ -19,16 +19,23 @@ permissions:
   actions: read
 
 jobs:
-  pull-request:
-    if: ${{ github.event_name == 'push' && !github.event.deleted }}
+  plan:
+    if: ${{ github.event_name != 'push' || !github.event.deleted }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
-    timeout-minutes: 5
+    timeout-minutes: 10
+    env:
+      BASE: ${{ inputs.base || 'origin/dev' }}
     outputs:
+      shards: ${{ steps.plan.outputs.shards }}
+      stats_parts: ${{ steps.plan.outputs.stats_parts }}
+      bases: ${{ steps.plan.outputs.bases }}
+      changed: ${{ steps.plan.outputs.changed }}
+      graded: ${{ steps.plan.conclusion == 'success' }}
       open: ${{ steps.open.outputs.open }}
-      reused: ${{ steps.reuse.outputs.reused }}
     steps:
       - name: Skip when the branch already has an open pull request into dev
         id: open
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -36,7 +43,7 @@ jobs:
           if [[ $count == 0 ]]; then echo open=false; else echo open=true; fi >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v4
-        if: steps.open.outputs.open == 'false'
+        if: steps.open.outputs.open != 'true'
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -63,18 +70,37 @@ jobs:
           include-hidden-files: true
           retention-days: 7
 
-  plan:
-    needs: pull-request
-    if: ${{ !cancelled() && (github.event_name != 'push' || (needs.pull-request.outputs.open == 'false' && needs.pull-request.outputs.reused != 'true')) }}
-    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
-    timeout-minutes: 5
+      - uses: actions/setup-python@v5
+        if: steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        if: steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'
+        with:
+          version: "0.12.23"
+          checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
+          enable-cache: false
+
+      - name: Install dependencies
+        if: steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'
+        run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+
+      - name: Size mutation shards from stored timings
+        id: plan
+        if: steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -m scripts.ci_mutation.plan --base "$BASE"
+
+  # A branch that adds only failing tests has no mutants and may reuse a green report, so its touched tests run here.
+  touched-tests:
+    needs: plan
+    if: ${{ !cancelled() && needs.plan.outputs.open == 'false' }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss' || 'ubuntu-latest' }}
+    timeout-minutes: 15
     env:
-      BASE: ${{ inputs.base || 'origin/dev' }}
-    outputs:
-      shards: ${{ steps.plan.outputs.shards }}
-      stats_parts: ${{ steps.plan.outputs.stats_parts }}
-      bases: ${{ steps.plan.outputs.bases }}
-      changed: ${{ steps.plan.outputs.changed }}
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
     steps:
       - uses: actions/checkout@v4
         with:
@@ -93,16 +119,42 @@ jobs:
       - name: Install dependencies
         run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
-      - name: Size mutation shards from stored timings
-        id: plan
+      - name: Select the tests the branch touches
+        id: touched
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          from scripts.ci_mutation.browser import needs_browser
+          from scripts.ci_select import changed_files, is_test
+
+          root = Path.cwd()
+          tests = [path for path in changed_files(root, "origin/dev", "HEAD") if is_test(path) and (root / path).is_file()]
+          browser = str(bool(tests) and needs_browser(root, tests)).lower()
+          print("Touched tests:", *tests or ["none"], sep="\n")
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a") as stream:
+              stream.write(f"files={' '.join(tests)}\nbrowser={browser}\n")
+          PY
+
+      - name: Install the browser that page tests drive
+        if: steps.touched.outputs.browser == 'true'
+        timeout-minutes: 6
+        uses: ./.github/actions/browser-cache
+
+      - name: Run the tests the branch touches
+        if: steps.touched.outputs.files != ''
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: python -m scripts.ci_mutation.plan --base "$BASE"
+          FILES: ${{ steps.touched.outputs.files }}
+          PYTHONUNBUFFERED: "1"
+        run: |
+          read -ra files <<< "$FILES"
+          python -m pytest "${files[@]}" -n auto --tb=short -p no:cacheprovider
 
   # Each leg queues on its run's lane under its kind and index, so a lane holds one stats and one shard leg per index.
   stats:
-    needs: [pull-request, plan]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.changed != '0' }}
+    needs: plan
+    if: ${{ !cancelled() && needs.plan.outputs.graded == 'true' && needs.plan.outputs.changed != '0' }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-batch' || 'ubuntu-latest' }}
     timeout-minutes: 26
     concurrency:
@@ -194,7 +246,7 @@ jobs:
 
   refine:
     needs: [plan, stats]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.changed != '0' && needs.stats.result == 'success' }}
+    if: ${{ !cancelled() && needs.plan.outputs.graded == 'true' && needs.plan.outputs.changed != '0' && needs.stats.result == 'success' }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 5
     outputs:
@@ -241,7 +293,7 @@ jobs:
 
   mutation-shard:
     needs: [plan, stats, refine]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.changed != '0' && needs.stats.result == 'success' && needs.refine.result == 'success' }}
+    if: ${{ !cancelled() && needs.plan.outputs.graded == 'true' && needs.plan.outputs.changed != '0' && needs.stats.result == 'success' && needs.refine.result == 'success' }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-batch' || 'ubuntu-latest' }}
     timeout-minutes: 26
     concurrency:
@@ -323,7 +375,7 @@ jobs:
   # Readers take one report and the check named mutation, so every shard ends here.
   mutation:
     needs: [plan, refine, mutation-shard]
-    if: ${{ !cancelled() && needs.plan.result == 'success' }}
+    if: ${{ !cancelled() && needs.plan.outputs.graded == 'true' }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 5
     env:

@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import re
 from types import ModuleType
 from urllib.parse import parse_qs, urlsplit
@@ -63,6 +64,10 @@ def dispatch(handler: object, server: ModuleType) -> dict | str | None:
 def ledger_read(server: ModuleType, slug: str, path: str, query: dict) -> dict:
     if path.split("/")[0] == "hierarchy":
         return resources.hierarchy_read(server.repository, slug, path, query)
+    if path == "architecture":
+        from . import architecture
+
+        return architecture.view(os.environ)
     return resources.read(server.repository.current(slug).state, path, query)
 
 
@@ -144,6 +149,10 @@ def ledger_operation(handler: object, server: ModuleType, slug: str, path: str, 
         return server.repository.encoded_view(slug, export_body)
     if path == "operations":
         return mutations.apply(server, slug, principal, payload)
+    if path == "architecture/actions":
+        from . import architecture
+
+        return architecture.act(handler, server, slug, principal, payload, os.environ)
     raise APIError(404, "resource_missing", "No such operation resource")
 
 

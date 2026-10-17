@@ -115,6 +115,15 @@ def publishing_root(repo: str, task: dict, agent: AgentRecord) -> tuple[Path | N
     return existing(primary, scoped, agent), primary, scoped
 
 
+def pushed_branches(repo: str, task: dict, agent: AgentRecord) -> dict:
+    record = {}
+    for repository in dict.fromkeys(repository_root(Path(value)) for value in task.get("repositories") or [repo]):
+        root = existing(repository, repository_task(repository, task), agent)
+        if root and stack.pushed(root):
+            record = branch_record(checkout_fields(root), repository, {**task, **record})
+    return record
+
+
 def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> dict:
     task = task_row(slug, agent, ledger)
     fields = []

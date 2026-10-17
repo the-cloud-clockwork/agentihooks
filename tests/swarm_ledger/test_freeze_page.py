@@ -158,14 +158,15 @@ def test_unfreeze_sends_the_clear_and_restores_the_rows(page):
     assert freeze_text(tab, "#item-plans-v2") == "freeze"
 
 
-@pytest.mark.parametrize("page", [[freeze("phases/p1"), freeze("tasks/t2")]], indirect=True)
-def test_unfreezing_a_parent_clears_the_freezes_under_it_on_the_page(page):
+@pytest.mark.parametrize("page", [[freeze("phases/p1"), freeze("tasks/t1")]], indirect=True)
+def test_unfreezing_a_phase_keeps_the_freezes_on_its_tasks_on_the_page(page):
     tab, sent = page
-    tab.click("#item-plans-hier > details.plan-fold > summary .freeze")
-    tab.click("#item-plans-hier > details.plan-fold > summary .freeze")
-    assert sent_ops(tab, sent, "freeze_clear") == [{"op": "freeze_clear", "target": "plans/hier"}]
+    tab.click('[data-focus="freeze:phases/p1"]')
+    assert sent_ops(tab, sent, "freeze_clear") == [{"op": "freeze_clear", "target": "phases/p1"}]
     tab.wait_for_function("() => !document.querySelector('#item-phases-p1').classList.contains('frozen')")
-    assert row_state(tab, "#item-tasks-t2")["frozen"] is True
+    assert row_state(tab, "#item-tasks-t1")["frozen"] is True
+    assert freeze_text(tab, "#item-tasks-t1") == "unfreeze"
+    assert row_state(tab, "#item-tasks-t3")["frozen"] is False
 
 
 @pytest.mark.parametrize("page", [[freeze("plans/hier", verb="focus")]], indirect=True)

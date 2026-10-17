@@ -12,6 +12,7 @@ from pathlib import Path
 import tomlkit
 
 from scripts.ci_mutation.clearances import load_clearances
+from scripts.ci_mutation.mutant_shards import holds, split_names, unit_cost
 from scripts.ci_mutation.report import evaluate, survivor_text
 from scripts.ci_mutation.scope import select_tests
 from scripts.ci_mutation.stats import SharedStats, load_parts, stats_key
@@ -152,7 +153,7 @@ def record_shard_measurement(
     if stats is None or stats.part is not None or not (stats.folder / "plan.json").is_file():
         return
     plan = json.loads((stats.folder / "plan.json").read_text())
-    owned = {name for name, index in plan["assignments"].items() if index == shard[0]}
+    owned = {name for name, assignment in plan["assignments"].items() if holds(assignment, shard[0])}
     completed = set()
     for path in output.glob("*/mutants/**/*.py.meta"):
         data = json.loads(path.read_text())
@@ -161,7 +162,8 @@ def record_shard_measurement(
         )
     graded = max(
         len(completed),
-        sum(count for file in report["files"] for status, count in file["counts"].items() if status != "not checked"),
+        sum(count for file in report["files"] for status, count in file["counts"].items() if status != "not checked")
+        + sum(row["status"] != "not checked" for entry in report.get("units", []) for row in entry["rows"]),
     )
     exhausted = any(entry["reason"] == "over budget" for entry in report["not_mutated"])
     report["shard"] = {
@@ -173,9 +175,23 @@ def record_shard_measurement(
         "graded": graded,
         "complete": graded == len(owned) and not report["not_mutated"],
         "budget_exhausted": exhausted,
-        "estimated_worker_seconds": sum(plan["costs"][name] for name in owned),
+        "estimated_worker_seconds": sum(unit_cost(plan, name, shard[0]) for name in owned),
     }
     print(json.dumps({"shard": report["shard"]}), flush=True)
+
+
+def grade_shard_rows(
+    report: dict, path: str, rows: list[dict], lines: set[int], cleared: dict, split: set[str]
+) -> dict:
+    if units := [row for row in rows if row["name"] in split]:
+        report.setdefault("units", []).append({"path": path, "lines": sorted(lines), "rows": units})
+    return evaluate(path, [row for row in rows if row["name"] not in split], lines, cleared)
+
+
+def split_plan_names(stats: SharedStats | None) -> set[str]:
+    if stats is None or not (stats.folder / "plan.json").is_file():
+        return set()
+    return split_names(json.loads((stats.folder / "plan.json").read_text()))
 
 
 def run_gate(
@@ -190,6 +206,7 @@ def run_gate(
     started = time.monotonic()
     deadline = started + budget
     cleared = load_clearances(root)
+    split = split_plan_names(stats)
     report = {"files": [], "not_mutated": [], "failed": False}
     rows, reasons, selected = {}, {}, {}
     for path, lines in changes.items():
@@ -224,7 +241,7 @@ def run_gate(
             print(f"{path}: not mutated, {reasons[path]}", flush=True)
             report["failed"] = True
             continue
-        result = evaluate(path, rows[path], lines, cleared)
+        result = grade_shard_rows(report, path, rows[path], lines, cleared, split)
         report["files"].append(result)
         if path in selected:
             print(json.dumps(result), flush=True)

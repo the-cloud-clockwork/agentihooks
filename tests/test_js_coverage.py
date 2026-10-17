@@ -158,20 +158,13 @@ def test_a_report_missing_either_kind_of_recorded_run_is_red(tmp_path, recorded,
     assert not (tmp_path / "lcov.info").exists()
 
 
-@pytest.mark.parametrize("recorded", [[], ["node"], ["browser"]], ids=["nothing", "node-only", "browser-only"])
-def test_a_selected_run_without_page_coverage_writes_an_empty_report(tmp_path, recorded):
-    captures = tmp_path / "captures"
-    captures.mkdir()
-    (captures / "capture-browser-empty.json").write_text('{"result": []}')
-    for kind in recorded:
-        stand_in(captures, kind)
-    out = tmp_path / "lcov.info"
-    result = subprocess.run(
+def convert_selected(root, captures, out):
+    return subprocess.run(
         [
             sys.executable,
             str(CONVERT),
             "--root",
-            str(tmp_path),
+            str(root),
             "--captures",
             str(captures),
             "--out",
@@ -181,16 +174,37 @@ def test_a_selected_run_without_page_coverage_writes_an_empty_report(tmp_path, r
         capture_output=True,
         text=True,
     )
-    if recorded:
-        assert result.returncode == 0
-        assert out.exists()
-        assert result.stdout.startswith("Mapped 2 captured runs")
-        return
+
+
+def test_a_selected_run_without_page_coverage_writes_an_empty_report(tmp_path):
+    captures = tmp_path / "captures"
+    captures.mkdir()
+    (captures / "capture-browser-empty.json").write_text('{"result": []}')
+    out = tmp_path / "lcov.info"
+    result = convert_selected(tmp_path, captures, out)
     assert result.returncode == 0
     assert out.read_text() == ""
     assert result.stdout == (
         f"The selected tests recorded no browser or node coverage under {captures}; the page report is empty\n"
     )
+
+
+@pytest.mark.parametrize("recorded", ["node", "browser"], ids=["node-only", "browser-only"])
+def test_a_selected_run_with_partial_page_coverage_maps_its_report(tmp_path, recorded):
+    text = "export const answer = total + offset;\n"
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts/page.js").write_text(text)
+    captures = tmp_path / "captures"
+    (captures / "sources").mkdir(parents=True)
+    (captures / "sources" / "page-run.js").write_text(text)
+    entry = {"source": "page-run", "functions": [{"ranges": [{"startOffset": 0, "endOffset": len(text), "count": 1}]}]}
+    (captures / f"capture-{recorded}-page-run.json").write_text(json.dumps({"result": [entry]}))
+    (captures / "capture-browser-empty.json").write_text('{"result": []}')
+    out = tmp_path / "lcov.info"
+    result = convert_selected(tmp_path, captures, out)
+    assert result.returncode == 0
+    assert result.stdout == "Mapped 2 captured runs of 1 scripts onto 1 page sources\n"
+    assert out.read_text() == "TN:\nSF:scripts/page.js\nDA:1,1\nLF:1\nLH:1\nend_of_record\n"
 
 
 def test_the_coverage_merge_marks_a_selected_scope_for_the_page_report():

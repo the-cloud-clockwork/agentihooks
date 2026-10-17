@@ -1051,6 +1051,14 @@ def test_herdr_names_the_agent_and_a_codex_session_by_its_raw_name(monkeypatch, 
     assert init_agent.CODEX_READY_S == 120.0
 
 
+def test_an_app_server_viewer_gets_no_typed_rename_because_its_server_names_the_thread(monkeypatch):
+    monkeypatch.setattr(init_agent.herdr_host, "rename_agent", lambda *args: True)
+    monkeypatch.setattr(init_agent.herdr_host, "wait_ready", lambda *args: pytest.fail("waited on a served viewer"))
+    monkeypatch.setattr(init_agent.herdr_host, "name_session", lambda *args: pytest.fail("typed a rename"))
+    monkeypatch.setattr(init_agent.herdr_panes, "mark", lambda *args, **changes: pytest.fail("marked a session name"))
+    assert init_agent._name_in_herdr("w1:p2", "eng-a", "codex", {}, "", 0.0, served=True) == ["agent_name=eng-a"]
+
+
 def test_a_codex_session_that_never_reads_ready_is_recorded_unnamed(monkeypatch):
     marked = []
     monkeypatch.setattr(init_agent.herdr_host, "rename_agent", lambda *args: True)

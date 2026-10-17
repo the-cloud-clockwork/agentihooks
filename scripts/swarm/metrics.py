@@ -36,8 +36,10 @@ def _collect(slug, now_ms, swarm, box, errors, environ):
     stage_detector.record(box, swarm.store, slug, now_ms, swarm.doc.get("tasks", []), environ, ready=ready)
     from redis.exceptions import RedisError
 
+    from scripts.swarm_v2 import deployed
+
     try:
-        metrics_fleet.record(box, swarm.store, slug, now_ms)
+        metrics_fleet.record(box, swarm.store, slug, now_ms, pools=deployed.worker_pools(environ, slug))
     except (OSError, SwarmError, ValueError, KeyError, RedisError) as exc:
         errors.append(f"fleet metrics failed: {exc}")
 

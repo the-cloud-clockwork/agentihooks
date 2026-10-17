@@ -248,6 +248,29 @@ class ExecutionRegistry:
                     continue
         raise SwarmError("execution history kept changing; update was not committed")
 
+    def set_pane(self, slug: str, execution_id: str, pane_id: str) -> None:
+        from redis.exceptions import WatchError
+
+        from scripts.swarm.store import AgentRecord, SwarmError
+
+        key = self.store.key(slug, "executions")
+        for _ in range(WRITE_ATTEMPTS):
+            with self.redis.pipeline() as pipe:
+                try:
+                    pipe.watch(key)
+                    raw = pipe.hget(key, execution_id)
+                    if not raw:
+                        pipe.unwatch()
+                        self.conflict(slug, "unknown execution identity; display labels cannot identify attempts")
+                    current = AgentRecord(**json.loads(raw))
+                    pipe.multi()
+                    self.write(pipe, slug, replace(current, pane_id=pane_id), current)
+                    pipe.execute()
+                    return
+                except WatchError:
+                    continue
+        raise SwarmError("execution history kept changing; pane was not committed")
+
     def write(self, pipe: Pipeline, slug: str, agent: AgentRecord, previous: AgentRecord | None = None) -> None:
         from scripts.swarm.tick import agent_status
 

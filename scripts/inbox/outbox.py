@@ -20,6 +20,9 @@ from scripts.inbox.store import Contended, DuplicateItem, InboxError, new_item_i
 
 NAME = "inbox-outbox.jsonl"
 SKIPPED = "inbox-outbox.skipped.jsonl"
+ATTEMPTS = "inbox-outbox.attempts.json"
+ATTEMPTS_ENV = "AGENTIHOOKS_INBOX_OUTBOX_MAX_ATTEMPTS"
+DEFAULT_ATTEMPTS = 3
 LOCK = "inbox-outbox.lock"
 OPS = ("send", "reply", "close", "post", "say", "ledger")
 MAX_ENV = "AGENTIHOOKS_INBOX_OUTBOX_MAX_BYTES"
@@ -67,6 +70,27 @@ def path() -> Path:
 
 def skipped_path() -> Path:
     return home() / SKIPPED
+
+
+def attempts_path() -> Path:
+    return home() / ATTEMPTS
+
+
+def max_attempts(environ=None) -> int:
+    env = os.environ if environ is None else environ
+    return int(env.get(ATTEMPTS_ENV) or DEFAULT_ATTEMPTS)
+
+
+def status() -> dict:
+    queued = path().read_text().splitlines() if path().exists() else []
+    skipped = skipped_path().read_text().splitlines() if skipped_path().exists() else []
+    return {"queued": len(queued), "retrying": len(_attempts()), "set_aside": len(skipped)}
+
+
+def status_lines() -> list[str]:
+    found = status()
+    line = f"inbox outbox  queued {found['queued']}  retrying {found['retrying']}  set aside {found['set_aside']}"
+    return [line] if any(found.values()) else []
 
 
 def bounds(environ=None) -> tuple[int, int]:
@@ -182,6 +206,7 @@ def _replay(store, report: Report) -> None:
     from scripts.inbox.cli import apply
 
     kept, down = [], {"redis"} if store is None else set()
+    tracked, cap = _attempts(), max_attempts()
     for line in path().read_text().splitlines(keepends=True):
         entry = parse(line)
         if entry is None:
@@ -211,13 +236,37 @@ def _replay(store, report: Report) -> None:
             _set_aside(line, str(exc))
             report.rejected.append((entry["item"], str(exc)))
         except Exception as exc:
-            print(f"agentihooks msg: outbox replay stopped ({type(exc).__name__}: {exc})", file=sys.stderr)
+            tracked[entry["sum"]] = tracked.get(entry["sum"], 0) + 1
+            if _gave_up(line, entry, f"{type(exc).__name__}: {exc}", tracked[entry["sum"]], report, cap):
+                continue
             down.add(lane(entry))
             kept.append(line)
+    _save_attempts({key: tracked[key] for key in (parse(line)["sum"] for line in kept) if key in tracked})
     if kept:
         _keep(kept, report)
     else:
         _clear()
+
+
+def _gave_up(line: str, entry: dict, error: str, count: int, report: Report, cap: int) -> bool:
+    if count < cap:
+        print(f"agentihooks msg: outbox replay stopped ({error})", file=sys.stderr)
+        return False
+    reason = f"{error} on {count} replays ({ATTEMPTS_ENV})"
+    _set_aside(line, reason)
+    report.rejected.append((entry["item"], reason))
+    return True
+
+
+def _attempts() -> dict:
+    return json.loads(attempts_path().read_text()) if attempts_path().exists() else {}
+
+
+def _save_attempts(counts: dict) -> None:
+    if counts:
+        _replace(attempts_path(), json.dumps(counts))
+    else:
+        attempts_path().unlink(missing_ok=True)
 
 
 def _keep(lines: list[str], report: Report) -> None:
@@ -237,11 +286,15 @@ def _clear() -> None:
 
 
 def _rewrite(lines: list[str]) -> None:
+    _replace(path(), "".join(lines))
+
+
+def _replace(target: Path, text: str) -> None:
     descriptor, staged = tempfile.mkstemp(dir=home())
     with os.fdopen(descriptor, "w") as handle:
-        handle.write("".join(lines))
+        handle.write(text)
         _sync(handle)
-    os.replace(staged, path())
+    os.replace(staged, target)
     _sync_home()
 
 

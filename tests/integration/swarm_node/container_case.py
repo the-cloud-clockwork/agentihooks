@@ -36,7 +36,7 @@ def main():
     }
     write(attempt / "registration.json", authority)
     fixture = "/opt/fixture/process_fixture.py"
-    delay = "2" if mode == "late" else "0.2"
+    delay = "4" if mode == "late" else "0.2"
     agent_mode = "stubborn" if mode == "forced" else "complete" if mode == "natural" else "cooperative"
     spec = {
         "schema_version": 1,
@@ -46,7 +46,7 @@ def main():
         "exporter": [sys.executable, fixture, "exporter", delay, "missing" if mode == "missing" else "complete"],
         "startup_seconds": 15,
         "quiesce_seconds": 2,
-        "checkpoint_seconds": 0.8,
+        "checkpoint_seconds": 0.8 if mode in ("late", "missing") else 3,
         "kill_seconds": 1,
     }
     path = attempt / "launch.json"

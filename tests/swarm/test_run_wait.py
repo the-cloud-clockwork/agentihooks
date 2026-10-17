@@ -11,15 +11,26 @@ pytestmark = pytest.mark.xdist_group("fakeredis")
 
 RUN = "https://github.com/org/repo/actions/runs/123"
 ENDPOINT = "repos/org/repo/actions/runs/123"
+JOBS = f"{ENDPOINT}/jobs?per_page=100"
 
 
 @pytest.fixture
 def actions(monkeypatch):
-    state = {"run": {"status": "in_progress", "conclusion": None}, "code": 0, "stderr": b"", "asked": []}
+    state = {
+        "run": {"status": "in_progress", "conclusion": None},
+        "jobs": {"jobs": []},
+        "jobs_code": 0,
+        "code": 0,
+        "stderr": b"",
+        "asked": [],
+    }
 
     def api(args, **kwargs):
         state["asked"].append(args)
         assert kwargs == {"capture_output": True, "timeout": 20}
+        if args == ["gh", "api", JOBS]:
+            out = json.dumps(state["jobs"]).encode() if state["jobs_code"] == 0 else b""
+            return subprocess.CompletedProcess(args, state["jobs_code"], out, b"HTTP 502: Bad Gateway")
         out = json.dumps(state["run"]).encode() if state["code"] == 0 else b""
         return subprocess.CompletedProcess(args, state["code"], out, state["stderr"])
 
@@ -92,3 +103,70 @@ def test_an_unreachable_github_keeps_the_run_wait(tick, actions):  # noqa: F811
     hold_run(tick)
     assert tick.end() == []
     assert idle.wait(tick.store.redis, "sw", ME)["on"]["target"] == RUN
+
+
+def job(name, conclusion):
+    return {"name": name, "status": "completed", "conclusion": conclusion}
+
+
+def test_a_red_run_names_its_failed_jobs_and_ends_the_wait(tick, actions):  # noqa: F811
+    actions["run"] = {"status": "completed", "conclusion": "failure"}
+    actions["jobs"] = {
+        "jobs": [
+            job("lint", "success"),
+            job("unit (3.11)", "failure"),
+            job("unit (3.12)", "timed_out"),
+            job("mutation", "cancelled"),
+            job("docs", "skipped"),
+        ]
+    }
+    hold_run(tick)
+    outcome = (
+        f"checks on {RUN}, now red; the run concluded failure; "
+        "failed jobs: unit (3.11) failure, unit (3.12) timed_out, mutation cancelled"
+    )
+    assert tick.end() == [f"ended the wait of {ME}: {outcome}"]
+    assert idle.wait(tick.store.redis, "sw", ME) is None
+    assert tick.told() == [
+        f"Your wait on {outcome} has ended. Pick task t1 back up: agentihooks swarm sw done, block, "
+        "or wait on the next thing."
+    ]
+    assert actions["asked"] == [["gh", "api", ENDPOINT], ["gh", "api", JOBS]]
+
+
+def test_a_green_run_reads_no_jobs(tick, actions):  # noqa: F811
+    actions["run"] = {"status": "completed", "conclusion": "success"}
+    hold_run(tick)
+    assert tick.end() == [f"ended the wait of {ME}: checks on {RUN}, now green"]
+    assert actions["asked"] == [["gh", "api", ENDPOINT]]
+
+
+def test_a_red_run_with_no_failed_job_names_only_its_conclusion(tick, actions):  # noqa: F811
+    actions["run"] = {"status": "completed", "conclusion": "failure"}
+    actions["jobs"] = {"jobs": [job("lint", "success"), job("docs", "skipped")]}
+    hold_run(tick)
+    assert tick.end() == [f"ended the wait of {ME}: checks on {RUN}, now red; the run concluded failure"]
+    assert actions["asked"] == [["gh", "api", ENDPOINT], ["gh", "api", JOBS]]
+
+
+def test_unreadable_jobs_still_end_a_red_run_wait_with_its_conclusion(tick, actions):  # noqa: F811
+    actions["run"] = {"status": "completed", "conclusion": "failure"}
+    actions["jobs_code"] = 1
+    hold_run(tick)
+    outcome = f"checks on {RUN}, now red; the run concluded failure; its jobs could not be read"
+    assert tick.end() == [f"ended the wait of {ME}: {outcome}"]
+    assert idle.wait(tick.store.redis, "sw", ME) is None
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [{"message": "no jobs"}, [], {"jobs": ["unit"]}, {"jobs": [{"conclusion": "failure"}]}],
+    ids=["no jobs key", "not an object", "job not an object", "job without a name"],
+)
+def test_a_malformed_jobs_answer_still_ends_a_red_run_wait(tick, actions, answer):  # noqa: F811
+    actions["run"] = {"status": "completed", "conclusion": "timed_out"}
+    actions["jobs"] = answer
+    hold_run(tick)
+    outcome = f"checks on {RUN}, now red; the run concluded timed_out; its jobs could not be read"
+    assert tick.end() == [f"ended the wait of {ME}: {outcome}"]
+    assert idle.wait(tick.store.redis, "sw", ME) is None

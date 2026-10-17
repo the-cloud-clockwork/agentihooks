@@ -383,7 +383,15 @@ def test_status_report_rows_keep_their_fields_and_add_the_observation(monkeypatc
     Observer(store, "kubernetes", LIMITS).observe("fixture", agent, [beat(agent)], NOW)
     monkeypatch.setattr(status, "page_quota", lambda: {})
     [row] = status.status_report(store, "fixture", {"tasks": []})["agents"]
-    assert set(row) == set(asdict(agent)) | {"status", "promoted", "state_since", "gates", "inbox", "observation"}
+    assert set(row) == set(asdict(agent)) | {
+        "status",
+        "promoted",
+        "state_since",
+        "gates",
+        "inbox",
+        "observation",
+        "capabilities",
+    }
     assert (row["name"], row["observation"]["sources"]["heartbeat"]["observed_at"]) == (agent.name, NOW - 5.0)
 
 
@@ -693,6 +701,19 @@ def test_only_a_registered_master_or_the_operator_may_classify(cautious, monkeyp
     assert (name in [found.name for found in store.agents("fixture")]) is registered
     args = ["--as", name, "classify", agent.execution_id, "working", "--reason", "fine"]
     assert classify_cli(monkeypatch, store, *args) == 1
+    assert capsys.readouterr().err == "swarm: only the master or the operator classifies an execution attempt\n"
+    assert observer.get("fixture", agent.execution_id) == before
+
+
+def test_a_session_naming_an_unregistered_agent_cannot_classify_as_the_operator(cautious, monkeypatch, capsys):
+    from scripts.swarm import cli
+
+    store, agent, observer = cautious
+    before = flagged(observer, agent)
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "master@unregistered-0001")
+    args = ["fixture", "--as", "operator", "classify", agent.execution_id, "lost", "--reason", "gone"]
+    assert cli.main(args) == 1
     assert capsys.readouterr().err == "swarm: only the master or the operator classifies an execution attempt\n"
     assert observer.get("fixture", agent.execution_id) == before
 

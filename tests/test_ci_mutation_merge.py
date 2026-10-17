@@ -137,3 +137,65 @@ def test_main_writes_a_complete_empty_report_when_the_plan_found_nothing_to_muta
     assert merge.main([str(tmp_path / "absent"), "--shards", "0", "--output", str(out)]) == 0
     assert json.loads((out / "report.json").read_text()) == {"files": [], "not_mutated": [], "failed": False}
     assert capsys.readouterr().out == "Merged 0 of 0 mutation shard reports\n"
+
+
+def _unit(name, status, fingerprint=""):
+    return {
+        "name": name,
+        "status": status,
+        "lines": [3] if status != "killed" else [],
+        "fingerprint": fingerprint,
+        "diff": "d",
+    }
+
+
+def _units(*rows):
+    return {
+        "files": [],
+        "not_mutated": [],
+        "failed": False,
+        "units": [{"path": "scripts/a.py", "lines": [3], "rows": list(rows)}],
+    }
+
+
+def test_a_split_mutant_is_killed_by_any_unit_and_survives_only_when_every_unit_survived():
+    reports = [
+        _units(_unit("m1", "survived", "f1"), _unit("m2", "survived", "f2"), _unit("m3", "survived", "f3")),
+        _units(_unit("m1", "killed"), _unit("m2", "survived", "f2"), _unit("m3", "timeout", "f3")),
+    ]
+    merged = merge.merge_reports(reports)
+    assert merged["files"][0]["counts"] == {"killed": 1, "survived": 1, "timeout": 1}
+    assert [row["name"] for row in merged["files"][0]["failures"]] == ["m2", "m3"]
+    assert merged["failed"] is True
+    cleared = {"scripts/a.py:m2:f2": {"reader": "r", "reason": "equivalent"}}
+    assert [row["name"] for row in merge.merge_reports(reports, cleared)["files"][0]["cleared"]] == ["m2"]
+    lone = merge.merge_reports([_units(_unit("m5", "survived", "f5"))])["files"][0]
+    assert [row["name"] for row in lone["failures"]] == ["m5"]
+    either = merge.merge_reports([_units(_unit("m4", "timeout", "f4")), _units(_unit("m4", "killed"))])["files"][0]
+    assert either["counts"] == {"killed": 1}
+    green = [_units(_unit("m1", "killed")), _units(_unit("m1", "survived", "f1"))]
+    assert merge.merge_reports(green) == {
+        "files": [_file("scripts/a.py", {"killed": 1})],
+        "not_mutated": [],
+        "failed": False,
+    }
+
+
+def test_split_units_add_to_the_shard_rows_of_the_same_file():
+    whole = {"files": [_file("scripts/a.py", {"killed": 2})], "not_mutated": [], "failed": False}
+    merged = merge.merge_reports([whole, _units(_unit("m1", "killed")), _units(_unit("m1", "killed"))])
+    assert merged["files"] == [_file("scripts/a.py", {"killed": 3})]
+
+
+def test_main_grades_split_survivors_against_the_checked_out_clearances(tmp_path, monkeypatch, capsys):
+    from scripts.ci_mutation.clearances import write_clearance
+
+    monkeypatch.chdir(tmp_path)
+    write_clearance(tmp_path, "scripts/a.py:m2:f2", {"reader": "r", "reason": "equivalent"})
+    _write(tmp_path / "in", 0, _units(_unit("m1", "survived", "f1"), _unit("m2", "survived", "f2")))
+    _write(tmp_path / "in", 1, _units(_unit("m1", "survived", "f1"), _unit("m2", "survived", "f2")))
+    assert merge.main([str(tmp_path / "in"), "--shards", "2", "--output", str(tmp_path / "out")]) == 1
+    report = json.loads((tmp_path / "out/report.json").read_text())
+    assert [row["name"] for row in report["files"][0]["failures"]] == ["m1"]
+    assert [row["name"] for row in report["files"][0]["cleared"]] == ["m2"]
+    assert "scripts/a.py:m1:f1" in capsys.readouterr().out

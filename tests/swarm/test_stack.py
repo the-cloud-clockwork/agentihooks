@@ -12,6 +12,7 @@ from scripts.handoff import transfers
 from scripts.inbox.seats import SeatRegistry
 from scripts.swarm import cli, dispatcher, stack, tick
 from scripts.swarm.store import SwarmError
+from scripts.swarm_ledger import ledger_comments
 from tests.swarm.test_cli import HANDOFF, env
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -36,7 +37,7 @@ REMOVE = ["bash", str(stack.WT_SCRIPT), "done", "engineer-a1b2c3-0001", "--repo"
 class Shell:
     def __init__(self):
         self.calls, self.remote, self.issues, self.fail = [], HEAD, json.dumps({"hasIssuesEnabled": True}), ()
-        self.status, self.top, self.origin = "", TOP, "git@github.com:O/r.git"
+        self.status, self.top, self.origin, self.probe = "", TOP, "git@github.com:O/r.git", ""
 
     def __call__(self, argv):
         self.calls.append(argv)
@@ -49,7 +50,7 @@ class Shell:
             ("git", "status", "--porcelain"): self.status,
         }.get(tuple(argv[:3])) or {
             ("git", "rev-parse"): HEAD,
-            ("git", "ls-remote"): f"{self.remote}\trefs/heads/{argv[-1]}" if self.remote else "",
+            ("git", "ls-remote"): self.probe + (f"{self.remote}\trefs/heads/{argv[-1]}" if self.remote else ""),
             ("git", "merge-base"): BASE,
             ("git", "rev-list"): "3",
             ("gh", "repo"): self.issues,
@@ -131,6 +132,17 @@ def test_park_refuses_a_branch_with_unpushed_commits(parked, capsys):
     assert parked[3].calls[-1] == ["git", "rev-parse", "HEAD"]
 
 
+def test_park_accepts_a_synced_branch_beside_a_same_named_diffcheck_branch(parked, capsys):
+    parked[3].probe = f"{'c' * 40}\trefs/heads/diffcheck/eng-t1\n"
+    assert park(parked[4]) == 0
+    assert json.loads(capsys.readouterr().out)["parked_on"] == ["a"]
+
+
+def test_park_refuses_a_branch_only_a_same_named_diffcheck_branch_carries(parked, capsys):
+    parked[3].probe, parked[3].remote = f"{HEAD}\trefs/heads/diffcheck/eng-t1\n", ""
+    _refused(parked, capsys, "branch eng-t1 is not on origin; push it first with git push -u origin eng-t1")
+
+
 def test_park_refuses_a_worktree_with_uncommitted_changes(parked, capsys):
     parked[3].status = " M scripts/x.py"
     _refused(parked, capsys, "the worktree holds uncommitted changes; commit them and push eng-t1 first")
@@ -170,7 +182,6 @@ def test_park_refuses_an_unreadable_answer_on_issues(parked, capsys):
         (("git", "fetch", "origin"), "cannot fetch eng-a"),
         (("git", "merge-base", "HEAD"), "eng-a shares no history"),
         (("git", "rev-list", "--count"), f"cannot count {BASE}"),
-        (("gh", "issue", "comment"), "could not comment on the issue"),
     ],
 )
 def test_park_refuses_when_a_command_fails(parked, capsys, failing, says):
@@ -235,6 +246,87 @@ def test_park_writes_the_open_dependencies_and_the_stacked_base(parked, capsys):
         "worktree_removed": TOP,
         "next": "stop now; the task waits on its branch",
     }
+
+
+@pytest.mark.parametrize("repo", [None, "https://github.com/o/other"])
+def test_park_accepts_an_open_dependency_merged_into_dev_after_its_branch_is_deleted(parked, monkeypatch, repo):
+    _, ledger, _, shell, doc = parked
+    dependency_pr = "https://github.com/o/r/pull/42"
+    ledger.rows["a"].update({"pr_url": dependency_pr, "branch_repo": repo})
+
+    def merged_dependency(argv):
+        result = shell(argv)
+        if argv[:3] == ["gh", "pr", "view"]:
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"state": "MERGED", "baseRefName": "dev"}), "")
+        if argv == ["git", "fetch", "origin", "eng-a"]:
+            return subprocess.CompletedProcess(argv, 1, "", "remote branch deleted")
+        return result
+
+    monkeypatch.setattr(stack, "shell", merged_dependency)
+    assert park(doc) == 0
+    assert ledger.rows["a"]["state"] == "pr"
+    assert ledger.rows["t1"]["parked_on"] == ["a"]
+    assert ledger.rows["t1"]["stacked_base"] == BASE
+    assert ["git", "fetch", "origin", "dev"] in shell.calls
+    assert ["git", "merge-base", "HEAD", "origin/dev"] in shell.calls
+    assert ["git", "fetch", "origin", "eng-a"] not in shell.calls
+    assert ["git", "fetch", "--", repo, "eng-a"] not in shell.calls
+    assert ["gh", "pr", "view", dependency_pr, "--json", "state,baseRefName"] in shell.calls
+
+
+@pytest.mark.parametrize(
+    "pull",
+    [
+        {"state": "OPEN", "baseRefName": "dev"},
+        {"state": "CLOSED", "baseRefName": "dev"},
+        {"state": "MERGED", "baseRefName": "main"},
+    ],
+)
+def test_park_keeps_the_dependency_branch_until_its_pull_request_merges_into_dev(parked, monkeypatch, pull):
+    _, ledger, _, shell, doc = parked
+    ledger.rows["a"]["pr_url"] = "https://github.com/o/r/pull/42"
+
+    def dependency_pull(argv):
+        result = shell(argv)
+        if argv[:3] == ["gh", "pr", "view"]:
+            return subprocess.CompletedProcess(argv, 0, json.dumps(pull), "")
+        return result
+
+    monkeypatch.setattr(stack, "shell", dependency_pull)
+    assert park(doc) == 0
+    assert ["git", "fetch", "origin", "eng-a"] in shell.calls
+    assert ["git", "merge-base", "HEAD", "origin/eng-a"] in shell.calls
+    assert ["git", "fetch", "origin", "dev"] not in shell.calls
+
+
+@pytest.mark.parametrize(
+    ("answer", "error"),
+    [
+        ("not json", "Expecting value: line 1 column 1 (char 0)"),
+        ("{}", "'state'"),
+        ('{"state": "MERGED"}', "'baseRefName'"),
+    ],
+)
+def test_park_refuses_unreadable_dependency_pull_request_state(parked, monkeypatch, capsys, answer, error):
+    _, ledger, _, shell, _ = parked
+    ledger.rows["a"]["pr_url"] = "https://github.com/o/r/pull/42"
+
+    def unreadable_pull(argv):
+        result = shell(argv)
+        if argv[:3] == ["gh", "pr", "view"]:
+            return subprocess.CompletedProcess(argv, 0, answer, "")
+        return result
+
+    monkeypatch.setattr(stack, "shell", unreadable_pull)
+    _refused(parked, capsys, f"cannot read the dependency pull request: {error}")
+    assert ["git", "fetch", "origin", "dev"] not in shell.calls
+
+
+def test_park_refuses_when_the_dependency_pull_request_cannot_be_read(parked, capsys):
+    _, ledger, _, shell, _ = parked
+    ledger.rows["a"]["pr_url"] = "https://github.com/o/r/pull/42"
+    shell.fail = (("gh", "pr", "view"),)
+    _refused(parked, capsys, "cannot read the dependency pull request: boom")
 
 
 @pytest.mark.parametrize("merged_before_stop", [False, True])
@@ -390,6 +482,96 @@ def test_park_reads_no_origin_url_when_no_dependency_records_a_repository(parked
     assert park(doc) == 0
     assert ["git", "remote", "get-url", "origin"] not in shell.calls
     assert ledger.rows["t1"]["parked_repos"] == []
+
+
+ANTONCORE = "https://github.com/o/antoncore"
+CHECKOUT = "/home/me/dev/antoncore"
+
+
+def _antoncore_dependency(parked, monkeypatch, origin):
+    _, ledger, _, shell, _ = parked
+    ledger.rows["a"].update({"branch_repo": ANTONCORE, "repository_branches": {CHECKOUT: "eng-a"}})
+
+    def answer(argv):
+        if argv == ["git", "-C", CHECKOUT, "remote", "get-url", "origin"]:
+            return subprocess.CompletedProcess(argv, 0, stdout=f"{origin}\n", stderr="")
+        return shell(argv)
+
+    monkeypatch.setattr(stack, "shell", answer)
+
+
+def test_park_fetches_an_antoncore_dependency_through_the_antoncore_checkout(parked, monkeypatch):
+    _, ledger, _, shell, doc = parked
+    _antoncore_dependency(parked, monkeypatch, "git@github.com:O/antoncore.git")
+    assert park(doc) == 0
+    assert ["git", "-C", CHECKOUT, "fetch", "origin", "eng-a"] in shell.calls
+    assert [c for c in shell.calls if c[:3] == ["git", "fetch", "--"]] == []
+    assert ledger.rows["t1"]["parked_repos"] == [ANTONCORE]
+
+
+@pytest.mark.parametrize("origin", ["git@github.com:o/bundle.git", ""])
+def test_park_fetches_by_url_when_the_recorded_checkout_has_no_matching_origin(parked, monkeypatch, origin):
+    _, ledger, _, shell, doc = parked
+    _antoncore_dependency(parked, monkeypatch, origin)
+    assert park(doc) == 0
+    assert ["git", "fetch", "--", ANTONCORE, "eng-a"] in shell.calls
+    assert [c for c in shell.calls if c[:2] == ["git", "-C"]] == []
+
+
+def test_park_refuses_when_the_antoncore_checkout_cannot_fetch(parked, monkeypatch, capsys):
+    _antoncore_dependency(parked, monkeypatch, "https://github.com/o/antoncore.git")
+    parked[3].fail = (("git", "-C", CHECKOUT),)
+    _refused(parked, capsys, f"cannot fetch eng-a in {CHECKOUT}: boom")
+
+
+LONG = "Teach the ledger server to keep every agent status comment short enough for the operator to read at once"
+
+
+def test_park_keeps_the_ledger_note_within_the_comment_limit_for_three_long_titled_dependencies(parked):
+    _, ledger, _, _, doc = parked
+    for name in ("a", "b", "c"):
+        ledger.rows[name] = {"id": name, "title": f"{LONG} part {name}", "state": "pr", "branch": f"eng-{name}"}
+    ledger.rows["t1"]["depends_on"] = ["a", "b", "c"]
+    assert park(doc) == 0
+    note = f"Parked on its branch until every open dependency is done. {NOTE}"
+    assert ledger.comments == [("sw", "t1", note, AGENT)]
+    assert ledger_comments.problems(note, "comment") == []
+
+
+def test_park_names_a_title_the_comment_filter_refuses_only_as_an_open_dependency(parked):
+    _, ledger, _, _, doc = parked
+    ledger.rows["a"]["title"] = "Fix the parser — then the schema"
+    assert park(doc) == 0
+    assert ledger.comments == [("sw", "t1", f"Parked on its branch until every open dependency is done. {NOTE}", AGENT)]
+
+
+def test_park_writes_the_ledger_note_before_the_issue_comment_and_the_task_update(parked, monkeypatch, capsys):
+    store, ledger, _, shell, doc = parked
+    note = ("sw", "t1", f"Parked on its branch until Build the parser is done. {NOTE}", AGENT)
+    seen = []
+
+    def answer(argv):
+        if argv[:3] == ["gh", "issue", "comment"]:
+            seen.append((list(ledger.comments), list(ledger.updates)))
+        return shell(argv)
+
+    def amend(slug, task, text, by):
+        if ledger.comments[-1:] != [(slug, task, text, by)]:
+            ledger.comments.append((slug, task, text, by))
+
+    monkeypatch.setattr(stack, "shell", answer)
+    ledger.comment = amend
+    shell.fail = (("gh", "issue", "comment"),)
+    assert park(doc) == 1
+    assert capsys.readouterr().err == "swarm: could not comment on the issue: boom\n"
+    assert seen == [([note], [])]
+    assert "parked_on" not in ledger.rows["t1"] and REMOVE not in shell.calls
+    assert store.handoff("sw", "t1") == ""
+    assert [a.state for a in store.agents("sw") if a.name == AGENT] == ["working"]
+    shell.fail = ()
+    assert park(doc) == 0
+    assert ledger.rows["t1"]["parked_on"] == ["a"]
+    assert ledger.comments == [note]
 
 
 @pytest.mark.parametrize(

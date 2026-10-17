@@ -7,6 +7,7 @@ from pathlib import Path
 
 INTEGRATION = "refs/remotes/origin/dev"
 PREFLIGHT = "actions/workflows/mutation-preflight.yml/runs"
+TESTS = "actions/workflows/test.yml/runs"
 
 
 def changed_lines(diff: str) -> set[int]:
@@ -41,19 +42,37 @@ def graded_green(sha: str) -> bool:
 
     runs = api(PREFLIGHT, "-f", f"head_sha={sha}", "-f", "event=push", "--jq", ".workflow_runs[].id")
     green = '[.jobs[] | select(.name == "mutation" and .conclusion == "success")] | length'
-    return any(api(f"actions/runs/{run}/jobs", "--jq", green).strip() not in ("", "0") for run in runs.split())
+    if any(api(f"actions/runs/{run}/jobs", "--jq", green).strip() not in ("", "0") for run in runs.split()):
+        return True
+    # An open pull request skips the push preflight, so its own mutation shards grade the head.
+    runs = api(TESTS, "-f", f"head_sha={sha}", "-f", "event=pull_request", "--jq", ".workflow_runs[].id")
+    shards = '.jobs[] | select(.name | startswith("mutation (")) | .conclusion'
+    for run in runs.split():
+        found = api(f"actions/runs/{run}/jobs", "-f", "filter=all", "--paginate", "--jq", shards).split()
+        if found and all(conclusion == "success" for conclusion in found):
+            return True
+    return False
 
 
 def discover_changes(root: Path, base: str | list[str], head: str) -> dict[str, set[int]]:
     bases = own_bases(root, base, head) if isinstance(base, str) else base
     given, *newer = [changes_since(root, own, head) for own in bases]
     weak = [weakened_tests(root, own, head) for own in bases[1:]]
+    reached = [{path: set(select_tests(root, Path(path))) for path in changes} for changes in newer]
     found = {}
     for name, lines in given.items():
-        kept = [lines if tests else changes.get(name) for changes, tests in zip(newer, weak)]
+        kept = [
+            lines if tests or oracle_changed(root, name, selected) else changes.get(name)
+            for changes, tests, selected in zip(newer, weak, reached)
+        ]
         if None not in kept:
             found[name] = lines.intersection(*kept)
     return found
+
+
+def oracle_changed(root: Path, name: str, reached: dict[str, set[str]]) -> bool:
+    killing = set(select_tests(root, Path(name)))
+    return any(killing & tests for path, tests in reached.items() if path != name)
 
 
 def is_test_file(path: str) -> bool:

@@ -188,9 +188,9 @@ def test_the_five_hundred_and_first_oldest_prompt_still_relays():
     from scripts.swarm_ledger import ledger_relay
 
     for n in range(501):
-        operator_words.heard_prompt(f"word{n} said", ENV, now=100 + n)
-    assert ledger_relay.verified("master@a1-1", "word0 said") == "word0 said"
-    assert ledger_relay.verified("master@a1-1", "word500 said") == "word500 said"
+        operator_words.heard_prompt(f"word{n} was said", ENV, now=100 + n)
+    assert ledger_relay.verified("master@a1-1", "word0 was said") == "word0 was said"
+    assert ledger_relay.verified("master@a1-1", "word500 was said") == "word500 was said"
 
 
 def test_line_hash_lookup_obeys_names_and_the_window():

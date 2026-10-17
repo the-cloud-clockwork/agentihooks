@@ -31,12 +31,9 @@ def report(result: Result, missed: dict[str, list[int]], covered: dict[str, int]
     return "\n".join(out) + "\n"
 
 
-def _missed(head: Path, shards: list[Path], out: Path) -> dict[str, list[int]]:
+def _missed(head: Path, lines: dict[str, set[int]], out: Path) -> dict[str, list[int]]:
     combined = CoverageData(basename=str(out.resolve() / ".coverage"))
-    for shard in shards:
-        part = CoverageData(basename=str(shard))
-        part.read()
-        combined.update(part)
+    combined.add_lines(lines)
     combined.write()
     coverage = Coverage(data_file=combined.base_filename(), config_file=False)
     coverage.set_option("run:relative_files", True)
@@ -103,6 +100,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--base-baseline", type=Path, help="exact base measurement restored from the Actions cache")
     args = parser.parse_args(argv)
     head_files = [args.head_shards / f"coverage-3.12-{n}" / ".coverage" for n in range(1, args.shards + 1)]
+    head_files += sorted(args.head_shards.glob("coverage-3.12-*/reused-coverage/.coverage"))
     args.out.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as scratch:
         try:
@@ -115,7 +113,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
     text = report(
         result,
-        _missed(args.head, head_files, args.out),
+        _missed(args.head, head, args.out),
         {path: len(lines) for path, lines in head.items()},
         {path: len(lines) for path, lines in base.executed.items()},
     )

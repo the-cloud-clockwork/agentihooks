@@ -8,7 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from scripts.codex_session.binding import CONNECTED, EXITED, FAILED, TransportRecord
+from scripts.codex_session.binding import CONNECTED, EXITED, FAILED, BindingStore, TransportRecord
 
 if TYPE_CHECKING:
     from scripts.herdr_host import Placement
@@ -34,7 +34,15 @@ class AttachError(RuntimeError):
 
 
 def viewer_argv(codex_bin: str, record: TransportRecord) -> list[str]:
-    return [codex_bin, "resume", "--remote", record.endpoint_ref, record.thread_id]
+    return [
+        codex_bin,
+        "-c",
+        "check_for_update_on_startup=false",
+        "resume",
+        "--remote",
+        record.endpoint_ref,
+        record.thread_id,
+    ]
 
 
 def attachable(record: TransportRecord | None) -> bool:
@@ -104,13 +112,14 @@ def reopenable(store: "RedisStore", slug: str, execution_id: str) -> "AgentRecor
     return agent
 
 
-def reopen(store: "RedisStore", agent: "AgentRecord", open_viewer: Open, codex_bin: str) -> dict:
+def reopen(store: "RedisStore", slug: str, agent: "AgentRecord", open_viewer: Open, codex_bin: str) -> dict:
     from scripts.swarm import live_binding
 
     record = live_binding.transport(store, agent)
     if not attachable(record):
         raise AttachError(NO_THREAD.format(agent.name))
     placed = open_viewer(agent.name, viewer_argv(codex_bin, record))
+    store.execution_registry.set_pane(slug, agent.execution_id, placed.pane_id)
     return {"agent": agent.name, "thread": record.thread_id, "pane": placed.pane_id}
 
 
@@ -125,9 +134,11 @@ def local_terminal(store: "RedisStore", slug: str, execution_id: str, environ: d
     workspace = naming.space(config.repo, config.code, config.slug)
 
     def open_viewer(title: str, argv: list[str]) -> "Placement":
-        return herdr_host.open_command(Path(config.repo), title, argv, workspace, environ)
+        placed = herdr_host.open_command(Path(config.repo), title, argv, workspace, environ)
+        BindingStore(store).add_viewer(slug, execution_id, placed.pane_id, placed.terminal_id)
+        return placed
 
-    return reopen(store, agent, open_viewer, "codex")
+    return reopen(store, slug, agent, open_viewer, "codex")
 
 
 def _parser() -> argparse.ArgumentParser:

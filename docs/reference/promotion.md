@@ -28,16 +28,16 @@ Every `dev` push run shares the concurrency group `promotion-dev` with `cancel-i
 The job runs on `ubuntu-latest` in the `release` environment, which deploys only from `dev`, with a ten minute timeout. It holds the `release-version` concurrency group without cancelling, the same group the manual `release.yml` uses, so two version computations never overlap.
 
 1. **Mint an App token.** `actions/create-github-app-token` uses the `TCC_CI_CLIENT_ID` and `TCC_CI_APP_PRIVATE_KEY` secrets, scoped to this repository with metadata read and contents, pull requests and workflows write.
-2. **Compare trees.** When `main` already carries the graded tree, no pull request is made and the job goes straight to release.
-3. **Snapshot the graded revision.** The pull request never uses `dev` as its head, because `dev` keeps moving. The head is a snapshot branch `promotion/<graded sha>`. When no open pull request from that branch exists, the job creates the branch at the graded commit, or reuses it when it already points there, and fails with `Promotion snapshot differs from the graded revision` when it points elsewhere.
-4. **Open or reuse the pull request.** An open pull request from the snapshot branch into `main` is reused; otherwise one is created titled `Promote green dev to main`, whose body names the graded revision and links the Tests run. The job fails when the pull request head is not the graded commit, its head repository is not this repository, or its base is not `main`.
-5. **Wait for mergeability.** Every five seconds, up to 48 times (four minutes), it reads the pull request. It fails when the pull request head moved away from the graded commit or GitHub reports conflicts, and proceeds once GitHub reports it mergeable and `clean`. An `unstable` head is also admitted when the current run's required grade succeeded and its exact running promotion job is the only unfinished check. The job is identified by its run, job id and check URL; all checks and effective commit statuses are read with pagination. Every other check must succeed or be legitimately skipped, and the latest status for every context must succeed.
-6. **Squash merge.** It merges with `merge_method: squash` and `sha` set to the graded commit, so GitHub refuses the merge if the head changed. `main` keeps linear history, as the `main-prod-lockdown` ruleset requires.
+2. **Compare trees.** When `main` already carries the graded tree, no pull request is made and the job goes straight to release. When the `main` commit message names an earlier graded revision (`Graded dev revision: <sha>`), the graded revision must not be that revision or an ancestor of it on `dev`; otherwise the job fails with `Graded revision is not newer than the last promotion`, so a rerun of an old run never rolls `main` back. The check needs that line on the current `main` commit, which every promotion made by this job writes; a `main` commit without it skips the check. A revision that has diverged from the named one is promoted; the `dev` ruleset blocks force pushes, so `dev` history never diverges.
+3. **Snapshot the graded tree on `main`.** The pull request never uses `dev` as its head, because `dev` keeps moving, and never the graded commit itself: each squash promotion puts a commit on `main` that `dev` does not contain, so a later `dev` commit would conflict with it on every file changed again. The head is a snapshot branch `promotion/<graded sha>` holding one commit whose tree is the graded tree and whose only parent is the current `main`. The job always reads the snapshot from that branch; it creates the commit and branch only when the branch is missing and no promotion pull request from it is open. The job fails with `Promotion snapshot is not the graded tree on main` when the snapshot commit has another tree or any parents other than exactly the current `main`.
+4. **Open or reuse the pull request.** An open pull request from the snapshot branch into `main` is reused; otherwise one is created titled `Promote green dev to main`, whose body names the graded revision and links the Tests run. The job fails when the pull request head is not the snapshot commit, its head repository is not this repository, or its base is not `main`.
+5. **Wait for mergeability.** Every five seconds, up to 48 times (four minutes), it reads the pull request. It fails when the pull request head moved away from the snapshot commit or GitHub reports conflicts, and proceeds once GitHub reports it mergeable and `clean`. An `unstable` head is also admitted when the current run's required grade on the graded `dev` commit succeeded and its exact running promotion job is the only unfinished check. The job is identified by its run, job id and check URL; all checks and effective commit statuses are read with pagination. Every other check must succeed or be legitimately skipped, and the latest status for every context must succeed.
+6. **Squash merge.** It merges with `merge_method: squash`, `sha` set to the snapshot commit and a commit message naming the graded revision and the Tests run, so GitHub refuses the merge if the head changed. `main` keeps linear history, as the `main-prod-lockdown` ruleset requires.
 7. **Verify the tree.** The new `main` commit must carry the same tree as the graded `dev` commit; otherwise the job fails. The squash creates a new commit id, so tree equality is the identity check, not commit equality.
 8. **Delete the snapshot.** The `promotion/<graded sha>` branch is deleted; a branch GitHub already removed is accepted.
 9. **Compute the version.** It checks out the promoted `main` commit and runs `scripts/ci_release.sh version` with `BUMP=patch` and `REUSE_TREE=true`. When a stable `vX.Y.Z` tag already points at the same tree, that version is reused and no new tag is made. Otherwise the next patch version follows the latest stable tag.
 10. **Tag and verify.** For a new version, `ci_release.sh tag` tags the promoted `main` commit `vX.Y.Z`, and `ci_release.sh verify` builds the wheel and checks its metadata version equals `X.Y.Z` (setuptools-scm derives the package version from the tag). The tag is then pushed.
-11. **Release.** Unless the release already exists, `gh release create vX.Y.Z --title vX.Y.Z --generate-notes --latest --verify-tag` creates the GitHub release.
+11. **Release.** Unless the release already exists, `ci_release.sh notes` assembles every `changelog.d/` fragment added since the previous stable tag into one section per Keep a Changelog heading, and `gh release create vX.Y.Z --title vX.Y.Z --notes-file <assembled notes> --generate-notes --latest --verify-tag` creates the GitHub release with those entries ahead of the generated pull request list.
 
 The job summary records the graded `dev` commit, the promoted `main` commit and the tree. The `promote` step outputs `graded`, `main` and, when it merged, `pull-request`; the release steps read `main`.
 
@@ -48,9 +48,11 @@ Promotion never publishes to PyPI and never dispatches another workflow. PyPI pu
 A rerun after a partial failure is safe:
 
 - `main` already on the graded tree skips the snapshot, pull request and merge.
-- An open promotion pull request from the snapshot branch is reused, and a snapshot branch left at the graded commit is reused.
+- An open promotion pull request from the snapshot branch is reused, and a snapshot branch left on the graded tree over the current `main` is reused.
 - A stable tag on that tree is reused (`existing=true`), so the tag step is skipped.
 - A release that already exists is not recreated.
+
+A rerun after another promotion moved `main` is refused with `Graded revision is not newer than the last promotion` before any snapshot or write; a promotion pull request it opened earlier stays open.
 
 ## When nothing is promoted
 
@@ -58,9 +60,10 @@ A rerun after a partial failure is safe:
 |---|---|
 | `Gate — Required` or any promotion dependency is red or cancelled | The `promote` job is skipped. `main` stays on the last promoted head; `dev` keeps merging. |
 | A newer push to `dev` arrived while a run was pending | The pending run is replaced and never runs; the running run still finishes and promotes its own revision when green. |
-| No open promotion pull request exists and the snapshot branch points at another commit, or the pull request conflicts or its head differs from the graded commit, or it is not mergeable and clean within four minutes | The job fails and nothing is merged or tagged. |
+| The snapshot commit has another tree or parents other than exactly the current `main`, or the pull request conflicts or its head differs from the snapshot commit, or it is not mergeable and clean within four minutes | The job fails and nothing is merged or tagged. |
+| The graded revision is not newer than the revision the last promotion names | The job fails and nothing is merged or tagged. |
 | GitHub refuses the merge | The job fails before tagging. |
-| The promoted tree differs | The job fails before tagging; `main` has already advanced to the merged commit and the snapshot branch is kept for inspection. |
+| The promoted tree differs | The job fails before tagging; `main` has already advanced to the merged commit and the snapshot branch is kept for inspection. A rerun of that revision is refused, because `main` already names it. |
 
 A red promotion produces one fixer task per failing check under the [delivery tiers rule](delivery-tiers.md#rules); the fix lands through an ordinary pull request into `dev`, and the next green push run promotes it.
 
