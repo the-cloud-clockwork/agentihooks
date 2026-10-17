@@ -195,6 +195,7 @@ def test_rendered_qa_persona_reads_tests_from_ci_only(world):
     persona = " ".join((render.render_claude("qa") / "CLAUDE.md").read_text().split())
 
     assert "run the gates, mutation and smoke runs" not in persona
+    assert "runs the gates" not in (ROLES / "qa" / "profile.yml").read_text()
     steps = ("results from their CI runs", "never on this machine", "AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN")
     assert [step for step in steps if step not in persona] == []
 
