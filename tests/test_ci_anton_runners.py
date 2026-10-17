@@ -80,6 +80,7 @@ MOVED = {
     ("test.yml", "mutation-stats"): BATCH,
     ("test.yml", "queue-fail-fast"): LIGHT,
     ("test.yml", "refresh-durations"): QUEUED,
+    ("test.yml", "count-record"): QUEUED,
     ("test.yml", "reuse"): LIGHT,
     ("test.yml", "select"): LIGHT,
     ("test.yml", "shard-check"): LIGHT,

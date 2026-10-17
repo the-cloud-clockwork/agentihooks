@@ -47,6 +47,7 @@
   "test-leaks.yml/followup": "light",
   "test-leaks.yml/one-process": "batch",
   "test.yml/admission": "light",
+  "test.yml/count-record": "standard",
   "test.yml/coverage-baseline": "light",
   "test.yml/coverage-ratchet": "light",
   "test.yml/flake-budget": "light",
