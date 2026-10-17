@@ -762,7 +762,7 @@ jobs:
           github-token: ${{ steps.unit-token.outputs.token }}
 
       - name: Upload the chosen durations
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: split-${{ matrix.python-version }}
           path: |
@@ -771,7 +771,6 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-          overwrite: true
 
       - name: Upload collected tests
         if: github.event.pull_request.base.ref != 'main'
@@ -930,7 +929,7 @@ jobs:
       # Shards balance on these: per-test times here differ from a local run.
       - name: Upload durations
         if: ${{ !cancelled() && hashFiles('durations.json') != '' }}
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: durations-${{ matrix.python-version }}-${{ matrix.shard }}
           path: |
@@ -938,7 +937,6 @@ jobs:
             durations.sha256
             elapsed.json
           retention-days: 14
-          overwrite: true
 
       - name: Record flaky tests
         if: ${{ !cancelled() }}
