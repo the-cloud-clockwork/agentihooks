@@ -31,7 +31,12 @@ def collection_identity(root: Path, tests: str, environment: str) -> str | None:
     if status.returncode or status.stdout:
         return None
     tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], cwd=root, text=True).strip()
-    packages = sorted((dist.metadata["Name"], dist.version) for dist in importlib.metadata.distributions())
+    # The project's own version is derived from its commit; the tree hash already names its code.
+    packages = sorted(
+        (name, None if name == "agentihooks" else dist.version)
+        for dist in importlib.metadata.distributions()
+        if (name := dist.metadata["Name"])
+    )
     options = {name: value for name, value in os.environ.items() if name.startswith("PYTEST_")}
     identity = json.dumps(
         [tree, tests, environment, sys.version, sys.platform, packages, _COLLECT, options], sort_keys=True
@@ -72,9 +77,9 @@ def dev_record(listing: dict, base: str) -> int | None:
 
 
 def write_record(head: Path, tests: str, out: Path) -> int:
-    nodeids = collect_all({"head": head}, tests)["head"]
     identity = collection_identity(head, tests, "")
-    if not nodeids or identity is None:
+    nodeids = collect_all({"head": head}, tests)["head"]
+    if not nodeids or identity is None or identity != collection_identity(head, tests, ""):
         print("::error::The tree did not collect cleanly, so no record is written.")
         return 1
     out.write_text(json.dumps({"identity": identity, "nodeids": nodeids}))
