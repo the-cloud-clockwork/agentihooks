@@ -40,7 +40,7 @@ def on(kind, target, task=""):
     return {"kind": kind, "target": target, **({"task": task} if kind == "intent" else {})}
 
 
-def checks_resolution(held, github):
+def checks_resolution(held, github, reread=None):
     target = held["target"]
     pull = github(target)
     if pull is None:
@@ -54,7 +54,7 @@ def checks_resolution(held, github):
         return ""
     if not pull.resolved or (pull.unpassed_gate and not pull.failed):
         return ""
-    current = github(target)
+    current = (reread or github)(target)
     if current is None or not current.head:
         return ""
     if current.head != pull.head:
@@ -165,7 +165,7 @@ def resolution(held, rows, inbox, github, reread, fresh, verdicts=None):
     if kind == "checks" and mutation_wait.RUN_URL.fullmatch(target):
         return mutation_wait.run_resolution(target)
     if kind == "checks":
-        return checks_resolution(held, github)
+        return checks_resolution(held, github, reread)
     if kind == "merge":
         return merge_resolution(held, github, reread, fresh)
     if kind == "task":
