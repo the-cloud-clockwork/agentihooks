@@ -39,7 +39,7 @@ _DEFAULT_BRANCH_SIGNALS = [
     "feature branch",
 ]
 PANE_SIGNALS = ["open pane", "open a pane", "open the pane"]
-_PANE_SIGNAL = re.compile(r"\bopen (?:a |the )?pane\b")
+_PANE_SIGNAL = re.compile("|".join(rf"\b{re.escape(phrase)}\b" for phrase in PANE_SIGNALS))
 _DEFAULT_PR_SIGNALS = [
     "open a pr",
     "open the pr",
