@@ -309,7 +309,7 @@ def _persona(root: Path, target: str, bundle: Path | None, dirs: list[tuple[str,
     ending = f"\n\n{FOOTER}\n"
     text = binding.persona(text.removesuffix(ending)) + ending
     if len(text) > 150_000:
-        raise ValueError(f"Profile {chain[0]} compiled to {len(text)} characters; Claude Code limit is 150000")
+        raise ValueError(f"Profile {root.parent.name} compiled to {len(text)} characters; Claude Code limit is 150000")
     return text
 
 
