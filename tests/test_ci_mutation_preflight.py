@@ -26,6 +26,10 @@ def test_preflight_runs_on_task_branch_pushes_only():
     assert workflow["permissions"] == {"contents": "read", "pull-requests": "read", "actions": "read"}
 
 
+def test_preflight_does_not_repeat_grading_for_promotion_snapshots():
+    assert "promotion/**" in _workflow()[True]["push"]["branches-ignore"]
+
+
 def test_preflight_skips_a_branch_with_an_open_pull_request():
     workflow = _workflow()
     jobs = workflow["jobs"]
