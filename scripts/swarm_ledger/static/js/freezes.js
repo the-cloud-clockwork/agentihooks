@@ -71,7 +71,7 @@ export function setFreeze(d, op, at) {
 }
 
 export function clearFreeze(d, op) {
-  d.freezes = d.freezes.filter((r) => r.target !== op.target && (isSelector(op.target) || isSelector(r.target) || !ancestors(d, r.target).includes(op.target)));
+  d.freezes = d.freezes.filter((r) => r.target !== op.target);
 }
 
 export function targetText(d, target) {
