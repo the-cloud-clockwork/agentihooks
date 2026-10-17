@@ -19,6 +19,10 @@ def test_container_proofs_share_one_runner_without_losing_commands():
             assert step["with"]["context"] == "."
             assert step["with"]["load"] is True
             commands.append(f"docker build -t {step['with']['tags']} .")
+        elif step.get("run") == (
+            "docker build -t local/agentihooks-swarm:clients-check --output type=image,compression=uncompressed ."
+        ):
+            commands.append("docker build -t local/agentihooks-swarm:clients-check .")
         elif "run" in step:
             commands.append(step["run"])
     assert commands == [
