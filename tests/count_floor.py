@@ -91,6 +91,41 @@ def fetch_dev_record(repository: str, name: str, base: str, out: Path) -> bool:
     return True
 
 
+def write_record(head: Path, tests: str, out: Path) -> int:
+    nodeids = collect_all({"head": head}, tests)["head"]
+    identity = collection_identity(head, tests, "")
+    if not nodeids or identity is None:
+        print("::error::The tree did not collect cleanly, so no record is written.")
+        return 1
+    out.write_text(json.dumps({"identity": identity, "nodeids": nodeids}))
+    print(f"recorded {len(nodeids)} tests")
+    return 0
+
+
+def base_from_record(base: Path, tests: str) -> list[str] | None:
+    record = os.environ.get("TEST_COUNT_BASE_RECORD")
+    if not record:
+        return None
+    if repository := os.environ.get("TEST_COUNT_RECORD_REPOSITORY"):
+        base_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=base, text=True).strip()
+        fetch_dev_record(repository, os.environ.get("TEST_COUNT_RECORD_NAME", ""), base_sha, Path(record))
+    recorded = recorded_base(Path(record), base, tests)
+    print("base count read from the dev record" if recorded else "no dev record matches the base, so it is collected")
+    return recorded
+
+
+def collect_sides(base: Path, head: Path, tests: str) -> dict[str, list[str] | None]:
+    recorded = base_from_record(base, tests)
+    cache = os.environ.get("TEST_COUNT_COLLECTION_CACHE")
+    collected = collect_all(
+        {"head": head} if recorded else {"base": base, "head": head},
+        tests,
+        cache=Path(cache) if cache else None,
+        environment=os.environ.get("TEST_COUNT_ENVIRONMENT", ""),
+    )
+    return {"base": recorded, **collected} if recorded else collected
+
+
 def collect_all(
     trees: dict[str, Path], tests: str, cache: Path | None = None, environment: str = ""
 ) -> dict[str, list[str] | None]:
@@ -292,40 +327,15 @@ def referenced_subjects(tree: Path, nodeid: str) -> set[tuple[str, str]]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="fail when the head collects fewer tests than the base")
-    parser.add_argument("--base", type=Path, help="checkout of the base revision")
+    side = parser.add_mutually_exclusive_group(required=True)
+    side.add_argument("--base", type=Path, help="checkout of the base revision")
+    side.add_argument("--record", type=Path, help="write the head's collection as a record a later base can reuse")
     parser.add_argument("--head", type=Path, default=Path.cwd(), help="checkout of the head revision")
     parser.add_argument("--tests", default="tests/")
-    parser.add_argument("--record", type=Path, help="write the head's collection as a record a later base can reuse")
     args = parser.parse_args(argv)
     if args.record:
-        nodeids = collect_all({"head": args.head}, args.tests)["head"]
-        identity = collection_identity(args.head, args.tests, "")
-        if not nodeids or identity is None:
-            print("::error::The tree did not collect cleanly, so no record is written.")
-            return 1
-        args.record.write_text(json.dumps({"identity": identity, "nodeids": nodeids}))
-        print(f"recorded {len(nodeids)} tests")
-        return 0
-    if args.base is None:
-        parser.error("--base is required")
-    record = os.environ.get("TEST_COUNT_BASE_RECORD")
-    if record and (repository := os.environ.get("TEST_COUNT_RECORD_REPOSITORY")):
-        base_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=args.base, text=True).strip()
-        fetch_dev_record(repository, os.environ.get("TEST_COUNT_RECORD_NAME", ""), base_sha, Path(record))
-    recorded = recorded_base(Path(record), args.base, args.tests) if record else None
-    if record:
-        print(
-            "base count read from the dev record" if recorded else "no dev record matches the base, so it is collected"
-        )
-    cache = os.environ.get("TEST_COUNT_COLLECTION_CACHE")
-    collected = collect_all(
-        {"head": args.head} if recorded else {"base": args.base, "head": args.head},
-        args.tests,
-        cache=Path(cache) if cache else None,
-        environment=os.environ.get("TEST_COUNT_ENVIRONMENT", ""),
-    )
-    if recorded:
-        collected = {"base": recorded, **collected}
+        return write_record(args.head, args.tests, args.record)
+    collected = collect_sides(args.base, args.head, args.tests)
     failed = [side for side, nodeids in collected.items() if not nodeids]
     for side in failed:
         print(f"::error::Collecting the {side} tests failed or found none, so the floor cannot be graded.")
