@@ -15,9 +15,10 @@ from scripts.swarm.ledger_client import LedgerGone, LedgerRefused
 from scripts.swarm.store import MASTER, SwarmError
 
 SLOW_S = 5.0
+CLEAR_S = 4.0
 PASSES = 2
 SENDER = "swarm"
-TEXT_KEPT = 280
+TEXT_KEPT = 700
 TIMED_OUT, NO_ANSWER, SERVER_ERROR = "timed out", "gave no answer", "answered with a server error"
 REFUSED_5XX = "server refused: 5"
 FAILED = (OSError, ValueError, SwarmError, SystemExit, http.client.HTTPException)
@@ -35,6 +36,10 @@ class Sample:
     failure: str = ""
     read_failure: str = ""
     write_failure: str = ""
+    cpu: float | None = None
+    cpu_before: dict | None = None
+    cpu_after: dict | None = None
+    wall_s: float = 0.0
 
     @property
     def slow(self) -> bool:
@@ -73,9 +78,21 @@ def measure(ledger, slug: str, inputs: dict, clock: Callable[[], float] = time.m
     read, write = getattr(ledger, "metadata", None), getattr(ledger, "time_left", None)
     if read is None or write is None:
         return None
+    started, before = clock(), ledger_host.snapshot()
     read_s, read_failure = _timed(lambda: read(slug), clock)
     write_s, write_failure = _timed(lambda: write(slug, inputs.get("slots"), inputs.get("ci_minutes")), clock)
-    return Sample(read_s, write_s, read_failure or write_failure, read_failure, write_failure)
+    after, elapsed = ledger_host.snapshot(), clock() - started
+    return Sample(
+        read_s,
+        write_s,
+        read_failure or write_failure,
+        read_failure,
+        write_failure,
+        ledger_host.cpu_over_pass(before, after, elapsed),
+        before,
+        after,
+        elapsed,
+    )
 
 
 def _key(store, slug: str) -> str:
@@ -103,12 +120,12 @@ def _passes(samples: list[dict]) -> str:
         + f" and write {row['write_s']:.1f} seconds"
         + (f", {row['write_failure']}" if row["write_failure"] else "")
         + (f", {row['watchdog']}" if row.get("watchdog") else "")
+        + (f", CPU {row['cpu']:.0f} percent over pass" if row.get("cpu") is not None else ", CPU unknown over pass")
         for row in samples
     )
 
 
 def _raised(samples: list[dict], facts: dict) -> str:
-    cpu = f"CPU {facts['cpu']:.0f} percent" if facts.get("cpu") is not None else "CPU unknown"
     started = (
         f"started {facts['started_minutes']} minutes ago"
         if facts.get("started_minutes") is not None
@@ -116,7 +133,7 @@ def _raised(samples: list[dict], facts: dict) -> str:
     )
     newest = f" merged {facts['merged_minutes']} minutes ago: {facts['newest']}" if facts.get("newest") else " unknown"
     label = "The ledger probe failed" if any(row["failure"] for row in samples) else "The ledger server is slow"
-    return f"{label}: {_passes(samples)}. Server {cpu}, {started}. Newest on dev{newest}."
+    return f"{label}: {_passes(samples)}. Server {started}. Newest on dev{newest}."
 
 
 def for_operator(text: str) -> str:
@@ -168,7 +185,7 @@ def _record(held: dict, slug: str, now_ms: int, sample: Sample, down: str) -> No
     bad = sample.slow or bool(down)
     before = {field: held.get(field, 0) for field in ("slow", "fast")}
     slow = before["slow"] + 1 if bad else 0
-    fast = 0 if bad else before["fast"] + 1
+    fast = before["fast"] + 1 if not bad and max(sample.read_s, sample.write_s) < CLEAR_S else 0
     sequence = held.get("sequence", 0) + 1
     row = {
         **asdict(sample),
@@ -176,6 +193,8 @@ def _record(held: dict, slug: str, now_ms: int, sample: Sample, down: str) -> No
         "sequence": sequence,
         "at": now_ms,
         "watchdog": down or "",
+        "raise_s": SLOW_S,
+        "clear_s": CLEAR_S,
         "streak_before": before,
         "streak_after": {"slow": slow, "fast": fast},
     }
@@ -198,16 +217,22 @@ def observe(
     down = store.redis.hget(incidents.key("ledger"), "watchdog")
     held = state(store, slug)
     _record(held, slug, now_ms, sample, down)
+    if held.get("alert") and max(sample.read_s, sample.write_s) > SLOW_S:
+        held["failure_only"] = False
     actions, notices = [], held.get("notices", [])
     raised, resolved = "", ""
     if not held.get("alert") and held["slow"] >= PASSES:
         raised = _raised(held["samples"], (facts or ledger_host.facts)())
-        held.update(alert=True, raised_at=now_ms, raised_samples=held["samples"])
+        failure_only = all(max(row["read_s"], row["write_s"]) <= SLOW_S for row in held["samples"])
+        held.update(alert=True, raised_at=now_ms, raised_samples=held["samples"], failure_only=failure_only)
         notices = [*notices, for_operator(raised)]
         actions.append("raised the ledger slow alert")
-    elif held.get("alert") and held["fast"] >= PASSES:
-        resolved = CLEARED.format(took=_passes(held["samples"]))
-        held.update(alert=False, cleared_samples=held["samples"])
+    elif held.get("alert") and held["fast"] >= (1 if held.get("failure_only") else PASSES):
+        samples = held["samples"][-held["fast"] :]
+        resolved = CLEARED.format(took=_passes(samples))
+        if held.get("failure_only"):
+            resolved = resolved.replace("two swarm passes", "one answered fast pass")
+        held.update(alert=False, cleared_samples=samples)
         notices = [*notices, for_operator(resolved)]
         actions.append("cleared the ledger slow alert")
     incident = _incident(store.redis, slug, bool(held.get("alert")), raised, resolved)
