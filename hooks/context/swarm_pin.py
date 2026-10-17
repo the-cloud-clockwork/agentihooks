@@ -21,14 +21,24 @@ def nested(environ, start: int | None = None, proc: Path = _PROC) -> bool:
     launcher = str(environ.get(LAUNCHER))
     if not launcher.isdigit():
         return False
-    sessions, previous, pid = 0, None, os.getppid() if start is None else start
+    sessions, previous, agent, pid = 0, None, 0, os.getppid() if start is None else start
     while pid > 1 and pid != int(launcher):
         comm = _comm(pid, proc)
         if comm is None:
             return False
-        sessions += comm in AGENTS and comm != previous
+        if comm in AGENTS and comm != previous:
+            sessions, agent = sessions + 1, pid
         previous, pid = comm, _ppid(pid, proc)
-    return sessions > 1 or pid != int(launcher)
+    if sessions > 1:
+        return True
+    return pid != int(launcher) and _sid(agent, proc) != int(launcher)
+
+
+def _sid(pid: int, proc: Path) -> int:
+    try:
+        return int((proc / str(pid) / "stat").read_text(encoding="utf-8").rsplit(")", 1)[1].split()[3])
+    except (OSError, ValueError, IndexError):
+        return 0
 
 
 def unpin(environ: MutableMapping[str, str] = os.environ, start: int | None = None, proc: Path = _PROC) -> bool:
