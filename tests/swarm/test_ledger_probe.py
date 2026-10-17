@@ -280,6 +280,29 @@ def test_a_departed_swarm_does_not_hold_an_incident_after_two_answered_sibling_p
     assert store.redis.hget(incidents.key("ledger"), "generation") == "2"
 
 
+def test_a_legacy_incident_names_missing_evidence_and_waits_for_measured_recovery(store):
+    clock = Clock()
+    ledger = ProbedLedger(clock)
+    store.redis.hset(incidents.key("ledger"), mapping={"active": 1, "generation": 9})
+    observe(store, ledger, clock)
+    assert store.redis.hget(incidents.key("ledger"), "active") == "1"
+    assert "triggering passes unknown" in master_mail(store)[0]
+    observe(store, ledger, clock)
+    assert store.redis.hget(incidents.key("ledger"), "active") == "0"
+    assert "sw pass 1" in master_mail(store)[1] and "sw pass 2" in master_mail(store)[1]
+
+
+def test_a_restored_local_alert_does_not_invent_its_missing_triggering_passes(store):
+    import json
+
+    clock = Clock()
+    ledger = ProbedLedger(clock, read_s=6.0)
+    store.redis.set(store.key("sw", "ledger-slow"), json.dumps({"alert": True, "slow": 2}))
+    observe(store, ledger, clock)
+    assert "Ledger incident changed; triggering passes unknown." in master_mail(store)[0]
+    assert ledger_probe.holding(store, "sw")
+
+
 def test_two_failed_passes_raise_the_alert_naming_the_failure(store):
     clock = Clock()
     ledger = ProbedLedger(clock)
@@ -398,6 +421,8 @@ def test_notice_cpu_covers_each_triggering_pass_instead_of_notice_time(store, mo
     assert rows[1]["cpu_before"]["ticks"] == 700
     assert rows[1]["cpu_after"]["ticks"] == 1100
     assert [row["cpu"] for row in rows] == [25.0, 50.0]
+    assert [row["wall_s"] for row in rows] == [8.0, 8.0]
+    assert all(row["raise_s"] == 5.0 and row["clear_s"] == 4.0 for row in rows)
     assert all(f"CPU {cpu} percent over pass" in ledger.notes[0] for cpu in (25, 50))
 
 
@@ -552,8 +577,10 @@ def test_the_master_is_told_first_and_the_clear_is_for_its_awareness(store):
     assert [(i.sender, i.fyi) for i in items] == [("swarm", False), ("swarm", True)]
     assert items[1].text == (
         "The ledger server answers fast again: two swarm passes took "
-        "sw pass 3: read 0.2 seconds and write 0.1 seconds, CPU unknown over pass. "
-        "sw pass 4: read 0.2 seconds and write 0.1 seconds, CPU unknown over pass. "
+        "sw pass 3: read 0.2 seconds and write 0.1 seconds, CPU unknown over pass, "
+        "streaks before/after slow 2/0, fast 0/1. "
+        "sw pass 4: read 0.2 seconds and write 0.1 seconds, CPU unknown over pass, "
+        "streaks before/after slow 0/0, fast 1/2. "
         "Idle and stale claim checks resume."
     )
 

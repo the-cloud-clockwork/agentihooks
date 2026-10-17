@@ -315,8 +315,10 @@ def test_probe_push_retry_after_recovery_preserves_the_delivery_messages(store, 
     assert sent.call_args_list[-1].args == (
         "critical",
         "The ledger server answers fast again: two swarm passes took "
-        "sw pass 3: read 0.1 seconds and write 0.1 seconds, CPU unknown over pass. "
-        "sw pass 4: read 0.1 seconds and write 0.1 seconds, CPU unknown over pass. "
+        "sw pass 3: read 0.1 seconds and write 0.1 seconds, CPU unknown over pass, "
+        "streaks before/after slow 2/0, fast 0/1. "
+        "sw pass 4: read 0.1 seconds and write 0.1 seconds, CPU unknown over pass, "
+        "streaks before/after slow 0/0, fast 1/2. "
         "Idle and stale claim checks resume.",
     )
 
