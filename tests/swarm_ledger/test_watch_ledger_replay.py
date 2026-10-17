@@ -2,14 +2,26 @@ import inspect
 
 import pytest
 
+from scripts.swarm_ledger import ledger_server as server
 from scripts.swarm_ledger import watch_ledger
 from tests.swarm_ledger import test_watch_ledger as replay_tests
 
 live = replay_tests.live
 
 
+@pytest.mark.parametrize("server_beat", [False, True])
 @pytest.mark.parametrize("heartbeats", [1, 3])
-def test_live_replay_finishes_with_forced_heartbeats(live, monkeypatch, capsys, heartbeats):
+def test_live_replay_finishes_with_forced_heartbeats(live, monkeypatch, capsys, heartbeats, server_beat):
+    if server_beat:
+        wait, beaten = server.HUB.wait, set()
+
+        def beat_first(slug, seq, timeout):
+            if seq in beaten:
+                return wait(slug, seq, timeout)
+            beaten.add(seq)
+            return []
+
+        monkeypatch.setattr(server.HUB, "wait", beat_first)
     original = watch_ledger.stream
     frames = []
     received = []
