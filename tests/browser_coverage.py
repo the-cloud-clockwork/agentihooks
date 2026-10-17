@@ -31,13 +31,13 @@ def watch(page):
     session = page.context.new_cdp_session(page)
     session.send("Profiler.enable")
     session.send("Profiler.startPreciseCoverage", {"callCount": True, "detailed": True})
-    WATCHED[page] = session
+    WATCHED[page] = session, os.environ.get("PYTEST_CURRENT_TEST", "")
     return page
 
 
 def flush(folder: Path, pages) -> None:
     for page in list(pages):
-        session = WATCHED.pop(page, None)
+        session, test = WATCHED.pop(page, (None, ""))
         if session is None or page.is_closed():
             continue
         coverage = session.send("Profiler.takePreciseCoverage")["result"]
@@ -53,7 +53,7 @@ def flush(folder: Path, pages) -> None:
             if entry["url"].startswith("http")
         ]
         folder.mkdir(parents=True, exist_ok=True)
-        (folder / f"capture-browser-{uuid.uuid4().hex}.json").write_text(json.dumps({"result": result}))
+        (folder / f"capture-browser-{uuid.uuid4().hex}.json").write_text(json.dumps({"result": result, "test": test}))
 
 
 def patches(folder: Path):

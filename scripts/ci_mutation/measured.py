@@ -9,7 +9,7 @@ from mutmut.utils.format_utils import get_mutant_name
 
 from scripts.ci_mutation.plan import MUTANT_SECONDS, WORKERS, shard_count
 from scripts.ci_mutation.scope import discover_changes, select_tests
-from scripts.ci_mutation.selection import selected_mutants
+from scripts.ci_mutation.selection import selected_mutant_names
 from scripts.ci_mutation.stats import SharedStats, load_parts, stats_key
 
 
@@ -69,7 +69,7 @@ def refine_plan(root: Path, selected: dict, stats: SharedStats) -> dict:
             raise ValueError(reason)
         names = []
         for path, (lines, _) in scope.items():
-            _, generated = selected_mutants(path, (root / path).read_text(), lines)
+            generated = selected_mutant_names(path, (root / path).read_text(), lines)
             names.extend(get_mutant_name(Path(path), name) for name in generated)
         costs.update(measured_costs(names, results))
     return {**plan_shards(costs), "keys": keys, "head": stats.head}

@@ -25,9 +25,20 @@ jobs:
         run: bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm
       - name: Build the swarm image
         if: ${{ !cancelled() }}
-        run: docker build -t local/agentihooks-swarm:clients-check .
+        run: |
+          docker build -t local/agentihooks-swarm:clients-check --output type=image,compression=uncompressed . &
+          build=$!
+          status=0
+          bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/redis:7 &
+          redis=$!
+          bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/redis:7-alpine || status=$?
+          wait "$redis" || status=$?
+          wait "$build" || status=$?
+          exit "$status"
       - name: Run the hive launch, Compose install, hive join and Compose hive scenarios in parallel
         if: ${{ !cancelled() }}
+        env:
+          SWARM_SMOKE_RUNTIME_IMAGES_READY: 'true'
         run: >-
           bash scripts/packaging/swarm-smoke-parallel.sh
           scripts/packaging/hive-launch-smoke.sh

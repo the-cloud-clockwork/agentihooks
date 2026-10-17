@@ -17,6 +17,7 @@ jobs:
     timeout-minutes: 20
     env:
       WORKER_SCANNER_CACHE: ${{ github.workspace }}/.worker-scanner-cache
+      WORKER_PROVEN_IMAGE: agentihooks-worker-proven:${{ github.run_id }}-${{ github.run_attempt }}
     strategy:
       fail-fast: false
       matrix:
@@ -35,6 +36,7 @@ jobs:
       - name: Prove the selected worker image build, scan and offline runs
         env:
           WORKER_PROOF: ${{ matrix.proof }}
+          WORKER_KEEP_IMAGE: ${{ matrix.proof == 'startup' && env.WORKER_PROVEN_IMAGE || '' }}
         run: bash docker/swarm-node/smoke.sh "$RUNNER_TEMP/worker-image-evidence" "$WORKER_PROOF"
       - uses: actions/cache/save@v4
         if: success() && matrix.proof == 'startup'
@@ -48,6 +50,8 @@ jobs:
           path: ${{ runner.temp }}/worker-image-evidence
       - name: Prove worker probes against isolated containers
         if: ${{ !cancelled() && matrix.proof == 'startup' }}
+        env:
+          WORKER_IMAGE: ${{ env.WORKER_PROVEN_IMAGE }}
         run: bash tests/integration/swarm_node/run_health_proof.sh "$RUNNER_TEMP/worker-health-evidence"
       - uses: actions/upload-artifact@v4
         if: ${{ always() && matrix.proof == 'startup' }}

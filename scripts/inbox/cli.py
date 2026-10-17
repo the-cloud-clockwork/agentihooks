@@ -115,14 +115,17 @@ def apply(store: InboxStore, record: dict) -> dict:
 
 
 def _apply_send(store, me, record):
-    from scripts.inbox.addresses import check_address
+    from scripts.inbox.addresses import check_address, dispatcher_status
 
     args = record["args"]
     check_address(store, me, args["address"])
     links.check_send(store, me, args["address"])
-    task = store.receiver_task(args["address"])
-    item = store.send(me, args["address"], args["text"], fyi=args["fyi"], task=task, item_id=record["item"])
-    return {"id": item.id, "from": item.sender, "to": item.address, "state": item.state}
+    status = dispatcher_status(store, args["address"]) if not args["fyi"] else {}
+    address = status.get("dispatch", {}).get("owner", args["address"])
+    task = store.receiver_task(address)
+    item = store.send(me, address, args["text"], fyi=args["fyi"], task=task, item_id=record["item"])
+    result = {"id": item.id, "from": item.sender, "to": item.address, "state": item.state}
+    return result | status
 
 
 def _apply_reply(store, me, record):
