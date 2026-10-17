@@ -259,6 +259,43 @@ def test_a_completed_attempt_pod_is_deleted_and_a_running_one_kept():
         assert complete(_listed(world)) == {}
 
 
+def test_a_completed_pod_waits_for_its_reported_final_transcript():
+    world = cases.World()
+    with world.clocked():
+        controller, _ = world.controller()
+        assert controller.acquire()
+        finished, running = _finished_and_running(world, controller)
+        pod = world.api.objects[f"swarm-{finished.execution_id}"]
+        pod["status"]["containerStatuses"] = [
+            {
+                "name": "agent",
+                "state": {
+                    "terminated": {
+                        "exitCode": 0,
+                        "message": json.dumps(
+                            {
+                                "schema_version": 1,
+                                "execution_id": finished.execution_id,
+                                "generation": finished.generation,
+                                "transcript_end": 9,
+                            }
+                        ),
+                    }
+                },
+            }
+        ]
+        world.acknowledge(finished.execution_id, 7)
+        complete = Completion(world.client(), cases.SLUG, world.cleanup(controller))
+        assert complete(_listed(world)) == {finished.execution_id: "waiting_archive"}
+        assert f"swarm-{finished.execution_id}" in world.api.objects
+        assert retention.final(world.store, cases.SLUG, finished.execution_id).transcript_end == 9
+        world.acknowledge(finished.execution_id, 8)
+        assert complete(_listed(world)) == {finished.execution_id: "waiting_archive"}
+        world.acknowledge(finished.execution_id, 9)
+        assert complete(_listed(world)) == {finished.execution_id: "done"}
+        assert sorted(world.api.objects) == [f"swarm-{running.execution_id}"]
+
+
 @pytest.mark.parametrize("change", ["generation", "fenced", "duplicate"])
 def test_a_succeeded_pod_of_another_generation_a_fenced_attempt_or_a_second_pod_is_left_alone(change):
     world = cases.World()
