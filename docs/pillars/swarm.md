@@ -251,6 +251,113 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> learned TEXT [--maturity data\|note\|insight\|canon]` | Add a lesson to your seat's learned notes, kept for every later occupant. The maturity defaults to `note`; only the master writes `canon`. |
 | `agentihooks swarm <id> say TEXT [--to NAME\|eng\|ci]` | Post to the swarm chat. |
 
+## Publishing after a successor prepares a branch
+
+`swarm publish` selects a branch from the prepared checkout and its continuation
+record. A successor can therefore publish after restacking parked work onto
+`dev`, even when that rebase means its head no longer descends from the parked
+predecessor's remote branch.
+
+The branch choice follows Git ancestry, rather than simply reusing the previous
+worker's branch name:
+
+| Checkout and continuation state | Publication target |
+|---|---|
+| An eligible recorded continuation's local `origin` ref is an ancestor of `HEAD` | Keep that continuation branch. A fast forward continuation can keep updating an existing pull request. |
+| Restacking removed that ancestry, and no other eligible recorded branch passes the ancestry check | Use the prepared checkout's own branch. The parked predecessor branch stays at its previous head. |
+| No recorded branch exists, or its local `origin` ref is missing | Use the prepared checkout's own branch unless another recorded candidate passes the ancestry check. A missing ref does not print a fatal Git diagnostic. |
+
+The current implementation checks a retained continuation from the handoff or
+reclaim record first, then the branch supplied by repository and checkout
+selection. Each candidate must pass the ancestry check. Inside a task worktree,
+checkout selection supplies the local branch; preserving a predecessor target
+there requires a retained handoff or reclaim continuation. From a primary
+checkout, selection can instead supply the task's recorded repository branch.
+In those continuation contexts, a different local branch name alone does not
+require a new remote branch: even parked work stays on an eligible recorded
+branch when it still fast forwards, including when there were no task commits
+beyond the stacked base.
+
+After a successful push, the result's `branch` names the actual target and
+`head` names the published commit. The task records that target in `branch` and
+in `repository_branches` for the selected repository; `branch_repo` identifies
+its origin repository. The push sets the checkout's upstream to the chosen
+remote branch. Publication does not retarget or open a pull request: record the
+pull request for the published branch with `swarm pr`.
+
+### Resume parked work and publish
+
+Use this sequence as the task's current worker, after reading its handoff and
+after its parked dependencies have finished. Replace angle bracket arguments
+with the swarm name and explicit files you changed. Worktree and branch names
+come from `prepare`.
+
+```bash
+agentihooks swarm <id> prepare
+```
+
+Change into the returned worktree. For parked work, restack from a clean
+checkout before making further changes:
+
+```bash
+cd <returned-worktree>
+agentihooks swarm <id> restack
+```
+
+A rebase conflict leaves the parked list intact. Resolve the reported files,
+stage the resolved files explicitly, run `git rebase --continue`, and run
+`swarm restack` again to finish. Once restacking succeeds and the task changes
+are ready, publish the selected files:
+
+```bash
+agentihooks swarm <id> publish \
+  --message "Document successor publication" \
+  -- docs/pillars/swarm.md docs/pillars/index.md
+```
+
+Inspect `branch`, `head`, `worktree` and `gate` in the returned result. For a
+restacked successor whose history diverged from the predecessor, expect the
+prepared branch and its published head. For a retained fast forward
+continuation, expect the retained branch. Use the resulting branch when
+opening a pull request into `dev`, then record its URL:
+
+```bash
+agentihooks swarm <id> pr <pull-request-url>
+```
+
+### Repository configuration and failures
+
+There is no separate branch selection flag or environment variable. Configure
+the task's repositories explicitly when it spans repositories; prose names in
+the task description do not select them. For an existing task:
+
+```bash
+agentihooks ledger --slug <id> --as <agent> \
+  task set <task> repositories=/absolute/repo,/absolute/other
+agentihooks swarm <id> prepare
+```
+
+`prepare` returns a worktree and branch per repository. Run `publish` from the
+appropriate returned worktree to select that repository; its recorded branch
+is kept separately from the others. From a primary checkout, publication can
+resolve a sole task repository, but refuses an ambiguous selection when the
+task declares several repositories. Without a `repositories` list, the swarm
+repository is the default.
+
+Publication stages only the named files, commits if needed, runs the selected
+repository's prepush gate, then pushes. A failure reports a `Next:` command;
+fix the reported cause and repeat that command. An already committed head is
+graded again without an empty commit. Missing worktrees require `prepare`;
+unrelated tracked changes must be dealt with before publication. Tests run in
+CI. A push rejected because the remote changed remains a failure to reconcile;
+branch selection does not resolve concurrent remote updates.
+
+The successor branch fix was delivered in [pull request 3385](https://github.com/the-cloud-clockwork/agentihooks/pull/3385).
+The regression reproduced a push rejected against the predecessor before the
+fix ([red proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38723619720));
+the corrected publication and continuation cases passed afterward
+([green proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38725568065)).
+
 ## Plan tracing for promotion fixer tasks
 
 Promotion failures create fixer tasks whose identifiers include the Actions run

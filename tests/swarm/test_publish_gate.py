@@ -121,3 +121,78 @@ def test_an_entry_added_on_the_branch_does_not_count(repo, capsys):
     repo({"mod.py": wide(name="new"), **listed({"mod.py::new": {"PLR0913": 8}})})
     assert publish_gate.main() == 1
     assert report(capsys) == [f"mod.py: new PLR0913 {ARGUMENTS} (8 > 7)"]
+
+
+def test_an_old_lint_offender_outside_the_diff_passes(repo, capsys):
+    repo({"mod.py": 'value = 1\nlabel = f"plain"\n'}, push=True)
+    repo({"mod.py": 'value = 2\nlabel = f"plain"\n'})
+    assert publish_gate.main() == 0
+    assert report(capsys) == ["Graded 1 changed Python files"]
+
+
+def test_a_lint_offender_on_a_changed_line_fails(repo, capsys):
+    repo({"mod.py": 'label = f"plain"\nvalue = 1\n'}, push=True)
+    repo({"mod.py": 'label = f"plain"\nimport os\nvalue = 2\n'})
+    assert publish_gate.main() == 1
+    assert report(capsys) == [
+        "mod.py:2:1: E402 Module level import not at top of file",
+        "mod.py:2:8: F401 `os` imported but unused",
+    ]
+
+
+def test_a_suppression_does_not_hide_a_lint_finding_on_a_changed_line(repo, capsys):
+    repo({"mod.py": 'label = f"plain"  # noqa: F541\nvalue = 1\n'}, push=True)
+    repo({"mod.py": 'label = f"plain"  # noqa: F541\nvalue = 2\nother = f"plain"  # noqa: F541\n'})
+    assert publish_gate.main() == 1
+    assert report(capsys) == ["mod.py:3:9: F541 f-string without any placeholders"]
+
+
+def test_a_renamed_file_grades_only_its_changed_lines(repo, capsys):
+    source = "import os\n" + "value = 1\n" * 5
+    repo({"old.py": source}, push=True)
+    git(".", "mv", "old.py", "new.py")
+    repo({"new.py": source + 'label = f"plain"\n'})
+    assert publish_gate.main() == 1
+    assert report(capsys) == ["new.py:7:9: F541 f-string without any placeholders"]
+
+
+def test_a_syntax_error_outside_the_diff_still_fails(repo, capsys):
+    repo({"mod.py": "broken =\n\n\nvalue = 1\n"}, push=True)
+    repo({"mod.py": "broken =\n\n\nvalue = 2\n"})
+    assert publish_gate.main() == 1
+    assert report(capsys)[0].startswith("mod.py:1:9: invalid-syntax ")
+
+
+def test_a_ruff_that_cannot_run_fails(repo, capsys):
+    repo({"pyproject.toml": '[tool.ruff]\nline-length = "wide"\n'}, push=True)
+    repo({"mod.py": "value = 1\n"})
+    assert publish_gate.main() == 1
+    assert report(capsys) == ["ruff check exited 2"]
+
+
+def test_an_old_unformatted_line_outside_the_diff_passes(repo, capsys):
+    repo({"mod.py": "value = 1\n\n\n\n\nlabel=1\n"}, push=True)
+    repo({"mod.py": "value = 2\n\n\n\n\nlabel=1\n"})
+    assert publish_gate.main() == 0
+    assert report(capsys) == ["Graded 1 changed Python files"]
+
+
+def test_an_unformatted_changed_line_fails(repo, capsys):
+    repo({"mod.py": "value = 1\n\n\n\n\nlabel=1\n"}, push=True)
+    repo({"mod.py": "value = 1\nother=2\n\n\n\nlabel=1\n"})
+    assert publish_gate.main() == 1
+    assert report(capsys) == ["mod.py:2: would reformat a changed line"]
+
+
+def test_a_missing_blank_line_before_a_changed_line_fails(repo, capsys):
+    repo({"mod.py": "value = 1\n"}, push=True)
+    repo({"mod.py": "value = 1\ndef chosen():\n    pass\n"})
+    assert publish_gate.main() == 1
+    assert report(capsys) == ["mod.py:2: would reformat a changed line"]
+
+
+def test_an_unformatted_changed_line_after_an_old_one_fails(repo, capsys):
+    repo({"mod.py": "a=1\nb = 1\n"}, push=True)
+    repo({"mod.py": "a=1\nb=2\n"})
+    assert publish_gate.main() == 1
+    assert report(capsys) == ["mod.py:2: would reformat a changed line"]
