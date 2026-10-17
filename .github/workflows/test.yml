@@ -2266,6 +2266,7 @@ jobs:
       - *venv
       - *uv
       - *install
+      - *save-venv
       - *use-venv
 
       - name: Record the suite count for later bases
