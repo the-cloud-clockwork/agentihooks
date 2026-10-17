@@ -1151,14 +1151,17 @@ def _master_coding(payload: dict, typed: bool) -> None:
         log("master coding window failed", {"error": str(e)})
 
 
-def _operator_question(payload: dict) -> str:
-    from hooks.context import operator_mode
+QUESTION_CHECK_FAILED = "The question tool is off: the operator presence check failed. Keep working without it."
 
+
+def _operator_question(payload: dict) -> str:
     try:
+        from hooks.context import operator_mode
+
         return operator_mode.question_block(payload.get("tool_name"), payload.get("session_id"))
     except Exception as e:
         log("operator question check failed", {"error": str(e)})
-        return operator_mode.STANDALONE_ASK_REFUSAL if payload.get("tool_name") == operator_mode.QUESTION_TOOL else ""
+        return QUESTION_CHECK_FAILED if payload.get("tool_name") == "AskUserQuestion" else ""
 
 
 def _operator_reminder(payload: dict) -> None:

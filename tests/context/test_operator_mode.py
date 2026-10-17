@@ -291,12 +291,13 @@ def test_a_standalone_codex_question_is_refused_until_its_operator_types_operato
 
 def test_a_standalone_claude_question_is_refused_until_its_operator_types_operator_on():
     payload = {"session_id": "s7", "tool_name": "AskUserQuestion", "tool_input": {"questions": []}}
-    for prompt in (None, "Explain the plan"):
-        if prompt:
-            operator_mode.observe("s7", prompt, True, now=100)
-        with pytest.raises(hook_manager.BlockAction) as blocked:
-            hook_manager.on_pre_tool_use(payload)
-        assert str(blocked.value) == STANDALONE_ASK
+    with pytest.raises(hook_manager.BlockAction) as blocked:
+        hook_manager.on_pre_tool_use(payload)
+    assert str(blocked.value) == STANDALONE_ASK
+    operator_mode.observe("s7", "Explain the plan", True, now=100)
+    with pytest.raises(hook_manager.BlockAction) as blocked:
+        hook_manager.on_pre_tool_use(payload)
+    assert str(blocked.value) == STANDALONE_ASK
     operator_mode.observe("s7", "operator on", True, now=101)
     hook_manager.on_pre_tool_use(payload)
 
@@ -305,7 +306,9 @@ def test_a_failing_question_check_is_logged_and_refuses_only_the_question_tool(m
     logged = []
     monkeypatch.setattr(operator_mode, "question_block", lambda *a: (_ for _ in ()).throw(OSError("disk full")))
     monkeypatch.setattr(hook_manager, "log", lambda *a: logged.append(a))
-    assert hook_manager._operator_question({"session_id": "s1", "tool_name": "AskUserQuestion"}) == STANDALONE_ASK
+    assert hook_manager._operator_question({"session_id": "s1", "tool_name": "AskUserQuestion"}) == (
+        "The question tool is off: the operator presence check failed. Keep working without it."
+    )
     assert hook_manager._operator_question({"session_id": "s1", "tool_name": "Bash"}) == ""
     assert logged == [("operator question check failed", {"error": "disk full"})] * 2
 
