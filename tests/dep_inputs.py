@@ -22,6 +22,7 @@ class DepInputs:
         self.shared = [set(), False]
         self.current = self.shared
         self.tests = {}
+        self.collections = {}
         self.fixtures = {}
         self.setting_up = []
         self.escaping = set()
@@ -42,6 +43,20 @@ class DepInputs:
             self.escaping.update(self.setting_up)
 
     @pytest.hookimpl(hookwrapper=True)
+    def pytest_make_collect_report(self, collector):
+        if not isinstance(collector, pytest.Module):
+            yield
+            return
+        previous = self.current
+        collected = self.collections.setdefault(collector.nodeid, [set(), False])
+        self.current = collected
+        try:
+            yield
+        finally:
+            previous[0].update(path for path in collected[0] if not path.startswith(self.root + ".github/workflows/"))
+            self.current = previous
+
+    @pytest.hookimpl(hookwrapper=True)
     def pytest_fixture_setup(self, fixturedef, request):
         self.setting_up.append(fixturedef.argname)
         try:
@@ -51,7 +66,10 @@ class DepInputs:
 
     @pytest.hookimpl(hookwrapper=True)
     def pytest_runtest_protocol(self, item, nextitem):
+        collected = self.collections.get(item.nodeid.split("::", 1)[0], [set(), False])
         self.current = self.tests.setdefault(item.nodeid, [set(), False])
+        self.current[0].update(collected[0])
+        self.current[1] = self.current[1] or collected[1]
         self.fixtures[item.nodeid] = set(getattr(item, "fixturenames", ()))
         try:
             yield
