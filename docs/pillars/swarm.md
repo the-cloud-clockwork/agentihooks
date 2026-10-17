@@ -407,9 +407,10 @@ checked, who judges it) that the agent's prompt carries.
 When the tick claims a task, it compares the task's territory with the territory of every other task in `claimed`
 or `pr` state. Two entries share an area when they are equal or one is a folder holding the other; surrounding
 spaces, a leading `./` and trailing slashes are ignored, and the narrower entry is the one named. Sharing an area
-never blocks a claim. Queue rank (or the dispatcher's order) decides first, so an `urgent` task that shares an area
-still claims ahead of a clear `normal` task. Overlap breaks the last tie: among tasks equal on rank, an earlier
-failed launch and resumed work, tasks clear of every held territory claim first.
+never blocks a claim; it moves the task back within its rank. The launch order is queue rank (or the dispatcher's
+band), then tasks without an earlier failed launch, then resumed work, then tasks clear of every held territory, then
+the S exception, critical path and ledger order described under [Queue rank](#queue-rank). An `urgent` task that
+shares an area still claims ahead of a clear `normal` task.
 
 The opening prompt then carries a header line once, followed by one line per running task that shares an area,
 after the task, contract, workspace and group lines. Several shared areas are joined with `and`:
@@ -421,9 +422,8 @@ Task t2, claimed by engineer@a1b2c3-0002, shares docs/a.md and scripts/swarm/tic
 ```
 
 A task that shares nothing gets no such lines. The agent coordinates with each claimant through the inbox and
-merges `dev` into its branch only on a real conflict. Where the repo has a merge queue, it queues a green head as it
-stands, because the merge group tests it on top of the newest `dev`, and merges `dev` only on a real conflict or
-when GitHub refuses the enqueue.
+merges `dev` into its branch only on a real conflict or, where the repo has a merge queue, when GitHub refuses the
+enqueue. A green head is queued as it stands, because the merge group tests it on top of the newest `dev`.
 
 ### Split tasks across pull requests
 
@@ -623,7 +623,9 @@ other dependencies are all done), or is the last task of its phase not yet done,
 Phase order is never used, and ledger order breaks the remaining ties. Capacity placement reads the same order. The
 tick then applies the usual
 rules: lane, phase, open dependencies, territories and live claims still decide whether a task is claimable, so an
-urgent task never skips a dependency that is not done and never takes a task or a territory another agent holds.
+urgent task never skips a dependency that is not done and never takes a task another agent holds. A territory
+another agent holds moves a task back within its rank without blocking it (see
+[Shared areas in the opening prompt](#shared-areas-in-the-opening-prompt)).
 Among open tasks whose territories overlap, the higher rank claims first. The rank is read from the ledger on every
 pass, so a change applies on the next tick.
 
