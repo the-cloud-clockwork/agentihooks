@@ -58,7 +58,9 @@ def page(browser, request):
         return route.abort()
 
     context.route("**/*", answer)
-    serve_modules(context, ledger_state({**DOC, "freezes": freezes}), SWARM)
+    from scripts.swarm_ledger import ledger_server
+
+    serve_modules(context, ledger_server.ledger_view(ledger_state({**DOC, "freezes": freezes})), SWARM)
     tab = context.new_page()
     tab.set_default_timeout(3000)
     tab.on("dialog", lambda dialog: dialog.accept())
