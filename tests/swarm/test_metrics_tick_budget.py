@@ -109,3 +109,37 @@ def test_slow_metrics_sink_yields_and_resumes_every_unshipped_row(tmp_path, monk
         if len(received) == 16:
             break
     assert sorted(received, key=int) == [str(index) for index in range(16)]
+
+
+def test_busy_first_table_cannot_starve_another_table_across_flush_restarts(tmp_path, monkeypatch):
+    import json
+    import time
+
+    now, elapsed, received = 2 * metrics_outbox.DAY_MS, [0.0], []
+    monkeypatch.setattr(time, "monotonic", lambda: elapsed[0])
+    monkeypatch.setattr(metrics_outbox, "BATCH", 1)
+
+    def send(sink, query, body):
+        elapsed[0] += 2
+        if query.startswith("INSERT"):
+            received.extend(json.loads(line)["event_id"] for line in body.splitlines())
+        return True
+
+    def row(event_id):
+        return {"event_id": event_id, "ledger": "sw", "plan": "", "phase": "", "slice": "", "task": "", "ts_ms": now}
+
+    path, sink = tmp_path / "metrics.sqlite", metrics_outbox.Settings("https://sink", "user", "password")
+    box = metrics_outbox.Outbox(path, sink, send)
+    box.append(metrics_outbox.Table("z_cold"), [row("cold")])
+    box.close()
+    for turn in range(4):
+        box = metrics_outbox.Outbox(path, sink, send)
+        try:
+            box.append(metrics_outbox.Table("a_hot"), [row(f"hot_{turn}_{index}") for index in range(6)])
+            started = elapsed[0]
+            box.flush(now)
+            assert elapsed[0] - started <= 10
+        finally:
+            box.close()
+    assert "cold" in received, "The busy first table starved the later metric table"
+    assert len(received) == len(set(received))

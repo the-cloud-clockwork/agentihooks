@@ -326,6 +326,49 @@ def test_tick_snapshot_batches_claimed_tasks_and_caches_fallbacks(doc, monkeypat
     assert fallback == ["other"]
 
 
+def test_metrics_completed_and_split_pulls_are_prefetched_without_late_slow_reads(monkeypatch, tmp_path):
+    import time
+
+    import fakeredis
+
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import ledger_events, metrics_outbox, metrics_swarm
+    from scripts.swarm.store import RedisStore
+
+    urls = [f"https://github.com/o/r/pull/{number}" for number in range(1, 5)]
+    doc = {
+        "tasks": [
+            {"id": "active", "state": "pr", "pr_url": urls[0], "split_pulls": [urls[1]]},
+            {"id": "done", "state": "done", "pr_url": urls[2], "split_pulls": [urls[3]]},
+        ],
+        "_meta": {"events": [{"kind": "task done", "target": "tasks/done", "at": int(time.time() * 1000)}]},
+    }
+    elapsed = [0.0]
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+
+    def batch(found, cache):
+        elapsed[0] += 20
+        return dict.fromkeys(found)
+
+    def late(url):
+        elapsed[0] += 20
+        return None
+
+    monkeypatch.setattr(ledger_events, "views", batch)
+    monkeypatch.setattr(ledger_events, "view", late)
+    lookup = ledger_events.tick_view(InboxStore(store.redis), store, "sw", doc)
+    box = metrics_outbox.Outbox(tmp_path / "metrics.sqlite", metrics_outbox.Settings("http://sink", "", ""))
+    try:
+        started = elapsed[0]
+        found = metrics_swarm.pull_rows(
+            box, int(time.time() * 1000), metrics_swarm.TickInput(store, doc, [], lookup, None)
+        )
+        assert elapsed[0] - started < 30, f"Late PR reads held metrics for {elapsed[0] - started} seconds"
+        assert set(found) == set(urls)
+    finally:
+        box.close()
+
+
 def test_missing_workflow_directory_does_not_declare_a_required_gate():
     url = "https://github.com/o/r/pull/1"
     pr = resource()
