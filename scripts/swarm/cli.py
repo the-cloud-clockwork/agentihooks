@@ -33,7 +33,7 @@ agentihooks swarm <id> culture set FILE | show                    the swarm's sh
 agent side (name from --as or AGENTIHOOKS_AGENT_NAME):
 agentihooks swarm <id> issue URL | pr URL | branch | done [--pr URL] | block NOTE | handoff DOC [--recap FILE] [--reason R] | say TEXT [--to NAME|eng|ci]
 agentihooks swarm <id> learned TEXT [--maturity data|note|insight|canon]   (default note; canon only by the master)
-agentihooks swarm <id> exit              an agent launched with <profile> up ends its own session
+agentihooks swarm <id> exit              an agent without a claim ends its own session
 agentihooks swarm <id> park DOC          hold a stacked task on its pushed branch until its open dependencies merge
 agentihooks swarm <id> restack           rebase parked task work onto dev after its dependencies merge
 agentihooks swarm <id> wait MINUTES [--reason TEXT]                 the tick counts no idle tick while it holds
@@ -121,8 +121,17 @@ from scripts.swarm.health import activity
 from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import LedgerClient, LedgerGone, LedgerRefused
 from scripts.swarm.runtime import HerdrRuntime
-from scripts.swarm.status import auto_snapshot, findings, live_agents, status_report, task_counts, verdict_store
+from scripts.swarm.status import (
+    auto_snapshot,
+    findings,
+    live_agents,
+    status_report,
+    task_counts,
+    transport,
+    verdict_store,
+)
 from scripts.swarm.store import (
+    APP_SERVER_TRANSPORT,
     ASSIST,
     AUTO_SCALING,
     AUTONOMY,
@@ -276,6 +285,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
                     intent.judged,
                     head=lambda url: getattr(view(url), "head", None),
                     named=intent.named_view,
+                    text=intent.pr_text,
                 ).run,
                 doc,
             )
@@ -470,6 +480,7 @@ def cmd_create(store, args):
         links=template.links,
         autonomy=template.autonomy or DELEGATE,
         scratch=not ledger_creator.shared(os.environ),
+        codex_inbox_transport=APP_SERVER_TRANSPORT,
     )
     store.create(config)
     from scripts.swarm import commands
@@ -658,7 +669,11 @@ def cmd_agent_up(store, args):
 
 def cmd_exit(store, args):
     name = store.names.resolve(args.name or Who.from_env().name)
-    agent_up.retire(store, args.slug, name, now_ms())
+    agent = next((a for a in store.agents(args.slug) if a.name == name), None)
+    if agent and agent.lane != MASTER and store.claimant(args.slug, agent.task) != name:
+        _retire(store, args.slug, agent, "finished its session without a claim")
+    else:
+        agent_up.retire(store, args.slug, name, now_ms())
     print(json.dumps({"exited": name}), flush=True)
     HerdrRuntime().reap_name(name)
 
@@ -928,12 +943,13 @@ def cmd_status(store, args):
     print(plan_shape.report(tasks, config.max_eng)["summary"])
     for phase_id, state, held in phase_state.report(doc):
         print(f"phase {phase_id}  {state}" + (f"  holds {', '.join(held)}" if held else ""))
-    from scripts.swarm import capacity, quota_view
+    from scripts.swarm import capacity, incidents, quota_view
     from scripts.swarm_ledger import ledger_freezes
 
     quota = quota_view.lines(capacity.read(store, args.slug), now_ms())
     held = spawn_holds(store, args.slug) + failed_panes.status_lines(store, args.slug)
-    for line in ledger_freezes.lines(doc) + quota + held:
+    held += incidents.status_lines(store, args.slug)
+    for line in ledger_freezes.lines(doc) + quota + held + outbox.status_lines():
         print(line)
     print(bottleneck.line(bottleneck.read(store, args.slug), now_ms()))
     print(stages.line(stages.read(store, args.slug), now_ms()))
@@ -942,11 +958,16 @@ def cmd_status(store, args):
     print(_affinity_line(affinity.report(store, args.slug, config, agents)))
     if promotion := tick_master.status_line(tick_master.read(store, args.slug)):
         print(promotion)
-    print("Agent\tLane\tHarness\tProfile\tModel\tAccount\tPane\tTask\tState\tConversation\tModel source\tConfidence")
+    print(
+        "Agent\tLane\tHarness\tProfile\tModel\tAccount\tPane\tTask\tState\tConversation\tPush inbox\tNative terminal\tModel source\tConfidence"
+    )
     for a in agents:
         model = " ".join(filter(None, (a.model, a.effort))) if a.model else "unknown"
+        can = transport(a)
+        push = "yes" if can["push_inbox"] else "no"
+        attach = "yes" if can["native_terminal_attach"] else "no"
         print(
-            f"{a.name}\t{a.lane}\t{a.harness}\t{a.profile or 'unknown'}\t{model}\t{a.account or '-'}\t{a.pane_id}\t{a.task}\t{agent_status(a)}\t{a.conversation_id or '-'}\t{a.model_source or '-'}\t{a.model_confidence if a.model_confidence is not None else '-'}"
+            f"{a.name}\t{a.lane}\t{a.harness}\t{a.profile or 'unknown'}\t{model}\t{a.account or '-'}\t{a.pane_id}\t{a.task}\t{agent_status(a)}\t{a.conversation_id or '-'}\t{push}\t{attach}\t{a.model_source or '-'}\t{a.model_confidence if a.model_confidence is not None else '-'}"
         )
     for r in store.restored(args.slug):
         print(f"restored  {r['name']}  {r['outcome']}  {r['reason']}")
@@ -1292,12 +1313,24 @@ def _split_binding(row, url, half):
     return {"split_pulls": [*pulls, url]}
 
 
+def _queue_intent(store, args, agent, head):
+    state = intent.Verdicts(args.slug, intent.NAME)
+    who = Who(name=agent.name, swarm=args.slug, task=agent.task)
+    decision = intent.queue_decision(who, state, args.url, intent.mode_of(store.config(args.slug)), head)
+    if not decision.allowed:
+        gate_log.append(args.slug, gate_log.Row.of(intent.NAME, "deny", who, "Bash", decision.reason))
+        raise SwarmError(decision.reason)
+
+
 def cmd_merge(store, args):
     agent = _worker(store, args) if args.action != "state" else None
     if agent is not None:
         done_gate.require_local(store, args.slug, agent.task)
         done_gate.require_target(store, args.slug, agent.task, args.url, LedgerClient().tasks(args.slug))
-    result = merge_queue.operate(args.action, args.url)
+    if args.action == "queue":
+        result = merge_queue.operate(args.action, args.url, admit=lambda head: _queue_intent(store, args, agent, head))
+    else:
+        result = merge_queue.operate(args.action, args.url)
     print(json.dumps(result))
 
 
@@ -1535,6 +1568,7 @@ def cmd_park(store, args):
     text = _read(args.doc, "handoff document")
     ledger = LedgerClient()
     fields, top = stack.park(store, args.slug, agent, text, ledger)
+    store.mark_restart(args.slug, agent.task, "park")
     _hand_off(store, args.slug, agent, text, "exit", ledger)
     removed = stack.remove_worktree(top)
     print(
@@ -1751,6 +1785,15 @@ def queued_say(args, who) -> bool:
 
 
 def cmd_terminal(store, args):
+    from scripts.codex_session import attach
+
+    try:
+        opened = attach.local_terminal(store, args.slug, args.execution, dict(os.environ))
+    except attach.AttachError as exc:
+        raise SwarmError(str(exc)) from None
+    if opened is not None:
+        print(json.dumps(opened))
+        return
     from scripts.swarm_v2.kubernetes import operator_terminal
 
     print(json.dumps(operator_terminal.command(store, args.slug, args.execution, os.environ, Who.from_env())))

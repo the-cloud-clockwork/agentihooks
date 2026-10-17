@@ -188,11 +188,13 @@ def request(slug, ops=None, service=False, timeout=REQUEST_TIMEOUT):
     return client.snapshot(slug) if ops is None else client.mutate(slug, ops)
 
 
-def resource(slug: str, path: str, service: bool = False, collection: bool = False) -> dict | list:
+def resource(
+    slug: str, path: str, service: bool = False, collection: bool = False, headers: dict | None = None
+) -> dict | list:
     from scripts.swarm_ledger.api.client import ResourceClient
 
     def read():
-        client = ResourceClient(base(), credentials(slug, service), REQUEST_TIMEOUT)
+        client = ResourceClient(base(), credentials(slug, service) if headers is None else headers, REQUEST_TIMEOUT)
         return client.collection(slug, path) if collection else client.request(slug, path)["data"]
 
     return retried(read, REMOTE_READ_ATTEMPTS) if ledger_link.remote() else read()

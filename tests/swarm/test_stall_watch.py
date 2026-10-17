@@ -134,6 +134,15 @@ def test_a_red_pull_request_with_no_push_past_its_limit_reopens():
     assert "red with no push for 15 minutes" in swarm.inbox()[0].text
 
 
+def test_a_watchdog_reopen_marks_the_next_start_as_after_the_watchdog():
+    swarm = Swarm(RED)
+    swarm.tick(START + 14 * MINUTE)
+    assert swarm.store.take_restart(SLUG, "t1") == ""
+    swarm.tick(START + 15 * MINUTE)
+    assert _reopened(swarm)
+    assert swarm.store.take_restart(SLUG, "t1") == "watchdog"
+
+
 @pytest.mark.parametrize("newest", ["CANCELLED", "FAILURE"])
 @pytest.mark.parametrize("reverse", [False, True])
 @pytest.mark.parametrize("same_time", [False, True])

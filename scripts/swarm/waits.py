@@ -132,13 +132,17 @@ def merge_resolution(held, github, reread, fresh):
         return ""
     if pull.state == "MERGED":
         return f"pull request {target}, now merged"
-    if pull.state == "OPEN":
-        if pull.queued:
-            held["queued"] = True
-            return ""
-        if not pull.resolved or (fresh and not held.get("queued")):
-            return ""
-    return f"pull request {target}, now red; left the merge queue without merging; fix it and queue it again"
+    if pull.state == "CLOSED":
+        return f"pull request {target}, now closed unmerged; reopen it or record why it was closed"
+    if pull.queued:
+        held["queued"] = True
+        return ""
+    if not pull.resolved or (fresh and not held.get("queued")):
+        return ""
+    if pull.red:
+        failed = ", ".join(pull.failed) or pull.unpassed_gate or "a required check"
+        return f"pull request {target}, now red; failed: {failed}; fix the failing checks and queue it again"
+    return f"pull request {target}, now green; dropped from the merge queue; queue it again"
 
 
 def intent_resolution(held, record, github):

@@ -14,7 +14,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from scripts.ci_budget import GATE
-from scripts.swarm import dev_red
+from scripts.swarm import dev_red, naming
 from scripts.swarm.store import PREFIX
 from scripts.swarm_ledger import ledger_comments
 
@@ -125,7 +125,7 @@ def refresh(
     run: Callable = subprocess.run,
 ) -> list[str]:
     redis = store.redis
-    if now_ms - int(redis.get(key(slug, "checked")) or 0) < REFRESH_MS:
+    if naming.PROOF_RE.fullmatch(slug) or now_ms - int(redis.get(key(slug, "checked")) or 0) < REFRESH_MS:
         return []
     redis.set(key(slug, "checked"), now_ms)
     try:

@@ -61,7 +61,7 @@ def _previous(store, slug):
         for row in history
         if row.get("lane") == MASTER and row["name"] not in names
     ]
-    return max(current + ended, key=lambda p: p.ran_at, default=None)
+    return max(current + ended, key=lambda p: (p.agent.started_at, p.ran_at), default=None)
 
 
 def describe(previous):
@@ -174,7 +174,8 @@ def _new(store, slug, runtime, at):
             store.redis.delete(store.key(slug, "master-start"))
         raise SwarmError(f"the new master could not start: {exc}") from exc
     affinity.placed(store, slug, placed.harness)
-    record = placed_record(store.execution_occupants(slug).get(record.seat, record), placed)
+    occupant = store.execution_occupants(slug).get(record.seat)
+    record = placed_record(occupant if occupant and occupant.name == name else record, placed)
     reported = runtime.reported(record)
     store.put_agent(slug, replace(record, state="working" if reported else "starting"))
     launch_check.begin(store, slug, record, at)

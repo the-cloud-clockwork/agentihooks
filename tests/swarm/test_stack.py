@@ -36,7 +36,7 @@ REMOVE = ["bash", str(stack.WT_SCRIPT), "done", "engineer-a1b2c3-0001", "--repo"
 class Shell:
     def __init__(self):
         self.calls, self.remote, self.issues, self.fail = [], HEAD, json.dumps({"hasIssuesEnabled": True}), ()
-        self.status, self.top, self.origin = "", TOP, "git@github.com:O/r.git"
+        self.status, self.top, self.origin, self.probe = "", TOP, "git@github.com:O/r.git", ""
 
     def __call__(self, argv):
         self.calls.append(argv)
@@ -49,7 +49,7 @@ class Shell:
             ("git", "status", "--porcelain"): self.status,
         }.get(tuple(argv[:3])) or {
             ("git", "rev-parse"): HEAD,
-            ("git", "ls-remote"): f"{self.remote}\trefs/heads/{argv[-1]}" if self.remote else "",
+            ("git", "ls-remote"): self.probe + (f"{self.remote}\trefs/heads/{argv[-1]}" if self.remote else ""),
             ("git", "merge-base"): BASE,
             ("git", "rev-list"): "3",
             ("gh", "repo"): self.issues,
@@ -129,6 +129,17 @@ def test_park_refuses_a_branch_with_unpushed_commits(parked, capsys):
     parked[3].remote = "c" * 40
     _refused(parked, capsys, "the worktree holds commits origin lacks; push eng-t1 first")
     assert parked[3].calls[-1] == ["git", "rev-parse", "HEAD"]
+
+
+def test_park_accepts_a_synced_branch_beside_a_same_named_diffcheck_branch(parked, capsys):
+    parked[3].probe = f"{'c' * 40}\trefs/heads/diffcheck/eng-t1\n"
+    assert park(parked[4]) == 0
+    assert json.loads(capsys.readouterr().out)["parked_on"] == ["a"]
+
+
+def test_park_refuses_a_branch_only_a_same_named_diffcheck_branch_carries(parked, capsys):
+    parked[3].probe, parked[3].remote = f"{HEAD}\trefs/heads/diffcheck/eng-t1\n", ""
+    _refused(parked, capsys, "branch eng-t1 is not on origin; push it first with git push -u origin eng-t1")
 
 
 def test_park_refuses_a_worktree_with_uncommitted_changes(parked, capsys):
@@ -480,6 +491,33 @@ def test_park_stores_the_handoff_and_retires_the_agent_so_the_reaped_task_waits(
     assert [a.name for a in store.agents("sw") if a.name == AGENT] == []
     assert ledger.rows["t1"]["state"] == "open" and ledger.rows["t1"]["parked_on"] == ["a"]
     assert store.handoff("sw", "t1") == text
+
+
+def test_park_marks_the_next_start_as_after_a_park(parked, capsys):
+    store, _, _, _, doc = parked
+    assert store.take_restart("sw", "t1") == ""
+    assert park(doc) == 0
+    assert store.take_restart("sw", "t1") == "park"
+
+
+def test_a_refused_park_leaves_no_restart_mark(parked, capsys):
+    store, ledger, _, _, doc = parked
+    del ledger.rows["t1"]["branch"]
+    assert park(doc) == 1
+    assert store.take_restart("sw", "t1") == ""
+
+
+def test_the_life_launched_after_a_park_is_recorded_as_after_the_park(parked):
+    store, ledger, rt, _, doc = parked
+    assert park(doc) == 0
+    tick._reap("sw", store, ledger, rt, ledger.rows, 1)
+    ledger.rows["a"]["state"] = "done"
+    ledger.update_task = type(ledger).update_task.__get__(ledger)
+    tick.tick("sw", store, ledger, rt, now_ms=NOW + 1)
+    lives = sorted(
+        (row["agent"] == AGENT, row["state"], row["after"]) for row in store.launches("sw") if row["task"] == "t1"
+    )
+    assert lives == [(False, "started", "park"), (True, "started", "")]
 
 
 def test_shell_runs_with_captured_text_and_a_timeout(monkeypatch):

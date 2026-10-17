@@ -146,6 +146,8 @@ def test_status_displays_profile_column_and_record_fields(monkeypatch, capsys):
         "Task",
         "State",
         "Conversation",
+        "Push inbox",
+        "Native terminal",
         "Model source",
         "Confidence",
     ]

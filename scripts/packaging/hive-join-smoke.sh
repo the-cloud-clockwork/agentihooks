@@ -18,8 +18,12 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=$run-hive" -addext 
   -keyout "$tls/key.pem" -out "$tls/cert.pem" 2>/dev/null
 chmod 0644 "$tls/cert.pem"
 bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/redis:7-alpine
-bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm
-docker build --progress=plain -t "$image" .
+if [[ -n "${SWARM_SMOKE_IMAGE:-}" ]]; then
+  docker tag "$SWARM_SMOKE_IMAGE" "$image"
+else
+  bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm
+  docker build --progress=plain -t "$image" .
+fi
 docker network create "$run" >/dev/null
 docker run --pull never -d --name "$run-redis" --network "$run" mirror.gcr.io/library/redis:7-alpine >/dev/null
 docker run -d --name "$run-hive" --network "$run" --user "$(id -u):$(id -g)" -v "$tls:/tls:ro" \

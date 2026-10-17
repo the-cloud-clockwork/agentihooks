@@ -367,6 +367,7 @@ agentihooks init-agent --handoff --dir "$PWD" --name repo-handoff --prompt-file 
 |---|---|
 | `--dir`, `--name`, `--prompt` / `--prompt-file` | Directory, session/tab name, opening prompt |
 | `--dry-run` | Print the launch without opening a terminal |
+| `--codex-transport legacy\|app_server`, `--seat` | Select the transport and admitted seat for a managed Codex swarm launch; see [Managed Codex terminals](codex-managed-terminal.md) for configuration and viewer behavior |
 | `--start-timeout` | Seconds to wait for the terminal to start (default 30) |
 | `--route-timeout` | Seconds to wait for the new session's route report (default 150) |
 | `--handoff` | Quota handoff: any account but this one, no bare-Claude fallback, marks this session handed off once the new one is routed; exit 3 on failure |

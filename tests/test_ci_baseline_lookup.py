@@ -138,7 +138,8 @@ def lookup(tmp_path):
             WAIT_SECONDS="0",
         )
         job, name = selector
-        steps = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"][job]["steps"]
+        definitions = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+        steps = definitions["select" if job == "durations" and job not in definitions else job]["steps"]
         script = next(step["run"] for step in steps if step.get("name") == name)
         result = subprocess.run(["bash", "-e", "-o", "pipefail", "-c", script], env=env, capture_output=True, text=True)
         return result, output.read_text(), requests.read_text()

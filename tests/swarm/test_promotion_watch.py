@@ -246,6 +246,22 @@ def test_a_run_already_handled_is_not_read_for_jobs_again(store):
     assert len(calls) == 1 and ledger.added == [] and ledger.raised == []
 
 
+@pytest.mark.parametrize("slug", ["proof-323133-cxc9-1", "proof-ed3ec8-t12-3"])
+def test_a_proof_swarm_never_reads_promotion_runs_or_files_fixers(store, slug):
+    calls, ledger = [], Ledger()
+    config = SimpleNamespace(repo="/repo")
+    actions = promotion_watch.refresh(slug, config, store, ledger, ledger.doc(), NOW, gh([RED], JOBS, calls))
+    assert (actions, calls, ledger.added, ledger.raised) == ([], [], [], [])
+    assert store.redis.keys("*") == []
+
+
+def test_a_slug_that_only_resembles_a_proof_swarm_still_files_fixers(store):
+    calls, ledger = [], Ledger()
+    config = SimpleNamespace(repo="/repo")
+    promotion_watch.refresh("proof-323133-cxc9", config, store, ledger, ledger.doc(), NOW, gh([RED], JOBS, calls))
+    assert calls and ledger.added
+
+
 def test_the_watch_reads_at_most_once_per_refresh_window(store):
     calls = []
     refresh(store, Ledger(), gh([GREEN], calls=calls))

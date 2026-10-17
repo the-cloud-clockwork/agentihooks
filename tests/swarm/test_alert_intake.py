@@ -77,7 +77,7 @@ def test_repeated_notifications_of_one_alert_update_rather_than_repeat(redis):
     alert_intake.receive(redis, payload(alert(hours=3.25)), NOW + 3_600_000)
     (found,) = standing.findings(redis, "sw", NOW + 3_600_000)
     assert (found.measure, found.summary) == (
-        1,
+        3.25,
         "ci queue at 3.25 task hours in the window, over its 1.0 threshold",
     )
 
@@ -165,22 +165,84 @@ def test_a_long_start_is_cut_before_it_names_an_episode(redis):
 
 
 def test_settings_default_to_every_interface_on_the_intake_port():
-    assert alert_intake.settings({}) == alert_intake.Settings("0.0.0.0", 8796, None)
+    assert alert_intake.settings({}) == alert_intake.Settings("0.0.0.0", 8796, None, "", "", "")
 
 
-def test_settings_read_host_port_and_allowed_networks_from_the_environment():
+def test_settings_read_host_port_networks_token_and_certificate_from_the_environment():
     found = alert_intake.settings(
         {
             "AGENTIHOOKS_ALERT_INTAKE_HOST": "10.1.2.3",
             "AGENTIHOOKS_ALERT_INTAKE_PORT": "9001",
             "AGENTIHOOKS_ALERT_INTAKE_FROM": " 10.1.2.0/24 , 127.0.0.1 ",
+            "AGENTIHOOKS_ALERT_INTAKE_TOKEN": " s3cret\n",
+            "AGENTIHOOKS_ALERT_INTAKE_CERT": " /certs/intake.crt ",
+            "AGENTIHOOKS_ALERT_INTAKE_KEY": " /certs/intake.key ",
         }
     )
     assert found == alert_intake.Settings(
         "10.1.2.3",
         9001,
         (ipaddress.ip_network("10.1.2.0/24"), ipaddress.ip_network("127.0.0.1/32")),
+        "s3cret",
+        "/certs/intake.crt",
+        "/certs/intake.key",
     )
+
+
+@pytest.mark.parametrize(
+    ("header", "token", "allowed"),
+    [
+        ("Bearer s3cret", "s3cret", True),
+        (None, "s3cret", False),
+        ("", "s3cret", False),
+        ("s3cret", "s3cret", False),
+        ("Bearer wrong", "s3cret", False),
+        ("Bearer s3cret ", "s3cret", False),
+        ("bearer s3cret", "s3cret", False),
+        ("Bearer ", "", False),
+        ("Bearer", "", False),
+    ],
+)
+def test_only_the_bearer_token_authorizes_a_post(header, token, allowed):
+    assert alert_intake.authorized(header, token) is allowed
+
+
+TLS = ("/certs/intake.crt", "/certs/intake.key")
+
+
+@pytest.mark.parametrize(
+    ("found", "why"),
+    [
+        (alert_intake.Settings("0.0.0.0", 0, None, "s3cret", *TLS), "AGENTIHOOKS_ALERT_INTAKE_PORT is 0"),
+        (alert_intake.Settings("0.0.0.0", 8796, None, "", *TLS), "AGENTIHOOKS_ALERT_INTAKE_TOKEN is not set"),
+        (
+            alert_intake.Settings("0.0.0.0", 8796, None, "s3cret", "", ""),
+            "0.0.0.0 is not loopback, so it needs AGENTIHOOKS_ALERT_INTAKE_CERT and AGENTIHOOKS_ALERT_INTAKE_KEY",
+        ),
+        (
+            alert_intake.Settings("10.1.2.3", 8796, None, "s3cret", TLS[0], ""),
+            "10.1.2.3 is not loopback, so it needs AGENTIHOOKS_ALERT_INTAKE_CERT and AGENTIHOOKS_ALERT_INTAKE_KEY",
+        ),
+        (
+            alert_intake.Settings("intake.lan", 8796, None, "s3cret", "", TLS[1]),
+            "intake.lan is not loopback, so it needs AGENTIHOOKS_ALERT_INTAKE_CERT and AGENTIHOOKS_ALERT_INTAKE_KEY",
+        ),
+    ],
+)
+def test_the_intake_stays_off_without_a_token_or_with_plain_text_off_loopback(found, why):
+    assert alert_intake.refusal(found) == f"alert intake off: {why}"
+
+
+@pytest.mark.parametrize(
+    "found",
+    [
+        alert_intake.Settings("0.0.0.0", 8796, None, "s3cret", *TLS),
+        alert_intake.Settings("127.0.0.1", 8796, None, "s3cret", "", ""),
+        alert_intake.Settings("::1", 8796, None, "s3cret", "", ""),
+    ],
+)
+def test_the_intake_listens_with_a_token_over_tls_or_on_loopback(found):
+    assert alert_intake.refusal(found) == ""
 
 
 @pytest.mark.parametrize(
@@ -204,15 +266,20 @@ class Sent:
         self.code, self.headers, self.ended = None, [], False
 
 
-def handler(redis, body, address="192.168.4.20", path="/alerts", networks=None, length=None, tail=b""):
+TOKEN = "s3cret"
+
+
+def handler(redis, body, address="192.168.4.20", path="/alerts", networks=None, length=None, auth=f"Bearer {TOKEN}"):
     raw = body if isinstance(body, bytes) else json.dumps(body).encode()
     sent = Sent()
     found = alert_intake.Handler.__new__(alert_intake.Handler)
-    found.server = SimpleNamespace(redis=redis, networks=networks, clock=lambda: NOW)
+    found.server = SimpleNamespace(redis=redis, networks=networks, clock=lambda: NOW, token=TOKEN)
     found.client_address = (address, 40000)
     found.path = path
     found.headers = {} if length == "" else {"Content-Length": str(len(raw) if length is None else length)}
-    found.rfile = io.BytesIO(raw + tail)
+    if auth is not None:
+        found.headers["Authorization"] = auth
+    found.rfile = io.BytesIO(raw)
     found.wfile = io.BytesIO()
     found.send_response = lambda code: setattr(sent, "code", code)
     found.send_header = lambda name, value: sent.headers.append((name, value))
@@ -230,7 +297,8 @@ def test_a_post_from_an_allowed_source_applies_the_alerts(redis):
 
 
 def test_a_post_reads_only_its_declared_length(redis):
-    sent, body = handler(redis, payload(alert()), tail=b"trailing bytes")
+    raw = json.dumps(payload(alert())).encode()
+    sent, body = handler(redis, raw + b"trailing bytes", length=len(raw))
     assert (sent.code, body) == (200, {"actions": ["fired ci_queue on sw"]})
 
 
@@ -250,6 +318,18 @@ def test_a_post_from_another_source_is_refused_and_changes_nothing(redis):
     sent, body = handler(redis, payload(alert()), address="8.8.8.8")
     assert (sent.code, body) == (403, {"error": "source not allowed"})
     assert standing.read(redis, "sw") == {}
+
+
+@pytest.mark.parametrize("auth", [None, "Bearer wrong", TOKEN])
+def test_a_post_without_the_token_is_refused_and_changes_nothing(redis, auth):
+    sent, body = handler(redis, payload(alert()), auth=auth)
+    assert (sent.code, body, sent.ended) == (401, {"error": "missing or wrong token"}, True)
+    assert standing.read(redis, "sw") == {}
+
+
+def test_a_source_outside_the_networks_is_refused_before_its_token_is_judged(redis):
+    sent, body = handler(redis, payload(alert()), address="8.8.8.8", auth=None)
+    assert (sent.code, body) == (403, {"error": "source not allowed"})
 
 
 def test_a_post_to_another_path_is_not_found(redis):
@@ -304,24 +384,77 @@ def test_a_body_declared_at_the_size_cap_is_read(redis):
     assert sent.code == 200
 
 
-def test_serve_listens_on_the_configured_address_with_the_store_and_clock(redis, monkeypatch):
+class FakeServer:
     built = []
 
-    class FakeServer:
-        def __init__(self, address, handler_class):
-            built.append((address, handler_class))
+    def __init__(self, address, handler_class):
+        self.socket = "plain socket"
+        FakeServer.built.append((address, handler_class))
 
-        def serve_forever(self):
-            built.append((self.redis, self.networks, self.clock))
+    def serve_forever(self):
+        FakeServer.built.append((self.socket, self.redis, self.networks, self.clock, self.token))
 
+
+class FakeContext:
+    made = []
+
+    def __init__(self, protocol):
+        self.protocol = protocol
+        FakeContext.made.append(self)
+
+    def load_cert_chain(self, cert, key):
+        self.chain = (cert, key)
+
+    def wrap_socket(self, sock, **options):
+        self.wrapped = (sock, options)
+        return "tls socket"
+
+
+@pytest.fixture
+def fakes(monkeypatch):
+    FakeServer.built, FakeContext.made = [], []
     monkeypatch.setattr(alert_intake, "HTTPServer", FakeServer)
+    monkeypatch.setattr(alert_intake.ssl, "SSLContext", FakeContext)
+
+
+def test_serve_listens_over_tls_with_the_store_clock_and_token(redis, fakes):
     clock = lambda: NOW  # noqa: E731
     networks = (ipaddress.ip_network("10.1.2.0/24"),)
-    assert alert_intake.serve(redis, alert_intake.Settings("10.1.2.3", 9001, networks), clock) is True
-    assert built == [(("10.1.2.3", 9001), alert_intake.Handler), (redis, networks, clock)]
+    found = alert_intake.Settings("10.1.2.3", 9001, networks, TOKEN, *TLS)
+    assert alert_intake.serve(redis, found, clock) is True
+    assert FakeServer.built == [
+        (("10.1.2.3", 9001), alert_intake.Handler),
+        ("tls socket", redis, networks, clock, TOKEN),
+    ]
+    (context,) = FakeContext.made
+    assert (context.protocol, context.minimum_version, context.chain) == (
+        alert_intake.ssl.PROTOCOL_TLS_SERVER,
+        alert_intake.ssl.TLSVersion.TLSv1_2,
+        TLS,
+    )
+    assert context.wrapped == ("plain socket", {"server_side": True, "do_handshake_on_connect": False})
 
 
-def test_serve_with_port_zero_stays_off(redis, monkeypatch, capsys):
-    monkeypatch.setattr(alert_intake, "HTTPServer", lambda *args: pytest.fail("no server expected"))
-    assert alert_intake.serve(redis, alert_intake.Settings("0.0.0.0", 0, None), lambda: NOW) is False
-    assert capsys.readouterr().err == "alert intake off: AGENTIHOOKS_ALERT_INTAKE_PORT is 0\n"
+def test_serve_on_loopback_without_a_certificate_stays_plain(redis, fakes):
+    assert alert_intake.serve(redis, alert_intake.Settings("127.0.0.1", 9001, None, TOKEN, "", ""), lambda: NOW)
+    assert FakeServer.built[1][0] == "plain socket"
+    assert FakeContext.made == []
+
+
+@pytest.mark.parametrize("cert", [("", TLS[1]), (TLS[0], "")])
+def test_serve_on_loopback_with_half_a_certificate_stays_plain(redis, fakes, cert):
+    assert alert_intake.serve(redis, alert_intake.Settings("127.0.0.1", 9001, None, TOKEN, *cert), lambda: NOW)
+    assert FakeContext.made == []
+
+
+@pytest.mark.parametrize(
+    ("found", "why"),
+    [
+        (alert_intake.Settings("0.0.0.0", 0, None, TOKEN, *TLS), "AGENTIHOOKS_ALERT_INTAKE_PORT is 0"),
+        (alert_intake.Settings("0.0.0.0", 8796, None, "", *TLS), "AGENTIHOOKS_ALERT_INTAKE_TOKEN is not set"),
+    ],
+)
+def test_serve_stays_off_and_says_why(redis, fakes, capsys, found, why):
+    assert alert_intake.serve(redis, found, lambda: NOW) is False
+    assert FakeServer.built == []
+    assert capsys.readouterr().err == f"alert intake off: {why}\n"

@@ -28,7 +28,8 @@ def _out(argv, refused):
 def _pushed(branch):
     if not branch:
         raise SwarmError("the task records no branch; push it and run swarm branch before parking")
-    remote = shell(["git", "ls-remote", "--heads", "origin", branch]).stdout.split()
+    listed = shell(["git", "ls-remote", "--heads", "origin", branch]).stdout.splitlines()
+    remote = [line.split()[0] for line in listed if line.endswith(f"\trefs/heads/{branch}")]
     if not remote:
         raise SwarmError(f"branch {branch} is not on origin; push it first with git push -u origin {branch}")
     if remote[0] != _out(["git", "rev-parse", "HEAD"], "cannot read the worktree head"):

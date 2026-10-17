@@ -387,7 +387,12 @@ def live_inputs(slug: str, store, ledger, environ: dict, now_ms: int) -> ScaleIn
     agents = [agent for agent in store.agents(slug) if not _ended(agent, rows)]
     demand = {lane: len(tasks) for lane, tasks in ready.items()}
     spent = spawn_counter(store, now_ms)
-    return ScaleInputs(observations, agents, demand, host_budget.read_host, read(store, slug), warned, spent, now_ms)
+    host = host_budget.read_host
+    if host_budget.deployed(environ):
+        from scripts.swarm_v2 import deployed
+
+        host = deployed.worker_host(environ, slug)
+    return ScaleInputs(observations, agents, demand, host, read(store, slug), warned, spent, now_ms)
 
 
 def spawn_counter(store: RedisStore, now_ms: int) -> Callable[[int], int]:

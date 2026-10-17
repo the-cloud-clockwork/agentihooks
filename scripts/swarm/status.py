@@ -12,11 +12,13 @@ from scripts.gates import quiet as quiet_gate
 from scripts.gates.talk import WORKER_LANES
 from scripts.handoff import transfers
 from scripts.hive import placement_waits, reports
+from scripts.inbox import outbox
 from scripts.inbox.store import InboxStore
 from scripts.swarm import (
     affinity,
     bottleneck,
     bottleneck_status,
+    capabilities,
     drain_watch,
     failed_panes,
     idle,
@@ -82,6 +84,8 @@ def findings(store, slug, config, tasks, events):
                 "kind": "task started" if row["state"] == "started" else "launch failed",
                 "target": f"tasks/{row['task']}",
                 "error": row["error"],
+                "at": row["at"],
+                "after": row.get("after"),
             }
             for row in store.launches(slug)
             if row["state"] in ("started", "failed")
@@ -239,6 +243,11 @@ def observation(store, slug, agent):
     return {"state": UNCLASSIFIED, "observed_at": at, "sources": {observe.Source.HEARTBEAT.value: heartbeat}}
 
 
+def transport(agent: AgentRecord) -> dict:
+    found = capabilities.of_agent(agent)
+    return {"push_inbox": found.push_inbox, "native_terminal_attach": found.native_terminal_attach}
+
+
 def live_agents(agents: list[AgentRecord], runtime: Runtime) -> list[AgentRecord]:
     names = runtime.live_names()
     return [a for a in agents if a.runtime_backend != "local" or reports.host(a) or a.name in names]
@@ -267,6 +276,7 @@ def status_report(store: RedisStore, slug: str, state: dict, runtime: Runtime | 
                 "promoted": a.name == promotion.get("promoted"),
                 "state_since": int(store.redis.hget(store.key(slug, "state-since"), a.name) or 0),
                 "observation": observation(store, slug, a),
+                "capabilities": transport(a),
                 "gates": active.get(a.name, []),
                 "inbox": [
                     {"text": item.text, "sender": item.sender, "state": item.state}
@@ -276,6 +286,7 @@ def status_report(store: RedisStore, slug: str, state: dict, runtime: Runtime | 
             for a in visible
         ],
         "outages": outage.open_records(slug),
+        "outbox": outbox.status(),
         "last_tick": int(store.redis.get(store.key(slug, "last-tick")) or 0),
         "last_tick_activity": tick_activity.read(store, slug),
         "history": [json.loads(row) for row in store.redis.lrange(store.key(slug, "history"), 0, -1)],

@@ -14,10 +14,10 @@ def _workflow():
     return yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
 
 
-def test_sonar_is_required_on_dev_and_main_pull_requests():
+def test_sonar_remains_required_during_promotion_trigger_rollout():
     workflow = _workflow()
     event = workflow[True]["pull_request"]
-    assert set(event["branches"]) == {"dev", "main"}
+    assert set(event["branches"]) in ({"dev", "main"}, {"dev"})
     assert "paths" not in event
     assert "paths-ignore" not in event
     jobs = workflow["jobs"]
@@ -31,7 +31,7 @@ def test_sonar_is_required_on_dev_and_main_pull_requests():
     )
     assert not sonar.get("continue-on-error")
     gate = next(step for step in sonar["steps"] if step.get("name") == "SonarQube Quality Gate")
-    assert gate["if"] == "steps.current.outputs.superseded != 'true'"
+    assert "if" not in gate
     assert not gate.get("continue-on-error")
     assert jobs["lint"]["needs"] in (["reuse"], ["reuse", "admission"])
     assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
@@ -50,7 +50,7 @@ def test_sonar_restores_downloads_before_every_scan():
     assert "${{ runner.arch }}" in key
     assert "hashFiles(" not in key
     assert "if" not in cache
-    assert steps[scan_index]["if"] == "steps.current.outputs.superseded != 'true'"
+    assert "if" not in steps[scan_index]
     assert not cache.get("continue-on-error")
 
 
@@ -81,40 +81,6 @@ def test_required_gate_rejects_unsuccessful_sonar(sonar):
     assert (result.returncode == 0) == (sonar == "success"), result.stdout + result.stderr
     if result.returncode:
         assert "::error::" in result.stdout
-
-
-@pytest.mark.parametrize("dev", ["graded", "newer", ""])
-def test_dev_push_sonar_guard_rejects_unscanned_revision(tmp_path, dev):
-    steps = _workflow()["jobs"]["sonar"]["steps"]
-    step = next(s for s in steps if s.get("id") == "current")
-    assert step["if"] == "github.event_name == 'push'"
-    assert steps.index(step) < next(i for i, s in enumerate(steps) if s.get("name") == "SonarQube Scan")
-    assert not step.get("continue-on-error", False)
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    git = bin_dir / "git"
-    git.write_text(
-        "#!/usr/bin/env bash\n"
-        '[[ "$*" == "ls-remote origin refs/heads/dev" ]] || exit 2\n'
-        + (f"printf '{dev}\\trefs/heads/dev\\n'\n" if dev else "")
-    )
-    git.chmod(0o755)
-    output = tmp_path / "output"
-    output.write_text("")
-    result = subprocess.run(
-        ["bash", "-eo", "pipefail", "-c", step["run"]],
-        env=dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", SHA="graded", GITHUB_OUTPUT=str(output)),
-        capture_output=True,
-        text=True,
-    )
-    if dev == "graded":
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert output.read_text() == "superseded=false\n"
-    else:
-        assert result.returncode != 0, result.stdout + result.stderr
-        if dev:
-            assert output.read_text() == "superseded=true\n"
-            assert "::error::" in result.stdout
 
 
 def _queued_step():

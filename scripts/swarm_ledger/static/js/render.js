@@ -204,12 +204,17 @@ function difficultyLabel(item) {
   return h("span", { class: `difficulty difficulty-${item.difficulty}`, text: `size ${item.difficulty}`, title: `set by ${item.difficulty_source || "operator"}${confidence}` });
 }
 
+function awaitingLabel(item) {
+  const awaiting = item.state === "done" ? "" : (item.awaiting || "").replace(/[_-]+/g, " ");
+  return awaiting ? h("span", { class: "awaiting", text: awaiting }) : null;
+}
+
 function taskRow(item, tasks) {
   const key = `tasks/${item.id}`;
   const waits = taskBlockers(item, tasks || []);
   const link = (url, label) => /^https?:\/\//.test(url || "") ? h("a", { href: url, target: "_blank", rel: "noopener", text: label }) : null;
   const meta = h("div", { class: "task-meta" }, rankPick(key, item), difficultyLabel(item), h("span", { text: item.lane }), item.kind ? h("span", { class: "kind", text: item.kind }) : null,
-    h("span", { text: item.state }),
+    h("span", { text: item.state }), awaitingLabel(item),
     item.phase ? h("span", { text: item.phase }) : null,
     item.claimed_by ? h("span", { class: "claimed", text: `claimed by ${item.claimed_by}` }) : null,
     link(item.plan_url, "plan"), link(item.issue_url, "issue"), link(item.pr_url, "pull request"));

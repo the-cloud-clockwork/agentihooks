@@ -6121,7 +6121,7 @@ def _cmd_conditions(args: argparse.Namespace) -> None:
         index = conditions.build_index(entries)
         command = getattr(args, "bash_command", "") or ""
         call = f"{tool} {command!r}" if command else tool
-        for s in [step] if step else list(conditions.STEPS):
+        for s in [s for s in conditions.TOOL_STEPS if not step or s == step]:
             fired = conditions.matching(s, tool, {"command": command} if command else {}, index)
             print(f"\n{s} {call}: {', '.join(e['file'] for e in fired) or 'no conditions fire'}")
 
@@ -6693,7 +6693,7 @@ examples:
         help="Inspect bundle and profile conditions (scripts run on matching tool calls)",
     )
     cond_p.add_argument("action", choices=["list"], help="Conditions action")
-    cond_p.add_argument("--step", choices=["pre", "post", "stop"], help="Only this step")
+    cond_p.add_argument("--step", choices=["pre", "post", "stop", "start"], help="Only this step")
     cond_p.add_argument("--tool", default="", help="Show which conditions fire for this tool name")
     cond_p.add_argument("--command", dest="bash_command", default="", help="Bash command to match with --tool Bash")
 
