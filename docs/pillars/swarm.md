@@ -408,6 +408,66 @@ its origin repository. The push sets the checkout's upstream to the chosen
 remote branch. Publication does not retarget or open a pull request: record the
 pull request for the published branch with `swarm pr`.
 
+### Continue an existing pull request with one push
+
+A successor continuing an existing pull request publishes its commit only to
+the retained pull request branch. Its newly prepared local branch is not also
+pushed. This removes the second branch push that previously started another
+Mutation preflight for the same commit. The `push-stop` gate uses the same
+retained target when it pushes committed work at Stop.
+
+The retained target comes from `continue_from` in the task's handoff envelope,
+or its reclaim record when there is no nonempty handoff envelope. It must name
+an `origin/` branch, and its local remote tracking ref must be an ancestor of
+`HEAD`. The protected names `dev`, `main`, `master` and `v1` are excluded from
+retained targets. A fresh continuation supplies no retained target. These are
+runtime records; no new flag or environment variable enables this behavior.
+
+For example, a successor may prepare a local branch with its own worker name
+while its handoff retains the predecessor's pull request branch. Work in the
+returned checkout and publish normally:
+
+```bash
+agentihooks swarm <id> prepare
+cd <returned-worktree>
+agentihooks swarm <id> publish \
+  --message "Document continuation publication" \
+  -- docs/pillars/swarm.md
+```
+
+The returned `branch` should name the predecessor's pull request branch, and
+`head` should match that pull request's updated head. The local upstream also
+tracks the retained branch. Keep using the existing pull request; do not push
+the prepared branch separately to publish the same commit. From the repository
+checkout, compare the result with GitHub; replace `PR_NUMBER` with the existing
+pull request's number:
+
+```bash
+gh api 'repos/{owner}/{repo}/pulls/PR_NUMBER' \
+  --jq '{branch: .head.ref, head: .head.sha}'
+git rev-parse --abbrev-ref '@{upstream}'
+```
+
+If the retained ref is missing or fails ancestry, `publish` tries its other
+recorded candidate before falling back to the local branch, as described
+above. `push-stop` falls back directly to the worktree's own branch. Thus a
+restacked successor that no longer continues the retained history may publish
+a new branch instead.
+
+Both push paths use a lease when the target differs from the local branch.
+A remote branch deleted while its tracking ref remains stale is refused
+rather than recreated; a changed remote ref can also reject the push. Read the
+remote state and reconcile the continuation before retrying. Removing the
+lease or pushing the same commit to a second branch defeats this protection.
+
+See [continuation publication and preflight runs](../reference/mutation-gate.md#continuation-publication-and-preflight-runs)
+for CI inspection and the distinction between a workflow run and mutation work.
+Delivered by [pull request 4076](https://github.com/the-cloud-clockwork/agentihooks/pull/4076),
+with a [successful focused regression proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39036611380)
+and [successful mutation preflight](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39037126637).
+Those proofs establish the tested branch selection and gate results; inspecting
+one live continuation's workflow runs is a separate operational check.
+
 ### Resume parked work and publish
 
 Use this sequence as the task's current worker, after reading its handoff and
