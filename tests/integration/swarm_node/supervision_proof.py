@@ -94,7 +94,7 @@ def heartbeats(container, root, accepted):
         try:
             observed = json.loads(docker("exec", container, "python", "-c", code))
         except (subprocess.CalledProcessError, ValueError) as exc:
-            observed = exc
+            observed = getattr(exc, "output", None) or exc
         else:
             if accepted(observed):
                 return observed

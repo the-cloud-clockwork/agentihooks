@@ -88,8 +88,9 @@ def test_a_container_that_never_exits_still_fails_and_is_removed(container, tmp_
     assert container.calls[-1][0] == ("rm", "--force", "container")
 
 
-def test_a_failed_heartbeat_read_is_retried(container, tmp_path):
-    container.ticks = iter((subprocess.CalledProcessError(1, "docker"), 1, 2))
+@pytest.mark.parametrize("error", [subprocess.CalledProcessError(1, "docker"), ValueError("bad json")])
+def test_a_failed_heartbeat_read_is_retried(container, tmp_path, error):
+    container.ticks = iter((error, 1, 2))
 
     result = proof.run_case("image", "complete", tmp_path, viewer=False)
 
@@ -98,7 +99,7 @@ def test_a_failed_heartbeat_read_is_retried(container, tmp_path):
 
 
 @pytest.mark.parametrize("beats", [5, 4])
-def test_heartbeats_that_never_advance_fail_and_the_container_is_removed(container, tmp_path, beats):
+def test_heartbeats_never_accepted_fail_and_the_container_is_removed(container, tmp_path, beats):
     container.ticks = itertools.repeat(1)
     container.beats = beats
 
