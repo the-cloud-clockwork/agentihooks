@@ -120,10 +120,12 @@ def _apply_send(store, me, record):
     args = record["args"]
     check_address(store, me, args["address"])
     links.check_send(store, me, args["address"])
-    task = store.receiver_task(args["address"])
-    item = store.send(me, args["address"], args["text"], fyi=args["fyi"], task=task, item_id=record["item"])
+    status = dispatcher_status(store, args["address"]) if not args["fyi"] else {}
+    address = status.get("dispatch", {}).get("owner", args["address"])
+    task = store.receiver_task(address)
+    item = store.send(me, address, args["text"], fyi=args["fyi"], task=task, item_id=record["item"])
     result = {"id": item.id, "from": item.sender, "to": item.address, "state": item.state}
-    return result | (dispatcher_status(store, item.address) if not item.fyi else {})
+    return result | status
 
 
 def _apply_reply(store, me, record):

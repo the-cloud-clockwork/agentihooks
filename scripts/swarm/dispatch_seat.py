@@ -142,7 +142,9 @@ def run(slug: str, config, store, runtime, doc: dict, now_ms: int, sleeping: boo
         return [_end(slug, store, seat) for seat in seats]
     gone = [seat for seat in seats if left(seat, doc)]
     if gone:
-        if seen := set(store.redis.hkeys(store.key(slug, SENT))) & {trigger["id"] for trigger in found}:
+        if seen := set(store.redis.hkeys(store.key(slug, SENT))) & {
+            trigger["id"] for trigger in found if trigger.get("kind") != "inbox"
+        }:
             store.redis.sadd(store.key(slug, LEFT), *seen)
         return [_end(slug, store, seat, DEPARTED) for seat in gone]
     if seats:
