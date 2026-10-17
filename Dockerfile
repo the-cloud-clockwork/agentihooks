@@ -34,11 +34,12 @@ ENV PATH=/opt/venv/bin:$PATH \
     LEDGER_PORT=8765 \
     LEDGER_DIR=/data \
     SWARM_RELOAD=0
-RUN --mount=type=bind,from=herdr,source=/opt/swarm-node,target=/opt/swarm-node \
+RUN --mount=type=bind,source=docker/swarm-node,target=/opt/swarm-node \
+    --mount=type=bind,source=scripts/swarm_v2/worker_image.py,target=/opt/worker_image.py \
     python -c 'import json; from pathlib import Path; s=json.loads(Path("/opt/swarm-node/versions.lock").read_text())["debian_snapshot"]; Path("/etc/apt/sources.list").write_text(f"deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/{s} bookworm main\ndeb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/{s} bookworm-security main\n")' \
     && rm /etc/apt/sources.list.d/debian.sources \
     && apt-get update \
-    && apt-get install -y --no-install-recommends $(python /opt/swarm-node/worker_image.py shell-packages --package openssh-client) \
+    && apt-get install -y --no-install-recommends $(python /opt/worker_image.py shell-packages --package openssh-client) \
     && rm -r /var/lib/apt/lists/*
 RUN groupadd --gid 10001 swarm && useradd --uid 10001 --gid swarm --create-home swarm && mkdir /data && chown swarm:swarm /data
 COPY --from=dependencies /opt/venv /opt/venv
