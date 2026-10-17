@@ -58,7 +58,7 @@ def complexity(
     return found
 
 
-def source(base: str, old: Path) -> bytes | None:
+def base_source(base: str, old: Path) -> bytes | None:
     shown = subprocess.run(["git", "show", f"{base}:{old.as_posix()}"], capture_output=True)
     try:
         ast.parse(shown.stdout)
@@ -71,7 +71,7 @@ def baseline(base: str, paths: dict[Path, Path]) -> dict[tuple[str, str], tuple[
     with tempfile.TemporaryDirectory() as directory:
         tree, present = Path(directory).resolve(), []
         for path, old in paths.items():
-            if (content := source(base, old)) is not None:
+            if (content := base_source(base, old)) is not None:
                 (tree / path).parent.mkdir(parents=True, exist_ok=True)
                 (tree / path).write_bytes(content)
                 present.append(path)
@@ -91,7 +91,7 @@ def logic(source: bytes) -> dict[str, str]:
 def touched(base: str, paths: dict[Path, Path]) -> dict[str, set[str]]:
     found = {}
     for path, old in paths.items():
-        before = {} if (content := source(base, old)) is None else logic(content)
+        before = {} if (content := base_source(base, old)) is None else logic(content)
         found[path.as_posix()] = {name for name, dump in logic(path.read_bytes()).items() if before.get(name) != dump}
     return found
 
@@ -116,10 +116,11 @@ def allowance(
             limit = listed.get(path, {}).get("file-lines")
         else:
             limit = listed.get(f"{path}::{name}", {}).get("function-lines" if rule == "lines" else rule)
-        if limit is not None and (path, unit) in allowed:
+        if limit is None:
+            continue
+        if (path, unit) in allowed:
             limit = min(limit, allowed[(path, unit)][0])
-        if limit is not None:
-            allowed[(path, unit)] = (limit, "")
+        allowed[(path, unit)] = (limit, "")
     return allowed
 
 
