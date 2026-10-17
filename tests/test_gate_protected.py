@@ -301,16 +301,18 @@ def test_the_protected_grader_never_executes_the_head():
     assert "git checkout" not in runs and "git worktree" not in runs
 
 
-def test_branch_lane_grading_holds_the_required_status_from_the_base():
-    steps = _protected_workflow()["jobs"]["grade"]["steps"]
-    grade = next(step for step in steps if step.get("id") == "grade")
-    assert grade["run"].splitlines() == [
-        'python -m scripts.ci_branch_lanes --head "$HEAD_SHA"',
-        'python -m scripts.gate_protected --head "$HEAD_SHA"',
-    ]
-    report = steps[-1]
-    assert report["env"]["OUTCOME"] == "${{ steps.grade.outcome }}"
-    assert "state=failure" in report["run"]
+@pytest.mark.parametrize("name", ["test.yml", "branch-lanes.yml"])
+def test_branch_lane_grading_holds_the_required_status_from_the_base(repo, capsys, name):
+    from scripts.ci_branch_lanes import GROUP
+
+    base = _workflow()
+    base["concurrency"] = {"group": GROUP, "queue": "max", "cancel-in-progress": False}
+    _commit(repo, {name: base}, {}, "base lane")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    planted = _commit(repo, {name: _workflow()}, {}, "drop workflow lane")
+    _git(repo, "checkout", "-q", "dev")
+    assert gate_protected.main(["--root", str(repo), "--head", planted]) == 1
+    assert "shared hosted lane concurrency group" in capsys.readouterr().out
 
 
 def test_the_protected_grader_reports_gate_required_on_the_head():
