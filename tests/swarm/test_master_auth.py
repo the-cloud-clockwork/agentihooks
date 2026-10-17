@@ -251,3 +251,13 @@ def test_only_a_claude_master_without_an_ordered_route_desires_the_login(tmp_pat
     )
     task = {"id": lane, "title": "proof", **({"route_kind": route} if route else {})}
     assert runtime.spawn(config, lane, "agent", task).desired_route_kind == desired
+
+
+@pytest.mark.parametrize("placed,kept", [("", ""), ("interactive", "interactive"), (None, "interactive")])
+def test_a_placement_decides_the_desired_route_and_an_undecided_one_keeps_the_record(placed, kept):
+    from scripts.swarm.store import AgentRecord
+    from scripts.swarm.tick import Placed, placed_record
+
+    record = AgentRecord("agent", "master", "master", desired_route_kind="interactive")
+    decided = Placed("pane", "claude") if placed is None else Placed("pane", "claude", desired_route_kind=placed)
+    assert placed_record(record, decided).desired_route_kind == kept
