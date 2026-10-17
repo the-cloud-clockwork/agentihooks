@@ -53,6 +53,7 @@ from scripts.swarm import (
     profile_first,
     promotion_watch,
     reaper,
+    release_wait,
     resume,
     retire_watch,
     seat_spawn,
@@ -720,7 +721,9 @@ def _owned_tasks(slug, store):
 def _claimable(slug, store, rows, doc, lane, dispatched=None):
     awaiting = _owned_tasks(slug, store)
     held = [t.get("territory") or [] for t in rows.values() if t.get("state") in ACTIVE]
-    graph, fix = hierarchy.project(doc)[0], freeze.fix_phase(store.config(slug))
+    config = store.config(slug)
+    graph, fix = hierarchy.project(doc)[0], freeze.fix_phase(config)
+    released = release_wait.checker(config.repo)
     clear, overlapping = [], []
     for t in sorted(rows.values(), key=dispatched or claim_order.key(rows)):
         if (
@@ -728,6 +731,7 @@ def _claimable(slug, store, rows, doc, lane, dispatched=None):
             and t["id"] not in awaiting
             and ready(t, rows, doc, graph, fix)
             and store.claimant(slug, t["id"]) is None
+            and released(t)
         ):
             mine = t.get("territory") or []
             if any(_overlaps(mine, other) for other in held):

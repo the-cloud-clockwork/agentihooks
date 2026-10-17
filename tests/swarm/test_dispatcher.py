@@ -330,6 +330,15 @@ def test_at_delegate_a_task_entering_the_queue_head_gets_one_comment_and_a_log_r
     assert len({r["event_id"] for r in rows}) == 3
 
 
+def test_the_rank_pass_reads_releases_from_the_swarm_repository(store, home, shipped, monkeypatch):
+    from scripts.swarm import release_wait
+
+    repos = []
+    monkeypatch.setattr(release_wait, "checker", lambda repo: repos.append(repo) or (lambda task: True))
+    dispatcher.rank_pass(SLUG, store.config(SLUG), store, Ledger(), doc(ladder()), NOW)
+    assert repos == [store.config(SLUG).repo]
+
+
 def test_the_queue_head_follows_claims_operator_ranks_and_freezes_with_one_comment_per_change(store, home, shipped):
     store.update(SLUG, autonomy="full", max_eng=2)
     tasks = [*deep_and_wide(), task("w1", phase="", depends_on=["l1"])]

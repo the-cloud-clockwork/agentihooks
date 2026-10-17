@@ -147,7 +147,7 @@ def test_empty_collection_is_refused(tmp_path, monkeypatch):
         duration_coverage.collected_tests(tmp_path)
 
 
-def test_collection_splits_the_suite_across_processes_without_assertion_rewriting(tmp_path, monkeypatch):
+def test_collection_runs_the_whole_suite_in_one_process_without_assertion_rewriting(tmp_path, monkeypatch):
     from tests import duration_coverage
 
     (tmp_path / "tests/sub").mkdir(parents=True)
@@ -157,34 +157,40 @@ def test_collection_splits_the_suite_across_processes_without_assertion_rewritin
     calls = []
 
     def collect(args, **kwargs):
-        options = args[args.index("--collect-only") :]
-        assert args[3] == "tests/"
-        assert options[:5] == ["--collect-only", "-q", "--assert=plain", "-p", "no:cacheprovider"]
-        kept = [path for path in files if f"--ignore={path}" not in args]
-        calls.append(kept)
-        output = "".join(f"{path}::test_{i}\n" for path in kept for i in (1, 2))
-        return subprocess.CompletedProcess(args, 0 if kept != ["tests/test_a.py"] else 5, output, "")
+        calls.append(args)
+        assert args[3:9] == ["tests/", "--collect-only", "-q", "--assert=plain", "-p", "no:cacheprovider"]
+        assert not any(arg.startswith("--ignore") for arg in args)
+        output = "".join(f"{path}::test_{i}\n" for path in reversed(files) for i in (1, 2))
+        return subprocess.CompletedProcess(args, 0, output, "")
 
-    monkeypatch.setattr(duration_coverage.os, "cpu_count", lambda: 2)
     monkeypatch.setattr(duration_coverage.subprocess, "run", collect)
     assert duration_coverage.collected_tests(tmp_path) == [f"{path}::test_{i}" for path in files for i in (1, 2)]
-    assert sorted(calls) == [["tests/sub/test_c.py", "tests/test_b.py"], ["tests/test_a.py"]]
+    assert len(calls) == 1
 
 
-def test_a_failed_collection_process_fails_the_whole_collection(tmp_path, monkeypatch):
+@pytest.mark.parametrize("returncode", [1, 2, 3, 4])
+def test_a_failed_collection_fails_the_whole_collection(tmp_path, monkeypatch, returncode):
     from tests import duration_coverage
 
     (tmp_path / "tests").mkdir()
-    for path in ("tests/test_a.py", "tests/test_b.py"):
-        (tmp_path / path).write_text("")
+    (tmp_path / "tests/test_a.py").write_text("")
 
     def collect(args, **kwargs):
-        failed = "--ignore=tests/test_a.py" in args
-        return subprocess.CompletedProcess(args, int(failed), "" if failed else "tests/test_a.py::t\n", "broken b")
+        return subprocess.CompletedProcess(args, returncode, "tests/test_a.py::t\n", "broken b")
 
-    monkeypatch.setattr(duration_coverage.os, "cpu_count", lambda: 2)
     monkeypatch.setattr(duration_coverage.subprocess, "run", collect)
     with pytest.raises(RuntimeError, match="broken b"):
+        duration_coverage.collected_tests(tmp_path)
+
+
+def test_no_tests_collected_status_is_refused(tmp_path, monkeypatch):
+    from tests import duration_coverage
+
+    (tmp_path / "tests").mkdir()
+    monkeypatch.setattr(
+        duration_coverage.subprocess, "run", lambda args, **kwargs: subprocess.CompletedProcess(args, 5, "", "")
+    )
+    with pytest.raises(RuntimeError, match="No tests collected"):
         duration_coverage.collected_tests(tmp_path)
 
 

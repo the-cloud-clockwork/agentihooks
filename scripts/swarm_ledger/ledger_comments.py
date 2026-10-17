@@ -52,7 +52,7 @@ def problems(text, kind, long=False, task_ids=()):
     prose = web_links().sub(" ", text)
     hash_prose = re.sub(r"[\w-]+", lambda match: " " if match.group() in task_ids else match.group(), prose)
     for name, pattern in RULES:
-        match = pattern.search(hash_prose if name == "commit hash" else prose)
+        match = pattern.search(hash_prose if name in ("commit hash", "run or job id") else prose)
         if match:
             found.append(f"{name} '{match.group(0).strip()}'")
     for name, mark, most in PUNCTUATION:

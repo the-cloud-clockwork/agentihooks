@@ -34,7 +34,15 @@ class AttachError(RuntimeError):
 
 
 def viewer_argv(codex_bin: str, record: TransportRecord) -> list[str]:
-    return [codex_bin, "resume", "--remote", record.endpoint_ref, record.thread_id]
+    return [
+        codex_bin,
+        "-c",
+        "check_for_update_on_startup=false",
+        "resume",
+        "--remote",
+        record.endpoint_ref,
+        record.thread_id,
+    ]
 
 
 def attachable(record: TransportRecord | None) -> bool:

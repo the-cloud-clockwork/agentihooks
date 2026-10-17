@@ -43,6 +43,8 @@ def reads(*records):
 def test_the_viewer_resumes_the_recorded_thread_over_the_recorded_endpoint():
     assert attach.viewer_argv("codex", RECORD) == [
         "codex",
+        "-c",
+        "check_for_update_on_startup=false",
         "resume",
         "--remote",
         "unix:///run/exe-1/codex.sock",
@@ -274,7 +276,20 @@ def test_reopen_resumes_the_recorded_thread_and_never_starts_a_server(monkeypatc
     opened = []
     placed = SimpleNamespace(pane_id="w9:p4")
     result = attach.reopen(store, agent, lambda title, argv: opened.append((title, argv)) or placed, "/bin/codex")
-    assert opened == [("sw-master-1", ["/bin/codex", "resume", "--remote", RECORD.endpoint_ref, "thread-1"])]
+    assert opened == [
+        (
+            "sw-master-1",
+            [
+                "/bin/codex",
+                "-c",
+                "check_for_update_on_startup=false",
+                "resume",
+                "--remote",
+                RECORD.endpoint_ref,
+                "thread-1",
+            ],
+        )
+    ]
     assert not {"app-server", "serve", "scripts.codex_session"} & set(opened[0][1])
     assert result == {"agent": "sw-master-1", "thread": "thread-1", "pane": "w9:p4"}
 

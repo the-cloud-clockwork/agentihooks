@@ -790,10 +790,15 @@ def _answer_channel_warning(pane: str, environ: dict[str, str]) -> str:
     return "answered" if herdr_host.answer(pane, channel.WARNING, environ, CHANNEL_WARNING_MS) else "unseen"
 
 
-def _name_in_herdr(pane: str, name: str, agent: str, environ: dict[str, str], opening: str, since: float) -> list[str]:
+def _name_in_herdr(
+    pane: str, name: str, agent: str, environ: dict[str, str], opening: str, since: float, served: bool = False
+) -> list[str]:
+    """A served viewer's thread is named by its server before the first turn."""
     detected = herdr_host.rename_agent(pane, name, environ)
-    ready = agent == "codex" and (detected or bool(opening)) and herdr_host.wait_ready(pane, environ, CODEX_READY_S)
     named = [f"agent_name={herdr_host.agent_name(name)}"] if detected else ["agent_name=unset"]
+    if served:
+        return named
+    ready = agent == "codex" and (detected or bool(opening)) and herdr_host.wait_ready(pane, environ, CODEX_READY_S)
     if detected and agent == "codex":
         named += _name_codex_session(pane, name, environ, since, ready)
     if opening:
@@ -993,7 +998,15 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
     pane = next((line.split("=", 1)[1] for line in report if line.startswith("pane_id=")), "")
     herdr_panes.mark(pane, active_env, route_status=route.get("status", "pending"))
     if pane and _names_pane(route, launcher, agent):
-        report += _name_in_herdr(pane, name, agent, active_env, _held_prompt(launcher, agent), launcher_at / 1000)
+        report += _name_in_herdr(
+            pane,
+            name,
+            agent,
+            active_env,
+            _held_prompt(launcher, agent),
+            launcher_at / 1000,
+            served=args.codex_transport == APP_SERVER,
+        )
         if channel:
             report.append(f"channel_warning={_answer_channel_warning(pane, active_env)}")
     if args.handoff and route.get("status") != "routed":
