@@ -89,7 +89,7 @@ def _resize(slug, store, doc, agents, count, want, now_ms):
     masters.MasterSeats(store.redis).keep_retired(slug, want, count)
     if want >= count:
         _withdraw_asks(store, retiring)
-        store.redis.hdel(key, BELOW, BELOW_WANT, RETIRING)
+        store.redis.hdel(key, BELOW, RETIRING)
         return _recount(slug, store, doc, agents, count, want, now_ms) if want > count else []
     _withdraw_wanted_again(slug, store, key, retiring, want)
     if now_ms - _below_since(store.redis, key, want, now_ms) < HOLD_MS:
