@@ -83,6 +83,7 @@ def refresh(redis: "Redis", credential: str, redis_url: str) -> dict:
         if member_id is None:
             raise HiveError("the ledger credential belongs to no hive member")
         pipe.multi()
+        pipe.sadd(INDEX, member_id)
         _set_user(pipe, member_id, password)
         return member_id
 
