@@ -2,8 +2,8 @@
 
 Each tick it orders every claimable task in focus, leaves included, by the longest open dependency chain behind it,
 then the open work it unblocks, the bottleneck lane, focus order and ledger position. A rank the master or the swarm
-set is a default it reorders; only an operator rank, set by him or relayed with his quoted words, orders ahead of or
-behind that queue. At delegate and full the tick claims from this queue, resumed work first within a rank band and
+set is a default it reorders; only an operator rank, set by him or relayed with his quoted words, and an urgent rank,
+whoever set it, order ahead of or behind that queue. At delegate and full the tick claims from this queue, resumed work first within a rank band and
 clear territory before overlapping, and the dispatcher writes no rank: it comments on a task only when the task
 enters the head of its lane's queue, as many tasks as the lane has seats among those that unblock work or carry an
 operator rank, or leaves it while still open; a lane with no seats keeps its head until seats return. When a task on
@@ -46,6 +46,7 @@ ENTERED = "The dispatcher put this task at the head of the {lane} claim queue: {
 LEFT = "The dispatcher moved this task out of the head of the {lane} claim queue: {why}."
 LEADS = "it leads a chain of {chain} and unblocks {work}"
 OPERATOR_RANK = "the operator ranked it {rank}"
+URGENT_RANK = "it is ranked urgent"
 OUTRANKED = "it was outranked by {ahead} in focus with longer chains, more unblocked work or an operator rank"
 ENTER = (ENTERED, "put task {} at the head of")
 LEAVE = (LEFT, "moved task {} out of the head of")
@@ -121,7 +122,7 @@ def ordered(doc: dict, named: str, scores: dict) -> list[str]:
 
 
 def queue(doc: dict, fix: str) -> list[str]:
-    fixed, guard, known = _fixed(doc), guarded(doc, fix), {t["id"]: t for t in doc["tasks"]}
+    fixed, guard, known = _banded(doc), guarded(doc, fix), {t["id"]: t for t in doc["tasks"]}
     return sorted(ordered(doc, None, leverage(doc)), key=lambda task_id: _band(known[task_id], fixed, guard))
 
 
@@ -129,7 +130,7 @@ def claim_key(config, doc):
     if config.autonomy not in APPLIES:
         return None
     fix = freeze.fix_phase(config)
-    fixed, guard = _fixed(doc), guarded(doc, fix)
+    fixed, guard = _banded(doc), guarded(doc, fix)
     lined = queue(doc, fix)
     position = {task_id: index for index, task_id in enumerate(lined)}
     return lambda task: (_band(task, fixed, guard), position.get(task["id"], len(lined)))
@@ -182,8 +183,8 @@ def rank_pass(slug, config, store, ledger, doc, now_ms):
     claimable = {task_id for task_id, t in known.items() if tick.ready(t, known, doc, graph, fix) and released(t)}
     scores, fixed = leverage(doc), _fixed(doc)
     if config.autonomy in APPLIES:
-        before = _saved_heads(store, slug)
-        leading = [t for t in queue(doc, fix) if t in claimable and (scores[t] or t in fixed)]
+        before, banded = _saved_heads(store, slug), _banded(doc)
+        leading = [t for t in queue(doc, fix) if t in claimable and (scores[t] or t in banded)]
         heads = _heads(store, slug, config, leading, known, before)
         landed = {
             lane: [t for t in before.get(lane, []) if t in head or known.get(t, {}).get("state") == "open"]
@@ -247,6 +248,8 @@ def _head_steps(slug, ledger, doc, before, heads, standing, landed):
 def _entered_why(task, fixed, depth, scores):
     if task["id"] in fixed:
         return OPERATOR_RANK.format(rank=task["rank"])
+    if task.get("rank") == "urgent":
+        return URGENT_RANK
     return LEADS.format(chain=_work(depth[task["id"]]), work=_work(scores[task["id"]]))
 
 
@@ -331,6 +334,10 @@ def _open(task):
 def _fixed(doc):
     urgent = {t["id"] for t in doc["tasks"] if t.get("rank") == "urgent"}
     return _ranked_by(doc, ledger_rank.OPERATOR) | (_ranked_by(doc, AUTHOR) & urgent)
+
+
+def _banded(doc):
+    return _fixed(doc) | {t["id"] for t in doc["tasks"] if t.get("rank") == "urgent"}
 
 
 def _ranked_by(doc, author):
