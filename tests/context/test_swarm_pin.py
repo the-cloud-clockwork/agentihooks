@@ -124,3 +124,20 @@ def test_an_orphan_scan_skips_processes_it_cannot_read(tmp_path):
     (proc / "82" / "stat").write_text("82 (codex) S x 0 10\n")
     (proc / "self").mkdir()
     assert not swarm_pin.nested(IDENTITY, 52, proc)
+
+
+def test_an_orphan_scan_keeps_an_opening_parenthesis_inside_the_command_name(tmp_path):
+    proc = _orphan(tmp_path, 10)
+    (proc / "70").mkdir()
+    (proc / "70" / "stat").write_text("70 (x(claude) S 1 70 10\n")
+    assert not swarm_pin.nested(IDENTITY, 52, proc)
+
+
+def test_an_orphan_scan_ends_the_command_name_at_the_last_closing_parenthesis(tmp_path):
+    root = _tree(tmp_path)
+    _proc(root, 50, "claude", 1, 4)
+    _proc(root, 51, "sh", 50, 51)
+    _proc(root, 52, "python3", 51, 51)
+    (root / "71").mkdir()
+    (root / "71" / "stat").write_text("71 (claude)1 2 3 4 ) S 2 71 4\n")
+    assert not swarm_pin.nested({**IDENTITY, "AGENTIHOOKS_SWARM_LAUNCHER": "4"}, 52, root)
