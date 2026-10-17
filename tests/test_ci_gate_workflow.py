@@ -108,6 +108,7 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
             "dependency-audit",
             "durations",
             "split",
+            "collect",
             "kind-due",
             "helm-kind",
             "ledger-load",
