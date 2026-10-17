@@ -93,8 +93,8 @@ def heartbeats(container, root, accepted):
     for _ in range(100):
         try:
             observed = json.loads(docker("exec", container, "python", "-c", code))
-        except (subprocess.CalledProcessError, ValueError):
-            pass
+        except (subprocess.CalledProcessError, ValueError) as exc:
+            observed = exc
         else:
             if accepted(observed):
                 return observed

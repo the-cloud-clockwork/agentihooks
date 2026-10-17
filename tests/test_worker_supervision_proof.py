@@ -21,6 +21,7 @@ def container(monkeypatch):
         results=True,
         calls=[],
         ticks=iter((1, 2)),
+        beats=5,
     )
     clock = iter((False, True))
 
@@ -32,7 +33,9 @@ def container(monkeypatch):
             if "supervisor_pid" in args[-1]:
                 return "1"
             tick = next(observed.ticks)
-            return json.dumps({f"heartbeat-{i}.json": tick for i in range(5)})
+            if isinstance(tick, Exception):
+                raise tick
+            return json.dumps({f"heartbeat-{i}.json": tick for i in range(observed.beats)})
         if args[0] == "wait":
             if observed.wait_error:
                 raise observed.wait_error
@@ -85,8 +88,19 @@ def test_a_container_that_never_exits_still_fails_and_is_removed(container, tmp_
     assert container.calls[-1][0] == ("rm", "--force", "container")
 
 
-def test_heartbeats_that_never_advance_fail_and_the_container_is_removed(container, tmp_path):
+def test_a_failed_heartbeat_read_is_retried(container, tmp_path):
+    container.ticks = iter((subprocess.CalledProcessError(1, "docker"), 1, 2))
+
+    result = proof.run_case("image", "complete", tmp_path, viewer=False)
+
+    assert result["exit_code"] == 0
+    assert container.calls[-1][0] == ("rm", "--force", "container")
+
+
+@pytest.mark.parametrize("beats", [5, 4])
+def test_heartbeats_that_never_advance_fail_and_the_container_is_removed(container, tmp_path, beats):
     container.ticks = itertools.repeat(1)
+    container.beats = beats
 
     with pytest.raises(AssertionError, match="heartbeats not accepted"):
         proof.run_case("image", "complete", tmp_path, viewer=False)
