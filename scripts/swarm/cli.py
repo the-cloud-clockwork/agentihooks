@@ -398,7 +398,7 @@ def _tick_while_others_run(store, slug, firsts, until):
         firsts.done()
     while not firsts.settled.wait(max(0.0, started + TICK_SECONDS - time.monotonic())):
         started = time.monotonic()
-        if started > until:
+        if started > until or tick_stop.STOP.is_set():
             return
         _tick_one(store, slug)
 

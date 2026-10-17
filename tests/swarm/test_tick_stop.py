@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import signal
@@ -7,7 +8,7 @@ import types
 
 import pytest
 
-from scripts.swarm import cli, controller, lease, tick_stop, timer
+from scripts.swarm import cli, controller, lease, tick_stop, timer, timing
 from tests.swarm.test_cli import env, run  # noqa: F401
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
@@ -113,14 +114,16 @@ def test_the_tick_stops_itself_at_its_deadline_and_releases_its_lock(env, monkey
 
 
 def test_the_deadline_counts_from_the_tick_start(monkeypatch):
-    monkeypatch.setattr(tick_stop, "DEADLINE_S", 5)
+    monkeypatch.setattr(tick_stop, "DEADLINE_S", 30)
     ran = []
 
     def work(slug):
         ran.append(slug)
-        assert tick_stop.STOP.wait(10)
+        assert tick_stop.STOP.wait(60)
 
-    assert tick_stop.run(["a"], work, no_stop, time.monotonic() - 5) is True
+    began = time.monotonic()
+    assert tick_stop.run(["a"], work, no_stop, began - 30) is True
+    assert time.monotonic() - began < 10
     assert ran == ["a"]
 
 
@@ -133,9 +136,15 @@ def test_a_stop_releases_the_locks_of_every_swarm_still_ticking(monkeypatch, cap
 
     monkeypatch.setattr(tick_stop, "DEADLINE_S", 0.2)
     monkeypatch.setattr(tick_stop, "GRACE_S", 0.2)
-    monkeypatch.setattr(tick_stop.os, "_exit", lambda code: exits.append(code))
+
+    def hard_exit(code):
+        exits.append(code)
+        raise SystemExit(code)
+
+    monkeypatch.setattr(tick_stop.os, "_exit", hard_exit)
     try:
-        assert tick_stop.run(["a", "b"], work, no_stop, time.monotonic()) is True
+        with pytest.raises(SystemExit):
+            tick_stop.run(["a", "b"], work, no_stop, time.monotonic())
     finally:
         free.set()
     assert sorted(released) == ["a", "b"]
@@ -237,3 +246,16 @@ def test_a_stopped_tick_skips_the_herdr_sweep(monkeypatch):
     monkeypatch.setattr(tick_stop, "DEADLINE_S", 0.2)
     cli.cmd_tick(types.SimpleNamespace(slugs=lambda: ["sw"]), None)
     assert swept == []
+
+
+def test_a_stopped_step_is_timed_as_stopped_without_a_failure_record(capsys):
+    failures = []
+    token = timing.ON_FAILURE.set(lambda name, exc: failures.append(name))
+    try:
+        with timing.tick("sw"), pytest.raises(tick_stop.Stopped), timing.step("x"):
+            raise tick_stop.Stopped
+    finally:
+        timing.ON_FAILURE.reset(token)
+    records = [json.loads(line) for line in capsys.readouterr().err.splitlines()]
+    assert records[-1]["outcome"] == "stopped"
+    assert failures == []
