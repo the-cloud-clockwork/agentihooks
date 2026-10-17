@@ -160,7 +160,8 @@ def test_workflow_declarations_cache_by_immutable_tree_while_heads_and_checks_re
         if "nodes(ids:" in query:
             tree = "tree1" if '"tree1"' in query else "tree2"
             assert (
-                query == f'query={{nodes(ids:["{tree}"]){{id ...on Tree{{entries{{object{{...on Blob{{text}}}}}}}}}}}}'
+                query
+                == f'query={{nodes(ids:["{tree}"]){{id ...on Tree{{entries{{name object{{...on Blob{{text}}}}}}}}}}}}'
             )
             return SimpleNamespace(
                 returncode=0,
@@ -196,7 +197,82 @@ def test_workflow_declarations_cache_by_immutable_tree_while_heads_and_checks_re
     assert not third.gate_passed
     assert "Blob{text}" not in calls[0]
     assert all(key.startswith(f"{PREFIX}:") for key in cache.scan_iter())
-    assert 0 < cache.ttl(f"{PREFIX}:workflow-gate:tree1") <= SENT_TTL_S
+    assert 0 < cache.ttl(f"{PREFIX}:workflow-gate-files:tree1") <= SENT_TTL_S
+
+
+@pytest.mark.parametrize("batched", [False, True])
+@pytest.mark.parametrize("optional", [False, True])
+@pytest.mark.parametrize("conclusion", [None, "FAILURE", "SUCCESS"])
+@pytest.mark.parametrize("phase", ["jobs", "suite", "absent"])
+def test_a_status_gate_judges_only_jobs_of_its_declared_workflow(batched, optional, conclusion, phase):
+    import fakeredis
+
+    from scripts.swarm.ledger_events import view
+
+    url = "https://github.com/o/r/pull/1"
+    required = {"id": "W1", "resourcePath": "/o/r/actions/workflows/test.yml"}
+    other = {"id": "W2", "resourcePath": "/o/r/actions/workflows/docs.yml"}
+    run = {"databaseId": 1, "event": "pull_request", "workflow": required}
+    probe = {"databaseId": 2 if optional else 1, "event": "pull_request", "workflow": other if optional else required}
+    checks = [
+        {"context": GATE, "state": "SUCCESS", "isRequired": True},
+        {
+            "name": "unit",
+            "databaseId": 10,
+            "conclusion": "SUCCESS",
+            "isRequired": False,
+            "checkSuite": {"workflowRun": run},
+        },
+        {
+            "name": "probe",
+            "databaseId": 20,
+            "conclusion": conclusion,
+            "isRequired": False,
+            "checkSuite": {"workflowRun": probe},
+        },
+    ]
+    suites = [
+        {"status": "COMPLETED", "workflowRun": run},
+        {"status": "IN_PROGRESS" if conclusion is None else "COMPLETED", "workflowRun": probe},
+    ]
+    if phase != "jobs":
+        checks = [checks[0], *([checks[-1]] if optional else [])]
+    if phase == "absent":
+        suites = [suites[-1]] if optional else []
+    tree = {
+        "id": "tree1",
+        "entries": [
+            {"name": "test.yml", "object": {"text": f"name: Tests\njobs:\n  gate:\n    name: {GATE}\n"}},
+            {"name": "docs.yml", "object": {"text": "name: Docs\njobs:\n  measure:\n    name: probe\n"}},
+        ],
+    }
+    raw = resource()
+    commit = raw["commits"]["nodes"][0]["commit"]
+    commit["file"] = {"object": tree}
+    commit["statusCheckRollup"] = {"contexts": {"nodes": checks, "pageInfo": {}}}
+    commit["checkSuites"] = {"nodes": suites, "pageInfo": {}}
+    calls = []
+
+    def read(command, **kwargs):
+        query = next(arg for arg in command if arg.startswith("query="))
+        calls.append(query)
+        if "nodes(ids:" in query:
+            assert "entries{name object" in query
+            data = {"nodes": [tree]}
+        else:
+            assert "workflow{id name resourcePath}" in query
+            assert "workflow{id resourcePath}" in query
+            data = {"p0" if batched else "resource": raw}
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"data": data}))
+
+    cache = fakeredis.FakeRedis(decode_responses=True)
+    for _ in range(2):
+        pull = views([url], read, cache)[url] if batched else view(url, read)
+        assert pull.head == "h1"
+        assert pull.resolved is (phase == "jobs" and (optional or conclusion is not None))
+        assert pull.red is (phase == "jobs" and not optional and conclusion == "FAILURE")
+        assert pull.failed == (("probe",) if phase == "jobs" and not optional and conclusion == "FAILURE" else ())
+    assert sum("nodes(ids:" in query for query in calls) == int(batched)
 
 
 def test_unreadable_workflow_declaration_is_unknown_and_is_not_cached():

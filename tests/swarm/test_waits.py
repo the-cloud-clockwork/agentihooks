@@ -1026,13 +1026,13 @@ def test_the_probe_requests_the_head_with_its_check_rollup():
                 "-f",
                 "query=query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid mergeQueueEntry{id state} mergeable isDraft "
                 "commits(last:1){nodes{commit{id oid committedDate "
-                'file(path:".github/workflows"){object{...on Tree{entries{object{...on Blob{text}}}}}} '
+                'file(path:".github/workflows"){object{...on Tree{entries{name object{...on Blob{text}}}}}} '
                 "statusCheckRollup{contexts(first:100){"
                 "nodes{...on CheckRun{databaseId name conclusion completedAt isRequired(pullRequestNumber:7) "
-                "checkSuite{app{databaseId} workflowRun{databaseId event workflow{id name}}}} "
+                "checkSuite{app{databaseId} workflowRun{databaseId event workflow{id name resourcePath}}}} "
                 "...on StatusContext{context state createdAt isRequired(pullRequestNumber:7)}} "
                 "pageInfo{hasNextPage endCursor}}} checkSuites(first:100){"
-                "nodes{status conclusion workflowRun{databaseId createdAt event workflow{id}}} "
+                "nodes{status conclusion workflowRun{databaseId createdAt event workflow{id resourcePath}}} "
                 "pageInfo{hasNextPage endCursor}}}}}}}}",
                 "-f",
                 f"url={URL}",
@@ -1422,7 +1422,7 @@ def test_a_status_gate_cannot_hide_the_current_workflow_jobs(tick, status, concl
     checks = [gate, job]
     if other_required:
         checks.append({**_run_check("security", 10, 1, "SUCCESS", workflow="W2"), "isRequired": True})
-    tick.pulls[URL] = _gated(checks, [_suite(2, status, event=event)], False)
+    tick.pulls[URL] = _gated(checks, [_suite(2, status, event=event)], False, workflows=["W1.yml"])
     if conclusion == "FAILURE":
         assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now red; failed: selected tests"]
     elif conclusion == "SUCCESS" and status == "COMPLETED":
@@ -1439,12 +1439,12 @@ def test_a_status_gate_holds_a_superseding_run_without_current_jobs(tick, status
     gate = {"context": "Gate — Required", "state": "SUCCESS", "isRequired": True}
     old = {**_run_check("selected tests", 10, 1, "SUCCESS"), "isRequired": False}
     suites = [_suite(1, "COMPLETED", "SUCCESS"), _suite(2, status)]
-    tick.pulls[URL] = _gated([gate, old], suites, reverse)
+    tick.pulls[URL] = _gated([gate, old], suites, reverse, workflows=["W1.yml"])
     assert tick.end() == []
     assert idle.wait(tick.store.redis, "sw", ME) is not None
     current = {**_run_check("selected tests", 20, 2, "SUCCESS"), "isRequired": False}
     suites[-1] = _suite(2, "COMPLETED", "SUCCESS")
-    tick.pulls[URL] = _gated([gate, old, current], suites, reverse)
+    tick.pulls[URL] = _gated([gate, old, current], suites, reverse, workflows=["W1.yml"])
     assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
 
 
