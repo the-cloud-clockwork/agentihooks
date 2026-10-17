@@ -1381,6 +1381,37 @@ def test_a_gated_checks_wait_ends_only_on_its_gate(tick, rollup, outcome):
     assert (idle.wait(tick.store.redis, "sw", ME) is None) is bool(outcome)
 
 
+@pytest.mark.parametrize("required", [False, True])
+@pytest.mark.parametrize("conclusion", [None, "FAILURE", "SUCCESS"])
+def test_checks_wait_judges_every_job_of_the_current_required_run(tick, required, conclusion):
+    tick.hold("checks", URL)
+    gate = {**_run_check("Gate — Required", 20, 2, "SUCCESS"), "isRequired": True}
+    job = {**_run_check("selected tests", 21, 2, conclusion), "isRequired": required}
+    tick.pulls[URL] = _gated([gate, job], [_suite(2, "COMPLETED")], False)
+    if conclusion is None:
+        assert tick.end() == []
+        assert idle.wait(tick.store.redis, "sw", ME) is not None
+    else:
+        outcome = "red; failed: selected tests" if conclusion == "FAILURE" else "green"
+        assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now {outcome}"]
+        assert idle.wait(tick.store.redis, "sw", ME) is None
+
+
+@pytest.mark.parametrize("status", ["QUEUED", "IN_PROGRESS"])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_checks_wait_holds_the_new_required_run_after_an_old_green_gate(tick, status, reverse):
+    tick.hold("checks", URL)
+    checks = [_run_check("Gate — Required", 10, 1, "SUCCESS")]
+    suites = [_suite(1, "COMPLETED", "SUCCESS"), _suite(2, status)]
+    tick.pulls[URL] = _gated(checks, suites, reverse)
+    assert tick.end() == []
+    assert idle.wait(tick.store.redis, "sw", ME) is not None
+    checks += [_run_check("Gate — Required", 20, 2, "SUCCESS"), _run_check("lint", 21, 2, None)]
+    tick.pulls[URL] = _gated(checks, suites, reverse)
+    assert tick.end() == []
+    assert idle.wait(tick.store.redis, "sw", ME) is not None
+
+
 @pytest.mark.parametrize("conclusion", ["SUCCESS", "FAILURE", "TIMED_OUT"])
 def test_a_required_gate_ends_checks_wait_beside_a_pending_jobless_workflow(tick, conclusion):
     tick.hold("checks", URL)
