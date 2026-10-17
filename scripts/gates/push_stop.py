@@ -17,6 +17,7 @@ from scripts.swarm.naming import lane_of, plain
 from scripts.swarm_ledger import ledger_kinds
 
 WORKERS = frozenset({"eng", "ci"})
+PROTECTED = frozenset({"dev", "main", "master", "v1"})
 TEMPLATE = (
     "You cannot leave uncommitted or unpushed changes. Commit them now. If the task is done, open the pull request. "
     "If not, update the issue and the pull request and record progress on the ledger."
@@ -111,9 +112,10 @@ def gate_refusal(tree, budget):
 
 
 def push(tree, branch, seconds):
-    ref = f"refs/heads/{tree.branch}"
+    ref = f"refs/heads/{branch}"
+    lease = [] if branch == tree.branch else [f"--force-with-lease={ref}"]
     process = subprocess.Popen(
-        ["git", "-C", str(tree.path), "push", "--set-upstream", "origin", f"{ref}:refs/heads/{branch}"],
+        ["git", "-C", str(tree.path), "push", *lease, "--set-upstream", "origin", f"refs/heads/{tree.branch}:{ref}"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,
@@ -127,11 +129,14 @@ def push(tree, branch, seconds):
 
 
 def target(tree, task):
-    """The task's recorded pull request branch when HEAD continues it, so publish and this hook push one branch."""
-    from scripts.swarm import publish
+    """The retained pull request branch HEAD continues, as swarm publish pushes it, else the worktree's own branch."""
+    from scripts.swarm.continuation import retained
 
-    scoped = publish.repository_task(publish.repository_root(tree.path), task)
-    return publish.target_branch(tree.path, scoped, tree.branch)
+    branch = retained(task)
+    if branch in PROTECTED or not branch:
+        return tree.branch
+    continues = git(tree.path, "merge-base", "--is-ancestor", f"refs/remotes/origin/{branch}", "HEAD")
+    return branch if continues.returncode == 0 else tree.branch
 
 
 def record_text(remote, branch, head):

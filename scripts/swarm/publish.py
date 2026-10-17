@@ -9,7 +9,7 @@ from pathlib import Path
 
 from scripts import ci_prepush
 from scripts.gates import entry as gate_entry
-from scripts.swarm import naming, stack
+from scripts.swarm import continuation, naming, stack
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, SwarmError
 
@@ -183,12 +183,12 @@ def check_build(root: Path) -> None:
 
 
 def target_branch(root: Path, task: dict, branch: str) -> str:
-    recorded = task.get("branch")
-    if recorded:
-        ref = f"refs/remotes/origin/{recorded}"
-        done = subprocess.run(["git", "merge-base", "--is-ancestor", ref, "HEAD"], cwd=root, capture_output=True)
-        if done.returncode == 0:
-            return recorded
+    for recorded in (continuation.retained(task), task.get("branch")):
+        if recorded:
+            ref = f"refs/remotes/origin/{recorded}"
+            done = subprocess.run(["git", "merge-base", "--is-ancestor", ref, "HEAD"], cwd=root, capture_output=True)
+            if done.returncode == 0:
+                return recorded
     return branch
 
 

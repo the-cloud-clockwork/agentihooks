@@ -8,6 +8,11 @@ def fresh(reason: str) -> dict:
     return {"remote_branch": "none", "remote_head": "none", "continue_from": "fresh", "fresh_reason": reason}
 
 
+def retained(task: dict) -> str:
+    ref = (task.get("handoff_envelope") or task.get("reclaim") or {}).get("continue_from", "")
+    return ref.removeprefix("origin/") if ref.startswith("origin/") else ""
+
+
 def resolve(repo: str, task: dict, rows: dict, lives: list[str], envelope: dict, reclaim: Callable[..., dict]) -> dict:
     origin = stack.origin_key(repo)
     if task.get("branch_repo") and stack.repo_key(task["branch_repo"]) != origin:

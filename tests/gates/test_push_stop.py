@@ -344,31 +344,64 @@ def test_a_numbered_second_worktree_in_another_repo_is_pushed_too(rig):
     assert git(rig.seed, "ls-remote", str(rig.origin), f"refs/heads/{BRANCH}-2")
 
 
-def test_a_continuation_pushes_its_head_to_the_recorded_pull_request_branch_not_its_own_name(rig):
-    predecessor = "engineer-100001-0009"
+PREDECESSOR = "engineer-100001-0009"
+
+
+def continuing(rig, ref=f"origin/{PREDECESSOR}"):
+    rig.ledger.task.update(
+        branch=BRANCH, handoff_envelope={"continue_from": ref}, pr_url="https://github.com/o/r/pull/7"
+    )
+
+
+def remote(rig, branch):
+    return git(rig.seed, "ls-remote", str(rig.origin), f"refs/heads/{branch}").split("\t")[0]
+
+
+def test_a_continuation_pushes_its_head_to_the_retained_pull_request_branch_not_its_own_name(rig):
     rig.commit("before")
-    git(rig.tree, "push", "origin", f"HEAD:refs/heads/{predecessor}")
-    rig.ledger.task.update(branch=predecessor, pr_url="https://github.com/o/r/pull/7")
+    git(rig.tree, "push", "origin", f"HEAD:refs/heads/{PREDECESSOR}")
+    continuing(rig)
     head = rig.commit()
     assert rig.stop().allowed
-    assert git(rig.seed, "ls-remote", str(rig.origin), f"refs/heads/{predecessor}").split("\t")[0] == head
+    assert remote(rig, PREDECESSOR) == head
     assert rig.remote_head() == ""
-    assert git(rig.tree, "rev-parse", "--abbrev-ref", "@{upstream}") == f"origin/{predecessor}"
-    assert predecessor in rig.ledger.comments[0][2]
+    assert git(rig.tree, "rev-parse", "--abbrev-ref", "@{upstream}") == f"origin/{PREDECESSOR}"
+    assert rig.ledger.comments == [
+        ("demo", "t1", record_text("https://github.com/o/r.git", PREDECESSOR, head), "swarm")
+    ]
 
 
-def test_a_recorded_branch_head_does_not_hold_is_left_alone_and_its_own_branch_is_pushed(rig):
-    other = "engineer-100001-0009"
+def test_a_retained_branch_head_does_not_descend_from_is_left_alone_and_its_own_branch_is_pushed(rig):
     (rig.seed / "elsewhere").write_text("elsewhere")
     git(rig.seed, "add", "elsewhere")
     git(rig.seed, "commit", "-m", "elsewhere")
-    git(rig.seed, "push", "origin", f"HEAD:refs/heads/{other}")
+    git(rig.seed, "push", "origin", f"HEAD:refs/heads/{PREDECESSOR}")
     unrelated = git(rig.seed, "rev-parse", "HEAD")
-    rig.ledger.task.update(branch=other, pr_url="https://github.com/o/r/pull/7")
+    continuing(rig)
     head = rig.commit()
     assert rig.stop().allowed
     assert rig.remote_head() == head
-    assert git(rig.seed, "ls-remote", str(rig.origin), f"refs/heads/{other}").split("\t")[0] == unrelated
+    assert remote(rig, PREDECESSOR) == unrelated
+
+
+def test_a_retained_branch_deleted_from_origin_is_not_recreated(rig):
+    rig.commit("before")
+    git(rig.tree, "push", "origin", f"HEAD:refs/heads/{PREDECESSOR}")
+    git(rig.seed, "push", str(rig.origin), "--delete", PREDECESSOR)
+    continuing(rig)
+    rig.commit()
+    assert rig.stop().reason == TEMPLATE
+    assert remote(rig, PREDECESSOR) == ""
+    assert rig.remote_head() == ""
+
+
+@pytest.mark.parametrize("ref", ["origin/dev", "fresh", ""])
+def test_a_protected_or_fresh_continuation_pushes_its_own_branch(rig, ref):
+    continuing(rig, ref)
+    head = rig.commit()
+    assert rig.stop().allowed
+    assert rig.remote_head() == head
+    assert git(rig.seed, "ls-remote", str(rig.origin), "refs/heads/dev").split("\t")[0] != head
 
 
 def test_a_worktree_on_dev_or_main_is_never_pushed(rig):
@@ -869,7 +902,7 @@ def test_push_keeps_the_normal_cap_and_uses_a_shorter_remaining_budget(monkeypat
     process = SimpleNamespace(wait=lambda timeout: waits.append(timeout) or 0)
     monkeypatch.setattr(push_stop.subprocess, "Popen", lambda *args, **kwargs: process)
     tree = push_stop.Tree(Path("/worktree"), BRANCH, False, 1, 1)
-    assert push_stop.push(tree, seconds)
+    assert push_stop.push(tree, BRANCH, seconds)
     assert waits == [expected]
 
 
@@ -909,7 +942,7 @@ def test_a_checked_wait_on_an_open_task_lets_a_refused_push_stop(rig, state):
 
 
 def test_a_checked_wait_on_an_open_task_lets_an_unpushed_commit_stop(rig, monkeypatch):
-    monkeypatch.setattr(push_stop, "push", lambda tree, seconds: False)
+    monkeypatch.setattr(push_stop, "push", lambda tree, branch, seconds: False)
     rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
     rig.commit()
     with_task(rig, "claimed")
