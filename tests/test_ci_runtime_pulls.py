@@ -93,10 +93,9 @@ fi
 LAYER_DOCKER = """#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\\n' "$*" >> "$PULL_LOG"
+stall() { exec python3 -c 'import time; time.sleep(30)'; }
 if [[ "$1" == manifest ]]; then
-  if (( "$(grep -c '^manifest ' "$PULL_LOG")" <= ${MANIFEST_STALLS:-0} )); then
-    exec python3 -c 'import time; time.sleep(30)'
-  fi
+  if (( "$(grep -c '^manifest ' "$PULL_LOG")" <= ${MANIFEST_STALLS:-0} )); then stall; fi
   if (( "$(grep -c '^manifest ' "$PULL_LOG")" <= ${MANIFEST_FAILURES:-0} )); then
     echo 'manifest lookup: registry unavailable' >&2
     exit 18
@@ -107,9 +106,7 @@ fi
 if [[ "$1" == --host ]]; then shift 2; fi
 if [[ "$1" == pull ]]; then
   attempt="$(grep -c ' pull ' "$PULL_LOG")"
-  if (( attempt <= ${STALLS:-0} )); then
-    exec python3 -c 'import time; time.sleep(30)'
-  fi
+  if (( attempt <= ${STALLS:-0} )); then stall; fi
   if (( attempt <= FAILURES )); then
     echo "could not fetch content descriptor sha256:layer from remote: not found on attempt $attempt" >&2
     exit 17
@@ -186,20 +183,23 @@ def test_runtime_pull_retries_a_failed_digest_lookup_within_the_same_bound(tmp_p
     assert result.stderr.count("manifest lookup: registry unavailable") == 3
 
 
-@pytest.mark.parametrize("stalled", ["stalls", "manifest_stalls"])
-def test_runtime_pull_retries_a_stalled_mirror_within_the_same_bound(tmp_path, stalled):
-    result, pulls, tags, waits = pull_runtime(tmp_path, 0, **{stalled: 1})
+@pytest.mark.parametrize("stalls,manifest_stalls,expected_pulls", [(1, 0, 2), (0, 1, 1)])
+def test_runtime_pull_retries_a_stalled_mirror_within_the_same_bound(tmp_path, stalls, manifest_stalls, expected_pulls):
+    result, pulls, tags, waits = pull_runtime(tmp_path, 0, stalls=stalls, manifest_stalls=manifest_stalls)
     assert result.returncode == 0, result.stderr
-    assert len(pulls) == 2 - (stalled == "manifest_stalls")
+    assert len(pulls) == expected_pulls
     assert len(waits) == 1
     assert len(tags) == 1
     assert "failed on attempt 1 of 3" in result.stderr
 
 
-def test_runtime_pull_fails_after_three_stalled_attempts(tmp_path):
-    result, pulls, tags, waits = pull_runtime(tmp_path, 0, stalls=99)
+@pytest.mark.parametrize("stalls,manifest_stalls,expected_pulls", [(99, 0, 3), (0, 99, 0)])
+def test_runtime_pull_fails_with_the_timeout_status_after_three_stalled_attempts(
+    tmp_path, stalls, manifest_stalls, expected_pulls
+):
+    result, pulls, tags, waits = pull_runtime(tmp_path, 0, stalls=stalls, manifest_stalls=manifest_stalls)
     assert result.returncode == 124
-    assert len(pulls) == 3
+    assert len(pulls) == expected_pulls
     assert len(waits) == 2
     assert not tags
 
