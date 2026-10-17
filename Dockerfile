@@ -3,14 +3,14 @@ COPY --from=ghcr.io/astral-sh/uv:0.10.9 /uv /usr/local/bin/uv
 WORKDIR /build
 COPY docker/swarm/requirements.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv venv /opt/venv && uv pip install --python /opt/venv/bin/python --require-hashes -r requirements.lock
+    uv venv /opt/venv && uv pip install --python /opt/venv/bin/python --compile-bytecode --require-hashes -r requirements.lock
 COPY pyproject.toml README.md ./
 COPY hooks/ hooks/
 COPY scripts/ scripts/
 COPY profiles/ profiles/
 ARG VERSION=0.0.0
 RUN --mount=type=cache,target=/root/.cache/uv \
-    SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS="$VERSION" uv pip install --python /opt/venv/bin/python --no-deps .
+    SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS="$VERSION" uv pip install --python /opt/venv/bin/python --compile-bytecode --no-deps .
 RUN mv /opt/venv/lib/python3.12/site-packages/botocore /botocore
 
 FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS herdr
