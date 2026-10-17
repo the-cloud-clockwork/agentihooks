@@ -8,7 +8,7 @@ from scripts.gates import intent
 from scripts.gates import log as gate_log
 from scripts.gates.verdicts import Verdicts
 from scripts.inbox.store import InboxStore
-from scripts.swarm import cli, commands, dispatcher, lease, runtime, timer
+from scripts.swarm import cli, commands, dispatcher, lease, publish, runtime, timer
 from scripts.swarm.health import checks
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.resume import Outcome
@@ -53,6 +53,7 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setattr(cli.delivery, "HerdrMessenger", lambda: FakeHerdr({}))
     ledger.pulls = {}
     monkeypatch.setattr(cli, "pull_branch", lambda url: ("", ""))
+    monkeypatch.setattr(publish, "pushed_branches", lambda repo, task, agent: {})
     monkeypatch.setattr(
         cli.ledger_events, "view", lambda url: ledger.pulls.get(url, PullRequest("MERGED", 1, 1, False))
     )
