@@ -28,8 +28,6 @@ def pool(label):
 
 
 MOVED = {
-    ("count-speed-proof.yml", "count-speed"): STANDARD,
-    ("count-speed-proof.yml", "gate-duration"): STANDARD,
     ("access-audit.yml", "audit"): LIGHT,
     ("branch-lanes.yml", "grade"): LIGHT,
     ("hive-worker.yml", "contracts"): LIGHT,
