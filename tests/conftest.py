@@ -17,7 +17,7 @@ for _redis_name in list(os.environ):
     if "REDIS" in _redis_name.upper():
         os.environ.pop(_redis_name)
 
-from tests import installer_isolation, ledger_guard, redis_key_guard, swarm_v2_isolation
+from tests import installer_isolation, ledger_guard, mutation_trace, redis_key_guard, swarm_v2_isolation
 from tests.shards import (
     FIRST_SHARD_FILES,
     assign_nodes,
@@ -134,6 +134,7 @@ def _shard_files(config) -> frozenset[str]:
 
 def pytest_configure(config):
     _reused(config)
+    mutation_trace.trace_browser_deadlines()
     config.args.sort(key=lambda arg: (Path(arg.split("::", 1)[0]).parent.parts, arg))
     workers = getattr(config.option, "numprocesses", None)
     if not config.getoption("shard") or not workers or hasattr(config, "workerinput") or not hasattr(os, "fork"):
