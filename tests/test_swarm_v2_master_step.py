@@ -170,6 +170,8 @@ def test_a_rise_withdraws_the_ask_of_a_seat_wanted_again(swarm):
     inbox = InboxStore(store.redis)
     assert inbox.get(second_ask.id).state == "cancelled"
     assert inbox.get(third_ask.id).state == "pending"
+    retiring = store.redis.hget(masters.MasterSeats(store.redis).key(SLUG), master_scale.RETIRING)
+    assert set(json.loads(retiring)) == {THIRD}
 
 
 def test_the_highest_backend_master_retires_and_returns_its_items_to_the_pool(swarm):
