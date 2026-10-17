@@ -57,8 +57,12 @@ profile without the shared credential link. `CLAUDE_CONFIG_DIR` and
 `--settings {"forceLoginMethod":"claudeai"}`, and its environment drops routed
 OAuth tokens, API keys, custom endpoints and provider selectors. Settings that
 bring back a credential, an `apiKeyHelper` or another login method refuse the
-launch, and so does a master account that is also a worker quota token or a
-swarm whose workers carry no quota token. The master gets `--remote-control`.
+launch, and so does a swarm whose workers carry no quota token. A login account
+that is also a worker quota token launches as the declared Claude master account
+(`agentihooks balance master-account`), and declares itself when none is
+declared; its live master then holds workers on that account at the reserved
+share of the week. Another account already declared master refuses the launch,
+naming both. The master gets `--remote-control`.
 Engineers, CI agents, planners and Codex masters never take this route.
 
 `agentihooks claude login --master <slug>` runs `claude auth login` once in that
