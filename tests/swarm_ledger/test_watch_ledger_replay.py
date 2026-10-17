@@ -40,8 +40,7 @@ def test_live_replay_finishes_with_forced_heartbeats(live, monkeypatch, capsys, 
                 for _ in range(heartbeats):
                     yield "heartbeat", {}, None
             for name, data, event_id in source:
-                if name != "heartbeat":
-                    received.append((cursor, name))
+                received.append((cursor, name))
                 yield name, data, event_id
                 if name == "snapshot":
                     for _ in range(heartbeats):
@@ -63,7 +62,7 @@ def test_live_replay_finishes_with_forced_heartbeats(live, monkeypatch, capsys, 
         replay_tests.test_the_watcher_prints_live_changes_and_replays_what_it_missed_after_a_drop(
             live, monkeypatch, capsys
         )
-        assert [name for _, name in received] == ["snapshot", "ledger", "ledger", "ledger"]
+        assert [name for _, name in received if name != "heartbeat"] == ["snapshot", "ledger", "ledger", "ledger"]
         assert received[-1][0]
         assert all(inspect.getgeneratorstate(item) == inspect.GEN_CLOSED for item in streams + frames)
     finally:
