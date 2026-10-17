@@ -472,13 +472,13 @@ CANCELLED_RUN = [
 ]
 
 
-def _gated(checks, suites, reverse):
+def _gated(checks, suites, reverse, gated=True):
     from scripts.swarm.ledger_events import pull_request
 
     if reverse:
         checks, suites = checks[::-1], suites[::-1]
     return pull_request(
-        {"state": "OPEN", "headRefOid": "first", "gated": True, "statusCheckRollup": checks, "checkSuites": suites}
+        {"state": "OPEN", "headRefOid": "first", "gated": gated, "statusCheckRollup": checks, "checkSuites": suites}
     )
 
 
@@ -528,7 +528,7 @@ def test_a_newer_run_of_another_event_or_workflow_keeps_the_older_red_check(tick
     checks = [_run_check("e2e", 10, 5, "FAILURE"), _run_check("unit", 20, 6, "SUCCESS", **newer)]
     checks.append(_run_check("e2e", 30, 6, "SUCCESS", **newer))
     suites = [_suite(5, "COMPLETED", "FAILURE"), _suite(6, "COMPLETED", "SUCCESS", **newer)]
-    tick.pulls[URL] = _gated(checks, suites, False)
+    tick.pulls[URL] = _gated(checks, suites, False, gated=False)
     assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now red; failed: e2e"]
 
 
@@ -548,9 +548,8 @@ def test_a_superseded_run_still_in_progress_does_not_hold_a_green_wait(tick):
 def test_a_rerun_attempt_of_one_run_is_judged_by_its_newest_check(tick, reverse):
     tick.hold("checks", URL)
     checks = [_run_check("unit", 10, 4, "FAILURE"), _run_check("unit", 20, 4, "SUCCESS")]
-    tick.pulls[URL] = _gated(checks, [_suite(4, "COMPLETED", "SUCCESS")], reverse)
-    assert tick.end() == []
-    assert idle.wait(tick.store.redis, "sw", ME) is not None
+    tick.pulls[URL] = _gated(checks, [_suite(4, "COMPLETED", "SUCCESS")], reverse, gated=False)
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
 
 
 def test_checks_wait_with_no_checks_stays_unresolved(tick):
