@@ -197,7 +197,7 @@ def submit(store, entry: dict, apply) -> dict:
 
 def flush(store) -> Report:
     """Replay every queued record in order; a failing destination keeps that record and its later ones for later, and a
-    resource still in revision conflict keeps only the later records that write it."""
+    resource still in revision conflict keeps only the later records that write it or a resource a kept record writes."""
     report = Report()
     if not waiting():
         return report
