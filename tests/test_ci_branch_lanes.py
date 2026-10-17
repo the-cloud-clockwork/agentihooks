@@ -373,3 +373,102 @@ def test_a_second_event_key_spelling_cannot_widen_a_trusted_conditional_lane(tmp
     assert lanes.refused(sha, base) == {
         f"{lanes.WORKFLOWS}/replay.yml": ["job replay has no shared hosted lane concurrency group"]
     }
+
+
+@pytest.mark.parametrize(
+    ("job", "stage", "index", "producer", "output"),
+    [("stats", "stats", "part", "plan", "stats_lane"), ("mutation-shard", "shard", "shard", "refine", "shard_lane")],
+)
+def test_trusted_mutation_stages_can_migrate_to_computed_lanes(job, stage, index, producer, output):
+    import copy
+
+    baseline = yaml.safe_load((ROOT / lanes.WORKFLOWS / "mutation-preflight.yml").read_text())
+    baseline["jobs"]["plan"]["outputs"]["stats_lane"] = "${{ steps.lanes.outputs.lane }}"
+    baseline["jobs"]["refine"]["outputs"]["shard_lane"] = "${{ steps.lanes.outputs.lane }}"
+    updated = copy.deepcopy(baseline)
+    updated["jobs"][job]["concurrency"]["group"] = (
+        "${{ format('{0}-"
+        + stage
+        + "-{1}', github.workflow == 'Mutation preflight' && needs."
+        + producer
+        + ".outputs."
+        + output
+        + " != '' && format('mutation-lane-{0}', needs."
+        + producer
+        + ".outputs."
+        + output
+        + ") || format('mutation-preflight-job-{0}', github.run_id), matrix."
+        + index
+        + ") }}"
+    )
+    assert lanes.problems(updated, baseline) == []
+
+
+def test_computed_lane_acceptance_still_grades_later_jobs():
+    import copy
+
+    baseline = yaml.safe_load((ROOT / lanes.WORKFLOWS / "mutation-preflight.yml").read_text())
+    baseline["jobs"]["plan"]["outputs"]["stats_lane"] = "${{ steps.lanes.outputs.lane }}"
+    updated = copy.deepcopy(baseline)
+    updated["jobs"]["stats"]["concurrency"]["group"] = (
+        "${{ format('{0}-stats-{1}', github.workflow == 'Mutation preflight' && needs.plan.outputs.stats_lane != '' && format('mutation-lane-{0}', needs.plan.outputs.stats_lane) || format('mutation-preflight-job-{0}', github.run_id), matrix.part) }}"
+    )
+    updated["jobs"]["unbounded"] = {
+        "runs-on": "ubuntu-latest",
+        "concurrency": {"group": "${{ github.run_id }}"},
+        "steps": [{"run": "echo unbounded"}],
+    }
+    assert any("job unbounded " in problem for problem in lanes.problems(updated, baseline))
+
+
+@pytest.mark.parametrize(
+    "change", ["capacity", "plan", "refine", "queue", "cancel", "group", "output", "untrusted", "needs", "strategy"]
+)
+def test_computed_mutation_lane_migration_keeps_trusted_producers_and_queue_policy(change):
+    import copy
+
+    baseline = yaml.safe_load((ROOT / lanes.WORKFLOWS / "mutation-preflight.yml").read_text())
+    baseline["jobs"]["plan"]["outputs"]["stats_lane"] = "${{ steps.lanes.outputs.lane }}"
+    baseline["jobs"]["refine"]["outputs"]["shard_lane"] = "${{ steps.lanes.outputs.lane }}"
+    updated = copy.deepcopy(baseline)
+    block = updated["jobs"]["stats"]["concurrency"]
+    block["group"] = (
+        "${{ format('{0}-stats-{1}', github.workflow == 'Mutation preflight' && needs.plan.outputs.stats_lane != '' && format('mutation-lane-{0}', needs.plan.outputs.stats_lane) || format('mutation-preflight-job-{0}', github.run_id), matrix.part) }}"
+    )
+    if change in {"needs", "strategy"}:
+        updated["jobs"]["stats"][change] = None
+    elif change == "capacity":
+        updated["jobs"]["capacity"] = {"steps": [{"run": "echo values=unbounded"}]}
+    elif change in {"plan", "refine"}:
+        updated["jobs"][change]["steps"].append({"run": "echo changed producer"})
+    elif change == "queue":
+        block["queue"] = "single"
+    elif change == "cancel":
+        block["cancel-in-progress"] = True
+    elif change == "group":
+        block["group"] = "${{ github.run_id }}"
+    elif change == "output":
+        baseline["jobs"]["plan"]["outputs"].pop("stats_lane")
+        updated["jobs"]["plan"] = copy.deepcopy(baseline["jobs"]["plan"])
+    else:
+        baseline = None
+    assert any("job stats " in problem for problem in lanes.problems(updated, baseline))
+
+
+@pytest.mark.parametrize(
+    ("job", "stage", "index", "producer", "output"),
+    [("stats", "stats", "part", "plan", "stats_lane"), ("mutation-shard", "shard", "shard", "refine", "shard_lane")],
+)
+def test_an_existing_computed_lane_cannot_keep_its_group_while_changing_its_producer(
+    job, stage, index, producer, output
+):
+    import copy
+
+    baseline = yaml.safe_load((ROOT / lanes.WORKFLOWS / "mutation-preflight.yml").read_text())
+    baseline["jobs"][producer]["outputs"][output] = "${{ steps.lanes.outputs.lane }}"
+    baseline["jobs"][job]["concurrency"]["group"] = (
+        f"${{{{ format('{{0}}-{stage}-{{1}}', github.workflow == 'Mutation preflight' && needs.{producer}.outputs.{output} != '' && format('mutation-lane-{{0}}', needs.{producer}.outputs.{output}) || format('mutation-preflight-job-{{0}}', github.run_id), matrix.{index}) }}}}"
+    )
+    updated = copy.deepcopy(baseline)
+    updated["jobs"][producer]["steps"].append({"run": "echo lane=unbounded"})
+    assert any(f"job {job} " in problem for problem in lanes.problems(updated, baseline))

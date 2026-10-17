@@ -19,8 +19,32 @@ permissions:
   actions: read
 
 jobs:
+  capacity:
+    if: github.workflow == 'Mutation preflight' && github.event_name == 'push' && !github.event.deleted && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor)
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 2
+    outputs:
+      values: ${{ steps.capacity.outputs.values }}
+    steps:
+      - name: Mint the batch capacity read token
+        id: capacity-token
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: antoncore
+          permission-contents: read
+
+      - name: Read the authoritative public batch values
+        id: capacity
+        env:
+          GH_TOKEN: ${{ steps.capacity-token.outputs.token }}
+        run: |
+          gh api 'repos/the-cloud-clockwork/antoncore/contents/k8s/charts/arc-runners-oss/values-oss-batch.yaml?ref=dev' --jq '"values=" + (.content | gsub("\\n"; ""))' >> "$GITHUB_OUTPUT"
+
   plan:
-    if: ${{ github.event_name != 'push' || !github.event.deleted }}
+    needs: capacity
+    if: ${{ !cancelled() && (needs.capacity.result == 'success' || needs.capacity.result == 'skipped') && (github.event_name != 'push' || !github.event.deleted) }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 10
     env:
@@ -32,6 +56,8 @@ jobs:
       changed: ${{ steps.plan.outputs.changed }}
       graded: ${{ steps.plan.conclusion == 'success' }}
       open: ${{ steps.open.outputs.open }}
+      stats_lane: ${{ steps.lanes.outputs.lane }}
+      batch_ceiling: ${{ steps.lanes.outputs.ceiling }}
     steps:
       - name: Skip when the branch already has an open pull request into dev
         id: open
@@ -92,6 +118,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python -m scripts.ci_mutation.plan --base "$BASE"
+
+      - name: Size statistics lanes from the batch ceiling
+        id: lanes
+        if: steps.plan.conclusion == 'success' && steps.plan.outputs.changed != '0' && github.workflow == 'Mutation preflight' && runner.environment == 'self-hosted'
+        env:
+          BATCH_VALUES: ${{ needs.capacity.outputs.values }}
+          SHARDS: ${{ steps.plan.outputs.stats_parts }}
+        shell: bash
+        run: |
+          printf '%s' "$BATCH_VALUES" | base64 --decode > "$RUNNER_TEMP/batch-values.yaml"
+          git show origin/dev:scripts/ci_mutation/lanes.py > "$RUNNER_TEMP/mutation-lanes.py"
+          python "$RUNNER_TEMP/mutation-lanes.py" --values "$RUNNER_TEMP/batch-values.yaml" --shards "$SHARDS" --run-id "$GITHUB_RUN_ID"
 
   # A branch that adds only failing tests has no mutants and may reuse a green report, so its touched tests run here.
   touched-tests:
@@ -251,6 +289,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       shards: ${{ steps.refine.outputs.shards }}
+      shard_lane: ${{ steps.lanes.outputs.lane }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -281,6 +320,16 @@ jobs:
         env:
           BASES: ${{ needs.plan.outputs.bases }}
         run: python -m scripts.ci_mutation.measured --bases "$BASES" --stats .mutation-stats
+
+      - name: Size mutation lanes from the refined shard count
+        id: lanes
+        if: needs.plan.outputs.batch_ceiling != ''
+        env:
+          CEILING: ${{ needs.plan.outputs.batch_ceiling }}
+          SHARDS: ${{ steps.refine.outputs.shards }}
+        run: |
+          git show origin/dev:scripts/ci_mutation/lanes.py > "$RUNNER_TEMP/mutation-lanes.py"
+          python "$RUNNER_TEMP/mutation-lanes.py" --ceiling "$CEILING" --shards "$SHARDS" --run-id "$GITHUB_RUN_ID"
 
       - name: Upload the measured mutation plan
         uses: actions/upload-artifact@v4
