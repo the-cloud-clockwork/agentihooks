@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+from scripts.ci_mutation.scope import imported_names
+
 ESCAPES = {"subprocess.Popen", "os.posix_spawn", "os.system", "os.exec", "os.spawn", "os.fork", "os.forkpty"}
 SKIPPED = (".git/", ".venv/", ".playwright/", "node_modules/")
 
@@ -49,12 +51,37 @@ class DepInputs:
             return
         previous = self.current
         collected = self.collections.setdefault(collector.nodeid, [set(), False])
+        imported = set(sys.modules)
         self.current = collected
         try:
             yield
         finally:
             previous[0].update(path for path in collected[0] if not path.startswith(self.root + ".github/workflows/"))
             self.current = previous
+            for name in set(sys.modules) - imported:
+                filename = getattr(sys.modules[name], "__file__", "") or ""
+                if filename.startswith(self.root) and filename.endswith(".py"):
+                    found = self.collections.setdefault(filename[len(self.root) :], [set(), False])
+                    found[0].update(collected[0])
+                    found[1] = found[1] or collected[1]
+
+    def pytest_collection_finish(self, session):
+        imports = {}
+        for path in self.collections:
+            source = Path(self.root) / path
+            names = imported_names(source.read_text(), Path(path).parent.parts)
+            filenames = {getattr(sys.modules.get(name), "__file__", "") or "" for name in names}
+            imports[path] = {name[len(self.root) :] for name in filenames if name.startswith(self.root)}
+        for _ in self.collections:
+            before = sum(len(found[0]) + found[1] for found in self.collections.values())
+            for path, names in imports.items():
+                found = self.collections[path]
+                for name in names & self.collections.keys():
+                    dependency = self.collections[name]
+                    found[0].update(dependency[0])
+                    found[1] = found[1] or dependency[1]
+            if before == sum(len(found[0]) + found[1] for found in self.collections.values()):
+                break
 
     @pytest.hookimpl(hookwrapper=True)
     def pytest_fixture_setup(self, fixturedef, request):

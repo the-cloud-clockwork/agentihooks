@@ -292,7 +292,8 @@ def test_a_workflow_only_plant_reuses_unrelated_tests_and_a_graded_plant_runs_it
     ]
 
 
-def test_collection_workflow_inputs_belong_only_to_the_module_that_reads_them(tmp_path):
+@pytest.mark.parametrize("shared_import", [None, "helper", "test_reader"])
+def test_collection_workflow_inputs_belong_only_to_the_module_that_reads_them(tmp_path, shared_import):
     workflow = tmp_path / ".github" / "workflows" / "smoke.yml"
     workflow.parent.mkdir(parents=True)
     workflow.write_text("name: smoke\n")
@@ -301,6 +302,19 @@ def test_collection_workflow_inputs_belong_only_to_the_module_that_reads_them(tm
         "WORKFLOW = Path('.github/workflows/smoke.yml').read_text()\n"
         "def test_reads():\n    assert WORKFLOW == 'name: smoke\\n'\n"
     )
+    consumers = []
+    if shared_import:
+        if shared_import == "helper":
+            (tmp_path / "helper.py").write_text(
+                "from pathlib import Path\nWORKFLOW = Path('.github/workflows/smoke.yml').read_text()\n"
+            )
+            (tmp_path / "test_reader.py").write_text(
+                "from helper import WORKFLOW\ndef test_reads():\n    assert WORKFLOW == 'name: smoke\\n'\n"
+            )
+        (tmp_path / "test_consumer.py").write_text(
+            f"from {shared_import} import WORKFLOW\ndef test_cached():\n    assert WORKFLOW == 'name: smoke\\n'\n"
+        )
+        consumers = ["test_consumer.py"]
     (tmp_path / "test_unrelated.py").write_text("def test_other():\n    assert 2 + 2 == 4\n")
     out = tmp_path / "inputs"
     subprocess.run(
@@ -314,6 +328,7 @@ def test_collection_workflow_inputs_belong_only_to_the_module_that_reads_them(tm
             "-p",
             "no:cacheprovider",
             "test_reader.py",
+            *consumers,
             "test_unrelated.py",
         ],
         cwd=tmp_path,
@@ -322,7 +337,12 @@ def test_collection_workflow_inputs_belong_only_to_the_module_that_reads_them(tm
         capture_output=True,
     )
     rows = [json.loads(line) for report in out.glob("*.jsonl") for line in report.read_text().splitlines()]
-    assert sorted(rows, key=lambda row: row["test"]) == [
+    expected = (
+        []
+        if not shared_import
+        else [{"test": "test_consumer.py::test_cached", "files": [".github/workflows/smoke.yml"], "escapes": False}]
+    )
+    assert sorted(rows, key=lambda row: row["test"]) == expected + [
         {"test": "test_reader.py::test_reads", "files": [".github/workflows/smoke.yml"], "escapes": False},
         {"test": "test_unrelated.py::test_other", "files": [], "escapes": False},
     ]
