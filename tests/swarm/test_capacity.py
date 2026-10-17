@@ -50,7 +50,7 @@ def test_routed_session_reads_quota_for_every_occupied_account(monkeypatch, tmp_
             },
         },
     )
-    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {"a": 1, "b": 2, "c": 1})
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {"a": 1, "b": 2, "c": 1})
     monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
     seen = capacity.accounts(env, 100)
     assert sorted((r.name, r.sessions, r.week_left) for r in seen) == [("a", 1, 90), ("b", 2, 90), ("c", 1, 90)]
@@ -79,7 +79,7 @@ def test_launch_choices_skip_a_cached_claude_account_without_its_token(monkeypat
             },
         },
     )
-    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {"mail": 2, "old": 1})
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {"mail": 2, "old": 1})
     monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
     monkeypatch.setattr(agent_choice.time, "time", lambda: 100)
     rows = capacity.accounts(env, 100)
@@ -99,7 +99,7 @@ def test_band_caps_follow_the_claude_five_hour_window_left(monkeypatch, five_use
         "a", "allowed", "NORMAL", 100 - five_used, balancer.QuotaWindow(used=five_used), balancer.QuotaWindow(used=0)
     )
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [(100, result)])
-    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {})
     monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
     (row,) = capacity.accounts({"AH_CC_TOKEN_a": "fake"}, 100)
     assert (row.cap, row.five_left, row.week_left) == (expected_cap, 100 - five_used, 100)
@@ -110,7 +110,7 @@ def test_a_reset_window_raises_the_cap_and_the_effective_caps_on_the_next_tick(m
     five, week = balancer.QuotaWindow(used=98, resets_at=200), balancer.QuotaWindow(used=97, resets_at=250)
     result = balancer.ProbeResult("a", "allowed", "NORMAL", 2, five, week)
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [(100, result)])
-    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {"a": 1})
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {"a": 1})
     monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
     config = SwarmConfig("sw", "/repo", max_eng=3, max_ci=1, max_plan=0)
     agents = [AgentRecord("engineer", "eng", "e", harness="claude")]
@@ -140,7 +140,7 @@ def test_a_stale_claude_reading_gets_no_seat(monkeypatch):
         "a", "allowed", "NORMAL", 90, balancer.QuotaWindow(used=10), balancer.QuotaWindow(used=0)
     )
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [(100, result)])
-    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {})
     monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
     from scripts import session_bands
 
@@ -153,7 +153,7 @@ def test_a_fresh_codex_reading_with_only_the_week_gets_the_top_band(monkeypatch)
     from scripts.codex_quota import CodexQuota
 
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
-    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {})
     pool = [capacity.codex_router.CodexAccount("a", "AH_CX_TOKEN_a")]
     monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: pool)
     weekly = CodexQuota(100, "pro", seven_day=balancer.QuotaWindow(used=10, resets_at=500))
@@ -174,7 +174,7 @@ def test_accounts_judge_every_window_at_the_given_time_and_pass_the_environment(
     pool = [capacity.codex_router.CodexAccount("default")]
     monkeypatch.setattr(balancer, "discover_credentials", lambda environ: [])
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [(now, claude)])
-    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {})
     monkeypatch.setattr(capacity.account_sessions, "codex_sessions_by_account", lambda: {"x": 1})
     monkeypatch.setattr(capacity.codex_router, "accounts", lambda environ: calls.append(("pool", environ)) or pool)
     monkeypatch.setattr(
@@ -200,7 +200,7 @@ def test_a_stale_codex_reading_gets_no_seat(monkeypatch):
     from scripts.codex_quota import CodexQuota
 
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
-    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {})
     pool = [capacity.codex_router.CodexAccount("a", "AH_CX_TOKEN_a")]
     monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: pool)
     stale_at = 100 + 6 * 3600 + 1
@@ -275,7 +275,7 @@ def test_quota_capacity_with_all_zero_demand_never_refreshes_codex(tmp_path, mon
     monkeypatch.setattr(balancer, "discover_credentials", lambda environ: [])
     monkeypatch.setattr(balancer, "collect_results", lambda *a, **kw: ([], "none"))
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
-    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {})
     monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
     monkeypatch.setattr(capacity.codex_router, "fresh_quotas", lambda *a, **kw: calls.append(1) or {})
     monkeypatch.setattr(capacity.codex_router, "probe", lambda *a, **kw: pytest.fail("reached the real codex probe"))
@@ -292,7 +292,7 @@ def test_quota_capacity_with_nonzero_demand_refreshes_codex(tmp_path, monkeypatc
     monkeypatch.setattr(balancer, "discover_credentials", lambda environ: [])
     monkeypatch.setattr(balancer, "collect_results", lambda *a, **kw: ([], "none"))
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
-    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {})
     monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
     monkeypatch.setattr(capacity.codex_router, "fresh_quotas", lambda *a, **kw: calls.append(1) or {})
     rt = module.HerdrRuntime(home=tmp_path)
@@ -377,7 +377,7 @@ def test_each_tick_refreshes_the_balance_source_for_all_available_accounts(monke
         lambda credentials, **kwargs: (seen.append(([r.account for r in credentials], kwargs)) or [], "live"),
     )
     monkeypatch.setattr(balancer, "cached_observations", lambda **kwargs: [])
-    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {})
     monkeypatch.setattr(capacity.codex_router, "accounts", lambda _: [])
     capacity.accounts(environ, 123)
     assert seen == [(["a", "b"], {"environ": environ, "now": 123})]
@@ -455,7 +455,7 @@ def test_codex_accounts_with_live_sessions_keep_their_own_quotas(monkeypatch):
     from scripts.codex_quota import CodexQuota
 
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
-    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {})
     monkeypatch.setattr(capacity.account_sessions, "codex_sessions_by_account", lambda: {"a": 1, "b": 2})
     monkeypatch.setattr(
         capacity.codex_router, "accounts", lambda _: [capacity.codex_router.CodexAccount("a", "AH_CX_TOKEN_a")]
@@ -480,7 +480,7 @@ def test_a_signed_out_codex_account_adds_no_capacity_and_no_routing_left(monkeyp
     from scripts.swarm import quota_view
 
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
-    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {})
     monkeypatch.setattr(capacity.account_sessions, "codex_sessions_by_account", lambda: {"a": 1})
     monkeypatch.setattr(
         capacity.codex_router, "accounts", lambda _: [capacity.codex_router.CodexAccount("a", "AH_CX_TOKEN_a")]
@@ -508,7 +508,7 @@ def test_codex_rows_count_a_managed_execution_once_and_hold_it_until_termination
     )
     monkeypatch.setattr(capacity.account_sessions, "codex_sessions_by_account", lambda: CODEX_COUNTS(root))
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
-    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {})
     monkeypatch.setattr(
         capacity.codex_router, "accounts", lambda _: [capacity.codex_router.CodexAccount("alpha", "AH_CX_TOKEN_alpha")]
     )
@@ -555,7 +555,7 @@ def test_failed_fresh_probe_does_not_leave_a_stale_healthy_account_placeable(mon
     failed = balancer.ProbeResult("a", "rejected", "BLOCKED", 0, balancer.QuotaWindow(), balancer.QuotaWindow())
     monkeypatch.setattr(balancer, "collect_results", lambda *args, **kw: ([failed], "live"))
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [(100, healthy)])
-    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {})
     monkeypatch.setattr(capacity.account_sessions, "codex_sessions_by_account", lambda: {})
     monkeypatch.setattr(capacity.codex_router, "accounts", lambda _: [])
     seen = capacity.accounts({"AH_CC_TOKEN_a": "fake-a"}, 200)
@@ -590,7 +590,7 @@ def test_profile_and_saved_handoff_harnesses_are_reserved_before_automatic_work(
 
 def test_unobserved_live_account_stays_visible_and_unplaceable(monkeypatch):
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
-    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {"unknown": 2})
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {"unknown": 2})
     monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
     assert capacity.accounts({"AH_CC_TOKEN_a": "fake"}, 100) == [
         capacity.Account("claude", "unknown", "UNKNOWN", 2, None, None)
@@ -604,7 +604,7 @@ def test_a_cached_claude_record_without_its_token_or_a_live_session_is_pruned(mo
         for name in ("ncgma", "busy", "mail")
     ]
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: cached)
-    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {"busy": 1})
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {"busy": 1})
     monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
     rows = capacity.accounts({"AH_CC_TOKEN_mail": "fake"}, 100)
     assert [(row.name, row.state, row.sessions) for row in rows] == [("busy", "UNKNOWN", 1), ("mail", "OPEN", 0)]
@@ -637,7 +637,7 @@ def test_stale_short_name_records_never_hold_a_ready_ci_task_off_its_cap(monkeyp
     names = ("ncgma", "nctcc", "tccgma", "nchotma", "ncsmgma", "mail_com")
     cached = [(100, balancer.ProbeResult(name, "allowed", "NORMAL", 90, windows, windows)) for name in names]
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: cached)
-    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {})
     monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
     rows = capacity.accounts({"AH_CC_TOKEN_mail_com": "fake"}, 100)
     config = SwarmConfig("sw", "/repo", max_eng=12, max_ci=1, max_plan=0)
@@ -1185,7 +1185,7 @@ def test_a_refused_swarm_notice_is_dropped_and_the_quota_step_still_runs(capsys)
 
 def test_a_missing_signed_in_default_does_not_create_a_fake_token_account(monkeypatch):
     monkeypatch.setattr(balancer, "cached_observations", lambda **kwargs: [])
-    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {})
     monkeypatch.setattr(capacity.account_sessions, "codex_sessions_by_account", lambda: {"default": 1})
     monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
 
@@ -2089,7 +2089,7 @@ def _api_policy(monkeypatch, weight=25, cap=10**6):
 def test_live_api_sessions_count_on_the_api_row_only_and_keep_accounts_known(monkeypatch):
     _api_policy(monkeypatch)
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
-    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {"api": 2})
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {"api": 2})
     monkeypatch.setattr(capacity.account_sessions, "codex_sessions_by_account", lambda: {"api": 1})
     monkeypatch.setattr(capacity.codex_router.CodexAccountSource, "pool", lambda self, env: [])
     env = {"ANTHROPIC_API_KEY": "fake", "OPENAI_API_KEY": "fake"}
@@ -2101,7 +2101,7 @@ def test_live_api_sessions_count_on_the_api_row_only_and_keep_accounts_known(mon
 
 def test_live_api_sessions_without_an_api_endpoint_show_as_a_closed_api_row(monkeypatch):
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
-    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {"api": 1})
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {"api": 1})
     monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
     assert capacity.accounts({"AH_CC_TOKEN_a": "fake"}, 100) == [
         capacity.Account("claude", "api", "CLOSED", 1, None, None, 0, kind="api"),
@@ -2169,7 +2169,7 @@ def test_accounts_ask_each_harness_api_side_with_the_environment_and_time(monkey
 
     monkeypatch.setattr(capacity.place, "api_side", api_side)
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
-    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {})
     monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
     capacity.accounts({"A": "1"}, 100)
     assert calls == [
@@ -2281,3 +2281,47 @@ def test_aggregate_capacity_keeps_missing_or_stale_codex_quota_unknown(monkeypat
         73 if observed is not None else None,
         2,
     )
+
+
+def test_two_names_holding_one_token_offer_one_account(monkeypatch, tmp_path):
+    env = {
+        "AGENTIHOOKS_HOME": str(tmp_path),
+        "AH_CC_TOKEN_mail": "fake-a",
+        "AH_CC_TOKEN_old": "fake-a",
+        "AH_CC_TOKEN_other": "fake-b",
+    }
+    windows = balancer.QuotaWindow(used=10)
+    results = [
+        balancer.ProbeResult(name, "allowed", "NORMAL", 90, windows, windows) for name in ("mail", "old", "other")
+    ]
+    balancer._write_cache(
+        tmp_path / "claude-router-cache.json",
+        {
+            "version": 1,
+            "modes": {
+                "normal": {
+                    "accounts": {
+                        f"AH_CC_TOKEN_{r.account}": {"observed_at": 100, "result": balancer._result_data(r)}
+                        for r in results
+                    }
+                }
+            },
+        },
+    )
+    proc = tmp_path / "proc"
+    for pid, name in ((300, "old"), (301, "old"), (302, "mail")):
+        (proc / str(pid)).mkdir(parents=True)
+        (proc / str(pid) / "comm").write_text("claude\n")
+        (proc / str(pid) / "cmdline").write_bytes(b"claude\0")
+        (proc / str(pid) / "environ").write_bytes(f"AH_CC_TOKEN_{name}=fake-a\0".encode())
+    counter = capacity.account_sessions.sessions_by_account
+    monkeypatch.setattr("scripts.operator_env.block_tokens", lambda: {})
+    monkeypatch.setattr(capacity.account_sessions, "handed_off_pids", set)
+    monkeypatch.setattr(
+        capacity.account_sessions, "sessions_by_account", lambda **kwargs: counter(proc, local=True, **kwargs)
+    )
+    monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
+
+    rows = capacity.accounts(env, 100)
+
+    assert sorted((r.name, r.sessions, r.state) for r in rows) == [("mail", 3, "OPEN"), ("other", 0, "OPEN")]

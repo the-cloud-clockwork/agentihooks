@@ -8,11 +8,95 @@ nav_order: 13
 
 The Mutation workflow runs beside Tests for pull requests into dev. It discovers changed Python files in `hooks` and `scripts` from the pull request merge base. Each file runs in an isolated copy with pinned mutmut 3.6.0. Pytest runs serially; matching and importing test modules provide mutmut's function coverage stats and per mutant test selection.
 
-Run locally with the workspace Python:
+Run a focused mutation proof in CI from a pushed branch:
 
 ```bash
-~/dev/tcc-ecosystem/.venv/bin/python -m scripts.ci_mutation --base origin/dev
+gh workflow run proofs.yml \
+  --ref YOUR_BRANCH \
+  -f proof=mutation \
+  -f base=origin/dev
 ```
+
+For a stacked branch, set `base` to its dependency branch. Branch pushes run Mutation preflight before the first draft pull request; wait for its current head to pass. Once a branch has an open pull request into `dev`, the push preflight skips it and the pull request checks own mutation. Tests and mutation runs execute in CI only.
+
+## Measured shards and split mutants
+
+The preflight collects shared function-to-test coverage and test durations, then its `refine` job builds the measured plan. Expensive mutants are placed first on the least loaded shard. A survivor must run all its covering tests, which can leave one shard running long after shards whose mutants were killed early.
+
+The planner splits a heavy function's covering tests into a shared fast head and balanced tail slices. Every mutant of that function runs as several units: each unit runs the head plus one slice on a distinct shard. The head repeats so tests that kill mutants quickly remain available on every unit; the slices together retain every remaining covering test. Other mutants keep one shard assignment.
+
+These are implementation defaults, with no environment variable or workflow dispatch input to tune them:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `HEAD_SECONDS` | 20 traced seconds | Select the fastest covering tests up to this budget, always including at least one test when available |
+| `SLICE_SECONDS` | 120 traced seconds | Divide the remaining duration by this value, rounding up to choose the slice count |
+| Split limit | 10 slices | Cap a mutant's units; fewer than two slices leaves it unsplit |
+| Shard target and limit | 240 seconds, 10 shards | Size the plan using estimated work and four workers, ensuring enough shards to place a mutant's units separately |
+
+For example, ten covering tests of one second each form a ten-second head. Thirty more tests of twenty seconds each make a 600-second tail, split into five 120-second slices. Each unit runs the ten head tests and six tail tests on its own shard. All forty distinct tests remain covered, although the head runs five times. Unit cost is estimated as `5.6 + 1.25 * (head_seconds + slice_seconds)`, or 168.1 worker seconds here. A split mutant's total estimated cost includes every repeated head.
+
+Repeated measurements use the maximum observed duration; a missing duration uses at least 5.6 seconds or the largest observed test duration, whichever is greater. A test stays whole, so a single slow test or the ten-slice cap can exceed the slice target. Traced duration and estimated worker seconds are planning inputs, not a wall-time deadline or a guarantee that jobs finish together.
+
+### Combined grading
+
+A shard grades its unsplit mutants normally and records split results under `units` for the final `mutation` merge job. A successful unit or shard alone does not establish a successful gate.
+
+| Unit outcomes for one mutant | Combined outcome |
+|---|---|
+| Any unit killed it | Killed, counted once |
+| Every unit survived | Survived, evaluated against changed lines and the checked out clearances |
+| No kill and an abnormal outcome, such as a timeout | Preserve an abnormal outcome for normal failure evaluation |
+| A shard report is missing or a shard did not finish successfully | Fail the workflow |
+
+Splitting changes execution units, not the selected mutant set or the clearance fingerprint. An uncleared combined survivor on graded lines still fails. Per-shard `expected` and `graded` count assigned units, so their sum can exceed the number of distinct mutants; use the merged file counts when comparing distinct mutant totals. Retained mutation replay uses the same split selection and combined grading, and checks completeness against the planned unit count.
+
+### Inspect a preflight
+
+Download evidence from the preflight run being investigated into a task work folder. Replace `RUN_ID` and `EVIDENCE_DIR` with that run and folder:
+
+```bash
+gh run download RUN_ID \
+  --name mutation-plan \
+  --dir EVIDENCE_DIR/plan
+
+gh run download RUN_ID \
+  --name mutation-preflight-report \
+  --dir EVIDENCE_DIR/merged
+
+gh run download RUN_ID \
+  --pattern 'mutation-preflight-shard-*' \
+  --dir EVIDENCE_DIR/shards
+
+jq '{shards, shard_worker_seconds, assignments, splits}' \
+  EVIDENCE_DIR/plan/plan.json
+
+jq '{failed, shards, files}' \
+  EVIDENCE_DIR/merged/report.json
+```
+
+In `assignments`, an integer is an unsplit mutant's shard; an array maps each slice position to its shard. `splits` records the function's head, slices and unit costs. Shard reports record `wall_seconds`, `expected`, `graded`, `complete`, `budget_exhausted` and estimated worker seconds. Plan and report artifacts are retained for seven days. A reused report or a run with no changed Python may have no measured plan or shard artifacts; inspect the merged evidence and run steps first.
+
+When investigating uneven work, compare the **Mutate changed Python files** step durations within one run, excluding setup and runner waits. Inspect the heavy function's slices and shard completeness before comparing distinct mutant counts. Missing reports, incomplete grading and budget exhaustion are failures to investigate; shard balancing retains every selected mutant and covering test.
+
+For a retained replay, the Proofs workflow takes the retained case through its `base` input:
+
+```bash
+gh workflow run proofs.yml \
+  --ref YOUR_BRANCH \
+  -f proof=mutation-replay \
+  -f base=third
+```
+
+The replay uploads `mutation-replay-proof` with the plan and completeness evidence. It checks a retained case rather than measuring current branch preflight timing.
+
+### Delivery evidence and timing limits
+
+[Pull request 4025](https://github.com/the-cloud-clockwork/agentihooks/pull/4025) delivered splitting and combined grading, with [successful branch preflight 39028535693](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39028535693). Its planning replay of run 38999090987 divided the slow survivor's function into nine units of about 173 estimated worker seconds and estimated shard loads between 3000 and 3108 worker seconds. Those numbers describe the plan, not observed shard completion times.
+
+The source acceptance target is a slowest mutation shard within sixty seconds of the next slowest, preserving the graded mutant set. The recorded comparison covered twenty preflight runs before and twenty-one after: the maximum gap between the slowest and next slowest shard fell from 369 to 18 seconds. Three earlier runs exceeded sixty seconds; none of the later runs did. All later runs reported complete grading with expected and graded unit counts equal; two earlier runs were incomplete. These are observations across different branch workloads, rather than a replay of identical mutant sets.
+
+For example, [earlier run 38999090987](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38999090987) recorded shard walls of 399 and 30 seconds for its slowest two shards. [Later run 39052293854](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39052293854) recorded 212 and 194 seconds, an eighteen-second gap, with all 1656 planned units graded. The target compares the slowest two shards, not the spread across all shards or their absolute completion time. See [Tests workflow timing](../ci-timing.md) for the surrounding CI timing context.
 
 ## Graded lines
 
