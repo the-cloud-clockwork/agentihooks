@@ -166,6 +166,8 @@ def test_lint_grades_dashboard_columns_with_the_antoncore_dev_checker():
     assert check is not None
     assert steps.index(token) < steps.index(checkout) < steps.index(check)
     assert '--agentihooks "$GITHUB_WORKSPACE"' in check["run"]
+    assert "orjson==" in check["run"]
+    assert "No module named" in check["run"]
 
 
 def test_post_shard_graders_do_not_wait_on_each_other_and_the_gate_needs_each():

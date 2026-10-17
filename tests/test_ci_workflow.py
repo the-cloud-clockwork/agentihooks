@@ -738,7 +738,7 @@ def test_unit_shards_upload_their_durations_for_the_refresh():
             expected += " && matrix.python-version == '3.12'"
         assert step["if"] == expected
     assert upload.get("if") in (None, "${{ !cancelled() && hashFiles('durations.json') != '' }}")
-    assert upload["uses"].startswith("actions/upload-artifact@")
+    assert upload["uses"] == "./.github/actions/retry-upload" or upload["uses"].startswith("actions/upload-artifact@")
     assert upload["with"]["name"] == "durations-${{ matrix.python-version }}-${{ matrix.shard }}"
     assert upload["with"]["path"].split() in (
         ["durations.json", "durations.sha256"],
