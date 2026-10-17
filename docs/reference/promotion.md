@@ -43,6 +43,37 @@ The job summary records the graded `dev` commit, the promoted `main` commit and 
 
 Promotion never publishes to PyPI and never dispatches another workflow. PyPI publication stays the operator's `publish-pypi.yml` run from `main`, with the `pypi` environment reviewer.
 
+## Merge step time
+
+The `Squash the graded tree snapshot into main` step covers steps 2 to 8: snapshot, pull request, the mergeability wait and the squash. Most of its time is the wait in step 5.
+
+Pushing the snapshot branch starts no Mutation preflight run: `mutation-preflight.yml` lists `promotion/**` in its push `branches-ignore`, beside `dev`, `main`, `gh-readonly-queue/**`, `wip/**` and `diffcheck/**`. The graded tree already passed mutation on its pull request, so a run on the snapshot only repeated it, and the merge step waited for it to finish. Since [#3886](https://github.com/the-cloud-clockwork/agentihooks/pull/3886) the snapshot head carries only its grade and measure checks.
+
+The step can still wait on the graded `dev` commit. When the promotion pull request reports `unstable`, step 5 admits it only once every check on the graded commit except the running promotion job has completed with success or skipped. A slow non-gate workflow on that commit, such as the Worker hive pod kind and publish jobs, holds the merge until it finishes.
+
+Measured on promotion runs of the Tests workflow:
+
+| Run | Snapshot mutation wait | Step seconds | What held the step | Release |
+|---|---|---|---|---|
+| [38950625810](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38950625810) | yes | 172 | Snapshot mutation check, completed 5 s before the merge | v2.17.1 |
+| [39043823157](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39043823157) | no | 241 | Worker hive pod `publish` on the graded commit, completed 8 s before the merge | v2.17.2 |
+| [39044572864](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39044572864) | no | 15 | Nothing; `Gate — Required` was the last check on the graded commit | v2.17.3 |
+
+Only one promotion before the change ran this step, so there is one baseline. In all three runs the tag and release steps succeeded and the promoted `main` commit carries the graded tree. The 241 s run ended one poll short of the four minute mergeability limit: a graded commit whose slowest non-gate workflow runs longer than the wait fails the promotion with nothing merged.
+
+Measure the step on any promotion run:
+
+```bash
+R=the-cloud-clockwork/agentihooks
+RUN=<Tests push run id on dev>
+gh api --paginate "repos/$R/actions/runs/$RUN/jobs?per_page=100" --jq '
+  .jobs[] | select(.name == "promote / promote") | .steps[]
+  | select((.name | startswith("Squash the graded")) or (.name | test("Tag and verify|Create the release")))
+  | {name, conclusion, seconds: (((.completed_at | fromdate) - (.started_at | fromdate)))}'
+```
+
+Promotions before #3886 name the step `Squash the graded dev head into main`; the `startswith` match reads both names. Check the tree identity with the commands under [Checking a promotion](#checking-a-promotion).
+
 ## Reruns and repeats
 
 A rerun after a partial failure is safe:
