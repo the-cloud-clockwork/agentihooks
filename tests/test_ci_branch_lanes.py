@@ -130,6 +130,31 @@ def test_removing_the_lane_from_an_existing_workflow_is_refused(tmp_path, monkey
     }
 
 
+def test_existing_dev_concurrency_is_preserved_while_job_steps_change(tmp_path, monkeypatch):
+    trusted = {"group": "${{ github.workflow }}", "cancel-in-progress": False}
+    updated = _workflow(trusted, replay={"runs-on": "x", "steps": [{"run": "echo changed"}]})
+    base, head, sha = _repo(tmp_path, {"replay.yml": updated})
+    (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(_workflow(trusted)))
+    monkeypatch.chdir(head)
+    assert lanes.refused(sha, base) == {}
+
+
+@pytest.mark.parametrize("change", ["override", "rename"])
+def test_an_edit_cannot_escape_trusted_concurrency(tmp_path, monkeypatch, change):
+    trusted = {"group": "${{ github.workflow == 'Replay' && 'hosted-lane-a' || github.run_id }}"}
+    updated = _workflow(trusted)
+    if change == "override":
+        updated["jobs"]["replay"]["concurrency"] = None
+    else:
+        updated["name"] = "Evasion"
+    base, head, sha = _repo(tmp_path, {"replay.yml": updated})
+    (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(_workflow(trusted)))
+    monkeypatch.chdir(head)
+    assert lanes.refused(sha, base) == {
+        f"{lanes.WORKFLOWS}/replay.yml": ["job replay has no shared hosted lane concurrency group"]
+    }
+
+
 def test_proof_branch_pushes_are_graded():
     workflow = yaml.safe_load((ROOT / lanes.WORKFLOWS / "branch-lanes.yml").read_text())
     assert "diffcheck/**" not in workflow[True]["push"]["branches-ignore"]

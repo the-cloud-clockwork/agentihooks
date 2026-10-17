@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 
-from scripts import ci_reuse, ci_runner_trust, ci_wiring
+from scripts import ci_branch_lanes, ci_reuse, ci_runner_trust, ci_wiring
 
 GATE = ci_wiring.GATE
 WORKFLOWS = ".github/workflows"
@@ -197,6 +197,12 @@ def main(argv: list[str] | None = None) -> int:
         actors = json.loads(_git(root, "show", f"{args.base}:{ci_runner_trust.ACTORS}"))
         ci_runner_trust.validate_actors(actors)
     problems = grade(base_workflows, base_config, head_workflows, head_config, datetime.now(UTC).date(), actors)
+    problems += [
+        f"{file}: {problem}"
+        for file, workflow in head_workflows.items()
+        if workflow != base_workflows.get(file)
+        for problem in ci_branch_lanes.problems(workflow, base_workflows.get(file))
+    ]
     if actors is not None:
         problems += ci_runner_trust.check(head_workflows, actors)
     print(f"graded {args.head[:12]} against merge base {merge_base[:12]}: {len(problems)} protected gate problems")
