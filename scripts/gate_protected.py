@@ -1,6 +1,7 @@
 import argparse
 import json
 import subprocess
+from copy import deepcopy
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -177,6 +178,20 @@ def load(root: Path, rev: str) -> tuple[dict[str, dict], dict]:
     return workflows, config
 
 
+def _preflight_problems(base_workflows: dict[str, dict], head_workflows: dict[str, dict]) -> list[str]:
+    baseline = base_workflows.get("branch-lanes.yml")
+    if baseline is None:
+        return []
+    expanded = deepcopy(baseline)
+    events = expanded[True] if True in expanded else expanded["on"]
+    ignored = (events.get("push") or {}).get("branches-ignore", [])
+    if "diffcheck/**" in ignored:
+        ignored.remove("diffcheck/**")
+    if head_workflows.get("branch-lanes.yml") in (baseline, expanded):
+        return []
+    return ["The head changes or removes the trusted branch lane preflight."]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default=".")
@@ -186,7 +201,7 @@ def main(argv: list[str] | None = None) -> int:
     root = Path(args.root)
     merge_base = _git(root, "merge-base", args.base, args.head).strip()
     base_workflows, branched_config = load(root, merge_base)
-    _, tip_config = load(root, args.base)
+    tip_workflows, tip_config = load(root, args.base)
     base_config = {
         section: {**branched_config.get(section, {}), **tip_config.get(section, {})}
         for section in ("not_gates", "outside_gate")
@@ -197,6 +212,7 @@ def main(argv: list[str] | None = None) -> int:
         actors = json.loads(_git(root, "show", f"{args.base}:{ci_runner_trust.ACTORS}"))
         ci_runner_trust.validate_actors(actors)
     problems = grade(base_workflows, base_config, head_workflows, head_config, datetime.now(UTC).date(), actors)
+    problems += _preflight_problems(tip_workflows, head_workflows)
     problems += [
         f"{file}: {problem}"
         for file, workflow in head_workflows.items()

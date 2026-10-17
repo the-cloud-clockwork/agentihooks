@@ -355,6 +355,27 @@ def test_the_required_grader_refuses_a_disabled_branch_lane_preflight(repo, faul
     assert gate_protected.main(["--root", str(repo), "--head", planted]) == 1
 
 
+@pytest.mark.parametrize("cover_proofs", [False, True])
+@pytest.mark.parametrize("quoted", [False, True])
+def test_the_required_grader_preserves_preflight_and_allows_proof_coverage(repo, cover_proofs, quoted):
+    from copy import deepcopy
+
+    preflight = yaml.safe_load((_ROOT / ".github/workflows/branch-lanes.yml").read_text())
+    event_key = "on" if quoted else True
+    if quoted:
+        preflight["on"] = preflight.pop(True)
+    old = deepcopy(preflight)
+    old[event_key]["push"]["branches-ignore"].append("diffcheck/**")
+    _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": old}, {}, "old preflight")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    head = preflight if cover_proofs else old
+    workflow = _workflow()
+    workflow["jobs"]["lint"]["steps"] = [{"run": "echo changed"}]
+    changed = _commit(repo, {"test.yml": workflow, "branch-lanes.yml": head}, {}, "retain preflight")
+    _git(repo, "checkout", "-q", "dev")
+    assert gate_protected.main(["--root", str(repo), "--head", changed]) == 0
+
+
 def test_the_protected_grader_reports_gate_required_on_the_head():
     steps = _protected_workflow()["jobs"]["grade"]["steps"]
     statuses = [step for step in steps if "statuses/$HEAD_SHA" in step.get("run", "")]
