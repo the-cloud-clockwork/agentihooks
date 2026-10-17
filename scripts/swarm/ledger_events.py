@@ -104,8 +104,12 @@ def pull_request(raw):
     everything = _newest([check for check in rollup if not _superseded(check, newest)])
     commits, checks = raw.get("commits") or [], _required(raw.get("gated"), everything)
     results = [check.get("conclusion") or check.get("state") for check in checks]
+    required_runs = {_run_key(check) for check in checks if _run_key(check)[0]}
     running = any(
-        suite.get("workflowRun") and suite.get("status") != "COMPLETED" and not _superseded(suite, newest)
+        suite.get("workflowRun")
+        and suite.get("status") != "COMPLETED"
+        and not _superseded(suite, newest)
+        and (not raw.get("gated") or not required_runs or _run_key(suite) in required_runs)
         for suite in suites
     )
     pushes = [
@@ -188,7 +192,8 @@ def _required(gated, checks):
         for check in checks
         if check.get("isRequired", True) or (check.get("name") or check.get("context")) == GATE
     ]
-    return required if gated or required else checks
+    runs = {_run_key(check) for check in required if _run_key(check)[0]}
+    return [check for check in checks if check in required or _run_key(check) in runs] if gated or required else checks
 
 
 def _mark(item):
@@ -220,7 +225,9 @@ def _unpassed_gate(gated, checks, results, running):
 
 def _resolved(gated, checks, results, running):
     if gated:
-        return any(result in FINAL_RED | {"TIMED_OUT"} for result in results) or "SUCCESS" in _gate(checks, results)
+        return any(result in RED for result in results) or (
+            not running and "SUCCESS" in _gate(checks, results) and all(result in PASSED for result in results)
+        )
     if not running and any(result in FINAL_RED for result in results):
         return True
     return not running and "SUCCESS" in results and all(result in PASSED for result in results)

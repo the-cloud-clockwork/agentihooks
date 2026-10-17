@@ -814,22 +814,22 @@ def test_a_gate_that_has_not_passed_or_failed_keeps_the_head_unresolved(gate):
     assert ledger_events.pull_request(raw).resolved is False
 
 
-def test_a_passed_gate_resolves_green_beside_pending_workflows_and_checks():
+def test_a_passed_gate_holds_beside_pending_workflows_and_required_checks():
     rollup = SKIPPED_ONLY + [{"name": GATE, "conclusion": "SUCCESS"}]
     raw = {"state": "OPEN", "gated": True, "statusCheckRollup": rollup, "checkSuites": [FINISHED_RUN, APP_SUITE]}
     pull = ledger_events.pull_request(raw)
     assert pull.resolved is True
     assert pull.red is False
     raw["checkSuites"] = [QUEUED_TESTS]
-    assert ledger_events.pull_request(raw).resolved is True
+    assert ledger_events.pull_request(raw).resolved is False
     raw["checkSuites"] = [FINISHED_RUN]
     raw["statusCheckRollup"] = rollup + [{"name": "sonar", "conclusion": None}]
-    assert ledger_events.pull_request(raw).resolved is True
+    assert ledger_events.pull_request(raw).resolved is False
     for state in ("PENDING", "EXPECTED", ""):
         raw["statusCheckRollup"] = rollup + [{"context": "sonar", "state": state}]
-        assert ledger_events.pull_request(raw).resolved is True
+        assert ledger_events.pull_request(raw).resolved is False
     raw["statusCheckRollup"] = rollup + [{"name": "sonar", "conclusion": "CANCELLED"}]
-    assert ledger_events.pull_request(raw).resolved is True
+    assert ledger_events.pull_request(raw).resolved is False
 
 
 @pytest.mark.parametrize("suites", [[FINISHED_RUN], [QUEUED_TESTS]])

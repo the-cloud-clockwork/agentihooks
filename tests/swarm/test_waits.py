@@ -1412,8 +1412,19 @@ def test_checks_wait_holds_the_new_required_run_after_an_old_green_gate(tick, st
     assert idle.wait(tick.store.redis, "sw", ME) is not None
 
 
+@pytest.mark.parametrize("conclusion", [None, "FAILURE"])
+def test_an_optional_workflow_cannot_hold_or_fail_the_required_run(tick, conclusion):
+    tick.hold("checks", URL)
+    gate = {**_run_check("Gate — Required", 10, 1, "SUCCESS"), "isRequired": True}
+    optional = {**_run_check("measure", 20, 2, conclusion, workflow="W2"), "isRequired": False}
+    suites = [_suite(1, "COMPLETED", "SUCCESS"), _suite(2, "IN_PROGRESS", workflow="W2")]
+    tick.pulls[URL] = _gated([gate, optional], suites, False)
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
+    assert idle.wait(tick.store.redis, "sw", ME) is None
+
+
 @pytest.mark.parametrize("conclusion", ["SUCCESS", "FAILURE", "TIMED_OUT"])
-def test_a_required_gate_ends_checks_wait_beside_a_pending_jobless_workflow(tick, conclusion):
+def test_a_required_gate_holds_green_or_ends_red_beside_a_pending_jobless_workflow(tick, conclusion):
     tick.hold("checks", URL)
     tick.pulls[URL] = gated_probe(
         [{"name": "Gate — Required", "conclusion": conclusion}],
@@ -1421,13 +1432,18 @@ def test_a_required_gate_ends_checks_wait_beside_a_pending_jobless_workflow(tick
         workflows(GATE_WORKFLOW),
     )
     assert tick.end() == []
-    outcome = "green" if conclusion == "SUCCESS" else "red; failed: Gate — Required"
-    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now {outcome}"]
-    assert idle.wait(tick.store.redis, "sw", ME) is None
-    assert tick.told() == [
-        f"Your wait on checks on {URL}, now {outcome} has ended. Pick task t1 back up: "
-        "agentihooks swarm sw done, block, or wait on the next thing."
-    ]
+    if conclusion == "SUCCESS":
+        assert tick.end() == []
+        assert idle.wait(tick.store.redis, "sw", ME) is not None
+        assert tick.told() == []
+    else:
+        outcome = "red; failed: Gate — Required"
+        assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now {outcome}"]
+        assert idle.wait(tick.store.redis, "sw", ME) is None
+        assert tick.told() == [
+            f"Your wait on checks on {URL}, now {outcome} has ended. Pick task t1 back up: "
+            "agentihooks swarm sw done, block, or wait on the next thing."
+        ]
 
 
 @pytest.mark.parametrize("conclusion", ["FAILURE", "ERROR", "STARTUP_FAILURE", "ACTION_REQUIRED", "TIMED_OUT"])
