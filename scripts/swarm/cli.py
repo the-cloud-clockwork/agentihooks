@@ -51,7 +51,6 @@ import subprocess
 import sys
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -112,6 +111,7 @@ from scripts.swarm import (
     take_master,
     templates,
     tick_master,
+    tick_stop,
     timer,
     timing,
     trace_plan,
@@ -212,9 +212,13 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
     token = controller.take_tick_lock(store, slug, held, TICK_LOCK_MS)
     if token is None:
         return ["another tick is running"]
+    tick_stop.hold(token, lambda: controller.release_tick_lock(store, slug, token))
     keeping = timing.BEFORE_STEP.set(
-        lambda: tick_activity.keep(
-            store, slug, lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS), now_ms
+        lambda: (
+            tick_stop.check()
+            or tick_activity.keep(
+                store, slug, lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS), now_ms
+            )
         )
     )
     doc = {}
@@ -358,6 +362,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
         finally:
             timing.BEFORE_STEP.reset(keeping)
             controller.release_tick_lock(store, slug, token)
+            tick_stop.drop(token)
 
 
 def cmd_list(store, args):
@@ -428,8 +433,8 @@ def cmd_tick(store, args):
     if slugs:
         _reconcile_services()
         firsts, until = _Firsts(len(slugs)), time.monotonic() + EXTRA_TICKS_UNTIL
-        with ThreadPoolExecutor(max_workers=len(slugs)) as pool:
-            list(pool.map(lambda slug: _tick_while_others_run(store, slug, firsts, until), slugs))
+        if tick_stop.run(slugs, lambda slug: _tick_while_others_run(store, slug, firsts, until), firsts.settled.set):
+            return
     from scripts import herdr_gc
 
     try:
