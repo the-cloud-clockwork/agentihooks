@@ -84,3 +84,19 @@ def test_selected_tests_publish_the_existing_duration_and_flake_formats():
         assert "!cancelled()" in upload["if"]
         assert "matrix.python-version" in upload["with"]["name"]
         assert "matrix.leg" in upload["with"]["name"]
+
+
+@pytest.mark.parametrize("phase", ["setup", "call", "teardown"])
+def test_summary_includes_final_failures_when_retries_are_disabled(tmp_path, phase):
+    from _pytest.reports import TestReport
+
+    from scripts.ci_gate_summary import counts
+    from tests.flake_ledger import FlakeLedger
+
+    report_dir = tmp_path / "flakes-3.12-1"
+    report_dir.mkdir()
+    ledger = FlakeLedger(report_dir / "flakes.jsonl")
+    report = TestReport("test_once", ("test_probe.py", 1, "test_once"), {}, "failed", "failure", phase)
+    ledger.pytest_runtest_logreport(report)
+    ledger.pytest_runtest_logfinish(report.nodeid)
+    assert counts(tmp_path) == {"ran": 1, "flaky": 0, "failed": 1}
