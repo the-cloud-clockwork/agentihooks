@@ -430,6 +430,13 @@ for (const options of [{ closeFails: 3 }, { compareFails: 'a'.repeat(40) }]) {
   });
 }
 
+test('stops at its time budget and leaves the rest for the next run without failing', async () => {
+  const f = cleanupFixture(census());
+  await promote.closeAbandoned({ ...f, deadline: Date.now() - 1 });
+  assert.deepEqual(f.writes, []);
+  assert.deepEqual(f.tables[0].slice(1), [['10 not examined', '', 'left for the next run, the cleanup time budget ran out']]);
+});
+
 test('refuses to choose pull requests without the promotion app identity', async () => {
   const f = cleanupFixture(census(), { app: '' });
   await assert.rejects(promote.closeAbandoned(f), /App/);

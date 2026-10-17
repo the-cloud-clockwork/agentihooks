@@ -101,4 +101,4 @@ jobs:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
             const { closeAbandoned } = require('./.github/scripts/promote.cjs');
-            await closeAbandoned({ github, context, core, app: process.env.PROMOTION_APP });
+            await closeAbandoned({ github, context, core, app: process.env.PROMOTION_APP, deadline: Date.now() + 180000 });

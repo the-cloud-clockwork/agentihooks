@@ -77,4 +77,7 @@ def test_abandoned_promotion_cleanup_runs_last_as_the_app_even_after_a_failed_pr
     assert cleanup["if"] == "!cancelled() && steps.app-token.outcome == 'success'"
     assert cleanup["with"]["github-token"] == "${{ steps.app-token.outputs.token }}"
     assert cleanup["env"] == {"PROMOTION_APP": "${{ steps.app-token.outputs.app-slug }}"}
-    assert "closeAbandoned({ github, context, core, app: process.env.PROMOTION_APP })" in cleanup["with"]["script"]
+    assert (
+        "closeAbandoned({ github, context, core, app: process.env.PROMOTION_APP, deadline: Date.now() + 180000 })"
+        in cleanup["with"]["script"]
+    )

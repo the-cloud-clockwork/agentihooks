@@ -92,7 +92,7 @@ module.exports = async ({ github, context, core, sleep = ms => new Promise(resol
   ]).write();
 };
 
-module.exports.closeAbandoned = async ({ github, context, core, app }) => {
+module.exports.closeAbandoned = async ({ github, context, core, app, deadline = Infinity }) => {
   const { owner, repo } = context.repo;
   const repository = `${owner}/${repo}`;
   if (context.eventName !== 'push' || context.ref !== 'refs/heads/dev' ||
@@ -103,7 +103,11 @@ module.exports.closeAbandoned = async ({ github, context, core, app }) => {
   const outcomes = [];
   const failures = [];
   const open = await github.paginate(github.rest.pulls.list, { ...api, state: 'open', base: 'main', per_page: 100 });
-  for (const pull of open) {
+  for (const [index, pull] of open.entries()) {
+    if (Date.now() > deadline) {
+      outcomes.push([`${open.length - index} not examined`, '', 'left for the next run, the cleanup time budget ran out']);
+      break;
+    }
     const graded = /^promotion\/([0-9a-f]{40})$/.exec(pull.head.ref)?.[1];
     if (!graded || graded === context.sha || pull.user?.login !== `${app}[bot]` ||
         pull.head.repo?.full_name !== repository || pull.base.ref !== 'main') continue;
