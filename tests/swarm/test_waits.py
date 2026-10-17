@@ -514,8 +514,9 @@ def test_a_check_whose_run_names_no_workflow_is_never_superseded(tick):
     from scripts.swarm.ledger_events import pull_request
 
     tick.hold("checks", URL)
-    lint = {"name": "lint", "databaseId": 1, "conclusion": "FAILURE", "checkSuite": {"workflowRun": {"databaseId": 4}}}
-    suites = [{"status": "COMPLETED", "workflowRun": {"databaseId": 5}}]
+    run = {"databaseId": 4, "event": "pull_request"}
+    lint = {"name": "lint", "databaseId": 1, "conclusion": "FAILURE", "checkSuite": {"workflowRun": run}}
+    suites = [{"status": "COMPLETED", "workflowRun": {**run, "databaseId": 5}}]
     tick.pulls[URL] = pull_request(
         {"state": "OPEN", "headRefOid": "first", "statusCheckRollup": [lint], "checkSuites": suites}
     )
@@ -550,6 +551,23 @@ def test_a_rerun_attempt_of_one_run_is_judged_by_its_newest_check(tick, reverse)
     checks = [_run_check("unit", 10, 4, "FAILURE"), _run_check("unit", 20, 4, "SUCCESS")]
     tick.pulls[URL] = _gated(checks, [_suite(4, "COMPLETED", "SUCCESS")], reverse, gated=False)
     assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
+
+
+def test_the_queue_reading_of_required_checks_skips_a_superseded_run():
+    from scripts.swarm.ledger_events import _required_pull_request
+
+    checks = [
+        {**_run_check("Gate — Required", 11, 1, "FAILURE"), "isRequired": True},
+        {**_run_check("Gate — Required", 9, 2, "SUCCESS"), "isRequired": True},
+    ]
+    raw = {
+        "state": "OPEN",
+        "headRefOid": "first",
+        "statusCheckRollup": checks,
+        "checkSuites": [_suite(1, "COMPLETED", "CANCELLED"), _suite(2, "COMPLETED", "SUCCESS")],
+    }
+    pull = _required_pull_request(raw, {"Gate — Required": None})
+    assert (pull.resolved, pull.red, pull.failed) == (True, False, ())
 
 
 def test_checks_wait_with_no_checks_stays_unresolved(tick):

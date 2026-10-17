@@ -174,7 +174,7 @@ def _newest_runs(checks, suites):
 
 def _superseded(item, newest):
     run = _workflow_run(item).get("databaseId")
-    return bool(run) and run < newest.get(_run_key(item), 0)
+    return bool(run) and run < newest.get(_run_key(item), run)
 
 
 def _run_key(item):
