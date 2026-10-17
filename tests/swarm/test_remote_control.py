@@ -38,7 +38,7 @@ def _config(tmp_path, lane, harness, login):
     )
 
 
-def _spawn(tmp_path, lane, harness, kind, login=True):
+def _spawn(tmp_path, lane, harness, kind, login=True, seat=None):
     seen = []
 
     def run(argv, **kwargs):
@@ -46,7 +46,7 @@ def _spawn(tmp_path, lane, harness, kind, login=True):
         return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
 
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: (harness, "requested"))
-    task = {"id": lane, "title": "proof", "route_kind": kind}
+    task = {"id": lane, "title": "proof", "route_kind": kind} | ({"seat": seat} if seat is not None else {})
     placed = runtime.spawn(_config(tmp_path, lane, harness, login), lane, "agent", task)
     return _passed(seen[0]), placed
 
@@ -106,12 +106,48 @@ def test_a_master_placed_on_the_api_route_records_gateway(tmp_path):
     assert (placed.route_kind, placed.remote_control) == ("api", {"state": "off", "detail": "gateway"})
 
 
-def _resumed(tmp_path, lane, harness, kind, login=True):
+def _resumed(tmp_path, lane, harness, kind, login=True, seat=""):
     runtime, config, agent, seen = _resuming(tmp_path, "c0ffee", harness)
     config.slug = "proof"
     config.master_claude_login = login
-    placed = runtime.resume(config, replace(agent, lane=lane, task=lane, route_kind=kind), "resume")
+    placed = runtime.resume(config, replace(agent, lane=lane, task=lane, route_kind=kind, seat=seat), "resume")
     return _passed(seen["runs"][0]), placed
+
+
+@pytest.mark.parametrize("login", [True, False])
+@pytest.mark.parametrize("kind", ["interactive", "subscription"])
+def test_a_backend_master_spawns_without_the_master_login_or_remote_control(tmp_path, kind, login):
+    passed, placed = _spawn(tmp_path, "master", "claude", kind, login=login, seat="master-2@proof")
+    assert not {"master-login", "--settings", "--remote-control"} & set(passed)
+    assert _rc(passed) == [] and placed.remote_control == {}
+    assert placed.route_kind == kind
+
+
+def test_the_front_door_seat_spawns_with_remote_control(tmp_path):
+    passed, placed = _spawn(tmp_path, "master", "claude", "subscription", seat="master@proof")
+    assert passed[:6] == ["--route", "master-login", *RC]
+    assert placed.remote_control == ON
+
+
+def test_a_backend_master_never_reaches_the_master_login_home(tmp_path, monkeypatch):
+    for name in ("build", "claim", "prepare", "publish", "restore"):
+        monkeypatch.setattr(master_claude_login, name, lambda *_, **__: pytest.fail("master login touched"))
+    passed, _ = _spawn(tmp_path, "master", "claude", "interactive", seat="master-3@proof")
+    assert passed[:2] == ["--route", "interactive"]
+
+
+@pytest.mark.parametrize("login", [True, False])
+def test_a_backend_master_resumes_without_the_master_login_or_remote_control(tmp_path, login):
+    passed, placed = _resumed(tmp_path, "master", "claude", "interactive", login, seat="master-2@proof")
+    assert passed[:2] == ["--route", "interactive"]
+    assert not {"master-login", "--remote-control"} & set(passed)
+    assert (placed.route_kind, placed.remote_control) == ("interactive", {})
+
+
+def test_the_front_door_seat_resumes_with_remote_control(tmp_path):
+    passed, placed = _resumed(tmp_path, "master", "claude", "subscription", seat="master@proof")
+    assert passed[:6] == ["--route", "master-login", *RC]
+    assert (placed.route_kind, placed.remote_control) == ("interactive", ON)
 
 
 @pytest.mark.parametrize("kind", ["interactive", "subscription", "api"])

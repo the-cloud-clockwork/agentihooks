@@ -57,7 +57,7 @@ from scripts.swarm_ledger.events.publishing import publishing  # noqa: E402
 from scripts.swarm_ledger.repository import legacy  # noqa: E402
 from scripts.swarm_ledger.repository import repository as stored  # noqa: E402
 from scripts.swarm_ledger.server_code import CODE_DIRS, code_stamp  # noqa: E402
-from scripts.swarm_v2 import ledger_writer, master_fence  # noqa: E402
+from scripts.swarm_v2 import front_door, ledger_writer, master_fence  # noqa: E402
 
 HOST, PORT = ledger_link.address()
 BASE = f"http://{HOST}:{PORT}"
@@ -696,8 +696,8 @@ def workspace_tails(slug, task_id):
 
 
 def write_gate(slug):
-    """Every op write: masters fenced to the items they own, inside the talk budget."""
-    return master_fence.Fence(slug, talk.Budget(slug))
+    """Every op write: masters fenced to the items they own, page chat to the front door, inside the talk budget."""
+    return master_fence.Fence(slug, front_door.Door(slug, talk.Budget(slug)))
 
 
 def sample_streams():

@@ -778,9 +778,10 @@ PROMPT_ARGUMENT_LIMIT = 131_072
 OPENING_FILE_INSTRUCTION = "Read the complete opening instructions in this file and follow them: "
 
 
-def _inbox_channel_args() -> list[str]:
+def _inbox_channel_args(environ: dict[str, str]) -> list[str]:
     from scripts.inbox import channel
 
+    channel.register(environ)
     return channel.launch_args()
 
 
@@ -875,7 +876,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         if not args.dry_run:
             prompt = _binding_request(args, agent, prompt, active_env, claude_args)
         channel = args.inbox_channel and agent == "claude"
-        claude_args = [*_inbox_channel_args(), *claude_args] if channel else claude_args
+        claude_args = [*_inbox_channel_args(active_env), *claude_args] if channel else claude_args
         # A handoff must land on another account, so it never falls back to bare Claude.
         launcher, prompt_file = _write_launcher(
             directory,

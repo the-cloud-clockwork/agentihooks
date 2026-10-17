@@ -50,13 +50,18 @@ def test_a_newer_dev_push_replaces_only_the_pending_dev_push_run():
 ADOPT = (
     'python -m tests.dev_durations "$PYTHON_VERSION" ~/dev-durations --hash durations.sha256 --collected collected.json'
 )
+PRECOLLECTED_ADOPT = (
+    'collection=()\nif [[ "$GITHUB_EVENT_NAME" != push ]]; then\n'
+    "  collection=(--collection collected.json)\nfi\n"
+    + ADOPT.replace(" --collected collected.json", ' "${collection[@]}" --collected collected.json')
+)
 ADOPT_ENV = {"PYTHON_VERSION": "${{ matrix.python-version }}"}
 
 
 def test_unit_shards_adopt_dev_durations_through_the_script_before_the_tests_run():
     jobs = _workflow("test.yml")["jobs"]
     step = next(s for s in jobs["split"]["steps"] if s.get("name") == "Adopt latest dev durations")
-    assert step["run"].strip() == ADOPT
+    assert step["run"].strip() in (ADOPT, PRECOLLECTED_ADOPT)
     assert step["env"] == ADOPT_ENV
     steps = jobs["unit"]["steps"]
     download = next(s for s in steps if s.get("name") == "Download the durations this run splits on")
@@ -84,7 +89,11 @@ def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
     assert restore["with"]["key"] == "${{ needs." + producer + ".outputs.key }}"
     assert restore["if"] == f"needs.{producer}.outputs.source == '' && needs.{producer}.outputs.key != ''"
     assert restore["with"]["fail-on-cache-miss"] is True
-    assert jobs["split"]["needs"] in (["durations", "select", "reuse", "admission"], ["select", "reuse", "admission"])
+    assert jobs["split"]["needs"] in (
+        ["durations", "select", "reuse", "admission"],
+        ["select", "reuse", "admission"],
+        ["test-count", "select", "reuse", "admission"],
+    )
     lookup = next(s for s in jobs.get("durations", jobs["select"])["steps"] if s.get("id") == "stored")
     assert {
         key: jobs.get("durations", jobs["select"])["outputs"][key] for key in ("key", "queued", "base", "source")
@@ -109,7 +118,7 @@ def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
     }
     assert {"durations" if "durations" in jobs else "select", "split"} <= set(jobs["gate-required"]["needs"])
     assert "run" not in restore
-    assert adopt["run"] == ADOPT
+    assert adopt["run"] in (ADOPT, PRECOLLECTED_ADOPT)
     assert adopt["env"] == ADOPT_ENV
 
 

@@ -371,7 +371,8 @@ def test_the_server_fences_master_writes_inside_the_talk_budget():
 
     gate = ledger_server.write_gate(SLUG)
 
-    assert (type(gate), gate.slug, type(gate.inner), gate.inner.slug) == (master_fence.Fence, SLUG, talk.Budget, SLUG)
+    budget = gate.inner.inner
+    assert (type(gate), gate.slug, type(budget), budget.slug) == (master_fence.Fence, SLUG, talk.Budget, SLUG)
 
 
 def test_the_api_publishes_decisions_after_the_write(monkeypatch):
