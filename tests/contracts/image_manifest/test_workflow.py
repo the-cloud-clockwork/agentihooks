@@ -473,6 +473,8 @@ def test_the_candidate_build_reuses_layers_saved_only_after_the_proofs(workflow)
     assert restore["with"]["path"] == save["with"]["path"] == "${{ runner.temp }}/worker-layers"
     assert save["uses"] == "actions/cache/save@v4"
     assert save["with"]["key"] == "${{ steps.layers.outputs.cache-primary-key }}"
+    assert save["if"] == named(workflow, "Keep the qualified candidate layers")["if"]
+    assert save["if"] == "steps.layers.outputs.cache-hit != 'true'"
     assert '${LAYERS_FROM:+--cache-from "$LAYERS_FROM"}' in build["run"]
     assert '${LAYERS_TO:+--cache-to "$LAYERS_TO"}' in build["run"]
     assert "mode=max" in build["env"]["LAYERS_TO"]
