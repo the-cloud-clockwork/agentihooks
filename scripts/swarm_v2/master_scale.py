@@ -174,7 +174,7 @@ def _withdraw_asks(store, retiring):
 
 
 def _withdraw_wanted_again(slug, store, key, retiring, want):
-    wanted_again = {_address(slug, index) for index in range(2, want + 1)} & retiring.keys()
+    wanted_again = [address for address in retiring if address in masters.seats(slug, want)]
     if wanted_again:
         _withdraw_asks(store, {address: retiring.pop(address) for address in wanted_again})
         store.redis.hset(key, RETIRING, json.dumps(retiring))
