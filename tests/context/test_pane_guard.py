@@ -4,7 +4,7 @@ import pytest
 
 import hooks.config
 from hooks import hook_manager
-from hooks.context import pane_guard
+from hooks.context import pane_guard, quota_policy
 from hooks.context.ci_manifesto import PANE_SIGNALS, contains_pane_signal
 from hooks.hook_manager import BlockAction
 from scripts.swarm import delivery
@@ -19,15 +19,20 @@ OPENERS = [
     "herdr worktree create topic",
     "herdr worktree open topic",
     "herdr --session main pane split",
+    "herdr --session pane split",
     "herdr --json pane split",
+    "herdr --remote-keybindings server pane split",
     "herdr --machine box tab create",
     "herdr --remote me@host workspace create",
     "agentihooks run-in-terminal --dir /repo -- npm test",
     "agentihooks run-in-terminal --handoff",
     "agentihooks init-agent --dir /repo --name eng",
+    "agentihooks init-agent --handoff /doc.md",
     "/skills/run-in-terminal/scripts/02_run_terminal.sh /repo ls",
-    "bash ~/.claude/skills/prompt-user-parameter/scripts/open.sh in.sh title",
-    "bash -e /skills/prompt-user-parameter/scripts/run.sh in.sh status p1",
+    '"$RT"/scripts/02_run_terminal.sh /repo ls',
+    "bash ~/.claude/skills/prompt-user-parameter/scripts/open_param_pane.sh in.sh title",
+    "bash -e /skills/prompt-user-parameter/scripts/run_param_pane.sh in.sh status p1",
+    "cd /skills/scripts && bash open_param_pane.sh in.sh",
     "cd /repo && herdr pane split",
     "env A=1 herdr pane split",
     "bash -c 'herdr tab create'",
@@ -44,13 +49,13 @@ ALLOWED = [
     "herdr agent read a1",
     "herdr --session main pane list",
     "herdr --json pane read p1",
-    "herdr --session pane split",
-    "agentihooks init-agent --handoff /doc.md",
     "agentihooks swarm demo start",
     "agentihooks swarm demo tick",
     "agentihooks",
-    "cat /skills/prompt-user-parameter/scripts/open.sh",
+    "cat /skills/prompt-user-parameter/scripts/open_param_pane.sh",
     "bash",
+    "bash open.sh",
+    "./run.sh",
     "/skills/run-in-terminal/scripts/01_check_interop.sh",
     "echo herdr pane split",
 ]
@@ -62,6 +67,7 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setattr(hook_manager, "_swarm_heartbeat", lambda *args: None)
     for name in ("AGENTIHOOKS_SWARM", "AGENTIHOOKS_AGENT_NAME", "AGENTIHOOKS_SWARM_TASK"):
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(quota_policy, "evaluate", lambda session: None)
     with patch("hooks._redis.get_redis", return_value=None):
         yield tmp_path
 
@@ -151,10 +157,48 @@ def test_a_negated_phrase_keeps_it_closed():
 
 
 def test_an_empty_session_never_opens(home):
-    pane_guard.observe_pane_signal("", "open pane")
+    pane_guard.observe_pane_signal("", "open pane", True)
     assert not (home / "prod_bypass" / ".pane").exists()
     pane_guard.set_pane_signal("")
     assert not pane_guard.has_pane_signal("")
+
+
+def test_a_later_typed_prompt_without_the_phrase_closes_it():
+    submit("open pane")
+    submit("now carry on")
+    assert not pane_guard.has_pane_signal("s1")
+
+
+def test_an_untyped_prompt_closes_it():
+    pane_guard.observe_pane_signal("s1", "open pane", True)
+    assert pane_guard.has_pane_signal("s1")
+    pane_guard.observe_pane_signal("s1", "open pane", False)
+    assert not pane_guard.has_pane_signal("s1")
+
+
+@pytest.mark.parametrize(
+    ("command", "action", "allowed"),
+    [
+        ("agentihooks init-agent --handoff /doc.md", "handoff", True),
+        ("/bin/agentihooks init-agent --handoff /doc.md --route b", "handoff", True),
+        ("agentihooks init-agent --handoff /doc.md", "wait", False),
+        ("agentihooks init-agent --handoff /doc.md", None, False),
+        ("agentihooks init-agent --dir /repo", "handoff", False),
+        ("agentihooks run-in-terminal --handoff /doc.md", "handoff", False),
+    ],
+)
+def test_only_a_due_quota_handoff_passes_init_agent(monkeypatch, command, action, allowed):
+    from types import SimpleNamespace
+
+    seen = []
+    decision = None if action is None else SimpleNamespace(action=action)
+    monkeypatch.setattr(quota_policy, "evaluate", lambda session: seen.append(session) or decision)
+    if allowed:
+        check(command)
+        assert seen == ["s1"]
+    else:
+        with pytest.raises(BlockAction):
+            check(command)
 
 
 def test_an_inbox_item_carrying_the_phrase_does_not_open_it(monkeypatch):

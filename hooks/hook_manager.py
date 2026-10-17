@@ -882,6 +882,7 @@ def on_user_prompt_submit(payload: dict) -> None:
         from hooks.context.prod_lockdown import set_hotfix_signal, set_release_signal
 
         prompt = payload.get("prompt", "")
+        observe_pane_signal(session_id, prompt, typed)
         if prompt and typed:
             from hooks.context.conditions import arm_gate, contains_condition_signal
 
@@ -905,7 +906,6 @@ def on_user_prompt_submit(payload: dict) -> None:
                     "ci_manifesto: branch-creation signal active this turn",
                     {"session_id": session_id},
                 )
-            observe_pane_signal(session_id, prompt)
             if session_id not in _KNOWN_SUBAGENT_IDS and contains_pr_signal(prompt):
                 set_pr_signal(session_id)
                 log(

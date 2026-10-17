@@ -19,7 +19,7 @@ passes through your context, a log, a status file or a command argument.
 
 Run it only when the operator's own prompt this turn, typed in this pane,
 says `open pane` (or `open a pane`, `open the pane`). A PreToolUse guard
-denies `open.sh` and `run.sh` otherwise, and you never open the pane on your
+denies `open_param_pane.sh` and `run_param_pane.sh` otherwise, and you never open the pane on your
 own. Without the phrase, add the ask to Priorities with `agentihooks ledger
 --slug <slug> --as <name> priority add <item> "<the ask in plain words>"`, or
 write the command in this pane for him to run, one flag per line joined with
@@ -43,7 +43,7 @@ backslashes, and continue other work.
    long lived process. Use a tool's environment variable or stdin option when
    it has one. The script runs with `bash -e`, so the first failing step ends
    it; an empty value fails `read_secret`.
-3. Open the pane: `bash <skill dir>/scripts/open.sh <script> "<pane title>"`.
+3. Only when his prompt this turn says `open pane`, open the pane: `bash <skill dir>/scripts/open_param_pane.sh <script> "<pane title>"`.
    It prints `pane=<id>` and `status=<file>`.
 4. Tell the operator in plain words what to type in the new pane, then start
    a Monitor on the status file that emits its first line and exits when the

@@ -1,7 +1,7 @@
 [
   {
     "query": "the operator types: open pane, I will give you the tailnet auth key for the hive",
-    "expected_behavior": "Writes a throwaway script in a scratch folder that calls read_secret and passes the key through the environment, opens it with open.sh, tells the operator to type it in the new pane, and watches the status file with a Monitor."
+    "expected_behavior": "Writes a throwaway script in a scratch folder that calls read_secret and passes the key through the environment, opens it with open_param_pane.sh, tells the operator to type it in the new pane, and watches the status file with a Monitor."
   },
   {
     "query": "the operator pastes a token into the master pane chat",
