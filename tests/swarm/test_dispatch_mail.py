@@ -49,3 +49,18 @@ def test_public_dispatcher_work_activates_and_retains_until_disposition(mailbox,
     assert inbox.get(sent["id"]).state == "done"
     run(store, runtime, doc(), NOW + 120_000)
     assert seats(store)[0].state == "finished"
+
+
+@pytest.mark.parametrize(
+    "policy,expected", [("paused", "paused"), ("delegate", "autonomy"), ("running", "pending lifecycle checks")]
+)
+def test_sender_reports_dispatcher_ownership_and_activation_deferral(mailbox, capsys, policy, expected):
+    store, inbox = mailbox
+    if policy == "delegate":
+        store.update(SLUG, autonomy=policy)
+    else:
+        store.update(SLUG, state=policy)
+    assert cli.main(["send", f"dispatcher@{SLUG}", "Consider rank evidence"]) == 0
+    sent = json.loads(capsys.readouterr().out)
+    assert sent["dispatch"] == {"owner": f"dispatcher@{SLUG}", "consumer": "", "activation": expected}
+    assert inbox.get(sent["id"]).state == "pending"
