@@ -58,6 +58,36 @@ def test_one_failed_scenario_fails_the_step_and_every_scenario_reports(tmp_path)
     assert f"::error title={passing}" not in result.stdout
 
 
+def test_cache_export_overlaps_smoke_and_reports_its_failure(tmp_path):
+    docker = tmp_path / "docker"
+    docker.write_text(
+        "#!/usr/bin/env bash\n"
+        f"touch {tmp_path}/cache.started\n"
+        f"for _ in $(seq 50); do\n"
+        f"  [[ -e {tmp_path}/smoke.started ]] && echo 'cache saw smoke' && exit 7\n"
+        "  sleep 0.1\n"
+        "done\n"
+        "exit 8\n"
+    )
+    docker.chmod(0o755)
+    smoke = rendezvous(tmp_path, "smoke", "cache")
+    result = subprocess.run(
+        ["bash", str(RUNNER), smoke],
+        env={
+            "PATH": f"{tmp_path}:/usr/bin:/bin",
+            "RUNNER_TEMP": str(tmp_path),
+            "SWARM_SMOKE_CACHE_EXPORT": "true",
+        },
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 1
+    assert "smoke saw cache" in result.stdout
+    assert "cache saw smoke" in result.stdout
+    assert "swarm-cache-export.sh failed with exit 7" in result.stdout
+
+
 def test_scenarios_sharing_a_file_name_keep_their_own_results(tmp_path):
     scenarios = []
     for name, status in (("one", 0), ("two", 4)):
