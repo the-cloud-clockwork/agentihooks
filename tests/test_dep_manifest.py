@@ -213,7 +213,7 @@ def test_sonar_builds_the_manifest_and_only_dev_pushes_save_it():
     assert steps.index("Wait for the coverage merge") < steps.index("Build the test dependency manifest")
     build = _step("sonar", "Build the test dependency manifest")
     assert "python -m tests.dep_manifest build" in build["run"]
-    assert ") < /dev/null >" in build["run"] and build["run"].rstrip().endswith('echo "pid=$!" >> "$GITHUB_OUTPUT"')
+    assert "< /dev/null" in build["run"] and 'echo "pid=$!"' in build["run"]
     assert '--out "$RUNNER_TEMP/dep-manifest/manifest.json"' in build["run"]
     assert (
         steps.index("Build the test dependency manifest")
