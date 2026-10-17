@@ -284,7 +284,9 @@ def test_queue_shards_split_on_the_tests_the_planner_did_not_reuse():
     assert 'cd "$RUNNER_TEMP/planner"' in plan["run"]
     assert _job("split")["outputs"]["reused"] == "${{ steps.plan.outputs.reused }}"
     assert _job("unit")["outputs"]["reused"] == "${{ needs.split.outputs.reused }}"
-    assert _step("split", "Deselect the reused tests")["run"].startswith("python -m tests.dep_manifest deselect")
+    deselected = _step("split", "Deselect the reused tests")
+    assert deselected["run"].startswith('cd "$RUNNER_TEMP/planner"\n"$PYTHON_PATH" -m tests.dep_manifest deselect')
+    assert deselected["env"]["PYTHON_PATH"] == plan["env"]["PYTHON_PATH"]
     assert _step("unit", "Run tests")["env"]["CI_REUSED"] == "${{ github.workspace }}/reused.json"
     check = _step("shard-check", "Check every collected test ran in exactly one shard")
     assert check["run"].endswith(" $REUSED")

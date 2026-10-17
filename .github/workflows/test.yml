@@ -721,9 +721,15 @@ jobs:
           retention-days: 7
           overwrite: true
 
+      # The grader's manifest code picks what is skipped; the head supplies only the plan and its collection.
       - name: Deselect the reused tests
         if: steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
-        run: python -m tests.dep_manifest deselect --plan reused-tests.json --collected collected.json --out reused.json
+        env:
+          PYTHON_PATH: ${{ steps.python.outputs.python-path }}
+        run: |
+          cd "$RUNNER_TEMP/planner"
+          "$PYTHON_PATH" -m tests.dep_manifest deselect --plan "$GITHUB_WORKSPACE/reused-tests.json" \
+            --collected "$GITHUB_WORKSPACE/collected.json" --out "$GITHUB_WORKSPACE/reused.json"
 
       - name: Upload the deselected tests
         if: steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
