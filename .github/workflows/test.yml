@@ -796,6 +796,7 @@ jobs:
       - name: Record the suite count for later bases
         if: github.event_name == 'push' && github.ref == 'refs/heads/dev' && env.UNIT_SOURCE == ''
         continue-on-error: true
+        timeout-minutes: 2
         run: |
           git worktree add --detach "$RUNNER_TEMP/base" HEAD
           mkdir -p "$RUNNER_TEMP/count-record"
