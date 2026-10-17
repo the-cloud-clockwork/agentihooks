@@ -694,6 +694,7 @@ def test_an_unrenewed_pod_worker_loses_its_scoped_writes_after_the_admission_lea
     from scripts.swarm_v2.api.executions import DEFAULT_LEASE_MS
 
     _, agent, token, _ = admitted_worker(world)
+    advance(world, 1000 + DEFAULT_LEASE_MS // 2)
     advance(world, 1000 + DEFAULT_LEASE_MS + 1000)
 
     with pytest.raises(SwarmError, match="^stale_generation$"):
