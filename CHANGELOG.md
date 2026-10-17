@@ -15,7 +15,8 @@ release assembles them into its release notes. See `changelog.d/README.md`.
   stands down one managed Codex conversation without a signal: it fences the
   conversation from new inbox turns and interrupts its active turn, leaving the
   app-server and its other conversations running. A refusal names its reason and
-  a safe alternative.
+  a safe alternative. It refuses `--type claude`, considers only Codex processes
+  and prints one JSON report with `--json`.
 - Bounded ledger write timing and request route CPU reports through the metrics
   endpoint and `python -m scripts.swarm_ledger.request_metrics` command.
 - Swarm waits accept branch mutation preflight runs and report every failing
@@ -48,6 +49,9 @@ release assembles them into its release notes. See `changelog.d/README.md`.
 
 ### Fixed
 
+- `terminate-agent --stand-down` reports a Redis error with whether the
+  conversation is fenced, names a process with unregistered conversations as
+  unknown and refuses to fence a conversation that exited after its plan.
 - Master notices for new and overdue follow ups include the item identifier and
   its exact completion command.
 - The swarm stall watchdog no longer reopens a task or stops its owner while

@@ -12,7 +12,7 @@ jobs:
   retry:
     if: github.event.workflow_run.event == 'merge_group' && (github.event.workflow_run.conclusion == 'failure' || github.event.workflow_run.conclusion == 'cancelled') && github.event.workflow_run.run_attempt == 1
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 35
     permissions:
       actions: read
       checks: read
@@ -38,7 +38,7 @@ jobs:
         run: python -m scripts.ci_queue_retry --repo "$GITHUB_REPOSITORY" --run-id "$RUN_ID"
 
       - name: Log the requeue a runner loss would make
-        if: steps.classify.outputs.requeue == 'true' && vars.QUEUE_RETRY_ENFORCE != 'true'
+        if: steps.classify.outputs.requeue == 'true' && vars.QUEUE_RETRY_ENFORCE == 'false'
         env:
           PULL: ${{ steps.classify.outputs.pull }}
         run: |
@@ -46,7 +46,7 @@ jobs:
 
       - name: Mint the TCC Main CI queue token
         id: app-token
-        if: steps.classify.outputs.requeue == 'true' && vars.QUEUE_RETRY_ENFORCE == 'true'
+        if: steps.classify.outputs.requeue == 'true' && vars.QUEUE_RETRY_ENFORCE != 'false'
         uses: actions/create-github-app-token@v3.2.0
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
@@ -55,8 +55,12 @@ jobs:
           permission-pull-requests: write
 
       - name: Requeue the pull request once
-        if: steps.classify.outputs.requeue == 'true' && vars.QUEUE_RETRY_ENFORCE == 'true'
+        if: steps.classify.outputs.requeue == 'true' && vars.QUEUE_RETRY_ENFORCE != 'false'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          PULL: ${{ steps.classify.outputs.pull }}
-        run: gh pr merge "$PULL" --squash --auto --repo "$GITHUB_REPOSITORY"
+          NODE: ${{ steps.classify.outputs.node }}
+          HEAD: ${{ steps.classify.outputs.head }}
+        run: >-
+          gh api graphql
+          -f query='mutation($pull: ID!, $head: GitObjectID!) { enqueuePullRequest(input: {pullRequestId: $pull, expectedHeadOid: $head}) { mergeQueueEntry { position } } }'
+          -f pull="$NODE" -f head="$HEAD"

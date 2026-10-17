@@ -29,12 +29,17 @@ CONNECT_S = 5.0
 IN_PROGRESS = "inProgress"
 LISTING = "agentihooks terminate-agent --list --type codex shows the live conversations"
 RETRY = "run the same stand down again to interrupt its turn"
+NOT_FENCED = "is not fenced; run the same stand down again"
 
 
 class Refused(ValueError):
     def __init__(self, reason: str, alternative: str) -> None:
         super().__init__(reason, alternative)
         self.reason, self.alternative = self.args
+
+
+class NotFenced(RuntimeError):
+    pass
 
 
 @dataclass(frozen=True)
@@ -49,6 +54,10 @@ def _conversation(record: TransportRecord) -> str:
     return f"conversation {record.thread_id} of {record.agent_name}"
 
 
+def _ended(record: TransportRecord) -> Refused:
+    return Refused(f"{_conversation(record)} already ended ({record.state})", "nothing needs standing down")
+
+
 def _unmanaged(slug: str, selector: str, sessions: "list[Session]") -> Refused:
     reason = (
         f"{selector} has no managed Codex conversation in swarm {slug}, "
@@ -59,9 +68,10 @@ def _unmanaged(slug: str, selector: str, sessions: "list[Session]") -> Refused:
         return Refused(reason, LISTING)
     [pid] = pids
     ids = ", ".join(sorted(s.session_id for s in sessions if s.process.pid == pid and s.session_id))
+    hosted = ids or "that agentihooks has not registered, so which ones is unknown"
     return Refused(
         reason,
-        f"process {pid} hosts conversations {ids}; "
+        f"process {pid} hosts conversations {hosted}; "
         f"agentihooks terminate-agent {pid} --force-shared --dry-run names its process group, "
         "and the same command without --dry-run ends every conversation in that process, "
         "so run it only when all of them belong to this agent",
@@ -79,8 +89,7 @@ def plan(bindings: BindingStore, slug: str, selector: str, sessions: "list[Sessi
         raise _unmanaged(slug, selector, sessions)
     live = [record for record in matches if record.state not in {EXITED, FAILED}]
     if not live:
-        ended = matches[0]
-        raise Refused(f"{_conversation(ended)} already ended ({ended.state})", "nothing needs standing down")
+        raise _ended(matches[0])
     if len(live) > 1:
         threads = ", ".join(sorted(record.thread_id for record in live))
         raise Refused(f"{selector} names {len(live)} live conversations", f"name one thread: {threads}")
@@ -123,6 +132,8 @@ def _fence(bindings: BindingStore, slug: str, record: TransportRecord) -> None:
     def fence(pipe):
         pipe.watch(key)
         current = bindings.get(slug, record.execution_id)
+        if current.state in {EXITED, FAILED}:
+            raise _ended(current)
         pipe.multi()
         pipe.hset(key, record.execution_id, json.dumps(asdict(replace(current, state=STOOD_DOWN))))
 
@@ -137,8 +148,13 @@ def execute(
     sleep: Callable[[float], None] = time.sleep,
     wait_s: float = WAIT_S,
 ) -> dict:
+    from redis.exceptions import RedisError
+
     record = chosen.record
-    _fence(bindings, chosen.slug, record)
+    try:
+        _fence(bindings, chosen.slug, record)
+    except RedisError as exc:
+        raise NotFenced(str(exc)) from exc
     publishing = bindings.store.key(chosen.slug, PUBLISHING)
     if not _settle(lambda: bindings.redis.hget(publishing, record.seat) != record.execution_id, clock, sleep, wait_s):
         raise RuntimeError(f"an inbox publication for {record.agent_name} is still in flight")
@@ -154,35 +170,67 @@ def execute(
     return {"stood_down": record.agent_name, "thread": record.thread_id, "interrupted": turn}
 
 
-def run(selector: str, swarm: str | None, dry_run: bool, sessions: "list[Session]") -> int:
+def _choose(selector: str, swarm: str | None, sessions: "list[Session]") -> tuple[BindingStore, Plan]:
     from scripts.swarm import store as swarm_store
 
     store = swarm_store.connect()
-    try:
-        slug = swarm or store.names.slug_of(selector)
-        if not slug:
-            raise Refused(f"no swarm given and {selector} names no swarm agent", "pass --swarm <slug>")
-        bindings = BindingStore(store)
-        chosen = plan(bindings, slug, selector, sessions)
-    except Refused as refused:
-        print(f"terminate-agent: refused: {refused.reason}", file=sys.stderr)
-        print(f"terminate-agent: safe alternative: {refused.alternative}", file=sys.stderr)
-        return 2
-    print(f"action=stand-down{'-dry-run' if dry_run else ''}")
-    for line in chosen.stops:
-        print(f"stops: {line}")
-    for line in chosen.keeps:
-        print(f"keeps: {line}")
-    if dry_run:
-        print("result=validated signal=none")
+    slug = swarm or store.names.slug_of(selector)
+    if not slug:
+        raise Refused(f"no swarm given and {selector} names no swarm agent", "pass --swarm <slug>")
+    bindings = BindingStore(store)
+    return bindings, plan(bindings, slug, selector, sessions)
+
+
+def _refuse(refused: Refused) -> int:
+    print(f"terminate-agent: refused: {refused.reason}", file=sys.stderr)
+    print(f"terminate-agent: safe alternative: {refused.alternative}", file=sys.stderr)
+    return 2
+
+
+def _failed(exc: Exception, status: str) -> int:
+    print(f"terminate-agent: {exc}", file=sys.stderr)
+    print(f"terminate-agent: {status}", file=sys.stderr)
+    return 1
+
+
+def _finish(report: dict, as_json: bool) -> int:
+    if as_json:
+        print(json.dumps(report))
         return 0
+    rest = {key: value for key, value in report.items() if key not in {"action", "stops", "keeps", "result"}}
+    print(" ".join([f"result={report['result']}", *(f"{key}={value}" for key, value in rest.items())]))
+    return 0
+
+
+def run(selector: str, swarm: str | None, dry_run: bool, sessions: "list[Session]", as_json: bool) -> int:
+    from redis.exceptions import RedisError
+
+    try:
+        bindings, chosen = _choose(selector, swarm, sessions)
+    except Refused as refused:
+        return _refuse(refused)
+    except RedisError as exc:
+        return _failed(exc, f"{selector} {NOT_FENCED}")
+    report = {
+        "action": f"stand-down{'-dry-run' if dry_run else ''}",
+        "stops": chosen.stops,
+        "keeps": chosen.keeps,
+    }
+    if not as_json:
+        print(f"action={report['action']}")
+        for line in chosen.stops:
+            print(f"stops: {line}")
+        for line in chosen.keeps:
+            print(f"keeps: {line}")
+    if dry_run:
+        return _finish({**report, "result": "validated", "signal": "none"}, as_json)
+    name = chosen.record.agent_name
     try:
         result = execute(bindings, chosen)
-    except (OSError, TimeoutError, RuntimeError, protocol.ProtocolError) as exc:
-        print(f"terminate-agent: {exc}", file=sys.stderr)
-        print(
-            f"terminate-agent: {chosen.record.agent_name} stays fenced from new inbox turns; {RETRY}", file=sys.stderr
-        )
-        return 1
-    print("result=stood-down " + " ".join(f"{key}={value}" for key, value in result.items()))
-    return 0
+    except Refused as refused:
+        return _refuse(refused)
+    except NotFenced as exc:
+        return _failed(exc, f"{name} {NOT_FENCED}")
+    except (OSError, TimeoutError, RuntimeError, RedisError, protocol.ProtocolError) as exc:
+        return _failed(exc, f"{name} stays fenced from new inbox turns; {RETRY}")
+    return _finish({**report, "result": "stood-down", **result}, as_json)

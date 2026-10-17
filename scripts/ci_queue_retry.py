@@ -16,8 +16,8 @@ RUNNER_LOSS = re.compile(
     r"|The job was not acquired by Runner"
 )
 QUEUE_BRANCH = re.compile(r"^gh-readonly-queue/.+/pr-(\d+)-[0-9a-f]+$")
-EXIT_POLLS = 12
-EXIT_POLL_SECONDS = 15
+EXIT_POLLS = 60
+EXIT_POLL_SECONDS = 30
 
 
 def base_name(job_name: str) -> str:
@@ -98,7 +98,7 @@ def pull_state(repo: str, number: int) -> dict:
     owner, name = repo.split("/")
     query = (
         f'query{{repository(owner:"{owner}",name:"{name}"){{pullRequest(number:{number}){{'
-        "id state isInMergeQueue commits(last:1){nodes{commit{committedDate}}} "
+        "id state isInMergeQueue commits(last:1){nodes{commit{oid committedDate}}} "
         "timelineItems(last:100,itemTypes:[REMOVED_FROM_MERGE_QUEUE_EVENT])"
         "{nodes{... on RemovedFromMergeQueueEvent{createdAt reason}}}}}}"
     )
@@ -125,13 +125,17 @@ def main(argv: list[str] | None = None) -> int:
     number = pull_number(run)
     if retry and number is None:
         retry, reason = False, f"no pull request in queue branch {run.get('head_branch')}"
+    node = head = ""
     if retry:
-        allowed, why = requeue(pull_after_exit(args.repo, number))
+        pull = pull_after_exit(args.repo, number)
+        allowed, why = requeue(pull)
         retry, reason = allowed, f"{reason}; {why}"
+        if retry:
+            node, head = pull["id"], pull["commits"]["nodes"][-1]["commit"]["oid"]
     print(json.dumps({"run": args.run_id, "pull": number, "requeue": retry, "reason": reason}))
     if output := os.environ.get("GITHUB_OUTPUT"):
         with Path(output).open("a") as handle:
-            handle.write(f"requeue={str(retry).lower()}\npull={number or ''}\n")
+            handle.write(f"requeue={str(retry).lower()}\npull={number or ''}\nnode={node}\nhead={head}\n")
     return 0
 
 

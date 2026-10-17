@@ -250,6 +250,71 @@ Each keyed job declares its inputs in `.github/input-keys.json`: repository path
 
 Known limits: the day in the key forces one full run per job per UTC day, which also bounds how long an unkeyed floating input, such as a Python patch release or a self hosted runner image, can be reused. `ci_reuse.py` keeps the whole tree queue reuse. `kind-due` looks up the `helm-kind` key of the chart, the swarm image inputs and the kind proof files on the same runner pool, and a hit skips `helm-kind`.
 
+## Helm kind proof input keys
+
+The Helm chart proof uses the same job input key in both `kind-due` in Tests and the reusable Helm chart in kind workflow. The former hand written path rule is removed. On a dev push, `kind-due` checks out the graded head and looks up `helm-kind`; `due` is true only when the key misses. Both jobs use the same runner pool so the runner fields in their keys match.
+
+| Decision | Tests workflow | Direct Helm workflow or Proofs dispatch |
+|---|---|---|
+| Passed key found | `kind-due` succeeds with `due=false`; `helm-kind` is skipped | The job succeeds; kind installation, fixture layer restore and chart proof steps are skipped |
+| Key missing | `due=true` calls the Helm workflow, which checks the key again | Install kind and run the full chart proof; save the passed key after success on a push or dispatch |
+| Input lookup fails | The due job fails; the chart workflow is not called | The job fails before the proof; no passed key is saved |
+
+The required gate accepts a skipped `helm-kind` when `due=false`. It still checks the due job's result. In the current delivery tiers, Tests invokes `kind-due` on pushes and admitted gate plant dispatches; pull requests and merge groups do not run this promotion proof. Use a focused Proofs dispatch to check a branch manually.
+
+### Declared inputs and configuration
+
+The `helm-kind` entry in `.github/input-keys.json` is the declaration to maintain when the chart proof gains an input. It covers:
+
+- The whole `deploy/helm/agentihooks-swarm` chart, including its CI fixtures, and `.github/workflows/helm-kind.yml`.
+- Swarm image inputs: `Dockerfile`, `.dockerignore`, `pyproject.toml`, `README.md`, `docker/swarm/requirements.lock`, `docker/swarm-node`, `hooks`, `scripts`, `profiles` and `media`.
+- Proof schemas and fixtures: `docs/swarm-v2/schemas`, `tests/fixtures/swarm_v2`, `tests/kind_request.py` and the five `tests/chart_*.py` helpers named in the declaration (`chart_hive_join`, `chart_network`, `chart_redis`, `chart_secrets`, `chart_workers`).
+- Tool labels `kind v0.33.0` and `kindest/node v1.37.0`. Keep these aligned with `KIND_VERSION` and `KIND_NODE_IMAGE` in the Helm workflow; the workflow itself is also a declared input, including the pinned node image digest.
+
+For example, if a new chart probe reads `tests/chart_storage.py`, append that path to the existing `helm-kind.paths` array. Preserve the other entries. When upgrading kind, update both the workflow environment and the declaration's tool label:
+
+```yaml
+# .github/workflows/helm-kind.yml, jobs.kind.env
+KIND_VERSION: v0.33.0
+KIND_NODE_IMAGE: mirror.gcr.io/kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
+```
+
+```json
+"tools": ["kind v0.33.0", "kindest/node v1.37.0"]
+```
+
+The key also includes the shared keyer's implementation, runner identity and UTC day, as described under [Slice 6](#slice-6-as-delivered). Helm passes only `job: helm-kind` to the input-key action; it supplies no grading base or external environment argument. A docs edit outside the declared paths can reuse a passed key, but editing `README.md`, a schema, a script or a profile invalidates it even when no chart template changed. A new day or changed runner image can also cause a full run. Cache eviction or a missing passed record safely falls back to the full proof. A failed proof saves no passed key.
+
+### Run and inspect the proof
+
+Dispatch the focused proof for a pushed branch:
+
+```bash
+gh workflow run proofs.yml \
+  --ref <branch> \
+  -f proof=helm-kind
+```
+
+The reusable workflow can also be dispatched directly with `gh workflow run helm-kind.yml --ref <branch>`. Neither dispatch offers a force or cache bypass input: dispatching the same inputs on the same day can reuse the previous pass. A passed branch dispatch does not seed the dev branch's pass record.
+
+Inspect the job and step conclusions for a chosen Tests or Proofs run:
+
+```bash
+gh api repos/the-cloud-clockwork/agentihooks/actions/runs/<run-id>/jobs \
+  --paginate \
+  --jq '.jobs[] | select(.name | contains("kind")) | {name, conclusion, started_at, completed_at, steps: [.steps[] | {name, conclusion}]}'
+```
+
+On a hit, the lookup emits an `Input key reused` notice naming `helm-kind` and its key. In Tests, inspect `kind-due` and the skipped `helm-kind` job. In a direct or Proofs run, inspect the successful job's skipped heavy steps. Measure job wall time from `started_at` to `completed_at`; a step skip and a skipped job are different results.
+
+The fixture image layer cache is separate. It accelerates image builds on a proof key miss, can restore older layers with the `kind-layers-` prefix, and saves only when an export is complete. A layer hit still runs the chart proof. Only a passed proof input key authorizes skipping it.
+
+### Delivery evidence and limits
+
+[Pull request 3866](https://github.com/the-cloud-clockwork/agentihooks/pull/3866) records the baseline: Helm took 151 to 191 seconds on twelve of fifteen dev pushes, with `kind-due` taking 12 to 16 seconds. The [source issue's completion report](https://github.com/the-cloud-clockwork/agentihooks/issues/3865) records branch misses of 169 and 178 seconds and a hit of 10 seconds. In [Proofs run 39000899419](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39000899419), the successful Helm job skipped kind installation, layer restoration, the chart proof and pass saving.
+
+The first reported dev push after merge, [39011568629](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39011568629), missed the cache and ran the full proof in 188 seconds before saving the key; the due lookup took 11 seconds. The source completion report explicitly leaves the unchanged-input dev-push skip measurement outstanding. These measurements prove branch reuse and an initial dev miss; they do not establish a measured dev-push speedup or a separate chart-input-change full-run comparison. Record those run links and job timings when that source proof is available.
+
 ## Full scope pull request reuse as delivered
 
 Pull requests into dev from a branch of this repository plan reuse the same way the queue does. A full scope run, one that `select` did not narrow to the tests its change reaches, skips every test that passed on the dev record with unchanged inputs and carries those tests' dev coverage into its own, so `sonar` and the coverage ratchet still grade the whole suite. A narrowed run skips the `split` job, so it plans nothing and runs only its selected tests.
