@@ -11,6 +11,7 @@ from scripts.inbox.pool import POOLS, MasterPool, live_masters, turn
 from scripts.inbox.store import RECLAIMED, InboxError, InboxStore, now_ms
 from scripts.swarm import operator_mail
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+from scripts.swarm_v2 import masters
 from scripts.swarm_v2.masters import MasterSeats
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
@@ -161,6 +162,15 @@ def test_masters_gone_or_draining_are_passed_over(swarm, inbox):
 
     fence = Seats(SLUG, swarm, {})
     assert [fence.writer(f"sw-master-{n}") for n in (2, 3, 4)] == ["sw-master-2", "master-3@sw", "master-4@sw"]
+
+
+def test_live_seats_read_lead_first_then_by_seat_number(swarm):
+    _masters(swarm, 12)
+    seats = [FRONT, *(f"master-{n}@{SLUG}" for n in range(2, 13))]
+    assert live_masters(swarm.redis, SLUG) == seats
+    assert list(masters.held(swarm.redis, SLUG, swarm.agents(SLUG)).items()) == [
+        (seat, f"sw-master-{n}") for n, seat in enumerate(seats, start=1)
+    ]
 
 
 def test_pool_fence_and_front_door_agree_on_the_seats_mid_handoff(swarm, inbox):

@@ -79,7 +79,7 @@ def held(redis, slug: str, agents: list) -> dict[str, str]:
     found = {}
     for address in {*seats(slug, table.count(slug)), *records} - retired:
         occupant = registry.occupant(address).occupant
-        name = occupant or records.get(address, "")
+        name = occupant or records.get(address)
         if occupant and (occupant in gone or registry.left(occupant, address)):
             continue
         if name and not master_retire.reason(store, slug, name):
