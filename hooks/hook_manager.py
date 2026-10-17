@@ -46,6 +46,7 @@ class BlockAction(Exception):
 
 _OTEL_SECRET_DETECTED = "agentihooks.guardrail.secret_detected"
 _UNSET = "<unset>"
+_QUESTION_CHECK_FAILED = "The question tool is off: the operator presence check failed. Keep working without it."
 
 
 # Heavy imports are lazy-loaded in functions that need them:
@@ -1151,9 +1152,6 @@ def _master_coding(payload: dict, typed: bool) -> None:
         log("master coding window failed", {"error": str(e)})
 
 
-QUESTION_CHECK_FAILED = "The question tool is off: the operator presence check failed. Keep working without it."
-
-
 def _operator_question(payload: dict) -> str:
     try:
         from hooks.context import operator_mode
@@ -1161,7 +1159,7 @@ def _operator_question(payload: dict) -> str:
         return operator_mode.question_block(payload.get("tool_name"), payload.get("session_id"))
     except Exception as e:
         log("operator question check failed", {"error": str(e)})
-        return QUESTION_CHECK_FAILED if payload.get("tool_name") == "AskUserQuestion" else ""
+        return _QUESTION_CHECK_FAILED if payload.get("tool_name") == "AskUserQuestion" else ""
 
 
 def _operator_reminder(payload: dict) -> None:
