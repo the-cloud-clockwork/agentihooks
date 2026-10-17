@@ -57,7 +57,7 @@ jobs:
         run: echo "$HOME/venv/bin" >> "$GITHUB_PATH"
       - name: Prepare identical base and head inputs
         env:
-          BASE: ${{ inputs.base || github.event.pull_request.base.sha }}
+          BASE: ${{ inputs.base || 'origin/dev' }}
         run: |
           BASE="$(git merge-base "$BASE" HEAD)"
           git worktree add --detach "$RUNNER_TEMP/base" "$BASE"
