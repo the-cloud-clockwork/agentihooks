@@ -929,9 +929,9 @@ def test_the_probe_requests_the_head_with_its_check_rollup():
                 'file(path:".github/workflows"){object{...on Tree{entries{object{...on Blob{text}}}}}} '
                 "statusCheckRollup{contexts(first:100){"
                 "nodes{...on CheckRun{databaseId name conclusion completedAt isRequired(pullRequestNumber:7) "
-                "checkSuite{app{databaseId} workflowRun{workflow{name}}}} "
+                "checkSuite{app{databaseId} workflowRun{databaseId workflow{name}}}} "
                 "...on StatusContext{context state createdAt isRequired(pullRequestNumber:7)}} "
-                "pageInfo{hasNextPage endCursor}}} checkSuites(first:100){nodes{status conclusion workflowRun{databaseId createdAt}} "
+                "pageInfo{hasNextPage endCursor}}} checkSuites(first:100){nodes{status conclusion workflowRun{databaseId createdAt workflow{name}}} "
                 "pageInfo{hasNextPage endCursor}}}}}}}}",
                 "-f",
                 f"url={URL}",
