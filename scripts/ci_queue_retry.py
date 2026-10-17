@@ -16,8 +16,8 @@ RUNNER_LOSS = re.compile(
     r"|The job was not acquired by Runner"
 )
 QUEUE_BRANCH = re.compile(r"^gh-readonly-queue/.+/pr-(\d+)-[0-9a-f]+$")
-EXIT_POLLS = 12
-EXIT_POLL_SECONDS = 15
+EXIT_POLLS = 60
+EXIT_POLL_SECONDS = 30
 
 
 def base_name(job_name: str) -> str:

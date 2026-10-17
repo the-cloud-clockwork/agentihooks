@@ -81,16 +81,16 @@ def test_operator_off_ends_it_at_once():
 
 def test_operator_on_keeps_questions_open_through_inbox_and_silence_until_off():
     operator_mode.observe("s1", "operator on", True, now=100)
-    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=101) == ""
+    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) == ""
     for prompt in (CHANNEL, delivery.marked("continue")):
         assert not is_operator_prompt(prompt, "demo")
         operator_mode.observe("s1", prompt, False, now=200)
-        assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=201) == ""
-    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=86500) == ""
+        assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) == ""
+    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) == ""
     operator_mode.observe("s1", CHANNEL, False, now=86501)
-    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=86502) == ""
+    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) == ""
     assert operator_mode.observe("s1", "operator off", True, now=86503) == "off"
-    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=86504) == MASTER_ASK.format(
+    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) == MASTER_ASK.format(
         slug="demo", name="master@a1-1"
     )
 
@@ -195,17 +195,25 @@ MASTER_ASK = (
     "Say only one short line, type operator on to answer the questions here, or leave them in Priorities with "
     'agentihooks ledger --slug {slug} --as {name} priority add <item> "<the ask in plain words>".'
 )
+STANDALONE_ASK = (
+    "The operator is not present in this pane, so the question tool is off until he types operator on. "
+    "State the open question in one short line, take the most reasonable choice and keep working."
+)
+PROMPT_REFUSAL = (
+    "Denied {tool}: the operator is not present in this pane, and only his typed operator on opens this prompt. "
+    "Keep working without it."
+)
 
 
 def test_while_off_the_master_is_told_one_operator_on_line_or_priorities():
-    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=100) == MASTER_ASK.format(
+    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) == MASTER_ASK.format(
         slug="demo", name="master@a1-1"
     )
 
 
 def test_while_off_a_non_master_is_refused_and_the_refusal_names_the_ledger_command():
     env = {**SWARM, "AGENTIHOOKS_AGENT_NAME": "engineer@a1-master@"}
-    assert operator_mode.question_block("AskUserQuestion", "s1", env, now=100) == ASK.format(
+    assert operator_mode.question_block("AskUserQuestion", "s1", env) == ASK.format(
         slug="demo", name="engineer@a1-master@"
     )
 
@@ -213,31 +221,32 @@ def test_while_off_a_non_master_is_refused_and_the_refusal_names_the_ledger_comm
 def test_a_ledger_bound_session_is_told_its_own_ledger_and_name(ledgers):
     (ledgers / ".sessions" / "s2.json").write_text(json.dumps({"slug": "work", "name": "eng-2@work"}))
     env = {**SWARM, "LEDGER_DIR": str(ledgers)}
-    assert operator_mode.question_block("AskUserQuestion", "s2", env, now=100) == ASK.format(
-        slug="work", name="eng-2@work"
-    )
+    assert operator_mode.question_block("AskUserQuestion", "s2", env) == ASK.format(slug="work", name="eng-2@work")
 
 
 def test_an_unreadable_binding_falls_back_to_the_swarm_and_names_what_is_unknown(ledgers):
     (ledgers / ".sessions" / "s4.json").write_text("{not json")
     env = {"AGENTIHOOKS_SWARM": "demo", "LEDGER_DIR": str(ledgers)}
-    assert operator_mode.question_block("AskUserQuestion", "s4", env, now=100) == ASK.format(slug="demo", name="<name>")
+    assert operator_mode.question_block("AskUserQuestion", "s4", env) == ASK.format(slug="demo", name="<name>")
 
 
 def test_the_binding_is_read_from_the_home_ledger_folder_by_default():
     sessions = Path.home() / "development-ledger" / ".sessions"
     sessions.mkdir(parents=True)
     (sessions / "s5.json").write_text(json.dumps({"name": "eng-2@work"}))
-    assert operator_mode.question_block("AskUserQuestion", "s5", {}, now=100) == ASK.format(
-        slug="<slug>", name="eng-2@work"
-    )
+    assert operator_mode.question_block("AskUserQuestion", "s5", {}) == ASK.format(slug="<slug>", name="eng-2@work")
 
 
-def test_the_question_tool_passes_while_on_or_unbound_and_other_tools_always_pass(ledgers):
+def test_the_question_tool_passes_only_after_typed_operator_on_and_other_tools_always_pass(ledgers):
+    standalone = {"LEDGER_DIR": str(ledgers)}
+    assert operator_mode.question_block("AskUserQuestion", "s3", standalone) == STANDALONE_ASK
+    assert operator_mode.question_block("AskUserQuestion", "", standalone) == STANDALONE_ASK
     operator_mode.observe("s1", "operator on", True, now=100)
-    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=101) == ""
-    assert operator_mode.question_block("AskUserQuestion", "s3", {"LEDGER_DIR": str(ledgers)}, now=101) == ""
-    assert operator_mode.question_block("Bash", "s3", SWARM, now=101) == ""
+    operator_mode.observe("s3", "operator on", True, now=100)
+    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) == ""
+    assert operator_mode.question_block("AskUserQuestion", "s3", standalone) == ""
+    assert operator_mode.question_block("Bash", "s4", SWARM) == ""
+    assert operator_mode.question_block("Bash", "s4", standalone) == ""
 
 
 def test_the_pre_tool_hook_blocks_the_question_tool_with_the_refusal(monkeypatch):
@@ -263,12 +272,56 @@ def test_the_pre_tool_hook_blocks_the_codex_question_tool_in_plan_and_default_mo
     assert str(blocked.value) == MASTER_ASK.format(slug="demo", name="master@a1-1")
 
 
-def test_a_failing_question_check_is_logged_and_lets_the_call_through(monkeypatch):
+def test_a_standalone_codex_question_is_refused_until_its_operator_types_operator_on(monkeypatch):
+    from hooks.targets.normalizer import normalize_payload
+
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    question = {"header": "Plan color", "id": "plan_color", "question": "Red or blue?", "options": []}
+    payload = normalize_payload(
+        {"session_id": "s8", "tool_name": "request_user_input", "tool_input": {"questions": [question]}}
+    )
+    for prompt in ("Explain the plan", "operator off"):
+        operator_mode.observe("s8", prompt, True, now=100)
+        with pytest.raises(hook_manager.BlockAction) as blocked:
+            hook_manager.on_pre_tool_use(payload)
+        assert str(blocked.value) == STANDALONE_ASK
+    operator_mode.observe("s8", "operator on", True, now=101)
+    hook_manager.on_pre_tool_use(payload)
+
+
+def test_a_standalone_claude_question_is_refused_until_its_operator_types_operator_on():
+    payload = {"session_id": "s7", "tool_name": "AskUserQuestion", "tool_input": {"questions": []}}
+    with pytest.raises(hook_manager.BlockAction) as blocked:
+        hook_manager.on_pre_tool_use(payload)
+    assert str(blocked.value) == STANDALONE_ASK
+    operator_mode.observe("s7", "Explain the plan", True, now=100)
+    with pytest.raises(hook_manager.BlockAction) as blocked:
+        hook_manager.on_pre_tool_use(payload)
+    assert str(blocked.value) == STANDALONE_ASK
+    operator_mode.observe("s7", "operator on", True, now=101)
+    hook_manager.on_pre_tool_use(payload)
+
+
+def test_a_failing_question_check_is_logged_and_refuses_only_the_question_tool(monkeypatch):
     logged = []
     monkeypatch.setattr(operator_mode, "question_block", lambda *a: (_ for _ in ()).throw(OSError("disk full")))
     monkeypatch.setattr(hook_manager, "log", lambda *a: logged.append(a))
-    assert hook_manager._operator_question({"session_id": "s1", "tool_name": "AskUserQuestion"}) == ""
-    assert logged == [("operator question check failed", {"error": "disk full"})]
+    assert hook_manager._operator_question({"session_id": "s1", "tool_name": "AskUserQuestion"}) == (
+        "The question tool is off: the operator presence check failed. Keep working without it."
+    )
+    assert hook_manager._operator_question({"session_id": "s1", "tool_name": "Bash"}) == ""
+    assert logged == [("operator question check failed", {"error": "disk full"})] * 2
+
+
+@pytest.mark.parametrize("saved", ["[]", "null", '"on"', "true"])
+def test_a_mode_file_that_is_not_an_object_holds_the_question_tool_off(tmp_path, monkeypatch, saved):
+    monkeypatch.setattr("hooks.config.AGENTIHOOKS_HOME", tmp_path)
+    (tmp_path / "operator_mode").mkdir()
+    (tmp_path / "operator_mode" / "s1.json").write_text(saved)
+    assert operator_mode._load("s1") == {}
+    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) == MASTER_ASK.format(
+        slug="demo", name="master@a1-1"
+    )
 
 
 REMINDER = "Operator not present: replies stay within 20 words."
@@ -330,7 +383,9 @@ def test_a_typed_prompt_uncaps_only_its_reply_turn(monkeypatch, capsys):
     assert expected not in out
     assert [operator_mode.reminder("s1", SWARM) for _ in range(4)] == [""] * 4
     assert not operator_mode.present("s1", SWARM)
-    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) == ""
+    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) == MASTER_ASK.format(
+        slug="demo", name="master@a1-1"
+    )
     assert [operator_mode.reminder("s2", SWARM) for _ in range(2)] == ["", expected]
     next_turn = run_prompt(monkeypatch, capsys, "s1", delivery.marked("continue"))
     assert expected in next_turn
@@ -341,27 +396,27 @@ def test_a_typed_prompt_uncaps_only_its_reply_turn(monkeypatch, capsys):
     )
 
 
-def test_a_typed_prompt_opens_the_question_tool_and_a_woken_turn_closes_it(monkeypatch, capsys):
+def test_only_typed_operator_on_opens_the_question_tool_and_no_other_prompt_does(monkeypatch, capsys):
     payload = {"session_id": "s1", "tool_name": "AskUserQuestion", "tool_input": {"questions": []}}
     run_prompt(monkeypatch, capsys, "s1", "You are master@a1-1, the master of swarm demo")
-    run_prompt(monkeypatch, capsys, "s1", "triage priorities")
-    hook_manager.on_pre_tool_use(payload)
-    for woken in (CHANNEL, delivery.marked("continue")):
-        run_prompt(monkeypatch, capsys, "s1", woken)
+    for prompt in ("triage priorities", CHANNEL, delivery.marked("operator on")):
+        run_prompt(monkeypatch, capsys, "s1", prompt)
         with pytest.raises(hook_manager.BlockAction) as blocked:
             hook_manager.on_pre_tool_use(payload)
         assert str(blocked.value) == MASTER_ASK.format(slug="demo", name="master@a1-1")
+    run_prompt(monkeypatch, capsys, "s1", "operator on")
+    hook_manager.on_pre_tool_use(payload)
 
 
-def test_the_question_tool_follows_the_typed_turn_window(monkeypatch):
+def test_the_typed_turn_window_never_opens_the_question_tool(monkeypatch):
     for key, value in SWARM.items():
         monkeypatch.setenv(key, value)
     operator_mode.notice({"session_id": "s1", "prompt": "Explain"}, True, now=100)
-    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=100 + WINDOW - 1) == ""
-    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=100 + WINDOW) == MASTER_ASK.format(
+    assert operator_mode._turn(operator_mode._load("s1"), 101)
+    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) == MASTER_ASK.format(
         slug="demo", name="master@a1-1"
     )
-    assert operator_mode.question_block("AskUserQuestion", "", SWARM, now=101) == MASTER_ASK.format(
+    assert operator_mode.question_block("AskUserQuestion", "", SWARM) == MASTER_ASK.format(
         slug="demo", name="master@a1-1"
     )
 
@@ -375,7 +430,7 @@ def test_the_typed_turn_notice_is_exact_and_operator_off_gives_only_the_away_not
         "Operator off: the operator is not present in this pane.\n" + REMINDER
     )
     assert [operator_mode.reminder("s1", SWARM, now=102) for _ in range(2)] == ["", REMINDER]
-    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=102) == MASTER_ASK.format(
+    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) == MASTER_ASK.format(
         slug="demo", name="master@a1-1"
     )
 
@@ -388,7 +443,7 @@ def test_operator_off_after_on_is_away_at_once_with_reminders_and_no_questions(m
         operator_mode.OFF_NOTICE + "\n" + REMINDER
     )
     assert [operator_mode.reminder("s1", SWARM, now=102) for _ in range(2)] == ["", REMINDER]
-    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM, now=102) != ""
+    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) != ""
 
 
 def test_operator_off_in_an_unbound_session_tells_only_its_mode(ledgers):

@@ -99,6 +99,7 @@ def findings(ledger, agents, activity, limits, waiting=frozenset(), green=frozen
         *idle_with_claim(agents, tasks, limits, waiting),
         *waiting_on_input(agents, tasks),
         *stalled(agents, limits),
+        *master_rc(agents),
         *stale_claims(agents, tasks, limits),
         *over_monitoring(activity, limits),
     ]
@@ -330,6 +331,25 @@ def stalled(agents: list[dict], limits: Limits) -> list[Finding]:
                 (f"pane working; task {agent.get('task', '')}",),
                 f"{limits.stalled_minutes} minutes without a tool call",
                 minutes,
+            )
+        )
+    return found
+
+
+def master_rc(agents: list[dict]) -> list[Finding]:
+    found = []
+    for agent in agents:
+        failed = agent.get("remote_control_failure")
+        if agent.get("lane") != "master" or not failed or failed["at"] < agent.get("started_at", 0):
+            continue
+        found.append(
+            Finding(
+                "master-rc",
+                agent.get("seat") or agent["name"],
+                "Remote Control failed on the master, phone access lost",
+                (f"notice: {failed['message']}", f"agent {agent['name']}"),
+                "a Remote Control failure notice since the master started",
+                1,
             )
         )
     return found

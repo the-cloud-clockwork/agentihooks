@@ -45,18 +45,16 @@ RED_NOTICE = re.compile(r"^Your pull request (\S+) for .* has red checks and no 
 GATE_JOB = re.compile(rf"^[ \t]+name:[ \t]*(['\"]?){re.escape(GATE)}\1[ \t]*$", re.MULTILINE)
 CONTEXT_NODES = (
     "nodes{...on CheckRun{databaseId name conclusion completedAt isRequired(pullRequestNumber:$number) "
-    "checkSuite{app{databaseId} workflowRun{databaseId event workflow{id name}}}} "
+    "checkSuite{app{databaseId} workflowRun{databaseId event workflow{id name resourcePath}}}} "
     "...on StatusContext{context state createdAt isRequired(pullRequestNumber:$number)}} "
     "pageInfo{hasNextPage endCursor}"
 )
-SUITE_NODES = (
-    "nodes{status conclusion workflowRun{databaseId createdAt event workflow{id}}} pageInfo{hasNextPage endCursor}"
-)
+SUITE_NODES = "nodes{status conclusion workflowRun{databaseId createdAt event workflow{id resourcePath}}} pageInfo{hasNextPage endCursor}"
 PULL_QUERY = (
     "query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid mergeQueueEntry{id state} "
     "mergeable isDraft "
     "commits(last:1){nodes{commit{id oid committedDate "
-    'file(path:".github/workflows"){object{...on Tree{entries{object{...on Blob{text}}}}}} '
+    'file(path:".github/workflows"){object{...on Tree{entries{name object{...on Blob{text}}}}}} '
     + "statusCheckRollup{contexts(first:100){"
     + CONTEXT_NODES
     + "}} checkSuites(first:100){"
@@ -102,12 +100,26 @@ def pull_request(raw):
     rollup = raw.get("statusCheckRollup") or []
     newest = _newest_runs(rollup, suites)
     everything = _newest([check for check in rollup if not _superseded(check, newest)])
-    commits, checks = raw.get("commits") or [], _required(raw.get("gated"), everything)
+    workflows = set(raw.get("gate_workflows") or [])
+    commits, required = raw.get("commits") or [], _required(raw.get("gated"), rollup, workflows)
+    checks = _newest([check for check in required if not _superseded(check, newest)])
     results = [check.get("conclusion") or check.get("state") for check in checks]
-    running = any(
-        suite.get("workflowRun") and suite.get("status") != "COMPLETED" and not _superseded(suite, newest)
-        for suite in suites
+    required_runs = {_run_key(check) for check in required if _run_key(check)[0]}
+    required_runs.update(
+        _run_key(suite) for suite in suites if _workflow_file(suite) in workflows and _run_key(suite)[0]
     )
+    present = {_workflow_file(item) for item in [*rollup, *suites]}
+    expected = {
+        (_run_key(check), check.get("name")) for check in rollup if check.get("isRequired") or check.get("name") == GATE
+    }
+    reported = {(_run_key(check), check.get("name")) for check in checks}
+    running = any(
+        suite.get("workflowRun")
+        and suite.get("status") != "COMPLETED"
+        and not _superseded(suite, newest)
+        and (not raw.get("gated") or not required_runs or _run_key(suite) in required_runs)
+        for suite in suites
+    ) or bool(expected - reported or required_runs - {key for key, _ in reported} or workflows - present)
     pushes = [
         iso_ms(suite["workflowRun"]["createdAt"])
         for suite in suites
@@ -187,13 +199,21 @@ def _run_key(item):
     return (run.get("workflow") or {}).get("id"), run.get("event")
 
 
-def _required(gated, checks):
+def _workflow_file(item):
+    path = (_workflow_run(item).get("workflow") or {}).get("resourcePath")
+    if path:
+        return path.split("/")[-1]
+
+
+def _required(gated, checks, workflows=()):
     required = [
         check
         for check in checks
         if check.get("isRequired", True) or (check.get("name") or check.get("context")) == GATE
     ]
-    return required if gated or required else checks
+    runs = {_run_key(check) for check in required if _run_key(check)[0]}
+    runs.update(_run_key(check) for check in checks if _workflow_file(check) in workflows and _run_key(check)[0])
+    return [check for check in checks if check in required or _run_key(check) in runs] if gated or required else checks
 
 
 def _mark(item):
@@ -225,8 +245,10 @@ def _unpassed_gate(gated, checks, results, running):
 
 def _resolved(gated, checks, results, running):
     if gated:
-        return any(result in FINAL_RED | {"TIMED_OUT"} for result in results) or (
-            "SUCCESS" in _gate(checks, results) and all(result in PASSED | {"NEUTRAL"} for result in results)
+        return any(result in RED for result in results) or (
+            not running
+            and set(_gate(checks, results)) == {"SUCCESS"}
+            and all(result in PASSED | {"NEUTRAL"} for result in results)
         )
     if not running and any(result in FINAL_RED for result in results):
         return True
@@ -238,9 +260,16 @@ def _gate(checks, results):
 
 
 def declares_gate(tree):
+    return bool(_gate_files(tree))
+
+
+def _gate_files(tree):
     entries = ((tree or {}).get("object") or {}).get("entries") or []
-    texts = [(entry.get("object") or {}).get("text") for entry in entries]
-    return any(GATE_JOB.search(text) for text in texts if text)
+    return [
+        entry.get("name")
+        for entry in entries
+        if (text := (entry.get("object") or {}).get("text")) and GATE_JOB.search(text)
+    ]
 
 
 def view(url, run=subprocess.run, required_checks=None):
@@ -306,7 +335,7 @@ def _required_pull_request(raw, required_checks):
     )
 
 
-def _view_resource(raw, number, gated=None, run=subprocess.run, required_checks=None):
+def _view_resource(raw, number, gated=None, run=subprocess.run, required_checks=None, gate_workflows=None):
     try:
         raw = dict(raw)
         commits = [node["commit"] for node in raw["commits"]["nodes"]]
@@ -323,7 +352,9 @@ def _view_resource(raw, number, gated=None, run=subprocess.run, required_checks=
         raw["checkSuites"] = suites
         if required_checks is not None:
             return _required_pull_request(raw, required_checks)
-        raw["gated"] = gated if gated is not None else bool(commits) and declares_gate(commit.get("file"))
+        files = _gate_files(commit.get("file")) if gate_workflows is None else gate_workflows
+        raw["gated"] = gated if gated is not None else declares_gate(commit.get("file"))
+        raw["gate_workflows"] = [name for name in files if name]
         return pull_request(raw)
     except (ValueError, KeyError, TypeError):
         return None
@@ -350,7 +381,7 @@ def views(
     urls = list(dict.fromkeys(urls))
     found = dict.fromkeys(urls)
     selection = PULL_QUERY.partition("{")[2][:-1].replace(
-        'file(path:".github/workflows"){object{...on Tree{entries{object{...on Blob{text}}}}}}',
+        'file(path:".github/workflows"){object{...on Tree{entries{name object{...on Blob{text}}}}}}',
         'file(path:".github/workflows"){object{id}}',
     )
     for start in range(0, len(urls), 20):
@@ -363,8 +394,12 @@ def views(
         gates = _workflow_gates(data, run, cache)
         for i, url in enumerate(batch):
             raw = data.get(f"p{i}")
-            gated = gates.get(_workflow_id(raw))
-            found[url] = _view_resource(raw, _number(url), gated, run) if gated is not None else None
+            declaration = gates.get(_workflow_id(raw))
+            found[url] = (
+                _view_resource(raw, _number(url), declaration["gated"], run, gate_workflows=declaration["workflows"])
+                if declaration is not None
+                else None
+            )
     return found
 
 
@@ -405,23 +440,24 @@ def _workflow_id(raw):
 
 def _workflow_gates(data, run, cache):
     trees = {_workflow_id(raw) for raw in data.values()} - {None, ""}
-    gates = {None: False, "": None, **dict.fromkeys(trees)}
+    gates = {None: {"gated": False, "workflows": []}, **dict.fromkeys(trees)}
     pending = []
     for tree in sorted(trees):
-        saved = cache.get(f"{PREFIX}:workflow-gate:{tree}") if cache is not None else None
-        if saved in ("0", "1"):
-            gates[tree] = saved == "1"
+        saved = cache.get(f"{PREFIX}:workflow-gate-files:{tree}") if cache is not None else None
+        if saved is not None:
+            gates[tree] = json.loads(saved)
         else:
             pending.append(tree)
     if pending:
-        query = "{nodes(ids:" + json.dumps(pending) + "){id ...on Tree{entries{object{...on Blob{text}}}}}}"
+        query = "{nodes(ids:" + json.dumps(pending) + "){id ...on Tree{entries{name object{...on Blob{text}}}}}}"
         for node in _graphql(query, run).get("nodes") or []:
             if node is None or "entries" not in node:
                 continue
             tree = node["id"]
-            gates[tree] = declares_gate({"object": node})
+            files = _gate_files({"object": node})
+            gates[tree] = {"gated": declares_gate({"object": node}), "workflows": [name for name in files if name]}
             if cache is not None:
-                cache.set(f"{PREFIX}:workflow-gate:{tree}", int(gates[tree]), ex=SENT_TTL_S)
+                cache.set(f"{PREFIX}:workflow-gate-files:{tree}", json.dumps(gates[tree]), ex=SENT_TTL_S)
     return gates
 
 
