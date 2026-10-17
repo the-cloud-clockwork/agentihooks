@@ -5,7 +5,7 @@ from dataclasses import replace
 import pytest
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import idle, ledger_events, outage, ready, stall_watch
+from scripts.swarm import idle, ledger_events, outage, ready, stall_watch, waits
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.stall_watch import ALERTED, REOPENED
@@ -1050,10 +1050,17 @@ def test_a_wait_on_its_own_pull_request_or_by_another_agent_does_not_hold_a_stal
 @pytest.mark.parametrize(("pull", "limit"), [(GREEN, 10), (RED, 15)])
 def test_a_wait_the_tick_ended_gives_its_owner_the_full_limit_from_the_wake(pull, limit):
     swarm = Swarm(pull)
-    _wait(swarm, {"kind": "checks", "target": URL})
+    inbox = InboxStore(swarm.store.redis)
+    asked = inbox.send("master@sw", OWNER, "review this").id
+    _wait(swarm, {"kind": "reply", "target": asked})
     assert swarm.tick(START) == []
     woke = START + 2 * limit * MINUTE
-    idle.end_wait(swarm.store.redis, SLUG, OWNER, woke)
+    inbox.close(asked, OWNER, "done", "answered")
+    rows = {t["id"]: t for t in swarm.ledger.state(SLUG)["tasks"]}
+    assert waits.end_pass(swarm.store, SLUG, rows, inbox, swarm.pulls.get, woke, swarm.pulls.get)
+    idle.declare_wait(
+        swarm.store.redis, SLUG, OWNER, woke + 600 * MINUTE, "queued", woke, on={"kind": "merge", "target": URL}
+    )
     assert swarm.tick(woke) == [] and swarm.tick(woke + (limit - 1) * MINUTE) == []
     assert not _reopened(swarm) and swarm.retired == []
     swarm.tick(woke + limit * MINUTE)
