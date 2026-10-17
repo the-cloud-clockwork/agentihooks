@@ -1876,9 +1876,10 @@ def test_required_green_needs_every_required_check_passed_on_the_head(monkeypatc
     assert calls == [(URL, subprocess.run)]
 
 
-def test_required_green_holds_when_github_cannot_answer(monkeypatch):
+@pytest.mark.parametrize("error", [SwarmError("GitHub API failed"), KeyError("repository"), TypeError("none")])
+def test_required_green_holds_when_github_cannot_answer(monkeypatch, error):
     def view(url, run):
-        raise SwarmError("GitHub API failed")
+        raise error
 
     monkeypatch.setattr(merge_queue, "required_view", view)
     assert REAL_REQUIRED_GREEN(URL, "first") is False

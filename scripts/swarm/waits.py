@@ -74,7 +74,7 @@ def checks_resolution(held, github, reread=None):
 def required_green(target, head):
     try:
         pull = merge_queue.required_view(target, subprocess.run)
-    except SwarmError:
+    except (SwarmError, KeyError, TypeError):
         return False
     return pull is not None and pull.head == head and pull.resolved and not pull.red
 
