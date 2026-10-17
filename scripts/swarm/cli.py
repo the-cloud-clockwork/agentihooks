@@ -58,6 +58,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from hooks.context import injection_trace, quarantine
+from scripts import master_claude_login
 from scripts.doctor import priming
 from scripts.gates import Who, catalog, intent, lift, modes, progress, quiet
 from scripts.gates import log as gate_log
@@ -104,6 +105,7 @@ from scripts.swarm import (
     prompt,
     ready,
     reaper,
+    remote_control,
     review_rounds,
     snapshot,
     stack,
@@ -166,7 +168,14 @@ SCALING_KEYS = {
 ADDRESS_KEYS = {"api-url": "api_url"}
 NO_API_ADDRESS = "api-url takes an http or https address with a host and no credentials"
 TRANSPORT_KEYS = {"codex-inbox-transport": "codex_inbox_transport"}
-CONFIG_KEYS = {**SCALING_KEYS, **ADDRESS_KEYS, **default_models.KEYS, **TRANSPORT_KEYS}
+ON_OFF = {"on": True, "off": False}
+CONFIG_KEYS = {
+    **SCALING_KEYS,
+    **ADDRESS_KEYS,
+    **default_models.KEYS,
+    **TRANSPORT_KEYS,
+    master_claude_login.KEY: master_claude_login.FIELD,
+}
 GATE_KEYS = {f"{name}-gate": name for name in catalog.defaults()}
 GATE_MODES = modes.MODES
 RETIRES_MASTER = frozenset({"stop now", "close ledger"})
@@ -770,7 +779,15 @@ def api_address(value):
     return value
 
 
+def _on_off(key, value):
+    if value not in ON_OFF:
+        raise SwarmError(f"{key} takes on or off")
+    return ON_OFF[value]
+
+
 def config_value(key, value):
+    if key == master_claude_login.KEY:
+        return _on_off(key, value)
     if key in default_models.KEYS or key in TRANSPORT_KEYS:
         return value
     return api_address(value) if key in ADDRESS_KEYS else scaling_value(key, value)
@@ -833,7 +850,7 @@ def cmd_set(store, args):
             raise SwarmError(
                 f"set takes {', '.join(SETTABLE)}=<whole number>, masters=N, master-per=N|hive|off, "
                 f"{masters.HIVE_KEY}<hive id>=<master seat>, autonomy={'|'.join(AUTONOMY)}, "
-                f"effort-min=E, effort-max=E, claude-model=M, codex-model=M, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB, api-url=URL, codex-inbox-transport=legacy|app_server "
+                f"effort-min=E, effort-max=E, claude-model=M, codex-model=M, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB, api-url=URL, codex-inbox-transport=legacy|app_server, master-claude-login=on|off "
                 f"or {', '.join(LANE_KEYS)}=<value>"
             )
         changes[SETTABLE[key]] = int(value)
@@ -934,6 +951,10 @@ def _affinity_line(report):
     return f"{line}  order to {order['to']} {order['state']}{reason}"
 
 
+def _remote_control_text(agents):
+    return "".join(f"{line}\n" for a in agents if (line := remote_control.line(a.__dict__)))
+
+
 def cmd_status(store, args):
     if args.json:
         store.config(args.slug)
@@ -971,6 +992,7 @@ def cmd_status(store, args):
     print(bottleneck_status.line(bottleneck_status.report(store, args.slug, now_ms())))
     print(_snapshot_line(auto_snapshot(config)))
     print(_affinity_line(affinity.report(store, args.slug, config, agents)))
+    sys.stdout.write(_remote_control_text(agents))
     if promotion := tick_master.status_line(tick_master.read(store, args.slug)):
         print(promotion)
     print(

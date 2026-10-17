@@ -1097,6 +1097,15 @@ def _swarm_outcome(payload: dict) -> None:
         log("swarm outcome record failed", {"error": str(e)})
 
 
+def _master_login_checkpoint() -> None:
+    try:
+        from scripts import master_claude_login
+
+        master_claude_login.checkpoint(os.environ)
+    except Exception as e:
+        log("master login checkpoint failed", {"error": str(e)})
+
+
 def _swarm_ledger(payload: dict) -> None:
     try:
         from hooks.context.swarm_ledger import run
@@ -2218,6 +2227,7 @@ def on_stop(payload: dict) -> None:
     # Parse transcript to get metrics (Claude Code doesn't include these in hook payload)
     metrics = parse_transcript_metrics(transcript_path) if transcript_path else {}
     _swarm_heartbeat("idle", payload=payload)
+    _master_login_checkpoint()
     log(
         "Claude stopped",
         {
@@ -2565,6 +2575,12 @@ def on_status_line(payload: dict) -> None:
 def on_notification(payload: dict) -> None:
     """Handle Notification event."""
     log("Notification", payload)
+    try:
+        from scripts.swarm import remote_control
+
+        remote_control.on_notification(payload)
+    except Exception as e:
+        log("remote control notice failed", {"error": str(e)})
 
 
 def on_pre_compact(payload: dict) -> None:
