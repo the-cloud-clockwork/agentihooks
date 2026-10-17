@@ -2161,3 +2161,35 @@ def test_aggregate_capacity_keeps_missing_or_stale_codex_quota_unknown(monkeypat
         73 if observed is not None else None,
         2,
     )
+
+
+def test_two_names_holding_one_token_offer_one_account(monkeypatch, tmp_path):
+    env = {
+        "AGENTIHOOKS_HOME": str(tmp_path),
+        "AH_CC_TOKEN_mail": "fake-a",
+        "AH_CC_TOKEN_old": "fake-a",
+        "AH_CC_TOKEN_other": "fake-b",
+    }
+    windows = balancer.QuotaWindow(used=10)
+    results = [balancer.ProbeResult(name, "allowed", "NORMAL", 90, windows, windows) for name in ("mail", "old", "other")]
+    balancer._write_cache(
+        tmp_path / "claude-router-cache.json",
+        {
+            "version": 1,
+            "modes": {
+                "normal": {
+                    "accounts": {
+                        f"AH_CC_TOKEN_{r.account}": {"observed_at": 100, "result": balancer._result_data(r)}
+                        for r in results
+                    }
+                }
+            },
+        },
+    )
+    monkeypatch.setattr("scripts.operator_env.block_tokens", lambda: {})
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {"mail": 6})
+    monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
+
+    rows = capacity.accounts(env, 100)
+
+    assert sorted((r.name, r.sessions, r.state) for r in rows) == [("mail", 6, "OPEN"), ("other", 0, "OPEN")]
