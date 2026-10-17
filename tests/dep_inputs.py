@@ -64,6 +64,7 @@ class DepInputs:
                     found[1] = found[1] or collected[1]
 
     def pytest_collection_finish(self, session):
+        # -p loads this plugin before pytest-cov starts; a module level import leaves scripts import lines unmeasured.
         from scripts.ci_mutation.scope import imported_names
 
         imports = {}
