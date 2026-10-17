@@ -230,10 +230,7 @@ def _replay(store, report: Report) -> None:
             report.already.append(entry["item"])
         except LedgerBusy as exc:
             if not stale(entry):
-                if exc.targets:
-                    held.update(exc.targets)
-                else:
-                    down.add(lane(entry))
+                _hold(entry, exc, down, held)
                 kept.append(line)
                 continue
             reason = f"{exc} for over {busy_age()} seconds ({BUSY_AGE_ENV})"
@@ -256,6 +253,13 @@ def _replay(store, report: Report) -> None:
         _keep(kept, report)
     else:
         _clear()
+
+
+def _hold(entry: dict, exc: LedgerBusy, down: set, held: set) -> None:
+    if exc.targets:
+        held.update(exc.targets)
+    else:
+        down.add(lane(entry))
 
 
 def _gave_up(line: str, entry: dict, error: str, count: int, report: Report, cap: int) -> bool:
