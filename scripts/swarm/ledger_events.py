@@ -200,8 +200,9 @@ def _run_key(item):
 
 
 def _workflow_file(item):
-    path = (_workflow_run(item).get("workflow") or {}).get("resourcePath") or ""
-    return path.rsplit("/", 1)[-1]
+    path = (_workflow_run(item).get("workflow") or {}).get("resourcePath")
+    if path:
+        return path.split("/")[-1]
 
 
 def _required(gated, checks, workflows=()):
@@ -264,7 +265,11 @@ def declares_gate(tree):
 
 def _gate_files(tree):
     entries = ((tree or {}).get("object") or {}).get("entries") or []
-    return [entry.get("name") for entry in entries if GATE_JOB.search((entry.get("object") or {}).get("text") or "")]
+    return [
+        entry.get("name")
+        for entry in entries
+        if (text := (entry.get("object") or {}).get("text")) and GATE_JOB.search(text)
+    ]
 
 
 def view(url, run=subprocess.run, required_checks=None):
@@ -348,7 +353,7 @@ def _view_resource(raw, number, gated=None, run=subprocess.run, required_checks=
         if required_checks is not None:
             return _required_pull_request(raw, required_checks)
         files = _gate_files(commit.get("file")) if gate_workflows is None else gate_workflows
-        raw["gated"] = gated if gated is not None else bool(files)
+        raw["gated"] = gated if gated is not None else declares_gate(commit.get("file"))
         raw["gate_workflows"] = [name for name in files if name]
         return pull_request(raw)
     except (ValueError, KeyError, TypeError):
@@ -435,7 +440,7 @@ def _workflow_id(raw):
 
 def _workflow_gates(data, run, cache):
     trees = {_workflow_id(raw) for raw in data.values()} - {None, ""}
-    gates = {None: {"gated": False, "workflows": []}, "": None, **dict.fromkeys(trees)}
+    gates = {None: {"gated": False, "workflows": []}, **dict.fromkeys(trees)}
     pending = []
     for tree in sorted(trees):
         saved = cache.get(f"{PREFIX}:workflow-gate-files:{tree}") if cache is not None else None
@@ -450,7 +455,7 @@ def _workflow_gates(data, run, cache):
                 continue
             tree = node["id"]
             files = _gate_files({"object": node})
-            gates[tree] = {"gated": bool(files), "workflows": [name for name in files if name]}
+            gates[tree] = {"gated": declares_gate({"object": node}), "workflows": [name for name in files if name]}
             if cache is not None:
                 cache.set(f"{PREFIX}:workflow-gate-files:{tree}", json.dumps(gates[tree]), ex=SENT_TTL_S)
     return gates

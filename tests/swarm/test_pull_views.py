@@ -205,14 +205,15 @@ def test_workflow_declarations_cache_by_immutable_tree_while_heads_and_checks_re
 @pytest.mark.parametrize("optional", [False, True])
 @pytest.mark.parametrize("conclusion", [None, "FAILURE", "SUCCESS"])
 @pytest.mark.parametrize("phase", ["jobs", "suite", "absent"])
-def test_a_status_gate_judges_only_jobs_of_its_declared_workflow(batched, optional, conclusion, phase):
+@pytest.mark.parametrize("event", [None, "pull_request"])
+def test_a_status_gate_judges_only_jobs_of_its_declared_workflow(batched, optional, conclusion, phase, event):
     import fakeredis
 
     url = "https://github.com/o/r/pull/1"
     required = {"id": "W1", "resourcePath": "/o/r/actions/workflows/test.yml"}
     other = {"id": "W2", "resourcePath": "/o/r/actions/workflows/docs.yml"}
-    run = {"databaseId": 1, "event": "pull_request", "workflow": required}
-    probe = {"databaseId": 2 if optional else 1, "event": "pull_request", "workflow": other if optional else required}
+    run = {"databaseId": 1, "event": event, "workflow": required}
+    probe = {"databaseId": 2 if optional else 1, "event": event, "workflow": other if optional else required}
     checks = [
         {"context": GATE, "state": "SUCCESS", "isRequired": True},
         {
@@ -261,7 +262,10 @@ def test_a_status_gate_judges_only_jobs_of_its_declared_workflow(batched, option
         else:
             assert "workflow{id name resourcePath}" in query
             assert "workflow{id resourcePath}" in query
-            data = {"p0" if batched else "resource": raw}
+            snapshot = json.loads(json.dumps(raw))
+            if batched:
+                snapshot["commits"]["nodes"][0]["commit"]["file"] = {"object": {"id": "tree1"}}
+            data = {"p0" if batched else "resource": snapshot}
         return SimpleNamespace(returncode=0, stdout=json.dumps({"data": data}))
 
     cache = fakeredis.FakeRedis(decode_responses=True)
