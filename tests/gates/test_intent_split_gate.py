@@ -101,6 +101,8 @@ def test_an_unsplit_task_may_merge_another_pull_request(tmp_path):
 
 
 def test_merge_target_reads_the_first_pull_request_operand():
+    assert intent._merge_target([]) is None
+    assert intent._merge_target(["FLAG=value"]) is None
     assert intent._merge_target(["gh", "pr", "merge", "--squash", "12"]) == "12"
     assert intent._merge_target(["gh", "pr", "merge", FIRST]) == FIRST
     assert intent._merge_target(["gh", "pr", "merge"]) is None
