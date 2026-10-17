@@ -1019,7 +1019,7 @@ jobs:
           JS_COVERAGE_DIR: ${{ matrix.python-version == '3.12' && format('{0}/js-coverage', github.workspace) || '' }}
         run: |
           read -ra files <<< "$FILES"
-          python -c 'import os, shlex, sys, pytest; sys.exit(pytest.main(shlex.split(os.environ.pop("PYTEST_ADDOPTS", "")) + sys.argv[1:]))' "${files[@]}" -v -n auto --dist loadgroup -p tests.flake_ledger --reruns 2 --tb=short -o faulthandler_timeout=60 -p no:anyio -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml
+          python -c 'import os, shlex, sys, pytest; sys.exit(pytest.main(shlex.split(os.environ.pop("PYTEST_ADDOPTS", "")) + sys.argv[1:]))' "${files[@]}" -v -n auto --dist loadgroup -p tests.flake_ledger --reruns 2 --tb=short -o faulthandler_timeout=60 --store-durations --durations-path durations.json -p no:anyio -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml
 
       - name: Record flaky tests
         if: ${{ !cancelled() }}
@@ -1041,6 +1041,25 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
+          overwrite: true
+
+      - name: Upload selected test durations
+        if: ${{ !cancelled() && hashFiles('durations.json') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: durations-${{ matrix.python-version }}-${{ matrix.leg }}
+          path: durations.json
+          retention-days: 14
+          overwrite: true
+
+      - name: Upload selected test flakes
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: flakes-${{ matrix.python-version }}-${{ matrix.leg }}
+          path: flakes.jsonl
+          if-no-files-found: error
+          retention-days: 14
           overwrite: true
 
   shard-check:
@@ -1851,6 +1870,32 @@ jobs:
             echo "::error::Every required gate must succeed."
             exit 1
           fi
+
+      - uses: actions/checkout@v4
+        if: ${{ always() }}
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: scripts/ci_gate_summary.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Download this run's test durations
+        if: ${{ always() }}
+        uses: actions/download-artifact@v4
+        with:
+          pattern: durations-3.*
+          path: test-reports
+
+      - name: Download this run's test flakes
+        if: ${{ always() }}
+        uses: actions/download-artifact@v4
+        with:
+          pattern: flakes-3.*
+          path: test-reports
+
+      - name: Summarize this run's tests
+        if: ${{ always() }}
+        run: python3 -m scripts.ci_gate_summary test-reports | tee -a "$GITHUB_STEP_SUMMARY"
 
   refresh-durations:
     needs: [unit, lint, shard-check]

@@ -1,7 +1,6 @@
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -39,6 +38,15 @@ def test_summary_without_test_reports_is_zero(tmp_path):
     from scripts.ci_gate_summary import counts
 
     assert counts(tmp_path) == {"ran": 0, "flaky": 0, "failed": 0}
+
+
+def test_summary_command_prints_the_artifact_counts(tmp_path, monkeypatch, capsys):
+    from scripts.ci_gate_summary import main
+
+    _reports(tmp_path)
+    monkeypatch.setattr("sys.argv", ["ci_gate_summary", str(tmp_path)])
+    main()
+    assert capsys.readouterr().out == "Tests: ran 6, flaky 3, failed 1\n"
 
 
 def test_required_summary_writes_current_artifact_counts_even_after_gate_failure(tmp_path):
