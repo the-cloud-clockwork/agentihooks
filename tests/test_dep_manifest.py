@@ -450,41 +450,53 @@ def test_queue_shards_split_on_the_tests_the_planner_did_not_reuse():
     assert "reused-plan/reused-tests.json" in check["env"]["REUSED"]
 
 
-def test_the_planner_interpreter_gets_every_third_party_module_the_grader_imports():
-    local = {"scripts", "tests", "hooks"}
-    pending, seen, third_party = ["scripts.ci_test_plan"], set(), set()
+def _module_level_imports(module):
+    path = ROOT / Path(*module.split("."))
+    path = path / "__init__.py" if path.is_dir() else path.with_suffix(".py")
+    names = []
+    for statement in ast.parse(path.read_text()).body:
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for node in ast.walk(statement):
+            if isinstance(node, ast.Import):
+                names += [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                names += [node.module] + [f"{node.module}.{a.name}" for a in node.names]
+    return names
+
+
+def test_the_manifest_code_needs_only_yaml_beyond_the_standard_library():
+    pending, seen, third_party = ["scripts.ci_test_plan", "tests.dep_manifest"], set(), set()
     while pending:
         module = pending.pop()
         if module in seen:
             continue
         seen.add(module)
-        path = ROOT / Path(*module.split("."))
-        path = path / "__init__.py" if path.is_dir() else path.with_suffix(".py")
-        loaded = [
-            node
-            for top in ast.parse(path.read_text()).body
-            if not isinstance(top, (ast.FunctionDef, ast.AsyncFunctionDef))
-            for node in ast.walk(top)
-        ]
-        for node in loaded:
-            names = [a.name for a in node.names] if isinstance(node, ast.Import) else []
-            if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-                names = [node.module] + [f"{node.module}.{a.name}" for a in node.names]
-            for name in names:
-                top = name.split(".")[0]
-                if top in local:
-                    parts = name.split(".")
-                    for depth in range(1, len(parts) + 1):
-                        candidate = ROOT / Path(*parts[:depth])
-                        if candidate.is_dir() or candidate.with_suffix(".py").is_file():
-                            pending.append(".".join(parts[:depth]))
-                elif top not in sys.stdlib_module_names:
-                    third_party.add(top)
+        for name in _module_level_imports(module):
+            parts = name.split(".")
+            if parts[0] not in {"scripts", "tests", "hooks"}:
+                if parts[0] not in sys.stdlib_module_names:
+                    third_party.add(parts[0])
+                continue
+            for depth in range(1, len(parts) + 1):
+                candidate = ROOT / Path(*parts[:depth])
+                if candidate.is_dir() or candidate.with_suffix(".py").is_file():
+                    pending.append(".".join(parts[:depth]))
     assert third_party == {"yaml"}
-    run = _step("split", "Plan the tests whose inputs did not change")["run"]
-    assert run.index('"$PYTHON_PATH" -m pip install --quiet PyYAML==6.0.3') < run.index(
-        '"$PYTHON_PATH" -m scripts.ci_test_plan'
-    )
+
+
+def test_every_job_running_the_manifest_code_installs_pyyaml_first():
+    calls = 0
+    for name, job in yaml.safe_load(WORKFLOW.read_text())["jobs"].items():
+        steps = job.get("steps", [])
+        for index, step in enumerate(steps):
+            run = step.get("run", "")
+            for call in ("-m scripts.ci_test_plan", "-m tests.dep_manifest"):
+                if call in run:
+                    calls += 1
+                    prepared = "\n".join(s.get("run", "") for s in steps[:index]) + run[: run.index(call)]
+                    assert "PyYAML==6.0.3" in prepared, (name, step.get("name"))
+    assert calls >= 3
 
 
 def test_the_split_deselects_with_the_grader_manifest_code_not_the_heads(tmp_path):
