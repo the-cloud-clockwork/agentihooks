@@ -8,6 +8,7 @@ that runs without the channel.
 
 import json
 import sys
+import time
 from pathlib import Path
 
 from scripts.inbox.cli import check_answer, identity
@@ -28,6 +29,35 @@ def launch_args(root=ROOT, python=sys.executable):
     code = f"import sys; sys.path.insert(0, {root!r}); from scripts.inbox.channel import main; main()"
     config = {"mcpServers": {NAME: {"command": python, "args": ["-I", "-c", code]}}}
     return [f"--mcp-config={json.dumps(config)}", FLAG]
+
+
+def register(environ: dict[str, str]) -> None:
+    from scripts import claude_trust
+    from scripts.claude_config import claude_json
+
+    config = claude_json(environ)
+    config.parent.mkdir(parents=True, exist_ok=True)
+    lock = config.with_name(config.name + ".lock")
+    deadline = time.monotonic() + 3
+    while True:
+        try:
+            lock.mkdir()
+            break
+        except FileExistsError:
+            if time.monotonic() >= deadline:
+                raise OSError(f"{lock} is held") from None
+            time.sleep(0.1)
+    try:
+        data = claude_trust._read(config)
+        servers = data.setdefault("mcpServers", {})
+        if not isinstance(servers, dict):
+            raise ValueError(f"{config} mcpServers is not a JSON object")
+        server = json.loads(launch_args()[0].removeprefix("--mcp-config="))["mcpServers"][NAME]
+        if servers.get(NAME) != server:
+            servers[NAME] = server
+            claude_trust._write(config, data)
+    finally:
+        lock.rmdir()
 
 
 def event(item):
