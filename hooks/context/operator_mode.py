@@ -139,7 +139,7 @@ def _heard(session_id):
 
 def _away(session_id, environ, now):
     now = time.time() if now is None else now
-    return bool(session_id) and not (present(session_id, environ, now) or _turn(_load(session_id), now))
+    return bool(session_id) and not (present(session_id, environ) or _turn(_load(session_id), now))
 
 
 def _reminder_text(environ):
