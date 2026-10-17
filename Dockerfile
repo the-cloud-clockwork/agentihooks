@@ -11,6 +11,7 @@ COPY profiles/ profiles/
 ARG VERSION=0.0.0
 RUN --mount=type=cache,target=/root/.cache/uv \
     SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS="$VERSION" uv pip install --python /opt/venv/bin/python --no-deps .
+RUN mv /opt/venv/lib/python3.12/site-packages/botocore /botocore
 
 FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS herdr
 ARG TARGETARCH=amd64
@@ -34,6 +35,7 @@ RUN --mount=type=bind,from=herdr,source=/opt/swarm-node,target=/opt/swarm-node \
     && rm -r /var/lib/apt/lists/*
 RUN groupadd --gid 10001 swarm && useradd --uid 10001 --gid swarm --create-home swarm && mkdir /data && chown swarm:swarm /data
 COPY --from=build /opt/venv /opt/venv
+COPY --from=build /botocore /opt/venv/lib/python3.12/site-packages/botocore
 COPY --from=herdr /usr/local/bin/herdr /usr/local/bin/herdr
 COPY media/agentihooks-logo.png /opt/venv/lib/python3.12/site-packages/media/agentihooks-logo.png
 COPY docs/swarm-v2/schemas/ /opt/venv/lib/python3.12/site-packages/docs/swarm-v2/schemas/
