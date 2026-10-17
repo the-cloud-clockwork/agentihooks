@@ -5,7 +5,7 @@ from dataclasses import replace
 import pytest
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import idle, ledger_events, outage, ready, stall_watch, waits
+from scripts.swarm import idle, ledger_events, outage, ready, release_wait, stall_watch, waits
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.stall_watch import ALERTED, REOPENED
@@ -69,7 +69,7 @@ class Swarm:
         self.store.put_agent(SLUG, AgentRecord(OWNER, "eng", "t1", seat="eng-1@sw"))
         self.store.redis.set(self.store.key(SLUG, "claim", "t1"), OWNER)
 
-    def tick(self, at, doc=None):
+    def tick(self, at, doc=None, **extra):
         watch = stall_watch.Watch(
             self.store,
             SLUG,
@@ -83,6 +83,7 @@ class Swarm:
             lambda url, title, text, env: (
                 self.posted.append((url, title, text)) or self.envs.append(env) or self.refusal
             ),
+            **extra,
         )
         return stall_watch.stall_pass(watch, doc or self.ledger.state(SLUG))
 
@@ -1064,4 +1065,20 @@ def test_a_wait_the_tick_ended_gives_its_owner_the_full_limit_from_the_wake(pull
     assert swarm.tick(woke) == [] and swarm.tick(woke + (limit - 1) * MINUTE) == []
     assert not _reopened(swarm) and swarm.retired == []
     swarm.tick(woke + limit * MINUTE)
+    assert _reopened(swarm)
+
+
+@pytest.mark.parametrize(("pull", "live", "limit"), RULES)
+def test_a_release_hold_keeps_every_stall_rule_until_a_newer_release_exists(pull, live, limit):
+    swarm = Swarm(pull, task={release_wait.FIELD: "v2.17.3"}, live=live)
+    tags = ["v2.17.3"]
+
+    def tick(at):
+        return swarm.tick(at, released=lambda task: release_wait.newer(tags, task[release_wait.FIELD]))
+
+    assert tick(START) == [] and tick(START + 6 * limit * MINUTE) == []
+    assert not _reopened(swarm) and swarm.retired == [] and swarm.inbox() == []
+    tags.append("v2.17.4")
+    tick(START + 7 * limit * MINUTE)
+    tick(START + 8 * limit * MINUTE)
     assert _reopened(swarm)
