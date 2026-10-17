@@ -330,3 +330,25 @@ def test_the_wait_pass_resolves_against_current_ledger_tasks(tick):  # noqa: F81
     assert cli.run_waits(tick.store, "sw", ledger) == [f"ended the wait of {ME}: task t2, now done"]
     assert idle.wait(tick.store.redis, "sw", ME) is None
     assert len(tick.told()) == 1
+
+
+def test_the_wait_pass_resolves_waits_beside_an_open_red_check_notice(tick, monkeypatch):  # noqa: F811
+    from types import SimpleNamespace
+
+    from tests.swarm.test_waits import URL
+
+    tick.hold("task", "t2")
+    notice = tick.inbox.send("swarm", "eng-1@sw", "A previous pull request has failed checks")
+    tick.store.redis.hset(tick.store.key("sw", "red-notices"), notice.id, URL)
+    monkeypatch.setattr(cli.ledger_events, "views", lambda urls, cache: {})
+    documents = {"sw": {"tasks": [{"id": "t2", "state": "done"}]}}
+    assert cli.run_waits(tick.store, "sw", SimpleNamespace(state=documents.__getitem__)) == [
+        f"ended the wait of {ME}: task t2, now done"
+    ]
+    assert idle.wait(tick.store.redis, "sw", ME) is None
+    assert tick.inbox.get(notice.id).state == "pending"
+    assert tick.told() == [
+        "A previous pull request has failed checks",
+        "Your wait on task t2, now done has ended. Pick task t1 back up: "
+        "agentihooks swarm sw done, block, or wait on the next thing.",
+    ]
