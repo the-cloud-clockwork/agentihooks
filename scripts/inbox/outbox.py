@@ -196,7 +196,8 @@ def submit(store, entry: dict, apply) -> dict:
 
 
 def flush(store) -> Report:
-    """Replay every queued record in order; a destination that fails keeps that record and its later ones for later."""
+    """Replay every queued record in order; a failing destination or a resource still in revision conflict keeps that
+    record and its later ones for later."""
     report = Report()
     if not waiting():
         return report
@@ -220,7 +221,7 @@ def _replay(store, report: Report) -> None:
             _set_aside(line, "corrupt")
             report.corrupt += 1
             continue
-        if lane(entry) in down or held and held & targets(entry):
+        if _waits(entry, down, held):
             kept.append(line)
             continue
         try:
@@ -253,6 +254,16 @@ def _replay(store, report: Report) -> None:
         _keep(kept, report)
     else:
         _clear()
+
+
+def _waits(entry: dict, down: set, held: set) -> bool:
+    if lane(entry) in down:
+        return True
+    shared = targets(entry)
+    if held & shared:
+        held.update(shared)
+        return True
+    return False
 
 
 def _hold(entry: dict, exc: LedgerBusy, down: set, held: set) -> None:

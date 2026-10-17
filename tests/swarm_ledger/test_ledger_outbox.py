@@ -430,7 +430,7 @@ def revision_conflict(where=None):
 
 def test_a_queued_comment_with_a_stale_revision_lands_with_a_fresh_one_and_the_writes_behind_it_follow(server):
     phase = f"phases/{stored()['phases'][0]['id']}"
-    ledger.call(SLUG, [{"op": "add", "thread": f"{phase}/comments", "id": "c-moved", "text": "Moved it", "by": ENG}])
+    ledger.call(SLUG, [{"op": "add", "thread": f"{phase}/comments", "id": "c-moved", "text": "Moved it", "by": BOSS}])
     stale_comment = {"op": "add", "thread": f"{phase}/comments", "id": "c-stale", "text": "Queued earlier", "by": ENG}
     queue_ops({**stale_comment, "expected_revision": STALE}, chat_op("m-behind", "Queued behind the comment"))
     report = outbox.flush(None)
@@ -527,12 +527,34 @@ def test_an_unpinned_record_still_conflicting_lets_inbox_records_and_other_items
     assert outbox.targets(sent) == frozenset()
 
 
+def failing(make):
+    def replay(*args):
+        raise make()
+
+    return replay
+
+
+def test_a_record_kept_behind_a_conflict_holds_every_resource_it_writes(server, monkeypatch):
+    sent = []
+
+    def replay(slug, ops, agent, service):
+        sent.append(ops[0]["id"])
+        raise revision_conflict("chat")
+
+    monkeypatch.setattr(ledger, "replay", replay)
+    comment = {"op": "add", "thread": "phases/a/comments", "id": "c-a", "text": "On a", "by": ENG}
+    queue_ops(chat_op("m-1", "Conflicting chat"))
+    outbox.append(outbox.ledger_record(SLUG, [chat_op("m-2", "Chat and comment"), comment], "", False))
+    queue_ops({**comment, "id": "c-a2"})
+    report = outbox.flush(None)
+    assert (report.applied, report.left) == ([], 3)
+    assert sent == ["m-1"]
+
+
 def test_a_revision_conflict_names_the_resource_the_server_reports(monkeypatch):
     entry = outbox.ledger_record(SLUG, [chat_op("m-1", "Unpinned")], ENG, False)
     for where, message in ((None, "the ledger server answered 409 revision conflict"), ("chat", "on chat")):
-        monkeypatch.setattr(
-            ledger, "replay", lambda *args, where=where: (_ for _ in ()).throw(revision_conflict(where))
-        )
+        monkeypatch.setattr(ledger, "replay", failing(lambda where=where: revision_conflict(where)))
         with pytest.raises(outbox.LedgerBusy) as busy:
             outbox.apply_ledger(None, ENG, entry)
         assert str(busy.value).endswith(message)
@@ -540,9 +562,7 @@ def test_a_revision_conflict_names_the_resource_the_server_reports(monkeypatch):
 
 
 def test_a_server_wide_busy_answer_holds_every_later_ledger_record(server, monkeypatch):
-    monkeypatch.setattr(
-        ledger, "replay", lambda *args: (_ for _ in ()).throw(urllib.error.HTTPError("u", 503, "", {}, io.BytesIO(b"")))
-    )
+    monkeypatch.setattr(ledger, "replay", failing(lambda: urllib.error.HTTPError("u", 503, "", {}, io.BytesIO(b""))))
     queue_ops(
         chat_op("m-1", "First"), {"op": "add", "thread": "phases/a/comments", "id": "c-2", "text": "Else", "by": ENG}
     )
