@@ -186,29 +186,20 @@ jobs:
   kind-due:
     if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') }}
     needs: [reuse, admission]
-    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
     timeout-minutes: 5
     outputs:
-      due: ${{ steps.paths.outputs.due }}
+      due: ${{ steps.key.outputs.hit != 'true' }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 0
 
-      - name: Decide from the base branch rule whether the chart proof is due
-        id: paths
-        env:
-          BASE: ${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && 'origin/dev' || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
-          HEAD: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
-        run: |
-          set -o pipefail
-          rule=deploy/helm/agentihooks-swarm/ci/kind-due.sh
-          if [[ -n $BASE ]] && git cat-file -e "$BASE:$rule"; then
-            git show "$BASE:$rule" | bash -s "$BASE" "$HEAD" >> "$GITHUB_OUTPUT"
-          else
-            echo due=true >> "$GITHUB_OUTPUT"
-          fi
+      - name: Look up the chart proof input key
+        id: key
+        uses: ./.github/actions/input-key
+        with:
+          job: helm-kind
 
   helm-kind:
     needs: kind-due

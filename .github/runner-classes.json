@@ -49,7 +49,7 @@
   "test.yml/durations": "light",
   "test.yml/flake-budget": "light",
   "test.yml/gate-required": "light",
-  "test.yml/kind-due": "light",
+  "test.yml/kind-due": "standard",
   "test.yml/lint": "standard",
   "test.yml/mutation": "batch",
   "test.yml/mutation-plan": "light",
