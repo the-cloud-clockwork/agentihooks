@@ -325,6 +325,9 @@ def test_updates_preserve_status_timestamp_until_status_changes(store, agent, mo
     monkeypatch.setattr(execution.time, "time", lambda: 20)
     store.put_agent("fixture", current)
     assert store.redis.hget(key, agent.name) == "10000"
+    store.execution_registry.set_pane("fixture", current.execution_id, "w2:p7")
+    assert store.redis.hget(key, agent.name) == "10000"
+    current = replace(current, pane_id="w2:p7")
     changed = replace(current, state="finished")
     store.put_agent("fixture", changed)
     assert store.redis.hget(key, agent.name) == "20000"
