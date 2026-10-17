@@ -172,6 +172,7 @@ def test_main_names_the_pane_as_served_only_on_the_app_server_transport(
         return ["pane_id=w1:p2"]
 
     monkeypatch.setattr(init_agent, "_prepare_profile", lambda args, agent, flags, environ: flags)
+    monkeypatch.setattr(init_agent, "_binding_request", lambda args, agent, prompt, environ, flags: prompt)
     monkeypatch.setattr(init_agent, "_start_herdr", start)
     monkeypatch.setattr(init_agent, "_name_in_herdr", lambda *args, **kwargs: named.append(kwargs) or [])
     monkeypatch.setattr(init_agent, "_route_reported", lambda *args: None)
