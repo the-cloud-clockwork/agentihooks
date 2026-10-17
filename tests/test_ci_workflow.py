@@ -1135,13 +1135,16 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
     install = plan["steps"][names.index("Install dependencies")]
     assert install["if"] == "steps.reuse.outputs.reused != 'true'"
     skipped = "needs.mutation-plan.outputs.forwarded != 'true'"
+    unguarded = (
+        "steps.selection.outputs.browser == 'true'",
+        "failure() && steps.browser.outcome == 'failure'",
+        "failure()",
+        f"github.event_name == 'pull_request' && {skipped}",
+        f"github.event_name == 'workflow_dispatch' && {skipped}",
+        f"always() && {skipped}",
+    )
     for job in (stats, mutation):
-        assert all(
-            skipped in step["if"]
-            or step["if"] in ("steps.selection.outputs.browser == 'true'", "failure()")
-            or step["if"].startswith("failure() && ")
-            for step in job["steps"]
-        )
+        assert all(step["if"] == skipped or step["if"] in unguarded for step in job["steps"])
     steps = {step.get("name"): step for step in mutation["steps"]}
     assert steps["Mutate changed Python files"]["if"] == f"github.event_name == 'pull_request' && {skipped}"
     assert steps["Mutate dispatched Python files"]["if"] == f"github.event_name == 'workflow_dispatch' && {skipped}"
