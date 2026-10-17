@@ -25,7 +25,7 @@ FAILED = (OSError, ValueError, SwarmError, SystemExit, http.client.HTTPException
 RAISED = (
     "The ledger server is slow: two swarm passes in a row took {took}. Server {cpu}, {started}. Newest on dev{newest}."
 )
-PAUSED = " Idle and stale claim checks and nudges pause until two fast passes."
+PAUSED = " Idle and stale claim checks and nudges pause until recovery below four seconds."
 CLEARED = "The ledger server answers fast again: two swarm passes took {took}. Idle and stale claim checks resume."
 
 

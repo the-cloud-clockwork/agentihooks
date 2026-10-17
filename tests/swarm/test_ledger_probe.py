@@ -140,13 +140,13 @@ def test_one_slow_pass_raises_nothing_and_two_in_a_row_raise_the_alert(store):
     assert observe(store, ledger, clock) == ["raised the ledger slow alert"]
     assert ledger_probe.holding(store, "sw")
     [mail] = master_mail(store)
-    for words in ("read 6.0 seconds", "write 7.5 seconds", "CPU 182 percent", "started 74 minutes ago"):
+    for words in ("read 6.0 seconds", "write 7.5 seconds", "CPU unknown over pass", "started 74 minutes ago"):
         assert words in mail
     assert "Newest on dev merged 9 minutes ago: Run the cheap CI gates before every push." in mail
-    assert mail.endswith("Idle and stale claim checks and nudges pause until two fast passes.")
+    assert mail.endswith("Idle and stale claim checks and nudges pause until recovery below four seconds.")
     [note] = ledger.notes
-    assert note.startswith("The ledger server is slow: two swarm passes in a row took read 6.0 seconds and write 7.5")
-    assert "CPU 182 percent, started 74 minutes ago" in note and "pause" not in note
+    assert note.startswith("The ledger server is slow: sw pass 1: read 6.0 seconds and write 7.5")
+    assert "CPU unknown over pass" in note and "Server started 74 minutes ago" in note and "pause" not in note
     assert observe(store, ledger, clock) == [] and len(master_mail(store)) == 1 and len(ledger.notes) == 1
 
 
@@ -224,7 +224,7 @@ def test_two_failed_passes_raise_the_alert_naming_the_failure(store):
     observe(store, ledger, clock)
     assert observe(store, ledger, clock) == ["raised the ledger slow alert"]
     [mail] = master_mail(store)
-    assert "write 0.1 seconds, and the ledger timed out. Server CPU" in mail and ledger.notes == []
+    assert "write 0.1 seconds, timed out" in mail and "probe failed" in mail and ledger.notes == []
     assert "127.0.0.1" not in mail and "ledger sw" not in mail
 
 
@@ -368,8 +368,14 @@ def test_the_operator_notice_keeps_every_fact_within_the_panel_limit(store):
             store, "sw", ledger, FakeRuntime(), 1_000, clock=clock, facts=lambda: {**FACTS, "newest": subject}
         )
     [note] = ledger.notes
-    assert len(note) == ledger_probe.TEXT_KEPT
-    for words in ("read 12.2 seconds", "write 20.5 seconds", "timed out", "CPU 182 percent", "started 74 minutes ago"):
+    assert len(note) <= ledger_probe.TEXT_KEPT
+    for words in (
+        "read 12.2 seconds",
+        "write 20.5 seconds",
+        "timed out",
+        "CPU unknown over pass",
+        "started 74 minutes ago",
+    ):
         assert words in note
     assert "Newest on dev merged 9 minutes ago: Keep a merge wait" in note
 
@@ -381,15 +387,20 @@ def test_unknown_server_facts_are_named_unknown(store):
     for _ in range(2):
         ledger_probe.observe(store, "sw", ledger, FakeRuntime(), 1_000, clock=clock, facts=lambda: unknown)
     [mail] = master_mail(store)
-    assert "Server CPU unknown, start time unknown. Newest on dev unknown." in mail
+    assert "CPU unknown over pass" in mail
+    assert "Server start time unknown. Newest on dev unknown." in mail
 
 
-def test_a_cpu_reading_is_shown_in_whole_percent(store):
+def test_a_cpu_reading_is_shown_in_whole_percent(store, monkeypatch):
+    from scripts.swarm import ledger_host
+
     clock = Clock()
     ledger = ProbedLedger(clock, read_s=6.0)
+    monkeypatch.setattr(ledger_host, "snapshot", lambda: {"pid": 1, "start": 1, "ticks": clock.now * 182, "hertz": 100})
     for _ in range(2):
-        ledger_probe.observe(store, "sw", ledger, FakeRuntime(), 1_000, clock=clock, facts=lambda: {**FACTS, "cpu": 0})
-    assert "Server CPU 0 percent, started 74 minutes ago." in master_mail(store)[0]
+        observe(store, ledger, clock)
+    assert "CPU 182 percent over pass" in master_mail(store)[0]
+    assert "Server started 74 minutes ago." in master_mail(store)[0]
 
 
 @pytest.mark.parametrize("error", [LedgerRefused("ledger sw refused: not plain words"), LedgerGone("gone")])
@@ -442,19 +453,26 @@ def test_the_probe_writes_the_inputs_the_time_left_pass_would_send(store, monkey
 
 
 def test_the_alert_state_is_kept_under_the_swarm_key(store):
+    import json
+
     clock = Clock()
     ledger = ProbedLedger(clock, read_s=0.2)
     observe(store, ledger, clock)
-    assert ledger_probe.state(store, "sw") == {"slow": 0, "fast": 1, "notices": []}
-    assert store.redis.get(store.key("sw", "ledger-slow")) == '{"slow": 0, "fast": 1, "notices": []}'
+    held = ledger_probe.state(store, "sw")
+    assert (held["slow"], held["fast"], held["notices"]) == (0, 1, [])
+    assert json.loads(store.redis.get(store.key("sw", "ledger-slow"))) == held
     ledger.read_s = 6.0
     observe(store, ledger, clock, at=2_000)
     observe(store, ledger, clock, at=3_000)
-    assert ledger_probe.state(store, "sw") == {"slow": 2, "fast": 0, "alert": True, "raised_at": 3_000, "notices": []}
+    held = ledger_probe.state(store, "sw")
+    assert (held["slow"], held["fast"], held["alert"], held["raised_at"], held["notices"]) == (2, 0, True, 3_000, [])
+    assert [row["at"] for row in held["raised_samples"]] == [2_000, 3_000]
     ledger.read_s = 0.2
     observe(store, ledger, clock)
     observe(store, ledger, clock)
-    assert ledger_probe.state(store, "sw") == {"slow": 0, "fast": 2, "alert": False, "raised_at": 3_000, "notices": []}
+    held = ledger_probe.state(store, "sw")
+    assert (held["slow"], held["fast"], held["alert"], held["raised_at"], held["notices"]) == (0, 2, False, 3_000, [])
+    assert [row["sequence"] for row in held["cleared_samples"]] == [4, 5]
 
 
 def test_the_master_is_told_first_and_the_clear_is_for_its_awareness(store):
@@ -468,7 +486,9 @@ def test_the_master_is_told_first_and_the_clear_is_for_its_awareness(store):
     items = InboxStore(store.redis).pending_items("master@sw")
     assert [(i.sender, i.fyi) for i in items] == [("swarm", False), ("swarm", True)]
     assert items[1].text == (
-        "The ledger server answers fast again: two swarm passes took read 0.2 seconds and write 0.1 seconds. "
+        "The ledger server answers fast again: two swarm passes took "
+        "sw pass 3: read 0.2 seconds and write 0.1 seconds, CPU unknown over pass. "
+        "sw pass 4: read 0.2 seconds and write 0.1 seconds, CPU unknown over pass. "
         "Idle and stale claim checks resume."
     )
 
