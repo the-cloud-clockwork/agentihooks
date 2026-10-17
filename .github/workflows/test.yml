@@ -976,8 +976,6 @@ jobs:
 
       - *install
 
-      - *save-venv
-
       - *use-venv
 
       - name: Restore latest dev durations
@@ -1141,8 +1139,6 @@ jobs:
       - *venv
       - *uv
       - *install
-
-      - *save-venv
       - *use-venv
 
       - name: Check out the base revision
