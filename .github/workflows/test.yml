@@ -713,6 +713,7 @@ jobs:
             echo "reused=0" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          "$PYTHON_PATH" -m pip install --quiet PyYAML==6.0.3
           before=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)
           cd "$RUNNER_TEMP/planner"
           "$PYTHON_PATH" -m scripts.ci_test_plan --repository "$GITHUB_REPOSITORY" --head "$GITHUB_SHA" \
