@@ -141,6 +141,14 @@ def test_a_green_run_reads_no_jobs(tick, actions):  # noqa: F811
     assert actions["asked"] == [["gh", "api", ENDPOINT]]
 
 
+def test_a_red_run_with_no_failed_job_names_only_its_conclusion(tick, actions):  # noqa: F811
+    actions["run"] = {"status": "completed", "conclusion": "failure"}
+    actions["jobs"] = {"jobs": [job("lint", "success"), job("docs", "skipped")]}
+    hold_run(tick)
+    assert tick.end() == [f"ended the wait of {ME}: checks on {RUN}, now red; the run concluded failure"]
+    assert actions["asked"] == [["gh", "api", ENDPOINT], ["gh", "api", JOBS]]
+
+
 def test_unreadable_jobs_still_end_a_red_run_wait_with_its_conclusion(tick, actions):  # noqa: F811
     actions["run"] = {"status": "completed", "conclusion": "failure"}
     actions["jobs_code"] = 1
@@ -150,9 +158,14 @@ def test_unreadable_jobs_still_end_a_red_run_wait_with_its_conclusion(tick, acti
     assert idle.wait(tick.store.redis, "sw", ME) is None
 
 
-def test_a_jobs_answer_without_jobs_still_ends_a_red_run_wait(tick, actions):  # noqa: F811
+@pytest.mark.parametrize(
+    "answer",
+    [{"message": "no jobs"}, [], {"jobs": ["unit"]}, {"jobs": [{"conclusion": "failure"}]}],
+    ids=["no jobs key", "not an object", "job not an object", "job without a name"],
+)
+def test_a_malformed_jobs_answer_still_ends_a_red_run_wait(tick, actions, answer):  # noqa: F811
     actions["run"] = {"status": "completed", "conclusion": "timed_out"}
-    actions["jobs"] = {"message": "no jobs"}
+    actions["jobs"] = answer
     hold_run(tick)
     outcome = f"checks on {RUN}, now red; the run concluded timed_out; its jobs could not be read"
     assert tick.end() == [f"ended the wait of {ME}: {outcome}"]

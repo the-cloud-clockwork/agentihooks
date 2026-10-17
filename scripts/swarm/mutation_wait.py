@@ -231,7 +231,7 @@ def run_resolution(target: str) -> str:
 def _failed_jobs(repo, number):
     try:
         jobs = _api(f"repos/{repo}/actions/runs/{number}/jobs?per_page=100")["jobs"]
-    except (Unreachable, KeyError):
+        failed = [f"{job['name']} {job['conclusion']}" for job in jobs if job.get("conclusion") in JOB_FAILURES]
+    except (Unreachable, KeyError, TypeError, AttributeError):
         return "; its jobs could not be read"
-    failed = [f"{job['name']} {job['conclusion']}" for job in jobs if job.get("conclusion") in JOB_FAILURES]
     return f"; failed jobs: {', '.join(failed)}" if failed else ""
