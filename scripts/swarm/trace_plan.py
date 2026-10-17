@@ -298,13 +298,22 @@ def _file_cuts(rows, ledger, who, home):
         gate_log.append(who.swarm, gate_log.Row.of(GATE.name, "count", who, reason=f"cut: {row['what']}"), home)
 
 
-def run(folder, state, ledger, who, mode, home=None, now_ms=None):
-    """Trace the plan in folder; returns the verdict record and whether the task must be blocked."""
+def _read(folder, who, state):
     try:
         text = (folder / PLAN).read_text()
     except OSError:
         raise ValueError(f"write the plan first: {folder / PLAN}, {FORMAT}") from None
-    pieces = parse(text, who.task, state.get("task ids", ()))
+    return parse(text, who.task, state.get("task ids", ()))
+
+
+def run(folder, state, ledger, who, mode, home=None, now_ms=None):
+    """Trace the plan in folder; returns the verdict record and whether the task must be blocked."""
+    try:
+        pieces = _read(folder, who, state)
+    except ValueError as exc:
+        if mode in FAIL_KINDS:
+            gate_log.append(who.swarm, gate_log.Row.of(GATE.name, FAIL_KINDS[mode], who, reason=str(exc)), home)
+        raise
     previous = load(folder)
     if previous.get("plan_hash") == plan_hash(pieces) and previous.get("authorizations", []) == _ids(state):
         return previous, False

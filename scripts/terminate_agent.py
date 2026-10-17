@@ -295,10 +295,14 @@ def main(argv: list[str] | None = None) -> int:
     if not args.selector:
         print("terminate-agent: selector is required unless --list is used", file=sys.stderr)
         return 2
+    if args.stand_down and args.type == "claude":
+        print("terminate-agent: --stand-down stops Codex conversations only, not --type claude", file=sys.stderr)
+        return 2
     if args.stand_down:
         from scripts.codex_session import stand_down
 
-        return stand_down.run(args.selector, args.swarm, args.dry_run, items)
+        codex = [item for item in items if item.target == "codex"]
+        return stand_down.run(args.selector, args.swarm, args.dry_run, codex, args.json)
     try:
         selected = resolve(items, args.selector, args.type)
         members = validate(selected, items, force_shared=args.force_shared)

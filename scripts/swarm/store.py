@@ -69,6 +69,7 @@ class SwarmConfig:
     codex_model: str = default_models.DEFAULTS["codex"]
     scratch: bool = False
     codex_inbox_transport: str = LEGACY_TRANSPORT
+    master_claude_login: bool = False
 
 
 def scaling_refusal(config):
@@ -118,6 +119,7 @@ class AgentRecord:
     hive: str = ""
     route_kind: str = "subscription"
     transport: str = ""
+    remote_control: dict = field(default_factory=dict)
 
 
 class RedisStore:
@@ -196,6 +198,7 @@ class RedisStore:
             raw.get("codex_model") or default_models.DEFAULTS["codex"],
             raw.get("scratch") == "True",
             raw.get("codex_inbox_transport") or LEGACY_TRANSPORT,
+            raw.get("master_claude_login") == "True",
         )
 
     def update(self, slug, **changes):

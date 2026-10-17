@@ -787,6 +787,28 @@ def test_run_needs_a_plan_file(tmp_path):
     assert str(refused.value) == f"write the plan first: {tmp_path / 't1' / 'plan.md'}, {trace_plan.FORMAT}"
 
 
+@pytest.mark.parametrize(("mode", "kind"), [("enforce", "deny"), ("observe", "observe"), ("off", None)])
+@pytest.mark.parametrize(
+    ("text", "refusal"),
+    [
+        (None, "write the plan first"),
+        ("- a light\n", "plan line 1 is not a piece"),
+        ("- fix Run 38842603017 failed | a | b\n", "plan line 1: the ledger would refuse its follow up"),
+        ("prose only\n", "the plan holds no pieces"),
+    ],
+)
+def test_run_logs_every_refusal_by_its_mode_before_raising(ask, tmp_path, mode, kind, text, refusal):
+    folder, home = tmp_path / "t1", tmp_path / "home"
+    if text is not None:
+        write_plan(folder, text)
+    fake = ask(0.9)
+    with pytest.raises(ValueError) as refused:
+        trace_plan.run(folder, INTENT, Ledger(), WHO, mode, home=home)
+    assert str(refused.value).startswith(refusal) and fake.calls == []
+    expected = [("trace-plan", kind, WHO.name, WHO.task, str(refused.value))] if kind else []
+    assert [(r["gate"], r["kind"], r["agent"], r["task"], r["reason"]) for r in rows(home)] == expected
+
+
 def test_run_accepts_a_task_identifier_the_ledger_would_refuse_in_prose(ask, tmp_path):
     folder = tmp_path / "t1"
     write_plan(folder, "- a light | a | b\n")
@@ -818,6 +840,17 @@ def test_run_accepts_registered_doctor_task_and_files_cut_piece(ask, tmp_path, t
     record, block = trace_plan.run(folder, state, ledger, who, "observe", home=tmp_path / "home")
     assert record["verdict"] == "pass" and not block
     assert ledger.followups == ["Cut from the plan: a diesel generator"]
+
+
+@pytest.mark.parametrize("task_id", ["fx-8be892c4-code", "promo-38842603017-0"])
+def test_run_accepts_registered_task_identifiers_in_piece_text(ask, tmp_path, task_id):
+    folder = tmp_path / "task"
+    write_plan(folder, f"- fix {task_id} | a | keep the task working\n")
+    ask(0.9)
+    state = {**INTENT, "task ids": [task_id]}
+    record, block = trace_plan.run(folder, state, Ledger(), WHO, "enforce", home=tmp_path / "home")
+    assert record["verdict"] == "pass" and not block
+    assert record["pieces"][0]["what"] == f"fix {task_id}"
 
 
 @pytest.mark.parametrize(
