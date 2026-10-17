@@ -152,6 +152,92 @@ same rewrite, so continuity confirmation compares the rendered action exactly.
 Legacy rendering retains the foreground inbox wait. New push-master handoffs
 should make their first Next action read `agentihooks msg inbox`.
 
+## Profile check in the execution home
+
+Every profiled launch asks the agent to validate its mounted profile with the
+binding canary command written into its instructions. For an `app_server`
+execution the check runs against the execution home, a private copy of the
+shared rendered profile home, not the shared home itself.
+
+1. `init-agent` writes the launch request to a private report file under the
+   runtime folder and names it in `AGENTIHOOKS_PROFILE_REPORT`. The request
+   records the profile, the harness, `state: pending` and the shared rendered
+   home's binding evidence, its canary included.
+2. The supervisor copies the shared home into the execution home with mode
+   `0700`. The copy's binding evidence names the execution home; the shared
+   home's evidence is left unchanged.
+3. When the launch environment names a report, the supervisor re-records the
+   request against the execution home (`binding.rehome`). It re-inspects the
+   execution home's rendered evidence and keeps the request only when its
+   canary equals the canary recorded at launch. The report's `rendered` block
+   then names the execution home; its canary, profile, harness and pending
+   state are unchanged.
+4. The server starts with `CODEX_HOME` set to the execution home. When the
+   agent runs its canary command, validation compares the live process home
+   with the recorded home. Both name the execution home, so the check passes
+   and the report moves to `state: validated`.
+
+A launch whose environment names no report (an unprofiled launch) skips the
+re-record, and the report file is never touched. Legacy Codex launches never
+pass through the supervisor, so their request keeps the rendered home they
+started with.
+
+The execution home is `<execution folder>/codex`. The execution folder is the
+parent of the server's socket, which the supervisor's launch line prints as
+`endpoint=unix://<path>`. Sockets sit under `$XDG_RUNTIME_DIR/cx` when that
+variable is set, else under `~/.agentihooks/cx`.
+
+### Refusals
+
+When the execution home's evidence cannot be confirmed, the supervisor marks
+the pending request `state: failed` with the reason and the launch fails: the
+transport binding is recorded `failed`, the agent is dropped and the execution
+folder is removed. The reasons are:
+
+| Reason | Cause |
+|---|---|
+| `execution home canary differs from the launch request` | The execution home's instructions carry another canary than the shared home did at launch: the profile was rendered again between the request and the execution home. |
+| `profile mismatch in rendered binding` | The execution home's evidence names another profile, harness or home than the request: the shared home was rendered for another profile or harness after the request was written. |
+| `mounted persona changed since render`, `rendered source manifest changed`, `missing or invalid rendered profile evidence: …` | The execution home's instructions or source manifest no longer match its evidence, or the evidence file is missing or unreadable. |
+
+The reason is written to the report, so `init-agent` prints
+`profile_validation=failed` and `agentihooks init-agent: <reason>` and exits 3.
+Read the reason there or in the report. Known gap: the supervisor process
+does not print the `agentihooks codex-session: launch refused:` line other
+launch refusals print; a follow up on the ledger tracks it.
+
+A failure while copying the home (an `OSError` from the copy) refuses no
+request: the report stays `pending`, and `init-agent` fails with
+`mounted profile canary did not validate before timeout`.
+
+### Read the result
+
+From inside the agent session:
+
+```bash
+agentihooks profile binding
+```
+
+It prints the session home's profile, harness, persona and source digests,
+the routed account and the report state (`pending`, `validated` or
+`failed: <reason>`), never an environment value. Point `--home` at an
+execution home to check its evidence without a report:
+
+```bash
+agentihooks profile binding --home <execution folder>/codex
+```
+
+That states `rendered` or `invalid: <reason>`. A home with no evidence file
+prints `ERROR:` with the read error and exits 1.
+
+The delivered behaviour is
+[pull request 3533](https://github.com/the-cloud-clockwork/agentihooks/pull/3533),
+covered by `test_rehomed_request_validates_against_the_execution_copy`,
+`test_rehome_refuses_and_marks_an_invalid_execution_copy` and
+`test_execution_home_rerecords_the_profile_report_for_the_copy`. Those tests
+run against fixture homes; no live `app_server` launch passing its profile
+check is cited here.
+
 ## Lifecycle and failures
 
 Reopening a viewer and retiring an execution are separate operations. Managed
@@ -173,6 +259,8 @@ The live qualification also recorded these viewer limits:
 | Symptom | Meaning and action |
 |---|---|
 | Launch fails with `ModuleNotFoundError: No module named 'websockets'` | The launching tool environment lacks its runtime dependency. Update the checkout to a revision containing the dependency fix, reinstall the tool using the installation instructions, and repeat the tool Python import check before retrying an admitted launch. Installing development extras in another venv does not fix this environment. |
+| Profile check fails with `live process binding changed since validation` on an `app_server` execution | The report records a home other than the execution home. A revision without the execution home re-record step produces this on every launch; update to one that contains it. See [Profile check in the execution home](#profile-check-in-the-execution-home). |
+| Launch fails with `execution home canary differs from the launch request` | The profile was rendered again between the launch request and the execution home. Relaunch; the new request records the current canary. |
 | Attach reports `failed` or `exited` | The recorded app-server ended; there is no live thread to attach through that transport. Inspect execution status before attempting recovery. |
 | Attach times out without a connected thread | Startup has not produced a connected thread within the timeout. Check the managed server's launch result and serve log; increasing the timeout alone does not repair a failed launch. |
 | Reopen reports no connected thread | The immediate reopen command requires an already connected thread. Use the waiting attach helper during startup. |

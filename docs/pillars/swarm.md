@@ -156,7 +156,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> set autonomy=LEVEL` | Set how far agents go without the operator: `manual` engineers open a draft pull request and stop for the operator; `assist` engineers open a pull request and merge only after an operator approval line on the ledger; `delegate` (default) engineers merge on green checks; `full` is delegate, and the master also turns follow ups into tasks without asking. Agents spawned next get it in their prompt and as `AGENTIHOOKS_SWARM_AUTONOMY`; the ledger page swarm panel shows it. |
 | `agentihooks swarm <id> set master-agent=claude\|codex` | Master affinity, the master lane's `agent`. The ledger page's Capacity dropdown writes the same field through Apply. When the value differs from the live master's harness, one durable inbox order reaches the master seat: hand off with Handoff v2 and stop. The tick ends the old process before it starts the successor in the same seat on the chosen harness, with the original profile and the frontier model of that harness. An unchanged value orders nothing. A failed successor launch shows on `swarm status` and the page, keeps the handoff and the seat inbox, and retries each tick. Templates, snapshots and restore carry the value. |
 | `agentihooks swarm <id> set effort-min=E effort-max=E` | The effort range every lane agent starts inside, default `medium` to `xhigh`. The classifier's pick, a lane or template effort, a resume and the `init-agent` launch of a swarm lane are each clamped into it; Claude levels are `low`, `medium`, `high`, `xhigh` and `max`, and Codex levels map by rank, so Codex runs `max` as `xhigh`. Setting a lane effort outside the range is refused with the range named. The swarm panel caps row edits both ends. |
-| `agentihooks swarm <id> set <gate>-gate=deny\|log only\|skip` | Operator or master only, for every gate: `identity`, `watch`, `subagents`, `reruns`, `intent`, `build`, `claim-stop`, `push-stop`, `claims`, `trace-plan`, `talk`. The mode lives in the swarm config; the ledger page's Gates controls beside Capacity write the same field, and `swarm status` reports every gate's current mode as `gate_modes`. Inside a swarm the ledger server, the tick, `swarm trace-plan` and the gate entry point read only the config, so an agent's `AGENTIHOOKS_GATE_<NAME>` is ignored there; it picks the mode only outside a swarm or when the swarm config cannot be read. `deny` refuses the call and logs the denial, `log only` lets the call through and logs the would-be denial, `skip` does not run the check. The old names `enforce`, `observe` and `off` remain aliases. Quote a mode containing spaces, for example `"watch-gate=log only"`. |
+| `agentihooks swarm <id> set <gate>-gate=deny\|log only\|skip` | Operator or master only, for every gate: `identity`, `watch`, `subagents`, `reruns`, `intent`, `build`, `claim-stop`, `push-stop`, `claims`, `trace-plan`, `talk`. The mode lives in the swarm config; the ledger page's Gates controls beside Capacity write the same field, and `swarm status` reports every gate's current mode as `gate_modes`. Inside a swarm the ledger server, the tick, `swarm trace-plan` and the gate entry point read only the config, so an agent's `AGENTIHOOKS_GATE_<NAME>` is ignored there; it picks the mode only outside a swarm or when the swarm config cannot be read. `deny` refuses the call and logs the denial, `log only` lets the call through and logs the would-be denial, `skip` does not run the check; for `trace-plan`, `deny` refuses no call: it logs each failed plan and the second distinct one blocks the task, and `skip` still runs the trace and saves its verdict, with no failure row and no block. The old names `enforce`, `observe` and `off` remain aliases. Quote a mode containing spaces, for example `"watch-gate=log only"`. |
 | `agentihooks swarm <id> set talk-gate=deny\|log only\|skip` | Operator or master only. The ledger server counts each eng and ci agent's talk writes (comments, chat lines, follow-ups) since its last outcome: a pushed commit, an opened pull request, resolved checks, a task state, pull request or proof change. Past 10, `deny` refuses the write and `log only` (the default) logs the would-be deny in the gate log. Talk owed to the operator and a typed `lift the talk gate` pass. The ledger hook's nudge and Stop gate also restart on an outcome and skip tool calls made inside sub-agents. |
 | `agentihooks swarm <id> set intent-gate=deny\|log only\|skip` | Operator or master only. `swarm pr` writes the parent intent (project overview, phase, task) into the pull request body and arms the task's intent check. On the next tick the classifier reads that intent with the pull request title, body, changed files, the task proof and the task's plan slice, resolved the way `agentihooks plan read` resolves it (phase range, plan artifact or Swarm v2 package, without the shared sections), and judges whether the phase can use the change as delivered and whether it weakens anything the phase builds; under 0.3, or a weakening at 0.5 or more, the verdict is fail, with reasons. It also asks phase fit on its own, so a fail names its criterion: a change that fits the phase but is not usable yet fails on delivery, never as a phase mismatch. Each verdict records its stage, criterion, model and definition digest. `python -m scripts.gates.intent_calibration` measures the check on its corpus of retained and control inputs. `deny` returns a failed task to its agent (claimed again, a ledger comment and an inbox item); `log only` (the default) logs the fail in the gate log; `skip` skips the check. The `intent` gate (`python -m scripts.gates intent`) refuses `gh pr merge` and `swarm done` while the verdict is fail, or pending for under two minutes; a check still pending after two minutes passes unchecked and is counted. A pass names the plan lines it judged. A task whose plan passed intent at `swarm trace-plan` opens its pull request on that pass, with no pending hold, and the tick still judges the pull request and replaces the plan verdict. Running `swarm pr` again starts a new check. A split task's halves are judged and merged one by one; see [Intent grading of each half](#intent-grading-of-each-half). |
 | `agentihooks swarm <id> set snapshot-minutes=N` | While the swarm runs, the tick writes an automatic snapshot every N minutes to `~/.agentihooks/swarm/<id>/snapshots/auto-<ms>.json` and removes the oldest past ten. Default 30; a swarm without the setting takes `AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES`; 0 turns automatic snapshots off. `snapshot.json` from `snapshot` and `stop` is separate and never pruned. |
@@ -250,6 +250,196 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> restack` | After the parked blockers finish, fetch origin and rebase task work from `stacked_base` onto `origin/dev`. Run in a clean branch cut from the parked branch. Success clears `parked_on`; a conflict lists the files and retains the parked list. Resolve the files, run `git rebase --continue`, then run restack again to finish. |
 | `agentihooks swarm <id> learned TEXT [--maturity data\|note\|insight\|canon]` | Add a lesson to your seat's learned notes, kept for every later occupant. The maturity defaults to `note`; only the master writes `canon`. |
 | `agentihooks swarm <id> say TEXT [--to NAME\|eng\|ci]` | Post to the swarm chat. |
+
+## Publishing after a successor prepares a branch
+
+`swarm publish` selects a branch from the prepared checkout and its continuation
+record. A successor can therefore publish after restacking parked work onto
+`dev`, even when that rebase means its head no longer descends from the parked
+predecessor's remote branch.
+
+The branch choice follows Git ancestry, rather than simply reusing the previous
+worker's branch name:
+
+| Checkout and continuation state | Publication target |
+|---|---|
+| An eligible recorded continuation's local `origin` ref is an ancestor of `HEAD` | Keep that continuation branch. A fast forward continuation can keep updating an existing pull request. |
+| Restacking removed that ancestry, and no other eligible recorded branch passes the ancestry check | Use the prepared checkout's own branch. The parked predecessor branch stays at its previous head. |
+| No recorded branch exists, or its local `origin` ref is missing | Use the prepared checkout's own branch unless another recorded candidate passes the ancestry check. A missing ref does not print a fatal Git diagnostic. |
+
+The current implementation checks a retained continuation from the handoff or
+reclaim record first, then the branch supplied by repository and checkout
+selection. Each candidate must pass the ancestry check. Inside a task worktree,
+checkout selection supplies the local branch; preserving a predecessor target
+there requires a retained handoff or reclaim continuation. From a primary
+checkout, selection can instead supply the task's recorded repository branch.
+In those continuation contexts, a different local branch name alone does not
+require a new remote branch: even parked work stays on an eligible recorded
+branch when it still fast forwards, including when there were no task commits
+beyond the stacked base.
+
+After a successful push, the result's `branch` names the actual target and
+`head` names the published commit. The task records that target in `branch` and
+in `repository_branches` for the selected repository; `branch_repo` identifies
+its origin repository. The push sets the checkout's upstream to the chosen
+remote branch. Publication does not retarget or open a pull request: record the
+pull request for the published branch with `swarm pr`.
+
+### Resume parked work and publish
+
+Use this sequence as the task's current worker, after reading its handoff and
+after its parked dependencies have finished. Replace angle bracket arguments
+with the swarm name and explicit files you changed. Worktree and branch names
+come from `prepare`.
+
+```bash
+agentihooks swarm <id> prepare
+```
+
+Change into the returned worktree. For parked work, restack from a clean
+checkout before making further changes:
+
+```bash
+cd <returned-worktree>
+agentihooks swarm <id> restack
+```
+
+A rebase conflict leaves the parked list intact. Resolve the reported files,
+stage the resolved files explicitly, run `git rebase --continue`, and run
+`swarm restack` again to finish. Once restacking succeeds and the task changes
+are ready, publish the selected files:
+
+```bash
+agentihooks swarm <id> publish \
+  --message "Document successor publication" \
+  -- docs/pillars/swarm.md docs/pillars/index.md
+```
+
+Inspect `branch`, `head`, `worktree` and `gate` in the returned result. For a
+restacked successor whose history diverged from the predecessor, expect the
+prepared branch and its published head. For a retained fast forward
+continuation, expect the retained branch. Use the resulting branch when
+opening a pull request into `dev`, then record its URL:
+
+```bash
+agentihooks swarm <id> pr <pull-request-url>
+```
+
+### Repository configuration and failures
+
+There is no separate branch selection flag or environment variable. Configure
+the task's repositories explicitly when it spans repositories; prose names in
+the task description do not select them. For an existing task:
+
+```bash
+agentihooks ledger --slug <id> --as <agent> \
+  task set <task> repositories=/absolute/repo,/absolute/other
+agentihooks swarm <id> prepare
+```
+
+`prepare` returns a worktree and branch per repository. Run `publish` from the
+appropriate returned worktree to select that repository; its recorded branch
+is kept separately from the others. From a primary checkout, publication can
+resolve a sole task repository, but refuses an ambiguous selection when the
+task declares several repositories. Without a `repositories` list, the swarm
+repository is the default.
+
+Publication stages only the named files, commits if needed, runs the selected
+repository's prepush gate, then pushes. A failure reports a `Next:` command;
+fix the reported cause and repeat that command. An already committed head is
+graded again without an empty commit. Missing worktrees require `prepare`;
+unrelated tracked changes must be dealt with before publication. Tests run in
+CI. A push rejected because the remote changed remains a failure to reconcile;
+branch selection does not resolve concurrent remote updates.
+
+The successor branch fix was delivered in [pull request 3385](https://github.com/the-cloud-clockwork/agentihooks/pull/3385).
+The regression reproduced a push rejected against the predecessor before the
+fix ([red proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38723619720));
+the corrected publication and continuation cases passed afterward
+([green proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38725568065)).
+
+## Plan tracing for promotion fixer tasks
+
+Promotion failures create fixer tasks whose identifiers include the Actions run
+number, for example `promo-38842603017-0`. Plan tracing accepts any task
+identifier registered in the swarm ledger, matched as a whole token, in the
+follow-up text it generates. Free text run numbers are still refused.
+
+### Trace the fix plan
+
+Work as the agent claiming the promotion fixer task. Write `plan.md` in the task
+work folder supplied at launch, with one piece per line:
+
+```text
+- Repair coverage accounting | scripts/ci_coverage.py | Restore the promotion coverage check
+- Add a coverage regression case | tests/test_ci_coverage.py | Prove the reported failure stays fixed
+- Add an unrelated feature | scripts/unrelated.py | Extend another service
+```
+
+Use the actual areas needed by the fix. Then run:
+
+```bash
+agentihooks swarm example-swarm trace-plan
+```
+
+The command resolves the agent and claimed task from the session. Before any
+classifier call it checks each piece's follow-up text,
+`Cut from the plan of task <task id>: <what>`, against the ledger's plain words
+rules. Its report names the verdict, kept pieces and cut pieces. If the
+classifier cuts the unrelated piece and the plan passes, the filed follow-up
+reads:
+
+```text
+Cut from the plan of task promo-38842603017-0: Add an unrelated feature
+```
+
+Classifier scope and size judgments still apply; accepting the identifier does
+not make every plan pass. The command reference above also describes
+authorization handling and the separate build and intent gates.
+
+### Configure enforcement
+
+The operator or master selects the gate mode, as described in the
+`<gate>-gate` row of the command reference:
+
+```bash
+agentihooks swarm example-swarm set trace-plan-gate=deny
+agentihooks swarm example-swarm set "trace-plan-gate=log only"
+```
+
+The mode governs what follows a failed verdict. `deny` logs each failed plan as
+a denial, and a second failed plan with different content sets the task to
+blocked, comments the reasons on it and retires the agent. `log only` logs each
+failed plan as a would-be denial. `skip` writes no failure row and never blocks
+the task, though a refused follow-up still stops the trace; the classifier still runs, the verdict
+is still saved, and unchecked verdicts and filed cuts are still logged.
+
+### Plain words limits and refusals
+
+The exception covers a token that exactly equals a task identifier registered
+in the swarm ledger. It exempts that token from the commit hash and run or job
+identifier checks; other prose rules still apply.
+
+With `promo-38842603017-0` registered and no other promotion task:
+
+| Text | Plain words result |
+|---|---|
+| `Cut from the plan of task promo-38842603017-0: Add an unrelated feature` | Accepted by the identifier checks. |
+| `Run 38842603017 failed` | Refused: a free text run number. |
+| `promo-38842603017-1` | Refused: the token is not a registered task identifier. |
+| `promo-38842603017-0 Run 38842603017 failed` | Refused: the separate run number remains in the prose. |
+
+A piece whose follow-up would be refused stops the trace in every gate mode,
+with `plan line <n>: the ledger would refuse its follow up` and the named
+violation. No passing verdict exists for the current `plan.md`; the build gate
+parses it again, reports the same refusal and refuses the task's edits under `build-gate=deny` and logs them under `log only` until
+the piece is rewritten and a trace passes.
+Rewrite the piece's description in plain words; a registered
+identifier does not authorize bare run numbers elsewhere in a plan piece or
+comment. Put run evidence in the task proof and link the Actions run when
+referencing it in ledger prose. If only the generated task token is refused,
+confirm the claimed task appears in the swarm ledger under that exact
+identifier. Retrying unchanged text does not resolve a validation refusal.
 
 ## Deployed host capacity
 
