@@ -1,4 +1,5 @@
 import ast
+import importlib.util
 import json
 import re
 import subprocess
@@ -10,6 +11,9 @@ NAME = "AgentiHooks touched Python fallback"
 RULES = ("C901", "PLR0912", "PLR0913")
 LIMITS = ("--config", "lint.mccabe.max-complexity=12", "--config", "lint.pylint.max-args=7")
 _MEASURED = re.compile(r"\((\d+) > \d+\)")
+_SPEC = importlib.util.spec_from_file_location("size_limits", Path(__file__).resolve().parents[1] / "size_limits.py")
+size_limits = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(size_limits)
 
 
 def git(*args: str) -> str:
@@ -21,29 +25,9 @@ def changed(base: str) -> dict[Path, Path]:
     found = {}
     for status in fields:
         old = next(fields)
-        new = next(fields) if status[0] in "RC" else old
+        new = next(fields) if status.startswith("R") else old
         if new.endswith(".py") and Path(new).is_file():
             found[Path(new)] = Path(old if old.endswith(".py") else new)
-    return found
-
-
-def units(source: bytes) -> dict[int, tuple[str, int]]:
-    found, seen = {}, {}
-
-    def walk(node, prefix):
-        for child in ast.iter_child_nodes(node):
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                name = f"{prefix}{child.name}"
-                seen[name] = seen.get(name, 0) + 1
-                if seen[name] > 1:
-                    name = f"{name}#{seen[name]}"
-                if not isinstance(child, ast.ClassDef):
-                    found[child.lineno] = (name, child.end_lineno - child.lineno + 1)
-                walk(child, f"{name}.")
-            else:
-                walk(child, prefix)
-
-    walk(ast.parse(source), "")
     return found
 
 
@@ -51,7 +35,7 @@ def measure(tree: Path, paths: list[Path]) -> dict[tuple[str, str], tuple[int, s
     found, defs = {}, {}
     for path in paths:
         source = (tree / path).read_bytes()
-        defs[path.as_posix()] = units(source)
+        defs[path.as_posix()] = size_limits.functions(source)
         if (lines := len(source.splitlines())) > 3000:
             found[(path.as_posix(), "file lines")] = (lines, f"{path}: file exceeds 3000 lines")
         for name, length in defs[path.as_posix()].values():
@@ -64,14 +48,13 @@ def complexity(
     tree: Path, paths: list[Path], defs: dict[str, dict[int, tuple[str, int]]]
 ) -> dict[tuple[str, str], tuple[int, str]]:
     found = {}
-    command = [sys.executable, "-m", "ruff", "check", "--isolated", "--exit-zero", "--output-format", "json"]
+    command = [sys.executable, "-m", "ruff", "check", "--isolated", "--output-format", "json"]
     command += ["--select", ",".join(RULES), *LIMITS, *(str(tree / path) for path in paths)]
     for hit in json.loads(subprocess.run(command, capture_output=True).stdout):
         rel = Path(hit["filename"]).relative_to(tree).as_posix()
-        value = _MEASURED.search(hit["message"])
-        if hit["code"] in RULES and value:
-            name = defs[rel][hit["location"]["row"]][0]
-            found[(rel, f"{name} {hit['code']}")] = (int(value[1]), f"{rel}: {name} {hit['code']} {hit['message']}")
+        value = int(_MEASURED.search(hit["message"])[1])
+        name = defs[rel][hit["location"]["row"]][0]
+        found[(rel, f"{name} {hit['code']}")] = (value, f"{rel}: {name} {hit['code']} {hit['message']}")
     return found
 
 
