@@ -41,7 +41,8 @@ RUN --mount=type=bind,source=docker/swarm-node,target=/opt/swarm-node \
     && apt-get update \
     && apt-get install -y --no-install-recommends $(python /opt/worker_image.py shell-packages --package openssh-client) \
     && rm -r /var/lib/apt/lists/*
-RUN groupadd --gid 10001 swarm && useradd --uid 10001 --gid swarm --create-home swarm && mkdir /data && chown swarm:swarm /data
+RUN groupadd --gid 10001 swarm && useradd --uid 10001 --gid swarm --create-home swarm && mkdir /data && chown swarm:swarm /data \
+    && python -m compileall -q -x /site-packages/ /usr/local/lib/python3.12
 COPY --from=dependencies /opt/venv /opt/venv
 COPY --from=build /opt/package/ /opt/venv/
 COPY --from=herdr /usr/local/bin/herdr /usr/local/bin/herdr
