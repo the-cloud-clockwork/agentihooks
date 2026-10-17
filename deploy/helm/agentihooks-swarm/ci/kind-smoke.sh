@@ -42,17 +42,38 @@ finish() {
   exit "$status"
 }
 
+layers() {
+  if [[ -z ${KIND_LAYER_CACHE:-} ]]; then
+    return
+  fi
+  if [[ -d $KIND_LAYER_CACHE/$1 ]]; then
+    printf '%s\n' --cache-from "type=local,src=$KIND_LAYER_CACHE/$1"
+  fi
+  if [[ ${KIND_LAYER_CACHE_HIT:-} != true ]]; then
+    printf '%s\n' --cache-to "type=local,dest=$KIND_LAYER_CACHE/$1.next,mode=max"
+  fi
+}
+rotate_layers() {
+  if [[ -d ${KIND_LAYER_CACHE:-}/$1.next ]]; then
+    rm -rf "${KIND_LAYER_CACHE:?}/$1"
+    mv "$KIND_LAYER_CACHE/$1.next" "$KIND_LAYER_CACHE/$1"
+  fi
+}
 (
   bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm >/dev/null
-  docker build -q --build-arg IMAGE="$image" --target packages \
+  mapfile -t terminal_layers < <(layers terminal)
+  docker build -q "${terminal_layers[@]}" --build-arg IMAGE="$image" --target packages \
     -f "$chart/ci/terminal-worker.Dockerfile" . >/dev/null &
   packages=$!
   trap 'status=$?; wait "$packages" || true; exit "$status"' EXIT
-  docker build -q -t "$image" . >/dev/null
+  mapfile -t swarm_layers < <(layers swarm)
+  docker build -q -t "$image" "${swarm_layers[@]}" . >/dev/null
+  rotate_layers swarm
   printf 'main fixture image built\n'
   printf 'FROM %s\nCOPY . /\n' "$image" \
     | docker build -q -t "$bundle_image" -f - tests/fixtures/swarm_v2/worker-bundle >/dev/null
   wait "$packages"
+  rotate_layers terminal
 ) &
 build=$!
 kind create cluster --name "$cluster" --image "$KIND_NODE_IMAGE" &
