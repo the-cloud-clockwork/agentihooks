@@ -38,7 +38,7 @@ jobs:
         run: python -m scripts.ci_queue_retry --repo "$GITHUB_REPOSITORY" --run-id "$RUN_ID"
 
       - name: Log the requeue a runner loss would make
-        if: steps.classify.outputs.requeue == 'true' && vars.QUEUE_RETRY_ENFORCE != 'true'
+        if: steps.classify.outputs.requeue == 'true' && vars.QUEUE_RETRY_ENFORCE == 'false'
         env:
           PULL: ${{ steps.classify.outputs.pull }}
         run: |
@@ -46,7 +46,7 @@ jobs:
 
       - name: Mint the TCC Main CI queue token
         id: app-token
-        if: steps.classify.outputs.requeue == 'true' && vars.QUEUE_RETRY_ENFORCE == 'true'
+        if: steps.classify.outputs.requeue == 'true' && vars.QUEUE_RETRY_ENFORCE != 'false'
         uses: actions/create-github-app-token@v3.2.0
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
@@ -55,7 +55,7 @@ jobs:
           permission-pull-requests: write
 
       - name: Requeue the pull request once
-        if: steps.classify.outputs.requeue == 'true' && vars.QUEUE_RETRY_ENFORCE == 'true'
+        if: steps.classify.outputs.requeue == 'true' && vars.QUEUE_RETRY_ENFORCE != 'false'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PULL: ${{ steps.classify.outputs.pull }}

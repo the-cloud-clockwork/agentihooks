@@ -183,7 +183,7 @@ def test_jobs_beyond_the_listed_page_refuse_the_requeue(monkeypatch, total, extr
     assert ci_queue_retry.decide(RUN, failed, WORKFLOW)[0] == (not extra)
 
 
-def test_the_retry_workflow_requeues_only_when_enforcement_is_on():
+def test_the_retry_workflow_requeues_unless_enforcement_is_switched_off():
     workflow = yaml.safe_load((ROOT / ".github/workflows/queue-retry.yml").read_text())
     assert workflow[True] == {"workflow_run": {"workflows": ["Tests"], "types": ["completed"]}}
     retry = workflow["jobs"]["retry"]
@@ -193,9 +193,9 @@ def test_the_retry_workflow_requeues_only_when_enforcement_is_on():
     steps = {step.get("name"): step for step in retry["steps"]}
     assert "ci_queue_retry" in steps["Classify the failed jobs"]["run"]
     log = steps["Log the requeue a runner loss would make"]
-    assert "vars.QUEUE_RETRY_ENFORCE != 'true'" in log["if"]
+    assert "vars.QUEUE_RETRY_ENFORCE == 'false'" in log["if"]
     requeue = steps["Requeue the pull request once"]
-    assert requeue["if"] == "steps.classify.outputs.requeue == 'true' && vars.QUEUE_RETRY_ENFORCE == 'true'"
+    assert requeue["if"] == "steps.classify.outputs.requeue == 'true' && vars.QUEUE_RETRY_ENFORCE != 'false'"
     assert steps["Mint the TCC Main CI queue token"]["if"] == requeue["if"]
     assert requeue["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
     assert requeue["run"].startswith('gh pr merge "$PULL" --squash --auto')
