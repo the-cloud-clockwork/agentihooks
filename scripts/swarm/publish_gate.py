@@ -77,6 +77,8 @@ def lint(base: str, paths: dict[Path, Path]) -> list[str]:
         rel, row = Path(hit["filename"]).relative_to(root).as_posix(), hit["location"]["row"]
         if hit["code"] == "invalid-syntax" or lines[rel] & set(range(row, hit["end_location"]["row"] + 1)):
             errors.append(f"{rel}:{row}:{hit['location']['column']}: {hit['code']} {hit['message']}")
+    if errors:
+        return errors
     for path in paths:
         result = subprocess.run(
             [sys.executable, "-m", "ruff", "format", "--diff", "--", str(path)], stdout=subprocess.PIPE
