@@ -283,6 +283,28 @@ exit "$status"
     assert floor["run"] in (serial, parallel)
 
 
+def test_dev_records_the_suite_count_and_the_count_floor_reads_it_only_through_the_base_grader():
+    jobs = _workflow()["jobs"]
+    split = {step.get("name"): step for step in jobs["split"]["steps"]}
+    on_dev = "github.event_name == 'push' && github.ref == 'refs/heads/dev' && env.UNIT_SOURCE == ''"
+    record, upload = split["Record the suite count for later bases"], split["Upload the suite count record"]
+    assert record["if"] == upload["if"] == on_dev
+    assert 'python -m tests.count_floor --record "$RUNNER_TEMP/count-record/record.json"' in record["run"]
+    assert 'git worktree add --detach "$RUNNER_TEMP/recorded" HEAD' in record["run"]
+    assert upload["with"]["name"] == "count-record-${{ matrix.python-version }}"
+    count = jobs["test-count"]["steps"]
+    names = [step.get("name") for step in count]
+    fetch = count[names.index("Fetch the base suite count recorded on dev")]
+    floor = count[names.index("Hold the base revision's test count")]
+    assert names.index("Check out the base revision") < names.index(fetch["name"]) < names.index(floor["name"])
+    assert fetch["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
+    assert fetch["env"]["RECORD"] == upload["with"]["name"]
+    assert 'cd "$RUNNER_TEMP/base" && python -c' in fetch["run"]
+    assert "from tests.count_floor import dev_record" in fetch["run"]
+    assert floor["env"]["TEST_COUNT_BASE_RECORD"] == "${{ runner.temp }}/base-record.json"
+    assert jobs["test-count"]["permissions"] == {"contents": "read"}
+
+
 def test_lint_and_test_count_grade_a_pull_request_that_merged_dev_from_the_current_merge_base(tmp_path):
     from tests.test_ci_hosted_lanes import _evaluate
 
