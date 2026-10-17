@@ -17,15 +17,17 @@ def qualified(node: ast.AST) -> str:
 
 
 def statements(node: ast.AST) -> Iterator[ast.AST]:
-    for child in ast.iter_child_nodes(node):
+    pending = [*ast.iter_child_nodes(node)][::-1]
+    while pending:
+        child = pending.pop()
         if not isinstance(child, (*FUNCTIONS, ast.ClassDef)):
             yield child
-            yield from statements(child)
+            pending.extend([*ast.iter_child_nodes(child)][::-1])
 
 
-def aliases_for(tree: ast.Module) -> dict[str, str]:
+def aliases_for(tree: ast.Module, nodes: list[ast.AST]) -> dict[str, str]:
     aliases = {}
-    for node in ast.walk(tree):
+    for node in nodes:
         if isinstance(node, ast.Import):
             aliases.update((name.asname or name.name, name.name) for name in node.names)
         elif isinstance(node, ast.ImportFrom):
@@ -65,10 +67,10 @@ def bindings_for(function: ast.AST) -> dict:
 
 
 class Timing:
-    def __init__(self, tree: ast.Module, helpers: dict) -> None:
-        self.functions = {node.name: node for node in ast.walk(tree) if isinstance(node, FUNCTIONS)}
+    def __init__(self, functions: dict, helpers: dict, aliases: dict) -> None:
+        self.functions = dict(functions)
         self.functions.update((name, node) for name, (node, _) in helpers.items())
-        self.aliases = aliases_for(tree)
+        self.aliases = aliases
         self.helper_aliases = {node: aliases for node, aliases in helpers.values()}
         self.bindings = {}
 
@@ -193,27 +195,36 @@ def marked(nodes: list[ast.AST]) -> bool:
     )
 
 
-def imported_helpers(tree: ast.Module, root: Path, seen: frozenset = frozenset()) -> dict:
+def parsed(path: Path, modules: dict) -> tuple:
+    if path not in modules:
+        tree = ast.parse(path.read_text(), filename=str(path))
+        nodes = list(ast.walk(tree))
+        imports = [
+            node for node in nodes if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("tests.")
+        ]
+        functions = {item.name: item for item in tree.body if isinstance(item, FUNCTIONS)}
+        every = {node.name: node for node in nodes if isinstance(node, FUNCTIONS)}
+        modules[path] = tree, imports, functions, aliases_for(tree, nodes), every
+    return modules[path]
+
+
+def imported_helpers(imports: list, root: Path, modules: dict, seen: frozenset = frozenset()) -> dict:
     helpers = {}
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.ImportFrom) or not (node.module or "").startswith("tests."):
-            continue
+    for node in imports:
         path = root / (node.module.replace(".", "/") + ".py")
         if path in seen or not path.is_file():
             continue
-        source = ast.parse(path.read_text(), filename=str(path))
-        helpers.update(imported_helpers(source, root, seen | {path}))
-        functions = {item.name: item for item in source.body if isinstance(item, FUNCTIONS)}
+        _, nested, functions, aliases, _ = parsed(path, modules)
+        helpers.update(imported_helpers(nested, root, modules, seen | {path}))
         helpers.update(
-            (name.asname or name.name, (functions[name.name], aliases_for(source)))
-            for name in node.names
-            if name.name in functions
+            (name.asname or name.name, (functions[name.name], aliases)) for name in node.names if name.name in functions
         )
     return helpers
 
 
-def discover(tree: ast.Module, root: Path) -> list[tuple[str, int, bool]]:
-    timing = Timing(tree, imported_helpers(tree, root))
+def discover(path: Path, root: Path, modules: dict) -> list[tuple[str, int, bool]]:
+    tree, imports, _, aliases, every = parsed(path, modules)
+    timing = Timing(every, imported_helpers(imports, root, modules), aliases)
 
     def walk(scope, prefix="", inherited=False):
         assignments = [node for node in scope.body if isinstance(node, ast.Assign)]
@@ -240,16 +251,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", type=Path, default=Path("."))
     args = parser.parse_args(argv)
     files = sorted((args.root / "tests").rglob("*.py"))
-    problems, count = [], 0
+    problems, count, modules = [], 0, {}
     if not files:
         problems.append("No Python test files found")
     for path in files:
         try:
-            tree = ast.parse(path.read_text(), filename=str(path))
+            parsed(path, modules)
         except (SyntaxError, UnicodeError) as error:
             problems.append(f"{path.relative_to(args.root)}: cannot parse: {error}")
             continue
-        for name, line, has_marker in discover(tree, args.root):
+        for name, line, has_marker in discover(path, args.root, modules):
             count += 1
             if not has_marker:
                 problems.append(f"{path.relative_to(args.root)}:{line}: {name} requires pytest.mark.wall_clock")

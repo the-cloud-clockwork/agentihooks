@@ -414,3 +414,30 @@ def test_keeps_clock_and_numeric_arguments_distinct_inside_one_helper(tmp_path):
         "def test_stamp():\n    assert stamp(time.monotonic(), 0) > 0\n"
     )
     assert main(["--root", str(tmp_path)]) == 0
+
+
+def test_parses_each_test_file_once_when_many_files_share_a_helper(tmp_path, monkeypatch, capsys):
+    import ast
+
+    from scripts.ci_wall_clock import main
+
+    directory = tmp_path / "tests"
+    directory.mkdir()
+    (directory / "measurement.py").write_text(
+        "import time\ndef measured():\n    start = time.monotonic()\n    return time.monotonic() - start\n"
+    )
+    for index in range(3):
+        (directory / f"test_budget_{index}.py").write_text(
+            "from tests.measurement import measured\ndef test_budget():\n    assert measured() < 1\n"
+        )
+    parsed = []
+    original = ast.parse
+
+    def counted(*args, **kwargs):
+        parsed.append(kwargs["filename"])
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(ast, "parse", counted)
+    assert main(["--root", str(tmp_path)]) == 1
+    assert sorted(parsed) == sorted(str(path) for path in directory.glob("*.py"))
+    assert "Wall clock markers: 4 files, 3 elapsed bounds, 3 problems" in capsys.readouterr().out
