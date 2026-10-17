@@ -970,7 +970,9 @@ def build_parser():
         "--repositories", help="comma separated absolute local repository paths; defaults to the swarm repository"
     )
     task.add_argument("--rank", help="queue rank: urgent, high, normal (default) or low; next means urgent")
-    task.add_argument("--plan-slice", default="", help="task slice anchor; computes its plan lines")
+    task.add_argument(
+        "--plan-slice", default="", help="task slice anchor; computes its plan lines; none uses the task description"
+    )
     task.add_argument(
         "--follow-up", action="store_true", help="a follow up task: no slice in a sliced phase, judged by its text"
     )

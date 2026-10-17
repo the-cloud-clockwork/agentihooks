@@ -89,8 +89,16 @@ class Relay(unittest.TestCase):
         state, _ = core.sync(SLUG, ops=[relay(2, self.question)])
         self.assertNotIn(self.question, [p["item"] for p in state["priorities"]])
 
+    def test_short_recorded_quotes_cannot_answer_a_question(self):
+        for n, quote in enumerate(("queue", "the queue"), start=40):
+            with self.subTest(quote=quote):
+                state, rejected = core.sync(SLUG, ops=[relay(n, self.question, quote=quote)])
+                self.assertEqual(rejected, [f"rl-{n}"])
+                self.assertEqual(state["questions"][0]["answers"], [])
+                self.assertIn(self.question, [p["item"] for p in state["priorities"]])
+
     def test_a_relay_on_another_item_is_an_operator_comment(self):
-        state, rejected = core.sync(SLUG, ops=[relay(3, self.phase, text="Approved, merge it.", quote="approve")])
+        state, rejected = core.sync(SLUG, ops=[relay(3, self.phase, text="Approved, merge it.", quote="use the queue")])
         self.assertEqual(rejected, [])
         comment = state["phases"][0]["comments"][-1]
         self.assertEqual(
@@ -146,7 +154,7 @@ class Relay(unittest.TestCase):
     def test_verified_is_empty_without_recorded_words(self):
         self.assertEqual(ledger_relay.verified("nobody", "use the queue"), "")
         self.assertEqual(ledger_relay.verified("nobody", "xx"), "")
-        self.assertEqual(ledger_relay.verified("master@a1-1", "the  QUEUE"), "the queue")
+        self.assertEqual(ledger_relay.verified("master@a1-1", "use the  QUEUE"), "Use the queue")
 
 
 def _cli(monkeypatch, item, quote, by="master@a1-1"):
@@ -250,8 +258,8 @@ def test_a_relay_onto_a_note_is_his_comment_carrying_only_the_quoted_words():
 
 def test_a_quote_the_span_search_misses_is_refused_not_stored_as_the_whole_prompt():
     operator_words.record("master@a1-1", "İstanbul is the city")
-    assert operator_words.matching("master@a1-1", "i̇stanbul", within=None)
-    assert ledger_relay.verified("master@a1-1", "i̇stanbul") == ""
+    assert operator_words.matching("master@a1-1", "i̇stanbul is the", within=None)
+    assert ledger_relay.verified("master@a1-1", "i̇stanbul is the") == ""
 
 
 def test_cli_relay_needs_item_text_and_quote():

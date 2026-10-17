@@ -326,7 +326,17 @@ def _parent(doc, task):
     }
 
 
+def _task_contract(doc, task):
+    phase = _phase(doc, task)
+    if task.get("split") and (
+        task.get("follow_up") or not (task.get("plan_url") or phase.get("plan_url") or phase.get("plan_ref"))
+    ):
+        return {**task, "split": [], "plan_lines": ""}
+    return task
+
+
 def state_of(doc, task, pr, proof_chars=PROOF_CHARS):
+    task = _task_contract(doc, task)
     return {
         **_parent(doc, task),
         "pull_request_title": pr["title"],
@@ -342,6 +352,7 @@ def state_of(doc, task, pr, proof_chars=PROOF_CHARS):
 
 
 def plan_state(doc, task, kept):
+    task = _task_contract(doc, task)
     return {
         "stage": "plan",
         **_parent(doc, task),

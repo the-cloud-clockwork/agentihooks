@@ -16,6 +16,7 @@ EVENTS = {WORKFLOW: "push", PROOFS: "workflow_dispatch"}
 UNREADABLE = (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError)
 
 BACKOFF = (2, 4)
+JOB_FAILURES = ("failure", "timed_out", "cancelled")
 
 
 class Unreachable(ValueError):
@@ -224,4 +225,13 @@ def run_resolution(target: str) -> str:
         return f"{outcome}, now green"
     if conclusion == "cancelled":
         return f"{outcome}, cancelled; dispatch the run again and wait on the new one"
-    return f"{outcome}, now red; the run concluded {conclusion}"
+    return f"{outcome}, now red; the run concluded {conclusion}{_failed_jobs(repo, number)}"
+
+
+def _failed_jobs(repo, number):
+    try:
+        jobs = _api(f"repos/{repo}/actions/runs/{number}/jobs?per_page=100")["jobs"]
+        failed = [f"{job['name']} {job['conclusion']}" for job in jobs if job.get("conclusion") in JOB_FAILURES]
+    except (Unreachable, KeyError, TypeError, AttributeError):
+        return "; its jobs could not be read"
+    return f"; failed jobs: {', '.join(failed)}" if failed else ""

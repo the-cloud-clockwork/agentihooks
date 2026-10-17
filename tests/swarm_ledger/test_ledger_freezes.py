@@ -242,6 +242,27 @@ def test_the_master_writes_a_freeze_only_with_the_operators_recorded_words():
     assert state["_meta"]["stamps"]["freezes"]["by"] == MASTER
 
 
+@pytest.mark.parametrize("quote", ["Freeze", "Freeze the"])
+@pytest.mark.parametrize("op", ["freeze_set", "freeze_clear"])
+def test_short_recorded_quotes_cannot_change_freezes(quote, op):
+    operator_words.record(MASTER, "Freeze the plan")
+    freeze("plans/a")
+    fields = {"verb": "freeze"} if op == "freeze_set" else {}
+    state, rejected = write(op, by=MASTER, target="plans/a", quote=quote, **fields)
+    assert rejected
+    assert targets(state) == [("freeze", "plans/a")]
+
+
+def test_three_recorded_words_allow_master_freezes():
+    operator_words.record(MASTER, "Freeze the plan")
+    state, rejected = freeze("plans/a", by=MASTER, quote="freeze the plan")
+    assert rejected == []
+    assert state["freezes"][0]["quote"] == "Freeze the plan"
+    state, rejected = write("freeze_clear", by=MASTER, target="plans/a", quote="freeze the plan")
+    assert rejected == []
+    assert state["freezes"] == []
+
+
 def test_an_author_who_never_joined_is_refused_without_error():
     operator_words.record(STRANGER, WORDS)
     state, rejected = freeze("plans/a", by=STRANGER, quote="freeze the swarm v2 plan")

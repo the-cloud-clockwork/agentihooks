@@ -360,6 +360,24 @@ def test_worker_smoke_runs_independent_proofs_in_parallel_and_compares_every_inv
     )
 
 
+def test_worker_smoke_shares_one_versioned_scanner_cache_across_independent_proofs():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/swarm-node-smoke.yml").read_text())
+    image = workflow["jobs"]["worker-image"]
+    cache = image["env"]["WORKER_SCANNER_CACHE"]
+    assert cache == "${{ github.workspace }}/.worker-scanner-cache"
+    restore = next(step for step in image["steps"] if step.get("uses") == "actions/cache/restore@v4")
+    save = next(step for step in image["steps"] if step.get("uses") == "actions/cache/save@v4")
+    assert restore["with"]["path"] == save["with"]["path"] == "${{ env.WORKER_SCANNER_CACHE }}"
+    assert restore["with"]["key"] == save["with"]["key"]
+    assert "matrix.proof" not in restore["with"]["key"]
+    assert "scan.sh" in restore["with"]["key"]
+    assert "versions.lock" in restore["with"]["key"]
+    assert save["if"] == "success() && matrix.proof == 'startup'"
+    assert restore["with"]["restore-keys"] == restore["with"]["key"].removesuffix("-${{ github.run_id }}")
+    proof = next(step for step in image["steps"] if "smoke.sh" in step.get("run", ""))
+    assert image["steps"].index(restore) < image["steps"].index(proof) < image["steps"].index(save)
+
+
 def test_worker_compare_downloads_every_proof_artifact_into_its_proof_folder():
     workflow = yaml.safe_load((ROOT / ".github/workflows/swarm-node-smoke.yml").read_text())
     proofs = workflow["jobs"]["worker-image"]["strategy"]["matrix"]["proof"]

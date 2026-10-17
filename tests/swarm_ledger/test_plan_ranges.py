@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm_ledger import ledger, ledger_artifacts, ledger_publish
+from scripts.swarm_ledger import ledger, ledger_artifacts, ledger_plans, ledger_publish
 from scripts.swarm_ledger import ledger_core as core
 from tests.swarm_ledger import test_plan_kind
 from tests.swarm_ledger.test_plan_kind import add, update
@@ -94,6 +94,45 @@ def test_publication_and_three_computed_ranges(published, monkeypatch):
     state, rejected = update(published, state="done", proof={"slice": "first,second,third"})
     assert rejected == []
     assert task(state, "plan")["state"] == "done"
+
+
+def test_explicit_no_plan_lines_normalizes_slice_metadata_only():
+    fields = {"plan_slice": "none", "slice": "slices/old", "description": "Independent work", "phase": "p1"}
+    assert ledger_plans.with_plan_slice({}, fields) == {
+        "description": "Independent work",
+        "phase": "p1",
+        "follow_up": True,
+    }
+    assert fields["plan_slice"] == "none"
+    assert fields["slice"] == "slices/old"
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_task_cli_accepts_explicit_no_plan_lines(published, monkeypatch, capsys, existing):
+    if existing:
+        add(published, "loose", plan_slice="first")
+        cli(monkeypatch, published, "task", "set", "loose", "plan_slice=none", "description=Independent work")
+    else:
+        cli(
+            monkeypatch,
+            published,
+            "task",
+            "add",
+            "loose",
+            "Independent work",
+            "--phase",
+            "p1",
+            "--plan-slice",
+            "none",
+            "--description",
+            "Independent work",
+        )
+    row = task(core.sync(published)[0], "loose")
+    assert row["description"] == "Independent work"
+    assert row["follow_up"] is True
+    assert not row.get("plan_slice")
+    assert not row.get("plan_lines")
+    assert not row.get("slice")
 
 
 def test_missing_anchor_refused(published):

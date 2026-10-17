@@ -623,7 +623,10 @@ def test_task_cli_forwards_each_set_option_and_names_the_plan_slice(monkeypatch)
     parser = ledger.build_parser()
     commands = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction)).choices
     option = next(a for a in commands["task"]._actions if a.dest == "plan_slice")
-    assert (option.default, option.help) == ("", "task slice anchor; computes its plan lines")
+    assert (option.default, option.help) == (
+        "",
+        "task slice anchor; computes its plan lines; none uses the task description",
+    )
 
 
 def test_ledger_page_shows_the_plan_link_on_a_task():
