@@ -159,7 +159,6 @@ function agentRow(a, remote) {
     const tip = agentCellTip(cell);
     cell.dataset.tip = tip;
     for (const el of cell.querySelectorAll("[data-tip], [title]")) {
-      el.removeAttribute("title");
       el.dataset.tip = tip;
     }
   }

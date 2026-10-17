@@ -419,8 +419,10 @@ def test_every_overflowing_agent_cell_ellipsizes_and_exposes_its_full_text(open_
         else:
             assert display == "inline", name
     execution = page.tab.locator("#swarm-agents tr").nth(1).locator("td").nth(8)
+    execution.scroll_into_view_if_needed()
+    page.tab.clock.run_for(100)
     execution.hover()
-    page.tab.clock.fast_forward(1000)
+    page.tab.clock.run_for(1100)
     assert page.tab.locator(".ledger-tip:popover-open").inner_text() == execution.get_attribute("data-tip")
 
 
