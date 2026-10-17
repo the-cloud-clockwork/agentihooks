@@ -35,7 +35,6 @@ def _collect(root: Path, paths: list[str]) -> subprocess.CompletedProcess:
 
 
 def collected_tests(root: Path) -> list[str]:
-    # One process: shared imports dominate collection, so splitting it only multiplies them under a CPU quota.
     result = _collect(root, ["tests/"])
     if result.returncode not in (0, 5):
         raise RuntimeError(result.stdout + result.stderr)
