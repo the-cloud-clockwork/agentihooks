@@ -45,7 +45,9 @@ DOC = {
 def page(browser, request):
     freezes = getattr(request, "param", [])
     context = browser.new_context(viewport={"width": 1920, "height": 1080})
-    html = shell_html()
+    from scripts.swarm_ledger import ledger_server
+
+    html = shell_html().replace("__LEDGER_PAGE__", ledger_server.served_version())
     sent = {"ops": [], "changes": []}
 
     def answer(route):
@@ -58,8 +60,6 @@ def page(browser, request):
         return route.abort()
 
     context.route("**/*", answer)
-    from scripts.swarm_ledger import ledger_server
-
     serve_modules(context, ledger_server.ledger_view(ledger_state({**DOC, "freezes": freezes})), SWARM)
     tab = context.new_page()
     tab.set_default_timeout(3000)
