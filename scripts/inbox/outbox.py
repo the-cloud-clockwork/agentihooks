@@ -196,8 +196,8 @@ def submit(store, entry: dict, apply) -> dict:
 
 
 def flush(store) -> Report:
-    """Replay every queued record in order; a failing destination or a resource still in revision conflict keeps that
-    record and its later ones for later."""
+    """Replay every queued record in order; a failing destination keeps that record and its later ones for later, and a
+    resource still in revision conflict keeps only the later records that write it."""
     report = Report()
     if not waiting():
         return report
@@ -221,10 +221,10 @@ def _replay(store, report: Report) -> None:
             _set_aside(line, "corrupt")
             report.corrupt += 1
             continue
-        if _waits(entry, down, held):
-            kept.append(line)
-            continue
         try:
+            if _keep_behind(entry, down, held):
+                kept.append(line)
+                continue
             apply(store, entry)
             report.applied.append(entry["item"])
         except DuplicateItem:
@@ -256,7 +256,7 @@ def _replay(store, report: Report) -> None:
         _clear()
 
 
-def _waits(entry: dict, down: set, held: set) -> bool:
+def _keep_behind(entry: dict, down: set, held: set) -> bool:
     if lane(entry) in down:
         return True
     shared = targets(entry)

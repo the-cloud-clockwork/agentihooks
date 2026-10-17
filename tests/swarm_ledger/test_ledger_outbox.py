@@ -527,7 +527,7 @@ def test_an_unpinned_record_still_conflicting_lets_inbox_records_and_other_items
     assert outbox.targets(sent) == frozenset()
 
 
-def failing(make):
+def always_raises(make):
     def replay(*args):
         raise make()
 
@@ -551,10 +551,26 @@ def test_a_record_kept_behind_a_conflict_holds_every_resource_it_writes(server, 
     assert sent == ["m-1"]
 
 
+def test_a_ledger_record_whose_resource_cannot_be_read_is_set_aside_and_the_records_behind_it_replay(
+    server, monkeypatch
+):
+    from scripts.inbox import cli
+
+    sends = []
+    monkeypatch.setitem(cli.APPLY, "send", lambda store, by, entry: sends.append(entry["item"]))
+    queue_ops({"op": "add", "id": "c-bad", "text": "No thread", "by": ENG})
+    sent = outbox.record("send", ENG, {"address": "bob", "text": "for bob", "fyi": False})
+    outbox.append(sent)
+    report = outbox.flush(object())
+    assert report.rejected == [("c-bad", "'thread'")]
+    assert sends == [sent["item"]]
+    assert not outbox.path().exists()
+
+
 def test_a_revision_conflict_names_the_resource_the_server_reports(monkeypatch):
     entry = outbox.ledger_record(SLUG, [chat_op("m-1", "Unpinned")], ENG, False)
     for where, message in ((None, "the ledger server answered 409 revision conflict"), ("chat", "on chat")):
-        monkeypatch.setattr(ledger, "replay", failing(lambda where=where: revision_conflict(where)))
+        monkeypatch.setattr(ledger, "replay", always_raises(lambda where=where: revision_conflict(where)))
         with pytest.raises(outbox.LedgerBusy) as busy:
             outbox.apply_ledger(None, ENG, entry)
         assert str(busy.value).endswith(message)
@@ -562,7 +578,9 @@ def test_a_revision_conflict_names_the_resource_the_server_reports(monkeypatch):
 
 
 def test_a_server_wide_busy_answer_holds_every_later_ledger_record(server, monkeypatch):
-    monkeypatch.setattr(ledger, "replay", failing(lambda: urllib.error.HTTPError("u", 503, "", {}, io.BytesIO(b""))))
+    monkeypatch.setattr(
+        ledger, "replay", always_raises(lambda: urllib.error.HTTPError("u", 503, "", {}, io.BytesIO(b"")))
+    )
     queue_ops(
         chat_op("m-1", "First"), {"op": "add", "thread": "phases/a/comments", "id": "c-2", "text": "Else", "by": ENG}
     )
