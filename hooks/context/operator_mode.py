@@ -1,5 +1,7 @@
 """Whether the operator is present in a session: a bound session starts off, typed operator on turns it on.
 
+The question tool and permission prompts stay off in every session, bound or not, until typed operator on.
+
 On lasts until the operator types operator off.
 """
 
@@ -131,7 +133,6 @@ def question_block(tool_name, session_id, environ=None):
 
 
 def _heard(session_id):
-    """Only the operator's typed operator on opens the question tool and permission prompts, in every session."""
     return bool(session_id) and bool(_load(session_id).get("on"))
 
 

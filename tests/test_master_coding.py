@@ -278,9 +278,9 @@ PROMPT_REFUSAL = (
 )
 
 
-@pytest.mark.parametrize("seat", ["master", "t12"])
-def test_the_question_and_plan_prompts_reach_the_operator_only_after_operator_on(master, monkeypatch, capsys, seat):
-    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", seat)
+@pytest.mark.parametrize("task", ["master", "t12"])
+def test_the_question_and_plan_prompts_reach_the_operator_only_after_operator_on(master, monkeypatch, capsys, task):
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", task)
     for tool in ("AskUserQuestion", "ExitPlanMode"):
         assert _permission(capsys, tool, SID) == {"behavior": "deny", "message": PROMPT_REFUSAL.format(tool=tool)}
     operator_mode.observe(SID, "rebase it", True, now=100)
