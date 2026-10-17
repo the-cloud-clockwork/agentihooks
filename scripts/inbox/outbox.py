@@ -25,6 +25,7 @@ ATTEMPTS_ENV = "AGENTIHOOKS_INBOX_OUTBOX_MAX_ATTEMPTS"
 DEFAULT_ATTEMPTS = 3
 LOCK = "inbox-outbox.lock"
 OPS = ("send", "reply", "close", "post", "say", "ledger")
+APPEND_ONLY = ("add", "add_item", "relay", "answer")
 MAX_ENV = "AGENTIHOOKS_INBOX_OUTBOX_MAX_BYTES"
 WARN_ENV = "AGENTIHOOKS_INBOX_OUTBOX_WARN_BYTES"
 DEFAULT_MAX_BYTES = 1_048_576
@@ -46,6 +47,12 @@ class LedgerDown(Exception):
 
 
 class LedgerBusy(LedgerDown):
+    def __init__(self, message: str, targets: frozenset = frozenset()) -> None:
+        super().__init__(message)
+        self.targets = targets
+
+
+class RevisionConflict(Exception):
     pass
 
 
@@ -205,7 +212,7 @@ def _replay(store, report: Report) -> None:
 
     from scripts.inbox.cli import apply
 
-    kept, down = [], {"redis"} if store is None else set()
+    kept, down, held = [], {"redis"} if store is None else set(), set()
     tracked, cap = _attempts(), max_attempts()
     for line in path().read_text().splitlines(keepends=True):
         entry = parse(line)
@@ -213,7 +220,7 @@ def _replay(store, report: Report) -> None:
             _set_aside(line, "corrupt")
             report.corrupt += 1
             continue
-        if lane(entry) in down:
+        if lane(entry) in down or held and held & targets(entry):
             kept.append(line)
             continue
         try:
@@ -223,7 +230,10 @@ def _replay(store, report: Report) -> None:
             report.already.append(entry["item"])
         except LedgerBusy as exc:
             if not stale(entry):
-                down.add(lane(entry))
+                if exc.targets:
+                    held.update(exc.targets)
+                else:
+                    down.add(lane(entry))
                 kept.append(line)
                 continue
             reason = f"{exc} for over {busy_age()} seconds ({BUSY_AGE_ENV})"
@@ -366,21 +376,49 @@ def ledger_record(slug: str, ops: list, agent: str, service: bool) -> dict:
 
 
 def apply_ledger(store, by: str, entry: dict) -> dict:
+    ops = entry["args"]["ops"]
+    pinned = any(op.get("expected_revision") for op in ops)
+    try:
+        state = _send_ledger(entry["args"], ops)
+    except RevisionConflict as exc:
+        if not pinned:
+            raise LedgerBusy(str(exc), targets(entry)) from None
+        if not all(op["op"] in APPEND_ONLY for op in ops):
+            raise InboxError(f"{exc} since this write was queued, so its expected revision can never apply") from None
+        fresh = [{key: value for key, value in op.items() if key != "expected_revision"} for op in ops]
+        try:
+            state = _send_ledger(entry["args"], fresh)
+        except RevisionConflict as again:
+            raise LedgerBusy(str(again), targets(entry)) from None
+    if state.get("rejected"):
+        raise InboxError(f"the ledger server rejected {', '.join(state['rejected'])}")
+    return state
+
+
+def _send_ledger(args: dict, ops: list) -> dict:
     import urllib.error
 
     from scripts.swarm_ledger import ledger
 
-    args = entry["args"]
     try:
-        state = ledger.replay(args["slug"], args["ops"], args["agent"], args["service"])
+        return ledger.replay(args["slug"], ops, args["agent"], args["service"])
     except urllib.error.HTTPError as exc:
         from scripts.swarm_ledger.api.client import failure
 
-        if exc.code >= 500 or exc.code == 429 or failure(exc)[1].get("code") == "revision_conflict":
+        error = failure(exc)[1]
+        if error.get("code") == "revision_conflict":
+            where = (error.get("details") or {}).get("path")
+            raise RevisionConflict(
+                f"the ledger server answered {exc.code} revision conflict" + (f" on {where}" if where else "")
+            ) from None
+        if exc.code >= 500 or exc.code == 429:
             raise LedgerBusy(f"the ledger server answered {exc.code}") from None
         raise InboxError(f"the ledger server refused it: {exc.code}") from None
     except OSError as exc:
         raise LedgerDown(str(exc)) from None
-    if state.get("rejected"):
-        raise InboxError(f"the ledger server rejected {', '.join(state['rejected'])}")
-    return state
+
+
+def targets(entry: dict) -> frozenset:
+    from scripts.swarm_ledger.api import schemas
+
+    return frozenset(schemas.target(op) for op in entry["args"]["ops"])
