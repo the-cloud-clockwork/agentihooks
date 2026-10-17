@@ -6,12 +6,13 @@ through its inbox, which the wake ladder delivers. A bare minutes wait, checked 
 
 import json
 import re
+import subprocess
 from collections.abc import Callable
 
 from scripts.gates import intent
 from scripts.gates.verdicts import Verdicts
 from scripts.inbox.store import CLOSED, InboxError
-from scripts.swarm import idle, mutation_wait
+from scripts.swarm import idle, merge_queue, mutation_wait
 from scripts.swarm.store import SwarmError
 
 KINDS = ("checks", "merge", "reply", "task", "mutation", "intent")
@@ -40,7 +41,7 @@ def on(kind, target, task=""):
     return {"kind": kind, "target": target, **({"task": task} if kind == "intent" else {})}
 
 
-def checks_resolution(held, github):
+def checks_resolution(held, github, reread=None):
     target = held["target"]
     pull = github(target)
     if pull is None:
@@ -54,7 +55,7 @@ def checks_resolution(held, github):
         return ""
     if not pull.resolved or (pull.unpassed_gate and not pull.failed):
         return ""
-    current = github(target)
+    current = (reread or github)(target)
     if current is None or not current.head:
         return ""
     if current.head != pull.head:
@@ -62,10 +63,20 @@ def checks_resolution(held, github):
         return ""
     if not current.resolved or (current.unpassed_gate and not current.failed):
         return ""
+    if not current.red and not required_green(target, current.head):
+        return ""
     outcome = f"checks on {target}, now {'red' if current.red else 'green'}"
     if current.red and current.failed:
         outcome += f"; failed: {', '.join(current.failed)}"
     return f"{outcome}; {current.unpassed_gate} never passed" if current.unpassed_gate else outcome
+
+
+def required_green(target, head):
+    try:
+        pull = merge_queue.required_view(target, subprocess.run)
+    except (SwarmError, KeyError, TypeError):
+        return False
+    return pull is not None and pull.head == head and pull.resolved and not pull.red
 
 
 def _save_wait(redis, slug, name, previous, held, outcome, now_ms):
@@ -165,7 +176,7 @@ def resolution(held, rows, inbox, github, reread, fresh, verdicts=None):
     if kind == "checks" and mutation_wait.RUN_URL.fullmatch(target):
         return mutation_wait.run_resolution(target)
     if kind == "checks":
-        return checks_resolution(held, github)
+        return checks_resolution(held, github, reread)
     if kind == "merge":
         return merge_resolution(held, github, reread, fresh)
     if kind == "task":

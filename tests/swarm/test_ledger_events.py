@@ -804,7 +804,7 @@ def test_a_head_with_only_skipped_checks_keeps_waiting(suites, gated):
     assert pull.resolved is (gated and suites != [QUEUED_TESTS])
     assert pull.red is (gated and suites != [QUEUED_TESTS])
     raw["statusCheckRollup"] = SKIPPED_ONLY + [{"name": GATE, "conclusion": "SUCCESS"}]
-    assert ledger_events.pull_request(raw).resolved is (gated or suites != [QUEUED_TESTS])
+    assert ledger_events.pull_request(raw).resolved is (suites != [QUEUED_TESTS])
 
 
 @pytest.mark.parametrize("gate", [None, "PENDING", "CANCELLED"])
@@ -823,13 +823,15 @@ def test_a_passed_gate_holds_beside_pending_workflows_and_required_checks():
     raw["checkSuites"] = [QUEUED_TESTS]
     assert ledger_events.pull_request(raw).resolved is False
     raw["checkSuites"] = [FINISHED_RUN]
-    raw["statusCheckRollup"] = rollup + [{"name": "sonar", "conclusion": None}]
-    assert ledger_events.pull_request(raw).resolved is False
+    raw["statusCheckRollup"] = rollup + [{"name": "sonar", "conclusion": None, "isRequired": False}]
+    assert ledger_events.pull_request(raw).resolved is True
     for state in ("PENDING", "EXPECTED", ""):
-        raw["statusCheckRollup"] = rollup + [{"context": "sonar", "state": state}]
+        raw["statusCheckRollup"] = rollup + [{"context": "sonar", "state": state, "isRequired": False}]
+        assert ledger_events.pull_request(raw).resolved is True
+        raw["statusCheckRollup"] = rollup + [{"context": "sonar", "state": state, "isRequired": True}]
         assert ledger_events.pull_request(raw).resolved is False
-    raw["statusCheckRollup"] = rollup + [{"name": "sonar", "conclusion": "CANCELLED"}]
-    assert ledger_events.pull_request(raw).resolved is False
+    raw["statusCheckRollup"] = rollup + [{"name": "sonar", "conclusion": "CANCELLED", "isRequired": False}]
+    assert ledger_events.pull_request(raw).resolved is True
 
 
 @pytest.mark.parametrize("suites", [[FINISHED_RUN], [QUEUED_TESTS]])
