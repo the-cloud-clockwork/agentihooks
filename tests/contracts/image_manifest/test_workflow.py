@@ -461,3 +461,20 @@ def test_a_failed_proof_fails_the_step_by_name_while_every_other_proof_reports(t
     assert f"planted failure in {fail}" in done.stdout
     assert done.stdout.count("::group::") == 5
     assert f"failed proofs: {proof}" in done.stderr
+
+
+def test_the_candidate_build_reuses_layers_saved_only_after_the_proofs(workflow):
+    names = [step.get("name") for step in steps(workflow)]
+    restore = named(workflow, "Restore the candidate layers")
+    build = named(workflow, "Build the candidate")
+    save = named(workflow, "Save the qualified candidate layers")
+
+    assert restore["uses"] == "actions/cache/restore@v4"
+    assert restore["with"]["path"] == save["with"]["path"] == "${{ runner.temp }}/worker-layers"
+    assert save["uses"] == "actions/cache/save@v4"
+    assert save["with"]["key"] == "${{ steps.layers.outputs.cache-primary-key }}"
+    assert '${LAYERS_FROM:+--cache-from "$LAYERS_FROM"}' in build["run"]
+    assert '${LAYERS_TO:+--cache-to "$LAYERS_TO"}' in build["run"]
+    assert "mode=max" in build["env"]["LAYERS_TO"]
+    assert names.index(restore["name"]) < names.index(build["name"])
+    assert names.index("Require the independent requalification to match") < names.index(save["name"])
