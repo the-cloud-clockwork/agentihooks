@@ -1045,3 +1045,16 @@ def test_a_wait_on_its_own_pull_request_or_by_another_agent_does_not_hold_a_stal
     _wait(swarm, on, name)
     swarm.tick(START + 15 * MINUTE)
     assert _reopened(swarm)
+
+
+@pytest.mark.parametrize(("pull", "limit"), [(GREEN, 10), (RED, 15)])
+def test_a_wait_the_tick_ended_gives_its_owner_the_full_limit_from_the_wake(pull, limit):
+    swarm = Swarm(pull)
+    _wait(swarm, {"kind": "checks", "target": URL})
+    assert swarm.tick(START) == []
+    woke = START + 2 * limit * MINUTE
+    idle.end_wait(swarm.store.redis, SLUG, OWNER, woke)
+    assert swarm.tick(woke) == [] and swarm.tick(woke + (limit - 1) * MINUTE) == []
+    assert not _reopened(swarm) and swarm.retired == []
+    swarm.tick(woke + limit * MINUTE)
+    assert _reopened(swarm)
