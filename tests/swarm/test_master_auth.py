@@ -141,3 +141,113 @@ def test_finished_fallback_master_raises_no_finding_and_unseated_master_uses_its
     assert [f.id for f in found] == ["master-fallback-auth/master-agent"]
     agent["state"] = "finished"
     assert not [f for f in findings({}, [agent], {}, Limits()) if f.kind == "master-fallback-auth"]
+
+
+def _master_spawn(tmp_path, login, task):
+    from scripts.routing import native_login
+    from scripts.swarm.capacity import Account
+    from scripts.swarm.runtime import HerdrRuntime
+    from tests.swarm.profile_fixture import validated
+
+    def run(argv, **kwargs):
+        if argv[1:] == list(native_login.COMMAND):
+            return SimpleNamespace(returncode=0 if login else 1, stdout=native_login.STATUS if login else "", stderr="")
+        out = "status=started\nroute_status=routed\naccount=token\n"
+        return SimpleNamespace(returncode=0, stdout=validated(argv, out), stderr="")
+
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "requested"))
+    runtime._quota_accounts = [Account("claude", "token", "OPEN", 0, 90, 90, 6)]
+    config = SimpleNamespace(
+        slug="proof",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        lanes={"master": {"agent": "claude"}},
+        autonomy="delegate",
+    )
+    return runtime.spawn(config, "master", "agent", task)
+
+
+def test_fallback_launch_raises_the_finding_and_a_valid_login_at_handoff_clears_it(tmp_path):
+    import fakeredis
+
+    from scripts.swarm.health.findings import Limits, findings
+    from scripts.swarm.store import AgentRecord, RedisStore
+    from scripts.swarm.tick import placed_record
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+
+    def stored(placed):
+        store.put_agent("proof", placed_record(AgentRecord("agent", "master", "master", seat="master@proof"), placed))
+        return [f.id for f in findings({}, [store.agents("proof")[0].__dict__], {}, Limits())]
+
+    fallback = _master_spawn(tmp_path, False, {"id": "master", "title": "proof"})
+    assert (fallback.route_kind, fallback.desired_route_kind) == ("subscription", "interactive")
+    assert "master-fallback-auth/master@proof" in stored(fallback)
+    handoff = {
+        "id": "master",
+        "title": "proof",
+        "handoff": "Continue the master task.",
+        "handoff_envelope": {
+            "launch": {"profile": "master", "harness": "claude", "account": "token", "model": "opus", "effort": "high"}
+        },
+    }
+    moved = _master_spawn(tmp_path, True, handoff)
+    assert (moved.route_kind, moved.desired_route_kind) == ("interactive", "interactive")
+    assert "master-fallback-auth/master@proof" not in stored(moved)
+
+
+def test_desired_route_survives_storage_outside_the_strict_projection():
+    import json
+    from dataclasses import replace
+
+    import fakeredis
+
+    from scripts.swarm.store import AgentRecord, RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    record = AgentRecord("agent", "master", "master", seat="master@proof", desired_route_kind="interactive")
+    store.put_agent("proof", record)
+    assert "desired_route_kind" not in json.loads(store.redis.hget(store.key("proof", "agents"), "agent"))
+    assert store.agents("proof")[0].desired_route_kind == "interactive"
+    store.put_agent("proof", replace(record, idle_ticks=2))
+    assert store.agents("proof")[0].desired_route_kind == "interactive"
+    store.put_agent("proof", replace(record, desired_route_kind=""))
+    assert store.agents("proof")[0].desired_route_kind == ""
+    store.put_agent("proof", record)
+    store.drop_agent("proof", "agent")
+    store.put_agent("proof", replace(record, desired_route_kind=""))
+    assert store.agents("proof")[0].desired_route_kind == ""
+
+
+@pytest.mark.parametrize(
+    "lane,harness,route,desired",
+    [
+        ("master", "claude", None, "interactive"),
+        ("master", "claude", "subscription", ""),
+        ("master", "codex", None, ""),
+        ("eng", "claude", None, ""),
+    ],
+)
+def test_only_a_claude_master_without_an_ordered_route_desires_the_login(tmp_path, lane, harness, route, desired):
+    from scripts.routing import native_login
+    from scripts.swarm.runtime import HerdrRuntime
+    from tests.swarm.profile_fixture import validated
+
+    def run(argv, **kwargs):
+        if argv[1:] == list(native_login.COMMAND):
+            return SimpleNamespace(returncode=1, stdout="", stderr="")
+        out = "status=started\nroute_status=routed\naccount=token\n"
+        return SimpleNamespace(returncode=0, stdout=validated(argv, out), stderr="")
+
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: (harness, "requested"))
+    config = SimpleNamespace(
+        slug="proof",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        lanes={lane: {"agent": harness}},
+        autonomy="delegate",
+    )
+    task = {"id": lane, "title": "proof", **({"route_kind": route} if route else {})}
+    assert runtime.spawn(config, lane, "agent", task).desired_route_kind == desired

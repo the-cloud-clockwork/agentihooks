@@ -497,6 +497,14 @@ def test_execution_records_saved_before_hive_ownership_load_with_an_empty_hive(s
     assert store.agents("fixture")[0].hive == ""
 
 
+def test_desired_route_survives_execution_updates_without_changing_the_legacy_projection(store, agent):
+    current = store.start_execution("fixture", replace(agent, desired_route_kind="interactive"))
+    assert store.agents("fixture")[0].desired_route_kind == "interactive"
+    assert "desired_route_kind" not in json.loads(store.redis.hget(store.key("fixture", "agents"), current.name))
+    store.put_agent("fixture", replace(current, idle_ticks=2))
+    assert store.agents("fixture")[0].desired_route_kind == "interactive"
+
+
 @pytest.mark.parametrize(
     "changes",
     [
