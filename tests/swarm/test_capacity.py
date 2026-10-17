@@ -890,6 +890,16 @@ def test_master_reservation_spends_one_subscription_seat_only(harness):
     assert decision["accounts"] == [capacity.record(row) for row in observed]
 
 
+def test_master_reservation_preserves_api_capacity():
+    config = SwarmConfig("sw", "/repo", max_eng=10, max_ci=0, max_plan=0, lanes={"master": {"agent": "claude"}})
+    decision = capacity.calculate(config, [api(weight=100, cap=1), account("open")], [])
+    assert decision["placements"]["eng"] == [
+        {"index": 0, "harness": "claude", "account": "api"},
+        {"index": 1, "harness": "claude", "account": "open"},
+        {"index": 2, "harness": "claude", "account": "open"},
+    ]
+
+
 @pytest.mark.parametrize("state", ["starting", "working"])
 @pytest.mark.parametrize("harness", ["claude", "codex"])
 def test_an_occupied_master_does_not_reserve_another_claude_seat(state, harness):
