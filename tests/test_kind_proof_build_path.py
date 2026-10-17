@@ -35,13 +35,20 @@ def test_kind_proof_cleanup_waits_for_the_terminal_image_job():
     assert 'load_lock="$(mktemp)"\ntrap finish EXIT\n' in SCRIPT
 
 
-def _layer_flags(tmp_path, env, present=(), then="keep_layers swarm"):
+@pytest.fixture
+def cache(tmp_path):
+    folder = tmp_path / "kind-layers"
+    folder.mkdir()
+    return folder
+
+
+def _layer_flags(cache, env, present=(), then="keep_layers swarm"):
     start = _at("layers() {")
     functions = SCRIPT[start : SCRIPT.index("\n}\n", SCRIPT.index("keep_layers() {")) + 3]
     for name in present:
-        (tmp_path / name).mkdir()
+        (cache / name).mkdir()
     result = subprocess.run(
-        ["bash", "-c", f"set -euo pipefail\n{functions}\nlayers swarm\n{then}\nls {tmp_path}"],
+        ["bash", "-c", f"set -euo pipefail\n{functions}\nlayers swarm\n{then}\nls {cache}"],
         env={"PATH": "/usr/bin:/bin", **env},
         capture_output=True,
         text=True,
@@ -68,29 +75,29 @@ def _layer_flags(tmp_path, env, present=(), then="keep_layers swarm"):
     ],
     ids=["hit-reads-only", "miss-reads-and-writes", "cold-writes-only"],
 )
-def test_fixture_builds_read_the_restored_layers_and_write_only_on_a_miss(tmp_path, hit, present, flags):
-    env = {"KIND_LAYER_CACHE": str(tmp_path), "KIND_LAYER_CACHE_HIT": hit}
-    expected = [flag.format(cache=tmp_path) for flag in flags] + ["complete", *present]
-    assert _layer_flags(tmp_path, env, present) == expected
+def test_fixture_builds_read_the_restored_layers_and_write_only_on_a_miss(cache, hit, present, flags):
+    env = {"KIND_LAYER_CACHE": str(cache), "KIND_LAYER_CACHE_HIT": hit}
+    expected = [flag.format(cache=cache) for flag in flags] + ["complete", *present]
+    assert _layer_flags(cache, env, present) == expected
 
 
-def test_a_new_layer_export_replaces_the_restored_one(tmp_path):
-    (tmp_path / "swarm").mkdir()
-    (tmp_path / "swarm" / "stale").touch()
-    (tmp_path / "swarm.next").mkdir()
-    _layer_flags(tmp_path, {"KIND_LAYER_CACHE": str(tmp_path), "KIND_LAYER_CACHE_HIT": "false"})
-    assert sorted(path.name for path in tmp_path.iterdir()) == ["complete", "swarm"]
-    assert not (tmp_path / "swarm" / "stale").exists()
+def test_a_new_layer_export_replaces_the_restored_one(cache):
+    (cache / "swarm").mkdir()
+    (cache / "swarm" / "stale").touch()
+    (cache / "swarm.next").mkdir()
+    _layer_flags(cache, {"KIND_LAYER_CACHE": str(cache), "KIND_LAYER_CACHE_HIT": "false"})
+    assert sorted(path.name for path in cache.iterdir()) == ["complete", "swarm"]
+    assert not (cache / "swarm" / "stale").exists()
 
 
-def test_a_restored_completion_mark_is_cleared_until_the_builds_finish(tmp_path):
-    (tmp_path / "complete").touch()
-    env = {"KIND_LAYER_CACHE": str(tmp_path), "KIND_LAYER_CACHE_HIT": "false"}
-    assert "complete" not in _layer_flags(tmp_path, env, then="true")
+def test_a_restored_completion_mark_is_cleared_until_the_builds_finish(cache):
+    (cache / "complete").touch()
+    env = {"KIND_LAYER_CACHE": str(cache), "KIND_LAYER_CACHE_HIT": "false"}
+    assert "complete" not in _layer_flags(cache, env, then="true")
 
 
-def test_fixture_builds_without_a_layer_cache_pass_no_cache_flags(tmp_path):
-    assert _layer_flags(tmp_path, {}) == []
+def test_fixture_builds_without_a_layer_cache_pass_no_cache_flags(cache):
+    assert _layer_flags(cache, {}) == []
 
 
 def test_every_fixture_build_stage_takes_the_layer_flags():
