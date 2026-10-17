@@ -26,7 +26,9 @@ def doctor(monkeypatch):
 
 def test_doctor_relays_words_typed_in_the_watched_master_pane(doctor, monkeypatch, capsys):
     state = make_ledger()
-    core.sync("relay-2026-01-01", ops=[{"op": "join", "id": "doctor-join", "by": "master@b2-1", "role": "orchestrator"}])
+    core.sync(
+        "relay-2026-01-01", ops=[{"op": "join", "id": "doctor-join", "by": "master@b2-1", "role": "orchestrator"}]
+    )
     question = f"questions/{state['questions'][0]['id']}"
     master_coding.record_seat("watched-pane", "watched", "master@a1-1")
     assert operator_words.typed({"session_id": "watched-pane", "prompt": "Fix only swarm health"}, {})
