@@ -87,6 +87,21 @@ def terminal_disconnect(container, root):
         os.close(master)
 
 
+def heartbeats(container, root, accepted):
+    code = f"import json; from pathlib import Path; r=Path({root!r}); print(json.dumps({{p.name:json.loads(p.read_text())['tick'] for p in r.glob('heartbeat-*.json')}}))"
+    observed = None
+    for _ in range(100):
+        try:
+            observed = json.loads(docker("exec", container, "python", "-c", code))
+        except (subprocess.CalledProcessError, ValueError) as exc:
+            observed = getattr(exc, "output", None) or exc
+        else:
+            if accepted(observed):
+                return observed
+        time.sleep(0.1)
+    raise AssertionError(f"heartbeats not accepted after 100 reads: {observed}")
+
+
 def run_case(image, mode, output, kill=False, supervised=False, viewer=True):
     container = docker(
         "run",
@@ -130,24 +145,9 @@ def run_case(image, mode, output, kill=False, supervised=False, viewer=True):
                 if exc.returncode != 137:
                     raise
         else:
-            before = docker(
-                "exec",
-                container,
-                "python",
-                "-c",
-                f"import json; from pathlib import Path; r=Path({root!r}); print(json.dumps({{p.name:json.loads(p.read_text())['tick'] for p in r.glob('heartbeat-*.json')}}))",
-            )
+            initial = heartbeats(container, root, lambda observed: len(observed) == 5)
             terminal = terminal_disconnect(container, root) if viewer else None
-            time.sleep(0.2)
-            after = docker(
-                "exec",
-                container,
-                "python",
-                "-c",
-                f"import json; from pathlib import Path; r=Path({root!r}); print(json.dumps({{p.name:json.loads(p.read_text())['tick'] for p in r.glob('heartbeat-*.json')}}))",
-            )
-            initial, final = json.loads(before), json.loads(after)
-            assert len(initial) == 5 and all(final[k] > v for k, v in initial.items())
+            heartbeats(container, root, lambda observed: all(observed[k] > v for k, v in initial.items()))
             start = time.monotonic()
             docker("kill", "--signal", "TERM", container)
         code = int(docker("wait", container, timeout=SHUTDOWN_WAIT_SECONDS))

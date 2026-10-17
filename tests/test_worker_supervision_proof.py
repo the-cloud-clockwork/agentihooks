@@ -1,3 +1,4 @@
+import itertools
 import json
 import subprocess
 from pathlib import Path
@@ -19,8 +20,9 @@ def container(monkeypatch):
         wait_error=None,
         results=True,
         calls=[],
+        ticks=iter((1, 2)),
+        beats=5,
     )
-    ticks = iter((1, 2))
     clock = iter((False, True))
 
     def docker(*args, timeout=30):
@@ -30,8 +32,10 @@ def container(monkeypatch):
         if args[0] == "exec":
             if "supervisor_pid" in args[-1]:
                 return "1"
-            tick = next(ticks)
-            return json.dumps({f"heartbeat-{i}.json": tick for i in range(5)})
+            tick = next(observed.ticks)
+            if isinstance(tick, Exception):
+                raise tick
+            return json.dumps({f"heartbeat-{i}.json": tick for i in range(observed.beats)})
         if args[0] == "wait":
             if observed.wait_error:
                 raise observed.wait_error
@@ -39,7 +43,7 @@ def container(monkeypatch):
         if args[0] == "cp":
             destination = Path(args[2])
             if args[1].endswith("launch.json"):
-                destination.write_text(json.dumps({"quiesce_seconds": 2, "checkpoint_seconds": 0.8, "kill_seconds": 1}))
+                destination.write_text(json.dumps({"quiesce_seconds": 2, "checkpoint_seconds": 2, "kill_seconds": 1}))
             elif observed.results:
                 root = destination / "supervision" / "incarnation"
                 root.mkdir(parents=True)
@@ -67,7 +71,7 @@ def test_delayed_host_observation_accepts_the_container_exit_event(container, tm
     result = proof.run_case("image", mode, tmp_path, kill=kill, supervised=supervised, viewer=False)
 
     assert result["elapsed_shutdown_seconds"] == 20
-    assert result["supervision_budget_seconds"] == 6.8
+    assert result["supervision_budget_seconds"] == 8
     assert result["shutdown_wait_timeout_seconds"] == 12
     assert result["container_process_tree_gone"] is True
     assert (("wait", "container"), 12) in container.calls
@@ -81,6 +85,27 @@ def test_a_container_that_never_exits_still_fails_and_is_removed(container, tmp_
         proof.run_case("image", "complete", tmp_path, viewer=False)
 
     assert (("wait", "container"), 12) in container.calls
+    assert container.calls[-1][0] == ("rm", "--force", "container")
+
+
+@pytest.mark.parametrize("error", [subprocess.CalledProcessError(1, "docker"), ValueError("bad json")])
+def test_a_failed_heartbeat_read_is_retried(container, tmp_path, error):
+    container.ticks = iter((error, 1, 2))
+
+    result = proof.run_case("image", "complete", tmp_path, viewer=False)
+
+    assert result["exit_code"] == 0
+    assert container.calls[-1][0] == ("rm", "--force", "container")
+
+
+@pytest.mark.parametrize("beats", [5, 4])
+def test_heartbeats_never_accepted_fail_and_the_container_is_removed(container, tmp_path, beats):
+    container.ticks = itertools.repeat(1)
+    container.beats = beats
+
+    with pytest.raises(AssertionError, match="heartbeats not accepted"):
+        proof.run_case("image", "complete", tmp_path, viewer=False)
+
     assert container.calls[-1][0] == ("rm", "--force", "container")
 
 

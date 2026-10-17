@@ -55,6 +55,8 @@ def _complete(evidence: Path, run: dict) -> bool:
         f"unit ({version}, {shard})" for version, count in (("3.11", 6), ("3.12", 12)) for shard in range(1, count + 1)
     }
     passed = {job["name"] for job in jobs if job["conclusion"] == "success"}
+    if any(name.startswith("reused-tests-") for name in kept):
+        return False
     return artifact_names() <= kept and expected <= passed
 
 

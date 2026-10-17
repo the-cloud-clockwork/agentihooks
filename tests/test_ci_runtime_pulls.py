@@ -210,7 +210,7 @@ def dockerfile_bases():
 
 def test_kind_proof_pulls_every_dockerfile_base_through_the_bounded_pull_before_building():
     script = (ROOT / "deploy/helm/agentihooks-swarm/ci/kind-smoke.sh").read_text()
-    build = script.index('docker build -q -t "$image" .')
+    build = script.index('docker build -q -t "$image"')
     for base in dockerfile_bases():
         pull = f"bash scripts/packaging/pull-runtime-image.sh {base}"
         assert pull in script
