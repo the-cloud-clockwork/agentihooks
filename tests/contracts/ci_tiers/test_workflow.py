@@ -116,9 +116,24 @@ def test_the_retired_queue_baseline_leaves_the_workflow_and_the_gate_takes_the_p
     assert "queue-baseline" not in jobs
     assert not any("queue-baseline" in job.get("needs", []) for job in jobs.values())
     options = {"consolidated": True} if DURATION_JOB == "select" else {}
-    assert jobs["gate-required"]["steps"] in [
+    expected = [
         ci_reuse.gate_steps(queue_tier=True, promotion=True, **options, summary=summary) for summary in (False, True)
     ]
+    for steps in list(expected):
+        parallel = [dict(step) for step in steps]
+        parallel[0]["run"] = (
+            parallel[0]["run"]
+            .replace(
+                '["select", "test-count", "lint", "semgrep", "sonar"]',
+                '["collect", "select", "test-count", "lint", "semgrep", "sonar"]',
+            )
+            .replace(
+                'all(to_entries[]; .value.result == "success" or ((.key == "mutation"',
+                'all(to_entries[]; .value.result == "success" or (.key == "collect" and .value.result == "skipped" and $event != "pull_request") or ((.key == "mutation"',
+            )
+        )
+        expected.append(parallel)
+    assert jobs["gate-required"]["steps"] in expected
 
 
 def test_the_queue_keeps_completeness_but_skips_the_shard_time_budget():
