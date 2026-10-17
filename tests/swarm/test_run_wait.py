@@ -172,7 +172,7 @@ def test_a_malformed_jobs_answer_still_ends_a_red_run_wait(tick, actions, answer
     assert idle.wait(tick.store.redis, "sw", ME) is None
 
 
-def test_the_wait_timer_ends_a_run_wait_while_the_tick_snapshot_is_blocked(env, actions, monkeypatch):
+def test_the_wait_timer_ends_a_run_wait_while_the_tick_snapshot_is_blocked(env, actions, monkeypatch):  # noqa: F811
     from concurrent.futures import ThreadPoolExecutor
     from threading import Event
 
