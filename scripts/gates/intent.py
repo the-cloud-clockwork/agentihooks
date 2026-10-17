@@ -16,7 +16,7 @@ from typing import Callable
 
 from hooks.classifier import ClassifierError, code_rules, decide, definitions, runner
 from hooks.classifier.questions import MAX_QUESTIONS
-from scripts.gates import intent_history, log
+from scripts.gates import intent_history, lift, log
 from scripts.gates.base import Decision, Who
 from scripts.gates.identity import program_index, simple_commands
 from scripts.gates.verdicts import Verdicts
@@ -784,6 +784,8 @@ class Check:
             and previous.get("text") == text_key(pr["title"], pr["body"])
             and not self._named_moved(previous)
         ):
+            return _Judgment(pr, previous, None, None)
+        if previous and lift.task_lifted(self.slug, task["id"], NAME, self.home):
             return _Judgment(pr, previous, None, None)
         pr = self._with_named(task, pr)
         state = intent_history.prepare(state_of(doc, task, pr))

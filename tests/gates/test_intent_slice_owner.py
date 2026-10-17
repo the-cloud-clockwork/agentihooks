@@ -4,7 +4,11 @@ import subprocess
 import pytest
 
 from scripts.gates import intent, lift
+from scripts.gates.verdicts import Verdicts
 from tests.gates.test_intent import PR, chunk_classifier
+from tests.gates.test_intent import SLUG as COACHED
+from tests.gates.test_intent import TASK as COACHED_TASK
+from tests.gates.test_intent_coach import run_check
 
 pytestmark = pytest.mark.unit
 
@@ -166,3 +170,26 @@ def test_a_master_lift_holds_on_its_own_head_without_comparing(tmp_path, monkeyp
 
 def test_a_master_lift_ends_when_the_head_cannot_be_read(tmp_path, monkeypatch):
     assert lifted_on(tmp_path, monkeypatch, None, True) == (False, [])
+
+
+def lift_coached(tmp_path, monkeypatch, unchanged):
+    run_check(tmp_path, "first")
+    path = lift.task_lift_path(COACHED, COACHED_TASK, intent.NAME, tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"at": 0, "url": URL, "head": "first"}))
+    monkeypatch.setattr(intent, "pr_head", lambda url: "second")
+    monkeypatch.setattr(intent, "production_unchanged", lambda url, before, after: unchanged)
+    return run_check(tmp_path, "second"), Verdicts(COACHED, intent.NAME, tmp_path).read(COACHED_TASK)
+
+
+def test_the_tick_keeps_a_lifted_verdict_on_a_head_that_adds_only_tests(tmp_path, monkeypatch):
+    (ledger, mail), record = lift_coached(tmp_path, monkeypatch, True)
+    assert (ledger.updates, ledger.comments, mail.sent) == ([], [], [])
+    assert (record["head"], record["coach_rounds"]) == ("first", 0)
+
+
+def test_the_tick_judges_again_a_lifted_task_whose_new_head_changes_production(tmp_path, monkeypatch):
+    (ledger, mail), record = lift_coached(tmp_path, monkeypatch, False)
+    assert ledger.updates == [(COACHED, COACHED_TASK, {"state": "claimed"}, "swarm")]
+    assert "fix round 2 of 2" in mail.sent[0][2]
+    assert record["head"] == "second"
