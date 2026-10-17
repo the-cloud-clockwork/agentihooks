@@ -933,6 +933,22 @@ def test_workers_keep_claude_capacity_without_a_claude_master(master):
     assert decision["effective"] == {"eng": 3, "ci": 0, "plan": 0}
 
 
+def test_runtime_keeps_explicit_master_and_worker_harness_pins(tmp_path, monkeypatch):
+    observed = [account("open"), account("cx", harness="codex")]
+    runtime, config, _ = _runtime_probe(tmp_path, monkeypatch, observed)
+    runtime.quota_accounts = lambda *args, **kwargs: observed
+    config = replace(
+        config,
+        max_eng=4,
+        max_plan=0,
+        scaling="manual",
+        lanes={"master": {"agent": "codex"}, "eng": {"agent": "claude"}},
+    )
+    decision = runtime.quota_capacity(config, [], 123)
+    assert decision["effective"] == {"eng": 3, "ci": 0, "plan": 0}
+    assert decision["allocation"]["eng"] == {"claude": 3, "codex": 0}
+
+
 @pytest.mark.parametrize("observed", [[], [account(cap=0)], [account(sessions=3)], [account(cap=None)]])
 def test_a_missing_master_without_open_claude_capacity_keeps_codex_seats(observed):
     config = SwarmConfig("sw", "/repo", max_eng=4, max_ci=0, max_plan=0, lanes={"master": {"agent": "claude"}})

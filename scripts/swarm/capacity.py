@@ -447,7 +447,10 @@ def _worker_seats(config: SwarmConfig, observations: list[Account], agents: list
     master = config.lanes.get("master")
     if master is None or master.get("agent") == "codex":
         return seats
-    if any(agent.lane == "master" and agent.state != "finished" for agent in agents):
+    if any(
+        agent.lane == "master" and agent.state != "finished" and (agent.harness, agent.account) not in warned
+        for agent in agents
+    ):
         return seats
     reserved = pick(seats, lambda seat: seat.harness == "claude" and seat.kind == SUBSCRIPTION)
     return [replace(seat, cap=seat.cap - 1) if seat == reserved else seat for seat in seats]
