@@ -1188,6 +1188,8 @@ def test_quota_capacity_reads_this_environment_and_hands_demand_on(tmp_path, mon
     runtime.quota_capacity(config, [], 5.0, {"eng": 1})
     assert seen == {"environ": dict(os.environ), "now": 5.0, "refresh": True, "demand": {"eng": 1}}
     runtime.quota_capacity(config, [], 5.0, {"eng": 0})
+    assert seen["refresh"] is True
+    runtime.quota_capacity(config, [], 5.0, {"eng": 0}, refresh=False)
     assert seen["refresh"] is False
 
 

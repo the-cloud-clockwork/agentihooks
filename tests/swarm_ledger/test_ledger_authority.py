@@ -20,6 +20,7 @@ from scripts.swarm.store import SwarmError  # noqa: E402
 from scripts.swarm_ledger import ledger, ledger_server  # noqa: E402
 from scripts.swarm_ledger import ledger_authority as authority  # noqa: E402
 from scripts.swarm_ledger.repository import repository  # noqa: E402
+from tests.mutation_trace import traced  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
 
 server = ledger_server
@@ -74,11 +75,8 @@ def live():
             thread.join(timeout=2)
 
 
-MUTATION_TRACE_FACTOR = 7
-
-
 def send(live, method, path, body=b"", **headers):
-    timeout = 5 * (MUTATION_TRACE_FACTOR if os.environ.get("MUTANT_UNDER_TEST") else 1)
+    timeout = traced(5)
     conn = http.client.HTTPConnection("127.0.0.1", live["port"], timeout=timeout)
     try:
         conn.request(method, path, body, {"Host": live["host"], **headers})
