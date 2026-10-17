@@ -446,7 +446,7 @@ OFFENDERS = (
     "def long():\n" + "    print(1)\n" * 300 + "\n\n" + BRANCHY + "    return result\n\n\n"
 )
 OFFENDERS += "print(1)\n" * (3001 - OFFENDERS.count("\n"))
-FRESH = "\n\ndef fresh(a, b, c, d, e, f, g, h):\n    return a, b, c, d, e, f, g, h\n"
+FRESH = "\n\nclass Holder:\n    def fresh(self, a, b, c, d, e, f, g, h):\n        return a, b, c, d, e, f, g, h\n"
 
 
 def unchanged_edit(source):
@@ -460,31 +460,31 @@ def grown_branches(source):
 @pytest.mark.parametrize(
     "edit, target, reported",
     [
-        (unchanged_edit, "tests/test_chosen.py", None),
-        (unchanged_edit, "tests/test_moved.py", None),
+        (unchanged_edit, "tests/deep/test_chosen.py", None),
+        (unchanged_edit, "tests/deep/test_moved.py", None),
         (
             lambda source: source + "print(1)\n",
-            "tests/test_chosen.py",
-            "tests/test_chosen.py: file lines grew from 3001 to 3002",
+            "tests/deep/test_chosen.py",
+            "tests/deep/test_chosen.py: file lines grew from 3001 to 3002",
         ),
         (
             lambda source: source.replace("def long():\n", "def long():\n    print(1)\n"),
-            "tests/test_chosen.py",
-            "tests/test_chosen.py: long lines grew from 301 to 302",
+            "tests/deep/test_chosen.py",
+            "tests/deep/test_chosen.py: long lines grew from 301 to 302",
         ),
         (
             lambda source: source.replace(
                 "h):\n    return a, b, c, d, e, f, g, h\n", "h, i):\n    return a, b, c, d, e, f, g, h, i\n"
             ),
-            "tests/test_chosen.py",
-            "tests/test_chosen.py: wide PLR0913 grew from 8 to 9",
+            "tests/deep/test_chosen.py",
+            "tests/deep/test_chosen.py: wide PLR0913 grew from 8 to 9",
         ),
-        (grown_branches, "tests/test_chosen.py", "tests/test_chosen.py: branchy C901 grew from 14 to 15"),
-        (grown_branches, "tests/test_chosen.py", "tests/test_chosen.py: branchy PLR0912 grew from 13 to 14"),
+        (grown_branches, "tests/deep/test_chosen.py", "tests/deep/test_chosen.py: branchy C901 grew from 14 to 15"),
+        (grown_branches, "tests/deep/test_chosen.py", "tests/deep/test_chosen.py: branchy PLR0912 grew from 13 to 14"),
         (
             lambda source: source[: -len("print(1)\n")] + FRESH,
-            "tests/test_chosen.py",
-            "tests/test_chosen.py: fresh PLR0913 Too many arguments in function definition (8 > 7)",
+            "tests/deep/test_chosen.py",
+            "tests/deep/test_chosen.py: Holder.fresh PLR0913 Too many arguments in function definition (8 > 7)",
         ),
     ],
     ids=[
@@ -507,15 +507,16 @@ def test_fallback_grades_touched_offenders_against_the_merge_base(
     from scripts.swarm import publish_gate
 
     p = repositories
-    (p.bundle / "tests").mkdir()
-    (p.bundle / "tests" / "test_chosen.py").write_text(OFFENDERS)
-    git(p.bundle, "add", "tests/test_chosen.py")
+    (p.bundle / "tests" / "deep").mkdir(parents=True)
+    (p.bundle / "tests" / "deep" / "test_chosen.py").write_text(OFFENDERS)
+    git(p.bundle, "add", "tests/deep/test_chosen.py")
     git(p.bundle, "commit", "-qm", "Existing offenders")
     git(p.bundle, "push", "origin", "dev")
     p.task["repositories"] = [str(p.bundle)]
     root = Path(publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)["worktree"])
-    if target != "tests/test_chosen.py":
-        git(root, "mv", "tests/test_chosen.py", target)
+    git(root, "config", "diff.renames", "false")
+    if target != "tests/deep/test_chosen.py":
+        git(root, "mv", "tests/deep/test_chosen.py", target)
     (root / target).write_text(edit(OFFENDERS))
     git(root, "add", target)
     git(root, "commit", "-qm", "Touch offenders")
@@ -561,8 +562,10 @@ def test_fallback_grades_an_unparsable_base_as_new(repositories, monkeypatch, ba
 
     p = repositories
     source = "".join(f"value_{n} = {n}\n" for n in range(20))
+    wide = "def wide(a, b, c, d, e, f, g, h):\n    return a, b, c, d, e, f, g, h\n"
     (p.bundle / base_name).write_text(source + "not python at all\n")
-    git(p.bundle, "add", base_name)
+    (p.bundle / "later.py").write_text(wide)
+    git(p.bundle, "add", base_name, "later.py")
     git(p.bundle, "commit", "-qm", "Unparsable base")
     git(p.bundle, "push", "origin", "dev")
     p.task["repositories"] = [str(p.bundle)]
@@ -570,8 +573,9 @@ def test_fallback_grades_an_unparsable_base_as_new(repositories, monkeypatch, ba
     if base_name != "chosen.py":
         git(root, "mv", base_name, "chosen.py")
     (root / "chosen.py").write_text(source)
-    git(root, "add", "chosen.py")
+    (root / "later.py").write_text(wide + "\n\nvalue = 1\n")
+    git(root, "add", "chosen.py", "later.py")
     git(root, "commit", "-qm", "Valid source")
-    assert git(root, "diff", "--name-status", "-M", "HEAD~1", "HEAD").split()[0][0] == status
+    assert status in {line[0] for line in git(root, "diff", "--name-status", "-M", "HEAD~1", "HEAD").splitlines()}
     monkeypatch.chdir(root)
     assert publish_gate.main() == 0

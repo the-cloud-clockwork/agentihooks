@@ -17,11 +17,9 @@ def git(*args: str) -> str:
 
 
 def changed(base: str) -> dict[Path, Path]:
-    fields = iter(git("diff", "--name-status", "-z", "-M", "--diff-filter=ACMRT", base, "HEAD").split("\0"))
+    fields = iter(git("diff", "--name-status", "-z", "-M", "--diff-filter=ACMRT", base, "HEAD").split("\0")[:-1])
     found = {}
     for status in fields:
-        if not status:
-            continue
         old = next(fields)
         new = next(fields) if status[0] in "RC" else old
         if new.endswith(".py") and Path(new).is_file():
@@ -67,12 +65,12 @@ def complexity(
 ) -> dict[tuple[str, str], tuple[int, str]]:
     found = {}
     command = [sys.executable, "-m", "ruff", "check", "--isolated", "--exit-zero", "--output-format", "json"]
-    command += ["--select", ",".join(RULES), *LIMITS, "--", *(str(tree / path) for path in paths)]
-    for hit in json.loads(subprocess.run(command, capture_output=True, text=True, check=True).stdout):
+    command += ["--select", ",".join(RULES), *LIMITS, *(str(tree / path) for path in paths)]
+    for hit in json.loads(subprocess.run(command, capture_output=True).stdout):
         rel = Path(hit["filename"]).relative_to(tree).as_posix()
         value = _MEASURED.search(hit["message"])
         if hit["code"] in RULES and value:
-            name = defs[rel].get(hit["location"]["row"], (f"line {hit['location']['row']}",))[0]
+            name = defs[rel][hit["location"]["row"]][0]
             found[(rel, f"{name} {hit['code']}")] = (int(value[1]), f"{rel}: {name} {hit['code']} {hit['message']}")
     return found
 
