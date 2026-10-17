@@ -119,6 +119,11 @@ def check(content):
     errors += [f"source not found: {s}" for s in missing]
     if not content.get("phases"):
         errors.append("no phases")
+    errors += [
+        f"tasks[{n}].rank is not allowed in seed content; set the rank after creation"
+        for n, task in enumerate(content.get("tasks", []), 1)
+        if "rank" in task
+    ]
     return errors
 
 

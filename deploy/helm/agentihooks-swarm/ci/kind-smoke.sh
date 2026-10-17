@@ -803,26 +803,43 @@ if [[ $calm != "0" ]]; then
   printf 'the host pressure alert was already active before the simulated pressure\n' >&2
   exit 1
 fi
-kubectl exec "$ledger_pod" -- python -c "from scripts.swarm.store import connect; connect().update('$slug', memory_per_agent_mb=10**9); print('simulated host pressure: one agent now needs more memory than the node has')"
-alert=""
+kubectl exec "$ledger_pod" -- python -c "from scripts.swarm.incidents import PRESSURE_OFF_KEY; from scripts.swarm.store import connect; store = connect(); store.update('$slug', memory_per_agent_mb=10**9); store.redis.delete(store.key('$slug', PRESSURE_OFF_KEY)); print('simulated host pressure: one agent now needs more memory than the node has')"
+pressure=""
 for _ in $(seq 120); do
-  alert="$(kubectl exec "$ledger_pod" -- python -c "import json; from scripts.swarm.store import PREFIX, connect; root = f'{PREFIX}:host:$host:incident:pressure'; redis = connect().redis; print(json.dumps({'incident': redis.hgetall(root), 'mailed': {k: redis.hgetall(k) for k in redis.scan_iter(root + ':mail:*')}}, sort_keys=True))")" || alert=""
-  if [[ $alert == *'"active": "1"'* && $alert == *'"raised": "1"'* ]]; then
+  pressure="$(kubectl exec -i "$ledger_pod" -- env SLUG="$slug" HOST="$host" python - <<'EOF'
+import json
+import os
+
+from scripts.swarm import host_budget, incidents
+from scripts.swarm.store import PREFIX, connect
+
+store = connect()
+off = store.redis.get(store.key(os.environ["SLUG"], incidents.PRESSURE_OFF_KEY))
+if off != host_budget.PRESSURE_OFF:
+    raise SystemExit(0)
+root = f'{PREFIX}:host:{os.environ["HOST"]}:incident:pressure'
+incident = store.redis.hgetall(root)
+mailed = {key: store.redis.hgetall(key) for key in store.redis.scan_iter(root + ":mail:*")}
+assert incident.get("active") != "1", f"controller node pressure incident is active: {incident}"
+assert not mailed, f"controller node pressure incident was mailed: {mailed}"
+print(json.dumps({"off": off, "incident": incident, "mailed": mailed}, sort_keys=True))
+EOF
+)"
+  if [[ -n $pressure ]]; then
     break
   fi
-  alert=""
   sleep 1
 done
-if [[ -z $alert ]]; then
-  printf 'the controller never sent the host pressure alert\n' >&2
+if [[ -z $pressure ]]; then
+  printf 'the controller never recorded the deployed host pressure off reason\n' >&2
   exit 1
 fi
 after="$(kubectl get pods "${controller[@]}" -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}')"
 if [[ $after != "$before" ]]; then
-  printf 'the controller restarted while sending the host pressure alert (%s then %s)\n' "$before" "$after" >&2
+  printf 'the controller restarted while recording the host pressure off reason (%s then %s)\n' "$before" "$after" >&2
   exit 1
 fi
-printf 'controller sent the host pressure alert without a restart: %s\n' "$alert"
+printf 'controller recorded the host pressure off reason without an incident, mail or restart: %s\n' "$pressure"
 
 mounted="$(kubectl exec "deployment/$release-controller" -c controller -- sh -c \
   'ls /run/secrets/terminal-ca && stat -L -c "%a %u:%g" "$AGENTIHOOKS_TERMINAL_CA_KEY" && echo "$AGENTIHOOKS_TERMINAL_CA_KEY"')"

@@ -35,7 +35,7 @@ def dependents(workflow: dict, root: str = SHARD) -> set[str]:
 
 
 def decide(run: dict, failed: list[dict], workflow: dict) -> tuple[bool, str]:
-    if run.get("event") != "merge_group" or run.get("conclusion") != "failure":
+    if run.get("event") != "merge_group" or run.get("conclusion") not in ("failure", "cancelled"):
         return False, "not a failed merge group run"
     if run.get("run_attempt") != 1:
         return False, f"attempt {run.get('run_attempt')} already ran"
@@ -82,11 +82,10 @@ def requeue(pull: dict) -> tuple[bool, str]:
     if pull.get("state") != "OPEN" or pull.get("isInMergeQueue"):
         return False, "pull request is not open outside the queue"
     head_at = pull["commits"]["nodes"][-1]["commit"]["committedDate"]
-    removals = [
-        event
-        for event in pull["timelineItems"]["nodes"]
-        if event["reason"] == "failed_checks" and event["createdAt"] >= head_at
-    ]
+    since_head = [event for event in pull["timelineItems"]["nodes"] if event["createdAt"] >= head_at]
+    if since_head and since_head[-1]["reason"] != "failed_checks":
+        return False, f"head last left the queue for {since_head[-1]['reason']}"
+    removals = [event for event in since_head if event["reason"] == "failed_checks"]
     if len(removals) > 1:
         return False, f"head already left the queue {len(removals)} times on failed checks"
     return True, "first failed checks removal of this head"

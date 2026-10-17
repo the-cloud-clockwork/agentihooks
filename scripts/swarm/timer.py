@@ -52,6 +52,14 @@ def units(binary):
     }
 
 
+def _current(path, text):
+    return path.is_file() and path.read_text() == text
+
+
+def _services(names):
+    return [name for name in names if name.endswith(".service") and name != f"{UNIT}.service"]
+
+
 def _foreign_run(unit_dir):
     from scripts.targets._common import _install_module
 
@@ -72,18 +80,30 @@ def ensure(binary, unit_dir=None, run=subprocess.run):
         print(refusal, file=sys.stderr)
         return False
     unit_dir.mkdir(parents=True, exist_ok=True)
-    changed = False
-    for name, text in units(binary).items():
+    changed, expected = False, units(binary)
+    for name, text in expected.items():
         path = unit_dir / name
-        if not path.exists() or path.read_text() != text:
+        if not _current(path, text):
             path.write_text(text)
             changed = True
     if changed:
         run(["systemctl", "--user", "daemon-reload"], capture_output=True, text=True, timeout=30, check=False)
-    run(["systemctl", "--user", "enable", "--now", f"{WAKER}.service"], capture_output=True, text=True, timeout=30)
-    run(["systemctl", "--user", "enable", "--now", f"{ALERTS}.service"], capture_output=True, text=True, timeout=30)
-    proc = run(["systemctl", "--user", "enable", "--now", f"{UNIT}.timer"], capture_output=True, text=True, timeout=30)
-    return proc.returncode == 0
+    procs = [
+        run(["systemctl", "--user", "enable", "--now", name], capture_output=True, text=True, timeout=30)
+        for name in [*_services(expected), f"{UNIT}.timer"]
+    ]
+    return all(proc.returncode == 0 for proc in procs)
+
+
+def reconcile(binary, unit_dir=None, run=subprocess.run):
+    unit_dir = unit_dir or UNIT_DIR
+    expected = units(binary)
+    if all(_current(unit_dir / name, text) for name, text in expected.items()):
+        names = [*_services(expected), f"{UNIT}.timer"]
+        enabled = ["systemctl", "--user", "is-enabled", "--quiet"]
+        if all(run([*enabled, name], capture_output=True, text=True, timeout=30).returncode == 0 for name in names):
+            return True
+    return ensure(binary, unit_dir, run)
 
 
 def _roots():

@@ -20,6 +20,7 @@ from hooks.targets import (
 from hooks.targets.capabilities import (
     allowed_permission_decisions,
     can_inject_context,
+    reports_shell_cwd,
     requires_envelope_block,
     supports_arg_mutation,
 )
@@ -753,6 +754,12 @@ class TestCopilotCapabilities:
         assert supports_arg_mutation("copilot") is True
         assert supports_arg_mutation("codex") is False
         assert supports_arg_mutation("claude") is True
+
+    def test_only_claude_reports_the_shell_cwd(self, codex):
+        assert reports_shell_cwd("claude") is True
+        assert reports_shell_cwd("codex") is False
+        assert reports_shell_cwd("copilot") is False
+        assert reports_shell_cwd() is False
 
     def test_envelope_block_required_only_for_copilot(self):
         # Settled live on v1.0.80: preToolUse denies on exit 2 alone;

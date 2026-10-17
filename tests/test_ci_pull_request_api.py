@@ -16,6 +16,7 @@ WORKSPACE = re.compile(r"\$\{?GITHUB_WORKSPACE\}?")
 # These API functions run only in local downloads or steps bound to the App token.
 LOCAL_ONLY = {
     ROOT / "scripts/ci_budget/jobs.py": {"read_page"},
+    ROOT / "scripts/ci_mutation/reuse.py": {"api"},
     ROOT / "tests/refresh_durations.py": {"_gh", "ci_run_ids", "ci_download"},
 }
 METADATA_ONLY = {ROOT / "scripts/ci_reuse.py": {"paged_reuse_job"}}
@@ -157,9 +158,11 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/ci_cpu_quota.py",
         "scripts/ci_dependency_audit.py",
         "scripts/ci_dev_reuse.py",
+        "scripts/ci_input_key.py",
         "scripts/ci_mutation/__main__.py",
         "scripts/ci_mutation/browser.py",
         "scripts/ci_mutation/plan.py",
+        "scripts/ci_mutation/reuse.py",
         "scripts/ci_queue_fail_fast.py",
         "scripts/ci_release.sh",
         "scripts/ci_semgrep.py",
@@ -232,6 +235,13 @@ def test_the_reuse_factory_exemption_contains_only_command_replacements():
 def test_the_budget_reader_runs_only_on_the_app_token():
     reader = ROOT / "scripts/ci_budget/jobs.py"
     steps = [step for _, step, here in _all_steps() if reader in _called(step.get("run", ""), here)]
+    assert steps
+    assert all(step.get("env", {}).get("GH_TOKEN") == APP_TOKEN and not _holds_token(step) for step in steps)
+
+
+def test_the_preflight_reuse_lookup_runs_only_on_the_app_token():
+    lookup = ROOT / "scripts/ci_mutation/reuse.py"
+    steps = [step for _, step, here in _all_steps() if lookup in _called(step.get("run", ""), here)]
     assert steps
     assert all(step.get("env", {}).get("GH_TOKEN") == APP_TOKEN and not _holds_token(step) for step in steps)
 

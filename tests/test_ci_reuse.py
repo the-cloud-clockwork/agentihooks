@@ -946,6 +946,27 @@ def _gate(steps, needs, event="merge_group"):
     return subprocess.run(["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True)
 
 
+@pytest.mark.parametrize("event", ["merge_group", "pull_request"])
+@pytest.mark.parametrize("promotion", [False, True])
+@pytest.mark.parametrize("admission", ["success", "failure", "skipped", "cancelled", None])
+def test_consolidated_gate_requires_the_shared_admission(event, promotion, admission):
+    from scripts import ci_reuse
+
+    required = (
+        {"select", "split", "unit", "shard-check", "test-count", "queue-fail-fast"}
+        if event == "merge_group"
+        else {"select", "test-count", "lint", "semgrep", "sonar"}
+    )
+    needs = {name: {"result": "success"} for name in required}
+    needs["select"]["outputs"] = {"scope": "none"}
+    if admission is None:
+        del needs["select"]
+    else:
+        needs["select"]["result"] = admission
+    result = _gate(ci_reuse.gate_steps(queue_tier=True, promotion=promotion, consolidated=True), needs, event)
+    assert (result.returncode == 0) == (admission == "success"), result.stdout + result.stderr
+
+
 def test_the_canonical_gate_still_needs_the_standalone_ratchet_in_the_queue():
     from scripts import ci_reuse
 

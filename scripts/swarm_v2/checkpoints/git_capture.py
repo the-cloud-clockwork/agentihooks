@@ -14,7 +14,7 @@ from hooks import secrets
 from hooks.context.credential_guard import sensitive_kind
 from scripts.swarm_v2.artifacts.base import ArtifactRef, ArtifactStore, Scope
 from scripts.swarm_v2.checkpoints import model
-from scripts.swarm_v2.filesystem import ARCHIVE_BYTES, ARCHIVE_MEMBERS, LayoutError, contain
+from scripts.swarm_v2.filesystem import ARCHIVE_MEMBERS, LayoutError, contain
 
 METRIC = "checkpoint_source_bytes"
 STAGED = "staged_patch"
@@ -204,7 +204,7 @@ def _members(data: bytes) -> list[tuple[str, int, bytes]]:
     with tarfile.open(fileobj=io.BytesIO(data), mode="r:") as archive:  # NOSONAR: uncompressed, count and size bounded
         for info in archive.getmembers():
             expanded += info.size
-            if len(found) >= ARCHIVE_MEMBERS or expanded > ARCHIVE_BYTES:
+            if len(found) >= ARCHIVE_MEMBERS or expanded > Policy().total_limit:
                 raise SourceError(OVERSIZED)
             parts = PurePosixPath(info.name).parts
             if not info.isreg() or info.name.startswith("/") or {"..", ".git"}.intersection(parts):
