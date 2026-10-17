@@ -452,35 +452,65 @@ def _suite(run_id, status, conclusion=None):
     return {
         "status": status,
         "conclusion": conclusion,
-        "workflowRun": {
-            "databaseId": run_id,
-            "createdAt": f"2026-10-17T10:0{run_id}:00Z",
-            "workflow": {"name": "Tests"},
-        },
+        "workflowRun": {"databaseId": run_id, "createdAt": "2026-10-17T10:00:00Z", "workflow": {"name": "Tests"}},
     }
 
 
-@pytest.mark.parametrize("newer_gate", [False, True])
-def test_checks_wait_ignores_a_cancelled_older_run_on_the_same_head(tick, newer_gate):
+CANCELLED_RUN = [
+    _run_check("unit", 10, 1, "CANCELLED"),
+    _run_check("Gate — Required", 11, 1, "FAILURE"),
+    {"context": "sonar", "state": "SUCCESS"},
+]
+
+
+def _gated(checks, suites, reverse):
+    from scripts.swarm.ledger_events import pull_request
+
+    if reverse:
+        checks, suites = checks[::-1], suites[::-1]
+    return pull_request(
+        {"state": "OPEN", "headRefOid": "first", "gated": True, "statusCheckRollup": checks, "checkSuites": suites}
+    )
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_a_cancelled_older_run_holds_the_wait_until_the_newer_run_reports_its_gate(tick, reverse):
+    tick.hold("checks", URL)
+    checks = CANCELLED_RUN + [_run_check("unit", 20, 2, "SUCCESS")]
+    suites = [_suite(1, "COMPLETED", "CANCELLED"), _suite(2, "IN_PROGRESS")]
+    tick.pulls[URL] = _gated(checks, suites, reverse)
+    assert tick.end() == []
+    assert idle.wait(tick.store.redis, "sw", ME) is not None
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_a_cancelled_older_run_and_a_green_newer_run_end_the_wait_green(tick, reverse):
+    tick.hold("checks", URL)
+    checks = CANCELLED_RUN + [_run_check("unit", 20, 2, "SUCCESS"), _run_check("Gate — Required", 9, 2, "SUCCESS")]
+    suites = [_suite(1, "COMPLETED", "CANCELLED"), _suite(2, "COMPLETED", "SUCCESS")]
+    tick.pulls[URL] = _gated(checks, suites, reverse)
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
+    assert idle.wait(tick.store.redis, "sw", ME) is None
+
+
+def test_a_newer_run_known_only_from_its_suite_holds_the_wait(tick):
+    tick.hold("checks", URL)
+    checks = [_run_check("Gate — Required", 20, 2, "SUCCESS")]
+    tick.pulls[URL] = _gated(checks, [_suite(2, "COMPLETED", "SUCCESS"), _suite(3, "QUEUED")], False)
+    assert tick.end() == []
+    assert idle.wait(tick.store.redis, "sw", ME) is not None
+
+
+def test_a_check_whose_run_names_no_workflow_is_never_superseded(tick):
     from scripts.swarm.ledger_events import pull_request
 
     tick.hold("checks", URL)
-    checks = [
-        _run_check("unit", 10, 1, "CANCELLED"),
-        _run_check("Gate — Required", 11, 1, "FAILURE"),
-        _run_check("unit", 20, 2, "SUCCESS"),
-    ]
-    suites = [_suite(1, "COMPLETED", "CANCELLED"), _suite(2, "IN_PROGRESS")]
-    raw = {"state": "OPEN", "headRefOid": "first", "gated": True, "statusCheckRollup": checks, "checkSuites": suites}
-    tick.pulls[URL] = pull_request(raw)
-    assert tick.end() == []
-    assert idle.wait(tick.store.redis, "sw", ME) is not None
-    if newer_gate:
-        raw["statusCheckRollup"] = checks + [_run_check("Gate — Required", 9, 2, "SUCCESS")]
-        raw["checkSuites"] = [suites[0], _suite(2, "COMPLETED", "SUCCESS")]
-        tick.pulls[URL] = pull_request(raw)
-        assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
-        assert idle.wait(tick.store.redis, "sw", ME) is None
+    lint = {"name": "lint", "databaseId": 1, "conclusion": "FAILURE", "checkSuite": {"workflowRun": {"databaseId": 4}}}
+    suites = [{"status": "COMPLETED", "workflowRun": {"databaseId": 5}}]
+    tick.pulls[URL] = pull_request(
+        {"state": "OPEN", "headRefOid": "first", "statusCheckRollup": [lint], "checkSuites": suites}
+    )
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now red; failed: lint"]
 
 
 def test_checks_wait_with_no_checks_stays_unresolved(tick):
@@ -931,7 +961,8 @@ def test_the_probe_requests_the_head_with_its_check_rollup():
                 "nodes{...on CheckRun{databaseId name conclusion completedAt isRequired(pullRequestNumber:7) "
                 "checkSuite{app{databaseId} workflowRun{databaseId workflow{name}}}} "
                 "...on StatusContext{context state createdAt isRequired(pullRequestNumber:7)}} "
-                "pageInfo{hasNextPage endCursor}}} checkSuites(first:100){nodes{status conclusion workflowRun{databaseId createdAt workflow{name}}} "
+                "pageInfo{hasNextPage endCursor}}} checkSuites(first:100){"
+                "nodes{status conclusion workflowRun{databaseId createdAt workflow{name}}} "
                 "pageInfo{hasNextPage endCursor}}}}}}}}",
                 "-f",
                 f"url={URL}",

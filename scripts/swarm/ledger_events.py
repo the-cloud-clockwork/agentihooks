@@ -169,7 +169,7 @@ def _current_runs(checks, suites):
 
 def _superseded(check, newest):
     run = _workflow_run(check).get("databaseId")
-    return bool(run) and run < newest[_workflow_name(check)]
+    return bool(run) and run < newest.get(_workflow_name(check), 0)
 
 
 def _workflow_name(check):
