@@ -20,6 +20,14 @@ async function gradeIsComplete(github, context, api) {
     [...latest.values()].every(state => state === 'success');
 }
 
+async function deleteSnapshot(github, api, ref) {
+  try {
+    await github.rest.git.deleteRef({ ...api, ref });
+  } catch (error) {
+    if (error.status !== 404 && !(error.status === 422 && error.message.includes('Reference does not exist'))) throw error;
+  }
+}
+
 module.exports = async ({ github, context, core, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) }) => {
   const { owner, repo } = context.repo;
   const repository = `${owner}/${repo}`;
@@ -74,11 +82,7 @@ module.exports = async ({ github, context, core, sleep = ms => new Promise(resol
     if (!merged.merged) throw new Error('GitHub refused the promotion merge');
     main = (await github.rest.repos.getCommit({ ...api, ref: merged.sha })).data;
     if (main.commit.tree.sha !== graded.commit.tree.sha) throw new Error('Promoted tree differs from the graded dev tree');
-    try {
-      await github.rest.git.deleteRef({ ...api, ref });
-    } catch (error) {
-      if (error.status !== 404 && !(error.status === 422 && error.message.includes('Reference does not exist'))) throw error;
-    }
+    await deleteSnapshot(github, api, ref);
     core.setOutput('pull-request', pull.html_url);
   }
   core.setOutput('graded', context.sha);
@@ -86,4 +90,48 @@ module.exports = async ({ github, context, core, sleep = ms => new Promise(resol
   await core.summary.addHeading('Promotion').addTable([
     ['Graded dev', context.sha], ['Promoted main', main.sha], ['Tree', graded.commit.tree.sha],
   ]).write();
+};
+
+module.exports.closeAbandoned = async ({ github, context, core, app, deadline = Infinity }) => {
+  const { owner, repo } = context.repo;
+  const repository = `${owner}/${repo}`;
+  if (context.eventName !== 'push' || context.ref !== 'refs/heads/dev' ||
+      context.payload.repository.full_name !== repository) return;
+  if (!app) throw new Error('The promotion App slug is required to recognise its own pull requests');
+  const api = { owner, repo };
+  const run = `${context.serverUrl}/${repository}/actions/runs/${context.runId}`;
+  const outcomes = [];
+  const failures = [];
+  const open = await github.paginate(github.rest.pulls.list, { ...api, state: 'open', base: 'main', per_page: 100 });
+  for (const [index, pull] of open.entries()) {
+    if (Date.now() > deadline) {
+      outcomes.push([`${open.length - index} not examined`, '', 'left for the next run, the cleanup time budget ran out']);
+      break;
+    }
+    const graded = /^promotion\/([0-9a-f]{40})$/.exec(pull.head.ref)?.[1];
+    if (!graded || graded === context.sha || pull.user?.login !== `${app}[bot]` ||
+        pull.head.repo?.full_name !== repository || pull.base.ref !== 'main') continue;
+    try {
+      if ((await github.rest.repos.compareCommits({ ...api, base: graded, head: context.sha })).data.status !== 'ahead') continue;
+      await github.rest.issues.createComment({ ...api, issue_number: pull.number,
+        body: `Abandoned: graded dev revision ${context.sha} supersedes ${graded}. Closed by the promotion run ${run}.` });
+      await github.rest.pulls.update({ ...api, pull_number: pull.number, state: 'closed' });
+      const ref = `heads/${pull.head.ref}`;
+      let snapshot = 'deleted';
+      try {
+        if ((await github.rest.git.getRef({ ...api, ref })).data.object.sha === pull.head.sha) await deleteSnapshot(github, api, ref);
+        else snapshot = 'kept, it moved';
+      } catch (error) {
+        if (error.status !== 404) throw error;
+        snapshot = 'already gone';
+      }
+      outcomes.push([`#${pull.number}`, graded, `closed, snapshot ${snapshot}`]);
+    } catch (error) {
+      failures.push(`#${pull.number}: ${error.message}`);
+      outcomes.push([`#${pull.number}`, graded, `failed: ${error.message}`]);
+    }
+  }
+  await core.summary.addHeading('Abandoned promotion pull requests')
+    .addTable([['Pull request', 'Graded dev', 'Outcome'], ...outcomes]).write();
+  if (failures.length) throw new Error(`Abandoned promotion cleanup failed: ${failures.join('; ')}`);
 };
