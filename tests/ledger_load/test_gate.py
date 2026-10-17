@@ -231,6 +231,7 @@ def test_the_reported_write_p95_is_none_without_writes():
 def test_a_run_returns_its_problems_and_its_measured_write_p95(monkeypatch, tmp_path):
     results = {"writes": [0.1] * 9 + [0.7], "reads": [0.05] * 10, "item_reads": [0.01] * 100, "errors": []}
     results["cpu"] = [(0.0, 0.0), (float(ledger_load.CPU_WINDOW_S), 1.0)]
+    results["resources"] = resource_samples()
     monkeypatch.setattr(ledger_load, "full_size", lambda at: {"tasks": []})
     monkeypatch.setattr(ledger_load, "store", lambda folder, doc: "token")
     monkeypatch.setattr(ledger_load, "free_port", lambda: 0)
@@ -273,6 +274,34 @@ def test_missing_or_short_resource_measurements_are_red():
     assert ledger_load.resource_verdict(resource_samples()[:40]) == [
         "server resource sampling did not cover 60s after warmup"
     ]
+
+
+def test_resource_limits_cannot_be_loosened_by_the_head(monkeypatch):
+    base = head_budgets()
+    for name, value in {
+        "RESOURCE_WARMUP_S": 40,
+        "RESOURCE_WINDOW_S": 10,
+        "THREAD_GROWTH": 1000,
+        "RSS_GROWTH_KIB": 1_000_000,
+    }.items():
+        monkeypatch.setattr(ledger_load, name, value)
+    assert ledger_load.graded(base) == base
+
+
+def test_the_gate_before_resource_sampling_uses_fixed_initial_resource_limits():
+    source = Path(ledger_load.__file__).read_text()
+    source = "\n".join(
+        line
+        for line in source.splitlines()
+        if not line.startswith(("RESOURCE_WARMUP_S =", "RESOURCE_WINDOW_S =", "THREAD_GROWTH =", "RSS_GROWTH_KIB ="))
+    )
+    assert ledger_load.budgets(source) == head_budgets()
+
+
+def test_a_partially_missing_resource_budget_is_red():
+    source = Path(ledger_load.__file__).read_text().replace("THREAD_GROWTH = 8", "")
+    with pytest.raises(SystemExit, match="THREAD_GROWTH"):
+        ledger_load.budgets(source)
 
 
 def test_some_open_alerts_are_past_their_quiet_hour_so_the_expiry_sweep_has_work():
