@@ -673,7 +673,6 @@ jobs:
           repositories: ${{ github.event.repository.name }}
           permission-actions: read
 
-      # The base's grader picks the record, and only one a run on dev uploaded for this exact commit qualifies.
       - name: Fetch the base suite count recorded on dev
         if: steps.app-token.outcome == 'success'
         env:
@@ -794,7 +793,6 @@ jobs:
         if: github.event_name == 'push' && env.UNIT_SOURCE == ''
         run: echo "$HOME/venv/bin" >> "$GITHUB_PATH"
 
-      # A pull request whose base is this commit grades against this record instead of collecting the base again.
       - name: Record the suite count for later bases
         if: github.event_name == 'push' && github.ref == 'refs/heads/dev' && env.UNIT_SOURCE == ''
         run: |
