@@ -14,15 +14,21 @@ LOOPBACK = ("127.0.0.1", "localhost")
 
 def base(environ=os.environ) -> str:
     if remote(environ):
-        if not environ.get("LEDGER_URL"):
-            raise SystemExit("a remote ledger client needs LEDGER_URL, the address of the hive ledger server")
-        return environ["LEDGER_URL"].rstrip("/")
+        url = environ.get("SWARM_URL") or environ.get("LEDGER_URL")
+        if not url:
+            raise SystemExit("a remote ledger client needs SWARM_URL, the address of the hosted ledger server")
+        return url.rstrip("/")
     host, port = address(environ)
     return f"http://{host}:{port}"
 
 
 def remote(environ=os.environ) -> bool:
-    return environ.get("AGENTIHOOKS_DEPLOYMENT", "local") != "local"
+    return bool(environ.get("SWARM_URL")) or environ.get("AGENTIHOOKS_DEPLOYMENT", "local") != "local"
+
+
+def access_headers(environ=os.environ) -> dict:
+    client, secret = environ.get("SWARM_ACCESS_CLIENT_ID"), environ.get("SWARM_ACCESS_CLIENT_SECRET")
+    return {"CF-Access-Client-Id": client, "CF-Access-Client-Secret": secret} if client and secret else {}
 
 
 def shared_directory(environ=os.environ) -> bool:
@@ -73,7 +79,8 @@ def folder(environ=os.environ) -> Path:
 
 def serving(timeout: float = 1, url: str | None = None) -> str | None:
     try:
-        with urllib.request.urlopen(f"{url or base()}/healthz", timeout=timeout) as resp:
+        probe = urllib.request.Request(f"{url or base()}/healthz", headers=access_headers())
+        with urllib.request.urlopen(probe, timeout=timeout) as resp:
             body = json.loads(resp.read())
     except http.client.RemoteDisconnected:
         return None

@@ -147,7 +147,7 @@ def credentials(slug, service=False):
             raise unauthenticated(
                 "a remote ledger client needs a pinned agent identity; the operator credential stays on its host"
             )
-        token = os.environ.get("AGENTIHOOKS_LEDGER_AGENT_TOKEN") or launch_token(slug, who.name)
+        token = os.environ.get("AGENTIHOOKS_LEDGER_AGENT_TOKEN") or derived_token(slug, who.name)
         return {"X-Ledger-Token": token, "X-Ledger-Agent": who.name}
     return local_credentials(slug, who.name if who.pinned else "", service)
 
@@ -163,6 +163,11 @@ def replay(slug, ops, agent, service):
     from scripts.swarm_ledger.api.client import ResourceClient
 
     return ResourceClient(base(), local_credentials(slug, agent, service), REQUEST_TIMEOUT).mutate(slug, ops)
+
+
+def derived_token(slug, name):
+    secret = os.environ.get("SWARM_SECRET")
+    return authority.agent_token(secret, slug, name) if secret else launch_token(slug, name)
 
 
 def launch_token(slug, name):
@@ -444,6 +449,7 @@ def upload(slug: str, name: str, path: str, route: str, extra: dict) -> dict:
         f"{base()}/api/v1/ledgers/{slug}/uploads/{route}",
         data=Path(path).read_bytes(),
         headers={
+            **ledger_link.access_headers(),
             **credentials(slug),
             "X-Ledger-Agent": name,
             "Content-Type": "application/octet-stream",

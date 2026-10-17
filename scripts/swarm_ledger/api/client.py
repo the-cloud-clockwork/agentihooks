@@ -8,6 +8,8 @@ import urllib.request
 import uuid
 from urllib.parse import quote, urlencode
 
+from scripts.swarm_ledger import ledger_link
+
 from . import resources, schemas
 
 RETRIES = 5
@@ -17,7 +19,7 @@ BACKOFF = 0.25
 class ResourceClient:
     def __init__(self, base: str, credentials: dict, timeout: float = 10) -> None:
         self.base = base
-        self.credentials = credentials
+        self.credentials = {**ledger_link.access_headers(), **credentials}
         self.timeout = timeout
 
     def request(self, slug: str, path: str, payload: dict | None = None) -> dict:

@@ -64,7 +64,7 @@ def stream(slug, cursor=None, headers=None):
 
 def request(slug, cursor, headers):
     """The events URL and headers: the credential headers, the stream Accept, and the cursor to resume after."""
-    headers = {**headers, "Accept": "text/event-stream"}
+    headers = {**ledger_link.access_headers(), **headers, "Accept": "text/event-stream"}
     if cursor:
         headers["Last-Event-ID"] = cursor
     return f"{ledger_link.base()}/api/v1/ledgers/{urllib.parse.quote(slug, safe='')}/events", headers

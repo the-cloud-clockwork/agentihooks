@@ -18,7 +18,11 @@ def call(path: str, payload: dict | None, environ) -> dict | None:
     request = urllib.request.Request(
         f"{ledger_link.base(environ)}/api/v1/{path}",
         data=None if payload is None else json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json", "X-Controller-Credential": credential},
+        headers={
+            "Content-Type": "application/json",
+            "X-Controller-Credential": credential,
+            **ledger_link.access_headers(environ),
+        },
     )
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT) as response:

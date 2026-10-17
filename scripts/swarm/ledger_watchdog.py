@@ -13,7 +13,7 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm import incidents, ledger_host, ledger_probe, time_left
 from scripts.swarm.ledger_client import LedgerGone, LedgerRefused
 from scripts.swarm.store import PREFIX
-from scripts.swarm_ledger import server_code
+from scripts.swarm_ledger import ledger_link, server_code
 
 PROC = Path("/proc")
 THREADS_MAX = 150
@@ -196,7 +196,7 @@ def _claimed(store, folder: Path, pid: int, kind: str) -> bool:
 
 
 def watch(store, slug: str, ledger, runtime, host: Host | None = None) -> list[str]:
-    if getattr(ledger, "time_left", None) is None:
+    if getattr(ledger, "time_left", None) is None or ledger_link.remote():
         return []
     host = host or default_host()
     pid = ledger_host.server_pid(host.folder)
