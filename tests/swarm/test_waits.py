@@ -439,7 +439,7 @@ def test_checks_wait_uses_only_the_newest_run_of_each_check(tick, conclusion, ob
         assert idle.wait(tick.store.redis, "sw", ME) is None
 
 
-def _workflow_run(run_id, workflow="W1", event="pull_request"):
+def _run_info(run_id, workflow="W1", event="pull_request"):
     return {"databaseId": run_id, "event": event, "workflow": {"id": workflow, "name": "Tests"}}
 
 
@@ -448,7 +448,7 @@ def _run_check(name, check_id, run_id, conclusion, **run):
         "name": name,
         "databaseId": check_id,
         "conclusion": conclusion,
-        "checkSuite": {"workflowRun": _workflow_run(run_id, **run)},
+        "checkSuite": {"workflowRun": _run_info(run_id, **run)},
     }
 
 
@@ -456,11 +456,16 @@ def _suite(run_id, status, conclusion=None, **run):
     return {
         "status": status,
         "conclusion": conclusion,
-        "workflowRun": {**_workflow_run(run_id, **run), "createdAt": "2026-10-17T10:00:00Z"},
+        "workflowRun": {**_run_info(run_id, **run), "createdAt": "2026-10-17T10:00:00Z"},
     }
 
 
 CANCELLED_RUN = [
+    {
+        "name": "lint",
+        "conclusion": "SUCCESS",
+        "checkSuite": {"workflowRun": {"event": "pull_request", "workflow": {"id": "W1", "name": "Tests"}}},
+    },
     _run_check("unit", 10, 1, "CANCELLED"),
     _run_check("Gate — Required", 11, 1, "FAILURE"),
     {"context": "sonar", "state": "SUCCESS"},
