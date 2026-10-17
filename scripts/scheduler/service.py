@@ -71,7 +71,7 @@ def supervise(stop: Event | None = None) -> None:
 
 def ensure_running(environ: Mapping[str, str] | None = None) -> bool:
     active = dict(os.environ if environ is None else environ)
-    if not (active.get("REDIS_URL") or active.get("AGENTIHOOKS_HIVE_REDIS_URL")):
+    if not (active.get("REDIS_URL") or active.get("AGENTIHOOKS_HIVE_REDIS_URL") or active.get("AGENTIHOOKS_SWARM_REDIS_URL")):
         return False
     try:
         with machine_lock("startup"):
