@@ -86,3 +86,21 @@ def test_doctor_with_an_unregistered_peer_has_no_watched_master_sources(doctor):
     doctor.set_peer("doctor", "unregistered")
     operator_words.record("master@-1", "Fix only swarm health")
     assert ledger_relay.watched_masters("master@bb2222-0001") == []
+
+
+@pytest.mark.parametrize("failure", ["redis", "missing"])
+def test_watched_quote_lookup_fails_closed_when_its_registry_is_unavailable(doctor, monkeypatch, failure):
+    from redis.exceptions import TimeoutError
+
+    from scripts.swarm.naming import NameRegistry
+    from scripts.swarm.store import SwarmError
+
+    error = TimeoutError("Timeout reading from socket") if failure == "redis" else SwarmError("no swarm doctor")
+
+    def unavailable(self, name):
+        raise error
+
+    monkeypatch.setattr(NameRegistry, "slug_of", unavailable)
+    operator_words.record("master@bb2222-0001", "Keep the local instruction")
+    assert ledger_relay.watched_masters("master@bb2222-0001") == []
+    assert ledger_relay.verified("master@bb2222-0001", "Keep the local instruction") == "Keep the local instruction"

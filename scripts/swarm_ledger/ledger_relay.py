@@ -28,20 +28,25 @@ def check(op):
 
 
 def watched_masters(by: str) -> list[str]:
+    from redis.exceptions import RedisError
+
     from hooks._redis import get_redis
     from hooks.context import operator_words
     from scripts.doctor.priming import TEMPLATE
-    from scripts.swarm.store import RedisStore
+    from scripts.swarm.store import RedisStore, SwarmError
 
     redis = get_redis()
     if redis is None:
         return []
     store = RedisStore(redis)
-    slug = store.names.slug_of(by)
-    watched = store.peer(slug)
-    if not watched or store.config(slug).template != TEMPLATE:
+    try:
+        slug = store.names.slug_of(by)
+        watched = store.peer(slug)
+        if not watched or store.config(slug).template != TEMPLATE:
+            return []
+        code = store.names.code_of(watched)
+    except (RedisError, SwarmError):
         return []
-    code = store.names.code_of(watched)
     return operator_words.recorded(f"master@{code}-*") if code else []
 
 
