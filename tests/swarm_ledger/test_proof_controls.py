@@ -213,6 +213,7 @@ def test_creator_set_refuses_fields_outside_the_allowlist(owned, key):
         {"control": "set", "fields": {"master-agent": "codex extra"}},
         {"control": "set", "fields": {"master-agent": "codex=claude"}},
         {"control": "set", "fields": {"master-agent": "-codex"}},
+        {"control": "set", "fields": {"master-agent": "codex\n"}},
         {"control": "set", "fields": {"master-agent": "c" * 65}},
         {"control": "set", "fields": {"master-agent": "codex"}, "extra": True},
         {"control": "start", "extra": True},
@@ -224,6 +225,25 @@ def test_creator_set_and_start_refuse_malformed_requests(owned, body):
         {"error": {"code": "schema_invalid", "message": "Request does not match the resource schema"}},
     )
     assert _queued(owned) == []
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "codex-inbox-transport",
+        "max-eng-agents",
+        "max-ci-agents",
+        "max-plan-agents",
+        *(
+            f"{lane}-{field}"
+            for lane in ("eng", "ci", "plan", "master")
+            for field in ("agent", "model", "effort", "profile")
+        ),
+    ],
+)
+def test_creator_sets_each_allowlisted_field(owned, key):
+    status, accepted = owned.invoke(f"/{owned.slug}/controls", {"control": "set", "fields": {key: "v1"}}, owned.proof)
+    assert status == 200 and accepted["data"]["argv"] == ["set", f"{key}=v1"]
 
 
 def test_creator_set_accepts_the_longest_plain_value(owned):
