@@ -55,3 +55,18 @@ def test_tick_pins_an_already_known_conversation_without_a_prior_hook(store, mon
     tick_module.tick("sw", store, ledger, runtime, 2000)
     monkeypatch.setattr(context_recycle, "used_tokens", lambda session_id: 650_000)
     assert "agentihooks swarm sw handoff" in context_recycle.directive("known", {})
+
+
+@pytest.mark.parametrize("compact_limit", [0, 700])
+def test_tick_pin_retains_the_swarm_limit_and_an_existing_session_pin(store, monkeypatch, compact_limit):
+    runtime = FakeRuntime()
+    ledger = FakeLedger([{"id": "t1"}])
+    store.update("sw", compact_limit=compact_limit)
+    runtime.conversation_ids = {"w1:p1": "bound"}
+    tick_module.tick("sw", store, ledger, runtime, 1000)
+    monkeypatch.setattr(context_recycle, "used_tokens", lambda session_id: 650_000)
+    expected = None if compact_limit else 650_000
+    assert context_recycle.unmarked_overrun("bound", 900) == expected
+    store.update("sw", compact_limit=900)
+    tick_module.tick("sw", store, ledger, runtime, 2000)
+    assert context_recycle.unmarked_overrun("bound", 900) == expected
