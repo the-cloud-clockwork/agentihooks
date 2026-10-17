@@ -41,15 +41,26 @@ def changed_lines(base: str, path: Path, old: Path) -> set[int]:
 
 
 def lint(base: str, paths: dict[Path, Path]) -> list[str]:
-    command = [sys.executable, "-m", "ruff", "check", "--output-format", "json", "--", *map(str, paths)]
+    command = [
+        sys.executable,
+        "-m",
+        "ruff",
+        "check",
+        "--ignore-noqa",
+        "--output-format",
+        "json",
+        "--",
+        *map(str, paths),
+    ]
+    result = subprocess.run(command, capture_output=True, text=True)
+    if result.returncode > 1:
+        return [result.stderr.strip() or f"ruff check exited {result.returncode}"]
     root, errors = Path.cwd().resolve(), []
     lines = {path.as_posix(): changed_lines(base, path, old) for path, old in paths.items()}
-    for hit in json.loads(subprocess.run(command, capture_output=True).stdout):
-        rel = Path(hit["filename"]).relative_to(root).as_posix()
-        start, end = hit["location"]["row"], hit["end_location"]["row"]
-        code = hit["code"] or "invalid-syntax"
-        if code == "invalid-syntax" or lines[rel] & set(range(start, end + 1)):
-            errors.append(f"{rel}:{start}:{hit['location']['column']}: {code} {hit['message']}")
+    for hit in json.loads(result.stdout):
+        rel, row = Path(hit["filename"]).relative_to(root).as_posix(), hit["location"]["row"]
+        if hit["code"] == "invalid-syntax" or row in lines[rel]:
+            errors.append(f"{rel}:{row}:{hit['location']['column']}: {hit['code']} {hit['message']}")
     return errors
 
 

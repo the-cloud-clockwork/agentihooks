@@ -140,7 +140,24 @@ def test_a_lint_offender_on_a_changed_line_fails(repo, capsys):
     ]
 
 
-def test_a_suppressed_lint_finding_on_a_changed_line_passes(repo):
-    repo({"base.py": "value = 1\n"}, push=True)
-    repo({"mod.py": "import os  # noqa: F401\n"})
-    assert publish_gate.main() == 0
+def test_a_suppression_does_not_hide_a_lint_finding_on_a_changed_line(repo, capsys):
+    repo({"mod.py": 'label = f"plain"  # noqa: F541\nvalue = 1\n'}, push=True)
+    repo({"mod.py": 'label = f"plain"  # noqa: F541\nvalue = 2\nother = f"plain"  # noqa: F541\n'})
+    assert publish_gate.main() == 1
+    assert report(capsys) == ["mod.py:3:9: F541 f-string without any placeholders"]
+
+
+def test_a_renamed_file_grades_only_its_changed_lines(repo, capsys):
+    source = "import os\n" + "value = 1\n" * 5
+    repo({"old.py": source}, push=True)
+    git(".", "mv", "old.py", "new.py")
+    repo({"new.py": source + 'label = f"plain"\n'})
+    assert publish_gate.main() == 1
+    assert report(capsys) == ["new.py:7:9: F541 f-string without any placeholders"]
+
+
+def test_a_syntax_error_outside_the_diff_still_fails(repo, capsys):
+    repo({"mod.py": "broken =\nvalue = 1\n"}, push=True)
+    repo({"mod.py": "broken =\nvalue = 2\n"})
+    assert publish_gate.main() == 1
+    assert report(capsys)[0].startswith("mod.py:1:9: invalid-syntax ")
