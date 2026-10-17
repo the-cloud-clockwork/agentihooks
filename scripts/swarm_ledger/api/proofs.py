@@ -6,6 +6,7 @@ from collections.abc import Callable
 from types import ModuleType
 
 from scripts.swarm import naming, templates
+from scripts.swarm.store import CODEX_TRANSPORTS
 
 from . import schemas
 from .errors import APIError
@@ -16,8 +17,9 @@ CREATE = {
     "additionalProperties": False,
     "properties": {"agent": {"type": "string"}, "task": {"type": "string"}, "content": {"type": "object"}},
 }
+CAPS = ("max-eng-agents", "max-ci-agents", "max-plan-agents")
 SETTABLE_FIELDS = frozenset(
-    {"codex-inbox-transport", "max-eng-agents", "max-ci-agents", "max-plan-agents"}
+    {"codex-inbox-transport", *CAPS}
     | {f"{lane}-{field}" for lane in templates.LANES for field in ("agent", "model", "effort", "profile")}
 )
 START = {
@@ -35,6 +37,10 @@ SET = {
         "fields": {
             "type": "object",
             "minProperties": 1,
+            "properties": {
+                "codex-inbox-transport": {"enum": list(CODEX_TRANSPORTS)},
+                **{cap: {"type": "string", "pattern": r"^[0-9]{1,3}\Z"} for cap in CAPS},
+            },
             "additionalProperties": {"type": "string", "pattern": r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}\Z"},
         },
     },

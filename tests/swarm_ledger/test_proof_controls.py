@@ -228,22 +228,50 @@ def test_creator_set_and_start_refuse_malformed_requests(owned, body):
 
 
 @pytest.mark.parametrize(
-    "key",
+    ("key", "value"),
     [
-        "codex-inbox-transport",
-        "max-eng-agents",
-        "max-ci-agents",
-        "max-plan-agents",
+        ("codex-inbox-transport", "legacy"),
+        ("codex-inbox-transport", "app_server"),
+        ("max-eng-agents", "0"),
+        ("max-ci-agents", "100"),
+        ("max-plan-agents", "7"),
         *(
-            f"{lane}-{field}"
+            (f"{lane}-{field}", "Ab.1:x-z")
             for lane in ("eng", "ci", "plan", "master")
             for field in ("agent", "model", "effort", "profile")
         ),
+        ("eng-model", "x"),
     ],
 )
-def test_creator_sets_each_allowlisted_field(owned, key):
-    status, accepted = owned.invoke(f"/{owned.slug}/controls", {"control": "set", "fields": {key: "v1"}}, owned.proof)
-    assert status == 200 and accepted["data"]["argv"] == ["set", f"{key}=v1"]
+def test_creator_sets_each_allowlisted_field(owned, key, value):
+    status, accepted = owned.invoke(f"/{owned.slug}/controls", {"control": "set", "fields": {key: value}}, owned.proof)
+    assert status == 200 and accepted["data"]["argv"] == ["set", f"{key}={value}"]
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"codex-inbox-transport": "other"},
+        {"max-eng-agents": "two"},
+        {"max-ci-agents": "1000"},
+        {"max-plan-agents": "-1"},
+        {"max-eng-agents": "1\n"},
+    ],
+)
+def test_creator_set_refuses_values_the_field_cannot_take(owned, fields):
+    assert owned.invoke(f"/{owned.slug}/controls", {"control": "set", "fields": fields}, owned.proof) == (
+        400,
+        {"error": {"code": "schema_invalid", "message": "Request does not match the resource schema"}},
+    )
+    assert _queued(owned) == []
+
+
+def test_creator_set_names_the_first_refused_field_in_sorted_order(owned):
+    body = {"control": "set", "fields": {"zeta-field": "1", "api-url": "1"}}
+    assert owned.invoke(f"/{owned.slug}/controls", body, owned.proof) == (
+        403,
+        {"error": {"code": "forbidden", "message": "Proof controls cannot set api-url"}},
+    )
 
 
 def test_creator_set_accepts_the_longest_plain_value(owned):
