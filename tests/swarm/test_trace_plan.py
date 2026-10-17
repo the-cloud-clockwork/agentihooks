@@ -787,14 +787,14 @@ def test_run_needs_a_plan_file(tmp_path):
     assert str(refused.value) == f"write the plan first: {tmp_path / 't1' / 'plan.md'}, {trace_plan.FORMAT}"
 
 
-def test_run_checks_follow_ups_against_its_own_task(ask, tmp_path):
+def test_run_accepts_a_task_identifier_the_ledger_would_refuse_in_prose(ask, tmp_path):
     folder = tmp_path / "t1"
     write_plan(folder, "- a light | a | b\n")
     fake = ask(0.9)
     who = Who(name="engineer@1-1", swarm="sw", task="my_task")
-    with pytest.raises(ValueError, match="^plan line 1: the ledger would refuse its follow up"):
-        trace_plan.run(folder, INTENT, Ledger(), who, "observe", home=tmp_path / "home")
-    assert fake.calls == []
+    record, block = trace_plan.run(folder, INTENT, Ledger(), who, "observe", home=tmp_path / "home")
+    assert record["verdict"] == "pass" and not block
+    assert len(fake.calls) == 1
 
 
 @pytest.mark.parametrize("task_id", ["fx-8be892c4", "fx-8be892c4-code", "fx-8be892c4-cause", "promo-38842603017-0"])
