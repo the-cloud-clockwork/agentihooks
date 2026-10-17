@@ -64,7 +64,7 @@ def test_required_summary_writes_current_artifact_counts_even_after_gate_failure
     result = subprocess.run(
         ["bash", "-e", "-o", "pipefail", "-c", step["run"]],
         cwd=tmp_path,
-        env=dict(os.environ, PYTHONPATH=str(ROOT), GITHUB_STEP_SUMMARY=str(summary)),
+        env=dict(os.environ, GITHUB_WORKSPACE=str(ROOT), GITHUB_STEP_SUMMARY=str(summary)),
         capture_output=True,
         text=True,
     )

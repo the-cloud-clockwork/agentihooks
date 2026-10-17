@@ -1895,7 +1895,7 @@ jobs:
 
       - name: Summarize this run's tests
         if: ${{ always() }}
-        run: python3 -m scripts.ci_gate_summary test-reports | tee -a "$GITHUB_STEP_SUMMARY"
+        run: python3 "$GITHUB_WORKSPACE/scripts/ci_gate_summary.py" test-reports | tee -a "$GITHUB_STEP_SUMMARY"
 
   refresh-durations:
     needs: [unit, lint, shard-check]
