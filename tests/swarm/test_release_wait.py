@@ -126,3 +126,30 @@ def test_checker_reads_tags_once_and_passes_tasks_without_the_field(monkeypatch)
     assert released({"id": "b", "after_release": "v1.0.0"}) is True
     assert released({"id": "c", "after_release": "v1.0.1"}) is False
     assert calls == ["/repo"]
+
+
+class Ledger:
+    def __init__(self):
+        self.alerts = []
+
+    def raise_alert(self, slug, source, text):
+        self.alerts.append((slug, source, text))
+
+
+def test_a_failed_lookup_raises_one_release_alert_while_a_task_waits_on_a_release(tmp_path):
+    ledger, held = Ledger(), task("proof", after_release="v2.17.1")
+    config = SwarmConfig("sw", str(tmp_path))
+    assert release_wait.alert_pass("sw", config, ledger, {"tasks": [task("plain"), held]})
+    [(slug, source, text)] = ledger.alerts
+    assert (slug, source) == ("sw", release_wait.SOURCE) and "proof" in text and str(tmp_path) in text
+    live = {"source": release_wait.SOURCE, "state": "open"}
+    assert release_wait.alert_pass("sw", config, ledger, {"tasks": [held], "alerts": [live]}) == []
+    assert release_wait.alert_pass("sw", config, ledger, {"tasks": [task("plain"), {**held, "state": "done"}]}) == []
+    assert len(ledger.alerts) == 1
+
+
+def test_a_working_lookup_raises_no_release_alert(origin):
+    ledger = Ledger()
+    held = {"tasks": [task("proof", after_release="v2.17.1")]}
+    assert release_wait.alert_pass("sw", SwarmConfig("sw", str(origin)), ledger, held) == []
+    assert ledger.alerts == []
