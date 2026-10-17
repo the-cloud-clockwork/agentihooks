@@ -48,7 +48,7 @@ def _claude(environ: dict, now: float) -> list[Account]:
     observed = {result.account: (at, result) for at, result in balancer.cached_observations(environ=environ)}
     fresh, _ = tokens.results(environ, now)
     observed.update({result.account: (now, result) for result in fresh})
-    counts = account_sessions.sessions_by_account()
+    counts = account_sessions.sessions_by_account(environ=environ)
     routed = account_sessions.token_accounts(environ)
     rows = []
     for at, result in observed.values():
