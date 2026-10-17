@@ -17,7 +17,6 @@ from scripts.swarm.naming import lane_of, plain
 from scripts.swarm_ledger import ledger_kinds
 
 WORKERS = frozenset({"eng", "ci"})
-PROTECTED = frozenset({"dev", "main", "master", "v1"})
 TEMPLATE = (
     "You cannot leave uncommitted or unpushed changes. Commit them now. If the task is done, open the pull request. "
     "If not, update the issue and the pull request and record progress on the ledger."
@@ -133,7 +132,7 @@ def target(tree, task):
     from scripts.swarm.continuation import retained
 
     branch = retained(task)
-    if branch in PROTECTED or not branch:
+    if not branch:
         return tree.branch
     continues = git(tree.path, "merge-base", "--is-ancestor", f"refs/remotes/origin/{branch}", "HEAD")
     return branch if continues.returncode == 0 else tree.branch

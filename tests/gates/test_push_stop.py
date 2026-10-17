@@ -397,11 +397,12 @@ def test_a_retained_branch_deleted_from_origin_is_not_recreated(rig):
 
 @pytest.mark.parametrize("ref", ["origin/dev", "fresh", ""])
 def test_a_protected_or_fresh_continuation_pushes_its_own_branch(rig, ref):
+    dev = remote(rig, "dev")
     continuing(rig, ref)
     head = rig.commit()
     assert rig.stop().allowed
     assert rig.remote_head() == head
-    assert git(rig.seed, "ls-remote", str(rig.origin), "refs/heads/dev").split("\t")[0] != head
+    assert remote(rig, "dev") == dev
 
 
 def test_a_worktree_on_dev_or_main_is_never_pushed(rig):

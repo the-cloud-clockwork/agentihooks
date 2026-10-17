@@ -217,7 +217,8 @@ def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, mess
     if root is None:
         raise SwarmError(f"task worktree missing; Next: agentihooks swarm {shlex.quote(slug)} prepare")
     fields = checkout_fields(root)
-    fields["branch"] = target_branch(root, scoped, fields["branch"])
+    own = fields["branch"]
+    fields["branch"] = target_branch(root, scoped, own)
     selected = selected_files(root, files)
     retry = shlex.join(["agentihooks", "swarm", slug, "publish", "--message", message, "--", *files])
     try:
@@ -236,7 +237,9 @@ def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, mess
             execute([python, "-I", str(Path(__file__).with_name("publish_gate.py"))], root)
         if not ci_prepush.passed(root) or git(root, "rev-parse", "HEAD") != head:
             raise SwarmError("the committed HEAD has no passing prepush evidence")
-        git(root, "push", "-u", "origin", f"HEAD:{fields['branch']}")
+        ref = f"refs/heads/{fields['branch']}"
+        lease = [] if fields["branch"] == own else [f"--force-with-lease={ref}"]
+        git(root, "push", *lease, "-u", "origin", f"HEAD:{ref}")
     except SwarmError as exc:
         detail = str(exc)
         if fields.get("gate") == "AgentiHooks touched Python fallback":
