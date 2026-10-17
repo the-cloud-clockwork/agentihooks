@@ -535,16 +535,43 @@ def test_fallback_keeps_same_named_offenders_apart(repositories, monkeypatch, ca
     from scripts.swarm import publish_gate
 
     p = repositories
-    body = "import sys\n\nif sys.platform:\n\n    def run():\n{long}else:\n\n    def run():\n        print(1)\n"
-    (p.bundle / "chosen.py").write_text(body.format(long="        print(1)\n" * 310))
+    body = "import sys\n\nif sys.platform:\n\n    def run():\n{long}else:\n\n    def run():\n{other}"
+    other = "        print(2)\n" * 304
+    (p.bundle / "chosen.py").write_text(body.format(long="        print(1)\n" * 310, other=other))
     git(p.bundle, "add", "chosen.py")
     git(p.bundle, "commit", "-qm", "Same named functions")
     git(p.bundle, "push", "origin", "dev")
     p.task["repositories"] = [str(p.bundle)]
     root = Path(publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)["worktree"])
-    (root / "chosen.py").write_text(body.format(long="        print(1)\n" * 311))
+    (root / "chosen.py").write_text(body.format(long="        print(1)\n" * 311, other=other))
     git(root, "add", "chosen.py")
     git(root, "commit", "-qm", "Grow the first")
     monkeypatch.chdir(root)
     assert publish_gate.main() == 1
     assert "chosen.py: run lines grew from 311 to 312\n" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "base_name, status", [("notes.txt", "R"), ("chosen.py", "M")], ids=["renamed_prose", "repaired_source"]
+)
+def test_fallback_grades_an_unparsable_base_as_new(repositories, monkeypatch, base_name, status):
+    from pathlib import Path
+
+    from scripts.swarm import publish_gate
+
+    p = repositories
+    source = "".join(f"value_{n} = {n}\n" for n in range(20))
+    (p.bundle / base_name).write_text(source + "not python at all\n")
+    git(p.bundle, "add", base_name)
+    git(p.bundle, "commit", "-qm", "Unparsable base")
+    git(p.bundle, "push", "origin", "dev")
+    p.task["repositories"] = [str(p.bundle)]
+    root = Path(publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)["worktree"])
+    if base_name != "chosen.py":
+        git(root, "mv", base_name, "chosen.py")
+    (root / "chosen.py").write_text(source)
+    git(root, "add", "chosen.py")
+    git(root, "commit", "-qm", "Valid source")
+    assert git(root, "diff", "--name-status", "-M", "HEAD~1", "HEAD").split()[0][0] == status
+    monkeypatch.chdir(root)
+    assert publish_gate.main() == 0

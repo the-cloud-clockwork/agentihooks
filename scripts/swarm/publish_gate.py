@@ -25,7 +25,7 @@ def changed(base: str) -> dict[Path, Path]:
         old = next(fields)
         new = next(fields) if status[0] in "RC" else old
         if new.endswith(".py") and Path(new).is_file():
-            found[Path(new)] = Path(old)
+            found[Path(new)] = Path(old if old.endswith(".py") else new)
     return found
 
 
@@ -82,6 +82,10 @@ def baseline(base: str, paths: dict[Path, Path]) -> dict[tuple[str, str], tuple[
         tree, present = Path(directory).resolve(), []
         for path, old in paths.items():
             shown = subprocess.run(["git", "show", f"{base}:{old.as_posix()}"], capture_output=True)
+            try:
+                ast.parse(shown.stdout)
+            except (SyntaxError, ValueError):
+                continue
             if shown.returncode == 0:
                 (tree / path).parent.mkdir(parents=True, exist_ok=True)
                 (tree / path).write_bytes(shown.stdout)
