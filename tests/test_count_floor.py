@@ -53,6 +53,36 @@ def _floor(tmp_path, base: dict[str, str], head: dict[str, str], sources: dict[s
     )
 
 
+def test_collection_reuses_only_an_exact_clean_tree_and_environment(tmp_path):
+    from tests.count_floor import collect_all
+
+    root = _tree(tmp_path / "tree", {"test_a.py": SUITE})
+    (root / ".gitignore").write_text("__pycache__/\n.collection-runs\n")
+    probe = root / "conftest.py"
+    probe.write_text(
+        "from pathlib import Path\n"
+        "p = Path('.collection-runs')\n"
+        "p.write_text(p.read_text() + 'x' if p.exists() else 'x')\n"
+    )
+    for arguments in (
+        ["init", "-b", "fixture"],
+        ["add", "tests", "conftest.py", ".gitignore"],
+        ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-m", "Fixture"],
+    ):
+        subprocess.run(["git", *arguments], cwd=root, check=True, capture_output=True)
+    cache = tmp_path / "cache"
+    expected = {"head": ["tests/test_a.py::test_a", "tests/test_a.py::test_b[1]", "tests/test_a.py::test_b[2]"]}
+    assert collect_all({"head": root}, "tests/", cache=cache, environment="first") == expected
+    assert collect_all({"head": root}, "tests/", cache=cache, environment="first") == expected
+    assert (root / ".collection-runs").read_text() == "x"
+    assert collect_all({"head": root}, "tests/", cache=cache, environment="second") == expected
+    assert (root / ".collection-runs").read_text() == "xx"
+    (root / "tests" / "test_a.py").write_text(SUITE + OTHER)
+    changed = collect_all({"head": root}, "tests/", cache=cache, environment="first")
+    assert len(changed["head"]) == 4
+    assert (root / ".collection-runs").read_text() == "xxx"
+
+
 def test_head_matching_the_base_count_passes(tmp_path):
     result = _floor(tmp_path, {"test_a.py": SUITE}, {"test_a.py": SUITE})
     assert result.returncode == 0, result.stdout + result.stderr
