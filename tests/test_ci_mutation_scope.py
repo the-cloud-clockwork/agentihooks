@@ -547,7 +547,7 @@ def test_an_open_branch_is_graded_by_its_pull_request_mutation_shards_when_its_p
     ]
 
 
-@pytest.mark.parametrize("helper", ["oracle.py", "other.py"])
+@pytest.mark.parametrize("helper", ["oracle.py", "other.py", "dev.py"])
 def test_inherited_lines_are_regraded_once_the_branch_changes_a_source_helper_their_tests_import(tmp_path, helper):
     from scripts.ci_mutation.scope import discover_changes
 
@@ -555,18 +555,24 @@ def test_inherited_lines_are_regraded_once_the_branch_changes_a_source_helper_th
     (tmp_path / "tests").mkdir()
     test = tmp_path / "tests" / "test_dev.py"
     test.write_text("from hooks import dev, oracle\n\n\ndef test_d():\n    assert dev.d() == oracle.ONE\n")
+    (tmp_path / "tests" / "test_other.py").write_text("from hooks import other\n")
     git("add", "tests")
     commit("oracle.py", "ONE = 1\n")
-    pinned = commit("dev.py", "def d():\n    return 1\n")
+    kept = "def d():\n    return 1\n\n\ndef k():\n    return 1\n"
+    pinned = commit("dev.py", kept)
     git("checkout", "-q", "-b", "branch")
-    commit(helper, "ONE = 1\nTWO = 2\n")
+    if helper == "dev.py":
+        commit(helper, kept + "\n\ndef g():\n    return 3\n")
+    else:
+        commit(helper, "ONE = 1\nTWO = 2\n")
     git("checkout", "-q", "dev")
-    commit("dev.py", "def d():\n    return 1\n\n\ndef e():\n    return 2\n")
+    commit("dev.py", "def c():\n    return 0\n\n\n" + kept)
     git("update-ref", "refs/remotes/origin/dev", "HEAD")
     git("checkout", "-q", "branch")
     git("merge", "-q", "--no-edit", "dev")
-    if helper == "oracle.py":
-        expected = {"hooks/oracle.py": {2}, "hooks/dev.py": {3, 4, 5, 6}}
-    else:
-        expected = {"hooks/other.py": {1, 2}}
-    assert discover_changes(tmp_path, pinned, "HEAD") == expected
+    expected = {
+        "oracle.py": {"hooks/oracle.py": {2}, "hooks/dev.py": {1, 2, 3, 4}},
+        "other.py": {"hooks/other.py": {1, 2}},
+        "dev.py": {"hooks/dev.py": {11, 12, 13, 14}},
+    }
+    assert discover_changes(tmp_path, pinned, "HEAD") == expected[helper]
