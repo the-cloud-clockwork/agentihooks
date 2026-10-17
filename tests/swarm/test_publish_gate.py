@@ -101,6 +101,14 @@ def test_long_units_read_their_allowlist_rules(repo, capsys):
     assert report(capsys) == ["mod.py: file lines grew from 3000 to 3001"]
 
 
+def test_a_listed_function_that_grows_its_length_fails(repo, capsys):
+    source = "def old():\n" + "    print(1)\n" * 300
+    repo({"mod.py": source, **listed({"mod.py::long": {"function-lines": 301}})}, push=True)
+    repo({"mod.py": source.replace("def old", "def long") + "    print(1)\n"})
+    assert publish_gate.main() == 1
+    assert report(capsys) == ["mod.py: long lines grew from 301 to 302"]
+
+
 def test_an_entry_added_on_the_branch_does_not_count(repo, capsys):
     repo({"mod.py": wide()}, push=True)
     repo({"mod.py": wide(name="new"), **listed({"mod.py::new": {"PLR0913": 8}})})

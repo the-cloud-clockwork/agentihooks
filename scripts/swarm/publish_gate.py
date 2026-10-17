@@ -58,18 +58,22 @@ def complexity(
     return found
 
 
+def source(base: str, old: Path) -> bytes | None:
+    shown = subprocess.run(["git", "show", f"{base}:{old.as_posix()}"], capture_output=True)
+    try:
+        ast.parse(shown.stdout)
+    except (SyntaxError, ValueError):
+        return None
+    return shown.stdout if shown.returncode == 0 else None
+
+
 def baseline(base: str, paths: dict[Path, Path]) -> dict[tuple[str, str], tuple[int, str]]:
     with tempfile.TemporaryDirectory() as directory:
         tree, present = Path(directory).resolve(), []
         for path, old in paths.items():
-            shown = subprocess.run(["git", "show", f"{base}:{old.as_posix()}"], capture_output=True)
-            try:
-                ast.parse(shown.stdout)
-            except (SyntaxError, ValueError):
-                continue
-            if shown.returncode == 0:
+            if (content := source(base, old)) is not None:
                 (tree / path).parent.mkdir(parents=True, exist_ok=True)
-                (tree / path).write_bytes(shown.stdout)
+                (tree / path).write_bytes(content)
                 present.append(path)
         return measure(tree, present) if present else {}
 
@@ -87,11 +91,7 @@ def logic(source: bytes) -> dict[str, str]:
 def touched(base: str, paths: dict[Path, Path]) -> dict[str, set[str]]:
     found = {}
     for path, old in paths.items():
-        shown = subprocess.run(["git", "show", f"{base}:{old.as_posix()}"], capture_output=True)
-        try:
-            before = logic(shown.stdout) if shown.returncode == 0 else {}
-        except (SyntaxError, ValueError):
-            before = {}
+        before = {} if (content := source(base, old)) is None else logic(content)
         found[path.as_posix()] = {name for name, dump in logic(path.read_bytes()).items() if before.get(name) != dump}
     return found
 
@@ -116,8 +116,10 @@ def allowance(
             limit = listed.get(path, {}).get("file-lines")
         else:
             limit = listed.get(f"{path}::{name}", {}).get("function-lines" if rule == "lines" else rule)
+        if limit is not None and (path, unit) in allowed:
+            limit = min(limit, allowed[(path, unit)][0])
         if limit is not None:
-            allowed[(path, unit)] = (min(limit, allowed.get((path, unit), (limit,))[0]), "")
+            allowed[(path, unit)] = (limit, "")
     return allowed
 
 
