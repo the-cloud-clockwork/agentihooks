@@ -401,13 +401,14 @@ def test_agents_table_lists_the_master_first_with_overlays_and_stats_carry_the_t
     payload["agents"][1]["overlays"] = ["qitp-tuner", "trader", "reviewer"]
     page = open_page(payload)
     assert page.table("swarm-agents") == [
-        ["master-1", "—", "—", "—", "opus high", "—", "LIVE", "2h 0m", "message\nterminate"],
+        ["master-1", "—", "—", "—", "opus high", "—", "—", "LIVE", "2h 0m", "message\nterminate"],
         [
             "eng-58",
             "eng",
             "—",
             "qitp-tuner · trader · reviewer",
             "opus high",
+            "—",
             "pb10",
             "IDLE",
             "1m",
@@ -433,6 +434,21 @@ def test_agents_table_lists_the_master_first_with_overlays_and_stats_carry_the_t
     ]
 
 
+def test_agents_table_shows_push_inbox_and_native_terminal_for_each_agent(open_page):
+    payload = status()
+    payload["agents"][0]["capabilities"] = {"push_inbox": True, "native_terminal_attach": False}
+    payload["agents"][1]["capabilities"] = {"push_inbox": False, "native_terminal_attach": True}
+    page = open_page(payload)
+    cells = page.tab.eval_on_selector_all(
+        "#swarm-agents tr",
+        "rows => rows.map(r => [...r.querySelectorAll('.sw-transport .lbl')].map(l => [l.textContent, l.className]))",
+    )
+    assert cells == [
+        [["push", "lbl on"], ["no native terminal", "lbl off"]],
+        [["no push", "lbl off"], ["native terminal", "lbl on"]],
+    ]
+
+
 def test_agents_table_shows_live_terminals_and_never_shows_an_aged_or_failed_view_as_live(open_page):
     payload = status()
     fresh = {"state": "live", "checked_at": NOW_MS - 30_000, "live_at": NOW_MS - 30_000, "fresh_ms": 30_000}
@@ -442,8 +458,8 @@ def test_agents_table_shows_live_terminals_and_never_shows_an_aged_or_failed_vie
     }
     page = open_page(payload, clock=True)
     heads = page.tab.eval_on_selector_all("#agents-table thead th", "ths => ths.map(t => t.innerText.trim())")
-    assert heads[6:10] == ["state", "execution", "terminal", "age"]
-    assert [row[8] for row in page.table("swarm-agents")] == ["CACHED live 1m ago · stale", "LIVE"]
+    assert heads[7:11] == ["state", "execution", "terminal", "age"]
+    assert [row[9] for row in page.table("swarm-agents")] == ["CACHED live 1m ago · stale", "LIVE"]
     payload["terminals"] = {
         "master-1": {
             "state": "unverified",
@@ -455,7 +471,7 @@ def test_agents_table_shows_live_terminals_and_never_shows_an_aged_or_failed_vie
         "eng-58": {**fresh, "state": "cached", "live_at": NOW_MS - 120_000, "reason": "conversation_mismatch"},
     }
     page = open_page(payload, clock=True)
-    assert [row[8] for row in page.table("swarm-agents")] == [
+    assert [row[9] for row in page.table("swarm-agents")] == [
         "UNVERIFIED unreachable",
         "CACHED live 2m ago · conversation mismatch",
     ]
@@ -513,12 +529,13 @@ def test_agents_table_shows_each_agents_execution_identity_beside_its_terminal(o
     }
     page = open_page(payload, clock=True)
     heads = page.tab.eval_on_selector_all("#agents-table thead th", "ths => ths.map(t => t.innerText.trim())")
-    assert heads[:10] == [
+    assert heads[:11] == [
         "agent",
         "lane",
         "profile",
         "overlays",
         "model",
+        "transport",
         "task",
         "state",
         "execution",
@@ -526,7 +543,7 @@ def test_agents_table_shows_each_agents_execution_identity_beside_its_terminal(o
         "age",
     ]
     rows = page.table("swarm-agents")
-    assert [row[:2] + row[6:9] for row in rows] == [
+    assert [row[:2] + row[7:10] for row in rows] == [
         ["master-1", "—", "LIVE", "WORKING seen 1m ago\nlocal · gen 1", "—"],
         ["eng-58", "eng", "IDLE", "INPUT WAIT not seen\nlocal · gen 3", "—"],
         [
@@ -554,8 +571,8 @@ def test_a_remote_agent_without_a_terminal_view_still_shows_the_execution_column
         }
     }
     page = open_page(payload, clock=True)
-    assert page.tab.eval_on_selector_all("#agents-table th", "ths => ths.length") == 11
-    assert [row[7:9] for row in page.table("swarm-agents")] == [
+    assert page.tab.eval_on_selector_all("#agents-table th", "ths => ths.length") == 12
+    assert [row[8:10] for row in page.table("swarm-agents")] == [
         ["—", "—"],
         ["STARTING seen 1m ago\nkubernetes · gen 2 · standard", "—"],
     ]
@@ -576,14 +593,14 @@ def test_a_local_only_swarm_keeps_the_familiar_agents_table(open_page):
         for a in payload["agents"]
     }
     page = open_page(payload)
-    assert page.tab.eval_on_selector_all("#agents-table th", "ths => ths.length") == 9
+    assert page.tab.eval_on_selector_all("#agents-table th", "ths => ths.length") == 10
     assert "execution" not in page.text("#agents-table thead")
 
 
-def test_an_agents_table_without_agents_spans_all_nine_columns(open_page):
+def test_an_agents_table_without_agents_spans_all_ten_columns(open_page):
     page = open_page(status(agents=[]))
-    assert page.tab.eval_on_selector("#swarm-agents td", "td => td.colSpan") == 9
-    assert page.tab.eval_on_selector_all("#agents-table th", "ths => ths.length") == 9
+    assert page.tab.eval_on_selector("#swarm-agents td", "td => td.colSpan") == 10
+    assert page.tab.eval_on_selector_all("#agents-table th", "ths => ths.length") == 10
 
 
 def test_agents_table_lists_live_agents_first_and_pages_the_finished_ones_newest_first(open_page):
@@ -606,7 +623,7 @@ def test_agents_table_lists_live_agents_first_and_pages_the_finished_ones_newest
     rows = page.table("swarm-agents")
     assert [row[0] for row in rows[:2]] == ["master-1", "eng-58"]
     assert [row[0] for row in rows[2:52]] == [f"done-{i}" for i in range(119, 69, -1)]
-    assert all(row[6] == "FINISHED" and row[8] == "" for row in rows[2:52])
+    assert all(row[7] == "FINISHED" and row[9] == "" for row in rows[2:52])
     assert [cell.lower() for cell in rows[52]] == ["show 50 more finished agents · 70 left"]
     assert page.text("#agents-count").lower() == "2 live · 120 finished"
     page.tab.locator("#swarm-agents .page-more button").click()

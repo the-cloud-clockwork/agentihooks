@@ -9,7 +9,7 @@ import functools
 import json
 
 from scripts.inbox import links, outbox
-from scripts.inbox.store import DuplicateItem, InboxError, InboxStore, Item
+from scripts.inbox.store import Contended, DuplicateItem, InboxError, InboxStore, Item
 from scripts.swarm.store import RedisStore, SwarmError
 
 READY = ("idle", "done")
@@ -132,9 +132,22 @@ def post(inbox, item, write):
     except SwarmError as exc:
         refused = exc
     if refused:
+        if not may_cancel(inbox, item, refused):
+            return False
         inbox.close(item.id, item.address, "cancel", f"refused by the ledger page: {refused}")
         if item.sender != BY:
             inbox.send(BY, item.sender, REFUSED.format(id=item.id, reason=refused))
+        return False
+    return True
+
+
+def may_cancel(inbox, item, refused):
+    """False while the entry item a refused answer closed cannot be reopened yet: the answer waits for the next pass."""
+    if not (item.ref and inbox.entry_of(item.id)):
+        return True
+    try:
+        inbox.reopen(item, BY, f"reopened: the answer was refused by the ledger page: {refused}")
+    except Contended:
         return False
     return True
 

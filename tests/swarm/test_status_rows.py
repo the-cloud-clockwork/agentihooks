@@ -254,6 +254,7 @@ def test_status_reports_each_closed_failed_launch_pane_with_its_lines(store, mon
             "state": "failed",
             "error": "account not found",
             "pane_id": "w1:p9",
+            "after": "",
             "pane_lines": ["account not found", "$"],
         }
     ]

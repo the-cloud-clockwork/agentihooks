@@ -6,7 +6,7 @@ nav_order: 10
 
 # Promotion and releases
 
-A green push run of the Tests workflow on `dev` promotes the tree it graded into `main` as a rebased commit and creates a patch release from it. No agent and no operator opens or merges the `dev` to `main` pull request: CI does it with the TCC Main CI GitHub App. This is the promotion tier described in [Delivery tiers](delivery-tiers.md).
+A green push run of the Tests workflow on `dev` promotes the tree it graded into `main` as a squash commit and creates a patch release from it. No agent and no operator opens or merges the `dev` to `main` pull request: CI does it with the TCC Main CI GitHub App. This is the promotion tier described in [Delivery tiers](delivery-tiers.md).
 
 ## When promotion runs
 
@@ -31,9 +31,9 @@ The job runs on `ubuntu-latest` in the `release` environment, which deploys only
 2. **Compare trees.** When `main` already carries the graded tree, no pull request is made and the job goes straight to release.
 3. **Snapshot the graded revision.** The pull request never uses `dev` as its head, because `dev` keeps moving. The head is a snapshot branch `promotion/<graded sha>`. When no open pull request from that branch exists, the job creates the branch at the graded commit, or reuses it when it already points there, and fails with `Promotion snapshot differs from the graded revision` when it points elsewhere.
 4. **Open or reuse the pull request.** An open pull request from the snapshot branch into `main` is reused; otherwise one is created titled `Promote green dev to main`, whose body names the graded revision and links the Tests run. The job fails when the pull request head is not the graded commit, its head repository is not this repository, or its base is not `main`.
-5. **Wait for mergeability.** Every five seconds, up to 48 times (four minutes), it reads the pull request. It fails when the pull request head moved away from the graded commit or GitHub reports conflicts, and proceeds once GitHub reports it mergeable and `clean`.
-6. **Rebase merge.** It merges with `merge_method: rebase` and `sha` set to the graded commit, so GitHub refuses the merge if the head changed. `main` keeps linear history, as the `main-prod-lockdown` ruleset requires.
-7. **Verify the tree.** The new `main` commit must carry the same tree as the graded `dev` commit; otherwise the job fails. The rebase rewrites commit ids, so tree equality is the identity check, not commit equality.
+5. **Wait for mergeability.** Every five seconds, up to 48 times (four minutes), it reads the pull request. It fails when the pull request head moved away from the graded commit or GitHub reports conflicts, and proceeds once GitHub reports it mergeable and `clean`. An `unstable` head is also admitted when the current run's required grade succeeded and its exact running promotion job is the only unfinished check. The job is identified by its run, job id and check URL; all checks and effective commit statuses are read with pagination. Every other check must succeed or be legitimately skipped, and the latest status for every context must succeed.
+6. **Squash merge.** It merges with `merge_method: squash` and `sha` set to the graded commit, so GitHub refuses the merge if the head changed. `main` keeps linear history, as the `main-prod-lockdown` ruleset requires.
+7. **Verify the tree.** The new `main` commit must carry the same tree as the graded `dev` commit; otherwise the job fails. The squash creates a new commit id, so tree equality is the identity check, not commit equality.
 8. **Delete the snapshot.** The `promotion/<graded sha>` branch is deleted; a branch GitHub already removed is accepted.
 9. **Compute the version.** It checks out the promoted `main` commit and runs `scripts/ci_release.sh version` with `BUMP=patch` and `REUSE_TREE=true`. When a stable `vX.Y.Z` tag already points at the same tree, that version is reused and no new tag is made. Otherwise the next patch version follows the latest stable tag.
 10. **Tag and verify.** For a new version, `ci_release.sh tag` tags the promoted `main` commit `vX.Y.Z`, and `ci_release.sh verify` builds the wheel and checks its metadata version equals `X.Y.Z` (setuptools-scm derives the package version from the tag). The tag is then pushed.
@@ -96,7 +96,7 @@ Immediately after a green push run promotes, `main` carries the graded `dev` tre
 | `TCC_CI_CLIENT_ID`, `TCC_CI_APP_PRIVATE_KEY` | repository secrets, passed by `test.yml` | Mint the App token that creates and deletes the snapshot branch, opens and merges the promotion pull request, pushes the tag and creates the release |
 | `release` environment | `.github/environments/release.json` | Deployment only from `dev`; the promotion job and `release.yml` both use it |
 | `version-tags.json` ruleset | `.github/rulesets/` | A `v*` tag cannot be moved, force pushed or deleted |
-| `main-prod-lockdown` ruleset | `.github/rulesets/` | `main` needs a pull request and linear history, which the rebase merge satisfies |
+| `main-prod-lockdown` ruleset | `.github/rulesets/` | `main` needs a pull request and linear history, which the squash merge satisfies |
 | `promote` budget | `scripts/ci_budget` | Matches the job's ten minute timeout |
 
 The environment and ruleset payloads and how to apply them are in `.github/rulesets/README.md`.

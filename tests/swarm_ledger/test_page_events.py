@@ -83,6 +83,7 @@ def test_the_page_sends_its_cursor_in_a_header_and_reloads_without_it_after_410(
         "http://ledger.test/api/layout",
         "http://ledger.test/api/swarm/__LEDGER_SLUG__/models",
         "http://ledger.test/api/v1/ledgers/__LEDGER_SLUG__",
+        "http://ledger.test/api/v1/ledgers/__LEDGER_SLUG__/architecture",
     ]
 
 
@@ -145,6 +146,7 @@ def test_tabs_get_ledger_and_swarm_changes_without_polling_the_document(browser,
             ("GET", f"/api/v1/ledgers/{SLUG}/events"),
             ("GET", f"/api/v1/ledgers/{SLUG}"),
             ("GET", f"/api/swarm/{SLUG}/models"),
+            ("GET", f"/api/v1/ledgers/{SLUG}/architecture"),
         ]
         * 2
     )

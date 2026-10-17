@@ -65,14 +65,14 @@ from scripts.swarm import (
 )
 from scripts.swarm import idle as idle_state
 from scripts.swarm.ledger_client import LedgerRefused
-from scripts.swarm.naming import parse
+from scripts.swarm.naming import lane_of, parse
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.profile_choice import ProfileUnresolved
 from scripts.swarm.ready import awaiting as awaiting_merge
 from scripts.swarm.store import MASTER, PREFIX, AgentRecord, SwarmConfig, SwarmError
 from scripts.swarm_ledger import ledger_rank, ledger_workspace, task_dependencies
 from scripts.swarm_ledger.repository import hierarchy
-from scripts.swarm_v2 import master_scale
+from scripts.swarm_v2 import master_scale, master_seat_alarm
 from scripts.swarm_v2 import masters as master_seats
 
 LEASE_MS = 10 * 60 * 1000
@@ -235,6 +235,7 @@ def tick(slug, store, ledger, runtime, now_ms):
                 lambda: _master(slug, config, store, runtime, now_ms),
             )
             actions += skip_refused(master_scale.run, slug, config, store, runtime, doc, now_ms)
+            actions += skip_refused(master_seat_alarm.run, slug, store, ledger, runtime, doc)
             actions += skip_refused(dispatcher.rank_pass, slug, config, store, ledger, doc, now_ms)
             actions += skip_refused(lane_split.step, slug, config, store, doc, now_ms)
             actions += skip_refused(bottleneck_remedy.step, slug, store, ledger, doc, now_ms)
@@ -784,6 +785,11 @@ def _refund_parked(slug, store, rows, task_id):
         store.refund_claim(slug, task_id)
 
 
+def _master_set(doc, task_id):
+    by = doc.get("_meta", {}).get("stamps", {}).get(f"tasks/{task_id}/state", {}).get("by")
+    return "master" if lane_of(by) == MASTER else ""
+
+
 def _overlaps(mine, theirs):
     return bool(_shared(mine, theirs))
 
@@ -957,7 +963,8 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
                 actions.append(_unresolved(slug, ledger, rows, task["id"], str(exc)))
             continue
         store.count_claim(slug, task["id"])
-        store.record_launch(slug, replace(record, pane_id=placed.pane_id), "started")
+        after = store.take_restart(slug, task["id"]) or _master_set(doc, task["id"])
+        store.record_launch(slug, replace(record, pane_id=placed.pane_id), "started", after=after)
         store.put_agent(slug, launched)
         launch_check.begin(store, slug, record, now_ms)
         store.count_spawn(slug, placed.harness)

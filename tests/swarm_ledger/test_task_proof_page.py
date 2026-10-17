@@ -45,6 +45,7 @@ def render(task, tail=None):
                 "taskRank",
                 "rankPick",
                 "difficultyLabel",
+                "awaitingLabel",
                 "taskRow",
             )
         )

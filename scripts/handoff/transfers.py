@@ -152,8 +152,9 @@ def confirm(store, slug: str, transfer: str, agent, next_action: str, at: int) -
         expected = row["next"]
         if agent.lane == "master" and agent.harness == "codex":
             from scripts.profiles.codex_master import next_action as codex_next
+            from scripts.swarm import capabilities
 
-            expected = codex_next(expected, slug)
+            expected = codex_next(expected, slug, not capabilities.of_agent(agent).requires_foreground_inbox_wait)
         if not expected or next_action.strip() != expected:
             raise SwarmError("Confirm the first Next action exactly as written in the handoff")
         row["continuity"] = {"state": "confirmed", "at": at, "by": agent.name, "next": next_action.strip()}

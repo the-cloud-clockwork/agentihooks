@@ -45,6 +45,7 @@ AUTO = "auto"
 PICKED_LANES = ("eng", "ci")
 PLAN_MODE = ["--permission-mode", "plan"]
 REMOTE_PANE = "a remote agent's pane lives on its worker herdr server, never on the local one"
+MANAGED_RESUME = "unsupported resume: a managed Codex execution continues through its supervised server"
 
 
 def codex_plan_mode(environ):
@@ -294,8 +295,8 @@ class HerdrRuntime:
             decision["tasks"] = dict(self._quota_tasks)
         return decision
 
-    def host(self) -> host_budget.HostSample | None:
-        return host_budget.read_host()
+    def host(self) -> host_budget.HostSample | host_budget.Room | None:
+        return host_budget.controller_host(os.environ)
 
     def quota_previous(self, decision: dict) -> None:
         self._quota_previous = decision
@@ -534,7 +535,10 @@ class HerdrRuntime:
         )
         if saved and agent != saved["harness"]:
             saved = {key: value for key, value in saved.items() if key not in ("model", "account")}
-        task = {**task, "harness": agent}
+        from scripts.swarm_v2.runtime import codex
+
+        transport = codex.transport(config, agent)
+        task = {**task, "harness": agent, **({"transport": transport} if transport else {})}
         text = timing.call(
             prompt.build,
             config.slug,
@@ -547,8 +551,6 @@ class HerdrRuntime:
         )
         timing.call(priming_trace.write, self.home, config.slug, name, task)
         argv = self._argv(config, name, agent, text, f"{name}.md", profile, decision.overlays)
-        from scripts.swarm_v2.runtime import codex
-
         argv += codex.arguments(config, agent, task)
         argv += _pinned(decision.overlays, decision.bundle_revision)
         if saved.get("model"):
@@ -618,6 +620,8 @@ class HerdrRuntime:
 
     def resume(self, config, agent, text):
         """Reopen the agent's own conversation in a new pane of the same name; SpawnError unless herdr shows it there."""
+        if live_binding.managed(agent):
+            raise SpawnError(MANAGED_RESUME, "unsupported")
         if not agent.profile:
             raise SpawnError("unsupported resume: original profile is missing", "unsupported")
         if agent.harness not in effort_range.EFFORTS:
@@ -1096,6 +1100,12 @@ class HerdrRuntime:
         if agent.runtime_backend != "local":
             return
         try:
+            if live_binding.managed(agent):
+                from scripts.inbox.store import InboxStore
+                from scripts.inbox.wake import BY
+
+                InboxStore(connect().redis).send(BY, agent.name, text, fyi=True)
+                return
             self.herdr(["agent", "prompt", pane_target(agent), marked(text)])
         except Exception as exc:
             return str(exc) or type(exc).__name__

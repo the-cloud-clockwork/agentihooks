@@ -49,12 +49,22 @@ agent name, and a test walks `scripts/` and `hooks/` to keep it so.
 
 ## The master
 
+For Codex executions using `app_server`, herdr is a viewer of the managed
+thread. Closing it leaves the execution running. A push master handles inbox
+work and ends its turn when idle; it does not run `wait --inbox`. A swarm made
+with `swarm create` uses `app_server` unless it sets `codex-inbox-transport=legacy`.
+See [Managed Codex terminals](../reference/codex-managed-terminal.md) for
+reopening the same thread and handoff behavior, and
+[Codex inbox transport](../reference/codex-inbox-transport.md) for the setting,
+the canary order and rollback. The Claude inbox channel, the Codex push pump and
+broadcast topics are separate paths; that page tells them apart.
+
 Every swarm that is not stopped keeps exactly one master, named `master@<code>-<n>`. The tick spawns it when the
-swarm starts and spawns a new one when its pane dies; it is never nudged or retired for being idle, and it
+swarm starts and recovers it when its execution ends (closing a managed Codex viewer alone leaves it running); it is never nudged or retired for being idle, and it
 does not count against the `eng` and `ci` caps. A stopping swarm keeps its master until the last worker leaves.
 
 Its opening prompt makes it join the ledger as orchestrator, with operator writes reaching it as inbox messages
-and the tick waking its idle pane, answer every operator chat
+through the recorded transport (a managed Codex master receives them in its live thread), answer every operator chat
 message on the page and in its herdr pane, keep phases, follow ups, time left and status comments current, turn
 operator requests into tasks with full specs, rewrite task descriptions, set caps, pause or stop the swarm,
 talk to agents, and check merged UI work in a real browser, closing the shared browser after.
@@ -136,8 +146,8 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> restore [--from FILE]` | After a reboot or a lost Redis: refuse while any agent of the swarm is live, write the newest snapshot back (manual, stop or automatic, by the time it was taken; `--from` names an older file) and leave the swarm paused. Each agent with a conversation id, its worktree still on disk (the master: the swarm repo) and its account not out of quota is relaunched through `init-agent --resume` into its own conversation, with the same pane name, seat, task and account (`--route`) on its lane's current model and effort, never the recorded one (a master on the frontier model at high effort); it counts as resumed only once herdr shows that conversation on the new pane, and its first message tells it to re-read its task folder and the ledger before acting. Every failed resume retains its seat and task as awaiting decision. The tick never starts a fresh replacement until the master or operator chooses Fresh on the page or runs `restore-decision`. Resume retries the old conversation; a failed retry keeps the decision open. Each agent's outcome, resumed or awaiting decision with the reason, shows as a `restored` line in `status`, under `restored` in `status --json` and in the Last restore list of the ledger page swarm panel. The ledger copy is written back only when the ledger file is gone. |
 | `agentihooks swarm <id> restore-decision AGENT resume\|fresh` | The master or operator chooses how an awaiting seat returns. Resume retries the saved conversation; fresh explicitly permits a new successor. The Last restore list offers the same two controls. |
 | `agentihooks swarm <id> confirm-handoff TRANSFER --next TEXT` | A live successor confirms that it read the handoff and its first Next action. Continuity remains pending until that confirmation; binding independently records live seat occupancy. Both appear in Handoff outcomes on the page and in `status --json`. |
-| `agentihooks swarm <id> status [--json]` | Config, task counts, when the last automatic snapshot was taken (`snapshots  last automatic snapshot 2026-10-05 13:15 UTC  every 30 min  kept 4`), one row per agent, and the health findings. An agent's model and effort are what its running session last reported (the Claude status line, a Codex hook) once that differs from the launch, with model source `session`, so a manual `/model` or `/effort` switch shows on the next tick. It also prints the host room (`host room 3: <reason>`, or `host room unknown` when the process files cannot be read) and, when the last spawn pass stopped at that room, the hold (`holding spawns: host memory room 3, 3 spawned since it was granted: <reason>`). The host room gates every spawn in manual and auto scaling, and the tick's master seat too, after the quota seat check. Spawns from every swarm on the host count against the room from thirty seconds before it was granted, since a new agent takes that long to show in a reading; a room held between the load watermarks keeps its first grant time, so spawns made under it keep counting. An unknown host lets spawns pass and keeps the last known room for the next reading. An operator's own master start and restore relaunches after a reboot are not gated. |
-| `agentihooks swarm <id> autoscale [--fixture <file>] [--json]` | Read only: the autoscale decision (lane ceilings, pending raise, host room and reason) for the live swarm, or for a fixture of accounts and host readings. It never refreshes quota or writes the stored decision; `applied` is false when the swarm runs manual scaling. |
+| `agentihooks swarm <id> status [--json]` | Config, task counts, when the last automatic snapshot was taken (`snapshots  last automatic snapshot 2026-10-05 13:15 UTC  every 30 min  kept 4`), one row per agent, and the health findings. An agent's model and effort are what its running session last reported (the Claude status line, a Codex hook) once that differs from the launch, with model source `session`, so a manual `/model` or `/effort` switch shows on the next tick. It also prints the host room (`host room 3: <reason>`, or `host room unknown` with its reason when capacity is unavailable; see [Deployed host capacity](#deployed-host-capacity)) and, when the last spawn pass stopped at that room, the hold (`holding spawns: host memory room 3, 3 spawned since it was granted: <reason>`). The host room gates every spawn in manual and auto scaling, and the tick's master seat too, after the quota seat check. Spawns from every swarm on the host count against the room from thirty seconds before it was granted, since a new agent takes that long to show in a reading; a room held between the load watermarks keeps its first grant time, so spawns made under it keep counting. An unknown host lets spawns pass and keeps the last known room for the next reading. An operator's own master start and restore relaunches after a reboot are not gated. |
+| `agentihooks swarm <id> autoscale [--fixture <file>] [--json]` | Read only: the autoscale decision (lane ceilings, pending raise, host room and reason) for the live swarm, or for a fixture of accounts and host readings. It never refreshes quota or writes the stored decision; `applied` is false when the swarm runs manual scaling. In deployed mode it reads the Kubernetes worker namespace or reports why host room is off; see [Deployed host capacity](#deployed-host-capacity). |
 | `agentihooks swarm <id> names [--json]` | The swarm code, its herdr space and every agent name the swarm gave, each with its type, number, session id and spawn and retire times. |
 | `agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N max-plan-agents=N` | Change the caps; `swarm <id> max-eng-agents=N` also works. |
 | `agentihooks swarm <id> set masters=N` | The master seat count: `master@<id>` is the lead and answers the operator, `master-2@<id>` and up each own phases assigned by code. The tick launches a master in every empty seat after the lead. |
@@ -153,10 +163,10 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> set eng-agent=codex eng-model=M eng-effort=E eng-kind=K eng-role=TEXT` | Change one lane field (`ci-` likewise); the next spawn in that lane uses it. |
 | `agentihooks swarm <id> save-template NAME` | Write this swarm's caps, compact limit and lane map as the user template NAME. |
 | `agentihooks swarm <id> send-message TEXT` | Message to every live agent's inbox; never posts to chat. |
-| `agentihooks swarm <id> verdict FINDING VERDICT [--note TEXT]` | The master or the operator judges a health finding: `false-positive`, `early-real`, `established`, `insufficient-evidence` or `resolved`. The finding hides for `AGENTIHOOKS_HEALTH_COOLDOWN_MINUTES` (60) and comes back once only if its evidence grew. Over monitoring fires past `AGENTIHOOKS_HEALTH_WATCH_MIN` (20) watch calls since the agent's last action and over `AGENTIHOOKS_HEALTH_WATCH_RATIO` (5) per action; the master, whose job is mostly watching, gets `AGENTIHOOKS_HEALTH_MASTER_WATCH_MIN` (60) and `AGENTIHOOKS_HEALTH_MASTER_WATCH_RATIO` (15). Working on drain fires when a working agent that is not idle stays on an account the quota capacity decision marks closed, or one at or under `AGENTIHOOKS_HEALTH_DRAIN_LEFT` (10) percent routing left, the quota balancer's drain line where the tick may still place work, over `AGENTIHOOKS_HEALTH_DRAIN_MINUTES` (10) after its early quota handoff warning. The `watch` gate (`python -m scripts.gates watch`) refuses the watch call that would cross the same limits, so this finding means the gate leaked; a ledger watch re-arm with no live watcher always passes. |
-| `agentihooks swarm alerts` | The Grafana alert intake, run by the `agentihooks-alert-intake` user service the swarm timer installs. It takes Grafana webhook posts on `/alerts` at `AGENTIHOOKS_ALERT_INTAKE_HOST` (`0.0.0.0`) and `AGENTIHOOKS_ALERT_INTAKE_PORT` (8796; 0 turns it off), only from private addresses or the networks in `AGENTIHOOKS_ALERT_INTAKE_FROM`. An alert labelled `swarm=bottleneck` with a `ledger`, a known `stage` and `threshold_hours` keeps one standing `bottleneck-stage/<stage>` health finding on that ledger: firing updates its hours and counts each new firing once, resolved clears it. Only those labels and the `hours` value are read, never the alert text. The ci budget pass alone owns the `ci_overrun` finding, which the intake refuses: it updates that finding for each Tests run over fifteen minutes instead of adding a follow up per run. A standing finding not updated for six hours stops showing. The rules live in antoncore's Grafana provisioning. Build, ci run and launch are productive work: the intake refuses their alerts and the stage detector never raises a finding for them, though status still ranks them. The detector opens a finding only when a stage's task hours in its window pass that stage's threshold in `stage_detector.THRESHOLD_HOURS` (seat wait and review 4, quota and host hold 2, merge queue, intent fix and ci queue 1, ci overrun and launch failure 0.25). A task's claim wait starts at the latest event that made it claimable: its add, reopen or return to scope, the unfreeze or focus that admits it, its phase opening, or a dependency done. It is split into `seat_wait`, ready while every seat of its lane was busy, counting at most as many waiting tasks as the lane has seats in ready order, and `queue_wait`, every other ready instant, which raises no finding. The detector clears a finding it opened once the stage falls back under it; an alert's finding is left to its alert. Each tick, every standing stage finding over a nonzero threshold runs its remedy once per four hour window. At `delegate` or `full`, `seat_wait` moves one seat from the ci lane to the eng lane under the lane split's caps, `launch_failure` moves the first eng or ci lane pinned to the one harness the detector saw fail to the other harness and `quota_hold` does the same for the one harness its finding names as held, which each host sample records as `held_harness` when every quota held lane is pinned to that harness; a stage whose remedy is refused or has none raises its open task titled `Bottleneck fix for the <stage> stage` to `urgent`, which the dispatcher queue orders first, and an urgent one needs nothing more. Otherwise, and for every stage below `delegate`, the master gets one proposed task carrying the hours: to add that task, or to raise the open one. Each action goes to the gate log as rule `bottleneck-remedy` with the hours it targeted and is kept as the stage's last action. |
+| `agentihooks swarm <id> verdict FINDING VERDICT [--note TEXT]` | The master or the operator judges a health finding: `false-positive`, `early-real`, `established`, `insufficient-evidence` or `resolved`. The finding hides for `AGENTIHOOKS_HEALTH_COOLDOWN_MINUTES` (60); after that it shows again, with its earlier verdict attached, only when its measure is above the measure recorded at the verdict. A standing `bottleneck-stage/<stage>` finding measures the stage's latest value in the unit of the writer that owns it, not how many times it fired: task hours for the stage detector, task hours in the window for the alert intake, minutes from push to `Gate Required` for the ci budget pass, which counts pull request Tests runs over fifteen minutes, and for a `bottleneck-stage/langfuse_account_<account>` finding the highest value to threshold ratio across that account's error rate and turn latency p95 breaches. A stage that keeps firing while its value holds or falls stays hidden after its verdict and returns once the value rises past the one judged. For example, `bottleneck-stage/merge_queue` judged `established` at 1.5 task hours stays hidden when it fires again at 1.2 and returns when it fires at 2.0. The `Fired N times` evidence line on the finding counts firings and never brings it back. Over monitoring fires past `AGENTIHOOKS_HEALTH_WATCH_MIN` (20) watch calls since the agent's last action and over `AGENTIHOOKS_HEALTH_WATCH_RATIO` (5) per action; the master, whose job is mostly watching, gets `AGENTIHOOKS_HEALTH_MASTER_WATCH_MIN` (60) and `AGENTIHOOKS_HEALTH_MASTER_WATCH_RATIO` (15). Working on drain fires when a working agent that is not idle stays on an account the quota capacity decision marks closed, or one at or under `AGENTIHOOKS_HEALTH_DRAIN_LEFT` (10) percent routing left, the quota balancer's drain line where the tick may still place work, over `AGENTIHOOKS_HEALTH_DRAIN_MINUTES` (10) after its early quota handoff warning. The `watch` gate (`python -m scripts.gates watch`) refuses the watch call that would cross the same limits, so this finding means the gate leaked; a ledger watch re-arm with no live watcher always passes. |
+| `agentihooks swarm alerts` | The Grafana alert intake, run by the `agentihooks-alert-intake` user service the swarm timer installs. It takes Grafana webhook posts on `/alerts` at `AGENTIHOOKS_ALERT_INTAKE_HOST` (`0.0.0.0`) and `AGENTIHOOKS_ALERT_INTAKE_PORT` (8796; 0 turns it off), only from private addresses or the networks in `AGENTIHOOKS_ALERT_INTAKE_FROM`, and only with `Authorization: Bearer` and the token in `AGENTIHOOKS_ALERT_INTAKE_TOKEN`; a post without it gets 401 and changes nothing. It serves HTTPS from the certificate and key at `AGENTIHOOKS_ALERT_INTAKE_CERT` and `AGENTIHOOKS_ALERT_INTAKE_KEY`, and stays off without a token, or without both files on any host but loopback, so the token never crosses the network in plain text. The user service reads all three from `~/.agentihooks/.env`; when it stays off it says why in its journal and exits. An alert labelled `swarm=bottleneck` with a `ledger`, a known `stage` and `threshold_hours` keeps one standing `bottleneck-stage/<stage>` health finding on that ledger: firing updates its hours and counts each new firing once, resolved clears it. Only those labels and the `hours` value are read, never the alert text. The ci budget pass alone owns the `ci_overrun` finding, which the intake refuses: it updates that finding for each Tests run over fifteen minutes instead of adding a follow up per run. A standing finding not updated for six hours stops showing. The rules live in antoncore's Grafana provisioning. Build, ci run and launch are productive work: the intake refuses their alerts and the stage detector never raises a finding for them, though status still ranks them. The detector opens a finding only when a stage's task hours in its window pass that stage's threshold in `stage_detector.THRESHOLD_HOURS` (seat wait and review 4, quota and host hold 2, merge queue, intent fix and ci queue 1, ci overrun and launch failure 0.25). A task's claim wait starts at the latest event that made it claimable: its add, reopen or return to scope, the unfreeze or focus that admits it, its phase opening, or a dependency done. It is split into `seat_wait`, ready while every seat of its lane was busy, counting at most as many waiting tasks as the lane has seats in ready order, and `queue_wait`, every other ready instant, which raises no finding. The detector clears a finding it opened once the stage falls back under it; an alert's finding is left to its alert. Each tick, every standing stage finding over a nonzero threshold runs its remedy once per four hour window. At `delegate` or `full`, `seat_wait` moves one seat from the ci lane to the eng lane under the lane split's caps, `launch_failure` moves the first eng or ci lane pinned to the one harness the detector saw fail to the other harness and `quota_hold` does the same for the one harness its finding names as held, which each host sample records as `held_harness` when every quota held lane is pinned to that harness; a stage whose remedy is refused or has none raises its open task titled `Bottleneck fix for the <stage> stage` to `urgent`, which the dispatcher queue orders first, and an urgent one needs nothing more. Otherwise, and for every stage below `delegate`, the master gets one proposed task carrying the hours: to add that task, or to raise the open one. Each action goes to the gate log as rule `bottleneck-remedy` with the hours it targeted and is kept as the stage's last action. |
 | `agentihooks swarm <id> classify EXECUTION RULING --reason TEXT` | The master or the operator rules `lost` or `working` on an execution attempt the observer flagged for the operator under `AGENTIHOOKS_OBSERVATION_MODE=conservative`. The reason, author and time are kept on its observation. `lost` holds the attempt lost and writes the audit record; `working` holds it working until a newer loss reading (pod gone or ended, supervisor exited) flags it again, or it recovers on its own. Only a registered master record or the operator acts: any other name, an empty reason or an attempt that is not flagged is refused. `verdict` follows the same authority rule. |
-| `agentihooks swarm <id> terminal EXECUTION` | The operator opens the worker terminal of a Kubernetes execution in herdr. The command takes only the swarm and the execution: the host, the generation and the host key come from the record the controller wrote when it launched the Pod. It signs a short lived certificate with the user CA key named by `AGENTIHOOKS_TERMINAL_CA_KEY`, reads the worker namespace from the Pod policy in `AGENTIHOOKS_POD_POLICY_FILE`, writes the SSH material under the operator's own home and saves the machine in herdr. A master or any agent session is refused, and so is an execution with no recorded host key. |
+| `agentihooks swarm <id> terminal EXECUTION` | For a local managed Codex execution, reopen a native viewer on its recorded thread; see [Managed Codex terminals](../reference/codex-managed-terminal.md). For Kubernetes, the operator opens the worker terminal in herdr. The command takes only the swarm and the execution: the host, the generation and the host key come from the record the controller wrote when it launched the Pod. It signs a short lived certificate with the user CA key named by `AGENTIHOOKS_TERMINAL_CA_KEY`, reads the worker namespace from the Pod policy in `AGENTIHOOKS_POD_POLICY_FILE`, writes the SSH material under the operator's own home and saves the machine in herdr. The Kubernetes path refuses a master or any agent session, and an execution with no recorded host key. |
 | `agentihooks swarm-terminal setup [--antoncore DIR]`, `agentihooks swarm-terminal install` | Places the files the terminal command needs on the operator machine, with nobody copying them by hand. `setup` reads the user CA key from OpenBao `secret/agentihooks-swarm/terminal-attach` field `user_ca` with `OPENBAO_URL` and `OPENBAO_TOKEN`, and the Pod policy from the `swarm-pod-policy` ConfigMap in the antoncore checkout (`--antoncore`, else `AGENTIHOOKS_ANTONCORE_DIR`, else `~/dev/tcc-ecosystem/antoncore`). Each is checked before it replaces the previous file: an Ed25519 OpenSSH key, a valid policy. It writes `user_ca`, `pod-policy.json` and `terminal.env`, which names both as `AGENTIHOOKS_TERMINAL_CA_KEY` and `AGENTIHOOKS_POD_POLICY_FILE`, mode 0600 under `~/.agentihooks/swarm-terminal`, below the `*.env` autoload, and prints only their paths, the CA fingerprint and the worker namespace. `install` writes and enables the `agentihooks-swarm-terminal` user timer, which runs `setup` a minute after boot and every fifteen minutes. Both refuse inside an agent session. `operator_setup.settings` reads `terminal.env` back for the service that uses the files. The workstation reads controller host key records through `scripts.swarm_v2.herdr.publications`, which opens `AGENTIHOOKS_HIVE_REDIS_URL`, else `AGENTIHOOKS_SWARM_REDIS_URL`, only as `rediss` with the certificate and its hostname verified, refuses a URL carrying `ssl_` options and a host resolving outside the private network, and keeps each worker's host key exactly as the controller recorded it at launch. |
 | `agentihooks swarm <id> lift AGENT GATE` | The operator or the master lets one agent past one gate for an hour, the page's lift button in the Agents table runs it. It arms the lift for that agent and writes the same `lift` row to the gate log as typing `lift the <gate> gate` in the agent's pane; the hook gates and the talk gate honour it. Each agent in `status --json` lists `gates`: every gate that denied it in the last hour and whether a lift holds. Other agents are refused. |
 | `agentihooks swarm <id> cover STAGE ITEM --reason TEXT` | Marks a bottleneck stage (`seat_wait`, `ci_overrun`, `merge_queue`, or a bottleneck share such as `review`) owned by an open `phases/<id>` or `tasks/<id>`, with the reason; a spoken name such as `merge queue` is accepted, an unknown name is refused with the names it takes, and a new cover on a stage replaces the old one. A cover on a share covers every stage inside it (`review` holds `review`, `merge_queue` and `intent_fix`; `quota` holds `quota_hold`; `host` holds `host_hold`), and a cover on a stage frees its share's dispatcher seat but leaves sibling stages' remedies running. A stage with a standing finding is also taken under its exact name. While that item is open the bottleneck hunter proposes no task and takes no remedy for the stage, and the bottleneck trigger for that share does not hold the dispatcher seat open. The cover lapses and is forgotten once the item is done, out of scope, or gone from a ledger that still lists others of its kind; the stage then fires normally. The operator, the master or the dispatcher writes it; a closed or missing item is refused, and so is every other agent. |
@@ -222,7 +232,7 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 |---|---|
 | `agentihooks swarm <id> issue URL` | Record the task's GitHub issue, where the repo has issues; without them the ledger task is the spec. |
 | `agentihooks swarm <id> pr URL` | Record the task's pull request, its head branch and that branch's repository (`branch_repo`); the task moves to `pr`. |
-| `agentihooks swarm <id> merge queue\|dequeue\|state URL` | Queue a pull request into `dev` on the merge queue at its current head, take it out of the queue, or report its state, head and queue entry as JSON. It goes through `gh api graphql`, so any `gh` with `gh api` works; queue and dequeue run only for a swarm worker, never the master, and refuse a pull request into any other base. |
+| `agentihooks swarm <id> merge queue\|dequeue\|state URL` | Queue a pull request into `dev` on the merge queue at its current head, take it out of the queue, or report its state, head and queue entry as JSON. `queue` reads the newest `pull_request` run of the Tests workflow on the current head and refuses unless that run passed (`the current pull request head must pass Tests before queueing`); it then enqueues that exact head with `expectedHeadOid`. It never compares the branch with `dev`, merges `dev` into it or updates it, whatever changed on `dev` since the checks ran: the merge group runs the unit suite on the head merged with the newest `dev` ([Delivery tiers](../reference/delivery-tiers.md#entering-the-merge-queue)). A repository with no merge queue on `dev` gets a squash merge instead, only for a ready pull request with green checks and a review decision of none or approved. A pull request already in the queue returns its state without another check or enqueue. It goes through `gh api graphql`, so any `gh` with `gh api` works; queue and dequeue run only for a swarm worker on its task's recorded pull request, never the master, and refuse a pull request into any other base. |
 | `agentihooks swarm <id> prepare` | Set `--repositories /absolute/repo,/absolute/other` when adding a task, or `task set <task> repositories=/absolute/repo`. Use that explicit `repositories` list of local repository paths; without it, report that the swarm repository is the default. Prose repository names do not select repositories. Create or reuse one worktree per repository from its own `dev`, with a recorded continuation branch scoped to that repository. Return each worktree and branch. |
 | `agentihooks swarm <id> publish --message TEXT -- FILE...` | Use the repository of the current task worktree; from a primary checkout, resolve the sole task repository or require a worktree selection when several are declared. Stage only explicit repository relative files, commit, run that repository’s `scripts.ci_prepush` gate, then push and retain its branch separately from other task repositories. The result names the gate. A repository without that module uses the named AgentiHooks touched Python fallback: lint, format, size and complexity on changed Python files since its own `origin/dev` merge base, without agentihooks baseline files or local tests. Unrelated tracked changes are refused before staging; unrelated untracked files are preserved. A failed stage stops publication and names the next command. Repeat the command after fixing a failure; an already committed head is graded again without an empty commit. Protected branches and tasks owned by another agent are refused. Tests run only in CI. |
 | `agentihooks swarm <id> branch` | Record the current worktree branch on the task once it is on origin, with its repository (`branch_repo`, the origin remote without credentials), so dependent tasks can start from it. |
@@ -239,6 +249,108 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> restack` | After the parked blockers finish, fetch origin and rebase task work from `stacked_base` onto `origin/dev`. Run in a clean branch cut from the parked branch. Success clears `parked_on`; a conflict lists the files and retains the parked list. Resolve the files, run `git rebase --continue`, then run restack again to finish. |
 | `agentihooks swarm <id> learned TEXT [--maturity data\|note\|insight\|canon]` | Add a lesson to your seat's learned notes, kept for every later occupant. The maturity defaults to `note`; only the master writes `canon`. |
 | `agentihooks swarm <id> say TEXT [--to NAME\|eng\|ci]` | Post to the swarm chat. |
+
+## Deployed host capacity
+
+When `AGENTIHOOKS_DEPLOYMENT` is unset or `local`, host room and the host pressure
+alert use the local host. Any other value, including `compose` and `distributed`,
+selects deployed behavior: neither check nor the live `autoscale` command reads
+the controller's own node for worker capacity.
+
+The Kubernetes runtime supplies host room from the worker namespace's
+ResourceQuota and the Pod policy's optional `worker_pool` budget. It uses the
+smallest known room from those sources. The pool reading lists every Pod in the
+policy namespace without a swarm label selector, counts unfinished Pods and
+their CPU and memory requests, and subtracts those requests from the declared
+budget. The next worker's selected profile supplies its CPU request (or CPU
+limit when no request is set) and memory limit. The smallest remaining Pod,
+CPU or memory allowance determines how many more workers fit, with a floor of
+zero. This measures declared capacity and requests, not node load or live CPU
+and memory utilization; it does not add Kubernetes nodes.
+
+### Configure the worker reading
+
+Use the deployed controller's existing Kubernetes runtime configuration. These
+Helm values map to the runtime environment:
+
+| Helm value | Environment variable | Purpose |
+|---|---|---|
+| `deployment` | `AGENTIHOOKS_DEPLOYMENT` | `distributed` enables Kubernetes worker placement. |
+| `controller.workers.apiUrl` | `AGENTIHOOKS_CONTROL_API_URL` | Worker registration API URL; an empty value leaves the worker runtime unconfigured. |
+| `controller.workers.podPolicy` or `podPolicyConfigMap` | `AGENTIHOOKS_POD_POLICY_FILE` | Approved Pod policy, including namespace, profiles and optional pool budget. |
+| `controller.workers.imageTag` | `AGENTIHOOKS_WORKER_IMAGE_TAG` | Worker image tag, never a digest. |
+| `controller.workers.profile` | `AGENTIHOOKS_WORKER_PROFILE` | Profile present in the policy; determines the next worker's requests. |
+| `controller.workers.cap` | `AGENTIHOOKS_LAUNCH_CAP` | Positive whole-number launch cap. |
+| `controller.workers.projects` | `AGENTIHOOKS_LAUNCH_PROJECTS` | Nonempty project list, rendered as comma-separated project names. |
+| `controller.workers.brain` | `AGENTIHOOKS_LAUNCH_BRAIN` | Required brain setting for worker launches. |
+
+For example, merge this fragment into an already valid Pod policy, retaining
+its namespace, selected profile and other required fields:
+
+```json
+{
+  "worker_pool": {
+    "pods": 4,
+    "cpu_millis": 8000,
+    "memory_mib": 12288
+  }
+}
+```
+
+The values declare a four Pod budget with eight CPUs and 12288 MiB of memory.
+Use the [Pod policy schema](../swarm-v2/schemas/pod-policy.json) for the complete
+policy contract. The chart can read that policy from an existing ConfigMap:
+
+```yaml
+deployment: distributed
+controller:
+  workers:
+    podPolicyConfigMap: approved-worker-policy
+```
+
+The ConfigMap must contain `pod-policy.json`; retain the deployment's existing
+API URL, image tag, profile, cap, projects, brain and service account settings.
+The controller needs Kubernetes access to list Pods and ResourceQuotas in the
+policy namespace. A missing `worker_pool` still permits a known namespace quota
+to supply room. If only one source is readable, that source supplies the room.
+
+### Inspect capacity and off reasons
+
+Run the live command in the deployed controller environment, so it receives the
+same deployment flag and worker settings:
+
+```bash
+agentihooks swarm example-swarm autoscale
+agentihooks swarm example-swarm autoscale --json
+agentihooks swarm example-swarm status
+```
+
+`autoscale` computes a read-only decision; it neither refreshes account quota nor
+writes the stored capacity decision. `status` shows the stored host room from
+the last capacity decision. A pool reading reports Pods, CPU and memory requested
+against the declared budget and how many more fit. A zero room holds new spawns;
+manual scaling still obeys the host room gate.
+
+The host pressure alert is always off in deployed mode, even when worker room is
+available. After the pressure check records that state, `status` prints:
+
+```text
+host pressure alert off: a deployed controller's own node says nothing about worker capacity; the host room line shows the worker pool reading or why it is off
+```
+
+If the Kubernetes runtime is absent, autoscale instead reports:
+
+```text
+host room None: host room off: the Kubernetes runtime is not configured on this deployed controller, so the worker pool cannot be read and spawns pass
+```
+
+Refused worker settings append the settings refusal to that reason. If no worker
+reading is wired into the controller tick, its host room is also off with an
+explicit reason. If neither namespace quota nor pool budget yields known room,
+the reason names the missing budget or failed reading. Unknown room permits
+spawns through the host gate; quota and launch controls still apply. Check the
+runtime settings, policy profile, declared pool and namespace API permissions
+when room is unknown. Do not use the controller node's load to infer worker room.
 
 ## Context recycle
 
@@ -545,7 +657,8 @@ The default is `redis://127.0.0.1:6379/0`; set `AGENTIHOOKS_SWARM_REDIS_URL` to 
 Every addressed message goes through the agent inbox, with one item per recipient, sent by the real author;
 an unaddressed agent line only shows on the page. Items pass from pending to delivered, then confirmed by
 the receiver; delivery alone leaves them eligible for redelivery. The receiver gets the item through its
-inbox channel or next tool call, an idle pane is prompted by the next tick, and unread items climb to the
+inbox channel, managed Codex thread or next tool call. The tick prompts an idle worker pane only when its
+transport does not own push delivery; unread items climb to the
 master, then to the operator. A reply to the operator is posted on the page chat and its item closed. The
 page keeps the whole conversation.
 
@@ -592,9 +705,14 @@ response was lost.
 |---|---|---|
 | `AGENTIHOOKS_INBOX_OUTBOX_MAX_BYTES` | 1048576 bytes (1 MiB) | Refuse an operation that would exceed the limit, with an error; retain everything already queued. |
 | `AGENTIHOOKS_INBOX_OUTBOX_WARN_BYTES` | 786432 bytes (768 KiB) | Warn when the queued bytes reach this threshold. |
+| `AGENTIHOOKS_INBOX_OUTBOX_MAX_ATTEMPTS` | 3 | Set aside a record after this many replays that fail with an unexpected error. |
 
 Corrupt records and operations refused during replay are preserved in `inbox-outbox.skipped.jsonl`, with
-the reason reported; later valid records can continue. Inspect and resolve those refusals rather than
+the reason reported; later valid records can continue. A record whose replay fails with an unexpected error
+stops its lane and is retried on the next replay; its failures are counted in `inbox-outbox.attempts.json`,
+and at the attempt limit it is set aside the same way so the records behind it replay.
+`agentihooks swarm <id> status` prints the queued, retrying and set aside counts while any is nonzero, and
+`status --json` carries them under `outbox`. Inspect and resolve those refusals rather than
 treating them as delivered. The outbox depends on the local disk surviving and having space, and its limit
 is a refusal boundary. Restoring Redis lets replay free space; a send refused before queuing must be retried.
 

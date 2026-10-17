@@ -994,7 +994,7 @@ def test_the_alerts_command_serves_the_intake_with_the_swarm_store_and_clock(mon
     monkeypatch.setenv("AGENTIHOOKS_ALERT_INTAKE_PORT", "9002")
     monkeypatch.setattr(alert_intake, "serve", lambda redis, settings, clock: ran.append((redis, settings, clock)))
     cli.cmd_alerts(SimpleNamespace(redis="redis"), None)
-    assert ran == [("redis", alert_intake.Settings("0.0.0.0", 9002, None), cli.now_ms)]
+    assert ran == [("redis", alert_intake.Settings("0.0.0.0", 9002, None, "", "", ""), cli.now_ms)]
 
 
 def test_the_waker_command_runs_the_waker_with_the_swarm_clock(monkeypatch):
@@ -2262,7 +2262,7 @@ def test_status_shows_each_agent_conversation_id_or_a_dash(env, capsys):
     env[2].live.update({"engineer@a1b2c3-0001", "engineer@a1b2c3-0002"})
     run("sw", "status")
     lines = {line.split("\t")[0]: line.split("\t") for line in capsys.readouterr().out.splitlines() if "\t" in line}
-    assert lines["engineer@a1b2c3-0001"][-3] == "5c90d80c" and lines["engineer@a1b2c3-0002"][-3] == "-"
+    assert lines["engineer@a1b2c3-0001"][-5] == "5c90d80c" and lines["engineer@a1b2c3-0002"][-5] == "-"
     run("sw", "status", "--json")
     agents = {a["name"]: a for a in json.loads(capsys.readouterr().out.splitlines()[-1])["agents"]}
     assert (agents["engineer@a1b2c3-0001"]["conversation_id"], agents["engineer@a1b2c3-0002"]["conversation_id"]) == (

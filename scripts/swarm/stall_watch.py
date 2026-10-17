@@ -201,6 +201,7 @@ def _reopen(watch, mail, task, case, minutes, limit):
     )
     if reopened.get("state") != "open" or reopened.get("claimed_by"):
         return []
+    watch.store.mark_restart(watch.slug, tid, "watchdog")
     if owner:
         watch.store.release(watch.slug, tid, owner)
     if agent is not None:

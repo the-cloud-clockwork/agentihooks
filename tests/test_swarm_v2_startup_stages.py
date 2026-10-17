@@ -468,6 +468,109 @@ def test_scale_ups_are_deduplicated_across_pods_and_ordered_per_group():
     assert stages.scale_ups(events) == {"g1": [(T0 + 1000, 2), (T0 + 5000, 4)], "g2": [(T0 + 5000, 0)]}
 
 
+OCID = "ocid1.instance.oc1.eu-frankfurt-1.abc"
+POOL = "ocid1.instancepool.oc1.eu-frankfurt-1.research"
+
+
+def scaled_event(when, message, reason="ScaledUpGroup", field="firstTimestamp"):
+    return {
+        "reason": reason,
+        field: when,
+        "message": message,
+        "involvedObject": {"kind": "ConfigMap", "namespace": "kube-system", "name": "cluster-autoscaler-oci-status"},
+    }
+
+
+def oci_capture():
+    raw = raw_capture()
+    raw["nodes"]["items"][0]["spec"]["providerID"] = OCID
+    raw["events"]["items"] += [
+        scaled_event("2026-10-11T14:36:20Z", f"Scale-up: setting group {POOL} size to 1 instead of 0 (max: 10)"),
+        scaled_event(
+            "2026-10-11T14:50:00.25Z",
+            f"Scale-up: setting group {POOL} size to 3 instead of 1 (max: 10)",
+            field="eventTime",
+        ),
+        scaled_event("2026-10-11T14:36:21Z", f"Scale-up: setting group {POOL} size to 1 instead of 0", reason="Other"),
+        scaled_event("2026-10-11T14:36:22Z", "Scale-up: group size unchanged"),
+        {
+            **scaled_event("2026-10-10T09:00:00Z", f"Scale-up: setting group {POOL} size to 1 instead of 0 (max: 10)"),
+            "lastTimestamp": "2026-10-11T14:40:00Z",
+            "count": 3,
+        },
+        {"reason": "ScaledUpGroup", "message": f"Scale-up: setting group {POOL} size to 2 instead of 1"},
+    ]
+    raw["activities"] = {"Activities": []}
+    raw["instances"] = {
+        "Reservations": [],
+        "Oci": [{"id": OCID, "time-created": "2026-10-11T14:36:41.500000+00:00", "instance-pool": POOL}],
+    }
+    return raw
+
+
+def test_the_autoscaler_scaled_up_group_events_give_each_group_its_scale_ups():
+    assert stages.scaled_groups(oci_capture()["events"]["items"]) == {
+        POOL: [
+            [stages.instant("2026-10-10T09:00:00Z"), 0],
+            [stages.instant("2026-10-11T14:36:20Z"), 0],
+            [stages.instant("2026-10-11T14:40:00Z"), 0],
+            [stages.instant("2026-10-11T14:50:00.25Z"), 1],
+        ]
+    }
+    assert stages.scaled_groups([]) == {}
+
+
+def test_reduce_charges_an_oci_instance_to_its_pool_at_its_creation():
+    reduced = stages.reduce(oci_capture())
+    assert reduced["nodes"][NODE]["instance"] == OCID
+    assert reduced["scaled_groups"] == stages.scaled_groups(oci_capture()["events"]["items"])
+    created = stages.instant("2026-10-11T14:36:41.5Z")
+    assert reduced["launches"] == {
+        OCID: {"group": POOL, "requested": created, "launched": created, "source": stages.NEW_INSTANCE}
+    }
+
+
+def test_a_read_without_oci_listings_has_no_scaled_groups_or_oci_launches():
+    reduced = stages.reduce(raw_capture())
+    assert reduced["scaled_groups"] == {}
+    assert list(reduced["launches"]) == ["i-0ad35d2621bca80ff", "i-0b28"]
+
+
+def test_an_oci_instance_without_its_pool_tag_fails_the_read():
+    raw = oci_capture()
+    raw["instances"]["Oci"][0]["instance-pool"] = None
+    with pytest.raises(ValueError, match=OCID):
+        stages.reduce(raw)
+
+
+def test_a_scaled_up_group_event_scales_from_zero_when_the_pod_event_comes_late():
+    events = [e for e in cold_events(group=POOL) if e["reason"] != "TriggeredScaleUp"]
+    events.append(ev("default/a", "TriggeredScaleUp", 80, f"pod triggered scale-up: [{{{POOL} 0->1 (max: 10)}}]"))
+    pods = {"default/a": {"created": T0 - 500, "ready": T0 + 97_000}}
+    oci = {**read(events, pods), "scaled_groups": {POOL: [[T0 + 9000, 0]]}}
+    oci["launches"] = {"i-0ad35d2621bca80ff": {**oci["launches"]["i-0ad35d2621bca80ff"], "group": POOL}}
+    [entry] = stages.attribute(oci)
+    assert (entry["node_kind"], entry["from_zero"]) == ("cold", True)
+    assert {k: entry["stages"][k] for k in stages.NODE_STAGES} == {
+        "trigger": 9000,
+        "instance": 12000,
+        "join": 46000,
+        "schedule": 3000,
+    }
+    assert stages.claim([entry], stages.COLD_LABEL) == [entry]
+    assert stages.attribute({**oci, "scaled_groups": {}})[0]["node_kind"] == "warm"
+    one_more = {**oci, "scaled_groups": {POOL: [[T0 + 9000, 1]]}}
+    assert stages.attribute(one_more)[0]["from_zero"] is False
+
+
+def test_scaled_up_group_events_join_the_pod_scale_ups_of_the_same_group():
+    pods = {"default/a": {"created": T0 - 500, "ready": T0 + 97_000}}
+    both = {**read(cold_events(group=POOL), pods), "scaled_groups": {POOL: [[T0 - 60_000, 1]]}}
+    both["launches"] = {"i-0ad35d2621bca80ff": {**both["launches"]["i-0ad35d2621bca80ff"], "group": POOL}}
+    [entry] = stages.attribute(both)
+    assert (entry["from_zero"], entry["stages"]["trigger"]) == (True, 9000)
+
+
 def write_capture(folder):
     folder.mkdir()
     raw = raw_capture()

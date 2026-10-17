@@ -49,7 +49,7 @@
     {
       "type": "merge_queue",
       "parameters": {
-        "check_response_timeout_minutes": 60,
+        "check_response_timeout_minutes": 25,
         "grouping_strategy": "ALLGREEN",
         "max_entries_to_build": 2,
         "max_entries_to_merge": 2,

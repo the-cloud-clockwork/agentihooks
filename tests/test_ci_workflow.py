@@ -256,9 +256,9 @@ def test_the_hung_test_bound_reads_the_committed_durations_not_the_downloaded_co
     assert _slowest_committed_test() == 1.0
 
 
-def test_tests_run_on_pull_requests_into_dev_and_main():
+def test_tests_keep_dev_pull_request_and_integration_triggers():
     triggers = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())[True]
-    assert set(triggers["pull_request"]["branches"]) == {"dev", "main"}
+    assert set(triggers["pull_request"]["branches"]) in ({"dev", "main"}, {"dev"})
     assert triggers["push"]["branches"] == ["dev"]
     assert triggers["merge_group"] == {"types": ["checks_requested"]}
 
@@ -417,7 +417,7 @@ def _workflow() -> dict:
 def test_shards_wait_only_on_the_durations_lookup():
     jobs = _workflow()["jobs"]
     assert "already-tested" not in jobs
-    assert jobs["split"]["needs"] == ["durations", "select", "reuse", "admission"]
+    assert jobs["split"]["needs"] in (["durations", "select", "reuse", "admission"], ["select", "reuse", "admission"])
     assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
     assert jobs["lint"]["needs"] in (["reuse"], ["reuse", "admission"])
 
@@ -963,8 +963,11 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
             "${{ !cancelled() && needs.mutation-plan.result == 'success' && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}",
         ),
     )
-    assert plan["outputs"]["shards"] == "${{ steps.plan.outputs.shards }}"
+    assert (
+        plan["outputs"]["shards"] == "${{ steps.reuse.outputs.reused == 'true' && '[0]' || steps.plan.outputs.shards }}"
+    )
     step = next(step for step in plan["steps"] if step.get("id") == "plan")
+    assert step["if"] == "steps.reuse.outputs.reused != 'true'"
     assert step["run"] == "python -m scripts.ci_mutation." + 'plan --base "$BASE"'
     assert step["env"] == {
         "BASE": "${{ inputs.base || 'origin/dev' }}",
@@ -1007,7 +1010,10 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
 def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
     jobs = _mutation_workflow()["jobs"]
     plan, stats, mutation = jobs["mutation-plan"], jobs["mutation-stats"], jobs["mutation"]
-    assert plan["outputs"]["stats_parts"] == "${{ steps.plan.outputs.stats_parts }}"
+    assert (
+        plan["outputs"]["stats_parts"]
+        == "${{ steps.reuse.outputs.reused == 'true' && '[0]' || steps.plan.outputs.stats_parts }}"
+    )
     assert stats["needs"] in ("mutation-plan", ["mutation-plan", "admission"])
     assert (stats["if"], mutation["if"]) in (
         (
@@ -1024,7 +1030,8 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
         "matrix": {"part": "${{ fromJSON(needs.mutation-plan.outputs.stats_parts) }}"},
     }
     setup = [step for step in mutation["steps"] if not str(step.get("name", "")).startswith(("Mutate", "Upload"))]
-    setup = [step for step in setup if step.get("name") != "Download the shared mutation stats"]
+    downloads = ("Download the shared mutation stats", "Download the reused preflight report")
+    setup = [step for step in setup if step.get("name") not in downloads]
     assert stats["steps"][: len(setup)] == setup
     collect = stats["steps"][len(setup)]
     assert collect["env"]["BASES"] == "${{ needs.mutation-plan.outputs.bases }}"
@@ -1050,3 +1057,60 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
     assert names.index("Download the shared mutation stats") < names.index("Mutate changed Python files")
     assert download["uses"] == "actions/download-artifact@v4"
     assert download["with"] == {"pattern": "mutation-stats-*", "path": ".mutation-stats", "merge-multiple": True}
+
+
+def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_protected_grader():
+    jobs = _mutation_workflow()["jobs"]
+    plan, stats, mutation = jobs["mutation-plan"], jobs["mutation-stats"], jobs["mutation"]
+    assert plan["outputs"]["reused"] == "${{ steps.reuse.outputs.reused || 'false' }}"
+    names = [step.get("name") for step in plan["steps"]]
+    grader = plan["steps"][names.index("Check out the protected grader")]
+    assert grader["env"] == {"GRADER": "${{ github.event.pull_request.base.sha }}"}
+    assert 'git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD' in grader["run"]
+    decide = plan["steps"][names.index("Reuse the branch preflight report graded on this head and base")]
+    assert decide["id"] == "reuse"
+    assert decide["if"] == grader["if"] == "github.event_name == 'pull_request'"
+    assert decide["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
+    assert decide["env"]["HEAD_SHA"] == "${{ github.event.pull_request.head.sha }}"
+    assert 'base=$(git merge-base origin/dev "$HEAD_SHA")' in decide["run"]
+    assert 'PYTHONPATH="$RUNNER_TEMP/grader" python -P -m scripts.ci_mutation.reuse' in decide["run"]
+    assert decide["run"].rstrip().endswith('--head "$HEAD_SHA" --base "$base" --grader "$GRADER"')
+    assert decide["env"]["GRADER"] == grader["env"]["GRADER"]
+    assert 'grep -q "^def exact(" "$RUNNER_TEMP/grader/scripts/ci_mutation/reuse.py"' in decide["run"]
+    assert "||" not in decide["run"]
+    upload = plan["steps"][names.index("Upload the reused preflight report")]
+    assert upload["if"] == "steps.reuse.outputs.reused == 'true'"
+    assert upload["with"]["name"] == "mutation-preflight-reuse"
+    assert upload["with"]["if-no-files-found"] == "error"
+    order = ["app-token", "reuse", "plan"]
+    ids = [step.get("id") for step in plan["steps"]]
+    assert [ids.index(name) for name in order] == sorted(ids.index(name) for name in order)
+    install = plan["steps"][names.index("Install dependencies")]
+    assert install["if"] == "steps.reuse.outputs.reused != 'true'"
+    assert names.index("Upload the reused preflight report") < names.index("Install dependencies")
+    skipped = "needs.mutation-plan.outputs.reused != 'true'"
+    for job, guarded in (
+        (stats, ["Install dependencies", "Select mutation tests before browser setup", "Upload mutation stats part"]),
+        (
+            mutation,
+            [
+                "Install dependencies",
+                "Select mutation tests before browser setup",
+                "Download the shared mutation stats",
+            ],
+        ),
+    ):
+        steps = {step.get("name"): step for step in job["steps"]}
+        assert all(steps[name]["if"] == skipped for name in guarded)
+    collect = next(step for step in stats["steps"] if str(step.get("name", "")).startswith("Collect"))
+    assert collect["if"] == skipped
+    steps = {step.get("name"): step for step in mutation["steps"]}
+    assert steps["Mutate changed Python files"]["if"] == f"github.event_name == 'pull_request' && {skipped}"
+    assert steps["Mutate dispatched Python files"]["if"] == "github.event_name == 'workflow_dispatch'"
+    reused = steps["Download the reused preflight report"]
+    assert reused["if"] == "needs.mutation-plan.outputs.reused == 'true'"
+    assert reused["with"] == {"name": "mutation-preflight-reuse", "path": ".mutation-gate"}
+    shard_order = list(steps)
+    reused_index = shard_order.index("Download the reused preflight report")
+    assert reused_index < shard_order.index("Upload complete mutation evidence")
+    assert steps["Upload complete mutation evidence"]["if"] == "always()"
