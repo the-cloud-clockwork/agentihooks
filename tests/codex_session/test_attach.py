@@ -265,8 +265,12 @@ def test_only_a_local_app_server_execution_reopens_in_a_native_terminal(executio
 def test_reopen_resumes_the_recorded_thread_and_never_starts_a_server(monkeypatch):
     from types import SimpleNamespace
 
-    written = []
-    store, agent = SimpleNamespace(put_agent=lambda *put: written.append(put)), _agents()[1]
+    written, agent = [], _agents()[1]
+    current = replace(agent, state="idle")
+    store = SimpleNamespace(
+        put_agent=lambda *put: written.append(put),
+        execution=lambda slug, execution_id: current if (slug, execution_id) == ("sw", "exe-1") else None,
+    )
     monkeypatch.setattr(
         "scripts.swarm.live_binding.transport",
         lambda found, seen: RECORD if (found, seen) == (store, agent) else None,
@@ -277,7 +281,7 @@ def test_reopen_resumes_the_recorded_thread_and_never_starts_a_server(monkeypatc
     assert opened == [("sw-master-1", ["/bin/codex", "resume", "--remote", RECORD.endpoint_ref, "thread-1"])]
     assert not {"app-server", "serve", "scripts.codex_session"} & set(opened[0][1])
     assert result == {"agent": "sw-master-1", "thread": "thread-1", "pane": "w9:p4"}
-    assert written == [("sw", replace(agent, pane_id="w9:p4"))]
+    assert written == [("sw", replace(current, pane_id="w9:p4"))]
 
 
 def test_reopen_refused_by_the_viewer_records_no_pane(monkeypatch):
@@ -295,6 +299,7 @@ def test_reopen_refused_by_the_viewer_records_no_pane(monkeypatch):
     assert written == []
 
 
+@pytest.mark.parametrize("record", [None, replace(RECORD, state=STARTING), replace(RECORD, thread_id="")])
 def test_reopen_refuses_an_execution_with_no_connected_thread(monkeypatch, record):
     from types import SimpleNamespace
 
@@ -306,6 +311,9 @@ def test_reopen_refuses_an_execution_with_no_connected_thread(monkeypatch, recor
     assert opened == []
 
 
+@pytest.mark.parametrize(
+    ("slug", "workspace"), [("proof-323133-cxc8-1", "proof-323133-cxc8-1"), ("sw", "agentihooks-323133")]
+)
 def test_the_local_terminal_opens_the_viewer_in_the_swarm_workspace(monkeypatch, slug, workspace):
     from pathlib import Path
     from types import SimpleNamespace
@@ -318,6 +326,7 @@ def test_the_local_terminal_opens_the_viewer_in_the_swarm_workspace(monkeypatch,
         agents=lambda asked: _agents() if asked == slug else [],
         config=lambda asked: config if asked == slug else None,
         put_agent=lambda *put: written.append(put),
+        execution=lambda asked, execution_id: next(a for a in _agents() if a.execution_id == execution_id),
     )
     monkeypatch.setattr("scripts.swarm.live_binding.transport", lambda found, seen: RECORD if found is store else None)
     opened = []

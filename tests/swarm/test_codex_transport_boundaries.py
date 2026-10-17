@@ -77,8 +77,11 @@ def test_reopening_a_managed_viewer_records_its_new_pane_on_the_execution(storag
     admitted = storage.start_execution("sw", managed)
     record = SimpleNamespace(state=attach.CONNECTED, thread_id="thread-1", endpoint_ref="unix:///run/codex.sock")
     monkeypatch.setattr(live_binding, "transport", lambda store, agent: record)
+    storage.put_agent("sw", replace(admitted, state="idle", idle_ticks=3))
     attach.reopen(storage, "sw", admitted, lambda title, argv: SimpleNamespace(pane_id="w2:p7"), "codex")
-    assert storage.execution_occupants("sw")[admitted.seat] == replace(admitted, pane_id="w2:p7")
+    assert storage.execution_occupants("sw")[admitted.seat] == replace(
+        admitted, state="idle", idle_ticks=3, pane_id="w2:p7"
+    )
     assert [(agent.name, agent.pane_id) for agent in storage.agents("sw")] == [(admitted.name, "w2:p7")]
 
 

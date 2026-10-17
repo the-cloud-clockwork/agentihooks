@@ -5,6 +5,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -105,15 +106,13 @@ def reopenable(store: "RedisStore", slug: str, execution_id: str) -> "AgentRecor
 
 
 def reopen(store: "RedisStore", slug: str, agent: "AgentRecord", open_viewer: Open, codex_bin: str) -> dict:
-    from dataclasses import replace
-
     from scripts.swarm import live_binding
 
     record = live_binding.transport(store, agent)
     if not attachable(record):
         raise AttachError(NO_THREAD.format(agent.name))
     placed = open_viewer(agent.name, viewer_argv(codex_bin, record))
-    store.put_agent(slug, replace(agent, pane_id=placed.pane_id))
+    store.put_agent(slug, replace(store.execution(slug, agent.execution_id), pane_id=placed.pane_id))
     return {"agent": agent.name, "thread": record.thread_id, "pane": placed.pane_id}
 
 
