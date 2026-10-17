@@ -48,6 +48,16 @@ def test_stored_durations_share_selection_admission_before_both_shard_paths():
     assert published["with"]["if-no-files-found"] == "error"
 
 
+@pytest.mark.parametrize("shard_path", ["split", "unit-selected"])
+def test_each_shard_path_fails_red_when_selection_names_missing_durations(shard_path):
+    steps = _workflow()["jobs"][shard_path]["steps"]
+    restore = next(step for step in steps if step.get("name") == "Restore latest dev durations")
+    assert restore["with"]["key"] == "${{ needs.select.outputs.key }}"
+    assert restore["with"]["fail-on-cache-miss"] is True
+    adopt = next(step for step in steps if step.get("name") == "Adopt latest dev durations")
+    assert "python -m tests.dev_durations" in adopt["run"]
+
+
 @pytest.mark.parametrize("gate_plant,allowed", [("", False), ("false", False), ("true", True)])
 def test_full_tests_dispatch_requires_explicit_gate_plant_intent(gate_plant, allowed):
     workflow = _workflow()
