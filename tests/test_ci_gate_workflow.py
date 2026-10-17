@@ -290,7 +290,7 @@ def test_dev_records_the_suite_count_and_the_count_floor_reads_it_only_through_t
     record, upload = split["Record the suite count for later bases"], split["Upload the suite count record"]
     assert record["if"] == upload["if"] == on_dev
     assert 'python -m tests.count_floor --record "$RUNNER_TEMP/count-record/record.json"' in record["run"]
-    assert 'git worktree add --detach "$RUNNER_TEMP/recorded" HEAD' in record["run"]
+    assert 'git worktree add --detach "$RUNNER_TEMP/base" HEAD' in record["run"]
     assert upload["with"]["name"] == "count-record-${{ matrix.python-version }}"
     count = jobs["test-count"]["steps"]
     names = [step.get("name") for step in count]

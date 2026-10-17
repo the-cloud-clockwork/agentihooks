@@ -798,10 +798,10 @@ jobs:
       - name: Record the suite count for later bases
         if: github.event_name == 'push' && github.ref == 'refs/heads/dev' && env.UNIT_SOURCE == ''
         run: |
-          git worktree add --detach "$RUNNER_TEMP/recorded" HEAD
+          git worktree add --detach "$RUNNER_TEMP/base" HEAD
           mkdir -p "$RUNNER_TEMP/count-record"
-          cd "$RUNNER_TEMP/recorded"
-          python -m tests.count_floor --record "$RUNNER_TEMP/count-record/record.json" --head "$RUNNER_TEMP/recorded"
+          cd "$RUNNER_TEMP/base"
+          python -m tests.count_floor --record "$RUNNER_TEMP/count-record/record.json" --head "$RUNNER_TEMP/base"
 
       - name: Upload the suite count record
         if: github.event_name == 'push' && github.ref == 'refs/heads/dev' && env.UNIT_SOURCE == ''
