@@ -241,7 +241,7 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> merge priority URL` | The master or operator moves a green critical pull request ahead of waiting dev queue entries. Running entries stay in place. Waiting entries ahead are removed tail first and requeued in their original order after the critical request; their swarm owners receive an inbox message. Entries behind an already queued critical request stay in place. A failed insertion still attempts to restore every displaced entry and reports any restoration failure. |
 | `agentihooks swarm <id> ready DOC` | Release the seat of a code or ci task whose reviewed pull request waits only on checks and the merge queue. Refuses at manual or assist autonomy, without a recorded open pull request, or unless the worktree is clean and its head is the pull request head. Checks the document like `handoff`, records the pull request, head and worktree, marks the task `awaiting` `merge` (still `pr`), stores the handoff and ends the session; the finished agent no longer holds a seat and the tick never reopens the task as an orphan. Each tick the merge pass watches its checks like a checks wait, queues its green head as is like `merge queue`, waits on the queue like a merge wait, then writes the same done fields `done` writes, closes its group members and removes the worktree with `wt.sh done`. Red checks, a closed pull request or a queue ejection reopen the task for the next engineer with the handoff, removing the worktree with `wt.sh done --pushed`. Five refusals GitHub returns (a GraphQL error, or a base other than `dev`) reopen it too; any other queue failure, an outage or checks still running, is retried and never counted. The intent gate holds `ready` like `done` in its enforce and coach modes; off and observe let it pass without a verdict. |
 | `agentihooks swarm <id> block NOTE` | Comment the blocker, mark the task `blocked`, end the session. |
-| `agentihooks swarm <id> trace-plan` | Trace `plan.md` in your task work folder, one piece per line (`- what \| area, area \| why`), to the task, its phase and the project intent through the classifier. A piece under 0.3 is cut and, once the plan passes, filed as a follow-up. The task's latest five scope authorizations, master relays of operator words and operator or master comments starting `In scope:`, travel in the trace intent, and the classifier asks whether each covers each piece that is not a clearance; a piece covered at 0.7 is kept, its row and the report's `authorized` name the authorization and it is never filed as a cut. A new authorization retraces an unchanged plan without counting a failed plan; a follow up filed before the authorization stays filed. A plan with more than half its pieces cut, or sized above one pull request at confidence 0.7, fails; the second failed plan blocks the task when `trace-plan-gate=deny` (default `log only` logs it). A piece appended to a passing plan is traced alone. Before the task's pull request opens, a plan that does not fail is also judged by the intent check as a plan, on its kept pieces and plan slice: whether the planned work serves the phase, covers the task and weakens nothing, with no demand for shipped code or proof; that verdict is printed as `intent` and logged like a pull request verdict. The verdict lands in `plan-verdict.json`; no classifier answer gives `unchecked`, counted in the gate log. The `build` gate (`python -m scripts.gates build`, on Edit, Write, MultiEdit, NotebookEdit, Serena edit tools and `git commit`) refuses an engineer's or CI agent's edit before a passing verdict for the current `plan.md`, and an edit or staged file outside the kept pieces' areas and the task territory; the work folder, `~/scratchpad` and files outside any git work tree are exempt, and an `unchecked` verdict lets edits through, counted. `build-gate` defaults to `log only`. |
+| `agentihooks swarm <id> trace-plan` | Trace `plan.md` in your task work folder, one piece per line (`- what \| area, area \| why`), to the task, its phase and the project intent through the classifier. A piece under 0.3 is cut and, once the plan passes, filed as a follow-up. The task's latest five scope authorizations, master relays of operator words and operator or master comments starting `In scope:`, travel in the trace intent, and the classifier asks whether each covers each piece that is not a clearance; a piece covered at 0.7 is kept, its row and the report's `authorized` name the authorization and it is never filed as a cut. A new authorization retraces an unchanged plan without counting a failed plan; a follow up filed before the authorization stays filed. See [Task scope authorizations](#task-scope-authorizations) for recording scope, report examples and troubleshooting. A plan with more than half its pieces cut, or sized above one pull request at confidence 0.7, fails; the second failed plan blocks the task when `trace-plan-gate=deny` (default `log only` logs it). A piece appended to a passing plan is traced alone. Before the task's pull request opens, a plan that does not fail is also judged by the intent check as a plan, on its kept pieces and plan slice: whether the planned work serves the phase, covers the task and weakens nothing, with no demand for shipped code or proof; that verdict is printed as `intent` and logged like a pull request verdict. The verdict lands in `plan-verdict.json`; no classifier answer gives `unchecked`, counted in the gate log. The `build` gate (`python -m scripts.gates build`, on Edit, Write, MultiEdit, NotebookEdit, Serena edit tools and `git commit`) refuses an engineer's or CI agent's edit before a passing verdict for the current `plan.md`, and an edit or staged file outside the kept pieces' areas and the task territory; the work folder, `~/scratchpad` and files outside any git work tree are exempt, and an `unchecked` verdict lets edits through, counted. `build-gate` defaults to `log only`. |
 | `agentihooks swarm <id> plan approve PHASE [--note TEXT]` / `plan send-back PHASE --note TEXT` | Decide the slice of a phase in review. At `manual` and `assist` autonomy the operator decides with the **Approve plan** and **Send back** buttons on the phase row, and the command refuses an agent naming them (at `assist` the master posts its recommendation as a phase comment). At `delegate` and `full` only the master decides. Approve moves the phase to building and the tick claims its tasks on the same pass. Send back reopens the plan task, records the note for the planner's steering and counts a round; when the planner finishes again the tick reopens the review. The third send back leaves the plan task done, marks the review escalated and raises a priority naming the notes; only the operator decides after that, and an operator send back reopens the plan task whatever the count. |
 | `agentihooks swarm <id> wait [MINUTES] [--on checks PR_URL\|RUN_URL\|reply ITEM\|task ID] [--reason TEXT]` | Declare a wait. While it holds, the tick counts no idle tick for you, so you are neither nudged nor retired. A checked wait (`--on`) lasts until the tick sees its thing resolve (the checks finish or the pull request closes or merges, an Actions run completes, is cancelled or is missing, the inbox item closes, the task is done or blocked), at most MINUTES or 12 hours; the tick then ends it and sends you an inbox item, which for a red Actions run names its conclusion and each failed, timed out or cancelled job, or says its jobs could not be read. A bare wait lasts MINUTES, at most 60. The `claim-stop` gate (`python -m scripts.gates claim-stop`, run from a Stop condition) refuses an eng or ci agent's stop while it holds a claimed or pr task with work owed: its pull request merged (run `done`), checks failed (fix or block) or green (merge), or no pull request and no live wait. Pending checks pass the stop and record a checked wait on them, unless a live wait on a reply or a task already holds, which is kept with its reason. The third block in a row with no outcome between blocks the task. The `push-stop` gate, beside it in the engineer, cicd and qa roles, pushes the agent's task branches itself (any worktree `~/dev/worktrees/<repo>/<agent>[-N]` on its own branch, never `dev` or `main`), records branch and head on the task, and refuses the stop with one fixed message, also sent to the agent's inbox, over uncommitted changes, a push origin refused, or pushed work with no pull request and no ledger line since the push. Planners, plan tasks, the master and the operator's sessions pass. |
 | `agentihooks swarm <id> progress --doing TEXT --ends-when TEXT` | Say what you are doing and when it ends: a ledger line on your task, a line in its work folder `progress.md` and an outcome on the progress signal. The tick raises a quiet flag (`gates/quiet/<agent>`, a gate log `count` row) on an eng or ci agent holding a claimed or pr task with no progress signal (last outcome, work folder progress line, start) for 30 minutes and no live checked wait. While it stands the `quiet` gate (`python -m scripts.gates quiet`, behind a bash flag test on every tool call) refuses every call except `agentihooks ledger`, `swarm` and `msg` commands; `progress` clears it. The stale claim finding reads the same quiet minutes, and each idle tick is a gate log `count` row (`idle-ticks`) for `doctor rates`. |
@@ -250,6 +250,129 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> restack` | After the parked blockers finish, fetch origin and rebase task work from `stacked_base` onto `origin/dev`. Run in a clean branch cut from the parked branch. Success clears `parked_on`; a conflict lists the files and retains the parked list. Resolve the files, run `git rebase --continue`, then run restack again to finish. |
 | `agentihooks swarm <id> learned TEXT [--maturity data\|note\|insight\|canon]` | Add a lesson to your seat's learned notes, kept for every later occupant. The maturity defaults to `note`; only the master writes `canon`. |
 | `agentihooks swarm <id> say TEXT [--to NAME\|eng\|ci]` | Post to the swarm chat. |
+
+## Task scope authorizations
+
+Record extra scope on the task before the engineer retraces its plan. This lets
+an authorized piece remain in the plan even when the task description omits it.
+The tracer reads the task's comments alongside the project, phase and task
+intent; it does not require rewriting the description.
+
+### Record the authorization
+
+The tracer recognizes these task comments:
+
+| Record | Requirement |
+|---|---|
+| Master relay of the operator's words | Record it on `tasks/<task>` with `ledger relay`; the stored comment has `relayed_by`. |
+| Master or operator scope comment | Start the comment with `In scope:`. Leading whitespace and letter case are ignored. |
+
+Only the latest five qualifying, nondeleted comments are included, in their
+stored order. Ordinary comments, engineer comments marked `In scope:`, phase
+comments and page chat do not supply task authorizations. Question answers are
+not read because ledger questions carry no task link. Put an authorization from
+an answer onto the task through one of the recognized records.
+
+For example, a master authorizes removal of a size allowance while the task
+description only mentions fixing the size gate. Run this as the task's master,
+using the actual ledger, master name and task:
+
+```bash
+agentihooks ledger \
+  --slug example-swarm \
+  --as master@a1b2c3-0001 \
+  comment tasks/t747 \
+  "In scope: Remove the size allowance while fixing the size gate."
+```
+
+When the operator authorized that work in the master's pane, the master can
+record the operator's words instead. Relay actual words received from the
+operator:
+
+```bash
+agentihooks ledger \
+  --slug example-swarm \
+  --as master@a1b2c3-0001 \
+  relay tasks/t747 \
+  "Remove the size allowance while fixing the size gate." \
+  --quote "Remove the size allowance too."
+```
+
+### Retrace and inspect the result
+
+In the engineer's task work folder, include the authorized piece in `plan.md`
+using the usual `what | areas | why` format. The area is a repository relative
+prefix for the work it permits, for example:
+
+```text
+- Remove the size allowance | scripts/ci_prepush | The master authorized removal while fixing the size gate
+```
+
+From the task worktree, run:
+
+```bash
+agentihooks swarm example-swarm trace-plan
+```
+
+For each newly judged piece that is not a mutation clearance, the classifier
+asks whether each included authorization covers it. Coverage at or above `0.7`
+keeps the piece even if its task relevance score would otherwise cut it. The
+piece counts as kept when checking whether more than half the plan was cut,
+and it is excluded from new cut follow ups. Naming an authorization in the
+plan's reason provides context; the classifier still judges coverage.
+
+The command's report names the authorization comment ID, rather than repeating
+its text. An illustrative excerpt is:
+
+```json
+{
+  "kept": ["Remove the size allowance"],
+  "cut": [],
+  "authorized": [
+    {
+      "what": "Remove the size allowance",
+      "authorization": "add-example"
+    }
+  ]
+}
+```
+
+The corresponding piece in `plan-verdict.json` has
+`"authorized": "add-example"`. Match that ID to the task comment to see who
+authorized the work and what they approved. The report's `authorized` list
+contains pieces kept through authorization, rather than every kept piece.
+
+A changed authorization list causes an unchanged plan to be traced again;
+retracing that same plan does not add another failed-plan attempt. Follow ups
+filed before the authorization remain on the ledger. Authorization does not
+waive the plan size check, the intent check or the build gate's area and task
+territory checks.
+
+### Configuration and troubleshooting
+
+Authorization requires no separate enable flag. The packaged `trace-plan`
+[classifier definition](../reference/classifier.md) supplies the `covered: 0.7`
+threshold. The master or operator controls enforcement through the swarm's gate
+settings, for example:
+
+```bash
+agentihooks swarm example-swarm set \
+  trace-plan-gate=deny \
+  build-gate=deny
+```
+
+Both gates default to `log only`. In `deny` mode the second failed plan blocks
+the task; the build gate requires a current passing plan and permits only its
+kept areas within task territory. Gate modes control enforcement, not whether
+a comment grants scope.
+
+| Symptom | Check or action |
+|---|---|
+| An authorized piece is still cut | Confirm the authorization is on this task, has a recognized author and marker or relay metadata, is not deleted, and is among the latest five qualifying comments. Make its wording specific enough to cover the piece, then retrace. |
+| The report has no authorization for a kept piece | It may have been kept by ordinary task relevance; inspect the piece row and task comments. |
+| A prior cut follow up is still present | Retracing does not close existing follow ups. The master decides their disposition through the normal follow up workflow. |
+| The plan still fails after the piece is kept | Read `reasons`: authorized scope can still exceed one pull request. Narrow the plan without discarding the authorization record. |
+| The report says `unchecked` | The classifier did not answer. Edits are allowed and counted; run tracing again when the classifier is available. |
 
 ## Publishing after a successor prepares a branch
 

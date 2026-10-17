@@ -205,7 +205,9 @@ def _capacity_outcome(case: dict, root: Path) -> dict:
     with ExitStack() as stack:
         patch = stack.enter_context
         patch(
-            mock.patch.object(capacity.account_sessions, "sessions_by_account", lambda: case.get("claude_sessions", {}))
+            mock.patch.object(
+                capacity.account_sessions, "sessions_by_account", lambda **_: case.get("claude_sessions", {})
+            )
         )
         patch(
             mock.patch.object(
