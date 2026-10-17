@@ -278,7 +278,15 @@ def test_reopen_resumes_the_recorded_thread_and_never_starts_a_server(monkeypatc
     assert opened == [
         (
             "sw-master-1",
-            ["/bin/codex", "-c", "check_for_update_on_startup=false", "resume", "--remote", RECORD.endpoint_ref, "thread-1"],
+            [
+                "/bin/codex",
+                "-c",
+                "check_for_update_on_startup=false",
+                "resume",
+                "--remote",
+                RECORD.endpoint_ref,
+                "thread-1",
+            ],
         )
     ]
     assert not {"app-server", "serve", "scripts.codex_session"} & set(opened[0][1])
