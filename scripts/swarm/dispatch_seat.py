@@ -42,6 +42,7 @@ REFUSED = "dispatcher triggers are still open; settle them, or the tick ends you
 WAKE = "New dispatcher triggers in swarm {slug}:\n{lines}\nSettle each one, then tell the master what you did."
 LINES = {
     "priority": "- The priority on {item} is unresolved after {minutes} minutes: {text}",
+    "inbox": "- Accepted inbox work {item}: read it and reply, close with an outcome, or explicitly transfer ownership.",
     "bottleneck": "- The bottleneck report named the same share {ticks} ticks running and no lane rule covers it: {text}",
     "freeze": "- Dev Tests run {run} is red and holds these blocked tasks: {text}. Propose a freeze or a focus to the "
     "master if one would help.",
@@ -104,6 +105,17 @@ def line(trigger: dict) -> str:
     return LINES[trigger.get("kind", "priority")].format(**trigger)
 
 
+def inbox_work(store, slug: str) -> list[dict]:
+    inbox = InboxStore(store.redis)
+    addresses = [f"{SEAT}@{slug}", *(a.name for a in store.agents(slug) if a.lane == LANE and a.state != "finished")]
+    items = {item.id: item for address in addresses for item in inbox.open_mail(address)}
+    return [
+        {"id": f"inbox:{item.id}", "kind": "inbox", "item": item.id}
+        for item in items.values()
+        if not item.fyi and not (item.sender == SENDER and item.text.startswith("New dispatcher triggers in swarm "))
+    ]
+
+
 def open_triggers(slug: str, config, store, doc: dict, now_ms: int, sleeping: bool) -> list[dict]:
     active = config.autonomy == FULL and config.state not in ENDED_STATES and not sleeping
     if not active:
@@ -113,7 +125,7 @@ def open_triggers(slug: str, config, store, doc: dict, now_ms: int, sleeping: bo
         for trigger in uncovered(store, slug, now_ms)
         if not stage_cover.covered(store, slug, doc, trigger["id"].removeprefix(BOTTLENECK), share=True)
     ]
-    return triggers(doc, now_ms) + held + red_dev(store, slug, doc)
+    return triggers(doc, now_ms) + held + red_dev(store, slug, doc) + inbox_work(store, slug)
 
 
 def refusal(slug: str, config, store, doc: dict, now_ms: int) -> str:
@@ -130,7 +142,9 @@ def run(slug: str, config, store, runtime, doc: dict, now_ms: int, sleeping: boo
         return [_end(slug, store, seat) for seat in seats]
     gone = [seat for seat in seats if left(seat, doc)]
     if gone:
-        if seen := set(store.redis.hkeys(store.key(slug, SENT))) & {trigger["id"] for trigger in found}:
+        if seen := set(store.redis.hkeys(store.key(slug, SENT))) & {
+            trigger["id"] for trigger in found if trigger.get("kind") != "inbox"
+        }:
             store.redis.sadd(store.key(slug, LEFT), *seen)
         return [_end(slug, store, seat, DEPARTED) for seat in gone]
     if seats:
@@ -172,7 +186,7 @@ def _spawn(slug, config, store, runtime, found, now_ms):
 
 def _wake(slug, store, seat, found):
     sent = set(store.redis.hkeys(store.key(slug, SENT)))
-    new = [trigger for trigger in found if trigger["id"] not in sent]
+    new = [trigger for trigger in found if trigger["id"] not in sent and trigger.get("kind") != "inbox"]
     if not new:
         return []
     lines = "\n".join(line(trigger) for trigger in new)

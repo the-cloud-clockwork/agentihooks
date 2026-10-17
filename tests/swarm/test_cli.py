@@ -202,7 +202,11 @@ def test_done_from_the_dispatcher_seat_ends_it_without_a_pull_request_once_its_t
     assert [a.state for a in store.agents("sw") if a.name == seat] == ["working"]
     ledger.state = lambda slug: {**settled(slug), "priorities": [handed] if slug == "sw" else [stale]}
     inbox = InboxStore(store.redis)
-    item = inbox.send("master@a1b2c3-0001", seat, "one more look")
+    work = inbox.send("master@a1b2c3-0001", seat, "one more look")
+    assert run("sw", "done") == 1
+    assert work.id in capsys.readouterr().err
+    inbox.close(work.id, seat, "done", "Evidence considered")
+    item = inbox.send("master@a1b2c3-0001", seat, "Status only", fyi=True)
     assert run("sw", "done") == 0
     assert json.loads(capsys.readouterr().out) == {
         "seat": seat,

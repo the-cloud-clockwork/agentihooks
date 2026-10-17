@@ -26,7 +26,9 @@ def _record(evidence: Path, run: dict) -> dict:
     if run["event"] == "merge_group" and not any(
         job["name"] == "reuse" and job["conclusion"] == "success" for job in jobs
     ):
-        producer = "durations"
+        producer = (
+            "select" if any(job["name"] == "select" and job["conclusion"] == "success" for job in jobs) else "durations"
+        )
     if not ci_reuse._authenticated(folder, record, jobs, producer=producer):
         raise ValueError("unauthenticated provenance")
     expected = {"version": 1, "run": run["id"], "attempt": run["run_attempt"], "event": run["event"]}

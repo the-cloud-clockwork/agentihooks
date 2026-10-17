@@ -114,7 +114,7 @@ class FlakeLedger:
             return
         attempts = self.attempts.pop(nodeid)
         errors = self.errors.pop(nodeid, [])
-        if attempts > 1:
+        if attempts > 1 or failed:
             self._write(nodeid, attempts, failed, errors)
 
     def pytest_sessionfinish(self):

@@ -46,7 +46,7 @@ def main():
         "exporter": [sys.executable, fixture, "exporter", delay, "missing" if mode == "missing" else "complete"],
         "startup_seconds": 15,
         "quiesce_seconds": 2,
-        "checkpoint_seconds": 2,
+        "checkpoint_seconds": 0.8 if mode in ("late", "missing") else 3,
         "kill_seconds": 1,
     }
     path = attempt / "launch.json"

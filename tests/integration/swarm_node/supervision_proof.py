@@ -44,6 +44,28 @@ def ready(container):
     raise AssertionError("container readiness timeout")
 
 
+def heartbeats(container: str, root: str, initial: dict | None = None) -> dict:
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        try:
+            ticks = json.loads(
+                docker(
+                    "exec",
+                    container,
+                    "python",
+                    "-c",
+                    f"import json; from pathlib import Path; r=Path({root!r}); print(json.dumps({{p.name:json.loads(p.read_text())['tick'] for p in r.glob('heartbeat-*.json')}}))",
+                )
+            )
+        except (subprocess.CalledProcessError, ValueError) as exc:
+            ticks = getattr(exc, "output", None) or exc
+        else:
+            if len(ticks) == 5 and all(ticks.get(key, value) > value for key, value in (initial or {}).items()):
+                return ticks
+        time.sleep(0.02)
+    raise AssertionError(f"heartbeats not accepted before timeout: initial={initial}, observed={ticks}")
+
+
 def herdr_argv(container, root):
     attempt = str(Path(root).parent.parent.parent)
     return [
@@ -85,21 +107,6 @@ def terminal_disconnect(container, root):
             viewer.kill()
             viewer.wait(timeout=5)
         os.close(master)
-
-
-def heartbeats(container, root, accepted):
-    code = f"import json; from pathlib import Path; r=Path({root!r}); print(json.dumps({{p.name:json.loads(p.read_text())['tick'] for p in r.glob('heartbeat-*.json')}}))"
-    observed = None
-    for _ in range(100):
-        try:
-            observed = json.loads(docker("exec", container, "python", "-c", code))
-        except (subprocess.CalledProcessError, ValueError) as exc:
-            observed = getattr(exc, "output", None) or exc
-        else:
-            if accepted(observed):
-                return observed
-        time.sleep(0.1)
-    raise AssertionError(f"heartbeats not accepted after 100 reads: {observed}")
 
 
 def run_case(image, mode, output, kill=False, supervised=False, viewer=True):
@@ -145,9 +152,10 @@ def run_case(image, mode, output, kill=False, supervised=False, viewer=True):
                 if exc.returncode != 137:
                     raise
         else:
-            initial = heartbeats(container, root, lambda observed: len(observed) == 5)
+            initial = heartbeats(container, root)
             terminal = terminal_disconnect(container, root) if viewer else None
-            heartbeats(container, root, lambda observed: all(observed[k] > v for k, v in initial.items()))
+            final = heartbeats(container, root, initial)
+            assert len(initial) == 5 and all(final[k] > v for k, v in initial.items())
             start = time.monotonic()
             docker("kill", "--signal", "TERM", container)
         code = int(docker("wait", container, timeout=SHUTDOWN_WAIT_SECONDS))

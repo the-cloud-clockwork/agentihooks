@@ -100,6 +100,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--base-baseline", type=Path, help="exact base measurement restored from the Actions cache")
     args = parser.parse_args(argv)
     head_files = [args.head_shards / f"coverage-3.12-{n}" / ".coverage" for n in range(1, args.shards + 1)]
+    head_files += sorted(args.head_shards.glob("coverage-3.12-*/reused-coverage/.coverage"))
     args.out.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as scratch:
         try:

@@ -14,7 +14,8 @@ from scripts.swarm_v2 import masters
 CLOSES = "The swarm then closes this session; stop working."
 OVERLAP_LINE = (
     "Running tasks share areas with yours. Coordinate with each claimant through the inbox "
-    '(agentihooks msg send <claimant> "<text>") and merge dev into your branch before your own merge:'
+    '(agentihooks msg send <claimant> "<text>") and merge dev only on a real conflict; '
+    "where the repo has a merge queue, it retests your green head against the newest dev:"
 )
 GROUP_LINE = (
     "Your task leads a group: deliver these grouped tasks too, in the same worktree and one pull request, and name "
