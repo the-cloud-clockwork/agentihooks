@@ -357,3 +357,21 @@ def test_a_pull_request_still_queued_after_three_minutes_is_not_requeued(monkeyp
     assert len(asked) == 13
     assert slept == [15] * 12
     assert ci_queue_retry.requeue(queued) == (False, "pull request is not open outside the queue")
+
+
+def test_main_requeues_once_the_queue_drops_the_pull_request(monkeypatch, tmp_path, capsys):
+    jobs = {"total_count": 1, "jobs": [{"id": 1, "name": "unit (3.11, 2)", "conclusion": "failure"}]}
+    pages = {
+        "repos/o/r/actions/runs/9": json.dumps({**RUN, "id": 9, "head_branch": QUEUE_BRANCH}),
+        "repos/o/r/actions/runs/9/jobs?filter=latest&per_page=100": json.dumps(jobs),
+        "repos/o/r/check-runs/1/annotations": "[]",
+        "repos/o/r/actions/jobs/1/logs": SHUTDOWN,
+    }
+    monkeypatch.setattr(ci_queue_retry, "_api", lambda path, *flags: pages[path])
+    asked, slept = queued_then([{**pull([REMOVED]), "isInMergeQueue": True}, pull([REMOVED])], monkeypatch)
+    monkeypatch.chdir(ROOT)
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
+    assert ci_queue_retry.main(["--repo", "o/r", "--run-id", "9"]) == 0
+    assert json.loads(capsys.readouterr().out)["requeue"] is True
+    assert asked == [("o/r", 3259)] * 2
+    assert slept == [15]
