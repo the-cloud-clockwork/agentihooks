@@ -170,6 +170,19 @@ def test_a_signature_quoted_in_test_output_is_not_a_runner_loss(monkeypatch):
     assert not ci_queue_retry.decide(RUN, failed, WORKFLOW)[0]
 
 
+def test_colour_codes_in_the_shard_log_keep_the_runner_loss(monkeypatch):
+    jobs = {"total_count": 1, "jobs": [{"id": 1, "name": "unit (3.11, 2)", "conclusion": "failure"}]}
+    coloured = "\x1b[36;1mpytest -n auto\x1b[0m\n" + SHUTDOWN.replace("##[error]", "\x1b[31m##[error]") + "\x1b[0m"
+    pages = {
+        "repos/o/r/actions/runs/9/jobs?filter=latest&per_page=100": json.dumps(jobs),
+        "repos/o/r/check-runs/1/annotations": "[]",
+        "repos/o/r/actions/jobs/1/logs": coloured,
+    }
+    monkeypatch.setattr(ci_queue_retry, "_api", lambda path, *flags: pages[path])
+    failed = ci_queue_retry.failed_jobs("o/r", 9)
+    assert ci_queue_retry.decide(RUN, failed, WORKFLOW) == (True, "runner lost on unit (3.11, 2)")
+
+
 def cancelled_run_pages(lost_log):
     jobs = {
         "total_count": 4,
