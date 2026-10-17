@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.swarm.ledger_events import GATE, SENT_TTL_S, views
+from scripts.swarm.ledger_events import view as single_view
 from scripts.swarm.store import PREFIX
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -207,8 +208,6 @@ def test_workflow_declarations_cache_by_immutable_tree_while_heads_and_checks_re
 def test_a_status_gate_judges_only_jobs_of_its_declared_workflow(batched, optional, conclusion, phase):
     import fakeredis
 
-    from scripts.swarm.ledger_events import view
-
     url = "https://github.com/o/r/pull/1"
     required = {"id": "W1", "resourcePath": "/o/r/actions/workflows/test.yml"}
     other = {"id": "W2", "resourcePath": "/o/r/actions/workflows/docs.yml"}
@@ -267,7 +266,7 @@ def test_a_status_gate_judges_only_jobs_of_its_declared_workflow(batched, option
 
     cache = fakeredis.FakeRedis(decode_responses=True)
     for _ in range(2):
-        pull = views([url], read, cache)[url] if batched else view(url, read)
+        pull = views([url], read, cache)[url] if batched else single_view(url, read)
         assert pull.head == "h1"
         assert pull.resolved is (phase == "jobs" and (optional or conclusion is not None))
         assert pull.red is (phase == "jobs" and not optional and conclusion == "FAILURE")

@@ -1311,6 +1311,13 @@ def workflows(*texts):
 def gated_probe(rollup, suites, tree):
     from types import SimpleNamespace
 
+    entries = ((tree or {}).get("object") or {}).get("entries") or []
+    path = f"/o/r/actions/workflows/{entries[-1]['name']}" if entries else ""
+    run = {"workflow": {"resourcePath": path}}
+    rollup = [
+        {**check, "checkSuite": {"workflowRun": run}} if "name" in check and not check.get("checkSuite") else check
+        for check in rollup
+    ]
     commit = {
         "committedDate": "2026-10-07T17:00:00Z",
         "statusCheckRollup": {"contexts": {"nodes": rollup, "pageInfo": {"hasNextPage": False}}},
@@ -1360,10 +1367,17 @@ def test_the_probe_reads_the_gate_from_the_last_commit():
     from types import SimpleNamespace
 
     def commit(tree):
+        checks = [
+            {
+                **check,
+                "checkSuite": {"workflowRun": {"workflow": {"resourcePath": "/o/r/actions/workflows/w0.yml"}}},
+            }
+            for check in UNIT_PASSED
+        ]
         return {
             "commit": {
                 "committedDate": "2026-10-07T17:00:00Z",
-                "statusCheckRollup": {"contexts": {"nodes": UNIT_PASSED, "pageInfo": {"hasNextPage": False}}},
+                "statusCheckRollup": {"contexts": {"nodes": checks, "pageInfo": {"hasNextPage": False}}},
                 "checkSuites": NO_SUITES,
                 "file": tree,
             }
