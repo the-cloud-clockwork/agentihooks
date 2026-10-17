@@ -40,6 +40,16 @@ def test_summary_without_test_reports_is_zero(tmp_path):
     assert counts(tmp_path) == {"ran": 0, "flaky": 0, "failed": 0}
 
 
+def test_summary_counts_passing_tests_separately_in_each_python_version(tmp_path):
+    from scripts.ci_gate_summary import counts
+
+    for version in ("3.11", "3.12"):
+        report_dir = tmp_path / f"durations-{version}-1"
+        report_dir.mkdir()
+        (report_dir / "durations.json").write_text('{"test_passes": 1, "test_also_passes": 2}')
+    assert counts(tmp_path) == {"ran": 4, "flaky": 0, "failed": 0}
+
+
 def test_summary_command_prints_the_artifact_counts(tmp_path, monkeypatch, capsys):
     from scripts.ci_gate_summary import main
 
