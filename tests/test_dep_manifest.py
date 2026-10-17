@@ -232,7 +232,11 @@ def test_the_coverage_shards_record_per_test_contexts_and_inputs():
 
 def test_sonar_builds_the_manifest_and_only_dev_pushes_save_it():
     steps = [step.get("name") for step in _job("sonar")["steps"]]
-    assert steps.index("Wait for the coverage merge") < steps.index("Build the test dependency manifest")
+    assert (
+        steps.index("Merge shard coverage")
+        < steps.index("Build the test dependency manifest")
+        < steps.index("Restore Sonar downloads")
+    )
     build = _step("sonar", "Build the test dependency manifest")
     assert "python -m tests.dep_manifest build" in build["run"]
     assert "< /dev/null" in build["run"] and 'echo "pid=$!"' in build["run"]
