@@ -653,5 +653,5 @@ def test_a_worker_token_master_launch_holds_its_workers_at_the_one_master_ceilin
         return ProbeResult(account, "allowed", "NORMAL", 90, QuotaWindow(10), QuotaWindow(used))
 
     assert source.cap(week(70.0), 0) == 0
-    assert source.cap(week(69.9), 0) != 0
-    assert source.cap(week(70.0, "workeratexample_com"), 0) != 0
+    assert source.cap(week(69.9), 0) > 0
+    assert source.cap(week(70.0, "workeratexample_com"), 0) > 0
