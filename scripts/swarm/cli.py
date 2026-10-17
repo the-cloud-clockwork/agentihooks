@@ -1338,14 +1338,30 @@ def _queue_intent(store, args, agent, head):
 
 
 def cmd_merge(store, args):
-    agent = _worker(store, args) if args.action != "state" else None
-    if agent is not None:
-        done_gate.require_local(store, args.slug, agent.task)
-        done_gate.require_target(store, args.slug, agent.task, args.url, LedgerClient().tasks(args.slug))
-    if args.action == "queue":
-        result = merge_queue.operate(args.action, args.url, admit=lambda head: _queue_intent(store, args, agent, head))
+    if args.action == "priority":
+        sender = _master_or_operator(store, args, "only the master or the operator prioritizes the merge queue")
+        tasks = LedgerClient().tasks(args.slug)
+        result = merge_queue.prioritize(args.url)
+        for task in tasks:
+            if task.get("pr_url") in result["displaced"] and task.get("claimed_by"):
+                InboxStore(store.redis).send(
+                    sender,
+                    task["claimed_by"],
+                    f"Your pull request {task['pr_url']} was requeued in its original order after priority request {args.url}.",
+                )
+        if result["errors"]:
+            raise SwarmError("; ".join(result["errors"]))
     else:
-        result = merge_queue.operate(args.action, args.url)
+        agent = _worker(store, args) if args.action != "state" else None
+        if agent is not None:
+            done_gate.require_local(store, args.slug, agent.task)
+            done_gate.require_target(store, args.slug, agent.task, args.url, LedgerClient().tasks(args.slug))
+        if args.action == "queue":
+            result = merge_queue.operate(
+                args.action, args.url, admit=lambda head: _queue_intent(store, args, agent, head)
+            )
+        else:
+            result = merge_queue.operate(args.action, args.url)
     print(json.dumps(result))
 
 
@@ -1878,7 +1894,7 @@ def build_parser():
     pr.add_argument("url")
     pr.add_argument("--half", type=int, default=0)
     merge = sub.add_parser("merge")
-    merge.add_argument("action", choices=("queue", "dequeue", "state"))
+    merge.add_argument("action", choices=("queue", "dequeue", "state", "priority"))
     merge.add_argument("url")
     sub.add_parser("prepare")
     publish = sub.add_parser("publish")

@@ -120,6 +120,76 @@ def test_only_workflows_absent_on_the_base_are_graded(tmp_path, monkeypatch):
     }
 
 
+@pytest.mark.parametrize("name", ["replay.yml", "branch-lanes.yml"])
+def test_removing_the_lane_from_an_existing_workflow_is_refused(tmp_path, monkeypatch, name):
+    base, head, sha = _repo(tmp_path, {name: _workflow()})
+    (base / lanes.WORKFLOWS / name).write_text(yaml.safe_dump(_workflow(LANED)))
+    monkeypatch.chdir(head)
+    assert lanes.refused(sha, base) == {
+        f"{lanes.WORKFLOWS}/{name}": ["job replay has no shared hosted lane concurrency group"]
+    }
+
+
+def test_existing_dev_concurrency_is_preserved_while_job_steps_change(tmp_path, monkeypatch):
+    trusted = {"group": "${{ github.workflow }}", "cancel-in-progress": False}
+    updated = _workflow(trusted, replay={"runs-on": "x", "steps": [{"run": "echo changed"}]})
+    base, head, sha = _repo(tmp_path, {"replay.yml": updated})
+    (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(_workflow(trusted)))
+    monkeypatch.chdir(head)
+    assert lanes.refused(sha, base) == {}
+
+
+@pytest.mark.parametrize("trusted", [None, {"group": "existing-dev-policy"}])
+def test_existing_job_concurrency_is_preserved_while_steps_change(tmp_path, monkeypatch, trusted):
+    baseline = _workflow(replay={"runs-on": "x", "concurrency": trusted})
+    updated = _workflow(replay={"runs-on": "x", "concurrency": trusted, "steps": [{"run": "echo changed"}]})
+    base, head, sha = _repo(tmp_path, {"replay.yml": updated})
+    (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(baseline))
+    monkeypatch.chdir(head)
+    assert lanes.refused(sha, base) == {}
+
+
+def test_unchanged_workflows_are_not_selected_as_edits(tmp_path, monkeypatch):
+    workflow = _workflow(LANED)
+    base, head, sha = _repo(tmp_path, {"replay.yml": workflow})
+    (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(workflow))
+    (base / lanes.WORKFLOWS / "test.yml").write_text("name: Changed\n")
+    monkeypatch.chdir(head)
+    assert lanes.branch_only(sha, base, include_edits=True) == []
+
+
+@pytest.mark.parametrize("change", ["override", "rename"])
+def test_an_edit_cannot_escape_trusted_concurrency(tmp_path, monkeypatch, change):
+    trusted = {"group": "${{ github.workflow == 'Replay' && 'hosted-lane-a' || github.run_id }}"}
+    updated = _workflow(trusted)
+    if change == "override":
+        updated["jobs"]["replay"]["concurrency"] = None
+    else:
+        updated["name"] = "Evasion"
+    base, head, sha = _repo(tmp_path, {"replay.yml": updated})
+    (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(_workflow(trusted)))
+    monkeypatch.chdir(head)
+    assert lanes.refused(sha, base) == {
+        f"{lanes.WORKFLOWS}/replay.yml": ["job replay has no shared hosted lane concurrency group"]
+    }
+
+
+def test_an_edited_workflow_cannot_add_an_uncapped_job(tmp_path, monkeypatch):
+    baseline = _workflow(allowed={"runs-on": "x", "concurrency": LANED})
+    updated = _workflow(allowed={"runs-on": "x", "concurrency": LANED}, escape={"runs-on": "x"})
+    base, head, sha = _repo(tmp_path, {"replay.yml": updated})
+    (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(baseline))
+    monkeypatch.chdir(head)
+    assert lanes.refused(sha, base) == {
+        f"{lanes.WORKFLOWS}/replay.yml": ["job escape has no shared hosted lane concurrency group"]
+    }
+
+
+def test_proof_branch_pushes_are_graded():
+    workflow = yaml.safe_load((ROOT / lanes.WORKFLOWS / "branch-lanes.yml").read_text())
+    assert "diffcheck/**" not in workflow[True]["push"]["branches-ignore"]
+
+
 def test_a_head_whose_new_workflows_all_queue_on_a_lane_is_allowed(tmp_path, monkeypatch, capsys):
     base, head, sha = _repo(tmp_path, {"laned.yml": _workflow(LANED)})
     monkeypatch.chdir(base)

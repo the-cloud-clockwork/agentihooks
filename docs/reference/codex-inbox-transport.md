@@ -40,6 +40,10 @@ The Bun channel plugins that Claude Code supplies (Telegram, Discord and the
 like) are a fourth, unrelated thing: AgentiHooks neither loads nor depends on
 them. The inbox channel is its own Python server.
 
+`agentihooks swarm <id> status` and the ledger page Agents panel show whether
+each agent takes pushed inbox items and whether a native terminal can attach:
+see [Transport capabilities](../pillars/swarm.md#transport-capabilities).
+
 ## Qualified versions
 
 | Component | Version | Evidence |

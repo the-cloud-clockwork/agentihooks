@@ -169,7 +169,7 @@ def test_task_add_prints_the_server_refusal(monkeypatch):
     )
     with pytest.raises(SystemExit) as raised:
         ledger.send(args, "task_add", task="t9")
-    assert raised.value.code == "refused because"
+    assert raised.value.code == "task t9 was not added: refused because"
 
 
 TAKEN = 'task c0 already exists as "c" (done): pick another id, or pass - as the id to mint one'
@@ -177,7 +177,7 @@ TAKEN = 'task c0 already exists as "c" (done): pick another id, or pass - as the
 
 def served(slug, ops=None):
     state, rejected = core.sync(slug, ops=ops)
-    return {**state, "rejected": rejected}
+    return {**state, "applied": [op["id"] for op in ops or [] if op["id"] not in rejected], "rejected": rejected}
 
 
 def cli(monkeypatch, *argv):
@@ -200,7 +200,7 @@ def test_task_add_cli_exits_with_the_refusal_for_a_taken_id(monkeypatch, capsys)
     make_ledger([("eng", "done", "engineer@abcdef-0001")])
     with pytest.raises(SystemExit) as raised:
         cli(monkeypatch, "add", "c0", "new", "work")
-    assert raised.value.code == TAKEN
+    assert raised.value.code == f"task c0 was not added: {TAKEN}"
     assert capsys.readouterr().out == ""
 
 
@@ -227,7 +227,7 @@ def test_the_refusal_names_a_task_without_a_state_as_open():
 
 def test_task_add_with_a_dash_mints_t1_on_a_ledger_without_tasks(monkeypatch, capsys):
     sent = []
-    monkeypatch.setattr(ledger, "call", lambda slug, ops=None: sent.append(ops) or {})
+    monkeypatch.setattr(ledger, "call", lambda slug, ops=None: sent.append(ops) or {"applied": [ops[0]["id"]]})
     monkeypatch.setattr(ledger, "resource", lambda slug, path, collection=False: sent.append(None) or [])
     ledger.cmd_task(ledger.build_parser().parse_args(["--slug", SLUG, "--as", "swarm", "task", "add", "-", "first"]))
     assert [op["task"] for op in sent[1]] == ["t1"]

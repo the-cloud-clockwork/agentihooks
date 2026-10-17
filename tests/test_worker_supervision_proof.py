@@ -22,8 +22,9 @@ def container(monkeypatch):
         calls=[],
         ticks=iter((1, 2)),
         beats=5,
+        now=100,
+        clock_step=0,
     )
-    clock = iter((False, True))
 
     def docker(*args, timeout=30):
         observed.calls.append((args, timeout))
@@ -35,8 +36,11 @@ def container(monkeypatch):
             tick = next(observed.ticks)
             if isinstance(tick, Exception):
                 raise tick
-            return json.dumps({f"heartbeat-{i}.json": tick for i in range(observed.beats)})
+            return json.dumps(
+                tick if isinstance(tick, dict) else {f"heartbeat-{i}.json": tick for i in range(observed.beats)}
+            )
         if args[0] == "wait":
+            observed.now += observed.elapsed
             if observed.wait_error:
                 raise observed.wait_error
             return str(observed.code)
@@ -54,7 +58,12 @@ def container(monkeypatch):
     monkeypatch.setattr(proof, "ready", lambda _: {"root": "/home/worker/attempts/fixture/run/supervision/incarnation"})
     monkeypatch.setattr(proof, "state", lambda _: {"Running": observed.running, "Pid": observed.pid})
     monkeypatch.setattr(proof.time, "sleep", lambda _: None)
-    monkeypatch.setattr(proof.time, "monotonic", lambda: 100 + (observed.elapsed if next(clock) else 0))
+
+    def monotonic():
+        observed.now += observed.clock_step
+        return observed.now
+
+    monkeypatch.setattr(proof.time, "monotonic", monotonic)
     return observed
 
 
@@ -102,6 +111,7 @@ def test_a_failed_heartbeat_read_is_retried(container, tmp_path, error):
 def test_heartbeats_never_accepted_fail_and_the_container_is_removed(container, tmp_path, beats):
     container.ticks = itertools.repeat(1)
     container.beats = beats
+    container.clock_step = 1
 
     with pytest.raises(AssertionError, match="heartbeats not accepted"):
         proof.run_case("image", "complete", tmp_path, viewer=False)
@@ -118,4 +128,35 @@ def test_incorrect_supervision_outcomes_still_fail(container, tmp_path, attribut
     with pytest.raises(AssertionError):
         proof.run_case("image", "complete", tmp_path, viewer=False)
 
+    assert container.calls[-1][0] == ("rm", "--force", "container")
+
+
+def test_delayed_heartbeats_are_observed_before_termination(container, tmp_path):
+    initial = {f"heartbeat-{i}.json": 1 for i in range(5)}
+    partial = {key: 2 if key != "heartbeat-4.json" else 1 for key in initial}
+    advanced = {key: 2 for key in initial}
+    container.ticks = iter(({}, dict(list(initial.items())[:4]), initial, initial, partial, advanced))
+
+    proof.run_case("image", "complete", tmp_path, viewer=False)
+
+    samples = [args for args, _ in container.calls if args[0] == "exec"]
+    assert len(samples) == 6
+    assert (("kill", "--signal", "TERM", "container"), 30) in container.calls
+
+
+@pytest.mark.parametrize("missing", [False, True])
+def test_stalled_or_missing_heartbeat_fails_before_termination(container, tmp_path, missing):
+    from itertools import chain, repeat
+
+    initial = {f"heartbeat-{i}.json": 1 for i in range(5)}
+    stalled = dict(initial)
+    if missing:
+        del stalled["heartbeat-4.json"]
+    container.ticks = chain((initial,), repeat(stalled))
+    container.clock_step = 1
+
+    with pytest.raises(AssertionError):
+        proof.run_case("image", "complete", tmp_path, viewer=False)
+
+    assert not any(args[0] == "kill" for args, _ in container.calls)
     assert container.calls[-1][0] == ("rm", "--force", "container")

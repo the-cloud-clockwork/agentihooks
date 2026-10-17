@@ -28,12 +28,17 @@ def stop(repo: str, run: int) -> bool:
     return subprocess.run(argv, capture_output=True).returncode == 0
 
 
-def branch_only(head: str, root: Path) -> list[str]:
+def branch_only(head: str, root: Path, include_edits: bool = False) -> list[str]:
     listed = git("ls-tree", "-z", "--name-only", f"{head}:{WORKFLOWS}").split("\0")
     return [
         f"{WORKFLOWS}/{name}"
         for name in listed
-        if name.endswith((".yml", ".yaml")) and not (root / WORKFLOWS / name).exists()
+        if name.endswith((".yml", ".yaml"))
+        and (
+            not (root / WORKFLOWS / name).exists()
+            or include_edits
+            and (root / WORKFLOWS / name).read_text() != git("show", f"{head}:{WORKFLOWS}/{name}")
+        )
     ]
 
 
@@ -47,30 +52,39 @@ def lane_problem(block: object) -> str | None:
     return None
 
 
-def problems(workflow: object) -> list[str]:
+def problems(workflow: object, baseline: object = None) -> list[str]:
     if not isinstance(workflow, dict):
         return ["is not a workflow mapping"]
     jobs = workflow.get("jobs") or {}
     if not isinstance(jobs, dict):
         return ["has no jobs mapping"]
+    trusted = baseline if isinstance(baseline, dict) and baseline.get("name") == workflow.get("name") else {}
     found = []
     for name, job in jobs.items():
         job = job if isinstance(job, dict) else {}
-        problem = lane_problem(job.get("concurrency", workflow.get("concurrency")))
+        block = job.get("concurrency", workflow.get("concurrency"))
+        base_job = (trusted.get("jobs") or {}).get(name, {})
+        base_block = base_job.get("concurrency", trusted.get("concurrency"))
+        if trusted and (name in (trusted.get("jobs") or {}) or base_block is not None) and block == base_block:
+            continue
+        problem = lane_problem(block)
         if problem:
             found.append(f"job {name} {problem}")
     return found
 
 
-def grade(text: str) -> list[str]:
+def grade(text: str, baseline: str | None = None) -> list[str]:
     try:
-        return problems(yaml.safe_load(text))
+        return problems(yaml.safe_load(text), yaml.safe_load(baseline) if baseline is not None else None)
     except yaml.YAMLError:
         return ["does not parse as YAML"]
 
 
 def refused(head: str, root: Path) -> dict[str, list[str]]:
-    graded = {path: grade(git("show", f"{head}:{path}")) for path in branch_only(head, root)}
+    graded = {
+        path: grade(git("show", f"{head}:{path}"), (root / path).read_text() if (root / path).exists() else None)
+        for path in branch_only(head, root, include_edits=True)
+    }
     return {path: found for path, found in graded.items() if found}
 
 

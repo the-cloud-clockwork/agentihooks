@@ -115,3 +115,57 @@ def operate(action: str, url: str, run=subprocess.run, admit=None) -> dict:
         "queued": raw["mergeQueueEntry"] is not None,
         "entry": raw["mergeQueueEntry"],
     }
+
+
+def waiting_ahead(url: str, target: str, run) -> list[dict]:
+    query = """query($url: URI!, $after: String) { resource(url: $url) { ... on PullRequest {
+      repository { mergeQueue(branch: "dev") { entries(first: 100, after: $after) {
+        nodes { state pullRequest { id url headRefOid } }
+        pageInfo { hasNextPage endCursor }
+      } } }
+    } } }"""
+    variables = {"url": url}
+    waiting = []
+    while True:
+        page = graphql(query, variables, run)["resource"]["repository"]["mergeQueue"]["entries"]
+        for entry in page["nodes"]:
+            if entry["pullRequest"]["id"] == target:
+                return waiting
+            if entry["state"] == "QUEUED":
+                waiting.append(entry["pullRequest"])
+        if not page["pageInfo"]["hasNextPage"]:
+            return waiting
+        variables["after"] = page["pageInfo"]["endCursor"]
+
+
+def prioritize(url: str, run=subprocess.run) -> dict:
+    raw = graphql(STATE, {"url": url}, run)["resource"]
+    if not raw or raw["baseRefName"] != "dev" or raw["state"] != "OPEN":
+        raise SwarmError("queue priority requires an open pull request into dev")
+    if raw["repository"]["mergeQueue"] is None:
+        raise SwarmError("queue priority requires a dev merge queue")
+    require_green(url, raw["headRefOid"], run)
+    waiting = waiting_ahead(url, raw["id"], run)
+    removed = []
+    errors = []
+    try:
+        for pull in reversed(waiting):
+            current = graphql(STATE, {"url": pull["url"]}, run)["resource"]
+            if current["mergeQueueEntry"] is not None and current["mergeQueueEntry"]["state"] == "QUEUED":
+                removed.append(pull)
+                graphql(DEQUEUE, {"id": pull["id"]}, run)
+        current = graphql(STATE, {"url": url}, run)["resource"]
+        if current["mergeQueueEntry"] is None:
+            graphql(QUEUE, {"id": raw["id"], "head": raw["headRefOid"]}, run)
+    except SwarmError as exc:
+        errors.append(str(exc))
+    restored = []
+    for pull in reversed(removed):
+        try:
+            current = graphql(STATE, {"url": pull["url"]}, run)["resource"]
+            if current["mergeQueueEntry"] is None:
+                graphql(QUEUE, {"id": pull["id"], "head": pull["headRefOid"]}, run)
+                restored.append(pull["url"])
+        except SwarmError as exc:
+            errors.append(f"could not restore {pull['url']}: {exc}")
+    return {"url": url, "displaced": restored, "errors": errors}

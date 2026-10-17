@@ -146,7 +146,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> restore [--from FILE]` | After a reboot or a lost Redis: refuse while any agent of the swarm is live, write the newest snapshot back (manual, stop or automatic, by the time it was taken; `--from` names an older file) and leave the swarm paused. Each agent with a conversation id, its worktree still on disk (the master: the swarm repo) and its account not out of quota is relaunched through `init-agent --resume` into its own conversation, with the same pane name, seat, task and account (`--route`) on its lane's current model and effort, never the recorded one (a master on the frontier model at high effort); it counts as resumed only once herdr shows that conversation on the new pane, and its first message tells it to re-read its task folder and the ledger before acting. Every failed resume retains its seat and task as awaiting decision. The tick never starts a fresh replacement until the master or operator chooses Fresh on the page or runs `restore-decision`. Resume retries the old conversation; a failed retry keeps the decision open. Each agent's outcome, resumed or awaiting decision with the reason, shows as a `restored` line in `status`, under `restored` in `status --json` and in the Last restore list of the ledger page swarm panel. The ledger copy is written back only when the ledger file is gone. |
 | `agentihooks swarm <id> restore-decision AGENT resume\|fresh` | The master or operator chooses how an awaiting seat returns. Resume retries the saved conversation; fresh explicitly permits a new successor. The Last restore list offers the same two controls. |
 | `agentihooks swarm <id> confirm-handoff TRANSFER --next TEXT` | A live successor confirms that it read the handoff and its first Next action. Continuity remains pending until that confirmation; binding independently records live seat occupancy. Both appear in Handoff outcomes on the page and in `status --json`. |
-| `agentihooks swarm <id> status [--json]` | Config, task counts, when the last automatic snapshot was taken (`snapshots  last automatic snapshot 2026-10-05 13:15 UTC  every 30 min  kept 4`), one row per agent, and the health findings. An agent's model and effort are what its running session last reported (the Claude status line, a Codex hook) once that differs from the launch, with model source `session`, so a manual `/model` or `/effort` switch shows on the next tick. It also prints the host room (`host room 3: <reason>`, or `host room unknown` with its reason when capacity is unavailable; see [Deployed host capacity](#deployed-host-capacity)) and, when the last spawn pass stopped at that room, the hold (`holding spawns: host memory room 3, 3 spawned since it was granted: <reason>`). The host room gates every spawn in manual and auto scaling, and the tick's master seat too, after the quota seat check. Spawns from every swarm on the host count against the room from thirty seconds before it was granted, since a new agent takes that long to show in a reading; a room held between the load watermarks keeps its first grant time, so spawns made under it keep counting. An unknown host lets spawns pass and keeps the last known room for the next reading. An operator's own master start and restore relaunches after a reboot are not gated. |
+| `agentihooks swarm <id> status [--json]` | Config, task counts, when the last automatic snapshot was taken (`snapshots  last automatic snapshot 2026-10-05 13:15 UTC  every 30 min  kept 4`), one row per agent with its [transport capabilities](#transport-capabilities), and the health findings. An agent's model and effort are what its running session last reported (the Claude status line, a Codex hook) once that differs from the launch, with model source `session`, so a manual `/model` or `/effort` switch shows on the next tick. It also prints the host room (`host room 3: <reason>`, or `host room unknown` with its reason when capacity is unavailable; see [Deployed host capacity](#deployed-host-capacity)) and, when the last spawn pass stopped at that room, the hold (`holding spawns: host memory room 3, 3 spawned since it was granted: <reason>`). The host room gates every spawn in manual and auto scaling, and the tick's master seat too, after the quota seat check. Spawns from every swarm on the host count against the room from thirty seconds before it was granted, since a new agent takes that long to show in a reading; a room held between the load watermarks keeps its first grant time, so spawns made under it keep counting. An unknown host lets spawns pass and keeps the last known room for the next reading. An operator's own master start and restore relaunches after a reboot are not gated. |
 | `agentihooks swarm <id> autoscale [--fixture <file>] [--json]` | Read only: the autoscale decision (lane ceilings, pending raise, host room and reason) for the live swarm, or for a fixture of accounts and host readings. It never refreshes quota or writes the stored decision; `applied` is false when the swarm runs manual scaling. In deployed mode it reads the Kubernetes worker namespace or reports why host room is off; see [Deployed host capacity](#deployed-host-capacity). |
 | `agentihooks swarm <id> names [--json]` | The swarm code, its herdr space and every agent name the swarm gave, each with its type, number, session id and spawn and retire times. |
 | `agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N max-plan-agents=N` | Change the caps; `swarm <id> max-eng-agents=N` also works. |
@@ -238,6 +238,7 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> branch` | Record the current worktree branch on the task once it is on origin, with its repository (`branch_repo`, the origin remote without credentials), so dependent tasks can start from it. |
 | `agentihooks swarm <id> review` | Start a review round on the task. The third round answers that review is closed: any finding still open gets one ruling from the other reader, then the merge proceeds. A fourth is refused with that text. |
 | `agentihooks swarm <id> done [--pr URL] [proof flags]` | Close the task with the proof its kind needs; the swarm then closes the session. |
+| `agentihooks swarm <id> merge priority URL` | The master or operator moves a green critical pull request ahead of waiting dev queue entries. Running entries stay in place. Waiting entries ahead are removed tail first and requeued in their original order after the critical request; their swarm owners receive an inbox message. Entries behind an already queued critical request stay in place. A failed insertion still attempts to restore every displaced entry and reports any restoration failure. |
 | `agentihooks swarm <id> ready DOC` | Release the seat of a code or ci task whose reviewed pull request waits only on checks and the merge queue. Refuses at manual or assist autonomy, without a recorded open pull request, or unless the worktree is clean and its head is the pull request head. Checks the document like `handoff`, records the pull request, head and worktree, marks the task `awaiting` `merge` (still `pr`), stores the handoff and ends the session; the finished agent no longer holds a seat and the tick never reopens the task as an orphan. Each tick the merge pass watches its checks like a checks wait, queues its green head as is like `merge queue`, waits on the queue like a merge wait, then writes the same done fields `done` writes, closes its group members and removes the worktree with `wt.sh done`. Red checks, a closed pull request or a queue ejection reopen the task for the next engineer with the handoff, removing the worktree with `wt.sh done --pushed`. Five refusals GitHub returns (a GraphQL error, or a base other than `dev`) reopen it too; any other queue failure, an outage or checks still running, is retried and never counted. The intent gate holds `ready` like `done` in its enforce and coach modes; off and observe let it pass without a verdict. |
 | `agentihooks swarm <id> block NOTE` | Comment the blocker, mark the task `blocked`, end the session. |
 | `agentihooks swarm <id> trace-plan` | Trace `plan.md` in your task work folder, one piece per line (`- what \| area, area \| why`), to the task, its phase and the project intent through the classifier. A piece under 0.3 is cut and, once the plan passes, filed as a follow-up. The task's latest five scope authorizations, master relays of operator words and operator or master comments starting `In scope:`, travel in the trace intent, and the classifier asks whether each covers each piece that is not a clearance; a piece covered at 0.7 is kept, its row and the report's `authorized` name the authorization and it is never filed as a cut. A new authorization retraces an unchanged plan without counting a failed plan; a follow up filed before the authorization stays filed. A plan with more than half its pieces cut, or sized above one pull request at confidence 0.7, fails; the second failed plan blocks the task when `trace-plan-gate=deny` (default `log only` logs it). A piece appended to a passing plan is traced alone. Before the task's pull request opens, a plan that does not fail is also judged by the intent check as a plan, on its kept pieces and plan slice: whether the planned work serves the phase, covers the task and weakens nothing, with no demand for shipped code or proof; that verdict is printed as `intent` and logged like a pull request verdict. The verdict lands in `plan-verdict.json`; no classifier answer gives `unchecked`, counted in the gate log. The `build` gate (`python -m scripts.gates build`, on Edit, Write, MultiEdit, NotebookEdit, Serena edit tools and `git commit`) refuses an engineer's or CI agent's edit before a passing verdict for the current `plan.md`, and an edit or staged file outside the kept pieces' areas and the task territory; the work folder, `~/scratchpad` and files outside any git work tree are exempt, and an `unchecked` verdict lets edits through, counted. `build-gate` defaults to `log only`. |
@@ -704,6 +705,63 @@ master seat for the next one, and the tick tells the page chat that the master i
 A stopped swarm whose master seat holds a pending item is paused, so the tick starts its master and no engineer.
 The ledger hook, the ledger watch and the inbox share one seen mark per agent and write. Stable item ids keep
 relay retries from creating a second item; an unconfirmed delivery may still be shown again.
+
+### Transport capabilities
+
+`agentihooks swarm <id> status` and the ledger page Agents panel show, for every
+agent, two things its transport can do. Both come from the harness and the Codex
+inbox transport recorded on the agent when it launched; neither is a live probe.
+
+| Harness and transport | Push inbox | Native terminal |
+|---|---|---|
+| Claude | yes: the inbox channel pushes each item into the session | no |
+| Codex, `app_server` | yes: the Codex push pump delivers each item to the managed thread | yes: herdr opens the managed thread as a viewer |
+| Codex, `legacy` | no: the tick types a wake into an idle worker pane; the Codex master, whose pane is never typed into, runs `agentihooks swarm <id> wait --inbox` when no work remains | no |
+| Any other or no harness | no | no |
+
+- **Push inbox** means the execution receives inbox items without a typed wake.
+  An agent without it relies on the tick's wake prompt and its own
+  `agentihooks msg inbox` read.
+- **Native terminal** means a terminal can attach to the running execution's own
+  thread; closing that terminal leaves the execution running. See
+  [Managed Codex terminals](../reference/codex-managed-terminal.md).
+
+A Codex agent keeps the transport it launched with. After
+`agentihooks swarm <id> set codex-inbox-transport=app_server`, running Codex agents
+still show `legacy` capabilities until they are replaced; agents launched next
+show the new ones.
+
+The tab separated agent table in status text has `Push inbox` and
+`Native terminal` columns, `yes` or `no`, before `Model source`. Columns are
+aligned and shortened here:
+
+```text
+Agent                 Lane    Harness  ...  Push inbox  Native terminal  ...
+master@ed7448-0002    master  claude   ...  yes         no               ...
+engineer@ed7448-0003  eng     claude   ...  yes         no               ...
+engineer@ed7448-0004  eng     codex    ...  yes         yes              ...
+ci@ed7448-0002        ci      codex    ...  no          no               ...
+```
+
+`status --json` carries the same pair on each agent:
+
+```json
+{"name": "engineer@ed7448-0004", "harness": "codex", "transport": "app_server",
+ "capabilities": {"push_inbox": true, "native_terminal_attach": true}}
+```
+
+The Agents panel shows them in its `transport` column, after `model`: `push` or
+`no push`, and `native terminal` or `no native terminal`, each with an on or off
+dot. A status payload without capabilities, such as one from a ledger server
+older than this column, shows `—`. Remote swarms, whose panel adds execution and
+terminal columns, keep the transport column in the same place.
+
+To list the agents without push inbox, which rely on a typed wake:
+
+```bash
+agentihooks swarm <id> status --json \
+  | jq -r '.agents[] | select(.capabilities.push_inbox | not) | .name'
+```
 
 ### Delivered then confirmed
 

@@ -146,12 +146,12 @@ function agentRows(sw, now) {
 
 function agentRow(a, remote) {
   return withId(cells(idCell(a.name), a.lane, a.profile, a.overlays, a.model, transportCell(a.transport), a.task ? h("a", { href: `#item-tasks-${a.task}`, text: a.task }) : "—",
-    a.promoted ? h("span", { class: "sw-promoted" }, label(a.state), label("promoted")) : label(a.state),
+    a.promoted ? h("span", { class: "sw-promoted", "data-tip": `${a.state} · promoted` }, label(a.state), label("promoted")) : label(a.state),
     ...(remote ? [executionCell(a.execution), terminalCell(a.terminal, a.execution)] : []), a.age, a.finished ? h("span") : agentActions(a, pending, swarmReadError)), `agent-${a.name}`);
 }
 
-const transportCell = (c) => c ? h("span", { class: "sw-transport" }, label(c.push_inbox ? "push" : "no push", c.push_inbox ? "on" : "off"),
-  label(c.native_terminal_attach ? "native terminal" : "no native terminal", c.native_terminal_attach ? "on" : "off")) : "—";
+const transportCell = (c) => c ? h("span", { class: "sw-transport", "data-tip": `${c.push_inbox ? "push" : "no push"} · ${c.native_terminal_attach ? "native terminal" : "no native terminal"}` },
+  label(c.push_inbox ? "push" : "no push", c.push_inbox ? "on" : "off"), label(c.native_terminal_attach ? "native terminal" : "no native terminal", c.native_terminal_attach ? "on" : "off")) : "—";
 
 function executionCell(e) {
   return e ? h("span", {}, label(e.shown, e.tone), ` ${e.seen}`, h("span", { class: "sw-sub", text: e.where })) : "—";

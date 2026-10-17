@@ -48,7 +48,6 @@
   "test.yml/admission": "light",
   "test.yml/coverage-baseline": "light",
   "test.yml/coverage-ratchet": "light",
-  "test.yml/durations": "light",
   "test.yml/flake-budget": "light",
   "test.yml/gate-required": "light",
   "test.yml/kind-due": "standard",
