@@ -257,6 +257,85 @@ def test_two_fast_passes_clear_the_alert_and_tell_the_master_and_operator(store)
     assert "answers fast again" in ledger.notes[-1]
 
 
+@pytest.mark.parametrize("latency", [4.0, 4.8, 5.0])
+def test_recovery_requires_two_passes_below_four_seconds(store, latency):
+    clock = Clock()
+    ledger = ProbedLedger(clock, write_s=5.7)
+    observe(store, ledger, clock)
+    observe(store, ledger, clock)
+    ledger.write_s = latency
+    for _ in range(4):
+        assert observe(store, ledger, clock) == []
+        assert ledger_probe.holding(store, "sw")
+    ledger.write_s = 3.9
+    assert observe(store, ledger, clock) == []
+    ledger.write_s = latency
+    assert observe(store, ledger, clock) == []
+    ledger.write_s = 3.9
+    assert observe(store, ledger, clock) == []
+    assert observe(store, ledger, clock) == ["cleared the ledger slow alert"]
+    assert not ledger_probe.holding(store, "sw")
+
+
+def test_a_failure_only_hold_resumes_on_the_first_answered_fast_pass(store):
+    clock = Clock()
+    ledger = ProbedLedger(clock)
+    ledger.read_error = TimeoutError("timed out")
+    observe(store, ledger, clock)
+    observe(store, ledger, clock)
+    assert "probe failed" in master_mail(store)[0]
+    ledger.read_error = None
+    assert observe(store, ledger, clock) == ["cleared the ledger slow alert"]
+    assert not ledger_probe.holding(store, "sw")
+    [raised, cleared] = master_mail(store)
+    assert "one answered fast pass" in cleared
+    assert "sw pass 3" in cleared and "sw pass 2" not in cleared
+
+
+def test_latency_in_a_failed_pass_still_needs_two_recovery_passes(store):
+    clock = Clock()
+    ledger = ProbedLedger(clock, write_s=5.7)
+    ledger.read_error = TimeoutError("timed out")
+    observe(store, ledger, clock)
+    observe(store, ledger, clock)
+    ledger.read_error, ledger.write_s = None, 0.1
+    assert observe(store, ledger, clock) == []
+    assert ledger_probe.holding(store, "sw")
+    assert observe(store, ledger, clock) == ["cleared the ledger slow alert"]
+
+
+def test_notice_cpu_covers_each_triggering_pass_instead_of_notice_time(store, monkeypatch):
+    from scripts.swarm import ledger_host
+
+    clock = Clock()
+    ledger = ProbedLedger(clock, read_s=6.0, write_s=2.0)
+    readings = iter([(100, 50), (300, 50), (700, 50), (1100, 50)])
+    boundaries = []
+    monkeypatch.setattr(ledger_host, "server_pid", lambda folder: 51)
+    monkeypatch.setattr(ledger_host.os, "sysconf", lambda name: 100)
+
+    def ticks(pid, proc):
+        assert pid == 51
+        boundaries.append(clock.now)
+        return next(readings)
+
+    monkeypatch.setattr(ledger_host, "_stat", ticks)
+    observe(store, ledger, clock, 1_000)
+    observe(store, ledger, clock, 2_000)
+    [notice] = master_mail(store)
+    assert "CPU 25 percent over pass" in notice
+    assert "CPU 50 percent over pass" in notice
+    assert "CPU 182" not in notice
+    assert boundaries == [0.0, 8.0, 8.0, 16.0]
+    rows = ledger_probe.state(store, "sw")["raised_samples"]
+    assert rows[0]["cpu_before"] == {"pid": 51, "start": 50, "ticks": 100, "hertz": 100}
+    assert rows[0]["cpu_after"]["ticks"] == 300
+    assert rows[1]["cpu_before"]["ticks"] == 700
+    assert rows[1]["cpu_after"]["ticks"] == 1100
+    assert [row["cpu"] for row in rows] == [25.0, 50.0]
+    assert all(f"CPU {cpu} percent over pass" in ledger.notes[0] for cpu in (25, 50))
+
+
 def test_the_alert_goes_to_the_master_seat_when_no_master_is_live():
     import fakeredis
 
