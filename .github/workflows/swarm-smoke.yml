@@ -37,7 +37,7 @@ jobs:
           cache-from: |
             type=gha,scope=swarm-smoke
             type=gha,scope=swarm
-          cache-to: type=gha,mode=max,scope=swarm-smoke
+          cache-to: type=gha,mode=max,scope=swarm-smoke,compression=zstd,force-compression=true
       - name: Run the hive launch, Compose install, hive join and Compose hive scenarios in parallel
         if: ${{ !cancelled() }}
         run: >-
