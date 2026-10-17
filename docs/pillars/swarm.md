@@ -405,11 +405,14 @@ checked, who judges it) that the agent's prompt carries.
 ### Shared areas in the opening prompt
 
 When the tick claims a task, it compares the task's territory with the territory of every other task in `claimed`
-or `pr` state. Two entries share an area when they are equal or one is a folder holding the other; a leading `./`
-and a trailing `/` are ignored, and the narrower entry is the one named. Tasks clear of every held territory claim
-first in a tick; a task that shares an area is still claimable and claims after them.
+or `pr` state. Two entries share an area when they are equal or one is a folder holding the other; surrounding
+spaces, a leading `./` and trailing slashes are ignored, and the narrower entry is the one named. Sharing an area
+never blocks a claim. Queue rank (or the dispatcher's order) decides first, so an `urgent` task that shares an area
+still claims ahead of a clear `normal` task. Overlap breaks the last tie: among tasks equal on rank, an earlier
+failed launch and resumed work, tasks clear of every held territory claim first.
 
-For each running task that shares an area, the opening prompt adds one line after its task and group lines:
+The opening prompt then carries a header line once, followed by one line per running task that shares an area,
+after the task, contract, workspace and group lines. Several shared areas are joined with `and`:
 
 ```text
 Running tasks share areas with yours. Coordinate with each claimant through the inbox (agentihooks msg send <claimant> "<text>") and merge dev only on a real conflict; where the repo has a merge queue, it retests your green head against the newest dev:
@@ -417,11 +420,10 @@ Task t1, claimed by engineer@a1b2c3-0001, shares hooks.
 Task t2, claimed by engineer@a1b2c3-0002, shares docs/a.md and scripts/swarm/tick.py.
 ```
 
-A task that shares nothing gets no such lines. The agent sends each claimant a message about the overlap and keeps
-its branch as it is. It merges `dev` into its branch only when GitHub reports a conflict with `dev` or refuses to
-queue the pull request; a green head is queued as it stands, because the merge group tests it on top of the newest
-`dev`. Earlier prompts told it to merge `dev` before its own merge, which spent a full check run on every
-overlapping pull request.
+A task that shares nothing gets no such lines. The agent coordinates with each claimant through the inbox and
+merges `dev` into its branch only on a real conflict. Where the repo has a merge queue, it queues a green head as it
+stands, because the merge group tests it on top of the newest `dev`, and merges `dev` only on a real conflict or
+when GitHub refuses the enqueue.
 
 ### Split tasks across pull requests
 
