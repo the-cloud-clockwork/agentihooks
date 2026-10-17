@@ -223,6 +223,10 @@ Coverage: merge group runs feed no coverage consumer, since `sonar` and the ratc
 
 A merge whose base grader has no planner, which includes the queue run of this slice's own pull request, runs in full.
 
+What the queue can reuse, measured with the planner's own rule: the manifest of dev push run [38972462506](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38972462506) (32678 tests, commit `5320236c9`) applied to each of the 40 dev merges before it, with `python -m tests.dep_manifest share --merges 40`. A queue entry reuses on average 58.0 % of its tests, median 79.2 %. 10 of the 40 merges reuse nothing: six changed `.github/`, and at least three changed a shared helper under `tests/`, which invalidates every test. Each 3.12 shard runs about 217 s of tests in its Run tests step, so at the median the remaining tests split over the same 12 shards run about a fifth of that.
+
+Pull request runs and the coverage combine are not in this slice. `select` already narrows a pull request to the tests its change reaches. It falls back to the full suite only for a harness or `conftest.py` change, which the manifest rule also treats as global, for a change with no selected tests, or when the selected tests exceed three legs. A full scope pull request run feeds `sonar` and the coverage ratchet, so reusing tests there needs coverage combined from the dev record. That is proposed as its own follow up.
+
 Known limits. Each is detected only after the merge, by the next dev push, which runs every test; a red dev push does not hold the queue:
 
 - The manifest is measured on 3.12, and its plan also deselects the same tests on 3.11.
