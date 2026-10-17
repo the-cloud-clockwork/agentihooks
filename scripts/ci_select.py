@@ -73,6 +73,18 @@ def selected_tests(root: Path, changed: list[str]) -> set[str]:
             tests.update(select_tests(root, Path(path)))
         else:
             needles.add(Path(path).name)
+    if any(
+        path.startswith(".github/workflows/")
+        or path in {".github/runner-classes.json", "scripts/ci_runner_classes.py", "scripts/ci_runner_trust.py"}
+        for path in changed
+    ):
+        tests.update(
+            {
+                "tests/test_ci_anton_runners.py",
+                "tests/test_ci_runner_classes.py",
+                "tests/test_ci_runner_trust.py",
+            }
+        )
     tests |= naming_tests(root, needles)
     return {path for path in tests if SAFE.fullmatch(path) and (root / path).is_file()}
 
