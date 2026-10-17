@@ -56,7 +56,7 @@ def release_all() -> int:
 
 def _pending(futures: Iterable[Future], signaled: list[int], until: float) -> set[Future]:
     pending = set(futures)
-    while pending and not signaled and time.monotonic() < until:
+    while all((pending, not signaled, time.monotonic() < until)):
         pending = wait(pending, timeout=POLL_S).not_done
     return pending
 
