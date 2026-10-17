@@ -364,7 +364,7 @@ def test_worker_smoke_shares_one_versioned_scanner_cache_across_independent_proo
     workflow = yaml.safe_load((ROOT / ".github/workflows/swarm-node-smoke.yml").read_text())
     image = workflow["jobs"]["worker-image"]
     cache = image["env"]["WORKER_SCANNER_CACHE"]
-    assert cache == "${{ runner.temp }}/worker-scanner-cache"
+    assert cache == "${{ github.workspace }}/.worker-scanner-cache"
     restore = next(step for step in image["steps"] if step.get("uses") == "actions/cache/restore@v4")
     save = next(step for step in image["steps"] if step.get("uses") == "actions/cache/save@v4")
     assert restore["with"]["path"] == save["with"]["path"] == "${{ env.WORKER_SCANNER_CACHE }}"
