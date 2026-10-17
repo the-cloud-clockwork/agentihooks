@@ -359,11 +359,11 @@ def test_registered_server_without_channel_activation_never_claims_messages(monk
     import anyio
 
     calls = []
-    monkeypatch.setattr(channel, "identity", lambda: "ordinary-session")
+    monkeypatch.setattr(channel, "identity", lambda: pytest.fail("dormant registration must not require an identity"))
     monkeypatch.setattr(channel, "connect", lambda: pytest.fail("an inactive channel must not connect to the inbox"))
     monkeypatch.setattr(anyio, "run", lambda serve, store, me, active: calls.append((store, me, active)))
     channel.main(active=False)
-    assert calls == [(None, "ordinary-session", False)]
+    assert calls == [(None, "", False)]
 
 
 @pytest.mark.parametrize("connected", [False, True])

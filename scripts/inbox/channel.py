@@ -219,7 +219,7 @@ def main(active: bool = True) -> None:
     import anyio
 
     try:
-        me = identity()
+        me = identity() if active else ""
     except InboxError as exc:
         print(f"agentihooks inbox channel: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
