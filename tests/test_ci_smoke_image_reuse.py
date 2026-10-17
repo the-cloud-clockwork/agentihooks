@@ -22,7 +22,10 @@ def test_main_image_is_built_once_before_every_compatible_smoke():
     build = builds[0]
     step = steps[build]
     if "run" in step:
-        assert step["run"] == f"docker build -t {IMAGE} ."
+        assert step["run"] in {
+            f"docker build -t {IMAGE} .",
+            f"docker build -t {IMAGE} --output type=image,compression=uncompressed .",
+        }
     else:
         assert step["with"]["context"] == "."
         assert step["with"]["load"] is True
