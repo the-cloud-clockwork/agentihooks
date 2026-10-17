@@ -159,7 +159,6 @@ The 10 queue failures counted above all ran on 2026-10-08 in the unit job's olde
 
 Cost: nothing when the first attempt succeeds; 30 s plus the attempts when an artifact is missing for good.
 
-
 ## Slice 3 as delivered
 
 The `flake-budget` job runs on every dev push after `unit`. It restores the newest `flake-history-` cache, downloads the run's `flakes-3.*` reports and runs `python -m tests.flake_budget`. That keeps one line per test and run for every `flaky` outcome, folds parameters into the test function, drops lines older than seven days, and writes `flake-budget.json`: the count of flaky test ids in the window, the number this slice moves, and every test flaky in two or more separate runs. The job prints the count to its step summary, raises a `Flake budget` warning per test over budget, uploads the `flake-budget` artifact and saves the history under `flake-history-<run>-<attempt>`. A job that cannot count or publish is red.
@@ -293,7 +292,7 @@ Two steps in `test.yml` use it; every other upload in the workflow calls `action
 
 To route another upload through it, replace `uses: actions/upload-artifact@v4` with `uses: ./.github/actions/retry-upload` and drop `overwrite`. Do it only for an upload whose name is unique to the job, since each attempt replaces the artifact of that name. `tests/test_ci_step_retry.py` pins the three attempts, the waits and warnings, the inputs passed to each attempt and the `with` block of both duration steps. Its guard against retrying in a job that holds a deployment environment or an OIDC token covers only `retry-download`; nothing stops `retry-upload` there, so keep it out of such jobs by review.
 
-Why the action's own retry is not enough, read from its source for [#3996](https://github.com/the-cloud-clockwork/agentihooks/issues/3996): `actions/upload-artifact@v4` resolves to v4.6.2, commit `ea165f8`. Its artifact service client retries timeouts and retryable HTTP statuses up to five times, but throws a socket error code (`ECONNRESET`, `ECONNREFUSED`, `ETIMEDOUT`, `ENOTFOUND`, `EHOSTUNREACH`) at once. The toolkit's `main` branch does the same, so a version bump does not help.
+Why the action's own retry is not enough, read from its source for [#3996](https://github.com/the-cloud-clockwork/agentihooks/issues/3996): `actions/upload-artifact@v4` resolves to v4.6.2, `actions/upload-artifact` commit [`ea165f8`](https://github.com/actions/upload-artifact/commit/ea165f8d65b6e75b540449e92b4886f43607fa02). Its artifact service client retries timeouts and retryable HTTP statuses up to five times, but throws a socket error code (`ECONNRESET`, `ECONNREFUSED`, `ETIMEDOUT`, `ENOTFOUND`, `EHOSTUNREACH`) at once. The toolkit's `main` branch does the same, so a version bump does not help.
 
 Before: on 2026-10-16, 3 of 2369 executed duration upload steps failed, in 2 of 130 queue attempts. The two failure classes stay separate; no common cause is shown.
 
