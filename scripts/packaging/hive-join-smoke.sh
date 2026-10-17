@@ -85,6 +85,8 @@ for command in (
     ("HSET", f"{ROOT}:swarm:proof:executions", "forged", "{}"),
     ("HSET", f"{ROOT}:hive:other-member", "heartbeat_at", "1"),
     ("SREM", f"{ROOT}:hives", member),
+    ("SADD", f"{ROOT}:hives", "forged"),
+    ("PEXPIRE", f"{ROOT}:launch-slot:forged", "45000"),
     ("SET", f"{ROOT}:hive-proof", "1"),
     ("FLUSHALL",),
     ("CONFIG", "GET", "maxmemory"),
@@ -116,6 +118,7 @@ orders.Consumer.local = classmethod(lambda cls, redis, hive: NoOrders())
 daemon.execution_report = lambda redis, local_id, herdr: {"names": [], "panes": {}, "executions": {}}
 daemon.beat(client, member)
 assert registry.live(registry.show(client, member), int(time.time() * 1000))
+assert member in client.smembers(registry.INDEX)
 idle.beat(client, "proof", "member-agent", "working", 1)
 item = InboxStore(client).send("member-agent", "master@proof", "hello from the member")
 assert [mail.id for mail in InboxStore(client).open_items("master@proof")] == [item.id]

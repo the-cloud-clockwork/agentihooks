@@ -64,6 +64,27 @@ def test_three_missed_beats_expire_both_keys(redis, monkeypatch):
     assert redis.exists(registry.key("machine"))
 
 
+@pytest.mark.parametrize(("member", "indexed", "ttl"), [("machine", set(), 10), ("other", {"machine"}, 45)])
+def test_a_member_beat_leaves_the_index_and_launch_slots_to_the_controller(redis, monkeypatch, member, indexed, ttl):
+    from scripts.routing.reservation import LaunchSlots
+    from scripts.swarm.keyspace import ROOT
+
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", member)
+    monkeypatch.setattr(
+        daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
+    )
+    monkeypatch.setattr(daemon, "_executions", lambda redis, local_id, processes: {"claude:one": ["first"]})
+    slots = LaunchSlots(redis)
+    assert slots.reserve("claude:one", "first", 1, 10000)
+    assert slots.acknowledge("first")
+    redis.pexpire(f"{ROOT}:launch-slot:first", 10000)
+
+    daemon.beat(redis, "machine")
+
+    assert redis.smembers(registry.INDEX) == indexed
+    assert round(redis.pttl(f"{ROOT}:launch-slot:first") / 1000) == ttl
+
+
 def test_run_beats_immediately_then_waits_fifteen_seconds(monkeypatch):
     events = []
     connection = object()

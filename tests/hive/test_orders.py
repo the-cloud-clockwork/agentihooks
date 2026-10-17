@@ -308,6 +308,21 @@ def test_missing_delivery_payload_is_acknowledged(setup):
     assert json.loads(setup.redis.hget(f"{setup.orders.stream('host')}:acks", item))["failure"] == "invalid_order"
 
 
+def test_a_delivery_redis_refuses_is_acknowledged_refused_and_leaves_the_stream(setup, monkeypatch):
+    from redis.exceptions import NoPermissionError
+
+    item = setup.orders.send("host", setup.order)
+
+    def refuse(order):
+        raise NoPermissionError("No permissions to access a key")
+
+    monkeypatch.setattr(setup.consumer, "apply", refuse)
+    assert setup.consumer.poll() == 1
+    ack = json.loads(setup.redis.hget(f"{setup.orders.stream('host')}:acks", item))
+    assert ack == {"status": "failed", "target": {}, "failure": "refused"}
+    assert not setup.redis.xrange(setup.orders.stream("host"))
+
+
 @pytest.mark.parametrize("field,value", [("harness", "claude"), ("profile", "qa"), ("account", "other")])
 def test_runtime_substitution_is_refused_and_terminated(setup, field, value):
     placed = setup.runtime.spawn.return_value.value

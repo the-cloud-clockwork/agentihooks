@@ -60,6 +60,7 @@ def test_a_valid_code_joins_with_a_ledger_credential_and_a_redis_acl_user(admin,
     assert grant["ledger_credential"] not in str({key: admin.dump(key) for key in admin.keys("*")})
     user = admin.acl_getuser(f"hive-{grant['id']}")
     assert f"~{ROOT}:hive:{grant['id']}" in user["keys"]
+    assert admin.smembers(f"{ROOT}:hives") == {grant["id"]}
     assert user["channels"] == [f"&{ROOT}:*"]
     assert user["categories"] == ["+@all", "-@admin", "-@dangerous"]
     assert user["commands"] == []
@@ -68,7 +69,7 @@ def test_a_valid_code_joins_with_a_ledger_credential_and_a_redis_acl_user(admin,
     assert not auth.PREFIX.startswith(f"{ROOT}:")
 
 
-def test_the_member_user_grants_reads_on_every_swarm_key_and_writes_only_on_member_keys():
+def test_the_member_user_reads_every_root_key_and_writes_only_its_granted_patterns():
     calls = []
 
     class Recorder:
@@ -100,7 +101,6 @@ def test_the_member_user_grants_reads_on_every_swarm_key_and_writes_only_on_memb
                     f"~{ROOT}:swarm:*:stop-blocks:*",
                 ),
                 "channels": (f"{ROOT}:*",),
-                "selectors": (("+sadd", f"~{ROOT}:hives"), ("+pexpire", f"~{ROOT}:launch-slot:*")),
             },
         )
     ]
@@ -177,6 +177,7 @@ def test_revoke_cuts_both_credentials(admin):
     assert admin.keys(f"{auth.PREFIX}:member:*") == [f"{auth.PREFIX}:member:{other['id']}"]
     assert sorted(admin.acl_users()) == ["default", f"hive-{other['id']}"]
     assert auth.ledger_member(admin, other["ledger_credential"]) == other["id"]
+    assert admin.smembers(auth.INDEX) == {other["id"]}
 
 
 def test_revoking_an_unknown_member_is_refused(admin):
