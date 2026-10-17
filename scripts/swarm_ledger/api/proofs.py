@@ -5,6 +5,7 @@ import sys
 from collections.abc import Callable
 from types import ModuleType
 
+from scripts import agent_choice
 from scripts.swarm import naming, templates
 from scripts.swarm.store import CODEX_TRANSPORTS
 
@@ -40,6 +41,7 @@ SET = {
             "properties": {
                 "codex-inbox-transport": {"enum": list(CODEX_TRANSPORTS)},
                 **{cap: {"type": "string", "pattern": r"^[0-9]{1,3}\Z"} for cap in CAPS},
+                **{f"{lane}-agent": {"enum": [templates.AUTO, *agent_choice.AGENTS]} for lane in templates.LANES},
             },
             "additionalProperties": {"type": "string", "pattern": r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}\Z"},
         },

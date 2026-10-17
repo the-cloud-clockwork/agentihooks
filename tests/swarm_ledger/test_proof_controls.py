@@ -235,10 +235,16 @@ def test_creator_set_and_start_refuse_malformed_requests(owned, body):
         ("max-eng-agents", "0"),
         ("max-ci-agents", "100"),
         ("max-plan-agents", "7"),
+        ("max-ci-agents", "9"),
+        ("eng-model", "a0.9"),
+        ("eng-agent", "auto"),
+        ("ci-agent", "claude"),
+        ("plan-agent", "codex"),
+        ("master-agent", "codex"),
         *(
             (f"{lane}-{field}", "Ab.1:x-z")
             for lane in ("eng", "ci", "plan", "master")
-            for field in ("agent", "model", "effort", "profile")
+            for field in ("model", "effort", "profile")
         ),
         ("eng-model", "x"),
     ],
@@ -256,6 +262,9 @@ def test_creator_sets_each_allowlisted_field(owned, key, value):
         {"max-ci-agents": "1000"},
         {"max-plan-agents": "-1"},
         {"max-eng-agents": "1\n"},
+        {"max-ci-agents": ""},
+        {"max-plan-agents": "1000"},
+        *({f"{lane}-agent": "gemini"} for lane in ("eng", "ci", "plan", "master")),
     ],
 )
 def test_creator_set_refuses_values_the_field_cannot_take(owned, fields):
