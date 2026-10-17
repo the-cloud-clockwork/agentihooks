@@ -439,6 +439,50 @@ def test_checks_wait_uses_only_the_newest_run_of_each_check(tick, conclusion, ob
         assert idle.wait(tick.store.redis, "sw", ME) is None
 
 
+def _run_check(name, check_id, run_id, conclusion):
+    return {
+        "name": name,
+        "databaseId": check_id,
+        "conclusion": conclusion,
+        "checkSuite": {"workflowRun": {"databaseId": run_id, "workflow": {"name": "Tests"}}},
+    }
+
+
+def _suite(run_id, status, conclusion=None):
+    return {
+        "status": status,
+        "conclusion": conclusion,
+        "workflowRun": {
+            "databaseId": run_id,
+            "createdAt": f"2026-10-17T10:0{run_id}:00Z",
+            "workflow": {"name": "Tests"},
+        },
+    }
+
+
+@pytest.mark.parametrize("newer_gate", [False, True])
+def test_checks_wait_ignores_a_cancelled_older_run_on_the_same_head(tick, newer_gate):
+    from scripts.swarm.ledger_events import pull_request
+
+    tick.hold("checks", URL)
+    checks = [
+        _run_check("unit", 10, 1, "CANCELLED"),
+        _run_check("Gate — Required", 11, 1, "FAILURE"),
+        _run_check("unit", 20, 2, "SUCCESS"),
+    ]
+    suites = [_suite(1, "COMPLETED", "CANCELLED"), _suite(2, "IN_PROGRESS")]
+    raw = {"state": "OPEN", "headRefOid": "first", "gated": True, "statusCheckRollup": checks, "checkSuites": suites}
+    tick.pulls[URL] = pull_request(raw)
+    assert tick.end() == []
+    assert idle.wait(tick.store.redis, "sw", ME) is not None
+    if newer_gate:
+        raw["statusCheckRollup"] = checks + [_run_check("Gate — Required", 9, 2, "SUCCESS")]
+        raw["checkSuites"] = [suites[0], _suite(2, "COMPLETED", "SUCCESS")]
+        tick.pulls[URL] = pull_request(raw)
+        assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
+        assert idle.wait(tick.store.redis, "sw", ME) is None
+
+
 def test_checks_wait_with_no_checks_stays_unresolved(tick):
     from scripts.swarm.ledger_events import pull_request
 
