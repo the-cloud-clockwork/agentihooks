@@ -23,7 +23,14 @@ def _rollout(home, day: str, name: str, lines: list[str], mtime: float):
 
 
 WEEK = {"used_percent": 46.0, "window_minutes": 10080, "resets_at": 1791611551}
-HEADER = "# HARNESS ACCOUNT KIND STATE SESSIONS WEIGHT CAP ROUTING LEFT 5H LEFT 5H RESET 7D LEFT 7D RESET".split()
+HEADER = "# HARNESS ACCOUNT KIND STATE SESSIONS WEIGHT CAP ROUTING LEFT 5H LEFT 5H RESET 7D LEFT 7D RESET AGE".split()
+
+
+@pytest.fixture(autouse=True)
+def no_codex_probe(monkeypatch):
+    from scripts import codex_router
+
+    monkeypatch.setattr(codex_router, "probe", lambda account, environ, run=None: None)
 
 
 def test_a_weekly_only_event_fills_the_seven_day_window():
@@ -99,11 +106,12 @@ def test_rows_list_every_claude_account_and_codex():
         "16m",
         "60%",
         "2h13m",
+        "0m",
     ]
     default = table[3].split()
     assert default[:8] == ["2", "codex", "default", "subscription", "NORMAL", "1/6", "-", "6"]
     assert default[9:11] == ["-", "-"] and default[8] == default[11]
-    assert table[4].split() == ["3", "codex", "alpha", "subscription", "UNKNOWN", "0/-", *["-"] * 7]
+    assert table[4].split() == ["3", "codex", "alpha", "subscription", "UNKNOWN", "0/-", *["-"] * 8]
     assert "?" not in "\n".join(table) and "SOURCE" not in table[0]
 
 
@@ -115,8 +123,8 @@ def test_an_api_row_is_open_with_its_weight_cap_and_provider():
         "codex", "api", "OPEN", 1, None, None, None, "openai", cap=4, kind="api", weight=30
     )
     table = agents_quota.render(rows, now=1000).splitlines()
-    assert table[2].split() == ["-", "claude", "api", "api", "OPEN", "2/none", "0%", "none", *["-"] * 5]
-    assert table[3].split() == ["-", "codex", "api", "api", "OPEN", "1/4", "30%", "4", *["-"] * 5]
+    assert table[2].split() == ["-", "claude", "api", "api", "OPEN", "2/none", "0%", "none", *["-"] * 6]
+    assert table[3].split() == ["-", "codex", "api", "api", "OPEN", "1/4", "30%", "4", *["-"] * 6]
 
 
 def test_api_rows_carry_the_weight_from_the_routing_settings(monkeypatch):
@@ -137,7 +145,7 @@ def test_quota_json_rows_carry_kind_and_weight(monkeypatch, capsys):
     sub = agents_quota.QuotaRow("codex", "default", "NORMAL", 0, 90.0, 80.0, None, "log", cap=6)
     api = agents_quota.api_row(Slot("codex", "api", 4, 1, kind=API, weight=30, provider="openai"))
     monkeypatch.setattr(agents_quota, "_claude", lambda refresh, timeout: [])
-    monkeypatch.setattr(agents_quota, "_codex", lambda now: [sub, api])
+    monkeypatch.setattr(agents_quota, "_codex", lambda now, force=False: [sub, api])
     assert agents_quota.main(["--json"]) == 0
     rows = json.loads(capsys.readouterr().out)
     assert [(row["kind"], row["weight"]) for row in rows] == [("subscription", None), ("api", 30)]
@@ -215,7 +223,7 @@ def test_a_plan_with_only_a_five_hour_window_is_classified_on_it():
 def test_quota_json_lists_every_row(monkeypatch, capsys):
     row = agents_quota.QuotaRow("claude", "ncgma", "NORMAL", 1, 90.0, 40.0, 9000, "cached")
     monkeypatch.setattr(agents_quota, "_claude", lambda refresh, timeout: [row])
-    monkeypatch.setattr(agents_quota, "_codex", lambda now: [])
+    monkeypatch.setattr(agents_quota, "_codex", lambda now, force=False: [])
     assert agents_quota.main(["--json"]) == 0
     assert json.loads(capsys.readouterr().out) == [
         {
@@ -330,7 +338,7 @@ def test_quota_lists_every_account_the_router_knows_from_a_one_token_session(mon
 
 def test_no_agent_rows_exit_one(monkeypatch, capsys):
     monkeypatch.setattr(agents_quota, "_claude", lambda refresh, timeout: [])
-    monkeypatch.setattr(agents_quota, "_codex", lambda now: [])
+    monkeypatch.setattr(agents_quota, "_codex", lambda now, force=False: [])
     assert agents_quota.main([]) == 1
     assert "no Claude account and no Codex session log" in capsys.readouterr().err
 
@@ -419,7 +427,7 @@ def test_tokenless_table_lists_an_interactive_master_and_the_codex_rows_in_one_t
     seen = []
     row = agents_quota.QuotaRow("codex", "alpha", "NORMAL", 0, None, 80.0, None, "log", cap=6, routing_left=80.0)
     monkeypatch.setattr(agents_quota.time, "time", lambda: 1_000_000.5)
-    monkeypatch.setattr(agents_quota, "_codex", lambda now: seen.append(now) or [row])
+    monkeypatch.setattr(agents_quota, "_codex", lambda now, force=False: seen.append(now) or [row])
     monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {})
     interactive = MasterAccount("claude", "home", "max", INTERACTIVE)
 
@@ -630,8 +638,9 @@ def test_one_table_sorts_each_harness_by_routing_left_and_shows_dashes_for_missi
         "-",
         "93%",
         "2h13m",
+        "0m",
     ]
-    assert table[6].split() == ["4", "codex", "gone", "subscription", "EXPIRED", "0/-", "-", "-", *["-"] * 5]
+    assert table[6].split() == ["4", "codex", "gone", "subscription", "EXPIRED", "0/-", "-", "-", *["-"] * 5, "0m"]
     assert "?" not in "\n".join(table)
     assert [row.routing_left for row in rows] == [40.0, 80.0, None, None, 93.0]
 
@@ -648,7 +657,7 @@ def test_current_lists_discovered_accounts_only_and_a_stale_reading_as_stale(mon
     from hooks.context import account_sessions
 
     monkeypatch.setattr(agents_quota.time, "time", lambda: 20_000.0)
-    monkeypatch.setattr(agents_quota, "_codex", lambda now: [])
+    monkeypatch.setattr(agents_quota, "_codex", lambda now, force=False: [])
     monkeypatch.setattr(agents_quota, "_masters", lambda harness="": {})
     monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {})
     old = ProbeResult("alpha", "allowed", "NORMAL", 70.0, QuotaWindow(20.0, 30_000), QuotaWindow(30.0, 90_000))
@@ -671,14 +680,14 @@ def test_current_lists_discovered_accounts_only_and_a_stale_reading_as_stale(mon
         "80%",
     ]
     assert table[2].split()[11] == "-"
-    assert table[3].split() == ["2", "claude", "alpha", "subscription", "STALE", "0/-", "-", "-", *["-"] * 5]
+    assert table[3].split() == ["2", "claude", "alpha", "subscription", "STALE", "0/-", "-", "-", *["-"] * 5, "3h00m"]
 
 
 def test_current_without_a_claude_account_still_lists_the_codex_rows(monkeypatch):
     from hooks.context import account_sessions
 
     codex = agents_quota.QuotaRow("codex", "personal", "NORMAL", 0, 60.0, 70.0, 9000, "log", cap=6, routing_left=70.0)
-    monkeypatch.setattr(agents_quota, "_codex", lambda now: [codex])
+    monkeypatch.setattr(agents_quota, "_codex", lambda now, force=False: [codex])
     monkeypatch.setattr(agents_quota, "_masters", lambda harness="": {})
     monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {})
     table = agents_quota.current_table([], [], {"alpha"}, {}, False, "").splitlines()
@@ -689,7 +698,7 @@ def test_current_lists_every_configured_account_and_an_unprobed_one_as_unknown(m
     from hooks.context import account_sessions
 
     monkeypatch.setattr(agents_quota.time, "time", lambda: 20_000.0)
-    monkeypatch.setattr(agents_quota, "_codex", lambda now: [])
+    monkeypatch.setattr(agents_quota, "_codex", lambda now, force=False: [])
     monkeypatch.setattr(agents_quota, "_masters", lambda harness="": {})
     monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {})
     fresh = ProbeResult("beta", "allowed", "NORMAL", 60.0, QuotaWindow(20.0, 30_000), QuotaWindow(40.0, 90_000))
@@ -697,8 +706,8 @@ def test_current_lists_every_configured_account_and_an_unprobed_one_as_unknown(m
     table = agents_quota.current_table([], [fresh], {"beta", *unprobed}, {"gamma": 2}, False, "beta")
     rows = [line.split() for line in table.splitlines()[2:]]
     assert [row[2] for row in rows] == ["beta", *unprobed]
-    assert rows[1] == ["2", "claude", "alpha", "subscription", "UNKNOWN", "0/-", "-", *["-"] * 6]
-    assert rows[4] == ["5", "claude", "gamma", "subscription", "UNKNOWN", "2/-", "-", *["-"] * 6]
+    assert rows[1] == ["2", "claude", "alpha", "subscription", "UNKNOWN", "0/-", "-", *["-"] * 7]
+    assert rows[4] == ["5", "claude", "gamma", "subscription", "UNKNOWN", "2/-", "-", *["-"] * 7]
 
 
 def test_an_unprobed_account_carries_no_provider_status_and_no_windows():
@@ -733,7 +742,7 @@ def test_quota_prints_one_table_and_json_rows_name_their_harness(monkeypatch, ca
 
     row = agents_quota.QuotaRow("codex", "alpha", "NORMAL", 0, None, 80.0, None, "log", cap=6, routing_left=80.0)
     monkeypatch.setattr(agents_quota, "_claude", lambda refresh, timeout: [])
-    monkeypatch.setattr(agents_quota, "_codex", lambda now: [row])
+    monkeypatch.setattr(agents_quota, "_codex", lambda now, force=False: [row])
     monkeypatch.setattr(account_sessions, "sessions_by_account", lambda **_: {"stray": 2})
     monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {})
     assert agents_quota.main([]) == 0
@@ -842,6 +851,61 @@ def test_codex_quota_rows_list_every_account_a_live_session_runs_on(monkeypatch)
     assert read == ["alpha", "beta"]
 
 
+@pytest.mark.parametrize("force", [False, True])
+def test_balance_codex_rows_read_stale_or_forced_accounts_live_and_show_the_reading_age(monkeypatch, force):
+    from scripts import codex_router
+
+    _one_codex_token_with_live_sessions_elsewhere(monkeypatch)
+    stale = codex_quota.CodexQuota(1000, "pro", seven_day=QuotaWindow(used=10.0, resets_at=10**10))
+    monkeypatch.setattr(codex_router, "quotas", lambda pool, environ: {account.name: stale for account in pool})
+    monkeypatch.setattr(agents_quota, "next_account", lambda *args: "")
+    live = codex_quota.CodexQuota(4540, "pro", seven_day=QuotaWindow(used=30.0, resets_at=10**10))
+    calls = []
+    fresh_quotas = codex_router.fresh_quotas
+    monkeypatch.setattr(
+        codex_router,
+        "fresh_quotas",
+        lambda pool, environ, now, force=False: (
+            calls.append(([a.name for a in pool], now, force)) or fresh_quotas(pool, environ, now, force=force)
+        ),
+    )
+    monkeypatch.setattr(codex_router, "probe", lambda account, environ, run=None: live)
+    rows = agents_quota._codex(4600.0, **({"force": True} if force else {}))
+    assert calls == [(["alpha"], 4600.0, force)]
+    assert [(row.account, row.routing_left, row.observed_at) for row in rows] == [
+        ("alpha", 70.0, 4540),
+        ("beta", None, 1000),
+    ]
+    assert [line.split()[-1] for line in agents_quota.render(rows, now=4600).splitlines()[2:]] == ["1m", "1h00m"]
+
+
+def test_quota_refresh_reads_every_claude_and_codex_account_live(monkeypatch, capsys):
+    seen = []
+    monkeypatch.setattr(agents_quota.time, "time", lambda: 77.0)
+    monkeypatch.setattr(
+        agents_quota, "_claude", lambda refresh, timeout: seen.append(("claude", refresh, timeout)) or []
+    )
+    monkeypatch.setattr(agents_quota, "_codex", lambda now, force=False: seen.append(("codex", now, force)) or [])
+    assert agents_quota.main(["--refresh"]) == 1
+    assert agents_quota.main([]) == 1
+    assert seen == [
+        ("claude", True, 60.0),
+        ("codex", 77.0, True),
+        ("claude", False, 60.0),
+        ("codex", 77.0, False),
+    ]
+
+
+def test_quota_help_names_the_refresh_of_every_claude_and_codex_account(monkeypatch, capsys):
+    monkeypatch.setenv("COLUMNS", "200")
+    with pytest.raises(SystemExit):
+        agents_quota.main(["--help"])
+    lines = [line.split() for line in capsys.readouterr().out.splitlines() if line.split()[:1] == ["--refresh"]]
+    assert [" ".join(words[1:]) for words in lines] == [
+        "Probe every Claude and Codex account instead of using the cache"
+    ]
+
+
 def test_page_quota_lists_every_codex_account_a_live_session_runs_on(monkeypatch):
     from hooks.context import account_sessions
     from scripts import claude_quota_balancer
@@ -919,7 +983,7 @@ def test_balance_table_defaults_to_the_codex_rows_at_its_own_time_and_counts_mas
     seen = []
     codex = agents_quota.QuotaRow("codex", "personal", "NORMAL", 0, 60.0, 70.0, None, "log", cap=6, routing_left=70.0)
     master = MasterAccount("claude", "home", "", INTERACTIVE)
-    monkeypatch.setattr(agents_quota, "_codex", lambda now: seen.append(now) or [codex])
+    monkeypatch.setattr(agents_quota, "_codex", lambda now, force=False: seen.append(now) or [codex])
     monkeypatch.setattr(agents_quota, "_masters", lambda harness="": {"claude": master})
     monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {})
     result = ProbeResult("alpha", "allowed", "NORMAL", 70.0, QuotaWindow(20.0, 30_000), QuotaWindow(30.0, 90_000))
@@ -930,9 +994,38 @@ def test_balance_table_defaults_to_the_codex_rows_at_its_own_time_and_counts_mas
     assert any(row[1:3] == ["codex", "personal"] for row in cells)
 
 
+@pytest.mark.parametrize("fable", [False, True])
+def test_balance_ages_each_claude_row_from_its_router_cache_entry_and_a_live_read_from_now(monkeypatch, fable):
+    from hooks.context import account_sessions
+    from scripts import claude_quota_balancer
+
+    asked = []
+    window = QuotaWindow(20.0, 10**10)
+    cached = ProbeResult("alpha", "allowed", "NORMAL", 80.0, window, window, window)
+    live = ProbeResult("beta", "allowed", "NORMAL", 80.0, window, window, window)
+    monkeypatch.setattr(
+        claude_quota_balancer,
+        "cached_observations",
+        lambda include_fable=False: (
+            asked.append(include_fable)
+            or [(19_880.0, cached), (100.0, ProbeResult("gone", "", "", 0.0, window, window))]
+        ),
+    )
+    monkeypatch.setattr(agents_quota, "_codex", lambda now, force=False: [])
+    monkeypatch.setattr(agents_quota, "_masters", lambda harness="": {})
+    monkeypatch.setattr(agents_quota, "api_rows", lambda source, harness, now: [])
+    monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {})
+    table = agents_quota.balance_table([cached, live], {}, 20_000.0, fable).splitlines()
+    assert asked == [fable]
+    assert sorted((line.split()[2], line.split()[-1 - 2 * fable]) for line in table[2:]) == [
+        ("alpha", "2m"),
+        ("beta", "0m"),
+    ]
+
+
 def test_quota_json_is_indented_two_spaces(monkeypatch, capsys):
     row = agents_quota.QuotaRow("codex", "alpha", "NORMAL", 0, None, 80.0, None, "log")
     monkeypatch.setattr(agents_quota, "_claude", lambda refresh, timeout: [])
-    monkeypatch.setattr(agents_quota, "_codex", lambda now: [row])
+    monkeypatch.setattr(agents_quota, "_codex", lambda now, force=False: [row])
     assert agents_quota.main(["--json"]) == 0
     assert capsys.readouterr().out.startswith('[\n  {\n    "agent": "codex",')

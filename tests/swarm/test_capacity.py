@@ -268,7 +268,7 @@ def test_tick_capacity_balance_and_quota_list_the_same_accounts_and_caps(monkeyp
     assert [credential.account for credential in balancer.discover_credentials(environ)] == ["mail", "other"]
 
 
-def test_quota_capacity_with_all_zero_demand_never_refreshes_codex(tmp_path, monkeypatch):
+def test_quota_capacity_with_all_zero_demand_still_refreshes_codex_before_its_drain_decisions(tmp_path, monkeypatch):
     from scripts.swarm import runtime as module
 
     calls = []
@@ -282,7 +282,7 @@ def test_quota_capacity_with_all_zero_demand_never_refreshes_codex(tmp_path, mon
     rt = module.HerdrRuntime(home=tmp_path)
     config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
     rt.quota_capacity(config, [], 100, {"eng": 0, "ci": 0, "plan": 0})
-    assert calls == []
+    assert calls == [1]
 
 
 def test_quota_capacity_with_nonzero_demand_refreshes_codex(tmp_path, monkeypatch):
@@ -2250,12 +2250,13 @@ def test_aggregate_capacity_uses_the_codex_week_rule(monkeypatch, harness, five_
     monkeypatch.setattr(aggregate, "current", lambda now: {"a": record})
     rows = capacity.accounts({"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"}, 100, refresh=False)
     assert len(rows) == 1
-    assert (rows[0].harness, rows[0].name, rows[0].state, rows[0].sessions, rows[0].cap) == (
+    assert (rows[0].harness, rows[0].name, rows[0].state, rows[0].sessions, rows[0].cap, rows[0].observed_at) == (
         harness,
         "a",
         state,
         2,
         cap,
+        100,
     )
 
 

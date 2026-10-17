@@ -230,7 +230,9 @@ def _capacity_outcome(case: dict, root: Path) -> dict:
     requirements = case.get("requirements")
     if requirements:
         requirements = {lane: [tuple(choice) for choice in choices] for lane, choices in requirements.items()}
-    return capacity.calculate(config, rows, agents, case.get("demand"), requirements)
+    decision = capacity.calculate(config, rows, agents, case.get("demand"), requirements)
+    unaged = [{key: value for key, value in row.items() if key != "observed_at"} for row in decision["accounts"]]
+    return {**decision, "accounts": unaged}
 
 
 def outcomes() -> dict:
