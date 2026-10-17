@@ -1227,6 +1227,7 @@ def test_capacity_apply_preserves_saved_options_and_controller_evidence(tmp_path
     store = _store()
     config = SwarmConfig("sw", "/repo", max_eng=3, max_ci=0, max_plan=0)
     store.create(config)
+    store.put_agent("sw", AgentRecord("master", "master", "master", harness="claude", account="a"))
     tasks = [{"id": "fixed", "profile": "frontend"}, {"id": "saved", "profile": "engineer"}]
     doc = FakeLedger(tasks)
     saved = {"profile": "engineer", "harness": "codex", "model": "sol", "effort": "high"}
