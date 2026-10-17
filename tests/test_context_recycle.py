@@ -318,6 +318,12 @@ def test_a_session_without_an_id_leaves_no_pin(monkeypatch, tmp_path):
     assert not (tmp_path / "context_usage").exists()
 
 
+def test_a_session_without_a_usage_snapshot_leaves_no_pin(tmp_path):
+    assert recycle.directive("s1", MASTER) is None
+    assert recycle.over_limit("s1", MASTER) is None
+    assert not (tmp_path / "context_usage").exists()
+
+
 def test_an_unmarked_overrun_uses_the_compact_limit_the_session_enforces(monkeypatch):
     monkeypatch.setattr(recycle, "COMPACT_LIMIT", 700)
     monkeypatch.setattr(recycle, "used_tokens", lambda session_id: 100_000)

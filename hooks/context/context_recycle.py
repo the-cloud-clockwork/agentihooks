@@ -77,7 +77,8 @@ def _swarm_of(environ, session_id: str = "") -> str:
         return slug
     if not slug:
         return _pinned_swarm(session_id).get("swarm")
-    _pin_swarm(session_id, slug)
+    if _used(session_id) is not None:
+        _pin_swarm(session_id, slug)
     return slug
 
 
