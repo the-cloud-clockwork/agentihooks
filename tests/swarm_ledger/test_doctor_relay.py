@@ -53,3 +53,29 @@ def test_doctor_cannot_borrow_watched_quotes_after_unlinking(doctor):
     operator_words.record("master@a1-1", "Fix only swarm health")
     doctor.clear_peer("doctor")
     assert ledger_relay.verified("master@b2-1", "Fix only swarm health") == ""
+
+
+def test_doctor_quote_sources_are_only_recorded_watched_masters(doctor):
+    for speaker in ("master@a1-1", "master@a1-2", "planner@a1-1", "engineer@a1-1", "master@c3-1"):
+        operator_words.record(speaker, "Fix only swarm health")
+    assert sorted(ledger_relay.watched_masters("master@b2-1")) == ["master@a1-1", "master@a1-2"]
+    assert ledger_relay.verified("master@b2-1", "fix ONLY swarm health") == "Fix only swarm health"
+    assert ledger_relay.verified("master@b2-1", "words never typed") == ""
+    assert (
+        ledger_relay.relayed(
+            {"by": "engineer@b2-1", "quote": "Fix only swarm health"},
+            {"members": {"engineer@b2-1": {"role": "member"}}},
+        )
+        == ""
+    )
+
+
+def test_quote_sources_remain_local_without_redis(monkeypatch):
+    monkeypatch.setattr("hooks._redis.get_redis", lambda: None)
+    assert ledger_relay.watched_masters("master@b2-1") == []
+
+
+def test_doctor_with_an_unregistered_peer_has_no_watched_master_sources(doctor):
+    doctor.set_peer("doctor", "unregistered")
+    operator_words.record("master@-1", "Fix only swarm health")
+    assert ledger_relay.watched_masters("master@b2-1") == []
