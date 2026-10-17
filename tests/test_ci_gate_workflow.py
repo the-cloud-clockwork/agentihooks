@@ -289,6 +289,7 @@ def test_dev_records_the_suite_count_and_the_count_floor_reads_it_only_through_t
     jobs = _workflow()["jobs"]
     recorder = jobs["count-record"]
     assert recorder["if"] == "${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' }}"
+    assert recorder["continue-on-error"] is True
     assert recorder["strategy"]["matrix"] == jobs["test-count"]["strategy"]["matrix"]
     steps = {step.get("name"): step for step in recorder["steps"]}
     record, upload = steps["Record the suite count for later bases"], steps["Upload the suite count record"]
