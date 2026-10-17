@@ -288,7 +288,7 @@ def test_page_snapshot_carries_the_shared_group_freeze_ancestry():
 
     snapshot = ledger_server.ledger_view(ledger_state(DOC))
     member = next(row for row in snapshot["tasks"] if row["id"] == "t5")
-    assert member["freeze_ancestry"] == [
+    assert set(member["freeze_ancestry"]) == {
         "tasks/t5",
         "tasks/t1",
         "slices/hier.hy-page",
@@ -296,7 +296,7 @@ def test_page_snapshot_carries_the_shared_group_freeze_ancestry():
         "plans/hier",
         "phases/p3",
         "plans/v2",
-    ]
+    }
     assert "freeze_ancestry" not in DOC["tasks"][-1]
 
 

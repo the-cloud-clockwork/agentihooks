@@ -57,7 +57,7 @@ def ancestry(task: dict, graph: dict) -> list:
     chain = [f"tasks/{task['id']}"]
     roots = [hierarchy.parent("tasks", task)]
     if task.get("merged_into"):
-        roots.insert(0, f"tasks/{task['merged_into']}")
+        roots.append(f"tasks/{task['merged_into']}")
     for up in roots:
         for _ in range(hierarchy.CHAIN - 1):
             if not up or up in chain:
