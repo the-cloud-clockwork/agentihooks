@@ -10,6 +10,11 @@ on:
         description: Base revision whose count grader supplies the legacy comparison
         required: true
         default: origin/dev
+      plant:
+        description: Remove a test module after warming the cache and require the floor to reject it
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -28,16 +33,19 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
+      - &proof-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - &proof-python
+        uses: actions/setup-python@v5
         id: python
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Stamp the shared environment
+      - &proof-day
+        name: Stamp the shared environment
         id: day
         run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
       - uses: actions/cache/restore@v4
@@ -45,22 +53,26 @@ jobs:
         with:
           path: ~/venv
           key: venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ steps.day.outputs.date }}-${{ hashFiles('pyproject.toml', '.github/test-excludes.txt') }}
-      - uses: astral-sh/setup-uv@v10.2.0
-        if: steps.venv.outputs.cache-hit != 'true'
+      - &proof-uv
+        uses: astral-sh/setup-uv@v10.2.0
+        if: steps.venv.outputs.cache-hit != 'true' && steps.legacy-venv.outputs.cache-hit != 'true'
         with:
           version: "0.12.23"
           checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
           enable-cache: false
-      - name: Install on an environment miss
-        if: steps.venv.outputs.cache-hit != 'true'
+      - &proof-install
+        name: Install on an environment miss
+        if: steps.venv.outputs.cache-hit != 'true' && steps.legacy-venv.outputs.cache-hit != 'true'
         env:
           PYTHON_PATH: ${{ steps.python.outputs.python-path }}
         run: |
           uv venv --python "$PYTHON_PATH" "$HOME/venv"
           uv pip install --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"
-      - name: Use the shared environment
+      - &proof-use
+        name: Use the shared environment
         run: echo "$HOME/venv/bin" >> "$GITHUB_PATH"
-      - name: Prepare identical base and head inputs
+      - &proof-base
+        name: Prepare identical base and head inputs
         env:
           BASE: ${{ inputs.base || 'origin/dev' }}
         run: |
@@ -111,6 +123,19 @@ jobs:
           print(f"Same head seconds: {seconds}; saved: {saved:.2f}", flush=True)
           assert saved >= 30, f"Only {saved:.2f} seconds saved"
           PY
+      - name: Plant a removed test module after warming the cache
+        if: inputs.plant
+        env:
+          TEST_COUNT_COLLECTION_CACHE: ${{ runner.temp }}/count-collections
+          TEST_COUNT_ENVIRONMENT: proof-${{ steps.venv.outputs.cache-primary-key }}
+        run: |
+          python -c 'from pathlib import Path; Path("tests/test_count_floor.py").unlink()'
+          python -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
+      - name: Seed the collection cache for full gate timing
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/count-collections
+          key: count-proof-${{ matrix.python-version }}-${{ github.sha }}-${{ github.run_id }}-seed
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -120,5 +145,69 @@ jobs:
             ${{ runner.temp }}/before.log
             ${{ runner.temp }}/cold.log
             ${{ runner.temp }}/after.log
+          if-no-files-found: error
+          retention-days: 7
+
+  gate-duration:
+    needs: count-speed
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss' || 'ubuntu-latest' }}
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+        mode: [before, after]
+    steps:
+      - *proof-checkout
+      - *proof-python
+      - *proof-day
+      - name: Restore and save the legacy environment
+        if: matrix.mode == 'before'
+        id: legacy-venv
+        uses: actions/cache@v4
+        with:
+          path: ~/venv
+          key: venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ steps.day.outputs.date }}-${{ hashFiles('pyproject.toml', '.github/test-excludes.txt') }}
+      - uses: actions/cache/restore@v4
+        if: matrix.mode == 'after'
+        id: venv
+        with:
+          path: ~/venv
+          key: venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ steps.day.outputs.date }}-${{ hashFiles('pyproject.toml', '.github/test-excludes.txt') }}
+      - *proof-uv
+      - *proof-install
+      - *proof-use
+      - *proof-base
+      - name: Restore exact full gate collections
+        if: matrix.mode == 'after'
+        id: counts
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/count-collections
+          key: count-proof-${{ matrix.python-version }}-${{ github.sha }}-${{ github.run_id }}-after
+          restore-keys: count-proof-${{ matrix.python-version }}-${{ github.sha }}-${{ github.run_id }}-
+          fail-on-cache-miss: true
+      - name: Grade the identical head and base
+        shell: bash
+        env:
+          MODE: ${{ matrix.mode }}
+          TEST_COUNT_COLLECTION_CACHE: ${{ runner.temp }}/count-collections
+          TEST_COUNT_ENVIRONMENT: proof-${{ steps.venv.outputs.cache-primary-key }}
+        run: |
+          if [[ "$MODE" == before ]]; then
+            python "$RUNNER_TEMP/legacy.py" --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE" | tee "$RUNNER_TEMP/gate.log"
+          else
+            python -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE" | tee "$RUNNER_TEMP/gate.log"
+          fi
+      - name: Save exact full gate collections
+        if: matrix.mode == 'after'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/count-collections
+          key: ${{ steps.counts.outputs.cache-primary-key }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: count-gate-${{ matrix.python-version }}-${{ matrix.mode }}
+          path: ${{ runner.temp }}/gate.log
           if-no-files-found: error
           retention-days: 7
