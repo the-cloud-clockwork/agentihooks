@@ -793,25 +793,6 @@ jobs:
         if: github.event_name == 'push' && env.UNIT_SOURCE == ''
         run: echo "$HOME/venv/bin" >> "$GITHUB_PATH"
 
-      - name: Record the suite count for later bases
-        if: github.event_name == 'push' && github.ref == 'refs/heads/dev' && env.UNIT_SOURCE == ''
-        continue-on-error: true
-        timeout-minutes: 2
-        run: |
-          git worktree add --detach "$RUNNER_TEMP/base" HEAD
-          mkdir -p "$RUNNER_TEMP/count-record"
-          cd "$RUNNER_TEMP/base"
-          python -m tests.count_floor --record "$RUNNER_TEMP/count-record/record.json" --head "$RUNNER_TEMP/base"
-
-      - name: Upload the suite count record
-        if: github.event_name == 'push' && github.ref == 'refs/heads/dev' && env.UNIT_SOURCE == ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: count-record-${{ matrix.python-version }}
-          path: ${{ runner.temp }}/count-record/record.json
-          if-no-files-found: warn
-          retention-days: 7
-          overwrite: true
 
       - name: Require successful early collection
         if: github.event_name != 'push' && needs.select.outputs.source == ''
@@ -2262,6 +2243,49 @@ jobs:
       - name: Summarize this run's tests
         if: ${{ always() }}
         run: python3 "$GITHUB_WORKSPACE/scripts/ci_gate_summary.py" test-reports | tee -a "$GITHUB_STEP_SUMMARY"
+
+  # A dev push that reuses the merge group's run skips the split job's environment, so the record has its own job.
+  count-record:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' }}
+    continue-on-error: true
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
+    timeout-minutes: 6
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - *python
+      - *day
+      - *venv
+      - *uv
+      - *install
+      - *save-venv
+      - *use-venv
+
+      - name: Record the suite count for later bases
+        continue-on-error: true
+        timeout-minutes: 2
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/base" HEAD
+          mkdir -p "$RUNNER_TEMP/count-record"
+          cd "$RUNNER_TEMP/base"
+          python -m tests.count_floor --record "$RUNNER_TEMP/count-record/record.json" --head "$RUNNER_TEMP/base"
+
+      - name: Upload the suite count record
+        uses: actions/upload-artifact@v4
+        with:
+          name: count-record-${{ matrix.python-version }}
+          path: ${{ runner.temp }}/count-record/record.json
+          if-no-files-found: warn
+          retention-days: 7
+          overwrite: true
 
   refresh-durations:
     needs: [unit, lint, shard-check]
