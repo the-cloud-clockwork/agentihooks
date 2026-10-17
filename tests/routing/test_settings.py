@@ -118,13 +118,26 @@ def test_a_claim_sets_an_unset_key_once_and_returns_the_holder(store):
     assert store.history() == [{"key": "master-account-claude", "value": "a", "actor": "master@x", "at": NOW}]
 
 
-@pytest.mark.parametrize(("value", "actor"), [(None, "m"), ("", "m"), ("a", "")])
-def test_a_claim_refuses_an_empty_value_or_actor(store, value, actor):
-    with pytest.raises(ValueError):
+@pytest.mark.parametrize(
+    ("value", "actor", "said"),
+    [
+        (None, "m", "^invalid value for master-account-claude: None$"),
+        ("", "m", "^invalid value for master-account-claude: ''$"),
+        ("a", "", "^a routing setting write needs an actor$"),
+    ],
+)
+def test_a_claim_refuses_an_empty_value_or_actor(store, value, actor, said):
+    with pytest.raises(ValueError, match=said):
         store.claim("master-account-claude", value, actor, NOW)
     with pytest.raises(ValueError, match="unknown routing setting"):
         store.claim("nope", "a", "m", NOW)
     assert store.history() == []
+
+
+def test_a_file_claim_creates_missing_parent_folders(tmp_path):
+    store = settings.FileSettings(tmp_path / "a" / "b" / "routing-settings.json")
+    assert store.claim("master-account-claude", "a", "m", NOW) == "a"
+    assert store.get("master-account-claude") == "a"
 
 
 def test_the_file_claim_holds_a_lock_beside_the_settings(home, monkeypatch):

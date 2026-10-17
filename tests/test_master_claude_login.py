@@ -203,6 +203,14 @@ def _never(environ):
     pytest.fail("settings opened for a login without a worker token")
 
 
+def _given(store, environ):
+    def store_of(seen):
+        assert seen is environ
+        return store
+
+    return store_of
+
+
 def test_workers_need_tokens_and_a_login_off_every_worker_token_never_declares(tmp_path):
     target = _home(tmp_path)
     with pytest.raises(
@@ -216,10 +224,11 @@ def test_workers_need_tokens_and_a_login_off_every_worker_token_never_declares(t
 def test_a_login_on_a_worker_token_account_declares_it_master_when_none_is_declared(tmp_path):
     target, store = _home(tmp_path), _store(tmp_path)
     environ = {"AH_CC_TOKEN_masteratexample_com": "x", "AGENTIHOOKS_AGENT_NAME": "master@a-1"}
-    assert login.account("rig", target, environ, lambda seen: store) == "masteratexample_com"
+    assert login.account("rig", target, environ, _given(store, environ)) == "masteratexample_com"
     assert master_account.declared(store, environ)["claude"] == MasterAccount("claude", "masteratexample_com")
     written = [entry for entry in store.history() if entry["key"] == "master-account-claude"]
     assert [(entry["value"], entry["actor"]) for entry in written] == [("masteratexample_com", "master@a-1")]
+    assert isinstance(written[0]["at"], float) and written[0]["at"] > 0
 
 
 def test_a_login_on_the_declared_master_account_keeps_its_declaration(tmp_path):
@@ -227,7 +236,7 @@ def test_a_login_on_the_declared_master_account_keeps_its_declaration(tmp_path):
     environ = {"AH_CC_TOKEN_masteratexample_com": "x", "AGENTIHOOKS_AGENT_NAME": "master@a-1"}
     master_account.declare(store, {"claude": ("masteratexample_com", "max")}, environ, "operator", 1.0)
     written = len(store.history())
-    assert login.account("rig", target, environ, lambda seen: store) == "masteratexample_com"
+    assert login.account("rig", target, environ, _given(store, environ)) == "masteratexample_com"
     assert len(store.history()) == written
     assert master_account.declared(store, environ)["claude"].tier == "max"
 
@@ -241,7 +250,7 @@ def test_another_declared_master_account_refuses_naming_both(tmp_path):
         match="^the master login account masteratexample_com is a worker quota token "
         "and the declared claude master account is other$",
     ):
-        login.account("rig", target, environ, lambda seen: store)
+        login.account("rig", target, environ, _given(store, environ))
     assert master_account.declared(store, environ)["claude"].slug == "other"
 
 
@@ -258,16 +267,35 @@ def test_a_declaration_another_login_wrote_first_refuses_naming_both(tmp_path):
         match="^the master login account masteratexample_com is a worker quota token "
         "and the declared claude master account is other$",
     ):
-        login.account("rig", target, environ, lambda seen: store)
+        login.account("rig", target, environ, _given(store, environ))
     assert [entry["actor"] for entry in store.history()] == ["rival"]
 
 
 def test_the_settings_store_follows_the_routing_store(tmp_path, monkeypatch):
     from scripts.routing import place
 
-    monkeypatch.setattr(place, "_client", lambda environ: None)
-    store = login.routing_store({"AGENTIHOOKS_HOME": str(tmp_path)})
-    assert isinstance(store, FileSettings) and store.path == tmp_path / "routing-settings.json"
+    environ, client, opened = {"AGENTIHOOKS_HOME": str(tmp_path)}, object(), []
+    monkeypatch.setattr(place, "_client", lambda seen: client if seen is environ else None)
+    monkeypatch.setattr(login, "open_store", lambda *args: opened.append(args) or "store")
+    assert login.routing_store(environ) == "store"
+    assert opened == [(client, environ)]
+
+
+def test_the_login_claims_the_claude_master_with_its_environment_and_name(tmp_path, monkeypatch):
+    claimed = []
+    monkeypatch.setattr(master_account, "claim", lambda *args: claimed.append(args) or "masteratexample_com")
+    environ = {"AH_CC_TOKEN_masteratexample_com": "x", "AGENTIHOOKS_AGENT_NAME": "master@a-1"}
+    store = _store(tmp_path)
+    login.account("rig", _home(tmp_path), environ, _given(store, environ))
+    ((seen_store, harness, slug, seen_environ, actor, at),) = claimed
+    assert (seen_store, harness, slug, seen_environ, actor) == (
+        store,
+        "claude",
+        "masteratexample_com",
+        environ,
+        "master@a-1",
+    )
+    assert isinstance(at, float) and at > 0
 
 
 def test_the_child_drops_routed_and_api_credentials_and_pins_both_selectors(tmp_path):

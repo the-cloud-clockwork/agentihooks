@@ -52,7 +52,9 @@ def test_a_claim_declares_only_an_undeclared_harness_and_returns_the_holder(stor
     assert master_account.declared(store, ENV)["claude"] == MasterAccount("claude", "luna", "", SUBSCRIPTION)
     with pytest.raises(ValueError, match="unknown codex token slug gone"):
         master_account.claim(store, "codex", "gone", ENV, "master@a", 3.0)
-    assert [(entry["key"], entry["actor"]) for entry in store.history()] == [("master-account-claude", "master@a")]
+    assert [(entry["key"], entry["actor"], entry["at"]) for entry in store.history()] == [
+        ("master-account-claude", "master@a", 1.0)
+    ]
 
 
 def test_clear_removes_the_named_harnesses_only(store):
