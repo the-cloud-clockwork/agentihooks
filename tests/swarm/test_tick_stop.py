@@ -54,15 +54,17 @@ def no_stop():
 
 def test_a_service_stop_during_a_tick_releases_its_lock_and_exits_143(env, monkeypatch, capsys):  # noqa: F811
     store, _, _ = env
+    woke = []
 
     def step():
         os.kill(os.getpid(), signal.SIGTERM)
-        assert tick_stop.STOP.wait(10)
+        woke.append(tick_stop.STOP.wait(10))
 
     seen = blocked_tick(store, monkeypatch, step)
     before = signal.getsignal(signal.SIGTERM)
     with pytest.raises(SystemExit) as stopped:
         tick_stop.run(["sw"], tick_each(store), no_stop, 0)
+    assert woke == [True]
     assert stopped.value.code == 143
     assert seen[0] is not None
     assert lock_of(store) is None
@@ -223,6 +225,13 @@ def test_release_all_releases_each_held_tick_lock_once():
     tick_stop.drop("gone")
     assert tick_stop.release_all() == 1
     assert lock_of(store) is None
+    assert tick_stop.release_all() == 0
+
+
+def test_a_tick_drops_a_lock_the_stop_already_released():
+    tick_stop.hold("t", lambda: None)
+    assert tick_stop.release_all() == 1
+    tick_stop.drop("t")
     assert tick_stop.release_all() == 0
 
 
