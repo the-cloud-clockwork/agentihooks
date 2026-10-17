@@ -49,13 +49,13 @@ def _claude(environ: dict, now: float) -> list[Account]:
     fresh, _ = tokens.results(environ, now)
     observed.update({result.account: (now, result) for result in fresh})
     counts = account_sessions.sessions_by_account(environ=environ)
-    routed = account_sessions.token_accounts(environ)
+    routed = set(account_sessions.token_accounts(environ).values())
     rows = []
     for at, result in observed.values():
         token = environ.get(f"{balancer.TOKEN_PREFIX}{result.account}")
         if not token and not counts.get(result.account):
             continue
-        if token and routed.get(account_sessions.token_fingerprint(token), result.account) != result.account:
+        if token and result.account not in routed:
             continue
         cap = tokens.cap(result, now) if token and session_bands.fresh(at, now) else None
         five, week = _left(result.five_hour, now), _left(result.seven_day, now)

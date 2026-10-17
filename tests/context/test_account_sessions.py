@@ -121,6 +121,19 @@ def test_the_calling_session_resolves_its_old_name_to_the_routed_account(tmp_pat
     assert acc.session_account(601, root) == "old"
 
 
+def test_a_token_fingerprint_reads_raw_environment_bytes(tmp_path):
+    root = tmp_path / "proc"
+    (root / "700").mkdir(parents=True)
+    (root / "700" / "environ").write_bytes(b"AH_CC_TOKEN_old=secret-\xff\0AH_CC_TOKEN_none=\0HOME=/home/u\0")
+    expected = hashlib.sha256(b"secret-\xff").hexdigest()
+
+    assert acc.token_fingerprint("secret-\udcff") == expected
+    assert acc._env_fingerprint(700, root, "AH_CC_TOKEN_old") == expected
+    assert acc._env_fingerprint(700, root, "AH_CC_TOKEN_none") == ""
+    assert acc._env_fingerprint(700, root, "AH_CC_TOKEN_absent") == ""
+    assert acc._env_fingerprint(701, root, "AH_CC_TOKEN_old") == ""
+
+
 def test_the_route_marker_attributes_an_api_session():
     assert acc.account_from_names(iter(["HOME", acc.API_MARKER])) == acc.API_ACCOUNT == "api"
     assert acc.account_from_names([acc.API_MARKER, "AH_CC_TOKEN_alpha"]) == "api"

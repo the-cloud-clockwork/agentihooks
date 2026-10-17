@@ -139,9 +139,11 @@ def _env_fingerprint(pid: int, proc: Path, name: str) -> str:
         raw = (proc / str(pid) / "environ").read_bytes()
     except OSError:
         return ""
-    prefix = f"{name}=".encode()
-    value = next((item[len(prefix) :] for item in raw.split(b"\0") if item.startswith(prefix)), b"")
-    return token_fingerprint(value.decode(errors="surrogateescape")) if value else ""
+    for item in raw.split(b"\0"):
+        key, _, value = item.partition(b"=")
+        if key == name.encode() and value:
+            return token_fingerprint(value.decode(errors="surrogateescape"))
+    return ""
 
 
 def agent_pid(start: int | None = None, proc: Path = _PROC) -> int:
