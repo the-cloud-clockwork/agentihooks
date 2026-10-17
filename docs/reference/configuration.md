@@ -266,13 +266,16 @@ See [Claude Account Load Balancing](../pillars/load-balancing.md).
 
 ## GitHub CLI Config Pin
 
-gh 2.x moves the operator's login. When `XDG_CONFIG_HOME` is set,
+gh 2.x moves the operator's login: gh 2.4.0 on the operator's machine carries
+`autoMigrateConfigDir`, which does this. When `XDG_CONFIG_HOME` is set,
 `GH_CONFIG_DIR` is unset and `$XDG_CONFIG_HOME/gh` does not exist, gh renames
 `~/.config/gh` into `$XDG_CONFIG_HOME/gh` on its next run. A proof, render or
 launch that points `XDG_CONFIG_HOME` at a scratch folder then takes the login
 with it, and every other session on the machine loses GitHub until the folder is
 moved back. This happened twice on 15 October: once from a proof wrapper and
-once from the Claude session it had already started.
+once from the Claude session it had already started
+([#3502](https://github.com/the-cloud-clockwork/agentihooks/issues/3502), fixed by
+[#3505](https://github.com/the-cloud-clockwork/agentihooks/pull/3505)).
 
 AgentiHooks pins `GH_CONFIG_DIR` to the home gh folder whenever
 `XDG_CONFIG_HOME` points away from the home default, so gh reads the operator's
@@ -324,9 +327,9 @@ fi
   needs the pin as much as a new command does. Restart it.
 - The pin only fills an unset value. A `GH_CONFIG_DIR` pointing elsewhere is
   used as given.
-- The shell check compares text: an `XDG_CONFIG_HOME` of `$HOME/.config/`, with
-  a trailing slash, counts as isolated and is pinned to the home folder, which is
-  harmless.
+- An `XDG_CONFIG_HOME` of `$HOME/.config/`, with a trailing slash, is pinned by
+  the launcher's shell check, which compares text, and left alone by hooks and
+  the CLI, which compare paths. Both outcomes keep the login in place.
 
 ### Troubleshooting
 
@@ -334,10 +337,12 @@ Every agent reports gh as logged out at once:
 
 1. Check whether the home folder is gone: `test -d ~/.config/gh && echo present || echo missing`.
 2. Look for a moved copy under scratch config folders:
-   `find ~/scratchpad -maxdepth 6 -type d -path '*/config/gh'`. A moved folder
-   keeps its original file times; the folder that received it carries the time
-   of the move.
-3. Move it back with `mv <found folder> ~/.config/gh`, then confirm with
+   `find ~/scratchpad -maxdepth 6 -type d -path '*/config/gh'`. The moved `gh`
+   folder keeps its original modification time; its new parent `config` folder
+   carries the time of the move.
+3. Confirm nothing has recreated the home folder, `test ! -e ~/.config/gh && echo free`,
+   since `mv` would otherwise nest the login inside it. Move it back with
+   `mv <found folder> ~/.config/gh`, then confirm with
    `gh api user --jq .login`. List the folder rather than reading its files: it
    holds the login token.
 4. Find the process that ran with an isolated `XDG_CONFIG_HOME` and no
