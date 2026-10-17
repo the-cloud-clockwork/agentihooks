@@ -218,7 +218,8 @@ def test_a_login_on_a_worker_token_account_declares_it_master_when_none_is_decla
     environ = {"AH_CC_TOKEN_masteratexample_com": "x", "AGENTIHOOKS_AGENT_NAME": "master@a-1"}
     assert login.account("rig", target, environ, lambda seen: store) == "masteratexample_com"
     assert master_account.declared(store, environ)["claude"] == MasterAccount("claude", "masteratexample_com")
-    assert store.history()[-2]["actor"] == "master@a-1"
+    written = [entry for entry in store.history() if entry["key"] == "master-account-claude"]
+    assert [(entry["value"], entry["actor"]) for entry in written] == [("masteratexample_com", "master@a-1")]
 
 
 def test_a_login_on_the_declared_master_account_keeps_its_declaration(tmp_path):
@@ -244,11 +245,22 @@ def test_another_declared_master_account_refuses_naming_both(tmp_path):
     assert master_account.declared(store, environ)["claude"].slug == "other"
 
 
+def test_a_declaration_another_login_wrote_first_refuses_naming_both(tmp_path):
+    class Raced(FileSettings):
+        def _write(self, key, value, entry):
+            super()._write(key, "other" if key == "master-account-claude" else value, entry)
+
+    target, store = _home(tmp_path), Raced(tmp_path / "routing-settings.json")
+    environ = {"AH_CC_TOKEN_masteratexample_com": "x", "AH_CC_TOKEN_other": "y", "AGENTIHOOKS_AGENT_NAME": "m"}
+    with pytest.raises(login.LoginRefused, match="masteratexample_com .* is other$"):
+        login.account("rig", target, environ, lambda seen: store)
+
+
 def test_the_settings_store_follows_the_routing_store(tmp_path, monkeypatch):
     from scripts.routing import place
 
     monkeypatch.setattr(place, "_client", lambda environ: None)
-    store = login.settings({"AGENTIHOOKS_HOME": str(tmp_path)})
+    store = login.routing_store({"AGENTIHOOKS_HOME": str(tmp_path)})
     assert isinstance(store, FileSettings) and store.path == tmp_path / "routing-settings.json"
 
 
@@ -608,15 +620,19 @@ def test_the_stop_hook_checkpoints_the_master_login_and_logs_a_failure(monkeypat
 
 
 def test_a_worker_token_master_launch_holds_its_workers_at_the_one_master_ceiling(ah, rendered, tmp_path, monkeypatch):
+    from scripts.claude_quota_balancer import ClaudeTokenSource, ProbeResult, QuotaWindow
+
     _seed(rendered)
     store = _store(tmp_path)
-    monkeypatch.setattr(login, "settings", lambda environ: store)
+    monkeypatch.setattr(login, "routing_store", lambda environ: store)
     monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
     monkeypatch.chdir(tmp_path)
     executed = []
     monkeypatch.setattr(login.os, "execvpe", lambda binary, argv, env: executed.append(env))
     environ = _environ(rendered, AH_CC_TOKEN_masteratexample_com="x")
-    login.launch_claude("/opt/claude", [], environ, str(tmp_path / "route"))
+    report = tmp_path / "route"
+    login.launch_claude("/opt/claude", [], environ, str(report))
+    assert report.read_text().splitlines() == ["status=routed", "account=masteratexample_com", "placement=forced"]
     env = executed[0]
     assert not any(name.startswith("AH_CC_TOKEN_") for name in env)
     proc = tmp_path / "proc" / "10"
@@ -625,7 +641,17 @@ def test_a_worker_token_master_launch_holds_its_workers_at_the_one_master_ceilin
     (proc / "comm").write_text("claude\n")
     (proc / "environ").write_bytes(b"\0".join(f"{k}={v}".encode() for k, v in env.items()) + b"\0")
     monkeypatch.setattr(master_account, "load", lambda seen: master_account.declared(store, seen))
-    held = reservation.current("claude", environ, store_of=lambda seen: None, proc=tmp_path / "proc")
+    agent = SimpleNamespace(
+        lane="master", state="working", harness="claude", account="masteratexample_com", route_kind="interactive"
+    )
+    swarms = SimpleNamespace(slugs=lambda: ["rig"], agents=lambda slug: [agent])
+    held = reservation.current("claude", environ, store_of=lambda seen: swarms, proc=tmp_path / "proc")
     assert held == reservation.Reservation("claude", "masteratexample_com", 1)
-    assert held.closes("masteratexample_com", 70.0)
-    assert not held.closes("masteratexample_com", 69.9)
+    source = ClaudeTokenSource(held=held)
+
+    def week(used, account="masteratexample_com"):
+        return ProbeResult(account, "allowed", "NORMAL", 90, QuotaWindow(10), QuotaWindow(used))
+
+    assert source.cap(week(70.0), 0) == 0
+    assert source.cap(week(69.9), 0) != 0
+    assert source.cap(week(70.0, "workeratexample_com"), 0) != 0

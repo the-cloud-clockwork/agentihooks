@@ -151,20 +151,20 @@ def refusal(target: Path, cwd: Path, managed: Path | None = None) -> str:
     return ""
 
 
-def settings(environ: Mapping[str, str]) -> SettingsStore:
+def routing_store(environ: Mapping[str, str]) -> SettingsStore:
     from scripts.routing import place
 
     return open_store(place._client(environ), environ)
 
 
 def _master(found: str, environ: Mapping[str, str], store: SettingsStore) -> None:
-    declared = master_account.declared(store, environ).get("claude")
-    if declared is None:
+    if master_account.declared(store, environ).get("claude") is None:
         master_account.declare(
             store, {"claude": (found, None)}, environ, environ["AGENTIHOOKS_AGENT_NAME"], time.time()
         )
-    elif declared.slug != found:
-        raise LoginRefused(OTHER_MASTER.format(account=found, master=declared.slug))
+    declared = master_account.declared(store, environ)["claude"].slug
+    if declared != found:
+        raise LoginRefused(OTHER_MASTER.format(account=found, master=declared))
 
 
 def account(
@@ -180,7 +180,7 @@ def account(
     if not any(name.startswith(TOKEN_PREFIX) for name in environ):
         raise LoginRefused(NO_QUOTA)
     if f"{TOKEN_PREFIX}{found}" in environ:
-        _master(found, environ, (store_of or settings)(environ))
+        _master(found, environ, (store_of or routing_store)(environ))
     return found
 
 
