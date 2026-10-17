@@ -446,7 +446,7 @@ agentihooks swarm <id> pr <first-pull-request-url> --half 1
 agentihooks swarm <id> pr <second-pull-request-url> --half 2
 ```
 
-After the work is complete and review is closed, prepare a [Handoff v2 document](#handoff-v2), leave the ledger crew and release the seat:
+After the work is complete and review is closed, prepare a Handoff v2 document using the installed `handoff` skill, leave the ledger crew and release the seat:
 
 ```bash
 agentihooks ledger --slug <id> --as <agent> leave
