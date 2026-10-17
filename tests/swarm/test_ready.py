@@ -10,6 +10,7 @@ from scripts.gates.claim_stop import ClaimStop
 from scripts.gates.verdicts import Verdicts
 from scripts.swarm import capacity, cli, linked_issues, merge_queue, ready, stack, tick, waits
 from scripts.swarm.ledger_events import PullRequest
+from scripts.swarm.ledger_events import view as read_pull
 from scripts.swarm.store import RedisStore, SwarmError
 from tests.swarm.test_cli import HANDOFF, env
 
@@ -574,22 +575,37 @@ def test_a_queue_pass_watches_the_merge_whatever_the_queue_command_reports(mergi
     assert ready.record(merging.store, "sw", "t1")["on"] == {"kind": "merge", "target": URL}
 
 
-def test_the_merge_pass_squash_merges_without_a_queue_or_tests_workflow(merging):
+def test_the_merge_pass_squash_merges_without_a_queue_or_tests_workflow(merging, monkeypatch):
     merging.pulls[URL] = GREEN
+    monkeypatch.setattr(merge_queue.ledger_events, "view", read_pull)
     pull = {
         "id": "PR_one",
         "state": "OPEN",
         "headRefOid": HEAD,
         "baseRefName": "dev",
+        "baseRef": {"branchProtectionRule": None},
         "mergeQueueEntry": None,
         "isDraft": False,
         "reviewDecision": None,
         "statusCheckRollup": {"state": "SUCCESS"},
-        "repository": {"mergeQueue": None},
+        "repository": {"mergeQueue": None, "nameWithOwner": "o/r"},
+        "commits": {
+            "nodes": [
+                {
+                    "commit": {
+                        "id": HEAD,
+                        "statusCheckRollup": {"contexts": {"nodes": []}},
+                        "checkSuites": {"nodes": [], "pageInfo": {"hasNextPage": False}},
+                    }
+                }
+            ]
+        },
     }
     merged_heads = []
 
     def github(command, **kwargs):
+        if command[2] == "repos/o/r/rules/branches/dev":
+            return subprocess.CompletedProcess(command, 0, "[]")
         if command[:3] != ["gh", "api", "graphql"]:
             return subprocess.CompletedProcess(command, 1, "", "gh: Not Found (HTTP 404)")
         if command[4] == f"query={merge_queue.MERGE}":

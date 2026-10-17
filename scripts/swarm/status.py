@@ -12,6 +12,7 @@ from scripts.gates import quiet as quiet_gate
 from scripts.gates.talk import WORKER_LANES
 from scripts.handoff import transfers
 from scripts.hive import placement_waits, reports
+from scripts.inbox import outbox
 from scripts.inbox.store import InboxStore
 from scripts.swarm import (
     affinity,
@@ -285,6 +286,7 @@ def status_report(store: RedisStore, slug: str, state: dict, runtime: Runtime | 
             for a in visible
         ],
         "outages": outage.open_records(slug),
+        "outbox": outbox.status(),
         "last_tick": int(store.redis.get(store.key(slug, "last-tick")) or 0),
         "last_tick_activity": tick_activity.read(store, slug),
         "history": [json.loads(row) for row in store.redis.lrange(store.key(slug, "history"), 0, -1)],

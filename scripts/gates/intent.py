@@ -6,6 +6,7 @@ import json
 import re
 import shlex
 import subprocess
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
@@ -179,6 +180,23 @@ def pr_merged(url: str, run=subprocess.run) -> bool:
 
 def pr_head(url: str, run=subprocess.run) -> str | None:
     return _pr_field(url, "head.sha", run)
+
+
+def text_key(title: str, body: str | None) -> str:
+    return hashlib.sha256(json.dumps([title, body or ""]).encode()).hexdigest()
+
+
+def pr_text(url: str, run=subprocess.run) -> str | None:
+    found = PULL.search(url)
+    if not found:
+        return None
+    owner, repo, number = found.groups()
+    try:
+        result = _gh(["gh", "api", f"repos/{owner}/{repo}/pulls/{number}", "--jq", "{title, body}"], run)
+        raw = json.loads(result.stdout) if result.returncode == 0 else None
+        return text_key(raw["title"], raw["body"]) if raw else None
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+        return None
 
 
 def pr_view(url, run=subprocess.run):
@@ -650,6 +668,7 @@ class Check:
     home: object = None
     head: Callable | None = None
     named: Callable | None = None
+    text: Callable | None = None
 
     def run(self, doc):
         if self.mode == "off":
@@ -726,6 +745,7 @@ class Check:
             previous
             and previous["head"] == pr.get("head")
             and previous.get("inputs") == inputs
+            and previous.get("text") == text_key(pr["title"], pr["body"])
             and not self._named_moved(previous)
         ):
             return _Judgment(pr, previous, None, None)
@@ -770,7 +790,11 @@ class Check:
         fixed = bool(previous) and previous["verdict"] == FAIL and previous["head"] != head
         rounds = min(previous["coach_rounds"] + fixed, 2) if previous else 0
         _remember(self.slug, task, self.now_ms, state, answer, self.home)
-        coached = {"coach_rounds": rounds, "head": head, "url": task["pr_url"]} if self.mode == "coach" else {}
+        coached = (
+            {"coach_rounds": rounds, "head": head, "url": task["pr_url"], "text": text_key(pr["title"], pr["body"])}
+            if self.mode == "coach"
+            else {}
+        )
         fields = {
             **_detail(answer),
             "phase": task.get("phase"),
@@ -806,10 +830,17 @@ class Check:
             or not _same_phase(previous, task)
             or previous.get("inputs") != inputs
             or previous["head"] != self.head(task["pr_url"])
+            or self._text_moved(previous, task["pr_url"])
             or self._named_moved(previous)
         ):
             return None
         return previous
+
+    def _text_moved(self, previous, url):
+        if self.text is None:
+            return False
+        current = self.text(url)
+        return current is None or previous.get("text") != current
 
     def _keep(self, task, previous, verdicts):
         verdicts.write(
@@ -913,6 +944,43 @@ def _same_pull(target, url):
     return bool(bound) and (named.groups() if named else target) == (bound.groups() if named else bound[3])
 
 
+def _queue_target(command):
+    for words in simple_commands(command):
+        index = program_index(words)
+        if PurePosixPath(words[index]).name == "agentihooks":
+            return _merge_target(words)
+    return None
+
+
+def queue_decision(who: Who, state: Verdicts, url: str, mode: str, head: str | None = None) -> Decision:
+    if mode == "off":
+        return Decision()
+    record = state.read(who.task)
+    pulls = Verdicts(state.slug, f"{NAME}-pulls", state.home)
+    bound = pulls.read(who.task)
+    if bound:
+        urls = [pull for pull in bound["pulls"] if _same_pull(url, pull)]
+        if len(urls) != 1:
+            return Decision.deny("Intent requires a pull request registered on this task.")
+        url = urls[0]
+        record = pulls.read(_pull_subject(who.task, url))
+        if record and record.get("inputs") != bound["inputs"].get(url):
+            return Decision()
+    if not record or record["verdict"] != FAIL:
+        return Decision()
+    judged_url = record.get("url")
+    if not judged_url or not _same_pull(url, judged_url) or not record.get("head"):
+        return Decision()
+    if (head if head is not None else pr_head(judged_url)) != record["head"]:
+        return Decision()
+    text = f"intent check failed for task {who.task}: {record['reason']}. {fix_steps(who.swarm)}"
+    if mode != "enforce":
+        log.append(state.slug, log.Row.of(NAME, mode, who, "Bash", text), state.home)
+    if mode == "coach":
+        print(text, file=sys.stderr)
+    return Decision(allowed=mode != "enforce", reason=text if mode != "observe" else "")
+
+
 def _other_half(command, record):
     judged = record and record.get("split") and PULL.search(record["url"])
     if not judged:
@@ -942,8 +1010,7 @@ class IntentGate:
         return call.tool == "Bash" and any(word in call.command for word in ("merge", "done", "ready"))
 
     def decide(self, call, who, state, mode="enforce"):
-        commands = [words for words in simple_commands(call.command) if _gated(words)]
-        if not (who.pinned and who.task) or not commands:
+        if not (who.pinned and who.task) or not any(map(_gated, simple_commands(call.command))):
             return Decision()
         record = state.read(who.task)
         pulls = Verdicts(state.slug, f"{NAME}-pulls", state.home)
@@ -954,11 +1021,17 @@ class IntentGate:
                 f"task {who.task} is split: name the pull request url in the merge so intent matches it to its "
                 "judged half."
             )
-        commands = [words for words in simple_commands(call.command) if _gated(words)]
         if not bound:
-            return self._decide_record(call, who, state, mode, record)
+            return self._decide_unbound(call, who, state, mode, record)
+        commands = [words for words in simple_commands(call.command) if _gated(words)]
         for words in commands:
             single = replace(call, tool_input={**call.tool_input, "command": shlex.join(words)})
+            queued = _queue_target(single.command)
+            if queued:
+                decision = queue_decision(who, state, queued, mode)
+                if not decision.allowed:
+                    return decision
+                continue
             target = _merge_target(words)
             saved = record
             if target:
@@ -979,6 +1052,15 @@ class IntentGate:
             if not decision.allowed:
                 return decision
         return Decision()
+
+    def _decide_unbound(self, call, who, state, mode, record):
+        commands = [words for words in simple_commands(call.command) if _gated(words)]
+        for words in commands:
+            single = replace(call, tool_input={**call.tool_input, "command": shlex.join(words)})
+            decision = self._decide_record(single, who, state, mode, record)
+            if not decision.allowed:
+                return decision
+        return decision
 
     def _resolve(self, call, split):
         if not split:
@@ -1003,6 +1085,9 @@ class IntentGate:
                 f"intent for task {who.task} was judged on {record['url']}, not this pull request. Record this half "
                 f"first: agentihooks swarm {who.swarm} pr <pull request url> --half <n>, then wait for its verdict."
             )
+        queued = _queue_target(call.command)
+        if queued:
+            return queue_decision(who, state, queued, mode)
         verdict = record and record["verdict"]
         if mode == "coach" and record and record.get("head"):
             head = pr_head(record["url"])

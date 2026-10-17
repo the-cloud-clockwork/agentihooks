@@ -47,6 +47,7 @@ PULL_FAILURES = (
 )
 LAUNCH = re.compile(r"Launching a new EC2 instance(?P<warm> from warm pool)?: (?P<id>i-[0-9a-f]+)$")
 SCALE = re.compile(r"\{(?P<group>\S+) (?P<before>\d+)->(?P<after>\d+)")
+SCALED_GROUP = re.compile(r"setting group (?P<group>\S+) size to (?P<after>\d+) instead of (?P<before>\d+)")
 PULL_TIME = re.compile(r" in (?:(?P<m>\d+)m)?(?:(?P<s>[\d.]+)s|(?P<ms>[\d.]+)ms)\b")
 ASSIGNED = re.compile(r" to (?P<node>\S+)$")
 
@@ -131,7 +132,9 @@ def reduce(raw: Mapping) -> dict:
         "events": events,
         "nodes": dict(sorted(nodes.items())),
         "pods": dict(sorted(pods.items())),
-        "launches": _launches(raw["activities"]["Activities"], raw["instances"]["Reservations"]),
+        "launches": _launches(raw["activities"]["Activities"], raw["instances"]["Reservations"])
+        | _oci_launches(raw["instances"].get("Oci", [])),
+        "scaled_groups": scaled_groups(raw["events"]["items"]),
     }
 
 
@@ -147,6 +150,35 @@ def _launches(activities: Sequence[Mapping], reservations: Sequence[Mapping]) ->
                 "launched": started.get(found["id"]),
                 "source": WARM_POOL if found["warm"] else NEW_INSTANCE,
             }
+    return dict(sorted(launches.items()))
+
+
+def scaled_groups(items: Iterable[Mapping]) -> dict[str, list[list[int]]]:
+    """Each group's scale ups as [time, size before]. A Pod's TriggeredScaleUp event can be recorded after the launch
+    it caused; ScaledUpGroup is recorded when the size is set. A repeated identical scale up is one event with a
+    count, so only its first and last occurrence are known."""
+    seen: dict[str, set[tuple[int, int]]] = {}
+    for item in items:
+        found = SCALED_GROUP.search(item["message"]) if item.get("reason") == "ScaledUpGroup" else None
+        times = {item.get("eventTime") or item.get("firstTimestamp"), item.get("lastTimestamp")} - {None}
+        for when in times if found else ():
+            seen.setdefault(found["group"], set()).add((instant(when), int(found["before"])))
+    return {group: [list(up) for up in sorted(ups)] for group, ups in sorted(seen.items())}
+
+
+def _oci_launches(instances: Sequence[Mapping]) -> dict:
+    """An OCI pool instance has no separate launch request, so its creation is both request and launch."""
+    launches = {}
+    for instance in instances:
+        if not instance.get("instance-pool"):
+            raise ValueError(f"OCI instance {instance['id']} carries no instance pool tag")
+        created = instant(instance["time-created"])
+        launches[instance["id"]] = {
+            "group": instance["instance-pool"],
+            "requested": created,
+            "launched": created,
+            "source": NEW_INSTANCE,
+        }
     return dict(sorted(launches.items()))
 
 
@@ -297,6 +329,8 @@ def attribute(read: Mapping) -> list[dict]:
     for event in read["events"]:
         grouped.setdefault(event["pod"], []).append(event)
     ups = scale_ups(read["events"])
+    for group, scaled in read.get("scaled_groups", {}).items():
+        ups[group] = sorted({*ups.get(group, ()), *map(tuple, scaled)})
     found = (sample(name, events, read, ups) for name, events in sorted(grouped.items()))
     return [entry for entry in found if entry]
 

@@ -1,0 +1,6 @@
+{
+  "hooks/context/local_test_guard.py:hooks.context.local_test_guard.x__python_script__mutmut_3:8bbf8230e9e0d15de3b0c1ddd60f11ddc31e02bf17a2ddf2cc772a93c9de628a": {
+    "reader": "standards_reader",
+    "reason": "Resetting value to None instead of False after a consumed option value is equivalent: None is falsy like False, so the next iteration falls through to the same elif chain and nothing observes the difference."
+  }
+}

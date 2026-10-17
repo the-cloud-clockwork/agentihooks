@@ -10,13 +10,13 @@ One observation of the fleet at `at_ms`, numbered by a rising `seq`.
 
 | Field | Shape | Source |
 |---|---|---|
-| `pools` | `pool`, `configured_maximum`, `nodes`, `template.cpu_millis`, `template.memory_mib` | Declared ASG ceilings and node templates; `nodes` is the joined, ready count |
+| `pools` | `pool`, `configured_maximum`, `nodes`, `template.cpu_millis`, `template.memory_mib` | Declared ASG ceilings and node templates; `nodes` is the joined, ready count. A deployed controller's worker pool reading sets `configured_maximum` to the Pod policy `worker_pool.pods` limit and `nodes` to the distinct nodes running live worker Pods, with no template. It is one pool per controller, named by the worker namespace, and the Kubernetes attempts and pending admissions carry that `pool` |
 | `attempts` | `execution_id`, `seat`, `task`, `phase` (`active` or `pending`), `pool`, `permitted_pools`, `requested`, `pending_since_ms`, `protected`, `idle_since_ms`, `terminal`, `authority` | Execution registry and runtime observation |
 | `quota` | `account`, `state` (`waiting` or `allowed`), `since_ms`, `resets_at_ms` | Fleet quota readings |
 | `archive` | The SV2-OBS-04 diagnose archive entry: `execution_id`, `seat`, `process`, `activity`, `heartbeat_at_ms`, `watermark`, `advanced_at_ms`, `state`, `observed_at_ms` | `Health.diagnose` |
-| `checkpoints` | `execution_id`, `seat`, `taken_at_ms` of the newest checkpoint | Checkpoint manifests |
+| `checkpoints` | `execution_id`, `seat`, `taken_at_ms` of the newest checkpoint | Each pointer the controller artifacts API commits; an active execution with none yet ages from its start; a reading expires seven days after its execution leaves the active set |
 | `brain.feed_at_ms` | Time of the newest brain feed | Brain adapter |
-| `brain.denials` | `denial_id`, `at_ms`, `requester_scope`, `target_brain`, `session_title` | Brain routing refusals |
+| `brain.denials` | `denial_id`, `at_ms`, `requester_scope`, `target_brain`, `session_title` | Brain routing refusals; not measured yet, because the brain does not refuse a cross scope query |
 
 ## Panels
 
