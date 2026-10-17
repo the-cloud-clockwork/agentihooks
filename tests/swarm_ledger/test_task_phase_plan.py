@@ -125,6 +125,12 @@ def test_a_move_into_an_anchored_phase_without_a_slice_drops_the_old_slice_as_a_
     assert (moved.get("plan_slice", ""), moved.get("plan_lines", "")) == ("", "")
 
 
+def test_a_move_into_a_phase_without_a_plan_marks_no_follow_up():
+    state, rejected = update(phase="p2")
+    assert rejected == []
+    assert (task(state)["phase"], "follow_up" in task(state)) == ("p2", False)
+
+
 def test_replacement_slice_uses_the_destination_link_without_a_plan_reference():
     file = ledger_artifacts.store(SLUG, "destination.md", b"# Plan\n<!-- slice: new -->\nBuild new feature\n")
     op = {

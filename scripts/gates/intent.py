@@ -46,6 +46,7 @@ SHORT = re.compile(r"(?<![\w./-])([A-Za-z0-9-]+)/([\w.-]+)#(\d+)\b")
 NAMED_LIMIT = 3
 NON_PRODUCTION = ("tests/", "docs/")
 COMPARED = "[.status, [(.files // [])[].filename]]"
+COMPARE_FILES = 300
 DIFF_CHARS, BODY_CHARS = 6000, 1000
 SECTION = re.compile(f"{re.escape(START)}.*?{re.escape(END)}", re.S)
 TESTS_FIRST = f"{PURPOSE}-tests-first"
@@ -195,7 +196,7 @@ def production_unchanged(url: str, before: str, after: str, run=subprocess.run) 
         status, files = json.loads(result.stdout) if result.returncode == 0 else (None, [])
     except (OSError, subprocess.SubprocessError, ValueError):
         return False
-    return status == "ahead" and all(path.startswith(NON_PRODUCTION) for path in files)
+    return status == "ahead" and len(files) < COMPARE_FILES and all(path.startswith(NON_PRODUCTION) for path in files)
 
 
 def text_key(title: str, body: str | None) -> str:
@@ -337,7 +338,9 @@ def _foreign_slice(doc, task, text):
     name = task.get("plan_slice")
     if not name:
         return False
-    if not re.search(rf"(?<![\w.-]){re.escape(name)}(?![\w.-])", text):
+    named = re.escape(name)
+    marked = rf"^\s*(?:<!--\s*slice:\s*{named}\s*-->|#+ .*(?<![\w.-]){named}(?![\w.-]).*)$"
+    if not re.search(marked, text, re.M):
         return True
     if name == task.get("id"):
         return False

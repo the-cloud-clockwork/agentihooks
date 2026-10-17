@@ -71,7 +71,7 @@ def task_lifted(slug, task, gate, home=None, now=None, command=""):
     if not record.get("head"):
         return False
     head = pr_head(record["url"])
-    return head == record["head"] or bool(head) and production_unchanged(record["url"], record["head"], head)
+    return head == record["head"] or (bool(head) and production_unchanged(record["url"], record["head"], head))
 
 
 def drop_task(slug, task, home=None):

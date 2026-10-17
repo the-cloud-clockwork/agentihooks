@@ -89,6 +89,11 @@ def test_stored_lines_that_no_longer_hold_the_tasks_slice_are_ignored(doc):
     assert "plan_chunk" not in state(doc, task("t5", "own", "2-5"))
 
 
+def test_a_slice_name_only_in_prose_does_not_mark_the_lines_as_the_tasks_own(doc):
+    assert "plan_chunk" not in state(doc, task("t5", "own", "8-8"))
+    assert state(doc, task("t9", "t9", "10-11"))["plan_lines"] == "10-11"
+
+
 def test_lines_without_a_slice_name_keep_their_chunk(doc):
     assert state(doc, task("t5", "", "6-8"))["plan_lines"] == "6-8"
 
@@ -97,7 +102,6 @@ def test_an_intent_verdict_on_a_placeholder_slice_is_graded_from_the_description
     asked = []
     graded = state(doc, task("t1", "tasks", "2-5"), task("t2", "tasks", "2-5"))
     verdict = intent.judge(graded, decide=chunk_classifier(underdelivers=0.99, seen=asked))
-    print(json.dumps({"graded_from": graded["task_text"], "verdict": verdict}))
     assert verdict == ("pass", "the phase can use it as delivered at probability 0.90")
     assert asked == [list(intent.BASE_QUESTIONS)]
 
@@ -118,6 +122,8 @@ class Ran:
         (0, json.dumps(["ahead", []]), True),
         (0, json.dumps(["ahead", ["tests/a.py", "scripts/gates/intent.py"]]), False),
         (0, json.dumps(["diverged", ["tests/a.py"]]), False),
+        (0, json.dumps(["ahead", [f"tests/test_{n}.py" for n in range(intent.COMPARE_FILES)]]), False),
+        (0, json.dumps(["ahead", [f"tests/test_{n}.py" for n in range(intent.COMPARE_FILES - 1)]]), True),
         (1, "", False),
         (0, "not json", False),
     ],
