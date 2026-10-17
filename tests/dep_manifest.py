@@ -185,7 +185,7 @@ def workflow_execution_changed(old: str | None, new: str | None) -> bool:
 
 
 def global_input(path: str, old: str | None, new: str | None, version: int | None) -> bool:
-    if path.startswith(".github/workflows/") and version == 2:
+    if path.startswith(".github/workflows/") and not path.endswith(".py") and version == 2:
         return path == ".github/workflows/test.yml" and workflow_execution_changed(old, new)
     return _global(path)
 

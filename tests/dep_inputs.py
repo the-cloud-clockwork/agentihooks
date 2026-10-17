@@ -69,7 +69,10 @@ class DepInputs:
         imports = {}
         for path in self.collections:
             source = Path(self.root) / path
-            names = imported_names(source.read_text(), Path(path).parent.parts)
+            text = source.read_text()
+            names = imported_names(text, Path(path).parent.parts)
+            if "__import__" in text or any(name == "importlib" or name.startswith("importlib.") for name in names):
+                self.collections[path][1] = True
             filenames = {getattr(sys.modules.get(name), "__file__", "") or "" for name in names}
             imports[path] = {name[len(self.root) :] for name in filenames if name.startswith(self.root)}
         for _ in self.collections:
