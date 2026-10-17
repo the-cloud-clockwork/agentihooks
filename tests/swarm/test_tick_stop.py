@@ -72,6 +72,7 @@ def test_a_service_stop_during_a_tick_releases_its_lock_and_exits_143(env, monke
     assert "the swarm tick stopped by the service; released 0 held tick locks" in capsys.readouterr().err
 
 
+@pytest.mark.wall_clock
 def test_a_stop_releases_a_lock_whose_step_has_not_returned(env, monkeypatch, capsys):  # noqa: F811
     store, _, _ = env
     free, finished, exits = threading.Event(), threading.Event(), []
@@ -115,6 +116,7 @@ def test_the_tick_stops_itself_at_its_deadline_and_releases_its_lock(env, monkey
     assert "the swarm tick stopped at its 0.2 second deadline; released 0 held tick locks" in capsys.readouterr().err
 
 
+@pytest.mark.wall_clock
 def test_the_deadline_counts_from_the_tick_start(monkeypatch):
     monkeypatch.setattr(tick_stop, "DEADLINE_S", 30)
     ran = []
