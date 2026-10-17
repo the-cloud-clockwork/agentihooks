@@ -384,6 +384,16 @@ def test_a_retained_branch_head_does_not_descend_from_is_left_alone_and_its_own_
     assert remote(rig, PREDECESSOR) == unrelated
 
 
+def test_the_push_gets_the_time_left_plus_the_reserve_less_the_floor(monkeypatch, rig):
+    budgets = []
+    monkeypatch.setattr(push_stop, "push", lambda tree, branch, seconds: budgets.append(seconds) or True)
+    monkeypatch.setattr(rig.gate, "left", lambda: 10.0)
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    rig.commit()
+    rig.stop()
+    assert budgets == [10.0 + RESERVE_S - FLOOR_S]
+
+
 def test_a_retained_branch_deleted_from_origin_is_not_recreated(rig):
     rig.commit("before")
     git(rig.tree, "push", "origin", f"HEAD:refs/heads/{PREDECESSOR}")
