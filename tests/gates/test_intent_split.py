@@ -15,7 +15,7 @@ def split(doc, pr_url=FIRST, pulls=(), lines="15-17"):
 
 
 @pytest.mark.parametrize("source", ["missing", "follow_up"])
-def test_a_split_task_without_plan_lines_is_graded_by_its_description(planned, source):
+def test_a_split_task_without_plan_lines_is_graded_by_its_description(planned, source):  # noqa: F811
     doc = split(planned)
     task = doc["tasks"][0]
     if source == "missing":
