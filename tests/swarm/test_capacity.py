@@ -868,7 +868,7 @@ def test_worker_capacity_leaves_a_claude_seat_for_the_master(tmp_path, monkeypat
                 "master",
                 "master",
                 harness="claude",
-                account="warned",
+                account="warned" if master_state == "warned" else "open",
                 state="working" if master_state == "warned" else "finished",
             )
         ]
