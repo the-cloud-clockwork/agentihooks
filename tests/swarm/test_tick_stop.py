@@ -1,0 +1,148 @@
+import os
+import re
+import signal
+import threading
+import types
+
+import pytest
+
+from scripts.swarm import cli, controller, lease, tick_stop, timer
+from tests.swarm.test_cli import env, run  # noqa: F401
+
+pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+
+
+def lock_of(store):
+    return store.redis.get(store.key("sw", "tick-lock"))
+
+
+def blocked_tick(store, monkeypatch, step):
+    run("sw", "create", "--repo", ".")
+    seen = []
+
+    def providers(*args):
+        seen.append(lock_of(store))
+        step()
+
+    monkeypatch.setattr(cli.outage, "providers", providers)
+    return seen
+
+
+def tick_each(store):
+    return lambda slug: cli._tick_one(store, slug)
+
+
+def test_a_service_stop_during_a_tick_releases_its_lock_and_exits_143(env, monkeypatch, capsys):  # noqa: F811
+    store, _, _ = env
+    before = signal.getsignal(signal.SIGTERM)
+
+    def step():
+        os.kill(os.getpid(), signal.SIGTERM)
+        assert tick_stop.STOP.wait(10)
+
+    seen = blocked_tick(store, monkeypatch, step)
+    with pytest.raises(SystemExit) as stopped:
+        tick_stop.run(["sw"], tick_each(store))
+    assert stopped.value.code == 143
+    assert seen[0] is not None
+    assert lock_of(store) is None
+    assert tick_stop.release_all() == 0
+    assert not tick_stop.STOP.is_set()
+    assert signal.getsignal(signal.SIGTERM) is before
+    assert "the swarm tick stopped by the service; released 0 held tick locks" in capsys.readouterr().err
+
+
+def test_a_stop_releases_a_lock_whose_step_has_not_returned(env, monkeypatch, capsys):  # noqa: F811
+    store, _, _ = env
+    free, exits = threading.Event(), []
+
+    def step():
+        os.kill(os.getpid(), signal.SIGTERM)
+        free.wait(30)
+
+    def hard_exit(code):
+        exits.append((code, lock_of(store)))
+        raise SystemExit(code)
+
+    seen = blocked_tick(store, monkeypatch, step)
+    monkeypatch.setattr(tick_stop, "GRACE_S", 0.2)
+    monkeypatch.setattr(tick_stop.os, "_exit", hard_exit)
+    try:
+        with pytest.raises(SystemExit):
+            tick_stop.run(["sw"], tick_each(store))
+    finally:
+        free.set()
+    assert seen[0] is not None
+    assert exits == [(143, None)]
+    assert "the swarm tick stopped by the service; released 1 held tick locks" in capsys.readouterr().err
+
+
+def test_the_tick_stops_itself_at_its_deadline_and_releases_its_lock(env, monkeypatch, capsys):  # noqa: F811
+    store, _, _ = env
+    seen = blocked_tick(store, monkeypatch, lambda: tick_stop.STOP.wait(10))
+    settled = threading.Event()
+    monkeypatch.setattr(tick_stop, "DEADLINE_S", 0.2)
+    assert tick_stop.run(["sw"], tick_each(store), settled.set) is True
+    assert seen[0] is not None
+    assert lock_of(store) is None
+    assert settled.is_set()
+    assert "the swarm tick stopped at its 0.2 second deadline; released 0 held tick locks" in capsys.readouterr().err
+
+
+def test_a_tick_that_finishes_in_time_returns_without_a_stop():
+    ran, before = [], signal.getsignal(signal.SIGTERM)
+    assert tick_stop.run(["a", "b"], ran.append) is False
+    assert sorted(ran) == ["a", "b"]
+    assert signal.getsignal(signal.SIGTERM) is before
+
+
+def test_a_failed_swarm_tick_still_raises():
+    def work(slug):
+        raise RuntimeError(slug)
+
+    with pytest.raises(RuntimeError, match="^a$"):
+        tick_stop.run(["a"], work)
+
+
+def test_release_all_releases_each_held_tick_lock_once():
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    held = lease.acquire(store, "sw", "host")
+    token = controller.take_tick_lock(store, "sw", held, 600_000)
+    tick_stop.hold(token, lambda: controller.release_tick_lock(store, "sw", token))
+    tick_stop.hold("gone", lambda: None)
+    tick_stop.drop("gone")
+    assert tick_stop.release_all() == 1
+    assert lock_of(store) is None
+    assert tick_stop.release_all() == 0
+
+
+def test_a_finished_tick_drops_its_holder_record(env):  # noqa: F811
+    store, ledger, runtime = env
+    run("sw", "create", "--repo", ".")
+    cli.run_tick(store, "sw", ledger, runtime)
+    assert lock_of(store) is None
+    assert tick_stop.release_all() == 0
+
+
+def test_the_deadline_and_grace_fit_inside_the_service_start_timeout():
+    limit = int(re.search(r"TimeoutStartSec=(\d+)", timer.units("agentihooks")[0]).group(1))
+    assert tick_stop.DEADLINE_S + tick_stop.GRACE_S + tick_stop.POLL_S <= limit - 20
+
+
+def test_a_stopped_tick_skips_the_herdr_sweep(monkeypatch):
+    from scripts import herdr_gc, operator_env
+
+    swept = []
+    monkeypatch.setattr(timer, "installed_refusal", lambda: "")
+    monkeypatch.setattr(timer, "reconcile", lambda binary: True)
+    monkeypatch.setattr(operator_env, "fill", lambda environ: None)
+    monkeypatch.setattr(operator_env, "classifier", lambda environ: None)
+    monkeypatch.setattr(herdr_gc, "run", lambda *args: swept.append(args) or [])
+    monkeypatch.setattr(cli, "run_tick", lambda store, slug, scheduled: tick_stop.STOP.wait(10) and [])
+    monkeypatch.setattr(tick_stop, "DEADLINE_S", 0.2)
+    cli.cmd_tick(types.SimpleNamespace(slugs=lambda: ["sw"]), None)
+    assert swept == []
