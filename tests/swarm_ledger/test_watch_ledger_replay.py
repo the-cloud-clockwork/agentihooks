@@ -40,7 +40,8 @@ def test_live_replay_finishes_with_forced_heartbeats(live, monkeypatch, capsys, 
                 for _ in range(heartbeats):
                     yield "heartbeat", {}, None
             for name, data, event_id in source:
-                received.append((cursor, name))
+                if name != "heartbeat":
+                    received.append((cursor, name))
                 yield name, data, event_id
                 if name == "snapshot":
                     for _ in range(heartbeats):
