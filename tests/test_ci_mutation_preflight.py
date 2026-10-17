@@ -34,8 +34,21 @@ def test_preflight_skips_a_branch_with_an_open_pull_request():
     jobs = _workflow()["jobs"]
     assert "pull-request" not in jobs
     plan = jobs["plan"]
-    assert "needs" not in plan
-    assert plan["if"] == "${{ github.event_name != 'push' || !github.event.deleted }}"
+    if "capacity" in jobs:
+        assert plan["needs"] == "capacity"
+        assert plan["if"] == (
+            "${{ !cancelled() && (needs.capacity.result == 'success' || needs.capacity.result == 'skipped')"
+            " && (github.event_name != 'push' || !github.event.deleted) }}"
+        )
+        assert "secrets." not in str(plan)
+        capacity = jobs["capacity"]
+        assert [step.get("id") for step in capacity["steps"]] == ["capacity-token", "capacity"]
+        assert capacity["steps"][0]["uses"] == "actions/create-github-app-token@v3.2.0"
+        assert capacity["steps"][1]["run"].startswith("gh api ")
+        assert "checkout" not in str(capacity)
+    else:
+        assert "needs" not in plan
+        assert plan["if"] == "${{ github.event_name != 'push' || !github.event.deleted }}"
     assert plan["outputs"]["graded"] == "${{ steps.plan.conclusion == 'success' }}"
     step = plan["steps"][0]
     assert step["id"] == "open"
