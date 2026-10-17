@@ -266,11 +266,7 @@ def test_reopen_resumes_the_recorded_thread_and_never_starts_a_server(monkeypatc
     from types import SimpleNamespace
 
     written, agent = [], _agents()[1]
-    current = replace(agent, state="idle")
-    store = SimpleNamespace(
-        put_agent=lambda *put: written.append(put),
-        execution=lambda slug, execution_id: current if (slug, execution_id) == ("sw", "exe-1") else None,
-    )
+    store = SimpleNamespace(execution_registry=SimpleNamespace(set_pane=lambda *pane: written.append(pane)))
     monkeypatch.setattr(
         "scripts.swarm.live_binding.transport",
         lambda found, seen: RECORD if (found, seen) == (store, agent) else None,
@@ -281,14 +277,14 @@ def test_reopen_resumes_the_recorded_thread_and_never_starts_a_server(monkeypatc
     assert opened == [("sw-master-1", ["/bin/codex", "resume", "--remote", RECORD.endpoint_ref, "thread-1"])]
     assert not {"app-server", "serve", "scripts.codex_session"} & set(opened[0][1])
     assert result == {"agent": "sw-master-1", "thread": "thread-1", "pane": "w9:p4"}
-    assert written == [("sw", replace(current, pane_id="w9:p4"))]
+    assert written == [("sw", "exe-1", "w9:p4")]
 
 
 def test_reopen_refused_by_the_viewer_records_no_pane(monkeypatch):
     from types import SimpleNamespace
 
     written = []
-    store = SimpleNamespace(put_agent=lambda *put: written.append(put))
+    store = SimpleNamespace(execution_registry=SimpleNamespace(set_pane=lambda *pane: written.append(pane)))
     monkeypatch.setattr("scripts.swarm.live_binding.transport", lambda found, seen: RECORD)
 
     def refuse(title, argv):
@@ -325,8 +321,7 @@ def test_the_local_terminal_opens_the_viewer_in_the_swarm_workspace(monkeypatch,
     store = SimpleNamespace(
         agents=lambda asked: _agents() if asked == slug else [],
         config=lambda asked: config if asked == slug else None,
-        put_agent=lambda *put: written.append(put),
-        execution=lambda asked, execution_id: next(a for a in _agents() if a.execution_id == execution_id),
+        execution_registry=SimpleNamespace(set_pane=lambda *pane: written.append(pane)),
     )
     monkeypatch.setattr("scripts.swarm.live_binding.transport", lambda found, seen: RECORD if found is store else None)
     opened = []
@@ -350,7 +345,7 @@ def test_the_local_terminal_opens_the_viewer_in_the_swarm_workspace(monkeypatch,
             environ,
         )
     ]
-    assert written == [(slug, replace(_agents()[1], pane_id="w1:p1"))]
+    assert written == [(slug, "exe-1", "w1:p1")]
 
 
 def test_the_local_terminal_leaves_other_executions_to_the_worker_terminal(monkeypatch):
