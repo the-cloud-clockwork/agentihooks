@@ -44,6 +44,26 @@ def _step(job, name):
     return next(step for step in _job(job)["steps"] if step.get("name") == name)
 
 
+def _deselect_in_split(tmp_path, head_manifest):
+    collected = ["tests/test_a.py::one", "tests/test_a.py::two", "tests/test_b.py::one", "tests/test_b.py::new"]
+    reused = ["tests/test_a.py::one", "tests/test_a.py::two", "tests/test_b.py::one"]
+    runner = tmp_path / "runner"
+    workspace = tmp_path / "workspace"
+    for checkout, manifest in (
+        (runner / "planner", (ROOT / "tests" / "dep_manifest.py").read_text()),
+        (workspace, head_manifest),
+    ):
+        (checkout / "tests").mkdir(parents=True)
+        (checkout / "tests" / "__init__.py").write_text("")
+        (checkout / "tests" / "dep_manifest.py").write_text(manifest)
+    (workspace / "reused-tests.json").write_text(json.dumps({"tests": reused}))
+    (workspace / "collected.json").write_text(json.dumps(collected))
+    env = {**os.environ, "RUNNER_TEMP": str(runner), "GITHUB_WORKSPACE": str(workspace), "PYTHON_PATH": sys.executable}
+    run = _step("split", "Deselect the reused tests")["run"]
+    subprocess.run(["bash", "-eo", "pipefail", "-c", run], cwd=workspace, env=env, check=True)
+    return json.loads((workspace / "reused.json").read_text()), dep_manifest.deselect(reused, collected)
+
+
 def test_lines_map_to_the_innermost_function_and_definitions_to_their_scope():
     units = dep_manifest.line_units(SOURCE)
     assert units[7] == "double"
@@ -286,11 +306,41 @@ def test_queue_shards_split_on_the_tests_the_planner_did_not_reuse():
     assert 'cd "$RUNNER_TEMP/planner"' in plan["run"]
     assert _job("split")["outputs"]["reused"] == "${{ steps.plan.outputs.reused }}"
     assert _job("unit")["outputs"]["reused"] == "${{ needs.split.outputs.reused }}"
-    assert _step("split", "Deselect the reused tests")["run"].startswith("python -m tests.dep_manifest deselect")
+    deselected = _step("split", "Deselect the reused tests")
+    assert deselected["run"].startswith('cd "$RUNNER_TEMP/planner"\n"$PYTHON_PATH" -m tests.dep_manifest deselect')
+    assert deselected["env"]["PYTHON_PATH"] == plan["env"]["PYTHON_PATH"]
     assert _step("unit", "Run tests")["env"]["CI_REUSED"] == "${{ github.workspace }}/reused.json"
     check = _step("shard-check", "Check every collected test ran in exactly one shard")
     assert check["run"].endswith(" $REUSED")
     assert "reused-plan/reused-tests.json" in check["env"]["REUSED"]
+
+
+def test_the_split_deselects_with_the_grader_manifest_code_not_the_heads(tmp_path):
+    planted = (
+        (ROOT / "tests" / "dep_manifest.py")
+        .read_text()
+        .replace(
+            "def deselect(",
+            "def deselect(reused, collected):\n"
+            "    return {'tests': sorted(collected), 'files': sorted({n.split('::')[0] for n in collected})}\n\n\n"
+            "def _planted(",
+            1,
+        )
+    )
+    chosen, expected = _deselect_in_split(tmp_path, planted)
+    assert chosen == expected
+
+
+def test_the_split_deselects_the_same_tests_when_the_head_keeps_the_manifest_code(tmp_path):
+    chosen, expected = _deselect_in_split(tmp_path, (ROOT / "tests" / "dep_manifest.py").read_text())
+    assert (
+        chosen
+        == expected
+        == {
+            "tests": ["tests/test_a.py::one", "tests/test_a.py::two", "tests/test_b.py::one"],
+            "files": ["tests/test_a.py"],
+        }
+    )
 
 
 def test_the_reused_plan_reaches_workers_but_never_nested_pytest_runs(tmp_path, monkeypatch):

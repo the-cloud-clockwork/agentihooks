@@ -79,6 +79,19 @@ def test_enforce_acts_only_on_the_second_agreeing_sweep(repo, tmp_path):
     assert "refs/heads/wip/primary/dirty-" in remote_refs(repo)
 
 
+def test_departed_owner_worktree_is_removed_on_the_first_sweep(repo, tmp_path):
+    left = repo.worktree("left")
+    held = repo.worktree("held")
+    add_holder(left, "worktree", Holder("sess-gone", 4242, 77, "boot-1"), 0.0)
+    add_holder(held, "worktree", Holder("", 5151, 9, "boot-1"), 0.0)
+    age(left, 60)
+    age(held, 60)
+    view = snap(uptime=10_000, table={5151: process(5151, start=9)})
+    report = sweep([repo.root()], view, tmp_path / "state", act=True, fresh=lambda: view)
+    assert outcomes(report) == {"left": "removed", "held": ""}
+    assert not left.exists() and held.exists()
+
+
 def test_failed_push_keeps_the_worktree(repo, tmp_path):
     dirty = repo.worktree("dirty")
     (dirty / "work.txt").write_text("unsaved\n")

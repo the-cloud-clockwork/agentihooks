@@ -330,3 +330,46 @@ def test_the_workflow_grades_every_branch_push_with_the_dev_grader():
     steps = workflow["jobs"]["grade"]["steps"]
     assert steps[0]["with"]["ref"] == "dev"
     assert steps[-1]["run"] == 'python -m scripts.ci_branch_lanes --head "$GITHUB_SHA" --repo "$GITHUB_REPOSITORY"'
+
+
+def test_an_edit_cannot_widen_the_events_of_a_trusted_conditional_lane(tmp_path, monkeypatch):
+    block = {"group": "${{ github.event_name == 'push' && github.ref || 'hosted-lane-a' }}", "queue": "max"}
+    baseline = _workflow(block)
+    baseline["on"] = {"push": {"branches": ["dev"]}}
+    updated = _workflow(block)
+    updated["on"] = {"push": None}
+    base, head, sha = _repo(tmp_path, {"replay.yml": updated})
+    (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(baseline))
+    monkeypatch.chdir(head)
+    assert lanes.refused(sha, base) == {
+        f"{lanes.WORKFLOWS}/replay.yml": ["job replay has no shared hosted lane concurrency group"]
+    }
+
+
+@pytest.mark.parametrize("quoted_head", [False, True])
+def test_equivalent_event_key_spellings_preserve_trusted_concurrency(tmp_path, monkeypatch, quoted_head):
+    block = {"group": "${{ github.workflow }}", "queue": "max"}
+    baseline = _workflow(block)
+    updated = _workflow(block, replay={"runs-on": "x", "steps": [{"run": "echo changed"}]})
+    unquoted = baseline if quoted_head else updated
+    unquoted[True] = unquoted.pop("on")
+    base, head, sha = _repo(tmp_path, {"replay.yml": updated})
+    (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(baseline))
+    monkeypatch.chdir(head)
+    assert lanes.refused(sha, base) == {}
+
+
+def test_a_second_event_key_spelling_cannot_widen_a_trusted_conditional_lane(tmp_path, monkeypatch):
+    block = {"group": "${{ github.event_name == 'push' && github.ref || 'hosted-lane-a' }}", "queue": "max"}
+    baseline = _workflow(block)
+    baseline.pop("on")
+    baseline[True] = {"push": {"branches": ["dev"]}}
+    updated = _workflow(block)
+    updated["on"] = {"push": None}
+    updated[True] = {"push": {"branches": ["dev"]}}
+    base, head, sha = _repo(tmp_path, {"replay.yml": updated})
+    (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(baseline))
+    monkeypatch.chdir(head)
+    assert lanes.refused(sha, base) == {
+        f"{lanes.WORKFLOWS}/replay.yml": ["job replay has no shared hosted lane concurrency group"]
+    }

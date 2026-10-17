@@ -2212,6 +2212,34 @@ def test_the_operator_may_give_a_verdict_and_a_worker_may_not(env, capsys, monke
     assert run("sw", "--as", "operator", "verdict", "idle-with-claim/engineer@a1b2c3-0001", "resolved") == 0
 
 
+@pytest.mark.parametrize(
+    ("session", "named", "by"),
+    [
+        ({"AGENTIHOOKS_AGENT_NAME": "master@unregistered-0001"}, "operator", None),
+        ({"AGENTIHOOKS_AGENT_NAME": "master@unregistered-0001"}, "", None),
+        ({"AGENTIHOOKS_SWARM": "sw"}, "", None),
+        ({}, "master@a1b2c3-0001", "master@a1b2c3-0001"),
+        ({"AGENTIHOOKS_AGENT_NAME": "master@a1b2c3-0001"}, "operator", "master@a1b2c3-0001"),
+        ({"AGENTIHOOKS_AGENT_NAME": "operator"}, "operator", "operator"),
+        ({}, "", "operator"),
+    ],
+)
+def test_only_a_registered_master_or_the_operator_session_gives_a_verdict(
+    env, capsys, monkeypatch, tmp_path, session, named, by
+):
+    _idle_finding(env, monkeypatch, tmp_path)
+    _findings(capsys)
+    for key, value in session.items():
+        monkeypatch.setenv(key, value)
+    finding = "idle-with-claim/engineer@a1b2c3-0001"
+    named_args = ["--as", named] if named else []
+    assert run("sw", *named_args, "verdict", finding, "resolved") == (1 if by is None else 0)
+    if by is None:
+        assert capsys.readouterr().err == "swarm: only the master or the operator gives a finding a verdict\n"
+    kept = cli.verdict_store(env[0], "sw")
+    assert (json.loads(kept.redis.hget(kept.key, finding)).get("verdict") or {}).get("by") == by
+
+
 def test_status_skips_idle_with_claim_while_the_pull_request_waits_on_checks(env, capsys, monkeypatch, tmp_path):
     store, ledger, _ = env
     _idle_finding(env, monkeypatch, tmp_path)

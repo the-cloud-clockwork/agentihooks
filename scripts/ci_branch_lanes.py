@@ -52,13 +52,23 @@ def lane_problem(block: object) -> str | None:
     return None
 
 
+def events(workflow: dict) -> list:
+    return [workflow[key] for key in ("on", True) if key in workflow]
+
+
 def problems(workflow: object, baseline: object = None) -> list[str]:
     if not isinstance(workflow, dict):
         return ["is not a workflow mapping"]
     jobs = workflow.get("jobs") or {}
     if not isinstance(jobs, dict):
         return ["has no jobs mapping"]
-    trusted = baseline if isinstance(baseline, dict) and baseline.get("name") == workflow.get("name") else {}
+    trusted = (
+        baseline
+        if isinstance(baseline, dict)
+        and baseline.get("name") == workflow.get("name")
+        and events(baseline) == events(workflow)
+        else {}
+    )
     found = []
     for name, job in jobs.items():
         job = job if isinstance(job, dict) else {}

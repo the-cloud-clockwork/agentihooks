@@ -1,6 +1,10 @@
-from hooks.lifecycle.lease import add_holder, admin_dir
-from hooks.lifecycle.model import Holder, Root
-from hooks.lifecycle.worktrees import classify, discover, nested_worktrees
+import json
+import time
+
+from hooks.lifecycle.gitstate import TreeState
+from hooks.lifecycle.lease import add_holder, admin_dir, lease_path
+from hooks.lifecycle.model import Finding, Holder, Lease, Root
+from hooks.lifecycle.worktrees import CLEAN_IDLE, _idle_verdict, classify, discover, nested_worktrees
 
 from .conftest import age, git, process, snap
 
@@ -57,7 +61,7 @@ def test_live_owner_and_boot_grace_hold_the_worktree(repo):
     add_holder(path, "worktree", Holder("", 4242, 77, "boot-1"), 0.0)
     age(path, 30 * HOUR)
     assert verdict(repo, path, table={4242: process(4242, start=77)}) == ("keep", "owner session alive")
-    assert verdict(repo, path, table={4242: process(4242, start=78)}) == ("remove", "clean and on a remote")
+    assert verdict(repo, path, table={4242: process(4242, start=78)}) == ("remove", "clean and on a remote, owner left")
     assert verdict(repo, path, uptime=600) == ("keep", "boot grace")
 
 
@@ -67,6 +71,69 @@ def test_resumed_session_keeps_its_worktree(repo):
     age(path, 30 * HOUR)
     assert verdict(repo, path, sessions={900: "sess-1"}) == ("keep", "owner session alive")
     assert verdict(repo, path, sessions={900: "sess-2"})[0] == "remove"
+
+
+def test_departed_owner_frees_clean_pushed_worktree_at_once(repo):
+    path = repo.worktree("left")
+    add_holder(path, "worktree", Holder("sess-gone", 4242, 77, "boot-1"), 0.0)
+    age(path, 60)
+    finding = classify(path, repo.root(), snap())
+    touched = finding.last_touch
+    assert finding == Finding(
+        str(path), "worktrees", "worktree", "remove", "clean and on a remote, owner left", touched, immediate=True
+    )
+    assert abs(touched - (time.time() - 60)) < 30
+    live = classify(path, repo.root(), snap(table={4242: process(4242, start=77)}))
+    assert (live.action, live.reason, live.immediate) == ("keep", "owner session alive", False)
+    (path / "notes.txt").write_text("unsaved\n")
+    age(path, 60)
+    dirty = classify(path, repo.root(), snap())
+    assert (dirty.action, dirty.reason, dirty.immediate) == ("keep", "unique work, recent", False)
+
+
+def test_departed_owner_unpushed_commit_stays_kept(repo):
+    path = repo.worktree("left-local")
+    add_holder(path, "worktree", Holder("sess-gone", 4242, 77, "boot-1"), 0.0)
+    (path / "a.txt").write_text("a\n")
+    git(path, "add", "a.txt")
+    git(path, "commit", "-q", "-m", "local")
+    age(path, 60)
+    assert verdict(repo, path) == ("keep", "unique work, recent")
+
+
+def test_clean_pushed_without_owner_still_waits_for_idle(repo):
+    path = repo.worktree("unowned")
+    lease_path(path, "worktree").write_text(json.dumps({"kind": "worktree", "created_at": 0.0, "holders": []}))
+    age(path, 60)
+    finding = classify(path, repo.root(), snap())
+    assert (finding.action, finding.reason, finding.immediate) == ("keep", "clean, recent", False)
+    age(path, 3 * HOUR)
+    idle = classify(path, repo.root(), snap())
+    assert (idle.action, idle.reason, idle.immediate) == ("remove", "clean and on a remote", False)
+
+
+def test_throwaway_and_snapshot_verdicts_are_never_immediate(repo):
+    def full(path):
+        finding = classify(path, repo.root(), snap())
+        return finding.action, finding.reason, finding.immediate
+
+    plant = repo.worktree("plant-x")
+    add_holder(plant, "ephemeral", Holder("sess-gone", 1, 1, "gone"), 0.0)
+    age(plant, 60)
+    assert full(plant) == ("keep", "throwaway, recent", False)
+    age(plant, 3 * HOUR)
+    assert full(plant) == ("remove", "throwaway checkout, owner gone", False)
+    dirty = repo.worktree("dirty-x")
+    (dirty / "notes.txt").write_text("unsaved\n")
+    age(dirty, 25 * HOUR)
+    assert full(dirty) == ("snapshot", "unique work, owner gone: push to wip/ then remove", False)
+
+
+def test_clean_idle_boundary_is_inclusive():
+    clean = TreeState("/w", "/a", "/p", "task", (), False, "", False, 0.0)
+    plant = Lease("ephemeral", 0.0)
+    assert _idle_verdict(clean, plant, CLEAN_IDLE) == ("remove", "throwaway checkout, owner gone", False)
+    assert _idle_verdict(clean, None, CLEAN_IDLE) == ("remove", "clean and on a remote", False)
 
 
 def test_ephemeral_worktree_is_removed_without_rescue(repo):
