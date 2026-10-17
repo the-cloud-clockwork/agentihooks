@@ -139,3 +139,10 @@ def test_the_kind_job_restores_and_saves_the_layers_it_builds_with():
         "deploy/helm/agentihooks-swarm/ci/terminal-worker.Dockerfile",
     )
     assert restore["with"]["key"] == f"kind-layers-${{{{ hashFiles({', '.join(map(repr, sources))}) }}}}"
+
+
+def test_requirements_layer_depends_on_the_lock_alone():
+    stage = (ROOT / "Dockerfile").read_text()
+    stage = stage[: stage.index("COPY hooks/ hooks/")]
+    assert "COPY docker/swarm/requirements.lock ./\nRUN python -m venv /opt/venv" in stage
+    assert stage.index("-r requirements.lock") < stage.index("COPY pyproject.toml README.md ./")

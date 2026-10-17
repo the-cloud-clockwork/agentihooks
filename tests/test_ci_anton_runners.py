@@ -49,6 +49,8 @@ MOVED = {
     ("mutation-replay.yml", "grade"): BATCH,
     ("mutation-replay.yml", "verify"): LIGHT,
     ("mutation-preflight.yml", "stats"): BATCH,
+    ("proofs.yml", "operations-cpu"): BATCH,
+    ("proofs.yml", "operations-receipts"): BATCH,
     ("proofs.yml", "tests"): STANDARD,
     ("semgrep.yml", "scan"): LIGHT,
     ("startup-stages.yml", "measure"): STANDARD,

@@ -220,7 +220,10 @@ def test_a_keyed_job_runs_its_heavy_steps_only_on_a_miss_and_saves_only_after_th
     index = next(i for i, step in enumerate(steps) if step.get("uses") == _KEY)
     assert steps[index]["id"] == "key"
     assert steps[index]["with"]["job"] == job
-    assert all(step.get("if") in {None, "${{ !inputs.streams }}"} for step in steps[:index])
+    assert all(
+        step.get("if") in {None, "${{ !inputs.streams }}", "${{ !inputs.streams && !inputs.compare }}"}
+        for step in steps[:index]
+    )
     [save] = [step for step in steps if step.get("uses") == _SAVE]
     assert save["if"] == (
         "steps.key.outputs.hit == 'false' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')"
@@ -230,4 +233,9 @@ def test_a_keyed_job_runs_its_heavy_steps_only_on_a_miss_and_saves_only_after_th
     assert steps.index(save) > max(i for i, step in enumerate(steps) if _SKIP in step.get("if", ""))
     assert heavy
     for step in heavy:
-        assert _SKIP in step.get("if", "") or step.get("if") in {"inputs.streams", "${{ always() && inputs.streams }}"}
+        assert _SKIP in step.get("if", "") or step.get("if") in {
+            "inputs.streams",
+            "${{ always() && inputs.streams }}",
+            "inputs.compare",
+            "${{ always() && inputs.compare }}",
+        }

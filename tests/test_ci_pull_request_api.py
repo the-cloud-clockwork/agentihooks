@@ -192,6 +192,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/js_lcov.py",
         "tests/kind_request.py",
         "tests/ledger_load/gate.py",
+        "tests/ledger_load/paired.py",
         "tests/ledger_load/streams.py",
         "tests/refresh_durations.py",
         "tests/shard_budget.py",

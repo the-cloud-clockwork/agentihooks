@@ -31,6 +31,8 @@
 /tests/test_ci_*.py @nestorcolt
 /tests/test_codeowners.py @nestorcolt
 /tests/swarm_ledger/receipt_mutation_probe.py @nestorcolt
+/tests/swarm_ledger/receipt_stats_probe.py @nestorcolt
+/tests/ledger_load/paired.py @nestorcolt
 /tests/test_count_floor.py @nestorcolt
 /tests/test_dev_durations.py @nestorcolt
 /tests/test_gate_protected.py @nestorcolt

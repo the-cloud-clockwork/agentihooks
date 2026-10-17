@@ -509,13 +509,13 @@ def _epoch_mutation_server(rejected):
         if rejected:
             raise SwarmError("the controller lease is stale")
 
-    def apply_ops(slug, ops, gate):
+    def apply_ops(slug, ops, gate, *, copy_state):
         assert slug == "sw"
         refused = [op["id"] for op in ops if not gate.apply(doc, op, ctx, None)]
         return doc, refused
 
     server = SimpleNamespace(
-        repository=SimpleNamespace(get_document=lambda *args, **kwargs: doc, apply_ops=apply_ops),
+        repository=SimpleNamespace(current=lambda *args, **kwargs: SimpleNamespace(state=doc), apply_ops=apply_ops),
         authority=SimpleNamespace(refusal=lambda *args: "", fence=fence),
         core=SimpleNamespace(check_body=lambda *args: None),
         write_gate=lambda slug: SimpleNamespace(apply=lambda *args: True, publish=lambda rejected: None),

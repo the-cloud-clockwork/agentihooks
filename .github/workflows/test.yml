@@ -1407,6 +1407,7 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: http://127.0.0.1:9000
           ARGS: ${{ steps.queued.outputs.args || steps.dispatched.outputs.args }}
+          SONAR_SCANNER_JAVA_OPTS: -Xmx3g -Xlog:gc:file=${{ runner.temp }}/sonar-gc.log
         run: |
           scanner="$RUNNER_TOOL_CACHE/sonar-scanner-cli/$SONAR_SCANNER_VERSION/linux-x64"
           if [[ ! -x "$scanner/bin/sonar-scanner" ]]; then
@@ -1419,7 +1420,9 @@ jobs:
             cp -a "$RUNNER_TEMP/sonar-scanner-$SONAR_SCANNER_VERSION-linux-x64/." "$scanner/"
           fi
           read -ra extra <<< "$ARGS"
-          bash "$GITHUB_WORKSPACE/.github/coverage/sonar-retry.sh" --unless .scannerwork/report-task.txt "SonarQube Scan" -- "$scanner/bin/sonar-scanner" -Dsonar.projectBaseDir=. "${extra[@]}"
+          threads=$(python "$GITHUB_WORKSPACE/scripts/ci_cpu_quota.py")
+          bash "$GITHUB_WORKSPACE/.github/coverage/sonar-retry.sh" --unless .scannerwork/report-task.txt "SonarQube Scan" -- "$scanner/bin/sonar-scanner" -Dsonar.projectBaseDir=. -Dsonar.python.analysis.threads="$threads" "${extra[@]}"
+          [[ ! -s "$RUNNER_TEMP/sonar-gc.log" ]] || awk '/Pause/ { n++; sub(/ms$/, "", $NF); t += $NF } END { printf "GC pauses %d, %.0f ms\n", n, t }' "$RUNNER_TEMP/sonar-gc.log"
 
       - name: Wait for the test dependency manifest
         if: needs.select.outputs.scope == 'full'
