@@ -493,7 +493,14 @@ def lifecycle_control(slug, body, operator):
 
 
 def refresh_quota(slug: str) -> tuple[dict | None, str]:
-    return swarm_control(slug, [], "quota")
+    from scripts.swarm import quota_refresh
+    from scripts.swarm.store import SwarmError
+
+    try:
+        quota_refresh.request(swarm_store(), slug)
+    except SwarmError as exc:
+        return None, str(exc)
+    return swarm_status(slug), ""
 
 
 def relay_to_inbox(slug, state):

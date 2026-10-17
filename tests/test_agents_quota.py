@@ -97,7 +97,7 @@ def test_rows_list_every_claude_account_and_codex():
         "claude",
         "ncgma",
         "subscription",
-        "NORMAL",
+        "OPEN",
         "2/6",
         "-",
         "6",
@@ -109,7 +109,7 @@ def test_rows_list_every_claude_account_and_codex():
         "0m",
     ]
     default = table[3].split()
-    assert default[:8] == ["2", "codex", "default", "subscription", "NORMAL", "1/6", "-", "6"]
+    assert default[:8] == ["2", "codex", "default", "subscription", "OPEN", "1/6", "-", "6"]
     assert default[9:11] == ["-", "-"] and default[8] == default[11]
     assert table[4].split() == ["3", "codex", "alpha", "subscription", "UNKNOWN", "0/-", *["-"] * 8]
     assert "?" not in "\n".join(table) and "SOURCE" not in table[0]
@@ -629,7 +629,7 @@ def test_one_table_sorts_each_harness_by_routing_left_and_shows_dashes_for_missi
         "codex",
         "pro",
         "subscription",
-        "NORMAL",
+        "OPEN",
         "0/6",
         "-",
         "6",
@@ -672,7 +672,7 @@ def test_current_lists_discovered_accounts_only_and_a_stale_reading_as_stale(mon
         "beta",
         "(current)",
         "subscription",
-        "NORMAL",
+        "OPEN",
         "0/6",
         "-",
         "6",
@@ -924,7 +924,7 @@ def test_an_hour_old_codex_reading_shows_its_state_and_cap_until_the_max_age(mon
     monkeypatch.delenv("AGENTIHOOKS_CODEX_READING_MAX_AGE_H", raising=False)
     quota = codex_quota.CodexQuota(1000, "pro", seven_day=QuotaWindow(used=10.0, resets_at=10**10))
     [row] = agents_quota.codex_rows([CodexAccount("default")], {"default": quota}, {}, now=1000 + 3600)
-    assert (row.state, row.cap) == ("NORMAL", 6)
+    assert (row.state, row.cap) == ("OPEN", 6)
     [old] = agents_quota.codex_rows([CodexAccount("default")], {"default": quota}, {}, now=1000 + 6 * 3600 + 1)
     assert (old.state, old.cap) == ("STALE", None)
 
@@ -989,7 +989,7 @@ def test_balance_table_defaults_to_the_codex_rows_at_its_own_time_and_counts_mas
     result = ProbeResult("alpha", "allowed", "NORMAL", 70.0, QuotaWindow(20.0, 30_000), QuotaWindow(30.0, 90_000))
     cells = [line.split() for line in agents_quota.balance_table([result], {"home": 2}, 20_000.0).splitlines()[2:]]
     assert seen == [20_000.0]
-    assert any(row[2] == "alpha" and "NORMAL" in row for row in cells)
+    assert any(row[2] == "alpha" and "OPEN" in row for row in cells)
     assert any("home" in row and "2/-" in row for row in cells)
     assert any(row[1:3] == ["codex", "personal"] for row in cells)
 
