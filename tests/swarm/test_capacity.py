@@ -840,7 +840,8 @@ def _runtime_probe(tmp_path, monkeypatch, observations, reason="priority"):
 
 @pytest.mark.parametrize("lane", ["eng", "ci", "plan"])
 @pytest.mark.parametrize("master_state", ["missing", "finished"])
-def test_worker_capacity_leaves_a_claude_seat_for_the_master(tmp_path, monkeypatch, lane, master_state):
+@pytest.mark.parametrize("master_config", [{}, {"master": {"agent": "claude"}}])
+def test_worker_capacity_leaves_a_claude_seat_for_the_master(tmp_path, monkeypatch, lane, master_state, master_config):
     observed = [account("open"), account("warned", cap=6, left=5)]
     runtime, config, seen = _runtime_probe(tmp_path, monkeypatch, observed)
     runtime.quota_accounts = lambda *args, **kwargs: observed
@@ -850,7 +851,7 @@ def test_worker_capacity_leaves_a_claude_seat_for_the_master(tmp_path, monkeypat
         max_ci=4 if lane == "ci" else 0,
         max_plan=4 if lane == "plan" else 0,
         scaling="manual",
-        lanes={"master": {"agent": "claude"}, lane: {"agent": "claude"}},
+        lanes={**master_config, lane: {"agent": "claude"}},
     )
     agents = (
         []
