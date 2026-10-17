@@ -12,6 +12,8 @@ from tests import dep_manifest
 UNIT_JOBS = frozenset(
     f"unit ({version}, {shard})" for version, count in (("3.11", 6), ("3.12", 12)) for shard in range(1, count + 1)
 )
+# Full scope runs carry these into their own coverage for the tests they reuse.
+COVERAGE = frozenset(f"coverage-3.12-{shard}" for shard in range(1, 13))
 CANDIDATES = 10
 
 
@@ -39,7 +41,8 @@ def find_record(repository: str, before: str) -> tuple[dict, dict] | None:
             continue
         artifacts = json.loads(_api(f"{actions}/runs/{run['id']}/artifacts?per_page=100"))["artifacts"]
         kept = [item for item in artifacts if item["name"] == "dep-manifest" and not item["expired"]]
-        if not kept:
+        live = {item["name"] for item in artifacts if not item["expired"]}
+        if not kept or any(name not in live for name in COVERAGE):
             continue
         jobs = read_jobs(f"{actions}/runs/{run['id']}/attempts/{run['run_attempt']}/jobs")
         if not UNIT_JOBS <= {job["name"] for job in jobs if job["conclusion"] == "success"}:
@@ -63,6 +66,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     found = find_record(args.repository, args.before)
     reused = 0
+    run_id = commit = ""
     if found is None:
         print(
             f"::notice title=No test record::No dev push run with passed unit shards kept a dependency manifest in the last {CANDIDATES}; every test runs."
@@ -74,6 +78,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         args.out.write_text(json.dumps(chosen))
         reused = len(chosen["tests"])
+        run_id, commit = str(run["id"]), manifest["commit"]
         cause = f" by {chosen['global']}" if chosen["global"] else ""
         print(
             f"Dev run {run['id']} on {manifest['commit']}: {chosen['invalidated']} of {len(manifest['tests'])}"
@@ -81,7 +86,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     if destination := os.environ.get("GITHUB_OUTPUT"):
         with Path(destination).open("a") as output:
-            output.write(f"reused={reused}\n")
+            output.write(f"reused={reused}\nrun={run_id}\ncommit={commit}\n")
     return 0
 
 

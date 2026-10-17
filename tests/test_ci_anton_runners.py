@@ -28,6 +28,7 @@ def pool(label):
 
 
 MOVED = {
+    ("mutation-refinement-proof.yml", "planning"): LIGHT,
     ("access-audit.yml", "audit"): LIGHT,
     ("branch-lanes.yml", "grade"): LIGHT,
     ("hive-worker.yml", "contracts"): LIGHT,
@@ -43,7 +44,6 @@ MOVED = {
     ("mutation-preflight.yml", "mutation"): LIGHT,
     ("mutation-preflight.yml", "mutation-shard"): BATCH,
     ("mutation-preflight.yml", "plan"): LIGHT,
-    ("mutation-preflight.yml", "pull-request"): LIGHT,
     ("mutation-preflight.yml", "refine"): LIGHT,
     ("mutation-replay.yml", "plan"): LIGHT,
     ("mutation-replay.yml", "grade"): BATCH,

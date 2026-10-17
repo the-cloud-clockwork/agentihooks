@@ -403,6 +403,31 @@ seen merged is not read again.
 `--must`, `--check` and `--judge` on `task add` store a proof contract (what must be true, how it is
 checked, who judges it) that the agent's prompt carries.
 
+### Shared areas in the opening prompt
+
+When the tick claims a task, it compares the task's territory with the territory of every other task in `claimed`
+or `pr` state. Two entries share an area when they are equal or one is a folder holding the other; surrounding
+spaces, a leading `./` and trailing slashes are ignored, and the narrower entry is the one named. Sharing an area
+never blocks a claim; it moves the task back within its rank. The launch order is queue rank (or the dispatcher's
+band), then tasks without an earlier failed launch, then resumed work, then tasks clear of every held territory, then
+the S exception, critical path and ledger order described under [Queue rank](#queue-rank). With dispatch active,
+the dispatcher's queue position replaces those last three within a band. An `urgent` task that shares an area still
+claims ahead of a clear `normal` task.
+
+The opening prompt then carries a header line once, followed by one line per running task that shares an area,
+after the task, contract, workspace and group lines. Several shared areas are joined with `and`:
+
+```text
+Running tasks share areas with yours. Coordinate with each claimant through the inbox (agentihooks msg send <claimant> "<text>") and merge dev only on a real conflict; where the repo has a merge queue, it retests your green head against the newest dev:
+Task t1, claimed by engineer@a1b2c3-0001, shares hooks.
+Task t2, claimed by engineer@a1b2c3-0002, shares docs/a.md and scripts/swarm/tick.py.
+```
+
+A task that shares nothing gets no such lines. The agent coordinates with each claimant through the inbox and
+merges `dev` into its branch only on a real conflict. The engineer skill adds one case the prompt line leaves out:
+where the repo has a merge queue, a green head is queued as it stands, because the merge group tests it on top of
+the newest `dev`, and the agent also merges `dev` when GitHub refuses the enqueue.
+
 ### Split tasks across pull requests
 
 A `code` or `ci` task can declare several plan line ranges for separate pull requests while keeping one task and its completion proof. Declare the split **before recording any pull request**. The ranges must be ordered, must not overlap and, when the task has `plan_lines`, must cover that range completely.
@@ -631,8 +656,10 @@ the longest chain of open tasks waiting on it. One exception: an S task that unb
 other dependencies are all done), or is the last task of its phase not yet done, goes ahead of the rest of its rank.
 Phase order is never used, and ledger order breaks the remaining ties. Capacity placement reads the same order. The
 tick then applies the usual
-rules: lane, phase, open dependencies, territories and live claims still decide whether a task is claimable, so an
-urgent task never skips a dependency that is not done and never takes a task or a territory another agent holds.
+rules: lane, phase, open dependencies and live claims still decide whether a task is claimable, so an
+urgent task never skips a dependency that is not done and never takes a task another agent holds. A territory
+another agent holds moves a task back within its rank without blocking it (see
+[Shared areas in the opening prompt](#shared-areas-in-the-opening-prompt)).
 Among open tasks whose territories overlap, the higher rank claims first. The rank is read from the ledger on every
 pass, so a change applies on the next tick.
 

@@ -49,6 +49,29 @@ def selected_mutants(filename: str, source: str, changed: set[int]) -> tuple[str
     return code, list(names)
 
 
+def selected_mutant_names(filename: str, source: str, changed: set[int]) -> list[str]:
+    import libcst as cst
+    from mutmut.mutation.file_mutation import group_by_top_level_node
+    from mutmut.mutation.trampoline_templates import mangle_function_name
+
+    module, selected = changed_mutations(filename, source, changed)
+    grouped = group_by_top_level_node(selected)
+    names = []
+    for statement in module.body:
+        if isinstance(statement, cst.FunctionDef):
+            functions = [(statement, None)]
+        elif isinstance(statement, cst.ClassDef) and isinstance(statement.body, cst.IndentedBlock):
+            functions = [
+                (method, statement.name.value) for method in statement.body.body if isinstance(method, cst.FunctionDef)
+            ]
+        else:
+            continue
+        for function, class_name in functions:
+            name = mangle_function_name(name=function.name.value, class_name=class_name)
+            names.extend(f"{name}__mutmut_{index + 1}" for index in range(len(grouped.get(function, ()))))
+    return names
+
+
 def keep_selected_tests(stats: dict[str, set[str]], tests_by_prefix: dict[str, set[str]]) -> set[str]:
     kept = set()
     for function, tests in stats.items():

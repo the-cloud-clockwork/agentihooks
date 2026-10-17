@@ -748,6 +748,30 @@ def refuse_unset_quote(args):
         sys.exit(f"task {args.action} takes no --quote: run task set <id> rank=<rank> --quote <his words> after it")
 
 
+def _add_task(args, title, fields):
+    if args.scaffold:
+        task = {"id": args.id, "title": title, "description": args.description, "phase": args.phase, **fields}
+        doc = call(args.slug) if args.kind == "plan" else None
+        fields["workspace"] = str(ledger_workspace.folder(args.slug, args.id))
+    send(
+        args,
+        "task_add",
+        task=args.id,
+        title=title,
+        lane=args.lane,
+        phase=args.phase,
+        description=args.description,
+        **fields,
+    )
+    if args.scaffold:
+        try:
+            ledger_workspace.scaffold(args.slug, task, doc)
+        except OSError as exc:
+            print(f"task {args.id} was added; its work folder was not created: {exc}", file=sys.stderr)
+            return {"workspace_error": str(exc)}
+    return {}
+
+
 def cmd_task(args):
     refuse_unset_quote(args)
     if args.action == "add":
@@ -780,21 +804,7 @@ def cmd_task(args):
             ("plan_slice", args.plan_slice),
         )
         lists.update((key, value) for key, value in options if value)
-        if args.scaffold:
-            task = {"id": args.id, "title": title, "description": args.description, "phase": args.phase, **lists}
-            doc = call(args.slug) if args.kind == "plan" else None
-            lists["workspace"] = str(ledger_workspace.scaffold(args.slug, task, doc))
-        send(
-            args,
-            "task_add",
-            task=args.id,
-            title=title,
-            lane=args.lane,
-            phase=args.phase,
-            description=args.description,
-            **lists,
-        )
-        print(json.dumps({"task": args.id, "added": title}))
+        print(json.dumps({"task": args.id, "added": title, **_add_task(args, title, lists)}))
         return
     if args.action in TASK_LISTS:
         kind, field, shown = TASK_LISTS[args.action]

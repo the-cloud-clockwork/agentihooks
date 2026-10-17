@@ -196,6 +196,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/ledger_load/paired.py",
         "tests/ledger_load/streams.py",
         "tests/refresh_durations.py",
+        "tests/reused_coverage.py",
         "tests/shard_budget.py",
         "tests/shard_check.py",
         "scripts/ci_select.py",

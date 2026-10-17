@@ -1,6 +1,7 @@
 import shlex
 import sys
 from dataclasses import replace
+from unittest.mock import Mock
 
 import pytest
 
@@ -303,13 +304,15 @@ def test_the_local_terminal_opens_the_viewer_in_the_swarm_workspace(monkeypatch,
     store = SimpleNamespace(
         agents=lambda asked: _agents() if asked == slug else [],
         config=lambda asked: config if asked == slug else None,
+        redis=Mock(),
+        key=lambda *parts: ":".join(parts),
     )
     monkeypatch.setattr("scripts.swarm.live_binding.transport", lambda found, seen: RECORD if found is store else None)
     opened = []
     monkeypatch.setattr(
         herdr_host,
         "open_command",
-        lambda *call: opened.append(call) or herdr_host.Placement("w1", "w1:t1", "w1:p1"),
+        lambda *call: opened.append(call) or herdr_host.Placement("w1", "w1:t1", "w1:p1", "term-1"),
     )
     environ = {"HERDR_SOCKET": "/run/herdr.sock"}
     assert attach.local_terminal(store, slug, "exe-1", environ) == {
@@ -326,6 +329,7 @@ def test_the_local_terminal_opens_the_viewer_in_the_swarm_workspace(monkeypatch,
             environ,
         )
     ]
+    store.redis.hset.assert_called_once_with(f"{slug}:codex-viewers", "w1:p1", '["exe-1", "term-1"]')
 
 
 def test_the_local_terminal_leaves_other_executions_to_the_worker_terminal(monkeypatch):

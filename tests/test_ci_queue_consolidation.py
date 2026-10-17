@@ -53,6 +53,16 @@ def test_worker_health_shares_startup_runner_and_preserves_independent_proofs():
     assert worker["worker-image-compare"]["needs"] == ["worker-image"]
 
 
+def test_worker_health_reuses_the_image_the_startup_proof_kept():
+    image = jobs("swarm-node-smoke.yml")["worker-image"]
+    proven = image["env"]["WORKER_PROVEN_IMAGE"]
+    assert "github.run_id" in proven and "github.run_attempt" in proven
+    smoke = next(step for step in image["steps"] if "docker/swarm-node/smoke.sh" in step.get("run", ""))
+    assert smoke["env"]["WORKER_KEEP_IMAGE"] == "${{ matrix.proof == 'startup' && env.WORKER_PROVEN_IMAGE || '' }}"
+    health = next(step for step in image["steps"] if "run_health_proof.sh" in step.get("run", ""))
+    assert health["env"]["WORKER_IMAGE"] == "${{ env.WORKER_PROVEN_IMAGE }}"
+
+
 def test_worker_health_obtains_the_locked_base_before_building():
     steps = jobs("swarm-node-smoke.yml")["worker-image"]["steps"]
     pull = next(index for index, step in enumerate(steps) if step.get("run") == "bash docker/swarm-node/pull-base.sh")
