@@ -151,6 +151,7 @@ def test_main_reads_the_run_and_writes_the_decision(monkeypatch, tmp_path, capsy
     }
     assert output.read_text() == "requeue=true\npull=3259\n"
     assert ("graphql", "-f", f"query={PULL_QUERY}") in asked
+    assert ("repos/o/r/actions/jobs/1/logs", "--allow-escape-sequences") in asked
 
 
 def test_a_signature_quoted_in_test_output_is_not_a_runner_loss(monkeypatch):
@@ -161,7 +162,7 @@ def test_a_signature_quoted_in_test_output_is_not_a_runner_loss(monkeypatch):
         "repos/o/r/check-runs/1/annotations": "[]",
         "repos/o/r/actions/jobs/1/logs": quoted,
     }
-    monkeypatch.setattr(ci_queue_retry, "_api", lambda path: pages[path])
+    monkeypatch.setattr(ci_queue_retry, "_api", lambda path, *flags: pages[path])
     failed = ci_queue_retry.failed_jobs("o/r", 9)
     assert failed == [{"name": "unit (3.11, 2)", "text": "##[error]Process completed with exit code 1."}]
     assert not ci_queue_retry.decide(RUN, failed, WORKFLOW)[0]
@@ -175,7 +176,7 @@ def test_jobs_beyond_the_listed_page_refuse_the_requeue(monkeypatch, total, extr
         "repos/o/r/check-runs/1/annotations": json.dumps([{"message": "a"}, {"message": "b"}]),
         "repos/o/r/actions/jobs/1/logs": SHUTDOWN,
     }
-    monkeypatch.setattr(ci_queue_retry, "_api", lambda path: pages[path])
+    monkeypatch.setattr(ci_queue_retry, "_api", lambda path, *flags: pages[path])
     failed = ci_queue_retry.failed_jobs("o/r", 9)
     errors = [line for line in SHUTDOWN.splitlines() if "##[error]" in line]
     assert failed == [{"name": "unit (3.11, 2)", "text": "\n".join(["a", "b", *errors])}, *extra]
@@ -313,7 +314,7 @@ def test_a_lost_shard_outside_a_queue_branch_is_not_requeued(monkeypatch, tmp_pa
         "repos/o/r/check-runs/1/annotations": "[]",
         "repos/o/r/actions/jobs/1/logs": SHUTDOWN,
     }
-    monkeypatch.setattr(ci_queue_retry, "_api", lambda path: pages[path])
+    monkeypatch.setattr(ci_queue_retry, "_api", lambda path, *flags: pages[path])
     monkeypatch.chdir(ROOT)
     output = tmp_path / "output"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
