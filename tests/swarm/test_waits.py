@@ -1820,7 +1820,7 @@ def test_a_neutral_required_check_beside_a_passed_gate_ends_the_wait_green(tick)
     from scripts.swarm.ledger_events import GATE, pull_request
 
     tick.hold("checks", URL)
-    checks = [{"name": GATE, "conclusion": "SUCCESS"}, {"name": "unit", "conclusion": "NEUTRAL"}]
+    checks = [{"name": GATE, "conclusion": "SUCCESS"}, {"name": "unit", "conclusion": "NEUTRAL", "isRequired": True}]
     tick.pulls[URL] = pull_request({"state": "OPEN", "headRefOid": "first", "gated": True, "statusCheckRollup": checks})
     assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
 

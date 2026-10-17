@@ -225,8 +225,9 @@ def _unpassed_gate(gated, checks, results, running):
 
 def _resolved(gated, checks, results, running):
     if gated:
+        required = [result for check, result in zip(checks, results) if check.get("isRequired")]
         return any(result in FINAL_RED | {"TIMED_OUT"} for result in results) or (
-            "SUCCESS" in _gate(checks, results) and all(result in PASSED | {"NEUTRAL"} for result in results)
+            "SUCCESS" in _gate(checks, results) and all(result in PASSED | {"NEUTRAL"} for result in required)
         )
     if not running and any(result in FINAL_RED for result in results):
         return True
