@@ -71,7 +71,7 @@ def test_remote_client_reports_the_refusal_without_exposing_credentials(owned):
     }
     with pytest.raises(SystemExit) as refused:
         proof_ledger.control(owned.slug, {"control": "cancel"}, environ)
-    assert refused.value.code == "proof control refused: 403 Proof controls permit only pause and drain"
+    assert refused.value.code == "proof control refused: 403 Proof controls permit only pause, drain, set and start"
     assert owned.parent["X-Ledger-Token"] not in refused.value.code
 
 

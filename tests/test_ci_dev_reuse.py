@@ -332,3 +332,10 @@ def test_cli_without_an_output_file_reports_the_source(tmp_path, monkeypatch, ca
     monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
     assert ci_dev_reuse.main(["--head", HEAD, "--repository", REPOSITORY, "--evidence", str(tmp_path)]) == 0
     assert capsys.readouterr().out == f"Reusing unit artifacts from passed queue evidence on {HEAD}: run 123\n"
+
+
+def test_a_queue_run_that_reused_tests_never_feeds_a_dev_push(tmp_path):
+    _, _, folder = evidence(tmp_path)
+    with (folder / "artifacts.jsonl").open("a") as items:
+        items.write(json.dumps({"name": "reused-tests-3.11", "expired": False}) + "\n")
+    assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) is None

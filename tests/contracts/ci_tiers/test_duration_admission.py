@@ -11,6 +11,34 @@ pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[3]
 
 
+def legacy(workflows):
+    base = copy.deepcopy(workflows)
+    jobs = base["test.yml"]["jobs"]
+    if "durations" in jobs:
+        return base
+    selection = jobs["select"]
+    end = next(index + 1 for index, step in enumerate(selection["steps"]) if step.get("id") == "republished")
+    durations = copy.deepcopy(selection)
+    durations["steps"] = durations["steps"][:end]
+    durations["outputs"] = {name: selection["outputs"].pop(name) for name in ("key", "queued", "base", "source")}
+    durations["timeout-minutes"] = (
+        "${{ (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch') && 4 || 2 }}"
+    )
+    selection["steps"] = selection["steps"][end:]
+    selection["if"] = selection["if"].replace("!cancelled()", "!cancelled() && github.event_name != 'merge_group'")
+    jobs["durations"] = durations
+    for job in jobs.values():
+        encoded = json.dumps(job)
+        for name in durations["outputs"]:
+            encoded = encoded.replace(f"needs.select.outputs.{name}", f"needs.durations.outputs.{name}")
+        if encoded != json.dumps(job):
+            job.update(json.loads(encoded))
+            job["needs"] = list(dict.fromkeys(job["needs"] + ["durations"]))
+    jobs["gate-required"]["needs"].append("durations")
+    jobs["gate-required"]["steps"] = ci_reuse.gate_steps(queue_tier=True, promotion=True)
+    return base
+
+
 def combined(base, promotion=True):
     head = copy.deepcopy(base)
     jobs = head["test.yml"]["jobs"]
@@ -39,10 +67,15 @@ def grade(base, head):
     return gate_protected.grade(base, config, head, config, date(2026, 10, 16), policy)
 
 
+def test_protected_grading_accepts_separate_duration_admission():
+    base = legacy(ci_wiring.load(ROOT))
+    assert grade(base, copy.deepcopy(base)) == []
+
+
 @pytest.mark.parametrize("already_combined", [False, True])
 @pytest.mark.parametrize("promotion", [False, True])
 def test_protected_grading_accepts_combined_duration_admission(already_combined, promotion):
-    base = ci_wiring.load(ROOT)
+    base = legacy(ci_wiring.load(ROOT))
     head = combined(base, promotion)
     if already_combined:
         base = copy.deepcopy(head)
@@ -60,14 +93,14 @@ def test_protected_grading_accepts_combined_duration_admission(already_combined,
     ],
 )
 def test_combined_admission_keeps_its_protected_execution_context(field, value):
-    base = ci_wiring.load(ROOT)
+    base = legacy(ci_wiring.load(ROOT))
     head = combined(base)
     head["test.yml"]["jobs"]["select"][field] = value
     assert grade(base, head)
 
 
 def test_combined_admission_keeps_provenance_before_head_execution():
-    base = ci_wiring.load(ROOT)
+    base = legacy(ci_wiring.load(ROOT))
     head = combined(base)
     head["test.yml"]["jobs"]["select"]["steps"].insert(0, {"run": "echo forged"})
     problems = grade(base, head)
@@ -76,14 +109,14 @@ def test_combined_admission_keeps_provenance_before_head_execution():
 
 
 def test_combined_admission_cannot_retire_another_required_gate():
-    base = ci_wiring.load(ROOT)
+    base = legacy(ci_wiring.load(ROOT))
     head = combined(base)
     head["test.yml"]["jobs"]["gate-required"]["needs"].remove("lint")
     assert any("base need lint" in problem for problem in grade(base, head))
 
 
 def test_combined_admission_requires_an_existing_selection_job():
-    base = ci_wiring.load(ROOT)
+    base = legacy(ci_wiring.load(ROOT))
     head = combined(base)
     del base["test.yml"]["jobs"]["select"]
     assert any("existing selection" in problem for problem in grade(base, head))
@@ -91,7 +124,7 @@ def test_combined_admission_requires_an_existing_selection_job():
 
 @pytest.mark.parametrize("missing", ["base", "head", "both"])
 def test_missing_all_provenance_producers_is_reported(missing):
-    base = ci_wiring.load(ROOT)
+    base = legacy(ci_wiring.load(ROOT))
     head = combined(base)
     for workflows in [base] if missing == "base" else [head] if missing == "head" else [base, head]:
         workflows["test.yml"]["jobs"].pop("durations", None)
@@ -100,21 +133,21 @@ def test_missing_all_provenance_producers_is_reported(missing):
 
 
 def test_missing_base_duration_outputs_is_reported():
-    base = ci_wiring.load(ROOT)
+    base = legacy(ci_wiring.load(ROOT))
     head = combined(base)
     del base["test.yml"]["jobs"]["durations"]["outputs"]
     assert any("provenance context outputs" in problem for problem in grade(base, head))
 
 
 def test_separate_duration_producer_cannot_be_unhooked_from_the_gate():
-    base = ci_wiring.load(ROOT)
+    base = legacy(ci_wiring.load(ROOT))
     head = copy.deepcopy(base)
     head["test.yml"]["jobs"]["gate-required"]["needs"].remove("durations")
     assert any("base need durations" in problem for problem in grade(base, head))
 
 
 def test_missing_reuse_cannot_retire_the_duration_dependency():
-    base = ci_wiring.load(ROOT)
+    base = legacy(ci_wiring.load(ROOT))
     head = combined(base)
     del head["test.yml"]["jobs"]["reuse"]
     problems = grade(base, head)

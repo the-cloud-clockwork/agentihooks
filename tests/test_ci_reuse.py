@@ -260,12 +260,19 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
     workflow = yaml.safe_load((root / ".github/workflows/test.yml").read_text())
     policy = json.loads((root / ".github/workflows/trusted-actors.json").read_text())
     steps = workflow["jobs"]["gate-required"]["steps"]
-    assert steps in (
-        ci_reuse.gate_steps(selected=True),
-        ci_reuse.gate_steps(),
-        ci_reuse.gate_steps(queue_tier=True),
-        ci_reuse.gate_steps(queue_tier=True, promotion=True),
-    )
+    if "durations" in workflow["jobs"]:
+        expected = (
+            ci_reuse.gate_steps(selected=True),
+            ci_reuse.gate_steps(),
+            ci_reuse.gate_steps(queue_tier=True),
+            ci_reuse.gate_steps(queue_tier=True, promotion=True),
+        )
+    else:
+        expected = (
+            ci_reuse.gate_steps(queue_tier=True, consolidated=True),
+            ci_reuse.gate_steps(queue_tier=True, promotion=True, consolidated=True),
+        )
+    assert steps in expected
 
     assert workflow["jobs"]["gate-required"]["runs-on"] in gate_protected.runners(policy)
     assert workflow["jobs"]["reuse"] in gate_protected.reuse_jobs(policy)
@@ -944,6 +951,14 @@ def _gate(steps, needs, event="merge_group"):
     [step] = steps
     env = dict(os.environ, NEEDS=json.dumps(needs), MUTATION="false", KIND="false", EVENT=event, REUSED="false")
     return subprocess.run(["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True)
+
+
+def test_queue_gate_keeps_legacy_duration_admission_by_default():
+    from scripts import ci_reuse
+
+    implicit = ci_reuse.gate_steps(queue_tier=True)
+    assert implicit == ci_reuse.gate_steps(queue_tier=True, consolidated=False)
+    assert implicit != ci_reuse.gate_steps(queue_tier=True, consolidated=True)
 
 
 @pytest.mark.parametrize("event", ["merge_group", "pull_request"])
