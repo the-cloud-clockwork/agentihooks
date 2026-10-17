@@ -58,5 +58,9 @@ jobs:
         if: steps.classify.outputs.requeue == 'true' && vars.QUEUE_RETRY_ENFORCE != 'false'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          PULL: ${{ steps.classify.outputs.pull }}
-        run: gh pr merge "$PULL" --squash --auto --repo "$GITHUB_REPOSITORY"
+          NODE: ${{ steps.classify.outputs.node }}
+          HEAD: ${{ steps.classify.outputs.head }}
+        run: >-
+          gh api graphql
+          -f query='mutation($pull: ID!, $head: GitObjectID!) { enqueuePullRequest(input: {pullRequestId: $pull, expectedHeadOid: $head}) { mergeQueueEntry { position } } }'
+          -f pull="$NODE" -f head="$HEAD"
