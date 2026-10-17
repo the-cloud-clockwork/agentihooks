@@ -132,17 +132,18 @@ def test_the_tick_ends_a_clean_preflight_once(tick, preflight):  # noqa: F811
     ]
 
 
-@pytest.fixture
-def open_pr(preflight):
+@pytest.fixture(params=["pull-request", "plan"])
+def open_pr(preflight, request):
     preflight.missing = True
     preflight.jobs = [
         {
-            "name": "pull-request",
+            "name": request.param,
             "conclusion": "success",
             "steps": [{"name": "Record the revisions the report grades", "conclusion": "skipped"}],
         },
-        {"name": "plan", "conclusion": "skipped"},
     ]
+    if request.param == "pull-request":
+        preflight.jobs.append({"name": "plan", "conclusion": "skipped"})
     preflight.pr_runs = [
         {"html_url": "wrong", "head_sha": "old", "pull_requests": [{"base": {"ref": "dev"}}]},
         {"html_url": "wrong", "head_sha": "first", "pull_requests": [{"base": {"ref": "main"}}]},

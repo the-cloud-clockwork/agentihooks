@@ -43,7 +43,6 @@ MOVED = {
     ("mutation-preflight.yml", "mutation"): LIGHT,
     ("mutation-preflight.yml", "mutation-shard"): BATCH,
     ("mutation-preflight.yml", "plan"): LIGHT,
-    ("mutation-preflight.yml", "pull-request"): LIGHT,
     ("mutation-preflight.yml", "refine"): LIGHT,
     ("mutation-replay.yml", "plan"): LIGHT,
     ("mutation-replay.yml", "grade"): BATCH,
