@@ -666,6 +666,7 @@ def test_a_sliver_of_startup_budget_still_runs_the_workspace_command(supervisor,
     assert run.call_args.kwargs["timeout"] == 0.25
 
 
+@pytest.mark.wall_clock
 def test_a_hanging_workspace_command_still_fails_at_the_startup_deadline(supervisor):
     supervisor.launch = replace(
         supervisor.launch, herdr=(sys.executable, "-c", "import time; time.sleep(60)", "server")

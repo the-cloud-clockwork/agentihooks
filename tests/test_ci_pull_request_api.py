@@ -144,7 +144,6 @@ def test_no_script_a_step_runs_calls_the_api():
         ".github/coverage/combine.sh",
         ".github/coverage/proxy.py",
         ".github/coverage/sonar-retry.sh",
-        "deploy/helm/agentihooks-swarm/ci/kind-due.sh",
         "deploy/helm/agentihooks-swarm/ci/kind-smoke.sh",
         "docker/swarm-node/base-copy.sh",
         "docker/swarm-node/pull-base.sh",
@@ -193,6 +192,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/js_lcov.py",
         "tests/kind_request.py",
         "tests/ledger_load/gate.py",
+        "tests/ledger_load/paired.py",
         "tests/ledger_load/streams.py",
         "tests/refresh_durations.py",
         "tests/shard_budget.py",
@@ -208,6 +208,8 @@ def test_no_script_a_step_runs_calls_the_api():
     ]
     if (ROOT / "scripts/ci_runner_trust.py").exists():
         expected.extend(("scripts/ci_runner_trust.py", "scripts/gate_protected.py"))
+    if (ROOT / "scripts/ci_wall_clock.py").exists():
+        expected.append("scripts/ci_wall_clock.py")
     assert sorted(str(path.relative_to(ROOT)) for path in calls) == sorted(expected)
     assert {path: count for path, count in calls.items() if count} == {}
 

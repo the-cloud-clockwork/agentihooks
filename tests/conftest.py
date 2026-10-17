@@ -55,9 +55,34 @@ SHARD_FILES = pytest.StashKey[frozenset[str]]()
 NODE_SHARDS = pytest.StashKey[dict[str, int]]()
 FILE_SHARDS = pytest.StashKey[dict[str, list[int]]]()
 WARM_PIDS = pytest.StashKey[list[int]]()
+REUSED = pytest.StashKey[tuple[frozenset[str], frozenset[str]]]()
+REUSED_SOURCE = pytest.StashKey[str]()
+
+
+def _reused(config) -> tuple[frozenset[str], frozenset[str]]:
+    if REUSED not in config.stash:
+        # Nested pytest runs that tests start must collect their own targets, so the plan never stays in the environment.
+        source = getattr(config, "workerinput", {}).get("ci_reused") or os.environ.pop("CI_REUSED", "")
+        config.stash[REUSED_SOURCE] = source
+        path = Path(source or os.devnull)
+        plan = json.loads(path.read_text()) if path.is_file() else {}
+        config.stash[REUSED] = (frozenset(plan.get("tests", ())), frozenset(plan.get("files", ())))
+    return config.stash[REUSED]
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_configure_node(node):
+    node.workerinput["ci_reused"] = node.config.stash[REUSED_SOURCE]
 
 
 def pytest_collection_modifyitems(config, items):
+    reused = _reused(config)[0]
+    if reused:
+        kept = [item for item in items if re.sub(r"@[^\[\]]*$", "", item.nodeid) not in reused]
+        if len(kept) != len(items):
+            ids = {id(item) for item in kept}
+            config.hook.pytest_deselected(items=[item for item in items if id(item) not in ids])
+            items[:] = kept
     if config.getoption("shard") and NODE_SHARDS in config.stash:
         index, shards = (int(part) for part in config.getoption("shard").split("/"))
         selected = []
@@ -84,10 +109,15 @@ def _shard_files(config) -> frozenset[str]:
     if SHARD_FILES not in config.stash:
         index, shards = (int(part) for part in config.getoption("shard").split("/"))
         durations = json.loads((config.rootpath / ".test_durations").read_text())
-        discovered = discover_test_files(config.rootpath)
+        reused, skipped = _reused(config)
+        discovered = [path for path in discover_test_files(config.rootpath) if path not in skipped]
         pinned = FIRST_SHARD_FILES.intersection(discovered)
         files = [path for path in discovered if path not in pinned]
-        measured = {node: seconds for node, seconds in durations.items() if node.split("::", 1)[0] in files}
+        measured = {
+            node: seconds
+            for node, seconds in durations.items()
+            if node.split("::", 1)[0] in files and re.sub(r"@[^\[\]]*$", "", node) not in reused
+        }
         sizes = source_sizes(config.rootpath, files)
         parts = assign_nodes(measured, shards, grouped_files(config.rootpath, files), 4, sizes=sizes)
         config.stash[NODE_SHARDS] = {node: shard for shard, part in enumerate(parts) for node in part}
@@ -103,6 +133,7 @@ def _shard_files(config) -> frozenset[str]:
 
 
 def pytest_configure(config):
+    _reused(config)
     config.args.sort(key=lambda arg: (Path(arg.split("::", 1)[0]).parent.parts, arg))
     workers = getattr(config.option, "numprocesses", None)
     if not config.getoption("shard") or not workers or hasattr(config, "workerinput") or not hasattr(os, "fork"):
@@ -117,6 +148,11 @@ def pytest_configure(config):
 def pytest_unconfigure(config):
     for pid in config.stash.get(WARM_PIDS, []):
         os.waitpid(pid, 0)
+
+
+def pytest_sessionfinish(session, exitstatus):
+    if exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED and _reused(session.config)[0]:
+        session.exitstatus = pytest.ExitCode.OK
 
 
 def pytest_ignore_collect(collection_path, config):

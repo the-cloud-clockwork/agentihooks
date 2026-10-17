@@ -115,6 +115,7 @@ def test_failed_browser_recovery_is_red_after_exactly_two_attempts(tmp_path, mon
     assert result.stdout.count("::warning title=Retried browser install::") == 1
 
 
+@pytest.mark.wall_clock
 def test_a_stalled_download_is_killed_at_its_attempt_timeout_and_retried_green(tmp_path, monkeypatch):
     started = time.monotonic()
     result, calls = _setup(tmp_path, monkeypatch, cached=False, ready=False, stall_once=True, attempt_seconds=5)

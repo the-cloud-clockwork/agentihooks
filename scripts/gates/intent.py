@@ -16,7 +16,7 @@ from typing import Callable
 
 from hooks.classifier import ClassifierError, code_rules, decide, definitions, runner
 from hooks.classifier.questions import MAX_QUESTIONS
-from scripts.gates import intent_history, log
+from scripts.gates import intent_history, lift, log
 from scripts.gates.base import Decision, Who
 from scripts.gates.identity import program_index, simple_commands
 from scripts.gates.verdicts import Verdicts
@@ -44,6 +44,9 @@ REPO_FLAGS = ("-R", "--repo")
 VALUE_FLAGS = ("-A", "--author-email", "-b", "--body", "-F", "--body-file", "--match-head-commit", "-t", "--subject")
 SHORT = re.compile(r"(?<![\w./-])([A-Za-z0-9-]+)/([\w.-]+)#(\d+)\b")
 NAMED_LIMIT = 3
+NON_PRODUCTION = ("tests/", "docs/")
+COMPARED = "[.status, [(.files // [])[].filename]]"
+COMPARE_FILES = 300
 DIFF_CHARS, BODY_CHARS = 6000, 1000
 SECTION = re.compile(f"{re.escape(START)}.*?{re.escape(END)}", re.S)
 TESTS_FIRST = f"{PURPOSE}-tests-first"
@@ -182,6 +185,20 @@ def pr_head(url: str, run=subprocess.run) -> str | None:
     return _pr_field(url, "head.sha", run)
 
 
+def production_unchanged(url: str, before: str, after: str, run=subprocess.run) -> bool:
+    found = PULL.search(url)
+    if not found:
+        return False
+    owner, repo, _ = found.groups()
+    compare = ["gh", "api", f"repos/{owner}/{repo}/compare/{before}...{after}", "--jq", COMPARED]
+    try:
+        result = _gh(compare, run)
+        status, files = json.loads(result.stdout) if result.returncode == 0 else (None, [])
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return False
+    return status == "ahead" and len(files) < COMPARE_FILES and all(path.startswith(NON_PRODUCTION) for path in files)
+
+
 def text_key(title: str, body: str | None) -> str:
     return hashlib.sha256(json.dumps([title, body or ""]).encode()).hexdigest()
 
@@ -312,7 +329,26 @@ def _plan_chunk(doc, task):
         text = plan_read.exact(doc, task)
     except (ValueError, OSError):
         text = None
+    if isinstance(text, str) and _foreign_slice(doc, task, text):
+        return {}
     return {"plan_lines": task["plan_lines"], "plan_chunk": text}
+
+
+def _foreign_slice(doc, task, text):
+    name = task.get("plan_slice")
+    if not name:
+        return False
+    named = re.escape(name)
+    marked = rf"^\s*(?:<!--\s*slice:\s*{named}\s*-->|#+ .*(?<![\w.-]){named}(?![\w.-]).*)$"
+    if not re.search(marked, text, re.M):
+        return True
+    if name == task.get("id"):
+        return False
+    return any(
+        other.get("id") == name or (other.get("plan_slice") == name and other.get("phase") == task.get("phase"))
+        for other in doc.get("tasks", ())
+        if other.get("id") != task.get("id")
+    )
 
 
 def _parent(doc, task):
@@ -326,7 +362,17 @@ def _parent(doc, task):
     }
 
 
+def _task_contract(doc, task):
+    phase = _phase(doc, task)
+    if task.get("split") and (
+        task.get("follow_up") or not (task.get("plan_url") or phase.get("plan_url") or phase.get("plan_ref"))
+    ):
+        return {**task, "split": [], "plan_lines": ""}
+    return task
+
+
 def state_of(doc, task, pr, proof_chars=PROOF_CHARS):
+    task = _task_contract(doc, task)
     return {
         **_parent(doc, task),
         "pull_request_title": pr["title"],
@@ -342,6 +388,7 @@ def state_of(doc, task, pr, proof_chars=PROOF_CHARS):
 
 
 def plan_state(doc, task, kept):
+    task = _task_contract(doc, task)
     return {
         "stage": "plan",
         **_parent(doc, task),
@@ -749,6 +796,8 @@ class Check:
             and not self._named_moved(previous)
         ):
             return _Judgment(pr, previous, None, None)
+        if previous and previous.get("inputs") == inputs and lift.head_lifted(self.slug, task["id"], NAME, self.home):
+            return _Judgment(pr, previous, None, None)
         pr = self._with_named(task, pr)
         state = intent_history.prepare(state_of(doc, task, pr))
         if state.get("task_part") == "tests-first":
@@ -802,6 +851,7 @@ class Check:
             "inputs": judgment.inputs,
             **_pending(pr),
             **_split_fields(task, task["pr_url"]),
+            "persisted_at": int(time.time() * 1000),
         }
         record = verdicts.write(task["id"], verdict, reason, self.now_ms, **fields)
         self._save_pull(task, {**record, "head": head, "url": task["pr_url"]})
@@ -851,6 +901,7 @@ class Check:
             coach_rounds=previous["coach_rounds"],
             head=previous["head"],
             phase=task.get("phase"),
+            persisted_at=previous.get("persisted_at"),
             **{"url": task["pr_url"], **_split_fields(task, task["pr_url"])},
         )
 

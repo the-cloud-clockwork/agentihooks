@@ -591,8 +591,9 @@ def _describe(slug, event, tasks):
     name, _, item = target.partition("/")
     if kind == "added" and name == "followups":
         return (
-            f"{by} added a follow-up on ledger {slug}: {event.get('text', '')}\n"
-            "Decide it: turn it into a task, close it with a status, or flag it for the operator."
+            f"{by} added a follow-up {item} on ledger {slug}: {event.get('text', '')}\n"
+            "Decide it: turn it into a task, close it with a status, or flag it for the operator.\n"
+            f"Close it: agentihooks ledger --slug {slug} followup done {item}"
         )
     if kind == "added" and name == "questions":
         return f"{by} asked on ledger {slug}: {event.get('text', '')}\nAnswer it, or raise it to the operator."
@@ -619,8 +620,10 @@ def _followups(mail, doc, events, ledger, now_ms):
         age = now_ms - event["at"]
         if age >= FOLLOWUP_RAISE_MS:
             text = (
-                f"A follow-up on ledger {mail.slug} is still open fifteen minutes after {event['by']} added it: "
-                f"{followup['text']}\nDecide it now, or it goes to the operator's Priorities."
+                f"A follow-up {followup['id']} on ledger {mail.slug} is still open fifteen minutes "
+                f"after {event['by']} added it: {followup['text']}\n"
+                "Decide it now, or it goes to the operator's Priorities.\n"
+                f"Close it: agentihooks ledger --slug {mail.slug} followup done {followup['id']}"
             )
             sent += mail.send(f"{target}:raised", mail.owner(target), text, ref=f"{mail.slug}:event:{target}")
         if age >= FOLLOWUP_OPERATOR_MS:

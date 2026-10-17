@@ -52,7 +52,8 @@ def test_comment_images_are_small_thumbnails_that_keep_ratio_and_never_grow(imag
         """() => {
           const images = [...document.querySelectorAll("#item-phases-p1 .attach-row img")];
           return images.length === 2 && images.every(image =>
-            image.complete && image.naturalWidth > 0 && image.naturalHeight > 0);
+            image.complete && image.naturalWidth > 0 && image.naturalHeight > 0 &&
+            image.getBoundingClientRect().width > 0);
         }"""
     )
     large = tab.locator("#item-phases-p1 .attach-row img").nth(0).bounding_box()

@@ -11,7 +11,7 @@ from scripts.swarm.store import PREFIX, RedisStore, SwarmConfig
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
 RUNS = "repos/{owner}/{repo}/actions/workflows/test.yml/runs?branch=dev&event=push&status=completed&per_page=20"
-JOBS_JQ = ".jobs[] | {name, conclusion} | @json"
+JOBS_JQ = ".jobs[] | {name, conclusion, check_run_url, steps} | @json"
 SHA = "c0ffee" + "0" * 34
 RED = {"id": 900, "conclusion": "failure", "head_sha": SHA, "html_url": "https://github.com/o/r/actions/runs/900"}
 GREEN = {
@@ -86,6 +86,106 @@ def refresh(store, ledger, run, now=NOW):
 
 def filed(store):
     return store.redis.hgetall(promotion_watch.key(SLUG, "jobs"))
+
+
+SUPERSEDED = "Dev advanced before Sonar analysis; this unscanned revision cannot be promoted."
+
+
+def sonar_run(message, extra_jobs=(), extra_steps=()):
+    sonar = {
+        "name": "sonar",
+        "conclusion": "failure",
+        "check_run_url": "https://api.github.com/repos/o/r/check-runs/123",
+        "steps": [
+            {"name": "Check dev still points at this commit", "conclusion": "failure"},
+            {"name": "SonarQube scan", "conclusion": "skipped"},
+            *extra_steps,
+        ],
+    }
+    found = [sonar, {"name": "Gate — Required", "conclusion": "failure"}, *extra_jobs]
+
+    def run(argv, **kwargs):
+        assert kwargs["cwd"] == "/repo"
+        if "/annotations" in argv[2]:
+            assert argv == [
+                "gh",
+                "api",
+                "https://api.github.com/repos/o/r/check-runs/123/annotations?per_page=100",
+                "--paginate",
+                "--jq",
+                ".[] | {annotation_level, message} | @json",
+            ]
+            body = [
+                {"annotation_level": "warning", "message": "Node.js 20 actions are deprecated."},
+                {"annotation_level": "failure", "message": "Process completed with exit code 1."},
+                {"annotation_level": "failure", "message": message},
+            ]
+        elif "/jobs" in argv[2]:
+            assert argv == [
+                "gh",
+                "api",
+                "repos/{owner}/{repo}/actions/runs/900/jobs?per_page=100",
+                "--paginate",
+                "--jq",
+                JOBS_JQ,
+            ]
+            body = found
+        else:
+            body = [RED]
+        return subprocess.CompletedProcess(argv, 0, "\n".join(json.dumps(item) for item in body), "")
+
+    return run
+
+
+def test_a_superseded_sonar_run_is_reported_without_fixers_or_alerts(store):
+    ledger = Ledger()
+    actions = refresh(store, ledger, sonar_run(SUPERSEDED))
+    assert actions == ["dev push run 900 was superseded before Sonar analysis"]
+    assert ledger.added == []
+    assert ledger.raised == []
+    assert ledger.updates == []
+    assert ledger.closed == []
+    assert filed(store) == {}
+    assert store.redis.get(promotion_watch.key(SLUG, "seen")) == "900"
+
+
+@pytest.mark.parametrize(
+    "message",
+    ["fatal: unable to access origin", "", SUPERSEDED + " extra error", "Process completed with exit code 1."],
+)
+def test_a_real_sonar_failure_still_files_a_fixer(store, message):
+    ledger = Ledger()
+    actions = refresh(store, ledger, sonar_run(message))
+    assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: sonar"]
+    assert len(ledger.raised) == 1
+    assert actions[-1] == "raised the promotion alert for dev push run 900"
+    assert filed(store) == {"promo-900-0": "sonar"}
+
+
+def test_a_superseded_run_with_another_failed_job_still_files_real_fixers(store):
+    ledger = Ledger()
+    refresh(store, ledger, sonar_run(SUPERSEDED, [{"name": "coverage-ratchet", "conclusion": "failure"}]))
+    assert [fields["title"] for _, fields, _ in ledger.added] == [
+        "Promotion red: coverage-ratchet",
+        "Promotion red: sonar",
+    ]
+    assert len(ledger.raised) == 1
+
+
+def test_another_failed_sonar_step_is_not_superseded(store):
+    ledger = Ledger()
+    refresh(
+        store,
+        ledger,
+        sonar_run(
+            SUPERSEDED,
+            extra_steps=[
+                {"name": "Post checkout", "conclusion": "failure"},
+            ],
+        ),
+    )
+    assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: sonar"]
+    assert len(ledger.raised) == 1
 
 
 def test_keys_sit_under_the_swarm_prefix():

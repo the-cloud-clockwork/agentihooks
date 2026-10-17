@@ -186,29 +186,20 @@ jobs:
   kind-due:
     if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') }}
     needs: [reuse, admission]
-    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
     timeout-minutes: 5
     outputs:
-      due: ${{ steps.paths.outputs.due }}
+      due: ${{ steps.key.outputs.hit != 'true' }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 0
 
-      - name: Decide from the base branch rule whether the chart proof is due
-        id: paths
-        env:
-          BASE: ${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && 'origin/dev' || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
-          HEAD: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
-        run: |
-          set -o pipefail
-          rule=deploy/helm/agentihooks-swarm/ci/kind-due.sh
-          if [[ -n $BASE ]] && git cat-file -e "$BASE:$rule"; then
-            git show "$BASE:$rule" | bash -s "$BASE" "$HEAD" >> "$GITHUB_OUTPUT"
-          else
-            echo due=true >> "$GITHUB_OUTPUT"
-          fi
+      - name: Look up the chart proof input key
+        id: key
+        uses: ./.github/actions/input-key
+        with:
+          job: helm-kind
 
   helm-kind:
     needs: kind-due
@@ -610,6 +601,7 @@ jobs:
       UNIT_SOURCE: ${{ needs.durations.outputs.source }}
     outputs:
       source: ${{ needs.durations.outputs.source }}
+      reused: ${{ steps.plan.outputs.reused }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -637,7 +629,7 @@ jobs:
         name: Restore the test environment
         if: env.UNIT_SOURCE == ''
         id: venv
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ~/venv
           key: venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ steps.day.outputs.date }}-${{ hashFiles('pyproject.toml', '.github/test-excludes.txt') }}
@@ -665,6 +657,15 @@ jobs:
           uv venv --python "$PYTHON_PATH" "$HOME/venv"
           uv pip install --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"
 
+      # Queue refs cannot read dev's entries, so saving there only fills the store with copies.
+      - &save-venv
+        name: Save the test environment from dev
+        if: env.UNIT_SOURCE == '' && steps.venv.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/dev'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/venv
+          key: ${{ steps.venv.outputs.cache-primary-key }}
+
       - &use-venv
         name: Use the test environment
         if: env.UNIT_SOURCE == ''
@@ -690,6 +691,60 @@ jobs:
         env:
           PYTHON_VERSION: ${{ matrix.python-version }}
         run: python -m tests.dev_durations "$PYTHON_VERSION" ~/dev-durations --hash durations.sha256 --collected collected.json
+
+      - name: Mint the token that reads the dev test record
+        id: app-token
+        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+
+      # The protected grader plans, so a queued change cannot widen what it reuses.
+      - name: Plan the tests whose inputs did not change
+        id: plan
+        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GRADER: ${{ github.event.merge_group.base_sha || github.sha }}
+          PYTHON_PATH: ${{ steps.python.outputs.python-path }}
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/planner" "$GRADER"
+          if [[ ! -f "$RUNNER_TEMP/planner/scripts/ci_test_plan.py" ]]; then
+            echo "The grader has no test planner; every test runs."
+            echo "reused=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          before=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)
+          cd "$RUNNER_TEMP/planner"
+          "$PYTHON_PATH" -m scripts.ci_test_plan --repository "$GITHUB_REPOSITORY" --head "$GITHUB_SHA" \
+            --repo "$GITHUB_WORKSPACE" --before "$before" --out "$GITHUB_WORKSPACE/reused-tests.json"
+
+      - name: Upload the test plan
+        if: steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: reused-tests-${{ matrix.python-version }}
+          path: reused-tests.json
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
+      - name: Deselect the reused tests
+        if: steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
+        run: python -m tests.dep_manifest deselect --plan reused-tests.json --collected collected.json --out reused.json
+
+      - name: Upload the deselected tests
+        if: steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: reused-${{ matrix.python-version }}
+          path: reused.json
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
 
       - name: Mint the token that restores queue unit artifacts
         id: unit-token
@@ -746,6 +801,8 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+    outputs:
+      reused: ${{ needs.split.outputs.reused }}
     env:
       CODEX_RELEASE: rust-v0.160.0
       UNIT_SOURCE: ${{ needs.split.outputs.source }}
@@ -777,6 +834,8 @@ jobs:
       - *uv
 
       - *install
+
+      - *save-venv
 
       - *use-venv
 
@@ -815,6 +874,12 @@ jobs:
         with:
           name: collected-${{ matrix.python-version }}
 
+      - name: Download the tests this run reuses
+        if: needs.split.outputs.source == '' && needs.split.outputs.reused != '' && needs.split.outputs.reused != '0'
+        uses: ./.github/actions/retry-download
+        with:
+          name: reused-${{ matrix.python-version }}
+
       # Page tests drive Chromium; the coverage shards run them so the page JavaScript they reach is measured.
       - name: Install the browser that page tests drive
         if: needs.split.outputs.source == '' && matrix.python-version == '3.12'
@@ -835,6 +900,7 @@ jobs:
           SHARD: ${{ matrix.shard }}/${{ matrix.python-version == '3.12' && 12 || 6 }}
           NODE_OPTIONS: ${{ matrix.python-version == '3.12' && format('--require {0}/tests/node_capture.cjs', github.workspace) || '' }}
           CI_FLAKES: ${{ github.workspace }}/flakes.jsonl
+          CI_REUSED: ${{ github.workspace }}/reused.json
           JS_COVERAGE_DIR: ${{ matrix.python-version == '3.12' && format('{0}/js-coverage', github.workspace) || '' }}
         run: start=$SECONDS && status=0 && workers=$(python -m scripts.ci_cpu_quota) && python -c 'import os, shlex, sys, pytest; sys.exit(pytest.main(shlex.split(os.environ.pop("PYTEST_ADDOPTS", "")) + sys.argv[1:]))' tests/ -v -n "$workers" --dist loadgroup --shard "$SHARD" -p tests.flake_ledger --reruns 2 --tb=short -o faulthandler_timeout=60 --store-durations --durations-path durations.json -p no:anyio -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml || status=$?; echo "{\"seconds\":$((SECONDS - start))}" > elapsed.json; exit "$status"
 
@@ -1092,9 +1158,41 @@ jobs:
           name: collected-${{ matrix.python-version }}
           path: collected-data
 
+      - name: Download the test plan
+        if: needs.unit.outputs.reused != '' && needs.unit.outputs.reused != '0'
+        uses: actions/download-artifact@v4
+        with:
+          name: reused-tests-${{ matrix.python-version }}
+          path: reused-plan
+
+      - name: Download shard flake reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: flakes-${{ matrix.python-version }}-*
+          path: shard-flakes
+
       - name: Check every collected test ran in exactly one shard
         if: github.event.pull_request.base.ref != 'main'
-        run: python -m tests.shard_check shard-durations/*/durations.json --collected collected-data/collected.json
+        env:
+          REUSED: ${{ hashFiles('reused-plan/reused-tests.json') != '' && '--reused reused-plan/reused-tests.json' || '' }}
+        run: python -m tests.shard_check shard-durations/*/durations.json --collected collected-data/collected.json $REUSED
+
+      - name: Summarize reused, ran and flaky tests
+        if: ${{ !cancelled() && github.event.pull_request.base.ref != 'main' }}
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+          PLAN: reused-plan/reused-tests.json
+        run: |
+          ran=$(jq -s '[.[] | keys[] | sub("@[^\\[\\]]*$"; "")] | unique | length' shard-durations/*/durations.json)
+          flaky=$(cat shard-flakes/*/flakes.jsonl 2> /dev/null | jq -s '[.[] | select(.outcome == "flaky")] | length')
+          reused=0
+          source="no plan"
+          if [[ -f "$PLAN" ]]; then
+            reused=$(jq -n --slurpfile plan "$PLAN" --slurpfile collected collected-data/collected.json \
+              '($collected[0] | map({(.): true}) | add // {}) as $set | [$plan[0].tests[] | select($set[.])] | length')
+            source="dev run $(jq -r .run "$PLAN")"
+          fi
+          echo "Python $PYTHON_VERSION: ran $ran, reused $reused from $source, flaky $flaky" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Check release shards with legacy collection
         if: github.event.pull_request.base.ref == 'main'
@@ -1286,24 +1384,22 @@ jobs:
           cat "$RUNNER_TEMP/combine.log"
           exit "$(< "$RUNNER_TEMP/combine.status")"
 
+      # Builds beside the scan, outside the scanned tree; the wait after the scan holds its result.
       - name: Build the test dependency manifest
+        id: manifest
         if: needs.select.outputs.scope == 'full'
         env:
           ENVIRONMENT: py3.12-${{ hashFiles('pyproject.toml') }}
         run: |
-          mkdir -p dep-manifest
-          python -m tests.dep_manifest build --coverage .coverage --inputs .coverage-shards --root . \
-            --commit "$GITHUB_SHA" --environment "$ENVIRONMENT" --out dep-manifest/manifest.json
-
-      - name: Upload the test dependency manifest
-        if: needs.select.outputs.scope == 'full'
-        uses: actions/upload-artifact@v4
-        with:
-          name: dep-manifest
-          path: dep-manifest/manifest.json
-          if-no-files-found: error
-          retention-days: 7
-          overwrite: true
+          mkdir -p "$RUNNER_TEMP/dep-manifest"
+          (
+            status=0
+            python -m tests.dep_manifest build --coverage .coverage --inputs .coverage-shards --root . \
+              --commit "$GITHUB_SHA" --environment "$ENVIRONMENT" --out "$RUNNER_TEMP/dep-manifest/manifest.json" || status=$?
+            echo "$status" > "$RUNNER_TEMP/manifest.next"
+            mv "$RUNNER_TEMP/manifest.next" "$RUNNER_TEMP/manifest.status"
+          ) < /dev/null > "$RUNNER_TEMP/manifest.log" 2>&1 &
+          echo "pid=$!" >> "$GITHUB_OUTPUT"
 
       # Runs the CLI directly: sonarqube-scan-action never finds its tool cache entry, since a four part version is not semver.
       - name: SonarQube Scan
@@ -1311,6 +1407,7 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: http://127.0.0.1:9000
           ARGS: ${{ steps.queued.outputs.args || steps.dispatched.outputs.args }}
+          SONAR_SCANNER_JAVA_OPTS: -Xmx3g -Xlog:gc:file=${{ runner.temp }}/sonar-gc.log
         run: |
           scanner="$RUNNER_TOOL_CACHE/sonar-scanner-cli/$SONAR_SCANNER_VERSION/linux-x64"
           if [[ ! -x "$scanner/bin/sonar-scanner" ]]; then
@@ -1323,7 +1420,36 @@ jobs:
             cp -a "$RUNNER_TEMP/sonar-scanner-$SONAR_SCANNER_VERSION-linux-x64/." "$scanner/"
           fi
           read -ra extra <<< "$ARGS"
-          bash "$GITHUB_WORKSPACE/.github/coverage/sonar-retry.sh" --unless .scannerwork/report-task.txt "SonarQube Scan" -- "$scanner/bin/sonar-scanner" -Dsonar.projectBaseDir=. "${extra[@]}"
+          threads=$(python "$GITHUB_WORKSPACE/scripts/ci_cpu_quota.py")
+          bash "$GITHUB_WORKSPACE/.github/coverage/sonar-retry.sh" --unless .scannerwork/report-task.txt "SonarQube Scan" -- "$scanner/bin/sonar-scanner" -Dsonar.projectBaseDir=. -Dsonar.python.analysis.threads="$threads" "${extra[@]}"
+          [[ ! -s "$RUNNER_TEMP/sonar-gc.log" ]] || awk '/Pause/ { n++; sub(/ms$/, "", $NF); t += $NF } END { printf "GC pauses %d, %.0f ms\n", n, t }' "$RUNNER_TEMP/sonar-gc.log"
+
+      - name: Wait for the test dependency manifest
+        if: needs.select.outputs.scope == 'full'
+        timeout-minutes: 5
+        env:
+          MANIFEST_PID: ${{ steps.manifest.outputs.pid }}
+        run: |
+          until [[ -s "$RUNNER_TEMP/manifest.status" ]]; do
+            if ! kill -0 "$MANIFEST_PID" 2> /dev/null && [[ ! -s "$RUNNER_TEMP/manifest.status" ]]; then
+              echo "::error::The test dependency manifest build ended without a status."
+              cat "$RUNNER_TEMP/manifest.log" 2> /dev/null || true
+              exit 1
+            fi
+            sleep 0.2
+          done
+          cat "$RUNNER_TEMP/manifest.log"
+          exit "$(< "$RUNNER_TEMP/manifest.status")"
+
+      - name: Upload the test dependency manifest
+        if: needs.select.outputs.scope == 'full'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dep-manifest
+          path: ${{ runner.temp }}/dep-manifest/manifest.json
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
 
       - name: Upload coverage and analysis evidence
         if: always()
@@ -1475,6 +1601,16 @@ jobs:
       - name: Check every pull request job is a need of Gate Required
         if: ${{ !cancelled() }}
         run: python -m scripts.ci_wiring
+
+      - name: Require wall clock markers on elapsed bounds
+        if: ${{ !cancelled() }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/grader/scripts/ci_wall_clock.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+            python -m scripts.ci_wall_clock --root "$GITHUB_WORKSPACE"
+          else
+            python -m scripts.ci_wall_clock
+          fi
 
       - name: Require trusted actors before private runner admission
         if: ${{ !cancelled() }}

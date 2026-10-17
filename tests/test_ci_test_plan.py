@@ -1,0 +1,179 @@
+import io
+import json
+import subprocess
+import zipfile
+from pathlib import Path
+
+import pytest
+
+from scripts import ci_test_plan
+
+REPOSITORY = "the-cloud-clockwork/agentihooks"
+HEAD = "a" * 40
+ACTIONS = f"repos/{REPOSITORY}/actions"
+LATER = "2026-10-17T00:00:00Z"
+
+pytestmark = pytest.mark.unit
+
+
+def _run(run_id, **changes):
+    return {
+        "id": run_id,
+        "run_attempt": 1,
+        "event": "push",
+        "head_branch": "dev",
+        "head_sha": f"{run_id:040d}",
+        "status": "completed",
+        "updated_at": f"2026-10-16T22:{run_id:02d}:00Z",
+        "path": ".github/workflows/test.yml",
+        "repository": {"full_name": REPOSITORY},
+        **changes,
+    }
+
+
+def _zip(manifest):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("manifest.json", json.dumps(manifest))
+    return buffer.getvalue()
+
+
+def _github(monkeypatch, runs, *, manifests, failed=()):
+    listing = f"{ACTIONS}/workflows/test.yml/runs?branch=dev&event=push&status=completed&per_page=10"
+
+    def api(endpoint):
+        if endpoint == listing:
+            return json.dumps({"workflow_runs": runs}).encode()
+        assert endpoint.startswith(f"{ACTIONS}/")
+        if endpoint.endswith("/artifacts?per_page=100"):
+            run_id = int(endpoint.split("/runs/")[1].split("/")[0])
+            kept = [{"id": run_id, "name": "dep-manifest", "expired": False}] if run_id in manifests else []
+            return json.dumps({"artifacts": [{"id": 0, "name": "durations-merged", "expired": False}, *kept]}).encode()
+        assert endpoint.endswith("/zip")
+        return _zip(manifests[int(endpoint.split("/artifacts/")[1].split("/")[0])])
+
+    def jobs(endpoint):
+        assert endpoint.startswith(f"{ACTIONS}/runs/") and endpoint.endswith("/attempts/1/jobs")
+        run_id = int(endpoint.split("/runs/")[1].split("/")[0])
+        return [
+            {"name": name, "conclusion": "failure" if (run_id, name) in failed else "success"}
+            for name in sorted(ci_test_plan.UNIT_JOBS)
+        ]
+
+    monkeypatch.setattr(ci_test_plan, "_api", api)
+    monkeypatch.setattr(ci_test_plan, "read_jobs", jobs)
+
+
+def _manifest(run_id):
+    return {
+        "commit": f"{run_id:040d}",
+        "units": [],
+        "tests": {"tests/test_a.py::test_a": {"units": [], "files": [], "escapes": False}},
+    }
+
+
+def test_the_api_reads_through_gh_and_fails_on_an_error(monkeypatch):
+    calls = []
+
+    def run(*args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args[0], 0, stdout=b"{}")
+
+    monkeypatch.setattr(ci_test_plan.subprocess, "run", run)
+    assert ci_test_plan._api("repos/x") == b"{}"
+    assert calls == [((["gh", "api", "repos/x"],), {"capture_output": True, "check": True, "timeout": 60})]
+
+
+def test_the_newest_dev_run_whose_unit_shards_passed_and_kept_a_manifest_is_the_record(monkeypatch):
+    runs = [_run(4, event="merge_group"), _run(3), _run(2), _run(1)]
+    _github(monkeypatch, runs, manifests={2: _manifest(2), 1: _manifest(1)}, failed={(2, "unit (3.11, 4)")})
+    run, manifest = ci_test_plan.find_record(REPOSITORY, LATER)
+    assert run["id"] == 1
+    assert manifest["commit"] == f"{1:040d}"
+
+
+def test_every_interpreter_leg_ignores_dev_runs_that_finished_after_its_run_started(monkeypatch):
+    _github(monkeypatch, [_run(3), _run(1)], manifests={3: _manifest(3), 1: _manifest(1)})
+    assert ci_test_plan.find_record(REPOSITORY, "2026-10-16T22:02:00Z")[0]["id"] == 1
+    assert ci_test_plan.find_record(REPOSITORY, "2026-10-16T22:03:00Z")[0]["id"] == 3
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [("event", "merge_group"), ("head_branch", "feature"), ("path", ".github/workflows/proofs.yml")],
+)
+def test_runs_that_are_not_dev_pushes_of_the_tests_workflow_are_no_record(monkeypatch, field, value):
+    _github(monkeypatch, [_run(1, **{field: value})], manifests={1: _manifest(1)})
+    assert ci_test_plan.find_record(REPOSITORY, LATER) is None
+
+
+def test_a_manifest_for_another_commit_is_skipped_for_an_older_record(monkeypatch, capsys):
+    _github(monkeypatch, [_run(2), _run(1)], manifests={2: _manifest(9), 1: _manifest(1)})
+    assert ci_test_plan.find_record(REPOSITORY, LATER)[0]["id"] == 1
+    assert capsys.readouterr().out == f"Dev run 2 recorded a manifest for {9:040d}, not {2:040d}\n"
+
+
+def test_a_missing_record_plans_a_full_run(monkeypatch, tmp_path, capsys):
+    _github(monkeypatch, [_run(1)], manifests={})
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    out = tmp_path / "reused-tests.json"
+    assert ci_test_plan.main(["--repository", REPOSITORY, "--head", HEAD, "--before", LATER, "--out", str(out)]) == 0
+    assert not out.exists()
+    assert output.read_text() == "reused=0\n"
+    assert "every test runs" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("cause", [None, ".github/workflows/test.yml"])
+def test_a_record_plans_the_unchanged_tests(monkeypatch, tmp_path, capsys, cause):
+    _github(monkeypatch, [_run(1)], manifests={1: _manifest(1)})
+    seen = []
+    changed = [(cause, None, None)] if cause else []
+    monkeypatch.setattr(
+        ci_test_plan.dep_manifest, "changes", lambda repo, base, head: seen.append((repo, base, head)) or changed
+    )
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    out = tmp_path / "reused-tests.json"
+    assert ci_test_plan.main(["--repository", REPOSITORY, "--head", HEAD, "--before", LATER, "--out", str(out)]) == 0
+    assert seen == [(Path.cwd(), f"{1:040d}", HEAD)]
+    assert isinstance(seen[0][0], Path)
+    plan = json.loads(out.read_text())
+    assert plan["run"] == "1"
+    if cause:
+        assert plan["tests"] == []
+        assert output.read_text() == "reused=0\n"
+        assert capsys.readouterr().out == f"Dev run 1 on {1:040d}: 1 of 1 tests invalidated by {cause}, 0 reused\n"
+    else:
+        assert plan["tests"] == ["tests/test_a.py::test_a"]
+        assert output.read_text() == "reused=1\n"
+        assert capsys.readouterr().out == f"Dev run 1 on {1:040d}: 0 of 1 tests invalidated, 1 reused\n"
+
+
+def test_the_repo_flag_names_the_diffed_checkout(monkeypatch, tmp_path):
+    _github(monkeypatch, [_run(1)], manifests={1: _manifest(1)})
+    seen = []
+    monkeypatch.setattr(ci_test_plan.dep_manifest, "changes", lambda repo, base, head: seen.append(repo) or [])
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    args = ["--repository", REPOSITORY, "--head", HEAD, "--before", LATER, "--repo", str(tmp_path)]
+    args += ["--out", str(tmp_path / "p.json")]
+    assert ci_test_plan.main(args) == 0
+    assert seen == [tmp_path]
+
+
+@pytest.mark.parametrize("missing", ["--repository", "--head", "--before", "--out"])
+def test_every_required_flag_is_required(tmp_path, missing):
+    flags = {"--repository": REPOSITORY, "--head": HEAD, "--before": LATER, "--out": str(tmp_path / "p.json")}
+    args = [part for flag, value in flags.items() if flag != missing for part in (flag, value)]
+    with pytest.raises(SystemExit):
+        ci_test_plan.main(args)
+
+
+def test_the_before_flag_reaches_the_record_lookup(monkeypatch, tmp_path):
+    _github(monkeypatch, [_run(3), _run(1)], manifests={3: _manifest(3), 1: _manifest(1)})
+    monkeypatch.setattr(ci_test_plan.dep_manifest, "changes", lambda repo, base, head: [])
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    out = tmp_path / "p.json"
+    args = ["--repository", REPOSITORY, "--head", HEAD, "--before", "2026-10-16T22:02:00Z", "--out", str(out)]
+    assert ci_test_plan.main(args) == 0
+    assert json.loads(out.read_text())["run"] == "1"

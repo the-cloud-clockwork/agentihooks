@@ -45,9 +45,20 @@ jobs:
           python-version: "3.12"
       - name: Pull the locked worker base with bounded rate limit retries
         run: bash docker/swarm-node/pull-base.sh
+      - name: Restore the candidate layers
+        id: layers
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/worker-layers
+          key: worker-layers-${{ hashFiles('docker/swarm-node/**', 'scripts/swarm_v2/worker_image.py') }}
+          restore-keys: worker-layers-
       - name: Build the candidate
+        env:
+          LAYERS_FROM: ${{ steps.layers.outputs.cache-matched-key && format('type=local,src={0}/worker-layers', runner.temp) || '' }}
+          LAYERS_TO: ${{ steps.layers.outputs.cache-hit != 'true' && format('type=local,dest={0}/worker-layers-next,mode=max', runner.temp) || '' }}
         run: >-
           docker build --platform linux/amd64 ${WORKER_BASE_CONTEXT:+--build-context "$WORKER_BASE_CONTEXT"} --build-arg SOURCE_REVISION="$GITHUB_SHA"
+          ${LAYERS_FROM:+--cache-from "$LAYERS_FROM"} ${LAYERS_TO:+--cache-to "$LAYERS_TO"}
           --file docker/swarm-node/Dockerfile --tag "$CANDIDATE" .
       - name: Build the incompatible herdr fixture
         run: >-
@@ -116,6 +127,17 @@ jobs:
           jq -S .report "$out/candidate/attestation.json" > "$out/candidate-report.json"
           jq -S .report "$out/repeat/attestation.json" > "$out/repeat-report.json"
           diff "$out/candidate-report.json" "$out/repeat-report.json"
+      - name: Keep the qualified candidate layers
+        if: steps.layers.outputs.cache-hit != 'true'
+        run: |
+          rm -rf "$RUNNER_TEMP/worker-layers"
+          mv "$RUNNER_TEMP/worker-layers-next" "$RUNNER_TEMP/worker-layers"
+      - name: Save the qualified candidate layers
+        if: steps.layers.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/worker-layers
+          key: ${{ steps.layers.outputs.cache-primary-key }}
       - name: Require a release tag on main
         id: main
         if: github.event_name == 'release'

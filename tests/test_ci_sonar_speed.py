@@ -192,12 +192,22 @@ def test_a_restored_scanner_runs_without_a_download(tmp_path):
     result, scanner, downloads = _scan(tmp_path, cached=True)
     assert result.returncode == 0, result.stdout + result.stderr
     assert downloads == ""
+    quota = subprocess.run(
+        ["python", str(_ROOT / "scripts/ci_cpu_quota.py")], capture_output=True, text=True, check=True
+    ).stdout.strip()
     assert (tmp_path / "scan").read_text().split() == [
         f"{scanner}/bin/sonar-scanner",
         "-Dsonar.projectBaseDir=.",
+        f"-Dsonar.python.analysis.threads={quota}",
         "-Dsonar.pullrequest.key=7",
         "-Dsonar.pullrequest.base=dev",
     ]
+
+
+def test_the_scanner_heap_is_raised_and_its_pauses_logged():
+    opts = _step("SonarQube Scan")["env"]["SONAR_SCANNER_JAVA_OPTS"].split()
+    assert "-Xmx3g" in opts
+    assert any(opt.startswith("-Xlog:gc:file=") for opt in opts)
 
 
 def test_a_missing_scanner_is_downloaded_into_the_cached_path(tmp_path):

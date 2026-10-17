@@ -529,6 +529,7 @@ def test_an_unmoved_head_is_read_once_and_skips_the_full_view(tmp_path):
         "head": "original",
         "url": url,
         "phase": "p8",
+        "persisted_at": None,
     }
 
 

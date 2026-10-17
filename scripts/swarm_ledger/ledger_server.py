@@ -103,7 +103,12 @@ def publish_ledger(slug, state):
         HUB.publish(slug, "ledger", ledger_view(state))
 
 
-repository = publishing(stored, publish_ledger)
+def publish_snapshot(slug: str, state: dict) -> None:
+    if HUB.has(slug):
+        HUB.publish_snapshot(slug, "ledger", ledger_view(state))
+
+
+repository = publishing(stored, publish_snapshot)
 
 
 def all_summaries():

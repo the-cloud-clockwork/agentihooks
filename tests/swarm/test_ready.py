@@ -1026,14 +1026,14 @@ def test_a_conflict_while_queued_is_left_to_the_queue(merging):
     assert merging.rows["t1"]["state"] == "pr"
 
 
-def test_a_branch_update_github_refuses_reopens_the_task_awaiting_fix(merging):
+def test_an_enqueue_github_refuses_reopens_the_task_awaiting_fix(merging):
     merging.pulls[URL] = GREEN
-    error = "could not update the branch from dev: gh: merge conflict between base and head (HTTP 422)"
+    error = "GitHub refused to enqueue the pull request"
 
-    def refused_update(action, url):
+    def refused_enqueue(action, url):
         raise SwarmError(error)
 
-    assert merging.run(queuer=refused_update) == [
+    assert merging.run(queuer=refused_enqueue) == [
         f"task t1 reopened, {URL} could not be queued: {error}",
     ]
     assert merging.rows["t1"]["state"] == "open" and merging.rows["t1"]["awaiting"] == "fix"

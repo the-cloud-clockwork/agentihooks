@@ -8,7 +8,7 @@ nav_order: 5
 
 One CI algorithm for every repo and workflow: a check whose real inputs did not change reuses its last green result, and a check that fails is retried in place a bounded number of times inside the same job. No run is ever restarted from zero because one test flaked.
 
-Status: slices 1 to 4 and 6 delivered (see [Slice 1 as delivered](#slice-1-as-delivered), [Slice 2 as delivered](#slice-2-as-delivered), [Slice 3 as delivered](#slice-3-as-delivered), [Slice 4 as delivered](#slice-4-as-delivered) and [Slice 6 as delivered](#slice-6-as-delivered)); slices 5 and 7 are design. Issue [#2365](https://github.com/the-cloud-clockwork/agentihooks/issues/2365). Slices are listed in [Slices](#slices); each one is a separate pull request.
+Status: slices 1 to 6 delivered (see [Slice 1 as delivered](#slice-1-as-delivered), [Slice 2 as delivered](#slice-2-as-delivered), [Slice 3 as delivered](#slice-3-as-delivered), [Slice 4 as delivered](#slice-4-as-delivered), [Slice 5 as delivered](#slice-5-as-delivered) and [Slice 6 as delivered](#slice-6-as-delivered)); slice 7 is design. Issue [#2365](https://github.com/the-cloud-clockwork/agentihooks/issues/2365). Slices are listed in [Slices](#slices); each one is a separate pull request.
 
 ## Before numbers
 
@@ -53,7 +53,7 @@ These two tests stay unfixed until slice 1 lands, so they keep proving the retry
 | Cached shard environments: `venv-*`, `chromium-*`, `sonar-*` caches | environment | interpreter, `pyproject.toml`, day; Playwright version | caches tools, not results |
 | Durations and coverage baselines: `durations-merged-<sha>`, `coverage-baseline-<tree>` | data | commit or tree | not results |
 | Mutation reuse of the preflight result: `own_bases` and `graded_green` in `scripts/ci_mutation/scope.py` | mutation scope | ancestor commit whose preflight `mutation` job passed | per commit, not per input |
-| Helm kind due check: `kind-due` | one job | chart paths changed | path rule written by hand |
+| Helm kind chart proof: `kind-due` and `helm-kind` | one job | job input key | none: `kind-due` looks up the `helm-kind` key |
 | Dev push | whole run | none | always runs everything; `ci_reuse.py` decides reuse only for `merge_group`, so the dev push reuse named in the task does not exist yet |
 
 Before slice 1 nothing retried. A failed test failed its shard, the shard failed `Gate — Required`, and the only recovery was a rerun of failed jobs on a pull request or a new queue entry.
@@ -209,6 +209,31 @@ Cost, from run [38952385459](https://github.com/the-cloud-clockwork/agentihooks/
 
 Not done here: the queue run's read of the dev cache entry, which slice 5 needs, is still unproven.
 
+## Slice 5 as delivered
+
+Merge queue runs, and gate plant dispatches, skip every test whose manifest inputs did not change since a dev push in which it passed.
+
+- **Record.** `scripts/ci_test_plan.py` reads the last 10 completed dev push Tests runs and takes the newest one whose 18 unit shards passed and that kept a `dep-manifest` artifact whose commit is the run's head. Both interpreter legs ignore dev runs that changed after their own run started, so they pick the same record. It does not require the whole run to pass, because promotion checks such as `helm-kind` fail dev pushes without touching the unit results. No such run is a missing record: the planner raises a `No test record` notice and every test runs.
+- **Plan.** Each `split` leg adds the protected grader as a worktree. For a queue run the grader is the merge group base; for a dispatch it is the head. The leg runs the planner from that worktree with the interpreter outside the test venv. Every manifest test that the diff from the record commit to the head leaves valid is reused, keyed without its xdist group suffix. The leg publishes the plan as `reused-tests-<python>`. The protected gate freezes the durations job's outputs, so the plan cannot live there.
+- **Deselect.** `tests.dep_manifest deselect` intersects the plan with the head collection and also lists the test files whose collected tests are all reused. It publishes `reused-<python>`. Each unit shard downloads that list into `CI_REUSED`. `conftest` leaves the wholly reused files uncollected and drops reused nodes from the duration split, so shards balance on the tests that remain, and then deselects the remaining reused items. A shard that has nothing left passes.
+- **Grade.** `shard-check` runs from the base and passes the grader's plan to `shard_check --reused`. Collected tests the plan does not reuse must each run exactly once, and reused tests must not run at all. Its step summary prints the counts of tests ran, tests reused (naming the dev run that recorded them) and flaky tests for each Python version.
+- **Dev push.** `ci_dev_reuse` refuses a queue run that published a plan, so a dev push runs the full suite and records the next manifest.
+
+Coverage: merge group runs feed no coverage consumer, since `sonar` and the ratchet do not run there. The only reader of queue coverage is dev unit reuse, and it is refused for partial runs, so no combine is needed on this path. Pull request full scope runs stay on the full suite. `select` sends a pull request to full scope only for changes that the manifest rule also treats as global, such as `.github/` and `pyproject.toml`.
+
+A merge whose base grader has no planner, which includes the queue run of this slice's own pull request, runs in full.
+
+What the queue can reuse, measured with the planner's own rule: the manifest of dev push run [38972462506](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38972462506) (32678 tests, commit `5320236c9`) applied to each of the 40 dev merges before it, with `python -m tests.dep_manifest share --merges 40`. A queue entry reuses on average 58.0 % of its tests, median 79.2 %. 10 of the 40 merges reuse nothing: six changed `.github/`, and at least three changed a shared helper under `tests/`, which invalidates every test. Each 3.12 shard runs about 217 s of tests in its Run tests step, so at the median the remaining tests split over the same 12 shards run about a fifth of that.
+
+Pull request runs and the coverage combine are not in this slice. `select` already narrows a pull request to the tests its change reaches. It falls back to the full suite only for a harness or `conftest.py` change, which the manifest rule also treats as global, for a change with no selected tests, or when the selected tests exceed three legs. A full scope pull request run feeds `sonar` and the coverage ratchet, so reusing tests there needs coverage combined from the dev record. That is proposed as its own follow up.
+
+Known limits. Each is detected only after the merge, by the next dev push, which runs every test; a red dev push does not hold the queue:
+
+- The manifest is measured on 3.12, and its plan also deselects the same tests on 3.11.
+- A test that reads a Python source as text, or lists a directory, depends only on what it executed or opened.
+- A test that passed the record run only on a retry is still reused.
+- A dispatch plans from its own head, since gate plant dispatches need admission by a trusted actor.
+
 ## Slice 6 as delivered
 
 Each keyed job declares its inputs in `.github/input-keys.json`: repository paths at the head, base paths read at the grading base, and the tools it runs. `scripts/ci_input_key.py` hashes the git object of every declared path, the keyer's own script and action, the declared tools, the runner (`RUNNER_OS`, `RUNNER_ARCH`, `RUNNER_ENVIRONMENT`, `ImageOS`, `ImageVersion`), any resolved external input the job passes, such as the Redis service image id, and the UTC day. A declared path missing at its revision fails the step.
@@ -223,4 +248,4 @@ Each keyed job declares its inputs in `.github/input-keys.json`: repository path
 | [38963275517](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38963275517), [38963279568](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38963279568) | a docs change, outside every declared input | 20 s each: key hit, install, check and save skipped |
 | [38963740312](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38963740312), [38965443542](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38965443542) | a change to `hooks/` and `tests/ledger_load/`, both declared | brain smoke 37 s and ledger load 131 s: key missed, every step ran, the new key saved |
 
-Known limits: the day in the key forces one full run per job per UTC day, which also bounds how long an unkeyed floating input, such as a Python patch release or a self hosted runner image, can be reused. `ci_reuse.py` keeps the whole tree queue reuse, and `kind-due` keeps its own path rule until `helm-kind` moves onto the input key.
+Known limits: the day in the key forces one full run per job per UTC day, which also bounds how long an unkeyed floating input, such as a Python patch release or a self hosted runner image, can be reused. `ci_reuse.py` keeps the whole tree queue reuse. `kind-due` looks up the `helm-kind` key of the chart, the swarm image inputs and the kind proof files on the same runner pool, and a hit skips `helm-kind`.
