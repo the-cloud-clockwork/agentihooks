@@ -25,6 +25,16 @@ def test_main_image_is_built_once_before_every_compatible_smoke():
         assert step["run"] in {
             f"docker build -t {IMAGE} .",
             f"docker build -t {IMAGE} --output type=image,compression=uncompressed .",
+            """docker build -t local/agentihooks-swarm:clients-check --output type=image,compression=uncompressed . &
+build=$!
+status=0
+bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/redis:7 &
+redis=$!
+bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/redis:7-alpine || status=$?
+wait "$redis" || status=$?
+wait "$build" || status=$?
+exit "$status"
+""",
         }
     else:
         assert step["with"]["context"] == "."
