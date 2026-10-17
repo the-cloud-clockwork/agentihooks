@@ -46,13 +46,8 @@ class Sample:
         return bool(self.failure) or max(self.read_s, self.write_s) > SLOW_S
 
     def took(self) -> str:
-        read = f"read {self.read_s:.1f} seconds"
-        write = f"write {self.write_s:.1f} seconds"
-        if self.read_failure:
-            read += f" ({self.read_failure})"
-        if self.write_failure:
-            write += f" ({self.write_failure})"
-        return f"{read} and {write}"
+        took = f"read {self.read_s:.1f} seconds and write {self.write_s:.1f} seconds"
+        return f"{took}, and the ledger {self.failure}" if self.failure else took
 
 
 def _failure(exc: BaseException) -> str:
@@ -132,7 +127,11 @@ def _raised(samples: list[dict], facts: dict) -> str:
         else "start time unknown"
     )
     newest = f" merged {facts['merged_minutes']} minutes ago: {facts['newest']}" if facts.get("newest") else " unknown"
-    label = "The ledger probe failed" if any(row["failure"] for row in samples) else "The ledger server is slow"
+    label = (
+        "The ledger probe failed"
+        if any(row["failure"] or row.get("watchdog") for row in samples)
+        else "The ledger server is slow"
+    )
     return f"{label}: {_passes(samples)}. Server {started}. Newest on dev{newest}."
 
 
