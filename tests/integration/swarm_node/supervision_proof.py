@@ -89,10 +89,15 @@ def terminal_disconnect(container, root):
 
 def heartbeats(container, root, accepted):
     code = f"import json; from pathlib import Path; r=Path({root!r}); print(json.dumps({{p.name:json.loads(p.read_text())['tick'] for p in r.glob('heartbeat-*.json')}}))"
+    observed = None
     for _ in range(100):
-        observed = json.loads(docker("exec", container, "python", "-c", code))
-        if accepted(observed):
-            return observed
+        try:
+            observed = json.loads(docker("exec", container, "python", "-c", code))
+        except (subprocess.CalledProcessError, ValueError):
+            pass
+        else:
+            if accepted(observed):
+                return observed
         time.sleep(0.1)
     raise AssertionError(f"heartbeats not accepted after 100 reads: {observed}")
 
