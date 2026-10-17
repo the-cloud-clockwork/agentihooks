@@ -184,6 +184,37 @@ def test_a_sibling_swarm_cannot_reset_or_clear_another_swarms_slow_passes(store,
     assert not any("fast again" in text for text in master_mail(store))
 
 
+def test_notices_keep_both_triggering_passes_and_do_not_substitute_a_new_swarms_fast_sample(store):
+    store.create(SwarmConfig("sibling", "/repo", max_eng=1, max_ci=0))
+    clock = Clock()
+    ledger = ProbedLedger(clock, read_s=6.2, write_s=0.7)
+    ledger.read_error = TimeoutError("timed out")
+    observe(store, ledger, clock, 1_000)
+    ledger.read_s, ledger.write_s = 0.2, 7.8
+    ledger.read_error, ledger.write_error = None, HTTPError("url", 503, "unavailable", {}, None)
+    observe(store, ledger, clock, 2_000)
+    [notice] = master_mail(store)
+    for words in ("read 6.2", "write 0.7", "timed out", "read 0.2", "write 7.8", "server error"):
+        assert words in notice
+        assert words in ledger.notes[0]
+    first_notice = notice
+    ledger.read_s, ledger.write_s, ledger.write_error = 0.1, 0.1, None
+    read, write = ledger.metadata, ledger.time_left
+    ledger.metadata = lambda slug: read("sw")
+    ledger.time_left = lambda slug, slots, ci_minutes: write("sw", slots, ci_minutes)
+    ledger_probe.observe(store, "sibling", ledger, FakeRuntime(), 3_000, clock=clock, facts=lambda: FACTS)
+    sibling_notice = InboxStore(store.redis).pending_items("master@sibling")[0].text
+    assert sibling_notice == first_notice
+    held = ledger_probe.state(store, "sw")
+    assert [row["sequence"] for row in held["raised_samples"]] == [1, 2]
+    assert [row["at"] for row in held["raised_samples"]] == [1_000, 2_000]
+    assert [row["slug"] for row in held["raised_samples"]] == ["sw", "sw"]
+    assert held["raised_samples"][0]["read_failure"] == "timed out"
+    assert held["raised_samples"][1]["write_failure"] == "answered with a server error"
+    assert held["raised_samples"][0]["streak_before"] == {"slow": 0, "fast": 0}
+    assert held["raised_samples"][1]["streak_after"] == {"slow": 2, "fast": 0}
+
+
 def test_two_failed_passes_raise_the_alert_naming_the_failure(store):
     clock = Clock()
     ledger = ProbedLedger(clock)
