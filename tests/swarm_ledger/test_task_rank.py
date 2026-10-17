@@ -175,6 +175,31 @@ def test_order_puts_each_rank_in_its_place(task, position):
     assert ledger_rank.order(task) == position
 
 
+GENERATED = {"profile": "documentation", "follow_up": True}
+
+
+@pytest.mark.parametrize(
+    ("task", "position"),
+    [(GENERATED, 3), ({**GENERATED, "rank": "x"}, 3), ({**GENERATED, "rank": "high"}, 1)],
+)
+def test_an_unranked_generated_documentation_task_orders_low(task, position):
+    assert ledger_rank.order(task) == position
+
+
+@pytest.mark.parametrize(
+    ("task", "found"),
+    [
+        (GENERATED, True),
+        ({"profile": "documentation"}, False),
+        ({"profile": "documentation", "follow_up": "yes"}, False),
+        ({"profile": "engineer", "follow_up": True}, False),
+        ({"follow_up": True}, False),
+    ],
+)
+def test_only_a_documentation_follow_up_counts_as_generated(task, found):
+    assert ledger_rank.generated(task) is found
+
+
 @pytest.mark.parametrize(
     "extra",
     [

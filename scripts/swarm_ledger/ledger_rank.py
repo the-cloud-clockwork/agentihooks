@@ -8,6 +8,7 @@ import re
 RANKS = ("urgent", "high", "normal", "low")
 ALIASES = {"next": "urgent"}
 DEFAULT = "normal"
+GENERATED_PROFILE = "documentation"
 OPERATOR = "operator"
 QUOTE_WORDS = 3
 OPS = ("task_rank",)
@@ -23,7 +24,13 @@ def canonical(value) -> str:
 
 def order(task: dict) -> int:
     rank = task.get("rank")
-    return RANKS.index(rank if rank in RANKS else DEFAULT)
+    if rank not in RANKS:
+        rank = RANKS[-1] if generated(task) else DEFAULT
+    return RANKS.index(rank)
+
+
+def generated(task: dict) -> bool:
+    return task.get("profile") == GENERATED_PROFILE and task.get("follow_up") is True
 
 
 def check(op):
