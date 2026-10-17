@@ -185,6 +185,9 @@ class InboxStore:
             self.redis.zrem(self.key("open", address), *closed)
         return sorted((item for item in items if item.state not in CLOSED), key=_order)
 
+    def open_mail(self, receiver: str) -> list[Item]:
+        return self._with_seat(receiver, self.open_items)
+
     def quiet(self, addresses: list[str]) -> set[str]:
         """Addresses whose open index is current and holds nothing; any other needs open_items to tell."""
         with self.redis.pipeline(transaction=False) as pipe:
