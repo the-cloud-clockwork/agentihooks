@@ -130,6 +130,22 @@ def test_codex_rollouts_name_their_session_id(tmp_path):
     assert [entry["path"] for entry in manifest["files"]] == [f"2026/10/11/{rollout.name}"]
 
 
+def test_export_reports_the_final_normalized_main_transcript_length(tmp_path):
+    attempt, home, environ = _home(tmp_path, "claude")
+    projects = home / ".claude" / "projects" / "p"
+    _session(
+        projects / f"{CLAUDE_ID}.jsonl",
+        b'{"type":"user","message":{"content":"first"}}\n'
+        b'{"type":"assistant","message":{"content":[{"type":"text","text":"last"}]}}\n'
+        b'{"type":"system","message":"ignored"}\n',
+        2_000,
+    )
+    _session(projects / f"{OLDER_ID}.jsonl", b'{}\n', 1_000)
+    _session(projects / CLAUDE_ID / "subagents" / "agent.jsonl", b'{}\n', 3_000)
+
+    assert session_export.export(attempt, _scope(), environ)["transcript_end"] == 2
+
+
 def test_an_attempt_without_a_native_session_reports_incomplete(tmp_path):
     attempt, home, environ = _home(tmp_path, "claude")
     (home / ".claude" / "projects").mkdir(parents=True)
