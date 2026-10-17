@@ -7,6 +7,7 @@ import sys
 import time
 import tomllib
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 
 from hooks.secrets import redact
@@ -78,7 +79,9 @@ def surviving_hook_children(existing: dict, seconds: float = HOOK_CHILD_SECONDS)
         supervision_processes.reap()
         time.sleep(POLL_HOOK_SECONDS)
     supervision_processes.send(survivors, signal.SIGKILL)
-    supervision_processes.reap()
+    for pid in survivors:
+        with suppress(ChildProcessError):
+            os.waitpid(pid, 0)
     return sorted(f"{pid} {' '.join(item.argv) or item.comm}" for pid, item in survivors.items())
 
 
