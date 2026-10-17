@@ -12,7 +12,6 @@ Complete reference documentation for configuration and CLI commands.
 
 | Page | What it covers |
 |------|---------------|
-| [Pull request mutation gate](mutation-gate.md) | Graded lines, measured shard costs, splitting heavy covering tests, combined grades, CI proof examples and evidence inspection |
 | [Configuration](configuration.md) | All environment variables across every integration, in one place |
 | [Deployed swarm host capacity](../pillars/swarm.md#deployed-host-capacity) | Worker namespace quota and pool budgets, autoscale inspection, configuration and disabled host pressure alerts |
 | [CLI Commands](cli-commands.md) | All `agentihooks` subcommands and flags: init, uninstall, claude, ignore |
@@ -23,7 +22,7 @@ Complete reference documentation for configuration and CLI commands.
 | [Ledger watcher replay verification](watch-ledger-replay.md) | Heartbeat frames, replay assertions, test configuration and first-attempt CI evidence |
 | [Ledger design with Impeccable live](ledger-design-live.md) | Start an Impeccable live session against a scratch ledger server; the rules that keep it away from the shared server |
 | [Hosted ledger auth](hosted-ledger-auth.md) | `SWARM_AUTH_MODE`: local page tokens, or edge with the Cloudflare Access operator and agent tokens from `SWARM_SECRET` |
-| [Pull request mutation gate](mutation-gate.md) | Graded lines and bases, push preflight reuse, the plan job forwarding reused and empty reports, how to inspect a forwarded run, and survivor clearances |
+| [Pull request mutation gate](mutation-gate.md) | Graded lines and bases, push preflight reuse, forwarded reports, measured shard costs, split mutants, combined grades, CI proof examples, evidence inspection and survivor clearances |
 | [Delivery tiers](delivery-tiers.md) | The three CI tiers (pull request, queue, promotion), why a red integration branch keeps merging, promotion owning the slow checks, fixer tasks for a red promotion, queueing a green head without merging `dev` first, and where coverage is graded |
 | [Test count floor](test-count-floor.md) | The `test-count` job: the base revision grades, the floor, lost tests admitted when the head deletes the function, class, constant or keyword branch they referenced, limits and proof |
 | [Promotion and releases](promotion.md) | How a green `dev` push run of Tests rebase merges its graded revision into `main` through a snapshot branch, tags a patch release with generated notes, what blocks it, reruns and manual `release.yml` runs |
