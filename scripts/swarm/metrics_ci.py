@@ -15,7 +15,7 @@ RUNS = metrics_outbox.Table(
         ("head_sha", "String"),
         *RUN_KEYS,
         ("conclusion", "String"),
-        ("queued_s", "Float64"),
+        ("queue_s", "Float64"),
         ("run_s", "Float64"),
     ),
 )
