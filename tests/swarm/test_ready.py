@@ -1527,3 +1527,16 @@ def test_the_ready_usage_names_its_handoff_document(capsys):
     with pytest.raises(SystemExit):
         cli.build_parser().parse_args(["sw", "ready", "--help"])
     assert "doc" in capsys.readouterr().out
+
+
+def test_the_merge_pass_queues_only_once_a_fresh_read_confirms_green(merging):
+    def run(fresh):
+        return ready.merge_pass(
+            ready.Pass(merging.store, "sw", merging.ledger, {URL: GREEN}.get, {URL: fresh}.get, NOW, merging.queue),
+            merging.rows,
+        )
+
+    assert run(RUNNING) == []
+    assert merging.queued == []
+    assert run(GREEN) == [f"queued {URL} for task t1"]
+    assert merging.queued == [("queue", URL)]

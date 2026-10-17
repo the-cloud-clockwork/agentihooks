@@ -1754,3 +1754,55 @@ def test_an_intent_wait_holds_on_a_verdict_judged_on_another_head(tick):
     assert tick.end() == []
     tick.pulls[URL] = PullRequest("OPEN", None, 1, False, head="old")
     assert tick.end() == [f"ended the wait of {ME}: the intent verdict on {URL}, now pass: fine"]
+
+
+@pytest.mark.parametrize(
+    "queued", [{"name": "unit"}, {"context": "unit", "state": "PENDING"}, {"name": "unit", "state": "EXPECTED"}]
+)
+def test_a_queued_required_check_holds_the_wait_after_the_gate_passed(tick, queued):
+    from scripts.swarm.ledger_events import GATE, pull_request
+
+    tick.hold("checks", URL)
+    gate = {"name": GATE, "conclusion": "SUCCESS", "isRequired": True}
+    raw = {"state": "OPEN", "headRefOid": "first", "gated": True}
+    tick.pulls[URL] = pull_request({**raw, "statusCheckRollup": [gate, {**queued, "isRequired": True}]})
+    assert tick.end() == []
+    assert tick.end() == []
+    assert idle.wait(tick.store.redis, "sw", ME)["on"] == {"kind": "checks", "target": URL, "head": "first"}
+    assert tick.told() == []
+    done = {**queued, "isRequired": True, "conclusion": "SUCCESS"}
+    tick.pulls[URL] = pull_request({**raw, "statusCheckRollup": [gate, done]})
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
+
+
+def test_a_result_read_from_an_older_commit_never_ends_the_wait(tick):
+    from scripts.swarm.ledger_events import GATE, pull_request
+
+    tick.hold("checks", URL)
+    raw = {
+        "state": "OPEN",
+        "headRefOid": "first",
+        "gated": True,
+        "commits": [{"oid": "older", "committedDate": "2026-10-17T10:00:00Z"}],
+        "statusCheckRollup": [{"name": GATE, "conclusion": "SUCCESS"}],
+    }
+    tick.pulls[URL] = pull_request(raw)
+    assert tick.pulls[URL].head == ""
+    assert tick.end() == []
+    assert tick.end() == []
+    assert idle.wait(tick.store.redis, "sw", ME)["on"] == {"kind": "checks", "target": URL, "head": "first"}
+    tick.pulls[URL] = pull_request({**raw, "commits": [{"oid": "first", "committedDate": "2026-10-17T10:00:00Z"}]})
+    assert tick.pulls[URL].head == "first"
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
+
+
+def test_a_cached_green_result_ends_the_wait_only_once_a_fresh_read_confirms_it(tick):
+    tick.hold("checks", URL)
+    tick.pulls[URL] = PullRequest("OPEN", None, 1, False, True, head="first")
+    tick.fresh[URL] = PullRequest("OPEN", None, 1, False, False, head="first")
+    assert tick.end() == []
+    tick.fresh[URL] = PullRequest("OPEN", None, 1, False, True, head="second")
+    assert tick.end() == []
+    assert idle.wait(tick.store.redis, "sw", ME)["on"] == {"kind": "checks", "target": URL, "head": "second"}
+    tick.pulls[URL] = tick.fresh[URL]
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
