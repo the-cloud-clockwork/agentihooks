@@ -229,11 +229,9 @@ def contains_pr_signal(text: str) -> bool:
 
 
 def contains_pane_signal(text: str) -> bool:
-    low = text.lower() if text else ""
+    low = text.lower()
     return any(
-        not any(
-            low[max(0, match.start() - 20) : match.start()].strip().endswith(neg.strip()) for neg in _NEGATION_PREFIXES
-        )
+        not any(low[: match.start()].strip().endswith(neg.strip()) for neg in _NEGATION_PREFIXES)
         for match in _PANE_SIGNAL.finditer(low)
     )
 

@@ -1,3 +1,4 @@
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -67,6 +68,7 @@ ALLOWED = [
     "cat /skills/prompt-user-parameter/scripts/open_param_pane.sh",
     "bash",
     "bash open.sh",
+    "bash other.sh run_param_pane.sh",
     "./run.sh",
     "/skills/run-in-terminal/scripts/01_check_interop.sh",
     "echo herdr pane split",
@@ -173,6 +175,12 @@ def test_an_empty_session_never_opens(home):
     assert not (home / "prod_bypass" / ".pane").exists()
     pane_guard.set_pane_signal("")
     assert not pane_guard.has_pane_signal("")
+
+
+def test_the_flag_lives_beside_the_other_turn_signals(home):
+    pane_guard.set_pane_signal("s1")
+    pane_guard.set_pane_signal("s1")
+    assert [path.relative_to(home) for path in home.rglob("*.pane")] == [Path("prod_bypass/s1.pane")]
 
 
 def test_a_later_typed_prompt_without_the_phrase_closes_it():

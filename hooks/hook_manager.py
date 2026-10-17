@@ -677,9 +677,6 @@ def on_session_end(payload: dict) -> None:
         clear_hotfix_signal(session_id)
         clear_branch_signal(session_id)
         clear_pr_signal(session_id)
-        from hooks.context.pane_guard import clear_pane_signal
-
-        clear_pane_signal(session_id)
     except Exception:
         pass
     try:
@@ -2307,12 +2304,10 @@ def on_stop(payload: dict) -> None:
     try:
         from hooks.context.branch_guard import clear_branch_signal
         from hooks.context.conditions import disarm_gate
-        from hooks.context.pane_guard import clear_pane_signal
         from hooks.context.prod_lockdown import clear_bypass
 
         clear_bypass(session_id)
         clear_branch_signal(session_id)
-        clear_pane_signal(session_id)
         disarm_gate(session_id)
     except Exception as e:
         log("prod_lockdown.clear_bypass failed", {"error": str(e)})

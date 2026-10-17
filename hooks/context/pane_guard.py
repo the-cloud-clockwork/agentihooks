@@ -29,8 +29,8 @@ def _flag(session_id: str) -> Path:
 
 def set_pane_signal(session_id: str) -> None:
     flag = _flag(session_id)
-    flag.parent.mkdir(parents=True, exist_ok=True)
-    flag.write_text("1")
+    flag.parent.mkdir(exist_ok=True)
+    flag.touch()
 
 
 def observe_pane_signal(session_id: str, prompt: str, typed: bool) -> None:
@@ -54,8 +54,8 @@ def has_pane_signal(session_id: str) -> bool:
 
 def _script(tokens: list[str]) -> bool:
     if Path(tokens[0]).name in _SHELLS:
-        tokens = [token for token in tokens[1:] if not token.startswith("-")] or [""]
-    return Path(tokens[0]).name in _SCRIPTS
+        tokens = [token for token in tokens[1:] if not token.startswith("-")]
+    return any(Path(token).name in _SCRIPTS for token in tokens[:1])
 
 
 def _herdr(args: list[str]) -> bool:
@@ -96,7 +96,7 @@ def _quota_handoff(tokens: list[str], session_id: str) -> bool:
 
 
 def check_panes(payload: dict) -> None:
-    session_id = payload.get("session_id", "")
+    session_id = payload.get("session_id")
     if payload.get("tool_name") != "Bash" or has_pane_signal(session_id):
         return
     tool_input = payload.get("tool_input") or {}
