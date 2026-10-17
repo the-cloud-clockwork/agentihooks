@@ -2,13 +2,11 @@ import argparse
 import ast
 import hashlib
 import importlib.metadata
-import io
 import json
 import os
 import subprocess
 import sys
 import tempfile
-import zipfile
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -73,24 +71,6 @@ def dev_record(listing: dict, base: str) -> int | None:
     return None
 
 
-# Only a run on dev itself can have uploaded the trusted record; a pull request's own runs never match.
-def fetch_dev_record(repository: str, name: str, base: str, out: Path) -> bool:
-    try:
-        listing = subprocess.check_output(
-            ["gh", "api", f"repos/{repository}/actions/artifacts?name={name}&per_page=100"], timeout=60
-        )
-        if (artifact := dev_record(json.loads(listing), base)) is None:
-            return False
-        archive = subprocess.check_output(
-            ["gh", "api", f"repos/{repository}/actions/artifacts/{artifact}/zip"], timeout=60
-        )
-        with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
-            out.write_bytes(bundle.read("record.json"))
-    except (OSError, subprocess.SubprocessError, ValueError, KeyError, zipfile.BadZipFile):
-        return False
-    return True
-
-
 def write_record(head: Path, tests: str, out: Path) -> int:
     nodeids = collect_all({"head": head}, tests)["head"]
     identity = collection_identity(head, tests, "")
@@ -106,9 +86,6 @@ def base_from_record(base: Path, tests: str) -> list[str] | None:
     record = os.environ.get("TEST_COUNT_BASE_RECORD")
     if not record:
         return None
-    if repository := os.environ.get("TEST_COUNT_RECORD_REPOSITORY"):
-        base_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=base, text=True).strip()
-        fetch_dev_record(repository, os.environ.get("TEST_COUNT_RECORD_NAME", ""), base_sha, Path(record))
     recorded = recorded_base(Path(record), base, tests)
     print("base count read from the dev record" if recorded else "no dev record matches the base, so it is collected")
     return recorded
