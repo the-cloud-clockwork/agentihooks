@@ -155,6 +155,17 @@ def test_an_edit_cannot_escape_trusted_concurrency(tmp_path, monkeypatch, change
     }
 
 
+def test_an_edited_workflow_cannot_add_an_uncapped_job(tmp_path, monkeypatch):
+    baseline = _workflow(replay={"runs-on": "x", "concurrency": LANED})
+    updated = _workflow(replay={"runs-on": "x", "concurrency": LANED}, escape={"runs-on": "x"})
+    base, head, sha = _repo(tmp_path, {"replay.yml": updated})
+    (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(baseline))
+    monkeypatch.chdir(head)
+    assert lanes.refused(sha, base) == {
+        f"{lanes.WORKFLOWS}/replay.yml": ["job escape has no shared hosted lane concurrency group"]
+    }
+
+
 def test_proof_branch_pushes_are_graded():
     workflow = yaml.safe_load((ROOT / lanes.WORKFLOWS / "branch-lanes.yml").read_text())
     assert "diffcheck/**" not in workflow[True]["push"]["branches-ignore"]

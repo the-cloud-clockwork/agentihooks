@@ -65,7 +65,7 @@ def problems(workflow: object, baseline: object = None) -> list[str]:
         block = job.get("concurrency", workflow.get("concurrency"))
         base_job = (trusted.get("jobs") or {}).get(name, {})
         base_block = base_job.get("concurrency", trusted.get("concurrency"))
-        if trusted and block == base_block:
+        if trusted and (name in (trusted.get("jobs") or {}) or base_block is not None) and block == base_block:
             continue
         problem = lane_problem(block)
         if problem:

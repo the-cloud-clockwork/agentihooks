@@ -16,7 +16,10 @@ pytestmark = pytest.mark.unit
 
 
 def _workflow():
+    from scripts.ci_branch_lanes import GROUP
+
     return {
+        "concurrency": {"group": GROUP, "queue": "max", "cancel-in-progress": False},
         True: {"pull_request": {"branches": ["dev"]}, "merge_group": None, "push": {"branches": ["dev"]}},
         "jobs": {
             "unit": {"runs-on": "ubuntu-latest"},
@@ -309,7 +312,9 @@ def test_branch_lane_grading_holds_the_required_status_from_the_base(repo, capsy
     base["concurrency"] = {"group": GROUP, "queue": "max", "cancel-in-progress": False}
     _commit(repo, {name: base}, {}, "base lane")
     _git(repo, "checkout", "-q", "-b", "pr")
-    planted = _commit(repo, {name: _workflow()}, {}, "drop workflow lane")
+    head = _workflow()
+    head.pop("concurrency")
+    planted = _commit(repo, {name: head}, {}, "drop workflow lane")
     _git(repo, "checkout", "-q", "dev")
     assert gate_protected.main(["--root", str(repo), "--head", planted]) == 1
     assert "shared hosted lane concurrency group" in capsys.readouterr().out
