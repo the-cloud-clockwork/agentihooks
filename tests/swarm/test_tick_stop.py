@@ -53,13 +53,13 @@ def no_stop():
 
 def test_a_service_stop_during_a_tick_releases_its_lock_and_exits_143(env, monkeypatch, capsys):  # noqa: F811
     store, _, _ = env
-    before = signal.getsignal(signal.SIGTERM)
 
     def step():
         os.kill(os.getpid(), signal.SIGTERM)
         assert tick_stop.STOP.wait(10)
 
     seen = blocked_tick(store, monkeypatch, step)
+    before = signal.getsignal(signal.SIGTERM)
     with pytest.raises(SystemExit) as stopped:
         tick_stop.run(["sw"], tick_each(store), no_stop, time.monotonic())
     assert stopped.value.code == 143
