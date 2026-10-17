@@ -82,6 +82,14 @@ def test_preflight_reuses_a_green_report_before_the_plan_installs_anything():
         assert step["if"] == gated, step
 
 
+def test_pull_request_reuse_does_not_grade_the_skipped_empty_plan():
+    plan = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["mutation-plan"]
+    steps, names = _steps(plan)
+    grade = steps[names.index("Grade the empty change set")]
+    install = steps[names.index("Install dependencies")]
+    assert grade["if"] == f"{install['if']} && steps.plan.outputs.changed == '0'"
+
+
 def _steps(job):
     steps = job["steps"]
     return steps, [step.get("name") for step in steps]
