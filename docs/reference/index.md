@@ -19,6 +19,7 @@ Complete reference documentation for configuration and CLI commands.
 | [Decision classifier](classifier.md) | `hooks.classifier`: typed questions to the LiteLLM decision models, failover, down cache, decision log, `classify` and `classifier stats` |
 | [Observability with Langfuse](observability-langfuse.md) | Every telemetry path and where it goes, turning Langfuse on per profile, other OTLP backends, checking a trace arrived, how the Doctor reads traces |
 | [Presentation layer architecture](presentation-layer.md) | The ledger pages, HOME and BIN as a product: constraints, today's architecture, limits, target (static pages, `/api/v1`, server-sent events, SQLite behind a repository) and the migration order |
+| [Ledger watcher replay verification](watch-ledger-replay.md) | Heartbeat frames, replay assertions, test configuration and first-attempt CI evidence |
 | [Ledger design with Impeccable live](ledger-design-live.md) | Start an Impeccable live session against a scratch ledger server; the rules that keep it away from the shared server |
 | [Delivery tiers](delivery-tiers.md) | The three CI tiers (pull request, queue, promotion), why a red integration branch keeps merging, promotion owning the slow checks, fixer tasks for a red promotion, queueing a green head without merging `dev` first, and where coverage is graded |
 | [Test count floor](test-count-floor.md) | The `test-count` job: the base revision grades, the floor, lost tests admitted when the head deletes the function, class, constant or keyword branch they referenced, limits and proof |
