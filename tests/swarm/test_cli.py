@@ -1,4 +1,5 @@
 import json
+import multiprocessing
 import subprocess
 
 import pytest
@@ -7,7 +8,7 @@ from scripts.gates import intent
 from scripts.gates import log as gate_log
 from scripts.gates.verdicts import Verdicts
 from scripts.inbox.store import InboxStore
-from scripts.swarm import cli, dispatcher, runtime, timer
+from scripts.swarm import cli, commands, dispatcher, lease, runtime, timer
 from scripts.swarm.health import checks
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.resume import Outcome
@@ -15,6 +16,7 @@ from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from scripts.swarm_v2.runtime.routed import RoutedRuntime
 from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
+from tests.swarm.test_tick_lock import hold_tick
 
 real_reconcile = timer.reconcile
 
@@ -666,21 +668,10 @@ def test_binning_releases_and_reopens_only_this_swarms_claims(env):
     assert (store.claimant("sw", "t1"), store.claimant("sw", "t2")) == (None, None)
 
 
-def _hold_the_tick_lock(store, held, sender):
-    from scripts.swarm import controller
-
-    sender.send(controller.take_tick_lock(store, "sw", held, 600_000))
-    sender.recv()
-
-
 def _die_holding_the_tick_lock(store):
-    import multiprocessing
-
-    from scripts.swarm import commands, lease
-
     held = lease.acquire(store, "sw", commands.hive_id())
     receiver, sender = multiprocessing.Pipe()
-    child = multiprocessing.get_context("fork").Process(target=_hold_the_tick_lock, args=(store, held, sender))
+    child = multiprocessing.get_context("fork").Process(target=hold_tick, args=(store, held, sender))
     child.start()
     try:
         assert receiver.poll(10)
@@ -722,12 +713,7 @@ def test_a_binned_swarm_reopened_by_a_tick_that_died_holding_the_lock_spawns_its
     assert store.redis.get(store.key("sw", "tick-lock")) is None
 
 
-@pytest.mark.parametrize("gone", [True, False])
-def test_a_tick_that_returns_early_on_its_ledger_releases_its_lock(env, gone):
-    store, ledger, rt = env
-    run("sw", "create", "--repo", "/repo")
-    run("sw", "start")
-    failure = cli.LedgerGone("ledger sw is gone") if gone else RuntimeError("ledger down")
+def _fail_the_first_state_read(ledger, failure):
     state, calls = ledger.state, []
 
     def fail_once(slug):
@@ -737,13 +723,36 @@ def test_a_tick_that_returns_early_on_its_ledger_releases_its_lock(env, gone):
         return state(slug)
 
     ledger.state = fail_once
-    if gone:
-        assert cli.run_tick(store, "sw", ledger, rt, FakeHerdr({})) == [
-            "ledger sw is gone; agentihooks swarm remove sw clears this swarm once it has no agents"
-        ]
-    else:
-        with pytest.raises(RuntimeError, match="^ledger down$"):
-            cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+
+
+def test_a_tick_that_finds_its_ledger_gone_releases_its_lock(env):
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    _fail_the_first_state_read(ledger, cli.LedgerGone("ledger sw is gone"))
+    assert cli.run_tick(store, "sw", ledger, rt, FakeHerdr({})) == [
+        "ledger sw is gone; agentihooks swarm remove sw clears this swarm once it has no agents"
+    ]
+    assert store.redis.get(store.key("sw", "tick-lock")) is None
+
+
+def test_a_tick_that_fails_mid_run_releases_its_lock(env):
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    _fail_the_first_state_read(ledger, RuntimeError("ledger down"))
+    with pytest.raises(RuntimeError, match="^ledger down$"):
+        cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert store.redis.get(store.key("sw", "tick-lock")) is None
+
+
+def test_a_tick_whose_ledger_health_probe_fails_releases_its_lock(env, monkeypatch):
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    monkeypatch.setattr(cli.outage, "ledger_health", lambda slug, at, probe: False)
+    unprobed = object.__new__(cli.ledger_client.LedgerClient)
+    assert cli.run_tick(store, "sw", unprobed, rt, FakeHerdr({})) == ["Ledger health probe failed"]
     assert store.redis.get(store.key("sw", "tick-lock")) is None
 
 
