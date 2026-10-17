@@ -1766,7 +1766,7 @@ jobs:
           [[ -f .antoncore/scripts/swarm_dashboard_columns.py ]] || { echo "::error::The antoncore dashboard column checker could not be checked out."; exit 1; }
           # The checker's own environment carries antoncore's job pins without changing the lint interpreter.
           python -m venv "$RUNNER_TEMP/columns"
-          "$RUNNER_TEMP/columns/bin/python" -m pip install --quiet PyYAML==6.0.3 jsonschema==4.25.1
+          "$RUNNER_TEMP/columns/bin/python" -m pip install --quiet PyYAML==6.0.3 jsonschema==4.25.1 orjson==3.13.0
           git -C .antoncore rev-parse HEAD
           docker run -d --rm --name "$CLICKHOUSE" clickhouse/clickhouse-server:24.1-alpine
           trap 'docker rm -f "$CLICKHOUSE" >/dev/null 2>&1 || true' EXIT
@@ -1775,7 +1775,14 @@ jobs:
             sleep 1
           done
           docker exec "$CLICKHOUSE" clickhouse-client -q 'SELECT 1' >/dev/null 2>&1 || { docker logs "$CLICKHOUSE"; echo "::error::ClickHouse never became ready."; exit 1; }
-          "$RUNNER_TEMP/columns/bin/python" .antoncore/scripts/swarm_dashboard_columns.py check --agentihooks "$GITHUB_WORKSPACE" --container "$CLICKHOUSE"
+          status=0
+          "$RUNNER_TEMP/columns/bin/python" .antoncore/scripts/swarm_dashboard_columns.py check --agentihooks "$GITHUB_WORKSPACE" --container "$CLICKHOUSE" 2> "$RUNNER_TEMP/columns.err" || status=$?
+          cat "$RUNNER_TEMP/columns.err" >&2
+          if (( status )); then
+            missing=$(grep -oP "No module named '\K[^']+" "$RUNNER_TEMP/columns.err" | sort -u | paste -sd, - || true)
+            [[ -z "$missing" ]] || echo "::error::The dashboard column checker imports $missing, which its environment lacks; pin it on this step's pip install line."
+            exit 1
+          fi
 
       - name: Select docs build
         if: ${{ !cancelled() }}
