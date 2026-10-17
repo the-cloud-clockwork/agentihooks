@@ -986,6 +986,40 @@ def test_inbox_channel_puts_the_channel_flags_first_for_claude_only(monkeypatch,
     assert line.endswith("--model opus")
 
 
+@pytest.mark.parametrize("profile_home", [False, True])
+def test_inbox_channel_registers_before_native_startup(monkeypatch, tmp_path, capsys, profile_home):
+    import json
+
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "requested"))
+    monkeypatch.setattr(init_agent, "_launch_command", lambda *args: ("linux", ["t"]))
+    environ = {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "rt")}
+    config = tmp_path / ".claude.json"
+    if profile_home:
+        native_home = tmp_path / "master"
+        native_home.mkdir()
+        environ["CLAUDE_CONFIG_DIR"] = str(native_home)
+        config = native_home / ".claude.json"
+    config.write_text(json.dumps({"hasCompletedOnboarding": True, "mcpServers": {"existing": {"command": "existing"}}}))
+    argv = ["--dir", str(tmp_path), "--agent", "claude", "--inbox-channel", "--dry-run"]
+    assert init_agent.main(argv, environ) == 0
+    registered = json.loads(config.read_text())
+    assert registered["hasCompletedOnboarding"] is True
+    assert registered["mcpServers"]["existing"] == {"command": "existing"}
+    args = next(line for line in capsys.readouterr().out.splitlines() if line.startswith("claude_args="))
+    inline = shlex.split(args.removeprefix("claude_args="))[0].removeprefix("--mcp-config=")
+    native = registered["mcpServers"]["inbox"]
+    active = json.loads(inline)["mcpServers"]["inbox"]
+    assert native["command"] == active["command"]
+    assert native["args"][:-1] == active["args"][:-1]
+    calls = []
+    from scripts.inbox import channel
+
+    monkeypatch.setattr(channel, "main", lambda active=True: calls.append(active))
+    exec(native["args"][-1])
+    exec(active["args"][-1])
+    assert calls == [False, True]
+
+
 @pytest.mark.parametrize("channel", [True, False])
 def test_a_channel_launch_pins_legacy_mcp_negotiation_before_claude(tmp_path, channel):
     env = {"XDG_RUNTIME_DIR": str(tmp_path)}

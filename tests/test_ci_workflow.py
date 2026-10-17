@@ -459,6 +459,83 @@ def test_shards_wait_only_on_the_durations_lookup():
     assert jobs["lint"]["needs"] in (["reuse"], ["reuse", "admission"])
 
 
+def test_full_suite_collection_starts_beside_selection_and_feeds_split():
+    jobs = _workflow()["jobs"]
+    assert "collect" not in jobs
+    collect = jobs["test-count"]
+    assert collect["needs"] == jobs["select"]["needs"]
+    assert "needs.select" not in collect["if"]
+    assert collect["strategy"]["matrix"] == jobs["split"]["strategy"]["matrix"]
+    command = next(
+        step["run"] for step in collect["steps"] if step.get("name") == "Hold the base revision's test count"
+    )
+    assert "tests.duration_coverage import collected_tests" in command
+    assert "collected_tests(Path.cwd())" in command
+    upload = next(step for step in collect["steps"] if step.get("name") == "Upload the early collection")
+    download = next(step for step in jobs["split"]["steps"] if step.get("name") == "Download the early collection")
+    assert upload["with"]["if-no-files-found"] == "error"
+    assert download["with"]["name"] == upload["with"]["name"]
+    assert "test-count" in jobs["split"]["needs"]
+    adopt = next(step for step in jobs["split"]["steps"] if step.get("name") == "Adopt latest dev durations")
+    assert "--collection collected.json" in adopt["run"]
+    assert "test-count" in jobs["gate-required"]["needs"]
+    assert "split" in jobs["gate-required"]["needs"]
+
+
+@pytest.mark.parametrize("result", ["success", "failure", "skipped", "cancelled"])
+def test_split_rejects_a_failed_collection_before_reading_any_artifact(result):
+    steps = _workflow()["jobs"]["split"]["steps"]
+    guard = next(step for step in steps if step.get("name") == "Require successful early collection")
+    download = next(step for step in steps if step.get("name") == "Download the early collection")
+    assert guard["if"] == download["if"]
+    assert guard["env"]["COLLECTION_RESULT"] == "${{ needs.test-count.result }}"
+    assert steps.index(guard) < steps.index(download)
+    outcome = subprocess.run(
+        ["bash", "-e", "-c", guard["run"]],
+        env=dict(os.environ, COLLECTION_RESULT=result),
+        capture_output=True,
+        text=True,
+    )
+    assert (outcome.returncode == 0) == (result == "success")
+
+
+@pytest.mark.parametrize("collection,floor", [(0, 0), (1, 0), (0, 1), (1, 1)])
+def test_collection_and_count_floor_both_have_to_succeed(tmp_path, collection, floor):
+    base = tmp_path / "base" / "tests"
+    base.mkdir(parents=True)
+    (base / "count_floor.py").touch()
+    commands = tmp_path / "commands"
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    python = binary / "python"
+    python.write_text(
+        '#!/usr/bin/env bash\nset -euo pipefail\nprintf "%s\\n" "$1" >> "$CALLS"\n'
+        'if [[ "$1" == -c ]]; then exit "$COLLECTION_EXIT"; fi\nexit "$FLOOR_EXIT"\n'
+    )
+    python.chmod(0o755)
+    step = next(
+        step
+        for step in _workflow()["jobs"]["test-count"]["steps"]
+        if step.get("name") == "Hold the base revision's test count"
+    )
+    outcome = subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        env=dict(
+            os.environ,
+            RUNNER_TEMP=str(tmp_path),
+            GITHUB_WORKSPACE=str(tmp_path),
+            PATH=f"{binary}:{os.environ['PATH']}",
+            CALLS=str(commands),
+            COLLECTION_EXIT=str(collection),
+            FLOOR_EXIT=str(floor),
+        ),
+        capture_output=True,
+        text=True,
+    )
+    assert (outcome.returncode == 0) == (collection == floor == 0)
+    assert sorted(commands.read_text().splitlines()) == ["-c", "-m"]
+
+
 def test_promotion_shard_reports_use_the_pushed_grader_and_prs_keep_the_base():
     steps = _workflow()["jobs"]["shard-check"]["steps"]
     checkout = next(step for step in steps if step.get("uses", "").startswith("actions/checkout@"))
