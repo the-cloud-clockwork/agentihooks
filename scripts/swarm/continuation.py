@@ -11,8 +11,8 @@ def fresh(reason: str) -> dict:
 
 
 def retained(task: dict) -> str:
-    ref = (task.get("handoff_envelope") or task.get("reclaim") or {}).get("continue_from") or ""
-    branch = ref.removeprefix("origin/") if ref.startswith("origin/") else ""
+    ref = (task.get("handoff_envelope") or task.get("reclaim") or {}).get("continue_from")
+    branch = ref.removeprefix("origin/") if isinstance(ref, str) and ref.startswith("origin/") else ""
     return "" if branch in PROTECTED else branch
 
 
