@@ -70,14 +70,18 @@ def _aggregator_problems(
             field == "steps"
             and base_id == "gate-required"
             and head_job.get("steps")
-            in (
-                [ci_reuse.gate_steps(selected=selected) for selected in (False, True)]
-                + [ci_reuse.gate_steps(queue_tier=True), ci_reuse.gate_steps(queue_tier=True, promotion=True)]
-                + [
-                    ci_reuse.gate_steps(queue_tier=True, consolidated=True),
-                    ci_reuse.gate_steps(queue_tier=True, promotion=True, consolidated=True),
-                ]
-            )
+            in [
+                ci_reuse.gate_steps(**form, summary=summary)
+                for form in (
+                    {},
+                    {"selected": True},
+                    {"queue_tier": True},
+                    {"queue_tier": True, "promotion": True},
+                    {"queue_tier": True, "consolidated": True},
+                    {"queue_tier": True, "promotion": True, "consolidated": True},
+                )
+                for summary in (False, True)
+            ]
         )
         and not (field == "runs-on" and head_job.get(field) in runners(policy))
     ]
