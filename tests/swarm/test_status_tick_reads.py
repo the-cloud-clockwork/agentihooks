@@ -62,3 +62,56 @@ def test_tick_findings_preserve_check_waits_without_reading_github(monkeypatch, 
     found = status.findings(store, "sw", config, tasks, [], view=lambda url: snapshot)
 
     assert any(row["kind"] == "idle with claim" for row in found) is idle
+
+
+def test_slow_merge_observation_is_bounded_and_keeps_the_existing_finding(monkeypatch):
+    import time
+    from datetime import datetime, timezone
+
+    from scripts.swarm.health import merge_stall
+
+    now, elapsed = 1_800_000_000_000, [0.0]
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    old = {
+        "tried": 0,
+        "queue": 2,
+        "merged": now - 2 * merge_stall.HOUR_MS,
+        "at": now,
+        "repo": "o/r",
+        "failed": "Previous check (2 runs)",
+    }
+    store.redis.set(store.key("sw", "merge-stall"), json.dumps(old))
+    monkeypatch.setattr(time, "monotonic", lambda: elapsed[0])
+    stamp = datetime.fromtimestamp(old["merged"] / 1000, timezone.utc).isoformat()
+
+    def run(command, **kwargs):
+        wait = min(14, kwargs["timeout"])
+        elapsed[0] += wait
+        if wait < 14:
+            raise subprocess.TimeoutExpired(command, wait)
+        if command[1:3] == ["repo", "view"]:
+            data = {"nameWithOwner": "o/r"}
+        elif command[2] == "graphql":
+            data = {
+                "data": {
+                    "repository": {
+                        "mergeQueue": {"entries": {"totalCount": 2}},
+                        "pullRequests": {
+                            "nodes": [{"mergedAt": stamp, "updatedAt": stamp}],
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                        },
+                    }
+                }
+            }
+        elif "/jobs?" in command[2]:
+            data = {"jobs": [{"name": "Lint", "conclusion": "failure"}]}
+        else:
+            data = {"workflow_runs": [{"id": 1, "conclusion": "failure"}]}
+        return subprocess.CompletedProcess(command, 0, json.dumps(data), "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    found = merge_stall.findings(store, "sw", "/repo", now)
+
+    assert elapsed[0] < 30, f"Merge observation held findings for {elapsed[0]} seconds"
+    assert len(found) == 1 and found[0].kind == "merge stall"
+    assert "Previous check (2 runs)" in " ".join(found[0].evidence)
