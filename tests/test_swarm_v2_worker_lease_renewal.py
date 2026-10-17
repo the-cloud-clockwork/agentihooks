@@ -320,14 +320,16 @@ class Rollout:
         return 200, acknowledged(self.clock, lease_deadline_ms=int(self.clock.wall * 1000) + HANDOVER_MS)
 
 
-def roll(tmp_path: Path, end: float) -> tuple[lease_renewal.Renewer, Rollout, Clock]:
+def roll(tmp_path: Path, end: float) -> tuple[lease_renewal.Renewer, Rollout, float]:
     clock = Clock()
     controller = Rollout(clock, 100.0 + lease_renewal.CREDENTIAL_SECONDS - 1, end)
     lease = lease_renewal.load(attempt_folder(tmp_path), controller, clock.monotonic, clock.time)
-    while lease.lost is None and clock.now < 500.0:
+    while clock.now < 500.0:
         lease.tick()
+        if lease.lost is not None:
+            break
         clock.advance(1.0)
-    return lease, controller, clock
+    return lease, controller, clock.now
 
 
 def test_a_worker_keeps_its_lease_through_a_controller_rollout_longer_than_the_old_lease(tmp_path):
@@ -339,10 +341,10 @@ def test_a_worker_keeps_its_lease_through_a_controller_rollout_longer_than_the_o
 
 
 def test_a_worker_loses_its_lease_when_the_controller_stays_gone_past_the_handover(tmp_path):
-    lease, controller, clock = roll(tmp_path, float("inf"))
+    lease, controller, lost_at = roll(tmp_path, float("inf"))
 
     assert lease.lost == "lease_expired"
-    assert clock.now - 1.0 == controller.acknowledged + HANDOVER_MS / 1000
+    assert lost_at == controller.acknowledged + HANDOVER_MS / 1000
 
 
 def test_a_lease_deadline_comes_from_the_last_acknowledgement(tmp_path):

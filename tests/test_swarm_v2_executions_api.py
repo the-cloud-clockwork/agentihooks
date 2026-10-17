@@ -572,7 +572,8 @@ def test_the_default_server_lease_outlasts_a_controller_handover(world, monkeypa
     from scripts.swarm_v2.api.executions import ExecutionsAPI
 
     monkeypatch.delenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", raising=False)
-    assert ExecutionsAPI(world.grants, world.tasks).lease_ms == lease.ttl_ms() + lease.tick_ms() == 240_000
+    assert lease.ttl_ms() + lease.tick_ms() == 240_000
+    assert ExecutionsAPI(world.grants, world.tasks).lease_ms == 240_000
 
 
 def test_a_renewed_grant_outlives_the_server_lease():
