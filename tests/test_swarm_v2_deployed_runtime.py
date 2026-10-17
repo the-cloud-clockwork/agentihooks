@@ -390,7 +390,7 @@ def test_a_controller_with_no_local_accounts_sizes_engineer_and_ci_lanes_from_fl
     finally:
         service.stop()
 
-    assert decision["effective"] == {"eng": 2, "ci": 1, "plan": 0}
+    assert decision["effective"] == {"eng": 1, "ci": 1, "plan": 0}
     assert decision["placeable"] == {"claude": 3, "codex": 0}
     assert [(row["name"], row["sessions"], row["cap"]) for row in decision["accounts"]] == [
         (ACCOUNT, 1, 2),

@@ -196,12 +196,7 @@ def _credential(server: ModuleType, slug: str, owner: dict) -> str:
 
 def credential(handler: object, server: ModuleType, slug: str) -> dict:
     owner = _owner(server, slug)
-    caller = server.authority.principal(
-        server.repository.token(owner["parent"]),
-        owner["parent"],
-        handler.headers.get("X-Ledger-Token"),
-        handler.headers.get("X-Ledger-Agent"),
-    )
+    caller = server.authority.caller(handler.headers, server.repository.token(owner["parent"]), owner["parent"])
     if caller != owner["owner"]:
         raise APIError(403, "forbidden", "Only the creating engineer receives the fixture credential")
     return {"data": {"credential": _credential(server, slug, owner)}}

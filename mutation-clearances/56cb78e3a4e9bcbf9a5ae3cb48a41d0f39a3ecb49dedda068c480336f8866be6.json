@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/publish_gate.py:scripts.swarm.publish_gate.x_graded__mutmut_6:d73b54371a283765c8eed9e83b0d16b91c6001ddde8dbfb9575a2d87c432bb16": {
+    "reader": "standards_reader",
+    "reason": "Replaces rsplit(\" \", 1) with rsplit(None, 1) on the unit label. Every label is built as \"file lines\", f\"{name} lines\" or f\"{name} {code}\", where name is a size_limits qualified name (identifiers, dots, optional #n) and code is a ruff code, so it holds exactly one space and no other whitespace; every variant yields the same leading name."
+  }
+}

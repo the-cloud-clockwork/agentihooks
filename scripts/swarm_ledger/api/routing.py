@@ -27,12 +27,7 @@ def _principal(handler: object, server: ModuleType) -> str | None:
     slug = handler.headers.get("X-Ledger-Slug") or ""
     if not server.core.SLUG_RE.fullmatch(slug) or not handler.exists(slug):
         return None
-    return server.authority.principal(
-        server.repository.token(slug),
-        slug,
-        handler.headers.get("X-Ledger-Token"),
-        handler.headers.get("X-Ledger-Agent"),
-    )
+    return server.authority.caller(handler.headers, server.repository.token(slug), slug)
 
 
 def _write(settings: SettingsStore, payload: dict) -> None:

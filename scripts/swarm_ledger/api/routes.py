@@ -39,12 +39,7 @@ def dispatch(handler: object, server: ModuleType) -> dict | str | None:
         raise APIError(404, "ledger_missing", "No such ledger")
     if path == "agent-token" and handler.command == "POST":
         return agent_token(handler, server, slug)
-    principal = server.authority.principal(
-        server.repository.token(slug),
-        slug,
-        handler.headers.get("X-Ledger-Token"),
-        handler.headers.get("X-Ledger-Agent"),
-    )
+    principal = server.authority.caller(handler.headers, server.repository.token(slug), slug)
     if principal is None and server.authority.controller(handler.headers.get("X-Controller-Credential")):
         principal = ""
     if principal is None:
