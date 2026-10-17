@@ -1007,7 +1007,17 @@ def test_inbox_channel_registers_before_native_startup(monkeypatch, tmp_path, ca
     assert registered["mcpServers"]["existing"] == {"command": "existing"}
     args = next(line for line in capsys.readouterr().out.splitlines() if line.startswith("claude_args="))
     inline = shlex.split(args.removeprefix("claude_args="))[0].removeprefix("--mcp-config=")
-    assert registered["mcpServers"]["inbox"] == json.loads(inline)["mcpServers"]["inbox"]
+    native = registered["mcpServers"]["inbox"]
+    active = json.loads(inline)["mcpServers"]["inbox"]
+    assert native["command"] == active["command"]
+    assert native["args"][:-1] == active["args"][:-1]
+    calls = []
+    from scripts.inbox import channel
+
+    monkeypatch.setattr(channel, "main", lambda active=True: calls.append(active))
+    exec(native["args"][-1])
+    exec(active["args"][-1])
+    assert calls == [False, True]
 
 
 @pytest.mark.parametrize("channel", [True, False])

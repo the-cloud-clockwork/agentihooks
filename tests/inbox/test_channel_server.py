@@ -353,3 +353,14 @@ def test_main_without_identity_exits_with_the_reason(monkeypatch, capsys):
         channel.main()
     assert stopped.value.code == 1
     assert capsys.readouterr().err == "agentihooks inbox channel: no session identity\n"
+
+
+def test_registered_server_without_channel_activation_never_claims_messages(monkeypatch):
+    import anyio
+
+    calls = []
+    monkeypatch.setattr(channel, "identity", lambda: "ordinary-session")
+    monkeypatch.setattr(channel, "connect", lambda: pytest.fail("an inactive channel must not connect to the inbox"))
+    monkeypatch.setattr(anyio, "run", lambda serve, store, me: calls.append((store, me)))
+    channel.main(active=False)
+    assert calls == [(None, "ordinary-session")]
