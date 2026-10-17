@@ -261,6 +261,8 @@ A shard listed with `success` stalled once and recovered; one listed with `failu
 
 ## Historical measurements
 
+For branch mutation preflight, see [Measured shards and split mutants](reference/mutation-gate.md#measured-shards-and-split-mutants): heavy mutants run a shared fast test head plus separate tail slices on distinct shards, and the merge job combines their results into one grade per mutant. The reference includes planning defaults, proof commands, completeness checks and the distinction between estimated work and observed mutation step timing.
+
 Last ten runs of the Tests workflow on dev (35380163028, 35379942561, 35379468297, 35156774129, 35156548701, 35156299806, 35155214526, 35138446531, 35138276256, 35137837913). Seconds per step, mean and max over those runs.
 
 | Job | Step | Mean | Max | Slowest run |
