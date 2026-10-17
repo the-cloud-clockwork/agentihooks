@@ -59,7 +59,7 @@ def lint(base: str, paths: dict[Path, Path]) -> list[str]:
     lines = {path.as_posix(): changed_lines(base, path, old) for path, old in paths.items()}
     for hit in json.loads(result.stdout):
         rel, row = Path(hit["filename"]).relative_to(root).as_posix(), hit["location"]["row"]
-        if hit["code"] == "invalid-syntax" or row in lines[rel]:
+        if hit["code"] == "invalid-syntax" or lines[rel] & set(range(row, hit["end_location"]["row"] + 1)):
             errors.append(f"{rel}:{row}:{hit['location']['column']}: {hit['code']} {hit['message']}")
     return errors
 
