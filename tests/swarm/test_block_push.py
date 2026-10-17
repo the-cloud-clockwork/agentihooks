@@ -2,7 +2,7 @@ import subprocess
 
 import pytest
 
-from scripts.swarm import cli, publish
+from scripts.swarm import cli, publish, stack
 from tests.swarm.test_cli import env
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -98,3 +98,22 @@ def test_block_without_a_task_worktree_blocks_as_before(worktree):
     assert block() == 0
     assert ledger.rows["t1"]["state"] == "blocked"
     assert "branch" not in ledger.rows["t1"]
+
+
+@pytest.mark.parametrize(
+    ("failing", "says"),
+    [("branch", "cannot read the worktree branch"), ("rev-list", "cannot count the worktree commits")],
+)
+def test_block_refuses_when_a_worktree_git_read_fails(worktree, capsys, monkeypatch, failing, says):
+    real = stack.shell
+
+    def answer(argv):
+        if argv[3:4] == [failing]:
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="boom\n")
+        return real(argv)
+
+    monkeypatch.setattr(stack, "shell", answer)
+    capsys.readouterr()
+    assert block() == 1
+    assert capsys.readouterr().err == f"swarm: {says}: boom\n"
+    assert worktree[0].rows["t1"].get("state") != "blocked"
