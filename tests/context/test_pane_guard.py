@@ -19,6 +19,7 @@ OPENERS = [
     "herdr worktree create topic",
     "herdr worktree open topic",
     "herdr --session main pane split",
+    "herdr --json pane split",
     "herdr --machine box tab create",
     "herdr --remote me@host workspace create",
     "agentihooks run-in-terminal --dir /repo -- npm test",
@@ -42,6 +43,7 @@ ALLOWED = [
     "herdr worktree list",
     "herdr agent read a1",
     "herdr --session main pane list",
+    "herdr --json pane read p1",
     "herdr --session pane split",
     "agentihooks init-agent --handoff /doc.md",
     "agentihooks swarm demo start",
@@ -76,7 +78,17 @@ def test_the_signal_phrases():
     assert PANE_SIGNALS == ["open pane", "open a pane", "open the pane"]
     for phrase in ("Open Pane", "please OPEN A PANE for the login", "open the pane beside you"):
         assert contains_pane_signal(phrase)
-    for phrase in ("open the task", "pane", "don't open pane", "never open a pane", "split a pane"):
+    for phrase in (
+        "open the task",
+        "pane",
+        "don't open pane",
+        "never open a pane",
+        "split a pane",
+        "open panel settings",
+        "reopen pane",
+        "open panes",
+        "",
+    ):
         assert not contains_pane_signal(phrase)
 
 
@@ -101,7 +113,13 @@ def test_codex_shell_command_key_is_guarded():
 def test_other_tools_and_empty_commands_pass():
     check("herdr pane split", tool="Read")
     check("")
+    pane_guard.check_panes({"tool_name": "Bash"})
     assert not pane_guard.opens_pane([])
+
+
+def test_a_payload_without_a_session_is_guarded():
+    with pytest.raises(BlockAction):
+        pane_guard.check_panes({"tool_name": "Bash", "tool_input": {"command": "herdr pane split"}})
 
 
 @pytest.mark.parametrize("command", OPENERS)

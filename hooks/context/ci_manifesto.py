@@ -39,6 +39,7 @@ _DEFAULT_BRANCH_SIGNALS = [
     "feature branch",
 ]
 PANE_SIGNALS = ["open pane", "open a pane", "open the pane"]
+_PANE_SIGNAL = re.compile(r"\bopen (?:a |the )?pane\b")
 _DEFAULT_PR_SIGNALS = [
     "open a pr",
     "open the pr",
@@ -228,7 +229,11 @@ def contains_pr_signal(text: str) -> bool:
 
 
 def contains_pane_signal(text: str) -> bool:
-    return _signal_match(text, PANE_SIGNALS)
+    low = text.lower() if text else ""
+    return any(
+        _signal_match(low[max(0, match.start() - 20) : match.end()], PANE_SIGNALS)
+        for match in _PANE_SIGNAL.finditer(low)
+    )
 
 
 # Claude Code injects hook stdout and additionalContext into the model's

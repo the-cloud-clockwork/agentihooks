@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from hooks.context.shell_commands import _SHELLS, commands
+from hooks.hook_manager import BlockAction
 
 DENY = (
     "BLOCKED [pane]: agents never open a herdr pane, tab, workspace or terminal on their own. "
@@ -72,8 +73,6 @@ def opens_pane(tokens: list[str]) -> bool:
 def check_panes(payload: dict) -> None:
     if payload.get("tool_name") != "Bash" or has_pane_signal(payload.get("session_id", "")):
         return
-    from hooks.hook_manager import BlockAction
-
     tool_input = payload.get("tool_input") or {}
     command = tool_input.get("command") or tool_input.get("cmd")
     if command and any(opens_pane(tokens) for tokens in commands(command)):
