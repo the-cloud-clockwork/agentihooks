@@ -310,7 +310,7 @@ def test_branch_lane_grading_holds_the_required_status_from_the_base():
     ]
     report = steps[-1]
     assert report["env"]["OUTCOME"] == "${{ steps.grade.outcome }}"
-    assert 'state=failure' in report["run"]
+    assert "state=failure" in report["run"]
 
 
 def test_the_protected_grader_reports_gate_required_on_the_head():
