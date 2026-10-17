@@ -171,7 +171,8 @@ def test_pool_fence_and_front_door_agree_on_the_seats_mid_handoff(swarm, inbox):
     fence = Seats(SLUG, swarm, {})
     assert live_masters(swarm.redis, SLUG) == fence.live == Mail(inbox, swarm, SLUG).masters == [FRONT, SECOND]
     assert master_address(swarm.redis, SLUG, swarm.agents(SLUG)) == fence.lead == FRONT
-    assert (fence.writer("sw-master-2b"), fence.writer("sw-master-1")) == (SECOND, FRONT)
+    writers = (fence.writer("sw-master-2b"), fence.writer("sw-master-1"), fence.writer("sw-master-2"))
+    assert writers == (SECOND, FRONT, "sw-master-2")
     items = [inbox.send("swarm", FRONT, f"item {n}") for n in range(2)]
     assert [inbox.get(i.id).address for i in items] == [FRONT, SECOND]
 
