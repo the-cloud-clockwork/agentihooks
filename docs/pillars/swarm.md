@@ -254,11 +254,9 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 ## Plan tracing for promotion fixer tasks
 
 Promotion failures create fixer tasks whose identifiers include the Actions run
-number, for example `promo-38842603017-0`. Plan tracing accepts that exact
-registered task identifier in its generated follow-up text. It uses the same
-registered-task exception that lets Doctor task identifiers containing hash-like
-characters pass the plain words check. No identifier rename or extra setting is
-needed.
+number, for example `promo-38842603017-0`. Plan tracing accepts any task
+identifier registered in the swarm ledger, matched as a whole token, in the
+follow-up text it generates. Free text run numbers are still refused.
 
 ### Trace the fix plan
 
@@ -277,65 +275,63 @@ Use the actual areas needed by the fix. Then run:
 agentihooks swarm example-swarm trace-plan
 ```
 
-The command resolves the agent and claimed task from the session. Its report
-names the verdict, kept pieces and cut pieces. If the classifier cuts the
-unrelated piece and the plan passes, the generated follow-up can contain:
+The command resolves the agent and claimed task from the session. Before any
+classifier call it checks each piece's follow-up text,
+`Cut from the plan of task <task id>: <what>`, against the ledger's plain words
+rules. Its report names the verdict, kept pieces and cut pieces. If the
+classifier cuts the unrelated piece and the plan passes, the filed follow-up
+reads:
 
 ```text
 Cut from the plan of task promo-38842603017-0: Add an unrelated feature
 ```
 
-The task identifier in that generated text passes validation. Classifier scope
-and size judgments still apply; accepting the identifier does not make every
-plan pass. Review the kept areas before editing. The command reference above
-also describes authorization handling and the separate build and intent gates.
+Classifier scope and size judgments still apply; accepting the identifier does
+not make every plan pass. The command reference above also describes
+authorization handling and the separate build and intent gates.
 
 ### Configure enforcement
 
-The operator or master selects the gate mode for the swarm:
+The operator or master selects the gate mode, as described in the
+`<gate>-gate` row of the command reference:
 
 ```bash
 agentihooks swarm example-swarm set trace-plan-gate=deny
-agentihooks swarm example-swarm status
-```
-
-`deny` enforces plan tracing failures; a second failed plan blocks the task.
-The default `log only` records would-be denials while allowing the call through.
-To select that mode explicitly:
-
-```bash
 agentihooks swarm example-swarm set "trace-plan-gate=log only"
 ```
 
-`skip` disables the check. Inside a swarm, the saved swarm configuration governs
-the gate; an agent's environment does not override it. This identifier fix needs
-no mode change. Check the reported `gate_modes` when comparing a refusal in an
-enforcing swarm with a logged failure in another swarm.
+The mode governs only what follows a failed verdict. Under `deny` the first
+failed plan is logged and returned to the agent to revise; a second failed plan
+with different content sets the task to blocked, comments the reasons on it and
+retires the agent. `log only`, the default, logs the would-be block. `skip`
+writes no gate log row and never blocks; the classifier still runs and the
+verdict is still saved. `agentihooks swarm example-swarm status` reports each
+gate's mode as `gate_modes`.
 
 ### Plain words limits and refusals
 
-The exception matches a whole task token exactly against the registered task
-identifiers supplied to validation. For plan tracing, that context includes the
-task whose plan is being traced. It exempts the token from the commit hash and
-run or job identifier checks; other prose rules still apply.
+The exception covers a token that exactly equals a task identifier registered
+in the swarm ledger. It exempts that token from the commit hash and run or job
+identifier checks; other prose rules still apply.
 
-For a trace of registered task `promo-38842603017-0`:
+With `promo-38842603017-0` registered and no other promotion task:
 
 | Text | Plain words result |
 |---|---|
 | `Cut from the plan of task promo-38842603017-0: Add an unrelated feature` | Accepted by the identifier checks. |
 | `Run 38842603017 failed` | Refused: a free text run number. |
-| `promo-38842603017-1` | Refused: this different token is absent from the supplied task context. |
+| `promo-38842603017-1` | Refused: the token is not a registered task identifier. |
 | `promo-38842603017-0 Run 38842603017 failed` | Refused: the separate run number remains in the prose. |
 
-If tracing reports that the ledger would refuse a follow-up, inspect the named
-plain words violation. Keep plan descriptions in plain words; a registered
+A piece whose follow-up would be refused stops the trace in every gate mode,
+with `plan line <n>: the ledger would refuse its follow up` and the named
+violation. No verdict is saved, so the build gate treats edits as made before a
+passing plan. Rewrite the piece's description in plain words; a registered
 identifier does not authorize bare run numbers elsewhere in a plan piece or
 comment. Put run evidence in the task proof and link the Actions run when
-referencing it in ledger prose. If only the generated task token is rejected,
-verify the claimed task and that the running installation includes the promotion
-fixer identifier correction. Retrying unchanged text does not resolve a
-validation refusal.
+referencing it in ledger prose. If only the generated task token is refused,
+confirm the claimed task appears in the swarm ledger under that exact
+identifier. Retrying unchanged text does not resolve a validation refusal.
 
 ## Deployed host capacity
 
