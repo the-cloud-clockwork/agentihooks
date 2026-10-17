@@ -124,8 +124,12 @@ def test_the_calling_session_resolves_its_old_name_to_the_routed_account(tmp_pat
 def test_a_token_fingerprint_reads_raw_environment_bytes(tmp_path):
     root = tmp_path / "proc"
     (root / "700").mkdir(parents=True)
-    (root / "700" / "environ").write_bytes(b"AH_CC_TOKEN_old=secret-\xff\0AH_CC_TOKEN_none=\0HOME=/home/u\0")
+    (root / "700" / "environ").write_bytes(
+        b"AH_CC_TOKEN_old=secret-\xff\0AH_CC_TOKEN_none=\0AH_CC_TOKEN_eq=a=b\0HOME=/home/u\0"
+    )
     expected = hashlib.sha256(b"secret-\xff").hexdigest()
+
+    assert acc._env_fingerprint(700, root, "AH_CC_TOKEN_eq") == hashlib.sha256(b"a=b").hexdigest()
 
     assert acc.token_fingerprint("secret-\udcff") == expected
     assert acc._env_fingerprint(700, root, "AH_CC_TOKEN_old") == expected
