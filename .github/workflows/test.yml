@@ -666,6 +666,7 @@ jobs:
           path: collected.json
           if-no-files-found: error
           retention-days: 7
+          overwrite: true
 
   # Every shard of a version splits on the one map this job chooses, so the whole suite is collected once per version, not once per shard.
   split:
