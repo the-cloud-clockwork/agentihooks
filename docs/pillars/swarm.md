@@ -269,10 +269,14 @@ worker's branch name:
 
 The current implementation checks a retained continuation from the handoff or
 reclaim record first, then the branch supplied by repository and checkout
-selection. Each candidate must pass the ancestry check. A different local
-branch name alone does not require a new remote branch: even parked work stays
-on an eligible recorded branch when it still fast forwards, including when
-there were no task commits beyond the stacked base.
+selection. Each candidate must pass the ancestry check. Inside a task worktree,
+checkout selection supplies the local branch; preserving a predecessor target
+there requires a retained handoff or reclaim continuation. From a primary
+checkout, selection can instead supply the task's recorded repository branch.
+In those continuation contexts, a different local branch name alone does not
+require a new remote branch: even parked work stays on an eligible recorded
+branch when it still fast forwards, including when there were no task commits
+beyond the stacked base.
 
 After a successful push, the result's `branch` names the actual target and
 `head` names the published commit. The task records that target in `branch` and
