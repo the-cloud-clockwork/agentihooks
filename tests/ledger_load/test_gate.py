@@ -242,6 +242,39 @@ def test_a_run_returns_its_problems_and_its_measured_write_p95(monkeypatch, tmp_
     assert ledger_load.run(tmp_path) == ([], 0.7)
 
 
+def resource_samples(threads=0, memory=0):
+    return [(float(n), 12 + threads * n, 100_000 + memory * n) for n in range(91)]
+
+
+def test_stable_server_resources_and_initial_warmup_pass():
+    samples = [(at, count, rss + (50_000 if at >= 10 else 0)) for at, count, rss in resource_samples()]
+    assert ledger_load.resource_verdict(samples) == []
+
+
+def test_continuing_thread_growth_is_red():
+    problems = ledger_load.resource_verdict(resource_samples(threads=0.5))
+    assert len(problems) == 1
+    assert "server threads kept growing" in problems[0]
+
+
+def test_continuing_memory_growth_is_red():
+    problems = ledger_load.resource_verdict(resource_samples(memory=2048))
+    assert len(problems) == 1
+    assert "server RSS kept growing" in problems[0]
+
+
+def test_a_temporary_resource_peak_that_recovers_passes():
+    samples = [(at, count + (100 if 40 <= at <= 45 else 0), rss) for at, count, rss in resource_samples()]
+    assert ledger_load.resource_verdict(samples) == []
+
+
+def test_missing_or_short_resource_measurements_are_red():
+    assert ledger_load.resource_verdict([]) == ["server resource sampling did not cover 60s after warmup"]
+    assert ledger_load.resource_verdict(resource_samples()[:40]) == [
+        "server resource sampling did not cover 60s after warmup"
+    ]
+
+
 def test_some_open_alerts_are_past_their_quiet_hour_so_the_expiry_sweep_has_work():
     at = 10 * ledger_load.ALERT_QUIET_MS
     alerts = [ledger_load.alert(n, at) for n in range(ledger_load.ALERTS)]
