@@ -81,10 +81,6 @@ def _orphan(tmp_path, sid):
     _proc(root, 50, "claude", 1, sid)
     _proc(root, 51, "sh", 50, 51)
     _proc(root, 52, "python3", 51, 51)
-    _proc(root, 60, "codex", 1, sid)
-    _proc(root, 61, "bash", 60, 61)
-    _proc(root, 62, "claude", 61, 61)
-    _proc(root, 63, "sh", 62, 63)
     return root
 
 
@@ -96,5 +92,24 @@ def test_an_orphan_outside_the_launcher_session_is_nested(tmp_path):
     assert swarm_pin.nested(IDENTITY, 52, _orphan(tmp_path, 30))
 
 
+def test_an_orphan_sharing_the_launcher_session_with_another_agent_is_nested(tmp_path):
+    proc = _orphan(tmp_path, 10)
+    _proc(proc, 70, "codex", 1, 10)
+    assert swarm_pin.nested(IDENTITY, 52, proc)
+
+
+def test_an_orphaned_codex_keeps_its_identity_across_its_own_wrapper(tmp_path):
+    root = _tree(tmp_path)
+    _proc(root, 60, "codex", 1, 10)
+    _proc(root, 61, "codex", 60, 10)
+    _proc(root, 62, "sh", 61, 10)
+    assert not swarm_pin.nested(IDENTITY, 62, root)
+
+
 def test_a_session_started_inside_an_orphaned_agent_is_nested(tmp_path):
-    assert swarm_pin.nested(IDENTITY, 63, _orphan(tmp_path, 10))
+    root = _tree(tmp_path)
+    _proc(root, 60, "codex", 1, 10)
+    _proc(root, 61, "bash", 60, 61)
+    _proc(root, 62, "claude", 61, 61)
+    _proc(root, 63, "sh", 62, 63)
+    assert swarm_pin.nested(IDENTITY, 63, root)
