@@ -89,6 +89,8 @@ class PullRequest:
     mergeable: str = ""
     draft: bool = False
     latest_run_cancelled: bool = False
+    checks_pending: bool = False
+    checks_passed: bool = False
 
 
 def iso_ms(text):
@@ -160,6 +162,9 @@ def pull_request(raw):
         raw.get("mergeable") or "",
         bool(raw.get("isDraft")),
         _latest_run_cancelled(suites),
+        any((check.get("conclusion") or check.get("state")) in (None, "PENDING", "EXPECTED") for check in everything),
+        any((check.get("conclusion") or check.get("state")) == "SUCCESS" for check in everything)
+        and all((check.get("conclusion") or check.get("state")) in PASSED | {"NEUTRAL"} for check in everything),
     )
 
 

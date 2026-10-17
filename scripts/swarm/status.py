@@ -75,8 +75,13 @@ def verdict_store(store, slug):
     return verdicts.VerdictStore(store.redis, store.key(slug, "findings"))
 
 
-def findings(store, slug, config, tasks, events):
+def findings(store, slug, config, tasks, events, view=None):
     agents, limits = store.agents(slug), health.limits()
+    if view is None:
+        pending = checks.cached(store.redis, store.key(slug, "checks"), approval=config.autonomy == ASSIST)
+        passing = checks.cached_green(store.redis, store.key(slug, "checks"))
+    else:
+        pending, passing = checks.from_view(view, approval=config.autonomy == ASSIST)
     placement_waits.prune(store, slug, tasks)
     events = [
         *events,
@@ -108,9 +113,9 @@ def findings(store, slug, config, tasks, events):
                 rows,
                 tasks,
                 limits,
-                checks.cached(store.redis, store.key(slug, "checks"), approval=config.autonomy == ASSIST),
+                pending,
             ),
-            checks.green(tasks, checks.cached_green(store.redis, store.key(slug, "checks"))),
+            checks.green(tasks, passing),
             talk_since_outcome(store, slug, rows),
         )
         + live_binding.findings(store, slug)
