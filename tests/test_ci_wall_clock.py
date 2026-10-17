@@ -1,3 +1,4 @@
+import ast
 import textwrap
 from pathlib import Path
 
@@ -416,9 +417,7 @@ def test_keeps_clock_and_numeric_arguments_distinct_inside_one_helper(tmp_path):
     assert main(["--root", str(tmp_path)]) == 0
 
 
-def test_parses_each_test_file_once_when_many_files_share_a_helper(tmp_path, monkeypatch, capsys):
-    import ast
-
+def test_parses_a_helper_once_however_many_test_files_share_it(tmp_path, monkeypatch, capsys):
     from scripts.ci_wall_clock import main
 
     directory = tmp_path / "tests"
@@ -439,5 +438,28 @@ def test_parses_each_test_file_once_when_many_files_share_a_helper(tmp_path, mon
 
     monkeypatch.setattr(ast, "parse", counted)
     assert main(["--root", str(tmp_path)]) == 1
-    assert sorted(parsed) == sorted(str(path) for path in directory.glob("*.py"))
+    assert sorted(parsed) == sorted(
+        [*(str(path) for path in directory.glob("*.py")), str(directory / "measurement.py")]
+    )
     assert "Wall clock markers: 4 files, 3 elapsed bounds, 3 problems" in capsys.readouterr().out
+
+
+def test_reports_every_nested_bound_in_source_order(tmp_path, capsys):
+    from scripts.ci_wall_clock import main
+
+    target = tmp_path / "tests/test_budget.py"
+    target.parent.mkdir()
+    target.write_text(
+        "import time\n"
+        "def test_budget():\n"
+        "    start = time.monotonic()\n"
+        "    assert time.monotonic() - start < 1\n"
+        "    if start:\n"
+        "        assert time.monotonic() - start < 2\n"
+        "        assert time.monotonic() - start < 3\n"
+        "        done = True\n"
+    )
+    assert main(["--root", str(tmp_path)]) == 1
+    assert [line for line in capsys.readouterr().out.splitlines() if line.startswith("::error::")] == [
+        f"::error::tests/test_budget.py:{line}: test_budget requires pytest.mark.wall_clock" for line in (4, 6, 7)
+    ]

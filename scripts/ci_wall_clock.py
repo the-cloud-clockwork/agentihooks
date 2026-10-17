@@ -195,16 +195,17 @@ def marked(nodes: list[ast.AST]) -> bool:
     )
 
 
-def parsed(path: Path, modules: dict) -> tuple:
+def indexed(tree: ast.Module) -> tuple:
+    nodes = list(ast.walk(tree))
+    imports = [node for node in nodes if isinstance(node, ast.ImportFrom) and str(node.module).startswith("tests.")]
+    functions = {item.name: item for item in tree.body if isinstance(item, FUNCTIONS)}
+    every = {node.name: node for node in nodes if isinstance(node, FUNCTIONS)}
+    return imports, functions, aliases_for(tree, nodes), every
+
+
+def helper_module(path: Path, modules: dict) -> tuple:
     if path not in modules:
-        tree = ast.parse(path.read_text(), filename=str(path))
-        nodes = list(ast.walk(tree))
-        imports = [
-            node for node in nodes if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("tests.")
-        ]
-        functions = {item.name: item for item in tree.body if isinstance(item, FUNCTIONS)}
-        every = {node.name: node for node in nodes if isinstance(node, FUNCTIONS)}
-        modules[path] = tree, imports, functions, aliases_for(tree, nodes), every
+        modules[path] = indexed(ast.parse(path.read_text(), filename=str(path)))[:3]
     return modules[path]
 
 
@@ -214,7 +215,7 @@ def imported_helpers(imports: list, root: Path, modules: dict, seen: frozenset =
         path = root / (node.module.replace(".", "/") + ".py")
         if path in seen or not path.is_file():
             continue
-        _, nested, functions, aliases, _ = parsed(path, modules)
+        nested, functions, aliases = helper_module(path, modules)
         helpers.update(imported_helpers(nested, root, modules, seen | {path}))
         helpers.update(
             (name.asname or name.name, (functions[name.name], aliases)) for name in node.names if name.name in functions
@@ -222,8 +223,8 @@ def imported_helpers(imports: list, root: Path, modules: dict, seen: frozenset =
     return helpers
 
 
-def discover(path: Path, root: Path, modules: dict) -> list[tuple[str, int, bool]]:
-    tree, imports, _, aliases, every = parsed(path, modules)
+def discover(tree: ast.Module, root: Path, modules: dict) -> list[tuple[str, int, bool]]:
+    imports, _, aliases, every = indexed(tree)
     timing = Timing(every, imported_helpers(imports, root, modules), aliases)
 
     def walk(scope, prefix="", inherited=False):
@@ -256,11 +257,11 @@ def main(argv: list[str] | None = None) -> int:
         problems.append("No Python test files found")
     for path in files:
         try:
-            parsed(path, modules)
+            tree = ast.parse(path.read_text(), filename=str(path))
         except (SyntaxError, UnicodeError) as error:
             problems.append(f"{path.relative_to(args.root)}: cannot parse: {error}")
             continue
-        for name, line, has_marker in discover(path, args.root, modules):
+        for name, line, has_marker in discover(tree, args.root, modules):
             count += 1
             if not has_marker:
                 problems.append(f"{path.relative_to(args.root)}:{line}: {name} requires pytest.mark.wall_clock")
