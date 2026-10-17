@@ -9,11 +9,11 @@ IDENTITY = {
 }
 
 
-def _proc(root, pid, comm, ppid):
+def _proc(root, pid, comm, ppid, sid=0):
     d = root / str(pid)
     d.mkdir(parents=True)
     (d / "comm").write_text(comm + "\n")
-    (d / "stat").write_text(f"{pid} ({comm}) S {ppid} 0 0\n")
+    (d / "stat").write_text(f"{pid} ({comm}) S {ppid} 0 {sid}\n")
 
 
 def _tree(tmp_path):
@@ -74,3 +74,27 @@ def test_unpin_tolerates_an_identity_already_partial(tmp_path):
     environ = {k: v for k, v in IDENTITY.items() if k != "AGENTIHOOKS_SWARM_LANE"}
     assert swarm_pin.unpin(environ, 23, _tree(tmp_path))
     assert environ == {}
+
+
+def _orphan(tmp_path, sid):
+    root = _tree(tmp_path)
+    _proc(root, 50, "claude", 1, sid)
+    _proc(root, 51, "sh", 50, 51)
+    _proc(root, 52, "python3", 51, 51)
+    _proc(root, 60, "codex", 1, sid)
+    _proc(root, 61, "bash", 60, 61)
+    _proc(root, 62, "claude", 61, 61)
+    _proc(root, 63, "sh", 62, 63)
+    return root
+
+
+def test_the_launched_session_keeps_its_identity_after_its_wrapper_dies(tmp_path):
+    assert not swarm_pin.nested(IDENTITY, 52, _orphan(tmp_path, 10))
+
+
+def test_an_orphan_outside_the_launcher_session_is_nested(tmp_path):
+    assert swarm_pin.nested(IDENTITY, 52, _orphan(tmp_path, 30))
+
+
+def test_a_session_started_inside_an_orphaned_agent_is_nested(tmp_path):
+    assert swarm_pin.nested(IDENTITY, 63, _orphan(tmp_path, 10))
