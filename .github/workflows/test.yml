@@ -574,25 +574,17 @@ jobs:
           cd "$RUNNER_TEMP/grader"
           python -m scripts.ci_select --root "$GITHUB_WORKSPACE" --base "$BASE" --head "$HEAD_SHA" --event "$EVENT" --legs 3 --durations "${durations[@]}"
 
-  # Every shard of a version splits on the one map this job chooses, so the whole suite is collected once per version, not once per shard.
-  split:
-    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'pull_request' || needs.select.outputs.scope == 'full') }}
-    needs: [select, reuse, admission]
+  test-count:
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'push' }}
+    needs: [reuse, admission]
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
-    timeout-minutes: 7
+    timeout-minutes: 16
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12"]
-    env:
-      UNIT_SOURCE: ${{ needs.select.outputs.source }}
-    outputs:
-      source: ${{ needs.select.outputs.source }}
-      reused: ${{ steps.plan.outputs.reused }}
-      run: ${{ steps.plan.outputs.run }}
-      commit: ${{ steps.plan.outputs.commit }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -649,6 +641,146 @@ jobs:
           uv pip install --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       # Queue refs cannot read dev's entries, so saving there only fills the store with copies.
+      - &use-venv
+        name: Use the test environment
+        if: env.UNIT_SOURCE == ''
+        run: echo "$HOME/venv/bin" >> "$GITHUB_PATH"
+
+      - name: Check out the base revision
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && 'origin/dev' || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
+        # swarm merge queue reads the graded base from this log line.
+        run: |
+          BASE="$(git merge-base "$BASE" HEAD)"
+          echo "BASE: $BASE"
+          git worktree add --detach "$RUNNER_TEMP/base" "$BASE"
+
+      - name: Restore exact count collections
+        id: counts
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/count-collections
+          key: ${{ steps.venv.outputs.cache-primary-key }}-counts-v1-${{ github.sha }}
+          restore-keys: ${{ steps.venv.outputs.cache-primary-key }}-counts-v1-
+
+      - name: Mint the token that reads the dev count record
+        id: app-token
+        if: github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+
+      - name: Fetch the base suite count recorded on dev
+        if: steps.app-token.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          RECORD: count-record-${{ matrix.python-version }}
+        run: |
+          base="$(git -C "$RUNNER_TEMP/base" rev-parse HEAD)" || exit 0
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$RECORD&per_page=100" > "$RUNNER_TEMP/count-records.json" || exit 0
+          id="$(cd "$RUNNER_TEMP/base" && python -c 'import json, sys; from tests.count_floor import dev_record; print(dev_record(json.load(open(sys.argv[1])), sys.argv[2]) or "")' "$RUNNER_TEMP/count-records.json" "$base")" || exit 0
+          if [[ -z "$id" ]]; then
+            echo "No dev run recorded the suite count for $base."
+            exit 0
+          fi
+          echo "Reading the suite count artifact $id recorded on dev for $base."
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$id/zip" > "$RUNNER_TEMP/count-record.zip" || exit 0
+          python -c 'import sys, zipfile; sys.stdout.buffer.write(zipfile.ZipFile(sys.argv[1]).read("record.json"))' "$RUNNER_TEMP/count-record.zip" > "$RUNNER_TEMP/base-record.json" || rm -f "$RUNNER_TEMP/base-record.json"
+
+      # The base revision's copy grades, so a pull request cannot loosen its own floor.
+      - name: Hold the base revision's test count
+        env:
+          TEST_COUNT_COLLECTION_CACHE: ${{ runner.temp }}/count-collections
+          TEST_COUNT_ENVIRONMENT: ${{ steps.venv.outputs.cache-primary-key }}
+          TEST_COUNT_BASE_RECORD: ${{ runner.temp }}/base-record.json
+        run: |
+          if [[ ! -f "$RUNNER_TEMP/base/tests/count_floor.py" ]]; then
+            echo "::error::The base carries no tests/count_floor.py, so nothing trusted can grade."
+            exit 1
+          fi
+          python -c 'import json; from pathlib import Path; from tests.duration_coverage import collected_tests; Path("collected.json").write_text(json.dumps(collected_tests(Path.cwd())))' > "$RUNNER_TEMP/collection.log" 2>&1 &
+          collection_pid=$!
+          (
+            cd "$RUNNER_TEMP/base"
+            python -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
+          ) &
+          floor_pid=$!
+          status=0
+          wait "$collection_pid" || status=$?
+          wait "$floor_pid" || status=$?
+          cat "$RUNNER_TEMP/collection.log"
+          exit "$status"
+
+      - name: Upload the early collection
+        uses: actions/upload-artifact@v4
+        with:
+          name: early-collected-${{ matrix.python-version }}
+          path: collected.json
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
+      - name: Save exact count collections
+        if: steps.counts.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/count-collections
+          key: ${{ steps.counts.outputs.cache-primary-key }}
+
+  # Every shard of a version splits on the one map this job chooses, so the whole suite is collected once per version, not once per shard.
+  split:
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'pull_request' || needs.select.outputs.scope == 'full') }}
+    needs: [test-count, select, reuse, admission]
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
+    timeout-minutes: 7
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    env:
+      UNIT_SOURCE: ${{ needs.select.outputs.source }}
+    outputs:
+      source: ${{ needs.select.outputs.source }}
+      reused: ${{ steps.plan.outputs.reused }}
+      run: ${{ steps.plan.outputs.run }}
+      commit: ${{ steps.plan.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - *python
+      - *day
+      - name: Restore the test environment
+        if: github.event_name == 'push' && env.UNIT_SOURCE == ''
+        id: venv
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/venv
+          key: venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ steps.day.outputs.date }}-${{ hashFiles('pyproject.toml', '.github/test-excludes.txt') }}
+
+      - name: Set up uv
+        if: github.event_name == 'push' && env.UNIT_SOURCE == '' && steps.venv.outputs.cache-hit != 'true'
+        uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.23"
+          checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
+          enable-cache: false
+
+      - name: Install dependencies
+        if: github.event_name == 'push' && env.UNIT_SOURCE == '' && steps.venv.outputs.cache-hit != 'true'
+        env:
+          PYTHON_PATH: ${{ steps.python.outputs.python-path }}
+        run: |
+          uv venv --python "$PYTHON_PATH" "$HOME/venv"
+          uv pip install --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"
+
       - &save-venv
         name: Save the test environment from dev
         if: env.UNIT_SOURCE == '' && steps.venv.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/dev'
@@ -657,10 +789,42 @@ jobs:
           path: ~/venv
           key: ${{ steps.venv.outputs.cache-primary-key }}
 
-      - &use-venv
-        name: Use the test environment
-        if: env.UNIT_SOURCE == ''
+      - name: Use the test environment
+        if: github.event_name == 'push' && env.UNIT_SOURCE == ''
         run: echo "$HOME/venv/bin" >> "$GITHUB_PATH"
+
+      - name: Record the suite count for later bases
+        if: github.event_name == 'push' && github.ref == 'refs/heads/dev' && env.UNIT_SOURCE == ''
+        continue-on-error: true
+        timeout-minutes: 2
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/base" HEAD
+          mkdir -p "$RUNNER_TEMP/count-record"
+          cd "$RUNNER_TEMP/base"
+          python -m tests.count_floor --record "$RUNNER_TEMP/count-record/record.json" --head "$RUNNER_TEMP/base"
+
+      - name: Upload the suite count record
+        if: github.event_name == 'push' && github.ref == 'refs/heads/dev' && env.UNIT_SOURCE == ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: count-record-${{ matrix.python-version }}
+          path: ${{ runner.temp }}/count-record/record.json
+          if-no-files-found: warn
+          retention-days: 7
+          overwrite: true
+
+      - name: Require successful early collection
+        if: github.event_name != 'push' && needs.select.outputs.source == ''
+        env:
+          COLLECTION_RESULT: ${{ needs.test-count.result }}
+        run: |
+          [[ "$COLLECTION_RESULT" == success ]] || { echo '::error::The early collection did not succeed.'; exit 1; }
+
+      - name: Download the early collection
+        if: github.event_name != 'push' && needs.select.outputs.source == ''
+        uses: ./.github/actions/retry-download
+        with:
+          name: early-collected-${{ matrix.python-version }}
 
       - name: Download the queued run's dev durations
         if: needs.select.outputs.source == '' && needs.select.outputs.queued == 'true'
@@ -681,7 +845,12 @@ jobs:
         if: needs.select.outputs.source == ''
         env:
           PYTHON_VERSION: ${{ matrix.python-version }}
-        run: python -m tests.dev_durations "$PYTHON_VERSION" ~/dev-durations --hash durations.sha256 --collected collected.json
+        run: |-
+          collection=()
+          if [[ "$GITHUB_EVENT_NAME" != push ]]; then
+            collection=(--collection collected.json)
+          fi
+          python -m tests.dev_durations "$PYTHON_VERSION" ~/dev-durations --hash durations.sha256 "${collection[@]}" --collected collected.json
 
       - name: Mint the token that reads the dev test record
         id: app-token
@@ -1271,72 +1440,6 @@ jobs:
         env:
           REPORT: ${{ github.event_name == 'push' && '--report' || '' }}
         run: python -m tests.shard_budget $REPORT shard-durations/*/durations.json
-
-  test-count:
-    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'push' }}
-    needs: [reuse, admission]
-    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
-    timeout-minutes: 16
-    permissions:
-      contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.11", "3.12"]
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
-
-      - *python
-      - *day
-      - name: Restore the shared test environment without saving it again
-        id: venv
-        uses: actions/cache/restore@v4
-        with:
-          path: ~/venv
-          key: venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ steps.day.outputs.date }}-${{ hashFiles('pyproject.toml', '.github/test-excludes.txt') }}
-      - *uv
-      - *install
-      - *use-venv
-
-      - name: Check out the base revision
-        env:
-          BASE: ${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && 'origin/dev' || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
-        # swarm merge queue reads the graded base from this log line.
-        run: |
-          BASE="$(git merge-base "$BASE" HEAD)"
-          echo "BASE: $BASE"
-          git worktree add --detach "$RUNNER_TEMP/base" "$BASE"
-
-      - name: Restore exact count collections
-        id: counts
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ runner.temp }}/count-collections
-          key: ${{ steps.venv.outputs.cache-primary-key }}-counts-v1-${{ github.sha }}
-          restore-keys: ${{ steps.venv.outputs.cache-primary-key }}-counts-v1-
-
-      # The base revision's copy grades, so a pull request cannot loosen its own floor.
-      - name: Hold the base revision's test count
-        env:
-          TEST_COUNT_COLLECTION_CACHE: ${{ runner.temp }}/count-collections
-          TEST_COUNT_ENVIRONMENT: ${{ steps.venv.outputs.cache-primary-key }}
-        run: |
-          if [[ ! -f "$RUNNER_TEMP/base/tests/count_floor.py" ]]; then
-            echo "::error::The base carries no tests/count_floor.py, so nothing trusted can grade."
-            exit 1
-          fi
-          cd "$RUNNER_TEMP/base"
-          python -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
-
-      - name: Save exact count collections
-        if: steps.counts.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ runner.temp }}/count-collections
-          key: ${{ steps.counts.outputs.cache-primary-key }}
 
   sonar:
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' }}
