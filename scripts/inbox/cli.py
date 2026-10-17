@@ -122,7 +122,8 @@ def _apply_send(store, me, record):
     links.check_send(store, me, args["address"])
     task = store.receiver_task(args["address"])
     item = store.send(me, args["address"], args["text"], fyi=args["fyi"], task=task, item_id=record["item"])
-    return {"id": item.id, "from": item.sender, "to": item.address, "state": item.state}
+    result = {"id": item.id, "from": item.sender, "to": item.address, "state": item.state}
+    return result | (dispatcher_status(store, item.address) if not item.fyi else {})
 
 
 def _apply_reply(store, me, record):
