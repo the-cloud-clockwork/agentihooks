@@ -104,9 +104,9 @@ def test_a_claimed_task_in_a_waiting_phase_may_still_be_made_urgent():
 def test_an_unrelated_update_to_a_held_urgent_task_still_lands():
     update("t1", {"rank": "urgent"})
     freeze_phase_one()
-    state, rejected = update("t1", {"title": "renamed"}, 2)
+    state, rejected = update("t1", {"description": "renamed"}, 2)
     assert rejected == []
-    assert next(t for t in state["tasks"] if t["id"] == "t1")["title"] == "renamed"
+    assert next(t for t in state["tasks"] if t["id"] == "t1")["description"] == "renamed"
 
 
 def test_an_urgent_rank_outside_the_focus_lands_because_urgent_tasks_skip_the_focus():
