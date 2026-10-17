@@ -36,7 +36,7 @@ def dispatcher_status(inbox: InboxStore, address: str) -> dict:
     seat = address if is_seat(address) else inbox.seats.known_seat(address)
     if not seat.startswith("dispatcher@"):
         return {}
-    slug = seat.split("@", 1)[1]
+    slug = seat.removeprefix("dispatcher@")
     store = RedisStore(inbox.redis)
     owner = next((a.name for a in store.agents(slug) if a.lane == DISPATCH and a.state != "finished"), "")
     activation = "recorded consumer" if owner else "pending lifecycle checks"
