@@ -723,6 +723,13 @@ jobs:
         if: github.event_name != 'pull_request' && env.UNIT_SOURCE == ''
         run: echo "$HOME/venv/bin" >> "$GITHUB_PATH"
 
+      - name: Require successful early collection
+        if: github.event_name == 'pull_request' && needs.select.outputs.source == ''
+        env:
+          COLLECTION_RESULT: ${{ needs.collect.result }}
+        run: |
+          [[ "$COLLECTION_RESULT" == success ]] || { echo '::error::The early collection did not succeed.'; exit 1; }
+
       - name: Download the early collection
         if: github.event_name == 'pull_request' && needs.select.outputs.source == ''
         uses: ./.github/actions/retry-download

@@ -482,6 +482,23 @@ def test_full_suite_collection_starts_beside_selection_and_feeds_split():
     assert "split" in jobs["gate-required"]["needs"]
 
 
+@pytest.mark.parametrize("result", ["success", "failure", "skipped", "cancelled"])
+def test_split_rejects_a_failed_collection_before_reading_any_artifact(result):
+    steps = _workflow()["jobs"]["split"]["steps"]
+    guard = next(step for step in steps if step.get("name") == "Require successful early collection")
+    download = next(step for step in steps if step.get("name") == "Download the early collection")
+    assert guard["if"] == download["if"]
+    assert guard["env"]["COLLECTION_RESULT"] == "${{ needs.collect.result }}"
+    assert steps.index(guard) < steps.index(download)
+    outcome = subprocess.run(
+        ["bash", "-e", "-c", guard["run"]],
+        env=dict(os.environ, COLLECTION_RESULT=result),
+        capture_output=True,
+        text=True,
+    )
+    assert (outcome.returncode == 0) == (result == "success")
+
+
 def test_promotion_shard_reports_use_the_pushed_grader_and_prs_keep_the_base():
     steps = _workflow()["jobs"]["shard-check"]["steps"]
     checkout = next(step for step in steps if step.get("uses", "").startswith("actions/checkout@"))
