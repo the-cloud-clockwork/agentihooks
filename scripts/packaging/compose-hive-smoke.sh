@@ -52,12 +52,12 @@ print(f"seeded swarm {slug} with host-agent and member-agent seated, in the comp
 PY
 docker compose restart controller >/dev/null
 held=""
-for _ in $(seq 30); do
+for _ in $(seq 60); do
   held="$(docker compose exec -T swarm agentihooks swarm "$slug" controller || true)"
   if [[ $held == *'"owner": "compose-controller"'* ]]; then
     break
   fi
-  sleep 2
+  sleep 1
 done
 printf 'controller lease: %s\n' "$held"
 if [[ $held != *'"owner": "compose-controller"'* ]]; then
