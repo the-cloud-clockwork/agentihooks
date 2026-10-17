@@ -297,7 +297,7 @@ def test_a_master_with_no_harness_set_takes_the_login_on_claude(tmp_path, monkey
     if claude_only:
         task["handoff"] = "Continue the master task."
         task["handoff_envelope"] = {
-            "launch": {"profile": "master", "harness": "codex", "account": "", "model": "", "effort": ""}
+            "launch": {"profile": "master", "harness": "codex", "account": "", "model": "opus", "effort": "high"}
         }
     placed = runtime.spawn(config, "master", "agent", task)
     assert (placed.harness, placed.route_kind, placed.choice) == ("claude", "interactive", "other")
