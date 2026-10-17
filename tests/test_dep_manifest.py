@@ -213,7 +213,20 @@ def test_sonar_builds_the_manifest_and_only_dev_pushes_save_it():
     assert steps.index("Wait for the coverage merge") < steps.index("Build the test dependency manifest")
     build = _step("sonar", "Build the test dependency manifest")
     assert "python -m tests.dep_manifest build" in build["run"]
-    assert _step("sonar", "Upload the test dependency manifest")["with"]["name"] == "dep-manifest"
+    assert "< /dev/null" in build["run"] and 'echo "pid=$!"' in build["run"]
+    assert '--out "$RUNNER_TEMP/dep-manifest/manifest.json"' in build["run"]
+    assert (
+        steps.index("Build the test dependency manifest")
+        < steps.index("SonarQube Scan")
+        < steps.index("Wait for the test dependency manifest")
+        < steps.index("Upload the test dependency manifest")
+    )
+    wait = _step("sonar", "Wait for the test dependency manifest")
+    assert wait["env"]["MANIFEST_PID"] == "${{ steps.manifest.outputs.pid }}"
+    assert 'exit "$(< "$RUNNER_TEMP/manifest.status")"' in wait["run"]
+    upload = _step("sonar", "Upload the test dependency manifest")
+    assert upload["with"]["name"] == "dep-manifest"
+    assert upload["with"]["path"] == "${{ runner.temp }}/dep-manifest/manifest.json"
     assert not any("cache/save" in step.get("uses", "") for step in _job("sonar")["steps"])
     assert "github.event_name == 'push'" in _job("coverage-baseline")["if"]
     assert _step("coverage-baseline", "Download the test dependency manifest")["with"]["name"] == "dep-manifest"
@@ -221,3 +234,79 @@ def test_sonar_builds_the_manifest_and_only_dev_pushes_save_it():
     assert save["if"] == "needs.gate-required.result == 'success'"
     assert save["uses"].startswith("actions/cache/save@")
     assert save["with"]["key"] == "dep-manifest-${{ github.sha }}"
+
+
+def test_the_plan_reuses_every_test_the_change_left_valid_without_its_group_suffix():
+    manifest = {
+        "commit": "c" * 40,
+        "units": ["hooks/sample.py::double", "hooks/sample.py::<module>"],
+        "tests": {
+            "tests/test_a.py::test_double@serial": {"units": [0, 1], "files": [], "escapes": False},
+            "tests/test_b.py::test_module": {"units": [1], "files": [], "escapes": False},
+            "tests/test_c.py::test_spawn[x@y]": {"units": [], "files": [], "escapes": True},
+        },
+    }
+    planted = [("hooks/sample.py", SOURCE, SOURCE.replace("value * 2", "value * 3"))]
+    assert dep_manifest.plan(manifest, planted, "41") == {
+        "run": "41",
+        "commit": "c" * 40,
+        "global": None,
+        "invalidated": 2,
+        "tests": ["tests/test_b.py::test_module"],
+    }
+    assert dep_manifest.plan(manifest, [], "41")["tests"] == [
+        "tests/test_a.py::test_double",
+        "tests/test_b.py::test_module",
+        "tests/test_c.py::test_spawn[x@y]",
+    ]
+    assert dep_manifest.plan(manifest, [(".github/workflows/test.yml", None, None)], "41")["tests"] == []
+
+
+def test_deselection_keeps_new_tests_and_skips_only_wholly_reused_files(tmp_path):
+    collected = ["tests/test_a.py::one", "tests/test_a.py::two", "tests/test_b.py::one", "tests/test_b.py::new"]
+    reused = ["tests/test_a.py::one", "tests/test_a.py::two", "tests/test_b.py::one", "tests/test_gone.py::x"]
+    assert dep_manifest.deselect(reused, collected) == {
+        "tests": ["tests/test_a.py::one", "tests/test_a.py::two", "tests/test_b.py::one"],
+        "files": ["tests/test_a.py"],
+    }
+    plan = tmp_path / "plan.json"
+    plan.write_text(json.dumps({"tests": reused}))
+    (tmp_path / "collected.json").write_text(json.dumps(collected))
+    out = tmp_path / "reused.json"
+    args = ["deselect", "--plan", str(plan), "--collected", str(tmp_path / "collected.json"), "--out", str(out)]
+    assert dep_manifest.main(args) == 0
+    assert json.loads(out.read_text())["files"] == ["tests/test_a.py"]
+
+
+def test_queue_shards_split_on_the_tests_the_planner_did_not_reuse():
+    plan = _step("split", "Plan the tests whose inputs did not change")
+    assert plan["env"]["GRADER"] == "${{ github.event.merge_group.base_sha || github.sha }}"
+    assert 'cd "$RUNNER_TEMP/planner"' in plan["run"]
+    assert _job("split")["outputs"]["reused"] == "${{ steps.plan.outputs.reused }}"
+    assert _job("unit")["outputs"]["reused"] == "${{ needs.split.outputs.reused }}"
+    assert _step("split", "Deselect the reused tests")["run"].startswith("python -m tests.dep_manifest deselect")
+    assert _step("unit", "Run tests")["env"]["CI_REUSED"] == "${{ github.workspace }}/reused.json"
+    check = _step("shard-check", "Check every collected test ran in exactly one shard")
+    assert check["run"].endswith(" $REUSED")
+    assert "reused-plan/reused-tests.json" in check["env"]["REUSED"]
+
+
+def test_the_reused_plan_reaches_workers_but_never_nested_pytest_runs(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    import pytest
+
+    from tests import conftest
+
+    plan = tmp_path / "reused.json"
+    plan.write_text(json.dumps({"tests": ["tests/test_a.py::one"], "files": ["tests/test_b.py"]}))
+    monkeypatch.setenv("CI_REUSED", str(plan))
+    controller = SimpleNamespace(stash=pytest.Stash())
+    assert conftest._reused(controller) == (frozenset({"tests/test_a.py::one"}), frozenset({"tests/test_b.py"}))
+    assert "CI_REUSED" not in os.environ
+    node = SimpleNamespace(config=controller, workerinput={})
+    conftest.pytest_configure_node(node)
+    assert node.workerinput == {"ci_reused": str(plan)}
+    worker = SimpleNamespace(stash=pytest.Stash(), workerinput=node.workerinput)
+    assert conftest._reused(worker) == conftest._reused(controller)
+    assert conftest._reused(SimpleNamespace(stash=pytest.Stash())) == (frozenset(), frozenset())

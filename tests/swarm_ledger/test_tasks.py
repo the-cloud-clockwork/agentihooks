@@ -72,6 +72,65 @@ class Tasks(unittest.TestCase):
             ("done", "smoke-eng-1", "https://github.com/o/r/pull/2", True),
         )
 
+    def test_review_history_records_pull_request_identity_and_parking(self):
+        make_ledger([{"title": "a", "phase": "p1", "lane": "eng"}, {"title": "dependency", "phase": "p1"}])
+        first, second = "https://github.com/o/r/pull/1", "https://github.com/o/r/pull/2"
+        changes = [
+            {"state": "pr", "pr_url": first, "branch": "first"},
+            {"pr_url": second, "branch": "second"},
+            {"parked_on": ["t2"], "stacked_base": "origin/first"},
+            {"parked_on": []},
+        ]
+        for index, fields in enumerate(changes):
+            state, rejected = core.sync(SLUG, ops=[op("task_update", index, item="tasks/t1", fields=fields)])
+            self.assertEqual(rejected, [])
+        found = [
+            event for event in state["_meta"]["events"] if event["kind"] in ("task pr", "task parked", "task unparked")
+        ]
+        self.assertEqual([event["target"] for event in found], ["tasks/t1"] * 4)
+        self.assertEqual([event["by"] for event in found], ["swarm"] * 4)
+        self.assertEqual(
+            [(event["kind"], event.get("pr_url"), event.get("branch")) for event in found],
+            [
+                ("task pr", first, "first"),
+                ("task pr", second, "second"),
+                ("task parked", None, None),
+                ("task unparked", None, None),
+            ],
+        )
+
+    def test_review_history_keeps_missing_legacy_branch_empty_when_the_pull_request_changes(self):
+        state = make_ledger([{"title": "a", "phase": "p1", "lane": "eng"}])
+        task = state["tasks"][0]
+        task.update(state="pr", pr_url="https://github.com/o/r/pull/1")
+        task.pop("branch", None)
+        context = core.Context(state["_meta"], 1000)
+        self.assertTrue(
+            core.apply_op(
+                state,
+                op("task_update", 1, item="tasks/t1", fields={"pr_url": "https://github.com/o/r/pull/2"}),
+                context,
+            )
+        )
+        self.assertEqual(context.refused, [])
+        self.assertEqual(
+            [(event["kind"], event["target"], event["pr_url"], event["branch"]) for event in context.events],
+            [("task pr", "tasks/t1", "https://github.com/o/r/pull/2", "")],
+        )
+
+    def test_review_history_keeps_unknown_legacy_pull_request_fields_empty(self):
+        state = make_ledger([{"title": "a", "phase": "p1", "lane": "eng"}])
+        task = state["tasks"][0]
+        task.pop("branch", None)
+        task.pop("pr_url", None)
+        context = core.Context(state["_meta"], 1000)
+        self.assertTrue(core.apply_op(state, op("task_update", 1, item="tasks/t1", fields={"state": "pr"}), context))
+        self.assertEqual(context.refused, [])
+        self.assertEqual(
+            [(event["kind"], event["pr_url"], event["branch"]) for event in context.events],
+            [("task pr", "", "")],
+        )
+
     def test_task_update_rewrites_the_description(self):
         make_ledger([{"title": "a", "phase": "p1", "lane": "eng", "description": "old spec"}])
         update = op("task_update", 1, item="tasks/t1", fields={"description": "new spec"})

@@ -85,7 +85,9 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           NEXT: ${{ steps.version.outputs.next }}
+          RELEASE_SHA: ${{ steps.promote.outputs.main }}
         run: |
           if ! gh release view "v$NEXT" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release create "v$NEXT" --repo "$GITHUB_REPOSITORY" --title "v$NEXT" --generate-notes --latest --verify-tag
+            bash scripts/ci_release.sh notes "$RELEASE_SHA" "$NEXT" "$RUNNER_TEMP/notes.md"
+            gh release create "v$NEXT" --repo "$GITHUB_REPOSITORY" --title "v$NEXT" --notes-file "$RUNNER_TEMP/notes.md" --generate-notes --latest --verify-tag
           fi

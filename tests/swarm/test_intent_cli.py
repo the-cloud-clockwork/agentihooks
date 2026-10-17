@@ -1,4 +1,5 @@
 import json
+from unittest.mock import ANY
 
 import pytest
 
@@ -259,4 +260,5 @@ def test_the_tick_stamps_its_own_time_on_the_verdict(started, monkeypatch):
         "at": 777,
         "phase": "p1",
         "inputs": intent._fingerprint({"phases": ledger.phases}, ledger.rows["t1"]),
+        "persisted_at": ANY,
     }

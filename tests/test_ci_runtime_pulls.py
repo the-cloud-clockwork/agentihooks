@@ -93,7 +93,9 @@ fi
 LAYER_DOCKER = """#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\\n' "$*" >> "$PULL_LOG"
+stall() { exec python3 -c 'import time; time.sleep(30)'; }
 if [[ "$1" == manifest ]]; then
+  if (( "$(grep -c '^manifest ' "$PULL_LOG")" <= ${MANIFEST_STALLS:-0} )); then stall; fi
   if (( "$(grep -c '^manifest ' "$PULL_LOG")" <= ${MANIFEST_FAILURES:-0} )); then
     echo 'manifest lookup: registry unavailable' >&2
     exit 18
@@ -104,6 +106,7 @@ fi
 if [[ "$1" == --host ]]; then shift 2; fi
 if [[ "$1" == pull ]]; then
   attempt="$(grep -c ' pull ' "$PULL_LOG")"
+  if (( attempt <= ${STALLS:-0} )); then stall; fi
   if (( attempt <= FAILURES )); then
     echo "could not fetch content descriptor sha256:layer from remote: not found on attempt $attempt" >&2
     exit 17
@@ -122,7 +125,7 @@ def tools_with(tmp_path, docker):
     return tools
 
 
-def pull_runtime(tmp_path, failures, manifest_failures=0):
+def pull_runtime(tmp_path, failures, manifest_failures=0, stalls=0, manifest_stalls=0):
     tools = tools_with(tmp_path, LAYER_DOCKER)
     log, waits = tmp_path / "docker.log", tmp_path / "waits.log"
     result = subprocess.run(
@@ -134,6 +137,9 @@ def pull_runtime(tmp_path, failures, manifest_failures=0):
             "WAITS": str(waits),
             "FAILURES": str(failures),
             "MANIFEST_FAILURES": str(manifest_failures),
+            "STALLS": str(stalls),
+            "MANIFEST_STALLS": str(manifest_stalls),
+            "PULL_ATTEMPT_SECONDS": "1",
         },
         text=True,
         capture_output=True,
@@ -177,13 +183,34 @@ def test_runtime_pull_retries_a_failed_digest_lookup_within_the_same_bound(tmp_p
     assert result.stderr.count("manifest lookup: registry unavailable") == 3
 
 
+@pytest.mark.parametrize("stalls,manifest_stalls,expected_pulls", [(1, 0, 2), (0, 1, 1)])
+def test_runtime_pull_retries_a_stalled_mirror_within_the_same_bound(tmp_path, stalls, manifest_stalls, expected_pulls):
+    result, pulls, tags, waits = pull_runtime(tmp_path, 0, stalls=stalls, manifest_stalls=manifest_stalls)
+    assert result.returncode == 0, result.stderr
+    assert len(pulls) == expected_pulls
+    assert len(waits) == 1
+    assert len(tags) == 1
+    assert "failed on attempt 1 of 3" in result.stderr
+
+
+@pytest.mark.parametrize("stalls,manifest_stalls,expected_pulls", [(99, 0, 3), (0, 99, 0)])
+def test_runtime_pull_fails_with_the_timeout_status_after_three_stalled_attempts(
+    tmp_path, stalls, manifest_stalls, expected_pulls
+):
+    result, pulls, tags, waits = pull_runtime(tmp_path, 0, stalls=stalls, manifest_stalls=manifest_stalls)
+    assert result.returncode == 124
+    assert len(pulls) == expected_pulls
+    assert len(waits) == 2
+    assert not tags
+
+
 def dockerfile_bases():
     return {line.split()[1] for line in (ROOT / "Dockerfile").read_text().splitlines() if line.startswith("FROM ")}
 
 
 def test_kind_proof_pulls_every_dockerfile_base_through_the_bounded_pull_before_building():
     script = (ROOT / "deploy/helm/agentihooks-swarm/ci/kind-smoke.sh").read_text()
-    build = script.index('docker build -q -t "$image" .')
+    build = script.index('docker build -q -t "$image"')
     for base in dockerfile_bases():
         pull = f"bash scripts/packaging/pull-runtime-image.sh {base}"
         assert pull in script
@@ -205,7 +232,7 @@ def test_compose_smoke_jobs_pull_every_dockerfile_base_before_building(job, scri
     smoke = workflow["jobs"].get(job, workflow["jobs"]["smoke"])
     assert not smoke.get("needs")
     steps = smoke["steps"]
-    build = next(i for i, step in enumerate(steps) if step.get("run") == f"bash scripts/packaging/{script}.sh")
+    build = next(i for i, step in enumerate(steps) if f"scripts/packaging/{script}.sh" in step.get("run", "").split())
     for base in dockerfile_bases():
         pull = next(
             i

@@ -382,11 +382,13 @@ def test_main_writes_one_matrix_entry_per_shard(tmp_path, monkeypatch, capsys):
     ("estimated", "shards", "parts"),
     [
         ((0, 0, {}), "[0]", "[0]"),
-        ((962, 500, dict.fromkeys("abcde", 15.24)), "[0, 1]", "[0, 1]"),
+        ((962, 500, dict.fromkeys("abcde", 15.24)), "[0, 1, 2]", "[0, 1]"),
+        ((480, 500, {}), "[0]", "[0]"),
+        ((481, 500, {}), "[0, 1]", "[0]"),
         ((10**6, 10**4, {f"t{n}": 30 for n in range(40)}), json.dumps(list(range(10))), json.dumps(list(range(10)))),
     ],
 )
-def test_main_defaults_to_origin_dev_a_four_minute_target_a_half_minute_stats_bucket_and_ten_shards(
+def test_main_defaults_to_origin_dev_a_two_minute_target_a_half_minute_stats_bucket_and_ten_shards(
     tmp_path, monkeypatch, estimated, shards, parts
 ):
     seconds, mutants, timed = estimated

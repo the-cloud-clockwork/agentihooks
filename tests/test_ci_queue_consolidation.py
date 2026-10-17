@@ -13,14 +13,20 @@ def test_container_proofs_share_one_runner_without_losing_commands():
     smoke = jobs("swarm-smoke.yml")
     assert list(smoke) == ["smoke"]
     steps = smoke["smoke"]["steps"]
-    assert [step["run"] for step in steps if "run" in step] == [
+    commands = []
+    for step in steps:
+        if step.get("uses") == "docker/build-push-action@v6":
+            assert step["with"]["context"] == "."
+            assert step["with"]["load"] is True
+            commands.append(f"docker build -t {step['with']['tags']} .")
+        elif "run" in step:
+            commands.append(step["run"])
+    assert commands == [
         "bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm",
         "docker build -t local/agentihooks-swarm:clients-check .",
-        "bash scripts/packaging/hive-launch-smoke.sh",
+        "bash scripts/packaging/swarm-smoke-parallel.sh scripts/packaging/hive-launch-smoke.sh"
+        " scripts/packaging/swarm-smoke.sh scripts/packaging/hive-join-smoke.sh scripts/packaging/compose-hive-smoke.sh",
         "bash scripts/packaging/hive-launch-attestation-proof.sh",
-        "bash scripts/packaging/swarm-smoke.sh",
-        "bash scripts/packaging/hive-join-smoke.sh",
-        "bash scripts/packaging/compose-hive-smoke.sh",
         "bash scripts/packaging/swarm-image-clients.sh local/agentihooks-swarm:clients-check",
     ]
     assert sum(step.get("uses") == "actions/checkout@v4" for step in steps) == 1

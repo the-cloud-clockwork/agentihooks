@@ -1,5 +1,7 @@
 import argparse
 import ast
+import hashlib
+import importlib.metadata
 import json
 import os
 import subprocess
@@ -18,24 +20,57 @@ class Collected:
     def pytest_collection_finish(self, session):
         Collected.nodeids = [item.nodeid for item in session.items]
 
-code = pytest.main(["--collect-only", "-qq", "-p", "no:cacheprovider", sys.argv[1]], plugins=[Collected()])
+code = pytest.main(["--collect-only", "-qq", "--assert=plain", "-p", "no:cacheprovider", sys.argv[1]], plugins=[Collected()])
 with open(sys.argv[2], "w") as out:
     json.dump(Collected.nodeids if code == 0 else None, out)
 """
 
 
-def collect_all(trees: dict[str, Path], tests: str) -> dict[str, list[str] | None]:
+def collection_cache(root: Path, tests: str, cache: Path | None, environment: str) -> Path | None:
+    if cache is None or not environment:
+        return None
+    status = subprocess.run(["git", "status", "--porcelain"], cwd=root, capture_output=True, text=True, check=False)
+    if status.returncode or status.stdout:
+        return None
+    tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], cwd=root, text=True).strip()
+    packages = sorted((dist.metadata["Name"], dist.version) for dist in importlib.metadata.distributions())
+    options = {name: value for name, value in os.environ.items() if name.startswith("PYTEST_")}
+    identity = json.dumps(
+        [tree, tests, environment, sys.version, sys.platform, packages, _COLLECT, options], sort_keys=True
+    )
+    key = hashlib.sha256(identity.encode()).hexdigest()
+    return cache / f"{key}.json"
+
+
+def collect_all(
+    trees: dict[str, Path], tests: str, cache: Path | None = None, environment: str = ""
+) -> dict[str, list[str] | None]:
+    cached = {side: collection_cache(tree, tests, cache, environment) for side, tree in trees.items()}
+    collected = {}
     with tempfile.TemporaryDirectory() as scratch:
         outputs = {side: Path(scratch) / f"{side}.json" for side in trees}
-        runs = {
-            side: subprocess.Popen(
-                [sys.executable, "-c", _COLLECT, tests, str(outputs[side])], cwd=tree, stdout=subprocess.DEVNULL
-            )
-            for side, tree in trees.items()
-        }
-        for run in runs.values():
+        runs = {}
+        for side, tree in trees.items():
+            if cached[side] and cached[side].is_file():
+                nodeids = json.loads(cached[side].read_text())
+                collected[side] = (
+                    nodeids
+                    if isinstance(nodeids, list) and all(isinstance(nodeid, str) for nodeid in nodeids)
+                    else None
+                )
+            else:
+                runs[side] = subprocess.Popen(
+                    [sys.executable, "-c", _COLLECT, tests, str(outputs[side])], cwd=tree, stdout=subprocess.DEVNULL
+                )
+        for side, run in runs.items():
             run.wait()
-        return {side: json.loads(outputs[side].read_text()) if outputs[side].is_file() else None for side in trees}
+            collected[side] = json.loads(outputs[side].read_text()) if outputs[side].is_file() else None
+            if run.returncode:
+                collected[side] = None
+            if collected[side] and cached[side]:
+                cached[side].parent.mkdir(parents=True, exist_ok=True)
+                cached[side].write_text(json.dumps(collected[side]))
+    return collected
 
 
 _DEFINITIONS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
@@ -212,7 +247,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--head", type=Path, default=Path.cwd(), help="checkout of the head revision")
     parser.add_argument("--tests", default="tests/")
     args = parser.parse_args(argv)
-    collected = collect_all({"base": args.base, "head": args.head}, args.tests)
+    cache = os.environ.get("TEST_COUNT_COLLECTION_CACHE")
+    collected = collect_all(
+        {"base": args.base, "head": args.head},
+        args.tests,
+        cache=Path(cache) if cache else None,
+        environment=os.environ.get("TEST_COUNT_ENVIRONMENT", ""),
+    )
     failed = [side for side, nodeids in collected.items() if not nodeids]
     for side in failed:
         print(f"::error::Collecting the {side} tests failed or found none, so the floor cannot be graded.")

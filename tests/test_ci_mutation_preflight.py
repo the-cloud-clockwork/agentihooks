@@ -13,7 +13,8 @@ def test_preflight_runs_on_task_branch_pushes_only():
     workflow = _workflow()
     events = workflow[True]
     assert set(events) in ({"push"}, {"push", "workflow_call"})
-    assert events["push"] == {"branches-ignore": ["dev", "main", "gh-readonly-queue/**", "wip/**", "diffcheck/**"]}
+    ignored = ["dev", "main", "gh-readonly-queue/**", "wip/**", "diffcheck/**"]
+    assert events["push"] in ({"branches-ignore": ignored}, {"branches-ignore": [*ignored, "promotion/**"]})
     if "workflow_call" in events:
         assert events["workflow_call"]["inputs"]["base"] == {"type": "string", "required": True}
         assert workflow["concurrency"] == {
