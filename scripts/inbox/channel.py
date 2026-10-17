@@ -25,8 +25,9 @@ METHOD = "notifications/claude/channel"
 UNSHOWN = "the inbox channel could not show it"
 
 
-def launch_args(root=ROOT, python=sys.executable):
-    code = f"import sys; sys.path.insert(0, {root!r}); from scripts.inbox.channel import main; main()"
+def launch_args(root: str = ROOT, python: str = sys.executable, *, active: bool = True) -> list[str]:
+    entry = "main()" if active else "main(active=False)"
+    code = f"import sys; sys.path.insert(0, {root!r}); from scripts.inbox.channel import main; {entry}"
     config = {"mcpServers": {NAME: {"command": python, "args": ["-I", "-c", code]}}}
     return [f"--mcp-config={json.dumps(config)}", FLAG]
 
@@ -52,7 +53,7 @@ def register(environ: dict[str, str]) -> None:
         servers = data.setdefault("mcpServers", {})
         if not isinstance(servers, dict):
             raise ValueError(f"{config} mcpServers is not a JSON object")
-        server = json.loads(launch_args()[0].removeprefix("--mcp-config="))["mcpServers"][NAME]
+        server = json.loads(launch_args(active=False)[0].removeprefix("--mcp-config="))["mcpServers"][NAME]
         if servers.get(NAME) != server:
             servers[NAME] = server
             claude_trust._write(config, data)
@@ -213,7 +214,7 @@ async def serve(store, me):
         await run(store, me, read, write)
 
 
-def main():
+def main(active: bool = True) -> None:
     import anyio
 
     try:
@@ -222,7 +223,7 @@ def main():
         print(f"agentihooks inbox channel: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
     try:
-        store = connect()
+        store = connect() if active else None
     except InboxError:
         store = None
     anyio.run(serve, store, me)
