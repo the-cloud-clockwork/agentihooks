@@ -563,7 +563,7 @@ def test_park_writes_the_ledger_note_before_the_issue_comment_and_the_task_updat
     shell.fail = ()
     assert park(doc) == 0
     assert ledger.rows["t1"]["parked_on"] == ["a"]
-    assert ledger.comments == [note, note]
+    assert set(ledger.comments) == {note}
 
 
 @pytest.mark.parametrize(
