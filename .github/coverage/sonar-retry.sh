@@ -10,8 +10,8 @@ label="$1"
 [[ "$2" == -- ]]
 shift 2
 
-transient='returned error: (401|403|408|429|5[0-9][0-9])|Failed to connect|Connection refused|Connection reset|timed out|Empty reply from server|Recv failure|Fail to request url|Call to URL .* failed|unexpected end of stream|SocketTimeoutException|Error status returned by url .*: (401|403|408|429|5[0-9][0-9])|failed with HTTP (401|403|408|429|5[0-9][0-9])'
-authorization='returned error: (401|403)|Error status returned by url .*: (401|403)|failed with HTTP (401|403)'
+transient='returned error: (401|403|408|429|5[0-9][0-9])|Failed to connect|Connection refused|Connection reset|timed out|Empty reply from server|Recv failure|Fail to request url|Call to URL .* failed|unexpected end of stream|SocketTimeoutException|Error status returned by url .*: (401|403|408|429|5[0-9][0-9])|failed with HTTP (401|403|408|429|5[0-9][0-9])|HTTP code (401|403|408|429|5[0-9][0-9])'
+authorization='returned error: (401|403)|Error status returned by url .*: (401|403)|failed with HTTP (401|403)|HTTP code (401|403)'
 deadline="${SONAR_RETRY_SECONDS:-180}"
 out=$(mktemp)
 err=$(mktemp)
