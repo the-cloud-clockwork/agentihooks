@@ -795,7 +795,13 @@ def test_runtime_preserves_flexible_first_then_fixed_task_reservations(monkeypat
         "accounts",
         lambda env, now, refresh=True: [account(sessions=2), account("cx", sessions=2, harness="codex")],
     )
-    runtime.quota_capacity(config, [], 100, {"eng": 2, "ci": 0, "plan": 0}, requirements)
+    runtime.quota_capacity(
+        config,
+        [AgentRecord("master", "master", "master", harness="claude", account="a")],
+        100,
+        {"eng": 2, "ci": 0, "plan": 0},
+        requirements,
+    )
     seen = []
 
     def launch(cfg, lane, task, name, argv, **kwargs):
