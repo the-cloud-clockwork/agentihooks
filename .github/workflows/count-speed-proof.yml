@@ -84,27 +84,27 @@ jobs:
       - name: Measure legacy count collection
         shell: bash
         run: |
-          /usr/bin/time -f '%e' -o "$RUNNER_TEMP/before.seconds" \
-            python "$RUNNER_TEMP/legacy.py" --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE" \
-            | tee "$RUNNER_TEMP/before.log"
+          count_start=$SECONDS
+          python "$RUNNER_TEMP/legacy.py" --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE" | tee "$RUNNER_TEMP/before.log"
+          echo "$((SECONDS - count_start))" > "$RUNNER_TEMP/before.seconds"
       - name: Populate exact collection records
         shell: bash
         env:
           TEST_COUNT_COLLECTION_CACHE: ${{ runner.temp }}/count-collections
           TEST_COUNT_ENVIRONMENT: proof-${{ steps.venv.outputs.cache-primary-key }}
         run: |
-          /usr/bin/time -f '%e' -o "$RUNNER_TEMP/cold.seconds" \
-            python -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE" \
-            | tee "$RUNNER_TEMP/cold.log"
+          count_start=$SECONDS
+          python -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE" | tee "$RUNNER_TEMP/cold.log"
+          echo "$((SECONDS - count_start))" > "$RUNNER_TEMP/cold.seconds"
       - name: Measure reused count collection
         shell: bash
         env:
           TEST_COUNT_COLLECTION_CACHE: ${{ runner.temp }}/count-collections
           TEST_COUNT_ENVIRONMENT: proof-${{ steps.venv.outputs.cache-primary-key }}
         run: |
-          /usr/bin/time -f '%e' -o "$RUNNER_TEMP/after.seconds" \
-            python -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE" \
-            | tee "$RUNNER_TEMP/after.log"
+          count_start=$SECONDS
+          python -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE" | tee "$RUNNER_TEMP/after.log"
+          echo "$((SECONDS - count_start))" > "$RUNNER_TEMP/after.seconds"
       - name: Require identical counts and thirty seconds saved
         run: |
           python - <<'PY'
