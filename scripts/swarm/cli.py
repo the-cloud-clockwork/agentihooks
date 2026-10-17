@@ -213,14 +213,12 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
     if token is None:
         return ["another tick is running"]
     tick_stop.hold(token, lambda: controller.release_tick_lock(store, slug, token))
-    keeping = timing.BEFORE_STEP.set(
-        lambda: (
-            tick_stop.check()
-            or tick_activity.keep(
-                store, slug, lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS), now_ms
-            )
-        )
-    )
+
+    def before_step():
+        tick_stop.check()
+        tick_activity.keep(store, slug, lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS), now_ms)
+
+    keeping = timing.BEFORE_STEP.set(before_step)
     doc = {}
     try:
         timing.keep()
@@ -361,8 +359,8 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             _publish_tick_status(store, slug, doc)
         finally:
             timing.BEFORE_STEP.reset(keeping)
-            controller.release_tick_lock(store, slug, token)
             tick_stop.drop(token)
+            controller.release_tick_lock(store, slug, token)
 
 
 def cmd_list(store, args):
@@ -420,6 +418,7 @@ def _reconcile_services():
 def cmd_tick(store, args):
     from scripts import operator_env
 
+    started = time.monotonic()
     if why := timer.installed_refusal():
         raise SwarmError(f"the tick refused to run: {why}")
     operator_env.fill(os.environ)
@@ -433,7 +432,9 @@ def cmd_tick(store, args):
     if slugs:
         _reconcile_services()
         firsts, until = _Firsts(len(slugs)), time.monotonic() + EXTRA_TICKS_UNTIL
-        if tick_stop.run(slugs, lambda slug: _tick_while_others_run(store, slug, firsts, until), firsts.settled.set):
+        if tick_stop.run(
+            slugs, lambda slug: _tick_while_others_run(store, slug, firsts, until), firsts.settled.set, started
+        ):
             return
     from scripts import herdr_gc
 
