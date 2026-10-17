@@ -145,6 +145,33 @@ def test_finished_fallback_master_raises_no_finding_and_unseated_master_uses_its
     assert not [f for f in findings({}, [agent], {}, Limits()) if f.kind == "master-fallback-auth"]
 
 
+def test_fallback_finding_reads_every_agent_and_names_an_unrecorded_route_as_subscription():
+    from scripts.swarm.health.findings import Limits, findings
+
+    worker = {"name": "worker", "lane": "eng", "task": "t1", "state": "working"}
+    master = {
+        "name": "master-agent",
+        "seat": "master@proof",
+        "lane": "master",
+        "task": "master",
+        "state": "working",
+        "desired_route_kind": "interactive",
+    }
+    found = [f for f in findings({}, [worker, master], {}, Limits()) if f.kind == "master-fallback-auth"]
+    assert [f.evidence for f in found] == [("route: subscription", "agent master-agent")]
+
+
+def test_unreserved_rows_regain_the_state_of_their_original_cap():
+    from scripts.routing.reservation import Reservation
+    from scripts.swarm.capacity import Account, _state, reserve, unreserved
+
+    held = reserve([Account("claude", "reserved", "OPEN", 0, 90, 25, 6)], Reservation("claude", "reserved", 1))
+    assert (held[0].cap, held[0].state) == (0, _state(0))
+    row = unreserved(held)[0]
+    assert (row.cap, row.state, row.reserved) == (6, _state(6), "")
+    assert _state(6) != _state(0)
+
+
 def _master_spawn(tmp_path, login, task):
     from scripts.routing import native_login
     from scripts.swarm.capacity import Account
