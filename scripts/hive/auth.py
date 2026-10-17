@@ -20,6 +20,8 @@ PREFIX = f"{ROOT}-hive"
 # ACL cannot confine a user to one database, so a hive's Redis serves that hive alone.
 ACL_PATTERNS = (f"{ROOT}:*",)
 ACL_CATEGORIES = ("+@all", "-@admin", "-@dangerous")
+SESSION_KEYS = ("heartbeat", "prompt", "session-model", "progress", "wait", "waited", "wait-history", "stop-blocks")
+INDEX = f"{ROOT}:hives"
 # A Redis started without --aclfile keeps users in memory only; there is nothing to save.
 NO_ACL_FILE = "not configured to use an ACL file"
 ENV_FILE = "hive.env"
@@ -54,6 +56,7 @@ def exchange(redis: "Redis", code: str, redis_url: str) -> dict:
     with redis.pipeline() as pipe:
         pipe.hset(records[0], mapping={"name": name, "ledger": _digest(ledger)})
         pipe.set(records[1], member_id)
+        pipe.sadd(INDEX, member_id)
         _set_user(pipe, member_id, password)
         try:
             pipe.execute()
@@ -80,6 +83,7 @@ def refresh(redis: "Redis", credential: str, redis_url: str) -> dict:
         if member_id is None:
             raise HiveError("the ledger credential belongs to no hive member")
         pipe.multi()
+        pipe.sadd(INDEX, member_id)
         _set_user(pipe, member_id, password)
         return member_id
 
@@ -98,8 +102,19 @@ def _set_user(client, member_id: str, password: str) -> None:
         reset=True,
         hashed_passwords=[f"+{_digest(password)}"],
         categories=ACL_CATEGORIES,
-        keys=ACL_PATTERNS,
+        keys=_acl_keys(member_id),
         channels=ACL_PATTERNS,
+    )
+
+
+def _acl_keys(member_id: str) -> tuple[str, ...]:
+    own = f"{ROOT}:hive:{member_id}"
+    return (
+        f"%R~{ROOT}:*",
+        f"~{own}",
+        f"~{own}:*",
+        f"~{ROOT}:inbox:*",
+        *(f"~{ROOT}:swarm:*:{kind}:*" for kind in SESSION_KEYS),
     )
 
 
@@ -118,6 +133,7 @@ def _forget(redis: "Redis", member_id: str, records: tuple[str, ...]) -> None:
 
     try:
         redis.delete(*records)
+        redis.srem(INDEX, member_id)
         redis.acl_deluser(f"hive-{member_id}")
     except RedisError:
         pass
@@ -173,6 +189,7 @@ def revoke(redis: "Redis", member_id: str) -> None:
         raise HiveError(f"no hive member {member_id}")
     with redis.pipeline() as pipe:
         pipe.delete(f"{PREFIX}:ledger:{member['ledger']}")
+        pipe.srem(INDEX, member_id)
         pipe.acl_deluser(f"hive-{member_id}")
         pipe.execute()
     try:

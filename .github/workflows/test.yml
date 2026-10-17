@@ -713,6 +713,7 @@ jobs:
             echo "reused=0" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          "$PYTHON_PATH" -m pip install --quiet PyYAML==6.0.3
           before=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)
           cd "$RUNNER_TEMP/planner"
           "$PYTHON_PATH" -m scripts.ci_test_plan --repository "$GITHUB_REPOSITORY" --head "$GITHUB_SHA" \
@@ -728,9 +729,15 @@ jobs:
           retention-days: 7
           overwrite: true
 
+      # The grader's manifest code picks what is skipped; the head supplies only the plan and its collection.
       - name: Deselect the reused tests
         if: steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
-        run: python -m tests.dep_manifest deselect --plan reused-tests.json --collected collected.json --out reused.json
+        env:
+          PYTHON_PATH: ${{ steps.python.outputs.python-path }}
+        run: |
+          cd "$RUNNER_TEMP/planner"
+          "$PYTHON_PATH" -m tests.dep_manifest deselect --plan "$GITHUB_WORKSPACE/reused-tests.json" \
+            --collected "$GITHUB_WORKSPACE/collected.json" --out "$GITHUB_WORKSPACE/reused.json"
 
       - name: Upload the deselected tests
         if: steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
@@ -769,7 +776,7 @@ jobs:
           github-token: ${{ steps.unit-token.outputs.token }}
 
       - name: Upload the chosen durations
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: split-${{ matrix.python-version }}
           path: |
@@ -778,7 +785,6 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-          overwrite: true
 
       - name: Upload collected tests
         if: github.event.pull_request.base.ref != 'main'
@@ -815,11 +821,24 @@ jobs:
           - {python-version: "3.11", shard: 11}
           - {python-version: "3.11", shard: 12}
     steps:
-      - uses: actions/checkout@v4
-        with:
+      # The action retries git fetch but not the lazy blob fetch inside git checkout; a silent connection there held a shard ten minutes.
+      - name: Check out the graded commit
+        id: checkout
+        continue-on-error: true
+        uses: actions/checkout@v4
+        env: &low-speed
+          GIT_HTTP_LOW_SPEED_LIMIT: "1000"
+          GIT_HTTP_LOW_SPEED_TIME: "60"
+        with: &unit-checkout
           ref: ${{ github.sha }}
           fetch-depth: 0
           filter: blob:none
+
+      - name: Check out the graded commit, attempt 2
+        if: steps.checkout.outcome == 'failure'
+        uses: actions/checkout@v4
+        env: *low-speed
+        with: *unit-checkout
 
       - *python
 
@@ -971,7 +990,7 @@ jobs:
       # Shards balance on these: per-test times here differ from a local run.
       - name: Upload durations
         if: ${{ !cancelled() && hashFiles('durations.json') != '' }}
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: durations-${{ matrix.python-version }}-${{ matrix.shard }}
           path: |
@@ -979,7 +998,6 @@ jobs:
             durations.sha256
             elapsed.json
           retention-days: 14
-          overwrite: true
 
       - name: Record flaky tests
         if: ${{ !cancelled() }}
@@ -1344,7 +1362,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install coverage
-        run: python -m pip install "coverage>=7.4"
+        run: python -m pip install "coverage>=7.4" PyYAML==6.0.3
 
       - name: Download shard coverage
         if: needs.select.outputs.scope != 'none'
@@ -1762,7 +1780,7 @@ jobs:
           [[ -f .antoncore/scripts/swarm_dashboard_columns.py ]] || { echo "::error::The antoncore dashboard column checker could not be checked out."; exit 1; }
           # The checker's own environment carries antoncore's job pins without changing the lint interpreter.
           python -m venv "$RUNNER_TEMP/columns"
-          "$RUNNER_TEMP/columns/bin/python" -m pip install --quiet PyYAML==6.0.3 jsonschema==4.25.1
+          "$RUNNER_TEMP/columns/bin/python" -m pip install --quiet PyYAML==6.0.3 jsonschema==4.25.1 orjson==3.13.0
           git -C .antoncore rev-parse HEAD
           docker run -d --rm --name "$CLICKHOUSE" clickhouse/clickhouse-server:24.1-alpine
           trap 'docker rm -f "$CLICKHOUSE" >/dev/null 2>&1 || true' EXIT
@@ -1771,7 +1789,14 @@ jobs:
             sleep 1
           done
           docker exec "$CLICKHOUSE" clickhouse-client -q 'SELECT 1' >/dev/null 2>&1 || { docker logs "$CLICKHOUSE"; echo "::error::ClickHouse never became ready."; exit 1; }
-          "$RUNNER_TEMP/columns/bin/python" .antoncore/scripts/swarm_dashboard_columns.py check --agentihooks "$GITHUB_WORKSPACE" --container "$CLICKHOUSE"
+          status=0
+          "$RUNNER_TEMP/columns/bin/python" .antoncore/scripts/swarm_dashboard_columns.py check --agentihooks "$GITHUB_WORKSPACE" --container "$CLICKHOUSE" 2> "$RUNNER_TEMP/columns.err" || status=$?
+          cat "$RUNNER_TEMP/columns.err" >&2
+          if (( status )); then
+            missing=$(grep -oP "No module named '\K[^']+" "$RUNNER_TEMP/columns.err" | sort -u | paste -sd, - || true)
+            [[ -z "$missing" ]] || echo "::error::The dashboard column checker imports $missing, which its environment lacks; pin it on this step's pip install line."
+            exit 1
+          fi
 
       - name: Select docs build
         if: ${{ !cancelled() }}
@@ -2393,7 +2418,7 @@ jobs:
         run: python -m scripts.ci_mutation.plan --base "$BASE"
 
       - name: Grade the empty change set
-        if: steps.plan.outputs.changed == '0'
+        if: steps.reuse.outputs.reused != 'true' && steps.plan.outputs.changed == '0'
         env:
           BASES: ${{ steps.plan.outputs.bases }}
         run: python -m scripts.ci_mutation --bases "$BASES" --budget 1080

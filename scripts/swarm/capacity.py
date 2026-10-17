@@ -442,6 +442,20 @@ def _without_work(lanes: list[str]) -> str:
     return f"{', '.join(lanes[:-1])} and {lanes[-1]} have no more ready tasks; "
 
 
+def _worker_seats(config: SwarmConfig, observations: list[Account], agents: list, warned: dict) -> list:
+    seats = offered(observations, warned)
+    master = config.lanes.get("master")
+    if master is None or master.get("agent") == "codex":
+        return seats
+    if any(
+        agent.lane == "master" and agent.state != "finished" and (agent.harness, agent.account) not in warned
+        for agent in agents
+    ):
+        return seats
+    reserved = pick(seats, lambda seat: seat.harness == "claude" and seat.kind == SUBSCRIPTION)
+    return [replace(seat, cap=seat.cap - 1) if seat == reserved else seat for seat in seats]
+
+
 def calculate(
     config,
     observations: list[Account],
@@ -461,7 +475,9 @@ def calculate(
     warned = warned or {}
     open_rows = _open(observations, warned)
     placeable = _placeable(open_rows)
-    allocation, placements = _allocate(config, effective, limits, offered(observations, warned), requirements, accounts)
+    allocation, placements = _allocate(
+        config, effective, limits, _worker_seats(config, observations, agents, warned), requirements, accounts
+    )
     restricted = sorted({row.state.lower() for row in observations if row.state != "OPEN" and row.kind != API})
     idle = [lane for lane in LANES if effective[lane] == limits[lane] < configured[lane]]
     reason = _without_work(idle)

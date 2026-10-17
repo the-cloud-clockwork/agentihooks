@@ -465,12 +465,29 @@ def test_promotion_shard_reports_use_the_pushed_grader_and_prs_keep_the_base():
 
 
 def test_unit_shards_check_out_full_history_without_old_file_contents():
-    _, checkout = _unit_step_index(lambda s: s.get("uses", "").startswith("actions/checkout"))
-    assert {key: value for key, value in checkout["with"].items() if key != "ref"} == {
-        "fetch-depth": 0,
-        "filter": "blob:none",
-    }
-    assert checkout["with"].get("ref") in (None, "${{ github.sha }}")
+    steps = _workflow()["jobs"]["unit"]["steps"]
+    checkouts = [s for s in steps if s.get("uses", "").startswith("actions/checkout")]
+    assert checkouts
+    for checkout in checkouts:
+        assert {key: value for key, value in checkout["with"].items() if key != "ref"} == {
+            "fetch-depth": 0,
+            "filter": "blob:none",
+        }
+        assert checkout["with"].get("ref") in (None, "${{ github.sha }}")
+
+
+def test_a_stalled_unit_checkout_aborts_within_a_minute_and_retries_once_in_place():
+    steps = _workflow()["jobs"]["unit"]["steps"]
+    first, second = [s for s in steps if s.get("uses", "").startswith("actions/checkout")]
+    assert steps.index(first) == 0 and steps.index(second) == 1
+    for checkout in (first, second):
+        assert checkout["uses"] == "actions/checkout@v4"
+        assert checkout["env"] == {"GIT_HTTP_LOW_SPEED_LIMIT": "1000", "GIT_HTTP_LOW_SPEED_TIME": "60"}
+        assert checkout["with"] == {"ref": "${{ github.sha }}", "fetch-depth": 0, "filter": "blob:none"}
+    assert first["continue-on-error"] is True
+    assert "if" not in first
+    assert "continue-on-error" not in second
+    assert second["if"] == f"steps.{first['id']}.outcome == 'failure'"
 
 
 def test_unit_pins_an_exact_uv_version():
@@ -738,7 +755,7 @@ def test_unit_shards_upload_their_durations_for_the_refresh():
             expected += " && matrix.python-version == '3.12'"
         assert step["if"] == expected
     assert upload.get("if") in (None, "${{ !cancelled() && hashFiles('durations.json') != '' }}")
-    assert upload["uses"].startswith("actions/upload-artifact@")
+    assert upload["uses"] == "./.github/actions/retry-upload" or upload["uses"].startswith("actions/upload-artifact@")
     assert upload["with"]["name"] == "durations-${{ matrix.python-version }}-${{ matrix.shard }}"
     assert upload["with"]["path"].split() in (
         ["durations.json", "durations.sha256"],
@@ -1115,7 +1132,10 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
         "${{ (steps.reuse.outputs.reused == 'true' || steps.plan.outputs.changed == '0') && 'true' || 'false' }}"
     )
     empty = plan["steps"][names.index("Grade the empty change set")]
-    assert empty["if"] == "steps.plan.outputs.changed == '0'"
+    assert empty["if"] in (
+        "steps.plan.outputs.changed == '0'",
+        "steps.reuse.outputs.reused != 'true' && steps.plan.outputs.changed == '0'",
+    )
     assert empty["env"] == {"BASES": "${{ steps.plan.outputs.bases }}"}
     assert empty["run"] == 'python -m scripts.ci_mutation --bases "$BASES" --budget 1080'
     upload = plan["steps"][names.index("Forward the reused or empty mutation report")]

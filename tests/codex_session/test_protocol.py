@@ -307,6 +307,14 @@ def test_an_error_reply_without_a_message_says_so():
     assert str(refused.value) == "thread/resume refused: no message"
 
 
+def test_set_thread_name_names_the_thread_through_the_server():
+    ws = Socket([{"id": 1, "result": {}}])
+    protocol.set_thread_name(protocol.Connection(ws, 5), "t2", "engineer@abc-0001")
+    assert [(message["method"], message["params"]) for message in ws.sent] == [
+        ("thread/name/set", {"threadId": "t2", "name": "engineer@abc-0001"})
+    ]
+
+
 def test_a_turn_reply_without_an_id_has_an_empty_turn_id():
     ws = Socket([{"id": 1, "result": {"turn": {}}}])
     assert protocol.start_turn(protocol.Connection(ws, 5), "t", "hello") == ""

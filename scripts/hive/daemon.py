@@ -35,17 +35,21 @@ def beat(redis: "Redis", local_id: str) -> None:
     if executions:
         report["sessions"]["_executions"] = executions
     key = registry.key(local_id)
+    # The member Redis user cannot write the hive index or launch slots; join, revoke and the controller maintain them.
+    member = local_id == os.environ.get("AGENTIHOOKS_HIVE_ID")
     with redis.pipeline() as pipe:
         for field, value in registry._default(local_id).items():
             pipe.hsetnx(key, field, registry._encode(field, value))
         fields = {name: json.dumps(report[name]) for name in ("slots", "interactive", "repos")}
         fields["heartbeat_at"] = str(int(time.time() * 1000))
         pipe.hset(key, mapping=fields)
-        pipe.sadd(registry.INDEX, local_id)
+        if not member:
+            pipe.sadd(registry.INDEX, local_id)
         for field in ("sessions", "quota"):
             pipe.set(f"{key}:{field}", json.dumps(report[field]), ex=TTL_SECONDS)
         pipe.execute()
-    LaunchSlots(redis).refresh([execution for ids in executions.values() for execution in ids])
+    if not member:
+        LaunchSlots(redis).refresh([execution for ids in executions.values() for execution in ids])
     consumer = Consumer.local(redis, local_id)
     consumer.poll()
     consumer.poll_commands()

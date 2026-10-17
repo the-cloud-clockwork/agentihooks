@@ -153,7 +153,9 @@ def test_a_launch_admits_one_server_binds_its_thread_and_opens_once(store, serve
     assert server.params("turn/start") == [
         {"threadId": "thread-new", "input": [{"type": "text", "text": "Start the task."}]}
     ]
-    assert server.methods().index("thread/start") < server.methods().index("turn/start")
+    assert server.params("thread/name/set") == [{"threadId": "thread-new", "name": agent.name}]
+    assert server.methods().index("thread/start") < server.methods().index("thread/name/set")
+    assert server.methods().index("thread/name/set") < server.methods().index("turn/start")
     assert not BindingStore(store).claim_opening(SLUG, agent.execution_id, 2000)
     assert all(connection.closed for connection in server.connections)
 
@@ -217,6 +219,26 @@ def test_a_resume_binds_the_existing_thread_without_starting_one(store, server, 
     assert (started.record.thread_id, started.record.session_id) == ("thread-kept", "session-resumed")
     assert "thread/start" not in server.methods()
     assert server.params("thread/resume") == [{"threadId": "thread-kept"}]
+    assert server.params("thread/name/set") == [{"threadId": "thread-kept", "name": spec.agent.name}]
+
+
+def test_a_launch_without_an_opening_still_names_its_thread(store, server, clock, root, tmp_path):
+    started = supervisor.launch(store, launch_spec(store, server, tmp_path, opening=""), deps(server, clock, root))
+    assert server.params("thread/name/set") == [{"threadId": "thread-new", "name": started.agent.name}]
+
+
+def test_a_refused_thread_name_still_opens_the_turn(store, server, clock, root, tmp_path):
+    server.refuse = {"thread/name/set"}
+    started = supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, clock, root))
+    assert (started.record.state, started.record.active_turn_id) == (CONNECTED, "turn-opening")
+    assert server.methods().index("thread/name/set") < server.methods().index("turn/start")
+
+
+def test_a_connection_lost_while_naming_the_thread_fails_the_launch(store, server, clock, root, tmp_path):
+    server.lose = {"thread/name/set"}
+    failure = failed(store, server, clock, root, launch_spec(store, server, tmp_path, opening=""), "protocol")
+    assert str(failure) == "thread/name/set lost the connection: scripted"
+    assert server.processes[-1].poll() is not None
 
 
 @pytest.mark.parametrize("account", ["default", "quota-successor"])

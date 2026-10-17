@@ -34,7 +34,9 @@ def fake_server():
         MAX_BODY=10_000,
         core=SimpleNamespace(SLUG_RE=re.compile(r"[a-z0-9-]+"), loads=json.loads),
         authority=SimpleNamespace(
-            principal=lambda admin, slug, token, agent: agent or PRINCIPALS.get(token),
+            caller=lambda headers, admin, slug: (
+                headers.get("X-Ledger-Agent") or PRINCIPALS.get(headers.get("X-Ledger-Token"))
+            ),
             controller=lambda credential: False,
         ),
         repository=SimpleNamespace(token={SLUG: "page-token"}.get),

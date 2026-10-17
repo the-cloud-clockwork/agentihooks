@@ -1106,7 +1106,10 @@ def _master_or_operator(store, args, message):
     store.config(args.slug)
     name = _caller(args)
     if name in ("", "operator"):
-        return "operator"
+        session = Who.from_env()
+        if clearance.is_operator(store, session):
+            return "operator"
+        name = session.name
     agent = next((a for a in store.agents(args.slug) if a.name == name), None)
     if agent is None or agent.lane != MASTER:
         raise SwarmError(message)
@@ -1439,7 +1442,12 @@ def cmd_block(store, args):
             waits.settle_notices(InboxStore(store.redis), agent, "a new wait")
             print(json.dumps({"task": agent.task, "state": "claimed", "waits_on": held}))
             return
+    from scripts.swarm import publish
+
+    pushed = publish.pushed_branches(store.config(args.slug).repo, rows[agent.task], agent)
     red_run = _dev_red_run(store, args.slug) if args.dev_red else None
+    if pushed:
+        ledger.update_task(args.slug, agent.task, pushed, by=agent.name)
     block_agent(store, args.slug, agent, args.note, ledger, red_run)
     cause = {"dev_red_run": red_run} if red_run is not None else {}
     print(

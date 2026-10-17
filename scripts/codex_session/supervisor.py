@@ -1,5 +1,6 @@
 """One supervised Codex app-server per admitted execution: admit, spawn, connect, bind, then open exactly once."""
 
+import contextlib
 import json
 import os
 import shutil
@@ -217,6 +218,12 @@ def bind_thread(connection: protocol.Connection, launch: Launch) -> dict:
     return thread
 
 
+def name_thread(connection: protocol.Connection, thread_id: str, name: str) -> None:
+    """A refused name leaves the default one; the launch still opens its turn."""
+    with contextlib.suppress(protocol.Refused):
+        protocol.set_thread_name(connection, thread_id, name)
+
+
 def stop(process: subprocess.Popen) -> None:
     if process.poll() is not None:
         return
@@ -263,6 +270,7 @@ def _connect_bound(store, bindings, launch, agent, record, process, deps) -> tup
         bindings.put(launch.slug, record)
         agent = replace(agent, conversation_id=thread["id"])
         store.put_agent(launch.slug, agent)
+        name_thread(connection, thread["id"], agent.name)
         if launch.opening and bindings.claim_opening(launch.slug, agent.execution_id, deps.now_ms()):
             record = replace(record, active_turn_id=protocol.start_turn(connection, thread["id"], launch.opening))
             bindings.put(launch.slug, record)
