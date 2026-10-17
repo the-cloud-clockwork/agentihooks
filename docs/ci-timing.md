@@ -103,6 +103,8 @@ gh run list --workflow codex-cache.yml --limit 5 \
 
 ## Historical measurements
 
+For Helm chart proof timing, see [Helm kind proof input keys](/docs/reference/ci-result-cache/#helm-kind-proof-input-keys): the declared inputs, skipped job versus skipped steps, branch hit measurements and outstanding dev comparison.
+
 Last ten runs of the Tests workflow on dev (35380163028, 35379942561, 35379468297, 35156774129, 35156548701, 35156299806, 35155214526, 35138446531, 35138276256, 35137837913). Seconds per step, mean and max over those runs.
 
 | Job | Step | Mean | Max | Slowest run |
