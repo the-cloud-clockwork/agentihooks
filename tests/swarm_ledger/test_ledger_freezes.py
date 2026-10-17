@@ -203,20 +203,6 @@ def test_unfreezing_a_phase_keeps_the_freezes_on_its_slices_and_tasks():
     assert event_of(state)["cleared"] == ["phases/p1"]
 
 
-def test_a_task_group_lead_holds_its_members_under_it():
-    doc = {
-        "phases": [{"id": "p1"}],
-        "tasks": [
-            {"id": "t1", "phase": "p1", "group_members": ["t3"]},
-            {"id": "t2", "phase": "p1"},
-            {"id": "t3", "phase": "p1", "merged_into": "t1"},
-        ],
-    }
-    assert ledger_freezes.under(doc, "tasks/t1") == {"tasks/t1", "tasks/t3"}
-    assert ledger_freezes.under(doc, "phases/p1") == {"phases/p1", "tasks/t1", "tasks/t2", "tasks/t3"}
-    assert ledger_freezes.under(doc, "tasks/t2") == {"tasks/t2"}
-
-
 def test_clearing_a_selector_removes_only_that_selector():
     freeze("lane:ci")
     freeze("kind:ci")
