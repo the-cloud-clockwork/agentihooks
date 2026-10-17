@@ -159,7 +159,6 @@ def test_unfreeze_sends_the_clear_and_restores_the_rows(page):
 
 
 @pytest.mark.parametrize("page", [[freeze("phases/p1"), freeze("tasks/t1")]], indirect=True)
-
 def test_unfreezing_a_phase_keeps_the_freezes_on_its_tasks_on_the_page(page):
     tab, sent = page
     tab.locator("#item-phases-p1 .freeze").first.click()
