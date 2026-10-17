@@ -17,6 +17,7 @@ jobs:
     timeout-minutes: 30
     env:
       SWARM_SMOKE_IMAGE: local/agentihooks-swarm:clients-check
+      COMPOSE_FILE: compose.yaml:deploy/compose/smoke-readiness.yaml
     steps:
       - uses: actions/checkout@v4
         with:

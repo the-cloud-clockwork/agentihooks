@@ -1,0 +1,15 @@
+services:
+  redis:
+    healthcheck:
+      start_period: 10s
+      start_interval: 1s
+  swarm:
+    healthcheck:
+      start_interval: 1s
+  controller:
+    healthcheck:
+      start_interval: 1s
+  hive:
+    healthcheck:
+      start_period: 10s
+      start_interval: 1s
