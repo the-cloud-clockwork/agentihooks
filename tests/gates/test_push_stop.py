@@ -609,6 +609,7 @@ def slow_origin(rig, seconds):
     hook.chmod(0o755)
 
 
+@pytest.mark.wall_clock
 def test_under_a_slow_push_a_later_gate_is_killed_with_the_reserve_left_inside_the_stop_condition(monkeypatch, rig):
     rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
     second_tree_with_work(rig)
@@ -635,6 +636,7 @@ def test_under_a_slow_push_a_later_gate_is_killed_with_the_reserve_left_inside_t
     assert 2 <= took <= timeout - RESERVE_S + 0.5
 
 
+@pytest.mark.wall_clock
 def test_under_a_slow_push_a_later_gate_with_less_than_the_floor_left_never_starts(monkeypatch, rig):
     rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
     second_tree_with_work(rig)
@@ -703,6 +705,7 @@ def test_the_hook_start_is_read_when_the_gate_is_built():
     assert PushStop(clock=lambda: 7.0).started == 7.0
 
 
+@pytest.mark.wall_clock
 def test_a_passing_gate_followed_by_a_slow_push_and_ledger_write_ends_inside_the_stop_condition(monkeypatch, rig):
     rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
     log = install_gate(rig, 0, before="import time\ntime.sleep(1.5)\n")
@@ -755,6 +758,7 @@ def test_a_passing_gate_is_followed_by_the_push_time_check(monkeypatch, rig):
     assert rig.remote_head() == ""
 
 
+@pytest.mark.wall_clock
 def test_under_a_slow_push_a_later_worktree_without_a_gate_is_not_pushed_past_the_stop_condition(monkeypatch, rig):
     rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
     second_tree_with_work(rig)
@@ -790,6 +794,7 @@ def test_a_pushed_head_with_dirty_files_never_runs_the_gate(rig):
 
 
 @pytest.mark.parametrize("with_gate", [False, True])
+@pytest.mark.wall_clock
 def test_a_push_slower_than_the_budget_is_cut_off_inside_the_stop_condition(monkeypatch, rig, with_gate):
     rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
     if with_gate:
@@ -808,6 +813,7 @@ def test_a_push_slower_than_the_budget_is_cut_off_inside_the_stop_condition(monk
     assert rig.ledger.comments == []
 
 
+@pytest.mark.wall_clock
 def test_a_second_push_is_cut_off_by_the_budget_the_first_push_left(monkeypatch, rig):
     rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
     second_tree_with_work(rig)

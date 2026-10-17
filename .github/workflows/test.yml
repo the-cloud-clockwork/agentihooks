@@ -1599,6 +1599,16 @@ jobs:
         if: ${{ !cancelled() }}
         run: python -m scripts.ci_wiring
 
+      - name: Require wall clock markers on elapsed bounds
+        if: ${{ !cancelled() }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/grader/scripts/ci_wall_clock.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+            python -m scripts.ci_wall_clock --root "$GITHUB_WORKSPACE"
+          else
+            python -m scripts.ci_wall_clock
+          fi
+
       - name: Require trusted actors before private runner admission
         if: ${{ !cancelled() }}
         run: |

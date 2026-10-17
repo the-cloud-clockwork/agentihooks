@@ -76,6 +76,7 @@ def test_silent_connections_never_run_more_handlers_than_the_cap(bounded):
             conn.close()
 
 
+@pytest.mark.wall_clock
 def test_trickling_connections_are_dropped_and_a_real_join_is_served(admin, bounded):
     dropped = []
     slow = [threading.Thread(target=_trickle, args=(bounded, dropped)) for _ in range(server.MAX_HANDLERS)]
@@ -166,6 +167,7 @@ def cert(tmp_path):
     return str(tmp_path / "cert.pem"), str(tmp_path / "key.pem")
 
 
+@pytest.mark.wall_clock
 def test_silent_tls_handshakes_are_dropped_and_a_real_https_join_is_served(admin, cert, monkeypatch):
     monkeypatch.setattr(server, "MAX_HANDLERS", 2)
     monkeypatch.setattr(server, "REQUEST_DEADLINE_S", 1)

@@ -221,6 +221,7 @@ def test_a_cursor_older_than_retention_is_expired_and_the_oldest_kept_one_replay
     assert hub.open(SLUG, None, Hub.cursor(channel, 11)) == (11, [channel.log[-1]])
 
 
+@pytest.mark.wall_clock
 def test_wait_returns_nothing_after_its_timeout():
     hub = Hub()
     opened(hub)
