@@ -449,7 +449,7 @@ Matching starts once the first half is recorded with `swarm pr <url> --half 1`; 
   task <task> is split: name the pull request url in the merge so intent matches it to its judged half.
   ```
 
-- A resolved or named pull request that is not one of the task's recorded halves is refused with `Intent requires a pull request registered on this task.`, or, before the task's halves are registered for intent, with `intent for task <task> was judged on <url>, not this pull request. Record this half first: agentihooks swarm <id> pr <pull request url> --half <n>, then wait for its verdict.` Record it first with `swarm pr <url> --half <n>` and wait for its verdict.
+- A resolved or named pull request that is not one of the task's recorded halves is refused with `Intent requires a pull request registered on this task.`, or, before the task's halves are registered for intent, with `intent for task <task> was judged on <url>, not this pull request. Record this half first: agentihooks swarm <id> pr <pull request url> --half <n>, then wait for its verdict.` After the first message, record the half the same way.
 - A half with no verdict yet, or one judged on another head or another task contract, is refused with `Intent must be checked on this pull request head and contract before it can merge.` Wait for the tick to judge the current head. A GitHub error or timeout while reading the half's current head gives the same refusal.
 
 For example, from the worktree of a split task's second half, both of these merge commands are graded against half 2:
@@ -473,8 +473,8 @@ A split cannot change which pull request a verdict belongs to. Once the task rec
 | A half has no pull request yet | Completion is premature. Record and merge the remaining half before `done`. |
 | The final pull request merged; close the task now | All halves have recorded pull requests. Run `done`; it verifies that each one merged. |
 | `task <task> is split: name the pull request url in the merge so intent matches it to its judged half.` | The `intent` gate could not resolve the branch or current branch of a `gh pr merge` to a pull request. Rerun the merge with the half's pull request URL. |
-| `Intent requires a pull request registered on this task.` | The merged pull request is not a recorded half. Record it with `swarm pr <url> --half <n>` and wait for its verdict. |
-| `intent for task <task> was judged on <url>, not this pull request. Record this half first: agentihooks swarm <id> pr <pull request url> --half <n>, then wait for its verdict.` | The merged pull request is not the half the verdict was judged on. Record it with `swarm pr <url> --half <n>` and wait for its verdict. |
+| `Intent requires a pull request registered on this task.` | The merged pull request is not a single recorded half: it is unrecorded, or its bare number matches more than one half. Record it with `swarm pr <url> --half <n>` and wait for its verdict. |
+| `intent for task <task> was judged on <url>, not this pull request. Record this half first: agentihooks swarm <id> pr <pull request url> --half <n>, then wait for its verdict.` | The merged pull request is not the half the verdict was judged on. Follow the command in the message. |
 | `Intent must be checked on this pull request head and contract before it can merge.` | The half has no verdict for its current head or task contract, or its head could not be read. Wait for the tick to judge it, then merge again. |
 
 ## The minute tick
