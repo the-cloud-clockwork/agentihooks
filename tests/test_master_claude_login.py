@@ -247,13 +247,19 @@ def test_another_declared_master_account_refuses_naming_both(tmp_path):
 
 def test_a_declaration_another_login_wrote_first_refuses_naming_both(tmp_path):
     class Raced(FileSettings):
-        def _write(self, key, value, entry):
-            super()._write(key, "other" if key == "master-account-claude" else value, entry)
+        def _claim(self, key, value, entry):
+            self._write(key, "other", {**entry, "value": "other", "actor": "rival"})
+            return super()._claim(key, value, entry)
 
     target, store = _home(tmp_path), Raced(tmp_path / "routing-settings.json")
     environ = {"AH_CC_TOKEN_masteratexample_com": "x", "AH_CC_TOKEN_other": "y", "AGENTIHOOKS_AGENT_NAME": "m"}
-    with pytest.raises(login.LoginRefused, match="masteratexample_com .* is other$"):
+    with pytest.raises(
+        login.LoginRefused,
+        match="^the master login account masteratexample_com is a worker quota token "
+        "and the declared claude master account is other$",
+    ):
         login.account("rig", target, environ, lambda seen: store)
+    assert [entry["actor"] for entry in store.history()] == ["rival"]
 
 
 def test_the_settings_store_follows_the_routing_store(tmp_path, monkeypatch):

@@ -111,6 +111,29 @@ def test_a_write_needs_an_actor(store):
     assert store.history() == []
 
 
+def test_a_claim_sets_an_unset_key_once_and_returns_the_holder(store):
+    assert store.claim("master-account-claude", "a", "master@x", NOW) == "a"
+    assert store.claim("master-account-claude", "b", "master@y", NOW + 1) == "a"
+    assert store.get("master-account-claude") == "a"
+    assert store.history() == [{"key": "master-account-claude", "value": "a", "actor": "master@x", "at": NOW}]
+
+
+@pytest.mark.parametrize(("value", "actor"), [(None, "m"), ("", "m"), ("a", "")])
+def test_a_claim_refuses_an_empty_value_or_actor(store, value, actor):
+    with pytest.raises(ValueError):
+        store.claim("master-account-claude", value, actor, NOW)
+    with pytest.raises(ValueError, match="unknown routing setting"):
+        store.claim("nope", "a", "m", NOW)
+    assert store.history() == []
+
+
+def test_the_file_claim_holds_a_lock_beside_the_settings(home, monkeypatch):
+    locked = []
+    monkeypatch.setattr(settings.fcntl, "flock", lambda handle, mode: locked.append((Path(handle.name).name, mode)))
+    settings.open_store(None, home).claim("master-account-claude", "a", "m", NOW)
+    assert locked == [("routing-settings.json.lock", settings.fcntl.LOCK_EX)]
+
+
 def test_an_unknown_key_is_refused_on_read_and_write(store):
     with pytest.raises(ValueError) as raised:
         store.get("nope")
