@@ -2,7 +2,7 @@ import pytest
 
 from scripts.swarm_ledger import ledger_core as core
 from scripts.swarm_ledger import ledger_freezes, ledger_rank, ledger_tasks, new_ledger
-from tests.swarm_ledger import legacy_page  # noqa: E402
+from tests.swarm_ledger import legacy_page
 
 SLUG = "urgentrank-2026-01-01"
 MASTER = "master@abcdef-0001"
@@ -99,6 +99,14 @@ def test_a_claimed_task_in_a_waiting_phase_may_still_be_made_urgent():
     update("t2", {"state": "claimed", "claimed_by": "engineer@abcdef-0002"})
     state, rejected = update("t2", {"rank": "urgent"}, 2)
     assert (rejected, rank_of(state, "t2")) == ([], "urgent")
+
+
+def test_an_unrelated_update_to_a_held_urgent_task_still_lands():
+    update("t1", {"rank": "urgent"})
+    freeze_phase_one()
+    state, rejected = update("t1", {"title": "renamed"}, 2)
+    assert rejected == []
+    assert next(t for t in state["tasks"] if t["id"] == "t1")["title"] == "renamed"
 
 
 def test_an_urgent_task_add_into_a_waiting_phase_is_refused_and_one_without_a_phase_lands():

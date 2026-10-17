@@ -127,18 +127,14 @@ def test_no_observation_means_no_finding(store):
     assert urgent_hold.findings(store, SLUG) == []
 
 
-def test_the_doctor_fix_phase_reaches_the_hold(store, monkeypatch):
-    from scripts.doctor import loop, priming
-    from scripts.swarm.health import urgent_hold
+def test_the_first_covering_freeze_names_the_hold():
+    freezes = [{"verb": "freeze", "target": "phases/p1"}, {"verb": "freeze", "target": "tasks/a"}]
+    assert hold(doc([task("a")], freezes=freezes), "a") == "the freeze on phase build holds it"
 
-    store.update(SLUG, template=priming.TEMPLATE)
-    found = doc([task("a", phase=loop.FIX_PHASE, rank="urgent")], freezes=[{"verb": "focus", "target": "lane:ci"}])
-    found["phases"].append({"id": loop.FIX_PHASE, "title": "fix", "depends_on": ["p1"]})
-    urgent_hold.observe(store, SLUG, found, 0)
-    urgent_hold.observe(store, SLUG, found, 10 * MINUTE)
-    assert [f.evidence for f in urgent_hold.findings(store, SLUG)] == [
-        ("its phase fix is waiting on an earlier phase",)
-    ]
+
+def test_a_watched_swarm_focus_holds_a_task_its_own_focus_covers():
+    found = doc([task("a")], freezes=[{"verb": "focus", "target": "lane:eng"}], watched_focus=["the focus elsewhere"])
+    assert hold(found, "a") == "a focus elsewhere holds it"
 
 
 def test_swarm_status_reports_the_urgent_hold(store):

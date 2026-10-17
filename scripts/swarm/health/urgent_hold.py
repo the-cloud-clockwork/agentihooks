@@ -2,7 +2,7 @@
 
 import json
 
-from scripts.swarm import claim_hold, freeze, timing
+from scripts.swarm import claim_hold, timing
 from scripts.swarm.health.findings import MINUTE_MS, Finding
 from scripts.swarm_ledger.repository import hierarchy
 
@@ -17,13 +17,13 @@ def read(store, slug: str) -> dict:
 
 def observe(store, slug: str, doc: dict, at: int) -> dict:
     before = read(store, slug).get("tasks", {})
-    fix, graph = freeze.fix_phase(store.config(slug)), hierarchy.project(doc)[0]
+    graph = hierarchy.project(doc)[0]
     rows = {t["id"]: t for t in doc.get("tasks", [])}
     held = {}
     for task in rows.values():
         if task.get("rank") != "urgent" or task.get("state") != "open" or task.get("out_of_scope"):
             continue
-        if task.get("merged_into") or not (why := claim_hold.hold(task, rows, doc, graph, fix)):
+        if task.get("merged_into") or not (why := claim_hold.hold(task, rows, doc, graph, "")):
             continue
         since = before.get(task["id"], {}).get("since", at)
         held[task["id"]] = {"since": since, "why": why, "title": task.get("title") or task["id"]}
