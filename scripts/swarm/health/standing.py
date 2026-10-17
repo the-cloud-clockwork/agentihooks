@@ -26,6 +26,8 @@ class Reading:
     unit: str
     episode: str
     detail: str = ""
+    evidence: tuple = ()
+    links: tuple = ()
 
 
 def key(slug: str) -> str:
@@ -62,6 +64,7 @@ def _fire(old, stage, reading, now_ms):
         "threshold": reading.threshold,
         "unit": reading.unit,
         "detail": reading.detail,
+        **({"evidence": reading.evidence, "links": reading.links} if reading.links or reading.evidence else {}),
         "fired": fired,
         "episodes": episodes,
         "first_at": old.get("first_at", now_ms),
@@ -125,6 +128,7 @@ def clear_detector(redis: Redis, slug: str, stage: str) -> bool:
 def _finding(row: dict) -> Finding:
     times = "time" if row["fired"] == 1 else "times"
     evidence = (f"Fired {row['fired']} {times}", row["detail"]) if row["detail"] else (f"Fired {row['fired']} {times}",)
+    evidence += tuple(row.get("evidence", ()))
     detector = row.get("detector")
     if detector:
         evidence += (
@@ -139,6 +143,7 @@ def _finding(row: dict) -> Finding:
         f"{row['threshold']} {row['unit']}",
         row["value"],
         SAME_MEASURE.get(row["unit"], row["unit"]),
+        links=tuple(row.get("links", ())),
     )
 
 
