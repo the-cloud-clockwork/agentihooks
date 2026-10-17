@@ -84,7 +84,7 @@ def token_fingerprint(token: str) -> str:
 
 
 def token_accounts(environ: Mapping[str, str] | None = None) -> dict[str, str]:
-    """Token fingerprint -> the slug the balancer routes that token under, so a renamed variable keeps one account."""
+    """Token fingerprint -> the slug the balancer routes that token under."""
     from scripts import operator_env
 
     active = {**(os.environ if environ is None else environ), **operator_env.block_tokens()}
@@ -134,16 +134,14 @@ def _env_names(pid: int, proc: Path) -> list[str]:
     return names
 
 
-def _env_value(pid: int, proc: Path, name: str) -> str:
+def _env_fingerprint(pid: int, proc: Path, name: str) -> str:
     try:
         raw = (proc / str(pid) / "environ").read_bytes()
     except OSError:
         return ""
     prefix = f"{name}=".encode()
-    return next(
-        (item[len(prefix) :].decode(errors="surrogateescape") for item in raw.split(b"\0") if item.startswith(prefix)),
-        "",
-    )
+    value = next((item[len(prefix) :] for item in raw.split(b"\0") if item.startswith(prefix)), b"")
+    return token_fingerprint(value.decode(errors="surrogateescape")) if value else ""
 
 
 def agent_pid(start: int | None = None, proc: Path = _PROC) -> int:
@@ -196,8 +194,7 @@ def live_sessions(
         pid = int(name)
         if pid not in skip and _is_interactive_claude(pid, proc):
             account = pid_account(pid, proc)
-            token = _env_value(pid, proc, f"{TOKEN_PREFIX}{account}")
-            sessions[pid] = accounts.get(token_fingerprint(token), account) if token else account
+            sessions[pid] = accounts.get(_env_fingerprint(pid, proc, f"{TOKEN_PREFIX}{account}"), account)
     return sessions
 
 

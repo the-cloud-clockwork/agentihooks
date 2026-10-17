@@ -1,5 +1,6 @@
 """Tests for hooks.context.account_sessions — live sessions per account from /proc."""
 
+import hashlib
 from pathlib import Path
 from unittest.mock import patch
 
@@ -70,8 +71,6 @@ def _renamed(tmp_path):
 
 
 def test_sessions_under_an_old_name_count_against_the_account_holding_the_same_token(tmp_path, monkeypatch, capsys):
-    import hashlib
-
     monkeypatch.setattr("scripts.operator_env.block_tokens", lambda: {})
     environ = {"AH_CC_TOKEN_mail": "secret-a", "AH_CC_TOKEN_beta": "secret-b", "AH_CC_TOKEN_x": ""}
     with patch.object(acc, "handed_off_pids", return_value=set()):
