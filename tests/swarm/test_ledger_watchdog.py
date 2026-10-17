@@ -467,7 +467,7 @@ def test_a_retired_proof_never_stops_the_shared_server(store, tmp_path, monkeypa
     current(host, tmp_path)
     store.update("sw", state=state)
     ledger = ProbedLedger(Clock())
-    monkeypatch.setattr(ledger, "binned", lambda slug: binned)
+    ledger.bin = {"sw"} if binned else set()
     monkeypatch.setattr(ledger_watchdog, "default_host", lambda: host)
 
     assert ledger_watchdog.watch(store, "sw", ledger, FakeRuntime()) == []
