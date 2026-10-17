@@ -35,13 +35,13 @@ def test_kind_proof_cleanup_waits_for_the_terminal_image_job():
     assert 'load_lock="$(mktemp)"\ntrap finish EXIT\n' in SCRIPT
 
 
-def _layer_flags(tmp_path, env, present=()):
+def _layer_flags(tmp_path, env, present=(), then="keep_layers swarm"):
     start = _at("layers() {")
-    functions = SCRIPT[start : SCRIPT.index("\n}\n", SCRIPT.index("rotate_layers() {")) + 3]
+    functions = SCRIPT[start : SCRIPT.index("\n}\n", SCRIPT.index("keep_layers() {")) + 3]
     for name in present:
         (tmp_path / name).mkdir()
     result = subprocess.run(
-        ["bash", "-c", f"set -euo pipefail\n{functions}\nlayers swarm\nrotate_layers swarm\nls {tmp_path}"],
+        ["bash", "-c", f"set -euo pipefail\n{functions}\nlayers swarm\n{then}\nls {tmp_path}"],
         env={"PATH": "/usr/bin:/bin", **env},
         capture_output=True,
         text=True,
@@ -70,7 +70,8 @@ def _layer_flags(tmp_path, env, present=()):
 )
 def test_fixture_builds_read_the_restored_layers_and_write_only_on_a_miss(tmp_path, hit, present, flags):
     env = {"KIND_LAYER_CACHE": str(tmp_path), "KIND_LAYER_CACHE_HIT": hit}
-    assert _layer_flags(tmp_path, env, present) == [flag.format(cache=tmp_path) for flag in flags] + list(present)
+    expected = [flag.format(cache=tmp_path) for flag in flags] + ["complete", *present]
+    assert _layer_flags(tmp_path, env, present) == expected
 
 
 def test_a_new_layer_export_replaces_the_restored_one(tmp_path):
@@ -78,8 +79,14 @@ def test_a_new_layer_export_replaces_the_restored_one(tmp_path):
     (tmp_path / "swarm" / "stale").touch()
     (tmp_path / "swarm.next").mkdir()
     _layer_flags(tmp_path, {"KIND_LAYER_CACHE": str(tmp_path), "KIND_LAYER_CACHE_HIT": "false"})
-    assert [path.name for path in tmp_path.iterdir()] == ["swarm"]
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["complete", "swarm"]
     assert not (tmp_path / "swarm" / "stale").exists()
+
+
+def test_a_restored_completion_mark_is_cleared_until_the_builds_finish(tmp_path):
+    (tmp_path / "complete").touch()
+    env = {"KIND_LAYER_CACHE": str(tmp_path), "KIND_LAYER_CACHE_HIT": "false"}
+    assert "complete" not in _layer_flags(tmp_path, env, then="true")
 
 
 def test_fixture_builds_without_a_layer_cache_pass_no_cache_flags(tmp_path):
@@ -89,8 +96,7 @@ def test_fixture_builds_without_a_layer_cache_pass_no_cache_flags(tmp_path):
 def test_every_fixture_build_stage_takes_the_layer_flags():
     assert 'docker build -q "${terminal_layers[@]}" --build-arg IMAGE="$image" --target packages' in SCRIPT
     assert 'docker build -q -t "$image" "${swarm_layers[@]}" .' in SCRIPT
-    assert _at("rotate_layers swarm\n") < _at("printf 'main fixture image built")
-    assert _at('wait "$packages"\n  rotate_layers terminal\n')
+    assert _at('wait "$packages"\n  keep_layers swarm terminal\n') < _at("build=$!\n")
 
 
 def test_the_kind_job_restores_and_saves_the_layers_it_builds_with():
@@ -103,9 +109,14 @@ def test_the_kind_job_restores_and_saves_the_layers_it_builds_with():
     assert restore["with"]["path"] == save["with"]["path"] == smoke["env"]["KIND_LAYER_CACHE"]
     assert smoke["env"]["KIND_LAYER_CACHE_HIT"] == "${{ steps.layers.outputs.cache-hit }}"
     assert save["with"]["key"] == "${{ steps.layers.outputs.cache-primary-key }}"
-    assert save["if"] == "steps.layers.outputs.cache-hit != 'true'"
+    exported = steps["exported"]
+    assert exported["if"] == "always() && steps.layers.outputs.cache-hit != 'true'"
+    assert "$RUNNER_TEMP/kind-layers/complete" in exported["run"]
+    assert restore["with"]["path"] == "${{ runner.temp }}/kind-layers"
+    assert save["if"] == "always() && steps.exported.outputs.complete == 'true'"
     order = list(steps)
-    assert order.index("layers") < order.index(smoke_name) < order.index("Save the fixture image layers")
+    assert order.index("layers") < order.index(smoke_name) < order.index("exported")
+    assert order.index("exported") < order.index("Save the fixture image layers")
     for source in (
         "Dockerfile",
         "docker/swarm/requirements.lock",

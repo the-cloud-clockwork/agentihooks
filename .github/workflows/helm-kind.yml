@@ -46,8 +46,15 @@ jobs:
           KIND_LAYER_CACHE: ${{ runner.temp }}/kind-layers
           KIND_LAYER_CACHE_HIT: ${{ steps.layers.outputs.cache-hit }}
         run: bash deploy/helm/agentihooks-swarm/ci/kind-smoke.sh
+      - name: Check the fixture image layers were exported
+        id: exported
+        if: always() && steps.layers.outputs.cache-hit != 'true'
+        run: |
+          if [[ -e $RUNNER_TEMP/kind-layers/complete ]]; then
+            echo complete=true >> "$GITHUB_OUTPUT"
+          fi
       - name: Save the fixture image layers
-        if: steps.layers.outputs.cache-hit != 'true'
+        if: always() && steps.exported.outputs.complete == 'true'
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/kind-layers
