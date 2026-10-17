@@ -1,7 +1,8 @@
 FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS build
 WORKDIR /build
-COPY pyproject.toml README.md docker/swarm/requirements.lock ./
+COPY docker/swarm/requirements.lock ./
 RUN python -m venv /opt/venv && /opt/venv/bin/pip install --no-cache-dir --require-hashes -r requirements.lock
+COPY pyproject.toml README.md ./
 COPY hooks/ hooks/
 COPY scripts/ scripts/
 COPY profiles/ profiles/

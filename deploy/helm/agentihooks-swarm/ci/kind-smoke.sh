@@ -48,7 +48,11 @@ finish() {
     -f "$chart/ci/terminal-worker.Dockerfile" . >/dev/null &
   packages=$!
   trap 'status=$?; wait "$packages" || true; exit "$status"' EXIT
-  docker build -q -t "$image" . >/dev/null
+  cache=()
+  if [[ -n ${ACTIONS_RUNTIME_TOKEN:-} && "$(docker info --format '{{.DriverStatus}}')" == *io.containerd.snapshotter.v1* ]]; then
+    cache=(--cache-from type=gha,scope=swarm)
+  fi
+  docker build -q "${cache[@]}" -t "$image" . >/dev/null
   printf 'main fixture image built\n'
   printf 'FROM %s\nCOPY . /\n' "$image" \
     | docker build -q -t "$bundle_image" -f - tests/fixtures/swarm_v2/worker-bundle >/dev/null

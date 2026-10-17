@@ -34,5 +34,7 @@ jobs:
           fi
           helm version --short
           kubectl version --client
+      - name: Expose the Actions cache to the swarm image build
+        uses: crazy-max/ghaction-github-runtime@v3
       - name: Lint, install and prove the chart in kind
         run: bash deploy/helm/agentihooks-swarm/ci/kind-smoke.sh
