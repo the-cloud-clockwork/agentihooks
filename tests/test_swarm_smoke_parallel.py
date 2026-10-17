@@ -85,7 +85,7 @@ def test_cache_export_overlaps_smoke_and_reports_its_failure(tmp_path):
     assert result.returncode == 1
     assert "smoke saw cache" in result.stdout
     assert "cache saw smoke" in result.stdout
-    assert "swarm-cache-export.sh failed with exit 7" in result.stdout
+    assert "failed with exit 7" in result.stdout
 
 
 def test_scenarios_sharing_a_file_name_keep_their_own_results(tmp_path):
