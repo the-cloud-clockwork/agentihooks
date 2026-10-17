@@ -189,3 +189,10 @@ def test_a_missing_blank_line_before_a_changed_line_fails(repo, capsys):
     repo({"mod.py": "value = 1\ndef chosen():\n    pass\n"})
     assert publish_gate.main() == 1
     assert report(capsys) == ["mod.py:2: would reformat a changed line"]
+
+
+def test_an_unformatted_changed_line_after_an_old_one_fails(repo, capsys):
+    repo({"mod.py": "a=1\nb = 1\n"}, push=True)
+    repo({"mod.py": "a=1\nb=2\n"})
+    assert publish_gate.main() == 1
+    assert report(capsys) == ["mod.py:2: would reformat a changed line"]
