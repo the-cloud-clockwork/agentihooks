@@ -307,6 +307,7 @@ def _isolate_real_user_paths(tmp_path, monkeypatch, request):
     monkeypatch.setattr(
         "hooks.context.broadcast.BROADCAST_DELIVERY_STATE_FILE", str(fake_state_dir / "broadcast_delivery_state.json")
     )
+    monkeypatch.setattr("hooks.context.context_recycle.AGENTIHOOKS_HOME", fake_state_dir)
     monkeypatch.setattr("hooks.context.quota_policy.AGENTIHOOKS_HOME", fake_state_dir)
     monkeypatch.setattr("hooks.context.branch_guard.AGENTIHOOKS_HOME", fake_state_dir)
     monkeypatch.setattr("hooks.context.prod_lockdown.AGENTIHOOKS_HOME", fake_state_dir)
@@ -370,6 +371,7 @@ def _isolate_real_user_paths(tmp_path, monkeypatch, request):
 
     from hooks import config as hooks_config
     from hooks.config import _agentibrain_home
+    from hooks.context import context_recycle
     from scripts.claude_config import claude_home, claude_json
     from scripts.herdr_setup import config_path as herdr_config_path
 
@@ -377,6 +379,7 @@ def _isolate_real_user_paths(tmp_path, monkeypatch, request):
         ("claude_home", claude_home()),
         ("claude_json", claude_json()),
         ("agentihooks home", hooks_config.AGENTIHOOKS_HOME),
+        ("context recycling home", context_recycle.AGENTIHOOKS_HOME),
         ("codex_home", codex_home()),
         ("copilot_home", copilot_home()),
         ("agents_skills_home", agents_skills_home()),
