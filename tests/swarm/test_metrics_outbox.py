@@ -480,3 +480,26 @@ def test_outbox_flushes_through_a_real_http_sink(tmp_path, server):
     assert box.flush(NOW) == 1
     box.close()
     assert [json.loads(seen[3]) for seen in Recorder.seen[2:]] == [row("e1")]
+
+
+def test_metric_history_read_sees_committed_rows_while_a_writer_holds_the_spool(box, monkeypatch):
+    box.append(TASKS, [row("old")])
+    monkeypatch.setattr(metrics_outbox, "spool_path", lambda: box.path)
+    box.db.execute("BEGIN IMMEDIATE")
+    try:
+        box.db.execute("UPDATE spool SET row = ? WHERE event_id = ?", (json.dumps(row("old", state="done")), "old"))
+        assert metrics_outbox.read_recent("task_moves", NOW) == [row("old")]
+    finally:
+        box.db.rollback()
+
+
+def test_unreadable_metric_history_is_reported_without_changing_the_spool(tmp_path, monkeypatch, caplog):
+    path = tmp_path / "broken.sqlite"
+    contents = b"not a sqlite database"
+    path.write_bytes(contents)
+    monkeypatch.setattr(metrics_outbox, "spool_path", lambda: path)
+
+    assert metrics_outbox.read_recent("task_moves", NOW) is None
+
+    assert "metrics history read failed" in caplog.text
+    assert path.read_bytes() == contents
