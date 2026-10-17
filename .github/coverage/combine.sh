@@ -25,7 +25,14 @@ selected=()
 if [[ "${SCOPE:-}" == selected ]]; then selected=(--selected); fi
 python "$(dirname "$0")/../../tests/js_lcov.py" --captures .coverage-shards --out lcov.info "${selected[@]}" > "$lcov_log" 2>&1 &
 lcov_pid=$!
-python -m coverage combine --rcfile="$config" --keep "${reports[@]}"
+flat=$(mktemp -d)
+flattening=()
+for index in "${!reports[@]}"; do
+    python "$(dirname "$0")/flatten.py" "${reports[$index]}" "$flat/.coverage.$index" &
+    flattening+=($!)
+done
+for pid in "${flattening[@]}"; do wait "$pid"; done
+python -m coverage combine --rcfile="$config" "$flat"/.coverage.*
 table=$(mktemp)
 python -m coverage report --rcfile="$config" > "$table" &
 table_pid=$!

@@ -69,6 +69,9 @@ def _ledger():
 
 
 def _quota_handoff(store, ledger, runtime):  # noqa: F811
+    master = store.next_name("sw", "master")
+    store.put_agent("sw", AgentRecord(master, "master", "master", started_at=1))
+    runtime.live.add(master)
     for task in ledger.rows.values():
         task["title"] = "keep the seat"
     warned = list(runtime.pool)
@@ -706,7 +709,9 @@ def _quota_decision(tmp_path, monkeypatch, rows, launch, tasks, lanes=None):
     envelope = {"reason": "quota", "launch": launch}
     ready = {"eng": [{"id": task, "handoff_envelope": envelope} for task in tasks], "ci": [], "plan": []}
     requirements = rt.quota_requirements(config, ready)
-    return rt.quota_capacity(config, [], 100, {"eng": len(tasks), "ci": 0, "plan": 0}, requirements)
+    return rt.quota_capacity(
+        config, [AgentRecord("master", "master", "master")], 100, {"eng": len(tasks), "ci": 0, "plan": 0}, requirements
+    )
 
 
 @pytest.mark.parametrize("claude_week_used,expected", [(20, {"q": "claude"}), (95, {})])

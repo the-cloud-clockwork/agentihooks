@@ -56,7 +56,7 @@ def rest(path: str, run) -> dict | list | str:
         raise SwarmError(f"GitHub API: {exc}") from exc
 
 
-def require_green(url: str, head: str, run) -> None:
+def required_view(url: str, run) -> "ledger_events.PullRequest | None":
     def read(command, **kwargs):
         try:
             done = run(command, **kwargs)
@@ -81,7 +81,11 @@ def require_green(url: str, head: str, run) -> None:
         if rule["type"] == "required_status_checks"
         for check in rule["parameters"]["required_status_checks"]
     )
-    pull = ledger_events.view(url, read, required_checks=expected)
+    return ledger_events.view(url, read, required_checks=expected)
+
+
+def require_green(url: str, head: str, run) -> None:
+    pull = required_view(url, run)
     if pull is None or pull.head != head or not pull.resolved or pull.red:
         failed = f"; failed: {', '.join(pull.failed)}" if pull and pull.failed else ""
         raise SwarmError(f"required checks on the current pull request head must pass before queueing{failed}")

@@ -213,7 +213,7 @@ def _advance(run, rows, row, found):
 
 
 def _checks(run, row, found, pull):
-    outcome = waits.checks_resolution(found["on"], run.github)
+    outcome = waits.checks_resolution(found["on"], run.github, run.reread)
     if not outcome.startswith(f"checks on {found['url']}"):
         save(run.store, run.slug, row["id"], found)
         return []
