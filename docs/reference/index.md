@@ -30,6 +30,7 @@ See [Focused proof CPU worker limits](../ci-timing.md#focused-proof-cpu-worker-l
 | [Test count floor](test-count-floor.md) | The `test-count` job: the base revision grades, the floor, lost tests admitted when the head deletes the function, class, constant or keyword branch they referenced, limits and proof |
 | [Promotion and releases](promotion.md) | How a green `dev` push run of Tests rebase merges its graded revision into `main` through a snapshot branch, tags a patch release with generated notes, what blocks it, reruns and manual `release.yml` runs |
 | [CI result cache and in place retry](ci-result-cache.md) | The design for one CI algorithm: reuse a check's green result while its real inputs are unchanged, retry a failed test in place, retry durations downloads and uploads in place, before numbers and slices |
+| [Codex CLI cache in unit jobs](../ci-timing.md#codex-cli-cache) | Seed the CLI on main, configure its release, diagnose cache misses and verify installation and shard timings |
 | [Browser cache](browser-cache.md) | Verified Chromium preparation, dev push only saving, restore scope, workflow configuration and cache inspection |
 | [WSL disk reclaim](wsl-disk.md) | Sparse VHDX so space `agentihooks gc` frees returns to Windows; why `/tmp` empties on WSL |
 | [CODEX-COMPAT](CODEX-COMPAT.md) | The `codex` install target: hook contract, surface map, divergences |

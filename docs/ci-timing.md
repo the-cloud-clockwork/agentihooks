@@ -131,8 +131,18 @@ The seed job saves only on the self-hosted pool the unit shards restore on. The 
 
 `CODEX_RELEASE` is set in three places: the `unit` and `unit-selected` job environments in `test.yml` and the `seed` job in `codex-cache.yml`. Change all three in one pull request; `tests/test_ci_workflow.py` fails when they differ. The new key does not exist until the next push to `main` or a dispatch of the seed:
 
+For example, each of those three jobs currently contains this environment setting; preserve its other environment entries when changing the release:
+
+```yaml
+env:
+  CODEX_RELEASE: rust-v0.160.0
+```
+
+The release must provide the Linux x86_64 musl archive named above. After promotion puts the updated seed on `main`, populate its cache without waiting for the schedule:
+
 ```bash
-gh workflow run codex-cache.yml --ref main
+gh workflow run codex-cache.yml \
+  --ref main
 ```
 
 Until then the Codex shard downloads the release on every run, which still passes.
@@ -163,6 +173,38 @@ gh run list --workflow codex-cache.yml --limit 5 \
 | `Install the Codex CLI` step fails | the release download failed; the job stops before the test runs | read the step log for the `curl` error and rerun |
 | `test_codex_api.py` fails rather than skips | `CODEX_CLI_REQUIRED=1` is set but `codex` is not on `PATH` | check that the `Use the Codex CLI` step ran and added `~/codex` to `PATH` |
 
+### Verifying the installation speedup
+
+A passing seed proves that the binary runs; verify the consuming shard too. In a completed merge queue Tests run, Python 3.12 shard 1 must run `Restore the Codex CLI` and `Use the Codex CLI` successfully while `Install the Codex CLI` is skipped. If all three steps are skipped, the run may have reused earlier test results and does not prove a cache hit. Inspect the restore log to confirm the matched key and cache version.
+
+Read the shard's step outcomes, substituting a completed Tests run id:
+
+```bash
+gh api --paginate \
+  'repos/the-cloud-clockwork/agentihooks/actions/runs/<run id>/jobs?per_page=100' \
+  --jq '.jobs[] | select(.name == "unit (3.12, 1)") | {html_url, conclusion, steps: [.steps[] | select(.name | contains("Codex CLI"))]}'
+```
+
+Measure execution time from each job's `started_at` to `completed_at`, excluding time waiting for a runner. Compare shards within Python 3.12 in the same run; Python 3.11 runs a different workload. List the completed successful shards from slowest to fastest:
+
+```bash
+gh api --paginate \
+  'repos/the-cloud-clockwork/agentihooks/actions/runs/<run id>/jobs?per_page=100' \
+  --jq '[.jobs[] | select(.name | startswith("unit (3.12, ")) | select(.conclusion == "success") | {name, seconds: ((.completed_at | fromdateiso8601) - (.started_at | fromdateiso8601))}] | sort_by(.seconds) | reverse'
+```
+
+The following observations use the Actions jobs API for merge queue runs before and after [the cache change](https://github.com/the-cloud-clockwork/agentihooks/pull/3504):
+
+| Observation | Before: [38802694821](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38802694821) | After: [39048986842](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39048986842) |
+|---|---|---|
+| Python 3.12 shard 1 execution | 478 s | 271 s |
+| Codex installation | 220 s | skipped; restore took 7 s |
+| Slowest other Python 3.12 shard | shard 7, 320 s | shard 11, 309 s |
+| Shard 1 lead over the slowest other shard | 158 s | none; shard 1 finished 38 s faster |
+
+Shard 1 no longer sets the run's maximum. The two slowest Python 3.12 shards in the after run took 309 s and 307 s, a 2 s gap. This observation meets the requirement that the Codex shard not exceed the next slowest shard by more than 30 s; it does not guarantee every future run's balance. Other workflow changes also landed between these runs, so the total job reduction cannot all be attributed to this cache. The skipped install directly verifies that this run avoided the download.
+
+For a later regression, retain both run links, the shard timings and the Codex step outcomes. A miss returns to the download fallback described above; seed the matching release on `main` before measuring another consuming run.
 ## Unit checkout
 
 Each `unit` shard checks out the graded commit as a partial clone: `ref` set to the run's commit SHA (`github.sha`), `fetch-depth: 0` (full history) and `filter: blob:none` (no file contents from old commits). The initial `git fetch` downloads commits and trees only. `git checkout` then fetches every file blob of the graded tree from the promisor remote in one batch, about 4400 blobs and 45 MB.
