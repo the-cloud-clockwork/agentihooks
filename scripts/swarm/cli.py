@@ -1106,9 +1106,10 @@ def _master_or_operator(store, args, message):
     store.config(args.slug)
     name = _caller(args)
     if name in ("", "operator"):
-        if clearance.is_operator(store, Who.from_env()):
+        session = Who.from_env()
+        if clearance.is_operator(store, session):
             return "operator"
-        raise SwarmError(message)
+        name = session.name
     agent = next((a for a in store.agents(args.slug) if a.name == name), None)
     if agent is None or agent.lane != MASTER:
         raise SwarmError(message)

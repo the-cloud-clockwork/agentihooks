@@ -2215,11 +2215,13 @@ def test_the_operator_may_give_a_verdict_and_a_worker_may_not(env, capsys, monke
 @pytest.mark.parametrize(
     ("session", "named", "by"),
     [
-        ("master@unregistered-0001", "operator", None),
-        ("master@unregistered-0001", "", None),
-        ("", "master@a1b2c3-0001", "master@a1b2c3-0001"),
-        ("operator", "operator", "operator"),
-        ("", "", "operator"),
+        ({"AGENTIHOOKS_AGENT_NAME": "master@unregistered-0001"}, "operator", None),
+        ({"AGENTIHOOKS_AGENT_NAME": "master@unregistered-0001"}, "", None),
+        ({"AGENTIHOOKS_SWARM": "sw"}, "", None),
+        ({}, "master@a1b2c3-0001", "master@a1b2c3-0001"),
+        ({"AGENTIHOOKS_AGENT_NAME": "master@a1b2c3-0001"}, "operator", "master@a1b2c3-0001"),
+        ({"AGENTIHOOKS_AGENT_NAME": "operator"}, "operator", "operator"),
+        ({}, "", "operator"),
     ],
 )
 def test_only_a_registered_master_or_the_operator_session_gives_a_verdict(
@@ -2227,8 +2229,8 @@ def test_only_a_registered_master_or_the_operator_session_gives_a_verdict(
 ):
     _idle_finding(env, monkeypatch, tmp_path)
     _findings(capsys)
-    if session:
-        monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", session)
+    for key, value in session.items():
+        monkeypatch.setenv(key, value)
     finding = "idle-with-claim/engineer@a1b2c3-0001"
     named_args = ["--as", named] if named else []
     assert run("sw", *named_args, "verdict", finding, "resolved") == (1 if by is None else 0)
