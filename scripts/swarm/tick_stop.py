@@ -77,14 +77,14 @@ def _stop(pool: ThreadPoolExecutor, futures: list[Future], pending: set[Future],
     return pending
 
 
-def run(slugs: list[str], work: Callable[[str], object], on_stop: Callable[[], object], started: float) -> bool:
+def run(slugs: list[str], work: Callable[[str], object], on_stop: Callable[[], object], spent: float) -> bool:
     STOP.clear()
     signaled: list[int] = []
     previous = signal.signal(signal.SIGTERM, lambda signum, _: signaled.append(signum))
     pool = ThreadPoolExecutor(max_workers=len(slugs))
     futures = [pool.submit(work, slug) for slug in slugs]
     try:
-        pending = _pending(futures, signaled, started + DEADLINE_S)
+        pending = _pending(futures, signaled, time.monotonic() + DEADLINE_S - spent)
         if not pending and not signaled:
             pool.shutdown()
             for future in futures:

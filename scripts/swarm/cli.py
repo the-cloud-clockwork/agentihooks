@@ -203,6 +203,7 @@ def _publish_tick_status(store, slug, doc):
 def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=False):
     from scripts.swarm import command_runner, commands, controller, incidents, lease, tick_activity
 
+    tick_stop.check()
     ledger = ledger or LedgerClient()
     outbox.flush(InboxStore(store.redis))
     runtime = runtime or routed(herdr=HerdrRuntime())
@@ -433,7 +434,10 @@ def cmd_tick(store, args):
         _reconcile_services()
         firsts, until = _Firsts(len(slugs)), time.monotonic() + EXTRA_TICKS_UNTIL
         if tick_stop.run(
-            slugs, lambda slug: _tick_while_others_run(store, slug, firsts, until), firsts.settled.set, started
+            slugs,
+            lambda slug: _tick_while_others_run(store, slug, firsts, until),
+            firsts.settled.set,
+            time.monotonic() - started,
         ):
             return
     from scripts import herdr_gc
