@@ -77,6 +77,8 @@ class Connection:
             return {"thread": self.server.thread}
         if method == "thread/resume":
             return {"thread": {"id": params["threadId"], "sessionId": "session-resumed"}}
+        if method == "thread/name/set":
+            return {}
         if method == "turn/start":
             return {"turn": {"id": "turn-opening"}}
         raise AssertionError(f"unexpected method {method}")
