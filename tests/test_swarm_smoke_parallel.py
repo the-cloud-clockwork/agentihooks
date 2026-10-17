@@ -63,7 +63,7 @@ def test_cache_export_overlaps_smoke_and_reports_its_failure(tmp_path):
     docker.write_text(
         "#!/usr/bin/env bash\n"
         f"touch {tmp_path}/cache.started\n"
-        f"for _ in $(seq 50); do\n"
+        "for _ in $(seq 50); do\n"
         f"  [[ -e {tmp_path}/smoke.started ]] && echo 'cache saw smoke' && exit 7\n"
         "  sleep 0.1\n"
         "done\n"
