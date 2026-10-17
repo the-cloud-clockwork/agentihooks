@@ -180,7 +180,6 @@ def test_a_live_extra_master_never_blocks_the_lead_seat_launch(swarm):
 def test_without_a_rule_the_count_stays_manual_and_its_empty_seats_are_launched(swarm):
     store, runtime = swarm
     master_scale.set_rule(store.redis, SLUG, master_scale.rule_of("off"))
-    store.update(SLUG, masters_step=0)
     staffed(store, 20)
     assert run(store, runtime) == []
     assert count(store) == 1 and runtime.masters == []
@@ -311,7 +310,6 @@ def test_turning_the_rule_off_refills_a_retired_seat_with_its_phases(swarm):
     seats.set_count(SLUG, 4)
     seats.retire(SLUG, SECOND)
     master_scale.set_rule(store.redis, SLUG, "")
-    store.update(SLUG, masters_step=0)
 
     run(store, runtime)
 
@@ -534,7 +532,6 @@ def test_retiring_a_seat_no_master_was_asked_to_leave_moves_its_items_to_the_lea
 def test_a_finished_master_that_left_its_seat_is_replaced(swarm):
     store, runtime = swarm
     master_scale.set_rule(store.redis, SLUG, "")
-    store.update(SLUG, masters_step=0)
     masters.MasterSeats(store.redis).set_count(SLUG, 2)
     store.put_agent(SLUG, AgentRecord(f"{SLUG}-master-2", MASTER, "master-2", seat=SECOND, state="finished"))
 
@@ -547,7 +544,6 @@ def test_a_finished_master_that_left_its_seat_is_replaced(swarm):
 def test_a_failed_master_launch_leaves_no_record_behind(swarm):
     store, runtime = swarm
     master_scale.set_rule(store.redis, SLUG, "")
-    store.update(SLUG, masters_step=0)
     masters.MasterSeats(store.redis).set_count(SLUG, 2)
     runtime.fail = True
 
@@ -660,7 +656,6 @@ def test_the_launch_hands_the_swarm_config_to_the_runtime(swarm):
 def test_a_recorded_master_that_is_not_live_still_holds_its_seat(swarm):
     store, runtime = swarm
     master_scale.set_rule(store.redis, SLUG, "")
-    store.update(SLUG, masters_step=0)
     masters.MasterSeats(store.redis).set_count(SLUG, 2)
     store.put_agent(SLUG, AgentRecord(f"{SLUG}-master-2", MASTER, "master-2", seat=SECOND))
     assert run(store, runtime) == []
@@ -669,7 +664,6 @@ def test_a_recorded_master_that_is_not_live_still_holds_its_seat(swarm):
 def test_a_full_runtime_holds_the_master_launch(swarm):
     store, runtime = swarm
     master_scale.set_rule(store.redis, SLUG, "")
-    store.update(SLUG, masters_step=0)
     masters.MasterSeats(store.redis).set_count(SLUG, 2)
     runtime.full = True
     assert run(store, runtime) == ["no session slot for the master, waiting"]
@@ -678,7 +672,6 @@ def test_a_full_runtime_holds_the_master_launch(swarm):
 def test_a_full_host_holds_the_master_launch(swarm, monkeypatch):
     store, runtime = swarm
     master_scale.set_rule(store.redis, SLUG, "")
-    store.update(SLUG, masters_step=0)
     masters.MasterSeats(store.redis).set_count(SLUG, 2)
     asked = []
     monkeypatch.setattr(tick_module, "_host_full", lambda slug, s, now: asked.append((slug, now)) or "memory low")

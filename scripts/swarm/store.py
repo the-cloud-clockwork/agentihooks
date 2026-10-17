@@ -70,7 +70,7 @@ class SwarmConfig:
     codex_model: str = default_models.DEFAULTS["codex"]
     scratch: bool = False
     codex_inbox_transport: str = LEGACY_TRANSPORT
-    masters_step: int = DEFAULT_MASTERS_STEP
+    masters_step: int = 0
 
 
 def scaling_refusal(config):

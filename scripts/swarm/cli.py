@@ -135,6 +135,7 @@ from scripts.swarm.store import (
     ASSIST,
     AUTO_SCALING,
     AUTONOMY,
+    DEFAULT_MASTERS_STEP,
     DELEGATE,
     DISPATCH,
     MASTER,
@@ -494,6 +495,7 @@ def cmd_create(store, args):
         autonomy=template.autonomy or DELEGATE,
         scratch=not ledger_creator.shared(os.environ),
         codex_inbox_transport=APP_SERVER_TRANSPORT,
+        masters_step=DEFAULT_MASTERS_STEP,
     )
     store.create(config)
     from scripts.swarm import commands

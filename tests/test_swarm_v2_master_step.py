@@ -7,7 +7,7 @@ from scripts.swarm import cli
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_ledger import ledger_server
 from scripts.swarm_v2 import master_scale, masters
-from tests.swarm.test_tick import FakeRuntime
+from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
@@ -25,7 +25,7 @@ def swarm():
     import fakeredis
 
     store = RedisStore(fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True))
-    store.create(SwarmConfig(SLUG, "/repo", 30, 30, max_plan=30))
+    store.create(SwarmConfig(SLUG, "/repo", 30, 30, max_plan=30, masters_step=12))
     store.update(SLUG, state="running")
     runtime = FakeRuntime()
     store.put_agent(SLUG, AgentRecord(LEAD_NAME, MASTER, MASTER, pane_id="pm1", seat=LEAD))
@@ -74,13 +74,20 @@ def at_three(swarm):
     return store, runtime
 
 
-def test_the_masters_step_defaults_to_twelve():
-    assert SwarmConfig(SLUG, "/repo", 1, 1).masters_step == 12
-
-
-def test_a_new_swarm_stores_twelve_and_a_swarm_stored_before_the_step_loads_zero(swarm):
+def test_swarm_create_stores_a_step_of_twelve(swarm, monkeypatch):
     store, _ = swarm
-    assert store.config(SLUG).masters_step == 12
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    ledger = FakeLedger([])
+    ledger.say = lambda slug, text, by=None: None
+    monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
+
+    assert cli.main(["new-step-sw", "create", "--repo", "/repo"]) == 0
+
+    assert store.config("new-step-sw").masters_step == 12
+
+
+def test_a_swarm_stored_before_the_step_loads_zero(swarm):
+    store, _ = swarm
     store.redis.hdel(store.key(SLUG, "config"), "masters_step")
     assert store.config(SLUG).masters_step == 0
 
