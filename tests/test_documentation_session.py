@@ -68,11 +68,29 @@ def test_session_end_queues_one_documentation_task_with_source_and_docs_evidence
     assert len(ledger.added) == 1
     task = ledger.added[0]
     assert (task["profile"], task["lane"], task["kind"]) == ("documentation", "eng", "code")
+    assert task["rank"] == "low"
     assert task["depends_on"] == ["t1"]
     assert task["phase"] == "p1"
     assert "handbook/policy.md" in task["description"]
     assert "small" in task["description"]
     assert "WidgetPolicy" in task["description"]
+
+
+def test_a_session_named_for_no_ledger_task_queues_documentation_without_that_dependency(world, monkeypatch):
+    root, _, ledger, jobs = world
+    monkeypatch.setattr(documentation.runner, "decide", answer())
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "master")
+    payload = {"session_id": "documentation-master", "cwd": str(root)}
+    documentation_session.start(payload)
+    (root / "limits.py").write_text("class WidgetLimits:\n    ceiling = 5\n")
+    git(root, "add", "limits.py")
+    git(root, "commit", "-qm", "Add widget limits")
+    documentation_session.end(payload)
+    for fn, args in jobs:
+        fn(*args)
+    assert len(ledger.added) == 1
+    assert ledger.added[0]["depends_on"] == []
+    assert ledger.added[0]["rank"] == "low"
 
 
 @pytest.mark.parametrize(("needed", "covered"), [(0.05, 0.05), (0.95, 0.95)])
