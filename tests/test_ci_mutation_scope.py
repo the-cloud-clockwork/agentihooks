@@ -554,21 +554,23 @@ def test_an_open_branch_is_graded_by_its_pull_request_mutation_shards_when_its_p
     assert calls[checked + 2 :] == jobs_listed
 
 
-@pytest.mark.parametrize("helper", ["oracle.py", "transitive", "other.py", "dev.py"])
+@pytest.mark.parametrize("helper", ["oracle.py", "transitive", "fixture", "other.py", "dev.py"])
 def test_inherited_lines_are_regraded_once_the_branch_changes_a_source_helper_their_tests_import(tmp_path, helper):
     from scripts.ci_mutation.scope import discover_changes
 
     git, commit = _repo(tmp_path)
     (tmp_path / "tests").mkdir()
-    test = tmp_path / "tests" / "test_api.py"
-    if helper == "transitive":
-        (tmp_path / "tests" / "fixtures.py").write_text("from hooks import dev\n")
-        test.write_text(
-            "from hooks import oracle\nfrom tests.fixtures import dev\n\n\ndef test_d():\n    assert dev.d() == oracle.ONE\n"
-        )
-        helper = "oracle.py"
-    else:
-        test.write_text("from hooks import dev, oracle\n\n\ndef test_d():\n    assert dev.d() == oracle.ONE\n")
+    fixtures = {"transitive": "from hooks import dev\n", "fixture": "from hooks.oracle import ONE\n"}
+    imports = {
+        "transitive": "from hooks import oracle\nfrom tests.fixtures import dev\n",
+        "fixture": "from hooks import dev\nfrom tests.fixtures import ONE as oracle_one\n",
+    }
+    if helper in fixtures:
+        (tmp_path / "tests" / "fixtures.py").write_text(fixtures[helper])
+    oracle = "oracle_one" if helper == "fixture" else "oracle.ONE"
+    head = imports.get(helper, "from hooks import dev, oracle\n")
+    (tmp_path / "tests" / "test_api.py").write_text(f"{head}\n\ndef test_d():\n    assert dev.d() == {oracle}\n")
+    helper = "oracle.py" if helper in fixtures else helper
     (tmp_path / "tests" / "test_other.py").write_text("from hooks import other\n")
     git("add", "tests")
     commit("oracle.py", "ONE = 1\n")

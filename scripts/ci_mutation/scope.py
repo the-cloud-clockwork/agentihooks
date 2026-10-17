@@ -58,23 +58,21 @@ def discover_changes(root: Path, base: str | list[str], head: str) -> dict[str, 
     bases = own_bases(root, base, head) if isinstance(base, str) else base
     given, *newer = [changes_since(root, own, head) for own in bases]
     weak = [weakened_tests(root, own, head) for own in bases[1:]]
+    reached = [{path: set(select_tests(root, Path(path))) for path in changes} for changes in newer]
     found = {}
     for name, lines in given.items():
         kept = [
-            lines if tests or oracle_changed(root, name, changes) else changes.get(name)
-            for changes, tests in zip(newer, weak)
+            lines if tests or oracle_changed(root, name, selected) else changes.get(name)
+            for changes, tests, selected in zip(newer, weak, reached)
         ]
         if None not in kept:
             found[name] = lines.intersection(*kept)
     return found
 
 
-def oracle_changed(root: Path, name: str, changes: dict[str, set[int]]) -> bool:
-    helpers = {module_name(Path(path)) for path in changes} - {module_name(Path(name))}
-    return any(
-        helpers & imported_names((root / test).read_text(), Path(test).parent.parts)
-        for test in select_tests(root, Path(name))
-    )
+def oracle_changed(root: Path, name: str, reached: dict[str, set[str]]) -> bool:
+    killing = set(select_tests(root, Path(name)))
+    return any(killing & tests for path, tests in reached.items() if path != name)
 
 
 def is_test_file(path: str) -> bool:
