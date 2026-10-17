@@ -10,6 +10,11 @@ on:
         description: Base revision whose count grader supplies the legacy comparison
         required: true
         default: origin/dev
+      plant:
+        description: Remove a test module after warming the cache and require the floor to reject it
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -118,6 +123,14 @@ jobs:
           print(f"Same head seconds: {seconds}; saved: {saved:.2f}", flush=True)
           assert saved >= 30, f"Only {saved:.2f} seconds saved"
           PY
+      - name: Plant a removed test module after warming the cache
+        if: inputs.plant
+        env:
+          TEST_COUNT_COLLECTION_CACHE: ${{ runner.temp }}/count-collections
+          TEST_COUNT_ENVIRONMENT: proof-${{ steps.venv.outputs.cache-primary-key }}
+        run: |
+          python -c 'from pathlib import Path; Path("tests/test_count_floor.py").unlink()'
+          python -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
       - name: Seed the collection cache for full gate timing
         uses: actions/cache/save@v4
         with:
