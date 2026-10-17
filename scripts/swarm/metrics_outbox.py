@@ -3,6 +3,7 @@ import json
 import math
 import re
 import sqlite3
+import time
 import urllib.parse
 import urllib.request
 from collections.abc import Callable
@@ -171,9 +172,10 @@ class Outbox:
             checkpoint(self.db)
 
     def flush(self, now_ms):
+        until = time.monotonic() + 5
         shipped = 0
         for name, ddl, widen, created in self.db.execute(WAITING).fetchall():
-            sent, reached = self._ship(name, (ddl, widen), created)
+            sent, reached = self._ship(name, (ddl, widen), created, until)
             shipped += sent
             if not reached:
                 break
@@ -181,14 +183,17 @@ class Outbox:
             self.db.execute(PRUNE, (now_ms - DAY_MS,))
         return shipped
 
-    def _ship(self, name, schema, created):
+    def _ship(self, name, schema, created, until):
         if not created:
-            if not all(self.send(self.sink, statement, b"") for statement in schema):
-                return 0, False
+            for statement in schema:
+                if time.monotonic() >= until or not self.send(self.sink, statement, b""):
+                    return 0, False
             with self.db:
                 self.db.execute(CREATED, (name,))
         shipped = 0
         while batch := self.db.execute(BATCH_ROWS, (name, BATCH)).fetchall():
+            if time.monotonic() >= until:
+                return shipped, False
             body = "\n".join(row for _, row in batch).encode()
             if not self.send(self.sink, f"INSERT INTO {DATABASE}.{name} FORMAT JSONEachRow", body):
                 return shipped, False
