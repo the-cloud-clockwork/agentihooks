@@ -219,3 +219,51 @@ def test_rendered_swarm_engineer_skill_reads_red_and_green_in_ci(world):
     )
     assert [step for step in steps if step not in text] == []
     assert [text.index(step) for step in steps] == sorted(text.index(step) for step in steps)
+
+
+MASTER_POOL = (
+    "masters-step",
+    "`master@<slug>`",
+    "`master-2@<slug>`",
+    "first in first out",
+    "exactly one",
+    "agentihooks swarm <slug> masters-channel say",
+    "agentihooks swarm <slug> masters-channel read",
+    "ten minutes",
+    "MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS",
+    "Claude and Codex",
+)
+
+
+def _section(text: str, heading: str) -> str:
+    start = text.index(heading)
+    end = text.find("\n## ", start + len(heading))
+    return text[start : end if end != -1 else len(text)]
+
+
+def test_rendered_claude_and_codex_masters_carry_the_same_master_pool(world):
+    from scripts.profiles import render
+
+    out = render.render_codex("package:master")
+    claude = out.parent / "claude"
+    pools = {
+        home: _section(persona.read_text(), "## Master pool")
+        for home, persona in (("claude", claude / "CLAUDE.md"), ("codex", out / "AGENTS.md"))
+    }
+    skills = {
+        home: root / "skills" / "swarm-master" / "SKILL.md" for home, root in (("claude", claude), ("codex", out))
+    }
+
+    assert pools["claude"] == pools["codex"]
+    assert [phrase for phrase in MASTER_POOL if phrase not in " ".join(pools["claude"].split())] == []
+    assert skills["claude"].resolve() == skills["codex"].resolve() == _skill("master")
+    skill = " ".join(_section(skills["codex"].read_text(), "## Master pool").split())
+    assert [phrase for phrase in MASTER_POOL if phrase not in skill] == []
+
+
+def test_swarm_docs_describe_the_master_pool_for_claude_and_codex():
+    docs = ROLES.parents[2] / "docs" / "pillars" / "swarm.md"
+    text = " ".join(_section(docs.read_text(), "### Master pool").split())
+    phrases = [phrase.replace("<slug>", "<id>") for phrase in MASTER_POOL]
+
+    assert [phrase for phrase in phrases if phrase not in text] == []
