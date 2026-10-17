@@ -442,7 +442,11 @@ def test_checks_wait_uses_only_the_newest_run_of_each_check(tick, conclusion, ob
 
 
 def _run_info(run_id, workflow="W1", event="pull_request"):
-    return {"databaseId": run_id, "event": event, "workflow": {"id": workflow, "name": "Tests"}}
+    return {
+        "databaseId": run_id,
+        "event": event,
+        "workflow": {"id": workflow, "name": "Tests", "resourcePath": f"/o/r/actions/workflows/{workflow}.yml"},
+    }
 
 
 def _run_check(name, check_id, run_id, conclusion, **run):
@@ -474,13 +478,20 @@ CANCELLED_RUN = [
 ]
 
 
-def _gated(checks, suites, reverse, gated=True):
+def _gated(checks, suites, reverse, gated=True, workflows=()):
     from scripts.swarm.ledger_events import pull_request
 
     if reverse:
         checks, suites = checks[::-1], suites[::-1]
     return pull_request(
-        {"state": "OPEN", "headRefOid": "first", "gated": gated, "statusCheckRollup": checks, "checkSuites": suites}
+        {
+            "state": "OPEN",
+            "headRefOid": "first",
+            "gated": gated,
+            "gate_workflows": workflows,
+            "statusCheckRollup": checks,
+            "checkSuites": suites,
+        }
     )
 
 
@@ -1434,6 +1445,17 @@ def test_a_status_gate_holds_a_superseding_run_without_current_jobs(tick, status
     current = {**_run_check("selected tests", 20, 2, "SUCCESS"), "isRequired": False}
     suites[-1] = _suite(2, "COMPLETED", "SUCCESS")
     tick.pulls[URL] = _gated([gate, old, current], suites, reverse)
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
+
+
+@pytest.mark.parametrize("conclusion", [None, "FAILURE"])
+def test_a_status_gate_ignores_workflows_without_a_declared_gate(tick, conclusion):
+    tick.hold("checks", URL)
+    gate = {"context": "Gate — Required", "state": "SUCCESS", "isRequired": True}
+    unit = {**_run_check("unit", 10, 1, "SUCCESS"), "isRequired": False}
+    optional = {**_run_check("measure", 20, 2, conclusion, workflow="W2"), "isRequired": False}
+    suites = [_suite(1, "COMPLETED", "SUCCESS"), _suite(2, "IN_PROGRESS", workflow="W2")]
+    tick.pulls[URL] = _gated([gate, unit, optional], suites, False, workflows=["W1.yml"])
     assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
 
 
