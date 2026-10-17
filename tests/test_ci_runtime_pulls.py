@@ -204,7 +204,17 @@ def test_runtime_pull_fails_with_the_timeout_status_after_three_stalled_attempts
     assert not tags
 
 
-def test_smoke_reuses_only_a_verified_local_redis_image(tmp_path):
+@pytest.mark.parametrize(
+    "image,architecture,expected",
+    [
+        ("redis:7", "amd64", 0),
+        ("redis:7-alpine", "amd64", 0),
+        ("redis:7", "arm64", 17),
+        ("python:3.12-slim-bookworm", "amd64", 17),
+    ],
+)
+def test_smoke_reuses_only_a_verified_local_redis_image(tmp_path, image, architecture, expected):
+    image = f"mirror.gcr.io/library/{image}"
     log = tmp_path / "docker.log"
     tools = tools_with(
         tmp_path,
@@ -213,30 +223,34 @@ set -euo pipefail
 printf '%s\\n' "$*" >> "$PULL_LOG"
 if [[ "$1" == --host ]]; then shift 2; fi
 if [[ "$1" == image && "$2" == inspect ]]; then
-  printf 'amd64\\n'
+  printf '%s\\n' "$LOCAL_ARCH"
   exit 0
 fi
 exit 17
 """,
     )
     result = subprocess.run(
-        ["bash", str(ROOT / "scripts/packaging/pull-runtime-image.sh"), "mirror.gcr.io/library/redis:7"],
+        ["bash", str(ROOT / "scripts/packaging/pull-runtime-image.sh"), image],
         env={
             **os.environ,
             "PATH": f"{tools}:{os.environ['PATH']}",
             "PULL_LOG": str(log),
             "WAITS": str(tmp_path / "waits.log"),
             "SWARM_SMOKE_RUNTIME_IMAGES_READY": "true",
+            "LOCAL_ARCH": architecture,
         },
         text=True,
         capture_output=True,
         timeout=10,
     )
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == expected, result.stderr
     calls = log.read_text().splitlines()
-    assert len(calls) == 1
-    assert " image inspect " in f" {calls[0]} "
-    assert calls[0].endswith("mirror.gcr.io/library/redis:7")
+    if expected == 0:
+        assert len(calls) == 1
+        assert " image inspect " in f" {calls[0]} "
+        assert calls[0].endswith(image)
+    else:
+        assert any(call.startswith("manifest inspect ") for call in calls)
 
 
 @pytest.mark.parametrize("failure", ["", "redis:7", "redis:7-alpine", "build"])
