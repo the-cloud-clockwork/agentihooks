@@ -157,6 +157,10 @@ def test_masters_gone_or_draining_are_passed_over(swarm, inbox):
     assert live_masters(swarm.redis, SLUG) == [FRONT, "master-6@sw"]
     items = [inbox.send("swarm", FRONT, f"item {n}") for n in range(3)]
     assert [inbox.get(i.id).address for i in items] == [FRONT, "master-6@sw", FRONT]
+    from scripts.swarm_v2.master_fence import Seats
+
+    fence = Seats(SLUG, swarm, {})
+    assert [fence.writer(f"sw-master-{n}") for n in (2, 3, 4)] == ["sw-master-2", "master-3@sw", "master-4@sw"]
 
 
 def test_pool_fence_and_front_door_agree_on_the_seats_mid_handoff(swarm, inbox):

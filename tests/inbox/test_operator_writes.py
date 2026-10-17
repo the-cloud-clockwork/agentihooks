@@ -191,6 +191,7 @@ def test_a_swarm_chat_line_carries_the_master_rule_while_no_master_seat_is_held(
     store, inbox = swarm
     store.drop_agent(SLUG, BOSS.name)
     store.redis.delete(store.seats.key(MASTER_SEAT))
+    assert operator_mail.master_address(store.redis, SLUG, store.agents(SLUG)) == MASTER_SEAT
     relay(swarm, write(5, "chat", kind="message added", text="@swarm the master launch failed"))
     [(_, text, _)] = pending(inbox, MASTER_SEAT)
     assert text.endswith(operator_mail.MASTER_RULE)
