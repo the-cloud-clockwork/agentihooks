@@ -1,4 +1,4 @@
-from tests.swarm_ledger.test_swarm_layout import ROOT, browser, open_page, status  # noqa: F401
+from tests.swarm_ledger.test_swarm_layout import browser, open_page, status  # noqa: F401
 
 
 def test_a_two_label_agent_cell_carries_its_full_text_as_one_ledger_tip(open_page):  # noqa: F811
@@ -7,7 +7,6 @@ def test_a_two_label_agent_cell_carries_its_full_text_as_one_ledger_tip(open_pag
     payload["agents"][1]["capabilities"] = {"push_inbox": False, "native_terminal_attach": True}
     payload["agents"][1]["promoted"] = True
     page = open_page(payload, width=1920)
-    page.tab.add_script_tag(path=str(ROOT / "scripts/swarm_ledger/tooltips.js"))
     page.tab.set_viewport_size({"width": 1920, "height": 1080})
     found = page.tab.eval_on_selector_all(
         "#swarm-agents :is(.sw-transport, .sw-promoted)",
