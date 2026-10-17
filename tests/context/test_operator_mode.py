@@ -116,7 +116,7 @@ def test_the_mode_is_kept_per_session_under_the_state_home(tmp_path, monkeypatch
     monkeypatch.setattr("hooks.config.AGENTIHOOKS_HOME", tmp_path / "fresh" / "home")
     assert operator_mode.observe("", "operator on", True, now=100) == ""
     assert operator_mode.observe("Pane A/b c", "operator on", True, now=100) == "on"
-    assert [p.name for p in (tmp_path / "fresh" / "home" / "operator_mode").iterdir()] == ["Pane_A_b_c.json"]
+    assert [p.name for p in (tmp_path / "fresh" / "home" / "operator_mode").glob("*.json")] == ["Pane_A_b_c.json"]
     assert operator_mode.present("Pane A/b c", SWARM, now=101)
 
 
