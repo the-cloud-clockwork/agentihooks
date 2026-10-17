@@ -30,8 +30,6 @@ jobs:
       stats_parts: ${{ steps.plan.outputs.stats_parts }}
       bases: ${{ steps.plan.outputs.bases }}
       changed: ${{ steps.plan.outputs.changed }}
-      open: ${{ steps.open.outputs.open }}
-      reused: ${{ steps.reuse.outputs.reused }}
       graded: ${{ steps.plan.conclusion == 'success' }}
     steps:
       - name: Skip when the branch already has an open pull request into dev
@@ -47,6 +45,7 @@ jobs:
         if: steps.open.outputs.open != 'true'
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Record the revisions the report grades
         if: steps.open.outputs.open == 'false'

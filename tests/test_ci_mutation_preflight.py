@@ -32,8 +32,6 @@ def test_preflight_skips_a_branch_with_an_open_pull_request():
     plan = jobs["plan"]
     assert "needs" not in plan
     assert plan["if"] == "${{ github.event_name != 'push' || !github.event.deleted }}"
-    assert plan["outputs"]["open"] == "${{ steps.open.outputs.open }}"
-    assert plan["outputs"]["reused"] == "${{ steps.reuse.outputs.reused }}"
     assert plan["outputs"]["graded"] == "${{ steps.plan.conclusion == 'success' }}"
     step = plan["steps"][0]
     assert step["id"] == "open"
@@ -55,7 +53,7 @@ def test_preflight_reuses_a_green_report_before_the_plan_installs_anything():
     assert "concurrency" not in plan
     assert steps[1]["uses"] == "actions/checkout@v4"
     assert steps[1]["if"] == "steps.open.outputs.open != 'true'"
-    assert steps[1]["with"] == {"fetch-depth": 0}
+    assert steps[1]["with"] == {"fetch-depth": 0, "persist-credentials": False}
     scope = steps[names.index("Record the revisions the report grades")]
     assert scope["if"] == "steps.open.outputs.open == 'false'"
     assert '"$(git merge-base origin/dev HEAD)" "$(git rev-parse HEAD)" > .mutation-gate/scope.json' in scope["run"]
@@ -94,12 +92,10 @@ def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan():
         "stats_parts": "${{ steps.plan.outputs.stats_parts }}",
         "bases": "${{ steps.plan.outputs.bases }}",
         "changed": "${{ steps.plan.outputs.changed }}",
-        "open": "${{ steps.open.outputs.open }}",
-        "reused": "${{ steps.reuse.outputs.reused }}",
         "graded": "${{ steps.plan.conclusion == 'success' }}",
     }
     steps, names = _steps(plan)
-    assert steps[names.index(None)]["with"] == {"fetch-depth": 0}
+    assert steps[names.index(None)]["with"] == {"fetch-depth": 0, "persist-credentials": False}
     sized = steps[names.index("Size mutation shards from stored timings")]
     assert sized["id"] == "plan"
     assert sized["env"] == {"GH_TOKEN": "${{ github.token }}"}

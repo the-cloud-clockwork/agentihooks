@@ -174,7 +174,7 @@ def test_the_tick_reports_an_open_pull_request_skip_with_its_run(tick, open_pr, 
     [
         ("run", "path", ".github/workflows/proofs.yml"),
         ("run", "conclusion", "failure"),
-        ("job", "name", "plan"),
+        ("job", "name", "refine"),
         ("job", "conclusion", "failure"),
         ("step", "name", "another step"),
         ("step", "conclusion", "success"),

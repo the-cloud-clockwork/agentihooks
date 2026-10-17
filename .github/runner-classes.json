@@ -18,7 +18,6 @@
   "mutation-preflight.yml/mutation": "light",
   "mutation-preflight.yml/mutation-shard": "batch",
   "mutation-preflight.yml/plan": "light",
-  "mutation-preflight.yml/pull-request": "light",
   "mutation-preflight.yml/refine": "light",
   "mutation-preflight.yml/stats": "batch",
   "mutation-replay.yml/grade": "batch",
