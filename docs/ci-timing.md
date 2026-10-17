@@ -47,6 +47,66 @@ gh api repos/the-cloud-clockwork/agentihooks/actions/runs/<run id>/jobs \
 
 A dispatch whose first job starts within seconds of its `created_at` did not queue. If a dispatch still sits queued for minutes, list the runs on its lane: another dispatch or a lane workflow run holds it, not a Startup stages or Worker resources push. `tests/test_ci_hosted_lanes.py` checks, for a sample branch across all ten run id endings, that a branch push of either workflow never resolves to a lane while a dispatch still does.
 
+## Focused proof CPU worker limits
+
+The `tests` proof in the Proofs workflow runs selected tests with the same CPU quota helper as the unit shards. A runner limited to four CPUs on a sixteen core node starts at most four pytest workers. Previously, `-n auto` could start sixteen competing workers on that runner.
+
+### Dispatch selected tests
+
+Push the branch first, then dispatch explicit test paths or pytest node ids under `tests/`:
+
+```bash
+gh workflow run proofs.yml \
+  --ref <branch> \
+  -f proof=tests \
+  -f tests='tests/test_ci_proofs.py'
+```
+
+For browser tests, add `-f browser=true` to install Chromium before pytest. Missing requested files fail by default; `-f existing_only=true` explicitly skips missing files with warnings, but still fails if none exist. Give paths on one line without `..`. The job uses Python 3.12 and has a fifteen minute timeout. Keep the selection focused; the CPU cap does not extend that deadline.
+
+### Automatic worker selection
+
+The Run selected tests step resolves the worker count before starting pytest:
+
+```bash
+workers=$(python -m scripts.ci_cpu_quota) && python -m pytest "${paths[@]}" -v -n "$workers" --dist loadgroup --tb=short
+```
+
+`paths` is the workflow's array of validated test selections. The helper reads the process CPU affinity and finite cgroup CPU quotas, including parent cgroups, supporting both cgroup v2 `cpu.max` and v1 CPU quota and period files. It takes the smallest finite quota, truncates fractional CPUs to an integer, caps that at the affinity CPU count and keeps at least one worker. If no finite quota is found, it uses the affinity count, with the same minimum of one.
+
+| Affinity CPUs | Smallest finite quota | Workers |
+|---|---|---|
+| 16 | 4 | 4 |
+| 2 | 4 | 2 |
+| 16 | 2.5 | 2 |
+| 16 | 0.5 | 1 |
+| 4 | none | 4 |
+
+There is no worker count dispatch input or environment override in this helper. Configure the runner's CPU quota or affinity to change the automatic result. A CPU request alone is not a finite cgroup quota. The cap applies to the selected tests job; it does not impose a worker count on other proof types or limit subprocesses a test starts. If the helper exits unsuccessfully, `&&` prevents pytest from starting.
+
+### Inspect the result
+
+Open the dispatched run and its Run selected tests log:
+
+```bash
+gh run list \
+  --workflow proofs.yml \
+  --branch <branch> \
+  --limit 5
+gh run view <run id> \
+  --log
+```
+
+The helper prints the worker count to stdout for pytest and a diagnostic to stderr, visible in the job log:
+
+```text
+pytest workers 4: cpu quota 4.0, affinity 4
+```
+
+If the count exceeds the intended runner allocation, check the reported quota and affinity. A quota of `None` means the helper found no finite quota; check the runner's cgroup CPU limit and its parent limits. A larger affinity count alone does not increase workers beyond a detected quota. If the job times out despite the expected count, reduce the selected test set and inspect execution time separately from runner queue time.
+
+[Delivered pull request #3247](https://github.com/the-cloud-clockwork/agentihooks/pull/3247) records a [red focused proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38552080779) with the old `-n auto` invocation and a [green focused proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38552154167) reporting four workers and 32 passing tests. The regression test `test_a_focused_proof_sizes_pytest_workers_from_the_cpu_quota` pins the selected tests invocation to the shared helper. These runs establish the cap and regression coverage; they do not establish a throughput improvement for every selected test set.
+
 ## Codex CLI cache
 
 The live Codex API test, `tests/routing/test_codex_api.py`, runs the real Codex CLI. `tests/shards.py` pins that file to unit shard 1, so only two Tests jobs need the CLI: the Python 3.12 shard 1 of the `unit` job, and a Python 3.12 leg of the `unit-selected` job whose selected files include that test. Both read the binary from the Actions cache and never write it.
@@ -71,8 +131,18 @@ The seed job saves only on the self-hosted pool the unit shards restore on. The 
 
 `CODEX_RELEASE` is set in three places: the `unit` and `unit-selected` job environments in `test.yml` and the `seed` job in `codex-cache.yml`. Change all three in one pull request; `tests/test_ci_workflow.py` fails when they differ. The new key does not exist until the next push to `main` or a dispatch of the seed:
 
+For example, each of those three jobs currently contains this environment setting; preserve its other environment entries when changing the release:
+
+```yaml
+env:
+  CODEX_RELEASE: rust-v0.160.0
+```
+
+The release must provide the Linux x86_64 musl archive named above. After promotion puts the updated seed on `main`, populate its cache without waiting for the schedule:
+
 ```bash
-gh workflow run codex-cache.yml --ref main
+gh workflow run codex-cache.yml \
+  --ref main
 ```
 
 Until then the Codex shard downloads the release on every run, which still passes.
@@ -103,6 +173,38 @@ gh run list --workflow codex-cache.yml --limit 5 \
 | `Install the Codex CLI` step fails | the release download failed; the job stops before the test runs | read the step log for the `curl` error and rerun |
 | `test_codex_api.py` fails rather than skips | `CODEX_CLI_REQUIRED=1` is set but `codex` is not on `PATH` | check that the `Use the Codex CLI` step ran and added `~/codex` to `PATH` |
 
+### Verifying the installation speedup
+
+A passing seed proves that the binary runs; verify the consuming shard too. In a completed merge queue Tests run, Python 3.12 shard 1 must run `Restore the Codex CLI` and `Use the Codex CLI` successfully while `Install the Codex CLI` is skipped. If all three steps are skipped, the run may have reused earlier test results and does not prove a cache hit. Inspect the restore log to confirm the matched key and cache version.
+
+Read the shard's step outcomes, substituting a completed Tests run id:
+
+```bash
+gh api --paginate \
+  'repos/the-cloud-clockwork/agentihooks/actions/runs/<run id>/jobs?per_page=100' \
+  --jq '.jobs[] | select(.name == "unit (3.12, 1)") | {html_url, conclusion, steps: [.steps[] | select(.name | contains("Codex CLI"))]}'
+```
+
+Measure execution time from each job's `started_at` to `completed_at`, excluding time waiting for a runner. Compare shards within Python 3.12 in the same run; Python 3.11 runs a different workload. List the completed successful shards from slowest to fastest:
+
+```bash
+gh api --paginate \
+  'repos/the-cloud-clockwork/agentihooks/actions/runs/<run id>/jobs?per_page=100' \
+  --jq '[.jobs[] | select(.name | startswith("unit (3.12, ")) | select(.conclusion == "success") | {name, seconds: ((.completed_at | fromdateiso8601) - (.started_at | fromdateiso8601))}] | sort_by(.seconds) | reverse'
+```
+
+The following observations use the Actions jobs API for merge queue runs before and after [the cache change](https://github.com/the-cloud-clockwork/agentihooks/pull/3504):
+
+| Observation | Before: [38802694821](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38802694821) | After: [39048986842](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39048986842) |
+|---|---|---|
+| Python 3.12 shard 1 execution | 478 s | 271 s |
+| Codex installation | 220 s | skipped; restore took 7 s |
+| Slowest other Python 3.12 shard | shard 7, 320 s | shard 11, 309 s |
+| Shard 1 lead over the slowest other shard | 158 s | none; shard 1 finished 38 s faster |
+
+Shard 1 no longer sets the run's maximum. The two slowest Python 3.12 shards in the after run took 309 s and 307 s, a 2 s gap. This observation meets the requirement that the Codex shard not exceed the next slowest shard by more than 30 s; it does not guarantee every future run's balance. Other workflow changes also landed between these runs, so the total job reduction cannot all be attributed to this cache. The skipped install directly verifies that this run avoided the download.
+
+For a later regression, retain both run links, the shard timings and the Codex step outcomes. A miss returns to the download fallback described above; seed the matching release on `main` before measuring another consuming run.
 ## Unit checkout
 
 Each `unit` shard checks out the graded commit as a partial clone: `ref` set to the run's commit SHA (`github.sha`), `fetch-depth: 0` (full history) and `filter: blob:none` (no file contents from old commits). The initial `git fetch` downloads commits and trees only. `git checkout` then fetches every file blob of the graded tree from the promisor remote in one batch, about 4400 blobs and 45 MB.
@@ -160,6 +262,8 @@ A shard listed with `success` stalled once and recovered; one listed with `failu
 ## Historical measurements
 
 For Helm chart proof timing, see [Helm kind proof input keys](/docs/reference/ci-result-cache/#helm-kind-proof-input-keys): the declared inputs, skipped job versus skipped steps, branch hit measurements and outstanding dev comparison.
+
+For branch mutation preflight, see [Measured shards and split mutants](reference/mutation-gate.md#measured-shards-and-split-mutants): heavy mutants run a shared fast test head plus separate tail slices on distinct shards, and the merge job combines their results into one grade per mutant. The reference includes planning defaults, proof commands, completeness checks and the distinction between estimated work and observed mutation step timing.
 
 Last ten runs of the Tests workflow on dev (35380163028, 35379942561, 35379468297, 35156774129, 35156548701, 35156299806, 35155214526, 35138446531, 35138276256, 35137837913). Seconds per step, mean and max over those runs.
 

@@ -11,7 +11,7 @@ from scripts.inbox.seats import is_seat
 IMMUTABLE = ("execution_id", "generation", "name", "lane", "task", "seat", "started_at", "runtime_backend", "transport")
 WRITE_ATTEMPTS = 5
 EXECUTION_FIELDS = ("execution_id", "generation", "runtime_backend", "runtime_target")
-PROJECTION_OMITTED = (*EXECUTION_FIELDS, "hive", "transport")
+PROJECTION_OMITTED = (*EXECUTION_FIELDS, "hive", "transport", "remote_control")
 
 
 if TYPE_CHECKING:
@@ -83,6 +83,7 @@ class ExecutionRegistry:
                 row.update({field: latest[name][field] for field in EXECUTION_FIELDS})
                 row["hive"] = latest[name].get("hive", "")
                 row["transport"] = latest[name].get("transport", "")
+                row["remote_control"] = latest[name].get("remote_control", {})
             result.append(AgentRecord(**row))
         return result
 

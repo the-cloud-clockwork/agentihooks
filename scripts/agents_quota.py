@@ -9,7 +9,7 @@ from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import asdict, dataclass, replace
 from typing import TYPE_CHECKING
 
-from scripts import codex_router, session_bands
+from scripts import codex_router, quota_freshness, session_bands
 from scripts.claude_quota_balancer import (
     MASTERS_ONLY,
     OPEN,
@@ -53,6 +53,7 @@ COLUMNS = [
     "5H RESET",
     "7D LEFT",
     "7D RESET",
+    "AGE",
 ]
 REFRESH_MIN_S = 60
 _page_cache: dict = {}
@@ -264,6 +265,7 @@ def _cells(rank: str, row: QuotaRow, now: int, current: str) -> list[str]:
         _reset(row.five_hour_left, row.five_hour_resets_at, now),
         _left(row.seven_day_left),
         _reset(row.seven_day_left, row.seven_day_resets_at, now),
+        MISSING if row.observed_at is None else quota_freshness.age(row.observed_at, now),
     ]
 
 
@@ -359,7 +361,7 @@ def _claude(refresh: bool, timeout: float) -> list[QuotaRow]:
     return with_masters(rows, _masters("claude"), sessions)
 
 
-def _codex(now: float) -> list[QuotaRow]:
+def _codex(now: float, force: bool = False) -> list[QuotaRow]:
     from hooks.context.account_sessions import codex_sessions_by_account
     from scripts import codex_router
     from scripts.routing.codex_api import CodexApiSource
@@ -367,7 +369,8 @@ def _codex(now: float) -> list[QuotaRow]:
     pool = codex_router.CodexAccountSource().pool(os.environ)
     sessions = codex_sessions_by_account()
     live = codex_router.live_accounts(pool, sessions)
-    quotas = codex_router.quotas(pool + live, os.environ)
+    quotas = codex_router.fresh_quotas(pool, os.environ, now, force=force)
+    quotas.update(codex_router.quotas(live, os.environ))
     identities = fingerprints(pool + live, os.environ)
     rows = without_routing(codex_rows(pool + live, quotas, sessions, now, identities=identities), live)
     master = _masters("codex").get("codex")
@@ -408,6 +411,13 @@ def _unprobed(account: str) -> ProbeResult:
     return ProbeResult(account, "", "UNKNOWN", None, QuotaWindow(), QuotaWindow())
 
 
+def _observed(results: list, now: float, fable: bool) -> dict[str, float]:
+    from scripts.claude_quota_balancer import cached_observations
+
+    cached = {result.account: at for at, result in cached_observations(include_fable=fable)}
+    return {result.account: cached.get(result.account, now) for result in results}
+
+
 def balance_table(
     results: list,
     sessions: dict[str, int],
@@ -418,7 +428,7 @@ def balance_table(
 ) -> str:
     from scripts.routing.claude_api import ClaudeApiSource
 
-    observed = {result.account: now for result in results} if observed is None else observed
+    observed = _observed(results, now, fable) if observed is None else observed
     claude = claude_rows(results, sessions, observed=observed, now=now, include_fable=fable)
     claude = with_masters(claude + api_rows(ClaudeApiSource(sessions), "claude", now), _masters("claude"), sessions)
     return _render_live(claude + ([] if fable else _codex(now)), sessions, now, fable, current)
@@ -481,13 +491,15 @@ def refresh_page_quota(probe: Callable[[], str], now: float | None = None) -> st
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="agentihooks quota", description="Quota left for every agent harness")
     parser.add_argument("--json", action="store_true", help="Print rows as JSON")
-    parser.add_argument("--refresh", action="store_true", help="Probe Claude accounts instead of using the cache")
+    parser.add_argument(
+        "--refresh", action="store_true", help="Probe every Claude and Codex account instead of using the cache"
+    )
     parser.add_argument("--timeout", type=float, default=60.0, help="Seconds per Claude account probe")
     args = parser.parse_args(argv)
     from hooks.context.account_sessions import sessions_by_account
 
     now = time.time()
-    rows = _claude(args.refresh, args.timeout) + _codex(now)
+    rows = _claude(args.refresh, args.timeout) + _codex(now, force=args.refresh)
     if args.json:
         print(json.dumps([{**asdict(row), "harness": row.agent} for row in rows], indent=2))
     elif rows:

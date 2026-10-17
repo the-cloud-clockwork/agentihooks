@@ -3,6 +3,7 @@ import json
 import os
 import re
 import subprocess
+import time
 from pathlib import Path
 
 import yaml
@@ -15,6 +16,8 @@ RUNNER_LOSS = re.compile(
     r"|The job was not acquired by Runner"
 )
 QUEUE_BRANCH = re.compile(r"^gh-readonly-queue/.+/pr-(\d+)-[0-9a-f]+$")
+EXIT_POLLS = 60
+EXIT_POLL_SECONDS = 30
 
 
 def base_name(job_name: str) -> str:
@@ -102,6 +105,16 @@ def pull_state(repo: str, number: int) -> dict:
     return json.loads(_api("graphql", "-f", f"query={query}"))["data"]["repository"]["pullRequest"]
 
 
+def pull_after_exit(repo: str, number: int) -> dict:
+    pull = pull_state(repo, number)
+    for _ in range(EXIT_POLLS):
+        if not pull.get("isInMergeQueue"):
+            return pull
+        time.sleep(EXIT_POLL_SECONDS)
+        pull = pull_state(repo, number)
+    return pull
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", required=True)
@@ -113,7 +126,7 @@ def main(argv: list[str] | None = None) -> int:
     if retry and number is None:
         retry, reason = False, f"no pull request in queue branch {run.get('head_branch')}"
     if retry:
-        allowed, why = requeue(pull_state(args.repo, number))
+        allowed, why = requeue(pull_after_exit(args.repo, number))
         retry, reason = allowed, f"{reason}; {why}"
     print(json.dumps({"run": args.run_id, "pull": number, "requeue": retry, "reason": reason}))
     if output := os.environ.get("GITHUB_OUTPUT"):
