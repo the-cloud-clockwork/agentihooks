@@ -137,6 +137,20 @@ def test_committed_collection_changes_cannot_reuse_an_old_count(tmp_path):
     assert (root / ".collection-runs").read_text() == "xx"
 
 
+def test_changed_pytest_selection_cannot_reuse_a_full_collection(tmp_path, monkeypatch):
+    from tests.count_floor import collect_all
+
+    root = _collection_tree(tmp_path)
+    cache = tmp_path / "cache"
+    monkeypatch.delenv("PYTEST_ADDOPTS", raising=False)
+    assert len(collect_all({"head": root}, "tests/", cache=cache, environment="first")["head"]) == 3
+    monkeypatch.setenv("PYTEST_ADDOPTS", "-k test_b")
+    assert collect_all({"head": root}, "tests/", cache=cache, environment="first") == {
+        "head": ["tests/test_a.py::test_b[1]", "tests/test_a.py::test_b[2]"]
+    }
+    assert (root / ".collection-runs").read_text() == "xx"
+
+
 def test_head_matching_the_base_count_passes(tmp_path):
     result = _floor(tmp_path, {"test_a.py": SUITE}, {"test_a.py": SUITE})
     assert result.returncode == 0, result.stdout + result.stderr

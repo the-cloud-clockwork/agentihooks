@@ -34,7 +34,10 @@ def collection_cache(root: Path, tests: str, cache: Path | None, environment: st
         return None
     tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], cwd=root, text=True).strip()
     packages = sorted((dist.metadata["Name"], dist.version) for dist in importlib.metadata.distributions())
-    identity = json.dumps([tree, tests, environment, sys.version, sys.platform, packages, _COLLECT])
+    options = {name: value for name, value in os.environ.items() if name.startswith("PYTEST_")}
+    identity = json.dumps(
+        [tree, tests, environment, sys.version, sys.platform, packages, _COLLECT, options], sort_keys=True
+    )
     key = hashlib.sha256(identity.encode()).hexdigest()
     return cache / f"{key}.json"
 
