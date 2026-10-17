@@ -276,7 +276,13 @@ class HerdrRuntime:
         host = capacity.granted(capacity.host_room(config, inputs), previous, inputs.now_ms)
         config, scaled = capacity.autoscaled(config, inputs, host)
         decision = capacity.calculate(
-            config, self._quota_accounts, agents, demand, requirements, accounts, warned=warned
+            replace(config, lanes={"master": {}, **config.lanes}),
+            self._quota_accounts,
+            agents,
+            demand,
+            requirements,
+            accounts,
+            warned=warned,
         )
         decision["host"] = host
         if scaled:

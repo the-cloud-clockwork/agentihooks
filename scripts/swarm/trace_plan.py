@@ -54,7 +54,7 @@ class Piece:
 
 
 def followup_text(task_id, what):
-    return f"Cut from the plan of task {task_id}: {what}"
+    return f"Cut from the plan: {what}"
 
 
 def _piece(line, number, task_id, task_ids):
