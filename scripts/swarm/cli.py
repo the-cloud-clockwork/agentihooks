@@ -140,6 +140,7 @@ from scripts.swarm.store import (
     DELEGATE,
     DISPATCH,
     MASTER,
+    RedisStore,
     SwarmConfig,
     SwarmError,
     Unreachable,
@@ -418,6 +419,45 @@ def _reconcile_services():
         why = ""
     if not installed:
         print(f"warning: the swarm user services could not be installed or enabled{why}", file=sys.stderr)
+
+
+def run_waits(store: RedisStore, slug: str, ledger=None) -> list[str]:
+    from scripts.swarm import commands, lease
+
+    held = lease.acquire(store, slug, commands.hive_id())
+    if held is None:
+        return []
+    if not any(
+        agent.state != "finished" and (idle.wait(store.redis, slug, agent.name) or {}).get("on")
+        for agent in store.agents(slug)
+    ):
+        return []
+    ledger = ledger or LedgerClient()
+    doc = ledger.state(slug)
+    inbox = InboxStore(store.redis)
+    view = ledger_events.tick_view(inbox, store, slug, doc)
+    lease.require(store, slug, held)
+    return waits.end_pass(
+        store, slug, {task["id"]: task for task in doc["tasks"]}, inbox, view, now_ms(), ledger_events.view
+    )
+
+
+@outage.guard_command
+def cmd_waits(store, args):
+    if why := timer.installed_refusal():
+        raise SwarmError(f"the wait pass refused to run: {why}")
+
+    def check(slug):
+        try:
+            for action in run_waits(store, slug):
+                timing.emit(sys.stdout, f"{slug}: {action}")
+        except Exception as exc:
+            timing.emit(sys.stderr, f"{slug}: {type(exc).__name__}: {exc}")
+
+    slugs = store.slugs()
+    if slugs:
+        with ThreadPoolExecutor(max_workers=len(slugs)) as pool:
+            list(pool.map(check, slugs))
 
 
 @outage.guard_command
@@ -2002,7 +2042,7 @@ def _tick_store():
 
 
 def main(argv):
-    if argv and argv[0] in ("list", "tick", "templates", "rename", "waker", "alerts"):
+    if argv and argv[0] in ("list", "tick", "templates", "rename", "waker", "alerts", "waits"):
         handler, args = globals()[f"cmd_{argv[0]}"], argparse.Namespace()
     else:
         if len(argv) > 1 and argv[1].partition("=")[0] in (
@@ -2025,7 +2065,7 @@ def main(argv):
     from redis.exceptions import RedisError
 
     try:
-        store = _tick_store() if handler is cmd_tick else connect()
+        store = _tick_store() if handler in (cmd_tick, cmd_waits) else connect()
         if store is None:
             return 0
         if "slug" in args:
