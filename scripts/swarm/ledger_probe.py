@@ -7,7 +7,7 @@ import sys
 import time
 import urllib.error
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 from scripts.inbox.seats import seat_address
 from scripts.swarm import control_notifications, incidents, ledger_host, notice_text, time_left
@@ -33,14 +33,21 @@ class Sample:
     read_s: float
     write_s: float
     failure: str = ""
+    read_failure: str = ""
+    write_failure: str = ""
 
     @property
     def slow(self) -> bool:
         return bool(self.failure) or max(self.read_s, self.write_s) > SLOW_S
 
     def took(self) -> str:
-        took = f"read {self.read_s:.1f} seconds and write {self.write_s:.1f} seconds"
-        return f"{took}, and the ledger {self.failure}" if self.failure else took
+        read = f"read {self.read_s:.1f} seconds"
+        write = f"write {self.write_s:.1f} seconds"
+        if self.read_failure:
+            read += f" ({self.read_failure})"
+        if self.write_failure:
+            write += f" ({self.write_failure})"
+        return f"{read} and {write}"
 
 
 def _failure(exc: BaseException) -> str:
@@ -68,7 +75,7 @@ def measure(ledger, slug: str, inputs: dict, clock: Callable[[], float] = time.m
         return None
     read_s, read_failure = _timed(lambda: read(slug), clock)
     write_s, write_failure = _timed(lambda: write(slug, inputs.get("slots"), inputs.get("ci_minutes")), clock)
-    return Sample(read_s, write_s, read_failure or write_failure)
+    return Sample(read_s, write_s, read_failure or write_failure, read_failure, write_failure)
 
 
 def _key(store, slug: str) -> str:
@@ -89,7 +96,18 @@ def master_address(store, slug: str) -> str:
     return (boss.seat or boss.name) if boss else seat_address(slug, MASTER)
 
 
-def _raised(sample: Sample, facts: dict) -> str:
+def _passes(samples: list[dict]) -> str:
+    return ". ".join(
+        f"{row['slug']} pass {row['sequence']}: read {row['read_s']:.1f} seconds"
+        + (f", {row['read_failure']}" if row["read_failure"] else "")
+        + f" and write {row['write_s']:.1f} seconds"
+        + (f", {row['write_failure']}" if row["write_failure"] else "")
+        + (f", {row['watchdog']}" if row.get("watchdog") else "")
+        for row in samples
+    )
+
+
+def _raised(samples: list[dict], facts: dict) -> str:
     cpu = f"CPU {facts['cpu']:.0f} percent" if facts.get("cpu") is not None else "CPU unknown"
     started = (
         f"started {facts['started_minutes']} minutes ago"
@@ -97,7 +115,8 @@ def _raised(sample: Sample, facts: dict) -> str:
         else "start time unknown"
     )
     newest = f" merged {facts['merged_minutes']} minutes ago: {facts['newest']}" if facts.get("newest") else " unknown"
-    return RAISED.format(took=sample.took(), cpu=cpu, started=started, newest=newest)
+    label = "The ledger probe failed" if any(row["failure"] for row in samples) else "The ledger server is slow"
+    return f"{label}: {_passes(samples)}. Server {cpu}, {started}. Newest on dev{newest}."
 
 
 def for_operator(text: str) -> str:
@@ -121,7 +140,7 @@ def _undelivered(ledger, slug: str, notices: list[str]) -> list[str]:
     return []
 
 
-def _incident(redis, slug: str, active: bool) -> None:
+def _incident(redis, slug: str, active: bool, raised: str, resolved: str) -> dict:
     root = incidents.key("ledger")
 
     def change(pipe):
@@ -131,14 +150,37 @@ def _incident(redis, slug: str, active: bool) -> None:
         combined = any(probes.values())
         changed = combined != (held.get("active") == "1")
         updates = {"probes": json.dumps(probes), "active": int(combined)}
-        if changed and combined:
-            updates["generation"] = int(held.get("generation", 0)) + 1
+        if changed:
+            field = "raised_text" if combined else "resolved_text"
+            updates[field] = raised if combined else resolved
+            if combined:
+                updates["generation"] = int(held.get("generation", 0)) + 1
         pipe.multi()
         pipe.hset(root, mapping=updates)
         if changed:
-            pipe.rpush(f"{root}:outbox", "raised" if combined else "resolved")
+            pipe.rpush(f"{root}:outbox", json.dumps({"text": updates[field]}))
+        return {**held, **updates}
 
-    redis.transaction(change, root)
+    return redis.transaction(change, root, value_from_callable=True)
+
+
+def _record(held: dict, slug: str, now_ms: int, sample: Sample, down: str) -> None:
+    bad = sample.slow or bool(down)
+    before = {field: held.get(field, 0) for field in ("slow", "fast")}
+    slow = before["slow"] + 1 if bad else 0
+    fast = 0 if bad else before["fast"] + 1
+    sequence = held.get("sequence", 0) + 1
+    row = {
+        **asdict(sample),
+        "slug": slug,
+        "sequence": sequence,
+        "at": now_ms,
+        "watchdog": down or "",
+        "streak_before": before,
+        "streak_after": {"slow": slow, "fast": fast},
+    }
+    previous = held.get("samples", []) if held.get("bad") == bad else []
+    held.update(slow=slow, fast=fast, bad=bad, sequence=sequence, samples=[*previous[-1:], row])
 
 
 def observe(
@@ -154,35 +196,27 @@ def observe(
     if sample is None:
         return []
     down = store.redis.hget(incidents.key("ledger"), "watchdog")
-    bad = sample.slow or bool(down)
     held = state(store, slug)
-    slow = held.get("slow", 0) + 1 if bad else 0
-    fast = 0 if bad else held.get("fast", 0) + 1
-    alert = bool(held.get("alert"))
-    if slow >= PASSES:
-        alert = True
-    elif fast >= PASSES:
-        alert = False
-    _incident(store.redis, slug, alert)
-    active = store.redis.hget(incidents.key("ledger"), "active") == "1"
-    raised = down or (
-        _raised(sample, (facts or ledger_host.facts)()) if active else "The ledger is slow or unavailable."
-    )
-    text = (raised if down else raised + PAUSED) if active else CLEARED.format(took=sample.took())
-    incidents.mail(store.redis, "ledger", master_address(store, slug), text, not active)
-    incidents.deliver(store.redis, "ledger", raised, CLEARED.format(took=sample.took()))
-    held.update(slow=slow, fast=fast)
+    _record(held, slug, now_ms, sample, down)
     actions, notices = [], held.get("notices", [])
-    if not held.get("alert") and slow >= PASSES:
-        text = raised
-        notices = [*notices, for_operator(text)]
-        held.update(alert=True, raised_at=now_ms)
+    raised, resolved = "", ""
+    if not held.get("alert") and held["slow"] >= PASSES:
+        raised = _raised(held["samples"], (facts or ledger_host.facts)())
+        held.update(alert=True, raised_at=now_ms, raised_samples=held["samples"])
+        notices = [*notices, for_operator(raised)]
         actions.append("raised the ledger slow alert")
-    elif held.get("alert") and fast >= PASSES:
-        text = CLEARED.format(took=sample.took())
-        notices = [*notices, for_operator(text)]
-        held.update(alert=False)
+    elif held.get("alert") and held["fast"] >= PASSES:
+        resolved = CLEARED.format(took=_passes(held["samples"]))
+        held.update(alert=False, cleared_samples=held["samples"])
+        notices = [*notices, for_operator(resolved)]
         actions.append("cleared the ledger slow alert")
+    incident = _incident(store.redis, slug, bool(held.get("alert")), raised, resolved)
+    active = str(incident["active"]) == "1"
+    text = incident.get("raised_text", "The ledger is slow or unavailable; triggering passes unknown.") + PAUSED
+    if not active:
+        text = incident.get("resolved_text", "The ledger incident is clear; triggering passes unknown.")
+    incidents.mail(store.redis, "ledger", master_address(store, slug), text, not active)
+    incidents.deliver(store.redis, "ledger", text, text)
     held["notices"] = _undelivered(ledger, slug, notices)
     store.redis.set(_key(store, slug), json.dumps(held))
     return actions
