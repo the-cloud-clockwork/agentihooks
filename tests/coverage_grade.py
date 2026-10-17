@@ -141,7 +141,7 @@ def statements_of(source: str, lines: Iterable[int]) -> dict[int, int]:
     return {line: parser.first_line(line) for line in lines if parser.first_line(line) in parser.statements}
 
 
-@functools.lru_cache(maxsize=4096)
+@functools.lru_cache(maxsize=64)
 def _parsed(source: str) -> PythonParser:
     parser = PythonParser(text=source)
     parser.parse_source()
