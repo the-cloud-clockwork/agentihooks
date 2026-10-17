@@ -43,8 +43,7 @@ jobs:
         name: Stamp the shared environment
         id: day
         run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
-      - &proof-venv
-        uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v4
         id: venv
         with:
           path: ~/venv
@@ -156,8 +155,12 @@ jobs:
         with:
           path: ~/venv
           key: venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ steps.day.outputs.date }}-${{ hashFiles('pyproject.toml', '.github/test-excludes.txt') }}
-      - <<: *proof-venv
+      - uses: actions/cache/restore@v4
         if: matrix.mode == 'after'
+        id: venv
+        with:
+          path: ~/venv
+          key: venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ steps.day.outputs.date }}-${{ hashFiles('pyproject.toml', '.github/test-excludes.txt') }}
       - *proof-uv
       - *proof-install
       - *proof-use
