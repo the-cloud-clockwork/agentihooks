@@ -467,9 +467,15 @@ def _workflow_gates(data, run, cache):
 
 
 def tick_view(inbox: object, store: object, slug: str, doc: dict) -> Callable[[str], PullRequest | None]:
-    from scripts.swarm import metrics_swarm
+    from scripts.swarm import metrics_outbox, metrics_swarm
 
-    urls = [url for url, _ in metrics_swarm.pull_targets(doc, int(datetime.now().timestamp() * 1000))]
+    urls = [
+        task["pr_url"] for task in doc.get("tasks", []) if task.get("state") in ("pr", "claimed") and task.get("pr_url")
+    ]
+    at = int(datetime.now().timestamp() * 1000)
+    recent = metrics_outbox.read_recent("delivery_events", at)
+    if recent is not None:
+        urls.extend(url for url, _ in metrics_swarm.pull_targets(doc, at, recent))
     notices = store.redis.hgetall(store.key(slug, "red-notices"))
     urls += [url for item_id, url in notices.items() if _open(inbox, item_id)]
     snapshots = views(urls, cache=store.redis)

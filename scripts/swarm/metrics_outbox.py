@@ -1,5 +1,6 @@
 import http.client
 import json
+import logging
 import math
 import re
 import sqlite3
@@ -7,6 +8,7 @@ import time
 import urllib.parse
 import urllib.request
 from collections.abc import Callable
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -126,6 +128,18 @@ def settings(environ):
 
 def spool_path():
     return Path.home() / ".agentihooks" / "swarm" / "metrics-outbox.sqlite"
+
+
+def read_recent(name: str, now_ms: int) -> list[dict] | None:
+    try:
+        path = spool_path()
+        if not path.exists():
+            return []
+        with closing(sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=LOCK_TIMEOUT_S)) as db:
+            return [json.loads(row) for (row,) in db.execute(RECENT, (name, now_ms - DAY_MS))]
+    except (sqlite3.Error, OSError) as exc:
+        logging.getLogger(__name__).warning("metrics history read failed: %s", exc)
+        return None
 
 
 def post(sink, query, body):
