@@ -267,9 +267,10 @@ See [Claude Account Load Balancing](../pillars/load-balancing.md).
 ## GitHub CLI Config Pin
 
 gh 2.x moves the operator's login: the gh 2.4.0 binary on the operator's
-machine carries `autoMigrateConfigDir`, recorded in #3502 below. When
-`XDG_CONFIG_HOME` is set, `GH_CONFIG_DIR` is unset and `$XDG_CONFIG_HOME/gh` does not exist, gh renames
-`~/.config/gh` into `$XDG_CONFIG_HOME/gh` on its next run. A proof, render or
+machine carries `autoMigrateConfigDir`, recorded in #3502. When
+`XDG_CONFIG_HOME` is set, `GH_CONFIG_DIR` is unset and `$XDG_CONFIG_HOME/gh`
+does not exist, gh renames `~/.config/gh` into `$XDG_CONFIG_HOME/gh` on its
+next run. A proof, render or
 launch that points `XDG_CONFIG_HOME` at a scratch folder then takes the login
 with it, and every other session on the machine loses GitHub until the folder is
 moved back. This happened twice on 15 October: once from a proof wrapper and
@@ -346,8 +347,9 @@ Every agent reports gh as logged out at once:
    `mv <found folder> ~/.config/gh`, then confirm with
    `gh api user --jq .login`. List the folder rather than reading its files: it
    holds the login token.
-4. Find the process that ran with an isolated `XDG_CONFIG_HOME` and no
-   `GH_CONFIG_DIR`, and add the pin to it.
+4. The scratch folder that held the moved copy names the proof or session that
+   set `XDG_CONFIG_HOME`. Add the pin to that wrapper and restart any session it
+   started, which still carries the unpinned environment.
 
 ---
 
