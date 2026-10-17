@@ -294,7 +294,7 @@ def materialize(attempt: Path, target: str) -> None:
         )
         if layer:
             servers.update(_i._load_native_layer(layer).get("mcpServers") or {})
-    workable = {name: server for name, server in servers.items() if not name.startswith(browser.EXTENSION)}
+    workable = {name: server for name, server in servers.items() if not name.lower().startswith(browser.EXTENSION)}
     adapter.register_mcp(browser.configure(workable, names))
 
 

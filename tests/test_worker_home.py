@@ -138,11 +138,19 @@ def test_bootstrap_renders_both_targets_into_separate_homes(fixture):
     assert "AH_CC_TOKEN_POOL_A" not in claude_text + codex_text
 
 
-def test_a_desktop_extension_browser_server_is_left_out_of_the_worker_home(fixture):
+@pytest.mark.parametrize("extension", ["playwright-ext-operator", "Playwright-Ext-Operator"])
+@pytest.mark.parametrize(("browser_role", "role_servers"), [(False, []), (True, ["playwright-cmd"])])
+def test_a_desktop_extension_browser_server_is_left_out_of_the_worker_home(
+    fixture, monkeypatch, browser_role, role_servers, extension
+):
+    from scripts.profiles import browser
+
+    monkeypatch.setattr(browser, "enabled", lambda chain: browser_role)
+    monkeypatch.setattr(browser, "spec", lambda: {"command": "python", "args": ["-m", "scripts.profiles.browser"]})
     templates, volume = fixture
     mcp = templates / "fixture-claude" / ".mcp.json"
     document = json.loads(mcp.read_text())
-    document["mcpServers"]["playwright-ext-operator"] = {
+    document["mcpServers"][extension] = {
         "command": "cmd.exe",
         "args": ["/c", "npx", "@playwright/mcp@latest", "--extension"],
     }
@@ -151,10 +159,9 @@ def test_a_desktop_extension_browser_server_is_left_out_of_the_worker_home(fixtu
     worker_home.bootstrap(request(templates, volume))
 
     home = volume / "attempt-1" / "homes" / "claude"
-    assert sorted(json.loads((home / ".claude.json").read_text())["mcpServers"]) == [
-        "agentihooks",
-        "fixture-claude-mcp",
-    ]
+    assert sorted(json.loads((home / ".claude.json").read_text())["mcpServers"]) == sorted(
+        ["agentihooks", "fixture-claude-mcp", *role_servers]
+    )
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
