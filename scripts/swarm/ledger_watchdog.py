@@ -198,6 +198,11 @@ def _claimed(store, folder: Path, pid: int, kind: str) -> bool:
 def watch(store, slug: str, ledger, runtime, host: Host | None = None) -> list[str]:
     if getattr(ledger, "time_left", None) is None:
         return []
+    config = store.config(slug)
+    if config.state == "stopped" or (config.scratch and host is None):
+        return []
+    if ledger.binned(slug):
+        return []
     host = host or default_host()
     pid = ledger_host.server_pid(host.folder)
     facts = seen(pid, host.proc) if pid is not None else None
