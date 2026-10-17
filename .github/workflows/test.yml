@@ -821,11 +821,24 @@ jobs:
           - {python-version: "3.11", shard: 11}
           - {python-version: "3.11", shard: 12}
     steps:
-      - uses: actions/checkout@v4
-        with:
+      # The action retries git fetch but not the lazy blob fetch inside git checkout; a silent connection there held a shard ten minutes.
+      - name: Check out the graded commit
+        id: checkout
+        continue-on-error: true
+        uses: actions/checkout@v4
+        env: &low-speed
+          GIT_HTTP_LOW_SPEED_LIMIT: "1000"
+          GIT_HTTP_LOW_SPEED_TIME: "60"
+        with: &unit-checkout
           ref: ${{ github.sha }}
           fetch-depth: 0
           filter: blob:none
+
+      - name: Check out the graded commit, attempt 2
+        if: steps.checkout.outcome == 'failure'
+        uses: actions/checkout@v4
+        env: *low-speed
+        with: *unit-checkout
 
       - *python
 
