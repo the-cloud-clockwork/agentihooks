@@ -203,8 +203,8 @@ def _required(gated, checks):
         if check.get("isRequired", True) or (check.get("name") or check.get("context")) == GATE
     ]
     runs = {_run_key(check) for check in required if _run_key(check)[0]}
-    if gated and not runs:
-        runs = {_run_key(check) for check in checks if _run_key(check)[0]}
+    if gated and not any(check.get("name") == GATE and _run_key(check)[0] for check in required):
+        runs.update(_run_key(check) for check in checks if _run_key(check)[0])
     return [check for check in checks if check in required or _run_key(check) in runs] if gated or required else checks
 
 

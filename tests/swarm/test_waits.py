@@ -1403,11 +1403,15 @@ def test_checks_wait_judges_every_job_of_the_current_required_run(tick, required
 @pytest.mark.parametrize("status", ["IN_PROGRESS", "COMPLETED"])
 @pytest.mark.parametrize("conclusion", [None, "FAILURE", "SUCCESS"])
 @pytest.mark.parametrize("event", [None, "pull_request"])
-def test_a_status_gate_cannot_hide_the_current_workflow_jobs(tick, status, conclusion, event):
+@pytest.mark.parametrize("other_required", [False, True])
+def test_a_status_gate_cannot_hide_the_current_workflow_jobs(tick, status, conclusion, event, other_required):
     tick.hold("checks", URL)
     gate = {"context": "Gate — Required", "state": "SUCCESS", "isRequired": True}
     job = {**_run_check("selected tests", 20, 2, conclusion, event=event), "isRequired": False}
-    tick.pulls[URL] = _gated([gate, job], [_suite(2, status, event=event)], False)
+    checks = [gate, job]
+    if other_required:
+        checks.append({**_run_check("security", 10, 1, "SUCCESS", workflow="W2"), "isRequired": True})
+    tick.pulls[URL] = _gated(checks, [_suite(2, status, event=event)], False)
     if conclusion == "FAILURE":
         assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now red; failed: selected tests"]
     elif conclusion == "SUCCESS" and status == "COMPLETED":
