@@ -2171,7 +2171,9 @@ def test_two_names_holding_one_token_offer_one_account(monkeypatch, tmp_path):
         "AH_CC_TOKEN_other": "fake-b",
     }
     windows = balancer.QuotaWindow(used=10)
-    results = [balancer.ProbeResult(name, "allowed", "NORMAL", 90, windows, windows) for name in ("mail", "old", "other")]
+    results = [
+        balancer.ProbeResult(name, "allowed", "NORMAL", 90, windows, windows) for name in ("mail", "old", "other")
+    ]
     balancer._write_cache(
         tmp_path / "claude-router-cache.json",
         {
