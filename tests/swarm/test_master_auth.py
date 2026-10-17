@@ -263,3 +263,72 @@ def test_a_placement_decides_the_desired_route_and_an_undecided_one_keeps_the_re
     record = AgentRecord("agent", "master", "master", desired_route_kind="interactive")
     decided = Placed("pane", "claude") if placed is None else Placed("pane", "claude", desired_route_kind=placed)
     assert placed_record(record, decided).desired_route_kind == kept
+
+
+def _login_runtime(tmp_path, accounts=None):
+    from scripts.routing import native_login
+    from scripts.swarm.runtime import HerdrRuntime
+    from tests.swarm.profile_fixture import validated
+
+    seen = []
+
+    def run(argv, **kwargs):
+        if argv[1:] == list(native_login.COMMAND):
+            return SimpleNamespace(returncode=0, stdout=native_login.STATUS, stderr="")
+        seen.append(argv)
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("codex", "requested"))
+    if accounts is not None:
+        runtime._quota_accounts = accounts
+    config = SimpleNamespace(
+        slug="proof", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={"master": {}}, autonomy="delegate"
+    )
+    return runtime, config, seen
+
+
+@pytest.mark.parametrize("claude_only", [False, True])
+def test_a_master_with_no_harness_set_takes_the_login_on_claude(tmp_path, monkeypatch, claude_only):
+    from scripts.profiles import plugins
+
+    monkeypatch.setattr(plugins, "claude_only", lambda name: claude_only)
+    runtime, config, _ = _login_runtime(tmp_path)
+    task = {"id": "master", "title": "proof"}
+    if claude_only:
+        task["handoff"] = "Continue the master task."
+        task["handoff_envelope"] = {
+            "launch": {"profile": "master", "harness": "codex", "account": "", "model": "", "effort": ""}
+        }
+    placed = runtime.spawn(config, "master", "agent", task)
+    assert (placed.harness, placed.route_kind, placed.choice) == ("claude", "interactive", "other")
+
+
+def test_a_valid_login_skips_the_quota_transfer_of_a_master_handoff(tmp_path):
+    from scripts.swarm.capacity import Account
+
+    runtime, config, seen = _login_runtime(tmp_path, [Account("claude", "token", "CLOSED", 0, 1, 1, 0)])
+    config.lanes = {"master": {"agent": "claude"}}
+    task = {
+        "id": "master",
+        "title": "proof",
+        "handoff": "Continue the master task.",
+        "handoff_envelope": {
+            "reason": "quota",
+            "launch": {"profile": "master", "harness": "claude", "account": "token", "model": "opus", "effort": "high"},
+        },
+    }
+    placed = runtime.spawn(config, "master", "agent", task)
+    assert placed.route_kind == "interactive"
+    assert seen[0][seen[0].index("--") + 1 :][:2] == ["--route", "interactive"]
+
+
+def test_a_resumed_master_keeps_its_desired_route(tmp_path):
+    from dataclasses import replace
+
+    from tests.swarm.test_runtime import _resuming
+
+    runtime, config, agent, _ = _resuming(tmp_path, "c0ffee")
+    config.slug = "proof"
+    config.master_claude_login = False
+    master = replace(agent, lane="master", task="master", route_kind="subscription", desired_route_kind="interactive")
+    assert runtime.resume(config, master, "resume").desired_route_kind == "interactive"

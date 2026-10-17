@@ -505,6 +505,20 @@ def test_desired_route_survives_execution_updates_without_changing_the_legacy_pr
     assert store.agents("fixture")[0].desired_route_kind == "interactive"
 
 
+def test_desired_route_on_a_local_record_lives_in_its_own_hash(store, agent):
+    master = replace(agent, desired_route_kind="interactive")
+    routes = store.key("fixture", "desired-routes")
+    store.put_agent("fixture", master)
+    assert store.redis.hget(routes, master.name) == "interactive"
+    assert store.agents("fixture")[0].desired_route_kind == "interactive"
+    store.put_agent("fixture", replace(master, desired_route_kind=""))
+    assert not store.redis.hexists(routes, master.name)
+    assert store.agents("fixture")[0].desired_route_kind == ""
+    store.put_agent("fixture", master)
+    store.drop_agent("fixture", master.name)
+    assert not store.redis.hexists(routes, master.name)
+
+
 @pytest.mark.parametrize(
     "changes",
     [
