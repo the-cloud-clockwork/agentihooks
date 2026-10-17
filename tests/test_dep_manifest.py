@@ -213,7 +213,20 @@ def test_sonar_builds_the_manifest_and_only_dev_pushes_save_it():
     assert steps.index("Wait for the coverage merge") < steps.index("Build the test dependency manifest")
     build = _step("sonar", "Build the test dependency manifest")
     assert "python -m tests.dep_manifest build" in build["run"]
-    assert _step("sonar", "Upload the test dependency manifest")["with"]["name"] == "dep-manifest"
+    assert ") < /dev/null >" in build["run"] and build["run"].rstrip().endswith('echo "pid=$!" >> "$GITHUB_OUTPUT"')
+    assert '--out "$RUNNER_TEMP/dep-manifest/manifest.json"' in build["run"]
+    assert (
+        steps.index("Build the test dependency manifest")
+        < steps.index("SonarQube Scan")
+        < steps.index("Wait for the test dependency manifest")
+        < steps.index("Upload the test dependency manifest")
+    )
+    wait = _step("sonar", "Wait for the test dependency manifest")
+    assert wait["env"]["MANIFEST_PID"] == "${{ steps.manifest.outputs.pid }}"
+    assert 'exit "$(< "$RUNNER_TEMP/manifest.status")"' in wait["run"]
+    upload = _step("sonar", "Upload the test dependency manifest")
+    assert upload["with"]["name"] == "dep-manifest"
+    assert upload["with"]["path"] == "${{ runner.temp }}/dep-manifest/manifest.json"
     assert not any("cache/save" in step.get("uses", "") for step in _job("sonar")["steps"])
     assert "github.event_name == 'push'" in _job("coverage-baseline")["if"]
     assert _step("coverage-baseline", "Download the test dependency manifest")["with"]["name"] == "dep-manifest"
