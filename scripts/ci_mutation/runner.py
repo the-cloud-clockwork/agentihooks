@@ -1,7 +1,6 @@
 import ast
 import json
 import os
-import re
 import shutil
 import signal
 import subprocess
@@ -19,7 +18,6 @@ from scripts.ci_mutation.scope import select_tests
 from scripts.ci_mutation.stats import SharedStats, load_parts, stats_key
 
 IDENTITY = "scripts/ci_mutation/identity.py"
-FAILED_TEST = re.compile(r"^(?:FAILED|ERROR) (\S+\.py(?:::.*?)?)(?: - (.*))?$", re.MULTILINE)
 
 
 def run_process(command: list[str], cwd: Path, timeout: float, log: Path) -> int | None:
@@ -44,8 +42,11 @@ def failing_tests(log: Path) -> list[str]:
     if not log.is_file():
         return []
     named = {}
-    for test, error in FAILED_TEST.findall(log.read_text(errors="replace")):
-        named.setdefault(test, f"{test} - {error}" if error else test)
+    for line in log.read_text(errors="replace").splitlines():
+        kind, _, rest = line.partition(" ")
+        test = rest.partition(" - ")[0]
+        if kind in ("FAILED", "ERROR") and ".py" in test:
+            named.setdefault(test, rest)
     return list(named.values())
 
 
