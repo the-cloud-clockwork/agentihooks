@@ -121,6 +121,26 @@ def _undelivered(ledger, slug: str, notices: list[str]) -> list[str]:
     return []
 
 
+def _incident(redis, slug: str, active: bool) -> None:
+    root = incidents.key("ledger")
+
+    def change(pipe):
+        held = pipe.hgetall(root)
+        probes = json.loads(held.get("probes", "{}"))
+        probes[slug] = active
+        combined = any(probes.values()) or bool(held.get("watchdog"))
+        changed = combined != (held.get("active") == "1")
+        updates = {"probes": json.dumps(probes), "active": int(combined)}
+        if changed and combined:
+            updates["generation"] = int(held.get("generation", 0)) + 1
+        pipe.multi()
+        pipe.hset(root, mapping=updates)
+        if changed:
+            pipe.rpush(f"{root}:outbox", "raised" if combined else "resolved")
+
+    redis.transaction(change, root)
+
+
 def observe(
     store,
     slug: str,
@@ -135,7 +155,15 @@ def observe(
         return []
     down = store.redis.hget(incidents.key("ledger"), "watchdog")
     bad = sample.slow or bool(down)
-    incidents.step(store.redis, "ledger", bad)
+    held = state(store, slug)
+    slow = held.get("slow", 0) + 1 if bad else 0
+    fast = 0 if bad else held.get("fast", 0) + 1
+    alert = bool(held.get("alert"))
+    if slow >= PASSES:
+        alert = True
+    elif fast >= PASSES:
+        alert = False
+    _incident(store.redis, slug, alert)
     active = store.redis.hget(incidents.key("ledger"), "active") == "1"
     raised = down or (
         _raised(sample, (facts or ledger_host.facts)()) if active else "The ledger is slow or unavailable."
@@ -143,9 +171,6 @@ def observe(
     text = (raised if down else raised + PAUSED) if active else CLEARED.format(took=sample.took())
     incidents.mail(store.redis, "ledger", master_address(store, slug), text, not active)
     incidents.deliver(store.redis, "ledger", raised, CLEARED.format(took=sample.took()))
-    held = state(store, slug)
-    slow = held.get("slow", 0) + 1 if bad else 0
-    fast = 0 if bad else held.get("fast", 0) + 1
     held.update(slow=slow, fast=fast)
     actions, notices = [], held.get("notices", [])
     if not held.get("alert") and slow >= PASSES:
