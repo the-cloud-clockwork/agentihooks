@@ -29,6 +29,14 @@ jobs:
       - name: Install Semgrep
         run: python -m pip install semgrep==1.177.0
 
+      # Each domain rule under .semgrep must fire on every ruleid line of its fixture and find nothing in the code.
+      - name: Domain rules hold on their fixtures and the code
+        run: |
+          for rule in .semgrep/*.yml; do
+            semgrep --metrics off --test --config "$rule" "${rule%.yml}.py"
+          done
+          semgrep scan --error --strict --metrics off --config .semgrep .
+
       - name: Resolve the merge base of the head and the base
         id: baseline
         env:
