@@ -47,8 +47,10 @@ function fixture(options = {}) {
       getCommit: async ({ ref }) => ({ data: ref === 'graded' ? commit('graded', 'tree') :
         ref === 'main' ? commit('main', options.already ? 'tree' : 'old') : commit('rebased', options.wrongTree ? 'wrong' : 'tree') }),
       listCommitStatusesForRef: async () => ({ data: statuses.slice(0, 100) }),
+      compareCommitsWithBasehead: async ({ basehead }) => ({ data: { status: (options.ancestry || {})[basehead] || 'diverged' } }),
     },
     pulls: {
+      update: async args => { writes.push(['close', args]); },
       get: async () => ({ data: { ...pull, mergeable: options.conflict ? false : true, rebaseable: !options.nonrebaseable,
         mergeable_state: options.mergeState || (options.pending || options.waitOnce && readiness++ === 0 ? 'blocked' : 'clean') } }),
       list: async () => ({ data: options.existing ? [pull] : [] }),
@@ -65,6 +67,7 @@ function fixture(options = {}) {
     if (method === github.rest.actions.listJobsForWorkflowRun) return jobs;
     if (method === github.rest.checks.listForRef) return checks;
     if (method === github.rest.repos.listCommitStatusesForRef) return statuses;
+    if (method === github.rest.pulls.list) return options.open || [];
     throw new Error('Unexpected paginated endpoint');
   };
   const summary = { addHeading() { return this; }, addTable() { return this; }, async write() {} };
@@ -121,6 +124,57 @@ test('reuses an existing promotion pull request', async () => {
   const f = fixture({ existing: true });
   await promote(f);
   assert.deepEqual(f.writes.map(([kind]) => kind), ['merge']);
+});
+
+const promotionPull = (number, sha, full_name = 'owner/repo', ref = `promotion/${sha}`) =>
+  ({ number, head: { ref, sha, repo: full_name && { full_name } }, base: { ref: 'main' } });
+const supersededFixture = options => fixture({
+  open: [
+    promotionPull(3, 'older'), promotionPull(4, 'diverged'), promotionPull(5, 'newer'),
+    promotionPull(6, 'older', 'owner/repo', 'feature'), promotionPull(8, 'older', 'fork/repo'),
+    promotionPull(9, 'older', null), promotionPull(7, 'graded'),
+  ],
+  ancestry: { 'older...graded': 'ahead', 'graded...graded': 'ahead', 'newer...graded': 'behind' },
+  ...options,
+});
+
+test('closes only superseded promotion pull requests and deletes their snapshots', async () => {
+  const f = supersededFixture();
+  await promote(f);
+  assert.deepEqual(f.writes.filter(([kind]) => kind === 'close').map(([, args]) => args),
+    [{ owner: 'owner', repo: 'repo', pull_number: 3, state: 'closed' }]);
+  assert.deepEqual(f.refs.filter(([, args]) => args.ref === 'heads/promotion/older'),
+    [['delete', { owner: 'owner', repo: 'repo', ref: 'heads/promotion/older' }]]);
+  assert.equal(f.outputs.main, 'rebased');
+});
+
+test('closes superseded promotion pull requests when the current promotion cannot merge', async () => {
+  const f = supersededFixture({ existing: true, conflict: true });
+  await assert.rejects(promote(f), /merge conflicts/);
+  assert.deepEqual(f.writes.map(([kind, args]) => [kind, args.pull_number]), [['close', 3]]);
+  assert.deepEqual(f.refs.map(([kind, args]) => [kind, args.ref]), [['delete', 'heads/promotion/older']]);
+});
+
+test('closes superseded promotion pull requests when main already carries the graded tree', async () => {
+  const f = supersededFixture({ already: true });
+  await promote(f);
+  assert.deepEqual(f.writes.map(([kind, args]) => [kind, args.pull_number]), [['close', 3]]);
+  assert.equal(f.outputs.main, 'main');
+});
+
+for (const status of [404, 422]) {
+  test(`an already deleted superseded snapshot does not stop promotion (${status})`, async () => {
+    const f = supersededFixture({ deleted: status });
+    await promote(f);
+    assert.deepEqual(f.writes.filter(([kind]) => kind === 'close').map(([, args]) => args.pull_number), [3]);
+    assert.equal(f.outputs.main, 'rebased');
+  });
+}
+
+test('a failed superseded snapshot deletion keeps its pull request open for the next run', async () => {
+  const f = supersededFixture({ deleteFailed: true });
+  await assert.rejects(promote(f), /Server error/);
+  assert.deepEqual(f.writes, []);
 });
 
 for (const status of [404, 422]) {

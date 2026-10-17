@@ -20,6 +20,26 @@ async function gradeIsComplete(github, context, api) {
     [...latest.values()].every(state => state === 'success');
 }
 
+async function deleteSnapshot(github, api, ref) {
+  try {
+    await github.rest.git.deleteRef({ ...api, ref });
+  } catch (error) {
+    if (error.status !== 404 && !(error.status === 422 && error.message.includes('Reference does not exist'))) throw error;
+  }
+}
+
+async function closeSuperseded(github, api, repository, graded) {
+  const open = await github.paginate(github.rest.pulls.list, { ...api, state: 'open', base: 'main', per_page: 100 });
+  for (const pull of open) {
+    if (pull.head.repo?.full_name !== repository || pull.head.sha === graded ||
+        pull.head.ref !== `promotion/${pull.head.sha}`) continue;
+    const { status } = (await github.rest.repos.compareCommitsWithBasehead({ ...api, basehead: `${pull.head.sha}...${graded}` })).data;
+    if (status !== 'ahead') continue;
+    await deleteSnapshot(github, api, `heads/${pull.head.ref}`);
+    await github.rest.pulls.update({ ...api, pull_number: pull.number, state: 'closed' });
+  }
+}
+
 module.exports = async ({ github, context, core, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) }) => {
   const { owner, repo } = context.repo;
   const repository = `${owner}/${repo}`;
@@ -27,6 +47,7 @@ module.exports = async ({ github, context, core, sleep = ms => new Promise(resol
       context.payload.repository.full_name !== repository) return;
   const api = { owner, repo };
   const graded = (await github.rest.repos.getCommit({ ...api, ref: context.sha })).data;
+  await closeSuperseded(github, api, repository, context.sha);
   let main = (await github.rest.repos.getCommit({ ...api, ref: 'main' })).data;
   if (main.commit.tree.sha !== graded.commit.tree.sha) {
     const head = `promotion/${context.sha}`;
@@ -65,11 +86,7 @@ module.exports = async ({ github, context, core, sleep = ms => new Promise(resol
     if (!merged.merged) throw new Error('GitHub refused the promotion merge');
     main = (await github.rest.repos.getCommit({ ...api, ref: merged.sha })).data;
     if (main.commit.tree.sha !== graded.commit.tree.sha) throw new Error('Promoted tree differs from the graded dev tree');
-    try {
-      await github.rest.git.deleteRef({ ...api, ref });
-    } catch (error) {
-      if (error.status !== 404 && !(error.status === 422 && error.message.includes('Reference does not exist'))) throw error;
-    }
+    await deleteSnapshot(github, api, ref);
     core.setOutput('pull-request', pull.html_url);
   }
   core.setOutput('graded', context.sha);
