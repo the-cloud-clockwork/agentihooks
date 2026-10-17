@@ -1,17 +1,25 @@
-FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS build
+FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS tools
 COPY --from=ghcr.io/astral-sh/uv:0.10.9 /uv /usr/local/bin/uv
+
+FROM tools AS dependencies
 WORKDIR /build
 COPY docker/swarm/requirements.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv venv /opt/venv && uv pip install --python /opt/venv/bin/python --compile-bytecode --require-hashes -r requirements.lock
+
+FROM tools AS build
+WORKDIR /build
 COPY pyproject.toml README.md ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    python -c 'import subprocess, tomllib; subprocess.run(["uv", "pip", "install", "--system", *tomllib.load(open("pyproject.toml", "rb"))["build-system"]["requires"]], check=True)'
 COPY hooks/ hooks/
 COPY scripts/ scripts/
 COPY profiles/ profiles/
 ARG VERSION=0.0.0
 RUN --mount=type=cache,target=/root/.cache/uv \
-    SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS="$VERSION" uv pip install --python /opt/venv/bin/python --compile-bytecode --no-deps .
-RUN mv /opt/venv/lib/python3.12/site-packages/botocore /botocore
+    SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS="$VERSION" uv build --wheel --no-build-isolation \
+    && uv venv /opt/venv \
+    && uv pip install --python /opt/venv/bin/python --prefix /opt/package --compile-bytecode --no-deps dist/*.whl
 
 FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS herdr
 ARG TARGETARCH=amd64
@@ -34,8 +42,8 @@ RUN --mount=type=bind,from=herdr,source=/opt/swarm-node,target=/opt/swarm-node \
     && apt-get install -y --no-install-recommends $(python /opt/swarm-node/worker_image.py shell-packages --package openssh-client) \
     && rm -r /var/lib/apt/lists/*
 RUN groupadd --gid 10001 swarm && useradd --uid 10001 --gid swarm --create-home swarm && mkdir /data && chown swarm:swarm /data
-COPY --from=build /opt/venv /opt/venv
-COPY --from=build /botocore /opt/venv/lib/python3.12/site-packages/botocore
+COPY --from=dependencies /opt/venv /opt/venv
+COPY --from=build /opt/package/ /opt/venv/
 COPY --from=herdr /usr/local/bin/herdr /usr/local/bin/herdr
 COPY media/agentihooks-logo.png /opt/venv/lib/python3.12/site-packages/media/agentihooks-logo.png
 COPY docs/swarm-v2/schemas/ /opt/venv/lib/python3.12/site-packages/docs/swarm-v2/schemas/

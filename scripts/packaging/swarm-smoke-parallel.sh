@@ -4,17 +4,9 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 logs="$(mktemp -d -p "${RUNNER_TEMP:-${TMPDIR:-/tmp}}")"
 scripts=("$@")
-if [[ "${SWARM_SMOKE_CACHE_EXPORT:-}" == true ]]; then
-  scripts+=(cache-export)
-fi
 scenario() {
   local start=$SECONDS status=0
-  local -a command=(bash "$1")
-  if [[ "$1" == cache-export ]]; then
-    command=(docker buildx build --output type=cacheonly
-      --cache-to type=gha,version=2,mode=max,scope=swarm-smoke,compression=zstd,force-compression=true .)
-  fi
-  "${command[@]}" >"$2" 2>&1 || status=$?
+  bash "$1" >"$2" 2>&1 || status=$?
   printf '%s %s\n' "$status" "$((SECONDS - start))" >"$2.result"
 }
 outcome() {

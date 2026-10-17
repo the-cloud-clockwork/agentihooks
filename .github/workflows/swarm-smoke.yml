@@ -17,29 +17,15 @@ jobs:
     timeout-minutes: 30
     env:
       SWARM_SMOKE_IMAGE: local/agentihooks-swarm:clients-check
-      SWARM_SMOKE_CACHE_EXPORT: 'true'
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
       - name: Pull the Python base with bounded retries
         run: bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          driver: docker
-      - name: Expose the cache service to the parallel export
-        uses: crazy-max/ghaction-github-runtime@v3
-        with:
-          github-token: ''
       - name: Build the swarm image
         if: ${{ !cancelled() }}
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          load: true
-          tags: local/agentihooks-swarm:clients-check
-          cache-from: type=gha,scope=swarm-smoke
+        run: docker build -t local/agentihooks-swarm:clients-check .
       - name: Run the hive launch, Compose install, hive join and Compose hive scenarios in parallel
         if: ${{ !cancelled() }}
         run: >-
