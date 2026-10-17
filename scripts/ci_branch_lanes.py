@@ -52,13 +52,23 @@ def lane_problem(block: object) -> str | None:
     return None
 
 
+def events(workflow: dict) -> list:
+    return [workflow[key] for key in ("on", True) if key in workflow]
+
+
 def problems(workflow: object, baseline: object = None) -> list[str]:
     if not isinstance(workflow, dict):
         return ["is not a workflow mapping"]
     jobs = workflow.get("jobs") or {}
     if not isinstance(jobs, dict):
         return ["has no jobs mapping"]
-    trusted = baseline if isinstance(baseline, dict) and baseline.get("name") == workflow.get("name") else {}
+    trusted = (
+        baseline
+        if isinstance(baseline, dict)
+        and baseline.get("name") == workflow.get("name")
+        and events(baseline) == events(workflow)
+        else {}
+    )
     found = []
     for name, job in jobs.items():
         job = job if isinstance(job, dict) else {}
@@ -92,13 +102,15 @@ def cancel(repo: str, head: str, paths: set[str], wait: float, step: float = 5.0
     cancelled, seen = set(), set()
     deadline = time.monotonic() + wait
     while True:
+        live = []
         for run in api(f"repos/{repo}/actions/runs?head_sha={head}&per_page=100").get("workflow_runs", []):
             path = run["path"].split("@")[0]
-            if path in paths and run["status"] != "completed":
+            if path in paths:
                 seen.add(path)
-                if run["id"] not in cancelled and stop(repo, run["id"]):
-                    cancelled.add(run["id"])
-        if seen >= paths or time.monotonic() >= deadline:
+                if run["status"] != "completed" and run["id"] not in cancelled:
+                    live.append(run["id"])
+        cancelled |= {run for run in live if stop(repo, run)}
+        if (seen >= paths and cancelled.issuperset(live)) or time.monotonic() >= deadline:
             return cancelled
         time.sleep(step)
 

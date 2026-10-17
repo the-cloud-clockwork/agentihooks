@@ -378,6 +378,33 @@ def test_worker_smoke_shares_one_versioned_scanner_cache_across_independent_proo
     assert image["steps"].index(restore) < image["steps"].index(proof) < image["steps"].index(save)
 
 
+def test_worker_smoke_reuses_the_candidate_layers_except_in_the_uncached_rebuild():
+    smoke_workflow = yaml.safe_load((ROOT / ".github/workflows/swarm-node-smoke.yml").read_text())
+    image_workflow = yaml.safe_load((ROOT / ".github/workflows/swarm-node-image.yml").read_text())
+    steps = smoke_workflow["jobs"]["worker-image"]["steps"]
+    layers = next(step for step in steps if step.get("id") == "layers")
+    candidate = next(
+        step for step in image_workflow["jobs"]["image"]["steps"] if step.get("name") == "Restore the candidate layers"
+    )
+    proof = next(step for step in steps if "smoke.sh" in step.get("run", ""))
+    smoke = (ROOT / "docker/swarm-node/smoke.sh").read_text()
+
+    assert layers["uses"] == "actions/cache/restore@v4"
+    assert layers["with"] == candidate["with"]
+    assert layers["if"] == "matrix.proof != 'rebuild' && runner.environment == 'self-hosted'"
+    assert all(
+        step["with"]["path"] == "${{ env.WORKER_SCANNER_CACHE }}"
+        for step in steps
+        if step.get("uses") == "actions/cache/save@v4"
+    )
+    assert steps.index(layers) < steps.index(proof)
+    assert proof["env"]["WORKER_LAYERS"] == (
+        "${{ steps.layers.outputs.cache-matched-key && format('{0}/worker-layers', runner.temp) || '' }}"
+    )
+    assert 'build_args+=(--cache-from "type=local,src=$WORKER_LAYERS")' in smoke
+    assert smoke.index("--cache-from") < smoke.index('-t "$image" "$context" > "$output/build.log"')
+
+
 def test_worker_compare_downloads_every_proof_artifact_into_its_proof_folder():
     workflow = yaml.safe_load((ROOT / ".github/workflows/swarm-node-smoke.yml").read_text())
     proofs = workflow["jobs"]["worker-image"]["strategy"]["matrix"]["proof"]
