@@ -15,7 +15,7 @@ pytestmark = [pytest.mark.unit, pytest.mark.xdist_group(name="dispatch_mail")]
 def mailbox(monkeypatch):
     store = swarm()
     inbox = InboxStore(store.redis)
-    inbox.seats.occupy(f"dispatcher@{SLUG}", "former")
+    inbox.seats.occupy(f"dispatcher@{SLUG}", "former", NOW)
     monkeypatch.setattr(cli, "connect", lambda: inbox)
     monkeypatch.setattr(cli, "registered_name", lambda: "")
     monkeypatch.setattr("scripts.inbox.addresses.get_active_sessions", lambda **kwargs: {"alice": {"name": "alice"}})
@@ -34,7 +34,7 @@ def test_public_dispatcher_work_activates_and_retains_until_disposition(mailbox,
     assert len(runtime.spawned) == 1, actions
     [seat] = seats(store)
     assert seat.state != "finished"
-    inbox.seats.occupy(seat.seat, seat.name)
+    inbox.seats.occupy(seat.seat, seat.name, NOW)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", seat.name)
     assert cli.main(["read", sent["id"]]) == 0
     capsys.readouterr()
