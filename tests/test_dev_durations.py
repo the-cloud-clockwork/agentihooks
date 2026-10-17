@@ -109,7 +109,7 @@ def test_precollected_suite_preserves_durations_hash_and_shard_assignments(tmp_p
     assert (tmp_path / ".test_durations").read_bytes() == expected
     assert digest.read_text() == expected_hash
     assert json.loads(collection.read_text()) == nodes
-    assert assign_nodes(json.loads(expected), 2, set(), 1) == expected_shards
+    assert assign_nodes(json.loads((tmp_path / ".test_durations").read_text()), 2, set(), 1) == expected_shards
 
 
 def test_main_never_calls_github(tmp_path, monkeypatch):
