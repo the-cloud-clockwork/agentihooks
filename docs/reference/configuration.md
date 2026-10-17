@@ -266,9 +266,9 @@ See [Claude Account Load Balancing](../pillars/load-balancing.md).
 
 ## GitHub CLI Config Pin
 
-gh 2.x moves the operator's login: gh 2.4.0 on the operator's machine carries
-`autoMigrateConfigDir`, which does this. When `XDG_CONFIG_HOME` is set,
-`GH_CONFIG_DIR` is unset and `$XDG_CONFIG_HOME/gh` does not exist, gh renames
+gh 2.x moves the operator's login: the gh 2.4.0 binary on the operator's
+machine carries `autoMigrateConfigDir`, recorded in #3502 below. When
+`XDG_CONFIG_HOME` is set, `GH_CONFIG_DIR` is unset and `$XDG_CONFIG_HOME/gh` does not exist, gh renames
 `~/.config/gh` into `$XDG_CONFIG_HOME/gh` on its next run. A proof, render or
 launch that points `XDG_CONFIG_HOME` at a scratch folder then takes the login
 with it, and every other session on the machine loses GitHub until the folder is
@@ -336,8 +336,9 @@ fi
 Every agent reports gh as logged out at once:
 
 1. Check whether the home folder is gone: `test -d ~/.config/gh && echo present || echo missing`.
-2. Look for a moved copy under scratch config folders:
-   `find ~/scratchpad -maxdepth 6 -type d -path '*/config/gh'`. The moved `gh`
+2. Look for a moved copy anywhere under your home folder:
+   `find ~ -maxdepth 8 -type d -name gh -not -path "$HOME/.config/gh"`.
+   Isolated proofs usually put their config folder under `~/scratchpad`. The moved `gh`
    folder keeps its original modification time; its new parent `config` folder
    carries the time of the move.
 3. Confirm nothing has recreated the home folder, `test ! -e ~/.config/gh && echo free`,
