@@ -144,14 +144,30 @@ function agentRows(sw, now) {
   });
 }
 
+function agentCellTip(node) {
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent;
+  if (node.matches(".sw-transport, .sw-promoted")) return node.dataset.tip;
+  return [...node.childNodes].map(agentCellTip).filter(Boolean).join(" ").trim();
+}
+
 function agentRow(a, remote) {
-  return withId(cells(idCell(a.name), a.lane, a.profile, a.overlays, a.model, a.remoteControl ? h("span", { "data-tip": `Remote Control: ${a.remoteControl.state} (${a.remoteControl.detail})` }, label(`remote control ${a.remoteControl.state}`, a.remoteControl.state), h("span", { class: "sw-sub", text: a.remoteControl.detail }), ...(a.transport ? [transportCell(a.transport)] : [])) : transportCell(a.transport), a.task ? h("a", { href: `#item-tasks-${a.task}`, text: a.task }) : "—",
-    a.promoted ? h("span", { class: "sw-promoted", "data-tip": `${a.state} · promoted` }, label(a.state), label("promoted")) : label(a.state),
+  const row = withId(cells(idCell(a.name), a.lane, a.profile, a.overlays, a.model, a.remoteControl ? h("span", { "data-tip": `Remote Control: ${a.remoteControl.state} (${a.remoteControl.detail})` }, label(`remote control ${a.remoteControl.state}`, a.remoteControl.state), h("span", { class: "sw-sub", text: a.remoteControl.detail }), ...(a.transport ? [transportCell(a.transport)] : [])) : transportCell(a.transport), a.task ? h("a", { href: `#item-tasks-${a.task}`, text: a.task }) : "—",
+    a.promoted ? h("span", { class: "sw-promoted", "data-tip": `${a.state} · promoted` }, label(a.state), " ", label("promoted")) : label(a.state),
     ...(remote ? [executionCell(a.execution), terminalCell(a.terminal, a.execution)] : []), a.age, a.finished ? h("span") : agentActions(a, pending, swarmReadError)), `agent-${a.name}`);
+  for (const cell of row.cells) {
+    if (cell.querySelector(".sw-acts")) continue;
+    const tip = agentCellTip(cell);
+    cell.dataset.tip = tip;
+    for (const el of cell.querySelectorAll("[data-tip], [title]")) {
+      el.removeAttribute("title");
+      el.dataset.tip = tip;
+    }
+  }
+  return row;
 }
 
 const transportCell = (c) => c ? h("span", { class: "sw-transport", "data-tip": `${c.push_inbox ? "push" : "no push"} · ${c.native_terminal_attach ? "native terminal" : "no native terminal"}` },
-  label(c.push_inbox ? "push" : "no push", c.push_inbox ? "on" : "off"), label(c.native_terminal_attach ? "native terminal" : "no native terminal", c.native_terminal_attach ? "on" : "off")) : "—";
+  label(c.push_inbox ? "push" : "no push", c.push_inbox ? "on" : "off"), " ", label(c.native_terminal_attach ? "native terminal" : "no native terminal", c.native_terminal_attach ? "on" : "off")) : "—";
 
 function executionCell(e) {
   return e ? h("span", {}, label(e.shown, e.tone), ` ${e.seen}`, h("span", { class: "sw-sub", text: e.where })) : "—";
