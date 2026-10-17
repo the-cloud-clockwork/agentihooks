@@ -45,7 +45,9 @@ DOC = {
 def page(browser, request):
     freezes = getattr(request, "param", [])
     context = browser.new_context(viewport={"width": 1920, "height": 1080})
-    html = shell_html()
+    from scripts.swarm_ledger import ledger_server
+
+    html = shell_html().replace("__LEDGER_PAGE__", ledger_server.served_version())
     sent = {"ops": [], "changes": []}
 
     def answer(route):
@@ -58,7 +60,7 @@ def page(browser, request):
         return route.abort()
 
     context.route("**/*", answer)
-    serve_modules(context, ledger_state({**DOC, "freezes": freezes}), SWARM)
+    serve_modules(context, ledger_server.ledger_view(ledger_state({**DOC, "freezes": freezes})), SWARM)
     tab = context.new_page()
     tab.set_default_timeout(3000)
     tab.on("dialog", lambda dialog: dialog.accept())
@@ -276,8 +278,26 @@ def test_the_snowflake_colour_is_a_palette_token_without_glow(page):
 @pytest.mark.parametrize("page", [[freeze("tasks/t1")]], indirect=True)
 def test_freezing_a_group_lead_holds_its_members(page):
     tab, _ = page
-    assert row_state(tab, "#item-tasks-t5")["frozen"] is True
+    state = row_state(tab, "#item-tasks-t5")
+    assert (state["frozen"], state["rank"]) == (True, [True])
     assert row_state(tab, "#item-tasks-t2")["frozen"] is False
+
+
+def test_page_snapshot_carries_the_shared_group_freeze_ancestry():
+    from scripts.swarm_ledger import ledger_server
+
+    snapshot = ledger_server.ledger_view(ledger_state(DOC))
+    member = next(row for row in snapshot["tasks"] if row["id"] == "t5")
+    assert set(member["freeze_ancestry"]) == {
+        "tasks/t5",
+        "tasks/t1",
+        "slices/hier.hy-page",
+        "phases/p1",
+        "plans/hier",
+        "phases/p3",
+        "plans/v2",
+    }
+    assert "freeze_ancestry" not in DOC["tasks"][-1]
 
 
 @pytest.mark.parametrize("page", [[freeze("phases/p4")]], indirect=True)
