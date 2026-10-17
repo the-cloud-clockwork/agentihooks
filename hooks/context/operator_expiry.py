@@ -2,6 +2,10 @@ import fcntl
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from redis import Redis
 
 from hooks.context import operator_mode
 from scripts.scheduler import Scheduler
@@ -23,10 +27,12 @@ def state_lock(session_id: str) -> Iterator[None]:
 
 
 def start(session_id: str, state: dict, now: float) -> None:
+    from scripts.inbox.cli import identity
     from scripts.scheduler.service import ensure_running
     from scripts.swarm.store import redis_client
 
     scheduler = Scheduler(redis_client())
+    previous = state.get("timer_id")
     timer = scheduler.timer(
         owner=session_id,
         payload=EXPIRED_NOTICE,
@@ -35,12 +41,24 @@ def start(session_id: str, state: dict, now: float) -> None:
     )
     timer.timeout.connect(expire)
     state["timer_id"] = timer.id
+    state["notice_address"] = identity({**os.environ, "CLAUDE_CODE_SESSION_ID": session_id})
     operator_mode._save(session_id, state)
     timer.start(now=now)
+    if previous:
+        scheduler.get(previous).cancel()
     ensure_running()
 
 
-def expire(event: dict, delivery_id: str, redis) -> None:
+def cancel(session_id: str, state: dict) -> None:
+    from scripts.swarm.store import redis_client
+
+    previous = state.pop("timer_id", None)
+    operator_mode._save(session_id, state)
+    if previous:
+        Scheduler(redis_client()).get(previous).cancel()
+
+
+def expire(event: dict, delivery_id: str, redis: "Redis") -> None:
     session_id = event["owner"]
     with state_lock(session_id):
         state = operator_mode._load(session_id)
@@ -48,4 +66,4 @@ def expire(event: dict, delivery_id: str, redis) -> None:
             return
         state.update(on=False, turn_at=None)
         operator_mode._save(session_id, state)
-        InboxSlot(session_id).deliver(event, delivery_id, redis)
+        InboxSlot(state["notice_address"]).deliver(event, delivery_id, redis)

@@ -89,7 +89,9 @@ def observe(session_id, prompt, typed, now=None):
         if word or (typed and _on(state, now)):
             state.update(on=word != "off", at=now)
         state["turn_at"] = now if typed and word != "off" else None
-        if word == "on":
+        if word == "off":
+            operator_expiry.cancel(session_id, state)
+        elif typed and state.get("on"):
             operator_expiry.start(session_id, state, now)
         else:
             _save(session_id, state)
@@ -156,9 +158,14 @@ def _reminder_text(environ):
 
 def reminder(session_id, environ=None, now=None):
     """The quiet reminder on every second tool call while the operator is away."""
-    if not _away(session_id, environ, now):
+    from hooks.context import operator_expiry
+
+    if not session_id:
         return ""
-    state = _load(session_id)
-    calls = state.get("calls", 0) + 1
-    _save(session_id, {**state, "calls": calls})
+    with operator_expiry.state_lock(session_id):
+        if not _away(session_id, environ, now):
+            return ""
+        state = _load(session_id)
+        calls = state.get("calls", 0) + 1
+        _save(session_id, {**state, "calls": calls})
     return _reminder_text(environ) if calls % QUIET_EVERY == 0 else ""
