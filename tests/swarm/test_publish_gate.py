@@ -109,6 +109,13 @@ def test_a_listed_function_that_grows_its_length_fails(repo, capsys):
     assert report(capsys) == ["mod.py: long lines grew from 301 to 302"]
 
 
+def test_an_unlisted_unit_does_not_stop_the_listed_units_after_it(repo, capsys):
+    repo({"mod.py": wide(), **listed({"mod.py::new": {"PLR0913": 8}})}, push=True)
+    repo({"mod.py": wide(name="first", extra=", i", last="i") + "\n\n" + wide(name="new")})
+    assert publish_gate.main() == 1
+    assert report(capsys) == [f"mod.py: first PLR0913 {ARGUMENTS} (9 > 7)"]
+
+
 def test_an_entry_added_on_the_branch_does_not_count(repo, capsys):
     repo({"mod.py": wide()}, push=True)
     repo({"mod.py": wide(name="new"), **listed({"mod.py::new": {"PLR0913": 8}})})

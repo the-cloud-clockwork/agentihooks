@@ -110,7 +110,7 @@ def allowance(
     shown = subprocess.run(["git", "show", f"{base}:{size_limits.ALLOWLIST.as_posix()}"], capture_output=True)
     listed = json.loads(shown.stdout) if shown.returncode == 0 else {}
     allowed = dict(measured)
-    for path, unit in head:
+    for (path, unit), (_, message) in head.items():
         name, rule = unit.rsplit(" ", 1)
         if unit == "file lines":
             limit = listed.get(path, {}).get("file-lines")
@@ -120,7 +120,7 @@ def allowance(
             continue
         if (path, unit) in allowed:
             limit = min(limit, allowed[(path, unit)][0])
-        allowed[(path, unit)] = (limit, "")
+        allowed[(path, unit)] = (limit, message)
     return allowed
 
 
