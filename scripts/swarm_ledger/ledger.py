@@ -62,6 +62,7 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       D is the task size, S, M or L, recorded as the operator's choice
   task set ID FIELD=VALUE...          set state, claimed_by, issue_url, pr_url, depends_on, territory, kind, rank,
                                       difficulty (S, M or L), artifact (yes or no) or plan_slice of a task;
+                                      after_release=vX.Y.Z holds its claim until a newer release tag exists;
                                       phase moves it to another phase, from the master or a planner;
                                       a move naming no slice drops it, into a phase with a plan as a follow up;
                                       plan_slice computes its plan lines from the published plan;

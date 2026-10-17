@@ -43,6 +43,7 @@ mkdir -p "$output"
 docker info --format '{{.DriverStatus}}' > "$output/docker-driver.txt"
 if [[ "$(< "$output/docker-driver.txt")" == *io.containerd.snapshotter.v1* ]]; then
     build_args+=(--provenance=false --output "type=image,compression=uncompressed")
+    if [[ -n "${WORKER_LAYERS:-}" ]]; then build_args+=(--cache-from "type=local,src=$WORKER_LAYERS"); fi
 fi
 fixture="$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
 image="agentihooks-worker-proof:$fixture"

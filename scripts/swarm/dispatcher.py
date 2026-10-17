@@ -19,7 +19,7 @@ from functools import partial
 
 from scripts.gates import log as gate_log
 from scripts.inbox.store import InboxStore
-from scripts.swarm import bottleneck, capacity, freeze, grouping, metrics_outbox, priority_sweep
+from scripts.swarm import bottleneck, capacity, freeze, grouping, metrics_outbox, priority_sweep, release_wait
 from scripts.swarm.ledger_events import Mail
 from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger import ledger_rank
@@ -178,7 +178,8 @@ def rank_pass(slug, config, store, ledger, doc, now_ms):
 
     known, named = {t["id"]: t for t in doc["tasks"]}, bottleneck.read(store, slug).get("bottleneck")
     graph, fix = hierarchy.project(doc)[0], freeze.fix_phase(config)
-    claimable = {task_id for task_id, t in known.items() if tick.ready(t, known, doc, graph, fix)}
+    released = release_wait.checker(config.repo)
+    claimable = {task_id for task_id, t in known.items() if tick.ready(t, known, doc, graph, fix) and released(t)}
     scores, fixed = leverage(doc), _fixed(doc)
     if config.autonomy in APPLIES:
         before = _saved_heads(store, slug)

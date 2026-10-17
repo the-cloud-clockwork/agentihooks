@@ -794,7 +794,7 @@ def test_run_checks_follow_ups_against_its_own_task(ask, tmp_path):
     assert fake.calls == []
 
 
-@pytest.mark.parametrize("task_id", ["fx-8be892c4", "fx-8be892c4-code", "fx-8be892c4-cause"])
+@pytest.mark.parametrize("task_id", ["fx-8be892c4", "fx-8be892c4-code", "fx-8be892c4-cause", "promo-38842603017-0"])
 def test_run_accepts_registered_doctor_task_and_files_cut_piece(ask, tmp_path, task_id):
     folder = tmp_path / "task"
     write_plan(folder)
@@ -815,6 +815,14 @@ def test_run_accepts_registered_doctor_task_and_files_cut_piece(ask, tmp_path, t
     record, block = trace_plan.run(folder, state, ledger, who, "observe", home=tmp_path / "home")
     assert record["verdict"] == "pass" and not block
     assert ledger.followups == [f"Cut from the plan of task {task_id}: a diesel generator"]
+
+
+@pytest.mark.parametrize(
+    "text", ["Run 38842603017 failed", "promo-38842603017-1", "promo-38842603017-0 Run 38842603017 failed"]
+)
+def test_promotion_task_context_still_refuses_free_run_numbers(text):
+    found = trace_plan.ledger_comments.problems(text, "item", task_ids=["promo-38842603017-0"])
+    assert any("run or job id" in problem for problem in found)
 
 
 def test_run_reads_a_broken_verdict_file_as_no_verdict(ask, tmp_path):
