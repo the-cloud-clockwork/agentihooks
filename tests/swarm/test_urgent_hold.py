@@ -84,16 +84,51 @@ def test_the_tick_ready_check_agrees_with_the_hold():
 def test_an_urgent_task_held_ten_minutes_raises_a_finding_naming_the_hold(store):
     from scripts.swarm.health import urgent_hold
 
-    found = doc([task("a", phase="p2", rank="urgent"), task("b", phase="p2"), task("c", rank="urgent")])
+    found = doc(
+        [
+            task("b", phase="p2"),
+            task("c", rank="urgent"),
+            task("a", phase="p2", rank="urgent"),
+            task("d", rank="urgent", depends_on=["b"]),
+        ]
+    )
     urgent_hold.observe(store, SLUG, found, 0)
     urgent_hold.observe(store, SLUG, found, 10 * MINUTE)
     assert urgent_hold.findings(store, SLUG) == []
     urgent_hold.observe(store, SLUG, found, 10 * MINUTE + 1)
-    (finding,) = urgent_hold.findings(store, SLUG)
+    finding, waiting = urgent_hold.findings(store, SLUG)
+    assert (waiting.id, waiting.evidence) == ("urgent-unclaimable/d", ("it waits on task b",))
     assert finding.id == "urgent-unclaimable/a"
     assert finding.summary == "urgent task title a has been unclaimable for 10 minutes"
     assert finding.evidence == ("its phase later is waiting on an earlier phase",)
     assert (finding.threshold, finding.measure) == ("ten minutes", 10)
+
+
+def test_a_recent_hold_listed_first_does_not_hide_an_older_one(store):
+    from scripts.swarm.health import urgent_hold
+
+    urgent_hold.observe(store, SLUG, doc([task("a", phase="p2"), task("b", phase="p2", rank="urgent")]), 0)
+    both = doc([task("a", phase="p2", rank="urgent"), task("b", phase="p2", rank="urgent")])
+    urgent_hold.observe(store, SLUG, both, 5 * MINUTE)
+    urgent_hold.observe(store, SLUG, both, 11 * MINUTE)
+    assert [f.id for f in urgent_hold.findings(store, SLUG)] == ["urgent-unclaimable/b"]
+
+
+def test_the_doctor_fix_phase_exempts_its_tasks_from_a_focus():
+    found = doc([task("a", phase="fix")], freezes=[{"verb": "focus", "target": "lane:ci"}])
+    found["phases"].append({"id": "fix", "title": "fix", "depends_on": []})
+    assert hold(found, "a", fix="fix") == ""
+    assert hold(found, "a") == "a focus elsewhere holds it"
+
+
+def test_a_lane_freeze_is_named_by_its_lane():
+    found = doc([task("a")], freezes=[{"verb": "freeze", "target": "lane:eng"}])
+    assert hold(found, "a") == "the freeze on the eng lane holds it"
+
+
+def test_only_the_open_dependencies_are_named():
+    found = doc([task("a", state="done"), task("b"), task("c", depends_on=["a", "b"])])
+    assert hold(found, "c") == "it waits on task b"
 
 
 def test_an_urgent_hold_clears_once_the_task_is_claimable_and_restarts_its_clock(store):

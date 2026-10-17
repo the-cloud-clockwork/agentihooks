@@ -32,13 +32,21 @@ def phased(task: dict, doc: dict) -> str:
 def frozen(task: dict, doc: dict, graph: dict, fix: str) -> str:
     if not freeze.held(task, doc, graph, fix):
         return ""
+    return freezes(task, doc, graph) or FOCUS
+
+
+def freezes(task: dict, doc: dict, graph: dict) -> str:
     records, chain = doc.get("freezes") or [], freeze.ancestry(task, graph)
     covering = [
         name
         for record, name in zip(records, freeze.names(doc))
         if record["verb"] == "freeze" and freeze.covers(record["target"], task, chain)
     ]
-    return f"{covering[0]} holds it" if covering else FOCUS
+    return f"{covering[0]} holds it" if covering else ""
+
+
+def urgent(task: dict, rows: dict, doc: dict, graph: dict) -> str:
+    return phased(task, doc) or freezes(task, doc, graph) or waits(task, rows)
 
 
 def waits(task: dict, rows: dict) -> str:

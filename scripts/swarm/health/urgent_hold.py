@@ -19,12 +19,12 @@ def read(store, slug: str) -> dict:
 def observe(store, slug: str, doc: dict, at: int) -> dict:
     before = read(store, slug).get("tasks", {})
     graph, released = hierarchy.project(doc)[0], release_wait.checker(store.config(slug).repo)
-    rows = {t["id"]: t for t in doc.get("tasks", [])}
+    rows = {t["id"]: t for t in doc["tasks"]}
     held = {}
     for task in rows.values():
         if task.get("rank") != "urgent" or task.get("state") != "open" or task.get("out_of_scope"):
             continue
-        why = claim_hold.hold(task, rows, doc, graph, "") or (not released(task) and RELEASE.format(**task))
+        why = claim_hold.urgent(task, rows, doc, graph) or (not released(task) and RELEASE.format(**task))
         if task.get("merged_into") or not why:
             continue
         since = before.get(task["id"], {}).get("since", at)

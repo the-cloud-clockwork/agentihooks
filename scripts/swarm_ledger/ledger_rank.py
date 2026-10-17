@@ -87,5 +87,5 @@ def urgent_refusal(task: dict, doc: dict) -> str:
 
     if task.get("rank") != "urgent" or task.get("state", "open") != "open":
         return ""
-    why = claim_hold.phased(task, doc) or claim_hold.frozen(task, doc, hierarchy.project(doc)[0], "")
+    why = claim_hold.phased(task, doc) or claim_hold.freezes(task, doc, hierarchy.project(doc)[0])
     return f"task {task['id']} cannot be urgent: {why}{HELD}" if why else ""
