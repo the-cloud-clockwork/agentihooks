@@ -220,7 +220,7 @@ def bind_thread(connection: protocol.Connection, launch: Launch) -> dict:
 
 def name_thread(connection: protocol.Connection, thread_id: str, name: str) -> None:
     """A refused name leaves the default one; the launch still opens its turn."""
-    with contextlib.suppress(protocol.ProtocolError):
+    with contextlib.suppress(protocol.Refused):
         protocol.set_thread_name(connection, thread_id, name)
 
 

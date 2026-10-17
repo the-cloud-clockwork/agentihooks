@@ -65,7 +65,9 @@ class Connection:
     def request(self, method, params=None):
         self.server.requests.append((method, params))
         if method in self.server.refuse:
-            raise protocol.ProtocolError(f"{method} refused: scripted")
+            raise protocol.Refused(f"{method} refused: scripted")
+        if method in self.server.lose:
+            raise protocol.ProtocolError(f"{method} lost the connection: scripted")
         if method == "hooks/list":
             return {"data": [{"hooks": self.server.hooks}]}
         if method == "config/batchWrite":
@@ -99,6 +101,7 @@ class Server:
         self.account = "chatgpt"
         self.thread = {"id": "thread-new", "sessionId": "session-new"}
         self.refuse = set()
+        self.lose = set()
         self.answers = True
         self.exits = False
         self.server_start = SERVER_START

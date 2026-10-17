@@ -234,6 +234,13 @@ def test_a_refused_thread_name_still_opens_the_turn(store, server, clock, root, 
     assert server.methods().index("thread/name/set") < server.methods().index("turn/start")
 
 
+def test_a_connection_lost_while_naming_the_thread_fails_the_launch(store, server, clock, root, tmp_path):
+    server.lose = {"thread/name/set"}
+    failure = failed(store, server, clock, root, launch_spec(store, server, tmp_path, opening=""), "protocol")
+    assert str(failure) == "thread/name/set lost the connection: scripted"
+    assert server.processes[-1].poll() is not None
+
+
 @pytest.mark.parametrize("account", ["default", "quota-successor"])
 def test_handoff_and_quota_successors_admit_a_new_server_and_resume_the_thread(
     store, server, clock, root, tmp_path, account
