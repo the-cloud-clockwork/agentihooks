@@ -113,3 +113,14 @@ def test_a_session_started_inside_an_orphaned_agent_is_nested(tmp_path):
     _proc(root, 62, "claude", 61, 61)
     _proc(root, 63, "sh", 62, 63)
     assert swarm_pin.nested(IDENTITY, 63, root)
+
+
+def test_an_orphan_scan_skips_processes_it_cannot_read(tmp_path):
+    proc = _orphan(tmp_path, 10)
+    (proc / "80").mkdir()
+    (proc / "81").mkdir()
+    (proc / "81" / "stat").write_text("81 (codex) S\n")
+    (proc / "82").mkdir()
+    (proc / "82" / "stat").write_text("82 (codex) S x 0 10\n")
+    (proc / "self").mkdir()
+    assert not swarm_pin.nested(IDENTITY, 52, proc)

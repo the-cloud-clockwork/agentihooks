@@ -48,9 +48,9 @@ def _session_agents(sid: int, proc: Path) -> list[int]:
 
 def _row(entry: Path) -> tuple[str, int, int]:
     try:
-        text = (entry / "stat").read_text(encoding="utf-8")
-        fields = text.rsplit(")", 1)[1].split()
-        return text.split("(", 1)[1].rsplit(")", 1)[0], int(fields[1]), int(fields[3])
+        head, _, tail = (entry / "stat").read_text(encoding="utf-8").rpartition(")")
+        fields = tail.split()
+        return head.partition("(")[2], int(fields[1]), int(fields[3])
     except (OSError, ValueError, IndexError):
         return "", 0, 0
 
