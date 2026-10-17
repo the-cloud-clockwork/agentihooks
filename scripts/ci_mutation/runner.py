@@ -19,7 +19,7 @@ from scripts.ci_mutation.scope import select_tests
 from scripts.ci_mutation.stats import SharedStats, load_parts, stats_key
 
 IDENTITY = "scripts/ci_mutation/identity.py"
-FAILED_TEST = re.compile(r"^(?:FAILED|ERROR) (\S+\.py(?:::\S+)?)(?: - (.*))?$", re.MULTILINE)
+FAILED_TEST = re.compile(r"^(?:FAILED|ERROR) (\S+\.py(?:::.*?)?)(?: - (.*))?$", re.MULTILINE)
 
 
 def run_process(command: list[str], cwd: Path, timeout: float, log: Path) -> int | None:
@@ -43,8 +43,10 @@ def run_process(command: list[str], cwd: Path, timeout: float, log: Path) -> int
 def failing_tests(log: Path) -> list[str]:
     if not log.is_file():
         return []
-    found = FAILED_TEST.findall(log.read_text(errors="replace"))
-    return list(dict.fromkeys(f"{test} - {error}" if error else test for test, error in found))
+    named = {}
+    for test, error in FAILED_TEST.findall(log.read_text(errors="replace")):
+        named.setdefault(test, f"{test} - {error}" if error else test)
+    return list(named.values())
 
 
 def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]) -> None:
@@ -244,7 +246,7 @@ def run_gate(
         )
         if reason:
             reasons.update(dict.fromkeys(group, reason))
-            failing += failing_tests(work / "run.log")
+            failing += failing_tests(work / "run.log") if reason.startswith("mutmut failed") else []
         else:
             rows.update(results)
     report.update({"failing_tests": list(dict.fromkeys(failing))} if failing else {})

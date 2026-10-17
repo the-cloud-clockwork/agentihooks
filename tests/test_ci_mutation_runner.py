@@ -115,7 +115,9 @@ BASELINE_LOG = """...F
 FAILED tests/test_sample.py::test_gate[ops0-True] - AssertionError: assert 'a' == 'b'
 ERROR tests/test_sample.py::test_setup - RuntimeError: no server
 FAILED tests/test_sample.py::test_bare
+FAILED tests/test_sample.py::test_spaced[a b] - ValueError: x
 FAILED tests/test_sample.py::test_gate[ops0-True] - AssertionError: assert 'a' == 'b'
+ERROR tests/test_sample.py::test_gate[ops0-True] - RuntimeError: teardown
 1 failed in 3.2s
 failed to collect stats. runner returned [1]
 """
@@ -137,6 +139,7 @@ def test_a_failed_clean_baseline_names_every_failing_test_in_the_reason_the_red_
         "tests/test_sample.py::test_gate[ops0-True] - AssertionError: assert 'a' == 'b'",
         "tests/test_sample.py::test_setup - RuntimeError: no server",
         "tests/test_sample.py::test_bare",
+        "tests/test_sample.py::test_spaced[a b] - ValueError: x",
     ]
     assert report["failing_tests"] == failing
     reason = report["not_mutated"][0]["reason"]
