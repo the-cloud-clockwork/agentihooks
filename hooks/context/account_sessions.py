@@ -158,9 +158,13 @@ def agent_pid(start: int | None = None, proc: Path = _PROC) -> int:
     return first
 
 
-def pid_account(pid: int, proc: Path = _PROC) -> str:
+def pid_account(pid: int, proc: Path = _PROC, accounts: Mapping[str, str] | None = None) -> str:
     names = _env_names(pid, proc)
-    return codex_account_from_names(names) if _is_codex(pid, proc) else account_from_names(names)
+    if _is_codex(pid, proc):
+        return codex_account_from_names(names)
+    account = account_from_names(names)
+    routed = token_accounts() if accounts is None else accounts
+    return routed.get(_env_fingerprint(pid, proc, f"{TOKEN_PREFIX}{account}"), account)
 
 
 def session_account(pid: int, proc: Path = _PROC) -> str:
@@ -193,8 +197,7 @@ def live_sessions(
     for name in entries:
         pid = int(name)
         if pid not in skip and _is_interactive_claude(pid, proc):
-            account = pid_account(pid, proc)
-            sessions[pid] = accounts.get(_env_fingerprint(pid, proc, f"{TOKEN_PREFIX}{account}"), account)
+            sessions[pid] = pid_account(pid, proc, accounts)
     return sessions
 
 

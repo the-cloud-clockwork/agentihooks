@@ -110,6 +110,17 @@ def test_an_unrouted_or_api_session_keeps_its_account(tmp_path, monkeypatch):
     }
 
 
+def test_the_calling_session_resolves_its_old_name_to_the_routed_account(tmp_path, monkeypatch):
+    monkeypatch.setattr("scripts.operator_env.block_tokens", lambda: {})
+    monkeypatch.setenv("AH_CC_TOKEN_mail", "secret-a")
+    root = tmp_path / "proc"
+    _proc(root, 600, "claude", 1, ["claude"], {"AH_CC_TOKEN_old": "secret-a"})
+    _proc(root, 601, "claude", 1, ["claude"], {"AH_CC_TOKEN_old": "secret-x"})
+
+    assert acc.session_account(600, root) == "mail"
+    assert acc.session_account(601, root) == "old"
+
+
 def test_the_route_marker_attributes_an_api_session():
     assert acc.account_from_names(iter(["HOME", acc.API_MARKER])) == acc.API_ACCOUNT == "api"
     assert acc.account_from_names([acc.API_MARKER, "AH_CC_TOKEN_alpha"]) == "api"
