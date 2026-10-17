@@ -55,7 +55,7 @@ The plan job sets its `forwarded` output to `true` in either case:
 Exact head reuse runs `scripts.ci_mutation.reuse` from a detached checkout of the pull request base commit, so a branch cannot change the code that decides reuse. It reuses only when all of these hold:
 
 - The files that produce a preflight report are identical between that base commit and the head: `.github/workflows/mutation-preflight.yml`, `.github/workflows/test.yml`, `.github/actions/`, `.github/test-excludes.txt`, `pyproject.toml` and `scripts/ci_mutation/`.
-- The lookup walks completed push preflights on this branch for this head, newest first, and ignores cancelled and skipped runs. It takes the first run that concluded success with an unexpired `mutation-preflight-report` artifact; a success whose artifact is missing or expired is passed over for an older one. A newer run that concluded failure stops the walk and blocks reuse.
+- The lookup walks completed push preflights on this branch for this head, newest first, and ignores cancelled and skipped runs. It takes the first run that concluded success with an unexpired `mutation-preflight-report` artifact; a success whose artifact is missing or expired is passed over for an older one. A newer run with a red report, or one that concluded failure, stops the walk and blocks reuse.
 - That report's `report.json` has no failed file, no file left unmutated and no file with failures.
 - Its `scope.json` names this head and the merge base of the head with `origin/dev`.
 
@@ -80,7 +80,7 @@ The plan log names the path taken:
 Reused the green mutation report of run <preflight run id> for <head sha>
 ```
 
-or, for an empty change set:
+or, for an empty change set, with the last line printed by the `Grade the empty change set` step:
 
 ```text
 No green mutation report covers this head; mutating
