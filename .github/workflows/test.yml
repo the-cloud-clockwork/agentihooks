@@ -663,11 +663,39 @@ jobs:
           key: ${{ steps.venv.outputs.cache-primary-key }}-counts-v1-${{ github.sha }}
           restore-keys: ${{ steps.venv.outputs.cache-primary-key }}-counts-v1-
 
+      - name: Mint the token that reads the dev count record
+        id: app-token
+        if: github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+
+      - name: Fetch the base suite count recorded on dev
+        if: steps.app-token.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          RECORD: count-record-${{ matrix.python-version }}
+        run: |
+          base="$(git -C "$RUNNER_TEMP/base" rev-parse HEAD)" || exit 0
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$RECORD&per_page=100" > "$RUNNER_TEMP/count-records.json" || exit 0
+          id="$(cd "$RUNNER_TEMP/base" && python -c 'import json, sys; from tests.count_floor import dev_record; print(dev_record(json.load(open(sys.argv[1])), sys.argv[2]) or "")' "$RUNNER_TEMP/count-records.json" "$base")" || exit 0
+          if [[ -z "$id" ]]; then
+            echo "No dev run recorded the suite count for $base."
+            exit 0
+          fi
+          echo "Reading the suite count artifact $id recorded on dev for $base."
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$id/zip" > "$RUNNER_TEMP/count-record.zip" || exit 0
+          python -c 'import sys, zipfile; sys.stdout.buffer.write(zipfile.ZipFile(sys.argv[1]).read("record.json"))' "$RUNNER_TEMP/count-record.zip" > "$RUNNER_TEMP/base-record.json" || rm -f "$RUNNER_TEMP/base-record.json"
+
       # The base revision's copy grades, so a pull request cannot loosen its own floor.
       - name: Hold the base revision's test count
         env:
           TEST_COUNT_COLLECTION_CACHE: ${{ runner.temp }}/count-collections
           TEST_COUNT_ENVIRONMENT: ${{ steps.venv.outputs.cache-primary-key }}
+          TEST_COUNT_BASE_RECORD: ${{ runner.temp }}/base-record.json
         run: |
           if [[ ! -f "$RUNNER_TEMP/base/tests/count_floor.py" ]]; then
             echo "::error::The base carries no tests/count_floor.py, so nothing trusted can grade."
@@ -764,6 +792,26 @@ jobs:
       - name: Use the test environment
         if: github.event_name == 'push' && env.UNIT_SOURCE == ''
         run: echo "$HOME/venv/bin" >> "$GITHUB_PATH"
+
+      - name: Record the suite count for later bases
+        if: github.event_name == 'push' && github.ref == 'refs/heads/dev' && env.UNIT_SOURCE == ''
+        continue-on-error: true
+        timeout-minutes: 2
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/base" HEAD
+          mkdir -p "$RUNNER_TEMP/count-record"
+          cd "$RUNNER_TEMP/base"
+          python -m tests.count_floor --record "$RUNNER_TEMP/count-record/record.json" --head "$RUNNER_TEMP/base"
+
+      - name: Upload the suite count record
+        if: github.event_name == 'push' && github.ref == 'refs/heads/dev' && env.UNIT_SOURCE == ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: count-record-${{ matrix.python-version }}
+          path: ${{ runner.temp }}/count-record/record.json
+          if-no-files-found: warn
+          retention-days: 7
+          overwrite: true
 
       - name: Require successful early collection
         if: github.event_name != 'push' && needs.select.outputs.source == ''

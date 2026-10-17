@@ -1,3 +1,5 @@
+import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -149,6 +151,114 @@ def test_changed_pytest_selection_cannot_reuse_a_full_collection(tmp_path, monke
         "head": ["tests/test_a.py::test_b[1]", "tests/test_a.py::test_b[2]"]
     }
     assert (root / ".collection-runs").read_text() == "xx"
+
+
+def _recorded_floor(tmp_path, base_files, head_files, recorded, environ=None):
+    base = _collection_tree(tmp_path / "b")
+    for name, text in base_files.items():
+        (base / "tests" / name).write_text(text)
+    subprocess.run(["git", "add", "tests"], cwd=base, check=True, capture_output=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "Base",
+        ],
+        cwd=base,
+        check=True,
+        capture_output=True,
+    )
+    record = tmp_path / "record.json"
+    subprocess.run(
+        [sys.executable, "-m", "tests.count_floor", "--record", str(record), "--head", str(base)],
+        cwd=_ROOT,
+        check=True,
+        capture_output=True,
+    )
+    if recorded is not None:
+        record.write_text(recorded(record.read_text()))
+    head = _tree(tmp_path / "head", head_files)
+    runs_before = (base / ".collection-runs").read_text()
+    result = subprocess.run(
+        [sys.executable, "-m", "tests.count_floor", "--base", str(base), "--head", str(head)],
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "TEST_COUNT_BASE_RECORD": str(record), **(environ or {})},
+    )
+    return result, (base / ".collection-runs").read_text() != runs_before
+
+
+def test_a_matching_dev_record_grades_the_base_without_collecting_it(tmp_path):
+    result, collected = _recorded_floor(tmp_path, {}, {"test_a.py": SUITE}, None)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "head collects 3 tests, base floor 3" in result.stdout
+    assert "base count read from the dev record" in result.stdout
+    assert not collected
+
+
+def test_a_dev_record_keeps_the_floor_red_on_a_lost_test(tmp_path):
+    result, collected = _recorded_floor(tmp_path, {}, {"test_a.py": OTHER}, None)
+    assert result.returncode == 1
+    assert "tests/test_a.py::test_a is in the base and not in the head" in result.stdout
+    assert not collected
+
+
+@pytest.mark.parametrize(
+    "recorded",
+    [
+        lambda text: json.dumps({**json.loads(text), "identity": "0" * 64}),
+        lambda text: "not json",
+        lambda text: json.dumps({"identity": json.loads(text)["identity"]}),
+        lambda text: json.dumps({**json.loads(text), "nodeids": [3]}),
+    ],
+    ids=["other-tree-or-environment", "unreadable", "no-tests", "invalid-tests"],
+)
+def test_a_record_that_does_not_match_the_base_falls_back_to_collecting_it(tmp_path, recorded):
+    result, collected = _recorded_floor(tmp_path, {"test_a.py": SUITE + OTHER}, {"test_a.py": SUITE}, recorded)
+    assert collected
+    assert result.returncode == 1
+    assert "no dev record matches the base, so it is collected" in result.stdout
+    assert "base floor 4" in result.stdout
+
+
+def test_a_missing_record_file_collects_the_base(tmp_path):
+    result, collected = _recorded_floor(
+        tmp_path, {}, {"test_a.py": SUITE}, None, {"TEST_COUNT_BASE_RECORD": str(tmp_path / "absent.json")}
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert collected
+
+
+@pytest.mark.parametrize(
+    "artifact, picked",
+    [
+        ({}, True),
+        ({"head_branch": "ci-plant"}, False),
+        ({"head_sha": "f" * 40}, False),
+        ({"head_repository_id": 2}, False),
+        ({"expired": True}, False),
+    ],
+    ids=["dev-push", "pull-request-branch", "other-commit", "fork", "expired"],
+)
+def test_only_an_artifact_from_dev_for_the_exact_base_commit_is_trusted(artifact, picked):
+    from tests.count_floor import dev_record
+
+    run = {"head_branch": "dev", "head_sha": "a" * 40, "repository_id": 1, "head_repository_id": 1}
+    expired = artifact.pop("expired", False)
+    listing = {
+        "artifacts": [
+            {"id": 7, "expired": False, "workflow_run": {**run, "head_branch": "ci-plant"}},
+            {"id": 9, "expired": expired, "workflow_run": {**run, **artifact}},
+        ]
+    }
+    assert dev_record(listing, "a" * 40) == (9 if picked else None)
 
 
 def test_head_matching_the_base_count_passes(tmp_path):
