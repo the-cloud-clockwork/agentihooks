@@ -1473,6 +1473,16 @@ def test_a_status_gate_ignores_workflows_without_a_declared_gate(tick, conclusio
     assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
 
 
+@pytest.mark.parametrize("conclusion", ["SKIPPED", "NEUTRAL"])
+def test_a_status_success_cannot_replace_a_gate_check_that_did_not_pass(tick, conclusion):
+    tick.hold("checks", URL)
+    status = {"context": "Gate — Required", "state": "SUCCESS", "isRequired": True}
+    gate = {**_run_check("Gate — Required", 10, 1, conclusion), "isRequired": True}
+    tick.pulls[URL] = _gated([status, gate], [_suite(1, "COMPLETED")], False)
+    assert tick.end() == []
+    assert idle.wait(tick.store.redis, "sw", ME) is not None
+
+
 @pytest.mark.parametrize("status", ["QUEUED", "IN_PROGRESS"])
 @pytest.mark.parametrize("reverse", [False, True])
 def test_checks_wait_holds_the_new_required_run_after_an_old_green_gate(tick, status, reverse):
