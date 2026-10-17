@@ -110,6 +110,53 @@ def test_a_failed_group_names_its_reason_for_every_file_and_later_groups_still_r
     assert [result["path"] for result in report["files"]] == ["scripts/ci_mutation/identity.py"]
 
 
+BASELINE_LOG = """...F
+=========================== short test summary info ============================
+FAILED tests/test_sample.py::test_gate[ops0-True] - AssertionError: assert 'a' == 'b'
+ERROR tests/test_sample.py::test_setup - RuntimeError: no server
+FAILED tests/test_sample.py::test_bare
+FAILED tests/test_sample.py::test_gate[ops0-True] - AssertionError: assert 'a' == 'b'
+1 failed in 3.2s
+failed to collect stats. runner returned [1]
+"""
+
+
+def test_a_failed_clean_baseline_names_every_failing_test_in_the_reason_the_red_message_and_the_report(
+    tmp_path, monkeypatch, capsys
+):
+    import json
+
+    def process(command, cwd, timeout, log):
+        log.write_text(BASELINE_LOG)
+        return 1
+
+    monkeypatch.setattr("scripts.ci_mutation.runner.prepare_workspace", lambda root, work, paths, tests: None)
+    monkeypatch.setattr("scripts.ci_mutation.runner.run_process", process)
+    report = run_gate(tmp_path, _two_groups(tmp_path), tmp_path / "output", 600)
+    failing = [
+        "tests/test_sample.py::test_gate[ops0-True] - AssertionError: assert 'a' == 'b'",
+        "tests/test_sample.py::test_setup - RuntimeError: no server",
+        "tests/test_sample.py::test_bare",
+    ]
+    assert report["failing_tests"] == failing
+    reason = report["not_mutated"][0]["reason"]
+    assert reason.startswith("mutmut failed with exit 1; failing tests: " + "; ".join(failing) + "; see ")
+    assert f"hooks/sample.py: not mutated, {reason}" in capsys.readouterr().out
+    assert json.loads((tmp_path / "output/report.json").read_text())["failing_tests"] == failing
+
+
+def test_a_clean_baseline_failure_without_a_test_summary_keeps_the_plain_reason(tmp_path, monkeypatch):
+    def process(command, cwd, timeout, log):
+        log.write_text("Traceback (most recent call last):\nImportError: boom\n")
+        return 1
+
+    monkeypatch.setattr("scripts.ci_mutation.runner.prepare_workspace", lambda root, work, paths, tests: None)
+    monkeypatch.setattr("scripts.ci_mutation.runner.run_process", process)
+    report = run_gate(tmp_path, _two_groups(tmp_path), tmp_path / "output", 600)
+    assert "failing_tests" not in report
+    assert report["not_mutated"][0]["reason"].startswith("mutmut failed with exit 1; see ")
+
+
 def test_empty_scope_passes_without_mutmut(tmp_path):
     report = run_gate(tmp_path, {}, tmp_path / "output", 60)
     assert report == {"files": [], "not_mutated": [], "failed": False}
