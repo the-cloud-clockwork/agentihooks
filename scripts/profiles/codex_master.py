@@ -28,9 +28,11 @@ def next_action(text: str, slug: str, push: bool = False) -> str:
     return re.sub(MONITOR, f"`agentihooks swarm {slug} wait --inbox`", text)
 
 
-def persona(text: str) -> str:
-    text = text.replace("Monitor its checks", "Watch its checks")
-    return next_action(text, "<slug>") + "\n" + waiting("<slug>") + "\n"
+def persona(text: str, push: bool = False) -> str:
+    text = next_action(text.replace("Monitor its checks", "Watch its checks"), "<slug>", push)
+    if push:
+        text = re.sub(MONITOR, "`agentihooks swarm <slug> wait --on checks|reply|task`", text)
+    return text + "\n" + waiting("<slug>", push) + "\n"
 
 
 def handoff(task: dict, slug: str, push: bool = False) -> dict:

@@ -14,6 +14,7 @@ from scripts.profiles import render as profiles
 
 OVERLAYS = "AGENTIHOOKS_OVERLAYS"
 BUNDLE_REVISION = "AGENTIHOOKS_BUNDLE_REVISION"
+PUSH = "AGENTIHOOKS_CODEX_PUSH"
 
 
 def prepare(
@@ -43,6 +44,8 @@ def prepare(
     revision = environ.get(BUNDLE_REVISION, "")
     isolate = agent == "codex" and bool(environ.get("AGENTIHOOKS_SWARM"))
     options = {"isolate": True} if isolate else {}
+    if agent == "codex" and environ.get(PUSH):
+        options["push"] = True
     profiles.render(agent, name, overlays=overlays, bundle_revision=revision, **options)
     env = {"AGENTIHOOKS_PROFILE": name, profiles.CHANNELS: profiles.channels(name), OVERLAYS: ",".join(overlays)}
     env[BUNDLE_REVISION] = revision

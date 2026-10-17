@@ -169,10 +169,11 @@ def test_prepare_routes_renders_and_builds_the_launch(tmp_path, monkeypatch):
 
     def prepare(name, agent, model, effort, args, environ, overlays):
         calls["prepare"] = (name, agent, model, effort, args, list(overlays), environ["AGENTIHOOKS_BUNDLE_REVISION"])
+        calls["push"] = environ["AGENTIHOOKS_CODEX_PUSH"]
         return {"CODEX_HOME": str(home)}, ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="high"', *args]
 
     def route(environ, route, exclude):
-        calls["route"] = (route, exclude, environ["CODEX_HOME"])
+        calls["route"] = (route, exclude, environ["CODEX_HOME"], "AGENTIHOOKS_CODEX_PUSH" in environ)
         return codex_router.CodexAccount("t", "AH_CX_TOKEN_t"), "open", {"CODEX_HOME": str(home), "AH_CX_TOKEN_t": "x"}
 
     monkeypatch.setattr(serve.select_profile, "prepare", prepare)
@@ -204,7 +205,8 @@ def test_prepare_routes_renders_and_builds_the_launch(tmp_path, monkeypatch):
     args = serve._parser().parse_args(argv)
     spec = serve.prepare(args, ["--route", "t", "-c", "x=1"], dict(SWARM_ENV))
     assert calls["prepare"] == ("engineer", "codex", "", "", ["-c", "x=1"], ["frontend"], "abc")
-    assert calls["route"] == ("t", "old", str(home))
+    assert calls["push"] == "1"
+    assert calls["route"] == ("t", "old", str(home), False)
     assert (tmp_path / "route").read_text() == "status=routed\naccount=t\nplacement=open\n"
     assert (spec.slug, spec.agent.name, spec.agent.lane, spec.agent.task, spec.agent.seat) == (
         "sw",
