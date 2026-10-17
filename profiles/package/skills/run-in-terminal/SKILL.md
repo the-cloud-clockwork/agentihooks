@@ -15,6 +15,12 @@ argument-hint: "[command] [--dir <directory>] [--title <tab-title>]"
 
 # Run In Terminal — Run Any Command in Any Directory
 
+Run it only when the operator's own prompt this turn, typed in your terminal,
+says `open pane` (or `open a pane`, `open the pane`); a PreToolUse guard denies
+it otherwise. Without the phrase, write the command in your own terminal for him
+to run, one flag per line joined with backslashes, and add the ask to Priorities
+in a swarm or ledger session.
+
 Opens a new terminal tab/window targeting any directory and runs an
 arbitrary command there. On WSL2, opens a Windows Terminal tab via the
 `wt.exe → powershell.exe → wsl.exe → bash` chain (same pattern as agentihooks
