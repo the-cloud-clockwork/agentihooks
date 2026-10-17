@@ -64,7 +64,7 @@ def failed_jobs(repo: str, run_id: int) -> list[dict]:
             continue
         notes = [note["message"] for note in json.loads(_api(f"repos/{repo}/check-runs/{job['id']}/annotations"))]
         if base_name(job["name"]) == SHARD:
-            log = _api(f"repos/{repo}/actions/jobs/{job['id']}/logs")
+            log = _api(f"repos/{repo}/actions/jobs/{job['id']}/logs", "--allow-escape-sequences")
             notes += [line for line in log.splitlines() if "##[error]" in line]
         failed.append({"name": job["name"], "text": "\n".join(notes)})
     unlisted = jobs["total_count"] - len(jobs["jobs"])
