@@ -838,6 +838,39 @@ def _runtime_probe(tmp_path, monkeypatch, observations, reason="priority"):
     return runtime, config, seen
 
 
+@pytest.mark.parametrize("lane", ["eng", "ci", "plan"])
+@pytest.mark.parametrize("master_state", ["missing", "finished"])
+def test_worker_capacity_leaves_a_claude_seat_for_the_master(tmp_path, monkeypatch, lane, master_state):
+    observed = [account("open"), account("warned", cap=6, left=5)]
+    runtime, config, seen = _runtime_probe(tmp_path, monkeypatch, observed)
+    runtime.quota_accounts = lambda *args, **kwargs: observed
+    config = replace(
+        config,
+        max_eng=4 if lane == "eng" else 0,
+        max_ci=4 if lane == "ci" else 0,
+        max_plan=4 if lane == "plan" else 0,
+        scaling="manual",
+        lanes={"master": {"agent": "claude"}, lane: {"agent": "claude"}},
+    )
+    agents = (
+        []
+        if master_state == "missing"
+        else [AgentRecord("previous", "master", "master", harness="claude", state="finished")]
+    )
+    decision = runtime.quota_capacity(config, agents, 123)
+
+    assert decision["effective"] == {name: 2 if name == lane else 0 for name in capacity.LANES}
+    assert decision["accounts"] == [capacity.record(row) for row in observed]
+    for index in range(2):
+        runtime.spawn(config, lane, f"worker{index}", {"id": f"t{index}", "title": "Worker"})
+    with pytest.raises(SpawnError, match="^no claude account has placeable quota seats$"):
+        runtime.spawn(config, lane, "extra", {"id": "extra", "title": "Worker"})
+    placed = runtime.spawn(config, "master", "master@a1b2c3-0001", {"id": "master", "title": "Master"})
+    assert placed.harness == "claude"
+    assert placed.account == "open"
+    assert seen == [("t0", "claude", "open"), ("t1", "claude", "open"), ("master", "claude", "open")]
+
+
 def test_saved_healthy_account_wins_over_another_accounts_higher_quota(tmp_path, monkeypatch):
     runtime, config, seen = _runtime_probe(tmp_path, monkeypatch, [account("a", left=40), account("b")])
     saved = {"profile": "planner", "harness": "claude", "model": "fable", "effort": "high", "account": "a"}
