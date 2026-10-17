@@ -797,12 +797,12 @@ jobs:
         if: needs.select.outputs.source == ''
         env:
           PYTHON_VERSION: ${{ matrix.python-version }}
-        run: |
+        run: |-
           collection=()
           if [[ "$GITHUB_EVENT_NAME" != push ]]; then
             collection=(--collection collected.json)
           fi
-          python -m tests.dev_durations "$PYTHON_VERSION" ~/dev-durations --hash durations.sha256 --collected collected.json "${collection[@]}"
+          python -m tests.dev_durations "$PYTHON_VERSION" ~/dev-durations --hash durations.sha256 "${collection[@]}" --collected collected.json
 
       - name: Mint the token that reads the dev test record
         id: app-token
