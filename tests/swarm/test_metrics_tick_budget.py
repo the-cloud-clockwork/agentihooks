@@ -57,3 +57,55 @@ def test_pruning_does_not_scan_metrics_still_inside_retention(tmp_path):
         assert box.db.execute("SELECT count(*) FROM spool WHERE event_id = 'expired'").fetchone()[0] == 0
     finally:
         box.close()
+
+
+def test_slow_metrics_sink_yields_and_resumes_every_unshipped_row(tmp_path, monkeypatch):
+    import time
+
+    now = 2 * metrics_outbox.DAY_MS
+    elapsed, received = [0.0], []
+    monkeypatch.setattr(time, "monotonic", lambda: elapsed[0])
+
+    def send(sink, query, body):
+        import json
+
+        elapsed[0] += 2.0
+        if query.startswith("INSERT"):
+            received.extend(json.loads(line)["event_id"] for line in body.splitlines())
+        return True
+
+    path = tmp_path / "metrics.sqlite"
+    sink = metrics_outbox.Settings("https://sink", "user", "password")
+    box = metrics_outbox.Outbox(path, sink, send)
+    try:
+        for index in range(16):
+            box.append(
+                metrics_outbox.Table(f"samples_{index}"),
+                [
+                    {
+                        "event_id": str(index),
+                        "ledger": "sw",
+                        "plan": "",
+                        "phase": "",
+                        "slice": "",
+                        "task": "",
+                        "ts_ms": now,
+                    }
+                ],
+            )
+        box.flush(now)
+        assert elapsed[0] <= 10, f"One metrics flush held the tick for {elapsed[0]} seconds"
+    finally:
+        box.close()
+
+    for _ in range(64):
+        box = metrics_outbox.Outbox(path, sink, send)
+        try:
+            started = elapsed[0]
+            box.flush(now)
+            assert elapsed[0] - started <= 10
+        finally:
+            box.close()
+        if len(received) == 16:
+            break
+    assert sorted(received, key=int) == [str(index) for index in range(16)]
