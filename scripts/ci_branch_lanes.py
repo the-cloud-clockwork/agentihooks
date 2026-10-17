@@ -52,8 +52,8 @@ def lane_problem(block: object) -> str | None:
     return None
 
 
-def events(workflow: dict) -> object:
-    return workflow.get(True, workflow.get("on"))
+def events(workflow: dict) -> list:
+    return [workflow[key] for key in ("on", True) if key in workflow]
 
 
 def problems(workflow: object, baseline: object = None) -> list[str]:

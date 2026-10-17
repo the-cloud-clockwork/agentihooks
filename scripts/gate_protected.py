@@ -187,7 +187,7 @@ def _preflight_problems(base_workflows: dict[str, dict], head_workflows: dict[st
     if baseline is None:
         return []
     expanded = deepcopy(baseline)
-    events = ci_branch_lanes.events(expanded)
+    events = expanded[True] if True in expanded else expanded["on"]
     ignored = (events.get("push") or {}).get("branches-ignore", [])
     if "diffcheck/**" in ignored:
         ignored.remove("diffcheck/**")
