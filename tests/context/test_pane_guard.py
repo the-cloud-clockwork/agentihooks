@@ -21,6 +21,8 @@ OPENERS = [
     "herdr --session main pane split",
     "herdr --session pane split",
     "herdr --json pane split",
+    "herdr pane --session s split",
+    "herdr pane --json --remote-keybindings server split p1",
     "herdr --remote-keybindings server pane split",
     "herdr --machine box tab create",
     "herdr --remote me@host workspace create",
@@ -52,6 +54,9 @@ ALLOWED = [
     "herdr agent read a1",
     "herdr --session main pane list",
     "herdr --json pane read p1",
+    "herdr pane --session s list",
+    "herdr pane read p1 --lines 'tab create'",
+    "herdr pane read p1 split",
     "agentihooks swarm demo start",
     "agentihooks swarm demo tick",
     "agentihooks swarm demo status",
@@ -186,12 +191,16 @@ def test_an_untyped_prompt_closes_it():
 @pytest.mark.parametrize(
     ("command", "action", "allowed"),
     [
-        ("agentihooks init-agent --handoff /doc.md", "handoff", True),
-        ("/bin/agentihooks init-agent --handoff /doc.md --route b", "handoff", True),
-        ("agentihooks init-agent --handoff /doc.md", "wait", False),
-        ("agentihooks init-agent --handoff /doc.md", None, False),
-        ("agentihooks init-agent --dir /repo", "handoff", False),
-        ("agentihooks run-in-terminal --handoff /doc.md", "handoff", False),
+        ("agentihooks init-agent --handoff --prompt-file /s/repo/handoff/s1.md", "handoff", True),
+        ("/bin/agentihooks init-agent --handoff --dir /r --prompt-file ~/handoff/s1.md --route b", "handoff", True),
+        ("agentihooks init-agent --handoff --prompt-file /s/repo/handoff/s1.md", "wait", False),
+        ("agentihooks init-agent --handoff --prompt-file /s/repo/handoff/s1.md", None, False),
+        ("agentihooks init-agent --handoff --prompt-file /s/repo/handoff/s2.md", "handoff", False),
+        ("agentihooks init-agent --handoff --prompt-file /s/repo/notes/s1.md", "handoff", False),
+        ("agentihooks init-agent --handoff --prompt-file", "handoff", False),
+        ("agentihooks init-agent --handoff", "handoff", False),
+        ("agentihooks init-agent --prompt-file /s/repo/handoff/s1.md", "handoff", False),
+        ("agentihooks run-in-terminal --handoff --prompt-file /s/repo/handoff/s1.md", "handoff", False),
     ],
 )
 def test_only_a_due_quota_handoff_passes_init_agent(monkeypatch, command, action, allowed):
@@ -206,6 +215,20 @@ def test_only_a_due_quota_handoff_passes_init_agent(monkeypatch, command, action
     else:
         with pytest.raises(BlockAction):
             check(command)
+
+
+def test_a_failing_quota_reading_keeps_the_handoff_closed(monkeypatch):
+    def broken(session):
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr(quota_policy, "evaluate", broken)
+    with pytest.raises(BlockAction):
+        check("agentihooks init-agent --handoff --prompt-file /s/repo/handoff/s1.md")
+
+
+def test_a_negated_phrase_does_not_mask_a_later_one():
+    assert contains_pane_signal("do not open pane yet, open pane for the login")
+    assert not contains_pane_signal("never open pane, do not open the pane")
 
 
 def test_an_inbox_item_carrying_the_phrase_does_not_open_it(monkeypatch):

@@ -16,6 +16,7 @@ _HERDR = {
     ("worktree", "create"),
     ("worktree", "open"),
 }
+_HERDR_VALUED = {"--session", "--machine", "--remote", "--remote-keybindings"}
 _AGENTIHOOKS = (["run-in-terminal"], ["init-agent"])
 _SCRIPTS = {"02_run_terminal.sh", "open_param_pane.sh", "run_param_pane.sh"}
 
@@ -57,23 +58,40 @@ def _script(tokens: list[str]) -> bool:
     return Path(tokens[0]).name in _SCRIPTS
 
 
+def _herdr(args: list[str]) -> bool:
+    words = []
+    while args and len(words) < 2:
+        token, args = args[0], args[1:]
+        if token in _HERDR_VALUED:
+            args = args[1:]
+        elif not token.startswith("-"):
+            words.append(token)
+    return tuple(words) in _HERDR
+
+
 def opens_pane(tokens: list[str]) -> bool:
     if not tokens:
         return False
     name = Path(tokens[0]).name
     if name == "herdr":
-        return any(pair in _HERDR for pair in zip(tokens[1:], tokens[2:]))
+        return _herdr(tokens[1:])
     if name == "agentihooks":
         return tokens[1:2] in _AGENTIHOOKS or (tokens[1:2] == ["swarm"] and tokens[4:5] == ["up"])
     return _script(tokens)
 
 
 def _quota_handoff(tokens: list[str], session_id: str) -> bool:
-    if tokens[1:2] != ["init-agent"] or "--handoff" not in tokens:
+    if tokens[1:2] != ["init-agent"] or "--handoff" not in tokens or "--prompt-file" not in tokens[:-1]:
+        return False
+    document = Path(tokens[tokens.index("--prompt-file") + 1])
+    if document.name != f"{session_id}.md" or document.parent.name != "handoff":
         return False
     from hooks.context.quota_policy import evaluate
 
-    decision = evaluate(session_id)
+    try:
+        decision = evaluate(session_id)
+    except Exception:
+        return False
     return decision is not None and decision.action == "handoff"
 
 

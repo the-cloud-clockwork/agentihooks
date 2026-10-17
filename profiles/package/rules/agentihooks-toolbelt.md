@@ -75,8 +75,9 @@ The deterministic CLI primitives behind these skills are respectively
 <profile> up` and every herdr pane split, pane run, tab or workspace creation
 run only when the operator's own prompt this turn, typed
 in your terminal, says `open pane` (or `open a pane`, `open the pane`); a
-PreToolUse guard denies them otherwise; a quota handoff's `init-agent --handoff`
-passes only while the quota policy has that handoff due. A step only the operator can do goes to
+PreToolUse guard denies them otherwise; the quota handoff directive's own
+`init-agent --handoff` with its handoff document passes only while the quota
+policy has that handoff due. A step only the operator can do goes to
 Priorities in a swarm or ledger session, or is written in your own terminal as
 a command for him to run. Reading, listing and closing panes stay allowed.
 
