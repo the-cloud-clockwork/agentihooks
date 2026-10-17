@@ -96,6 +96,34 @@ def test_publication_and_three_computed_ranges(published, monkeypatch):
     assert task(state, "plan")["state"] == "done"
 
 
+@pytest.mark.parametrize("existing", [False, True])
+def test_task_cli_accepts_explicit_no_plan_lines(published, monkeypatch, capsys, existing):
+    if existing:
+        add(published, "loose", plan_slice="first")
+        cli(monkeypatch, published, "task", "set", "loose", "plan_slice=none", "description=Independent work")
+    else:
+        cli(
+            monkeypatch,
+            published,
+            "task",
+            "add",
+            "loose",
+            "Independent work",
+            "--phase",
+            "p1",
+            "--plan-slice",
+            "none",
+            "--description",
+            "Independent work",
+        )
+    row = task(core.sync(published)[0], "loose")
+    assert row["description"] == "Independent work"
+    assert row["follow_up"] is True
+    assert not row.get("plan_slice")
+    assert not row.get("plan_lines")
+    assert not row.get("slice")
+
+
 def test_missing_anchor_refused(published):
     state, rejected = add(published, "missing", plan_slice="missing")
     assert rejected == ["add-missing"]
