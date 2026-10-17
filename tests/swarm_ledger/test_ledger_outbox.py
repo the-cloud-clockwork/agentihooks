@@ -504,6 +504,29 @@ def test_a_record_still_conflicting_holds_only_later_records_for_its_own_resourc
     assert queued()[0]["args"]["ops"][0]["expected_revision"] == STALE
 
 
+def test_an_unpinned_record_still_conflicting_lets_inbox_records_and_other_items_replay(server, monkeypatch):
+    from scripts.inbox import cli
+
+    def replay(slug, ops, agent, service):
+        if ops[0]["thread"] == "phases/a/comments":
+            raise revision_conflict("phases/a/comments")
+        return {"applied": [op["id"] for op in ops]}
+
+    monkeypatch.setattr(ledger, "replay", replay)
+    sends = []
+    monkeypatch.setitem(cli.APPLY, "send", lambda store, by, entry: sends.append(entry["item"]))
+    first = {"op": "add", "thread": "phases/a/comments", "id": "c-a1", "text": "First on a", "by": ENG}
+    queue_ops(first)
+    sent = outbox.record("send", ENG, {"address": "bob", "text": "for bob", "fyi": False})
+    outbox.append(sent)
+    queue_ops(chat_op("m-b", "Another item"), {**first, "id": "c-a2", "text": "Second on a"})
+    report = outbox.flush(object())
+    assert (report.applied, report.rejected, report.left) == ([sent["item"], "m-b"], [], 2)
+    assert sends == [sent["item"]]
+    assert [record["item"] for record in queued()] == ["c-a1", "c-a2"]
+    assert outbox.targets(sent) == frozenset()
+
+
 def test_a_revision_conflict_names_the_resource_the_server_reports(monkeypatch):
     entry = outbox.ledger_record(SLUG, [chat_op("m-1", "Unpinned")], ENG, False)
     for where, message in ((None, "the ledger server answered 409 revision conflict"), ("chat", "on chat")):

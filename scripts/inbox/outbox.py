@@ -425,4 +425,6 @@ def _send_ledger(args: dict, ops: list) -> dict:
 def targets(entry: dict) -> frozenset:
     from scripts.swarm_ledger.api import schemas
 
+    if lane(entry) != "ledger":
+        return frozenset()
     return frozenset(schemas.target(op) for op in entry["args"]["ops"])
