@@ -227,4 +227,7 @@ def main(active: bool = True) -> None:
         store = connect() if active else None
     except InboxError:
         store = None
-    anyio.run(serve, store, me, active)
+    if active:
+        anyio.run(serve, store, me)
+    else:
+        anyio.run(serve, store, me, False)

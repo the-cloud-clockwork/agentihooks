@@ -341,7 +341,7 @@ def test_main_serves_this_sessions_identity(store, monkeypatch):
     monkeypatch.setattr(channel, "connect", lambda: store)
     monkeypatch.setattr(anyio, "run", lambda *args: ran.append(args))
     channel.main()
-    assert ran == [(channel.serve, store, "bob", True)]
+    assert ran == [(channel.serve, store, "bob")]
 
 
 def test_main_without_identity_exits_with_the_reason(monkeypatch, capsys):
