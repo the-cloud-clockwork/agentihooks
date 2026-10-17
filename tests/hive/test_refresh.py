@@ -64,16 +64,18 @@ def _accepts(redis, url):
 def test_a_ledger_credential_recreates_a_redis_user_lost_on_restart(admin):
     grant = auth.exchange(admin, auth.invite(admin, "laptop"), PUBLIC)
     admin.acl_deluser(f"hive-{grant['id']}")
+    admin.srem(auth.INDEX, grant["id"])
 
     refreshed = auth.refresh(admin, grant["ledger_credential"], PUBLIC)
 
     assert refreshed["id"] == grant["id"]
+    assert admin.smembers(auth.INDEX) == {grant["id"]}
     assert refreshed["redis_url"].startswith(f"rediss://hive-{grant['id']}:")
     assert refreshed["redis_url"].endswith("@hive.example:6380/0")
     assert _accepts(admin, refreshed["redis_url"])
     user = admin.acl_getuser(f"hive-{grant['id']}")
     assert user["enabled"] is True
-    assert user["keys"] == [f"~{pattern}" for pattern in auth.ACL_PATTERNS]
+    assert f"~{auth.ROOT}:hive:{grant['id']}" in user["keys"]
     assert user["channels"] == [f"&{pattern}" for pattern in auth.ACL_PATTERNS]
     assert user["categories"] == list(auth.ACL_CATEGORIES)
 

@@ -1442,7 +1442,12 @@ def cmd_block(store, args):
             waits.settle_notices(InboxStore(store.redis), agent, "a new wait")
             print(json.dumps({"task": agent.task, "state": "claimed", "waits_on": held}))
             return
+    from scripts.swarm import publish
+
+    pushed = publish.pushed_branches(store.config(args.slug).repo, rows[agent.task], agent)
     red_run = _dev_red_run(store, args.slug) if args.dev_red else None
+    if pushed:
+        ledger.update_task(args.slug, agent.task, pushed, by=agent.name)
     block_agent(store, args.slug, agent, args.note, ledger, red_run)
     cause = {"dev_red_run": red_run} if red_run is not None else {}
     print(

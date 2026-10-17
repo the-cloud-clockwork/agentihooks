@@ -129,6 +129,8 @@ class Consumer:
         return cls(redis, hive, LocalHerdrRuntime(HerdrRuntime()))
 
     def poll(self) -> int:
+        from redis.exceptions import NoPermissionError
+
         entries = self.store.redis.xrange(self.orders.stream(self.hive), count=32)
         for item, fields in entries:
             try:
@@ -136,19 +138,19 @@ class Consumer:
                 ack = self.orders.ack(order)
                 if ack is None:
                     ack = self.apply(order)
+                if ack is not None:
+                    self.orders.finish(self.hive, item, order, ack)
             except (KeyError, TypeError, ValueError):
-                with self.store.redis.pipeline() as pipe:
-                    pipe.hset(
-                        f"{self.orders.stream(self.hive)}:acks",
-                        item,
-                        json.dumps(asdict(Ack("failed", {}, "invalid_order"))),
-                    )
-                    pipe.xdel(self.orders.stream(self.hive), item)
-                    pipe.execute()
-                continue
-            if ack is not None:
-                self.orders.finish(self.hive, item, order, ack)
+                self._drop(item, "invalid_order")
+            except NoPermissionError:
+                self._drop(item, "refused")
         return len(entries)
+
+    def _drop(self, item: str, failure: str) -> None:
+        with self.store.redis.pipeline() as pipe:
+            pipe.hset(f"{self.orders.stream(self.hive)}:acks", item, json.dumps(asdict(Ack("failed", {}, failure))))
+            pipe.xdel(self.orders.stream(self.hive), item)
+            pipe.execute()
 
     def poll_commands(self) -> int:
         stream = self.orders.commands(self.hive)

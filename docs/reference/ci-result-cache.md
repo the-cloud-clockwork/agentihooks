@@ -320,3 +320,71 @@ gh run view "$RUN" --log | grep -E "Python 3\.1[12]: ran [0-9]+, reused"
 - A page capture with no test is kept whenever any test is reused, so it can carry coverage from tests that ran on the dev record but run again here.
 - The download of the dev shard's coverage has no fallback: if the artifact cannot be downloaded, the shard fails instead of running every test.
 - A dev record whose coverage artifacts expired, after 7 days, is never chosen, so a quiet dev plans no reuse until its next push.
+
+## Retried duration uploads
+
+`.github/actions/retry-upload` is the upload side of the same rule ([#3996](https://github.com/the-cloud-clockwork/agentihooks/issues/3996), [#3998](https://github.com/the-cloud-clockwork/agentihooks/pull/3998)). It uploads one artifact of the run with `actions/upload-artifact@v4`, up to three attempts. Attempts 1 and 2 are `continue-on-error`; each failure raises a `Retried upload` warning annotation and waits 10 s, then 20 s. Attempt 3 is not, so an upload that never succeeds still fails the step and the job. There is no workflow rerun.
+
+| Input | Required | Default | Passed to every attempt as |
+|---|---|---|---|
+| `name` | yes | | `name` |
+| `path` | yes | | `path` |
+| `retention-days` | yes | | `retention-days` |
+| `include-hidden-files` | no | `false` | `include-hidden-files` |
+| `if-no-files-found` | no | `warn` | `if-no-files-found` |
+
+Every attempt sets `overwrite: true`, so a caller does not pass it. A retry deletes any copy an earlier attempt finalized under the same name and uploads the files again: the artifact keeps the caller's name, files and retention, whichever attempt succeeds. `if-no-files-found` reaches every attempt, so a caller that asks for `error` stays red when its files are missing: all three attempts report no files and the step fails, 30 s later than a plain upload would.
+
+Two steps in `test.yml` use it; every other upload in the workflow calls `actions/upload-artifact@v4` directly.
+
+```yaml
+      - name: Upload the chosen durations        # split
+        uses: ./.github/actions/retry-upload
+        with:
+          name: split-${{ matrix.python-version }}
+          path: |
+            .test_durations
+            durations.sha256
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload durations                   # unit
+        if: ${{ !cancelled() && hashFiles('durations.json') != '' }}
+        uses: ./.github/actions/retry-upload
+        with:
+          name: durations-${{ matrix.python-version }}-${{ matrix.shard }}
+          path: |
+            durations.json
+            durations.sha256
+            elapsed.json
+          retention-days: 14
+```
+
+To route another upload through it, replace `uses: actions/upload-artifact@v4` with `uses: ./.github/actions/retry-upload` and drop `overwrite`. Do it only for an upload whose name is unique to the job, since each attempt replaces the artifact of that name. `tests/test_ci_step_retry.py` pins the three attempts, the waits and warnings, the inputs passed to each attempt and the `with` block of both duration steps. Its guard against retrying in a job that holds a deployment environment or an OIDC token covers only `retry-download`; nothing stops `retry-upload` there, so keep it out of such jobs by review.
+
+Why the action's own retry is not enough, read from its source for [#3996](https://github.com/the-cloud-clockwork/agentihooks/issues/3996): `actions/upload-artifact@v4` resolves to v4.6.2, `actions/upload-artifact` commit [`ea165f8`](https://github.com/actions/upload-artifact/commit/ea165f8d65b6e75b540449e92b4886f43607fa02). Its artifact service client retries timeouts and retryable HTTP statuses up to five times, but throws a socket error code (`ECONNRESET`, `ECONNREFUSED`, `ETIMEDOUT`, `ENOTFOUND`, `EHOSTUNREACH`) at once. The toolkit's `main` branch does the same, so a version bump does not help.
+
+Before: on 2026-10-16, 3 of 2369 executed duration upload steps failed, in 2 of 130 queue attempts. The two failure classes stay separate; no common cause is shown.
+
+| Step | Executed | Failed | Error |
+|---|---:|---:|---|
+| Upload the chosen durations (`split`) | 254 | 2 | `Failed to CreateArtifact: Unable to make request: ECONNREFUSED`, after four `ListArtifacts` request timeouts |
+| Upload durations (`unit`) | 2115 | 1 | `Failed to FinalizeArtifact: Unable to make request: ECONNRESET`, after the content uploaded |
+
+The flake report, coverage and collected tests uploads in the same jobs had no failures. In the `FinalizeArtifact` case the same job's next upload finalized two seconds later and three other runners uploaded in the same seconds, so no pool wide outage was visible in the seconds around it. The `CreateArtifact` case has no concurrent control upload, and one of its two job logs has expired.
+
+| Run | Fault injected on a plant branch | Result |
+|---|---|---|
+| [39025447958](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39025447958) | `ECONNRESET` on `FinalizeArtifact`, plain `upload-artifact@v4` | `Failed to FinalizeArtifact: Unable to make request: ECONNRESET`, job red: the 16 October message |
+| same run | `ECONNRESET` on `FinalizeArtifact`, `retry-upload` | attempt 1 red, attempt 2 finalized; the downloaded sha256 matches the upload |
+| same run | `ECONNREFUSED` on `CreateArtifact`, `retry-upload` | attempt 1 red, attempt 2 finalized; the downloaded sha256 matches the upload |
+| same run | missing file with `if-no-files-found: error`, `retry-upload` | three `No files were found` attempts, job red |
+| [39025246357](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39025246357) | tests first head | only the two new routing tests failed |
+| [39025583932](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39025583932) | delivered head | green; all 20 duration uploads succeeded through the composite |
+
+The fault was injected with a `NODE_OPTIONS` preload that breaks the first matching artifact service request with the given socket error.
+
+Troubleshooting: a `Retried upload` warning followed by a green step means one or more failed attempts were replaced by a later success; nothing needs doing. A step red after three attempts with `No files were found` means the caller's files are missing, not a transport fault. A step red after three failed attempts with any other error is a fault that outlasted 30 s; read the three attempt logs before rerunning.
+
+Known gap: run history cannot say why a connection was refused or reset, and no network or runner lifecycle telemetry exists for the two failure intervals. The retry turns one socket fault on these calls into one bounded retry instead of a failed shard and queue entry. It does not explain or remove the fault.

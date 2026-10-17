@@ -88,6 +88,29 @@ def test_a_changed_file_is_also_selected_by_its_full_path(repo):
     assert decide(repo, ["docs/guide/index.md"]) == ("selected", [["tests/test_docs.py"]])
 
 
+@pytest.mark.parametrize(
+    "changed",
+    [
+        ".github/workflows/new.yml",
+        ".github/workflows/new.yaml",
+        ".github/runner-classes.json",
+        ".github/workflows/trusted-actors.json",
+        "scripts/ci_runner_classes.py",
+        "scripts/ci_runner_trust.py",
+    ],
+)
+def test_workflow_and_runner_changes_select_routing_contracts(repo, changed):
+    contracts = {
+        "tests/test_ci_anton_runners.py",
+        "tests/test_ci_runner_classes.py",
+        "tests/test_ci_runner_trust.py",
+    }
+    write(repo, {path: "import os\n" for path in contracts})
+    scope, legs = decide(repo, [changed])
+    assert scope == "selected"
+    assert set().union(*map(set, legs)) == contracts
+
+
 def test_a_python_source_is_not_selected_by_its_bare_file_name(repo):
     write(repo, {"tests/test_names.py": "NAME = 'lonely.py'\n"})
     assert decide(repo, ["scripts/lonely.py"]) == ("full", [])
