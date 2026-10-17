@@ -145,7 +145,7 @@ function agentRows(sw, now) {
 }
 
 function agentCellTip(node) {
-  if (node.nodeType === Node.TEXT_NODE) return node.textContent;
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent.trim();
   if (node.matches(".sw-transport, .sw-promoted")) return node.dataset.tip;
   return [...node.childNodes].map(agentCellTip).filter(Boolean).join(" ").trim();
 }
