@@ -845,10 +845,10 @@ def _runtime_probe(tmp_path, monkeypatch, observations, reason="priority"):
 
 
 @pytest.mark.parametrize("lane", ["eng", "ci", "plan"])
-@pytest.mark.parametrize("master_state", ["missing", "finished"])
+@pytest.mark.parametrize("master_state", ["missing", "finished", "warned"])
 @pytest.mark.parametrize("master_config", [{}, {"master": {"agent": "claude"}}])
 def test_worker_capacity_leaves_a_claude_seat_for_the_master(tmp_path, monkeypatch, lane, master_state, master_config):
-    observed = [account("open"), account("warned", cap=6, left=5)]
+    observed = [account("open"), account("warned", cap=6, left=5, sessions=1 if master_state == "warned" else 0)]
     runtime, config, seen = _runtime_probe(tmp_path, monkeypatch, observed)
     runtime.quota_accounts = lambda *args, **kwargs: observed
     config = replace(
@@ -862,7 +862,16 @@ def test_worker_capacity_leaves_a_claude_seat_for_the_master(tmp_path, monkeypat
     agents = (
         []
         if master_state == "missing"
-        else [AgentRecord("previous", "master", "master", harness="claude", state="finished")]
+        else [
+            AgentRecord(
+                "previous",
+                "master",
+                "master",
+                harness="claude",
+                account="warned",
+                state="working" if master_state == "warned" else "finished",
+            )
+        ]
     )
     decision = runtime.quota_capacity(config, agents, 123)
 
