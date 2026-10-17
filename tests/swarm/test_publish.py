@@ -245,7 +245,7 @@ def test_publish_does_not_recreate_a_deleted_retained_branch(publication, tmp_pa
     (second / "chosen.txt").write_text("after")
     monkeypatch.chdir(second)
 
-    with pytest.raises(SwarmError):
+    with pytest.raises(SwarmError, match="stale info"):
         publish.publish(
             "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
         )
