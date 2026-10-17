@@ -5,13 +5,15 @@ import pytest
 from scripts.gates import intent
 from scripts.gates.verdicts import Verdicts
 from scripts.inbox.store import InboxError, InboxStore
-from scripts.swarm import cli, idle, waits
+from scripts.swarm import cli, idle, merge_queue, waits
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.ledger_events import head as github_head
 from scripts.swarm.ledger_events import view as github_view
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_ledger_events import APP_SUITE, QUEUED_TESTS, SKIPPED_ONLY
+
+REAL_REQUIRED_GREEN = waits.required_green
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
@@ -1757,7 +1759,13 @@ def test_an_intent_wait_holds_on_a_verdict_judged_on_another_head(tick):
 
 
 @pytest.mark.parametrize(
-    "queued", [{"name": "unit"}, {"context": "unit", "state": "PENDING"}, {"name": "unit", "state": "EXPECTED"}]
+    "queued",
+    [
+        {"name": "unit"},
+        {"context": "unit", "state": "PENDING"},
+        {"name": "unit", "state": "EXPECTED"},
+        {"name": "unit", "conclusion": "CANCELLED"},
+    ],
 )
 def test_a_queued_required_check_holds_the_wait_after_the_gate_passed(tick, queued):
     from scripts.swarm.ledger_events import GATE, pull_request
@@ -1806,3 +1814,86 @@ def test_a_cached_green_result_ends_the_wait_only_once_a_fresh_read_confirms_it(
     assert idle.wait(tick.store.redis, "sw", ME)["on"] == {"kind": "checks", "target": URL, "head": "second"}
     tick.pulls[URL] = tick.fresh[URL]
     assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
+
+
+def test_a_neutral_required_check_beside_a_passed_gate_ends_the_wait_green(tick):
+    from scripts.swarm.ledger_events import GATE, pull_request
+
+    tick.hold("checks", URL)
+    checks = [{"name": GATE, "conclusion": "SUCCESS"}, {"name": "unit", "conclusion": "NEUTRAL"}]
+    tick.pulls[URL] = pull_request({"state": "OPEN", "headRefOid": "first", "gated": True, "statusCheckRollup": checks})
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
+
+
+def test_a_green_wait_holds_until_the_branch_rules_confirm_every_required_check(tick, monkeypatch):
+    seen, answer = [], {"green": False}
+
+    def required(target, head):
+        seen.append((target, head))
+        return answer["green"]
+
+    monkeypatch.setattr(waits, "required_green", required)
+    tick.hold("checks", URL)
+    tick.pulls[URL] = PullRequest("OPEN", None, 1, False, True, head="first")
+    assert tick.end() == []
+    assert idle.wait(tick.store.redis, "sw", ME)["on"] == {"kind": "checks", "target": URL, "head": "first"}
+    answer["green"] = True
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
+    assert seen == [(URL, "first"), (URL, "first")]
+
+
+def test_a_red_wait_ends_without_asking_the_branch_rules(tick, monkeypatch):
+    def required(target, head):
+        pytest.fail("a red result needs no required check confirmation")
+
+    monkeypatch.setattr(waits, "required_green", required)
+    tick.hold("checks", URL)
+    tick.pulls[URL] = PullRequest("OPEN", None, 1, True, True, head="first")
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now red"]
+
+
+@pytest.mark.parametrize(
+    "pull, green",
+    [
+        (None, False),
+        (PullRequest("OPEN", None, None, False, True, head="first"), True),
+        (PullRequest("OPEN", None, None, False, True, head="second"), False),
+        (PullRequest("OPEN", None, None, False, False, head="first"), False),
+        (PullRequest("OPEN", None, None, True, True, head="first"), False),
+    ],
+)
+def test_required_green_needs_every_required_check_passed_on_the_head(monkeypatch, pull, green):
+    import subprocess
+
+    calls = []
+
+    def view(url, run):
+        calls.append((url, run))
+        return pull
+
+    monkeypatch.setattr(merge_queue, "required_view", view)
+    assert REAL_REQUIRED_GREEN(URL, "first") is green
+    assert calls == [(URL, subprocess.run)]
+
+
+def test_required_green_holds_when_github_cannot_answer(monkeypatch):
+    def view(url, run):
+        raise SwarmError("GitHub API failed")
+
+    monkeypatch.setattr(merge_queue, "required_view", view)
+    assert REAL_REQUIRED_GREEN(URL, "first") is False
+
+
+def test_the_required_reading_of_an_older_commit_carries_no_head():
+    from scripts.swarm.ledger_events import GATE, _required_pull_request
+
+    raw = {
+        "state": "OPEN",
+        "headRefOid": "first",
+        "commits": [{"oid": "older"}],
+        "statusCheckRollup": [{"name": GATE, "conclusion": "SUCCESS", "isRequired": True}],
+        "checkSuites": [],
+    }
+    assert _required_pull_request(raw, {GATE: None}).head == ""
+    assert _required_pull_request({**raw, "commits": [{"oid": "first"}]}, {GATE: None}).head == "first"
+    assert _required_pull_request({k: v for k, v in raw.items() if k != "commits"}, {GATE: None}).head == "first"
