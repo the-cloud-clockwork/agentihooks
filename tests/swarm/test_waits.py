@@ -439,20 +439,24 @@ def test_checks_wait_uses_only_the_newest_run_of_each_check(tick, conclusion, ob
         assert idle.wait(tick.store.redis, "sw", ME) is None
 
 
-def _run_check(name, check_id, run_id, conclusion):
+def _workflow_run(run_id, workflow="W1", event="pull_request"):
+    return {"databaseId": run_id, "event": event, "workflow": {"id": workflow, "name": "Tests"}}
+
+
+def _run_check(name, check_id, run_id, conclusion, **run):
     return {
         "name": name,
         "databaseId": check_id,
         "conclusion": conclusion,
-        "checkSuite": {"workflowRun": {"databaseId": run_id, "workflow": {"name": "Tests"}}},
+        "checkSuite": {"workflowRun": _workflow_run(run_id, **run)},
     }
 
 
-def _suite(run_id, status, conclusion=None):
+def _suite(run_id, status, conclusion=None, **run):
     return {
         "status": status,
         "conclusion": conclusion,
-        "workflowRun": {"databaseId": run_id, "createdAt": "2026-10-17T10:00:00Z", "workflow": {"name": "Tests"}},
+        "workflowRun": {**_workflow_run(run_id, **run), "createdAt": "2026-10-17T10:00:00Z"},
     }
 
 
@@ -511,6 +515,27 @@ def test_a_check_whose_run_names_no_workflow_is_never_superseded(tick):
         {"state": "OPEN", "headRefOid": "first", "statusCheckRollup": [lint], "checkSuites": suites}
     )
     assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now red; failed: lint"]
+
+
+@pytest.mark.parametrize("newer", [{"event": "push"}, {"workflow": "W2"}])
+def test_a_newer_run_of_another_event_or_workflow_keeps_the_older_red_check(tick, newer):
+    tick.hold("checks", URL)
+    checks = [_run_check("e2e", 10, 5, "FAILURE"), _run_check("unit", 20, 6, "SUCCESS", **newer)]
+    suites = [_suite(5, "COMPLETED", "FAILURE"), _suite(6, "COMPLETED", "SUCCESS", **newer)]
+    tick.pulls[URL] = _gated(checks, suites, False)
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now red; failed: e2e"]
+
+
+def test_a_superseded_run_still_in_progress_does_not_hold_a_green_wait(tick):
+    from scripts.swarm.ledger_events import pull_request
+
+    tick.hold("checks", URL)
+    checks = [_run_check("unit", 10, 1, None), _run_check("unit", 20, 2, "SUCCESS")]
+    suites = [_suite(1, "IN_PROGRESS"), _suite(2, "COMPLETED", "SUCCESS")]
+    tick.pulls[URL] = pull_request(
+        {"state": "OPEN", "headRefOid": "first", "statusCheckRollup": checks, "checkSuites": suites}
+    )
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
 
 
 def test_checks_wait_with_no_checks_stays_unresolved(tick):
@@ -959,10 +984,10 @@ def test_the_probe_requests_the_head_with_its_check_rollup():
                 'file(path:".github/workflows"){object{...on Tree{entries{object{...on Blob{text}}}}}} '
                 "statusCheckRollup{contexts(first:100){"
                 "nodes{...on CheckRun{databaseId name conclusion completedAt isRequired(pullRequestNumber:7) "
-                "checkSuite{app{databaseId} workflowRun{databaseId workflow{name}}}} "
+                "checkSuite{app{databaseId} workflowRun{databaseId event workflow{id name}}}} "
                 "...on StatusContext{context state createdAt isRequired(pullRequestNumber:7)}} "
                 "pageInfo{hasNextPage endCursor}}} checkSuites(first:100){"
-                "nodes{status conclusion workflowRun{databaseId createdAt workflow{name}}} "
+                "nodes{status conclusion workflowRun{databaseId createdAt event workflow{id}}} "
                 "pageInfo{hasNextPage endCursor}}}}}}}}",
                 "-f",
                 f"url={URL}",

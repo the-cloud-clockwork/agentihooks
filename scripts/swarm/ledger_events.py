@@ -45,12 +45,12 @@ RED_NOTICE = re.compile(r"^Your pull request (\S+) for .* has red checks and no 
 GATE_JOB = re.compile(rf"^[ \t]+name:[ \t]*(['\"]?){re.escape(GATE)}\1[ \t]*$", re.MULTILINE)
 CONTEXT_NODES = (
     "nodes{...on CheckRun{databaseId name conclusion completedAt isRequired(pullRequestNumber:$number) "
-    "checkSuite{app{databaseId} workflowRun{databaseId workflow{name}}}} "
+    "checkSuite{app{databaseId} workflowRun{databaseId event workflow{id name}}}} "
     "...on StatusContext{context state createdAt isRequired(pullRequestNumber:$number)}} "
     "pageInfo{hasNextPage endCursor}"
 )
 SUITE_NODES = (
-    "nodes{status conclusion workflowRun{databaseId createdAt workflow{name}}} pageInfo{hasNextPage endCursor}"
+    "nodes{status conclusion workflowRun{databaseId createdAt event workflow{id}}} pageInfo{hasNextPage endCursor}"
 )
 PULL_QUERY = (
     "query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid mergeQueueEntry{id state} "
@@ -99,10 +99,15 @@ def iso_ms(text):
 
 def pull_request(raw):
     suites = raw.get("checkSuites") or []
-    everything = _newest(_current_runs(raw.get("statusCheckRollup") or [], suites))
+    rollup = raw.get("statusCheckRollup") or []
+    newest = _newest_runs(rollup, suites)
+    everything = _newest([check for check in rollup if not _superseded(check, newest)])
     commits, checks = raw.get("commits") or [], _required(raw.get("gated"), everything)
     results = [check.get("conclusion") or check.get("state") for check in checks]
-    running = any(suite.get("workflowRun") and suite.get("status") != "COMPLETED" for suite in suites)
+    running = any(
+        suite.get("workflowRun") and suite.get("status") != "COMPLETED" and not _superseded(suite, newest)
+        for suite in suites
+    )
     pushes = [
         iso_ms(suite["workflowRun"]["createdAt"])
         for suite in suites
@@ -158,22 +163,23 @@ def _workflow_run(item):
     return (item.get("checkSuite") or item).get("workflowRun") or {}
 
 
-def _current_runs(checks, suites):
+def _newest_runs(checks, suites):
     newest = collections.defaultdict(int)
     for item in [*checks, *suites]:
-        name, run = _workflow_name(item), _workflow_run(item).get("databaseId")
-        if name and run:
-            newest[name] = max(newest[name], run)
-    return [check for check in checks if not _superseded(check, newest)]
+        key, run = _run_key(item), _workflow_run(item).get("databaseId")
+        if key[0] and run:
+            newest[key] = max(newest[key], run)
+    return newest
 
 
-def _superseded(check, newest):
-    run = _workflow_run(check).get("databaseId")
-    return bool(run) and run < newest.get(_workflow_name(check), 0)
+def _superseded(item, newest):
+    run = _workflow_run(item).get("databaseId")
+    return bool(run) and run < newest.get(_run_key(item), 0)
 
 
-def _workflow_name(check):
-    return (_workflow_run(check).get("workflow") or {}).get("name")
+def _run_key(item):
+    run = _workflow_run(item)
+    return (run.get("workflow") or {}).get("id"), run.get("event")
 
 
 def _required(gated, checks):
@@ -268,11 +274,12 @@ def _required_app(check, required_checks):
 
 
 def _required_pull_request(raw, required_checks):
+    newest = _newest_runs(raw["statusCheckRollup"], raw["checkSuites"])
     checks = _newest(
         [
             check
-            for check in _current_runs(raw["statusCheckRollup"], raw["checkSuites"])
-            if check.get("isRequired") and _required_app(check, required_checks)
+            for check in raw["statusCheckRollup"]
+            if check.get("isRequired") and _required_app(check, required_checks) and not _superseded(check, newest)
         ]
     )
     results = [check.get("conclusion") or check.get("state") for check in checks]
