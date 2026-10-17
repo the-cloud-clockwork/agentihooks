@@ -5,6 +5,7 @@ import ssl
 import subprocess
 import threading
 import time
+from unittest.mock import Mock
 
 import pytest
 
@@ -262,3 +263,19 @@ def test_a_request_whose_socket_cannot_be_duplicated_is_closed(admin):
         assert not httpd._open
     finally:
         httpd.server_close()
+
+
+def test_reaping_continues_when_an_expired_socket_shutdown_raises(admin, monkeypatch):
+    monkeypatch.setattr(server.time, "monotonic", lambda: 10)
+    failed = Mock(spec=socket.socket)
+    failed.shutdown.side_effect = OSError("socket already closed")
+    expired = Mock(spec=socket.socket)
+    unexpired = Mock(spec=socket.socket)
+    with server.make_server(admin, PUBLIC, "127.0.0.1", 0) as httpd:
+        httpd._open = {1: (9, failed), 2: (10, expired), 3: (11, unexpired)}
+
+        httpd.reap()
+
+    failed.shutdown.assert_called_once_with(socket.SHUT_RDWR)
+    expired.shutdown.assert_called_once_with(socket.SHUT_RDWR)
+    unexpired.shutdown.assert_not_called()
