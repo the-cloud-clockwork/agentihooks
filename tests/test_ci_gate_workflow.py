@@ -127,6 +127,7 @@ def test_lint_grades_dashboard_columns_with_the_antoncore_dev_checker():
     assert token["with"]["permission-contents"] == "read"
     checkout = next((s for s in steps if s.get("with", {}).get("repository") == "the-cloud-clockwork/antoncore"), None)
     assert checkout is not None
+    assert checkout["if"] == "${{ !cancelled() && steps.antoncore-token.outcome == 'success' }}"
     assert checkout["with"]["token"] == "${{ steps.antoncore-token.outputs.token }}"
     assert checkout["with"]["ref"] == "dev"
     assert checkout["with"]["persist-credentials"] is False
