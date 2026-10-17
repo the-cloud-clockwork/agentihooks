@@ -4,6 +4,8 @@
   "branch-lanes.yml/grade": "light",
   "ci-templates.yml/actionlint": "hosted",
   "codex-cache.yml/seed": "standard",
+  "count-speed-proof.yml/count-speed": "standard",
+  "count-speed-proof.yml/gate-duration": "standard",
   "coverage-stability.yml/compare": "batch",
   "equivalence.yml/ledger-equivalence": "standard",
   "gate-protected.yml/grade": "hosted",
