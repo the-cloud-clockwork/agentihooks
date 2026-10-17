@@ -228,6 +228,24 @@ def test_a_thread_that_cannot_start_gives_its_slot_back(admin, monkeypatch):
         httpd.server_close()
 
 
+def test_a_served_join_gives_its_slot_back(admin, monkeypatch):
+    monkeypatch.setattr(server, "MAX_HANDLERS", 1)
+    httpd = server.make_server(admin, PUBLIC, "127.0.0.1", 0)
+    threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
+    try:
+        assert _join(httpd.server_address[1], auth.invite(admin, "laptop")) == 200
+        deadline = time.monotonic() + 5
+        while httpd._admitted and time.monotonic() < deadline:
+            time.sleep(0.05)
+
+        assert not httpd._admitted
+        assert httpd._slots.acquire(blocking=False)
+        httpd._slots.release()
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
 class _Undupable(socket.socket):
     def dup(self):
         raise OSError("descriptor table full")
