@@ -813,3 +813,21 @@ def test_the_promotion_gate_skips_only_pull_request_tier_jobs_on_a_push(event, s
         text=True,
     )
     assert (result.returncode == 0) == green, result.stdout + result.stderr
+
+
+def test_the_required_grader_refuses_widened_events_behind_a_conditional_lane(repo, capsys):
+    block = {"group": "${{ github.event_name == 'push' && github.ref || 'hosted-lane-a' }}", "queue": "max"}
+    base = {
+        "name": "Replay",
+        True: {"push": {"branches": ["dev"]}},
+        "concurrency": block,
+        "jobs": {"replay": {"runs-on": "x"}},
+    }
+    _commit(repo, {"test.yml": _workflow(), "replay.yml": base}, {}, "conditional lane")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    widened = {**base, True: {"push": None}}
+    planted = _commit(repo, {"test.yml": _workflow(), "replay.yml": widened}, {}, "widen push events")
+    _git(repo, "checkout", "-q", "dev")
+    assert gate_protected.main(["--root", str(repo), "--head", planted]) == 1
+    out = capsys.readouterr().out.splitlines()
+    assert "::error::replay.yml: job replay has no shared hosted lane concurrency group" in out
