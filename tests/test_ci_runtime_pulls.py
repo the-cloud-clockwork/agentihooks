@@ -204,6 +204,114 @@ def test_runtime_pull_fails_with_the_timeout_status_after_three_stalled_attempts
     assert not tags
 
 
+@pytest.mark.parametrize(
+    "image,architecture,expected",
+    [
+        ("redis:7", "amd64", 0),
+        ("redis:7-alpine", "amd64", 0),
+        ("redis:7", "arm64", 17),
+        ("python:3.12-slim-bookworm", "amd64", 17),
+    ],
+)
+def test_smoke_reuses_only_a_verified_local_redis_image(tmp_path, image, architecture, expected):
+    image = f"mirror.gcr.io/library/{image}"
+    log = tmp_path / "docker.log"
+    tools = tools_with(
+        tmp_path,
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> "$PULL_LOG"
+if [[ "$1" == --host ]]; then shift 2; fi
+if [[ "$1" == image && "$2" == inspect ]]; then
+  printf '%s\\n' "$LOCAL_ARCH"
+  exit 0
+fi
+exit 17
+""",
+    )
+    result = subprocess.run(
+        ["bash", str(ROOT / "scripts/packaging/pull-runtime-image.sh"), image],
+        env={
+            **os.environ,
+            "PATH": f"{tools}:{os.environ['PATH']}",
+            "PULL_LOG": str(log),
+            "WAITS": str(tmp_path / "waits.log"),
+            "SWARM_SMOKE_RUNTIME_IMAGES_READY": "true",
+            "LOCAL_ARCH": architecture,
+        },
+        text=True,
+        capture_output=True,
+        timeout=10,
+    )
+    assert result.returncode == expected, result.stderr
+    calls = log.read_text().splitlines()
+    if expected == 0:
+        assert len(calls) == 1
+        assert " image inspect " in f" {calls[0]} "
+        assert calls[0].endswith(image)
+    else:
+        assert any(call.startswith("manifest inspect ") for call in calls)
+
+
+@pytest.mark.parametrize("failure", ["", "redis:7", "redis:7-alpine", "build"])
+def test_the_smoke_build_overlaps_runtime_pulls_and_preserves_failures(tmp_path, failure):
+    log = tmp_path / "docker.log"
+    tools = tools_with(
+        tmp_path,
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> "$PULL_LOG"
+if [[ "$1" == manifest ]]; then
+  printf '%s\\n' '{"manifests":[{"digest":"sha256:runtime","platform":{"os":"linux","architecture":"amd64"}}]}'
+  exit 0
+fi
+if [[ "$1" == --host ]]; then shift 2; fi
+if [[ "$1" == pull ]]; then
+  image="${2%%@*}"
+  touch "$SYNC/${image##*/}"
+  for _ in {1..200}; do
+    if [[ -e "$SYNC/build" ]]; then break; fi
+    /bin/sleep 0.01
+  done
+  [[ -e "$SYNC/build" ]] || exit 18
+  if [[ -n "$FAILURE" && "$image" == *"$FAILURE" ]]; then exit 17; fi
+elif [[ "$1" == build ]]; then
+  touch "$SYNC/build"
+  for _ in {1..200}; do
+    if [[ -e "$SYNC/redis:7" && -e "$SYNC/redis:7-alpine" ]]; then break; fi
+    /bin/sleep 0.01
+  done
+  [[ -e "$SYNC/redis:7" && -e "$SYNC/redis:7-alpine" ]] || exit 19
+  if [[ "$FAILURE" == build ]]; then exit 23; fi
+fi
+""",
+    )
+    sync = tmp_path / "sync"
+    sync.mkdir()
+    workflow = yaml.safe_load((ROOT / ".github/workflows/swarm-smoke.yml").read_text())
+    step = next(step for step in workflow["jobs"]["smoke"]["steps"] if step.get("name") == "Build the swarm image")
+    result = subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "PATH": f"{tools}:{os.environ['PATH']}",
+            "PULL_LOG": str(log),
+            "WAITS": str(tmp_path / "waits.log"),
+            "SYNC": str(sync),
+            "FAILURE": failure,
+        },
+        text=True,
+        capture_output=True,
+        timeout=10,
+    )
+    assert result.returncode == (23 if failure == "build" else 17 if failure else 0), result.stderr
+    calls = log.read_text().splitlines()
+    assert sum(call.startswith("build ") for call in calls) == 1
+    assert (sync / "redis:7").exists()
+    assert (sync / "redis:7-alpine").exists()
+
+
 def dockerfile_bases():
     return {line.split()[1] for line in (ROOT / "Dockerfile").read_text().splitlines() if line.startswith("FROM ")}
 

@@ -144,5 +144,13 @@ def test_the_kind_job_restores_and_saves_the_layers_it_builds_with():
 def test_requirements_layer_depends_on_the_lock_alone():
     stage = (ROOT / "Dockerfile").read_text()
     stage = stage[: stage.index("COPY hooks/ hooks/")]
-    assert "COPY docker/swarm/requirements.lock ./\nRUN python -m venv /opt/venv" in stage
+    assert any(
+        command in stage
+        for command in (
+            "COPY docker/swarm/requirements.lock ./\nRUN python -m venv /opt/venv",
+            "COPY docker/swarm/requirements.lock ./\nRUN --mount=type=cache,target=/root/.cache/uv \\\n"
+            "    uv venv /opt/venv && uv pip install --python /opt/venv/bin/python "
+            "--compile-bytecode --require-hashes -r requirements.lock",
+        )
+    )
     assert stage.index("-r requirements.lock") < stage.index("COPY pyproject.toml README.md ./")

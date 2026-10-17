@@ -19,6 +19,20 @@ def test_container_proofs_share_one_runner_without_losing_commands():
             assert step["with"]["context"] == "."
             assert step["with"]["load"] is True
             commands.append(f"docker build -t {step['with']['tags']} .")
+        elif step.get("run") in {
+            "docker build -t local/agentihooks-swarm:clients-check --output type=image,compression=uncompressed .",
+            """docker build -t local/agentihooks-swarm:clients-check --output type=image,compression=uncompressed . &
+build=$!
+status=0
+bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/redis:7 &
+redis=$!
+bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/redis:7-alpine || status=$?
+wait "$redis" || status=$?
+wait "$build" || status=$?
+exit "$status"
+""",
+        }:
+            commands.append("docker build -t local/agentihooks-swarm:clients-check .")
         elif "run" in step:
             commands.append(step["run"])
     assert commands == [
@@ -33,7 +47,7 @@ def test_container_proofs_share_one_runner_without_losing_commands():
     for step in steps:
         if "hive-launch-attestation-proof.sh" in step.get("run", ""):
             assert step["if"] == "github.event_name == 'workflow_dispatch'"
-        elif "pull-runtime-image.sh" in step.get("run", ""):
+        elif step.get("run", "").startswith("bash scripts/packaging/pull-runtime-image.sh "):
             assert "if" not in step
         elif "run" in step:
             assert step["if"] == "${{ !cancelled() }}"

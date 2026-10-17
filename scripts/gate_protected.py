@@ -216,11 +216,13 @@ def main(argv: list[str] | None = None) -> int:
         actors = json.loads(_git(root, "show", f"{args.base}:{ci_runner_trust.ACTORS}"))
         ci_runner_trust.validate_actors(actors)
     problems = grade(base_workflows, base_config, head_workflows, head_config, datetime.now(UTC).date(), actors)
-    problems += _preflight_problems(tip_workflows, head_workflows)
+    preflight = _preflight_problems(tip_workflows, head_workflows)
+    governed = {"branch-lanes.yml"} if "branch-lanes.yml" in tip_workflows and not preflight else set()
+    problems += preflight
     problems += [
         f"{file}: {problem}"
         for file, workflow in head_workflows.items()
-        if workflow != base_workflows.get(file)
+        if file not in governed and workflow != base_workflows.get(file)
         for problem in ci_branch_lanes.problems(workflow, base_workflows.get(file))
     ]
     if actors is not None:

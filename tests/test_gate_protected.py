@@ -355,6 +355,7 @@ def test_the_required_grader_refuses_a_disabled_branch_lane_preflight(repo, faul
     assert gate_protected.main(["--root", str(repo), "--head", planted]) == 1
     out = capsys.readouterr().out
     assert "::error::The head changes or removes the trusted branch lane preflight." in out.splitlines()
+    assert ("shared hosted lane concurrency group" in out) is (fault == "proofs")
 
 
 @pytest.mark.parametrize("cover_proofs", [False, True])
@@ -813,3 +814,41 @@ def test_the_promotion_gate_skips_only_pull_request_tier_jobs_on_a_push(event, s
         text=True,
     )
     assert (result.returncode == 0) == green, result.stdout + result.stderr
+
+
+def test_the_required_grader_refuses_widened_events_behind_a_conditional_lane(repo, capsys):
+    block = {"group": "${{ github.event_name == 'push' && github.ref || 'hosted-lane-a' }}", "queue": "max"}
+    base = {
+        "name": "Replay",
+        True: {"push": {"branches": ["dev"]}},
+        "concurrency": block,
+        "jobs": {"replay": {"runs-on": "x"}},
+    }
+    _commit(repo, {"test.yml": _workflow(), "replay.yml": base}, {}, "conditional lane")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    widened = {**base, True: {"push": None}}
+    planted = _commit(repo, {"test.yml": _workflow(), "replay.yml": widened}, {}, "widen push events")
+    _git(repo, "checkout", "-q", "dev")
+    assert gate_protected.main(["--root", str(repo), "--head", planted]) == 1
+    out = capsys.readouterr().out.splitlines()
+    assert "::error::replay.yml: job replay has no shared hosted lane concurrency group" in out
+
+
+def test_the_required_grader_skips_lane_grading_of_an_unchanged_workflow(repo, capsys):
+    unchanged = {"name": "Replay", "concurrency": float("nan"), "jobs": {"replay": {"runs-on": "x"}}}
+    head = _commit(repo, {"test.yml": _workflow(), "replay.yml": unchanged}, {}, "unchanged lane")
+    assert gate_protected.main(["--root", str(repo), "--head", head]) == 0
+    assert "replay.yml" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("trusted", [False, True])
+def test_only_the_trusted_preflight_skips_lane_grading(repo, capsys, trusted):
+    preflight = yaml.safe_load((_ROOT / ".github/workflows/branch-lanes.yml").read_text())
+    _commit(repo, {"test.yml": _workflow()}, {}, "no preflight")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    added = _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": preflight}, {}, "add preflight")
+    _git(repo, "checkout", "-q", "dev")
+    if trusted:
+        _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": preflight}, {}, "trust preflight")
+    assert gate_protected.main(["--root", str(repo), "--head", added]) == (0 if trusted else 1)
+    assert ("shared hosted lane concurrency group" in capsys.readouterr().out) is not trusted
