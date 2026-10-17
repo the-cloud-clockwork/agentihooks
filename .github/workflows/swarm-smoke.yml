@@ -30,6 +30,8 @@ jobs:
           driver: docker
       - name: Expose the cache service to the parallel export
         uses: crazy-max/ghaction-github-runtime@v3
+        with:
+          github-token: ''
       - name: Build the swarm image
         if: ${{ !cancelled() }}
         uses: docker/build-push-action@v6
