@@ -202,7 +202,8 @@ skill. A swarm below one step behaves exactly as a single master swarm.
   scaling.
 - **Inbox pool.** With two or more live masters, items for the master seat from agents and the tick wait in one
   pool per swarm, first in first out. Each item is claimed by exactly one live master with an atomic claim, in
-  round robin seat order; no item is shown to two masters. An item a master never confirms returns to the pool after
+  round robin seat order, skipping a master that is gone or draining toward retirement; no item is shown to two
+  masters. An item a master never confirms returns to the pool after
   `AGENTIHOOKS_INBOX_REDELIVER_S` and goes to the next master with the same id, and a gone master's unconfirmed
   items return the same way. Items from the operator bypass the pool and go to the front door. With one live master
   delivery is unchanged.

@@ -89,9 +89,11 @@ Claude and Codex masters run this loop identically.
   the pool. When your seat is asked to retire, hand off as in Handoff.
 - With two or more live masters, items for the master seat wait in one pool,
   first in first out, and each reaches exactly one live master in round robin
-  seat order. Handle every item that reaches you as your own. An unconfirmed
-  item returns to the pool after the redelivery window and goes to the next
-  master.
+  seat order, skipping a master that is gone or draining toward retirement.
+  Handle every item that reaches you as your own. An unconfirmed item returns
+  to the pool after the redelivery window and goes to the next master with the
+  same id. Items from the operator bypass the pool and go to the front door.
+  A swarm below one step behaves exactly as a single master swarm.
 - Front door only: page chat, operator writes, Priorities and the Remote
   Control login. A backend master's page chat write is refused; ask the front
   door instead.
