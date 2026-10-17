@@ -10,6 +10,8 @@ See [Delivery tiers](/docs/reference/delivery-tiers/) for check ownership. The m
 
 ## Proof dispatch lanes
 
+Browser jobs share the [verified Chromium cache](reference/browser-cache.md): restore is attempted on every ref when no verified baked browser is available, while only `dev` pushes save after a miss and successful installation. The guide covers workflow setup, GitHub cache scope, recovery and cache inventory checks.
+
 Proof dispatches share three hosted lanes, the concurrency groups `hosted-lane-a`, `hosted-lane-b` and `hosted-lane-c`. A run picks its lane from the last digit of its run id: 0 to 2 is lane a, 3 to 5 lane b and 6 to 9 lane c. Each lane runs one run at a time and queues the rest (`queue: max`), so at most three such runs hold hosted runners at once. The lanes are used by every `proofs.yml` dispatch except `proof=tests` (that one gets its own `focused-proof-<run id>` group), by every Mutation refinement proof run, by `workflow_dispatch` runs of the Tests, Swarm worker image and Test leaks workflows, by Worker hive pod runs other than a push to `dev`, and by the brain smoke, Helm chart in kind, CI templates, Swarm container smoke, Swarm worker image smoke and Ledger server load workflows when they run under their own name.
 
 Branch pushes of the Startup stages and Worker resources workflows stay off the lanes. Each push resolves to a per-branch group, `startup-stages-refs/heads/<branch>` or `worker-resources-refs/heads/<branch>`, with `queue: single`: a newer push to the same branch replaces the pending one, and the push never waits behind or blocks a proof dispatch. A `workflow_dispatch` of either workflow still queues on a lane. When another workflow calls either one, the call runs under the caller's name and gets its own `startup-stages-<run id>` or `worker-resources-<run id>` group with `queue: single`.
@@ -44,6 +46,66 @@ gh api repos/the-cloud-clockwork/agentihooks/actions/runs/<run id>/jobs \
 ```
 
 A dispatch whose first job starts within seconds of its `created_at` did not queue. If a dispatch still sits queued for minutes, list the runs on its lane: another dispatch or a lane workflow run holds it, not a Startup stages or Worker resources push. `tests/test_ci_hosted_lanes.py` checks, for a sample branch across all ten run id endings, that a branch push of either workflow never resolves to a lane while a dispatch still does.
+
+## Focused proof CPU worker limits
+
+The `tests` proof in the Proofs workflow runs selected tests with the same CPU quota helper as the unit shards. A runner limited to four CPUs on a sixteen core node starts at most four pytest workers. Previously, `-n auto` could start sixteen competing workers on that runner.
+
+### Dispatch selected tests
+
+Push the branch first, then dispatch explicit test paths or pytest node ids under `tests/`:
+
+```bash
+gh workflow run proofs.yml \
+  --ref <branch> \
+  -f proof=tests \
+  -f tests='tests/test_ci_proofs.py'
+```
+
+For browser tests, add `-f browser=true` to install Chromium before pytest. Missing requested files fail by default; `-f existing_only=true` explicitly skips missing files with warnings, but still fails if none exist. Give paths on one line without `..`. The job uses Python 3.12 and has a fifteen minute timeout. Keep the selection focused; the CPU cap does not extend that deadline.
+
+### Automatic worker selection
+
+The Run selected tests step resolves the worker count before starting pytest:
+
+```bash
+workers=$(python -m scripts.ci_cpu_quota) && python -m pytest "${paths[@]}" -v -n "$workers" --dist loadgroup --tb=short
+```
+
+`paths` is the workflow's array of validated test selections. The helper reads the process CPU affinity and finite cgroup CPU quotas, including parent cgroups, supporting both cgroup v2 `cpu.max` and v1 CPU quota and period files. It takes the smallest finite quota, truncates fractional CPUs to an integer, caps that at the affinity CPU count and keeps at least one worker. If no finite quota is found, it uses the affinity count, with the same minimum of one.
+
+| Affinity CPUs | Smallest finite quota | Workers |
+|---|---|---|
+| 16 | 4 | 4 |
+| 2 | 4 | 2 |
+| 16 | 2.5 | 2 |
+| 16 | 0.5 | 1 |
+| 4 | none | 4 |
+
+There is no worker count dispatch input or environment override in this helper. Configure the runner's CPU quota or affinity to change the automatic result. A CPU request alone is not a finite cgroup quota. The cap applies to the selected tests job; it does not impose a worker count on other proof types or limit subprocesses a test starts. If the helper exits unsuccessfully, `&&` prevents pytest from starting.
+
+### Inspect the result
+
+Open the dispatched run and its Run selected tests log:
+
+```bash
+gh run list \
+  --workflow proofs.yml \
+  --branch <branch> \
+  --limit 5
+gh run view <run id> \
+  --log
+```
+
+The helper prints the worker count to stdout for pytest and a diagnostic to stderr, visible in the job log:
+
+```text
+pytest workers 4: cpu quota 4.0, affinity 4
+```
+
+If the count exceeds the intended runner allocation, check the reported quota and affinity. A quota of `None` means the helper found no finite quota; check the runner's cgroup CPU limit and its parent limits. A larger affinity count alone does not increase workers beyond a detected quota. If the job times out despite the expected count, reduce the selected test set and inspect execution time separately from runner queue time.
+
+[Delivered pull request #3247](https://github.com/the-cloud-clockwork/agentihooks/pull/3247) records a [red focused proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38552080779) with the old `-n auto` invocation and a [green focused proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38552154167) reporting four workers and 32 passing tests. The regression test `test_a_focused_proof_sizes_pytest_workers_from_the_cpu_quota` pins the selected tests invocation to the shared helper. These runs establish the cap and regression coverage; they do not establish a throughput improvement for every selected test set.
 
 ## Codex CLI cache
 
@@ -100,6 +162,60 @@ gh run list --workflow codex-cache.yml --limit 5 \
 | `CODEX_RELEASE` test failure in `tests/test_ci_workflow.py` | the three release values differ | set the same release in all three jobs |
 | `Install the Codex CLI` step fails | the release download failed; the job stops before the test runs | read the step log for the `curl` error and rerun |
 | `test_codex_api.py` fails rather than skips | `CODEX_CLI_REQUIRED=1` is set but `codex` is not on `PATH` | check that the `Use the Codex CLI` step ran and added `~/codex` to `PATH` |
+
+## Unit checkout
+
+Each `unit` shard checks out the graded commit as a partial clone: `ref` set to the run's commit SHA (`github.sha`), `fetch-depth: 0` (full history) and `filter: blob:none` (no file contents from old commits). The initial `git fetch` downloads commits and trees only. `git checkout` then fetches every file blob of the graded tree from the promisor remote in one batch, about 4400 blobs and 45 MB.
+
+`actions/checkout` retries `git fetch` but not `git checkout`. Before the change, one silent connection during that lazy blob fetch held unit (3.12, 9) of Tests run 39010480846 for 617 seconds before `curl 56 Recv failure: Connection timed out` failed the step, and the shard ran no tests (issue #4063). Over 263 Tests runs from 02:24 to 12:32 UTC on 17 October 2026, 4734 unit checkouts had a p50 of 4 seconds and a p99.9 of 10 seconds; that one was the only stall.
+
+The checkout now runs as two steps:
+
+| Step | Runs when | On failure |
+|---|---|---|
+| `Check out the graded commit` (`id: checkout`) | always, first step of the job | `continue-on-error: true`: the step shows as failed and the job continues |
+| `Check out the graded commit, attempt 2` | `steps.checkout.outcome == 'failure'` | the job fails; no tests run and shard-check reports the shard's tests as missing |
+
+Both steps use the same `with` block and set:
+
+```yaml
+env:
+  GIT_HTTP_LOW_SPEED_LIMIT: "1000"
+  GIT_HTTP_LOW_SPEED_TIME: "60"
+```
+
+Git aborts any HTTP transfer that stays below 1000 bytes per second for 60 seconds, so a stalled lazy blob fetch fails in about a minute instead of about ten. The variables cover every HTTP transfer in the step, the initial `git fetch` included. The workflow test pins both values as literals, so changing one means changing the test with it. Attempt 2 runs on the same runner with the same commit, history depth, filter and shard, so a retried shard grades the same tests as one that passed on attempt 1. The retry runs once; a second stall fails the job.
+
+`tests/test_ci_workflow.py` fails if the two checkouts are not the first two steps of `unit`, if either loses the low speed settings or the `with` block above, if the first step drops `continue-on-error` or gains an `if`, or if the second step runs on anything but the first step's failure.
+
+### Proof
+
+| Run | Result |
+|---|---|
+| Tests 39037534575, tests only head | the new workflow test failed, nothing else |
+| Plant run 39037894054, a CONNECT proxy that serves the initial fetch and goes silent during the lazy blob fetch | the old checkout hung until the step's 5 minute cap; the new checkout aborted 66 seconds after the stall, on the same promisor object as the incident, and attempt 2 passed in 5 seconds with the graded commit, full history and partial clone |
+| Same commit, cold, three runs each | `blob:none`: median 5.0 seconds and 21 MB of `.git`; full blobs: median 6.6 seconds and 71 MB |
+| Tests 39038020220 on the fixed head | all 18 unit shards passed on attempt 1 |
+
+The partial clone stays: a full blob checkout took longer and stored more than three times the `.git` bytes.
+
+### Checking a run
+
+List the unit shards of a run whose second checkout ran:
+
+```bash
+gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/<run id>/jobs?per_page=100" \
+  --jq '.jobs[] | select(.name | startswith("unit (")) | {name, attempt2: (.steps[] | select(.name == "Check out the graded commit, attempt 2") | .conclusion)} | select(.attempt2 != "skipped")'
+```
+
+A shard listed with `success` stalled once and recovered; one listed with `failure` failed both attempts. In the log, a stalled first step ends with `RPC failed; curl 28 Operation too slow. Less than 1000 bytes/sec transferred the last 60 seconds`, then `fatal: could not fetch <object> from promisor remote`. Attempt 2 then warns `Unable to clean or reset the repository. The repository will be recreated instead.` and checks out from scratch.
+
+| Symptom | Cause | Action |
+|---|---|---|
+| First checkout failed, attempt 2 passed, tests ran | one stalled lazy blob fetch, recovered | none; the shard's results stand |
+| Both checkouts failed, shard-check reports missing tests | the stall or a GitHub outage persisted past the retry | read both step logs; rerun the failed jobs once GitHub serves fetches again |
+| A checkout step runs for minutes with no abort | the low speed settings were removed from that step | restore the `env` block; `tests/test_ci_workflow.py` fails without it |
+| A checkout fails within seconds on both attempts | the error is not a stall: a bad ref, permissions or a missing commit | read the first error in the step log; a retry does not fix it |
 
 ## Historical measurements
 
