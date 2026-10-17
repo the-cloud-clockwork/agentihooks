@@ -10,6 +10,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from scripts.swarm import timing
+
 URL_ENV = "AGENTIHOOKS_METRICS_URL"
 USER_ENV = "AGENTIHOOKS_METRICS_USER"
 PASSWORD_ENV = "AGENTIHOOKS_METRICS_PASSWORD"
@@ -132,7 +134,10 @@ def post(sink, query, body):
             data=body,
             headers={USER_HEADER: sink.user, KEY_HEADER: sink.password},
         )
-        with urllib.request.urlopen(request, timeout=TIMEOUT_S) as reply:
+        with (
+            timing.step("scripts.swarm.metrics_outbox.sink_request"),
+            urllib.request.urlopen(request, timeout=TIMEOUT_S) as reply,
+        ):
             return reply.status == 200
     except (OSError, ValueError, http.client.HTTPException):
         return False
@@ -179,7 +184,7 @@ class Outbox:
             shipped += sent
             if not reached:
                 break
-        with self.db:
+        with timing.step("scripts.swarm.metrics_outbox.retention"), self.db:
             self.db.execute(PRUNE, (now_ms - DAY_MS,))
         return shipped
 

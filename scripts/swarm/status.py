@@ -35,6 +35,7 @@ from scripts.swarm import (
     snapshot,
     stall_watch,
     tick_master,
+    timing,
 )
 from scripts.swarm.health import activity, checks, merge_stall, prompt_backlog, spawn_stall, standing, verdicts
 from scripts.swarm.health import findings as health
@@ -97,8 +98,8 @@ def findings(store, slug, config, tasks, events, view=None):
             if row["state"] in ("started", "failed")
         ),
     ]
-    quiet = quiet_gate.quiet_minutes(store.redis, slug, agents, {t["id"]: t for t in tasks}, now_ms())
-    rows = _health_rows(store, slug, agents, quiet, now_ms())
+    quiet = timing.call(quiet_gate.quiet_minutes, store.redis, slug, agents, {t["id"]: t for t in tasks}, now_ms())
+    rows = timing.call(_health_rows, store, slug, agents, quiet, now_ms())
     found = (
         health.findings(
             {
@@ -107,7 +108,7 @@ def findings(store, slug, config, tasks, events, view=None):
                 "review_rounds": {task["id"]: review_rounds.counts(slug, task["id"]) for task in tasks},
             },
             rows,
-            activity.counts(slug),
+            timing.call(activity.counts, slug),
             limits,
             checks.waiting(
                 rows,
@@ -124,7 +125,7 @@ def findings(store, slug, config, tasks, events, view=None):
         + drain_watch.findings(store, slug, limits, now_ms())
         + launch_check.findings(store, slug)
         + spawn_stall.findings(store, slug)
-        + merge_stall.findings(store, slug, config.repo, now_ms())
+        + timing.call(merge_stall.findings, store, slug, config.repo, now_ms())
         + prompt_backlog.findings(store, slug)
         + placement_waits.findings(store, slug, now_ms())
         + standing.findings(store.redis, slug, now_ms())
