@@ -38,10 +38,52 @@ The job runs on `ubuntu-latest` in the `release` environment, which deploys only
 9. **Compute the version.** It checks out the promoted `main` commit and runs `scripts/ci_release.sh version` with `BUMP=patch` and `REUSE_TREE=true`. When a stable `vX.Y.Z` tag already points at the same tree, that version is reused and no new tag is made. Otherwise the next patch version follows the latest stable tag.
 10. **Tag and verify.** For a new version, `ci_release.sh tag` tags the promoted `main` commit `vX.Y.Z`, and `ci_release.sh verify` builds the wheel and checks its metadata version equals `X.Y.Z` (setuptools-scm derives the package version from the tag). The tag is then pushed.
 11. **Release.** Unless the release already exists, `ci_release.sh notes` assembles every `changelog.d/` fragment added since the previous stable tag into one section per Keep a Changelog heading, and `gh release create vX.Y.Z --title vX.Y.Z --notes-file <assembled notes> --generate-notes --latest --verify-tag` creates the GitHub release with those entries ahead of the generated pull request list.
+12. **Close abandoned attempts.** The last step runs after any promotion outcome except cancellation, with the same App token. Every open pull request into `main` that the App opened from `promotion/<graded sha>` in this repository, whose graded revision is an ancestor of the revision this run graded, gets a comment naming the superseding revision and run, is closed, and loses its snapshot branch while that branch still points at the pull request head. The current attempt, newer or diverged attempts, other authors, forks and other branches stay open. The step stops examining pull requests after three minutes so the ten minute job timeout holds, and the summary names how many it left for the next run. The job summary lists each outcome; any failure fails the step after the other pull requests are handled, and the release steps before it have already run.
 
 The job summary records the graded `dev` commit, the promoted `main` commit and the tree. The `promote` step outputs `graded`, `main` and, when it merged, `pull-request`; the release steps read `main`.
 
 Promotion never publishes to PyPI and never dispatches another workflow. PyPI publication stays the operator's `publish-pypi.yml` run from `main`, with the `pypi` environment reviewer.
+
+## Merge step time
+
+The `Squash the graded tree snapshot into main` step runs `promote.cjs`, so it covers steps 2 to 8 of the list above: snapshot, pull request, the mergeability wait, the squash, the tree check and the branch delete. Its time is the step 5 wait plus the API calls of the other steps; the command below reports only the step total.
+
+Pushing a `promotion/**` branch starts no Mutation preflight run: `mutation-preflight.yml` lists `promotion/**` in its push `branches-ignore`, beside `dev`, `main`, `gh-readonly-queue/**`, `wip/**` and `diffcheck/**`. Before [#3886](https://github.com/the-cloud-clockwork/agentihooks/pull/3886) the push ran a mutation preflight on the promotion head, a tree whose changes had already been mutation graded on their pull requests, and the merge waited for its `mutation` check. Other workflows still run on that push; on the snapshot of v2.17.2 they were `grade` (Branch workflow lanes) and two `measure` checks (Startup stages, Worker resources).
+
+The step can still wait on the graded `dev` commit. When the promotion pull request reports `unstable`, step 5 admits it only while this run's `promote / promote` job is the one check still running, this run's `Gate — Required` succeeded, every other check on the graded commit has completed with success or skipped, and the latest commit status of every context is success. A slow non-gate workflow on that commit, such as the Worker hive pod `kind` and `publish` jobs, holds the merge until it finishes or the four minute limit fails the step.
+
+Measured on promotion runs of the Tests workflow, check times from the commits API and merge times from the pulls API:
+
+| Run | Mutation wait on the promotion head | Step seconds | Last check before the merge | Release |
+|---|---|---|---|---|
+| [38950625810](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38950625810) | yes | 172 | `mutation` on the promotion head, 19:05:12Z; merged 19:05:17Z | v2.17.1 |
+| [39043823157](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39043823157) | no | 241 | Worker hive pod `publish` (run [39043823047](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39043823047)) on the graded commit, 15:21:01Z; merged 15:21:09Z | v2.17.2 |
+| [39044572864](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39044572864) | no | 15 | `Gate — Required` on the graded commit, 15:28:25Z; merged 15:28:47Z | v2.17.3 |
+
+Only one promotion before the change ran this step, so there is one baseline. In all three runs the `Tag and verify the promoted package` and `Create the release with generated notes` steps succeeded, and the promoted `main` commit carries the graded tree. The 241 s run used nearly the whole four minute wait: the step started at 15:17:11Z and `publish` completed 230 s later. A graded commit whose slowest non-gate workflow outlasts the wait fails the promotion with nothing merged.
+
+Measure the step on a promotion run:
+
+```bash
+R=The-Cloud-Clockwork/agentihooks
+gh run list -R "$R" -w Tests -e push -b dev -L 5                                   # pick a run id
+RUN=<Tests push run id on dev>
+gh api --paginate "repos/$R/actions/runs/$RUN/jobs?per_page=100" --jq '
+  .jobs[] | select(.name == "promote / promote") | .steps[]
+  | select((.name | startswith("Squash the graded")) or (.name | test("Tag and verify|Create the release")))
+  | {name, conclusion, seconds: ((.completed_at | fromdate) - (.started_at | fromdate))}'
+```
+
+Promotions before [#3668](https://github.com/the-cloud-clockwork/agentihooks/pull/3668) name the step `Squash the graded dev head into main`; the `startswith` match reads both names. List what the step waited on from the check times of the graded commit:
+
+```bash
+R=The-Cloud-Clockwork/agentihooks
+GRADED=<head sha of the run>
+gh api --paginate "repos/$R/commits/$GRADED/check-runs?per_page=100" \
+  --jq '.check_runs[] | [.completed_at, .name] | @tsv' | sort | tail -5
+```
+
+Checks completing after the promotion pull request's `merged_at`, such as `promote / promote` itself, played no part; the last line before `merged_at` is the check that held the merge. Check the tree identity with the commands under [Checking a promotion](#checking-a-promotion).
 
 ## Reruns and repeats
 
