@@ -108,7 +108,6 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
             "dependency-audit",
             "durations",
             "split",
-            "collect",
             "kind-due",
             "helm-kind",
             "ledger-load",
@@ -126,7 +125,7 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
     assert jobs["split"]["needs"] in (
         ["durations", "select", "reuse", "admission"],
         ["select", "reuse", "admission"],
-        ["collect", "select", "reuse", "admission"],
+        ["test-count", "select", "reuse", "admission"],
     )
     assert jobs["lint"]["needs"] in (["reuse"], ["reuse", "admission"])
     if "swarm-image" in gate["needs"]:

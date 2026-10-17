@@ -205,10 +205,7 @@ def test_only_a_dev_push_saves_the_test_environment_after_installing_it():
     callers = {
         name: job["steps"] for name, job in jobs.items() if any(s.get("id") == "venv" for s in job.get("steps", []))
     }
-    assert sorted(callers) in (
-        ["split", "test-count", "unit", "unit-selected"],
-        ["collect", "split", "test-count", "unit", "unit-selected"],
-    )
+    assert sorted(callers) == ["split", "test-count", "unit", "unit-selected"]
     for name, steps in callers.items():
         restore = next(step for step in steps if step.get("id") == "venv")
         assert restore["uses"] == "actions/cache/restore@v4"
@@ -456,7 +453,7 @@ def test_shards_wait_only_on_the_durations_lookup():
     assert jobs["split"]["needs"] in (
         ["durations", "select", "reuse", "admission"],
         ["select", "reuse", "admission"],
-        ["collect", "select", "reuse", "admission"],
+        ["test-count", "select", "reuse", "admission"],
     )
     assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
     assert jobs["lint"]["needs"] in (["reuse"], ["reuse", "admission"])
