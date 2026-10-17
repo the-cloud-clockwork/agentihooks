@@ -217,19 +217,19 @@ def overrun(rig, seconds):
     rig.env["CONDITIONS_TIMEOUT_SEC"] = str(seconds)
     clock = rig.tree.parent / "condition-clock"
     rig.env["CONDITION_CLOCK"] = str(clock)
-    done = rig.stop()
-    started, finished = map(float, clock.read_text().split())
-    return done, finished - started
+    return rig.stop(), clock
 
 
 @pytest.mark.wall_clock
 def test_a_pre_push_gate_that_overruns_is_stopped_by_the_gate_inside_the_stop_condition(rig):
-    done, took = overrun(rig, 8)
+    seconds = 8
+    done, clock = overrun(rig, seconds)
     assert done.returncode == 2, (done.stderr, rig.rows())
     assert "The pre push gate did not finish in " in done.stderr
     assert f" s in {rig.tree}, so the stop hook did not push it." in done.stderr
     assert rig.remote_head() == ""
-    assert took < 8
+    started, finished = map(float, clock.read_text().split())
+    assert finished - started < seconds, "the stop condition process ran past its timeout"
 
 
 def test_a_pre_push_gate_that_overruns_is_stopped_inside_the_stop_condition(rig):
