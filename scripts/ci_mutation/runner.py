@@ -1,6 +1,7 @@
 import ast
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -18,6 +19,7 @@ from scripts.ci_mutation.scope import select_tests
 from scripts.ci_mutation.stats import SharedStats, load_parts, stats_key
 
 IDENTITY = "scripts/ci_mutation/identity.py"
+FAILED_TEST = re.compile(r"^(?:FAILED|ERROR) (\S+\.py(?:::\S+)?)(?: - (.*))?$", re.MULTILINE)
 
 
 def run_process(command: list[str], cwd: Path, timeout: float, log: Path) -> int | None:
@@ -36,6 +38,13 @@ def run_process(command: list[str], cwd: Path, timeout: float, log: Path) -> int
             os.killpg(process.pid, signal.SIGKILL)
             process.wait()
             return None
+
+
+def failing_tests(log: Path) -> list[str]:
+    if not log.is_file():
+        return []
+    found = FAILED_TEST.findall(log.read_text(errors="replace"))
+    return list(dict.fromkeys(f"{test} - {error}" if error else test for test, error in found))
 
 
 def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]) -> None:
@@ -130,6 +139,8 @@ def mutate_files(
     if status is None:
         return {}, "over budget"
     if status != 0:
+        if failing := failing_tests(log):
+            return {}, f"mutmut failed with exit {status}; failing tests: {'; '.join(failing)}; see {log}"
         return {}, f"mutmut failed with exit {status}; see {log}"
     if stats and stats.part:
         return {path: [] for path in selected}, ""
@@ -208,7 +219,7 @@ def run_gate(
     cleared = load_clearances(root)
     split = split_plan_names(stats)
     report = {"files": [], "not_mutated": [], "failed": False}
-    rows, reasons, selected = {}, {}, {}
+    rows, reasons, selected, failing = {}, {}, {}, []
     for path, lines in changes.items():
         source = root / path
         if source.is_file() and not any(
@@ -233,8 +244,11 @@ def run_gate(
         )
         if reason:
             reasons.update(dict.fromkeys(group, reason))
+            failing += failing_tests(work / "run.log")
         else:
             rows.update(results)
+    if failing:
+        report["failing_tests"] = list(dict.fromkeys(failing))
     for path, lines in changes.items():
         if path in reasons:
             report["not_mutated"].append({"path": path, "reason": reasons[path]})
