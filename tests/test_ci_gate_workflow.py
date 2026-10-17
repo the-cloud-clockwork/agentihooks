@@ -580,6 +580,42 @@ def test_chart_proof_is_due_only_when_its_input_key_has_no_passed_run():
     assert not (_ROOT / "deploy/helm/agentihooks-swarm/ci/kind-due.sh").exists()
 
 
+@pytest.mark.parametrize(
+    ("path", "keyed"),
+    [
+        ("deploy/helm/agentihooks-swarm/templates/controller.yaml", True),
+        ("deploy/helm/agentihooks-swarm/ci/kind-smoke.sh", True),
+        ("deploy/helm/agentihooks-swarm/ci/terminal-worker.Dockerfile", True),
+        ("Dockerfile", True),
+        (".dockerignore", True),
+        ("pyproject.toml", True),
+        ("README.md", True),
+        (".github/workflows/helm-kind.yml", True),
+        ("docker/swarm/requirements.lock", True),
+        ("docker/swarm-node/versions.lock", True),
+        ("docker/swarm-node/layout.json", True),
+        ("scripts/swarm/lease.py", True),
+        ("scripts/swarm_ledger/new_ledger.py", True),
+        ("hooks/hook_manager.py", True),
+        ("profiles/package/rules/x.md", True),
+        ("media/agentihooks-logo.png", True),
+        ("docs/swarm-v2/schemas/x.json", True),
+        ("tests/kind_request.py", True),
+        ("tests/chart_redis.py", True),
+        ("tests/fixtures/swarm_v2/pod-rendered.json", True),
+        ("tests/test_x.py", False),
+        ("docs/x.md", False),
+        (".github/workflows/semgrep.yml", False),
+        (".github/workflows/test.yml", False),
+        ("deploy/helm/other/values.yaml", False),
+        ("deploy/helm/agentihooks-swarm-other/values.yaml", False),
+    ],
+)
+def test_chart_proof_input_key_declares_the_chart_image_and_proof_files_only(path, keyed):
+    listed = json.loads((_ROOT / ".github/input-keys.json").read_text())["helm-kind"]["paths"]
+    assert any(path == p or path.startswith(f"{p}/") for p in listed) is keyed
+
+
 def test_chart_proof_input_key_covers_every_file_the_swarm_image_copies():
     listed = json.loads((_ROOT / ".github/input-keys.json").read_text())["helm-kind"]["paths"]
     sources = []

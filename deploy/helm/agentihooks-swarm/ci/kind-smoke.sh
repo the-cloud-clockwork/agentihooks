@@ -15,6 +15,10 @@ ca_dir=""
 route=""
 terminal=""
 
+if [[ -n ${KIND_LAYER_CACHE:-} ]]; then
+  mkdir -p "$KIND_LAYER_CACHE"
+  rm -f "$KIND_LAYER_CACHE/complete"
+fi
 python3 tests/kind_request.py
 
 finish() {
@@ -42,17 +46,43 @@ finish() {
   exit "$status"
 }
 
+layers() {
+  if [[ -z ${KIND_LAYER_CACHE:-} ]]; then
+    return
+  fi
+  if [[ -d $KIND_LAYER_CACHE/$1 ]]; then
+    printf '%s\n' --cache-from "type=local,src=$KIND_LAYER_CACHE/$1"
+  fi
+  if [[ ${KIND_LAYER_CACHE_HIT:-} != true ]]; then
+    printf '%s\n' --cache-to "type=local,dest=$KIND_LAYER_CACHE/$1.next,mode=max"
+  fi
+}
+keep_layers() {
+  if [[ -z ${KIND_LAYER_CACHE:-} ]]; then
+    return
+  fi
+  for name in "$@"; do
+    if [[ -d $KIND_LAYER_CACHE/$name.next ]]; then
+      rm -rf "${KIND_LAYER_CACHE:?}/$name"
+      mv "$KIND_LAYER_CACHE/$name.next" "$KIND_LAYER_CACHE/$name"
+    fi
+  done
+  touch "$KIND_LAYER_CACHE/complete"
+}
 (
   bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm >/dev/null
-  docker build -q --build-arg IMAGE="$image" --target packages \
+  mapfile -t terminal_layers < <(layers terminal)
+  docker build -q "${terminal_layers[@]}" --build-arg IMAGE="$image" --target packages \
     -f "$chart/ci/terminal-worker.Dockerfile" . >/dev/null &
   packages=$!
   trap 'status=$?; wait "$packages" || true; exit "$status"' EXIT
-  docker build -q -t "$image" . >/dev/null
+  mapfile -t swarm_layers < <(layers swarm)
+  docker build -q -t "$image" "${swarm_layers[@]}" . >/dev/null
   printf 'main fixture image built\n'
   printf 'FROM %s\nCOPY . /\n' "$image" \
     | docker build -q -t "$bundle_image" -f - tests/fixtures/swarm_v2/worker-bundle >/dev/null
   wait "$packages"
+  keep_layers swarm terminal
 ) &
 build=$!
 kind create cluster --name "$cluster" --image "$KIND_NODE_IMAGE" &
