@@ -196,7 +196,8 @@ def _incident(store, slug: str, active: bool, raised: str, resolved: str) -> dic
 
 def _record(held: dict, slug: str, now_ms: int, sample: Sample, down: str) -> None:
     bad = sample.slow or bool(down)
-    before = {field: held.get(field, 0) for field in ("slow", "fast")}
+    counts = held if held.get("samples") else {}
+    before = {field: counts.get(field, 0) for field in ("slow", "fast")}
     slow = before["slow"] + 1 if bad else 0
     fast = before["fast"] + 1 if not bad and max(sample.read_s, sample.write_s) < CLEAR_S else 0
     sequence = held.get("sequence", 0) + 1
