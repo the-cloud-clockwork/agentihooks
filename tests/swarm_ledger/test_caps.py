@@ -14,6 +14,7 @@ import new_ledger  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
 
 SLUG = "caps-2026-01-01"
+SAFETY_S = 120
 
 
 def make_ledger():
@@ -94,9 +95,6 @@ def signal_state(pid):
         if line.startswith(("State", "SigQ", "SigPnd", "ShdPnd", "SigBlk", "SigIgn", "SigCgt"))
     ]
     return "\n".join([*fields, f"wchan: {wchan}"])
-
-
-SAFETY_S = 120
 
 
 def wait_for_beat(proc, beat, stderr):
