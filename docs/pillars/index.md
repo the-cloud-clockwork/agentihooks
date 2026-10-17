@@ -9,3 +9,5 @@ has_children: true
 AgentiHooks is organised around four pillars: Identity, Guardrails, Context Intelligence, Fleet Command. Each pillar covers one axis of running Claude Code agents at scale.
 
 The [swarm guide](swarm.md) covers fleet task execution, including [ready handoffs for tasks split across pull requests](swarm.md#ready-handoffs-for-split-tasks).
+
+For resumed work, see [publishing after a successor prepares a branch](swarm.md#publishing-after-a-successor-prepares-a-branch): branch selection, restacking, repository configuration and publication retries.
