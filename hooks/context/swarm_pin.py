@@ -38,21 +38,22 @@ def nested(environ, start: int | None = None, proc: Path = _PROC) -> bool:
 
 
 def _session_agents(sid: int, proc: Path) -> list[int]:
-    rows = {int(entry.name): _row(entry) for entry in proc.iterdir() if entry.name.isdigit()}
+    rows = {int(entry.name): row for entry in proc.iterdir() if entry.name.isdigit() and (row := _row(entry))}
+    names = {pid: comm for pid, (comm, _, _) in rows.items()}
     return [
         pid
         for pid, (comm, ppid, session) in rows.items()
-        if comm in AGENTS and session == sid and rows.get(ppid, ("", 0, 0))[0] != comm
+        if comm in AGENTS and session == sid and names.get(ppid) != comm
     ]
 
 
-def _row(entry: Path) -> tuple[str, int, int]:
+def _row(entry: Path) -> tuple[str, int, int] | None:
     try:
-        head, _, tail = (entry / "stat").read_text(encoding="utf-8").rpartition(")")
+        head, _, tail = (entry / "stat").read_text().rpartition(")")
         fields = tail.split()
         return head.partition("(")[2], int(fields[1]), int(fields[3])
     except (OSError, ValueError, IndexError):
-        return "", 0, 0
+        return None
 
 
 def unpin(environ: MutableMapping[str, str] = os.environ, start: int | None = None, proc: Path = _PROC) -> bool:
