@@ -116,7 +116,7 @@ def pull_request(raw):
         and not _superseded(suite, newest)
         and (not raw.get("gated") or not required_runs or _run_key(suite) in required_runs)
         for suite in suites
-    ) or bool(expected - reported)
+    ) or bool(expected - reported or required_runs - {key for key, _ in reported})
     pushes = [
         iso_ms(suite["workflowRun"]["createdAt"])
         for suite in suites
@@ -203,6 +203,8 @@ def _required(gated, checks):
         if check.get("isRequired", True) or (check.get("name") or check.get("context")) == GATE
     ]
     runs = {_run_key(check) for check in required if _run_key(check)[0]}
+    if gated and not runs:
+        runs = {_run_key(check) for check in checks if _run_key(check)[0]}
     return [check for check in checks if check in required or _run_key(check) in runs] if gated or required else checks
 
 

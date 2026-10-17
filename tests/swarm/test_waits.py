@@ -1402,11 +1402,12 @@ def test_checks_wait_judges_every_job_of_the_current_required_run(tick, required
 
 @pytest.mark.parametrize("status", ["IN_PROGRESS", "COMPLETED"])
 @pytest.mark.parametrize("conclusion", [None, "FAILURE", "SUCCESS"])
-def test_a_status_gate_cannot_hide_the_current_workflow_jobs(tick, status, conclusion):
+@pytest.mark.parametrize("event", [None, "pull_request"])
+def test_a_status_gate_cannot_hide_the_current_workflow_jobs(tick, status, conclusion, event):
     tick.hold("checks", URL)
     gate = {"context": "Gate — Required", "state": "SUCCESS", "isRequired": True}
-    job = {**_run_check("selected tests", 20, 2, conclusion), "isRequired": False}
-    tick.pulls[URL] = _gated([gate, job], [_suite(2, status)], False)
+    job = {**_run_check("selected tests", 20, 2, conclusion, event=event), "isRequired": False}
+    tick.pulls[URL] = _gated([gate, job], [_suite(2, status, event=event)], False)
     if conclusion == "FAILURE":
         assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now red; failed: selected tests"]
     elif conclusion == "SUCCESS" and status == "COMPLETED":
@@ -1414,6 +1415,22 @@ def test_a_status_gate_cannot_hide_the_current_workflow_jobs(tick, status, concl
     else:
         assert tick.end() == []
         assert idle.wait(tick.store.redis, "sw", ME) is not None
+
+
+@pytest.mark.parametrize("status", ["QUEUED", "IN_PROGRESS", "COMPLETED"])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_a_status_gate_holds_a_superseding_run_without_current_jobs(tick, status, reverse):
+    tick.hold("checks", URL)
+    gate = {"context": "Gate — Required", "state": "SUCCESS", "isRequired": True}
+    old = {**_run_check("selected tests", 10, 1, "SUCCESS"), "isRequired": False}
+    suites = [_suite(1, "COMPLETED", "SUCCESS"), _suite(2, status)]
+    tick.pulls[URL] = _gated([gate, old], suites, reverse)
+    assert tick.end() == []
+    assert idle.wait(tick.store.redis, "sw", ME) is not None
+    current = {**_run_check("selected tests", 20, 2, "SUCCESS"), "isRequired": False}
+    suites[-1] = _suite(2, "COMPLETED", "SUCCESS")
+    tick.pulls[URL] = _gated([gate, old, current], suites, reverse)
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
 
 
 @pytest.mark.parametrize("status", ["QUEUED", "IN_PROGRESS"])
