@@ -50,9 +50,10 @@ def _path(session_id):
 
 def _load(session_id):
     try:
-        return json.loads(_path(session_id).read_text())
+        state = json.loads(_path(session_id).read_text())
     except (OSError, ValueError):
         return {}
+    return state if isinstance(state, dict) else {}
 
 
 def _save(session_id, state):

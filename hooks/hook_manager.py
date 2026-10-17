@@ -1152,13 +1152,13 @@ def _master_coding(payload: dict, typed: bool) -> None:
 
 
 def _operator_question(payload: dict) -> str:
-    try:
-        from hooks.context import operator_mode
+    from hooks.context import operator_mode
 
+    try:
         return operator_mode.question_block(payload.get("tool_name"), payload.get("session_id"))
     except Exception as e:
         log("operator question check failed", {"error": str(e)})
-        return ""
+        return operator_mode.STANDALONE_ASK_REFUSAL if payload.get("tool_name") == operator_mode.QUESTION_TOOL else ""
 
 
 def _operator_reminder(payload: dict) -> None:
