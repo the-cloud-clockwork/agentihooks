@@ -94,7 +94,7 @@ def test_a_shrunk_allowlist_entry_caps_the_baseline(repo, capsys):
 
 def test_long_units_read_their_allowlist_rules(repo, capsys):
     units = {"mod.py": {"file-lines": 3000}, "mod.py::long": {"function-lines": 301}}
-    source = "def old():\n" + "    print(1)\n" * 300 + "print(1)\n" * 2700
+    source = "def old():\n" + "    print(1)\n" * 300 + "\n\n" + "print(1)\n" * 2698
     repo({"mod.py": source, **listed(units)}, push=True)
     repo({"mod.py": source.replace("def old", "def long")})
     assert publish_gate.main() == 1
