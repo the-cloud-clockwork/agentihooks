@@ -2061,7 +2061,7 @@ jobs:
 
   # Reports only: it fails when it cannot read the run, never because a stage ran slow.
   stage-budget:
-    needs: [collect, select, split, unit, unit-selected, shard-check, test-count, coverage-ratchet, lint, sonar, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, kind-due, helm-kind, semgrep, ledger-load, reuse]
+    needs: [select, split, unit, unit-selected, shard-check, test-count, coverage-ratchet, lint, sonar, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, kind-due, helm-kind, semgrep, ledger-load, reuse]
     if: ${{ always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 3
@@ -2162,7 +2162,7 @@ jobs:
 
   gate-required:
     name: Gate — Required
-    needs: [collect, select, split, unit, unit-selected, shard-check, test-count, coverage-ratchet, lint, sonar, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, kind-due, helm-kind, semgrep, ledger-load, stage-budget, reuse, queue-fail-fast]
+    needs: [select, split, unit, unit-selected, shard-check, test-count, coverage-ratchet, lint, sonar, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, kind-due, helm-kind, semgrep, ledger-load, stage-budget, reuse, queue-fail-fast]
     if: ${{ always() }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 5
@@ -2181,7 +2181,7 @@ jobs:
               | (if $event == "merge_group" then
                 ["select", "split", "unit", "shard-check", "test-count", "queue-fail-fast"]
               else
-                ["collect", "select", "test-count", "lint", "semgrep", "sonar"]
+                ["select", "test-count", "lint", "semgrep", "sonar"]
                 + (if $scope == "full" then ["split", "unit", "shard-check"] elif $scope == "selected" then ["unit-selected"] else [] end)
                 + (if $mutation == "true" then ["mutation-plan", "mutation-stats", "mutation"] else [] end)
               end) as $required
@@ -2201,7 +2201,7 @@ jobs:
             echo "::error::A push or dispatch run never reuses a queue result."
             exit 1
           fi
-          if ! jq -e --arg event "${EVENT:-}" --arg mutation "$MUTATION" --arg kind "${KIND:-}" '(.select.outputs.scope // "") as $scope | ($event != "pull_request" or $scope != "selected" or ."unit-selected".result == "success") and all(to_entries[]; .value.result == "success" or (.key == "collect" and .value.result == "skipped" and $event != "pull_request") or ((.key == "mutation" or .key == "mutation-plan" or .key == "mutation-stats") and .value.result == "skipped" and $mutation == "false") or (.key == "helm-kind" and .value.result == "skipped" and $kind == "false") or (.key == "queue-baseline" and .value.result == "skipped" and $event != "merge_group") or ((.key == "lint" or .key == "semgrep" or .key == "test-count") and .value.result == "skipped" and $event == "push") or ((.key == "split" or .key == "unit" or .key == "shard-check" or .key == "coverage-ratchet") and .value.result == "skipped" and $event == "pull_request" and ($scope == "selected" or $scope == "none")) or (.key == "unit-selected" and .value.result == "skipped" and ($event != "pull_request" or $scope == "full" or $scope == "none")))' <<< "$NEEDS"; then
+          if ! jq -e --arg event "${EVENT:-}" --arg mutation "$MUTATION" --arg kind "${KIND:-}" '(.select.outputs.scope // "") as $scope | ($event != "pull_request" or $scope != "selected" or ."unit-selected".result == "success") and all(to_entries[]; .value.result == "success" or ((.key == "mutation" or .key == "mutation-plan" or .key == "mutation-stats") and .value.result == "skipped" and $mutation == "false") or (.key == "helm-kind" and .value.result == "skipped" and $kind == "false") or (.key == "queue-baseline" and .value.result == "skipped" and $event != "merge_group") or ((.key == "lint" or .key == "semgrep" or .key == "test-count") and .value.result == "skipped" and $event == "push") or ((.key == "split" or .key == "unit" or .key == "shard-check" or .key == "coverage-ratchet") and .value.result == "skipped" and $event == "pull_request" and ($scope == "selected" or $scope == "none")) or (.key == "unit-selected" and .value.result == "skipped" and ($event != "pull_request" or $scope == "full" or $scope == "none")))' <<< "$NEEDS"; then
             echo "::error::Every required gate must succeed."
             exit 1
           fi
