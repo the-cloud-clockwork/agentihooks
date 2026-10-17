@@ -63,13 +63,17 @@ def failed_jobs(repo: str, run_id: int) -> list[dict]:
     jobs = json.loads(_api(f"repos/{repo}/actions/runs/{run_id}/jobs?filter=latest&per_page=100"))
     failed = []
     for job in jobs["jobs"]:
-        if job["conclusion"] != "failure":
+        shard = base_name(job["name"]) == SHARD
+        if job["conclusion"] != "failure" and not (shard and job["conclusion"] == "cancelled"):
             continue
         notes = [note["message"] for note in json.loads(_api(f"repos/{repo}/check-runs/{job['id']}/annotations"))]
-        if base_name(job["name"]) == SHARD:
+        if shard:
             log = _api(f"repos/{repo}/actions/jobs/{job['id']}/logs", "--allow-escape-sequences")
             notes += [line for line in log.splitlines() if "##[error]" in line]
-        failed.append({"name": job["name"], "text": "\n".join(notes)})
+        text = "\n".join(notes)
+        if job["conclusion"] == "cancelled" and not RUNNER_LOSS.search(text):
+            continue
+        failed.append({"name": job["name"], "text": text})
     unlisted = jobs["total_count"] - len(jobs["jobs"])
     if unlisted > 0:
         failed.append({"name": f"{unlisted} unlisted jobs", "text": ""})
