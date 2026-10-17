@@ -459,6 +459,26 @@ def test_shards_wait_only_on_the_durations_lookup():
     assert jobs["lint"]["needs"] in (["reuse"], ["reuse", "admission"])
 
 
+def test_full_suite_collection_starts_beside_selection_and_feeds_split():
+    jobs = _workflow()["jobs"]
+    collect = jobs["collect"]
+    assert collect["needs"] == jobs["select"]["needs"]
+    assert "needs.select" not in collect["if"]
+    assert "github.event_name == 'pull_request'" in collect["if"]
+    assert collect["strategy"]["matrix"] == jobs["split"]["strategy"]["matrix"]
+    command = next(step["run"] for step in collect["steps"] if step.get("name") == "Collect the whole suite")
+    assert "tests.duration_coverage import collected_tests" in command
+    assert "collected_tests(Path.cwd())" in command
+    upload = next(step for step in collect["steps"] if step.get("name") == "Upload the early collection")
+    download = next(step for step in jobs["split"]["steps"] if step.get("name") == "Download the early collection")
+    assert upload["with"]["if-no-files-found"] == "error"
+    assert download["with"]["name"] == upload["with"]["name"]
+    assert "collect" in jobs["split"]["needs"]
+    adopt = next(step for step in jobs["split"]["steps"] if step.get("name") == "Adopt latest dev durations")
+    assert "--collection collected.json" in adopt["run"]
+    assert "collect" in jobs["gate-required"]["needs"]
+
+
 def test_promotion_shard_reports_use_the_pushed_grader_and_prs_keep_the_base():
     steps = _workflow()["jobs"]["shard-check"]["steps"]
     checkout = next(step for step in steps if step.get("uses", "").startswith("actions/checkout@"))
