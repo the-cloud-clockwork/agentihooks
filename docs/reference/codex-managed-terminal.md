@@ -152,6 +152,76 @@ same rewrite, so continuity confirmation compares the rendered action exactly.
 Legacy rendering retains the foreground inbox wait. New push-master handoffs
 should make their first Next action read `agentihooks msg inbox`.
 
+## Profile check in the execution home
+
+Every profiled launch asks the agent to validate its mounted profile with the
+binding canary command written into its instructions. For an `app_server`
+execution the check runs against the execution's own Codex home, not the shared
+rendered profile home.
+
+1. `init-agent` writes the launch request, a private report file under the
+   runtime folder named by `AGENTIHOOKS_PROFILE_REPORT`. The request records
+   the profile, the harness, `state: pending` and the shared rendered home's
+   binding evidence, its canary included.
+2. The supervisor copies the shared home into a private per execution home,
+   `<execution folder>/codex`, with mode `0700`, the source and mount manifests
+   beside it and `bin` linked rather than copied. It rewrites the copy's own
+   `.profile-binding.json` so its `home` names the copy. The shared home's
+   evidence file is left unchanged.
+3. When the launch environment names a report, the supervisor then re-records
+   the request against the copy (`binding.rehome`). It re-inspects the copy's
+   rendered evidence and keeps the request only when the copy's canary equals
+   the canary recorded at launch. The report's `rendered` block then names the
+   copy's home; its canary, profile, harness and pending state are unchanged.
+4. The server starts with `CODEX_HOME` set to the copy. When the agent runs its
+   canary command, validation compares the live process home with the recorded
+   home. Both name the copy, so the check passes and the report moves to
+   `state: validated`.
+
+Before this step existed, the request kept the shared home while the process
+ran from the copy, so every `app_server` Codex profile check failed with
+`live process binding changed since validation`.
+
+A launch whose environment names no report (an unprofiled launch) skips
+the re-record and the report file is never touched. Legacy Codex launches never
+pass through the supervisor, so their request keeps the rendered home they
+started with.
+
+When the copy cannot be confirmed, the supervisor marks the pending request
+`state: failed` with the reason and the launch fails: the transport binding is
+recorded `failed`, the agent is dropped and the execution folder is removed.
+The two reasons are:
+
+| Reason | Cause |
+|---|---|
+| `execution home canary differs from the launch request` | The copy's instructions carry another canary than the shared home did at launch: the profile was rendered again between the request and the copy. |
+| `profile mismatch in rendered binding` | The copy's evidence file names another profile, harness or home; for example, an evidence file left pointing at the shared home. |
+
+Any other rendered evidence fault in the copy (`mounted persona changed since
+render`, `rendered source manifest changed`, `missing or invalid rendered profile
+evidence: …`) refuses the request the same way with that reason.
+
+Read the result from inside the agent session:
+
+```bash
+agentihooks profile binding
+```
+
+It prints the session home's profile, harness, persona and source digests,
+the routed account and the report state (`pending`, `validated` or
+`failed: <reason>`), never an environment value. `--home <path>` reads that
+home's evidence file without a report and states `rendered` or
+`invalid: <reason>`; run it against the execution copy to check its evidence
+on its own.
+
+The delivered behaviour is
+[pull request 3533](https://github.com/the-cloud-clockwork/agentihooks/pull/3533),
+covered by `test_rehomed_request_validates_against_the_execution_copy`,
+`test_rehome_refuses_and_marks_an_invalid_execution_copy` and
+`test_execution_home_rerecords_the_profile_report_for_the_copy`. Those tests
+run against fixture homes; a live `app_server` launch passing its profile check
+is recorded separately on the source task.
+
 ## Lifecycle and failures
 
 Reopening a viewer and retiring an execution are separate operations. Managed
@@ -173,6 +243,8 @@ The live qualification also recorded these viewer limits:
 | Symptom | Meaning and action |
 |---|---|
 | Launch fails with `ModuleNotFoundError: No module named 'websockets'` | The launching tool environment lacks its runtime dependency. Update the checkout to a revision containing the dependency fix, reinstall the tool using the installation instructions, and repeat the tool Python import check before retrying an admitted launch. Installing development extras in another venv does not fix this environment. |
+| Profile check fails with `live process binding changed since validation` on an `app_server` execution | The report records a home other than the execution copy. A revision without the execution home re-record step produces this on every launch; update to one that contains it. See [Profile check in the execution home](#profile-check-in-the-execution-home). |
+| Launch fails with `execution home canary differs from the launch request` | The profile was rendered again between the launch request and the execution home copy. Relaunch; the new request records the current canary. |
 | Attach reports `failed` or `exited` | The recorded app-server ended; there is no live thread to attach through that transport. Inspect execution status before attempting recovery. |
 | Attach times out without a connected thread | Startup has not produced a connected thread within the timeout. Check the managed server's launch result and serve log; increasing the timeout alone does not repair a failed launch. |
 | Reopen reports no connected thread | The immediate reopen command requires an already connected thread. Use the waiting attach helper during startup. |
