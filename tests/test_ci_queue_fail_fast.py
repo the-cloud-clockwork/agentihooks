@@ -299,6 +299,7 @@ def test_every_merge_queue_job_but_the_watcher_is_graded():
     assert push_only == {
         "promote",
         "refresh-durations",
+        "count-record",
         "flake-budget",
         "coverage-baseline",
         "coverage-ratchet",

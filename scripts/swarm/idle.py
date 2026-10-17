@@ -106,6 +106,14 @@ def waited(redis, slug, name):
     return int(raw) if raw else 0
 
 
+def woke(redis, slug, name):
+    from scripts.swarm.naming import NameRegistry
+
+    name = NameRegistry(redis).resolve(name)
+    raw = redis.get(key(slug, "woke", name))
+    return int(raw) if raw else 0
+
+
 def end_wait(redis, slug, name, at):
     from scripts.swarm.naming import NameRegistry
 
