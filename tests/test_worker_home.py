@@ -138,6 +138,25 @@ def test_bootstrap_renders_both_targets_into_separate_homes(fixture):
     assert "AH_CC_TOKEN_POOL_A" not in claude_text + codex_text
 
 
+def test_a_desktop_extension_browser_server_is_left_out_of_the_worker_home(fixture):
+    templates, volume = fixture
+    mcp = templates / "fixture-claude" / ".mcp.json"
+    document = json.loads(mcp.read_text())
+    document["mcpServers"]["playwright-ext-operator"] = {
+        "command": "cmd.exe",
+        "args": ["/c", "npx", "@playwright/mcp@latest", "--extension"],
+    }
+    mcp.write_text(json.dumps(document))
+
+    worker_home.bootstrap(request(templates, volume))
+
+    home = volume / "attempt-1" / "homes" / "claude"
+    assert sorted(json.loads((home / ".claude.json").read_text())["mcpServers"]) == [
+        "agentihooks",
+        "fixture-claude-mcp",
+    ]
+
+
 @pytest.mark.parametrize("target", ["claude", "codex"])
 def test_bootstrap_emits_binding_evidence_accepted_by_the_local_inspector(fixture, target):
     from scripts.profiles import binding
