@@ -172,3 +172,52 @@ def test_send_response_loss_replays_one_item_and_duplicate_delivery_retains_one_
     capsys.readouterr()
     run(store, runtime, doc(), NOW + 120_000)
     assert seats(store)[0].state == "finished"
+
+
+def test_departure_does_not_suppress_accepted_mail_for_the_successor(mailbox, capsys):
+    from tests.swarm.test_dispatch_seat import crew
+
+    store, inbox = mailbox
+    runtime = FakeRuntime()
+    assert cli.main(["send", f"dispatcher@{SLUG}", "Consider rank evidence"]) == 0
+    sent = json.loads(capsys.readouterr().out)
+    run(store, runtime, doc())
+    [seat] = seats(store)
+    departed = crew(doc(), joined={seat.name: [NOW + 10_000]})
+    run(store, runtime, departed, NOW + 60_000)
+    run(store, runtime, doc(), NOW + 120_000)
+    assert len(runtime.spawned) == 2
+    assert inbox.get(sent["id"]).state == "pending"
+    assert inbox.seats.occupant(seat.seat).occupant != seat.name
+
+
+def test_public_work_sent_to_a_finished_dispatcher_belongs_to_its_successor(mailbox, capsys):
+    from tests.swarm.test_dispatch_seat import priority
+
+    store, inbox = mailbox
+    runtime = FakeRuntime()
+    run(store, runtime, doc(priority()))
+    [seat] = seats(store)
+    run(store, runtime, doc(), NOW + 60_000)
+    assert seats(store)[0].state == "finished"
+    assert cli.main(["send", seat.name, "Consider fresh rank evidence"]) == 0
+    sent = json.loads(capsys.readouterr().out)
+    run(store, runtime, doc(), NOW + 120_000)
+    assert len(runtime.spawned) == 2
+    successor = next(a for a in seats(store) if a.state != "finished")
+    assert sent["to"] == successor.seat
+    assert inbox.deliver(sent["id"], successor.name).state == "delivered"
+
+
+def test_a_failed_consumer_launch_retries_without_losing_accepted_mail(mailbox, capsys):
+    store, inbox = mailbox
+    runtime = FakeRuntime(fail=True)
+    assert cli.main(["send", f"dispatcher@{SLUG}", "Consider rank evidence"]) == 0
+    sent = json.loads(capsys.readouterr().out)
+    assert "spawn failed" in run(store, runtime, doc())[0]
+    assert inbox.get(sent["id"]).state == "pending"
+    runtime.fail = False
+    run(store, runtime, doc(), NOW + 60_000)
+    assert len(runtime.spawned) == 1
+    [seat] = seats(store)
+    assert inbox.deliver(sent["id"], seat.name).state == "delivered"
