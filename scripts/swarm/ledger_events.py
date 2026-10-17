@@ -106,13 +106,19 @@ def pull_request(raw):
     checks = _newest([check for check in required if not _superseded(check, newest)])
     results = [check.get("conclusion") or check.get("state") for check in checks]
     required_runs = {_run_key(check) for check in required if _run_key(check)[0]}
+    expected = {
+        (_run_key(check), check.get("name") or check.get("context"))
+        for check in rollup
+        if check.get("isRequired") or (check.get("name") or check.get("context")) == GATE
+    }
+    reported = {(_run_key(check), check.get("name") or check.get("context")) for check in checks}
     running = any(
         suite.get("workflowRun")
         and suite.get("status") != "COMPLETED"
         and not _superseded(suite, newest)
         and (not raw.get("gated") or not required_runs or _run_key(suite) in required_runs)
         for suite in suites
-    ) or bool(required_runs - {_run_key(check) for check in checks})
+    ) or bool(expected - reported)
     pushes = [
         iso_ms(suite["workflowRun"]["createdAt"])
         for suite in suites
