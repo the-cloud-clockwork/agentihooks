@@ -51,7 +51,7 @@ def reformatted(diff: str) -> set[int]:
             row += 1
         elif row and line.startswith("+"):
             rows.add(row)
-        elif row and line.startswith(" "):
+        elif row:
             row += 1
     return rows
 
