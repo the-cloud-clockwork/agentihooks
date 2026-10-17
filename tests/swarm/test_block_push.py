@@ -79,15 +79,40 @@ def test_block_refuses_from_inside_the_task_worktree_too(worktree, capsys, monke
     _refused(worktree, capsys)
 
 
-def test_block_records_the_pushed_branch_on_the_task(worktree):
+def test_block_records_the_pushed_branch_on_the_task(worktree, monkeypatch):
     ledger, origin, primary, top = worktree
     _git(top, "commit", "--allow-empty", "-m", "Task work")
     _git(top, "push", "-u", "origin", BRANCH)
+    writers = []
+    update = ledger.update_task
+    monkeypatch.setattr(
+        ledger,
+        "update_task",
+        lambda slug, task, fields, **kw: (
+            writers.append((task, sorted(fields), kw.get("by"))) or update(slug, task, fields, **kw)
+        ),
+    )
     assert block() == 0
     row = ledger.rows["t1"]
     assert row["state"] == "blocked"
     assert (row["branch"], row["branch_repo"]) == (BRANCH, str(origin))
     assert row["repository_branches"] == {str(primary): BRANCH}
+    assert ("t1", ["branch", "branch_repo", "repository_branches"], AGENT) in writers
+
+
+def test_block_checks_the_worktree_of_the_branch_recorded_for_its_repository(worktree, capsys):
+    ledger, _, primary, _ = worktree
+    top = (primary.parent / "worktrees" / "recorded").resolve()
+    _git(primary, "worktree", "add", "-b", "eng-t1", str(top), "origin/dev")
+    _git(top, "commit", "--allow-empty", "-m", "Task work")
+    _git(primary, "worktree", "remove", "--force", str(primary.parent / "worktrees" / "repo" / BRANCH))
+    ledger.rows["t1"].update({"branch": "stale", "repository_branches": {str(primary): "eng-t1"}})
+    capsys.readouterr()
+    assert block() == 1
+    assert capsys.readouterr().err == (
+        f"swarm: the worktree {top} holds commits origin lacks; "
+        f"push them with git -C {top} push -u origin eng-t1 before blocking\n"
+    )
 
 
 def test_block_without_task_commits_blocks_and_records_no_branch(worktree):

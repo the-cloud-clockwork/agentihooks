@@ -135,9 +135,9 @@ def _merged_into_dev(dep):
 
 def _fetch_foreign(dep, branch):
     wanted = repo_key(dep["branch_repo"])
-    checkout = next((path for path in dep.get("repository_branches") or {} if origin_key(path) == wanted), "")
-    if checkout:
-        _out(["git", "-C", checkout, "fetch", "origin", branch], f"cannot fetch {branch} in {checkout}")
+    checkouts = [path for path in dep.get("repository_branches") or {} if origin_key(path) == wanted]
+    if checkouts:
+        _out(["git", "-C", checkouts[0], "fetch", "origin", branch], f"cannot fetch {branch} in {checkouts[0]}")
     else:
         _out(["git", "fetch", "--", dep["branch_repo"], branch], f"cannot fetch {branch} from {dep['branch_repo']}")
 
