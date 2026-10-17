@@ -436,3 +436,67 @@ def test_fallback_grades_a_literal_leading_dash_filename(repositories, monkeypat
     git(root, "commit", "-qm", "Literal source filename")
     monkeypatch.chdir(root)
     assert publish_gate.main() == 0
+
+
+BRANCHY = "def branchy(value):\n    result = 0\n" + "".join(
+    f"    if value == {n}:\n        result += 1\n" for n in range(13)
+)
+OFFENDERS = (
+    "def wide(a, b, c, d, e, f, g, h):\n    return a, b, c, d, e, f, g, h\n\n\n"
+    "def long():\n" + "    print(1)\n" * 300 + "\n\n" + BRANCHY + "    return result\n\n\n"
+)
+OFFENDERS += "print(1)\n" * (3001 - OFFENDERS.count("\n"))
+FRESH = "\n\ndef fresh(a, b, c, d, e, f, g, h):\n    return a, b, c, d, e, f, g, h\n"
+
+
+@pytest.mark.parametrize(
+    "edit, reported",
+    [
+        (lambda source: source[: -len("print(1)\n")] + "print(2)\n", None),
+        (lambda source: source + "print(1)\n", "tests/test_chosen.py: file lines grew from 3001 to 3002"),
+        (
+            lambda source: source.replace("def long():\n", "def long():\n    print(1)\n"),
+            "tests/test_chosen.py: long lines grew from 301 to 302",
+        ),
+        (
+            lambda source: source.replace(
+                "h):\n    return a, b, c, d, e, f, g, h\n", "h, i):\n    return a, b, c, d, e, f, g, h, i\n"
+            ),
+            "tests/test_chosen.py: wide PLR0913 grew from 8 to 9",
+        ),
+        (
+            lambda source: source.replace(BRANCHY, BRANCHY + "    if value == 13:\n        result += 1\n"),
+            "tests/test_chosen.py: branchy C901 grew from 14 to 15",
+        ),
+        (
+            lambda source: source[: -len("print(1)\n")] + FRESH,
+            "tests/test_chosen.py: fresh PLR0913 Too many arguments in function definition (8 > 7)",
+        ),
+    ],
+    ids=["unchanged", "file_growth", "function_growth", "argument_growth", "complexity_growth", "new_offender"],
+)
+def test_fallback_grades_touched_offenders_against_the_merge_base(repositories, monkeypatch, capsys, edit, reported):
+    from pathlib import Path
+
+    from scripts import ci_prepush
+    from scripts.swarm import publish_gate
+
+    p = repositories
+    (p.bundle / "tests").mkdir()
+    (p.bundle / "tests" / "test_chosen.py").write_text(OFFENDERS)
+    git(p.bundle, "add", "tests/test_chosen.py")
+    git(p.bundle, "commit", "-qm", "Existing offenders")
+    git(p.bundle, "push", "origin", "dev")
+    p.task["repositories"] = [str(p.bundle)]
+    root = Path(publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)["worktree"])
+    (root / "tests" / "test_chosen.py").write_text(edit(OFFENDERS))
+    git(root, "add", "tests/test_chosen.py")
+    git(root, "commit", "-qm", "Touch offenders")
+    monkeypatch.chdir(root)
+    assert publish_gate.main() == (0 if reported is None else 1)
+    output = capsys.readouterr().out
+    assert ci_prepush.passed(root) is (reported is None)
+    if reported is None:
+        assert output.endswith("Graded 1 changed Python files\n")
+    else:
+        assert f"{reported}\n" in output
