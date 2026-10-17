@@ -1,6 +1,11 @@
+import subprocess
 from pathlib import Path
 
-SCRIPT = (Path(__file__).resolve().parents[1] / "deploy/helm/agentihooks-swarm/ci/kind-smoke.sh").read_text()
+import pytest
+import yaml
+
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPT = (ROOT / "deploy/helm/agentihooks-swarm/ci/kind-smoke.sh").read_text()
 
 
 def _at(text: str) -> int:
@@ -28,3 +33,83 @@ def test_kind_proof_cleanup_waits_for_the_terminal_image_job():
     assert finish.index('wait "$terminal" || true') < finish.index('rm -f "$load_lock"')
     assert SCRIPT.count('load_lock="$(mktemp)"\n') == 1
     assert 'load_lock="$(mktemp)"\ntrap finish EXIT\n' in SCRIPT
+
+
+def _layer_flags(tmp_path, env, present=()):
+    start = _at("layers() {")
+    functions = SCRIPT[start : SCRIPT.index("\n}\n", SCRIPT.index("rotate_layers() {")) + 3]
+    for name in present:
+        (tmp_path / name).mkdir()
+    result = subprocess.run(
+        ["bash", "-c", f"set -euo pipefail\n{functions}\nlayers swarm\nrotate_layers swarm\nls {tmp_path}"],
+        env={"PATH": "/usr/bin:/bin", **env},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout.splitlines()
+
+
+@pytest.mark.parametrize(
+    ("hit", "present", "flags"),
+    [
+        ("true", ("swarm",), ["--cache-from", "type=local,src={cache}/swarm"]),
+        (
+            "false",
+            ("swarm",),
+            [
+                "--cache-from",
+                "type=local,src={cache}/swarm",
+                "--cache-to",
+                "type=local,dest={cache}/swarm.next,mode=max",
+            ],
+        ),
+        ("", (), ["--cache-to", "type=local,dest={cache}/swarm.next,mode=max"]),
+    ],
+    ids=["hit-reads-only", "miss-reads-and-writes", "cold-writes-only"],
+)
+def test_fixture_builds_read_the_restored_layers_and_write_only_on_a_miss(tmp_path, hit, present, flags):
+    env = {"KIND_LAYER_CACHE": str(tmp_path), "KIND_LAYER_CACHE_HIT": hit}
+    assert _layer_flags(tmp_path, env, present) == [flag.format(cache=tmp_path) for flag in flags] + list(present)
+
+
+def test_a_new_layer_export_replaces_the_restored_one(tmp_path):
+    (tmp_path / "swarm").mkdir()
+    (tmp_path / "swarm" / "stale").touch()
+    (tmp_path / "swarm.next").mkdir()
+    _layer_flags(tmp_path, {"KIND_LAYER_CACHE": str(tmp_path), "KIND_LAYER_CACHE_HIT": "false"})
+    assert [path.name for path in tmp_path.iterdir()] == ["swarm"]
+    assert not (tmp_path / "swarm" / "stale").exists()
+
+
+def test_fixture_builds_without_a_layer_cache_pass_no_cache_flags(tmp_path):
+    assert _layer_flags(tmp_path, {}) == []
+
+
+def test_every_fixture_build_stage_takes_the_layer_flags():
+    assert 'docker build -q "${terminal_layers[@]}" --build-arg IMAGE="$image" --target packages' in SCRIPT
+    assert 'docker build -q -t "$image" "${swarm_layers[@]}" .' in SCRIPT
+    assert _at("rotate_layers swarm\n") < _at("printf 'main fixture image built")
+    assert _at('wait "$packages"\n  rotate_layers terminal\n')
+
+
+def test_the_kind_job_restores_and_saves_the_layers_it_builds_with():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/helm-kind.yml").read_text())
+    steps = {step.get("id") or step.get("name"): step for step in workflow["jobs"]["kind"]["steps"]}
+    smoke_name = "Lint, install and prove the chart in kind"
+    restore, smoke, save = steps["layers"], steps[smoke_name], steps["Save the fixture image layers"]
+    assert restore["uses"] == "actions/cache/restore@v4"
+    assert save["uses"] == "actions/cache/save@v4"
+    assert restore["with"]["path"] == save["with"]["path"] == smoke["env"]["KIND_LAYER_CACHE"]
+    assert smoke["env"]["KIND_LAYER_CACHE_HIT"] == "${{ steps.layers.outputs.cache-hit }}"
+    assert save["with"]["key"] == "${{ steps.layers.outputs.cache-primary-key }}"
+    assert save["if"] == "steps.layers.outputs.cache-hit != 'true'"
+    order = list(steps)
+    assert order.index("layers") < order.index(smoke_name) < order.index("Save the fixture image layers")
+    for source in (
+        "Dockerfile",
+        "docker/swarm/requirements.lock",
+        "docker/swarm-node/versions.lock",
+        "deploy/helm/agentihooks-swarm/ci/terminal-worker.Dockerfile",
+    ):
+        assert f"'{source}'" in restore["with"]["key"]
