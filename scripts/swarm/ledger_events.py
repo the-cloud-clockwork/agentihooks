@@ -247,7 +247,7 @@ def _resolved(gated, checks, results, running):
     if gated:
         return any(result in RED for result in results) or (
             not running
-            and "SUCCESS" in _gate(checks, results)
+            and set(_gate(checks, results)) == {"SUCCESS"}
             and all(result in PASSED | {"NEUTRAL"} for result in results)
         )
     if not running and any(result in FINAL_RED for result in results):
