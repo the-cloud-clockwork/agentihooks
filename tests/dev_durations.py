@@ -65,8 +65,9 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--collected", type=Path, help="where to write the test identifiers the coverage check collected"
     )
+    parser.add_argument("--collection", type=Path, help="the test identifiers already collected for this head")
     args = parser.parse_args(argv)
-    collected = collected_tests(_ROOT)
+    collected = json.loads(args.collection.read_text()) if args.collection else collected_tests(_ROOT)
     _choose(args.version, args.restored, collected)
     if args.collected:
         args.collected.write_text(json.dumps(collected))
