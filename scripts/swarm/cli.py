@@ -105,6 +105,7 @@ from scripts.swarm import (
     prompt,
     ready,
     reaper,
+    release_wait,
     remote_control,
     review_rounds,
     snapshot,
@@ -331,6 +332,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
                     lambda agent: runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)),
                     lambda lane: ready_in_order(slug, store, rows, doc, lane),
                     now_ms(),
+                    released=release_wait.checker(config.repo),
                 ),
                 doc,
             )

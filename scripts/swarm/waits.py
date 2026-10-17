@@ -90,6 +90,7 @@ def _save_wait(redis, slug, name, previous, held, outcome, now_ms):
             idle.remember_wait(pipe, slug, name, json.loads(previous), now_ms)
             pipe.delete(key)
             pipe.set(idle.key(slug, "waited", name), now_ms, ex=idle.BEAT_TTL_S)
+            pipe.set(idle.key(slug, "woke", name), now_ms, ex=idle.BEAT_TTL_S)
         else:
             pipe.set(key, json.dumps(held), keepttl=True)
         return True

@@ -702,7 +702,14 @@ def test_a_live_alert_of_another_source_does_not_hold_a_promotion_raise():
     assert [a["source"] for a in state["alerts"]] == ["size", "promotion"]
 
 
-RAISE_REFUSED = "alert_raise takes by, a source among ('promotion',) and a text of up to 2000 characters"
+def test_a_raised_release_alert_opens_one_alert_for_the_master():
+    make_ledger()
+    state, rejected = sync(ops=[{**raise_promotion("r1", "Release tag lookup failed"), "source": "release"}])
+    assert rejected == []
+    assert [(a["source"], a["target"], a["state"]) for a in state["alerts"]] == [("release", "master", "open")]
+
+
+RAISE_REFUSED = "alert_raise takes by, a source among ('promotion', 'release') and a text of up to 2000 characters"
 
 
 @pytest.mark.parametrize(
