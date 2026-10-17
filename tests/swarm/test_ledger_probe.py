@@ -265,9 +265,10 @@ def test_a_departed_swarm_does_not_hold_an_incident_after_two_answered_sibling_p
     else:
         store.update("sw", state="stopped")
     ledger.read_s = 0.1
-    read, write = ledger.metadata, ledger.time_left
+    read, write, notify = ledger.metadata, ledger.time_left, ledger.notify
     ledger.metadata = lambda slug: read("sw")
     ledger.time_left = lambda slug, slots, ci_minutes: write("sw", slots, ci_minutes)
+    ledger.notify = lambda slug, text: notify("sw", text)
     ledger_probe.observe(store, "sibling", ledger, FakeRuntime(), 3_000, clock=clock, facts=lambda: FACTS)
     assert store.redis.hget(incidents.key("ledger"), "active") == "1"
     ledger_probe.observe(store, "sibling", ledger, FakeRuntime(), 4_000, clock=clock, facts=lambda: FACTS)
