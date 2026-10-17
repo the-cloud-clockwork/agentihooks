@@ -465,12 +465,29 @@ def test_promotion_shard_reports_use_the_pushed_grader_and_prs_keep_the_base():
 
 
 def test_unit_shards_check_out_full_history_without_old_file_contents():
-    _, checkout = _unit_step_index(lambda s: s.get("uses", "").startswith("actions/checkout"))
-    assert {key: value for key, value in checkout["with"].items() if key != "ref"} == {
-        "fetch-depth": 0,
-        "filter": "blob:none",
-    }
-    assert checkout["with"].get("ref") in (None, "${{ github.sha }}")
+    steps = _workflow()["jobs"]["unit"]["steps"]
+    checkouts = [s for s in steps if s.get("uses", "").startswith("actions/checkout")]
+    assert checkouts
+    for checkout in checkouts:
+        assert {key: value for key, value in checkout["with"].items() if key != "ref"} == {
+            "fetch-depth": 0,
+            "filter": "blob:none",
+        }
+        assert checkout["with"].get("ref") in (None, "${{ github.sha }}")
+
+
+def test_a_stalled_unit_checkout_aborts_within_a_minute_and_retries_once_in_place():
+    steps = _workflow()["jobs"]["unit"]["steps"]
+    first, second = [s for s in steps if s.get("uses", "").startswith("actions/checkout")]
+    assert steps.index(first) == 0 and steps.index(second) == 1
+    for checkout in (first, second):
+        assert checkout["uses"] == "actions/checkout@v4"
+        assert checkout["env"] == {"GIT_HTTP_LOW_SPEED_LIMIT": "1000", "GIT_HTTP_LOW_SPEED_TIME": "60"}
+        assert checkout["with"] == {"ref": "${{ github.sha }}", "fetch-depth": 0, "filter": "blob:none"}
+    assert first["continue-on-error"] is True
+    assert "if" not in first
+    assert "continue-on-error" not in second
+    assert second["if"] == f"steps.{first['id']}.outcome == 'failure'"
 
 
 def test_unit_pins_an_exact_uv_version():
