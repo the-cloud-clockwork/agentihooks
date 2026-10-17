@@ -93,10 +93,10 @@ def closed_in_window(value: str, cwd: Path) -> bool:
 
 
 def asks_operator(tool_name: str, session_id: str | None) -> bool:
-    """Whether a permission prompt for this tool may reach the operator present in the master pane."""
+    """Whether a permission prompt for this tool may reach the operator, who opens it only by typing operator on."""
     from hooks.context.operator_mode import _heard
 
-    return tool_name in PERMISSION_TOOLS and is_master(session_id) and _heard(session_id, None, None)
+    return tool_name in PERMISSION_TOOLS and _heard(session_id)
 
 
 def protection_refusal(payload: dict) -> str:

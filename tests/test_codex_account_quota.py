@@ -260,6 +260,7 @@ def test_two_accounts_render_both_windows_their_resets_and_the_reading_age():
         "30m",
         "60%",
         "4d15h",
+        "0m",
     ]
     assert table[3].split() == [
         "2",
@@ -275,6 +276,7 @@ def test_two_accounts_render_both_windows_their_resets_and_the_reading_age():
         "1h00m",
         "3%",
         "1d00h",
+        "1m",
     ]
 
 

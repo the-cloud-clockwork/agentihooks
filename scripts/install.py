@@ -88,6 +88,7 @@ def _resolve_claude_home() -> Path:
 
 
 CLAUDE_HOME = _resolve_claude_home()
+ROUTE_LAUNCHERS = {"interactive": "scripts.routing.interactive", "master-login": "scripts.master_claude_login"}
 
 # Persistent state directory for user-level agentihooks configuration.
 # Overridable via AGENTIHOOKS_HOME for per-pod isolation on shared filesystems.
@@ -5491,10 +5492,8 @@ def cmd_claude(extra_args: list[str]) -> None:
     route_lock = route_lock_path.open("a+", encoding="utf-8")
     fcntl.flock(route_lock, fcntl.LOCK_EX)
     try:
-        if route == "interactive":
-            from scripts.routing import interactive
-
-            return interactive.launch_claude(claude_bin, extra_args, os.environ, report)
+        if route in ROUTE_LAUNCHERS:
+            return import_module(ROUTE_LAUNCHERS[route]).launch_claude(claude_bin, extra_args, os.environ, report)
         decision = (
             forced(os.environ, route)
             if route
