@@ -244,6 +244,37 @@ def test_cancel_stops_each_open_run_once_and_waits_until_every_refused_workflow_
     assert stops == [("o/r", 1), ("o/r", 6), ("o/r", 3), ("o/r", 6)]
 
 
+def test_cancel_ends_at_once_when_every_matching_run_has_completed(monkeypatch):
+    monkeypatch.setattr(
+        lanes, "api", lambda *a: {"workflow_runs": [_run(1, "a.yml", "completed"), _run(2, "b.yml@x", "completed")]}
+    )
+    monkeypatch.setattr(lanes, "stop", lambda *a: pytest.fail("nothing left to cancel"))
+    monkeypatch.setattr(lanes.time, "sleep", lambda *a: pytest.fail("nothing left to wait for"))
+    assert lanes.cancel("o/r", "abc", {"a.yml", "b.yml"}, 60) == set()
+
+
+def test_cancel_keeps_waiting_while_a_matching_run_still_runs(monkeypatch):
+    pages = [
+        [_run(1, "a.yml", "completed"), _run(2, "b.yml")],
+        [_run(1, "a.yml", "completed"), _run(2, "b.yml")],
+    ]
+    monkeypatch.setattr(lanes, "api", lambda *a: {"workflow_runs": pages.pop(0)})
+    stops = []
+    monkeypatch.setattr(lanes, "stop", lambda repo, run: stops.append(run) or len(stops) > 1)
+    sleeps = []
+    monkeypatch.setattr(lanes.time, "sleep", sleeps.append)
+    assert lanes.cancel("o/r", "abc", {"a.yml", "b.yml"}, 60) == {2}
+    assert sleeps == [5.0]
+    assert stops == [2, 2]
+
+
+def test_an_accepted_cancel_ends_the_wait_while_the_run_still_shows_running(monkeypatch):
+    monkeypatch.setattr(lanes, "api", lambda *a: {"workflow_runs": [_run(1, "a.yml")]})
+    monkeypatch.setattr(lanes, "stop", lambda *a: True)
+    monkeypatch.setattr(lanes.time, "sleep", lambda *a: pytest.fail("the cancel was accepted"))
+    assert lanes.cancel("o/r", "abc", {"a.yml"}, 60) == {1}
+
+
 @pytest.mark.parametrize("code, stopped", [(0, True), (1, False)])
 def test_stop_reports_whether_github_accepted_the_cancel(monkeypatch, code, stopped):
     seen = []
@@ -299,3 +330,46 @@ def test_the_workflow_grades_every_branch_push_with_the_dev_grader():
     steps = workflow["jobs"]["grade"]["steps"]
     assert steps[0]["with"]["ref"] == "dev"
     assert steps[-1]["run"] == 'python -m scripts.ci_branch_lanes --head "$GITHUB_SHA" --repo "$GITHUB_REPOSITORY"'
+
+
+def test_an_edit_cannot_widen_the_events_of_a_trusted_conditional_lane(tmp_path, monkeypatch):
+    block = {"group": "${{ github.event_name == 'push' && github.ref || 'hosted-lane-a' }}", "queue": "max"}
+    baseline = _workflow(block)
+    baseline["on"] = {"push": {"branches": ["dev"]}}
+    updated = _workflow(block)
+    updated["on"] = {"push": None}
+    base, head, sha = _repo(tmp_path, {"replay.yml": updated})
+    (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(baseline))
+    monkeypatch.chdir(head)
+    assert lanes.refused(sha, base) == {
+        f"{lanes.WORKFLOWS}/replay.yml": ["job replay has no shared hosted lane concurrency group"]
+    }
+
+
+@pytest.mark.parametrize("quoted_head", [False, True])
+def test_equivalent_event_key_spellings_preserve_trusted_concurrency(tmp_path, monkeypatch, quoted_head):
+    block = {"group": "${{ github.workflow }}", "queue": "max"}
+    baseline = _workflow(block)
+    updated = _workflow(block, replay={"runs-on": "x", "steps": [{"run": "echo changed"}]})
+    unquoted = baseline if quoted_head else updated
+    unquoted[True] = unquoted.pop("on")
+    base, head, sha = _repo(tmp_path, {"replay.yml": updated})
+    (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(baseline))
+    monkeypatch.chdir(head)
+    assert lanes.refused(sha, base) == {}
+
+
+def test_a_second_event_key_spelling_cannot_widen_a_trusted_conditional_lane(tmp_path, monkeypatch):
+    block = {"group": "${{ github.event_name == 'push' && github.ref || 'hosted-lane-a' }}", "queue": "max"}
+    baseline = _workflow(block)
+    baseline.pop("on")
+    baseline[True] = {"push": {"branches": ["dev"]}}
+    updated = _workflow(block)
+    updated["on"] = {"push": None}
+    updated[True] = {"push": {"branches": ["dev"]}}
+    base, head, sha = _repo(tmp_path, {"replay.yml": updated})
+    (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(baseline))
+    monkeypatch.chdir(head)
+    assert lanes.refused(sha, base) == {
+        f"{lanes.WORKFLOWS}/replay.yml": ["job replay has no shared hosted lane concurrency group"]
+    }

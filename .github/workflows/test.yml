@@ -728,9 +728,15 @@ jobs:
           retention-days: 7
           overwrite: true
 
+      # The grader's manifest code picks what is skipped; the head supplies only the plan and its collection.
       - name: Deselect the reused tests
         if: steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
-        run: python -m tests.dep_manifest deselect --plan reused-tests.json --collected collected.json --out reused.json
+        env:
+          PYTHON_PATH: ${{ steps.python.outputs.python-path }}
+        run: |
+          cd "$RUNNER_TEMP/planner"
+          "$PYTHON_PATH" -m tests.dep_manifest deselect --plan "$GITHUB_WORKSPACE/reused-tests.json" \
+            --collected "$GITHUB_WORKSPACE/collected.json" --out "$GITHUB_WORKSPACE/reused.json"
 
       - name: Upload the deselected tests
         if: steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
@@ -769,7 +775,7 @@ jobs:
           github-token: ${{ steps.unit-token.outputs.token }}
 
       - name: Upload the chosen durations
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: split-${{ matrix.python-version }}
           path: |
@@ -778,7 +784,6 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-          overwrite: true
 
       - name: Upload collected tests
         if: github.event.pull_request.base.ref != 'main'
@@ -971,7 +976,7 @@ jobs:
       # Shards balance on these: per-test times here differ from a local run.
       - name: Upload durations
         if: ${{ !cancelled() && hashFiles('durations.json') != '' }}
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: durations-${{ matrix.python-version }}-${{ matrix.shard }}
           path: |
@@ -979,7 +984,6 @@ jobs:
             durations.sha256
             elapsed.json
           retention-days: 14
-          overwrite: true
 
       - name: Record flaky tests
         if: ${{ !cancelled() }}
@@ -2331,6 +2335,7 @@ jobs:
       stats_parts: ${{ steps.reuse.outputs.reused == 'true' && '[0]' || steps.plan.outputs.stats_parts }}
       bases: ${{ steps.plan.outputs.bases }}
       reused: ${{ steps.reuse.outputs.reused || 'false' }}
+      forwarded: ${{ (steps.reuse.outputs.reused == 'true' || steps.plan.outputs.changed == '0') && 'true' || 'false' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -2379,16 +2384,6 @@ jobs:
           PYTHONPATH="$RUNNER_TEMP/grader" python -P -m scripts.ci_mutation.reuse "$BRANCH" "$GITHUB_RUN_ID" \
             --head "$HEAD_SHA" --base "$base" --grader "$GRADER"
 
-      - name: Upload the reused preflight report
-        if: steps.reuse.outputs.reused == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: mutation-preflight-reuse
-          path: .mutation-gate/
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 7
-
       - name: Install dependencies
         if: steps.reuse.outputs.reused != 'true'
         run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
@@ -2400,6 +2395,22 @@ jobs:
           BASE: ${{ inputs.base || 'origin/dev' }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: python -m scripts.ci_mutation.plan --base "$BASE"
+
+      - name: Grade the empty change set
+        if: steps.plan.outputs.changed == '0'
+        env:
+          BASES: ${{ steps.plan.outputs.bases }}
+        run: python -m scripts.ci_mutation --bases "$BASES" --budget 1080
+
+      - name: Forward the reused or empty mutation report
+        if: always() && (steps.reuse.outputs.reused == 'true' || steps.plan.outputs.changed == '0')
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-report-0
+          path: .mutation-gate/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
 
   mutation-stats:
     needs: [mutation-plan, admission]
@@ -2414,26 +2425,29 @@ jobs:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
     steps:
       - uses: actions/checkout@v4
+        if: needs.mutation-plan.outputs.forwarded != 'true'
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
 
       - uses: actions/setup-python@v5
+        if: needs.mutation-plan.outputs.forwarded != 'true'
         with:
           python-version: "3.12"
 
       - uses: astral-sh/setup-uv@v10.2.0
+        if: needs.mutation-plan.outputs.forwarded != 'true'
         with:
           version: "0.12.23"
           checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
           enable-cache: false
 
       - name: Install dependencies
-        if: needs.mutation-plan.outputs.reused != 'true'
+        if: needs.mutation-plan.outputs.forwarded != 'true'
         run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Select mutation tests before browser setup
-        if: needs.mutation-plan.outputs.reused != 'true'
+        if: needs.mutation-plan.outputs.forwarded != 'true'
         id: selection
         env:
           BASES: ${{ needs.mutation-plan.outputs.bases }}
@@ -2452,7 +2466,7 @@ jobs:
           exit 1
 
       - name: Collect one stats part for every mutation shard
-        if: needs.mutation-plan.outputs.reused != 'true'
+        if: needs.mutation-plan.outputs.forwarded != 'true'
         env:
           BASES: ${{ needs.mutation-plan.outputs.bases }}
           PYTHONUNBUFFERED: "1"
@@ -2461,7 +2475,7 @@ jobs:
         run: mkdir -p .mutation-stats && touch ".mutation-stats/collected-$PART" && python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --stats .mutation-stats --stats-part "$PART" --stats-parts "$PARTS"
 
       - name: Upload mutation stats part
-        if: needs.mutation-plan.outputs.reused != 'true'
+        if: needs.mutation-plan.outputs.forwarded != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: mutation-stats-${{ matrix.part }}
@@ -2494,26 +2508,29 @@ jobs:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
     steps:
       - uses: actions/checkout@v4
+        if: needs.mutation-plan.outputs.forwarded != 'true'
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
 
       - uses: actions/setup-python@v5
+        if: needs.mutation-plan.outputs.forwarded != 'true'
         with:
           python-version: "3.12"
 
       - uses: astral-sh/setup-uv@v10.2.0
+        if: needs.mutation-plan.outputs.forwarded != 'true'
         with:
           version: "0.12.23"
           checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
           enable-cache: false
 
       - name: Install dependencies
-        if: needs.mutation-plan.outputs.reused != 'true'
+        if: needs.mutation-plan.outputs.forwarded != 'true'
         run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Select mutation tests before browser setup
-        if: needs.mutation-plan.outputs.reused != 'true'
+        if: needs.mutation-plan.outputs.forwarded != 'true'
         id: selection
         env:
           BASES: ${{ needs.mutation-plan.outputs.bases }}
@@ -2532,22 +2549,15 @@ jobs:
           exit 1
 
       - name: Download the shared mutation stats
-        if: needs.mutation-plan.outputs.reused != 'true'
+        if: needs.mutation-plan.outputs.forwarded != 'true'
         uses: actions/download-artifact@v4
         with:
           pattern: mutation-stats-*
           path: .mutation-stats
           merge-multiple: true
 
-      - name: Download the reused preflight report
-        if: needs.mutation-plan.outputs.reused == 'true'
-        uses: actions/download-artifact@v4
-        with:
-          name: mutation-preflight-reuse
-          path: .mutation-gate
-
       - name: Mutate changed Python files
-        if: github.event_name == 'pull_request' && needs.mutation-plan.outputs.reused != 'true'
+        if: github.event_name == 'pull_request' && needs.mutation-plan.outputs.forwarded != 'true'
         env:
           BASES: ${{ needs.mutation-plan.outputs.bases }}
           PYTHONUNBUFFERED: "1"
@@ -2556,7 +2566,7 @@ jobs:
         run: python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --shard "$SHARD" --shards "$SHARDS" --stats .mutation-stats
 
       - name: Mutate dispatched Python files
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && needs.mutation-plan.outputs.forwarded != 'true'
         env:
           BASES: ${{ needs.mutation-plan.outputs.bases }}
           PYTHONUNBUFFERED: "1"
@@ -2565,7 +2575,7 @@ jobs:
         run: python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --shard "$SHARD" --shards "$SHARDS" --stats .mutation-stats
 
       - name: Upload complete mutation evidence
-        if: always()
+        if: always() && needs.mutation-plan.outputs.forwarded != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: mutation-report-${{ matrix.shard }}

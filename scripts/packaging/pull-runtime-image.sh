@@ -6,6 +6,11 @@ shift
 docker_host="${DOCKER_HOST:-unix:///var/run/docker.sock}"
 attempts=3
 limit="${PULL_ATTEMPT_SECONDS:-120}"
+if [[ ${SWARM_SMOKE_RUNTIME_IMAGES_READY:-} == true &&
+      ( "$image" == mirror.gcr.io/library/redis:7 || "$image" == mirror.gcr.io/library/redis:7-alpine ) ]] &&
+   [[ "$(timeout "$limit" docker --host "$docker_host" image inspect --format '{{.Architecture}}' "$image" 2>/dev/null)" == amd64 ]]; then
+  exit 0
+fi
 acquire() {
   manifest="$(timeout "$limit" docker manifest inspect "$@" "$image")" && digest="$(python3 -c '
 import json
