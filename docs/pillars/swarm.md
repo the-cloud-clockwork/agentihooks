@@ -122,20 +122,21 @@ live master:
 
 | Rule | Behavior |
 |---|---|
-| Order | Items leave the pool oldest first, in the order the inbox numbered them on arrival. |
+| Order | Items leave the pool oldest first, by the arrival sequence number the inbox gives each item sent to `master@<id>`. |
 | Exactly once | A master takes an item in one Redis transaction that removes it from the pool, moves it pending to that master's seat and records the seat as its holder. Two processes handing out the same pool never give one item to two masters. |
 | Round robin | The pool remembers the last seat it served and gives the next item to the next live seat in seat order, lead first, then `master-2@<id>`, `master-3@<id>` and on, wrapping back to the first. |
-| Skips | A seat whose master is finished, retiring, asked to retire, retired by a seat count change or recorded as having left its seat is not live and is passed over. |
+| Skips | A seat whose master is finished, retiring, asked to retire, retired early, numbered above the seat count or recorded as having left its seat is not live and is passed over. |
 | Redelivery | A pooled item its holder does not confirm within `AGENTIHOOKS_INBOX_REDELIVER_S` (default 300 seconds) goes back to the pool and on to the next live master, passing over the master that let it lapse while another is live. It keeps its id. |
-| Gone holder | Items a master claimed and never took return to the pool when that master stops being live, for the remaining masters. |
-| No master | Items wait in the pool, in order, until a master is live. |
+| Gone holder | Items a master claimed that are still pending at its seat return to the pool when that master stops being live, for the remaining masters. Items it had already been delivered return at the next redelivery pass, as any unconfirmed item does. |
+| No master | Items already in the pool wait there, in order, until a master is live. A new item sent while fewer than two masters are live does not enter the pool and waits at the lead seat. |
 
 The inbox hands out the pool when an item enters it and again on every redelivery pass, so an item waiting for a
 master, or one whose holder lapsed, moves within a redelivery pass. Each move is a line on the item's history:
 `claimed from the master pool by <seat>` when a master takes it, and `returned to the master pool: its master is
-gone` when it comes back from a master that left. While an item waits in the pool it belongs to no master:
-`msg read` and every state change other than a close refuse it with `message <id> waits in the master pool for the next
-master`. Closing it (`msg close <id> cancel`) takes it out of the pool. An item redirected to another address
+gone` when it comes back from a master that left. While an item waits in the pool it belongs to no master. A
+master other than the front door seat is refused with `message <id> belongs to master@<id>, not <name>`; for the front
+door seat, `msg read` and every state change other than a close are refused with `message <id> waits in the master
+pool for the next master`. Closing it (`msg close <id> cancel`) takes it out of the pool. An item redirected to another address
 leaves the pool and stays where it was sent.
 
 Operator facing items never enter the pool. Page chat, every operator write on the ledger page (comments, replies,
@@ -147,10 +148,12 @@ A swarm with one live master has no pool: items for `master@<id>` wait at its se
 a single master swarm. When a second master goes, the remaining master takes the items still pooled at the next
 redelivery pass, and a lapsed item of its own redelivers to it as before.
 
-The pool, the master write fence and the front door read the live master seats from one place, the seat registry:
-a seat counts while its registered occupant has neither left it, finished nor retired, and a master record whose seat
-the registry does not hold yet counts by its record. During a handoff the successor that took the seat counts and
-its predecessor does not, so all three agree on the same seat list and the same lead.
+The pool, the master write fence and the operator mail routing read the live master seats from one reader, built on
+the seat registry: a seat counts while its registered occupant has neither left it, finished nor retired, and a master
+record whose seat the registry does not hold yet counts by its record. During a handoff the successor that took the
+seat counts and its predecessor does not, so all three agree on the same seat list and the same lead. The page chat
+front door gate reads the seat registry too: a master writes page chat only while the registry holds it in the lead
+seat.
 
 Inspect a pool with the inbox commands and, for the raw state, Redis (the key prefix is
 `AGENTIHOOKS_SWARM_KEY_PREFIX`, default `agentihooks`):
@@ -163,10 +166,12 @@ redis-cli GET agentihooks:inbox:pool:<id>:last
 redis-cli SMEMBERS agentihooks:inbox:pool:<id>:holders
 ```
 
-The sorted set lists the item ids still waiting, scored by arrival; `last` is the seat served last and `holders` the
-seats holding pooled items. An item that stays in the pool while masters are live, or a master that never receives
-pool items, points to the live seat list: check `swarm <id> status` for finished, retiring or retired masters and
-`msg read <id>` on a delivered item for the seat that claimed it.
+The sorted set lists the item ids still waiting, scored by arrival sequence number; `last` is the seat served last
+and `holders` the seats that have claimed pool items, kept until a seat stops being live and its pending items
+return. An item that stays in the pool while masters are live, or a master that never receives
+pool items, points to the live seat list: check `swarm <id> status` for finished, retiring or retired masters, and the item's
+history, which `msg read <id>` prints for the master that claimed it, for the `claimed from the master pool by <seat>`
+line naming that seat.
 
 ## Commands
 
