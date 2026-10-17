@@ -27,7 +27,6 @@ OPENERS = [
     "/skills/run-in-terminal/scripts/02_run_terminal.sh /repo ls",
     "bash ~/.claude/skills/prompt-user-parameter/scripts/open.sh in.sh title",
     "bash -e /skills/prompt-user-parameter/scripts/run.sh in.sh status p1",
-    "C:\\skills\\prompt-user-parameter\\scripts\\open.sh in.sh",
     "cd /repo && herdr pane split",
     "env A=1 herdr pane split",
     "bash -c 'herdr tab create'",

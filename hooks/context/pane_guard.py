@@ -53,7 +53,7 @@ def _herdr(args: list[str]) -> bool:
 def _script(tokens: list[str]) -> bool:
     if Path(tokens[0]).name in _SHELLS:
         tokens = [token for token in tokens[1:] if not token.startswith("-")] or [""]
-    return tokens[0].replace("\\", "/").endswith(_SCRIPTS)
+    return tokens[0].endswith(_SCRIPTS)
 
 
 def opens_pane(tokens: list[str]) -> bool:
