@@ -221,9 +221,7 @@ def test_while_off_a_non_master_is_refused_and_the_refusal_names_the_ledger_comm
 def test_a_ledger_bound_session_is_told_its_own_ledger_and_name(ledgers):
     (ledgers / ".sessions" / "s2.json").write_text(json.dumps({"slug": "work", "name": "eng-2@work"}))
     env = {**SWARM, "LEDGER_DIR": str(ledgers)}
-    assert operator_mode.question_block("AskUserQuestion", "s2", env) == ASK.format(
-        slug="work", name="eng-2@work"
-    )
+    assert operator_mode.question_block("AskUserQuestion", "s2", env) == ASK.format(slug="work", name="eng-2@work")
 
 
 def test_an_unreadable_binding_falls_back_to_the_swarm_and_names_what_is_unknown(ledgers):
@@ -236,9 +234,7 @@ def test_the_binding_is_read_from_the_home_ledger_folder_by_default():
     sessions = Path.home() / "development-ledger" / ".sessions"
     sessions.mkdir(parents=True)
     (sessions / "s5.json").write_text(json.dumps({"name": "eng-2@work"}))
-    assert operator_mode.question_block("AskUserQuestion", "s5", {}) == ASK.format(
-        slug="<slug>", name="eng-2@work"
-    )
+    assert operator_mode.question_block("AskUserQuestion", "s5", {}) == ASK.format(slug="<slug>", name="eng-2@work")
 
 
 def test_the_question_tool_passes_only_after_typed_operator_on_and_other_tools_always_pass(ledgers):
