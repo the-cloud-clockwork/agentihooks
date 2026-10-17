@@ -544,6 +544,15 @@ def test_a_superseded_run_still_in_progress_does_not_hold_a_green_wait(tick):
     assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
 
 
+@pytest.mark.parametrize("reverse", [False, True])
+def test_a_rerun_attempt_of_one_run_is_judged_by_its_newest_check(tick, reverse):
+    tick.hold("checks", URL)
+    checks = [_run_check("unit", 10, 4, "FAILURE"), _run_check("unit", 20, 4, "SUCCESS")]
+    tick.pulls[URL] = _gated(checks, [_suite(4, "COMPLETED", "SUCCESS")], reverse)
+    assert tick.end() == []
+    assert idle.wait(tick.store.redis, "sw", ME) is not None
+
+
 def test_checks_wait_with_no_checks_stays_unresolved(tick):
     from scripts.swarm.ledger_events import pull_request
 
