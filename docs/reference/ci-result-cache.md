@@ -252,15 +252,15 @@ Known limits: the day in the key forces one full run per job per UTC day, which 
 
 ## Full scope pull request reuse as delivered
 
-Pull requests into dev from a branch of this repository plan reuse the same way the queue does. A full scope run, one that `select` did not narrow to the tests its change reaches, skips every test that passed on the dev record with unchanged inputs and carries those tests' dev coverage into its own, so `sonar` and the coverage ratchet still grade the whole suite. A narrowed run keeps running only its selected tests; the plan is published but the unit shards apply it only when the scope is full.
+Pull requests into dev from a branch of this repository plan reuse the same way the queue does. A full scope run, one that `select` did not narrow to the tests its change reaches, skips every test that passed on the dev record with unchanged inputs and carries those tests' dev coverage into its own, so `sonar` and the coverage ratchet still grade the whole suite. A narrowed run skips the `split` job, so it plans nothing and runs only its selected tests. Gate plant dispatches take the same path with the head as grader.
 
 ### When a pull request run reuses tests
 
-The `split` job's plan step runs on a `pull_request` event when all of these hold:
+The `split` job's plan step runs on `merge_group`, on `workflow_dispatch`, and on a `pull_request` event when all of these hold:
 
 - the base branch is `dev` and the head branch lives in this repository; a fork pull request plans nothing;
 - the grader, a detached worktree of `origin/dev`, has `scripts/ci_test_plan.py`;
-- the grader also has `tests/reused_coverage.py`. A grader without it cannot carry reused coverage, so the step prints `The grader cannot carry reused tests' coverage into Sonar; every test runs.` and plans no reuse. Merge group runs skip this check because they feed no coverage consumer.
+- the grader also has `tests/reused_coverage.py`. A grader without it cannot carry reused coverage, so the step prints `The grader cannot carry reused tests' coverage into Sonar; every test runs.` and plans no reuse. Merge group runs skip this check. A dispatch's grader is its own head, so it runs the check and the coverage filter from the head.
 
 The planner runs from the grader, never from the head, so a pull request cannot widen what it reuses. It mints the CI App token with `actions: read` to read dev's runs and artifacts.
 
@@ -297,7 +297,7 @@ The step prints `Kept the dev coverage of <n> reused tests and <m> page captures
 ```bash
 RUN=<tests run id>
 # Planner decision on each split leg
-gh run view "$RUN" --log | grep -E "Dev run [0-9]+ on|No test record|cannot carry reused"
+gh run view "$RUN" --log | grep -E "Dev run [0-9]+ on|No dev push run with passed|cannot carry reused"
 # Reused coverage kept on each 3.12 unit shard
 gh run view "$RUN" --log | grep "Kept the dev coverage of"
 # Ran, reused and flaky counts from both shard-check legs
@@ -316,4 +316,7 @@ gh run view "$RUN" --log | grep -E "Python 3\.1[12]: ran [0-9]+, reused"
 
 - Everything listed under slice 5's known limits applies: the manifest is measured on 3.12 and its plan also deselects on 3.11, and the next dev push, which runs every test, is the backstop for any hidden input.
 - Reused coverage is the dev record's measurement moved by a line diff. A changed line that the diff matches to an unchanged one elsewhere can carry an arc onto it; the next dev push measures the real figure.
+- Only `*.py` files are remapped, and the diff runs with `--no-renames`: a renamed file counts as deleted, so the reused tests' arcs on it are dropped and that coverage is missing until the next dev push.
+- A page capture with no test is kept whenever any test is reused, so it can carry coverage from tests that ran on the dev record but run again here.
+- The download of the dev shard's coverage has no fallback: if the artifact cannot be downloaded, the shard fails instead of running every test.
 - A dev record whose coverage artifacts expired, after 7 days, is never chosen, so a quiet dev plans no reuse until its next push.
