@@ -414,7 +414,7 @@ STALE = "0" * 64
 
 
 def chat_op(item, text):
-    return {"op": "add", "thread": "chat", "id": item, "text": text, "by": ENG}
+    return {"op": "add", "thread": "chat", "id": item, "text": text, "by": ENG, "to": "operator"}
 
 
 def queue_ops(*ops):
