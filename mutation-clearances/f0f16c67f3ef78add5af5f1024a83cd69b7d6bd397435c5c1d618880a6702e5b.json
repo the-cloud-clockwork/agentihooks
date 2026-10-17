@@ -1,0 +1,6 @@
+{
+  "scripts/gate_protected.py:scripts.gate_protected.x_main__mutmut_4:ae27dc7a88f9202effc156115b671a0cac6ff5846e397c79712bff833f46a31f": {
+    "reader": "Standards",
+    "reason": "Equivalent for valid workflows: unchanged jobs preserve identical baseline concurrency; additional grading yields no problems."
+  }
+}

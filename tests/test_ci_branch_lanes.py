@@ -139,6 +139,25 @@ def test_existing_dev_concurrency_is_preserved_while_job_steps_change(tmp_path, 
     assert lanes.refused(sha, base) == {}
 
 
+@pytest.mark.parametrize("trusted", [None, {"group": "existing-dev-policy"}])
+def test_existing_job_concurrency_is_preserved_while_steps_change(tmp_path, monkeypatch, trusted):
+    baseline = _workflow(replay={"runs-on": "x", "concurrency": trusted})
+    updated = _workflow(replay={"runs-on": "x", "concurrency": trusted, "steps": [{"run": "echo changed"}]})
+    base, head, sha = _repo(tmp_path, {"replay.yml": updated})
+    (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(baseline))
+    monkeypatch.chdir(head)
+    assert lanes.refused(sha, base) == {}
+
+
+def test_unchanged_workflows_are_not_selected_as_edits(tmp_path, monkeypatch):
+    workflow = _workflow(LANED)
+    base, head, sha = _repo(tmp_path, {"replay.yml": workflow})
+    (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(workflow))
+    (base / lanes.WORKFLOWS / "test.yml").write_text("name: Changed\n")
+    monkeypatch.chdir(head)
+    assert lanes.branch_only(sha, base, include_edits=True) == []
+
+
 @pytest.mark.parametrize("change", ["override", "rename"])
 def test_an_edit_cannot_escape_trusted_concurrency(tmp_path, monkeypatch, change):
     trusted = {"group": "${{ github.workflow == 'Replay' && 'hosted-lane-a' || github.run_id }}"}
@@ -156,8 +175,8 @@ def test_an_edit_cannot_escape_trusted_concurrency(tmp_path, monkeypatch, change
 
 
 def test_an_edited_workflow_cannot_add_an_uncapped_job(tmp_path, monkeypatch):
-    baseline = _workflow(replay={"runs-on": "x", "concurrency": LANED})
-    updated = _workflow(replay={"runs-on": "x", "concurrency": LANED}, escape={"runs-on": "x"})
+    baseline = _workflow(allowed={"runs-on": "x", "concurrency": LANED})
+    updated = _workflow(allowed={"runs-on": "x", "concurrency": LANED}, escape={"runs-on": "x"})
     base, head, sha = _repo(tmp_path, {"replay.yml": updated})
     (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(baseline))
     monkeypatch.chdir(head)

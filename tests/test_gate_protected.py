@@ -320,6 +320,19 @@ def test_branch_lane_grading_holds_the_required_status_from_the_base(repo, capsy
     assert "shared hosted lane concurrency group" in capsys.readouterr().out
 
 
+def test_the_required_grader_preserves_existing_dev_concurrency(repo):
+    base = _workflow()
+    base["concurrency"] = {"group": "existing-dev-policy"}
+    _commit(repo, {"test.yml": base}, {}, "base concurrency")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    head = _workflow()
+    head["concurrency"] = base["concurrency"]
+    head["jobs"]["lint"]["steps"] = [{"run": "echo changed"}]
+    changed = _commit(repo, {"test.yml": head}, {}, "change lint steps")
+    _git(repo, "checkout", "-q", "dev")
+    assert gate_protected.main(["--root", str(repo), "--head", changed]) == 0
+
+
 def test_the_protected_grader_reports_gate_required_on_the_head():
     steps = _protected_workflow()["jobs"]["grade"]["steps"]
     statuses = [step for step in steps if "statuses/$HEAD_SHA" in step.get("run", "")]
