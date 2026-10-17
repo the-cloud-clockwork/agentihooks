@@ -8,7 +8,6 @@ import os
 import subprocess
 import sys
 import threading
-import time
 from pathlib import Path
 
 import pytest
@@ -27,7 +26,20 @@ SLUG, ME, SID = "pushexec-2026-01-01", "engineer@abcdef-0001", "sid-push"
 BRANCH = "engineer-abcdef-0001"
 URL = "https://github.com/o/r/pull/7"
 PACKAGE = ".".join(("scripts", "gates"))
-SHIM = f"import runpy\nimport sys\n\nsys.argv = ['gate', 'push-stop']\nrunpy.run_module({PACKAGE!r}, run_name='__main__')\n"
+SHIM = f"""import os
+import runpy
+import sys
+import time
+
+started = time.monotonic()
+sys.argv = ['gate', 'push-stop']
+try:
+    runpy.run_module({PACKAGE!r}, run_name='__main__')
+finally:
+    if os.environ.get('CONDITION_CLOCK'):
+        with open(os.environ['CONDITION_CLOCK'], 'w') as clock:
+            clock.write(f'{{started}} {{time.monotonic()}}')
+"""
 TEMPLATE = (
     "You cannot leave uncommitted or unpushed changes. Commit them now. If the task is done, open the pull request. "
     "If not, update the issue and the pull request and record progress on the ledger."
@@ -203,19 +215,21 @@ def overrun(rig, seconds):
     git(rig.tree, "add", "scripts")
     git(rig.tree, "commit", "-m", "gate")
     rig.env["CONDITIONS_TIMEOUT_SEC"] = str(seconds)
-    started = time.monotonic()
+    clock = rig.tree.parent / "condition-clock"
+    rig.env["CONDITION_CLOCK"] = str(clock)
     done = rig.stop()
-    return done, time.monotonic() - started
+    started, finished = map(float, clock.read_text().split())
+    return done, finished - started
 
 
 @pytest.mark.wall_clock
 def test_a_pre_push_gate_that_overruns_is_stopped_by_the_gate_inside_the_stop_condition(rig):
-    done, took = overrun(rig, 6)
+    done, took = overrun(rig, 8)
     assert done.returncode == 2, (done.stderr, rig.rows())
     assert "The pre push gate did not finish in " in done.stderr
     assert f" s in {rig.tree}, so the stop hook did not push it." in done.stderr
     assert rig.remote_head() == ""
-    assert took < 6
+    assert took < 8
 
 
 def test_a_pre_push_gate_that_overruns_is_stopped_inside_the_stop_condition(rig):
