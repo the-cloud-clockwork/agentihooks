@@ -154,8 +154,8 @@ def pull_request(raw):
 def _newest(checks):
     latest = {}
     for order, check in sorted(enumerate(checks), key=_mark):
-        run = ((check.get("checkSuite") or {}).get("workflowRun") or {}).get("workflow") or {}
-        latest[(run.get("name"), check.get("name"), check.get("context"))] = (order, check)
+        workflow = (_workflow_run(check).get("workflow") or {}).get("name")
+        latest[(workflow, _run_key(check), check.get("name"), check.get("context"))] = (order, check)
     return [check for _, check in sorted(latest.values())]
 
 

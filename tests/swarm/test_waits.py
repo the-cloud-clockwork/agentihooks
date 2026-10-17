@@ -526,6 +526,7 @@ def test_a_check_whose_run_names_no_workflow_is_never_superseded(tick):
 def test_a_newer_run_of_another_event_or_workflow_keeps_the_older_red_check(tick, newer):
     tick.hold("checks", URL)
     checks = [_run_check("e2e", 10, 5, "FAILURE"), _run_check("unit", 20, 6, "SUCCESS", **newer)]
+    checks.append(_run_check("e2e", 30, 6, "SUCCESS", **newer))
     suites = [_suite(5, "COMPLETED", "FAILURE"), _suite(6, "COMPLETED", "SUCCESS", **newer)]
     tick.pulls[URL] = _gated(checks, suites, False)
     assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now red; failed: e2e"]
