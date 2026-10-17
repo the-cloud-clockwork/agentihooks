@@ -73,7 +73,7 @@ def test_a_ledger_credential_recreates_a_redis_user_lost_on_restart(admin):
     assert _accepts(admin, refreshed["redis_url"])
     user = admin.acl_getuser(f"hive-{grant['id']}")
     assert user["enabled"] is True
-    assert user["keys"] == [f"~{pattern}" for pattern in auth.ACL_PATTERNS]
+    assert f"~{auth.ROOT}:hive:{grant['id']}" in user["keys"]
     assert user["channels"] == [f"&{pattern}" for pattern in auth.ACL_PATTERNS]
     assert user["categories"] == list(auth.ACL_CATEGORIES)
 

@@ -80,6 +80,24 @@ from scripts.swarm import idle
 client = redis_client()
 member = env["AGENTIHOOKS_HIVE_ID"]
 assert client.acl_whoami() == f"hive-{member}"
+for command in (
+    ("HSET", f"{ROOT}:swarm:proof:agents", "eng-1", '{"hive": "forged"}'),
+    ("HSET", f"{ROOT}:swarm:proof:executions", "forged", "{}"),
+    ("HSET", f"{ROOT}:hive:other-member", "heartbeat_at", "1"),
+    ("SREM", f"{ROOT}:hives", member),
+    ("SET", f"{ROOT}:hive-proof", "1"),
+    ("FLUSHALL",),
+    ("CONFIG", "GET", "maxmemory"),
+    ("SET", "outside", "1"),
+    ("SET", f"{ROOT}-hive:invite:forged", "1"),
+    ("ACL", "LIST"),
+):
+    try:
+        client.execute_command(*command)
+    except redis.exceptions.NoPermissionError as refused:
+        print(f"{command[0]}: refused ({refused})")
+    else:
+        raise SystemExit(f"{command[0]} was allowed for a hive member")
 os.environ.update(AGENTIHOOKS_HIVE_ID=member, AGENTIHOOKS_HIVE_REDIS_URL=env["AGENTIHOOKS_HIVE_REDIS_URL"])
 assert daemon.hive_id() == member
 
@@ -103,24 +121,6 @@ item = InboxStore(client).send("member-agent", "master@proof", "hello from the m
 assert [mail.id for mail in InboxStore(client).open_items("master@proof")] == [item.id]
 assert client.hgetall(f"{ROOT}:swarm:proof:agents") == {}
 print(f"Redis as {client.acl_whoami()}: own hive heartbeat, agent heartbeat, inbox send and agent record reads allowed")
-for command in (
-    ("HSET", f"{ROOT}:swarm:proof:agents", "eng-1", '{"hive": "forged"}'),
-    ("HSET", f"{ROOT}:swarm:proof:executions", "forged", "{}"),
-    ("HSET", f"{ROOT}:hive:other-member", "heartbeat_at", "1"),
-    ("SREM", f"{ROOT}:hives", member),
-    ("SET", f"{ROOT}:hive-proof", "1"),
-    ("FLUSHALL",),
-    ("CONFIG", "GET", "maxmemory"),
-    ("SET", "outside", "1"),
-    ("SET", f"{ROOT}-hive:invite:forged", "1"),
-    ("ACL", "LIST"),
-):
-    try:
-        client.execute_command(*command)
-    except redis.exceptions.NoPermissionError as refused:
-        print(f"{command[0]}: refused ({refused})")
-    else:
-        raise SystemExit(f"{command[0]} was allowed for a hive member")
 PY
 
 if docker exec "$run-member" "${hive[@]}" join "https://$run-hive:8770" "$code" 2>/dev/null; then
