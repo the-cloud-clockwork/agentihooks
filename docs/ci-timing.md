@@ -103,6 +103,60 @@ gh run list --workflow codex-cache.yml --limit 5 \
 | `Install the Codex CLI` step fails | the release download failed; the job stops before the test runs | read the step log for the `curl` error and rerun |
 | `test_codex_api.py` fails rather than skips | `CODEX_CLI_REQUIRED=1` is set but `codex` is not on `PATH` | check that the `Use the Codex CLI` step ran and added `~/codex` to `PATH` |
 
+## Unit checkout
+
+Each `unit` shard checks out the graded commit as a partial clone: `ref` set to the run's commit SHA (`github.sha`), `fetch-depth: 0` (full history) and `filter: blob:none` (no file contents from old commits). The initial `git fetch` downloads commits and trees only. `git checkout` then fetches every file blob of the graded tree from the promisor remote in one batch, about 4400 blobs and 45 MB.
+
+`actions/checkout` retries `git fetch` but not `git checkout`. Before the change, one silent connection during that lazy blob fetch held unit (3.12, 9) of Tests run 39010480846 for 617 seconds before `curl 56 Recv failure: Connection timed out` failed the step, and the shard ran no tests (issue #4063). Over 263 Tests runs from 02:24 to 12:32 UTC on 17 October 2026, 4734 unit checkouts had a p50 of 4 seconds and a p99.9 of 10 seconds; that one was the only stall.
+
+The checkout now runs as two steps:
+
+| Step | Runs when | On failure |
+|---|---|---|
+| `Check out the graded commit` (`id: checkout`) | always, first step of the job | `continue-on-error: true`: the step shows as failed and the job continues |
+| `Check out the graded commit, attempt 2` | `steps.checkout.outcome == 'failure'` | the job fails; no tests run and shard-check reports the shard's tests as missing |
+
+Both steps use the same `with` block and set:
+
+```yaml
+env:
+  GIT_HTTP_LOW_SPEED_LIMIT: "1000"
+  GIT_HTTP_LOW_SPEED_TIME: "60"
+```
+
+Git aborts any HTTP transfer that stays below 1000 bytes per second for 60 seconds, so a stalled lazy blob fetch fails in about a minute instead of about ten. The variables cover every HTTP transfer in the step, the initial `git fetch` included. The workflow test pins both values as literals, so changing one means changing the test with it. Attempt 2 runs on the same runner with the same commit, history depth, filter and shard, so a retried shard grades the same tests as one that passed on attempt 1. The retry runs once; a second stall fails the job.
+
+`tests/test_ci_workflow.py` fails if the two checkouts are not the first two steps of `unit`, if either loses the low speed settings or the `with` block above, if the first step drops `continue-on-error` or gains an `if`, or if the second step runs on anything but the first step's failure.
+
+### Proof
+
+| Run | Result |
+|---|---|
+| Tests 39037534575, tests only head | the new workflow test failed, nothing else |
+| Plant run 39037894054, a CONNECT proxy that serves the initial fetch and goes silent during the lazy blob fetch | the old checkout hung until the step's 5 minute cap; the new checkout aborted 66 seconds after the stall, on the same promisor object as the incident, and attempt 2 passed in 5 seconds with the graded commit, full history and partial clone |
+| Same commit, cold, three runs each | `blob:none`: median 5.0 seconds and 21 MB of `.git`; full blobs: median 6.6 seconds and 71 MB |
+| Tests 39038020220 on the fixed head | all 18 unit shards passed on attempt 1 |
+
+The partial clone stays: a full blob checkout took longer and stored more than three times the `.git` bytes.
+
+### Checking a run
+
+List the unit shards of a run whose second checkout ran:
+
+```bash
+gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/<run id>/jobs?per_page=100" \
+  --jq '.jobs[] | select(.name | startswith("unit (")) | {name, attempt2: (.steps[] | select(.name == "Check out the graded commit, attempt 2") | .conclusion)} | select(.attempt2 != "skipped")'
+```
+
+A shard listed with `success` stalled once and recovered; one listed with `failure` failed both attempts. In the log, a stalled first step ends with `RPC failed; curl 28 Operation too slow. Less than 1000 bytes/sec transferred the last 60 seconds`, then `fatal: could not fetch <object> from promisor remote`. Attempt 2 then warns `Unable to clean or reset the repository. The repository will be recreated instead.` and checks out from scratch.
+
+| Symptom | Cause | Action |
+|---|---|---|
+| First checkout failed, attempt 2 passed, tests ran | one stalled lazy blob fetch, recovered | none; the shard's results stand |
+| Both checkouts failed, shard-check reports missing tests | the stall or a GitHub outage persisted past the retry | read both step logs; rerun the failed jobs once GitHub serves fetches again |
+| A checkout step runs for minutes with no abort | the low speed settings were removed from that step | restore the `env` block; `tests/test_ci_workflow.py` fails without it |
+| A checkout fails within seconds on both attempts | the error is not a stall: a bad ref, permissions or a missing commit | read the first error in the step log; a retry does not fix it |
+
 ## Historical measurements
 
 Last ten runs of the Tests workflow on dev (35380163028, 35379942561, 35379468297, 35156774129, 35156548701, 35156299806, 35155214526, 35138446531, 35138276256, 35137837913). Seconds per step, mean and max over those runs.
