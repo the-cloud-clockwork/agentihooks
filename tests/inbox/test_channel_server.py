@@ -119,7 +119,7 @@ def _message(**fields):
 INITIALIZE = {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}}
 
 
-def session(store, scenario):
+def session(store, scenario, active=True):
     """Run the channel server for bob over memory streams; scenario(send, receive) drives it as Claude would."""
     import anyio
 
@@ -132,7 +132,7 @@ def session(store, scenario):
             return got.message.root.model_dump(exclude_none=True)
 
         async with anyio.create_task_group() as group:
-            group.start_soon(channel.run, store, "bob", server_in, server_out)
+            group.start_soon(channel.run, store, "bob", server_in, server_out, active)
             await to_server.send(_message(id=1, method="initialize", params=INITIALIZE))
             opened = await receive()
             await to_server.send(_message(method="notifications/initialized"))
@@ -330,7 +330,7 @@ def test_serve_runs_the_session_over_stdio(store, monkeypatch):
     import anyio
 
     anyio.run(channel.serve, store, "bob")
-    assert seen == [(store, "bob", "read", "write")]
+    assert seen == [(store, "bob", "read", "write", True)]
 
 
 def test_main_serves_this_sessions_identity(store, monkeypatch):
@@ -341,7 +341,7 @@ def test_main_serves_this_sessions_identity(store, monkeypatch):
     monkeypatch.setattr(channel, "connect", lambda: store)
     monkeypatch.setattr(anyio, "run", lambda *args: ran.append(args))
     channel.main()
-    assert ran == [(channel.serve, store, "bob")]
+    assert ran == [(channel.serve, store, "bob", True)]
 
 
 def test_main_without_identity_exits_with_the_reason(monkeypatch, capsys):
@@ -361,9 +361,30 @@ def test_registered_server_without_channel_activation_never_claims_messages(monk
     calls = []
     monkeypatch.setattr(channel, "identity", lambda: "ordinary-session")
     monkeypatch.setattr(channel, "connect", lambda: pytest.fail("an inactive channel must not connect to the inbox"))
-    monkeypatch.setattr(anyio, "run", lambda serve, store, me: calls.append((store, me)))
+    monkeypatch.setattr(anyio, "run", lambda serve, store, me, active: calls.append((store, me, active)))
     channel.main(active=False)
-    assert calls == [(None, "ordinary-session")]
+    assert calls == [(None, "ordinary-session", False)]
+
+
+@pytest.mark.parametrize("connected", [False, True])
+def test_dormant_protocol_session_never_starts_delivery(store, monkeypatch, connected):
+    import anyio
+
+    monkeypatch.setattr(channel, "connect", lambda: pytest.fail("dormant registration must not reconnect"))
+
+    async def pushed(*args):
+        pytest.fail("dormant registration must not claim or push messages")
+
+    async def idle(send, receive):
+        with anyio.move_on_after(0.1) as timeout:
+            await receive()
+        return timeout.cancel_called
+
+    monkeypatch.setattr(channel, "_push", pushed)
+    opened, listed, idle_timeout = session(store if connected else None, idle, active=False)
+    assert opened["result"]["serverInfo"]["name"] == "inbox"
+    assert listed["result"]["tools"][0]["name"] == "reply"
+    assert idle_timeout is True
 
 
 def test_saved_registration_is_dormant_and_preserves_the_native_config(tmp_path, monkeypatch):

@@ -169,7 +169,7 @@ async def _push(store, me, write, ready):
             pubsub.close()
 
 
-async def run(store, me, read, write):
+async def run(store, me, read, write, active=True):
     import anyio
     import mcp.types as types
     from mcp.server.lowlevel import Server
@@ -202,16 +202,17 @@ async def run(store, me, read, write):
 
     options = server.create_initialization_options(experimental_capabilities={"claude/channel": {}})
     async with anyio.create_task_group() as group:
-        group.start_soon(push)
+        if active:
+            group.start_soon(push)
         await server.run(read, write, options)
         group.cancel_scope.cancel()
 
 
-async def serve(store, me):
+async def serve(store, me, active=True):
     from mcp.server.stdio import stdio_server
 
     async with stdio_server() as (read, write):
-        await run(store, me, read, write)
+        await run(store, me, read, write, active)
 
 
 def main(active: bool = True) -> None:
@@ -226,4 +227,4 @@ def main(active: bool = True) -> None:
         store = connect() if active else None
     except InboxError:
         store = None
-    anyio.run(serve, store, me)
+    anyio.run(serve, store, me, active)
