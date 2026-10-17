@@ -21,7 +21,9 @@ PULL_REQUEST = UNIT | {"select", "lint", "semgrep", "sonar", "mutation-plan", "m
 if "collect" in yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]:
     PULL_REQUEST |= {"collect"}
 SELECTED = PULL_REQUEST - {"split", "unit", "shard-check"} | {"unit-selected"}
-PROMOTION = (PULL_REQUEST - {"collect", "mutation-plan", "mutation-stats", "mutation", "lint", "semgrep", "test-count"}) | {
+PROMOTION = (
+    PULL_REQUEST - {"collect", "mutation-plan", "mutation-stats", "mutation", "lint", "semgrep", "test-count"}
+) | {
     "queue-fail-fast",
     "reuse",
     "coverage-ratchet",
