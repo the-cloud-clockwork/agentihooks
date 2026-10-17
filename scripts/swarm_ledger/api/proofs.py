@@ -5,7 +5,9 @@ import sys
 from collections.abc import Callable
 from types import ModuleType
 
-from scripts.swarm import naming
+from scripts import agent_choice
+from scripts.swarm import naming, templates
+from scripts.swarm.store import CODEX_TRANSPORTS
 
 from . import schemas
 from .errors import APIError
@@ -15,6 +17,35 @@ CREATE = {
     "required": ["agent", "task", "content"],
     "additionalProperties": False,
     "properties": {"agent": {"type": "string"}, "task": {"type": "string"}, "content": {"type": "object"}},
+}
+CAPS = ("max-eng-agents", "max-ci-agents", "max-plan-agents")
+SETTABLE_FIELDS = frozenset(
+    {"codex-inbox-transport", *CAPS}
+    | {f"{lane}-{field}" for lane in templates.LANES for field in ("agent", "model", "effort", "profile")}
+)
+START = {
+    "type": "object",
+    "required": ["control"],
+    "additionalProperties": False,
+    "properties": {"control": {"const": "start"}},
+}
+SET = {
+    "type": "object",
+    "required": ["control", "fields"],
+    "additionalProperties": False,
+    "properties": {
+        "control": {"const": "set"},
+        "fields": {
+            "type": "object",
+            "minProperties": 1,
+            "properties": {
+                "codex-inbox-transport": {"enum": list(CODEX_TRANSPORTS)},
+                **{cap: {"type": "string", "pattern": r"^[0-9]{1,3}\Z"} for cap in CAPS},
+                **{f"{lane}-agent": {"enum": [templates.AUTO, *agent_choice.AGENTS]} for lane in templates.LANES},
+            },
+            "additionalProperties": {"type": "string", "pattern": r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}\Z"},
+        },
+    },
 }
 
 
@@ -176,6 +207,17 @@ def credential(handler: object, server: ModuleType, slug: str) -> dict:
     return {"data": {"credential": _credential(server, slug, owner)}}
 
 
+def _fixture_argv(payload: dict) -> list:
+    if payload["control"] == "start":
+        schemas.validate(START, payload)
+        return ["start"]
+    schemas.validate(SET, payload)
+    for key in sorted(payload["fields"]):
+        if key not in SETTABLE_FIELDS:
+            raise APIError(403, "forbidden", f"Proof controls cannot set {key}")
+    return ["set", *(f"{key}={payload['fields'][key]}" for key in sorted(payload["fields"]))]
+
+
 def control(handler: object, server: ModuleType, slug: str, payload: dict) -> dict:
     from scripts.swarm import commands
     from scripts.swarm.lifecycle import Refused
@@ -190,8 +232,10 @@ def control(handler: object, server: ModuleType, slug: str, payload: dict) -> di
     action = payload.get("control") if isinstance(payload, dict) else None
     if action == "pause" and payload == {"control": "pause"}:
         return {"data": commands.submit(store, slug, "swarm", ["pause"])}
+    if action in ("set", "start"):
+        return {"data": commands.submit(store, slug, "swarm", _fixture_argv(payload))}
     if action != "drain":
-        raise APIError(403, "forbidden", "Proof controls permit only pause and drain")
+        raise APIError(403, "forbidden", "Proof controls permit only pause, drain, set and start")
     try:
         result, error = server.lifecycle_control(slug, payload, False)
     except Refused as exc:

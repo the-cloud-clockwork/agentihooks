@@ -61,6 +61,9 @@ _REWRITE_TARGETS = frozenset({"claude"})
 # Codex accepts deny only; copilot's command transport ignores stdout decisions.
 _ALLOW_ASK_TARGETS = frozenset({"claude"})
 
+# Targets whose hook payload cwd is the shell's working directory.
+_SHELL_CWD_TARGETS = frozenset({"claude"})
+
 
 def can_inject_context(event: str, target: str | None = None) -> bool:
     target = target or current_target()
@@ -92,6 +95,10 @@ def supports_output_rewrite(target: str | None = None) -> bool:
 
 def honors_allow_ask(target: str | None = None) -> bool:
     return (target or current_target()) in _ALLOW_ASK_TARGETS
+
+
+def reports_shell_cwd(target: str | None = None) -> bool:
+    return (target or current_target()) in _SHELL_CWD_TARGETS
 
 
 # How each host says the operator accepted a plan. Claude and Copilot run their

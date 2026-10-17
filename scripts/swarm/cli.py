@@ -400,6 +400,17 @@ def _tick_while_others_run(store, slug, firsts, until):
         _tick_one(store, slug)
 
 
+def _reconcile_services():
+    try:
+        installed = timer.reconcile(timer.entry_point())
+    except (OSError, subprocess.SubprocessError) as exc:
+        installed, why = False, f": {exc}"
+    else:
+        why = ""
+    if not installed:
+        print(f"warning: the swarm user services could not be installed or enabled{why}", file=sys.stderr)
+
+
 @outage.guard_command
 def cmd_tick(store, args):
     from scripts import operator_env
@@ -415,6 +426,7 @@ def cmd_tick(store, args):
         )
     slugs = store.slugs()
     if slugs:
+        _reconcile_services()
         firsts, until = _Firsts(len(slugs)), time.monotonic() + EXTRA_TICKS_UNTIL
         with ThreadPoolExecutor(max_workers=len(slugs)) as pool:
             list(pool.map(lambda slug: _tick_while_others_run(store, slug, firsts, until), slugs))
@@ -495,7 +507,10 @@ def _state(store, args, state):
         store.redis.delete(store.key(args.slug, "master-retired-tasks"))
     store.update(args.slug, state=state)
     if state == "running" and not timer.ensure(timer.entry_point()):
-        print("warning: the systemd timer could not be enabled; run agentihooks swarm tick yourself", file=sys.stderr)
+        print(
+            "warning: the systemd timer or swarm services could not be enabled; run agentihooks swarm tick yourself",
+            file=sys.stderr,
+        )
     for action in run_tick(store, args.slug):
         print(action)
     print(json.dumps({"swarm": args.slug, "state": store.config(args.slug).state}))

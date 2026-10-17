@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_hive_join_acquires_redis_before_starting_without_another_pull():
     workflow = yaml.safe_load((ROOT / ".github/workflows/swarm-smoke.yml").read_text())
     steps = workflow["jobs"].get("hive-join", workflow["jobs"]["smoke"])["steps"]
-    assert any(step.get("run") == "bash scripts/packaging/hive-join-smoke.sh" for step in steps)
+    assert any("scripts/packaging/hive-join-smoke.sh" in step.get("run", "").split() for step in steps)
     script = (ROOT / "scripts/packaging/hive-join-smoke.sh").read_text()
     image = "mirror.gcr.io/library/redis:7-alpine"
     pull = f"bash scripts/packaging/pull-runtime-image.sh {image}\n"

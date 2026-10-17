@@ -329,6 +329,7 @@ class TestCommand:
         assert read_heads == [URL]
         assert lift.task_lifted(SLUG, TASK, "watch", now=time.time() + 2 * lift.LIFT_SECONDS)
         monkeypatch.setattr("scripts.gates.intent.pr_head", lambda url: "b2")
+        monkeypatch.setattr("scripts.gates.intent.production_unchanged", lambda url, before, after: False)
         assert not lift.task_lifted(SLUG, TASK, "watch")
 
     def test_an_unreadable_head_refuses_the_lift_and_writes_nothing(self, monkeypatch):

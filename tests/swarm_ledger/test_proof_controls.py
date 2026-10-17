@@ -163,8 +163,167 @@ def test_owned_fixture_cannot_control_a_real_swarm_configuration(owned):
 def test_fixture_controls_refuse_every_ungranted_action(owned, action):
     assert owned.invoke(f"/{owned.slug}/controls", {"control": action}, owned.proof) == (
         403,
-        {"error": {"code": "forbidden", "message": "Proof controls permit only pause and drain"}},
+        {"error": {"code": "forbidden", "message": "Proof controls permit only pause, drain, set and start"}},
     )
+
+
+def _queued(owned):
+    return [
+        json.loads(row)["argv"] for row in owned.store.redis.hgetall(owned.store.key(owned.slug, "commands")).values()
+    ]
+
+
+def test_creator_sets_allowlisted_fields_and_starts_its_own_fixture(owned):
+    fields = {"master-agent": "codex", "codex-inbox-transport": "app_server", "max-eng-agents": "2"}
+    status, accepted = owned.invoke(f"/{owned.slug}/controls", {"control": "set", "fields": fields}, owned.proof)
+    assert status == 200
+    assert accepted["data"]["argv"] == [
+        "set",
+        "codex-inbox-transport=app_server",
+        "master-agent=codex",
+        "max-eng-agents=2",
+    ]
+    assert accepted["data"]["command"] == "swarm"
+    status, started = owned.invoke(f"/{owned.slug}/controls", {"control": "start"}, owned.proof)
+    assert status == 200 and started["data"]["argv"] == ["start"]
+    assert sorted(_queued(owned)) == sorted([accepted["data"]["argv"], ["start"]])
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["api-url", "autonomy", "masters", "master-per", "compact-limit", "eng-role", "plan-kind", "review-gate", "hive-x"],
+)
+def test_creator_set_refuses_fields_outside_the_allowlist(owned, key):
+    body = {"control": "set", "fields": {key: "1"}}
+    assert owned.invoke(f"/{owned.slug}/controls", body, owned.proof) == (
+        403,
+        {"error": {"code": "forbidden", "message": f"Proof controls cannot set {key}"}},
+    )
+    assert _queued(owned) == []
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"control": "set"},
+        {"control": "set", "fields": {}},
+        {"control": "set", "fields": []},
+        {"control": "set", "fields": {"master-agent": 1}},
+        {"control": "set", "fields": {"master-agent": ""}},
+        {"control": "set", "fields": {"master-agent": "codex extra"}},
+        {"control": "set", "fields": {"master-agent": "codex=claude"}},
+        {"control": "set", "fields": {"master-agent": "-codex"}},
+        {"control": "set", "fields": {"master-agent": "codex\n"}},
+        {"control": "set", "fields": {"master-agent": "c" * 65}},
+        {"control": "set", "fields": {"master-agent": "codex"}, "extra": True},
+        {"control": "start", "extra": True},
+    ],
+)
+def test_creator_set_and_start_refuse_malformed_requests(owned, body):
+    assert owned.invoke(f"/{owned.slug}/controls", body, owned.proof) == (
+        400,
+        {"error": {"code": "schema_invalid", "message": "Request does not match the resource schema"}},
+    )
+    assert _queued(owned) == []
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("codex-inbox-transport", "legacy"),
+        ("codex-inbox-transport", "app_server"),
+        ("max-eng-agents", "0"),
+        ("max-ci-agents", "100"),
+        ("max-plan-agents", "7"),
+        ("max-ci-agents", "9"),
+        ("eng-model", "a0.9"),
+        ("eng-agent", "auto"),
+        ("ci-agent", "claude"),
+        ("plan-agent", "codex"),
+        ("master-agent", "codex"),
+        *(
+            (f"{lane}-{field}", "Ab.1:x-z")
+            for lane in ("eng", "ci", "plan", "master")
+            for field in ("model", "effort", "profile")
+        ),
+        ("eng-model", "x"),
+    ],
+)
+def test_creator_sets_each_allowlisted_field(owned, key, value):
+    status, accepted = owned.invoke(f"/{owned.slug}/controls", {"control": "set", "fields": {key: value}}, owned.proof)
+    assert status == 200 and accepted["data"]["argv"] == ["set", f"{key}={value}"]
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"codex-inbox-transport": "other"},
+        {"max-eng-agents": "two"},
+        {"max-ci-agents": "1000"},
+        {"max-plan-agents": "-1"},
+        {"max-eng-agents": "1\n"},
+        {"max-ci-agents": ""},
+        {"max-plan-agents": "1000"},
+        *({f"{lane}-agent": "gemini"} for lane in ("eng", "ci", "plan", "master")),
+    ],
+)
+def test_creator_set_refuses_values_the_field_cannot_take(owned, fields):
+    assert owned.invoke(f"/{owned.slug}/controls", {"control": "set", "fields": fields}, owned.proof) == (
+        400,
+        {"error": {"code": "schema_invalid", "message": "Request does not match the resource schema"}},
+    )
+    assert _queued(owned) == []
+
+
+def test_creator_set_names_the_first_refused_field_in_sorted_order(owned):
+    body = {"control": "set", "fields": {"zeta-field": "1", "api-url": "1"}}
+    assert owned.invoke(f"/{owned.slug}/controls", body, owned.proof) == (
+        403,
+        {"error": {"code": "forbidden", "message": "Proof controls cannot set api-url"}},
+    )
+
+
+def test_creator_set_accepts_the_longest_plain_value(owned):
+    value = "c" * 64
+    status, accepted = owned.invoke(
+        f"/{owned.slug}/controls", {"control": "set", "fields": {"eng-model": value}}, owned.proof
+    )
+    assert status == 200 and accepted["data"]["argv"] == ["set", f"eng-model={value}"]
+
+
+@pytest.mark.parametrize("body", [{"control": "set", "fields": {"master-agent": "codex"}}, {"control": "start"}])
+def test_set_and_start_refuse_a_real_swarm(owned, body):
+    owned.store.update(owned.slug, scratch=False)
+    assert owned.invoke(f"/{owned.slug}/controls", body, owned.proof) == (
+        403,
+        {"error": {"code": "forbidden", "message": "Proof controls need a scratch swarm"}},
+    )
+    assert _queued(owned) == []
+
+
+def test_a_non_creating_agent_cannot_set_or_start_the_fixture(owned):
+    other = owned.store.next_name(SLUG, "eng")
+    headers = {"X-Ledger-Agent": other, "X-Ledger-Token": authority.agent_token(owned.live["admin"], SLUG, other)}
+    assert owned.invoke(f"/{owned.slug}/credential", {}, headers) == (
+        403,
+        {"error": {"code": "forbidden", "message": "Only the creating engineer receives the fixture credential"}},
+    )
+    status, created = owned.invoke("", {"agent": other, "task": "other", "content": CONTENT}, owned.controller)
+    assert status == 200
+    theirs = created["data"]["slug"]
+    owned.store.create(SwarmConfig(theirs, "/repo", 1, 0, scratch=True))
+    status, issued = owned.invoke(f"/{theirs}/credential", {}, headers)
+    assert status == 200
+    for body in ({"control": "set", "fields": {"master-agent": "codex"}}, {"control": "start"}):
+        assert owned.invoke(f"/{owned.slug}/controls", body, {"X-Proof-Credential": issued["data"]["credential"]}) == (
+            403,
+            {"error": {"code": "forbidden", "message": "Wrong proof fixture credential"}},
+        )
+        assert owned.invoke(f"/{theirs}/controls", body, owned.proof) == (
+            403,
+            {"error": {"code": "forbidden", "message": "Wrong proof fixture credential"}},
+        )
+    assert _queued(owned) == []
 
 
 def test_stale_drain_refusal_keeps_its_protocol_status_and_reason(owned):
@@ -292,7 +451,7 @@ def test_controller_controls_refuse_wrong_owner_and_ungranted_actions(owned):
     payload["request"] = {"control": "resume"}
     status, result = owned.invoke(f"/{owned.slug}/controller-controls", payload, owned.controller)
     assert status == 403
-    assert result["error"]["message"] == "Proof controls permit only pause and drain"
+    assert result["error"]["message"] == "Proof controls permit only pause, drain, set and start"
 
 
 def test_controller_controls_do_not_enqueue_pause_again(owned):

@@ -15,7 +15,7 @@ from dataclasses import dataclass, fields
 
 from scripts.inbox import exits
 from scripts.inbox.store import CLOSED, InboxError, InboxStore
-from scripts.swarm import capacity, outage, ready, waits
+from scripts.swarm import capacity, idle, outage, ready, waits
 from scripts.swarm.health.findings import MINUTE_MS, Finding
 from scripts.swarm.ledger_events import Mail
 
@@ -114,8 +114,7 @@ def stall_pass(watch, doc):
     if gone:
         watch.store.redis.srem(_key(watch, QUEUED), *gone)
     for task in held:
-        found = ready.record(watch.store, watch.slug, task["id"]) if ready.awaiting(task) else None
-        if found and waits.dependency(found.get("dependency", {}), task, rows, watch.view):
+        if _waiting(watch, task, rows):
             continue
         actions += _pull_request(watch, mail, task, limit, marks, seen)
     actions += _unclaimed(watch, mail, rows, limit, marks, seen)
@@ -123,6 +122,16 @@ def stall_pass(watch, doc):
     if seen:
         watch.store.redis.hset(_key(watch, SEEN), mapping=seen)
     return actions + _escalate(watch, rows)
+
+
+def _waiting(watch, task, rows):
+    tid, owner = task["id"], task.get("claimed_by")
+    if any(dep != tid and rows.get(dep, {}).get("state") != "done" for dep in task.get("depends_on") or []):
+        return True
+    found = ready.record(watch.store, watch.slug, tid) if ready.awaiting(task) else None
+    declared = idle.wait(watch.store.redis, watch.slug, owner) if owner else None
+    held = ((found or {}).get("dependency"), (declared or {}).get("on"))
+    return any(on and waits.dependency(on, task, rows, watch.view) for on in held)
 
 
 def _minutes(watch, since):

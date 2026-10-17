@@ -85,7 +85,10 @@ def test_starting_warns_when_the_timer_cannot_be_enabled(monkeypatch, capsys):
     monkeypatch.setattr(timer, "ensure", lambda binary: False)
     monkeypatch.setattr(cli, "run_tick", lambda store, slug: [])
     cli._state(_Store(), Namespace(slug="sw"), "running")
-    assert "the systemd timer could not be enabled" in capsys.readouterr().err
+    assert (
+        "warning: the systemd timer or swarm services could not be enabled; run agentihooks swarm tick yourself\n"
+        in capsys.readouterr().err
+    )
 
 
 def test_starting_from_a_non_installed_run_says_why_and_writes_nothing(monkeypatch, capsys, tmp_path):

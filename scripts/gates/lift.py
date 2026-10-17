@@ -63,12 +63,19 @@ def task_lifted(slug, task, gate, home=None, now=None, command=""):
     if not record.get("url"):
         return _alive(record, now)
     from scripts.gates.identity import simple_commands
-    from scripts.gates.intent import _merge_target, _same_pull, pr_head
+    from scripts.gates.intent import _merge_target, _same_pull, pr_head, production_unchanged
 
     targets = filter(None, map(_merge_target, simple_commands(command)))
     if not all(_same_pull(target, record["url"]) for target in targets):
         return False
-    return bool(record.get("head")) and pr_head(record["url"]) == record["head"]
+    if not record.get("head"):
+        return False
+    head = pr_head(record["url"])
+    return head == record["head"] or (bool(head) and production_unchanged(record["url"], record["head"], head))
+
+
+def head_lifted(slug, task, gate, home=None):
+    return bool(_record(task_lift_path(slug, task, gate, home)).get("url")) and task_lifted(slug, task, gate, home)
 
 
 def drop_task(slug, task, home=None):
