@@ -4,6 +4,9 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 logs="$(mktemp -d -p "${RUNNER_TEMP:-${TMPDIR:-/tmp}}")"
 scripts=("$@")
+if [[ "${SWARM_SMOKE_CACHE_EXPORT:-}" == true ]]; then
+  scripts+=(scripts/packaging/swarm-cache-export.sh)
+fi
 scenario() {
   local start=$SECONDS status=0
   bash "$1" >"$2" 2>&1 || status=$?

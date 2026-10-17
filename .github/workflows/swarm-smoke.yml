@@ -17,6 +17,7 @@ jobs:
     timeout-minutes: 30
     env:
       SWARM_SMOKE_IMAGE: local/agentihooks-swarm:clients-check
+      SWARM_SMOKE_CACHE_EXPORT: 'true'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -27,6 +28,16 @@ jobs:
         uses: docker/setup-buildx-action@v3
         with:
           driver: docker
+      - name: Expose the cache service to the parallel export
+        uses: actions/github-script@v7
+        with:
+          script: |
+            for (const name of ['ACTIONS_RUNTIME_TOKEN', 'ACTIONS_RESULTS_URL']) {
+              const value = process.env[name];
+              if (!value) throw new Error(`${name} is unavailable`);
+              core.setSecret(value);
+              core.exportVariable(name, value);
+            }
       - name: Build the swarm image
         if: ${{ !cancelled() }}
         uses: docker/build-push-action@v6
@@ -34,10 +45,7 @@ jobs:
           context: .
           load: true
           tags: local/agentihooks-swarm:clients-check
-          cache-from: |
-            type=gha,scope=swarm-smoke
-            type=gha,scope=swarm
-          cache-to: type=gha,mode=max,scope=swarm-smoke,compression=zstd,force-compression=true
+          cache-from: type=gha,scope=swarm-smoke
       - name: Run the hive launch, Compose install, hive join and Compose hive scenarios in parallel
         if: ${{ !cancelled() }}
         run: >-
