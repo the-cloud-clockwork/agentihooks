@@ -328,6 +328,43 @@ def test_collection_workflow_inputs_belong_only_to_the_module_that_reads_them(tm
     ]
 
 
+@pytest.mark.parametrize(
+    "new",
+    [
+        None,
+        "jobs: [broken]",
+        "jobs:\n  unit: [broken]\n  split: {}\n",
+        "jobs:\n  unit: {}\n  split: {}\nenv:\n  MODE: changed\n",
+        "jobs:\n  unit: {}\n  split: {}\ndefaults:\n  run:\n    shell: python\n",
+        "jobs:\n  unit:\n    steps: [{run: changed}]\n  split: {}\n",
+        "jobs:\n  unit:\n    needs: select\n  split: {}\n  select:\n    steps: [{run: changed}]\n",
+    ],
+)
+def test_execution_input_plants_still_invalidate_every_test(tmp_path, new):
+    manifest = _measure(tmp_path)
+    old = "jobs:\n  unit:\n    needs: select\n  split: {}\n  select: {}\n"
+    result = dep_manifest.plan(manifest, [(".github/workflows/test.yml", old, new)], "41")
+    assert result["tests"] == []
+    assert result["global"] == ".github/workflows/test.yml"
+
+
+@pytest.mark.parametrize("version", [None, 1])
+def test_legacy_manifests_keep_workflow_changes_global(tmp_path, version):
+    manifest = _measure(tmp_path)
+    manifest["version"] = version
+    result = dep_manifest.plan(manifest, [(".github/workflows/smoke.yml", "name: old", "name: new")], "41")
+    assert result["tests"] == []
+    assert result["global"] == ".github/workflows/smoke.yml"
+
+
+@pytest.mark.parametrize("path", [".github/test-excludes.txt", ".github/actions/retry-download/action.yml"])
+def test_shared_github_execution_inputs_remain_global(tmp_path, path):
+    manifest = _measure(tmp_path)
+    result = dep_manifest.plan(manifest, [(path, "old", "new")], "41")
+    assert result["tests"] == []
+    assert result["global"] == path
+
+
 def test_deselection_keeps_new_tests_and_skips_only_wholly_reused_files(tmp_path):
     collected = ["tests/test_a.py::one", "tests/test_a.py::two", "tests/test_b.py::one", "tests/test_b.py::new"]
     reused = ["tests/test_a.py::one", "tests/test_a.py::two", "tests/test_b.py::one", "tests/test_gone.py::x"]

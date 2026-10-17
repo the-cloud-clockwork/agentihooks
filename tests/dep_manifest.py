@@ -184,14 +184,16 @@ def workflow_execution_changed(old: str | None, new: str | None) -> bool:
         return True
 
 
+def global_input(path: str, old: str | None, new: str | None, version: int | None) -> bool:
+    if path.startswith(".github/workflows/") and version == 2:
+        return path == ".github/workflows/test.yml" and workflow_execution_changed(old, new)
+    return _global(path)
+
+
 def invalidated(manifest: dict, changed: list[tuple[str, str | None, str | None]]) -> tuple[set[str], str | None]:
     tests = manifest["tests"]
     for path, old, new in changed:
-        if path.startswith(".github/workflows/") and manifest.get("version") == 2:
-            if path == ".github/workflows/test.yml" and workflow_execution_changed(old, new):
-                return set(tests), path
-            continue
-        if _global(path):
+        if global_input(path, old, new, manifest.get("version")):
             return set(tests), path
     index = {name: number for number, name in enumerate(manifest["units"])}
     units = set()
