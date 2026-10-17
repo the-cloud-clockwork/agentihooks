@@ -50,6 +50,11 @@ def prepare(
     env[home] = str(profiles.profile_dir(name, overlays) / agent)
     if isolate and Path(env[home]).resolve() == profiles.operator_codex_home().resolve():
         raise ValueError("swarm codex profile resolves to the operator Codex home")
+    if agent == "claude":
+        from scripts.inbox import channel
+
+        if channel.FLAG in remaining:
+            channel.register({**environ, **env})
     return env, [*flags, *remaining]
 
 

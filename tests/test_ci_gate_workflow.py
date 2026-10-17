@@ -122,7 +122,11 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
     )
     assert gate["if"] == "${{ always() }}"
     assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
-    assert jobs["split"]["needs"] in (["durations", "select", "reuse", "admission"], ["select", "reuse", "admission"])
+    assert jobs["split"]["needs"] in (
+        ["durations", "select", "reuse", "admission"],
+        ["select", "reuse", "admission"],
+        ["test-count", "select", "reuse", "admission"],
+    )
     assert jobs["lint"]["needs"] in (["reuse"], ["reuse", "admission"])
     if "swarm-image" in gate["needs"]:
         assert jobs["swarm-image"]["uses"] == "./.github/workflows/swarm-smoke.yml"
@@ -252,7 +256,7 @@ def test_test_count_floor_runs_per_suite_beside_unit_against_the_base():
     assert base["run"].replace('echo "BASE: $BASE"\n', "") == (
         'BASE="$(git merge-base "$BASE" HEAD)"\ngit worktree add --detach "$RUNNER_TEMP/base" "$BASE"\n'
     )
-    assert floor["run"] == (
+    serial = (
         'if [[ ! -f "$RUNNER_TEMP/base/tests/count_floor.py" ]]; then\n'
         '  echo "::error::The base carries no tests/count_floor.py, so nothing trusted can grade."\n'
         "  exit 1\n"
@@ -260,6 +264,23 @@ def test_test_count_floor_runs_per_suite_beside_unit_against_the_base():
         'cd "$RUNNER_TEMP/base"\n'
         'python -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"\n'
     )
+    parallel = serial.replace(
+        'cd "$RUNNER_TEMP/base"\npython -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"\n',
+        """python -c 'import json; from pathlib import Path; from tests.duration_coverage import collected_tests; Path("collected.json").write_text(json.dumps(collected_tests(Path.cwd())))' > "$RUNNER_TEMP/collection.log" 2>&1 &
+collection_pid=$!
+(
+  cd "$RUNNER_TEMP/base"
+  python -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
+) &
+floor_pid=$!
+status=0
+wait "$collection_pid" || status=$?
+wait "$floor_pid" || status=$?
+cat "$RUNNER_TEMP/collection.log"
+exit "$status"
+""",
+    )
+    assert floor["run"] in (serial, parallel)
 
 
 def test_lint_and_test_count_grade_a_pull_request_that_merged_dev_from_the_current_merge_base(tmp_path):
