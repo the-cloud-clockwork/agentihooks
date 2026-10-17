@@ -8,6 +8,8 @@ has_children: true
 
 Complete reference documentation for configuration and CLI commands.
 
+See [Focused proof CPU worker limits](../ci-timing.md#focused-proof-cpu-worker-limits) for focused test dispatch, automatic CPU quota and affinity caps, configuration and diagnostics.
+
 ## Pages in this section
 
 | Page | What it covers |
