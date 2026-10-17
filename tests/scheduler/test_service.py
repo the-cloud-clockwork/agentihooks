@@ -103,7 +103,7 @@ def test_supervisor_terminates_its_active_child_on_shutdown(monkeypatch, tmp_pat
     stop.wait.assert_called_once_with(1)
 
 
-@pytest.mark.parametrize("variable", ["REDIS_URL", "AGENTIHOOKS_HIVE_REDIS_URL"])
+@pytest.mark.parametrize("variable", ["REDIS_URL", "AGENTIHOOKS_HIVE_REDIS_URL", "AGENTIHOOKS_SWARM_REDIS_URL"])
 @pytest.mark.parametrize("inherited", [False, True])
 def test_agentihooks_starts_one_detached_supervisor_when_redis_is_configured(
     monkeypatch, tmp_path, variable, inherited
