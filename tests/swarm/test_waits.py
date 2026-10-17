@@ -1412,6 +1412,23 @@ def test_checks_wait_holds_the_new_required_run_after_an_old_green_gate(tick, st
     assert idle.wait(tick.store.redis, "sw", ME) is not None
 
 
+@pytest.mark.parametrize("status", ["QUEUED", "IN_PROGRESS", "COMPLETED"])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_checks_wait_retains_a_separate_required_workflow_after_superseding_its_check(tick, status, reverse):
+    tick.hold("checks", URL)
+    gate = {**_run_check("Gate — Required", 10, 1, "SUCCESS"), "isRequired": True}
+    old = {**_run_check("security", 20, 2, "SUCCESS", workflow="W2"), "isRequired": True}
+    suites = [_suite(1, "COMPLETED", "SUCCESS"), _suite(3, status, workflow="W2")]
+    tick.pulls[URL] = _gated([gate, old], suites, reverse)
+    assert tick.end() == []
+    assert idle.wait(tick.store.redis, "sw", ME) is not None
+    current = {**_run_check("security", 30, 3, "SUCCESS", workflow="W2"), "isRequired": True}
+    suites[-1] = _suite(3, "COMPLETED", "SUCCESS", workflow="W2")
+    tick.pulls[URL] = _gated([gate, old, current], suites, reverse)
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
+    assert idle.wait(tick.store.redis, "sw", ME) is None
+
+
 @pytest.mark.parametrize("conclusion", [None, "FAILURE"])
 def test_an_optional_workflow_cannot_hold_or_fail_the_required_run(tick, conclusion):
     tick.hold("checks", URL)

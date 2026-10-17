@@ -102,16 +102,17 @@ def pull_request(raw):
     rollup = raw.get("statusCheckRollup") or []
     newest = _newest_runs(rollup, suites)
     everything = _newest([check for check in rollup if not _superseded(check, newest)])
-    commits, checks = raw.get("commits") or [], _required(raw.get("gated"), everything)
+    commits, required = raw.get("commits") or [], _required(raw.get("gated"), rollup)
+    checks = _newest([check for check in required if not _superseded(check, newest)])
     results = [check.get("conclusion") or check.get("state") for check in checks]
-    required_runs = {_run_key(check) for check in checks if _run_key(check)[0]}
+    required_runs = {_run_key(check) for check in required if _run_key(check)[0]}
     running = any(
         suite.get("workflowRun")
         and suite.get("status") != "COMPLETED"
         and not _superseded(suite, newest)
         and (not raw.get("gated") or not required_runs or _run_key(suite) in required_runs)
         for suite in suites
-    )
+    ) or bool(required_runs - {_run_key(check) for check in checks})
     pushes = [
         iso_ms(suite["workflowRun"]["createdAt"])
         for suite in suites
