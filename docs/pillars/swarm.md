@@ -714,8 +714,8 @@ inbox transport recorded on the agent when it launched; neither is a live probe.
 | Harness and transport | Push inbox | Native terminal |
 |---|---|---|
 | Claude | yes: the inbox channel pushes each item into the session | no |
-| Codex, `app_server` | yes: the push pump starts or steers a turn | yes: herdr opens the managed thread as a viewer |
-| Codex, `legacy` | no: the tick types a wake into the idle pane and the master runs `wait --inbox` | no |
+| Codex, `app_server` | yes: the Codex push pump delivers each item to the managed thread | yes: herdr opens the managed thread as a viewer |
+| Codex, `legacy` | no: the tick types a wake into the idle pane, and the agent runs `agentihooks swarm <id> wait --inbox` when no work remains | no |
 | Any other or no harness | no | no |
 
 - **Push inbox** means the execution receives inbox items without a typed wake.
@@ -755,7 +755,7 @@ dot. A status payload without capabilities, such as one from a ledger server old
 whose panel adds execution and terminal columns, keep the transport column in
 the same place.
 
-To find the agents that still need a typed wake:
+To list the agents without push inbox, which rely on a typed wake:
 
 ```bash
 agentihooks swarm <id> status --json \
