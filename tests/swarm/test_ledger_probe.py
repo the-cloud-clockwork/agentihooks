@@ -4,7 +4,7 @@ from urllib.error import HTTPError
 import pytest
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import ledger_probe
+from scripts.swarm import incidents, ledger_probe
 from scripts.swarm.ledger_client import LedgerGone, LedgerRefused
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
@@ -159,6 +159,29 @@ def test_a_fast_pass_between_slow_ones_resets_the_count(store):
     ledger.read_s = 6.0
     assert observe(store, ledger, clock) == []
     assert not ledger_probe.holding(store, "sw")
+
+
+@pytest.mark.parametrize("sibling_passes", [1, 2])
+def test_a_sibling_swarm_cannot_reset_or_clear_another_swarms_slow_passes(store, sibling_passes):
+    store.create(SwarmConfig("sibling", "/repo", max_eng=1, max_ci=0))
+    clock = Clock()
+    slow = ProbedLedger(clock, write_s=5.7)
+    fast = ProbedLedger(clock)
+    read, write = fast.metadata, fast.time_left
+    fast.metadata = lambda slug: read("sw")
+    fast.time_left = lambda slug, slots, ci_minutes: write("sw", slots, ci_minutes)
+    observe(store, slow, clock)
+    for at in range(sibling_passes):
+        ledger_probe.observe(store, "sibling", fast, FakeRuntime(), 2_000 + at, clock=clock, facts=lambda: FACTS)
+    observe(store, slow, clock, 3_000)
+    assert ledger_probe.holding(store, "sw")
+    assert len(master_mail(store)) == 1
+    assert "slow" in master_mail(store)[0]
+    for at in range(2):
+        ledger_probe.observe(store, "sibling", fast, FakeRuntime(), 4_000 + at, clock=clock, facts=lambda: FACTS)
+    assert store.redis.hget(incidents.key("ledger"), "active") == "1"
+    observe(store, slow, clock, 5_000)
+    assert not any("fast again" in text for text in master_mail(store))
 
 
 def test_two_failed_passes_raise_the_alert_naming_the_failure(store):
