@@ -158,11 +158,7 @@ def routing_store(environ: Mapping[str, str]) -> SettingsStore:
 
 
 def _master(found: str, environ: Mapping[str, str], store: SettingsStore) -> None:
-    if master_account.declared(store, environ).get("claude") is None:
-        master_account.declare(
-            store, {"claude": (found, None)}, environ, environ["AGENTIHOOKS_AGENT_NAME"], time.time()
-        )
-    declared = master_account.declared(store, environ)["claude"].slug
+    declared = master_account.claim(store, "claude", found, environ, environ["AGENTIHOOKS_AGENT_NAME"], time.time())
     if declared != found:
         raise LoginRefused(OTHER_MASTER.format(account=found, master=declared))
 
