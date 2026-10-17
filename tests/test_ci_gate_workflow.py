@@ -48,6 +48,7 @@ def test_stored_durations_share_selection_admission_before_both_shard_paths():
     assert published["with"]["if-no-files-found"] == "error"
 
 
+@pytest.mark.parametrize("shard_path", ["split", "unit-selected"])
 def test_each_shard_path_restores_selected_durations_red_on_a_cache_miss(shard_path):
     steps = _workflow()["jobs"][shard_path]["steps"]
     restore = next(step for step in steps if step.get("name") == "Restore latest dev durations")
