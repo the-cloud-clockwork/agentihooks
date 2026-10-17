@@ -115,7 +115,7 @@ def apply(store: InboxStore, record: dict) -> dict:
 
 
 def _apply_send(store, me, record):
-    from scripts.inbox.addresses import check_address
+    from scripts.inbox.addresses import check_address, dispatcher_status
 
     args = record["args"]
     check_address(store, me, args["address"])
