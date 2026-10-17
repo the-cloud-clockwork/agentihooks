@@ -138,14 +138,12 @@ class Consumer:
                 ack = self.orders.ack(order)
                 if ack is None:
                     ack = self.apply(order)
+                if ack is not None:
+                    self.orders.finish(self.hive, item, order, ack)
             except (KeyError, TypeError, ValueError):
                 self._drop(item, "invalid_order")
-                continue
             except NoPermissionError:
                 self._drop(item, "refused")
-                continue
-            if ack is not None:
-                self.orders.finish(self.hive, item, order, ack)
         return len(entries)
 
     def _drop(self, item: str, failure: str) -> None:

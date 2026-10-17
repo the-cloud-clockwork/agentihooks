@@ -35,7 +35,7 @@ def beat(redis: "Redis", local_id: str) -> None:
     if executions:
         report["sessions"]["_executions"] = executions
     key = registry.key(local_id)
-    # A member's Redis user writes neither: its join indexes it, and its sessions report counts its executions.
+    # The member Redis user cannot write the hive index or launch slots; join, revoke and the controller maintain them.
     member = local_id == os.environ.get("AGENTIHOOKS_HIVE_ID")
     with redis.pipeline() as pipe:
         for field, value in registry._default(local_id).items():
