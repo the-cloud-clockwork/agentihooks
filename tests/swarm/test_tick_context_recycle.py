@@ -4,9 +4,19 @@ import pytest
 
 from hooks.context import context_recycle
 from scripts.swarm import tick as tick_module
-from tests.swarm.test_tick import FakeLedger, FakeRuntime, store  # noqa: F401
+from scripts.swarm.store import RedisStore, SwarmConfig
+from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
+
+
+@pytest.fixture
+def store():
+    import fakeredis
+
+    result = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    result.create(SwarmConfig("sw", "/repo", max_eng=2, max_ci=1))
+    return result
 
 
 @pytest.fixture(autouse=True)
