@@ -36,6 +36,7 @@
   "queue-retry.yml/retry": "hosted",
   "release.yml/release": "hosted",
   "runner-trust.yml/actors": "hosted",
+  "selector-proof.yml/selection": "light",
   "semgrep.yml/scan": "light",
   "startup-stages.yml/measure": "standard",
   "swarm-image.yml/publish": "standard",

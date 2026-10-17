@@ -53,6 +53,7 @@ MOVED = {
     ("proofs.yml", "operations-cpu"): BATCH,
     ("proofs.yml", "operations-receipts"): BATCH,
     ("proofs.yml", "tests"): STANDARD,
+    ("selector-proof.yml", "selection"): LIGHT,
     ("semgrep.yml", "scan"): LIGHT,
     ("startup-stages.yml", "measure"): STANDARD,
     ("swarm-image.yml", "publish"): STANDARD,
