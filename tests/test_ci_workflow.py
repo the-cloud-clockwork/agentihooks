@@ -200,6 +200,29 @@ def test_unit_install_keeps_playwright_and_excludes_the_grpc_exporter():
     assert excludes == ["opentelemetry-exporter-otlp-proto-grpc"]
 
 
+def test_only_a_dev_push_saves_the_test_environment_after_installing_it():
+    jobs = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    callers = [job["steps"] for job in jobs.values() if any(step.get("id") == "venv" for step in job["steps"])]
+    assert len(callers) == 4
+    for steps in callers:
+        restore = next(step for step in steps if step.get("id") == "venv")
+        install = next(step for step in steps if step.get("name") == "Install dependencies")
+        save = next(step for step in steps if step.get("name") == "Save the test environment from dev")
+        assert restore["uses"] == "actions/cache/restore@v4"
+        assert save["uses"] == "actions/cache/save@v4"
+        assert save["with"] == {"path": restore["with"]["path"], "key": "${{ steps.venv.outputs.cache-primary-key }}"}
+        assert save["if"] == (
+            "env.UNIT_SOURCE == '' && steps.venv.outputs.cache-hit != 'true'"
+            " && github.event_name == 'push' && github.ref == 'refs/heads/dev'"
+        )
+        assert steps.index(restore) < steps.index(install) < steps.index(save)
+    assert not any(
+        step.get("uses") == "actions/cache@v4" and "venv" in step.get("with", {}).get("path", "")
+        for job in jobs.values()
+        for step in job["steps"]
+    )
+
+
 def test_unit_matrix_runs_one_shard_per_split():
     command = _pytest_command()
     assert '--shard "$SHARD"' in command

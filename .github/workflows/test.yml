@@ -637,7 +637,7 @@ jobs:
         name: Restore the test environment
         if: env.UNIT_SOURCE == ''
         id: venv
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ~/venv
           key: venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ steps.day.outputs.date }}-${{ hashFiles('pyproject.toml', '.github/test-excludes.txt') }}
@@ -664,6 +664,15 @@ jobs:
         run: |
           uv venv --python "$PYTHON_PATH" "$HOME/venv"
           uv pip install --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"
+
+      # Queue refs cannot read dev's entries, so saving there only fills the store with copies.
+      - &save-venv
+        name: Save the test environment from dev
+        if: env.UNIT_SOURCE == '' && steps.venv.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/dev'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/venv
+          key: ${{ steps.venv.outputs.cache-primary-key }}
 
       - &use-venv
         name: Use the test environment
@@ -777,6 +786,8 @@ jobs:
       - *uv
 
       - *install
+
+      - *save-venv
 
       - *use-venv
 
@@ -965,6 +976,8 @@ jobs:
 
       - *install
 
+      - *save-venv
+
       - *use-venv
 
       - name: Restore latest dev durations
@@ -1128,6 +1141,8 @@ jobs:
       - *venv
       - *uv
       - *install
+
+      - *save-venv
       - *use-venv
 
       - name: Check out the base revision
