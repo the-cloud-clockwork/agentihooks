@@ -519,6 +519,12 @@ def test_desired_route_on_a_local_record_lives_in_its_own_hash(store, agent):
     assert not store.redis.hexists(routes, master.name)
 
 
+def test_a_controller_admission_without_the_route_hash_reads_the_desired_route_from_its_execution(store, agent):
+    current = store.start_execution("fixture", replace(agent, desired_route_kind="interactive"))
+    store.redis.hdel(store.key("fixture", "desired-routes"), current.name)
+    assert store.agents("fixture")[0].desired_route_kind == "interactive"
+
+
 @pytest.mark.parametrize(
     "changes",
     [

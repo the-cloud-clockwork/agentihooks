@@ -159,6 +159,7 @@ def test_fallback_finding_reads_every_agent_and_names_an_unrecorded_route_as_sub
     }
     found = [f for f in findings({}, [worker, master], {}, Limits()) if f.kind == "master-fallback-auth"]
     assert [f.evidence for f in found] == [("route: subscription", "agent master-agent")]
+    assert found[0].threshold == "the master desires interactive authentication but runs on fallback authentication"
 
 
 def test_unreserved_rows_regain_the_state_of_their_original_cap():
@@ -328,6 +329,51 @@ def test_a_master_with_no_harness_set_takes_the_login_on_claude(tmp_path, monkey
         }
     placed = runtime.spawn(config, "master", "agent", task)
     assert (placed.harness, placed.route_kind, placed.choice) == ("claude", "interactive", "other")
+
+
+@pytest.mark.parametrize("ordered", ["", "interactive"])
+def test_a_master_after_a_codex_predecessor_keeps_codex(tmp_path, monkeypatch, ordered):
+    from scripts.profiles import plugins
+
+    monkeypatch.setattr(plugins, "claude_only", lambda name: False)
+    runtime, config, _ = _login_runtime(tmp_path)
+    task = {
+        "id": "master",
+        "title": "proof",
+        "handoff": "Continue the master task.",
+        "handoff_envelope": {
+            "launch": {"profile": "master", "harness": "codex", "account": "", "model": "sol", "effort": "high"}
+        },
+        **({"route_kind": ordered} if ordered else {}),
+    }
+    placed = runtime.spawn(config, "master", "agent", task)
+    assert (placed.harness, placed.route_kind) == ("codex", ordered or "subscription")
+
+
+def test_the_login_probe_runs_as_the_native_interactive_account(tmp_path):
+    from scripts.routing import envs, native_login
+    from scripts.swarm.runtime import HerdrRuntime
+    from tests.swarm.profile_fixture import validated
+
+    probes = []
+
+    def run(argv, **kwargs):
+        if argv[1:] == list(native_login.COMMAND):
+            probes.append(kwargs["env"])
+            return SimpleNamespace(returncode=0, stdout=native_login.STATUS, stderr="")
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "requested"))
+    config = SimpleNamespace(
+        slug="proof",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        lanes={"master": {"agent": "claude"}},
+        autonomy="delegate",
+    )
+    assert runtime.spawn(config, "master", "agent", {"id": "master", "title": "proof"}).route_kind == "interactive"
+    assert probes and probes[0].get(f"{envs.INTERACTIVE_PREFIX}native") == "1"
 
 
 def test_a_valid_login_skips_the_quota_transfer_of_a_master_handoff(tmp_path):
