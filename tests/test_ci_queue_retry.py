@@ -346,16 +346,16 @@ def test_the_requeue_waits_for_the_queue_to_drop_the_pull_request(monkeypatch):
     asked, slept = queued_then([queued, queued, left], monkeypatch)
     assert ci_queue_retry.pull_after_exit("o/r", 3259) is left
     assert asked == [("o/r", 3259)] * 3
-    assert slept == [15, 15]
+    assert slept == [30, 30]
     assert ci_queue_retry.requeue(left) == (True, "first failed checks removal of this head")
 
 
-def test_a_pull_request_still_queued_after_three_minutes_is_not_requeued(monkeypatch):
+def test_a_pull_request_still_queued_after_thirty_minutes_is_not_requeued(monkeypatch):
     queued = {**pull([REMOVED]), "isInMergeQueue": True}
     asked, slept = queued_then([queued], monkeypatch)
     assert ci_queue_retry.pull_after_exit("o/r", 3259) is queued
-    assert len(asked) == 13
-    assert slept == [15] * 12
+    assert len(asked) == 61
+    assert slept == [30] * 60
     assert ci_queue_retry.requeue(queued) == (False, "pull request is not open outside the queue")
 
 
@@ -374,4 +374,4 @@ def test_main_requeues_once_the_queue_drops_the_pull_request(monkeypatch, tmp_pa
     assert ci_queue_retry.main(["--repo", "o/r", "--run-id", "9"]) == 0
     assert json.loads(capsys.readouterr().out)["requeue"] is True
     assert asked == [("o/r", 3259)] * 2
-    assert slept == [15]
+    assert slept == [30]
