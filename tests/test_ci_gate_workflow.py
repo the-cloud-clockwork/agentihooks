@@ -15,6 +15,7 @@ LINT_CONTROLS = [
     "Check every pull request job is a need of Gate Required",
     "Hold the size and complexity limits",
     "Fail on known vulnerabilities new against the base",
+    "Run every Swarm Ledger dashboard query against this head's metrics tables",
 ]
 LINT_SETUP = [
     "Install ruff",
@@ -116,6 +117,17 @@ def test_each_cheap_gate_grades_in_lint_after_its_setup_even_after_an_earlier_re
     step = _workflow()["jobs"]["lint"]["steps"][names.index(control)]
     assert step["if"] == "${{ !cancelled() }}"
     assert max(names.index(name) for name in LINT_SETUP) < names.index(control)
+
+
+def test_lint_grades_dashboard_columns_with_the_antoncore_dev_checker():
+    steps = _workflow()["jobs"]["lint"]["steps"]
+    checkout = next(s for s in steps if s.get("with", {}).get("repository") == "the-cloud-clockwork/antoncore")
+    assert checkout["with"]["ref"] == "dev"
+    assert checkout["with"]["persist-credentials"] is False
+    assert "scripts/swarm_dashboard_columns.py" in checkout["with"]["sparse-checkout"]
+    check = next(s for s in steps if "swarm_dashboard_columns.py check" in s.get("run", ""))
+    assert steps.index(checkout) < steps.index(check)
+    assert '--agentihooks "$GITHUB_WORKSPACE"' in check["run"]
 
 
 def test_post_shard_graders_do_not_wait_on_each_other_and_the_gate_needs_each():
