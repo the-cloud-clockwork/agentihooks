@@ -334,7 +334,7 @@ def test_the_required_grader_preserves_existing_dev_concurrency(repo):
 
 
 @pytest.mark.parametrize("fault", ["skip", "command", "proofs", "delete"])
-def test_the_required_grader_refuses_a_disabled_branch_lane_preflight(repo, fault):
+def test_the_required_grader_refuses_a_disabled_branch_lane_preflight(repo, fault, capsys):
     from copy import deepcopy
 
     preflight = yaml.safe_load((_ROOT / ".github/workflows/branch-lanes.yml").read_text())
@@ -353,6 +353,8 @@ def test_the_required_grader_refuses_a_disabled_branch_lane_preflight(repo, faul
     planted = _commit(repo, files, {}, "disable preflight")
     _git(repo, "checkout", "-q", "dev")
     assert gate_protected.main(["--root", str(repo), "--head", planted]) == 1
+    out = capsys.readouterr().out
+    assert "::error::The head changes or removes the trusted branch lane preflight." in out.splitlines()
 
 
 @pytest.mark.parametrize("cover_proofs", [False, True])
