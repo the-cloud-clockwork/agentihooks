@@ -52,6 +52,8 @@
     ['[data-swarm="ci_up"]', "Raise the most CI agents that may run at once."],
     ['[data-swarm="plan_down"]', "Lower the most planner agents that may run at once."],
     ['[data-swarm="plan_up"]', "Raise the most planner agents that may run at once."],
+    ['[data-swarm="masters_down"]', "Lower the running agents each extra master serves; 0 keeps the master count by hand."],
+    ['[data-swarm="masters_up"]', "Raise the running agents each extra master serves."],
     ['[data-swarm="compact_down"]', "Lower the context size at which an agent writes its handoff."],
     ['[data-swarm="compact_up"]', "Raise the context size at which an agent writes its handoff."],
     ['[data-swarm="effort_min_down"]', "Lower the least effort a new agent may start with."],

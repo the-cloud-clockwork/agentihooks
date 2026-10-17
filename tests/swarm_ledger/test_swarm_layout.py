@@ -48,6 +48,7 @@ def status(**changes):
             "max_eng": 3,
             "max_ci": 1,
             "max_plan": 1,
+            "masters_step": 12,
             "autonomy": "delegate",
             "effort_min": "medium",
             "effort_max": "high",
@@ -291,6 +292,20 @@ def test_capacity_fields_take_typed_values_and_apply_sends_one_set(open_page):
     assert apply.is_disabled()
 
 
+def test_the_masters_step_stepper_drafts_and_apply_sends_it(open_page):
+    page = open_page()
+    field = page.tab.locator("#cap-masters")
+    assert field.input_value() == "12"
+    page.tab.get_by_role("button", name="Lower masters step").click()
+    assert field.input_value() == "11"
+    page.tab.get_by_role("button", name="Apply capacity").click()
+    for _ in range(100):
+        if page.puts:
+            break
+        page.tab.wait_for_timeout(100)
+    assert page.puts == [{"action": "set", "masters_step": 11}]
+
+
 def test_the_effort_range_shows_in_the_caps_row_and_apply_sends_it(open_page):
     page = open_page(width=1920)
     floor, ceiling = page.tab.locator("#cap-effort_min"), page.tab.locator("#cap-effort_max")
@@ -378,8 +393,8 @@ def test_capacity_caps_and_apply_share_one_row_and_gates_start_below(open_page):
           };
         }"""
     )
-    assert len(boxes["row"]) == 10
-    caps, (affinity, apply) = boxes["row"][:6], boxes["row"][8:]
+    assert len(boxes["row"]) == 11
+    caps, (affinity, apply) = boxes["row"][:7], boxes["row"][9:]
     middle = (caps[0][0] + caps[0][1]) / 2
     assert all(top <= middle <= bottom for top, bottom in caps)
     last = (affinity[0] + affinity[1]) / 2
@@ -846,6 +861,7 @@ def test_every_capacity_stepper_puts_minus_before_and_plus_after_its_value(open_
         ["eng", ["−", "3", "+"]],
         ["ci", ["−", "1", "+"]],
         ["plan", ["−", "1", "+"]],
+        ["masters step", ["−", "12", "+"]],
         ["compact limit", ["−", "600k", "+"]],
         ["effort min", ["−", "medium", "+"]],
         ["effort max", ["−", "high", "+"]],
