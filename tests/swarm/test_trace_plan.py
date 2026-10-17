@@ -370,7 +370,10 @@ def test_scope_questions_keep_required_runner_registration_without_allowing_unre
     [(sent, questions, _)] = fake.calls
     assert sent["task"] == state["task"]
     for key in ("piece_0", "piece_1", "piece_2"):
-        assert "Registering a CI job added by the task in the runner class table is required" in questions[key].instructions
+        assert (
+            "Registering a CI job added by the task in the runner class table is required"
+            in questions[key].instructions
+        )
         assert "Unrelated workflow edits remain out of scope" in questions[key].instructions
     assert [row["kept"] for row in record["pieces"]] == [True, True, False]
     assert record["verdict"] == "pass"
