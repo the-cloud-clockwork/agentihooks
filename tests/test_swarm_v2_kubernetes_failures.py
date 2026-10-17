@@ -581,6 +581,16 @@ def test_the_deployed_pass_deletes_a_completed_attempt_pod_and_scale_down_never_
     recover = deployed.recovery_pass(service, SimpleNamespace(image_tag="dev"), cluster)
     node = world.fx["first"]["node"]
     world.show(world.old, "clean_exit", node)
+    pod = world.api.objects[f"swarm-{world.old.execution_id}"]
+    terminated = pod["status"]["containerStatuses"][0]["state"]["terminated"]
+    terminated["message"] = json.dumps(
+        {
+            "schema_version": 1,
+            "execution_id": world.old.execution_id,
+            "generation": world.old.generation,
+            "transcript_end": 0,
+        }
+    )
     assert recover() == {world.old.execution_id: "working"}
     assert f"swarm-{world.old.execution_id}" not in world.api.objects
     assert grants.revoked == [(cases.SLUG, world.old.execution_id)]

@@ -48,6 +48,8 @@ release assembles them into its release notes. See `changelog.d/README.md`.
 
 ### Fixed
 
+- Master notices for new and overdue follow ups include the item identifier and
+  its exact completion command.
 - The swarm stall watchdog no longer reopens a task or stops its owner while
   the task depends on a task not yet done, or while its owner has declared a
   wait on another open task or on another open pull request's merge.

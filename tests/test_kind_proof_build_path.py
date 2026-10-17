@@ -121,10 +121,10 @@ def test_the_kind_job_restores_and_saves_the_layers_it_builds_with():
     assert smoke["env"]["KIND_LAYER_CACHE_HIT"] == "${{ steps.layers.outputs.cache-hit }}"
     assert save["with"]["key"] == "${{ steps.layers.outputs.cache-primary-key }}"
     exported = steps["exported"]
-    assert exported["if"] == "always() && steps.layers.outputs.cache-hit != 'true'"
+    assert exported["if"] == "always() && steps.key.outputs.hit != 'true' && steps.layers.outputs.cache-hit != 'true'"
     assert "$RUNNER_TEMP/kind-layers/complete" in exported["run"]
     assert restore["with"]["path"] == "${{ runner.temp }}/kind-layers"
-    assert save["if"] == "always() && steps.exported.outputs.complete == 'true'"
+    assert save["if"] == "always() && steps.key.outputs.hit != 'true' && steps.exported.outputs.complete == 'true'"
     order = list(steps)
     assert order.index("layers") < order.index(smoke_name) < order.index("exported")
     assert order.index("exported") < order.index("Save the fixture image layers")

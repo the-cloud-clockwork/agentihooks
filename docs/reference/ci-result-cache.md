@@ -53,7 +53,7 @@ These two tests stay unfixed until slice 1 lands, so they keep proving the retry
 | Cached shard environments: `venv-*`, `chromium-*`, `sonar-*` caches | environment | interpreter, `pyproject.toml`, day; Playwright version | caches tools, not results |
 | Durations and coverage baselines: `durations-merged-<sha>`, `coverage-baseline-<tree>` | data | commit or tree | not results |
 | Mutation reuse of the preflight result: `own_bases` and `graded_green` in `scripts/ci_mutation/scope.py` | mutation scope | ancestor commit whose preflight `mutation` job passed | per commit, not per input |
-| Helm kind due check: `kind-due` | one job | chart paths changed | path rule written by hand |
+| Helm kind chart proof: `kind-due` and `helm-kind` | one job | job input key | none: `kind-due` looks up the `helm-kind` key |
 | Dev push | whole run | none | always runs everything; `ci_reuse.py` decides reuse only for `merge_group`, so the dev push reuse named in the task does not exist yet |
 
 Before slice 1 nothing retried. A failed test failed its shard, the shard failed `Gate — Required`, and the only recovery was a rerun of failed jobs on a pull request or a new queue entry.
@@ -248,4 +248,4 @@ Each keyed job declares its inputs in `.github/input-keys.json`: repository path
 | [38963275517](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38963275517), [38963279568](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38963279568) | a docs change, outside every declared input | 20 s each: key hit, install, check and save skipped |
 | [38963740312](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38963740312), [38965443542](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38965443542) | a change to `hooks/` and `tests/ledger_load/`, both declared | brain smoke 37 s and ledger load 131 s: key missed, every step ran, the new key saved |
 
-Known limits: the day in the key forces one full run per job per UTC day, which also bounds how long an unkeyed floating input, such as a Python patch release or a self hosted runner image, can be reused. `ci_reuse.py` keeps the whole tree queue reuse, and `kind-due` keeps its own path rule until `helm-kind` moves onto the input key.
+Known limits: the day in the key forces one full run per job per UTC day, which also bounds how long an unkeyed floating input, such as a Python patch release or a self hosted runner image, can be reused. `ci_reuse.py` keeps the whole tree queue reuse. `kind-due` looks up the `helm-kind` key of the chart, the swarm image inputs and the kind proof files on the same runner pool, and a hit skips `helm-kind`.

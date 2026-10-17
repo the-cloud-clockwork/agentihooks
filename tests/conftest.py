@@ -56,14 +56,23 @@ NODE_SHARDS = pytest.StashKey[dict[str, int]]()
 FILE_SHARDS = pytest.StashKey[dict[str, list[int]]]()
 WARM_PIDS = pytest.StashKey[list[int]]()
 REUSED = pytest.StashKey[tuple[frozenset[str], frozenset[str]]]()
+REUSED_SOURCE = pytest.StashKey[str]()
 
 
 def _reused(config) -> tuple[frozenset[str], frozenset[str]]:
     if REUSED not in config.stash:
-        path = Path(os.environ.get("CI_REUSED") or os.devnull)
+        # Nested pytest runs that tests start must collect their own targets, so the plan never stays in the environment.
+        source = getattr(config, "workerinput", {}).get("ci_reused") or os.environ.pop("CI_REUSED", "")
+        config.stash[REUSED_SOURCE] = source
+        path = Path(source or os.devnull)
         plan = json.loads(path.read_text()) if path.is_file() else {}
         config.stash[REUSED] = (frozenset(plan.get("tests", ())), frozenset(plan.get("files", ())))
     return config.stash[REUSED]
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_configure_node(node):
+    node.workerinput["ci_reused"] = node.config.stash[REUSED_SOURCE]
 
 
 def pytest_collection_modifyitems(config, items):
@@ -124,6 +133,7 @@ def _shard_files(config) -> frozenset[str]:
 
 
 def pytest_configure(config):
+    _reused(config)
     config.args.sort(key=lambda arg: (Path(arg.split("::", 1)[0]).parent.parts, arg))
     workers = getattr(config.option, "numprocesses", None)
     if not config.getoption("shard") or not workers or hasattr(config, "workerinput") or not hasattr(os, "fork"):

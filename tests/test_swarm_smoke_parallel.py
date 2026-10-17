@@ -75,11 +75,22 @@ def test_scenarios_sharing_a_file_name_keep_their_own_results(tmp_path):
 def test_the_swarm_image_job_runs_every_scenario_in_one_parallel_step_on_the_built_image():
     job = yaml.safe_load((ROOT / ".github/workflows/swarm-smoke.yml").read_text())["jobs"]["smoke"]
     steps = job["steps"]
-    build = next(i for i, step in enumerate(steps) if step.get("run", "").startswith("docker build -t "))
+    build = next(
+        i
+        for i, step in enumerate(steps)
+        if step.get("run", "").startswith("docker build -t ") or step.get("uses") == "docker/build-push-action@v6"
+    )
     parallel = [i for i, step in enumerate(steps) if "scripts/packaging/swarm-smoke-parallel.sh" in step.get("run", "")]
     assert len(parallel) == 1 and parallel[0] > build
     assert steps[parallel[0]]["run"].split()[2:] == SCENARIOS
-    assert job["env"]["SWARM_SMOKE_IMAGE"] == steps[build]["run"].split()[3]
+    step = steps[build]
+    if "run" in step:
+        image = step["run"].split()[3]
+    else:
+        assert step["with"]["context"] == "."
+        assert step["with"]["load"] is True
+        image = step["with"]["tags"]
+    assert job["env"]["SWARM_SMOKE_IMAGE"] == image
     for scenario in SCENARIOS:
         assert not any(step.get("run") == f"bash {scenario}" for step in steps)
 

@@ -1,6 +1,7 @@
 import json
 import subprocess
 from types import SimpleNamespace
+from unittest.mock import ANY
 
 import pytest
 
@@ -570,6 +571,7 @@ class TestCheckPass:
             "at": NOW,
             "phase": "p8",
             "inputs": intent._fingerprint(DOC, DOC["tasks"][0]),
+            "persisted_at": ANY,
         }
         assert got.viewed == [URL]
         assert got.ledger.updates == [(SLUG, TASK, {"state": "claimed"}, "swarm")]
@@ -639,6 +641,7 @@ class TestCheckPass:
             "at": NOW,
             "phase": "p8",
             "inputs": intent._fingerprint(DOC, DOC["tasks"][0]),
+            "persisted_at": ANY,
         }
         assert (got.ledger.updates, got.mail.sent, rows(tmp_path)) == ([], [], [])
         assert got.actions == [f"task {TASK} intent check pass"]
@@ -974,10 +977,11 @@ class TestPlanSource:
     def test_a_swarm_v2_package_slice_is_read_from_the_package_plan(self, monkeypatch):
         from scripts.swarm_ledger import plan_packages
 
-        monkeypatch.setattr(plan_packages, "text", lambda: PLAN)
+        monkeypatch.setattr(plan_packages, "text", lambda: PLAN.replace("line 15\n", "#### SV2-CTL-04 line 15\n"))
         issue = "https://github.com/o/r/issues/7"
         task = {**DOC["tasks"][0], "plan_lines": "15-17", "plan_slice": "SV2-CTL-04", "plan_url": issue}
-        assert intent.state_of({**DOC, "tasks": [task]}, task, PR)["plan_chunk"] == SLICE
+        chunk = intent.state_of({**DOC, "tasks": [task]}, task, PR)["plan_chunk"]
+        assert chunk == "#### SV2-CTL-04 line 15\nline 16\nline 17\n"
 
     def test_a_pass_cites_the_plan_lines_it_judged(self):
         assert intent.judge(CHUNK_STATE, decide=chunk_classifier()) == (

@@ -200,6 +200,39 @@ def test_unit_install_keeps_playwright_and_excludes_the_grpc_exporter():
     assert excludes == ["opentelemetry-exporter-otlp-proto-grpc"]
 
 
+def test_only_a_dev_push_saves_the_test_environment_after_installing_it():
+    jobs = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    callers = {
+        name: job["steps"] for name, job in jobs.items() if any(s.get("id") == "venv" for s in job.get("steps", []))
+    }
+    assert sorted(callers) == ["split", "test-count", "unit", "unit-selected"]
+    for name, steps in callers.items():
+        restore = next(step for step in steps if step.get("id") == "venv")
+        assert restore["uses"] == "actions/cache/restore@v4"
+        saves = [
+            step for step in steps if step.get("uses") == "actions/cache/save@v4" and step["with"]["path"] == "~/venv"
+        ]
+        guards = {"unit-selected": "github.event_name == 'pull_request'", "test-count": "github.event_name != 'push'"}
+        if name in guards:
+            assert guards[name] in jobs[name]["if"]
+            assert saves == []
+            continue
+        [save] = saves
+        install = next(step for step in steps if step.get("name") == "Install dependencies")
+        assert save["name"] == "Save the test environment from dev"
+        assert save["with"] == {"path": restore["with"]["path"], "key": "${{ steps.venv.outputs.cache-primary-key }}"}
+        assert save["if"] == (
+            "env.UNIT_SOURCE == '' && steps.venv.outputs.cache-hit != 'true'"
+            " && github.event_name == 'push' && github.ref == 'refs/heads/dev'"
+        )
+        assert steps.index(restore) < steps.index(install) < steps.index(save)
+    assert not any(
+        step.get("uses") == "actions/cache@v4" and "venv" in step.get("with", {}).get("path", "")
+        for job in jobs.values()
+        for step in job.get("steps", [])
+    )
+
+
 def test_unit_matrix_runs_one_shard_per_split():
     command = _pytest_command()
     assert '--shard "$SHARD"' in command

@@ -71,7 +71,7 @@ MOVED = {
     ("test.yml", "durations"): LIGHT,
     ("test.yml", "flake-budget"): LIGHT,
     ("test.yml", "gate-required"): LIGHT,
-    ("test.yml", "kind-due"): LIGHT,
+    ("test.yml", "kind-due"): QUEUED,
     ("test.yml", "lint"): QUEUED,
     ("test.yml", "mutation"): BATCH,
     ("test.yml", "mutation-plan"): LIGHT,

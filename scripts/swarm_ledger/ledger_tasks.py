@@ -415,11 +415,7 @@ def update_refusal(doc: dict, op: dict, meta: dict | None = None) -> str:
     if phase is not None and phase not in {p["id"] for p in doc["phases"]}:
         return f"phase {phase} is not on this ledger: name one of its phase ids"
     task = next((t for t in doc["tasks"] if t["id"] == op["item"].split("/")[1]), {})
-    if refusal := park_refusal(op, task):
-        return refusal
-    if phase is not None and phase != task.get("phase"):
-        return unsliced_refusal(doc, {**task, "plan_slice": "", **op["fields"]}, op["by"])
-    return ""
+    return park_refusal(op, task)
 
 
 def park_refusal(op: dict, task: dict) -> str:
@@ -636,6 +632,10 @@ def _move_plan(doc: dict, task: dict, fields: dict, phase: dict) -> None:
     source = next((p for p in doc["phases"] if p["id"] == task.get("phase")), {})
     if "plan_url" not in fields and (fields.get("plan_slice") or task.get("plan_url") == source.get("plan_url")):
         fields["plan_url"] = phase.get("plan_url", "") if fields.get("plan_slice") else ""
+    if fields.get("plan_slice") or fields.get("slice"):
+        fields.setdefault("follow_up", False)
+    elif phase.get("plan_ref") or phase.get("plan_url"):
+        fields.setdefault("follow_up", True)
     fields.setdefault("plan_slice", "")
     if task.get("slice"):
         fields.setdefault("slice", "")
