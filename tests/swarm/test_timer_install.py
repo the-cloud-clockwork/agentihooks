@@ -121,3 +121,25 @@ def test_a_refused_tick_exits_non_zero_and_logs_why(monkeypatch, capsys):
     monkeypatch.setattr(cli, "connect", lambda: None)
     assert cli.main(["tick"]) == 1
     assert "this run comes from a worktree" in capsys.readouterr().err
+
+
+def test_wait_checks_have_a_separate_short_timer_and_service(tmp_path):
+    import subprocess
+
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0)
+
+    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=run)
+    wait_timer = (tmp_path / "agentihooks-swarm-waits.timer").read_text()
+    wait_service = (tmp_path / "agentihooks-swarm-waits.service").read_text()
+    assert "OnBootSec=15s\n" in wait_timer
+    assert "OnUnitActiveSec=15s\n" in wait_timer
+    assert "AccuracySec=1s\n" in wait_timer
+    assert 'ExecStart="/installed/bin/agentihooks" swarm waits\n' in wait_service
+    assert "Type=oneshot\n" in wait_service
+    assert "agentihooks-swarm.service" not in wait_service + wait_timer
+    assert ["systemctl", "--user", "enable", "--now", "agentihooks-swarm-waits.timer"] in calls
+    assert ["systemctl", "--user", "enable", "--now", "agentihooks-swarm-waits.service"] not in calls

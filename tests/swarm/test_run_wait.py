@@ -170,3 +170,44 @@ def test_a_malformed_jobs_answer_still_ends_a_red_run_wait(tick, actions, answer
     outcome = f"checks on {RUN}, now red; the run concluded timed_out; its jobs could not be read"
     assert tick.end() == [f"ended the wait of {ME}: {outcome}"]
     assert idle.wait(tick.store.redis, "sw", ME) is None
+
+
+def test_the_wait_timer_ends_a_run_wait_while_the_tick_snapshot_is_blocked(env, actions, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import snapshot
+    from scripts.swarm.store import AgentRecord
+    from tests.swarm.test_delivery import FakeHerdr
+
+    store, ledger, runtime = env
+    run("sw", "create", "--repo", "/repo")
+    entered, release = Event(), Event()
+
+    def slow_snapshot(*args):
+        entered.set()
+        assert release.wait(5)
+
+    monkeypatch.setattr(snapshot, "auto", slow_snapshot)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(cli.run_tick, store, "sw", ledger, runtime, FakeHerdr({}))
+        try:
+            assert entered.wait(5)
+            store.put_agent("sw", AgentRecord(name=ME, lane="eng", task="t1", seat="eng-1@sw"))
+            idle.declare_wait(store.redis, "sw", ME, 10_000_000, "", 1, on={"kind": "checks", "target": RUN})
+            actions["run"] = {"status": "completed", "conclusion": "success"}
+            assert cli.main(["waits"]) == 0
+            assert not future.done()
+            assert idle.wait(store.redis, "sw", ME) is None
+            inbox = InboxStore(store.redis)
+            notices = [item.text for item in inbox.inbox("eng-1@sw")]
+            assert notices == [
+                f"Your wait on checks on {RUN}, now green has ended. Pick task t1 back up: "
+                "agentihooks swarm sw done, block, or wait on the next thing."
+            ]
+            assert cli.main(["waits"]) == 0
+            assert [item.text for item in inbox.inbox("eng-1@sw")] == notices
+        finally:
+            release.set()
+        future.result()
