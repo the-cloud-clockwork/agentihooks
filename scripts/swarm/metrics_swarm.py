@@ -355,8 +355,8 @@ def pull_targets(doc: dict, now_ms: int) -> list[tuple[str, bool]]:
     }
     return [
         (url, url == task.get("pr_url"))
-        for task in doc["tasks"]
-        if task["state"] in ("pr", "claimed") or task["id"] in completed
+        for task in doc.get("tasks", [])
+        if task.get("state") in ("pr", "claimed") or task.get("id") in completed
         for url in dict.fromkeys([*(task.get("split_pulls") or []), task.get("pr_url")])
         if url
     ]
