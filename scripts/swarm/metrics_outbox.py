@@ -137,7 +137,7 @@ def read_recent(name: str, now_ms: int) -> list[dict] | None:
             return []
         with closing(sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=LOCK_TIMEOUT_S)) as db:
             return [json.loads(row) for (row,) in db.execute(RECENT, (name, now_ms - DAY_MS))]
-    except (sqlite3.Error, OSError) as exc:
+    except (sqlite3.Error, OSError, ValueError) as exc:
         logging.getLogger(__name__).warning("metrics history read failed: %s", exc)
         return None
 
