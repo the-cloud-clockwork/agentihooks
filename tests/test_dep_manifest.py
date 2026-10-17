@@ -291,6 +291,55 @@ def test_queue_shards_split_on_the_tests_the_planner_did_not_reuse():
     assert "reused-plan/reused-tests.json" in check["env"]["REUSED"]
 
 
+def _deselect_in_split(tmp_path, head_manifest):
+    collected = ["tests/test_a.py::one", "tests/test_a.py::two", "tests/test_b.py::one", "tests/test_b.py::new"]
+    reused = ["tests/test_a.py::one", "tests/test_a.py::two", "tests/test_b.py::one"]
+    runner = tmp_path / "runner"
+    workspace = tmp_path / "workspace"
+    for checkout, manifest in (
+        (runner / "planner", (ROOT / "tests" / "dep_manifest.py").read_text()),
+        (workspace, head_manifest),
+    ):
+        (checkout / "tests").mkdir(parents=True)
+        (checkout / "tests" / "__init__.py").write_text("")
+        (checkout / "tests" / "dep_manifest.py").write_text(manifest)
+    (workspace / "reused-tests.json").write_text(json.dumps({"tests": reused}))
+    (workspace / "collected.json").write_text(json.dumps(collected))
+    env = {**os.environ, "RUNNER_TEMP": str(runner), "GITHUB_WORKSPACE": str(workspace), "PYTHON_PATH": sys.executable}
+    env["PATH"] = f"{Path(sys.executable).parent}{os.pathsep}{env['PATH']}"
+    run = _step("split", "Deselect the reused tests")["run"]
+    subprocess.run(["bash", "-eo", "pipefail", "-c", run], cwd=workspace, env=env, check=True, capture_output=True)
+    return json.loads((workspace / "reused.json").read_text()), dep_manifest.deselect(reused, collected)
+
+
+def test_the_split_deselects_with_the_grader_manifest_code_not_the_heads(tmp_path):
+    planted = (
+        (ROOT / "tests" / "dep_manifest.py")
+        .read_text()
+        .replace(
+            "def deselect(",
+            "def deselect(reused, collected):\n"
+            "    return {'tests': sorted(collected), 'files': sorted({n.split('::')[0] for n in collected})}\n\n\n"
+            "def _planted(",
+            1,
+        )
+    )
+    chosen, expected = _deselect_in_split(tmp_path, planted)
+    assert chosen == expected
+
+
+def test_the_split_deselects_the_same_tests_when_the_head_keeps_the_manifest_code(tmp_path):
+    chosen, expected = _deselect_in_split(tmp_path, (ROOT / "tests" / "dep_manifest.py").read_text())
+    assert (
+        chosen
+        == expected
+        == {
+            "tests": ["tests/test_a.py::one", "tests/test_a.py::two", "tests/test_b.py::one"],
+            "files": ["tests/test_a.py"],
+        }
+    )
+
+
 def test_the_reused_plan_reaches_workers_but_never_nested_pytest_runs(tmp_path, monkeypatch):
     from types import SimpleNamespace
 
