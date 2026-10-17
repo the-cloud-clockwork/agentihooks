@@ -657,8 +657,10 @@ class HerdrRuntime:
             overlays=list(decision.overlays),
             route_kind=placed_kind,
             remote_control=remote_control.decision(lane, agent, placed_kind, config.slug, login) if front else {},
-            desired_route_kind="interactive"
-            if lane == MASTER and agent == "claude" and not task.get("route_kind")
+            desired_route_kind=None
+            if lane != MASTER
+            else "interactive"
+            if agent == "claude" and not task.get("route_kind")
             else "",
         )
 

@@ -2,6 +2,8 @@ from types import SimpleNamespace
 
 import pytest
 
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
 
 @pytest.mark.parametrize("quota_handoff", [False, True])
 @pytest.mark.parametrize("lane", ["master", "eng"])
@@ -226,7 +228,7 @@ def test_desired_route_survives_storage_outside_the_strict_projection():
         ("master", "claude", None, "interactive"),
         ("master", "claude", "subscription", ""),
         ("master", "codex", None, ""),
-        ("eng", "claude", None, ""),
+        ("eng", "claude", None, None),
     ],
 )
 def test_only_a_claude_master_without_an_ordered_route_desires_the_login(tmp_path, lane, harness, route, desired):
