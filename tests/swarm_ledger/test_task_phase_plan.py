@@ -131,6 +131,22 @@ def test_a_move_into_a_phase_without_a_plan_marks_no_follow_up():
     assert (task(state)["phase"], "follow_up" in task(state)) == ("p2", False)
 
 
+@pytest.mark.parametrize(
+    "named, destination, follow_up",
+    [
+        ({}, {"plan_url": "https://example.com/plan"}, True),
+        ({}, {"plan_ref": {"artifact": "a", "lines": "1-2"}}, True),
+        ({}, {}, None),
+        ({"slice": "slices/plan-a.first"}, {"plan_url": "https://example.com/plan"}, False),
+        ({"plan_slice": "first"}, {"plan_url": "https://example.com/plan"}, False),
+    ],
+)
+def test_a_move_marks_a_follow_up_only_into_a_planned_phase_without_a_named_slice(named, destination, follow_up):
+    fields = {"phase": "p2", **named}
+    ledger_tasks._move_plan({"phases": [{"id": "p1"}]}, {"phase": "p1"}, fields, {"id": "p2", **destination})
+    assert fields.get("follow_up") is follow_up
+
+
 def test_replacement_slice_uses_the_destination_link_without_a_plan_reference():
     file = ledger_artifacts.store(SLUG, "destination.md", b"# Plan\n<!-- slice: new -->\nBuild new feature\n")
     op = {

@@ -84,6 +84,14 @@ def test_a_slice_named_after_another_task_belongs_to_that_task(doc):
     assert state(doc, owner, borrower)["plan_chunk"] == "<!-- slice: t9 -->\n### t9 work\nDo the t9 work.\n"
 
 
+def test_a_slice_named_after_a_task_on_another_slice_still_belongs_to_that_task(doc):
+    assert "plan_chunk" not in state(doc, task("t4", "t9", "9-11"), task("t9", "own", "6-8"))
+
+
+def test_a_document_without_tasks_leaves_a_marked_slice_to_its_task():
+    assert intent._foreign_slice({}, task("t4", "own", "6-8"), "<!-- slice: own -->\n") is False
+
+
 def test_the_same_slice_name_in_another_phase_is_not_shared(doc):
     graded = state(doc, task("t5", "own", "6-8"), task("t6", "own", "6-8", phase="p2"))
     assert graded["plan_lines"] == "6-8"
@@ -170,6 +178,14 @@ def test_a_master_lift_holds_on_its_own_head_without_comparing(tmp_path, monkeyp
 
 def test_a_master_lift_ends_when_the_head_cannot_be_read(tmp_path, monkeypatch):
     assert lifted_on(tmp_path, monkeypatch, None, True) == (False, [])
+
+
+def test_a_master_lift_without_a_recorded_head_never_holds(tmp_path, monkeypatch):
+    path = lift.task_lift_path(SLUG, "t1", "intent", tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"at": 0, "url": URL}))
+    monkeypatch.setattr(intent, "pr_head", lambda url: None)
+    assert lift.task_lifted(SLUG, "t1", "intent", tmp_path) is False
 
 
 def lift_coached(tmp_path, monkeypatch, unchanged, record=None):
