@@ -341,7 +341,7 @@ def test_publish_plan_command_links_each_phase_and_comments_it(plan_ledger, tmp_
 
 def served(slug, ops=None):
     state, rejected = core.sync(slug, ops=ops)
-    return {**state, "rejected": rejected}
+    return {**state, "applied": [op["id"] for op in ops or [] if op["id"] not in rejected], "rejected": rejected}
 
 
 def cli(monkeypatch, slug, *argv):

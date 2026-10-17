@@ -280,6 +280,8 @@ def _add(doc, op, ctx):
         )
         return False
     if not _known(tasks, op.get("depends_on", [])):
+        missing = sorted(set(op["depends_on"]) - {t["id"] for t in tasks})
+        ctx.refused.append(f"task {op['task']} depends on unknown tasks: {', '.join(missing)}")
         return False
     appended = {p["id"] for p in doc.get("phases", []) if p.get("added_by") == op["by"]}
     if refusal := (

@@ -70,7 +70,6 @@ MOVED = {
     ("test.yml", "admission"): LIGHT,
     ("test.yml", "coverage-baseline"): LIGHT,
     ("test.yml", "coverage-ratchet"): LIGHT,
-    ("test.yml", "durations"): LIGHT,
     ("test.yml", "flake-budget"): LIGHT,
     ("test.yml", "gate-required"): LIGHT,
     ("test.yml", "kind-due"): QUEUED,

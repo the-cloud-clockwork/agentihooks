@@ -16,7 +16,10 @@ pytestmark = pytest.mark.unit
 
 
 def _workflow():
+    from scripts.ci_branch_lanes import GROUP
+
     return {
+        "concurrency": {"group": GROUP, "queue": "max", "cancel-in-progress": False},
         True: {"pull_request": {"branches": ["dev"]}, "merge_group": None, "push": {"branches": ["dev"]}},
         "jobs": {
             "unit": {"runs-on": "ubuntu-latest"},
@@ -299,6 +302,80 @@ def test_the_protected_grader_never_executes_the_head():
     assert "pip install" not in runs.replace('python -m pip install "pyyaml>=6.0"', "")
     assert 'python -m scripts.gate_protected --head "$HEAD_SHA"' in runs
     assert "git checkout" not in runs and "git worktree" not in runs
+
+
+@pytest.mark.parametrize("name", ["test.yml", "branch-lanes.yml"])
+def test_branch_lane_grading_holds_the_required_status_from_the_base(repo, capsys, name):
+    from scripts.ci_branch_lanes import GROUP
+
+    base = _workflow()
+    base["concurrency"] = {"group": GROUP, "queue": "max", "cancel-in-progress": False}
+    _commit(repo, {name: base}, {}, "base lane")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    head = _workflow()
+    head.pop("concurrency")
+    planted = _commit(repo, {name: head}, {}, "drop workflow lane")
+    _git(repo, "checkout", "-q", "dev")
+    assert gate_protected.main(["--root", str(repo), "--head", planted]) == 1
+    assert "shared hosted lane concurrency group" in capsys.readouterr().out
+
+
+def test_the_required_grader_preserves_existing_dev_concurrency(repo):
+    base = _workflow()
+    base["concurrency"] = {"group": "existing-dev-policy"}
+    _commit(repo, {"test.yml": base}, {}, "base concurrency")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    head = _workflow()
+    head["concurrency"] = base["concurrency"]
+    head["jobs"]["lint"]["steps"] = [{"run": "echo changed"}]
+    changed = _commit(repo, {"test.yml": head}, {}, "change lint steps")
+    _git(repo, "checkout", "-q", "dev")
+    assert gate_protected.main(["--root", str(repo), "--head", changed]) == 0
+
+
+@pytest.mark.parametrize("fault", ["skip", "command", "proofs", "delete"])
+def test_the_required_grader_refuses_a_disabled_branch_lane_preflight(repo, fault, capsys):
+    from copy import deepcopy
+
+    preflight = yaml.safe_load((_ROOT / ".github/workflows/branch-lanes.yml").read_text())
+    _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": preflight}, {}, "trusted preflight")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    altered = deepcopy(preflight)
+    if fault == "skip":
+        altered["jobs"]["grade"]["if"] = False
+    elif fault == "command":
+        altered["jobs"]["grade"]["steps"][-1]["run"] = "echo accepted"
+    elif fault == "proofs":
+        altered[True]["push"]["branches-ignore"].append("diffcheck/**")
+    files = {"test.yml": _workflow(), "branch-lanes.yml": altered}
+    if fault == "delete":
+        files.pop("branch-lanes.yml")
+    planted = _commit(repo, files, {}, "disable preflight")
+    _git(repo, "checkout", "-q", "dev")
+    assert gate_protected.main(["--root", str(repo), "--head", planted]) == 1
+    out = capsys.readouterr().out
+    assert "::error::The head changes or removes the trusted branch lane preflight." in out.splitlines()
+
+
+@pytest.mark.parametrize("cover_proofs", [False, True])
+@pytest.mark.parametrize("quoted", [False, True])
+def test_the_required_grader_preserves_preflight_and_allows_proof_coverage(repo, cover_proofs, quoted):
+    from copy import deepcopy
+
+    preflight = yaml.safe_load((_ROOT / ".github/workflows/branch-lanes.yml").read_text())
+    event_key = "on" if quoted else True
+    if quoted:
+        preflight["on"] = preflight.pop(True)
+    old = deepcopy(preflight)
+    old[event_key]["push"]["branches-ignore"].append("diffcheck/**")
+    _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": old}, {}, "old preflight")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    head = preflight if cover_proofs else old
+    workflow = _workflow()
+    workflow["jobs"]["lint"]["steps"] = [{"run": "echo changed"}]
+    changed = _commit(repo, {"test.yml": workflow, "branch-lanes.yml": head}, {}, "retain preflight")
+    _git(repo, "checkout", "-q", "dev")
+    assert gate_protected.main(["--root", str(repo), "--head", changed]) == 0
 
 
 def test_the_protected_grader_reports_gate_required_on_the_head():

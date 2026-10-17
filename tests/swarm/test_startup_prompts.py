@@ -308,7 +308,8 @@ def test_the_spawn_prompt_names_each_running_task_that_shares_an_area():
         "Task t1, claimed by engineer@a1b2c3-0001, shares hooks.",
         "Task t2, claimed by engineer@a1b2c3-0002, shares docs/a.md and scripts/swarm/tick.py.",
     ]
-    assert "inbox" in prompt.OVERLAP_LINE and "merge dev" in prompt.OVERLAP_LINE
+    assert "inbox" in prompt.OVERLAP_LINE and "merge dev only on a real conflict" in prompt.OVERLAP_LINE
+    assert "before your own merge" not in prompt.OVERLAP_LINE
 
 
 def test_a_prompt_without_overlaps_says_nothing_about_shared_areas():
