@@ -10,6 +10,7 @@ import ast
 import hashlib
 import io
 import json
+import re
 import statistics
 import subprocess
 import sys
@@ -204,6 +205,25 @@ def share(manifest: dict, repo: Path, ref: str, merges: int) -> dict:
     }
 
 
+def node(test: str) -> str:
+    return re.sub(r"@[^\[\]]*$", "", test)
+
+
+def plan(manifest: dict, changed: list[tuple[str, str | None, str | None]], run: str) -> dict:
+    hit, cause = invalidated(manifest, changed)
+    reused = sorted({node(test) for test in manifest["tests"] if test not in hit})
+    return {"run": run, "commit": manifest["commit"], "global": cause, "invalidated": len(hit), "tests": reused}
+
+
+def deselect(reused: list[str], collected: list[str]) -> dict:
+    tests = set(reused).intersection(collected)
+    files = {}
+    for nodeid in collected:
+        path = nodeid.split("::", 1)[0]
+        files[path] = files.get(path, True) and nodeid in tests
+    return {"tests": sorted(tests), "files": sorted(path for path, whole in files.items() if whole)}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest="command", required=True)
@@ -224,7 +244,16 @@ def main(argv: list[str] | None = None) -> int:
     measured.add_argument("--repo", type=Path, default=Path.cwd())
     measured.add_argument("--ref", default="origin/dev")
     measured.add_argument("--merges", type=int, default=40)
+    deselected = commands.add_parser("deselect")
+    deselected.add_argument("--plan", type=Path, required=True)
+    deselected.add_argument("--collected", type=Path, required=True)
+    deselected.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
+    if args.command == "deselect":
+        chosen = deselect(json.loads(args.plan.read_text())["tests"], json.loads(args.collected.read_text()))
+        args.out.write_text(json.dumps(chosen))
+        print(f"Reusing {len(chosen['tests'])} collected tests; {len(chosen['files'])} test files are not collected")
+        return 0
     if args.command == "build":
         reports = sorted(args.inputs.rglob("*.jsonl"))
         if not reports:

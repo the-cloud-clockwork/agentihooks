@@ -610,6 +610,7 @@ jobs:
       UNIT_SOURCE: ${{ needs.durations.outputs.source }}
     outputs:
       source: ${{ needs.durations.outputs.source }}
+      reused: ${{ steps.plan.outputs.reused }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -691,6 +692,60 @@ jobs:
           PYTHON_VERSION: ${{ matrix.python-version }}
         run: python -m tests.dev_durations "$PYTHON_VERSION" ~/dev-durations --hash durations.sha256 --collected collected.json
 
+      - name: Mint the token that reads the dev test record
+        id: app-token
+        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+
+      # The protected grader plans, so a queued change cannot widen what it reuses.
+      - name: Plan the tests whose inputs did not change
+        id: plan
+        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GRADER: ${{ github.event.merge_group.base_sha || github.sha }}
+          PYTHON_PATH: ${{ steps.python.outputs.python-path }}
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/planner" "$GRADER"
+          if [[ ! -f "$RUNNER_TEMP/planner/scripts/ci_test_plan.py" ]]; then
+            echo "The grader has no test planner; every test runs."
+            echo "reused=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          before=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)
+          cd "$RUNNER_TEMP/planner"
+          "$PYTHON_PATH" -m scripts.ci_test_plan --repository "$GITHUB_REPOSITORY" --head "$GITHUB_SHA" \
+            --repo "$GITHUB_WORKSPACE" --before "$before" --out "$GITHUB_WORKSPACE/reused-tests.json"
+
+      - name: Upload the test plan
+        if: steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: reused-tests-${{ matrix.python-version }}
+          path: reused-tests.json
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
+      - name: Deselect the reused tests
+        if: steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
+        run: python -m tests.dep_manifest deselect --plan reused-tests.json --collected collected.json --out reused.json
+
+      - name: Upload the deselected tests
+        if: steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: reused-${{ matrix.python-version }}
+          path: reused.json
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
       - name: Mint the token that restores queue unit artifacts
         id: unit-token
         if: needs.durations.outputs.source != ''
@@ -746,6 +801,8 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+    outputs:
+      reused: ${{ needs.split.outputs.reused }}
     env:
       CODEX_RELEASE: rust-v0.160.0
       UNIT_SOURCE: ${{ needs.split.outputs.source }}
@@ -815,6 +872,12 @@ jobs:
         with:
           name: collected-${{ matrix.python-version }}
 
+      - name: Download the tests this run reuses
+        if: needs.split.outputs.source == '' && needs.split.outputs.reused != '' && needs.split.outputs.reused != '0'
+        uses: ./.github/actions/retry-download
+        with:
+          name: reused-${{ matrix.python-version }}
+
       # Page tests drive Chromium; the coverage shards run them so the page JavaScript they reach is measured.
       - name: Install the browser that page tests drive
         if: needs.split.outputs.source == '' && matrix.python-version == '3.12'
@@ -835,6 +898,7 @@ jobs:
           SHARD: ${{ matrix.shard }}/${{ matrix.python-version == '3.12' && 12 || 6 }}
           NODE_OPTIONS: ${{ matrix.python-version == '3.12' && format('--require {0}/tests/node_capture.cjs', github.workspace) || '' }}
           CI_FLAKES: ${{ github.workspace }}/flakes.jsonl
+          CI_REUSED: ${{ github.workspace }}/reused.json
           JS_COVERAGE_DIR: ${{ matrix.python-version == '3.12' && format('{0}/js-coverage', github.workspace) || '' }}
         run: start=$SECONDS && status=0 && workers=$(python -m scripts.ci_cpu_quota) && python -c 'import os, shlex, sys, pytest; sys.exit(pytest.main(shlex.split(os.environ.pop("PYTEST_ADDOPTS", "")) + sys.argv[1:]))' tests/ -v -n "$workers" --dist loadgroup --shard "$SHARD" -p tests.flake_ledger --reruns 2 --tb=short -o faulthandler_timeout=60 --store-durations --durations-path durations.json -p no:anyio -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml || status=$?; echo "{\"seconds\":$((SECONDS - start))}" > elapsed.json; exit "$status"
 
@@ -1092,9 +1156,41 @@ jobs:
           name: collected-${{ matrix.python-version }}
           path: collected-data
 
+      - name: Download the test plan
+        if: needs.unit.outputs.reused != '' && needs.unit.outputs.reused != '0'
+        uses: actions/download-artifact@v4
+        with:
+          name: reused-tests-${{ matrix.python-version }}
+          path: reused-plan
+
+      - name: Download shard flake reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: flakes-${{ matrix.python-version }}-*
+          path: shard-flakes
+
       - name: Check every collected test ran in exactly one shard
         if: github.event.pull_request.base.ref != 'main'
-        run: python -m tests.shard_check shard-durations/*/durations.json --collected collected-data/collected.json
+        env:
+          REUSED: ${{ hashFiles('reused-plan/reused-tests.json') != '' && '--reused reused-plan/reused-tests.json' || '' }}
+        run: python -m tests.shard_check shard-durations/*/durations.json --collected collected-data/collected.json $REUSED
+
+      - name: Summarize reused, ran and flaky tests
+        if: ${{ !cancelled() && github.event.pull_request.base.ref != 'main' }}
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+          PLAN: reused-plan/reused-tests.json
+        run: |
+          ran=$(jq -s '[.[] | keys[] | sub("@[^\\[\\]]*$"; "")] | unique | length' shard-durations/*/durations.json)
+          flaky=$(cat shard-flakes/*/flakes.jsonl 2> /dev/null | jq -s '[.[] | select(.outcome == "flaky")] | length')
+          reused=0
+          source="no plan"
+          if [[ -f "$PLAN" ]]; then
+            reused=$(jq -n --slurpfile plan "$PLAN" --slurpfile collected collected-data/collected.json \
+              '($collected[0] | map({(.): true}) | add // {}) as $set | [$plan[0].tests[] | select($set[.])] | length')
+            source="dev run $(jq -r .run "$PLAN")"
+          fi
+          echo "Python $PYTHON_VERSION: ran $ran, reused $reused from $source, flaky $flaky" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Check release shards with legacy collection
         if: github.event.pull_request.base.ref == 'main'

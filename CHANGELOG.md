@@ -48,6 +48,9 @@ release assembles them into its release notes. See `changelog.d/README.md`.
 
 ### Fixed
 
+- The swarm stall watchdog no longer reopens a task or stops its owner while
+  the task depends on a task not yet done, or while its owner has declared a
+  wait on another open task or on another open pull request's merge.
 - The quota usage banner test passes in any test order: tests that change the
   banner cadence restore it, and a regression test runs them before it.
 - Launch checks report unavailable process observations without inventing profile,
@@ -56,6 +59,9 @@ release assembles them into its release notes. See `changelog.d/README.md`.
 - Judged bottleneck stage findings return only when current stage load grows,
   instead of when the cumulative fired count increases.
 - Ledger task set accepts split pull request addresses as comma or JSON lists.
+- The intent gate matches a split task's `gh pr merge` that names only a branch,
+  or nothing (current branch), to the half it belongs to, and refuses one that
+  resolves to no pull request.
 - Reopening a swarm pull request retains its registered worker's ownership,
   claim lease and worktree until retirement; status omits gone local processes.
 - Offline worker profile proofs replay the rendered Codex startup hook so

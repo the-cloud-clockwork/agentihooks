@@ -12,7 +12,13 @@ from scripts import ci_reuse, gate_protected
 
 pytestmark = pytest.mark.unit
 
-UNIT = {"durations", "split", "unit", "shard-check", "test-count"}
+ROOT = Path(__file__).resolve().parents[3]
+DURATION_JOB = (
+    "durations"
+    if "durations" in yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    else "select"
+)
+UNIT = {DURATION_JOB, "split", "unit", "shard-check", "test-count"}
 QUEUE = UNIT | {"queue-fail-fast"}
 PULL_REQUEST = UNIT | {"select", "lint", "semgrep", "sonar", "mutation-plan", "mutation-stats", "mutation"}
 SELECTED = PULL_REQUEST - {"split", "unit", "shard-check"} | {"unit-selected"}
@@ -23,13 +29,17 @@ TIERS = [
     ("pull_request", SELECTED, "selected"),
     ("pull_request", UNSELECTED, "none"),
 ]
-ROOT = Path(__file__).parents[3]
+
+
+def _gate_steps():
+    options = {"consolidated": True} if DURATION_JOB == "select" else {}
+    return ci_reuse.gate_steps(queue_tier=True, **options)
 
 
 def gate(event, needs, mutation="true", scope="full"):
     if "select" in needs:
         needs = {**needs, "select": {**needs["select"], "outputs": {"scope": scope}}}
-    [step] = ci_reuse.gate_steps(queue_tier=True)
+    [step] = _gate_steps()
     return subprocess.run(
         ["bash", "-e", "-c", step["run"]],
         env=dict(os.environ, EVENT=event, NEEDS=json.dumps(needs), MUTATION=mutation, KIND="false", REUSED="false"),
@@ -117,12 +127,12 @@ def test_duration_provenance_reads_the_base_and_records_the_queue_head():
 def test_skipping_reuse_requires_protected_duration_provenance(forged):
     base = {path.name: yaml.safe_load(path.read_text()) for path in (ROOT / ".github/workflows").glob("*.yml")}
     head = copy.deepcopy(base)
-    head["test.yml"]["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(queue_tier=True)
+    head["test.yml"]["jobs"]["gate-required"]["steps"] = _gate_steps()
     head["test.yml"]["jobs"]["reuse"]["if"] = (
         "github.event_name != 'merge_group' && github.event_name != 'pull_request'"
     )
     prefix = ci_reuse.duration_provenance_steps()
-    durations = head["test.yml"]["jobs"]["durations"]
+    durations = head["test.yml"]["jobs"][DURATION_JOB]
     durations["steps"] = [step for step in durations["steps"] if step not in prefix]
     if forged:
         durations["steps"] = prefix + durations["steps"]
@@ -136,17 +146,17 @@ def test_skipping_reuse_requires_protected_duration_provenance(forged):
 def test_the_protected_grader_accepts_only_the_exact_tiered_aggregation_and_reuse_condition():
     base = {path.name: yaml.safe_load(path.read_text()) for path in (ROOT / ".github/workflows").glob("*.yml")}
     head = copy.deepcopy(base)
-    head["test.yml"]["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(queue_tier=True)
+    head["test.yml"]["jobs"]["gate-required"]["steps"] = _gate_steps()
     head["test.yml"]["jobs"]["reuse"]["if"] = (
         "github.event_name != 'merge_group' && github.event_name != 'pull_request'"
     )
-    head["test.yml"]["jobs"]["durations"]["steps"] = (
-        ci_reuse.duration_provenance_steps() + head["test.yml"]["jobs"]["durations"]["steps"]
+    head["test.yml"]["jobs"][DURATION_JOB]["steps"] = (
+        ci_reuse.duration_provenance_steps() + head["test.yml"]["jobs"][DURATION_JOB]["steps"]
     )
-    head["test.yml"]["jobs"]["durations"]["if"] = (
+    head["test.yml"]["jobs"][DURATION_JOB]["if"] = (
         "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') }}"
     )
-    head["test.yml"]["jobs"]["durations"]["runs-on"] = "ubuntu-latest"
+    head["test.yml"]["jobs"][DURATION_JOB]["runs-on"] = "ubuntu-latest"
     config = json.loads((ROOT / ".github/gate-wiring.json").read_text())
     policy = json.loads((ROOT / ".github/workflows/trusted-actors.json").read_text())
 
@@ -156,7 +166,7 @@ def test_the_protected_grader_accepts_only_the_exact_tiered_aggregation_and_reus
     assert grade() == []
     head["test.yml"]["jobs"]["gate-required"]["steps"][0]["run"] += "exit 0\n"
     assert any("changes its steps" in problem for problem in grade())
-    head["test.yml"]["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(queue_tier=True)
+    head["test.yml"]["jobs"]["gate-required"]["steps"] = _gate_steps()
     head["test.yml"]["jobs"]["reuse"]["if"] = "false"
     assert any("changes the protected reuse job" in problem for problem in grade())
 
@@ -178,10 +188,10 @@ def test_duration_provenance_keeps_the_protected_execution_context(field, value)
     head["test.yml"]["jobs"]["reuse"]["if"] = (
         "github.event_name != 'merge_group' && github.event_name != 'pull_request'"
     )
-    head["test.yml"]["jobs"]["durations"]["steps"] = (
-        ci_reuse.duration_provenance_steps() + head["test.yml"]["jobs"]["durations"]["steps"]
+    head["test.yml"]["jobs"][DURATION_JOB]["steps"] = (
+        ci_reuse.duration_provenance_steps() + head["test.yml"]["jobs"][DURATION_JOB]["steps"]
     )
-    head["test.yml"]["jobs"]["durations"][field] = value
+    head["test.yml"]["jobs"][DURATION_JOB][field] = value
     config = json.loads((ROOT / ".github/gate-wiring.json").read_text())
     policy = json.loads((ROOT / ".github/workflows/trusted-actors.json").read_text())
     problems = gate_protected.grade(base, config, head, config, date(2026, 10, 14), policy)
@@ -197,8 +207,8 @@ def test_duration_provenance_keeps_the_global_execution_context(field, value):
     head["test.yml"]["jobs"]["reuse"]["if"] = (
         "github.event_name != 'merge_group' && github.event_name != 'pull_request'"
     )
-    head["test.yml"]["jobs"]["durations"]["steps"] = (
-        ci_reuse.duration_provenance_steps() + head["test.yml"]["jobs"]["durations"]["steps"]
+    head["test.yml"]["jobs"][DURATION_JOB]["steps"] = (
+        ci_reuse.duration_provenance_steps() + head["test.yml"]["jobs"][DURATION_JOB]["steps"]
     )
     head["test.yml"][field] = value
     config = json.loads((ROOT / ".github/gate-wiring.json").read_text())
@@ -214,15 +224,15 @@ def test_missing_duration_definitions_are_reported_without_trusting_the_producer
     head["test.yml"]["jobs"]["reuse"]["if"] = (
         "github.event_name != 'merge_group' && github.event_name != 'pull_request'"
     )
-    head["test.yml"]["jobs"]["durations"]["steps"] = (
-        ci_reuse.duration_provenance_steps() + head["test.yml"]["jobs"]["durations"]["steps"]
+    head["test.yml"]["jobs"][DURATION_JOB]["steps"] = (
+        ci_reuse.duration_provenance_steps() + head["test.yml"]["jobs"][DURATION_JOB]["steps"]
     )
     if missing == "base-job":
-        del base["test.yml"]["jobs"]["durations"]
+        del base["test.yml"]["jobs"][DURATION_JOB]
     elif missing == "head-job":
-        del head["test.yml"]["jobs"]["durations"]
+        del head["test.yml"]["jobs"][DURATION_JOB]
     else:
-        del head["test.yml"]["jobs"]["durations"]["steps"]
+        del head["test.yml"]["jobs"][DURATION_JOB]["steps"]
     config = json.loads((ROOT / ".github/gate-wiring.json").read_text())
     policy = json.loads((ROOT / ".github/workflows/trusted-actors.json").read_text())
     problems = gate_protected.grade(base, config, head, config, date(2026, 10, 14), policy)
@@ -237,8 +247,8 @@ def test_duration_provenance_accepts_unchanged_global_execution_context(field, v
     head["test.yml"]["jobs"]["reuse"]["if"] = (
         "github.event_name != 'merge_group' && github.event_name != 'pull_request'"
     )
-    head["test.yml"]["jobs"]["durations"]["steps"] = (
-        ci_reuse.duration_provenance_steps() + head["test.yml"]["jobs"]["durations"]["steps"]
+    head["test.yml"]["jobs"][DURATION_JOB]["steps"] = (
+        ci_reuse.duration_provenance_steps() + head["test.yml"]["jobs"][DURATION_JOB]["steps"]
     )
     config = json.loads((ROOT / ".github/gate-wiring.json").read_text())
     policy = json.loads((ROOT / ".github/workflows/trusted-actors.json").read_text())
