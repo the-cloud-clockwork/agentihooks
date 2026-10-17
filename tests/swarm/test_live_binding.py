@@ -576,9 +576,11 @@ def test_departed_agents_raise_no_finding_while_a_seated_mismatch_does(ticking):
     superseded = AgentRecord("superseded", "eng", "one", harness="claude", profile="engineer", started_at=1)
     finished = AgentRecord("finished", "eng", "two", harness="claude", profile="engineer", state="finished")
     dropped = AgentRecord("dropped", "eng", "three", harness="claude", profile="engineer")
-    for agent in (seated, superseded, finished):
+    older = AgentRecord("older", "eng", "four", harness="claude", profile="engineer", started_at=1)
+    ended = AgentRecord("ended", "eng", "four", harness="claude", profile="engineer", started_at=2, state="finished")
+    for agent in (seated, superseded, finished, older, ended):
         store.put_agent("sw", agent)
-    for agent in (superseded, seated, finished, dropped):
+    for agent in (superseded, seated, finished, dropped, older, ended):
         live_binding.record(store, "sw", agent, {"process": False}, 10)
     assert [f.subject for f in live_binding.findings(store, "sw")] == ["seated/process"]
 
