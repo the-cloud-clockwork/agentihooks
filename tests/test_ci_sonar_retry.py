@@ -162,8 +162,9 @@ def test_the_dependent_checks_require_successful_proxy_startup(name):
         ("", "curl: (22) The requested URL returned error: 404\n", 22),
         ("", "", 22),
         ("ERROR Quality profile not found\n", "", 2),
+        ("ERROR Failed to download analysis cache: HTTP code 404: Not Found\n", "", 3),
     ],
-    ids=["not-found", "silent", "scanner-config"],
+    ids=["not-found", "silent", "scanner-config", "analysis-cache-not-found"],
 )
 def test_a_failure_that_is_not_the_server_fails_at_once_without_the_label(tmp_path, failure):
     result, calls, sleeps, _ = _retry(tmp_path, [failure, ('{"status":"UP"}', "", 0)])
