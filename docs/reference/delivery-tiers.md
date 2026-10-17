@@ -20,6 +20,36 @@ Each tier has a wall time budget. A check that does not fit the pull request or 
 
 How a green promotion run merges `dev` into `main` and creates the release is in [Promotion and releases](promotion.md).
 
+## Checks a dev push skips
+
+`lint`, `semgrep` and `test-count` run on the pull request head; `test-count` also runs in the merge group. A push to `dev` grades a tree that already passed them, so their job `if` in `.github/workflows/test.yml` carries `github.event_name != 'push'` and the promotion run skips them. `Gate — Required` accepts these three as skipped only when the event is `push`; on a pull request, a merge group or a dispatched run a skipped `lint`, `semgrep` or `test-count` still fails the gate.
+
+| Job | `pull_request` | `merge_group` | `push` to `dev` |
+|---|---|---|---|
+| `lint` | runs | skipped | skipped |
+| `semgrep` | runs | skipped | skipped |
+| `test-count` (3.11 and 3.12) | runs | runs | skipped |
+| `sonar` | runs | skipped | runs |
+
+`sonar` stays on the push: the promotion tier runs the integration scan. The skip removed about 284 runner seconds from each dev push, measured over the ten dev pushes before the change: `lint` 64 s, `semgrep` 42 s and `test-count` 88 s and 90 s for its two Python legs. Delivered by pull request [3517](https://github.com/the-cloud-clockwork/agentihooks/pull/3517), after [3486](https://github.com/the-cloud-clockwork/agentihooks/pull/3486) taught the protected gate check (`gate-protected.yml`, `scripts.gate_protected`) to accept the `promotion` form of the gate step. The check accepts a head's `Gate — Required` steps only when they equal one of the forms `scripts.ci_reuse.gate_steps` renders from the protected `dev` code; `dev` now carries the form rendered with `queue_tier=True, promotion=True, consolidated=True, summary=True`. `tests/contracts/ci_tiers/test_workflow.py` pins the push job set.
+
+Check which of these jobs the newest dev push run ran:
+
+```bash
+R=repos/the-cloud-clockwork/agentihooks
+RUN=$(gh api "$R/actions/workflows/test.yml/runs?event=push&branch=dev&status=completed&per_page=1" --jq '.workflow_runs[0].id')
+gh api "$R/actions/runs/$RUN/jobs?per_page=100" --jq '.jobs[]|"\(.name) | \(.conclusion)"' \
+  | grep -E '^(lint|semgrep|test-count|sonar|Gate)'
+```
+
+Dev push run [39064628062](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39064628062) printed `lint`, `semgrep` and `test-count` as `skipped`, and `sonar` and `Gate — Required` as `success`.
+
+| Symptom | Cause | Action |
+|---|---|---|
+| `Gate — Required` fails with `Every gate required for this event must succeed and other gates must be skipped.` on a pull request while `lint`, `semgrep` or `test-count` reads `skipped` | A workflow change dropped the job's pull request condition, or the job's admission failed on a dispatch. | Restore the job `if` shown above; on a dispatch, read the `admission` job. |
+| `lint`, `semgrep` or `test-count` runs on a dev push | The `github.event_name != 'push'` clause was removed from its `if`. | Restore it; `tests/contracts/ci_tiers/test_workflow.py` fails on the change. |
+| `gate-protected.yml` fails with `The head's Gate — Required changes its steps; the protected branch grades with its own.` | The head's gate step matches none of the forms `scripts.ci_reuse.gate_steps` renders on `dev`. | Render the step from `scripts.ci_reuse.gate_steps` instead of editing it by hand; a new form lands first in its own pull request that teaches `scripts.gate_protected` to accept it. |
+
 ## Rules
 
 - **A red integration branch keeps merging; promotion does not advance.** A failed promotion run never closes the queue or holds other pull requests. The release branch stays on the last green promoted head until a later run passes.
@@ -67,12 +97,12 @@ A repository with no merge queue on `dev` gets a squash merge from the same comm
 
 The coverage ratchet fails a run when a line the base tree ran is no longer run by any test. Since the queue tier landed (pull request #3303), it runs on dev pushes, which form the promotion tier, and on dispatched Tests runs. The merge queue grades no coverage, so a queue entry never looks up or waits on the run of the entry ahead of it.
 
-| Tests workflow event | `coverage-ratchet` | `coverage-baseline` | `queue-baseline` |
-|---|---|---|---|
-| `pull_request` | skipped | skipped | skipped |
-| `merge_group` | skipped | skipped | skipped |
-| `push` to `dev` | runs when every unit shard passed | runs when every unit shard passed | skipped |
-| `workflow_dispatch` | runs against the dispatched base | skipped | skipped |
+| Tests workflow event | `coverage-ratchet` | `coverage-baseline` |
+|---|---|---|
+| `pull_request` | skipped | skipped |
+| `merge_group` | skipped | skipped |
+| `push` to `dev` | runs when every unit shard passed | runs when every unit shard passed |
+| `workflow_dispatch` | runs against the dispatched base | skipped |
 
 `Gate — Required` enforces the first two rows: on a pull request or a merge group every job outside that event's required set must be skipped, so a coverage job that ran there fails the gate. On a dev push a red ratchet fails the promotion run, and under the promotion rule the queue keeps merging.
 
@@ -87,7 +117,7 @@ The coverage ratchet fails a run when a line the base tree ran is no longer run 
 
 The ratchet always runs `tests/coverage_ratchet.py` from the base checkout, never from the head under test, and uploads its findings as the `coverage-ratchet` artifact (`report.txt`, kept 7 days).
 
-`queue-baseline` stays in the workflow with `if: false`, so it is always skipped, until `Gate — Required` and its clauses stop listing it.
+The disabled `queue-baseline` job is gone: pull request [3517](https://github.com/the-cloud-clockwork/agentihooks/pull/3517) removed it from the workflow, from the `needs` of `coverage-ratchet`, `stage-budget` and `Gate — Required`, from the `ci_budget` stage budgets and from `.github/runner-classes.json`.
 
 ### Troubleshooting
 
