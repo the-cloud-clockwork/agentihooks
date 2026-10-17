@@ -16,18 +16,29 @@ def git(*args: str) -> str:
     return subprocess.check_output(["git", *args], text=True)
 
 
-def changed(base: str) -> list[Path]:
-    names = git("diff", "--name-only", "-z", "--diff-filter=ACMRT", base, "HEAD").split("\0")
-    return [Path(name) for name in names if name.endswith(".py") and Path(name).is_file()]
-
-
-def units(source: str) -> dict[int, tuple[str, int]]:
+def changed(base: str) -> dict[Path, Path]:
+    fields = iter(git("diff", "--name-status", "-z", "-M", "--diff-filter=ACMRT", base, "HEAD").split("\0"))
     found = {}
+    for status in fields:
+        if not status:
+            continue
+        old = next(fields)
+        new = next(fields) if status[0] in "RC" else old
+        if new.endswith(".py") and Path(new).is_file():
+            found[Path(new)] = Path(old)
+    return found
+
+
+def units(source: bytes) -> dict[int, tuple[str, int]]:
+    found, seen = {}, {}
 
     def walk(node, prefix):
         for child in ast.iter_child_nodes(node):
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 name = f"{prefix}{child.name}"
+                seen[name] = seen.get(name, 0) + 1
+                if seen[name] > 1:
+                    name = f"{name}#{seen[name]}"
                 if not isinstance(child, ast.ClassDef):
                     found[child.lineno] = (name, child.end_lineno - child.lineno + 1)
                 walk(child, f"{name}.")
@@ -41,13 +52,20 @@ def units(source: str) -> dict[int, tuple[str, int]]:
 def measure(tree: Path, paths: list[Path]) -> dict[tuple[str, str], tuple[int, str]]:
     found, defs = {}, {}
     for path in paths:
-        source = (tree / path).read_text()
+        source = (tree / path).read_bytes()
         defs[path.as_posix()] = units(source)
         if (lines := len(source.splitlines())) > 3000:
             found[(path.as_posix(), "file lines")] = (lines, f"{path}: file exceeds 3000 lines")
         for name, length in defs[path.as_posix()].values():
             if length > 300:
                 found[(path.as_posix(), f"{name} lines")] = (length, f"{path}: {name} exceeds 300 lines")
+    return found | complexity(tree, paths, defs)
+
+
+def complexity(
+    tree: Path, paths: list[Path], defs: dict[str, dict[int, tuple[str, int]]]
+) -> dict[tuple[str, str], tuple[int, str]]:
+    found = {}
     command = [sys.executable, "-m", "ruff", "check", "--isolated", "--exit-zero", "--output-format", "json"]
     command += ["--select", ",".join(RULES), *LIMITS, "--", *(str(tree / path) for path in paths)]
     for hit in json.loads(subprocess.run(command, capture_output=True, text=True, check=True).stdout):
@@ -59,19 +77,19 @@ def measure(tree: Path, paths: list[Path]) -> dict[tuple[str, str], tuple[int, s
     return found
 
 
-def baseline(base: str, paths: list[Path]) -> dict[tuple[str, str], tuple[int, str]]:
+def baseline(base: str, paths: dict[Path, Path]) -> dict[tuple[str, str], tuple[int, str]]:
     with tempfile.TemporaryDirectory() as directory:
         tree, present = Path(directory).resolve(), []
-        for path in paths:
-            shown = subprocess.run(["git", "show", f"{base}:{path.as_posix()}"], capture_output=True, text=True)
+        for path, old in paths.items():
+            shown = subprocess.run(["git", "show", f"{base}:{old.as_posix()}"], capture_output=True)
             if shown.returncode == 0:
                 (tree / path).parent.mkdir(parents=True, exist_ok=True)
-                (tree / path).write_text(shown.stdout)
+                (tree / path).write_bytes(shown.stdout)
                 present.append(path)
         return measure(tree, present) if present else {}
 
 
-def grade(base: dict, head: dict) -> list[str]:
+def grade(base: dict[tuple[str, str], tuple[int, str]], head: dict[tuple[str, str], tuple[int, str]]) -> list[str]:
     errors = []
     for key, (value, message) in head.items():
         if key not in base:
@@ -90,7 +108,7 @@ def main() -> int:
         for command in (["check", "--", *names], ["format", "--check", "--", *names]):
             if code := subprocess.run([sys.executable, "-m", "ruff", *command]).returncode:
                 return code
-        if errors := grade(baseline(base, paths), measure(Path.cwd().resolve(), paths)):
+        if errors := grade(baseline(base, paths), measure(Path.cwd().resolve(), list(paths))):
             print("\n".join(errors))
             return 1
     print(f"Graded {len(paths)} changed Python files")

@@ -449,33 +449,58 @@ OFFENDERS += "print(1)\n" * (3001 - OFFENDERS.count("\n"))
 FRESH = "\n\ndef fresh(a, b, c, d, e, f, g, h):\n    return a, b, c, d, e, f, g, h\n"
 
 
+def unchanged_edit(source):
+    return source[: -len("print(1)\n")] + "print(2)\n"
+
+
+def grown_branches(source):
+    return source.replace(BRANCHY, BRANCHY + "    if value == 13:\n        result += 1\n")
+
+
 @pytest.mark.parametrize(
-    "edit, reported",
+    "edit, target, reported",
     [
-        (lambda source: source[: -len("print(1)\n")] + "print(2)\n", None),
-        (lambda source: source + "print(1)\n", "tests/test_chosen.py: file lines grew from 3001 to 3002"),
+        (unchanged_edit, "tests/test_chosen.py", None),
+        (unchanged_edit, "tests/test_moved.py", None),
+        (
+            lambda source: source + "print(1)\n",
+            "tests/test_chosen.py",
+            "tests/test_chosen.py: file lines grew from 3001 to 3002",
+        ),
         (
             lambda source: source.replace("def long():\n", "def long():\n    print(1)\n"),
+            "tests/test_chosen.py",
             "tests/test_chosen.py: long lines grew from 301 to 302",
         ),
         (
             lambda source: source.replace(
                 "h):\n    return a, b, c, d, e, f, g, h\n", "h, i):\n    return a, b, c, d, e, f, g, h, i\n"
             ),
+            "tests/test_chosen.py",
             "tests/test_chosen.py: wide PLR0913 grew from 8 to 9",
         ),
-        (
-            lambda source: source.replace(BRANCHY, BRANCHY + "    if value == 13:\n        result += 1\n"),
-            "tests/test_chosen.py: branchy C901 grew from 14 to 15",
-        ),
+        (grown_branches, "tests/test_chosen.py", "tests/test_chosen.py: branchy C901 grew from 14 to 15"),
+        (grown_branches, "tests/test_chosen.py", "tests/test_chosen.py: branchy PLR0912 grew from 13 to 14"),
         (
             lambda source: source[: -len("print(1)\n")] + FRESH,
+            "tests/test_chosen.py",
             "tests/test_chosen.py: fresh PLR0913 Too many arguments in function definition (8 > 7)",
         ),
     ],
-    ids=["unchanged", "file_growth", "function_growth", "argument_growth", "complexity_growth", "new_offender"],
+    ids=[
+        "unchanged",
+        "renamed",
+        "file_growth",
+        "function_growth",
+        "argument_growth",
+        "complexity_growth",
+        "branch_growth",
+        "new_offender",
+    ],
 )
-def test_fallback_grades_touched_offenders_against_the_merge_base(repositories, monkeypatch, capsys, edit, reported):
+def test_fallback_grades_touched_offenders_against_the_merge_base(
+    repositories, monkeypatch, capsys, edit, target, reported
+):
     from pathlib import Path
 
     from scripts import ci_prepush
@@ -489,8 +514,10 @@ def test_fallback_grades_touched_offenders_against_the_merge_base(repositories, 
     git(p.bundle, "push", "origin", "dev")
     p.task["repositories"] = [str(p.bundle)]
     root = Path(publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)["worktree"])
-    (root / "tests" / "test_chosen.py").write_text(edit(OFFENDERS))
-    git(root, "add", "tests/test_chosen.py")
+    if target != "tests/test_chosen.py":
+        git(root, "mv", "tests/test_chosen.py", target)
+    (root / target).write_text(edit(OFFENDERS))
+    git(root, "add", target)
     git(root, "commit", "-qm", "Touch offenders")
     monkeypatch.chdir(root)
     assert publish_gate.main() == (0 if reported is None else 1)
@@ -500,3 +527,24 @@ def test_fallback_grades_touched_offenders_against_the_merge_base(repositories, 
         assert output.endswith("Graded 1 changed Python files\n")
     else:
         assert f"{reported}\n" in output
+
+
+def test_fallback_keeps_same_named_offenders_apart(repositories, monkeypatch, capsys):
+    from pathlib import Path
+
+    from scripts.swarm import publish_gate
+
+    p = repositories
+    body = "import sys\n\nif sys.platform:\n\n    def run():\n{long}else:\n\n    def run():\n        print(1)\n"
+    (p.bundle / "chosen.py").write_text(body.format(long="        print(1)\n" * 310))
+    git(p.bundle, "add", "chosen.py")
+    git(p.bundle, "commit", "-qm", "Same named functions")
+    git(p.bundle, "push", "origin", "dev")
+    p.task["repositories"] = [str(p.bundle)]
+    root = Path(publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)["worktree"])
+    (root / "chosen.py").write_text(body.format(long="        print(1)\n" * 311))
+    git(root, "add", "chosen.py")
+    git(root, "commit", "-qm", "Grow the first")
+    monkeypatch.chdir(root)
+    assert publish_gate.main() == 1
+    assert "chosen.py: run lines grew from 311 to 312\n" in capsys.readouterr().out
