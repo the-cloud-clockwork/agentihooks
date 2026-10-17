@@ -16,8 +16,16 @@ SWARM = {"AGENTIHOOKS_SWARM": "demo", "AGENTIHOOKS_AGENT_NAME": "master@a1-1"}
 WINDOW = operator_mode.WINDOW_SEC
 
 
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
+
 @pytest.fixture(autouse=True)
 def ledgers(tmp_path, monkeypatch):
+    import fakeredis
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr("scripts.swarm.store.redis_client", lambda: redis)
+    monkeypatch.setattr("scripts.scheduler.service.ensure_running", lambda: True)
     path = tmp_path / "ledgers"
     (path / ".sessions").mkdir(parents=True)
     monkeypatch.setenv("LEDGER_DIR", str(path))
@@ -501,7 +509,7 @@ def test_explicit_presence_keeps_reminders_off_past_the_supplied_clock(monkeypat
         monkeypatch.setenv(key, value)
     monkeypatch.setattr(operator_mode.time, "time", lambda: 5000)
     assert operator_mode.notice({"session_id": "s1", "prompt": "operator on"}, True, now=100) == (
-        "Operator on: the operator is present in this pane until he types operator off."
+        "Operator on: the operator is present in this pane until the idle timer expires or he types operator off."
     )
     assert operator_mode.notice({"session_id": "s1", "prompt": delivery.marked("continue")}, False, now=101) == ""
     assert [operator_mode.reminder("s1", SWARM, now=102) for _ in range(2)] == ["", ""]

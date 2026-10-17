@@ -14,7 +14,7 @@ def clocked_scheduler(monkeypatch):
     from scripts.scheduler import Scheduler
 
     redis = fakeredis.FakeRedis(decode_responses=True)
-    monkeypatch.setattr("hooks._redis.get_redis", lambda: redis)
+    monkeypatch.setattr("scripts.swarm.store.redis_client", lambda: redis)
     monkeypatch.setattr("scripts.scheduler.service.ensure_running", Mock(return_value=True))
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "proof")
     monkeypatch.delenv("AGENTIHOOKS_OPERATOR_TIMEOUT_SEC", raising=False)
