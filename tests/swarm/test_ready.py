@@ -1530,13 +1530,14 @@ def test_the_ready_usage_names_its_handoff_document(capsys):
 
 
 def test_the_merge_pass_queues_only_once_a_fresh_read_confirms_green(merging):
-    def run(fresh):
+    def run(cached, fresh):
         return ready.merge_pass(
-            ready.Pass(merging.store, "sw", merging.ledger, {URL: GREEN}.get, {URL: fresh}.get, NOW, merging.queue),
+            ready.Pass(merging.store, "sw", merging.ledger, {URL: cached}.get, {URL: fresh}.get, NOW, merging.queue),
             merging.rows,
         )
 
-    assert run(RUNNING) == []
+    assert run(GREEN, RUNNING) == []
+    assert run(RUNNING, GREEN) == []
     assert merging.queued == []
-    assert run(GREEN) == [f"queued {URL} for task t1"]
+    assert run(GREEN, GREEN) == [f"queued {URL} for task t1"]
     assert merging.queued == [("queue", URL)]
