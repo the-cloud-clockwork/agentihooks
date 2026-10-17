@@ -52,7 +52,14 @@ def test_public_dispatcher_work_activates_and_retains_until_disposition(mailbox,
 
 
 @pytest.mark.parametrize(
-    "policy,expected", [("paused", "paused"), ("delegate", "autonomy"), ("running", "pending lifecycle checks")]
+    "policy,expected",
+    [
+        ("paused", "paused"),
+        ("stopped", "stopped"),
+        ("stopping", "stopping"),
+        ("delegate", "autonomy"),
+        ("running", "pending lifecycle checks"),
+    ],
 )
 def test_sender_reports_dispatcher_ownership_and_activation_deferral(mailbox, capsys, policy, expected):
     store, inbox = mailbox
@@ -78,7 +85,7 @@ def test_mail_arriving_as_structured_triggers_clear_retains_its_consumer(mailbox
     address = seat.name if named else seat.seat
     assert cli.main(["send", address, "Consider new rank evidence"]) == 0
     sent = json.loads(capsys.readouterr().out)
-    assert sent["dispatch"]["consumer"] == seat.name
+    assert sent["dispatch"] == {"owner": seat.seat, "consumer": seat.name, "activation": "recorded consumer"}
     if receipt in ("delivered", "confirmed"):
         assert inbox.deliver(sent["id"], seat.name).state == "delivered"
     if receipt == "confirmed":
@@ -87,7 +94,8 @@ def test_mail_arriving_as_structured_triggers_clear_retains_its_consumer(mailbox
     if receipt == "read":
         assert cli.main(["read", sent["id"]]) == 0
         capsys.readouterr()
-    run(store, runtime, doc(), NOW + 60_000)
+    assert run(store, runtime, doc(), NOW + 60_000) == []
+    assert [item.id for item in inbox.open_items(seat.seat)] == [sent["id"]]
     assert seats(store)[0].state != "finished"
     assert len(runtime.spawned) == 1
     assert cli.main(["close", sent["id"], "handoff", "master@" + SLUG]) == 0
@@ -202,6 +210,7 @@ def test_public_work_sent_to_a_finished_dispatcher_belongs_to_its_successor(mail
     assert seats(store)[0].state == "finished"
     assert cli.main(["send", seat.name, "Consider fresh rank evidence"]) == 0
     sent = json.loads(capsys.readouterr().out)
+    assert sent["dispatch"] == {"owner": seat.seat, "consumer": "", "activation": "pending lifecycle checks"}
     run(store, runtime, doc(), NOW + 120_000)
     assert len(runtime.spawned) == 2
     successor = next(a for a in seats(store) if a.state != "finished")
@@ -221,3 +230,66 @@ def test_a_failed_consumer_launch_retries_without_losing_accepted_mail(mailbox, 
     assert len(runtime.spawned) == 1
     [seat] = seats(store)
     assert inbox.deliver(sent["id"], seat.name).state == "delivered"
+
+
+@pytest.mark.parametrize("lane,state", [("eng", "working"), ("dispatch", "finished")])
+def test_other_or_finished_consumers_do_not_own_dispatcher_work(mailbox, capsys, lane, state):
+    from scripts.swarm.store import AgentRecord
+
+    store, inbox = mailbox
+    name = store.next_name(SLUG, lane, NOW)
+    store.put_agent(SLUG, AgentRecord(name, lane, "other", state=state))
+    inbox.send("alice", name, "Work belonging to another consumer")
+    runtime = FakeRuntime()
+    assert run(store, runtime, doc()) == []
+    assert not runtime.spawned
+    assert cli.main(["send", f"dispatcher@{SLUG}", "Consider evidence"]) == 0
+    sent = json.loads(capsys.readouterr().out)
+    assert sent["dispatch"] == {"owner": f"dispatcher@{SLUG}", "consumer": "", "activation": "pending lifecycle checks"}
+
+
+def test_legacy_named_mail_retains_its_live_dispatcher(mailbox):
+    from tests.swarm.test_dispatch_seat import priority
+
+    store, inbox = mailbox
+    runtime = FakeRuntime()
+    run(store, runtime, doc(priority()))
+    [seat] = seats(store)
+    item = inbox.send("alice", seat.name, "Consider evidence already accepted by name")
+    assert run(store, runtime, doc(), NOW + 60_000) == []
+    assert seats(store)[0].state != "finished"
+    assert inbox.deliver(item.id, seat.name).state == "delivered"
+
+
+def test_a_generated_trigger_notice_does_not_retain_the_dispatcher_after_its_triggers_close(mailbox):
+    from tests.swarm.test_dispatch_seat import priority
+
+    store, inbox = mailbox
+    runtime = FakeRuntime()
+    first = priority()
+    second = {**first, "id": "pr2", "item": "tasks/t6"}
+    run(store, runtime, doc(first))
+    [seat] = seats(store)
+    assert run(store, runtime, doc(first, second), NOW + 60_000)
+    [notice] = inbox.open_items(seat.seat)
+    assert notice.sender == "swarm"
+    assert notice.text.startswith("New dispatcher triggers in swarm ")
+    run(store, runtime, doc(), NOW + 120_000)
+    assert seats(store)[0].state == "finished"
+
+
+@pytest.mark.parametrize(
+    "sender,text",
+    [
+        ("swarm", "Consider the new integration evidence"),
+        ("alice", "New dispatcher triggers in swarm are evidence for judgment"),
+    ],
+)
+def test_actionable_mail_is_not_mistaken_for_a_generated_trigger_notice(mailbox, sender, text):
+    store, inbox = mailbox
+    item = inbox.send(sender, f"dispatcher@{SLUG}", text)
+    runtime = FakeRuntime()
+    run(store, runtime, doc())
+    assert len(runtime.spawned) == 1
+    [seat] = seats(store)
+    assert inbox.deliver(item.id, seat.name).state == "delivered"
