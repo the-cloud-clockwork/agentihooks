@@ -56,7 +56,7 @@ def rest(path: str, run) -> dict | list | str:
         raise SwarmError(f"GitHub API: {exc}") from exc
 
 
-def required_view(url: str, run) -> ledger_events.PullRequest | None:
+def required_view(url: str, run) -> "ledger_events.PullRequest | None":
     def read(command, **kwargs):
         try:
             done = run(command, **kwargs)
