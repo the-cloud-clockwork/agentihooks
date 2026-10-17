@@ -560,7 +560,7 @@ def test_inherited_lines_are_regraded_once_the_branch_changes_a_source_helper_th
 
     git, commit = _repo(tmp_path)
     (tmp_path / "tests").mkdir()
-    test = tmp_path / "tests" / "test_dev.py"
+    test = tmp_path / "tests" / "test_api.py"
     if helper == "transitive":
         (tmp_path / "tests" / "fixtures.py").write_text("from hooks import dev\n")
         test.write_text(
