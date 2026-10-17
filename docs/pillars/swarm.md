@@ -113,6 +113,61 @@ that phase; any other item, and one whose owner seat has no live master, reaches
 `@master` stay with the lead, which answers the operator; while the lead seat is empty the lowest numbered live
 master answers.
 
+### Master inbox pool
+
+The lead address `master@<id>` is the swarm's front door. While two or more masters are live, an item sent to
+`master@<id>` by any sender other than `operator` (a tick item, an agent's question or follow up, a
+`msg send master@<id>`) does not wait at the lead's seat. It enters one pool per swarm and is handed to exactly one
+live master:
+
+| Rule | Behavior |
+|---|---|
+| Order | Items leave the pool oldest first, in the order the inbox numbered them on arrival. |
+| Exactly once | A master takes an item in one Redis transaction that removes it from the pool, moves it pending to that master's seat and records the seat as its holder. Two processes handing out the same pool never give one item to two masters. |
+| Round robin | The pool remembers the last seat it served and gives the next item to the next live seat in seat order, lead first, then `master-2@<id>`, `master-3@<id>` and on, wrapping back to the first. |
+| Skips | A seat whose master is finished, retiring, asked to retire, retired by a seat count change or recorded as having left its seat is not live and is passed over. |
+| Redelivery | A pooled item its holder does not confirm within `AGENTIHOOKS_INBOX_REDELIVER_S` (default 300 seconds) goes back to the pool and on to the next live master, passing over the master that let it lapse while another is live. It keeps its id. |
+| Gone holder | Items a master claimed and never took return to the pool when that master stops being live, for the remaining masters. |
+| No master | Items wait in the pool, in order, until a master is live. |
+
+The inbox hands out the pool when an item enters it and again on every redelivery pass, so an item waiting for a
+master, or one whose holder lapsed, moves within a redelivery pass. Each move is a line on the item's history:
+`claimed from the master pool by <seat>` when a master takes it, and `returned to the master pool: its master is
+gone` when it comes back from a master that left. While an item waits in the pool it belongs to no master:
+`msg read` and every state change other than a close refuse it with `message <id> waits in the master pool for the next
+master`. Closing it (`msg close <id> cancel`) takes it out of the pool. An item redirected to another address
+leaves the pool and stays where it was sent.
+
+Operator facing items never enter the pool. Page chat, every operator write on the ledger page (comments, replies,
+answers, notes, checks) and every relayed decision are sent as `operator` and reach the front door master: the lead,
+or the lowest numbered live master while the lead seat is empty. An item addressed to a numbered seat, such as
+`master-2@<id>` for a phase that seat owns, reaches that seat directly.
+
+A swarm with one live master has no pool: items for `master@<id>` wait at its seat and redeliver to it exactly as in
+a single master swarm. When a second master goes, the remaining master takes the items still pooled at the next
+redelivery pass, and a lapsed item of its own redelivers to it as before.
+
+The pool, the master write fence and the front door read the live master seats from one place, the seat registry:
+a seat counts while its registered occupant has neither left it, finished nor retired, and a master record whose seat
+the registry does not hold yet counts by its record. During a handoff the successor that took the seat counts and
+its predecessor does not, so all three agree on the same seat list and the same lead.
+
+Inspect a pool with the inbox commands and, for the raw state, Redis (the key prefix is
+`AGENTIHOOKS_SWARM_KEY_PREFIX`, default `agentihooks`):
+
+```bash
+agentihooks msg inbox --of master@<id>
+agentihooks msg inbox --of master-2@<id>
+redis-cli ZRANGE agentihooks:inbox:pool:<id> 0 -1 WITHSCORES
+redis-cli GET agentihooks:inbox:pool:<id>:last
+redis-cli SMEMBERS agentihooks:inbox:pool:<id>:holders
+```
+
+The sorted set lists the item ids still waiting, scored by arrival; `last` is the seat served last and `holders` the
+seats holding pooled items. An item that stays in the pool while masters are live, or a master that never receives
+pool items, points to the live seat list: check `swarm <id> status` for finished, retiring or retired masters and
+`msg read <id>` on a delivered item for the seat that claimed it.
+
 ## Commands
 
 The swarm id is a lowercase slug of letters, digits and dashes, starting with a letter, at most 48 long.
