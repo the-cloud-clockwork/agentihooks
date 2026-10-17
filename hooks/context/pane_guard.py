@@ -16,7 +16,7 @@ _HERDR = {
     ("worktree", "create"),
     ("worktree", "open"),
 }
-_AGENTIHOOKS = {"run-in-terminal", "init-agent"}
+_AGENTIHOOKS = (["run-in-terminal"], ["init-agent"])
 _SCRIPTS = {"02_run_terminal.sh", "open_param_pane.sh", "run_param_pane.sh"}
 
 
@@ -64,7 +64,7 @@ def opens_pane(tokens: list[str]) -> bool:
     if name == "herdr":
         return any(pair in _HERDR for pair in zip(tokens[1:], tokens[2:]))
     if name == "agentihooks":
-        return len(tokens) > 1 and tokens[1] in _AGENTIHOOKS
+        return tokens[1:2] in _AGENTIHOOKS or (tokens[1:2] == ["swarm"] and tokens[4:5] == ["up"])
     return _script(tokens)
 
 

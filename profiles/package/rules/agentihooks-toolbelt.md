@@ -71,8 +71,9 @@ The deterministic CLI primitives behind these skills are respectively
 `agentihooks init-agent`, and `agentihooks run-in-terminal`. Follow each
 `SKILL.md`; do not reconstruct its process manually.
 
-`init-agent`, `run-in-terminal` and every herdr pane split, pane run, tab or
-workspace creation run only when the operator's own prompt this turn, typed
+`init-agent`, `run-in-terminal`, `swarm <slug> master up`, `swarm <slug>
+<profile> up` and every herdr pane split, pane run, tab or workspace creation
+run only when the operator's own prompt this turn, typed
 in your terminal, says `open pane` (or `open a pane`, `open the pane`); a
 PreToolUse guard denies them otherwise; a quota handoff's `init-agent --handoff`
 passes only while the quota policy has that handoff due. A step only the operator can do goes to
