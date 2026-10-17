@@ -21,7 +21,6 @@ def nested(environ, start: int | None = None, proc: Path = _PROC) -> bool:
     launcher = str(environ.get(LAUNCHER))
     if not launcher.isdigit():
         return False
-    agent = 0
     sessions, previous, pid = 0, None, os.getppid() if start is None else start
     while pid > 1 and pid != int(launcher):
         comm = _comm(pid, proc)
@@ -32,9 +31,9 @@ def nested(environ, start: int | None = None, proc: Path = _PROC) -> bool:
             if comm != previous:
                 sessions += 1
         previous, pid = comm, _ppid(pid, proc)
-    if sessions > 1:
-        return True
-    return pid != int(launcher) and _session_agents(int(launcher), proc) != [agent]
+    if sessions == 1 and pid != int(launcher):
+        return _session_agents(int(launcher), proc) != [agent]
+    return sessions > 1 or pid != int(launcher)
 
 
 def _session_agents(sid: int, proc: Path) -> list[int]:

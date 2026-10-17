@@ -55,6 +55,10 @@ def test_a_session_outside_the_launcher_is_nested(tmp_path):
     assert not swarm_pin.nested({**IDENTITY, "AGENTIHOOKS_SWARM_LAUNCHER": "30"}, 33, proc)
 
 
+def test_a_process_outside_the_launcher_with_no_agent_above_it_is_nested(tmp_path):
+    assert swarm_pin.nested(IDENTITY, 30, _tree(tmp_path))
+
+
 def test_an_unpinned_or_unreadable_session_keeps_its_identity(tmp_path):
     unpinned = {k: v for k, v in IDENTITY.items() if k != "AGENTIHOOKS_SWARM_LAUNCHER"}
     assert not swarm_pin.nested(unpinned, 23, _tree(tmp_path))
