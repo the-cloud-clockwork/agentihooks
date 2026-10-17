@@ -333,6 +333,28 @@ def test_the_required_grader_preserves_existing_dev_concurrency(repo):
     assert gate_protected.main(["--root", str(repo), "--head", changed]) == 0
 
 
+@pytest.mark.parametrize("fault", ["skip", "command", "proofs", "delete"])
+def test_the_required_grader_refuses_a_disabled_branch_lane_preflight(repo, fault):
+    from copy import deepcopy
+
+    preflight = yaml.safe_load((_ROOT / ".github/workflows/branch-lanes.yml").read_text())
+    _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": preflight}, {}, "trusted preflight")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    altered = deepcopy(preflight)
+    if fault == "skip":
+        altered["jobs"]["grade"]["if"] = False
+    elif fault == "command":
+        altered["jobs"]["grade"]["steps"][-1]["run"] = "echo accepted"
+    elif fault == "proofs":
+        altered[True]["push"]["branches-ignore"].append("diffcheck/**")
+    files = {"test.yml": _workflow(), "branch-lanes.yml": altered}
+    if fault == "delete":
+        files.pop("branch-lanes.yml")
+    planted = _commit(repo, files, {}, "disable preflight")
+    _git(repo, "checkout", "-q", "dev")
+    assert gate_protected.main(["--root", str(repo), "--head", planted]) == 1
+
+
 def test_the_protected_grader_reports_gate_required_on_the_head():
     steps = _protected_workflow()["jobs"]["grade"]["steps"]
     statuses = [step for step in steps if "statuses/$HEAD_SHA" in step.get("run", "")]
