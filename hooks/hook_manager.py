@@ -2592,12 +2592,14 @@ def on_permission_request(payload: dict) -> None:
     """Handle PermissionRequest event."""
     tool_name = payload.get("tool_name", "unknown")
     log(f"Permission requested: {tool_name}", {"tool": tool_name})
-    from hooks.context import master_coding, planner_plan
+    from hooks.context import master_coding, operator_mode, planner_plan
 
     if planner_plan.accepts(tool_name):
         print(json.dumps(planner_plan.grant(payload.get("tool_input") or {})))
     elif master_coding.asks_operator(tool_name, payload.get("session_id")):
         return
+    elif tool_name in master_coding.PERMISSION_TOOLS:
+        emit_permission_decision("PermissionRequest", "deny", operator_mode.PROMPT_REFUSAL.format(tool=tool_name))
     elif os.environ.get("AGENTIHOOKS_SWARM"):
         emit_permission_decision(
             "PermissionRequest",
