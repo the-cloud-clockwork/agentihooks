@@ -8,6 +8,55 @@ Each integration push runs the promotion tier, including module coverage, schedu
 
 See [Delivery tiers](/docs/reference/delivery-tiers/) for check ownership. The measurements below record earlier workflow versions; their old event assignments do not describe the current tiers. Tests and mutation runs execute in CI only.
 
+## Resource sampling and stop condition regression checks
+
+Two regression checks cover live process tree sampling and a pre push gate that overruns its stop condition budget. Their checks distinguish sampling leaks from inherited garbage, and condition execution time from hook startup and exit time.
+
+### Whole process tree sampling
+
+`test_measure_reports_the_whole_tree_of_a_live_workload` starts a real memory workload with two children, 48 MiB per child and a 1.5 second hold. It samples every 0.05 seconds with a 60 second workload timeout. The test retains the workload exit, process count, memory, CPU, storage and wall time assertions; the resource audit change does not widen those bounds.
+
+The audit collects garbage before capturing warnings, then collects again after sampling while warning capture is active. This keeps an unclosed file inherited from earlier work out of the sampler's resource audit. A `ResourceWarning` raised during sampling still fails with its category, message and source location. The historical warning producer was not established by this fix.
+
+`test_live_workload_resource_audit_owns_only_sampling_leaks` disables automatic garbage collection and test reruns for two controls: an inherited cyclic unclosed file must pass the audit, while a new cyclic unclosed file created during sampling must fail it with diagnostics. These controls verify warning ownership without replacing the real child processes with mocks.
+
+### Pre push overrun timing
+
+`test_a_pre_push_gate_that_overruns_is_stopped_by_the_gate_inside_the_stop_condition` sets `CONDITIONS_TIMEOUT_SEC=8` in its isolated fixture. The stop gate keeps a 3.5 second reserve, leaving 4.5 seconds for the pre push gate instead of the former 2.5 seconds at a six second timeout.
+
+The fixture's condition shim records monotonic start and finish times to the file named by `CONDITION_CLOCK`. The assertion requires that condition process to finish within eight seconds. Interpreter startup and exit for the enclosing `python -m hooks` invocation are outside this measured interval. The test still requires exit code 2, the pre push timeout diagnostic and an empty remote head: the stop hook must not push unfinished work. If the outer runner kills the condition before it can report the gate timeout, that is a test failure.
+
+| Setting | Scope | Meaning |
+|---|---|---|
+| `CONDITIONS_TIMEOUT_SEC=8` | Overrun test fixture | Condition timeout used by this regression; the documented runtime default remains `10` seconds |
+| `CONDITION_CLOCK` | Test shim only | Temporary output file holding two monotonic timestamps; not a production hook setting |
+| `0.05`, `60` | Sampling test arguments | Sample interval and workload timeout in seconds; not new environment variables |
+
+See [condition configuration](hooks/conditions.md#configuration) for runtime timeout configuration. These changes require no operator configuration and do not change production sampling or stop gate behavior.
+
+### Verify in CI
+
+Push the branch, then run the two test files through the existing focused proof workflow:
+
+```bash
+gh workflow run proofs.yml \
+  --ref <branch> \
+  -f proof=tests \
+  -f tests='tests/test_swarm_v2_resource_sampling.py tests/gates/test_push_stop_executor.py'
+gh run list \
+  --workflow proofs.yml \
+  --branch <branch> \
+  --limit 5
+gh run view <run id> \
+  --log
+```
+
+Inspect each named test's result and any `RERUN` or flaky test report. A green run after a retry does not establish a first attempt pass. The sampling ownership controls explicitly set `reruns=0`; that setting does not disable retries for every test in the selection. Tests run in CI, not on the shared development host.
+
+If the sampling audit fails, use its warning category, message and source location to distinguish a new sampling leak from inherited garbage; retain the post sampling collection that exposes new leaks. If the overrun check fails, inspect the stop diagnostic and recorded condition interval before changing any budget. Timing the enclosing hook process against the condition timeout reintroduces the startup and exit overhead mismatch.
+
+[Pull request #2808](https://github.com/the-cloud-clockwork/agentihooks/pull/2808) introduced the resource audit isolation. Its [green Tests run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38243723120) records both ownership controls passing on Python 3.11 and 3.12 with reruns disabled. [Pull request #4083](https://github.com/the-cloud-clockwork/agentihooks/pull/4083) changed only the overrun test timing; its [Python 3.12 selected tests job](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39051257730/job/117450548906) passed all 62 tests, including the overrun check, without a test rerun. That pull request also reports no failed or rerun line for either target test across about 165 recent dev push runs. This is historical delivery evidence, not a guarantee that future runs cannot fail.
+
 ## Proof dispatch lanes
 
 Browser jobs share the [verified Chromium cache](reference/browser-cache.md): restore is attempted on every ref when no verified baked browser is available, while only `dev` pushes save after a miss and successful installation. The guide covers workflow setup, GitHub cache scope, recovery and cache inventory checks.
