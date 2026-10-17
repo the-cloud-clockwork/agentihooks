@@ -357,8 +357,7 @@ def test_fallback_reports_each_size_violation(repositories, monkeypatch, capsys)
     assert publish_gate.main() == 1
     assert capsys.readouterr().out == (
         f"AgentiHooks touched Python fallback: {root}\n"
-        "chosen.py breaks file-lines at 3002; it is not on the base allowlist\n"
-        "chosen.py::chosen breaks function-lines at 3002; it is not on the base allowlist\n"
+        "chosen.py: file exceeds 3000 lines\nchosen.py: chosen exceeds 300 lines\n"
     )
 
 
