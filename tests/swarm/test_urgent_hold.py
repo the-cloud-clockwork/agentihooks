@@ -131,6 +131,10 @@ def test_only_the_open_dependencies_are_named():
     assert hold(found, "c") == "it waits on task b"
 
 
+def test_a_dependency_missing_from_the_ledger_is_named_as_open():
+    assert hold(doc([task("c", depends_on=["gone"])]), "c") == "it waits on task gone"
+
+
 def test_an_urgent_hold_clears_once_the_task_is_claimable_and_restarts_its_clock(store):
     from scripts.swarm.health import urgent_hold
 
