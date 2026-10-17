@@ -785,7 +785,7 @@ class Check:
             and not self._named_moved(previous)
         ):
             return _Judgment(pr, previous, None, None)
-        if previous and lift.task_lifted(self.slug, task["id"], NAME, self.home):
+        if previous and previous.get("inputs") == inputs and lift.head_lifted(self.slug, task["id"], NAME, self.home):
             return _Judgment(pr, previous, None, None)
         pr = self._with_named(task, pr)
         state = intent_history.prepare(state_of(doc, task, pr))

@@ -172,11 +172,11 @@ def test_a_master_lift_ends_when_the_head_cannot_be_read(tmp_path, monkeypatch):
     assert lifted_on(tmp_path, monkeypatch, None, True) == (False, [])
 
 
-def lift_coached(tmp_path, monkeypatch, unchanged):
+def lift_coached(tmp_path, monkeypatch, unchanged, record=None):
     run_check(tmp_path, "first")
     path = lift.task_lift_path(COACHED, COACHED_TASK, intent.NAME, tmp_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"at": 0, "url": URL, "head": "first"}))
+    path.write_text(json.dumps(record or {"at": 0, "url": URL, "head": "first"}))
     monkeypatch.setattr(intent, "pr_head", lambda url: "second")
     monkeypatch.setattr(intent, "production_unchanged", lambda url, before, after: unchanged)
     return run_check(tmp_path, "second"), Verdicts(COACHED, intent.NAME, tmp_path).read(COACHED_TASK)
@@ -192,4 +192,12 @@ def test_the_tick_judges_again_a_lifted_task_whose_new_head_changes_production(t
     (ledger, mail), record = lift_coached(tmp_path, monkeypatch, False)
     assert ledger.updates == [(COACHED, COACHED_TASK, {"state": "claimed"}, "swarm")]
     assert "fix round 2 of 2" in mail.sent[0][2]
+    assert record["head"] == "second"
+
+
+def test_the_tick_judges_again_a_task_whose_lift_is_bound_to_no_pull_request(tmp_path, monkeypatch):
+    import time
+
+    (ledger, _), record = lift_coached(tmp_path, monkeypatch, True, record={"at": time.time()})
+    assert ledger.updates == [(COACHED, COACHED_TASK, {"state": "claimed"}, "swarm")]
     assert record["head"] == "second"

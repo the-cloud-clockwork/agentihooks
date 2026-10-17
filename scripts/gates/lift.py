@@ -74,6 +74,10 @@ def task_lifted(slug, task, gate, home=None, now=None, command=""):
     return head == record["head"] or (bool(head) and production_unchanged(record["url"], record["head"], head))
 
 
+def head_lifted(slug, task, gate, home=None):
+    return bool(_record(task_lift_path(slug, task, gate, home)).get("url")) and task_lifted(slug, task, gate, home)
+
+
 def drop_task(slug, task, home=None):
     for path in task_lifts_dir(slug, task, home).glob("*"):
         path.unlink()
