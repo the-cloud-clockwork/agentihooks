@@ -12,6 +12,7 @@ Complete reference documentation for configuration and CLI commands.
 
 | Page | What it covers |
 |------|---------------|
+| [Pull request mutation gate](mutation-gate.md) | Graded lines, measured shard costs, splitting heavy covering tests, combined grades, CI proof examples and evidence inspection |
 | [Configuration](configuration.md) | All environment variables across every integration, in one place |
 | [Deployed swarm host capacity](../pillars/swarm.md#deployed-host-capacity) | Worker namespace quota and pool budgets, autoscale inspection, configuration and disabled host pressure alerts |
 | [CLI Commands](cli-commands.md) | All `agentihooks` subcommands and flags: init, uninstall, claude, ignore |
