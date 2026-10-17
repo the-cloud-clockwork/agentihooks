@@ -1400,6 +1400,22 @@ def test_checks_wait_judges_every_job_of_the_current_required_run(tick, required
         assert idle.wait(tick.store.redis, "sw", ME) is None
 
 
+@pytest.mark.parametrize("status", ["IN_PROGRESS", "COMPLETED"])
+@pytest.mark.parametrize("conclusion", [None, "FAILURE", "SUCCESS"])
+def test_a_status_gate_cannot_hide_the_current_workflow_jobs(tick, status, conclusion):
+    tick.hold("checks", URL)
+    gate = {"context": "Gate — Required", "state": "SUCCESS", "isRequired": True}
+    job = {**_run_check("selected tests", 20, 2, conclusion), "isRequired": False}
+    tick.pulls[URL] = _gated([gate, job], [_suite(2, status)], False)
+    if conclusion == "FAILURE":
+        assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now red; failed: selected tests"]
+    elif conclusion == "SUCCESS" and status == "COMPLETED":
+        assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
+    else:
+        assert tick.end() == []
+        assert idle.wait(tick.store.redis, "sw", ME) is not None
+
+
 @pytest.mark.parametrize("status", ["QUEUED", "IN_PROGRESS"])
 @pytest.mark.parametrize("reverse", [False, True])
 def test_checks_wait_holds_the_new_required_run_after_an_old_green_gate(tick, status, reverse):
