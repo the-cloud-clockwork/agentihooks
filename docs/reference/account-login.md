@@ -37,6 +37,39 @@ A failed setup or missing token leaves storage unchanged.
 Claude login does not set the refresh authority flag. Other
 `agentihooks claude` invocations retain their normal routing behavior.
 
+## Master claude ai login
+
+```bash
+agentihooks swarm <slug> set master-claude-login=on
+agentihooks claude login --master <slug>
+```
+
+The swarm setting `master-claude-login` is off by default, and off leaves every
+launch unchanged, including swarms on routed quota tokens or gateway API tokens.
+Turn it on only when the swarm's workers run on quota tokens separate from the
+master's login.
+
+With it on, the swarm's Claude front door master launches on route
+`master-login` from a private home under
+`$AGENTIHOOKS_HOME/master-claude/<slug>/claude`, copied from its rendered master
+profile without the shared credential link. `CLAUDE_CONFIG_DIR` and
+`CLAUDE_SECURESTORAGE_CONFIG_DIR` both point at that home, the session gets
+`--settings {"forceLoginMethod":"claudeai"}`, and its environment drops routed
+OAuth tokens, API keys, custom endpoints and provider selectors. Settings that
+bring back a credential, an `apiKeyHelper` or another login method refuse the
+launch, and so does a master account that is also a worker quota token or a
+swarm whose workers carry no quota token. The master gets `--remote-control`.
+Engineers, CI agents, planners and Codex masters never take this route.
+
+`agentihooks claude login --master <slug>` runs `claude auth login` once in that
+home. Native Claude is the only refresher of the login. One process holds it at
+a time: a launch refuses while the process that holds it is still running, and
+each claim takes an epoch above the one stored in OpenBao. With `--openbao`, and
+at each master launch and Stop where `OPENBAO_URL` and `OPENBAO_TOKEN` are set,
+the latest grant native Claude saved is copied to
+`secret/agentihooks/master-claude/<slug>` with its owner epoch, never replacing
+a newer copy; a launch whose home has no login restores it from there.
+
 ## Codex login
 
 ```bash

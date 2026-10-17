@@ -33,6 +33,7 @@ class Account:
     weight: int | None = None
     five_resets_at: int | None = None
     reserved: str = ""
+    observed_at: float | None = field(default=None, compare=False)
 
 
 def _left(window: balancer.QuotaWindow, now: float) -> float | None:
@@ -48,11 +49,14 @@ def _claude(environ: dict, now: float) -> list[Account]:
     observed = {result.account: (at, result) for at, result in balancer.cached_observations(environ=environ)}
     fresh, _ = tokens.results(environ, now)
     observed.update({result.account: (now, result) for result in fresh})
-    counts = account_sessions.sessions_by_account()
+    counts = account_sessions.sessions_by_account(environ=environ)
+    routed = set(account_sessions.token_accounts(environ).values())
     rows = []
     for at, result in observed.values():
         token = environ.get(f"{balancer.TOKEN_PREFIX}{result.account}")
         if not token and not counts.get(result.account):
+            continue
+        if token and result.account not in routed:
             continue
         cap = tokens.cap(result, now) if token and session_bands.fresh(at, now) else None
         five, week = _left(result.five_hour, now), _left(result.seven_day, now)
@@ -69,6 +73,7 @@ def _claude(environ: dict, now: float) -> list[Account]:
                 cap,
                 reset,
                 five_resets_at=five_reset,
+                observed_at=at,
             )
         )
     rows += [
@@ -102,6 +107,7 @@ def _codex(environ: dict, now: float, refresh: bool) -> list[Account]:
     for account in pool + live:
         quota = found.get(account.name)
         cap = codex_router.account_cap(quota, now, environ) if account.name in known else None
+        observed_at = quota.observed_at if quota else None
         quota = None if quota and quota.expired else quota
         five = _left(quota.five_hour, now) if quota else None
         week = _left(quota.seven_day, now) if quota else None
@@ -118,6 +124,7 @@ def _codex(environ: dict, now: float, refresh: bool) -> list[Account]:
                 cap,
                 reset,
                 five_resets_at=five_reset,
+                observed_at=observed_at,
             )
         )
     return rows + _api(codex_api.CodexApiSource(counts), "codex", environ, now)
@@ -151,6 +158,7 @@ def _global(environ: dict, now: float) -> list[Account]:
                 kind=row["kind"],
                 weight=weight,
                 five_resets_at=session_bands.upcoming(quota["five_hour"]["resets_at"], now) if quota else None,
+                observed_at=quota["observed_at"] if quota else None,
             )
         )
     return rows
@@ -426,6 +434,7 @@ def record(row: Account) -> dict:
     """The stored row; pool rows keep their pre-api fields so decisions without an api stay byte identical."""
     dropped = set() if row.kind == API else {"kind", "weight"}
     dropped |= set() if row.reserved else {"reserved"}
+    dropped |= set() if row.observed_at is not None else {"observed_at"}
     return {key: value for key, value in row.__dict__.items() if key not in dropped}
 
 
