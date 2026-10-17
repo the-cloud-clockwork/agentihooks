@@ -408,3 +408,122 @@ def test_an_inbox_send_goes_live_past_waiting_ledger_talk_and_the_inbox_flush_re
     assert len(outbox.flush(object()).applied) == 1
     assert chat(stored()) == ["Replayed by the inbox"]
     assert not outbox.path().exists()
+
+
+STALE = "0" * 64
+
+
+def chat_op(item, text):
+    return {"op": "add", "thread": "chat", "id": item, "text": text, "by": ENG}
+
+
+def queue_ops(*ops):
+    for op in ops:
+        outbox.append(outbox.ledger_record(SLUG, [op], "", False))
+
+
+def revision_conflict(where=None):
+    details = {"path": where} if where else {}
+    body = json.dumps({"error": {"code": "revision_conflict", "message": "changed", "details": details}}).encode()
+    return urllib.error.HTTPError("http://ledger", 409, "conflict", {}, io.BytesIO(body))
+
+
+def test_a_queued_comment_with_a_stale_revision_lands_with_a_fresh_one_and_the_writes_behind_it_follow(server):
+    phase = f"phases/{stored()['phases'][0]['id']}"
+    ledger.call(SLUG, [{"op": "add", "thread": f"{phase}/comments", "id": "c-moved", "text": "Moved it", "by": ENG}])
+    stale_comment = {"op": "add", "thread": f"{phase}/comments", "id": "c-stale", "text": "Queued earlier", "by": ENG}
+    queue_ops({**stale_comment, "expected_revision": STALE}, chat_op("m-behind", "Queued behind the comment"))
+    report = outbox.flush(None)
+    assert (report.applied, report.rejected, report.left) == (["c-stale", "m-behind"], [], 0)
+    assert comments(stored()) == ["Moved it", "Queued earlier"]
+    assert chat(stored()) == ["Queued behind the comment"]
+    assert not outbox.path().exists()
+    assert not outbox.skipped_path().exists()
+
+
+@pytest.mark.parametrize("kind", ["add", "add_item", "relay", "answer"])
+def test_an_append_only_op_with_a_stale_revision_is_sent_once_more_with_a_fresh_one(monkeypatch, kind):
+    sent = []
+
+    def replay(slug, ops, agent, service):
+        sent.append([dict(op) for op in ops])
+        if ops[0].get("expected_revision"):
+            raise revision_conflict("chat")
+        return {"applied": [ops[0]["id"]]}
+
+    monkeypatch.setattr(ledger, "replay", replay)
+    entry = outbox.ledger_record(SLUG, [{"op": kind, "id": "x-1", "expected_revision": STALE}], ENG, False)
+    assert outbox.apply_ledger(None, ENG, entry) == {"applied": ["x-1"]}
+    assert sent == [[{"op": kind, "id": "x-1", "expected_revision": STALE}], [{"op": kind, "id": "x-1"}]]
+    assert entry["args"]["ops"] == [{"op": kind, "id": "x-1", "expected_revision": STALE}]
+
+
+def test_a_queued_write_that_is_not_an_append_with_a_stale_revision_is_set_aside_at_once(server, monkeypatch):
+    sent = []
+
+    def replay(slug, ops, agent, service):
+        sent.append(ops[0]["id"])
+        if any(op.get("expected_revision") for op in ops):
+            raise revision_conflict("phases/p1")
+        return {"applied": [op["id"] for op in ops]}
+
+    monkeypatch.setattr(ledger, "replay", replay)
+    rename = {"op": "set", "path": "phases/p1/title", "value": "Renamed", "id": "s-stale", "expected_revision": STALE}
+    queue_ops(rename, chat_op("m-after", "Lands behind the stale write"))
+    line = outbox.path().read_text().splitlines(keepends=True)[0]
+    report = outbox.flush(None)
+    reason = (
+        "the ledger server answered 409 revision conflict on phases/p1 since this write was queued, "
+        "so its expected revision can never apply"
+    )
+    assert report.rejected == [("s-stale", reason)]
+    assert report.applied == ["m-after"]
+    assert sent == ["s-stale", "m-after"]
+    assert not outbox.path().exists()
+    assert json.loads(outbox.skipped_path().read_text().splitlines()[-1]) == {"reason": reason, "line": line}
+
+
+def test_a_record_still_conflicting_holds_only_later_records_for_its_own_resource(server, monkeypatch):
+    sent = []
+
+    def replay(slug, ops, agent, service):
+        sent.append([dict(op) for op in ops])
+        if ops[0]["thread"] == "phases/a/comments":
+            raise revision_conflict()
+        return {"applied": [op["id"] for op in ops]}
+
+    monkeypatch.setattr(ledger, "replay", replay)
+    first = {"op": "add", "thread": "phases/a/comments", "id": "c-a1", "text": "First on a", "by": ENG}
+    second = {"op": "add", "thread": "phases/a/comments", "id": "c-a2", "text": "Second on a", "by": ENG}
+    queue_ops({**first, "expected_revision": STALE}, chat_op("m-b", "Another item"), second)
+    report = outbox.flush(None)
+    assert (report.applied, report.rejected, report.left) == (["m-b"], [], 2)
+    assert [ops[0]["id"] for ops in sent] == ["c-a1", "c-a1", "m-b"]
+    assert "expected_revision" not in sent[1][0]
+    assert [record["item"] for record in queued()] == ["c-a1", "c-a2"]
+    assert queued()[0]["args"]["ops"][0]["expected_revision"] == STALE
+
+
+def test_a_revision_conflict_names_the_resource_the_server_reports(monkeypatch):
+    entry = outbox.ledger_record(SLUG, [chat_op("m-1", "Unpinned")], ENG, False)
+    for where, message in ((None, "the ledger server answered 409 revision conflict"), ("chat", "on chat")):
+        monkeypatch.setattr(
+            ledger, "replay", lambda *args, where=where: (_ for _ in ()).throw(revision_conflict(where))
+        )
+        with pytest.raises(outbox.LedgerBusy) as busy:
+            outbox.apply_ledger(None, ENG, entry)
+        assert str(busy.value).endswith(message)
+        assert busy.value.targets == {"chat"}
+
+
+def test_a_server_wide_busy_answer_holds_every_later_ledger_record(server, monkeypatch):
+    monkeypatch.setattr(
+        ledger, "replay", lambda *args: (_ for _ in ()).throw(urllib.error.HTTPError("u", 503, "", {}, io.BytesIO(b"")))
+    )
+    queue_ops(
+        chat_op("m-1", "First"), {"op": "add", "thread": "phases/a/comments", "id": "c-2", "text": "Else", "by": ENG}
+    )
+    assert outbox.flush(None).left == 2
+    with pytest.raises(outbox.LedgerBusy) as busy:
+        outbox.apply_ledger(None, ENG, queued()[0])
+    assert busy.value.targets == frozenset()
