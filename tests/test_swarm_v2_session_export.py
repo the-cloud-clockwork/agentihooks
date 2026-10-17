@@ -140,8 +140,8 @@ def test_export_reports_the_final_normalized_main_transcript_length(tmp_path):
         b'{"type":"system","message":"ignored"}\n',
         2_000,
     )
-    _session(projects / f"{OLDER_ID}.jsonl", b'{}\n', 1_000)
-    _session(projects / CLAUDE_ID / "subagents" / "agent.jsonl", b'{}\n', 3_000)
+    _session(projects / f"{OLDER_ID}.jsonl", b"{}\n", 1_000)
+    _session(projects / CLAUDE_ID / "subagents" / "agent.jsonl", b"{}\n", 3_000)
 
     assert session_export.export(attempt, _scope(), environ)["transcript_end"] == 2
 
