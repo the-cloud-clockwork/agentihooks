@@ -301,6 +301,18 @@ def test_the_protected_grader_never_executes_the_head():
     assert "git checkout" not in runs and "git worktree" not in runs
 
 
+def test_branch_lane_grading_holds_the_required_status_from_the_base():
+    steps = _protected_workflow()["jobs"]["grade"]["steps"]
+    grade = next(step for step in steps if step.get("id") == "grade")
+    assert grade["run"].splitlines() == [
+        'python -m scripts.ci_branch_lanes --head "$HEAD_SHA"',
+        'python -m scripts.gate_protected --head "$HEAD_SHA"',
+    ]
+    report = steps[-1]
+    assert report["env"]["OUTCOME"] == "${{ steps.grade.outcome }}"
+    assert 'state=failure' in report["run"]
+
+
 def test_the_protected_grader_reports_gate_required_on_the_head():
     steps = _protected_workflow()["jobs"]["grade"]["steps"]
     statuses = [step for step in steps if "statuses/$HEAD_SHA" in step.get("run", "")]

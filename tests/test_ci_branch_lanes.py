@@ -120,6 +120,21 @@ def test_only_workflows_absent_on_the_base_are_graded(tmp_path, monkeypatch):
     }
 
 
+@pytest.mark.parametrize("name", ["replay.yml", "branch-lanes.yml"])
+def test_removing_the_lane_from_an_existing_workflow_is_refused(tmp_path, monkeypatch, name):
+    base, head, sha = _repo(tmp_path, {name: _workflow()})
+    (base / lanes.WORKFLOWS / name).write_text(yaml.safe_dump(_workflow(LANED)))
+    monkeypatch.chdir(head)
+    assert lanes.refused(sha, base) == {
+        f"{lanes.WORKFLOWS}/{name}": ["job replay has no shared hosted lane concurrency group"]
+    }
+
+
+def test_proof_branch_pushes_are_graded():
+    workflow = yaml.safe_load((ROOT / lanes.WORKFLOWS / "branch-lanes.yml").read_text())
+    assert "diffcheck/**" not in workflow[True]["push"]["branches-ignore"]
+
+
 def test_a_head_whose_new_workflows_all_queue_on_a_lane_is_allowed(tmp_path, monkeypatch, capsys):
     base, head, sha = _repo(tmp_path, {"laned.yml": _workflow(LANED)})
     monkeypatch.chdir(base)
