@@ -46,6 +46,7 @@ class BlockAction(Exception):
 
 _OTEL_SECRET_DETECTED = "agentihooks.guardrail.secret_detected"
 _UNSET = "<unset>"
+_QUESTION_CHECK_FAILED = "The question tool is off: the operator presence check failed. Keep working without it."
 
 
 # Heavy imports are lazy-loaded in functions that need them:
@@ -1158,7 +1159,7 @@ def _operator_question(payload: dict) -> str:
         return operator_mode.question_block(payload.get("tool_name"), payload.get("session_id"))
     except Exception as e:
         log("operator question check failed", {"error": str(e)})
-        return ""
+        return _QUESTION_CHECK_FAILED if payload.get("tool_name") == "AskUserQuestion" else ""
 
 
 def _operator_reminder(payload: dict) -> None:
@@ -2592,12 +2593,14 @@ def on_permission_request(payload: dict) -> None:
     """Handle PermissionRequest event."""
     tool_name = payload.get("tool_name", "unknown")
     log(f"Permission requested: {tool_name}", {"tool": tool_name})
-    from hooks.context import master_coding, planner_plan
+    from hooks.context import master_coding, operator_mode, planner_plan
 
     if planner_plan.accepts(tool_name):
         print(json.dumps(planner_plan.grant(payload.get("tool_input") or {})))
     elif master_coding.asks_operator(tool_name, payload.get("session_id")):
         return
+    elif tool_name in master_coding.PERMISSION_TOOLS:
+        emit_permission_decision("PermissionRequest", "deny", operator_mode.PROMPT_REFUSAL.format(tool=tool_name))
     elif os.environ.get("AGENTIHOOKS_SWARM"):
         emit_permission_decision(
             "PermissionRequest",
