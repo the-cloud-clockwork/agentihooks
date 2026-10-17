@@ -16,7 +16,7 @@ from scripts.swarm_v2.auth_context import IDENTIFIER, GrantRefused, LaunchAuthor
 from scripts.swarm_v2.authority import RenewalFence, TaskAuthority, TaskClaim
 from scripts.swarm_v2.runtime.operations import SPAWN, OperationJournal, digest
 
-DEFAULT_LEASE_MS = 60_000
+DEFAULT_LEASE_MS = 240_000
 HEARTBEAT_LOCK_MS = 5_000
 BEARER = "Bearer "
 RELEASE = "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end return 0"
