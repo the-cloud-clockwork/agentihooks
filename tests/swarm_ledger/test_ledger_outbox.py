@@ -226,8 +226,12 @@ def test_a_record_the_server_keeps_answering_busy_is_set_aside_once_it_is_older_
     import urllib.error
 
     server.stop()
+    from types import SimpleNamespace
+
     run(capsys, ENG, "say", "Busy for too long")
     entry = aged(seconds)
+    now = entry["args"]["queued_at"] + seconds
+    monkeypatch.setattr(outbox, "time", SimpleNamespace(time=lambda: now))
     monkeypatch.setenv(outbox.BUSY_AGE_ENV, "60")
 
     def busy(*args):
@@ -575,6 +579,15 @@ def test_a_revision_conflict_names_the_resource_the_server_reports(monkeypatch):
             outbox.apply_ledger(None, ENG, entry)
         assert str(busy.value).endswith(message)
         assert busy.value.targets == {"chat"}
+
+
+def test_a_pinned_append_still_conflicting_after_its_refresh_is_busy_on_its_own_resource(monkeypatch):
+    monkeypatch.setattr(ledger, "replay", always_raises(lambda: revision_conflict("chat")))
+    entry = outbox.ledger_record(SLUG, [{**chat_op("m-1", "Pinned"), "expected_revision": STALE}], ENG, False)
+    with pytest.raises(outbox.LedgerBusy) as busy:
+        outbox.apply_ledger(None, ENG, entry)
+    assert str(busy.value) == "the ledger server answered 409 revision conflict on chat"
+    assert busy.value.targets == {"chat"}
 
 
 def test_a_server_wide_busy_answer_holds_every_later_ledger_record(server, monkeypatch):
