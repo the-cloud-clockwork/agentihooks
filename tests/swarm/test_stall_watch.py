@@ -1059,6 +1059,7 @@ def test_a_wait_the_tick_ended_gives_its_owner_the_full_limit_from_the_wake(pull
     inbox.close(asked, OWNER, "done", "answered")
     rows = {t["id"]: t for t in swarm.ledger.state(SLUG)["tasks"]}
     assert waits.end_pass(swarm.store, SLUG, rows, inbox, swarm.pulls.get, woke, swarm.pulls.get)
+    assert 0 < swarm.store.redis.ttl(idle.key(SLUG, "woke", OWNER)) <= idle.BEAT_TTL_S
     idle.declare_wait(
         swarm.store.redis, SLUG, OWNER, woke + 600 * MINUTE, "queued", woke, on={"kind": "merge", "target": URL}
     )

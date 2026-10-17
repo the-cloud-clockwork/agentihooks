@@ -89,6 +89,15 @@ def test_tags_is_empty_when_the_lookup_times_out(monkeypatch):
     assert release_wait.tags("/repo") == []
 
 
+@pytest.mark.parametrize(("error", "why"), [(OSError(), "OSError"), (OSError("no git"), "no git")])
+def test_lookup_names_why_it_failed(monkeypatch, error, why):
+    def run(args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(release_wait.subprocess, "run", run)
+    assert release_wait.lookup("/repo") == ([], why)
+
+
 def test_tags_is_empty_when_the_repository_has_no_origin(tmp_path):
     assert release_wait.tags(str(tmp_path)) == []
 
