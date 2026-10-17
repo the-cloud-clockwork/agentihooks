@@ -148,3 +148,12 @@ def test_unreadable_jobs_still_end_a_red_run_wait_with_its_conclusion(tick, acti
     outcome = f"checks on {RUN}, now red; the run concluded failure; its jobs could not be read"
     assert tick.end() == [f"ended the wait of {ME}: {outcome}"]
     assert idle.wait(tick.store.redis, "sw", ME) is None
+
+
+def test_a_jobs_answer_without_jobs_still_ends_a_red_run_wait(tick, actions):  # noqa: F811
+    actions["run"] = {"status": "completed", "conclusion": "timed_out"}
+    actions["jobs"] = {"message": "no jobs"}
+    hold_run(tick)
+    outcome = f"checks on {RUN}, now red; the run concluded timed_out; its jobs could not be read"
+    assert tick.end() == [f"ended the wait of {ME}: {outcome}"]
+    assert idle.wait(tick.store.redis, "sw", ME) is None
