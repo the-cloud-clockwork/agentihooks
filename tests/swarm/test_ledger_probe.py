@@ -140,6 +140,15 @@ def test_one_slow_pass_raises_nothing_and_two_in_a_row_raise_the_alert(store):
     assert observe(store, ledger, clock) == ["raised the ledger slow alert"]
     assert ledger_probe.holding(store, "sw")
     [mail] = master_mail(store)
+    assert mail == (
+        "The ledger server is slow: sw pass 1: read 6.0 seconds and write 7.5 seconds, "
+        "CPU unknown over pass, streaks before/after slow 0/1, fast 0/0. "
+        "sw pass 2: read 6.0 seconds and write 7.5 seconds, "
+        "CPU unknown over pass, streaks before/after slow 1/2, fast 0/0. "
+        "Server started 74 minutes ago. Newest on dev merged 9 minutes ago: "
+        "Run the cheap CI gates before every push. "
+        "Idle and stale claim checks and nudges pause until recovery below four seconds."
+    )
     for words in ("read 6.0 seconds", "write 7.5 seconds", "CPU unknown over pass", "started 74 minutes ago"):
         assert words in mail
     assert "Newest on dev merged 9 minutes ago: Run the cheap CI gates before every push." in mail
@@ -215,6 +224,22 @@ def test_notices_keep_both_triggering_passes_and_do_not_substitute_a_new_swarms_
     assert held["raised_samples"][1]["streak_after"] == {"slow": 2, "fast": 0}
 
 
+def test_triggering_evidence_stays_fixed_while_the_current_pass_window_advances(store):
+    clock = Clock()
+    ledger = ProbedLedger(clock)
+    for sequence, latency in enumerate((6.1, 6.2, 6.3, 6.4), 1):
+        ledger.read_s = latency
+        observe(store, ledger, clock, sequence * 1_000)
+    held = ledger_probe.state(store, "sw")
+    assert [row["sequence"] for row in held["raised_samples"]] == [1, 2]
+    assert [row["read_s"] for row in held["raised_samples"]] == pytest.approx([6.1, 6.2])
+    assert [row["sequence"] for row in held["samples"]] == [3, 4]
+    assert [row["read_s"] for row in held["samples"]] == pytest.approx([6.3, 6.4])
+    [notice] = master_mail(store)
+    assert "read 6.1 seconds" in notice and "read 6.2 seconds" in notice
+    assert "read 6.3 seconds" not in notice and "read 6.4 seconds" not in notice
+
+
 def test_notice_streaks_and_cpu_survive_long_watchdog_details(store):
     clock = Clock()
     ledger = ProbedLedger(clock)
@@ -282,16 +307,34 @@ def test_a_departed_swarm_does_not_hold_an_incident_after_two_answered_sibling_p
     assert store.redis.hget(incidents.key("ledger"), "generation") == "2"
 
 
-def test_a_legacy_incident_names_missing_evidence_and_waits_for_measured_recovery(store):
+@pytest.mark.parametrize("prior_fast", [0, 1, 41])
+def test_a_legacy_incident_names_missing_evidence_and_waits_for_measured_recovery(store, prior_fast):
+    import json
+
     clock = Clock()
     ledger = ProbedLedger(clock)
     store.redis.hset(incidents.key("ledger"), mapping={"active": 1, "generation": 9})
+    store.redis.set(
+        store.key("sw", "ledger-slow"), json.dumps({"alert": False, "slow": 0, "fast": prior_fast, "notices": []})
+    )
     observe(store, ledger, clock)
     assert store.redis.hget(incidents.key("ledger"), "active") == "1"
     assert "triggering passes unknown" in master_mail(store)[0]
     observe(store, ledger, clock)
     assert store.redis.hget(incidents.key("ledger"), "active") == "0"
     assert "sw pass 1" in master_mail(store)[1] and "sw pass 2" in master_mail(store)[1]
+
+
+def test_missing_legacy_pass_records_restart_the_slow_streak(store):
+    import json
+
+    clock = Clock()
+    ledger = ProbedLedger(clock, read_s=6.0)
+    store.redis.set(store.key("sw", "ledger-slow"), json.dumps({"alert": False, "slow": 1, "fast": 0, "notices": []}))
+    assert observe(store, ledger, clock) == []
+    assert not ledger_probe.holding(store, "sw") and master_mail(store) == []
+    assert observe(store, ledger, clock) == ["raised the ledger slow alert"]
+    assert [row["sequence"] for row in ledger_probe.state(store, "sw")["raised_samples"]] == [1, 2]
 
 
 def test_a_restored_local_alert_does_not_invent_its_missing_triggering_passes(store):
@@ -301,8 +344,41 @@ def test_a_restored_local_alert_does_not_invent_its_missing_triggering_passes(st
     ledger = ProbedLedger(clock, read_s=6.0)
     store.redis.set(store.key("sw", "ledger-slow"), json.dumps({"alert": True, "slow": 2}))
     observe(store, ledger, clock)
-    assert "Ledger incident changed; triggering passes unknown." in master_mail(store)[0]
+    assert master_mail(store) == [
+        "Ledger incident changed; triggering passes unknown. "
+        "Idle and stale claim checks and nudges pause until recovery below four seconds."
+    ]
     assert ledger_probe.holding(store, "sw")
+
+
+@pytest.mark.parametrize(
+    ("event", "expected"),
+    [
+        (
+            "raised",
+            "The ledger is slow or unavailable; triggering passes unknown. "
+            "Idle and stale claim checks and nudges pause until recovery below four seconds.",
+        ),
+        ("resolved", "The ledger incident is clear; triggering passes unknown."),
+    ],
+)
+def test_a_legacy_push_without_retained_text_names_the_evidence_gap(store, monkeypatch, event, expected):
+    from unittest.mock import Mock
+
+    from scripts.swarm import push
+
+    sent = Mock(return_value=True)
+    monkeypatch.setattr(push, "send", sent)
+    root = incidents.key("ledger")
+    store.redis.hset(root, mapping={"active": int(event == "raised"), "generation": 9})
+    if event == "resolved":
+        store.redis.hset(f"{root}:mail:master@sw", "raised", 9)
+    store.redis.rpush(f"{root}:outbox", event)
+    clock = Clock()
+    observe(store, ProbedLedger(clock), clock)
+    assert master_mail(store) == [expected]
+    assert sent.call_args.args == ("critical", expected)
+    assert store.redis.lrange(f"{root}:outbox", 0, -1) == []
 
 
 def test_two_failed_passes_raise_the_alert_naming_the_failure(store):
@@ -367,19 +443,23 @@ def test_recovery_requires_two_passes_below_four_seconds(store, latency):
     assert not ledger_probe.holding(store, "sw")
 
 
-def test_a_failure_only_hold_resumes_on_the_first_answered_fast_pass(store):
+@pytest.mark.parametrize("latency", [0.1, 5.0])
+def test_a_failure_only_hold_resumes_on_the_first_answered_fast_pass(store, latency):
     clock = Clock()
-    ledger = ProbedLedger(clock)
+    ledger = ProbedLedger(clock, write_s=latency)
     ledger.read_error = TimeoutError("timed out")
     observe(store, ledger, clock)
     observe(store, ledger, clock)
     assert "probe failed" in master_mail(store)[0]
-    ledger.read_error = None
+    ledger.read_error, ledger.write_s = None, 0.1
     assert observe(store, ledger, clock) == ["cleared the ledger slow alert"]
     assert not ledger_probe.holding(store, "sw")
     [raised, cleared] = master_mail(store)
-    assert "one answered fast pass" in cleared
-    assert "sw pass 3" in cleared and "sw pass 2" not in cleared
+    assert cleared == (
+        "The ledger server answers fast again: one answered fast pass took "
+        "sw pass 3: read 0.1 seconds and write 0.1 seconds, CPU unknown over pass, "
+        "streaks before/after slow 2/0, fast 0/1. Idle and stale claim checks resume."
+    )
 
 
 def test_latency_in_a_failed_pass_still_needs_two_recovery_passes(store):
@@ -392,6 +472,26 @@ def test_latency_in_a_failed_pass_still_needs_two_recovery_passes(store):
     assert observe(store, ledger, clock) == []
     assert ledger_probe.holding(store, "sw")
     assert observe(store, ledger, clock) == ["cleared the ledger slow alert"]
+
+
+@pytest.mark.parametrize(("latency", "first_fast_clears"), [(5.0, True), (5.7, False)])
+def test_a_failed_hold_requires_two_fast_passes_after_a_later_slow_request(store, latency, first_fast_clears):
+    clock = Clock()
+    ledger = ProbedLedger(clock)
+    ledger.read_error = TimeoutError("timed out")
+    observe(store, ledger, clock)
+    observe(store, ledger, clock)
+    ledger.read_error, ledger.write_s = None, latency
+    assert observe(store, ledger, clock) == []
+    assert ledger_probe.state(store, "sw")["failure_only"] is first_fast_clears
+    ledger.write_s = 0.1
+    actions = observe(store, ledger, clock)
+    if first_fast_clears:
+        assert actions == ["cleared the ledger slow alert"]
+        assert not ledger_probe.holding(store, "sw")
+    else:
+        assert actions == [] and ledger_probe.holding(store, "sw")
+        assert observe(store, ledger, clock) == ["cleared the ledger slow alert"]
 
 
 def test_notice_cpu_covers_each_triggering_pass_instead_of_notice_time(store, monkeypatch):

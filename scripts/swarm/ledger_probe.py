@@ -211,7 +211,7 @@ def _record(held: dict, slug: str, now_ms: int, sample: Sample, down: str) -> No
         "streak_before": before,
         "streak_after": {"slow": slow, "fast": fast},
     }
-    previous = held.get("samples", []) if held.get("bad") == bad else []
+    previous = held["samples"] if held.get("bad") == bad else []
     held.update(slow=slow, fast=fast, bad=bad, sequence=sequence, samples=[*previous[-1:], row])
 
 

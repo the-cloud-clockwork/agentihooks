@@ -65,6 +65,8 @@ def test_cpu_over_a_pass_requires_the_same_process_and_measured_elapsed_time():
     before = {"pid": 1, "start": 20, "ticks": 100, "hertz": 100}
     after = {**before, "ticks": 300}
     assert ledger_host.cpu_over_pass(before, after, 8) == 25.0
+    assert ledger_host.cpu_over_pass(before, {**after, "ticks": 125}, 0.5) == 50.0
+    assert ledger_host.cpu_over_pass(before, after, 1.0) == 200.0
     assert ledger_host.cpu_over_pass(before, before, 8) == 0.0
     assert ledger_host.cpu_over_pass(None, after, 8) is None
     assert ledger_host.cpu_over_pass(before, None, 8) is None
