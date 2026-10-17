@@ -422,8 +422,9 @@ Task t2, claimed by engineer@a1b2c3-0002, shares docs/a.md and scripts/swarm/tic
 ```
 
 A task that shares nothing gets no such lines. The agent coordinates with each claimant through the inbox and
-merges `dev` into its branch only on a real conflict or, where the repo has a merge queue, when GitHub refuses the
-enqueue. A green head is queued as it stands, because the merge group tests it on top of the newest `dev`.
+merges `dev` into its branch only on a real conflict. The engineer skill adds one case the prompt line leaves out:
+where the repo has a merge queue, a green head is queued as it stands, because the merge group tests it on top of
+the newest `dev`, and the agent also merges `dev` when GitHub refuses the enqueue.
 
 ### Split tasks across pull requests
 
@@ -622,7 +623,7 @@ the longest chain of open tasks waiting on it. One exception: an S task that unb
 other dependencies are all done), or is the last task of its phase not yet done, goes ahead of the rest of its rank.
 Phase order is never used, and ledger order breaks the remaining ties. Capacity placement reads the same order. The
 tick then applies the usual
-rules: lane, phase, open dependencies, territories and live claims still decide whether a task is claimable, so an
+rules: lane, phase, open dependencies and live claims still decide whether a task is claimable, so an
 urgent task never skips a dependency that is not done and never takes a task another agent holds. A territory
 another agent holds moves a task back within its rank without blocking it (see
 [Shared areas in the opening prompt](#shared-areas-in-the-opening-prompt)).
