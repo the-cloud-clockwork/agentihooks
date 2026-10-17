@@ -169,10 +169,11 @@ def test_task_set_marks_a_sliced_task_a_follow_up_and_clears_its_slice(sliced, f
 
 
 def test_the_intent_state_of_a_task_set_follow_up_carries_its_description_alone(sliced, monkeypatch):
-    monkeypatch.setattr(plan_read, "exact", lambda doc, task: "borrowed plan lines\n")
+    borrowed = "<!-- slice: first -->\nborrowed plan lines\n"
+    monkeypatch.setattr(plan_read, "exact", lambda doc, task: borrowed)
     pr = {"title": "Fix it", "body": "Closes 1", "files": ["scripts/x.py"]}
     before = intent.state_of(sliced, sliced["tasks"][0], pr)
-    assert (before["plan_lines"], before["plan_chunk"]) == ("3-5", "borrowed plan lines\n")
+    assert (before["plan_lines"], before["plan_chunk"]) == ("3-5", borrowed)
     assert ledger_tasks.apply(sliced, task_set({"follow_up": True}), update_ctx()) is True
     state = intent.state_of(sliced, sliced["tasks"][0], pr)
     assert not {"plan_lines", "plan_chunk"} & set(state)
