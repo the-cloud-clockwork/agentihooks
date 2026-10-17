@@ -121,3 +121,26 @@ def test_an_entry_added_on_the_branch_does_not_count(repo, capsys):
     repo({"mod.py": wide(name="new"), **listed({"mod.py::new": {"PLR0913": 8}})})
     assert publish_gate.main() == 1
     assert report(capsys) == [f"mod.py: new PLR0913 {ARGUMENTS} (8 > 7)"]
+
+
+def test_an_old_lint_offender_outside_the_diff_passes(repo, capsys):
+    repo({"mod.py": 'label = f"plain"\nvalue = 1\n'}, push=True)
+    repo({"mod.py": 'label = f"plain"\nvalue = 2\n'})
+    assert publish_gate.main() == 0
+    assert report(capsys) == ["Graded 1 changed Python files"]
+
+
+def test_a_lint_offender_on_a_changed_line_fails(repo, capsys):
+    repo({"mod.py": 'label = f"plain"\nvalue = 1\n'}, push=True)
+    repo({"mod.py": 'label = f"plain"\nimport os\nvalue = 2\n'})
+    assert publish_gate.main() == 1
+    assert report(capsys) == [
+        "mod.py:2:1: E402 Module level import not at top of file",
+        "mod.py:2:8: F401 `os` imported but unused",
+    ]
+
+
+def test_a_suppressed_lint_finding_on_a_changed_line_passes(repo):
+    repo({"base.py": "value = 1\n"}, push=True)
+    repo({"mod.py": "import os  # noqa: F401\n"})
+    assert publish_gate.main() == 0
