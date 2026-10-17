@@ -369,6 +369,73 @@ def test_metrics_completed_and_split_pulls_are_prefetched_without_late_slow_read
         box.close()
 
 
+@pytest.mark.parametrize(
+    "recorded_primary,recorded_split", [(True, True), (True, False), (False, True), (False, False)]
+)
+def test_tick_prefetch_skips_recorded_completed_metrics_but_keeps_unrecorded_backfill(
+    monkeypatch, tmp_path, recorded_primary, recorded_split
+):
+    import time
+
+    import fakeredis
+
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import ledger_events, metrics_outbox
+    from scripts.swarm.store import RedisStore
+
+    now = int(time.time() * 1000)
+    urls = [f"https://github.com/o/r/pull/{number}" for number in range(1, 5)]
+    doc = {
+        "tasks": [
+            {"id": "active", "state": "pr", "pr_url": urls[0], "split_pulls": [urls[1]]},
+            {"id": "done", "state": "done", "pr_url": urls[2], "split_pulls": [urls[3]]},
+        ],
+        "_meta": {"events": [{"kind": "task done", "target": "tasks/done", "at": now}]},
+    }
+    path = tmp_path / "metrics.sqlite"
+    monkeypatch.setattr(metrics_outbox, "spool_path", lambda: path)
+    table = metrics_outbox.Table("delivery_events", (("kind", "String"), ("pull_request", "String")))
+    box = metrics_outbox.Outbox(path, metrics_outbox.Settings("http://sink", "", ""))
+    try:
+        for enabled, kind, url in [
+            (recorded_primary, "merge", urls[2]),
+            (recorded_split, "pull_request_merged", urls[3]),
+        ]:
+            if enabled:
+                box.append(
+                    table,
+                    [
+                        {
+                            "event_id": kind,
+                            "ledger": "sw",
+                            "plan": "",
+                            "phase": "",
+                            "slice": "",
+                            "task": "",
+                            "ts_ms": now,
+                            "kind": kind,
+                            "pull_request": url,
+                        }
+                    ],
+                )
+    finally:
+        box.close()
+    batches = []
+    monkeypatch.setattr(ledger_events, "views", lambda found, cache: batches.append(found) or dict.fromkeys(found))
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+
+    ledger_events.tick_view(InboxStore(store.redis), store, "sw", doc)
+    ledger_events.tick_view(InboxStore(store.redis), store, "sw", doc)
+
+    expected = (
+        {urls[0], urls[1]}
+        | ({urls[2]} if not recorded_primary else set())
+        | ({urls[3]} if not recorded_split else set())
+    )
+    assert len(batches) == 2
+    assert all(set(batch) == expected for batch in batches)
+
+
 def test_missing_workflow_directory_does_not_declare_a_required_gate():
     url = "https://github.com/o/r/pull/1"
     pr = resource()
