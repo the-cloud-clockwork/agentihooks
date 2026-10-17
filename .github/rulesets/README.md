@@ -7,8 +7,8 @@ push protection, linear history and pull requests without bypass actors.
 Dev requires the exact `Gate — Required` check from the Tests workflow and
 allows squash merges with zero required approvals. Instead of requiring each
 branch to be up to date, dev merges through a merge queue: the Tests workflow
-runs on `merge_group`, so unit, lint, Sonar and the swarm image smoke grade
-the merged tree before it lands. Mutation stays on the pull request head.
+runs on `merge_group`, so the full unit suite and test count floor grade the
+merged tree before it lands. Mutation stays on the pull request head.
 Once the queue is active, `gh pr merge --squash` adds the pull request to the
 queue; it lands when the queue run passes the gate.
 The queue groups with `ALLGREEN`: every entry is built on dev plus the
