@@ -2047,9 +2047,10 @@ jobs:
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 5
     outputs:
-      shards: ${{ steps.plan.outputs.shards }}
-      stats_parts: ${{ steps.plan.outputs.stats_parts }}
+      shards: ${{ steps.reuse.outputs.reused == 'true' && '[0]' || steps.plan.outputs.shards }}
+      stats_parts: ${{ steps.reuse.outputs.reused == 'true' && '[0]' || steps.plan.outputs.stats_parts }}
       bases: ${{ steps.plan.outputs.bases }}
+      reused: ${{ steps.reuse.outputs.reused || 'false' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -2066,9 +2067,6 @@ jobs:
           checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
           enable-cache: false
 
-      - name: Install dependencies
-        run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
-
       # An earlier branch counts as a base only once its push preflight mutated it green; the lookup runs on the App's quota.
       - name: Mint the tcc main ci App token
         id: app-token
@@ -2079,8 +2077,50 @@ jobs:
           repositories: ${{ github.event.repository.name }}
           permission-actions: read
 
+      # The protected copy gives the reuse verdict and refuses a head whose preflight producer differs from the grader's.
+      - name: Check out the protected grader
+        if: github.event_name == 'pull_request'
+        env:
+          GRADER: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --no-tags origin "$GRADER"
+          git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD
+
+      - name: Reuse the branch preflight report graded on this head and base
+        id: reuse
+        if: github.event_name == 'pull_request'
+        env:
+          BRANCH: ${{ github.head_ref }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GRADER: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if ! grep -q "^def exact(" "$RUNNER_TEMP/grader/scripts/ci_mutation/reuse.py"; then
+            echo "The protected copy has no exact head reuse; mutating"
+            echo "reused=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          base=$(git merge-base origin/dev "$HEAD_SHA")
+          PYTHONPATH="$RUNNER_TEMP/grader" python -P -m scripts.ci_mutation.reuse "$BRANCH" "$GITHUB_RUN_ID" \
+            --head "$HEAD_SHA" --base "$base" --grader "$GRADER"
+
+      - name: Upload the reused preflight report
+        if: steps.reuse.outputs.reused == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-preflight-reuse
+          path: .mutation-gate/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Install dependencies
+        if: steps.reuse.outputs.reused != 'true'
+        run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+
       - name: Size mutation shards from stored timings
         id: plan
+        if: steps.reuse.outputs.reused != 'true'
         env:
           BASE: ${{ inputs.base || 'origin/dev' }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -2114,9 +2154,11 @@ jobs:
           enable-cache: false
 
       - name: Install dependencies
+        if: needs.mutation-plan.outputs.reused != 'true'
         run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Select mutation tests before browser setup
+        if: needs.mutation-plan.outputs.reused != 'true'
         id: selection
         env:
           BASES: ${{ needs.mutation-plan.outputs.bases }}
@@ -2135,6 +2177,7 @@ jobs:
           exit 1
 
       - name: Collect one stats part for every mutation shard
+        if: needs.mutation-plan.outputs.reused != 'true'
         env:
           BASES: ${{ needs.mutation-plan.outputs.bases }}
           PYTHONUNBUFFERED: "1"
@@ -2143,6 +2186,7 @@ jobs:
         run: mkdir -p .mutation-stats && touch ".mutation-stats/collected-$PART" && python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --stats .mutation-stats --stats-part "$PART" --stats-parts "$PARTS"
 
       - name: Upload mutation stats part
+        if: needs.mutation-plan.outputs.reused != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: mutation-stats-${{ matrix.part }}
@@ -2190,9 +2234,11 @@ jobs:
           enable-cache: false
 
       - name: Install dependencies
+        if: needs.mutation-plan.outputs.reused != 'true'
         run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Select mutation tests before browser setup
+        if: needs.mutation-plan.outputs.reused != 'true'
         id: selection
         env:
           BASES: ${{ needs.mutation-plan.outputs.bases }}
@@ -2211,14 +2257,22 @@ jobs:
           exit 1
 
       - name: Download the shared mutation stats
+        if: needs.mutation-plan.outputs.reused != 'true'
         uses: actions/download-artifact@v4
         with:
           pattern: mutation-stats-*
           path: .mutation-stats
           merge-multiple: true
 
+      - name: Download the reused preflight report
+        if: needs.mutation-plan.outputs.reused == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: mutation-preflight-reuse
+          path: .mutation-gate
+
       - name: Mutate changed Python files
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && needs.mutation-plan.outputs.reused != 'true'
         env:
           BASES: ${{ needs.mutation-plan.outputs.bases }}
           PYTHONUNBUFFERED: "1"

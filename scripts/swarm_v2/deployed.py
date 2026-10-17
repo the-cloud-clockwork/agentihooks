@@ -21,6 +21,7 @@ from scripts.swarm_v2.kubernetes.completion import Completion
 from scripts.swarm_v2.kubernetes.failures import AccountSlot, Recovery, restore_directive
 from scripts.swarm_v2.kubernetes.grants import PodGrants, Supervision
 from scripts.swarm_v2.kubernetes.pool import WorkerPool
+from scripts.swarm_v2.kubernetes.pool import reading as pool_reading
 from scripts.swarm_v2.kubernetes.prompts import TerminalPrompts
 from scripts.swarm_v2.kubernetes.replacement import Replacements, TaskLedger
 from scripts.swarm_v2.kubernetes.runtime import KubernetesTransport
@@ -246,6 +247,17 @@ def worker_host(environ: Mapping[str, str], slug: str) -> Callable[[], Room]:
     except WorkerSettingsRefused as refused:
         return partial(Room, None, f"{WORKERS_OFF}: {refused}", UNKNOWN)
     return partial(Room, None, WORKERS_OFF, UNKNOWN)
+
+
+def worker_pools(environ: Mapping[str, str], slug: str) -> Callable[[], list[dict] | None] | None:
+    try:
+        workers = Workers.from_environ(environ, slug)
+        if workers is None or "worker_pool" not in workers.policy:
+            return None
+        namespace = workers.policy["namespace"]
+        return partial(pool_reading, pod_api(environ, namespace), namespace, workers.policy["worker_pool"])
+    except WorkerSettingsRefused:
+        return None
 
 
 def terminal_views(controller: "Controller", environ: Mapping[str, str]) -> TerminalViews:

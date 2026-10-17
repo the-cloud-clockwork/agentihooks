@@ -44,7 +44,7 @@ RED_NOTICE = re.compile(r"^Your pull request (\S+) for .* has red checks and no 
 GATE_JOB = re.compile(rf"^[ \t]+name:[ \t]*(['\"]?){re.escape(GATE)}\1[ \t]*$", re.MULTILINE)
 CONTEXT_NODES = (
     "nodes{...on CheckRun{databaseId name conclusion completedAt isRequired(pullRequestNumber:$number) "
-    "checkSuite{workflowRun{workflow{name}}}} "
+    "checkSuite{app{databaseId} workflowRun{workflow{name}}}} "
     "...on StatusContext{context state createdAt isRequired(pullRequestNumber:$number)}} "
     "pageInfo{hasNextPage endCursor}"
 )
@@ -205,7 +205,7 @@ def declares_gate(tree):
     return any(GATE_JOB.search(text) for text in texts if text)
 
 
-def view(url, run=subprocess.run):
+def view(url, run=subprocess.run, required_checks=None):
     number = _number(url)
     try:
         done = run(
@@ -216,7 +216,9 @@ def view(url, run=subprocess.run):
         )
         if done.returncode != 0:
             return None
-        return _view_resource(json.loads(done.stdout)["data"]["resource"], number, run=run)
+        return _view_resource(
+            json.loads(done.stdout)["data"]["resource"], number, run=run, required_checks=required_checks
+        )
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
         return None
 
@@ -234,7 +236,38 @@ def _number(url):
     return found[1] if found else "0"
 
 
-def _view_resource(raw, number, gated=None, run=subprocess.run):
+def _required_app(check, required_checks):
+    app_id = required_checks.get(check.get("name") or check.get("context"))
+    app = ((check.get("checkSuite") or {}).get("app") or {}).get("databaseId")
+    return app_id is None or app == app_id
+
+
+def _required_pull_request(raw, required_checks):
+    checks = _newest(
+        [
+            check
+            for check in raw["statusCheckRollup"]
+            if check.get("isRequired") and _required_app(check, required_checks)
+        ]
+    )
+    results = [check.get("conclusion") or check.get("state") for check in checks]
+    return PullRequest(
+        raw["state"],
+        None,
+        None,
+        any(result in RED for result in results),
+        resolved=set(required_checks).issubset(check.get("name") or check.get("context") for check in checks)
+        and all(result in PASSED | {"NEUTRAL"} for result in results),
+        failed=tuple(
+            check.get("name") or check.get("context") or "a check"
+            for check, result in zip(checks, results)
+            if result in RED
+        ),
+        head=raw["headRefOid"],
+    )
+
+
+def _view_resource(raw, number, gated=None, run=subprocess.run, required_checks=None):
     try:
         raw = dict(raw)
         commits = [node["commit"] for node in raw["commits"]["nodes"]]
@@ -249,6 +282,8 @@ def _view_resource(raw, number, gated=None, run=subprocess.run):
         raw["commits"] = commits
         raw["statusCheckRollup"] = checks
         raw["checkSuites"] = suites
+        if required_checks is not None:
+            return _required_pull_request(raw, required_checks)
         raw["gated"] = gated if gated is not None else bool(commits) and declares_gate(commit.get("file"))
         return pull_request(raw)
     except (ValueError, KeyError, TypeError):

@@ -36,7 +36,7 @@ REMOVE = ["bash", str(stack.WT_SCRIPT), "done", "engineer-a1b2c3-0001", "--repo"
 class Shell:
     def __init__(self):
         self.calls, self.remote, self.issues, self.fail = [], HEAD, json.dumps({"hasIssuesEnabled": True}), ()
-        self.status, self.top, self.origin = "", TOP, "git@github.com:O/r.git"
+        self.status, self.top, self.origin, self.probe = "", TOP, "git@github.com:O/r.git", ""
 
     def __call__(self, argv):
         self.calls.append(argv)
@@ -49,7 +49,7 @@ class Shell:
             ("git", "status", "--porcelain"): self.status,
         }.get(tuple(argv[:3])) or {
             ("git", "rev-parse"): HEAD,
-            ("git", "ls-remote"): f"{self.remote}\trefs/heads/{argv[-1]}" if self.remote else "",
+            ("git", "ls-remote"): self.probe + (f"{self.remote}\trefs/heads/{argv[-1]}" if self.remote else ""),
             ("git", "merge-base"): BASE,
             ("git", "rev-list"): "3",
             ("gh", "repo"): self.issues,
@@ -129,6 +129,17 @@ def test_park_refuses_a_branch_with_unpushed_commits(parked, capsys):
     parked[3].remote = "c" * 40
     _refused(parked, capsys, "the worktree holds commits origin lacks; push eng-t1 first")
     assert parked[3].calls[-1] == ["git", "rev-parse", "HEAD"]
+
+
+def test_park_accepts_a_synced_branch_beside_a_same_named_diffcheck_branch(parked, capsys):
+    parked[3].probe = f"{'c' * 40}\trefs/heads/diffcheck/eng-t1\n"
+    assert park(parked[4]) == 0
+    assert json.loads(capsys.readouterr().out)["parked_on"] == ["a"]
+
+
+def test_park_refuses_a_branch_only_a_same_named_diffcheck_branch_carries(parked, capsys):
+    parked[3].probe, parked[3].remote = f"{HEAD}\trefs/heads/diffcheck/eng-t1\n", ""
+    _refused(parked, capsys, "branch eng-t1 is not on origin; push it first with git push -u origin eng-t1")
 
 
 def test_park_refuses_a_worktree_with_uncommitted_changes(parked, capsys):

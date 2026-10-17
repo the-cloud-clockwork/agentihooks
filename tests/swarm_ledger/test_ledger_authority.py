@@ -74,8 +74,12 @@ def live():
             thread.join(timeout=2)
 
 
+MUTATION_TRACE_FACTOR = 7
+
+
 def send(live, method, path, body=b"", **headers):
-    conn = http.client.HTTPConnection("127.0.0.1", live["port"], timeout=5)
+    timeout = 5 * (MUTATION_TRACE_FACTOR if os.environ.get("MUTANT_UNDER_TEST") else 1)
+    conn = http.client.HTTPConnection("127.0.0.1", live["port"], timeout=timeout)
     try:
         conn.request(method, path, body, {"Host": live["host"], **headers})
         response = conn.getresponse()

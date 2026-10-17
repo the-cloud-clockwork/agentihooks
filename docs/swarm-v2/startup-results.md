@@ -53,6 +53,14 @@ Source: read only kubectl and aws read of anton-prod at 2026-10-12T10:17:25Z wit
 | warm-node/uncached-image | 445 | 445 | none | none | n/a | 1.0 / 5.4 (n 445) | n/a | n/a | n/a | 0.4 / 0.9 (n 81) | 1.0 / 5.4 (n 445) | 0.0 / 0.0 (n 445) | 0.4 / 2.9 (n 445) | 6.0 / 17.0 (n 3) | 1.1 / 1.1 (n 1) |
 | warm-node/unknown-image | 42 | 0 | registry_unauthorized 1, unschedulable 41 | none | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 
+## anton-outage-1.json
+
+Source: startup fixture anton-outage mode at 1dd43842b6bc51122e6bf19cb539d6fc619dc14a against anton-prod, read at 2026-10-16T20:49:20Z: one worker Pod of the agentihooks-worker:dev image scaled the empty Oracle research pool, which has no kata runtime, from zero and pulled through a registry that started 96 seconds after the Pod was scheduled. Cells are p50 / p95 in seconds with the sample count.
+
+| Scenario | Samples | Started | Failures | Transient failures | Node provision to schedulable | Image pull with retries | Unschedulable to scale up | Scale up to EC2 launch | EC2 launch to node Ready | Node Ready or Pod creation to Scheduled | Image pull | Failed pulls before the pull that succeeded | Scheduled to last container start, less pulls and retries | Last container start to Pod Ready | Worker prepared to native agent ready and prompt delivered |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| cold-node/uncached-image | 1 | 1 | none | registry_unavailable 1 | 225.7 / 225.7 (n 1) | 112.0 / 112.0 (n 1) | 6.0 / 6.0 (n 1) | 21.3 / 21.3 (n 1) | 197.7 / 197.7 (n 1) | 0.8 / 0.8 (n 1) | 23.5 / 23.5 (n 1) | 88.5 / 88.5 (n 1) | 14.2 / 14.2 (n 1) | 1.0 / 1.0 (n 1) | n/a |
+
 ## Limits of this measurement
 
 - Node provision runs from the Pod waiting to the new node accepting it: trigger, instance, join and schedule. Image pull with retries is the successful pull plus the time lost to failed pulls before it. Pod start (sandbox, containers, init containers) and bootstrap are separate columns. No column sums them into one launch figure.
@@ -62,3 +70,4 @@ Source: read only kubectl and aws read of anton-prod at 2026-10-12T10:17:25Z wit
 - Bootstrap is the worker image's own report followed by a readiness file in the kind fixture. The native handshake runs from the worker's prepared report to the supervisor's prompt delivery once the native agent reported ready, read from the worker log of a controller launched Pod; it falls inside bootstrap and is not added to it.
 - The kind fixture pulls from a registry on the same runner, so its pull times show image size and unpack cost, not registry distance; the Anton reads show the production registry path.
 - With few cold samples the p95 equals the maximum.
+- The cold node outage read runs on the Oracle research pool, which shares the swarm pool's shape, image and network but not its kata runtime: the swarm pool keeps two nodes by the operator's choice and cannot scale from zero. Its scale up time is the cluster autoscaler's ScaledUpGroup event and its launch is the instance's creation, so the instance column is scale up to Oracle instance creation and the join column runs to the node's Ready transition. The registry is a pull through cache of ghcr.io on the new node's loopback that started 96 seconds after the worker was scheduled, so its pull shows the production registry path after the outage; the registry Pod itself is not a sample. The fixture's outage_seconds of 90 is the wait it targets from seeing the worker scheduled; 96 seconds is measured from the worker's Scheduled event to the registry's Started event. The worker image was the :dev tag, not :release.
