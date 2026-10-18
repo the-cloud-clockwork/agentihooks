@@ -300,6 +300,28 @@ def test_refresh_drops_ineligible_priorities(priority, monkeypatch, state, base,
     assert len(records) == 1
 
 
+@pytest.mark.parametrize("unreadable", [False, True])
+def test_refresh_keeps_priority_when_pull_request_cannot_be_read(priority, monkeypatch, unreadable):
+    p = priority
+    assert cli.main(["sw", "merge", "priority", URL]) == 0
+    key = p.store.key("sw", queue_priority.PENDING)
+    before = p.store.redis.hgetall(key)
+
+    def graphql(query, variables, run):
+        assert query == merge_queue.STATE
+        assert variables == {"url": URL}
+        assert run is subprocess.run
+        if unreadable:
+            return {"resource": None}
+        raise SwarmError("GitHub unavailable")
+
+    monkeypatch.setattr(merge_queue, "graphql", graphql)
+    reason = "pull request could not be read" if unreadable else "GitHub unavailable"
+    assert queue_priority.refresh(p.store, "sw", p.tasks) == [f"merge queue priority for {URL} waits: {reason}"]
+    assert p.store.redis.hgetall(key) == before
+    assert p.queue.mutations == []
+
+
 def test_replay_records_application_and_notifies_the_displaced_owner(priority, monkeypatch, capsys):
     p = priority
     records, sent = [], []
