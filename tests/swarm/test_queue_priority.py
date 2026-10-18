@@ -252,6 +252,44 @@ def test_refused_reorder_keeps_pending_request_for_retry(priority, monkeypatch, 
     assert p.store.redis.hget(p.store.key("sw", queue_priority.PENDING), URL)
 
 
+@pytest.mark.parametrize(
+    "state,base,reason",
+    [
+        ("MERGED", "dev", "pull request is MERGED"),
+        ("CLOSED", "dev", "pull request is CLOSED"),
+        ("OPEN", "main", "pull request no longer targets dev"),
+    ],
+)
+@pytest.mark.parametrize("run_status", ["in_progress", "completed", None])
+def test_refresh_drops_ineligible_priorities(priority, monkeypatch, state, base, reason, run_status):
+    p = priority
+    assert cli.main(["sw", "merge", "priority", URL]) == 0
+    key = p.store.key("sw", queue_priority.PENDING)
+    record = json.loads(p.store.redis.hget(key, URL))
+    p.run["status"] = run_status
+    if run_status is None:
+        record["run_id"] = None
+        p.store.redis.hset(key, URL, json.dumps(record))
+    records = []
+
+    def graphql(query, variables, run):
+        assert query == merge_queue.STATE
+        assert variables == {"url": URL}
+        assert run is subprocess.run
+        return {"resource": {"state": state, "baseRefName": base}}
+
+    monkeypatch.setattr(merge_queue, "graphql", graphql)
+    monkeypatch.setattr(queue_record.Journal, "write", lambda self, *args, **kwargs: records.append((args, kwargs)))
+    assert queue_priority.refresh(p.store, "sw", p.tasks) == [
+        f"dropped deferred merge queue priority for {URL}: {reason}"
+    ]
+    assert p.store.redis.hgetall(key) == {}
+    assert records == [(("priority-dropped", URL, "", None, None), {"reason": reason, **record})]
+    assert p.queue.mutations == []
+    assert queue_priority.refresh(p.store, "sw", p.tasks) == []
+    assert len(records) == 1
+
+
 def test_replay_records_application_and_notifies_the_displaced_owner(priority, monkeypatch, capsys):
     p = priority
     records, sent = [], []
