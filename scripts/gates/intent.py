@@ -21,7 +21,7 @@ from scripts.gates.base import Decision, Who
 from scripts.gates.identity import program_index, simple_commands
 from scripts.gates.verdicts import Verdicts
 from scripts.swarm import timing
-from scripts.swarm_ledger import plan_read
+from scripts.swarm_ledger import ledger_splits, plan_read
 
 NAME = "intent"
 PURPOSE = "intent-check"
@@ -387,7 +387,9 @@ def _task_text(task):
 def _task_contract(doc, task):
     phase = _phase(doc, task)
     if task.get("split") and (
-        task.get("follow_up") or not (task.get("plan_url") or phase.get("plan_url") or phase.get("plan_ref"))
+        task.get("follow_up")
+        or not ledger_splits.ranged(task["split"])
+        or not (task.get("plan_url") or phase.get("plan_url") or phase.get("plan_ref"))
     ):
         return {**task, "split": [], "plan_lines": ""}
     return task
