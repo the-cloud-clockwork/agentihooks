@@ -182,6 +182,23 @@ def refresh_rules(rules_dir: Path, claude_md: Path, local_md: Path, dry_run: boo
     return collect_profile_rules(rules_dir, claude_md, local_md)
 
 
+def refresh_every_home(caller: str) -> None:
+    from hooks.context.rules_refresh import collect_profile_rules, write_refresh_marker
+    from scripts.profiles import render
+    from scripts.targets import SUPPORTED_TARGETS
+
+    _i = _install_module()
+    for target in SUPPORTED_TARGETS:
+        keys = render.rerender(target, skip=[caller] if target == "claude" else [])
+        if target != "claude":
+            continue
+        for key in keys:
+            home = render.profile_dir(*render.split_key(key)) / "claude"
+            rules = collect_profile_rules(home / "rules", home / "CLAUDE.md", home / "CLAUDE.local.md")
+            pending = write_refresh_marker(key, rules, home=key)["pending_count"]
+            print(f"{_i._GREEN}[OK]{_i._RESET} Refresh marker written for profile '{key}' ({pending} sessions).")
+
+
 class ClaudeAdapter:
     name = "claude"
 
