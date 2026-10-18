@@ -54,3 +54,36 @@ def test_task_cost_names_a_truncated_comparison_median(tmp_path, cap, median, tr
     assert f"uncached tokens 1000, median of the other merged tasks {median}" in finding.evidence
     assert ("comparison set truncated: trace listing incomplete" in finding.evidence) is truncated
     assert failures == []
+
+
+def test_old_cached_usage_is_read_again_before_task_cost_is_reported(tmp_path):
+    from scripts.doctor import registry
+
+    registry.save(
+        tmp_path / "session.json",
+        {
+            "updated_at": "u",
+            "whole": True,
+            "observations": [
+                {"type": "GENERATION", "tokens": 1136776},
+                {"type": "SPAN", "turn": 1},
+            ],
+        },
+    )
+
+    def get(path, params):
+        if path == "traces":
+            return _page([{"id": "session", "tags": ["task:large"], "updatedAt": "u"}], 1)
+        return _page(
+            [
+                {"id": "generation", "type": "GENERATION", "totalTokens": 568388},
+                {"id": "turn", "type": "SPAN", "metadata": {"attributes": {"agent.turn": "1"}}},
+            ],
+            1,
+        )
+
+    found, coverage, failures = traces_read.history("s", get, tmp_path, traces_read.Budget())
+    record = {"now_ms": 0, "merged": ["large"], "traces": found}
+    assert traces.measures(record)["tasks"] == [{"task": "large", "sessions": 1, "turns": 1, "tokens": 568388}]
+    assert coverage["complete"] is True
+    assert failures == []

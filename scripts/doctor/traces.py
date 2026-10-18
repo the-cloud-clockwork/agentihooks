@@ -115,6 +115,11 @@ def task_cost(record: dict, limits: Limits) -> list[Finding]:
                     f"traced sessions {cost['sessions']}",
                     f"uncached tokens {cost['tokens']}, median of the other merged tasks {round(median(others))}",
                     "uncached tokens are input, cache writes and output; cache reads are left out",
+                    *(
+                        ("comparison set truncated: trace listing incomplete",)
+                        if not record.get("reader", {}).get("historical", {}).get("listed", True)
+                        else ()
+                    ),
                 ),
                 f"over {limits.task_cost_ratio} times the median uncached tokens of the other merged tasks",
                 cost["tokens"],
