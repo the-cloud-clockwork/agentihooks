@@ -1,6 +1,8 @@
 import os
+import re
 import subprocess
 from argparse import Namespace
+from datetime import datetime, timezone
 
 import pytest
 
@@ -26,14 +28,20 @@ class FakeRun:
 
 
 class FakeLedger:
-    def __init__(self):
-        self.said, self.noted = [], []
+    def __init__(self, rows=()):
+        self.said, self.noted, self.rows, self.updates = [], [], {slug: list(rows) for slug in (DOCTOR,)}, []
 
     def say(self, slug, text, by=None):
         self.said.append((slug, text, by))
 
     def notify(self, slug, text):
         self.noted.append((slug, text))
+
+    def tasks(self, slug):
+        return self.rows.get(slug, [])
+
+    def update_task(self, slug, task_id, fields, by="swarm"):
+        self.updates.append((slug, task_id, fields, by))
 
 
 @pytest.fixture
@@ -84,6 +92,57 @@ def test_pull_dev_refuses_a_checkout_that_is_not_on_dev(store):
     with pytest.raises(SwarmError, match="not dev"):
         interventions.apply(ctx, "pull-dev", args())
     assert not any("pull" in call for call in ctx.run.calls) and ctx.ledger.noted == []
+
+
+def test_pull_dev_records_the_applied_time_of_each_merged_fix_an_open_tune_task_measures(store):
+    rows = [
+        {"id": "m", "kind": "tune", "state": "open", "depends_on": ["a", "b", "c", "d", "e", "g", "h", "ghost"]},
+        {"id": "done-tune", "kind": "tune", "state": "done", "depends_on": ["f"]},
+        {"id": "a", "state": "done"},
+        {"id": "b", "kind": "ci", "state": "done"},
+        {"id": "c", "kind": "code", "state": "pr"},
+        {"id": "d", "kind": "code", "state": "done", "applied_at": "2026-10-17T01:00:00Z"},
+        {"id": "e", "kind": "research", "state": "done"},
+        {"id": "f", "kind": "code", "state": "done"},
+        {"id": "g", "kind": "code", "state": "done", "branch_repo": "git@github.com:O/bundle.git"},
+        {"id": "h", "kind": "code", "state": "done", "branch_repo": "https://github.com/o/r"},
+    ]
+    run = FakeRun({"rev-parse": "dev\n", "get-url": "git@github.com:O/r.git\n"})
+    ledger = FakeLedger(rows)
+    read = ledger.tasks
+    ledger.tasks = lambda slug: run.calls.append(["ledger-read", slug]) or read(slug)
+    ctx = interventions.Context(store, ledger, WATCHED, DOCTOR, run)
+    line = interventions.apply(ctx, "pull-dev", args())
+    stamped = [(slug, task, by) for slug, task, _, by in ctx.ledger.updates]
+    assert stamped == [(DOCTOR, t, f"master@{DOCTOR}") for t in ("a", "b", "h")]
+    times = {fields["applied_at"] for *_, fields, _ in ctx.ledger.updates}
+    assert len(times) == 1 and re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", times.pop())
+    pull = ["git", "-C", "/repo", "pull", "--ff-only", "origin", "dev"]
+    assert run.calls.index(["ledger-read", DOCTOR]) < run.calls.index(pull)
+    assert ["git", "-C", "/repo", "remote", "get-url", "origin"] in run.calls
+    assert (
+        line == "The Doctor pulled dev into the main checkout of the watched swarm and recorded 3 merged fixes applied."
+    )
+    assert logged_on_both(ctx)
+
+
+def test_pull_dev_with_no_unapplied_fix_records_nothing(store):
+    ctx = context(store)
+    line = interventions.apply(ctx, "pull-dev", args())
+    assert ctx.ledger.updates == []
+    assert line == "The Doctor pulled dev into the main checkout of the watched swarm."
+
+
+def test_record_applied_stamps_utc_whatever_the_local_zone(store, monkeypatch):
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 10, 18, 12, tzinfo=timezone.utc).astimezone(tz) if tz else datetime(2026, 10, 18, 21)
+
+    monkeypatch.setattr(interventions, "datetime", Clock)
+    ctx = context(store)
+    assert interventions.record_applied(ctx, ["a"]) == ["a"]
+    assert ctx.ledger.updates == [(DOCTOR, "a", {"applied_at": "2026-10-18T12:00:00Z"}, f"master@{DOCTOR}")]
 
 
 def test_a_failed_command_is_reported_and_not_logged(store):

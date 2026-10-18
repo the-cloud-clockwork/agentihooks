@@ -49,6 +49,7 @@ UPDATABLE = (
     "split_pulls",
     "pull_scopes",
     "after_release",
+    "applied_at",
     "recovery",
 )
 BOOL_FIELDS = ("artifact", "follow_up")
@@ -61,6 +62,7 @@ OVERLAY_CAP = 3
 BRANCH_RE = re.compile(r"^(?!-)\S*$")
 COMMIT_RE = re.compile(r"^([0-9a-f]{7,64})?$")
 RELEASE_RE = re.compile(r"^(v?\d+\.\d+\.\d+)?$")
+APPLIED_RE = re.compile(r"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)?")
 OBJECT_FIELDS = ("contract", "proof", "recovery", "repository_branches", "pull_scopes")
 PULL_SCOPE_KINDS = ("stage", "prerequisite")
 PULL_URL_RE = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/pull/\d+")
@@ -136,6 +138,7 @@ def check(op):
     check_lists(fields)
     check_stack(fields)
     check_release(fields)
+    check_applied(fields)
     check_bools(fields)
     check_profile(fields)
     check_urls(fields)
@@ -192,6 +195,12 @@ def check_release(fields):
     value = fields.get("after_release", "")
     if not (isinstance(value, str) and RELEASE_RE.fullmatch(value)):
         raise ValueError("after_release must be a release tag such as v2.17.1, or empty to clear it")
+
+
+def check_applied(fields):
+    value = fields.get("applied_at", "")
+    if not (isinstance(value, str) and APPLIED_RE.fullmatch(value)):
+        raise ValueError("applied_at must be a UTC time such as 2026-10-18T12:00:00Z, or empty to clear it")
 
 
 def check_rank(fields):
@@ -290,6 +299,7 @@ def check_task(task):
     check_lists(task)
     check_stack(task)
     check_release(task)
+    check_applied(task)
     check_urls(task)
     check_profile(task)
     check_rank(task)
@@ -463,6 +473,8 @@ def urgent_update_refusal(op: dict, task: dict, doc: dict) -> str:
 def park_refusal(op: dict, task: dict) -> str:
     after = {**task, **op["fields"]}
     if "parked_on" not in op["fields"] or not after["parked_on"] or (after.get("branch") and after.get("stacked_base")):
+        return ""
+    if ledger_kinds.read_only(after):
         return ""
     return f"{op['item']} cannot be parked without a branch and a stacked base: park it with agentihooks swarm park"
 

@@ -28,6 +28,7 @@ from scripts.inbox.seats import seat_address
 from scripts.inbox.store import CLOSED, InboxStore
 from scripts.swarm import (
     affinity,
+    apply_wait,
     bottleneck_remedy,
     ci_speed,
     claim_hold,
@@ -766,7 +767,7 @@ def _claimable(slug, store, rows, doc, lane, dispatched=None):
     held = [t.get("territory") or [] for t in rows.values() if t.get("state") in ACTIVE]
     config = store.config(slug)
     graph, fix = hierarchy.project(doc)[0], freeze.fix_phase(config)
-    released = release_wait.checker(config.repo)
+    released, applied = release_wait.checker(config.repo), apply_wait.checker(config, rows)
     clear, overlapping = [], []
     for t in sorted(rows.values(), key=dispatched or claim_order.key(rows)):
         if (
@@ -775,6 +776,7 @@ def _claimable(slug, store, rows, doc, lane, dispatched=None):
             and ready(t, rows, doc, graph, fix)
             and store.claimant(slug, t["id"]) is None
             and released(t)
+            and applied(t)
         ):
             mine = t.get("territory") or []
             if any(_overlaps(mine, other) for other in held):

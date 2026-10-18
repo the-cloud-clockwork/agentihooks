@@ -199,6 +199,8 @@ EXTRA_TICKS_UNTIL = 420
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
 ONLY_MASTER_CANON = "only the master or the operator makes a learned note canon"
 ONLY_MASTER_RETIRE = "only the master or the operator retires a learned note"
+PARKED_NEXT = "stop now; the task waits on its branch"
+READ_ONLY_PARKED_NEXT = "stop now; the task waits on its dependencies and the next engineer continues it"
 CLOSE_ASK = (
     "The operator pressed Close on the ledger page. Write one short paragraph in plain words on where the work "
     'stands, then run: agentihooks swarm {slug} close --note "<your paragraph>". Close retires you too.'
@@ -1743,17 +1745,9 @@ def cmd_park(store, args):
     fields, top = stack.park(store, args.slug, agent, text, ledger)
     store.mark_restart(args.slug, agent.task, "park")
     _hand_off(store, args.slug, agent, text, "exit", ledger)
-    removed = stack.remove_worktree(top)
-    print(
-        json.dumps(
-            {
-                "task": agent.task,
-                **fields,
-                "worktree_removed": removed,
-                "next": "stop now; the task waits on its branch",
-            }
-        )
-    )
+    removed = stack.remove_worktree(top) if top else ""
+    after = PARKED_NEXT if top else READ_ONLY_PARKED_NEXT
+    print(json.dumps({"task": agent.task, **fields, "worktree_removed": removed, "next": after}))
 
 
 def cmd_ready(store, args):
