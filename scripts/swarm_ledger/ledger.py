@@ -128,7 +128,10 @@ AUTH_FAILURES = collections.Counter()
 SHOW_JSON = functools.partial(json.dumps, indent=1, ensure_ascii=False)
 OBJECT_FORMS = {
     "proof": (ledger_kinds.PROOF_KEYS, "proof.evidence=E proof.output=O"),
-    "contract": (ledger_kinds.CONTRACT_KEYS + ledger_kinds.CONTRACT_FLAGS, "contract.must=M contract.check=C"),
+    "contract": (
+        ledger_kinds.CONTRACT_KEYS + ledger_kinds.CONTRACT_TIMES + ledger_kinds.CONTRACT_FLAGS,
+        "contract.must=M contract.check=C",
+    ),
 }
 
 

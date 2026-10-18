@@ -120,7 +120,7 @@ jobs:
         if: steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python -m scripts.ci_mutation.plan --base "$BASE"
+        run: python -m scripts.ci_mutation.plan --base "$BASE" --repository "$GITHUB_REPOSITORY"
 
       - name: Upload planned mutation test selection
         if: steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'
@@ -312,6 +312,11 @@ jobs:
           pattern: mutation-stats-*
           path: .mutation-stats
           merge-multiple: true
+
+      - name: Download planned mutation test selection
+        uses: actions/download-artifact@v4
+        with:
+          name: mutation-selection
 
       - name: Refine mutation shards from measured statistics
         id: refine
