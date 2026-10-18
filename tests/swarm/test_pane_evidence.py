@@ -65,8 +65,12 @@ class Panes:
 def collect(tmp_path, panes, at=100, agents=None):
     from scripts.swarm import pane_evidence
 
+    def roster(slug):
+        assert slug == "swarm"
+        return agents if agents is not None else [agent()]
+
     rt = runtime.HerdrRuntime(home=tmp_path, herdr=panes)
-    store = SimpleNamespace(agents=lambda slug: agents if agents is not None else [agent()])
+    store = SimpleNamespace(agents=roster)
     actions = pane_evidence.sweep("swarm", store, rt, at)
     files = sorted((tmp_path / "swarm" / "pane-evidence").glob("*.json"))
     return actions, [json.loads(p.read_text()) for p in files]
@@ -103,6 +107,8 @@ def test_tick_capture_preserves_screen_and_safe_process_identity(tmp_path):
         (" \n", "working", "blank screen"),
         (None, "working", "missing screen"),
         ("bad\ufffd", "working", "invalid screen text"),
+        ("bad\x00", "working", "invalid screen text"),
+        ("\x1b[31m \x1b[0m", "working", "blank screen"),
         ("Ready", "unknown", "unknown pane state"),
         (TimeoutError("private"), "working", "screen read failed: TimeoutError"),
     ],
@@ -115,6 +121,8 @@ def test_unreadable_incident_keeps_last_healthy_screen_and_process(tmp_path, tex
     assert actions == ["pane evidence saved for engineer@abc: " + reason]
     assert any(row["at"] == 100 and row["screen_text"] == "Ready" for row in rows)
     assert any(row["at"] == 200 and row["reason"] == reason and row["process"]["shell_pid"] == 10 for row in rows)
+    if text is None or isinstance(text, Exception):
+        assert all(row["screen_ansi"] == row["screen_text"] == "" for row in rows if row["at"] == 200)
 
 
 def test_rolling_capture_stays_bounded_and_incident_survives_recovery(tmp_path):
@@ -156,9 +164,18 @@ def test_missing_pane_has_no_capture(tmp_path):
 
     actions, rows = collect(tmp_path, gone)
     assert actions == ["pane evidence saved for engineer@abc: pane lookup failed: RuntimeError"]
-    assert rows[0]["reason"] == "pane lookup failed: RuntimeError"
-    assert rows[0]["screen_text"] == ""
-    assert rows[0]["process"] == {}
+    expected = {
+        "at": 100,
+        "agent": "engineer@abc",
+        "task": "t1",
+        "pane": {"pane_id": "w4:p7K"},
+        "screen_ansi": "",
+        "screen_text": "",
+        "process": {},
+        "reason": "pane lookup failed: RuntimeError",
+        "process_error": "",
+    }
+    assert rows == [{**expected, "previous": None}, expected]
 
 
 def test_process_failure_still_saves_the_screen(tmp_path):
@@ -316,3 +333,80 @@ def test_filesystem_failure_during_budget_sorting_does_not_escape_the_sweep(tmp_
     actions, rows = collect(tmp_path, Panes())
     assert actions == ["pane evidence sweep failed: PermissionError"]
     assert rows == []
+
+
+def test_unwrapped_pane_reply_and_missing_state_are_captured(tmp_path):
+    panes = Panes()
+
+    def unwrapped(args):
+        reply = panes(args)
+        if args[:2] == ["agent", "get"]:
+            reply = reply["agent"]
+            del reply["agent_status"]
+        return reply
+
+    actions, rows = collect(tmp_path, unwrapped)
+    assert actions == ["pane evidence saved for engineer@abc: unknown pane state"]
+    assert rows[0]["pane"] == {"pane_id": "w4:p7K", "terminal_id": "term_one"}
+    assert rows[0]["screen_text"] == "Ready"
+    assert rows[0]["reason"] == "unknown pane state"
+
+
+def test_ansi_redaction_uses_strict_mode_even_when_plain_text_has_no_secret(tmp_path, monkeypatch):
+    from scripts.swarm import pane_evidence
+
+    calls = []
+
+    def redact(text, *, mode=None):
+        calls.append((text, mode))
+        return text
+
+    monkeypatch.setattr(pane_evidence, "redact", redact)
+    collect(tmp_path, Panes("\x1b[31mReady\x1b[0m"))
+    assert calls == [("Ready", "strict"), ("\x1b[31mReady\x1b[0m", "strict")]
+
+
+def test_oldest_record_is_pruned_instead_of_lexical_filename_order(tmp_path, monkeypatch):
+    import os
+
+    from scripts.swarm import pane_evidence
+
+    monkeypatch.setattr(pane_evidence, "RECORD_LIMIT", 3)
+    directory = tmp_path / "swarm" / "pane-evidence"
+    directory.mkdir(parents=True)
+    for name, stamp in [("a.json", 300), ("m.json", 200), ("z.json", 100)]:
+        path = directory / name
+        path.write_text("{}")
+        os.utime(path, ns=(stamp, stamp))
+    collect(tmp_path, Panes())
+    assert (directory / "a.json").exists()
+    assert (directory / "m.json").exists()
+    assert not (directory / "z.json").exists()
+    assert len(list(directory.glob("*.json"))) == 3
+
+
+def test_record_suffixes_keep_latest_previous_and_incident_discoverable(tmp_path):
+    panes = Panes()
+    collect(tmp_path, panes)
+    panes.text = None
+    collect(tmp_path, panes, 200)
+    names = [path.name.rsplit(".", 2)[1] for path in (tmp_path / "swarm" / "pane-evidence").glob("*.json")]
+    assert sorted(names) == ["incident", "latest", "previous"]
+
+
+def test_atomic_write_uses_the_target_filesystem_and_keeps_renamed_file(tmp_path, monkeypatch):
+    from scripts.swarm import pane_evidence
+
+    real = pane_evidence.tempfile.NamedTemporaryFile
+    seen = []
+
+    def temporary(**kwargs):
+        seen.append(kwargs)
+        return real(**kwargs)
+
+    monkeypatch.setattr(pane_evidence, "tempfile", SimpleNamespace(NamedTemporaryFile=temporary))
+    path = tmp_path / "snapshot.json"
+    pane_evidence._write(path, {"screen": "Ready"})
+    assert seen == [{"mode": "w", "dir": tmp_path, "delete": False}]
+    assert json.loads(path.read_text()) == {"screen": "Ready"}
+    assert list(tmp_path.iterdir()) == [path]

@@ -44,7 +44,7 @@ def _sweep(slug: str, store, runtime, at: int) -> list[str]:
 
 
 def _latest(directory: Path, agent) -> Path:
-    stem = hashlib.sha256(agent.name.encode()).hexdigest()[:16]
+    stem = hashlib.sha256(agent.name.encode()).hexdigest()
     return directory / f"{stem}.latest.json"
 
 
@@ -100,7 +100,7 @@ def _write(path: Path, row: dict) -> None:
     with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as stream:
         pending = Path(stream.name)
         try:
-            stream.write(json.dumps(row, ensure_ascii=False))
+            stream.write(json.dumps(row))
             stream.flush()
             pending.replace(path)
         finally:

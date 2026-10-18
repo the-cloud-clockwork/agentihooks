@@ -174,8 +174,7 @@ class Runtime(Protocol):
 def tick(slug, store, ledger, runtime, now_ms):
     config = store.ensure_code(slug)
     store.redis.delete(store.key(slug, SPAWN_HOLD))
-    actions = []
-    actions += skip_refused(pane_evidence.sweep, slug, store, runtime, now_ms)
+    actions = skip_refused(pane_evidence.sweep, slug, store, runtime, now_ms)
     if config.state != "stopped" or _woken(slug, config, store, ledger):
         actions += skip_refused(_recover_master, slug, config, store, runtime, now_ms)
     doc = freeze.watched(slug, store, ledger, timing.call(ledger.state, slug))
