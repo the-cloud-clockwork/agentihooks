@@ -177,6 +177,7 @@ def test_a_member_inbox_keeps_its_items_owners_and_marks_below_its_own_hive_key(
 
 
 def test_a_member_send_waits_in_its_own_keys_until_the_controller_relays_it(redis, swarm, monkeypatch):
+    from scripts.hive import scope
     from scripts.inbox import relay
     from scripts.inbox.store import InboxStore
 
@@ -190,7 +191,10 @@ def test_a_member_send_waits_in_its_own_keys_until_the_controller_relays_it(redi
         item = inbox.send(name, "master@fixture", "done", ref="fixture:7:note", fyi=True, task="t1")
         assert not redis.keys(f"{ROOT}:inbox:*")
 
-    assert relay.relay(redis) == [item.id]
+    with monkeypatch.context() as controller:
+        controller.setattr(scope, "member", lambda environ=None: "elsewhere")
+        controller.setattr(scope, "joined", lambda client: ["m1"])
+        assert relay.relay(redis) == [item.id]
     relayed = InboxStore(redis).get(item.id)
     assert [mail.id for mail in InboxStore(redis).open_items("master@fixture")] == [item.id]
     assert (relayed.sender, relayed.ref, relayed.fyi, relayed.task) == (name, "fixture:7:note", True, "t1")
