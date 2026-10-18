@@ -235,3 +235,22 @@ def test_a_master_keeps_only_its_last_fifteen_items(swarm, inbox, grouping):
     recent = swarm.redis.lrange(f"{pool.PREFIX}:sw:recent:{FRONT}", 0, -1)
     assert recent == [f"item {n}" for n in range(38, 8, -2)][: intent.RECENT]
     assert 0 < swarm.redis.ttl(f"{pool.PREFIX}:sw:recent:{FRONT}") <= intent.RECENT_TTL_S
+
+
+def test_the_classifier_runs_one_thread_per_ask_up_to_its_cap(swarm, inbox, grouping):
+    sizes = []
+    real = intent.ThreadPoolExecutor
+
+    def sized(workers):
+        sizes.append(workers)
+        return real(workers)
+
+    grouping.setattr(intent, "ThreadPoolExecutor", sized)
+    _decider(grouping, lambda new, recent: 0.1)
+    for seat in (FRONT, SECOND):
+        swarm.redis.rpush(f"{pool.PREFIX}:sw:recent:{seat}", "earlier work")
+    grouping.setattr(intent, "MAX_WORKERS", 1)
+    inbox.send("swarm", FRONT, "more work")
+    grouping.setattr(intent, "MAX_WORKERS", 16)
+    inbox.send("swarm", FRONT, "other work")
+    assert sizes == [1, 2]
