@@ -1189,6 +1189,23 @@ def test_a_green_pull_request_dropped_with_no_failure_of_its_own_is_queued_again
     assert found["on"] == {"kind": "merge", "target": URL}
 
 
+def test_each_accepted_requeue_adds_to_the_stored_count(merging):
+    left_queue_green(merging)
+    merging.exits.failures = []
+    found = ready.record(merging.store, "sw", "t1")
+    ready.save(merging.store, "sw", "t1", {**found, "requeues": 2})
+    assert merging.run(NOW + 120_000) == [f"queued {URL} for task t1"]
+    assert ready.record(merging.store, "sw", "t1")["requeues"] == 3
+
+
+def test_a_first_requeue_is_allowed_under_a_cap_of_one(merging, monkeypatch):
+    monkeypatch.setattr(ready, "QUEUE_TRIES", 1)
+    left_queue_green(merging)
+    merging.exits.failures = []
+    assert merging.run(NOW + 120_000) == [f"queued {URL} for task t1"]
+    assert ready.record(merging.store, "sw", "t1")["requeues"] == 1
+
+
 def test_an_own_merge_group_failure_reopens_the_task(merging):
     left_queue_green(merging)
     assert merging.run(NOW + 120_000)[0] == f"task t1 reopened, {URL} left the merge queue without merging"

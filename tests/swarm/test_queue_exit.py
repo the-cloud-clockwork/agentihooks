@@ -1,5 +1,6 @@
 import json
 import subprocess
+import time
 
 import pytest
 
@@ -34,6 +35,21 @@ def runner(*pages, total=None, code=0):
     return run
 
 
+@pytest.fixture
+def tokyo(monkeypatch):
+    monkeypatch.setenv("TZ", "Asia/Tokyo")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
+
+
+def test_the_since_bound_is_utc_whatever_the_local_zone(tokyo):
+    run = runner([])
+    assert queue_exit.own_failures(URL, SINCE, run) == []
+    assert run.calls == [["gh", "api", PATH.format(page=1)]]
+
+
 def test_cancelled_and_passed_own_runs_are_no_failure():
     run = runner([run_of(7, "cancelled"), run_of(7, "success", run_id=2), run_of(8, None, run_id=3)])
     assert queue_exit.own_failures(URL, SINCE, run) == []
@@ -43,6 +59,14 @@ def test_cancelled_and_passed_own_runs_are_no_failure():
 def test_an_own_run_still_running_holds_the_answer():
     run = runner([run_of(7, "cancelled"), run_of(7, None, run_id=3)])
     with pytest.raises(SwarmError, match="still running: https://github.com/o/r/actions/runs/3$"):
+        queue_exit.own_failures(URL, SINCE, run)
+
+
+def test_every_running_own_run_is_named():
+    run = runner([run_of(7, None, run_id=3), run_of(7, None, run_id=4)])
+    with pytest.raises(
+        SwarmError, match="still running: https://github.com/o/r/actions/runs/3, https://github.com/o/r/actions/runs/4$"
+    ):
         queue_exit.own_failures(URL, SINCE, run)
 
 
@@ -63,6 +87,13 @@ def test_every_page_is_read():
     run = runner([run_of(8, "success")] * 100, [run_of(7, "failure", run_id=2)])
     assert queue_exit.own_failures(URL, SINCE, run) == ["Tests https://github.com/o/r/actions/runs/2"]
     assert run.calls[1] == ["gh", "api", PATH.format(page=2)]
+
+
+def test_the_last_capped_page_is_read():
+    pages = [[run_of(8, "success")] * 100] * (queue_exit.PAGES - 1) + [[run_of(7, "failure", run_id=2)]]
+    run = runner(*pages)
+    assert queue_exit.own_failures(URL, SINCE, run) == ["Tests https://github.com/o/r/actions/runs/2"]
+    assert run.calls[-1] == ["gh", "api", PATH.format(page=queue_exit.PAGES)]
 
 
 def test_a_listing_that_stops_short_is_unknown():
