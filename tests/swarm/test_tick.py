@@ -98,7 +98,6 @@ class FakeLedger:
     def binned(self, slug):
         return slug in getattr(self, "bin", set())
 
-
     def closed(self, slug):
         return bool(self.state(slug).get("closed_at"))
 
