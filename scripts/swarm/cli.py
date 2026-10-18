@@ -473,6 +473,19 @@ def cmd_waits(store, args):
             list(pool.map(check, slugs))
 
 
+def _tick_slugs(store):
+    ledger = LedgerClient()
+    selected = []
+    for slug in store.slugs():
+        try:
+            if ledger.binned(slug) or ledger.closed(slug):
+                continue
+        except LedgerGone:
+            pass
+        selected.append(slug)
+    return selected
+
+
 @outage.guard_command
 def cmd_tick(store, args):
     from scripts import operator_env
@@ -487,7 +500,7 @@ def cmd_tick(store, args):
             "the tick refused to run: AGENTIHOOKS_CONTROLLER_TICK_SECONDS is for controller installs, "
             "and the host timer ticks every 60 seconds"
         )
-    slugs = store.slugs()
+    slugs = _tick_slugs(store)
     if slugs:
         _reconcile_services()
         firsts, until = _Firsts(len(slugs)), time.monotonic() + EXTRA_TICKS_UNTIL

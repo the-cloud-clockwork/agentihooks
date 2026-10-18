@@ -42,3 +42,20 @@ def test_the_host_tick_excludes_retired_ledgers_before_any_tick_pass(monkeypatch
         if excluded == "binned"
         else [("binned", "retired"), ("closed", "retired"), ("binned", "active"), ("closed", "active")]
     )
+
+
+@pytest.mark.parametrize("missing_at", ["binned", "closed"])
+def test_missing_ledgers_reach_the_existing_tick_diagnostic(monkeypatch, missing_at):
+    checked = []
+
+    def check(stage, slug):
+        assert slug == "missing"
+        checked.append(stage)
+        if stage == missing_at:
+            raise cli.LedgerGone("ledger missing does not exist")
+        return False
+
+    ledger = SimpleNamespace(binned=lambda slug: check("binned", slug), closed=lambda slug: check("closed", slug))
+    monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
+    assert cli._tick_slugs(SimpleNamespace(slugs=lambda: ["missing"])) == ["missing"]
+    assert checked == (["binned"] if missing_at == "binned" else ["binned", "closed"])
