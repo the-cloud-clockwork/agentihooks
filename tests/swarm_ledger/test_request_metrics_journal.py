@@ -168,10 +168,12 @@ def test_restore_drops_records_past_retention_and_compacts(tmp_path, monkeypatch
     assert len(path.read_text().splitlines()) == 2
 
 
-def test_persist_without_restore_writes_nothing(tmp_path, now):
+def test_persist_without_restore_writes_nothing(tmp_path, monkeypatch, now):
+    monkeypatch.chdir(tmp_path)
     request_metrics.record("POST", OPERATIONS, 1.0, 0.0, 0.0)
     request_metrics.persist(stopped=True)
-    assert list(tmp_path.iterdir()) == []
+    assert request_metrics.PENDING == []
+    assert list(tmp_path.rglob("*.jsonl*")) == []
 
 
 def test_journal_rewrites_when_appends_exceed_capacity(tmp_path, monkeypatch, now):
