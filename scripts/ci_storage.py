@@ -1,7 +1,8 @@
 """Deletes expired and superseded Actions artifacts in the owner's billed repositories.
 
-GitHub bills artifact storage only for private and internal repositories. The newest artifact of a name on a
-long lived branch or an open pull request branch is what later runs read, so it is kept at any age.
+GitHub bills artifact storage only for private and internal repositories, against one organisation limit. Later
+runs read the newest artifact of a name on a long lived or open pull request branch, from its newest run or its
+newest successful run, so both are kept at any age.
 """
 
 import argparse
@@ -82,36 +83,47 @@ def kept_branches(repo: dict) -> frozenset[str]:
     return LONG_LIVED | {repo["default_branch"]} | heads
 
 
+def passed_runs(repo: str, branches: set[str]) -> set[int]:
+    return {
+        run["id"]
+        for branch in sorted(branches)
+        for run in first_page(
+            f"repos/{repo}/actions/runs?branch={quote(branch)}&status=success&per_page=100", "workflow_runs"
+        )
+    }
+
+
 def _branch(row: dict) -> str | None:
     return (row.get("workflow_run") or {}).get("head_branch")
+
+
+def _run(row: dict) -> int | None:
+    return (row.get("workflow_run") or {}).get("id")
 
 
 def _created(row: dict) -> datetime:
     return datetime.fromisoformat(row["created_at"])
 
 
+def _size(rows) -> int:
+    return sum(row["size_in_bytes"] for row in rows if not row["expired"])
+
+
 def plan(
-    found: list[dict], branches: frozenset[str], now: datetime, keep: timedelta, floor: timedelta, limit: int
-) -> tuple[list[dict], int]:
+    found: list[dict], branches: frozenset[str], passed: set[int], now: datetime, keep: timedelta
+) -> tuple[list[dict], list[dict]]:
     live = sorted((row for row in found if not row["expired"]), key=_created)
-    newest = {
-        (row["name"], _branch(row)): row["id"]
-        for row in live
-        if _branch(row) in branches and not row["name"].endswith(BUILD_RECORD)
-    }
+    newest = {}
+    for row in live:
+        if _branch(row) in branches and not row["name"].endswith(BUILD_RECORD):
+            newest[(row["name"], _branch(row), "any")] = row["id"]
+            if _run(row) in passed:
+                newest[(row["name"], _branch(row), "passed")] = row["id"]
     kept = set(newest.values())
     free = [row for row in live if row["id"] not in kept]
     old = [row for row in free if _created(row) < now - keep]
-    total = sum(row["size_in_bytes"] for row in live) - sum(row["size_in_bytes"] for row in old)
-    over = []
-    for row in free:
-        if total <= limit or _created(row) >= now - floor:
-            break
-        if _created(row) >= now - keep:
-            over.append(row)
-            total -= row["size_in_bytes"]
-    doomed = sorted(old + over, key=lambda row: row["size_in_bytes"], reverse=True)
-    return doomed + [row for row in found if row["expired"]], total
+    young = [row for row in free if _created(row) >= now - keep]
+    return old + [row for row in found if row["expired"]], young
 
 
 def delete(repo: str, row: dict) -> bool:
@@ -127,64 +139,82 @@ def delete(repo: str, row: dict) -> bool:
     return done.returncode == 0 or "(HTTP 404)" in done.stderr
 
 
-def prune(args: argparse.Namespace, now: datetime) -> list[dict]:
-    plans = []
+def _survey(args: argparse.Namespace, now: datetime) -> tuple[dict, list[str]]:
+    plans, unread = {}, []
     for repo in billed(args.owner):
-        found = artifacts(repo["full_name"])
-        doomed, after = plan(
-            found,
-            kept_branches(repo),
-            now,
-            timedelta(hours=args.keep_hours),
-            timedelta(hours=args.floor_hours),
-            args.limit_mb * MB,
-        )
-        plans.append((repo["full_name"], found, doomed, after))
-    ranked = sorted(
-        ((name, row) for name, _, doomed, _ in plans for row in doomed),
-        key=lambda item: (item[1]["expired"], -item[1]["size_in_bytes"]),
+        name = repo["full_name"]
+        try:
+            found = artifacts(name)
+            branches = kept_branches(repo)
+            passed = passed_runs(name, branches & {_branch(row) for row in found})
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            unread.append(name)
+            continue
+        plans[name] = (found, *plan(found, branches, passed, now, timedelta(hours=args.keep_hours)))
+    return plans, unread
+
+
+def prune(args: argparse.Namespace, now: datetime) -> dict:
+    plans, unread = _survey(args, now)
+    doomed = [(name, row) for name, (_, old, _) in plans.items() for row in old]
+    total = sum(_size(found) - _size(old) for found, old, _ in plans.values())
+    ripe = sorted(
+        (
+            (name, row)
+            for name, (_, _, young) in plans.items()
+            for row in young
+            if _created(row) < now - timedelta(hours=args.floor_hours)
+        ),
+        key=lambda item: _created(item[1]),
     )
+    for name, row in ripe:
+        if total <= args.limit_mb * MB:
+            break
+        doomed.append((name, row))
+        total -= row["size_in_bytes"]
+    ranked = sorted(doomed, key=lambda item: (item[1]["expired"], -item[1]["size_in_bytes"]))
     chosen = {(name, row["id"]) for name, row in ranked[: args.budget]}
     report = []
-    for name, found, doomed, after in plans:
-        picked = [row for row in doomed if (name, row["id"]) in chosen]
+    for name, (found, _, _) in plans.items():
+        mine = [row for row_name, row in doomed if row_name == name]
+        picked = [row for row in mine if (name, row["id"]) in chosen]
         deleted = [row for row in picked if not args.apply or delete(name, row)]
-        left = sum(row["size_in_bytes"] for row in doomed if not row["expired"] and (name, row["id"]) not in chosen)
         report.append(
             {
                 "repository": name,
                 "listed": len(found),
-                "live_bytes": sum(row["size_in_bytes"] for row in found if not row["expired"]),
+                "live_bytes": _size(found),
                 "deleted": len(deleted),
-                "deleted_bytes": sum(row["size_in_bytes"] for row in deleted),
+                "deleted_bytes": _size(deleted),
                 "failed": len(picked) - len(deleted),
-                "after_bytes": after + left,
-                "pending": len(doomed) - len(picked),
+                "after_bytes": _size(found) - _size(deleted),
+                "pending": len(mine) - len(picked),
             }
         )
-    return report
+    return {"repositories": report, "unread": unread}
 
 
-def verdict(report: list[dict], limit: int) -> tuple[list[str], int]:
-    lines, status = [], 0
-    for row in report:
-        mb = row["after_bytes"] / MB
-        if row["failed"]:
-            lines.append(
-                f"::error title=Artifact deletion failed::{row['failed']} deletions failed in {row['repository']}"
-            )
-            status = 1
-        if row["after_bytes"] > limit and not row["pending"]:
-            lines.append(
-                f"::error title=Kept artifacts over the limit::{row['repository']} keeps {mb:.1f} MB that no rule may delete"
-            )
-            status = 1
-        elif row["after_bytes"] > limit:
-            lines.append(
-                f"::warning title=Pruning continues::{row['repository']} keeps {mb:.1f} MB with {row['pending']} deletions"
-                " left for the next run"
-            )
-    return lines, status
+def verdict(result: dict, limit: int) -> tuple[list[str], int]:
+    lines = [f"::error title=Artifacts not listed::{name} could not be listed" for name in result["unread"]]
+    rows = result["repositories"]
+    lines += [
+        f"::error title=Artifact deletion failed::{row['failed']} deletions failed in {row['repository']}"
+        for row in rows
+        if row["failed"]
+    ]
+    kept = sum(row["after_bytes"] for row in rows)
+    pending = sum(row["pending"] for row in rows)
+    if kept > limit and pending:
+        lines.append(
+            f"::warning title=Pruning continues::billed repositories keep {kept / MB:.1f} MB with {pending} deletions"
+            " left for the next run"
+        )
+    elif kept > limit:
+        lines.append(
+            f"::error title=Kept artifacts over the limit::billed repositories keep {kept / MB:.1f} MB that no rule may"
+            " delete"
+        )
+    return lines, int(any(line.startswith("::error") for line in lines))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -192,15 +222,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--owner", required=True)
     parser.add_argument("--keep-hours", type=float, default=24)
     parser.add_argument("--floor-hours", type=float, default=6)
-    parser.add_argument("--limit-mb", type=int, default=300)
+    parser.add_argument("--limit-mb", type=int, default=1000)
     parser.add_argument("--budget", type=int, default=1500)
     parser.add_argument("--report", type=Path, default=Path("storage-report.json"))
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args(argv)
-    report = prune(args, datetime.now(UTC))
-    args.report.write_text(json.dumps(report, indent=2) + "\n")
-    lines, status = verdict(report, args.limit_mb * MB)
-    for row in report:
+    result = prune(args, datetime.now(UTC))
+    args.report.write_text(json.dumps(result, indent=2) + "\n")
+    lines, status = verdict(result, args.limit_mb * MB)
+    for row in result["repositories"]:
         print(
             f"{row['repository']}: {row['listed']} listed, {row['live_bytes'] / MB:.1f} MB live, {row['deleted']} deleted"
             f" ({row['deleted_bytes'] / MB:.1f} MB), {row['after_bytes'] / MB:.1f} MB kept, {row['pending']} pending"
