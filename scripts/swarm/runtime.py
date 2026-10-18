@@ -34,7 +34,15 @@ from scripts.swarm import (
     remote_control,
     timing,
 )
-from scripts.swarm.pane import PaneObservation, provider_error, provider_error_id, selection_prompt, typed_input
+from scripts.swarm.pane import (
+    PaneObservation,
+    content_refusal,
+    provider_error,
+    provider_error_id,
+    refusal_input,
+    selection_prompt,
+    typed_input,
+)
 from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig, connect
 from scripts.swarm.tick import Placed, SpawnError
 from scripts.swarm_v2 import front_door
@@ -1127,6 +1135,9 @@ class HerdrRuntime:
         error = provider_error(agent.harness, text)
         error_id = provider_error_id(agent.harness, text)
         title = selection_prompt(text)
+        refusal = content_refusal(agent.harness, text)
+        if state in {"idle", "blocked"} and refusal and not refusal_input(text):
+            return PaneObservation("idle", provider_checked=True, content_refusal=refusal)
         if title or state == "blocked":
             return PaneObservation(
                 "waiting", title, provider_error=error, provider_checked=True, provider_error_id=error_id

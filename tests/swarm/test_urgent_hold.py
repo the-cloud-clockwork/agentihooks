@@ -44,6 +44,45 @@ def test_a_claimable_task_has_no_hold():
     assert hold(doc([task("a")]), "a") == ""
 
 
+def test_only_claimable_unclaimed_urgent_tasks_raise_a_finding(store):
+    from scripts.swarm.health import urgent_hold
+
+    found = doc(
+        [
+            task("dependency", state="claimed"),
+            task("waiting", rank="urgent", depends_on=["dependency"]),
+            task("phase", phase="p2", rank="urgent"),
+            task("ready", rank="urgent"),
+        ]
+    )
+    urgent_hold.observe(store, SLUG, found, 0)
+    urgent_hold.observe(store, SLUG, found, 11 * MINUTE)
+    assert [finding.id for finding in urgent_hold.findings(store, SLUG)] == ["urgent-unclaimable/ready"]
+    rows = urgent_hold.read(store, SLUG)["tasks"]
+    assert rows["waiting"]["why"] == "it waits on task dependency"
+    assert rows["phase"]["why"] == "its phase later is waiting on an earlier phase"
+
+
+def test_stacking_on_a_live_dependency_is_claimable_but_parked_work_waits(store):
+    from scripts.swarm.health import urgent_hold
+
+    found = doc(
+        [
+            task("dependency", state="claimed", branch="engineer-live"),
+            task("stackable", rank="urgent", depends_on=["dependency"]),
+            task("parked", rank="urgent", parked_on=["dependency"]),
+            task("frozen", rank="urgent"),
+        ],
+        freezes=[{"verb": "freeze", "target": "tasks/frozen"}],
+    )
+    urgent_hold.observe(store, SLUG, found, 0)
+    urgent_hold.observe(store, SLUG, found, 11 * MINUTE)
+    assert [finding.id for finding in urgent_hold.findings(store, SLUG)] == ["urgent-unclaimable/stackable"]
+    rows = urgent_hold.read(store, SLUG)["tasks"]
+    assert rows["parked"]["why"] == "it waits on task dependency"
+    assert rows["frozen"]["why"] == "the freeze on task title frozen holds it"
+
+
 def test_a_task_in_a_waiting_phase_is_held_by_its_phase():
     assert hold(doc([task("a", phase="p2")]), "a") == "its phase later is waiting on an earlier phase"
 
@@ -81,34 +120,26 @@ def test_the_tick_ready_check_agrees_with_the_hold():
     assert [t for t in rows if tick.ready(rows[t], rows, found, graph, "")] == ["a"]
 
 
-def test_an_urgent_task_held_ten_minutes_raises_a_finding_naming_the_hold(store):
+def test_an_urgent_claimable_task_unclaimed_ten_minutes_raises_a_finding(store):
     from scripts.swarm.health import urgent_hold
 
-    found = doc(
-        [
-            task("b", phase="p2"),
-            task("c", rank="urgent"),
-            task("a", phase="p2", rank="urgent"),
-            task("d", rank="urgent", depends_on=["b"]),
-        ]
-    )
+    found = doc([task("a", rank="urgent"), task("b", phase="p2", rank="urgent")])
     urgent_hold.observe(store, SLUG, found, 0)
     urgent_hold.observe(store, SLUG, found, 10 * MINUTE)
     assert urgent_hold.findings(store, SLUG) == []
     urgent_hold.observe(store, SLUG, found, 10 * MINUTE + 1)
-    finding, waiting = urgent_hold.findings(store, SLUG)
-    assert (waiting.id, waiting.evidence) == ("urgent-unclaimable/d", ("it waits on task b",))
+    (finding,) = urgent_hold.findings(store, SLUG)
     assert finding.id == "urgent-unclaimable/a"
-    assert finding.summary == "urgent task title a has been unclaimable for 10 minutes"
-    assert finding.evidence == ("its phase later is waiting on an earlier phase",)
+    assert finding.summary == "urgent task title a has been claimable but unclaimed for 10 minutes"
+    assert finding.evidence == ("it is claimable but remains unclaimed",)
     assert (finding.threshold, finding.measure) == ("ten minutes", 10)
 
 
-def test_a_recent_hold_listed_first_does_not_hide_an_older_one(store):
+def test_a_recent_task_listed_first_does_not_hide_an_older_one(store):
     from scripts.swarm.health import urgent_hold
 
-    urgent_hold.observe(store, SLUG, doc([task("a", phase="p2"), task("b", phase="p2", rank="urgent")]), 0)
-    both = doc([task("a", phase="p2", rank="urgent"), task("b", phase="p2", rank="urgent")])
+    urgent_hold.observe(store, SLUG, doc([task("a"), task("b", rank="urgent")]), 0)
+    both = doc([task("a", rank="urgent"), task("b", rank="urgent")])
     urgent_hold.observe(store, SLUG, both, 5 * MINUTE)
     urgent_hold.observe(store, SLUG, both, 11 * MINUTE)
     assert [f.id for f in urgent_hold.findings(store, SLUG)] == ["urgent-unclaimable/b"]
@@ -135,16 +166,19 @@ def test_a_dependency_missing_from_the_ledger_is_named_as_open():
     assert hold(doc([task("c", depends_on=["gone"])]), "c") == "it waits on task gone"
 
 
-def test_an_urgent_hold_clears_once_the_task_is_claimable_and_restarts_its_clock(store):
+def test_an_urgent_wait_resets_the_unclaimed_clock(store):
     from scripts.swarm.health import urgent_hold
 
+    ready = doc([task("a", rank="urgent")])
     held = doc([task("a", phase="p2", rank="urgent")])
-    urgent_hold.observe(store, SLUG, held, 0)
-    urgent_hold.observe(store, SLUG, doc([task("a", rank="urgent")]), 5 * MINUTE)
-    urgent_hold.observe(store, SLUG, held, 6 * MINUTE)
-    urgent_hold.observe(store, SLUG, held, 16 * MINUTE)
+    urgent_hold.observe(store, SLUG, ready, 0)
+    urgent_hold.observe(store, SLUG, held, 5 * MINUTE)
+    urgent_hold.observe(store, SLUG, held, 60 * MINUTE)
     assert urgent_hold.findings(store, SLUG) == []
-    urgent_hold.observe(store, SLUG, held, 16 * MINUTE + 1)
+    urgent_hold.observe(store, SLUG, ready, 61 * MINUTE)
+    urgent_hold.observe(store, SLUG, ready, 71 * MINUTE)
+    assert urgent_hold.findings(store, SLUG) == []
+    urgent_hold.observe(store, SLUG, ready, 71 * MINUTE + 1)
     assert [f.id for f in urgent_hold.findings(store, SLUG)] == ["urgent-unclaimable/a"]
 
 
@@ -155,7 +189,7 @@ def test_a_claimed_or_out_of_scope_urgent_task_is_never_reported(store):
         [
             task("a", phase="p2", rank="urgent", state="claimed"),
             task("b", phase="p2", rank="urgent", out_of_scope=True),
-            task("c", phase="p2", rank="urgent", merged_into="d"),
+            task("c", rank="urgent", merged_into="d"),
         ]
     )
     urgent_hold.observe(store, SLUG, found, 0)
@@ -183,7 +217,7 @@ def test_swarm_status_reports_the_urgent_hold(store):
     from scripts.swarm import status
     from scripts.swarm.health import urgent_hold
 
-    found = doc([task("a", phase="p2", rank="urgent")])
+    found = doc([task("a", rank="urgent")])
     urgent_hold.observe(store, SLUG, found, 0)
     urgent_hold.observe(store, SLUG, found, 11 * MINUTE)
     rows = status.findings(store, SLUG, store.config(SLUG), found["tasks"], [])
@@ -221,11 +255,11 @@ def test_an_urgent_refusal_reads_a_task_without_a_state_as_open():
 def test_an_untitled_urgent_task_is_named_by_its_id(store):
     from scripts.swarm.health import urgent_hold
 
-    found = doc([{"id": "a", "phase": "p2", "state": "open", "rank": "urgent"}])
+    found = doc([{"id": "a", "phase": "p1", "state": "open", "rank": "urgent"}])
     urgent_hold.observe(store, SLUG, found, 0)
     urgent_hold.observe(store, SLUG, found, 12 * MINUTE)
     (finding,) = urgent_hold.findings(store, SLUG)
-    assert finding.summary == "urgent task a has been unclaimable for 12 minutes"
+    assert finding.summary == "urgent task a has been claimable but unclaimed for 12 minutes"
 
 
 def test_an_urgent_task_waiting_on_a_release_is_reported(store, monkeypatch):
@@ -238,7 +272,7 @@ def test_an_urgent_task_waiting_on_a_release_is_reported(store, monkeypatch):
     urgent_hold.observe(store, SLUG, found, 0)
     urgent_hold.observe(store, SLUG, found, 11 * MINUTE)
     assert [(f.id, f.evidence) for f in urgent_hold.findings(store, SLUG)] == [
-        ("urgent-unclaimable/a", ("it waits on a release newer than v1.2.3",))
+        ("urgent-unclaimable/b", ("it is claimable but remains unclaimed",))
     ]
 
 
@@ -281,4 +315,4 @@ def test_the_tick_hands_an_urgent_hold_past_ten_minutes_to_the_findings_pass(env
     clock[0] += 600_001
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
     assert "urgent-unclaimable/t1" not in shown[0]
-    assert "urgent-unclaimable/t1" in shown[-1]
+    assert "urgent-unclaimable/t1" not in shown[-1]
