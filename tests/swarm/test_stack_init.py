@@ -19,6 +19,7 @@ HEALTHY = [
 ]
 STACK_FILES = [
     "compose.yaml",
+    "deploy/compose/adopt.yaml",
     "deploy/compose/redis/healthcheck.sh",
     "deploy/compose/redis/start.sh",
     "deploy/compose/redis/users.acl.template",
@@ -99,6 +100,12 @@ def compose(home, *args):
     ]
 
 
+def adopted(home, *args):
+    argv = compose(home, *args)
+    at = argv.index("--env-file")
+    return [*argv[:at], "--file", str(stack(home) / "deploy" / "compose" / "adopt.yaml"), *argv[at:]]
+
+
 def up(home, timeout):
     return compose(home, "up", "--detach", "--no-build", "--wait", "--wait-timeout", timeout)
 
@@ -150,6 +157,71 @@ def test_a_second_run_keeps_the_password_ports_and_edits(home, monkeypatch):
     assert "  1. Open the ledger: http://127.0.0.1:9100/\n" in out
     assert (stack(home) / "client.env").read_text().splitlines()[1] == "LEDGER_URL=http://127.0.0.1:9100"
     assert docker.calls[2] == up(home, "42")
+
+
+ADOPTED = {
+    "SWARM_ADOPT_LEDGER_DIR": "/srv/ledger",
+    "SWARM_ADOPT_HOME": "/home/op",
+    "SWARM_ADOPT_UID": "1234",
+    "SWARM_ADOPT_GID": "5678",
+    "SWARM_PORT": "8765",
+}
+
+
+def test_adopt_records_the_ledger_folder_user_home_and_port_and_keeps_them(home, monkeypatch):
+    monkeypatch.setattr(stack_init.Path, "home", lambda: Path("/home/op"))
+    monkeypatch.setattr(stack_init.os, "getuid", lambda: 1234)
+    monkeypatch.setattr(stack_init.os, "getgid", lambda: 5678)
+    init(home, Docker())
+    docker = Docker()
+    environ = {"AGENTIHOOKS_HOME": str(home), "LEDGER_DIR": "/srv/ledger"}
+    code, out = init(home, docker, ["--adopt"], environ=environ)
+    env = stack(home) / ".env"
+    values = stack_env.read_env(env)
+    assert code == 0
+    assert {key: values[key] for key in ADOPTED} == ADOPTED
+    assert values["SWARM_REDIS_PASSWORD"] == PASSWORD
+    assert values["SWARM_REDIS_PORT"] == "6380"
+    assert stat.S_IMODE(env.stat().st_mode) == 0o600
+    assert docker.calls[2:] == [
+        adopted(home, "up", "--detach", "--no-build", "--wait", "--wait-timeout", "300"),
+        adopted(home, "ps", "--all", "--format", "json"),
+    ]
+    assert "  1. Open the ledger: http://127.0.0.1:8765/\n" in out
+    again = Docker()
+    assert init(home, again, environ={"AGENTIHOOKS_HOME": str(home), "LEDGER_DIR": "/other"})[0] == 0
+    assert again.calls[2] == adopted(home, "up", "--detach", "--no-build", "--wait", "--wait-timeout", "300")
+    assert {key: stack_env.read_env(env)[key] for key in ADOPTED} == ADOPTED
+
+
+def test_adopt_defaults_to_the_shared_ledger_folder_in_the_home(home, monkeypatch):
+    monkeypatch.setattr(stack_init.Path, "home", lambda: Path("/home/op"))
+    code, _ = init(home, Docker(), ["--adopt"])
+    assert code == 0
+    values = stack_env.read_env(stack(home) / ".env")
+    assert values["SWARM_ADOPT_LEDGER_DIR"] == "/home/op/development-ledger"
+    assert values["SWARM_ADOPT_HOME"] == "/home/op"
+
+
+def test_the_adoption_override_serves_the_host_folder_as_the_host_user():
+    text = (stack_init.BUNDLED / "deploy" / "compose" / "adopt.yaml").read_text()
+    swarm = stack_init_yaml(text)["services"]["swarm"]
+    assert (
+        swarm["user"]
+        == "${SWARM_ADOPT_UID:?run agentihooks swarm init --adopt}:${SWARM_ADOPT_GID:?run agentihooks swarm init --adopt}"
+    )
+    assert swarm["pid"] == "host"
+    assert swarm["environment"] == {"HOME": "${SWARM_ADOPT_HOME}", "LEDGER_DIR": "${SWARM_ADOPT_LEDGER_DIR}"}
+    assert swarm["volumes"] == [
+        "${SWARM_ADOPT_LEDGER_DIR}:${SWARM_ADOPT_LEDGER_DIR}",
+        "${SWARM_ADOPT_HOME}/.agentihooks:${SWARM_ADOPT_HOME}/.agentihooks",
+    ]
+
+
+def stack_init_yaml(text):
+    import yaml
+
+    return yaml.safe_load(text)
 
 
 def test_stack_folder_defaults_to_the_agentihooks_home(monkeypatch, tmp_path):
@@ -324,9 +396,11 @@ def test_help_names_the_command_and_its_timeout():
     text = " ".join(stack_init.parser().format_help().split())
     description = " ".join(stack_init.__doc__.split())
     assert text == (
-        f"usage: agentihooks swarm init [-h] [--timeout TIMEOUT] {description} options: "
+        f"usage: agentihooks swarm init [-h] [--timeout TIMEOUT] [--adopt] {description} options: "
         "-h, --help show this help message and exit "
-        "--timeout TIMEOUT seconds to wait for every service to be healthy"
+        "--timeout TIMEOUT seconds to wait for every service to be healthy "
+        "--adopt serve the existing shared ledger folder as this user from the stack, on the default ledger port, "
+        "and keep doing so on every later run"
     )
 
 

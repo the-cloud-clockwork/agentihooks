@@ -1,0 +1,13 @@
+services:
+  swarm:
+    user: ${SWARM_ADOPT_UID:?run agentihooks swarm init --adopt}:${SWARM_ADOPT_GID:?run agentihooks swarm init --adopt}
+    pid: host
+    environment:
+      HOME: ${SWARM_ADOPT_HOME}
+      LEDGER_DIR: ${SWARM_ADOPT_LEDGER_DIR}
+    volumes:
+      - ${SWARM_ADOPT_LEDGER_DIR}:${SWARM_ADOPT_LEDGER_DIR}
+      - ${SWARM_ADOPT_HOME}/.agentihooks:${SWARM_ADOPT_HOME}/.agentihooks
+  redis:
+    environment:
+      SWARM_REDIS_ADOPTED: "1"

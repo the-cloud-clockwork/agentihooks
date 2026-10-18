@@ -15,11 +15,13 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TextIO
 
-from scripts.swarm.stack_env import BIND, client_env, settings, write_private
+from scripts.swarm.stack_env import BIND, client_env, read_env, settings, write_private
 
 PROJECT = "agentihooks-swarm"
 BUNDLED = Path(__file__).with_name("stack")
 SERVICES = ("redis", "swarm", "controller")
+ADOPTION = "deploy/compose/adopt.yaml"
+LEDGER_PORT = 8765
 AGAIN = "then run agentihooks swarm init again"
 LOGS = f"docker compose --project-name {PROJECT} logs"
 OUTPUT_LINES = 10
@@ -52,6 +54,12 @@ Paint = Callable[[str, str], str]
 def parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agentihooks swarm init", description=__doc__)
     parser.add_argument("--timeout", type=int, default=300, help="seconds to wait for every service to be healthy")
+    parser.add_argument(
+        "--adopt",
+        action="store_true",
+        help="serve the existing shared ledger folder as this user from the stack, on the default ledger port, "
+        "and keep doing so on every later run",
+    )
     return parser
 
 
@@ -83,7 +91,24 @@ def materialize(home: Path) -> None:
     (home / "deploy" / "compose" / "tls").mkdir(exist_ok=True)
 
 
+def adopt(env_file: Path, environ: Mapping[str, str]) -> None:
+    values = read_env(env_file)
+    values.update(
+        {
+            "SWARM_ADOPT_LEDGER_DIR": str(
+                Path(environ.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser()
+            ),
+            "SWARM_ADOPT_HOME": str(Path.home()),
+            "SWARM_ADOPT_UID": str(os.getuid()),
+            "SWARM_ADOPT_GID": str(os.getgid()),
+            "SWARM_PORT": str(LEDGER_PORT),
+        }
+    )
+    write_private(env_file, "".join(f"{key}={value}\n" for key, value in values.items()))
+
+
 def compose(home: Path, *args: str) -> list[str]:
+    adoption = ["--file", str(home / ADOPTION)] if read_env(home / ".env").get("SWARM_ADOPT_LEDGER_DIR") else []
     return [
         "docker",
         "compose",
@@ -93,6 +118,7 @@ def compose(home: Path, *args: str) -> list[str]:
         str(home),
         "--file",
         str(home / "compose.yaml"),
+        *adoption,
         "--env-file",
         str(home / ".env"),
         *args,
@@ -167,6 +193,8 @@ def init(argv: list[str], environ: Mapping[str, str], run: Run, opener: Callable
         return 1
     home = stack_home(environ)
     materialize(home)
+    if args.adopt:
+        adopt(home / ".env", environ)
     values = settings(home / ".env")
     write_private(home / "client.env", client_env(values, home))
     if sick := start(run, home, args.timeout, out):
