@@ -105,6 +105,37 @@ def test_media_folder_glob_and_search_refused(ledger):
     assert check({"tool_name": "Grep", "tool_input": {"pattern": "x", "path": f"{ledger}/{SLUG}.media"}}, env(ledger))
 
 
+def test_named_migration_inventory_and_copy_pass_without_allowing_other_reads(ledger):
+    module = "scripts.swarm_ledger.storage_migration.hosted"
+    commands = [
+        f"python -m {module} --source {ledger}",
+        f"/venv/bin/python -m {module} --source {ledger} --url https://hosted.example --freeze",
+        f"python -m {module} --source {ledger} > /home/x/scratch/inventory.jsonl",
+    ]
+    for command in commands:
+        assert check(bash(command), env(ledger)) is None
+    assert check(bash(f"cat {ledger}/{SLUG}.media/*.md"), env(ledger))
+    assert check(bash(f"python -m {module} --source {ledger}; cat {stored(ledger)}"), env(ledger))
+    assert check(bash(f"python -c 'print(1)' -m {module} --source {ledger}"), env(ledger))
+
+
+def test_migration_flags_and_redirects_preserve_guard_operands(ledger):
+    module = "scripts.swarm_ledger.storage_migration.hosted"
+    for redirect in (">", ">>"):
+        assert check(bash(f"python -m {module} --source {ledger} {redirect} {stored(ledger)}"), env(ledger))
+    valid = f"python3 -m {module} --freeze --slug demo --source {ledger} --url https://hosted.example >> /home/x/scratch/proof.jsonl"
+    assert check(bash(valid), env(ledger)) is None
+    for ending in ("--slug", "--unknown value", "unexpected value", "> one two", "--source"):
+        assert check(bash(f"python -m {module} --source {ledger} {ending}"), env(ledger))
+
+
+def test_migration_flag_cannot_be_mistaken_for_the_configured_store(ledger):
+    folder = ledger / "--source"
+    put(folder, SLUG, {"artifacts": [{"file": {"id": PLAN}, "plan": True}]})
+    command = "python -m scripts.swarm_ledger.storage_migration.hosted --source /home/x/source"
+    assert check(bash(command), env(folder)) is None
+
+
 def test_grep_and_fetch_of_plan_refused(ledger):
     assert check({"tool_name": "Grep", "tool_input": {"pattern": "x", "path": stored(ledger)}}, env(ledger))
     url = f"http://127.0.0.1:8765/artifacts/{SLUG}/{PLAN}"

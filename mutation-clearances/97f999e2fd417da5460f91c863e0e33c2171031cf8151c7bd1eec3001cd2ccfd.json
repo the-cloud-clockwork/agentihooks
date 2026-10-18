@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/storage_migration/hosted.py:scripts.swarm_ledger.storage_migration.hosted.x_route__mutmut_33:e9e7fa84d6877caa3169270b1ed5c44831aed91ffa50e79da24603d12b13abfe": {
+    "reader": "Standards",
+    "reason": "An absent server key becomes None rather than empty string; authorize still returns False and the same forbidden envelope."
+  }
+}
