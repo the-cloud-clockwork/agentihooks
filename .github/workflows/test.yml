@@ -31,6 +31,9 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  UV_CONSTRAINT: ${{ github.workspace }}/.github/test-constraints.txt
+
 jobs:
   promote:
     needs: [gate-required, refresh-durations, coverage-baseline, flake-budget, sonar]
@@ -615,7 +618,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/venv
-          key: venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ steps.day.outputs.date }}-${{ hashFiles('pyproject.toml', '.github/test-excludes.txt') }}
+          key: venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ steps.day.outputs.date }}-${{ hashFiles('pyproject.toml', '.github/test-excludes.txt') }}-${{ hashFiles('.github/test-constraints.txt') }}
 
       - &uv
         name: Set up uv
@@ -763,7 +766,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/venv
-          key: venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ steps.day.outputs.date }}-${{ hashFiles('pyproject.toml', '.github/test-excludes.txt') }}
+          key: venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ steps.day.outputs.date }}-${{ hashFiles('pyproject.toml', '.github/test-excludes.txt') }}-${{ hashFiles('.github/test-constraints.txt') }}
 
       - name: Set up uv
         if: github.event_name == 'push' && env.UNIT_SOURCE == '' && steps.venv.outputs.cache-hit != 'true'
@@ -1081,9 +1084,15 @@ jobs:
 
       # Page tests drive Chromium; the coverage shards run them so the page JavaScript they reach is measured.
       - name: Install the browser that page tests drive
-        if: needs.split.outputs.source == '' && matrix.python-version == '3.12'
+        if: needs.split.outputs.source == '' && matrix.python-version == '3.12' && github.event_name != 'merge_group'
         timeout-minutes: 6
         uses: ./.github/actions/browser-cache
+
+      - name: Verify the runner browser for queue tests
+        if: needs.split.outputs.source == '' && matrix.python-version == '3.12' && github.event_name == 'merge_group'
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
+        run: bash .github/actions/browser-cache/use-image.sh
 
       # NOT `-m unit`: only 439 of 999 tests carry that marker, so 560 —
       # including every ownership-scope test guarding what uninstall and prune
