@@ -317,6 +317,28 @@ def test_a_dead_master_still_in_the_registry_is_the_last_master(up):
     assert master_launch.last_master(store, "sw").name == "master@a1b2c3-0009"
 
 
+def test_a_master_launched_later_is_the_last_master_even_when_an_older_one_ended_after_its_launch(up):
+    store, _, _ = up
+    gone_master(store, ended=ENDED + 10)
+    record = AgentRecord(
+        "master@a1b2c3-0009", MASTER, MASTER, harness="claude", conversation_id="c9", started_at=ENDED + 5
+    )
+    store.put_agent("sw", record)
+    assert master_launch.last_master(store, "sw").name == "master@a1b2c3-0009"
+
+
+def test_a_new_master_records_its_launch_on_its_own_record_not_a_stale_seat_execution(up, monkeypatch):
+    store, _, rt = up
+    stale = AgentRecord(store.next_name("sw", MASTER, 5), MASTER, MASTER, seat="master@sw", started_at=5)
+    store.start_execution("sw", stale)
+    answers(monkeypatch)
+    assert run("sw", "master", "up", "--new") == 0
+    [(name, _)] = rt.masters
+    found = {a.name: a for a in masters(store)}
+    assert (found[name].pane_id, found[name].state) == ("w1:m1", "working")
+    assert found[stale.name].pane_id == ""
+
+
 def test_a_live_master_present_does_not_stop_a_new_master_and_both_stay_seated(up, monkeypatch):
     store, _, rt = up
     live = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, harness="claude", seat="master@sw", started_at=5)
@@ -354,7 +376,7 @@ def test_an_incomplete_saved_assignment_keeps_what_it_has_and_fills_the_rest(up,
         "profile": "master",
         "harness": "codex",
         "model": "gpt-6.1-sol",
-        "effort": "medium",
+        "effort": "high",
         "account": "acct-3",
     }
 
@@ -532,6 +554,20 @@ def test_fill_keeps_a_saved_harness_and_picks_its_frontier_model():
 def test_fill_leaves_a_saved_launch_on_an_unknown_harness_unclamped():
     saved = {"harness": "copilot", "model": "gpt-x", "effort": "max"}
     assert master_launch.fill(saved, SwarmConfig("sw", "/repo", 0, 0)) == {"profile": "master", **saved}
+
+
+@pytest.mark.parametrize("bounds", [("medium", "xhigh"), ("low", "medium")])
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+@pytest.mark.parametrize("saved", ["", "low", "medium"])
+def test_fill_never_leaves_a_master_launch_below_high_whatever_the_saved_launch_or_range_says(harness, bounds, saved):
+    config = SwarmConfig("sw", "/repo", 0, 0, effort_min=bounds[0], effort_max=bounds[1])
+    assert master_launch.fill({"harness": harness, "effort": saved}, config)["effort"] == "high"
+
+
+@pytest.mark.parametrize("bounds,launched", [(("medium", "xhigh"), "xhigh"), (("medium", "max"), "max")])
+def test_fill_keeps_a_saved_master_effort_above_high_inside_the_swarm_range(bounds, launched):
+    config = SwarmConfig("sw", "/repo", 0, 0, effort_min=bounds[0], effort_max=bounds[1])
+    assert master_launch.fill({"harness": "claude", "effort": "max"}, config)["effort"] == launched
 
 
 def test_a_master_saved_on_an_unknown_harness_is_refused_cleanly(tmp_path):

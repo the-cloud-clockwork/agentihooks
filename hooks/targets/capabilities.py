@@ -61,6 +61,9 @@ _REWRITE_TARGETS = frozenset({"claude"})
 # Codex accepts deny only; copilot's command transport ignores stdout decisions.
 _ALLOW_ASK_TARGETS = frozenset({"claude"})
 
+# Targets whose hook payload cwd is the shell's working directory.
+_SHELL_CWD_TARGETS = frozenset({"claude"})
+
 
 def can_inject_context(event: str, target: str | None = None) -> bool:
     target = target or current_target()
@@ -94,15 +97,15 @@ def honors_allow_ask(target: str | None = None) -> bool:
     return (target or current_target()) in _ALLOW_ASK_TARGETS
 
 
+def reports_shell_cwd(target: str | None = None) -> bool:
+    return (target or current_target()) in _SHELL_CWD_TARGETS
+
+
 # How each host says the operator accepted a plan. Claude and Copilot run their
 # plan-exit tool only once the operator approves; Codex 0.160 has no such tool,
 # and its "Yes, implement this plan" choice submits this prompt (captured live).
 _PLAN_ACCEPT_TOOLS = {"claude": frozenset({"ExitPlanMode"}), "copilot": frozenset({"exit_plan_mode"})}
 _PLAN_ACCEPT_PROMPTS = {"codex": frozenset({"Implement the plan."})}
-
-# The host's own task list: a tool that rewrites the whole list, or one that adds one task per call.
-_TASK_LIST_TOOLS = {"claude": frozenset({"TodoWrite"})}
-_TASK_ADD_TOOLS = {"claude": frozenset({"TaskCreate"})}
 
 
 def plan_accept_tools(target: str | None = None) -> frozenset[str]:
@@ -111,14 +114,6 @@ def plan_accept_tools(target: str | None = None) -> frozenset[str]:
 
 def plan_accept_prompts(target: str | None = None) -> frozenset[str]:
     return _PLAN_ACCEPT_PROMPTS.get(target or current_target(), frozenset())
-
-
-def task_list_tools(target: str | None = None) -> frozenset[str]:
-    return _TASK_LIST_TOOLS.get(target or current_target(), frozenset())
-
-
-def task_add_tools(target: str | None = None) -> frozenset[str]:
-    return _TASK_ADD_TOOLS.get(target or current_target(), frozenset())
 
 
 # Events where a stdout decision envelope is meaningful. Emitting one on,

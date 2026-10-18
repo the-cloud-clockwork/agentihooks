@@ -50,7 +50,7 @@ def test_memory_rejects_credentials_before_storage_and_replay(tmp_path, field):
     entry = {"ts": "2026-10-09", "tool": "Bash", "error": "Error: unavailable", "input": "", "session": ""}
     entry[field] = "redis://:" + credential + "@localhost:6379"
     memory = tmp_path / "memory.ndjson"
-    with patch.object(tool_memory, "MEMORY_PATH", memory), patch("hooks.common.inject_banner") as banner:
+    with patch.object(tool_memory, "MEMORY_PATH", memory), patch("hooks.common.inject_context") as banner:
         tool_memory._append_entry(entry)
         assert not memory.exists(), "credential entry was stored"
         tool_memory._append_entries([entry])
@@ -68,7 +68,7 @@ def test_legacy_credentials_never_replay(tmp_path, field):
     entry[field] = "redis://:" + "synthetic" + "-credential@localhost:6379"
     memory = tmp_path / "memory.ndjson"
     memory.write_text(json.dumps(entry) + "\n")
-    with patch.object(tool_memory, "MEMORY_PATH", memory), patch("hooks.common.inject_banner") as banner:
+    with patch.object(tool_memory, "MEMORY_PATH", memory), patch("hooks.common.inject_context") as banner:
         tool_memory.inject_memory()
         banner.assert_not_called()
 
@@ -95,7 +95,7 @@ def test_memory_drops_short_assignments_and_connection_aliases(tmp_path, text):
         )
         assert not memory.exists(), "credential error was stored"
     memory.write_text(json.dumps({"tool": "Bash", "error": text}) + "\n")
-    with patch.object(tool_memory, "MEMORY_PATH", memory), patch("hooks.common.inject_banner") as banner:
+    with patch.object(tool_memory, "MEMORY_PATH", memory), patch("hooks.common.inject_context") as banner:
         tool_memory.inject_memory()
         banner.assert_not_called()
 
@@ -157,10 +157,10 @@ def test_safe_entries_survive_contaminated_batch_and_rotation(tmp_path):
         assert memory.read_text().splitlines() == [json.dumps(safe, separators=(",", ":"))]
         tool_memory._append_entry(safe)
         assert memory.read_text().splitlines() == [json.dumps(safe, separators=(",", ":"))]
-        with patch("hooks.common.inject_banner") as banner:
+        with patch("hooks.common.inject_context") as banner:
             tool_memory.inject_memory()
         assert banner.call_count == 1
-        assert "safe guidance" in banner.call_args.args[1]
+        assert "safe guidance" in banner.call_args.args[0]
 
 
 @pytest.mark.parametrize(
@@ -201,7 +201,7 @@ def test_memory_scans_nested_keys_and_multiline_values(tmp_path, entry):
     from hooks import tool_memory
 
     memory = tmp_path / "memory.ndjson"
-    with patch.object(tool_memory, "MEMORY_PATH", memory), patch("hooks.common.inject_banner") as banner:
+    with patch.object(tool_memory, "MEMORY_PATH", memory), patch("hooks.common.inject_context") as banner:
         tool_memory._append_entry(entry)
         assert not memory.exists(), "nested credential entry was stored"
         memory.write_text(json.dumps(entry) + "\n")
@@ -254,7 +254,7 @@ def test_memory_drops_scalar_credential_fields(tmp_path, value):
 
     entry = {"tool": "Bash", "error": "Error: unavailable", "metadata": {"PASSWORD": value}}
     memory = tmp_path / "memory.ndjson"
-    with patch.object(tool_memory, "MEMORY_PATH", memory), patch("hooks.common.inject_banner") as banner:
+    with patch.object(tool_memory, "MEMORY_PATH", memory), patch("hooks.common.inject_context") as banner:
         tool_memory._append_entry(entry)
         assert not memory.exists(), "scalar credential field was stored"
         memory.write_text(json.dumps(entry) + "\n")
@@ -277,7 +277,7 @@ def test_memory_rejects_multiline_bearer_credentials(tmp_path):
 
     entry = {"tool": "Bash", "error": "Error: Bearer\n" + "a" * 24}
     memory = tmp_path / "memory.ndjson"
-    with patch.object(tool_memory, "MEMORY_PATH", memory), patch("hooks.common.inject_banner") as banner:
+    with patch.object(tool_memory, "MEMORY_PATH", memory), patch("hooks.common.inject_context") as banner:
         tool_memory._append_entry(entry)
         assert not memory.exists(), "multiline credential entry was stored"
         memory.write_text(json.dumps(entry) + "\n")

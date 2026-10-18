@@ -535,7 +535,7 @@ def test_successful_herdr_command_without_json_output_is_accepted(tmp_path, monk
     monkeypatch.setattr(
         subprocess, "run", lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout=b"", stderr=b"")
     )
-    assert supervisor.herdr(["pane", "run", "fixture", "true"]) == {}
+    assert supervisor.herdr(["pane", "run", "fixture", "true"], time.monotonic() + 5) == {}
 
 
 class LapsingLease:

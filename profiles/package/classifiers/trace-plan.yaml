@@ -6,9 +6,20 @@ questions:
     type: yesno
     each: pieces
     key: "piece_{item[slot]}"
-    instructions: "Is piece {item[number]}, {item[what]}, needed to deliver the task?"
+    instructions: >-
+      Is piece {item[number]}, {item[what]}, needed to deliver the task?
+      Registering a CI job added by the task in the runner class table is required
+      to deliver that job, even when the task does not name the table.
+      Unrelated workflow edits remain out of scope.
     "true": the task needs it
     "false": it serves something else
+  - name: covers
+    type: yesno
+    each: covers
+    key: "covers_{item[slot]}_{item[grant]}"
+    instructions: "Does scope authorization {item[id]}, recorded on the task by its master or operator, cover piece {item[number]}, {item[what]}?"
+    "true": the authorization covers it
+    "false": it authorizes something else
   - name: size
     type: score
     each: sized
@@ -23,6 +34,7 @@ questions:
       - a whole phase
 thresholds:
   off_intent: 0.3
+  covered: 0.7
   too_big_confidence: 0.7
 rule:
   type: code

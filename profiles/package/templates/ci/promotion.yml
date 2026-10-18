@@ -1,0 +1,70 @@
+name: Promotion
+
+on:
+  push:
+    branches: [dev]
+
+concurrency:
+  group: promotion-dev
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Promotion checks
+    runs-on: ${{ vars.CI_RUNNER_LABEL || 'ubuntu-latest' }}
+    env:
+      DELIVERY_TIER: promotion
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install PyYAML==6.0.2
+      - name: Run delivery checks
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          import subprocess
+          from pathlib import Path
+          import yaml
+          commands = yaml.safe_load(Path('delivery.yaml').read_text())[os.environ['DELIVERY_TIER']]
+          for command in commands:
+              subprocess.run(['bash', '-euo', 'pipefail', '-c', command], check=True)
+          PY
+  promote:
+    needs: checks
+    environment: promotion
+    runs-on: ${{ vars.CI_RUNNER_LABEL || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install PyYAML==6.0.2
+      - uses: actions/create-github-app-token@v2
+        id: app
+        with:
+          app-id: ${{ vars.PROMOTION_APP_ID }}
+          private-key: ${{ secrets.PROMOTION_APP_PRIVATE_KEY }}
+      - name: Promote the graded revision
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          import subprocess
+          from pathlib import Path
+          import yaml
+          commands = yaml.safe_load(Path('delivery.yaml').read_text())['promote']
+          for command in commands:
+              subprocess.run(['bash', '-euo', 'pipefail', '-c', command], check=True)
+          PY

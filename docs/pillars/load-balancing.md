@@ -255,8 +255,8 @@ records its actor and time in the store's history.
 |---|---|---|---|
 | `claude-api-weight`, `codex-api-weight` | integer 0 to 100 | `0` | Live share of the api side |
 | `claude-api-max-sessions`, `codex-api-max-sessions` | integer 0 or more | unset (unbounded) | Session cap of the api slot; `0` closes the api side to placement (a forced `--route api` still launches) |
-| `master-account-claude`, `master-account-codex` | account name | unset | Account declared for swarm masters; stored and validated, read by no launch path yet |
-| `master-tier-claude`, `master-tier-codex` | tier name | unset | Tier declared for swarm masters; stored and validated, read by no launch path yet |
+| `master-account-claude`, `master-account-codex` | account name | unset | Account declared for swarm masters, used for interactive routing and worker reservation |
+| `master-tier-claude`, `master-tier-codex` | tier name | unset | Display label for the declared master account |
 
 ```bash
 agentihooks balance settings                     # every key with its value and the store in use
@@ -270,6 +270,56 @@ one `key: before -> after` line per key, and exits 2 on an unknown key or an
 invalid value. The actor is `AGENTIHOOKS_AGENT_NAME`, else `operator`.
 `agentihooks balance` and `agentihooks quota` show each row's `KIND`, `WEIGHT`
 and `CAP`; an api row shows `n/a` for its quota windows.
+
+## Master accounts and reserved headroom
+
+Declare the account the operator uses for masters separately from worker
+placement. The declaration stores account names and optional tier labels, never
+credentials:
+
+```bash
+agentihooks balance master-account claude=<slug> tier=Max
+agentihooks balance master-account codex=default tier=Pro
+agentihooks balance settings
+agentihooks balance master-account --clear claude
+```
+
+Each `tier=` follows the account it labels. Codex accepts `default` for its
+native login or a slug with a matching `AH_CX_TOKEN_<slug>` variable. A Claude
+declaration may name an interactive login with no worker token. Declarations
+appear as `MASTER <tier>` in account reports. Clearing one harness leaves the
+other declaration in place; `--clear` without a harness clears both. These
+commands declare an identity; sign in separately using the
+[master login procedure](../reference/account-login.md#master-claude-ai-login).
+
+The declared account keeps weekly headroom according to how many masters are
+live on it, across swarms. The 70/60/50 rule is a ceiling on **weekly quota
+used**, not the percentage left and not a session cap:
+
+| Live masters on the declared account | Worker ceiling: week used | Headroom left at the ceiling |
+|---|---|---|
+| 0 | No master reservation | Normal quota rules apply |
+| 1 | 70% | 30% |
+| 2 | 60% | 40% |
+| 3 or more | 50% | 50% |
+
+At or above the ceiling, new workers and worker quota handoffs cannot select
+that account. A running worker's quota policy uses the same ceiling. Masters
+are exempt from the worker reservation; their normal account eligibility and
+quota limits still apply. Other accounts keep their normal routing rules, and
+workers can use their tokens or the configured API capacity.
+
+For example, with one master and 65% of its account's week used, workers may
+still use that account. A second master lowers the ceiling to 60%, so the same
+65% reading now closes it to workers. With three masters, workers stop selecting
+it at 50% used. When the count drops, the next reservation reading uses the
+corresponding ceiling; with no live master the reservation disappears.
+
+The account report includes the reason, for example
+`reserved for 2 live masters: workers stop at 60% of the week`. Use
+`agentihooks balance` and `agentihooks quota` to inspect the declaration and
+reservation. See [Interactive masters and Remote Control](swarm.md#interactive-masters-and-remote-control)
+for launch authentication, fallback and phone access.
 
 ## Skill evaluations
 
@@ -356,6 +406,84 @@ waits or stops.
 
 A window whose reset time has passed counts as empty, so a waiting session is
 released by the reset itself.
+
+## Quota usage banner
+
+Claude Code sessions see their own remaining quota in a banner built by
+`hooks/context/quota_usage.py`. Its title, `ATTENTION TO QOUTA USAGE`, is
+printed with that spelling:
+
+```text
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  ATTENTION TO QOUTA USAGE                                                    ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║  5H REMAINING: 96% | resets in 1h59m                                         ║
+║  7D REMAINING: 23% | resets Sun 11:00 UTC                                    ║
+║  Shown every 5 tool calls                                                    ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+```
+
+| When | Injected |
+|---|---|
+| Every user prompt | Always, when quota numbers are available |
+| PreToolUse | Every `QUOTA_USAGE_TOOL_CALLS` tool calls of the session, counted by the enforcement tool call counter; skipped on a call that already carries a quota policy directive |
+
+Where the numbers come from, first match wins:
+
+1. **The session's own snapshot.** The status line writes the `rate_limits`
+   Claude Code reports to `~/.agentihooks/quota_usage/<session id>.json`
+   (folder mode 0700, file mode 0600). SessionEnd deletes it.
+2. **The router cache.** When the session carries exactly one
+   `AH_CC_TOKEN_<slug>`, the banner reads that account's entry from
+   `~/.agentihooks/claude-router-cache.json`.
+
+A reading older than `QUOTA_USAGE_STALE_SEC` is ignored. With no fresh reading,
+or a reading missing either window, no banner is shown; a fresh snapshot missing
+a window also keeps the router cache from being read. A reset time under an
+hour prints as `resets in 42m`, under a day as `resets in 1h59m`, later as the
+UTC weekday and time, and as `reset unknown` when the reading has no reset
+time.
+
+Turn the banner off with `QUOTA_USAGE_INJECTION_ENABLED=false`, or change its
+cadence, in the shell before the session starts or in `~/.agentihooks/.env`:
+
+```bash
+QUOTA_USAGE_INJECTION_ENABLED=true
+QUOTA_USAGE_TOOL_CALLS=10
+QUOTA_USAGE_STALE_SEC=300
+```
+
+`QUOTA_USAGE_STALE_SEC` also bounds the reading the [quota policy](#quota-policy)
+trusts.
+
+### Testing the banner cadence
+
+`hooks.context.quota_usage` copies `QUOTA_USAGE_TOOL_CALLS` from `hooks.config`
+when it is imported, and the PreToolUse cadence reads `hooks.config`. A test
+that changes the cadence patches both with `monkeypatch`, so teardown restores
+each module's own value:
+
+```python
+import hooks.config as config
+import hooks.context.quota_usage as quota_usage
+
+monkeypatch.setattr(quota_usage, "QUOTA_USAGE_TOOL_CALLS", 1)
+monkeypatch.setattr(config, "QUOTA_USAGE_TOOL_CALLS", 1)
+```
+
+A test that asserts the `Shown every N tool calls` line sets the cadence it
+expects instead of relying on the default:
+
+```python
+monkeypatch.setattr(quota_usage, "QUOTA_USAGE_TOOL_CALLS", 5)
+```
+
+`test_banner_renders_requested_cadence_after_injection_tests_patch_it` in
+`tests/test_quota_usage.py` guards this. It runs the injection kinds test that
+patches the cadence to 1, then the banner rendering test, both in one
+subprocess interpreter with the xdist and cache plugins disabled, and passes
+only when both exit 0. The banner test's result therefore does not depend on
+which tests a CI shard ran before it.
 
 ## Early swarm quota warnings
 
@@ -651,6 +779,9 @@ on becomes the refresh authority.
 | `AGENTIHOOKS_HANDOFF_MIN_LEFT` | `20` | Routing left % a handoff target needs |
 | `AGENTIHOOKS_WAIT_MIN_WEEK_LEFT` | `10` | 7-day left % that makes a spent 5h window wait instead of stop |
 | `QUOTA_POLICY_ENABLED` | `true` | Turn the quota policy off |
+| `QUOTA_USAGE_INJECTION_ENABLED` | `true` | Inject the quota usage banner on every prompt and on the tool call cadence |
+| `QUOTA_USAGE_TOOL_CALLS` | `5` | Tool calls between quota usage banners |
+| `QUOTA_USAGE_STALE_SEC` | `300` | Age in seconds after which a quota reading is ignored by the banner and the quota policy |
 
 Set them in the shell or in `~/.agentihooks/.env`.
 

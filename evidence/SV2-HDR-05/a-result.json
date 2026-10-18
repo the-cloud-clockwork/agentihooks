@@ -26,9 +26,9 @@
       "after_cut": {
         "engineer@a1b2c3-0001": {
           "agent": "engineer@a1b2c3-0001",
-          "checked_at": 1790000040600,
+          "checked_at": 1790000040900,
           "fresh_ms": 30000,
-          "live_at": 1790000040600,
+          "live_at": 1790000040900,
           "machine": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
           "pane_id": "w1:p1",
           "reason": "",
@@ -36,9 +36,9 @@
         },
         "engineer@a1b2c3-0002": {
           "agent": "engineer@a1b2c3-0002",
-          "checked_at": 1790000040700,
+          "checked_at": 1790000041100,
           "fresh_ms": 30000,
-          "live_at": 1790000030500,
+          "live_at": 1790000030700,
           "machine": "swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal",
           "pane_id": "w1:p1",
           "reason": "unreachable",
@@ -48,9 +48,9 @@
       "after_reopen": {
         "engineer@a1b2c3-0001": {
           "agent": "engineer@a1b2c3-0001",
-          "checked_at": 1790000030400,
+          "checked_at": 1790000030500,
           "fresh_ms": 30000,
-          "live_at": 1790000030400,
+          "live_at": 1790000030500,
           "machine": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
           "pane_id": "w1:p1",
           "reason": "",
@@ -58,9 +58,9 @@
         },
         "engineer@a1b2c3-0002": {
           "agent": "engineer@a1b2c3-0002",
-          "checked_at": 1790000030500,
+          "checked_at": 1790000030700,
           "fresh_ms": 30000,
-          "live_at": 1790000030500,
+          "live_at": 1790000030700,
           "machine": "swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal",
           "pane_id": "w1:p1",
           "reason": "",
@@ -81,16 +81,16 @@
       },
       "detach_commands": 0,
       "heartbeats": {
-        "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": 1790000040600,
-        "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": 1790000040600
+        "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": 1790000040900,
+        "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": 1790000040900
       },
       "launches": [],
       "ledger": {
         "engineer@a1b2c3-0001": {
           "agent": "engineer@a1b2c3-0001",
-          "checked_at": 1790000040600,
+          "checked_at": 1790000040900,
           "fresh_ms": 30000,
-          "live_at": 1790000040600,
+          "live_at": 1790000040900,
           "machine": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
           "pane_id": "w1:p1",
           "reason": "",
@@ -98,16 +98,16 @@
         },
         "engineer@a1b2c3-0002": {
           "agent": "engineer@a1b2c3-0002",
-          "checked_at": 1790000040700,
+          "checked_at": 1790000041100,
           "fresh_ms": 30000,
-          "live_at": 1790000030500,
+          "live_at": 1790000030700,
           "machine": "swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal",
           "pane_id": "w1:p1",
           "reason": "unreachable",
           "state": "cached"
         }
       },
-      "now_ms": 1790000040850,
+      "now_ms": 1790000041350,
       "opened": {
         "engineer@a1b2c3-0001": {
           "agent": "engineer@a1b2c3-0001",
@@ -121,9 +121,9 @@
         },
         "engineer@a1b2c3-0002": {
           "agent": "engineer@a1b2c3-0002",
-          "checked_at": 1790000000250,
+          "checked_at": 1790000000300,
           "fresh_ms": 30000,
-          "live_at": 1790000000250,
+          "live_at": 1790000000300,
           "machine": "swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal",
           "pane_id": "w1:p1",
           "reason": "",
@@ -158,7 +158,7 @@
         "engineer@a1b2c3-0002": "engineer@a1b2c3-0002 work 3\n"
       },
       "terminal_reconnect_latency_seconds": [
-        0.1
+        0.2
       ],
       "while_closed": {
         "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {

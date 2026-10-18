@@ -100,6 +100,7 @@ def test_gate_imports_store_from_scratch_directory(tmp_path, monkeypatch, child,
     (tmp_path / "tests/test_store.py").write_text(test)
     (tmp_path / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
     store = tmp_path / "scripts/swarm/store.py"
+    store.write_text(subprocess.check_output(["git", "show", "HEAD:scripts/swarm/store.py"], cwd=root, text=True))
 
     def git(*args):
         return subprocess.check_output(["git", *args], cwd=tmp_path, text=True).strip()
@@ -132,12 +133,31 @@ def test_gate_imports_store_from_scratch_directory(tmp_path, monkeypatch, child,
         assert report["failed"] is False
 
 
+def _assert_units_run_their_own_tests(monkeypatch, selection, runner, test_calls):
+    unit = "scripts.s.x_f__mutmut_1"
+    units = []
+
+    def shard_tests(tests, name, index):
+        units.append((tests, name, index))
+        return [test for test in tests if test in {"h", "b"}]
+
+    with monkeypatch.context() as planned:
+        planned.setattr(selection, "shard_tests", shard_tests)
+        assert runner.PytestRunner().run_tests(mutant_name=unit, tests=["a"]) == 0
+        runner.PytestRunner().run_tests(mutant_name=unit, tests=("h", "a", "b"))
+        assert runner.PytestRunner().run_tests(mutant_name="unsplit", tests=[]) == 9
+    assert units == [(["a"], unit, 1), (["h", "a", "b"], unit, 1), ([], "unsplit", 1)]
+    assert test_calls[-2:] == [(unit, ["h", "b"]), ("unsplit", [])]
+    assert len(test_calls) == 6
+
+
 @pytest.mark.parametrize(
     "header", ["", '"""sample contract"""\n', '"""sample contract"""\nfrom __future__ import annotations\n']
 )
 def test_selection_passes_exact_lines_before_generation_and_reloads_source_packages(tmp_path, monkeypatch, header):
     from mutmut import configuration as engine_config
 
+    from scripts.ci_mutation import selection as selection_module
     from scripts.ci_mutation.selection import run_selected
 
     monkeypatch.setenv("CI", "true")
@@ -296,6 +316,7 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
             (None, ["tests/test_x.py::t"]),
             ("m", ["tests/test_y.py::t"]),
         ]
+        _assert_units_run_their_own_tests(monkeypatch, selection_module, runner, test_calls)
         data.exit_code_by_key = {}
         with pytest.raises(SystemExit) as empty:
             runner.collect_or_load_stats(test_runner)
@@ -574,7 +595,14 @@ def test_shard_stats_run_in_stats_mode_with_their_own_basetemp_and_record_everyt
 
     output = tmp_path / "out.json"
     collect_shard_stats(SimpleNamespace(mutmut=engine), Runner(), ["tests/test_a.py"], output, "/scratch/base")
-    assert calls == [(["tests/test_a.py"], ["-q", "-m", "not wall_clock", "--basetemp=/scratch/base"], "stats", "1")]
+    assert calls == [
+        (
+            ["tests/test_a.py"],
+            ["-q", "-p", "pytest_rerunfailures", "--reruns", "1", "-m", "not wall_clock", "--basetemp=/scratch/base"],
+            "stats",
+            "1",
+        )
+    ]
     result = json.loads(output.read_text())
     assert 0 <= result.pop("cpu") <= process_time()
     assert result == {"status": 4, "tests": {"m.x_f": ["a::t", "b::t"]}, "durations": {"a::t": 2.5}}
@@ -706,6 +734,29 @@ def _gate_tree(tmp_path, monkeypatch):
     )
     (tmp_path / "tests").mkdir()
     (tmp_path / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+
+
+@pytest.mark.parametrize("failures", [1, 2])
+def test_statistics_retry_a_flake_once_and_reject_a_persistent_failure(tmp_path, monkeypatch, failures):
+    _gate_tree(tmp_path, monkeypatch)
+    attempts = tmp_path / "attempts"
+    (tmp_path / "scripts/sample.py").write_text("def covered(value):\n    return value + 1\n")
+    (tmp_path / "tests/test_sample.py").write_text(
+        "import os\nfrom pathlib import Path\nfrom scripts.sample import covered\n\n"
+        "def test_value():\n"
+        "    assert covered(1) == 2\n"
+        "    if os.environ.get('MUTANT_UNDER_TEST') == 'stats':\n"
+        f"        attempts = Path({str(attempts)!r})\n"
+        "        count = int(attempts.read_text()) + 1 if attempts.exists() else 1\n"
+        "        attempts.write_text(str(count))\n"
+        f"        assert count > {failures}\n"
+    )
+    report = run_gate(tmp_path, {"scripts/sample.py": {2}}, tmp_path / "evidence", 60)
+    assert attempts.read_text() == "2"
+    assert report["failed"] is (failures == 2)
+    if failures == 1:
+        assert report["not_mutated"] == []
+        assert report["files"][0]["counts"] == {"killed": 2}
 
 
 @pytest.mark.parametrize("source", ["hooks/__init__.py", "scripts/sample/__init__.py"])

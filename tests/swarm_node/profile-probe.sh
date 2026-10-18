@@ -25,9 +25,11 @@ positive)
     mkdir -p /home/worker/work
     git -C /home/worker/work init -q
     cd /home/worker/work
-    HOME="$attempts/a1/homes/claude" timeout 60 claude -p hello > /tmp/claude-run.txt 2>&1 || true
-    HOME="$attempts/a1/homes/codex" timeout 20 codex exec --skip-git-repo-check \
-        --dangerously-bypass-hook-trust hello > /tmp/codex-run.txt 2>&1 || true
+    set +e
+    date +%s%N > /tmp/claude-run.started
+    HOME="$attempts/a1/homes/claude" timeout 60 claude -p hello > /tmp/claude-run.txt 2>&1
+    echo $? > /tmp/claude-run.exit
+    set -e
     python /opt/probe/profile_probe.py positive "$attempts/a1"
     ;;
 rejection)

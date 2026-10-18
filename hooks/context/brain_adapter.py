@@ -572,7 +572,7 @@ def inject_on_session_start(session_id: str = "", cwd: str = "") -> bool:
         record_session(session_id, resolve_project(cwd))
         context = project_context(session_id, cwd)
         if context:
-            inject_context(context, skip_compression=True)
+            inject_context(context, skip_compression=True, kind="brain")
     return refreshed
 
 

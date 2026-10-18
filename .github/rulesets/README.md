@@ -7,15 +7,16 @@ push protection, linear history and pull requests without bypass actors.
 Dev requires the exact `Gate — Required` check from the Tests workflow and
 allows squash merges with zero required approvals. Instead of requiring each
 branch to be up to date, dev merges through a merge queue: the Tests workflow
-runs on `merge_group`, so unit, lint, Sonar and the swarm image smoke grade
-the merged tree before it lands. Mutation stays on the pull request head.
+runs on `merge_group`, so the full unit suite and test count floor grade the
+merged tree before it lands. Mutation stays on the pull request head.
 Once the queue is active, `gh pr merge --squash` adds the pull request to the
 queue; it lands when the queue run passes the gate.
 The queue groups with `ALLGREEN`: every entry is built on dev plus the
 entries ahead of it and merges only on its own passing run, so a red pull
 request never lands. A failing entry leaves the queue and the entries behind
-it rebuild without it. A full queue run takes 21 `anton-oss` jobs, so the
-queue builds five entries at a time to keep independent entries progressing.
+it rebuild without it. Merge groups run on the `anton-oss-queue` pool, which
+serves only merge queue runs. The queue builds two entries at a time, and a
+check that has not reported within 25 minutes fails the entry.
 Main keeps its existing branch match and rules; only its bypass list changes.
 
 The antoncore `Organization secrets and dev rulesets` workflow applies

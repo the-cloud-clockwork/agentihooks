@@ -12,6 +12,7 @@ from scripts.swarm_ledger.api import client as api_client
 from scripts.swarm_ledger.api import resources, routes
 from scripts.swarm_ledger.api.errors import APIError
 from scripts.swarm_ledger.repository import sqlite as store
+from scripts.swarm_v2 import masters
 
 SLUG = "hierarchy-pages"
 
@@ -142,8 +143,9 @@ def test_the_phase_pass_reads_every_page_of_a_ledger_above_the_cap(large, monkey
         def set_phase(self, slug, phase_id, done, status):
             ticked.append((phase_id, done))
 
+    monkeypatch.setattr(masters, "held", lambda redis, slug, agents: {})
     document = state(40, 100)
-    actions = phases.phase_pass(Inbox(), SimpleNamespace(agents=lambda slug: []), SLUG, document, Ledger())
+    actions = phases.phase_pass(Inbox(), SimpleNamespace(agents=lambda slug: [], redis=None), SLUG, document, Ledger())
     assert ticked == [(f"p{n}", n % 2 == 0) for n in range(40)]
     assert actions == [f"phase p{n} {'ticked' if n % 2 == 0 else 'reopened'}" for n in range(40)]
     assert len(served.paths) > 1

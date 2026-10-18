@@ -12,7 +12,17 @@ NAMESPACE = "startup-bench"
 REGISTRY = "kind-registry"
 WORKERS = "agentihooks-swarm-workers"
 READY_FILE = "/tmp/startup-ready"
+REMOVE_SECONDS = 120
 BOOT = f"python /opt/swarm-node/worker_image.py report > /tmp/report.json && touch {READY_FILE} && sleep 900"
+AUTOSCALER_STATUS = "cluster-autoscaler-oci-status"
+POOL_LABEL = "anton.io/node-pool"
+WORKLOAD_LABEL = "anton.io/workload"
+WORKLOADS = ("swarm", "research")
+OUTAGE_REGISTRY = "127.0.0.1:5000"
+REGISTRY_IMAGE = "mirror.gcr.io/library/registry:2"
+UPSTREAM = "https://ghcr.io"
+COLD_POD = "outage-cold"
+REGISTRY_POD = "outage-registry"
 
 
 def run(*command: str, check: bool = True) -> str:
@@ -26,13 +36,13 @@ def kubectl(*args: str, check: bool = True) -> str:
     return run("kubectl", *args, check=check)
 
 
-def pod(name: str, node: str, image: str) -> dict:
+def pod(name: str, selector: dict, image: str) -> dict:
     return {
         "apiVersion": "v1",
         "kind": "Pod",
         "metadata": {"name": name, "namespace": NAMESPACE, "labels": {"app": "startup-bench"}},
         "spec": {
-            "nodeSelector": {"kubernetes.io/hostname": node},
+            "nodeSelector": selector,
             "restartPolicy": "Never",
             "terminationGracePeriodSeconds": 0,
             "containers": [
@@ -49,7 +59,12 @@ def pod(name: str, node: str, image: str) -> dict:
 
 
 def launch(name: str, node: str, image: str) -> None:
-    subprocess.run(["kubectl", "apply", "-f", "-"], input=json.dumps(pod(name, node, image)), text=True, check=True)
+    subprocess.run(
+        ["kubectl", "apply", "-f", "-"],
+        input=json.dumps(pod(name, {"kubernetes.io/hostname": node}, image)),
+        text=True,
+        check=True,
+    )
 
 
 def wait_ready(name: str, seconds: int) -> bool:
@@ -81,8 +96,16 @@ def remove_pods(names: list[str]) -> list[dict]:
     return kept
 
 
-def forget_image(node: str, image: str) -> None:
-    run("docker", "exec", node, "crictl", "rmi", image)
+def forget_image(node: str, image: str) -> bool:
+    command = ["docker", "exec", node, "crictl", "--timeout", f"{REMOVE_SECONDS}s", "rmi", image]
+    try:
+        done = subprocess.run(command, capture_output=True, text=True, check=False, timeout=REMOVE_SECONDS + 30)
+    except subprocess.TimeoutExpired:
+        print(f"removing {image} on {node} took over {REMOVE_SECONDS + 30} seconds")
+        return False
+    if done.returncode:
+        print(f"removing {image} on {node} failed: {done.stderr.strip()}")
+    return done.returncode == 0
 
 
 def capture(output: Path, removed: list[dict]) -> None:
@@ -108,8 +131,7 @@ def scenario(image: str, nodes: list[str], grace: int, outage: int, output: Path
             launch(name, node, image)
             outcome["ready"][name] = wait_ready(name, 300)
     removed = remove_pods([f"{phase}-{node}" for node in nodes for phase in ("uncached", "cached")])
-    for node in nodes:
-        forget_image(node, image)
+    outcome["interruption"]["image_removed"] = {node: forget_image(node, image) for node in nodes}
     run("docker", "stop", REGISTRY)
     stopped = time.monotonic()
     names = [f"interrupted-{node}" for node in nodes]
@@ -154,6 +176,155 @@ def read_anton(output: Path) -> None:
         (logs / f"{WORKERS}_{pod}.log").write_text(done.stdout)
 
 
+def tolerations(workload: str) -> list[dict]:
+    return [
+        {"key": "anton.io/remote", "operator": "Equal", "value": "oci", "effect": "NoSchedule"},
+        {"key": WORKLOAD_LABEL, "operator": "Equal", "value": workload, "effect": "NoSchedule"},
+    ]
+
+
+def pool_pod(name: str, image: str, workload: str) -> dict:
+    spec = pod(name, {POOL_LABEL: f"oci-{workload}"}, image)
+    spec["spec"]["tolerations"] = tolerations(workload)
+    return spec
+
+
+def registry_pod(node: str, workload: str) -> dict:
+    """A pull through cache of the production registry on the node's loopback, which containerd reaches over plain
+    HTTP; until it runs, every pull from it is refused."""
+    return {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {"name": REGISTRY_POD, "namespace": NAMESPACE, "labels": {"app": "startup-bench"}},
+        "spec": {
+            "nodeSelector": {"kubernetes.io/hostname": node},
+            "tolerations": tolerations(workload),
+            "hostNetwork": True,
+            "restartPolicy": "Never",
+            "terminationGracePeriodSeconds": 0,
+            "containers": [
+                {
+                    "name": "registry",
+                    "image": REGISTRY_IMAGE,
+                    "env": [
+                        {"name": "REGISTRY_HTTP_ADDR", "value": OUTAGE_REGISTRY},
+                        {"name": "REGISTRY_PROXY_REMOTEURL", "value": UPSTREAM},
+                    ],
+                }
+            ],
+        },
+    }
+
+
+def apply(manifest: dict) -> None:
+    subprocess.run(["kubectl", "apply", "-f", "-"], input=json.dumps(manifest), text=True, check=True)
+
+
+def wait_event(name: str, reason: str, seconds: int) -> bool:
+    """The kubelet records events after the state they describe, so the capture waits for the last one it reads."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        found = kubectl(
+            "-n", NAMESPACE, "get", "events", "--field-selector", f"involvedObject.name={name}", "-o", "json"
+        )
+        if any(e["reason"] == reason for e in json.loads(found)["items"]):
+            return True
+        time.sleep(2)
+    return False
+
+
+def scheduled_node(name: str, seconds: int) -> str:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        node = kubectl("-n", NAMESPACE, "get", "pod", name, "-o", "jsonpath={.spec.nodeName}")
+        if node:
+            return node
+        time.sleep(2)
+    return ""
+
+
+def oci_instance(node: str) -> dict:
+    """Only the instance id, creation time and pool are read: the instance metadata carries the join credentials."""
+    found = json.loads(kubectl("get", "node", node, "-o", "json"))
+    query = 'data.{id:id,"time-created":"time-created","instance-pool":"freeform-tags"."oci:compute:instancepool"}'
+    instance = run(
+        "oci",
+        "--profile",
+        "ANTON",
+        "compute",
+        "instance",
+        "get",
+        "--instance-id",
+        found["spec"]["providerID"].rsplit("/", 1)[-1],
+        "--query",
+        query,
+    )
+    return json.loads(instance)
+
+
+def capture_anton(output: Path, node: str) -> None:
+    output.mkdir(parents=True, exist_ok=True)
+    (output / "read_at").write_text(datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ") + "\n")
+    (output / "nodes.json").write_text(kubectl("get", "nodes", "-o", "json"))
+    events = json.loads(kubectl("-n", NAMESPACE, "get", "events", "-o", "json"))
+    scaled = kubectl(
+        "-n",
+        "kube-system",
+        "get",
+        "events",
+        "--field-selector",
+        f"involvedObject.name={AUTOSCALER_STATUS}",
+        "-o",
+        "json",
+    )
+    events["items"] += json.loads(scaled)["items"]
+    (output / "events.json").write_text(json.dumps(events))
+    (output / "pods.json").write_text(kubectl("-n", NAMESPACE, "get", "pods", "-o", "json"))
+    (output / "activities.json").write_text(json.dumps({"Activities": []}))
+    (output / "instances.json").write_text(json.dumps({"Reservations": [], "Oci": [oci_instance(node)]}))
+
+
+def cold_outage(args: argparse.Namespace, pool: str) -> dict:
+    """The registry is absent from the worker's scheduling for `outage` seconds, then started on the same node; the
+    worker must start once it returns."""
+    apply(pool_pod(COLD_POD, args.image, args.workload))
+    node = scheduled_node(COLD_POD, 1200)
+    if not node:
+        raise SystemExit(f"{COLD_POD} was not scheduled onto a new {pool} node")
+    scheduled = time.monotonic()
+    outcome = {"node": node, "pool": pool, "outage_seconds": args.outage, "scheduled_seen": now()}
+    outcome["classified_within_grace"] = wait_pull_failure(COLD_POD, args.grace)
+    time.sleep(max(args.outage - (time.monotonic() - scheduled), 0))
+    outcome["registry_applied"] = now()
+    apply(registry_pod(node, args.workload))
+    outcome["registry_ready"] = wait_ready(REGISTRY_POD, 300)
+    outcome["recovered"] = wait_ready(COLD_POD, 600)
+    outcome["started_event"] = wait_event(COLD_POD, "Started", 120)
+    capture_anton(args.output, node)
+    return outcome
+
+
+def now() -> str:
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def anton_outage(args: argparse.Namespace) -> None:
+    pool = f"oci-{args.workload}"
+    if kubectl("get", "nodes", "-l", f"{POOL_LABEL}={pool}", "-o", "name").strip():
+        raise SystemExit(f"the {pool} pool has nodes; a scale from zero needs it empty")
+    kubectl("create", "namespace", NAMESPACE)
+    try:
+        outcome = cold_outage(args, pool)
+    finally:
+        kubectl("delete", "namespace", NAMESPACE, "--wait=false", check=False)
+    (args.output / "fixture.json").write_text(json.dumps(outcome, indent=2, sort_keys=True) + "\n")
+    print(json.dumps(outcome, sort_keys=True))
+    if not all(outcome[key] for key in ("classified_within_grace", "registry_ready", "recovered")):
+        raise SystemExit(
+            "the cold Pod did not classify its pull failure in grace, or did not start once the registry returned"
+        )
+
+
 def kind(args: argparse.Namespace) -> None:
     try:
         outcome = scenario(args.image, args.nodes, args.grace, args.outage, args.output)
@@ -163,7 +334,9 @@ def kind(args: argparse.Namespace) -> None:
     (args.output / "fixture.json").write_text(json.dumps(outcome, indent=2, sort_keys=True) + "\n")
     print(json.dumps(outcome, sort_keys=True))
     interruption = outcome["interruption"]
-    checks = [*outcome["ready"].values(), *interruption["classified_within_grace"].values()]
+    removed = interruption["image_removed"]
+    classified = interruption["classified_within_grace"]
+    checks = [*outcome["ready"].values(), *(classified[f"interrupted-{node}"] for node in removed if removed[node])]
     if not all([*checks, *interruption["recovered"].values()]):
         raise SystemExit("a fixture Pod did not become ready, classify its pull failure in grace, or recover")
 
@@ -179,9 +352,17 @@ def main() -> None:
     fixture.add_argument("--output", type=Path, required=True)
     anton = modes.add_parser("anton")
     anton.add_argument("--output", type=Path, required=True)
+    cold = modes.add_parser("anton-outage")
+    cold.add_argument("--image", default=f"{OUTAGE_REGISTRY}/the-cloud-clockwork/agentihooks-worker:dev")
+    cold.add_argument("--workload", choices=WORKLOADS, default="research")
+    cold.add_argument("--grace", type=int, default=120)
+    cold.add_argument("--outage", type=int, default=90)
+    cold.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.mode == "anton":
         read_anton(args.output)
+    elif args.mode == "anton-outage":
+        anton_outage(args)
     else:
         kind(args)
 

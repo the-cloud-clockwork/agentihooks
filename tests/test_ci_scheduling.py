@@ -8,10 +8,11 @@ pytestmark = pytest.mark.unit
 _ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_push_concurrency_is_per_run():
+def test_push_concurrency_is_one_promotion_group_and_other_runs_keep_their_own():
     workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
     assert workflow["concurrency"]["group"].endswith(
-        "|| format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}"
+        "|| github.event_name == 'push' && 'promotion-dev'"
+        " || format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}"
     )
 
 

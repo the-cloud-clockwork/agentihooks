@@ -4,27 +4,27 @@ import json
 import re
 from dataclasses import replace
 
-from scripts.swarm.store import PREFIX
-
 SESSION = "session"
 TTL_S = 24 * 3600
 
 
-def key(slug, name):
-    return ":".join((PREFIX, slug, "session-model", name))
+def key(redis, slug, name):
+    from scripts.hive import scope
+
+    return ":".join((scope.readings(redis, slug, name), slug, "session-model", name))
 
 
 def put(redis, slug, name, model, effort, at):
     from scripts.swarm.naming import NameRegistry
 
     name = NameRegistry(redis).resolve(name)
-    redis.set(key(slug, name), json.dumps({"model": model, "effort": effort, "at": at}), ex=TTL_S)
+    redis.set(key(redis, slug, name), json.dumps({"model": model, "effort": effort, "at": at}), ex=TTL_S)
 
 
 def get(redis, slug, name):
     from scripts.swarm.naming import NameRegistry
 
-    raw = redis.get(key(slug, NameRegistry(redis).resolve(name)))
+    raw = redis.get(key(redis, slug, NameRegistry(redis).resolve(name)))
     return json.loads(raw) if raw else None
 
 

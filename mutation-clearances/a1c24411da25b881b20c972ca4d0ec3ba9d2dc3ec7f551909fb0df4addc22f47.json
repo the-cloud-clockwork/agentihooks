@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/codex.py:scripts.inbox.codex.xǁPumpǁrun__mutmut_4:cd9dc3eba0cd5bd705143f91b8fc2feb49639a519494956c0298013d7aefbacb": {
+    "reader": "standards_reader",
+    "reason": "The reset value of pause after _pause is read only by the truthiness test at the top of the next loop iteration, where None and 0.0 are both falsy; every other write sets a positive backoff before any read. No output changes."
+  }
+}

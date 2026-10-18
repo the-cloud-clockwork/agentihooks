@@ -1,5 +1,7 @@
 import time
 
+import pytest
+
 import hooks.config
 from hooks import hook_manager
 from hooks.context import operator_words
@@ -9,6 +11,16 @@ from scripts.swarm.tick import NUDGE
 
 ENV = {"AGENTIHOOKS_AGENT_NAME": "master@a1-1", "AGENTIHOOKS_SWARM": "demo"}
 LATER = 100 + operator_words.TTL_SEC
+
+
+@pytest.fixture(autouse=True)
+def signal_state(tmp_path, monkeypatch):
+    import hooks.context.branch_guard as branch_guard
+    import hooks.context.prod_lockdown as prod_lockdown
+
+    for module in (branch_guard, prod_lockdown):
+        monkeypatch.setattr(module, "AGENTIHOOKS_HOME", tmp_path)
+        monkeypatch.setattr(module, "get_redis", lambda: None)
 
 
 def test_a_typed_prompt_is_found_by_a_quote_in_any_case_and_spacing():
@@ -79,6 +91,64 @@ def test_typed_in_an_unnamed_session_is_any_prompt_the_swarm_did_not_send():
     assert not operator_words.typed({"tool_name": "AskUserQuestion", "tool_response": {"answers": {"q": "a"}}}, {})
 
 
+def test_a_taken_masters_first_typed_prompt_is_recorded_without_swarm_env():
+    from hooks.context import master_coding
+
+    master_coding.record_seat("taken", "demo", "master@a1-1")
+    payload = {"session_id": "taken", "prompt": "Use the queue for the broker"}
+    assert operator_words.typed(payload, {}, now=100)
+    assert operator_words.matching("master@a1-1", "use the queue", now=101) == "Use the queue for the broker"
+    for prompt in (WAKE_TEXT, NUDGE.format(slug="demo"), "<task-notification> use redis"):
+        assert not operator_words.typed({"session_id": "taken", "prompt": prompt}, {}, now=102)
+    assert not operator_words.matching("master@a1-1", "use redis", now=103)
+
+
+def test_a_taken_masters_question_answer_is_recorded_without_swarm_env():
+    from hooks.context import master_coding
+
+    master_coding.record_seat("taken", "demo", "master@a1-1")
+    answer = {
+        "session_id": "taken",
+        "tool_name": "AskUserQuestion",
+        "tool_response": {"answers": {"question": "Use the queue"}},
+    }
+    assert operator_words.typed(answer, {}, now=100)
+    assert operator_words.matching("master@a1-1", "use the queue", now=101) == "Use the queue"
+
+
+@pytest.mark.parametrize("launch_swarm", [None, "previous"])
+def test_a_taken_master_records_under_its_seat_instead_of_its_launch_identity(launch_swarm):
+    from hooks.context import master_coding
+
+    master_coding.record_seat("taken", "demo", "master@a1-1")
+    env = {"AGENTIHOOKS_AGENT_NAME": "launch-session"}
+    if launch_swarm:
+        env["AGENTIHOOKS_SWARM"] = launch_swarm
+    assert operator_words.typed({"session_id": "taken", "prompt": "Use the queue"}, env, now=100)
+    assert operator_words.matching("master@a1-1", "use the queue", now=101) == "Use the queue"
+    assert not operator_words.matching("launch-session", "use the queue", now=101)
+    answer = {
+        "session_id": "taken",
+        "tool_name": "AskUserQuestion",
+        "tool_response": {"answers": {"question": "Keep the queue"}},
+    }
+    assert operator_words.typed(answer, env, now=102)
+    assert operator_words.matching("master@a1-1", "keep the queue", now=103) == "Keep the queue"
+    assert not operator_words.typed({"session_id": "taken", "prompt": NUDGE.format(slug="demo")}, env, now=104)
+
+
+@pytest.mark.parametrize("content", [None, "invalid", "[]", "null", "{}"])
+def test_an_invalid_taken_seat_records_no_operator_words(content):
+    from hooks.context import master_coding
+
+    target = master_coding.seat_path("taken")
+    target.parent.mkdir(parents=True)
+    if content is not None:
+        target.write_text(content)
+    assert operator_words.typed({"session_id": "taken", "prompt": "Use the queue"}, {}, now=100)
+    assert not operator_words.matching("master@a1-1", "Use the queue", now=101)
+
+
 def test_a_prompt_without_a_session_id_is_recorded():
     assert operator_words.heard({"prompt": "hold the merge"}, ENV, now=100)
     assert operator_words.matching("master@a1-1", "hold the merge", now=LATER - 1) == "hold the merge"
@@ -118,9 +188,9 @@ def test_the_five_hundred_and_first_oldest_prompt_still_relays():
     from scripts.swarm_ledger import ledger_relay
 
     for n in range(501):
-        operator_words.heard_prompt(f"word{n} said", ENV, now=100 + n)
-    assert ledger_relay.verified("master@a1-1", "word0 said") == "word0 said"
-    assert ledger_relay.verified("master@a1-1", "word500 said") == "word500 said"
+        operator_words.heard_prompt(f"word{n} was said", ENV, now=100 + n)
+    assert ledger_relay.verified("master@a1-1", "word0 was said") == "word0 was said"
+    assert ledger_relay.verified("master@a1-1", "word500 was said") == "word500 was said"
 
 
 def test_line_hash_lookup_obeys_names_and_the_window():
@@ -361,8 +431,21 @@ def test_a_codex_answer_carries_release_and_branch_signals(monkeypatch):
     seen = []
     monkeypatch.setattr(prod_lockdown, "set_release_signal", lambda session_id: seen.append(("release", session_id)))
     monkeypatch.setattr(branch_guard, "set_branch_signal", lambda session_id: seen.append(("branch", session_id)))
-    _codex_post_tool_use(monkeypatch, CODEX_ANSWER)
+    payload = {
+        **CODEX_ANSWER,
+        "tool_response": '{"answers":{"plan_color":{"answers":["release dance, then cut a new branch"]}}}',
+    }
+    _codex_post_tool_use(monkeypatch, payload)
     assert seen == [("release", "cx1"), ("branch", "cx1")]
+
+
+def test_a_codex_answer_without_release_dance_does_not_arm_publication(monkeypatch):
+    import hooks.context.prod_lockdown as prod_lockdown
+
+    seen = []
+    monkeypatch.setattr(prod_lockdown, "set_release_signal", lambda session_id: seen.append(session_id))
+    _codex_post_tool_use(monkeypatch, CODEX_ANSWER)
+    assert seen == []
 
 
 def test_a_recorder_failure_is_logged_and_never_raised(monkeypatch):

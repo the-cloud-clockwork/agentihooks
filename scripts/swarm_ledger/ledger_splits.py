@@ -33,6 +33,8 @@ def refusal(task: dict, halves: list) -> str:
         return "not a code or ci task"
     if task.get("split_pulls"):
         return "a half has a pull request"
+    if task.get("pr_url"):
+        return "the task has a pull request outside the split"
     lines = task.get("plan_lines")
     if lines and not _covers(plan_ranges.bounds(lines), [plan_ranges.bounds(half) for half in halves]):
         return f"halves: cover plan lines {lines}"

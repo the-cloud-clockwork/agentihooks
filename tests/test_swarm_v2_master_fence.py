@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -370,7 +371,8 @@ def test_the_server_fences_master_writes_inside_the_talk_budget():
 
     gate = ledger_server.write_gate(SLUG)
 
-    assert (type(gate), gate.slug, type(gate.inner), gate.inner.slug) == (master_fence.Fence, SLUG, talk.Budget, SLUG)
+    budget = gate.inner.inner
+    assert (type(gate), gate.slug, type(budget), budget.slug) == (master_fence.Fence, SLUG, talk.Budget, SLUG)
 
 
 def test_the_api_publishes_decisions_after_the_write(monkeypatch):
@@ -386,12 +388,14 @@ def test_the_api_publishes_decisions_after_the_write(monkeypatch):
         def publish(self, rejected):
             published.append(rejected)
 
-    def apply_ops(slug, changes=None, ops=None, gate=None):
+    def apply_ops(slug, changes=None, ops=None, gate=None, *, copy_state=True):
         gates.append(gate.inner.budget)
         return {"_meta": {"rev": 2, "warnings": []}, "tasks": []}, ["b"]
 
     monkeypatch.setattr(ledger_server, "write_gate", lambda slug: Gate())
-    monkeypatch.setattr(ledger_server.repository, "get_document", lambda slug: {"tasks": [], "_meta": {}})
+    monkeypatch.setattr(
+        ledger_server.repository, "current", lambda slug: SimpleNamespace(state={"tasks": [], "_meta": {}})
+    )
     monkeypatch.setattr(ledger_server.repository, "apply_ops", apply_ops)
     for name in ("relay_to_inbox", "doctor_phrase", "deliver_alerts"):
         monkeypatch.setattr(ledger_server, name, lambda slug, state: None)

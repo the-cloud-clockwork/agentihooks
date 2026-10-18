@@ -8,6 +8,9 @@ nav_order: 12
 
 The ledger pages, HOME and BIN form the presentation layer of agentihooks. Since 2026-10-06 the operator treats them as a product in their own right. This page records the constraints, the system as it runs today, what limits it, the target architecture, and the order of migration.
 
+For heartbeat handling, reconnect examples and the live replay regression, see
+[Ledger watcher replay verification](watch-ledger-replay.md).
+
 ## Constraints (operator decisions)
 
 | Decision | Detail |

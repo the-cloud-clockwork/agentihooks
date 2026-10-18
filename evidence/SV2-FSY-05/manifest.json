@@ -1,0 +1,17 @@
+{
+  "tested_commit": "92907cf4a5cbf45ec902c8e4a89febd0b9968d8e",
+  "evidence_class": "mocked: rendered Pod manifests checked without a cluster, a cache store whose read only mount is simulated by the store's mount probe, and a local artifact directory replaced by a file to model lost shared storage; no NFS, no Pod and no live rollout proof",
+  "inputs": {
+    "scripts/swarm_v2/kubernetes/storage.py": "e7c38d6711161f01583d530a743ab00d23b1bdf1400d5d79bb77134281602a93",
+    "scripts/swarm_v2/kubernetes/spec.py": "d01f61dd58a8e401271ca966d78aee3f6a23bb9720f2d4c23664513d6e62274f",
+    "scripts/swarm_v2/cache.py": "d2001b20a38cdc7875bb6865913f8a04ff6a26ca9d3fcc647f7ee68c0d683f8b",
+    "scripts/swarm_v2/artifacts/publication.py": "6dabd3f177f76b26fd8c62ba132b6ebf9c3e9cae3a4a6aa8109ded0ca5dd73da",
+    "docs/swarm-v2/schemas/pod-policy.json": "a84d40e2984c4abfa9f7e74a45927f9d134682575ebf0a7c2f22928e76af8cb1",
+    "tests/contracts/storage_layout/test_pod_storage.py": "7a7633ee5b6433b8bbe457c82159160d31988379eafe65a94f4da3ad74a48265",
+    "tests/contracts/storage_layout/test_publication.py": "008961054e651318a5597e5cdd468a8518f3eed6b8e76a62563d9df2ebeb10bb",
+    "tests/contracts/storage_layout/cases.py": "0415125d764aef317c99ec2cd3fef6a75304cdd3c666e731650284ff31b48d6f",
+    "tests/test_swarm_v2_cache.py": "da20d5e9f534572a53d1553c2e21d13ba3c3ee28e05c46761f371d3020436631",
+    "evidence/SV2-FSY-05/generate_case_results.py": "dbec4fc546b23a5606d3d350c2a498d22f805870a83fa55c01eae0777e64ba01",
+    "Swarm-v2.md": "5850767c2e57212bce0dc4c5a493da58a0517c723851b79a4b8ff92c37ec5905"
+  }
+}

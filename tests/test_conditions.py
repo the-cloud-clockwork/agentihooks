@@ -84,6 +84,8 @@ class TestFilename:
             ("post-mcp-audit.async.py", "post", "mcp", "audit", True),
             ("stop-idle.sh", "stop", "any", "idle", False),
             ("stop-idle.async.py", "stop", "any", "idle", True),
+            ("start-greeting.sh", "start", "any", "greeting", False),
+            ("start-greeting.async.py", "start", "any", "greeting", True),
             (
                 "pre-mcp__gateway-tools__github-create_pull_request-audit.py",
                 "pre",
@@ -102,9 +104,11 @@ class TestFilename:
         [
             ("pre-bash.git-audit", "extension"),
             ("pre-bash.sh", "expected"),
-            ("start-any-x.sh", "unknown step"),
+            ("begin-any-x.sh", "unknown step"),
             ("stop-bash-x.sh", "expected stop-<name>"),
             ("stop.sh", "expected stop-<name>"),
+            ("start-bash-x.sh", "expected start-<name>"),
+            ("start.sh", "expected start-<name>"),
             ("pre-bad*-x.sh", "invalid characters"),
             ("pre--x.sh", "empty matcher"),
         ],
@@ -601,6 +605,59 @@ class TestStopStep:
         hm.on_stop(_stop())
         assert beats == [("idle",)]
         assert ("conditions stop failed", {"error": "index unreadable"}) in logged
+
+
+def _start(**extra) -> dict:
+    return {
+        "hook_event_name": "SessionStart",
+        "session_id": "sid-conditions",
+        "cwd": "/tmp",
+        "source": "startup",
+        **extra,
+    }
+
+
+class TestStartStep:
+    def test_plain_text_becomes_context(self, layers):
+        _write(layers[1], "start-greet.sh", "echo hello from start")
+        effect = conditions.start_effect(_start())
+        assert effect.contexts == ["[condition start-greet.sh]\nhello from start"]
+
+    def test_a_start_file_with_a_matcher_names_the_start_grammar(self):
+        with pytest.raises(ValueError) as refused:
+            conditions.parse_filename("start-bash-greet.sh")
+        assert str(refused.value) == "expected start-<name>.<ext>: SessionStart has no tool to match"
+
+    def test_decision_deny_never_blocks(self, layers):
+        _write(layers[1], "start-greet.sh", 'echo \'{"decision": "deny", "reason": "nope", "context": "hi"}\'')
+        effect = conditions.start_effect(_start())
+        assert effect.contexts == ["[condition start-greet.sh]\nhi"]
+
+    def test_exit_2_never_blocks(self, layers):
+        _write(layers[1], "start-greet.sh", "echo 'should not block' >&2; exit 2")
+        effect = conditions.start_effect(_start())
+        assert effect.contexts == []
+
+    def test_tool_input_rewrite_is_ignored(self, layers):
+        _write(layers[1], "start-greet.sh", 'echo \'{"tool_input": {"command": "x"}, "context": "hi"}\'')
+        effect = conditions.start_effect(_start())
+        assert effect.contexts == ["[condition start-greet.sh]\nhi"]
+
+    def test_no_conditions_returns_none(self, layers):
+        assert conditions.start_effect(_start()) is None
+
+    def test_tool_conditions_do_not_run_at_start(self, layers):
+        _write(layers[1], "pre-any-no.sh", "echo no >&2; exit 2")
+        assert conditions.start_effect(_start()) is None
+
+    def test_start_conditions_do_not_run_on_tool_calls(self, layers):
+        _write(layers[1], "start-greet.sh", "echo no")
+        assert conditions.run_step("pre", _bash("ls")) is None
+
+    def test_disabled_runs_nothing(self, layers, monkeypatch):
+        _write(layers[1], "start-greet.sh", "echo hi")
+        monkeypatch.setattr("hooks.config.CONDITIONS_ENABLED", False)
+        assert conditions.start_effect(_start()) is None
 
 
 class TestHookProcess:

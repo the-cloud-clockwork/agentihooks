@@ -8,7 +8,7 @@ import pytest
 from scripts.swarm import cli
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm_ledger import ledger_authority as authority
-from scripts.swarm_ledger.api import routes
+from scripts.swarm_ledger.api import proofs, routes
 from tests.swarm_ledger.test_ledger_authority import SLUG, server
 from tests.swarm_ledger.test_proof_ledgers import CONTENT
 from tests.swarm_ledger.test_proof_ledgers import credential as _credential
@@ -163,8 +163,167 @@ def test_owned_fixture_cannot_control_a_real_swarm_configuration(owned):
 def test_fixture_controls_refuse_every_ungranted_action(owned, action):
     assert owned.invoke(f"/{owned.slug}/controls", {"control": action}, owned.proof) == (
         403,
-        {"error": {"code": "forbidden", "message": "Proof controls permit only pause and drain"}},
+        {"error": {"code": "forbidden", "message": "Proof controls permit only pause, drain, set and start"}},
     )
+
+
+def _queued(owned):
+    return [
+        json.loads(row)["argv"] for row in owned.store.redis.hgetall(owned.store.key(owned.slug, "commands")).values()
+    ]
+
+
+def test_creator_sets_allowlisted_fields_and_starts_its_own_fixture(owned):
+    fields = {"master-agent": "codex", "codex-inbox-transport": "app_server", "max-eng-agents": "2"}
+    status, accepted = owned.invoke(f"/{owned.slug}/controls", {"control": "set", "fields": fields}, owned.proof)
+    assert status == 200
+    assert accepted["data"]["argv"] == [
+        "set",
+        "codex-inbox-transport=app_server",
+        "master-agent=codex",
+        "max-eng-agents=2",
+    ]
+    assert accepted["data"]["command"] == "swarm"
+    status, started = owned.invoke(f"/{owned.slug}/controls", {"control": "start"}, owned.proof)
+    assert status == 200 and started["data"]["argv"] == ["start"]
+    assert sorted(_queued(owned)) == sorted([accepted["data"]["argv"], ["start"]])
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["api-url", "autonomy", "masters", "master-per", "compact-limit", "eng-role", "plan-kind", "review-gate", "hive-x"],
+)
+def test_creator_set_refuses_fields_outside_the_allowlist(owned, key):
+    body = {"control": "set", "fields": {key: "1"}}
+    assert owned.invoke(f"/{owned.slug}/controls", body, owned.proof) == (
+        403,
+        {"error": {"code": "forbidden", "message": f"Proof controls cannot set {key}"}},
+    )
+    assert _queued(owned) == []
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"control": "set"},
+        {"control": "set", "fields": {}},
+        {"control": "set", "fields": []},
+        {"control": "set", "fields": {"master-agent": 1}},
+        {"control": "set", "fields": {"master-agent": ""}},
+        {"control": "set", "fields": {"master-agent": "codex extra"}},
+        {"control": "set", "fields": {"master-agent": "codex=claude"}},
+        {"control": "set", "fields": {"master-agent": "-codex"}},
+        {"control": "set", "fields": {"master-agent": "codex\n"}},
+        {"control": "set", "fields": {"master-agent": "c" * 65}},
+        {"control": "set", "fields": {"master-agent": "codex"}, "extra": True},
+        {"control": "start", "extra": True},
+    ],
+)
+def test_creator_set_and_start_refuse_malformed_requests(owned, body):
+    assert owned.invoke(f"/{owned.slug}/controls", body, owned.proof) == (
+        400,
+        {"error": {"code": "schema_invalid", "message": "Request does not match the resource schema"}},
+    )
+    assert _queued(owned) == []
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("codex-inbox-transport", "legacy"),
+        ("codex-inbox-transport", "app_server"),
+        ("max-eng-agents", "0"),
+        ("max-ci-agents", "100"),
+        ("max-plan-agents", "7"),
+        ("max-ci-agents", "9"),
+        ("eng-model", "a0.9"),
+        ("eng-agent", "auto"),
+        ("ci-agent", "claude"),
+        ("plan-agent", "codex"),
+        ("master-agent", "codex"),
+        *(
+            (f"{lane}-{field}", "Ab.1:x-z")
+            for lane in ("eng", "ci", "plan", "master")
+            for field in ("model", "effort", "profile")
+        ),
+        ("eng-model", "x"),
+    ],
+)
+def test_creator_sets_each_allowlisted_field(owned, key, value):
+    status, accepted = owned.invoke(f"/{owned.slug}/controls", {"control": "set", "fields": {key: value}}, owned.proof)
+    assert status == 200 and accepted["data"]["argv"] == ["set", f"{key}={value}"]
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"codex-inbox-transport": "other"},
+        {"max-eng-agents": "two"},
+        {"max-ci-agents": "1000"},
+        {"max-plan-agents": "-1"},
+        {"max-eng-agents": "1\n"},
+        {"max-ci-agents": ""},
+        {"max-plan-agents": "1000"},
+        *({f"{lane}-agent": "gemini"} for lane in ("eng", "ci", "plan", "master")),
+    ],
+)
+def test_creator_set_refuses_values_the_field_cannot_take(owned, fields):
+    assert owned.invoke(f"/{owned.slug}/controls", {"control": "set", "fields": fields}, owned.proof) == (
+        400,
+        {"error": {"code": "schema_invalid", "message": "Request does not match the resource schema"}},
+    )
+    assert _queued(owned) == []
+
+
+def test_creator_set_names_the_first_refused_field_in_sorted_order(owned):
+    body = {"control": "set", "fields": {"zeta-field": "1", "api-url": "1"}}
+    assert owned.invoke(f"/{owned.slug}/controls", body, owned.proof) == (
+        403,
+        {"error": {"code": "forbidden", "message": "Proof controls cannot set api-url"}},
+    )
+
+
+def test_creator_set_accepts_the_longest_plain_value(owned):
+    value = "c" * 64
+    status, accepted = owned.invoke(
+        f"/{owned.slug}/controls", {"control": "set", "fields": {"eng-model": value}}, owned.proof
+    )
+    assert status == 200 and accepted["data"]["argv"] == ["set", f"eng-model={value}"]
+
+
+@pytest.mark.parametrize("body", [{"control": "set", "fields": {"master-agent": "codex"}}, {"control": "start"}])
+def test_set_and_start_refuse_a_real_swarm(owned, body):
+    owned.store.update(owned.slug, scratch=False)
+    assert owned.invoke(f"/{owned.slug}/controls", body, owned.proof) == (
+        403,
+        {"error": {"code": "forbidden", "message": "Proof controls need a scratch swarm"}},
+    )
+    assert _queued(owned) == []
+
+
+def test_a_non_creating_agent_cannot_set_or_start_the_fixture(owned):
+    other = owned.store.next_name(SLUG, "eng")
+    headers = {"X-Ledger-Agent": other, "X-Ledger-Token": authority.agent_token(owned.live["admin"], SLUG, other)}
+    assert owned.invoke(f"/{owned.slug}/credential", {}, headers) == (
+        403,
+        {"error": {"code": "forbidden", "message": "Only the creating engineer receives the fixture credential"}},
+    )
+    status, created = owned.invoke("", {"agent": other, "task": "other", "content": CONTENT}, owned.controller)
+    assert status == 200
+    theirs = created["data"]["slug"]
+    owned.store.create(SwarmConfig(theirs, "/repo", 1, 0, scratch=True))
+    status, issued = owned.invoke(f"/{theirs}/credential", {}, headers)
+    assert status == 200
+    for body in ({"control": "set", "fields": {"master-agent": "codex"}}, {"control": "start"}):
+        assert owned.invoke(f"/{owned.slug}/controls", body, {"X-Proof-Credential": issued["data"]["credential"]}) == (
+            403,
+            {"error": {"code": "forbidden", "message": "Wrong proof fixture credential"}},
+        )
+        assert owned.invoke(f"/{theirs}/controls", body, owned.proof) == (
+            403,
+            {"error": {"code": "forbidden", "message": "Wrong proof fixture credential"}},
+        )
+    assert _queued(owned) == []
 
 
 def test_stale_drain_refusal_keeps_its_protocol_status_and_reason(owned):
@@ -215,3 +374,193 @@ def test_proof_control_requires_its_request_file(capsys):
         cli.build_parser().parse_args(["proof-a1b2c3-contract-1", "proof-control"])
     assert refused.value.code == 2
     assert "--request" in capsys.readouterr().err
+
+
+def test_controller_migrates_missing_external_creator_once(owned):
+    key = owned.store.key(owned.slug, "proof-creator")
+    owned.store.redis.delete(key)
+    payload = {"parent": "external-parent", "agent": owned.owner, "task": "contract"}
+    for _ in range(2):
+        status, result = owned.invoke(f"/{owned.slug}/migrate", payload, owned.controller)
+        assert status == 200
+        assert result == {"data": {"parent": "external-parent", "owner": owned.owner}}
+    assert owned.store.redis.hgetall(key) == {"parent": "external-parent", "owner": owned.owner}
+
+
+def test_migration_requires_controller_and_preserves_existing_creator(owned):
+    payload = {"parent": "external-parent", "agent": owned.owner, "task": "contract"}
+    before = owned.store.redis.hgetall(owned.store.key(owned.slug, "proof-creator"))
+    status, _ = owned.invoke(f"/{owned.slug}/migrate", payload, owned.parent)
+    assert status == 403
+    status, result = owned.invoke(f"/{owned.slug}/migrate", payload, owned.controller)
+    assert status == 409
+    assert result["error"] == {
+        "code": "ownership_conflict",
+        "message": "Proof creator already differs from the requested migration",
+    }
+    assert owned.store.redis.hgetall(owned.store.key(owned.slug, "proof-creator")) == before
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [("agent", "engineer@fedcba-0001"), ("agent", "master@a1b2c3-0001"), ("agent", "invalid"), ("task", "another")],
+)
+def test_migration_refuses_a_different_proof_identity(owned, field, value):
+    owned.store.redis.delete(owned.store.key(owned.slug, "proof-creator"))
+    payload = {"parent": "external-parent", "agent": owned.owner, "task": "contract", field: value}
+    status, result = owned.invoke(f"/{owned.slug}/migrate", payload, owned.controller)
+    assert status == 403
+    assert result["error"] == {"code": "forbidden", "message": "Migration must match the proof engineer and task"}
+    assert owned.store.redis.hgetall(owned.store.key(owned.slug, "proof-creator")) == {}
+
+
+def test_controller_controls_use_the_existing_drain_fences(owned, monkeypatch):
+    request = {
+        "control": "drain",
+        "agent": "attempt",
+        "op": "chosen",
+        "incarnation": "old",
+        "generation": 3,
+        "task_revision": 4,
+    }
+    seen = []
+    monkeypatch.setattr(
+        server,
+        "lifecycle_control",
+        lambda slug, body, operator: (seen.append((slug, body, operator)) or None, "stale attempt"),
+    )
+    payload = {"owner": {"parent": SLUG, "agent": owned.owner, "task": "contract"}, "request": request}
+    status, result = owned.invoke(f"/{owned.slug}/controller-controls", payload, owned.controller)
+    assert status == 409
+    assert result["error"]["message"] == "stale attempt"
+    assert seen == [(owned.slug, request, False)]
+
+
+def test_controller_controls_refuse_wrong_owner_and_ungranted_actions(owned):
+    payload = {
+        "owner": {"parent": "wrong-parent", "agent": owned.owner, "task": "contract"},
+        "request": {"control": "pause"},
+    }
+    status, result = owned.invoke(f"/{owned.slug}/controller-controls", payload, owned.controller)
+    assert status == 409
+    assert result["error"] == {
+        "code": "ownership_conflict",
+        "message": "Proof creator differs from the configured requester",
+    }
+    payload["owner"]["parent"] = SLUG
+    payload["request"] = {"control": "resume"}
+    status, result = owned.invoke(f"/{owned.slug}/controller-controls", payload, owned.controller)
+    assert status == 403
+    assert result["error"]["message"] == "Proof controls permit only pause, drain, set and start"
+
+
+def test_controller_controls_do_not_enqueue_pause_again(owned):
+    owned.store.update(owned.slug, state="paused")
+    payload = {"owner": {"parent": SLUG, "agent": owned.owner, "task": "contract"}, "request": {"control": "pause"}}
+    status, result = owned.invoke(f"/{owned.slug}/controller-controls", payload, owned.controller)
+    assert status == 200
+    assert result == {"data": {"state": "paused"}}
+
+
+@pytest.mark.parametrize("target", ["missing", "binned", "real", "nonscratch"])
+def test_migration_refuses_missing_real_and_nonscratch_targets(owned, target, monkeypatch):
+    slug = owned.slug
+    if target == "missing":
+        exists = server.repository.exists
+        monkeypatch.setattr(server.repository, "exists", lambda other: other != slug and exists(other))
+    elif target == "binned":
+        server.repository.delete(slug)
+    elif target == "real":
+        slug = SLUG
+    else:
+        owned.store.update(slug, scratch=False)
+    payload = {"parent": "external-parent", "agent": owned.owner, "task": "contract"}
+    status, result = owned.invoke(f"/{slug}/migrate", payload, owned.controller)
+    assert status == 403
+    assert result["error"] == {"code": "forbidden", "message": "Migration needs an existing scratch proof"}
+
+
+def test_migration_fences_a_concurrent_owner(owned, monkeypatch):
+    key = owned.store.key(owned.slug, "proof-creator")
+    owned.store.redis.delete(key)
+    pipeline = owned.store.redis.pipeline
+    other = {"parent": "racing-parent", "owner": owned.owner}
+
+    def racing_pipeline():
+        pipe = pipeline()
+        execute = pipe.execute
+
+        def race():
+            owned.store.redis.hset(key, mapping=other)
+            return execute()
+
+        pipe.execute = race
+        return pipe
+
+    monkeypatch.setattr(owned.store.redis, "pipeline", racing_pipeline)
+    payload = {"parent": "external-parent", "agent": owned.owner, "task": "contract"}
+    status, result = owned.invoke(f"/{owned.slug}/migrate", payload, owned.controller)
+    assert status == 409
+    assert result["error"] == {"code": "ownership_conflict", "message": "Proof creator changed during migration"}
+    assert owned.store.redis.hgetall(key) == other
+
+
+def test_controller_controls_require_controller_and_enqueue_only_scoped_pause(owned):
+    payload = {"owner": {"parent": SLUG, "agent": owned.owner, "task": "contract"}, "request": {"control": "pause"}}
+    status, result = owned.invoke(f"/{owned.slug}/controller-controls", payload, owned.parent)
+    assert status == 403
+    assert result["error"]["message"] == "Proof ledgers need the controller credential"
+    status, result = owned.invoke(f"/{owned.slug}/controller-controls", payload, owned.controller)
+    assert status == 200
+    assert result["data"]["argv"] == ["pause"]
+    assert result["data"]["state"] == "pending"
+    assert "credential" not in result["data"]
+
+
+@pytest.mark.parametrize("owner", [{}, {"parent": "", "agent": "engineer@a1b2c3-0001", "task": "contract"}])
+def test_migration_refuses_incomplete_requester_identity(owned, owner):
+    with pytest.raises(proofs.APIError) as refused:
+        proofs.migrate(server, owned.slug, owner)
+    assert refused.value.status == 400
+    assert owned.store.redis.hgetall(owned.store.key(owned.slug, "proof-creator")) == {
+        "parent": SLUG,
+        "owner": owned.owner,
+    }
+
+
+@pytest.mark.parametrize(
+    "change", ["parent", "agent", "task", "extra", "parent-type", "agent-type", "task-type", "task-pattern", "list"]
+)
+def test_migration_schema_refuses_malformed_payload_before_authority(owned, change):
+    payload = {"parent": "external-parent", "agent": owned.owner, "task": "contract"}
+    if change in ("parent", "agent", "task"):
+        payload.pop(change)
+    elif change == "extra":
+        payload["extra"] = True
+    elif change.endswith("-type"):
+        payload[change.removesuffix("-type")] = 1
+    elif change == "task-pattern":
+        payload["task"] = "Contract"
+    else:
+        payload = []
+    with pytest.raises(proofs.APIError) as refused:
+        proofs.migrate(server, owned.slug, payload)
+    assert refused.value.status == 400
+    assert refused.value.code == "schema_invalid"
+
+
+@pytest.mark.parametrize("change", ["owner", "request", "extra", "request-type", "owner-type", "list"])
+def test_controller_control_schema_refuses_malformed_payload(owned, change):
+    payload = {"owner": {"parent": SLUG, "agent": owned.owner, "task": "contract"}, "request": {"control": "pause"}}
+    if change in ("owner", "request"):
+        payload.pop(change)
+    elif change == "extra":
+        payload["extra"] = True
+    elif change.endswith("-type"):
+        payload[change.removesuffix("-type")] = []
+    else:
+        payload = []
+    with pytest.raises(proofs.APIError) as refused:
+        proofs.controller_control(server, owned.slug, payload)
+    assert refused.value.status == 400
+    assert refused.value.code == "schema_invalid"

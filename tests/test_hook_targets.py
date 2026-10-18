@@ -20,6 +20,7 @@ from hooks.targets import (
 from hooks.targets.capabilities import (
     allowed_permission_decisions,
     can_inject_context,
+    reports_shell_cwd,
     requires_envelope_block,
     supports_arg_mutation,
 )
@@ -599,11 +600,12 @@ class TestCodexEnforcementFallback:
         hm.on_post_tool_use({"hook_event_name": "PostToolUse", "tool_output": "ok", **call})
         assert any("agentihooks swarm sw handoff" in text for text in captured)
 
-    def test_a_codex_swarm_agent_over_the_compact_limit_is_denied_work(self, codex, monkeypatch):
+    def test_a_codex_swarm_agent_over_the_compact_limit_is_denied_work(self, codex, monkeypatch, tmp_path):
         import hooks.context.context_recycle as recycle
         import hooks.hook_manager as hm
 
         monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "sw-eng-1")
+        monkeypatch.setattr(recycle, "AGENTIHOOKS_HOME", tmp_path)
         monkeypatch.setattr(recycle, "used_tokens", lambda session_id: 900_000)
         call = {"session_id": "codex-recycle", "tool_name": "Bash", "tool_input": {"command": "git commit -m x"}}
         with pytest.raises(hm.BlockAction, match="agentihooks swarm sw handoff"):
@@ -753,6 +755,12 @@ class TestCopilotCapabilities:
         assert supports_arg_mutation("copilot") is True
         assert supports_arg_mutation("codex") is False
         assert supports_arg_mutation("claude") is True
+
+    def test_only_claude_reports_the_shell_cwd(self, codex):
+        assert reports_shell_cwd("claude") is True
+        assert reports_shell_cwd("codex") is False
+        assert reports_shell_cwd("copilot") is False
+        assert reports_shell_cwd() is False
 
     def test_envelope_block_required_only_for_copilot(self):
         # Settled live on v1.0.80: preToolUse denies on exit 2 alone;

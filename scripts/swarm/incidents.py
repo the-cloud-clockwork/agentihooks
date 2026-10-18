@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import json
+import os
 import socket
 import sys
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from scripts.inbox.store import InboxStore
 from scripts.swarm import push
 from scripts.swarm.store import PREFIX
+
+PRESSURE_OFF_KEY = "host-pressure-off"
 
 if TYPE_CHECKING:
     from redis import Redis
@@ -52,7 +57,10 @@ def deliver(redis: Redis, kind: str, raised: str, resolved: str) -> None:
         return
     try:
         event = redis.lindex(f"{root}:outbox", 0)
-        if event and push.send("critical" if kind == "ledger" else "alerts", raised if event == "raised" else resolved):
+        text = (
+            json.loads(event)["text"] if event and event.startswith("{") else raised if event == "raised" else resolved
+        )
+        if event and push.send("critical" if kind == "ledger" else "alerts", text):
             redis.lpop(f"{root}:outbox")
     finally:
 
@@ -89,12 +97,16 @@ def mail(redis: Redis, kind: str, address: str, text: str, resolved: bool = Fals
     return True
 
 
-def host_pressure(store: RedisStore, slug: str) -> list[str]:
+def host_pressure(store: RedisStore, slug: str, environ: Mapping[str, str] = os.environ) -> list[str]:
     from redis.exceptions import RedisError
 
     from scripts.swarm import host_budget, ledger_probe
 
     try:
+        if host_budget.deployed(environ):
+            store.redis.set(store.key(slug, PRESSURE_OFF_KEY), host_budget.PRESSURE_OFF)
+            return []
+        store.redis.delete(store.key(slug, PRESSURE_OFF_KEY))
         sample = host_budget.read_host()
         if sample is None:
             return []
@@ -117,3 +129,8 @@ def host_pressure(store: RedisStore, slug: str) -> list[str]:
     except (OSError, RedisError):
         print("host pressure check unavailable", file=sys.stderr)
         return []
+
+
+def status_lines(store: RedisStore, slug: str) -> list[str]:
+    off = store.redis.get(store.key(slug, PRESSURE_OFF_KEY))
+    return [off] if off else []

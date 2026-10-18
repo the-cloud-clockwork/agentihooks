@@ -163,6 +163,12 @@ def test_a_remote_host_without_a_hive_id_is_refused_before_any_change(remote_tak
     assert (_masters(store), sent, broadcast.session_name(4242)) == ([], [], CARRIED)
 
 
+def test_a_workstation_on_a_hosted_ledger_needs_no_hive_id():
+    assert take_master.hive_of({"SWARM_URL": "https://swarm.example"}) == ""
+    assert take_master.hive_of({"SWARM_URL": "https://swarm.example", "AGENTIHOOKS_DEPLOYMENT": "local"}) == ""
+    assert take_master.hive_of({"AGENTIHOOKS_DEPLOYMENT": "compose", "AGENTIHOOKS_HIVE_ID": "member-9"}) == "member-9"
+
+
 def test_a_local_ledger_keeps_the_session_unpinned(taker, monkeypatch):  # noqa: F811
     store, ledger, _, _ = taker
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")

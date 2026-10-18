@@ -1,5 +1,9 @@
 """Tests for hooks.context.serena_edit_guard."""
 
+import json
+import subprocess
+import sys
+
 import pytest
 
 from hooks.context.serena_edit_guard import check
@@ -102,3 +106,39 @@ def test_the_guard_can_be_turned_off(trees, monkeypatch):
     _, worktree = trees
     monkeypatch.setattr("hooks.config.SERENA_EDIT_GUARD_ENABLED", False)
     check(_tool("Edit", worktree, file_path=str(worktree / "pkg" / "mod.py")))
+
+
+@pytest.mark.parametrize("profile", ["anton", "engineer"])
+@pytest.mark.parametrize("value", [None, "", "true", "0", "banana", "FALSE", " false ", "false"])
+def test_agentihooks_serena_switch_preserves_shared_enforcement(trees, monkeypatch, profile, value):
+    primary, worktree = trees
+    monkeypatch.setenv("AGENTIHOOKS_PROFILE", profile)
+    monkeypatch.setenv("SERENA_EDIT_GUARD_ENABLED", "false")
+    monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
+    if value is None:
+        monkeypatch.delenv("AGENTIHOOKS_SERENA", raising=False)
+    else:
+        monkeypatch.setenv("AGENTIHOOKS_SERENA", value)
+    payloads = [
+        _tool("Edit", primary, file_path=str(primary / "pkg" / "mod.py")),
+        _tool("mcp__serena__replace_content", worktree, relative_path="pkg/mod.py"),
+        _tool("Edit", worktree, file_path=str(worktree / "pkg" / "mod.py")),
+    ]
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import json, sys; from hooks.context.serena_edit_guard import check; "
+            "[check(payload) for payload in json.loads(sys.argv[1])]",
+            json.dumps(payloads),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.stdout == ""
+    if value == "false":
+        assert result.returncode == 0, result.stderr
+        assert result.stderr == ""
+    else:
+        assert result.returncode == 1
+        assert "activate_project" in result.stderr

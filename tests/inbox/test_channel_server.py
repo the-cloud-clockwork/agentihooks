@@ -119,7 +119,7 @@ def _message(**fields):
 INITIALIZE = {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}}
 
 
-def session(store, scenario):
+def session(store, scenario, active=None):
     """Run the channel server for bob over memory streams; scenario(send, receive) drives it as Claude would."""
     import anyio
 
@@ -132,7 +132,8 @@ def session(store, scenario):
             return got.message.root.model_dump(exclude_none=True)
 
         async with anyio.create_task_group() as group:
-            group.start_soon(channel.run, store, "bob", server_in, server_out)
+            options = () if active is None else (active,)
+            group.start_soon(channel.run, store, "bob", server_in, server_out, *options)
             await to_server.send(_message(id=1, method="initialize", params=INITIALIZE))
             opened = await receive()
             await to_server.send(_message(method="notifications/initialized"))
@@ -330,7 +331,7 @@ def test_serve_runs_the_session_over_stdio(store, monkeypatch):
     import anyio
 
     anyio.run(channel.serve, store, "bob")
-    assert seen == [(store, "bob", "read", "write")]
+    assert seen == [(store, "bob", "read", "write", True)]
 
 
 def test_main_serves_this_sessions_identity(store, monkeypatch):
@@ -353,3 +354,101 @@ def test_main_without_identity_exits_with_the_reason(monkeypatch, capsys):
         channel.main()
     assert stopped.value.code == 1
     assert capsys.readouterr().err == "agentihooks inbox channel: no session identity\n"
+
+
+def test_registered_server_without_channel_activation_never_claims_messages(monkeypatch):
+    import anyio
+
+    calls = []
+    monkeypatch.setattr(channel, "identity", lambda: pytest.fail("dormant registration must not require an identity"))
+    monkeypatch.setattr(channel, "connect", lambda: pytest.fail("an inactive channel must not connect to the inbox"))
+    monkeypatch.setattr(anyio, "run", lambda serve, store, me, active: calls.append((serve, store, me, active)))
+    channel.main(active=False)
+    assert calls == [(channel.serve, None, "", False)]
+
+
+@pytest.mark.parametrize("connected", [False, True])
+def test_dormant_protocol_session_never_starts_delivery(store, monkeypatch, connected):
+    import anyio
+
+    monkeypatch.setattr(channel, "connect", lambda: pytest.fail("dormant registration must not reconnect"))
+
+    async def pushed(*args):
+        pytest.fail("dormant registration must not claim or push messages")
+
+    async def idle(send, receive):
+        with anyio.move_on_after(0.1) as timeout:
+            await receive()
+        return timeout.cancel_called
+
+    monkeypatch.setattr(channel, "_push", pushed)
+    opened, listed, idle_timeout = session(store if connected else None, idle, active=False)
+    assert opened["result"]["serverInfo"]["name"] == "inbox"
+    assert listed["result"]["tools"][0]["name"] == "reply"
+    assert idle_timeout is True
+
+
+def test_saved_registration_is_dormant_and_preserves_the_native_config(tmp_path, monkeypatch):
+    import json
+
+    from scripts import claude_trust
+
+    environ = {"CLAUDE_CONFIG_DIR": str(tmp_path / "master")}
+    channel.register(environ)
+    config = tmp_path / "master" / ".claude.json"
+    saved = json.loads(config.read_text())
+    calls = []
+    monkeypatch.setattr(channel, "main", lambda active=True: calls.append(active))
+    exec(saved["mcpServers"]["inbox"]["args"][-1])
+    assert calls == [False]
+    saved["mcpServers"]["existing"] = {"command": "existing"}
+    saved["hasCompletedOnboarding"] = True
+    config.write_text(json.dumps(saved))
+    config.chmod(0o600)
+    monkeypatch.setattr(claude_trust, "_write", lambda *args: pytest.fail("current registration must not be rewritten"))
+    channel.register(environ)
+    assert json.loads(config.read_text()) == saved
+    assert config.stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize("servers", [None, []])
+def test_invalid_saved_registration_is_left_untouched_and_unlocks(tmp_path, servers):
+    import json
+
+    config = tmp_path / ".claude.json"
+    text = json.dumps({"mcpServers": servers})
+    config.write_text(text)
+    with pytest.raises(ValueError, match="mcpServers is not a JSON object"):
+        channel.register({"CLAUDE_CONFIG_DIR": str(tmp_path)})
+    assert config.read_text() == text
+    assert not (tmp_path / ".claude.json.lock").exists()
+
+
+def test_registration_waits_for_the_native_config_writer(tmp_path, monkeypatch):
+    lock = tmp_path / ".claude.json.lock"
+    lock.mkdir()
+    waits = []
+
+    def unlock(delay):
+        waits.append(delay)
+        lock.rmdir()
+
+    monkeypatch.setattr(channel.time, "sleep", unlock)
+    channel.register({"CLAUDE_CONFIG_DIR": str(tmp_path)})
+    assert waits == [0.1]
+    assert (tmp_path / ".claude.json").is_file()
+    assert not lock.exists()
+
+
+def test_registration_times_out_without_changing_a_locked_native_config(tmp_path, monkeypatch):
+    lock = tmp_path / ".claude.json.lock"
+    lock.mkdir()
+    clock = iter([0, 2, 3])
+    waits = []
+    monkeypatch.setattr(channel.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(channel.time, "sleep", waits.append)
+    with pytest.raises(OSError, match="is held"):
+        channel.register({"CLAUDE_CONFIG_DIR": str(tmp_path)})
+    assert waits == [0.1]
+    assert lock.is_dir()
+    assert not (tmp_path / ".claude.json").exists()

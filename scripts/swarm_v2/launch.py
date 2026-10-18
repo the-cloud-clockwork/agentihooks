@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Protocol
 
-from hooks.context.profile_chain import PACKAGE_ROLES
+from hooks.context import profile_chain
 from scripts.swarm import live_binding, profile_choice, prompt
 from scripts.swarm.store import AgentRecord, SwarmError
 from scripts.swarm_v2 import broadcast_bridge, worker_home
@@ -93,7 +93,9 @@ def opening(request: SpawnRequest) -> str:
 
 
 def worker_profiles() -> set[str]:
-    roles = {path.name for path in PACKAGE_ROLES.iterdir() if path.is_dir() and not path.name.startswith("_")}
+    roles = {
+        path.name for path in profile_chain.PACKAGE_ROLES.iterdir() if path.is_dir() and not path.name.startswith("_")
+    }
     return {WORKER_DEFAULT, *roles}
 
 

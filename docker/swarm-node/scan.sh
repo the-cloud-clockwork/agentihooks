@@ -1,13 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+scanner="aquasec/trivy:0.58.1"
+if [[ "${1:-}" == --pull-scanner ]]; then
+    exec docker pull --quiet "$scanner"
+fi
 image="${1:?worker image to scan}"
 output="$(realpath -m "${2:?scan evidence directory}")"
-scanner="aquasec/trivy:0.58.1"
 mkdir -p "$output"
+cache_args=()
+if [[ -n "${WORKER_SCANNER_CACHE:-}" ]]; then
+    cache="$(realpath -m "$WORKER_SCANNER_CACHE")"
+    mkdir -p "$cache"
+    cache_args=(--user "$(id -u):$(stat -c %g /var/run/docker.sock)" -v "$cache:/cache" -e TRIVY_CACHE_DIR=/cache)
+fi
 rm -f "$output/secrets.json"
 status=0
-docker run --rm -v /var/run/docker.sock:/var/run/docker.sock:ro -v "$output:/out" "$scanner" \
+docker run --rm "${cache_args[@]}" -v /var/run/docker.sock:/var/run/docker.sock:ro -v "$output:/out" "$scanner" \
     image --quiet --scanners secret --image-config-scanners secret --exit-code 1 \
     --format json --output /out/secrets.json "$image" > "$output/scan.log" 2>&1 || status=$?
 if [[ ! -s "$output/secrets.json" ]] || (( status > 1 )); then

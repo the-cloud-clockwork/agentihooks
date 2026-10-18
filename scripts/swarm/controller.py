@@ -4,6 +4,8 @@ import os
 import sys
 import time
 import uuid
+from dataclasses import replace
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from scripts.swarm import lease
@@ -48,6 +50,7 @@ class FencedRuntime:
             and callable(getattr(runtime.herdr_runtime, "_profile_decision", None))
         ):
             runtime = hive_controller(runtime, store, slug, held)
+            runtime.router.placement = replace(runtime.router.placement, master_seats=lambda: frozenset(("master",)))
         self.runtime, self.deployment = runtime, deployment
 
     def __getattr__(self, name):
@@ -74,13 +77,14 @@ class FencedRuntime:
         return "" if getattr(router, "placement", None) is not None else NO_KUBERNETES
 
     def placement_refusal(self, lane: str, task: dict) -> str:
+        task = {"id": "master", **task} if lane == "master" else task
         if refused := self._mode_refusal():
             return refused
         if self.deployment == LOCAL:
             return ""
         router = self.runtime.router
         if router.placement.backend == "hive":
-            if lane not in ("eng", "ci"):
+            if not _hive_lane(lane, task):
                 original = self.runtime.original_runtime.router
                 wanted = original.placed_backend(lane, task)
                 return (
@@ -111,22 +115,69 @@ class FencedRuntime:
             raise SwarmError(refused)
         with lease.kept(self.store, self.slug, self.held):
             runtime = self.runtime
-            if lane not in ("eng", "ci") and getattr(runtime, "hive_launch", None) is not None:
+            if not _hive_lane(lane, task) and getattr(runtime, "hive_launch", None) is not None:
                 runtime = runtime.original_runtime
             return runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch})
+
+
+def _hive_lane(lane: str, task: dict) -> bool:
+    return lane in ("eng", "ci") or (lane == "master" and task.get("id") == "master") or bool(task.get("hive"))
+
+
+def _read(path: str) -> str:
+    try:
+        return Path(path).read_text().strip()
+    except OSError:
+        return ""
+
+
+def _host() -> str:
+    boot = _read("/proc/sys/kernel/random/boot_id")
+    try:
+        return f"{boot}:{os.readlink('/proc/self/ns/pid')}" if boot else ""
+    except OSError:
+        return ""
+
+
+def _stat(pid) -> list[str]:
+    return _read(f"/proc/{pid}/stat").rsplit(")", 1)[-1].split()
+
+
+def _holder() -> dict:
+    host, fields = _host(), _stat(os.getpid())
+    return {"host": host, "pid": os.getpid(), "start": fields[19]} if host and len(fields) > 19 else {}
+
+
+def _gone(pid: int, start: str) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        return False
+    fields = _stat(pid)
+    return len(fields) > 19 and (fields[0] == "Z" or fields[19] != start)
+
+
+def _dead(raw: str) -> bool:
+    held = json.loads(raw) if raw.startswith("{") else {}
+    host = _host()
+    if not host or held.get("host") != host or not {"pid", "start"} <= held.keys():
+        return False
+    return _gone(held["pid"], held["start"])
 
 
 def take_tick_lock(store: RedisStore, slug: str, held: lease.Lease, ttl_ms: int) -> str | None:
     from redis.exceptions import WatchError
 
     key = store.key(slug, "tick-lock")
-    token = json.dumps({"epoch": held.epoch, "token": uuid.uuid4().hex})
+    token = json.dumps({"epoch": held.epoch, "token": uuid.uuid4().hex, **_holder()})
     with store.redis.pipeline() as pipe:
         try:
             pipe.watch(key, store.key(slug, "control-owner"))
             lease.require(store, slug, held)
             raw = pipe.get(key)
-            if raw and (not raw.startswith("{") or json.loads(raw)["epoch"] == held.epoch):
+            if raw and (not raw.startswith("{") or json.loads(raw)["epoch"] == held.epoch) and not _dead(raw):
                 return None
             pipe.multi()
             pipe.set(key, token, px=ttl_ms)

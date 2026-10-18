@@ -144,6 +144,25 @@ def test_confirm_shown_confirms_only_this_receivers_items_delivered_before_the_e
     assert store.get(other.id).state == "delivered"
 
 
+def test_a_successor_claims_and_confirms_a_vacant_seat_backlog_in_batches(store, monkeypatch):
+    clock = iter(range(1000, 10000))
+    monkeypatch.setattr("scripts.inbox.store.now_ms", lambda: next(clock))
+    monkeypatch.setattr("scripts.inbox.seen.now_ms", lambda: next(clock))
+    seat = "master@sw"
+    queued = [store.send("alice", seat, f"work {number}") for number in range(40)]
+    store.seats.occupy(seat, "bob", at=next(clock))
+
+    for offset in range(0, 40, 5):
+        expected = [item.id for item in queued[offset : offset + 5]]
+        shown = seen.claim(store, "bob")
+        assert [item.id for item in shown] == expected
+        assert [item.id for item in store.confirm_shown("bob", next(clock))] == expected
+        assert all(store.get(item.id).state == "confirmed" for item in queued[: offset + 5])
+        assert all(store.get(item.id).state == "pending" for item in queued[offset + 5 :])
+
+    assert seen.claim(store, "bob") == []
+
+
 def test_a_successor_at_a_seat_does_not_confirm_what_its_predecessor_was_shown(store):
     seat = "eng-1@sw"
     store.seats.occupy(seat, "bob", at=1)

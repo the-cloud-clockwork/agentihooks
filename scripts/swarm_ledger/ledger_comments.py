@@ -5,6 +5,7 @@ Agent text is for the operator: plain words saying what was done or why it was s
 """
 
 import re
+from itertools import groupby
 
 LIMITS = {"comment": 50, "chat": 100, "item": 40, "priority": 20}
 OUTCOMES = ("done", "blocked")
@@ -52,7 +53,7 @@ def problems(text, kind, long=False, task_ids=()):
     prose = web_links().sub(" ", text)
     hash_prose = re.sub(r"[\w-]+", lambda match: " " if match.group() in task_ids else match.group(), prose)
     for name, pattern in RULES:
-        match = pattern.search(hash_prose if name == "commit hash" else prose)
+        match = pattern.search(hash_prose if name in ("commit hash", "run or job id") else prose)
         if match:
             found.append(f"{name} '{match.group(0).strip()}'")
     for name, mark, most in PUNCTUATION:
@@ -80,11 +81,10 @@ def can_change(entry, by, members):
 
 
 def post_status(thread, by, entry_id, text, ctx, target, attachments=None):
-    """An agent's comment amends its own latest one on the item, unless the operator spoke after it."""
+    """An agent's comment amends its own latest one on the item, unless anyone commented after it."""
     live = [e for e in thread if not e.get("deleted")]
     mine = next((e for e in reversed(live) if e.get("by") == by and "to" not in e), None)
-    replied = mine is not None and any(e.get("by") == "operator" for e in live[live.index(mine) + 1 :])
-    if mine is None or replied or "outcome" in mine:
+    if mine is None or mine is not live[-1] or "outcome" in mine:
         if any(e["id"] == entry_id for e in thread):
             return
         thread.append({"id": entry_id, "by": by, "at": ctx.at, "text": text})
@@ -188,14 +188,18 @@ def audit_item(where, item, task_ids=()):
     rows = []
     if "text" in item and problems(item["text"], "item", task_ids=task_ids):
         rows.append((where, "text", "", problems(item["text"], "item", task_ids=task_ids)))
-    counts = {}
-    for entry in item.get("comments", []):
-        if entry.get("deleted") or entry.get("by") == "operator":
+    counts = []
+    live = (entry for entry in item.get("comments", []) if not entry.get("deleted"))
+    for by, entries in groupby(live, key=lambda entry: entry["by"]):
+        if by == "operator":
             continue
-        counts[entry["by"]] = counts.get(entry["by"], 0) + ("to" not in entry)
-        if problems(entry["text"], "comment", task_ids=task_ids):
-            rows.append((where, entry["id"], entry["by"], problems(entry["text"], "comment", task_ids=task_ids)))
-    rows += [(where, "-", by, [f"{n} comments, keep one status"]) for by, n in counts.items() if n > 1]
+        count = 0
+        for entry in entries:
+            count += "to" not in entry
+            if problems(entry["text"], "comment", task_ids=task_ids):
+                rows.append((where, entry["id"], by, problems(entry["text"], "comment", task_ids=task_ids)))
+        counts.append((by, count))
+    rows += [(where, "-", by, [f"{n} comments, keep one status"]) for by, n in counts if n > 1]
     return rows
 
 

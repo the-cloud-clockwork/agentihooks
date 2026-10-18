@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/publish.py:scripts.swarm.publish.x_repository_task__mutmut_47:0666b449ea440f00d25dc491775b75481a0c531e1b3e2c95afbd70772548571b": {
+    "reader": "Standards",
+    "reason": "The ambiguous branch reset to None and empty string both normalize to the same final empty branch."
+  }
+}

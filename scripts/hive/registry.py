@@ -7,7 +7,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from scripts.hive.auth import HiveError
+from scripts.hive import scope
+from scripts.hive.auth import INDEX, HiveError
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm_v2.keyspace import INSTALLATION_FILE
 
@@ -18,7 +19,6 @@ if TYPE_CHECKING:
 ROLES = ("master", "qa", "frontend", "eng", "ci", "plan")
 UI_ROLES = ("master", "qa", "frontend")
 LIVE_MS = 90_000
-INDEX = f"{ROOT}:hives"
 HIVE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}")
 JSON_FIELDS = {"roles": list, "prefer": dict, "harnesses": list, "slots": list, "interactive": dict, "repos": list}
 INT_FIELDS = ("max_agents", "heartbeat_at")
@@ -149,7 +149,8 @@ def update(redis: "Redis", hive_id: str, pairs: list[str]) -> dict:
         for field, value in _default(hive_id).items():
             pipe.hsetnx(key(hive_id), field, _encode(field, value))
         pipe.hset(key(hive_id), mapping={field: _encode(field, value) for field, value in fields.items()})
-        pipe.sadd(INDEX, hive_id)
+        if hive_id != scope.member():
+            pipe.sadd(INDEX, hive_id)
         return record
 
     return redis.transaction(write, key(hive_id), value_from_callable=True)

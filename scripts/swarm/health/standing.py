@@ -16,6 +16,7 @@ KIND = "bottleneck stage"
 STALE_MS = 6 * 3_600_000
 EPISODES = 20
 DETECTOR_UNIT = "task hours"
+SAME_MEASURE = {"task hours in the window": DETECTOR_UNIT}
 
 
 @dataclass(frozen=True)
@@ -25,6 +26,8 @@ class Reading:
     unit: str
     episode: str
     detail: str = ""
+    evidence: tuple = ()
+    links: tuple = ()
 
 
 def key(slug: str) -> str:
@@ -61,6 +64,7 @@ def _fire(old, stage, reading, now_ms):
         "threshold": reading.threshold,
         "unit": reading.unit,
         "detail": reading.detail,
+        **({"evidence": reading.evidence, "links": reading.links} if reading.links or reading.evidence else {}),
         "fired": fired,
         "episodes": episodes,
         "first_at": old.get("first_at", now_ms),
@@ -68,11 +72,18 @@ def _fire(old, stage, reading, now_ms):
     }
 
 
+def _owned(unit):
+    return SAME_MEASURE.get(unit, unit) == DETECTOR_UNIT
+
+
 def _detector(old, reading, now_ms, threshold):
     if old.get("detector") == reading and (old.get("unit") != DETECTOR_UNIT or old.get("threshold") == threshold):
         return old
     known = {*old.get("episodes", []), *old.get("detector", {}).get("episodes", [])}
     added = [episode for episode in reading["episodes"] if episode not in known]
+    unit = old.get("unit", DETECTOR_UNIT)
+    if not _owned(unit) and now_ms - old["updated_at"] >= STALE_MS:
+        old, unit = {**old, "unit": DETECTOR_UNIT, "detail": ""}, DETECTOR_UNIT
     row = {
         "stage": reading["stage"],
         "unit": DETECTOR_UNIT,
@@ -82,7 +93,7 @@ def _detector(old, reading, now_ms, threshold):
         "fired": old.get("fired", 0) + len(added),
         "episodes": [*old.get("episodes", []), *added][-EPISODES:],
         "detector": reading,
-        "updated_at": now_ms,
+        "updated_at": now_ms if _owned(unit) else old["updated_at"],
     }
     if row["unit"] == DETECTOR_UNIT:
         row["value"] = reading["seconds"] / 3600
@@ -117,6 +128,7 @@ def clear_detector(redis: Redis, slug: str, stage: str) -> bool:
 def _finding(row: dict) -> Finding:
     times = "time" if row["fired"] == 1 else "times"
     evidence = (f"Fired {row['fired']} {times}", row["detail"]) if row["detail"] else (f"Fired {row['fired']} {times}",)
+    evidence += tuple(row.get("evidence", ()))
     detector = row.get("detector")
     if detector:
         evidence += (
@@ -129,7 +141,9 @@ def _finding(row: dict) -> Finding:
         f"{row['stage'].replace('_', ' ')} at {row['value']} {row['unit']}, over its {row['threshold']} threshold",
         evidence,
         f"{row['threshold']} {row['unit']}",
-        row["fired"],
+        row["value"],
+        SAME_MEASURE.get(row["unit"], row["unit"]),
+        links=tuple(row.get("links", ())),
     )
 
 

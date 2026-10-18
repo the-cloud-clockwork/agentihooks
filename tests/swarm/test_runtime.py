@@ -291,6 +291,23 @@ def test_spawn_marks_the_launch_as_the_tick_s_own(tmp_path, monkeypatch):
     assert _spawn_env(tmp_path, monkeypatch, compact_limit=0)["AGENTIHOOKS_SWARM_SPAWN"] == "1"
 
 
+def test_spawn_hands_each_agent_its_own_ledger_token_and_never_the_server_secret(tmp_path, monkeypatch):
+    from scripts.swarm_ledger.ledger_authority import agent_token
+
+    monkeypatch.setenv("SWARM_SECRET", "seed-one")
+    monkeypatch.setenv("AGENTIHOOKS_LEDGER_AGENT_TOKEN", "the-tick-s-own")
+    env = _spawn_env(tmp_path, monkeypatch, compact_limit=0)
+    assert env["AGENTIHOOKS_LEDGER_AGENT_TOKEN"] == agent_token("seed-one", "sw", "engineer@a1b2c3-0001")
+    assert "SWARM_SECRET" not in env
+
+
+def test_spawn_without_the_server_secret_never_passes_on_the_tick_s_token(tmp_path, monkeypatch):
+    monkeypatch.delenv("SWARM_SECRET", raising=False)
+    monkeypatch.setenv("AGENTIHOOKS_LEDGER_AGENT_TOKEN", "the-tick-s-own")
+    env = _spawn_env(tmp_path, monkeypatch, compact_limit=0)
+    assert "AGENTIHOOKS_LEDGER_AGENT_TOKEN" not in env and "SWARM_SECRET" not in env
+
+
 def test_spawn_names_the_predecessor_conversation_of_an_attached_transfer(tmp_path, monkeypatch):
     task = {"id": "t1", "title": "x", "transfer": {"id": "x1"}, "handoff_envelope": {"conversation_id": "sess-old"}}
     env = _spawn_env(tmp_path, monkeypatch, task=task, compact_limit=0)
@@ -333,6 +350,21 @@ def _spawn_seen(tmp_path, lanes, lane="eng", config=None):
     )
     runtime.spawn(config, lane, "engineer@a1b2c3-0001", {"id": "t1", "title": "x"})
     return seen
+
+
+@pytest.mark.parametrize("lane", ["eng", "ci", "master", "plan"])
+def test_claude_swarm_display_name_is_mentionable(tmp_path, lane):
+    seen = _spawn_seen(tmp_path, {lane: {"agent": "claude"}}, lane=lane)
+    argv = seen["argv"]
+    assert argv[argv.index("--name") + 1] == "engineer-a1b2c3-0001"
+
+
+def test_claude_resume_uses_a_mentionable_display_name(tmp_path):
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee")
+    runtime.resume(config, agent, "you were restored")
+    argv = seen["runs"][0]
+    assert argv[argv.index("--name") + 1] == "engineer-a1b2c3-0001"
+    assert seen["env"]["AGENTIHOOKS_AGENT_NAME"] == "engineer@a1b2c3-0001"
 
 
 @pytest.mark.parametrize("pin", ["claude", "codex"])
@@ -925,6 +957,52 @@ def test_a_master_launches_on_the_frontier_model_at_high_effort_whatever_the_lan
     assert _launched(tmp_path, monkeypatch, "master", task, lanes, harness=harness, env=env) == launch
 
 
+MASTER_RANGES = [(("medium", "xhigh"), "high:xhigh"), (("low", "medium"), "high:high")]
+
+
+@pytest.mark.parametrize("bounds,handed", MASTER_RANGES)
+def test_a_master_handoff_successor_launches_at_high_effort_whatever_its_saved_launch_or_the_range_names(
+    tmp_path, monkeypatch, bounds, handed
+):
+    monkeypatch.delenv("AGENTIHOOKS_CLAUDE_EFFORT", raising=False)
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen.update(argv=argv, env=kwargs["env"])
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "open"))
+    config = SimpleNamespace(
+        slug="sw",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        lanes={},
+        autonomy="delegate",
+        effort_min=bounds[0],
+        effort_max=bounds[1],
+    )
+    launch = {"profile": "master", "harness": "claude", "model": "opus", "effort": "medium"}
+    task = {"id": "master", "peer": "", "handoff": "# Handoff", "handoff_envelope": {"launch": launch}}
+    runtime.spawn(config, "master", "master@a1b2c3-0002", task)
+    assert _passed(seen["argv"]) == ["--model", "opus", "--effort", "high"]
+    assert seen["env"]["AGENTIHOOKS_SWARM_EFFORT_RANGE"] == handed
+
+
+@pytest.mark.parametrize("bounds,handed", MASTER_RANGES)
+def test_a_resumed_master_launches_at_high_effort_whatever_its_previous_agent_or_the_range_names(
+    tmp_path, bounds, handed
+):
+    from dataclasses import replace
+
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee")
+    config.effort_min, config.effort_max = bounds
+    master = replace(agent, name="master@a1b2c3-0001", lane="master", task="master", profile="master", effort="medium")
+    runtime.resume(config, master, "you were restored")
+    assert _passed(seen["runs"][0]) == ["--route", "a1", "--model", "opus", "--effort", "high"]
+    assert seen["env"]["AGENTIHOOKS_SWARM_EFFORT_RANGE"] == handed
+
+
 def _lowest_pick(*args, **kwargs):
     from hooks.classifier import Answer, DecisionResult
 
@@ -1127,6 +1205,8 @@ def test_quota_capacity_reads_this_environment_and_hands_demand_on(tmp_path, mon
     runtime.quota_capacity(config, [], 5.0, {"eng": 1})
     assert seen == {"environ": dict(os.environ), "now": 5.0, "refresh": True, "demand": {"eng": 1}}
     runtime.quota_capacity(config, [], 5.0, {"eng": 0})
+    assert seen["refresh"] is True
+    runtime.quota_capacity(config, [], 5.0, {"eng": 0}, refresh=False)
     assert seen["refresh"] is False
 
 

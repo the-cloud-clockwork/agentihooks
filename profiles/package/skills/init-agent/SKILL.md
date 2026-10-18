@@ -12,6 +12,15 @@ argument-hint: "[--dir PATH] [--name NAME] [--prompt-file PATH] [-- <claude flag
 
 # Init Agent
 
+Run it only when the operator's own prompt this turn, typed in your terminal,
+says `open pane` (or `open a pane`, `open the pane`); a PreToolUse guard denies
+it otherwise. Without the phrase, write the command in your own terminal for him
+to run, one flag per line joined with backslashes, and add the ask to Priorities
+in a swarm or ledger session.
+
+A quota handoff's `init-agent --handoff` passes while the runtime's quota
+policy has the handoff due.
+
 `agentihooks init-agent` owns host detection, terminal quoting, OAuth
 account routing, and the start check. Never build a `herdr`, `wt.exe`,
 `osascript`, or terminal command by hand.

@@ -9,6 +9,7 @@ from scripts.swarm_ledger import request_metrics
 
 from . import hierarchy
 from .events import append_events, read_events, trim_events, write_events
+from .fragments import document, encoded
 from .rows import TABLES, assemble, diff, encode, flatten, read_rows, write_rows
 from .seeds import read_seeds, sync_values, write_seeds
 
@@ -48,8 +49,13 @@ class Missing(KeyError, ValueError):
 class Entry:
     """One ledger as last stored: its generation, canonical text, a parsed copy callers only read and views of it."""
 
-    def __init__(self, generation, text, state):
-        self.generation, self.text, self.state, self.views = generation, text, state, {}
+    def __init__(self, generation, text, state, fragments=None):
+        self.generation, self._text, self.state, self.views = generation, text, state, {}
+        self.fragments = fragments
+
+    @property
+    def text(self) -> str:
+        return encoded(self.fragments) if self._text is None else self._text
 
 
 def summarize(slug: str, state: dict) -> dict:
@@ -303,7 +309,8 @@ class SQLiteLedgerRepository:
             state = assemble(read_rows(connection, slug))
             if "events" in state["_meta"]:
                 state["_meta"]["events"] = read_events(connection, slug)
-            entry = Entry(row[0], encode(state), state)
+            fragments = document(state)
+            entry = Entry(row[0], None, fragments.value, fragments)
             self._remember(slug, entry)
         return entry
 
@@ -361,7 +368,7 @@ class SQLiteLedgerRepository:
         return None if row is None else row[0]
 
     def apply_ops(
-        self, slug: str, changes: list | None = None, ops: list | None = None, gate=None
+        self, slug: str, changes: list | None = None, ops: list | None = None, gate=None, *, copy_state: bool = True
     ) -> tuple[dict, list]:
         from . import mutation
 
@@ -374,10 +381,18 @@ class SQLiteLedgerRepository:
                 rejected, ctx = mutation.apply(slug, state, self.domain, changes, ops, gate)
                 written = self._write(connection, slug, entry, state, ctx.events if ctx.changed else [])
             self._remember(slug, written)
-        return json.loads(written.text), rejected
+        return (json.loads(written.text) if copy_state else written.state), rejected
 
     def _write(self, connection, slug: str, entry: Entry, state: dict, events: list) -> Entry:
-        before, after = diff(*(without_events(document) for document in (entry.state, state)))
+        meta, previous = state["_meta"], entry.state["_meta"]
+        meta["task_revision"] = (
+            meta["rev"]
+            if state.get("tasks", []) != entry.state.get("tasks", [])
+            else previous.get("task_revision", previous["rev"])
+        )
+        fragments = document(state, entry.fragments)
+        state = fragments.value
+        before, after = diff(*(without_events(value) for value in (entry.state, state)))
         write_rows(connection, slug, before, after)
         hierarchy.sync(connection, slug, state)
         kept = len(state["_meta"].get("events", []))
@@ -389,7 +404,7 @@ class SQLiteLedgerRepository:
             UPDATE,
             (state["_meta"]["rev"], generation, encode(summarize(slug, state)), self.domain.now_ms(), slug),
         )
-        return Entry(generation, encode(state), state)
+        return Entry(generation, None, state, fragments)
 
     def _insert(self, connection, slug: str, state: dict, token: str, seeds: dict | None = None) -> None:
         previous = connection.execute(GENERATION, (slug,)).fetchone()

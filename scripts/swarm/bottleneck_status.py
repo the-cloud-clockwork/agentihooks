@@ -24,11 +24,15 @@ def read(store: RedisStore, slug: str) -> dict:
 
 def report(store: RedisStore, slug: str, now_ms: int) -> dict:
     found = stages.read(store, slug)
-    ranked = [row for row in found.get("stages", []) if row["stage"] != stages.QUEUE_WAIT]
-    row = ranked[0] if found.get("total") and ranked else {}
+    ranked = sorted(
+        (row for row in found.get("stages", []) if row["seconds"] > 0),
+        key=lambda row: row["seconds"],
+        reverse=True,
+    )
+    row = next((row for row in ranked if row["stage"] != stages.QUEUE_WAIT), {})
     stage = row.get("stage", "")
     action = json.loads(store.redis.hget(store.key(slug, ACTIONS), stage) or "{}")
-    return {
+    result = {
         "stage": stage,
         "label": stage.replace("_", " ") or "none",
         "trend": row.get("trend", "none" if found else "unknown"),
@@ -39,6 +43,12 @@ def report(store: RedisStore, slug: str, now_ms: int) -> dict:
         "action_at": action.get("at", 0),
         "waits": _waits(found["stages"]) if found else [],
     }
+    if ranked and ranked[0]["stage"] == stages.QUEUE_WAIT:
+        result["skipped_leader"] = (
+            f"Leading stage queue wait {ranked[0]['seconds'] / 3600:.1f} task hours skipped:"
+            " tasks beyond the seat limit or ready while a seat was free are excluded from bottleneck ranking"
+        )
+    return result
 
 
 def _waits(rows: list) -> list[str]:
@@ -49,10 +59,11 @@ def _waits(rows: list) -> list[str]:
 
 
 def line(found: dict) -> str:
-    return (
+    text = (
         f"Top bottleneck {found['label']}; trend {found['trend']}; measured {found['measured']};"
         f" last action {found['last_action']}"
     )
+    return f"{text}; {found['skipped_leader']}" if "skipped_leader" in found else text
 
 
 def refresh(slug: str, store: RedisStore, now_ms: int) -> list[str]:

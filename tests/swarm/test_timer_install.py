@@ -85,7 +85,10 @@ def test_starting_warns_when_the_timer_cannot_be_enabled(monkeypatch, capsys):
     monkeypatch.setattr(timer, "ensure", lambda binary: False)
     monkeypatch.setattr(cli, "run_tick", lambda store, slug: [])
     cli._state(_Store(), Namespace(slug="sw"), "running")
-    assert "the systemd timer could not be enabled" in capsys.readouterr().err
+    assert (
+        "warning: the systemd timer or swarm services could not be enabled; run agentihooks swarm tick yourself\n"
+        in capsys.readouterr().err
+    )
 
 
 def test_starting_from_a_non_installed_run_says_why_and_writes_nothing(monkeypatch, capsys, tmp_path):
@@ -118,3 +121,39 @@ def test_a_refused_tick_exits_non_zero_and_logs_why(monkeypatch, capsys):
     monkeypatch.setattr(cli, "connect", lambda: None)
     assert cli.main(["tick"]) == 1
     assert "this run comes from a worktree" in capsys.readouterr().err
+
+
+def test_wait_checks_have_a_separate_short_timer_and_service(tmp_path):
+    import subprocess
+    from configparser import ConfigParser
+
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0)
+
+    def installed(name):
+        parsed = ConfigParser(interpolation=None)
+        parsed.optionxform = str
+        parsed.read_string((tmp_path / name).read_text())
+        return parsed
+
+    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=run)
+    wait_timer = installed("agentihooks-swarm-waits.timer")
+    wait_service = installed("agentihooks-swarm-waits.service")
+    assert wait_timer.sections() == ["Unit", "Timer", "Install"]
+    assert wait_service.sections() == ["Unit", "Service"]
+    assert wait_timer["Unit"]["Description"]
+    assert wait_service["Unit"]["Description"]
+    assert dict(wait_timer["Timer"]) == {"OnBootSec": "15s", "OnUnitActiveSec": "15s", "AccuracySec": "1s"}
+    assert dict(wait_timer["Install"]) == {"WantedBy": "timers.target"}
+    assert dict(wait_service["Service"]) == {
+        "Type": "oneshot",
+        "Environment": "PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin",
+        "EnvironmentFile": "-%h/.agentihooks/.env",
+        "ExecStart": '"/installed/bin/agentihooks" swarm waits',
+        "TimeoutStartSec": "120",
+    }
+    assert ["systemctl", "--user", "enable", "--now", "agentihooks-swarm-waits.timer"] in calls
+    assert ["systemctl", "--user", "enable", "--now", "agentihooks-swarm-waits.service"] not in calls

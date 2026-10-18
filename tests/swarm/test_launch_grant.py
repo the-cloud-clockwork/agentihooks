@@ -463,6 +463,31 @@ def test_a_retried_registration_returns_the_original_identity(store, authority, 
     assert str(error.value) == "registration project_ids is outside the launch grant"
 
 
+@pytest.mark.parametrize("already_registered", [False, True])
+def test_an_ended_execution_cannot_register_while_it_still_holds_its_seat(
+    store, authority, execution, already_registered
+):
+    token = issue(authority, execution)
+    if already_registered:
+        authority.register("fixture", token, body(execution))
+    ended = replace(execution, state="ended")
+    store.put_agent("fixture", ended)
+    assert store.execution_occupants("fixture")[execution.seat] == ended
+    before = protected(store)
+
+    with pytest.raises(GrantRefused) as error:
+        authority.register("fixture", token, body(execution), "ended-registration")
+
+    assert (error.value.error_class, str(error.value)) == (
+        "stale_generation",
+        "launch grant is for an ended execution",
+    )
+    assert error.value.operation_id == "ended-registration"
+    assert launch_grant_rejections(store, "fixture") == {"stale_generation": 1}
+    assert launch_grant_rejections_total(store, "fixture") == 1
+    assert protected(store) == before
+
+
 class Hooked:
     def __init__(self, pipe, hook):
         self.pipe = pipe

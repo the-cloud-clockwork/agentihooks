@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Protocol, Sequence
 
 SUPPORTED_TARGETS = ("claude", "codex", "copilot")
+DEFAULT_TARGETS = ("claude", "codex")
 DEFAULT_TARGET = "claude"
 
 
@@ -91,6 +92,8 @@ class TargetAdapter(Protocol):
     def home(self) -> Path:
         """Config root this target reads (``~/.claude`` / ``~/.codex`` / ``~/.copilot``)."""
         ...
+
+    def summary_counts(self) -> dict[str, int]: ...
 
     def write_settings(self, native: dict) -> Path:
         """Persist the merged settings for this target; returns the file written.

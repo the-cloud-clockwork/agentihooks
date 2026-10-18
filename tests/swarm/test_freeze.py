@@ -226,6 +226,26 @@ def test_a_frozen_phase_keeps_its_urgent_task_open(store):
     assert ledger.rows["t1"]["state"] == "open"
 
 
+@pytest.mark.parametrize("target", ["tasks/t1", "phases/p1", "plans/a", "slices/a.first"])
+def test_a_group_member_follows_its_leads_freeze(target):
+    from scripts.swarm.tick import ready
+    from scripts.swarm_ledger import ledger_stats
+
+    lead = task(slice="slices/a.first")
+    member = task("t2", phase="p2", merged_into="t1")
+    found = doc(record(target), tasks=[lead, member])
+    graph = hierarchy.project(found)[0]
+    rows = {row["id"]: row for row in found["tasks"]}
+
+    assert freeze.held(member, found, graph, "")
+    assert not ready(member, rows, found, graph, "")
+    assert ledger_stats.frozen(found, rows, {}) == {"t1", "t2"}
+
+    found["freezes"] = []
+    assert not freeze.held(member, found, graph, "")
+    assert ledger_stats.frozen(found, rows, {}) == set()
+
+
 def test_a_focused_plan_lets_an_urgent_task_outside_it_be_claimed_and_holds_a_normal_one(store):
     ledger = FrozenLedger(
         [{"id": "normal", "phase": "p2"}, {"id": "urgent", "phase": "p2", "rank": "urgent"}],

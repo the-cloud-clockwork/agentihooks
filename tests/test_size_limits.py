@@ -292,13 +292,16 @@ def test_size_runs_in_lint_graded_by_the_base_with_the_pinned_ruff():
     install, base = steps["Install ruff"], steps["Check out the base revision"]
     grader, grade = steps["Check out the protected grader"], steps["Hold the size and complexity limits"]
     assert install["run"] == f"python -m pip install ruff=={size_limits.RUFF_VERSION}"
-    assert base["run"] == 'git worktree add --detach "$RUNNER_TEMP/base" "$BASE"'
+    assert base["run"] == 'git worktree add --detach "$RUNNER_TEMP/base" "$(git merge-base "$BASE" HEAD)"'
     assert grader["run"] in (
         'git fetch --no-tags origin dev\ngit worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD\n',
         'git fetch --no-tags origin "$GRADER"\ngit worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD\n',
     )
     if 'origin "$GRADER"' in grader["run"]:
-        assert grader.get("env", {}).get("GRADER") == "${{ needs.reuse.outputs.grader }}"
+        assert (
+            grader.get("env", {}).get("GRADER")
+            == "${{ github.event.pull_request.base.sha || needs.reuse.outputs.grader }}"
+        )
     assert grade["if"] == "${{ !cancelled() }}"
     assert grade["run"] == (
         'if [[ -f "$RUNNER_TEMP/grader/scripts/size_limits.py" ]]; then\n'

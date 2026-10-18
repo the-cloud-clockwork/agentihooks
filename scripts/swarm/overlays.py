@@ -6,7 +6,7 @@ import yaml
 
 from hooks.context import profile_chain
 
-ROLES = ("master", "engineer", "planner", "qa", "cicd")
+ROLES = ("master", "engineer", "planner", "qa", "cicd", "documentation")
 KEY = "overlays-"
 
 

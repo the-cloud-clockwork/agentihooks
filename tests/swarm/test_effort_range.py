@@ -52,6 +52,20 @@ def test_a_lane_or_environment_effort_outside_the_range_launches_at_its_edge(tmp
     assert _launched(tmp_path, monkeypatch, lane, task, lanes, env=launch_env)[-2:] == ["--effort", edge]
 
 
+@pytest.mark.parametrize(
+    "lane,configured,launched",
+    [
+        ("master", ("low", "medium"), ("high", "high")),
+        ("master", ("medium", "xhigh"), ("high", "xhigh")),
+        ("master", ("xhigh", "max"), ("xhigh", "max")),
+        ("eng", ("low", "medium"), ("low", "medium")),
+    ],
+)
+def test_a_master_launch_range_is_the_swarm_range_lifted_to_high(lane, configured, launched):
+    config = SwarmConfig("sw", "/repo", 0, 0, effort_min=configured[0], effort_max=configured[1])
+    assert effort_range.bounds(config, lane) == launched
+
+
 def test_spawn_hands_init_agent_the_swarm_effort_range(tmp_path):
     seen = {}
 
@@ -328,8 +342,8 @@ def test_set_names_every_key_it_takes_and_every_level(env, capsys):  # noqa: F81
     assert (
         "autonomy=manual|assist|delegate|full, effort-min=E, effort-max=E, claude-model=M, codex-model=M, "
         "scaling=auto|manual, "
-        "load-high=N, load-low=N, memory-per-agent=MB, api-url=URL, codex-inbox-transport=legacy|app_server "
-        "or eng-role, "
+        "load-high=N, load-low=N, memory-per-agent=MB, api-url=URL, codex-inbox-transport=legacy|app_server, "
+        "master-claude-login=on|off or eng-role, "
     ) in err
     assert run("sw", "set", "effort-min=huge") == 1
     assert "one of low, medium, high, xhigh, max, Codex running max as xhigh" in capsys.readouterr().err
@@ -364,3 +378,9 @@ def test_launch_args_keep_every_other_arg_and_carry_one_clamped_effort(agent, ar
     environ = {"AGENTIHOOKS_SWARM_LANE": "eng"}
     assert effort_range.launch_args(agent, args, environ) == expected
     assert effort_range.launch_args(agent, args, {}) == args
+
+
+@pytest.mark.parametrize("handed", ["high:high", "high:xhigh"])
+def test_launch_args_lift_a_master_launch_to_the_high_floor_it_is_handed(handed):
+    environ = {"AGENTIHOOKS_SWARM_LANE": "master", effort_range.VARIABLE: handed}
+    assert effort_range.launch_args("claude", ["--effort", "medium"], environ) == ["--effort", "high"]

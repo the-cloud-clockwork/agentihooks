@@ -21,6 +21,17 @@ The `agentihooks` CLI is installed globally via `uv tool install --editable .` a
 
 The single entry point for installing agentihooks. Handles global setup and bundle linking.
 
+Plain `agentihooks init` installs Claude and Codex. A previous Copilot install
+does not add it to this default. Use `--target copilot` to install Copilot alone,
+or `--with-copilot` to include it with Claude and Codex.
+
+Default output shows the linked bundle, installed profile, resolved profile
+chain and overlays, then each harness home and installed MCP server, skill and
+plugin counts. Stored swarm role profiles are never recalled for an operator
+home; Codex borrows the operator profile from Claude instead. Actionable
+warnings and errors remain visible. Use `--verbose` for installation details,
+kept MCP notices and launch hints.
+
 ```bash
 agentihooks init [--bundle <path>] [--profile <name>]
 ```
@@ -53,6 +64,9 @@ downgrade cannot leave a process serving a port nothing points at. See
 | Flag | Description |
 |------|-------------|
 | `--bundle <path>` | Path to bundle directory. First-time: links the bundle and runs global install. |
+| `--target claude\|codex\|copilot` | Install only the selected harness. |
+| `--with-copilot` | Include Copilot alongside the default harnesses. |
+| `--verbose`, `-v` | Show all installer output, including linked skills and configuration details. |
 | `--profile <name>` | Profile to install. Comma-separated for chaining: `--profile coding,anton` (default: `default`, env: `AGENTIHOOKS_PROFILE`) |
 | `--force` | Clean install — resets install state (`state.json`, sync hashes, session caches, PID files, `prod_bypass/`, `controls_flags/`, `voice_flags/`, `force_refresh/`) and re-symlinks `~/.claude/` assets. **Preserves** broadcasts, enforcements, brain data, logs, quota accounts, `.env`, `.venv`. |
 
@@ -268,6 +282,19 @@ and `path` fields but requires an absolute path.
 
 ---
 
+## `agentihooks ledger task split`
+
+Declare a code or CI task's pull request halves before recording its first pull request:
+
+```bash
+agentihooks ledger --slug <id> --as <agent> \
+  task split <task> 1-10 11-20
+```
+
+Ranges are ordered, non-overlapping plan lines and must cover the task's assigned plan lines when present. A task with a recorded pull request, or a split with a recorded half, refuses the change. See [Split tasks across pull requests](../pillars/swarm.md#split-tasks-across-pull-requests) for recording each half, the automatic active-link reset between merges, completion and troubleshooting.
+
+---
+
 ## `agentihooks conditions`
 
 Inspect the [conditions](../hooks/conditions.md) the running harness would execute.
@@ -340,6 +367,7 @@ agentihooks init-agent --handoff --dir "$PWD" --name repo-handoff --prompt-file 
 |---|---|
 | `--dir`, `--name`, `--prompt` / `--prompt-file` | Directory, session/tab name, opening prompt |
 | `--dry-run` | Print the launch without opening a terminal |
+| `--codex-transport legacy\|app_server`, `--seat` | Select the transport and admitted seat for a managed Codex swarm launch; see [Managed Codex terminals](codex-managed-terminal.md) for configuration and viewer behavior |
 | `--start-timeout` | Seconds to wait for the terminal to start (default 30) |
 | `--route-timeout` | Seconds to wait for the new session's route report (default 150) |
 | `--handoff` | Quota handoff: any account but this one, no bare-Claude fallback, marks this session handed off once the new one is routed; exit 3 on failure |
@@ -367,6 +395,105 @@ changes that. The output adds `workspace_id`, `tab_id`, `pane_id` and `agent_nam
 Agents: `--agent claude|codex`; without it, the harness of the account the session
 rotation picks: the eligible Claude or Codex account with the fewest live sessions
 under its band cap (see Load balancing). Codex runs directly (`route_status=direct`).
+
+---
+
+## `agentihooks terminate-agent`
+
+List live Claude Code and Codex sessions, end one by exact name, session UUID or
+PID, or stand down one managed Codex conversation without ending its process.
+
+```bash
+agentihooks terminate-agent --list --type any        # TYPE NAME SESSION_ID PID PGID STATUS CWD
+agentihooks terminate-agent eng@abc-0042 --dry-run   # resolve and validate, send nothing
+agentihooks terminate-agent eng@abc-0042             # SIGTERM the process group, SIGKILL if it survives
+agentihooks terminate-agent ci@abc-0815 --stand-down --dry-run
+agentihooks terminate-agent ci@abc-0815 --stand-down --swarm <slug>
+```
+
+| Flag | Meaning |
+|---|---|
+| `--type claude\|codex\|any` | Limit listing and matching to one harness (default `any`) |
+| `--list` | Print the live sessions table |
+| `--dry-run` | Resolve and validate, print what would happen, change nothing; ends `result=validated signal=none` |
+| `--force-shared` | Allow ending a process whose other session UUIDs would end with it |
+| `--stand-down` | Stand down one managed Codex conversation instead of signalling a process |
+| `--swarm <slug>` | Swarm whose Codex records the stand-down reads; without it, the swarm the agent name belongs to |
+| `--term-timeout` | Seconds to wait after SIGTERM, and again after SIGKILL (default 3) |
+| `--keep-pane` | Leave the agent's herdr pane open after it exits |
+| `--json` | Print the resolution report as one JSON object |
+
+### Terminate a process
+
+A termination validates the target first: the PID's start time, command and
+arguments match its listing, its process group ID is above 1, every member
+belongs to one POSIX session, and the group does not contain the caller. It then
+sends SIGTERM to the whole process group, waits `--term-timeout`, rechecks the
+target's identity and sends SIGKILL to any survivor. Output is the resolution
+line (`action`, `type`, `name`, `session_id`, `pid`, `pgid`, `members`,
+`pane_id` in herdr), then `result=terminated escalation=SIGKILL|none` and, in
+herdr, `pane_id=<id> pane=closed|kept|close-failed (...)`. Exit 2 is a refused
+resolution or validation; exit 1 is a failed signal or a process that outlived
+SIGKILL.
+
+One interactive Codex process can carry several conversations, each listed as
+its own row with the same PID. Ending that process ends all of them, so a
+termination refuses it with `target process is shared by other session UUIDs:
+<ids>; use --force-shared`. Add `--force-shared` only when every listed
+conversation belongs to the agent being stopped.
+
+### Stand down one Codex conversation
+
+`--stand-down` stops one conversation of a managed Codex agent, one the swarm
+launched on the Codex app-server and recorded in its Codex transport records,
+and sends no signal. The selector is matched against each record's agent name,
+thread id, session id and execution id in the swarm. A stand-down:
+
+1. Marks that execution's transport record `stood_down`. The agent's inbox pump
+   treats the execution as no longer current and stops, so the conversation
+   takes no new turns from the inbox.
+2. Waits up to 10 seconds for an inbox publication to that seat already in
+   flight to finish.
+3. Reads the thread from the app-server and, when its last turn is in
+   progress, interrupts that turn with `turn/interrupt`, then waits up to 10
+   seconds for the turn to stop.
+
+The app-server process and every other conversation it hosts keep running.
+Under `--stand-down` only `--swarm` and `--dry-run` change the run; `--type`,
+`--json`, `--force-shared` and `--keep-pane` are ignored, `--term-timeout` is
+only checked to be positive, and `--list` prints the listing instead.
+
+```text
+$ agentihooks terminate-agent ci@abc-0815 --stand-down --dry-run
+action=stand-down-dry-run
+stops: conversation <thread> of ci@abc-0815 (execution <id> generation 3): its active turn (last recorded: <turn>) is interrupted and it takes no new turns
+keeps: app-server pid 41872: not signalled
+keeps: conversation <uuid> of eng@abc-0816: not interrupted
+result=validated signal=none
+```
+
+The dry run reads the swarm's recorded transport state and the live process
+list, and does not contact the app-server, so `last recorded:` is the turn the
+inbox last submitted or reconciled, or `none`. Without `--dry-run` the same
+`stops:` and `keeps:` lines print, the stand-down runs, and the command ends
+`result=stood-down stood_down=<agent> thread=<thread> interrupted=<turn>`; the
+run interrupts only a last turn the app-server reports in progress, and
+`interrupted=` is empty when none was.
+
+| Exit | Output | Meaning and next step |
+|---|---|---|
+| 0 | `result=validated signal=none` | Dry run; nothing changed |
+| 0 | `result=stood-down ...` | Fenced and, when a turn ran, interrupted |
+| 1 | `terminate-agent: <error>` then `<agent> stays fenced from new inbox turns; run the same stand down again to interrupt its turn` | The fence is written first, so the record is `stood_down` after this exit. Causes: an inbox publication still in flight, an unreachable app-server, or a turn still running after the interrupt. Rerun the same command. A Redis error or an unreadable transport record raises an uncaught traceback, also exit 1, with no `stays fenced` line; check the record's state before rerunning |
+| 2 | `terminate-agent: refused: <reason>` then `terminate-agent: safe alternative: <alternative>` | Nothing changed; see the refusals below |
+
+| Refusal reason | Safe alternative |
+|---|---|
+| No `--swarm` and the selector names no swarm agent | `pass --swarm <slug>` |
+| The selector has no managed Codex conversation in the swarm, and it names one process | That process's PID and conversation ids, with `agentihooks terminate-agent <pid> --force-shared --dry-run`; the same command without `--dry-run` ends every conversation in the process, so run it only when all of them belong to this agent. An empty list means the process hosts no registered conversation: skip `--force-shared` and use the plain `agentihooks terminate-agent <pid> --dry-run` |
+| The selector has no managed Codex conversation, and it names no single process | `agentihooks terminate-agent --list --type codex shows the live conversations` |
+| The conversation already ended (`exited` or `failed`) | `nothing needs standing down` |
+| The selector names several live conversations | `name one thread: <thread ids>` |
 
 ---
 
@@ -444,11 +571,11 @@ agentihooks scratch rm <task-dir>       # safe replacement for rm -rf "$dir": re
 
 A path is actionable only when it is **unused** and **removing it loses nothing**:
 
-- Unused: no live process has its cwd inside it, no lease holder is alive (pid + `/proc` start time + `boot_id`, or a live session file with the same `sessionId` and matching `procStart`), nothing in it changed recently, and the machine has been up at least 2 h.
-- Worktrees: clean and reachable from a remote after 2 h idle (`remove`); dirty or unpushed after 24 h idle (`snapshot` — pushed to `wip/` first). Primary checkouts, `dev`/`main`/`master`, git-locked worktrees and any merge/rebase in progress are never touched.
+- Unused: no live process has its cwd inside it, no lease holder is alive (pid + `/proc` start time + `boot_id`, or a live session file with the same `sessionId` and matching `procStart`), nothing in it changed recently (except a clean pushed worktree whose lease holders are all gone), and the machine has been up at least 2 h.
+- Worktrees: clean and reachable from a remote after 2 h idle (`remove`), or at once when its lease names holders and none is alive; dirty or unpushed after 24 h idle (`snapshot` — pushed to `wip/` first). Primary checkouts, `dev`/`main`/`master`, git-locked worktrees and any merge/rebase in progress are never touched.
 - Scratch task dirs (`~/scratchpad/<repo>/<task>`): idle past the root's `idle_days`, then the oldest dead dirs while the root is over `budget_gb`. A `.keep` file pins a dir; files at depth ≤ 2 are never touched.
 - Injection traces (`~/.agentihooks/injections/<session>.jsonl`): removed once the session is no longer live and the trace was last written more than `AGENTIHOOKS_TRACE_KEEP_DAYS` ago (default: the root's `idle_days`, 14). Liveness is checked again right before removal.
-- An action is `due` only after two sweeps at least 1 h apart in the same boot. `--enforce` re-checks each due path against a fresh process snapshot right before acting.
+- An action is `due` only after two sweeps at least 1 h apart in the same boot, except removal of a clean pushed worktree whose owner left, which is due on first sight. `--enforce` re-checks each due path against a fresh process snapshot right before acting.
 - `snapshot` builds a commit from the worktree through a temporary index (ignored files and files over 50 MB are left out and listed), with `[skip ci]` in the message, and pushes it to `wip/<repo>/<worktree>-<timestamp>`. A failed push keeps the worktree.
 - Removals are journaled in `~/.agentihooks/gc-journal.json`; the next sweep finishes any removal a crash interrupted.
 - Herdr panes: `init-agent` (every swarm, resume and proof launch) and `run-in-terminal` with a command record each pane they open in `~/.agentihooks/herdr/panes/` (pane id, terminal id, tab, workspace, owner swarm and session, launch time, route status). `gc` lists, and `gc --enforce` and every `swarm tick` close, a recorded pane whose agent is gone: it sits at a bare shell (the agent or command exited, or the launch failed), its swarm agent was retired, or its swarm stopped or was removed. Never inside `AGENTIHOOKS_HERDR_GC_GRACE_MINUTES` (default 5) of launch, while its input line holds text, or while its screen changed or its agent was prompted inside `AGENTIHOOKS_INBOX_QUIET_S`; a pane whose terminal id changed, or a swarm store that cannot be read, keeps the pane. A pane agentihooks never recorded, such as a plain `run-in-terminal` shell, is never touched. A tab or workspace the sweep empties is closed. Each close prints with its reason, `herdr: closed pane …` in the tick journal (`journalctl --user -u agentihooks-swarm.service`).
