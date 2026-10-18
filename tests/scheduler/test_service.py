@@ -210,6 +210,8 @@ def test_supervisor_entrypoint_stops_on_signals_and_restores_handlers(monkeypatc
 def test_machine_lock_directory_is_shared_across_profile_configurations(monkeypatch):
     from scripts.scheduler import service
 
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
+    monkeypatch.delenv("AGENTIHOOKS_SWARM_REDIS_URL", raising=False)
     directory = service.runtime_dir()
     monkeypatch.setenv("GH_CONFIG_DIR", str(Path.home() / ".config" / "gh"))
     monkeypatch.setenv("XDG_CONFIG_HOME", "/proof/one")

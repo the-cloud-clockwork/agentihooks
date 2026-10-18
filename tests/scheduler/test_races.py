@@ -17,7 +17,7 @@ def scheduler():
 def test_child_can_acquire_supervisor_ownership_before_spawn_returns(monkeypatch, tmp_path):
     from scripts.scheduler import service
 
-    monkeypatch.setattr(service, "runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
     accepted = []
 
     def spawn(*args, **kwargs):

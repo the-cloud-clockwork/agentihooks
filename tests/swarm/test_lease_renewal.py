@@ -295,7 +295,7 @@ def test_the_controller_sleeps_one_configured_tick_between_passes(store, monkeyp
     monkeypatch.setattr(scripts.operator_env, "classifier", lambda environ: [])
     monkeypatch.setattr(controller, "connect", lambda: store)
     monkeypatch.setattr(controller, "run_once", lambda saved: {})
-    monkeypatch.setattr(controller.time, "sleep", sleep)
+    monkeypatch.setattr(controller, "scheduled_wait", sleep)
     assert controller.main(["run"]) == 1
     assert slept == [4.0]
 

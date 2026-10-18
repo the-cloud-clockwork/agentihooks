@@ -235,6 +235,8 @@ def test_member_scheduler_runs_with_real_acl_enforcement(monkeypatch):
         channels=auth.ACL_PATTERNS,
     )
     member = fakeredis.FakeRedis(server=server, decode_responses=True, username="hive-member")
+    member.auth("", username="hive-member")
+    assert member.acl_whoami() == "hive-member"
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
     shared = Scheduler(admin).key("entries")
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "cloud")
