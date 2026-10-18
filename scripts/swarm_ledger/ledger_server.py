@@ -520,7 +520,7 @@ def relay_to_inbox(slug, state):
         inbox = connect()
         store = RedisStore(inbox.redis)
         sent = operator_mail.relay(inbox, store, slug, state, events, watch_ledger.line)
-        addresses = [operator_mail.master_address(slug, []), *masters.live_seats(store.agents(slug))]
+        addresses = [masters.lead_of(slug, []), *masters.held(store.redis, slug, store.agents(slug))]
         chat_receipts.post(repository, inbox, slug, events, addresses)
     except Exception as exc:  # the ledger write stands whatever the inbox does
         sys.stderr.write(f"inbox relay for {slug}: {exc}\n")
@@ -567,8 +567,9 @@ def deliver_alerts(slug, state):
         from scripts.swarm.store import RedisStore
 
         inbox = connect()
-        live = [a for a in RedisStore(inbox.redis).agents(slug) if a.state != "finished"]
-        master = operator_mail.master_address(slug, live)
+        agents = RedisStore(inbox.redis).agents(slug)
+        live = [a for a in agents if a.state != "finished"]
+        master = operator_mail.master_address(inbox.redis, slug, agents)
         addresses = {a.name: a.seat or a.name for a in live}
         alerts = [{**a, "target": addresses.get(a["target"], "master")} for a in fresh]
         sent = ledger_alerts.deliver(inbox, slug, alerts, meta["rev"], master, since=since)
