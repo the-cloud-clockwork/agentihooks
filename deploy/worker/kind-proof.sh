@@ -136,8 +136,21 @@ assert redis.xlen(orders.commands(hive)) == 0
 print(json.dumps({'scratch_order': order.action, 'ack': ack.status, 'pending': 0}, sort_keys=True))
 PY
 }
+member_id() {
+  local member
+  for _ in {1..60}; do
+    member="$(kubectl exec "$1" -- python3 -c 'import hooks.config; from scripts.hive.scope import member; print(member())')"
+    if [[ -n "$member" ]]; then
+      printf '%s\n' "$member"
+      return
+    fi
+    sleep 1
+  done
+  echo 'pod did not acquire hive membership' >&2
+  return 1
+}
 pod="$(kubectl get pods -l app.kubernetes.io/component=worker-hive -o jsonpath='{.items[0].metadata.name}')"
-member="$(kubectl exec "$pod" -- python3 -c 'import hooks.config; from scripts.swarm.commands import hive_id; print(hive_id())')"
+member="$(member_id "$pod")"
 prove_worker "$member" | tee "$out/orders.txt"
 kubectl logs "$pod" > "$out/worker.log"
 restarts="$(kubectl get pod "$pod" -o jsonpath='{.status.containerStatuses[0].restartCount}')"
@@ -146,7 +159,7 @@ kubectl delete pod "$pod" --wait --timeout=60s
 kubectl rollout status "deployment/$deployment" --timeout=120s
 replacement="$(kubectl get pods -l app.kubernetes.io/component=worker-hive -o jsonpath='{.items[0].metadata.name}')"
 [[ "$replacement" != "$pod" ]]
-replacement_member="$(kubectl exec "$replacement" -- python3 -c 'import hooks.config; from scripts.swarm.commands import hive_id; print(hive_id())')"
+replacement_member="$(member_id "$replacement")"
 [[ "$replacement_member" == "$member" ]]
 prove_worker "$replacement_member" | tee "$out/replacement.txt"
 echo 'replacement pod reused durable membership without redeeming the join code again' | tee -a "$out/replacement.txt"
