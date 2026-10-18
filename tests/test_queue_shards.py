@@ -90,7 +90,8 @@ def test_the_unit_command_uses_the_computed_queue_partition(tmp_path):
     args = json.loads((tmp_path / "args.json").read_text())
     assert args[args.index("--shard") + 1] == "7/48"
     assert workflow["jobs"]["unit"]["strategy"]["matrix"]["include"] == (
-        "${{ fromJSON(needs.split.outputs.queue_matrix || '[]') }}"
+        "${{ fromJSON(github.event_name == 'merge_group' && format('[{0},{1}]', "
+        "needs.split.outputs.queue_311, needs.split.outputs.queue_312) || '[]') }}"
     )
 
 

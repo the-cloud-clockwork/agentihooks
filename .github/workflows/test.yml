@@ -749,7 +749,8 @@ jobs:
       reused: ${{ steps.plan.outputs.reused }}
       run: ${{ steps.plan.outputs.run }}
       commit: ${{ steps.plan.outputs.commit }}
-      queue_matrix: ${{ steps.queue-size.outputs.queue_matrix }}
+      queue_311: ${{ steps.queue-size.outputs.queue_311 }}
+      queue_312: ${{ steps.queue-size.outputs.queue_312 }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -831,11 +832,6 @@ jobs:
             [[ ! -f "$measured" ]] || cp "$measured" "$HOME/dev-durations/.test_durations$suffix"
           done
 
-      - name: Size queue shards from conservative durations
-        id: queue-size
-        if: github.event_name == 'merge_group'
-        run: python -m tests.queue_shards --root . --durations ~/dev-durations --output "$GITHUB_OUTPUT"
-
       - name: Adopt latest dev durations
         if: needs.select.outputs.source == ''
         env:
@@ -846,6 +842,13 @@ jobs:
             collection=(--collection collected.json)
           fi
           python -m tests.dev_durations "$PYTHON_VERSION" ~/dev-durations --hash durations.sha256 "${collection[@]}" --collected collected.json
+
+      - name: Size queue shards from conservative durations
+        id: queue-size
+        if: github.event_name == 'merge_group'
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+        run: python -m tests.queue_shards --root . --collection collected.json --version "$PYTHON_VERSION" --output "$GITHUB_OUTPUT"
 
       - name: Mint the token that reads the dev test record
         id: app-token
@@ -978,7 +981,7 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12"]
         shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-        include: ${{ fromJSON(needs.split.outputs.queue_matrix || '[]') }}
+        include: ${{ fromJSON(github.event_name == 'merge_group' && format('[{0},{1}]', needs.split.outputs.queue_311, needs.split.outputs.queue_312) || '[]') }}
         exclude:
           - {python-version: "3.11", shard: 7}
           - {python-version: "3.11", shard: 8}

@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
@@ -49,25 +50,31 @@ def _seconds(part: list[str], durations: dict[str, float], grouped: dict[str, st
     for node in part:
         if group := grouped.get(node.split("::", 1)[0]):
             serial[group] = serial.get(group, 0.0) + durations[node]
-    return max(sum(durations[node] for node in part) / WORKERS, max(serial.values(), default=0.0)) + sum(
-        sizes[path] * SECONDS_PER_SOURCE_BYTE for path in files
-    )
+    return max(
+        sum(durations[node] for node in part) / WORKERS,
+        max((durations[node] for node in part), default=0.0),
+        max(serial.values(), default=0.0),
+    ) + sum(sizes[path] * SECONDS_PER_SOURCE_BYTE for path in files)
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
-    parser.add_argument("--durations", type=Path, required=True)
+    parser.add_argument("--collection", type=Path, required=True)
+    parser.add_argument("--version", required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
-    versions = {}
-    for version in ("3.11", "3.12"):
-        merged = json.loads((args.durations / ".test_durations").read_text())
-        path = args.durations / f".test_durations-{version}"
-        versions[version] = {**merged, **(json.loads(path.read_text()) if path.exists() else {})}
-    plan = matrix(args.root, versions)
+    snapshot = args.root / ".test_durations"
+    measured = json.loads(snapshot.read_text())
+    collected = json.loads(args.collection.read_text())
+    estimate = max(measured.values())
+    measured = {node: measured.get(node, estimate) for node in collected}
+    plan = matrix(args.root, {args.version: measured})
+    snapshot.write_text(json.dumps(measured, indent=4, sort_keys=True) + "\n")
+    (args.root / "durations.sha256").write_text(hashlib.sha256(snapshot.read_bytes()).hexdigest() + "\n")
+    key = "queue_" + args.version.replace(".", "")
     with args.output.open("a") as output:
-        output.write(f"queue_matrix={json.dumps(plan)}\n")
+        output.write(f"{key}={json.dumps(plan)[1:-1]}\n")
 
 
 if __name__ == "__main__":
