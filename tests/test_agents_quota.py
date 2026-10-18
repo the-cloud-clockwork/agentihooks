@@ -1043,16 +1043,18 @@ def test_the_master_reservation_closes_only_the_rows_the_swarm_quota_view_closes
     reason = "reserved for 1 live master: workers stop at 70% of the week"
     rows = [
         _week_row("codex", "default", 30.0),
+        replace(_week_row("codex", "default", 10.0), seven_day_resets_at=250),
         _week_row("codex", "default", 30.1),
+        replace(_week_row("codex", "default", 10.0), seven_day_resets_at=200),
         _week_row("codex", "spare", 10.0),
         _week_row("codex", "default", None),
         _week_row("codex", "default", 10.0, API),
         _week_row("claude", "default", 10.0),
     ]
-    closed = replace(rows[0], state="CLOSED", cap=0, reserved=reason)
+    closed = [replace(row, state="CLOSED", cap=0, reserved=reason) for row in rows[:2]]
     held = {"codex": Reservation("codex", "default", 1), "claude": None}
-    assert agents_quota.with_reservations(rows, held) == [closed, *rows[1:]]
-    assert agents_quota.with_reservations(rows, {"codex": Reservation("codex", "default", 0)}) == rows
+    assert agents_quota.with_reservations(rows, held, 200.0) == [*closed, *rows[2:]]
+    assert agents_quota.with_reservations(rows, {"codex": Reservation("codex", "default", 0)}, 200.0) == rows
 
 
 @pytest.mark.parametrize("fable", [False, True])
@@ -1080,9 +1082,5 @@ def test_balance_table_names_the_master_reservation_for_each_harness(monkeypatch
     footer = [claude, *([] if fable else [codex_line])]
     assert lines[len(plain.splitlines()) :] == footer
     assert asked == (["claude"] if fable else ["claude", "codex"])
-    states = {
-        (cells[1], cells[2]): cells[4] for cells in (line.split() for line in lines[2 : -len(footer)]) if len(cells) > 4
-    }
-    assert states[("claude", "home")] == "CLOSED"
-    if not fable:
-        assert (states[("codex", "default")], states[("codex", "spare")]) == ("CLOSED", "NORMAL")
+    marked = [["home", "(reserved)"], *([] if fable else [["default", "(reserved)"]])]
+    assert [line.split()[2:4] for line in lines if "(reserved)" in line] == marked

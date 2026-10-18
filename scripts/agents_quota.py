@@ -34,6 +34,7 @@ STALE = "STALE"
 CLOSED = "CLOSED"
 EXPIRED_SOURCE = "token expired: run {login}"
 NEXT_MARK = "(next)"
+RESERVED_MARK = "(reserved)"
 CURRENT_MARK = "(current)"
 NO_CURRENT = ""
 CACHED = "cached"
@@ -254,6 +255,7 @@ def _cells(rank: str, row: QuotaRow, now: int, current: str) -> list[str]:
                 row.identity and f"#{row.identity}",
                 mark,
                 row.master,
+                RESERVED_MARK if row.reserved else "",
                 NEXT_MARK if row.selected else "",
             )
             if part
@@ -421,13 +423,16 @@ def _observed(results: list, now: float, fable: bool) -> dict[str, float]:
     return {result.account: cached.get(result.account, now) for result in results}
 
 
-def with_reservations(rows: list[QuotaRow], holds: Mapping[str, "Reservation | None"]) -> list[QuotaRow]:
+def _week_left(row: QuotaRow, now: float) -> float | None:
+    if row.seven_day_left is None:
+        return None
+    return session_bands.left(100 - row.seven_day_left, row.seven_day_resets_at, now)
+
+
+def with_reservations(rows: list[QuotaRow], holds: Mapping[str, "Reservation | None"], now: float) -> list[QuotaRow]:
     return [
         replace(row, state=CLOSED, cap=0, reserved=held.reason)
-        if (held := holds.get(row.agent))
-        and row.kind != API
-        and row.seven_day_left is not None
-        and held.closes(row.account, 100 - row.seven_day_left)
+        if (held := holds.get(row.agent)) and held.closes_row(row.agent, row.kind, row.account, _week_left(row, now))
         else row
         for row in rows
     ]
@@ -448,7 +453,7 @@ def balance_table(
     claude = claude_rows(results, sessions, observed=observed, now=now, include_fable=fable)
     claude = with_masters(claude + api_rows(ClaudeApiSource(sessions), "claude", now), _masters("claude"), sessions)
     holds = {harness: reservation.current(harness, os.environ) for harness in (("claude",) if fable else HARNESSES)}
-    rows = with_reservations(claude + ([] if fable else _codex(now)), holds)
+    rows = with_reservations(claude + ([] if fable else _codex(now)), holds, now)
     table = _render_live(rows, sessions, now, fable, current)
     return "\n".join([table, *(f"{row.agent} {row.account}: {row.reserved}" for row in rows if row.reserved)])
 
