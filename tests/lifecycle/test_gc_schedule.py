@@ -77,8 +77,9 @@ def test_install_starts_the_runner_on_the_default_redis_url(scheduler, monkeypat
     from scripts.scheduler import service
     from scripts.swarm.store import DEFAULT_URL
 
-    for name in ("REDIS_URL", "AGENTIHOOKS_HIVE_REDIS_URL", "AGENTIHOOKS_SWARM_REDIS_URL"):
+    for name in ("REDIS_URL", "AGENTIHOOKS_HIVE_REDIS_URL"):
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_REDIS_URL", "")
     monkeypatch.setenv("AGENTIHOOKS_PROOF", "kept")
     timer.install_timer("/venv/bin/python", "/opt/agentihooks")
     started_with = service.ensure_running.call_args.args[0]
@@ -162,6 +163,7 @@ def test_the_gc_slot_starts_one_detached_sweep_per_delivery(monkeypatch):
     redis = fakeredis.FakeRedis(decode_responses=True)
     started = Mock()
     monkeypatch.setattr(timer.subprocess, "Popen", started)
+    monkeypatch.setattr(timer.shutil, "which", lambda name: None)
     monkeypatch.setenv("AGENTIHOOKS_PROOF", "kept")
     payload = {"python": "/venv/bin/python", "root": "/opt/agentihooks", "home": "/srv/ah"}
     event = {"payload": json.dumps(payload)}
@@ -185,6 +187,33 @@ def test_the_gc_slot_starts_one_detached_sweep_per_delivery(monkeypatch):
     assert redis.get(marker) == "1" and redis.ttl(marker) == 86400
     timer.sweep(event, "delivery-2", redis)
     assert started.call_count == 2
+
+
+def test_the_sweep_is_time_limited_and_idle_where_the_tools_exist(monkeypatch):
+    import fakeredis
+
+    from hooks.lifecycle import timer
+
+    started = Mock()
+    monkeypatch.setattr(timer.subprocess, "Popen", started)
+    monkeypatch.setattr(timer.shutil, "which", lambda name: f"/usr/bin/{name}")
+    payload = {"python": "/venv/bin/python", "root": "/opt/agentihooks", "home": "/srv/ah"}
+    timer.sweep({"payload": json.dumps(payload)}, "delivery-1", fakeredis.FakeRedis())
+    assert started.call_args.args[0] == [
+        "timeout",
+        "3600",
+        "nice",
+        "-n",
+        "10",
+        "ionice",
+        "-c",
+        "3",
+        "/venv/bin/python",
+        "-m",
+        "scripts.gc_cli",
+        "gc",
+        "--enforce",
+    ]
 
 
 def test_a_sweep_that_cannot_start_never_crashes_the_runner(monkeypatch):

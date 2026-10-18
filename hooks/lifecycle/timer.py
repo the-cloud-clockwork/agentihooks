@@ -1,6 +1,7 @@
 import json
 import os
 import pwd
+import shutil
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -63,7 +64,7 @@ def _schedule(python: str, root: str) -> str:
         cron.start()
     except RedisError:
         return "[--] Redis unreachable: lifecycle sweep not scheduled, sessions trigger the sweep instead"
-    ensure_running({"AGENTIHOOKS_SWARM_REDIS_URL": redis_url(os.environ), **os.environ})
+    ensure_running({**os.environ, "AGENTIHOOKS_SWARM_REDIS_URL": redis_url(os.environ)})
     return f"[OK] Lifecycle sweep scheduled hourly on the agentihooks scheduler ({CRON})"
 
 
@@ -102,9 +103,11 @@ def sweep(event: dict, delivery_id: str, redis: "Redis") -> None:
     if not redis.set(redis_key("scheduler", f"{UNIT}:{delivery_id}"), "1", nx=True, ex=86400):
         return
     target = json.loads(event["payload"])
+    limit = ["timeout", "3600"] if shutil.which("timeout") else []
+    idle = ["ionice", "-c", "3"] if shutil.which("ionice") else []
     try:
         subprocess.Popen(
-            ["nice", "-n", "10", target["python"], "-m", "scripts.gc_cli", "gc", "--enforce"],
+            [*limit, "nice", "-n", "10", *idle, target["python"], "-m", "scripts.gc_cli", "gc", "--enforce"],
             cwd=target["root"],
             env={**os.environ, "AGENTIHOOKS_HOME": target["home"]},
             stdin=subprocess.DEVNULL,
