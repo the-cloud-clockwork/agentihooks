@@ -1,14 +1,16 @@
 from scripts.handoff import transfers
+from scripts.swarm import idle
 from scripts.swarm.store import MASTER
 
 
 def repeated(store, slug, agent, observed) -> bool:
-    if agent.harness != "codex" or agent.lane == MASTER or observed.state != "idle" or not observed.refusal_id:
+    if agent.harness != "codex" or agent.lane == MASTER or observed.state != "idle" or not observed.content_refusal:
         return False
     if store.claimant(slug, agent.task) != agent.name:
         return False
     key = store.key(slug, "content-refusals", agent.task)
-    store.redis.hsetnx(key, observed.refusal_id, agent.name)
+    receipt = f"{agent.name}:{idle.turn(store.redis, slug, agent.name)}"
+    store.redis.hsetnx(key, receipt, agent.name)
     return store.redis.hlen(key) >= 2
 
 

@@ -1126,7 +1126,7 @@ class HerdrRuntime:
         title = selection_prompt(text)
         refusal = content_refusal(agent.harness, text)
         if state in {"idle", "blocked"} and refusal and not refusal_input(text):
-            return PaneObservation("idle", provider_checked=True, refusal_id=refusal)
+            return PaneObservation("idle", provider_checked=True, content_refusal=refusal)
         if title or state == "blocked":
             return PaneObservation(
                 "waiting", title, provider_error=error, provider_checked=True, provider_error_id=error_id

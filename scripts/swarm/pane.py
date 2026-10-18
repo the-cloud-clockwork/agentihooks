@@ -11,7 +11,7 @@ class PaneObservation:
     provider_error: str = ""
     provider_checked: bool = field(default=False, compare=False)
     provider_error_id: str = ""
-    refusal_id: str = ""
+    content_refusal: bool = False
 
 
 PROVIDER_ERRORS = {
@@ -33,19 +33,15 @@ PROVIDER_ERRORS = {
 }
 
 
-def content_refusal(harness: str, text: str) -> str:
+def content_refusal(harness: str, text: str) -> bool:
     if harness != "codex":
-        return ""
+        return False
     plain = ESCAPE.sub("", text)
     notices = list(re.finditer(r"(?m)^ⓘ This content can[’']t be shown\s*$", plain))
     if not notices:
-        return ""
-    notice = notices[-1]
-    tail = plain[notice.end() :]
-    if not re.search(r"(?m)^› ", tail) or re.search(r"(?m)^• ", tail):
-        return ""
-    turn = plain[: notice.start()].rsplit("\n• ", 1)[-1].strip()
-    return hashlib.sha256(turn.encode()).hexdigest()
+        return False
+    tail = plain[notices[-1].end() :]
+    return len(re.findall(r"(?m)^› ", tail)) == 1 and not re.search(r"(?m)^• ", tail) and not selection_prompt(text)
 
 
 def refusal_input(text: str) -> str:
