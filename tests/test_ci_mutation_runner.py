@@ -323,21 +323,30 @@ def test_selected_test_clean_baseline_reads_only_its_extra_repository_fixtures(t
     (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
     resource = root / fixture
     resource.parent.mkdir(parents=True)
-    resource.write_text("selected fixture")
+    content = "printf 'selected fixture'" if fixture == "deploy/worker/start.sh" else "selected fixture"
+    resource.write_text(content)
     (resource.parent / "unrelated.txt").write_text("unrelated")
     (root / "other-data").mkdir()
     (root / "other-data" / "unused.txt").write_text("unused")
     (root / "deploy").mkdir(exist_ok=True)
     (root / "deploy" / "unread.yaml").write_text("unread")
     expression = " / ".join(repr(part) for part in fixture.split("/"))
+    read = f"    assert (ROOT / {expression}).read_text() == 'selected fixture'\n"
+    if fixture == "deploy/worker/start.sh":
+        read = (
+            f"    START = ROOT / {expression}\n"
+            "    result = subprocess.run(['bash', str(START)], capture_output=True, text=True)\n"
+            "    assert result.returncode == 0, result.stderr\n"
+            "    assert result.stdout == 'selected fixture'\n"
+        )
     (root / "tests/test_fixture.py").write_text(
+        "import subprocess\n"
         "from pathlib import Path\n"
         "ROOT = Path(__file__).resolve().parents[1]\n"
         "def test_fixture():\n"
         "    unused_text = 'deploy/unread.yaml'\n"
         "    tmp_path = Path('scratch')\n"
-        "    (tmp_path / 'deploy').mkdir(parents=True, exist_ok=True)\n"
-        f"    assert (ROOT / {expression}).read_text() == 'selected fixture'\n"
+        "    (tmp_path / 'deploy').mkdir(parents=True, exist_ok=True)\n" + read
     )
     (root / "tests/test_unselected.py").write_text('UNUSED = "other-data/unused.txt"\n')
     work = tmp_path / "work"
@@ -362,7 +371,7 @@ def test_selected_test_clean_baseline_reads_only_its_extra_repository_fixtures(t
             env={**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
         )
         assert result.returncode == 0, result.stdout + result.stderr
-        assert (baseline / fixture).read_text() == "selected fixture"
+        assert (baseline / fixture).read_text() == content
         assert not (baseline / resource.relative_to(root).parent / "unrelated.txt").exists()
         assert not (baseline / "other-data").exists()
         assert not (baseline / "deploy/unread.yaml").exists()
