@@ -320,6 +320,25 @@ def test_timeout_must_be_a_number(home, capsys):
     assert "invalid int value: 'soon'" in capsys.readouterr().err
 
 
+def test_help_names_the_command_and_its_timeout():
+    text = " ".join(stack_init.parser().format_help().split())
+    description = " ".join(stack_init.__doc__.split())
+    assert text == (
+        f"usage: agentihooks swarm init [-h] [--timeout TIMEOUT] {description} options: "
+        "-h, --help show this help message and exit "
+        "--timeout TIMEOUT seconds to wait for every service to be healthy"
+    )
+
+
+def test_a_tls_stack_points_the_client_at_its_own_ca(home):
+    folder = stack(home)
+    folder.mkdir()
+    (folder / ".env").write_text("SWARM_REDIS_SCHEME=rediss\n")
+    code, _ = init(home, Docker())
+    assert code == 0
+    assert (folder / "client.env").read_text().endswith(f"\nSSL_CERT_FILE={folder}/deploy/compose/tls/ca.pem\n")
+
+
 def test_main_runs_init_with_the_process_environment_docker_and_stdout(monkeypatch):
     seen = []
     monkeypatch.setattr(stack_init, "init", lambda *args: seen.append(args) or 3)

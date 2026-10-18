@@ -79,7 +79,7 @@ def materialize(home: Path) -> None:
             target = home / source.relative_to(BUNDLED)
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, target)
-    (home / "deploy" / "compose" / "tls").mkdir(parents=True, exist_ok=True)
+    (home / "deploy" / "compose" / "tls").mkdir(exist_ok=True)
 
 
 def compose(home: Path, *args: str) -> list[str]:
