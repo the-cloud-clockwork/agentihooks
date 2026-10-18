@@ -4,12 +4,18 @@ from datetime import UTC, datetime
 
 import pytest
 
-from scripts.swarm import merge_queue, queue_record
+from scripts.swarm import ledger_events, merge_queue, queue_record
 from scripts.swarm.store import SwarmError
 from tests.swarm.test_merge_queue_priority import URL, FakeQueue
 
 pytestmark = pytest.mark.unit
 NOW = datetime(2026, 10, 16, 1, 16, 43, tzinfo=UTC)
+READ_PULL = ledger_events.view
+
+
+@pytest.fixture(autouse=True)
+def read_required_checks(monkeypatch):
+    monkeypatch.setattr(ledger_events, "view", READ_PULL)
 
 
 def node(number, head, position, *, jump=False, enqueued="2026-10-16T01:00:00Z", base="b0"):
@@ -21,7 +27,7 @@ def node(number, head, position, *, jump=False, enqueued="2026-10-16T01:00:00Z",
         "enqueuer": {"login": "nestorcolt"},
         "headCommit": {"oid": head},
         "baseCommit": {"oid": base},
-        "pullRequest": {"number": number, "url": URL[:-1] + str(number)},
+        "pullRequest": {"number": number, "url": URL[:-1] + str(number), "headRefOid": f"pr{number}"},
     }
 
 
@@ -58,6 +64,20 @@ def written(tmp_path):
     return [json.loads(line) for line in (tmp_path / "merge-queue-events.jsonl").read_text().splitlines()]
 
 
+def test_groups_come_back_in_queue_position_order(tmp_path, monkeypatch):
+    run = Snapshots(([node(2, "h2", 2), node(1, "h1", 1)], LAST))
+    assert [g["position"] for g in journal(tmp_path, run, monkeypatch).groups()] == [1, 2]
+
+
+def test_an_unwritable_journal_keeps_the_record_and_reports_on_stderr(tmp_path, monkeypatch, capsys):
+    blocker = tmp_path / "file"
+    blocker.write_text("")
+    book = journal(blocker, Snapshots(([node(1, "h1", 1)], LAST), ([node(1, "h1", 1)], LAST)), monkeypatch)
+    record = book.write("queue", URL, "head9", book.groups(), book.groups())
+    assert record["rebuilt"] == []
+    assert "merge queue record not written" in capsys.readouterr().err
+
+
 def test_groups_read_every_queue_page_with_heads_bases_jump_and_enqueuer(tmp_path, monkeypatch):
     run = Snapshots(
         ([node(1, "h1", 1)], {"hasNextPage": True, "endCursor": "c"}), ([node(2, "h2", 2, jump=True)], LAST)
@@ -67,6 +87,7 @@ def test_groups_read_every_queue_page_with_heads_bases_jump_and_enqueuer(tmp_pat
     assert groups == [
         {
             "pull": URL[:-1] + "1",
+            "pull_head": "pr1",
             "position": 1,
             "state": "QUEUED",
             "jump": False,
@@ -77,6 +98,7 @@ def test_groups_read_every_queue_page_with_heads_bases_jump_and_enqueuer(tmp_pat
         },
         {
             "pull": URL[:-1] + "2",
+            "pull_head": "pr2",
             "position": 2,
             "state": "QUEUED",
             "jump": True,
@@ -99,11 +121,14 @@ def test_a_record_names_action_actor_agent_pull_and_the_old_and_new_group_heads(
     assert written(tmp_path) == [record]
     assert record["at"] == "2026-10-16T01:16:43+00:00"
     assert record["action"] == "priority"
-    assert record["actor"] == "tcc-main-ci[bot]"
+    assert record["token_actor"] == "tcc-main-ci[bot]"
     assert record["agent"] == "master@d44a5a-1"
     assert record["pull"] == URL
     assert record["expected_head"] == "head9"
-    assert record["rebuilt"] == [{"pull": URL[:-1] + "2", "old_head": "old2", "new_head": "new2"}]
+    assert record["rebuilt"] == [
+        {"pull": URL[:-1] + "2", "old_head": "old2", "new_head": "new2", "old_base": "b0", "new_base": "b0"}
+    ]
+    assert record["observed_between"] == ["2026-10-16T01:16:43+00:00", "2026-10-16T01:16:43+00:00"]
     assert record["removed"] == [URL[:-1] + "3"]
     assert record["added"] == [URL, URL[:-1] + "4"]
     assert [g["head"] for g in record["old_groups"]] == ["h1", "old2", "old3"]
@@ -186,3 +211,17 @@ def test_priority_journals_one_record_with_every_mutation_step():
             },
         )
     ]
+
+
+def test_priority_journals_its_steps_when_an_unexpected_error_escapes():
+    queue = FakeQueue()
+    book = Book()
+
+    def run(command, **kwargs):
+        if "dequeuePullRequest" in " ".join(command):
+            raise KeyError("data")
+        return queue.run(command, **kwargs)
+
+    with pytest.raises(KeyError):
+        merge_queue.prioritize(URL, run=run, journal=book)
+    assert book.records == [("priority", URL, "head9", "1", "2", [], {"steps": [["dequeue", URL[:-1] + "3"]]})]

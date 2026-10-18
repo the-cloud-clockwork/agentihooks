@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import sys
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -9,7 +10,8 @@ from scripts.swarm import merge_queue
 from scripts.swarm.store import SwarmError
 
 ENTRY = (
-    "position state jump enqueuedAt enqueuer { login } headCommit { oid } baseCommit { oid } pullRequest { number url }"
+    "position state jump enqueuedAt enqueuer { login } headCommit { oid } baseCommit { oid }"
+    " pullRequest { number url headRefOid }"
 )
 GROUPS = (
     """query($url: URI!, $after: String) { viewer { login } resource(url: $url) { ... on PullRequest {
@@ -26,6 +28,7 @@ GROUPS = (
 def group(node: dict) -> dict:
     return {
         "pull": node["pullRequest"]["url"],
+        "pull_head": node["pullRequest"]["headRefOid"],
         "position": node["position"],
         "state": node["state"],
         "jump": node["jump"],
@@ -41,7 +44,13 @@ def changes(before: list[dict], after: list[dict]) -> dict:
     new = {g["pull"]: g for g in after}
     return {
         "rebuilt": [
-            {"pull": pull, "old_head": old[pull]["head"], "new_head": new[pull]["head"]}
+            {
+                "pull": pull,
+                "old_head": old[pull]["head"],
+                "new_head": new[pull]["head"],
+                "old_base": old[pull]["base"],
+                "new_base": new[pull]["base"],
+            }
             for pull in old
             if pull in new and old[pull]["head"] != new[pull]["head"]
         ],
@@ -58,9 +67,11 @@ class Journal:
         self.clock = clock
         self.actor = None
         self.gaps = []
+        self.read_at = []
 
     def groups(self) -> list[dict] | None:
         found, variables = [], {"url": self.url}
+        self.read_at.append(self.clock().isoformat())
         try:
             while True:
                 data = merge_queue.graphql(GROUPS, variables, self.run)
@@ -68,30 +79,43 @@ class Journal:
                 page = data["resource"]["repository"]["mergeQueue"]["entries"]
                 found += [group(node) for node in page["nodes"]]
                 if not page["pageInfo"]["hasNextPage"]:
-                    return found
+                    return sorted(found, key=lambda g: g["position"])
                 variables["after"] = page["pageInfo"]["endCursor"]
         except (SwarmError, KeyError, TypeError) as exc:
             self.gaps.append(f"queue unreadable: {exc}")
             return None
 
-    def write(self, action, pull, head, before, after, errors=(), **extra) -> dict:
+    def write(
+        self,
+        action: str,
+        pull: str,
+        head: str,
+        before: list[dict] | None,
+        after: list[dict] | None,
+        errors=(),
+        **extra,
+    ) -> dict:
         record = {
             "id": uuid.uuid4().hex,
             "at": self.clock().isoformat(),
             "action": action,
-            "actor": self.actor,
+            "token_actor": self.actor,
             "agent": self.environ.get("AGENTIHOOKS_AGENT_NAME"),
             "pull": pull,
             "expected_head": head,
             "old_groups": before,
             "new_groups": after,
+            "observed_between": self.read_at[:1] + self.read_at[-1:],
             **(changes(before, after) if before is not None and after is not None else {}),
             "gaps": self.gaps,
             "errors": list(errors),
             **extra,
         }
         path = Path(self.environ.get("AGENTIHOOKS_HOME") or Path.home() / ".agentihooks") / "merge-queue-events.jsonl"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a") as handle:
-            handle.write(json.dumps(record) + "\n")
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a") as handle:
+                handle.write(json.dumps(record) + "\n")
+        except OSError as exc:
+            print(f"merge queue record not written: {exc}", file=sys.stderr)
         return record

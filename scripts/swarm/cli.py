@@ -1451,10 +1451,8 @@ def cmd_merge(store, args):
                 admit=lambda head: _queue_intent(store, args, agent, head),
                 journal=queue_record.Journal(args.url),
             )
-        elif args.action == "dequeue":
-            result = merge_queue.operate(args.action, args.url, journal=queue_record.Journal(args.url))
         else:
-            result = merge_queue.operate(args.action, args.url)
+            result = merge_queue.operate(args.action, args.url, journal=queue_record.Journal(args.url))
     print(json.dumps(result))
 
 
