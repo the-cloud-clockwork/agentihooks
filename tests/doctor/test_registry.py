@@ -393,7 +393,7 @@ def test_every_binding_is_read_in_one_round(cursors):
     assert failures == [] and all(b["read"] for b in found)
 
 
-def test_no_binding_reads_with_no_worker_pool(cursors):
+def test_no_bindings_read_nothing(cursors):
     assert registry.read("s", [], Langfuse([], []), {}, 15, 50) == ([], [])
 
 
