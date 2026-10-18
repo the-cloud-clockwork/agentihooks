@@ -12,22 +12,10 @@ ALERTS = "agentihooks-alert-intake"
 PROBER = "agentihooks-quota-prober"
 WAITS = "agentihooks-swarm-waits"
 UNIT_DIR = Path.home() / ".config" / "systemd" / "user"
+RETIRED = (f"{UNIT}.timer", f"{UNIT}.service")
 
 
 def units(binary):
-    service = (
-        "[Unit]\nDescription=agentihooks swarm tick\n\n"
-        "[Service]\nType=oneshot\n"
-        "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
-        "EnvironmentFile=-%h/.agentihooks/.env\n"
-        f'ExecStart="{binary}" swarm tick\n'
-        "TimeoutStartSec=540\nKillMode=process\n"
-    )
-    timer = (
-        "[Unit]\nDescription=agentihooks swarm tick every minute\n\n"
-        "[Timer]\nOnBootSec=1min\nOnUnitActiveSec=60s\nAccuracySec=5s\n\n"
-        "[Install]\nWantedBy=timers.target\n"
-    )
     waker = (
         "[Unit]\nDescription=agentihooks inbox waker for Codex panes\n\n"
         "[Service]\nType=simple\nEnvironment=PYTHONUNBUFFERED=1\n"
@@ -71,8 +59,6 @@ def units(binary):
     return {
         f"{WAITS}.service": wait_service,
         f"{WAITS}.timer": wait_timer,
-        f"{UNIT}.service": service,
-        f"{UNIT}.timer": timer,
         f"{WAKER}.service": waker,
         f"{ALERTS}.service": alerts,
         f"{PROBER}.service": prober,
@@ -84,7 +70,34 @@ def _current(path, text):
 
 
 def _services(names):
-    return [name for name in names if name.endswith(".service") and name not in (f"{UNIT}.service", f"{WAITS}.service")]
+    return [name for name in names if name.endswith(".service") and name != f"{WAITS}.service"]
+
+
+def _retire(unit_dir, run):
+    present = [unit_dir / name for name in RETIRED if (unit_dir / name).exists()]
+    if present:
+        disable = ["systemctl", "--user", "disable", "--now", f"{UNIT}.timer"]
+        run(disable, capture_output=True, text=True, timeout=30, check=False)
+    for path in present:
+        path.unlink()
+    return bool(present)
+
+
+def schedule():
+    from redis.exceptions import RedisError
+
+    from scripts.scheduler.core import Scheduler
+    from scripts.scheduler.service import ensure_running
+    from scripts.swarm import scheduled_tick
+    from scripts.swarm.store import redis_client
+
+    try:
+        scheduled_tick.ensure(Scheduler(redis_client()))
+    except RedisError as exc:
+        print(f"the scheduled swarm tick could not be registered: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return False
+    ensure_running()
+    return True
 
 
 def _foreign_run(unit_dir):
@@ -107,7 +120,7 @@ def ensure(binary, unit_dir=None, run=subprocess.run):
         print(refusal, file=sys.stderr)
         return False
     unit_dir.mkdir(parents=True, exist_ok=True)
-    changed, expected = False, units(binary)
+    changed, expected = _retire(unit_dir, run), units(binary)
     for name, text in expected.items():
         path = unit_dir / name
         if not _current(path, text):
@@ -117,19 +130,21 @@ def ensure(binary, unit_dir=None, run=subprocess.run):
         run(["systemctl", "--user", "daemon-reload"], capture_output=True, text=True, timeout=30, check=False)
     procs = [
         run(["systemctl", "--user", "enable", "--now", name], capture_output=True, text=True, timeout=30)
-        for name in [*_services(expected), f"{WAITS}.timer", f"{UNIT}.timer"]
+        for name in [*_services(expected), f"{WAITS}.timer"]
     ]
-    return all(proc.returncode == 0 for proc in procs)
+    scheduled = schedule()
+    return scheduled and all(proc.returncode == 0 for proc in procs)
 
 
 def reconcile(binary, unit_dir=None, run=subprocess.run):
     unit_dir = unit_dir or UNIT_DIR
     expected = units(binary)
-    if all(_current(unit_dir / name, text) for name, text in expected.items()):
-        names = [*_services(expected), f"{WAITS}.timer", f"{UNIT}.timer"]
+    current = all(_current(unit_dir / name, text) for name, text in expected.items())
+    if current and not any((unit_dir / name).exists() for name in RETIRED):
+        names = [*_services(expected), f"{WAITS}.timer"]
         enabled = ["systemctl", "--user", "is-enabled", "--quiet"]
         if all(run([*enabled, name], capture_output=True, text=True, timeout=30).returncode == 0 for name in names):
-            return True
+            return schedule()
     return ensure(binary, unit_dir, run)
 
 
