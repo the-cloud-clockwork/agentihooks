@@ -51,6 +51,7 @@ def _schedule(python: str, root: str) -> str:
 
     from hooks.config import AGENTIHOOKS_HOME
     from scripts.scheduler.service import ensure_running
+    from scripts.swarm.store import redis_url
 
     try:
         scheduler = _scheduler()
@@ -62,7 +63,7 @@ def _schedule(python: str, root: str) -> str:
         cron.start()
     except RedisError:
         return "[--] Redis unreachable: lifecycle sweep not scheduled, sessions trigger the sweep instead"
-    ensure_running()
+    ensure_running({"AGENTIHOOKS_SWARM_REDIS_URL": redis_url(os.environ), **os.environ})
     return f"[OK] Lifecycle sweep scheduled hourly on the agentihooks scheduler ({CRON})"
 
 

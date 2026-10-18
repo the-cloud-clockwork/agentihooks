@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 from unittest.mock import Mock
 
@@ -51,6 +52,8 @@ def test_install_schedules_one_hourly_cron_connected_to_the_gc_slot(scheduler):
     assert timer.install_timer("/venv/bin/python", "/opt/agentihooks") == SCHEDULED
     assert timer.install_timer("/venv/bin/python", "/opt/agentihooks") == SCHEDULED
     assert service.ensure_running.call_count == 2
+    started_with = service.ensure_running.call_args.args[0]
+    assert started_with["AGENTIHOOKS_SWARM_REDIS_URL"] == os.environ["AGENTIHOOKS_SWARM_REDIS_URL"]
     [entry_id] = timer.scheduled(scheduler)
     record = scheduler.get(entry_id).record
     assert record["kind"] == "cron" and record["expression"] == "0 * * * *" and record["state"] == "active"
@@ -67,6 +70,20 @@ def test_install_schedules_one_hourly_cron_connected_to_the_gc_slot(scheduler):
     ]
     assert not (timer.unit_dir() / "agentihooks-gc.timer").exists()
     assert not (timer.unit_dir() / "agentihooks-gc.service").exists()
+
+
+def test_install_starts_the_runner_on_the_default_redis_url(scheduler, monkeypatch):
+    from hooks.lifecycle import timer
+    from scripts.scheduler import service
+    from scripts.swarm.store import DEFAULT_URL
+
+    for name in ("REDIS_URL", "AGENTIHOOKS_HIVE_REDIS_URL", "AGENTIHOOKS_SWARM_REDIS_URL"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("AGENTIHOOKS_PROOF", "kept")
+    timer.install_timer("/venv/bin/python", "/opt/agentihooks")
+    started_with = service.ensure_running.call_args.args[0]
+    assert started_with["AGENTIHOOKS_SWARM_REDIS_URL"] == DEFAULT_URL
+    assert started_with["AGENTIHOOKS_PROOF"] == "kept"
 
 
 @pytest.mark.parametrize("suffixes", [("timer", "service"), ("service",)])
