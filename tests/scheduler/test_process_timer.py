@@ -62,3 +62,45 @@ def test_duplicate_delivery_keeps_one_wake(redis, monkeypatch):
         assert redis.lrange(timer.key, 0, -1) == ["same"]
         assert redis.ttl(timer.key) > 0
         assert json.loads(event["payload"])["key"] == timer.key
+
+
+def test_blocking_client_keeps_connection_settings_without_a_read_timeout(monkeypatch):
+    import redis
+
+    source = Mock()
+    source.connection_pool.connection_class = object
+    source.connection_pool.connection_kwargs = {"host": "scheduler", "socket_timeout": 10, "decode_responses": True}
+    pool, client = Mock(), Mock()
+    constructor = Mock(return_value=pool)
+    monkeypatch.setattr(process_timer, "redis_client", lambda: source)
+    monkeypatch.setattr(redis, "ConnectionPool", constructor)
+    monkeypatch.setattr(redis, "Redis", Mock(return_value=client))
+    assert process_timer.blocking_client() is client
+    constructor.assert_called_once_with(
+        connection_class=object, host="scheduler", socket_timeout=None, decode_responses=True
+    )
+    source.close.assert_called_once_with()
+
+
+async def test_async_wait_cancels_its_timer_and_unblocks_its_worker(redis, monkeypatch):
+    import asyncio
+
+    started = asyncio.Event()
+    timers = []
+    original = process_timer.Timer
+
+    def timer(delay):
+        result = original(delay, redis=redis)
+        timers.append(result)
+        started.set()
+        return result
+
+    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
+    monkeypatch.setattr(process_timer, "Timer", timer)
+    task = asyncio.create_task(process_timer.async_wait(60))
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert timers[0].entry.state == "cancelled"
+    assert not redis.exists(timers[0].key)
