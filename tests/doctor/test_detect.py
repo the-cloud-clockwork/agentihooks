@@ -76,6 +76,10 @@ def test_every_detector_of_a_wide_pass_runs_at_once():
     assert detect.collect({f"d{n}": waits for n in range(40)}) == ([STALE] * 40, [])
 
 
+def test_a_pass_with_no_detectors_finds_nothing():
+    assert detect.collect({}) == ([], [])
+
+
 def test_the_spawn_reader_reads_the_watched_swarm_at_the_pass_time(monkeypatch):
     from scripts.doctor import spawn_read, spawns
 

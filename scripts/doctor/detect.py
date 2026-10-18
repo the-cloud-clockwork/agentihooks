@@ -115,6 +115,8 @@ def _timed(name, detect):
 
 def collect(found_by):
     found, failed = [], []
+    if not found_by:
+        return found, failed
     with ThreadPoolExecutor(max_workers=len(found_by)) as pool:
         running = {
             name: pool.submit(contextvars.copy_context().run, _timed, name, detect) for name, detect in found_by.items()
