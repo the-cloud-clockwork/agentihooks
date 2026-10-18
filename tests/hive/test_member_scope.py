@@ -39,6 +39,7 @@ def join(redis, member):
     from scripts.hive import auth
 
     redis.hset(f"{auth.PREFIX}:member:{member}", mapping={"name": member, "ledger": "digest"})
+    redis.sadd(auth.INDEX, member)
 
 
 def as_member(monkeypatch, member="m1"):
