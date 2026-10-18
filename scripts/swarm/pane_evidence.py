@@ -15,6 +15,13 @@ ESCAPE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
 
 
 def sweep(slug: str, store, runtime, at: int) -> list[str]:
+    try:
+        return _sweep(slug, store, runtime, at)
+    except Exception as error:
+        return [f"pane evidence sweep failed: {type(error).__name__}"]
+
+
+def _sweep(slug: str, store, runtime, at: int) -> list[str]:
     if not callable(getattr(runtime, "herdr", None)):
         return []
     directory = runtime.home / slug / "pane-evidence"

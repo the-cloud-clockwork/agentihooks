@@ -304,3 +304,15 @@ def test_sweep_budget_defers_panes_and_next_tick_starts_with_the_oldest_capture(
 
 def test_empty_pane_reply_is_not_an_owned_pane(tmp_path):
     assert collect(tmp_path, lambda args: {}) == ([], [])
+
+
+def test_filesystem_failure_during_budget_sorting_does_not_escape_the_sweep(tmp_path, monkeypatch):
+    from scripts.swarm import pane_evidence
+
+    def unreadable(*args):
+        raise PermissionError("private")
+
+    monkeypatch.setattr(pane_evidence, "_last_capture", unreadable)
+    actions, rows = collect(tmp_path, Panes())
+    assert actions == ["pane evidence sweep failed: PermissionError"]
+    assert rows == []
