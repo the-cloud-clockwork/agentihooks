@@ -372,5 +372,3 @@ rm -rf ~/.agentihooks
   Built by <a href="https://github.com/The-Cloud-Clockwork">The Cloud Clockwork</a> &middot;
   <a href="https://github.com/The-Cloud-Clockwork/agentihooks/blob/main/LICENSE">MIT License</a>
 </p>
-
-<!-- Temporary documentation builder acceptance proof. -->
