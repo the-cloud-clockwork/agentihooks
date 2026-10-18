@@ -307,7 +307,10 @@ def _persona(root: Path, target: str, bundle: Path | None, dirs: list[tuple[str,
     rules = [("rule", n, quarantine.annotate(p.read_text(), sources.source(p))) for n, p in items.items()]
     text = quarantine.passages(build_persona(dirs, chain, bundle, rules, HEADER, FOOTER))
     ending = f"\n\n{FOOTER}\n"
-    return binding.persona(text.removesuffix(ending)) + ending
+    text = binding.persona(text.removesuffix(ending)) + ending
+    if len(text) > 150_000:
+        raise ValueError(f"Profile {root.parent.name} compiled to {len(text)} characters; Claude Code limit is 150000")
+    return text
 
 
 def _read_json(path: Path) -> dict | None:
