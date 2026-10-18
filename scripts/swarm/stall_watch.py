@@ -98,6 +98,7 @@ class Watch:
     now_ms: int
     environ: dict | None = None
     post: Callable = ntfy
+    released: Callable = lambda task: True
 
 
 def _key(watch, name):
@@ -126,6 +127,8 @@ def stall_pass(watch, doc):
 
 def _waiting(watch, task, rows):
     tid, owner = task["id"], task.get("claimed_by")
+    if not watch.released(task):
+        return True
     if any(dep != tid and rows.get(dep, {}).get("state") != "done" for dep in task.get("depends_on") or []):
         return True
     found = ready.record(watch.store, watch.slug, tid) if ready.awaiting(task) else None
@@ -141,6 +144,11 @@ def _minutes(watch, since):
 def _since(watch, marks, seen, mark):
     seen[mark] = int(marks.get(mark, watch.now_ms))
     return seen[mark]
+
+
+def _woken(watch, task):
+    owner = task.get("claimed_by")
+    return idle.woke(watch.store.redis, watch.slug, owner) if owner else 0
 
 
 def _stall(watch, task, pull, marks, seen, agent):
@@ -185,7 +193,7 @@ def _pull_request(watch, mail, task, limit, marks, seen):
     if case is None:
         return []
     if case != "owner":
-        since = max(since, pull.pushed_at or 0, pull.red_at or 0, agent.started_at if agent else 0)
+        since = max(since, pull.pushed_at or 0, pull.red_at or 0, agent.started_at if agent else 0, _woken(watch, task))
     minutes = _minutes(watch, since)
     if minutes < getattr(limit, case):
         return []

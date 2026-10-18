@@ -287,10 +287,14 @@ exit "$status"
 
 def test_dev_records_the_suite_count_and_the_count_floor_reads_it_only_through_the_base_grader():
     jobs = _workflow()["jobs"]
-    split = {step.get("name"): step for step in jobs["split"]["steps"]}
-    on_dev = "github.event_name == 'push' && github.ref == 'refs/heads/dev' && env.UNIT_SOURCE == ''"
-    record, upload = split["Record the suite count for later bases"], split["Upload the suite count record"]
-    assert record["if"] == upload["if"] == on_dev
+    recorder = jobs["count-record"]
+    assert recorder["if"] == "${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' }}"
+    assert recorder["continue-on-error"] is True
+    assert recorder["strategy"]["matrix"] == jobs["test-count"]["strategy"]["matrix"]
+    steps = {step.get("name"): step for step in recorder["steps"]}
+    record, upload = steps["Record the suite count for later bases"], steps["Upload the suite count record"]
+    assert record["continue-on-error"] is True
+    assert "Record the suite count for later bases" not in str(jobs["split"]["steps"])
     assert 'python -m tests.count_floor --record "$RUNNER_TEMP/count-record/record.json"' in record["run"]
     assert 'git worktree add --detach "$RUNNER_TEMP/base" HEAD' in record["run"]
     assert upload["with"]["name"] == "count-record-${{ matrix.python-version }}"

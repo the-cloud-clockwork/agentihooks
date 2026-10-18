@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from scripts.inbox.store import CLOSED, InboxError
-from scripts.swarm import merge_queue, operator_mail, outage
+from scripts.swarm import merge_queue, outage
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.naming import lane_of
 from scripts.swarm.store import MASTER, PREFIX, SwarmError
@@ -484,8 +484,8 @@ class Mail:
         self.seats = {a.name: a.seat or a.name for a in live}
         self.held = {a.name: a.task for a in agents if a.lane != MASTER}
         self.has_master = any(a.lane == MASTER for a in live)
-        self.master = operator_mail.master_address(slug, live)
-        self.masters = masters.live_seats(live)
+        self.masters = list(masters.held(store.redis, slug, agents))
+        self.master = masters.lead_of(slug, self.masters)
 
     @functools.cached_property
     def owners(self):
