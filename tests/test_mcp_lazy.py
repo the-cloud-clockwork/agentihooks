@@ -82,7 +82,7 @@ def test_startup_and_listing_do_not_load_protocol_or_hook_dispatch(monkeypatch):
         result = initialize(request)
         assert result["protocolVersion"] == "2025-03-26"
         listing = request("tools/list", request_id=2)["result"]["tools"]
-        assert len(listing) == 13
+        assert len(listing) == 22
         assert request("ping", request_id=3)["result"] == {}
         for method, key in (
             ("resources/list", "resources"),
@@ -101,6 +101,7 @@ def test_startup_and_listing_do_not_load_protocol_or_hook_dispatch(monkeypatch):
             "hooks.mcp.channels",
             "hooks.mcp.enforcement",
             "hooks.mcp.conditions",
+            "hooks.mcp.scheduler",
         )
     )
     from hooks.mcp import build_server
@@ -246,7 +247,7 @@ def test_discovery_handshake_matches_protocol_library(monkeypatch, capsys, reque
             "serverInfo": {"name": expected.server_name, "version": expected.server_version},
         },
     }
-    assert len(replies[1]["result"]["tools"]) == 13
+    assert len(replies[1]["result"]["tools"]) == 22
 
 
 @pytest.mark.parametrize(

@@ -391,6 +391,157 @@ CATALOG = {
             },
         },
     ],
+    "scheduler": [
+        {
+            "name": "timer_add",
+            "description": "Fire message once at a target, after delay or at a time.\n"
+            "\n"
+            "    Args:\n"
+            "        message: Text delivered when the timer fires.\n"
+            "        delay: Seconds, or a number with s, m, h or d (90, 5m, 2h). Give delay "
+            "or at.\n"
+            "        at: ISO time such as 2026-10-18T09:30:00+00:00. Give delay or at.\n"
+            "        target: fleet, swarm, seat or session.\n"
+            "        name: Swarm slug, seat address or session name; empty for fleet.\n"
+            "        session_id: The calling session; required when the server serves many "
+            "sessions and agent_name is empty.\n"
+            "        agent_name: The calling swarm agent's name; owns the schedule, and a "
+            "swarm firing skips it.\n"
+            "\n"
+            "    Returns:\n"
+            "        JSON with the timer entry and its id.\n"
+            "    ",
+            "inputSchema": {
+                "properties": {
+                    "message": {"title": "Message", "type": "string"},
+                    "delay": {"default": "", "title": "Delay", "type": "string"},
+                    "at": {"default": "", "title": "At", "type": "string"},
+                    "target": {"default": "fleet", "title": "Target", "type": "string"},
+                    "name": {"default": "", "title": "Name", "type": "string"},
+                    "session_id": {"default": "", "title": "Session Id", "type": "string"},
+                    "agent_name": {"default": "", "title": "Agent Name", "type": "string"},
+                },
+                "required": ["message"],
+                "title": "timer_addArguments",
+                "type": "object",
+            },
+        },
+        {
+            "name": "timer_list",
+            "description": "List timers still waiting to fire on this machine, soonest first.",
+            "inputSchema": {"properties": {}, "title": "timer_listArguments", "type": "object"},
+        },
+        {
+            "name": "timer_cancel",
+            "description": "Cancel a timer that has not fired.",
+            "inputSchema": {
+                "properties": {"timer_id": {"title": "Timer Id", "type": "string"}},
+                "required": ["timer_id"],
+                "title": "timer_cancelArguments",
+                "type": "object",
+            },
+        },
+        {
+            "name": "stopwatch_start",
+            "description": "Start a stopwatch that delivers message to a target when its elapsed time "
+            "crosses limit.\n"
+            "\n"
+            "    Args:\n"
+            "        message: Text delivered when the limit is reached.\n"
+            "        limit: Seconds, or a number with s, m, h or d.\n"
+            "        target: fleet, swarm, seat or session.\n"
+            "        name: Swarm slug, seat address or session name; empty for fleet.\n"
+            "        session_id: The calling session; required when the server serves many "
+            "sessions and agent_name is empty.\n"
+            "        agent_name: The calling swarm agent's name; owns the schedule, and a "
+            "swarm firing skips it.\n"
+            "\n"
+            "    Returns:\n"
+            "        JSON with the stopwatch entry and its id.\n"
+            "    ",
+            "inputSchema": {
+                "properties": {
+                    "message": {"title": "Message", "type": "string"},
+                    "limit": {"title": "Limit", "type": "string"},
+                    "target": {"default": "fleet", "title": "Target", "type": "string"},
+                    "name": {"default": "", "title": "Name", "type": "string"},
+                    "session_id": {"default": "", "title": "Session Id", "type": "string"},
+                    "agent_name": {"default": "", "title": "Agent Name", "type": "string"},
+                },
+                "required": ["message", "limit"],
+                "title": "stopwatch_startArguments",
+                "type": "object",
+            },
+        },
+        {
+            "name": "stopwatch_stop",
+            "description": "Stop a running stopwatch and report its elapsed seconds.",
+            "inputSchema": {
+                "properties": {"stopwatch_id": {"title": "Stopwatch Id", "type": "string"}},
+                "required": ["stopwatch_id"],
+                "title": "stopwatch_stopArguments",
+                "type": "object",
+            },
+        },
+        {
+            "name": "stopwatch_show",
+            "description": "Show a stopwatch with its state and elapsed seconds.",
+            "inputSchema": {
+                "properties": {"stopwatch_id": {"title": "Stopwatch Id", "type": "string"}},
+                "required": ["stopwatch_id"],
+                "title": "stopwatch_showArguments",
+                "type": "object",
+            },
+        },
+        {
+            "name": "cron_add",
+            "description": "Deliver message to a target on every match of a five field cron expression.\n"
+            "\n"
+            "    Args:\n"
+            "        message: Text delivered on each firing.\n"
+            "        expression: Five fields: minute hour day month weekday.\n"
+            "        target: fleet, swarm, seat or session.\n"
+            "        name: Swarm slug, seat address or session name; empty for fleet.\n"
+            "        timezone: Time zone the expression is read in.\n"
+            "        session_id: The calling session; required when the server serves many "
+            "sessions and agent_name is empty.\n"
+            "        agent_name: The calling swarm agent's name; owns the schedule, and a "
+            "swarm firing skips it.\n"
+            "\n"
+            "    Returns:\n"
+            "        JSON with the cron entry and its id.\n"
+            "    ",
+            "inputSchema": {
+                "properties": {
+                    "message": {"title": "Message", "type": "string"},
+                    "expression": {"title": "Expression", "type": "string"},
+                    "target": {"default": "fleet", "title": "Target", "type": "string"},
+                    "name": {"default": "", "title": "Name", "type": "string"},
+                    "timezone": {"default": "UTC", "title": "Timezone", "type": "string"},
+                    "session_id": {"default": "", "title": "Session Id", "type": "string"},
+                    "agent_name": {"default": "", "title": "Agent Name", "type": "string"},
+                },
+                "required": ["message", "expression"],
+                "title": "cron_addArguments",
+                "type": "object",
+            },
+        },
+        {
+            "name": "cron_list",
+            "description": "List cron schedules on this machine, next firing first.",
+            "inputSchema": {"properties": {}, "title": "cron_listArguments", "type": "object"},
+        },
+        {
+            "name": "cron_remove",
+            "description": "Remove a cron schedule.",
+            "inputSchema": {
+                "properties": {"cron_id": {"title": "Cron Id", "type": "string"}},
+                "required": ["cron_id"],
+                "title": "cron_removeArguments",
+                "type": "object",
+            },
+        },
+    ],
 }
 
 CAPABILITIES = {
