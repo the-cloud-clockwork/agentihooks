@@ -265,3 +265,14 @@ class LaunchSlots:
             raw = self.redis.get(key)
             if raw is not None and json.loads(raw)["state"] == "live":
                 self.redis.pexpire(key, 45000)
+
+    def refresh_reported(self, now_ms: int) -> None:
+        """Refresh the live rows every live hive reports, members included, whose Redis users cannot."""
+        import json
+
+        from scripts.hive import registry
+
+        for hive in registry.hives(self.redis):
+            if registry.live(hive, now_ms):
+                report = json.loads(self.redis.get(f"{registry.key(hive['id'])}:sessions") or "{}")
+                self.refresh([execution for ids in report.get("_executions", {}).values() for execution in ids])

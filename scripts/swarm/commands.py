@@ -8,15 +8,14 @@ from collections.abc import Callable
 
 from scripts.hive import registry
 from scripts.swarm import bottleneck_status, execution_card, lease
-from scripts.swarm.store import RedisStore, redis_url
+from scripts.swarm.store import RedisStore
 from scripts.swarm_v2.herdr import visibility
 
 
 def hive_id() -> str:
-    member = os.environ.get("AGENTIHOOKS_HIVE_ID")
-    if member and redis_url(os.environ) == os.environ.get("AGENTIHOOKS_HIVE_REDIS_URL"):
-        return member
-    return os.environ.get("SWARM_HIVE_ID") or registry.seeded_id() or socket.gethostname()
+    from scripts.hive import scope
+
+    return scope.member() or os.environ.get("SWARM_HIVE_ID") or registry.seeded_id() or socket.gethostname()
 
 
 def bind(store: RedisStore, slug: str, owner: str) -> bool:
