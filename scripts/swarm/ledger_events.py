@@ -797,14 +797,20 @@ def _tell_engineer(mail, ledger, task, key, text, url=""):
 def _move_task_notices(mail, ledger, tasks):
     index, moved = mail.task_index(), []
     for item_id, task_id in mail.store.redis.hgetall(index).items():
-        if not _open(mail.inbox, item_id):
+        task = tasks.get(task_id)
+        if task is None or not _open(mail.inbox, item_id):
             mail.store.redis.hdel(index, item_id)
             continue
-        item, task = mail.inbox.get(item_id), tasks.get(task_id)
-        if task is None or not mail.held_elsewhere(item.address, task):
+        item = mail.inbox.get(item_id)
+        if not mail.held_elsewhere(item.address, task):
+            continue
+        try:
+            mail.inbox.close(
+                item_id, SENDER, "done", f"moved onto task {task_id}; {item.address} now holds another task"
+            )
+        except InboxError:
             continue
         ledger.comment(mail.slug, task_id, item.text, by=SENDER)
-        mail.inbox.close(item_id, SENDER, "done", f"moved onto task {task_id}; {item.address} now holds another task")
         mail.store.redis.hdel(index, item_id)
         moved.append(f"moved {item_id} onto tasks/{task_id}")
     return moved

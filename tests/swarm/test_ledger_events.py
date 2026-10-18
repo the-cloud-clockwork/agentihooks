@@ -493,6 +493,23 @@ def test_a_task_notice_for_a_seat_its_claimant_still_occupies_goes_to_the_seat(s
     (item,) = InboxStore(store.redis).inbox(ENG_SEAT)
     assert words in item.text and ledger.comments == [] and told == [f"told {ENG_SEAT}: {key}"]
     assert task_notices(store) == {item.id: "t1"}
+    assert red_index(store) == ({item.id: URL} if ":red:" in key else {})
+
+
+def test_each_pull_request_notice_in_one_pass_reaches_its_engineer(store):
+    red, closed, merged = answer("open_red"), answer("closed_unmerged"), answer("merged")
+    urls = {"https://github.com/o/r/pull/7": red, "https://github.com/o/r/pull/8": closed, URL: merged}
+    tasks = [
+        {"id": f"t{n}", "title": "Build", "state": "pr", "claimed_by": "sw-eng-1", "pr_url": url}
+        for n, url in enumerate(urls)
+    ]
+    run(store, recorded())
+    told = run(store, recorded(tasks=tasks), now_ms=merged.merged_at + 10 * MINUTE, github=urls.get)
+    assert told[-3:] == [
+        f"told {ENG_SEAT}: https://github.com/o/r/pull/7:red:{red.head}",
+        f"told {ENG_SEAT}: https://github.com/o/r/pull/8:closed",
+        f"told {ENG_SEAT}: {URL}:merged:engineer",
+    ]
 
 
 def test_a_task_notice_for_a_claimant_no_longer_running_goes_to_the_master_unindexed(store):
@@ -544,7 +561,7 @@ def test_a_seat_notice_closed_by_its_reader_leaves_the_task_index(store):
     assert task_notices(store) == {} and ledger.comments == []
 
 
-def test_a_seat_notice_for_a_task_gone_from_the_ledger_stays_where_it_is(store):
+def test_a_seat_notice_for_a_task_gone_from_the_ledger_stays_and_leaves_the_task_index(store):
     closed, ledger = answer("closed_unmerged"), FakeLedger()
     run(store, recorded(), ledger=ledger)
     run(store, in_pr(), ledger=ledger, github=lambda url: closed)
@@ -552,6 +569,42 @@ def test_a_seat_notice_for_a_task_gone_from_the_ledger_stays_where_it_is(store):
     reassign_seat(store)
     run(store, recorded(tasks=[DONE_T2]), ledger=ledger)
     assert InboxStore(store.redis).get(item.id).state == "pending" and ledger.comments == []
+    assert task_notices(store) == {}
+
+
+def test_skipped_seat_notices_leave_the_later_ones_to_move(store):
+    inbox, ledger = InboxStore(store.redis), FakeLedger()
+    run(store, recorded(), ledger=ledger)
+    read, gone, held, due = (inbox.send("swarm", ENG_SEAT, text) for text in ("read", "gone", "held", "due"))
+    inbox.close(read.id, "sw-eng-1", "done", "fixed it")
+    for item, task in ((read, "t1"), (gone, "t9"), (held, "t2"), (due, "t1")):
+        store.redis.hset(store.key("sw", "task-notices"), item.id, task)
+    reassign_seat(store)
+    tasks = [
+        {"id": "t1", "title": "Build the thing", "state": "pr", "claimed_by": "sw-eng-1", "pr_url": URL},
+        {"id": "t2", "title": "Other", "state": "claimed", "claimed_by": "sw-eng-2"},
+    ]
+    told = run(store, recorded(tasks=tasks), ledger=ledger)
+    assert told == [f"moved {due.id} onto tasks/t1"] and ledger.comments == [("sw", "t1", "due", "swarm")]
+    assert task_notices(store) == {held.id: "t2"}
+
+
+def test_a_seat_notice_whose_close_races_stays_indexed_and_moves_next_pass(store, monkeypatch):
+    closed, ledger = answer("closed_unmerged"), FakeLedger()
+    run(store, recorded(), ledger=ledger)
+    run(store, in_pr(), ledger=ledger, github=lambda url: closed)
+    (item,) = InboxStore(store.redis).inbox(ENG_SEAT)
+    reassign_seat(store)
+
+    def changed_meanwhile(self, item_id, closer, kind, detail=""):
+        raise ledger_events.InboxError(f"message {item_id} changed meanwhile")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(InboxStore, "close", changed_meanwhile)
+        run(store, in_pr(), ledger=ledger, github=lambda url: closed)
+    assert ledger.comments == [] and task_notices(store) == {item.id: "t1"}
+    told = run(store, in_pr(), ledger=ledger, github=lambda url: closed)
+    assert told == [f"moved {item.id} onto tasks/t1"] and len(ledger.comments) == 1
 
 
 @pytest.mark.parametrize(("gate", "notices"), [("SUCCESS", 0), ("FAILURE", 1)])
