@@ -3,11 +3,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm import cli, merge_queue, queue_priority, queue_record
+from scripts.swarm import cli, ledger_events, merge_queue, queue_priority, queue_record
 from scripts.swarm.store import SwarmError
 from tests.swarm.test_cli import env
 from tests.swarm.test_merge_queue import swarm_of
-from tests.swarm.test_merge_queue_priority import URL, FakeQueue
+from tests.swarm.test_merge_queue_priority import READ_PULL, URL, FakeQueue
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 _fixture = env
@@ -15,6 +15,7 @@ _fixture = env
 
 @pytest.fixture
 def priority(monkeypatch, tmp_path):
+    monkeypatch.setattr(ledger_events, "view", READ_PULL)
     store = swarm_of("master")
     store.config = lambda slug: None
     monkeypatch.setattr(cli, "connect", lambda: store)
@@ -173,3 +174,113 @@ def test_missing_run_resolves_original_group_after_queue_advances(priority, monk
     assert len(reads) == 2
     assert not responses
     assert not p.store.redis.hgetall(p.store.key("sw", queue_priority.PENDING))
+
+
+def test_missing_tests_run_waits_for_discovery_then_completion(priority, monkeypatch, capsys):
+    p = priority
+    responses = [[], [], [{"id": 42, "status": "queued"}]]
+    original_rest = merge_queue.rest
+
+    def rest(path, run):
+        if "workflows/" in path:
+            assert (
+                path == "repos/o/r/actions/workflows/test.yml/runs?event=merge_group&head_sha=group-head&per_page=100"
+            )
+            return {"workflow_runs": responses.pop(0)}
+        return original_rest(path, run)
+
+    monkeypatch.setattr(merge_queue, "rest", rest)
+    assert cli.main(["sw", "merge", "priority", URL]) == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "url": URL,
+        "deferred": True,
+        "displaced": [],
+        "errors": [],
+        "repo": "o/r",
+        "group_head": "group-head",
+        "run_id": None,
+    }
+    assert queue_priority.refresh(p.store, "sw", p.tasks) == []
+    assert queue_priority.refresh(p.store, "sw", p.tasks) == []
+    saved = json.loads(p.store.redis.hget(p.store.key("sw", queue_priority.PENDING), URL))
+    assert saved == {"repo": "o/r", "group_head": "group-head", "run_id": 42, "sender": "engineer@a1b2c3-0001"}
+    assert p.queue.mutations == []
+    p.run["status"] = "completed"
+    assert queue_priority.refresh(p.store, "sw", p.tasks) == [f"applied deferred merge queue priority for {URL}"]
+
+
+def test_missing_run_for_a_departed_group_does_not_hold_forever(priority, monkeypatch, capsys):
+    p = priority
+    monkeypatch.setattr(merge_queue, "rest", lambda path, run: {"workflow_runs": []})
+    assert cli.main(["sw", "merge", "priority", URL]) == 0
+    capsys.readouterr()
+    p.groups.clear()
+    applied = []
+    monkeypatch.setattr(
+        merge_queue,
+        "prioritize",
+        lambda url, journal: applied.append(url) or {"url": url, "displaced": [], "errors": []},
+    )
+    assert queue_priority.refresh(p.store, "sw", p.tasks) == [f"applied deferred merge queue priority for {URL}"]
+    assert applied == [URL]
+
+
+def test_refused_reorder_keeps_pending_request_for_retry(priority, monkeypatch, capsys):
+    p = priority
+    assert cli.main(["sw", "merge", "priority", URL]) == 0
+    capsys.readouterr()
+    p.run["status"] = "completed"
+    monkeypatch.setattr(merge_queue, "prioritize", lambda url, journal: {"displaced": [], "errors": ["queue refused"]})
+    assert queue_priority.refresh(p.store, "sw", p.tasks) == [f"merge queue priority for {URL} waits: queue refused"]
+    assert p.store.redis.hget(p.store.key("sw", queue_priority.PENDING), URL)
+
+
+def test_replay_records_application_and_notifies_the_displaced_owner(priority, monkeypatch, capsys):
+    p = priority
+    records, sent = [], []
+    monkeypatch.setattr(queue_record.Journal, "write", lambda self, *args, **kwargs: records.append((args, kwargs)))
+    monkeypatch.setattr(
+        queue_priority,
+        "InboxStore",
+        lambda redis: SimpleNamespace(send=lambda *args: sent.append(args)),
+    )
+    assert cli.main(["sw", "merge", "priority", URL]) == 0
+    capsys.readouterr()
+    assert records == [
+        (
+            ("priority-deferred", URL, "", None, None),
+            {
+                "repo": "o/r",
+                "group_head": "group-head",
+                "run_id": 42,
+                "sender": "engineer@a1b2c3-0001",
+            },
+        )
+    ]
+    p.run["status"] = "completed"
+    queue_priority.refresh(p.store, "sw", p.tasks)
+    assert sent == [
+        (
+            "engineer@a1b2c3-0001",
+            "ci@owner",
+            f"Your pull request {URL[:-1]}2 was requeued in its original order after priority request {URL}.",
+        )
+    ]
+    assert records[-1] == (
+        ("priority-applied", URL, "", None, None),
+        {
+            "repo": "o/r",
+            "group_head": "group-head",
+            "run_id": 42,
+            "sender": "engineer@a1b2c3-0001",
+        },
+    )
+
+
+def test_operator_lift_is_journaled(priority, monkeypatch, capsys):
+    records = []
+    monkeypatch.setattr(queue_record.Journal, "write", lambda self, *args, **kwargs: records.append((args, kwargs)))
+    monkeypatch.setattr(cli.clearance, "is_operator", lambda store, who: True)
+    assert cli.main(["sw", "merge", "priority", URL, "--lift"]) == 0
+    assert json.loads(capsys.readouterr().out)["errors"] == []
+    assert records[0] == (("priority-lift", URL, "", None, None), {})

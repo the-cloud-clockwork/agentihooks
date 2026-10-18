@@ -3,12 +3,12 @@ import subprocess
 
 from scripts.inbox.store import InboxStore
 from scripts.swarm import merge_queue, queue_record
-from scripts.swarm.store import SwarmError
+from scripts.swarm.store import RedisStore, SwarmError
 
 PENDING = "queue-priority"
 
 
-def blocking(url: str, journal, head: str | None = None) -> dict | None:
+def blocking(url: str, journal: queue_record.Journal, head: str | None = None) -> dict | None:
     groups = journal.groups()
     if groups is None:
         raise SwarmError("queue priority waits until the head group can be read")
@@ -28,7 +28,9 @@ def blocking(url: str, journal, head: str | None = None) -> dict | None:
     return {"repo": repo, "group_head": head, "run_id": runs[0]["id"] if runs else None}
 
 
-def apply(store, slug: str, url: str, sender: str, tasks: list[dict], journal) -> dict:
+def apply(
+    store: RedisStore, slug: str, url: str, sender: str, tasks: list[dict], journal: queue_record.Journal
+) -> dict:
     result = merge_queue.prioritize(url, journal=journal)
     for task in tasks:
         if task.get("pr_url") in result["displaced"] and task.get("claimed_by"):
@@ -43,7 +45,7 @@ def apply(store, slug: str, url: str, sender: str, tasks: list[dict], journal) -
     return result
 
 
-def request(store, slug: str, url: str, sender: str, tasks: list[dict], lift: bool = False) -> dict:
+def request(store: RedisStore, slug: str, url: str, sender: str, tasks: list[dict], lift: bool = False) -> dict:
     journal = queue_record.Journal(url)
     held = None if lift else blocking(url, journal)
     if held is not None:
@@ -56,7 +58,7 @@ def request(store, slug: str, url: str, sender: str, tasks: list[dict], lift: bo
     return apply(store, slug, url, sender, tasks, journal)
 
 
-def refresh(store, slug: str, tasks: list[dict]) -> list[str]:
+def refresh(store: RedisStore, slug: str, tasks: list[dict]) -> list[str]:
     actions = []
     for url, raw in store.redis.hgetall(store.key(slug, PENDING)).items():
         record = json.loads(raw)
