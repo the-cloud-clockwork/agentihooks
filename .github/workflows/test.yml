@@ -2749,6 +2749,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: mutation-report-${{ matrix.shard }}
-          path: .mutation-gate/
+          path: ${{ job.status == 'success' && '.mutation-gate/report.json' || '.mutation-gate/' }}
           include-hidden-files: true
           retention-days: 7

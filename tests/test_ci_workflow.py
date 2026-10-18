@@ -1114,6 +1114,9 @@ def test_mutation_job_runs_independently_and_keeps_its_evidence():
     assert artifact["if"] == "always() && needs.mutation-plan.outputs.forwarded != 'true'"
     assert artifact["with"]["include-hidden-files"] is True
     assert artifact["with"]["name"] == "mutation-report-${{ matrix.shard }}"
+    assert artifact["with"]["path"] == (
+        "${{ job.status == 'success' && '.mutation-gate/report.json' || '.mutation-gate/' }}"
+    )
 
 
 def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
