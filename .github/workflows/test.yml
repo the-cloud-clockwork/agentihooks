@@ -932,15 +932,10 @@ jobs:
           cd "$RUNNER_TEMP/planner"
           "$PYTHON_PATH" -m tests.dep_manifest deselect --plan "$GITHUB_WORKSPACE/reused-tests.json" \
             --collected "$GITHUB_WORKSPACE/collected.json" --out "$GITHUB_WORKSPACE/reused.json"
-
-      - name: Deselect the Python 3.12 queue reused tests
-        if: github.event_name == 'merge_group' && steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
-        env:
-          PYTHON_PATH: ${{ steps.python.outputs.python-path }}
-        run: |
-          cd "$RUNNER_TEMP/planner"
-          "$PYTHON_PATH" -m tests.dep_manifest deselect --plan "$GITHUB_WORKSPACE/reused-tests.json" \
-            --collected "$GITHUB_WORKSPACE/queue-input/3.12/collected.json" --out "$GITHUB_WORKSPACE/queue-input/3.12/reused.json"
+          if [[ "${GITHUB_EVENT_NAME:-}" == merge_group ]]; then
+            "$PYTHON_PATH" -m tests.dep_manifest deselect --plan "$GITHUB_WORKSPACE/reused-tests.json" \
+              --collected "$GITHUB_WORKSPACE/queue-input/3.12/collected.json" --out "$GITHUB_WORKSPACE/queue-input/3.12/reused.json"
+          fi
 
       - name: Upload the deselected tests
         if: steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'

@@ -281,7 +281,6 @@ def test_joint_queue_reuse_keeps_each_versions_deselection_and_uploads(tmp_path)
 
     root = Path(__file__).resolve().parents[1]
     steps = yaml.safe_load((root / ".github/workflows/test.yml").read_text())["jobs"]["split"]["steps"]
-    names = ["Deselect the reused tests", "Deselect the Python 3.12 queue reused tests"]
     runner = tmp_path / "runner"
     (runner / "planner").mkdir(parents=True)
     workspace = tmp_path / "workspace"
@@ -294,22 +293,22 @@ def test_joint_queue_reuse_keeps_each_versions_deselection_and_uploads(tmp_path)
     (workspace / "reused-tests.json").write_text(json.dumps({"tests": [common, first, second]}))
     (workspace / "collected.json").write_text(json.dumps([common, first]))
     (other / "collected.json").write_text(json.dumps([common, second]))
-    for name in names:
-        step = next(step for step in steps if step.get("name") == name)
-        result = subprocess.run(
-            ["bash", "-e", "-c", step["run"]],
-            cwd=workspace,
-            env={
-                **os.environ,
-                "RUNNER_TEMP": str(runner),
-                "GITHUB_WORKSPACE": str(workspace),
-                "PYTHON_PATH": sys.executable,
-                "PYTHONPATH": str(root),
-            },
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
+    step = next(step for step in steps if step.get("name") == "Deselect the reused tests")
+    result = subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        cwd=workspace,
+        env={
+            **os.environ,
+            "RUNNER_TEMP": str(runner),
+            "GITHUB_WORKSPACE": str(workspace),
+            "GITHUB_EVENT_NAME": "merge_group",
+            "PYTHON_PATH": sys.executable,
+            "PYTHONPATH": str(root),
+        },
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads((workspace / "reused.json").read_text())["tests"] == sorted([common, first])
     assert json.loads((other / "reused.json").read_text())["tests"] == sorted([common, second])
     uploads = {step.get("with", {}).get("name"): step for step in steps if "upload" in step.get("uses", "")}
