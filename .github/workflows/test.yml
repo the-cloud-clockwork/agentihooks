@@ -2504,6 +2504,8 @@ jobs:
       shards: ${{ steps.reuse.outputs.reused == 'true' && '[0]' || steps.plan.outputs.shards }}
       stats_parts: ${{ steps.reuse.outputs.reused == 'true' && '[0]' || steps.plan.outputs.stats_parts }}
       bases: ${{ steps.plan.outputs.bases }}
+      selection: ${{ steps.plan.outputs.selection }}
+      browser: ${{ steps.plan.outputs.browser }}
       reused: ${{ steps.reuse.outputs.reused || 'false' }}
       forwarded: ${{ (steps.reuse.outputs.reused == 'true' || steps.plan.outputs.changed == '0') && 'true' || 'false' }}
     steps:
@@ -2592,6 +2594,7 @@ jobs:
       matrix:
         part: ${{ fromJSON(needs.mutation-plan.outputs.stats_parts) }}
     env:
+      MUTATION_SELECTION: ${{ needs.mutation-plan.outputs.selection }}
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
     steps:
       - uses: actions/checkout@v4
@@ -2616,16 +2619,9 @@ jobs:
         if: needs.mutation-plan.outputs.forwarded != 'true'
         run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
-      - name: Select mutation tests before browser setup
-        if: needs.mutation-plan.outputs.forwarded != 'true'
-        id: selection
-        env:
-          BASES: ${{ needs.mutation-plan.outputs.bases }}
-        run: python -m scripts.ci_mutation.browser --bases "$BASES"
-
       - name: Install the browser that page tests drive
         id: browser
-        if: steps.selection.outputs.browser == 'true'
+        if: needs.mutation-plan.outputs.browser == 'true'
         timeout-minutes: 6
         uses: ./.github/actions/browser-cache
 
@@ -2675,6 +2671,7 @@ jobs:
       matrix:
         shard: ${{ fromJSON(needs.mutation-plan.outputs.shards) }}
     env:
+      MUTATION_SELECTION: ${{ needs.mutation-plan.outputs.selection }}
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
     steps:
       - uses: actions/checkout@v4
@@ -2699,16 +2696,9 @@ jobs:
         if: needs.mutation-plan.outputs.forwarded != 'true'
         run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
-      - name: Select mutation tests before browser setup
-        if: needs.mutation-plan.outputs.forwarded != 'true'
-        id: selection
-        env:
-          BASES: ${{ needs.mutation-plan.outputs.bases }}
-        run: python -m scripts.ci_mutation.browser --bases "$BASES"
-
       - name: Install the browser that page tests drive
         id: browser
-        if: steps.selection.outputs.browser == 'true'
+        if: needs.mutation-plan.outputs.browser == 'true'
         timeout-minutes: 6
         uses: ./.github/actions/browser-cache
 

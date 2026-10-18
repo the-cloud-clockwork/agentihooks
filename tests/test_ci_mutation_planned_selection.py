@@ -6,11 +6,13 @@ import pytest
 from scripts.ci_mutation import plan, runner
 
 
-def test_plan_publishes_each_file_selection_and_browser_requirement_once(tmp_path, monkeypatch):
+@pytest.mark.parametrize("tests,browser", [(["tests/test_sample.py"], "true"), ([], "false")])
+def test_plan_publishes_each_file_selection_and_browser_requirement_once(tmp_path, monkeypatch, tests, browser):
     (tmp_path / "scripts").mkdir()
     (tmp_path / "tests").mkdir()
     (tmp_path / "scripts/sample.py").write_text("def sample(value):\n    return value + 1\n")
     (tmp_path / "tests/test_sample.py").write_text("import playwright\n")
+    (tmp_path / "pyproject.toml").write_text('[tool.mutmut]\nsource_paths = ["scripts/"]\n')
     output = tmp_path / "output"
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
@@ -21,13 +23,13 @@ def test_plan_publishes_each_file_selection_and_browser_requirement_once(tmp_pat
 
     def select(root, path):
         calls.append((root, path))
-        return ["tests/test_sample.py"]
+        return tests
 
     monkeypatch.setattr(plan, "select_tests", select)
     assert plan.main() == 0
     values = dict(line.split("=", 1) for line in output.read_text().splitlines())
-    assert json.loads(values["selection"]) == {"scripts/sample.py": ["tests/test_sample.py"]}
-    assert values["browser"] == "true"
+    assert json.loads(values["selection"]) == {"scripts/sample.py": tests}
+    assert values["browser"] == browser
     assert calls == [(tmp_path, Path("scripts/sample.py"))]
 
 

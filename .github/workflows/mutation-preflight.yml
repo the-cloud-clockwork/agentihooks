@@ -29,6 +29,8 @@ jobs:
       shards: ${{ steps.plan.outputs.shards }}
       stats_parts: ${{ steps.plan.outputs.stats_parts }}
       bases: ${{ steps.plan.outputs.bases }}
+      selection: ${{ steps.plan.outputs.selection }}
+      browser: ${{ steps.plan.outputs.browser }}
       changed: ${{ steps.plan.outputs.changed }}
       graded: ${{ steps.plan.conclusion == 'success' }}
       open: ${{ steps.open.outputs.open }}
@@ -165,6 +167,7 @@ jobs:
       matrix:
         part: ${{ fromJSON(needs.plan.outputs.stats_parts) }}
     env:
+      MUTATION_SELECTION: ${{ needs.plan.outputs.selection }}
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
       MUTATION_STATS_CACHE: ${{ github.workspace }}/.mutation-stats-cache
     steps:
@@ -185,15 +188,9 @@ jobs:
       - name: Install dependencies
         run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
-      - name: Select mutation tests before browser setup
-        id: selection
-        env:
-          BASES: ${{ needs.plan.outputs.bases }}
-        run: python -m scripts.ci_mutation.browser --bases "$BASES"
-
       - name: Install the browser that page tests drive
         id: browser
-        if: steps.selection.outputs.browser == 'true'
+        if: needs.plan.outputs.browser == 'true'
         timeout-minutes: 6
         uses: ./.github/actions/browser-cache
 
@@ -304,6 +301,7 @@ jobs:
       matrix:
         shard: ${{ fromJSON(needs.refine.outputs.shards) }}
     env:
+      MUTATION_SELECTION: ${{ needs.plan.outputs.selection }}
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
     steps:
       - uses: actions/checkout@v4
@@ -323,15 +321,9 @@ jobs:
       - name: Install dependencies
         run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
-      - name: Select mutation tests before browser setup
-        id: selection
-        env:
-          BASES: ${{ needs.plan.outputs.bases }}
-        run: python -m scripts.ci_mutation.browser --bases "$BASES"
-
       - name: Install the browser that page tests drive
         id: browser
-        if: steps.selection.outputs.browser == 'true'
+        if: needs.plan.outputs.browser == 'true'
         timeout-minutes: 6
         uses: ./.github/actions/browser-cache
 

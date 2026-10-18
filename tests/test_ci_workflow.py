@@ -388,16 +388,14 @@ def test_mutation_job_installs_chromium_before_mutating():
 def test_mutation_browser_setup_is_selected_bounded_and_reports_failure():
     steps = _mutation_workflow()["jobs"]["mutation"]["steps"]
     names = [step.get("name") for step in steps]
-    select = names.index("Select mutation tests before browser setup")
+    assert "Select mutation tests before browser setup" not in names
     install = names.index("Install the browser that page tests drive")
-    assert select < install
-    assert steps[select]["id"] == "selection"
-    assert steps[select]["run"].startswith("python -m scripts.ci_mutation." + "browser ")
-    assert steps[install]["if"] == "steps.selection.outputs.browser == 'true'"
+    assert steps[install]["if"] == "needs.mutation-plan.outputs.browser == 'true'"
     assert steps[install]["id"] == "browser"
     assert steps[install]["timeout-minutes"] == 6
     job = _mutation_workflow()["jobs"]["mutation"]
     assert job["env"]["PLAYWRIGHT_BROWSERS_PATH"] == "${{ github.workspace }}/.playwright"
+    assert job["env"]["MUTATION_SELECTION"] == "${{ needs.mutation-plan.outputs.selection }}"
     failure = next(step for step in steps if step.get("name") == "Report browser setup failure")
     assert failure["if"] == "failure() && steps.browser.outcome == 'failure'"
     assert "::error::" in failure["run"]
@@ -1156,10 +1154,11 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
     }
     assert "permissions" not in plan
     assert plan["outputs"]["bases"] == "${{ steps.plan.outputs.bases }}"
+    assert plan["outputs"]["selection"] == "${{ steps.plan.outputs.selection }}"
+    assert plan["outputs"]["browser"] == "${{ steps.plan.outputs.browser }}"
     for job in (mutation, jobs["mutation-stats"]):
-        select = next(step for step in job["steps"] if step.get("id") == "selection")
-        assert select["env"] == {"BASES": "${{ needs.mutation-plan.outputs.bases }}"}
-        assert select["run"] == "python -m scripts.ci_mutation." + 'browser --bases "$BASES"'
+        assert job["env"]["MUTATION_SELECTION"] == "${{ needs.mutation-plan.outputs.selection }}"
+        assert not any(step.get("id") == "selection" for step in job["steps"])
     checkout = next(step for step in plan["steps"] if step.get("uses", "").startswith("actions/checkout"))
     assert checkout["with"] == {"fetch-depth": 0, "ref": "${{ github.event.pull_request.head.sha }}"}
     assert mutation["strategy"] == {
@@ -1271,7 +1270,7 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
     assert install["if"] == "steps.reuse.outputs.reused != 'true'"
     skipped = "needs.mutation-plan.outputs.forwarded != 'true'"
     unguarded = (
-        "steps.selection.outputs.browser == 'true'",
+        "needs.mutation-plan.outputs.browser == 'true'",
         "failure() && steps.browser.outcome == 'failure'",
         "failure()",
         f"github.event_name == 'pull_request' && {skipped}",
