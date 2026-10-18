@@ -313,14 +313,14 @@ def control_argv(body):
         if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9@._-]{1,200}", name) or name.startswith("-"):
             raise ValueError("terminate needs an exact agent name")
         return ["terminate", name]
-    if action == "verdict":
-        return verdict_argv(body)
-    if action == "restore-decision":
-        return restore_decision_argv(body)
-    if action == "lift":
-        return lift_argv(body)
-    if action == "master_move":
-        return master_move_argv(body)
+    builders = {
+        "verdict": verdict_argv,
+        "restore-decision": restore_decision_argv,
+        "lift": lift_argv,
+        "master_move": master_move_argv,
+    }
+    if action in builders:
+        return builders[action](body)
     if action != "set":
         raise ValueError("action must be start, pause, stop, stop_now, close, reopen, set or verdict")
     pairs = []
