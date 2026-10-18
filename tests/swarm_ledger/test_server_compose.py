@@ -102,6 +102,32 @@ def test_adoption_sends_start_and_stop_to_the_bundle_swarm_service(tmp_path, mon
         assert (kw["capture_output"], kw["text"], kw["check"], kw["timeout"]) == (True, True, False, 120)
 
 
+def test_an_adopted_folder_matches_through_a_symlink(tmp_path, monkeypatch):
+    folder = shared(tmp_path, monkeypatch)
+    link = tmp_path / "linked-ledger"
+    link.symlink_to(folder)
+    adopt(tmp_path, link)
+    assert server_compose.adoption({}) == str(link)
+    assert server_compose.adopted(folder, {})
+
+
+def test_an_adoption_of_another_folder_refuses_rather_than_restoring_the_old_service(tmp_path, monkeypatch):
+    folder = shared(tmp_path, monkeypatch)
+    elsewhere = tmp_path / "elsewhere"
+    adopt(tmp_path, elsewhere)
+    calls = []
+
+    def run(argv, **kw):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    refusal = f"the swarm stack adopts {elsewhere}, not {folder}; the legacy ledger service stays down"
+    assert server_compose.start(folder, {}, run) == refusal
+    assert server_compose.stop(folder, {}, run) == refusal
+    assert calls == []
+    assert server_compose.adoption({"AGENTIHOOKS_HOME": str(tmp_path / "none")}) == ""
+
+
 def test_an_adopted_ledger_restart_never_restores_the_old_service(tmp_path, monkeypatch, ledger_port):
     folder = shared(tmp_path, monkeypatch)
     stack = adopt(tmp_path, folder)

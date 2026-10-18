@@ -8,6 +8,7 @@ import urllib.request
 from pathlib import Path
 
 import pytest
+import yaml
 
 from scripts.swarm import cli, stack_env, stack_init
 
@@ -205,7 +206,7 @@ def test_adopt_defaults_to_the_shared_ledger_folder_in_the_home(home, monkeypatc
 
 def test_the_adoption_override_serves_the_host_folder_as_the_host_user():
     text = (stack_init.BUNDLED / "deploy" / "compose" / "adopt.yaml").read_text()
-    swarm = stack_init_yaml(text)["services"]["swarm"]
+    swarm = yaml.safe_load(text)["services"]["swarm"]
     assert (
         swarm["user"]
         == "${SWARM_ADOPT_UID:?run agentihooks swarm init --adopt}:${SWARM_ADOPT_GID:?run agentihooks swarm init --adopt}"
@@ -216,12 +217,6 @@ def test_the_adoption_override_serves_the_host_folder_as_the_host_user():
         "${SWARM_ADOPT_LEDGER_DIR}:${SWARM_ADOPT_LEDGER_DIR}",
         "${SWARM_ADOPT_HOME}/.agentihooks:${SWARM_ADOPT_HOME}/.agentihooks",
     ]
-
-
-def stack_init_yaml(text):
-    import yaml
-
-    return yaml.safe_load(text)
 
 
 def test_stack_folder_defaults_to_the_agentihooks_home(monkeypatch, tmp_path):

@@ -26,8 +26,12 @@ Run = Callable[..., subprocess.CompletedProcess]
 
 
 def adopted(folder: Path, environ: dict = os.environ) -> bool:
-    stack = stack_env.read_env(stack_init.stack_home(environ) / ".env")
-    return stack.get("SWARM_ADOPT_LEDGER_DIR") == str(folder)
+    recorded = adoption(environ)
+    return bool(recorded) and Path(recorded).resolve() == folder.resolve()
+
+
+def adoption(environ: dict = os.environ) -> str:
+    return stack_env.read_env(stack_init.stack_home(environ) / ".env").get("SWARM_ADOPT_LEDGER_DIR", "")
 
 
 def used(
@@ -47,6 +51,8 @@ def used(
 def _compose(action: list[str], folder: Path, environ: dict, run: Run) -> str:
     if adopted(folder, environ):
         argv, env = stack_init.compose(stack_init.stack_home(environ), *action, ADOPTED_SERVICE), environ
+    elif recorded := adoption(environ):
+        return f"the swarm stack adopts {recorded}, not {folder}; the legacy ledger service stays down"
     else:
         argv, env = _legacy(action, folder, environ)
     try:
