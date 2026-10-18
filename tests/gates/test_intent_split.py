@@ -14,14 +14,17 @@ def split(doc, pr_url=FIRST, pulls=(), lines="15-17"):
     return {**doc, "tasks": [{**task, "pr_url": pr_url}]}
 
 
-@pytest.mark.parametrize("source", ["missing", "follow_up"])
+@pytest.mark.parametrize("source", ["missing", "follow_up", "labels"])
 def test_a_split_task_without_plan_lines_is_graded_by_its_description(planned, source):  # noqa: F811
     doc = split(planned)
     task = doc["tasks"][0]
     if source == "missing":
         doc["phases"][0].pop("plan_ref")
-    else:
+    elif source == "follow_up":
         task["follow_up"] = True
+    else:
+        task.pop("plan_lines")
+        task["split"] = ["compatibility", "repair"]
     state = intent.state_of(doc, task, PR)
     assert state["task_text"] == task["description"]
     assert "plan_lines" not in state
