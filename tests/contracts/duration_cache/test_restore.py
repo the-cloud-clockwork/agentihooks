@@ -34,7 +34,7 @@ def restore(folder, failures):
     if step["uses"].startswith("./"):
         steps = yaml.safe_load((ROOT / step["uses"] / "action.yml").read_text())["runs"]["steps"]
     else:
-        steps = [step]
+        steps = [{name: value for name, value in step.items() if name != "if"}]
     outcomes = {}
     calls = []
     folder.mkdir()
