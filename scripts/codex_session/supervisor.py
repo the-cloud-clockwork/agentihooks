@@ -13,7 +13,7 @@ from pathlib import Path
 
 from hooks.observability.trace_flush import start_time
 from scripts.codex_session import protocol
-from scripts.codex_session.binding import CONNECTED, EXITED, FAILED, BindingStore, TransportRecord
+from scripts.codex_session.binding import CONNECTED, EXITED, FAILED, RECORDS, BindingStore, TransportRecord, decode
 from scripts.profiles import binding
 from scripts.routing import envs
 from scripts.swarm.store import APP_SERVER_TRANSPORT, AgentRecord, RedisStore
@@ -32,7 +32,8 @@ UNIX = "unix://"
 EXECUTION_PREFIX = "exe-"
 ENDPOINT_ID_CHARS = 16
 PRIVATE_MODE = 0o700
-RUNTIME_DIR_ENV = "XDG_RUNTIME_DIR"
+SHARED_ROLLOUTS = ("sessions", "archived_sessions")
+OMITTED_STATE = (*SHARED_ROLLOUTS, "bin", "history.jsonl", "session_index.jsonl", "log", "tmp", "shell_snapshots")
 RUNTIME_SUBDIR = "cx"
 HOME_SUBDIR = ".agentihooks"
 CODEX_HOME_KEY = "codexHome"
@@ -99,9 +100,7 @@ class Started:
 
 
 def runtime_root(environ: Mapping[str, str]) -> Path:
-    runtime = environ.get(RUNTIME_DIR_ENV)
-    base = Path(runtime) if runtime else Path(environ.get("HOME") or Path.home()) / HOME_SUBDIR
-    return base / RUNTIME_SUBDIR
+    return Path(environ.get("HOME") or Path.home()) / HOME_SUBDIR / RUNTIME_SUBDIR
 
 
 def socket_path(root: Path, execution_id: str) -> Path:
@@ -300,9 +299,17 @@ def execution_home(spec: Launch, directory: Path) -> Launch:
     shutil.copytree(
         source,
         home,
-        ignore=lambda directory, _names: ("bin",) if Path(directory) == source else (),
+        ignore=lambda directory, names: (
+            tuple(name for name in names if name in OMITTED_STATE or ".sqlite" in name)
+            if Path(directory) == source
+            else ()
+        ),
         ignore_dangling_symlinks=True,
     )
+    for name in SHARED_ROLLOUTS:
+        canonical = (source / name).resolve()
+        canonical.mkdir(parents=True, exist_ok=True)
+        (home / name).symlink_to(canonical, target_is_directory=True)
     binaries = source / "bin"
     if binaries.exists():
         (home / "bin").symlink_to(binaries.resolve())
@@ -321,8 +328,32 @@ def execution_home(spec: Launch, directory: Path) -> Launch:
     return replace(spec, codex_home=str(home), environ={**spec.environ, "CODEX_HOME": str(home)})
 
 
+def reclaim_homes(store: RedisStore, slug: str, deps: Deps) -> None:
+    bindings = BindingStore(store)
+    for raw in store.redis.hgetall(store.key(slug, RECORDS)).values():
+        record = decode(raw)
+        directory = execution_directory(record)
+        if record.host_id != socket.gethostname() or directory is None or not directory.exists():
+            continue
+        if record.server_pid:
+            identity = deps.start_identity(record.server_pid)
+            alive = identity is not None and (
+                not record.server_start_identity or identity == record.server_start_identity
+            )
+        else:
+            bridge = record.bridge_owner.rpartition(":")[2]
+            alive = not bridge.isdecimal() or deps.start_identity(int(bridge)) is not None
+        if alive:
+            continue
+        shutil.rmtree(directory)
+        ended = replace(record, state=EXITED, active_turn_id="")
+        bindings.put(slug, ended)
+        bindings.release(slug, ended)
+
+
 def launch(store: RedisStore, spec: Launch, deps: Deps) -> Started:
     check_environment(spec.environ, spec.allowed_tokens)
+    reclaim_homes(store, spec.slug, deps)
     agent = admit(store, spec, deps)
     bindings = BindingStore(store)
     record, process, path = None, None, None
@@ -361,4 +392,7 @@ def finish(store: RedisStore, slug: str, started: Started, now_ms: int) -> Trans
     record = replace(current, state=EXITED, active_turn_id="", last_transport_activity=now_ms)
     bindings.put(slug, record)
     bindings.release(slug, record)
+    directory = execution_directory(record)
+    if started.process.poll() is not None and directory is not None and directory.exists():
+        shutil.rmtree(directory)
     return record
