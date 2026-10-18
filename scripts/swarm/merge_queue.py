@@ -91,7 +91,21 @@ def require_green(url: str, head: str, run) -> None:
         raise SwarmError(f"required checks on the current pull request head must pass before queueing{failed}")
 
 
-def operate(action: str, url: str, run=subprocess.run, admit=None) -> dict:
+def journaled(journal, action: str, url: str, head: str, call):
+    if journal is None:
+        return call()
+    before = journal.groups()
+    errors = []
+    try:
+        return call()
+    except SwarmError as exc:
+        errors.append(str(exc))
+        raise
+    finally:
+        journal.write(action, url, head, before, journal.groups(), errors)
+
+
+def operate(action: str, url: str, run=subprocess.run, admit=None, journal=None) -> dict:
     raw = graphql(STATE, {"url": url}, run)["resource"]
     if not raw:
         raise SwarmError("GitHub URL does not identify a pull request")
@@ -107,10 +121,11 @@ def operate(action: str, url: str, run=subprocess.run, admit=None) -> dict:
             graphql(MERGE, {"id": raw["id"], "head": raw["headRefOid"]}, run)
         else:
             require_green(url, raw["headRefOid"], run)
-            graphql(QUEUE, {"id": raw["id"], "head": raw["headRefOid"]}, run)
+            variables = {"id": raw["id"], "head": raw["headRefOid"]}
+            journaled(journal, "queue", url, raw["headRefOid"], lambda: graphql(QUEUE, variables, run))
         raw = graphql(STATE, {"url": url}, run)["resource"]
     if action == "dequeue":
-        graphql(DEQUEUE, {"id": raw["id"]}, run)
+        journaled(journal, "dequeue", url, raw["headRefOid"], lambda: graphql(DEQUEUE, {"id": raw["id"]}, run))
         raw = graphql(STATE, {"url": url}, run)["resource"]
     return {
         "url": url,
@@ -142,24 +157,28 @@ def waiting_ahead(url: str, target: str, run) -> list[dict]:
         variables["after"] = page["pageInfo"]["endCursor"]
 
 
-def prioritize(url: str, run=subprocess.run) -> dict:
+def prioritize(url: str, run=subprocess.run, journal=None) -> dict:
     raw = graphql(STATE, {"url": url}, run)["resource"]
     if not raw or raw["baseRefName"] != "dev" or raw["state"] != "OPEN":
         raise SwarmError("queue priority requires an open pull request into dev")
     if raw["repository"]["mergeQueue"] is None:
         raise SwarmError("queue priority requires a dev merge queue")
     require_green(url, raw["headRefOid"], run)
+    before = journal.groups() if journal is not None else None
     waiting = waiting_ahead(url, raw["id"], run)
     removed = []
     errors = []
+    steps = []
     try:
         for pull in reversed(waiting):
             current = graphql(STATE, {"url": pull["url"]}, run)["resource"]
             if current["mergeQueueEntry"] is not None and current["mergeQueueEntry"]["state"] == "QUEUED":
                 removed.append(pull)
+                steps.append(["dequeue", pull["url"]])
                 graphql(DEQUEUE, {"id": pull["id"]}, run)
         current = graphql(STATE, {"url": url}, run)["resource"]
         if current["mergeQueueEntry"] is None:
+            steps.append(["queue", url])
             graphql(QUEUE, {"id": raw["id"], "head": raw["headRefOid"]}, run)
     except SwarmError as exc:
         errors.append(str(exc))
@@ -168,8 +187,11 @@ def prioritize(url: str, run=subprocess.run) -> dict:
         try:
             current = graphql(STATE, {"url": pull["url"]}, run)["resource"]
             if current["mergeQueueEntry"] is None:
+                steps.append(["restore", pull["url"]])
                 graphql(QUEUE, {"id": pull["id"], "head": pull["headRefOid"]}, run)
                 restored.append(pull["url"])
         except SwarmError as exc:
             errors.append(f"could not restore {pull['url']}: {exc}")
+    if journal is not None:
+        journal.write("priority", url, raw["headRefOid"], before, journal.groups(), errors, steps=steps)
     return {"url": url, "displaced": restored, "errors": errors}
