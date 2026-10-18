@@ -505,7 +505,7 @@ input, textarea { caret-color: var(--accent-2); }
 .sw-cap.sw-gate { display: grid; grid-template-columns: 12ch 5.5ch 8ch 5ch; gap: var(--space-tight); align-items: center; }
 .sw-gate .sw-cap-name { margin: 0; text-align: right; white-space: nowrap; }
 .sw-gate .sw-mode { min-height: 28px; text-align: left; padding: 4px 0; font-size: inherit; }
-@media (max-width: 1599px) { .sw-caps, .sw-roles { grid-column: 1 / -1; } }
+@media (max-width: 1599px) { .sw-caps, .sw-roles, .sw-unavailable { grid-column: 1 / -1; } }
 .sw-label, .sw-blockhead h3 { margin: 0; font-size: var(--fs-h2); font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--text); }
 .sw-cap { display: inline-flex; align-items: center; gap: 2px; }
 .sw-cap-name { margin-right: 4px; font-size: var(--fs-meta); letter-spacing: .06em; color: var(--text); }

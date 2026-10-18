@@ -29,6 +29,7 @@ def test_a_status_with_agents_of_every_role_renders_one_row_per_role_with_its_li
         {"name": "q1", "lane": "eng", "profile": "qa"},
         {"name": "q2", "lane": "eng", "profile": "qa"},
         {"name": "q3", "lane": "eng", "profile": "qa"},
+        {"name": "doc", "lane": "eng", "profile": "documentation"},
         {"name": "c1", "lane": "ci"},
         {"name": "p1", "lane": "plan", "profile": "planner"},
     ]
@@ -37,7 +38,7 @@ def test_a_status_with_agents_of_every_role_renders_one_row_per_role_with_its_li
     tab.reload()
     tab.get_by_role("tab", name="Swarm", exact=False).click()
     tab.locator("#capacity-roles [data-role]").first.wait_for(state="visible", timeout=1500)
-    counts = {"engineer": "2", "frontend": "1", "qa": "3", "documentation": "0", "cicd": "1", "planner": "1"}
+    counts = {"engineer": "2", "frontend": "1", "qa": "3", "documentation": "1", "cicd": "1", "planner": "1"}
     counts |= {"dispatcher": "1", "master": "1"}
     assert roles(tab) == [[lane, [[role, counts[role]] for role in names]] for lane, names in ROLES.items()]
     assert tab.locator("#cap-eng").input_value() == "3"
@@ -77,4 +78,6 @@ def test_a_failed_read_after_a_status_keeps_the_last_counts_under_the_unavailabl
     notice.wait_for(state="visible", timeout=5000)
     assert "last observed" in notice.inner_text().lower()
     assert tab.locator("#cap-eng").input_value() == "3"
-    assert tab.locator('#capacity-roles [data-role="engineer"] [data-role-count]').inner_text() == "1"
+    count = '#capacity-roles [data-role="{}"] [data-role-count]'
+    assert tab.locator(count.format("engineer")).inner_text() == "1"
+    assert tab.locator(count.format("documentation")).inner_text() == "0"
