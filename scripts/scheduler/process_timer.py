@@ -32,12 +32,12 @@ def wake(event: dict, delivery_id: str, redis: "Redis") -> None:
     with redis.pipeline() as pipe:
         pipe.rpush(key, delivery_id)
         pipe.ltrim(key, -1, -1)
-        pipe.expire(key, 60)
         pipe.execute()
 
 
 class Timer:
     def __init__(self, delay: float, *, redis: "Redis | None" = None) -> None:
+        self.closed = False
         self.owns_redis = redis is None
         self.redis = redis if redis is not None else blocking_client()
         scheduler = Scheduler(self.redis)
@@ -52,7 +52,10 @@ class Timer:
         self.redis.delete(self.key)
 
     def close(self) -> None:
-        self.entry.cancel()
+        if self.closed:
+            return
+        self.entry.scheduler.retire(self.entry.id, self.key)
+        self.closed = True
         self.redis.delete(self.key)
         if self.owns_redis:
             self.redis.close()

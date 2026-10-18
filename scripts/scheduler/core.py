@@ -258,6 +258,19 @@ class Scheduler:
             entry["due"] = next_due(entry["expression"], entry["timezone"], now)
         entry.pop("pending")
 
+    def retire(self, entry_id: str, wake_key: str) -> None:
+        self.get(entry_id).cancel()
+        self.redis.hset(self.key("retired"), entry_id, wake_key)
+
+    def _reap(self, lease: "Lock") -> None:
+        for entry_id, wake_key in self.redis.hgetall(self.key("retired")).items():
+            verify_lease(self.redis, lease)
+            with self.redis.pipeline() as pipe:
+                pipe.hdel(self.key("entries"), entry_id)
+                pipe.delete(wake_key)
+                pipe.hdel(self.key("retired"), entry_id)
+                pipe.execute()
+
     def run_due(self, *, now: float | None = None) -> int:
         now = time.time() if now is None else now
         with dispatch_lock(self.redis, self.key("dispatch-lock")) as lease:
@@ -269,4 +282,5 @@ class Scheduler:
                 entry = self.get(entry_id).record
                 if entry["state"] == "pending":
                     self._deliver(entry_id, now, lease)
+            self._reap(lease)
             return fired

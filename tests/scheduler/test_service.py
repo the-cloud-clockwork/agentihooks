@@ -14,7 +14,7 @@ pytestmark = pytest.mark.unit
 async def test_one_runner_drains_work_and_refuses_a_second_runner(monkeypatch, tmp_path):
     from scripts.scheduler import service
 
-    monkeypatch.setattr(service, "runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
     stop = asyncio.Event()
     calls = []
 
@@ -44,7 +44,7 @@ async def test_one_runner_drains_work_and_refuses_a_second_runner(monkeypatch, t
 async def test_runner_polls_again_after_the_wait_timeout(monkeypatch, tmp_path):
     from scripts.scheduler import service
 
-    monkeypatch.setattr(service, "runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
     stop = asyncio.Event()
     timeouts = []
     drain = Mock()
@@ -65,7 +65,7 @@ async def test_runner_polls_again_after_the_wait_timeout(monkeypatch, tmp_path):
 def test_supervisor_restarts_an_exited_runner_without_machine_timers(monkeypatch, tmp_path):
     from scripts.scheduler import service
 
-    monkeypatch.setattr(service, "runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
     children = [Mock(), Mock()]
     children[0].poll.return_value = 1
     children[1].poll.return_value = 2
@@ -89,7 +89,7 @@ def test_supervisor_restarts_an_exited_runner_without_machine_timers(monkeypatch
 def test_supervisor_terminates_its_active_child_on_shutdown(monkeypatch, tmp_path):
     from scripts.scheduler import service
 
-    monkeypatch.setattr(service, "runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
     child = Mock()
     child.poll.return_value = None
     monkeypatch.setattr(service, "subprocess", SimpleNamespace(Popen=Mock(return_value=child)))
@@ -110,7 +110,7 @@ def test_agentihooks_starts_one_detached_supervisor_when_redis_is_configured(
 ):
     from scripts.scheduler import service
 
-    monkeypatch.setattr(service, "runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
     spawn = Mock()
     monkeypatch.setattr(service, "subprocess", SimpleNamespace(Popen=spawn, DEVNULL=subprocess.DEVNULL))
     assert service.ensure_running({}) is False

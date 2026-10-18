@@ -60,7 +60,7 @@ def test_duplicate_delivery_keeps_one_wake(redis, monkeypatch):
         process_timer.wake(event, "same", redis)
         process_timer.wake(event, "same", redis)
         assert redis.lrange(timer.key, 0, -1) == ["same"]
-        assert redis.ttl(timer.key) == 60
+        assert redis.ttl(timer.key) == -1
         assert json.loads(event["payload"])["key"] == timer.key
 
 

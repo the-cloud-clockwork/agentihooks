@@ -46,7 +46,6 @@ import ledger_link  # noqa: E402
 import ledger_media  # noqa: E402
 
 from scripts.gates import talk  # noqa: E402
-from scripts.scheduler.process_timer import wait as scheduled_wait  # noqa: E402
 from scripts.swarm import freeze  # noqa: E402
 from scripts.swarm_ledger import (  # noqa: E402
     ledger_task_duplicates,
@@ -1167,6 +1166,12 @@ def reload_if_changed(started, code_dirs=CODE_DIRS, execv=os.execv):
 
 def reloading(environ=os.environ) -> bool:
     return environ.get("SWARM_RELOAD") == "1"
+
+
+def scheduled_wait(interval: float) -> None:
+    from scripts.scheduler.process_timer import wait
+
+    wait(interval)
 
 
 def watch_ledgers(interval=2.0):
