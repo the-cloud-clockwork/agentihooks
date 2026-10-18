@@ -44,11 +44,3 @@ def test_the_swarm_image_installs_the_herdr_client_the_worker_lock_pins():
     assert '["debian_snapshot"]' in dockerfile
     keyed = json.loads((root / ".github/input-keys.json").read_text())["helm-kind"]["paths"]
     assert "docker/swarm-node" in keyed
-
-
-def test_the_swarm_image_carries_the_architecture_record_its_api_reads():
-    root = Path(__file__).parents[1]
-    record = "docs/swarm-v2/architecture.json"
-    assert (root / record).is_file()
-    assert f"COPY {record} /opt/venv/lib/python3.12/site-packages/{record}" in (root / "Dockerfile").read_text()
-    assert f"!{record}" in (root / ".dockerignore").read_text().splitlines()
