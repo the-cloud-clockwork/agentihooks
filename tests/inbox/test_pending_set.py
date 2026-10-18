@@ -293,3 +293,23 @@ def test_back_fill_rebuilds_the_waiting_set_once(store):
     assert waiting(store) == {"bob", "dave"}
     store.redis.srem(store.key("waiting"), "dave")
     assert [i.id for i in store.pending()] == [first.id]
+
+
+def test_waiting_set_rebuild_survives_exhausted_watch_retries(store, monkeypatch):
+    from redis.exceptions import WatchError
+
+    pending = store.send("alice", "bob", "waiting")
+    store.pending_items("bob")
+    store.redis.delete(store.key("waiting"), store.key("waiting", "built"))
+    calls = []
+
+    def conflicting_watch(_pipe, *keys):
+        calls.append(keys)
+        raise WatchError()
+
+    monkeypatch.setattr(type(store.redis.pipeline()), "watch", conflicting_watch)
+
+    assert [item.id for item in store.pending()] == [pending.id]
+    assert calls == [(store.key("pending", "bob"),)] * 3
+    assert waiting(store) == {"bob"}
+    assert store.redis.exists(store.key("waiting", "built"))
