@@ -223,6 +223,15 @@ def test_every_signal_a_restart_sends_leaves_a_record_of_its_reason_target_and_c
     assert ledger_watchdog.LOG == ".watchdog.log"
 
 
+def test_a_restart_whose_record_cannot_be_written_sends_no_signal_and_reports_why(tmp_path):
+    host = Host(tmp_path)
+    plant(host.proc, host.argv)
+    (host.folder / ledger_watchdog.LOG).mkdir()
+    error = ledger_watchdog.restart(host, PID, host.argv[:2], REASON)
+    assert error.startswith("[Errno 21] Is a directory")
+    assert host.calls == []
+
+
 def test_a_watched_restart_records_why_it_stopped_the_server(store, tmp_path):
     host = Host(tmp_path)
     plant(host.proc, host.argv)

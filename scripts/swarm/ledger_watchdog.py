@@ -128,7 +128,7 @@ def restart(host: Host, pid: int, command: list[str], reason: str) -> str:
             host.sleep(POLL_S)
         if alive(pid, host.proc) and _ours(pid, host.proc):
             _signal(host, pid, signal.SIGKILL, reason)
-    except PermissionError as exc:
+    except OSError as exc:
         return str(exc)
     try:
         done = host.run(
