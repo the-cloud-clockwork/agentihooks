@@ -18,10 +18,13 @@ MASTER_SEAT, ENG_SEAT = "master@sw", "eng-1@sw"
 
 class FakeLedger:
     def __init__(self):
-        self.priorities = []
+        self.priorities, self.comments = [], []
 
     def priority(self, slug, item, text):
         self.priorities.append((item, text))
+
+    def comment(self, slug, task_id, text, by):
+        self.comments.append((slug, task_id, text, by))
 
 
 @pytest.fixture
@@ -444,6 +447,28 @@ def test_red_checks_with_no_push_for_twenty_minutes_go_to_its_engineer(store):
     told = run(store, in_pr(), now_ms=pushed.pushed_at + 20 * MINUTE, github=lambda url: pushed)
     assert f"told {ENG_SEAT}: https://github.com/o/r/pull/9:red:pushed" in told
     assert len(texts(store, ENG_SEAT)) == 2
+
+
+def test_a_task_notice_for_a_seat_now_holding_another_task_goes_onto_the_task(store):
+    red, ledger = answer("open_red"), FakeLedger()
+    store.put_agent("sw", AgentRecord("sw-eng-2", "eng", "t2", seat=ENG_SEAT))
+    store.seats.occupy(ENG_SEAT, "sw-eng-2", 1_000)
+    run(store, recorded(), ledger=ledger)
+    told = run(store, in_pr(), now_ms=red.red_at + 20 * MINUTE, ledger=ledger, github=lambda url: red)
+    run(store, in_pr(), now_ms=red.red_at + 21 * MINUTE, ledger=ledger, github=lambda url: red)
+    assert texts(store, ENG_SEAT) == []
+    ((slug, task_id, text, by),) = ledger.comments
+    assert (slug, task_id, by) == ("sw", "t1", "swarm")
+    assert text.startswith("Your pull request https://github.com/o/r/pull/9 for task t1 (Build the thing) has red checks")
+    assert told == ["noted on tasks/t1: https://github.com/o/r/pull/9:red:" + red.head]
+
+
+def test_a_task_notice_for_a_seat_its_claimant_still_occupies_goes_to_the_seat(store):
+    red, ledger = answer("open_red"), FakeLedger()
+    store.seats.occupy(ENG_SEAT, "sw-eng-1", 1_000)
+    run(store, recorded(), ledger=ledger)
+    run(store, in_pr(), now_ms=red.red_at + 20 * MINUTE, ledger=ledger, github=lambda url: red)
+    assert len(texts(store, ENG_SEAT)) == 1 and ledger.comments == []
 
 
 @pytest.mark.parametrize(("gate", "notices"), [("SUCCESS", 0), ("FAILURE", 1)])
