@@ -521,6 +521,9 @@ ISSUE_BODY_WRITER = (
         "python3 -c 'import inspect; from scripts.ci_mutation import selection; print(inspect.getsource(selection))'",
         "python3 -c 'import inspect, pytest; print(inspect.signature(pytest.main))'",
         "python3 -c 'from inspect import getsourcefile; from mutmut.__main__ import cli; print(getsourcefile(cli))'",
+        "python3 -c 'import inspect, scripts.ci_mutation.selection; print(inspect.getsource(scripts.ci_mutation.selection))'",
+        "python3 - <<'PY'\nimport inspect\nimport mutmut.__main__ as runner  # read only, no subprocess\n"
+        "print(inspect.getsource(runner))\nPY",
         ISSUE_BODY_WRITER,
     ],
 )
@@ -551,6 +554,11 @@ def test_source_inspection_and_prose_naming_a_runner_pass(command, monkeypatch):
         "python3 -c \"import runpy; runpy._run_module_as_main('pytest'); print('launch via subprocess')\"",
         "python3 -c \"import runpy; runpy._run_module_as_main('pytest')\"",
         "python3 -c \"import inspect, pytest, sys; print(inspect.getsource(pytest)); sys.modules['pyt'+'est'].main()\"",
+        "python3 -c \"import inspect, pytest, sys; print(inspect.getsource(pytest)); getattr(sys.modules['pytest'], 'main')()\"",
+        "python3 -c 'import inspect, pytest, os; print(inspect.getsource(pytest)); os.getfile(pytest)'",
+        "python3 -c 'import pytest; from doctest import getfile; print(getfile(pytest))'",
+        "python3 -c 'import pytest; from inspect import cleandoc; print(cleandoc(pytest))'",
+        "python3 -c 'import inspect, pytest; print(inspect.getsource(pytest)); pytest.main('",
     ],
 )
 def test_runner_use_beside_an_inspection_is_blocked(command, monkeypatch):

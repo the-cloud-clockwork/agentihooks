@@ -82,7 +82,7 @@ _LAUNCH = re.compile(
     r"|\brequire\s*\(\s*[A-Za-z_$]"
 )
 _NAME_LITERAL = re.compile(r"([\"'`])\w+\1")
-_FORMAT_PREFIX = re.compile(r"(?i)(?:^|\W)[rb]?f[rb]?$")
+_FORMAT_PREFIX = re.compile(r"(?i)(?<!\w)[rb]?f[rb]?$")
 _READERS = frozenset({"getsource", "getsourcelines", "getsourcefile", "getfile", "getdoc", "signature"})
 _RUNS_ON_IMPORT = frozenset({"unittest.__main__"})
 _DENY = (
@@ -108,11 +108,7 @@ def _module_literal(source: str, match: re.Match) -> bool:
 
 
 def _named_literal(source: str, match: re.Match) -> bool:
-    return bool(
-        match["module"]
-        or _NAME_LITERAL.fullmatch(match[0])
-        or _FORMAT_PREFIX.search(source[max(match.start() - 3, 0) : match.start()])
-    )
+    return bool(match["module"] or _NAME_LITERAL.fullmatch(match[0]) or _FORMAT_PREFIX.search(source, 0, match.start()))
 
 
 def _launches(source: str, comment: str) -> bool:
@@ -184,7 +180,7 @@ def _reads_runner_source(code: str) -> bool:
         return False
     imports = _imports(tree)
     runners = {bound for path, bound in imports if _PYTHON_TEST.search(path)}
-    if not runners or "*" in runners or any(path in _RUNS_ON_IMPORT for path, _ in imports):
+    if any(path in _RUNS_ON_IMPORT for path, _ in imports):
         return False
     roots = _read_roots(tree, imports)
     uses = [node for node in ast.walk(tree) if _node_text(node) in runners or _PYTHON_TEST.search(_node_text(node))]
