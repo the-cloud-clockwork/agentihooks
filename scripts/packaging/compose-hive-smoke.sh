@@ -35,7 +35,7 @@ if ! docker compose up --pull never "${build[@]}" --wait --wait-timeout 180; the
 fi
 
 slug="compose-proof"
-docker compose exec -T -e SLUG="$slug" swarm python - <<'PY'
+host_agent="$(docker compose exec -T -e SLUG="$slug" swarm python - <<'PY'
 import os
 import time
 
@@ -47,10 +47,14 @@ store, slug = connect(), os.environ["SLUG"]
 create(slug, {"title": "Compose proof", "phases": [{"title": "Prove the compose stack"}]}, "swarm")
 store.create(SwarmConfig(slug, "/data", 1, 1))
 seats = SeatRegistry(store.redis)
-store.start_execution(slug, AgentRecord("host-agent", "master", "", seat=f"master@{slug}", started_at=int(time.time() * 1000)))
-seats.occupy(f"master@{slug}", "host-agent", 0)
-print(f"seeded swarm {slug} with host-agent seated, in the compose Redis over TLS")
+name = store.next_name(slug, "master")
+started = int(time.time() * 1000)
+store.start_execution(slug, AgentRecord(name, "master", "", seat=f"master@{slug}", started_at=started))
+seats.occupy(f"master@{slug}", name, started)
+print(name)
 PY
+)"
+printf 'seeded swarm %s with %s seated, in the compose Redis over TLS\n' "$slug" "$host_agent"
 docker compose restart controller >/dev/null
 held=""
 for _ in $(seq 60); do
@@ -108,10 +112,10 @@ from scripts.swarm.store import connect
 print(relay.relay(connect().redis))
 ')"
 printf 'controller relay of member mail: %s\n' "$relayed"
-inbox="$(docker compose exec -T -e AGENTIHOOKS_AGENT_NAME=host-agent swarm agentihooks msg inbox)"
+inbox="$(docker compose exec -T -e AGENTIHOOKS_AGENT_NAME="$host_agent" swarm agentihooks msg inbox)"
 printf 'host inbox: %s\n' "$inbox"
 [[ $inbox == *"hello from the member hive"* ]]
-docker compose exec -T -e AGENTIHOOKS_AGENT_NAME=host-agent swarm agentihooks msg send "eng-1@$slug" "hello from the host"
+docker compose exec -T -e AGENTIHOOKS_AGENT_NAME="$host_agent" swarm agentihooks msg send "eng-1@$slug" "hello from the host"
 inbox="$(docker exec -e AGENTIHOOKS_AGENT_NAME="$member_agent" "$run-member" agentihooks msg inbox)"
 printf 'member inbox: %s\n' "$inbox"
 [[ $inbox == *"hello from the host"* ]]
