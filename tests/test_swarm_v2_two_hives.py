@@ -126,22 +126,16 @@ def test_absent_hive_master_falls_back_to_lead(world):
     assert world.write(op)["accepted"]
 
 
-def test_operator_comment_routes_to_hive_owner_but_chat_stays_with_lead(world):
+def test_operator_comment_on_a_hive_item_and_chat_both_reach_the_lead(world):
     from scripts.swarm import operator_mail
     from scripts.swarm_v2 import masters
 
     add(world, "questions")
     doc = world.doc()
-
-    def owners():
-        return masters.MasterSeats(world.redis).owners(cases.SLUG, doc)
-
     agents = world.store.agents(cases.SLUG)
     held = list(masters.held(world.redis, cases.SLUG, agents))
-    assert operator_mail.addresses(cases.SLUG, {"target": "questions/targeted"}, doc, agents, owners, held) == [
-        cases.SECOND
-    ]
-    assert operator_mail.addresses(cases.SLUG, {"target": "chat"}, doc, agents, owners, held) == [cases.LEAD]
+    assert operator_mail.addresses(cases.SLUG, {"target": "questions/targeted"}, doc, agents, held) == [cases.LEAD]
+    assert operator_mail.addresses(cases.SLUG, {"target": "chat"}, doc, agents, held) == [cases.LEAD]
 
 
 @pytest.mark.parametrize("command", ["question", "followup"])

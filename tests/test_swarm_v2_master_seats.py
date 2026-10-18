@@ -174,18 +174,25 @@ def test_an_item_with_no_phase_has_no_owner(swarm, target):
     assert masters.owner_of(target, DOC, owners) == ""
 
 
-def test_an_operator_comment_on_a_phase_of_the_second_master_reaches_only_that_master(swarm):
+def test_an_operator_comment_on_a_phase_of_the_second_master_reaches_only_the_front_door(swarm):
     store, inbox = swarm
     seated(store, FIRST, OTHER)
     relay(swarm, write(5, "phases/p2"))
-    assert len(texts(inbox, SECOND)) == 1 and texts(inbox, LEAD) == []
+    assert len(texts(inbox, LEAD)) == 1 and texts(inbox, SECOND) == []
 
 
-def test_an_operator_comment_on_a_task_whose_claimant_is_gone_reaches_its_phase_owner(swarm):
+def test_an_operator_comment_on_a_task_whose_claimant_is_gone_reaches_only_the_front_door(swarm):
     store, inbox = swarm
     seated(store, FIRST, OTHER)
     relay(swarm, write(5, "tasks/t4/comments/c1"))
-    assert len(texts(inbox, SECOND)) == 1 and texts(inbox, LEAD) == []
+    assert len(texts(inbox, LEAD)) == 1 and texts(inbox, SECOND) == []
+
+
+def test_operator_chat_naming_a_backend_master_reaches_only_the_front_door(swarm):
+    store, inbox = swarm
+    seated(store, FIRST, OTHER)
+    relay(swarm, write(5, "chat", text=f"@{OTHER.name} where are we"))
+    assert len(texts(inbox, LEAD)) == 1 and texts(inbox, SECOND) == []
 
 
 def test_unaddressed_chat_stays_with_the_lead_which_answers_the_operator(swarm):
