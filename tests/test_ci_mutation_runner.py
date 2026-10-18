@@ -569,11 +569,12 @@ def test_workspace_does_not_copy_inputs_referenced_through_repository_parent_tra
     (root / "tests/test_selected.py").write_text(
         'from pathlib import Path\nROOT = Path(__file__).resolve().parents[1]\n(ROOT / "../outside.txt").read_text()\n'
     )
-    work = tmp_path / "work"
-    work.mkdir()
+    work = tmp_path / "nested/work"
+    work.mkdir(parents=True)
     prepare_workspace(root, work, ["hooks/sample.py"], ["tests/test_selected.py"])
     assert outside.read_text() == "outside"
     assert not (work / "outside.txt").exists()
+    assert not (work.parent / "outside.txt").exists()
 
 
 @pytest.mark.parametrize("separator", ["\n", "\r"])
