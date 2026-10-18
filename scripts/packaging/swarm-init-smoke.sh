@@ -12,9 +12,9 @@ export AGENTIHOOKS_HOME="$work/agentihooks-home" NO_COLOR=1
 trap 'docker compose --project-name agentihooks-swarm down --volumes >/dev/null 2>&1 || true' EXIT
 bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/redis:7
 if [[ -n "${SWARM_SMOKE_IMAGE:-}" ]]; then
-  docker tag "$SWARM_SMOKE_IMAGE" ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev
+  docker tag "$SWARM_SMOKE_IMAGE" ghcr.io/the-cloud-clockwork/agentihooks-swarm:release
 else
-  bash scripts/packaging/pull-runtime-image.sh ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev
+  bash scripts/packaging/pull-runtime-image.sh ghcr.io/the-cloud-clockwork/agentihooks-swarm:release
 fi
 "${SWARM_INIT_PYTHON:-python3}" -m venv "$work/venv"
 SETUPTOOLS_SCM_PRETEND_VERSION=0.0.0 "$work/venv/bin/pip" install --quiet .

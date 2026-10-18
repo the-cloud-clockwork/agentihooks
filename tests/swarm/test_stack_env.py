@@ -22,6 +22,7 @@ def test_first_settings_are_generated_private(tmp_path, fixed):
         "AGENTIHOOKS_DEPLOYMENT=compose\n"
         "SWARM_BIND=127.0.0.1\n"
         "SWARM_HIVE_ID=compose-controller\n"
+        "SWARM_IMAGE_TAG=release\n"
         f"SWARM_REDIS_PASSWORD={PASSWORD}\n"
         "SWARM_PORT=8766\n"
         "SWARM_REDIS_PORT=6380\n"
@@ -52,6 +53,7 @@ def test_missing_settings_are_filled_in(tmp_path, fixed):
         "AGENTIHOOKS_DEPLOYMENT=compose\n"
         "SWARM_BIND=127.0.0.1\n"
         "SWARM_HIVE_ID=compose-controller\n"
+        "SWARM_IMAGE_TAG=release\n"
         "SWARM_REDIS_PORT=6380\n"
     )
 

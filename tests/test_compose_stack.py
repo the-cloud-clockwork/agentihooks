@@ -79,3 +79,5 @@ def test_swarm_init_ships_the_repository_stack_byte_for_byte():
     ]
     for name in shipped:
         assert (bundled / name).read_bytes() == (ROOT / name).read_bytes(), name
+    for service in ("swarm", "controller", "hive"):
+        assert SERVICES[service]["image"] == "ghcr.io/the-cloud-clockwork/agentihooks-swarm:${SWARM_IMAGE_TAG:-dev}"

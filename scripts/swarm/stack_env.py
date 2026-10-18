@@ -37,6 +37,7 @@ def settings(env_file: Path) -> dict[str, str]:
         "AGENTIHOOKS_DEPLOYMENT": lambda: "compose",
         "SWARM_BIND": lambda: BIND,
         "SWARM_HIVE_ID": lambda: "compose-controller",
+        "SWARM_IMAGE_TAG": lambda: "release",
         "SWARM_REDIS_PASSWORD": secrets.token_urlsafe,
         "SWARM_PORT": lambda: str(free_port(8765)),
         "SWARM_REDIS_PORT": lambda: str(free_port(6379)),
