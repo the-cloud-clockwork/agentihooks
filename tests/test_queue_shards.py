@@ -385,3 +385,69 @@ def test_joint_queue_reuse_keeps_each_versions_deselection_and_uploads(tmp_path)
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert not (other / "reused.json").exists()
+
+
+def test_queue_plan_excludes_reused_work_before_matching_the_unit_split(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    import pytest
+
+    from tests import conftest
+    from tests.queue_shards import main, matrix
+
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    for name in ("partial", "whole", "fresh"):
+        (tests / f"test_{name}.py").write_text("")
+    reused_node = "tests/test_partial.py::test_reused"
+    grouped_node = reused_node + "@worker"
+    whole = "tests/test_whole.py::test_old"
+    remaining = {"tests/test_partial.py::test_run": 8.0, "tests/test_fresh.py::test_new": 4.0}
+    measured = {**remaining, grouped_node: 9000.0, whole: 9000.0}
+    snapshot = tmp_path / ".test_durations"
+    snapshot.write_text(json.dumps(measured))
+    collection = tmp_path / "collected.json"
+    collection.write_text(json.dumps(list(measured)))
+    reused = tmp_path / "reused.json"
+    reused.write_text(json.dumps({"tests": [reused_node], "files": ["tests/test_whole.py"]}))
+    output = tmp_path / "output"
+
+    main(
+        [
+            "--root",
+            str(tmp_path),
+            "--collection",
+            str(collection),
+            "--version",
+            "3.11",
+            "--output",
+            str(output),
+            "--reused",
+            str(reused),
+        ]
+    )
+
+    plan = json.loads("[" + output.read_text().strip().split("=", 1)[1] + "]")
+    assert len(plan) == 12
+    assert json.loads(snapshot.read_text()) == remaining
+    snapshot.write_text(json.dumps(measured))
+    monkeypatch.setenv("CI_REUSED", str(reused))
+    config = SimpleNamespace(getoption=lambda name: "1/12", stash=pytest.Stash(), rootpath=tmp_path)
+    conftest._shard_files(config)
+    assigned = config.stash[conftest.NODE_SHARDS]
+    assert set(assigned) == set(remaining)
+    assert plan == matrix(tmp_path, {"3.11": {node: measured[node] for node in assigned}})
+
+
+def test_queue_sizing_consumes_reuse_after_deselection_for_both_versions():
+    from pathlib import Path
+
+    import yaml
+
+    steps = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/test.yml").read_text())["jobs"][
+        "split"
+    ]["steps"]
+    names = [step.get("name") for step in steps]
+    assert names.index("Deselect the reused tests") < names.index("Size queue shards from conservative durations")
+    sizing = next(step for step in steps if step.get("name") == "Size queue shards from conservative durations")
+    assert "--reused" in sizing["run"]
