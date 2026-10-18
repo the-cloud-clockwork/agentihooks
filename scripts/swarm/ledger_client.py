@@ -220,7 +220,12 @@ class LedgerClient:
         self._call(slug, [_op("size_set", by, size="swarm")])
 
     def reopen(self, slug, by):
+        from scripts.swarm_ledger import ledger_link
+
         self._call(slug, [_op("reopen", by)])
+        if ledger_link.remote():
+            self._lifecycle(slug, {"action": "restore"})
+            return
         _ledger()
         import ledger_bin
 
@@ -250,6 +255,10 @@ class LedgerClient:
         return bool(self._resource(slug, "metadata").get("closed_at"))
 
     def binned(self, slug):
+        from scripts.swarm_ledger import ledger_link
+
+        if ledger_link.remote():
+            return self._lifecycle(slug, {"action": "binned"})
         _ledger()
         import ledger_bin
 

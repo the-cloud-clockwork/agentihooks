@@ -62,17 +62,33 @@ def lifecycle(principal: str, slug: str, payload: dict) -> dict:
         raise APIError(403, "forbidden", "Ledger lifecycle actions need the operator or controller credential")
     schemas.validate(
         {
-            "type": "object",
-            "required": ["action", "closed_at"],
-            "additionalProperties": False,
-            "properties": {
-                "action": {"const": "bin_closed"},
-                "closed_at": {"type": "integer", "minimum": 1},
-            },
+            "oneOf": [
+                {
+                    "type": "object",
+                    "required": ["action", "closed_at"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "action": {"const": "bin_closed"},
+                        "closed_at": {"type": "integer", "minimum": 1},
+                    },
+                },
+                {
+                    "type": "object",
+                    "required": ["action"],
+                    "additionalProperties": False,
+                    "properties": {"action": {"enum": ["restore", "binned"]}},
+                },
+            ],
         },
         payload,
     )
-    return {"data": bin_storage.bin_closed(slug, payload["closed_at"])}
+    if payload["action"] == "bin_closed":
+        result = bin_storage.bin_closed(slug, payload["closed_at"])
+    elif payload["action"] == "restore":
+        result = bin_storage.restore(slug)
+    else:
+        result = slug in bin_storage.entries()
+    return {"data": result}
 
 
 def control(server: ModuleType, slug: str, principal: str, payload: dict) -> dict:
