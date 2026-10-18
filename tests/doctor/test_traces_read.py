@@ -301,6 +301,27 @@ def test_record_runs_the_history_budget_on_its_own_clock(tmp_path):
     assert data["reader"]["historical"]["covered"] == 0
 
 
+def test_record_reads_active_bindings_and_history_side_by_side(tmp_path, monkeypatch):
+    import threading
+
+    met = threading.Barrier(2, timeout=5)
+    whole = {"listed": True, "traces": 0, "covered": 0, "complete": True, "unreadable": []}
+
+    def active(slug, agents, get, state, seconds, page, clock):
+        met.wait()
+        return [], ["active failure"]
+
+    def history(slug, get, cache, budget, clock):
+        met.wait()
+        return [], whole, ["history failure"]
+
+    monkeypatch.setattr(traces_read.registry, "read", active)
+    monkeypatch.setattr(traces_read, "history", history)
+    data = traces_read.record("s", [], [], 1000, Langfuse([]), home=tmp_path)
+    assert data["reader"]["failures"] == ["active failure", "history failure"]
+    assert data["reader"]["historical"] == whole
+
+
 LOCAL = {
     "generated_bytes": 10,
     "accepted_bytes": 10,
