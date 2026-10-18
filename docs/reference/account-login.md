@@ -50,10 +50,13 @@ file). It is off by default, and off leaves every launch unchanged, including
 swarms on routed quota tokens or gateway API tokens. Turn it on only when the
 workers run on quota tokens separate from the master's login. A swarm config
 saved with the former per swarm `master_claude_login` field loads without it;
-`agentihooks swarm <slug> set` no longer takes `master-claude-login`.
+`agentihooks swarm <slug> set` no longer takes `master-claude-login`. The
+former per swarm homes under `$AGENTIHOOKS_HOME/master-claude/<slug>` and
+recovery copies under `secret/agentihooks/master-claude/<slug>` are no longer
+read: run `agentihooks claude login --master` once after the upgrade.
 
 With it on, the Claude front door master of every swarm, seat
-`master@<slug>`, launches on route `master-login` from one private home,
+`master@<slug>` (or a master with no seat, which predates seats), launches on route `master-login` from one private home,
 `$AGENTIHOOKS_HOME/master-login/claude`, copied from its rendered master
 profile without the shared credential link. Pool master seats
 (`master-2@<slug>` and up) and a master order placed on an explicit
@@ -71,10 +74,13 @@ naming both. The master gets `--remote-control`.
 Engineers, CI agents, planners, pool masters and Codex masters never take this route.
 
 `agentihooks claude login --master` takes no slug and runs `claude auth login`
-once in that home. Native Claude is the only refresher of the login. The
-primary masters of several swarms hold it at once; a claim refuses only while
-another live process holds it under the same name, so a second login command
-waits for the first. Each claim takes an epoch above the one stored in OpenBao. With `--openbao`, and
+once in that home; it refuses while any master or another login command holding
+the home is still running. Native Claude is the only refresher of the login.
+The front door masters of several swarms hold the home at once: a master launch
+refuses only while another live process holds it under the same name, and it
+rebuilds the home from its rendered profile only when no other live master runs
+on it, otherwise it launches on the home as it is. Each claim takes an epoch
+above the one stored in OpenBao. With `--openbao`, and
 at each master launch and Stop where `OPENBAO_URL` and `OPENBAO_TOKEN` are set,
 the latest grant native Claude saved is copied to
 `secret/agentihooks/master-claude-login` with its owner epoch, never replacing

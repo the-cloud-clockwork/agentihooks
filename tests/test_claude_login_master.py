@@ -59,13 +59,12 @@ def test_master_mode_reports_a_failed_login_and_stores_nothing(ah, monkeypatch, 
     assert "claude auth login exited 4; the master login is unchanged" in capsys.readouterr().err
 
 
-def test_master_mode_refuses_only_while_another_login_command_holds_the_login(ah, monkeypatch, capsys):
+def test_master_mode_refuses_while_any_master_holds_the_login(ah, monkeypatch, capsys):
     login.claim("master@a-1", os.getppid())
-    login.claim(claude_login.PROG, os.getppid())
     runs = []
     assert claude_login.master(False, {}, _deps(ah, runs)) == 1
     assert runs == []
-    assert f"held by {claude_login.PROG}, still running" in capsys.readouterr().err
+    assert "held by master@a-1, still running" in capsys.readouterr().err
 
 
 def test_master_mode_reports_a_missing_claude_binary(ah, capsys):
@@ -125,7 +124,8 @@ def test_the_master_flag_routes_main_to_master_mode(monkeypatch):
     openbao, environ, deps = seen[0]
     assert (openbao, environ, deps.console, deps.opener) == (True, {"A": "1"}, console, "op")
     with pytest.raises(SystemExit):
-        claude_login.main(["--master", "rig", "extra"], {}, console=console)
+        claude_login.main(["--master", "rig"], {}, console=console)
+    assert len(seen) == 1
 
 
 def test_without_the_master_flag_the_setup_token_login_is_unchanged(monkeypatch):

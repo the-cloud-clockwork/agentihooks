@@ -92,6 +92,19 @@ def test_several_primary_masters_hold_the_login_at_once_and_one_name_once(ah):
     assert login.claim("master@rig-1", 30, lambda pid: pid != 10) == 3
 
 
+def test_a_launch_beside_a_live_master_keeps_the_home_it_runs_on(ah, tmp_path, rendered):
+    import os
+
+    home = login.build(rendered)
+    (home / login.CREDENTIALS).write_text(json.dumps({login.GRANT: {"refreshToken": "r"}}))
+    (home / login.CONFIG).write_text(json.dumps({login.ACCOUNT: MASTER_ACCOUNT, "live": "rig"}))
+    login.claim("master@rig-1", os.getppid())
+    target, _ = login.prepare(_environ(rendered, "doctor"), tmp_path)
+    assert json.loads((target / login.CONFIG).read_text())["live"] == "rig"
+    with pytest.raises(login.LoginRefused, match="^the master login is held by master@doctor-1, still running$"):
+        login.claim("agentihooks claude login", os.getpid() + 1, lambda pid: True, alone=True)
+
+
 def _spawn(tmp_path, lane, seat, kind="interactive"):
     seen = []
 

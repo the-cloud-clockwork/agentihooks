@@ -41,6 +41,7 @@ SUMMARY = "{name} written to {rc} ({length} chars). run: source {rc}"
 STEP_MASTER = "Sign in to the master claude ai account in the browser; the login stays in {home}"
 MASTER_FAILED = "claude auth login exited {code}; the master login is unchanged"
 STEP_RECOVERY = "Storing the master login recovery copy in OpenBao"
+MASTER_SLUG = "--master takes no slug: the master login is one home for every swarm"
 _write = os.write
 
 
@@ -203,7 +204,7 @@ def master(openbao: bool | None, environ: Mapping[str, str], deps: Deps) -> int:
     from scripts import master_claude_login as login
 
     try:
-        epoch = login.claim(PROG, os.getpid())
+        epoch = login.claim(PROG, os.getpid(), alone=True)
     except login.LoginRefused as exc:
         _fail(str(exc))
         return 1
@@ -244,6 +245,8 @@ def main(
     console = console or Console()
     parser = _parser()
     options = parser.parse_args(args)
+    if options.master and options.slug:
+        parser.error(MASTER_SLUG)
     if options.master:
         return master(options.openbao, environ, Deps(console=console, opener=opener))
     raw = _raw_slug(options.slug, console, parser)

@@ -122,29 +122,34 @@ def _private(target: Path) -> Path | None:
 
 def build(rendered: Path, report: str | None = None) -> Path:
     with _locked() as folder:
-        target, staging = home(), folder / "staging"
-        kept = _private(target)
-        grant = kept.read_bytes() if kept else None
-        account = _read(target / CONFIG).get(ACCOUNT)
-        shutil.rmtree(staging, ignore_errors=True)
-        shutil.copytree(
-            rendered, staging, symlinks=True, ignore=lambda found, _: [CREDENTIALS] if Path(found) == rendered else []
-        )
-        staging.chmod(PRIVATE_DIR)
-        if grant is not None:
-            (staging / CREDENTIALS).write_bytes(grant)
-            (staging / CREDENTIALS).chmod(PRIVATE_FILE)
-        config = {key: value for key, value in _read(staging / CONFIG).items() if key != ACCOUNT}
-        _write(staging / CONFIG, {**config, **({ACCOUNT: account} if account else {})})
-        evidence = _read(staging / binding.FILE)
-        (staging / binding.FILE).write_text(json.dumps({**evidence, "home": str(target.resolve())}) + "\n")
-        for name in MANIFESTS:
-            if (rendered.parent / name).is_file():
-                shutil.copyfile(rendered.parent / name, folder / name)
-        shutil.rmtree(target, ignore_errors=True)
-        staging.rename(target)
+        target = _rebuild(folder, rendered)
     if report:
         binding.rehome(Path(report), target)
+    return target
+
+
+def _rebuild(folder: Path, rendered: Path) -> Path:
+    target, staging = home(), folder / "staging"
+    kept = _private(target)
+    grant = kept.read_bytes() if kept else None
+    account = _read(target / CONFIG).get(ACCOUNT)
+    shutil.rmtree(staging, ignore_errors=True)
+    shutil.copytree(
+        rendered, staging, symlinks=True, ignore=lambda found, _: [CREDENTIALS] if Path(found) == rendered else []
+    )
+    staging.chmod(PRIVATE_DIR)
+    if grant is not None:
+        (staging / CREDENTIALS).write_bytes(grant)
+        (staging / CREDENTIALS).chmod(PRIVATE_FILE)
+    config = {key: value for key, value in _read(staging / CONFIG).items() if key != ACCOUNT}
+    _write(staging / CONFIG, {**config, **({ACCOUNT: account} if account else {})})
+    evidence = _read(staging / binding.FILE)
+    (staging / binding.FILE).write_text(json.dumps({**evidence, "home": str(target.resolve())}) + "\n")
+    for name in MANIFESTS:
+        if (rendered.parent / name).is_file():
+            shutil.copyfile(rendered.parent / name, folder / name)
+    shutil.rmtree(target, ignore_errors=True)
+    staging.rename(target)
     return target
 
 
@@ -204,15 +209,22 @@ def _alive(pid: object) -> bool:
     return isinstance(pid, int) and Path(f"/proc/{pid}").exists()
 
 
-def claim(name: str, pid: int, alive: Callable[[object], bool] = _alive, floor: int = 0) -> int:
+def claim(name: str, pid: int, alive: Callable[[object], bool] = _alive, floor: int = 0, alone: bool = False) -> int:
     with _locked() as folder:
-        held = _read(folder / OWNER)
-        holders = {owner: found for owner, found in (held.get("holders") or {}).items() if alive(found)}
-        if holders.get(name, pid) != pid:
-            raise LoginRefused(HELD.format(owner=name))
-        epoch = max(int(held.get("epoch", 0)), floor) + 1
-        _write(folder / OWNER, {"holders": {**holders, name: pid}, "epoch": epoch})
-    return epoch
+        return _claim(folder, name, pid, alive, floor, alone)[0]
+
+
+def _claim(
+    folder: Path, name: str, pid: int, alive: Callable[[object], bool], floor: int, alone: bool
+) -> tuple[int, bool]:
+    held = _read(folder / OWNER)
+    holders = {owner: found for owner, found in (held.get("holders") or {}).items() if alive(found)}
+    others = sorted(owner for owner, found in holders.items() if found != pid)
+    if name in others or (alone and others):
+        raise LoginRefused(HELD.format(owner=name if name in others else others[0]))
+    epoch = max(int(held.get("epoch", 0)), floor) + 1
+    _write(folder / OWNER, {"holders": {**holders, name: pid}, "epoch": epoch})
+    return epoch, bool(others)
 
 
 def publish(bao: openbao_kv.OpenBao, target: Path, epoch: int) -> bool:
@@ -275,8 +287,13 @@ def prepare(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str]:
         raise LoginRefused(refused)
     bao = openbao_kv.from_env(environ)
     copy = stored(bao)
-    epoch = claim(environ["AGENTIHOOKS_AGENT_NAME"], os.getpid(), floor=int(copy.get("epoch", 0)))
-    target = build(rendered, environ.get(binding.REPORT))
+    with _locked() as folder:
+        epoch, shared = _claim(
+            folder, environ["AGENTIHOOKS_AGENT_NAME"], os.getpid(), _alive, int(copy.get("epoch", 0)), False
+        )
+        target = home() if shared and _private(home()) else _rebuild(folder, rendered)
+    if environ.get(binding.REPORT):
+        binding.rehome(Path(environ[binding.REPORT]), target)
     restore(copy, target)
     found = account(target, environ)
     keep(bao, target, epoch)
