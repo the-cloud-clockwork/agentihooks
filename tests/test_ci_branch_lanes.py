@@ -376,7 +376,7 @@ def test_a_second_event_key_spelling_cannot_widen_a_trusted_conditional_lane(tmp
 
 
 @pytest.mark.parametrize(("job", "stage", "index"), [("stats", "stats", "part"), ("mutation-shard", "shard", "shard")])
-@pytest.mark.parametrize("change", [None, "runs-on", "queue", "group", "untrusted"])
+@pytest.mark.parametrize("change", [None, "runs-on", "queue", "cancel", "stage", "index", "group", "untrusted"])
 def test_a_trusted_mutation_leg_may_move_to_a_group_of_its_own_run(job, stage, index, change):
     import copy
 
@@ -390,6 +390,12 @@ def test_a_trusted_mutation_leg_may_move_to_a_group_of_its_own_run(job, stage, i
         updated["jobs"][job]["runs-on"] = "ubuntu-latest"
     elif change == "queue":
         block["queue"] = "max"
+    elif change == "cancel":
+        block["cancel-in-progress"] = True
+    elif change == "stage":
+        block["group"] = block["group"].replace(f"-{stage}-", "-other-")
+    elif change == "index":
+        block["group"] = block["group"].replace(f"matrix.{index}", "matrix.other")
     elif change == "group":
         block["group"] = "${{ github.run_id }}"
     elif change == "untrusted":
