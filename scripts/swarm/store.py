@@ -438,7 +438,7 @@ class RedisStore:
         return self.redis.hget(self.key(slug, "launch-failures"), task) or ""
 
     def record_launch(
-        self, slug: str, agent: AgentRecord, state: str, error: str = "", after: str = "", head: str = ""
+        self, slug: str, agent: AgentRecord, state: str, error: str = "", after: str = "", head: str | None = ""
     ) -> None:
         row = {
             "agent": agent.name,
