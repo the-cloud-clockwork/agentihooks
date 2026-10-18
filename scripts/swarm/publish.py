@@ -138,7 +138,7 @@ def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> d
             output = execute(command, repository)
             root = Path(output.splitlines()[-1])
         checkout = checkout_fields(root)
-        delivery = target_branch(root, scoped, checkout["branch"])
+        delivery = target_branch(root, scoped, checkout["branch"], task)
         if delivery != checkout["branch"]:
             git(root, "branch", f"--set-upstream-to=origin/{delivery}")
         fields.append({**checkout, "branch": delivery, "repository": str(repository)})
@@ -195,21 +195,21 @@ def check_build(root: Path) -> None:
         raise SwarmError(reason.getvalue().strip())
 
 
-def tracked(root: Path) -> str:
+def tracked(root: Path, task: dict) -> str:
     done = subprocess.run(
         ["git", "rev-parse", "--symbolic-full-name", "@{upstream}"], cwd=root, capture_output=True, text=True
     )
     branch = done.stdout.strip().removeprefix("refs/remotes/origin/")
-    return "" if branch in continuation.PROTECTED else branch
+    return branch if branch in {task.get("branch"), *task.get("repository_branches", {}).values()} else ""
 
 
-def target_branch(root: Path, task: dict, branch: str) -> str:
-    for recorded in (continuation.retained(task), tracked(root), task.get("branch")):
-        if recorded:
-            ref = f"refs/remotes/origin/{recorded}"
+def target_branch(root: Path, task: dict, branch: str, recorded: dict) -> str:
+    for candidate in (continuation.retained(task), tracked(root, recorded), task.get("branch")):
+        if candidate:
+            ref = f"refs/remotes/origin/{candidate}"
             done = subprocess.run(["git", "merge-base", "--is-ancestor", ref, "HEAD"], cwd=root, capture_output=True)
             if done.returncode == 0:
-                return recorded
+                return candidate
     return branch
 
 
@@ -239,7 +239,7 @@ def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, mess
         raise SwarmError(f"task worktree missing; Next: agentihooks swarm {shlex.quote(slug)} prepare")
     fields = checkout_fields(root)
     own = fields["branch"]
-    fields["branch"] = target_branch(root, scoped, own)
+    fields["branch"] = target_branch(root, scoped, own, task)
     selected = selected_files(root, files)
     retry = shlex.join(["agentihooks", "swarm", slug, "publish", "--message", message, "--", *files])
     try:

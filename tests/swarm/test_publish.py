@@ -331,7 +331,7 @@ def test_publish_pushes_the_tracked_delivery_branch_over_a_stale_local_record(pu
     git(root, "push", "origin", "HEAD:predecessor")
     git(root, "fetch", "origin")
     git(root, "branch", "--set-upstream-to=origin/predecessor")
-    publication.task["repository_branches"] = {str(publication.repo): "engineer-test"}
+    publication.task.update(branch="predecessor", repository_branches={str(publication.repo): "engineer-test"})
 
     result = publish.publish(
         "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
@@ -358,6 +358,23 @@ def test_publish_never_follows_a_tracked_protected_branch(publication):
 
     assert result["branch"] == "engineer-test"
     assert git(root, "ls-remote", "origin", "refs/heads/dev").split()[0] == dev
+    assert git(root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == git(root, "rev-parse", "HEAD")
+
+
+def test_publish_never_follows_a_tracked_branch_the_task_does_not_record(publication):
+    from scripts.swarm import publish
+
+    root = publication.root
+    git(root, "push", "origin", "HEAD:another-task")
+    other = git(root, "rev-parse", "HEAD")
+    git(root, "branch", "--set-upstream-to=origin/another-task")
+
+    result = publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+
+    assert result["branch"] == publication.task["branch"] == "engineer-test"
+    assert git(root, "ls-remote", "origin", "refs/heads/another-task").split()[0] == other
     assert git(root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == git(root, "rev-parse", "HEAD")
 
 
