@@ -5,6 +5,7 @@ It never creates or starts a swarm; swarm init creates it after this step and th
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import urllib.parse
