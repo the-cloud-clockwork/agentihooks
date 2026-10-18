@@ -66,9 +66,9 @@ def _overruns(store, slug):
     )
 
 
-def _once(read):
+def _once(load):
     lock = Lock()
-    kept = cache(read)
+    kept = cache(load)
 
     def shared():
         with lock:

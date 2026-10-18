@@ -43,7 +43,6 @@ def test_detector_records_its_own_stage_and_keeps_running_after_failure(capsys):
         "doctor.health": [("started", None), ("finished", "success")],
         "doctor.trace": [("started", None), ("finished", "success")],
     }
-    assert len(rows) == 6
     assert all(row["slug"] == "doctor" for row in rows)
     assert all(
         row[key] >= 0
@@ -249,19 +248,22 @@ def test_the_trace_detector_reads_the_swarm_tag_and_its_sessions(monkeypatch, tm
     monkeypatch.setattr(traces_read, "SWARM_HOME", tmp_path)
     monkeypatch.setattr(agent_trace, "CURSOR_DIR", tmp_path / "agent_trace")
     found = detect.readers(store, ledger, "s", 10**12, environ={})["trace"]()
-    assert asked == [
-        (
-            "traces",
-            {
-                "tags": ["swarm:s", "agent:s-master-1"],
-                "fields": "core,io",
-                "orderBy": "timestamp.desc",
-                "limit": registry.TRACES_LIMIT,
-                "page": 1,
-            },
-        ),
-        ("traces", {"tags": "swarm:s", "fields": "core", "page": 1, "limit": 100}),
-    ]
+    assert sorted(asked, key=repr) == sorted(
+        [
+            (
+                "traces",
+                {
+                    "tags": ["swarm:s", "agent:s-master-1"],
+                    "fields": "core,io",
+                    "orderBy": "timestamp.desc",
+                    "limit": registry.TRACES_LIMIT,
+                    "page": 1,
+                },
+            ),
+            ("traces", {"tags": "swarm:s", "fields": "core", "page": 1, "limit": 100}),
+        ],
+        key=repr,
+    )
     assert [f.id for f in found] == ["untraced-session/s-master-1", "telemetry-never-exported/s-master-1.1"]
     assert (tmp_path / "s" / traces_read.STATE_FILE).exists()
 

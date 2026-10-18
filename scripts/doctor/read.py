@@ -3,8 +3,8 @@
 import json
 import re
 from dataclasses import asdict
-from functools import cache
 from pathlib import Path
+from types import SimpleNamespace
 
 from scripts.inbox.seats import is_seat, of_swarm
 from scripts.inbox.store import _item, _order
@@ -27,28 +27,30 @@ def health_records(redis, slug):
     return {finding_id: json.loads(record) for finding_id, record in raw.items()}
 
 
-def _batched(redis, keys, queue):
+def _batched(redis, keys, command):
     found = []
     for start in range(0, len(keys), BATCH):
         pipe = redis.pipeline(transaction=False)
         for key in keys[start : start + BATCH]:
-            queue(pipe, key)
+            command(pipe, key)
         found += pipe.execute()
     return found
 
 
 def inbox_items(inbox, slug):
-    prefix, redis, names = inbox.key("address", ""), inbox.redis, NameRegistry(inbox.redis)
-    ours = cache(lambda name: of_swarm(name, slug, names))
+    prefix, redis = inbox.key("address", ""), inbox.redis
     keys = sorted(redis.scan_iter(match=prefix + "*", count=BATCH))
     listed = _batched(redis, keys, lambda pipe, key: pipe.zrange(key, 0, -1))
     ids = [item_id for group in listed for item_id in group]
-    raws = iter(_batched(redis, ids, lambda pipe, item_id: pipe.hgetall(inbox.key("item", item_id))))
+    raws = dict(zip(ids, _batched(redis, ids, lambda pipe, item_id: pipe.hgetall(inbox.key("item", item_id)))))
+    grouped = [sorted((_item(raws[item_id], item_id) for item_id in group), key=_order) for group in listed]
+    named = sorted({name for group in grouped for item in group for name in (item.address, item.sender)})
+    names = SimpleNamespace(slug_of=NameRegistry(redis).slugs_of(named).__getitem__)
     items = [
         item
-        for group in listed
-        for item in sorted((_item(next(raws), item_id) for item_id in group), key=_order)
-        if ours(item.address) or ours(item.sender)
+        for group in grouped
+        for item in group
+        if of_swarm(item.address, slug, names) or of_swarm(item.sender, slug, names)
     ]
     histories = _batched(
         redis, [item.id for item in items], lambda pipe, item_id: pipe.lrange(inbox.key("history", item_id), 0, -1)

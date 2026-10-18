@@ -39,7 +39,11 @@ def test_inbox_items_of_the_swarm_carry_their_history(redis):
 
 
 def test_one_inbox_read_of_a_large_inbox_takes_a_bounded_number_of_round_trips(redis, monkeypatch):
+    from dataclasses import asdict
+
     from redis.client import Pipeline
+
+    from scripts.inbox.seats import of_swarm
 
     box, sent = InboxStore(redis), []
     for n in range(100):
@@ -48,14 +52,32 @@ def test_one_inbox_read_of_a_large_inbox_takes_a_bounded_number_of_round_trips(r
         box.close(sent[-1], f"other-{n}", "done", "answered in the thread")
     for n in range(30):
         box.send("operator", f"stranger-{n}", "not ours")
+    prefix = box.key("address", "")
+    expected = [
+        {**asdict(item), "history": box.history(item.id)}
+        for key in sorted(redis.scan_iter(match=prefix + "*"))
+        for item in box.inbox(key[len(prefix) :])
+        if of_swarm(item.address, SLUG, box.names) or of_swarm(item.sender, SLUG, box.names)
+    ]
     trips = []
     direct, batched = redis.execute_command, Pipeline.execute
     monkeypatch.setattr(redis, "execute_command", lambda *a, **k: trips.append(a[0]) or direct(*a, **k))
     monkeypatch.setattr(Pipeline, "execute", lambda pipe, *a, **k: trips.append("pipeline") or batched(pipe, *a, **k))
     rows = read.inbox_items(box, SLUG)
+    assert rows == expected
     assert sorted(row["id"] for row in rows) == sorted(sent)
     assert sum(len(row["history"]) for row in rows) == len(sent) + 100
     assert len(trips) <= 12
+
+
+def test_an_inbox_listing_whose_item_is_gone_is_refused(redis):
+    from scripts.inbox.store import InboxError
+
+    box = InboxStore(redis)
+    box.send(f"{SLUG}-eng-1", "operator", "kept")
+    redis.zadd(box.key("address", "operator"), {"gone": 1})
+    with pytest.raises(InboxError, match="no message gone"):
+        read.inbox_items(box, SLUG)
 
 
 def test_inbox_receivers_name_who_is_live_how_long_quiet_and_who_sits_outside_the_swarm(redis):
