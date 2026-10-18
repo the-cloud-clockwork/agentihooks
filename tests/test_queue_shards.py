@@ -191,9 +191,81 @@ def test_queue_capacity_admission_precedes_the_unit_matrix():
     import yaml
 
     jobs = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/test.yml").read_text())["jobs"]
-    capacity = jobs["queue-plan"]
-    assert capacity["needs"] == ["split"]
-    assert capacity["if"] == "${{ github.event_name != 'pull_request' && github.event_name == 'merge_group' }}"
-    assert "queue-plan" in jobs["unit"]["needs"]
-    assert "needs.queue-plan.result == 'success'" in jobs["unit"]["if"]
-    assert "unit" in jobs["gate-required"]["needs"]
+    split = jobs["split"]
+    assert split["strategy"]["matrix"]["python-version"] == (
+        "${{ fromJSON(github.event_name == 'merge_group' && '[\"3.11\"]' || '[\"3.11\",\"3.12\"]') }}"
+    )
+    step = next(step for step in split["steps"] if step.get("name") == "Size queue shards from conservative durations")
+    assert step["run"].index("combine --from-output") < step["run"].index('cat queue-plan.txt >> "$GITHUB_OUTPUT"')
+    assert "queue-plan" not in jobs
+    assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
+    assert "split" in jobs["gate-required"]["needs"]
+
+
+def test_joint_queue_planning_keeps_version_specific_collections_and_hashes(tmp_path):
+    import hashlib
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    import yaml
+
+    root = Path(__file__).resolve().parents[1]
+    jobs = yaml.safe_load((root / ".github/workflows/test.yml").read_text())["jobs"]
+    step = next(
+        step for step in jobs["split"]["steps"] if step.get("name") == "Size queue shards from conservative durations"
+    )
+    cases = {"3.11": {"tests/test_one.py::test_one": 1.0}, "3.12": {"tests/test_two.py::test_two": 2.0}}
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_one.py").write_text("")
+    (tests / "test_two.py").write_text("")
+    restored = tmp_path / "home/dev-durations"
+    restored.mkdir(parents=True)
+    merged = {node: seconds for durations in cases.values() for node, seconds in durations.items()}
+    (restored / ".test_durations").write_text(json.dumps(merged))
+    (tmp_path / ".test_durations").write_text(json.dumps(merged))
+    for version, durations in cases.items():
+        (restored / f".test_durations-{version}").write_text(json.dumps(durations))
+    (tmp_path / "collected.json").write_text(json.dumps(list(cases["3.11"])))
+    other = tmp_path / "queue-input/3.12"
+    other.mkdir(parents=True)
+    (other / "collected.json").write_text(json.dumps(list(cases["3.12"])))
+    binaries = tmp_path / "bin"
+    binaries.mkdir()
+    python = binaries / "python"
+    python.write_text(
+        "#!/usr/bin/env bash\nset -euo pipefail\n"
+        'if [[ "${1:-}" == -m && "${2:-}" == tests.dev_durations ]]; then\n'
+        '  exec "$REAL_PYTHON" -c \'import sys; from pathlib import Path; from tests import dev_durations as d; d._ROOT = Path.cwd(); d.main(sys.argv[1:])\' "${@:3}"\n'
+        "fi\n"
+        'exec "$REAL_PYTHON" "$@"\n'
+    )
+    python.chmod(0o755)
+    output = tmp_path / "output"
+    result = subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "HOME": str(tmp_path / "home"),
+            "PATH": f"{binaries}:{os.environ['PATH']}",
+            "PYTHONPATH": str(root),
+            "REAL_PYTHON": sys.executable,
+            "PYTHON_VERSION": "3.11",
+            "GITHUB_OUTPUT": str(output),
+        },
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    plans = dict(line.split("=", 1) for line in output.read_text().splitlines())
+    assert set(plans) == {"queue_311", "queue_312"}
+    for version, expected in cases.items():
+        snapshot = tmp_path / "queue-input" / version
+        data = (snapshot / ".test_durations").read_bytes()
+        assert json.loads(data) == expected
+        assert (snapshot / "durations.sha256").read_text().strip() == hashlib.sha256(data).hexdigest()
+    assert json.loads((tmp_path / ".test_durations").read_text()) == cases["3.11"]
