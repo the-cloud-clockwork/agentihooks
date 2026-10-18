@@ -36,6 +36,10 @@ def test_prepare_clients_keeps_the_live_store_and_legacy_clients(tmp_path, redis
     stack = home / "swarm-stack"
     stack.mkdir(parents=True)
     bundle = stack_env.settings(stack / ".env")
+    redis_source.acl_setuser(
+        "swarm", enabled=True, passwords=["+" + bundle["SWARM_REDIS_PASSWORD"]], keys=["*"], commands=["+@all"]
+    )
+    redis_source.config_set("aclfile", "/data/users.acl")
     redis_source.set("test-stage:inbox:retained", "pending")
     environ = {"HOME": str(tmp_path), "AGENTIHOOKS_HOME": str(home)}
     out = io.StringIO()
