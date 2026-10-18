@@ -243,7 +243,7 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
     ]
     assert config["tool"]["mutmut"]["also_copy"] in (
         existing_copies,
-        [*existing_copies, "deploy/fixture.yaml"],
+        [*existing_copies, "deploy/"],
     )
     assert config["tool"]["mutmut"]["pytest_add_cli_args"] == [
         "-q",
@@ -334,6 +334,7 @@ def test_selected_test_clean_baseline_reads_only_its_extra_repository_fixtures(t
         "from pathlib import Path\n"
         "ROOT = Path(__file__).resolve().parents[1]\n"
         "def test_fixture():\n"
+        "    unused_text = 'deploy/unread.yaml'\n"
         "    tmp_path = Path('scratch')\n"
         "    (tmp_path / 'deploy').mkdir(parents=True, exist_ok=True)\n"
         f"    assert (ROOT / {expression}).read_text() == 'selected fixture'\n"
@@ -351,7 +352,6 @@ def test_selected_test_clean_baseline_reads_only_its_extra_repository_fixtures(t
         if source.is_dir():
             shutil.copytree(source, mutants / name, dirs_exist_ok=True)
         elif source.exists():
-            (mutants / name).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, mutants / name)
     for baseline in (work, mutants):
         result = subprocess.run(
@@ -366,7 +366,7 @@ def test_selected_test_clean_baseline_reads_only_its_extra_repository_fixtures(t
         assert not (baseline / resource.relative_to(root).parent / "unrelated.txt").exists()
         assert not (baseline / "other-data").exists()
         assert not (baseline / "deploy/unread.yaml").exists()
-    assert fixture in config["also_copy"]
+    assert f"{fixture.split('/')[0]}/" in config["also_copy"]
 
 
 def test_workspace_inside_a_copied_folder_is_not_copied_into_itself(tmp_path):
