@@ -53,10 +53,16 @@ class _Api:
         )
 
 
+def _final(kept: dict, workflow: dict) -> bool:
+    finished = kept.get("status") == workflow.get("status") == "completed"
+    return finished and kept.get("run_attempt") == workflow.get("run_attempt")
+
+
 def read(
     since_ms: int,
     now_ms: int,
     pending: list[int] | None = None,
+    known: dict[str, dict] | None = None,
     *,
     run: Callable = subprocess.run,
     max_calls: int = 60,
@@ -80,12 +86,20 @@ def read(
             for future in as_completed(previous):
                 workflow = future.result()
                 discovered[workflow["id"]] = workflow
-            jobs = {
-                pool.submit(api.pages, f"{root}/{identity}/jobs?filter=latest", "jobs"): workflow
-                for identity, workflow in discovered.items()
-            }
+            jobs, failure = {}, None
+            for identity, workflow in discovered.items():
+                kept = (known or {}).get(str(identity))
+                if kept and _final(kept, workflow):
+                    records.append({**workflow, "jobs": kept["jobs"]})
+                else:
+                    jobs[pool.submit(api.pages, f"{root}/{identity}/jobs?filter=latest", "jobs")] = workflow
             for future in as_completed(jobs):
-                records.append({**jobs[future], "jobs": future.result()})
+                try:
+                    records.append({**jobs[future], "jobs": future.result()})
+                except (subprocess.SubprocessError, ValueError, KeyError, RuntimeError) as exc:
+                    failure = failure or exc
+            if failure:
+                raise failure
         return {"complete": True, "runs": records, "api_calls": api.calls, "discovered_runs": len(discovered)}
     except (subprocess.SubprocessError, ValueError, KeyError, RuntimeError) as exc:
         return {
