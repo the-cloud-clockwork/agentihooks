@@ -63,4 +63,6 @@ def pull(repo: str, run: Callable, python: str, source: Path = SOURCE) -> list[s
     run(["git", "-C", repo, "pull", "--ff-only", "origin", "dev"])
     if not tracked:
         return []
-    return install([spec for spec in _head(repo, run) if spec not in before], run, python)
+    after = _head(repo, run)
+    changed = [spec for spec in after if spec not in before]
+    return install(changed + [spec for spec in missing(after) if spec not in changed], run, python)

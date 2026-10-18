@@ -91,6 +91,26 @@ def test_pull_with_unchanged_dependencies_installs_nothing(tmp_path):
     assert git.calls == [show(repo), pull(repo), show(repo)]
 
 
+def test_pull_with_unchanged_dependencies_installs_a_declared_spec_still_missing(tmp_path):
+    text = '[project]\ndependencies = ["redis>=5.0.0", "agentihooks-absent-dist-for-test>=1"]\n'
+    git, repo = FakeGit(text, text), str(tmp_path)
+    assert tool_deps.pull(repo, git, "/tool/python", source=tmp_path) == ["agentihooks-absent-dist-for-test>=1"]
+    assert git.calls[-1] == [
+        "uv",
+        "pip",
+        "install",
+        "--python",
+        "/tool/python",
+        "agentihooks-absent-dist-for-test>=1",
+    ]
+
+
+def test_pull_installs_a_new_spec_once_even_when_it_is_also_missing(tmp_path):
+    after = '[project]\ndependencies = ["redis>=5.0.0", "agentihooks-absent-dist-for-test>=1"]\n'
+    git, repo = FakeGit(BEFORE, after), str(tmp_path)
+    assert tool_deps.pull(repo, git, "/tool/python", source=tmp_path) == ["agentihooks-absent-dist-for-test>=1"]
+
+
 def test_pull_that_only_removes_a_dependency_installs_nothing(tmp_path):
     git, repo = FakeGit(AFTER, BEFORE), str(tmp_path)
     assert tool_deps.pull(repo, git, "/tool/python", source=tmp_path) == []

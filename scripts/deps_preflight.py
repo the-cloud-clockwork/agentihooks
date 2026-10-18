@@ -163,13 +163,13 @@ def ensure(*, quiet: bool = False) -> int:
 
     repair()
     refresh_codex_wrapper("deps")
-    install_declared(quiet=quiet)
     path = manifest_path()
     if path is None or stamp_fresh(path):
         return 0
     with _lock():
         if stamp_fresh(path):
             return 0
+        install_declared(quiet=quiet)
         missing_system = []
         for dep in parse(json.loads(path.read_text())):
             if satisfied(dep):
