@@ -214,7 +214,9 @@ def test_preflight_mutates_each_shard_against_the_shared_stats_with_the_pull_req
     assert names.index("Install the browser that page tests drive") < names.index(mutate["name"])
     assert steps[-1]["if"] == "always()"
     assert steps[-1]["with"]["name"] == "mutation-preflight-shard-${{ matrix.shard }}"
-    assert steps[-1]["with"]["path"] == ".mutation-gate/"
+    assert steps[-1]["with"]["path"] == (
+        "${{ job.status == 'success' && '.mutation-gate/report.json' || '.mutation-gate/' }}"
+    )
 
 
 def test_single_shard_collection_preserves_both_supported_workflow_states():
