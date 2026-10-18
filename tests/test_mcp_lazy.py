@@ -6,6 +6,7 @@ import subprocess
 import sys
 from contextlib import contextmanager
 from pathlib import Path
+from tempfile import TemporaryFile
 
 import pytest
 
@@ -27,40 +28,42 @@ def server(monkeypatch):
     monkeypatch.delenv("ALLOWED_TOOLS", raising=False)
     monkeypatch.setenv("BRAIN_ENABLED", "false")
     monkeypatch.setenv("BRAIN_SOURCE_TYPE", "file")
-    process = subprocess.Popen(
-        [sys.executable, "-c", _RUNNER],
-        cwd=Path(__file__).resolve().parents[1],
-        env=os.environ.copy(),
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        bufsize=0,
-    )
+    with TemporaryFile(dir=Path.home()) as stderr:
+        process = subprocess.Popen(
+            [sys.executable, "-c", _RUNNER],
+            cwd=Path(__file__).resolve().parents[1],
+            env=os.environ.copy(),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=stderr,
+            bufsize=0,
+        )
 
-    def request(method, params=None, request_id=1):
-        message = {"jsonrpc": "2.0", "method": method, "id": request_id}
-        if params is not None:
-            message["params"] = params
-        process.stdin.write((json.dumps(message) + "\n").encode())
-        process.stdin.flush()
-        while True:
-            assert select.select([process.stdout], [], [], 30)[0], "No protocol reply"
-            reply = json.loads(process.stdout.readline())
-            if reply.get("id") == request_id:
-                return reply
+        def request(method, params=None, request_id=1):
+            message = {"jsonrpc": "2.0", "method": method, "id": request_id}
+            if params is not None:
+                message["params"] = params
+            process.stdin.write((json.dumps(message) + "\n").encode())
+            process.stdin.flush()
+            while True:
+                assert select.select([process.stdout], [], [], 30)[0], "No protocol reply"
+                reply = json.loads(process.stdout.readline())
+                if reply.get("id") == request_id:
+                    return reply
 
-    try:
-        yield request, process
-    finally:
-        process.stdin.close()
-        process.stdin = None
         try:
-            _, stderr = process.communicate(timeout=30)
-            process.stderr_output = stderr.decode()
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.communicate()
-            raise
+            yield request, process
+        finally:
+            process.stdin.close()
+            process.stdin = None
+            try:
+                process.communicate(timeout=30)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.communicate()
+                raise
+            stderr.seek(0)
+            process.stderr_output = stderr.read().decode()
 
 
 def initialize(request):
