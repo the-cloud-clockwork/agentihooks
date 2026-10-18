@@ -526,6 +526,26 @@ def test_publish_still_refuses_unrelated_edits_during_a_dev_merge(conflicted_pub
     assert (p.root / "other.txt").read_text() == "unrelated edit"
 
 
+def test_publish_requires_conflict_resolutions_in_the_selected_scope(conflicted_publication):
+    from scripts.swarm import publish
+    from scripts.swarm.store import SwarmError
+
+    p = conflicted_publication
+    with pytest.raises(SwarmError, match="unrelated tracked changes remain: chosen.txt;"):
+        publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Merge dev", ["other.txt"])
+
+
+def test_publish_does_not_exempt_files_from_a_merge_outside_dev(conflicted_publication):
+    from scripts.swarm import publish
+    from scripts.swarm.store import SwarmError
+
+    p = conflicted_publication
+    base = git(p.root, "merge-base", "HEAD", "MERGE_HEAD")
+    git(p.root, "update-ref", "refs/remotes/origin/dev", base)
+    with pytest.raises(SwarmError, match="unrelated tracked changes remain: inherited.txt, other.txt, sub/other.txt;"):
+        publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Merge another branch", ["chosen.txt"])
+
+
 @pytest.mark.parametrize("staged", [False, True])
 def test_unrelated_refusal_names_every_file_and_the_exact_worktree(publication, staged):
     from scripts.swarm import publish
