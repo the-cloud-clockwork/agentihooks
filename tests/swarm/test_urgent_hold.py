@@ -44,6 +44,23 @@ def test_a_claimable_task_has_no_hold():
     assert hold(doc([task("a")]), "a") == ""
 
 
+def test_only_claimable_unclaimed_urgent_tasks_raise_a_finding(store):
+    from scripts.swarm.health import urgent_hold
+
+    found = doc([
+        task("dependency", state="claimed", branch="engineer-live"),
+        task("waiting", rank="urgent", depends_on=["dependency"]),
+        task("phase", phase="p2", rank="urgent"),
+        task("ready", rank="urgent"),
+    ])
+    urgent_hold.observe(store, SLUG, found, 0)
+    urgent_hold.observe(store, SLUG, found, 11 * MINUTE)
+    assert [finding.id for finding in urgent_hold.findings(store, SLUG)] == ["urgent-unclaimable/ready"]
+    rows = urgent_hold.read(store, SLUG)["tasks"]
+    assert rows["waiting"]["why"] == "it waits on task dependency"
+    assert rows["phase"]["why"] == "its phase later is waiting on an earlier phase"
+
+
 def test_a_task_in_a_waiting_phase_is_held_by_its_phase():
     assert hold(doc([task("a", phase="p2")]), "a") == "its phase later is waiting on an earlier phase"
 
