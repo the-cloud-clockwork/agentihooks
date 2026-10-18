@@ -220,6 +220,8 @@ def run_gate(
     started = time.monotonic()
     deadline = started + budget
     cleared = load_clearances(root)
+    selection_path = root / ".mutation-selection.json"
+    selection = json.loads(selection_path.read_text()) if selection_path.is_file() else None
     split = split_plan_names(stats)
     report = {"files": [], "not_mutated": [], "failed": False}
     rows, reasons, selected, failing = {}, {}, {}, []
@@ -232,7 +234,7 @@ def run_gate(
             rows[path] = []
         elif time.monotonic() >= deadline:
             reasons[path] = "over budget"
-        elif tests := select_tests(root, Path(path)):
+        elif tests := (selection[path] if selection is not None else select_tests(root, Path(path))):
             selected[path] = (lines, tests)
         else:
             reasons[path] = "no matching or importing test modules"
