@@ -120,3 +120,80 @@ def test_queue_plan_prices_new_cases_and_publishes_one_immutable_partition(tmp_p
     plan = json.loads("[" + value + "]")
     assert len(plan) == 12
     assert {leg["python-version"] for leg in plan} == {"3.11"}
+
+
+def test_queue_sizing_uses_the_smallest_count_with_timeout_margin(tmp_path):
+    from tests.queue_shards import matrix
+
+    path = tmp_path / "tests/test_serial.py"
+    path.parent.mkdir()
+    path.write_text("import pytest\npytestmark = pytest.mark.xdist_group('serial')\n")
+    measured = {f"tests/test_serial.py::test_{i}": 90.0 for i in range(13)}
+
+    assert len(matrix(tmp_path, {"3.11": measured})) == 13
+
+
+def test_unknown_cases_use_module_maxima_and_the_global_tail_for_new_modules(tmp_path):
+    from tests.queue_shards import main
+
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_old.py").write_text("")
+    (tests / "test_new.py").write_text("")
+    known = {f"tests/test_old.py::test_{i}": 0.2 for i in range(200)}
+    known["tests/test_old.py::test_slow"] = 40.0
+    (tmp_path / ".test_durations").write_text(json.dumps(known))
+    collected = [*known, "tests/test_old.py::test_added", "tests/test_new.py::test_added"]
+    collection = tmp_path / "collected.json"
+    collection.write_text(json.dumps(collected))
+
+    main(
+        [
+            "--root",
+            str(tmp_path),
+            "--collection",
+            str(collection),
+            "--version",
+            "3.11",
+            "--output",
+            str(tmp_path / "out"),
+        ]
+    )
+
+    measured = json.loads((tmp_path / ".test_durations").read_text())
+    assert measured["tests/test_old.py::test_added"] == 40.0
+    assert measured["tests/test_new.py::test_added"] == 0.2
+
+
+def test_combined_queue_plan_refuses_more_jobs_than_the_runner_pool(capsys):
+    import pytest
+
+    from tests.queue_shards import main
+
+    plan = [
+        {"python-version": version, "shard": shard, "total": 20, "predicted_seconds": 150.0}
+        for version in ("3.11", "3.12")
+        for shard in range(1, 21)
+    ]
+    first = json.dumps(plan[:20])[1:-1]
+    second = json.dumps(plan[20:])[1:-1]
+    main(["combine", "--plans", first, second])
+    assert "40 queue jobs" in capsys.readouterr().out
+
+    second = json.dumps([*plan[20:], {**plan[-1], "shard": 21, "total": 21}])[1:-1]
+    with pytest.raises(SystemExit, match="41 queue jobs exceed the pool of 40"):
+        main(["combine", "--plans", first, second])
+
+
+def test_queue_capacity_admission_precedes_the_unit_matrix():
+    from pathlib import Path
+
+    import yaml
+
+    jobs = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/test.yml").read_text())["jobs"]
+    capacity = jobs["queue-plan"]
+    assert capacity["needs"] == ["split"]
+    assert capacity["if"] == "github.event_name == 'merge_group'"
+    assert "queue-plan" in jobs["unit"]["needs"]
+    assert "needs.queue-plan.result == 'success'" in jobs["unit"]["if"]
+    assert "queue-plan" in jobs["gate-required"]["needs"]
