@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm_ledger import ledger
+from scripts.swarm_ledger import ledger, new_ledger
 from scripts.swarm_ledger.api import resources, routes
 from scripts.swarm_ledger.api.errors import APIError
 from scripts.swarm_ledger.repository import hierarchy
@@ -188,6 +188,9 @@ def test_the_hierarchy_revision_follows_the_rows(repo):
 
 
 def test_a_warm_hierarchy_read_sees_a_task_state_written_by_another_repository(repo, tmp_path):
+    state = new_ledger.build_doc({"title": "Freshness", "phases": []})
+    state.update({key: value for key, value in STATE.items() if key != "_meta"})
+    repo.import_document(SLUG, state, replace=True)
     before = resources.hierarchy_read(repo, SLUG, "hierarchy", {})
     writer = store.SQLiteLedgerRepository(tmp_path / store.DATABASE)
     _, rejected = writer.apply_ops(
